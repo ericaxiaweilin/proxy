@@ -1,0 +1,24 @@
+<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF1B6B"/>
+      <stop offset="100%" stop-color="#7C2AFF"/>
+    </linearGradient>
+  </defs>
+  <circle cx="120" cy="120" r="112" fill="url(#bg2)"/>
+
+  <!-- back avatar: represents the "proxy" -->
+  <g transform="translate(140,114)" fill="#FFFFFF" opacity="0.55">
+    <circle cx="0" cy="-38" r="24"/>
+    <path d="M -46 40 Q -46 -4 0 -4 Q 46 -4 46 40 Z"/>
+  </g>
+
+  <!-- front avatar: represents the requester -->
+  <g transform="translate(112,134)" fill="#FFFFFF">
+    <circle cx="0" cy="-38" r="26"/>
+    <path d="M -50 42 Q -50 -6 0 -6 Q 50 -6 50 42 Z"/>
+  </g>
+
+  <!-- tag chip: represents structured attribute filters -->
+  <circle cx="182" cy="62" r="13" fill="#D4FF3D"/>
+</svg>

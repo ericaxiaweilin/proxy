@@ -1,0 +1,52 @@
+<div style="display:flex;align-items:center;gap:28px;background:#14121F;padding:44px;border-radius:24px;font-family:Arial,Helvetica,sans-serif;width:fit-content;">
+  <svg viewBox="0 0 240 240" width="140" height="140" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg3" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#FF1B6B"/>
+        <stop offset="100%" stop-color="#7C2AFF"/>
+      </linearGradient>
+    </defs>
+    <circle cx="120" cy="120" r="112" fill="url(#bg3)"/>
+
+    <g transform="translate(140,114)">
+      <g class="avatar-back" fill="#FFFFFF" opacity="0.55">
+        <circle cx="0" cy="-38" r="24"/>
+        <path d="M -46 40 Q -46 -4 0 -4 Q 46 -4 46 40 Z"/>
+      </g>
+    </g>
+
+    <g transform="translate(112,134)" fill="#FFFFFF">
+      <circle cx="0" cy="-38" r="26"/>
+      <path d="M -50 42 Q -50 -6 0 -6 Q 50 -6 50 42 Z"/>
+    </g>
+
+    <g transform="translate(182,62)">
+      <circle class="tag-chip" cx="0" cy="0" r="13" fill="#D4FF3D"/>
+    </g>
+  </svg>
+  <div>
+    <div style="font-size:46px;font-weight:800;color:#FFFFFF;line-height:1;">Proxy</div>
+    <div style="font-size:22px;font-weight:600;color:#FF3D8C;margin-top:8px;">分身 · 找对的人出现</div>
+  </div>
+</div>
+
+<style>
+  .avatar-back {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: breathe 2.6s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.07); opacity: 0.82; }
+  }
+  .tag-chip {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: chipPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes chipPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.35); }
+  }
+</style>

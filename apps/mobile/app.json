@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Proxy",
+    "slug": "proxy",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "proxy",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "bundleIdentifier": "com.proxy.app",
+      "supportsTablet": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.proxy.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#050505"
+      }
+    },
+    "plugins": [
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true
+        }
+      ]
+    ]
+  }
+}

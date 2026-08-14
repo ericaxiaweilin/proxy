@@ -1,0 +1,593 @@
+package identity
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/proxy-app/proxy-api/internal/clock"
+	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/event"
+)
+
+type UserAccount struct{ ID, Status string }
+type LoginIdentity struct {
+	ID, UserAccountID string
+	Verified          bool
+	Status            string
+}
+type DeviceRegistration struct{ ID, UserAccountID, Platform, Status, PushTokenRef string }
+type Membership struct {
+	Principal             command.Principal
+	UserAccountID, Status string
+}
+
+type Session struct {
+	ID            string            `json:"id"`
+	UserAccountID string            `json:"userAccountId"`
+	DeviceID      string            `json:"deviceId"`
+	Status        string            `json:"status"`
+	Principal     command.Principal `json:"principal"`
+	IssuedAt      time.Time         `json:"issuedAt"`
+	ExpiresAt     time.Time         `json:"expiresAt"`
+	Version       int               `json:"version"`
+}
+
+type Seed struct {
+	User          UserAccount
+	LoginIdentity LoginIdentity
+	Memberships   []Membership
+	Devices       []DeviceRegistration
+	Challenges    []LoginChallenge
+}
+
+type Service struct {
+	mu                sync.Mutex
+	repository        Repository
+	clock             clock.Clock
+	tokenManager      *TokenManager
+	challengeProvider LoginChallengeProvider
+}
+
+func New(seed *Seed) *Service {
+	return NewWithRepositoryAndClock(NewMemoryRepository(seed), clock.System{})
+}
+
+func NewWithClock(seed *Seed, domainClock clock.Clock) *Service {
+	return NewWithRepositoryAndClock(NewMemoryRepository(seed), domainClock)
+}
+
+func NewWithRepository(repository Repository) *Service {
+	return NewWithRepositoryAndClock(repository, clock.System{})
+}
+
+func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *Service {
+	return NewWithRepositoryAndClockAndChallengeProvider(repository, domainClock, nil)
+}
+
+func NewWithRepositoryAndClockAndChallengeProvider(repository Repository, domainClock clock.Clock, provider LoginChallengeProvider) *Service {
+	if repository == nil {
+		repository = NewMemoryRepository(nil)
+	}
+	if domainClock == nil {
+		domainClock = clock.System{}
+	}
+	if provider == nil {
+		provider = UnconfiguredLoginChallengeProvider{}
+	}
+	service := &Service{repository: repository, clock: domainClock, challengeProvider: provider}
+	if tokenRepository, ok := repository.(TokenRepository); ok {
+		service.tokenManager = NewTokenManager(tokenRepository, repository, domainClock)
+	}
+	return service
+}
+
+func (s *Service) Supports(commandType string) bool {
+	switch commandType {
+	case "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) Handle(envelope command.Envelope) command.Result {
+	return s.HandleContext(context.Background(), envelope)
+}
+
+func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) command.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch envelope.CommandType {
+	case "RequestLoginChallenge":
+		return s.requestLoginChallenge(ctx, envelope)
+	case "VerifyLoginChallenge":
+		return s.verifyLoginChallenge(ctx, envelope)
+	case "CreateSession":
+		return s.createSession(ctx, envelope)
+	case "RegisterDevice":
+		return s.registerDevice(ctx, envelope)
+	case "RevokeSession":
+		return s.revokeSession(ctx, envelope)
+	case "RevokeAllSessions":
+		return s.revokeAllSessions(ctx, envelope)
+	case "SwitchPrincipalContext":
+		return s.switchPrincipalContext(ctx, envelope)
+	case "RequestAccountRecovery":
+		return s.requestAccountRecovery(envelope)
+	case "RefreshSession":
+		return s.refreshSession(ctx, envelope)
+	default:
+		return command.Rejected(envelope, "IDENTITY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "identity.unsupported_command", nil)
+	}
+}
+
+func (s *Service) Snapshot() (sessions []Session, devices []DeviceRegistration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sessions, devices, _ = s.repository.Snapshot(context.Background())
+	return sessions, devices
+}
+
+type createSessionPayload struct {
+	UserAccountID      string            `json:"userAccountId"`
+	LoginIdentityID    string            `json:"loginIdentityId"`
+	DeviceID           string            `json:"deviceId"`
+	ChallengeID        string            `json:"challengeId"`
+	RequestedPrincipal command.Principal `json:"requestedPrincipal"`
+}
+
+type requestLoginChallengePayload struct {
+	LoginIdentityID string `json:"loginIdentityId"`
+	DeviceID        string `json:"deviceId"`
+	Channel         string `json:"channel"`
+}
+
+func (s *Service) requestLoginChallenge(ctx context.Context, e command.Envelope) command.Result {
+	var p requestLoginChallengePayload
+	if !decode(e.Payload, &p) || p.LoginIdentityID == "" || p.DeviceID == "" || (p.Channel != "EMAIL" && p.Channel != "SMS") {
+		return command.Rejected(e, "INVALID_LOGIN_CHALLENGE_REQUEST", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_login_challenge_request", nil)
+	}
+	loginIdentity, err := s.repository.GetLoginIdentity(ctx, p.LoginIdentityID)
+	if err != nil || !loginIdentity.Verified || loginIdentity.Status != "ACTIVE" {
+		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_challenge_request_failed", nil)
+	}
+	device, err := s.repository.GetDevice(ctx, p.DeviceID)
+	if err != nil || device.UserAccountID != loginIdentity.UserAccountID || device.Status != "ACTIVE" {
+		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_challenge_request_failed", nil)
+	}
+	providerChallenge, err := s.challengeProvider.Request(ctx, LoginChallengeRequest{
+		LoginIdentityID: p.LoginIdentityID,
+		DeviceID:        p.DeviceID,
+		Channel:         p.Channel,
+		Purpose:         e.Purpose,
+		CorrelationID:   e.CorrelationID,
+	})
+	if errors.Is(err, ErrLoginChallengeProviderNotReady) {
+		return command.Rejected(e, "LOGIN_PROVIDER_NOT_CONFIGURED", "PROVIDER", "SAFE_RETRY", "identity.login_provider_not_configured", nil)
+	}
+	if err != nil || providerChallenge.ProviderRef == "" {
+		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "PROVIDER", "SAFE_RETRY", "identity.login_challenge_request_failed", nil)
+	}
+	now := s.clock.Now().UTC()
+	expiresAt := providerChallenge.ExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = now.Add(5 * time.Minute)
+	}
+	if !expiresAt.After(now) {
+		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "PROVIDER", "SAFE_RETRY", "identity.login_challenge_request_failed", nil)
+	}
+	challenge := LoginChallenge{
+		ID:              newID("challenge_"),
+		UserAccountID:   loginIdentity.UserAccountID,
+		LoginIdentityID: p.LoginIdentityID,
+		DeviceID:        p.DeviceID,
+		Channel:         p.Channel,
+		ProviderRef:     providerChallenge.ProviderRef,
+		Status:          "PENDING",
+		MaxAttempts:     5,
+		Version:         1,
+		RequestedAt:     now,
+		ExpiresAt:       expiresAt.UTC(),
+	}
+	domainEvents := []event.DomainEvent{event.New("LoginChallengeRequested", "LoginChallenge", challenge.ID, challenge.Version, challenge.UserAccountID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"channel": p.Channel,
+	})}
+	if err := s.persistCreateLoginChallenge(ctx, challenge, domainEvents); err != nil {
+		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "INTERNAL", "SAFE_RETRY", "identity.login_challenge_request_failed", nil)
+	}
+	return command.Pending(e, challenge.ID, "LOGIN_CHALLENGE_PENDING", "AUTHENTICATION", "identity.login_challenge_pending", map[string]any{"channel": challenge.Channel})
+}
+
+type verifyLoginChallengePayload struct {
+	ChallengeID string `json:"challengeId"`
+	Code        string `json:"code"`
+}
+
+func (s *Service) verifyLoginChallenge(ctx context.Context, e command.Envelope) command.Result {
+	var p verifyLoginChallengePayload
+	if !decode(e.Payload, &p) || p.ChallengeID == "" || p.Code == "" {
+		return command.Rejected(e, "INVALID_LOGIN_CHALLENGE_VERIFICATION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_login_challenge_verification", nil)
+	}
+	challenge, err := s.repository.GetLoginChallenge(ctx, p.ChallengeID)
+	if errors.Is(err, ErrLoginChallengeNotFound) || err != nil {
+		return command.Rejected(e, "LOGIN_CHALLENGE_INVALID", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_challenge_invalid", nil)
+	}
+	now := s.clock.Now().UTC()
+	if challenge.Status != "PENDING" || challenge.Attempts >= challenge.MaxAttempts || !now.Before(challenge.ExpiresAt) {
+		return command.Rejected(e, "LOGIN_CHALLENGE_INVALID", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_challenge_invalid", nil)
+	}
+	verification, err := s.challengeProvider.Verify(ctx, LoginChallengeVerification{ProviderRef: challenge.ProviderRef, Code: p.Code})
+	if errors.Is(err, ErrLoginChallengeProviderNotReady) {
+		return command.Rejected(e, "LOGIN_PROVIDER_NOT_CONFIGURED", "PROVIDER", "SAFE_RETRY", "identity.login_provider_not_configured", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "LOGIN_CHALLENGE_VERIFICATION_FAILED", "PROVIDER", "SAFE_RETRY", "identity.login_challenge_verification_failed", nil)
+	}
+	previousVersion := challenge.Version
+	challenge.Version++
+	if !verification.Verified {
+		challenge.Attempts++
+		if challenge.Attempts >= challenge.MaxAttempts {
+			challenge.Status = "LOCKED"
+		}
+		if err := s.repository.UpdateLoginChallenge(ctx, challenge, previousVersion); err != nil {
+			return command.Rejected(e, "LOGIN_CHALLENGE_VERIFICATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.login_challenge_verification_failed", nil)
+		}
+		return command.Rejected(e, "LOGIN_CHALLENGE_INVALID", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_challenge_invalid", nil)
+	}
+	challenge.Status = "VERIFIED"
+	challenge.VerifiedAt = now
+	domainEvents := []event.DomainEvent{event.New("LoginChallengeVerified", "LoginChallenge", challenge.ID, challenge.Version, challenge.UserAccountID, e.CorrelationID, e.CommandID, now, map[string]any{})}
+	if err := s.persistUpdateLoginChallenge(ctx, challenge, previousVersion, domainEvents); err != nil {
+		return command.Rejected(e, "LOGIN_CHALLENGE_VERIFICATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.login_challenge_verification_failed", nil)
+	}
+	return command.Accepted(e, "LoginChallenge", challenge.ID, challenge.Version, challenge.Status, eventRefs(domainEvents))
+}
+
+func (s *Service) createSession(ctx context.Context, e command.Envelope) command.Result {
+	var p createSessionPayload
+	if !decode(e.Payload, &p) || p.UserAccountID == "" || p.LoginIdentityID == "" || p.DeviceID == "" || p.ChallengeID == "" || p.RequestedPrincipal.ID == "" {
+		return command.Rejected(e, "INVALID_CREATE_SESSION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_create_session", nil)
+	}
+	user, err := s.repository.GetUser(ctx, p.UserAccountID)
+	if errors.Is(err, ErrUserNotFound) {
+		return command.Rejected(e, "LOGIN_IDENTITY_NOT_VERIFIED", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_identity_not_verified", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	identity, err := s.repository.GetLoginIdentity(ctx, p.LoginIdentityID)
+	if errors.Is(err, ErrLoginIdentityNotFound) {
+		return command.Rejected(e, "LOGIN_IDENTITY_NOT_VERIFIED", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_identity_not_verified", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	if identity.UserAccountID != user.ID || !identity.Verified || identity.Status != "ACTIVE" {
+		return command.Rejected(e, "LOGIN_IDENTITY_NOT_VERIFIED", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_identity_not_verified", nil)
+	}
+	if user.Status != "ACTIVE" {
+		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.account_not_active", nil)
+	}
+	device, err := s.repository.GetDevice(ctx, p.DeviceID)
+	if errors.Is(err, ErrDeviceNotFound) {
+		return command.Rejected(e, "DEVICE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.device_not_allowed", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	if device.UserAccountID != user.ID || device.Status != "ACTIVE" {
+		return command.Rejected(e, "DEVICE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.device_not_allowed", nil)
+	}
+	challenge, err := s.repository.GetLoginChallenge(ctx, p.ChallengeID)
+	if errors.Is(err, ErrLoginChallengeNotFound) || err != nil || challenge.UserAccountID != user.ID || challenge.LoginIdentityID != identity.ID || challenge.DeviceID != device.ID || challenge.Status != "VERIFIED" || challenge.VerifiedAt.IsZero() || !s.clock.Now().UTC().Before(challenge.ExpiresAt) {
+		return command.Rejected(e, "LOGIN_CHALLENGE_REQUIRED", "AUTHENTICATION", "AFTER_REAUTH", "identity.login_challenge_required", nil)
+	}
+	allowed, err := s.repository.HasActiveMembership(ctx, user.ID, p.RequestedPrincipal)
+	if err != nil {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	if !allowed {
+		return command.Rejected(e, "PRINCIPAL_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.principal_not_allowed", nil)
+	}
+	now := s.clock.Now().UTC()
+	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: p.RequestedPrincipal, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
+	domainEvents := []event.DomainEvent{event.New("SessionCreated", "Session", session.ID, session.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"userAccountId": session.UserAccountID,
+		"deviceId":      session.DeviceID,
+		"principal":     session.Principal,
+		"expiresAt":     session.ExpiresAt,
+	})}
+	consumedChallenge := challenge
+	consumedChallenge.Status = "CONSUMED"
+	consumedChallenge.Version++
+	consumedChallenge.ConsumedAt = now
+	domainEvents = append(domainEvents, event.New("LoginChallengeConsumed", "LoginChallenge", consumedChallenge.ID, consumedChallenge.Version, consumedChallenge.UserAccountID, e.CorrelationID, e.CommandID, now, map[string]any{"sessionId": session.ID}))
+	var pair TokenPair
+	var tokenRecord SessionToken
+	if s.tokenManager != nil {
+		var tokenErr error
+		pair, tokenRecord, tokenErr = s.tokenManager.Prepare(session)
+		if tokenErr != nil {
+			return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
+		}
+	}
+	if err := s.persistCreateSession(ctx, session, tokenRecord, consumedChallenge, domainEvents); err != nil {
+		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
+	}
+	result := command.Accepted(e, "Session", session.ID, 1, "ACTIVE", eventRefs(domainEvents))
+	if pair.AccessToken != "" {
+		result.Auth = authTokens(pair)
+	}
+	return result
+}
+
+type registerDevicePayload struct{ UserAccountID, DeviceID, Platform, PushTokenRef string }
+
+func (s *Service) registerDevice(ctx context.Context, e command.Envelope) command.Result {
+	var p registerDevicePayload
+	if !decode(e.Payload, &p) || p.UserAccountID == "" || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
+		return command.Rejected(e, "INVALID_REGISTER_DEVICE", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_register_device", nil)
+	}
+	user, err := s.repository.GetUser(ctx, p.UserAccountID)
+	if errors.Is(err, ErrUserNotFound) || err != nil || user.Status != "ACTIVE" || e.Actor.Type != "USER" || e.Actor.ID != user.ID {
+		return command.Rejected(e, "DEVICE_REGISTRATION_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.device_registration_not_allowed", nil)
+	}
+	existing, err := s.repository.GetDevice(ctx, p.DeviceID)
+	if err != nil && !errors.Is(err, ErrDeviceNotFound) {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	if err == nil && existing.UserAccountID != user.ID {
+		return command.Rejected(e, "DEVICE_REGISTRATION_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.device_registration_not_allowed", nil)
+	}
+	device := DeviceRegistration{ID: p.DeviceID, UserAccountID: user.ID, Platform: p.Platform, Status: "ACTIVE", PushTokenRef: p.PushTokenRef}
+	domainEvents := []event.DomainEvent{event.New("DeviceRegistered", "DeviceRegistration", device.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"userAccountId": device.UserAccountID,
+		"platform":      device.Platform,
+	})}
+	if err := s.persistUpsertDevice(ctx, device, domainEvents); err != nil {
+		return command.Rejected(e, "DEVICE_REGISTRATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.device_registration_failed", nil)
+	}
+	return command.Accepted(e, "DeviceRegistration", p.DeviceID, 1, "ACTIVE", eventRefs(domainEvents))
+}
+
+type revokePayload struct{ Reason string }
+
+func (s *Service) revokeSession(ctx context.Context, e command.Envelope) command.Result {
+	var p revokePayload
+	if !decode(e.Payload, &p) || p.Reason == "" {
+		return command.Rejected(e, "INVALID_REVOKE_SESSION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_revoke_session", nil)
+	}
+	session, err := s.repository.GetSession(ctx, e.Target.ID)
+	if errors.Is(err, ErrSessionNotFound) {
+		return command.Rejected(e, "SESSION_NOT_REVOCABLE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.session_not_revocable", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	if session.UserAccountID != e.Actor.ID || session.Status != "ACTIVE" {
+		return command.Rejected(e, "SESSION_NOT_REVOCABLE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.session_not_revocable", nil)
+	}
+	previousVersion := session.Version
+	session.Status = "REVOKED"
+	session.Version++
+	domainEvents := []event.DomainEvent{event.New("SessionRevoked", "Session", session.ID, session.Version, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"reason": p.Reason,
+	})}
+	if err := s.persistUpdateSession(ctx, session, previousVersion, domainEvents); err != nil {
+		if errors.Is(err, ErrSessionVersionConflict) {
+			return command.Rejected(e, "SESSION_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "identity.session_version_conflict", nil)
+		}
+		return command.Rejected(e, "SESSION_REVOKE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_revoke_failed", nil)
+	}
+	return command.Accepted(e, "Session", session.ID, session.Version, session.Status, eventRefs(domainEvents))
+}
+
+func (s *Service) revokeAllSessions(ctx context.Context, e command.Envelope) command.Result {
+	var p revokePayload
+	if !decode(e.Payload, &p) || p.Reason == "" {
+		return command.Rejected(e, "INVALID_REVOKE_ALL_SESSIONS", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_revoke_all_sessions", nil)
+	}
+	var domainEvents []event.DomainEvent
+	var revoked []Session
+	var err error
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		revoked, err = repository.RevokeAllSessionsAndPublish(ctx, e.Actor.ID, func(sessions []Session) []event.DomainEvent {
+			domainEvents = sessionRevocationEvents(sessions, e, p.Reason, s.clock.Now().UTC())
+			return domainEvents
+		})
+	} else {
+		revoked, err = s.repository.RevokeAllSessions(ctx, e.Actor.ID)
+		domainEvents = sessionRevocationEvents(revoked, e, p.Reason, s.clock.Now().UTC())
+	}
+	if err != nil {
+		return command.Rejected(e, "SESSION_BATCH_REVOKE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_batch_revoke_failed", nil)
+	}
+	result := command.Accepted(e, "SessionBatch", e.Actor.ID, 1, "REVOKED", eventRefs(domainEvents))
+	result.OperationRef = "session_batch_" + newID("")
+	return result
+}
+
+type switchPrincipalPayload struct{ Principal command.Principal }
+
+func (s *Service) switchPrincipalContext(ctx context.Context, e command.Envelope) command.Result {
+	var p switchPrincipalPayload
+	if !decode(e.Payload, &p) || p.Principal.ID == "" {
+		return command.Rejected(e, "INVALID_PRINCIPAL_CONTEXT", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_principal_context", nil)
+	}
+	if e.ExpectedAggregateVersion == nil {
+		return command.Rejected(e, "EXPECTED_SESSION_VERSION_REQUIRED", "CONCURRENCY", "AFTER_USER_ACTION", "identity.expected_session_version_required", nil)
+	}
+	session, err := s.repository.GetSession(ctx, e.Target.ID)
+	if errors.Is(err, ErrSessionNotFound) {
+		return command.Rejected(e, "SESSION_NOT_USABLE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.session_not_usable", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	if session.UserAccountID != e.Actor.ID || !s.sessionUsable(ctx, &session) {
+		return command.Rejected(e, "SESSION_NOT_USABLE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.session_not_usable", nil)
+	}
+	allowed, err := s.repository.HasActiveMembership(ctx, session.UserAccountID, p.Principal)
+	if err != nil {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	if !allowed {
+		return command.Rejected(e, "PRINCIPAL_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.principal_not_allowed", nil)
+	}
+	if *e.ExpectedAggregateVersion != session.Version {
+		return command.Rejected(e, "SESSION_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "identity.session_version_conflict", map[string]any{"expectedVersion": *e.ExpectedAggregateVersion, "actualVersion": session.Version})
+	}
+	previousVersion := session.Version
+	session.Principal = p.Principal
+	session.Version++
+	domainEvents := []event.DomainEvent{event.New("SessionPrincipalSwitched", "Session", session.ID, session.Version, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"principal": p.Principal,
+	})}
+	if err := s.persistUpdateSession(ctx, session, previousVersion, domainEvents); err != nil {
+		if errors.Is(err, ErrSessionVersionConflict) {
+			return command.Rejected(e, "SESSION_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "identity.session_version_conflict", nil)
+		}
+		return command.Rejected(e, "SESSION_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_update_failed", nil)
+	}
+	return command.Accepted(e, "Session", session.ID, session.Version, session.Status, eventRefs(domainEvents))
+}
+
+func (s *Service) persistCreateLoginChallenge(ctx context.Context, challenge LoginChallenge, domainEvents []event.DomainEvent) error {
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		return repository.CreateLoginChallengeAndPublish(ctx, challenge, domainEvents)
+	}
+	return s.repository.CreateLoginChallenge(ctx, challenge)
+}
+
+func (s *Service) persistUpdateLoginChallenge(ctx context.Context, challenge LoginChallenge, expectedVersion int, domainEvents []event.DomainEvent) error {
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		return repository.UpdateLoginChallengeAndPublish(ctx, challenge, expectedVersion, domainEvents)
+	}
+	return s.repository.UpdateLoginChallenge(ctx, challenge, expectedVersion)
+}
+
+func (s *Service) persistCreateSession(ctx context.Context, session Session, tokens SessionToken, challenge LoginChallenge, domainEvents []event.DomainEvent) error {
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		return repository.CreateSessionWithTokensAndChallengeAndPublish(ctx, session, tokens, challenge, domainEvents)
+	}
+	return errors.New("transactional session bootstrap is not configured")
+}
+
+func (s *Service) Authenticate(ctx context.Context, rawAccessToken string) (AuthenticatedSession, error) {
+	if s.tokenManager == nil {
+		return AuthenticatedSession{}, ErrTokenStorageNotEnabled
+	}
+	return s.tokenManager.AuthenticateContext(ctx, rawAccessToken)
+}
+
+func authTokens(pair TokenPair) *command.AuthTokens {
+	return &command.AuthTokens{
+		SessionID:        pair.SessionID,
+		AccessToken:      pair.AccessToken,
+		RefreshToken:     pair.RefreshToken,
+		AccessExpiresAt:  pair.AccessExpiresAt,
+		RefreshExpiresAt: pair.RefreshExpiresAt,
+		Rotation:         pair.Rotation,
+	}
+}
+
+func (s *Service) persistUpsertDevice(ctx context.Context, device DeviceRegistration, domainEvents []event.DomainEvent) error {
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		return repository.UpsertDeviceAndPublish(ctx, device, domainEvents)
+	}
+	return s.repository.UpsertDevice(ctx, device)
+}
+
+func (s *Service) persistUpdateSession(ctx context.Context, session Session, expectedVersion int, domainEvents []event.DomainEvent) error {
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		return repository.UpdateSessionAndPublish(ctx, session, expectedVersion, domainEvents)
+	}
+	return s.repository.UpdateSession(ctx, session, expectedVersion)
+}
+
+func sessionRevocationEvents(sessions []Session, e command.Envelope, reason string, occurredAt time.Time) []event.DomainEvent {
+	domainEvents := make([]event.DomainEvent, 0, len(sessions))
+	for _, session := range sessions {
+		domainEvents = append(domainEvents, event.New("SessionRevoked", "Session", session.ID, session.Version, e.Principal.ID, e.CorrelationID, e.CommandID, occurredAt, map[string]any{
+			"reason": reason,
+		}))
+	}
+	return domainEvents
+}
+
+func eventRefs(domainEvents []event.DomainEvent) []string {
+	refs := make([]string, 0, len(domainEvents))
+	for _, domainEvent := range domainEvents {
+		refs = append(refs, domainEvent.EventID)
+	}
+	return refs
+}
+
+type recoveryPayload struct{ LoginIdentity, RequestedChannel string }
+
+func (s *Service) requestAccountRecovery(e command.Envelope) command.Result {
+	var p recoveryPayload
+	if !decode(e.Payload, &p) || p.LoginIdentity == "" || (p.RequestedChannel != "EMAIL" && p.RequestedChannel != "SMS") {
+		return command.Rejected(e, "INVALID_ACCOUNT_RECOVERY", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_account_recovery", nil)
+	}
+	return command.Pending(e, newID("recovery_"), "RECOVERY_PROVIDER_NOT_CONFIGURED", "PROVIDER", "identity.recovery_provider_pending", map[string]any{"channel": p.RequestedChannel})
+}
+
+type refreshSessionPayload struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+func (s *Service) refreshSession(ctx context.Context, e command.Envelope) command.Result {
+	var p refreshSessionPayload
+	if !decode(e.Payload, &p) || p.RefreshToken == "" {
+		return command.Rejected(e, "INVALID_REFRESH_SESSION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_refresh_session", nil)
+	}
+	if s.tokenManager == nil {
+		return command.Rejected(e, "SESSION_TOKEN_REFRESH_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "identity.session_token_refresh_unavailable", nil)
+	}
+	pair, session, err := s.tokenManager.Rotate(ctx, p.RefreshToken)
+	switch {
+	case errors.Is(err, ErrTokenNotFound), errors.Is(err, ErrTokenExpired):
+		return command.Rejected(e, "REFRESH_TOKEN_INVALID", "AUTHENTICATION", "AFTER_REAUTH", "identity.refresh_token_invalid", nil)
+	case errors.Is(err, ErrTokenRotationConflict):
+		return command.Rejected(e, "REFRESH_TOKEN_ALREADY_USED", "CONCURRENCY", "AFTER_REAUTH", "identity.refresh_token_already_used", nil)
+	case errors.Is(err, ErrSessionNotFound):
+		return command.Rejected(e, "SESSION_NOT_USABLE", "ACCOUNT_STATE", "AFTER_REAUTH", "identity.session_not_usable", nil)
+	case err != nil:
+		return command.Rejected(e, "SESSION_TOKEN_REFRESH_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_refresh_failed", nil)
+	}
+	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, []string{})
+	result.Auth = authTokens(pair)
+	return result
+}
+
+func (s *Service) sessionUsable(ctx context.Context, session *Session) bool {
+	if session.Status != "ACTIVE" || !s.clock.Now().UTC().Before(session.ExpiresAt) {
+		if session.Status == "ACTIVE" {
+			session.Status = "EXPIRED"
+			session.Version++
+		}
+		return false
+	}
+	device, err := s.repository.GetDevice(ctx, session.DeviceID)
+	return err == nil && device.Status == "ACTIVE"
+}
+
+func decode(payload map[string]any, target any) bool {
+	bytes, err := json.Marshal(payload)
+	return err == nil && json.Unmarshal(bytes, target) == nil
+}
+
+func newID(prefix string) string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return prefix + time.Now().UTC().Format("20060102150405.000000000")
+	}
+	return prefix + hex.EncodeToString(bytes[:])
+}
