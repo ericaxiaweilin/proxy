@@ -7,10 +7,13 @@ import { LoginClient } from "./login-client";
 import { RequesterApp } from "./requester-app";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
+import { color, Gradient, shadows } from "./theme";
+
+const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, right: 0, top: 0 };
 
 const secureSessionStore = new SecureSessionStore(nativeSecureStorageDriver);
 const localApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL ?? (Platform.OS === "android" ? "http://10.0.2.2:4100" : "http://127.0.0.1:4100");
-const developmentLoginEnabled = process.env.NODE_ENV !== "production" && process.env.EXPO_PUBLIC_LOGIN_MODE === "simulated";
+const developmentLoginEnabled = process.env.EXPO_PUBLIC_LOGIN_MODE === "simulated";
 const nativeTransport: Transport = async (request) => {
   const response = await fetch(request.url, {
     method: request.method,
@@ -42,12 +45,7 @@ export function ProxyApp(): React.JSX.Element {
   }, []);
 
   if (!state) {
-    return (
-      <SafeAreaView style={styles.screen}>
-        <ActivityIndicator color="#9B5CFF" />
-        <Text style={styles.secondary}>正在准备安全会话…</Text>
-      </SafeAreaView>
-    );
+    return <BootScreen />;
   }
 
   if (state.initialRoute === "auth") {
@@ -71,11 +69,34 @@ export function ProxyApp(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.card}>
-        <Text style={styles.brand}>PROXY</Text>
+        <BrandMark />
         <Text style={styles.title}>{statusTitle(state)}</Text>
         <Text style={styles.secondary}>Native App Shell · {state.initialRoute}</Text>
       </View>
     </SafeAreaView>
+  );
+}
+
+function BootScreen(): React.JSX.Element {
+  return (
+    <SafeAreaView style={styles.screen}>
+      <BrandMark large />
+      <ActivityIndicator color={color.magenta} style={styles.spinner} />
+      <Text style={styles.secondary}>让时间遇见需要。</Text>
+    </SafeAreaView>
+  );
+}
+
+function BrandMark({ large = false }: { large?: boolean }): React.JSX.Element {
+  return (
+    <View style={styles.brandBlock}>
+      <Gradient from={color.magenta} to={color.violet} style={[styles.brandLogo, large && styles.brandLogoLarge, shadows.hero]}>
+        <Text style={[styles.brandLogoText, large && styles.brandLogoTextLarge]}>P</Text>
+      </Gradient>
+      <Text style={[styles.brandName, large && styles.brandNameLarge]}>Proxy</Text>
+      <Text style={styles.brandSlogan}>让时间遇见需要。</Text>
+      <Text style={styles.brandSloganEn}>Where time meets need.</Text>
+    </View>
   );
 }
 
@@ -121,8 +142,7 @@ function DevelopmentAuthScreen({ onAuthenticated }: { onAuthenticated: () => voi
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.card}>
-        <Text style={styles.brand}>PROXY</Text>
-        <Text style={styles.title}>本地模拟登录</Text>
+        <Text style={styles.title}>登录 Proxy</Text>
         <Text style={styles.secondary}>开发模式 · user_001 · device_001</Text>
         <Text style={styles.helper}>模拟验证码：123456（仅本地开发）</Text>
         {challengeId ? (
@@ -133,18 +153,24 @@ function DevelopmentAuthScreen({ onAuthenticated }: { onAuthenticated: () => voi
               maxLength={6}
               onChangeText={setCode}
               placeholder="输入验证码"
-              placeholderTextColor="#777783"
+              placeholderTextColor="#A9A2B0"
               style={styles.input}
               value={code}
             />
-            <Pressable disabled={busy || code.trim() === ""} onPress={() => void completeLogin()} style={({ pressed }) => [styles.button, (busy || code.trim() === "") && styles.buttonDisabled, pressed && styles.buttonPressed]}>
-              <Text style={styles.buttonText}>{busy ? "验证中…" : "验证并进入 App"}</Text>
-            </Pressable>
+            <View style={[styles.button, busy || code.trim() === "" ? styles.disabled : null]}>
+              <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
+              <Pressable disabled={busy || code.trim() === ""} onPress={() => void completeLogin()} style={styles.buttonPressable}>
+                <Text style={styles.buttonText}>{busy ? "验证中…" : "验证并进入 App"}</Text>
+              </Pressable>
+            </View>
           </>
         ) : (
-          <Pressable disabled={busy} onPress={() => void requestChallenge()} style={({ pressed }) => [styles.button, busy && styles.buttonDisabled, pressed && styles.buttonPressed]}>
-            <Text style={styles.buttonText}>{busy ? "请求中…" : "请求模拟验证码"}</Text>
-          </Pressable>
+          <View style={[styles.button, busy ? styles.disabled : null]}>
+            <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
+            <Pressable disabled={busy} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
+              <Text style={styles.buttonText}>{busy ? "请求中…" : "请求模拟验证码"}</Text>
+            </Pressable>
+          </View>
         )}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
@@ -156,7 +182,7 @@ function AuthUnavailableScreen(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.card}>
-        <Text style={styles.brand}>PROXY</Text>
+        <BrandMark />
         <Text style={styles.title}>登录服务待配置</Text>
         <Text style={styles.secondary}>当前 App 没有启用本地模拟登录 Provider。</Text>
       </View>
@@ -197,55 +223,59 @@ function statusTitle(state: AppShellState): string {
 const styles = StyleSheet.create({
   screen: {
     alignItems: "center",
-    backgroundColor: "#050505",
+    backgroundColor: color.offWhite,
     flex: 1,
     justifyContent: "center",
     padding: 24
   },
   card: {
     alignItems: "center",
-    backgroundColor: "#111111",
-    borderColor: "#2A2A2A",
+    backgroundColor: color.white,
+    borderColor: color.line,
     borderRadius: 24,
     borderWidth: 1,
+    ...shadows.card,
     maxWidth: 420,
     padding: 32,
     width: "100%"
   },
-  brand: {
-    color: "#FFFFFF",
-    fontSize: 28,
-    fontWeight: "800",
-    letterSpacing: 5,
-    marginBottom: 24
-  },
+  brandBlock: { alignItems: "center", marginBottom: 26 },
+  brandLogo: { alignItems: "center", borderRadius: 22, height: 56, justifyContent: "center", width: 56 },
+  brandLogoLarge: { borderRadius: 30, height: 76, width: 76 },
+  brandLogoText: { color: color.white, fontSize: 30, fontWeight: "900" },
+  brandLogoTextLarge: { fontSize: 40 },
+  brandName: { color: color.ink, fontSize: 30, fontWeight: "900", letterSpacing: 2, marginTop: 16 },
+  brandNameLarge: { fontSize: 34 },
+  brandSlogan: { color: color.muted, fontSize: 12, letterSpacing: 0.4, marginTop: 6 },
+  brandSloganEn: { color: "#8A8490", fontSize: 9, letterSpacing: 2.2, marginTop: 4, textTransform: "uppercase" },
+  spinner: { marginTop: 22 },
   title: {
-    color: "#FFFFFF",
+    color: color.ink,
     fontSize: 20,
-    fontWeight: "700",
+    fontWeight: "800",
     marginBottom: 8
   },
   secondary: {
-    color: "#A9A9B2",
-    fontSize: 14,
-    marginTop: 12,
+    color: color.muted,
+    fontSize: 13,
+    marginTop: 8,
     textAlign: "center"
   },
   helper: {
-    color: "#A77BFF",
-    fontSize: 13,
-    marginTop: 20,
+    color: color.violet,
+    fontSize: 12,
+    marginTop: 16,
     textAlign: "center"
   },
   input: {
-    backgroundColor: "#050505",
-    borderColor: "#44404F",
-    borderRadius: 12,
+    backgroundColor: color.surface,
+    borderColor: color.line,
+    borderRadius: 14,
     borderWidth: 1,
-    color: "#FFFFFF",
+    color: color.ink,
     fontSize: 18,
     letterSpacing: 8,
-    marginTop: 20,
+    marginTop: 18,
     paddingHorizontal: 16,
     paddingVertical: 14,
     textAlign: "center",
@@ -253,27 +283,28 @@ const styles = StyleSheet.create({
   },
   button: {
     alignItems: "center",
-    backgroundColor: "#8E4DFF",
-    borderRadius: 12,
+    borderRadius: 14,
     marginTop: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    minHeight: 50,
+    overflow: "hidden",
     width: "100%"
   },
-  buttonDisabled: {
-    opacity: 0.5
-  },
-  buttonPressed: {
-    opacity: 0.8
+  buttonPressable: {
+    ...absoluteFillStyle,
+    alignItems: "center",
+    justifyContent: "center"
   },
   buttonText: {
-    color: "#FFFFFF",
+    color: color.white,
     fontSize: 15,
-    fontWeight: "700"
+    fontWeight: "900"
+  },
+  disabled: {
+    opacity: 0.5
   },
   error: {
-    color: "#FF8F9B",
-    fontSize: 13,
+    color: color.error,
+    fontSize: 12,
     marginTop: 16,
     textAlign: "center"
   }

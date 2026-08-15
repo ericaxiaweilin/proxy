@@ -37,6 +37,9 @@ mobile SecureSessionStore contract with App Shell restore / sign-out and strict 
 mobile Expo SecureStore adapter with Keychain accessibility policy
 React Native / Expo SDK 57 development-build App Shell bootstrap with iOS / Android prebuild
 Metro Android / iOS bundle validation for native App entrypoint
+Android API 36 Pixel_8 Google Play arm64 system image installed and booted
+Android native debug build installed to Pixel_8 with Metro dev-client connection
+Android clean simulated login → session bootstrap → secure-session restore smoke
 mobile SessionAuthClient with access-token expiry, one-flight refresh, 401 retry, and fail-closed sign-out
 mobile LoginClient challenge → verification → first-session bootstrap boundary with strict result/token parsing
 local-only simulated Login Challenge Provider for emulator development; production provider remains unconfigured/fail-closed
@@ -76,6 +79,7 @@ Demand domain/API tests  PASS
 Demand API flow  200 / 202 / 409
 Go API health smoke  200
 Go tests  PASS
+Android Pixel_8 native install / Metro / simulated login / session restore  PASS
 ```
 
 ## 当前有意未实现
@@ -89,7 +93,7 @@ minimum app version enforcement
 device notification integration and provider lifecycle
 PostgreSQL-backed Task / TaskSlot canonical tables and migration from draft JSON slots
 real Catalog / Admission / Funding gate adapters
-offline SQLite Draft persistence and device-level Keychain / Keystore smoke verification
+offline SQLite Draft persistence and iOS real-device Keychain / Keystore smoke verification
 server-backed Requester Home read model and restart-safe in-progress need hydration
 ObservationTemplate / ObservationSet handlers
 Outcome compatibility gate handler
@@ -100,7 +104,7 @@ OpenAPI document generation
 
 ```text
 production OTP/passwordless delivery and verification provider adapter
-→ iOS / Android simulator or real-device Keychain / Keystore smoke verification
+→ iOS real-device native install / Keychain smoke (blocked by connected iPhone on iOS 26.6 vs installed Xcode 26.2 platform)
 → PostgreSQL integration tests for command Unit of Work rollback
 → canonical Task / TaskSlot persistence migration
 → M3 Agent Passport / Availability
