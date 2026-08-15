@@ -37,6 +37,7 @@ export function ProxyApp(): React.JSX.Element {
   // 原型优先：Proxy_Free_Prototype_v1.5.2 单文件（105 screens / Otter logo / localStorage）
   // 完全离线内嵌，WebView 全屏渲染——与设计原型 1:1，不再走 RN 重写的有限路由。
   // 自动导航（Splash / 恢复 lastRoute）已注入原型 HTML 的 boot script，无需 RN 侧干预。
+  // 手机全屏 CSS（隐藏桌面品牌导航/工程面板）已注入原型 HTML。
   return (
     <View style={styles.webviewRoot}>
       {/* baseUrl 提供合法 origin：source={{html}} 默认 about:blank 会拒绝 localStorage */}
