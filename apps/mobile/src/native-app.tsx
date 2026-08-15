@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
+import { WebView } from "react-native-webview";
 import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-shell";
 import { SessionAuthClient, type Transport } from "./auth-client";
 import { DemandClient } from "./demand-client";
@@ -7,6 +8,7 @@ import { LoginClient } from "./login-client";
 import { RequesterApp } from "./requester-app";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
+import { PROTOTYPE_HTML } from "./prototype-html";
 import { color, Gradient, shadows } from "./theme";
 
 const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, right: 0, top: 0 };
@@ -32,48 +34,27 @@ const sessionAuthClient = new SessionAuthClient({ baseUrl: localApiBaseUrl, secu
 const demandClient = new DemandClient({ authClient: sessionAuthClient, secureSessionStore });
 
 export function ProxyApp(): React.JSX.Element {
-  const [state, setState] = useState<AppShellState>();
-
-  useEffect(() => {
-    let mounted = true;
-    void restoreNativeShell().then((nextState) => {
-      if (mounted) setState(nextState);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  if (!state) {
-    return <BootScreen />;
-  }
-
-  if (state.initialRoute === "auth") {
-    return developmentLoginEnabled ? (
-      <DevelopmentAuthScreen onAuthenticated={() => setState(resolveInitialRoute({ hasSession: true, isRestricted: false, isOffline: false }))} />
-    ) : <AuthUnavailableScreen />;
-  }
-
-  if (state.initialRoute === "home") {
-    return (
-      <RequesterApp
-        demandClient={demandClient}
-        onSignOut={async () => {
-          await sessionAuthClient.signOut();
-          setState(resolveInitialRoute({ hasSession: false, isRestricted: false, isOffline: false }));
-        }}
-      />
-    );
-  }
-
+  // 原型优先：Proxy_Free_Prototype_v1.5.2 单文件（105 screens / Otter logo / localStorage）
+  // 完全离线内嵌，WebView 全屏渲染——与设计原型 1:1，不再走 RN 重写的有限路由。
+  // 自动导航（Splash / 恢复 lastRoute）已注入原型 HTML 的 boot script，无需 RN 侧干预。
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.card}>
-        <BrandMark />
-        <Text style={styles.title}>{statusTitle(state)}</Text>
-        <Text style={styles.secondary}>Native App Shell · {state.initialRoute}</Text>
-      </View>
-    </SafeAreaView>
+    <View style={styles.webviewRoot}>
+      {/* baseUrl 提供合法 origin：source={{html}} 默认 about:blank 会拒绝 localStorage */}
+      <WebView
+        originWhitelist={["*"]}
+        source={{ html: PROTOTYPE_HTML, baseUrl: "https://proxy.app/" }}
+        style={styles.webview}
+        domStorageEnabled
+        javaScriptEnabled
+        startInLoadingState
+        renderLoading={() => (
+          <View style={styles.webviewLoading}>
+            <ActivityIndicator color={color.magenta} size="large" />
+            <Text style={styles.webviewLoadingText}>Proxy · 原型加载中</Text>
+          </View>
+        )}
+      />
+    </View>
   );
 }
 
@@ -307,5 +288,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 16,
     textAlign: "center"
-  }
+  },
+  webviewRoot: { backgroundColor: color.offWhite, flex: 1 },
+  webview: { backgroundColor: color.offWhite, flex: 1 },
+  webviewLoading: {
+    alignItems: "center",
+    backgroundColor: color.offWhite,
+    flex: 1,
+    justifyContent: "center"
+  },
+  webviewLoadingText: { color: color.muted, fontSize: 13, marginTop: 14 }
 });
