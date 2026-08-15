@@ -619,4 +619,4 @@ window.addEventListener("offline",()=>{appState.connectivity="OFFLINE";persist()
 window.addEventListener("online",()=>{appState.connectivity="ONLINE";persist();renderRoute(currentRoute||"rhome",false)});
 document.addEventListener("visibilitychange",()=>{if(document.hidden){appState.lastBackgroundAt=Date.now();persist()}else if(appState.lastBackgroundAt&&Date.now()-appState.lastBackgroundAt>60000){appState.resumeNotice=true;appState.progressPulse.stale=true;appState.progressPulse.freshness="STALE";persist();renderRoute(currentRoute||appState.lastRoute||"rhome",false)}});
 window.addEventListener("load",()=>{const requested=location.hash.slice(1);const restore=requested||appState.lastRoute||"splash";renderRoute(screens[restore]?restore:"splash",false)});
-</script></body></html>
+</script><script>window.addEventListener('load',function(){setTimeout(function(){try{var s=JSON.parse(localStorage.getItem('proxy_v152_state'));if(s){s.lastRoute=null;localStorage.setItem('proxy_v152_state',JSON.stringify(s));}}catch(e){}if(typeof go==='function'){go('splash',{replace:true});}},300);});</script></body></html>
