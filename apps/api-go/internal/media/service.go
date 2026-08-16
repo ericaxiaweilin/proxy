@@ -1,0 +1,615 @@
+package media
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/proxy-app/proxy-api/internal/clock"
+	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/event"
+)
+
+// Media P0（PRD Chapter06A §9-12）。
+// 普通视频：upload / thumbnail / play / pause / seek / fullscreen / caption / share。
+// 只有 READY 的视频允许正式播放。
+// FFmpeg 不是播放器：客户端播 MP4/HLS URL；FFmpeg 负责把用户上传的
+// HEVC/MOV/奇怪 rotation/不同音频 codec 标准化为 H.264+AAC MP4+faststart。
+// 不做：多码率 HLS / ABR / 转码集群 / 直播 / WebRTC（P0 只要求正常播放）。
+
+// MediaAsset 是媒体资产（IMAGE | VIDEO）。
+type MediaAsset struct {
+	MediaAssetID       string    `json:"mediaAssetId"`
+	OwnerPrincipalType string    `json:"ownerPrincipalType"`
+	OwnerPrincipalID   string    `json:"ownerPrincipalId"`
+	MediaType          string    `json:"mediaType"` // IMAGE | VIDEO
+	OriginalStorageKey string    `json:"originalStorageKey"`
+	PlaybackStorageKey string    `json:"playbackStorageKey,omitempty"`
+	ThumbnailStorageKey string   `json:"thumbnailStorageKey,omitempty"`
+	MimeType           string    `json:"mimeType,omitempty"`
+	Width              int       `json:"width,omitempty"`
+	Height             int       `json:"height,omitempty"`
+	DurationMs         int64     `json:"durationMs,omitempty"`
+	Codec              string    `json:"codec,omitempty"`
+	ProcessingStatus   string    `json:"processingStatus"` // UPLOADING | PROCESSING | READY | FAILED
+	PlaybackURL        string    `json:"playbackUrl,omitempty"`
+	ThumbnailURL       string    `json:"thumbnailUrl,omitempty"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
+}
+
+// VideoMetadata 是 ffprobe 输出（时长/分辨率/codec/rotation）。
+type VideoMetadata struct {
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	DurationMs int64  `json:"durationMs"`
+	Codec     string `json:"codec"`
+	HasAudio  bool   `json:"hasAudio"`
+}
+
+// Processor 是媒体处理链接口（worker 实现，dev 用本地 ffmpeg）。
+type Processor interface {
+	// Process 处理原文件 → 标准 MP4 + thumbnail，返回播放/缩略图存储 key 和元数据。
+	Process(ctx context.Context, originalPath string) (ProcessResult, error)
+}
+
+// ProcessResult 是处理结果。
+type ProcessResult struct {
+	PlaybackStorageKey string
+	ThumbnailStorageKey string
+	Metadata           VideoMetadata
+}
+
+type Repository interface {
+	CreateAsset(ctx context.Context, a MediaAsset) error
+	GetAsset(ctx context.Context, id string) (MediaAsset, error)
+	UpdateAsset(ctx context.Context, a MediaAsset, expectedStatus string) error
+	Snapshot(ctx context.Context) ([]MediaAsset, error)
+}
+
+var (
+	ErrAssetNotFound = errors.New("media asset not found")
+	ErrStatusTransition = errors.New("invalid status transition")
+)
+
+type MemoryRepository struct {
+	mu     sync.Mutex
+	assets map[string]MediaAsset
+	events []event.DomainEvent
+}
+
+func NewMemoryRepository() *MemoryRepository {
+	return &MemoryRepository{assets: make(map[string]MediaAsset)}
+}
+
+func (r *MemoryRepository) CreateAsset(_ context.Context, a MediaAsset) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.assets[a.MediaAssetID]; exists {
+		return errors.New("asset already exists")
+	}
+	r.assets[a.MediaAssetID] = a
+	return nil
+}
+
+func (r *MemoryRepository) GetAsset(_ context.Context, id string) (MediaAsset, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, exists := r.assets[id]
+	if !exists {
+		return MediaAsset{}, ErrAssetNotFound
+	}
+	return a, nil
+}
+
+func (r *MemoryRepository) UpdateAsset(_ context.Context, a MediaAsset, expectedStatus string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, exists := r.assets[a.MediaAssetID]
+	if !exists {
+		return ErrAssetNotFound
+	}
+	if current.ProcessingStatus != expectedStatus {
+		return ErrStatusTransition
+	}
+	r.assets[a.MediaAssetID] = a
+	return nil
+}
+
+func (r *MemoryRepository) Snapshot(_ context.Context) ([]MediaAsset, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]MediaAsset, 0, len(r.assets))
+	for _, a := range r.assets {
+		result = append(result, a)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+type Service struct {
+	mu         sync.Mutex
+	repository Repository
+	processor  Processor
+	clock      clock.Clock
+}
+
+func New() *Service {
+	return NewWithDependencies(NewMemoryRepository(), nil)
+}
+
+// NewWithDependencies 注入 repository 和 processor。
+// processor 为 nil 时用 NoopProcessor（单测/无 ffmpeg 环境）。
+func NewWithDependencies(repository Repository, processor Processor) *Service {
+	if repository == nil {
+		repository = NewMemoryRepository()
+	}
+	return &Service{repository: repository, processor: processor, clock: clock.System{}}
+}
+
+func (s *Service) Supports(commandType string) bool {
+	switch commandType {
+	case "CreateMediaAsset", "CompleteMediaUpload", "ProcessMediaAsset",
+		"MarkMediaReady", "GetMediaAsset", "ListMediaAssets":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) Handle(e command.Envelope) command.Result {
+	return s.HandleContext(context.Background(), e)
+}
+
+func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch e.CommandType {
+	case "CreateMediaAsset":
+		return s.createAsset(ctx, e)
+	case "CompleteMediaUpload":
+		return s.completeUpload(ctx, e)
+	case "ProcessMediaAsset":
+		return s.processAsset(ctx, e)
+	case "MarkMediaReady":
+		return s.markReady(ctx, e)
+	case "GetMediaAsset":
+		return s.getAsset(ctx, e)
+	case "ListMediaAssets":
+		return s.listAssets(ctx, e)
+	default:
+		return command.Rejected(e, "MEDIA_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "media.unsupported_command", nil)
+	}
+}
+
+// ---------- CreateMediaAsset ----------
+// 登记上传：拿到 upload URL（dev 返回本地直传路径），资产 = UPLOADING。
+
+type createAssetPayload struct {
+	MediaType          string `json:"mediaType"`
+	OriginalStorageKey string `json:"originalStorageKey"`
+	MimeType           string `json:"mimeType"`
+}
+
+func (s *Service) createAsset(ctx context.Context, e command.Envelope) command.Result {
+	var p createAssetPayload
+	if !decode(e.Payload, &p) || p.MediaType == "" || p.OriginalStorageKey == "" {
+		return command.Rejected(e, "INVALID_MEDIA_ASSET", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_asset", nil)
+	}
+	if p.MediaType != "IMAGE" && p.MediaType != "VIDEO" {
+		return command.Rejected(e, "INVALID_MEDIA_TYPE", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_type", map[string]any{"mediaType": p.MediaType})
+	}
+	now := s.clock.Now().UTC()
+	asset := MediaAsset{
+		MediaAssetID:        newID("ma_"),
+		OwnerPrincipalType:  e.Principal.Type,
+		OwnerPrincipalID:    e.Principal.ID,
+		MediaType:           p.MediaType,
+		OriginalStorageKey:  p.OriginalStorageKey,
+		MimeType:            p.MimeType,
+		ProcessingStatus:    "UPLOADING",
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	domainEvents := []event.DomainEvent{event.New("MediaAssetCreated", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"mediaType": p.MediaType,
+		"status":    "UPLOADING",
+	})}
+	if err := s.repository.CreateAsset(ctx, asset); err != nil {
+		return command.Rejected(e, "MEDIA_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.create_failed", nil)
+	}
+	return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, "UPLOADING", map[string]any{
+		"mediaAssetId": asset.MediaAssetID,
+		"uploadUrl":    "/v1/media/upload/" + asset.MediaAssetID, // dev：本地直传端点
+		"status":       "UPLOADING",
+	}, domainEvents)
+}
+
+// ---------- CompleteMediaUpload ----------
+// 上传完成 → PROCESSING（准备处理）。
+
+type completeUploadPayload struct {
+	OriginalStorageKey string `json:"originalStorageKey"`
+}
+
+func (s *Service) completeUpload(ctx context.Context, e command.Envelope) command.Result {
+	var p completeUploadPayload
+	if !decode(e.Payload, &p) || p.OriginalStorageKey == "" {
+		return command.Rejected(e, "INVALID_COMPLETE_UPLOAD", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_complete_upload", nil)
+	}
+	asset, err := s.repository.GetAsset(ctx, e.Target.ID)
+	if errors.Is(err, ErrAssetNotFound) {
+		return command.Rejected(e, "MEDIA_ASSET_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.asset_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
+	}
+	if asset.ProcessingStatus != "UPLOADING" {
+		return command.Rejected(e, "MEDIA_NOT_UPLOADING", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_uploading", map[string]any{"status": asset.ProcessingStatus})
+	}
+	if asset.OriginalStorageKey != p.OriginalStorageKey {
+		return command.Rejected(e, "STORAGE_KEY_MISMATCH", "VALIDATION", "AFTER_USER_ACTION", "media.storage_key_mismatch", nil)
+	}
+	asset.ProcessingStatus = "PROCESSING"
+	asset.UpdatedAt = s.clock.Now().UTC()
+	domainEvents := []event.DomainEvent{event.New("MediaUploadCompleted", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
+		"status": "PROCESSING",
+	})}
+	if err := s.repository.UpdateAsset(ctx, asset, "UPLOADING"); err != nil {
+		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
+	}
+	return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, "PROCESSING", eventRefs(domainEvents))
+}
+
+// ---------- ProcessMediaAsset ----------
+// Worker 触发：ffprobe + ffmpeg 标准化 → 标准 MP4 + thumbnail。
+// 无 processor 时（dev 无 ffmpeg）跳到 READY。
+
+type processPayload struct {
+	OriginalPath string `json:"originalPath"` // dev：本地原文件路径（模拟 Object Storage 取回）
+}
+
+func (s *Service) processAsset(ctx context.Context, e command.Envelope) command.Result {
+	var p processPayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_PROCESS_REQUEST", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_process", nil)
+	}
+	asset, err := s.repository.GetAsset(ctx, e.Target.ID)
+	if errors.Is(err, ErrAssetNotFound) {
+		return command.Rejected(e, "MEDIA_ASSET_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.asset_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
+	}
+	if asset.ProcessingStatus != "PROCESSING" {
+		return command.Rejected(e, "MEDIA_NOT_PROCESSING", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_processing", map[string]any{"status": asset.ProcessingStatus})
+	}
+	if asset.MediaType == "IMAGE" {
+		// 图片：无转码，直接 READY
+		asset.ProcessingStatus = "READY"
+		asset.PlaybackStorageKey = asset.OriginalStorageKey
+		asset.ThumbnailStorageKey = asset.OriginalStorageKey
+		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
+		asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
+		asset.UpdatedAt = s.clock.Now().UTC()
+		domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
+			"status": "READY", "mediaType": "IMAGE",
+		})}
+		if err := s.repository.UpdateAsset(ctx, asset, "PROCESSING"); err != nil {
+			return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
+		}
+		return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, "READY", eventRefs(domainEvents))
+	}
+	// VIDEO：走 FFmpeg 处理链
+	if s.processor == nil {
+		// 无 processor：模拟处理成功（dev 无 ffmpeg 时）
+		asset.ProcessingStatus = "READY"
+		asset.PlaybackStorageKey = asset.OriginalStorageKey
+		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
+		asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
+		asset.UpdatedAt = s.clock.Now().UTC()
+		domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
+			"status": "READY", "mediaType": "VIDEO", "note": "no processor (dev)",
+		})}
+		if err := s.repository.UpdateAsset(ctx, asset, "PROCESSING"); err != nil {
+			return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
+		}
+		return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, "READY", map[string]any{
+			"mediaAssetId":     asset.MediaAssetID,
+			"playbackUrl":      asset.PlaybackURL,
+			"processingStatus": "READY",
+		}, domainEvents)
+	}
+	result, err := s.processor.Process(ctx, p.OriginalPath)
+	if err != nil {
+		// 处理失败 → FAILED（保留原文件，可重试）
+		asset.ProcessingStatus = "FAILED"
+		asset.UpdatedAt = s.clock.Now().UTC()
+		_ = s.repository.UpdateAsset(ctx, asset, "PROCESSING")
+		return command.Rejected(e, "MEDIA_PROCESSING_FAILED", "PROVIDER", "SAFE_RETRY", "media.processing_failed", map[string]any{"detail": err.Error()})
+	}
+	asset.ProcessingStatus = "READY"
+	asset.PlaybackStorageKey = result.PlaybackStorageKey
+	asset.ThumbnailStorageKey = result.ThumbnailStorageKey
+	asset.Width = result.Metadata.Width
+	asset.Height = result.Metadata.Height
+	asset.DurationMs = result.Metadata.DurationMs
+	asset.Codec = result.Metadata.Codec
+	asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
+	asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
+	asset.UpdatedAt = s.clock.Now().UTC()
+	domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
+		"status":     "READY",
+		"mediaType":  "VIDEO",
+		"durationMs": result.Metadata.DurationMs,
+		"codec":      result.Metadata.Codec,
+		"width":      result.Metadata.Width,
+		"height":     result.Metadata.Height,
+		"note":       "H.264 + AAC MP4 + faststart；只有 READY 可正式播放",
+	})}
+	if err := s.repository.UpdateAsset(ctx, asset, "PROCESSING"); err != nil {
+		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
+	}
+	return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, "READY", map[string]any{
+		"mediaAssetId":   asset.MediaAssetID,
+		"playbackUrl":    asset.PlaybackURL,
+		"thumbnailUrl":   asset.ThumbnailURL,
+		"durationMs":     asset.DurationMs,
+		"width":          asset.Width,
+		"height":         asset.Height,
+		"codec":          asset.Codec,
+		"processingStatus": "READY",
+	}, domainEvents)
+}
+
+// ---------- MarkMediaReady ----------
+// 手动标 READY（外部 worker 已处理完的场景）。
+
+type markReadyPayload struct {
+	PlaybackStorageKey  string `json:"playbackStorageKey"`
+	ThumbnailStorageKey string `json:"thumbnailStorageKey"`
+	DurationMs          int64  `json:"durationMs"`
+	Width               int    `json:"width"`
+	Height              int    `json:"height"`
+	Codec               string `json:"codec"`
+}
+
+func (s *Service) markReady(ctx context.Context, e command.Envelope) command.Result {
+	var p markReadyPayload
+	asset, err := s.repository.GetAsset(ctx, e.Target.ID)
+	if errors.Is(err, ErrAssetNotFound) {
+		return command.Rejected(e, "MEDIA_ASSET_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.asset_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
+	}
+	if asset.ProcessingStatus != "PROCESSING" && asset.ProcessingStatus != "UPLOADING" {
+		return command.Rejected(e, "MEDIA_NOT_PROCESSABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_processable", map[string]any{"status": asset.ProcessingStatus})
+	}
+	asset.ProcessingStatus = "READY"
+	if p.PlaybackStorageKey != "" {
+		asset.PlaybackStorageKey = p.PlaybackStorageKey
+	}
+	if p.ThumbnailStorageKey != "" {
+		asset.ThumbnailStorageKey = p.ThumbnailStorageKey
+	}
+	asset.DurationMs = p.DurationMs
+	asset.Width = p.Width
+	asset.Height = p.Height
+	asset.Codec = p.Codec
+	asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
+	asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
+	asset.UpdatedAt = s.clock.Now().UTC()
+	domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
+		"status": "READY", "mediaType": asset.MediaType,
+	})}
+	if err := s.repository.UpdateAsset(ctx, asset, asset.ProcessingStatus); err != nil {
+		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
+	}
+	return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, "READY", eventRefs(domainEvents))
+}
+
+// ---------- GetMediaAsset / ListMediaAssets ----------
+
+func (s *Service) getAsset(ctx context.Context, e command.Envelope) command.Result {
+	assetID := e.Target.ID
+	if assetID == "" {
+		var p struct {
+			MediaAssetID string `json:"mediaAssetId"`
+		}
+		if !decode(e.Payload, &p) || p.MediaAssetID == "" {
+			return command.Rejected(e, "INVALID_ASSET_QUERY", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_query", nil)
+		}
+		assetID = p.MediaAssetID
+	}
+	asset, err := s.repository.GetAsset(ctx, assetID)
+	if errors.Is(err, ErrAssetNotFound) {
+		return command.Rejected(e, "MEDIA_ASSET_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.asset_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
+	}
+	return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, asset.ProcessingStatus, map[string]any{
+		"asset": asset,
+		"playable": asset.ProcessingStatus == "READY", // 只有 READY 可正式播放
+	}, nil)
+}
+
+func (s *Service) listAssets(ctx context.Context, e command.Envelope) command.Result {
+	assets, err := s.repository.Snapshot(ctx)
+	if err != nil {
+		return command.Rejected(e, "MEDIA_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "media.list_failed", nil)
+	}
+	return acceptedWithPayload(e, "MediaAsset", "", 1, "LIST", map[string]any{
+		"assets": assets,
+	}, nil)
+}
+
+// ---------- FFmpeg Processor（本地 dev 实现）----------
+
+// FFmpegProcessor 用本机 ffmpeg/ffprobe 实现处理链：
+// ffprobe 读元数据 → ffmpeg 转 H.264+AAC MP4+faststart → thumbnail → 存 media_store。
+type FFmpegProcessor struct {
+	StoreDir string // 输出目录（模拟 Object Storage）
+}
+
+func NewFFmpegProcessor(storeDir string) *FFmpegProcessor {
+	return &FFmpegProcessor{StoreDir: storeDir}
+}
+
+func (p *FFmpegProcessor) Process(ctx context.Context, originalPath string) (ProcessResult, error) {
+	if originalPath == "" {
+		return ProcessResult{}, errors.New("original path required")
+	}
+	if p.StoreDir == "" {
+		p.StoreDir = filepath.Join(".", "media_store")
+	}
+	if err := os.MkdirAll(p.StoreDir, 0o755); err != nil {
+		return ProcessResult{}, err
+	}
+	// 1. ffprobe 读元数据
+	metadata, err := probe(ctx, originalPath)
+	if err != nil {
+		return ProcessResult{}, err
+	}
+	// 2. 生成输出 key（时间戳随机）
+	key := strconv.FormatInt(time.Now().UnixNano(), 36)
+	playbackKey := key + "_playback.mp4"
+	thumbnailKey := key + "_thumb.jpg"
+	playbackPath := filepath.Join(p.StoreDir, playbackKey)
+	thumbnailPath := filepath.Join(p.StoreDir, thumbnailKey)
+	// 3. ffmpeg 标准化：H.264 + AAC + MP4 + faststart
+	if err := transcode(ctx, originalPath, playbackPath); err != nil {
+		return ProcessResult{}, err
+	}
+	// 4. 生成缩略图
+	if err := makeThumbnail(ctx, playbackPath, thumbnailPath); err != nil {
+		// 缩略图失败不阻塞主链（可降级）
+		_ = err
+	}
+	return ProcessResult{
+		PlaybackStorageKey:  playbackKey,
+		ThumbnailStorageKey: thumbnailKey,
+		Metadata:            metadata,
+	}, nil
+}
+
+func probe(ctx context.Context, path string) (VideoMetadata, error) {
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "quiet", "-print_format", "json",
+		"-show_streams", "-show_format", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return VideoMetadata{}, err
+	}
+	var info struct {
+		Streams []struct {
+			CodecType string `json:"codec_type"`
+			CodecName string `json:"codec_name"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+		} `json:"streams"`
+		Format struct {
+			Duration string `json:"duration"`
+		} `json:"format"`
+	}
+	if err := json.Unmarshal(out, &info); err != nil {
+		return VideoMetadata{}, err
+	}
+	meta := VideoMetadata{HasAudio: false}
+	for _, stream := range info.Streams {
+		if stream.CodecType == "video" {
+			meta.Width = stream.Width
+			meta.Height = stream.Height
+			meta.Codec = stream.CodecName
+		}
+		if stream.CodecType == "audio" {
+			meta.HasAudio = true
+		}
+	}
+	if d, err := strconv.ParseFloat(info.Format.Duration, 64); err == nil {
+		meta.DurationMs = int64(d * 1000)
+	}
+	return meta, nil
+}
+
+func transcode(ctx context.Context, input, output string) error {
+	// H.264 video + AAC audio + MP4 + faststart（兼容所有播放器）
+	args := []string{"-y", "-i", input,
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+		"-c:a", "aac", "-b:a", "128k",
+		"-movflags", "+faststart",
+		"-pix_fmt", "yuv420p",
+		output}
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return errors.New("ffmpeg transcode failed: " + strings.TrimSpace(string(out))[:min(len(out), 200)])
+	}
+	return nil
+}
+
+func makeThumbnail(ctx context.Context, input, output string) error {
+	// 第 1 秒缩略图
+	args := []string{"-y", "-i", input, "-ss", "1", "-vframes", "1", "-vf", "scale=480:-2", output}
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return errors.New("thumbnail failed: " + strings.TrimSpace(string(out))[:min(len(out), 200)])
+	}
+	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// ---------- helpers ----------
+
+func decode(payload map[string]any, target any) bool {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return false
+	}
+	return true
+}
+
+func newID(prefix string) string {
+	var raw [12]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return prefix + hex.EncodeToString(raw[:])
+	}
+	return prefix + "fallback"
+}
+
+func eventRefs(events []event.DomainEvent) []string {
+	refs := make([]string, 0, len(events))
+	for _, e := range events {
+		refs = append(refs, e.EventID)
+	}
+	return refs
+}
+
+func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, version int, state string, payload map[string]any, domainEvents []event.DomainEvent) command.Result {
+	result := command.Accepted(e, aggregateType, aggregateID, version, state, eventRefs(domainEvents))
+	result.OperationRef = encodeRef(payload)
+	return result
+}
+
+func encodeRef(payload map[string]any) string {
+	raw, _ := json.Marshal(payload)
+	return string(raw)
+}
