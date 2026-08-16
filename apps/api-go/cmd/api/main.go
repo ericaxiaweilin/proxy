@@ -16,6 +16,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/conversation"
+	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
@@ -50,6 +51,7 @@ func main() {
 	fulfillmentService := fulfillment.New()
 	supplyService := supply.New()
 	mediaService := media.New()
+	contributionService := contribution.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -78,6 +80,7 @@ func main() {
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepository(pool))
 		mediaService = media.NewWithDependencies(postgres.NewMediaRepository(pool), media.NewFFmpegProcessor(filepath.Join("media_store")))
+		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
 		localNetService = localnet.NewWithMediaLookup(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService))
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
 		authenticator = identityService
@@ -89,7 +92,7 @@ func main() {
 		}
 	}()
 
-	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, supplyService, mediaService, idempotencyStore, readyCheck, authenticator, transactions)
+	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, supplyService, mediaService, contributionService, idempotencyStore, readyCheck, authenticator, transactions)
 	address := ":" + port
 	if simulatedLogin {
 		log.Printf("proxy api go listening on %s with LOCAL simulated login provider", address)

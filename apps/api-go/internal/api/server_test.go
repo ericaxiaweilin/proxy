@@ -15,6 +15,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
+	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/supply"
@@ -75,7 +76,7 @@ func requestWithBearer(handler http.Handler, method, path string, body any, bear
 }
 
 func TestHealthAndCommandBoundary(t *testing.T) {
-	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), nil, nil, stubAuthenticator{})
+	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil, stubAuthenticator{})
 	handler := server.Handler()
 	live := httptest.NewRecorder()
 	handler.ServeHTTP(live, httptest.NewRequest(http.MethodGet, "/health/live", nil))
@@ -95,7 +96,7 @@ func TestHealthAndCommandBoundary(t *testing.T) {
 }
 
 func TestDemandCommandBoundary(t *testing.T) {
-	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), nil, nil, stubAuthenticator{})
+	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil, stubAuthenticator{})
 	handler := server.Handler()
 	created := requestWithBearer(handler, http.MethodPost, "/v1/commands/CreateTaskDraft", apiEnvelope("CreateTaskDraft", map[string]any{
 		"ownerUserAccountId": "user_001",
@@ -123,7 +124,7 @@ func TestDemandCommandBoundary(t *testing.T) {
 }
 
 func TestCommandReplayUsesStoredResult(t *testing.T) {
-	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), nil, nil, stubAuthenticator{})
+	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil, stubAuthenticator{})
 	handler := server.Handler()
 	envelope := apiEnvelope("CreateTaskDraft", map[string]any{
 		"ownerUserAccountId": "user_001",
@@ -145,7 +146,7 @@ func TestCommandReplayUsesStoredResult(t *testing.T) {
 }
 
 func TestReadinessFailsWhenDependencyCheckFails(t *testing.T) {
-	server := NewServerWithDependencies(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), nil, func(_ context.Context) error {
+	server := NewServerWithDependencies(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, func(_ context.Context) error {
 		return errors.New("database unavailable")
 	})
 	record := httptest.NewRecorder()
@@ -156,7 +157,7 @@ func TestReadinessFailsWhenDependencyCheckFails(t *testing.T) {
 }
 
 func TestConfiguredAuthenticatorOwnsCommandScope(t *testing.T) {
-	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), nil, nil, stubAuthenticator{})
+	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil, stubAuthenticator{})
 	handler := server.Handler()
 	envelope := apiEnvelope("CreateTaskDraft", map[string]any{
 		"ownerUserAccountId": "user_001",
@@ -176,7 +177,7 @@ func TestConfiguredAuthenticatorOwnsCommandScope(t *testing.T) {
 }
 
 func TestConfiguredAuthenticatorRejectsMissingBearerToken(t *testing.T) {
-	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), nil, nil, stubAuthenticator{})
+	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil, stubAuthenticator{})
 	record := request(server.Handler(), http.MethodPost, "/v1/commands/PreviewTaskDraft", apiEnvelope("PreviewTaskDraft", map[string]any{"expectedVersion": 1}, command.Target{Type: "TaskDraft", ID: "draft_001"}, "idem_auth_missing_001"))
 	if record.Code != http.StatusUnauthorized {
 		t.Fatalf("expected missing access token to be rejected, got %d body=%s", record.Code, record.Body.String())
@@ -184,7 +185,7 @@ func TestConfiguredAuthenticatorRejectsMissingBearerToken(t *testing.T) {
 }
 
 func TestProtectedCommandFailsClosedWithoutAuthenticator(t *testing.T) {
-	server := NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New())
+	server := NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New())
 	record := request(server.Handler(), http.MethodPost, "/v1/commands/CreateTaskDraft", apiEnvelope("CreateTaskDraft", map[string]any{
 		"ownerUserAccountId": "user_001",
 		"principal":          map[string]any{"type": "BUSINESS", "id": "business_001"},
@@ -197,7 +198,7 @@ func TestProtectedCommandFailsClosedWithoutAuthenticator(t *testing.T) {
 
 func TestCommandUsesConfiguredTransactionRunner(t *testing.T) {
 	runner := &recordingTransactionRunner{}
-	server := NewServerWithRuntime(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), nil, nil, stubAuthenticator{}, runner)
+	server := NewServerWithRuntime(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil, stubAuthenticator{}, runner)
 	record := requestWithBearer(server.Handler(), http.MethodPost, "/v1/commands/CreateTaskDraft", apiEnvelope("CreateTaskDraft", map[string]any{
 		"ownerUserAccountId": "user_001",
 		"principal":          map[string]any{"type": "BUSINESS", "id": "business_001"},
@@ -213,7 +214,7 @@ func TestCommandRejectsUnknownEnvelopeFields(t *testing.T) {
 	var envelope map[string]any
 	_ = json.Unmarshal(envelopeBytes, &envelope)
 	envelope["unexpectedAuthority"] = true
-	record := request(NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New()).Handler(), http.MethodPost, "/v1/commands/CreateTaskDraft", envelope)
+	record := request(NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New()).Handler(), http.MethodPost, "/v1/commands/CreateTaskDraft", envelope)
 	if record.Code != http.StatusBadRequest {
 		t.Fatalf("expected strict envelope rejection, got %d body=%s", record.Code, record.Body.String())
 	}
