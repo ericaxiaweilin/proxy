@@ -11,16 +11,16 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
+	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
-	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/supply"
-	"github.com/proxy-app/proxy-api/internal/demand"
-	"github.com/proxy-app/proxy-api/internal/identity"
 )
 
 func apiEnvelope(commandType string, payload map[string]any, target command.Target, idempotency string) command.Envelope {
@@ -217,5 +217,29 @@ func TestCommandRejectsUnknownEnvelopeFields(t *testing.T) {
 	record := request(NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New()).Handler(), http.MethodPost, "/v1/commands/CreateTaskDraft", envelope)
 	if record.Code != http.StatusBadRequest {
 		t.Fatalf("expected strict envelope rejection, got %d body=%s", record.Code, record.Body.String())
+	}
+}
+
+// OperatorGate fail-closed（第 9 项收尾）：nil gate 拒绝一切 operator 命令；
+// 白名单 principal 放行。
+func TestOperatorGateFailsClosedAndAllowlist(t *testing.T) {
+	// nil gate → 拒绝
+	g := (*StaticOperatorGate)(nil)
+	if g.IsOperator(command.Actor{Type: "USER", ID: "user_001"}, command.Principal{Type: "BUSINESS", ID: "business_001"}, map[string]any{}) {
+		t.Fatal("nil gate must deny everything")
+	}
+	// 空白名单 → 拒绝
+	g2 := NewStaticOperatorGate(nil)
+	if g2.IsOperator(command.Actor{}, command.Principal{Type: "BUSINESS", ID: "business_001"}, map[string]any{}) {
+		t.Fatal("empty allowlist must deny")
+	}
+	// 白名单命中 → 放行
+	g3 := NewStaticOperatorGate([]string{"prin_operator_1"})
+	if !g3.IsOperator(command.Actor{}, command.Principal{Type: "INDIVIDUAL", ID: "prin_operator_1"}, map[string]any{}) {
+		t.Fatal("allowlisted principal must pass")
+	}
+	// 未命中 → 拒绝
+	if g3.IsOperator(command.Actor{}, command.Principal{Type: "INDIVIDUAL", ID: "prin_regular"}, map[string]any{}) {
+		t.Fatal("non-allowlisted principal must be denied")
 	}
 }

@@ -24,38 +24,38 @@ import (
 
 // Conversation 是对话聚合。
 type Conversation struct {
-	ID             string    `json:"conversationId"`
-	Type           string    `json:"conversationType"` // DM | GROUP | SUPPORT
-	OriginType     string    `json:"originType"`       // POST | PROFILE | SERVICE | ACTIVITY | NEED | OFFER | ORDER
-	OriginID       string    `json:"originId"`
-	MarketID       string    `json:"marketId,omitempty"`
-	State          string    `json:"state"` // ACTIVE | ARCHIVED | BLOCKED
-	Participants   []string  `json:"participants"`
-	CreatedAt      time.Time `json:"createdAt"`
-	LastMessageAt  time.Time `json:"lastMessageAt"`
+	ID            string    `json:"conversationId"`
+	Type          string    `json:"conversationType"` // DM | GROUP | SUPPORT
+	OriginType    string    `json:"originType"`       // POST | PROFILE | SERVICE | ACTIVITY | NEED | OFFER | ORDER
+	OriginID      string    `json:"originId"`
+	MarketID      string    `json:"marketId,omitempty"`
+	State         string    `json:"state"` // ACTIVE | ARCHIVED | BLOCKED
+	Participants  []string  `json:"participants"`
+	CreatedAt     time.Time `json:"createdAt"`
+	LastMessageAt time.Time `json:"lastMessageAt"`
 }
 
 // Message 是对话消息。
 type Message struct {
-	ID             string    `json:"messageId"`
-	ConversationID string    `json:"conversationId"`
-	SenderID       string    `json:"senderId"`
-	MessageType    string    `json:"messageType"` // TEXT | IMAGE | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
-	Body           string    `json:"body,omitempty"`
-	MediaRef       string    `json:"mediaRef,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID             string     `json:"messageId"`
+	ConversationID string     `json:"conversationId"`
+	SenderID       string     `json:"senderId"`
+	MessageType    string     `json:"messageType"` // TEXT | IMAGE | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
+	Body           string     `json:"body,omitempty"`
+	MediaRef       string     `json:"mediaRef,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
 	EditedAt       *time.Time `json:"editedAt,omitempty"`
 	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
 }
 
 // NeedDraft 是 Conversation 内的显式 Need Draft（Gate D：普通消息不创建正式 Need）。
 type NeedDraft struct {
-	DraftID    string    `json:"draftId"`
-	ConversationID string `json:"conversationId"`
-	Summary    string    `json:"summary"`
-	Confirmed  bool      `json:"confirmed"`
-	NeedID     string    `json:"needId,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
+	DraftID        string    `json:"draftId"`
+	ConversationID string    `json:"conversationId"`
+	Summary        string    `json:"summary"`
+	Confirmed      bool      `json:"confirmed"`
+	NeedID         string    `json:"needId,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 type Repository interface {
@@ -75,18 +75,18 @@ var (
 )
 
 type MemoryRepository struct {
-	mu           sync.Mutex
+	mu            sync.Mutex
 	conversations map[string]Conversation
-	messages     map[string][]Message
-	drafts       map[string]NeedDraft
-	events       []event.DomainEvent
+	messages      map[string][]Message
+	drafts        map[string]NeedDraft
+	events        []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
 		conversations: make(map[string]Conversation),
-		messages:     make(map[string][]Message),
-		drafts:       make(map[string]NeedDraft),
+		messages:      make(map[string][]Message),
+		drafts:        make(map[string]NeedDraft),
 	}
 }
 
@@ -242,12 +242,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 // 同一个 Post 被不同用户发起 DM 时 Conversation 独立。
 
 type startConversationPayload struct {
-	ConversationType string   `json:"conversationType"`
-	OriginType       string   `json:"originType"`
-	OriginID         string   `json:"originId"`
-	ParticipantID    string   `json:"participantId"`
-	MarketID         string   `json:"marketId"`
-	FirstMessage     string   `json:"firstMessage"`
+	ConversationType string `json:"conversationType"`
+	OriginType       string `json:"originType"`
+	OriginID         string `json:"originId"`
+	ParticipantID    string `json:"participantId"`
+	MarketID         string `json:"marketId"`
+	FirstMessage     string `json:"firstMessage"`
 }
 
 func (s *Service) startConversation(ctx context.Context, e command.Envelope) command.Result {
@@ -277,10 +277,10 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		LastMessageAt: s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("ConversationStarted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, conv.CreatedAt, map[string]any{
-		"originType": conv.OriginType,
-		"originId":   conv.OriginID,
+		"originType":   conv.OriginType,
+		"originId":     conv.OriginID,
 		"participants": conv.Participants,
-		"note":       "Conversation 必须保存来源；同一 Post 不同用户发起 DM 时 Conversation 独立",
+		"note":         "Conversation 必须保存来源；同一 Post 不同用户发起 DM 时 Conversation 独立",
 	})}
 	if err := s.repository.CreateConversation(ctx, conv); err != nil {
 		return command.Rejected(e, "CONVERSATION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.create_failed", nil)
@@ -362,11 +362,21 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 // ---------- ListConversationMessages ----------
 
 func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.Result {
+	conv, err := s.repository.GetConversation(ctx, e.Target.ID)
+	if errors.Is(err, ErrConversationNotFound) {
+		return command.Rejected(e, "CONVERSATION_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	if !isParticipant(conv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
 	messages, err := s.repository.Messages(ctx, e.Target.ID)
 	if err != nil {
 		return command.Rejected(e, "MESSAGE_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
 	}
-	return acceptedWithPayload(e, "Conversation", e.Target.ID, 1, "ACTIVE", map[string]any{
+	return acceptedWithPayload(e, "Conversation", e.Target.ID, 1, conv.State, map[string]any{
 		"messages": messages,
 	}, nil)
 }
@@ -390,6 +400,9 @@ func (s *Service) createNeedDraft(ctx context.Context, e command.Envelope) comma
 	if err != nil {
 		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
 	}
+	if !isParticipant(conv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
 	draft := NeedDraft{
 		DraftID:        newID("nd_"),
 		ConversationID: conv.ID,
@@ -398,15 +411,15 @@ func (s *Service) createNeedDraft(ctx context.Context, e command.Envelope) comma
 		CreatedAt:      s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("NeedDraftCreated", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, draft.CreatedAt, map[string]any{
-		"draftId":  draft.DraftID,
-		"summary":  draft.Summary,
-		"note":     "Need Draft 不是正式 Need；用户明确确认后才产生正式 Need",
+		"draftId": draft.DraftID,
+		"summary": draft.Summary,
+		"note":    "Need Draft 不是正式 Need；用户明确确认后才产生正式 Need",
 	})}
 	if err := s.repository.SaveNeedDraft(ctx, draft); err != nil {
 		return command.Rejected(e, "NEED_DRAFT_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.need_draft_failed", nil)
 	}
 	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, map[string]any{
-		"draftId": draft.DraftID,
+		"draftId":   draft.DraftID,
 		"confirmed": false,
 	}, domainEvents)
 }
@@ -432,8 +445,14 @@ func (s *Service) confirmNeedDraft(ctx context.Context, e command.Envelope) comm
 		return command.Rejected(e, "NEED_DRAFT_ALREADY_CONFIRMED", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.draft_already_confirmed", nil)
 	}
 	conv, err := s.repository.GetConversation(ctx, draft.ConversationID)
+	if errors.Is(err, ErrConversationNotFound) {
+		return command.Rejected(e, "CONVERSATION_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.not_found", nil)
+	}
 	if err != nil {
 		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	if !isParticipant(conv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
 	}
 	needID := newID("need_")
 	draft.Confirmed = true
@@ -442,14 +461,14 @@ func (s *Service) confirmNeedDraft(ctx context.Context, e command.Envelope) comm
 		return command.Rejected(e, "NEED_DRAFT_CONFIRM_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.draft_confirm_failed", nil)
 	}
 	domainEvents := []event.DomainEvent{event.New("NeedConfirmedFromConversation", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
-		"needId":  needID,
-		"draftId": draft.DraftID,
+		"needId":     needID,
+		"draftId":    draft.DraftID,
 		"originType": conv.OriginType,
 		"originId":   conv.OriginID,
-		"note":     "Need 生成后 Conversation 不丢失；origin 保留",
+		"note":       "Need 生成后 Conversation 不丢失；origin 保留",
 	})}
 	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, map[string]any{
-		"needId":  needID,
+		"needId":    needID,
 		"confirmed": true,
 	}, domainEvents)
 }

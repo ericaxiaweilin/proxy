@@ -317,9 +317,9 @@ func (r *SupplyRepository) SaveCandidateBatchAndPublish(ctx context.Context, b s
 			return err
 		}
 		if _, err := transaction.Exec(ctx, `
-			INSERT INTO supply.candidate_batches (id, need_id, market_id, created_at, candidates, shortage, shortage_note)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			b.ID, b.NeedID, b.MarketID, b.CreatedAt, candidates, b.Shortage, b.ShortageNote,
+			INSERT INTO supply.candidate_batches (id, need_id, market_id, owner_principal_id, created_at, candidates, shortage, shortage_note)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			b.ID, b.NeedID, b.MarketID, b.OwnerPrincipalID, b.CreatedAt, candidates, b.Shortage, b.ShortageNote,
 		); err != nil {
 			return err
 		}

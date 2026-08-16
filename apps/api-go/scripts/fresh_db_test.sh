@@ -26,7 +26,7 @@ psql -d postgres -c "CREATE DATABASE $FRESH_DB OWNER proxy;" > /dev/null
 echo "空库已创建"
 
 echo "=== 2. 按顺序跑迁移 ==="
-for f in 001_r14_schema.sql 002_identity_demand.sql 003_integration.sql 004_supply.sql 005_media.sql 006_contribution.sql 007_interaction_events.sql; do
+for f in 001_r14_schema.sql 002_identity_demand.sql 003_integration.sql 004_supply.sql 005_media.sql 006_contribution.sql 007_interaction_events.sql 008_security_hardening.sql; do
   echo "--- $f ---"
   psql -h localhost -U proxy -d $FRESH_DB -f "$MIGRATIONS/$f" > /dev/null
   echo "OK"

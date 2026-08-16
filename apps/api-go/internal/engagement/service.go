@@ -81,21 +81,21 @@ type Repository interface {
 var ErrPostNotTracked = errors.New("post not tracked")
 
 type MemoryRepository struct {
-	mu       sync.Mutex
-	follows  map[string]Follow
+	mu        sync.Mutex
+	follows   map[string]Follow
 	reactions map[string]Reaction
-	replies  map[string]Reply
-	reposts  map[string]Repost
+	replies   map[string]Reply
+	reposts   map[string]Repost
 	bookmarks map[string]Bookmark
-	events   []event.DomainEvent
+	events    []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		follows:  make(map[string]Follow),
+		follows:   make(map[string]Follow),
 		reactions: make(map[string]Reaction),
-		replies:  make(map[string]Reply),
-		reposts:  make(map[string]Repost),
+		replies:   make(map[string]Reply),
+		reposts:   make(map[string]Repost),
 		bookmarks: make(map[string]Bookmark),
 	}
 }

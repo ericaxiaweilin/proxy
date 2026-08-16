@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -12,11 +13,11 @@ import (
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/contribution"
-	"github.com/proxy-app/proxy-api/internal/demand"
-	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/conversation"
+	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/media"
@@ -24,22 +25,24 @@ import (
 )
 
 type Server struct {
-	Identity        *identity.Service
-	Demand          *demand.Service
-	CityCompanion   *citycompanion.Service
-	LocalNet        *localnet.Service
-	LocalContext    *localcontext.Service
-	Conversation    *conversation.Service
-	Engagement      *engagement.Service
-	Fulfillment     *fulfillment.Service
-	Supply          *supply.Service
-	Media           *media.Service
-	Contribution    *contribution.Service
-	Idempotency     command.IdempotencyStore
-	Authenticator   Authenticator
-	ReadyCheck      func(context.Context) error
-	ReadyMode       string
-	Transactions    TransactionRunner
+	Identity      *identity.Service
+	Demand        *demand.Service
+	CityCompanion *citycompanion.Service
+	LocalNet      *localnet.Service
+	LocalContext  *localcontext.Service
+	Conversation  *conversation.Service
+	Engagement    *engagement.Service
+	Fulfillment   *fulfillment.Service
+	Supply        *supply.Service
+	Media         *media.Service
+	Contribution  *contribution.Service
+	Idempotency   command.IdempotencyStore
+	Authenticator Authenticator
+	ReadyCheck    func(context.Context) error
+	ReadyMode     string
+	Transactions  TransactionRunner
+	Operator      OperatorGate
+	RateLimit     *RateLimiter
 }
 
 type Authenticator interface {
@@ -73,7 +76,7 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if readyCheck != nil {
 		readyMode = "configured"
 	}
-	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions}
+	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -81,7 +84,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health/live", s.live)
 	mux.HandleFunc("/health/ready", s.ready)
 	mux.HandleFunc("/v1/commands/", s.command)
-	return mux
+	return s.recoverMiddleware(mux)
+}
+
+// recoverMiddleware keeps a panic inside any command handler from crashing the
+// whole API process (a malformed upload must not take down the service).
+func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal_error"})
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) live(w http.ResponseWriter, _ *http.Request) {
@@ -131,6 +147,13 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		writeResult(w, http.StatusBadRequest, *result)
 		return
 	}
+	// Pre-auth per-IP rate limit: protects authentication and every command
+	// route from brute force (also bounds OTP challenge requests).
+	if !s.rateAllow("ip:" + clientIP(r) + ":" + envelope.CommandType) {
+		result := command.Rejected(envelope, "RATE_LIMITED", "RESOURCE", "SAFE_RETRY", "command.rate_limited", nil)
+		writeResult(w, http.StatusTooManyRequests, result)
+		return
+	}
 	if requiresAuthentication(envelope.CommandType) {
 		if s.Authenticator == nil {
 			result := command.Rejected(envelope, "AUTHENTICATION_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "command.authentication_unavailable", nil)
@@ -149,11 +172,27 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 			writeResult(w, http.StatusUnauthorized, result)
 			return
 		}
-		// The App may send actor/principal as a UI hint, but the server-owned
+		// The App may send actor/principal as a UI hint, but the server owned
 		// session is authoritative for command scope and idempotency.
 		envelope.Actor = authenticated.Actor
 		envelope.Principal = authenticated.Principal
 		envelope.AuthContext = authenticated.AuthContext
+		// Privileged commands (capability verification, contribution review /
+		// reward, media readiness override) require operator rights. Fail closed.
+		if requiresOperator(envelope.CommandType) {
+			if s.Operator == nil || !s.Operator.IsOperator(envelope.Actor, envelope.Principal, envelope.AuthContext) {
+				result := command.Rejected(envelope, "OPERATOR_PRIVILEGE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "command.operator_privilege_required", nil)
+				writeResult(w, http.StatusForbidden, result)
+				return
+			}
+		}
+		// Per-actor rate limit on top of the IP limit: rotating idempotency
+		// keys must not allow unbounded command volume per session.
+		if !s.rateAllow("actor:" + envelope.Actor.Type + ":" + envelope.Actor.ID + ":" + envelope.CommandType) {
+			result := command.Rejected(envelope, "RATE_LIMITED", "RESOURCE", "SAFE_RETRY", "command.rate_limited", nil)
+			writeResult(w, http.StatusTooManyRequests, result)
+			return
+		}
 	}
 
 	result, status, err := s.executeCommand(r.Context(), envelope)
@@ -210,6 +249,12 @@ func (s *Server) executeCommand(ctx context.Context, envelope command.Envelope) 
 	} else {
 		err = operation(ctx)
 	}
+	if err != nil {
+		// Dispatch/transaction failed: release the inflight idempotency claim
+		// so the key does not stay IN_PROGRESS forever (best effort; the
+		// transactional store may have rolled the claim back already).
+		_ = s.Idempotency.Release(context.WithoutCancel(ctx), scope, envelope.IdempotencyKey, fingerprint)
+	}
 	return result, status, err
 }
 
@@ -261,6 +306,26 @@ func bearerToken(header string) (string, bool) {
 		return "", false
 	}
 	return parts[1], true
+}
+
+func (s *Server) rateAllow(scope string) bool {
+	if s.RateLimit == nil {
+		return true
+	}
+	return s.RateLimit.Allow(scope, time.Now())
+}
+
+func clientIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		first, _, _ := strings.Cut(forwarded, ",")
+		if first = strings.TrimSpace(first); first != "" {
+			return first
+		}
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func validateEnvelope(envelope command.Envelope, routeCommandType string) *command.Result {

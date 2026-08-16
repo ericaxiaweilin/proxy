@@ -49,8 +49,8 @@ type ExactLocationGrant struct {
 
 // Market 是市场目录（P0 演示标签，不冻结正式市场）。
 type Market struct {
-	MarketID    string   `json:"marketId"`
-	MarketLabel string   `json:"marketLabel"`
+	MarketID    string       `json:"marketId"`
+	MarketLabel string       `json:"marketLabel"`
 	Areas       []MarketArea `json:"areas"`
 }
 
@@ -83,9 +83,9 @@ type Repository interface {
 var ErrContextNotFound = errors.New("local context not found")
 
 type MemoryRepository struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
 	contexts map[string]LocalContext
-	events  []event.DomainEvent
+	events   []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {

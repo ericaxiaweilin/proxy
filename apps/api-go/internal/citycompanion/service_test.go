@@ -9,18 +9,18 @@ import (
 
 func envelopeFor(needID, commandType string, payload map[string]any) command.Envelope {
 	return command.Envelope{
-		CommandID:       "cmd_test_1",
-		CommandType:     commandType,
-		CommandVersion:  1,
-		Actor:           command.Actor{Type: "USER", ID: "user_001"},
-		Principal:       command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
-		Target:          command.Target{Type: "CityCompanionNeed", ID: needID},
-		IdempotencyKey:  "test_key_123456",
-		AuthContext:     map[string]any{"session": "s1"},
-		Purpose:         "test",
-		CorrelationID:   "corr_1",
-		RequestedAt:     "2026-08-16T00:00:00Z",
-		Payload:         payload,
+		CommandID:      "cmd_test_1",
+		CommandType:    commandType,
+		CommandVersion: 1,
+		Actor:          command.Actor{Type: "USER", ID: "user_001"},
+		Principal:      command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
+		Target:         command.Target{Type: "CityCompanionNeed", ID: needID},
+		IdempotencyKey: "test_key_123456",
+		AuthContext:    map[string]any{"session": "s1"},
+		Purpose:        "test",
+		CorrelationID:  "corr_1",
+		RequestedAt:    "2026-08-16T00:00:00Z",
+		Payload:        payload,
 	}
 }
 

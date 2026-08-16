@@ -29,32 +29,32 @@ import (
 
 // MediaAsset 是媒体资产（IMAGE | VIDEO）。
 type MediaAsset struct {
-	MediaAssetID       string    `json:"mediaAssetId"`
-	OwnerPrincipalType string    `json:"ownerPrincipalType"`
-	OwnerPrincipalID   string    `json:"ownerPrincipalId"`
-	MediaType          string    `json:"mediaType"` // IMAGE | VIDEO
-	OriginalStorageKey string    `json:"originalStorageKey"`
-	PlaybackStorageKey string    `json:"playbackStorageKey,omitempty"`
-	ThumbnailStorageKey string   `json:"thumbnailStorageKey,omitempty"`
-	MimeType           string    `json:"mimeType,omitempty"`
-	Width              int       `json:"width,omitempty"`
-	Height             int       `json:"height,omitempty"`
-	DurationMs         int64     `json:"durationMs,omitempty"`
-	Codec              string    `json:"codec,omitempty"`
-	ProcessingStatus   string    `json:"processingStatus"` // UPLOADING | PROCESSING | READY | FAILED
-	PlaybackURL        string    `json:"playbackUrl,omitempty"`
-	ThumbnailURL       string    `json:"thumbnailUrl,omitempty"`
-	CreatedAt          time.Time `json:"createdAt"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	MediaAssetID        string    `json:"mediaAssetId"`
+	OwnerPrincipalType  string    `json:"ownerPrincipalType"`
+	OwnerPrincipalID    string    `json:"ownerPrincipalId"`
+	MediaType           string    `json:"mediaType"` // IMAGE | VIDEO
+	OriginalStorageKey  string    `json:"originalStorageKey"`
+	PlaybackStorageKey  string    `json:"playbackStorageKey,omitempty"`
+	ThumbnailStorageKey string    `json:"thumbnailStorageKey,omitempty"`
+	MimeType            string    `json:"mimeType,omitempty"`
+	Width               int       `json:"width,omitempty"`
+	Height              int       `json:"height,omitempty"`
+	DurationMs          int64     `json:"durationMs,omitempty"`
+	Codec               string    `json:"codec,omitempty"`
+	ProcessingStatus    string    `json:"processingStatus"` // UPLOADING | PROCESSING | READY | FAILED
+	PlaybackURL         string    `json:"playbackUrl,omitempty"`
+	ThumbnailURL        string    `json:"thumbnailUrl,omitempty"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
 // VideoMetadata 是 ffprobe 输出（时长/分辨率/codec/rotation）。
 type VideoMetadata struct {
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
 	DurationMs int64  `json:"durationMs"`
-	Codec     string `json:"codec"`
-	HasAudio  bool   `json:"hasAudio"`
+	Codec      string `json:"codec"`
+	HasAudio   bool   `json:"hasAudio"`
 }
 
 // Processor 是媒体处理链接口（worker 实现，dev 用本地 ffmpeg）。
@@ -65,9 +65,9 @@ type Processor interface {
 
 // ProcessResult 是处理结果。
 type ProcessResult struct {
-	PlaybackStorageKey string
+	PlaybackStorageKey  string
 	ThumbnailStorageKey string
-	Metadata           VideoMetadata
+	Metadata            VideoMetadata
 }
 
 type Repository interface {
@@ -78,7 +78,7 @@ type Repository interface {
 }
 
 var (
-	ErrAssetNotFound = errors.New("media asset not found")
+	ErrAssetNotFound    = errors.New("media asset not found")
 	ErrStatusTransition = errors.New("invalid status transition")
 )
 
@@ -211,15 +211,15 @@ func (s *Service) createAsset(ctx context.Context, e command.Envelope) command.R
 	}
 	now := s.clock.Now().UTC()
 	asset := MediaAsset{
-		MediaAssetID:        newID("ma_"),
-		OwnerPrincipalType:  e.Principal.Type,
-		OwnerPrincipalID:    e.Principal.ID,
-		MediaType:           p.MediaType,
-		OriginalStorageKey:  p.OriginalStorageKey,
-		MimeType:            p.MimeType,
-		ProcessingStatus:    "UPLOADING",
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		MediaAssetID:       newID("ma_"),
+		OwnerPrincipalType: e.Principal.Type,
+		OwnerPrincipalID:   e.Principal.ID,
+		MediaType:          p.MediaType,
+		OriginalStorageKey: p.OriginalStorageKey,
+		MimeType:           p.MimeType,
+		ProcessingStatus:   "UPLOADING",
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	domainEvents := []event.DomainEvent{event.New("MediaAssetCreated", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"mediaType": p.MediaType,
@@ -254,6 +254,9 @@ func (s *Service) completeUpload(ctx context.Context, e command.Envelope) comman
 	if err != nil {
 		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
 	}
+	if asset.OwnerPrincipalID != e.Principal.ID {
+		return command.Rejected(e, "MEDIA_NOT_OWNER", "AUTHORIZATION", "AFTER_USER_ACTION", "media.not_owner", nil)
+	}
 	if asset.ProcessingStatus != "UPLOADING" {
 		return command.Rejected(e, "MEDIA_NOT_UPLOADING", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_uploading", map[string]any{"status": asset.ProcessingStatus})
 	}
@@ -284,12 +287,20 @@ func (s *Service) processAsset(ctx context.Context, e command.Envelope) command.
 	if !decode(e.Payload, &p) {
 		return command.Rejected(e, "INVALID_PROCESS_REQUEST", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_process", nil)
 	}
+	// ffmpeg 支持 http:// / concat: / subfile: 等协议输入：客户端可控路径不做
+	// 收敛会变成任意文件读取 + SSRF。只接受本地普通文件路径。
+	if p.OriginalPath != "" && !isSafeLocalPath(p.OriginalPath) {
+		return command.Rejected(e, "UNSAFE_MEDIA_PATH", "VALIDATION", "AFTER_USER_ACTION", "media.unsafe_path", nil)
+	}
 	asset, err := s.repository.GetAsset(ctx, e.Target.ID)
 	if errors.Is(err, ErrAssetNotFound) {
 		return command.Rejected(e, "MEDIA_ASSET_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.asset_not_found", nil)
 	}
 	if err != nil {
 		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
+	}
+	if asset.OwnerPrincipalID != e.Principal.ID {
+		return command.Rejected(e, "MEDIA_NOT_OWNER", "AUTHORIZATION", "AFTER_USER_ACTION", "media.not_owner", nil)
 	}
 	if asset.ProcessingStatus != "PROCESSING" {
 		return command.Rejected(e, "MEDIA_NOT_PROCESSING", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_processing", map[string]any{"status": asset.ProcessingStatus})
@@ -367,19 +378,20 @@ func (s *Service) processAsset(ctx context.Context, e command.Envelope) command.
 		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
 	}
 	return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, "READY", map[string]any{
-		"mediaAssetId":   asset.MediaAssetID,
-		"playbackUrl":    asset.PlaybackURL,
-		"thumbnailUrl":   asset.ThumbnailURL,
-		"durationMs":     asset.DurationMs,
-		"width":          asset.Width,
-		"height":         asset.Height,
-		"codec":          asset.Codec,
+		"mediaAssetId":     asset.MediaAssetID,
+		"playbackUrl":      asset.PlaybackURL,
+		"thumbnailUrl":     asset.ThumbnailURL,
+		"durationMs":       asset.DurationMs,
+		"width":            asset.Width,
+		"height":           asset.Height,
+		"codec":            asset.Codec,
 		"processingStatus": "READY",
 	}, domainEvents)
 }
 
 // ---------- MarkMediaReady ----------
-// 手动标 READY（外部 worker 已处理完的场景）。
+// 手动标 READY（外部 worker 已处理完的场景）。API 边界已将其限定为 operator
+// 命令；这里仍坚持 PROCESSING 前置，禁止从 UPLOADING 直接跳过处理链。
 
 type markReadyPayload struct {
 	PlaybackStorageKey  string `json:"playbackStorageKey"`
@@ -392,6 +404,9 @@ type markReadyPayload struct {
 
 func (s *Service) markReady(ctx context.Context, e command.Envelope) command.Result {
 	var p markReadyPayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_MARK_READY", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_mark_ready", nil)
+	}
 	asset, err := s.repository.GetAsset(ctx, e.Target.ID)
 	if errors.Is(err, ErrAssetNotFound) {
 		return command.Rejected(e, "MEDIA_ASSET_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.asset_not_found", nil)
@@ -399,7 +414,8 @@ func (s *Service) markReady(ctx context.Context, e command.Envelope) command.Res
 	if err != nil {
 		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
 	}
-	if asset.ProcessingStatus != "PROCESSING" && asset.ProcessingStatus != "UPLOADING" {
+	expectedStatus := asset.ProcessingStatus
+	if expectedStatus != "PROCESSING" {
 		return command.Rejected(e, "MEDIA_NOT_PROCESSABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_processable", map[string]any{"status": asset.ProcessingStatus})
 	}
 	asset.ProcessingStatus = "READY"
@@ -419,13 +435,14 @@ func (s *Service) markReady(ctx context.Context, e command.Envelope) command.Res
 	domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
 		"status": "READY", "mediaType": asset.MediaType,
 	})}
-	if err := s.repository.UpdateAsset(ctx, asset, asset.ProcessingStatus); err != nil {
+	if err := s.repository.UpdateAsset(ctx, asset, expectedStatus); err != nil {
 		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
 	}
 	return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, "READY", eventRefs(domainEvents))
 }
 
 // ---------- GetMediaAsset / ListMediaAssets ----------
+// 只能读自己名下的资产：storage key / URL 是敏感数据，不得跨 principal 泄露。
 
 func (s *Service) getAsset(ctx context.Context, e command.Envelope) command.Result {
 	assetID := e.Target.ID
@@ -445,8 +462,11 @@ func (s *Service) getAsset(ctx context.Context, e command.Envelope) command.Resu
 	if err != nil {
 		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
 	}
+	if asset.OwnerPrincipalID != e.Principal.ID {
+		return command.Rejected(e, "MEDIA_NOT_OWNER", "AUTHORIZATION", "AFTER_USER_ACTION", "media.not_owner", nil)
+	}
 	return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, asset.ProcessingStatus, map[string]any{
-		"asset": asset,
+		"asset":    asset,
 		"playable": asset.ProcessingStatus == "READY", // 只有 READY 可正式播放
 	}, nil)
 }
@@ -456,8 +476,14 @@ func (s *Service) listAssets(ctx context.Context, e command.Envelope) command.Re
 	if err != nil {
 		return command.Rejected(e, "MEDIA_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "media.list_failed", nil)
 	}
+	owned := make([]MediaAsset, 0, len(assets))
+	for _, asset := range assets {
+		if asset.OwnerPrincipalID == e.Principal.ID {
+			owned = append(owned, asset)
+		}
+	}
 	return acceptedWithPayload(e, "MediaAsset", "", 1, "LIST", map[string]any{
-		"assets": assets,
+		"assets": owned,
 	}, nil)
 }
 
@@ -476,6 +502,9 @@ func NewFFmpegProcessor(storeDir string) *FFmpegProcessor {
 func (p *FFmpegProcessor) Process(ctx context.Context, originalPath string) (ProcessResult, error) {
 	if originalPath == "" {
 		return ProcessResult{}, errors.New("original path required")
+	}
+	if !isSafeLocalPath(originalPath) {
+		return ProcessResult{}, errors.New("original path must be a plain local file path")
 	}
 	if p.StoreDir == "" {
 		p.StoreDir = filepath.Join(".", "media_store")
@@ -558,7 +587,7 @@ func transcode(ctx context.Context, input, output string) error {
 		output}
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return errors.New("ffmpeg transcode failed: " + strings.TrimSpace(string(out))[:min(len(out), 200)])
+		return errors.New("ffmpeg transcode failed: " + clippedOutput(out))
 	}
 	return nil
 }
@@ -568,9 +597,34 @@ func makeThumbnail(ctx context.Context, input, output string) error {
 	args := []string{"-y", "-i", input, "-ss", "1", "-vframes", "1", "-vf", "scale=480:-2", output}
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return errors.New("thumbnail failed: " + strings.TrimSpace(string(out))[:min(len(out), 200)])
+		return errors.New("thumbnail failed: " + clippedOutput(out))
 	}
 	return nil
+}
+
+// clippedOutput 截取 ffmpeg/ffprobe 错误输出前 200 字节。
+// 注意：必须在 TrimSpace 之后再按 trim 后长度截断，否则越界 panic。
+func clippedOutput(out []byte) string {
+	tail := strings.TrimSpace(string(out))
+	if len(tail) > 200 {
+		tail = tail[:200]
+	}
+	return tail
+}
+
+// isSafeLocalPath 拒绝 ffmpeg 协议输入（http:// / concat: / subfile: / data: 等），
+// 避免客户端可控路径变成任意文件读取 / SSRF。
+func isSafeLocalPath(path string) bool {
+	if strings.Contains(path, "://") {
+		return false
+	}
+	lower := strings.ToLower(path)
+	for _, prefix := range []string{"concat:", "subfile:", "data:", "file:", "lavfi:", "color:", "null:"} {
+		if strings.HasPrefix(lower, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 // probeImage 用 ffprobe 读图片宽高（IMAGE 资产提供 aspect_ratio）。
@@ -600,13 +654,6 @@ func probeImage(ctx context.Context, path string) (VideoMetadata, error) {
 		}
 	}
 	return meta, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // ---------- helpers ----------

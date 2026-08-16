@@ -24,9 +24,12 @@ type IdempotencyRecord struct {
 
 // IdempotencyStore owns the claim/complete boundary for externally retryable
 // commands. Implementations must make Begin atomic across API instances.
+// Release frees an inflight claim when dispatch fails so the key is not
+// permanently stuck IN_PROGRESS.
 type IdempotencyStore interface {
 	Begin(ctx context.Context, scope, key, fingerprint string) (IdempotencyDecision, *IdempotencyRecord, error)
 	Complete(ctx context.Context, scope, key string, record IdempotencyRecord) error
+	Release(ctx context.Context, scope, key, fingerprint string) error
 }
 
 type MemoryIdempotencyStore struct {
@@ -73,6 +76,16 @@ func (s *MemoryIdempotencyStore) Complete(_ context.Context, scope, key string, 
 	}
 	delete(s.inflight, storeKey)
 	s.records[storeKey] = record
+	return nil
+}
+
+func (s *MemoryIdempotencyStore) Release(_ context.Context, scope, key, fingerprint string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	storeKey := idempotencyStoreKey(scope, key)
+	if current, exists := s.inflight[storeKey]; exists && current == fingerprint {
+		delete(s.inflight, storeKey)
+	}
 	return nil
 }
 

@@ -27,11 +27,11 @@ import (
 
 // ContributionType 是 P0 支持的贡献类型。
 var ValidContributionTypes = map[string]bool{
-	"MERCHANT_REFERRAL": true,
-	"DRIVER_REFERRAL":   true,
-	"AGENT_REFERRAL":    true,
+	"MERCHANT_REFERRAL":  true,
+	"DRIVER_REFERRAL":    true,
+	"AGENT_REFERRAL":     true,
 	"REQUESTER_REFERRAL": true,
-	"VENUE_DISCOVERY":   true,
+	"VENUE_DISCOVERY":    true,
 }
 
 // Contribution 状态机（PRD §7）。
@@ -43,37 +43,37 @@ var ContributionStates = map[string]bool{
 
 // NetworkContribution 是网络贡献（Canonical，PRD §7）。
 type NetworkContribution struct {
-	ContributionID          string    `json:"contributionId"`
-	ContributorPrincipalID  string    `json:"contributorPrincipalId"`
-	ContributionType        string    `json:"contributionType"`
-	CampaignID              string    `json:"campaignId,omitempty"`
-	TargetType              string    `json:"targetType"` // MERCHANT | DRIVER | AGENT | REQUESTER | VENUE
-	TargetID                string    `json:"targetId,omitempty"`
-	ReferralInviteID        string    `json:"referralInviteId,omitempty"`
-	AttributionID           string    `json:"attributionId"`
-	State                   string    `json:"state"`
-	SubmittedAt             time.Time `json:"submittedAt"`
-	QualifiedAt             *time.Time `json:"qualifiedAt,omitempty"`
-	ActivatedAt             *time.Time `json:"activatedAt,omitempty"`
-	ValueCreatedAt          *time.Time `json:"valueCreatedAt,omitempty"`
-	RewardedAt              *time.Time `json:"rewardedAt,omitempty"`
-	RejectReason            string    `json:"rejectReason,omitempty"`
-	ReviewAccess            string    `json:"reviewAccess,omitempty"`  // PASSED | FAILED | PENDING
-	ReviewDomain            string    `json:"reviewDomain,omitempty"`  // PASSED | FAILED | PENDING
-	ReviewRewardGate        string    `json:"reviewRewardGate,omitempty"` // PASSED | FAILED | PENDING
-	RewardVND               int64     `json:"rewardVnd,omitempty"`
+	ContributionID         string     `json:"contributionId"`
+	ContributorPrincipalID string     `json:"contributorPrincipalId"`
+	ContributionType       string     `json:"contributionType"`
+	CampaignID             string     `json:"campaignId,omitempty"`
+	TargetType             string     `json:"targetType"` // MERCHANT | DRIVER | AGENT | REQUESTER | VENUE
+	TargetID               string     `json:"targetId,omitempty"`
+	ReferralInviteID       string     `json:"referralInviteId,omitempty"`
+	AttributionID          string     `json:"attributionId"`
+	State                  string     `json:"state"`
+	SubmittedAt            time.Time  `json:"submittedAt"`
+	QualifiedAt            *time.Time `json:"qualifiedAt,omitempty"`
+	ActivatedAt            *time.Time `json:"activatedAt,omitempty"`
+	ValueCreatedAt         *time.Time `json:"valueCreatedAt,omitempty"`
+	RewardedAt             *time.Time `json:"rewardedAt,omitempty"`
+	RejectReason           string     `json:"rejectReason,omitempty"`
+	ReviewAccess           string     `json:"reviewAccess,omitempty"`     // PASSED | FAILED | PENDING
+	ReviewDomain           string     `json:"reviewDomain,omitempty"`     // PASSED | FAILED | PENDING
+	ReviewRewardGate       string     `json:"reviewRewardGate,omitempty"` // PASSED | FAILED | PENDING
+	RewardVND              int64      `json:"rewardVnd,omitempty"`
 }
 
 // ReferralInvite 是邀请（PRD §8：Invite/QR/deep link 只是 Attribution 入口，不是 Reward Truth）。
 type ReferralInvite struct {
-	ReferralInviteID       string    `json:"referralInviteId"`
-	ContributorPrincipalID string    `json:"contributorPrincipalId"`
-	CampaignID             string    `json:"campaignId,omitempty"`
-	InviteCode             string    `json:"inviteCode"`
-	ContributionType       string    `json:"contributionType"`
-	CreatedAt              time.Time `json:"createdAt"`
+	ReferralInviteID       string     `json:"referralInviteId"`
+	ContributorPrincipalID string     `json:"contributorPrincipalId"`
+	CampaignID             string     `json:"campaignId,omitempty"`
+	InviteCode             string     `json:"inviteCode"`
+	ContributionType       string     `json:"contributionType"`
+	CreatedAt              time.Time  `json:"createdAt"`
 	ExpiresAt              *time.Time `json:"expiresAt,omitempty"`
-	State                  string    `json:"state"` // ACTIVE | USED | EXPIRED
+	State                  string     `json:"state"` // ACTIVE | USED | EXPIRED
 }
 
 type Repository interface {
@@ -83,6 +83,10 @@ type Repository interface {
 	CreateInvite(ctx context.Context, i ReferralInvite) error
 	GetInvite(ctx context.Context, id string) (ReferralInvite, error)
 	UpdateInviteState(ctx context.Context, id, state string) error
+	// ConsumeInvite atomically flips an invite ACTIVE → USED. It fails with
+	// ErrInviteNotActive when the invite is missing or already consumed, which
+	// prevents concurrent double-consumption of the same invite.
+	ConsumeInvite(ctx context.Context, id string) error
 	FindByTarget(ctx context.Context, contributionType, targetType, targetID string) (NetworkContribution, error)
 	ContributionsBy(ctx context.Context, contributorID string) ([]NetworkContribution, error)
 	InvitesBy(ctx context.Context, contributorID string) ([]ReferralInvite, error)
@@ -92,10 +96,15 @@ type Repository interface {
 var (
 	ErrContributionNotFound = errors.New("contribution not found")
 	ErrInviteNotFound       = errors.New("invite not found")
+	ErrInviteNotActive      = errors.New("invite not active")
 	ErrDuplicateTarget      = errors.New("duplicate target")
 	ErrSelfReferral         = errors.New("self referral not allowed")
 	ErrInvalidState         = errors.New("invalid state transition")
 )
+
+// maxRewardVND caps a single contribution reward (fail-closed against
+// operator misuse / client-inflated amounts entering the Ledger).
+const maxRewardVND = 100_000_000
 
 type MemoryRepository struct {
 	mu            sync.Mutex
@@ -170,6 +179,21 @@ func (r *MemoryRepository) UpdateInviteState(_ context.Context, id, state string
 		return ErrInviteNotFound
 	}
 	i.State = state
+	r.invites[id] = i
+	return nil
+}
+
+func (r *MemoryRepository) ConsumeInvite(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	i, exists := r.invites[id]
+	if !exists {
+		return ErrInviteNotFound
+	}
+	if i.State != "ACTIVE" {
+		return ErrInviteNotActive
+	}
+	i.State = "USED"
 	r.invites[id] = i
 	return nil
 }
@@ -307,9 +331,9 @@ func (s *Service) createInvite(ctx context.Context, e command.Envelope) command.
 		State:                  "ACTIVE",
 	}
 	domainEvents := []event.DomainEvent{event.New("ReferralInviteCreated", "ReferralInvite", invite.ReferralInviteID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"inviteCode": invite.InviteCode,
+		"inviteCode":       invite.InviteCode,
 		"contributionType": p.ContributionType,
-		"note":       "Invite 只是 Attribution 入口，不是 Reward Truth",
+		"note":             "Invite 只是 Attribution 入口，不是 Reward Truth",
 	})}
 	if err := s.repository.CreateInvite(ctx, invite); err != nil {
 		return command.Rejected(e, "INVITE_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "contribution.invite_failed", nil)
@@ -325,11 +349,11 @@ func (s *Service) createInvite(ctx context.Context, e command.Envelope) command.
 // PRD §9：Discover → SUBMITTED；防 self-referral / duplicate target / prior valid attribution。
 
 type submitPayload struct {
-	ContributionType string `json:"contributionType"`
-	CampaignID       string `json:"campaignId"`
-	TargetType       string `json:"targetType"`
-	TargetID         string `json:"targetId"`
-	ReferralInviteID string `json:"referralInviteId"`
+	ContributionType  string `json:"contributionType"`
+	CampaignID        string `json:"campaignId"`
+	TargetType        string `json:"targetType"`
+	TargetID          string `json:"targetId"`
+	ReferralInviteID  string `json:"referralInviteId"`
 	TargetPrincipalID string `json:"targetPrincipalId"` // 被推荐人（self-referral 检查）
 }
 
@@ -340,6 +364,10 @@ func (s *Service) submitContribution(ctx context.Context, e command.Envelope) co
 	}
 	if !ValidContributionTypes[p.ContributionType] {
 		return command.Rejected(e, "INVALID_CONTRIBUTION_TYPE", "VALIDATION", "AFTER_USER_ACTION", "contribution.invalid_type", map[string]any{"type": p.ContributionType})
+	}
+	// REFERRAL 类必须显式提供被推荐人：缺省时无法做 self-referral 判定，fail-closed 拒绝。
+	if strings.HasSuffix(p.ContributionType, "_REFERRAL") && p.TargetPrincipalID == "" {
+		return command.Rejected(e, "TARGET_PRINCIPAL_REQUIRED", "VALIDATION", "AFTER_USER_ACTION", "contribution.target_principal_required", nil)
 	}
 	// 防 self-referral：被推荐人不能是贡献者自己
 	if p.TargetPrincipalID != "" && p.TargetPrincipalID == e.Principal.ID {
@@ -388,12 +416,18 @@ func (s *Service) submitContribution(ctx context.Context, e command.Envelope) co
 		"targetType":       p.TargetType,
 		"note":             "状态只能由 Domain Event / Review / Policy 推进，客户端不得直接置成功",
 	})}
-	if err := s.repository.CreateContribution(ctx, contribution); err != nil {
-		return command.Rejected(e, "CONTRIBUTION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "contribution.create_failed", nil)
-	}
-	// invite 标记为 USED（Attribution 入口已消费）
+	// 先 CAS 消费 invite（ACTIVE → USED），防止并发双花；失败则整体拒绝。
 	if p.ReferralInviteID != "" {
-		_ = s.repository.UpdateInviteState(ctx, p.ReferralInviteID, "USED")
+		if err := s.repository.ConsumeInvite(ctx, p.ReferralInviteID); err != nil {
+			return command.Rejected(e, "INVITE_ALREADY_CONSUMED", "CONCURRENCY", "AFTER_USER_ACTION", "contribution.invite_consumed", nil)
+		}
+	}
+	if err := s.repository.CreateContribution(ctx, contribution); err != nil {
+		// 创建失败时归还 invite，避免用户损失 Attribution 入口。
+		if p.ReferralInviteID != "" {
+			_ = s.repository.UpdateInviteState(ctx, p.ReferralInviteID, "ACTIVE")
+		}
+		return command.Rejected(e, "CONTRIBUTION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "contribution.create_failed", nil)
 	}
 	return acceptedWithPayload(e, "NetworkContribution", contribution.ContributionID, 1, "SUBMITTED", map[string]any{
 		"contributionId": contribution.ContributionID,
@@ -557,6 +591,10 @@ func (s *Service) grantReward(ctx context.Context, e command.Envelope) command.R
 	var p rewardPayload
 	if !decode(e.Payload, &p) || p.AmountVND <= 0 {
 		return command.Rejected(e, "INVALID_REWARD", "VALIDATION", "AFTER_USER_ACTION", "contribution.invalid_reward", nil)
+	}
+	if p.AmountVND > maxRewardVND {
+		return command.Rejected(e, "REWARD_EXCEEDS_LIMIT", "VALIDATION", "AFTER_USER_ACTION", "contribution.reward_exceeds_limit",
+			map[string]any{"maxRewardVnd": maxRewardVND})
 	}
 	contribution, err := s.repository.GetContribution(ctx, e.Target.ID)
 	if errors.Is(err, ErrContributionNotFound) {

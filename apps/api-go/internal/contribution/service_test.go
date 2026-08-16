@@ -9,18 +9,18 @@ import (
 
 func envelopeFor(commandType string, payload map[string]any, targetID string) command.Envelope {
 	return command.Envelope{
-		CommandID:       "cmd_test_1",
-		CommandType:     commandType,
-		CommandVersion:  1,
-		Actor:           command.Actor{Type: "USER", ID: "user_001"},
-		Principal:       command.Principal{Type: "INDIVIDUAL", ID: "principal_a"},
-		Target:          command.Target{Type: "NetworkContribution", ID: targetID},
-		IdempotencyKey:  "test_key_123456",
-		AuthContext:     map[string]any{"session": "s1"},
-		Purpose:         "test",
-		CorrelationID:   "corr_1",
-		RequestedAt:     "2026-08-16T00:00:00Z",
-		Payload:         payload,
+		CommandID:      "cmd_test_1",
+		CommandType:    commandType,
+		CommandVersion: 1,
+		Actor:          command.Actor{Type: "USER", ID: "user_001"},
+		Principal:      command.Principal{Type: "INDIVIDUAL", ID: "principal_a"},
+		Target:         command.Target{Type: "NetworkContribution", ID: targetID},
+		IdempotencyKey: "test_key_123456",
+		AuthContext:    map[string]any{"session": "s1"},
+		Purpose:        "test",
+		CorrelationID:  "corr_1",
+		RequestedAt:    "2026-08-16T00:00:00Z",
+		Payload:        payload,
 	}
 }
 
@@ -28,9 +28,9 @@ func envelopeFor(commandType string, payload map[string]any, targetID string) co
 func TestContributionLifecycle(t *testing.T) {
 	s := New()
 	r := s.Handle(envelopeFor("SubmitContribution", map[string]any{
-		"contributionType": "MERCHANT_REFERRAL",
-		"targetType":       "MERCHANT",
-		"targetId":         "merchant_1",
+		"contributionType":  "MERCHANT_REFERRAL",
+		"targetType":        "MERCHANT",
+		"targetId":          "merchant_1",
 		"targetPrincipalId": "principal_b",
 	}, ""))
 	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "SUBMITTED" {
@@ -87,9 +87,9 @@ func TestContributionLifecycle(t *testing.T) {
 func TestSelfReferralRejected(t *testing.T) {
 	s := New()
 	r := s.Handle(envelopeFor("SubmitContribution", map[string]any{
-		"contributionType": "AGENT_REFERRAL",
-		"targetType":       "AGENT",
-		"targetId":         "agent_1",
+		"contributionType":  "AGENT_REFERRAL",
+		"targetType":        "AGENT",
+		"targetId":          "agent_1",
 		"targetPrincipalId": "principal_a", // 与贡献者相同！
 	}, ""))
 	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "SELF_REFERRAL_NOT_ALLOWED" {
@@ -101,9 +101,9 @@ func TestSelfReferralRejected(t *testing.T) {
 func TestDuplicateTargetRejected(t *testing.T) {
 	s := New()
 	payload := map[string]any{
-		"contributionType": "MERCHANT_REFERRAL",
-		"targetType":       "MERCHANT",
-		"targetId":         "merchant_9",
+		"contributionType":  "MERCHANT_REFERRAL",
+		"targetType":        "MERCHANT",
+		"targetId":          "merchant_9",
 		"targetPrincipalId": "principal_b",
 	}
 	r := s.Handle(envelopeFor("SubmitContribution", payload, ""))
@@ -120,9 +120,9 @@ func TestDuplicateTargetRejected(t *testing.T) {
 func TestReviewLayersAreSeparate(t *testing.T) {
 	s := New()
 	r := s.Handle(envelopeFor("SubmitContribution", map[string]any{
-		"contributionType": "DRIVER_REFERRAL",
-		"targetType":       "DRIVER",
-		"targetId":         "driver_1",
+		"contributionType":  "DRIVER_REFERRAL",
+		"targetType":        "DRIVER",
+		"targetId":          "driver_1",
 		"targetPrincipalId": "principal_b",
 	}, ""))
 	var view struct {
@@ -151,9 +151,9 @@ func TestReviewLayersAreSeparate(t *testing.T) {
 func TestRewardGateBlocksReward(t *testing.T) {
 	s := New()
 	r := s.Handle(envelopeFor("SubmitContribution", map[string]any{
-		"contributionType": "REQUESTER_REFERRAL",
-		"targetType":       "REQUESTER",
-		"targetId":         "requester_1",
+		"contributionType":  "REQUESTER_REFERRAL",
+		"targetType":        "REQUESTER",
+		"targetId":          "requester_1",
 		"targetPrincipalId": "principal_b",
 	}, ""))
 	var view struct {

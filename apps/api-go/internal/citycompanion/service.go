@@ -19,50 +19,50 @@ import (
 // CityCompanionNeed 是城市同行需求的聚合。
 // 对齐 PRD Chapter21F：Task First, People Second；价格属于本单 Offer，不属于人的长期标价。
 type CityCompanionNeed struct {
-	ID             string            `json:"id"`
-	OwnerUserID    string            `json:"ownerUserId"`
-	Lifecycle      string            `json:"lifecycle"` // DRAFT -> CANDIDATES -> CONFIRMED -> COMPLETED / CANCELLED
-	Version        int               `json:"version"`
-	Duration       string            `json:"duration"`        // 4H | 8H
-	Language       string            `json:"language"`        // zh | en | vi
-	GenderPref     string            `json:"genderPref"`      // any | female | male
-	Interests      []string          `json:"interests"`       // 咖啡 / 拍照 / 夜生活 ...
-	Meeting        string            `json:"meeting"`         // 集合点
-	BudgetVND      int64             `json:"budgetVnd"`       // 预算参考（实验值，非 Price Floor）
-	Route          *CityRoute        `json:"route,omitempty"` // 行程方案（R2 §10）
-	RouteChanges   []MaterialRouteChange `json:"routeChanges"` // material_route_changes[]
-	ConfirmedAgent *ConfirmedAgent   `json:"confirmedAgent,omitempty"`
-	SceneVisits    []SceneCommerceVisit `json:"sceneVisits"`
-	UpdatedAt      time.Time         `json:"updatedAt"`
+	ID             string                `json:"id"`
+	OwnerUserID    string                `json:"ownerUserId"`
+	Lifecycle      string                `json:"lifecycle"` // DRAFT -> CANDIDATES -> CONFIRMED -> COMPLETED / CANCELLED
+	Version        int                   `json:"version"`
+	Duration       string                `json:"duration"`        // 4H | 8H
+	Language       string                `json:"language"`        // zh | en | vi
+	GenderPref     string                `json:"genderPref"`      // any | female | male
+	Interests      []string              `json:"interests"`       // 咖啡 / 拍照 / 夜生活 ...
+	Meeting        string                `json:"meeting"`         // 集合点
+	BudgetVND      int64                 `json:"budgetVnd"`       // 预算参考（实验值，非 Price Floor）
+	Route          *CityRoute            `json:"route,omitempty"` // 行程方案（R2 §10）
+	RouteChanges   []MaterialRouteChange `json:"routeChanges"`    // material_route_changes[]
+	ConfirmedAgent *ConfirmedAgent       `json:"confirmedAgent,omitempty"`
+	SceneVisits    []SceneCommerceVisit  `json:"sceneVisits"`
+	UpdatedAt      time.Time             `json:"updatedAt"`
 }
 
 type ConfirmedAgent struct {
-	AgentID   string `json:"agentId"`
-	Name      string `json:"name"`
-	OfferVND  int64  `json:"offerVnd"` // 本单报价
-	Duration  string `json:"duration"`
-	Currency  string `json:"currency"`
+	AgentID  string `json:"agentId"`
+	Name     string `json:"name"`
+	OfferVND int64  `json:"offerVnd"` // 本单报价
+	Duration string `json:"duration"`
+	Currency string `json:"currency"`
 }
 
 type SceneCommerceVisit struct {
-	VenueID     string    `json:"venueId"`
-	VenueType   string    `json:"venueType"` // cafe | restaurant
-	Attributed  bool      `json:"attributed"`
-	VisitedAt   time.Time `json:"visitedAt"`
+	VenueID    string    `json:"venueId"`
+	VenueType  string    `json:"venueType"` // cafe | restaurant
+	Attributed bool      `json:"attributed"`
+	VisitedAt  time.Time `json:"visitedAt"`
 }
 
 // Candidate 是候选卡（PRD §7）：本单报价 + 履约/满意/单量/语言 + 1-3 个本单证明。
 // 对齐 "不显示不可解释的 96% fit"。
 type Candidate struct {
-	AgentID              string   `json:"agentId"`
-	Name                 string   `json:"name"`
-	OfferVND             int64    `json:"offerVnd"`           // 本单报价
-	FulfillmentRate      float64  `json:"fulfillmentRate"`    // 履约率
-	SatisfactionRate     float64  `json:"satisfactionRate"`   // 满意率
-	CompletedCityOrders  int      `json:"completedCityOrders"` // 已完成城市同行单量
-	Languages            []string `json:"languages"`
-	Style                string   `json:"style"`
-	Proofs               []string `json:"proofs"` // 1-3 个本单证明：中文已验证 / 河内 26 单 ...
+	AgentID             string   `json:"agentId"`
+	Name                string   `json:"name"`
+	OfferVND            int64    `json:"offerVnd"`            // 本单报价
+	FulfillmentRate     float64  `json:"fulfillmentRate"`     // 履约率
+	SatisfactionRate    float64  `json:"satisfactionRate"`    // 满意率
+	CompletedCityOrders int      `json:"completedCityOrders"` // 已完成城市同行单量
+	Languages           []string `json:"languages"`
+	Style               string   `json:"style"`
+	Proofs              []string `json:"proofs"` // 1-3 个本单证明：中文已验证 / 河内 26 单 ...
 }
 
 // eligibilityScore 实现 "Eligibility before Ranking"（PRD §7）：
@@ -109,9 +109,12 @@ type Repository interface {
 }
 
 var (
-	ErrNeedNotFound   = errors.New("city companion need not found")
+	ErrNeedNotFound    = errors.New("city companion need not found")
 	ErrVersionConflict = errors.New("city companion need version conflict")
 )
+
+// maxOfferVND 是本单报价上限（fail-closed 防异常金额进入成交事实）。
+const maxOfferVND = 1_000_000_000
 
 type MemoryRepository struct {
 	mu     sync.Mutex
@@ -212,12 +215,12 @@ type Supplier interface {
 
 // CandidateQuery 是城市同行候选查询。
 type CandidateQuery struct {
-	MarketID    string
-	StartAt     time.Time
-	DurationH   int
-	Language    string
+	MarketID     string
+	StartAt      time.Time
+	DurationH    int
+	Language     string
 	Capabilities []string
-	BudgetVND   int64
+	BudgetVND    int64
 }
 
 // SupplyCandidate 是供给侧返回的真实候选。
@@ -380,8 +383,8 @@ func (s *Service) listCandidates(ctx context.Context, e command.Envelope) comman
 	candidates := s.candidatesFor(ctx, need)
 	// 结果通过 Accepted 的 Payload 返回给客户端
 	return acceptedWithPayload(e, "CityCompanionNeed", need.ID, need.Version, need.Lifecycle, map[string]any{
-		"needId":     need.ID,
-		"candidates": candidates,
+		"needId":          need.ID,
+		"candidates":      candidates,
 		"eligibilityNote": "Eligibility before Ranking：资格 + 可用性 + 履约 + 本单适配；候选来自真实供给查询（B），非公开目录。",
 	}, nil)
 }
@@ -484,11 +487,11 @@ func languageMatches(c *Candidate, language string) bool {
 // PRD §5/§9：确认页把"人、时间、服务价格、沿途消费"拆开；餐厅/咖啡是可选增值，不强制绑成旅游套餐。
 
 type confirmPayload struct {
-	ExpectedVersion int    `json:"expectedVersion"`
-	AgentID         string `json:"agentId"`
-	OfferVND        int64  `json:"offerVnd"`
-	IncludeCafe     bool   `json:"includeCafe"` // 可选增值，不改变服务价格
-	IncludeRestaurant bool `json:"includeRestaurant"`
+	ExpectedVersion   int    `json:"expectedVersion"`
+	AgentID           string `json:"agentId"`
+	OfferVND          int64  `json:"offerVnd"`
+	IncludeCafe       bool   `json:"includeCafe"` // 可选增值，不改变服务价格
+	IncludeRestaurant bool   `json:"includeRestaurant"`
 }
 
 func (s *Service) confirm(ctx context.Context, e command.Envelope) command.Result {
@@ -512,15 +515,33 @@ func (s *Service) confirm(ctx context.Context, e command.Envelope) command.Resul
 	if need.Lifecycle != "CANDIDATES" && need.Lifecycle != "DRAFT" {
 		return command.Rejected(e, "CITY_COMPANION_NOT_CONFIRMABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "citycompanion.not_confirmable", nil)
 	}
-	// 验证 Agent 在候选池中（防止确认不在本单候选里的人）
-	if !s.inPool(p.AgentID) {
+	// 验证 Agent 在本单真实候选集中（candidatesFor：supplier 模式走真实供给，
+	// 无 supplier 时回退 seed pool；两种模式统一校验，防确认候选集外的人）。
+	candidates := s.candidatesFor(ctx, need)
+	var candidate *Candidate
+	for i := range candidates {
+		if candidates[i].AgentID == p.AgentID {
+			candidate = &candidates[i]
+			break
+		}
+	}
+	if candidate == nil {
 		return command.Rejected(e, "AGENT_NOT_IN_CANDIDATES", "BUSINESS_STATE", "AFTER_USER_ACTION", "citycompanion.agent_not_in_candidates", map[string]any{"agentId": p.AgentID})
 	}
-	candidate := s.findCandidate(p.AgentID)
+	// 报价以服务端候选快照为权威：客户端不得自行压价/抬价（防 offerVnd:1 成交），
+	// 且受单笔金额上限约束。
+	if p.OfferVND != candidate.OfferVND {
+		return command.Rejected(e, "OFFER_PRICE_MISMATCH", "VALIDATION", "AFTER_USER_ACTION", "citycompanion.offer_price_mismatch",
+			map[string]any{"expectedOfferVnd": candidate.OfferVND})
+	}
+	if p.OfferVND > maxOfferVND {
+		return command.Rejected(e, "OFFER_EXCEEDS_LIMIT", "VALIDATION", "AFTER_USER_ACTION", "citycompanion.offer_exceeds_limit",
+			map[string]any{"maxOfferVnd": maxOfferVND})
+	}
 	need.ConfirmedAgent = &ConfirmedAgent{
 		AgentID:  candidate.AgentID,
 		Name:     candidate.Name,
-		OfferVND: p.OfferVND,
+		OfferVND: candidate.OfferVND, // 服务端权威报价
 		Duration: need.Duration,
 		Currency: "VND",
 	}
@@ -528,11 +549,11 @@ func (s *Service) confirm(ctx context.Context, e command.Envelope) command.Resul
 	need.Version++
 	need.UpdatedAt = s.clock.Now().UTC()
 	domainEvents := []event.DomainEvent{event.New("CityCompanionConfirmed", "CityCompanionNeed", need.ID, need.Version, e.Principal.ID, e.CorrelationID, e.CommandID, need.UpdatedAt, map[string]any{
-		"agentId":         p.AgentID,
-		"offerVnd":        p.OfferVND,
-		"includeCafe":     p.IncludeCafe,
+		"agentId":           p.AgentID,
+		"offerVnd":          p.OfferVND,
+		"includeCafe":       p.IncludeCafe,
 		"includeRestaurant": p.IncludeRestaurant,
-		"servicePriceNote": "本单服务价格，不属于人的长期标价",
+		"servicePriceNote":  "本单服务价格，不属于人的长期标价",
 	})}
 	if err := s.repository.UpdateNeed(ctx, need, p.ExpectedVersion); err != nil {
 		if errors.Is(err, ErrVersionConflict) {
@@ -641,13 +662,13 @@ type RouteStop struct {
 
 // CityRoute 是生成/确认的行程方案。
 type CityRoute struct {
-	Version      int         `json:"version"`
-	Style        string      `json:"style"` // RELAXED | FOOD | LOCAL
-	Pace         string      `json:"pace"`
-	Distance     string      `json:"distance"`
-	EstimatedSpend string    `json:"estimatedSpend"`
-	Stops        []RouteStop `json:"stops"`
-	Accepted     bool        `json:"accepted"`
+	Version        int         `json:"version"`
+	Style          string      `json:"style"` // RELAXED | FOOD | LOCAL
+	Pace           string      `json:"pace"`
+	Distance       string      `json:"distance"`
+	EstimatedSpend string      `json:"estimatedSpend"`
+	Stops          []RouteStop `json:"stops"`
+	Accepted       bool        `json:"accepted"`
 }
 
 // MaterialRouteChange 是行程重大变化记录（R2 §10 material_route_changes[]）。
@@ -872,24 +893,6 @@ func stopNames(stops []RouteStop) []string {
 		names = append(names, s.Name)
 	}
 	return names
-}
-
-func (s *Service) inPool(agentID string) bool {
-	for _, c := range s.pool {
-		if c.AgentID == agentID {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Service) findCandidate(agentID string) *Candidate {
-	for _, c := range s.pool {
-		if c.AgentID == agentID {
-			return c
-		}
-	}
-	return nil
 }
 
 func canOperate(need CityCompanionNeed, e command.Envelope) bool {

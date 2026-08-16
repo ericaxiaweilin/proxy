@@ -105,6 +105,18 @@ func (r *ContributionRepository) UpdateInviteState(ctx context.Context, id, stat
 	return err
 }
 
+func (r *ContributionRepository) ConsumeInvite(ctx context.Context, id string) error {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE contribution.referral_invites SET state='USED' WHERE referral_invite_id=$1 AND state='ACTIVE'`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return contribution.ErrInviteNotActive
+	}
+	return nil
+}
+
 func (r *ContributionRepository) FindByTarget(ctx context.Context, contributionType, targetType, targetID string) (contribution.NetworkContribution, error) {
 	var c contribution.NetworkContribution
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `

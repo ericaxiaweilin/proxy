@@ -94,3 +94,12 @@ func (s *IdempotencyStore) Complete(ctx context.Context, scope, key string, reco
 	}
 	return nil
 }
+
+// Release removes an inflight claim after a failed dispatch so the key can be
+// retried. Best effort: only touches rows this request owns (fingerprint match).
+func (s *IdempotencyStore) Release(ctx context.Context, scope, key, fingerprint string) error {
+	_, err := execerForContext(ctx, s.pool).Exec(ctx, `
+		DELETE FROM integration.idempotency_records
+		WHERE scope = $1 AND idempotency_key = $2 AND fingerprint = $3 AND status = 'IN_PROGRESS'`, scope, key, fingerprint)
+	return err
+}

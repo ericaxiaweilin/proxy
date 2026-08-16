@@ -252,3 +252,37 @@ func TestProfileIsNotIdentityOrCapability(t *testing.T) {
 		t.Fatalf("profile wrong: %+v", view.Profile)
 	}
 }
+
+// 归属校验（第 9 项收尾）：候选批次只允许创建者读取，他人读取 fail-closed 拒绝。
+func TestCandidateBatchOwnerAccess(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_linh", "Linh", []string{"ZH", "VI"}, "hn", 1200000)
+
+	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	r := s.Handle(envelopeFor("CreateCandidateBatch", map[string]any{
+		"needId": "need_1", "marketId": "hn", "startAt": start, "durationH": 8,
+		"languages": []string{"ZH"},
+	}, ""))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("batch create: %s (%+v)", r.Outcome, r.Error)
+	}
+	var view struct {
+		BatchID string `json:"batchId"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	if view.BatchID == "" {
+		// OperationRef 可能不含 batchId，从 Aggregate.ID 取
+		view.BatchID = r.Aggregate.ID
+	}
+
+	// 创建者（business_001）可读
+	r2 := s.Handle(envelopeFor("GetCandidateBatch", map[string]any{}, view.BatchID))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("owner read: %s (%+v)", r2.Outcome, r2.Error)
+	}
+	// 他人（principal_other）读 → BATCH_NOT_OWNED fail-closed
+	r3 := s.Handle(envelopeForPrincipal("GetCandidateBatch", map[string]any{}, view.BatchID, "principal_other"))
+	if r3.Outcome != "REJECTED" || r3.Error.ErrorCode != "BATCH_NOT_OWNED" {
+		t.Fatalf("want BATCH_NOT_OWNED, got %s/%+v", r3.Outcome, r3.Error)
+	}
+}

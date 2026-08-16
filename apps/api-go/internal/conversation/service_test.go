@@ -9,18 +9,18 @@ import (
 
 func envelopeFor(commandType string, payload map[string]any, targetID string) command.Envelope {
 	return command.Envelope{
-		CommandID:       "cmd_test_1",
-		CommandType:     commandType,
-		CommandVersion:  1,
-		Actor:           command.Actor{Type: "USER", ID: "user_001"},
-		Principal:       command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
-		Target:          command.Target{Type: "Conversation", ID: targetID},
-		IdempotencyKey:  "test_key_123456",
-		AuthContext:     map[string]any{"session": "s1"},
-		Purpose:         "test",
-		CorrelationID:   "corr_1",
-		RequestedAt:     "2026-08-16T00:00:00Z",
-		Payload:         payload,
+		CommandID:      "cmd_test_1",
+		CommandType:    commandType,
+		CommandVersion: 1,
+		Actor:          command.Actor{Type: "USER", ID: "user_001"},
+		Principal:      command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
+		Target:         command.Target{Type: "Conversation", ID: targetID},
+		IdempotencyKey: "test_key_123456",
+		AuthContext:    map[string]any{"session": "s1"},
+		Purpose:        "test",
+		CorrelationID:  "corr_1",
+		RequestedAt:    "2026-08-16T00:00:00Z",
+		Payload:        payload,
 	}
 }
 
@@ -83,7 +83,9 @@ func TestSendMessageAndList(t *testing.T) {
 		"originType": "NEED", "originId": "need_1", "participantId": "agent_linh",
 	}, "")
 	r := s.Handle(e)
-	var view struct{ ConversationID string `json:"conversationId"` }
+	var view struct {
+		ConversationID string `json:"conversationId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	convID := view.ConversationID
 
@@ -121,7 +123,9 @@ func TestNeedDraftExplicitConfirm(t *testing.T) {
 		"originType": "POST", "originId": "post_1", "participantId": "agent_linh",
 	}, "")
 	r := s.Handle(e)
-	var view struct{ ConversationID string `json:"conversationId"` }
+	var view struct {
+		ConversationID string `json:"conversationId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	convID := view.ConversationID
 
@@ -168,7 +172,9 @@ func TestNonParticipantCannotSend(t *testing.T) {
 		"originType": "POST", "originId": "post_1", "participantId": "agent_linh",
 	}, "")
 	r := s.Handle(e)
-	var view struct{ ConversationID string `json:"conversationId"` }
+	var view struct {
+		ConversationID string `json:"conversationId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 
 	e2 := envelopeFor("SendMessage", map[string]any{"body": "闯入"}, view.ConversationID)
