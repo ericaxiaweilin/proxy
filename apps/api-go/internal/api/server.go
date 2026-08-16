@@ -13,6 +13,9 @@ import (
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/identity"
+	"github.com/proxy-app/proxy-api/internal/conversation"
+	"github.com/proxy-app/proxy-api/internal/engagement"
+	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 )
@@ -23,6 +26,9 @@ type Server struct {
 	CityCompanion   *citycompanion.Service
 	LocalNet        *localnet.Service
 	LocalContext    *localcontext.Service
+	Conversation    *conversation.Service
+	Engagement      *engagement.Service
+	Fulfillment     *fulfillment.Service
 	Idempotency     command.IdempotencyStore
 	Authenticator   Authenticator
 	ReadyCheck      func(context.Context) error
@@ -41,19 +47,19 @@ type TransactionRunner interface {
 	WithinTransaction(ctx context.Context, operation func(context.Context) error) error
 }
 
-func NewServer(identityService *identity.Service, demandService *demand.Service, cityCompanionService *citycompanion.Service, localNetService *localnet.Service, localContextService *localcontext.Service) *Server {
-	return NewServerWithDependencies(identityService, demandService, cityCompanionService, localNetService, localContextService, command.NewMemoryIdempotencyStore(), nil)
+func NewServer(identityService *identity.Service, demandService *demand.Service, cityCompanionService *citycompanion.Service, localNetService *localnet.Service, localContextService *localcontext.Service, conversationService *conversation.Service, engagementService *engagement.Service, fulfillmentService *fulfillment.Service) *Server {
+	return NewServerWithDependencies(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, command.NewMemoryIdempotencyStore(), nil)
 }
 
-func NewServerWithDependencies(identityService *identity.Service, demandService *demand.Service, cityCompanionService *citycompanion.Service, localNetService *localnet.Service, localContextService *localcontext.Service, idempotencyStore command.IdempotencyStore, readyCheck func(context.Context) error) *Server {
-	return NewServerWithDependenciesAndAuthenticator(identityService, demandService, cityCompanionService, localNetService, localContextService, idempotencyStore, readyCheck, nil)
+func NewServerWithDependencies(identityService *identity.Service, demandService *demand.Service, cityCompanionService *citycompanion.Service, localNetService *localnet.Service, localContextService *localcontext.Service, conversationService *conversation.Service, engagementService *engagement.Service, fulfillmentService *fulfillment.Service, idempotencyStore command.IdempotencyStore, readyCheck func(context.Context) error) *Server {
+	return NewServerWithDependenciesAndAuthenticator(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, idempotencyStore, readyCheck, nil)
 }
 
-func NewServerWithDependenciesAndAuthenticator(identityService *identity.Service, demandService *demand.Service, cityCompanionService *citycompanion.Service, localNetService *localnet.Service, localContextService *localcontext.Service, idempotencyStore command.IdempotencyStore, readyCheck func(context.Context) error, authenticator Authenticator) *Server {
-	return NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, idempotencyStore, readyCheck, authenticator, nil)
+func NewServerWithDependenciesAndAuthenticator(identityService *identity.Service, demandService *demand.Service, cityCompanionService *citycompanion.Service, localNetService *localnet.Service, localContextService *localcontext.Service, conversationService *conversation.Service, engagementService *engagement.Service, fulfillmentService *fulfillment.Service, idempotencyStore command.IdempotencyStore, readyCheck func(context.Context) error, authenticator Authenticator) *Server {
+	return NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, idempotencyStore, readyCheck, authenticator, nil)
 }
 
-func NewServerWithRuntime(identityService *identity.Service, demandService *demand.Service, cityCompanionService *citycompanion.Service, localNetService *localnet.Service, localContextService *localcontext.Service, idempotencyStore command.IdempotencyStore, readyCheck func(context.Context) error, authenticator Authenticator, transactions TransactionRunner) *Server {
+func NewServerWithRuntime(identityService *identity.Service, demandService *demand.Service, cityCompanionService *citycompanion.Service, localNetService *localnet.Service, localContextService *localcontext.Service, conversationService *conversation.Service, engagementService *engagement.Service, fulfillmentService *fulfillment.Service, idempotencyStore command.IdempotencyStore, readyCheck func(context.Context) error, authenticator Authenticator, transactions TransactionRunner) *Server {
 	if idempotencyStore == nil {
 		idempotencyStore = command.NewMemoryIdempotencyStore()
 	}
@@ -61,7 +67,7 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if readyCheck != nil {
 		readyMode = "configured"
 	}
-	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions}
+	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -213,6 +219,12 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.LocalNet.HandleContext(ctx, envelope)
 	case s.LocalContext != nil && s.LocalContext.Supports(envelope.CommandType):
 		return s.LocalContext.HandleContext(ctx, envelope)
+	case s.Conversation != nil && s.Conversation.Supports(envelope.CommandType):
+		return s.Conversation.HandleContext(ctx, envelope)
+	case s.Engagement != nil && s.Engagement.Supports(envelope.CommandType):
+		return s.Engagement.HandleContext(ctx, envelope)
+	case s.Fulfillment != nil && s.Fulfillment.Supports(envelope.CommandType):
+		return s.Fulfillment.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}
