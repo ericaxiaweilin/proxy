@@ -72,13 +72,13 @@ func main() {
 			}
 		}
 		demandService = demand.NewWithRepository(nil, nil, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
-		localNetService = localnet.NewWithRepositoryAndClock(postgres.NewLocalNetRepository(pool), nil)
 		localContextService = localcontext.NewWithRepository(postgres.NewLocalContextRepository(pool))
 		conversationService = conversation.NewWithRepository(postgres.NewConversationRepository(pool))
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepository(pool))
 		mediaService = media.NewWithDependencies(postgres.NewMediaRepository(pool), media.NewFFmpegProcessor(filepath.Join("media_store")))
+		localNetService = localnet.NewWithMediaLookup(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService))
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)

@@ -24,16 +24,53 @@ import (
 
 // Post 是本地动态的 durable content（PRD §4 Post Canonical Contract）。
 type Post struct {
-	ID            string       `json:"postId"`
-	AuthorType    string       `json:"authorType"` // USER | AGENT | MERCHANT | PLATFORM_SPECIAL
-	AuthorID      string       `json:"authorId"`
-	Body          string       `json:"body"`
-	MediaRefs     []string     `json:"mediaRefs"`
-	Visibility    string       `json:"visibility"` // PUBLIC | FOLLOWERS | AGENT_ONLY
-	CityScope     string       `json:"cityScope,omitempty"`
-	Status        string       `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
-	ContextRefs   []ContextRef `json:"contextRefs"`
-	CreatedAt     time.Time    `json:"createdAt"`
+	ID            string        `json:"postId"`
+	AuthorType    string        `json:"authorType"` // USER | AGENT | MERCHANT | PLATFORM_SPECIAL
+	AuthorID      string        `json:"authorId"`
+	Body          string        `json:"body"`
+	MediaRefs     []PostMediaRef `json:"mediaRefs"` // R14 Adaptive Media Rail：带 sortOrder
+	Visibility    string        `json:"visibility"` // PUBLIC | FOLLOWERS | AGENT_ONLY
+	CityScope     string        `json:"cityScope,omitempty"`
+	Status        string        `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
+	ContextRefs   []ContextRef  `json:"contextRefs"`
+	CreatedAt     time.Time     `json:"createdAt"`
+}
+
+// PostMediaRef 是 Post 的媒体引用（R14 §16.5：sort_order = 作者确认的展示顺序）。
+type PostMediaRef struct {
+	MediaAssetID string `json:"mediaAssetId"`
+	SortOrder    int    `json:"sortOrder"`
+}
+
+// PostMediaItem 是 Feed Read Model 的 Hydrate 媒体项（R14 §16.5 + R10 Gate F）。
+type PostMediaItem struct {
+	MediaAssetID     string `json:"mediaAssetId"`
+	MediaType        string `json:"mediaType"` // IMAGE | VIDEO
+	ThumbnailURL     string `json:"thumbnailUrl,omitempty"`
+	PlaybackURL      string `json:"playbackUrl,omitempty"`
+	Width            int    `json:"width"`
+	Height           int    `json:"height"`
+	AspectRatio      float64 `json:"aspectRatio"`
+	DurationMs       int64  `json:"durationMs,omitempty"`
+	ProcessingStatus string `json:"processingStatus"`
+	SortOrder        int    `json:"sortOrder"`
+}
+
+// MediaLookup 是媒体详情查询接口（由 media 包实现，注入避免循环依赖）。
+type MediaLookup interface {
+	LookupMediaAssets(ctx context.Context, ids []string) (map[string]MediaAssetInfo, error)
+}
+
+// MediaAssetInfo 是媒体资产的可读视图（READY 过滤在调用方）。
+type MediaAssetInfo struct {
+	MediaAssetID     string
+	MediaType        string
+	ThumbnailURL     string
+	PlaybackURL      string
+	Width            int
+	Height           int
+	DurationMs       int64
+	ProcessingStatus string
 }
 
 // ContextRef 是 Post 的结构化上下文关联（PRD §4 PostContextRef）。
@@ -144,7 +181,7 @@ func (r *MemoryRepository) SnapshotNeeds(_ context.Context) ([]NeedFromPost, err
 }
 
 func clonePost(post Post) Post {
-	post.MediaRefs = append([]string(nil), post.MediaRefs...)
+	post.MediaRefs = append([]PostMediaRef(nil), post.MediaRefs...)
 	post.ContextRefs = append([]ContextRef(nil), post.ContextRefs...)
 	return post
 }
@@ -152,11 +189,19 @@ func clonePost(post Post) Post {
 type Service struct {
 	mu         sync.Mutex
 	repository Repository
+	mediaLookup MediaLookup
 	clock      clock.Clock
 }
 
 func New() *Service {
 	return NewWithRepository(NewMemoryRepository())
+}
+
+// NewWithMediaLookup 注入媒体详情查询（R14 Adaptive Media Rail：Feed Hydrate）。
+func NewWithMediaLookup(repository Repository, mediaLookup MediaLookup) *Service {
+	s := NewWithRepository(repository)
+	s.mediaLookup = mediaLookup
+	return s
 }
 
 func NewWithRepository(repository Repository) *Service {
@@ -208,12 +253,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 // PRD §4/§11：Post = durable content；发布永不自动创建 Task。
 
 type createPostPayload struct {
-	AuthorType  string       `json:"authorType"`
-	Body        string       `json:"body"`
-	MediaRefs   []string     `json:"mediaRefs"`
-	Visibility  string       `json:"visibility"`
-	CityScope   string       `json:"cityScope"`
-	ContextRefs []ContextRef `json:"contextRefs"`
+	AuthorType  string        `json:"authorType"`
+	Body        string        `json:"body"`
+	MediaRefs   []PostMediaRef `json:"mediaRefs"` // R14：{mediaAssetId, sortOrder}，≤6
+	Visibility  string        `json:"visibility"`
+	CityScope   string        `json:"cityScope"`
+	ContextRefs []ContextRef  `json:"contextRefs"`
 }
 
 func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Result {
@@ -226,6 +271,10 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	}
 	if p.Body == "" && len(p.MediaRefs) == 0 {
 		return command.Rejected(e, "POST_EMPTY_CONTENT", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_empty_content", nil)
+	}
+	// R14 §16.1：P0 max = 6 Media/Post；超过不静默截断
+	if len(p.MediaRefs) > 6 {
+		return command.Rejected(e, "POST_MEDIA_LIMIT_EXCEEDED", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_media_limit", map[string]any{"max": 6, "got": len(p.MediaRefs)})
 	}
 	if p.Visibility == "" {
 		p.Visibility = "PUBLIC"
@@ -242,7 +291,7 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		AuthorType:  p.AuthorType,
 		AuthorID:    e.Actor.ID,
 		Body:        p.Body,
-		MediaRefs:   append([]string(nil), p.MediaRefs...),
+		MediaRefs:   append([]PostMediaRef(nil), p.MediaRefs...),
 		Visibility:  p.Visibility,
 		CityScope:   p.CityScope,
 		Status:      "PUBLISHED",
@@ -286,9 +335,57 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	sort.Slice(feed, func(i, j int) bool {
 		return feed[i].CreatedAt.After(feed[j].CreatedAt)
 	})
+	// R14 §16.5：Feed Read Model Hydrate 媒体（mediaLookup + READY 过滤）
+	feedMedia := make(map[string][]PostMediaItem, len(feed))
+	if s.mediaLookup != nil {
+		for _, p := range feed {
+			if len(p.MediaRefs) == 0 {
+				continue
+			}
+			ids := make([]string, 0, len(p.MediaRefs))
+			for _, ref := range p.MediaRefs {
+				ids = append(ids, ref.MediaAssetID)
+			}
+			assets, err := s.mediaLookup.LookupMediaAssets(ctx, ids)
+			if err != nil {
+				continue
+			}
+			items := make([]PostMediaItem, 0, len(p.MediaRefs))
+			for _, ref := range p.MediaRefs {
+				info, ok := assets[ref.MediaAssetID]
+				if !ok {
+					continue
+				}
+				// R10 Gate E：只有 READY 媒体可作正式 Feed Media
+				if info.ProcessingStatus != "READY" {
+					continue
+				}
+				aspect := 0.0
+				if info.Height > 0 {
+					aspect = float64(info.Width) / float64(info.Height)
+				}
+				items = append(items, PostMediaItem{
+					MediaAssetID:     info.MediaAssetID,
+					MediaType:        info.MediaType,
+					ThumbnailURL:     info.ThumbnailURL,
+					PlaybackURL:      info.PlaybackURL,
+					Width:            info.Width,
+					Height:           info.Height,
+					AspectRatio:      aspect,
+					DurationMs:       info.DurationMs,
+					ProcessingStatus: info.ProcessingStatus,
+					SortOrder:        ref.SortOrder,
+				})
+			}
+			if len(items) > 0 {
+				feedMedia[p.ID] = items
+			}
+		}
+	}
 	return acceptedWithPayload(e, "Post", "", 0, "FEED", map[string]any{
 		"posts": feed,
-		"note":  "实时交易事实（价格/可用性/商家状态）由读取时 Hydration 获得，Post 不是 Source of Truth",
+		"media": feedMedia, // postId → []PostMediaItem（R14 Adaptive Media Rail Read Model）
+		"note":  "实时交易事实（价格/可用性/商家状态）由读取时 Hydration 获得，Post 不是 Source of Truth；媒体只呈现 READY",
 	}, nil)
 }
 

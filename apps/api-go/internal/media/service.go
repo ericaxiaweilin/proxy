@@ -295,12 +295,18 @@ func (s *Service) processAsset(ctx context.Context, e command.Envelope) command.
 		return command.Rejected(e, "MEDIA_NOT_PROCESSING", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_processing", map[string]any{"status": asset.ProcessingStatus})
 	}
 	if asset.MediaType == "IMAGE" {
-		// 图片：无转码，直接 READY
+		// 图片：无转码，直接 READY（用 ffprobe 读宽高供 aspect_ratio）
 		asset.ProcessingStatus = "READY"
 		asset.PlaybackStorageKey = asset.OriginalStorageKey
 		asset.ThumbnailStorageKey = asset.OriginalStorageKey
 		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
 		asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
+		if s.processor != nil && p.OriginalPath != "" {
+			if meta, err := probeImage(ctx, p.OriginalPath); err == nil {
+				asset.Width = meta.Width
+				asset.Height = meta.Height
+			}
+		}
 		asset.UpdatedAt = s.clock.Now().UTC()
 		domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
 			"status": "READY", "mediaType": "IMAGE",
@@ -565,6 +571,35 @@ func makeThumbnail(ctx context.Context, input, output string) error {
 		return errors.New("thumbnail failed: " + strings.TrimSpace(string(out))[:min(len(out), 200)])
 	}
 	return nil
+}
+
+// probeImage 用 ffprobe 读图片宽高（IMAGE 资产提供 aspect_ratio）。
+func probeImage(ctx context.Context, path string) (VideoMetadata, error) {
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "quiet", "-print_format", "json",
+		"-show_streams", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return VideoMetadata{}, err
+	}
+	var info struct {
+		Streams []struct {
+			CodecType string `json:"codec_type"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &info); err != nil {
+		return VideoMetadata{}, err
+	}
+	meta := VideoMetadata{}
+	for _, stream := range info.Streams {
+		if stream.CodecType == "video" {
+			meta.Width = stream.Width
+			meta.Height = stream.Height
+			break
+		}
+	}
+	return meta, nil
 }
 
 func min(a, b int) int {
