@@ -14,6 +14,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/identity"
+	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 )
@@ -35,6 +36,7 @@ func main() {
 	demandService := demand.New(nil, nil)
 	cityCompanionService := citycompanion.New()
 	localNetService := localnet.New()
+	localContextService := localcontext.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -58,7 +60,7 @@ func main() {
 		}
 	}()
 
-	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, idempotencyStore, readyCheck, authenticator, transactions)
+	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, idempotencyStore, readyCheck, authenticator, transactions)
 	address := ":" + port
 	if simulatedLogin {
 		log.Printf("proxy api go listening on %s with LOCAL simulated login provider", address)
