@@ -188,7 +188,46 @@ type Service struct {
 	mu         sync.Mutex
 	repository Repository
 	pool       []*Candidate
+	supplier   Supplier
 	clock      clock.Clock
+}
+
+// DurationHours 把 "4H"/"8H" 解析为小时数。
+func (n CityCompanionNeed) DurationHours() int {
+	switch n.Duration {
+	case "4H":
+		return 4
+	case "8H":
+		return 8
+	default:
+		return 4
+	}
+}
+
+// Supplier 是真实供给查询接口（B：由 supply 包实现）。
+// nil 时回退本地 seed pool（保持向后兼容）。
+type Supplier interface {
+	QueryEligibleCandidates(ctx context.Context, query CandidateQuery) ([]SupplyCandidate, error)
+}
+
+// CandidateQuery 是城市同行候选查询。
+type CandidateQuery struct {
+	MarketID    string
+	StartAt     time.Time
+	DurationH   int
+	Language    string
+	Capabilities []string
+	BudgetVND   int64
+}
+
+// SupplyCandidate 是供给侧返回的真实候选。
+type SupplyCandidate struct {
+	AgentID        string
+	Name           string
+	Languages      []string
+	ReferencePrice int64
+	Currency       string
+	VerifiedCaps   []string
 }
 
 func New() *Service {
@@ -207,6 +246,13 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 	if domainClock != nil {
 		s.clock = domainClock
 	}
+	return s
+}
+
+// NewWithRepositoryAndSupplier 接真实供给（B：候选来自 supply，非 seed）。
+func NewWithRepositoryAndSupplier(repository Repository, supplier Supplier) *Service {
+	s := NewWithRepository(repository)
+	s.supplier = supplier
 	return s
 }
 
@@ -331,13 +377,66 @@ func (s *Service) listCandidates(ctx context.Context, e command.Envelope) comman
 	if p.ExpectedVersion != need.Version {
 		return command.Rejected(e, "CITY_COMPANION_NEED_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "citycompanion.need_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion, "actualVersion": need.Version})
 	}
-	candidates := s.eligible(need)
+	candidates := s.candidatesFor(ctx, need)
 	// 结果通过 Accepted 的 Payload 返回给客户端
 	return acceptedWithPayload(e, "CityCompanionNeed", need.ID, need.Version, need.Lifecycle, map[string]any{
 		"needId":     need.ID,
 		"candidates": candidates,
-		"eligibilityNote": "Eligibility before Ranking：资格 + 可用性 + 履约 + 本单适配；候选来自本单需求，非公开目录。",
+		"eligibilityNote": "Eligibility before Ranking：资格 + 可用性 + 履约 + 本单适配；候选来自真实供给查询（B），非公开目录。",
 	}, nil)
+}
+
+// candidatesFor 优先走真实供给（supplier），无 supplier 时回退 seed pool。
+func (s *Service) candidatesFor(ctx context.Context, need CityCompanionNeed) []Candidate {
+	if s.supplier != nil {
+		start := time.Now().Add(24 * time.Hour).UTC()
+		query := CandidateQuery{
+			MarketID:     need.Meeting,
+			StartAt:      start,
+			DurationH:    need.DurationHours(),
+			Language:     need.Language,
+			Capabilities: nil, // 硬要求=语言（adapter 转 ZH/VI）；CITY_GUIDE 不强制
+			BudgetVND:    need.BudgetVND,
+		}
+		supplyCandidates, err := s.supplier.QueryEligibleCandidates(ctx, query)
+		if err == nil && len(supplyCandidates) > 0 {
+			result := make([]Candidate, 0, len(supplyCandidates))
+			for _, sc := range supplyCandidates {
+				result = append(result, Candidate{
+					AgentID:             sc.AgentID,
+					Name:                sc.Name,
+					OfferVND:            sc.ReferencePrice, // 本单报价来自真实参考价
+					FulfillmentRate:     0.97,              // 待 Outcome 数据接入后取真实履约率
+					SatisfactionRate:    0.95,
+					CompletedCityOrders: 0,
+					Languages:           sc.Languages,
+					Style:               "city_companion",
+					Proofs:              verifiedProofs(sc.VerifiedCaps),
+				})
+			}
+			return result
+		}
+		// supplier 无结果 → 返回空（shortage），不回退 seed（不允许 fallback 到 seed 后还显示成功）
+		return []Candidate{}
+	}
+	return s.eligible(need)
+}
+
+func verifiedProofs(verifiedCaps []string) []string {
+	proofs := make([]string, 0, len(verifiedCaps))
+	for _, cap := range verifiedCaps {
+		switch cap {
+		case "ZH":
+			proofs = append(proofs, "中文已验证")
+		case "VI":
+			proofs = append(proofs, "越南语已验证")
+		case "PHOTOGRAPHY":
+			proofs = append(proofs, "摄影能力已验证")
+		default:
+			proofs = append(proofs, cap+"已验证")
+		}
+	}
+	return proofs
 }
 
 // eligible 实现 Eligibility before Ranking。
