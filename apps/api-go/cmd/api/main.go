@@ -9,14 +9,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/api"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
-	"github.com/proxy-app/proxy-api/internal/demand"
-	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/conversation"
+	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
@@ -56,7 +57,18 @@ func main() {
 		outboxRepository := postgres.NewOutboxRepository(pool)
 		readyCheck = pool.Ping
 		identityService = identity.NewWithRepositoryAndClockAndChallengeProvider(postgres.NewIdentityRepositoryWithOutbox(pool, outboxRepository), nil, loginProvider)
+		if simulatedLogin {
+			if err := seedPostgresIdentity(pool); err != nil {
+				log.Fatalf("seed postgres identity: %v", err)
+			}
+		}
 		demandService = demand.NewWithRepository(nil, nil, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
+		cityCompanionService = citycompanion.NewWithRepositoryAndClock(postgres.NewCityCompanionRepository(pool), nil)
+		localNetService = localnet.NewWithRepositoryAndClock(postgres.NewLocalNetRepository(pool), nil)
+		localContextService = localcontext.NewWithRepository(postgres.NewLocalContextRepository(pool))
+		conversationService = conversation.NewWithRepository(postgres.NewConversationRepository(pool))
+		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
+		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -101,6 +113,49 @@ func configuredLoginChallengeProvider() (identity.LoginChallengeProvider, bool) 
 		return identity.UnconfiguredLoginChallengeProvider{}, false
 	}
 	return identity.NewSimulatedLoginChallengeProvider(os.Getenv("PROXY_SIMULATED_OTP_CODE")), true
+}
+
+// seedPostgresIdentity 在 simulated 模式把开发用户幂等写入 Postgres
+// （与 localIdentityService 的 memory seed 对齐，保证模拟登录在 DB 模式可用）。
+func seedPostgresIdentity(pool *pgxpool.Pool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// user_accounts
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity.user_accounts (id, status) VALUES ($1, $2)
+		ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status`,
+		"user_001", "ACTIVE"); err != nil {
+		return err
+	}
+	// login_identities
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity.login_identities (id, user_account_id, verified, status, channel, identifier)
+		VALUES ($1, $2, TRUE, 'ACTIVE', 'PHONE', 'jvn')
+		ON CONFLICT (id) DO UPDATE SET verified = TRUE, status = 'ACTIVE'`,
+		"login_001", "user_001"); err != nil {
+		return err
+	}
+	// memberships
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity.memberships (principal_type, principal_id, user_account_id, status)
+		VALUES ('INDIVIDUAL', 'user_001', 'user_001', 'ACTIVE')
+		ON CONFLICT (principal_type, principal_id) DO UPDATE SET status = 'ACTIVE'`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity.memberships (principal_type, principal_id, user_account_id, status)
+		VALUES ('BUSINESS', 'business_001', 'user_001', 'ACTIVE')
+		ON CONFLICT (principal_type, principal_id) DO UPDATE SET status = 'ACTIVE'`); err != nil {
+		return err
+	}
+	// devices
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity.device_registrations (id, user_account_id, platform, status)
+		VALUES ('device_001', 'user_001', 'IOS', 'ACTIVE')
+		ON CONFLICT (id) DO UPDATE SET status = 'ACTIVE'`); err != nil {
+		return err
+	}
+	return nil
 }
 
 func localIdentityService(provider identity.LoginChallengeProvider, simulated bool) *identity.Service {

@@ -120,14 +120,21 @@ func updateLoginChallenge(ctx context.Context, execer sqlExecer, challenge ident
 
 func (r *IdentityRepository) GetDevice(ctx context.Context, id string) (identity.DeviceRegistration, error) {
 	var device identity.DeviceRegistration
+	var pushTokenRef *string
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT id, user_account_id, platform, status, push_token_ref
 		FROM identity.device_registrations
-		WHERE id = $1`, id).Scan(&device.ID, &device.UserAccountID, &device.Platform, &device.Status, &device.PushTokenRef)
+		WHERE id = $1`, id).Scan(&device.ID, &device.UserAccountID, &device.Platform, &device.Status, &pushTokenRef)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.DeviceRegistration{}, identity.ErrDeviceNotFound
 	}
-	return device, err
+	if err != nil {
+		return identity.DeviceRegistration{}, err
+	}
+	if pushTokenRef != nil {
+		device.PushTokenRef = *pushTokenRef
+	}
+	return device, nil
 }
 
 func (r *IdentityRepository) UpsertDevice(ctx context.Context, device identity.DeviceRegistration) error {

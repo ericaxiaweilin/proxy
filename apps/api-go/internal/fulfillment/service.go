@@ -111,6 +111,13 @@ type Repository interface {
 	Snapshot(ctx context.Context) ([]Order, error)
 }
 
+// TransactionalRepository 由支持事务性 outbox 的存储实现（订单与事件原子提交）。
+type TransactionalRepository interface {
+	Repository
+	CreateOrderAndPublish(ctx context.Context, o Order, domainEvents []event.DomainEvent) error
+	UpdateOrderAndPublish(ctx context.Context, o Order, expectedVersion int, domainEvents []event.DomainEvent) error
+}
+
 var (
 	ErrOrderNotFound   = errors.New("order not found")
 	ErrVersionConflict = errors.New("order version conflict")
@@ -136,6 +143,17 @@ func (r *MemoryRepository) CreateOrder(_ context.Context, o Order) error {
 	return nil
 }
 
+func (r *MemoryRepository) CreateOrderAndPublish(_ context.Context, o Order, domainEvents []event.DomainEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.orders[o.ID]; exists {
+		return errors.New("order already exists")
+	}
+	r.orders[o.ID] = cloneOrder(o)
+	r.events = append(r.events, domainEvents...)
+	return nil
+}
+
 func (r *MemoryRepository) GetOrder(_ context.Context, id string) (Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -157,6 +175,21 @@ func (r *MemoryRepository) UpdateOrder(_ context.Context, o Order, expectedVersi
 		return ErrVersionConflict
 	}
 	r.orders[o.ID] = cloneOrder(o)
+	return nil
+}
+
+func (r *MemoryRepository) UpdateOrderAndPublish(_ context.Context, o Order, expectedVersion int, domainEvents []event.DomainEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, exists := r.orders[o.ID]
+	if !exists {
+		return ErrOrderNotFound
+	}
+	if current.Version != expectedVersion {
+		return ErrVersionConflict
+	}
+	r.orders[o.ID] = cloneOrder(o)
+	r.events = append(r.events, domainEvents...)
 	return nil
 }
 
@@ -186,7 +219,7 @@ func cloneOrder(o Order) Order {
 
 type Service struct {
 	mu         sync.Mutex
-	repository Repository
+	repository TransactionalRepository
 	clock      clock.Clock
 }
 
@@ -194,7 +227,7 @@ func New() *Service {
 	return NewWithRepository(NewMemoryRepository())
 }
 
-func NewWithRepository(repository Repository) *Service {
+func NewWithRepository(repository TransactionalRepository) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}
@@ -302,7 +335,7 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 		"settlementMode":    p.SettlementMode,
 		"note":              "Gate G：Order 创建前冻结快照",
 	})}
-	if err := s.repository.CreateOrder(ctx, order); err != nil {
+	if err := s.repository.CreateOrderAndPublish(ctx, order, domainEvents); err != nil {
 		return command.Rejected(e, "OFFER_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.offer_failed", nil)
 	}
 	return acceptedWithPayload(e, "Order", order.ID, 1, order.Lifecycle, map[string]any{
@@ -334,7 +367,7 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 	domainEvents := []event.DomainEvent{event.New("CooperationConfirmed", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, order.UpdatedAt, map[string]any{
 		"snapshot": order.Snapshot,
 	})}
-	if err := s.repository.UpdateOrder(ctx, order, order.Version-1); err != nil {
+	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
 		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -360,7 +393,7 @@ func (s *Service) startExecution(ctx context.Context, e command.Envelope) comman
 	order.Version++
 	order.UpdatedAt = s.clock.Now().UTC()
 	domainEvents := []event.DomainEvent{event.New("ExecutionStarted", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, order.UpdatedAt, map[string]any{})}
-	if err := s.repository.UpdateOrder(ctx, order, order.Version-1); err != nil {
+	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
 		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -418,7 +451,7 @@ func (s *Service) recordDirectSettlement(ctx context.Context, e command.Envelope
 		"payeeConfirmed": p.PayeeConfirmed,
 		"note":          "DIRECT_SETTLEMENT 不创建 Platform Funding 假记录；双方确认是声明信号，不等于平台物理验证现金",
 	})}
-	if err := s.repository.UpdateOrder(ctx, order, order.Version-1); err != nil {
+	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
 		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -465,7 +498,7 @@ func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command
 		"scopeCompleted": p.ScopeCompleted,
 		"materialChanges": p.MaterialChanges,
 	})}
-	if err := s.repository.UpdateOrder(ctx, order, order.Version-1); err != nil {
+	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
 		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
@@ -535,7 +568,7 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 		"description": p.Description,
 		"note":        "Material Change 产生新版本/amendment，不得静默覆盖",
 	})}
-	if err := s.repository.UpdateOrder(ctx, order, order.Version-1); err != nil {
+	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
 		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
 	}
 	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))

@@ -1,0 +1,428 @@
+package postgres
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/proxy-app/proxy-api/internal/conversation"
+	"github.com/proxy-app/proxy-api/internal/engagement"
+	"github.com/proxy-app/proxy-api/internal/localcontext"
+	"github.com/proxy-app/proxy-api/internal/localnet"
+)
+
+// ---------- LocalNet ----------
+
+type LocalNetRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewLocalNetRepository(pool *pgxpool.Pool) *LocalNetRepository {
+	return &LocalNetRepository{pool: pool}
+}
+
+func (r *LocalNetRepository) CreatePost(ctx context.Context, post localnet.Post) error {
+	mediaRefs, contextRefs, err := encodePostJSON(post)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO localnet.posts (id, author_type, author_id, body, media_refs,
+			visibility, city_scope, status, context_refs, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		post.ID, post.AuthorType, post.AuthorID, post.Body, mediaRefs,
+		post.Visibility, post.CityScope, post.Status, contextRefs, post.CreatedAt,
+	)
+	return err
+}
+
+func (r *LocalNetRepository) GetPost(ctx context.Context, id string) (localnet.Post, error) {
+	var post localnet.Post
+	var mediaRefs, contextRefs []byte
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, author_type, author_id, body, media_refs,
+			visibility, city_scope, status, context_refs, created_at
+		FROM localnet.posts WHERE id = $1`, id).Scan(
+		&post.ID, &post.AuthorType, &post.AuthorID, &post.Body, &mediaRefs,
+		&post.Visibility, &post.CityScope, &post.Status, &contextRefs, &post.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return localnet.Post{}, localnet.ErrPostNotFound
+	}
+	if err != nil {
+		return localnet.Post{}, err
+	}
+	if err := json.Unmarshal(mediaRefs, &post.MediaRefs); err != nil {
+		return post, fmt.Errorf("decode media refs: %w", err)
+	}
+	if err := json.Unmarshal(contextRefs, &post.ContextRefs); err != nil {
+		return post, fmt.Errorf("decode context refs: %w", err)
+	}
+	return post, nil
+}
+
+func (r *LocalNetRepository) UpdatePost(ctx context.Context, post localnet.Post, _ int) error {
+	mediaRefs, contextRefs, err := encodePostJSON(post)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE localnet.posts SET body=$1, media_refs=$2, status=$3, context_refs=$4
+		WHERE id=$5`,
+		post.Body, mediaRefs, post.Status, contextRefs, post.ID,
+	)
+	return err
+}
+
+func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, author_type, author_id, body, media_refs,
+			visibility, city_scope, status, context_refs, created_at
+		FROM localnet.posts ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []localnet.Post{}
+	for rows.Next() {
+		var post localnet.Post
+		var mediaRefs, contextRefs []byte
+		if err := rows.Scan(
+			&post.ID, &post.AuthorType, &post.AuthorID, &post.Body, &mediaRefs,
+			&post.Visibility, &post.CityScope, &post.Status, &contextRefs, &post.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(mediaRefs, &post.MediaRefs)
+		_ = json.Unmarshal(contextRefs, &post.ContextRefs)
+		result = append(result, post)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *LocalNetRepository) SaveNeedFromPost(ctx context.Context, record localnet.NeedFromPost) error {
+	lineage, err := json.Marshal(record.Lineage)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO localnet.need_from_posts (need_id, post_id, lineage, created_at)
+		VALUES ($1,$2,$3,$4)`,
+		record.NeedID, record.PostID, lineage, record.CreatedAt,
+	)
+	return err
+}
+
+func (r *LocalNetRepository) SnapshotNeeds(ctx context.Context) ([]localnet.NeedFromPost, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT need_id, post_id, lineage, created_at FROM localnet.need_from_posts ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []localnet.NeedFromPost{}
+	for rows.Next() {
+		var record localnet.NeedFromPost
+		var lineage []byte
+		if err := rows.Scan(&record.NeedID, &record.PostID, &lineage, &record.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(lineage, &record.Lineage)
+		result = append(result, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func encodePostJSON(post localnet.Post) ([]byte, []byte, error) {
+	mediaRefs, err := json.Marshal(post.MediaRefs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode media refs: %w", err)
+	}
+	contextRefs, err := json.Marshal(post.ContextRefs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode context refs: %w", err)
+	}
+	return mediaRefs, contextRefs, nil
+}
+
+var _ localnet.Repository = (*LocalNetRepository)(nil)
+
+// ---------- LocalContext ----------
+
+type LocalContextRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewLocalContextRepository(pool *pgxpool.Pool) *LocalContextRepository {
+	return &LocalContextRepository{pool: pool}
+}
+
+func (r *LocalContextRepository) GetContext(ctx context.Context, actorID string) (localcontext.LocalContext, error) {
+	var lc localcontext.LocalContext
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT market_id, market_label, area_id, area_label, source, precision, updated_at
+		FROM localcontext.contexts WHERE actor_id = $1`, actorID).Scan(
+		&lc.MarketID, &lc.MarketLabel, &lc.AreaID, &lc.AreaLabel, &lc.Source, &lc.Precision, &lc.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return localcontext.LocalContext{}, localcontext.ErrContextNotFound
+	}
+	return lc, err
+}
+
+func (r *LocalContextRepository) SetContext(ctx context.Context, actorID string, lc localcontext.LocalContext) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO localcontext.contexts (actor_id, market_id, market_label, area_id, area_label, source, precision, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (actor_id) DO UPDATE SET
+			market_id=$2, market_label=$3, area_id=$4, area_label=$5, source=$6, precision=$7, updated_at=$8`,
+		actorID, lc.MarketID, lc.MarketLabel, lc.AreaID, lc.AreaLabel, lc.Source, lc.Precision, lc.UpdatedAt,
+	)
+	return err
+}
+
+func (r *LocalContextRepository) Snapshot(ctx context.Context) ([]localcontext.LocalContext, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT market_id, market_label, area_id, area_label, source, precision, updated_at
+		FROM localcontext.contexts ORDER BY market_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []localcontext.LocalContext{}
+	for rows.Next() {
+		var lc localcontext.LocalContext
+		if err := rows.Scan(&lc.MarketID, &lc.MarketLabel, &lc.AreaID, &lc.AreaLabel, &lc.Source, &lc.Precision, &lc.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, lc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+var _ localcontext.Repository = (*LocalContextRepository)(nil)
+
+// ---------- Conversation ----------
+
+type ConversationRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewConversationRepository(pool *pgxpool.Pool) *ConversationRepository {
+	return &ConversationRepository{pool: pool}
+}
+
+func (r *ConversationRepository) CreateConversation(ctx context.Context, c conversation.Conversation) error {
+	participants, err := json.Marshal(c.Participants)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.conversations (id, type, origin_type, origin_id, market_id, state, participants, created_at, last_message_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		c.ID, c.Type, c.OriginType, c.OriginID, c.MarketID, c.State, participants, c.CreatedAt, c.LastMessageAt,
+	)
+	return err
+}
+
+func (r *ConversationRepository) GetConversation(ctx context.Context, id string) (conversation.Conversation, error) {
+	var c conversation.Conversation
+	var participants []byte
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, type, origin_type, origin_id, market_id, state, participants, created_at, last_message_at
+		FROM conversation.conversations WHERE id = $1`, id).Scan(
+		&c.ID, &c.Type, &c.OriginType, &c.OriginID, &c.MarketID, &c.State, &participants, &c.CreatedAt, &c.LastMessageAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return conversation.Conversation{}, conversation.ErrConversationNotFound
+	}
+	if err != nil {
+		return conversation.Conversation{}, err
+	}
+	if err := json.Unmarshal(participants, &c.Participants); err != nil {
+		return c, fmt.Errorf("decode participants: %w", err)
+	}
+	return c, nil
+}
+
+func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversation.Message) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE conversation.conversations SET last_message_at = $1 WHERE id = $2`,
+		m.CreatedAt, m.ConversationID,
+	)
+	return err
+}
+
+func (r *ConversationRepository) Messages(ctx context.Context, conversationID string) ([]conversation.Message, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at
+		FROM conversation.messages WHERE conversation_id = $1 ORDER BY created_at`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []conversation.Message{}
+	for rows.Next() {
+		var m conversation.Message
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.MessageType, &m.Body, &m.MediaRef, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *ConversationRepository) SaveNeedDraft(ctx context.Context, d conversation.NeedDraft) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.need_drafts (id, conversation_id, summary, confirmed, need_id, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)`,
+		d.DraftID, d.ConversationID, d.Summary, d.Confirmed, d.NeedID, d.CreatedAt,
+	)
+	return err
+}
+
+func (r *ConversationRepository) GetNeedDraft(ctx context.Context, draftID string) (conversation.NeedDraft, error) {
+	var d conversation.NeedDraft
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, conversation_id, summary, confirmed, need_id, created_at
+		FROM conversation.need_drafts WHERE id = $1`, draftID).Scan(
+		&d.DraftID, &d.ConversationID, &d.Summary, &d.Confirmed, &d.NeedID, &d.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return conversation.NeedDraft{}, conversation.ErrDraftNotFound
+	}
+	return d, err
+}
+
+func (r *ConversationRepository) UpdateNeedDraft(ctx context.Context, d conversation.NeedDraft) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE conversation.need_drafts SET summary=$1, confirmed=$2, need_id=$3 WHERE id=$4`,
+		d.Summary, d.Confirmed, d.NeedID, d.DraftID,
+	)
+	return err
+}
+
+func (r *ConversationRepository) Snapshot(ctx context.Context) ([]conversation.Conversation, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, type, origin_type, origin_id, market_id, state, participants, created_at, last_message_at
+		FROM conversation.conversations ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []conversation.Conversation{}
+	for rows.Next() {
+		var c conversation.Conversation
+		var participants []byte
+		if err := rows.Scan(&c.ID, &c.Type, &c.OriginType, &c.OriginID, &c.MarketID, &c.State, &participants, &c.CreatedAt, &c.LastMessageAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(participants, &c.Participants)
+		result = append(result, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+var _ conversation.Repository = (*ConversationRepository)(nil)
+
+// ---------- Engagement ----------
+
+type EngagementRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewEngagementRepository(pool *pgxpool.Pool) *EngagementRepository {
+	return &EngagementRepository{pool: pool}
+}
+
+func (r *EngagementRepository) AddFollow(ctx context.Context, f engagement.Follow) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO engagement.follows (follower_id, followee_id, created_at)
+		VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+		f.FollowerID, f.FolloweeID, f.CreatedAt,
+	)
+	return err
+}
+
+func (r *EngagementRepository) AddReaction(ctx context.Context, re engagement.Reaction) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at)
+		VALUES ($1,$2,$3,$4,$5)`,
+		re.ID, re.PostID, re.ActorID, re.Kind, re.CreatedAt,
+	)
+	return err
+}
+
+func (r *EngagementRepository) AddReply(ctx context.Context, re engagement.Reply) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO engagement.replies (id, post_id, actor_id, body, created_at)
+		VALUES ($1,$2,$3,$4,$5)`,
+		re.ID, re.PostID, re.ActorID, re.Body, re.CreatedAt,
+	)
+	return err
+}
+
+func (r *EngagementRepository) AddRepost(ctx context.Context, re engagement.Repost) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO engagement.reposts (id, post_id, actor_id, created_at)
+		VALUES ($1,$2,$3,$4)`,
+		re.ID, re.PostID, re.ActorID, re.CreatedAt,
+	)
+	return err
+}
+
+func (r *EngagementRepository) AddBookmark(ctx context.Context, b engagement.Bookmark) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO engagement.bookmarks (id, post_id, actor_id, created_at)
+		VALUES ($1,$2,$3,$4)`,
+		b.ID, b.PostID, b.ActorID, b.CreatedAt,
+	)
+	return err
+}
+
+func (r *EngagementRepository) Engagement(ctx context.Context, postID string) (engagement.PostEngagement, error) {
+	e := engagement.PostEngagement{PostID: postID}
+	var reactions, replies, reposts int
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT COUNT(*) FROM engagement.reactions WHERE post_id=$1`, postID).Scan(&reactions); err != nil {
+		return e, err
+	}
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT COUNT(*) FROM engagement.replies WHERE post_id=$1`, postID).Scan(&replies); err != nil {
+		return e, err
+	}
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT COUNT(*) FROM engagement.reposts WHERE post_id=$1`, postID).Scan(&reposts); err != nil {
+		return e, err
+	}
+	e.Reactions, e.Replies, e.Reposts = reactions, replies, reposts
+	return e, nil
+}
+
+var _ engagement.Repository = (*EngagementRepository)(nil)
