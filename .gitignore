@@ -21,3 +21,4 @@ apps/mobile/android/local.properties
 apps/mobile/ios/Pods/
 apps/mobile/ios/build/
 apps/mobile/ios/.xcode.env.local
+apps/api-go/media_store/

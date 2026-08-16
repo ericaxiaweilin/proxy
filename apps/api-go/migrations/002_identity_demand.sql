@@ -22,14 +22,22 @@ CREATE TABLE IF NOT EXISTS identity.login_identities (
 
 CREATE TABLE IF NOT EXISTS identity.login_challenges (
     id TEXT PRIMARY KEY,
+    user_account_id TEXT,
     login_identity_id TEXT NOT NULL,
     device_id TEXT NOT NULL,
     channel TEXT NOT NULL,
+    provider_ref TEXT,
     status TEXT NOT NULL,
     code_hash TEXT,
+    attempts INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL DEFAULT 5,
+    version INT NOT NULL DEFAULT 1,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ,
     verified_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    consumed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS identity.device_registrations (
@@ -71,6 +79,8 @@ CREATE TABLE IF NOT EXISTS identity.memberships (
     principal_id TEXT NOT NULL,
     user_account_id TEXT NOT NULL,
     status TEXT NOT NULL,
+    version INT NOT NULL DEFAULT 1,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (principal_type, principal_id)
 );
 
@@ -88,13 +98,3 @@ CREATE TABLE IF NOT EXISTS demand.task_drafts (
     slots JSONB NOT NULL DEFAULT '[]',
     updated_at TIMESTAMPTZ NOT NULL
 );
-
--- login_challenges 列对齐（identity.go INSERT 需要）
-ALTER TABLE identity.login_challenges
-    ADD COLUMN IF NOT EXISTS user_account_id TEXT,
-    ADD COLUMN IF NOT EXISTS provider_ref TEXT,
-    ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS max_attempts INT NOT NULL DEFAULT 5,
-    ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1,
-    ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    ADD COLUMN IF NOT EXISTS consumed_at TIMESTAMPTZ;
