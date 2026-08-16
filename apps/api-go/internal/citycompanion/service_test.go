@@ -200,3 +200,105 @@ func parseCandidates(t *testing.T, raw string) []Candidate {
 	}
 	return view.Candidates
 }
+
+// ---------- R2 行程规划测试 ----------
+
+func TestGenerateAndAcceptRoute(t *testing.T) {
+	s := New()
+	needID := createNeed(t, s)
+
+	// 生成路线（FOOD 风格）
+	e := envelopeFor(needID, "GenerateCityCompanionRoute", map[string]any{
+		"expectedVersion": 1,
+		"style":           "FOOD",
+	})
+	result := s.Handle(e)
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("generate route: got %s (%+v)", result.Outcome, result.Error)
+	}
+	// 路线在 OperationRef 里
+	var view struct {
+		Route CityRoute `json:"route"`
+		Note  string    `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &view); err != nil {
+		t.Fatalf("parse route: %v", err)
+	}
+	if view.Route.Version != 1 || view.Route.Style != "FOOD" {
+		t.Fatalf("route wrong: %+v", view.Route)
+	}
+	if len(view.Route.Stops) == 0 {
+		t.Fatal("route has no stops")
+	}
+	// AI involvement HIGH / authority LOW：note 必须存在
+	if view.Note == "" {
+		t.Fatal("missing route governance note")
+	}
+	// 场景可替换标注（不能静默锁定商家）
+	foundReplaceable := false
+	for _, st := range view.Route.Stops {
+		if st.Note != "" && contains(st.Note, "可替换") {
+			foundReplaceable = true
+		}
+	}
+	if !foundReplaceable {
+		t.Fatal("route stops must mark replaceable venues (AI cannot lock merchant arrangements)")
+	}
+
+	// 接受路线
+	version := result.Aggregate.Version
+	e2 := envelopeFor(needID, "AcceptCityCompanionRoute", map[string]any{"expectedVersion": version})
+	r2 := s.Handle(e2)
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("accept route: got %s (%+v)", r2.Outcome, r2.Error)
+	}
+
+	// 未生成路线就接受 → 拒绝
+	s2 := New()
+	needID2 := createNeed(t, s2)
+	e3 := envelopeFor(needID2, "AcceptCityCompanionRoute", map[string]any{"expectedVersion": 1})
+	r3 := s2.Handle(e3)
+	if r3.Outcome != "REJECTED" || r3.Error.ErrorCode != "ROUTE_NOT_GENERATED" {
+		t.Fatalf("want ROUTE_NOT_GENERATED, got %s/%+v", r3.Outcome, r3.Error)
+	}
+}
+
+func TestMaterialRouteChange(t *testing.T) {
+	s := New()
+	needID := createNeed(t, s)
+
+	e := envelopeFor(needID, "RecordMaterialRouteChange", map[string]any{
+		"expectedVersion": 1,
+		"description":     "原定还剑湖行程因下雨改为室内咖啡馆",
+		"reConfirmed":     true,
+	})
+	result := s.Handle(e)
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("material change: got %s (%+v)", result.Outcome, result.Error)
+	}
+	if result.Aggregate.Version != 2 {
+		t.Fatalf("want version 2 after change, got %d", result.Aggregate.Version)
+	}
+	// 空描述 → 拒绝
+	e2 := envelopeFor(needID, "RecordMaterialRouteChange", map[string]any{
+		"expectedVersion": 2,
+		"description":     "",
+	})
+	r2 := s.Handle(e2)
+	if r2.Outcome != "REJECTED" {
+		t.Fatalf("want REJECTED for empty description, got %s", r2.Outcome)
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || indexOf(s, sub) >= 0)
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}

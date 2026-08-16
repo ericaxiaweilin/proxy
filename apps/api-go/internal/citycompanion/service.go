@@ -29,6 +29,8 @@ type CityCompanionNeed struct {
 	Interests      []string          `json:"interests"`       // 咖啡 / 拍照 / 夜生活 ...
 	Meeting        string            `json:"meeting"`         // 集合点
 	BudgetVND      int64             `json:"budgetVnd"`       // 预算参考（实验值，非 Price Floor）
+	Route          *CityRoute        `json:"route,omitempty"` // 行程方案（R2 §10）
+	RouteChanges   []MaterialRouteChange `json:"routeChanges"` // material_route_changes[]
 	ConfirmedAgent *ConfirmedAgent   `json:"confirmedAgent,omitempty"`
 	SceneVisits    []SceneCommerceVisit `json:"sceneVisits"`
 	UpdatedAt      time.Time         `json:"updatedAt"`
@@ -169,6 +171,12 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]CityCompanionNeed, err
 func cloneNeed(need CityCompanionNeed) CityCompanionNeed {
 	need.Interests = append([]string(nil), need.Interests...)
 	need.SceneVisits = append([]SceneCommerceVisit(nil), need.SceneVisits...)
+	need.RouteChanges = append([]MaterialRouteChange(nil), need.RouteChanges...)
+	if need.Route != nil {
+		copy := *need.Route
+		copy.Stops = append([]RouteStop(nil), need.Route.Stops...)
+		need.Route = &copy
+	}
 	if need.ConfirmedAgent != nil {
 		copy := *need.ConfirmedAgent
 		need.ConfirmedAgent = &copy
@@ -205,7 +213,8 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateCityCompanionNeed", "ListCityCompanionCandidates",
-		"ConfirmCityCompanion", "CompleteCityCompanion", "RecordSceneCommerceVisit":
+		"ConfirmCityCompanion", "CompleteCityCompanion", "RecordSceneCommerceVisit",
+		"GenerateCityCompanionRoute", "AcceptCityCompanionRoute", "RecordMaterialRouteChange":
 		return true
 	default:
 		return false
@@ -230,6 +239,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.complete(ctx, e)
 	case "RecordSceneCommerceVisit":
 		return s.recordSceneVisit(ctx, e)
+	case "GenerateCityCompanionRoute":
+		return s.generateRoute(ctx, e)
+	case "AcceptCityCompanionRoute":
+		return s.acceptRoute(ctx, e)
+	case "RecordMaterialRouteChange":
+		return s.recordMaterialRouteChange(ctx, e)
 	default:
 		return command.Rejected(e, "CITY_COMPANION_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "citycompanion.unsupported_command", nil)
 	}
@@ -322,7 +337,7 @@ func (s *Service) listCandidates(ctx context.Context, e command.Envelope) comman
 		"needId":     need.ID,
 		"candidates": candidates,
 		"eligibilityNote": "Eligibility before Ranking：资格 + 可用性 + 履约 + 本单适配；候选来自本单需求，非公开目录。",
-	})
+	}, nil)
 }
 
 // eligible 实现 Eligibility before Ranking。
@@ -513,7 +528,252 @@ func (s *Service) recordSceneVisit(ctx context.Context, e command.Envelope) comm
 	return command.Accepted(e, "CityCompanionNeed", need.ID, need.Version, need.Lifecycle, eventRefs(domainEvents))
 }
 
+// ---------- 行程规划（R2 §10 履约主链：Route / Scope Preview）----------
+// 对齐 PRD：AI involvement HIGH / transaction authority LOW——AI 可规划路线/场景/节奏，
+// 但不能静默锁定消费、价格、人选或不可取消的商家安排。
+
+// RouteStop 是行程中的一站（场景）。
+type RouteStop struct {
+	VenueID   string `json:"venueId"`
+	Name      string `json:"name"`
+	VenueType string `json:"venueType"` // cafe | restaurant | sight | photo | market ...
+	Note      string `json:"note,omitempty"`
+}
+
+// CityRoute 是生成/确认的行程方案。
+type CityRoute struct {
+	Version      int         `json:"version"`
+	Style        string      `json:"style"` // RELAXED | FOOD | LOCAL
+	Pace         string      `json:"pace"`
+	Distance     string      `json:"distance"`
+	EstimatedSpend string    `json:"estimatedSpend"`
+	Stops        []RouteStop `json:"stops"`
+	Accepted     bool        `json:"accepted"`
+}
+
+// MaterialRouteChange 是行程重大变化记录（R2 §10 material_route_changes[]）。
+type MaterialRouteChange struct {
+	ChangeID    string    `json:"changeId"`
+	Description string    `json:"description"`
+	ReConfirmed bool      `json:"reConfirmed"`
+	RecordedAt  time.Time `json:"recordedAt"`
+}
+
+// ---------- GenerateCityCompanionRoute ----------
+// AI involvement HIGH / transaction authority LOW：生成路线是建议方案，不锁定任何商业安排。
+
+type generateRoutePayload struct {
+	ExpectedVersion int    `json:"expectedVersion"`
+	Style           string `json:"style"` // RELAXED | FOOD | LOCAL
+}
+
+var routeSceneCatalog = map[string][]RouteStop{
+	"RELAXED": {
+		{VenueID: "sight_hoankiem", Name: "还剑湖", VenueType: "sight", Note: "湖边散步 + 拍照"},
+		{VenueID: "cafe_oldquarter", Name: "老街咖啡馆", VenueType: "cafe", Note: "本地咖啡 · 可替换"},
+		{VenueID: "photo_trainstreet", Name: "火车街", VenueType: "photo", Note: "经典拍照点"},
+	},
+	"FOOD": {
+		{VenueID: "cafe_eggcoffee", Name: "鸡蛋咖啡", VenueType: "cafe", Note: "河内特色 · 可替换"},
+		{VenueID: "rest_pho", Name: "本地 Pho", VenueType: "restaurant", Note: "非游客店 · 可替换"},
+		{VenueID: "market_dongxuan", Name: "同春市场", VenueType: "market", Note: "小吃 + 本地生活"},
+	},
+	"LOCAL": {
+		{VenueID: "street_hoan", Name: "老街巷子", VenueType: "sight", Note: "小店 · 街区"},
+		{VenueID: "market_dongxuan", Name: "同春市场", VenueType: "market", Note: "本地生活"},
+		{VenueID: "cafe_local", Name: "社区咖啡馆", VenueType: "cafe", Note: "本地日常 · 可替换"},
+	},
+}
+
+func (s *Service) generateRoute(ctx context.Context, e command.Envelope) command.Result {
+	var p generateRoutePayload
+	if !decode(e.Payload, &p) || p.ExpectedVersion <= 0 {
+		return command.Rejected(e, "INVALID_ROUTE_GENERATION", "VALIDATION", "AFTER_USER_ACTION", "citycompanion.invalid_route_generation", nil)
+	}
+	if p.Style != "RELAXED" && p.Style != "FOOD" && p.Style != "LOCAL" {
+		p.Style = "RELAXED"
+	}
+	need, err := s.repository.GetNeed(ctx, e.Target.ID)
+	if errors.Is(err, ErrNeedNotFound) {
+		return command.Rejected(e, "CITY_COMPANION_NEED_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "citycompanion.need_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "CITY_COMPANION_NEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "citycompanion.need_read_failed", nil)
+	}
+	if !canOperate(need, e) {
+		return command.Rejected(e, "ROUTE_GENERATION_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "citycompanion.route_generation_not_allowed", nil)
+	}
+	if p.ExpectedVersion != need.Version {
+		return command.Rejected(e, "CITY_COMPANION_NEED_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "citycompanion.need_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion})
+	}
+	if need.Lifecycle != "CANDIDATES" && need.Lifecycle != "DRAFT" {
+		return command.Rejected(e, "ROUTE_GENERATION_NOT_ALLOWED_LIFECYCLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "citycompanion.route_generation_lifecycle", map[string]any{"lifecycle": need.Lifecycle})
+	}
+	stops := routeSceneCatalog[p.Style]
+	nextVersion := 1
+	if need.Route != nil {
+		nextVersion = need.Route.Version + 1
+	}
+	route := CityRoute{
+		Version:        nextVersion,
+		Style:          p.Style,
+		Pace:           paceLabel(p.Style),
+		Distance:       distanceLabel(p.Style),
+		EstimatedSpend: spendLabel(need.Duration, p.Style),
+		Stops:          stops,
+		Accepted:       false,
+	}
+	need.Route = &route
+	need.Version++
+	need.UpdatedAt = s.clock.Now().UTC()
+	domainEvents := []event.DomainEvent{event.New("CityCompanionRouteGenerated", "CityCompanionNeed", need.ID, need.Version, e.Principal.ID, e.CorrelationID, e.CommandID, need.UpdatedAt, map[string]any{
+		"routeVersion": route.Version,
+		"style":        route.Style,
+		"stops":        stopNames(stops),
+		"note":         "AI involvement HIGH / transaction authority LOW：路线是建议方案，不锁定消费/价格/人选/商家安排",
+	})}
+	if err := s.repository.UpdateNeed(ctx, need, p.ExpectedVersion); err != nil {
+		if errors.Is(err, ErrVersionConflict) {
+			return command.Rejected(e, "CITY_COMPANION_NEED_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "citycompanion.need_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion})
+		}
+		return command.Rejected(e, "ROUTE_GENERATION_FAILED", "INTERNAL", "SAFE_RETRY", "citycompanion.route_generation_failed", nil)
+	}
+	return acceptedWithPayload(e, "CityCompanionNeed", need.ID, need.Version, need.Lifecycle, map[string]any{
+		"needId": need.ID,
+		"route":  route,
+		"note":   "路线会参与匹配但不会锁死；成交后仍可调整",
+	}, domainEvents)
+}
+
+// ---------- AcceptCityCompanionRoute ----------
+// "用这条路线去选人"：确认路线后进入候选匹配（不锁定商业安排）。
+
+func (s *Service) acceptRoute(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		ExpectedVersion int `json:"expectedVersion"`
+	}
+	if !decode(e.Payload, &p) || p.ExpectedVersion <= 0 {
+		return command.Rejected(e, "INVALID_ROUTE_ACCEPT", "VALIDATION", "AFTER_USER_ACTION", "citycompanion.invalid_route_accept", nil)
+	}
+	need, err := s.repository.GetNeed(ctx, e.Target.ID)
+	if errors.Is(err, ErrNeedNotFound) {
+		return command.Rejected(e, "CITY_COMPANION_NEED_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "citycompanion.need_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "CITY_COMPANION_NEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "citycompanion.need_read_failed", nil)
+	}
+	if !canOperate(need, e) {
+		return command.Rejected(e, "ROUTE_ACCEPT_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "citycompanion.route_accept_not_allowed", nil)
+	}
+	if p.ExpectedVersion != need.Version {
+		return command.Rejected(e, "CITY_COMPANION_NEED_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "citycompanion.need_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion})
+	}
+	if need.Route == nil {
+		return command.Rejected(e, "ROUTE_NOT_GENERATED", "BUSINESS_STATE", "AFTER_USER_ACTION", "citycompanion.route_not_generated", nil)
+	}
+	need.Route.Accepted = true
+	need.Version++
+	need.UpdatedAt = s.clock.Now().UTC()
+	domainEvents := []event.DomainEvent{event.New("CityCompanionRouteAccepted", "CityCompanionNeed", need.ID, need.Version, e.Principal.ID, e.CorrelationID, e.CommandID, need.UpdatedAt, map[string]any{
+		"routeVersion": need.Route.Version,
+	})}
+	if err := s.repository.UpdateNeed(ctx, need, p.ExpectedVersion); err != nil {
+		if errors.Is(err, ErrVersionConflict) {
+			return command.Rejected(e, "CITY_COMPANION_NEED_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "citycompanion.need_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion})
+		}
+		return command.Rejected(e, "ROUTE_ACCEPT_FAILED", "INTERNAL", "SAFE_RETRY", "citycompanion.route_accept_failed", nil)
+	}
+	return command.Accepted(e, "CityCompanionNeed", need.ID, need.Version, need.Lifecycle, eventRefs(domainEvents))
+}
+
+// ---------- RecordMaterialRouteChange ----------
+// R2 §10 material_route_changes[]：行程重大变化记录并重新确认。
+
+type materialChangePayload struct {
+	ExpectedVersion int    `json:"expectedVersion"`
+	Description     string `json:"description"`
+	ReConfirmed     bool   `json:"reConfirmed"`
+}
+
+func (s *Service) recordMaterialRouteChange(ctx context.Context, e command.Envelope) command.Result {
+	var p materialChangePayload
+	if !decode(e.Payload, &p) || p.ExpectedVersion <= 0 || p.Description == "" {
+		return command.Rejected(e, "INVALID_MATERIAL_CHANGE", "VALIDATION", "AFTER_USER_ACTION", "citycompanion.invalid_material_change", nil)
+	}
+	need, err := s.repository.GetNeed(ctx, e.Target.ID)
+	if errors.Is(err, ErrNeedNotFound) {
+		return command.Rejected(e, "CITY_COMPANION_NEED_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "citycompanion.need_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "CITY_COMPANION_NEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "citycompanion.need_read_failed", nil)
+	}
+	if !canOperate(need, e) {
+		return command.Rejected(e, "MATERIAL_CHANGE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "citycompanion.material_change_not_allowed", nil)
+	}
+	if p.ExpectedVersion != need.Version {
+		return command.Rejected(e, "CITY_COMPANION_NEED_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "citycompanion.need_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion})
+	}
+	change := MaterialRouteChange{
+		ChangeID:    newID("chg_"),
+		Description: p.Description,
+		ReConfirmed: p.ReConfirmed,
+		RecordedAt:  s.clock.Now().UTC(),
+	}
+	need.RouteChanges = append(need.RouteChanges, change)
+	need.Version++
+	need.UpdatedAt = s.clock.Now().UTC()
+	domainEvents := []event.DomainEvent{event.New("MaterialRouteChangeRecorded", "CityCompanionNeed", need.ID, need.Version, e.Principal.ID, e.CorrelationID, e.CommandID, need.UpdatedAt, map[string]any{
+		"changeId":    change.ChangeID,
+		"description": change.Description,
+		"reConfirmed": change.ReConfirmed,
+	})}
+	if err := s.repository.UpdateNeed(ctx, need, p.ExpectedVersion); err != nil {
+		if errors.Is(err, ErrVersionConflict) {
+			return command.Rejected(e, "CITY_COMPANION_NEED_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "citycompanion.need_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion})
+		}
+		return command.Rejected(e, "MATERIAL_CHANGE_RECORD_FAILED", "INTERNAL", "SAFE_RETRY", "citycompanion.material_change_failed", nil)
+	}
+	return command.Accepted(e, "CityCompanionNeed", need.ID, need.Version, need.Lifecycle, eventRefs(domainEvents))
+}
+
 // ---------- helpers ----------
+
+func paceLabel(style string) string {
+	switch style {
+	case "RELAXED":
+		return "轻松 · 少赶路"
+	case "FOOD":
+		return "吃逛结合"
+	default:
+		return "本地节奏"
+	}
+}
+
+func distanceLabel(style string) string {
+	switch style {
+	case "RELAXED":
+		return "3–5 km"
+	case "FOOD":
+		return "2–4 km"
+	default:
+		return "1–3 km"
+	}
+}
+
+func spendLabel(duration, style string) string {
+	if duration == "8H" {
+		return "约 400–700k VND"
+	}
+	return "约 200–400k VND"
+}
+
+func stopNames(stops []RouteStop) []string {
+	names := make([]string, 0, len(stops))
+	for _, s := range stops {
+		names = append(names, s.Name)
+	}
+	return names
+}
 
 func (s *Service) inPool(agentID string) bool {
 	for _, c := range s.pool {
@@ -564,9 +824,9 @@ func eventRefs(events []event.DomainEvent) []string {
 	return refs
 }
 
-// acceptedWithPayload 返回 Accepted 结果并附带客户端负载（候选列表等）。
-func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, version int, state string, payload map[string]any) command.Result {
-	result := command.Accepted(e, aggregateType, aggregateID, version, state, nil)
+// acceptedWithPayload 返回 Accepted 结果并附带客户端负载（候选列表、路线等）。
+func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, version int, state string, payload map[string]any, domainEvents []event.DomainEvent) command.Result {
+	result := command.Accepted(e, aggregateType, aggregateID, version, state, eventRefs(domainEvents))
 	result.OperationRef = encodeRef(payload)
 	return result
 }
