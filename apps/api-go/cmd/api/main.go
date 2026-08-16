@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,15 +16,16 @@ import (
 	"github.com/proxy-app/proxy-api/internal/api"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
-	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/contribution"
+	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
-	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/localnet"
+	"github.com/proxy-app/proxy-api/internal/media"
+	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/supply"
 )
@@ -52,6 +54,12 @@ func main() {
 	supplyService := supply.New()
 	mediaService := media.New()
 	contributionService := contribution.New()
+	modelStack := configuredModelStack()
+	if modelStack.Available() {
+		log.Printf("proxy api go model stack adapter configured (business side sends task ids only)")
+	} else {
+		log.Printf("proxy api go model stack adapter unconfigured (fail-closed)")
+	}
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -78,7 +86,7 @@ func main() {
 		conversationService = conversation.NewWithRepository(postgres.NewConversationRepository(pool))
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
-		supplyService = supply.NewWithRepository(postgres.NewSupplyRepository(pool))
+		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
 		mediaService = media.NewWithDependencies(postgres.NewMediaRepository(pool), media.NewFFmpegProcessor(filepath.Join("media_store")))
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
 		localNetService = localnet.NewWithMediaLookup(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService))
@@ -93,6 +101,11 @@ func main() {
 	}()
 
 	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, supplyService, mediaService, contributionService, idempotencyStore, readyCheck, authenticator, transactions)
+	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
+	// 未配置时 fail-closed：特权命令（审核/发奖/能力核验/媒体就绪覆盖）一律拒绝。
+	if operatorPrincipals := os.Getenv("PROXY_OPERATOR_PRINCIPALS"); operatorPrincipals != "" {
+		server.Operator = api.NewStaticOperatorGate(strings.Split(operatorPrincipals, ","))
+	}
 	address := ":" + port
 	if simulatedLogin {
 		log.Printf("proxy api go listening on %s with LOCAL simulated login provider", address)
@@ -127,6 +140,19 @@ func configuredLoginChallengeProvider() (identity.LoginChallengeProvider, bool) 
 		return identity.UnconfiguredLoginChallengeProvider{}, false
 	}
 	return identity.NewSimulatedLoginChallengeProvider(os.Getenv("PROXY_SIMULATED_OTP_CODE")), true
+}
+
+// configuredModelStack 装配公共模型底座适配器。业务侧契约：只发任务 ID，
+// 模型选择/Provider/凭证/failover 全部由底座负责。任一配置缺失时返回
+// fail-closed 的 Unconfigured 适配器，Domain 能力视为不可用。
+func configuredModelStack() modelstack.Port {
+	controlPlaneURL := os.Getenv("MODELSTACK_CONTROL_PLANE_URL")
+	gatewayURL := os.Getenv("MODELSTACK_GATEWAY_URL")
+	gatewayAPIKey := os.Getenv("MODELSTACK_GATEWAY_API_KEY")
+	if controlPlaneURL == "" || gatewayURL == "" || gatewayAPIKey == "" {
+		return modelstack.Unconfigured{}
+	}
+	return modelstack.New(controlPlaneURL, gatewayURL, gatewayAPIKey)
 }
 
 // seedPostgresIdentity 在 simulated 模式把开发用户幂等写入 Postgres

@@ -24,16 +24,16 @@ import (
 
 // Post 是本地动态的 durable content（PRD §4 Post Canonical Contract）。
 type Post struct {
-	ID            string        `json:"postId"`
-	AuthorType    string        `json:"authorType"` // USER | AGENT | MERCHANT | PLATFORM_SPECIAL
-	AuthorID      string        `json:"authorId"`
-	Body          string        `json:"body"`
-	MediaRefs     []PostMediaRef `json:"mediaRefs"` // R14 Adaptive Media Rail：带 sortOrder
-	Visibility    string        `json:"visibility"` // PUBLIC | FOLLOWERS | AGENT_ONLY
-	CityScope     string        `json:"cityScope,omitempty"`
-	Status        string        `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
-	ContextRefs   []ContextRef  `json:"contextRefs"`
-	CreatedAt     time.Time     `json:"createdAt"`
+	ID          string         `json:"postId"`
+	AuthorType  string         `json:"authorType"` // USER | AGENT | MERCHANT | PLATFORM_SPECIAL
+	AuthorID    string         `json:"authorId"`
+	Body        string         `json:"body"`
+	MediaRefs   []PostMediaRef `json:"mediaRefs"`  // R14 Adaptive Media Rail：带 sortOrder
+	Visibility  string         `json:"visibility"` // PUBLIC | FOLLOWERS | AGENT_ONLY
+	CityScope   string         `json:"cityScope,omitempty"`
+	Status      string         `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
+	ContextRefs []ContextRef   `json:"contextRefs"`
+	CreatedAt   time.Time      `json:"createdAt"`
 }
 
 // PostMediaRef 是 Post 的媒体引用（R14 §16.5：sort_order = 作者确认的展示顺序）。
@@ -44,16 +44,16 @@ type PostMediaRef struct {
 
 // PostMediaItem 是 Feed Read Model 的 Hydrate 媒体项（R14 §16.5 + R10 Gate F）。
 type PostMediaItem struct {
-	MediaAssetID     string `json:"mediaAssetId"`
-	MediaType        string `json:"mediaType"` // IMAGE | VIDEO
-	ThumbnailURL     string `json:"thumbnailUrl,omitempty"`
-	PlaybackURL      string `json:"playbackUrl,omitempty"`
-	Width            int    `json:"width"`
-	Height           int    `json:"height"`
+	MediaAssetID     string  `json:"mediaAssetId"`
+	MediaType        string  `json:"mediaType"` // IMAGE | VIDEO
+	ThumbnailURL     string  `json:"thumbnailUrl,omitempty"`
+	PlaybackURL      string  `json:"playbackUrl,omitempty"`
+	Width            int     `json:"width"`
+	Height           int     `json:"height"`
 	AspectRatio      float64 `json:"aspectRatio"`
-	DurationMs       int64  `json:"durationMs,omitempty"`
-	ProcessingStatus string `json:"processingStatus"`
-	SortOrder        int    `json:"sortOrder"`
+	DurationMs       int64   `json:"durationMs,omitempty"`
+	ProcessingStatus string  `json:"processingStatus"`
+	SortOrder        int     `json:"sortOrder"`
 }
 
 // MediaLookup 是媒体详情查询接口（由 media 包实现，注入避免循环依赖）。
@@ -82,21 +82,21 @@ type ContextRef struct {
 
 // DemandAttributionLineage 是订单来源完整链路（PRD §10）。
 type DemandAttributionLineage struct {
-	DemandOrigin      string `json:"demandOrigin"`      // PROXY_OWNED | PARTNER | AGENT_OWNED
-	SourceType        string `json:"sourceType"`        // POST_TO_DM | PROFILE_LINK | FOLLOW_REPLY | DIRECT | ...
-	SourceID          string `json:"sourceId"`
+	DemandOrigin       string `json:"demandOrigin"` // PROXY_OWNED | PARTNER | AGENT_OWNED
+	SourceType         string `json:"sourceType"`   // POST_TO_DM | PROFILE_LINK | FOLLOW_REPLY | DIRECT | ...
+	SourceID           string `json:"sourceId"`
 	CreatorPrincipalID string `json:"creatorPrincipalId,omitempty"`
-	ConversationID    string `json:"conversationId,omitempty"`
-	NeedID            string `json:"needId,omitempty"`
-	OrderID           string `json:"orderId,omitempty"`
+	ConversationID     string `json:"conversationId,omitempty"`
+	NeedID             string `json:"needId,omitempty"`
+	OrderID            string `json:"orderId,omitempty"`
 }
 
 // NeedFromPost 是 Post → Need 的显式转化记录。
 type NeedFromPost struct {
-	NeedID     string `json:"needId"`
-	PostID     string `json:"postId"`
-	Lineage    DemandAttributionLineage `json:"lineage"`
-	CreatedAt  time.Time `json:"createdAt"`
+	NeedID    string                   `json:"needId"`
+	PostID    string                   `json:"postId"`
+	Lineage   DemandAttributionLineage `json:"lineage"`
+	CreatedAt time.Time                `json:"createdAt"`
 }
 
 type Repository interface {
@@ -106,18 +106,33 @@ type Repository interface {
 	Snapshot(ctx context.Context) ([]Post, error)
 	SaveNeedFromPost(ctx context.Context, record NeedFromPost) error
 	SnapshotNeeds(ctx context.Context) ([]NeedFromPost, error)
+	AppendInteractionEvent(ctx context.Context, ie InteractionEvent) error
+	ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]InteractionEvent, error)
+}
+
+// InteractionEvent 是网络交互事件（C1 Event Stream 最小底座）。
+// 读侧事件：PROFILE_OPEN / POST_IMPRESSION / CANDIDATE_VIEWED / AGENT_SHORTLISTED。
+type InteractionEvent struct {
+	EventID    string    `json:"eventId"`
+	EventType  string    `json:"eventType"` // PROFILE_OPEN | POST_IMPRESSION | CANDIDATE_VIEWED | AGENT_SHORTLISTED
+	ActorID    string    `json:"actorId"`
+	TargetType string    `json:"targetType"` // PROFILE | POST | CANDIDATE | AGENT
+	TargetID   string    `json:"targetId"`
+	NeedID     string    `json:"needId,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 var (
-	ErrPostNotFound   = errors.New("post not found")
+	ErrPostNotFound    = errors.New("post not found")
 	ErrVersionConflict = errors.New("post version conflict")
 )
 
 type MemoryRepository struct {
-	mu    sync.Mutex
-	posts map[string]Post
-	needs []NeedFromPost
-	events []event.DomainEvent
+	mu                sync.Mutex
+	posts             map[string]Post
+	needs             []NeedFromPost
+	interactionEvents []InteractionEvent
+	events            []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -180,6 +195,29 @@ func (r *MemoryRepository) SnapshotNeeds(_ context.Context) ([]NeedFromPost, err
 	return result, nil
 }
 
+func (r *MemoryRepository) AppendInteractionEvent(_ context.Context, ie InteractionEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.interactionEvents = append(r.interactionEvents, ie)
+	return nil
+}
+
+func (r *MemoryRepository) ListInteractionEvents(_ context.Context, actorID string, limit int) ([]InteractionEvent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []InteractionEvent{}
+	for i := len(r.interactionEvents) - 1; i >= 0; i-- {
+		ie := r.interactionEvents[i]
+		if actorID == "" || ie.ActorID == actorID {
+			result = append(result, ie)
+			if limit > 0 && len(result) >= limit {
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 func clonePost(post Post) Post {
 	post.MediaRefs = append([]PostMediaRef(nil), post.MediaRefs...)
 	post.ContextRefs = append([]ContextRef(nil), post.ContextRefs...)
@@ -187,10 +225,10 @@ func clonePost(post Post) Post {
 }
 
 type Service struct {
-	mu         sync.Mutex
-	repository Repository
+	mu          sync.Mutex
+	repository  Repository
 	mediaLookup MediaLookup
-	clock      clock.Clock
+	clock       clock.Clock
 }
 
 func New() *Service {
@@ -221,7 +259,9 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreatePost", "ListFeedPosts", "CreateNeedFromPost", "RecordAttribution":
+	case "CreatePost", "ListFeedPosts", "CreateNeedFromPost", "RecordAttribution",
+		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed",
+		"ShortlistAgent", "ListInteractionEvents":
 		return true
 	default:
 		return false
@@ -244,6 +284,16 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.createNeedFromPost(ctx, e)
 	case "RecordAttribution":
 		return s.recordAttribution(ctx, e)
+	case "RecordProfileOpen":
+		return s.recordProfileOpen(ctx, e)
+	case "RecordPostImpression":
+		return s.recordPostImpression(ctx, e)
+	case "RecordCandidateViewed":
+		return s.recordCandidateViewed(ctx, e)
+	case "ShortlistAgent":
+		return s.shortlistAgent(ctx, e)
+	case "ListInteractionEvents":
+		return s.listInteractionEvents(ctx, e)
 	default:
 		return command.Rejected(e, "LOCAL_NET_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "localnet.unsupported_command", nil)
 	}
@@ -253,12 +303,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 // PRD §4/§11：Post = durable content；发布永不自动创建 Task。
 
 type createPostPayload struct {
-	AuthorType  string        `json:"authorType"`
-	Body        string        `json:"body"`
+	AuthorType  string         `json:"authorType"`
+	Body        string         `json:"body"`
 	MediaRefs   []PostMediaRef `json:"mediaRefs"` // R14：{mediaAssetId, sortOrder}，≤6
-	Visibility  string        `json:"visibility"`
-	CityScope   string        `json:"cityScope"`
-	ContextRefs []ContextRef  `json:"contextRefs"`
+	Visibility  string         `json:"visibility"`
+	CityScope   string         `json:"cityScope"`
+	ContextRefs []ContextRef   `json:"contextRefs"`
 }
 
 func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Result {
@@ -299,11 +349,11 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		CreatedAt:   s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, map[string]any{
-		"authorType": post.AuthorType,
-		"body":       post.Body,
-		"visibility": post.Visibility,
+		"authorType":  post.AuthorType,
+		"body":        post.Body,
+		"visibility":  post.Visibility,
 		"contextRefs": post.ContextRefs,
-		"note":       "Post 发布永不自动创建 Task；Intent 经 DM / 显式 Need 涌现",
+		"note":        "Post 发布永不自动创建 Task；Intent 经 DM / 显式 Need 涌现",
 	})}
 	if err := s.repository.CreatePost(ctx, post); err != nil {
 		return command.Rejected(e, "POST_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_create_failed", nil)
@@ -393,12 +443,12 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 // PRD §10：Post → DM → Need 显式转化；归因保留完整 lineage；不覆盖 Agent 自带来源。
 
 type createNeedFromPostPayload struct {
-	PostID          string `json:"postId"`
-	DemandOrigin    string `json:"demandOrigin"` // PROXY_OWNED | PARTNER | AGENT_OWNED
-	SourceType      string `json:"sourceType"`   // POST_TO_DM | PROFILE_LINK | FOLLOW_REPLY | DIRECT
-	ConversationID  string `json:"conversationId"`
+	PostID             string `json:"postId"`
+	DemandOrigin       string `json:"demandOrigin"` // PROXY_OWNED | PARTNER | AGENT_OWNED
+	SourceType         string `json:"sourceType"`   // POST_TO_DM | PROFILE_LINK | FOLLOW_REPLY | DIRECT
+	ConversationID     string `json:"conversationId"`
 	CreatorPrincipalID string `json:"creatorPrincipalId"`
-	NeedSummary     string `json:"needSummary"`
+	NeedSummary        string `json:"needSummary"`
 }
 
 func (s *Service) createNeedFromPost(ctx context.Context, e command.Envelope) command.Result {
@@ -433,18 +483,18 @@ func (s *Service) createNeedFromPost(ctx context.Context, e command.Envelope) co
 		CreatedAt: s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("NeedCreatedFromPost", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, record.CreatedAt, map[string]any{
-		"needId":      record.NeedID,
-		"postId":      p.PostID,
+		"needId":       record.NeedID,
+		"postId":       p.PostID,
 		"demandOrigin": p.DemandOrigin,
-		"sourceType":  p.SourceType,
-		"note":        "归因保留完整 lineage；Proxy 不得为抢归因覆盖 Agent 自带客户来源",
+		"sourceType":   p.SourceType,
+		"note":         "归因保留完整 lineage；Proxy 不得为抢归因覆盖 Agent 自带客户来源",
 	})}
 	if err := s.repository.SaveNeedFromPost(ctx, record); err != nil {
 		return command.Rejected(e, "NEED_FROM_POST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.need_from_post_failed", nil)
 	}
 	return acceptedWithPayload(e, "Post", post.ID, 1, post.Status, map[string]any{
-		"needId":   record.NeedID,
-		"lineage":  lineage,
+		"needId":  record.NeedID,
+		"lineage": lineage,
 	}, domainEvents)
 }
 
@@ -488,6 +538,87 @@ func (s *Service) recordAttribution(ctx context.Context, e command.Envelope) com
 		return command.Rejected(e, "ATTRIBUTION_RECORD_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.attribution_failed", nil)
 	}
 	return command.Accepted(e, "DemandAttribution", newID("attr_"), 1, "RECORDED", eventRefs(domainEvents))
+}
+
+// ---------- C1 Event Stream：读侧交互事件 ----------
+// 这些事件是 Analytics 不是 Truth（R10 Gate J）：记录但不影响业务状态。
+
+type interactionPayload struct {
+	TargetType string `json:"targetType"` // PROFILE | POST | CANDIDATE | AGENT
+	TargetID   string `json:"targetId"`
+	NeedID     string `json:"needId"`
+}
+
+func (s *Service) recordProfileOpen(ctx context.Context, e command.Envelope) command.Result {
+	return s.appendInteraction(ctx, e, "PROFILE_OPEN", "PROFILE")
+}
+
+func (s *Service) recordPostImpression(ctx context.Context, e command.Envelope) command.Result {
+	return s.appendInteraction(ctx, e, "POST_IMPRESSION", "POST")
+}
+
+func (s *Service) recordCandidateViewed(ctx context.Context, e command.Envelope) command.Result {
+	return s.appendInteraction(ctx, e, "CANDIDATE_VIEWED", "CANDIDATE")
+}
+
+func (s *Service) shortlistAgent(ctx context.Context, e command.Envelope) command.Result {
+	return s.appendInteraction(ctx, e, "AGENT_SHORTLISTED", "AGENT")
+}
+
+func (s *Service) appendInteraction(ctx context.Context, e command.Envelope, eventType, defaultTargetType string) command.Result {
+	var p interactionPayload
+	if !decode(e.Payload, &p) || p.TargetID == "" {
+		return command.Rejected(e, "INVALID_INTERACTION", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_interaction", nil)
+	}
+	targetType := p.TargetType
+	if targetType == "" {
+		targetType = defaultTargetType
+	}
+	now := s.clock.Now().UTC()
+	ie := InteractionEvent{
+		EventID:    newID("evt_"),
+		EventType:  eventType,
+		ActorID:    e.Actor.ID,
+		TargetType: targetType,
+		TargetID:   p.TargetID,
+		NeedID:     p.NeedID,
+		CreatedAt:  now,
+	}
+	domainEvents := []event.DomainEvent{event.New(eventType, "InteractionEvent", ie.EventID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"actorId":    ie.ActorID,
+		"targetType": ie.TargetType,
+		"targetId":   ie.TargetID,
+		"note":       "交互事件是 Analytics 不是 Truth（R10 Gate J）",
+	})}
+	if err := s.repository.AppendInteractionEvent(ctx, ie); err != nil {
+		return command.Rejected(e, "INTERACTION_RECORD_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.interaction_failed", nil)
+	}
+	return command.Accepted(e, "InteractionEvent", ie.EventID, 1, "RECORDED", eventRefs(domainEvents))
+}
+
+// ListInteractionEvents：事件流查询（按 actor 过滤 + limit）。
+func (s *Service) listInteractionEvents(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		ActorID string `json:"actorId"`
+		Limit   int    `json:"limit"`
+	}
+	_ = decode(e.Payload, &p)
+	actorID := p.ActorID
+	if actorID == "" {
+		actorID = e.Actor.ID
+	}
+	if p.Limit <= 0 || p.Limit > 100 {
+		p.Limit = 50
+	}
+	events, err := s.repository.ListInteractionEvents(ctx, actorID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "INTERACTION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.interaction_list_failed", nil)
+	}
+	return acceptedWithPayload(e, "InteractionEvent", "", 0, "LIST", map[string]any{
+		"actorId": actorID,
+		"events":  events,
+		"note":    "事件流：订单是怎么来的，从这里可回放",
+	}, nil)
 }
 
 // ---------- helpers ----------

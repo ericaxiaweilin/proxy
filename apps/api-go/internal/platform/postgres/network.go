@@ -119,6 +119,41 @@ func (r *LocalNetRepository) SaveNeedFromPost(ctx context.Context, record localn
 	return err
 }
 
+func (r *LocalNetRepository) AppendInteractionEvent(ctx context.Context, ie localnet.InteractionEvent) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, need_id, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		ie.EventID, ie.EventType, ie.ActorID, ie.TargetType, ie.TargetID, ie.NeedID, ie.CreatedAt,
+	)
+	return err
+}
+
+func (r *LocalNetRepository) ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]localnet.InteractionEvent, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT event_id, event_type, actor_id, target_type, target_id, need_id, created_at
+		FROM localnet.interaction_events
+		WHERE actor_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2`, actorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []localnet.InteractionEvent{}
+	for rows.Next() {
+		var ie localnet.InteractionEvent
+		var needID *string
+		if err := rows.Scan(&ie.EventID, &ie.EventType, &ie.ActorID, &ie.TargetType, &ie.TargetID, &needID, &ie.CreatedAt); err != nil {
+			return nil, err
+		}
+		if needID != nil {
+			ie.NeedID = *needID
+		}
+		result = append(result, ie)
+	}
+	return result, rows.Err()
+}
+
 func (r *LocalNetRepository) SnapshotNeeds(ctx context.Context) ([]localnet.NeedFromPost, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT need_id, post_id, lineage, created_at FROM localnet.need_from_posts ORDER BY created_at`)

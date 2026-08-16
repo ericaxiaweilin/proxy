@@ -9,36 +9,36 @@ import (
 
 func envelopeFor(commandType string, payload map[string]any, targetID string) command.Envelope {
 	return command.Envelope{
-		CommandID:       "cmd_test_1",
-		CommandType:     commandType,
-		CommandVersion:  1,
-		Actor:           command.Actor{Type: "USER", ID: "user_001"},
-		Principal:       command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
-		Target:          command.Target{Type: "Order", ID: targetID},
-		IdempotencyKey:  "test_key_123456",
-		AuthContext:     map[string]any{"session": "s1"},
-		Purpose:         "test",
-		CorrelationID:   "corr_1",
-		RequestedAt:     "2026-08-16T00:00:00Z",
-		Payload:         payload,
+		CommandID:      "cmd_test_1",
+		CommandType:    commandType,
+		CommandVersion: 1,
+		Actor:          command.Actor{Type: "USER", ID: "user_001"},
+		Principal:      command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
+		Target:         command.Target{Type: "Order", ID: targetID},
+		IdempotencyKey: "test_key_123456",
+		AuthContext:    map[string]any{"session": "s1"},
+		Purpose:        "test",
+		CorrelationID:  "corr_1",
+		RequestedAt:    "2026-08-16T00:00:00Z",
+		Payload:        payload,
 	}
 }
 
 func offerPayload() map[string]any {
 	return map[string]any{
-		"needId":            "need_1",
-		"agentId":           "agent_linh",
-		"serviceSku":        "cc_8h",
-		"needVersion":       "need_v3",
-		"routeVersion":      "route_v2",
-		"duration":          "8H",
-		"startTime":         "2026-08-20T09:30:00Z",
-		"meetingContext":    "还剑湖正门",
+		"needId":             "need_1",
+		"agentId":            "agent_linh",
+		"serviceSku":         "cc_8h",
+		"needVersion":        "need_v3",
+		"routeVersion":       "route_v2",
+		"duration":           "8H",
+		"startTime":          "2026-08-20T09:30:00Z",
+		"meetingContext":     "还剑湖正门",
 		"agreedCompensation": 1200000,
-		"currency":          "VND",
-		"includedScope":     "8 小时陪同 + 拍照",
-		"excludedScope":     "门票 / 餐饮",
-		"settlementMode":    "DIRECT_SETTLEMENT",
+		"currency":           "VND",
+		"includedScope":      "8 小时陪同 + 拍照",
+		"excludedScope":      "门票 / 餐饮",
+		"settlementMode":     "DIRECT_SETTLEMENT",
 		"paymentMethodLabel": "线下现金",
 	}
 }
@@ -109,14 +109,23 @@ func TestSettlementModeIsolation(t *testing.T) {
 	s := New()
 	orderID := createOffer(t, s)
 
-	// 快照是 DIRECT_SETTLEMENT；试 PLATFORM_PAY 记录 → 模式不匹配拒绝
-	r := s.Handle(envelopeFor("RecordDirectSettlement", map[string]any{
+	// 新加固：OFFERED 状态不可结算 → 先确认+执行
+	r := s.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, orderID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %s", r.Outcome)
+	}
+	r = s.Handle(envelopeFor("StartExecution", map[string]any{}, orderID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("execute: %s", r.Outcome)
+	}
+
+	// 快照是 DIRECT_SETTLEMENT，所以这个应该成功（模式匹配）
+	r = s.Handle(envelopeFor("RecordDirectSettlement", map[string]any{
 		"agreedAmount": 1200000, "paymentMethodLabel": "平台支付",
 		"payerConfirmed": true, "payeeConfirmed": true,
 	}, orderID))
-	// 快照是 DIRECT_SETTLEMENT，所以这个应该成功（模式匹配）
 	if r.Outcome != "ACCEPTED" {
-		t.Fatalf("settlement should match DIRECT_SETTLEMENT: %s", r.Outcome)
+		t.Fatalf("settlement should match DIRECT_SETTLEMENT: %s (%+v)", r.Outcome, r.Error)
 	}
 	// 重复记录 → 拒绝
 	r2 := s.Handle(envelopeFor("RecordDirectSettlement", map[string]any{
@@ -132,10 +141,16 @@ func TestMaterialChangeAmendment(t *testing.T) {
 	s := New()
 	orderID := createOffer(t, s)
 
-	r := s.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{
+	// 新加固：OFFERED 不可变更 → 先确认
+	r := s.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, orderID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %s", r.Outcome)
+	}
+	r = s.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{
 		"description": "集合点改为老城区咖啡店",
 	}, orderID))
-	if r.Outcome != "ACCEPTED" || r.Aggregate.Version != 2 {
+	// Confirm 已是 v2，变更后 v3（版本递增 = amendment 记录，不覆盖原快照）
+	if r.Outcome != "ACCEPTED" || r.Aggregate.Version != 3 {
 		t.Fatalf("material change: got %s v%d", r.Outcome, r.Aggregate.Version)
 	}
 	// 版本递增 = amendment 记录，不覆盖原快照

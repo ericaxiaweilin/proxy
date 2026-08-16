@@ -22,78 +22,78 @@ import (
 
 // Order 是订单聚合（含 Confirmation Snapshot）。
 type Order struct {
-	ID            string          `json:"orderId"`
-	RequesterID   string          `json:"requesterId"`
-	AgentID       string          `json:"agentId"`
-	NeedID        string          `json:"needId"`
-	Lifecycle     string          `json:"lifecycle"` // OFFERED | CONFIRMED | EXECUTING | COMPLETED | CANCELLED
-	Version       int             `json:"version"`
-	Snapshot      OrderSnapshot   `json:"snapshot"`
-	Amendments    []Amendment     `json:"amendments"`
-	Settlement    *SettlementRecord `json:"settlement,omitempty"`
-	Outcome       *OutcomeRecord  `json:"outcome,omitempty"`
-	CreatedAt     time.Time       `json:"createdAt"`
-	UpdatedAt     time.Time       `json:"updatedAt"`
+	ID          string            `json:"orderId"`
+	RequesterID string            `json:"requesterId"`
+	AgentID     string            `json:"agentId"`
+	NeedID      string            `json:"needId"`
+	Lifecycle   string            `json:"lifecycle"` // OFFERED | CONFIRMED | EXECUTING | COMPLETED | CANCELLED
+	Version     int               `json:"version"`
+	Snapshot    OrderSnapshot     `json:"snapshot"`
+	Amendments  []Amendment       `json:"amendments"`
+	Settlement  *SettlementRecord `json:"settlement,omitempty"`
+	Outcome     *OutcomeRecord    `json:"outcome,omitempty"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
 }
 
 // OrderSnapshot 是 Gate G 冻结的确认快照。
 type OrderSnapshot struct {
-	Requester           string `json:"requester"`
-	Agent               string `json:"agent"`
-	ServiceSKU          string `json:"serviceSku"`
-	NeedVersion         string `json:"needVersion"`
-	RouteVersion        string `json:"routeVersion"`
-	Duration            string `json:"duration"`
-	StartTime           string `json:"startTime"`
-	MeetingContext      string `json:"meetingContext"`
-	AgreedCompensation  int64  `json:"agreedCompensation"`
-	Currency            string `json:"currency"`
-	IncludedScope       string `json:"includedScope"`
-	ExcludedScope       string `json:"excludedScope"`
-	SettlementMode      string `json:"settlementMode"` // DIRECT_SETTLEMENT | PLATFORM_PAY
-	PaymentMethodLabel  string `json:"paymentMethodLabel"`
+	Requester          string `json:"requester"`
+	Agent              string `json:"agent"`
+	ServiceSKU         string `json:"serviceSku"`
+	NeedVersion        string `json:"needVersion"`
+	RouteVersion       string `json:"routeVersion"`
+	Duration           string `json:"duration"`
+	StartTime          string `json:"startTime"`
+	MeetingContext     string `json:"meetingContext"`
+	AgreedCompensation int64  `json:"agreedCompensation"`
+	Currency           string `json:"currency"`
+	IncludedScope      string `json:"includedScope"`
+	ExcludedScope      string `json:"excludedScope"`
+	SettlementMode     string `json:"settlementMode"` // DIRECT_SETTLEMENT | PLATFORM_PAY
+	PaymentMethodLabel string `json:"paymentMethodLabel"`
 }
 
 // Amendment 是 Material Change（新版本，不静默覆盖）。
 type Amendment struct {
-	AmendmentID string    `json:"amendmentId"`
-	Description string    `json:"description"`
+	AmendmentID string        `json:"amendmentId"`
+	Description string        `json:"description"`
 	Snapshot    OrderSnapshot `json:"snapshot"`
-	CreatedAt   time.Time `json:"createdAt"`
+	CreatedAt   time.Time     `json:"createdAt"`
 }
 
 // SettlementRecord 是结算记录（Gate H：DIRECT_SETTLEMENT 与 PLATFORM_PAY 隔离）。
 type SettlementRecord struct {
-	Mode              string    `json:"mode"`
-	AgreedAmount      int64     `json:"agreedAmount"`
-	Currency          string    `json:"currency"`
-	Duration          string    `json:"duration"`
-	IncludedScope     string    `json:"includedScope"`
-	ExcludedScope     string    `json:"excludedScope"`
-	PaymentMethodLabel string   `json:"paymentMethodLabel"`
-	Payer             string    `json:"payer"`
-	Payee             string    `json:"payee"`
-	PayerConfirmed    bool      `json:"payerConfirmed"`
-	PayeeConfirmed    bool      `json:"payeeConfirmed"`
-	ConfirmedAt       time.Time `json:"confirmedAt"`
+	Mode               string    `json:"mode"`
+	AgreedAmount       int64     `json:"agreedAmount"`
+	Currency           string    `json:"currency"`
+	Duration           string    `json:"duration"`
+	IncludedScope      string    `json:"includedScope"`
+	ExcludedScope      string    `json:"excludedScope"`
+	PaymentMethodLabel string    `json:"paymentMethodLabel"`
+	Payer              string    `json:"payer"`
+	Payee              string    `json:"payee"`
+	PayerConfirmed     bool      `json:"payerConfirmed"`
+	PayeeConfirmed     bool      `json:"payeeConfirmed"`
+	ConfirmedAt        time.Time `json:"confirmedAt"`
 }
 
 // OutcomeRecord 是履约结果（客观事实与主观满意分离）。
 type OutcomeRecord struct {
-	OnTime         bool      `json:"onTime"`
-	ActualStart    string    `json:"actualStart"`
-	ActualEnd      string    `json:"actualEnd"`
-	MaterialChanges int      `json:"materialChanges"`
-	ScopeCompleted bool      `json:"scopeCompleted"`
-	ObjectiveNote  string    `json:"objectiveNote"`
-	RecordedAt     time.Time `json:"recordedAt"`
+	OnTime          bool      `json:"onTime"`
+	ActualStart     string    `json:"actualStart"`
+	ActualEnd       string    `json:"actualEnd"`
+	MaterialChanges int       `json:"materialChanges"`
+	ScopeCompleted  bool      `json:"scopeCompleted"`
+	ObjectiveNote   string    `json:"objectiveNote"`
+	RecordedAt      time.Time `json:"recordedAt"`
 }
 
 // SatisfactionRecord 是主观满意（Gate：履约事实不要求用户重复打分）。
 type SatisfactionRecord struct {
-	Resolved      string    `json:"resolved"` // FULL | PARTIAL | NONE
-	RepeatIntent  string    `json:"repeatIntent"` // REUSE | MAYBE | NO
-	RecordedAt    time.Time `json:"recordedAt"`
+	Resolved     string    `json:"resolved"`     // FULL | PARTIAL | NONE
+	RepeatIntent string    `json:"repeatIntent"` // REUSE | MAYBE | NO
+	RecordedAt   time.Time `json:"recordedAt"`
 }
 
 // RepeatRelationship 是复购关系（Outcome → Repeat）。
@@ -275,19 +275,19 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 // Offer = Candidate → Order 的中间态（含 Gate G 快照）。
 
 type createOfferPayload struct {
-	NeedID           string `json:"needId"`
-	AgentID          string `json:"agentId"`
-	ServiceSKU       string `json:"serviceSku"`
-	NeedVersion      string `json:"needVersion"`
-	RouteVersion     string `json:"routeVersion"`
-	Duration         string `json:"duration"`
-	StartTime        string `json:"startTime"`
-	MeetingContext   string `json:"meetingContext"`
-	AgreedCompensation int64 `json:"agreedCompensation"`
-	Currency         string `json:"currency"`
-	IncludedScope    string `json:"includedScope"`
-	ExcludedScope    string `json:"excludedScope"`
-	SettlementMode   string `json:"settlementMode"`
+	NeedID             string `json:"needId"`
+	AgentID            string `json:"agentId"`
+	ServiceSKU         string `json:"serviceSku"`
+	NeedVersion        string `json:"needVersion"`
+	RouteVersion       string `json:"routeVersion"`
+	Duration           string `json:"duration"`
+	StartTime          string `json:"startTime"`
+	MeetingContext     string `json:"meetingContext"`
+	AgreedCompensation int64  `json:"agreedCompensation"`
+	Currency           string `json:"currency"`
+	IncludedScope      string `json:"includedScope"`
+	ExcludedScope      string `json:"excludedScope"`
+	SettlementMode     string `json:"settlementMode"`
 	PaymentMethodLabel string `json:"paymentMethodLabel"`
 }
 
@@ -295,6 +295,12 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 	var p createOfferPayload
 	if !decode(e.Payload, &p) || p.NeedID == "" || p.AgentID == "" || p.AgreedCompensation <= 0 {
 		return command.Rejected(e, "INVALID_OFFER", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_offer", nil)
+	}
+	if p.AgreedCompensation > maxAmountVND {
+		return command.Rejected(e, "INVALID_OFFER_AMOUNT", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_offer_amount", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == p.AgentID {
+		return command.Rejected(e, "OFFER_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.offer_not_allowed", nil)
 	}
 	if p.SettlementMode == "" {
 		p.SettlementMode = "DIRECT_SETTLEMENT"
@@ -330,10 +336,10 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 		UpdatedAt:   s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("OfferCreated", "Order", order.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, order.CreatedAt, map[string]any{
-		"agentId":           p.AgentID,
+		"agentId":            p.AgentID,
 		"agreedCompensation": p.AgreedCompensation,
-		"settlementMode":    p.SettlementMode,
-		"note":              "Gate G：Order 创建前冻结快照",
+		"settlementMode":     p.SettlementMode,
+		"note":               "Gate G：Order 创建前冻结快照",
 	})}
 	if err := s.repository.CreateOrderAndPublish(ctx, order, domainEvents); err != nil {
 		return command.Rejected(e, "OFFER_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.offer_failed", nil)
@@ -421,6 +427,15 @@ func (s *Service) recordDirectSettlement(ctx context.Context, e command.Envelope
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	if !isOrderParty(order, e.Actor.ID) {
+		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
+	}
+	if order.Lifecycle == "OFFERED" || order.Lifecycle == "CANCELLED" {
+		return command.Rejected(e, "SETTLEMENT_NOT_RECORDABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.settlement_not_recordable", map[string]any{"lifecycle": order.Lifecycle})
+	}
+	if p.AgreedAmount > maxAmountVND {
+		return command.Rejected(e, "INVALID_SETTLEMENT_AMOUNT", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_settlement_amount", nil)
+	}
 	if order.Snapshot.SettlementMode != "DIRECT_SETTLEMENT" {
 		return command.Rejected(e, "SETTLEMENT_MODE_MISMATCH", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.settlement_mode_mismatch", map[string]any{"mode": order.Snapshot.SettlementMode})
 	}
@@ -446,10 +461,10 @@ func (s *Service) recordDirectSettlement(ctx context.Context, e command.Envelope
 	order.Version++
 	order.UpdatedAt = now
 	domainEvents := []event.DomainEvent{event.New("DirectSettlementRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"agreedAmount":  p.AgreedAmount,
+		"agreedAmount":   p.AgreedAmount,
 		"payerConfirmed": p.PayerConfirmed,
 		"payeeConfirmed": p.PayeeConfirmed,
-		"note":          "DIRECT_SETTLEMENT 不创建 Platform Funding 假记录；双方确认是声明信号，不等于平台物理验证现金",
+		"note":           "DIRECT_SETTLEMENT 不创建 Platform Funding 假记录；双方确认是声明信号，不等于平台物理验证现金",
 	})}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
 		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
@@ -480,6 +495,16 @@ func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	if !isOrderParty(order, e.Actor.ID) {
+		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
+	}
+	// 状态机：只有 EXECUTING 的订单能记录履约结果（防 OFFERED 直接跳 COMPLETED）。
+	if order.Lifecycle != "EXECUTING" {
+		return command.Rejected(e, "ORDER_NOT_COMPLETABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_completable", map[string]any{"lifecycle": order.Lifecycle})
+	}
+	if order.Outcome != nil {
+		return command.Rejected(e, "OUTCOME_ALREADY_RECORDED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.outcome_exists", nil)
+	}
 	now := s.clock.Now().UTC()
 	order.Outcome = &OutcomeRecord{
 		OnTime:          p.OnTime,
@@ -494,8 +519,8 @@ func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command
 	order.Version++
 	order.UpdatedAt = now
 	domainEvents := []event.DomainEvent{event.New("OutcomeRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"onTime":         p.OnTime,
-		"scopeCompleted": p.ScopeCompleted,
+		"onTime":          p.OnTime,
+		"scopeCompleted":  p.ScopeCompleted,
 		"materialChanges": p.MaterialChanges,
 	})}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
@@ -526,6 +551,12 @@ func (s *Service) recordSatisfaction(ctx context.Context, e command.Envelope) co
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	if !isOrderParty(order, e.Actor.ID) {
+		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
+	}
+	if order.Lifecycle != "COMPLETED" {
+		return command.Rejected(e, "ORDER_NOT_COMPLETED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_completed", map[string]any{"lifecycle": order.Lifecycle})
+	}
 	domainEvents := []event.DomainEvent{event.New("SatisfactionRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
 		"resolved":     p.Resolved,
 		"repeatIntent": p.RepeatIntent,
@@ -553,6 +584,12 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 	if err != nil {
 		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
 	}
+	if !isOrderParty(order, e.Actor.ID) {
+		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
+	}
+	if order.Lifecycle != "CONFIRMED" && order.Lifecycle != "EXECUTING" {
+		return command.Rejected(e, "ORDER_NOT_AMENDABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_amendable", map[string]any{"lifecycle": order.Lifecycle})
+	}
 	now := s.clock.Now().UTC()
 	amendment := Amendment{
 		AmendmentID: newID("amd_"),
@@ -575,6 +612,9 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 }
 
 // ---------- helpers ----------
+
+// maxAmountVND 是订单/结算金额的服务端上限（防超大金额脏数据）。
+const maxAmountVND = 1_000_000_000
 
 func isOrderParty(order Order, actorID string) bool {
 	return order.RequesterID == actorID || order.AgentID == actorID

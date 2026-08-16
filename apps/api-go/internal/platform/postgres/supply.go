@@ -9,16 +9,22 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/supply"
 )
 
 // SupplyRepository 持久化 Agent Profile/Service/Capability/Availability/CandidateBatch。
 type SupplyRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	outbox *OutboxRepository
 }
 
 func NewSupplyRepository(pool *pgxpool.Pool) *SupplyRepository {
 	return &SupplyRepository{pool: pool}
+}
+
+func NewSupplyRepositoryWithOutbox(pool *pgxpool.Pool, outboxRepository *OutboxRepository) *SupplyRepository {
+	return &SupplyRepository{pool: pool, outbox: outboxRepository}
 }
 
 // ---------- AgentProfile ----------
@@ -233,6 +239,26 @@ func (r *SupplyRepository) GetWindows(ctx context.Context, agentID string) ([]su
 	return result, rows.Err()
 }
 
+func (r *SupplyRepository) GetWindow(ctx context.Context, windowID string) (supply.AvailabilityWindow, error) {
+	var w supply.AvailabilityWindow
+	var orderID *string
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, agent_id, start_at, end_at, market_id, status, order_id, created_at, updated_at
+		FROM supply.availability_windows WHERE id=$1`, windowID).Scan(
+		&w.ID, &w.AgentID, &w.StartAt, &w.EndAt, &w.MarketID, &w.Status, &orderID, &w.CreatedAt, &w.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return supply.AvailabilityWindow{}, errors.New("window not found")
+	}
+	if err != nil {
+		return supply.AvailabilityWindow{}, err
+	}
+	if orderID != nil {
+		w.OrderID = *orderID
+	}
+	return w, nil
+}
+
 func (r *SupplyRepository) UpdateWindowStatus(ctx context.Context, windowID string, status, orderID string) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE supply.availability_windows SET status=$1, order_id=$2 WHERE id=$3`,
@@ -274,20 +300,45 @@ func (r *SupplyRepository) SaveCandidateBatch(ctx context.Context, b supply.Cand
 		return err
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO supply.candidate_batches (id, need_id, market_id, created_at, candidates, shortage, shortage_note)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		b.ID, b.NeedID, b.MarketID, b.CreatedAt, candidates, b.Shortage, b.ShortageNote,
+		INSERT INTO supply.candidate_batches (id, need_id, market_id, owner_principal_id, created_at, candidates, shortage, shortage_note)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		b.ID, b.NeedID, b.MarketID, b.OwnerPrincipalID, b.CreatedAt, candidates, b.Shortage, b.ShortageNote,
 	)
 	return err
+}
+
+func (r *SupplyRepository) SaveCandidateBatchAndPublish(ctx context.Context, b supply.CandidateBatch, domainEvents []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("supply transactional outbox is not configured")
+	}
+	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		candidates, err := json.Marshal(b.Candidates)
+		if err != nil {
+			return err
+		}
+		if _, err := transaction.Exec(ctx, `
+			INSERT INTO supply.candidate_batches (id, need_id, market_id, created_at, candidates, shortage, shortage_note)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			b.ID, b.NeedID, b.MarketID, b.CreatedAt, candidates, b.Shortage, b.ShortageNote,
+		); err != nil {
+			return err
+		}
+		for _, domainEvent := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (r *SupplyRepository) GetCandidateBatch(ctx context.Context, batchID string) (supply.CandidateBatch, error) {
 	var b supply.CandidateBatch
 	var candidates []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, need_id, market_id, created_at, candidates, shortage, shortage_note
+		SELECT id, need_id, market_id, COALESCE(owner_principal_id, ''), created_at, candidates, shortage, shortage_note
 		FROM supply.candidate_batches WHERE id=$1`, batchID).Scan(
-		&b.ID, &b.NeedID, &b.MarketID, &b.CreatedAt, &candidates, &b.Shortage, &b.ShortageNote,
+		&b.ID, &b.NeedID, &b.MarketID, &b.OwnerPrincipalID, &b.CreatedAt, &candidates, &b.Shortage, &b.ShortageNote,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return supply.CandidateBatch{}, supply.ErrBatchNotFound

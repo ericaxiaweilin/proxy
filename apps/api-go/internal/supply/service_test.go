@@ -9,57 +9,63 @@ import (
 )
 
 func envelopeFor(commandType string, payload map[string]any, targetID string) command.Envelope {
+	return envelopeForPrincipal(commandType, payload, targetID, "business_001")
+}
+
+// envelopeForPrincipal 构造指定 principal 的会话 envelope（归属校验：写命令要求
+// agentId == principalId，故 agent 侧命令必须以 agent 自己的 principal 发起）。
+func envelopeForPrincipal(commandType string, payload map[string]any, targetID, principalID string) command.Envelope {
 	return command.Envelope{
-		CommandID:       "cmd_test_1",
-		CommandType:     commandType,
-		CommandVersion:  1,
-		Actor:           command.Actor{Type: "USER", ID: "user_001"},
-		Principal:       command.Principal{Type: "BUSINESS", ID: "business_001"},
-		Target:          command.Target{Type: "Supply", ID: targetID},
-		IdempotencyKey:  "test_key_123456",
-		AuthContext:     map[string]any{"session": "s1"},
-		Purpose:         "test",
-		CorrelationID:   "corr_1",
-		RequestedAt:     "2026-08-16T00:00:00Z",
-		Payload:         payload,
+		CommandID:      "cmd_test_1",
+		CommandType:    commandType,
+		CommandVersion: 1,
+		Actor:          command.Actor{Type: "USER", ID: "user_001"},
+		Principal:      command.Principal{Type: "BUSINESS", ID: principalID},
+		Target:         command.Target{Type: "Supply", ID: targetID},
+		IdempotencyKey: "test_key_123456",
+		AuthContext:    map[string]any{"session": "s1"},
+		Purpose:        "test",
+		CorrelationID:  "corr_1",
+		RequestedAt:    "2026-08-16T00:00:00Z",
+		Payload:        payload,
 	}
 }
 
 // setupAgent 创建完整合格 Agent（profile + service + 语言能力 verified + 窗口）。
 func setupAgent(t *testing.T, s *Service, agentID, name string, languages []string, market string, price int64) {
 	t.Helper()
-	r := s.Handle(envelopeFor("CreateAgentProfile", map[string]any{
+	r := s.Handle(envelopeForPrincipal("CreateAgentProfile", map[string]any{
 		"agentId": agentID, "name": name, "languages": languages, "serviceAreas": []string{market},
-	}, ""))
+	}, "", agentID))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create profile %s: %s", agentID, r.Outcome)
 	}
-	r = s.Handle(envelopeFor("CreateAgentService", map[string]any{
+	r = s.Handle(envelopeForPrincipal("CreateAgentService", map[string]any{
 		"agentId": agentID, "serviceType": "CITY_COMPANION", "referencePrice": price,
 		"currency": "VND", "markets": []string{market},
-	}, ""))
+	}, "", agentID))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create service %s: %s", agentID, r.Outcome)
 	}
 	for _, lang := range languages {
-		r = s.Handle(envelopeFor("DeclareCapability", map[string]any{
+		r = s.Handle(envelopeForPrincipal("DeclareCapability", map[string]any{
 			"agentId": agentID, "capability": lang,
-		}, ""))
+		}, "", agentID))
 		if r.Outcome != "ACCEPTED" {
 			t.Fatalf("declare %s: %s", lang, r.Outcome)
 		}
-		r = s.Handle(envelopeFor("VerifyCapability", map[string]any{
+		r = s.Handle(envelopeForPrincipal("VerifyCapability", map[string]any{
 			"agentId": agentID, "capability": lang, "method": "INTERVIEW", "decision": "APPROVE",
-		}, ""))
+		}, "", agentID))
 		if r.Outcome != "ACCEPTED" {
 			t.Fatalf("verify %s: %s", lang, r.Outcome)
 		}
 	}
 	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
 	end := time.Now().Add(24*time.Hour + 10*time.Hour).UTC().Format(time.RFC3339)
-	r = s.Handle(envelopeFor("SetAvailabilityWindow", map[string]any{
+	r = s.Handle(envelopeForPrincipal("SetAvailabilityWindow", map[string]any{
 		"agentId": agentID, "startAt": start, "endAt": end, "marketId": market,
-	}, ""))
+	}, "", agentID))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("set window %s: %s (%+v)", agentID, r.Outcome, r.Error)
 	}
@@ -105,31 +111,31 @@ func TestSupplyQueryReturnsOnlyEligible(t *testing.T) {
 func TestEligibilityGateBlocksUnverified(t *testing.T) {
 	s := New()
 	// Dung：声明中文但未 VERIFIED
-	r := s.Handle(envelopeFor("CreateAgentProfile", map[string]any{
+	r := s.Handle(envelopeForPrincipal("CreateAgentProfile", map[string]any{
 		"agentId": "agent_dung", "name": "Dung", "languages": []string{"ZH"}, "serviceAreas": []string{"hn"},
-	}, ""))
+	}, "", "agent_dung"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("profile: %s", r.Outcome)
 	}
-	r = s.Handle(envelopeFor("CreateAgentService", map[string]any{
+	r = s.Handle(envelopeForPrincipal("CreateAgentService", map[string]any{
 		"agentId": "agent_dung", "serviceType": "CITY_COMPANION", "referencePrice": 900000,
 		"currency": "VND", "markets": []string{"hn"},
-	}, ""))
+	}, "", "agent_dung"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("service: %s", r.Outcome)
 	}
 	// 只 declare，不 verify
-	r = s.Handle(envelopeFor("DeclareCapability", map[string]any{
+	r = s.Handle(envelopeForPrincipal("DeclareCapability", map[string]any{
 		"agentId": "agent_dung", "capability": "ZH",
-	}, ""))
+	}, "", "agent_dung"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("declare: %s", r.Outcome)
 	}
 	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
 	end := time.Now().Add(24*time.Hour + 10*time.Hour).UTC().Format(time.RFC3339)
-	r = s.Handle(envelopeFor("SetAvailabilityWindow", map[string]any{
+	r = s.Handle(envelopeForPrincipal("SetAvailabilityWindow", map[string]any{
 		"agentId": "agent_dung", "startAt": start, "endAt": end, "marketId": "hn",
-	}, ""))
+	}, "", "agent_dung"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("window: %s", r.Outcome)
 	}
@@ -183,7 +189,7 @@ func TestCandidateBatchFrozenSnapshot(t *testing.T) {
 	if len(windows) == 0 {
 		t.Fatal("no windows")
 	}
-	r = s.Handle(envelopeFor("BlockAvailabilityWindow", map[string]any{"windowId": windows[0].ID}, ""))
+	r = s.Handle(envelopeForPrincipal("BlockAvailabilityWindow", map[string]any{"windowId": windows[0].ID}, "", "agent_linh"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("block: %s", r.Outcome)
 	}
@@ -222,9 +228,9 @@ func TestWindowTimeConflict(t *testing.T) {
 	// 设重叠窗口 → 拒绝
 	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
 	end := time.Now().Add(24*time.Hour + 10*time.Hour).UTC().Format(time.RFC3339)
-	r := s.Handle(envelopeFor("SetAvailabilityWindow", map[string]any{
+	r := s.Handle(envelopeForPrincipal("SetAvailabilityWindow", map[string]any{
 		"agentId": "agent_linh", "startAt": start, "endAt": end, "marketId": "hn",
-	}, ""))
+	}, "", "agent_linh"))
 	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "WINDOW_TIME_CONFLICT" {
 		t.Fatalf("want WINDOW_TIME_CONFLICT, got %s/%+v", r.Outcome, r.Error)
 	}

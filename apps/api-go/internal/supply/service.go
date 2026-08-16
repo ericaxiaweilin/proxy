@@ -27,106 +27,107 @@ import (
 
 // AgentProfile 是 Agent 的经营身份（principal → profile 1:1）。
 type AgentProfile struct {
-	AgentID        string    `json:"agentId"`        // = principal.ID
-	Name           string    `json:"name"`
-	Bio            string    `json:"bio"`
-	Photos         []string  `json:"photos"`
-	Languages      []string  `json:"languages"`
-	ServiceAreas   []string  `json:"serviceAreas"`   // market_id 列表
-	Status         string    `json:"status"`         // DRAFT | ACTIVE | SUSPENDED
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	AgentID      string    `json:"agentId"` // = principal.ID
+	Name         string    `json:"name"`
+	Bio          string    `json:"bio"`
+	Photos       []string  `json:"photos"`
+	Languages    []string  `json:"languages"`
+	ServiceAreas []string  `json:"serviceAreas"` // market_id 列表
+	Status       string    `json:"status"`       // DRAFT | ACTIVE | SUSPENDED
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // AgentService 是 Agent 提供的一项服务（当前类别：CITY_COMPANION）。
 type AgentService struct {
-	AgentID         string    `json:"agentId"`
-	ServiceType     string    `json:"serviceType"` // CITY_COMPANION（未来扩类别不改核心表）
-	Status          string    `json:"status"`      // DRAFT | ACTIVE | PAUSED | RETIRED
-	ReferencePrice  int64     `json:"referencePrice"`
-	Currency        string    `json:"currency"`
-	Markets         []string  `json:"markets"` // market_id 列表
-	UpdatedAt       time.Time `json:"updatedAt"`
+	AgentID        string    `json:"agentId"`
+	ServiceType    string    `json:"serviceType"` // CITY_COMPANION（未来扩类别不改核心表）
+	Status         string    `json:"status"`      // DRAFT | ACTIVE | PAUSED | RETIRED
+	ReferencePrice int64     `json:"referencePrice"`
+	Currency       string    `json:"currency"`
+	Markets        []string  `json:"markets"` // market_id 列表
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // Capability 是能力（declared 与 verified 分离）。
 type Capability struct {
-	AgentID     string    `json:"agentId"`
-	Capability  string    `json:"capability"`  // ZH | PHOTOGRAPHY | CITY_GUIDE | DRIVING | ...
-	Declared    bool      `json:"declared"`    // Agent 自声明
-	Verified    bool      `json:"verified"`    // 通过 CapabilityVerification
-	UpdatedAt   time.Time `json:"updatedAt"`
+	AgentID    string    `json:"agentId"`
+	Capability string    `json:"capability"` // ZH | PHOTOGRAPHY | CITY_GUIDE | DRIVING | ...
+	Declared   bool      `json:"declared"`   // Agent 自声明
+	Verified   bool      `json:"verified"`   // 通过 CapabilityVerification
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // CapabilityVerification 是验证记录。
 type CapabilityVerification struct {
-	ID             string    `json:"id"`
-	AgentID        string    `json:"agentId"`
-	Capability     string    `json:"capability"`
-	Status         string    `json:"status"`    // PENDING | VERIFIED | REJECTED | EXPIRED
-	Method         string    `json:"method"`    // DOCUMENT | INTERVIEW | TEST | REFERENCE
-	VerifiedBy     string    `json:"verifiedBy"`
-	VerifiedAt     time.Time `json:"verifiedAt"`
-	ExpiresAt      time.Time `json:"expiresAt"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID         string    `json:"id"`
+	AgentID    string    `json:"agentId"`
+	Capability string    `json:"capability"`
+	Status     string    `json:"status"` // PENDING | VERIFIED | REJECTED | EXPIRED
+	Method     string    `json:"method"` // DOCUMENT | INTERVIEW | TEST | REFERENCE
+	VerifiedBy string    `json:"verifiedBy"`
+	VerifiedAt time.Time `json:"verifiedAt"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 // AvailabilityWindow 是时间窗（持久化，重启不丢）。
 type AvailabilityWindow struct {
-	ID         string    `json:"id"`
-	AgentID    string    `json:"agentId"`
-	StartAt    time.Time `json:"startAt"`
-	EndAt      time.Time `json:"endAt"`
-	MarketID   string    `json:"marketId"`
-	Status     string    `json:"status"` // AVAILABLE | BLOCKED | BOOKED
-	OrderID    string    `json:"orderId,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID        string    `json:"id"`
+	AgentID   string    `json:"agentId"`
+	StartAt   time.Time `json:"startAt"`
+	EndAt     time.Time `json:"endAt"`
+	MarketID  string    `json:"marketId"`
+	Status    string    `json:"status"` // AVAILABLE | BLOCKED | BOOKED
+	OrderID   string    `json:"orderId,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // EligibilitySnapshot 是候选资格快照（CandidateBatch 冻结）。
 type EligibilitySnapshot struct {
-	AgentID           string `json:"agentId"`
-	ProfileActive     bool   `json:"profileActive"`
-	ServiceActive     bool   `json:"serviceActive"`
-	CapabilitiesOK    bool   `json:"capabilitiesOk"`
-	AvailabilityOK    bool   `json:"availabilityOk"`
-	MarketOK          bool   `json:"marketOk"`
-	NoOrderConflict   bool   `json:"noOrderConflict"`
-	Eligible          bool   `json:"eligible"`
+	AgentID         string `json:"agentId"`
+	ProfileActive   bool   `json:"profileActive"`
+	ServiceActive   bool   `json:"serviceActive"`
+	CapabilitiesOK  bool   `json:"capabilitiesOk"`
+	AvailabilityOK  bool   `json:"availabilityOk"`
+	MarketOK        bool   `json:"marketOk"`
+	NoOrderConflict bool   `json:"noOrderConflict"`
+	Eligible        bool   `json:"eligible"`
 }
 
 // AvailabilitySnapshot 是候选可用性快照（冻结时的时间窗）。
 type AvailabilitySnapshot struct {
-	WindowID   string    `json:"windowId"`
-	AgentID    string    `json:"agentId"`
-	StartAt    time.Time `json:"startAt"`
-	EndAt      time.Time `json:"endAt"`
-	MarketID   string    `json:"marketId"`
+	WindowID string    `json:"windowId"`
+	AgentID  string    `json:"agentId"`
+	StartAt  time.Time `json:"startAt"`
+	EndAt    time.Time `json:"endAt"`
+	MarketID string    `json:"marketId"`
 }
 
 // Candidate 是有限候选集成员（快照，之后 Agent 变化不改历史）。
 type Candidate struct {
-	AgentID              string               `json:"agentId"`
-	Name                 string               `json:"name"`
-	Languages            []string             `json:"languages"`
-	ServiceType          string               `json:"serviceType"`
-	ReferencePrice       int64                `json:"referencePrice"`
-	Currency             string               `json:"currency"`
-	Eligibility          EligibilitySnapshot  `json:"eligibility"`
-	Availability         AvailabilitySnapshot `json:"availability"`
-	RankingReason        string               `json:"rankingReason"`
+	AgentID        string               `json:"agentId"`
+	Name           string               `json:"name"`
+	Languages      []string             `json:"languages"`
+	ServiceType    string               `json:"serviceType"`
+	ReferencePrice int64                `json:"referencePrice"`
+	Currency       string               `json:"currency"`
+	Eligibility    EligibilitySnapshot  `json:"eligibility"`
+	Availability   AvailabilitySnapshot `json:"availability"`
+	RankingReason  string               `json:"rankingReason"`
 }
 
 // CandidateBatch 是一次有限候选集的快照。
 type CandidateBatch struct {
-	ID             string      `json:"batchId"`
-	NeedID         string      `json:"needId"`
-	MarketID       string      `json:"marketId"`
-	CreatedAt      time.Time   `json:"createdAt"`
-	Candidates     []Candidate `json:"candidates"`
-	Shortage       bool        `json:"shortage"`
-	ShortageNote   string      `json:"shortageNote,omitempty"`
+	ID               string      `json:"batchId"`
+	NeedID           string      `json:"needId"`
+	MarketID         string      `json:"marketId"`
+	OwnerPrincipalID string      `json:"ownerPrincipalId"`
+	CreatedAt        time.Time   `json:"createdAt"`
+	Candidates       []Candidate `json:"candidates"`
+	Shortage         bool        `json:"shortage"`
+	ShortageNote     string      `json:"shortageNote,omitempty"`
 }
 
 // SupplyQuery 是真实供给查询参数。
@@ -134,10 +135,10 @@ type SupplyQuery struct {
 	MarketID     string    `json:"marketId"`
 	StartAt      time.Time `json:"startAt"`
 	DurationH    int       `json:"durationH"`
-	ServiceType  string    `json:"serviceType"` // CITY_COMPANION
-	Languages    []string  `json:"languages"`   // 硬要求（需 VERIFIED）
+	ServiceType  string    `json:"serviceType"`  // CITY_COMPANION
+	Languages    []string  `json:"languages"`    // 硬要求（需 VERIFIED）
 	Capabilities []string  `json:"capabilities"` // 硬要求（需 VERIFIED）
-	GenderPref   string    `json:"genderPref"`  // any | female | male（软过滤）
+	GenderPref   string    `json:"genderPref"`   // any | female | male（软过滤）
 }
 
 type Repository interface {
@@ -152,6 +153,7 @@ type Repository interface {
 	CreateVerification(ctx context.Context, v CapabilityVerification) error
 	GetVerifications(ctx context.Context, agentID string) ([]CapabilityVerification, error)
 	CreateWindow(ctx context.Context, w AvailabilityWindow) error
+	GetWindow(ctx context.Context, windowID string) (AvailabilityWindow, error)
 	GetWindows(ctx context.Context, agentID string) ([]AvailabilityWindow, error)
 	UpdateWindowStatus(ctx context.Context, windowID string, status, orderID string) error
 	OverlappingWindows(ctx context.Context, agentID string, startAt, endAt time.Time) ([]AvailabilityWindow, error)
@@ -163,10 +165,25 @@ type Repository interface {
 	BatchesSnapshot(ctx context.Context) ([]CandidateBatch, error)
 }
 
+// TransactionalRepository 由支持事务性 outbox 的存储实现（事件与状态原子提交）。
+type TransactionalRepository interface {
+	Repository
+	SaveCandidateBatchAndPublish(ctx context.Context, b CandidateBatch, domainEvents []event.DomainEvent) error
+}
+
 var (
 	ErrProfileNotFound = errors.New("agent profile not found")
 	ErrServiceNotFound = errors.New("agent service not found")
 	ErrBatchNotFound   = errors.New("candidate batch not found")
+)
+
+const (
+	// maxAmountVND 是金额类字段的服务端上限（防 9.2e18 级脏数据）。
+	maxAmountVND = 1_000_000_000
+	// maxSupplierResults 限制单次供给查询返回的 Agent 数（防全市场目录抓取）。
+	maxSupplierResults = 20
+	// maxBatchCandidates 限制有限候选集大小。
+	maxBatchCandidates = 10
 )
 
 type MemoryRepository struct {
@@ -295,6 +312,16 @@ func (r *MemoryRepository) CreateWindow(_ context.Context, w AvailabilityWindow)
 	return nil
 }
 
+func (r *MemoryRepository) GetWindow(_ context.Context, windowID string) (AvailabilityWindow, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	w, exists := r.windows[windowID]
+	if !exists {
+		return AvailabilityWindow{}, errors.New("window not found")
+	}
+	return w, nil
+}
+
 func (r *MemoryRepository) GetWindows(_ context.Context, agentID string) ([]AvailabilityWindow, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -337,6 +364,14 @@ func (r *MemoryRepository) SaveCandidateBatch(_ context.Context, b CandidateBatc
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.batches[b.ID] = b
+	return nil
+}
+
+func (r *MemoryRepository) SaveCandidateBatchAndPublish(_ context.Context, b CandidateBatch, domainEvents []event.DomainEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.batches[b.ID] = b
+	r.events = append(r.events, domainEvents...)
 	return nil
 }
 
@@ -408,7 +443,7 @@ func cloneService(s AgentService) AgentService {
 
 type Service struct {
 	mu         sync.Mutex
-	repository Repository
+	repository TransactionalRepository
 	clock      clock.Clock
 }
 
@@ -416,7 +451,7 @@ func New() *Service {
 	return NewWithRepository(NewMemoryRepository())
 }
 
-func NewWithRepository(repository Repository) *Service {
+func NewWithRepository(repository TransactionalRepository) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}
@@ -489,6 +524,10 @@ func (s *Service) createProfile(ctx context.Context, e command.Envelope) command
 	if !decode(e.Payload, &p) || p.AgentID == "" || p.Name == "" {
 		return command.Rejected(e, "INVALID_AGENT_PROFILE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_profile", nil)
 	}
+	// 归属校验：AgentID 必须等于会话 principal（principal → profile 1:1）。
+	if p.AgentID != e.Principal.ID {
+		return command.Rejected(e, "AGENT_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.agent_not_owned", nil)
+	}
 	profile := AgentProfile{
 		AgentID:      p.AgentID,
 		Name:         p.Name,
@@ -514,6 +553,9 @@ func (s *Service) updateProfile(ctx context.Context, e command.Envelope) command
 	var p profilePayload
 	if !decode(e.Payload, &p) || p.AgentID == "" {
 		return command.Rejected(e, "INVALID_AGENT_PROFILE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_profile", nil)
+	}
+	if p.AgentID != e.Principal.ID {
+		return command.Rejected(e, "AGENT_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.agent_not_owned", nil)
 	}
 	profile, err := s.repository.GetProfile(ctx, p.AgentID)
 	if errors.Is(err, ErrProfileNotFound) {
@@ -584,6 +626,9 @@ func (s *Service) createService(ctx context.Context, e command.Envelope) command
 	if !decode(e.Payload, &p) || p.AgentID == "" || p.ServiceType == "" {
 		return command.Rejected(e, "INVALID_AGENT_SERVICE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_service", nil)
 	}
+	if p.AgentID != e.Principal.ID {
+		return command.Rejected(e, "AGENT_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.agent_not_owned", nil)
+	}
 	if p.ServiceType != "CITY_COMPANION" {
 		return command.Rejected(e, "UNSUPPORTED_SERVICE_TYPE", "VALIDATION", "AFTER_USER_ACTION", "supply.unsupported_service_type", map[string]any{"serviceType": p.ServiceType})
 	}
@@ -615,6 +660,12 @@ func (s *Service) updateService(ctx context.Context, e command.Envelope) command
 	var p servicePayload
 	if !decode(e.Payload, &p) || p.AgentID == "" || p.ServiceType == "" {
 		return command.Rejected(e, "INVALID_AGENT_SERVICE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_service", nil)
+	}
+	if p.AgentID != e.Principal.ID {
+		return command.Rejected(e, "AGENT_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.agent_not_owned", nil)
+	}
+	if p.ReferencePrice < 0 || p.ReferencePrice > maxAmountVND {
+		return command.Rejected(e, "INVALID_REFERENCE_PRICE", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_reference_price", nil)
 	}
 	svc, err := s.repository.GetService(ctx, p.AgentID, p.ServiceType)
 	if errors.Is(err, ErrServiceNotFound) {
@@ -657,6 +708,9 @@ func (s *Service) declareCapability(ctx context.Context, e command.Envelope) com
 	var p capabilityPayload
 	if !decode(e.Payload, &p) || p.AgentID == "" || p.Capability == "" {
 		return command.Rejected(e, "INVALID_CAPABILITY", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_capability", nil)
+	}
+	if p.AgentID != e.Principal.ID {
+		return command.Rejected(e, "AGENT_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.agent_not_owned", nil)
 	}
 	caps, err := s.repository.GetCapabilities(ctx, p.AgentID)
 	if err != nil {
@@ -714,15 +768,15 @@ func (s *Service) verifyCapability(ctx context.Context, e command.Envelope) comm
 		status = "REJECTED"
 	}
 	verification := CapabilityVerification{
-		ID:          newID("cv_"),
-		AgentID:     p.AgentID,
-		Capability:  p.Capability,
-		Status:      status,
-		Method:      p.Method,
-		VerifiedBy:  e.Principal.ID,
-		VerifiedAt:  now,
-		ExpiresAt:   now.AddDate(1, 0, 0),
-		CreatedAt:   now,
+		ID:         newID("cv_"),
+		AgentID:    p.AgentID,
+		Capability: p.Capability,
+		Status:     status,
+		Method:     p.Method,
+		VerifiedBy: e.Principal.ID,
+		VerifiedAt: now,
+		ExpiresAt:  now.AddDate(1, 0, 0),
+		CreatedAt:  now,
 	}
 	caps, _ := s.repository.GetCapabilities(ctx, p.AgentID)
 	cap := Capability{AgentID: p.AgentID, Capability: p.Capability, Declared: true, Verified: p.Decision == "APPROVE", UpdatedAt: now}
@@ -757,6 +811,9 @@ func (s *Service) setAvailabilityWindow(ctx context.Context, e command.Envelope)
 	var p windowPayload
 	if !decode(e.Payload, &p) || p.AgentID == "" || p.StartAt == "" || p.EndAt == "" || p.MarketID == "" {
 		return command.Rejected(e, "INVALID_WINDOW", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_window", nil)
+	}
+	if p.AgentID != e.Principal.ID {
+		return command.Rejected(e, "AGENT_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.agent_not_owned", nil)
 	}
 	start, err := time.Parse(time.RFC3339, p.StartAt)
 	if err != nil || !start.After(s.clock.Now().UTC()) {
@@ -803,13 +860,21 @@ func (s *Service) blockWindow(ctx context.Context, e command.Envelope) command.R
 	if !decode(e.Payload, &p) || p.WindowID == "" {
 		return command.Rejected(e, "INVALID_WINDOW_BLOCK", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_window_block", nil)
 	}
-	domainEvents := []event.DomainEvent{event.New("AvailabilityWindowBlocked", "AgentProfile", "", 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+	// 归属校验：先按 windowId 查窗口，确认属于当前 principal。
+	window, err := s.repository.GetWindow(ctx, p.WindowID)
+	if err != nil {
+		return command.Rejected(e, "WINDOW_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.window_not_found", nil)
+	}
+	if window.AgentID != e.Principal.ID {
+		return command.Rejected(e, "WINDOW_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.window_not_owned", nil)
+	}
+	domainEvents := []event.DomainEvent{event.New("AvailabilityWindowBlocked", "AgentProfile", window.AgentID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
 		"windowId": p.WindowID,
 	})}
 	if err := s.repository.UpdateWindowStatus(ctx, p.WindowID, "BLOCKED", ""); err != nil {
 		return command.Rejected(e, "WINDOW_BLOCK_FAILED", "INTERNAL", "SAFE_RETRY", "supply.window_block_failed", nil)
 	}
-	return command.Accepted(e, "AgentProfile", "", 1, "BLOCKED", eventRefs(domainEvents))
+	return command.Accepted(e, "AgentProfile", window.AgentID, 1, "BLOCKED", eventRefs(domainEvents))
 }
 
 // ---------- Eligibility Gate + Supply Query ----------
@@ -888,6 +953,9 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 	if !decode(e.Payload, &p) || p.MarketID == "" || p.StartAt == "" || p.DurationH <= 0 {
 		return command.Rejected(e, "INVALID_SUPPLY_QUERY", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_query", nil)
 	}
+	if p.DurationH > 24 {
+		return command.Rejected(e, "INVALID_QUERY_DURATION", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_query_duration", nil)
+	}
 	if p.ServiceType == "" {
 		p.ServiceType = "CITY_COMPANION"
 	}
@@ -919,25 +987,28 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 			"currency":       svc.Currency,
 			"eligibility":    snap,
 		})
+		if len(results) >= maxSupplierResults {
+			break
+		}
 	}
 	sort.Slice(results, func(i, j int) bool {
 		return results[i]["agentId"].(string) < results[j]["agentId"].(string)
 	})
 	return acceptedWithPayload(e, "Supply", p.MarketID, 1, "QUERIED", map[string]any{
-		"marketId":    p.MarketID,
-		"suppliers":   results,
-		"shortage":    len(results) == 0,
+		"marketId":  p.MarketID,
+		"suppliers": results,
+		"shortage":  len(results) == 0,
 	}, nil)
 }
 
 // ---------- CandidateBatch（冻结快照）----------
 
 type batchPayload struct {
-	NeedID    string   `json:"needId"`
-	MarketID  string   `json:"marketId"`
-	StartAt   string   `json:"startAt"`
-	DurationH int      `json:"durationH"`
-	Languages []string `json:"languages"`
+	NeedID       string   `json:"needId"`
+	MarketID     string   `json:"marketId"`
+	StartAt      string   `json:"startAt"`
+	DurationH    int      `json:"durationH"`
+	Languages    []string `json:"languages"`
 	Capabilities []string `json:"capabilities"`
 }
 
@@ -1000,30 +1071,35 @@ func (s *Service) createCandidateBatch(ctx context.Context, e command.Envelope) 
 		return candidates[i].AgentID < candidates[j].AgentID
 	})
 	now := s.clock.Now().UTC()
+	// 有限候选集：封顶 maxBatchCandidates，且快照记录归属 principal。
+	if len(candidates) > maxBatchCandidates {
+		candidates = candidates[:maxBatchCandidates]
+	}
 	batch := CandidateBatch{
-		ID:         newID("cb_"),
-		NeedID:     p.NeedID,
-		MarketID:   p.MarketID,
-		CreatedAt:  now,
-		Candidates: candidates,
-		Shortage:   len(candidates) == 0,
+		ID:               newID("cb_"),
+		NeedID:           p.NeedID,
+		MarketID:         p.MarketID,
+		OwnerPrincipalID: e.Principal.ID,
+		CreatedAt:        now,
+		Candidates:       candidates,
+		Shortage:         len(candidates) == 0,
 	}
 	if batch.Shortage {
 		batch.ShortageNote = "no eligible agents for this query"
 	}
 	domainEvents := []event.DomainEvent{event.New("CandidateBatchCreated", "CandidateBatch", batch.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
-		"needId":    p.NeedID,
+		"needId":         p.NeedID,
 		"candidateCount": len(candidates),
-		"shortage":  batch.Shortage,
-		"note":      "CandidateBatch 是一次有限候选集快照；Agent 变化不改历史",
+		"shortage":       batch.Shortage,
+		"note":           "CandidateBatch 是一次有限候选集快照；Agent 变化不改历史",
 	})}
-	if err := s.repository.SaveCandidateBatch(ctx, batch); err != nil {
+	if err := s.repository.SaveCandidateBatchAndPublish(ctx, batch, domainEvents); err != nil {
 		return command.Rejected(e, "BATCH_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "supply.batch_failed", nil)
 	}
 	return acceptedWithPayload(e, "CandidateBatch", batch.ID, 1, "CREATED", map[string]any{
-		"batchId":    batch.ID,
-		"candidates": candidates,
-		"shortage":   batch.Shortage,
+		"batchId":      batch.ID,
+		"candidates":   candidates,
+		"shortage":     batch.Shortage,
 		"shortageNote": batch.ShortageNote,
 	}, domainEvents)
 }
@@ -1045,6 +1121,10 @@ func (s *Service) getCandidateBatch(ctx context.Context, e command.Envelope) com
 	}
 	if err != nil {
 		return command.Rejected(e, "BATCH_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.batch_read_failed", nil)
+	}
+	// 归属校验：候选批次只允许创建者读取（fail-closed：旧批次无归属也拒绝）。
+	if batch.OwnerPrincipalID != e.Principal.ID {
+		return command.Rejected(e, "BATCH_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "supply.batch_not_owned", nil)
 	}
 	return acceptedWithPayload(e, "CandidateBatch", batch.ID, 1, "READ", map[string]any{
 		"batchId":    batch.ID,

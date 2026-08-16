@@ -9,18 +9,18 @@ import (
 
 func envelopeFor(needID, commandType string, payload map[string]any) command.Envelope {
 	return command.Envelope{
-		CommandID:       "cmd_test_1",
-		CommandType:     commandType,
-		CommandVersion:  1,
-		Actor:           command.Actor{Type: "USER", ID: "user_001"},
-		Principal:       command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
-		Target:          command.Target{Type: "Post", ID: needID},
-		IdempotencyKey:  "test_key_123456",
-		AuthContext:     map[string]any{"session": "s1"},
-		Purpose:         "test",
-		CorrelationID:   "corr_1",
-		RequestedAt:     "2026-08-16T00:00:00Z",
-		Payload:         payload,
+		CommandID:      "cmd_test_1",
+		CommandType:    commandType,
+		CommandVersion: 1,
+		Actor:          command.Actor{Type: "USER", ID: "user_001"},
+		Principal:      command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
+		Target:         command.Target{Type: "Post", ID: needID},
+		IdempotencyKey: "test_key_123456",
+		AuthContext:    map[string]any{"session": "s1"},
+		Purpose:        "test",
+		CorrelationID:  "corr_1",
+		RequestedAt:    "2026-08-16T00:00:00Z",
+		Payload:        payload,
 	}
 }
 
@@ -94,9 +94,9 @@ func TestCreateNeedFromPost(t *testing.T) {
 
 	// Post → DM → Need 显式转化
 	e := envelopeFor("", "CreateNeedFromPost", map[string]any{
-		"postId":        postID,
-		"demandOrigin":  "AGENT_OWNED",
-		"sourceType":    "POST_TO_DM",
+		"postId":         postID,
+		"demandOrigin":   "AGENT_OWNED",
+		"sourceType":     "POST_TO_DM",
 		"conversationId": "conv_1",
 	})
 	result := s.Handle(e)
@@ -104,7 +104,7 @@ func TestCreateNeedFromPost(t *testing.T) {
 		t.Fatalf("need from post: got %s (%+v)", result.Outcome, result.Error)
 	}
 	var view struct {
-		NeedID  string                  `json:"needId"`
+		NeedID  string                   `json:"needId"`
 		Lineage DemandAttributionLineage `json:"lineage"`
 	}
 	if err := json.Unmarshal([]byte(result.OperationRef), &view); err != nil {
