@@ -6,7 +6,7 @@
 
 # ADR-001 — Public Product Is a Mobile App
 
-**状态**：ACCEPTED  
+**状态**：SUPERSEDED BY ADR-022
 **决策**：Requester、Agent、Business 使用同一个 iOS / Android App。P0 不建设公开 Web、PWA 或响应式浏览器产品。Operator 使用独立内部桌面 Console。
 
 **结果**：
@@ -121,7 +121,7 @@ packages/test-fixtures
 
 # ADR-010 — One App, Explicit Principal Context
 
-**状态**：ACCEPTED  
+**状态**：SUPERSEDED BY ADR-022
 **决策**：Individual Requester、AgentProfile、BusinessMembership 在同一 App 中切换。每个 query / command 都带 explicit principal context，服务端重新验证。
 
 **规则**：客户端最近一次选择不能成为授权；支付主体、Business scope、Agent identity 必须在高影响动作前再次展示。
@@ -268,3 +268,45 @@ persisted comparison_policy_version
 - 订单数、五星或单次结果只能触发 Outcome Verification Review，不能直接生成 `OUTCOME_VERIFIED`。
 
 详细 contract 见 `architecture/Proxy_Outcome_Intelligence_Architecture_R3.md`。
+
+---
+
+# ADR-022 — Creator App + Unified Venue/Dispatch Web
+
+**状态**：ACCEPTED — 2026-08-22
+**取代**：ADR-001、ADR-010 中关于“所有公开角色必须使用同一 App”及“不建设公开 Web”的产品边界。
+**依据**：`Proxy_PRD_v1.4_Human_Scene_Orchestration_Infrastructure_Freeze_2026-08-20.md`。
+
+**决策**：P0 维护两个前端产品、三个受控角色工作区，并共同使用一个资源编排后端和一套 canonical server truth。
+
+```text
+1. Creator App
+   - 内容、动态、讨论、发帖
+   - 场所情况与机会发现
+   - 邀请接受/拒绝、个人档期、签到、结果与收益
+
+2. Unified Orchestration Web
+   - Venue Workspace：场所、空间、容量、预约、需求、Offer、执行确认
+   - Dispatch Workspace：跨场所缺口、冲突、补位、异常、安全与结算复核
+```
+
+Venue 与 Dispatch 可以共享 Web 代码库和设计系统，但必须使用独立路由、权限策略、Read Model 和审计范围。可部署为不同域名；共享代码不等于共享授权。
+
+场所预约不要求独立原生 App。P0 使用响应式 Web / PWA / QR 或分享链接；`Reservation` 始终是服务端 canonical object。只有出现持续后台推送、扫码硬件、门锁/POS、离线、固定平板或企业设备管控需求时，才允许用新 ADR 评估 Venue Native App。
+
+**硬规则**：
+
+- App、Web、Bot、Partner API 都不得持有独立 Human、Venue、Space、Availability、Assignment、Reservation 或 Economic truth；
+- Creator App 是轻内容与撮合客户端，不承载全局调度和复杂场所经营后台；
+- Venue Workspace 只能访问所属 tenant / venue；
+- Dispatch Workspace 使用受控跨租户权限，高影响动作必须 JIT 授权并写 append-only audit；
+- 所有写入经过同一 Domain Command、Policy、Eligibility 和并发锁；
+- 服务器下发 UI 不得引入未声明或绕过客户端审核边界的隐藏核心功能；
+- App → vertical adapter → platform，Platform 不得依赖任何 App 页面或文案。
+
+**P0 不选择**：
+
+- 为 Venue 单独维护第三个原生 App；
+- Venue Web 与 Dispatch Web 各自建设独立后端；
+- 把场所容量或 Creator 档期保存在客户端；
+- 通过 Web 或动态 UI 隐藏 App 未申报的核心功能。
