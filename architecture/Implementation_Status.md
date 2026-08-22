@@ -1,7 +1,7 @@
 # Proxy Implementation Status
 
-**更新时间**：2026-08-14  
-**当前阶段**：M2 Requester Cockpit + Demand Draft / Preview / Commit + App passwordless login boundary + command Unit of Work
+**更新时间**：2026-08-22
+**当前阶段**：Creator App shell + Server UI runtime + iOS/Android deterministic delivery + orchestration foundation
 
 ## 已实现
 
@@ -80,6 +80,9 @@ Demand API flow  200 / 202 / 409
 Go API health smoke  200
 Go tests  PASS
 Android Pixel_8 native install / Metro / simulated login / session restore  PASS
+iOS 26.5 Platform Support on Xcode 26.6  READY / VERIFIED
+iPhone `weilin` development build signing and install  PASS
+iPhone `weilin` launch + Metro iOS bundle load  PASS
 ```
 
 ## 当前有意未实现
@@ -104,7 +107,7 @@ OpenAPI document generation
 
 ```text
 production OTP/passwordless delivery and verification provider adapter
-→ iOS real-device native install / Keychain smoke (blocked by connected iPhone on iOS 26.6 vs installed Xcode 26.2 platform)
+→ iOS real-device login / Keychain smoke
 → PostgreSQL integration tests for command Unit of Work rollback
 → canonical Task / TaskSlot persistence migration
 → M3 Agent Passport / Availability
