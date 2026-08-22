@@ -1,7 +1,7 @@
 # Proxy System Architecture v1
 
 **状态**：APPROVED BASELINE — Implementation Handoff  
-**产品形态**：iOS / Android App-first；仅 Operator 使用内部桌面 Console  
+**产品形态**：Creator iOS / Android App + Unified Venue/Dispatch Web；共同使用统一资源编排平台
 **当前实现基线**：Prototype v1.5.2 · Chapter 21D R3 FINAL · P0 Addendum R3 FINAL ALIGNED  
 **依据**：Proxy PRD v1.1 Chapter 01–41、Canonical Registry、Outcome Intelligence Architecture R3  
 **目标**：把 PRD 的 Domain contract 收敛成 Luna 可直接实现、可测试、可演进的工程架构。
@@ -15,9 +15,11 @@
 P0 采用：
 
 ```text
-一个 iOS / Android App
+一个 Creator iOS / Android App
 +
-一个受限内部 Operator Console
+一个 Unified Orchestration Web
+  ├── Venue Workspace
+  └── Dispatch Workspace
 +
 一个模块化单体 Backend
 +
@@ -36,9 +38,11 @@ Provider Adapters
 
 核心判断：
 
-- Proxy 是 App 项目，不建设 Requester、Agent、Business 的公开 Web、PWA 或响应式浏览器版本。
-- Requester、Agent、Business 是同一个 App 内的不同 Principal Context，不是三套 App。
-- Operator Console 是内部运营工具，不是公开 Web 产品。
+- Creator App 是内容、撮合、现场执行与个人供给入口，不承载复杂场所经营或全局调度。
+- Venue Workspace 面向场所管理者；Dispatch Workspace 面向受控专业调度人员。两者共享 Web 工程和设计系统，但路由、权限、Read Model 与审计范围隔离。
+- P0 不建设独立 Venue 原生 App。场所预约、需求呼叫和供给管理优先使用响应式 Web / PWA / QR / 分享链接。
+- App 与 Web 都是壳；Human、Venue、Space、Availability、Demand、Offer、Assignment、Reservation、Outcome 与 Economic truth 只属于统一资源编排平台。
+- 用户/Creator、Venue member、Dispatcher 是显式 Principal Context；客户端选择永远不能替代服务端授权。
 - P0 不拆微服务；模块化单体减少分布式一致性风险，同时保留未来拆分边界。
 - PostgreSQL 是 Order、TaskSlot、Payment、Ledger、KYC decision、Safety、Consent 与 Audit 的唯一事实库。
 - Redis、Search index、Read Model、AI、Provider result 都不能成为 Domain truth。
@@ -53,43 +57,41 @@ Provider Adapters
 
 ## 2.1 P0 Scope
 
-公开 App：
+Creator App：
 
 ```text
 Account / Session / Recovery
-Principal switch: Individual / Agent / Business
-Task creation and management
-Availability
-Matching / Offer
-Order execution
-Check-in / Evidence
-Payment / Refund status
-Agent earnings / Payout status
+Content / feed / discussion / posting
+Market and scene visibility
+Intent capture and semantic routing
+Creator availability and invitation response
+Assignment / reservation visibility
+Check-in / evidence / execution outcome
+Earnings / settlement visibility
 Inbox / Push / Deep link
 Safety / Incident / Support
-Business workspace
 Privacy / Consent / Account lifecycle
 ```
 
-内部 Console：
+Unified Orchestration Web：
 
 ```text
-OperatorCase queue
-Match rescue
-Payment / dispute review
-Safety / identity review
-JIT sensitive-data access
-Dual-control approvals
-Provider reconciliation
-Audit timeline
-AI-assisted summaries and proposals
+Venue Workspace
+  Venue / Space / Capacity / Schedule
+  Reservation / Demand / Offer / execution confirmation
+  Venue-scoped members, settlement visibility and scene policies
+
+Dispatch Workspace
+  Cross-venue gaps / conflicts / replacement
+  Match rescue / safety / dispute / settlement review
+  JIT cross-tenant access / dual control / audit timeline
 ```
 
 ## 2.2 P0 非目标
 
 ```text
-Public website / PWA
-Three separate consumer apps
+Dedicated Venue native app
+Separate Venue and Dispatch backends
 Microservices
 Kafka
 Kubernetes
@@ -108,11 +110,13 @@ Full CRM / storefront / membership wallet
 
 ```mermaid
 flowchart LR
-    U["Requester / Agent / Business"] --> APP["Proxy iOS / Android App"]
-    O["Authorized Operator"] --> CONSOLE["Internal Operator Console"]
+    C["Creator / Consumer"] --> APP["Creator iOS / Android App"]
+    V["Venue Manager"] --> VENUE["Venue Workspace"]
+    O["Authorized Dispatcher"] --> DISPATCH["Dispatch Workspace"]
 
     APP --> EDGE["API Edge / Mobile BFF"]
-    CONSOLE --> EDGE
+    VENUE --> EDGE
+    DISPATCH --> EDGE
     EDGE --> CORE["Modular Domain Backend"]
     CORE --> DB[("PostgreSQL + PostGIS")]
     CORE --> REDIS[("Redis")]
@@ -163,7 +167,7 @@ Sentry-compatible crash / performance telemetry
 - 团队可在需要时为高风险设备能力编写 Swift / Kotlin module；
 - 不把 UI 与浏览器 DOM、SEO 或 responsive Web 假设绑定。
 
-## 4.2 App Shell
+## 4.2 Creator App Shell
 
 ```text
 AppShell
@@ -174,17 +178,17 @@ AppShell
 │   ├── secure session restore
 │   └── remote capability flags
 ├── Authentication Stack
-├── Principal Context Switcher
-├── Requester Tabs
-├── Agent Tabs
-├── Business Tabs
+├── Creator / Consumer Context
+├── Home Semantic Command Surface
+├── Market / Feed / Messages / Me Tabs
+├── Availability / Invitation / Execution Flows
 ├── Shared Inbox
 ├── Safety Entry
 ├── Deep Link Router
 └── Global Offline / Pending / Restricted Banner
 ```
 
-Principal 切换必须显式展示当前作用身份。Business command 必须携带 `principal_type = BUSINESS`、business id 和 membership scope；不能沿用上一次 Individual context。
+Principal 切换必须显式展示当前作用身份。Venue 与 Dispatch 工作区不通过 App 内的视觉切换获得权限；对应 command 必须携带服务端验证的 venue membership 或 dispatch scope。
 
 ## 4.3 Feature Modules
 
@@ -327,11 +331,23 @@ POST /v1/uploads
 
 ---
 
-# 5. Internal Operator Console
+# 5. Unified Venue/Dispatch Web
 
-Operator Console 是单独部署的内部桌面应用，推荐 React + TypeScript。它可以与 App 共享 API schema 和 design tokens，但不能共享公开路由、session cookie 或权限模型。
+Unified Orchestration Web 推荐 React + TypeScript，由 Venue Workspace 与 Dispatch Workspace 组成。两者可以共享组件、API schema 和 design tokens，但必须使用不同路由边界、服务端权限、Read Model 与审计策略；不能通过前端隐藏菜单代替授权隔离。
 
-必须具备：
+Venue Workspace 必须具备：
+
+```text
+tenant / venue scoped session
+Venue / Space / Capacity / Schedule management
+Reservation / Demand / Offer / execution confirmation
+venue membership and role validation
+venue-scoped settlement visibility
+append-only command and membership audit
+no direct database access
+```
+
+Dispatch Workspace 必须具备：
 
 ```text
 SSO / MFA
@@ -345,7 +361,7 @@ append-only OperatorAuditLog
 no direct database access
 ```
 
-Console 只能调用 Operator BFF / canonical Domain Command。任何“快速修复”都必须创建 Repair Command、ManualAdjustmentRequest、Approval 或 OperatorCase，不允许 SQL console 成为业务功能。
+两个 Workspace 都只能调用受控 BFF / canonical Domain Command。Venue command 必须绑定 tenant、venue 与 membership scope；任何调度“快速修复”都必须创建 Repair Command、ManualAdjustmentRequest、Approval 或 OperatorCase，不允许 SQL console 成为业务功能。
 
 ---
 
@@ -353,7 +369,7 @@ Console 只能调用 Operator BFF / canonical Domain Command。任何“快速�
 
 ## 6.1 Deployment Units
 
-P0 使用同一代码库、三个运行进程：
+P0 使用同一代码库、三个后端运行进程：
 
 ```text
 api
@@ -361,10 +377,12 @@ worker
 ai-runtime
 ```
 
-可选第四个进程：
+Web 前端可作为一个部署单元、两个受控 Workspace：
 
 ```text
-operator-console
+orchestration-web
+  /venue/*
+  /dispatch/*
 ```
 
 `api` 与 `worker` 共享 Domain modules；`ai-runtime` 只能通过受控 Tool API 调用 Backend，不加载数据库凭证。
@@ -867,9 +885,11 @@ P0 为单 Region、多可用区：
 
 ```mermaid
 flowchart TB
-    subgraph Mobile["Public Mobile Distribution"]
+    subgraph Clients["Controlled Client Surfaces"]
         IOS["iOS App / TestFlight / App Store"]
         AND["Android App / Internal Track / Play Store"]
+        VENUE["Venue Workspace / Web"]
+        DISPATCH["Dispatch Workspace / Web"]
     end
 
     subgraph Edge["Single Region / Multi-AZ"]
@@ -878,7 +898,6 @@ flowchart TB
         API2["API Instance B"]
         W1["Worker Pool"]
         AIR["AI Runtime"]
-        OC["Internal Operator Console"]
     end
 
     subgraph Data["Managed Data Services"]
@@ -889,7 +908,8 @@ flowchart TB
 
     IOS --> LB
     AND --> LB
-    OC --> LB
+    VENUE --> LB
+    DISPATCH --> LB
     LB --> API1
     LB --> API2
     API1 --> PG
