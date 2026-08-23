@@ -204,7 +204,7 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
           <Pressable onPress={() => { setAuthMode("login"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "login" && styles.authTabActive]}>
             <Text style={[styles.authTabText, authMode === "login" && styles.authTabTextActive]}>登录</Text>
           </Pressable>
-          <Pressable onPress={() => { setAuthMode("register"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "register" && styles.authTabActive]}>
+          <Pressable onPress={() => { setAuthMode("register"); setAuthChannel("SMS"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "register" && styles.authTabActive]}>
             <Text style={[styles.authTabText, authMode === "register" && styles.authTabTextActive]}>注册</Text>
           </Pressable>
         </View>
