@@ -126,9 +126,13 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
     try {
 		const loginClient = await getNativeLoginClient();
       const isEmail = authChannel === "EMAIL";
-      const identifier = isEmail ? googleEmail.trim().toLowerCase() : `+84${phone.replace(/\D/g, "")}`;
+      let rawEmail = googleEmail.trim().toLowerCase();
+      // 自动补全 gmail.com 后缀（用户只输用户名时）
+      if (isEmail && rawEmail && !rawEmail.includes("@")) rawEmail = `${rawEmail}@gmail.com`;
+      if (isEmail && rawEmail !== googleEmail.trim().toLowerCase()) setGoogleEmail(rawEmail);
+      const identifier = isEmail ? rawEmail : `+84${phone.replace(/\D/g, "")}`;
       if (isEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
-        setError("请输入有效的 Google 邮箱地址。");
+        setError("请输入有效的 Google 邮箱地址（可只输用户名自动补全 @gmail.com）。");
         setBusy(false);
         return;
       }
@@ -138,21 +142,16 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
         platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
       });
       setChallengeId(result.challengeId);
-      // 谷歌邮箱自动跳转：Gmail App 优先，失败回退 Chrome 浏览器
+      // 谷歌邮箱自动跳转：Gmail App 优先，失败回退 Chrome/浏览器（模拟环境验证码固定 123456）
       if (isEmail) {
-        const gmailUrl = "googlegmail://";
-        const chromeUrl = "googlechrome://mail.google.com";
         const webUrl = "https://mail.google.com";
         try {
-          if (await Linking.canOpenURL(gmailUrl)) {
-            await Linking.openURL(gmailUrl);
-          } else if (await Linking.canOpenURL(chromeUrl)) {
-            await Linking.openURL(chromeUrl);
-          } else {
-            await Linking.openURL(webUrl);
-          }
+          // 先尝试 Gmail App，无需 canOpenURL 阻塞，直接尝试
+          await Linking.openURL("googlegmail://").catch(async () => {
+            // 回退 Chrome / 系统浏览器
+            await Linking.openURL(webUrl).catch(() => undefined);
+          });
         } catch {
-          // 静默：即使无法跳转也不阻塞验证码输入，模拟环境验证码固定 123456
           await Linking.openURL(webUrl).catch(() => undefined);
         }
       }
@@ -226,7 +225,7 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
         ) : (
           <>
             <View style={styles.googleButtonRow}>
-              <Pressable onPress={() => { setAuthChannel("EMAIL"); setError(undefined); }} style={[styles.googleButton, authChannel === "EMAIL" && styles.googleButtonActive]}>
+              <Pressable onPress={() => { setAuthChannel("EMAIL"); setError(undefined); Linking.openURL("https://mail.google.com").catch(() => undefined); }} style={[styles.googleButton, authChannel === "EMAIL" && styles.googleButtonActive]}>
                 <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 邮箱继续</Text>
               </Pressable>
               <Pressable onPress={() => { setAuthChannel("SMS"); setError(undefined); }} style={[styles.googleButton, authChannel === "SMS" && styles.googleButtonActive, styles.googleButtonSmall]}>
@@ -235,10 +234,10 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
             </View>
             {authChannel === "EMAIL" ? (
               <>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" keyboardType="email-address" onChangeText={setGoogleEmail} placeholder="请输入 Google 邮箱" placeholderTextColor="#A9A2B0" style={styles.phoneInput} value={googleEmail} /></View>
-                <View style={[styles.button, busy || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(googleEmail.trim()) ? styles.disabled : null]}>
+                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" keyboardType="email-address" onChangeText={setGoogleEmail} placeholder="用户名或完整 Gmail（自动补全 @gmail.com）" placeholderTextColor="#A9A2B0" style={styles.phoneInput} value={googleEmail} /></View>
+                <View style={[styles.button, busy || googleEmail.trim().length === 0 ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
-                  <Pressable disabled={busy || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(googleEmail.trim())} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
+                  <Pressable disabled={busy || googleEmail.trim().length === 0} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
                     <Text style={styles.buttonText}>{busy ? "发送中…" : "获取邮箱验证码"}</Text>
                   </Pressable>
                 </View>
