@@ -129,6 +129,9 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID as string,
     webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID as string,
     scopes: ["openid", "profile", "email"],
+    // 未配真实 ClientID 时走 Expo 代理，全球 Gmail 仍可一键（开发阶段）
+    useProxy: true,
+    projectNameForProxy: "@proxy/proxy",
   } as any);
 
   useEffect(() => {
