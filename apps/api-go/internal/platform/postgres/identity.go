@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -37,13 +39,118 @@ func (r *IdentityRepository) GetUser(ctx context.Context, id string) (identity.U
 func (r *IdentityRepository) GetLoginIdentity(ctx context.Context, id string) (identity.LoginIdentity, error) {
 	var loginIdentity identity.LoginIdentity
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, user_account_id, verified, status
+		SELECT id, user_account_id, verified, status, COALESCE(channel, ''), COALESCE(identifier, '')
 		FROM identity.login_identities
-		WHERE id = $1`, id).Scan(&loginIdentity.ID, &loginIdentity.UserAccountID, &loginIdentity.Verified, &loginIdentity.Status)
+		WHERE id = $1`, id).Scan(&loginIdentity.ID, &loginIdentity.UserAccountID, &loginIdentity.Verified, &loginIdentity.Status, &loginIdentity.Channel, &loginIdentity.Identifier)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.LoginIdentity{}, identity.ErrLoginIdentityNotFound
 	}
 	return loginIdentity, err
+}
+
+func (r *IdentityRepository) EnsurePasswordlessIdentity(ctx context.Context, channel, identifier, deviceID, platform, upgradingUserAccountID string) (identity.LoginIdentity, identity.DeviceRegistration, bool, error) {
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+	}
+	defer func() { _ = transaction.Rollback(ctx) }()
+	var login identity.LoginIdentity
+	err = transaction.QueryRow(ctx, `
+		SELECT id, user_account_id, verified, status, COALESCE(channel, ''), COALESCE(identifier, '')
+		FROM identity.login_identities WHERE channel = $1 AND identifier = $2 FOR UPDATE`, channel, identifier,
+	).Scan(&login.ID, &login.UserAccountID, &login.Verified, &login.Status, &login.Channel, &login.Identifier)
+	created := false
+	if errors.Is(err, pgx.ErrNoRows) {
+		userID, loginID := postgresIdentityID("user_"), postgresIdentityID("login_")
+		if upgradingUserAccountID != "" {
+			userID = upgradingUserAccountID
+			if _, err = transaction.Exec(ctx, `UPDATE identity.user_accounts SET status = 'REGISTERED', updated_at = now() WHERE id = $1`, userID); err != nil {
+				return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+			}
+		} else if _, err = transaction.Exec(ctx, `INSERT INTO identity.user_accounts (id, status) VALUES ($1, 'REGISTERED')`, userID); err != nil {
+			return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+		}
+		if _, err = transaction.Exec(ctx, `INSERT INTO identity.login_identities (id, user_account_id, verified, status, channel, identifier) VALUES ($1, $2, TRUE, 'ACTIVE', $3, $4)`, loginID, userID, channel, identifier); err != nil {
+			return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+		}
+		if upgradingUserAccountID == "" {
+			if _, err = transaction.Exec(ctx, `INSERT INTO identity.memberships (principal_type, principal_id, user_account_id, status) VALUES ('INDIVIDUAL', $1, $1, 'ACTIVE')`, userID); err != nil {
+				return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+			}
+		}
+		login = identity.LoginIdentity{ID: loginID, UserAccountID: userID, Channel: channel, Identifier: identifier, Verified: true, Status: "ACTIVE"}
+		created = true
+	} else if err != nil {
+		return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+	}
+	device := identity.DeviceRegistration{ID: deviceID, UserAccountID: login.UserAccountID, Platform: platform, Status: "ACTIVE"}
+	if upgradingUserAccountID != "" {
+		err = reassignDevice(ctx, transaction, device)
+	} else {
+		err = upsertDevice(ctx, transaction, device)
+	}
+	if err != nil {
+		return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+	}
+	if err = transaction.Commit(ctx); err != nil {
+		return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
+	}
+	return login, device, created, nil
+}
+
+func reassignDevice(ctx context.Context, execer sqlExecer, device identity.DeviceRegistration) error {
+	_, err := execer.Exec(ctx, `INSERT INTO identity.device_registrations (id, user_account_id, platform, status, push_token_ref)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO UPDATE SET user_account_id = EXCLUDED.user_account_id, platform = EXCLUDED.platform, status = EXCLUDED.status, push_token_ref = EXCLUDED.push_token_ref, updated_at = now()`,
+		device.ID, device.UserAccountID, device.Platform, device.Status, nullableText(device.PushTokenRef))
+	return err
+}
+
+func (r *IdentityRepository) EnsureAnonymousIdentity(ctx context.Context, deviceID, platform string) (identity.UserAccount, identity.DeviceRegistration, bool, error) {
+	transaction, err := r.pool.Begin(ctx)
+	if err != nil {
+		return identity.UserAccount{}, identity.DeviceRegistration{}, false, err
+	}
+	defer func() { _ = transaction.Rollback(ctx) }()
+	var device identity.DeviceRegistration
+	err = transaction.QueryRow(ctx, `SELECT id, user_account_id, platform, status, COALESCE(push_token_ref, '') FROM identity.device_registrations WHERE id = $1 FOR UPDATE`, deviceID).
+		Scan(&device.ID, &device.UserAccountID, &device.Platform, &device.Status, &device.PushTokenRef)
+	if err == nil {
+		var user identity.UserAccount
+		if err = transaction.QueryRow(ctx, `SELECT id, status FROM identity.user_accounts WHERE id = $1`, device.UserAccountID).Scan(&user.ID, &user.Status); err != nil {
+			return identity.UserAccount{}, identity.DeviceRegistration{}, false, err
+		}
+		if err = transaction.Commit(ctx); err != nil {
+			return identity.UserAccount{}, identity.DeviceRegistration{}, false, err
+		}
+		return user, device, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return identity.UserAccount{}, identity.DeviceRegistration{}, false, err
+	}
+	user := identity.UserAccount{ID: postgresIdentityID("user_"), Status: "ANONYMOUS"}
+	device = identity.DeviceRegistration{ID: deviceID, UserAccountID: user.ID, Platform: platform, Status: "ACTIVE"}
+	if _, err = transaction.Exec(ctx, `INSERT INTO identity.user_accounts (id, status) VALUES ($1, $2)`, user.ID, user.Status); err != nil {
+		return identity.UserAccount{}, identity.DeviceRegistration{}, false, err
+	}
+	if _, err = transaction.Exec(ctx, `INSERT INTO identity.memberships (principal_type, principal_id, user_account_id, status) VALUES ('INDIVIDUAL', $1, $1, 'ACTIVE')`, user.ID); err != nil {
+		return identity.UserAccount{}, identity.DeviceRegistration{}, false, err
+	}
+	if err = upsertDevice(ctx, transaction, device); err != nil {
+		return identity.UserAccount{}, identity.DeviceRegistration{}, false, err
+	}
+	if err = transaction.Commit(ctx); err != nil {
+		return identity.UserAccount{}, identity.DeviceRegistration{}, false, err
+	}
+	return user, device, true, nil
+}
+
+func postgresIdentityID(prefix string) string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return prefix + time.Now().UTC().Format("20060102150405.000000000")
+	}
+	return prefix + hex.EncodeToString(bytes[:])
 }
 
 func (r *IdentityRepository) CreateLoginChallenge(ctx context.Context, challenge identity.LoginChallenge) error {

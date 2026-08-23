@@ -8,6 +8,8 @@ function response(status: number, body: unknown): TransportResponse {
 
 const auth = {
   sessionId: "session_001",
+	userAccountId: "user_001",
+	principal: { type: "INDIVIDUAL" as const, id: "user_001" },
   accessToken: "access_secret",
   refreshToken: "refresh_secret",
   accessExpiresAt: "2026-08-14T00:15:00.000Z",

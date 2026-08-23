@@ -4,11 +4,13 @@
 
 当前 Mobile runtime 已使用 Expo SDK 57 + React Native 0.86，并生成 development-build 原生工程。入口是 `src/index.ts`，原生配置在 `app.json`；`ios/` 和 `android/` 由 Expo prebuild 生成，不把 HTML 原型当作 App runtime。
 
-运行方式：
+运行方式（完整分层见 `DELIVERY_ARCHITECTURE.md`）：
 
 - `pnpm --filter @proxy/mobile start` 启动 Metro
 - `pnpm --filter @proxy/mobile native:prebuild` 重新生成原生工程
-- `pnpm --filter @proxy/mobile ios` / `android` 构建 development build
+- `pnpm --filter @proxy/mobile android:bootstrap` / `ios:bootstrap` 只在首次或 Native Shell 变化后构建 development shell
+- `pnpm --filter @proxy/mobile android:dev` / `ios:dev` 启动 Metro；日常 JS/UI 修改不运行 Gradle/Xcode
+- `pnpm --filter @proxy/mobile android:emulator` 以单点触控模式启动 Pixel_8，避免桌面模拟器的 Option/Ctrl 多点手势卡住后注入幽灵点击
 
 下一步在已生成的 React Native + TypeScript + Expo development build 上继续接入：
 
@@ -38,6 +40,14 @@ EXPO_PUBLIC_LOGIN_MODE=simulated EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:4100 
 # Android Emulator 时改为：
 EXPO_PUBLIC_LOGIN_MODE=simulated EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:4100 pnpm --filter @proxy/mobile start
 ```
+
+低频、需要从桌面图标独立启动的 Android 验收才生成内嵌 JS 包：
+
+```bash
+pnpm --filter @proxy/mobile android:release-test
+```
+
+`android` 与 `android:dev` 只启动已有 development shell + Metro，不会再次编译原生工程。`android:release-test` 才安装不依赖 Metro 的内嵌测试包。
 
 开发登录页使用本地 fixture `user_001 / login_001 / device_001`，验证码为配置的模拟码。该页面不会进入 production build。
 `auth-client.ts` 负责 access token 注入、401 单次重试和 refresh 并发合并；refresh 失败会清除安全 Session，不能把失效 token 留在 App 内。

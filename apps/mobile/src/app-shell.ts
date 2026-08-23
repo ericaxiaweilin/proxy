@@ -1,7 +1,7 @@
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 
 export type AppShellStatus = "BOOTSTRAPPING" | "AUTHENTICATED" | "OFFLINE" | "RESTRICTED" | "SIGNED_OUT";
-export type PrincipalContext = "INDIVIDUAL" | "AGENT" | "BUSINESS";
+export type PrincipalContext = "INDIVIDUAL" | "BUSINESS";
 
 export type AppShellState = {
   status: AppShellStatus;

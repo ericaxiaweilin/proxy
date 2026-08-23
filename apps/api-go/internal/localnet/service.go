@@ -24,16 +24,18 @@ import (
 
 // Post 是本地动态的 durable content（PRD §4 Post Canonical Contract）。
 type Post struct {
-	ID          string         `json:"postId"`
-	AuthorType  string         `json:"authorType"` // USER | AGENT | MERCHANT | PLATFORM_SPECIAL
-	AuthorID    string         `json:"authorId"`
-	Body        string         `json:"body"`
-	MediaRefs   []PostMediaRef `json:"mediaRefs"`  // R14 Adaptive Media Rail：带 sortOrder
-	Visibility  string         `json:"visibility"` // PUBLIC | FOLLOWERS | AGENT_ONLY
-	CityScope   string         `json:"cityScope,omitempty"`
-	Status      string         `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
-	ContextRefs []ContextRef   `json:"contextRefs"`
-	CreatedAt   time.Time      `json:"createdAt"`
+	ID         string `json:"postId"`
+	AuthorType string `json:"authorType"` // USER | AGENT | MERCHANT | PLATFORM_SPECIAL
+	AuthorID   string `json:"authorId"`
+	// AuthorDisplayName 是展示名（P0 演示用；权威作者仍是 AuthorType+AuthorID）。
+	AuthorDisplayName string         `json:"authorDisplayName,omitempty"`
+	Body              string         `json:"body"`
+	MediaRefs         []PostMediaRef `json:"mediaRefs"`  // R14 Adaptive Media Rail：带 sortOrder
+	Visibility        string         `json:"visibility"` // PUBLIC | FOLLOWERS | AGENT_ONLY
+	CityScope         string         `json:"cityScope,omitempty"`
+	Status            string         `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
+	ContextRefs       []ContextRef   `json:"contextRefs"`
+	CreatedAt         time.Time      `json:"createdAt"`
 }
 
 // PostMediaRef 是 Post 的媒体引用（R14 §16.5：sort_order = 作者确认的展示顺序）。
@@ -303,12 +305,13 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 // PRD §4/§11：Post = durable content；发布永不自动创建 Task。
 
 type createPostPayload struct {
-	AuthorType  string         `json:"authorType"`
-	Body        string         `json:"body"`
-	MediaRefs   []PostMediaRef `json:"mediaRefs"` // R14：{mediaAssetId, sortOrder}，≤6
-	Visibility  string         `json:"visibility"`
-	CityScope   string         `json:"cityScope"`
-	ContextRefs []ContextRef   `json:"contextRefs"`
+	AuthorType        string         `json:"authorType"`
+	AuthorDisplayName string         `json:"authorDisplayName"`
+	Body              string         `json:"body"`
+	MediaRefs         []PostMediaRef `json:"mediaRefs"` // R14：{mediaAssetId, sortOrder}，≤6
+	Visibility        string         `json:"visibility"`
+	CityScope         string         `json:"cityScope"`
+	ContextRefs       []ContextRef   `json:"contextRefs"`
 }
 
 func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Result {
@@ -337,16 +340,17 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		return command.Rejected(e, "POST_AUTHOR_MISMATCH", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.post_author_mismatch", nil)
 	}
 	post := Post{
-		ID:          newID("post_"),
-		AuthorType:  p.AuthorType,
-		AuthorID:    e.Actor.ID,
-		Body:        p.Body,
-		MediaRefs:   append([]PostMediaRef(nil), p.MediaRefs...),
-		Visibility:  p.Visibility,
-		CityScope:   p.CityScope,
-		Status:      "PUBLISHED",
-		ContextRefs: append([]ContextRef(nil), p.ContextRefs...),
-		CreatedAt:   s.clock.Now().UTC(),
+		ID:                newID("post_"),
+		AuthorType:        p.AuthorType,
+		AuthorID:          e.Actor.ID,
+		AuthorDisplayName: p.AuthorDisplayName,
+		Body:              p.Body,
+		MediaRefs:         append([]PostMediaRef(nil), p.MediaRefs...),
+		Visibility:        p.Visibility,
+		CityScope:         p.CityScope,
+		Status:            "PUBLISHED",
+		ContextRefs:       append([]ContextRef(nil), p.ContextRefs...),
+		CreatedAt:         s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, map[string]any{
 		"authorType":  post.AuthorType,
@@ -378,6 +382,13 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		}
 		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
 			continue
+		}
+		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
+		if p.MediaRefs == nil {
+			p.MediaRefs = []PostMediaRef{}
+		}
+		if p.ContextRefs == nil {
+			p.ContextRefs = []ContextRef{}
 		}
 		feed = append(feed, p)
 	}

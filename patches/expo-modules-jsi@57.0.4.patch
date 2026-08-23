@@ -1,0 +1,14 @@
+diff --git a/apple/scripts/build-xcframework.sh b/apple/scripts/build-xcframework.sh
+index 56bcb4ced0c25da2aaa170e3d2657ae2e4798ca7..f3e5a711b3068232f2734c66b737e20ec8366af6 100755
+--- a/apple/scripts/build-xcframework.sh
++++ b/apple/scripts/build-xcframework.sh
+@@ -32,5 +32,6 @@ CONFIGURATION="Release"
+ CONFIGURATION="Release"
+-DERIVED_DATA_PATH="${PACKAGE_DIR}/.DerivedData"
+-SPM_BUILD_PATH="${PACKAGE_DIR}/.build"
+-SPM_WORKSPACE_PATH="${PACKAGE_DIR}/.swiftpm"
++BUILD_ROOT="${EXPO_MODULES_JSI_BUILD_ROOT:-${PACKAGE_DIR}}"
++DERIVED_DATA_PATH="${BUILD_ROOT}/.DerivedData"
++SPM_BUILD_PATH="${BUILD_ROOT}/.build"
++SPM_WORKSPACE_PATH="${BUILD_ROOT}/.swiftpm"
+ BUILD_PRODUCTS_PATH="${DERIVED_DATA_PATH}/Build/Products"

@@ -12,6 +12,7 @@ proxy_ios_scheme="Proxy"
 proxy_ios_project="${mobile_dir}/ios/Proxy.xcodeproj/project.pbxproj"
 proxy_ios_autolinking="${mobile_dir}/ios/build/generated/autolinking/autolinking.json"
 proxy_ios_derived_data="${PROXY_IOS_DERIVED_DATA:-${HOME}/Library/Developer/Xcode/DerivedData/Proxy-Local}"
+proxy_ios_expo_jsi_build_root="${PROXY_IOS_EXPO_JSI_BUILD_ROOT:-${HOME}/Library/Developer/Xcode/DerivedData/Proxy-ExpoModulesJSI}"
 
 if ! /usr/bin/shlock -f "${proxy_build_lock}" -p $$; then
   echo "Another Proxy iOS native build is already running." >&2
@@ -111,9 +112,13 @@ COPYFILE_DISABLE=1 xcodebuild \
   -scheme "${proxy_ios_scheme}" \
   -destination "id=${proxy_ios_destination_id}" \
   -derivedDataPath "${proxy_ios_derived_data}" \
+  -disableAutomaticPackageResolution \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
   COCOAPODS_PARALLEL_CODE_SIGN=true \
   COMPILER_INDEX_STORE_ENABLE=NO \
   DEVELOPMENT_TEAM="${proxy_ios_team}" \
+  EXPO_MODULES_JSI_BUILD_ROOT="${proxy_ios_expo_jsi_build_root}" \
   PRODUCT_BUNDLE_IDENTIFIER="${proxy_ios_bundle_id}" \
   -allowProvisioningUpdates \
   -allowProvisioningDeviceRegistration \

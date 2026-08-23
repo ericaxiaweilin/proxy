@@ -33,7 +33,9 @@ PROXY_IOS_DEVICE=weilin pnpm --filter @proxy/mobile ios:bootstrap
 
 真机开发构建使用 `com.proxy.creator.dev.<team>` 本地 Bundle ID，避免个人开发团队占用或覆盖生产 `com.proxy.app`。可通过 `PROXY_IOS_DEV_BUNDLE_ID` 显式覆盖；仓库里的生产 Bundle ID 不会被脚本改写。首次安装后，iPhone 需要在“设置 → 通用 → VPN 与设备管理”信任开发者证书。
 
-本仓库位于 macOS Desktop/File Provider 管理目录。为避免 FinderInfo/FileProvider 扩展属性污染 `.app` 并导致签名失败，iOS DerivedData 固定写到 `~/Library/Developer/Xcode/DerivedData/Proxy-Local`，同时启用 `COPYFILE_DISABLE=1`。禁止把 DerivedData 改回项目目录。
+本仓库位于 macOS Desktop/File Provider 管理目录。为避免 FinderInfo/FileProvider 扩展属性污染 `.app` 并导致签名失败，iOS DerivedData 固定写到 `~/Library/Developer/Xcode/DerivedData/Proxy-Local`，ExpoModulesJSI 的内部 SwiftPM/DerivedData 固定写到 `~/Library/Developer/Xcode/DerivedData/Proxy-ExpoModulesJSI`，同时启用 `COPYFILE_DISABLE=1`。依赖补丁 `patches/expo-modules-jsi@57.0.4.patch` 保证重新安装依赖后仍支持该外置目录；禁止把这些构建目录改回项目目录。
+
+Bootstrap 禁用 Xcode 自动 Package Resolution，只使用 `pod install` 已锁定的依赖图，避免真机构建在输出依赖图之前无期限等待。只有 Pod/原生依赖变化时才需要重新执行 `pod install`，普通 Server UI / JS Renderer 更新不重新编译。
 
 随后运行：
 
@@ -43,6 +45,8 @@ pnpm --filter @proxy/mobile ios:dev
 ```
 
 `ios:dev` 自动把 `EXPO_PUBLIC_API_BASE_URL` 指向 Mac 当前局域网地址；它不会沿用 Android 模拟器专用的 `10.0.2.2`。网络环境特殊时可设置 `PROXY_IOS_API_BASE_URL`。真机与 Mac 必须能互访，API 监听 4100，Metro 监听 8081。
+
+`pnpm dev:api` 会先恢复并检查本地模型底座通道，再启动 Go API。该开发辅助只维护 `.env` 指定的 loopback gateway；业务代码仍只提交 task ID，模型、Provider 与故障切换继续由模型底座负责。
 
 自包含 Android 验收包是低频命令：
 

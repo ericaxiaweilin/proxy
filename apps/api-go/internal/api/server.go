@@ -5,23 +5,27 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/engagement"
+	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/supply"
+	"github.com/proxy-app/proxy-api/internal/voucher"
 )
 
 type Server struct {
@@ -35,7 +39,10 @@ type Server struct {
 	Fulfillment   *fulfillment.Service
 	Supply        *supply.Service
 	Media         *media.Service
+	Activity      *activity.Service
 	Contribution  *contribution.Service
+	Experience    *experience.Service
+	Voucher       *voucher.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -76,7 +83,7 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if readyCheck != nil {
 		readyMode = "configured"
 	}
-	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120)}
+	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.New(), Voucher: voucher.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -84,7 +91,86 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health/live", s.live)
 	mux.HandleFunc("/health/ready", s.ready)
 	mux.HandleFunc("/v1/commands/", s.command)
+	mux.HandleFunc("/v1/media/upload/", s.mediaUpload)
+	mux.HandleFunc("/v1/media/play/", s.mediaFile)
+	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)
 	return s.recoverMiddleware(mux)
+}
+
+// mediaUpload is a narrow authenticated raw-body endpoint. Metadata and state
+// transitions remain commands; only the file bytes use this route.
+func (s *Server) mediaUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	if s.Media == nil || s.Authenticator == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "media_upload_unavailable"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/v1/media/upload/")
+	if id == "" || strings.Contains(id, "/") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_route_not_found"})
+		return
+	}
+	rawAccessToken, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "access_token_required"})
+		return
+	}
+	authenticated, err := s.Authenticator.Authenticate(r.Context(), rawAccessToken)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_access_token"})
+		return
+	}
+	const maxUploadBytes = int64(20 << 20)
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+1)
+	if _, err := s.Media.SaveUpload(r.Context(), id, authenticated.Principal.ID, r.Body, maxUploadBytes); err != nil {
+		switch {
+		case errors.Is(err, media.ErrAssetNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_asset_not_found"})
+		case errors.Is(err, media.ErrMediaNotOwner):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "media_not_owner"})
+		case errors.Is(err, media.ErrUploadTooLarge):
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "media_upload_too_large"})
+		case errors.Is(err, media.ErrStatusTransition):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "media_not_uploading"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "media_upload_failed"})
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// mediaFile 提供 READY 资产的播放/缩略图文件（GET，播放器直接拉 MP4/图片 URL）。
+// 内容可见性已由 Feed 管道 fail-closed 控制，P0 不再叠加会话鉴权；
+// 非 READY / 不存在一律 404。
+func (s *Server) mediaFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	if s.Media == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_not_configured"})
+		return
+	}
+	kind := "play"
+	id := strings.TrimPrefix(r.URL.Path, "/v1/media/play/")
+	if strings.HasPrefix(r.URL.Path, "/v1/media/thumb/") {
+		kind = "thumb"
+		id = strings.TrimPrefix(r.URL.Path, "/v1/media/thumb/")
+	}
+	if id == "" || strings.Contains(id, "/") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_route_not_found"})
+		return
+	}
+	path, err := s.Media.ResolveServingPath(r.Context(), id, kind)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_not_available"})
+		return
+	}
+	http.ServeFile(w, r, path)
 }
 
 // recoverMiddleware keeps a panic inside any command handler from crashing the
@@ -194,9 +280,35 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Passwordless authentication is normally public. When it is initiated
+	// from an existing Guest session, however, preserve that server-authenticated
+	// person so the new credential upgrades it instead of creating a duplicate.
+	if envelope.CommandType == "BeginPasswordlessAuthentication" && r.Header.Get("Authorization") != "" {
+		if s.Authenticator == nil {
+			result := command.Rejected(envelope, "AUTHENTICATION_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "command.authentication_unavailable", nil)
+			writeResult(w, http.StatusServiceUnavailable, result)
+			return
+		}
+		rawAccessToken, ok := bearerToken(r.Header.Get("Authorization"))
+		if !ok {
+			result := command.Rejected(envelope, "INVALID_ACCESS_TOKEN", "AUTHENTICATION", "AFTER_REAUTH", "command.invalid_access_token", nil)
+			writeResult(w, http.StatusUnauthorized, result)
+			return
+		}
+		authenticated, err := s.Authenticator.Authenticate(r.Context(), rawAccessToken)
+		if err != nil {
+			result := command.Rejected(envelope, "INVALID_ACCESS_TOKEN", "AUTHENTICATION", "AFTER_REAUTH", "command.invalid_access_token", nil)
+			writeResult(w, http.StatusUnauthorized, result)
+			return
+		}
+		envelope.Actor = authenticated.Actor
+		envelope.Principal = authenticated.Principal
+		envelope.AuthContext = authenticated.AuthContext
+	}
 
 	result, status, err := s.executeCommand(r.Context(), envelope)
 	if err != nil {
+		log.Printf("command transaction failed: command=%s key=%s err=%v", envelope.CommandType, envelope.IdempotencyKey, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "command_transaction_failed"})
 		return
 	}
@@ -212,6 +324,7 @@ func (s *Server) executeCommand(ctx context.Context, envelope command.Envelope) 
 	operation := func(operationContext context.Context) error {
 		decision, previous, err := s.Idempotency.Begin(operationContext, scope, envelope.IdempotencyKey, fingerprint)
 		if err != nil {
+			log.Printf("idempotency begin failed: command=%s err=%v", envelope.CommandType, err)
 			return err
 		}
 		switch decision {
@@ -234,6 +347,7 @@ func (s *Server) executeCommand(ctx context.Context, envelope command.Envelope) 
 		case command.IdempotencyClaimed:
 			result = s.dispatchCommand(operationContext, envelope)
 			if err := s.Idempotency.Complete(operationContext, scope, envelope.IdempotencyKey, command.IdempotencyRecord{Fingerprint: fingerprint, Result: result}); err != nil {
+				log.Printf("idempotency complete failed: command=%s outcome=%s err=%v", envelope.CommandType, result.Outcome, err)
 				return err
 			}
 			status = statusFor(result)
@@ -280,8 +394,14 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Supply.HandleContext(ctx, envelope)
 	case s.Media != nil && s.Media.Supports(envelope.CommandType):
 		return s.Media.HandleContext(ctx, envelope)
+	case s.Activity != nil && s.Activity.Supports(envelope.CommandType):
+		return s.Activity.HandleContext(ctx, envelope)
 	case s.Contribution != nil && s.Contribution.Supports(envelope.CommandType):
 		return s.Contribution.HandleContext(ctx, envelope)
+	case s.Experience != nil && s.Experience.Supports(envelope.CommandType):
+		return s.Experience.HandleContext(ctx, envelope)
+	case s.Voucher != nil && s.Voucher.Supports(envelope.CommandType):
+		return s.Voucher.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}
@@ -293,7 +413,7 @@ func idempotencyScope(envelope command.Envelope) string {
 
 func requiresAuthentication(commandType string) bool {
 	switch commandType {
-	case "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "RequestAccountRecovery", "RefreshSession":
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RequestAccountRecovery", "RefreshSession":
 		return false
 	default:
 		return true

@@ -30,10 +30,10 @@ func (r *LocalNetRepository) CreatePost(ctx context.Context, post localnet.Post)
 		return err
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO localnet.posts (id, author_type, author_id, body, media_refs,
+		INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body, media_refs,
 			visibility, city_scope, status, context_refs, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		post.ID, post.AuthorType, post.AuthorID, post.Body, mediaRefs,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		post.ID, post.AuthorType, post.AuthorID, post.AuthorDisplayName, post.Body, mediaRefs,
 		post.Visibility, post.CityScope, post.Status, contextRefs, post.CreatedAt,
 	)
 	return err
@@ -43,10 +43,10 @@ func (r *LocalNetRepository) GetPost(ctx context.Context, id string) (localnet.P
 	var post localnet.Post
 	var mediaRefs, contextRefs []byte
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, author_type, author_id, body, media_refs,
+		SELECT id, author_type, author_id, author_display_name, body, media_refs,
 			visibility, city_scope, status, context_refs, created_at
 		FROM localnet.posts WHERE id = $1`, id).Scan(
-		&post.ID, &post.AuthorType, &post.AuthorID, &post.Body, &mediaRefs,
+		&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
 		&post.Visibility, &post.CityScope, &post.Status, &contextRefs, &post.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -79,7 +79,7 @@ func (r *LocalNetRepository) UpdatePost(ctx context.Context, post localnet.Post,
 
 func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, author_type, author_id, body, media_refs,
+		SELECT id, author_type, author_id, author_display_name, body, media_refs,
 			visibility, city_scope, status, context_refs, created_at
 		FROM localnet.posts ORDER BY created_at DESC`)
 	if err != nil {
@@ -91,7 +91,7 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 		var post localnet.Post
 		var mediaRefs, contextRefs []byte
 		if err := rows.Scan(
-			&post.ID, &post.AuthorType, &post.AuthorID, &post.Body, &mediaRefs,
+			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
 			&post.Visibility, &post.CityScope, &post.Status, &contextRefs, &post.CreatedAt,
 		); err != nil {
 			return nil, err

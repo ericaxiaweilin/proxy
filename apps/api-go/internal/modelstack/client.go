@@ -22,8 +22,11 @@ type ControlPlaneClient struct {
 // RouteDecision 是底座对单个业务任务 ID 的权威路由决策快照。
 // 业务侧只消费本结构，不做任何模型选择。
 type RouteDecision struct {
-	TaskID              string
-	Providers           []string
+	TaskID    string
+	Providers []string
+	// GatewayModel 是模型底座为当前任务下发的可执行 delegation。它不是
+	// Provider 名，也不是由业务侧猜测出的模型名；业务服务只能原样交给网关。
+	GatewayModel        string
 	ModelOptionID       string
 	Streaming           bool
 	RequestTimeoutMS    int
@@ -33,7 +36,8 @@ type RouteDecision struct {
 	FetchedAt           time.Time
 }
 
-// PrimaryProvider 返回底座指定的首选 Provider（同时作为网关模型名）。
+// PrimaryProvider 返回底座指定的首选 Provider，仅用于运行时故障回报。
+// 它绝不能被当作网关模型名。
 func (r RouteDecision) PrimaryProvider() string {
 	if len(r.Providers) == 0 {
 		return ""
@@ -45,6 +49,7 @@ type routeRequestEnvelope struct {
 	Status   string `json:"status"`
 	RouteReq *struct {
 		Providers       []string `json:"providers"`
+		GatewayModel    string   `json:"gateway_model"`
 		ModelOptionID   string   `json:"model_option_id"`
 		LatencyBudgetMS int      `json:"latency_budget_ms"`
 		Streaming       bool     `json:"streaming"`
@@ -116,6 +121,7 @@ func (c *ControlPlaneClient) GetRouteDecision(ctx context.Context, taskID string
 	decision := RouteDecision{
 		TaskID:              taskID,
 		Providers:           route.Providers,
+		GatewayModel:        route.GatewayModel,
 		ModelOptionID:       route.ModelOptionID,
 		Streaming:           route.Streaming,
 		RequestTimeoutMS:    route.RequestTimeoutMS,
@@ -140,6 +146,12 @@ func (c *ControlPlaneClient) GetRouteDecision(ctx context.Context, taskID string
 	}
 	if !route.HasAvailable || decision.PrimaryProvider() == "" {
 		return RouteDecision{}, fmt.Errorf("%w: no deployed provider for task %s", ErrTaskNotRoutable, taskID)
+	}
+	if decision.GatewayModel == "" {
+		// Fail closed: provider aliases are control-plane metadata, not a valid
+		// business-side fallback. Calling the gateway with one would silently
+		// bind a task to an arbitrary model and bypass base-layer delegation.
+		return RouteDecision{}, fmt.Errorf("%w: task %s route has no gateway delegation", ErrTaskNotRoutable, taskID)
 	}
 	return decision, nil
 }

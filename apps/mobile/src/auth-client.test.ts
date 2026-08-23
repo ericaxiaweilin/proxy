@@ -6,6 +6,8 @@ const initialSession: StoredSession = {
 	userAccountId: "user_001",
 	auth: {
     sessionId: "session_001",
+    userAccountId: "user_001",
+    principal: { type: "BUSINESS", id: "business_001" },
     accessToken: "access_1",
     refreshToken: "refresh_1",
     accessExpiresAt: "2026-08-14T00:00:10.000Z",

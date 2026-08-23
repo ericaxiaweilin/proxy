@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,9 +17,9 @@ import (
 
 type UserAccount struct{ ID, Status string }
 type LoginIdentity struct {
-	ID, UserAccountID string
-	Verified          bool
-	Status            string
+	ID, UserAccountID, Channel, Identifier string
+	Verified                               bool
+	Status                                 string
 }
 type DeviceRegistration struct{ ID, UserAccountID, Platform, Status, PushTokenRef string }
 type Membership struct {
@@ -88,7 +89,7 @@ func NewWithRepositoryAndClockAndChallengeProvider(repository Repository, domain
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession":
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession":
 		return true
 	default:
 		return false
@@ -103,12 +104,16 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch envelope.CommandType {
+	case "BeginPasswordlessAuthentication":
+		return s.beginPasswordlessAuthentication(ctx, envelope)
 	case "RequestLoginChallenge":
 		return s.requestLoginChallenge(ctx, envelope)
 	case "VerifyLoginChallenge":
 		return s.verifyLoginChallenge(ctx, envelope)
 	case "CreateSession":
 		return s.createSession(ctx, envelope)
+	case "CreateAnonymousSession":
+		return s.createAnonymousSession(ctx, envelope)
 	case "RegisterDevice":
 		return s.registerDevice(ctx, envelope)
 	case "RevokeSession":
@@ -145,6 +150,84 @@ type requestLoginChallengePayload struct {
 	LoginIdentityID string `json:"loginIdentityId"`
 	DeviceID        string `json:"deviceId"`
 	Channel         string `json:"channel"`
+}
+
+type beginPasswordlessAuthenticationPayload struct {
+	Channel    string `json:"channel"`
+	Identifier string `json:"identifier"`
+	DeviceID   string `json:"deviceId"`
+	Platform   string `json:"platform"`
+}
+
+type createAnonymousSessionPayload struct {
+	DeviceID string `json:"deviceId"`
+	Platform string `json:"platform"`
+}
+
+func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope) command.Result {
+	var p createAnonymousSessionPayload
+	if !decode(e.Payload, &p) || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
+		return command.Rejected(e, "INVALID_ANONYMOUS_SESSION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_anonymous_session", nil)
+	}
+	user, device, created, err := s.repository.EnsureAnonymousIdentity(ctx, p.DeviceID, p.Platform)
+	if err != nil {
+		return command.Rejected(e, "ANONYMOUS_IDENTITY_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "identity.anonymous_identity_unavailable", nil)
+	}
+	if user.Status != "ANONYMOUS" && user.Status != "ACTIVE" {
+		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.account_not_active", nil)
+	}
+	now := s.clock.Now().UTC()
+	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
+	domainEvents := []event.DomainEvent{event.New("AnonymousSessionCreated", "Session", session.ID, session.Version, user.ID, e.CorrelationID, e.CommandID, now, map[string]any{"userAccountId": user.ID, "deviceId": device.ID, "accountCreated": created})}
+	if s.tokenManager == nil {
+		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
+	}
+	pair, tokenRecord, err := s.tokenManager.Prepare(session)
+	if err != nil {
+		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
+	}
+	if err := s.persistCreateAnonymousSession(ctx, session, tokenRecord, domainEvents); err != nil {
+		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
+	}
+	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, eventRefs(domainEvents))
+	result.Auth = authTokens(pair, session)
+	return result
+}
+
+// beginPasswordlessAuthentication is the public entry point for sign-up and
+// sign-in. The client supplies only the verified address/number and device;
+// it never chooses or learns a pre-seeded account identity.
+func (s *Service) beginPasswordlessAuthentication(ctx context.Context, e command.Envelope) command.Result {
+	var p beginPasswordlessAuthenticationPayload
+	if !decode(e.Payload, &p) || (p.Channel != "EMAIL" && p.Channel != "SMS") || normalizeLoginIdentifier(p.Channel, p.Identifier) == "" || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
+		return command.Rejected(e, "INVALID_PASSWORDLESS_AUTHENTICATION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_passwordless_authentication", nil)
+	}
+	upgradingUserAccountID := ""
+	if _, authenticated := e.AuthContext["sessionId"]; authenticated && e.Actor.Type == "USER" && e.Actor.ID != "" && e.Actor.ID != p.DeviceID {
+		upgradingUserAccountID = e.Actor.ID
+	}
+	identity, device, created, err := s.repository.EnsurePasswordlessIdentity(ctx, p.Channel, normalizeLoginIdentifier(p.Channel, p.Identifier), p.DeviceID, p.Platform, upgradingUserAccountID)
+	if err != nil {
+		return command.Rejected(e, "PASSWORDLESS_IDENTITY_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "identity.passwordless_identity_unavailable", nil)
+	}
+	providerChallenge, err := s.challengeProvider.Request(ctx, LoginChallengeRequest{LoginIdentityID: identity.ID, DeviceID: device.ID, Channel: p.Channel, Purpose: e.Purpose, CorrelationID: e.CorrelationID})
+	if errors.Is(err, ErrLoginChallengeProviderNotReady) {
+		return command.Rejected(e, "LOGIN_PROVIDER_NOT_CONFIGURED", "PROVIDER", "SAFE_RETRY", "identity.login_provider_not_configured", nil)
+	}
+	if err != nil || providerChallenge.ProviderRef == "" {
+		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "PROVIDER", "SAFE_RETRY", "identity.login_challenge_request_failed", nil)
+	}
+	now := s.clock.Now().UTC()
+	expiresAt := providerChallenge.ExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = now.Add(5 * time.Minute)
+	}
+	challenge := LoginChallenge{ID: newID("challenge_"), UserAccountID: identity.UserAccountID, LoginIdentityID: identity.ID, DeviceID: device.ID, Channel: p.Channel, ProviderRef: providerChallenge.ProviderRef, Status: "PENDING", MaxAttempts: 5, Version: 1, RequestedAt: now, ExpiresAt: expiresAt.UTC()}
+	events := []event.DomainEvent{event.New("LoginChallengeRequested", "LoginChallenge", challenge.ID, challenge.Version, identity.UserAccountID, e.CorrelationID, e.CommandID, now, map[string]any{"channel": p.Channel, "accountCreated": created})}
+	if err := s.persistCreateLoginChallenge(ctx, challenge, events); err != nil {
+		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "INTERNAL", "SAFE_RETRY", "identity.login_challenge_request_failed", nil)
+	}
+	return command.Pending(e, challenge.ID, "LOGIN_CHALLENGE_PENDING", "AUTHENTICATION", "identity.login_challenge_pending", map[string]any{"channel": challenge.Channel, "accountCreated": created})
 }
 
 func (s *Service) requestLoginChallenge(ctx context.Context, e command.Envelope) command.Result {
@@ -251,8 +334,26 @@ func (s *Service) verifyLoginChallenge(ctx context.Context, e command.Envelope) 
 
 func (s *Service) createSession(ctx context.Context, e command.Envelope) command.Result {
 	var p createSessionPayload
-	if !decode(e.Payload, &p) || p.UserAccountID == "" || p.LoginIdentityID == "" || p.DeviceID == "" || p.ChallengeID == "" || p.RequestedPrincipal.ID == "" {
+	if !decode(e.Payload, &p) || p.DeviceID == "" || p.ChallengeID == "" {
 		return command.Rejected(e, "INVALID_CREATE_SESSION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_create_session", nil)
+	}
+	// Passwordless clients only hold a verified challenge. Derive account,
+	// identity and default individual principal server-side so callers cannot
+	// forge another account's identifiers.
+	if p.UserAccountID == "" || p.LoginIdentityID == "" || p.RequestedPrincipal.ID == "" {
+		challenge, err := s.repository.GetLoginChallenge(ctx, p.ChallengeID)
+		if err != nil || challenge.DeviceID != p.DeviceID {
+			return command.Rejected(e, "LOGIN_CHALLENGE_REQUIRED", "AUTHENTICATION", "AFTER_REAUTH", "identity.login_challenge_required", nil)
+		}
+		if p.UserAccountID == "" {
+			p.UserAccountID = challenge.UserAccountID
+		}
+		if p.LoginIdentityID == "" {
+			p.LoginIdentityID = challenge.LoginIdentityID
+		}
+		if p.RequestedPrincipal.ID == "" {
+			p.RequestedPrincipal = command.Principal{Type: "INDIVIDUAL", ID: challenge.UserAccountID}
+		}
 	}
 	user, err := s.repository.GetUser(ctx, p.UserAccountID)
 	if errors.Is(err, ErrUserNotFound) {
@@ -271,7 +372,7 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 	if identity.UserAccountID != user.ID || !identity.Verified || identity.Status != "ACTIVE" {
 		return command.Rejected(e, "LOGIN_IDENTITY_NOT_VERIFIED", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_identity_not_verified", nil)
 	}
-	if user.Status != "ACTIVE" {
+	if !canHoldSession(user.Status) {
 		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.account_not_active", nil)
 	}
 	device, err := s.repository.GetDevice(ctx, p.DeviceID)
@@ -322,9 +423,13 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 	}
 	result := command.Accepted(e, "Session", session.ID, 1, "ACTIVE", eventRefs(domainEvents))
 	if pair.AccessToken != "" {
-		result.Auth = authTokens(pair)
+		result.Auth = authTokens(pair, session)
 	}
 	return result
+}
+
+func canHoldSession(status string) bool {
+	return status == "ACTIVE" || status == "ANONYMOUS" || status == "REGISTERED" || status == "VERIFIED" || status == "COMMERCIAL_VERIFIED"
 }
 
 type registerDevicePayload struct{ UserAccountID, DeviceID, Platform, PushTokenRef string }
@@ -479,6 +584,13 @@ func (s *Service) persistCreateSession(ctx context.Context, session Session, tok
 	return errors.New("transactional session bootstrap is not configured")
 }
 
+func (s *Service) persistCreateAnonymousSession(ctx context.Context, session Session, tokens SessionToken, domainEvents []event.DomainEvent) error {
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		return repository.CreateSessionWithTokensAndPublish(ctx, session, tokens, domainEvents)
+	}
+	return errors.New("transactional session bootstrap is not configured")
+}
+
 func (s *Service) Authenticate(ctx context.Context, rawAccessToken string) (AuthenticatedSession, error) {
 	if s.tokenManager == nil {
 		return AuthenticatedSession{}, ErrTokenStorageNotEnabled
@@ -486,9 +598,11 @@ func (s *Service) Authenticate(ctx context.Context, rawAccessToken string) (Auth
 	return s.tokenManager.AuthenticateContext(ctx, rawAccessToken)
 }
 
-func authTokens(pair TokenPair) *command.AuthTokens {
+func authTokens(pair TokenPair, session Session) *command.AuthTokens {
 	return &command.AuthTokens{
 		SessionID:        pair.SessionID,
+		UserAccountID:    session.UserAccountID,
+		Principal:        session.Principal,
 		AccessToken:      pair.AccessToken,
 		RefreshToken:     pair.RefreshToken,
 		AccessExpiresAt:  pair.AccessExpiresAt,
@@ -563,7 +677,7 @@ func (s *Service) refreshSession(ctx context.Context, e command.Envelope) comman
 		return command.Rejected(e, "SESSION_TOKEN_REFRESH_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_refresh_failed", nil)
 	}
 	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, []string{})
-	result.Auth = authTokens(pair)
+	result.Auth = authTokens(pair, session)
 	return result
 }
 
@@ -590,4 +704,22 @@ func newID(prefix string) string {
 		return prefix + time.Now().UTC().Format("20060102150405.000000000")
 	}
 	return prefix + hex.EncodeToString(bytes[:])
+}
+
+func normalizeLoginIdentifier(channel, value string) string {
+	identifier := strings.TrimSpace(value)
+	if channel == "EMAIL" {
+		return strings.ToLower(identifier)
+	}
+	// Phone normalization deliberately accepts E.164 only; national-number
+	// parsing belongs to the phone provider / country selector, not the server.
+	if channel == "SMS" && strings.HasPrefix(identifier, "+") {
+		for _, character := range identifier[1:] {
+			if character < '0' || character > '9' {
+				return ""
+			}
+		}
+		return identifier
+	}
+	return ""
 }

@@ -6,13 +6,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/modelstack"
 )
 
 // Conversation / DM（R14 Chapter21I §6 + R9 Gate C/D/K）。
@@ -26,7 +29,7 @@ import (
 type Conversation struct {
 	ID            string    `json:"conversationId"`
 	Type          string    `json:"conversationType"` // DM | GROUP | SUPPORT
-	OriginType    string    `json:"originType"`       // POST | PROFILE | SERVICE | ACTIVITY | NEED | OFFER | ORDER
+	OriginType    string    `json:"originType"`       // HOME | TASK | POST | PROFILE | SERVICE | ACTIVITY | NEED | OFFER | ORDER
 	OriginID      string    `json:"originId"`
 	MarketID      string    `json:"marketId,omitempty"`
 	State         string    `json:"state"` // ACTIVE | ARCHIVED | BLOCKED
@@ -191,6 +194,7 @@ type Service struct {
 	mu         sync.Mutex
 	repository Repository
 	clock      clock.Clock
+	modelStack modelstack.Port
 }
 
 func New() *Service {
@@ -201,7 +205,17 @@ func NewWithRepository(repository Repository) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}
-	return &Service{repository: repository, clock: clock.System{}}
+	return &Service{repository: repository, clock: clock.System{}, modelStack: modelstack.Unconfigured{}}
+}
+
+func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
+	if repository == nil {
+		repository = NewMemoryRepository()
+	}
+	if ms == nil {
+		ms = modelstack.Unconfigured{}
+	}
+	return &Service{repository: repository, clock: clock.System{}, modelStack: ms}
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -248,6 +262,8 @@ type startConversationPayload struct {
 	ParticipantID    string `json:"participantId"`
 	MarketID         string `json:"marketId"`
 	FirstMessage     string `json:"firstMessage"`
+	MediaRef         string `json:"mediaRef"`
+	AssistantMode    string `json:"assistantMode"`
 }
 
 func (s *Service) startConversation(ctx context.Context, e command.Envelope) command.Result {
@@ -255,7 +271,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	if !decode(e.Payload, &p) || p.OriginType == "" || p.OriginID == "" || p.ParticipantID == "" {
 		return command.Rejected(e, "INVALID_CONVERSATION_START", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_start", nil)
 	}
-	validOrigins := map[string]bool{"POST": true, "PROFILE": true, "SERVICE": true, "ACTIVITY": true, "NEED": true, "OFFER": true, "ORDER": true}
+	validOrigins := map[string]bool{"HOME": true, "TASK": true, "POST": true, "PROFILE": true, "SERVICE": true, "ACTIVITY": true, "NEED": true, "OFFER": true, "ORDER": true}
 	if !validOrigins[p.OriginType] {
 		return command.Rejected(e, "INVALID_ORIGIN_TYPE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_origin", map[string]any{"originType": p.OriginType})
 	}
@@ -297,20 +313,54 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		}
 		_ = s.repository.AppendMessage(ctx, msg)
 	}
-	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, map[string]any{
+	if p.MediaRef != "" {
+		_ = s.repository.AppendMessage(ctx, Message{
+			ID: newID("msg_"), ConversationID: conv.ID, SenderID: e.Actor.ID,
+			MessageType: "IMAGE", MediaRef: p.MediaRef, CreatedAt: s.clock.Now().UTC(),
+		})
+	}
+	payload := map[string]any{
 		"conversationId": conv.ID,
 		"originType":     conv.OriginType,
 		"originId":       conv.OriginID,
-	}, domainEvents)
+	}
+	if p.FirstMessage != "" {
+		temporaryUI := temporaryUIFor(p.FirstMessage)
+		if temporaryUI != nil {
+			payload["temporaryUI"] = temporaryUI
+		}
+		payload["assistantStatus"] = "NOT_REQUESTED"
+		var aiReply *Message
+		if temporaryUI != nil {
+			aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
+		} else if s.modelStack != nil && s.modelStack.Available() {
+			aiReply = s.generateAIReply(ctx, conv, e, p.FirstMessage, p.AssistantMode, nil)
+		}
+		if aiReply != nil {
+			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
+				"messageId": aiReply.ID,
+				"note":      "Proxy 生成首条对话引导",
+			}))
+			payload["aiMessage"] = aiReply
+			payload["assistantStatus"] = "RESPONDED"
+		} else if s.modelStack == nil || !s.modelStack.Available() {
+			payload["assistantStatus"] = "UNAVAILABLE"
+		} else {
+			payload["assistantStatus"] = "FAILED"
+		}
+	}
+	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, payload, domainEvents)
 }
 
 // ---------- SendMessage ----------
 // Gate K：实时 IM 最小；ordinary chat 不修改 Need/Order。
 
 type sendMessagePayload struct {
-	MessageType string `json:"messageType"`
-	Body        string `json:"body"`
-	MediaRef    string `json:"mediaRef"`
+	MessageType           string `json:"messageType"`
+	Body                  string `json:"body"`
+	MediaRef              string `json:"mediaRef"`
+	AssistantMode         string `json:"assistantMode"`
+	TemporaryUIResponseID string `json:"temporaryUIResponseId"`
 }
 
 func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.Result {
@@ -356,7 +406,152 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if err := s.repository.AppendMessage(ctx, msg); err != nil {
 		return command.Rejected(e, "MESSAGE_SEND_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.send_failed", nil)
 	}
-	return command.Accepted(e, "Conversation", conv.ID, 1, conv.State, eventRefs(domainEvents))
+
+	// --- AI 回复：模型底座对话式需求构建助手 ---
+	var temporaryUI *TemporaryUI
+	if p.TemporaryUIResponseID == "" {
+		temporaryUI = temporaryUIFor(p.Body)
+	}
+	var aiReply *Message
+	if p.MessageType == "TEXT" && temporaryUI != nil {
+		aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
+	} else if p.MessageType == "TEXT" && p.TemporaryUIResponseID != "" {
+		aiReply = s.serverFormResponseReply(ctx, conv)
+	} else if s.modelStack != nil && s.modelStack.Available() && p.MessageType == "TEXT" {
+		aiReply = s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil)
+		if aiReply != nil {
+			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
+				"messageId": aiReply.ID,
+				"model":     aiReply.Body[:min(40, len(aiReply.Body))],
+				"note":      "AI 通过模型底座生成对话式需求构建回复",
+			}))
+		}
+	}
+
+	payload := map[string]any{
+		"messageId":       msg.ID,
+		"assistantStatus": "NOT_REQUESTED",
+	}
+	if temporaryUI != nil {
+		payload["temporaryUI"] = temporaryUI
+	}
+	if aiReply != nil {
+		payload["aiMessage"] = aiReply
+		payload["assistantStatus"] = "RESPONDED"
+	} else if p.MessageType == "TEXT" {
+		if s.modelStack != nil && s.modelStack.Available() {
+			payload["assistantStatus"] = "FAILED"
+		} else {
+			payload["assistantStatus"] = "UNAVAILABLE"
+		}
+	}
+	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, payload, domainEvents)
+}
+
+func (s *Service) serverGuidedReply(ctx context.Context, conv Conversation, ui *TemporaryUI) *Message {
+	if ui == nil {
+		return nil
+	}
+	body := "请在下方简短点选或填写，我会据此继续帮你处理。"
+	switch ui.ID {
+	case "translation_brief.v1":
+		body = "可以。请在下方简短点选或填写翻译需求，我会据此继续帮你处理。"
+	case "relationship_introduction_brief.v1":
+		body = "可以协助发起交友介绍：后续只会在自愿开启介绍、由本人选择公开恋爱或婚姻状态的成年女性中筛选；这不是交易或临时伴侣。请在下方简短补充。"
+	}
+	aiMsg := Message{
+		ID:             newID("msg_"),
+		ConversationID: conv.ID,
+		SenderID:       "proxy_ai",
+		MessageType:    "SYSTEM_CONTEXT",
+		Body:           body,
+		CreatedAt:      s.clock.Now().UTC(),
+	}
+	if err := s.repository.AppendMessage(ctx, aiMsg); err != nil {
+		log.Printf("conversation ai: failed to store server guided reply: %v", err)
+		return nil
+	}
+	return &aiMsg
+}
+
+func (s *Service) serverFormResponseReply(ctx context.Context, conv Conversation) *Message {
+	aiMsg := Message{
+		ID:             newID("msg_"),
+		ConversationID: conv.ID,
+		SenderID:       "proxy_ai",
+		MessageType:    "SYSTEM_CONTEXT",
+		Body:           "已收到你的补充，我会按这些条件继续处理；如需调整，直接告诉我即可。",
+		CreatedAt:      s.clock.Now().UTC(),
+	}
+	if err := s.repository.AppendMessage(ctx, aiMsg); err != nil {
+		log.Printf("conversation ai: failed to store server form response: %v", err)
+		return nil
+	}
+	return &aiMsg
+}
+
+// generateAIReply 调用模型底座生成 AI 回复。fail-closed：任何错误静默跳过，不阻塞用户消息。
+func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI) *Message {
+	// 1. 构建对话历史（最近 20 条）
+	history, err := s.repository.Messages(ctx, conv.ID)
+	if err != nil {
+		log.Printf("conversation ai: failed to load history: %v", err)
+		return nil
+	}
+	systemPrompt := "你是 Proxy，一个智能需求构建助手。用户会描述他们想在河内完成的事情，你帮助他们理清需求、补充细节（时间、地点、预算、人数等），并最终生成一个结构化的需求摘要。回复简洁、友好、像朋友聊天。如果用户已经提供了足够信息，给出一个简洁的需求摘要供确认。不要要求用户按 1、2、3、4 编号逐项回复；当服务器提供了临时表单时，用一句自然引导让用户点选或简短填写。对于恋爱或交友请求，可以协助推荐自愿开启介绍、且自行选择公开资料范围的成年用户；这只是社交介绍，不是人员交易、临时伴侣或任何有偿/性服务，也不能承诺匹配结果。"
+	if assistantMode != "" {
+		systemPrompt += " 当前 Home 语义方向是「" + assistantMode + "」，它只是帮助你理解意图，不代表已经选择页面或创建业务事实。"
+	}
+	if temporaryUI != nil {
+		systemPrompt += " 当前服务器已附带「" + temporaryUI.Title + "」短表单。不要重复列出字段、不要编号追问，只需简短说明用户可直接点选或填写后继续。"
+	}
+	// 取最近 20 条构建上下文
+	start := 0
+	if len(history) > 20 {
+		start = len(history) - 20
+	}
+	for _, m := range history[start:] {
+		if m.MessageType == "IMAGE" && m.MediaRef != "" {
+			systemPrompt += " 对话中包含用户上传的图片附件；当前任务只收到文本历史，除非模型底座同时提供了图像内容，否则不要声称已经识别图片细节。"
+			break
+		}
+	}
+	messages := []modelstack.ChatMessage{{Role: "system", Content: systemPrompt}}
+	for _, m := range history[start:] {
+		body := strings.TrimSpace(m.Body)
+		if body == "" || m.DeletedAt != nil {
+			continue
+		}
+		role := "assistant"
+		if m.SenderID == e.Actor.ID {
+			role = "user"
+		}
+		messages = append(messages, modelstack.ChatMessage{Role: role, Content: body})
+	}
+
+	// 2. 调用模型底座
+	taskID := "proxy.conversation.demand_assist"
+	completion, err := s.modelStack.Complete(ctx, taskID, messages)
+	if err != nil {
+		log.Printf("conversation ai: modelstack complete failed: %v", err)
+		return nil
+	}
+	log.Printf("conversation ai: model=%s provider=%s tokens=%d/%d", completion.Model, completion.Provider, completion.PromptTokens, completion.OutputTokens)
+
+	// 3. 存储 AI 回复消息
+	aiMsg := Message{
+		ID:             newID("msg_"),
+		ConversationID: conv.ID,
+		SenderID:       "proxy_ai",
+		MessageType:    "TEXT",
+		Body:           completion.Content,
+		CreatedAt:      s.clock.Now().UTC(),
+	}
+	if err := s.repository.AppendMessage(ctx, aiMsg); err != nil {
+		log.Printf("conversation ai: failed to store reply: %v", err)
+		return nil
+	}
+	return &aiMsg
 }
 
 // ---------- ListConversationMessages ----------

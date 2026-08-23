@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -9,6 +10,33 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
+
+func TestSaveUploadPersistsOnlyOwnersBytes(t *testing.T) {
+	dir := t.TempDir()
+	s := New()
+	s.SetStoreDir(dir)
+	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
+		"mediaType": "IMAGE", "originalStorageKey": "mobile_photo.jpg", "mimeType": "image/jpeg",
+	}, ""))
+	var created struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &created)
+
+	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "another_principal", bytes.NewBufferString("image"), 20); err != ErrMediaNotOwner {
+		t.Fatalf("non-owner upload: %v", err)
+	}
+	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewBufferString("too-large"), 3); err != ErrUploadTooLarge {
+		t.Fatalf("oversized upload: %v", err)
+	}
+	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewBufferString("image"), 20); err != nil {
+		t.Fatalf("owner upload: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "mobile_photo.jpg"))
+	if err != nil || string(data) != "image" {
+		t.Fatalf("saved upload: %q, %v", string(data), err)
+	}
+}
 
 func envelopeFor(commandType string, payload map[string]any, targetID string) command.Envelope {
 	return command.Envelope{

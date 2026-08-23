@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
-import { WebView } from "react-native-webview";
+import { ActivityIndicator, Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-shell";
-import { SessionAuthClient, type Transport } from "./auth-client";
+import { type Transport, SessionAuthClient } from "./auth-client";
+import { ConversationClient } from "./conversation-client";
 import { DemandClient } from "./demand-client";
 import { LoginClient } from "./login-client";
-import { RequesterApp } from "./requester-app";
+import { LocalNetClient } from "./localnet-client";
+import { MediaClient } from "./media-client";
+import { ActivityClient } from "./activity-client";
+import { ExperienceClient } from "./experience-client";
+import { VoucherClient } from "./voucher-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
-import { PROTOTYPE_HTML } from "./prototype-html";
+import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
 
 const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, right: 0, top: 0 };
 
 const secureSessionStore = new SecureSessionStore(nativeSecureStorageDriver);
+const INSTALLATION_DEVICE_ID_KEY = "proxy.installation.device-id.v1";
 const localApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL ?? (Platform.OS === "android" ? "http://10.0.2.2:4100" : "http://127.0.0.1:4100");
-const developmentLoginEnabled = process.env.EXPO_PUBLIC_LOGIN_MODE === "simulated";
 const nativeTransport: Transport = async (request) => {
   const response = await fetch(request.url, {
     method: request.method,
@@ -24,57 +28,82 @@ const nativeTransport: Transport = async (request) => {
   });
   return { status: response.status, json: () => response.json() };
 };
-const developmentLoginClient = new LoginClient({
+let nativeLoginClient: LoginClient | undefined;
+async function getNativeLoginClient(): Promise<LoginClient> {
+  if (nativeLoginClient) return nativeLoginClient;
+  let deviceId = await nativeSecureStorageDriver.getItem(INSTALLATION_DEVICE_ID_KEY);
+  if (!deviceId) {
+    deviceId = `device_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+    await nativeSecureStorageDriver.setItem(INSTALLATION_DEVICE_ID_KEY, deviceId);
+  }
+  nativeLoginClient = new LoginClient({ baseUrl: localApiBaseUrl, deviceId, secureSessionStore, transport: nativeTransport });
+  return nativeLoginClient;
+}
+// 服务端驱动 Surface 的认证客户端：读模型/命令全部走 /v1/commands/ envelope。
+const sessionAuthClient = new SessionAuthClient({
   baseUrl: localApiBaseUrl,
-  deviceId: "device_001",
   secureSessionStore,
   transport: nativeTransport
 });
-const sessionAuthClient = new SessionAuthClient({ baseUrl: localApiBaseUrl, secureSessionStore, transport: nativeTransport });
+const localNetClient = new LocalNetClient({ authClient: sessionAuthClient, secureSessionStore, baseUrl: localApiBaseUrl });
+const activityClient = new ActivityClient({ authClient: sessionAuthClient, secureSessionStore });
+const experienceClient = new ExperienceClient({ authClient: sessionAuthClient, secureSessionStore });
+const conversationClient = new ConversationClient({ authClient: sessionAuthClient, secureSessionStore, baseUrl: localApiBaseUrl });
+const mediaClient = new MediaClient({ authClient: sessionAuthClient, secureSessionStore, baseUrl: localApiBaseUrl });
 const demandClient = new DemandClient({ authClient: sessionAuthClient, secureSessionStore });
+const voucherClient = new VoucherClient({ authClient: sessionAuthClient, secureSessionStore });
+type BootPhase = "BOOTSTRAPPING" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {
-  // 原型优先：Proxy_Free_Prototype_v1.5.2 单文件（105 screens / Otter logo / localStorage）
-  // 完全离线内嵌，WebView 全屏渲染——与设计原型 1:1，不再走 RN 重写的有限路由。
-  // 自动导航（Splash / 恢复 lastRoute）已注入原型 HTML 的 boot script，无需 RN 侧干预。
-  // 手机全屏 CSS（隐藏桌面品牌导航/工程面板）已注入原型 HTML。
-  return (
-    <View style={styles.webviewRoot}>
-      {/* baseUrl 提供合法 origin：source={{html}} 默认 about:blank 会拒绝 localStorage */}
-      <WebView
-        originWhitelist={["*"]}
-        source={{ html: PROTOTYPE_HTML, baseUrl: "https://proxy.app/" }}
-        style={styles.webview}
-        domStorageEnabled
-        javaScriptEnabled
-        startInLoadingState
-        renderLoading={() => (
-          <View style={styles.webviewLoading}>
-            <ActivityIndicator color={color.magenta} size="large" />
-            <Text style={styles.webviewLoadingText}>Proxy · 原型加载中</Text>
-          </View>
-        )}
+  // R15 Model-Driven UI：不再内嵌 HTML 原型（Gate O）。
+  // 启动引导 → 统一认证入口 → 认证后渲染 App Shell。
+  const [phase, setPhase] = useState<BootPhase>("BOOTSTRAPPING");
+
+  useEffect(() => {
+    let cancelled = false;
+    void restoreNativeShell().then((state) => {
+      if (cancelled) return;
+      setPhase(state.status === "AUTHENTICATED" ? "AUTHENTICATED" : "SIGNED_OUT");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (phase === "BOOTSTRAPPING") return <BootScreen />;
+  if (phase === "AUTHENTICATED") {
+    return (
+      <AppShell
+        localNet={localNetClient}
+        activities={activityClient}
+        experience={experienceClient}
+        conversation={conversationClient}
+        media={mediaClient}
+        demand={demandClient}
+        vouchers={voucherClient}
+        onSignOut={() => {
+          void secureSessionStore.clear().catch(() => undefined).then(() => setPhase("SIGNED_OUT"));
+        }}
       />
-    </View>
-  );
+    );
+  }
+  return <AuthenticationEntryScreen onAuthenticated={() => setPhase("AUTHENTICATED")} />;
 }
 
 function BootScreen(): React.JSX.Element {
   return (
-    <SafeAreaView style={styles.screen}>
+    <View style={styles.screen}>
       <BrandMark large />
       <ActivityIndicator color={color.magenta} style={styles.spinner} />
       <Text style={styles.secondary}>让时间遇见需要。</Text>
-    </SafeAreaView>
+    </View>
   );
 }
 
 function BrandMark({ large = false }: { large?: boolean }): React.JSX.Element {
   return (
     <View style={styles.brandBlock}>
-      <Gradient from={color.magenta} to={color.violet} style={[styles.brandLogo, large && styles.brandLogoLarge, shadows.hero]}>
-        <Text style={[styles.brandLogoText, large && styles.brandLogoTextLarge]}>P</Text>
-      </Gradient>
+      <Image accessibilityLabel="Proxy" source={require("../assets/otter-logo.png")} style={[styles.otterLogo, large && styles.otterLogoLarge]} />
       <Text style={[styles.brandName, large && styles.brandNameLarge]}>Proxy</Text>
       <Text style={styles.brandSlogan}>让时间遇见需要。</Text>
       <Text style={styles.brandSloganEn}>Where time meets need.</Text>
@@ -82,8 +111,9 @@ function BrandMark({ large = false }: { large?: boolean }): React.JSX.Element {
   );
 }
 
-function DevelopmentAuthScreen({ onAuthenticated }: { onAuthenticated: () => void }): React.JSX.Element {
+function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () => void }): React.JSX.Element {
   const [challengeId, setChallengeId] = useState<string>();
+  const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -92,10 +122,29 @@ function DevelopmentAuthScreen({ onAuthenticated }: { onAuthenticated: () => voi
     setBusy(true);
     setError(undefined);
     try {
-      const result = await developmentLoginClient.requestChallenge({ loginIdentityId: "login_001", channel: "EMAIL" });
+		const loginClient = await getNativeLoginClient();
+      const result = await loginClient.beginPasswordlessAuthentication({
+        channel: "SMS",
+        identifier: `+84${phone.replace(/\D/g, "")}`,
+        platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
+      });
       setChallengeId(result.challengeId);
     } catch {
-      setError("无法请求模拟登录验证码，请确认 Go API 已用 simulated provider 启动。");
+      setError("无法发送验证码。请检查越南手机号和认证服务配置。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function continueAsGuest(): Promise<void> {
+    setBusy(true);
+    setError(undefined);
+    try {
+		const loginClient = await getNativeLoginClient();
+      await loginClient.createAnonymousSession(Platform.OS === "ios" ? "IOS" : "ANDROID");
+      onAuthenticated();
+    } catch {
+      setError("暂时无法创建访客会话，请稍后重试。");
     } finally {
       setBusy(false);
     }
@@ -106,13 +155,9 @@ function DevelopmentAuthScreen({ onAuthenticated }: { onAuthenticated: () => voi
     setBusy(true);
     setError(undefined);
     try {
-      await developmentLoginClient.verifyChallenge(challengeId, code);
-      await developmentLoginClient.createSession({
-        userAccountId: "user_001",
-        loginIdentityId: "login_001",
-        challengeId,
-        requestedPrincipal: { type: "INDIVIDUAL", id: "user_001" }
-      });
+		const loginClient = await getNativeLoginClient();
+      await loginClient.verifyChallenge(challengeId, code);
+      await loginClient.createSessionFromChallenge(challengeId);
       onAuthenticated();
     } catch {
       setError("验证码无效或已过期，请重新请求。");
@@ -122,13 +167,14 @@ function DevelopmentAuthScreen({ onAuthenticated }: { onAuthenticated: () => voi
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <View style={styles.screen}>
       <View style={styles.card}>
-        <Text style={styles.title}>登录 Proxy</Text>
-        <Text style={styles.secondary}>开发模式 · user_001 · device_001</Text>
-        <Text style={styles.helper}>模拟验证码：123456（仅本地开发）</Text>
+        <BrandMark />
+        <Text style={styles.title}>继续使用 Proxy</Text>
+        <Text style={styles.secondary}>手机号验证后自动完成登录或注册。</Text>
         {challengeId ? (
           <>
+            <Text style={styles.helper}>验证码已发送至 +84 {phone.replace(/\D/g, "")}</Text>
             <TextInput
               autoFocus
               keyboardType="number-pad"
@@ -142,33 +188,34 @@ function DevelopmentAuthScreen({ onAuthenticated }: { onAuthenticated: () => voi
             <View style={[styles.button, busy || code.trim() === "" ? styles.disabled : null]}>
               <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
               <Pressable disabled={busy || code.trim() === ""} onPress={() => void completeLogin()} style={styles.buttonPressable}>
-                <Text style={styles.buttonText}>{busy ? "验证中…" : "验证并进入 App"}</Text>
+                <Text style={styles.buttonText}>{busy ? "验证中…" : "继续"}</Text>
               </Pressable>
+            </View>
+            <View style={styles.inlineActions}>
+              <Pressable disabled={busy} onPress={() => { setChallengeId(undefined); setCode(""); }}><Text style={styles.linkText}>更换手机号</Text></Pressable>
+              <Pressable disabled={busy} onPress={() => void requestChallenge()}><Text style={styles.linkText}>重新发送</Text></Pressable>
             </View>
           </>
         ) : (
-          <View style={[styles.button, busy ? styles.disabled : null]}>
-            <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
-            <Pressable disabled={busy} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
-              <Text style={styles.buttonText}>{busy ? "请求中…" : "请求模拟验证码"}</Text>
+          <>
+            <Pressable onPress={() => setError("Google 登录将在官方 OAuth Client 配置完成后启用；当前原型不模拟账号。 ")} style={styles.googleButton}>
+              <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 继续</Text>
             </Pressable>
-          </View>
+            <Text style={styles.divider}>或使用越南手机号</Text>
+            <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput keyboardType="phone-pad" onChangeText={setPhone} placeholder="请输入手机号" placeholderTextColor="#A9A2B0" style={styles.phoneInput} value={phone} /></View>
+            <View style={[styles.button, busy || phone.replace(/\D/g, "").length < 8 ? styles.disabled : null]}>
+              <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
+              <Pressable disabled={busy || phone.replace(/\D/g, "").length < 8} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
+                <Text style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
+              </Pressable>
+            </View>
+            <Pressable disabled={busy} onPress={() => void continueAsGuest()} style={styles.guestButton}><Text style={styles.guestText}>暂不登录，直接使用 Proxy</Text></Pressable>
+            <Text style={styles.oauthHint}>访客会保存当前设备、会话与使用记录；需要发布、交易或长期保存时再升级登录。</Text>
+          </>
         )}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
-    </SafeAreaView>
-  );
-}
-
-function AuthUnavailableScreen(): React.JSX.Element {
-  return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.card}>
-        <BrandMark />
-        <Text style={styles.title}>登录服务待配置</Text>
-        <Text style={styles.secondary}>当前 App 没有启用本地模拟登录 Provider。</Text>
-      </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -184,21 +231,6 @@ async function restoreNativeShell(): Promise<AppShellState> {
     // A Keychain/Keystore read failure must never leave an ambiguous session.
     await secureSessionStore.clear().catch(() => undefined);
     return resolveInitialRoute({ hasSession: false, isRestricted: false, isOffline: false });
-  }
-}
-
-function statusTitle(state: AppShellState): string {
-  switch (state.status) {
-    case "AUTHENTICATED":
-      return "欢迎回来";
-    case "OFFLINE":
-      return "离线模式";
-    case "RESTRICTED":
-      return "需要处理账户状态";
-    case "SIGNED_OUT":
-      return "开始使用 Proxy";
-    case "BOOTSTRAPPING":
-      return "正在启动";
   }
 }
 
@@ -222,10 +254,8 @@ const styles = StyleSheet.create({
     width: "100%"
   },
   brandBlock: { alignItems: "center", marginBottom: 26 },
-  brandLogo: { alignItems: "center", borderRadius: 22, height: 56, justifyContent: "center", width: 56 },
-  brandLogoLarge: { borderRadius: 30, height: 76, width: 76 },
-  brandLogoText: { color: color.white, fontSize: 30, fontWeight: "900" },
-  brandLogoTextLarge: { fontSize: 40 },
+  otterLogo: { height: 56, resizeMode: "contain", width: 56 },
+  otterLogoLarge: { height: 76, width: 76 },
   brandName: { color: color.ink, fontSize: 30, fontWeight: "900", letterSpacing: 2, marginTop: 16 },
   brandNameLarge: { fontSize: 34 },
   brandSlogan: { color: color.muted, fontSize: 12, letterSpacing: 0.4, marginTop: 6 },
@@ -263,6 +293,18 @@ const styles = StyleSheet.create({
     textAlign: "center",
     width: "100%"
   },
+  googleButton: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "center", marginTop: 20, minHeight: 50, width: "100%" },
+  googleText: { color: "#4285F4", fontSize: 20, fontWeight: "900", marginRight: 10 },
+  googleLabel: { color: color.ink, fontSize: 15, fontWeight: "800" },
+  divider: { color: color.muted, fontSize: 12, marginTop: 20 },
+  phoneRow: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", marginTop: 10, minHeight: 52, paddingHorizontal: 16, width: "100%" },
+  countryCode: { color: color.ink, fontSize: 16, fontWeight: "800", marginRight: 12 },
+  phoneInput: { color: color.ink, flex: 1, fontSize: 16, paddingVertical: 12 },
+  guestButton: { alignItems: "center", marginTop: 18, paddingVertical: 10 },
+  guestText: { color: color.violet, fontSize: 14, fontWeight: "800" },
+  inlineActions: { flexDirection: "row", gap: 28, justifyContent: "center", marginTop: 18 },
+  linkText: { color: color.violet, fontSize: 13, fontWeight: "700" },
+  oauthHint: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 18, textAlign: "center" },
   button: {
     alignItems: "center",
     borderRadius: 14,
@@ -289,14 +331,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 16,
     textAlign: "center"
-  },
-  webviewRoot: { backgroundColor: color.offWhite, flex: 1 },
-  webview: { backgroundColor: color.offWhite, flex: 1 },
-  webviewLoading: {
-    alignItems: "center",
-    backgroundColor: color.offWhite,
-    flex: 1,
-    justifyContent: "center"
-  },
-  webviewLoadingText: { color: color.muted, fontSize: 13, marginTop: 14 }
+  }
 });

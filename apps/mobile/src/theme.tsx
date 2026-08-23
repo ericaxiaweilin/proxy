@@ -1,24 +1,25 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 
-// Otter Brand design tokens — ported 1:1 from Proxy_Free_Prototype_v1.5.2 :root
+// Proxy App Design System R3 tokens. R3 is the single visual baseline for the app.
 export const color = {
-  magenta: "#FF1B6B",
-  violet: "#7C2AFF",
-  lime: "#D4FF3D",
-  ink: "#14121F",
-  offWhite: "#FAF9FC",
+  magenta: "#FF2474",
+  violet: "#8533F5",
+  lime: "#D6FB24",
+  ink: "#17131F",
+  deep: "#17131D",
+  offWhite: "#F7F4F9",
   mint: "#1FC8A9",
-  muted: "#746E7C",
-  line: "#E8E3EC",
-  surface: "#F3EEF8",
+  muted: "#7E7586",
+  line: "#E6DFEB",
+  surface: "#F4F0F6",
   warn: "#FFF2C7",
   appBg: "#EEEAF1",
   white: "#FFFFFF",
 
-  heroShadow: "rgba(124,42,255,0.2)",
-  cardShadow: "rgba(32,16,50,0.06)",
-  cardBorder: "rgba(20,18,31,0.035)",
+  heroShadow: "transparent",
+  cardShadow: "transparent",
+  cardBorder: "#E6DFEB",
   darkCardText: "#D8D1E0",
   brandSmall: "#AAA0B6",
   sideText: "#DDD5E5",
@@ -44,7 +45,41 @@ export const color = {
   inspireSavedBorder: "#A8C91E",
   inspireSavedBg: "#FBFFE9",
   bottomActiveBg: "#FFF0F6",
-  error: "#B5194E"
+  error: "#B5194E",
+
+  // 原型基线补充 token（Proxy_P0_Prototype_R15_11_0_Social_Baseline_Launch_Candidate）
+  answerSelectedBg: "#F8F3FF",
+  domainActiveBg: "#FAF8FB",
+  warnBannerBg: "#FFF6E8",
+  warnBannerBorder: "#F0DDBB",
+  warnBannerText: "#786650",
+  chipNeutralBg: "#F6F2F8",
+  chipNeutralText: "#625969",
+  darkTextMuted: "#D8D1E0",
+  violetSoftBg: "#F2ECF7",
+  sponsoredBg: "#FFF0F6",
+  sponsoredFg: "#C4175B",
+  organicBg: "#EDF9F6",
+  organicFg: "#137C6C",
+
+  // R15.11 Social Baseline 新增 token
+  proxyInk: "#17131F",
+  proxyPurple: "#7C3AED",
+  proxyPurpleSoft: "#F3EEFC",
+  proxyGreen: "#18A957",
+  proxyGreenSoft: "#EAF9F0",
+  proxyLine: "#E9E3EC",
+  proxyMuted: "#7D7383",
+  homeIntentBg: "#FCFAFD",
+  homeIntentBorder: "#DDD6E3",
+  homeIntentInputBg: "#FCFBFD",
+  marketModeBg: "#F5F1F8",
+  activityOriginAgent: "#EAF5FF",
+  activityOriginAgentFg: "#1B5B8A",
+  activityOriginBusiness: "#F1FFD1",
+  activityOriginBusinessFg: "#455900",
+  activityOriginPlatform: "#17131F",
+  activityOriginPlatformFg: "#FFFFFF"
 };
 
 export const gradient = {
@@ -53,11 +88,12 @@ export const gradient = {
 };
 
 // Gradient — pure React Native (no native dep), vertical lerp between two stops.
-// Reads the prototype's 135°/120° magenta→violet as a clean vertical gradient.
+// A fixed fill layer with overlapping percentage bands avoids the first-frame
+// onLayout/state update that used to make Home briefly flash while measuring.
 export function Gradient({
   from,
   to,
-  bands = 14,
+  bands = 48,
   style,
   children
 }: {
@@ -67,31 +103,28 @@ export function Gradient({
   style?: StyleProp<ViewStyle>;
   children?: ReactNode;
 }): React.JSX.Element {
-  const [height, setHeight] = useState(0);
-  const bandHeight = height / bands;
   return (
     <View
-      style={[styles.gradientRoot, style]}
-      onLayout={(event) => {
-        const h = event.nativeEvent.layout.height;
-        if (h !== height) setHeight(h);
-      }}
+      // The gradient is a visual layer. Let nested Pressables (and sibling
+      // buttons using an absolute-fill gradient) receive Android touches.
+      pointerEvents="box-none"
+      style={[styles.gradientRoot, { backgroundColor: from }, style]}
     >
-      {height > 0
-        ? Array.from({ length: bands }).map((_, index) => (
-            <View
-              key={index}
-              style={{
-                backgroundColor: lerpHex(from, to, index / (bands - 1)),
-                height: bandHeight,
-                left: 0,
-                position: "absolute",
-                right: 0,
-                top: index * bandHeight
-              }}
-            />
-          ))
-        : null}
+      <View pointerEvents="none" style={styles.gradientBands}>
+        {Array.from({ length: bands }).map((_, index) => (
+          <View
+            key={index}
+            style={{
+              backgroundColor: lerpHex(from, to, index / (bands - 1)),
+              height: `${100 / bands + 1.5}%`,
+              left: 0,
+              position: "absolute",
+              right: 0,
+              top: `${index * (100 / bands) - 0.75}%`
+            }}
+          />
+        ))}
+      </View>
       {children}
     </View>
   );
@@ -109,25 +142,32 @@ function lerpHex(from: string, to: string, t: number): string {
 
 export const shadows = {
   hero: {
-    elevation: 8,
-    shadowColor: color.violet,
+    elevation: 0,
+    shadowColor: "transparent",
     shadowOffset: { width: 0, height: 13 },
-    shadowOpacity: 0.2,
-    shadowRadius: 28
+    shadowOpacity: 0,
+    shadowRadius: 0
   },
   card: {
-    elevation: 2,
-    shadowColor: "#201032",
+    elevation: 0,
+    shadowColor: "transparent",
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.06,
-    shadowRadius: 18
+    shadowOpacity: 0,
+    shadowRadius: 0
+  },
+  nav: {
+    elevation: 0,
+    shadowColor: "transparent",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0,
+    shadowRadius: 0
   },
   phone: {
-    elevation: 10,
-    shadowColor: "#2A1042",
+    elevation: 0,
+    shadowColor: "transparent",
     shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.14,
-    shadowRadius: 55
+    shadowOpacity: 0,
+    shadowRadius: 0
   }
 } as const;
 
@@ -135,5 +175,12 @@ const styles = StyleSheet.create({
   gradientRoot: {
     overflow: "hidden",
     position: "relative"
+  },
+  gradientBands: {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0
   }
 });

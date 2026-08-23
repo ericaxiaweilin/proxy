@@ -4,18 +4,30 @@
 // （SERVICE / ORDER / ACTIVITY）；提示只说明语义作用，不把用户带离 Home。
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html
 import { useEffect, useRef, useState } from "react";
-import { Animated, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent
+} from "expo-speech-recognition";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { color } from "../theme";
 
 export type HomeIntentMode = "SERVICE" | "ORDER" | "ACTIVITY";
+export type HomeAttachment = {
+  uri: string;
+  fileName?: string;
+  mimeType?: string;
+  width: number;
+  height: number;
+};
 
 interface HomeChatBoxProps {
   contextLabel: string;
   placeholder?: string;
   mode?: HomeIntentMode | undefined;
   onSelectMode?: ((mode: HomeIntentMode) => void) | undefined;
-  onSend: (text: string, mode?: HomeIntentMode) => void;
+  onSend: (text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void;
 }
 
 const SEMANTIC_MODES: ReadonlyArray<{ id: HomeIntentMode; icon: ProxyIconName; label: string; placeholder: string }> = [
@@ -40,11 +52,31 @@ export function HomeChatBox({
 }: HomeChatBoxProps): React.JSX.Element {
   const [text, setText] = useState("");
   const [voiceState, setVoiceState] = useState<"IDLE" | "LISTENING" | "DONE">("IDLE");
-  const [photoAttached, setPhotoAttached] = useState(false);
+  const [photo, setPhoto] = useState<HomeAttachment>();
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [toolError, setToolError] = useState<string>();
   const [promptIndex, setPromptIndex] = useState(0);
   const promptOpacity = useRef(new Animated.Value(1)).current;
   const selectedMode = SEMANTIC_MODES.find((entry) => entry.id === mode);
+
+  useSpeechRecognitionEvent("start", () => {
+    setToolError(undefined);
+    setVoiceState("LISTENING");
+  });
+  useSpeechRecognitionEvent("result", (event) => {
+    const transcript = event.results[0]?.transcript?.trim();
+    if (transcript) setText(transcript);
+    if (event.isFinal) setVoiceState("DONE");
+  });
+  useSpeechRecognitionEvent("end", () => {
+    setVoiceState((current) => current === "LISTENING" ? "DONE" : current);
+  });
+  useSpeechRecognitionEvent("error", (event) => {
+    setVoiceState("IDLE");
+    if (event.error !== "aborted") {
+      setToolError(event.error === "not-allowed" ? "请在系统设置中允许麦克风和语音识别。" : `语音识别暂不可用：${event.message || event.error}`);
+    }
+  });
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -57,29 +89,73 @@ export function HomeChatBox({
     return () => clearInterval(interval);
   }, [promptOpacity]);
 
+  useEffect(() => () => {
+    ExpoSpeechRecognitionModule.abort();
+  }, []);
+
   function handleSend(): void {
     const trimmed = text.trim();
     if (!trimmed) return;
-    onSend(photoAttached ? `${trimmed}\n[已附 1 张照片]` : trimmed, mode);
+    onSend(trimmed, mode, photo);
     setText("");
-    setPhotoAttached(false);
+    setPhoto(undefined);
     setVoiceState("IDLE");
   }
 
-  function toggleVoice(): void {
+  async function toggleVoice(): Promise<void> {
     if (voiceState === "LISTENING") {
-      setVoiceState("DONE");
-      setText((current) => current || "帮我看看附近有什么可参加的体验");
+      ExpoSpeechRecognitionModule.stop();
       return;
     }
-    setVoiceState("LISTENING");
+    setToolError(undefined);
+    try {
+      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        setToolError("请允许麦克风和语音识别后再使用语音输入。");
+        return;
+      }
+      const speechLocale = Intl.DateTimeFormat().resolvedOptions().locale || "zh-CN";
+      ExpoSpeechRecognitionModule.start({
+        lang: speechLocale,
+        interimResults: true,
+        continuous: false,
+        addsPunctuation: true
+      });
+    } catch (error) {
+      setVoiceState("IDLE");
+      setToolError(error instanceof Error ? error.message : "语音识别启动失败");
+    }
   }
 
-  function attachMockPhoto(source: "CAMERA" | "LIBRARY"): void {
+  async function choosePhoto(source: "CAMERA" | "LIBRARY"): Promise<void> {
     setPhotoMenuOpen(false);
-    setPhotoAttached(true);
+    setToolError(undefined);
     setVoiceState("IDLE");
-    if (!text) setText(source === "CAMERA" ? "我刚拍了一张照片，帮我看看" : "根据这张照片帮我找相关体验");
+    try {
+      const permission = source === "CAMERA"
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setToolError(source === "CAMERA" ? "请在系统设置中允许 Proxy 使用相机。" : "请在系统设置中允许 Proxy 读取照片。");
+        return;
+      }
+      const result = source === "CAMERA"
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.85 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85, selectionLimit: 1 });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset) return;
+      setPhoto({
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height,
+        ...(asset.fileName ? { fileName: asset.fileName } : {}),
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {})
+      });
+      if (!text) setText(source === "CAMERA" ? "请根据我拍的照片帮我看看" : "请根据这张照片帮我找相关体验");
+    } catch (error) {
+      setToolError(error instanceof Error ? error.message : "照片选择失败");
+    }
   }
 
   const promptCycle = selectedMode ? [selectedMode.placeholder, ...INPUT_PROMPTS] : INPUT_PROMPTS;
@@ -110,7 +186,7 @@ export function HomeChatBox({
           </Pressable>
           <Pressable
             accessibilityLabel={voiceState === "LISTENING" ? "结束语音" : "语音输入"}
-            onPress={toggleVoice}
+            onPress={() => void toggleVoice()}
             style={[styles.toolBtn, voiceState === "LISTENING" && styles.toolBtnListening]}
           >
             <MicrophoneIcon color={color.ink} />
@@ -127,28 +203,37 @@ export function HomeChatBox({
         </Pressable>
       </View>
 
+      {photo ? (
+        <View style={styles.photoPreviewRow}>
+          <Image accessibilityLabel="已选择的照片" source={{ uri: photo.uri }} style={styles.photoPreview} />
+          <View style={styles.photoPreviewCopy}>
+            <Text numberOfLines={1} style={styles.photoMenuTitle}>{photo.fileName || "已选择照片"}</Text>
+            <Text style={styles.photoMenuSub}>发送时将安全上传到当前会话</Text>
+          </View>
+          <Pressable accessibilityLabel="移除照片" onPress={() => setPhoto(undefined)} style={styles.photoRemoveButton}>
+            <Text style={styles.photoMenuRemove}>×</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {toolError ? <Text accessibilityLiveRegion="polite" style={styles.toolError}>{toolError}</Text> : null}
+
       {photoMenuOpen ? (
         <View style={styles.photoMenu}>
-          <Pressable accessibilityLabel="拍照（测试）" onPress={() => attachMockPhoto("CAMERA")} style={styles.photoMenuItem}>
+          <Pressable accessibilityLabel="拍照" onPress={() => void choosePhoto("CAMERA")} style={styles.photoMenuItem}>
             <CameraIcon color={color.ink} />
             <View>
               <Text style={styles.photoMenuTitle}>拍照</Text>
               <Text style={styles.photoMenuSub}>加入当前输入，不会自动发布</Text>
             </View>
           </Pressable>
-          <Pressable accessibilityLabel="从相册选择（测试）" onPress={() => attachMockPhoto("LIBRARY")} style={styles.photoMenuItem}>
+          <Pressable accessibilityLabel="从相册选择" onPress={() => void choosePhoto("LIBRARY")} style={styles.photoMenuItem}>
             <PhotoIcon color={color.ink} />
             <View>
               <Text style={styles.photoMenuTitle}>选择照片</Text>
-              <Text style={styles.photoMenuSub}>从相册选择（测试数据）</Text>
+              <Text style={styles.photoMenuSub}>从系统相册选择一张照片</Text>
             </View>
           </Pressable>
-          {photoAttached ? (
-            <Pressable accessibilityLabel="移除照片" onPress={() => { setPhotoAttached(false); setPhotoMenuOpen(false); }} style={styles.photoMenuItem}>
-              <Text style={styles.photoMenuRemove}>×</Text>
-              <View><Text style={styles.photoMenuTitle}>移除已选照片</Text></View>
-            </Pressable>
-          ) : null}
         </View>
       ) : null}
 
@@ -263,6 +348,11 @@ const styles = StyleSheet.create({
   photoMenuTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   photoMenuSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   photoMenuRemove: { color: color.error, fontSize: 19, lineHeight: 20, width: 13 },
+  photoPreviewRow: { alignItems: "center", backgroundColor: "#FCFBFD", borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, padding: 8 },
+  photoPreview: { borderRadius: 10, height: 52, width: 52 },
+  photoPreviewCopy: { flex: 1 },
+  photoRemoveButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
+  toolError: { color: color.error, fontSize: 11, lineHeight: 15, marginTop: 7 },
   // 基线 .r157Quick：3 列 grid，active = ink 底白字。
   quick: {
     flexDirection: "row",

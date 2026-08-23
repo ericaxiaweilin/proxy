@@ -28,8 +28,14 @@ func newFakeModelStack(t *testing.T, gatewayStatus int, gatewayBody string) (*Se
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode gateway payload: %v", err)
 		}
-		if payload.BusinessTaskID == "" {
-			t.Errorf("gateway payload must carry business task id")
+		if payload.BusinessTaskID != "" {
+			t.Errorf("gateway payload must not leak task metadata to the upstream provider")
+		}
+		if r.Header.Get("X-Model-Task-ID") == "" {
+			t.Errorf("gateway request must carry task metadata as an internal header")
+		}
+		if payload.Model != "fake-gateway-model" {
+			t.Errorf("gateway must receive the base-provided delegation, got %q", payload.Model)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(gatewayStatus)
@@ -52,6 +58,7 @@ func newFakeModelStack(t *testing.T, gatewayStatus int, gatewayBody string) (*Se
 				"status":"success",
 				"route_request":{
 					"providers":["fake-provider"],
+					"gateway_model":"fake-gateway-model",
 					"model_option_id":"fake_option",
 					"latency_budget_ms":12000,
 					"streaming":false,
@@ -89,7 +96,7 @@ func TestUnconfiguredServiceFailsClosed(t *testing.T) {
 
 func TestCompleteHappyPathOnlySendsTaskID(t *testing.T) {
 	service, routeHits, failureHits, _ := newFakeModelStack(t, http.StatusOK, `{
-		"model":"fake-provider",
+		"model":"fake-gateway-model",
 		"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
 		"usage":{"prompt_tokens":12,"completion_tokens":3}
 	}`)
@@ -117,7 +124,7 @@ func TestCompleteHappyPathOnlySendsTaskID(t *testing.T) {
 
 func TestCompleteUsesRouteCacheWithinTTL(t *testing.T) {
 	service, routeHits, _, chatHits := newFakeModelStack(t, http.StatusOK, `{
-		"model":"fake-provider",
+		"model":"fake-gateway-model",
 		"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
 	}`)
 
@@ -156,8 +163,8 @@ func TestGatewayFailureReportsRuntimeFailureAndInvalidatesRoute(t *testing.T) {
 	}
 	// 失败后路由缓存必须失效：再次调用会重新向控制面请求路由。
 	_, _ = service.Complete(context.Background(), "proxy.localnet.post_summary", []ChatMessage{{Role: "user", Content: "x"}})
-	if routeHits.Load() != 2 {
-		t.Fatalf("route cache must be invalidated after gateway failure, route fetches=%d", routeHits.Load())
+	if routeHits.Load() != 3 {
+		t.Fatalf("failure must invalidate and re-fetch the base route before the next call, route fetches=%d", routeHits.Load())
 	}
 }
 

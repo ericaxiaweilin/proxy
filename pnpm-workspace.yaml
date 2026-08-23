@@ -6,3 +6,8 @@ onlyBuiltDependencies:
   - esbuild
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - '@json-render/core@0.20.0'
+  - '@json-render/react-native@0.20.0'
+patchedDependencies:
+  expo-modules-jsi@57.0.4: patches/expo-modules-jsi@57.0.4.patch

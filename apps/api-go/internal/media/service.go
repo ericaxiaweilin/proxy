@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,6 +81,8 @@ type Repository interface {
 var (
 	ErrAssetNotFound    = errors.New("media asset not found")
 	ErrStatusTransition = errors.New("invalid status transition")
+	ErrMediaNotOwner    = errors.New("media asset owner mismatch")
+	ErrUploadTooLarge   = errors.New("media upload too large")
 )
 
 type MemoryRepository struct {
@@ -142,6 +145,7 @@ type Service struct {
 	repository Repository
 	processor  Processor
 	clock      clock.Clock
+	storeDir   string
 }
 
 func New() *Service {
@@ -154,7 +158,95 @@ func NewWithDependencies(repository Repository, processor Processor) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}
-	return &Service{repository: repository, processor: processor, clock: clock.System{}}
+	return &Service{repository: repository, processor: processor, clock: clock.System{}, storeDir: filepath.Join(".", "media_store")}
+}
+
+// SetStoreDir 覆盖媒体文件本地目录（与 FFmpegProcessor.StoreDir 对齐）。
+func (s *Service) SetStoreDir(dir string) {
+	s.storeDir = dir
+}
+
+// SaveUpload persists the authenticated owner's raw upload under the storage
+// key registered by CreateMediaAsset. The command state remains UPLOADING;
+// CompleteMediaUpload and ProcessMediaAsset still own lifecycle transitions.
+func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID string, source io.Reader, maxBytes int64) (MediaAsset, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	asset, err := s.repository.GetAsset(ctx, id)
+	if err != nil {
+		return MediaAsset{}, err
+	}
+	if asset.OwnerPrincipalID != ownerPrincipalID {
+		return MediaAsset{}, ErrMediaNotOwner
+	}
+	if asset.ProcessingStatus != "UPLOADING" {
+		return MediaAsset{}, ErrStatusTransition
+	}
+	key := asset.OriginalStorageKey
+	if key == "" || filepath.Base(key) != key || strings.Contains(key, "..") {
+		return MediaAsset{}, errors.New("invalid storage key")
+	}
+	if maxBytes <= 0 {
+		maxBytes = 20 << 20
+	}
+	if err := os.MkdirAll(s.storeDir, 0o750); err != nil {
+		return MediaAsset{}, err
+	}
+	temporary, err := os.CreateTemp(s.storeDir, ".proxy-upload-*")
+	if err != nil {
+		return MediaAsset{}, err
+	}
+	temporaryPath := temporary.Name()
+	committed := false
+	defer func() {
+		_ = temporary.Close()
+		if !committed {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	written, err := io.Copy(temporary, io.LimitReader(source, maxBytes+1))
+	if err != nil {
+		return MediaAsset{}, err
+	}
+	if written > maxBytes {
+		return MediaAsset{}, ErrUploadTooLarge
+	}
+	if err := temporary.Sync(); err != nil {
+		return MediaAsset{}, err
+	}
+	if err := temporary.Close(); err != nil {
+		return MediaAsset{}, err
+	}
+	if err := os.Rename(temporaryPath, filepath.Join(s.storeDir, key)); err != nil {
+		return MediaAsset{}, err
+	}
+	committed = true
+	return asset, nil
+}
+
+// ResolveServingPath 把 READY 资产的 storage key 解析为本地文件路径，供
+// GET /v1/media/play|thumb/{id} 直接 ServeFile（客户端播 MP4/图片 URL）。
+// kind: "play" | "thumb"（thumb 缺失时降级回 playback 文件）。
+// fail-closed：非 READY / key 含路径分隔符（防目录穿越）一律拒绝。
+func (s *Service) ResolveServingPath(ctx context.Context, id string, kind string) (string, error) {
+	asset, err := s.repository.GetAsset(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if asset.ProcessingStatus != "READY" {
+		return "", errors.New("media not ready")
+	}
+	key := asset.PlaybackStorageKey
+	if kind == "thumb" {
+		if asset.ThumbnailStorageKey != "" {
+			key = asset.ThumbnailStorageKey
+		}
+	}
+	if key == "" || strings.ContainsAny(key, "/\\") || strings.Contains(key, "..") {
+		return "", errors.New("invalid storage key")
+	}
+	return filepath.Join(s.storeDir, key), nil
 }
 
 func (s *Service) Supports(commandType string) bool {

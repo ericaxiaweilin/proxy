@@ -74,11 +74,12 @@ func (g *GatewayClient) Chat(ctx context.Context, model string, taskID string, m
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	payload, err := json.Marshal(gatewayChatRequest{
-		Model:          model,
-		Messages:       messages,
-		Stream:         false,
-		MaxTokens:      maxTokens,
-		BusinessTaskID: taskID,
+		Model:     model,
+		Messages:  messages,
+		Stream:    false,
+		MaxTokens: maxTokens,
+		// taskID 已由控制面用于路由。不要把非 OpenAI 字段透传到上游，
+		// Gemini 等严格实现会拒绝 business_task_id。
 	})
 	if err != nil {
 		return GatewayResult{}, err
@@ -88,6 +89,7 @@ func (g *GatewayClient) Chat(ctx context.Context, model string, taskID string, m
 		return GatewayResult{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Model-Task-ID", taskID)
 	if g.apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+g.apiKey)
 	}

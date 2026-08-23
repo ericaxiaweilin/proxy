@@ -7,7 +7,7 @@
     "typecheck": "pnpm build && pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "lint": "pnpm -r --if-present lint",
-    "dev:api": "go -C apps/api-go run ./cmd/api",
+    "dev:api": "bash ./scripts/dev-api.sh",
     "dev:worker": "go -C apps/api-go run ./cmd/worker",
     "test:go": "go -C apps/api-go test ./...",
     "build:go": "mkdir -p apps/api-go/.build && go -C apps/api-go build -o .build/proxy-api ./cmd/api && go -C apps/api-go build -o .build/proxy-worker ./cmd/worker",

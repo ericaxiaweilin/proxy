@@ -73,6 +73,8 @@ export type CommandResult = {
 
 export type SessionAuthTokens = {
   sessionId: string;
+  userAccountId: string;
+  principal: PrincipalContext;
   accessToken: string;
   refreshToken: string;
   accessExpiresAt: string;
@@ -125,6 +127,7 @@ export type OutcomeComparisonGateResult =
   | { allowed: false; reason: "NOT_FINALIZED" | "TARGET_MISMATCH" | "TEMPLATE_LINEAGE_MISMATCH" | "ENTITY_MISMATCH" | "UNIT_OR_SCALE_MISMATCH" | "POLICY_MISSING" };
 
 export const IdentityCommandTypeSchema = z.enum([
+	"CreateAnonymousSession",
   "RequestLoginChallenge",
   "VerifyLoginChallenge",
   "CreateSession",
@@ -138,10 +141,16 @@ export const IdentityCommandTypeSchema = z.enum([
 export type IdentityCommandType = z.infer<typeof IdentityCommandTypeSchema>;
 
 export const PrincipalContextSchema = z.object({
-  type: z.enum(["INDIVIDUAL", "AGENT", "BUSINESS"]),
+  type: z.enum(["INDIVIDUAL", "BUSINESS"]),
   id: z.string().min(1)
 });
 export type PrincipalContext = z.infer<typeof PrincipalContextSchema>;
+
+export const CreateAnonymousSessionPayloadSchema = z.object({
+  deviceId: z.string().min(1),
+  platform: z.enum(["IOS", "ANDROID"])
+});
+export type CreateAnonymousSessionPayload = z.infer<typeof CreateAnonymousSessionPayloadSchema>;
 
 export const RequestLoginChallengePayloadSchema = z.object({
   loginIdentityId: z.string().min(1),
@@ -280,3 +289,202 @@ export const PublishTaskPayloadSchema = z.object({
   online: z.literal(true)
 });
 export type PublishTaskPayload = z.infer<typeof PublishTaskPayloadSchema>;
+
+// ---- LocalNet Feed 读模型（服务端驱动：前端只渲染下发的 payload）----
+
+export const PostMediaRefSchema = z.object({
+  mediaAssetId: z.string().min(1),
+  sortOrder: z.number().int().nonnegative()
+});
+export type PostMediaRef = z.infer<typeof PostMediaRefSchema>;
+
+export const PostContextRefSchema = z.object({
+  contextType: z.string().min(1),
+  contextId: z.string().min(1),
+  relationType: z.string().optional()
+});
+export type PostContextRef = z.infer<typeof PostContextRefSchema>;
+
+export const FeedPostSchema = z.object({
+  postId: z.string().min(1),
+  authorType: z.enum(["USER", "AGENT", "MERCHANT", "PLATFORM_SPECIAL"]),
+  authorId: z.string().min(1),
+  authorDisplayName: z.string().optional(),
+  body: z.string(),
+  mediaRefs: z.array(PostMediaRefSchema).default([]),
+  visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY"]).optional(),
+  cityScope: z.string().optional(),
+  status: z.string(),
+  contextRefs: z.array(PostContextRefSchema).default([]),
+  createdAt: z.string()
+});
+export type FeedPost = z.infer<typeof FeedPostSchema>;
+
+export const FeedMediaItemSchema = z.object({
+  mediaAssetId: z.string().min(1),
+  mediaType: z.enum(["IMAGE", "VIDEO"]),
+  thumbnailUrl: z.string().optional(),
+  playbackUrl: z.string().optional(),
+  width: z.number().int().nonnegative(),
+  height: z.number().int().nonnegative(),
+  aspectRatio: z.number(),
+  durationMs: z.number().int().nonnegative().optional(),
+  processingStatus: z.string(),
+  sortOrder: z.number().int().nonnegative()
+});
+export type FeedMediaItem = z.infer<typeof FeedMediaItemSchema>;
+
+export const ListFeedPostsPayloadSchema = z.object({
+  posts: z.array(FeedPostSchema),
+  media: z.record(z.string(), z.array(FeedMediaItemSchema)).default({}),
+  note: z.string().optional()
+});
+export type ListFeedPostsPayload = z.infer<typeof ListFeedPostsPayloadSchema>;
+
+export const CreatePostPayloadSchema = z.object({
+  authorType: z.enum(["USER", "AGENT", "MERCHANT", "PLATFORM_SPECIAL"]).optional(),
+  authorDisplayName: z.string().optional(),
+  body: z.string(),
+  mediaRefs: z.array(PostMediaRefSchema).max(6).optional(),
+  visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY"]).optional(),
+  cityScope: z.string().optional(),
+  contextRefs: z.array(PostContextRefSchema).optional()
+});
+export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;
+
+// ---- Activity 读模型（活动页服务端驱动）----
+
+export const ActivitySchema = z.object({
+  activityId: z.string().min(1),
+  origin: z.enum(["PLATFORM", "MERCHANT", "USER"]),
+  title: z.string().min(1),
+  time: z.string(),
+  people: z.string(),
+  price: z.string(),
+  consumption: z.string(),
+  venueIcon: z.string(),
+  venueName: z.string(),
+  venueSpend: z.string(),
+  venueType: z.enum(["CAFE", "RESTAURANT"]),
+  venueTypeLabel: z.string(),
+  desc: z.string(),
+  benefit: z.string(),
+  qaCount: z.number().int().nonnegative(),
+  interested: z.number().int().nonnegative(),
+  joined: z.number().int().nonnegative(),
+  capacity: z.number().int().positive().optional(),
+  shares: z.number().int().nonnegative(),
+  parentTitle: z.string().optional()
+});
+export type Activity = z.infer<typeof ActivitySchema>;
+
+export const ListActivitiesPayloadSchema = z.object({
+  activities: z.array(ActivitySchema),
+  note: z.string().optional()
+});
+export type ListActivitiesPayload = z.infer<typeof ListActivitiesPayloadSchema>;
+
+export const ActivityRefPayloadSchema = z.object({
+  activityId: z.string().min(1)
+});
+export type ActivityRefPayload = z.infer<typeof ActivityRefPayloadSchema>;
+
+export const ToggleActivityInterestPayloadSchema = z.object({
+  activity: ActivitySchema,
+  interested: z.boolean()
+});
+export type ToggleActivityInterestPayload = z.infer<typeof ToggleActivityInterestPayloadSchema>;
+
+export const JoinActivityPayloadSchema = z.object({
+  activity: ActivitySchema,
+  joined: z.boolean()
+});
+export type JoinActivityPayload = z.infer<typeof JoinActivityPayloadSchema>;
+
+
+// ---- Experience Manifest R1 (Server-driven navigation) ----
+//
+// Apple-safe boundary:
+// - server sends structured data/configuration only
+// - client executes only pre-registered action vocabulary
+// - no remote JS / JSX / executable code
+//
+// R1 deliberately supports only the first proven navigation slice:
+// Me -> Tasks / Need
+// Me -> Tasks / Activity / Mine
+export const ExperienceContextSchema = z.enum([
+  "REQUESTER",
+  "BUSINESS"
+]);
+export type ExperienceContext = z.infer<typeof ExperienceContextSchema>;
+
+export const TasksExperienceParamsSchema = z.object({
+  view: z.enum(["NEED", "ACTIVITY"]),
+  filter: z
+    .enum(["RECOMMENDED", "CAFE", "RESTAURANT", "MINE"])
+    .optional()
+}).strict();
+
+export type TasksExperienceParams = z.infer<typeof TasksExperienceParamsSchema>;
+
+export const ExperienceOpenTasksActionSchema = z.object({
+  type: z.literal("OPEN_SURFACE"),
+  surface: z.literal("TASKS"),
+  params: TasksExperienceParamsSchema
+}).strict();
+
+export const RegisteredExperienceRouteSchema = z.enum([
+  "personalhub",
+  "socialidentity",
+  "socialanalytics",
+  "messages",
+  "addfriend",
+  "available",
+  "postfeed",
+  "wallet",
+  "appbehavior",
+  "bdash",
+  "vouchers"
+]);
+export type RegisteredExperienceRoute = z.infer<typeof RegisteredExperienceRouteSchema>;
+
+export const ExperienceOpenRegisteredRouteActionSchema = z.object({
+  type: z.literal("OPEN_REGISTERED_ROUTE"),
+  route: RegisteredExperienceRouteSchema
+}).strict();
+
+export const ExperienceActionSchema = z.discriminatedUnion("type", [
+  ExperienceOpenTasksActionSchema,
+  ExperienceOpenRegisteredRouteActionSchema
+]);
+export type ExperienceAction = z.infer<typeof ExperienceActionSchema>;
+
+export const ExperienceMenuItemSchema = z.object({
+  id: z.string().min(1),
+  icon: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().min(1),
+  accent: z.boolean().optional(),
+  action: ExperienceActionSchema
+}).strict();
+export type ExperienceMenuItem = z.infer<typeof ExperienceMenuItemSchema>;
+
+export const ExperienceMenuSectionSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  hint: z.string().optional(),
+  items: z.array(ExperienceMenuItemSchema)
+}).strict();
+export type ExperienceMenuSection = z.infer<typeof ExperienceMenuSectionSchema>;
+
+export const ExperienceManifestSchema = z.object({
+  schemaVersion: z.literal("1.0"),
+  revision: z.string().min(1),
+  context: ExperienceContextSchema,
+  me: z.object({
+    mode: z.enum(["MERGE", "REPLACE"]).optional(),
+    sections: z.array(ExperienceMenuSectionSchema)
+  }).strict()
+}).strict();
+
+export type ExperienceManifest = z.infer<typeof ExperienceManifestSchema>;

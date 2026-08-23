@@ -82,6 +82,9 @@ function isSessionAuthTokens(value: unknown): value is SessionAuthTokens {
   return (
     typeof token.sessionId === "string" &&
     token.sessionId.length > 0 &&
+    typeof token.userAccountId === "string" &&
+    token.userAccountId.length > 0 &&
+    isPrincipal(token.principal) &&
     typeof token.accessToken === "string" &&
     token.accessToken.length > 0 &&
     typeof token.refreshToken === "string" &&
@@ -100,6 +103,8 @@ export function parseSessionAuthTokens(value: unknown): SessionAuthTokens | unde
   if (!isSessionAuthTokens(value)) return undefined;
   return {
     sessionId: value.sessionId,
+    userAccountId: value.userAccountId,
+    principal: value.principal,
     accessToken: value.accessToken,
     refreshToken: value.refreshToken,
     accessExpiresAt: value.accessExpiresAt,
@@ -112,7 +117,7 @@ function isPrincipal(value: unknown): value is PrincipalContext {
   if (!value || typeof value !== "object") return false;
   const principal = value as Partial<PrincipalContext>;
   return (
-    (principal.type === "INDIVIDUAL" || principal.type === "AGENT" || principal.type === "BUSINESS") &&
+    (principal.type === "INDIVIDUAL" || principal.type === "BUSINESS") &&
     typeof principal.id === "string" &&
     principal.id.length > 0
   );
@@ -123,6 +128,8 @@ function cloneSession(session: StoredSession): StoredSession {
 		userAccountId: session.userAccountId,
 		auth: {
       sessionId: session.auth.sessionId,
+      userAccountId: session.auth.userAccountId,
+      principal: { type: session.auth.principal.type, id: session.auth.principal.id },
       accessToken: session.auth.accessToken,
       refreshToken: session.auth.refreshToken,
       accessExpiresAt: session.auth.accessExpiresAt,

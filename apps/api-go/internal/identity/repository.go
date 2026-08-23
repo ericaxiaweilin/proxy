@@ -23,6 +23,8 @@ var (
 type Repository interface {
 	GetUser(ctx context.Context, id string) (UserAccount, error)
 	GetLoginIdentity(ctx context.Context, id string) (LoginIdentity, error)
+	EnsurePasswordlessIdentity(ctx context.Context, channel, identifier, deviceID, platform, upgradingUserAccountID string) (LoginIdentity, DeviceRegistration, bool, error)
+	EnsureAnonymousIdentity(ctx context.Context, deviceID, platform string) (UserAccount, DeviceRegistration, bool, error)
 	CreateLoginChallenge(ctx context.Context, challenge LoginChallenge) error
 	GetLoginChallenge(ctx context.Context, id string) (LoginChallenge, error)
 	UpdateLoginChallenge(ctx context.Context, challenge LoginChallenge, expectedVersion int) error
@@ -108,6 +110,61 @@ func (r *MemoryRepository) GetLoginIdentity(_ context.Context, id string) (Login
 		return LoginIdentity{}, ErrLoginIdentityNotFound
 	}
 	return identity, nil
+}
+
+func (r *MemoryRepository) EnsurePasswordlessIdentity(_ context.Context, channel, identifier, deviceID, platform, upgradingUserAccountID string) (LoginIdentity, DeviceRegistration, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, identity := range r.loginIdentities {
+		if identity.Channel == channel && identity.Identifier == identifier && identity.Status == "ACTIVE" {
+			device := DeviceRegistration{ID: deviceID, UserAccountID: identity.UserAccountID, Platform: platform, Status: "ACTIVE"}
+			if existing, exists := r.devices[deviceID]; exists && existing.UserAccountID != identity.UserAccountID && upgradingUserAccountID == "" {
+				return LoginIdentity{}, DeviceRegistration{}, false, errors.New("device belongs to another user")
+			}
+			r.devices[deviceID] = device
+			return identity, device, false, nil
+		}
+	}
+	user := UserAccount{ID: newID("user_"), Status: "REGISTERED"}
+	if upgradingUserAccountID != "" {
+		var found bool
+		user, found = r.users[upgradingUserAccountID]
+		if !found {
+			return LoginIdentity{}, DeviceRegistration{}, false, ErrUserNotFound
+		}
+		user.Status = "REGISTERED"
+		r.users[user.ID] = user
+	}
+	identity := LoginIdentity{ID: newID("login_"), UserAccountID: user.ID, Channel: channel, Identifier: identifier, Verified: true, Status: "ACTIVE"}
+	device := DeviceRegistration{ID: deviceID, UserAccountID: user.ID, Platform: platform, Status: "ACTIVE"}
+	if upgradingUserAccountID == "" {
+		r.users[user.ID] = user
+	}
+	r.loginIdentities[identity.ID] = identity
+	r.devices[device.ID] = device
+	r.memberships = append(r.memberships, Membership{Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, UserAccountID: user.ID, Status: "ACTIVE"})
+	return identity, device, true, nil
+}
+
+// EnsureAnonymousIdentity gives a device a durable, server-owned ANONYMOUS
+// account. Re-opening the app on the same device reuses the same person;
+// it never manufactures a client-side placeholder identity.
+func (r *MemoryRepository) EnsureAnonymousIdentity(_ context.Context, deviceID, platform string) (UserAccount, DeviceRegistration, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if device, exists := r.devices[deviceID]; exists {
+		user, found := r.users[device.UserAccountID]
+		if !found {
+			return UserAccount{}, DeviceRegistration{}, false, ErrUserNotFound
+		}
+		return user, device, false, nil
+	}
+	user := UserAccount{ID: newID("user_"), Status: "ANONYMOUS"}
+	device := DeviceRegistration{ID: deviceID, UserAccountID: user.ID, Platform: platform, Status: "ACTIVE"}
+	r.users[user.ID] = user
+	r.devices[device.ID] = device
+	r.memberships = append(r.memberships, Membership{Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, UserAccountID: user.ID, Status: "ACTIVE"})
+	return user, device, true, nil
 }
 
 func (r *MemoryRepository) CreateLoginChallenge(_ context.Context, challenge LoginChallenge) error {

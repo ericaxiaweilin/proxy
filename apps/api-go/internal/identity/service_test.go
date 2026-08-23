@@ -120,6 +120,59 @@ func TestLoginChallengeMustBeVerifiedAndIsConsumedOnce(t *testing.T) {
 	}
 }
 
+func TestPasswordlessEmailCreatesAccountThenSessionWithoutClientAccountIDs(t *testing.T) {
+	fixed := clock.NewFixed(time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC))
+	service := NewWithRepositoryAndClockAndChallengeProvider(NewMemoryRepository(nil), fixed, testLoginChallengeProvider{})
+	begin := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": "New.Person@Example.com", "deviceId": "device_new", "platform": "ANDROID",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if begin.Outcome != "PENDING" || begin.OperationRef == "" {
+		t.Fatalf("expected pending passwordless challenge, got %#v", begin)
+	}
+	verified := service.Handle(testEnvelope("VerifyLoginChallenge", map[string]any{"challengeId": begin.OperationRef, "code": "123456"}, command.Target{Type: "LoginChallenge", ID: begin.OperationRef}))
+	if verified.Outcome != "ACCEPTED" {
+		t.Fatalf("expected verified challenge, got %#v", verified)
+	}
+	session := service.Handle(testEnvelope("CreateSession", map[string]any{"challengeId": begin.OperationRef, "deviceId": "device_new"}, command.Target{Type: "Session", ID: "new"}))
+	if session.Outcome != "ACCEPTED" || session.Auth == nil || session.Auth.AccessToken == "" {
+		t.Fatalf("expected session without client-supplied account IDs, got %#v", session)
+	}
+}
+
+func TestAnonymousSessionIsDurableAndReusesDeviceIdentity(t *testing.T) {
+	service := NewWithRepositoryAndClock(NewMemoryRepository(nil), clock.NewFixed(time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)))
+	first := service.Handle(testEnvelope("CreateAnonymousSession", map[string]any{"deviceId": "device_guest", "platform": "ANDROID"}, command.Target{Type: "Session", ID: "new"}))
+	second := service.Handle(testEnvelope("CreateAnonymousSession", map[string]any{"deviceId": "device_guest", "platform": "ANDROID"}, command.Target{Type: "Session", ID: "new"}))
+	if first.Outcome != "ACCEPTED" || first.Auth == nil || second.Outcome != "ACCEPTED" || second.Auth == nil {
+		t.Fatalf("expected anonymous sessions with tokens, got %#v %#v", first, second)
+	}
+	if first.Auth.UserAccountID != second.Auth.UserAccountID || first.Auth.Principal.ID != first.Auth.UserAccountID {
+		t.Fatalf("anonymous sessions must reuse one durable individual identity, got %#v %#v", first.Auth, second.Auth)
+	}
+}
+
+func TestPhoneUpgradeKeepsGuestPersonAndExistingCredentialWins(t *testing.T) {
+	repository := NewMemoryRepository(nil)
+	service := NewWithRepositoryAndClockAndChallengeProvider(repository, clock.NewFixed(time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)), testLoginChallengeProvider{})
+	guest := service.Handle(testEnvelope("CreateAnonymousSession", map[string]any{"deviceId": "device_guest", "platform": "ANDROID"}, command.Target{Type: "Session", ID: "new"}))
+	if guest.Outcome != "ACCEPTED" || guest.Auth == nil {
+		t.Fatalf("expected guest session, got %#v", guest)
+	}
+	upgradeEnvelope := testEnvelope("BeginPasswordlessAuthentication", map[string]any{"channel": "SMS", "identifier": "+84912345678", "deviceId": "device_guest", "platform": "ANDROID"}, command.Target{Type: "LoginChallenge", ID: "new"})
+	upgradeEnvelope.Actor = command.Actor{Type: "USER", ID: guest.Auth.UserAccountID}
+	upgradeEnvelope.AuthContext = map[string]any{"sessionId": guest.Auth.SessionID}
+	upgrade := service.Handle(upgradeEnvelope)
+	if upgrade.Outcome != "PENDING" {
+		t.Fatalf("expected phone upgrade challenge, got %#v", upgrade)
+	}
+	if user, err := repository.GetUser(context.Background(), guest.Auth.UserAccountID); err != nil || user.Status != "REGISTERED" {
+		t.Fatalf("guest should become REGISTERED, got %#v %v", user, err)
+	}
+	if device, err := repository.GetDevice(context.Background(), "device_guest"); err != nil || device.UserAccountID != guest.Auth.UserAccountID {
+		t.Fatalf("device must remain on guest person, got %#v %v", device, err)
+	}
+}
+
 func TestRefreshTokenRotationRejectsReplay(t *testing.T) {
 	service := testService()
 	created := service.Handle(testEnvelope("CreateSession", map[string]any{

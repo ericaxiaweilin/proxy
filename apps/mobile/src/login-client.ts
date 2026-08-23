@@ -22,6 +22,12 @@ export type RequestLoginChallengeInput = {
   channel: LoginChallengeChannel;
 };
 
+export type BeginPasswordlessAuthenticationInput = {
+  channel: LoginChallengeChannel;
+  identifier: string;
+  platform: "ANDROID" | "IOS";
+};
+
 export type CreateSessionInput = {
   userAccountId: string;
   loginIdentityId: string;
@@ -70,6 +76,32 @@ export class LoginClient {
     return { challengeId: result.operationRef, result };
   }
 
+  public async beginPasswordlessAuthentication(input: BeginPasswordlessAuthenticationInput): Promise<{ challengeId: string; result: CommandResult }> {
+    const result = await this.sendCommand("BeginPasswordlessAuthentication", { type: "LoginChallenge", id: "new" }, {
+      channel: input.channel,
+      identifier: input.identifier,
+      deviceId: this.input.deviceId,
+      platform: input.platform
+    });
+    if (result.outcome !== "PENDING" || !result.operationRef) {
+      throw new LoginProtocolError("passwordless authentication response did not contain a pending operation");
+    }
+    return { challengeId: result.operationRef, result };
+  }
+
+  public async createAnonymousSession(platform: "ANDROID" | "IOS"): Promise<StoredSession> {
+    const result = await this.sendCommand("CreateAnonymousSession", { type: "Session", id: "new" }, {
+      deviceId: this.input.deviceId,
+      platform
+    });
+    if (result.outcome !== "ACCEPTED") throw new LoginProtocolError("anonymous session response was not accepted");
+    const auth = parseSessionAuthTokens(result.auth);
+    if (!auth) throw new LoginProtocolError("anonymous session response did not contain valid auth tokens");
+    const session: StoredSession = { userAccountId: auth.userAccountId, auth, principal: auth.principal };
+    await this.input.secureSessionStore.write(session);
+    return session;
+  }
+
   public async verifyChallenge(challengeId: string, code: string): Promise<CommandResult> {
     const result = await this.sendCommand("VerifyLoginChallenge", {
       type: "LoginChallenge",
@@ -101,13 +133,26 @@ export class LoginClient {
     const auth = parseSessionAuthTokens(result.auth);
     if (!auth) throw new LoginProtocolError("session response did not contain valid auth tokens");
 
-		const session: StoredSession = { userAccountId: input.userAccountId, auth, principal: input.requestedPrincipal };
+    const session: StoredSession = { userAccountId: auth.userAccountId, auth, principal: auth.principal };
     try {
       await this.input.secureSessionStore.write(session);
     } catch (error) {
       await this.input.secureSessionStore.clear().catch(() => undefined);
       throw error;
     }
+    return session;
+  }
+
+  public async createSessionFromChallenge(challengeId: string): Promise<StoredSession> {
+    const result = await this.sendCommand("CreateSession", { type: "Session", id: "new" }, {
+      deviceId: this.input.deviceId,
+      challengeId
+    });
+    if (result.outcome !== "ACCEPTED" || !result.aggregate?.id) throw new LoginProtocolError("session response was not accepted");
+    const auth = parseSessionAuthTokens(result.auth);
+    if (!auth) throw new LoginProtocolError("session response did not contain valid auth tokens");
+    const session: StoredSession = { userAccountId: auth.userAccountId, auth, principal: auth.principal };
+    await this.input.secureSessionStore.write(session);
     return session;
   }
 
@@ -133,7 +178,8 @@ export class LoginClient {
       url: `${this.input.baseUrl}/v1/commands/${commandType}`,
       headers: {
         Accept: "application/json",
-        "Content-Type": "application/json"
+		"Content-Type": "application/json",
+		...(commandType === "BeginPasswordlessAuthentication" ? await this.optionalSessionAuthorization() : {})
       },
       body: JSON.stringify(envelope)
     });
@@ -146,6 +192,11 @@ export class LoginClient {
     }
     return result;
   }
+
+	private async optionalSessionAuthorization(): Promise<Record<string, string>> {
+		const stored = await this.input.secureSessionStore.read();
+		return stored ? { Authorization: `Bearer ${stored.auth.accessToken}` } : {};
+	}
 
   private nextId(prefix: string): string {
     this.commandSequence += 1;

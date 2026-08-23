@@ -3,12 +3,23 @@
     "name": "Proxy",
     "slug": "proxy",
     "version": "0.1.0",
+    "icon": "./assets/otter-logo.png",
     "orientation": "portrait",
     "scheme": "proxy",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.proxy.app",
       "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Proxy 使用相机拍摄并添加到你主动发起的需求或对话。",
+        "NSPhotoLibraryUsageDescription": "Proxy 读取你主动选择的照片并添加到需求或对话。",
+        "NSMicrophoneUsageDescription": "Proxy 使用麦克风将你的语音转换为输入文字。",
+        "NSSpeechRecognitionUsageDescription": "Proxy 使用系统语音识别将你的语音转换为输入文字。",
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
+      },
       "config": {
         "usesNonExemptEncryption": false
       }
@@ -16,6 +27,7 @@
     "android": {
       "package": "com.proxy.app",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/otter-logo.png",
         "backgroundColor": "#050505"
       }
     },
@@ -24,6 +36,21 @@
         "expo-secure-store",
         {
           "configureAndroidBackup": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Proxy 读取你主动选择的照片并添加到需求或对话。",
+          "cameraPermission": "Proxy 使用相机拍摄并添加到你主动发起的需求或对话。",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Proxy 使用麦克风将你的语音转换为输入文字。",
+          "speechRecognitionPermission": "Proxy 使用系统语音识别将你的语音转换为输入文字。"
         }
       ]
     ]

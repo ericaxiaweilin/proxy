@@ -66,6 +66,8 @@ type Result struct {
 
 type AuthTokens struct {
 	SessionID        string    `json:"sessionId"`
+	UserAccountID    string    `json:"userAccountId"`
+	Principal        Principal `json:"principal"`
 	AccessToken      string    `json:"accessToken"`
 	RefreshToken     string    `json:"refreshToken"`
 	AccessExpiresAt  time.Time `json:"accessExpiresAt"`
@@ -74,6 +76,10 @@ type AuthTokens struct {
 }
 
 func Accepted(envelope Envelope, aggregateType, aggregateID string, version int, state string, eventRefs []string) Result {
+	// eventRefs 永远序列化为 [] 而非 null（客户端 fail-closed 解析要求数组）
+	if eventRefs == nil {
+		eventRefs = []string{}
+	}
 	return Result{
 		CommandID:     envelope.CommandID,
 		Outcome:       "ACCEPTED",

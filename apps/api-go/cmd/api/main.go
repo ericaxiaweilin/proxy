@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/api"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -48,18 +49,18 @@ func main() {
 	cityCompanionService := citycompanion.New()
 	localNetService := localnet.New()
 	localContextService := localcontext.New()
-	conversationService := conversation.New()
-	engagementService := engagement.New()
-	fulfillmentService := fulfillment.New()
-	supplyService := supply.New()
-	mediaService := media.New()
-	contributionService := contribution.New()
 	modelStack := configuredModelStack()
 	if modelStack.Available() {
 		log.Printf("proxy api go model stack adapter configured (business side sends task ids only)")
 	} else {
 		log.Printf("proxy api go model stack adapter unconfigured (fail-closed)")
 	}
+	conversationService := conversation.NewWithModelStack(nil, modelStack)
+	engagementService := engagement.New()
+	fulfillmentService := fulfillment.New()
+	supplyService := supply.New()
+	mediaService := media.New()
+	contributionService := contribution.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -80,10 +81,13 @@ func main() {
 			if err := seedPostgresSupply(pool); err != nil {
 				log.Fatalf("seed postgres supply: %v", err)
 			}
+			if err := seedPostgresMedia(pool); err != nil {
+				log.Fatalf("seed postgres media: %v", err)
+			}
 		}
 		demandService = demand.NewWithRepository(nil, nil, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
 		localContextService = localcontext.NewWithRepository(postgres.NewLocalContextRepository(pool))
-		conversationService = conversation.NewWithRepository(postgres.NewConversationRepository(pool))
+		conversationService = conversation.NewWithModelStack(postgres.NewConversationRepository(pool), modelStack)
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
@@ -101,6 +105,10 @@ func main() {
 	}()
 
 	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, supplyService, mediaService, contributionService, idempotencyStore, readyCheck, authenticator, transactions)
+	// Activity 域（P0 内存读模型）：启动幂等 seed 基线 5 条活动。
+	activityService := activity.New()
+	activityService.SeedDefaults()
+	server.Activity = activityService
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
 	// 未配置时 fail-closed：特权命令（审核/发奖/能力核验/媒体就绪覆盖）一律拒绝。
 	if operatorPrincipals := os.Getenv("PROXY_OPERATOR_PRINCIPALS"); operatorPrincipals != "" {
@@ -153,6 +161,44 @@ func configuredModelStack() modelstack.Port {
 		return modelstack.Unconfigured{}
 	}
 	return modelstack.New(controlPlaneURL, gatewayURL, gatewayAPIKey)
+}
+
+// seedPostgresMedia 幂等写入演示媒体资产（READY，storage key 指向 media_store 现有文件）。
+// 固定 ID 供前端种子帖引用（新架构：前端只拿服务端下发的 playbackUrl）。
+func seedPostgresMedia(pool *pgxpool.Pool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	now := time.Now().UTC()
+	assets := []struct {
+		id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+		width, height                                                  int
+		durationMs                                                     int64
+	}{
+		{"seed_media_hoankiem", "IMAGE", "dkq8mi3yf254_thumb.jpg", "dkq8mi3yf254_thumb.jpg", "dkq8mi3yf254_thumb.jpg", "image/jpeg", "", 480, 360, 0},
+		{"seed_media_coffee", "IMAGE", "dkq8n8mjr34w_thumb.jpg", "dkq8n8mjr34w_thumb.jpg", "dkq8n8mjr34w_thumb.jpg", "image/jpeg", "", 480, 360, 0},
+		{"seed_media_westlake", "IMAGE", "dkq8noieylig_thumb.jpg", "dkq8noieylig_thumb.jpg", "dkq8noieylig_thumb.jpg", "image/jpeg", "", 480, 360, 0},
+		{"seed_media_route_video", "VIDEO", "dkq8qwqitirc_playback.mp4", "dkq8qwqitirc_playback.mp4", "dkq8qwqitirc_thumb.jpg", "video/mp4", "h264", 1080, 1920, 9833},
+		{"seed_media_opening_video", "VIDEO", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_thumb.jpg", "video/mp4", "h264", 320, 240, 2020},
+	}
+	for _, a := range assets {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media.media_assets (
+				media_asset_id, owner_principal_type, owner_principal_id, media_type,
+				original_storage_key, playback_storage_key, thumbnail_storage_key,
+				mime_type, width, height, duration_ms, codec,
+				processing_status, playback_url, thumbnail_url, created_at, updated_at
+			) VALUES ($1,'PLATFORM','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY',$11,$12,$13,$13)
+			ON CONFLICT (media_asset_id) DO UPDATE SET
+				playback_storage_key=EXCLUDED.playback_storage_key,
+				thumbnail_storage_key=EXCLUDED.thumbnail_storage_key,
+				processing_status='READY', updated_at=EXCLUDED.updated_at`,
+			a.id, a.mediaType, a.originalKey, a.playbackKey, a.thumbKey, a.mime,
+			a.width, a.height, a.durationMs, a.codec,
+			"/v1/media/play/"+a.id, "/v1/media/thumb/"+a.id, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedPostgresIdentity 在 simulated 模式把开发用户幂等写入 Postgres
@@ -286,19 +332,20 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 			return err
 		}
 	}
-	// AvailabilityWindow（明天 9:00-19:00，幂等按 agent+时间查重）
+	// AvailabilityWindow（明天 9:00-19:00，幂等按固定 id 查重，跨天重启不冲突）
 	agents := []string{"agent_linh", "agent_mai", "agent_minh"}
 	for _, agentID := range agents {
 		var exists int
 		if err := pool.QueryRow(ctx, `
-			SELECT count(*) FROM supply.availability_windows WHERE agent_id=$1 AND start_at=$2`,
-			agentID, tomorrow9).Scan(&exists); err != nil {
+			SELECT count(*) FROM supply.availability_windows WHERE id=$1`,
+			"aw_"+agentID).Scan(&exists); err != nil {
 			return err
 		}
 		if exists == 0 {
 			if _, err := pool.Exec(ctx, `
 				INSERT INTO supply.availability_windows (id, agent_id, start_at, end_at, market_id, status, created_at, updated_at)
-				VALUES ($1,$2,$3,$4,$5,'AVAILABLE',$6,$6)`,
+				VALUES ($1,$2,$3,$4,$5,'AVAILABLE',$6,$6)
+				ON CONFLICT (id) DO NOTHING`,
 				"aw_"+agentID, agentID, tomorrow9, tomorrow19, "hn", now); err != nil {
 				return err
 			}

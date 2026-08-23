@@ -11,6 +11,8 @@ const session: StoredSession = {
 	userAccountId: "user_001",
 	auth: {
     sessionId: "session_001",
+    userAccountId: "user_001",
+    principal: { type: "BUSINESS", id: "business_001" },
     accessToken: "access_secret",
     refreshToken: "refresh_secret",
     accessExpiresAt: "2026-08-14T00:15:00.000Z",

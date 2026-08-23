@@ -32,7 +32,9 @@ func New(controlPlaneURL, gatewayURL, gatewayAPIKey string) *Service {
 	}
 }
 
-func (s *Service) Available() bool { return true }
+func (s *Service) Available() bool {
+	return s != nil && s.controlPlane != nil && s.gateway != nil && s.controlPlane.baseURL != "" && s.gateway.baseURL != ""
+}
 
 // Complete 实现业务侧契约：只发任务 ID，模型选择完全由底座决定。
 func (s *Service) Complete(ctx context.Context, taskID string, messages []ChatMessage) (Completion, error) {
@@ -46,20 +48,33 @@ func (s *Service) Complete(ctx context.Context, taskID string, messages []ChatMe
 	if err != nil {
 		return Completion{}, err
 	}
-	model := decision.PrimaryProvider()
+	// 模型底座负责把业务 task 路由为可执行网关 delegation；业务侧不得把
+	// provider 名、环境变量或任何默认模型当作 fallback。
+	model := decision.GatewayModel
 	timeout := time.Duration(decision.RequestTimeoutMS) * time.Millisecond
 	gatewayResult, err := s.gateway.Chat(ctx, model, taskID, messages, decision.MaxCompletionTokens, timeout)
 	if err != nil {
-		s.reportFailure(ctx, model, gatewayResult.StatusCode, err)
-		// 路由决策可能已过期（底座刚切换 Provider），失效缓存后让下次调用重新路由。
+		s.reportFailure(ctx, decision.PrimaryProvider(), gatewayResult.StatusCode, err)
+		// 只让控制面决定下一跳。一次运行时失败后失效缓存、重新取路由并
+		// 最多重试一次；绝不在 Proxy 内遍历或猜测候选模型。
 		s.invalidateRoute(taskID)
+		if retryDecision, retryErr := s.resolveRoute(ctx, taskID); retryErr == nil && retryDecision.GatewayModel != "" && retryDecision.GatewayModel != model {
+			retryTimeout := time.Duration(retryDecision.RequestTimeoutMS) * time.Millisecond
+			retryResult, retryErr := s.gateway.Chat(ctx, retryDecision.GatewayModel, taskID, messages, retryDecision.MaxCompletionTokens, retryTimeout)
+			if retryErr == nil {
+				return Completion{Content: retryResult.Content, TaskID: taskID, Model: retryResult.Model, Provider: retryDecision.PrimaryProvider(), ModelOption: retryDecision.ModelOptionID, PromptTokens: retryResult.PromptTokens, OutputTokens: retryResult.OutputTokens}, nil
+			}
+			s.reportFailure(ctx, retryDecision.PrimaryProvider(), retryResult.StatusCode, retryErr)
+			s.invalidateRoute(taskID)
+			return Completion{}, retryErr
+		}
 		return Completion{}, err
 	}
 	return Completion{
 		Content:      gatewayResult.Content,
 		TaskID:       taskID,
 		Model:        gatewayResult.Model,
-		Provider:     model,
+		Provider:     decision.PrimaryProvider(),
 		ModelOption:  decision.ModelOptionID,
 		PromptTokens: gatewayResult.PromptTokens,
 		OutputTokens: gatewayResult.OutputTokens,
