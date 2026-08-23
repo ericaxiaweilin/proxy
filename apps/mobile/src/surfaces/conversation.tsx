@@ -126,8 +126,10 @@ export function ConversationSurface({
         };
         setMessages((prev) => [...prev, reply]);
       }
-    } catch {
-      // 网络错误时静默
+      if (payload?.assistantStatus === "FAILED") setError("模型服务暂时不可用，消息已保留");
+      if (payload?.assistantStatus === "UNAVAILABLE") setError("模型服务未配置，消息已保留");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "发送失败，请重试");
     } finally {
       setSending(false);
     }

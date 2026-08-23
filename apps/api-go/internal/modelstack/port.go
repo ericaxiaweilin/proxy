@@ -8,6 +8,7 @@ package modelstack
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -21,9 +22,75 @@ type Port interface {
 }
 
 // ChatMessage 是 OpenAI 兼容对话消息的最小业务表示。
+// 文本消息用 Content；多模态消息用 Parts（文本+图片），两者择一。
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string        `json:"role"`
+	Content string        `json:"content,omitempty"`
+	Parts   []ContentPart `json:"-"`
+}
+
+// ContentPart 是多模态内容片段（OpenAI Vision 兼容）。
+type ContentPart struct {
+	Type     string    `json:"type"` // text | image_url
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+// ImageURL 是图片的 data URI 或可访问 URL。
+type ImageURL struct {
+	URL string `json:"url"`
+}
+
+// MarshalJSON 按是否包含多模态 Parts 决定 content 的形态：
+// - 仅文本： "content": "string"
+// - 含图：   "content": [{"type":"text",...}, {"type":"image_url",...}]
+func (m ChatMessage) MarshalJSON() ([]byte, error) {
+	type raw ChatMessage
+	if len(m.Parts) == 0 {
+		return json.Marshal(struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{Role: m.Role, Content: m.Content})
+	}
+	return json.Marshal(struct {
+		Role    string        `json:"role"`
+		Content []ContentPart `json:"content"`
+	}{Role: m.Role, Content: m.Parts})
+}
+
+func (m *ChatMessage) UnmarshalJSON(data []byte) error {
+	var probe struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return err
+	}
+	m.Role = probe.Role
+	if len(probe.Content) == 0 || string(probe.Content) == "null" {
+		return nil
+	}
+	// 尝试按字符串解析
+	var s string
+	if err := json.Unmarshal(probe.Content, &s); err == nil {
+		m.Content = s
+		return nil
+	}
+	var parts []ContentPart
+	if err := json.Unmarshal(probe.Content, &parts); err == nil {
+		m.Parts = parts
+		// 兼容：把 text 片段拼回 Content 便于日志
+		for _, p := range parts {
+			if p.Type == "text" && p.Text != "" {
+				if m.Content != "" {
+					m.Content += "\n"
+				}
+				m.Content += p.Text
+			}
+		}
+		return nil
+	}
+	return nil
 }
 
 // Completion 是一次推理的业务侧结果。Model/Provider 仅用于审计与可观测性，

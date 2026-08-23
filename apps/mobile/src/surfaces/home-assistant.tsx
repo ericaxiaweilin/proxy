@@ -56,7 +56,8 @@ export function HomeAssistantSurface({
       if (initialAttachment) {
         setStatus("正在安全上传照片…");
         const uploaded = await mediaClient.uploadImage(initialAttachment);
-        mediaRef = uploaded.mediaAssetId;
+        // 视觉任务需要 storageKey 直读文件，assetId 仅用于播放；此处传 storageKey 供模型底座读取
+        mediaRef = (uploaded as unknown as { storageKey?: string }).storageKey || uploaded.mediaAssetId;
         setStatus(undefined);
       }
       return conversationClient.startConversation({

@@ -3,10 +3,14 @@ package conversation
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -324,7 +328,8 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		"originType":     conv.OriginType,
 		"originId":       conv.OriginID,
 	}
-	if p.FirstMessage != "" {
+	hasInitialContent := strings.TrimSpace(p.FirstMessage) != "" || strings.TrimSpace(p.MediaRef) != ""
+	if hasInitialContent {
 		temporaryUI := temporaryUIFor(p.FirstMessage)
 		if temporaryUI != nil {
 			payload["temporaryUI"] = temporaryUI
@@ -375,8 +380,16 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if !validTypes[p.MessageType] {
 		return command.Rejected(e, "INVALID_MESSAGE_TYPE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_message_type", map[string]any{"messageType": p.MessageType})
 	}
-	if p.MessageType == "TEXT" && p.Body == "" {
+	// 文本消息 Body 不能为空；图片消息允许空文本但必须带 MediaRef（上层已对纯图补 " " 占位）
+	if p.MessageType == "TEXT" && strings.TrimSpace(p.Body) == "" {
 		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", nil)
+	}
+	if p.MessageType == "IMAGE" && strings.TrimSpace(p.Body) == "" && strings.TrimSpace(p.MediaRef) == "" {
+		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", nil)
+	}
+	// 兼容：前端对纯图用 " " 占位，这里归一为空以便历史拼接
+	if p.MessageType == "IMAGE" && strings.TrimSpace(p.Body) == "" {
+		p.Body = ""
 	}
 	conv, err := s.repository.GetConversation(ctx, e.Target.ID)
 	if errors.Is(err, ErrConversationNotFound) {
@@ -413,11 +426,12 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		temporaryUI = temporaryUIFor(p.Body)
 	}
 	var aiReply *Message
-	if p.MessageType == "TEXT" && temporaryUI != nil {
+	hasContent := strings.TrimSpace(p.Body) != "" || strings.TrimSpace(p.MediaRef) != ""
+	if p.TemporaryUIResponseID == "" && temporaryUI != nil && hasContent {
 		aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
-	} else if p.MessageType == "TEXT" && p.TemporaryUIResponseID != "" {
+	} else if p.TemporaryUIResponseID != "" {
 		aiReply = s.serverFormResponseReply(ctx, conv)
-	} else if s.modelStack != nil && s.modelStack.Available() && p.MessageType == "TEXT" {
+	} else if s.modelStack != nil && s.modelStack.Available() && hasContent {
 		aiReply = s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil)
 		if aiReply != nil {
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
@@ -438,7 +452,7 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if aiReply != nil {
 		payload["aiMessage"] = aiReply
 		payload["assistantStatus"] = "RESPONDED"
-	} else if p.MessageType == "TEXT" {
+	} else if hasContent {
 		if s.modelStack != nil && s.modelStack.Available() {
 			payload["assistantStatus"] = "FAILED"
 		} else {
@@ -491,6 +505,7 @@ func (s *Service) serverFormResponseReply(ctx context.Context, conv Conversation
 }
 
 // generateAIReply 调用模型底座生成 AI 回复。fail-closed：任何错误静默跳过，不阻塞用户消息。
+// 多模态：若历史或当前消息含图片，则尝试以 vision 任务路由，底座会将其转给支持图像的模型。
 func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e command.Envelope, userText string, assistantMode string, temporaryUI *TemporaryUI) *Message {
 	// 1. 构建对话历史（最近 20 条）
 	history, err := s.repository.Messages(ctx, conv.ID)
@@ -510,28 +525,78 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 	if len(history) > 20 {
 		start = len(history) - 20
 	}
+	hasImageInHistory := false
 	for _, m := range history[start:] {
-		if m.MessageType == "IMAGE" && m.MediaRef != "" {
-			systemPrompt += " 对话中包含用户上传的图片附件；当前任务只收到文本历史，除非模型底座同时提供了图像内容，否则不要声称已经识别图片细节。"
+		if m.MessageType == "IMAGE" && strings.TrimSpace(m.MediaRef) != "" {
+			hasImageInHistory = true
 			break
 		}
 	}
+	if hasImageInHistory {
+		systemPrompt += " 对话中包含图片附件，请结合图片内容理解用户需求；若图片无法读取则说明并请用户文字补充。"
+	}
 	messages := []modelstack.ChatMessage{{Role: "system", Content: systemPrompt}}
 	for _, m := range history[start:] {
+		if m.DeletedAt != nil {
+			continue
+		}
 		body := strings.TrimSpace(m.Body)
-		if body == "" || m.DeletedAt != nil {
+		// 跳过完全空的 TEXT（IMAGE 允许空文本但需带图）
+		if body == "" && m.MessageType == "TEXT" {
 			continue
 		}
 		role := "assistant"
 		if m.SenderID == e.Actor.ID {
 			role = "user"
 		}
+		if m.MessageType == "IMAGE" && strings.TrimSpace(m.MediaRef) != "" {
+			if dataURI := s.imageDataURI(m.MediaRef); dataURI != "" {
+				parts := []modelstack.ContentPart{}
+				if body != "" {
+					parts = append(parts, modelstack.ContentPart{Type: "text", Text: body})
+				} else {
+					parts = append(parts, modelstack.ContentPart{Type: "text", Text: "请结合这张图片理解我的需求。"})
+				}
+				parts = append(parts, modelstack.ContentPart{Type: "image_url", ImageURL: &modelstack.ImageURL{URL: dataURI}})
+				messages = append(messages, modelstack.ChatMessage{Role: role, Parts: parts})
+				hasImageInHistory = true
+				continue
+			}
+			// 图片读取失败则退化为文本占位
+			if body == "" {
+				body = "[图片附件，未能读取]"
+			} else {
+				body = body + " [含图片附件]"
+			}
+		}
+		if body == "" {
+			continue
+		}
 		messages = append(messages, modelstack.ChatMessage{Role: role, Content: body})
 	}
 
-	// 2. 调用模型底座
+	// 2. 调用模型底座：有图用 vision 任务，无图用文本任务
 	taskID := "proxy.conversation.demand_assist"
+	if hasImageInHistory {
+		taskID = "proxy.conversation.vision_assist"
+	}
 	completion, err := s.modelStack.Complete(ctx, taskID, messages)
+	// vision 任务未注册时回退到文本任务（不假装识图，但保证对话可用）
+	if err != nil && hasImageInHistory {
+		log.Printf("conversation ai: vision task %s failed (%v), fallback to demand_assist", taskID, err)
+		taskID = "proxy.conversation.demand_assist"
+		// 退化：把多模态消息压回纯文本（去图）
+		fallback := make([]modelstack.ChatMessage, 0, len(messages))
+		for _, m := range messages {
+			if len(m.Parts) > 0 {
+				fallback = append(fallback, modelstack.ChatMessage{Role: m.Role, Content: m.Content})
+			} else {
+				fallback = append(fallback, m)
+			}
+		}
+		messages = fallback
+		completion, err = s.modelStack.Complete(ctx, taskID, messages)
+	}
 	if err != nil {
 		log.Printf("conversation ai: modelstack complete failed: %v", err)
 		return nil
@@ -552,6 +617,70 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 		return nil
 	}
 	return &aiMsg
+}
+
+// imageDataURI 尝试从本地 media_store 读取图片并转 data URI。
+// MediaRef 约定为 storageKey（如 mobile_media_image_xxx.jpg），兼容旧 assetId 兜底。
+func (s *Service) imageDataURI(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	// 防目录穿越
+	if strings.Contains(ref, "..") || strings.ContainsAny(ref, "/\\") && filepath.Base(ref) != ref && !strings.HasPrefix(ref, "mobile_media_") {
+		// storageKey 本身不含路径，仅文件名；若含 / 则拒绝
+		if strings.Contains(ref, "/") || strings.Contains(ref, "\\") {
+			return ""
+		}
+	}
+	candidates := []string{
+		filepath.Join("media_store", ref),
+		filepath.Join("apps", "api-go", "media_store", ref),
+		filepath.Join(".", "media_store", ref),
+		filepath.Join(os.TempDir(), ref),
+		ref,
+	}
+	var data []byte
+	var err error
+	for _, p := range candidates {
+		data, err = os.ReadFile(p)
+		if err == nil {
+			mime := guessImageMime(ref)
+			b64 := base64.StdEncoding.EncodeToString(data)
+			// 限 6MB 原图，超限则拒绝（网关 8MB 限制）
+			if len(b64) > 8<<20 {
+				log.Printf("conversation ai: image too large %s (%d bytes)", ref, len(data))
+				return ""
+			}
+			return fmt.Sprintf("data:%s;base64,%s", mime, b64)
+		}
+	}
+	// 兼容：ref 可能是 assetId，尝试按 media_store 中同前缀文件查找（开发环境）
+	if entries, rerr := os.ReadDir("media_store"); rerr == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ref) || strings.HasPrefix(ref, e.Name()) {
+				if d, err2 := os.ReadFile(filepath.Join("media_store", e.Name())); err2 == nil {
+					mime := guessImageMime(e.Name())
+					return fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(d))
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func guessImageMime(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, ".png"):
+		return "image/png"
+	case strings.HasSuffix(lower, ".heic"), strings.HasSuffix(lower, ".heif"):
+		return "image/heic"
+	case strings.HasSuffix(lower, ".webp"):
+		return "image/webp"
+	default:
+		return "image/jpeg"
+	}
 }
 
 // ---------- ListConversationMessages ----------

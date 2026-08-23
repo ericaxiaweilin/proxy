@@ -26,7 +26,7 @@ export class MediaClient {
     now?: () => Date;
   }) {}
 
-  public async uploadImage(image: UploadableImage): Promise<{ mediaAssetId: string }> {
+  public async uploadImage(image: UploadableImage): Promise<{ mediaAssetId: string; storageKey: string }> {
     const mimeType = image.mimeType || "image/jpeg";
     const storageKey = `${this.nextId("image")}${extensionFor(mimeType)}`;
     const created = await this.command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, {
@@ -54,7 +54,7 @@ export class MediaClient {
 
     await this.command("CompleteMediaUpload", { type: "MediaAsset", id: mediaAssetId }, { originalStorageKey: storageKey });
     await this.command("ProcessMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { originalPath: "" });
-    return { mediaAssetId };
+    return { mediaAssetId, storageKey };
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<Record<string, unknown>> {

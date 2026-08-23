@@ -32,15 +32,21 @@ export class ConversationClient {
     return result;
   }
 
-  public async sendMessage(conversationId: string, body: string, assistantMode?: string, temporaryUIResponseId?: string): Promise<Record<string, unknown>> {
+  public async sendMessage(conversationId: string, body: string, assistantMode?: string, temporaryUIResponseId?: string, mediaRef?: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
+    const isImage = Boolean(mediaRef);
     const result = await this.sendCommand(session, "SendMessage", { type: "Conversation", id: conversationId }, {
-      messageType: "TEXT",
-      body,
+      messageType: isImage ? "IMAGE" : "TEXT",
+      body: body || (isImage ? " " : ""),
+      ...(mediaRef ? { mediaRef } : {}),
       ...(assistantMode ? { assistantMode } : {}),
       ...(temporaryUIResponseId ? { temporaryUIResponseId } : {})
     });
     return result;
+  }
+
+  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, caption?.trim() || " ", undefined, undefined, mediaRef);
   }
 
   public async listMessages(conversationId: string): Promise<Record<string, unknown>> {
