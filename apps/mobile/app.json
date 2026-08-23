@@ -15,6 +15,7 @@
         "NSPhotoLibraryUsageDescription": "Proxy 读取你主动选择的照片并添加到需求或对话。",
         "NSMicrophoneUsageDescription": "Proxy 使用麦克风将你的语音转换为输入文字。",
         "NSSpeechRecognitionUsageDescription": "Proxy 使用系统语音识别将你的语音转换为输入文字。",
+        "LSApplicationQueriesSchemes": ["googlegmail", "googlechrome", "googlechrome-x-callback"],
         "UIBackgroundModes": [
           "fetch",
           "remote-notification"

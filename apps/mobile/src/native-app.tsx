@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-shell";
 import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
@@ -138,6 +138,24 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
         platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
       });
       setChallengeId(result.challengeId);
+      // 谷歌邮箱自动跳转：Gmail App 优先，失败回退 Chrome 浏览器
+      if (isEmail) {
+        const gmailUrl = "googlegmail://";
+        const chromeUrl = "googlechrome://mail.google.com";
+        const webUrl = "https://mail.google.com";
+        try {
+          if (await Linking.canOpenURL(gmailUrl)) {
+            await Linking.openURL(gmailUrl);
+          } else if (await Linking.canOpenURL(chromeUrl)) {
+            await Linking.openURL(chromeUrl);
+          } else {
+            await Linking.openURL(webUrl);
+          }
+        } catch {
+          // 静默：即使无法跳转也不阻塞验证码输入，模拟环境验证码固定 123456
+          await Linking.openURL(webUrl).catch(() => undefined);
+        }
+      }
     } catch {
       setError(authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。");
     } finally {
