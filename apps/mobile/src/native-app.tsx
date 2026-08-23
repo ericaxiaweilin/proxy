@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
-import * as WebBrowser from "expo-web-browser";
-import * as Google from "expo-auth-session/providers/google";
 import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-shell";
 import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
@@ -16,8 +14,6 @@ import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
-
-WebBrowser.maybeCompleteAuthSession();
 
 const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, right: 0, top: 0 };
 
@@ -124,38 +120,6 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [googleReq, googleRes, googlePromptAsync] = Google.useAuthRequest({
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID as string,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID as string,
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID as string,
-    scopes: ["openid", "profile", "email"],
-    // 未配真实 ClientID 时走 Expo 代理，全球 Gmail 仍可一键（开发阶段）
-    useProxy: true,
-    projectNameForProxy: "@proxy/proxy",
-  } as any);
-
-  useEffect(() => {
-    if (!googleRes) return;
-    if (googleRes.type === "success" && googleRes.authentication?.idToken) {
-      void (async () => {
-        setBusy(true);
-        setError(undefined);
-        try {
-          const loginClient = await getNativeLoginClient();
-          await loginClient.authenticateWithGoogle(googleRes.authentication!.idToken!, Platform.OS === "ios" ? "IOS" : "ANDROID");
-          onAuthenticated();
-        } catch (e) {
-          setError(e instanceof Error ? e.message : "Google 登录失败，请重试或用手机号/邮箱");
-        } finally {
-          setBusy(false);
-        }
-      })();
-    } else if (googleRes.type === "error") {
-      setError("Google 授权失败，请重试");
-    } else if (googleRes.type === "dismiss") {
-      setError(undefined);
-    }
-  }, [googleRes, onAuthenticated]);
 
   async function requestChallenge(): Promise<void> {
     setBusy(true);
@@ -276,30 +240,13 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
         ) : (
           <>
             <View style={styles.googleButtonRow}>
-              <Pressable
-                disabled={busy}
-                onPress={async () => {
-                  setError(undefined);
-                  setAuthChannel("EMAIL");
-                  if (googleReq) {
-                    try {
-                      await googlePromptAsync();
-                      return;
-                    } catch {
-                      setError("无法启动 Google 授权，已切邮箱验证码");
-                    }
-                  }
-                  await Linking.openURL("https://mail.google.com").catch(() => undefined);
-                }}
-                style={[styles.googleButton, authChannel === "EMAIL" && styles.googleButtonActive, busy && styles.disabled]}
-              >
-                <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 继续</Text>
+              <Pressable onPress={() => { setAuthChannel("EMAIL"); setError(undefined); Linking.openURL("https://mail.google.com").catch(() => undefined); }} style={[styles.googleButton, authChannel === "EMAIL" && styles.googleButtonActive]}>
+                <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 邮箱继续</Text>
               </Pressable>
               <Pressable onPress={() => { setAuthChannel("SMS"); setError(undefined); }} style={[styles.googleButton, authChannel === "SMS" && styles.googleButtonActive, styles.googleButtonSmall]}>
                 <Text style={styles.googleLabel}>手机</Text>
               </Pressable>
             </View>
-            <Text style={styles.oauthHint}>Google 将在系统浏览器完成授权，成功后自动返回 Proxy（全球 Gmail 通用）。未配置时可切邮箱/手机用 123456。</Text>
             {authChannel === "EMAIL" ? (
               <>
                 <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整 Gmail（自动补全 @gmail.com）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
