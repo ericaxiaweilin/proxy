@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
 import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-shell";
 import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
@@ -194,8 +194,11 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
   }
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.card}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.screenAvoid}>
+      <ScrollView contentContainerStyle={styles.screenScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.screenInner}>
+            <View style={styles.card}>
         <BrandMark />
         <View style={styles.authTabs}>
           <Pressable onPress={() => { setAuthMode("login"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "login" && styles.authTabActive]}>
@@ -212,11 +215,14 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
             <Text style={styles.helper}>验证码已发送至 {authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : `+84 ${phone.replace(/\D/g, "")}`}</Text>
             <TextInput
               autoFocus
+              blurOnSubmit
               keyboardType="number-pad"
               maxLength={6}
               onChangeText={setCode}
+              onSubmitEditing={() => Keyboard.dismiss()}
               placeholder="输入验证码"
               placeholderTextColor="#A9A2B0"
+              returnKeyType="done"
               style={styles.input}
               value={code}
             />
@@ -243,7 +249,7 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
             </View>
             {authChannel === "EMAIL" ? (
               <>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" keyboardType="email-address" onChangeText={setGoogleEmail} placeholder="用户名或完整 Gmail（自动补全 @gmail.com）" placeholderTextColor="#A9A2B0" style={styles.phoneInput} value={googleEmail} /></View>
+                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整 Gmail（自动补全 @gmail.com）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
                 <View style={[styles.button, busy || googleEmail.trim().length === 0 ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
                   <Pressable disabled={busy || googleEmail.trim().length === 0} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
@@ -254,7 +260,7 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
             ) : (
               <>
                 <Text style={styles.divider}>或使用越南手机号</Text>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput keyboardType="phone-pad" onChangeText={setPhone} placeholder="请输入手机号" placeholderTextColor="#A9A2B0" style={styles.phoneInput} value={phone} /></View>
+                <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="请输入手机号" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
                 <View style={[styles.button, busy || phone.replace(/\D/g, "").length < 8 ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
                   <Pressable disabled={busy || phone.replace(/\D/g, "").length < 8} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
@@ -271,8 +277,11 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
           </>
         )}
         {error ? <Text style={styles.error}>{error}</Text> : null}
-      </View>
-    </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -299,6 +308,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24
   },
+  screenAvoid: { backgroundColor: color.offWhite, flex: 1 },
+  screenScroll: { flexGrow: 1, justifyContent: "center", padding: 24 },
+  screenInner: { alignItems: "center", flex: 1, justifyContent: "center" },
   card: {
     alignItems: "center",
     backgroundColor: color.white,
