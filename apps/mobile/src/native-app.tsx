@@ -113,6 +113,7 @@ function BrandMark({ large = false }: { large?: boolean }): React.JSX.Element {
 
 function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () => void }): React.JSX.Element {
   const [challengeId, setChallengeId] = useState<string>();
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [phone, setPhone] = useState("");
   const [googleEmail, setGoogleEmail] = useState("");
   const [authChannel, setAuthChannel] = useState<"SMS" | "EMAIL">("SMS");
@@ -196,8 +197,16 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
     <View style={styles.screen}>
       <View style={styles.card}>
         <BrandMark />
-        <Text style={styles.title}>继续使用 Proxy</Text>
-        <Text style={styles.secondary}>手机号验证后自动完成登录或注册。</Text>
+        <View style={styles.authTabs}>
+          <Pressable onPress={() => { setAuthMode("login"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "login" && styles.authTabActive]}>
+            <Text style={[styles.authTabText, authMode === "login" && styles.authTabTextActive]}>登录</Text>
+          </Pressable>
+          <Pressable onPress={() => { setAuthMode("register"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "register" && styles.authTabActive]}>
+            <Text style={[styles.authTabText, authMode === "register" && styles.authTabTextActive]}>注册</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.title}>{authMode === "login" ? "欢迎回来" : "创建账户"}</Text>
+        <Text style={styles.secondary}>{authMode === "login" ? "手机号/邮箱验证登录" : "手机号/邮箱验证后自动注册，默认 Individual Requester"}</Text>
         {challengeId ? (
           <>
             <Text style={styles.helper}>验证码已发送至 {authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : `+84 ${phone.replace(/\D/g, "")}`}</Text>
@@ -256,6 +265,9 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
             )}
             <Pressable disabled={busy} onPress={() => void continueAsGuest()} style={styles.guestButton}><Text style={styles.guestText}>暂不登录，直接使用 Proxy</Text></Pressable>
             <Text style={styles.oauthHint}>访客会保存当前设备、会话与使用记录；需要发布、交易或长期保存时再升级登录。</Text>
+            <Pressable onPress={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(undefined); }} style={styles.switchAuthRow}>
+              <Text style={styles.switchAuthText}>{authMode === "login" ? "没有账号？去注册" : "已有账号？去登录"}</Text>
+            </Pressable>
           </>
         )}
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -338,6 +350,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     width: "100%"
   },
+  authTabs: { flexDirection: "row", backgroundColor: color.surface, borderRadius: 12, padding: 3, marginTop: 14, width: "100%" },
+  authTab: { flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 8 },
+  authTabActive: { backgroundColor: color.white, ...shadows.card },
+  authTabText: { color: color.muted, fontSize: 14, fontWeight: "700" },
+  authTabTextActive: { color: color.ink },
+  switchAuthRow: { alignItems: "center", marginTop: 12, paddingVertical: 6 },
+  switchAuthText: { color: color.violet, fontSize: 13, fontWeight: "700" },
   googleButton: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "center", marginTop: 20, minHeight: 50, width: "100%" },
   googleButtonRow: { flexDirection: "row", gap: 8, width: "100%" },
   googleButtonActive: { borderColor: color.violet, backgroundColor: "#F0EBF5" },
