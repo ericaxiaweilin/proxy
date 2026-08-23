@@ -102,6 +102,20 @@ export class LoginClient {
     return session;
   }
 
+  public async authenticateWithGoogle(idToken: string, platform: "ANDROID" | "IOS"): Promise<StoredSession> {
+    const result = await this.sendCommand("AuthenticateWithGoogle", { type: "Session", id: "new" }, {
+      idToken,
+      deviceId: this.input.deviceId,
+      platform
+    });
+    if (result.outcome !== "ACCEPTED") throw new LoginProtocolError(result.error?.messageKey ?? "Google authentication rejected");
+    const auth = parseSessionAuthTokens(result.auth);
+    if (!auth) throw new LoginProtocolError("Google authentication did not return valid auth tokens");
+    const session: StoredSession = { userAccountId: auth.userAccountId, auth, principal: auth.principal };
+    await this.input.secureSessionStore.write(session);
+    return session;
+  }
+
   public async verifyChallenge(challengeId: string, code: string): Promise<CommandResult> {
     const result = await this.sendCommand("VerifyLoginChallenge", {
       type: "LoginChallenge",

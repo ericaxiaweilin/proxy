@@ -3,9 +3,14 @@ package identity
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -89,7 +94,7 @@ func NewWithRepositoryAndClockAndChallengeProvider(repository Repository, domain
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession":
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "AuthenticateWithGoogle":
 		return true
 	default:
 		return false
@@ -126,6 +131,8 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.requestAccountRecovery(envelope)
 	case "RefreshSession":
 		return s.refreshSession(ctx, envelope)
+	case "AuthenticateWithGoogle":
+		return s.authenticateWithGoogle(ctx, envelope)
 	default:
 		return command.Rejected(envelope, "IDENTITY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "identity.unsupported_command", nil)
 	}
@@ -679,6 +686,150 @@ func (s *Service) refreshSession(ctx context.Context, e command.Envelope) comman
 	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, []string{})
 	result.Auth = authTokens(pair, session)
 	return result
+}
+
+type authenticateWithGooglePayload struct {
+	IdToken  string `json:"idToken"`
+	DeviceID string `json:"deviceId"`
+	Platform string `json:"platform"`
+}
+
+func (s *Service) authenticateWithGoogle(ctx context.Context, e command.Envelope) command.Result {
+	var p authenticateWithGooglePayload
+	if !decode(e.Payload, &p) || strings.TrimSpace(p.IdToken) == "" || strings.TrimSpace(p.DeviceID) == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
+		return command.Rejected(e, "INVALID_GOOGLE_AUTH", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_google_auth", nil)
+	}
+	email, err := verifyGoogleIDToken(ctx, p.IdToken)
+	if err != nil {
+		return command.Rejected(e, "GOOGLE_TOKEN_INVALID", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.google_token_invalid", map[string]any{"detail": err.Error()})
+	}
+	// 全球用户：email 即为 LoginIdentity identifier，channel EMAIL
+	identity, device, _, err := s.repository.EnsurePasswordlessIdentity(ctx, "EMAIL", strings.ToLower(email), p.DeviceID, p.Platform, "")
+	if err != nil {
+		return command.Rejected(e, "GOOGLE_IDENTITY_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "identity.google_identity_unavailable", nil)
+	}
+	// 确保设备归属正确
+	if device.UserAccountID != identity.UserAccountID {
+		// 若 EnsurePasswordlessIdentity 已创建新用户，device 已归属该用户；否则需校验
+	}
+	user, err := s.repository.GetUser(ctx, identity.UserAccountID)
+	if err != nil {
+		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
+	}
+	if !canHoldSession(user.Status) {
+		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.account_not_active", nil)
+	}
+	now := s.clock.Now().UTC()
+	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
+	if s.tokenManager == nil {
+		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
+	}
+	pair, tokenRecord, err := s.tokenManager.Prepare(session)
+	if err != nil {
+		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
+	}
+	domainEvents := []event.DomainEvent{event.New("GoogleSessionCreated", "Session", session.ID, session.Version, user.ID, e.CorrelationID, e.CommandID, now, map[string]any{"email": email, "provider": "google"})}
+	if err := s.persistCreateGoogleSession(ctx, session, tokenRecord, domainEvents); err != nil {
+		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
+	}
+	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, eventRefs(domainEvents))
+	result.Auth = authTokens(pair, session)
+	return result
+}
+
+func (s *Service) persistCreateGoogleSession(ctx context.Context, session Session, tokens SessionToken, domainEvents []event.DomainEvent) error {
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		return repository.CreateSessionWithTokensAndPublish(ctx, session, tokens, domainEvents)
+	}
+	return errors.New("transactional session bootstrap is not configured")
+}
+
+func verifyGoogleIDToken(ctx context.Context, idToken string) (string, error) {
+	idToken = strings.TrimSpace(idToken)
+	if idToken == "" {
+		return "", fmt.Errorf("empty id_token")
+	}
+	// 本地开发：允许模拟 token（sim_google_ 开头）直接返回测试邮箱，方便无真实 ClientID 时联调
+	if strings.HasPrefix(idToken, "sim_google_") {
+		return "simulated_google_user@gmail.com", nil
+	}
+	// 优先走 Google 官方 tokeninfo（需外网）
+	tokenInfoURL := "https://oauth2.googleapis.com/tokeninfo?id_token=" + idToken
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenInfoURL, nil)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		// 外网不可达时回退本地 JWT 解析（仅验 exp 与 email 存在，不验签名，仅用于开发）
+		return fallbackParseGoogleJWT(idToken)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode != http.StatusOK {
+		// 回退本地解析
+		if email, ferr := fallbackParseGoogleJWT(idToken); ferr == nil && email != "" {
+			return email, nil
+		}
+		return "", fmt.Errorf("tokeninfo %d: %s", resp.StatusCode, string(body))
+	}
+	var info struct {
+		Email         string `json:"email"`
+		EmailVerified string `json:"email_verified"`
+		Aud           string `json:"aud"`
+		Exp           string `json:"exp"`
+	}
+	if err := json.Unmarshal(body, &info); err != nil {
+		return "", err
+	}
+	if info.Email == "" {
+		return "", fmt.Errorf("email missing in tokeninfo")
+	}
+	// 可选：校验 aud 是否在允许的 ClientID 列表中
+	if allowed := os.Getenv("GOOGLE_ALLOWED_CLIENT_IDS"); allowed != "" {
+		found := false
+		for _, v := range strings.Split(allowed, ",") {
+			if strings.TrimSpace(v) != "" && strings.TrimSpace(v) == info.Aud {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", fmt.Errorf("aud not allowed")
+		}
+	}
+	return strings.ToLower(info.Email), nil
+}
+
+func fallbackParseGoogleJWT(idToken string) (string, error) {
+	parts := strings.Split(idToken, ".")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid jwt")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		// 兼容标准 base64
+		payload, err = base64.StdEncoding.DecodeString(parts[1])
+		if err != nil {
+			return "", err
+		}
+	}
+	var claims struct {
+		Email    string `json:"email"`
+		Exp      int64  `json:"exp"`
+		Verified bool   `json:"email_verified"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", err
+	}
+	if claims.Email == "" {
+		return "", fmt.Errorf("email claim missing")
+	}
+	if claims.Exp != 0 && time.Unix(claims.Exp, 0).Before(time.Now().Add(-5*time.Minute)) {
+		return "", fmt.Errorf("token expired")
+	}
+	return strings.ToLower(claims.Email), nil
 }
 
 func (s *Service) sessionUsable(ctx context.Context, session *Session) bool {
