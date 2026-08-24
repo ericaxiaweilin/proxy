@@ -78,3 +78,25 @@ func TestInvalidReply(t *testing.T) {
 		t.Fatalf("want INVALID_REPLY, got %s/%+v", r.Outcome, r.Error)
 	}
 }
+
+func TestFeedPreferenceAndReportAreDurableCommands(t *testing.T) {
+	s := New()
+	preference := s.Handle(envelopeFor("RecordFeedPreference", map[string]any{"postId": "post_1", "authorId": "author_1", "action": "REDUCE_AUTHOR"}, "post_1"))
+	if preference.Outcome != "ACCEPTED" || preference.Aggregate.State != "RECORDED" {
+		t.Fatalf("preference: %#v", preference)
+	}
+	report := s.Handle(envelopeFor("ReportPost", map[string]any{"postId": "post_1", "reason": "SPAM"}, "post_1"))
+	if report.Outcome != "ACCEPTED" || report.Aggregate.State != "SUBMITTED" {
+		t.Fatalf("report: %#v", report)
+	}
+}
+
+func TestFeedPreferenceAndReportRejectUnknownValues(t *testing.T) {
+	s := New()
+	if result := s.Handle(envelopeFor("RecordFeedPreference", map[string]any{"postId": "post_1", "action": "DELETE"}, "post_1")); result.Outcome != "REJECTED" {
+		t.Fatalf("unexpected preference result: %#v", result)
+	}
+	if result := s.Handle(envelopeFor("ReportPost", map[string]any{"postId": "post_1", "reason": "DISLIKE"}, "post_1")); result.Outcome != "REJECTED" {
+		t.Fatalf("unexpected report result: %#v", result)
+	}
+}

@@ -239,6 +239,7 @@ export function FeedSurface({
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
   const [engagementError, setEngagementError] = useState<string>();
+  const [engagementNotice, setEngagementNotice] = useState<string>();
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [replying, setReplying] = useState(false);
@@ -272,6 +273,8 @@ export function FeedSurface({
   const [muted, setMuted] = useState(true);
   // 长按减少推荐菜单
   const [contextMenu, setContextMenu] = useState<{ postId: string; x: number; y: number } | null>(null);
+  const [contextActionBusy, setContextActionBusy] = useState(false);
+  const [reportMode, setReportMode] = useState(false);
   const [hiddenPosts, setHiddenPosts] = useState<ReadonlySet<string>>(new Set());
   // 新更新提示：后台刷新检测到新帖时显示
   const [pendingCount, setPendingCount] = useState(0);
@@ -569,6 +572,43 @@ export function FeedSurface({
       setEngagementError("回复没有提交成功，请检查连接后重试。");
     } finally {
       setReplying(false);
+    }
+  }
+
+  async function submitFeedPreference(action: "NOT_INTERESTED" | "REDUCE_TOPIC" | "REDUCE_AUTHOR"): Promise<void> {
+    if (!contextMenu || contextActionBusy) return;
+    const post = posts.find((item) => item.postId === contextMenu.postId);
+    if (!post) return;
+    setContextActionBusy(true);
+    setEngagementError(undefined);
+    setEngagementNotice(undefined);
+    try {
+      await engagement.recordFeedPreference(post.postId, action, post.authorId);
+      if (action === "NOT_INTERESTED") setHiddenPosts((prev) => new Set(prev).add(post.postId));
+      setEngagementNotice(action === "REDUCE_AUTHOR" ? "已记录：将减少推荐此作者。" : action === "REDUCE_TOPIC" ? "已记录：将减少推荐类似内容。" : "已隐藏，并记录到推荐偏好。");
+      setContextMenu(null);
+      setReportMode(false);
+    } catch {
+      setEngagementError("偏好没有保存成功，请检查连接后重试。");
+    } finally {
+      setContextActionBusy(false);
+    }
+  }
+
+  async function submitPostReport(reason: "SPAM" | "HARASSMENT" | "UNSAFE" | "OTHER"): Promise<void> {
+    if (!contextMenu || contextActionBusy) return;
+    setContextActionBusy(true);
+    setEngagementError(undefined);
+    setEngagementNotice(undefined);
+    try {
+      await engagement.reportPost(contextMenu.postId, reason);
+      setEngagementNotice("举报已提交，平台将按审核流程处理。");
+      setContextMenu(null);
+      setReportMode(false);
+    } catch {
+      setEngagementError("举报没有提交成功，请检查连接后重试。");
+    } finally {
+      setContextActionBusy(false);
     }
   }
 
@@ -1022,6 +1062,7 @@ export function FeedSurface({
       ) : null}
 
       {engagementError ? <Text style={styles.engagementError}>{engagementError}</Text> : null}
+      {engagementNotice ? <Text style={styles.engagementNotice}>{engagementNotice}</Text> : null}
       {phase === "LOADING" ? (
         <View style={styles.feedEmpty}>
           <ActivityIndicator color={color.magenta} />
@@ -1175,7 +1216,8 @@ export function FeedSurface({
                   <Text style={styles.postActionText}>分享</Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => setContextMenu({ postId: post.postId, x: 0, y: 0 })}
+                  accessibilityLabel="更多帖子操作"
+                  onPress={() => { setReportMode(false); setContextMenu({ postId: post.postId, x: 0, y: 0 }); }}
                   style={styles.postAction}
                 >
                   <Text style={styles.postActionText}>···</Text>
@@ -1221,30 +1263,27 @@ export function FeedSurface({
       {contextMenu ? (
         <Modal transparent animationType="fade" onRequestClose={() => setContextMenu(null)}>
           <Pressable style={styles.menuOverlay} onPress={() => setContextMenu(null)}>
-            <View style={styles.menuContent}>
-              <Text style={styles.menuTitle}>减少此类内容</Text>
-              <Pressable
-                style={styles.menuItem}
-                onPress={() => {
-                  setHiddenPosts((prev) => new Set([...prev, contextMenu.postId]));
-                  setContextMenu(null);
-                }}
-              >
-                <Text style={styles.menuItemText}>不感兴趣</Text>
-              </Pressable>
-              <Pressable style={styles.menuItem} onPress={() => setContextMenu(null)}>
-                <Text style={styles.menuItemText}>减少这类内容</Text>
-              </Pressable>
-              <Pressable style={styles.menuItem} onPress={() => setContextMenu(null)}>
-                <Text style={styles.menuItemText}>少看这个人</Text>
-              </Pressable>
-              <Pressable style={styles.menuItem} onPress={() => setContextMenu(null)}>
-                <Text style={styles.menuItemText}>举报</Text>
-              </Pressable>
-              <Pressable style={styles.menuCancel} onPress={() => setContextMenu(null)}>
+            <Pressable style={styles.menuContent} onPress={(event) => event.stopPropagation()}>
+              <Text style={styles.menuTitle}>{reportMode ? "举报原因" : "调整推荐"}</Text>
+              {reportMode ? (
+                <>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("SPAM")}><Text style={styles.menuItemText}>垃圾信息或广告</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("HARASSMENT")}><Text style={styles.menuItemText}>骚扰或攻击</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("UNSAFE")}><Text style={styles.menuItemText}>不安全内容</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitPostReport("OTHER")}><Text style={styles.menuItemText}>其他问题</Text></Pressable>
+                </>
+              ) : (
+                <>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("NOT_INTERESTED")}><Text style={styles.menuItemText}>不感兴趣</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("REDUCE_TOPIC")}><Text style={styles.menuItemText}>减少这类内容</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => void submitFeedPreference("REDUCE_AUTHOR")}><Text style={styles.menuItemText}>少看这个人</Text></Pressable>
+                  <Pressable disabled={contextActionBusy} style={styles.menuItem} onPress={() => setReportMode(true)}><Text style={styles.menuItemText}>举报</Text></Pressable>
+                </>
+              )}
+              <Pressable style={styles.menuCancel} onPress={() => { setReportMode(false); setContextMenu(null); }}>
                 <Text style={styles.menuCancelText}>取消</Text>
               </Pressable>
-            </View>
+            </Pressable>
           </Pressable>
         </Modal>
       ) : null}
@@ -1843,6 +1882,7 @@ const styles = StyleSheet.create({
   postAvatarText: { color: color.ink, fontSize: 15, fontWeight: "700" },
   scenarioBadge: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 20, justifyContent: "center", width: 20 },
   engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
+  engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },
   postName: { color: color.ink, fontSize: 11, fontWeight: "700" },
   postMeta: { color: color.muted, fontSize: 11, marginTop: 1 },

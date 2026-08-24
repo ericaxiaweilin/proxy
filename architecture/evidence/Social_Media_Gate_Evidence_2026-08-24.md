@@ -5,9 +5,9 @@ Scope: Gate 3 Feed/Gallery and Gate 4 Composer on the local P0 stack.
 ## Automated contracts
 
 - `pnpm --filter @proxy/mobile typecheck`: passed.
-- `pnpm --filter @proxy/mobile test`: 22 files / 64 tests passed.
+- `pnpm --filter @proxy/mobile test`: 23 files / 65 tests passed.
 - `go test ./...`: passed, including resumable-upload restart/gap/replay checks and SocialSpace expiry/membership isolation.
-- `apps/api-go/scripts/fresh_db_test.sh`: passed from an empty PostgreSQL database through migration `014_social_space.sql`; production and fresh schemas both reported 38 tables.
+- `apps/api-go/scripts/fresh_db_test.sh`: passed from an empty PostgreSQL database through migration `015_feed_preferences_reports.sql`; production and fresh schemas both reported 40 tables.
 - Real command replay: first `CreatePost` returned `ACCEPTED`; the identical envelope returned `ALREADY_APPLIED`; both returned Post `post_498411d9d6da8bebb82e9dff`.
 
 ## iPhone 15 simulator flow
@@ -78,7 +78,15 @@ Scope: Gate 3 Feed/Gallery and Gate 4 Composer on the local P0 stack.
 - Joined `河内摄影`, terminated/relaunched the App, reopened Community and confirmed `已加入` persisted. Membership is actor-scoped and seeded community content comes from migration `014_social_space.sql`.
 - Community detail discussion cards are currently read-model projections. Creating community posts and moderation are separate Gate work and are not claimed complete.
 
+## Feed preference and reporting audit
+
+- The `...` menu no longer contains close-only placeholders. `不感兴趣`, `减少这类内容` and `少看这个人` send authenticated `RecordFeedPreference` commands; the server stores actor-scoped facts for downstream ranking instead of embedding recommendation logic in the App.
+- `举报` now opens a short reason selector rather than immediately pretending to submit. Reasons are server-enforced to SPAM / HARASSMENT / UNSAFE / OTHER and create a `PostReport` in SUBMITTED state.
+- Simulator selected `垃圾信息或广告`; PostgreSQL confirmed `SPAM|SUBMITTED`. The UI showed `举报已提交，平台将按审核流程处理。` only after the server accepted it.
+
 ## Development endpoint recurrence
 
 - The apparent feed API outage was caused by Metro loading stale `.env` address `192.168.1.49` after the Mac moved to `192.168.110.2`.
 - Restarted Metro through `pnpm --filter @proxy/mobile ios:dev`, which resolves the current LAN address and exported `EXPO_PUBLIC_API_BASE_URL=http://192.168.110.2:4100`; feed reads recovered without code rollback.
+- A second recurrence exposed the durable cause: the Mac moved from `192.168.110.2` to hotspot address `172.20.10.9` while Metro remained alive. `dev-ios.sh` now exports the stable Bonjour endpoint `http://Thanhs-MacBook-Air.local:4100`, valid for simulator and same-network physical iPhone, so ordinary Wi-Fi/hotspot address changes no longer stale the API endpoint.
+- A warning banner appeared once during Fast Refresh while multiple runtime changes were applied. A full terminate/relaunch on the new Metro session reproduced neither the banner nor a runtime warning; release evidence must still use a clean launch, not a hot-refresh state.

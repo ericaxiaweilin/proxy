@@ -52,6 +52,14 @@ export class EngagementClient {
     await this.command("BookmarkPost", { type: "Post", id: postId }, { postId });
   }
 
+  public async recordFeedPreference(postId: string, action: "NOT_INTERESTED" | "REDUCE_TOPIC" | "REDUCE_AUTHOR", authorId?: string): Promise<void> {
+    await this.command("RecordFeedPreference", { type: "Post", id: postId }, { postId, action, ...(authorId ? { authorId } : {}) });
+  }
+
+  public async reportPost(postId: string, reason: "SPAM" | "HARASSMENT" | "UNSAFE" | "OTHER"): Promise<void> {
+    await this.command("ReportPost", { type: "Post", id: postId }, { postId, reason });
+  }
+
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {
     const session = await this.requireSession();
     const envelope = {

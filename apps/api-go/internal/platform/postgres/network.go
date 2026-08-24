@@ -441,6 +441,20 @@ func (r *EngagementRepository) AddBookmark(ctx context.Context, b engagement.Boo
 	return err
 }
 
+func (r *EngagementRepository) AddFeedPreference(ctx context.Context, preference engagement.FeedPreference) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO engagement.feed_preferences (id, actor_id, post_id, author_id, action, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)`, preference.ID, preference.ActorID, preference.PostID, preference.AuthorID, preference.Action, preference.CreatedAt)
+	return err
+}
+
+func (r *EngagementRepository) AddPostReport(ctx context.Context, report engagement.PostReport) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO engagement.post_reports (id, actor_id, post_id, reason, state, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6)`, report.ID, report.ActorID, report.PostID, report.Reason, report.State, report.CreatedAt)
+	return err
+}
+
 func (r *EngagementRepository) Engagement(ctx context.Context, postID string) (engagement.PostEngagement, error) {
 	e := engagement.PostEngagement{PostID: postID}
 	var reactions, replies, reposts int

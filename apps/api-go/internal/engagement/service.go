@@ -59,6 +59,24 @@ type Bookmark struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type FeedPreference struct {
+	ID        string    `json:"preferenceId"`
+	ActorID   string    `json:"actorId"`
+	PostID    string    `json:"postId"`
+	AuthorID  string    `json:"authorId,omitempty"`
+	Action    string    `json:"action"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type PostReport struct {
+	ID        string    `json:"reportId"`
+	ActorID   string    `json:"actorId"`
+	PostID    string    `json:"postId"`
+	Reason    string    `json:"reason"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // PostEngagement 是某帖子的互动汇总（读取视图）。
 type PostEngagement struct {
 	PostID     string `json:"postId"`
@@ -75,28 +93,34 @@ type Repository interface {
 	AddReply(ctx context.Context, r Reply) error
 	AddRepost(ctx context.Context, r Repost) error
 	AddBookmark(ctx context.Context, b Bookmark) error
+	AddFeedPreference(ctx context.Context, preference FeedPreference) error
+	AddPostReport(ctx context.Context, report PostReport) error
 	Engagement(ctx context.Context, postID string) (PostEngagement, error)
 }
 
 var ErrPostNotTracked = errors.New("post not tracked")
 
 type MemoryRepository struct {
-	mu        sync.Mutex
-	follows   map[string]Follow
-	reactions map[string]Reaction
-	replies   map[string]Reply
-	reposts   map[string]Repost
-	bookmarks map[string]Bookmark
-	events    []event.DomainEvent
+	mu          sync.Mutex
+	follows     map[string]Follow
+	reactions   map[string]Reaction
+	replies     map[string]Reply
+	reposts     map[string]Repost
+	bookmarks   map[string]Bookmark
+	preferences map[string]FeedPreference
+	reports     map[string]PostReport
+	events      []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		follows:   make(map[string]Follow),
-		reactions: make(map[string]Reaction),
-		replies:   make(map[string]Reply),
-		reposts:   make(map[string]Repost),
-		bookmarks: make(map[string]Bookmark),
+		follows:     make(map[string]Follow),
+		reactions:   make(map[string]Reaction),
+		replies:     make(map[string]Reply),
+		reposts:     make(map[string]Repost),
+		bookmarks:   make(map[string]Bookmark),
+		preferences: make(map[string]FeedPreference),
+		reports:     make(map[string]PostReport),
 	}
 }
 
@@ -132,6 +156,20 @@ func (r *MemoryRepository) AddBookmark(_ context.Context, b Bookmark) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.bookmarks[b.ID] = b
+	return nil
+}
+
+func (r *MemoryRepository) AddFeedPreference(_ context.Context, preference FeedPreference) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.preferences[preference.ID] = preference
+	return nil
+}
+
+func (r *MemoryRepository) AddPostReport(_ context.Context, report PostReport) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reports[report.ID] = report
 	return nil
 }
 
@@ -176,7 +214,7 @@ func NewWithRepository(repository Repository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "FollowProfile", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement":
+	case "FollowProfile", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost":
 		return true
 	default:
 		return false
@@ -203,6 +241,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.bookmark(ctx, e)
 	case "GetPostEngagement":
 		return s.engagement(ctx, e)
+	case "RecordFeedPreference":
+		return s.recordFeedPreference(ctx, e)
+	case "ReportPost":
+		return s.reportPost(ctx, e)
 	default:
 		return command.Rejected(e, "ENGAGEMENT_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "engagement.unsupported_command", nil)
 	}
@@ -345,6 +387,49 @@ func (s *Service) engagement(ctx context.Context, e command.Envelope) command.Re
 	return acceptedWithPayload(e, "Post", postID, 1, "ENGAGEMENT", map[string]any{
 		"engagement": eng,
 	}, nil)
+}
+
+func (s *Service) recordFeedPreference(ctx context.Context, e command.Envelope) command.Result {
+	var payload struct {
+		PostID   string `json:"postId"`
+		AuthorID string `json:"authorId"`
+		Action   string `json:"action"`
+	}
+	if !decode(e.Payload, &payload) || payload.PostID == "" || !oneOf(payload.Action, "NOT_INTERESTED", "REDUCE_TOPIC", "REDUCE_AUTHOR") {
+		return command.Rejected(e, "INVALID_FEED_PREFERENCE", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_feed_preference", nil)
+	}
+	if payload.Action == "REDUCE_AUTHOR" && payload.AuthorID == "" {
+		return command.Rejected(e, "INVALID_FEED_PREFERENCE", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_feed_preference", nil)
+	}
+	preference := FeedPreference{ID: newID("pref_"), ActorID: e.Actor.ID, PostID: payload.PostID, AuthorID: payload.AuthorID, Action: payload.Action, CreatedAt: s.clock.Now().UTC()}
+	if err := s.repository.AddFeedPreference(ctx, preference); err != nil {
+		return command.Rejected(e, "FEED_PREFERENCE_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.feed_preference_failed", nil)
+	}
+	return command.Accepted(e, "FeedPreference", preference.ID, 1, "RECORDED", nil)
+}
+
+func (s *Service) reportPost(ctx context.Context, e command.Envelope) command.Result {
+	var payload struct {
+		PostID string `json:"postId"`
+		Reason string `json:"reason"`
+	}
+	if !decode(e.Payload, &payload) || payload.PostID == "" || !oneOf(payload.Reason, "SPAM", "HARASSMENT", "UNSAFE", "OTHER") {
+		return command.Rejected(e, "INVALID_POST_REPORT", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_post_report", nil)
+	}
+	report := PostReport{ID: newID("report_"), ActorID: e.Actor.ID, PostID: payload.PostID, Reason: payload.Reason, State: "SUBMITTED", CreatedAt: s.clock.Now().UTC()}
+	if err := s.repository.AddPostReport(ctx, report); err != nil {
+		return command.Rejected(e, "POST_REPORT_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.post_report_failed", nil)
+	}
+	return command.Accepted(e, "PostReport", report.ID, 1, report.State, nil)
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------- helpers ----------
