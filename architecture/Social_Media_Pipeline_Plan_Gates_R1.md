@@ -344,6 +344,7 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 - [x] EXIF orientation、color space、alpha/animated metadata 入库；未知值不猜测。
 - [x] 同字节 PUT 可安全重试，不同字节禁止覆盖 ORIGINAL。
 - [x] iOS/Android 客户端对网络错误、408/425/429/5xx 自动退避重试；4xx 不重试。
+- [x] iOS 上传使用 background URL session，App 暂停时继续传输。
 - [ ] 分片 resumable upload 与后台恢复完成。
 - [ ] 25MB、断网、后台恢复、重复提交测试。
 - [x] ORIGINAL 不可变测试。

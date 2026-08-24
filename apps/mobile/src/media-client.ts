@@ -50,7 +50,9 @@ export class MediaClient {
         uploadType: UploadType.BINARY_CONTENT,
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": mimeType },
         mimeType,
-        sessionType: "foreground"
+        // iOS keeps the native transfer alive while the app is suspended.
+        // Terminated-app recovery still requires the planned resumable upload session.
+        sessionType: "background"
       });
       return response.status;
     });
