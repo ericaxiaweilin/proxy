@@ -291,6 +291,8 @@ type createAssetPayload struct {
 	MediaType          string `json:"mediaType"`
 	OriginalStorageKey string `json:"originalStorageKey"`
 	MimeType           string `json:"mimeType"`
+	Width              int    `json:"width"`
+	Height             int    `json:"height"`
 }
 
 func (s *Service) createAsset(ctx context.Context, e command.Envelope) command.Result {
@@ -309,6 +311,8 @@ func (s *Service) createAsset(ctx context.Context, e command.Envelope) command.R
 		MediaType:          p.MediaType,
 		OriginalStorageKey: p.OriginalStorageKey,
 		MimeType:           p.MimeType,
+		Width:              p.Width,
+		Height:             p.Height,
 		ProcessingStatus:   "UPLOADING",
 		CreatedAt:          now,
 		UpdatedAt:          now,

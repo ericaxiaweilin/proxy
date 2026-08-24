@@ -32,7 +32,9 @@ export class MediaClient {
     const created = await this.command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, {
       mediaType: "IMAGE",
       originalStorageKey: storageKey,
-      mimeType
+      mimeType,
+      width: image.width,
+      height: image.height
     });
     const mediaAssetId = stringField(created, "mediaAssetId");
     const uploadUrl = stringField(created, "uploadUrl");

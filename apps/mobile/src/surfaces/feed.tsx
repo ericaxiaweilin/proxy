@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import ImageViewing from "react-native-image-viewing";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as ImagePicker from "expo-image-picker";
 import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
@@ -371,8 +372,14 @@ export function FeedSurface({
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) { setComposerError(source === "camera" ? "需要相机权限才能拍照。" : "需要照片权限才能选择图片。"); return; }
     const result = source === "camera"
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.85 })
-      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85, allowsMultipleSelection: true, selectionLimit: Math.max(1, 6 - draftImages.length) });
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 1 })
+      : await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ["images"],
+          quality: 1,
+          allowsMultipleSelection: true,
+          selectionLimit: Math.max(1, 6 - draftImages.length),
+          preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current
+        });
     if (result.canceled) return;
     const selected = result.assets.map((asset) => ({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) }));
     setDraftImages((current) => [...current, ...selected].slice(0, 6));
@@ -746,17 +753,11 @@ export function FeedSurface({
                   onToggleMute={() => setMuted((prev) => !prev)}
                 />
               ) : items.length === 1 && items[0] ? (
-                (() => {
-                  const item = items[0];
-                  return (
-                    <Pressable onPress={() => setViewer({ postId: post.postId, index: 0 })}>
-                      <Image
-                        source={{ uri: localNet.resolveMediaUrl(item.thumbnailUrl ?? "") }}
-                        style={{ backgroundColor: "#2A2135", borderRadius: 14, height: 156, width: "100%" }}
-                      />
-                    </Pressable>
-                  );
-                })()
+                <SinglePostImage
+                  item={items[0]}
+                  resolveUrl={(path) => localNet.resolveMediaUrl(path)}
+                  onPress={() => setViewer({ postId: post.postId, index: 0 })}
+                />
               ) : null}
 
               {/* 基线 .contextrefs：上下文标签 chips（服务端 contextRefs），首个为 strong */}
@@ -839,14 +840,12 @@ export function FeedSurface({
       {viewer && viewerPost && viewerItems[viewer.index] ? (
         <MediaViewer
           key={`${viewer.postId}_${viewer.index}`}
-          item={viewerItems[viewer.index] as FeedMediaItem}
-          counter={`${(viewer.index ?? 0) + 1}/${viewerItems.length}`}
+          items={viewerItems}
+          index={viewer.index}
           author={authorName(viewerPost)}
           resolveUrl={(path) => localNet.resolveMediaUrl(path)}
           onNavigate={(next) => setViewer({ postId: viewer.postId, index: next })}
           onClose={() => setViewer(null)}
-          hasPrev={(viewer.index ?? 0) > 0}
-          hasNext={(viewer.index ?? 0) < viewerItems.length - 1}
         />
       ) : null}
 
@@ -910,62 +909,75 @@ function railWidth(item: FeedMediaItem): number {
   return Math.max(110, Math.min(230, Math.round(156 * aspect)));
 }
 
-// 全屏查看器：视频用 expo-video 播服务端 playbackUrl；图片展示 thumbnailUrl。
+// 单图不使用固定高度：常见比例按原比例展示；超长/超宽图限制卡片高度并 contain，
+// 避免默认 Feed 裁掉脸或身体。点击后再进入原比例高清查看。
+function SinglePostImage({ item, resolveUrl, onPress }: {
+  item: FeedMediaItem;
+  resolveUrl: (path: string) => string;
+  onPress: () => void;
+}): React.JSX.Element {
+  const declaredAspect = item.aspectRatio > 0
+    ? item.aspectRatio
+    : item.width > 0 && item.height > 0
+      ? item.width / item.height
+      : 0;
+  const [loadedAspect, setLoadedAspect] = useState(0);
+  const sourceAspect = declaredAspect || loadedAspect || 4 / 3;
+  const displayAspect = Math.max(4 / 5, Math.min(1.91, sourceAspect));
+  const needsLetterbox = Math.abs(displayAspect - sourceAspect) > 0.01;
+  return (
+    <Pressable accessibilityLabel="查看原图" onPress={onPress} style={[styles.singleMediaStage, { aspectRatio: displayAspect }]}>
+      <Image
+        source={{ uri: resolveUrl(item.thumbnailUrl ?? item.playbackUrl ?? "") }}
+        onLoad={(event) => {
+          const source = event.nativeEvent.source;
+          if (!declaredAspect && source.width > 0 && source.height > 0) setLoadedAspect(source.width / source.height);
+        }}
+        resizeMode={needsLetterbox ? "contain" : "cover"}
+        style={styles.singleMediaImage}
+      />
+    </Pressable>
+  );
+}
+
+// 图片查看器加载服务端原始文件（playbackUrl 对 IMAGE 指向原文件），缩略图不再被放大。
+// 成熟开源查看器负责 iOS/Android 双指缩放、双击缩放、左右翻页和下滑关闭。
 function MediaViewer({
-  item,
-  counter,
+  items,
+  index,
   author,
   resolveUrl,
   onNavigate,
-  onClose,
-  hasPrev,
-  hasNext
+  onClose
 }: {
-  item: FeedMediaItem;
-  counter: string;
+  items: FeedMediaItem[];
+  index: number;
   author: string;
   resolveUrl: (path: string) => string;
   onNavigate: (next: number) => void;
   onClose: () => void;
-  hasPrev: boolean;
-  hasNext: boolean;
 }): React.JSX.Element {
+  const sources = items.map((item) => ({
+    uri: resolveUrl(item.mediaType === "IMAGE" ? (item.playbackUrl ?? item.thumbnailUrl ?? "") : (item.thumbnailUrl ?? ""))
+  }));
   return (
-    <Modal transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.viewerRoot}>
+    <ImageViewing
+      images={sources}
+      imageIndex={index}
+      visible
+      backgroundColor="#050507"
+      onRequestClose={onClose}
+      onImageIndexChange={onNavigate}
+      HeaderComponent={({ imageIndex }) => (
         <View style={styles.viewerTop}>
-          <Text style={styles.viewerCounter}>{counter} · {author}</Text>
-          <Pressable onPress={onClose} style={styles.viewerClose}>
+          <Text style={styles.viewerCounter}>{imageIndex + 1}/{items.length} · {author}</Text>
+          <Pressable accessibilityLabel="关闭原图" onPress={onClose} style={styles.viewerClose}>
             <Text style={styles.viewerCloseText}>×</Text>
           </Pressable>
         </View>
-        <View style={styles.viewerStage}>
-          {hasPrev ? (
-            <Pressable onPress={() => onNavigate((viewerIndexFromCounter(counter) ?? 1) - 1)} style={styles.viewerNav}>
-              <Text style={styles.viewerNavText}>‹</Text>
-            </Pressable>
-          ) : null}
-          {item.mediaType === "VIDEO" && item.playbackUrl ? (
-            <Image source={{ uri: resolveUrl(item.thumbnailUrl ?? "") }} style={{ backgroundColor: "#0F0C14", borderRadius: 16, flex: 1, height: 380 }} resizeMode="contain" />
-          ) : (
-            <Image source={{ uri: resolveUrl(item.thumbnailUrl ?? "") }} style={{ backgroundColor: "#0F0C14", borderRadius: 16, flex: 1, height: 380 }} resizeMode="contain" />
-          )}
-          {hasNext ? (
-            <Pressable onPress={() => onNavigate((viewerIndexFromCounter(counter) ?? 0) + 1)} style={styles.viewerNav}>
-              <Text style={styles.viewerNavText}>›</Text>
-            </Pressable>
-          ) : null}
-        </View>
-        <Text style={styles.viewerCaption}>{author} · {item.mediaType === "VIDEO" ? "视频（服务端 playbackUrl）" : "图片（服务端 thumbnailUrl）"}</Text>
-      </View>
-    </Modal>
+      )}
+    />
   );
-}
-
-function viewerIndexFromCounter(counter: string): number | undefined {
-  const head = counter.split("/")[0];
-  const parsed = Number(head);
-  return Number.isFinite(parsed) ? parsed - 1 : undefined;
 }
 
 // X 式内联视频卡：滑近视口中心自动播（默认静音）、滑出即停；轻点暂停/继续，角标切静音。
@@ -1341,6 +1353,16 @@ const styles = StyleSheet.create({
   },
   videoMuteText: { fontSize: 11 },
   mediaRail: { flexDirection: "row", marginVertical: 8 },
+  singleMediaStage: {
+    alignItems: "center",
+    backgroundColor: "#17131F",
+    borderRadius: 14,
+    justifyContent: "center",
+    marginVertical: 8,
+    overflow: "hidden",
+    width: "100%"
+  },
+  singleMediaImage: { height: "100%", width: "100%" },
   railAsset: {
     backgroundColor: "#2A2135",
     borderRadius: 14,
