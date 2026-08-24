@@ -235,6 +235,12 @@ components:
             - ReleasePayout
             - CheckInOrder
             - SubmitEvidence
+            - CreateObservationSet
+            - RecordOutcomeObservation
+            - FinalizeObservationSet
+            - CreateOutcomeComparison
+            - ConfirmOutcomeLearning
+            - DismissOutcomeLearning
             - DummyOther # placeholder to keep enum open for additive field evolution
         commandVersion: { type: integer, minimum: 1 }
         actor:
