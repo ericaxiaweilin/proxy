@@ -11,6 +11,8 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { color, shadows } from "../theme";
+import { CommunityHub } from "./community";
+import { StatusFeed } from "./status";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情报/行业信息";
@@ -356,6 +358,9 @@ export function FeedSurface({
           </Pressable>
         </View>
       </View>
+
+      <StatusFeed onReply={onOpenChat} />
+      <CommunityHub />
 
       {/* R15.3 r153search：🔍 + input + › */}
       <Pressable style={styles.r153search}>

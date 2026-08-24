@@ -216,6 +216,10 @@ export function AppShell({
                 setHomeAssistant(undefined);
                 openMarket({ tab: "OPPORTUNITY" });
               }}
+              onOpenFeed={() => {
+                setHomeAssistant(undefined);
+                selectTab("FEED");
+              }}
             />
           ) : context === "BUSINESS" ? (
             <BusinessHome

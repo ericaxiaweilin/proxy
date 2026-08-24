@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Proxy · Module Logo Master</title>
+<style>
+:root{
+  --pink:#FF2474;
+  --violet:#8533F5;
+  --lime:#D6FB24;
+  --ink:#17131F;
+  --bg:#F7F4F9;
+  --panel:#FFFFFF;
+  --line:#E6DFEB;
+  --muted:#7E7586;
+  --glyph:26px;
+  --stroke:2.2;
+  --box:56px;
+  --radius:16px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:1120px;margin:0 auto;padding:28px 20px 56px}
+.header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:26px}
+h1{font-size:28px;line-height:34px;margin:0;font-weight:900;letter-spacing:-.035em}
+.spec{font-size:12px;line-height:18px;font-weight:700;color:var(--muted);text-align:right}
+.group{margin-top:26px}
+.group h2{font-size:17px;line-height:24px;font-weight:800;margin:0 0 12px}
+.grid{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px}
+.item{min-height:128px;background:var(--panel);border:1px solid var(--line);border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px 12px;text-align:center}
+.name{margin-top:11px;font-size:14px;line-height:20px;font-weight:800}
+.code{margin-top:2px;font-size:11px;line-height:15px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.icon-box{width:var(--box);height:var(--box);border-radius:var(--radius);display:grid;place-items:center;flex:none}
+.icon-box.brand{background:linear-gradient(135deg,var(--pink),var(--violet));color:#fff}
+.icon-box.lime{background:var(--lime);color:var(--ink)}
+.icon-box.neutral{background:#fff;border:1px solid var(--line);color:var(--ink)}
+.icon-box svg{width:var(--glyph);height:var(--glyph);fill:none;stroke:currentColor;stroke-width:var(--stroke);stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.logo-img{width:56px;height:56px;border-radius:16px;display:block}
+.brand-sizes{display:flex;align-items:end;justify-content:center;gap:12px;height:60px}
+.brand-sizes img{display:block;border-radius:22%}
+.brand-sizes .s32{width:32px;height:32px}
+.brand-sizes .s44{width:44px;height:44px}
+.brand-sizes .s56{width:56px;height:56px}
+@media(max-width:900px){.grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:580px){.wrap{padding:20px 14px 40px}.header{align-items:flex-start;flex-direction:column}.spec{text-align:left}.grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5"/><path d="M6.5 10v9h11v-9"/></symbol>
+    <symbol id="i-diamond" viewBox="0 0 24 24"><path d="M12 4 20 12 12 20 4 12z"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 6h14v9H9l-4 3z"/></symbol>
+    <symbol id="i-me" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M6.2 19c1.2-3.5 3.7-5.3 5.8-5.3s4.6 1.8 5.8 5.3"/><circle cx="12" cy="12" r="9"/></symbol>
+    <symbol id="i-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></symbol>
+    <symbol id="i-cup" viewBox="0 0 24 24"><path d="M6 9h10v5a4 4 0 0 1-4 4h-2a4 4 0 0 1-4-4z"/><path d="M16 10h2a2.5 2.5 0 0 1 0 5h-2"/><path d="M8 5c0 1-1 1.4-1 2M12 5c0 1-1 1.4-1 2M16 5c0 1-1 1.4-1 2"/></symbol>
+    <symbol id="i-profile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="9" r="2.6"/><path d="M7.7 17c1-2.8 2.9-4.2 4.3-4.2s3.3 1.4 4.3 4.2"/></symbol>
+    <symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 17 17 7"/><path d="M10 7h7v7"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="5" cy="17" r="1.5"/><circle cx="18" cy="8" r="1.5"/><path d="M6.5 16c2.3-5.6 4.6-7.5 7.2-7.5 1.2 0 2.1.3 2.8.6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 8v4l3 2"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 4l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 9.2l5-.7z"/></symbol>
+    <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M9.5 9.5h5M9.5 14.5h5M12 7.5v9"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4"/></symbol>
+    <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M5 8h14v3a2 2 0 0 0 0 4v3H5v-3a2 2 0 0 0 0-4z"/><path d="M12 8v10"/></symbol>
+    <symbol id="i-store" viewBox="0 0 24 24"><path d="M6 7h12M7 10h10M7 13h10M7 16h10"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 4l1.7 4.3L18 10l-4.3 1.7L12 16l-1.7-4.3L6 10l4.3-1.7z"/></symbol>
+    <symbol id="i-party" viewBox="0 0 24 24"><path d="M7 18l3.3-8.3 4 4L7 18z"/><path d="M12 7l1-2M16 8l2-1M17 12h2M7 6h.01M18 5h.01"/></symbol>
+    <symbol id="i-cash" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M9.5 9.5h5M9.5 14.5h5M12 7.5v9"/></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <div class="header">
+    <h1>Proxy · Module Logo Master</h1>
+    <div class="spec">SVG 24×24 · stroke 2.2px · round cap/join<br>Module box 56×56 · glyph 26×26 · radius 16</div>
+  </div>
+
+  <section class="group">
+    <h2>品牌</h2>
+    <div class="grid">
+      <div class="item"><div class="brand-sizes"><img class="s32" src="data:image/png;base64,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"><img class="s44" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAIAAAADnC86AAALC0lEQVR4nMVXaXBU15U+9973ut/Wi9QSBu0gYiBCQciIsMU2FgbKBlJFZuzxAsZTdgV+JOWUcRVOWSZ2cLBdAU/AGQ/EU5OAUwOOs4stgYSAcJxglpFFhNpWBJYMkhCtbnX367fekx+3WxIu4qSSqfKtrl5u33e+e76zE0XV4NNY9FNB/TSBpb//KCGEEEIpBQBEBAAAFNsAwDlHxML+/xMwpZRS6jiOY1ufcCyoqLIsc8455/8ssFAxm80C8nA4ctttjfX19bVTam+5ZYKu60CImTUHBvo/+KC7/b32Cx0X0ukRIFTXdUHAPwjMGLNt23OdWbMa1qxZs2zZ0ilTpmiaBgCAyDkCAKF5qk3T7O7uPnTo0N69b3R0vCcHgoFAwPf9v6rSx8KJECJuKklSJj1SVlbe0tLy4IMPhMPhXC5nWRb3fSAEAAgQAEDIq8UoU5SgoqrJZHLv3r1btrwwODhghMKe540XexNgxhgi+r7PGGOMpUdSd9+9dNeu/5o8eXIymfR9X1haqCuwAUahCQIiR46+JMmRSCQejz/2+OMnT5wIhSO+7wuxhJBRDvLAlFIzmwEA3QiZponcX7Nm7e7duxAxm83KkjQO6SYLEQkAAiEEENBzPCNk+J7/yKPrfvzWW5RJqqpmM2kA0HRDuB5RVE2gNjcv+cpXv1JdVfXBB93nzp37+tObOKLruowxQIBPwh1THggCEEDwfF9Rgq7jbtu+ralpbmVlRW9v744dO48dOyqwiW6EspnMylUrf/zWW7IsA4BgNZVKISIlFIQVP1HjPCoAkMIXAI6cUhoJR3zuM8YAwHXd1au/1HqgVdcNElRUxtjbp07V1c1oadl8+cPL/7F9uywHSN5bxy/yV/X+eOBgARsBwDTNJ5742vTp0zZv3tzRcWHhooW+z6ltWVOnTp05s+7Ir3794otbJ02cGIvFEBDIDdIQbsY2ipf4ACTiTP43Fpx5woQJ0Wh0y5Ytx48fr6+fWVs71bYsCoCBQIAxNjgwWF5R2dLSkrOsUWXHRBTUQBSCcfyVCoSI7RsuSAjxPO/ZZ1uKiopTqRRjLBCQAZBIciAWi50/d9bzvI4LF+68/fZcLkcoHS+uIAvH9saiadzmODvfwBZHRVF+eaB10YIFhNKG2Y2JRIIqijLQf/UHe/ZUVFR8YdGinGVRSsk4YYW3G804RvJ4VDL+LqTwooxatrXi3nvLysv37n1jcKBfURSiajoiZ5T94hc/X7BgQc408/UHQAQ7o6xAPEFhOAAEJDfQMGoaYQ/wuU8IYQXmfM5VVW1rO7V69WrP9wihFBEJobZjc84ZY0IT4Y2xWKy4uJhQwlFEaMF7hCvlVSZYYEDchnMuyVIsFguHw6JQiNOBQCCXM7PZLKUMEYmmGznT/NysWSdP/E6oiIiSJHHOf/aznzNG77nnnmAg4LguJWTUfgVbFPJFQXHkqGpqf3//wYMHq2tq7rrzTsd1RZamhHLO5y1YEI/HVVWllFJEftttjYZh+J6Xz3sATz658fTp09u2v7L6S/9i2bYgI++n4x1gvH8jBpXgpUuXNm16uvNi10MPPfzMs89qmiZypOu5kUh49uwG5H4h6QPU1dUVGgk/Eg7/srV1aOj6q6/ufGrjk787/tvW1tZQKOT7foFVwewN/QYB4Jxrmvbqd7+7fPnynTu+M3/+/O3btnV1damqKg4TSmfMmCHOS+Lh8vJyzjkQggCE0v6rA388c+rlb289ePBXVdWVf+q8SPKlEDnnHJExJkkMADzfzxeuQgN05aOrP3z/B30ffdjbe2lSeXk8/v5nZ8wwTZMAAcTysjJBDhXAuqZjoV/hHMsrSs3Bkhee+W83x1fdc18opBf+4qqmxoqLCSHDyWQylaKUxmKxYCAg+gJKaXVNxdtHLm1+5qX5c5cs+PxCXdc454QQIMARRR+BAJJo4RzHEWxQSlOpkS/cvnD5kntz8Xn8SuoPI2/+b+t3slkTADRd7+zs3P297505czaRSBACJbGSefPmrV//5arKymzWtC3nwYf+teOoFHbvOPuT81OXDC1cOD+VGqGUiF7Q87x8WtSNEADs3PkqIg4PD2ezWdu2EXHw+kevbN/x4guvXIz/KZfLDQ0N5UzzzJkzZeUVQKimG6FIJByJaroBAJ+tm9nT05NOp4eGhizLfvfc77c89+3X/nOXaWYQ0bbtbDY7nBhGxG9t3QoARihMjFC4tKRk1aqV06dPHxgcpIQEFSVWXFxf/7k5cxoJJWbWsm0LACLh8OEjR1asWDFxUhnnXMSeCLx0Ot128kRdXV0ulwNERdVUNeC63jvv/KGzszORSLiuyzlOnHjL/7W3H2g9cG1oSFr3yFrLsn2OK1eulGVZluVMOtPb13v69B+vXLnSfNddjuuIajqSTjc3N2/a9PRLL79sGLqiqACYTqcd23nppa319fWZTIZSSgjJ5UzHtg8cPJDNmg0NDWVlZbquu65r23b7ex3Lly+XAzIxQuFMegQIOdXWVlNTc/bsuYGBfsdxKKXTpk2bO3eubVmjNYMQYhjGvv37n3/+m5cvXwaAadOmffP551asWJFKpcZqGmIgEDh58uTly5c554qiTJo0ac6cOR0dHYsXLwaASLRI5Gq0cubaRx65a/HiQCBw6623lpSUdHXFU6nksmXLRrtzAgQBOefRSGQ4mfzGc88VRaNPPfWUqqqi3o3FNCGu6x4+fKS6qqqyqrK/vz8efx+RH+o4vH/3Pk0yuMtpLpcrikafeOJrtm0XFRU/8MADpSWlJ9vaent7y8srRvOSSNEEgFLaPzAQi8VixcVVVdWhUOja4LUbUAEAgFFaVjYp/n783TNnaqfUrl27pqioWJbk9Rs2BGTZdRxSN3PmHbff8Zvf/uZiZ6cRCr322mux4uKKiorp06cjommaACCSg/AmQki0qOjixYv33/9v0Wj0Rz96c8KECcPDwyKFU5afrAiApuuc8/b29sHBQdu2H3vs8eHhxJympqampgOtB2ht7dT/+f73u7q6AkGluKj4xIkTiFhfXz8yMpJKpvK8ea7neaqm6YYBAD/56U/XPfrvO3fu2LBhw3333X/s2DHGmG4Yiqq4rut7HiEEAZLJ5MjISFNTUyQaPXT4MBBQVe3d06f373+zsbGRMEmWJAkAFEV5dN26ffv29fdfbWlp2bhxo2EYyWQSACzLOn/+fPef/3zt2rW+3j5Zltev/3L9zJlASFvbqT179jDGKisrSkpKP/OZqQ0NDaIERMJhjrhr9+6NGzdWV1cvvXvp66+/ziTJcRzGGKiarukGY9KqL35xSu1UACJSyuzZjfv3789kMsi5aZrXr1+Px+Pt7e29vb2cc5FShoaGHNv2PK+np6e9vb27uzuRSKTTad/3Hcc5evRoc/MSAFA1HQBmNzY2L7mbEKrphqJqRFE1RAwGg6WlpT09PYqicM4lScqk0wD4+Xnz1jz88NKlS2tqakTXbVu2mTMRcXQsppRqmhYMBoUfXL169fjx42+88cNfHz3KfU83Qvmy6LqTJ0/u6+sT1SE/woipSZbl0UpHKQVCzEwaAEpKS+fOnbto4cJZs2bV1NTEYjFN04SBfN+3LCuRSPT19b3X0fH2qVNv//6dvt4PhaKU0rFhiRDHccTtx4DhZgOdgBcPuI4tTkWj0VhJLBqJqppKCLVyudTIyPXr14eHh7nvAQCTZEVRRqNg/BoP8fEx9aZLjOeEEM6553me53HfH+12CWWSJEmSxBhFhL85kn/K6y8svMo2Eg50kgAAAABJRU5ErkJggg=="><img class="s56" src="data:image/png;base64,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"></div><div class="name">Proxy 正式 Logo</div><div class="code">32 / 44 / 56</div></div>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>全局导航</h2>
+    <div class="grid">
+      <div class="item"><div class="icon-box neutral"><svg><use href="#i-home"/></svg></div><div class="name">首页</div><div class="code">home</div></div>
+      <div class="item"><div class="icon-box neutral"><svg><use href="#i-diamond"/></svg></div><div class="name">市场</div><div class="code">diamond</div></div>
+      <div class="item"><div class="icon-box neutral"><svg><use href="#i-target"/></svg></div><div class="name">动态</div><div class="code">target</div></div>
+      <div class="item"><div class="icon-box neutral"><svg><use href="#i-chat"/></svg></div><div class="name">消息</div><div class="code">chat</div></div>
+      <div class="item"><div class="icon-box brand"><svg><use href="#i-me"/></svg></div><div class="name">我的</div><div class="code">me-ring</div></div>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>首页模式</h2>
+    <div class="grid">
+      <div class="item"><div class="icon-box neutral"><svg><use href="#i-target"/></svg></div><div class="name">体验</div><div class="code">target</div></div>
+      <div class="item"><div class="icon-box neutral"><svg><use href="#i-diamond"/></svg></div><div class="name">机会</div><div class="code">diamond</div></div>
+      <div class="item"><div class="icon-box neutral"><svg><use href="#i-ring"/></svg></div><div class="name">活动</div><div class="code">ring</div></div>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>用户 · 我的</h2>
+    <div class="grid">
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-cup"/></svg></div><div class="name">礼品券</div><div class="code">cup</div></div>
+      <div class="item"><div class="icon-box brand"><svg><use href="#i-profile"/></svg></div><div class="name">主页与二维码</div><div class="code">profile-ring</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-arrow-up-right"/></svg></div><div class="name">社媒与联系</div><div class="code">arrow-up-right</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-route"/></svg></div><div class="name">访问与转化</div><div class="code">route</div></div>
+      <div class="item"><div class="icon-box brand"><svg><use href="#i-target"/></svg></div><div class="name">好友与关系</div><div class="code">target</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-plus"/></svg></div><div class="name">添加好友</div><div class="code">plus</div></div>
+      <div class="item"><div class="icon-box brand"><svg><use href="#i-diamond"/></svg></div><div class="name">我的订单</div><div class="code">diamond</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-clock"/></svg></div><div class="name">能力与可用时间</div><div class="code">clock</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-ring"/></svg></div><div class="name">我的活动</div><div class="code">ring</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-star"/></svg></div><div class="name">关注与收藏</div><div class="code">star</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-coin"/></svg></div><div class="name">钱包与结算</div><div class="code">coin</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-gear"/></svg></div><div class="name">设置与隐私</div><div class="code">gear</div></div>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>商家 · 我的</h2>
+    <div class="grid">
+      <div class="item"><div class="icon-box brand"><svg><use href="#i-target"/></svg></div><div class="name">Creator</div><div class="code">target</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-ticket"/></svg></div><div class="name">券</div><div class="code">ticket</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-arrow-up-right"/></svg></div><div class="name">活动导流</div><div class="code">arrow-up-right</div></div>
+      <div class="item"><div class="icon-box brand"><svg><use href="#i-store"/></svg></div><div class="name">线上店铺</div><div class="code">store-lines</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-coin"/></svg></div><div class="name">销售中心</div><div class="code">coin</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-spark"/></svg></div><div class="name">经营助手</div><div class="code">spark</div></div>
+      <div class="item"><img class="logo-img" src="data:image/png;base64,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"><div class="name">Proxy 中心</div><div class="code">official-logo</div></div>
+    </div>
+  </section>
+
+  <section class="group">
+    <h2>券类型</h2>
+    <div class="grid">
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-cup"/></svg></div><div class="name">咖啡券</div><div class="code">cup</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-party"/></svg></div><div class="name">活动券</div><div class="code">party-popper</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-ticket"/></svg></div><div class="name">礼品券</div><div class="code">ticket</div></div>
+      <div class="item"><div class="icon-box lime"><svg><use href="#i-cash"/></svg></div><div class="name">现金券</div><div class="code">cash</div></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "name": "Proxy App Design System",
+    "version": "R2",
+    "baseViewport": {"width": 390, "height": 844},
+    "grid": 4
+  },
+  "colors": {
+    "brandPink": "#FF2474",
+    "brandViolet": "#8533F5",
+    "signalLime": "#D6FB24",
+    "ink": "#17131F",
+    "deep": "#17131D",
+    "background": "#F7F4F9",
+    "panel": "#FFFFFF",
+    "soft": "#F4F0F6",
+    "line": "#E6DFEB",
+    "muted": "#7E7586",
+    "disabled": "#B8B0BD"
+  },
+  "gradient": {
+    "brand": "linear-gradient(135deg,#FF2474 0%,#8533F5 100%)"
+  },
+  "radius": {
+    "chip": 999,
+    "icon": 16,
+    "card": 20,
+    "large": 26,
+    "bottomNav": 24,
+    "composer": 26
+  },
+  "spacing": [4,8,12,16,24,32],
+  "icon": {
+    "strokeWidth": 2.2,
+    "bottomNav": 20,
+    "list": 22,
+    "module": 28,
+    "moduleContainer": 56
+  },
+  "typography": {
+    "display": {"size": 36, "weight": 900},
+    "h1": {"size": 28, "weight": 900},
+    "h2": {"size": 22, "weight": 900},
+    "h3": {"size": 18, "weight": 800},
+    "title": {"size": 15, "weight": 800},
+    "body": {"size": 13, "weight": 500},
+    "meta": {"size": 12, "weight": 500},
+    "caption": {"size": 11, "weight": 500}
+  },
+  "component": {
+    "pageHorizontalPadding": 16,
+    "headerHeight": 48,
+    "bottomNavHeight": 68,
+    "tapTargetMin": 44,
+    "moduleGridColumns": 2,
+    "moduleCardAspect": "1:1",
+    "moduleAlign": "center",
+    "shadow": "none"
+  }
+}

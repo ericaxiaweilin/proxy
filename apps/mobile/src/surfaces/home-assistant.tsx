@@ -32,7 +32,8 @@ export function HomeAssistantSurface({
   mode,
   onBack,
   onOpenMarket,
-  onOpenXiaomei
+  onOpenXiaomei,
+  onOpenFeed
 }: {
   conversationClient: ConversationClient;
   mediaClient: MediaClient;
@@ -42,6 +43,7 @@ export function HomeAssistantSurface({
   onBack: () => void;
   onOpenMarket?: (tab: MarketTab) => void;
   onOpenXiaomei?: () => void;
+  onOpenFeed?: () => void;
 }): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string>();
   const [messages, setMessages] = useState<AssistantMessage[]>([
@@ -52,7 +54,7 @@ export function HomeAssistantSurface({
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string>();
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
-  const [suggestedActions, setSuggestedActions] = useState<Array<{ label: string; tab: MarketTab }>>([]);
+  const [suggestedActions, setSuggestedActions] = useState<Array<{ label: string; tab?: MarketTab; isFeed?: boolean }>>([]);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -97,6 +99,11 @@ export function HomeAssistantSurface({
 
   function handleLocalIntent(text: string): void {
     const t = text.toLowerCase();
+    if (/(周六|周日|今晚|明天|拍照|咖啡|西湖|有空|状态|临时)/i.test(t) && /(小美|找|想|有空)/i.test(t)) {
+      setSuggestedActions([{ label: "看临时状态 ›", isFeed: true }]);
+      setMessages((cur) => [...cur, makeMessage("临时状态里有小美「周六下午想去西湖拍照 ☕️」等 3 条 24h 动态，24h 后自动归档，不进永久主页。去动态的临时状态看看吧。", false)]);
+      return;
+    }
     if (/(小美|xiaomei|陪同|找.*妹|挑.*人|找小美)/i.test(text)) {
       setSuggestedActions([{ label: "看小美机会 ›", tab: "OPPORTUNITY" }]);
       setMessages((cur) => [...cur, makeMessage("小美相关机会已备好 · 不会把她做成货架，价格只属于本次需求。点下面去市场看看，或直接告诉我你想要的时间/地点。", false)]);
@@ -157,13 +164,14 @@ export function HomeAssistantSurface({
 
       <View style={styles.contextCard}>
         <Text style={styles.contextTitle}>Home 语义运行时 · 全功能入口</Text>
-        <Text style={styles.contextText}>输入 挑选小美 / 活动 / 机会 即可直达对应市场；也支持选人、报价、活动报名等后续动作。</Text>
+        <Text style={styles.contextText}>输入 挑选小美 / 活动 / 机会 / 状态 即可直达对应市场与动态；也支持选人、报价、活动报名等。</Text>
       </View>
       <View style={styles.quickRow}>
         {[
           { label: "挑选小美", text: "帮我挑选小美" },
           { label: "看活动", text: "最近有什么活动" },
-          { label: "找机会", text: "有什么适合我的机会" }
+          { label: "找机会", text: "有什么适合我的机会" },
+          { label: "看状态", text: "看看临时状态" }
         ].map((q) => (
           <Pressable key={q.label} onPress={() => setDraft(q.text)} style={styles.quickPill}>
             <Text style={styles.quickText}>{q.label}</Text>
@@ -184,7 +192,7 @@ export function HomeAssistantSurface({
         {suggestedActions.length > 0 ? (
           <View style={styles.suggestedRow}>
             {suggestedActions.map((a) => (
-              <Pressable key={a.label} onPress={() => { if (a.label.includes("小美") && onOpenXiaomei) onOpenXiaomei(); else onOpenMarket?.(a.tab); }} style={styles.suggestedPill}>
+              <Pressable key={a.label} onPress={() => { if (a.isFeed && onOpenFeed) onOpenFeed(); else if (a.label.includes("小美") && onOpenXiaomei) onOpenXiaomei(); else if (a.tab) onOpenMarket?.(a.tab); }} style={styles.suggestedPill}>
                 <Text style={styles.suggestedText}>{a.label}</Text>
               </Pressable>
             ))}
@@ -203,7 +211,7 @@ export function HomeAssistantSurface({
           multiline
           onChangeText={setDraft}
           onSubmitEditing={() => void send()}
-          placeholder={conversationId ? "输入 挑选小美 / 活动 / 机会 试试…" : "连接中…"}
+          placeholder={conversationId ? "输入 挑选小美 / 活动 / 机会 / 状态 试试…" : "连接中…"}
           placeholderTextColor="#A9A2B0"
           style={styles.input}
           value={draft}
