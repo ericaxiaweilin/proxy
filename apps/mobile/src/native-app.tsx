@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
+import * as WebBrowser from "expo-web-browser";
+import * as Google from "expo-auth-session/providers/google";
 import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-shell";
 import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
@@ -16,6 +18,8 @@ import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
 
 const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, right: 0, top: 0 };
+
+WebBrowser.maybeCompleteAuthSession();
 
 const secureSessionStore = new SecureSessionStore(nativeSecureStorageDriver);
 const INSTALLATION_DEVICE_ID_KEY = "proxy.installation.device-id.v1";
@@ -120,6 +124,37 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [googleReq, googleRes, googlePromptAsync] = Google.useAuthRequest({
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID as string,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID as string,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID as string,
+    scopes: ["openid", "profile", "email"],
+    useProxy: true,
+    projectNameForProxy: "@proxy/proxy",
+  } as any);
+
+  useEffect(() => {
+    if (!googleRes) return;
+    if (googleRes.type === "success" && googleRes.authentication?.idToken) {
+      void (async () => {
+        setBusy(true);
+        setError(undefined);
+        try {
+          const loginClient = await getNativeLoginClient();
+          await loginClient.authenticateWithGoogle(googleRes.authentication!.idToken!, Platform.OS === "ios" ? "IOS" : "ANDROID");
+          onAuthenticated();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Google 登录失败，请重试或用手机号/邮箱");
+        } finally {
+          setBusy(false);
+        }
+      })();
+    } else if (googleRes.type === "error") {
+      setError("Google 授权失败，请重试");
+    } else if (googleRes.type === "dismiss") {
+      setError(undefined);
+    }
+  }, [googleRes, onAuthenticated]);
 
   async function requestChallenge(): Promise<void> {
     setBusy(true);
@@ -240,8 +275,24 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
         ) : (
           <>
             <View style={styles.googleButtonRow}>
-              <Pressable onPress={() => { setAuthChannel("EMAIL"); setError(undefined); Linking.openURL("https://mail.google.com").catch(() => undefined); }} style={[styles.googleButton, authChannel === "EMAIL" && styles.googleButtonActive]}>
-                <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 邮箱继续</Text>
+              <Pressable
+                disabled={busy}
+                onPress={async () => {
+                  setError(undefined);
+                  setAuthChannel("EMAIL");
+                  if (googleReq) {
+                    try {
+                      await googlePromptAsync();
+                      return;
+                    } catch {
+                      setError("无法启动 Google 授权，已切邮箱验证码");
+                    }
+                  }
+                  await Linking.openURL("https://mail.google.com").catch(() => undefined);
+                }}
+                style={[styles.googleButton, authChannel === "EMAIL" && styles.googleButtonActive, busy && styles.disabled]}
+              >
+                <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 继续</Text>
               </Pressable>
               <Pressable onPress={() => { setAuthChannel("SMS"); setError(undefined); }} style={[styles.googleButton, authChannel === "SMS" && styles.googleButtonActive, styles.googleButtonSmall]}>
                 <Text style={styles.googleLabel}>手机</Text>
