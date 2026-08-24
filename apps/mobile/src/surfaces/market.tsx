@@ -77,6 +77,11 @@ export function MarketSurface({
   const [busy, setBusy] = useState(false);
   const [oppDetail, setOppDetail] = useState<MarketOpportunity | null>(null);
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [selectOpen, setSelectOpen] = useState(false);
+  const [applicantName, setApplicantName] = useState<string | null>(null);
+  const [submissionName, setSubmissionName] = useState<string | null>(null);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   const loadActivities = useCallback(async (): Promise<void> => {
     setActivityPhase("LOADING");
@@ -146,7 +151,7 @@ export function MarketSurface({
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
             <Text style={[styles.viewToggleText, view === "MAP" && styles.viewToggleTextOn]}>{view === "MAP" ? "▤" : "⌖"}</Text>
           </Pressable>
-          <Pressable style={styles.plusBtn}>
+          <Pressable onPress={() => setPublishOpen(true)} style={styles.plusBtn}>
             <Text style={styles.plusBtnText}>＋</Text>
           </Pressable>
         </View>
@@ -173,7 +178,17 @@ export function MarketSurface({
         ))}
       </View>
 
-      {view === "MAP" ? (
+      {publishOpen ? (
+        <PublishDemand onBack={() => setPublishOpen(false)} onPublished={() => { setPublishOpen(false); setSelectOpen(true); }} />
+      ) : applicantName ? (
+        <ApplicantDetail name={applicantName} onBack={() => setApplicantName(null)} onOpenSubmission={(n) => { setApplicantName(null); setSubmissionName(n); }} onCompare={() => { setApplicantName(null); setCompareOpen(true); }} />
+      ) : submissionName ? (
+        <SubmissionDetail name={submissionName} onBack={() => setSubmissionName(null)} onCompare={() => { setSubmissionName(null); setCompareOpen(true); }} onOpenApplicant={(n) => { setSubmissionName(null); setApplicantName(n); }} />
+      ) : compareOpen ? (
+        <CompareScene onBack={() => setCompareOpen(false)} onOpenApplicant={(n) => { setCompareOpen(false); setApplicantName(n); }} />
+      ) : selectOpen ? (
+        <SelectWorkbench onBack={() => setSelectOpen(false)} onOpenApplicant={setApplicantName} onOpenSubmission={setSubmissionName} onCompare={() => setCompareOpen(true)} />
+      ) : view === "MAP" ? (
         <MarketMap
           tab={tab === "OPPORTUNITY" ? "OPPORTUNITY" : "ACTIVITY"}
           lens={lens}
@@ -193,6 +208,7 @@ export function MarketSurface({
             quoteMode={oppQuoteMode}
             setQuoteMode={setOppQuoteMode}
             onBack={() => setOppDetail(null)}
+            onOpenSelect={() => { setOppDetail(null); setSelectOpen(true); }}
           />
         ) : (
           <OpportunityTab
@@ -202,6 +218,8 @@ export function MarketSurface({
             setOppFilter={setOppFilter}
             marketLabel={marketLabel}
             onOpen={(o) => setOppDetail(o)}
+            onOpenPublish={() => setPublishOpen(true)}
+            onOpenSelect={() => setSelectOpen(true)}
           />
         )
       ) : (
@@ -271,7 +289,9 @@ function OpportunityTab({
   oppFilter,
   setOppFilter,
   marketLabel,
-  onOpen
+  onOpen,
+  onOpenPublish,
+  onOpenSelect
 }: {
   lens: OpportunityLens;
   setLens: (lens: OpportunityLens) => void;
@@ -279,6 +299,8 @@ function OpportunityTab({
   setOppFilter: (f: OpportunityFilter) => void;
   marketLabel: string;
   onOpen: (o: MarketOpportunity) => void;
+  onOpenPublish: () => void;
+  onOpenSelect: () => void;
 }): React.JSX.Element {
   const base = MARKET_OPPORTUNITIES.filter((o) => o.lens.includes(lens));
   let items = [...base];
@@ -337,6 +359,15 @@ function OpportunityTab({
           <R4OpportunityCard key={opportunity.id} opportunity={opportunity} onOpen={() => onOpen(opportunity)} />
         ))}
       </View>
+      <View style={styles.r4Actions}>
+        <Pressable onPress={onOpenPublish} style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>发布需求</Text>
+        </Pressable>
+        <Pressable onPress={onOpenSelect} style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>选人工作台 ›</Text>
+        </Pressable>
+      </View>
+      <Text style={styles.detailHint}>＋ 发布会先给合理价格建议，避免低价竞价。选人工作台演示客户如何挑人。</Text>
     </>
   );
 }
@@ -402,12 +433,14 @@ function OpportunityDetail({
   opportunity,
   quoteMode,
   setQuoteMode,
-  onBack
+  onBack,
+  onOpenSelect
 }: {
   opportunity: MarketOpportunity;
   quoteMode: "budget" | "standard" | "premium" | "custom";
   setQuoteMode: (m: "budget" | "standard" | "premium" | "custom") => void;
   onBack: () => void;
+  onOpenSelect: () => void;
 }): React.JSX.Element {
   const budget = opportunity.price;
   const fair = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()} – ${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
@@ -508,8 +541,278 @@ function OpportunityDetail({
           <Text style={styles.r4ActionPrimaryText}>按我的条件回应</Text>
         </Pressable>
       </View>
+      <Pressable onPress={onOpenSelect} style={[styles.r4ActionGhost, { marginTop: 7 }]}>
+        <Text style={styles.r4ActionGhostText}>查看客户选人视角 ›</Text>
+      </Pressable>
 
       <Text style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
+    </View>
+  );
+}
+
+function PublishDemand({ onBack, onPublished }: { onBack: () => void; onPublished: () => void }): React.JSX.Element {
+  return (
+    <View>
+      <View style={styles.detailHead}>
+        <Pressable onPress={onBack} style={styles.detailBack}>
+          <Text style={styles.detailBackText}>‹</Text>
+        </Pressable>
+        <Text style={styles.detailTitle}>发布需求</Text>
+        <Text style={styles.detailMore}>•••</Text>
+      </View>
+      <View style={styles.detailHero}>
+        <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
+        <Text style={styles.detailHeroTitle}>周六城市同行 + 拍照</Text>
+        <Text style={styles.detailHeroSub}>Proxy 在发布前就告诉客户合理价格，避免把需求故意压成低价再让真人竞价。</Text>
+      </View>
+      <View style={styles.r4Card}>
+        <Text style={styles.r4Title}>你想完成什么</Text>
+        <View style={styles.factGrid}>
+          <View style={styles.fact}>
+            <Text style={styles.factLabel}>时间</Text>
+            <Text style={styles.factValue}>10:00–18:00</Text>
+          </View>
+          <View style={styles.fact}>
+            <Text style={styles.factLabel}>地点</Text>
+            <Text style={styles.factValue}>西湖 / 老城区</Text>
+          </View>
+        </View>
+        <View style={[styles.r4PriceCellHot, { borderRadius: 11, marginTop: 8, padding: 10 }]}>
+          <Text style={styles.r4PriceLabel}>Proxy 建议预算</Text>
+          <Text style={styles.r4PriceValue}>1.8 – 2.4M₫ · 8h + 中文 + 摄影 + 本地熟悉度</Text>
+        </View>
+        <View style={styles.r4Match}>
+          <Text style={styles.r4MatchText}>会完整展示给回应者 · 预计 6–10 位合格回应 · 竞争力：中等</Text>
+        </View>
+      </View>
+      <View style={styles.aiBox}>
+        <Text style={styles.aiTitle}>如果坚持 1.5–2.0M₫ 也可以发布</Text>
+        <Text style={styles.aiCheck}>Proxy 不阻止低预算，但会原样告诉小美“客户预算”和“公平参考”，小美可按更高条件回应。</Text>
+      </View>
+      <View style={styles.r4Actions}>
+        <Pressable onPress={onBack} style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>预览小美视角</Text>
+        </Pressable>
+        <Pressable onPress={onPublished} style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>发布需求</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function SelectWorkbench({
+  onBack,
+  onOpenApplicant,
+  onOpenSubmission,
+  onCompare
+}: {
+  onBack: () => void;
+  onOpenApplicant: (name: string) => void;
+  onOpenSubmission: (name: string) => void;
+  onCompare: () => void;
+}): React.JSX.Element {
+  const candidates: Array<{ name: string; meta: string; price: string; rank: string; hot?: boolean }> = [
+    { name: "小美", meta: "中文 / 摄影 / 河内", price: "2.2M₫", rank: "推荐 1", hot: true },
+    { name: "Linh", meta: "中文 / 本地同行", price: "2.0M₫", rank: "推荐 2" },
+    { name: "Minh", meta: "摄影 / 英文 / 河内", price: "1.8M₫", rank: "推荐 3" }
+  ];
+  return (
+    <View>
+      <View style={styles.detailHead}>
+        <Pressable onPress={onBack} style={styles.detailBack}>
+          <Text style={styles.detailBackText}>‹</Text>
+        </Pressable>
+        <Text style={styles.detailTitle}>选人工作台</Text>
+        <Text style={styles.detailMore}>•••</Text>
+      </View>
+      <View style={styles.detailHero}>
+        <Text style={styles.detailHeroKicker}>12 RESPONSES</Text>
+        <Text style={styles.detailHeroTitle}>周六城市同行 + 拍照</Text>
+        <Text style={styles.detailHeroSub}>先由 Proxy 排除不满足必要条件的人，再让你围绕能力、履约、回应做决定。</Text>
+      </View>
+      <View style={styles.r4PriceStrip}>
+        {[["12", "回应"], ["7", "合格"], ["3", "建议先看"], ["1", "确认"]].map(([n, l]) => (
+          <View key={l} style={styles.r4PriceCell}>
+            <Text style={[styles.r4PriceValue, { textAlign: "center" }]}>{n}</Text>
+            <Text style={[styles.r4PriceLabel, { textAlign: "center" }]}>{l}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.aiBox}>
+        <Text style={styles.aiTitle}>Proxy 推荐不是“最便宜”</Text>
+        <Text style={styles.aiCheck}>必要条件 40% · 类似结果 20% · 时间15% · 回应质量10% · 偏好10% · 价格5%。</Text>
+      </View>
+      {candidates.map((c) => (
+        <View key={c.name} style={[styles.r4Card, c.hot && { borderColor: color.magenta }]}>
+          <View style={styles.r4Top}>
+            <Text style={styles.r4Title}>{c.name} · {c.meta}</Text>
+            <View style={styles.r4FitBadge}>
+              <Text style={styles.r4FitText}>{c.rank}</Text>
+            </View>
+          </View>
+          <Text style={styles.r4Meta}>本次报价 {c.price} · 只属于本次需求，不会把她永久标成小时价</Text>
+          <View style={styles.r4Actions}>
+            <Pressable onPress={() => onOpenApplicant(c.name)} style={styles.r4ActionGhost}>
+              <Text style={styles.r4ActionGhostText}>看候选详情</Text>
+            </Pressable>
+            <Pressable onPress={() => onOpenSubmission(c.name)} style={styles.r4ActionGhost}>
+              <Text style={styles.r4ActionGhostText}>看本次投递</Text>
+            </Pressable>
+            <Pressable onPress={onCompare} style={styles.r4ActionPrimary}>
+              <Text style={styles.r4ActionPrimaryText}>比较</Text>
+            </Pressable>
+          </View>
+        </View>
+      ))}
+      <Pressable onPress={onCompare} style={[styles.r4ActionPrimary, { marginTop: 8 }]}>
+        <Text style={styles.r4ActionPrimaryText}>进入深度比较</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function ApplicantDetail({
+  name,
+  onBack,
+  onOpenSubmission,
+  onCompare
+}: {
+  name: string;
+  onBack: () => void;
+  onOpenSubmission: (name: string) => void;
+  onCompare: () => void;
+}): React.JSX.Element {
+  return (
+    <View>
+      <View style={styles.detailHead}>
+        <Pressable onPress={onBack} style={styles.detailBack}>
+          <Text style={styles.detailBackText}>‹</Text>
+        </Pressable>
+        <Text style={styles.detailTitle}>{name} · 候选详情</Text>
+        <Text style={styles.detailMore}>•••</Text>
+      </View>
+      <View style={styles.r4Card}>
+        <View style={styles.r4Top}>
+          <Text style={styles.r4Title}>{name} Xiaomei · 河内 · 中文/越南语</Text>
+          <View style={styles.r4FitBadge}>
+            <Text style={styles.r4FitText}>已验证</Text>
+          </View>
+        </View>
+        <Text style={styles.r4Meta}>18 真实履约 · 96% 按约 · 7 复邀 · 摄影/本地同行/活动执行</Text>
+      </View>
+      <View style={styles.aiBox}>
+        <Text style={styles.aiTitle}>为什么适合你的这个需求 · 推荐 1</Text>
+        <Text style={styles.aiCheck}>✓ 中文已验证 · 摄影作品与 3 次类似履约相关 · 周六完全覆盖</Text>
+      </View>
+      <View style={[styles.r4PriceCellHot, { borderRadius: 12, padding: 11 }]}>
+        <Text style={styles.r4PriceLabel}>她对你这个需求的本次 Offer</Text>
+        <Text style={styles.r4PriceValue}>2.2M₫ · 8h + 中文 + 30 张调色 · 仅属于本次</Text>
+      </View>
+      <View style={styles.r4Actions}>
+        <Pressable onPress={() => onOpenSubmission(name)} style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>看本次完整投递</Text>
+        </Pressable>
+        <Pressable onPress={onCompare} style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>和其他候选比较</Text>
+        </Pressable>
+      </View>
+      <View style={styles.r4Actions}>
+        <Pressable style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>问她一个问题</Text>
+        </Pressable>
+        <Pressable style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>接受 {name} · 2.2M₫</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function SubmissionDetail({
+  name,
+  onBack,
+  onCompare,
+  onOpenApplicant
+}: {
+  name: string;
+  onBack: () => void;
+  onCompare: () => void;
+  onOpenApplicant: (name: string) => void;
+}): React.JSX.Element {
+  return (
+    <View>
+      <View style={styles.detailHead}>
+        <Pressable onPress={onBack} style={styles.detailBack}>
+          <Text style={styles.detailBackText}>‹</Text>
+        </Pressable>
+        <Text style={styles.detailTitle}>{name} · 本次投递详情</Text>
+        <Text style={styles.detailMore}>•••</Text>
+      </View>
+      <View style={[styles.r4PriceCellHot, { borderRadius: 12, padding: 11 }]}>
+        <Text style={styles.r4PriceLabel}>本次主动报价</Text>
+        <Text style={styles.r4PriceValue}>2.2M₫ · 不是主页固定价格</Text>
+      </View>
+      <View style={styles.r4Card}>
+        <Text style={styles.r4Title}>这次她具体提供什么</Text>
+        <Text style={styles.r4Meta}>周六 10:00–18:00 · 8h · 西湖+老城区 · 中文/越南语 · 30 张调色 · 交通已含 · 超时250k₫/h</Text>
+      </View>
+      <View style={styles.aiBox}>
+        <Text style={styles.aiTitle}>为什么排在前面 · 综合推荐 1</Text>
+        <Text style={styles.aiCheck}>5/5 硬条件 · 3 次同类履约 · 路线熟悉 · 2 次复邀 · 高于预算10%但处公平区间</Text>
+      </View>
+      <View style={styles.r4Actions}>
+        <Pressable onPress={() => onOpenApplicant(name)} style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>看候选详情</Text>
+        </Pressable>
+        <Pressable onPress={onCompare} style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>比较候选</Text>
+        </Pressable>
+      </View>
+      <Pressable style={[styles.r4ActionPrimary, { marginTop: 8 }]}>
+        <Text style={styles.r4ActionPrimaryText}>接受 {name} · 2.2M₫</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function CompareScene({ onBack, onOpenApplicant }: { onBack: () => void; onOpenApplicant: (name: string) => void }): React.JSX.Element {
+  return (
+    <View>
+      <View style={styles.detailHead}>
+        <Pressable onPress={onBack} style={styles.detailBack}>
+          <Text style={styles.detailBackText}>‹</Text>
+        </Pressable>
+        <Text style={styles.detailTitle}>比较 3 位候选</Text>
+        <Text style={styles.detailMore}>•••</Text>
+      </View>
+      <View style={styles.aiBox}>
+        <Text style={styles.aiTitle}>当前最关键：中文 + 摄影 + 路线</Text>
+        <Text style={styles.aiCheck}>只比较与这件事相关的字段，不以头像/价格作唯一排序。</Text>
+      </View>
+      {[
+        ["本次报价", "2.2M", "2.0M", "1.8M"],
+        ["中文", "强", "强", "基础"],
+        ["摄影", "强", "一般", "很强"],
+        ["熟悉路线", "强", "很强", "一般"],
+        ["类似履约", "3", "6", "8"],
+        ["按约", "96%", "98%", "94%"]
+      ].map(([dim, a, b, c]) => (
+        <View key={dim} style={[styles.r4Card, { flexDirection: "row", gap: 6 }]}>
+          <Text style={[styles.r4PriceLabel, { flex: 1 }]}>{dim}</Text>
+          <Text style={[styles.r4PriceValue, { flex: 1, textAlign: "center" }]}>{a}</Text>
+          <Text style={[styles.r4PriceValue, { flex: 1, textAlign: "center" }]}>{b}</Text>
+          <Text style={[styles.r4PriceValue, { flex: 1, textAlign: "center" }]}>{c}</Text>
+        </View>
+      ))}
+      <View style={styles.r4Actions}>
+        <Pressable onPress={() => onOpenApplicant("小美")} style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>看小美主页</Text>
+        </Pressable>
+        <Pressable style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>接受 2.2M₫</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
