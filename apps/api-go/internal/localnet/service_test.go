@@ -55,6 +55,37 @@ func TestCreatePostEmptyContent(t *testing.T) {
 	}
 }
 
+func TestCreatePostClassifiesDemandWithoutCreatingTransaction(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeFor("", "CreatePost", map[string]any{"body": "周六在河内找一位活动摄影师，预算 150 万"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("create classified post: got %s (%+v)", result.Outcome, result.Error)
+	}
+	post, err := s.repository.GetPost(t.Context(), result.Aggregate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundDemand, foundActivity := false, false
+	for _, ref := range post.ContextRefs {
+		if ref.ContextType == "DEMAND" {
+			foundDemand = true
+		}
+		if ref.ContextType == "ACTIVITY" {
+			foundActivity = true
+		}
+	}
+	if !foundDemand || !foundActivity {
+		t.Fatalf("expected demand and activity classification, got %+v", post.ContextRefs)
+	}
+	needs, err := s.repository.SnapshotNeeds(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(needs) != 0 {
+		t.Fatal("classification must not create a Need")
+	}
+}
+
 func TestFeedAndHydrationNote(t *testing.T) {
 	s := New()
 	// 发 2 个帖子

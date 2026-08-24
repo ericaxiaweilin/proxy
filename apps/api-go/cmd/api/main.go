@@ -48,9 +48,9 @@ func main() {
 	identityService := localIdentityService(loginProvider, simulatedLogin)
 	demandService := demand.New(nil, nil)
 	cityCompanionService := citycompanion.New()
-	localNetService := localnet.New()
 	localContextService := localcontext.New()
 	modelStack := configuredModelStack()
+	localNetService := localnet.NewWithModelStack(nil, modelStack)
 	if modelStack.Available() {
 		log.Printf("proxy api go model stack adapter configured (business side sends task ids only)")
 	} else {
@@ -94,7 +94,7 @@ func main() {
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
 		mediaService = media.NewWithDependencies(postgres.NewMediaRepository(pool), media.NewFFmpegProcessor(filepath.Join("media_store")))
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
-		localNetService = localnet.NewWithMediaLookup(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService))
+		localNetService = localnet.NewWithMediaLookupAndModelStack(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack)
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)

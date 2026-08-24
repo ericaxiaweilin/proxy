@@ -13,6 +13,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/modelstack"
 )
 
 // Local Life Social Demand Network（R13 PRD Chapter21H）。
@@ -230,6 +231,7 @@ type Service struct {
 	mu          sync.Mutex
 	repository  Repository
 	mediaLookup MediaLookup
+	modelStack  modelstack.Port
 	clock       clock.Clock
 }
 
@@ -244,11 +246,27 @@ func NewWithMediaLookup(repository Repository, mediaLookup MediaLookup) *Service
 	return s
 }
 
+func NewWithMediaLookupAndModelStack(repository Repository, mediaLookup MediaLookup, ms modelstack.Port) *Service {
+	s := NewWithMediaLookup(repository, mediaLookup)
+	if ms != nil {
+		s.modelStack = ms
+	}
+	return s
+}
+
+func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
+	s := NewWithRepository(repository)
+	if ms != nil {
+		s.modelStack = ms
+	}
+	return s
+}
+
 func NewWithRepository(repository Repository) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}
-	return &Service{repository: repository, clock: clock.System{}}
+	return &Service{repository: repository, modelStack: modelstack.Unconfigured{}, clock: clock.System{}}
 }
 
 func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *Service {
@@ -349,7 +367,7 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		Visibility:        p.Visibility,
 		CityScope:         p.CityScope,
 		Status:            "PUBLISHED",
-		ContextRefs:       append([]ContextRef(nil), p.ContextRefs...),
+		ContextRefs:       mergeClassificationRefs(p.ContextRefs, classifyPostFallback(p.Body)),
 		CreatedAt:         s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, map[string]any{
@@ -362,6 +380,7 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if err := s.repository.CreatePost(ctx, post); err != nil {
 		return command.Rejected(e, "POST_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_create_failed", nil)
 	}
+	go s.enrichPostClassification(post)
 	return command.Accepted(e, "Post", post.ID, 1, post.Status, eventRefs(domainEvents))
 }
 

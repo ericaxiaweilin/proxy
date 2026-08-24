@@ -8,10 +8,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
+import * as ImagePicker from "expo-image-picker";
 import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type EngagementClient } from "../engagement-client";
 import { type MarketplaceClient } from "../marketplace-client";
+import { type MediaClient, type UploadableImage } from "../media-client";
 import { isOpportunityPost, mergeFeedContent } from "../feed-content";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
@@ -27,6 +29,7 @@ type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情
 let cachedPosts: FeedPost[] = [];
 let cachedMedia: Record<string, FeedMediaItem[]> = {};
 let cachedPostIds: Set<string> = new Set();
+let cachedComposerDraft = "";
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
 const SEED_IMAGE_IDS = ["seed_media_hoankiem", "seed_media_coffee", "seed_media_westlake"];
@@ -103,6 +106,7 @@ const CUSTOM_FEED_LABELS: Readonly<Record<string, string>> = {
 export function FeedSurface({
   localNet,
   marketplace,
+  mediaClient,
   engagement,
   onOpenChat,
   onOpenFeedPrefs,
@@ -110,6 +114,7 @@ export function FeedSurface({
 }: {
   localNet: LocalNetClient;
   marketplace: MarketplaceClient;
+  mediaClient: MediaClient;
   engagement: EngagementClient;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
@@ -128,8 +133,11 @@ export function FeedSurface({
   const [engagementError, setEngagementError] = useState<string>();
   // 发布器状态（X 式 compose）
   const [composerOpen, setComposerOpen] = useState(false);
-  const [draft, setDraft] = useState("");
-  const [draftMedia, setDraftMedia] = useState<"IMAGE" | "VIDEO" | null>(null);
+  const [draft, setDraft] = useState(cachedComposerDraft);
+  const [draftImages, setDraftImages] = useState<UploadableImage[]>([]);
+  const [draftVisibility, setDraftVisibility] = useState<"PUBLIC" | "FOLLOWERS">("PUBLIC");
+  const [draftIncludeCity, setDraftIncludeCity] = useState(true);
+  const [composerError, setComposerError] = useState<string>();
   const [quoteTargetId, setQuoteTargetId] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
@@ -335,36 +343,44 @@ export function FeedSurface({
     setComposerOpen(true);
   }
 
-  /** 绑定一条随机服务端动态作为引用（X 式 quote 的随机入口）。 */
-  function bindRandomQuote(): void {
-    const pool = posts.filter((post) => post.postId !== quoteTargetId);
-    if (pool.length === 0) return;
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    if (pick) setQuoteTargetId(pick.postId);
+  async function pickComposerImages(source: "camera" | "library"): Promise<void> {
+    setComposerError(undefined);
+    const permission = source === "camera"
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) { setComposerError(source === "camera" ? "需要相机权限才能拍照。" : "需要照片权限才能选择图片。"); return; }
+    const result = source === "camera"
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.85 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85, allowsMultipleSelection: true, selectionLimit: Math.max(1, 6 - draftImages.length) });
+    if (result.canceled) return;
+    const selected = result.assets.map((asset) => ({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) }));
+    setDraftImages((current) => [...current, ...selected].slice(0, 6));
   }
 
   async function publish(): Promise<void> {
-    if (!draft.trim() || publishing) return;
+    if ((!draft.trim() && draftImages.length === 0) || publishing) return;
     setPublishing(true);
+    setComposerError(undefined);
     try {
+      const uploaded = await Promise.all(draftImages.map((image) => mediaClient.uploadImage(image)));
       const payload: CreatePostPayload = {
         authorType: "USER",
         authorDisplayName: "你",
         body: draft.trim(),
-        visibility: "PUBLIC",
-        cityScope: "hn"
+        visibility: draftVisibility,
+        ...(draftIncludeCity ? { cityScope: "hn" } : {})
       };
-      if (draftMedia === "IMAGE") payload.mediaRefs = [{ mediaAssetId: SEED_IMAGE_IDS[0] ?? "seed_media_hoankiem", sortOrder: 0 }];
-      if (draftMedia === "VIDEO") payload.mediaRefs = [{ mediaAssetId: SEED_VIDEO_ID, sortOrder: 0 }];
+      if (uploaded.length > 0) payload.mediaRefs = uploaded.map((item, index) => ({ mediaAssetId: item.mediaAssetId, sortOrder: index }));
       if (quoteTargetId) payload.contextRefs = [{ contextType: "QUOTE_POST", contextId: quoteTargetId }];
       await localNet.createPost(payload);
       setDraft("");
-      setDraftMedia(null);
+      cachedComposerDraft = "";
+      setDraftImages([]);
       setQuoteTargetId(null);
       setComposerOpen(false);
       await loadFeed();
-    } catch {
-      // fail-closed：发布失败保留草稿，提示由读模型层统一呈现
+    } catch (error) {
+      setComposerError(error instanceof Error ? error.message : "发布失败，请稍后重试。");
     } finally {
       setPublishing(false);
     }
@@ -389,7 +405,7 @@ export function FeedSurface({
       const ctxTypes = new Set(post.contextRefs.map((r) => r.contextType));
       switch (feedFilter) {
         case "人/关系":
-          if (post.authorType !== "USER") return false;
+          if (post.authorType !== "USER" && !ctxTypes.has("PEOPLE_RELATIONSHIP")) return false;
           break;
         case "机会/需求":
           if (!isOpportunityPost(post)) return false;
@@ -398,7 +414,7 @@ export function FeedSurface({
           if (!ctxTypes.has("ACTIVITY")) return false;
           break;
         case "情报/行业信息":
-          if (post.authorType !== "MERCHANT" && !ctxTypes.has("VENUE")) return false;
+          if (post.authorType !== "MERCHANT" && !ctxTypes.has("VENUE") && !ctxTypes.has("INDUSTRY_INFO")) return false;
           break;
         case "附近":
           if (post.cityScope !== "hn") return false;
@@ -544,8 +560,9 @@ export function FeedSurface({
         <View style={styles.composer}>
           <TextInput
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={(value) => { cachedComposerDraft = value; setDraft(value); }}
             multiline
+            maxLength={1000}
             placeholder="说点本地的事情…"
             placeholderTextColor={color.muted}
             style={styles.composerInput}
@@ -560,26 +577,45 @@ export function FeedSurface({
               </Pressable>
             </View>
           ) : null}
+          {draftImages.length > 0 ? (
+            <View style={styles.composerMediaPreview}>
+              {draftImages.map((image, index) => (
+                <Pressable key={`${image.uri}_${index}`} onPress={() => setDraftImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                  <Image source={{ uri: image.uri }} style={styles.composerMediaThumb} />
+                  <Text style={styles.composerMediaRemove}>移除</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+          <View style={styles.composerMetaRow}>
+            <Pressable onPress={() => setDraftVisibility((value) => value === "PUBLIC" ? "FOLLOWERS" : "PUBLIC")} style={styles.composerMetaChip}>
+              <Text style={styles.composerMetaText}>{draftVisibility === "PUBLIC" ? "所有人可见" : "仅关注者"}</Text>
+            </Pressable>
+            <Pressable onPress={() => setDraftIncludeCity((value) => !value)} style={[styles.composerMetaChip, draftIncludeCity && styles.composerMetaChipOn]}>
+              <Text style={styles.composerMetaText}>{draftIncludeCity ? "河内 · 已添加" : "不添加位置"}</Text>
+            </Pressable>
+            <Text style={styles.composerCount}>{draft.length}/1000</Text>
+          </View>
           <View style={styles.composerTools}>
             <Pressable
-              onPress={() => setDraftMedia(draftMedia === "IMAGE" ? null : "IMAGE")}
-              style={[styles.composerTool, draftMedia === "IMAGE" && styles.composerToolOn]}
+              disabled={draftImages.length >= 6}
+              onPress={() => void pickComposerImages("library")}
+              style={[styles.composerTool, draftImages.length >= 6 && styles.disabled]}
             >
-              <Text style={styles.composerToolText}>照片 · 1–6</Text>
+              <Text style={styles.composerToolText}>照片 {draftImages.length}/6</Text>
             </Pressable>
             <Pressable
-              onPress={() => setDraftMedia(draftMedia === "VIDEO" ? null : "VIDEO")}
-              style={[styles.composerTool, draftMedia === "VIDEO" && styles.composerToolOn]}
+              disabled={draftImages.length >= 6}
+              onPress={() => void pickComposerImages("camera")}
+              style={[styles.composerTool, draftImages.length >= 6 && styles.disabled]}
             >
-              <Text style={styles.composerToolText}>普通视频</Text>
-            </Pressable>
-            <Pressable onPress={bindRandomQuote} style={styles.composerTool}>
-              <Text style={styles.composerToolText}>🎲 随机引用</Text>
+              <Text style={styles.composerToolText}>拍照</Text>
             </Pressable>
             <Pressable onPress={() => void publish()} style={styles.composerPublish}>
               <Text style={styles.composerPublishText}>{publishing ? "发布中…" : "发布"}</Text>
             </Pressable>
           </View>
+          {composerError ? <Text style={styles.composerError}>{composerError}</Text> : null}
         </View>
       ) : null}
 
@@ -1134,6 +1170,14 @@ const styles = StyleSheet.create({
   },
   composerQuoteText: { color: color.muted, flex: 1, fontSize: 11 },
   composerQuoteRemove: { color: "#B91451", fontSize: 11, fontWeight: "700" },
+  composerMediaPreview: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 },
+  composerMediaThumb: { borderRadius: 9, height: 58, width: 58 },
+  composerMediaRemove: { color: "#B91451", fontSize: 11, fontWeight: "700", marginTop: 2, textAlign: "center" },
+  composerMetaRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  composerMetaChip: { backgroundColor: "#F8F5FA", borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 5 },
+  composerMetaChipOn: { backgroundColor: color.lime, borderColor: color.lime },
+  composerMetaText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  composerCount: { color: color.muted, fontSize: 11, marginLeft: "auto" },
   composerTools: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
   composerTool: {
     backgroundColor: color.white,
@@ -1147,6 +1191,8 @@ const styles = StyleSheet.create({
   composerToolText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   composerPublish: { backgroundColor: color.lime, borderRadius: 999, marginLeft: "auto", paddingHorizontal: 14, paddingVertical: 6 },
   composerPublishText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  composerError: { color: "#B91451", fontSize: 11, lineHeight: 15, marginTop: 7 },
+  disabled: { opacity: 0.45 },
 
   // 基线 .networktabs：border-bottom var(--ln)。
   tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row" },

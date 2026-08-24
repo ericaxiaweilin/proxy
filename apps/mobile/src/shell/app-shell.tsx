@@ -271,7 +271,7 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
+            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (
