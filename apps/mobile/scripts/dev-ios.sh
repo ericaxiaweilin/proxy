@@ -22,4 +22,4 @@ export EXPO_PUBLIC_API_BASE_URL="${proxy_ios_api_base_url}"
 echo "Proxy iOS API: ${EXPO_PUBLIC_API_BASE_URL}"
 
 cd "${mobile_dir}"
-NODE_ENV=development exec npx expo start --dev-client
+NODE_ENV=development exec npx expo start --host lan

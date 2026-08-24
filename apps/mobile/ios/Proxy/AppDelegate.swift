@@ -61,7 +61,23 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
 
   override func bundleURL() -> URL? {
 #if DEBUG
-    return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: ".expo/.virtual-metro-entry")
+    // A physical iPhone cannot use Metro's localhost default. Keep the
+    // Bonjour host in the Debug shell so Wi-Fi/hotspot IP changes do not leave
+    // the native app without a script URL.
+    let metroHost = "Thanhs-MacBook-Air.local"
+    var components = URLComponents()
+    components.scheme = "http"
+    components.host = metroHost
+    components.port = 8081
+    components.path = "/.expo/.virtual-metro-entry.bundle"
+    components.queryItems = [
+      URLQueryItem(name: "platform", value: "ios"),
+      URLQueryItem(name: "dev", value: "true"),
+      URLQueryItem(name: "minify", value: "false"),
+      URLQueryItem(name: "modulesOnly", value: "false"),
+      URLQueryItem(name: "runModule", value: "true"),
+    ]
+    return components.url
 #else
     return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif
