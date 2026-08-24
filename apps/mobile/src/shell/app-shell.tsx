@@ -27,6 +27,7 @@ import { type LocalNetClient } from "../localnet-client";
 import { type MediaClient } from "../media-client";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { type FulfillmentClient } from "../fulfillment-client";
+import { type PaymentClient } from "../payment-client";
 import { BusinessHome } from "../surfaces/business-home";
 import { ConversationSurface } from "../surfaces/conversation";
 import { FeedSurface } from "../surfaces/feed";
@@ -71,6 +72,7 @@ export function AppShell({
   marketplace,
   socialSpace,
   fulfillment,
+  payment,
   onSignOut
 }: {
   localNet: LocalNetClient;
@@ -84,6 +86,7 @@ export function AppShell({
   marketplace: MarketplaceClient;
   socialSpace: SocialSpaceClient;
   fulfillment: FulfillmentClient;
+  payment: PaymentClient;
   onSignOut: () => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
