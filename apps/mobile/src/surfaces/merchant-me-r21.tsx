@@ -4,12 +4,11 @@
 import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
-import { AvatarDressingSurface } from "./avatar-dressing";
 import { color, Gradient } from "../theme";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
-type MerchantPage = "root" | "creator" | "creatorDetail" | "voucher" | "voucherDetail" | "activity" | "activityDetail" | "store" | "sales" | "ops" | "proxy" | "avatar";
+type MerchantPage = "root" | "creator" | "creatorDetail" | "voucher" | "voucherDetail" | "activity" | "activityDetail" | "store" | "sales" | "ops" | "proxy";
 
 const creators = [
   { name: "Linh", nick: "生活方式 · 3D 已建模", avail: "本周可约", status: "核心", visits: "18", guests: "72", content: "24", spend: "6.8tr", last: "昨天 · 下午茶体验局" },
@@ -36,7 +35,7 @@ function IconBox({ icon, brand = false, size = 56 }: { icon: ProxyIconName; bran
 }
 
 function Back({ onPress }: { onPress: () => void }): React.JSX.Element {
-  return <Pressable accessibilityLabel="返回我的" onPress={onPress} style={styles.back}><ProxyIcon color={color.ink} name="chevronLeft" size={22} /></Pressable>;
+  return <Pressable accessibilityLabel="返回" onPress={onPress} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>;
 }
 
 function Summary({ title, meta, stats }: { title: string; meta: string; stats: Array<[string, string]> }): React.JSX.Element {
@@ -56,11 +55,9 @@ export function MerchantMeR21({ onOpenSwitcher, onSignOut }: { onOpenSwitcher: (
   const [selectedCreator, setSelectedCreator] = useState<(typeof creators)[number]>(creators[0]!);
   const [selectedVoucher, setSelectedVoucher] = useState<(typeof vouchers)[number]>(vouchers[0]!);
   const [selectedActivity, setSelectedActivity] = useState<(typeof activities)[number]>(activities[0]!);
-  const openCreator = (creator: (typeof creators)[number]) => { setSelectedCreator(creator); setPage(creator.name === "Linh" ? "avatar" : "creatorDetail"); };
+  const openCreator = (creator: (typeof creators)[number]) => { setSelectedCreator(creator); setPage("creatorDetail"); };
   const openVoucher = (voucher: (typeof vouchers)[number]) => { setSelectedVoucher(voucher); setPage("voucherDetail"); };
   const openActivity = (activity: (typeof activities)[number]) => { setSelectedActivity(activity); setPage("activityDetail"); };
-
-  if (page === "avatar") return <AvatarDressingSurface onBack={() => setPage("creator")} />;
 
   if (page === "creator") return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><DetailHead onBack={() => setPage("root")} title="Creator" /><Summary meta="近 30 天到店 61 次 · 影响消费 18.7tr VND" stats={[["9", "活跃"], ["5", "核心"], ["4", "待召回"], ["8", "今日到店"]]} title="24 位 Creator · 5 位核心" /><View style={styles.tabs}>{["全部 24", "活跃 9", "核心 5", "待召回 4"].map((item, index) => <View key={item} style={[styles.tab, index === 0 && styles.tabOn]}><Text style={[styles.tabText, index === 0 && styles.tabTextOn]}>{item}</Text></View>)}</View>{creators.map((creator) => <Pressable key={creator.name} onPress={() => openCreator(creator)} style={styles.objectCard}><View style={styles.objectTop}><View style={styles.avatar}><Text style={styles.avatarText}>{creator.name[0]}</Text></View><View style={styles.objectCopy}><Text style={styles.objectTitle}>{creator.name}</Text><Text style={styles.meta}>{creator.nick} · {creator.avail}</Text></View><View style={styles.status}><Text style={styles.statusText}>{creator.status}</Text></View></View><Text style={[styles.meta, styles.lastVisit]}>最近到店 {creator.last}</Text><View style={styles.facts}>{[[creator.visits, "到店"], [creator.guests, "带客"], [creator.content, "内容"], [creator.spend, "消费"]].map(([value, label]) => <View key={label} style={styles.fact}><Text style={styles.factValue}>{value}</Text><Text style={styles.caption}>{label}</Text></View>)}</View></Pressable>)}</ScrollView></View>;
 
@@ -103,7 +100,7 @@ const styles = StyleSheet.create({
   moduleGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, module: { alignItems: "center", aspectRatio: 1, backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, justifyContent: "center", padding: 14, textAlign: "center", width: "48.55%" }, iconBox: { alignItems: "center", borderRadius: 16, justifyContent: "center" }, iconBoxLime: { backgroundColor: color.lime }, moduleMeta: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15, marginTop: 6, textAlign: "center", width: "100%" },
   proxyWide: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 10, minHeight: 78, padding: 11 }, proxyLogo: { borderRadius: 16, height: 56, width: 56 }, chev: { color: "#756B80", fontSize: 24 },
   switchRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", height: 50, justifyContent: "space-between", marginTop: 12, paddingHorizontal: 14 }, switchText: { color: color.ink, fontSize: 12, fontWeight: "800" }, switchAction: { color: color.ink, fontSize: 12, fontWeight: "800" }, signOut: { alignItems: "center", paddingVertical: 18 }, signOutText: { color: color.magenta, fontSize: 12, fontWeight: "800" },
-  detailHead: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 12 }, back: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, height: 44, justifyContent: "center", width: 44 }, detailTitle: { color: color.ink, fontSize: 24, fontWeight: "900", letterSpacing: -0.7, lineHeight: 30 },
+  detailHead: { marginBottom: 12 }, subPageBack: { marginBottom: 10, paddingVertical: 4 }, subPageBackText: { color: color.magenta, fontSize: 12, fontWeight: "700" }, detailTitle: { color: color.ink, fontSize: 24, fontWeight: "900", letterSpacing: -0.7, lineHeight: 30 },
   summary: { backgroundColor: color.deep, borderRadius: 24, padding: 15 }, summaryMeta: { color: "#D7D0DD", fontSize: 12, lineHeight: 17, marginTop: 4 }, summaryStats: { flexDirection: "row", gap: 8, marginTop: 12 }, summaryStat: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.12)", borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 9 }, summaryValue: { color: color.white, fontSize: 17, fontWeight: "900", lineHeight: 20 }, summaryLabel: { color: "#D8D1DD", fontSize: 11, fontWeight: "600", lineHeight: 15, marginTop: 3 },
   tabs: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 10 }, tab: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 34, justifyContent: "center", paddingHorizontal: 12 }, tabOn: { backgroundColor: "#F8F3FF", borderColor: "#D1C2FF" }, tabText: { color: color.ink, fontSize: 12, fontWeight: "800" }, tabTextOn: { color: "#6830DA" },
   objectCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginTop: 10, padding: 14 }, objectTop: { alignItems: "center", flexDirection: "row", gap: 10 }, avatar: { alignItems: "center", backgroundColor: "#F0EBF3", borderRadius: 16, height: 48, justifyContent: "center", width: 48 }, avatarText: { color: color.ink, fontSize: 18, fontWeight: "900" }, objectCopy: { flex: 1 }, status: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }, statusText: { color: color.ink, fontSize: 11, fontWeight: "800" }, lastVisit: { marginTop: 10 }, facts: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", marginTop: 12, paddingTop: 12 }, fact: { alignItems: "center", borderLeftColor: color.line, borderLeftWidth: 1, flex: 1, paddingHorizontal: 4 }, factValue: { color: color.ink, fontSize: 13, fontWeight: "800", lineHeight: 18 },
