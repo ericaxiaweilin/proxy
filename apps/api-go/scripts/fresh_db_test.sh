@@ -26,7 +26,7 @@ psql -d postgres -c "CREATE DATABASE $FRESH_DB OWNER proxy;" > /dev/null
 echo "空库已创建"
 
 echo "=== 2. 按顺序跑迁移 ==="
-for f in 001_r14_schema.sql 002_identity_demand.sql 003_integration.sql 003_passwordless_identity_uniqueness.sql 004_supply.sql 005_media.sql 006_contribution.sql 007_interaction_events.sql 008_security_hardening.sql 009_post_author_display_name.sql 010_session_tokens_updated_at.sql 011_social_media_pipeline.sql 012_media_processing_jobs.sql 013_outbox_worker_lease.sql; do
+for f in 001_r14_schema.sql 002_identity_demand.sql 003_integration.sql 003_passwordless_identity_uniqueness.sql 004_supply.sql 005_media.sql 006_contribution.sql 007_interaction_events.sql 008_security_hardening.sql 009_post_author_display_name.sql 010_session_tokens_updated_at.sql 011_social_media_pipeline.sql 012_media_processing_jobs.sql 013_outbox_worker_lease.sql 014_social_space.sql; do
   echo "--- $f ---"
   psql -h localhost -U proxy -d $FRESH_DB -f "$MIGRATIONS/$f" > /dev/null
   echo "OK"
@@ -35,11 +35,11 @@ done
 echo "=== 3. Schema 断言 ==="
 EXPECTED_TABLES=$(psql -h localhost -U proxy -d proxy -t -A -c "
 SELECT schemaname || '.' || tablename FROM pg_tables
-WHERE schemaname IN ('citycompanion','localnet','localcontext','conversation','engagement','fulfillment','identity','demand','integration','supply','media','contribution')
+WHERE schemaname IN ('citycompanion','localnet','localcontext','conversation','engagement','fulfillment','identity','demand','integration','supply','media','contribution','socialspace')
 ORDER BY 1;")
 FRESH_TABLES=$(psql -h localhost -U proxy -d $FRESH_DB -t -A -c "
 SELECT schemaname || '.' || tablename FROM pg_tables
-WHERE schemaname IN ('citycompanion','localnet','localcontext','conversation','engagement','fulfillment','identity','demand','integration','supply','media','contribution')
+WHERE schemaname IN ('citycompanion','localnet','localcontext','conversation','engagement','fulfillment','identity','demand','integration','supply','media','contribution','socialspace')
 ORDER BY 1;")
 
 echo "--- 表数量 ---"

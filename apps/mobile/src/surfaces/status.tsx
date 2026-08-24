@@ -2,6 +2,7 @@
 // 小美发「周六下午想去西湖拍照 ☕️」产生机会但不挂牌；回复走私信，Agent 可召回。
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { type SocialSpaceClient, type SocialStatus } from "../socialspace-client";
 import { color, shadows } from "../theme";
 
 export interface Status {
@@ -17,11 +18,16 @@ function lifespanHours(status: Status): number {
   return Math.max(1, Math.round((status.expiresAt - status.createdAt) / 3600_000));
 }
 
-const MOCK_STATUSES: Status[] = [
-  { id: "s_xiaomei", author: "小美", body: "周六下午想去西湖拍照 ☕️ 有一起的吗", createdAt: Date.now() - 2 * 3600_000, expiresAt: Date.now() + 22 * 3600_000, location: "西湖" },
-  { id: "s_huyen", author: "Huyen", body: "今晚想喝咖啡，有人一起找好看的店互相拍照吗", createdAt: Date.now() - 5 * 3600_000, expiresAt: Date.now() + 19 * 3600_000, location: "还剑" },
-  { id: "s_linh", author: "Linh", body: "明天下午 13:00–18:00 临时空出来，想轻松逛西湖", createdAt: Date.now() - 8 * 3600_000, expiresAt: Date.now() + 16 * 3600_000, location: "西湖" }
-];
+function toStatus(status: SocialStatus): Status {
+  return {
+    id: status.id,
+    author: status.author,
+    body: status.body,
+    createdAt: Date.parse(status.createdAt),
+    expiresAt: Date.parse(status.expiresAt),
+    ...(status.location ? { location: status.location } : {})
+  };
+}
 
 function hoursLeft(expiresAt: number): string {
   const diff = Math.max(0, expiresAt - Date.now());
@@ -30,34 +36,45 @@ function hoursLeft(expiresAt: number): string {
   return `${h}h 后归档`;
 }
 
-export function StatusFeed({ onReply }: { onReply?: (author: string) => void }): React.JSX.Element {
-  const [statuses, setStatuses] = useState<Status[]>(MOCK_STATUSES);
+export function StatusFeed({ client, onReply }: { client: SocialSpaceClient; onReply?: (author: string) => void }): React.JSX.Element {
+  const [statuses, setStatuses] = useState<Status[]>([]);
   const [draft, setDraft] = useState("");
   const [location, setLocation] = useState("");
   const [expiry, setExpiry] = useState<24 | 48>(24);
+  const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState<string>();
 
   useEffect(() => {
+    let active = true;
+    void client.listStatuses().then((items) => {
+      if (active) setStatuses(items.map(toStatus));
+    }).catch(() => {
+      if (active) setError("状态暂时无法加载，请稍后重试");
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
     const timer = setInterval(() => setStatuses((prev) => [...prev]), 60_000);
-    return () => clearInterval(timer);
-  }, []);
+    return () => { active = false; clearInterval(timer); };
+  }, [client]);
 
   const visible = statuses.filter((s) => Date.now() < s.expiresAt);
 
-  function publish(): void {
+  async function publish(): Promise<void> {
     const body = draft.trim();
-    if (!body) return;
-    const now = Date.now();
-    const next: Status = {
-      id: `s_${now.toString(36)}`,
-      author: "你",
-      body,
-      createdAt: now,
-      expiresAt: now + expiry * 3600_000,
-      ...(location.trim() ? { location: location.trim() } : {})
-    };
-    setStatuses((prev) => [next, ...prev]);
-    setDraft("");
-    setLocation("");
+    if (!body || publishing) return;
+    setPublishing(true);
+    setError(undefined);
+    try {
+      const created = await client.createStatus({ body, expiryHours: expiry, authorDisplayName: "你", ...(location.trim() ? { location: location.trim() } : {}) });
+      setStatuses((prev) => [toStatus(created), ...prev.filter((item) => item.id !== created.id)]);
+      setDraft("");
+      setLocation("");
+    } catch {
+      setError("发布失败，内容已保留，可稍后重试");
+    } finally {
+      setPublishing(false);
+    }
   }
 
   return (
@@ -75,16 +92,18 @@ export function StatusFeed({ onReply }: { onReply?: (author: string) => void }):
               </Pressable>
             ))}
           </View>
-          <Pressable onPress={publish} style={[styles.postBtn, !draft.trim() && styles.disabled]}>
-            <Text style={styles.postBtnText}>发布</Text>
+          <Pressable disabled={!draft.trim() || publishing} onPress={() => void publish()} style={[styles.postBtn, (!draft.trim() || publishing) && styles.disabled]}>
+            <Text style={styles.postBtnText}>{publishing ? "发布中" : "发布"}</Text>
           </Pressable>
         </View>
         <Text style={styles.composerHint}>示例：周六下午想去西湖拍照 ☕️。系统可据此推荐相关的人、活动或机会，但不会自动创建订单。</Text>
       </View>
 
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>正在发生 · 临时状态</Text>
-        <Text style={styles.sectionSub}>{visible.length} 条 · 24h 内</Text>
+        <Text style={styles.sectionSub}>{loading ? "加载中" : `${visible.length} 条 · 服务器同步`}</Text>
       </View>
 
       {visible.map((s) => (
@@ -149,5 +168,6 @@ const styles = StyleSheet.create({
   actions: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 8 },
   actionBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   actionText: { color: color.white, fontSize: 11, fontWeight: "700" },
-  actionHint: { color: color.muted, fontSize: 11 }
+  actionHint: { color: color.muted, fontSize: 11 },
+  error: { color: color.magenta, fontSize: 11, marginBottom: 6 }
 });

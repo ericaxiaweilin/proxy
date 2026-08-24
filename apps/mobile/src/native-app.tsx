@@ -15,6 +15,7 @@ import { ExperienceClient } from "./experience-client";
 import { VoucherClient } from "./voucher-client";
 import { EngagementClient } from "./engagement-client";
 import { MarketplaceClient } from "./marketplace-client";
+import { SocialSpaceClient } from "./socialspace-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { AppShell } from "./shell/app-shell";
@@ -61,6 +62,7 @@ const demandClient = new DemandClient({ authClient: sessionAuthClient, secureSes
 const voucherClient = new VoucherClient({ authClient: sessionAuthClient, secureSessionStore });
 const engagementClient = new EngagementClient({ authClient: sessionAuthClient, secureSessionStore });
 const marketplaceClient = new MarketplaceClient({ authClient: sessionAuthClient, secureSessionStore });
+const socialSpaceClient = new SocialSpaceClient({ authClient: sessionAuthClient, secureSessionStore });
 type BootPhase = "BOOTSTRAPPING" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {
@@ -92,6 +94,7 @@ export function ProxyApp(): React.JSX.Element {
         vouchers={voucherClient}
         engagement={engagementClient}
         marketplace={marketplaceClient}
+        socialSpace={socialSpaceClient}
         onSignOut={() => {
           void secureSessionStore.clear().catch(() => undefined).then(() => setPhase("SIGNED_OUT"));
         }}

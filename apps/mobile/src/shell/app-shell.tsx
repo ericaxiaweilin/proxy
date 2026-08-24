@@ -25,6 +25,7 @@ import { keepManifestRevision } from "../experience-refresh";
 import { dispatchExperienceAction } from "../experience-dispatcher";
 import { type LocalNetClient } from "../localnet-client";
 import { type MediaClient } from "../media-client";
+import { type SocialSpaceClient } from "../socialspace-client";
 import { BusinessHome } from "../surfaces/business-home";
 import { ConversationSurface } from "../surfaces/conversation";
 import { FeedSurface } from "../surfaces/feed";
@@ -67,6 +68,7 @@ export function AppShell({
   vouchers,
   engagement,
   marketplace,
+  socialSpace,
   onSignOut
 }: {
   localNet: LocalNetClient;
@@ -78,6 +80,7 @@ export function AppShell({
   vouchers: VoucherClient;
   engagement: EngagementClient;
   marketplace: MarketplaceClient;
+  socialSpace: SocialSpaceClient;
   onSignOut: () => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
@@ -273,7 +276,7 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
+            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (

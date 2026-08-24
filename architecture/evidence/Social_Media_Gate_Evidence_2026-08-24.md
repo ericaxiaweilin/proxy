@@ -5,7 +5,9 @@ Scope: Gate 3 Feed/Gallery and Gate 4 Composer on the local P0 stack.
 ## Automated contracts
 
 - `pnpm --filter @proxy/mobile typecheck`: passed.
-- `pnpm --filter @proxy/mobile test`: 21 files / 61 tests passed.
+- `pnpm --filter @proxy/mobile test`: 22 files / 64 tests passed.
+- `go test ./...`: passed, including resumable-upload restart/gap/replay checks and SocialSpace expiry/membership isolation.
+- `apps/api-go/scripts/fresh_db_test.sh`: passed from an empty PostgreSQL database through migration `014_social_space.sql`; production and fresh schemas both reported 38 tables.
 - Real command replay: first `CreatePost` returned `ACCEPTED`; the identical envelope returned `ALREADY_APPLIED`; both returned Post `post_498411d9d6da8bebb82e9dff`.
 
 ## iPhone 15 simulator flow
@@ -57,7 +59,7 @@ Scope: Gate 3 Feed/Gallery and Gate 4 Composer on the local P0 stack.
 
 - Gate 3 still needs multi-person/edge-subject portrait screenshot coverage, mixed image/video coverage, a small-iPhone run and Android evidence. The half-body/full-body mixed portrait case is now covered with synthetic fixtures and simulator evidence.
 - The automation driver could navigate the native gallery but did not dispatch its close-button tap. The close control now has an expanded hit target and touch-down fallback; manual physical-device confirmation remains required before Gate 3 release.
-- Gate 4 still needs resumable multipart pause/resume before full release. Drag reordering is now implemented and covered by state tests plus simulator restart evidence.
+- A real 13,860,478-byte PNG was uploaded from the iPhone 15 simulator through the 1 MiB chunk client and reached READY as `ma_a31005d23609d2c5fa64311a`, producing FEED_1X, FEED_2X, GALLERY, SHARE_OG and PLACEHOLDER variants. The pause control was visible during transfer, but localhost completed before the automation tap landed. Deliberately interrupted device-network evidence remains open; server restart/offset recovery, gap rejection and changed-chunk replay rejection are automated and passing.
 - Model classification was unavailable because the external model-stack control plane at `100.96.188.77:14041` timed out. Media publication correctly continued without binding a business-side model.
 
 ## Dynamic shell and collection-layout regression
@@ -67,13 +69,14 @@ Scope: Gate 3 Feed/Gallery and Gate 4 Composer on the local P0 stack.
 - Media collection policy is deterministic: 1 = maximum-width single, 2/3/5 = horizontal rail, 4/6 = two-column wall. `media-presentation.test.ts` covers all six counts.
 - The content-aware fallback matrix for PERSON / PRODUCT / TEXT_HEAVY / SCENE / mixed content is frozen in `architecture/Social_Media_Pipeline_Plan_Gates_R1.md`. Until the worker emits versioned composition hints, low-confidence or extreme-ratio media falls back to contain rather than destructive center crop.
 - The embedded composer text area now uses a 15 pt font and 112 pt minimum writing area.
-- Post reply now opens a public-reply composer backed by the existing `ReplyToPost` server command. Native Share Sheet is wired for the current post text; canonical public links remain a later Gate and are not claimed complete.
+- Post reply now opens a public-reply composer backed by the existing `ReplyToPost` server command. The native iOS Share Sheet was opened successfully from a feed post and displayed the post text. Canonical public links remain a later Gate and are not claimed complete.
 
 ## Status and Community audit
 
-- Status creation was exercised on the iPhone 15 simulator with `Status flow test`; it appeared immediately as a 24-hour item. The copy now explains temporary broadcast, private-message reply, automatic archive, and that routing suggestions do not create an order. The 48-hour badge calculation bug was fixed.
-- Community list, join toggle and community detail navigation are interactive.
-- Both features still use component-local state and therefore remain **not released**: server commands, durable read models, authorization and restart recovery are required before their Gate can pass.
+- Status and Community no longer use component-local fixtures as their source of truth. `CreateStatus`, `ListStatuses`, `ListCommunities` and `SetCommunityMembership` are authenticated commands in the dedicated `socialspace` domain with PostgreSQL read/write repositories.
+- Status `Server status flow verified` was published from the iPhone 15 simulator, returned from the server read model and displayed as a 24-hour item. Expired items are filtered by the domain clock; 24/48-hour validation is server-enforced.
+- Joined `河内摄影`, terminated/relaunched the App, reopened Community and confirmed `已加入` persisted. Membership is actor-scoped and seeded community content comes from migration `014_social_space.sql`.
+- Community detail discussion cards are currently read-model projections. Creating community posts and moderation are separate Gate work and are not claimed complete.
 
 ## Development endpoint recurrence
 

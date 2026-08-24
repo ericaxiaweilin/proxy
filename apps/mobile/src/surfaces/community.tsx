@@ -1,7 +1,8 @@
 // Community — 兴趣圈子，非接单市场。河内摄影/中文生活/创业/咖啡/羽毛球等。
 // 人围绕兴趣聚集，不围绕接单聚集；Community Hub + Flair + Activity 关联。
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { type SocialCommunity, type SocialSpaceClient } from "../socialspace-client";
 import { color, shadows } from "../theme";
 
 export interface Community {
@@ -11,37 +12,64 @@ export interface Community {
   members: number;
   color: string;
   flair?: string;
+  joined: boolean;
 }
 
-const COMMUNITIES: Community[] = [
-  { id: "photo", name: "河内摄影", desc: "西湖/老城区/咖啡店 · 作品与地点", members: 342, color: "#F0EAF5", flair: "活跃" },
-  { id: "chinese", name: "中文生活", desc: "中文沟通/本地生活/互助", members: 218, color: "#FFF0F6", flair: "互助" },
-  { id: "startup", name: "河内创业", desc: "产品/AI/出海 · 线下碰头", members: 156, color: "#EDF9F6", flair: "创业" },
-  { id: "coffee", name: "本地咖啡", desc: "独立咖啡/烘焙/探店", members: 289, color: "#FFF8DF", flair: "探店" },
-  { id: "badminton", name: "羽毛球", desc: "每周组局 · 新手友好", members: 94, color: "#F1F7FF", flair: "组局" }
-];
+function toCommunity(community: SocialCommunity): Community {
+  return {
+    id: community.id,
+    name: community.name,
+    desc: community.desc,
+    members: community.members,
+    color: community.color,
+    joined: community.joined,
+    ...(community.flair ? { flair: community.flair } : {})
+  };
+}
 
-export function CommunityHub({ onOpenCommunity }: { onOpenCommunity?: (id: string) => void }): React.JSX.Element {
-  const [joined, setJoined] = useState<ReadonlySet<string>>(new Set(["photo"]));
+export function CommunityHub({ client, onOpenCommunity }: { client: SocialSpaceClient; onOpenCommunity?: (id: string) => void }): React.JSX.Element {
+  const [communities, setCommunities] = useState<Community[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const [error, setError] = useState<string>();
 
-  function toggle(id: string): void {
-    const next = new Set(joined);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setJoined(next);
+  useEffect(() => {
+    let active = true;
+    void client.listCommunities().then((items) => {
+      if (active) setCommunities(items.map(toCommunity));
+    }).catch(() => {
+      if (active) setError("社区暂时无法加载，请稍后重试");
+    });
+    return () => { active = false; };
+  }, [client]);
+
+  async function toggle(id: string): Promise<void> {
+    const current = communities.find((item) => item.id === id);
+    if (!current || busy.has(id)) return;
+    const joined = !current.joined;
+    setBusy((prev) => new Set(prev).add(id));
+    setError(undefined);
+    setCommunities((prev) => prev.map((item) => item.id === id ? { ...item, joined } : item));
+    try {
+      await client.setCommunityMembership(id, joined);
+    } catch {
+      setCommunities((prev) => prev.map((item) => item.id === id ? { ...item, joined: !joined } : item));
+      setError("加入状态保存失败，请重试");
+    } finally {
+      setBusy((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    }
   }
 
-  const selected = COMMUNITIES.find((community) => community.id === selectedId);
+  const selected = communities.find((community) => community.id === selectedId);
   if (selected) {
-    const isJoined = joined.has(selected.id);
+    const isJoined = selected.joined;
     return (
       <View>
         <Pressable onPress={() => setSelectedId(undefined)}><Text style={styles.back}>‹ 返回社区</Text></Pressable>
         <View style={styles.detailHero}>
           <View style={[styles.icon, { backgroundColor: selected.color }]}><Text style={styles.iconText}>{selected.name.charAt(0)}</Text></View>
           <View style={styles.copy}><Text style={styles.detailTitle}>{selected.name}</Text><Text style={styles.desc}>{selected.desc}</Text><Text style={styles.meta}>{selected.members} 成员 · {selected.flair}</Text></View>
-          <Pressable onPress={() => toggle(selected.id)} style={[styles.joinBtn, isJoined && styles.joinBtnOn]}><Text style={[styles.joinText, isJoined && styles.joinTextOn]}>{isJoined ? "已加入" : "加入"}</Text></Pressable>
+          <Pressable disabled={busy.has(selected.id)} onPress={() => void toggle(selected.id)} style={[styles.joinBtn, isJoined && styles.joinBtnOn]}><Text style={[styles.joinText, isJoined && styles.joinTextOn]}>{isJoined ? "已加入" : "加入"}</Text></Pressable>
         </View>
         <Text style={styles.sectionTitle}>圈内正在讨论</Text>
         <View style={styles.discussion}><Text style={styles.discussionTitle}>本周大家最推荐的地点</Text><Text style={styles.discussionBody}>分享具体地点、作品或经验；回复会留在这个兴趣社区，不进入接单市场。</Text></View>
@@ -56,8 +84,10 @@ export function CommunityHub({ onOpenCommunity }: { onOpenCommunity?: (id: strin
         <Text style={styles.title}>Community</Text>
         <Text style={styles.sub}>人围绕兴趣聚集，不围绕接单聚集</Text>
       </View>
-      {COMMUNITIES.map((c) => {
-        const isJoined = joined.has(c.id);
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {communities.length === 0 && !error ? <Text style={styles.loading}>社区加载中…</Text> : null}
+      {communities.map((c) => {
+        const isJoined = c.joined;
         return (
           <Pressable key={c.id} onPress={() => { setSelectedId(c.id); onOpenCommunity?.(c.id); }} style={styles.card}>
             <View style={[styles.icon, { backgroundColor: c.color }]}>
@@ -68,7 +98,7 @@ export function CommunityHub({ onOpenCommunity }: { onOpenCommunity?: (id: strin
               <Text numberOfLines={1} style={styles.desc}>{c.desc}</Text>
               <Text style={styles.meta}>{c.members} 成员 · {c.flair}</Text>
             </View>
-            <Pressable onPress={() => toggle(c.id)} style={[styles.joinBtn, isJoined && styles.joinBtnOn]}>
+            <Pressable disabled={busy.has(c.id)} onPress={(event) => { event.stopPropagation(); void toggle(c.id); }} style={[styles.joinBtn, isJoined && styles.joinBtnOn]}>
               <Text style={[styles.joinText, isJoined && styles.joinTextOn]}>{isJoined ? "已加入" : "加入"}</Text>
             </Pressable>
           </Pressable>
@@ -101,5 +131,7 @@ const styles = StyleSheet.create({
   sectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginBottom: 3, marginTop: 14 },
   discussion: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 6, padding: 11 },
   discussionTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  discussionBody: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 }
+  discussionBody: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  error: { color: color.magenta, fontSize: 11, marginBottom: 6 },
+  loading: { color: color.muted, fontSize: 11, paddingVertical: 12, textAlign: "center" }
 });

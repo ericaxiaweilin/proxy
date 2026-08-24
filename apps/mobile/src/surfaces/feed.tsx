@@ -24,6 +24,7 @@ import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
 import { CustomFeedHub } from "./custom-feed";
 import { StatusFeed } from "./status";
+import { type SocialSpaceClient } from "../socialspace-client";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
@@ -211,6 +212,7 @@ export function FeedSurface({
   marketplace,
   mediaClient,
   engagement,
+  socialSpace,
   onOpenChat,
   onOpenFeedPrefs,
   onChromeVisibilityChange,
@@ -220,6 +222,7 @@ export function FeedSurface({
   marketplace: MarketplaceClient;
   mediaClient: MediaClient;
   engagement: EngagementClient;
+  socialSpace: SocialSpaceClient;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -843,9 +846,9 @@ export function FeedSurface({
       </View>
 
       {section === "STATUS" ? (
-        <StatusFeed onReply={onOpenChat} />
+        <StatusFeed client={socialSpace} onReply={onOpenChat} />
       ) : section === "COMMUNITY" ? (
-        <CommunityHub />
+        <CommunityHub client={socialSpace} />
       ) : (
       <>
       {selectedCustomFeed ? (
