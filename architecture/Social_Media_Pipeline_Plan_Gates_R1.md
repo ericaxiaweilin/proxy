@@ -375,6 +375,7 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 - [ ] 多图 Rail 的比例、露出、滑动 index、混合媒体完成。
 - [x] 半身 4:5 + 全身 9:16 使用统一人像画布，不再缩成 156px 小图。
 - [x] 全身人像 contain + 柔化补边，默认不裁头脚。
+- [x] 同帖半身 4:5 + 全身 9:16 真实发布回归：顺序、`1/2 → 2/2` index、稳定 Rail 高度、Gallery 原比例均通过；证据 Post `post_45ca5b5f18da5f06659d89cc`。
 - [ ] 半身/全身/多人/靠边人物样本集截图回归。
 - [x] Gallery 与 Rail 共享稳定媒体 index；关闭覆盖层后 Feed 未卸载，恢复原 Post/index/scroll position。
 - [ ] iPhone 15 + 小屏 iPhone + Android 三档真机视觉证据。
