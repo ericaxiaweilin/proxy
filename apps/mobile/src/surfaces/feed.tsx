@@ -419,19 +419,6 @@ export function FeedSurface({
     }
     return true;
   });
-  const [page, setPage] = useState(1);
-  const pageSize = 3;
-  useEffect(() => { setPage(1); }, [tab, feedFilter, selectedCustomFeed]);
-  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
-  useEffect(() => { setPage((current) => Math.min(current, pageCount)); }, [pageCount]);
-  const pageStart = (page - 1) * pageSize;
-  const paginatedVisible = visible.slice(pageStart, pageStart + pageSize);
-
-  function changePage(next: number): void {
-    setPage(Math.max(1, Math.min(pageCount, next)));
-    scrollRef.current?.scrollTo({ y: 0, animated: true });
-  }
-
   const quoteTarget = quoteTargetId ? posts.find((post) => post.postId === quoteTargetId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
@@ -597,12 +584,6 @@ export function FeedSurface({
       ) : null}
 
       {engagementError ? <Text style={styles.engagementError}>{engagementError}</Text> : null}
-      {phase === "READY" && visible.length > 0 ? (
-        <View style={styles.pageSummary}>
-          <Text style={styles.pageSummaryTitle}>内容流</Text>
-          <Text style={styles.pageSummaryText}>第 {page} / {pageCount} 页 · 共 {visible.length} 条</Text>
-        </View>
-      ) : null}
       {phase === "LOADING" ? (
         <View style={styles.feedEmpty}>
           <ActivityIndicator color={color.magenta} />
@@ -625,7 +606,7 @@ export function FeedSurface({
         </View>
       ) : (
         <>
-          {paginatedVisible.map((post) => {
+          {visible.map((post) => {
           const quoted = findQuote(post);
           const items = mediaFor(post.postId);
           const name = authorName(post);
@@ -791,19 +772,6 @@ export function FeedSurface({
             </View>
           );
         })}
-        {pageCount > 1 ? (
-          <View style={styles.pageControls}>
-            <Pressable disabled={page === 1} onPress={() => changePage(page - 1)} style={[styles.pageButton, page === 1 && styles.pageButtonDisabled]}>
-              <Text style={[styles.pageButtonText, page === 1 && styles.pageButtonTextDisabled]}>‹ 上一页</Text>
-            </Pressable>
-            <View style={styles.pageIndicator}>
-              <Text style={styles.pageIndicatorText}>{page} / {pageCount}</Text>
-            </View>
-            <Pressable disabled={page === pageCount} onPress={() => changePage(page + 1)} style={[styles.pageButton, page === pageCount && styles.pageButtonDisabled]}>
-              <Text style={[styles.pageButtonText, page === pageCount && styles.pageButtonTextDisabled]}>下一页 ›</Text>
-            </Pressable>
-          </View>
-        ) : null}
         </>
       )}
       </>
@@ -1210,17 +1178,6 @@ const styles = StyleSheet.create({
   feedEmptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   retryBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   retryBtnText: { color: color.white, fontSize: 11, fontWeight: "700" },
-  pageSummary: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 3, marginTop: 8 },
-  pageSummaryTitle: { color: color.ink, fontSize: 14, fontWeight: "900" },
-  pageSummaryText: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  pageControls: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "space-between", marginTop: 12 },
-  pageButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, flex: 1, minHeight: 42, justifyContent: "center", paddingHorizontal: 12 },
-  pageButtonDisabled: { backgroundColor: "#F3EFF5", opacity: 0.55 },
-  pageButtonText: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  pageButtonTextDisabled: { color: color.muted },
-  pageIndicator: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, minWidth: 54, paddingHorizontal: 10, paddingVertical: 8 },
-  pageIndicatorText: { color: color.white, fontSize: 11, fontWeight: "900" },
-
   // 基线 .postcard：radius 18，margin 9，padding 12。
   postCard: {
     backgroundColor: color.white,
