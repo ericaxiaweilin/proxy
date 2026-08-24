@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDraftMedia, draftMediaRefs, moveDraftMedia, normalizeRestoredDraftMedia, pendingDraftMedia } from "./composer-media";
+import { createDraftMedia, draftMediaDragTarget, draftMediaRefs, moveDraftMedia, normalizeRestoredDraftMedia, pendingDraftMedia } from "./composer-media";
 
 const image = { uri: "file:///portrait.jpg", width: 1200, height: 1800, mimeType: "image/jpeg" };
 
@@ -7,6 +7,13 @@ describe("composer media state", () => {
   it("keeps author order stable while moving one item", () => {
     const items = [createDraftMedia(image, "a"), createDraftMedia({ ...image, uri: "file:///b.jpg" }, "b")];
     expect(moveDraftMedia(items, 1, 0).map((item) => item.localId)).toEqual(["b", "a"]);
+  });
+
+  it("maps a horizontal drag to a clamped author-order slot", () => {
+    expect(draftMediaDragTarget(1, 250, 236, 4)).toBe(2);
+    expect(draftMediaDragTarget(2, -500, 236, 4)).toBe(0);
+    expect(draftMediaDragTarget(0, -500, 236, 4)).toBe(0);
+    expect(draftMediaDragTarget(3, 500, 236, 4)).toBe(3);
   });
 
   it("retries only media that is not already ready", () => {

@@ -36,6 +36,17 @@ Scope: Gate 3 Feed/Gallery and Gate 4 Composer on the local P0 stack.
   - `architecture/evidence/social-media-2026-08-24/portrait-feed-full-body.jpg`
   - `architecture/evidence/social-media-2026-08-24/portrait-gallery-full-body.jpg`
 
+## Composer drag-order regression
+
+- Added a dedicated horizontal drag handle to each media card; the media rail keeps ordinary horizontal scrolling separate from author reordering.
+- Dragged the original first item one slot right. The 9:16 full-body fixture became item 1 and the 4:5 half-body fixture became item 2.
+- Terminated and relaunched the App, reopened Dynamic and confirmed the durable draft restored the reordered list unchanged.
+- `draftMediaRefs` continues to derive contiguous `sortOrder` values from the restored author order.
+- A clean launch showed no Debug warning banner. The banner observed during Fast Refresh cleared after a full terminate/relaunch and did not reproduce on the clean build session.
+- Visual evidence:
+  - `architecture/evidence/social-media-2026-08-24/composer-drag-reordered.jpg`
+  - `architecture/evidence/social-media-2026-08-24/composer-drag-restored.jpg`
+
 ## Physical device state
 
 - Connected target: `weilin`, iPhone 15, iOS 26.6, CoreDevice ID `5F487B76-69EA-5311-AE63-3C5F09A61F20`.
@@ -46,5 +57,5 @@ Scope: Gate 3 Feed/Gallery and Gate 4 Composer on the local P0 stack.
 
 - Gate 3 still needs multi-person/edge-subject portrait screenshot coverage, mixed image/video coverage, a small-iPhone run and Android evidence. The half-body/full-body mixed portrait case is now covered with synthetic fixtures and simulator evidence.
 - The automation driver could navigate the native gallery but did not dispatch its close-button tap. The close control now has an expanded hit target and touch-down fallback; manual physical-device confirmation remains required before Gate 3 release.
-- Gate 4 still needs resumable multipart pause/resume and drag reordering before full release.
+- Gate 4 still needs resumable multipart pause/resume before full release. Drag reordering is now implemented and covered by state tests plus simulator restart evidence.
 - Model classification was unavailable because the external model-stack control plane at `100.96.188.77:14041` timed out. Media publication correctly continued without binding a business-side model.

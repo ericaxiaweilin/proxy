@@ -5,7 +5,7 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, AppState, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -15,7 +15,7 @@ import { type LocalNetClient } from "../localnet-client";
 import { type EngagementClient } from "../engagement-client";
 import { type MarketplaceClient } from "../marketplace-client";
 import { type MediaClient } from "../media-client";
-import { createDraftMedia, draftMediaRefs, mediaStatusLabel, moveDraftMedia, normalizeRestoredDraftMedia, pendingDraftMedia, type DraftMediaItem } from "../composer-media";
+import { createDraftMedia, draftMediaDragTarget, draftMediaRefs, mediaStatusLabel, moveDraftMedia, normalizeRestoredDraftMedia, pendingDraftMedia, type DraftMediaItem } from "../composer-media";
 import { clearComposerDraft, readComposerDraft, retainComposerImage, writeComposerDraft } from "../expo-composer-draft-store";
 import { isOpportunityPost, mergeFeedContent } from "../feed-content";
 import { mediaAspect, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
@@ -106,6 +106,98 @@ const CUSTOM_FEED_LABELS: Readonly<Record<string, string>> = {
   photo: "摄影",
   startup: "创业"
 };
+
+const COMPOSER_MEDIA_ITEM_SPAN = 236;
+
+function ComposerMediaCard({
+  item,
+  index,
+  itemCount,
+  publishing,
+  onAltText,
+  onCancel,
+  onMove,
+  onRemove,
+  onReplace
+}: {
+  item: DraftMediaItem;
+  index: number;
+  itemCount: number;
+  publishing: boolean;
+  onAltText: (altText: string) => void;
+  onCancel: () => void;
+  onMove: (from: number, to: number) => void;
+  onRemove: () => void;
+  onReplace: () => void;
+}): React.JSX.Element {
+  const dragX = useRef(new Animated.Value(0)).current;
+  const [dragging, setDragging] = useState(false);
+  const dragResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => !publishing,
+    onMoveShouldSetPanResponder: (_event, gesture) => !publishing && Math.abs(gesture.dx) > 4,
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
+    onPanResponderGrant: () => setDragging(true),
+    onPanResponderMove: (_event, gesture) => dragX.setValue(gesture.dx),
+    onPanResponderRelease: (_event, gesture) => {
+      const target = draftMediaDragTarget(index, gesture.dx, COMPOSER_MEDIA_ITEM_SPAN, itemCount);
+      dragX.setValue(0);
+      setDragging(false);
+      if (target !== index) onMove(index, target);
+    },
+    onPanResponderTerminate: () => {
+      dragX.setValue(0);
+      setDragging(false);
+    }
+  }), [dragX, index, itemCount, onMove, publishing]);
+
+  return (
+    <Animated.View style={[styles.composerMediaItem, dragging && styles.composerMediaItemDragging, { transform: [{ translateX: dragX }] }]}>
+      <View
+        accessibilityLabel={`拖动第 ${index + 1} 张照片排序`}
+        accessibilityRole="adjustable"
+        style={styles.composerMediaDragHandle}
+        {...dragResponder.panHandlers}
+      >
+        <Text style={styles.composerMediaDragText}>按住左右拖动排序</Text>
+        <Text style={styles.composerMediaDragGlyph}>≡</Text>
+      </View>
+      <Image resizeMode="contain" source={{ uri: item.image.uri }} style={styles.composerMediaThumb} />
+      <Text style={[styles.composerMediaStatus, item.status === "FAILED" && styles.composerMediaStatusFailed]}>{mediaStatusLabel(item)}</Text>
+      <TextInput
+        accessibilityLabel={`第 ${index + 1} 张照片替代文本`}
+        editable={!publishing}
+        maxLength={500}
+        onChangeText={onAltText}
+        placeholder="描述照片（可选）"
+        placeholderTextColor={color.muted}
+        style={styles.composerMediaAlt}
+        value={item.altText}
+      />
+      <View style={styles.composerMediaActions}>
+        <Pressable disabled={publishing || index === 0} onPress={() => onMove(index, index - 1)}>
+          <Text style={[styles.composerMediaAction, index === 0 && styles.disabledText]}>前移</Text>
+        </Pressable>
+        <Pressable disabled={publishing || index === itemCount - 1} onPress={() => onMove(index, index + 1)}>
+          <Text style={[styles.composerMediaAction, index === itemCount - 1 && styles.disabledText]}>后移</Text>
+        </Pressable>
+        {item.status === "UPLOADING" ? (
+          <Pressable onPress={onCancel}>
+            <Text style={styles.composerMediaRemove}>取消</Text>
+          </Pressable>
+        ) : (
+          <Pressable disabled={publishing} onPress={onReplace}>
+            <Text style={styles.composerMediaAction}>替换</Text>
+          </Pressable>
+        )}
+        <Pressable disabled={publishing} onPress={onRemove}>
+          <Text style={styles.composerMediaRemove}>移除</Text>
+        </Pressable>
+      </View>
+      {item.error ? <Text numberOfLines={2} style={styles.composerMediaError}>{item.error}</Text> : null}
+    </Animated.View>
+  );
+}
 
 export function FeedSurface({
   localNet,
@@ -781,44 +873,27 @@ export function FeedSurface({
               style={styles.composerMediaPreview}
             >
               {draftMedia.map((item, index) => (
-                <View key={item.localId} style={styles.composerMediaItem}>
-                  <Image resizeMode="contain" source={{ uri: item.image.uri }} style={styles.composerMediaThumb} />
-                  <Text style={[styles.composerMediaStatus, item.status === "FAILED" && styles.composerMediaStatusFailed]}>{mediaStatusLabel(item)}</Text>
-                  <TextInput
-                    accessibilityLabel={`第 ${index + 1} 张照片替代文本`}
-                    editable={!publishing}
-                    maxLength={500}
-                    onChangeText={(altText) => {
-                      invalidatePublishAttempt();
-                      setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId ? { ...candidate, altText } : candidate));
-                    }}
-                    placeholder="描述照片（可选）"
-                    placeholderTextColor={color.muted}
-                    style={styles.composerMediaAlt}
-                    value={item.altText}
-                  />
-                  <View style={styles.composerMediaActions}>
-                    <Pressable disabled={publishing || index === 0} onPress={() => { invalidatePublishAttempt(); setDraftMedia((current) => moveDraftMedia(current, index, index - 1)); }}>
-                      <Text style={[styles.composerMediaAction, index === 0 && styles.disabledText]}>前移</Text>
-                    </Pressable>
-                    <Pressable disabled={publishing || index === draftMedia.length - 1} onPress={() => { invalidatePublishAttempt(); setDraftMedia((current) => moveDraftMedia(current, index, index + 1)); }}>
-                      <Text style={[styles.composerMediaAction, index === draftMedia.length - 1 && styles.disabledText]}>后移</Text>
-                    </Pressable>
-                    {item.status === "UPLOADING" ? (
-                      <Pressable onPress={() => uploadControllersRef.current.get(item.localId)?.abort()}>
-                        <Text style={styles.composerMediaRemove}>取消</Text>
-                      </Pressable>
-                    ) : (
-                      <Pressable disabled={publishing} onPress={() => void replaceComposerImage(item.localId)}>
-                        <Text style={styles.composerMediaAction}>替换</Text>
-                      </Pressable>
-                    )}
-                    <Pressable disabled={publishing} onPress={() => { invalidatePublishAttempt(); setDraftMedia((current) => current.filter((candidate) => candidate.localId !== item.localId)); }}>
-                      <Text style={styles.composerMediaRemove}>移除</Text>
-                    </Pressable>
-                  </View>
-                  {item.error ? <Text numberOfLines={2} style={styles.composerMediaError}>{item.error}</Text> : null}
-                </View>
+                <ComposerMediaCard
+                  index={index}
+                  item={item}
+                  itemCount={draftMedia.length}
+                  key={item.localId}
+                  onAltText={(altText) => {
+                    invalidatePublishAttempt();
+                    setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId ? { ...candidate, altText } : candidate));
+                  }}
+                  onCancel={() => uploadControllersRef.current.get(item.localId)?.abort()}
+                  onMove={(from, to) => {
+                    invalidatePublishAttempt();
+                    setDraftMedia((current) => moveDraftMedia(current, from, to));
+                  }}
+                  onRemove={() => {
+                    invalidatePublishAttempt();
+                    setDraftMedia((current) => current.filter((candidate) => candidate.localId !== item.localId));
+                  }}
+                  onReplace={() => void replaceComposerImage(item.localId)}
+                  publishing={publishing}
+                />
               ))}
             </ScrollView>
           ) : null}
@@ -1526,6 +1601,10 @@ const styles = StyleSheet.create({
   composerMediaPreview: { marginTop: 8 },
   composerMediaPreviewContent: { gap: 8, paddingRight: 12 },
   composerMediaItem: { backgroundColor: "#FAF8FB", borderColor: color.line, borderRadius: 12, borderWidth: 1, padding: 8, width: 228 },
+  composerMediaItemDragging: { elevation: 8, opacity: 0.94, shadowColor: "#17121F", shadowOffset: { height: 5, width: 0 }, shadowOpacity: 0.22, shadowRadius: 10, zIndex: 20 },
+  composerMediaDragHandle: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 30, paddingBottom: 5, paddingHorizontal: 2 },
+  composerMediaDragText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  composerMediaDragGlyph: { color: color.ink, fontSize: 18, fontWeight: "800", lineHeight: 20 },
   composerMediaThumb: { backgroundColor: "#F0ECF3", borderRadius: 9, height: 142, width: "100%" },
   composerMediaStatus: { color: "#4F6840", fontSize: 11, fontWeight: "700", marginTop: 4 },
   composerMediaStatusFailed: { color: "#B91451" },

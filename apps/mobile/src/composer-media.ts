@@ -24,6 +24,12 @@ export function moveDraftMedia(items: readonly DraftMediaItem[], from: number, t
   return next;
 }
 
+export function draftMediaDragTarget(from: number, dragX: number, itemSpan: number, itemCount: number): number {
+  if (itemCount <= 0 || itemSpan <= 0 || from < 0 || from >= itemCount) return from;
+  const slotDelta = Math.round(dragX / itemSpan);
+  return Math.max(0, Math.min(itemCount - 1, from + slotDelta));
+}
+
 export function pendingDraftMedia(items: readonly DraftMediaItem[]): DraftMediaItem[] {
   return items.filter((item) => item.status !== "READY" || !item.mediaAssetId);
 }
