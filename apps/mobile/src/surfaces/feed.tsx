@@ -347,6 +347,10 @@ export function FeedSurface({
     }
     return true;
   });
+  const [page, setPage] = useState(1);
+  const pageSize = 5;
+  useEffect(() => { setPage(1); }, [tab, feedFilter, selectedCustomFeed]);
+  const paginatedVisible = visible.slice(0, page * pageSize);
 
   const quoteTarget = quoteTargetId ? posts.find((post) => post.postId === quoteTargetId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
@@ -537,7 +541,8 @@ export function FeedSurface({
           </Text>
         </View>
       ) : (
-        visible.map((post) => {
+        <>
+          {paginatedVisible.map((post) => {
           const quoted = findQuote(post);
           const items = mediaFor(post.postId);
           const name = authorName(post);
@@ -698,7 +703,17 @@ export function FeedSurface({
               ) : null}
             </View>
           );
-        })
+        })}
+        {paginatedVisible.length < visible.length ? (
+          <Pressable onPress={() => setPage((p) => p + 1)} style={styles.loadMoreBtn}>
+            <Text style={styles.loadMoreText}>加载更多 · 还有 {visible.length - paginatedVisible.length} 条</Text>
+          </Pressable>
+        ) : visible.length > pageSize ? (
+          <View style={styles.loadMoreDone}>
+            <Text style={styles.loadMoreDoneText}>已看完 · 共 {visible.length} 条</Text>
+          </View>
+        ) : null}
+        </>
       )}
 
       {/* 全屏媒体查看器（真实文件：图片 thumbnailUrl / 视频 playbackUrl） */}
@@ -1096,6 +1111,10 @@ const styles = StyleSheet.create({
   feedEmptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   retryBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   retryBtnText: { color: color.white, fontSize: 11, fontWeight: "700" },
+  loadMoreBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, marginTop: 10, paddingVertical: 10 },
+  loadMoreText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  loadMoreDone: { alignItems: "center", marginTop: 10, paddingVertical: 6 },
+  loadMoreDoneText: { color: color.muted, fontSize: 11 },
 
   // 基线 .postcard：radius 18，margin 9，padding 12。
   postCard: {
