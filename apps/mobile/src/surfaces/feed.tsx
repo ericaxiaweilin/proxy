@@ -11,6 +11,8 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type EngagementClient } from "../engagement-client";
+import { type MarketplaceClient } from "../marketplace-client";
+import { isOpportunityPost, mergeFeedContent } from "../feed-content";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
@@ -100,12 +102,14 @@ const CUSTOM_FEED_LABELS: Readonly<Record<string, string>> = {
 
 export function FeedSurface({
   localNet,
+  marketplace,
   engagement,
   onOpenChat,
   onOpenFeedPrefs,
   refreshTrigger
 }: {
   localNet: LocalNetClient;
+  marketplace: MarketplaceClient;
   engagement: EngagementClient;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
@@ -226,40 +230,54 @@ export function FeedSurface({
       setPhase("LOADING");
     }
     try {
-      let read = await localNet.listFeedPosts();
-      if (read.posts.length === 0) {
+      const [postResult, marketResult] = await Promise.allSettled([
+        localNet.listFeedPosts(),
+        marketplace.list()
+      ]);
+      if (postResult.status === "rejected" && marketResult.status === "rejected") throw new Error("feed sources unavailable");
+      let read = postResult.status === "fulfilled" ? postResult.value : { posts: [], media: {} };
+      if (postResult.status === "fulfilled" && read.posts.length === 0) {
         await seedDemoPosts();
         read = await localNet.listFeedPosts();
       }
-      // 更新缓存
-      cachedPosts = read.posts;
+      const opportunities = marketResult.status === "fulfilled" ? marketResult.value : [];
+      const unifiedPosts = mergeFeedContent(read.posts, opportunities, Date.now());
+      // “全部”是统一内容流：帖子 + 服务端市场机会/需求。
+      cachedPosts = unifiedPosts;
       cachedMedia = read.media;
-      cachedPostIds = new Set(read.posts.map((p) => p.postId));
+      cachedPostIds = new Set(unifiedPosts.map((p) => p.postId));
       postIdsRef.current = cachedPostIds;
-      setPosts(read.posts);
+      setPosts(unifiedPosts);
       setMedia(read.media);
       setPhase("READY");
     } catch {
       setPhase("ERROR");
     }
-  }, [localNet, seedDemoPosts]);
+  }, [localNet, marketplace, seedDemoPosts]);
 
   // 后台静默刷新：不显示 LOADING，只检测新帖
   const backgroundRefresh = useCallback(async (): Promise<void> => {
     try {
-      const read = await localNet.listFeedPosts();
-      if (read.posts.length === 0) return;
+      const [postResult, marketResult] = await Promise.allSettled([
+        localNet.listFeedPosts(),
+        marketplace.list()
+      ]);
+      if (postResult.status === "rejected" && marketResult.status === "rejected") return;
+      const read = postResult.status === "fulfilled" ? postResult.value : { posts: [], media: {} };
+      const opportunities = marketResult.status === "fulfilled" ? marketResult.value : [];
+      const unifiedPosts = mergeFeedContent(read.posts, opportunities, Date.now());
+      if (unifiedPosts.length === 0) return;
       const currentIds = postIdsRef.current;
-      const newPosts = read.posts.filter((p) => !currentIds.has(p.postId));
+      const newPosts = unifiedPosts.filter((p) => !currentIds.has(p.postId));
       if (newPosts.length > 0) {
         setPendingCount(newPosts.length);
-        setPendingPosts(read.posts);
+        setPendingPosts(unifiedPosts);
         setPendingMedia(read.media);
       }
     } catch {
       // 静默失败
     }
-  }, [localNet]);
+  }, [localNet, marketplace]);
 
   // 切换到 Feed tab 时触发后台刷新
   useEffect(() => {
@@ -374,7 +392,7 @@ export function FeedSurface({
           if (post.authorType !== "USER") return false;
           break;
         case "机会/需求":
-          if (!ctxTypes.has("AVAILABILITY") && post.authorType !== "AGENT") return false;
+          if (!isOpportunityPost(post)) return false;
           break;
         case "活动/团体":
           if (!ctxTypes.has("ACTIVITY")) return false;
@@ -392,7 +410,7 @@ export function FeedSurface({
         friends: (p) => following.has(p.authorId) || authorName(p) === "你",
         hanoi: (p) => p.cityScope === "hn",
         photo: (p) => p.contextRefs.some((r) => r.contextId.includes("摄影") || r.contextId.includes("拍照")),
-        opportunity: (p) => p.contextRefs.some((r) => r.contextType === "AVAILABILITY") || p.authorType === "AGENT",
+        opportunity: isOpportunityPost,
         merchant: (p) => p.authorType === "MERCHANT",
         startup: (p) => p.contextRefs.some((r) => r.contextId.includes("创业") || r.contextId.includes("AI"))
       };
