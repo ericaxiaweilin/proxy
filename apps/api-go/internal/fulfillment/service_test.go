@@ -275,3 +275,51 @@ func TestConcurrentAcceptSameSlot(t *testing.T) {
 		t.Fatalf("want SLOT_UNAVAILABLE got %s", rB.Error.ErrorCode)
 	}
 }
+
+func TestCheckInAndEvidence(t *testing.T) {
+	s := New()
+	// reuse slot offer flow to get an order
+	taskID := "task_exec"
+	slotID := "slot_exec"
+	offerID := createSlotOffer(t, s, taskID, slotID, "agent_exec")
+	r := s.Handle(command.Envelope{
+		CommandID: "cmd_accept_exec", CommandType: "AcceptSlotOffer", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "agent_exec"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "agent_exec"},
+		Target: command.Target{Type: "Offer", ID: offerID}, IdempotencyKey: "idem_accept_exec",
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_exec", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"offerId": offerID},
+	})
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("accept: %s %+v", r.Outcome, r.Error)
+	}
+	var view struct{ OrderID string `json:"orderId"`}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	orderID := view.OrderID
+	// offline check-in denied: try CheckIn with CONFIRMED -> should succeed and move to EXECUTING
+	r2 := s.Handle(command.Envelope{
+		CommandID: "cmd_checkin", CommandType: "CheckInOrder", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "agent_exec"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "agent_exec"},
+		Target: command.Target{Type: "Order", ID: orderID}, IdempotencyKey: "idem_checkin",
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_checkin", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"marketId": "hn", "locationLabel": "D1"},
+	})
+	if r2.Outcome != "ACCEPTED" || r2.Aggregate.State != "EXECUTING" {
+		t.Fatalf("checkin: %s %+v", r2.Outcome, r2.Error)
+	}
+	// duplicate evidence submit: first should succeed, second with same order but different media should also succeed? For now we allow multiple
+	r3 := s.Handle(command.Envelope{
+		CommandID: "cmd_evidence", CommandType: "SubmitEvidence", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "agent_exec"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "agent_exec"},
+		Target: command.Target{Type: "Order", ID: orderID}, IdempotencyKey: "idem_evidence",
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_ev", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"mediaAssetId": "seed_media_hoankiem", "evidenceType": "PHOTO"},
+	})
+	if r3.Outcome != "ACCEPTED" {
+		t.Fatalf("evidence: %s %+v", r3.Outcome, r3.Error)
+	}
+	// completion vs cancellation race is handled via Order lifecycle, but for now test that after evidence, RecordOutcome can complete
+	r4 := s.Handle(envelopeFor("RecordOutcome", map[string]any{"onTime": true, "scopeCompleted": true, "materialChanges": 0}, orderID))
+	if r4.Outcome != "ACCEPTED" {
+		t.Fatalf("outcome after evidence: %s %+v", r4.Outcome, r4.Error)
+	}
+}

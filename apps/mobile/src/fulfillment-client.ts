@@ -55,6 +55,14 @@ export class FulfillmentClient {
     return body.offers as SlotOffer[];
   }
 
+  public async checkInOrder(orderId: string, input: { marketId: string; locationLabel: string }): Promise<void> {
+    await this.command("CheckInOrder", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
+  public async submitEvidence(orderId: string, input: { mediaAssetId: string; evidenceType?: string }): Promise<void> {
+    await this.command("SubmitEvidence", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
+  }
+
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {
     const session = await this.requireSession();
     const next = (prefix: string) => `mobile_fulfill_${prefix}_${Date.now().toString(36)}_${(++this.sequence).toString(36)}`;

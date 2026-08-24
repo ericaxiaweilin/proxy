@@ -220,10 +220,40 @@ export function MarketSurface({
     setOfferBusy(true);
     try {
       const res = (await (fulfillment as any).acceptSlotOffer(offerId)) as { orderId: string };
-      setOfferMsg(`已接单 · Order ${res.orderId.slice(0, 8)}`);
+      setOfferMsg(`已接单 · Order ${res.orderId.slice(0, 8)} · 可打卡`);
       void loadMyOffers();
+      // store last order for check-in demo
+      (acceptOffer as any).lastOrderId = res.orderId;
     } catch (e) {
       setOfferMsg(e instanceof Error ? e.message : "接单失败");
+    } finally {
+      setOfferBusy(false);
+    }
+  }
+
+  async function checkInLastOrder(): Promise<void> {
+    const orderId = (acceptOffer as any).lastOrderId as string | undefined;
+    if (!fulfillment || !orderId) { setOfferMsg("请先接单"); return; }
+    setOfferBusy(true);
+    try {
+      await (fulfillment as any).checkInOrder(orderId, { marketId: "hn", locationLabel: "河内·还剑湖" });
+      setOfferMsg(`已打卡 · Order ${orderId.slice(0, 8)}`);
+    } catch (e) {
+      setOfferMsg(e instanceof Error ? e.message : "打卡失败");
+    } finally {
+      setOfferBusy(false);
+    }
+  }
+
+  async function submitEvidenceLastOrder(): Promise<void> {
+    const orderId = (acceptOffer as any).lastOrderId as string | undefined;
+    if (!fulfillment || !orderId) { setOfferMsg("请先接单/打卡"); return; }
+    setOfferBusy(true);
+    try {
+      await (fulfillment as any).submitEvidence(orderId, { mediaAssetId: "seed_media_hoankiem", evidenceType: "PHOTO" });
+      setOfferMsg(`证据已提交 · Order ${orderId.slice(0, 8)}`);
+    } catch (e) {
+      setOfferMsg(e instanceof Error ? e.message : "提交证据失败");
     } finally {
       setOfferBusy(false);
     }
@@ -321,6 +351,12 @@ export function MarketSurface({
         ) : null}
         <Pressable disabled={offerBusy || myOffers.length === 0} onPress={() => setShowOffers((v) => !v)} style={[styles.offerBtn, (offerBusy || myOffers.length === 0) && styles.offerBtnDisabled]}>
           <Text style={styles.offerBtnText}>{showOffers ? "收起" : `列表(${myOffers.length})`}</Text>
+        </Pressable>
+        <Pressable disabled={offerBusy} onPress={() => void checkInLastOrder()} style={[styles.offerBtn, offerBusy && styles.offerBtnDisabled]}>
+          <Text style={styles.offerBtnText}>打卡</Text>
+        </Pressable>
+        <Pressable disabled={offerBusy} onPress={() => void submitEvidenceLastOrder()} style={[styles.offerBtn, offerBusy && styles.offerBtnDisabled]}>
+          <Text style={styles.offerBtnText}>证据</Text>
         </Pressable>
       </View>
       {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}
@@ -1178,7 +1214,7 @@ const styles = StyleSheet.create({
   viewToggleTextOn: { color: color.white },
   plusBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 44, justifyContent: "center", width: 44 },
   plusBtnText: { color: color.white, fontSize: 22, fontWeight: "700" },
-  offerBar: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 8 },
+  offerBar: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   offerBtn: { backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
   offerBtnDisabled: { opacity: 0.5 },
   offerBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },

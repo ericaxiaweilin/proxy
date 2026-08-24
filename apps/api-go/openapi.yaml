@@ -233,6 +233,8 @@ components:
             - RefundPaymentIntent
             - CreatePayoutHold
             - ReleasePayout
+            - CheckInOrder
+            - SubmitEvidence
             - DummyOther # placeholder to keep enum open for additive field evolution
         commandVersion: { type: integer, minimum: 1 }
         actor:
