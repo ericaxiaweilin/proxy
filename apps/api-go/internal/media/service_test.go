@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -53,6 +54,83 @@ func TestSaveUploadPersistsOnlyOwnersBytes(t *testing.T) {
 	differentJPEG := []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x02, 0xff, 0xd9}
 	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(differentJPEG), 20); err != ErrOriginalImmutable {
 		t.Fatalf("different bytes must not overwrite original: %v", err)
+	}
+}
+
+func TestReadTIFFOrientationAndColorSpace(t *testing.T) {
+	tiff := testExifTIFF()
+
+	meta := sourceImageMetadata{}
+	readTIFFMetadata(tiff, &meta)
+	if meta.Orientation != 6 || meta.ColorSpace != "SRGB" {
+		t.Fatalf("metadata orientation=%d color=%s", meta.Orientation, meta.ColorSpace)
+	}
+}
+
+func testExifTIFF() []byte {
+	tiff := make([]byte, 56)
+	copy(tiff[:2], "II")
+	binary.LittleEndian.PutUint16(tiff[2:4], 42)
+	binary.LittleEndian.PutUint32(tiff[4:8], 8)
+	binary.LittleEndian.PutUint16(tiff[8:10], 2)
+	// IFD0 Orientation = 6 (90° clockwise).
+	binary.LittleEndian.PutUint16(tiff[10:12], 0x0112)
+	binary.LittleEndian.PutUint16(tiff[12:14], 3)
+	binary.LittleEndian.PutUint32(tiff[14:18], 1)
+	binary.LittleEndian.PutUint16(tiff[18:20], 6)
+	// Exif IFD pointer = 38.
+	binary.LittleEndian.PutUint16(tiff[22:24], 0x8769)
+	binary.LittleEndian.PutUint16(tiff[24:26], 4)
+	binary.LittleEndian.PutUint32(tiff[26:30], 1)
+	binary.LittleEndian.PutUint32(tiff[30:34], 38)
+	binary.LittleEndian.PutUint16(tiff[38:40], 1)
+	binary.LittleEndian.PutUint16(tiff[40:42], 0xa001)
+	binary.LittleEndian.PutUint16(tiff[42:44], 3)
+	binary.LittleEndian.PutUint32(tiff[44:48], 1)
+	binary.LittleEndian.PutUint16(tiff[48:50], 1)
+
+	return tiff
+}
+
+func TestSaveUploadPersistsImageOrientationAndColorSpace(t *testing.T) {
+	dir := t.TempDir()
+	s := New()
+	s.SetStoreDir(dir)
+	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
+		"mediaType": "IMAGE", "originalStorageKey": "portrait.jpg", "mimeType": "image/jpeg",
+	}, ""))
+	var created struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &created)
+	payload := append([]byte("Exif\x00\x00"), testExifTIFF()...)
+	jpeg := []byte{0xff, 0xd8, 0xff, 0xe1, byte((len(payload) + 2) >> 8), byte(len(payload) + 2)}
+	jpeg = append(jpeg, payload...)
+	jpeg = append(jpeg, 0xff, 0xd9)
+	asset, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(jpeg), 1024)
+	if err != nil {
+		t.Fatalf("save exif portrait: %v", err)
+	}
+	if asset.Orientation != 6 || asset.ColorSpace != "SRGB" {
+		t.Fatalf("persisted metadata: orientation=%d color=%s", asset.Orientation, asset.ColorSpace)
+	}
+}
+
+func TestReadPNGDimensionsAlphaAndSRGB(t *testing.T) {
+	pngHeader := make([]byte, 45)
+	copy(pngHeader[:8], "\x89PNG\r\n\x1a\n")
+	binary.BigEndian.PutUint32(pngHeader[8:12], 13)
+	copy(pngHeader[12:16], "IHDR")
+	binary.BigEndian.PutUint32(pngHeader[16:20], 1080)
+	binary.BigEndian.PutUint32(pngHeader[20:24], 1920)
+	pngHeader[24] = 8
+	pngHeader[25] = 6 // RGBA
+	binary.BigEndian.PutUint32(pngHeader[33:37], 0)
+	copy(pngHeader[37:41], "sRGB")
+	meta := sourceImageMetadata{}
+	readPNGMetadata(pngHeader, &meta)
+	if meta.Width != 1080 || meta.Height != 1920 || !meta.HasAlpha || meta.ColorSpace != "SRGB" {
+		t.Fatalf("png metadata: %+v", meta)
 	}
 }
 

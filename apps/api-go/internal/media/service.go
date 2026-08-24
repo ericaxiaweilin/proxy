@@ -260,6 +260,17 @@ func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID st
 	if err := temporary.Close(); err != nil {
 		return MediaAsset{}, err
 	}
+	if asset.MediaType == "IMAGE" {
+		metadata := readSourceImageMetadata(ctx, temporaryPath, detectedMime)
+		if metadata.Width > 0 && metadata.Height > 0 {
+			asset.Width = metadata.Width
+			asset.Height = metadata.Height
+		}
+		asset.Orientation = metadata.Orientation
+		asset.ColorSpace = metadata.ColorSpace
+		asset.HasAlpha = metadata.HasAlpha
+		asset.Animated = metadata.Animated
+	}
 	// Link is exclusive: unlike Rename on Unix it cannot silently overwrite an
 	// existing ORIGINAL object. The temp file lives in the same directory/filesystem.
 	if err := os.Link(temporaryPath, destinationPath); err != nil {

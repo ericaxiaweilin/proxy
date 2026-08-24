@@ -2,6 +2,7 @@ import type { TransportResponse } from "./auth-client";
 import { File, UploadType } from "expo-file-system";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { uploadOriginalWithRetry } from "./media-upload-retry";
 
 export type UploadableImage = {
   uri: string;
@@ -43,16 +44,16 @@ export class MediaClient {
 
     const localFile = new File(image.uri);
     if (!localFile.exists) throw new Error("无法读取所选照片");
-    const uploadResponse = await localFile.upload(`${this.input.baseUrl}${uploadUrl}`, {
-      httpMethod: "PUT",
-      uploadType: UploadType.BINARY_CONTENT,
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": mimeType },
-      mimeType,
-      sessionType: "foreground"
+    await uploadOriginalWithRetry(async () => {
+      const response = await localFile.upload(`${this.input.baseUrl}${uploadUrl}`, {
+        httpMethod: "PUT",
+        uploadType: UploadType.BINARY_CONTENT,
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": mimeType },
+        mimeType,
+        sessionType: "foreground"
+      });
+      return response.status;
     });
-    if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
-      throw new Error(`照片上传失败（${uploadResponse.status}）`);
-    }
 
     await this.command("CompleteMediaUpload", { type: "MediaAsset", id: mediaAssetId }, { originalStorageKey: storageKey });
     await this.command("ProcessMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { originalPath: "" });
