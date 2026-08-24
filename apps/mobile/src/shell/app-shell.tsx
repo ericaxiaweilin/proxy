@@ -18,6 +18,8 @@ import { type HomeAttachment, type HomeIntentMode } from "../components/home-cha
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type DemandClient } from "../demand-client";
 import { type VoucherClient } from "../voucher-client";
+import { type EngagementClient } from "../engagement-client";
+import { type MarketplaceClient } from "../marketplace-client";
 import { type ExperienceClient } from "../experience-client";
 import { keepManifestRevision } from "../experience-refresh";
 import { dispatchExperienceAction } from "../experience-dispatcher";
@@ -63,6 +65,8 @@ export function AppShell({
   media,
   demand,
   vouchers,
+  engagement,
+  marketplace,
   onSignOut
 }: {
   localNet: LocalNetClient;
@@ -72,6 +76,8 @@ export function AppShell({
   media: MediaClient;
   demand: DemandClient;
   vouchers: VoucherClient;
+  engagement: EngagementClient;
+  marketplace: MarketplaceClient;
   onSignOut: () => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
@@ -248,6 +254,7 @@ export function AppShell({
           ) : (
             <MarketSurface
               activities={activities}
+              marketplace={marketplace}
               marketLabel="河内"
               initialTab={marketEntry.tab}
               onOpenExperience={setOpenExperience}
@@ -264,7 +271,7 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface localNet={localNet} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
+            <FeedSurface engagement={engagement} localNet={localNet} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (

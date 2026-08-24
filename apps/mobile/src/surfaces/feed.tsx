@@ -10,6 +10,8 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
 import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
+import { type EngagementClient } from "../engagement-client";
+import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
 import { CustomFeedHub } from "./custom-feed";
@@ -34,6 +36,16 @@ const AUTHOR_TYPE_META: Record<FeedPost["authorType"], { label: string; reason: 
   MERCHANT: { label: "商家 · 河内", reason: "为你推荐：附近商家的公开动态" },
   PLATFORM_SPECIAL: { label: "Proxy 特别企划", reason: "为你推荐：平台特别企划" }
 };
+
+function scenarioIconForPost(post: FeedPost): ProxyIconName {
+  const text = post.body + " " + post.contextRefs.map((r) => r.contextId).join(" ");
+  if (text.includes("摄影") || text.includes("拍照")) return "camera";
+  if (text.includes("咖啡")) return "cup";
+  if (text.includes("城市同行") || text.includes("路线") || text.includes("同行")) return "route";
+  if (text.includes("翻译") || text.includes("口译") || text.includes("中文") || text.includes("接待")) return "chat";
+  if (text.includes("活动") || text.includes("开业") || text.includes("品鉴")) return "ticket";
+  return "diamond";
+}
 
 function authorName(post: FeedPost): string {
   return post.authorDisplayName !== undefined && post.authorDisplayName !== "" ? post.authorDisplayName : post.authorId;
@@ -71,11 +83,13 @@ const FILTERS: ReadonlyArray<{ id: FilterKey; label: string }> = [
 
 export function FeedSurface({
   localNet,
+  engagement,
   onOpenChat,
   onOpenFeedPrefs,
   refreshTrigger
 }: {
   localNet: LocalNetClient;
+  engagement: EngagementClient;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
   refreshTrigger?: number;
@@ -88,6 +102,8 @@ export function FeedSurface({
   const [following, setFollowing] = useState<ReadonlySet<string>>(new Set());
   const [liked, setLiked] = useState<ReadonlySet<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
+  const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
+  const [engagementError, setEngagementError] = useState<string>();
   // 发布器状态（X 式 compose）
   const [composerOpen, setComposerOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -254,11 +270,28 @@ export function FeedSurface({
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
-  function toggle(set: ReadonlySet<string>, apply: (next: ReadonlySet<string>) => void, key: string): void {
-    const next = new Set(set);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    apply(next);
+  async function commitEngagement(
+    busyKey: string,
+    stateKey: string,
+    command: () => Promise<void>,
+    apply: (next: ReadonlySet<string>) => void,
+    current: ReadonlySet<string>
+  ): Promise<void> {
+    if (current.has(stateKey) || engagementBusy.has(busyKey)) return;
+    setEngagementError(undefined);
+    setEngagementBusy((value) => new Set(value).add(busyKey));
+    try {
+      await command();
+      apply(new Set(current).add(stateKey));
+    } catch {
+      setEngagementError("互动没有提交成功，请检查连接后重试。");
+    } finally {
+      setEngagementBusy((value) => {
+        const next = new Set(value);
+        next.delete(busyKey);
+        return next;
+      });
+    }
   }
 
   function openComposer(quoteId?: string): void {
@@ -314,7 +347,7 @@ export function FeedSurface({
   const visible = posts.filter((post) => {
     if (hiddenPosts.has(post.postId)) return false;
     if (tab === "FOLLOWING") {
-      if (!(following.has(authorName(post)) || authorName(post) === "你")) return false;
+      if (!(following.has(post.authorId) || authorName(post) === "你")) return false;
     }
     if (feedFilter !== "ALL") {
       const ctxTypes = new Set(post.contextRefs.map((r) => r.contextType));
@@ -335,7 +368,7 @@ export function FeedSurface({
     }
     if (selectedCustomFeed) {
       const feedMap: Record<string, (post: FeedPost) => boolean> = {
-        friends: (p) => following.has(authorName(p)) || authorName(p) === "你",
+        friends: (p) => following.has(p.authorId) || authorName(p) === "你",
         hanoi: (p) => p.cityScope === "hn",
         photo: (p) => p.contextRefs.some((r) => r.contextId.includes("摄影") || r.contextId.includes("拍照")),
         opportunity: (p) => p.contextRefs.some((r) => r.contextType === "AVAILABILITY") || p.authorType === "AGENT",
@@ -520,6 +553,7 @@ export function FeedSurface({
         </View>
       ) : null}
 
+      {engagementError ? <Text style={styles.engagementError}>{engagementError}</Text> : null}
       {phase === "LOADING" ? (
         <View style={styles.feedEmpty}>
           <ActivityIndicator color={color.magenta} />
@@ -547,7 +581,7 @@ export function FeedSurface({
           const items = mediaFor(post.postId);
           const name = authorName(post);
           const meta = AUTHOR_TYPE_META[post.authorType];
-          const isFollow = following.has(name);
+          const isFollow = following.has(post.authorId);
           const isLiked = liked.has(post.postId);
           const isSaved = bookmarked.has(post.postId);
           const chips = post.contextRefs.filter((entry) => entry.contextType !== "QUOTE_POST");
@@ -563,6 +597,9 @@ export function FeedSurface({
                 <View style={styles.postAvatar}>
                   <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
                 </View>
+                <View style={styles.scenarioBadge}>
+                  <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={12} />
+                </View>
                 <View style={styles.postIdentity}>
                   <Text style={styles.postName}>{name}</Text>
                   <Text numberOfLines={1} style={styles.postMeta}>
@@ -571,7 +608,8 @@ export function FeedSurface({
                 </View>
                 {name !== "你" ? (
                   <Pressable
-                    onPress={() => toggle(following, setFollowing, name)}
+                    disabled={isFollow || engagementBusy.has(`follow:${post.authorId}`)}
+                    onPress={() => void commitEngagement(`follow:${post.authorId}`, post.authorId, () => engagement.followProfile(post.authorId), setFollowing, following)}
                     style={[styles.followBtn, isFollow && styles.followBtnOn]}
                   >
                     <Text style={[styles.followBtnText, isFollow && styles.followBtnTextOn]}>
@@ -665,7 +703,7 @@ export function FeedSurface({
 
               {/* postactions：♡ / 回复 / 引用 / 收藏 / 分享 / ···(更多) */}
               <View style={styles.postActions}>
-                <Pressable onPress={() => toggle(liked, setLiked, post.postId)} style={styles.postAction}>
+                <Pressable disabled={isLiked || engagementBusy.has(`like:${post.postId}`)} onPress={() => void commitEngagement(`like:${post.postId}`, post.postId, () => engagement.reactToPost(post.postId), setLiked, liked)} style={styles.postAction}>
                   <Text style={[styles.postActionText, isLiked && styles.postActionOn]}>
                     {isLiked ? "♥" : "♡"} {isLiked ? 1 : 0}
                   </Text>
@@ -676,7 +714,7 @@ export function FeedSurface({
                 <Pressable onPress={() => openComposer(post.postId)} style={styles.postAction}>
                   <Text style={styles.postActionText}>引用</Text>
                 </Pressable>
-                <Pressable onPress={() => toggle(bookmarked, setBookmarked, post.postId)} style={styles.postAction}>
+                <Pressable disabled={isSaved || engagementBusy.has(`bookmark:${post.postId}`)} onPress={() => void commitEngagement(`bookmark:${post.postId}`, post.postId, () => engagement.bookmarkPost(post.postId), setBookmarked, bookmarked)} style={styles.postAction}>
                   <Text style={[styles.postActionText, isSaved && styles.postActionOn]}>收藏 {isSaved ? 1 : 0}</Text>
                 </Pressable>
                 <Pressable style={styles.postAction}>
@@ -1136,6 +1174,8 @@ const styles = StyleSheet.create({
     width: 40
   },
   postAvatarText: { color: color.ink, fontSize: 15, fontWeight: "700" },
+  scenarioBadge: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 20, justifyContent: "center", width: 20 },
+  engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },
   postName: { color: color.ink, fontSize: 11, fontWeight: "700" },
   postMeta: { color: color.muted, fontSize: 11, marginTop: 1 },

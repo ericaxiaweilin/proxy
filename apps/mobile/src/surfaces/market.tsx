@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
+import { type MarketplaceClient } from "../marketplace-client";
 import {
   MAP_DISTRICTS,
   MARKET_EXPERIENCES,
@@ -60,6 +61,16 @@ const R7_FILTER_META: Record<R7Filter, { title: string; sub: string }> = {
   FILTER: { title: "完整筛选", sub: "价格、时长、类型、付款、客户质量等高级条件" }
 };
 
+function scenarioIconForOpportunity(opportunity: MarketOpportunity): ProxyIconName {
+  const t = opportunity.theme + opportunity.title;
+  if (t.includes("摄影")) return "camera";
+  if (t.includes("翻译") || t.includes("口译") || t.includes("接待") || t.includes("谈判") || t.includes("中文")) return "chat";
+  if (t.includes("同行") || t.includes("陪同") || t.includes("巡店") || t.includes("路线")) return "route";
+  if (t.includes("美食") || t.includes("门店") || t.includes("咖啡") || t.includes("餐饮")) return "cup";
+  if (t.includes("助理") || t.includes("商务") || t.includes("晚餐")) return "storeLines";
+  return "diamond";
+}
+
 const OPPORTUNITY_COORDS: Array<[number, number]> = OPPORTUNITY_MAP_COORDS;
 
 function normalizeTab(tab: MarketTab): "OPPORTUNITY" | "ACTIVITY" {
@@ -69,12 +80,14 @@ function normalizeTab(tab: MarketTab): "OPPORTUNITY" | "ACTIVITY" {
 
 export function MarketSurface({
   activities,
+  marketplace,
   marketLabel,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
   onOpenActivity
 }: {
   activities: ActivityClient;
+  marketplace: MarketplaceClient;
   marketLabel: string;
   initialTab?: MarketTab;
   onOpenExperience: (experienceId: string) => void;
@@ -89,6 +102,9 @@ export function MarketSurface({
   const [search, setSearch] = useState("");
   const [activityPhase, setActivityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [activityItems, setActivityItems] = useState<Activity[]>([]);
+  const [opportunityPhase, setOpportunityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [opportunityItems, setOpportunityItems] = useState<MarketOpportunity[]>(MARKET_OPPORTUNITIES);
+  const [opportunityError, setOpportunityError] = useState<string>();
   const [activityDetail, setActivityDetail] = useState<Activity | null>(null);
   const [interestedIn, setInterestedIn] = useState<ReadonlySet<string>>(new Set());
   const [joinedIds, setJoinedIds] = useState<ReadonlySet<string>>(new Set());
@@ -115,6 +131,53 @@ export function MarketSurface({
   useEffect(() => {
     if (tab === "ACTIVITY") void loadActivities();
   }, [tab, loadActivities]);
+
+  const loadOpportunities = useCallback(async (): Promise<void> => {
+    setOpportunityPhase("LOADING");
+    try {
+      setOpportunityItems(await marketplace.list());
+      setOpportunityError(undefined);
+      setOpportunityPhase("READY");
+    } catch {
+      setOpportunityItems(MARKET_OPPORTUNITIES);
+      setOpportunityError("机会服务暂时不可用；当前为只读基线，发布与报名需要重试。");
+      setOpportunityPhase("ERROR");
+    }
+  }, [marketplace]);
+
+  useEffect(() => {
+    if (tab === "OPPORTUNITY") void loadOpportunities();
+  }, [tab, loadOpportunities]);
+
+  async function dismissOpportunity(id: string): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await marketplace.dismiss(id);
+      setOpportunityItems((items) => items.filter((item) => item.id !== id));
+      setOpportunityError(undefined);
+    } catch {
+      setOpportunityError("未能保存“不感兴趣”，请重试。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyToOpportunity(opportunity: MarketOpportunity, quote: string): Promise<void> {
+    if (busy || opportunity.appliedByViewer) return;
+    setBusy(true);
+    try {
+      await marketplace.apply(opportunity.id, quote, opportunity.skills);
+      const applied = { ...opportunity, appliedByViewer: true, responses: opportunity.responses + 1 };
+      setOpportunityItems((items) => items.map((item) => item.id === applied.id ? applied : item));
+      setOppDetail(applied);
+      setOpportunityError(undefined);
+    } catch {
+      setOpportunityError("回应没有提交成功，请检查连接后重试。");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function upsertActivity(next: Activity): void {
     setActivityItems((current) => current.map((entry) => (entry.activityId === next.activityId ? next : entry)));
@@ -197,7 +260,14 @@ export function MarketSurface({
       </View>
 
       {publishOpen ? (
-        <PublishDemand onBack={() => setPublishOpen(false)} onPublished={() => setPublishOpen(false)} />
+        <PublishDemand
+          marketplace={marketplace}
+          onBack={() => setPublishOpen(false)}
+          onPublished={(opportunity) => {
+            setOpportunityItems((items) => [opportunity, ...items]);
+            setPublishOpen(false);
+          }}
+        />
       ) : applicantName ? (
         <ApplicantDetail name={applicantName} onBack={() => setApplicantName(null)} onOpenSubmission={(n) => { setApplicantName(null); setSubmissionName(n); }} onCompare={() => { setApplicantName(null); setCompareOpen(true); }} />
       ) : submissionName ? (
@@ -214,7 +284,7 @@ export function MarketSurface({
           marketLabel={marketLabel}
           onOpenExperience={onOpenExperience}
           onOpenOpportunity={(id) => {
-            const found = MARKET_OPPORTUNITIES.find((x) => x.id === id);
+            const found = opportunityItems.find((x) => x.id === id);
             if (found) setOppDetail(found);
           }}
           onOpenActivity={(a) => setActivityDetail(a)}
@@ -226,6 +296,8 @@ export function MarketSurface({
             quoteMode={oppQuoteMode}
             setQuoteMode={setOppQuoteMode}
             onBack={() => setOppDetail(null)}
+            busy={busy}
+            onApply={(quote) => void applyToOpportunity(oppDetail, quote)}
             onOpenSelect={() => {
               const cur = oppDetail;
               setOppDetail(null);
@@ -233,7 +305,11 @@ export function MarketSurface({
             }}
           />
         ) : (
-          <OpportunityTab lens={lens} setLens={setLens} oppFilter={oppFilter} setOppFilter={setOppFilter} marketLabel={marketLabel} onOpen={(o) => setOppDetail(o)} />
+          <>
+            {opportunityError ? <Text style={styles.marketError}>{opportunityError}</Text> : null}
+            {opportunityPhase === "LOADING" ? <ActivityIndicator color={color.magenta} style={{ marginVertical: 8 }} /> : null}
+            <OpportunityTab items={opportunityItems} lens={lens} setLens={setLens} oppFilter={oppFilter} setOppFilter={setOppFilter} marketLabel={marketLabel} onOpen={(o) => setOppDetail(o)} onDismiss={(id) => void dismissOpportunity(id)} />
+          </>
         )
       ) : (
         <>
@@ -297,21 +373,25 @@ export function MarketSurface({
 }
 
 function OpportunityTab({
+  items: sourceItems,
   lens,
   setLens,
   oppFilter,
   setOppFilter,
   marketLabel,
-  onOpen
+  onOpen,
+  onDismiss
 }: {
+  items: MarketOpportunity[];
   lens: OpportunityLens;
   setLens: (lens: OpportunityLens) => void;
   oppFilter: R7Filter;
   setOppFilter: (f: R7Filter) => void;
   marketLabel: string;
   onOpen: (o: MarketOpportunity) => void;
+  onDismiss: (id: string) => void;
 }): React.JSX.Element {
-  const base = MARKET_OPPORTUNITIES;
+  const base = sourceItems;
   let items = [...base];
   if (oppFilter === "NEARBY") items = items.filter((o) => o.travel != null).sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
   if (oppFilter === "TIME") items = [...items].sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
@@ -384,7 +464,7 @@ function OpportunityTab({
 
       <View style={styles.oppStack}>
         {items.map((opportunity) => (
-          <R4OpportunityCard key={opportunity.id} opportunity={opportunity} onOpen={() => onOpen(opportunity)} />
+          <R4OpportunityCard key={opportunity.id} opportunity={opportunity} onDismiss={() => onDismiss(opportunity.id)} onOpen={() => onOpen(opportunity)} />
         ))}
       </View>
       <Text style={styles.detailHint}>发布需求在右上角 ＋；选人/对比在每个机会的报名明细里（仅发布者可见）。</Text>
@@ -393,7 +473,7 @@ function OpportunityTab({
 }
 
 // R4 卡：价格三栏（客户预算 / Proxy 公平区间 / 你的类似记录）+ tags + 匹配度 + 双按钮
-function R4OpportunityCard({ opportunity, onOpen }: { opportunity: MarketOpportunity; onOpen: () => void }): React.JSX.Element {
+function R4OpportunityCard({ opportunity, onOpen, onDismiss }: { opportunity: MarketOpportunity; onOpen: () => void; onDismiss: () => void }): React.JSX.Element {
   const budget = opportunity.price;
   const fairLow = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()}₫`;
   const fairHigh = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
@@ -403,6 +483,9 @@ function R4OpportunityCard({ opportunity, onOpen }: { opportunity: MarketOpportu
   return (
     <View style={styles.r4Card}>
       <View style={styles.r4Top}>
+        <View style={styles.scenarioIcon}>
+          <ProxyIcon color={color.violet} name={scenarioIconForOpportunity(opportunity)} size={14} />
+        </View>
         <Text style={styles.r4Title}>{opportunity.title}</Text>
         <Text style={styles.r4Budget}>{budget}</Text>
       </View>
@@ -438,7 +521,7 @@ function R4OpportunityCard({ opportunity, onOpen }: { opportunity: MarketOpportu
         </View>
       </View>
       <View style={styles.r4Actions}>
-        <Pressable style={styles.r4ActionGhost}>
+        <Pressable onPress={onDismiss} style={styles.r4ActionGhost}>
           <Text style={styles.r4ActionGhostText}>不感兴趣</Text>
         </Pressable>
         <Pressable onPress={onOpen} style={styles.r4ActionPrimary}>
@@ -454,16 +537,23 @@ function OpportunityDetail({
   quoteMode,
   setQuoteMode,
   onBack,
-  onOpenSelect
+  onOpenSelect,
+  onApply,
+  busy
 }: {
   opportunity: MarketOpportunity;
   quoteMode: "budget" | "standard" | "premium" | "custom";
   setQuoteMode: (m: "budget" | "standard" | "premium" | "custom") => void;
   onBack: () => void;
   onOpenSelect: () => void;
+  onApply: (quote: string) => void;
+  busy: boolean;
 }): React.JSX.Element {
   const budget = opportunity.price;
   const fair = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()} – ${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
+  const quote = quoteMode === "premium"
+    ? `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.25).toLocaleString()}₫`
+    : quoteMode === "standard" ? (fair.split("–")[0]?.trim() ?? budget) : budget;
   return (
     <View>
       <View style={styles.detailHead}>
@@ -557,20 +647,46 @@ function OpportunityDetail({
         <Pressable onPress={onBack} style={styles.r4ActionGhost}>
           <Text style={styles.r4ActionGhostText}>返回</Text>
         </Pressable>
-        <Pressable style={styles.r4ActionPrimary}>
-          <Text style={styles.r4ActionPrimaryText}>按我的条件回应</Text>
+        <Pressable disabled={busy || opportunity.appliedByViewer || opportunity.ownedByViewer} onPress={() => onApply(quote)} style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>{opportunity.appliedByViewer ? "已回应" : opportunity.ownedByViewer ? "这是你发布的机会" : busy ? "提交中…" : "按我的条件回应"}</Text>
         </Pressable>
       </View>
-      <Pressable onPress={onOpenSelect} style={[styles.r4ActionGhost, { marginTop: 7 }]}>
-        <Text style={styles.r4ActionGhostText}>查看客户选人视角 ›</Text>
-      </Pressable>
+      {opportunity.ownedByViewer ? (
+        <Pressable onPress={onOpenSelect} style={[styles.r4ActionGhost, { marginTop: 7 }]}>
+          <Text style={styles.r4ActionGhostText}>查看客户选人视角 ›</Text>
+        </Pressable>
+      ) : null}
 
       <Text style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
     </View>
   );
 }
 
-function PublishDemand({ onBack, onPublished }: { onBack: () => void; onPublished: () => void }): React.JSX.Element {
+function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: MarketplaceClient; onBack: () => void; onPublished: (opportunity: MarketOpportunity) => void }): React.JSX.Element {
+  const [title, setTitle] = useState("周六城市同行 + 拍照");
+  const [time, setTime] = useState("10:00–18:00");
+  const [location, setLocation] = useState("河内 · 西湖 / 老城区");
+  const [price, setPrice] = useState("2,000,000₫");
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState<string>();
+
+  async function publish(): Promise<void> {
+    if (publishing || !title.trim() || !location.trim() || !price.trim()) return;
+    setPublishing(true);
+    setError(undefined);
+    try {
+      const opportunity = await marketplace.publish({
+        title: title.trim(), shortTitle: "同行", theme: "城市同行", date: "周六", time: time.trim(),
+        location: location.trim(), price: price.trim(), skills: "中文 · 摄影 · 本地路线",
+        lens: ["BOOKED", "NEARBY"], travel: 20
+      });
+      onPublished(opportunity);
+    } catch {
+      setError("发布没有写入服务器，请检查连接后重试。");
+    } finally {
+      setPublishing(false);
+    }
+  }
   return (
     <View>
       <View style={styles.detailHead}>
@@ -582,7 +698,7 @@ function PublishDemand({ onBack, onPublished }: { onBack: () => void; onPublishe
       </View>
       <View style={styles.detailHero}>
         <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
-        <Text style={styles.detailHeroTitle}>周六城市同行 + 拍照</Text>
+        <TextInput onChangeText={setTitle} style={[styles.detailHeroTitle, styles.publishInput]} value={title} />
         <Text style={styles.detailHeroSub}>Proxy 在发布前就告诉客户合理价格，避免把需求故意压成低价再让真人竞价。</Text>
       </View>
       <View style={styles.r4Card}>
@@ -590,16 +706,17 @@ function PublishDemand({ onBack, onPublished }: { onBack: () => void; onPublishe
         <View style={styles.factGrid}>
           <View style={styles.fact}>
             <Text style={styles.factLabel}>时间</Text>
-            <Text style={styles.factValue}>10:00–18:00</Text>
+            <TextInput onChangeText={setTime} style={styles.publishFactInput} value={time} />
           </View>
           <View style={styles.fact}>
             <Text style={styles.factLabel}>地点</Text>
-            <Text style={styles.factValue}>西湖 / 老城区</Text>
+            <TextInput onChangeText={setLocation} style={styles.publishFactInput} value={location} />
           </View>
         </View>
         <View style={[styles.r4PriceCellHot, { borderRadius: 11, marginTop: 8, padding: 10 }]}>
           <Text style={styles.r4PriceLabel}>Proxy 建议预算</Text>
-          <Text style={styles.r4PriceValue}>1.8 – 2.4M₫ · 8h + 中文 + 摄影 + 本地熟悉度</Text>
+          <TextInput onChangeText={setPrice} style={styles.publishPriceInput} value={price} />
+          <Text style={styles.r4PriceLabel}>公平参考：1.8 – 2.4M₫ · 8h + 中文 + 摄影 + 本地熟悉度</Text>
         </View>
         <View style={styles.r4Match}>
           <Text style={styles.r4MatchText}>会完整展示给回应者 · 预计 6–10 位合格回应 · 竞争力：中等</Text>
@@ -613,10 +730,11 @@ function PublishDemand({ onBack, onPublished }: { onBack: () => void; onPublishe
         <Pressable onPress={onBack} style={styles.r4ActionGhost}>
           <Text style={styles.r4ActionGhostText}>预览小美视角</Text>
         </Pressable>
-        <Pressable onPress={onPublished} style={styles.r4ActionPrimary}>
-          <Text style={styles.r4ActionPrimaryText}>发布需求</Text>
+        <Pressable disabled={publishing} onPress={() => void publish()} style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>{publishing ? "发布中…" : "发布需求"}</Text>
         </Pressable>
       </View>
+      {error ? <Text style={styles.marketError}>{error}</Text> : null}
     </View>
   );
 }
@@ -1028,6 +1146,11 @@ const styles = StyleSheet.create({
   // R4 机会卡
   r4Card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, marginVertical: 5, padding: 12, ...shadows.card },
   r4Top: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
+  scenarioIcon: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 28, justifyContent: "center", width: 28 },
+  marketError: { color: color.magenta, fontSize: 11, lineHeight: 16, marginVertical: 7 },
+  publishInput: { borderBottomColor: "rgba(255,255,255,0.35)", borderBottomWidth: 1, color: color.white, paddingVertical: 5 },
+  publishFactInput: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 3, paddingVertical: 2 },
+  publishPriceInput: { color: color.ink, fontSize: 14, fontWeight: "900", paddingVertical: 3 },
   r4Title: { color: color.ink, flex: 1, fontSize: 12, fontWeight: "800", lineHeight: 17 },
   r4Budget: { color: color.ink, fontSize: 13, fontWeight: "900" },
   r4Meta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },

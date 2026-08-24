@@ -12,6 +12,8 @@ import { MediaClient } from "./media-client";
 import { ActivityClient } from "./activity-client";
 import { ExperienceClient } from "./experience-client";
 import { VoucherClient } from "./voucher-client";
+import { EngagementClient } from "./engagement-client";
+import { MarketplaceClient } from "./marketplace-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { AppShell } from "./shell/app-shell";
@@ -56,6 +58,8 @@ const conversationClient = new ConversationClient({ authClient: sessionAuthClien
 const mediaClient = new MediaClient({ authClient: sessionAuthClient, secureSessionStore, baseUrl: localApiBaseUrl });
 const demandClient = new DemandClient({ authClient: sessionAuthClient, secureSessionStore });
 const voucherClient = new VoucherClient({ authClient: sessionAuthClient, secureSessionStore });
+const engagementClient = new EngagementClient({ authClient: sessionAuthClient, secureSessionStore });
+const marketplaceClient = new MarketplaceClient({ authClient: sessionAuthClient, secureSessionStore });
 type BootPhase = "BOOTSTRAPPING" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {
@@ -85,6 +89,8 @@ export function ProxyApp(): React.JSX.Element {
         media={mediaClient}
         demand={demandClient}
         vouchers={voucherClient}
+        engagement={engagementClient}
+        marketplace={marketplaceClient}
         onSignOut={() => {
           void secureSessionStore.clear().catch(() => undefined).then(() => setPhase("SIGNED_OUT"));
         }}

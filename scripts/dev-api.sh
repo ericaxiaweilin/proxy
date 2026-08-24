@@ -12,5 +12,7 @@ if [[ -f .env ]]; then
 fi
 set +a
 
-"${repo_dir}/scripts/ensure-modelstack-tunnel.sh"
+if ! "${repo_dir}/scripts/ensure-modelstack-tunnel.sh"; then
+  echo "Model-stack tunnel is unavailable; starting the API with model tasks fail-closed." >&2
+fi
 exec go -C apps/api-go run ./cmd/api

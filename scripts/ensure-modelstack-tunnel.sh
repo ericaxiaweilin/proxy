@@ -31,6 +31,8 @@ fi
 echo "Opening Proxy model-stack development tunnel on 127.0.0.1:${local_port}."
 ssh -fN -M -S "${control_socket}" \
   -o BatchMode=yes \
+  -o ConnectTimeout=5 \
+  -o ConnectionAttempts=1 \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=3 \

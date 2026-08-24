@@ -56,6 +56,8 @@ export interface MarketOpportunity {
   signalClass: string;
   countdown: string;
   coord?: [number, number];
+  ownedByViewer?: boolean;
+  appliedByViewer?: boolean;
 }
 
 export const MARKET_EXPERIENCES: MarketExperience[] = [

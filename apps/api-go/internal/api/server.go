@@ -23,6 +23,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
+	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"github.com/proxy-app/proxy-api/internal/voucher"
@@ -43,6 +44,7 @@ type Server struct {
 	Contribution  *contribution.Service
 	Experience    *experience.Service
 	Voucher       *voucher.Service
+	Marketplace   *marketplace.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -402,6 +404,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Experience.HandleContext(ctx, envelope)
 	case s.Voucher != nil && s.Voucher.Supports(envelope.CommandType):
 		return s.Voucher.HandleContext(ctx, envelope)
+	case s.Marketplace != nil && s.Marketplace.Supports(envelope.CommandType):
+		return s.Marketplace.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}

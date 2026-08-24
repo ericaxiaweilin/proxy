@@ -25,6 +25,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
+	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
@@ -109,6 +110,9 @@ func main() {
 	activityService := activity.New()
 	activityService.SeedDefaults()
 	server.Activity = activityService
+	marketplaceService := marketplace.New()
+	marketplaceService.SeedDefaults()
+	server.Marketplace = marketplaceService
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
 	// 未配置时 fail-closed：特权命令（审核/发奖/能力核验/媒体就绪覆盖）一律拒绝。
 	if operatorPrincipals := os.Getenv("PROXY_OPERATOR_PRINCIPALS"); operatorPrincipals != "" {
