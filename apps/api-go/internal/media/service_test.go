@@ -2,6 +2,8 @@ package media
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -26,15 +28,46 @@ func TestSaveUploadPersistsOnlyOwnersBytes(t *testing.T) {
 	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "another_principal", bytes.NewBufferString("image"), 20); err != ErrMediaNotOwner {
 		t.Fatalf("non-owner upload: %v", err)
 	}
-	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewBufferString("too-large"), 3); err != ErrUploadTooLarge {
+	jpeg := []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x01, 0xff, 0xd9}
+	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(jpeg), 3); err != ErrUploadTooLarge {
 		t.Fatalf("oversized upload: %v", err)
 	}
-	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewBufferString("image"), 20); err != nil {
+	asset, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(jpeg), 20)
+	if err != nil {
 		t.Fatalf("owner upload: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "mobile_photo.jpg"))
-	if err != nil || string(data) != "image" {
-		t.Fatalf("saved upload: %q, %v", string(data), err)
+	if err != nil || !bytes.Equal(data, jpeg) {
+		t.Fatalf("saved upload differs: %x, %v", data, err)
+	}
+	wantHash := sha256.Sum256(jpeg)
+	if asset.SourceBytes != int64(len(jpeg)) || asset.ChecksumSHA256 != hex.EncodeToString(wantHash[:]) {
+		t.Fatalf("integrity metadata = bytes:%d hash:%s", asset.SourceBytes, asset.ChecksumSHA256)
+	}
+	if asset.MimeType != "image/jpeg" {
+		t.Fatalf("sniffed mime = %s", asset.MimeType)
+	}
+	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(jpeg), 20); err != nil {
+		t.Fatalf("same-byte retry must be idempotent: %v", err)
+	}
+	differentJPEG := []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x02, 0xff, 0xd9}
+	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(differentJPEG), 20); err != ErrOriginalImmutable {
+		t.Fatalf("different bytes must not overwrite original: %v", err)
+	}
+}
+
+func TestSaveUploadRejectsDeclaredImageWithHTMLBytes(t *testing.T) {
+	s := New()
+	s.SetStoreDir(t.TempDir())
+	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
+		"mediaType": "IMAGE", "originalStorageKey": "spoofed.jpg", "mimeType": "image/jpeg",
+	}, ""))
+	var created struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &created)
+	if _, err := s.SaveUpload(t.Context(), created.MediaAssetID, "business_001", bytes.NewBufferString("<html>not an image</html>"), 1024); err != ErrMediaTypeMismatch {
+		t.Fatalf("spoofed image must be rejected: %v", err)
 	}
 }
 

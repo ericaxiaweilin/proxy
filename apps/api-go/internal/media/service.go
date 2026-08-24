@@ -1,12 +1,15 @@
 package media
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,10 +108,12 @@ type Repository interface {
 }
 
 var (
-	ErrAssetNotFound    = errors.New("media asset not found")
-	ErrStatusTransition = errors.New("invalid status transition")
-	ErrMediaNotOwner    = errors.New("media asset owner mismatch")
-	ErrUploadTooLarge   = errors.New("media upload too large")
+	ErrAssetNotFound     = errors.New("media asset not found")
+	ErrStatusTransition  = errors.New("invalid status transition")
+	ErrMediaNotOwner     = errors.New("media asset owner mismatch")
+	ErrUploadTooLarge    = errors.New("media upload too large")
+	ErrMediaTypeMismatch = errors.New("media content type does not match declaration")
+	ErrOriginalImmutable = errors.New("original media object is immutable")
 )
 
 type MemoryRepository struct {
@@ -219,6 +224,7 @@ func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID st
 	if err := os.MkdirAll(s.storeDir, 0o750); err != nil {
 		return MediaAsset{}, err
 	}
+	destinationPath := filepath.Join(s.storeDir, key)
 	temporary, err := os.CreateTemp(s.storeDir, ".proxy-upload-*")
 	if err != nil {
 		return MediaAsset{}, err
@@ -231,7 +237,17 @@ func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID st
 			_ = os.Remove(temporaryPath)
 		}
 	}()
-	written, err := io.Copy(temporary, io.LimitReader(source, maxBytes+1))
+	buffered := bufio.NewReader(source)
+	header, peekErr := buffered.Peek(512)
+	if peekErr != nil && !errors.Is(peekErr, io.EOF) {
+		return MediaAsset{}, peekErr
+	}
+	detectedMime := detectMediaMime(header)
+	if !mediaMimeAllowed(asset.MediaType, asset.MimeType, detectedMime) {
+		return MediaAsset{}, ErrMediaTypeMismatch
+	}
+	hasher := sha256.New()
+	written, err := io.Copy(io.MultiWriter(temporary, hasher), io.LimitReader(buffered, maxBytes+1))
 	if err != nil {
 		return MediaAsset{}, err
 	}
@@ -244,11 +260,72 @@ func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID st
 	if err := temporary.Close(); err != nil {
 		return MediaAsset{}, err
 	}
-	if err := os.Rename(temporaryPath, filepath.Join(s.storeDir, key)); err != nil {
+	// Link is exclusive: unlike Rename on Unix it cannot silently overwrite an
+	// existing ORIGINAL object. The temp file lives in the same directory/filesystem.
+	if err := os.Link(temporaryPath, destinationPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			incomingHash := hex.EncodeToString(hasher.Sum(nil))
+			// A PUT whose response was lost may be retried. The exact same bytes
+			// are idempotent; different bytes can never replace ORIGINAL.
+			if asset.SourceBytes == written && asset.ChecksumSHA256 != "" && asset.ChecksumSHA256 == incomingHash {
+				_ = os.Remove(temporaryPath)
+				committed = true
+				return asset, nil
+			}
+			return MediaAsset{}, ErrOriginalImmutable
+		}
 		return MediaAsset{}, err
 	}
+	originalPersisted := true
+	defer func() {
+		if originalPersisted {
+			_ = os.Remove(destinationPath)
+		}
+	}()
+	asset.SourceBytes = written
+	asset.ChecksumSHA256 = hex.EncodeToString(hasher.Sum(nil))
+	asset.MimeType = detectedMime
+	if err := s.repository.UpdateAsset(ctx, asset, "UPLOADING"); err != nil {
+		return MediaAsset{}, err
+	}
+	originalPersisted = false
+	_ = os.Remove(temporaryPath)
 	committed = true
 	return asset, nil
+}
+
+func detectMediaMime(header []byte) string {
+	if len(header) >= 12 && string(header[4:8]) == "ftyp" {
+		brand := string(header[8:12])
+		switch brand {
+		case "heic", "heix", "hevc", "hevx", "mif1", "msf1":
+			return "image/heic"
+		case "avif", "avis":
+			return "image/avif"
+		}
+	}
+	return http.DetectContentType(header)
+}
+
+func mediaMimeAllowed(mediaType, declared, detected string) bool {
+	expectedPrefix := "image/"
+	if mediaType == "VIDEO" {
+		expectedPrefix = "video/"
+	}
+	if !strings.HasPrefix(detected, expectedPrefix) {
+		return false
+	}
+	normalize := func(value string) string {
+		value = strings.ToLower(strings.TrimSpace(strings.Split(value, ";")[0]))
+		if value == "image/jpg" {
+			return "image/jpeg"
+		}
+		if value == "image/heif" {
+			return "image/heic"
+		}
+		return value
+	}
+	return declared == "" || normalize(declared) == normalize(detected)
 }
 
 // ResolveServingPath 把 READY 资产的 storage key 解析为本地文件路径，供

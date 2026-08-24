@@ -340,10 +340,12 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 - [x] 客户端取消 `quality: 0.85` 预压缩。
 - [x] iOS 相册优先 Current representation。
 - [x] 上传传递 width/height。
-- [ ] checksum、MIME sniff、bytes、orientation 入库。
-- [ ] resumable/可重试上传与幂等完成。
+- [x] checksum、MIME sniff、source bytes 入库。
+- [ ] EXIF orientation 与 color space 入库。
+- [x] 同字节 PUT 可安全重试，不同字节禁止覆盖 ORIGINAL。
+- [ ] 分片 resumable upload 与后台恢复完成。
 - [ ] 25MB、断网、后台恢复、重复提交测试。
-- [ ] ORIGINAL 不可变测试。
+- [x] ORIGINAL 不可变测试。
 
 放行证据：原文件上传前后 SHA-256 一致；故障注入通过。  
 当前状态：**BLOCKED**。

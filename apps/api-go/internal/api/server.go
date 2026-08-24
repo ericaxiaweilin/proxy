@@ -125,7 +125,7 @@ func (s *Server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_access_token"})
 		return
 	}
-	const maxUploadBytes = int64(20 << 20)
+	const maxUploadBytes = int64(25 << 20)
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+1)
 	if _, err := s.Media.SaveUpload(r.Context(), id, authenticated.Principal.ID, r.Body, maxUploadBytes); err != nil {
 		switch {
@@ -135,6 +135,10 @@ func (s *Server) mediaUpload(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "media_not_owner"})
 		case errors.Is(err, media.ErrUploadTooLarge):
 			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "media_upload_too_large"})
+		case errors.Is(err, media.ErrMediaTypeMismatch):
+			writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "media_type_mismatch"})
+		case errors.Is(err, media.ErrOriginalImmutable):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "media_original_immutable"})
 		case errors.Is(err, media.ErrStatusTransition):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "media_not_uploading"})
 		default:
