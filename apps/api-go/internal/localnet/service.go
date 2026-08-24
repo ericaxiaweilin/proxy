@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -43,6 +44,7 @@ type Post struct {
 type PostMediaRef struct {
 	MediaAssetID string `json:"mediaAssetId"`
 	SortOrder    int    `json:"sortOrder"`
+	AltText      string `json:"altText,omitempty"`
 }
 
 // PostMediaItem 是 Feed Read Model 的 Hydrate 媒体项（R14 §16.5 + R10 Gate F）。
@@ -360,6 +362,21 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	// R14 §16.1：P0 max = 6 Media/Post；超过不静默截断
 	if len(p.MediaRefs) > 6 {
 		return command.Rejected(e, "POST_MEDIA_LIMIT_EXCEEDED", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_media_limit", map[string]any{"max": 6, "got": len(p.MediaRefs)})
+	}
+	seenMedia := make(map[string]struct{}, len(p.MediaRefs))
+	seenOrder := make(map[int]struct{}, len(p.MediaRefs))
+	for _, ref := range p.MediaRefs {
+		if ref.MediaAssetID == "" || ref.SortOrder < 0 || ref.SortOrder >= len(p.MediaRefs) || utf8.RuneCountInString(ref.AltText) > 500 {
+			return command.Rejected(e, "INVALID_POST_MEDIA_REF", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_media_ref", nil)
+		}
+		if _, exists := seenMedia[ref.MediaAssetID]; exists {
+			return command.Rejected(e, "INVALID_POST_MEDIA_REF", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_media_ref", nil)
+		}
+		if _, exists := seenOrder[ref.SortOrder]; exists {
+			return command.Rejected(e, "INVALID_POST_MEDIA_REF", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_media_ref", nil)
+		}
+		seenMedia[ref.MediaAssetID] = struct{}{}
+		seenOrder[ref.SortOrder] = struct{}{}
 	}
 	if p.Visibility == "" {
 		p.Visibility = "PUBLIC"

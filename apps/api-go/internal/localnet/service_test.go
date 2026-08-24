@@ -55,6 +55,26 @@ func TestCreatePostEmptyContent(t *testing.T) {
 	}
 }
 
+func TestCreatePostRejectsInvalidMediaOrderAndAltText(t *testing.T) {
+	s := New()
+	for name, refs := range map[string][]map[string]any{
+		"duplicate sort order": {
+			{"mediaAssetId": "media_a", "sortOrder": 0},
+			{"mediaAssetId": "media_b", "sortOrder": 0},
+		},
+		"oversized alt text": {
+			{"mediaAssetId": "media_a", "sortOrder": 0, "altText": string(make([]rune, 501))},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := s.Handle(envelopeFor("", "CreatePost", map[string]any{"body": "照片", "mediaRefs": refs}))
+			if result.Outcome != "REJECTED" || result.Error.ErrorCode != "INVALID_POST_MEDIA_REF" {
+				t.Fatalf("want INVALID_POST_MEDIA_REF, got %s/%+v", result.Outcome, result.Error)
+			}
+		})
+	}
+}
+
 func TestCreatePostClassifiesDemandWithoutCreatingTransaction(t *testing.T) {
 	s := New()
 	result := s.Handle(envelopeFor("", "CreatePost", map[string]any{"body": "周六在河内找一位活动摄影师，预算 150 万"}))

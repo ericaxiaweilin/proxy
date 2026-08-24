@@ -55,9 +55,9 @@ export class LocalNetClient {
     return { posts: payload.posts, media: payload.media };
   }
 
-  public async createPost(payload: CreatePostPayload): Promise<string> {
+  public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {
     const session = await this.requireSession();
-    const result = await this.sendCommand(session, "CreatePost", { type: "Post", id: "new" }, payload as unknown as Record<string, unknown>);
+    const result = await this.sendCommand(session, "CreatePost", { type: "Post", id: "new" }, payload as unknown as Record<string, unknown>, idempotencyKey);
     if (result.aggregate?.type !== "Post") {
       throw new LocalNetProtocolError("create post response did not contain a Post aggregate");
     }
@@ -74,7 +74,8 @@ export class LocalNetClient {
     session: StoredSession & { principal: NonNullable<StoredSession["principal"]> },
     commandType: string,
     target: { type: string; id: string },
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    idempotencyKey?: string
   ): Promise<CommandResult> {
     const commandId = this.nextId("command");
     const envelope = {
@@ -84,7 +85,7 @@ export class LocalNetClient {
       actor: { type: "USER", id: session.userAccountId },
       principal: session.principal,
       target,
-      idempotencyKey: this.nextId("idempotency"),
+      idempotencyKey: idempotencyKey ?? this.nextId("idempotency"),
       authContext: { sessionId: session.auth.sessionId },
       purpose: "localnet_feed",
       correlationId: this.nextId("correlation"),

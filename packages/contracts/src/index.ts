@@ -294,7 +294,8 @@ export type PublishTaskPayload = z.infer<typeof PublishTaskPayloadSchema>;
 
 export const PostMediaRefSchema = z.object({
   mediaAssetId: z.string().min(1),
-  sortOrder: z.number().int().nonnegative()
+  sortOrder: z.number().int().nonnegative(),
+  altText: z.string().trim().max(500).optional()
 });
 export type PostMediaRef = z.infer<typeof PostMediaRefSchema>;
 
