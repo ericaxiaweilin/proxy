@@ -307,7 +307,7 @@ func (s *Service) publishTask(ctx context.Context, e command.Envelope) command.R
 			"slotCount": len(draft.Slots),
 		}),
 	}
-	if err := s.persistUpdateDraft(ctx, draft, previousVersion, domainEvents); err != nil {
+	if err := s.persistPublishTask(ctx, draft, previousVersion, domainEvents); err != nil {
 		if errors.Is(err, ErrVersionConflict) {
 			return command.Rejected(e, "TASK_DRAFT_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "demand.draft_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion})
 		}
@@ -326,6 +326,13 @@ func (s *Service) persistCreateDraft(ctx context.Context, draft TaskDraft, domai
 func (s *Service) persistUpdateDraft(ctx context.Context, draft TaskDraft, expectedVersion int, domainEvents []event.DomainEvent) error {
 	if repository, ok := s.repository.(TransactionalRepository); ok {
 		return repository.UpdateDraftAndPublish(ctx, draft, expectedVersion, domainEvents)
+	}
+	return s.repository.UpdateDraft(ctx, draft, expectedVersion)
+}
+
+func (s *Service) persistPublishTask(ctx context.Context, draft TaskDraft, expectedVersion int, domainEvents []event.DomainEvent) error {
+	if repository, ok := s.repository.(TransactionalRepository); ok {
+		return repository.PublishTaskAndCreateCanonical(ctx, draft, expectedVersion, draft.Slots, domainEvents)
 	}
 	return s.repository.UpdateDraft(ctx, draft, expectedVersion)
 }

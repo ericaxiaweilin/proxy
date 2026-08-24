@@ -103,6 +103,39 @@ func TestPublishExpandsAtomicSlotsWhenGatesAllow(t *testing.T) {
 	}
 }
 
+func TestPublishPersistsCanonicalTaskAndSlots(t *testing.T) {
+	allow := func(*TaskDraft, command.Envelope) GateDecision { return GateDecision{Status: "ALLOW"} }
+	repository := NewMemoryRepository()
+	service := NewWithRepository(allow, allow, repository)
+	draftID := completeDraft(t, service)
+	publish := service.Handle(demandEnvelope("PublishTask", map[string]any{"expectedVersion": 2, "online": true}, command.Target{Type: "TaskDraft", ID: draftID}))
+	if publish.Outcome != "ACCEPTED" {
+		t.Fatalf("publish failed: %#v", publish)
+	}
+	task, err := repository.GetTask(nil, draftID)
+	if err != nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+	if task.Lifecycle != "COMMITTED" || task.Version != 3 || task.DraftID != draftID {
+		t.Fatalf("canonical task mismatch: %#v", task)
+	}
+	if len(task.Slots) != 2 {
+		t.Fatalf("expected 2 canonical slots, got %d", len(task.Slots))
+	}
+	slots, err := repository.ListTaskSlots(nil, draftID)
+	if err != nil || len(slots) != 2 {
+		t.Fatalf("ListTaskSlots failed: %v len=%d", err, len(slots))
+	}
+	for _, s := range slots {
+		if s.State != "OPEN" || s.RoleID != "GREETER" {
+			t.Fatalf("slot mismatch: %#v", s)
+		}
+	}
+	if len(repository.Events()) < 2 {
+		t.Fatalf("expected outbox events, got %d", len(repository.Events()))
+	}
+}
+
 func TestRepositoryVersionGuardsAcrossServiceInstances(t *testing.T) {
 	repository := NewMemoryRepository()
 	first := NewWithRepository(nil, nil, repository)

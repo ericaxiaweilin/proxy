@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -163,6 +164,101 @@ func (r *DemandRepository) UpdateDraftAndPublish(ctx context.Context, draft dema
 	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
 		if err := updateDraft(transactionContext, transaction, draft, expectedVersion); err != nil {
 			return err
+		}
+		for _, domainEvent := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (r *DemandRepository) GetTask(ctx context.Context, id string) (demand.Task, error) {
+	var task demand.Task
+	var principalType, principalID string
+	var changes []byte
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, draft_id, owner_user_account_id, principal_type, principal_id, lifecycle, version,
+		       source_input, changes, created_at, updated_at
+		FROM demand.tasks
+		WHERE id = $1`, id).Scan(
+		&task.ID, &task.DraftID, &task.OwnerUserAccountID, &principalType, &principalID,
+		&task.Lifecycle, &task.Version, &task.SourceInput, &changes, &task.CreatedAt, &task.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return demand.Task{}, demand.ErrDraftNotFound
+	}
+	if err != nil {
+		return demand.Task{}, err
+	}
+	task.Principal = command.Principal{Type: principalType, ID: principalID}
+	if err := json.Unmarshal(changes, &task.Changes); err != nil {
+		return demand.Task{}, fmt.Errorf("decode task changes: %w", err)
+	}
+	slots, err := r.ListTaskSlots(ctx, task.ID)
+	if err != nil {
+		return demand.Task{}, err
+	}
+	task.Slots = slots
+	return task, nil
+}
+
+func (r *DemandRepository) ListTaskSlots(ctx context.Context, taskID string) ([]demand.TaskSlot, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, task_id, role_id, state, version, created_at, updated_at
+		FROM demand.task_slots
+		WHERE task_id = $1
+		ORDER BY id`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []demand.TaskSlot{}
+	for rows.Next() {
+		var slot demand.TaskSlot
+		var taskIDScan string
+		var createdAt, updatedAt time.Time
+		var version int
+		if err := rows.Scan(&slot.ID, &taskIDScan, &slot.RoleID, &slot.State, &version, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, slot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *DemandRepository) PublishTaskAndCreateCanonical(ctx context.Context, draft demand.TaskDraft, expectedVersion int, slots []demand.TaskSlot, domainEvents []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("demand transactional outbox is not configured")
+	}
+	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		if err := updateDraft(transactionContext, transaction, draft, expectedVersion); err != nil {
+			return err
+		}
+		changesJSON, err := json.Marshal(draft.Changes)
+		if err != nil {
+			return fmt.Errorf("encode task changes: %w", err)
+		}
+		if _, err := transaction.Exec(transactionContext, `
+			INSERT INTO demand.tasks (
+				id, draft_id, owner_user_account_id, principal_type, principal_id, lifecycle, version,
+				source_input, changes, created_at, updated_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			draft.ID, draft.ID, draft.OwnerUserAccountID, draft.Principal.Type, draft.Principal.ID,
+			draft.Lifecycle, draft.Version, draft.SourceInput, changesJSON, draft.UpdatedAt, draft.UpdatedAt); err != nil {
+			return err
+		}
+		for _, slot := range slots {
+			if _, err := transaction.Exec(transactionContext, `
+				INSERT INTO demand.task_slots (id, task_id, role_id, state, version, created_at, updated_at)
+				VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+				slot.ID, draft.ID, slot.RoleID, slot.State, 1, draft.UpdatedAt, draft.UpdatedAt); err != nil {
+				return err
+			}
 		}
 		for _, domainEvent := range domainEvents {
 			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {

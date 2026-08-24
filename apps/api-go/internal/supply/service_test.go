@@ -2,6 +2,7 @@ package supply
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -285,4 +286,100 @@ func TestCandidateBatchOwnerAccess(t *testing.T) {
 	if r3.Outcome != "REJECTED" || r3.Error.ErrorCode != "BATCH_NOT_OWNED" {
 		t.Fatalf("want BATCH_NOT_OWNED, got %s/%+v", r3.Outcome, r3.Error)
 	}
+}
+
+// M3 验收：过期 KYC 必须阻断 Eligibility（verified 但已过期 ≠ 可匹配）
+func TestEligibilityBlocksExpiredVerification(t *testing.T) {
+	s := New()
+	// 手动创建 profile/service，不走 VerifyCapability 的自动 future expiry
+	repo := s.repository
+	agentID := "agent_expired"
+	_ = repo.CreateProfile(nil, AgentProfile{AgentID: agentID, Name: "Expired", Status: "ACTIVE", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	_ = repo.CreateService(nil, AgentService{AgentID: agentID, ServiceType: "CITY_COMPANION", Status: "ACTIVE", ReferencePrice: 900000, Currency: "VND", Markets: []string{"hn"}, UpdatedAt: time.Now()})
+	_ = repo.SetCapability(nil, Capability{AgentID: agentID, Capability: "ZH", Declared: true, Verified: true, UpdatedAt: time.Now()})
+	// 写入过期验证（VERIFIED 但 expiresAt 在过去）
+	_ = repo.CreateVerification(nil, CapabilityVerification{
+		ID: "cv_expired", AgentID: agentID, Capability: "ZH", Status: "VERIFIED", Method: "INTERVIEW",
+		VerifiedBy: "ops_001", VerifiedAt: time.Now().Add(-48 * time.Hour), ExpiresAt: time.Now().Add(-24 * time.Hour), CreatedAt: time.Now().Add(-48 * time.Hour),
+	})
+	// 窗口正常
+	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	end := time.Now().Add(34 * time.Hour).UTC().Format(time.RFC3339)
+	_ = repo.CreateWindow(nil, AvailabilityWindow{ID: "aw_expired", AgentID: agentID, StartAt: time.Now().Add(24 * time.Hour), EndAt: time.Now().Add(34 * time.Hour), MarketID: "hn", Status: "AVAILABLE", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+
+	r := s.Handle(envelopeFor("QuerySuppliers", map[string]any{
+		"marketId": "hn", "startAt": start, "durationH": 8,
+		"serviceType": "CITY_COMPANION", "languages": []string{"ZH"},
+	}, ""))
+	var view struct {
+		Suppliers []map[string]any `json:"suppliers"`
+		Shortage  bool             `json:"shortage"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	if !view.Shortage || len(view.Suppliers) != 0 {
+		t.Fatalf("expired verification must NOT pass eligibility, got suppliers=%v shortage=%v", view.Suppliers, view.Shortage)
+	}
+	// Passport 应显示 expired 计数
+	r2 := s.Handle(envelopeFor("GetAgentPassport", map[string]any{"agentId": agentID}, agentID))
+	var passport struct {
+		VerificationSummary map[string]int `json:"verificationSummary"`
+		PassportStatus      string         `json:"passportStatus"`
+	}
+	_ = json.Unmarshal([]byte(r2.OperationRef), &passport)
+	if passport.VerificationSummary["expired"] != 1 || passport.VerificationSummary["verified"] != 0 {
+		t.Fatalf("passport expired summary wrong: %+v", passport.VerificationSummary)
+	}
+	_ = end
+}
+
+// M3 验收：permission denied（非 owner 不能改他人 Profile）
+func TestPermissionDeniedOnProfileUpdate(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_linh", "Linh", []string{"ZH"}, "hn", 1200000)
+	r := s.Handle(envelopeForPrincipal("UpdateAgentProfile", map[string]any{
+		"agentId": "agent_linh", "name": "Hacked",
+	}, "", "principal_other"))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "AGENT_NOT_OWNED" {
+		t.Fatalf("want AGENT_NOT_OWNED, got %s/%+v", r.Outcome, r.Error)
+	}
+}
+
+// M3 验收：location 精度 redaction — QuerySuppliers 与 Passport 不泄露精确坐标
+func TestLocationPrecisionRedaction(t *testing.T) {
+	s := New()
+	setupAgent(t, s, "agent_linh", "Linh", []string{"ZH"}, "hn", 1200000)
+	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	r := s.Handle(envelopeFor("QuerySuppliers", map[string]any{
+		"marketId": "hn", "startAt": start, "durationH": 8,
+		"serviceType": "CITY_COMPANION", "languages": []string{"ZH"},
+	}, ""))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("query: %s", r.Outcome)
+	}
+	// 响应中不得包含精确经纬度字段
+	payload := r.OperationRef
+	if contains(payload, "lat") || contains(payload, "lng") || contains(payload, "coordinate") || contains(payload, "exact") {
+		t.Fatalf("supply query leaked precise location: %s", payload)
+	}
+	// Passport activeWindows 仅含 marketId/startAt/endAt，不含 precise
+	r2 := s.Handle(envelopeFor("GetAgentPassport", map[string]any{"agentId": "agent_linh"}, "agent_linh"))
+	var pp struct {
+		ActiveWindows []map[string]any `json:"activeWindows"`
+	}
+	_ = json.Unmarshal([]byte(r2.OperationRef), &pp)
+	for _, w := range pp.ActiveWindows {
+		if _, hasLat := w["lat"]; hasLat {
+			t.Fatalf("passport leaked lat")
+		}
+		if _, hasPrecise := w["preciseLocation"]; hasPrecise {
+			t.Fatalf("passport leaked preciseLocation")
+		}
+		if _, ok := w["marketId"]; !ok {
+			t.Fatalf("passport missing marketId redaction")
+		}
+	}
+}
+
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

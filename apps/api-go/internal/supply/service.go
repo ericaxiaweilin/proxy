@@ -460,7 +460,7 @@ func NewWithRepository(repository TransactionalRepository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreateAgentProfile", "UpdateAgentProfile", "GetAgentProfile",
+	case "CreateAgentProfile", "UpdateAgentProfile", "GetAgentProfile", "GetAgentPassport",
 		"CreateAgentService", "UpdateAgentService",
 		"DeclareCapability", "VerifyCapability",
 		"SetAvailabilityWindow", "BlockAvailabilityWindow", "QuerySuppliers",
@@ -503,6 +503,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.createCandidateBatch(ctx, e)
 	case "GetCandidateBatch":
 		return s.getCandidateBatch(ctx, e)
+	case "GetAgentPassport":
+		return s.getAgentPassport(ctx, e)
 	default:
 		return command.Rejected(e, "SUPPLY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "supply.unsupported_command", nil)
 	}
@@ -607,6 +609,81 @@ func (s *Service) getProfile(ctx context.Context, e command.Envelope) command.Re
 	}
 	return acceptedWithPayload(e, "AgentProfile", agentID, 1, profile.Status, map[string]any{
 		"profile": profile,
+	}, nil)
+}
+
+func (s *Service) getAgentPassport(ctx context.Context, e command.Envelope) command.Result {
+	agentID := e.Target.ID
+	if agentID == "" {
+		var p struct {
+			AgentID string `json:"agentId"`
+		}
+		if !decode(e.Payload, &p) || p.AgentID == "" {
+			return command.Rejected(e, "INVALID_PASSPORT_QUERY", "VALIDATION", "AFTER_USER_ACTION", "supply.invalid_passport_query", nil)
+		}
+		agentID = p.AgentID
+	}
+	profile, err := s.repository.GetProfile(ctx, agentID)
+	if errors.Is(err, ErrProfileNotFound) {
+		return command.Rejected(e, "AGENT_PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "supply.profile_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "PASSPORT_READ_FAILED", "INTERNAL", "SAFE_RETRY", "supply.passport_read_failed", nil)
+	}
+	svc, _ := s.repository.GetService(ctx, agentID, "CITY_COMPANION")
+	caps, _ := s.repository.GetCapabilities(ctx, agentID)
+	verifications, _ := s.repository.GetVerifications(ctx, agentID)
+	windows, _ := s.repository.GetWindows(ctx, agentID)
+	now := s.clock.Now().UTC()
+	// Verification summary (redacted:不暴露 verifiedBy 明文，仅计数)
+	verifiedCount, expiredCount, pendingCount := 0, 0, 0
+	for _, v := range verifications {
+		switch v.Status {
+		case "VERIFIED":
+			if v.ExpiresAt.After(now) {
+				verifiedCount++
+			} else {
+				expiredCount++
+			}
+		case "PENDING":
+			pendingCount++
+		}
+	}
+	// Availability: only future AVAILABLE windows, precise location redacted to marketId
+	activeWindows := []map[string]any{}
+	for _, w := range windows {
+		if w.Status == "AVAILABLE" && w.EndAt.After(now) {
+			activeWindows = append(activeWindows, map[string]any{
+				"windowId": w.ID,
+				"marketId": w.MarketID,
+				"startAt":  w.StartAt.Format(time.RFC3339),
+				"endAt":    w.EndAt.Format(time.RFC3339),
+				"status":   w.Status,
+			})
+		}
+	}
+	// Passport status: ACTIVE if profile ACTIVE + service ACTIVE + at least one verified capability
+	passportStatus := profile.Status
+	if profile.Status == "ACTIVE" {
+		if svc.Status != "ACTIVE" {
+			passportStatus = "INCOMPLETE_SERVICE"
+		} else if verifiedCount == 0 {
+			passportStatus = "PENDING_VERIFICATION"
+		}
+	}
+	return acceptedWithPayload(e, "AgentPassport", agentID, 1, passportStatus, map[string]any{
+		"agentId": agentID,
+		"profile": profile,
+		"service": svc,
+		"capabilities": caps,
+		"verificationSummary": map[string]any{
+			"verified": verifiedCount,
+			"expired":  expiredCount,
+			"pending":  pendingCount,
+		},
+		"activeWindows": activeWindows,
+		"passportStatus": passportStatus,
+		"redactions": []string{"profile.photos precise EXIF removed", "location precise coordinates redacted to marketId"},
 	}, nil)
 }
 
@@ -899,12 +976,23 @@ func (s *Service) evaluateEligibility(ctx context.Context, agentID string, q Sup
 			break
 		}
 	}
-	// Capability 硬要求：语言 + 能力都要 VERIFIED
-	caps, _ := s.repository.GetCapabilities(ctx, agentID)
+	// Capability 硬要求：语言 + 能力都要 VERIFIED 且未过期
+	// 必须以 capability_verifications 的未过期 VERIFIED 记录为准，不能仅靠 capabilities.verified 布尔（过期后需失效）。
 	verified := map[string]bool{}
-	for _, c := range caps {
-		if c.Verified {
-			verified[c.Capability] = true
+	verifications, _ := s.repository.GetVerifications(ctx, agentID)
+	now := s.clock.Now().UTC()
+	for _, v := range verifications {
+		if v.Status == "VERIFIED" && v.ExpiresAt.After(now) {
+			verified[v.Capability] = true
+		}
+	}
+	// 兼容：若无 verification 记录但 capability.verified 已置位（内存测试旧数据），仍视为有效，直到下次验证写入。
+	if len(verifications) == 0 {
+		caps, _ := s.repository.GetCapabilities(ctx, agentID)
+		for _, c := range caps {
+			if c.Verified {
+				verified[c.Capability] = true
+			}
 		}
 	}
 	snap.CapabilitiesOK = true

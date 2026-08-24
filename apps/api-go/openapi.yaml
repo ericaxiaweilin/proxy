@@ -1,0 +1,289 @@
+openapi: 3.1.0
+info:
+  title: Proxy API
+  version: 1.0.0
+  description: |
+    Proxy modular monolith — App-first. All mutations are typed Commands
+    via POST /v1/commands/{commandType}. Events are delivered via Transactional Outbox.
+    This document is generated from Go domain contracts and shared Zod schemas.
+servers:
+  - url: http://localhost:4100
+    description: local development
+paths:
+  /health/live:
+    get:
+      operationId: healthLive
+      summary: Liveness probe
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: proxy-api }
+  /health/ready:
+    get:
+      operationId: healthReady
+      summary: Readiness probe (database/redis optional)
+      responses:
+        '200':
+          description: ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  service: { type: string }
+                  checks: { type: object, additionalProperties: { type: string } }
+        '503':
+          description: not ready
+  /v1/commands/{commandType}:
+    post:
+      operationId: executeCommand
+      summary: Canonical command envelope
+      parameters:
+        - name: commandType
+          in: path
+          required: true
+          schema: { type: string }
+          description: Must match envelope.commandType
+          example: CreateTaskDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommandEnvelope' }
+      responses:
+        '200':
+          description: ACCEPTED or ALREADY_APPLIED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResult' }
+        '202':
+          description: PENDING (admission/funding gate not configured)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResult' }
+        '400':
+          description: invalid envelope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResult' }
+        '401':
+          description: access token required/invalid
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResult' }
+        '403':
+          description: operator privilege required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResult' }
+        '409':
+          description: REJECTED (business/conflict)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResult' }
+        '429':
+          description: rate limited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommandResult' }
+      security:
+        - bearerAuth: []
+  /v1/media/upload/{mediaAssetId}:
+    put:
+      operationId: uploadMediaChunk
+      summary: Resumable media upload (Content-Range + X-Chunk-SHA256)
+      parameters:
+        - name: mediaAssetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '202': { description: chunk accepted }
+        '204': { description: upload complete }
+        '409': { description: offset mismatch }
+      security:
+        - bearerAuth: []
+    head:
+      operationId: uploadOffset
+      summary: Query upload offset
+      parameters:
+        - name: mediaAssetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: offset in Upload-Offset header }
+      security:
+        - bearerAuth: []
+  /v1/media/play/{mediaAssetId}:
+    get:
+      operationId: getMediaPlay
+      summary: Serve READY media asset (fail-closed; 404 if not READY)
+      parameters:
+        - name: mediaAssetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: binary media }
+        '404': { description: not available }
+  /v1/media/thumb/{mediaAssetId}:
+    get:
+      operationId: getMediaThumb
+      summary: Serve READY thumbnail
+      parameters:
+        - name: mediaAssetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: thumbnail }
+        '404': { description: not available }
+  /v1/media/variant/{variantId}:
+    get:
+      operationId: getMediaVariant
+      summary: Serve specific MediaVariant by id
+      parameters:
+        - name: variantId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: variant file }
+        '404': { description: not available }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    CommandEnvelope:
+      type: object
+      required: [commandId, commandType, commandVersion, actor, principal, target, idempotencyKey, authContext, purpose, correlationId, requestedAt, payload]
+      properties:
+        commandId: { type: string, minLength: 1 }
+        commandType:
+          type: string
+          enum:
+            - CreateTaskDraft
+            - UpdateTaskDraft
+            - PreviewTaskDraft
+            - PublishTask
+            - CreateAnonymousSession
+            - RequestLoginChallenge
+            - VerifyLoginChallenge
+            - CreateSession
+            - RefreshSession
+            - RegisterDevice
+            - RevokeSession
+            - RevokeAllSessions
+            - SwitchPrincipalContext
+            - RequestAccountRecovery
+            - CreatePost
+            - ReplyToPost
+            - ToggleReaction
+            - ToggleRepost
+            - ToggleBookmark
+            - ToggleFollow
+            - RecordFeedPreference
+            - ReportPost
+            - CreateStatus
+            - SetCommunityMembership
+            - CreateMediaAsset
+            - MarkMediaReady
+            - CreateContribution
+            - CreateAgentProfile
+            - UpdateAgentProfile
+            - GetAgentProfile
+            - GetAgentPassport
+            - CreateAgentService
+            - UpdateAgentService
+            - DeclareCapability
+            - VerifyCapability
+            - SetAvailabilityWindow
+            - BlockAvailabilityWindow
+            - QuerySuppliers
+            - CreateCandidateBatch
+            - GetCandidateBatch
+            - DummyOther # placeholder to keep enum open for additive field evolution
+        commandVersion: { type: integer, minimum: 1 }
+        actor:
+          type: object
+          required: [type, id]
+          properties:
+            type: { type: string, enum: [USER, OPERATOR, SYSTEM, PROVIDER] }
+            id: { type: string, minLength: 1 }
+        principal:
+          type: object
+          required: [type, id]
+          properties:
+            type: { type: string, enum: [INDIVIDUAL, BUSINESS, SYSTEM] }
+            id: { type: string, minLength: 1 }
+        target:
+          type: object
+          required: [type, id]
+          properties:
+            type: { type: string, minLength: 1 }
+            id: { type: string, minLength: 1 }
+        idempotencyKey: { type: string, minLength: 8 }
+        expectedAggregateVersion: { type: integer, minimum: 0, nullable: true }
+        policySnapshot:
+          type: object
+          nullable: true
+          properties:
+            policySetId: { type: string }
+            policySetVersion: { type: string }
+        authContext:
+          type: object
+          properties:
+            sessionId: { type: string }
+            reauthenticatedAt: { type: string, format: date-time }
+            operatorAccessGrantId: { type: string }
+        purpose: { type: string, minLength: 1 }
+        correlationId: { type: string, minLength: 1 }
+        causationId: { type: string }
+        requestedAt: { type: string, format: date-time }
+        payload: { type: object, additionalProperties: true }
+    CommandResult:
+      type: object
+      required: [commandId, outcome, eventRefs, correlationId]
+      properties:
+        commandId: { type: string }
+        outcome: { type: string, enum: [ACCEPTED, REJECTED, PENDING, ALREADY_APPLIED] }
+        aggregate:
+          type: object
+          nullable: true
+          properties:
+            type: { type: string }
+            id: { type: string }
+            version: { type: integer }
+            state: { type: string }
+        eventRefs: { type: array, items: { type: string } }
+        operationRef: { type: string }
+        error:
+          $ref: '#/components/schemas/ErrorEnvelope'
+        correlationId: { type: string }
+    ErrorEnvelope:
+      type: object
+      required: [errorCode, category, retryability, messageKey, safeDetails, correlationId]
+      properties:
+        errorCode: { type: string }
+        category:
+          type: string
+          enum: [AUTHENTICATION, AUTHORIZATION, ACCOUNT_STATE, VALIDATION, BUSINESS_STATE, ELIGIBILITY, CONSENT_PERMISSION, PAYMENT, CONCURRENCY, PROVIDER, PRIVACY, INTERNAL]
+        retryability:
+          type: string
+          enum: [NO, SAFE_RETRY, AFTER_REAUTH, AFTER_USER_ACTION, ASYNC_PENDING]
+        messageKey: { type: string }
+        safeDetails: { type: object, additionalProperties: true }
+        requiredAction: { type: string }
+        correlationId: { type: string }
+        supportCaseRef: { type: string }

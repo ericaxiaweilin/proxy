@@ -11,7 +11,8 @@
     "dev:worker": "go -C apps/api-go run ./cmd/worker",
     "test:go": "go -C apps/api-go test ./...",
     "build:go": "mkdir -p apps/api-go/.build && go -C apps/api-go build -o .build/proxy-api ./cmd/api && go -C apps/api-go build -o .build/proxy-worker ./cmd/worker",
-    "check": "pnpm typecheck && pnpm test && pnpm test:go && pnpm build:go && pnpm build"
+    "check:openapi": "go -C apps/api-go run ./scripts/generate_openapi.go --check",
+    "check": "pnpm typecheck && pnpm test && pnpm test:go && pnpm build:go && pnpm build && pnpm check:openapi"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",
