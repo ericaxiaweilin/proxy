@@ -16,7 +16,7 @@ import { type EngagementClient } from "../engagement-client";
 import { type MarketplaceClient } from "../marketplace-client";
 import { type MediaClient, type UploadableImage } from "../media-client";
 import { isOpportunityPost, mergeFeedContent } from "../feed-content";
-import { mediaAspect, portraitRailLayout, shouldPreserveWholeSubject } from "../media-presentation";
+import { mediaAspect, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
@@ -143,6 +143,7 @@ export function FeedSurface({
   const [quoteTargetId, setQuoteTargetId] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
+  const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
   const [selectedCustomFeed, setSelectedCustomFeed] = useState<string | null>(null);
   // X 式内联视频自动播放：滑近视口中心自动播（默认静音）、滑出即停，同一时刻仅一条在播。
@@ -722,8 +723,13 @@ export function FeedSurface({
               {items.length > 1 ? (
                 <AdaptiveMediaRail
                   items={items}
+                  currentIndex={mediaPositions[post.postId] ?? 0}
                   resolveUrl={(path) => localNet.resolveMediaUrl(path)}
-                  onOpen={(index) => setViewer({ postId: post.postId, index })}
+                  onIndexChange={(index) => setMediaPositions((current) => ({ ...current, [post.postId]: index }))}
+                  onOpen={(index) => {
+                    setMediaPositions((current) => ({ ...current, [post.postId]: index }));
+                    setViewer({ postId: post.postId, index });
+                  }}
                 />
               ) : items.length === 1 && items[0] && items[0].mediaType === "VIDEO" && items[0].playbackUrl ? (
                 <VideoCard
@@ -827,12 +833,15 @@ export function FeedSurface({
       {/* 全屏媒体查看器（真实文件：图片 thumbnailUrl / 视频 playbackUrl） */}
       {viewer && viewerPost && viewerItems[viewer.index] ? (
         <MediaViewer
-          key={`${viewer.postId}_${viewer.index}`}
+          key={viewer.postId}
           items={viewerItems}
           index={viewer.index}
           author={authorName(viewerPost)}
           resolveUrl={(path) => localNet.resolveMediaUrl(path)}
-          onNavigate={(next) => setViewer({ postId: viewer.postId, index: next })}
+          onNavigate={(next) => {
+            setMediaPositions((current) => ({ ...current, [viewer.postId]: next }));
+            setViewer({ postId: viewer.postId, index: next });
+          }}
           onClose={() => setViewer(null)}
         />
       ) : null}
@@ -894,38 +903,45 @@ export function FeedSurface({
 
 // 人像组图规则：Rail 保持统一画布，半身照约 4:5 铺满；9:16 等全身照
 // 在同一画布内 contain + 柔和背景，保证头顶与脚都不被裁掉，也不会缩成窄条。
-function AdaptiveMediaRail({ items, resolveUrl, onOpen }: {
+function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onOpen }: {
   items: FeedMediaItem[];
+  currentIndex: number;
   resolveUrl: (path: string) => string;
+  onIndexChange: (index: number) => void;
   onOpen: (index: number) => void;
 }): React.JSX.Element {
   const [contentWidth, setContentWidth] = useState(320);
-  const { portraitSet, railHeight, portraitCardWidth } = portraitRailLayout(items, contentWidth);
+  const railRef = useRef<ScrollView>(null);
+  const metrics = useMemo(() => mediaRailMetrics(items, contentWidth), [items, contentWidth]);
+  useEffect(() => {
+    const target = metrics.offsets[Math.max(0, Math.min(currentIndex, metrics.offsets.length - 1))] ?? 0;
+    railRef.current?.scrollTo({ x: target, animated: false });
+  }, [currentIndex, metrics.offsets]);
 
   return (
     <View onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}>
       <ScrollView
         decelerationRate="fast"
         horizontal
+        onMomentumScrollEnd={(event) => onIndexChange(nearestRailIndex(metrics.offsets, event.nativeEvent.contentOffset.x))}
+        ref={railRef}
+        snapToOffsets={metrics.offsets}
         snapToAlignment="start"
         showsHorizontalScrollIndicator={false}
         style={styles.mediaRail}
       >
         {items.map((item, index) => {
-          const aspect = mediaAspect(item);
-          const cardWidth = portraitSet
-            ? portraitCardWidth
-            : Math.max(contentWidth * 0.72, Math.min(contentWidth * 0.92, railHeight * aspect));
+          const cardWidth = metrics.cardWidths[index] ?? contentWidth * 0.84;
           return (
             <Pressable
               accessibilityLabel={`查看第 ${index + 1} 张媒体`}
               key={item.mediaAssetId}
               onPress={() => onOpen(index)}
-              style={{ height: railHeight, marginRight: 10, width: cardWidth }}
+              style={{ height: metrics.railHeight, marginRight: 10, width: cardWidth }}
             >
               <SocialMediaFrame
                 item={item}
-                frameAspect={cardWidth / railHeight}
+                frameAspect={cardWidth / metrics.railHeight}
                 resolveUrl={resolveUrl}
               />
               <View style={styles.mediaBadge}>
@@ -935,7 +951,7 @@ function AdaptiveMediaRail({ items, resolveUrl, onOpen }: {
           );
         })}
       </ScrollView>
-      <Text style={styles.mediaRailHint}>{items.length} 张 · 左右滑动查看</Text>
+      <Text style={styles.mediaRailHint}>{currentIndex + 1}/{items.length} · 左右滑动查看</Text>
     </View>
   );
 }

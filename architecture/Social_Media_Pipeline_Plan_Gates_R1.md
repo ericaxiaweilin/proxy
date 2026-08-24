@@ -376,7 +376,7 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 - [x] 半身 4:5 + 全身 9:16 使用统一人像画布，不再缩成 156px 小图。
 - [x] 全身人像 contain + 柔化补边，默认不裁头脚。
 - [ ] 半身/全身/多人/靠边人物样本集截图回归。
-- [ ] 返回原 Post/index/scroll position 完成。
+- [x] Gallery 与 Rail 共享稳定媒体 index；关闭覆盖层后 Feed 未卸载，恢复原 Post/index/scroll position。
 - [ ] iPhone 15 + 小屏 iPhone + Android 三档真机视觉证据。
 
 放行证据：截图矩阵、手势录屏、E2E、性能 trace。  
@@ -438,4 +438,4 @@ Sprint D: Gate 5
 Sprint E: Gate 6 + release candidate
 ```
 
-当前立即执行：补齐 `MediaVariant` 合同与迁移，随后实现图片 worker。分享 UI 不先做假按钮；必须等 canonical HTTPS resolver 与权限回落合同成立后一起接线。
+当前立即执行：Gate 3 继续补齐混合视频与真机截图矩阵，同时推进 Gate 4 发布器状态机。分享 UI 不先做假按钮；必须等 canonical HTTPS resolver 与权限回落合同成立后一起接线。

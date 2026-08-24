@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { portraitRailLayout, shouldPreserveWholeSubject } from "./media-presentation.js";
+import { mediaRailMetrics, nearestRailIndex, portraitRailLayout, shouldPreserveWholeSubject } from "./media-presentation.js";
 
 describe("portrait social media presentation", () => {
   it("gives half-body and full-body photos one stable 4:5-like rail", () => {
@@ -24,5 +24,15 @@ describe("portrait social media presentation", () => {
     expect(small.railHeight).toBe(294);
     expect(large.railHeight).toBe(440);
   });
-});
 
+  it("produces stable snap offsets and restores the closest media index", () => {
+    const metrics = mediaRailMetrics([
+      { aspectRatio: 4 / 5, width: 2400, height: 3000 },
+      { aspectRatio: 9 / 16, width: 2160, height: 3840 },
+      { aspectRatio: 3 / 4, width: 2250, height: 3000 }
+    ], 360);
+    expect(metrics.offsets).toEqual([0, 312.4, 624.8]);
+    expect(nearestRailIndex(metrics.offsets, 330)).toBe(1);
+    expect(nearestRailIndex(metrics.offsets, 610)).toBe(2);
+  });
+});
