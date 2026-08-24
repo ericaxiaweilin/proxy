@@ -26,7 +26,7 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 		if err != nil {
 			continue // 找不到的媒体跳过（不阻塞 Feed）
 		}
-		result[id] = localnet.MediaAssetInfo{
+		info := localnet.MediaAssetInfo{
 			MediaAssetID:     asset.MediaAssetID,
 			MediaType:        asset.MediaType,
 			ThumbnailURL:     asset.ThumbnailURL,
@@ -36,6 +36,25 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 			DurationMs:       asset.DurationMs,
 			ProcessingStatus: asset.ProcessingStatus,
 		}
+		variants, variantErr := l.service.ListReadyVariants(ctx, id)
+		if variantErr == nil {
+			for _, variant := range variants {
+				url := "/v1/media/variant/" + variant.MediaVariantID
+				switch variant.Purpose {
+				case "ORIGINAL":
+					info.OriginalAvailable = true
+				case "FEED_1X":
+					info.FeedURL = url
+				case "FEED_2X":
+					info.Feed2xURL = url
+				case "GALLERY":
+					info.GalleryURL = url
+				case "PLACEHOLDER":
+					info.PlaceholderURL = url
+				}
+			}
+		}
+		result[id] = info
 	}
 	return result, nil
 }

@@ -354,12 +354,13 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 
 ### Gate 2 — 派生与审核
 
-- [ ] Worker 生成 FEED_1X、FEED_2X、GALLERY、SHARE_OG、PLACEHOLDER。
-- [ ] recipe version 与幂等键完成。
-- [ ] EXIF orientation、sRGB、GPS metadata 策略完成。
+- [x] 生成 FEED_1X、FEED_2X、GALLERY、SHARE_OG、PLACEHOLDER；ORIGINAL 单独登记。
+- [x] `image_recipe_v1`、稳定 Variant ID 与数据库幂等约束完成。
+- [x] 展示派生图移除 EXIF/GPS metadata，保留源文件 metadata 事实。
+- [ ] 从同步 ProcessMediaAsset 迁移到可恢复的异步 Worker/Queue。
 - [ ] quarantine、格式嗅探、解码安全限制完成。
 - [ ] processing/moderation/visibility 状态组合 fail-closed。
-- [ ] 失败重试不覆盖 ORIGINAL。
+- [x] 派生失败只把处理状态置为 FAILED，不覆盖 ORIGINAL。
 
 放行证据：样本集像素/方向/色彩快照与安全测试。  
 当前状态：**BLOCKED**。
@@ -370,7 +371,7 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 - [x] 极端比例不默认裁主体。
 - [x] Gallery 使用 IMAGE playback/original 路由而非 thumbnail。
 - [x] iOS/Android 缩放图库依赖已接入。
-- [ ] Feed 改用用途明确的 `feedUrl`，Gallery 改用 `galleryUrl`。
+- [x] 新媒体 Feed 使用 `feedUrl`、Gallery 使用 `galleryUrl`；旧媒体保留兼容回落。
 - [ ] 多图 Rail 的比例、露出、滑动 index、混合媒体完成。
 - [x] 半身 4:5 + 全身 9:16 使用统一人像画布，不再缩成 156px 小图。
 - [x] 全身人像 contain + 柔化补边，默认不裁头脚。

@@ -6,9 +6,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -239,22 +243,72 @@ func TestCannotProcessBeforeUploadComplete(t *testing.T) {
 
 // 图片：直接 READY（无转码）。
 func TestImageGoesReadyDirectly(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	dir := t.TempDir()
 	s := New()
+	s.SetStoreDir(dir)
 	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
-		"mediaType": "IMAGE", "originalStorageKey": "uploads/photo.jpg", "mimeType": "image/jpeg",
+		"mediaType": "IMAGE", "originalStorageKey": "photo.jpg", "mimeType": "image/jpeg",
 	}, ""))
 	var view struct {
 		MediaAssetID string `json:"mediaAssetId"`
 	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	id := view.MediaAssetID
-	r = s.Handle(envelopeFor("CompleteMediaUpload", map[string]any{"originalStorageKey": "uploads/photo.jpg"}, id))
+	var encoded bytes.Buffer
+	portrait := image.NewRGBA(image.Rect(0, 0, 80, 120))
+	for y := 0; y < 120; y++ {
+		for x := 0; x < 80; x++ {
+			portrait.Set(x, y, color.RGBA{R: uint8(x * 3), G: uint8(y * 2), B: 120, A: 255})
+		}
+	}
+	if err := jpeg.Encode(&encoded, portrait, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveUpload(t.Context(), id, "business_001", bytes.NewReader(encoded.Bytes()), 1<<20); err != nil {
+		t.Fatalf("save image: %v", err)
+	}
+	r = s.Handle(envelopeFor("CompleteMediaUpload", map[string]any{"originalStorageKey": "photo.jpg"}, id))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("complete: %s", r.Outcome)
 	}
 	r = s.Handle(envelopeFor("ProcessMediaAsset", map[string]any{"originalPath": ""}, id))
 	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "READY" {
 		t.Fatalf("image process: %s/%s", r.Outcome, r.Aggregate.State)
+	}
+	variants, err := s.ListReadyVariants(t.Context(), id)
+	if err != nil || len(variants) != 6 {
+		t.Fatalf("want ORIGINAL + 5 derivatives, got %d: %v", len(variants), err)
+	}
+	for _, variant := range variants {
+		if _, err := os.Stat(filepath.Join(dir, variant.StorageKey)); err != nil {
+			t.Fatalf("variant %s missing: %v", variant.Purpose, err)
+		}
+		if variant.Purpose == "SHARE_OG" && (variant.Width != 1200 || variant.Height != 630) {
+			t.Fatalf("share OG dimensions = %dx%d", variant.Width, variant.Height)
+		}
+		if variant.Purpose == "GALLERY" && (variant.Width > 80 || variant.Height > 120) {
+			t.Fatalf("gallery must not upscale small originals: %dx%d", variant.Width, variant.Height)
+		}
+		if variant.Purpose == "ORIGINAL" {
+			if _, err := s.ResolveVariantPath(t.Context(), variant.MediaVariantID); err == nil {
+				t.Fatal("ORIGINAL must not be exposed by the public variant route")
+			}
+		}
+	}
+	lookup := NewPostMediaLookup(s)
+	read, err := lookup.LookupMediaAssets(t.Context(), []string{id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mediaInfo := read[id]
+	if mediaInfo.FeedURL == "" || mediaInfo.Feed2xURL == "" || mediaInfo.GalleryURL == "" || mediaInfo.PlaceholderURL == "" || !mediaInfo.OriginalAvailable {
+		t.Fatalf("purpose URLs not hydrated: %+v", mediaInfo)
+	}
+	if path, err := s.ResolveVariantPath(t.Context(), strings.TrimPrefix(mediaInfo.GalleryURL, "/v1/media/variant/")); err != nil || path == "" {
+		t.Fatalf("gallery variant route unresolved: %s %v", path, err)
 	}
 }
 

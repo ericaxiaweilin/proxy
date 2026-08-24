@@ -949,7 +949,7 @@ function SocialMediaFrame({ item, frameAspect, resolveUrl }: {
   const [loadedAspect, setLoadedAspect] = useState(0);
   const sourceAspect = declaredAspect || loadedAspect || frameAspect;
   const preserveWholeSubject = shouldPreserveWholeSubject(sourceAspect, frameAspect);
-  const uri = resolveUrl(item.thumbnailUrl ?? item.playbackUrl ?? "");
+  const uri = resolveUrl(item.feedUrl ?? item.thumbnailUrl ?? item.playbackUrl ?? "");
 
   return (
     <View style={styles.socialMediaFrame}>
@@ -988,7 +988,7 @@ function SinglePostImage({ item, resolveUrl, onPress }: {
   return (
     <Pressable accessibilityLabel="查看原图" onPress={onPress} style={[styles.singleMediaStage, { aspectRatio: displayAspect }]}>
       <Image
-        source={{ uri: resolveUrl(item.thumbnailUrl ?? item.playbackUrl ?? "") }}
+        source={{ uri: resolveUrl(item.feedUrl ?? item.thumbnailUrl ?? item.playbackUrl ?? "") }}
         onLoad={(event) => {
           const source = event.nativeEvent.source;
           if (!declaredAspect && source.width > 0 && source.height > 0) setLoadedAspect(source.width / source.height);
@@ -1018,7 +1018,7 @@ function MediaViewer({
   onClose: () => void;
 }): React.JSX.Element {
   const sources = items.map((item) => ({
-    uri: resolveUrl(item.mediaType === "IMAGE" ? (item.playbackUrl ?? item.thumbnailUrl ?? "") : (item.thumbnailUrl ?? ""))
+    uri: resolveUrl(item.mediaType === "IMAGE" ? (item.galleryUrl ?? item.playbackUrl ?? item.thumbnailUrl ?? "") : (item.thumbnailUrl ?? ""))
   }));
   return (
     <ImageViewing

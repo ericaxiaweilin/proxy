@@ -96,7 +96,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/media/upload/", s.mediaUpload)
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)
+	mux.HandleFunc("/v1/media/variant/", s.mediaVariantFile)
 	return s.recoverMiddleware(mux)
+}
+
+func (s *Server) mediaVariantFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	if s.Media == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_not_configured"})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/v1/media/variant/")
+	if id == "" || strings.Contains(id, "/") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_route_not_found"})
+		return
+	}
+	path, err := s.Media.ResolveVariantPath(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_variant_not_available"})
+		return
+	}
+	http.ServeFile(w, r, path)
 }
 
 // mediaUpload is a narrow authenticated raw-body endpoint. Metadata and state

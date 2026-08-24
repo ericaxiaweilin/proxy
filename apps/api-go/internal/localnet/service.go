@@ -47,16 +47,21 @@ type PostMediaRef struct {
 
 // PostMediaItem 是 Feed Read Model 的 Hydrate 媒体项（R14 §16.5 + R10 Gate F）。
 type PostMediaItem struct {
-	MediaAssetID     string  `json:"mediaAssetId"`
-	MediaType        string  `json:"mediaType"` // IMAGE | VIDEO
-	ThumbnailURL     string  `json:"thumbnailUrl,omitempty"`
-	PlaybackURL      string  `json:"playbackUrl,omitempty"`
-	Width            int     `json:"width"`
-	Height           int     `json:"height"`
-	AspectRatio      float64 `json:"aspectRatio"`
-	DurationMs       int64   `json:"durationMs,omitempty"`
-	ProcessingStatus string  `json:"processingStatus"`
-	SortOrder        int     `json:"sortOrder"`
+	MediaAssetID      string  `json:"mediaAssetId"`
+	MediaType         string  `json:"mediaType"` // IMAGE | VIDEO
+	ThumbnailURL      string  `json:"thumbnailUrl,omitempty"`
+	PlaybackURL       string  `json:"playbackUrl,omitempty"`
+	PlaceholderURL    string  `json:"placeholderUrl,omitempty"`
+	FeedURL           string  `json:"feedUrl,omitempty"`
+	Feed2xURL         string  `json:"feed2xUrl,omitempty"`
+	GalleryURL        string  `json:"galleryUrl,omitempty"`
+	OriginalAvailable bool    `json:"originalAvailable,omitempty"`
+	Width             int     `json:"width"`
+	Height            int     `json:"height"`
+	AspectRatio       float64 `json:"aspectRatio"`
+	DurationMs        int64   `json:"durationMs,omitempty"`
+	ProcessingStatus  string  `json:"processingStatus"`
+	SortOrder         int     `json:"sortOrder"`
 }
 
 // MediaLookup 是媒体详情查询接口（由 media 包实现，注入避免循环依赖）。
@@ -66,14 +71,19 @@ type MediaLookup interface {
 
 // MediaAssetInfo 是媒体资产的可读视图（READY 过滤在调用方）。
 type MediaAssetInfo struct {
-	MediaAssetID     string
-	MediaType        string
-	ThumbnailURL     string
-	PlaybackURL      string
-	Width            int
-	Height           int
-	DurationMs       int64
-	ProcessingStatus string
+	MediaAssetID      string
+	MediaType         string
+	ThumbnailURL      string
+	PlaybackURL       string
+	PlaceholderURL    string
+	FeedURL           string
+	Feed2xURL         string
+	GalleryURL        string
+	OriginalAvailable bool
+	Width             int
+	Height            int
+	DurationMs        int64
+	ProcessingStatus  string
 }
 
 // ContextRef 是 Post 的结构化上下文关联（PRD §4 PostContextRef）。
@@ -445,16 +455,21 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 					aspect = float64(info.Width) / float64(info.Height)
 				}
 				items = append(items, PostMediaItem{
-					MediaAssetID:     info.MediaAssetID,
-					MediaType:        info.MediaType,
-					ThumbnailURL:     info.ThumbnailURL,
-					PlaybackURL:      info.PlaybackURL,
-					Width:            info.Width,
-					Height:           info.Height,
-					AspectRatio:      aspect,
-					DurationMs:       info.DurationMs,
-					ProcessingStatus: info.ProcessingStatus,
-					SortOrder:        ref.SortOrder,
+					MediaAssetID:      info.MediaAssetID,
+					MediaType:         info.MediaType,
+					ThumbnailURL:      info.ThumbnailURL,
+					PlaybackURL:       info.PlaybackURL,
+					PlaceholderURL:    info.PlaceholderURL,
+					FeedURL:           info.FeedURL,
+					Feed2xURL:         info.Feed2xURL,
+					GalleryURL:        info.GalleryURL,
+					OriginalAvailable: info.OriginalAvailable,
+					Width:             info.Width,
+					Height:            info.Height,
+					AspectRatio:       aspect,
+					DurationMs:        info.DurationMs,
+					ProcessingStatus:  info.ProcessingStatus,
+					SortOrder:         ref.SortOrder,
 				})
 			}
 			if len(items) > 0 {

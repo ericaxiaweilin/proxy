@@ -118,4 +118,65 @@ func (r *MediaRepository) Snapshot(ctx context.Context) ([]media.MediaAsset, err
 	return result, rows.Err()
 }
 
+func (r *MediaRepository) UpsertVariant(ctx context.Context, variant media.MediaVariant) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO media.media_variants (
+			media_variant_id, media_asset_id, purpose, recipe_version, format,
+			width, height, bytes, storage_key, content_hash, status, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		ON CONFLICT (media_asset_id, purpose, recipe_version) DO UPDATE SET
+			media_variant_id=EXCLUDED.media_variant_id,
+			format=EXCLUDED.format, width=EXCLUDED.width, height=EXCLUDED.height,
+			bytes=EXCLUDED.bytes, storage_key=EXCLUDED.storage_key,
+			content_hash=EXCLUDED.content_hash, status=EXCLUDED.status,
+			updated_at=EXCLUDED.updated_at`,
+		variant.MediaVariantID, variant.MediaAssetID, variant.Purpose, variant.RecipeVersion,
+		variant.Format, variant.Width, variant.Height, variant.Bytes, variant.StorageKey,
+		variant.ContentHash, variant.Status, variant.CreatedAt, variant.UpdatedAt,
+	)
+	return err
+}
+
+func (r *MediaRepository) ListVariants(ctx context.Context, mediaAssetID string) ([]media.MediaVariant, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT media_variant_id, media_asset_id, purpose, recipe_version, format,
+			width, height, bytes, storage_key, content_hash, status, created_at, updated_at
+		FROM media.media_variants
+		WHERE media_asset_id=$1
+		ORDER BY purpose`, mediaAssetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []media.MediaVariant{}
+	for rows.Next() {
+		var variant media.MediaVariant
+		if err := rows.Scan(
+			&variant.MediaVariantID, &variant.MediaAssetID, &variant.Purpose, &variant.RecipeVersion,
+			&variant.Format, &variant.Width, &variant.Height, &variant.Bytes, &variant.StorageKey,
+			&variant.ContentHash, &variant.Status, &variant.CreatedAt, &variant.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, variant)
+	}
+	return result, rows.Err()
+}
+
+func (r *MediaRepository) GetVariant(ctx context.Context, variantID string) (media.MediaVariant, error) {
+	var variant media.MediaVariant
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT media_variant_id, media_asset_id, purpose, recipe_version, format,
+			width, height, bytes, storage_key, content_hash, status, created_at, updated_at
+		FROM media.media_variants WHERE media_variant_id=$1`, variantID).Scan(
+		&variant.MediaVariantID, &variant.MediaAssetID, &variant.Purpose, &variant.RecipeVersion,
+		&variant.Format, &variant.Width, &variant.Height, &variant.Bytes, &variant.StorageKey,
+		&variant.ContentHash, &variant.Status, &variant.CreatedAt, &variant.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return media.MediaVariant{}, media.ErrAssetNotFound
+	}
+	return variant, err
+}
+
 var _ media.Repository = (*MediaRepository)(nil)

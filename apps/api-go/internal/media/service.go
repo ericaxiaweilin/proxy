@@ -105,6 +105,9 @@ type Repository interface {
 	GetAsset(ctx context.Context, id string) (MediaAsset, error)
 	UpdateAsset(ctx context.Context, a MediaAsset, expectedStatus string) error
 	Snapshot(ctx context.Context) ([]MediaAsset, error)
+	UpsertVariant(ctx context.Context, variant MediaVariant) error
+	GetVariant(ctx context.Context, variantID string) (MediaVariant, error)
+	ListVariants(ctx context.Context, mediaAssetID string) ([]MediaVariant, error)
 }
 
 var (
@@ -117,13 +120,14 @@ var (
 )
 
 type MemoryRepository struct {
-	mu     sync.Mutex
-	assets map[string]MediaAsset
-	events []event.DomainEvent
+	mu       sync.Mutex
+	assets   map[string]MediaAsset
+	variants map[string]MediaVariant
+	events   []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{assets: make(map[string]MediaAsset)}
+	return &MemoryRepository{assets: make(map[string]MediaAsset), variants: make(map[string]MediaVariant)}
 }
 
 func (r *MemoryRepository) CreateAsset(_ context.Context, a MediaAsset) error {
@@ -169,6 +173,38 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]MediaAsset, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
 	return result, nil
+}
+
+func (r *MemoryRepository) UpsertVariant(_ context.Context, variant MediaVariant) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := variant.MediaAssetID + ":" + variant.Purpose + ":" + variant.RecipeVersion
+	r.variants[key] = variant
+	return nil
+}
+
+func (r *MemoryRepository) ListVariants(_ context.Context, mediaAssetID string) ([]MediaVariant, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []MediaVariant{}
+	for _, variant := range r.variants {
+		if variant.MediaAssetID == mediaAssetID {
+			result = append(result, variant)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Purpose < result[j].Purpose })
+	return result, nil
+}
+
+func (r *MemoryRepository) GetVariant(_ context.Context, variantID string) (MediaVariant, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, variant := range r.variants {
+		if variant.MediaVariantID == variantID {
+			return variant, nil
+		}
+	}
+	return MediaVariant{}, ErrAssetNotFound
 }
 
 type Service struct {
@@ -281,6 +317,9 @@ func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID st
 			if asset.SourceBytes == written && asset.ChecksumSHA256 != "" && asset.ChecksumSHA256 == incomingHash {
 				_ = os.Remove(temporaryPath)
 				committed = true
+				if variantErr := s.persistOriginalVariant(ctx, asset); variantErr != nil {
+					return MediaAsset{}, variantErr
+				}
 				return asset, nil
 			}
 			return MediaAsset{}, ErrOriginalImmutable
@@ -300,9 +339,31 @@ func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID st
 		return MediaAsset{}, err
 	}
 	originalPersisted = false
+	if err := s.persistOriginalVariant(ctx, asset); err != nil {
+		return MediaAsset{}, err
+	}
 	_ = os.Remove(temporaryPath)
 	committed = true
 	return asset, nil
+}
+
+func (s *Service) persistOriginalVariant(ctx context.Context, asset MediaAsset) error {
+	now := s.clock.Now().UTC()
+	return s.repository.UpsertVariant(ctx, MediaVariant{
+		MediaVariantID: "mv_" + asset.MediaAssetID + "_original_v1",
+		MediaAssetID:   asset.MediaAssetID,
+		Purpose:        "ORIGINAL",
+		RecipeVersion:  "original_v1",
+		Format:         asset.MimeType,
+		Width:          asset.Width,
+		Height:         asset.Height,
+		Bytes:          asset.SourceBytes,
+		StorageKey:     asset.OriginalStorageKey,
+		ContentHash:    asset.ChecksumSHA256,
+		Status:         "READY",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	})
 }
 
 func detectMediaMime(header []byte) string {
@@ -361,6 +422,37 @@ func (s *Service) ResolveServingPath(ctx context.Context, id string, kind string
 		return "", errors.New("invalid storage key")
 	}
 	return filepath.Join(s.storeDir, key), nil
+}
+
+func (s *Service) ResolveVariantPath(ctx context.Context, variantID string) (string, error) {
+	variant, err := s.repository.GetVariant(ctx, variantID)
+	if err != nil {
+		return "", err
+	}
+	if variant.Status != "READY" {
+		return "", errors.New("variant not ready")
+	}
+	if variant.Purpose == "ORIGINAL" {
+		return "", errors.New("original variant is not a public delivery resource")
+	}
+	if variant.StorageKey == "" || strings.ContainsAny(variant.StorageKey, "/\\") || strings.Contains(variant.StorageKey, "..") {
+		return "", errors.New("invalid variant storage key")
+	}
+	return filepath.Join(s.storeDir, variant.StorageKey), nil
+}
+
+func (s *Service) ListReadyVariants(ctx context.Context, mediaAssetID string) ([]MediaVariant, error) {
+	variants, err := s.repository.ListVariants(ctx, mediaAssetID)
+	if err != nil {
+		return nil, err
+	}
+	ready := make([]MediaVariant, 0, len(variants))
+	for _, variant := range variants {
+		if variant.Status == "READY" {
+			ready = append(ready, variant)
+		}
+	}
+	return ready, nil
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -518,18 +610,25 @@ func (s *Service) processAsset(ctx context.Context, e command.Envelope) command.
 		return command.Rejected(e, "MEDIA_NOT_PROCESSING", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_processing", map[string]any{"status": asset.ProcessingStatus})
 	}
 	if asset.MediaType == "IMAGE" {
-		// 图片：无转码，直接 READY（用 ffprobe 读宽高供 aspect_ratio）
-		asset.ProcessingStatus = "READY"
-		asset.PlaybackStorageKey = asset.OriginalStorageKey
-		asset.ThumbnailStorageKey = asset.OriginalStorageKey
-		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
-		asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
-		if s.processor != nil && p.OriginalPath != "" {
-			if meta, err := probeImage(ctx, p.OriginalPath); err == nil {
-				asset.Width = meta.Width
-				asset.Height = meta.Height
+		// ORIGINAL 永不覆盖；Feed/Gallery/分享分别使用 recipe-versioned variants。
+		originalPath := filepath.Join(s.storeDir, asset.OriginalStorageKey)
+		variants, variantErr := generateImageVariants(ctx, originalPath, s.storeDir, asset, s.clock.Now().UTC())
+		if variantErr != nil {
+			asset.ProcessingStatus = "FAILED"
+			asset.UpdatedAt = s.clock.Now().UTC()
+			_ = s.repository.UpdateAsset(ctx, asset, "PROCESSING")
+			return command.Rejected(e, "IMAGE_VARIANT_PROCESSING_FAILED", "PROVIDER", "SAFE_RETRY", "media.image_variant_failed", map[string]any{"detail": variantErr.Error()})
+		}
+		for _, variant := range variants {
+			if err := s.repository.UpsertVariant(ctx, variant); err != nil {
+				return command.Rejected(e, "MEDIA_VARIANT_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.variant_update_failed", nil)
 			}
 		}
+		asset.ProcessingStatus = "READY"
+		asset.PlaybackStorageKey = asset.OriginalStorageKey
+		asset.ThumbnailStorageKey = variantStorageKey(variants, "FEED_1X", asset.OriginalStorageKey)
+		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
+		asset.ThumbnailURL = variantURL(variants, "FEED_1X", "/v1/media/thumb/"+asset.MediaAssetID)
 		asset.UpdatedAt = s.clock.Now().UTC()
 		domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
 			"status": "READY", "mediaType": "IMAGE",
