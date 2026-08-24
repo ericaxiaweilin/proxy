@@ -773,10 +773,16 @@ export function FeedSurface({
             </View>
           ) : null}
           {draftMedia.length > 0 ? (
-            <View style={styles.composerMediaPreview}>
+            <ScrollView
+              contentContainerStyle={styles.composerMediaPreviewContent}
+              horizontal
+              keyboardShouldPersistTaps="handled"
+              showsHorizontalScrollIndicator={false}
+              style={styles.composerMediaPreview}
+            >
               {draftMedia.map((item, index) => (
                 <View key={item.localId} style={styles.composerMediaItem}>
-                  <Image source={{ uri: item.image.uri }} style={styles.composerMediaThumb} />
+                  <Image resizeMode="contain" source={{ uri: item.image.uri }} style={styles.composerMediaThumb} />
                   <Text style={[styles.composerMediaStatus, item.status === "FAILED" && styles.composerMediaStatusFailed]}>{mediaStatusLabel(item)}</Text>
                   <TextInput
                     accessibilityLabel={`第 ${index + 1} 张照片替代文本`}
@@ -814,7 +820,7 @@ export function FeedSurface({
                   {item.error ? <Text numberOfLines={2} style={styles.composerMediaError}>{item.error}</Text> : null}
                 </View>
               ))}
-            </View>
+            </ScrollView>
           ) : null}
           <View style={styles.composerMetaRow}>
             <Pressable onPress={() => { invalidatePublishAttempt(); setDraftVisibility((value) => value === "PUBLIC" ? "FOLLOWERS" : "PUBLIC"); }} style={styles.composerMetaChip}>
@@ -1243,9 +1249,16 @@ function MediaViewer({
       onRequestClose={onClose}
       onImageIndexChange={onNavigate}
       HeaderComponent={({ imageIndex }) => (
-        <View style={styles.viewerTop}>
+        <View pointerEvents="box-none" style={styles.viewerTop}>
           <Text style={styles.viewerCounter}>{imageIndex + 1}/{items.length} · {author}</Text>
-          <Pressable accessibilityLabel="关闭原图" onPress={onClose} style={styles.viewerClose}>
+          <Pressable
+            accessibilityLabel="关闭原图"
+            accessibilityRole="button"
+            hitSlop={16}
+            onPress={onClose}
+            onPressIn={onClose}
+            style={styles.viewerClose}
+          >
             <Text style={styles.viewerCloseText}>×</Text>
           </Pressable>
         </View>
@@ -1510,9 +1523,10 @@ const styles = StyleSheet.create({
   },
   composerQuoteText: { color: color.muted, flex: 1, fontSize: 11 },
   composerQuoteRemove: { color: "#B91451", fontSize: 11, fontWeight: "700" },
-  composerMediaPreview: { gap: 8, marginTop: 8 },
-  composerMediaItem: { backgroundColor: "#FAF8FB", borderColor: color.line, borderRadius: 12, borderWidth: 1, padding: 8 },
-  composerMediaThumb: { borderRadius: 9, height: 88, width: 72 },
+  composerMediaPreview: { marginTop: 8 },
+  composerMediaPreviewContent: { gap: 8, paddingRight: 12 },
+  composerMediaItem: { backgroundColor: "#FAF8FB", borderColor: color.line, borderRadius: 12, borderWidth: 1, padding: 8, width: 228 },
+  composerMediaThumb: { backgroundColor: "#F0ECF3", borderRadius: 9, height: 142, width: "100%" },
   composerMediaStatus: { color: "#4F6840", fontSize: 11, fontWeight: "700", marginTop: 4 },
   composerMediaStatusFailed: { color: "#B91451" },
   composerMediaAlt: { backgroundColor: color.white, borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 11, marginTop: 6, minHeight: 36, paddingHorizontal: 8, paddingVertical: 6 },
@@ -1792,7 +1806,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: 52
+    paddingTop: 52,
+    zIndex: 100
   },
   viewerCounter: { color: "rgba(255,255,255,0.82)", fontSize: 11, fontWeight: "700" },
   viewerClose: {
@@ -1801,7 +1816,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     height: 34,
     justifyContent: "center",
-    width: 34
+    width: 34,
+    zIndex: 101
   },
   viewerCloseText: { color: color.white, fontSize: 16 },
   viewerStage: { alignItems: "center", flex: 1, flexDirection: "row", justifyContent: "center", paddingHorizontal: 8 },

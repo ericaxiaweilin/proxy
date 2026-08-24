@@ -389,6 +389,7 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 - [x] 草稿正文、媒体顺序/状态、可见性、位置、引用与发布幂等键写入 App Documents；选择的本地照片复制到持久草稿目录，后台/重启恢复。
 - [x] 任一媒体上传或 Worker 处理失败时 fail-closed，不调用 CreatePost；成功项保留，失败项可单独重试。
 - [x] CreatePost 使用草稿级稳定 idempotency key；同步 ref 阻止快速双击，客户端合同测试验证重试复用同一键。
+- [x] iPhone 15 模拟器真实链路发布 3 张照片：Worker 单批处理 3 项，Feed hydration 显示 1/3；命令重放返回 `ALREADY_APPLIED` 且复用同一 Post ID。证据见 `architecture/evidence/Social_Media_Gate_Evidence_2026-08-24.md`。
 - [ ] 发布后删除媒体和撤销公开缓存。
 
 放行证据：状态机测试、弱网真机录屏、重复命令测试。  
