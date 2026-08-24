@@ -7,6 +7,7 @@ import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
 import { DemandClient } from "./demand-client";
 import { LoginClient } from "./login-client";
+import { googleAuthConfigured, type GoogleClientConfig } from "./google-auth-config";
 import { LocalNetClient } from "./localnet-client";
 import { MediaClient } from "./media-client";
 import { ActivityClient } from "./activity-client";
@@ -130,37 +131,6 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [googleReq, googleRes, googlePromptAsync] = Google.useAuthRequest({
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID as string,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID as string,
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID as string,
-    scopes: ["openid", "profile", "email"],
-    useProxy: true,
-    projectNameForProxy: "@proxy/proxy",
-  } as any);
-
-  useEffect(() => {
-    if (!googleRes) return;
-    if (googleRes.type === "success" && googleRes.authentication?.idToken) {
-      void (async () => {
-        setBusy(true);
-        setError(undefined);
-        try {
-          const loginClient = await getNativeLoginClient();
-          await loginClient.authenticateWithGoogle(googleRes.authentication!.idToken!, Platform.OS === "ios" ? "IOS" : "ANDROID");
-          onAuthenticated();
-        } catch (e) {
-          setError(e instanceof Error ? e.message : "Google 登录失败，请重试或用手机号/邮箱");
-        } finally {
-          setBusy(false);
-        }
-      })();
-    } else if (googleRes.type === "error") {
-      setError("Google 授权失败，请重试");
-    } else if (googleRes.type === "dismiss") {
-      setError(undefined);
-    }
-  }, [googleRes, onAuthenticated]);
 
   async function requestChallenge(): Promise<void> {
     setBusy(true);
@@ -281,25 +251,14 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
         ) : (
           <>
             <View style={styles.googleButtonRow}>
-              <Pressable
-                disabled={busy}
-                onPress={async () => {
-                  setError(undefined);
-                  setAuthChannel("EMAIL");
-                  if (googleReq) {
-                    try {
-                      await googlePromptAsync();
-                      return;
-                    } catch {
-                      setError("无法启动 Google 授权，已切邮箱验证码");
-                    }
-                  }
-                  await Linking.openURL("https://mail.google.com").catch(() => undefined);
-                }}
-                style={[styles.googleButton, authChannel === "EMAIL" && styles.googleButtonActive, busy && styles.disabled]}
-              >
-                <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 继续</Text>
-              </Pressable>
+              <GoogleSignInSlot
+                active={authChannel === "EMAIL"}
+                busy={busy}
+                onAuthenticated={onAuthenticated}
+                onSelectEmail={() => setAuthChannel("EMAIL")}
+                setBusy={setBusy}
+                setError={setError}
+              />
               <Pressable onPress={() => { setAuthChannel("SMS"); setError(undefined); }} style={[styles.googleButton, authChannel === "SMS" && styles.googleButtonActive, styles.googleButtonSmall]}>
                 <Text style={styles.googleLabel}>手机</Text>
               </Pressable>
@@ -339,6 +298,91 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
         </TouchableWithoutFeedback>
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+type GoogleSignInProps = {
+  active: boolean;
+  busy: boolean;
+  onAuthenticated: () => void;
+  onSelectEmail: () => void;
+  setBusy: (busy: boolean) => void;
+  setError: (message: string | undefined) => void;
+};
+
+const googleClientConfig: GoogleClientConfig = {
+  iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+};
+
+function GoogleSignInSlot(props: GoogleSignInProps): React.JSX.Element {
+  const platform = Platform.OS === "ios" ? "ios" : Platform.OS === "android" ? "android" : "web";
+  if (!googleAuthConfigured(platform, googleClientConfig)) {
+    return (
+      <Pressable
+        disabled={props.busy}
+        onPress={() => {
+          props.setError(undefined);
+          props.onSelectEmail();
+        }}
+        style={[styles.googleButton, props.active && styles.googleButtonActive, props.busy && styles.disabled]}
+      >
+        <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 邮箱</Text>
+      </Pressable>
+    );
+  }
+  return <ConfiguredGoogleSignIn {...props} />;
+}
+
+function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
+  const { onAuthenticated, setBusy, setError } = props;
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    ...googleClientConfig,
+    scopes: ["openid", "profile", "email"],
+    useProxy: true,
+    projectNameForProxy: "@proxy/proxy",
+  } as any);
+
+  useEffect(() => {
+    if (!response) return;
+    if (response.type === "success" && response.authentication?.idToken) {
+      void (async () => {
+        setBusy(true);
+        setError(undefined);
+        try {
+          const loginClient = await getNativeLoginClient();
+          await loginClient.authenticateWithGoogle(response.authentication!.idToken!, Platform.OS === "ios" ? "IOS" : "ANDROID");
+          onAuthenticated();
+        } catch (error) {
+          setError(error instanceof Error ? error.message : "Google 登录失败，请重试或用手机号/邮箱");
+        } finally {
+          setBusy(false);
+        }
+      })();
+    } else if (response.type === "error") {
+      setError("Google 授权失败，请重试");
+    } else if (response.type === "dismiss") {
+      setError(undefined);
+    }
+  }, [onAuthenticated, response, setBusy, setError]);
+
+  return (
+    <Pressable
+      disabled={props.busy || !request}
+      onPress={async () => {
+        props.setError(undefined);
+        props.onSelectEmail();
+        try {
+          await promptAsync();
+        } catch {
+          props.setError("无法启动 Google 授权，请改用邮箱验证码");
+        }
+      }}
+      style={[styles.googleButton, props.active && styles.googleButtonActive, (props.busy || !request) && styles.disabled]}
+    >
+      <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 继续</Text>
+    </Pressable>
   );
 }
 
