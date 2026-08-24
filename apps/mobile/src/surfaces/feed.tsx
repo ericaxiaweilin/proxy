@@ -19,7 +19,7 @@ import { StatusFeed } from "./status";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
-type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情报/行业信息";
+type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情报/行业信息" | "附近";
 
 // 模块级缓存：组件卸载/重载时保留数据，避免闪烁
 let cachedPosts: FeedPost[] = [];
@@ -85,8 +85,18 @@ const FILTERS: ReadonlyArray<{ id: FilterKey; label: string }> = [
   { id: "人/关系", label: "人 / 关系" },
   { id: "机会/需求", label: "机会 / 需求" },
   { id: "活动/团体", label: "活动 / 团体" },
-  { id: "情报/行业信息", label: "情报 / 行业信息" }
+  { id: "情报/行业信息", label: "情报 / 行业信息" },
+  { id: "附近", label: "河内 · 附近" }
 ];
+
+const CUSTOM_FEED_LABELS: Readonly<Record<string, string>> = {
+  friends: "朋友",
+  hanoi: "河内",
+  merchant: "商家",
+  opportunity: "机会",
+  photo: "摄影",
+  startup: "创业"
+};
 
 export function FeedSurface({
   localNet,
@@ -372,6 +382,9 @@ export function FeedSurface({
         case "情报/行业信息":
           if (post.authorType !== "MERCHANT" && !ctxTypes.has("VENUE")) return false;
           break;
+        case "附近":
+          if (post.cityScope !== "hn") return false;
+          break;
       }
     }
     if (selectedCustomFeed) {
@@ -406,7 +419,7 @@ export function FeedSurface({
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
 
   if (customFeedHubOpen) {
-    return <CustomFeedHub onBack={() => setCustomFeedHubOpen(false)} onOpenFeed={(id) => { setSelectedCustomFeed(id); setCustomFeedHubOpen(false); }} />;
+    return <CustomFeedHub onBack={() => setCustomFeedHubOpen(false)} onOpenFeed={(id) => { setSelectedCustomFeed(id); setFeedFilter("ALL"); setCustomFeedHubOpen(false); }} />;
   }
 
   return (
@@ -422,7 +435,7 @@ export function FeedSurface({
       <View style={styles.feedHead}>
         <Text style={styles.feedTitle}>动态</Text>
         <View style={styles.feedTools}>
-          <Pressable onPress={onOpenFeedPrefs} style={styles.iconBtn}>
+          <Pressable accessibilityLabel="定制频道" onPress={() => setCustomFeedHubOpen(true)} style={styles.iconBtn}>
             <Text style={styles.iconBtnText}>≡</Text>
           </Pressable>
           <Pressable onPress={() => (composerOpen ? setComposerOpen(false) : openComposer())} style={styles.iconBtn}>
@@ -449,28 +462,11 @@ export function FeedSurface({
         <CommunityHub />
       ) : (
       <>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customFeedRow} style={styles.filterRail}>
-        {[
-          { id: "all", label: "全部", icon: "◎" },
-          { id: "friends", label: "朋友", icon: "♥" },
-          { id: "hanoi", label: "河内", icon: "⌖" },
-          { id: "photo", label: "摄影", icon: "◯" },
-          { id: "opportunity", label: "机会", icon: "₫" },
-          { id: "startup", label: "创业", icon: "✦" }
-        ].map((f) => (
-          <Pressable key={f.id} onPress={() => setSelectedCustomFeed(f.id === "all" ? null : f.id)} style={[styles.filterChip, (selectedCustomFeed === f.id || (f.id === "all" && !selectedCustomFeed)) && styles.filterChipActive]}>
-            <Text style={[styles.filterChipText, (selectedCustomFeed === f.id || (f.id === "all" && !selectedCustomFeed)) && styles.filterChipTextActive]}>{f.icon} {f.label}</Text>
-          </Pressable>
-        ))}
-        <Pressable onPress={() => setCustomFeedHubOpen(true)} style={styles.filterChip}>
-          <Text style={styles.filterChipText}>＋ 定制</Text>
-        </Pressable>
-      </ScrollView>
       {selectedCustomFeed ? (
         <View style={styles.customFeedBanner}>
-          <Text style={styles.customFeedBannerText}>正在看：{selectedCustomFeed} · 已按定制频道过滤</Text>
+          <Text style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? selectedCustomFeed}</Text>
           <Pressable onPress={() => setSelectedCustomFeed(null)}>
-            <Text style={styles.customFeedBannerAction}>查看全部</Text>
+            <Text style={styles.customFeedBannerAction}>退出频道</Text>
           </Pressable>
         </View>
       ) : null}
@@ -513,14 +509,11 @@ export function FeedSurface({
         {FILTERS.map((f) => {
           const active = feedFilter === f.id;
           return (
-            <Pressable key={f.id} onPress={() => setFeedFilter(f.id)} style={[styles.filterChip, active && styles.filterChipActive]}>
+            <Pressable key={f.id} onPress={() => { setFeedFilter(f.id); setSelectedCustomFeed(null); }} style={[styles.filterChip, active && styles.filterChipActive]}>
               <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{f.label}</Text>
             </Pressable>
           );
         })}
-        <Pressable style={styles.filterChip}>
-          <Text style={styles.filterChipText}>河内 · 附近</Text>
-        </Pressable>
       </ScrollView>
 
       {/* R15.3 preferencehint：推荐由你和算法共同决定 */}
@@ -1070,7 +1063,6 @@ const styles = StyleSheet.create({
     marginBottom: 6
   },
   filterRailContent: { gap: 8, paddingRight: 18 },
-  customFeedRow: { gap: 8, paddingRight: 18, paddingVertical: 4 },
   customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6 },
   customFeedBannerText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   customFeedBannerAction: { color: color.muted, fontSize: 11, fontWeight: "700" },

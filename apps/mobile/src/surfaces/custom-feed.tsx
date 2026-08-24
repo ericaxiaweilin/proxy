@@ -66,7 +66,7 @@ export function CustomFeedHub({ onBack, onOpenFeed }: { onBack: () => void; onOp
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <Text style={styles.title}>自定频道</Text>
-      <Text style={styles.sub}>把「朋友/河内/摄影/机会/商家/创业」固定到首页；也可让 AI 按一句话生成频道。</Text>
+      <Text style={styles.sub}>在动态左上角集中管理「朋友/河内/摄影/机会/商家/创业」；也可让 AI 按一句话生成频道。</Text>
 
       <View style={styles.aiBox}>
         <Text style={styles.aiTitle}>让 AI 生成频道</Text>
@@ -76,8 +76,8 @@ export function CustomFeedHub({ onBack, onOpenFeed }: { onBack: () => void; onOp
         </Pressable>
       </View>
 
-      <Text style={styles.sectionTitle}>已固定到首页 · {pinned.length}</Text>
-      <Text style={styles.sectionSub}>首页 Feed 顶部可横滑切换</Text>
+      <Text style={styles.sectionTitle}>已固定频道 · {pinned.length}</Text>
+      <Text style={styles.sectionSub}>从动态左上角菜单进入并切换</Text>
       {pinned.map((f) => (
         <View key={f.id} style={styles.card}>
           <View style={styles.cardIcon}>
