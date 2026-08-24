@@ -78,7 +78,7 @@ export function MarketSurface({
   const [oppDetail, setOppDetail] = useState<MarketOpportunity | null>(null);
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
   const [publishOpen, setPublishOpen] = useState(false);
-  const [selectOpen, setSelectOpen] = useState(false);
+  const [selectOpp, setSelectOpp] = useState<MarketOpportunity | null>(null);
   const [applicantName, setApplicantName] = useState<string | null>(null);
   const [submissionName, setSubmissionName] = useState<string | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -179,15 +179,15 @@ export function MarketSurface({
       </View>
 
       {publishOpen ? (
-        <PublishDemand onBack={() => setPublishOpen(false)} onPublished={() => { setPublishOpen(false); setSelectOpen(true); }} />
+        <PublishDemand onBack={() => setPublishOpen(false)} onPublished={() => setPublishOpen(false)} />
       ) : applicantName ? (
         <ApplicantDetail name={applicantName} onBack={() => setApplicantName(null)} onOpenSubmission={(n) => { setApplicantName(null); setSubmissionName(n); }} onCompare={() => { setApplicantName(null); setCompareOpen(true); }} />
       ) : submissionName ? (
         <SubmissionDetail name={submissionName} onBack={() => setSubmissionName(null)} onCompare={() => { setSubmissionName(null); setCompareOpen(true); }} onOpenApplicant={(n) => { setSubmissionName(null); setApplicantName(n); }} />
       ) : compareOpen ? (
         <CompareScene onBack={() => setCompareOpen(false)} onOpenApplicant={(n) => { setCompareOpen(false); setApplicantName(n); }} />
-      ) : selectOpen ? (
-        <SelectWorkbench onBack={() => setSelectOpen(false)} onOpenApplicant={setApplicantName} onOpenSubmission={setSubmissionName} onCompare={() => setCompareOpen(true)} />
+      ) : selectOpp ? (
+        <SelectWorkbench opportunity={selectOpp} onBack={() => setSelectOpp(null)} onOpenApplicant={setApplicantName} onOpenSubmission={setSubmissionName} onCompare={() => setCompareOpen(true)} />
       ) : view === "MAP" ? (
         <MarketMap
           tab={tab === "OPPORTUNITY" ? "OPPORTUNITY" : "ACTIVITY"}
@@ -208,19 +208,14 @@ export function MarketSurface({
             quoteMode={oppQuoteMode}
             setQuoteMode={setOppQuoteMode}
             onBack={() => setOppDetail(null)}
-            onOpenSelect={() => { setOppDetail(null); setSelectOpen(true); }}
+            onOpenSelect={() => {
+              const cur = oppDetail;
+              setOppDetail(null);
+              if (cur) setSelectOpp(cur);
+            }}
           />
         ) : (
-          <OpportunityTab
-            lens={lens}
-            setLens={setLens}
-            oppFilter={oppFilter}
-            setOppFilter={setOppFilter}
-            marketLabel={marketLabel}
-            onOpen={(o) => setOppDetail(o)}
-            onOpenPublish={() => setPublishOpen(true)}
-            onOpenSelect={() => setSelectOpen(true)}
-          />
+          <OpportunityTab lens={lens} setLens={setLens} oppFilter={oppFilter} setOppFilter={setOppFilter} marketLabel={marketLabel} onOpen={(o) => setOppDetail(o)} />
         )
       ) : (
         <>
@@ -230,13 +225,13 @@ export function MarketSurface({
               <Text style={styles.searchIcon}>⌕</Text>
             </View>
           </View>
-          <View style={styles.lensRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lensRow} style={styles.lensScroll}>
             {ACTIVITY_FILTERS.map((entry) => (
               <Pressable key={entry.id} onPress={() => setActivityFilter(entry.id)} style={[styles.lens, activityFilter === entry.id && styles.lensOn]}>
                 <Text style={[styles.lensText, activityFilter === entry.id && styles.lensTextOn]}>{entry.label}</Text>
               </Pressable>
             ))}
-          </View>
+          </ScrollView>
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>趋势活动</Text>
             <Text style={styles.sectionHint}>多人 / 兴趣 / 品牌场景</Text>
@@ -289,9 +284,7 @@ function OpportunityTab({
   oppFilter,
   setOppFilter,
   marketLabel,
-  onOpen,
-  onOpenPublish,
-  onOpenSelect
+  onOpen
 }: {
   lens: OpportunityLens;
   setLens: (lens: OpportunityLens) => void;
@@ -299,8 +292,6 @@ function OpportunityTab({
   setOppFilter: (f: OpportunityFilter) => void;
   marketLabel: string;
   onOpen: (o: MarketOpportunity) => void;
-  onOpenPublish: () => void;
-  onOpenSelect: () => void;
 }): React.JSX.Element {
   const base = MARKET_OPPORTUNITIES.filter((o) => o.lens.includes(lens));
   let items = [...base];
@@ -328,21 +319,21 @@ function OpportunityTab({
         </View>
       </View>
 
-      <View style={styles.lensRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lensRow} style={styles.lensScroll}>
         {OPP_FILTERS.map((entry) => (
           <Pressable key={entry.id} onPress={() => setOppFilter(entry.id)} style={[styles.lens, oppFilter === entry.id && styles.lensOn]}>
             <Text style={[styles.lensText, oppFilter === entry.id && styles.lensTextOn]}>{entry.label}</Text>
           </Pressable>
         ))}
-      </View>
+      </ScrollView>
 
-      <View style={styles.lensRowCompact}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lensSmRow} style={styles.lensScroll}>
         {(Object.keys(OPPORTUNITY_LENS_LABEL) as OpportunityLens[]).map((id) => (
           <Pressable key={id} onPress={() => setLens(id)} style={[styles.lensSm, lens === id && styles.lensSmOn]}>
             <Text style={[styles.lensSmText, lens === id && styles.lensSmTextOn]}>{OPPORTUNITY_LENS_LABEL[id]}</Text>
           </Pressable>
         ))}
-      </View>
+      </ScrollView>
 
       <View style={styles.localScope}>
         <ProxyIcon color={color.violet} name="route" size={12} />
@@ -359,15 +350,7 @@ function OpportunityTab({
           <R4OpportunityCard key={opportunity.id} opportunity={opportunity} onOpen={() => onOpen(opportunity)} />
         ))}
       </View>
-      <View style={styles.r4Actions}>
-        <Pressable onPress={onOpenPublish} style={styles.r4ActionGhost}>
-          <Text style={styles.r4ActionGhostText}>发布需求</Text>
-        </Pressable>
-        <Pressable onPress={onOpenSelect} style={styles.r4ActionGhost}>
-          <Text style={styles.r4ActionGhostText}>选人工作台 ›</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.detailHint}>＋ 发布会先给合理价格建议，避免低价竞价。选人工作台演示客户如何挑人。</Text>
+      <Text style={styles.detailHint}>发布需求在右上角 ＋；选人/对比在每个机会的报名明细里（仅发布者可见）。</Text>
     </>
   );
 }
@@ -602,11 +585,13 @@ function PublishDemand({ onBack, onPublished }: { onBack: () => void; onPublishe
 }
 
 function SelectWorkbench({
+  opportunity,
   onBack,
   onOpenApplicant,
   onOpenSubmission,
   onCompare
 }: {
+  opportunity: MarketOpportunity;
   onBack: () => void;
   onOpenApplicant: (name: string) => void;
   onOpenSubmission: (name: string) => void;
@@ -627,9 +612,11 @@ function SelectWorkbench({
         <Text style={styles.detailMore}>•••</Text>
       </View>
       <View style={styles.detailHero}>
-        <Text style={styles.detailHeroKicker}>12 RESPONSES</Text>
-        <Text style={styles.detailHeroTitle}>周六城市同行 + 拍照</Text>
-        <Text style={styles.detailHeroSub}>先由 Proxy 排除不满足必要条件的人，再让你围绕能力、履约、回应做决定。</Text>
+        <Text style={styles.detailHeroKicker}>报名明细 · 仅发布者可见</Text>
+        <Text style={styles.detailHeroTitle}>{opportunity.title}</Text>
+        <Text style={styles.detailHeroSub}>
+          {opportunity.date} {opportunity.time} · {opportunity.location} · {opportunity.responses} 人报名 · 先由 Proxy 排除不满足必要条件的人。
+        </Text>
       </View>
       <View style={styles.r4PriceStrip}>
         {[["12", "回应"], ["7", "合格"], ["3", "建议先看"], ["1", "确认"]].map(([n, l]) => (
@@ -961,7 +948,9 @@ const styles = StyleSheet.create({
   searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flexDirection: "row", overflow: "hidden" },
   searchInput: { flex: 1, fontSize: 14, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10 },
   searchIcon: { color: color.ink, fontSize: 15, paddingHorizontal: 10 },
-  lensRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginVertical: 7 },
+  lensRow: { flexDirection: "row", gap: 5, paddingRight: 12 },
+  lensSmRow: { flexDirection: "row", gap: 5, paddingRight: 12 },
+  lensScroll: { marginVertical: 7 },
   lensRowCompact: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginBottom: 6 },
   lens: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 13, paddingVertical: 8 },
   lensOn: { backgroundColor: color.ink, borderColor: color.ink },
