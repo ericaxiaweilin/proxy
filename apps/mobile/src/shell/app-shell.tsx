@@ -26,6 +26,7 @@ import { dispatchExperienceAction } from "../experience-dispatcher";
 import { type LocalNetClient } from "../localnet-client";
 import { type MediaClient } from "../media-client";
 import { type SocialSpaceClient } from "../socialspace-client";
+import { type FulfillmentClient } from "../fulfillment-client";
 import { BusinessHome } from "../surfaces/business-home";
 import { ConversationSurface } from "../surfaces/conversation";
 import { FeedSurface } from "../surfaces/feed";
@@ -69,6 +70,7 @@ export function AppShell({
   engagement,
   marketplace,
   socialSpace,
+  fulfillment,
   onSignOut
 }: {
   localNet: LocalNetClient;
@@ -81,6 +83,7 @@ export function AppShell({
   engagement: EngagementClient;
   marketplace: MarketplaceClient;
   socialSpace: SocialSpaceClient;
+  fulfillment: FulfillmentClient;
   onSignOut: () => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
@@ -260,6 +263,7 @@ export function AppShell({
             <MarketSurface
               activities={activities}
               marketplace={marketplace}
+              fulfillment={fulfillment}
               marketLabel="河内"
               initialTab={marketEntry.tab}
               onOpenExperience={setOpenExperience}

@@ -81,6 +81,7 @@ function normalizeTab(tab: MarketTab): "OPPORTUNITY" | "ACTIVITY" {
 export function MarketSurface({
   activities,
   marketplace,
+  fulfillment,
   marketLabel,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
@@ -88,6 +89,7 @@ export function MarketSurface({
 }: {
   activities: ActivityClient;
   marketplace: MarketplaceClient;
+  fulfillment?: { createSlotOffer: (input: { taskId: string; slotId: string; agentId: string }) => Promise<unknown>; acceptSlotOffer: (offerId: string) => Promise<unknown> };
   marketLabel: string;
   initialTab?: MarketTab;
   onOpenExperience: (experienceId: string) => void;
