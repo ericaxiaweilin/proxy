@@ -45,8 +45,34 @@ type MediaAsset struct {
 	ProcessingStatus    string    `json:"processingStatus"` // UPLOADING | PROCESSING | READY | FAILED
 	PlaybackURL         string    `json:"playbackUrl,omitempty"`
 	ThumbnailURL        string    `json:"thumbnailUrl,omitempty"`
+	SourceBytes         int64     `json:"sourceBytes,omitempty"`
+	ChecksumSHA256      string    `json:"checksumSha256,omitempty"`
+	Orientation         int       `json:"orientation,omitempty"`
+	ColorSpace          string    `json:"colorSpace,omitempty"`
+	HasAlpha            bool      `json:"hasAlpha"`
+	Animated            bool      `json:"animated"`
+	ModerationStatus    string    `json:"moderationStatus"`
+	VisibilityClass     string    `json:"visibilityClass"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
+}
+
+// MediaVariant is an immutable, recipe-versioned representation for one UI purpose.
+// ORIGINAL remains immutable; a recipe upgrade creates another row instead of overwriting it.
+type MediaVariant struct {
+	MediaVariantID string    `json:"mediaVariantId"`
+	MediaAssetID   string    `json:"mediaAssetId"`
+	Purpose        string    `json:"purpose"`
+	RecipeVersion  string    `json:"recipeVersion"`
+	Format         string    `json:"format"`
+	Width          int       `json:"width"`
+	Height         int       `json:"height"`
+	Bytes          int64     `json:"bytes,omitempty"`
+	StorageKey     string    `json:"storageKey"`
+	ContentHash    string    `json:"contentHash,omitempty"`
+	Status         string    `json:"status"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // VideoMetadata 是 ffprobe 输出（时长/分辨率/codec/rotation）。
@@ -313,6 +339,8 @@ func (s *Service) createAsset(ctx context.Context, e command.Envelope) command.R
 		MimeType:           p.MimeType,
 		Width:              p.Width,
 		Height:             p.Height,
+		ModerationStatus:   "PENDING",
+		VisibilityClass:    "OWNER_ONLY",
 		ProcessingStatus:   "UPLOADING",
 		CreatedAt:          now,
 		UpdatedAt:          now,

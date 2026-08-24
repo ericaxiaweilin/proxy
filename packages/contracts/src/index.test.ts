@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommandEnvelopeSchema } from "./index.js";
+import { CommandEnvelopeSchema, FeedMediaItemSchema, MediaVariantSchema } from "./index.js";
 
 describe("command envelope", () => {
   it("rejects a command without idempotency", () => {
@@ -23,5 +23,40 @@ describe("command envelope", () => {
       payload: {}
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("social media pipeline contracts", () => {
+  it("accepts a recipe-versioned gallery variant", () => {
+    expect(MediaVariantSchema.parse({
+      mediaVariantId: "mv_001",
+      mediaAssetId: "ma_001",
+      purpose: "GALLERY",
+      recipeVersion: "image_recipe_v1",
+      format: "image/jpeg",
+      width: 1920,
+      height: 2560,
+      bytes: 840000,
+      url: "/v1/media/variant/mv_001",
+      contentHash: "sha256:abc",
+      status: "READY"
+    }).purpose).toBe("GALLERY");
+  });
+
+  it("keeps legacy URLs compatible while accepting purpose URLs", () => {
+    const item = FeedMediaItemSchema.parse({
+      mediaAssetId: "ma_001",
+      mediaType: "IMAGE",
+      thumbnailUrl: "/legacy/thumb",
+      feedUrl: "/v1/media/variant/feed",
+      galleryUrl: "/v1/media/variant/gallery",
+      originalAvailable: true,
+      width: 3024,
+      height: 4032,
+      aspectRatio: 0.75,
+      processingStatus: "READY",
+      sortOrder: 0
+    });
+    expect(item.galleryUrl).toContain("gallery");
   });
 });

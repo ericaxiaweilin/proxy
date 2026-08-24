@@ -320,11 +320,36 @@ export const FeedPostSchema = z.object({
 });
 export type FeedPost = z.infer<typeof FeedPostSchema>;
 
+export const MediaVariantPurposeSchema = z.enum([
+  "ORIGINAL", "FEED_1X", "FEED_2X", "GALLERY", "SHARE_OG", "PLACEHOLDER"
+]);
+export type MediaVariantPurpose = z.infer<typeof MediaVariantPurposeSchema>;
+
+export const MediaVariantSchema = z.object({
+  mediaVariantId: z.string().min(1),
+  mediaAssetId: z.string().min(1),
+  purpose: MediaVariantPurposeSchema,
+  recipeVersion: z.string().min(1),
+  format: z.string().min(1),
+  width: z.number().int().nonnegative(),
+  height: z.number().int().nonnegative(),
+  bytes: z.number().int().nonnegative().optional(),
+  url: z.string().min(1),
+  contentHash: z.string().optional(),
+  status: z.enum(["PROCESSING", "READY", "FAILED", "REMOVED"])
+});
+export type MediaVariant = z.infer<typeof MediaVariantSchema>;
+
 export const FeedMediaItemSchema = z.object({
   mediaAssetId: z.string().min(1),
   mediaType: z.enum(["IMAGE", "VIDEO"]),
   thumbnailUrl: z.string().optional(),
   playbackUrl: z.string().optional(),
+  placeholderUrl: z.string().optional(),
+  feedUrl: z.string().optional(),
+  feed2xUrl: z.string().optional(),
+  galleryUrl: z.string().optional(),
+  originalAvailable: z.boolean().optional(),
   width: z.number().int().nonnegative(),
   height: z.number().int().nonnegative(),
   aspectRatio: z.number(),
