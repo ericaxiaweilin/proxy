@@ -117,6 +117,9 @@ func (s *Service) ProcessAssetNow(ctx context.Context, mediaAssetID string) erro
 	}
 	originalPath := filepath.Join(s.storeDir, asset.OriginalStorageKey)
 	if asset.MediaType == "IMAGE" {
+		if err := validateQuarantinedImage(ctx, originalPath, asset); err != nil {
+			return err
+		}
 		variants, err := generateImageVariants(ctx, originalPath, s.storeDir, asset, s.clock.Now().UTC())
 		if err != nil {
 			return err
@@ -127,6 +130,7 @@ func (s *Service) ProcessAssetNow(ctx context.Context, mediaAssetID string) erro
 			}
 		}
 		asset.ProcessingStatus = "READY"
+		asset.ModerationStatus = "APPROVED"
 		asset.PlaybackStorageKey = asset.OriginalStorageKey
 		asset.ThumbnailStorageKey = variantStorageKey(variants, "FEED_1X", asset.OriginalStorageKey)
 		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
@@ -136,6 +140,7 @@ func (s *Service) ProcessAssetNow(ctx context.Context, mediaAssetID string) erro
 	}
 	if s.processor == nil {
 		asset.ProcessingStatus = "READY"
+		asset.ModerationStatus = "APPROVED"
 		asset.PlaybackStorageKey = asset.OriginalStorageKey
 		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
 		asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
@@ -147,6 +152,7 @@ func (s *Service) ProcessAssetNow(ctx context.Context, mediaAssetID string) erro
 		return err
 	}
 	asset.ProcessingStatus = "READY"
+	asset.ModerationStatus = "APPROVED"
 	asset.PlaybackStorageKey = result.PlaybackStorageKey
 	asset.ThumbnailStorageKey = result.ThumbnailStorageKey
 	asset.Width = result.Metadata.Width
@@ -173,6 +179,7 @@ func (s *Service) MarkAssetProcessingFailed(ctx context.Context, mediaAssetID st
 		return ErrStatusTransition
 	}
 	asset.ProcessingStatus = "FAILED"
+	asset.ModerationStatus = "REJECTED_TECHNICAL"
 	asset.UpdatedAt = s.clock.Now().UTC()
 	return s.repository.UpdateAsset(ctx, asset, "PROCESSING")
 }

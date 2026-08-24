@@ -435,6 +435,9 @@ func (s *Service) ResolveServingPath(ctx context.Context, id string, kind string
 	if asset.ProcessingStatus != "READY" {
 		return "", errors.New("media not ready")
 	}
+	if asset.ModerationStatus != "APPROVED" || asset.VisibilityClass != "PUBLIC" {
+		return "", errors.New("media is not publicly deliverable")
+	}
 	key := asset.PlaybackStorageKey
 	if kind == "thumb" {
 		if asset.ThumbnailStorageKey != "" {
@@ -458,6 +461,13 @@ func (s *Service) ResolveVariantPath(ctx context.Context, variantID string) (str
 	if variant.Purpose == "ORIGINAL" {
 		return "", errors.New("original variant is not a public delivery resource")
 	}
+	asset, err := s.repository.GetAsset(ctx, variant.MediaAssetID)
+	if err != nil {
+		return "", err
+	}
+	if asset.ProcessingStatus != "READY" || asset.ModerationStatus != "APPROVED" || asset.VisibilityClass != "PUBLIC" {
+		return "", errors.New("variant is not publicly deliverable")
+	}
 	if variant.StorageKey == "" || strings.ContainsAny(variant.StorageKey, "/\\") || strings.Contains(variant.StorageKey, "..") {
 		return "", errors.New("invalid variant storage key")
 	}
@@ -476,6 +486,41 @@ func (s *Service) ListReadyVariants(ctx context.Context, mediaAssetID string) ([
 		}
 	}
 	return ready, nil
+}
+
+// AuthorizeForPost is the server-owned publication transition. READY alone is
+// never public: only the owner can attach technically approved media, and the
+// asset receives exactly the Post visibility class inside the command transaction.
+func (s *Service) AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if visibility != "PUBLIC" && visibility != "FOLLOWERS" && visibility != "AGENT_ONLY" {
+		return errors.New("unsupported media visibility")
+	}
+	for _, id := range ids {
+		asset, err := s.repository.GetAsset(ctx, id)
+		if err != nil {
+			return err
+		}
+		if asset.OwnerPrincipalID != ownerPrincipalID {
+			return ErrMediaNotOwner
+		}
+		if asset.ProcessingStatus != "READY" || asset.ModerationStatus != "APPROVED" {
+			return ErrStatusTransition
+		}
+		if asset.VisibilityClass != "OWNER_ONLY" && asset.VisibilityClass != visibility {
+			return errors.New("media already bound to another visibility class")
+		}
+		if asset.VisibilityClass == visibility {
+			continue
+		}
+		asset.VisibilityClass = visibility
+		asset.UpdatedAt = s.clock.Now().UTC()
+		if err := s.repository.UpdateAsset(ctx, asset, "READY"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -542,7 +587,7 @@ func (s *Service) createAsset(ctx context.Context, e command.Envelope) command.R
 		MimeType:           p.MimeType,
 		Width:              p.Width,
 		Height:             p.Height,
-		ModerationStatus:   "PENDING",
+		ModerationStatus:   "QUARANTINED",
 		VisibilityClass:    "OWNER_ONLY",
 		ProcessingStatus:   "UPLOADING",
 		CreatedAt:          now,

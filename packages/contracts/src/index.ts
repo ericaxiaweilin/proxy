@@ -355,6 +355,7 @@ export const FeedMediaItemSchema = z.object({
   aspectRatio: z.number(),
   durationMs: z.number().int().nonnegative().optional(),
   processingStatus: z.string(),
+  moderationStatus: z.enum(["QUARANTINED", "APPROVED", "REJECTED_TECHNICAL"]),
   sortOrder: z.number().int().nonnegative()
 });
 export type FeedMediaItem = z.infer<typeof FeedMediaItemSchema>;

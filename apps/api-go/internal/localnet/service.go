@@ -61,12 +61,14 @@ type PostMediaItem struct {
 	AspectRatio       float64 `json:"aspectRatio"`
 	DurationMs        int64   `json:"durationMs,omitempty"`
 	ProcessingStatus  string  `json:"processingStatus"`
+	ModerationStatus  string  `json:"moderationStatus"`
 	SortOrder         int     `json:"sortOrder"`
 }
 
 // MediaLookup 是媒体详情查询接口（由 media 包实现，注入避免循环依赖）。
 type MediaLookup interface {
 	LookupMediaAssets(ctx context.Context, ids []string) (map[string]MediaAssetInfo, error)
+	AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error
 }
 
 // MediaAssetInfo 是媒体资产的可读视图（READY 过滤在调用方）。
@@ -84,6 +86,8 @@ type MediaAssetInfo struct {
 	Height            int
 	DurationMs        int64
 	ProcessingStatus  string
+	ModerationStatus  string
+	VisibilityClass   string
 }
 
 // ContextRef 是 Post 的结构化上下文关联（PRD §4 PostContextRef）。
@@ -360,6 +364,9 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if p.Visibility == "" {
 		p.Visibility = "PUBLIC"
 	}
+	if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" && p.Visibility != "AGENT_ONLY" {
+		return command.Rejected(e, "INVALID_POST_VISIBILITY", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_visibility", nil)
+	}
 	if p.AuthorType != "USER" && p.AuthorType != "AGENT" && p.AuthorType != "MERCHANT" && p.AuthorType != "PLATFORM_SPECIAL" {
 		return command.Rejected(e, "INVALID_AUTHOR_TYPE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_author_type", nil)
 	}
@@ -387,6 +394,15 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		"contextRefs": post.ContextRefs,
 		"note":        "Post 发布永不自动创建 Task；Intent 经 DM / 显式 Need 涌现",
 	})}
+	if len(p.MediaRefs) > 0 && s.mediaLookup != nil {
+		ids := make([]string, 0, len(p.MediaRefs))
+		for _, ref := range p.MediaRefs {
+			ids = append(ids, ref.MediaAssetID)
+		}
+		if err := s.mediaLookup.AuthorizeForPost(ctx, ids, e.Principal.ID, p.Visibility); err != nil {
+			return command.Rejected(e, "POST_MEDIA_NOT_PUBLISHABLE", "BUSINESS_STATE", "SAFE_RETRY", "localnet.media_not_publishable", nil)
+		}
+	}
 	if err := s.repository.CreatePost(ctx, post); err != nil {
 		return command.Rejected(e, "POST_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_create_failed", nil)
 	}
@@ -410,6 +426,11 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 			continue
 		}
 		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
+			continue
+		}
+		// Follow-graph authorization is not implemented yet. Fail closed instead
+		// of treating FOLLOWERS as public; authors may still see their own post.
+		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
 			continue
 		}
 		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
@@ -450,6 +471,9 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 				if info.ProcessingStatus != "READY" {
 					continue
 				}
+				if info.ModerationStatus != "APPROVED" || info.VisibilityClass != p.Visibility {
+					continue
+				}
 				aspect := 0.0
 				if info.Height > 0 {
 					aspect = float64(info.Width) / float64(info.Height)
@@ -469,6 +493,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 					AspectRatio:       aspect,
 					DurationMs:        info.DurationMs,
 					ProcessingStatus:  info.ProcessingStatus,
+					ModerationStatus:  info.ModerationStatus,
 					SortOrder:         ref.SortOrder,
 				})
 			}

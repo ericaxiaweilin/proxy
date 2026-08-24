@@ -55,6 +55,7 @@ describe("social media pipeline contracts", () => {
       height: 4032,
       aspectRatio: 0.75,
       processingStatus: "READY",
+      moderationStatus: "APPROVED",
       sortOrder: 0
     });
     expect(item.galleryUrl).toContain("gallery");

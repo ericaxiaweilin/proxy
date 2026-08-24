@@ -148,6 +148,25 @@ func TestReadPNGDimensionsAlphaAndSRGB(t *testing.T) {
 	}
 }
 
+func TestQuarantineRejectsDecompressionBombDimensions(t *testing.T) {
+	header := make([]byte, 33)
+	copy(header[:8], "\x89PNG\r\n\x1a\n")
+	binary.BigEndian.PutUint32(header[8:12], 13)
+	copy(header[12:16], "IHDR")
+	binary.BigEndian.PutUint32(header[16:20], 30_000)
+	binary.BigEndian.PutUint32(header[20:24], 30_000)
+	header[24] = 8
+	header[25] = 6
+	path := filepath.Join(t.TempDir(), "bomb.png")
+	if err := os.WriteFile(path, header, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := validateQuarantinedImage(t.Context(), path, MediaAsset{MediaType: "IMAGE", MimeType: "image/png"})
+	if err == nil || !strings.Contains(err.Error(), "safe decode limits") {
+		t.Fatalf("decompression bomb dimensions must fail closed: %v", err)
+	}
+}
+
 func TestSaveUploadRejectsDeclaredImageWithHTMLBytes(t *testing.T) {
 	s := New()
 	s.SetStoreDir(t.TempDir())
@@ -351,6 +370,12 @@ func TestImageGoesReadyDirectly(t *testing.T) {
 	mediaInfo := read[id]
 	if mediaInfo.FeedURL == "" || mediaInfo.Feed2xURL == "" || mediaInfo.GalleryURL == "" || mediaInfo.PlaceholderURL == "" || !mediaInfo.OriginalAvailable {
 		t.Fatalf("purpose URLs not hydrated: %+v", mediaInfo)
+	}
+	if _, err := s.ResolveVariantPath(t.Context(), strings.TrimPrefix(mediaInfo.GalleryURL, "/v1/media/variant/")); err == nil {
+		t.Fatal("approved media must remain private until a Post publication transition")
+	}
+	if err := s.AuthorizeForPost(t.Context(), []string{id}, "business_001", "PUBLIC"); err != nil {
+		t.Fatalf("authorize public post media: %v", err)
 	}
 	if path, err := s.ResolveVariantPath(t.Context(), strings.TrimPrefix(mediaInfo.GalleryURL, "/v1/media/variant/")); err != nil || path == "" {
 		t.Fatalf("gallery variant route unresolved: %s %v", path, err)

@@ -328,7 +328,7 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 
 - [x] 已有 Post `mediaRefs + sortOrder + max 6` 基础合同。
 - [x] 已有单图自适应、多图 Rail、Gallery 的产品基线。
-- [ ] `MediaAsset + MediaVariant + visibility` 合同进入 shared contracts、Go 和数据库迁移。
+- [x] `MediaAsset + MediaVariant + visibility` 合同进入 shared contracts、Go 和数据库迁移。
 - [ ] iOS、Android、Web 分享页共同引用同一 recipe/version 定义。
 - [ ] Architecture review 通过，无客户端私自拼 URL。
 
@@ -357,13 +357,13 @@ North Star 仍是高价值关系和现实行动，照片打开率、停留时长
 - [x] 生成 FEED_1X、FEED_2X、GALLERY、SHARE_OG、PLACEHOLDER；ORIGINAL 单独登记。
 - [x] `image_recipe_v1`、稳定 Variant ID 与数据库幂等约束完成。
 - [x] 展示派生图移除 EXIF/GPS metadata，保留源文件 metadata 事实。
-- [ ] 从同步 ProcessMediaAsset 迁移到可恢复的异步 Worker/Queue。
-- [ ] quarantine、格式嗅探、解码安全限制完成。
-- [ ] processing/moderation/visibility 状态组合 fail-closed。
+- [x] 从同步 ProcessMediaAsset 迁移到可恢复的异步 Worker/Queue；任务与上传完成同事务，支持租约恢复、退避与 dead letter。
+- [x] quarantine、格式嗅探、解码安全限制完成（25MB、20k 边长、80MP、动画/伪装格式拒绝）。
+- [x] processing/moderation/visibility 状态组合 fail-closed；`READY` 不再自动公开，Post 发布拥有独立授权转换。
 - [x] 派生失败只把处理状态置为 FAILED，不覆盖 ORIGINAL。
 
 放行证据：样本集像素/方向/色彩快照与安全测试。  
-当前状态：**BLOCKED**。
+当前状态：**BLOCKED**（仍需内容政策审核提供方与样本集色彩/方向快照证据）。
 
 ### Gate 3 — Feed 与 Gallery
 

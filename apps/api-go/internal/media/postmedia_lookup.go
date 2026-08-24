@@ -35,6 +35,8 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 			Height:           asset.Height,
 			DurationMs:       asset.DurationMs,
 			ProcessingStatus: asset.ProcessingStatus,
+			ModerationStatus: asset.ModerationStatus,
+			VisibilityClass:  asset.VisibilityClass,
 		}
 		variants, variantErr := l.service.ListReadyVariants(ctx, id)
 		if variantErr == nil {
@@ -57,4 +59,11 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 		result[id] = info
 	}
 	return result, nil
+}
+
+func (l *PostMediaLookup) AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error {
+	if l.service == nil {
+		return errors.New("media service not configured")
+	}
+	return l.service.AuthorizeForPost(ctx, ids, ownerPrincipalID, visibility)
 }

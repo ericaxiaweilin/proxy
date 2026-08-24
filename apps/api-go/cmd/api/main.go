@@ -190,12 +190,12 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 				media_asset_id, owner_principal_type, owner_principal_id, media_type,
 				original_storage_key, playback_storage_key, thumbnail_storage_key,
 				mime_type, width, height, duration_ms, codec,
-				processing_status, playback_url, thumbnail_url, created_at, updated_at
-			) VALUES ($1,'PLATFORM','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY',$11,$12,$13,$13)
+				processing_status, playback_url, thumbnail_url, moderation_status, visibility_class, created_at, updated_at
+			) VALUES ($1,'PLATFORM','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY',$11,$12,'APPROVED','PUBLIC',$13,$13)
 			ON CONFLICT (media_asset_id) DO UPDATE SET
 				playback_storage_key=EXCLUDED.playback_storage_key,
 				thumbnail_storage_key=EXCLUDED.thumbnail_storage_key,
-				processing_status='READY', updated_at=EXCLUDED.updated_at`,
+				processing_status='READY', moderation_status='APPROVED', visibility_class='PUBLIC', updated_at=EXCLUDED.updated_at`,
 			a.id, a.mediaType, a.originalKey, a.playbackKey, a.thumbKey, a.mime,
 			a.width, a.height, a.durationMs, a.codec,
 			"/v1/media/play/"+a.id, "/v1/media/thumb/"+a.id, now); err != nil {
