@@ -2,7 +2,7 @@
 // 对齐 Proxy_P0_Prototype_R15_3_SearchFirst_ModelUI_BusinessOS.html 的 feedprefs 页面
 // 每行 3 列 grid：标签(96px) + range slider(1fr) + 数值(34px)
 import { useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { GestureResponderEvent } from "react-native";
 import { color } from "../theme";
 
@@ -80,11 +80,34 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
   });
   const [scope, setScope] = useState<"7D" | "30D" | "PERSISTENT">("7D");
   const [muted, setMuted] = useState<Set<string>>(new Set());
+  const [algoInput, setAlgoInput] = useState("");
+  const [algoApplied, setAlgoApplied] = useState<string | null>(null);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <Text style={styles.title}>我的推荐</Text>
       <Text style={styles.sub}>你可以直接告诉 Proxy 多看什么、少看什么。搜索和明确需求仍然优先。</Text>
+
+      <View style={styles.algoCard}>
+        <Text style={styles.algoTitle}>直接训练算法 — Your Algo 对话版</Text>
+        <TextInput value={algoInput} onChangeText={setAlgoInput} placeholder="例：最近一个月多给我看河内创业活动，摄影多一点，兼职少一点" placeholderTextColor={color.muted} style={styles.algoInput} multiline />
+        <Pressable
+          onPress={() => {
+            if (!algoInput.trim()) return;
+            setAlgoApplied(algoInput.trim());
+            const t = algoInput.toLowerCase();
+            if (t.includes("摄影")) setWeights((p) => ({ ...p, people: Math.min(100, (p.people ?? 50) + 20) }));
+            if (t.includes("创业")) setWeights((p) => ({ ...p, intelligence: Math.min(100, (p.intelligence ?? 50) + 20) }));
+            if (t.includes("商业") && t.includes("少")) setWeights((p) => ({ ...p, commercial: Math.max(0, (p.commercial ?? 50) - 20) }));
+            setAlgoInput("");
+          }}
+          style={[styles.algoBtn, !algoInput.trim() && styles.disabled]}
+        >
+          <Text style={styles.algoBtnText}>应用到推荐 · {scope === "7D" ? "7 天" : scope === "30D" ? "30 天" : "长期"}</Text>
+        </Pressable>
+        {algoApplied ? <Text style={styles.algoApplied}>已应用：{algoApplied}</Text> : null}
+        <Text style={styles.algoHint}>试试：多给我摄影和本地活动，少一点商业内容，持续一周 / 最近想认识做产品的人</Text>
+      </View>
 
       {/* 权重卡片 — 每行 3 列：标签 + slider + 数值 */}
       <View style={styles.card}>
@@ -183,6 +206,14 @@ const styles = StyleSheet.create({
   },
   prefLabel: { color: color.ink, fontSize: 11, fontWeight: "700", width: 96 },
   prefValue: { color: color.muted, fontSize: 11, fontWeight: "700", textAlign: "right", width: 34 },
+  algoCard: { backgroundColor: "#F8F5FA", borderColor: "#ECE4F0", borderRadius: 14, borderWidth: 1, marginBottom: 14, padding: 10 },
+  algoTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  algoInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1, color: color.ink, fontSize: 11, marginTop: 8, minHeight: 44, paddingHorizontal: 10, paddingVertical: 8, textAlignVertical: "top" },
+  algoBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 8, paddingVertical: 8 },
+  algoBtnText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  disabled: { opacity: 0.4 },
+  algoApplied: { color: "#6330B2", fontSize: 11, fontWeight: "700", marginTop: 6 },
+  algoHint: { color: color.muted, fontSize: 11, lineHeight: 14, marginTop: 6 },
 
   // slider
   sliderTrack: {

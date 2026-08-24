@@ -12,6 +12,7 @@ import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contract
 import { type LocalNetClient } from "../localnet-client";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
+import { CustomFeedHub } from "./custom-feed";
 import { StatusFeed } from "./status";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
@@ -94,6 +95,8 @@ export function FeedSurface({
   const [quoteTargetId, setQuoteTargetId] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
+  const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
+  const [selectedCustomFeed, setSelectedCustomFeed] = useState<string | null>(null);
   // X 式内联视频自动播放：滑近视口中心自动播（默认静音）、滑出即停，同一时刻仅一条在播。
   const [cardYs, setCardYs] = useState<Record<string, number>>({});
   const [frames, setFrames] = useState<Record<string, { y: number; height: number }>>({});
@@ -330,12 +333,28 @@ export function FeedSurface({
           break;
       }
     }
+    if (selectedCustomFeed) {
+      const feedMap: Record<string, (post: FeedPost) => boolean> = {
+        friends: (p) => following.has(authorName(p)) || authorName(p) === "你",
+        hanoi: (p) => p.cityScope === "hn",
+        photo: (p) => p.contextRefs.some((r) => r.contextId.includes("摄影") || r.contextId.includes("拍照")),
+        opportunity: (p) => p.contextRefs.some((r) => r.contextType === "AVAILABILITY") || p.authorType === "AGENT",
+        merchant: (p) => p.authorType === "MERCHANT",
+        startup: (p) => p.contextRefs.some((r) => r.contextId.includes("创业") || r.contextId.includes("AI"))
+      };
+      const checker = feedMap[selectedCustomFeed];
+      if (checker && !checker(post)) return false;
+    }
     return true;
   });
 
   const quoteTarget = quoteTargetId ? posts.find((post) => post.postId === quoteTargetId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
+
+  if (customFeedHubOpen) {
+    return <CustomFeedHub onBack={() => setCustomFeedHubOpen(false)} onOpenFeed={(id) => { setSelectedCustomFeed(id); setCustomFeedHubOpen(false); }} />;
+  }
 
   return (
     <ScrollView
@@ -361,6 +380,31 @@ export function FeedSurface({
 
       <StatusFeed onReply={onOpenChat} />
       <CommunityHub />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customFeedRow} style={styles.filterRail}>
+        {[
+          { id: "all", label: "全部", icon: "◎" },
+          { id: "friends", label: "朋友", icon: "♥" },
+          { id: "hanoi", label: "河内", icon: "⌖" },
+          { id: "photo", label: "摄影", icon: "◯" },
+          { id: "opportunity", label: "机会", icon: "₫" },
+          { id: "startup", label: "创业", icon: "✦" }
+        ].map((f) => (
+          <Pressable key={f.id} onPress={() => setSelectedCustomFeed(f.id === "all" ? null : f.id)} style={[styles.filterChip, (selectedCustomFeed === f.id || (f.id === "all" && !selectedCustomFeed)) && styles.filterChipActive]}>
+            <Text style={[styles.filterChipText, (selectedCustomFeed === f.id || (f.id === "all" && !selectedCustomFeed)) && styles.filterChipTextActive]}>{f.icon} {f.label}</Text>
+          </Pressable>
+        ))}
+        <Pressable onPress={() => setCustomFeedHubOpen(true)} style={styles.filterChip}>
+          <Text style={styles.filterChipText}>＋ 定制</Text>
+        </Pressable>
+      </ScrollView>
+      {selectedCustomFeed ? (
+        <View style={styles.customFeedBanner}>
+          <Text style={styles.customFeedBannerText}>正在看：{selectedCustomFeed} · 已按定制频道过滤</Text>
+          <Pressable onPress={() => setSelectedCustomFeed(null)}>
+            <Text style={styles.customFeedBannerAction}>查看全部</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {/* R15.3 r153search：🔍 + input + › */}
       <Pressable style={styles.r153search}>
@@ -922,6 +966,10 @@ const styles = StyleSheet.create({
     marginBottom: 6
   },
   filterRailContent: { gap: 8, paddingRight: 18 },
+  customFeedRow: { gap: 8, paddingRight: 18, paddingVertical: 4 },
+  customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  customFeedBannerText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  customFeedBannerAction: { color: color.muted, fontSize: 11, fontWeight: "700" },
   filterChip: {
     alignItems: "center",
     backgroundColor: color.white,
