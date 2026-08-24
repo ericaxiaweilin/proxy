@@ -118,6 +118,10 @@ export function MarketSurface({
   const [applicantName, setApplicantName] = useState<string | null>(null);
   const [submissionName, setSubmissionName] = useState<string | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [offerBusy, setOfferBusy] = useState(false);
+  const [offerMsg, setOfferMsg] = useState<string>();
+  const [myOffers, setMyOffers] = useState<Array<{ offerId: string; status: string; expiresAt: string }>>([]);
+  const [showOffers, setShowOffers] = useState(false);
 
   const loadActivities = useCallback(async (): Promise<void> => {
     setActivityPhase("LOADING");
@@ -178,6 +182,50 @@ export function MarketSurface({
       setOpportunityError("回应没有提交成功，请检查连接后重试。");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function createOfferForLinh(opportunity: MarketOpportunity): Promise<void> {
+    if (!fulfillment) { setOfferMsg("Offer 服务未就绪"); return; }
+    if (offerBusy) return;
+    setOfferBusy(true);
+    setOfferMsg(undefined);
+    try {
+      const offer = (await (fulfillment as any).createSlotOffer({ taskId: opportunity.id, slotId: `${opportunity.id}_slot_1`, agentId: "agent_linh" })) as { offerId: string; expiresAt: string };
+      setOfferMsg(`已发 Offer 给 Linh · ${offer.offerId.slice(0, 8)} · 5分钟内有效`);
+    } catch (e) {
+      setOfferMsg(e instanceof Error ? e.message : "发 Offer 失败");
+    } finally {
+      setOfferBusy(false);
+    }
+  }
+
+  async function loadMyOffers(): Promise<void> {
+    if (!fulfillment) { setOfferMsg("Offer 服务未就绪"); return; }
+    setOfferBusy(true);
+    try {
+      const list = (await (fulfillment as any).listAgentOffers()) as Array<{ offerId: string; status: string; expiresAt: string }>;
+      setMyOffers(list.map((o) => ({ offerId: (o as any).offerId ?? (o as any).id, status: o.status, expiresAt: o.expiresAt })));
+      setShowOffers(true);
+      setOfferMsg(list.length === 0 ? "暂无 Offer" : `已加载 ${list.length} 个 Offer`);
+    } catch (e) {
+      setOfferMsg(e instanceof Error ? e.message : "加载 Offer 失败");
+    } finally {
+      setOfferBusy(false);
+    }
+  }
+
+  async function acceptOffer(offerId: string): Promise<void> {
+    if (!fulfillment) return;
+    setOfferBusy(true);
+    try {
+      const res = (await (fulfillment as any).acceptSlotOffer(offerId)) as { orderId: string };
+      setOfferMsg(`已接单 · Order ${res.orderId.slice(0, 8)}`);
+      void loadMyOffers();
+    } catch (e) {
+      setOfferMsg(e instanceof Error ? e.message : "接单失败");
+    } finally {
+      setOfferBusy(false);
     }
   }
 
@@ -260,6 +308,41 @@ export function MarketSurface({
           </Pressable>
         ))}
       </View>
+
+      {/* M4 Offer wave: requester 发 Offer (5m TTL) + agent 接单，idempotency + slot 唯一 + 过期校验 */}
+      <View style={styles.offerBar}>
+        <Pressable disabled={offerBusy} onPress={() => void loadMyOffers()} style={[styles.offerBtn, offerBusy && styles.offerBtnDisabled]}>
+          <Text style={styles.offerBtnText}>{offerBusy ? "加载中…" : "我的 Offer"}</Text>
+        </Pressable>
+        {oppDetail ? (
+          <Pressable disabled={offerBusy} onPress={() => void createOfferForLinh(oppDetail)} style={[styles.offerBtnPrimary, offerBusy && styles.offerBtnDisabled]}>
+            <Text style={styles.offerBtnPrimaryText}>发 Offer 给 Linh</Text>
+          </Pressable>
+        ) : null}
+        <Pressable disabled={offerBusy || myOffers.length === 0} onPress={() => setShowOffers((v) => !v)} style={[styles.offerBtn, (offerBusy || myOffers.length === 0) && styles.offerBtnDisabled]}>
+          <Text style={styles.offerBtnText}>{showOffers ? "收起" : `列表(${myOffers.length})`}</Text>
+        </Pressable>
+      </View>
+      {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}
+      {showOffers ? (
+        <View style={styles.offerList}>
+          {myOffers.length === 0 ? (
+            <Text style={styles.offerEmpty}>暂无 Offer</Text>
+          ) : (
+            myOffers.map((o) => (
+              <View key={o.offerId} style={styles.offerCard}>
+                <View style={styles.offerCopy}>
+                  <Text style={styles.offerId}>{o.offerId.slice(0, 8)}</Text>
+                  <Text style={styles.offerMeta}>{o.status} · {new Date(o.expiresAt).toLocaleTimeString()}</Text>
+                </View>
+                <Pressable disabled={offerBusy || o.status !== "OFFERED"} onPress={() => void acceptOffer(o.offerId)} style={[styles.offerAccept, (offerBusy || o.status !== "OFFERED") && styles.offerBtnDisabled]}>
+                  <Text style={styles.offerAcceptText}>{o.status === "OFFERED" ? "接受" : o.status}</Text>
+                </Pressable>
+              </View>
+            ))
+          )}
+        </View>
+      ) : null}
 
       {publishOpen ? (
         <PublishDemand
@@ -1095,6 +1178,21 @@ const styles = StyleSheet.create({
   viewToggleTextOn: { color: color.white },
   plusBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 44, justifyContent: "center", width: 44 },
   plusBtnText: { color: color.white, fontSize: 22, fontWeight: "700" },
+  offerBar: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 8 },
+  offerBtn: { backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
+  offerBtnDisabled: { opacity: 0.5 },
+  offerBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  offerBtnPrimary: { backgroundColor: color.lime, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  offerBtnPrimaryText: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  offerMsg: { color: color.muted, fontSize: 11, marginTop: 6 },
+  offerList: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, gap: 6, marginTop: 8, padding: 8 },
+  offerCard: { alignItems: "center", backgroundColor: color.surface, borderRadius: 10, flexDirection: "row", justifyContent: "space-between", padding: 8 },
+  offerCopy: { flex: 1 },
+  offerId: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  offerMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
+  offerAccept: { backgroundColor: color.ink, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  offerAcceptText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  offerEmpty: { color: color.muted, fontSize: 11, textAlign: "center" },
   tabs: { backgroundColor: color.surface, borderRadius: 14, flexDirection: "row", gap: 5, marginVertical: 8, padding: 4 },
   tab: { borderRadius: 11, flex: 1, minHeight: 44, justifyContent: "center", paddingVertical: 9 },
   tabOn: { backgroundColor: color.white, ...shadows.card },
