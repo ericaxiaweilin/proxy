@@ -16,6 +16,7 @@ import { type EngagementClient } from "../engagement-client";
 import { type MarketplaceClient } from "../marketplace-client";
 import { type MediaClient, type UploadableImage } from "../media-client";
 import { isOpportunityPost, mergeFeedContent } from "../feed-content";
+import { mediaAspect, portraitRailLayout, shouldPreserveWholeSubject } from "../media-presentation";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
@@ -719,24 +720,11 @@ export function FeedSurface({
 
               {/* 服务端媒体（READY Hydrate）：多图横滑轨 / 单图全宽 / 视频内联自动播放（X 式，滑近中心播、滑出停，带声音） */}
               {items.length > 1 ? (
-                <>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mediaRail}>
-                    {items.map((item, index) => (
-                      <Pressable key={item.mediaAssetId} onPress={() => setViewer({ postId: post.postId, index })}>
-                        <Image
-                          source={{ uri: localNet.resolveMediaUrl(item.thumbnailUrl ?? "") }}
-                          style={{ backgroundColor: "#2A2135", borderRadius: 14, height: 156, marginRight: 8, width: railWidth(item) }}
-                        />
-                        {index === 0 ? (
-                          <View style={styles.mediaBadge}>
-                            <Text style={styles.mediaBadgeText}>1/{items.length}</Text>
-                          </View>
-                        ) : null}
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                  <Text style={styles.mediaRailHint}>{items.length} 张 · 左右滑动查看</Text>
-                </>
+                <AdaptiveMediaRail
+                  items={items}
+                  resolveUrl={(path) => localNet.resolveMediaUrl(path)}
+                  onOpen={(index) => setViewer({ postId: post.postId, index })}
+                />
               ) : items.length === 1 && items[0] && items[0].mediaType === "VIDEO" && items[0].playbackUrl ? (
                 <VideoCard
                   videoId={post.postId}
@@ -904,9 +892,81 @@ export function FeedSurface({
   );
 }
 
-function railWidth(item: FeedMediaItem): number {
-  const aspect = item.aspectRatio > 0 ? item.aspectRatio : 4 / 3;
-  return Math.max(110, Math.min(230, Math.round(156 * aspect)));
+// 人像组图规则：Rail 保持统一画布，半身照约 4:5 铺满；9:16 等全身照
+// 在同一画布内 contain + 柔和背景，保证头顶与脚都不被裁掉，也不会缩成窄条。
+function AdaptiveMediaRail({ items, resolveUrl, onOpen }: {
+  items: FeedMediaItem[];
+  resolveUrl: (path: string) => string;
+  onOpen: (index: number) => void;
+}): React.JSX.Element {
+  const [contentWidth, setContentWidth] = useState(320);
+  const { portraitSet, railHeight, portraitCardWidth } = portraitRailLayout(items, contentWidth);
+
+  return (
+    <View onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}>
+      <ScrollView
+        decelerationRate="fast"
+        horizontal
+        snapToAlignment="start"
+        showsHorizontalScrollIndicator={false}
+        style={styles.mediaRail}
+      >
+        {items.map((item, index) => {
+          const aspect = mediaAspect(item);
+          const cardWidth = portraitSet
+            ? portraitCardWidth
+            : Math.max(contentWidth * 0.72, Math.min(contentWidth * 0.92, railHeight * aspect));
+          return (
+            <Pressable
+              accessibilityLabel={`查看第 ${index + 1} 张媒体`}
+              key={item.mediaAssetId}
+              onPress={() => onOpen(index)}
+              style={{ height: railHeight, marginRight: 10, width: cardWidth }}
+            >
+              <SocialMediaFrame
+                item={item}
+                frameAspect={cardWidth / railHeight}
+                resolveUrl={resolveUrl}
+              />
+              <View style={styles.mediaBadge}>
+                <Text style={styles.mediaBadgeText}>{index + 1}/{items.length}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <Text style={styles.mediaRailHint}>{items.length} 张 · 左右滑动查看</Text>
+    </View>
+  );
+}
+
+function SocialMediaFrame({ item, frameAspect, resolveUrl }: {
+  item: FeedMediaItem;
+  frameAspect: number;
+  resolveUrl: (path: string) => string;
+}): React.JSX.Element {
+  const declaredAspect = mediaAspect(item, 0);
+  const [loadedAspect, setLoadedAspect] = useState(0);
+  const sourceAspect = declaredAspect || loadedAspect || frameAspect;
+  const preserveWholeSubject = shouldPreserveWholeSubject(sourceAspect, frameAspect);
+  const uri = resolveUrl(item.thumbnailUrl ?? item.playbackUrl ?? "");
+
+  return (
+    <View style={styles.socialMediaFrame}>
+      {preserveWholeSubject ? (
+        <Image blurRadius={24} resizeMode="cover" source={{ uri }} style={styles.socialMediaBackdrop} />
+      ) : null}
+      <Image
+        onLoad={(event) => {
+          const source = event.nativeEvent.source;
+          if (!declaredAspect && source.width > 0 && source.height > 0) setLoadedAspect(source.width / source.height);
+        }}
+        resizeMode={preserveWholeSubject ? "contain" : "cover"}
+        source={{ uri }}
+        style={styles.socialMediaAsset}
+      />
+    </View>
+  );
 }
 
 // 单图不使用固定高度：常见比例按原比例展示；超长/超宽图限制卡片高度并 contain，
@@ -1353,6 +1413,22 @@ const styles = StyleSheet.create({
   },
   videoMuteText: { fontSize: 11 },
   mediaRail: { flexDirection: "row", marginVertical: 8 },
+  socialMediaFrame: {
+    backgroundColor: "#17131F",
+    borderRadius: 14,
+    height: "100%",
+    overflow: "hidden",
+    width: "100%"
+  },
+  socialMediaBackdrop: {
+    height: "112%",
+    left: "-6%",
+    opacity: 0.38,
+    position: "absolute",
+    top: "-6%",
+    width: "112%"
+  },
+  socialMediaAsset: { height: "100%", width: "100%" },
   singleMediaStage: {
     alignItems: "center",
     backgroundColor: "#17131F",
