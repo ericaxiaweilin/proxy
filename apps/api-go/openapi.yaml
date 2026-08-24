@@ -213,6 +213,21 @@ components:
             - QuerySuppliers
             - CreateCandidateBatch
             - GetCandidateBatch
+            - CreateOffer
+            - CreateSlotOffer
+            - AcceptSlotOffer
+            - GetOffer
+            - ListAgentOffers
+            - ConfirmCooperation
+            - StartExecution
+            - RecordDirectSettlement
+            - RecordOutcome
+            - RecordSatisfaction
+            - RecordMaterialOrderChange
+            - ListMarketOpportunities
+            - PublishMarketOpportunity
+            - ApplyToMarketOpportunity
+            - DismissMarketOpportunity
             - DummyOther # placeholder to keep enum open for additive field evolution
         commandVersion: { type: integer, minimum: 1 }
         actor:

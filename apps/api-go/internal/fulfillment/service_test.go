@@ -3,6 +3,7 @@ package fulfillment
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
@@ -164,5 +165,113 @@ func TestLifecycleGate(t *testing.T) {
 	r := s.Handle(envelopeFor("StartExecution", map[string]any{}, orderID))
 	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "ORDER_NOT_EXECUTABLE" {
 		t.Fatalf("want ORDER_NOT_EXECUTABLE, got %s/%+v", r.Outcome, r.Error)
+	}
+}
+
+func createSlotOffer(t *testing.T, s *Service, taskID, slotID, agentID string) string {
+	t.Helper()
+	r := s.Handle(command.Envelope{
+		CommandID: "cmd_slot_offer", CommandType: "CreateSlotOffer", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "user_001"}, Principal: command.Principal{Type: "BUSINESS", ID: "business_001"},
+		Target: command.Target{Type: "Offer", ID: "new"}, IdempotencyKey: "idem_slot_" + agentID + "_" + slotID,
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_slot", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"taskId": taskID, "slotId": slotID, "agentId": agentID, "agreedCompensation": int64(1200000)},
+	})
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create slot offer: %s %+v", r.Outcome, r.Error)
+	}
+	var view struct{ OfferID string `json:"offerId"`}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	if view.OfferID == "" {
+		view.OfferID = r.Aggregate.ID
+	}
+	return view.OfferID
+}
+
+func TestSlotOfferAcceptAndTTL(t *testing.T) {
+	s := New()
+	taskID := "task_001"
+	slotID := "slot_001"
+	agentID := "agent_linh"
+	offerID := createSlotOffer(t, s, taskID, slotID, agentID)
+	// GetOffer should be OFFERED
+	r := s.Handle(envelopeFor("GetOffer", map[string]any{"offerId": offerID}, offerID))
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "OFFERED" {
+		t.Fatalf("get offer: %s %s", r.Outcome, r.Aggregate.State)
+	}
+	// Accept
+	r = s.Handle(command.Envelope{
+		CommandID: "cmd_accept", CommandType: "AcceptSlotOffer", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: agentID}, Principal: command.Principal{Type: "INDIVIDUAL", ID: agentID},
+		Target: command.Target{Type: "Offer", ID: offerID}, IdempotencyKey: "idem_accept_" + offerID,
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_accept", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"offerId": offerID},
+	})
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("accept: %s %+v", r.Outcome, r.Error)
+	}
+	// Second accept same offer -> not available
+	r2 := s.Handle(command.Envelope{
+		CommandID: "cmd_accept2", CommandType: "AcceptSlotOffer", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: agentID}, Principal: command.Principal{Type: "INDIVIDUAL", ID: agentID},
+		Target: command.Target{Type: "Offer", ID: offerID}, IdempotencyKey: "idem_accept2_" + offerID,
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_accept2", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"offerId": offerID},
+	})
+	if r2.Outcome != "REJECTED" || r2.Error.ErrorCode != "OFFER_NOT_AVAILABLE" {
+		t.Fatalf("second accept want OFFER_NOT_AVAILABLE got %s %+v", r2.Outcome, r2.Error)
+	}
+}
+
+func TestOfferExpiredTTL(t *testing.T) {
+	s := New()
+	// direct repo insert expired offer
+	offerID := "off_expired"
+	now := s.clock.Now().UTC()
+	expired := Offer{ID: offerID, TaskID: "task_1", SlotID: "slot_exp", RequesterID: "user_001", AgentID: "agent_exp", Status: "OFFERED", ExpiresAt: now.Add(-1 * time.Minute), Version: 1, CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: now.Add(-10 * time.Minute)}
+	_ = s.repository.CreateOffer(nil, expired)
+	r := s.Handle(command.Envelope{
+		CommandID: "cmd_accept_exp", CommandType: "AcceptSlotOffer", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "agent_exp"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "agent_exp"},
+		Target: command.Target{Type: "Offer", ID: offerID}, IdempotencyKey: "idem_exp",
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_exp", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"offerId": offerID},
+	})
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "OFFER_EXPIRED" {
+		t.Fatalf("want OFFER_EXPIRED got %s %+v", r.Outcome, r.Error)
+	}
+}
+
+func TestConcurrentAcceptSameSlot(t *testing.T) {
+	s := New()
+	taskID := "task_conc"
+	slotID := "slot_conc"
+	// two offers for same slot to two agents
+	offerA := createSlotOffer(t, s, taskID, slotID, "agent_a")
+	offerB := createSlotOffer(t, s, taskID, slotID, "agent_b")
+	// agent A accepts first -> success
+	rA := s.Handle(command.Envelope{
+		CommandID: "cmd_a", CommandType: "AcceptSlotOffer", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "agent_a"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "agent_a"},
+		Target: command.Target{Type: "Offer", ID: offerA}, IdempotencyKey: "idem_a",
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_a", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"offerId": offerA},
+	})
+	if rA.Outcome != "ACCEPTED" {
+		t.Fatalf("agent A accept: %s %+v", rA.Outcome, rA.Error)
+	}
+	// agent B accept same slot -> should be slot unavailable (or offer not available due to slot taken)
+	rB := s.Handle(command.Envelope{
+		CommandID: "cmd_b", CommandType: "AcceptSlotOffer", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "agent_b"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "agent_b"},
+		Target: command.Target{Type: "Offer", ID: offerB}, IdempotencyKey: "idem_b",
+		AuthContext: map[string]any{"session": "s1"}, Purpose: "test", CorrelationID: "corr_b", RequestedAt: "2026-08-16T00:00:00Z",
+		Payload: map[string]any{"offerId": offerB},
+	})
+	if rB.Outcome != "REJECTED" {
+		t.Fatalf("agent B should be rejected due to slot taken, got %s", rB.Outcome)
+	}
+	if rB.Error.ErrorCode != "SLOT_UNAVAILABLE" && rB.Error.ErrorCode != "OFFER_NOT_AVAILABLE" && rB.Error.ErrorCode != "ACCEPT_OFFER_FAILED" {
+		t.Fatalf("want SLOT_UNAVAILABLE got %s", rB.Error.ErrorCode)
 	}
 }

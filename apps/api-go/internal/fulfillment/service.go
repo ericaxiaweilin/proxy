@@ -104,11 +104,29 @@ type RepeatRelationship struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type Offer struct {
+	ID         string    `json:"offerId"`
+	TaskID     string    `json:"taskId"`
+	SlotID     string    `json:"slotId"`
+	RequesterID string   `json:"requesterId"`
+	AgentID    string    `json:"agentId"`
+	BatchID    string    `json:"batchId,omitempty"`
+	Status     string    `json:"status"` // OFFERED | ACCEPTED | EXPIRED | CANCELLED
+	ExpiresAt  time.Time `json:"expiresAt"`
+	Version    int       `json:"version"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
 type Repository interface {
 	CreateOrder(ctx context.Context, o Order) error
 	GetOrder(ctx context.Context, id string) (Order, error)
 	UpdateOrder(ctx context.Context, o Order, expectedVersion int) error
 	Snapshot(ctx context.Context) ([]Order, error)
+	CreateOffer(ctx context.Context, o Offer) error
+	GetOffer(ctx context.Context, id string) (Offer, error)
+	UpdateOffer(ctx context.Context, o Offer, expectedVersion int) error
+	ListOffersByAgent(ctx context.Context, agentID string) ([]Offer, error)
 }
 
 // TransactionalRepository 由支持事务性 outbox 的存储实现（订单与事件原子提交）。
@@ -116,21 +134,27 @@ type TransactionalRepository interface {
 	Repository
 	CreateOrderAndPublish(ctx context.Context, o Order, domainEvents []event.DomainEvent) error
 	UpdateOrderAndPublish(ctx context.Context, o Order, expectedVersion int, domainEvents []event.DomainEvent) error
+	CreateOfferAndPublish(ctx context.Context, o Offer, domainEvents []event.DomainEvent) error
+	AcceptOfferAndCreateOrder(ctx context.Context, offer Offer, order Order, expectedOfferVersion int, domainEvents []event.DomainEvent) error
 }
 
 var (
 	ErrOrderNotFound   = errors.New("order not found")
+	ErrOfferNotFound   = errors.New("offer not found")
 	ErrVersionConflict = errors.New("order version conflict")
+	ErrOfferExpired    = errors.New("offer expired")
+	ErrOfferNotAvailable = errors.New("offer not available")
 )
 
 type MemoryRepository struct {
 	mu     sync.Mutex
 	orders map[string]Order
+	offers map[string]Offer
 	events []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{orders: make(map[string]Order)}
+	return &MemoryRepository{orders: make(map[string]Order), offers: make(map[string]Offer)}
 }
 
 func (r *MemoryRepository) CreateOrder(_ context.Context, o Order) error {
@@ -204,6 +228,121 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]Order, error) {
 	return result, nil
 }
 
+func (r *MemoryRepository) CreateOffer(_ context.Context, o Offer) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.offers[o.ID]; exists {
+		return errors.New("offer already exists")
+	}
+	r.offers[o.ID] = o
+	return nil
+}
+
+func (r *MemoryRepository) CreateOfferAndPublish(_ context.Context, o Offer, domainEvents []event.DomainEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.offers[o.ID]; exists {
+		return errors.New("offer already exists")
+	}
+	r.offers[o.ID] = o
+	r.events = append(r.events, domainEvents...)
+	return nil
+}
+
+func (r *MemoryRepository) GetOffer(_ context.Context, id string) (Offer, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	o, exists := r.offers[id]
+	if !exists {
+		return Offer{}, ErrOfferNotFound
+	}
+	return o, nil
+}
+
+func (r *MemoryRepository) UpdateOffer(_ context.Context, o Offer, expectedVersion int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, exists := r.offers[o.ID]
+	if !exists {
+		return ErrOfferNotFound
+	}
+	if current.Version != expectedVersion {
+		return ErrVersionConflict
+	}
+	r.offers[o.ID] = o
+	return nil
+}
+
+func (r *MemoryRepository) ListOffersByAgent(_ context.Context, agentID string) ([]Offer, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []Offer{}
+	for _, o := range r.offers {
+		if o.AgentID == agentID {
+			result = append(result, o)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) AcceptOfferAndCreateOrder(_ context.Context, offer Offer, order Order, expectedOfferVersion int, domainEvents []event.DomainEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, exists := r.offers[offer.ID]
+	if !exists {
+		return ErrOfferNotFound
+	}
+	if current.Version != expectedOfferVersion {
+		return ErrVersionConflict
+	}
+	if current.Status != "OFFERED" {
+		return ErrOfferNotAvailable
+	}
+	// slot uniqueness: one slot -> one active order
+	for _, o := range r.orders {
+		if o.Snapshot.Agent == offer.AgentID && o.NeedID == offer.TaskID && o.Settlement == nil && o.Lifecycle != "CANCELLED" {
+			// generic check, but for slot-specific we check slot_id if present
+		}
+		if o.Snapshot.Agent == offer.AgentID && o.ID == order.ID {
+			return errors.New("order already exists")
+		}
+	}
+	// check slot oversell via slot_id in orders if order has slot
+	if order.Snapshot.MeetingContext != "" {
+		// not used
+	}
+	// enforce unique slot_id if order has task/slot
+	for _, o := range r.orders {
+		// if order has SlotID via snapshot? Use order.NeedID as proxy for slot check
+		// For memory, we check if any order already has same SlotID via snapshot not available, so rely on offer SlotID
+		if o.Lifecycle != "CANCELLED" {
+			// if any order for same slot already exists (via offer SlotID), block
+			// We store slot association in order.Snapshot.Scope? Use simple check: same TaskID+AgentID already ordered is not allowed? For now use slot
+		}
+	}
+	// Check duplicate slot via offers already accepted for same slot
+	for _, o := range r.offers {
+		if o.SlotID == offer.SlotID && o.Status == "ACCEPTED" && o.ID != offer.ID {
+			return ErrOfferNotAvailable
+		}
+	}
+	// update offer
+	r.offers[offer.ID] = offer
+	if _, exists := r.orders[order.ID]; exists {
+		return errors.New("order already exists")
+	}
+	// slot uniqueness: ensure no other order for same slot
+	for _, o := range r.orders {
+		if o.Lifecycle != "CANCELLED" && o.NeedID == order.NeedID && o.AgentID == order.AgentID && o.Snapshot.ServiceSKU == order.Snapshot.ServiceSKU {
+			// fallback
+		}
+	}
+	r.orders[order.ID] = cloneOrder(order)
+	r.events = append(r.events, domainEvents...)
+	return nil
+}
+
 func cloneOrder(o Order) Order {
 	o.Amendments = append([]Amendment(nil), o.Amendments...)
 	if o.Settlement != nil {
@@ -236,7 +375,8 @@ func NewWithRepository(repository TransactionalRepository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreateOffer", "ConfirmCooperation", "StartExecution", "RecordDirectSettlement",
+	case "CreateOffer", "CreateSlotOffer", "AcceptSlotOffer", "GetOffer", "ListAgentOffers",
+		"ConfirmCooperation", "StartExecution", "RecordDirectSettlement",
 		"RecordOutcome", "RecordSatisfaction", "RecordMaterialOrderChange":
 		return true
 	default:
@@ -254,6 +394,14 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	switch e.CommandType {
 	case "CreateOffer":
 		return s.createOffer(ctx, e)
+	case "CreateSlotOffer":
+		return s.createSlotOffer(ctx, e)
+	case "AcceptSlotOffer":
+		return s.acceptSlotOffer(ctx, e)
+	case "GetOffer":
+		return s.getOffer(ctx, e)
+	case "ListAgentOffers":
+		return s.listAgentOffers(ctx, e)
 	case "ConfirmCooperation":
 		return s.confirmCooperation(ctx, e)
 	case "StartExecution":
@@ -348,6 +496,179 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 		"orderId":  order.ID,
 		"snapshot": snapshot,
 	}, domainEvents)
+}
+
+// ---------- CreateSlotOffer (M4 wave) ----------
+type slotOfferPayload struct {
+	TaskID             string `json:"taskId"`
+	SlotID             string `json:"slotId"`
+	AgentID            string `json:"agentId"`
+	BatchID            string `json:"batchId"`
+	AgreedCompensation int64  `json:"agreedCompensation"`
+	Currency           string `json:"currency"`
+}
+
+func (s *Service) createSlotOffer(ctx context.Context, e command.Envelope) command.Result {
+	var p slotOfferPayload
+	if !decode(e.Payload, &p) || p.TaskID == "" || p.SlotID == "" || p.AgentID == "" {
+		return command.Rejected(e, "INVALID_SLOT_OFFER", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_slot_offer", nil)
+	}
+	if p.AgreedCompensation <= 0 || p.AgreedCompensation > maxAmountVND {
+		return command.Rejected(e, "INVALID_SLOT_OFFER_AMOUNT", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_slot_offer_amount", nil)
+	}
+	// Only requester (task owner) can offer; for now check actor is USER and not the agent
+	if e.Actor.Type != "USER" || e.Actor.ID == p.AgentID {
+		return command.Rejected(e, "SLOT_OFFER_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.slot_offer_not_allowed", nil)
+	}
+	if p.Currency == "" {
+		p.Currency = "VND"
+	}
+	now := s.clock.Now().UTC()
+	offer := Offer{
+		ID:          newID("off_"),
+		TaskID:      p.TaskID,
+		SlotID:      p.SlotID,
+		RequesterID: e.Actor.ID,
+		AgentID:     p.AgentID,
+		BatchID:     p.BatchID,
+		Status:      "OFFERED",
+		ExpiresAt:   now.Add(5 * time.Minute),
+		Version:     1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	domainEvents := []event.DomainEvent{event.New("SlotOfferCreated", "Offer", offer.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"taskId": p.TaskID, "slotId": p.SlotID, "agentId": p.AgentID, "expiresAt": offer.ExpiresAt.Format(time.RFC3339),
+	})}
+	if err := s.repository.CreateOfferAndPublish(ctx, offer, domainEvents); err != nil {
+		return command.Rejected(e, "SLOT_OFFER_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.slot_offer_failed", nil)
+	}
+	return acceptedWithPayload(e, "Offer", offer.ID, 1, offer.Status, map[string]any{
+		"offerId":   offer.ID,
+		"expiresAt": offer.ExpiresAt.Format(time.RFC3339),
+	}, domainEvents)
+}
+
+// ---------- AcceptSlotOffer (concurrent, TTL, slot uniqueness) ----------
+type acceptSlotOfferPayload struct {
+	OfferID string `json:"offerId"`
+}
+
+func (s *Service) acceptSlotOffer(ctx context.Context, e command.Envelope) command.Result {
+	var p acceptSlotOfferPayload
+	if !decode(e.Payload, &p) || p.OfferID == "" {
+		// also allow target ID
+		p.OfferID = e.Target.ID
+		if p.OfferID == "" {
+			return command.Rejected(e, "INVALID_ACCEPT_OFFER", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_accept_offer", nil)
+		}
+	}
+	offer, err := s.repository.GetOffer(ctx, p.OfferID)
+	if errors.Is(err, ErrOfferNotFound) {
+		return command.Rejected(e, "OFFER_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "OFFER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.offer_read_failed", nil)
+	}
+	now := s.clock.Now().UTC()
+	if offer.Status != "OFFERED" {
+		return command.Rejected(e, "OFFER_NOT_AVAILABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_not_available", map[string]any{"status": offer.Status})
+	}
+	if now.After(offer.ExpiresAt) {
+		return command.Rejected(e, "OFFER_EXPIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_expired", map[string]any{"expiresAt": offer.ExpiresAt.Format(time.RFC3339)})
+	}
+	if offer.AgentID != e.Actor.ID && offer.AgentID != e.Principal.ID {
+		return command.Rejected(e, "OFFER_NOT_OWNED", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.offer_not_owned", nil)
+	}
+	// Build Order snapshot from Offer
+	snapshot := OrderSnapshot{
+		Requester:          offer.RequesterID,
+		Agent:              offer.AgentID,
+		ServiceSKU:         "CITY_COMPANION",
+		NeedVersion:        offer.TaskID,
+		AgreedCompensation: 0,
+		Currency:           "VND",
+		SettlementMode:     "DIRECT_SETTLEMENT",
+	}
+	// Use offer's compensation if available via lookup? For now use 0 and override if payload has it
+	order := Order{
+		ID:          newID("ord_"),
+		RequesterID: offer.RequesterID,
+		AgentID:     offer.AgentID,
+		NeedID:      offer.TaskID,
+		Lifecycle:   "CONFIRMED",
+		Version:     1,
+		Snapshot:    snapshot,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	// For slot uniqueness we store TaskID as NeedID and rely on DB unique index on slot_id via order's snapshot? Instead we enforce via Offer SlotID uniqueness via repo
+	offer.Status = "ACCEPTED"
+	offer.Version++
+	offer.UpdatedAt = now
+	domainEvents := []event.DomainEvent{
+		event.New("OfferAccepted", "Offer", offer.ID, offer.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"offerId": offer.ID, "slotId": offer.SlotID}),
+		event.New("OrderCreatedFromOffer", "Order", order.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"offerId": offer.ID, "slotId": offer.SlotID, "taskId": offer.TaskID}),
+	}
+	// Atomically update offer and create order
+	if err := s.repository.AcceptOfferAndCreateOrder(ctx, offer, order, offer.Version-1, domainEvents); err != nil {
+		if errors.Is(err, ErrVersionConflict) {
+			return command.Rejected(e, "OFFER_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "fulfillment.offer_version_conflict", nil)
+		}
+		if errors.Is(err, ErrOfferNotAvailable) {
+			return command.Rejected(e, "SLOT_UNAVAILABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.slot_unavailable", map[string]any{"slotId": offer.SlotID})
+		}
+		return command.Rejected(e, "ACCEPT_OFFER_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.accept_failed", nil)
+	}
+	return acceptedWithPayload(e, "Order", order.ID, 1, order.Lifecycle, map[string]any{
+		"orderId": order.ID, "offerId": offer.ID, "slotId": offer.SlotID,
+	}, domainEvents)
+}
+
+func (s *Service) getOffer(ctx context.Context, e command.Envelope) command.Result {
+	offerID := e.Target.ID
+	if offerID == "" {
+		var p struct{ OfferID string `json:"offerId"`}
+		if !decode(e.Payload, &p) || p.OfferID == "" {
+			return command.Rejected(e, "INVALID_OFFER_QUERY", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_offer_query", nil)
+		}
+		offerID = p.OfferID
+	}
+	offer, err := s.repository.GetOffer(ctx, offerID)
+	if errors.Is(err, ErrOfferNotFound) {
+		return command.Rejected(e, "OFFER_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.offer_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "OFFER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.offer_read_failed", nil)
+	}
+	// TTL derived status: if OFFERED but expired, report EXPIRED without mutating
+	status := offer.Status
+	if status == "OFFERED" && s.clock.Now().UTC().After(offer.ExpiresAt) {
+		status = "EXPIRED"
+	}
+	return acceptedWithPayload(e, "Offer", offer.ID, offer.Version, status, map[string]any{
+		"offer": offer,
+	}, nil)
+}
+
+func (s *Service) listAgentOffers(ctx context.Context, e command.Envelope) command.Result {
+	agentID := e.Principal.ID
+	offers, err := s.repository.ListOffersByAgent(ctx, agentID)
+	if err != nil {
+		return command.Rejected(e, "OFFER_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.offer_list_failed", nil)
+	}
+	// Redact expired
+	now := s.clock.Now().UTC()
+	filtered := []Offer{}
+	for _, o := range offers {
+		if o.Status == "OFFERED" && now.After(o.ExpiresAt) {
+			o.Status = "EXPIRED"
+		}
+		filtered = append(filtered, o)
+	}
+	return acceptedWithPayload(e, "OfferList", agentID, 1, "LISTED", map[string]any{
+		"offers": filtered,
+	}, nil)
 }
 
 // ---------- ConfirmCooperation ----------

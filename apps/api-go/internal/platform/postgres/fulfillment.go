@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -13,7 +14,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 )
 
-// FulfillmentRepository 持久化 Order（北极星 Traceable Human Order 的可回放载体）。
+// FulfillmentRepository 持久化 Order/Offer（北极星 Traceable Human Order 的可回放载体）。
 type FulfillmentRepository struct {
 	pool   *pgxpool.Pool
 	outbox *OutboxRepository
@@ -145,6 +146,159 @@ func (r *FulfillmentRepository) UpdateOrderAndPublish(ctx context.Context, order
 		}
 		return nil
 	})
+}
+
+func (r *FulfillmentRepository) CreateOffer(ctx context.Context, o fulfillment.Offer) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		o.ID, o.TaskID, o.SlotID, o.RequesterID, o.AgentID, nullableText(o.BatchID), o.Status, o.ExpiresAt, o.Version, o.CreatedAt, o.UpdatedAt,
+	)
+	return err
+}
+
+func (r *FulfillmentRepository) CreateOfferAndPublish(ctx context.Context, o fulfillment.Offer, domainEvents []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("fulfillment transactional outbox is not configured")
+	}
+	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(transactionContext, `
+			INSERT INTO fulfillment.offers (id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			o.ID, o.TaskID, o.SlotID, o.RequesterID, o.AgentID, nullableText(o.BatchID), o.Status, o.ExpiresAt, o.Version, o.CreatedAt, o.UpdatedAt,
+		); err != nil {
+			return err
+		}
+		for _, e := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, tx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (r *FulfillmentRepository) GetOffer(ctx context.Context, id string) (fulfillment.Offer, error) {
+	var o fulfillment.Offer
+	var batchID *string
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at
+		FROM fulfillment.offers WHERE id=$1`, id).Scan(
+		&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fulfillment.Offer{}, fulfillment.ErrOfferNotFound
+	}
+	if err != nil {
+		return fulfillment.Offer{}, err
+	}
+	if batchID != nil {
+		o.BatchID = *batchID
+	}
+	return o, nil
+}
+
+func (r *FulfillmentRepository) UpdateOffer(ctx context.Context, o fulfillment.Offer, expectedVersion int) error {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE fulfillment.offers SET status=$1, version=$2, updated_at=$3
+		WHERE id=$4 AND version=$5`,
+		o.Status, o.Version, o.UpdatedAt, o.ID, expectedVersion,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fulfillment.ErrVersionConflict
+	}
+	return nil
+}
+
+func (r *FulfillmentRepository) ListOffersByAgent(ctx context.Context, agentID string) ([]fulfillment.Offer, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, task_id, slot_id, requester_id, agent_id, candidate_batch_id, status, expires_at, version, created_at, updated_at
+		FROM fulfillment.offers WHERE agent_id=$1 ORDER BY created_at DESC`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []fulfillment.Offer{}
+	for rows.Next() {
+		var o fulfillment.Offer
+		var batchID *string
+		if err := rows.Scan(&o.ID, &o.TaskID, &o.SlotID, &o.RequesterID, &o.AgentID, &batchID, &o.Status, &o.ExpiresAt, &o.Version, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if batchID != nil {
+			o.BatchID = *batchID
+		}
+		result = append(result, o)
+	}
+	return result, rows.Err()
+}
+
+func (r *FulfillmentRepository) AcceptOfferAndCreateOrder(ctx context.Context, offer fulfillment.Offer, order fulfillment.Order, expectedOfferVersion int, domainEvents []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("fulfillment transactional outbox is not configured")
+	}
+	return runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
+		// Lock offer row
+		var currentStatus string
+		var currentVersion int
+		var expiresAt time.Time
+		var slotID string
+		err := tx.QueryRow(txCtx, `SELECT status, version, expires_at, slot_id FROM fulfillment.offers WHERE id=$1 FOR UPDATE`, offer.ID).Scan(&currentStatus, &currentVersion, &expiresAt, &slotID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fulfillment.ErrOfferNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if currentVersion != expectedOfferVersion {
+			return fulfillment.ErrVersionConflict
+		}
+		if currentStatus != "OFFERED" {
+			return fulfillment.ErrOfferNotAvailable
+		}
+		if time.Now().UTC().After(expiresAt) {
+			return fulfillment.ErrOfferExpired
+		}
+		// Check slot uniqueness via orders unique index (try insert, handle conflict)
+		// Update offer
+		if _, err := tx.Exec(txCtx, `UPDATE fulfillment.offers SET status=$1, version=$2, updated_at=$3 WHERE id=$4 AND version=$5`, offer.Status, offer.Version, offer.UpdatedAt, offer.ID, expectedOfferVersion); err != nil {
+			return err
+		}
+		// Insert order with slot/task reference
+		snapshot, amendments, settlement, outcome, err := encodeOrderJSON(order)
+		if err != nil {
+			return err
+		}
+		// Use slot/task columns if available
+		if _, err := tx.Exec(txCtx, `
+			INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, version, snapshot, amendments, settlement, outcome, created_at, updated_at, task_id, slot_id, offer_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+			order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version, snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt, offer.TaskID, offer.SlotID, offer.ID,
+		); err != nil {
+			// unique violation on slot -> slot unavailable
+			if isUniqueViolation(err) {
+				return fulfillment.ErrOfferNotAvailable
+			}
+			return err
+		}
+		for _, e := range domainEvents {
+			if err := r.outbox.publishWithExec(txCtx, tx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }
 
 func (r *FulfillmentRepository) Snapshot(ctx context.Context) ([]fulfillment.Order, error) {
