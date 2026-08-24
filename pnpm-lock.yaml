@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  expo-modules-jsi@57.0.4: 66abfcd61fe79f17eb8bd1e4233ed428f59acf8505f601fad234526be81075f0
+  expo-modules-jsi@57.0.4: a78d1a4c55dadc7e20e76b76bfdfdca2a3419cdf107a542a8981917772181b7a
 
 importers:
 
@@ -4503,12 +4503,12 @@ snapshots:
   expo-modules-core@57.0.10(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3):
     dependencies:
       '@expo/expo-modules-macros-plugin': 0.6.1
-      expo-modules-jsi: 57.0.4(patch_hash=66abfcd61fe79f17eb8bd1e4233ed428f59acf8505f601fad234526be81075f0)(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))
+      expo-modules-jsi: 57.0.4(patch_hash=a78d1a4c55dadc7e20e76b76bfdfdca2a3419cdf107a542a8981917772181b7a)(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))
       invariant: 2.2.4
       react: 19.2.3
       react-native: 0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)
 
-  expo-modules-jsi@57.0.4(patch_hash=66abfcd61fe79f17eb8bd1e4233ed428f59acf8505f601fad234526be81075f0)(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)):
+  expo-modules-jsi@57.0.4(patch_hash=a78d1a4c55dadc7e20e76b76bfdfdca2a3419cdf107a542a8981917772181b7a)(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)):
     dependencies:
       react-native: 0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)
 
