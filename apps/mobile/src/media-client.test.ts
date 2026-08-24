@@ -21,4 +21,18 @@ describe("original media upload retry", () => {
     expect(attempt).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
   });
+
+  it("stops immediately after user cancellation", async () => {
+    const controller = new AbortController();
+    const attempt = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      const error = new Error("cancelled");
+      error.name = "AbortError";
+      throw error;
+    });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(uploadOriginalWithRetry(attempt, sleep, 3, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(attempt).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });

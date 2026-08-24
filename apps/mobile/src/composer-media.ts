@@ -7,6 +7,7 @@ export type DraftMediaItem = {
   image: UploadableImage;
   altText: string;
   status: DraftMediaStatus;
+  progress?: number | undefined;
   mediaAssetId?: string | undefined;
   error?: string | undefined;
 };
@@ -37,7 +38,9 @@ export function draftMediaRefs(items: readonly DraftMediaItem[]): Array<{ mediaA
 }
 
 export function mediaStatusLabel(item: DraftMediaItem): string {
-  if (item.status === "UPLOADING") return "上传与处理中…";
+  if (item.status === "UPLOADING") return item.progress !== undefined && item.progress < 1
+    ? `上传 ${Math.round(item.progress * 100)}%`
+    : "服务端处理中…";
   if (item.status === "READY") return "已就绪";
   if (item.status === "FAILED") return "失败 · 可重试";
   return "待上传";
@@ -45,6 +48,6 @@ export function mediaStatusLabel(item: DraftMediaItem): string {
 
 export function normalizeRestoredDraftMedia(items: readonly DraftMediaItem[]): DraftMediaItem[] {
   return items.map((item) => item.status === "UPLOADING"
-    ? { ...item, status: "FAILED", error: "上传在后台中断，请重试" }
+    ? { ...item, status: "FAILED", progress: undefined, error: "上传在后台中断，请重试" }
     : { ...item });
 }

@@ -145,6 +145,7 @@ export function FeedSurface({
   const [quoteTargetId, setQuoteTargetId] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const publishingRef = useRef(false);
+  const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
   const draftMediaSequenceRef = useRef(0);
   const publishIdempotencyRef = useRef<string | undefined>(undefined);
   const draftRestoredRef = useRef(false);
@@ -187,6 +188,11 @@ export function FeedSurface({
       draftRestoredRef.current = true;
     });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => () => {
+    for (const controller of uploadControllersRef.current.values()) controller.abort();
+    uploadControllersRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -460,6 +466,41 @@ export function FeedSurface({
     if (retentionFailed) setComposerError("部分照片暂时无法复制到草稿目录；当前会话仍可发布，重启 App 前请完成或重新选择。 ");
   }
 
+  async function replaceComposerImage(localId: string): Promise<void> {
+    setComposerError(undefined);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) { setComposerError("需要照片权限才能替换图片。"); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 1,
+      allowsMultipleSelection: false,
+      selectionLimit: 1,
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current
+    });
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (!asset) return;
+    const current = draftMedia.find((item) => item.localId === localId);
+    if (!current) return;
+    invalidatePublishAttempt();
+    const replacement = {
+      ...createDraftMedia({
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height,
+        ...(asset.fileName ? { fileName: asset.fileName } : {}),
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {})
+      }, localId),
+      altText: current.altText
+    };
+    try {
+      const retained = await retainComposerImage(replacement);
+      setDraftMedia((items) => items.map((item) => item.localId === localId ? retained : item));
+    } catch {
+      setDraftMedia((items) => items.map((item) => item.localId === localId ? replacement : item));
+      setComposerError("替换照片暂时无法复制到草稿目录；重启 App 前请完成发布或重新选择。");
+    }
+  }
+
   async function publish(): Promise<void> {
     if ((!draft.trim() && draftMedia.length === 0) || publishingRef.current) return;
     publishingRef.current = true;
@@ -470,22 +511,31 @@ export function FeedSurface({
       if (pending.length > 0) {
         const pendingIds = new Set(pending.map((item) => item.localId));
         setDraftMedia((current) => current.map((item) => pendingIds.has(item.localId)
-          ? { ...item, status: "UPLOADING", error: undefined }
+          ? { ...item, status: "UPLOADING", progress: 0, error: undefined }
           : item));
       }
       const uploadResults = await Promise.allSettled(pending.map(async (item) => {
+        const controller = new AbortController();
+        uploadControllersRef.current.set(item.localId, controller);
         try {
-          const uploaded = await mediaClient.uploadImage(item.image);
+          const uploaded = await mediaClient.uploadImage(item.image, {
+            signal: controller.signal,
+            onProgress: (progress) => setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
+              ? { ...candidate, progress }
+              : candidate))
+          });
           setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
-            ? { ...candidate, status: "READY", mediaAssetId: uploaded.mediaAssetId, error: undefined }
+            ? { ...candidate, status: "READY", progress: 1, mediaAssetId: uploaded.mediaAssetId, error: undefined }
             : candidate));
           return { localId: item.localId, mediaAssetId: uploaded.mediaAssetId };
         } catch (error) {
-          const message = error instanceof Error ? error.message : "上传失败";
+          const message = controller.signal.aborted ? "照片上传已取消，可重试" : error instanceof Error ? error.message : "上传失败";
           setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
-            ? { ...candidate, status: "FAILED", error: message }
+            ? { ...candidate, status: "FAILED", progress: undefined, error: message }
             : candidate));
           throw error;
+        } finally {
+          uploadControllersRef.current.delete(item.localId);
         }
       }));
       if (uploadResults.some((result) => result.status === "rejected")) {
@@ -495,7 +545,7 @@ export function FeedSurface({
       const uploadedById = new Map(uploadResults.flatMap((result) => result.status === "fulfilled" ? [[result.value.localId, result.value.mediaAssetId] as const] : []));
       const completedMedia = draftMedia.map((item) => {
         const mediaAssetId = uploadedById.get(item.localId) ?? item.mediaAssetId;
-        return mediaAssetId ? { ...item, status: "READY" as const, mediaAssetId, error: undefined } : item;
+        return mediaAssetId ? { ...item, status: "READY" as const, progress: 1, mediaAssetId, error: undefined } : item;
       });
       setDraftMedia(completedMedia);
       const mediaRefs = draftMediaRefs(completedMedia);
@@ -748,6 +798,15 @@ export function FeedSurface({
                     <Pressable disabled={publishing || index === draftMedia.length - 1} onPress={() => { invalidatePublishAttempt(); setDraftMedia((current) => moveDraftMedia(current, index, index + 1)); }}>
                       <Text style={[styles.composerMediaAction, index === draftMedia.length - 1 && styles.disabledText]}>后移</Text>
                     </Pressable>
+                    {item.status === "UPLOADING" ? (
+                      <Pressable onPress={() => uploadControllersRef.current.get(item.localId)?.abort()}>
+                        <Text style={styles.composerMediaRemove}>取消</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable disabled={publishing} onPress={() => void replaceComposerImage(item.localId)}>
+                        <Text style={styles.composerMediaAction}>替换</Text>
+                      </Pressable>
+                    )}
                     <Pressable disabled={publishing} onPress={() => { invalidatePublishAttempt(); setDraftMedia((current) => current.filter((candidate) => candidate.localId !== item.localId)); }}>
                       <Text style={styles.composerMediaRemove}>移除</Text>
                     </Pressable>

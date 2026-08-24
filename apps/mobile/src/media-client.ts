@@ -12,6 +12,11 @@ export type UploadableImage = {
   height: number;
 };
 
+export type MediaUploadOptions = {
+  onProgress?: (progress: number) => void;
+  signal?: AbortSignal;
+};
+
 type MediaAuthClient = {
   getAccessToken(): Promise<string | undefined>;
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -27,7 +32,7 @@ export class MediaClient {
     now?: () => Date;
   }) {}
 
-  public async uploadImage(image: UploadableImage): Promise<{ mediaAssetId: string; storageKey: string }> {
+  public async uploadImage(image: UploadableImage, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
     const mimeType = image.mimeType || "image/jpeg";
     const storageKey = `${this.nextId("image")}${extensionFor(mimeType)}`;
     const created = await this.command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, {
@@ -45,28 +50,38 @@ export class MediaClient {
     const localFile = new File(image.uri);
     if (!localFile.exists) throw new Error("无法读取所选照片");
     await uploadOriginalWithRetry(async () => {
-      const response = await localFile.upload(`${this.input.baseUrl}${uploadUrl}`, {
+      throwIfAborted(options.signal);
+      const task = localFile.createUploadTask(`${this.input.baseUrl}${uploadUrl}`, {
         httpMethod: "PUT",
         uploadType: UploadType.BINARY_CONTENT,
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": mimeType },
         mimeType,
+        ...(options.signal ? { signal: options.signal } : {}),
+        onProgress: ({ bytesSent, totalBytes }) => {
+          if (totalBytes > 0) options.onProgress?.(Math.min(1, Math.max(0, bytesSent / totalBytes)));
+        },
         // iOS keeps the native transfer alive while the app is suspended.
         // Terminated-app recovery still requires the planned resumable upload session.
         sessionType: "background"
       });
+      const response = await task.uploadAsync();
       return response.status;
-    });
+    }, undefined, 3, options.signal);
 
+    throwIfAborted(options.signal);
     await this.command("CompleteMediaUpload", { type: "MediaAsset", id: mediaAssetId }, { originalStorageKey: storageKey });
+    options.onProgress?.(1);
+    throwIfAborted(options.signal);
     await this.command("ProcessMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { originalPath: "" });
-    await this.waitUntilReady(mediaAssetId);
+    await this.waitUntilReady(mediaAssetId, options.signal);
     return { mediaAssetId, storageKey };
   }
 
-  private async waitUntilReady(mediaAssetId: string): Promise<void> {
+  private async waitUntilReady(mediaAssetId: string, signal?: AbortSignal): Promise<void> {
     const deadline = Date.now() + 60_000;
     let delayMs = 300;
     while (Date.now() < deadline) {
+      throwIfAborted(signal);
       const result = await this.command("GetMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { mediaAssetId });
       const asset = result.asset;
       const status = asset && typeof asset === "object" && "processingStatus" in asset
@@ -113,6 +128,13 @@ export class MediaClient {
     this.sequence += 1;
     return `mobile_media_${prefix}_${Date.now().toString(36)}_${this.sequence.toString(36)}`;
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error("照片上传已取消");
+  error.name = "AbortError";
+  throw error;
 }
 
 function extensionFor(mimeType: string): string {

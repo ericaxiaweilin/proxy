@@ -1,15 +1,18 @@
 export async function uploadOriginalWithRetry(
   attempt: () => Promise<number>,
   sleep: (milliseconds: number) => Promise<void> = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
-  maxAttempts = 3
+  maxAttempts = 3,
+  signal?: AbortSignal
 ): Promise<void> {
   let lastError: unknown;
   for (let index = 0; index < maxAttempts; index += 1) {
+    if (signal?.aborted) throw abortedUploadError();
     let status: number | undefined;
     try {
       status = await attempt();
     } catch (error) {
       lastError = error;
+      if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
       if (index === maxAttempts - 1) throw error;
     }
     if (status !== undefined) {
@@ -20,7 +23,13 @@ export async function uploadOriginalWithRetry(
       lastError = error;
     }
     await sleep(index === 0 ? 300 : 900);
+    if (signal?.aborted) throw abortedUploadError();
   }
   throw lastError instanceof Error ? lastError : new Error("照片上传失败");
 }
 
+function abortedUploadError(): Error {
+  const error = new Error("照片上传已取消");
+  error.name = "AbortError";
+  return error;
+}
