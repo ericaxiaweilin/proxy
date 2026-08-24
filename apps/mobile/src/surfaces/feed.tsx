@@ -18,6 +18,7 @@ import { CustomFeedHub } from "./custom-feed";
 import { StatusFeed } from "./status";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
+type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
 type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情报/行业信息";
 
 // 模块级缓存：组件卸载/重载时保留数据，避免闪烁
@@ -73,6 +74,12 @@ const TABS: ReadonlyArray<{ id: FeedTab; label: string }> = [
   { id: "FOLLOWING", label: "关注" }
 ];
 
+const SECTIONS: ReadonlyArray<{ id: FeedSection; label: string; icon: ProxyIconName }> = [
+  { id: "POSTS", label: "动态", icon: "target" },
+  { id: "STATUS", label: "状态", icon: "clock" },
+  { id: "COMMUNITY", label: "社区", icon: "user" }
+];
+
 const FILTERS: ReadonlyArray<{ id: FilterKey; label: string }> = [
   { id: "ALL", label: "全部" },
   { id: "人/关系", label: "人 / 关系" },
@@ -95,6 +102,7 @@ export function FeedSurface({
   refreshTrigger?: number;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>("RECOMMENDED");
+  const [section, setSection] = useState<FeedSection>("POSTS");
   const [feedFilter, setFeedFilter] = useState<FilterKey>("ALL");
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedPosts.length > 0 ? "READY" : "LOADING");
   const [posts, setPosts] = useState<FeedPost[]>(cachedPosts);
@@ -381,9 +389,17 @@ export function FeedSurface({
     return true;
   });
   const [page, setPage] = useState(1);
-  const pageSize = 5;
+  const pageSize = 3;
   useEffect(() => { setPage(1); }, [tab, feedFilter, selectedCustomFeed]);
-  const paginatedVisible = visible.slice(0, page * pageSize);
+  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
+  useEffect(() => { setPage((current) => Math.min(current, pageCount)); }, [pageCount]);
+  const pageStart = (page - 1) * pageSize;
+  const paginatedVisible = visible.slice(pageStart, pageStart + pageSize);
+
+  function changePage(next: number): void {
+    setPage(Math.max(1, Math.min(pageCount, next)));
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }
 
   const quoteTarget = quoteTargetId ? posts.find((post) => post.postId === quoteTargetId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
@@ -415,8 +431,24 @@ export function FeedSurface({
         </View>
       </View>
 
-      <StatusFeed onReply={onOpenChat} />
-      <CommunityHub />
+      <View style={styles.sectionTabs}>
+        {SECTIONS.map((entry) => {
+          const active = section === entry.id;
+          return (
+            <Pressable key={entry.id} onPress={() => setSection(entry.id)} style={[styles.sectionTab, active && styles.sectionTabOn]}>
+              <ProxyIcon color={active ? color.white : color.muted} name={entry.icon} size={16} />
+              <Text style={[styles.sectionTabText, active && styles.sectionTabTextOn]}>{entry.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {section === "STATUS" ? (
+        <StatusFeed onReply={onOpenChat} />
+      ) : section === "COMMUNITY" ? (
+        <CommunityHub />
+      ) : (
+      <>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.customFeedRow} style={styles.filterRail}>
         {[
           { id: "all", label: "全部", icon: "◎" },
@@ -554,6 +586,12 @@ export function FeedSurface({
       ) : null}
 
       {engagementError ? <Text style={styles.engagementError}>{engagementError}</Text> : null}
+      {phase === "READY" && visible.length > 0 ? (
+        <View style={styles.pageSummary}>
+          <Text style={styles.pageSummaryTitle}>内容流</Text>
+          <Text style={styles.pageSummaryText}>第 {page} / {pageCount} 页 · 共 {visible.length} 条</Text>
+        </View>
+      ) : null}
       {phase === "LOADING" ? (
         <View style={styles.feedEmpty}>
           <ActivityIndicator color={color.magenta} />
@@ -742,16 +780,22 @@ export function FeedSurface({
             </View>
           );
         })}
-        {paginatedVisible.length < visible.length ? (
-          <Pressable onPress={() => setPage((p) => p + 1)} style={styles.loadMoreBtn}>
-            <Text style={styles.loadMoreText}>加载更多 · 还有 {visible.length - paginatedVisible.length} 条</Text>
-          </Pressable>
-        ) : visible.length > pageSize ? (
-          <View style={styles.loadMoreDone}>
-            <Text style={styles.loadMoreDoneText}>已看完 · 共 {visible.length} 条</Text>
+        {pageCount > 1 ? (
+          <View style={styles.pageControls}>
+            <Pressable disabled={page === 1} onPress={() => changePage(page - 1)} style={[styles.pageButton, page === 1 && styles.pageButtonDisabled]}>
+              <Text style={[styles.pageButtonText, page === 1 && styles.pageButtonTextDisabled]}>‹ 上一页</Text>
+            </Pressable>
+            <View style={styles.pageIndicator}>
+              <Text style={styles.pageIndicatorText}>{page} / {pageCount}</Text>
+            </View>
+            <Pressable disabled={page === pageCount} onPress={() => changePage(page + 1)} style={[styles.pageButton, page === pageCount && styles.pageButtonDisabled]}>
+              <Text style={[styles.pageButtonText, page === pageCount && styles.pageButtonTextDisabled]}>下一页 ›</Text>
+            </Pressable>
           </View>
         ) : null}
         </>
+      )}
+      </>
       )}
 
       {/* 全屏媒体查看器（真实文件：图片 thumbnailUrl / 视频 playbackUrl） */}
@@ -802,9 +846,11 @@ export function FeedSurface({
       ) : null}
 
       {/* R15.3 feedfab：渐变浮动发布按钮 */}
-      <Pressable onPress={() => (composerOpen ? setComposerOpen(false) : openComposer())} style={styles.feedFab}>
-        <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
-      </Pressable>
+      {section === "POSTS" ? (
+        <Pressable onPress={() => (composerOpen ? setComposerOpen(false) : openComposer())} style={styles.feedFab}>
+          <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
+        </Pressable>
+      ) : null}
     </ScrollView>
   );
 }
@@ -959,6 +1005,11 @@ const styles = StyleSheet.create({
     width: 44
   },
   iconBtnText: { color: color.ink, fontSize: 14, fontWeight: "900" },
+  sectionTabs: { backgroundColor: "#F0EBF3", borderRadius: 16, flexDirection: "row", gap: 4, marginBottom: 10, marginTop: 9, padding: 4 },
+  sectionTab: { alignItems: "center", borderRadius: 12, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 42, paddingHorizontal: 8 },
+  sectionTabOn: { backgroundColor: color.ink },
+  sectionTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
+  sectionTabTextOn: { color: color.white },
   feedNote: { color: color.muted, fontSize: 12, lineHeight: 17, marginBottom: 8, marginTop: 0 },
   // 基线 .feedfab：violet bg radius 999 48×48。
   feedFab: {
@@ -1149,10 +1200,16 @@ const styles = StyleSheet.create({
   feedEmptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   retryBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   retryBtnText: { color: color.white, fontSize: 11, fontWeight: "700" },
-  loadMoreBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, marginTop: 10, paddingVertical: 10 },
-  loadMoreText: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  loadMoreDone: { alignItems: "center", marginTop: 10, paddingVertical: 6 },
-  loadMoreDoneText: { color: color.muted, fontSize: 11 },
+  pageSummary: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 3, marginTop: 8 },
+  pageSummaryTitle: { color: color.ink, fontSize: 14, fontWeight: "900" },
+  pageSummaryText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  pageControls: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "space-between", marginTop: 12 },
+  pageButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, flex: 1, minHeight: 42, justifyContent: "center", paddingHorizontal: 12 },
+  pageButtonDisabled: { backgroundColor: "#F3EFF5", opacity: 0.55 },
+  pageButtonText: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  pageButtonTextDisabled: { color: color.muted },
+  pageIndicator: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, minWidth: 54, paddingHorizontal: 10, paddingVertical: 8 },
+  pageIndicatorText: { color: color.white, fontSize: 11, fontWeight: "900" },
 
   // 基线 .postcard：radius 18，margin 9，padding 12。
   postCard: {
