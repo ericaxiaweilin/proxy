@@ -1,9 +1,8 @@
-// R15.12.7 Market Map Parity Freeze — frozen Market fixtures.
-// Ported 1:1 from Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html:
-//   R162_EXPERIENCES (体验), R158_OPPORTUNITIES (机会, from R156_ORDERS + decor +
-//   R158_NOW_EXTRA + R158_REMOTE), R158_PEOPLE (Host 可选项，人是体验内可选的履约者，
-//   不是 Market SKU)。坐标用于 MAP 视图的相对定位（百分比）。
-// 冻结语义：体验负责消费，机会负责需求，活动负责聚人。人不被做成 Market Inventory。
+// Market fixtures — R15.12.7 → R4 (2026-08-24).
+// R4 决定：移除“体验上架”（小美真人货架）以不拉低小美身价。
+// 市场仅保留 机会 / 活动 双 Tab：机会由客户发布、小美单向报名；活动是公共线。
+// EXPERIENCE 保留为 deprecated 别名（历史路由兼容），新 UI 不再展示，统一归一到 OPPORTUNITY。
+// 坐标仍用于 MAP 的粗粒度区域定位，精确地址仅授权后披露。
 
 export type MarketTab = "EXPERIENCE" | "OPPORTUNITY" | "ACTIVITY";
 

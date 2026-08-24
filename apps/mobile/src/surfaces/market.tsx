@@ -1,9 +1,7 @@
-// Market Surface（R15.12.7 Market Map Parity Freeze）：市场 Root = 体验 / 机会 / 活动。
-// 三类一级对象冻结；Market 保留 LIST / MAP 双模式，右上角固定图标切换（不新增文字 Tab）。
-// Map 只展示对象公开地点 / 区域（Experience Venue · Opportunity 任务区域 · Activity Venue），
-// 严格禁止 Creator / Host / Participant 实时 GPS、未授权的私人集合点、精确个人地址。
-// REMOTE 机会只存在于 LIST；MAP 不强行生成地理 Pin，提示切回列表。
-// 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（screens.market + r162*）。
+// Market Surface — R4 (2026-08-24): 机会 / 活动 双 Tab。
+// R4 决策：移除“体验上架”以保护小美身价；机会由客户单向发布，小美报名/报价。
+// 视觉：沿用项目 R3 token（magenta/violet/ink/muted/line/surface），仅复用 R4 的卡片结构与价格可见性，
+// 不引入原型暖黄 #F3A61D 作为主色，保持 Proxy 紫粉基线。
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Activity } from "@proxy/contracts";
@@ -11,26 +9,23 @@ import { type ActivityClient } from "../activity-client";
 import {
   MAP_DISTRICTS,
   MARKET_EXPERIENCES,
-  MARKET_HOSTS,
   MARKET_OPPORTUNITIES,
   OPPORTUNITY_LENS_LABEL,
   OPPORTUNITY_MAP_COORDS,
   marketExperience,
-  marketHost,
   type MarketOpportunity,
   type MarketTab,
   type OpportunityLens
 } from "../market-fixtures";
 import { ProxyIcon } from "../components/proxy-icon";
-import { color, Gradient, shadows } from "../theme";
+import { color, shadows } from "../theme";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
 
 export type MarketViewMode = "LIST" | "MAP";
 
 type ActivityFilter = "RECOMMENDED" | "CAFE" | "RESTAURANT" | "MINE";
+type OpportunityFilter = "MATCH" | "FAIR" | "COUNTER" | "NEARBY" | "TODAY" | "INVITED";
 
-const EXPERIENCE_LENS = ["推荐", "附近", "本周", "摄影", "城市"] as const;
-const ACTIVITY_LENS = ["趋势", "附近", "本周", "新活动"] as const;
 const ACTIVITY_FILTERS: ReadonlyArray<{ id: ActivityFilter; label: string }> = [
   { id: "RECOMMENDED", label: "趋势" },
   { id: "CAFE", label: "附近" },
@@ -38,12 +33,26 @@ const ACTIVITY_FILTERS: ReadonlyArray<{ id: ActivityFilter; label: string }> = [
   { id: "MINE", label: "我的活动" }
 ];
 
+const OPP_FILTERS: ReadonlyArray<{ id: OpportunityFilter; label: string }> = [
+  { id: "MATCH", label: "适合你" },
+  { id: "FAIR", label: "价格合理" },
+  { id: "COUNTER", label: "可反报价" },
+  { id: "NEARBY", label: "附近" },
+  { id: "TODAY", label: "今天" },
+  { id: "INVITED", label: "邀请我的" }
+];
+
 const OPPORTUNITY_COORDS: Array<[number, number]> = OPPORTUNITY_MAP_COORDS;
+
+function normalizeTab(tab: MarketTab): "OPPORTUNITY" | "ACTIVITY" {
+  if (tab === "ACTIVITY") return "ACTIVITY";
+  return "OPPORTUNITY";
+}
 
 export function MarketSurface({
   activities,
   marketLabel,
-  initialTab = "EXPERIENCE",
+  initialTab = "OPPORTUNITY",
   onOpenExperience,
   onOpenActivity
 }: {
@@ -53,9 +62,11 @@ export function MarketSurface({
   onOpenExperience: (experienceId: string) => void;
   onOpenActivity: (activity: Activity) => void;
 }): React.JSX.Element {
-  const [tab, setTab] = useState<MarketTab>(initialTab);
+  const normalized = normalizeTab(initialTab);
+  const [tab, setTab] = useState<"OPPORTUNITY" | "ACTIVITY">(normalized);
   const [view, setView] = useState<MarketViewMode>("LIST");
   const [lens, setLens] = useState<OpportunityLens>("NOW");
+  const [oppFilter, setOppFilter] = useState<OpportunityFilter>("MATCH");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("RECOMMENDED");
   const [search, setSearch] = useState("");
   const [activityPhase, setActivityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
@@ -64,6 +75,8 @@ export function MarketSurface({
   const [interestedIn, setInterestedIn] = useState<ReadonlySet<string>>(new Set());
   const [joinedIds, setJoinedIds] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [oppDetail, setOppDetail] = useState<MarketOpportunity | null>(null);
+  const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
 
   const loadActivities = useCallback(async (): Promise<void> => {
     setActivityPhase("LOADING");
@@ -77,9 +90,7 @@ export function MarketSurface({
   }, [activities]);
 
   useEffect(() => {
-    if (tab === "ACTIVITY") {
-      void loadActivities();
-    }
+    if (tab === "ACTIVITY") void loadActivities();
   }, [tab, loadActivities]);
 
   function upsertActivity(next: Activity): void {
@@ -96,8 +107,6 @@ export function MarketSurface({
       if (interested) next.add(activityId);
       else next.delete(activityId);
       setInterestedIn(next);
-    } catch {
-      // fail-closed：命令失败保持原状态
     } finally {
       setBusy(false);
     }
@@ -112,8 +121,6 @@ export function MarketSurface({
       const next = new Set(joinedIds);
       next.add(activityId);
       setJoinedIds(next);
-    } catch {
-      // fail-closed：命令失败保持原状态
     } finally {
       setBusy(false);
     }
@@ -130,20 +137,14 @@ export function MarketSurface({
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      {/* 基线 .r157MarketHead：市场 + 本地范围 + 右上 map/list 图标切换 + ＋ 发布 */}
       <View style={styles.marketHead}>
         <View>
           <Text style={styles.marketTitle}>市场</Text>
-          <Text style={styles.marketSub}>{marketLabel} · 体验 / 机会 / 活动</Text>
+          <Text style={styles.marketSub}>{marketLabel} · 机会 · 活动</Text>
         </View>
         <View style={styles.headActions}>
-          <Pressable
-            onPress={() => setView(view === "MAP" ? "LIST" : "MAP")}
-            style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}
-          >
-            <Text style={[styles.viewToggleText, view === "MAP" && styles.viewToggleTextOn]}>
-              {view === "MAP" ? "▤" : "⌖"}
-            </Text>
+          <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
+            <Text style={[styles.viewToggleText, view === "MAP" && styles.viewToggleTextOn]}>{view === "MAP" ? "▤" : "⌖"}</Text>
           </Pressable>
           <Pressable style={styles.plusBtn}>
             <Text style={styles.plusBtnText}>＋</Text>
@@ -151,20 +152,19 @@ export function MarketSurface({
         </View>
       </View>
 
-      {/* 基线 .r162Tabs：体验 / 机会 / 活动 三 Tab，无第四个 Market Object */}
       <View style={styles.tabs}>
         {(
           [
-            ["EXPERIENCE", "体验"],
             ["OPPORTUNITY", "机会"],
             ["ACTIVITY", "活动"]
-          ] as ReadonlyArray<[MarketTab, string]>
+          ] as const
         ).map(([id, label]) => (
           <Pressable
             key={id}
             onPress={() => {
               setTab(id);
               setActivityDetail(null);
+              setOppDetail(null);
             }}
             style={[styles.tab, tab === id && styles.tabOn]}
           >
@@ -175,39 +175,46 @@ export function MarketSurface({
 
       {view === "MAP" ? (
         <MarketMap
-          tab={tab}
+          tab={tab === "OPPORTUNITY" ? "OPPORTUNITY" : "ACTIVITY"}
           lens={lens}
           remoteLens={remoteLens}
           marketLabel={marketLabel}
           onOpenExperience={onOpenExperience}
-          onOpenOpportunity={() => undefined}
+          onOpenOpportunity={(id) => {
+            const found = MARKET_OPPORTUNITIES.find((x) => x.id === id);
+            if (found) setOppDetail(found);
+          }}
           onOpenActivity={(a) => setActivityDetail(a)}
         />
-      ) : tab === "EXPERIENCE" ? (
-        <ExperienceTab search={search} setSearch={setSearch} onOpenExperience={onOpenExperience} />
       ) : tab === "OPPORTUNITY" ? (
-        <OpportunityTab lens={lens} setLens={setLens} marketLabel={marketLabel} />
+        oppDetail ? (
+          <OpportunityDetail
+            opportunity={oppDetail}
+            quoteMode={oppQuoteMode}
+            setQuoteMode={setOppQuoteMode}
+            onBack={() => setOppDetail(null)}
+          />
+        ) : (
+          <OpportunityTab
+            lens={lens}
+            setLens={setLens}
+            oppFilter={oppFilter}
+            setOppFilter={setOppFilter}
+            marketLabel={marketLabel}
+            onOpen={(o) => setOppDetail(o)}
+          />
+        )
       ) : (
         <>
           <View style={styles.searchRow}>
             <View style={styles.searchBox}>
-              <TextInput
-                onChangeText={setSearch}
-                placeholder="搜活动、地点、主题…"
-                placeholderTextColor="#A9A2B0"
-                style={styles.searchInput}
-                value={search}
-              />
+              <TextInput onChangeText={setSearch} placeholder="搜活动、地点、主题…" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={search} />
               <Text style={styles.searchIcon}>⌕</Text>
             </View>
           </View>
           <View style={styles.lensRow}>
             {ACTIVITY_FILTERS.map((entry) => (
-              <Pressable
-                key={entry.id}
-                onPress={() => setActivityFilter(entry.id)}
-                style={[styles.lens, activityFilter === entry.id && styles.lensOn]}
-              >
+              <Pressable key={entry.id} onPress={() => setActivityFilter(entry.id)} style={[styles.lens, activityFilter === entry.id && styles.lensOn]}>
                 <Text style={[styles.lensText, activityFilter === entry.id && styles.lensTextOn]}>{entry.label}</Text>
               </Pressable>
             ))}
@@ -230,9 +237,7 @@ export function MarketSurface({
             </View>
           ) : visibleActivities.length === 0 ? (
             <View style={styles.emptyBox}>
-              <Text style={styles.emptyText}>
-                {activityFilter === "MINE" ? "还没有参加或感兴趣的活动。" : "附近暂时没有符合的活动。"}
-              </Text>
+              <Text style={styles.emptyText}>{activityFilter === "MINE" ? "还没有参加或感兴趣的活动。" : "附近暂时没有符合的活动。"}</Text>
             </View>
           ) : activityDetail ? (
             <ActivityDetail
@@ -260,279 +265,255 @@ export function MarketSurface({
   );
 }
 
-// R15.12.10：体验入口按 Creator 的身份、档期和开放对象组织；不是动态流，也不是 OTA 商品目录。
-function ExperienceTab({
-  search,
-  setSearch,
-  onOpenExperience
-}: {
-  search: string;
-  setSearch: (value: string) => void;
-  onOpenExperience: (experienceId: string) => void;
-}): React.JSX.Element {
-  const [activeFilter, setActiveFilter] = useState("本周可参加");
-  const normalizedSearch = search.trim().toLocaleLowerCase();
-  const creators = MARKET_HOSTS.filter((host) => {
-    const openExperiences = MARKET_EXPERIENCES.filter((experience) => experience.hosts.includes(host.id));
-    if (!normalizedSearch) return true;
-    return [host.name, host.topic, host.sub, ...openExperiences.flatMap((experience) => [experience.title, experience.place])]
-      .join(" ")
-      .toLocaleLowerCase()
-      .includes(normalizedSearch);
-  });
-  return (
-    <>
-      <View style={styles.searchRow}>
-        <View style={styles.searchBox}>
-          <TextInput
-            onChangeText={setSearch}
-            placeholder="搜 Creator、时间、地点、体验…"
-            placeholderTextColor="#A9A2B0"
-            style={styles.searchInput}
-            value={search}
-          />
-          <Text style={styles.searchIcon}>⌕</Text>
-        </View>
-      </View>
-      <View style={styles.lensRow}>
-        {["本周可参加", "关注", "附近", "摄影", "中文"].map((label) => (
-          <Pressable key={label} onPress={() => setActiveFilter(label)} style={[styles.lens, activeFilter === label && styles.lensOn]}>
-            <Text style={[styles.lensText, activeFilter === label && styles.lensTextOn]}>{label}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <View style={styles.creatorUtilityBar}>
-        <View style={styles.creatorUtilityCopy}>
-          <Text style={styles.creatorUtilityTitle}>按 Creator 看开放体验</Text>
-          <Text style={styles.creatorUtilitySub}>不是动态流，也不是旅游商品目录</Text>
-        </View>
-        <Text style={styles.creatorUtilityCount}>9 位可参加 · 24 个开放</Text>
-      </View>
-
-      <View style={styles.externalNote}>
-        <View style={styles.externalNoteBadge}><Text style={styles.externalNoteBadgeText}>TK</Text></View>
-        <View style={styles.externalNoteCopy}>
-          <Text style={styles.externalNoteTitle}>内容继续在 TikTok / Instagram 运营</Text>
-          <Text style={styles.externalNoteText}>Proxy 不复制 Creator Feed；这里只承接身份、档期、可参加对象、预约与后续关系。</Text>
-        </View>
-      </View>
-
-      {creators.map((creator) => (
-        <CreatorAvailabilityCard key={creator.id} creatorId={creator.id} onOpenExperience={onOpenExperience} />
-      ))}
-      {creators.length === 0 ? <Text style={styles.creatorEmpty}>没有匹配的 Creator 或开放体验。</Text> : null}
-      <Text style={styles.creatorMarketHint}>
-        Creator 是发现入口；真正的价格与 Scope 仍属于具体体验。外部内容平台负责流量，Proxy 负责把流量接到可执行的本地商业对象。
-      </Text>
-    </>
-  );
-}
-
-const CREATOR_CHANNELS: Record<string, { handle: string; followers: string; relation: string; available: string; meta: string }> = {
-  linh: { handle: "@linh.hanoi", followers: "12.4k", relation: "已关注", available: "周六可约", meta: "城市陪同 · 中文 / 越南语" },
-  mai: { handle: "@mai.frames", followers: "8.7k", relation: "新发现", available: "今天可约", meta: "摄影 Creator · 西湖" },
-  anh: { handle: "@anh.local", followers: "19.1k", relation: "已联系", available: "本周可约", meta: "本地接待 · 还剑" },
-  thao: { handle: "@thao.hn", followers: "4.8k", relation: "推荐", available: "周日可约", meta: "中文口译 · 河内 / 北宁" }
-};
-
-function CreatorAvailabilityCard({
-  creatorId,
-  onOpenExperience
-}: {
-  creatorId: string;
-  onOpenExperience: (experienceId: string) => void;
-}): React.JSX.Element {
-  const creator = marketHost(creatorId);
-  const channel = CREATOR_CHANNELS[creator.id] ?? CREATOR_CHANNELS.linh!;
-  const openExperiences = MARKET_EXPERIENCES.filter((experience) => experience.hosts.includes(creator.id));
-  const firstExperience = openExperiences[0];
-
-  return (
-    <View style={styles.creatorCard}>
-      <View style={styles.creatorTop}>
-        <View style={styles.creatorPortraitWrap}>
-          <Image resizeMode="cover" source={{ uri: creator.photo }} style={styles.creatorPortrait} />
-          <View style={styles.creatorAvailability}><Text style={styles.creatorAvailabilityText}>{channel.available}</Text></View>
-        </View>
-        <View style={styles.creatorInfo}>
-          <View style={styles.creatorNameRow}>
-            <Text style={styles.creatorName}>{creator.name}</Text>
-            <Text style={styles.creatorVerified}>✓ VERIFIED</Text>
-          </View>
-          <Text style={styles.creatorMeta}>{channel.meta}{"\n"}履约 {creator.fulfill} · 已完成 {creator.done} 次</Text>
-          <View style={styles.creatorChannelRow}>
-            <View style={styles.creatorChannel}><Text style={styles.creatorChannelMark}>TK</Text><Text style={styles.creatorChannelText}>{channel.handle} · {channel.followers}</Text></View>
-            <Text style={styles.creatorRelation}>{channel.relation}</Text>
-          </View>
-          <View style={styles.creatorActions}>
-            <Pressable accessibilityLabel={`${creator.name} 主页`} style={styles.creatorAction}><Text style={styles.creatorActionText}>主页</Text></Pressable>
-            {firstExperience ? (
-              <Pressable accessibilityLabel={`查看 ${creator.name} 开放体验`} onPress={() => onOpenExperience(firstExperience.id)} style={[styles.creatorAction, styles.creatorActionPrimary]}>
-                <Text style={[styles.creatorActionText, styles.creatorActionPrimaryText]}>看开放体验</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-      </View>
-      <View style={styles.creatorOpenHead}>
-        <Text style={styles.creatorOpenTitle}>本周开放</Text>
-        <Text style={styles.creatorOpenCount}>{openExperiences.length} 个可参加对象</Text>
-      </View>
-      <View style={styles.creatorOpenList}>
-        {openExperiences.slice(0, 2).map((experience) => (
-          <Pressable key={experience.id} onPress={() => onOpenExperience(experience.id)} style={styles.creatorOpenItem}>
-            <View style={styles.creatorOpenIcon}><ProxyMark /></View>
-            <View style={styles.creatorOpenCopy}>
-              <Text numberOfLines={1} style={styles.creatorOpenItemTitle}>{experience.title}</Text>
-              <Text numberOfLines={1} style={styles.creatorOpenItemSub}>{experience.next} · {experience.duration} · {experience.place}</Text>
-            </View>
-            <Text style={styles.creatorOpenArrow}>›</Text>
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function ProxyMark(): React.JSX.Element {
-  return <ProxyIcon color="#6840A0" name="target" size={13} />;
-}
-
-// 基线 .r162ExperienceCard：hero 图 + 类目徽章 + Host 行 + scope 元信息 + 价格。
-function ExperienceCard({ experienceId, onOpen }: { experienceId: string; onOpen: () => void }): React.JSX.Element {
-  const experience = marketExperience(experienceId);
-  const host = marketHost(experience.hosts[0] ?? "");
-  return (
-    <Pressable onPress={onOpen} style={styles.experienceCard}>
-      <View style={styles.experienceHero}>
-        <Image resizeMode="cover" source={{ uri: experience.photo }} style={styles.experienceHeroImage} />
-        <View style={styles.experienceHeroScrim} />
-        <View style={styles.experienceBadge}>
-          <Text style={styles.experienceBadgeText}>{experience.category}</Text>
-        </View>
-        <View style={styles.hostLine}>
-          <View style={styles.hostMiniAva}>
-            <Image resizeMode="cover" source={{ uri: host.photo }} style={styles.hostMiniAvaImage} />
-          </View>
-          <View style={styles.hostMiniCopy}>
-            <Text style={styles.hostMiniName}>
-              Host {host.name}
-              {experience.hosts.length > 1 ? " · 可选" : ""}
-            </Text>
-            <Text style={styles.hostMiniSub}>{experience.hosts.length} 位可选 Host</Text>
-          </View>
-        </View>
-      </View>
-      <View style={styles.experienceBody}>
-        <Text style={styles.experienceTitle}>{experience.title}</Text>
-        <Text style={styles.experienceMeta}>{experience.meta}</Text>
-        <View style={styles.experienceMetaRow}>
-          <Text style={styles.experienceMetaChip}>{experience.duration}</Text>
-          <Text style={styles.experienceMetaChip}>{experience.place}</Text>
-          <Text style={styles.experienceMetaChip}>{experience.next}</Text>
-        </View>
-        <View style={styles.experienceFoot}>
-          <Text style={styles.experienceScopeHint}>明确体验 Scope · 进入详情后选 Host</Text>
-          <View style={styles.experiencePriceBlock}>
-            <Text style={styles.experiencePrice}>{experience.price}</Text>
-            <Text style={styles.experiencePriceUnit}> / 本体验</Text>
-          </View>
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-// 机会 LIST：Search + 现在/附近/预约/远程 + 本地范围说明 + Opportunity Cards。
 function OpportunityTab({
   lens,
   setLens,
-  marketLabel
+  oppFilter,
+  setOppFilter,
+  marketLabel,
+  onOpen
 }: {
   lens: OpportunityLens;
   setLens: (lens: OpportunityLens) => void;
+  oppFilter: OpportunityFilter;
+  setOppFilter: (f: OpportunityFilter) => void;
   marketLabel: string;
+  onOpen: (o: MarketOpportunity) => void;
 }): React.JSX.Element {
-  const items = MARKET_OPPORTUNITIES.filter((o) => o.lens.includes(lens));
-  const sorted =
-    lens === "NOW" || lens === "NEARBY"
-      ? [...items].sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999))
-      : items;
+  const base = MARKET_OPPORTUNITIES.filter((o) => o.lens.includes(lens));
+  let items = [...base];
+  if (oppFilter === "NEARBY") items = items.filter((o) => o.travel != null).sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
+  if (oppFilter === "TODAY") items = items.filter((o) => o.date === "今天");
+  if (oppFilter === "FAIR") items = [...items].sort((a, b) => parseInt(a.price.replace(/\D/g, "")) - parseInt(b.price.replace(/\D/g, "")));
+  // MATCH 默认按旅行时间 / 匹配度
+  if (oppFilter === "MATCH") items = [...items].sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
   return (
     <>
+      <View style={styles.contextBar}>
+        <View style={styles.contextCopy}>
+          <Text style={styles.contextTitle}>小美 · 机会模式</Text>
+          <Text style={styles.contextSub}>公开主页正常 · 机会单向提供 · 小美主动报名</Text>
+        </View>
+        <View style={styles.contextBadge}>
+          <Text style={styles.contextBadgeText}>报名制</Text>
+        </View>
+      </View>
+
       <View style={styles.searchRow}>
         <View style={styles.searchBox}>
           <TextInput placeholder="搜机会、主题、地点…" placeholderTextColor="#A9A2B0" style={styles.searchInput} />
           <Text style={styles.searchIcon}>⌕</Text>
         </View>
       </View>
+
       <View style={styles.lensRow}>
-        {(Object.keys(OPPORTUNITY_LENS_LABEL) as OpportunityLens[]).map((id) => (
-          <Pressable key={id} onPress={() => setLens(id)} style={[styles.lens, lens === id && styles.lensOn]}>
-            <Text style={[styles.lensText, lens === id && styles.lensTextOn]}>{OPPORTUNITY_LENS_LABEL[id]}</Text>
+        {OPP_FILTERS.map((entry) => (
+          <Pressable key={entry.id} onPress={() => setOppFilter(entry.id)} style={[styles.lens, oppFilter === entry.id && styles.lensOn]}>
+            <Text style={[styles.lensText, oppFilter === entry.id && styles.lensTextOn]}>{entry.label}</Text>
           </Pressable>
         ))}
       </View>
+
+      <View style={styles.lensRowCompact}>
+        {(Object.keys(OPPORTUNITY_LENS_LABEL) as OpportunityLens[]).map((id) => (
+          <Pressable key={id} onPress={() => setLens(id)} style={[styles.lensSm, lens === id && styles.lensSmOn]}>
+            <Text style={[styles.lensSmText, lens === id && styles.lensSmTextOn]}>{OPPORTUNITY_LENS_LABEL[id]}</Text>
+          </Pressable>
+        ))}
+      </View>
+
       <View style={styles.localScope}>
         <Text style={styles.localScopeGlyph}>⌖</Text>
-        <Text style={styles.localScopeText}>
-          {lens === "REMOTE" ? "远程 · 不受通勤半径限制" : `${marketLabel} · 默认只展示可履约范围`}
-        </Text>
+        <Text style={styles.localScopeText}>{lens === "REMOTE" ? "远程 · 不受通勤限制" : `${marketLabel} · 默认只展示可履约范围 · 价格先可见`}</Text>
       </View>
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>适合你的机会</Text>
+        <Text style={styles.sectionHint}>先看价格，再决定是否回应</Text>
+      </View>
+
       <View style={styles.oppStack}>
-        {sorted.map((opportunity) => (
-          <OpportunityCard key={opportunity.id} opportunity={opportunity} />
+        {items.map((opportunity) => (
+          <R4OpportunityCard key={opportunity.id} opportunity={opportunity} onOpen={() => onOpen(opportunity)} />
         ))}
       </View>
     </>
   );
 }
 
-interface OpportunityCardProps {
-  opportunity: MarketOpportunity;
-}
-
-// 基线 .r158Opportunity：类目 mark + 时间 / 地点 / 验证 + 信号 / 应答 / 报酬。
-function OpportunityCard({ opportunity }: OpportunityCardProps): React.JSX.Element {
-  const local = opportunity.travel != null;
+// R4 卡：价格三栏（客户预算 / Proxy 公平区间 / 你的类似记录）+ tags + 匹配度 + 双按钮
+function R4OpportunityCard({ opportunity, onOpen }: { opportunity: MarketOpportunity; onOpen: () => void }): React.JSX.Element {
+  const budget = opportunity.price;
+  const fairLow = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()}₫`;
+  const fairHigh = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
+  const fair = `${fairLow} – ${fairHigh}`;
+  const mine = `约 ${budget}`;
+  const reason = opportunity.skills ? `${opportunity.skills} · ${opportunity.match} 匹配` : `${opportunity.match} 匹配`;
   return (
-    <Pressable style={styles.opportunity}>
-      <View style={styles.oppTop}>
-        <View style={styles.oppCatMark}>
-          <Text style={styles.oppCatMarkText}>{opportunity.shortTitle.slice(0, 1)}</Text>
+    <View style={styles.r4Card}>
+      <View style={styles.r4Top}>
+        <Text style={styles.r4Title}>{opportunity.title}</Text>
+        <Text style={styles.r4Budget}>{budget}</Text>
+      </View>
+      <Text style={styles.r4Meta}>{opportunity.date} {opportunity.time} · {opportunity.location} · {opportunity.owner} {opportunity.verified ? "✓已验证" : ""}</Text>
+      <View style={styles.r4PriceStrip}>
+        <View style={styles.r4PriceCell}>
+          <Text style={styles.r4PriceLabel}>客户预算</Text>
+          <Text style={styles.r4PriceValue}>{budget}</Text>
         </View>
-        <View style={styles.oppCopy}>
-          <Text style={styles.oppTitle}>{opportunity.shortTitle}</Text>
-          <Text style={styles.oppLine}>◷ {opportunity.date} {opportunity.time}</Text>
-          <Text style={styles.oppLine}>
-            ⌖ {opportunity.location}
-            {local ? ` · ${opportunity.travel}min 可达` : ""}
-          </Text>
+        <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
+          <Text style={styles.r4PriceLabel}>Proxy 公平区间</Text>
+          <Text style={styles.r4PriceValue}>{fair}</Text>
         </View>
-        {opportunity.verified ? (
-          <View style={styles.oppVerify}>
-            <Text style={styles.oppVerifyText}>✓已验证</Text>
+        <View style={styles.r4PriceCell}>
+          <Text style={styles.r4PriceLabel}>你的类似记录</Text>
+          <Text style={styles.r4PriceValue}>{mine}</Text>
+        </View>
+      </View>
+      <View style={styles.r4Tags}>
+        {opportunity.skills.split("·").slice(0, 3).map((t) => (
+          <View key={t} style={styles.r4Tag}>
+            <Text style={styles.r4TagText}>{t.trim()}</Text>
           </View>
-        ) : null}
+        ))}
+        <View style={[styles.r4Tag, opportunity.signalClass === "hot" && styles.r4TagHot]}>
+          <Text style={[styles.r4TagText, opportunity.signalClass === "hot" && styles.r4TagTextHot]}>{opportunity.signal}</Text>
+        </View>
       </View>
-      <View style={styles.oppFoot}>
-        <Text style={[styles.oppSignal, opportunity.signalClass === "hot" && styles.oppSignalHot]}>
-          {opportunity.signal}
-        </Text>
-        <Text style={styles.oppFootText}>{opportunity.responses} 应答</Text>
-        <Text style={styles.oppFootText}>报酬见详情</Text>
-        <Text style={styles.oppCount}>{opportunity.countdown} ›</Text>
+      <View style={styles.r4Match}>
+        <Text style={styles.r4MatchText}>{reason}</Text>
+        <View style={styles.r4FitBadge}>
+          <Text style={styles.r4FitText}>{opportunity.match} 匹配</Text>
+        </View>
       </View>
-    </Pressable>
+      <View style={styles.r4Actions}>
+        <Pressable style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>不感兴趣</Text>
+        </Pressable>
+        <Pressable onPress={onOpen} style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>查看 & 报价 ›</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
-interface OpportunityCardProps {
+function OpportunityDetail({
+  opportunity,
+  quoteMode,
+  setQuoteMode,
+  onBack
+}: {
   opportunity: MarketOpportunity;
+  quoteMode: "budget" | "standard" | "premium" | "custom";
+  setQuoteMode: (m: "budget" | "standard" | "premium" | "custom") => void;
+  onBack: () => void;
+}): React.JSX.Element {
+  const budget = opportunity.price;
+  const fair = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()} – ${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
+  return (
+    <View>
+      <View style={styles.detailHead}>
+        <Pressable onPress={onBack} style={styles.detailBack}>
+          <Text style={styles.detailBackText}>‹</Text>
+        </Pressable>
+        <Text style={styles.detailTitle}>机会详情</Text>
+        <Text style={styles.detailMore}>•••</Text>
+      </View>
+
+      <View style={styles.detailHero}>
+        <Text style={styles.detailHeroKicker}>OPPORTUNITY</Text>
+        <Text style={styles.detailHeroTitle}>{opportunity.title}</Text>
+        <Text style={styles.detailHeroSub}>先回答：值不值得接、条件是否公平、你能不能按自己的条件做。</Text>
+      </View>
+
+      <View style={styles.r4PriceStrip}>
+        <View style={styles.r4PriceCell}>
+          <Text style={styles.r4PriceLabel}>客户预算</Text>
+          <Text style={styles.r4PriceValue}>{budget}</Text>
+        </View>
+        <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
+          <Text style={styles.r4PriceLabel}>Proxy 建议</Text>
+          <Text style={styles.r4PriceValue}>{fair}</Text>
+        </View>
+        <View style={styles.r4PriceCell}>
+          <Text style={styles.r4PriceLabel}>你的历史</Text>
+          <Text style={styles.r4PriceValue}>约 {budget}</Text>
+        </View>
+      </View>
+
+      <View style={styles.valueBox}>
+        <View style={styles.valueHead}>
+          <Text style={styles.valueTitle}>当前预算竞争力</Text>
+          <Text style={styles.valueBadge}>中等</Text>
+        </View>
+        <View style={styles.valueBar}>
+          <View style={[styles.valueFill, { width: "68%" }]} />
+        </View>
+        <Text style={styles.valueText}>客户预算处在 Proxy 公平区间内。可以直接按建议回应，不需要先接受低价。你的最低条件仅 Agent 可见，不对客户公开。</Text>
+      </View>
+
+      <View style={styles.factGrid}>
+        <View style={styles.fact}>
+          <Text style={styles.factLabel}>时间</Text>
+          <Text style={styles.factValue}>{opportunity.date} {opportunity.time}</Text>
+        </View>
+        <View style={styles.fact}>
+          <Text style={styles.factLabel}>地点</Text>
+          <Text style={styles.factValue}>{opportunity.location}</Text>
+        </View>
+        <View style={styles.fact}>
+          <Text style={styles.factLabel}>发布方</Text>
+          <Text style={styles.factValue}>{opportunity.owner} {opportunity.verified ? "✓" : ""}</Text>
+        </View>
+        <View style={styles.fact}>
+          <Text style={styles.factLabel}>当前回应</Text>
+          <Text style={styles.factValue}>{opportunity.responses} 人</Text>
+        </View>
+      </View>
+
+      <View style={styles.aiBox}>
+        <View style={styles.aiHead}>
+          <Text style={styles.aiTitle}>Proxy · 给小美的判断</Text>
+          <Text style={styles.aiStrong}>值得考虑</Text>
+        </View>
+        <View style={styles.aiChecks}>
+          <Text style={styles.aiCheck}>✓ {opportunity.match} 匹配；你的组合满足硬条件。</Text>
+          <Text style={styles.aiCheck}>₫ 按类似履约，不建议低于预算 85% 接单。</Text>
+          <Text style={styles.aiCheck}>↗ 通勤约 {opportunity.travel ?? 20} 分钟，平台托管付款。</Text>
+        </View>
+      </View>
+
+      <View style={styles.quoteGrid}>
+        {(
+          [
+            ["budget", budget, "客户预算 · 成交更快"],
+            ["standard", fair.split("–")[0] ?? budget, "Proxy 建议 · 保持价值"],
+            ["premium", `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.25).toLocaleString()}₫`, "含更完整交付"],
+            ["custom", "自定义", "自己决定金额与范围"]
+          ] as const
+        ).map(([id, label, sub]) => (
+          <Pressable key={id} onPress={() => setQuoteMode(id)} style={[styles.quoteOption, quoteMode === id && styles.quoteOptionOn]}>
+            <Text style={styles.quotePrice}>{label}</Text>
+            <Text style={styles.quoteSub}>{sub}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={styles.r4Actions}>
+        <Pressable onPress={onBack} style={styles.r4ActionGhost}>
+          <Text style={styles.r4ActionGhostText}>返回</Text>
+        </Pressable>
+        <Pressable style={styles.r4ActionPrimary}>
+          <Text style={styles.r4ActionPrimaryText}>按我的条件回应</Text>
+        </Pressable>
+      </View>
+
+      <Text style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
+    </View>
+  );
 }
 
-// MAP：三类对象共用同一视图规则；Pin 只代表对象地点 / 区域，不代表真人实时位置。
 function MarketMap({
   tab,
   lens,
@@ -542,7 +523,7 @@ function MarketMap({
   onOpenOpportunity,
   onOpenActivity
 }: {
-  tab: MarketTab;
+  tab: "OPPORTUNITY" | "ACTIVITY";
   lens: OpportunityLens;
   remoteLens: boolean;
   marketLabel: string;
@@ -550,7 +531,6 @@ function MarketMap({
   onOpenOpportunity: (id: string) => void;
   onOpenActivity: (activity: Activity) => void;
 }): React.JSX.Element {
-  const [detailActivity, setDetailActivity] = useState<Activity | null>(null);
   const config = mapConfig(tab);
   return (
     <View style={styles.mapWrap}>
@@ -568,8 +548,7 @@ function MarketMap({
           <Pressable
             key={pin.label}
             onPress={() => {
-              if (tab === "EXPERIENCE") onOpenExperience(pin.id);
-              else if (tab === "OPPORTUNITY") onOpenOpportunity(pin.id);
+              if (tab === "OPPORTUNITY") onOpenOpportunity(pin.id);
               else onOpenActivity(pin.activity as Activity);
             }}
             style={[styles.geoPin, { left: `${pin.left}%`, top: `${pin.top}%` }]}
@@ -587,10 +566,7 @@ function MarketMap({
       </View>
       {remoteLens ? (
         <View style={styles.mapRemote}>
-          <Text style={styles.mapRemoteText}>
-            远程机会不依赖地理位置。
-            {"\n"}地图仅保留可定位的本地机会；远程机会请切回列表查看完整结果。
-          </Text>
+          <Text style={styles.mapRemoteText}>远程机会不依赖地理位置。{"\n"}地图仅保留可定位的本地机会；远程机会请切回列表查看完整结果。</Text>
         </View>
       ) : null}
       {config.results}
@@ -598,7 +574,7 @@ function MarketMap({
   );
 }
 
-function mapConfig(tab: MarketTab): {
+function mapConfig(tab: "OPPORTUNITY" | "ACTIVITY"): {
   title: string;
   sub: string;
   privacyTitle: string;
@@ -613,12 +589,7 @@ function mapConfig(tab: MarketTab): {
       sub: "河内 · 仅公开 / 粗粒度任务区域",
       privacyTitle: "任务区域",
       privacyText: "地图用于附近探索与可达性判断；具体地址仅在业务确实需要且授权后提升精度。",
-      pins: local.map((o, i) => ({
-        id: o.id,
-        label: String(i + 1),
-        left: (OPPORTUNITY_COORDS[i % OPPORTUNITY_COORDS.length] ?? [50, 50])[0],
-        top: (OPPORTUNITY_COORDS[i % OPPORTUNITY_COORDS.length] ?? [50, 50])[1]
-      })),
+      pins: local.map((o, i) => ({ id: o.id, label: String(i + 1), left: (OPPORTUNITY_COORDS[i % OPPORTUNITY_COORDS.length] ?? [50, 50])[0], top: (OPPORTUNITY_COORDS[i % OPPORTUNITY_COORDS.length] ?? [50, 50])[1] })),
       results: (
         <View>
           {local.slice(0, 2).map((o) => (
@@ -637,47 +608,25 @@ function mapConfig(tab: MarketTab): {
       )
     };
   }
-  if (tab === "ACTIVITY") {
-    return {
-      title: "活动地图",
-      sub: "公开 Activity Venue / 区域",
-      privacyTitle: "公开活动地点",
-      privacyText: "只展示 Activity 对外公开的 Venue / 区域；参与者和 Creator 的实时位置不展示。",
-      pins: [
-        { id: "photo_walk", label: "1", left: 28, top: 34 },
-        { id: "coffee_chat", label: "2", left: 66, top: 40 },
-        { id: "merchant_open", label: "3", left: 22, top: 54 },
-        { id: "proxy_meetup", label: "4", left: 54, top: 68 }
-      ],
-      results: (
-        <View>
-          {MARKET_EXPERIENCES.slice(0, 2).map((experience) => (
-            <View key={experience.id} style={styles.mapResult}>
-              <Text style={styles.mapResultTitle}>{experience.title}</Text>
-              <Text style={styles.mapResultMeta}>{experience.meta} · 已参加</Text>
-              <Pressable style={styles.mapResultBtn}>
-                <Text style={styles.mapResultBtnText}>查看活动</Text>
-              </Pressable>
-            </View>
-          ))}
-        </View>
-      )
-    };
-  }
   return {
-    title: "体验地图",
-    sub: "按公开体验地点 / Venue 展示",
-    privacyTitle: "体验地点",
-    privacyText: "地图展示 Experience 的公开地点或粗粒度区域；Host 真人实时位置不进入地图。",
-    pins: MARKET_EXPERIENCES.map((x, i) => ({ id: x.id, label: String(i + 1), left: x.coord[0], top: x.coord[1] })),
+    title: "活动地图",
+    sub: "公开 Activity Venue / 区域",
+    privacyTitle: "公开活动地点",
+    privacyText: "只展示 Activity 对外公开的 Venue / 区域；参与者和 Creator 的实时位置不展示。",
+    pins: [
+      { id: "photo_walk", label: "1", left: 28, top: 34 },
+      { id: "coffee_chat", label: "2", left: 66, top: 40 },
+      { id: "merchant_open", label: "3", left: 22, top: 54 },
+      { id: "proxy_meetup", label: "4", left: 54, top: 68 }
+    ],
     results: (
       <View>
         {MARKET_EXPERIENCES.slice(0, 2).map((experience) => (
           <View key={experience.id} style={styles.mapResult}>
             <Text style={styles.mapResultTitle}>{experience.title}</Text>
-            <Text style={styles.mapResultMeta}>{experience.meta} · {experience.price}</Text>
+            <Text style={styles.mapResultMeta}>{experience.meta} · 已参加</Text>
             <Pressable style={styles.mapResultBtn}>
-              <Text style={styles.mapResultBtnText}>查看体验</Text>
+              <Text style={styles.mapResultBtnText}>查看活动</Text>
             </Pressable>
           </View>
         ))}
@@ -689,378 +638,131 @@ function mapConfig(tab: MarketTab): {
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 18, paddingTop: 10 },
-
-  // 基线 .r157MarketHead：space-between align-end margin 4 0 8。
   marketHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginVertical: 4 },
   marketTitle: { color: color.ink, fontSize: 30, fontWeight: "800", lineHeight: 36 },
   marketSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
   headActions: { alignItems: "center", flexDirection: "row", gap: 6 },
-  viewToggle: {
-    alignItems: "center",
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 11,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: "center",
-    width: 44,
-    ...shadows.card
-  },
+  viewToggle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1, height: 44, justifyContent: "center", width: 44, ...shadows.card },
   viewToggleOn: { backgroundColor: color.ink, borderColor: color.ink },
   viewToggleText: { color: color.ink, fontSize: 15, fontWeight: "800" },
   viewToggleTextOn: { color: color.white },
-  plusBtn: {
-    alignItems: "center",
-    backgroundColor: color.ink,
-    borderRadius: 13,
-    height: 44,
-    justifyContent: "center",
-    width: 44
-  },
+  plusBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 44, justifyContent: "center", width: 44 },
   plusBtnText: { color: color.white, fontSize: 22, fontWeight: "700" },
-
-  // 基线 .r162Tabs：3 列 surface 底 + 白激活胶囊。
-  tabs: {
-    backgroundColor: color.surface,
-    borderRadius: 14,
-    flexDirection: "row",
-    gap: 5,
-    marginVertical: 8,
-    padding: 4
-  },
+  tabs: { backgroundColor: color.surface, borderRadius: 14, flexDirection: "row", gap: 5, marginVertical: 8, padding: 4 },
   tab: { borderRadius: 11, flex: 1, minHeight: 44, justifyContent: "center", paddingVertical: 9 },
   tabOn: { backgroundColor: color.white, ...shadows.card },
   tabText: { color: color.muted, fontSize: 14, fontWeight: "800", textAlign: "center" },
   tabTextOn: { color: color.ink },
-
   oppStack: { marginTop: 4 },
-
   searchRow: { marginTop: 6 },
-  searchBox: {
-    alignItems: "center",
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 13,
-    borderWidth: 1,
-    flexDirection: "row",
-    overflow: "hidden"
-  },
+  searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flexDirection: "row", overflow: "hidden" },
   searchInput: { flex: 1, fontSize: 14, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10 },
   searchIcon: { color: color.ink, fontSize: 15, paddingHorizontal: 10 },
-
-  // 基线 .r158Lens：横向胶囊，on = ink 底白字。
   lensRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginVertical: 7 },
-  lens: {
-    alignItems: "center",
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 999,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 44,
-    paddingHorizontal: 13,
-    paddingVertical: 8
-  },
+  lensRowCompact: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginBottom: 6 },
+  lens: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 13, paddingVertical: 8 },
   lensOn: { backgroundColor: color.ink, borderColor: color.ink },
   lensText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   lensTextOn: { color: color.white },
-
-  localScope: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 5,
-    marginVertical: 2,
-    paddingHorizontal: 1
-  },
+  lensSm: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  lensSmOn: { backgroundColor: color.ink, borderColor: color.ink },
+  lensSmText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  lensSmTextOn: { color: color.white },
+  localScope: { alignItems: "center", flexDirection: "row", gap: 5, marginVertical: 2, paddingHorizontal: 1 },
   localScopeGlyph: { color: color.violet, fontSize: 11 },
   localScopeText: { color: color.muted, fontSize: 11 },
-
   sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginVertical: 8 },
   sectionTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
   sectionHint: { color: color.muted, fontSize: 11 },
-
-  // 体验卡：.r162ExperienceCard radius 18 overflow hidden。
-  experienceCard: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 18,
-    borderWidth: 1,
-    marginVertical: 9,
-    overflow: "hidden",
-    ...shadows.card
-  },
-  experienceHero: { height: 118, position: "relative" },
-  experienceHeroImage: { height: "100%", width: "100%" },
-  experienceHeroScrim: {
-    backgroundColor: "rgba(18,15,24,0.32)",
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: "40%"
-  },
-  experienceBadge: {
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderRadius: 999,
-    left: 10,
-    paddingHorizontal: 7,
-    paddingVertical: 5,
-    position: "absolute",
-    top: 9
-  },
-  experienceBadgeText: { color: color.ink, fontSize: 11, fontWeight: "900" },
-  hostLine: {
-    alignItems: "center",
-    bottom: 9,
-    flexDirection: "row",
-    gap: 7,
-    left: 10,
-    position: "absolute",
-    right: 10
-  },
-  hostMiniAva: {
-    borderColor: color.white,
-    borderRadius: 999,
-    borderWidth: 2,
-    height: 24,
-    overflow: "hidden",
-    width: 24
-  },
-  hostMiniAvaImage: { height: "100%", width: "100%" },
-  hostMiniCopy: { flex: 1 },
-  hostMiniName: { color: color.white, fontSize: 11, fontWeight: "700" },
-  hostMiniSub: { color: "rgba(255,255,255,0.9)", fontSize: 11, marginTop: 1 },
-  experienceBody: { padding: 11 },
-  experienceTitle: { color: color.ink, fontSize: 13, fontWeight: "700" },
-  experienceMeta: { color: color.muted, fontSize: 11, marginTop: 3 },
-  experienceMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
-  experienceMetaChip: {
-    backgroundColor: color.surface,
-    borderRadius: 999,
-    color: "#5E5665",
-    fontSize: 11,
-    overflow: "hidden",
-    paddingHorizontal: 7,
-    paddingVertical: 4
-  },
-  experienceFoot: { alignItems: "flex-end", borderTopColor: "#F1EDF3", borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 10, paddingTop: 8 },
-  experienceScopeHint: { color: color.muted, fontSize: 11, flex: 1 },
-  experiencePriceBlock: { flexDirection: "row", alignItems: "flex-end" },
-  experiencePrice: { color: color.ink, fontSize: 15, fontWeight: "900" },
-  experiencePriceUnit: { color: color.muted, fontSize: 11, marginBottom: 1 },
-
-  // R15.12.10 .r165*：Creator Availability 的体验发现入口。
-  creatorUtilityBar: {
-    alignItems: "center",
-    backgroundColor: "#F7F3FA",
-    borderRadius: 13,
-    flexDirection: "row",
-    gap: 9,
-    marginTop: 2,
-    paddingHorizontal: 10,
-    paddingVertical: 9
-  },
-  creatorUtilityCopy: { flex: 1 },
-  creatorUtilityTitle: { color: color.ink, fontSize: 11, fontWeight: "900" },
-  creatorUtilitySub: { color: color.muted, fontSize: 11, marginTop: 2 },
-  creatorUtilityCount: { color: "#604D72", fontSize: 11, fontWeight: "800", textAlign: "right" },
-  externalNote: {
-    alignItems: "flex-start",
-    backgroundColor: "#FBF8FF",
-    borderColor: "#E7DCF4",
-    borderRadius: 13,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 7,
-    marginVertical: 8,
-    padding: 9
-  },
-  externalNoteBadge: { alignItems: "center", backgroundColor: "#18151D", borderRadius: 7, height: 22, justifyContent: "center", width: 22 },
-  externalNoteBadgeText: { color: color.white, fontSize: 11, fontWeight: "900" },
-  externalNoteCopy: { flex: 1 },
-  externalNoteTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  externalNoteText: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
-  creatorCard: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 18,
-    borderWidth: 1,
-    marginVertical: 5,
-    padding: 10,
-    ...shadows.card
-  },
-  creatorTop: { flexDirection: "row", gap: 10 },
-  creatorPortraitWrap: { borderRadius: 14, height: 86, overflow: "hidden", position: "relative", width: 72 },
-  creatorPortrait: { height: "100%", width: "100%" },
-  creatorAvailability: { backgroundColor: "rgba(20,18,31,0.78)", borderRadius: 999, bottom: 7, left: 7, paddingHorizontal: 6, paddingVertical: 4, position: "absolute" },
-  creatorAvailabilityText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  creatorInfo: { flex: 1, minWidth: 0 },
-  creatorNameRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 5 },
-  creatorName: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  creatorVerified: { backgroundColor: "#F0E9F8", borderRadius: 999, color: "#6334A3", fontSize: 11, fontWeight: "900", overflow: "hidden", paddingHorizontal: 4, paddingVertical: 3 },
-  creatorMeta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 3 },
-  creatorChannelRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 7 },
-  creatorChannel: { alignItems: "center", backgroundColor: "#17131F", borderRadius: 999, flexDirection: "row", gap: 4, paddingHorizontal: 7, paddingVertical: 5 },
-  creatorChannelMark: { backgroundColor: color.white, borderRadius: 4, color: "#17131F", fontSize: 11, fontWeight: "900", overflow: "hidden", paddingHorizontal: 3, paddingVertical: 1 },
-  creatorChannelText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  creatorRelation: { backgroundColor: "#F5F1F7", borderRadius: 999, color: "#6A616E", fontSize: 11, overflow: "hidden", paddingHorizontal: 7, paddingVertical: 5 },
-  creatorActions: { flexDirection: "row", gap: 6, marginTop: "auto", paddingTop: 7 },
-  creatorAction: { backgroundColor: color.white, borderColor: "#E4DDE8", borderRadius: 9, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 6 },
-  creatorActionPrimary: { backgroundColor: color.ink, borderColor: color.ink },
-  creatorActionText: { color: "#5F5663", fontSize: 11, fontWeight: "800" },
-  creatorActionPrimaryText: { color: color.white },
-  creatorOpenHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginHorizontal: 1, marginTop: 9, marginBottom: 5 },
-  creatorOpenTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  creatorOpenCount: { color: color.muted, fontSize: 11 },
-  creatorOpenList: { gap: 5 },
-  creatorOpenItem: { alignItems: "center", backgroundColor: "#FAF8FB", borderColor: "#ECE6EF", borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 7, paddingHorizontal: 8, paddingVertical: 7 },
-  creatorOpenIcon: { alignItems: "center", backgroundColor: "#F0E8F8", borderRadius: 8, height: 25, justifyContent: "center", width: 25 },
-  creatorOpenCopy: { flex: 1, minWidth: 0 },
-  creatorOpenItemTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  creatorOpenItemSub: { color: color.muted, fontSize: 11, marginTop: 2 },
-  creatorOpenArrow: { color: "#A79EAA", fontSize: 15 },
-  creatorEmpty: { color: color.muted, fontSize: 11, paddingVertical: 18, textAlign: "center" },
-  creatorMarketHint: { color: "#958C99", fontSize: 11, lineHeight: 15, paddingHorizontal: 8, paddingTop: 8, textAlign: "center" },
-
-  // 机会卡：.r158Opportunity。
-  opportunity: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginVertical: 4,
-    padding: 11,
-    ...shadows.card
-  },
-  oppTop: { alignItems: "flex-start", flexDirection: "row", gap: 9 },
-  oppCatMark: {
-    alignItems: "center",
-    backgroundColor: "#F1EAFE",
-    borderRadius: 12,
-    height: 40,
-    justifyContent: "center",
-    width: 40
-  },
-  oppCatMarkText: { color: "#5B2CB5", fontSize: 14, fontWeight: "900" },
-  oppCopy: { flex: 1, minWidth: 0 },
-  oppTitle: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  oppLine: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
-  oppVerify: { backgroundColor: "#EAF8F4", borderRadius: 999, paddingHorizontal: 6, paddingVertical: 4 },
-  oppVerifyText: { color: "#137C6C", fontSize: 11, fontWeight: "900" },
-  oppFoot: { alignItems: "center", borderTopColor: "#F1EDF3", borderTopWidth: 1, flexDirection: "row", gap: 8, marginTop: 9, paddingTop: 8 },
-  oppSignal: {
-    backgroundColor: "#F3EEFA",
-    borderRadius: 999,
-    color: "#5B2CB5",
-    fontSize: 11,
-    fontWeight: "900",
-    paddingHorizontal: 6,
-    paddingVertical: 4
-  },
-  oppSignalHot: { backgroundColor: "#FFF0F6", color: "#B91451" },
-  oppFootText: { color: color.muted, fontSize: 11 },
-  oppCount: { color: color.ink, fontSize: 11, fontWeight: "900", marginLeft: "auto" },
-
-  // 活动空态 / 加载态。
+  // R4 世代的上下文条
+  contextBar: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 8, paddingHorizontal: 11, paddingVertical: 10 },
+  contextCopy: { flex: 1 },
+  contextTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  contextSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  contextBadge: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
+  contextBadgeText: { color: "#5B2CB5", fontSize: 11, fontWeight: "800" },
+  // R4 机会卡
+  r4Card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, marginVertical: 5, padding: 12, ...shadows.card },
+  r4Top: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
+  r4Title: { color: color.ink, flex: 1, fontSize: 12, fontWeight: "800", lineHeight: 17 },
+  r4Budget: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  r4Meta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
+  r4PriceStrip: { flexDirection: "row", gap: 6, marginTop: 8 },
+  r4PriceCell: { backgroundColor: color.surface, borderRadius: 10, flex: 1, padding: 8 },
+  r4PriceCellHot: { backgroundColor: "#FFF2C7" },
+  r4PriceLabel: { color: color.muted, fontSize: 11 },
+  r4PriceValue: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 2 },
+  r4Tags: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
+  r4Tag: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
+  r4TagHot: { backgroundColor: "#FFF0F6" },
+  r4TagText: { color: "#5E5665", fontSize: 11 },
+  r4TagTextHot: { color: "#B91451", fontWeight: "800" },
+  r4Match: { alignItems: "center", borderTopColor: "#F1EDF3", borderTopWidth: 1, flexDirection: "row", gap: 8, justifyContent: "space-between", marginTop: 9, paddingTop: 8 },
+  r4MatchText: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 15 },
+  r4FitBadge: { backgroundColor: "#FFF0F6", borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
+  r4FitText: { color: "#B91451", fontSize: 11, fontWeight: "800" },
+  r4Actions: { flexDirection: "row", gap: 7, marginTop: 9 },
+  r4ActionGhost: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 40 },
+  r4ActionGhostText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  r4ActionPrimary: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, flex: 1, justifyContent: "center", minHeight: 40 },
+  r4ActionPrimaryText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  // 详情
+  detailHead: { alignItems: "center", flexDirection: "row", gap: 4, marginBottom: 8 },
+  detailBack: { paddingHorizontal: 6, paddingVertical: 4 },
+  detailBackText: { color: color.ink, fontSize: 22, fontWeight: "700" },
+  detailTitle: { color: color.ink, flex: 1, fontSize: 16, fontWeight: "800" },
+  detailMore: { color: color.muted, fontSize: 16 },
+  detailHero: { backgroundColor: color.ink, borderRadius: 18, marginBottom: 10, padding: 14 },
+  detailHeroKicker: { color: "#CDC8BF", fontSize: 11, fontWeight: "800" },
+  detailHeroTitle: { color: color.white, fontSize: 18, fontWeight: "800", lineHeight: 24, marginTop: 4 },
+  detailHeroSub: { color: "#D8D4CA", fontSize: 11, lineHeight: 16, marginTop: 6 },
+  valueBox: { backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 10 },
+  valueHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  valueTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  valueBadge: { backgroundColor: "#FFF2C7", borderRadius: 999, color: "#7A5B00", fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4 },
+  valueBar: { backgroundColor: "#EEEAF1", borderRadius: 999, height: 8, marginVertical: 7, overflow: "hidden" },
+  valueFill: { backgroundColor: color.magenta, borderRadius: 999, height: "100%" },
+  valueText: { color: color.muted, fontSize: 11, lineHeight: 15 },
+  factGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  fact: { backgroundColor: color.surface, borderRadius: 10, flexBasis: "48%", flexGrow: 1, padding: 8 },
+  factLabel: { color: color.muted, fontSize: 11 },
+  factValue: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  aiBox: { backgroundColor: "#F1EAFE", borderColor: "#E6DBF8", borderRadius: 15, borderWidth: 1, marginTop: 10, padding: 10 },
+  aiHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  aiTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  aiStrong: { color: "#5B2CB5", fontSize: 11, fontWeight: "800" },
+  aiChecks: { gap: 4, marginTop: 7 },
+  aiCheck: { color: "#3E2E5A", fontSize: 11, lineHeight: 15 },
+  quoteGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 10 },
+  quoteOption: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexBasis: "48%", flexGrow: 1, padding: 9 },
+  quoteOptionOn: { backgroundColor: "#FFF0F6", borderColor: color.magenta },
+  quotePrice: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  quoteSub: { color: color.muted, fontSize: 11, marginTop: 2 },
+  detailHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 10, textAlign: "center" },
   emptyBox: { alignItems: "center", borderColor: "#D9D0DE", borderRadius: 17, borderStyle: "dashed", borderWidth: 1, gap: 8, marginTop: 12, padding: 22 },
   emptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   retryBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   retryText: { color: color.white, fontSize: 11, fontWeight: "700" },
-
-  // Host / Creator 可参与 flag：.r162ActivityFlag。
   hostFlag: { marginHorizontal: 12, marginTop: -4, marginBottom: 7 },
-  hostFlagText: {
-    backgroundColor: "#F3EEFA",
-    borderRadius: 999,
-    color: "#633B99",
-    fontSize: 11,
-    fontWeight: "900",
-    overflow: "hidden",
-    paddingHorizontal: 6,
-    paddingVertical: 4
-  },
-
-  // MAP：.geoMap / .geoPin / .geoPrivacy。
+  hostFlagText: { backgroundColor: "#F3EEFA", borderRadius: 999, color: "#633B99", fontSize: 11, fontWeight: "900", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 4 },
   mapWrap: { marginVertical: 9 },
   mapLegend: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
   mapLegendTitle: { color: color.ink, fontSize: 11, fontWeight: "700" },
   mapLegendSub: { color: color.muted, fontSize: 11, textAlign: "right" },
-  geoMap: {
-    backgroundColor: "#F7F5F8",
-    borderColor: color.line,
-    borderRadius: 19,
-    borderWidth: 1,
-    height: 330,
-    marginVertical: 8,
-    overflow: "hidden",
-    position: "relative"
-  },
-  geoDistrict: {
-    backgroundColor: "rgba(255,255,255,0.78)",
-    borderRadius: 8,
-    color: "#8E8595",
-    fontSize: 11,
-    fontWeight: "900",
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    position: "absolute"
-  },
-  geoPin: {
-    alignItems: "center",
-    backgroundColor: "#0B7A73",
-    borderColor: color.white,
-    borderRadius: 999,
-    borderWidth: 2,
-    height: 31,
-    justifyContent: "center",
-    minWidth: 31,
-    paddingHorizontal: 7,
-    position: "absolute",
-    transform: [{ translateX: -15.5 }, { translateY: -15.5 }]
-  },
+  geoMap: { backgroundColor: "#F7F5F8", borderColor: color.line, borderRadius: 19, borderWidth: 1, height: 330, marginVertical: 8, overflow: "hidden", position: "relative" },
+  geoDistrict: { backgroundColor: "rgba(255,255,255,0.78)", borderRadius: 8, color: "#8E8595", fontSize: 11, fontWeight: "900", paddingHorizontal: 6, paddingVertical: 4, position: "absolute" },
+  geoPin: { alignItems: "center", backgroundColor: "#0B7A73", borderColor: color.white, borderRadius: 999, borderWidth: 2, height: 31, justifyContent: "center", minWidth: 31, paddingHorizontal: 7, position: "absolute", transform: [{ translateX: -15.5 }, { translateY: -15.5 }] },
   geoPinText: { color: color.white, fontSize: 11, fontWeight: "900" },
-  geoPrivacy: {
-    alignItems: "flex-start",
-    backgroundColor: "#FFF8DF",
-    borderColor: "#F0DA85",
-    borderRadius: 13,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 7,
-    marginVertical: 7,
-    padding: 9
-  },
+  geoPrivacy: { alignItems: "flex-start", backgroundColor: "#FFF8DF", borderColor: "#F0DA85", borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 7, marginVertical: 7, padding: 9 },
   geoPrivacyGlyph: { color: color.ink, fontSize: 12 },
   geoPrivacyCopy: { flex: 1 },
   geoPrivacyTitle: { color: color.ink, fontSize: 11, fontWeight: "700" },
   geoPrivacyText: { color: "#78672F", fontSize: 11, lineHeight: 15, marginTop: 2 },
-  mapRemote: {
-    backgroundColor: "#F7F4FA",
-    borderColor: "#D8CFDE",
-    borderRadius: 13,
-    borderStyle: "dashed",
-    borderWidth: 1,
-    marginTop: 8,
-    padding: 10
-  },
+  mapRemote: { backgroundColor: "#F7F4FA", borderColor: "#D8CFDE", borderRadius: 13, borderStyle: "dashed", borderWidth: 1, marginTop: 8, padding: 10 },
   mapRemoteText: { color: color.muted, fontSize: 11, lineHeight: 15 },
-  mapResult: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 15,
-    borderWidth: 1,
-    marginTop: 8,
-    padding: 10
-  },
+  mapResult: { backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, marginTop: 8, padding: 10 },
   mapResultTitle: { color: color.ink, fontSize: 11, fontWeight: "700" },
   mapResultMeta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 3 },
-  mapResultBtn: {
-    alignSelf: "flex-start",
-    backgroundColor: color.ink,
-    borderRadius: 10,
-    marginTop: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7
-  },
+  mapResultBtn: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 10, marginTop: 8, paddingHorizontal: 10, paddingVertical: 7 },
   mapResultBtnText: { color: color.white, fontSize: 11, fontWeight: "800" }
 });

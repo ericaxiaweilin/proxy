@@ -1,9 +1,8 @@
 // App Shell：RootNav 五标签 首页 / 市场 / 动态 / 消息 / 我的。
-// R15.12.7 冻结：Market = 体验 / 机会 / 活动；第二 Tab 对全部身份固定「市场」。
+// R4 (2026-08-24)：Market = 机会 / 活动；移除体验上架，机会单向由客户发布、小美报名。
+// EXPERIENCE 仅作历史路由别名，新 UI 不展示体验货架。
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
-// 找人、接机会、开放能力、发活动都是行为，不是另一种身份。
-// 导航预算 target 2 / max 5：Surface 之间用内部 state 切换，不引入 react-navigation。
-// 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（.header.root / .bottom 悬浮胶囊导航）。
+// 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
 import { useCallback, useEffect, useState } from "react";
 import { AppState, Image, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -85,7 +84,7 @@ export function AppShell({
   const [marketEntry, setMarketEntry] = useState<{
     tab: MarketTab;
     viewMode: MarketViewMode;
-  }>({ tab: "EXPERIENCE", viewMode: "LIST" });
+  }>({ tab: "OPPORTUNITY", viewMode: "LIST" });
   const [openExperience, setOpenExperience] = useState<string>();
   const [experienceManifest, setExperienceManifest] =
     useState<ExperienceManifest>();
@@ -135,7 +134,7 @@ export function AppShell({
 
   function selectTab(next: RootTab): void {
     if (next === "MARKET") {
-      setMarketEntry({ tab: "EXPERIENCE", viewMode: "LIST" });
+      setMarketEntry({ tab: "OPPORTUNITY", viewMode: "LIST" });
       setOpenExperience(undefined);
     }
     if (next === "FEED") {
