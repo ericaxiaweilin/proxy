@@ -13,6 +13,10 @@ export interface Status {
   location?: string;
 }
 
+function lifespanHours(status: Status): number {
+  return Math.max(1, Math.round((status.expiresAt - status.createdAt) / 3600_000));
+}
+
 const MOCK_STATUSES: Status[] = [
   { id: "s_xiaomei", author: "小美", body: "周六下午想去西湖拍照 ☕️ 有一起的吗", createdAt: Date.now() - 2 * 3600_000, expiresAt: Date.now() + 22 * 3600_000, location: "西湖" },
   { id: "s_huyen", author: "Huyen", body: "今晚想喝咖啡，有人一起找好看的店互相拍照吗", createdAt: Date.now() - 5 * 3600_000, expiresAt: Date.now() + 19 * 3600_000, location: "还剑" },
@@ -59,6 +63,8 @@ export function StatusFeed({ onReply }: { onReply?: (author: string) => void }):
   return (
     <View>
       <View style={styles.composer}>
+        <Text style={styles.composerTitle}>24/48 小时临时广播</Text>
+        <Text style={styles.composerDescription}>发布临时想法、计划或可用时间；不进入永久主页，别人回复时转入私信。</Text>
         <TextInput value={draft} onChangeText={setDraft} placeholder="发个临时状态… 24h 后自动归档（不进永久主页）" placeholderTextColor={color.muted} style={styles.input} multiline maxLength={140} />
         <View style={styles.composerRow}>
           <TextInput value={location} onChangeText={setLocation} placeholder="地点（选填）" placeholderTextColor={color.muted} style={styles.locationInput} />
@@ -73,7 +79,7 @@ export function StatusFeed({ onReply }: { onReply?: (author: string) => void }):
             <Text style={styles.postBtnText}>发布</Text>
           </Pressable>
         </View>
-        <Text style={styles.composerHint}>小美示例：周六下午想去西湖拍照 ☕️ — 状态本身产生机会，无需挂牌</Text>
+        <Text style={styles.composerHint}>示例：周六下午想去西湖拍照 ☕️。系统可据此推荐相关的人、活动或机会，但不会自动创建订单。</Text>
       </View>
 
       <View style={styles.sectionHead}>
@@ -95,7 +101,7 @@ export function StatusFeed({ onReply }: { onReply?: (author: string) => void }):
               </Text>
             </View>
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>24h</Text>
+              <Text style={styles.badgeText}>{lifespanHours(s)}h</Text>
             </View>
           </View>
           <Text style={styles.body}>{s.body}</Text>
@@ -113,6 +119,8 @@ export function StatusFeed({ onReply }: { onReply?: (author: string) => void }):
 
 const styles = StyleSheet.create({
   composer: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginBottom: 10, padding: 10, ...shadows.card },
+  composerTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  composerDescription: { color: color.muted, fontSize: 11, lineHeight: 16, marginBottom: 7, marginTop: 2 },
   input: { color: color.ink, fontSize: 11, lineHeight: 16, minHeight: 44, textAlignVertical: "top" },
   composerRow: { alignItems: "center", flexDirection: "row", gap: 6, marginTop: 8 },
   locationInput: { backgroundColor: color.surface, borderRadius: 999, color: color.ink, flex: 1, fontSize: 11, paddingHorizontal: 10, paddingVertical: 6 },

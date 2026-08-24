@@ -30,8 +30,8 @@ describe("composer media state", () => {
     ]);
   });
 
-  it("restores an interrupted upload as retryable instead of successful", () => {
-    const uploading = { ...createDraftMedia(image, "a"), status: "UPLOADING" as const };
-    expect(normalizeRestoredDraftMedia([uploading])[0]).toMatchObject({ status: "FAILED", error: "上传在后台中断，请重试" });
+  it("restores an interrupted upload as resumable instead of successful", () => {
+    const uploading = { ...createDraftMedia(image, "a"), status: "UPLOADING" as const, uploadSession: { mediaAssetId: "ma_a", storageKey: "a.jpg", uploadUrl: "/upload/a", offset: 25, totalBytes: 100 } };
+    expect(normalizeRestoredDraftMedia([uploading])[0]).toMatchObject({ status: "PAUSED", progress: 0.25, error: "上传已暂停，点击发布即可续传" });
   });
 });

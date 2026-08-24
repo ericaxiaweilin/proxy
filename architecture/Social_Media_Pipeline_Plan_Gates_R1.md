@@ -12,7 +12,7 @@ Owner：Social / Media Platform
 1. 用户选中的原始文件只上传一次、不可被派生处理覆盖；
 2. Feed、详情、分享预览和全屏查看使用不同用途的受控派生资源；
 3. 单图默认不裁脸、不裁身体；极端比例仍能完整查看；
-4. 2–6 个媒体保持作者顺序，使用稳定横向 Media Rail，不做九宫格；
+4. 2–6 个媒体保持作者顺序：2/3/5 使用稳定横向 Media Rail，4/6 使用两列照片墙；
 5. 点击后以原比例高清查看，支持缩放、翻页、返回原位置；
 6. 帖子 Link 可复制、系统分享、打开 App，并能在未安装时回落到 Web；
 7. PRIVATE、FOLLOWERS、REMOVED、审核中内容不能因分享链接泄露；
@@ -148,11 +148,50 @@ URL 可以是短期签名 URL 或同源受控路由；稳定身份永远是 `med
 
 ### 5.2 多图
 
-- 2–6 个媒体使用稳定高度的横向 Adaptive Media Rail。
+- 2/3/5 个媒体使用稳定高度的横向 Adaptive Media Rail。
+- 4/6 个媒体使用两列照片墙（2×2 / 2×3）；点击任意格仍进入同一 Gallery 顺序。
+- 单图始终使用内容区最大可用宽度，并在安全比例内按原比例展示。
 - 按 `sortOrder` 显示，下一张露出一部分。
 - Rail 预览允许 `cover`，但点击后必须回到完整 Gallery。
 - 图片和普通视频共用容器与 index，不拆成两套顺序。
 - 删除、重试一个媒体不能改变其它媒体 ID 和顺序。
+
+### 5.2.2 人像、物品、广告与混合内容
+
+数量只决定集合形态，内容语义决定每个格子的填充方式。语义分析属于媒体 Worker，不放在 App 中硬编码：
+
+```text
+MediaCompositionHint
+  subjectType: PERSON | PRODUCT | TEXT_HEAVY | SCENE | UNKNOWN
+  subjectCount
+  faceBoxes[]
+  bodyBoxes[]
+  textSafeArea?
+  focalPoint?
+  safeCropRect?
+  confidence
+  recipeVersion
+```
+
+首版回落矩阵：
+
+| 内容 | 有可靠服务端 Hint | 无 Hint / 低置信度 |
+|---|---|---|
+| 单人半身/全身 | safeCropRect cover；若身体不完整则 contain | 仅按宽高比判断，宁可 contain 不裁头脚 |
+| 多人合照 | 所有人脸联合安全区 cover | contain |
+| 商品 | 主商品框完整时 cover | contain，避免裁掉商品边缘 |
+| 文字广告/海报 | textSafeArea 完整时 cover | contain，保证文字可读 |
+| 人像 + 商品 | 人体框与商品框联合安全区 | contain |
+| 人像 + 海报 | 人脸/身体/文字安全区联合 | contain |
+| 场景/风景 | focalPoint cover | 宽高比接近时 cover，否则 contain |
+
+不变量：
+
+- `subjectType` 只能影响预览构图，不能决定审核、可见性或交易含义；
+- 低置信度必须回落到完整展示，不能冒险中心裁切；
+- Gallery 永远恢复完整 GALLERY/ORIGINAL 构图；
+- Worker 的 Hint 必须带 `recipeVersion`，客户端只消费合同，不复制检测逻辑；
+- 作者可在发帖器中调整顺序；后续 Gate 增加“调整预览焦点”，但不得修改原文件。
 
 ### 5.2.1 人像混合组图（P0 核心 Case）
 

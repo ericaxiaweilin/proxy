@@ -5,7 +5,7 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, AppState, Image, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, AppState, Image, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -18,7 +18,7 @@ import { type MediaClient } from "../media-client";
 import { createDraftMedia, draftMediaDragTarget, draftMediaRefs, mediaStatusLabel, moveDraftMedia, normalizeRestoredDraftMedia, pendingDraftMedia, type DraftMediaItem } from "../composer-media";
 import { clearComposerDraft, readComposerDraft, retainComposerImage, writeComposerDraft } from "../expo-composer-draft-store";
 import { isOpportunityPost, mergeFeedContent } from "../feed-content";
-import { mediaAspect, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
+import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
@@ -117,6 +117,7 @@ function ComposerMediaCard({
   onAltText,
   onCancel,
   onMove,
+  onPause,
   onRemove,
   onReplace
 }: {
@@ -127,6 +128,7 @@ function ComposerMediaCard({
   onAltText: (altText: string) => void;
   onCancel: () => void;
   onMove: (from: number, to: number) => void;
+  onPause: () => void;
   onRemove: () => void;
   onReplace: () => void;
 }): React.JSX.Element {
@@ -182,9 +184,14 @@ function ComposerMediaCard({
           <Text style={[styles.composerMediaAction, index === itemCount - 1 && styles.disabledText]}>后移</Text>
         </Pressable>
         {item.status === "UPLOADING" ? (
-          <Pressable onPress={onCancel}>
-            <Text style={styles.composerMediaRemove}>取消</Text>
-          </Pressable>
+          <>
+            <Pressable onPress={onPause}>
+              <Text style={styles.composerMediaAction}>暂停</Text>
+            </Pressable>
+            <Pressable onPress={onCancel}>
+              <Text style={styles.composerMediaRemove}>取消</Text>
+            </Pressable>
+          </>
         ) : (
           <Pressable disabled={publishing} onPress={onReplace}>
             <Text style={styles.composerMediaAction}>替换</Text>
@@ -206,6 +213,7 @@ export function FeedSurface({
   engagement,
   onOpenChat,
   onOpenFeedPrefs,
+  onChromeVisibilityChange,
   refreshTrigger
 }: {
   localNet: LocalNetClient;
@@ -214,6 +222,7 @@ export function FeedSurface({
   engagement: EngagementClient;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
+  onChromeVisibilityChange?: (visible: boolean) => void;
   refreshTrigger?: number;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>("RECOMMENDED");
@@ -227,8 +236,13 @@ export function FeedSurface({
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
   const [engagementError, setEngagementError] = useState<string>();
+  const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [replying, setReplying] = useState(false);
   // 发布器状态（X 式 compose）
   const [composerOpen, setComposerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [draft, setDraft] = useState(cachedComposerDraft);
   const [draftMedia, setDraftMedia] = useState<DraftMediaItem[]>([]);
   const [draftVisibility, setDraftVisibility] = useState<"PUBLIC" | "FOLLOWERS">("PUBLIC");
@@ -238,6 +252,7 @@ export function FeedSurface({
   const [publishing, setPublishing] = useState(false);
   const publishingRef = useRef(false);
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const uploadActionsRef = useRef<Map<string, "PAUSE" | "CANCEL">>(new Map());
   const draftMediaSequenceRef = useRef(0);
   const publishIdempotencyRef = useRef<string | undefined>(undefined);
   const draftRestoredRef = useRef(false);
@@ -261,6 +276,8 @@ export function FeedSurface({
   const [pendingMedia, setPendingMedia] = useState<Record<string, FeedMediaItem[]>>({});
   const scrollRef = useRef<ScrollView>(null);
   const lastScrollYRef = useRef(0);
+  const scrollDirectionDistanceRef = useRef(0);
+  const chromeVisibleRef = useRef(true);
   const postIdsRef = useRef<Set<string>>(cachedPostIds);
 
   useEffect(() => {
@@ -337,13 +354,37 @@ export function FeedSurface({
     setScrollY(nextY);
     if (nextY <= 48) {
       setStickyHeaderVisible(false);
-    } else if (delta < -3) {
-      setStickyHeaderVisible(true);
-    } else if (delta > 3) {
-      setStickyHeaderVisible(false);
+      scrollDirectionDistanceRef.current = 0;
+      if (!chromeVisibleRef.current) {
+        chromeVisibleRef.current = true;
+        onChromeVisibilityChange?.(true);
+      }
+    } else if (Math.abs(delta) >= 1) {
+      const previousDirection = Math.sign(scrollDirectionDistanceRef.current);
+      const nextDirection = Math.sign(delta);
+      scrollDirectionDistanceRef.current = previousDirection !== 0 && previousDirection !== nextDirection
+        ? delta
+        : scrollDirectionDistanceRef.current + delta;
+      if (scrollDirectionDistanceRef.current <= -18) {
+        setStickyHeaderVisible(true);
+        if (!chromeVisibleRef.current) {
+          chromeVisibleRef.current = true;
+          onChromeVisibilityChange?.(true);
+        }
+        scrollDirectionDistanceRef.current = 0;
+      } else if (scrollDirectionDistanceRef.current >= 28) {
+        setStickyHeaderVisible(false);
+        if (chromeVisibleRef.current) {
+          chromeVisibleRef.current = false;
+          onChromeVisibilityChange?.(false);
+        }
+        scrollDirectionDistanceRef.current = 0;
+      }
     }
     lastScrollYRef.current = nextY;
   }
+
+  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
 
   function toggleEmbeddedComposer(): void {
     if (composerOpen) {
@@ -513,6 +554,21 @@ export function FeedSurface({
     }
   }
 
+  async function submitReply(): Promise<void> {
+    if (!replyTargetId || !replyDraft.trim() || replying) return;
+    setReplying(true);
+    setEngagementError(undefined);
+    try {
+      await engagement.replyToPost(replyTargetId, replyDraft);
+      setReplyTargetId(null);
+      setReplyDraft("");
+    } catch {
+      setEngagementError("回复没有提交成功，请检查连接后重试。");
+    } finally {
+      setReplying(false);
+    }
+  }
+
   function openComposer(quoteId?: string): void {
     if ((quoteId ?? null) !== quoteTargetId) publishIdempotencyRef.current = undefined;
     setQuoteTargetId(quoteId ?? null);
@@ -603,41 +659,52 @@ export function FeedSurface({
       if (pending.length > 0) {
         const pendingIds = new Set(pending.map((item) => item.localId));
         setDraftMedia((current) => current.map((item) => pendingIds.has(item.localId)
-          ? { ...item, status: "UPLOADING", progress: 0, error: undefined }
+          ? { ...item, status: "UPLOADING", progress: item.progress ?? 0, error: undefined }
           : item));
       }
+      let uploadPaused = false;
       const uploadResults = await Promise.allSettled(pending.map(async (item) => {
         const controller = new AbortController();
         uploadControllersRef.current.set(item.localId, controller);
         try {
           const uploaded = await mediaClient.uploadImage(item.image, {
             signal: controller.signal,
+            ...(item.uploadSession ? { resumeSession: item.uploadSession } : {}),
             onProgress: (progress) => setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
               ? { ...candidate, progress }
+              : candidate)),
+            onSession: (uploadSession) => setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
+              ? { ...candidate, uploadSession }
               : candidate))
           });
           setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
-            ? { ...candidate, status: "READY", progress: 1, mediaAssetId: uploaded.mediaAssetId, error: undefined }
+            ? { ...candidate, status: "READY", progress: 1, mediaAssetId: uploaded.mediaAssetId, uploadSession: undefined, error: undefined }
             : candidate));
           return { localId: item.localId, mediaAssetId: uploaded.mediaAssetId };
         } catch (error) {
-          const message = controller.signal.aborted ? "照片上传已取消，可重试" : error instanceof Error ? error.message : "上传失败";
+          const action = uploadActionsRef.current.get(item.localId);
+          const paused = controller.signal.aborted && action === "PAUSE";
+          if (paused) uploadPaused = true;
+          const message = paused ? "上传已暂停，点击发布即可续传" : controller.signal.aborted ? "照片上传已取消" : error instanceof Error ? error.message : "上传失败";
           setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
-            ? { ...candidate, status: "FAILED", progress: undefined, error: message }
+            ? { ...candidate, status: paused ? "PAUSED" : "FAILED", error: message }
             : candidate));
           throw error;
         } finally {
           uploadControllersRef.current.delete(item.localId);
+          uploadActionsRef.current.delete(item.localId);
         }
       }));
       if (uploadResults.some((result) => result.status === "rejected")) {
-        setComposerError("有照片上传或处理失败。失败项已保留，可直接重试；帖子尚未发布。");
+        setComposerError(uploadPaused
+          ? "照片上传已暂停，草稿和断点均已保留；再次点击发布即可续传。"
+          : "有照片上传或处理失败。失败项已保留，可直接重试；帖子尚未发布。");
         return;
       }
       const uploadedById = new Map(uploadResults.flatMap((result) => result.status === "fulfilled" ? [[result.value.localId, result.value.mediaAssetId] as const] : []));
       const completedMedia = draftMedia.map((item) => {
         const mediaAssetId = uploadedById.get(item.localId) ?? item.mediaAssetId;
-        return mediaAssetId ? { ...item, status: "READY" as const, progress: 1, mediaAssetId, error: undefined } : item;
+        return mediaAssetId ? { ...item, status: "READY" as const, progress: 1, mediaAssetId, uploadSession: undefined, error: undefined } : item;
       });
       setDraftMedia(completedMedia);
       const mediaRefs = draftMediaRefs(completedMedia);
@@ -719,6 +786,14 @@ export function FeedSurface({
       const checker = feedMap[selectedCustomFeed];
       if (checker && !checker(post)) return false;
     }
+    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+    if (normalizedQuery) {
+      const searchable = [authorName(post), post.body, post.cityScope, ...post.contextRefs.map((entry) => entry.contextId)]
+        .filter((value): value is string => typeof value === "string")
+        .join(" ")
+        .toLocaleLowerCase();
+      if (!searchable.includes(normalizedQuery)) return false;
+    }
     return true;
   });
   const quoteTarget = quoteTargetId ? posts.find((post) => post.postId === quoteTargetId) : undefined;
@@ -745,6 +820,9 @@ export function FeedSurface({
         <View style={styles.feedTools}>
           <Pressable accessibilityLabel="定制频道" onPress={() => setCustomFeedHubOpen(true)} style={styles.iconBtn}>
             <Text style={styles.iconBtnText}>≡</Text>
+          </Pressable>
+          <Pressable accessibilityLabel={searchOpen ? "关闭动态搜索" : "搜索动态"} onPress={() => setSearchOpen((value) => !value)} style={styles.iconBtn}>
+            <ProxyIcon color={color.ink} name="search" size={18} />
           </Pressable>
           <Pressable onPress={toggleEmbeddedComposer} style={styles.iconBtn}>
             <Text style={styles.iconBtnText}>{composerOpen ? "×" : "＋"}</Text>
@@ -779,19 +857,21 @@ export function FeedSurface({
         </View>
       ) : null}
 
-      {/* R15.3 r153search：🔍 + input + › */}
-      <Pressable style={styles.r153search}>
+      {/* 搜索只在使用时占一行；入口与发帖按钮并列。 */}
+      {searchOpen ? <View style={styles.r153search}>
         <View style={styles.searchMag}>
-          <Text style={styles.searchMagText}>⌕</Text>
+          <ProxyIcon color={color.ink} name="search" size={16} />
         </View>
         <TextInput
+          autoFocus
           style={styles.r153searchInput}
           placeholder="搜索人、机会、活动、情报…"
           placeholderTextColor={color.muted}
-          editable={false}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
         />
-        <Text style={styles.searchArrow}>›</Text>
-      </Pressable>
+        {searchQuery ? <Pressable accessibilityLabel="清空动态搜索" onPress={() => setSearchQuery("")}><Text style={styles.searchArrow}>×</Text></Pressable> : null}
+      </View> : null}
 
       {/* R15.3 networktabs：2 列（推荐 / 关注） */}
       <View style={styles.tabs}>
@@ -882,10 +962,19 @@ export function FeedSurface({
                     invalidatePublishAttempt();
                     setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId ? { ...candidate, altText } : candidate));
                   }}
-                  onCancel={() => uploadControllersRef.current.get(item.localId)?.abort()}
+                  onCancel={() => {
+                    uploadActionsRef.current.set(item.localId, "CANCEL");
+                    uploadControllersRef.current.get(item.localId)?.abort();
+                    invalidatePublishAttempt();
+                    setDraftMedia((current) => current.filter((candidate) => candidate.localId !== item.localId));
+                  }}
                   onMove={(from, to) => {
                     invalidatePublishAttempt();
                     setDraftMedia((current) => moveDraftMedia(current, from, to));
+                  }}
+                  onPause={() => {
+                    uploadActionsRef.current.set(item.localId, "PAUSE");
+                    uploadControllersRef.current.get(item.localId)?.abort();
                   }}
                   onRemove={() => {
                     invalidatePublishAttempt();
@@ -1000,7 +1089,7 @@ export function FeedSurface({
 
               {/* 服务端媒体（READY Hydrate）：多图横滑轨 / 单图全宽 / 视频内联自动播放（X 式，滑近中心播、滑出停，带声音） */}
               {items.length > 1 ? (
-                <AdaptiveMediaRail
+                <AdaptiveMediaCollection
                   items={items}
                   currentIndex={mediaPositions[post.postId] ?? 0}
                   resolveUrl={(path) => localNet.resolveMediaUrl(path)}
@@ -1070,7 +1159,7 @@ export function FeedSurface({
                     {isLiked ? "♥" : "♡"} {isLiked ? 1 : 0}
                   </Text>
                 </Pressable>
-                <Pressable style={styles.postAction}>
+                <Pressable onPress={() => { setReplyTargetId(post.postId); setReplyDraft(""); }} style={styles.postAction}>
                   <Text style={styles.postActionText}>回复</Text>
                 </Pressable>
                 <Pressable onPress={() => openComposer(post.postId)} style={styles.postAction}>
@@ -1079,7 +1168,7 @@ export function FeedSurface({
                 <Pressable disabled={isSaved || engagementBusy.has(`bookmark:${post.postId}`)} onPress={() => void commitEngagement(`bookmark:${post.postId}`, post.postId, () => engagement.bookmarkPost(post.postId), setBookmarked, bookmarked)} style={styles.postAction}>
                   <Text style={[styles.postActionText, isSaved && styles.postActionOn]}>收藏 {isSaved ? 1 : 0}</Text>
                 </Pressable>
-                <Pressable style={styles.postAction}>
+                <Pressable onPress={() => void Share.share({ message: `${post.body}\n\nProxy · ${name}` })} style={styles.postAction}>
                   <Text style={styles.postActionText}>分享</Text>
                 </Pressable>
                 <Pressable
@@ -1096,7 +1185,7 @@ export function FeedSurface({
                   <Pressable onPress={() => onOpenChat(name)} style={styles.intentChat}>
                     <Text style={styles.intentChatText}>聊一下</Text>
                   </Pressable>
-                  <Pressable style={styles.intentNeed}>
+                  <Pressable onPress={() => onOpenChat(name)} style={styles.intentNeed}>
                     <Text style={styles.intentNeedText}>按这个想法找同行</Text>
                   </Pressable>
                 </View>
@@ -1157,6 +1246,30 @@ export function FeedSurface({
         </Modal>
       ) : null}
 
+      {replyTargetId ? (
+        <Modal transparent animationType="fade" onRequestClose={() => setReplyTargetId(null)}>
+          <Pressable style={styles.replyOverlay} onPress={() => setReplyTargetId(null)}>
+            <Pressable style={styles.replySheet} onPress={(event) => event.stopPropagation()}>
+              <Text style={styles.replyTitle}>回复帖文</Text>
+              <TextInput
+                autoFocus
+                maxLength={500}
+                multiline
+                onChangeText={setReplyDraft}
+                placeholder="写下公开回复…"
+                placeholderTextColor={color.muted}
+                style={styles.replyInput}
+                value={replyDraft}
+              />
+              <View style={styles.replyActions}>
+                <Pressable onPress={() => setReplyTargetId(null)} style={styles.replyCancel}><Text style={styles.replyCancelText}>取消</Text></Pressable>
+                <Pressable disabled={!replyDraft.trim() || replying} onPress={() => void submitReply()} style={[styles.replySubmit, (!replyDraft.trim() || replying) && styles.disabled]}><Text style={styles.replySubmitText}>{replying ? "提交中…" : "回复"}</Text></Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
+
     </ScrollView>
     {stickyHeaderVisible ? (
       <View style={styles.stickyFeedHead}>
@@ -1164,6 +1277,9 @@ export function FeedSurface({
         <View style={styles.feedTools}>
           <Pressable accessibilityLabel="定制频道" onPress={() => setCustomFeedHubOpen(true)} style={styles.stickyIconBtn}>
             <Text style={styles.iconBtnText}>≡</Text>
+          </Pressable>
+          <Pressable accessibilityLabel={searchOpen ? "关闭动态搜索" : "搜索动态"} onPress={() => { setSearchOpen((value) => !value); scrollRef.current?.scrollTo({ y: 0, animated: true }); }} style={styles.stickyIconBtn}>
+            <ProxyIcon color={color.ink} name="search" size={17} />
           </Pressable>
           <Pressable onPress={toggleEmbeddedComposer} style={styles.stickyIconBtn}>
             <Text style={styles.iconBtnText}>{composerOpen ? "×" : "＋"}</Text>
@@ -1182,6 +1298,34 @@ export function FeedSurface({
 
 // 人像组图规则：Rail 保持统一画布，半身照约 4:5 铺满；9:16 等全身照
 // 在同一画布内 contain + 柔和背景，保证头顶与脚都不被裁掉，也不会缩成窄条。
+function AdaptiveMediaCollection({ items, currentIndex, resolveUrl, onIndexChange, onOpen }: {
+  items: FeedMediaItem[];
+  currentIndex: number;
+  resolveUrl: (path: string) => string;
+  onIndexChange: (index: number) => void;
+  onOpen: (index: number) => void;
+}): React.JSX.Element {
+  const mode = mediaCollectionMode(items.length);
+  if (mode === "WALL") {
+    return (
+      <View style={styles.mediaWall}>
+        {items.map((item, index) => (
+          <Pressable
+            accessibilityLabel={`查看第 ${index + 1} 张媒体`}
+            key={item.mediaAssetId}
+            onPress={() => onOpen(index)}
+            style={styles.mediaWallCell}
+          >
+            <SocialMediaFrame item={item} frameAspect={1} resolveUrl={resolveUrl} />
+            <View style={styles.mediaWallBadge}><Text style={styles.mediaBadgeText}>{index + 1}/{items.length}</Text></View>
+          </Pressable>
+        ))}
+      </View>
+    );
+  }
+  return <AdaptiveMediaRail items={items} currentIndex={currentIndex} resolveUrl={resolveUrl} onIndexChange={onIndexChange} onOpen={onOpen} />;
+}
+
 function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onOpen }: {
   items: FeedMediaItem[];
   currentIndex: number;
@@ -1585,7 +1729,7 @@ const styles = StyleSheet.create({
     padding: 11,
     ...shadows.card
   },
-  composerInput: { color: color.ink, fontSize: 11, lineHeight: 16, minHeight: 44, textAlignVertical: "top" },
+  composerInput: { color: color.ink, fontSize: 15, lineHeight: 22, minHeight: 112, paddingHorizontal: 2, paddingTop: 4, textAlignVertical: "top" },
   composerQuote: {
     alignItems: "center",
     backgroundColor: "#F8F5FA",
@@ -1634,6 +1778,15 @@ const styles = StyleSheet.create({
   composerPublishText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   composerError: { color: "#B91451", fontSize: 11, lineHeight: 15, marginTop: 7 },
   disabled: { opacity: 0.45 },
+  replyOverlay: { alignItems: "center", backgroundColor: "rgba(17,13,22,0.45)", flex: 1, justifyContent: "flex-end", padding: 18 },
+  replySheet: { backgroundColor: color.white, borderRadius: 18, padding: 14, width: "100%", ...shadows.card },
+  replyTitle: { color: color.ink, fontSize: 17, fontWeight: "800" },
+  replyInput: { backgroundColor: "#F8F5FA", borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, lineHeight: 21, marginTop: 10, minHeight: 108, padding: 10, textAlignVertical: "top" },
+  replyActions: { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 10 },
+  replyCancel: { borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
+  replyCancelText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  replySubmit: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
+  replySubmitText: { color: color.white, fontSize: 12, fontWeight: "800" },
 
   // 基线 .networktabs：border-bottom var(--ln)。
   tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row" },
@@ -1728,6 +1881,17 @@ const styles = StyleSheet.create({
   },
   videoMuteText: { fontSize: 11 },
   mediaRail: { flexDirection: "row", marginVertical: 8 },
+  mediaWall: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginVertical: 8 },
+  mediaWallCell: { aspectRatio: 1, flexBasis: "49%", flexGrow: 1, maxWidth: "50%" },
+  mediaWallBadge: {
+    backgroundColor: "rgba(17,13,22,0.72)",
+    borderRadius: 999,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    position: "absolute",
+    right: 6,
+    top: 6
+  },
   socialMediaFrame: {
     backgroundColor: "#17131F",
     borderRadius: 14,

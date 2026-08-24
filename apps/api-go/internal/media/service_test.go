@@ -71,6 +71,74 @@ func TestSaveUploadPersistsOnlyOwnersBytes(t *testing.T) {
 	}
 }
 
+func TestResumableUploadSurvivesServiceRestartAndCommitsImmutableOriginal(t *testing.T) {
+	dir := t.TempDir()
+	repository := NewMemoryRepository()
+	firstService := NewWithDependencies(repository, nil)
+	firstService.SetStoreDir(dir)
+	result := firstService.Handle(envelopeFor("CreateMediaAsset", map[string]any{
+		"mediaType": "IMAGE", "originalStorageKey": "resumable.jpg", "mimeType": "image/jpeg",
+	}, ""))
+	var created struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
+	_ = json.Unmarshal([]byte(result.OperationRef), &created)
+	content := []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x01, 0xff, 0xd9}
+	first := content[:4]
+	progress, err := firstService.SaveUploadChunk(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(first), 0, 3, int64(len(content)), 1024, chunkSHA256(first))
+	if err != nil || progress.Offset != 4 || progress.Complete {
+		t.Fatalf("first chunk progress=%+v err=%v", progress, err)
+	}
+
+	// A new Service instance over the same repository/store simulates an API restart.
+	restarted := NewWithDependencies(repository, nil)
+	restarted.SetStoreDir(dir)
+	resumed, err := restarted.UploadOffset(t.Context(), created.MediaAssetID, "business_001")
+	if err != nil || resumed.Offset != 4 {
+		t.Fatalf("restored offset=%+v err=%v", resumed, err)
+	}
+	second := content[4:]
+	completed, err := restarted.SaveUploadChunk(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(second), 4, 7, int64(len(content)), 1024, chunkSHA256(second))
+	if err != nil || !completed.Complete || completed.Offset != int64(len(content)) {
+		t.Fatalf("completed progress=%+v err=%v", completed, err)
+	}
+	stored, err := os.ReadFile(filepath.Join(dir, "resumable.jpg"))
+	if err != nil || !bytes.Equal(stored, content) {
+		t.Fatalf("assembled original=%x err=%v", stored, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "."+created.MediaAssetID+".resumable.jpg.part")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial file must be removed after commit: %v", err)
+	}
+}
+
+func TestResumableUploadRejectsGapsAndChangedChunkReplay(t *testing.T) {
+	s := New()
+	s.SetStoreDir(t.TempDir())
+	result := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
+		"mediaType": "IMAGE", "originalStorageKey": "gaps.jpg", "mimeType": "image/jpeg",
+	}, ""))
+	var created struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
+	_ = json.Unmarshal([]byte(result.OperationRef), &created)
+	chunk := []byte{0xff, 0xd8, 0xff, 0xdb}
+	if _, err := s.SaveUploadChunk(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(chunk), 4, 7, 8, 1024, chunkSHA256(chunk)); err != ErrUploadOffset {
+		t.Fatalf("gap must be rejected: %v", err)
+	}
+	if _, err := s.SaveUploadChunk(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(chunk), 0, 3, 8, 1024, chunkSHA256(chunk)); err != nil {
+		t.Fatal(err)
+	}
+	changed := []byte{0xff, 0xd8, 0xff, 0xe0}
+	if _, err := s.SaveUploadChunk(t.Context(), created.MediaAssetID, "business_001", bytes.NewReader(changed), 0, 3, 8, 1024, chunkSHA256(changed)); err != ErrChunkChecksum {
+		t.Fatalf("changed replay must be rejected: %v", err)
+	}
+}
+
+func chunkSHA256(value []byte) string {
+	hash := sha256.Sum256(value)
+	return hex.EncodeToString(hash[:])
+}
+
 func TestReadTIFFOrientationAndColorSpace(t *testing.T) {
 	tiff := testExifTIFF()
 

@@ -2,6 +2,7 @@ package media
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -134,7 +135,16 @@ var (
 	ErrUploadTooLarge    = errors.New("media upload too large")
 	ErrMediaTypeMismatch = errors.New("media content type does not match declaration")
 	ErrOriginalImmutable = errors.New("original media object is immutable")
+	ErrUploadOffset      = errors.New("media upload offset mismatch")
+	ErrUploadLength      = errors.New("media upload length mismatch")
+	ErrChunkChecksum     = errors.New("media upload chunk checksum mismatch")
 )
+
+type UploadProgress struct {
+	Offset   int64 `json:"offset"`
+	Total    int64 `json:"total,omitempty"`
+	Complete bool  `json:"complete"`
+}
 
 type MemoryRepository struct {
 	mu       sync.Mutex
@@ -262,7 +272,10 @@ func (s *Service) SetStoreDir(dir string) {
 func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID string, source io.Reader, maxBytes int64) (MediaAsset, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveUploadLocked(ctx, id, ownerPrincipalID, source, maxBytes)
+}
 
+func (s *Service) saveUploadLocked(ctx context.Context, id string, ownerPrincipalID string, source io.Reader, maxBytes int64) (MediaAsset, error) {
 	asset, err := s.repository.GetAsset(ctx, id)
 	if err != nil {
 		return MediaAsset{}, err
@@ -368,6 +381,132 @@ func (s *Service) SaveUpload(ctx context.Context, id string, ownerPrincipalID st
 	_ = os.Remove(temporaryPath)
 	committed = true
 	return asset, nil
+}
+
+// UploadOffset returns the durable byte boundary for a resumable upload. The
+// partial object lives beside the immutable ORIGINAL so an API restart does not
+// force the client to resend accepted chunks.
+func (s *Service) UploadOffset(ctx context.Context, id, ownerPrincipalID string) (UploadProgress, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	asset, err := s.uploadingAsset(ctx, id, ownerPrincipalID)
+	if err != nil {
+		return UploadProgress{}, err
+	}
+	if asset.SourceBytes > 0 {
+		return UploadProgress{Offset: asset.SourceBytes, Total: asset.SourceBytes, Complete: true}, nil
+	}
+	info, err := os.Stat(s.partialUploadPath(asset))
+	if errors.Is(err, os.ErrNotExist) {
+		return UploadProgress{}, nil
+	}
+	if err != nil {
+		return UploadProgress{}, err
+	}
+	return UploadProgress{Offset: info.Size()}, nil
+}
+
+// SaveUploadChunk appends exactly one Content-Range chunk. A replay of an
+// already committed chunk is accepted only when its bytes are identical.
+func (s *Service) SaveUploadChunk(ctx context.Context, id, ownerPrincipalID string, source io.Reader, start, end, total, maxBytes int64, expectedSHA256 string) (UploadProgress, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	asset, err := s.uploadingAsset(ctx, id, ownerPrincipalID)
+	if err != nil {
+		return UploadProgress{}, err
+	}
+	if start < 0 || end < start || total <= end || total > maxBytes {
+		return UploadProgress{}, ErrUploadLength
+	}
+	expectedBytes := end - start + 1
+	chunk, err := io.ReadAll(io.LimitReader(source, expectedBytes+1))
+	if err != nil {
+		return UploadProgress{}, err
+	}
+	if int64(len(chunk)) != expectedBytes {
+		return UploadProgress{}, ErrUploadLength
+	}
+	hash := sha256.Sum256(chunk)
+	if expectedSHA256 == "" || !strings.EqualFold(expectedSHA256, hex.EncodeToString(hash[:])) {
+		return UploadProgress{}, ErrChunkChecksum
+	}
+	if err := os.MkdirAll(s.storeDir, 0o750); err != nil {
+		return UploadProgress{}, err
+	}
+	partialPath := s.partialUploadPath(asset)
+	file, err := os.OpenFile(partialPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return UploadProgress{}, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return UploadProgress{}, err
+	}
+	current := info.Size()
+	if start < current {
+		if end+1 > current {
+			return UploadProgress{Offset: current, Total: total}, ErrUploadOffset
+		}
+		existing := make([]byte, len(chunk))
+		if _, err := file.ReadAt(existing, start); err != nil || !bytes.Equal(existing, chunk) {
+			return UploadProgress{Offset: current, Total: total}, ErrChunkChecksum
+		}
+		return UploadProgress{Offset: current, Total: total, Complete: current == total}, nil
+	}
+	if start != current {
+		return UploadProgress{Offset: current, Total: total}, ErrUploadOffset
+	}
+	if _, err := file.WriteAt(chunk, start); err != nil {
+		return UploadProgress{}, err
+	}
+	if err := file.Sync(); err != nil {
+		return UploadProgress{}, err
+	}
+	current = end + 1
+	if current < total {
+		return UploadProgress{Offset: current, Total: total}, nil
+	}
+	if err := file.Close(); err != nil {
+		return UploadProgress{}, err
+	}
+	assembled, err := os.Open(partialPath)
+	if err != nil {
+		return UploadProgress{}, err
+	}
+	_, saveErr := s.saveUploadLocked(ctx, id, ownerPrincipalID, assembled, maxBytes)
+	closeErr := assembled.Close()
+	if saveErr != nil {
+		return UploadProgress{}, saveErr
+	}
+	if closeErr != nil {
+		return UploadProgress{}, closeErr
+	}
+	if err := os.Remove(partialPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return UploadProgress{}, err
+	}
+	return UploadProgress{Offset: total, Total: total, Complete: true}, nil
+}
+
+func (s *Service) uploadingAsset(ctx context.Context, id, ownerPrincipalID string) (MediaAsset, error) {
+	asset, err := s.repository.GetAsset(ctx, id)
+	if err != nil {
+		return MediaAsset{}, err
+	}
+	if asset.OwnerPrincipalID != ownerPrincipalID {
+		return MediaAsset{}, ErrMediaNotOwner
+	}
+	if asset.ProcessingStatus != "UPLOADING" {
+		return MediaAsset{}, ErrStatusTransition
+	}
+	if asset.OriginalStorageKey == "" || filepath.Base(asset.OriginalStorageKey) != asset.OriginalStorageKey || strings.Contains(asset.OriginalStorageKey, "..") {
+		return MediaAsset{}, errors.New("invalid storage key")
+	}
+	return asset, nil
+}
+
+func (s *Service) partialUploadPath(asset MediaAsset) string {
+	return filepath.Join(s.storeDir, "."+asset.MediaAssetID+"."+asset.OriginalStorageKey+".part")
 }
 
 func (s *Service) persistOriginalVariant(ctx context.Context, asset MediaAsset) error {

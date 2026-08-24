@@ -96,6 +96,7 @@ export function AppShell({
     useState<ExperienceManifest>();
   const [feedRefreshTrigger, setFeedRefreshTrigger] = useState(0);
   const [feedPrefsOpen, setFeedPrefsOpen] = useState(false);
+  const [feedChromeVisible, setFeedChromeVisible] = useState(true);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [homeAssistant, setHomeAssistant] = useState<{ text: string; mode?: HomeIntentMode; attachment?: HomeAttachment }>();
   const [voucherOpen, setVoucherOpen] = useState(false);
@@ -139,6 +140,7 @@ export function AppShell({
   }, [context, experience]);
 
   function selectTab(next: RootTab): void {
+    setFeedChromeVisible(true);
     if (next === "MARKET") {
       setMarketEntry({ tab: "OPPORTUNITY", viewMode: "LIST" });
       setOpenExperience(undefined);
@@ -271,7 +273,7 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
+            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (
@@ -304,7 +306,7 @@ export function AppShell({
           )
         )}
         </View>
-        <RootNav activeTab={tab} compact={compactWidth} onSelect={selectTab} />
+        {tab !== "FEED" || feedChromeVisible || feedChatAuthor || feedPrefsOpen ? <RootNav activeTab={tab} compact={compactWidth} onSelect={selectTab} /> : null}
         <ContextSwitcherSheet
           current={context}
           onClose={() => setSwitcherOpen(false)}

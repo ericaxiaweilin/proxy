@@ -3,8 +3,10 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -92,6 +94,51 @@ func TestHealthAndCommandBoundary(t *testing.T) {
 	mismatch := request(handler, http.MethodPost, "/v1/commands/RecordOutcomeObservation", apiEnvelope("FinalizeObservationSet", map[string]any{}, command.Target{Type: "ObservationSet", ID: "1"}, "idem_mismatch_001"))
 	if mismatch.Code != http.StatusBadRequest {
 		t.Fatalf("mismatch status: %d", mismatch.Code)
+	}
+}
+
+func TestMediaUploadContentRangeCanResumeFromReportedOffset(t *testing.T) {
+	mediaService := media.New()
+	mediaService.SetStoreDir(t.TempDir())
+	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), mediaService, contribution.New(), nil, nil, stubAuthenticator{})
+	handler := server.Handler()
+	created := requestWithBearer(handler, http.MethodPost, "/v1/commands/CreateMediaAsset", apiEnvelope("CreateMediaAsset", map[string]any{
+		"mediaType": "IMAGE", "originalStorageKey": "range.jpg", "mimeType": "image/jpeg",
+	}, command.Target{Type: "MediaAsset", ID: "new"}, "idem_range_asset"), "access_test")
+	var commandResult command.Result
+	if err := json.Unmarshal(created.Body.Bytes(), &commandResult); err != nil {
+		t.Fatal(err)
+	}
+	var operation struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
+	if err := json.Unmarshal([]byte(commandResult.OperationRef), &operation); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x01, 0xff, 0xd9}
+	uploadChunk := func(start, end int, chunk []byte) *httptest.ResponseRecorder {
+		record := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/v1/media/upload/"+operation.MediaAssetID, bytes.NewReader(chunk))
+		req.Header.Set("Authorization", "Bearer access_test")
+		req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(content)))
+		req.Header.Set("X-Chunk-SHA256", fmt.Sprintf("%x", sha256.Sum256(chunk)))
+		handler.ServeHTTP(record, req)
+		return record
+	}
+	first := uploadChunk(0, 3, content[:4])
+	if first.Code != http.StatusAccepted || first.Header().Get("Upload-Offset") != "4" {
+		t.Fatalf("first chunk status=%d offset=%s body=%s", first.Code, first.Header().Get("Upload-Offset"), first.Body.String())
+	}
+	head := httptest.NewRecorder()
+	headRequest := httptest.NewRequest(http.MethodHead, "/v1/media/upload/"+operation.MediaAssetID, nil)
+	headRequest.Header.Set("Authorization", "Bearer access_test")
+	handler.ServeHTTP(head, headRequest)
+	if head.Code != http.StatusNoContent || head.Header().Get("Upload-Offset") != "4" {
+		t.Fatalf("head status=%d offset=%s", head.Code, head.Header().Get("Upload-Offset"))
+	}
+	second := uploadChunk(4, 7, content[4:])
+	if second.Code != http.StatusNoContent || second.Header().Get("Upload-Offset") != "8" {
+		t.Fatalf("second chunk status=%d offset=%s body=%s", second.Code, second.Header().Get("Upload-Offset"), second.Body.String())
 	}
 }
 

@@ -42,6 +42,12 @@ export class EngagementClient {
     await this.command("ReactToPost", { type: "Post", id: postId }, { postId, kind });
   }
 
+  public async replyToPost(postId: string, body: string): Promise<void> {
+    const normalized = body.trim();
+    if (!normalized) throw new EngagementProtocolError("reply body is required");
+    await this.command("ReplyToPost", { type: "Post", id: postId }, { postId, body: normalized });
+  }
+
   public async bookmarkPost(postId: string): Promise<void> {
     await this.command("BookmarkPost", { type: "Post", id: postId }, { postId });
   }

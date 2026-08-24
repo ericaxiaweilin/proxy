@@ -1,5 +1,6 @@
 import type { TransportResponse } from "./auth-client";
-import { File, UploadType } from "expo-file-system";
+import { File } from "expo-file-system";
+import * as Crypto from "expo-crypto";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { uploadOriginalWithRetry } from "./media-upload-retry";
@@ -14,8 +15,20 @@ export type UploadableImage = {
 
 export type MediaUploadOptions = {
   onProgress?: (progress: number) => void;
+  onSession?: (session: ResumableMediaUploadSession) => void;
+  resumeSession?: ResumableMediaUploadSession;
   signal?: AbortSignal;
 };
+
+export type ResumableMediaUploadSession = {
+  mediaAssetId: string;
+  storageKey: string;
+  uploadUrl: string;
+  offset: number;
+  totalBytes: number;
+};
+
+const UPLOAD_CHUNK_BYTES = 1024 * 1024;
 
 type MediaAuthClient = {
   getAccessToken(): Promise<string | undefined>;
@@ -34,47 +47,98 @@ export class MediaClient {
 
   public async uploadImage(image: UploadableImage, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
     const mimeType = image.mimeType || "image/jpeg";
-    const storageKey = `${this.nextId("image")}${extensionFor(mimeType)}`;
-    const created = await this.command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, {
-      mediaType: "IMAGE",
-      originalStorageKey: storageKey,
-      mimeType,
-      width: image.width,
-      height: image.height
-    });
-    const mediaAssetId = stringField(created, "mediaAssetId");
-    const uploadUrl = stringField(created, "uploadUrl");
     const accessToken = await this.input.authClient.getAccessToken();
     if (!accessToken) throw new Error("上传照片前需要有效会话");
-
     const localFile = new File(image.uri);
     if (!localFile.exists) throw new Error("无法读取所选照片");
-    await uploadOriginalWithRetry(async () => {
-      throwIfAborted(options.signal);
-      const task = localFile.createUploadTask(`${this.input.baseUrl}${uploadUrl}`, {
-        httpMethod: "PUT",
-        uploadType: UploadType.BINARY_CONTENT,
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": mimeType },
+    const totalBytes = localFile.size;
+    if (!totalBytes || totalBytes <= 0) throw new Error("所选照片为空或大小不可读");
+
+    let session = options.resumeSession?.totalBytes === totalBytes ? options.resumeSession : undefined;
+    if (!session) {
+      const storageKey = `${this.nextId("image")}${extensionFor(mimeType)}`;
+      const created = await this.command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, {
+        mediaType: "IMAGE",
+        originalStorageKey: storageKey,
         mimeType,
-        ...(options.signal ? { signal: options.signal } : {}),
-        onProgress: ({ bytesSent, totalBytes }) => {
-          if (totalBytes > 0) options.onProgress?.(Math.min(1, Math.max(0, bytesSent / totalBytes)));
-        },
-        // iOS keeps the native transfer alive while the app is suspended.
-        // Terminated-app recovery still requires the planned resumable upload session.
-        sessionType: "background"
+        width: image.width,
+        height: image.height
       });
-      const response = await task.uploadAsync();
-      return response.status;
-    }, undefined, 3, options.signal);
+      session = {
+        mediaAssetId: stringField(created, "mediaAssetId"),
+        storageKey,
+        uploadUrl: stringField(created, "uploadUrl"),
+        offset: 0,
+        totalBytes
+      };
+      options.onSession?.(session);
+    }
+
+    const uploadEndpoint = `${this.input.baseUrl}${session.uploadUrl}`;
+    let offset = await this.queryUploadOffset(uploadEndpoint, accessToken, options.signal);
+    if (offset < 0 || offset > totalBytes) throw new Error("照片续传位置无效，请重新选择照片");
+    session = { ...session, offset };
+    options.onSession?.(session);
+    options.onProgress?.(offset / totalBytes);
+    const handle = localFile.open();
+    try {
+      handle.offset = offset;
+      while (offset < totalBytes) {
+        throwIfAborted(options.signal);
+        const chunk = handle.readBytes(Math.min(UPLOAD_CHUNK_BYTES, totalBytes - offset));
+        if (chunk.byteLength === 0) throw new Error("照片读取提前结束");
+        const end = offset + chunk.byteLength - 1;
+        const checksum = hexDigest(await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, chunk));
+        let response: Response | undefined;
+        await uploadOriginalWithRetry(async () => {
+          throwIfAborted(options.signal);
+          response = await fetch(uploadEndpoint, {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": mimeType,
+              "Content-Range": `bytes ${offset}-${end}/${totalBytes}`,
+              "X-Chunk-SHA256": checksum
+            },
+            body: chunk as unknown as BodyInit,
+            ...(options.signal ? { signal: options.signal } : {})
+          });
+          return response.status;
+        }, undefined, 3, options.signal);
+        const acceptedOffset = Number(response?.headers.get("Upload-Offset") ?? end + 1);
+        if (!Number.isInteger(acceptedOffset) || acceptedOffset < end + 1 || acceptedOffset > totalBytes) {
+          throw new Error("照片服务返回了无效续传位置");
+        }
+        offset = acceptedOffset;
+        handle.offset = offset;
+        session = { ...session, offset };
+        options.onSession?.(session);
+        options.onProgress?.(offset / totalBytes);
+      }
+    } finally {
+      handle.close();
+    }
 
     throwIfAborted(options.signal);
-    await this.command("CompleteMediaUpload", { type: "MediaAsset", id: mediaAssetId }, { originalStorageKey: storageKey });
+    await this.command("CompleteMediaUpload", { type: "MediaAsset", id: session.mediaAssetId }, { originalStorageKey: session.storageKey });
     options.onProgress?.(1);
     throwIfAborted(options.signal);
-    await this.command("ProcessMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { originalPath: "" });
-    await this.waitUntilReady(mediaAssetId, options.signal);
-    return { mediaAssetId, storageKey };
+    await this.command("ProcessMediaAsset", { type: "MediaAsset", id: session.mediaAssetId }, { originalPath: "" });
+    await this.waitUntilReady(session.mediaAssetId, options.signal);
+    return { mediaAssetId: session.mediaAssetId, storageKey: session.storageKey };
+  }
+
+  private async queryUploadOffset(uploadEndpoint: string, accessToken: string, signal?: AbortSignal): Promise<number> {
+    throwIfAborted(signal);
+    const response = await fetch(uploadEndpoint, {
+      method: "HEAD",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      ...(signal ? { signal } : {})
+    });
+    if (response.status < 200 || response.status >= 300) throw new Error(`照片续传会话不可用（${response.status}）`);
+    const value = Number(response.headers.get("Upload-Offset") ?? "0");
+    if (!Number.isInteger(value) || value < 0) throw new Error("照片服务缺少有效续传位置");
+    return value;
   }
 
   private async waitUntilReady(mediaAssetId: string, signal?: AbortSignal): Promise<void> {
@@ -147,4 +211,8 @@ function stringField(value: Record<string, unknown>, key: string): string {
   const field = value[key];
   if (typeof field !== "string" || field === "") throw new Error(`媒体服务缺少 ${key}`);
   return field;
+}
+
+function hexDigest(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

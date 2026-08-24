@@ -59,3 +59,23 @@ Scope: Gate 3 Feed/Gallery and Gate 4 Composer on the local P0 stack.
 - The automation driver could navigate the native gallery but did not dispatch its close-button tap. The close control now has an expanded hit target and touch-down fallback; manual physical-device confirmation remains required before Gate 3 release.
 - Gate 4 still needs resumable multipart pause/resume before full release. Drag reordering is now implemented and covered by state tests plus simulator restart evidence.
 - Model classification was unavailable because the external model-stack control plane at `100.96.188.77:14041` timed out. Media publication correctly continued without binding a business-side model.
+
+## Dynamic shell and collection-layout regression
+
+- Dynamic search is now a real title-row action. The search row is absent while idle, expands only after activation, accepts text, filters author/body/city/context data, and can be cleared without leaving Dynamic.
+- Scroll chrome uses accumulated direction thresholds (28 pt down / 18 pt up), rather than reacting to a single 3 pt event. Simulator verification confirmed that downward reading hides the Dynamic floating header and root navigation together; upward reading restores both. The outer Proxy brand header remains stable so changing chrome does not shift the feed coordinate system.
+- Media collection policy is deterministic: 1 = maximum-width single, 2/3/5 = horizontal rail, 4/6 = two-column wall. `media-presentation.test.ts` covers all six counts.
+- The content-aware fallback matrix for PERSON / PRODUCT / TEXT_HEAVY / SCENE / mixed content is frozen in `architecture/Social_Media_Pipeline_Plan_Gates_R1.md`. Until the worker emits versioned composition hints, low-confidence or extreme-ratio media falls back to contain rather than destructive center crop.
+- The embedded composer text area now uses a 15 pt font and 112 pt minimum writing area.
+- Post reply now opens a public-reply composer backed by the existing `ReplyToPost` server command. Native Share Sheet is wired for the current post text; canonical public links remain a later Gate and are not claimed complete.
+
+## Status and Community audit
+
+- Status creation was exercised on the iPhone 15 simulator with `Status flow test`; it appeared immediately as a 24-hour item. The copy now explains temporary broadcast, private-message reply, automatic archive, and that routing suggestions do not create an order. The 48-hour badge calculation bug was fixed.
+- Community list, join toggle and community detail navigation are interactive.
+- Both features still use component-local state and therefore remain **not released**: server commands, durable read models, authorization and restart recovery are required before their Gate can pass.
+
+## Development endpoint recurrence
+
+- The apparent feed API outage was caused by Metro loading stale `.env` address `192.168.1.49` after the Mac moved to `192.168.110.2`.
+- Restarted Metro through `pnpm --filter @proxy/mobile ios:dev`, which resolves the current LAN address and exported `EXPO_PUBLIC_API_BASE_URL=http://192.168.110.2:4100`; feed reads recovered without code rollback.

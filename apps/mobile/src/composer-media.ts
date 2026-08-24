@@ -1,6 +1,6 @@
-import type { UploadableImage } from "./media-client";
+import type { ResumableMediaUploadSession, UploadableImage } from "./media-client";
 
-export type DraftMediaStatus = "LOCAL" | "UPLOADING" | "READY" | "FAILED";
+export type DraftMediaStatus = "LOCAL" | "UPLOADING" | "PAUSED" | "READY" | "FAILED";
 
 export type DraftMediaItem = {
   localId: string;
@@ -9,6 +9,7 @@ export type DraftMediaItem = {
   status: DraftMediaStatus;
   progress?: number | undefined;
   mediaAssetId?: string | undefined;
+  uploadSession?: ResumableMediaUploadSession | undefined;
   error?: string | undefined;
 };
 
@@ -47,6 +48,7 @@ export function mediaStatusLabel(item: DraftMediaItem): string {
   if (item.status === "UPLOADING") return item.progress !== undefined && item.progress < 1
     ? `上传 ${Math.round(item.progress * 100)}%`
     : "服务端处理中…";
+  if (item.status === "PAUSED") return "已暂停 · 可续传";
   if (item.status === "READY") return "已就绪";
   if (item.status === "FAILED") return "失败 · 可重试";
   return "待上传";
@@ -54,6 +56,6 @@ export function mediaStatusLabel(item: DraftMediaItem): string {
 
 export function normalizeRestoredDraftMedia(items: readonly DraftMediaItem[]): DraftMediaItem[] {
   return items.map((item) => item.status === "UPLOADING"
-    ? { ...item, status: "FAILED", progress: undefined, error: "上传在后台中断，请重试" }
+    ? { ...item, status: "PAUSED", progress: item.uploadSession && item.uploadSession.totalBytes > 0 ? item.uploadSession.offset / item.uploadSession.totalBytes : item.progress, error: "上传已暂停，点击发布即可续传" }
     : { ...item });
 }

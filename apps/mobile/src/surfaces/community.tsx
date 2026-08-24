@@ -23,12 +23,31 @@ const COMMUNITIES: Community[] = [
 
 export function CommunityHub({ onOpenCommunity }: { onOpenCommunity?: (id: string) => void }): React.JSX.Element {
   const [joined, setJoined] = useState<ReadonlySet<string>>(new Set(["photo"]));
+  const [selectedId, setSelectedId] = useState<string>();
 
   function toggle(id: string): void {
     const next = new Set(joined);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setJoined(next);
+  }
+
+  const selected = COMMUNITIES.find((community) => community.id === selectedId);
+  if (selected) {
+    const isJoined = joined.has(selected.id);
+    return (
+      <View>
+        <Pressable onPress={() => setSelectedId(undefined)}><Text style={styles.back}>‹ 返回社区</Text></Pressable>
+        <View style={styles.detailHero}>
+          <View style={[styles.icon, { backgroundColor: selected.color }]}><Text style={styles.iconText}>{selected.name.charAt(0)}</Text></View>
+          <View style={styles.copy}><Text style={styles.detailTitle}>{selected.name}</Text><Text style={styles.desc}>{selected.desc}</Text><Text style={styles.meta}>{selected.members} 成员 · {selected.flair}</Text></View>
+          <Pressable onPress={() => toggle(selected.id)} style={[styles.joinBtn, isJoined && styles.joinBtnOn]}><Text style={[styles.joinText, isJoined && styles.joinTextOn]}>{isJoined ? "已加入" : "加入"}</Text></Pressable>
+        </View>
+        <Text style={styles.sectionTitle}>圈内正在讨论</Text>
+        <View style={styles.discussion}><Text style={styles.discussionTitle}>本周大家最推荐的地点</Text><Text style={styles.discussionBody}>分享具体地点、作品或经验；回复会留在这个兴趣社区，不进入接单市场。</Text></View>
+        <View style={styles.discussion}><Text style={styles.discussionTitle}>相关公开活动</Text><Text style={styles.discussionBody}>社区内容可以关联活动，但参加活动仍需单独确认，不会因加入社区自动报名。</Text></View>
+      </View>
+    );
   }
 
   return (
@@ -40,7 +59,7 @@ export function CommunityHub({ onOpenCommunity }: { onOpenCommunity?: (id: strin
       {COMMUNITIES.map((c) => {
         const isJoined = joined.has(c.id);
         return (
-          <Pressable key={c.id} onPress={() => onOpenCommunity?.(c.id)} style={styles.card}>
+          <Pressable key={c.id} onPress={() => { setSelectedId(c.id); onOpenCommunity?.(c.id); }} style={styles.card}>
             <View style={[styles.icon, { backgroundColor: c.color }]}>
               <Text style={styles.iconText}>{c.name.charAt(0)}</Text>
             </View>
@@ -75,5 +94,12 @@ const styles = StyleSheet.create({
   joinBtnOn: { backgroundColor: color.ink, borderColor: color.ink },
   joinText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   joinTextOn: { color: color.white },
-  hint: { color: color.muted, fontSize: 11, lineHeight: 14, marginTop: 8, textAlign: "center" }
+  hint: { color: color.muted, fontSize: 11, lineHeight: 14, marginTop: 8, textAlign: "center" },
+  back: { color: color.magenta, fontSize: 12, fontWeight: "800", marginBottom: 8, marginTop: 4 },
+  detailHero: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, padding: 10, ...shadows.card },
+  detailTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
+  sectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginBottom: 3, marginTop: 14 },
+  discussion: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 6, padding: 11 },
+  discussionTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  discussionBody: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 3 }
 });

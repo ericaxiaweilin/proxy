@@ -1,6 +1,13 @@
 import type { FeedMediaItem } from "@proxy/contracts";
 
 export type MediaDimensions = Pick<FeedMediaItem, "aspectRatio" | "width" | "height">;
+export type MediaCollectionMode = "SINGLE" | "RAIL" | "WALL";
+
+export function mediaCollectionMode(itemCount: number): MediaCollectionMode {
+  if (itemCount <= 1) return "SINGLE";
+  if (itemCount === 4 || itemCount === 6) return "WALL";
+  return "RAIL";
+}
 
 export function mediaAspect(item: MediaDimensions, fallback = 4 / 5): number {
   if (item.aspectRatio > 0) return item.aspectRatio;

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { mediaRailMetrics, nearestRailIndex, portraitRailLayout, shouldPreserveWholeSubject } from "./media-presentation.js";
+import { mediaCollectionMode, mediaRailMetrics, nearestRailIndex, portraitRailLayout, shouldPreserveWholeSubject } from "./media-presentation.js";
 
 describe("portrait social media presentation", () => {
+  it("uses a large single, rails for 2/3/5, and walls for 4/6", () => {
+    expect([1, 2, 3, 4, 5, 6].map(mediaCollectionMode)).toEqual([
+      "SINGLE", "RAIL", "RAIL", "WALL", "RAIL", "WALL"
+    ]);
+  });
   it("gives half-body and full-body photos one stable 4:5-like rail", () => {
     const layout = portraitRailLayout([
       { aspectRatio: 4 / 5, width: 2400, height: 3000 },
