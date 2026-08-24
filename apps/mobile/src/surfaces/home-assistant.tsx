@@ -7,6 +7,7 @@ import type { HomeAttachment, HomeIntentMode } from "../components/home-chat-box
 import type { MediaClient } from "../media-client";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import { color, shadows } from "../theme";
+import type { MarketTab } from "../market-fixtures";
 
 const MODE_LABEL: Record<HomeIntentMode, string> = {
   SERVICE: "体验",
@@ -29,7 +30,9 @@ export function HomeAssistantSurface({
   initialText,
   initialAttachment,
   mode,
-  onBack
+  onBack,
+  onOpenMarket,
+  onOpenXiaomei
 }: {
   conversationClient: ConversationClient;
   mediaClient: MediaClient;
@@ -37,6 +40,8 @@ export function HomeAssistantSurface({
   initialAttachment?: HomeAttachment;
   mode?: HomeIntentMode;
   onBack: () => void;
+  onOpenMarket?: (tab: MarketTab) => void;
+  onOpenXiaomei?: () => void;
 }): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string>();
   const [messages, setMessages] = useState<AssistantMessage[]>([
@@ -47,6 +52,7 @@ export function HomeAssistantSurface({
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string>();
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
+  const [suggestedActions, setSuggestedActions] = useState<Array<{ label: string; tab: MarketTab }>>([]);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -89,6 +95,30 @@ export function HomeAssistantSurface({
     return () => clearTimeout(timer);
   }, [messages, status]);
 
+  function handleLocalIntent(text: string): void {
+    const t = text.toLowerCase();
+    if (/(小美|xiaomei|陪同|找.*妹|挑.*人|找小美)/i.test(text)) {
+      setSuggestedActions([{ label: "看小美机会 ›", tab: "OPPORTUNITY" }]);
+      setMessages((cur) => [...cur, makeMessage("小美相关机会已备好 · 不会把她做成货架，价格只属于本次需求。点下面去市场看看，或直接告诉我你想要的时间/地点。", false)]);
+      return;
+    }
+    if (/(活动|聚会|摄影活动|咖啡|品牌活动|周末活动)/i.test(t)) {
+      setSuggestedActions([{ label: "去活动市场 ›", tab: "ACTIVITY" }]);
+      setMessages((cur) => [...cur, makeMessage("活动在另一条主线 · 趋势/附近/本周都在市场-活动里。", false)]);
+      return;
+    }
+    if (/(机会|接单|报名|工作|兼职|找.*机会)/i.test(t)) {
+      setSuggestedActions([{ label: "去机会市场 ›", tab: "OPPORTUNITY" }]);
+      setMessages((cur) => [...cur, makeMessage("机会市场已打开 · 先看客户预算与公平区间，再决定是否报价。", false)]);
+      return;
+    }
+  }
+
+  useEffect(() => {
+    if (!conversationId || loading) return;
+    handleLocalIntent(initialText);
+  }, [conversationId, loading]);
+
   async function send(preparedText?: string, temporaryUIResponseId?: string): Promise<void> {
     const text = (preparedText ?? draft).trim();
     if (!text || !conversationId || sending) return;
@@ -96,6 +126,7 @@ export function HomeAssistantSurface({
     setStatus(undefined);
     setTemporaryUI(undefined);
     setMessages((current) => [...current, makeMessage(text, true)]);
+    handleLocalIntent(text);
     setSending(true);
     try {
       const result = await conversationClient.sendMessage(conversationId, text, mode, temporaryUIResponseId);
@@ -125,8 +156,19 @@ export function HomeAssistantSurface({
       </View>
 
       <View style={styles.contextCard}>
-        <Text style={styles.contextTitle}>Home 语义运行时</Text>
-        <Text style={styles.contextText}>Proxy 先理解你要完成的事，再决定是否需要进入体验、机会或活动的后续动作。</Text>
+        <Text style={styles.contextTitle}>Home 语义运行时 · 全功能入口</Text>
+        <Text style={styles.contextText}>输入 挑选小美 / 活动 / 机会 即可直达对应市场；也支持选人、报价、活动报名等后续动作。</Text>
+      </View>
+      <View style={styles.quickRow}>
+        {[
+          { label: "挑选小美", text: "帮我挑选小美" },
+          { label: "看活动", text: "最近有什么活动" },
+          { label: "找机会", text: "有什么适合我的机会" }
+        ].map((q) => (
+          <Pressable key={q.label} onPress={() => setDraft(q.text)} style={styles.quickPill}>
+            <Text style={styles.quickText}>{q.label}</Text>
+          </Pressable>
+        ))}
       </View>
 
       <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messageContent} keyboardShouldPersistTaps="handled">
@@ -139,6 +181,18 @@ export function HomeAssistantSurface({
           </View>
         ))}
         {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
+        {suggestedActions.length > 0 ? (
+          <View style={styles.suggestedRow}>
+            {suggestedActions.map((a) => (
+              <Pressable key={a.label} onPress={() => { if (a.label.includes("小美") && onOpenXiaomei) onOpenXiaomei(); else onOpenMarket?.(a.tab); }} style={styles.suggestedPill}>
+                <Text style={styles.suggestedText}>{a.label}</Text>
+              </Pressable>
+            ))}
+            <Pressable onPress={() => setSuggestedActions([])} style={[styles.suggestedPill, styles.suggestedGhost]}>
+              <Text style={[styles.suggestedText, styles.suggestedGhostText]}>留在对话</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {loading ? <View style={styles.systemPill}><Text style={styles.systemText}>正在理解你的意图…</Text></View> : null}
         {status ? <View style={styles.statusBox}><Text style={styles.statusText}>{status}</Text></View> : null}
       </ScrollView>
@@ -149,7 +203,7 @@ export function HomeAssistantSurface({
           multiline
           onChangeText={setDraft}
           onSubmitEditing={() => void send()}
-          placeholder={conversationId ? "继续告诉 Proxy…" : "连接中…"}
+          placeholder={conversationId ? "输入 挑选小美 / 活动 / 机会 试试…" : "连接中…"}
           placeholderTextColor="#A9A2B0"
           style={styles.input}
           value={draft}
@@ -230,5 +284,13 @@ const styles = StyleSheet.create({
   input: { backgroundColor: "#FCFBFD", borderColor: "#DDD5E3", borderRadius: 15, borderWidth: 1, color: color.ink, flex: 1, fontSize: 11, lineHeight: 16, maxHeight: 88, minHeight: 42, paddingHorizontal: 11, paddingVertical: 8 },
   sendButton: { alignItems: "center", backgroundColor: color.magenta, borderRadius: 14, height: 42, justifyContent: "center", width: 42 },
   disabled: { opacity: 0.4 },
-  sendText: { color: color.white, fontSize: 20, fontWeight: "900" }
+  sendText: { color: color.white, fontSize: 20, fontWeight: "900" },
+  quickRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 14, paddingBottom: 8 },
+  quickPill: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  quickText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  suggestedRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 2, paddingTop: 4 },
+  suggestedPill: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  suggestedText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  suggestedGhost: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1 },
+  suggestedGhostText: { color: color.muted }
 });

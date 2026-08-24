@@ -149,10 +149,10 @@ export function MarketSurface({
         </View>
         <View style={styles.headActions}>
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
-            <Text style={[styles.viewToggleText, view === "MAP" && styles.viewToggleTextOn]}>{view === "MAP" ? "▤" : "⌖"}</Text>
+            <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "route"} size={18} />
           </Pressable>
           <Pressable onPress={() => setPublishOpen(true)} style={styles.plusBtn}>
-            <Text style={styles.plusBtnText}>＋</Text>
+            <ProxyIcon color={color.white} name="plus" size={18} />
           </Pressable>
         </View>
       </View>
@@ -345,7 +345,7 @@ function OpportunityTab({
       </View>
 
       <View style={styles.localScope}>
-        <Text style={styles.localScopeGlyph}>⌖</Text>
+        <ProxyIcon color={color.violet} name="route" size={12} />
         <Text style={styles.localScopeText}>{lens === "REMOTE" ? "远程 · 不受通勤限制" : `${marketLabel} · 默认只展示可履约范围 · 价格先可见`}</Text>
       </View>
 
@@ -861,7 +861,7 @@ function MarketMap({
         ))}
       </View>
       <View style={styles.geoPrivacy}>
-        <Text style={styles.geoPrivacyGlyph}>⌖</Text>
+        <ProxyIcon color={color.ink} name="route" size={14} />
         <View style={styles.geoPrivacyCopy}>
           <Text style={styles.geoPrivacyTitle}>{config.privacyTitle}</Text>
           <Text style={styles.geoPrivacyText}>{config.privacyText}</Text>

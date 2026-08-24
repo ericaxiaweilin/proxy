@@ -208,6 +208,14 @@ export function AppShell({
               {...(homeAssistant.attachment ? { initialAttachment: homeAssistant.attachment } : {})}
               {...(homeAssistant.mode ? { mode: homeAssistant.mode } : {})}
               onBack={() => setHomeAssistant(undefined)}
+              onOpenMarket={(tab) => {
+                setHomeAssistant(undefined);
+                openMarket({ tab });
+              }}
+              onOpenXiaomei={() => {
+                setHomeAssistant(undefined);
+                openMarket({ tab: "OPPORTUNITY" });
+              }}
             />
           ) : context === "BUSINESS" ? (
             <BusinessHome
@@ -323,7 +331,7 @@ function LocationContext(): React.JSX.Element {
   return (
     <View style={styles.locationRow}>
       <View style={styles.locationPin}>
-        <ProxyIcon color={color.ink} name="crosshair" size={17} />
+        <ProxyIcon color={color.ink} name="route" size={17} />
       </View>
       <View style={styles.locationCopy}>
         <Text style={styles.locationCity}>河内 · 还剑湖附近</Text>
