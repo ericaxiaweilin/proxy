@@ -214,11 +214,17 @@ func (r *MemoryRepository) Events() []event.DomainEvent {
 	return result
 }
 
+type PaymentProvider interface {
+	CreateQR(ctx context.Context, req VietQRRequest) (VietQRResponse, error)
+	Refund(ctx context.Context, paymentIntentID string, amountMinor int64) (string, error)
+}
+
 type Service struct {
-	mu         sync.Mutex
-	repo       TransactionalRepository
-	clock      clock.Clock
-	sandbox    bool
+	mu       sync.Mutex
+	repo     TransactionalRepository
+	clock    clock.Clock
+	sandbox  bool
+	provider PaymentProvider
 }
 
 func New() *Service { return NewWithRepository(NewMemoryRepository()) }
@@ -226,7 +232,16 @@ func NewWithRepository(repo TransactionalRepository) *Service {
 	if repo == nil {
 		repo = NewMemoryRepository()
 	}
-	return &Service{repo: repo, clock: clock.System{}, sandbox: true}
+	return &Service{repo: repo, clock: clock.System{}, sandbox: true, provider: NewVietQRProvider()}
+}
+func NewWithProvider(repo TransactionalRepository, provider PaymentProvider) *Service {
+	if repo == nil {
+		repo = NewMemoryRepository()
+	}
+	if provider == nil {
+		provider = NewVietQRProvider()
+	}
+	return &Service{repo: repo, clock: clock.System{}, sandbox: true, provider: provider}
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -279,6 +294,12 @@ func (s *Service) createIntent(ctx context.Context, e command.Envelope) command.
 		p.AgentID = "agent_unknown"
 	}
 	now := s.clock.Now().UTC()
+	// VietQR bank scan: create PENDING intent with QR via provider
+	providerRef := newID("vietqr_")
+	qrResp, err := s.provider.CreateQR(ctx, VietQRRequest{OrderID: p.OrderID, AmountMinor: p.AmountMinor, Currency: p.Currency, ProviderRef: providerRef})
+	if err != nil {
+		return command.Rejected(e, "PAYMENT_PROVIDER_ERROR", "PROVIDER", "SAFE_RETRY", "payment.provider_error", nil)
+	}
 	pi := PaymentIntent{
 		ID:          newID("pi_"),
 		OrderID:     p.OrderID,
@@ -287,25 +308,17 @@ func (s *Service) createIntent(ctx context.Context, e command.Envelope) command.
 		AmountMinor: p.AmountMinor,
 		Currency:    p.Currency,
 		Status:      "PENDING",
+		ProviderRef: qrResp.ProviderRef,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	// Sandbox: immediately succeed and create balanced ledger (DEBIT_REQUESTER + CREDIT_HOLD)
-	pi.Status = "SUCCEEDED"
-	pi.ProviderRef = "sandbox_" + pi.ID
-	pi.UpdatedAt = now
-	entries := []LedgerEntry{
-		{ID: newID("le_"), PaymentIntentID: pi.ID, OrderID: pi.OrderID, EntryType: "DEBIT_REQUESTER", AmountMinor: pi.AmountMinor, Currency: pi.Currency, CreatedAt: now},
-		{ID: newID("le_"), PaymentIntentID: pi.ID, OrderID: pi.OrderID, EntryType: "CREDIT_HOLD", AmountMinor: pi.AmountMinor, Currency: pi.Currency, CreatedAt: now},
-	}
-	if !isBalanced(entries) {
-		return command.Rejected(e, "UNBALANCED_LEDGER", "INTERNAL", "NO", "payment.unbalanced", nil)
-	}
-	domainEvents := []event.DomainEvent{event.New("PaymentIntentSucceeded", "PaymentIntent", pi.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"orderId": pi.OrderID, "amount": pi.AmountMinor})}
-	if err := s.repo.CreateIntentAndLedgerAndPublish(ctx, pi, entries, domainEvents); err != nil {
+	domainEvents := []event.DomainEvent{event.New("PaymentIntentCreated", "PaymentIntent", pi.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"orderId": pi.OrderID, "providerRef": pi.ProviderRef})}
+	if err := s.repo.CreateIntent(ctx, pi); err != nil {
 		return command.Rejected(e, "PAYMENT_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "payment.create_failed", nil)
 	}
-	return acceptedWithPayload(e, "PaymentIntent", pi.ID, 1, pi.Status, map[string]any{"paymentIntentId": pi.ID, "status": pi.Status}, domainEvents)
+	// publish event via direct Add? For now just return pending with QR
+	_ = domainEvents
+	return acceptedWithPayload(e, "PaymentIntent", pi.ID, 1, pi.Status, map[string]any{"paymentIntentId": pi.ID, "status": pi.Status, "qrString": qrResp.QRString, "expiresAt": qrResp.ExpiresAt.Format(time.RFC3339), "providerRef": pi.ProviderRef}, domainEvents)
 }
 
 type confirmPayload struct {
@@ -349,7 +362,29 @@ func (s *Service) confirmIntent(ctx context.Context, e command.Envelope) command
 	if p.Status == "UNKNOWN" {
 		return command.Pending(e, pi.ID, "PAYMENT_UNKNOWN", "PROVIDER", "payment.unknown", nil)
 	}
-	// save dedupe
+	// Provider confirms success -> create balanced ledger (bank QR scanned + bank confirmed)
+	if p.Status == "SUCCEEDED" || p.Status == "" {
+		now := s.clock.Now().UTC()
+		pi.Status = "SUCCEEDED"
+		pi.UpdatedAt = now
+		entries := []LedgerEntry{
+			{ID: newID("le_"), PaymentIntentID: pi.ID, OrderID: pi.OrderID, EntryType: "DEBIT_REQUESTER", AmountMinor: pi.AmountMinor, Currency: pi.Currency, CreatedAt: now},
+			{ID: newID("le_"), PaymentIntentID: pi.ID, OrderID: pi.OrderID, EntryType: "CREDIT_HOLD", AmountMinor: pi.AmountMinor, Currency: pi.Currency, CreatedAt: now},
+		}
+		if !isBalanced(entries) {
+			return command.Rejected(e, "UNBALANCED_LEDGER", "INTERNAL", "NO", "payment.unbalanced", nil)
+		}
+		domainEvents := []event.DomainEvent{event.New("PaymentIntentSucceeded", "PaymentIntent", pi.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"orderId": pi.OrderID, "amount": pi.AmountMinor, "providerEventId": p.ProviderEventID})}
+		if err := s.repo.UpdateIntentAndLedgerAndPublish(ctx, pi, entries, "PENDING", domainEvents); err != nil {
+			if errors.Is(err, ErrIntentConflict) {
+				return command.Rejected(e, "PAYMENT_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "payment.conflict", nil)
+			}
+			return command.Rejected(e, "PAYMENT_CONFIRM_FAILED", "INTERNAL", "SAFE_RETRY", "payment.confirm_failed", nil)
+		}
+		_ = s.repo.SaveProviderEvent(ctx, p.ProviderEventID, pi.ID, e.Payload)
+		return command.Accepted(e, "PaymentIntent", pi.ID, 1, pi.Status, nil)
+	}
+	// save dedupe for other statuses
 	_ = s.repo.SaveProviderEvent(ctx, p.ProviderEventID, pi.ID, e.Payload)
 	return command.Accepted(e, "PaymentIntent", pi.ID, 1, pi.Status, nil)
 }

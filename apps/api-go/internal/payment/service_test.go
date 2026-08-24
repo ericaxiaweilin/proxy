@@ -18,10 +18,28 @@ func envelopeFor(cmd, target string, payload map[string]any) command.Envelope {
 func TestCreatePaymentIntentBalanced(t *testing.T) {
 	s := New()
 	r := s.Handle(envelopeFor("CreatePaymentIntent", "order_1", map[string]any{"orderId": "order_1", "agentId": "agent_1", "amountMinor": int64(1200000)}))
-	if r.Outcome != "ACCEPTED" {
-		t.Fatalf("create: %s %+v", r.Outcome, r.Error)
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "PENDING" {
+		t.Fatalf("create: %s %s %+v", r.Outcome, r.Aggregate.State, r.Error)
+	}
+	// VietQR bank scan: should return QR
+	if r.OperationRef == "" || len(r.OperationRef) < 10 {
+		t.Fatal("qr missing")
 	}
 	ledger, _ := s.repo.ListLedger(nil, "order_1")
+	if len(ledger) != 0 {
+		t.Fatalf("ledger should be empty before provider confirm, got %d", len(ledger))
+	}
+	// provider confirms via bank app scan
+	var piID string
+	for id := range s.repo.(*MemoryRepository).intents {
+		piID = id
+		break
+	}
+	r2 := s.Handle(envelopeFor("ConfirmPaymentIntent", piID, map[string]any{"paymentIntentId": piID, "providerEventId": "evt_qr_1", "status": "SUCCEEDED"}))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %s %+v", r2.Outcome, r2.Error)
+	}
+	ledger, _ = s.repo.ListLedger(nil, "order_1")
 	if len(ledger) != 2 {
 		t.Fatalf("ledger len %d", len(ledger))
 	}

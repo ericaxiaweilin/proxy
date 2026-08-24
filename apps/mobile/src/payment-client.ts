@@ -13,9 +13,9 @@ export class PaymentClient {
     },
   ) {}
 
-  public async createIntent(input: { orderId: string; agentId: string; amountMinor: number; currency?: string }): Promise<{ paymentIntentId: string }> {
+  public async createIntent(input: { orderId: string; agentId: string; amountMinor: number; currency?: string }): Promise<{ paymentIntentId: string; qrString: string; providerRef: string }> {
     const body = this.body(await this.command("CreatePaymentIntent", { type: "Payment", id: input.orderId }, input as unknown as Record<string, unknown>));
-    return { paymentIntentId: body.paymentIntentId as string };
+    return { paymentIntentId: body.paymentIntentId as string, qrString: body.qrString as string, providerRef: body.providerRef as string };
   }
 
   public async confirmIntent(input: { paymentIntentId: string; providerEventId: string; amountMinor?: number; currency?: string; status: string }): Promise<void> {
