@@ -2,10 +2,12 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -14,9 +16,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
+
+type failingProcessor struct{ calls int }
+
+func (p *failingProcessor) Process(context.Context, string) (ProcessResult, error) {
+	p.calls++
+	return ProcessResult{}, errors.New("transcoder unavailable")
+}
 
 func TestSaveUploadPersistsOnlyOwnersBytes(t *testing.T) {
 	dir := t.TempDir()
@@ -191,7 +201,8 @@ func createVideoAsset(t *testing.T, s *Service) string {
 
 // 状态机：UPLOADING → PROCESSING → READY；只有 READY 可播。
 func TestMediaLifecycleAndPlayability(t *testing.T) {
-	s := New()
+	repository := NewMemoryRepository()
+	s := NewWithDependencies(repository, nil)
 	id := createVideoAsset(t, s)
 
 	// UPLOADING 不可播
@@ -210,17 +221,14 @@ func TestMediaLifecycleAndPlayability(t *testing.T) {
 		t.Fatalf("complete upload: %s/%s", r.Outcome, r.Aggregate.State)
 	}
 
-	// Process → READY（无 processor，模拟成功）
+	// Process command only confirms the durable job; expensive work is off-request.
 	r = s.Handle(envelopeFor("ProcessMediaAsset", map[string]any{"originalPath": "/tmp/nonexist.mp4"}, id))
-	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "READY" {
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "PROCESSING" {
 		t.Fatalf("process: %s/%s (%+v)", r.Outcome, r.Aggregate.State, r.Error)
 	}
-	var readyView struct {
-		PlaybackURL string `json:"playbackUrl"`
-	}
-	_ = json.Unmarshal([]byte(r.OperationRef), &readyView)
-	if readyView.PlaybackURL == "" {
-		t.Fatal("READY must have playback url")
+	worker := Worker{Repository: repository, Service: s, WorkerID: "test-worker"}
+	if processed, err := worker.RunOnce(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("worker: processed=%d err=%v", processed, err)
 	}
 
 	// READY 可播
@@ -228,6 +236,38 @@ func TestMediaLifecycleAndPlayability(t *testing.T) {
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	if !view.Playable {
 		t.Fatal("READY must be playable")
+	}
+}
+
+func TestProcessingRunsOnlyInWorkerAndDeadLettersAfterRetries(t *testing.T) {
+	repository := NewMemoryRepository()
+	processor := &failingProcessor{}
+	service := NewWithDependencies(repository, processor)
+	id := createVideoAsset(t, service)
+	result := service.Handle(envelopeFor("CompleteMediaUpload", map[string]any{"originalStorageKey": "uploads/test_video.mp4"}, id))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("complete: %+v", result.Error)
+	}
+	result = service.Handle(envelopeFor("ProcessMediaAsset", map[string]any{"originalPath": "/tmp/ignored.mp4"}, id))
+	if result.Aggregate.State != "PROCESSING" || processor.calls != 0 {
+		t.Fatalf("API request ran processor: state=%s calls=%d", result.Aggregate.State, processor.calls)
+	}
+	now := time.Now().UTC().Add(time.Second)
+	worker := Worker{Repository: repository, Service: service, WorkerID: "worker-a", MaxAttempts: 2, Clock: func() time.Time { return now }}
+	if processed, err := worker.RunOnce(t.Context()); err != nil || processed != 0 || processor.calls != 1 {
+		t.Fatalf("first attempt: processed=%d calls=%d err=%v", processed, processor.calls, err)
+	}
+	asset, _ := repository.GetAsset(t.Context(), id)
+	if asset.ProcessingStatus != "PROCESSING" {
+		t.Fatalf("transient failure must remain retryable, got %s", asset.ProcessingStatus)
+	}
+	now = now.Add(2 * time.Second)
+	if processed, err := worker.RunOnce(t.Context()); err != nil || processed != 0 || processor.calls != 2 {
+		t.Fatalf("second attempt: processed=%d calls=%d err=%v", processed, processor.calls, err)
+	}
+	asset, _ = repository.GetAsset(t.Context(), id)
+	if asset.ProcessingStatus != "FAILED" {
+		t.Fatalf("dead letter must surface FAILED, got %s", asset.ProcessingStatus)
 	}
 }
 
@@ -247,7 +287,8 @@ func TestImageGoesReadyDirectly(t *testing.T) {
 		t.Skip("ffmpeg not installed")
 	}
 	dir := t.TempDir()
-	s := New()
+	repository := NewMemoryRepository()
+	s := NewWithDependencies(repository, nil)
 	s.SetStoreDir(dir)
 	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
 		"mediaType": "IMAGE", "originalStorageKey": "photo.jpg", "mimeType": "image/jpeg",
@@ -275,8 +316,12 @@ func TestImageGoesReadyDirectly(t *testing.T) {
 		t.Fatalf("complete: %s", r.Outcome)
 	}
 	r = s.Handle(envelopeFor("ProcessMediaAsset", map[string]any{"originalPath": ""}, id))
-	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "READY" {
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "PROCESSING" {
 		t.Fatalf("image process: %s/%s", r.Outcome, r.Aggregate.State)
+	}
+	worker := Worker{Repository: repository, Service: s, WorkerID: "test-worker"}
+	if processed, err := worker.RunOnce(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("image worker: processed=%d err=%v", processed, err)
 	}
 	variants, err := s.ListReadyVariants(t.Context(), id)
 	if err != nil || len(variants) != 6 {

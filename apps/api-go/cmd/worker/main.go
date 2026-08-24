@@ -6,10 +6,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/outbox"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 )
@@ -52,12 +54,18 @@ func main() {
 	if os.Getenv("OUTBOX_DELIVERY") == "log" {
 		delivery = logDelivery{}
 	}
-	worker := outbox.Worker{
+	outboxWorker := outbox.Worker{
 		Repository:  postgres.NewOutboxRepository(pool),
 		Delivery:    delivery,
 		WorkerID:    workerID,
 		BatchSize:   50,
 		MaxAttempts: 10,
+	}
+	mediaRepository := postgres.NewMediaRepository(pool)
+	mediaService := media.NewWithDependencies(mediaRepository, media.NewFFmpegProcessor(filepath.Join("media_store")))
+	mediaWorker := media.Worker{
+		Repository: mediaRepository, Service: mediaService, WorkerID: workerID,
+		BatchSize: 4, MaxAttempts: 5,
 	}
 
 	ticker := time.NewTicker(time.Second)
@@ -68,13 +76,19 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			processed, runErr := worker.RunOnce(ctx)
+			processed, runErr := outboxWorker.RunOnce(ctx)
 			if runErr != nil {
 				log.Printf("outbox poll failed: %v", runErr)
+			} else if processed > 0 {
+				log.Printf("outbox batch delivered: count=%d", processed)
+			}
+			mediaProcessed, mediaErr := mediaWorker.RunOnce(ctx)
+			if mediaErr != nil {
+				log.Printf("media processing poll failed: %v", mediaErr)
 				continue
 			}
-			if processed > 0 {
-				log.Printf("outbox batch delivered: count=%d", processed)
+			if mediaProcessed > 0 {
+				log.Printf("media processing batch completed: count=%d", mediaProcessed)
 			}
 		}
 	}

@@ -59,7 +59,25 @@ export class MediaClient {
 
     await this.command("CompleteMediaUpload", { type: "MediaAsset", id: mediaAssetId }, { originalStorageKey: storageKey });
     await this.command("ProcessMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { originalPath: "" });
+    await this.waitUntilReady(mediaAssetId);
     return { mediaAssetId, storageKey };
+  }
+
+  private async waitUntilReady(mediaAssetId: string): Promise<void> {
+    const deadline = Date.now() + 60_000;
+    let delayMs = 300;
+    while (Date.now() < deadline) {
+      const result = await this.command("GetMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { mediaAssetId });
+      const asset = result.asset;
+      const status = asset && typeof asset === "object" && "processingStatus" in asset
+        ? (asset as { processingStatus?: unknown }).processingStatus
+        : undefined;
+      if (status === "READY") return;
+      if (status === "FAILED") throw new Error("照片处理失败，请重试");
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs = Math.min(Math.round(delayMs * 1.5), 2_000);
+    }
+    throw new Error("照片仍在处理中，请稍后重试发布");
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<Record<string, unknown>> {

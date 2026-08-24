@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,10 +43,10 @@ func (r *MediaRepository) GetAsset(ctx context.Context, id string) (media.MediaA
 	var a media.MediaAsset
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT media_asset_id, owner_principal_type, owner_principal_id, media_type,
-			original_storage_key, playback_storage_key, thumbnail_storage_key,
-			mime_type, width, height, duration_ms, codec,
-			processing_status, playback_url, thumbnail_url, source_bytes, checksum_sha256,
-			orientation, color_space, has_alpha, animated, moderation_status, visibility_class,
+			original_storage_key, COALESCE(playback_storage_key,''), COALESCE(thumbnail_storage_key,''),
+			COALESCE(mime_type,''), COALESCE(width,0), COALESCE(height,0), COALESCE(duration_ms,0), COALESCE(codec,''),
+			processing_status, COALESCE(playback_url,''), COALESCE(thumbnail_url,''), COALESCE(source_bytes,0), COALESCE(checksum_sha256,''),
+			COALESCE(orientation,1), COALESCE(color_space,''), has_alpha, animated, moderation_status, visibility_class,
 			created_at, updated_at
 		FROM media.media_assets WHERE media_asset_id = $1`, id).Scan(
 		&a.MediaAssetID, &a.OwnerPrincipalType, &a.OwnerPrincipalID, &a.MediaType,
@@ -90,10 +91,10 @@ func (r *MediaRepository) UpdateAsset(ctx context.Context, a media.MediaAsset, e
 func (r *MediaRepository) Snapshot(ctx context.Context) ([]media.MediaAsset, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT media_asset_id, owner_principal_type, owner_principal_id, media_type,
-			original_storage_key, playback_storage_key, thumbnail_storage_key,
-			mime_type, width, height, duration_ms, codec,
-			processing_status, playback_url, thumbnail_url, source_bytes, checksum_sha256,
-			orientation, color_space, has_alpha, animated, moderation_status, visibility_class,
+			original_storage_key, COALESCE(playback_storage_key,''), COALESCE(thumbnail_storage_key,''),
+			COALESCE(mime_type,''), COALESCE(width,0), COALESCE(height,0), COALESCE(duration_ms,0), COALESCE(codec,''),
+			processing_status, COALESCE(playback_url,''), COALESCE(thumbnail_url,''), COALESCE(source_bytes,0), COALESCE(checksum_sha256,''),
+			COALESCE(orientation,1), COALESCE(color_space,''), has_alpha, animated, moderation_status, visibility_class,
 			created_at, updated_at
 		FROM media.media_assets ORDER BY created_at DESC`)
 	if err != nil {
@@ -140,7 +141,7 @@ func (r *MediaRepository) UpsertVariant(ctx context.Context, variant media.Media
 func (r *MediaRepository) ListVariants(ctx context.Context, mediaAssetID string) ([]media.MediaVariant, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT media_variant_id, media_asset_id, purpose, recipe_version, format,
-			width, height, bytes, storage_key, content_hash, status, created_at, updated_at
+			width, height, COALESCE(bytes,0), storage_key, COALESCE(content_hash,''), status, created_at, updated_at
 		FROM media.media_variants
 		WHERE media_asset_id=$1
 		ORDER BY purpose`, mediaAssetID)
@@ -167,7 +168,7 @@ func (r *MediaRepository) GetVariant(ctx context.Context, variantID string) (med
 	var variant media.MediaVariant
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT media_variant_id, media_asset_id, purpose, recipe_version, format,
-			width, height, bytes, storage_key, content_hash, status, created_at, updated_at
+			width, height, COALESCE(bytes,0), storage_key, COALESCE(content_hash,''), status, created_at, updated_at
 		FROM media.media_variants WHERE media_variant_id=$1`, variantID).Scan(
 		&variant.MediaVariantID, &variant.MediaAssetID, &variant.Purpose, &variant.RecipeVersion,
 		&variant.Format, &variant.Width, &variant.Height, &variant.Bytes, &variant.StorageKey,
@@ -179,4 +180,114 @@ func (r *MediaRepository) GetVariant(ctx context.Context, variantID string) (med
 	return variant, err
 }
 
+func (r *MediaRepository) EnqueueProcessingJob(ctx context.Context, job media.ProcessingJob) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO media.processing_jobs (
+			job_id, media_asset_id, recipe_version, status, attempts,
+			available_at, created_at, updated_at
+		) VALUES ($1,$2,$3,'PENDING',0,$4,$4,$4)
+		ON CONFLICT (media_asset_id, recipe_version) DO UPDATE SET
+			status = CASE
+				WHEN media.processing_jobs.status IN ('COMPLETED','PROCESSING','PENDING') THEN media.processing_jobs.status
+				ELSE 'PENDING'
+			END,
+			available_at = CASE
+				WHEN media.processing_jobs.status IN ('COMPLETED','PROCESSING','PENDING') THEN media.processing_jobs.available_at
+				ELSE EXCLUDED.available_at
+			END,
+			last_error = CASE
+				WHEN media.processing_jobs.status IN ('COMPLETED','PROCESSING','PENDING') THEN media.processing_jobs.last_error
+				ELSE NULL
+			END,
+			updated_at = EXCLUDED.updated_at`,
+		job.JobID, job.MediaAssetID, job.RecipeVersion, job.AvailableAt.UTC())
+	return err
+}
+
+func (r *MediaRepository) ClaimProcessingJobs(ctx context.Context, workerID string, limit int, now time.Time) ([]media.ProcessingJob, error) {
+	if limit <= 0 {
+		return []media.ProcessingJob{}, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `
+		UPDATE media.processing_jobs
+		SET status='PENDING', worker_id=NULL, processing_at=NULL, available_at=$1::timestamptz, updated_at=$1::timestamptz
+		WHERE status='PROCESSING' AND processing_at < ($1::timestamptz - interval '5 minutes')`, now.UTC()); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `
+		WITH claimed AS (
+			SELECT job_id FROM media.processing_jobs
+			WHERE status IN ('PENDING','FAILED') AND available_at <= $1::timestamptz
+			ORDER BY available_at, created_at
+			FOR UPDATE SKIP LOCKED
+			LIMIT $2
+		)
+		UPDATE media.processing_jobs jobs
+		SET status='PROCESSING', attempts=jobs.attempts+1, worker_id=$3,
+			processing_at=$1::timestamptz, updated_at=$1::timestamptz
+		FROM claimed WHERE jobs.job_id=claimed.job_id
+		RETURNING jobs.job_id, jobs.media_asset_id, jobs.recipe_version,
+			jobs.status, jobs.attempts, jobs.available_at, COALESCE(jobs.last_error,'')`,
+		now.UTC(), limit, workerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []media.ProcessingJob{}
+	for rows.Next() {
+		var job media.ProcessingJob
+		if err := rows.Scan(&job.JobID, &job.MediaAssetID, &job.RecipeVersion, &job.Status, &job.Attempts, &job.AvailableAt, &job.LastError); err != nil {
+			return nil, err
+		}
+		result = append(result, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (r *MediaRepository) MarkProcessingJobCompleted(ctx context.Context, workerID, jobID string, completedAt time.Time) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media.processing_jobs
+		SET status='COMPLETED', worker_id=NULL, processing_at=NULL, updated_at=$1
+		WHERE job_id=$2 AND status='PROCESSING' AND worker_id=$3`, completedAt.UTC(), jobID, workerID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return media.ErrProcessingJobNotClaimed
+	}
+	return nil
+}
+
+func (r *MediaRepository) MarkProcessingJobFailed(ctx context.Context, workerID, jobID, reason string, next time.Time, deadLetter bool) error {
+	status := "FAILED"
+	if deadLetter {
+		status = "DEAD_LETTER"
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media.processing_jobs
+		SET status=$1, available_at=$2, last_error=$3, worker_id=NULL,
+			processing_at=NULL, updated_at=$2
+		WHERE job_id=$4 AND status='PROCESSING' AND worker_id=$5`,
+		status, next.UTC(), reason, jobID, workerID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return media.ErrProcessingJobNotClaimed
+	}
+	return nil
+}
+
 var _ media.Repository = (*MediaRepository)(nil)
+var _ media.ProcessingJobRepository = (*MediaRepository)(nil)

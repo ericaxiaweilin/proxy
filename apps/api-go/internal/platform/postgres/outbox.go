@@ -59,30 +59,31 @@ func (r *OutboxRepository) Claim(ctx context.Context, workerID string, limit int
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `
 		UPDATE integration.outbox_messages
-		SET status = 'PENDING', worker_id = NULL, processing_at = NULL, available_at = $1
-		WHERE status = 'PROCESSING' AND processing_at < $1 - interval '5 minutes'`, now.UTC()); err != nil {
+		SET status = 'PENDING', worker_id = NULL, claimed_until = NULL
+		WHERE status = 'PROCESSING' AND claimed_until <= $1`, now.UTC()); err != nil {
 		return nil, err
 	}
 
 	rows, err := tx.Query(ctx, `
 		WITH claimed AS (
-			SELECT outbox_id
+			SELECT event_id
 			FROM integration.outbox_messages
-			WHERE status IN ('PENDING', 'FAILED') AND available_at <= $1
-			ORDER BY available_at, created_at
+			WHERE status IN ('PENDING', 'FAILED')
+				AND (claimed_until IS NULL OR claimed_until <= $1)
+			ORDER BY COALESCE(claimed_until, occurred_at), created_at
 			FOR UPDATE SKIP LOCKED
 			LIMIT $2
 		)
 		UPDATE integration.outbox_messages AS messages
 		SET status = 'PROCESSING', attempts = messages.attempts + 1,
-			worker_id = $3, processing_at = $1
+			worker_id = $3, claimed_until = $1 + interval '5 minutes'
 		FROM claimed
-		WHERE messages.outbox_id = claimed.outbox_id
+		WHERE messages.event_id = claimed.event_id
 		RETURNING messages.event_id, messages.event_type, messages.event_version,
 			messages.aggregate_type, messages.aggregate_id, messages.aggregate_version,
 			messages.principal_id, messages.occurred_at, messages.correlation_id,
 			messages.causation_id, messages.payload, messages.status, messages.attempts,
-			messages.available_at, COALESCE(messages.last_error, '')`,
+			COALESCE(messages.claimed_until, $1), COALESCE(messages.last_error, '')`,
 		now.UTC(), limit, workerID)
 	if err != nil {
 		return nil, err
@@ -124,7 +125,7 @@ func (r *OutboxRepository) Claim(ctx context.Context, workerID string, limit int
 func (r *OutboxRepository) MarkSent(ctx context.Context, workerID, eventID string, sentAt time.Time) error {
 	commandTag, err := r.pool.Exec(ctx, `
 		UPDATE integration.outbox_messages
-		SET status = 'SENT', sent_at = $1, worker_id = NULL, processing_at = NULL
+		SET status = 'SENT', delivered_at = $1, worker_id = NULL, claimed_until = NULL
 		WHERE event_id = $2 AND status = 'PROCESSING' AND worker_id = $3`, sentAt.UTC(), eventID, workerID)
 	if err != nil {
 		return err
@@ -142,8 +143,8 @@ func (r *OutboxRepository) MarkFailed(ctx context.Context, workerID, eventID, re
 	}
 	commandTag, err := r.pool.Exec(ctx, `
 		UPDATE integration.outbox_messages
-		SET status = $1, available_at = $2, last_error = $3,
-			worker_id = NULL, processing_at = NULL
+		SET status = $1, claimed_until = $2, last_error = $3,
+			worker_id = NULL
 		WHERE event_id = $4 AND status = 'PROCESSING' AND worker_id = $5`,
 		status, nextAttemptAt.UTC(), reason, eventID, workerID)
 	if err != nil {

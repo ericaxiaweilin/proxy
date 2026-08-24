@@ -78,6 +78,16 @@ type MediaVariant struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
+type ProcessingJob struct {
+	JobID         string    `json:"jobId"`
+	MediaAssetID  string    `json:"mediaAssetId"`
+	RecipeVersion string    `json:"recipeVersion"`
+	Status        string    `json:"status"`
+	Attempts      int       `json:"attempts"`
+	AvailableAt   time.Time `json:"availableAt"`
+	LastError     string    `json:"lastError,omitempty"`
+}
+
 // VideoMetadata 是 ffprobe 输出（时长/分辨率/codec/rotation）。
 type VideoMetadata struct {
 	Width      int    `json:"width"`
@@ -108,6 +118,13 @@ type Repository interface {
 	UpsertVariant(ctx context.Context, variant MediaVariant) error
 	GetVariant(ctx context.Context, variantID string) (MediaVariant, error)
 	ListVariants(ctx context.Context, mediaAssetID string) ([]MediaVariant, error)
+	EnqueueProcessingJob(ctx context.Context, job ProcessingJob) error
+}
+
+type ProcessingJobRepository interface {
+	ClaimProcessingJobs(ctx context.Context, workerID string, limit int, now time.Time) ([]ProcessingJob, error)
+	MarkProcessingJobCompleted(ctx context.Context, workerID, jobID string, completedAt time.Time) error
+	MarkProcessingJobFailed(ctx context.Context, workerID, jobID, reason string, nextAttemptAt time.Time, deadLetter bool) error
 }
 
 var (
@@ -123,11 +140,17 @@ type MemoryRepository struct {
 	mu       sync.Mutex
 	assets   map[string]MediaAsset
 	variants map[string]MediaVariant
+	jobs     map[string]memoryProcessingJob
 	events   []event.DomainEvent
 }
 
+type memoryProcessingJob struct {
+	job    ProcessingJob
+	worker string
+}
+
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{assets: make(map[string]MediaAsset), variants: make(map[string]MediaVariant)}
+	return &MemoryRepository{assets: make(map[string]MediaAsset), variants: make(map[string]MediaVariant), jobs: make(map[string]memoryProcessingJob)}
 }
 
 func (r *MemoryRepository) CreateAsset(_ context.Context, a MediaAsset) error {
@@ -575,12 +598,16 @@ func (s *Service) completeUpload(ctx context.Context, e command.Envelope) comman
 	if err := s.repository.UpdateAsset(ctx, asset, "UPLOADING"); err != nil {
 		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
 	}
+	if err := s.repository.EnqueueProcessingJob(ctx, processingJobFor(asset, asset.UpdatedAt)); err != nil {
+		return command.Rejected(e, "MEDIA_JOB_ENQUEUE_FAILED", "INTERNAL", "SAFE_RETRY", "media.job_enqueue_failed", nil)
+	}
 	return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, "PROCESSING", eventRefs(domainEvents))
 }
 
 // ---------- ProcessMediaAsset ----------
-// Worker 触发：ffprobe + ffmpeg 标准化 → 标准 MP4 + thumbnail。
-// 无 processor 时（dev 无 ffmpeg）跳到 READY。
+// Compatibility command: processing is always performed by the durable worker.
+// Calling this command only confirms/repairs the idempotent queue entry; it
+// never runs ffmpeg in the API request thread.
 
 type processPayload struct {
 	OriginalPath string `json:"originalPath"` // dev：本地原文件路径（模拟 Object Storage 取回）
@@ -609,95 +636,12 @@ func (s *Service) processAsset(ctx context.Context, e command.Envelope) command.
 	if asset.ProcessingStatus != "PROCESSING" {
 		return command.Rejected(e, "MEDIA_NOT_PROCESSING", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.not_processing", map[string]any{"status": asset.ProcessingStatus})
 	}
-	if asset.MediaType == "IMAGE" {
-		// ORIGINAL 永不覆盖；Feed/Gallery/分享分别使用 recipe-versioned variants。
-		originalPath := filepath.Join(s.storeDir, asset.OriginalStorageKey)
-		variants, variantErr := generateImageVariants(ctx, originalPath, s.storeDir, asset, s.clock.Now().UTC())
-		if variantErr != nil {
-			asset.ProcessingStatus = "FAILED"
-			asset.UpdatedAt = s.clock.Now().UTC()
-			_ = s.repository.UpdateAsset(ctx, asset, "PROCESSING")
-			return command.Rejected(e, "IMAGE_VARIANT_PROCESSING_FAILED", "PROVIDER", "SAFE_RETRY", "media.image_variant_failed", map[string]any{"detail": variantErr.Error()})
-		}
-		for _, variant := range variants {
-			if err := s.repository.UpsertVariant(ctx, variant); err != nil {
-				return command.Rejected(e, "MEDIA_VARIANT_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.variant_update_failed", nil)
-			}
-		}
-		asset.ProcessingStatus = "READY"
-		asset.PlaybackStorageKey = asset.OriginalStorageKey
-		asset.ThumbnailStorageKey = variantStorageKey(variants, "FEED_1X", asset.OriginalStorageKey)
-		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
-		asset.ThumbnailURL = variantURL(variants, "FEED_1X", "/v1/media/thumb/"+asset.MediaAssetID)
-		asset.UpdatedAt = s.clock.Now().UTC()
-		domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
-			"status": "READY", "mediaType": "IMAGE",
-		})}
-		if err := s.repository.UpdateAsset(ctx, asset, "PROCESSING"); err != nil {
-			return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
-		}
-		return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, "READY", eventRefs(domainEvents))
+	if err := s.repository.EnqueueProcessingJob(ctx, processingJobFor(asset, s.clock.Now().UTC())); err != nil {
+		return command.Rejected(e, "MEDIA_JOB_ENQUEUE_FAILED", "INTERNAL", "SAFE_RETRY", "media.job_enqueue_failed", nil)
 	}
-	// VIDEO：走 FFmpeg 处理链
-	if s.processor == nil {
-		// 无 processor：模拟处理成功（dev 无 ffmpeg 时）
-		asset.ProcessingStatus = "READY"
-		asset.PlaybackStorageKey = asset.OriginalStorageKey
-		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
-		asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
-		asset.UpdatedAt = s.clock.Now().UTC()
-		domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
-			"status": "READY", "mediaType": "VIDEO", "note": "no processor (dev)",
-		})}
-		if err := s.repository.UpdateAsset(ctx, asset, "PROCESSING"); err != nil {
-			return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
-		}
-		return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, "READY", map[string]any{
-			"mediaAssetId":     asset.MediaAssetID,
-			"playbackUrl":      asset.PlaybackURL,
-			"processingStatus": "READY",
-		}, domainEvents)
-	}
-	result, err := s.processor.Process(ctx, p.OriginalPath)
-	if err != nil {
-		// 处理失败 → FAILED（保留原文件，可重试）
-		asset.ProcessingStatus = "FAILED"
-		asset.UpdatedAt = s.clock.Now().UTC()
-		_ = s.repository.UpdateAsset(ctx, asset, "PROCESSING")
-		return command.Rejected(e, "MEDIA_PROCESSING_FAILED", "PROVIDER", "SAFE_RETRY", "media.processing_failed", map[string]any{"detail": err.Error()})
-	}
-	asset.ProcessingStatus = "READY"
-	asset.PlaybackStorageKey = result.PlaybackStorageKey
-	asset.ThumbnailStorageKey = result.ThumbnailStorageKey
-	asset.Width = result.Metadata.Width
-	asset.Height = result.Metadata.Height
-	asset.DurationMs = result.Metadata.DurationMs
-	asset.Codec = result.Metadata.Codec
-	asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
-	asset.ThumbnailURL = "/v1/media/thumb/" + asset.MediaAssetID
-	asset.UpdatedAt = s.clock.Now().UTC()
-	domainEvents := []event.DomainEvent{event.New("MediaAssetReady", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
-		"status":     "READY",
-		"mediaType":  "VIDEO",
-		"durationMs": result.Metadata.DurationMs,
-		"codec":      result.Metadata.Codec,
-		"width":      result.Metadata.Width,
-		"height":     result.Metadata.Height,
-		"note":       "H.264 + AAC MP4 + faststart；只有 READY 可正式播放",
-	})}
-	if err := s.repository.UpdateAsset(ctx, asset, "PROCESSING"); err != nil {
-		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
-	}
-	return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, "READY", map[string]any{
-		"mediaAssetId":     asset.MediaAssetID,
-		"playbackUrl":      asset.PlaybackURL,
-		"thumbnailUrl":     asset.ThumbnailURL,
-		"durationMs":       asset.DurationMs,
-		"width":            asset.Width,
-		"height":           asset.Height,
-		"codec":            asset.Codec,
-		"processingStatus": "READY",
-	}, domainEvents)
+	return acceptedWithPayload(e, "MediaAsset", asset.MediaAssetID, 1, "PROCESSING", map[string]any{
+		"mediaAssetId": asset.MediaAssetID, "processingStatus": "PROCESSING",
+	}, nil)
 }
 
 // ---------- MarkMediaReady ----------
