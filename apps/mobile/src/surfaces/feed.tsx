@@ -147,6 +147,7 @@ export function FeedSurface({
   const [cardYs, setCardYs] = useState<Record<string, number>>({});
   const [frames, setFrames] = useState<Record<string, { y: number; height: number }>>({});
   const [scrollY, setScrollY] = useState(0);
+  const [stickyHeaderVisible, setStickyHeaderVisible] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [muted, setMuted] = useState(true);
   // 长按减少推荐菜单
@@ -157,6 +158,7 @@ export function FeedSurface({
   const [pendingPosts, setPendingPosts] = useState<FeedPost[]>([]);
   const [pendingMedia, setPendingMedia] = useState<Record<string, FeedMediaItem[]>>({});
   const scrollRef = useRef<ScrollView>(null);
+  const lastScrollYRef = useRef(0);
   const postIdsRef = useRef<Set<string>>(cachedPostIds);
 
   const activeVideoId = useMemo(() => {
@@ -176,7 +178,26 @@ export function FeedSurface({
   }, [cardYs, frames, scrollY, viewportHeight]);
 
   function onFeedScroll(event: NativeSyntheticEvent<NativeScrollEvent>): void {
-    setScrollY(event.nativeEvent.contentOffset.y);
+    const nextY = Math.max(0, event.nativeEvent.contentOffset.y);
+    const delta = nextY - lastScrollYRef.current;
+    setScrollY(nextY);
+    if (nextY <= 48) {
+      setStickyHeaderVisible(false);
+    } else if (delta < -3) {
+      setStickyHeaderVisible(true);
+    } else if (delta > 3) {
+      setStickyHeaderVisible(false);
+    }
+    lastScrollYRef.current = nextY;
+  }
+
+  function toggleEmbeddedComposer(): void {
+    if (composerOpen) {
+      setComposerOpen(false);
+      return;
+    }
+    openComposer();
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
   }
 
   // 首次空读模型时经 CreatePost 写入演示帖（内容归服务端所有，前端不内嵌）。
@@ -444,9 +465,10 @@ export function FeedSurface({
   }
 
   return (
+    <View style={styles.root}>
     <ScrollView
       ref={scrollRef}
-      style={styles.root}
+      style={styles.scrollRoot}
       contentContainerStyle={styles.content}
       onScroll={onFeedScroll}
       onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setViewportHeight(ly.height); }}
@@ -459,7 +481,7 @@ export function FeedSurface({
           <Pressable accessibilityLabel="定制频道" onPress={() => setCustomFeedHubOpen(true)} style={styles.iconBtn}>
             <Text style={styles.iconBtnText}>≡</Text>
           </Pressable>
-          <Pressable onPress={() => (composerOpen ? setComposerOpen(false) : openComposer())} style={styles.iconBtn}>
+          <Pressable onPress={toggleEmbeddedComposer} style={styles.iconBtn}>
             <Text style={styles.iconBtnText}>{composerOpen ? "×" : "＋"}</Text>
           </Pressable>
         </View>
@@ -860,13 +882,26 @@ export function FeedSurface({
         </Modal>
       ) : null}
 
-      {/* R15.3 feedfab：渐变浮动发布按钮 */}
-      {section === "POSTS" ? (
-        <Pressable onPress={() => (composerOpen ? setComposerOpen(false) : openComposer())} style={styles.feedFab}>
-          <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
-        </Pressable>
-      ) : null}
     </ScrollView>
+    {stickyHeaderVisible ? (
+      <View style={styles.stickyFeedHead}>
+        <Text style={styles.stickyFeedTitle}>动态</Text>
+        <View style={styles.feedTools}>
+          <Pressable accessibilityLabel="定制频道" onPress={() => setCustomFeedHubOpen(true)} style={styles.stickyIconBtn}>
+            <Text style={styles.iconBtnText}>≡</Text>
+          </Pressable>
+          <Pressable onPress={toggleEmbeddedComposer} style={styles.stickyIconBtn}>
+            <Text style={styles.iconBtnText}>{composerOpen ? "×" : "＋"}</Text>
+          </Pressable>
+        </View>
+      </View>
+    ) : null}
+    {section === "POSTS" ? (
+      <Pressable accessibilityLabel={composerOpen ? "关闭发布器" : "发布帖文"} onPress={toggleEmbeddedComposer} style={styles.feedFab}>
+        <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
+      </Pressable>
+    ) : null}
+    </View>
   );
 }
 
@@ -1002,13 +1037,31 @@ function VideoCard({
 // 全屏查看器（图片）：视频已改为内联自动播放，不再弹出。
 
 const styles = StyleSheet.create({
-  root: { backgroundColor: color.offWhite, flex: 1 },
-  content: { paddingBottom: 24, paddingHorizontal: 18, paddingTop: 10 },
+  root: { backgroundColor: color.offWhite, flex: 1, position: "relative" },
+  scrollRoot: { flex: 1 },
+  content: { paddingBottom: 88, paddingHorizontal: 18, paddingTop: 10 },
 
   // 基线 .feedhead：h2 21 bold。
   feedHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 2, marginTop: 5 },
   feedTitle: { color: color.ink, fontSize: 28, fontWeight: "800", lineHeight: 34 },
   feedTools: { flexDirection: "row", gap: 6 },
+  stickyFeedHead: {
+    alignItems: "center",
+    backgroundColor: "rgba(252,250,253,0.97)",
+    borderBottomColor: color.line,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    left: 0,
+    paddingHorizontal: 18,
+    paddingVertical: 7,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 20
+  },
+  stickyFeedTitle: { color: color.ink, fontSize: 18, fontWeight: "800" },
+  stickyIconBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 38, justifyContent: "center", width: 38 },
   iconBtn: {
     alignItems: "center",
     backgroundColor: color.white,
@@ -1031,7 +1084,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: color.violet,
     borderRadius: 999,
-    bottom: 12,
+    bottom: 16,
     height: 48,
     justifyContent: "center",
     position: "absolute",
@@ -1040,7 +1093,8 @@ const styles = StyleSheet.create({
     shadowOffset: { height: 12, width: 0 },
     shadowOpacity: 0.27,
     shadowRadius: 26,
-    width: 48
+    width: 48,
+    zIndex: 30
   },
   feedFabText: { color: color.white, fontSize: 24 },
 
