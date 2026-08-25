@@ -19,6 +19,7 @@ import { SocialSpaceClient } from "./socialspace-client";
 import { FulfillmentClient } from "./fulfillment-client";
 import { PaymentClient } from "./payment-client";
 import { NotificationClient } from "./notification-client";
+import { BusinessClient } from "./business-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { AppShell } from "./shell/app-shell";
@@ -69,6 +70,7 @@ const socialSpaceClient = new SocialSpaceClient({ authClient: sessionAuthClient,
 const fulfillmentClient = new FulfillmentClient({ authClient: sessionAuthClient, secureSessionStore });
 const paymentClient = new PaymentClient({ authClient: sessionAuthClient, secureSessionStore });
 const notificationClient = new NotificationClient({ authClient: sessionAuthClient, secureSessionStore });
+const businessClient = new BusinessClient({ authClient: sessionAuthClient, secureSessionStore });
 type BootPhase = "BOOTSTRAPPING" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {

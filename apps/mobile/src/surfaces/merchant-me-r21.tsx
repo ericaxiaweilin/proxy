@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, Gradient } from "../theme";
+import { MerchantCreatorCenter } from "./merchant-creator-center";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -59,7 +60,7 @@ export function MerchantMeR21({ onOpenSwitcher, onSignOut }: { onOpenSwitcher: (
   const openVoucher = (voucher: (typeof vouchers)[number]) => { setSelectedVoucher(voucher); setPage("voucherDetail"); };
   const openActivity = (activity: (typeof activities)[number]) => { setSelectedActivity(activity); setPage("activityDetail"); };
 
-  if (page === "creator") return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><DetailHead onBack={() => setPage("root")} title="Creator" /><Summary meta="近 30 天到店 61 次 · 影响消费 18.7tr VND" stats={[["9", "活跃"], ["5", "核心"], ["4", "待召回"], ["8", "今日到店"]]} title="24 位 Creator · 5 位核心" /><View style={styles.tabs}>{["全部 24", "活跃 9", "核心 5", "待召回 4"].map((item, index) => <View key={item} style={[styles.tab, index === 0 && styles.tabOn]}><Text style={[styles.tabText, index === 0 && styles.tabTextOn]}>{item}</Text></View>)}</View>{creators.map((creator) => <Pressable key={creator.name} onPress={() => openCreator(creator)} style={styles.objectCard}><View style={styles.objectTop}><View style={styles.avatar}><Text style={styles.avatarText}>{creator.name[0]}</Text></View><View style={styles.objectCopy}><Text style={styles.objectTitle}>{creator.name}</Text><Text style={styles.meta}>{creator.nick} · {creator.avail}</Text></View><View style={styles.status}><Text style={styles.statusText}>{creator.status}</Text></View></View><Text style={[styles.meta, styles.lastVisit]}>最近到店 {creator.last}</Text><View style={styles.facts}>{[[creator.visits, "到店"], [creator.guests, "带客"], [creator.content, "内容"], [creator.spend, "消费"]].map(([value, label]) => <View key={label} style={styles.fact}><Text style={styles.factValue}>{value}</Text><Text style={styles.caption}>{label}</Text></View>)}</View></Pressable>)}</ScrollView></View>;
+  if (page === "creator") return <MerchantCreatorCenter onBack={() => setPage("root")} />;
 
   if (page === "creatorDetail") return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><DetailHead onBack={() => setPage("creator")} title={selectedCreator.name} /><Summary meta={selectedCreator.avail} stats={[[selectedCreator.visits, "到店"], [selectedCreator.guests, "带客"], [selectedCreator.content, "内容"], ["3.4", "ROI"]]} title={`${selectedCreator.name} · ${selectedCreator.status}`} /><SimpleRows onPress={setPage} rows={[["最近到店", selectedCreator.last], ["当前权益", "咖啡券 / 活动券"], ["当前邀约", "周二下午茶体验局", "activityDetail"], ["使用过的券", "咖啡券 / 活动券 / 礼品券", "voucher"]]} /><View style={styles.actions}><Pressable style={styles.primary}><Text style={styles.primaryText}>发起定向邀约</Text></Pressable><Pressable style={styles.secondary}><Text style={styles.secondaryText}>查看记录</Text></Pressable></View></ScrollView></View>;
 

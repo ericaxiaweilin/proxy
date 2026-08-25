@@ -270,6 +270,7 @@ export function AppShell({
               activities={activities}
               marketplace={marketplace}
               fulfillment={fulfillment}
+              media={media}
               marketLabel="河内"
               initialTab={marketEntry.tab}
               onOpenExperience={setOpenExperience}
@@ -314,6 +315,10 @@ export function AppShell({
               onOpenFeed={() => selectTab("FEED")}
               onOpenVouchers={() => setVoucherOpen(true)}
               onExperienceAction={executeExperienceAction}
+              onOpenConversation={(author) => {
+                setMessageChatAuthor(author);
+                setTab("MESSAGES");
+              }}
               onSignOut={onSignOut}
             />
           )

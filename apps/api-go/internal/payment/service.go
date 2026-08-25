@@ -28,24 +28,24 @@ type PaymentIntent struct {
 }
 
 type LedgerEntry struct {
-	ID               string    `json:"id"`
-	PaymentIntentID  string    `json:"paymentIntentId,omitempty"`
-	OrderID          string    `json:"orderId"`
-	EntryType        string    `json:"entryType"`
-	AmountMinor      int64     `json:"amountMinor"`
-	Currency         string    `json:"currency"`
-	CreatedAt        time.Time `json:"createdAt"`
+	ID              string    `json:"id"`
+	PaymentIntentID string    `json:"paymentIntentId,omitempty"`
+	OrderID         string    `json:"orderId"`
+	EntryType       string    `json:"entryType"`
+	AmountMinor     int64     `json:"amountMinor"`
+	Currency        string    `json:"currency"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
 type PayoutHold struct {
-	ID         string    `json:"id"`
-	OrderID    string    `json:"orderId"`
-	AgentID    string    `json:"agentId"`
-	AmountMinor int64    `json:"amountMinor"`
-	Currency   string    `json:"currency"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"createdAt"`
-	ReleasedAt *time.Time `json:"releasedAt,omitempty"`
+	ID          string     `json:"id"`
+	OrderID     string     `json:"orderId"`
+	AgentID     string     `json:"agentId"`
+	AmountMinor int64      `json:"amountMinor"`
+	Currency    string     `json:"currency"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	ReleasedAt  *time.Time `json:"releasedAt,omitempty"`
 }
 
 type Repository interface {
@@ -252,7 +252,9 @@ func (s *Service) Supports(commandType string) bool {
 		return false
 	}
 }
-func (s *Service) Handle(e command.Envelope) command.Result { return s.HandleContext(context.Background(), e) }
+func (s *Service) Handle(e command.Envelope) command.Result {
+	return s.HandleContext(context.Background(), e)
+}
 func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -408,6 +410,19 @@ func (s *Service) refundIntent(ctx context.Context, e command.Envelope) command.
 	}
 	if pi.Status != "SUCCEEDED" {
 		return command.Rejected(e, "REFUND_NOT_ALLOWED", "BUSINESS_STATE", "AFTER_USER_ACTION", "payment.refund_not_allowed", nil)
+	}
+	ledger, err := s.repo.ListLedger(ctx, pi.OrderID)
+	if err != nil {
+		return command.Rejected(e, "REFUND_LEDGER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "payment.refund_ledger_read_failed", nil)
+	}
+	var alreadyRefunded int64
+	for _, entry := range ledger {
+		if entry.PaymentIntentID == pi.ID && entry.EntryType == "CREDIT_REFUND" {
+			alreadyRefunded += entry.AmountMinor
+		}
+	}
+	if p.AmountMinor > pi.AmountMinor-alreadyRefunded {
+		return command.Rejected(e, "REFUND_EXCEEDS_CAPTURED_AMOUNT", "PAYMENT", "NO", "payment.refund_exceeds_captured", map[string]any{"capturedMinor": pi.AmountMinor, "alreadyRefundedMinor": alreadyRefunded})
 	}
 	now := s.clock.Now().UTC()
 	entries := []LedgerEntry{

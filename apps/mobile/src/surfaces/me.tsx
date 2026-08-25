@@ -11,6 +11,8 @@ import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "rea
 import type { ExperienceAction, ExperienceMenuSection, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { MerchantMeR21 } from "./merchant-me-r21";
+import { CreatorApplicationCard } from "./creator-application";
+import { FriendCrmSurface } from "./friend-crm";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 
@@ -83,10 +85,9 @@ const REQUESTER_ME: PersonaConfig = {
     {
       id: "relationships",
       title: "关系",
-      hint: "真人网络",
+      hint: "真人网络 · 个人轻 CRM 关系图",
       rows: [
-        { icon: "target", label: "好友与关系", desc: "好友、请求、二维码与关系发现", grad: true, route: "messages" },
-        { icon: "plus", label: "添加好友", desc: "二维码、邀请、通讯录与社媒", route: "addfriend" }
+        { icon: "target", label: "好友与关系", desc: "关系图 · 轻 CRM · 标签、备注、来源与互动记录", grad: true, route: "friendcrm" }
       ]
     },
     {
@@ -126,6 +127,13 @@ const BUSINESS_ME: PersonaConfig = {
   contextLineAction: "切换身份",
   settingsRow: { icon: "P", label: "Proxy 中心", desc: "应用状态、主体权限与业务工作区", route: "bdash" },
   sections: [
+    {
+      title: "关系",
+      hint: "真人网络 · 个人轻 CRM 关系图",
+      rows: [
+        { icon: "target", label: "好友与关系", desc: "关系图 · 轻 CRM · 标签、备注、来源与互动记录", grad: true, route: "friendcrm" }
+      ]
+    },
     {
       title: "商家 · 我的",
       hint: "业务资产",
@@ -815,6 +823,7 @@ export function MeSurface({
   onOpenFeed,
   onOpenVouchers,
   onExperienceAction,
+  onOpenConversation,
   onSignOut
 }: {
   context: ActiveContext;
@@ -824,6 +833,7 @@ export function MeSurface({
   onOpenFeed: () => void;
   onOpenVouchers: () => void;
   onExperienceAction: (action: ExperienceAction) => void;
+  onOpenConversation?: (author: string) => void;
   onSignOut: () => void;
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
@@ -832,6 +842,10 @@ export function MeSurface({
   const [enterpriseOpsStage, setEnterpriseOpsStage] = useState<EnterpriseOpsStage>("READY");
   const [enterpriseOpsAssets, setEnterpriseOpsAssets] = useState(3);
 
+  // 轻 CRM 关系图对 BUSINESS 也开放，优先于 R21 商家页
+  if (subPage?.route === "friendcrm") {
+    return <FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} />;
+  }
   // R21 是商家“我的”的独立产品页面，不与旧的个人菜单卡片语法混用。
   // 必须在所有 hooks 之后再分支，避免身份切换时破坏 hook 顺序。
   if (context === "BUSINESS") {
@@ -975,6 +989,7 @@ export function MeSurface({
             </Pressable>
             <Text style={styles.detailTitle}>社媒与联系</Text>
             <Text style={styles.detailSub}>关联、二维码和公开范围都由你控制。</Text>
+            <CreatorApplicationCard />
             {channels.map(([mark, name, account, visibility, linked]) => (
               <View key={name} style={styles.channelCard}>
                 <View style={[styles.channelMark, linked && styles.channelMarkLinked]}>
@@ -1086,24 +1101,13 @@ export function MeSurface({
       );
     }
 
+    // 个人轻 CRM：接线 proxy_add_friend_detail.html 的 5 种加好友原型，不再是静态宫格
     if (subPage.route === "addfriend") {
-      const methods = [["▦", "扫二维码", "扫描 Proxy Personal QR"], ["↗", "邀请好友", "链接或二维码邀请"], ["☎", "通讯录", "授权后只做匹配"], ["◎", "社媒好友", "Facebook / TikTok / IG / Zalo"], ["⌕", "搜索 Proxy", "昵称、Proxy ID、手机号"]];
-      return (
-        <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
-            </Pressable>
-            <View style={styles.friendPageHead}><View><Text style={styles.detailTitle}>添加好友</Text><Text style={styles.detailSub}>找到现实里认识的人</Text></View></View>
-            <View style={styles.friendMethodGrid}>
-              {methods.map(([icon, title, desc]) => (
-                <View key={title} style={styles.friendMethod}><Text style={styles.friendMethodIcon}>{icon}</Text><Text style={styles.friendMethodTitle}>{title}</Text><Text style={styles.friendMethodDesc}>{desc}</Text></View>
-              ))}
-            </View>
-            <View style={styles.infoNote}><Text style={styles.infoNoteTitle}>关系不会自动导入</Text><Text style={styles.infoNoteText}>通讯录或外部社媒只产生“可能认识”的信号；真正成为 Proxy 好友仍需要双方确认。</Text></View>
-          </ScrollView>
-        </View>
-      );
+      return <FriendCrmSurface initialView="ADD_FRIEND" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} />;
+    }
+
+    if (subPage.route === "friendcrm") {
+      return <FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} />;
     }
 
     if (subPage.route === "available") {

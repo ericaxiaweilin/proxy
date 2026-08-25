@@ -255,6 +255,11 @@ components:
             - CreateLegalHold
             - ReleaseLegalHold
             - CheckLegalHold
+            - CreateBusinessAccount
+            - AddBusinessMember
+            - CreateBusinessStore
+            - ListBusinessStores
+            - SpendSummary
             - DummyOther # placeholder to keep enum open for additive field evolution
         commandVersion: { type: integer, minimum: 1 }
         actor:

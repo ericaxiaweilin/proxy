@@ -94,6 +94,38 @@ func TestConfirmDedupeAndAmountMismatch(t *testing.T) {
 	}
 }
 
+func TestRefundCannotExceedCapturedAmountAcrossMultipleRefunds(t *testing.T) {
+	s := New()
+	created := s.Handle(envelopeFor("CreatePaymentIntent", "order_refund_cap", map[string]any{
+		"orderId": "order_refund_cap", "agentId": "agent_1", "amountMinor": int64(1000),
+	}))
+	if created.Outcome != "ACCEPTED" {
+		t.Fatalf("create failed: %+v", created)
+	}
+	var paymentIntentID string
+	for id := range s.repo.(*MemoryRepository).intents {
+		paymentIntentID = id
+	}
+	confirmed := s.Handle(envelopeFor("ConfirmPaymentIntent", paymentIntentID, map[string]any{
+		"paymentIntentId": paymentIntentID, "providerEventId": "evt_refund_cap", "status": "SUCCEEDED",
+	}))
+	if confirmed.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm failed: %+v", confirmed)
+	}
+	first := s.Handle(envelopeFor("RefundPaymentIntent", paymentIntentID, map[string]any{
+		"paymentIntentId": paymentIntentID, "amountMinor": int64(700),
+	}))
+	if first.Outcome != "ACCEPTED" {
+		t.Fatalf("first refund failed: %+v", first)
+	}
+	second := s.Handle(envelopeFor("RefundPaymentIntent", paymentIntentID, map[string]any{
+		"paymentIntentId": paymentIntentID, "amountMinor": int64(301),
+	}))
+	if second.Outcome != "REJECTED" || second.Error == nil || second.Error.ErrorCode != "REFUND_EXCEEDS_CAPTURED_AMOUNT" {
+		t.Fatalf("over-refund was not denied: %+v", second)
+	}
+}
+
 func TestUnbalancedLedgerImpossible(t *testing.T) {
 	entries := []LedgerEntry{
 		{ID: "1", OrderID: "o1", EntryType: "DEBIT_REQUESTER", AmountMinor: 1000, Currency: "VND"},

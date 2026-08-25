@@ -4,9 +4,12 @@
 // 不引入原型暖黄 #F3A61D 作为主色，保持 Proxy 紫粉基线。
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
+import { type FulfillmentClient } from "../fulfillment-client";
 import { type MarketplaceClient } from "../marketplace-client";
+import { type MediaClient } from "../media-client";
 import {
   MAP_DISTRICTS,
   MARKET_EXPERIENCES,
@@ -82,6 +85,7 @@ export function MarketSurface({
   activities,
   marketplace,
   fulfillment,
+  media,
   marketLabel,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
@@ -89,7 +93,8 @@ export function MarketSurface({
 }: {
   activities: ActivityClient;
   marketplace: MarketplaceClient;
-  fulfillment?: { createSlotOffer: (input: { taskId: string; slotId: string; agentId: string }) => Promise<unknown>; acceptSlotOffer: (offerId: string) => Promise<unknown> };
+  fulfillment?: FulfillmentClient;
+  media?: MediaClient;
   marketLabel: string;
   initialTab?: MarketTab;
   onOpenExperience: (experienceId: string) => void;
@@ -119,6 +124,7 @@ export function MarketSurface({
   const [submissionName, setSubmissionName] = useState<string | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
   const [offerBusy, setOfferBusy] = useState(false);
+  const [lastOrderId, setLastOrderId] = useState<string>();
   const [offerMsg, setOfferMsg] = useState<string>();
   const [myOffers, setMyOffers] = useState<Array<{ offerId: string; status: string; expiresAt: string }>>([]);
   const [showOffers, setShowOffers] = useState(false);
@@ -191,7 +197,7 @@ export function MarketSurface({
     setOfferBusy(true);
     setOfferMsg(undefined);
     try {
-      const offer = (await (fulfillment as any).createSlotOffer({ taskId: opportunity.id, slotId: `${opportunity.id}_slot_1`, agentId: "agent_linh" })) as { offerId: string; expiresAt: string };
+      const offer = await fulfillment.createSlotOffer({ taskId: opportunity.id, slotId: `${opportunity.id}_slot_1`, agentId: "agent_linh" });
       setOfferMsg(`已发 Offer 给 Linh · ${offer.offerId.slice(0, 8)} · 5分钟内有效`);
     } catch (e) {
       setOfferMsg(e instanceof Error ? e.message : "发 Offer 失败");
@@ -204,8 +210,8 @@ export function MarketSurface({
     if (!fulfillment) { setOfferMsg("Offer 服务未就绪"); return; }
     setOfferBusy(true);
     try {
-      const list = (await (fulfillment as any).listAgentOffers()) as Array<{ offerId: string; status: string; expiresAt: string }>;
-      setMyOffers(list.map((o) => ({ offerId: (o as any).offerId ?? (o as any).id, status: o.status, expiresAt: o.expiresAt })));
+      const list = await fulfillment.listAgentOffers();
+      setMyOffers(list.map((offer) => ({ offerId: offer.offerId, status: offer.status, expiresAt: offer.expiresAt })));
       setShowOffers(true);
       setOfferMsg(list.length === 0 ? "暂无 Offer" : `已加载 ${list.length} 个 Offer`);
     } catch (e) {
@@ -219,11 +225,11 @@ export function MarketSurface({
     if (!fulfillment) return;
     setOfferBusy(true);
     try {
-      const res = (await (fulfillment as any).acceptSlotOffer(offerId)) as { orderId: string };
+      const res = await fulfillment.acceptSlotOffer(offerId);
       setOfferMsg(`已接单 · Order ${res.orderId.slice(0, 8)} · 可打卡`);
       void loadMyOffers();
       // store last order for check-in demo
-      (acceptOffer as any).lastOrderId = res.orderId;
+      setLastOrderId(res.orderId);
     } catch (e) {
       setOfferMsg(e instanceof Error ? e.message : "接单失败");
     } finally {
@@ -232,11 +238,11 @@ export function MarketSurface({
   }
 
   async function checkInLastOrder(): Promise<void> {
-    const orderId = (acceptOffer as any).lastOrderId as string | undefined;
+    const orderId = lastOrderId;
     if (!fulfillment || !orderId) { setOfferMsg("请先接单"); return; }
     setOfferBusy(true);
     try {
-      await (fulfillment as any).checkInOrder(orderId, { marketId: "hn", locationLabel: "河内·还剑湖" });
+      await fulfillment.checkInOrder(orderId, { marketId: "hn", locationLabel: "河内·还剑湖" });
       setOfferMsg(`已打卡 · Order ${orderId.slice(0, 8)}`);
     } catch (e) {
       setOfferMsg(e instanceof Error ? e.message : "打卡失败");
@@ -246,11 +252,33 @@ export function MarketSurface({
   }
 
   async function submitEvidenceLastOrder(): Promise<void> {
-    const orderId = (acceptOffer as any).lastOrderId as string | undefined;
-    if (!fulfillment || !orderId) { setOfferMsg("请先接单/打卡"); return; }
+    const orderId = lastOrderId;
+    if (!fulfillment || !media || !orderId) { setOfferMsg(!media ? "媒体服务未连接" : "请先接单/打卡"); return; }
     setOfferBusy(true);
     try {
-      await (fulfillment as any).submitEvidence(orderId, { mediaAssetId: "seed_media_hoankiem", evidenceType: "PHOTO" });
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setOfferMsg("需要相机权限才能提交履约凭证");
+        return;
+      }
+      const picked = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        quality: 1,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current
+      });
+      if (picked.canceled || !picked.assets[0]) {
+        setOfferMsg("已取消凭证拍摄");
+        return;
+      }
+      const asset = picked.assets[0];
+      const uploaded = await media.uploadImage({
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height,
+        ...(asset.fileName ? { fileName: asset.fileName } : {}),
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {})
+      });
+      await fulfillment.submitEvidence(orderId, { mediaAssetId: uploaded.mediaAssetId, evidenceType: "PHOTO" });
       setOfferMsg(`证据已提交 · Order ${orderId.slice(0, 8)}`);
     } catch (e) {
       setOfferMsg(e instanceof Error ? e.message : "提交证据失败");

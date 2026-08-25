@@ -55,6 +55,15 @@ var operatorCommandTypes = map[string]bool{
 	"RecordContributionValue":  true,
 	"GrantContributionReward":  true,
 	"MarkMediaReady":           true,
+	// Money movement and settlement confirmation are server/operator actions.
+	// Mobile users may create a payment intent, but cannot impersonate a bank
+	// callback, mint/refund value, or release held payout funds.
+	"ConfirmPaymentIntent": true,
+	"RefundPaymentIntent":  true,
+	"CreatePayoutHold":     true,
+	"ReleasePayout":        true,
+	"CreateVoucher":        true,
+	"SettleVoucher":        true,
 }
 
 func requiresOperator(commandType string) bool {

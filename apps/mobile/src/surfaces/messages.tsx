@@ -1,8 +1,10 @@
 // 根级「消息」：按 R15 原型实现为「聊天 + 好友」完整模块，而非只有会话列表。
+// R15.10 §161：添加好友 5 种入口统一在 Messages → 添加好友，不在 My
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
+import { FriendCrmSurface } from "./friend-crm";
 
 type MessageTab = "CHAT" | "FRIENDS";
 type ComposerMode = "ADD_FRIEND" | "CREATE_GROUP" | undefined;
@@ -29,6 +31,10 @@ export function MessagesSurface({ onOpenConversation }: { onOpenConversation: (a
   const [requestState, setRequestState] = useState<"PENDING" | "ACCEPTED" | "IGNORED">("PENDING");
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
+  // 轻 CRM：好友点击进入 CRM 详情，而非直接发消息（在 My 的关系图已为纯 CRM，Messages 的 Friends 仅做快捷入口）
+  const [crmFriend, setCrmFriend] = useState<(typeof FRIENDS)[number] | undefined>();
+  // R15.10 添加好友 5 种方式归属 Messages，由 FriendCrmSurface 的 ADD_FRIEND 复用 HTML 原型
+  const [addFriendOpen, setAddFriendOpen] = useState(false);
   const visibleFriends = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return keyword ? FRIENDS.filter((friend) => `${friend.name}${friend.context}${friend.relation}`.toLowerCase().includes(keyword)) : FRIENDS;
@@ -41,6 +47,14 @@ export function MessagesSurface({ onOpenConversation }: { onOpenConversation: (a
 
   function toggleMember(name: string): void {
     setSelectedMembers((current) => current.includes(name) ? current.filter((member) => member !== name) : [...current, name]);
+  }
+
+  if (addFriendOpen) {
+    return (
+      <View style={styles.root}>
+        <FriendCrmSurface initialView="ADD_FRIEND" onBack={() => setAddFriendOpen(false)} onOpenConversation={onOpenConversation} />
+      </View>
+    );
   }
 
   return (
@@ -75,10 +89,10 @@ export function MessagesSurface({ onOpenConversation }: { onOpenConversation: (a
       ) : (
         <>
           <View style={styles.quickRow}>
-            <Pressable accessibilityLabel="添加好友" onPress={() => chooseComposer("ADD_FRIEND")} style={styles.quickCard}>
+            <Pressable accessibilityLabel="添加好友" onPress={() => setAddFriendOpen(true)} style={styles.quickCard}>
               <ProxyIcon color={color.proxyPurple} name="plus" size={26} />
               <Text style={styles.quickTitle}>添加好友</Text>
-              <Text style={styles.quickSub}>二维码、邀请、通讯录、社媒或 Proxy 搜索</Text>
+              <Text style={styles.quickSub}>二维码、邀请、通讯录、社媒或 Proxy 搜索 · 5 种方式</Text>
             </Pressable>
             <Pressable accessibilityLabel="创建群聊" onPress={() => chooseComposer("CREATE_GROUP")} style={styles.quickCard}>
               <ProxyIcon color={color.proxyPurple} name="chat" size={26} />
@@ -127,17 +141,28 @@ export function MessagesSurface({ onOpenConversation }: { onOpenConversation: (a
             <View style={styles.searchButton}><ProxyIcon color={color.white} name="search" size={24} /></View>
           </View>
 
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHead}><Text style={styles.sectionTitle}>好友</Text><Text style={styles.sectionCount}>{FRIENDS.length} 人</Text></View>
-            {visibleFriends.map((friend, index) => (
-              <Pressable key={friend.name} accessibilityLabel={`与 ${friend.name} 聊天`} onPress={() => onOpenConversation(friend.name)} style={[styles.friendRow, index > 0 && styles.friendRowLine]}>
-                <View style={styles.avatar}><Text style={styles.avatarText}>{friend.initial}</Text></View>
-                <View style={styles.threadCopy}><Text style={styles.threadName}>{friend.name}</Text><Text style={styles.preview}>{friend.context}</Text><Text style={styles.relationship}>{friend.relation}</Text></View>
-                <Text style={styles.chevron}>›</Text>
-              </Pressable>
-            ))}
-            {!visibleFriends.length ? <Text style={styles.emptyResult}>没有匹配的好友</Text> : null}
-          </View>
+          {crmFriend ? (
+            <View style={styles.sectionCard}>
+              <Pressable onPress={() => setCrmFriend(undefined)} style={styles.crmBack}><Text style={styles.crmBackText}>‹ 返回好友列表</Text></Pressable>
+              <View style={styles.crmHead}><View style={styles.avatarLarge}><Text style={styles.avatarLargeText}>{crmFriend.initial}</Text></View><View style={styles.crmHeadCopy}><Text style={styles.crmName}>{crmFriend.name}</Text><Text style={styles.crmContext}>{crmFriend.context} · {crmFriend.relation}</Text></View></View>
+              <View style={styles.crmKv}><Text style={styles.crmKvLabel}>来源</Text><Text style={styles.crmKvValue}>{crmFriend.relation}</Text></View>
+              <View style={styles.crmKv}><Text style={styles.crmKvLabel}>备注</Text><Text style={styles.crmKvValue}>仅自己可见 · 点击编辑</Text></View>
+              <View style={styles.crmActions}><Pressable onPress={() => onOpenConversation(crmFriend.name)} style={styles.crmActionPrimary}><Text style={styles.crmActionPrimaryText}>发消息</Text></Pressable><Pressable onPress={() => setCrmFriend(undefined)} style={styles.crmAction}><Text style={styles.crmActionText}>查看轻 CRM 详情</Text></Pressable></View>
+              <Text style={styles.crmHint}>轻 CRM：标签、备注、来源与互动记录在「我的 → 好友与关系」中统一管理，此处仅做快捷入口。</Text>
+            </View>
+          ) : (
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHead}><Text style={styles.sectionTitle}>好友</Text><Text style={styles.sectionCount}>{FRIENDS.length} 人 · 轻 CRM</Text></View>
+              {visibleFriends.map((friend, index) => (
+                <Pressable key={friend.name} accessibilityLabel={`查看 ${friend.name} 的轻 CRM`} onPress={() => setCrmFriend(friend)} style={[styles.friendRow, index > 0 && styles.friendRowLine]}>
+                  <View style={styles.avatar}><Text style={styles.avatarText}>{friend.initial}</Text></View>
+                  <View style={styles.threadCopy}><Text style={styles.threadName}>{friend.name}</Text><Text style={styles.preview}>{friend.context}</Text><Text style={styles.relationship}>{friend.relation}</Text></View>
+                  <Text style={styles.chevron}>›</Text>
+                </Pressable>
+              ))}
+              {!visibleFriends.length ? <Text style={styles.emptyResult}>没有匹配的好友</Text> : null}
+            </View>
+          )}
         </>
       )}
     </ScrollView>
@@ -242,6 +267,23 @@ const styles = StyleSheet.create({
   friendRowLine: { borderTopColor: color.line, borderTopWidth: 1 },
   relationship: { alignSelf: "flex-start", backgroundColor: "#F0E8FF", borderRadius: 999, color: "#6332B8", fontSize: 11, fontWeight: "800", marginTop: 5, overflow: "hidden", paddingHorizontal: 6, paddingVertical: 3 },
   emptyResult: { color: color.muted, fontSize: 11, padding: 18, textAlign: "center" },
+  crmBack: { paddingHorizontal: 12, paddingTop: 12 },
+  crmBackText: { color: color.magenta, fontSize: 12, fontWeight: "800" },
+  crmHead: { alignItems: "center", flexDirection: "row", gap: 10, padding: 12 },
+  avatarLarge: { alignItems: "center", backgroundColor: "#F1E8FF", borderRadius: 14, height: 48, justifyContent: "center", width: 48 },
+  avatarLargeText: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  crmHeadCopy: { flex: 1 },
+  crmName: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  crmContext: { color: color.muted, fontSize: 11, marginTop: 3 },
+  crmKv: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 7 },
+  crmKvLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  crmKvValue: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  crmActions: { flexDirection: "row", gap: 7, padding: 12 },
+  crmAction: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, flex: 1, paddingVertical: 9 },
+  crmActionPrimary: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, flex: 1, paddingVertical: 9 },
+  crmActionText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  crmActionPrimaryText: { color: color.white, fontSize: 12, fontWeight: "900" },
+  crmHint: { color: color.muted, fontSize: 11, lineHeight: 15, padding: 12, paddingTop: 0 },
   // R15 .r160Section：聊天列表是一张完整圆角卡片，不是贴边的无框表格。
   chatSection: {
     backgroundColor: color.white,

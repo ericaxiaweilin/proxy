@@ -2046,7 +2046,7 @@ DEPENDENCIES:
   - "ExpoLinking (from `../../../node_modules/.pnpm/expo-linking@57.0.7_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@_74e08933ab54e8573f7074996f7e34e4/node_modules/expo-linking/ios`)"
   - "ExpoLogBox (from `../../../node_modules/.pnpm/@expo+log-box@57.0.2_@expo+dom-webview@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+c_18db1bc83d018e12944500dab2079985/node_modules/@expo/log-box`)"
   - "ExpoModulesCore (from `../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesCore.podspec`)"
-  - "ExpoModulesJSI (from `../../../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=66abfcd61fe79f17eb8bd1e4233ed428f59acf8505f601fad234_9f9aefb274abbdaaeea1aa76e1637b14/node_modules/expo-modules-jsi/apple`)"
+  - "ExpoModulesJSI (from `../../../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=a78d1a4c55dadc7e20e76b76bfdfdca2a3419cdf107a542a8981_88216104a3087e678fb3ceac78a09733/node_modules/expo-modules-jsi/apple`)"
   - "ExpoModulesWorklets (from `../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesWorklets.podspec`)"
   - "ExpoSecureStore (from `../../../node_modules/.pnpm/expo-secure-store@57.0.1_expo@57.0.12/node_modules/expo-secure-store/ios`)"
   - "ExpoSpeechRecognition (from `../../../node_modules/.pnpm/expo-speech-recognition@56.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supp_106c999af36e86e2c96298f748ee76e4/node_modules/expo-speech-recognition/ios`)"
@@ -2162,7 +2162,7 @@ EXTERNAL SOURCES:
   ExpoModulesCore:
     :podspec: "../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesCore.podspec"
   ExpoModulesJSI:
-    :path: "../../../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=66abfcd61fe79f17eb8bd1e4233ed428f59acf8505f601fad234_9f9aefb274abbdaaeea1aa76e1637b14/node_modules/expo-modules-jsi/apple"
+    :path: "../../../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=a78d1a4c55dadc7e20e76b76bfdfdca2a3419cdf107a542a8981_88216104a3087e678fb3ceac78a09733/node_modules/expo-modules-jsi/apple"
   ExpoModulesWorklets:
     :podspec: "../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesWorklets.podspec"
   ExpoSecureStore:
