@@ -466,6 +466,7 @@ export const RegisteredExperienceRouteSchema = z.enum([
   "socialanalytics",
   "messages",
   "addfriend",
+  "friendcrm",
   "available",
   "postfeed",
   "wallet",

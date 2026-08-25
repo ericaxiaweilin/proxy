@@ -151,10 +151,9 @@ func manifestFor(contextName string) manifest {
 				},
 			},
 			{
-				ID: "relationships", Title: "关系", Hint: "真人网络",
+				ID: "relationships", Title: "关系", Hint: "真人网络 · 个人轻 CRM 关系图",
 				Items: []menuItem{
-					{ID: "friend_relationships", Icon: "target", Label: "好友与关系", Description: "好友、请求、二维码与关系发现", Accent: true, Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "messages"}},
-					{ID: "add_friend", Icon: "plus", Label: "添加好友", Description: "二维码、邀请、通讯录与社媒", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "addfriend"}},
+					{ID: "friend_relationships", Icon: "target", Label: "好友与关系", Description: "关系图 · 轻 CRM · 标签、备注、来源与互动记录", Accent: true, Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "friendcrm"}},
 				},
 			},
 			{
@@ -179,7 +178,7 @@ func manifestFor(contextName string) manifest {
 
 	return manifest{
 		SchemaVersion: "1.0",
-		Revision:      "experience_manifest_r2_server_composed_me",
+		Revision:      "experience_manifest_r3_friendcrm_me",
 		Context:       contextName,
 		Me: meManifest{
 			Mode:     "REPLACE",

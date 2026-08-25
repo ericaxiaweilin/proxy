@@ -643,6 +643,11 @@ const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; icon: stri
       ]}
     ]
   },
+  friendcrm: {
+    title: "好友与关系",
+    desc: "关系图 · 轻 CRM · 标签、备注、来源与互动记录。",
+    icon: "◎"
+  },
   friendrequests: {
     title: "好友请求",
     desc: "好友是双向确认关系；关注、通讯录匹配和社媒关系都不能自动升级为好友。",
