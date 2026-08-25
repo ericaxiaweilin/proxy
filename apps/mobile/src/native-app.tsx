@@ -18,6 +18,7 @@ import { MarketplaceClient } from "./marketplace-client";
 import { SocialSpaceClient } from "./socialspace-client";
 import { FulfillmentClient } from "./fulfillment-client";
 import { PaymentClient } from "./payment-client";
+import { NotificationClient } from "./notification-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { AppShell } from "./shell/app-shell";
@@ -67,6 +68,7 @@ const marketplaceClient = new MarketplaceClient({ authClient: sessionAuthClient,
 const socialSpaceClient = new SocialSpaceClient({ authClient: sessionAuthClient, secureSessionStore });
 const fulfillmentClient = new FulfillmentClient({ authClient: sessionAuthClient, secureSessionStore });
 const paymentClient = new PaymentClient({ authClient: sessionAuthClient, secureSessionStore });
+const notificationClient = new NotificationClient({ authClient: sessionAuthClient, secureSessionStore });
 type BootPhase = "BOOTSTRAPPING" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {
@@ -101,6 +103,7 @@ export function ProxyApp(): React.JSX.Element {
         socialSpace={socialSpaceClient}
         fulfillment={fulfillmentClient}
         payment={paymentClient}
+        notification={notificationClient}
         onSignOut={() => {
           void secureSessionStore.clear().catch(() => undefined).then(() => setPhase("SIGNED_OUT"));
         }}
