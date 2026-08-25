@@ -246,6 +246,15 @@ components:
             - ListInbox
             - MarkInboxRead
             - ResolveDeepLink
+            - CreateIncident
+            - CreateSafetyBlock
+            - CreateOperatorCase
+            - GrantJITAccess
+            - CheckJITAccess
+            - RecordConsent
+            - CreateLegalHold
+            - ReleaseLegalHold
+            - CheckLegalHold
             - DummyOther # placeholder to keep enum open for additive field evolution
         commandVersion: { type: integer, minimum: 1 }
         actor:
