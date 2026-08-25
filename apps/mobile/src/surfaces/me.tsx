@@ -3209,7 +3209,7 @@ const styles = StyleSheet.create({
   // 个人主页 v3：编辑资料 sheet + 字段行（值 + 独立展示开关）。
   profileEditorSheet: { maxHeight: "82%" },
   profileGroupTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  profileGroupHint: { color: color.muted, fontSize: 10, marginBottom: 4, marginTop: 1 },
+  profileGroupHint: { color: color.muted, fontSize: 11, marginBottom: 4, marginTop: 1 },
   profileFieldRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   profileFieldMain: { flex: 1 },
   profileFieldInput: {
@@ -3224,7 +3224,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7
   },
   profileFieldSide: { alignItems: "flex-end", width: 74 },
-  profileFieldLabel: { color: color.muted, fontSize: 10, fontWeight: "700", marginBottom: 4 },
+  profileFieldLabel: { color: color.muted, fontSize: 11, fontWeight: "700", marginBottom: 4 },
   profileVisToggle: {
     borderRadius: 999,
     borderWidth: 1,
@@ -3234,8 +3234,8 @@ const styles = StyleSheet.create({
   },
   profileVisOn: { backgroundColor: "#EEF8D6", borderColor: "#DFEBC7" },
   profileVisOff: { backgroundColor: "#F3F1F5", borderColor: "#E2DEE6" },
-  profileVisTextOn: { color: "#465C00", fontSize: 10, fontWeight: "900" },
-  profileVisTextOff: { color: "#8B8290", fontSize: 10, fontWeight: "700" },
+  profileVisTextOn: { color: "#465C00", fontSize: 11, fontWeight: "900" },
+  profileVisTextOff: { color: "#8B8290", fontSize: 11, fontWeight: "700" },
 
   // 能力实例卡与 sheet（原型 my_market_modules v5）。
   abilitySheetHead: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 6 },
@@ -3249,10 +3249,10 @@ const styles = StyleSheet.create({
     width: 30
   },
   abilityIconText: { color: "#6F37B9", fontSize: 13, fontWeight: "900" },
-  abilitySub: { color: color.muted, fontSize: 10, marginTop: 1 },
-  abilityNote: { color: color.muted, fontSize: 10, lineHeight: 14, marginTop: 4 },
+  abilitySub: { color: color.muted, fontSize: 11, marginTop: 1 },
+  abilityNote: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
   abilityFieldBlock: { marginTop: 8 },
-  abilityFieldLabel: { color: color.muted, fontSize: 10, fontWeight: "700", marginBottom: 4 },
+  abilityFieldLabel: { color: color.muted, fontSize: 11, fontWeight: "700", marginBottom: 4 },
 
   // chips（能力字段选择 / 星期 / 时段共用）。
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
@@ -3265,8 +3265,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6
   },
   chipActive: { backgroundColor: color.ink, borderColor: color.ink },
-  chipText: { color: color.ink, fontSize: 10, fontWeight: "700" },
-  chipTextActive: { color: color.white, fontSize: 10, fontWeight: "800" },
+  chipText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  chipTextActive: { color: color.white, fontSize: 11, fontWeight: "800" },
   dayCell: {
     alignItems: "center",
     backgroundColor: "#F8F6FA",
@@ -3304,9 +3304,9 @@ const styles = StyleSheet.create({
   avCell_off: { backgroundColor: "#F6EEF0", borderColor: "#EBD9DD" },
   avCell_custom: { backgroundColor: "#F6F1FC", borderColor: "#E2D4F4" },
   avCell_blank: { backgroundColor: "#FAF9FB" },
-  avCellDay: { color: color.ink, fontSize: 10, fontWeight: "800" },
-  avCellWeek: { color: "#A59EAA", fontSize: 9 },
-  avCellValue: { color: "#22506E", fontSize: 9, fontWeight: "800", marginTop: 1 },
+  avCellDay: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  avCellWeek: { color: "#A59EAA", fontSize: 11 },
+  avCellValue: { color: "#22506E", fontSize: 11, fontWeight: "800", marginTop: 1 },
   avCellValueMuted: { color: "#B9B3BD" },
 
   // 隐私阶梯（原型 .r159PrivacyLadder）。
