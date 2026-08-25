@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-24",
+  "global": {
+    "designSystem": "Proxy_App_Design_System_R3.md",
+    "visualReference": "Proxy_App_Design_System_R3_Visual.html",
+    "status": "ACTIVE"
+  },
+  "production": {
+    "iconRegistry": "apps/mobile/src/components/proxy-icon.tsx",
+    "theme": "apps/mobile/src/theme.tsx"
+  },
+  "screenReferences": [
+    {
+      "scope": "merchant-me",
+      "version": "R21_ACTIVITY_VOUCHER_ICON_FIX",
+      "file": "docs/design/references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html",
+      "status": "ACTIVE_SCREEN_REFERENCE"
+    },
+    {
+      "scope": "merchant-creator-center",
+      "version": "CREATOR_CENTER_MATCH_V3",
+      "file": "docs/design/references/proxy_creator_center_match_v3.html",
+      "status": "FUNCTIONAL_REFERENCE_ONLY"
+    },
+    {
+      "scope": "personal-creator-application",
+      "version": "CREATOR_APPLY_V1",
+      "file": "docs/design/references/proxy_creator_apply_v1.html",
+      "status": "FUNCTIONAL_REFERENCE_ONLY"
+    }
+  ],
+  "legacy": [
+    "Proxy_App_Design_Tokens_R2.json",
+    "docs/design/archive/icon-masters/Proxy_Module_Logo_Master_R1.html",
+    "docs/design/archive/prototypes/"
+  ]
+}

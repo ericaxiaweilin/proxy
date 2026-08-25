@@ -60,6 +60,6 @@ pnpm --filter @proxy/mobile android:release-test
 
 服务器只能发送共享契约允许的组件、图标 token、props 和已注册 route。App 使用 Zod 验证整个 manifest/UIPlan；任意 JavaScript、任意原生能力和未注册 route 都 fail closed。服务端不可绕过 App Store 权限、支付、身份或隐私边界。
 
-模块图标唯一母版是最新审批的 `Proxy_Module_Logo_Master_R3.html`。服务端下发稳定 icon token；Android/iOS 通过同一份 SVG path、viewBox、stroke 和 fill 规则渲染。禁止使用 Unicode 回退字体、替换图形或按页面重新绘制模块图标。
+模块图标规范入口是仓库的 `docs/design/README.md`，生产唯一注册表是 `src/components/proxy-icon.tsx`。服务端下发稳定 icon token；Android/iOS 通过同一份 SVG path、viewBox、stroke 和 fill 规则渲染。禁止引用不存在的本地母版、使用 Unicode 回退字体、替换图形或按页面重新绘制模块图标。
 
 生产 OTA 需要一次性配置更新服务与签名凭据。该步骤只用于 JS Renderer；Server UI revision 不依赖 OTA。未配置生产 OTA 前，不允许把 release APK 编译当作日常 UI 同步机制。

@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Proxy — Creator Center Match</title>
+<style>
+:root{
+  --bg:#f5f5f2; --card:#fff; --ink:#11110f; --muted:#73736c; --line:#e7e7e1;
+  --soft:#f8f8f5; --yellow:#ffb800; --yellow-soft:#fff5d8; --green:#187a4a; --green-soft:#edf8f1;
+  --radius:20px; --small:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.app{max-width:480px;margin:0 auto;min-height:100vh;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.04)}
+.topbar{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.96);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.header{padding:14px 18px 10px}
+.brand-row{display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:9px;font-weight:900;letter-spacing:-.5px}
+.otter{width:28px;height:28px;border:2px solid var(--ink);border-radius:50% 50% 46% 46%;position:relative}
+.otter:before,.otter:after{content:"";position:absolute;top:-4px;width:8px;height:8px;border:2px solid var(--ink);border-radius:50%;background:#fff}
+.otter:before{left:-2px}.otter:after{right:-2px}
+.otter i,.otter b{position:absolute;background:var(--ink);border-radius:50%}
+.otter i{width:3px;height:3px;left:7px;top:10px;box-shadow:9px 0 0 var(--ink)}
+.otter b{width:5px;height:3px;left:10px;top:16px}
+.header-actions{display:flex;gap:8px}
+.icon-btn{width:36px;height:36px;border:1px solid var(--line);border-radius:12px;background:#fff;display:grid;place-items:center}
+.icon{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.title{font-size:27px;line-height:1.05;letter-spacing:-1.1px;margin:18px 0 4px}
+.subtitle{font-size:12px;color:var(--muted);margin:0}
+.tabs{display:flex;gap:4px;padding:0 14px 10px;overflow:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{border:0;background:transparent;padding:9px 11px;border-radius:10px;font-size:11px;font-weight:850;color:#77776f;white-space:nowrap}
+.tab.active{background:#111;color:#fff}
+.page{display:none;padding:16px 16px 92px}
+.page.active{display:block}
+.section{margin-bottom:24px}
+.section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-bottom:11px}
+.section-title{font-size:16px;font-weight:900;letter-spacing:-.3px}
+.section-kicker{font-size:10px;color:var(--muted);margin-top:2px}
+.link-btn{border:0;background:transparent;font-size:10px;font-weight:850;color:#5d5d57;padding:3px}
+
+.goal-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.goal-card{border:1px solid var(--line);background:#fff;border-radius:17px;padding:14px;text-align:left;min-height:112px;transition:.15s}
+.goal-card.active{border-color:#111;box-shadow:inset 0 0 0 1px #111}
+.goal-icon{width:32px;height:32px;border:1px solid var(--line);border-radius:10px;display:grid;place-items:center;margin-bottom:12px;background:#fafafa}
+.goal-card.active .goal-icon{background:var(--yellow);border-color:var(--yellow)}
+.goal-card strong{display:block;font-size:13px;margin-bottom:4px}
+.goal-card span{display:block;font-size:10px;line-height:1.45;color:var(--muted)}
+
+.brief-card{border:1px solid var(--line);border-radius:20px;padding:14px;background:#fff}
+.brief-row{padding:12px 0;border-bottom:1px solid var(--line)}
+.brief-row:last-of-type{border-bottom:0}
+.brief-label{font-size:10px;font-weight:850;color:#5f5f59;margin-bottom:8px;display:flex;justify-content:space-between}
+.brief-label span{font-weight:650;color:#96968f}
+.option-row{display:flex;gap:7px;overflow:auto;scrollbar-width:none}
+.option-row::-webkit-scrollbar{display:none}
+.choice{border:1px solid var(--line);background:#fff;border-radius:999px;padding:8px 10px;font-size:10px;font-weight:850;white-space:nowrap;color:#4e4e49}
+.choice.active{background:#111;color:#fff;border-color:#111}
+.field-line{display:grid;grid-template-columns:1fr auto;gap:8px}
+.clean-select,.clean-input{width:100%;border:1px solid var(--line);background:#fafafa;border-radius:12px;padding:10px 11px;font-size:11px;font-weight:750;color:var(--ink);outline:none}
+.budget-line{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:7px}
+.budget-sep{font-size:10px;color:var(--muted)}
+.primary-btn{width:100%;border:0;background:var(--yellow);color:#111;border-radius:14px;padding:13px 14px;font-weight:950;margin-top:12px}
+.primary-btn:active{transform:translateY(1px)}
+.secondary-btn{border:1px solid var(--line);background:#fff;color:#111;border-radius:12px;padding:9px 11px;font-size:10px;font-weight:850}
+.black-btn{border:0;background:#111;color:#fff;border-radius:12px;padding:9px 12px;font-size:10px;font-weight:850}
+
+.summary-strip{border:1px solid #efdf9e;background:#fffaf0;border-radius:16px;padding:11px 12px;margin:2px 0 14px}
+.summary-strip strong{display:block;font-size:11px;margin-bottom:4px}
+.summary-strip span{font-size:10px;color:#6d6651;line-height:1.45}
+
+.match-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.match-head .count{font-size:10px;color:var(--muted)}
+.match-card{border:1px solid var(--line);border-radius:19px;padding:14px;margin-bottom:11px;background:#fff}
+.match-top{display:grid;grid-template-columns:48px 1fr auto;gap:11px;align-items:center}
+.avatar{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;font-size:12px;font-weight:950;background:#f1f1ed;border:1px solid #e7e7e1}
+.avatar.a{background:#fff1c9}.avatar.b{background:#e9f3ee}.avatar.c{background:#efeaff}.avatar.d{background:#f6eaea}.avatar.e{background:#e7f0f6}
+.name{font-size:13px;font-weight:900}
+.handle{font-size:9px;color:var(--muted);margin-top:2px}
+.fit-badge{font-size:9px;font-weight:900;padding:6px 8px;border-radius:999px;background:var(--green-soft);color:var(--green);white-space:nowrap}
+.fit-badge.good{background:var(--yellow-soft);color:#7a5900}
+.category-line,.channel-line{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.pill{border:1px solid var(--line);border-radius:999px;padding:4px 7px;font-size:9px;font-weight:800;color:#5d5d57;background:#fff}
+.pill.primary{border-color:#111;color:#111}
+.channel-stat{background:#f6f6f2;border:1px solid #e9e9e4;border-radius:8px;padding:5px 7px;font-size:9px;font-weight:850;color:#4b4b46}
+.why{margin-top:12px;border-top:1px solid var(--line);padding-top:11px}
+.why-title{font-size:9px;font-weight:900;color:#686862;margin-bottom:7px;text-transform:uppercase;letter-spacing:.4px}
+.reason{display:flex;align-items:flex-start;gap:7px;font-size:10px;line-height:1.4;margin:5px 0;color:#3f3f3a}
+.tick{width:16px;height:16px;border-radius:50%;background:#f0f7f2;color:var(--green);display:grid;place-items:center;font-size:9px;font-weight:950;flex:0 0 auto}
+.match-footer{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:12px}
+.rate small{display:block;font-size:8px;color:var(--muted);margin-bottom:2px}
+.rate strong{font-size:13px}
+.actions{display:flex;gap:7px}
+.mini-btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 10px;font-size:9px;font-weight:900}
+.mini-btn.invite{background:#111;color:#fff;border-color:#111}
+.eligibility{font-size:9px;color:#77776f;margin-top:5px}
+
+.searchbar{display:flex;gap:8px;margin-bottom:12px}
+.search{flex:1;display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:13px;background:#fafafa;padding:0 10px}
+.search input{border:0;outline:none;background:transparent;width:100%;padding:11px 0;font-size:11px}
+.filter-btn{width:42px;border:1px solid var(--line);border-radius:13px;background:#fff;position:relative}
+.filter-badge{position:absolute;right:-4px;top:-5px;min-width:17px;height:17px;border-radius:9px;background:#111;color:#fff;font-size:8px;font-weight:900;display:grid;place-items:center;padding:0 4px}
+.quick-filters{display:flex;gap:7px;overflow:auto;margin-bottom:14px;scrollbar-width:none}
+.quick-filters::-webkit-scrollbar{display:none}
+
+.creator-row{display:grid;grid-template-columns:46px 1fr auto;gap:11px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line)}
+.creator-row .avatar{width:46px;height:46px}
+.meta{font-size:9px;color:var(--muted);margin-top:3px;line-height:1.35}
+.save{width:34px;height:34px;border:1px solid var(--line);background:#fff;border-radius:11px;font-size:16px}
+.save.saved{background:#111;color:#fff;border-color:#111}
+.empty{border:1px dashed #d7d7d0;border-radius:16px;padding:24px 16px;text-align:center;color:var(--muted);font-size:10px;display:none}
+
+.notice{display:flex;gap:10px;border:1px solid var(--line);background:#fafafa;border-radius:15px;padding:12px;font-size:10px;line-height:1.45;color:#55554f}
+.notice strong{display:block;color:#111;margin-bottom:2px}
+
+.collab-card{border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:11px}
+.collab-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.person{display:flex;align-items:center;gap:9px}.person .avatar{width:40px;height:40px;border-radius:13px}
+.status{font-size:9px;font-weight:900;border-radius:999px;padding:6px 8px;background:#f5f5f1}
+.status.active{background:#edf8f1;color:#187a4a}.status.invited{background:#fff5d8;color:#7a5900}
+.collab-title{font-size:13px;font-weight:900;margin:12px 0 9px}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.info{border:1px solid var(--line);border-radius:12px;padding:9px;background:#fafafa}
+.info small{display:block;color:var(--muted);font-size:8px;margin-bottom:3px}
+.info strong{font-size:10px}
+
+.kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kpi{border:1px solid var(--line);border-radius:15px;padding:13px}
+.kpi small{display:block;font-size:8px;color:var(--muted);margin-bottom:7px}
+.kpi strong{font-size:19px;letter-spacing:-.4px}
+.bar-card{border:1px solid var(--line);border-radius:18px;padding:14px;margin-top:10px}
+.bar{height:8px;border-radius:999px;background:#f0f0eb;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--yellow);border-radius:999px}
+
+.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(480px,100%);background:rgba(255,255,255,.97);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding:7px 12px calc(7px + env(safe-area-inset-bottom));z-index:25}
+.navitem{border:0;background:transparent;padding:7px 4px;font-size:8px;font-weight:800;color:#87877f;display:grid;place-items:center;gap:2px}
+.navitem.active{color:#111}
+.navitem .icon{width:18px;height:18px}
+
+.drawer,.modal,.filter-drawer{position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:60;display:none;align-items:flex-end;justify-content:center}
+.drawer.open,.modal.open,.filter-drawer.open{display:flex}
+.sheet{width:min(480px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:24px 24px 0 0;padding:12px 16px 26px}
+.grab{width:38px;height:4px;border-radius:999px;background:#d8d8d2;margin:1px auto 14px}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}
+.sheet-head h3{margin:0;font-size:18px}
+.close{width:34px;height:34px;border:1px solid var(--line);background:#fff;border-radius:11px}
+.profile-top{display:flex;gap:12px;align-items:center;margin-bottom:14px}.profile-top .avatar{width:60px;height:60px;border-radius:18px}
+.profile-top h3{margin:0;font-size:17px}.profile-top p{margin:3px 0 0;color:var(--muted);font-size:10px}
+.profile-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:14px}
+.pstat{border:1px solid var(--line);border-radius:12px;padding:10px}.pstat strong{font-size:13px;display:block}.pstat span{font-size:8px;color:var(--muted)}
+.profile-section{border-top:1px solid var(--line);padding:14px 0}
+.profile-section h4{margin:0 0 10px;font-size:12px}
+.profile-list{display:grid;gap:7px}
+.profile-item{display:flex;justify-content:space-between;gap:12px;font-size:10px}.profile-item span:first-child{color:var(--muted)}
+.social-row{display:flex;gap:7px;flex-wrap:wrap}
+.social{border:1px solid var(--line);border-radius:10px;padding:8px 9px;font-size:9px;font-weight:850;background:#fff}
+.rate-list{display:grid;gap:7px}.rate-row{display:flex;justify-content:space-between;border:1px solid var(--line);border-radius:11px;padding:9px 10px;font-size:10px}
+.rate-row span{color:var(--muted)}
+.rate-note{font-size:9px;line-height:1.45;color:var(--muted);margin-top:8px}
+.profile-actions{display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:7px;position:sticky;bottom:-26px;background:#fff;padding:12px 0 0}
+
+.modal-card{width:min(440px,calc(100% - 24px));background:#fff;border-radius:20px;padding:16px;margin-bottom:18px}
+.modal-card h3{margin:0 0 4px}.modal-card>p{margin:0 0 14px;font-size:10px;color:var(--muted)}
+.field{margin-bottom:11px}.field label{display:block;font-size:9px;font-weight:850;margin-bottom:6px;color:#60605a}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.price-ref{border:1px solid #efd77b;background:#fffaf0;border-radius:14px;padding:11px;margin-top:9px}
+.price-ref small{font-size:8px;color:#756b47}.price-ref strong{display:block;font-size:14px;margin-top:2px}
+
+.filter-sheet{width:min(480px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:24px 24px 0 0;padding:12px 16px 28px}
+.filter-group{padding:13px 0;border-top:1px solid var(--line)}
+.filter-label{font-size:10px;font-weight:900;margin-bottom:8px}
+.filter-grid{display:flex;flex-wrap:wrap;gap:7px}
+.filter-choice{border:1px solid var(--line);background:#fff;border-radius:999px;padding:8px 10px;font-size:9px;font-weight:850}
+.filter-choice.active{background:#111;color:#fff;border-color:#111}
+.filter-help{font-size:9px;line-height:1.45;color:var(--muted);margin:-2px 0 9px}
+.filter-footer{position:sticky;bottom:-28px;background:#fff;border-top:1px solid var(--line);padding-top:11px;display:grid;grid-template-columns:1fr 1.5fr;gap:8px}
+
+@media (min-width:700px){
+ body{padding:22px 0}.app{min-height:calc(100vh - 44px);border-radius:26px;overflow:hidden}
+ .bottom-nav{bottom:22px;border-radius:0 0 26px 26px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <header class="header">
+      <div class="brand-row">
+        <div class="brand"><span class="otter"><i></i><b></b></span><span>proxy</span></div>
+        <div class="header-actions">
+          <button class="icon-btn" aria-label="Messages"><svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3V5Z"/></svg></button>
+          <button class="icon-btn" aria-label="Notifications"><svg class="icon" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M10 19h4"/></svg></button>
+        </div>
+      </div>
+      <h1 class="title">Creator Center</h1>
+      <p class="subtitle">Match creators to a real business goal — not just follower counts.</p>
+    </header>
+    <nav class="tabs">
+      <button class="tab active" data-page="match">Match</button>
+      <button class="tab" data-page="browse">Browse</button>
+      <button class="tab" data-page="mycreators">My Creators</button>
+      <button class="tab" data-page="collabs">Collabs</button>
+      <button class="tab" data-page="results">Results</button>
+    </nav>
+  </div>
+
+  <section class="page active" id="match">
+    <div class="section">
+      <div class="section-head">
+        <div><div class="section-title">What do you want creators to do?</div><div class="section-kicker">This drives matching. Filters come later.</div></div>
+      </div>
+      <div class="goal-grid" id="goalGrid">
+        <button class="goal-card active" data-goal="customers">
+          <span class="goal-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 17h16"/><path d="M7 17V9l5-4 5 4v8"/><path d="M10 17v-5h4v5"/></svg></span>
+          <strong>Bring customers</strong><span>Drive visits, bookings or voucher use.</span>
+        </button>
+        <button class="goal-card" data-goal="content">
+          <span class="goal-icon"><svg class="icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m10 9 5 3-5 3V9Z"/></svg></span>
+          <strong>Create content</strong><span>UGC, photos or short-form content for your brand.</span>
+        </button>
+        <button class="goal-card" data-goal="exposure">
+          <span class="goal-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 12c3-5 13-5 16 0-3 5-13 5-16 0Z"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <strong>Get exposure</strong><span>Reach more relevant local audiences.</span>
+        </button>
+        <button class="goal-card" data-goal="offer">
+          <span class="goal-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="M8 10h8M8 14h5"/></svg></span>
+          <strong>Promote an offer</strong><span>Push a service, package or campaign.</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><div><div class="section-title">Build the brief</div><div class="section-kicker">Only the fields that affect creator fit.</div></div></div>
+      <div class="brief-card">
+        <div class="brief-row">
+          <div class="brief-label">Promote <span>what should they talk about?</span></div>
+          <select class="clean-select" id="briefProduct">
+            <option value="spa">90-min Spa Package</option>
+            <option value="facial">Signature Facial</option>
+            <option value="voucher">Luna Spa Gift Voucher</option>
+            <option value="brand">Luna Spa brand</option>
+          </select>
+        </div>
+
+        <div class="brief-row">
+          <div class="brief-label">Preferred channels <span>multi-select</span></div>
+          <div class="option-row" id="briefChannels">
+            <button class="choice active" data-value="tiktok">TikTok</button>
+            <button class="choice active" data-value="instagram">Instagram</button>
+            <button class="choice" data-value="facebook">Facebook</button>
+            <button class="choice" data-value="youtube">YouTube</button>
+          </div>
+        </div>
+
+        <div class="brief-row">
+          <div class="brief-label">Collaboration <span>what will creator actually do?</span></div>
+          <div class="option-row" id="briefCollab">
+            <button class="choice active" data-value="visit">Visit + content</button>
+            <button class="choice" data-value="sponsored">Sponsored post</button>
+            <button class="choice" data-value="ugc">UGC only</button>
+            <button class="choice" data-value="voucher">Voucher promo</button>
+            <button class="choice" data-value="event">Event</button>
+          </div>
+        </div>
+
+        <div class="brief-row">
+          <div class="brief-label">Creator base <span>offline business relevance</span></div>
+          <select class="clean-select" id="briefLocation">
+            <option>Ho Chi Minh City</option>
+            <option>Hanoi</option>
+            <option>Da Nang</option>
+            <option>Any Vietnam city</option>
+          </select>
+        </div>
+
+        <div class="brief-row">
+          <div class="brief-label">Budget / creator <span>creator-set rate is the reference</span></div>
+          <div class="budget-line">
+            <input class="clean-input" id="budgetMin" type="number" value="2500000" min="0" step="100000"/>
+            <span class="budget-sep">to</span>
+            <input class="clean-input" id="budgetMax" type="number" value="5000000" min="0" step="100000"/>
+          </div>
+        </div>
+
+        <button class="primary-btn" id="findMatches">Find matches</button>
+      </div>
+    </div>
+
+    <div class="section" id="matchResults">
+      <div class="summary-strip" id="briefSummary">
+        <strong>Current brief</strong>
+        <span>Bring customers · 90-min Spa Package · TikTok + Instagram · Visit + content · HCMC · up to ₫5M</span>
+      </div>
+      <div class="match-head"><div class="section-title">Best matches</div><div class="count" id="matchCount">3 eligible creators</div></div>
+      <div id="matchList"></div>
+      <div class="empty" id="matchEmpty">No creator meets the hard requirements. Increase budget, change channels, or choose another collaboration type.</div>
+    </div>
+  </section>
+
+  <section class="page" id="browse">
+    <div class="searchbar">
+      <label class="search"><svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="browseSearch" placeholder="Search creators or categories"/></label>
+      <button class="filter-btn" id="openFilters"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span class="filter-badge" id="filterBadge">0</span></button>
+    </div>
+    <div class="quick-filters" id="browseQuick">
+      <button class="choice active" data-cat="all">All</button>
+      <button class="choice" data-cat="Beauty">Beauty</button>
+      <button class="choice" data-cat="Wellness">Wellness</button>
+      <button class="choice" data-cat="Lifestyle">Lifestyle</button>
+      <button class="choice" data-cat="Travel">Travel</button>
+      <button class="choice" data-cat="Food">Food</button>
+    </div>
+    <div class="section-head"><div><div class="section-title">Browse all creators</div><div class="section-kicker">Manual discovery when you already know what you want.</div></div></div>
+    <div id="browseList"></div>
+    <div class="empty" id="browseEmpty">No creators match these browse filters.</div>
+  </section>
+
+  <section class="page" id="mycreators">
+    <div class="section-head"><div><div class="section-title">My Creators</div><div class="section-kicker">People you saved, contacted or worked with.</div></div></div>
+    <div class="creator-row" data-profile="Anna Nguyen"><div class="avatar a">AN</div><div><div class="name">Anna Nguyen</div><div class="meta">Saved · Beauty / Wellness<br/>Worked with Luna Spa 2×</div></div><button class="save saved">♥</button></div>
+    <div class="creator-row" data-profile="Noah Kim"><div class="avatar b">NK</div><div><div class="name">Noah Kim</div><div class="meta">Contacted · Travel / Lifestyle<br/>Visited Luna Spa before</div></div><button class="save saved">♥</button></div>
+    <div class="creator-row" data-profile="Maya Patel"><div class="avatar c">MP</div><div><div class="name">Maya Patel</div><div class="meta">Worked with · Beauty / Skincare<br/>1 completed collaboration</div></div><button class="save saved">♥</button></div>
+  </section>
+
+  <section class="page" id="collabs">
+    <div class="section-head"><div><div class="section-title">Collaborations</div><div class="section-kicker">A collaboration has a status. The creator relationship does not.</div></div></div>
+    <article class="collab-card">
+      <div class="collab-top"><div class="person"><div class="avatar a">AN</div><div><div class="name">Anna Nguyen</div><div class="handle">@annawellness</div></div></div><span class="status active">Active</span></div>
+      <div class="collab-title">Summer Relax Campaign</div>
+      <div class="info-grid"><div class="info"><small>Deliverable</small><strong>Visit + TikTok video</strong></div><div class="info"><small>Agreed fee</small><strong>₫4.5M + service</strong></div><div class="info"><small>Voucher</small><strong>ANNA20</strong></div><div class="info"><small>Visit</small><strong>Aug 28 · 14:00</strong></div></div>
+    </article>
+    <article class="collab-card">
+      <div class="collab-top"><div class="person"><div class="avatar c">MP</div><div><div class="name">Maya Patel</div><div class="handle">@glowbymaya</div></div></div><span class="status invited">Invited</span></div>
+      <div class="collab-title">Signature Facial Launch</div>
+      <div class="info-grid"><div class="info"><small>Your offer</small><strong>₫3.8M</strong></div><div class="info"><small>Creator listed</small><strong>₫4.8M</strong></div></div>
+    </article>
+  </section>
+
+  <section class="page" id="results">
+    <div class="section-head"><div><div class="section-title">Results</div><div class="section-kicker">Measure what creators actually bring to the business.</div></div></div>
+    <div class="kpi-grid">
+      <div class="kpi"><small>Attributed revenue</small><strong>₫46.8M</strong></div>
+      <div class="kpi"><small>Voucher uses</small><strong>74</strong></div>
+      <div class="kpi"><small>New customers</small><strong>51</strong></div>
+      <div class="kpi"><small>Completed collabs</small><strong>8</strong></div>
+    </div>
+    <div class="bar-card"><div class="section-title">Creator contribution</div><div class="meta">Anna Nguyen · ₫18.6M</div><div class="bar"><i style="width:78%"></i></div><div class="meta" style="margin-top:10px">Noah Kim · ₫12.4M</div><div class="bar"><i style="width:53%"></i></div><div class="meta" style="margin-top:10px">Maya Patel · ₫9.8M</div><div class="bar"><i style="width:42%"></i></div></div>
+  </section>
+
+  <nav class="bottom-nav">
+    <button class="navitem active" data-goto="match"><svg class="icon" viewBox="0 0 24 24"><path d="M4 12h5l2-6 3 12 2-6h4"/></svg>Match</button>
+    <button class="navitem" data-goto="mycreators"><svg class="icon" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-4 2-6 6-6s6 2 6 6"/><path d="M17 8h4M19 6v4"/></svg>Creators</button>
+    <button class="navitem" data-goto="collabs"><svg class="icon" viewBox="0 0 24 24"><path d="M8 11 4 7l3-3 4 4"/><path d="m16 13 4 4-3 3-4-4"/><path d="m9 15 6-6"/></svg>Collabs</button>
+    <button class="navitem" data-goto="results"><svg class="icon" viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Results</button>
+  </nav>
+</div>
+
+<div class="drawer" id="profileDrawer">
+  <div class="sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><h3>Creator profile</h3><button class="close" data-close="profileDrawer">×</button></div>
+    <div class="profile-top"><div class="avatar a" id="profileAvatar">AN</div><div><h3 id="profileName">Anna Nguyen</h3><p id="profileHandle">@annawellness</p><div class="category-line" id="profileCats"></div></div></div>
+    <div class="profile-stats">
+      <div class="pstat"><strong id="profileFollowers">128K</strong><span id="profileFollowerLabel">TikTok followers</span></div>
+      <div class="pstat"><strong id="profileViews">1.2M</strong><span id="profileViewLabel">TikTok avg views</span></div>
+      <div class="pstat"><strong id="profileEng">6.3%</strong><span id="profileEngLabel">TikTok engagement</span></div>
+    </div>
+    <div class="profile-section"><h4>Creator identity</h4><div class="profile-list">
+      <div class="profile-item"><span>Base location</span><strong id="profileLocation">Ho Chi Minh City</strong></div>
+      <div class="profile-item"><span>Categories</span><strong id="profileCategoryText">Beauty · Wellness · Lifestyle</strong></div>
+      <div class="profile-item"><span>Open to</span><strong id="profileOpenTo">Visit · Sponsored · Voucher promo</strong></div>
+    </div></div>
+    <div class="profile-section"><h4>Connected channels</h4><div class="social-row" id="profileSocial"></div></div>
+    <div class="profile-section"><h4>Creator-set rate card</h4><div class="rate-list" id="profileRates"></div><div class="rate-note">Rates are set by the creator. Proxy structures and compares them; Proxy does not set the creator's price.</div></div>
+    <div class="profile-section"><h4>Why this creator may fit Luna Spa</h4><div id="profileReasons"></div></div>
+    <div class="profile-actions"><button class="secondary-btn" id="profileSave">Save</button><button class="secondary-btn">Contact</button><button class="black-btn" id="profileInvite">Invite</button></div>
+  </div>
+</div>
+
+<div class="modal" id="inviteModal">
+  <div class="modal-card">
+    <h3>Invite creator</h3><p id="inviteTo">Anna Nguyen</p>
+    <div class="field"><label>Collaboration</label><select class="clean-select" id="inviteCollab"><option value="visit">Visit + content</option><option value="sponsored">Sponsored post</option><option value="ugc">UGC only</option><option value="voucher">Voucher promo</option><option value="event">Event</option></select></div>
+    <div class="field"><label>Preferred channel</label><select class="clean-select" id="inviteChannel"><option value="tiktok">TikTok</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="youtube">YouTube</option></select></div>
+    <div class="price-ref"><small>Creator listed reference</small><strong id="inviteListed">₫4.5M</strong><div class="rate-note">Final collaboration price can be negotiated.</div></div>
+    <div class="field" style="margin-top:11px"><label>Your offer</label><input class="clean-input" id="inviteOffer" type="number" step="100000" value="4500000"/></div>
+    <div class="modal-actions"><button class="secondary-btn" data-close="inviteModal">Cancel</button><button class="black-btn" id="sendInvite">Send invite</button></div>
+  </div>
+</div>
+
+<div class="filter-drawer" id="filterDrawer">
+  <div class="filter-sheet">
+    <div class="grab"></div>
+    <div class="sheet-head"><div><h3>Browse filters</h3><div class="section-kicker">For manual discovery, not the core matching engine.</div></div><button class="close" data-close="filterDrawer">×</button></div>
+    <div class="filter-group"><div class="filter-label">Channels · multi-select</div><div class="filter-grid" id="filterChannels">
+      <button class="filter-choice" data-filter-channel="tiktok">TikTok</button><button class="filter-choice" data-filter-channel="instagram">Instagram</button><button class="filter-choice" data-filter-channel="facebook">Facebook</button><button class="filter-choice" data-filter-channel="youtube">YouTube</button>
+    </div></div>
+    <div class="filter-group"><div class="filter-label">Followers on a selected channel</div><div class="filter-grid" id="filterFollowers">
+      <button class="filter-choice" data-followers="10000">10K+</button><button class="filter-choice" data-followers="50000">50K+</button><button class="filter-choice" data-followers="100000">100K+</button><button class="filter-choice" data-followers="500000">500K+</button>
+    </div></div>
+    <div class="filter-group"><div class="filter-label">Creator-set rate</div><div class="filter-grid" id="filterBudget">
+      <button class="filter-choice" data-browse-budget="3000000">≤ ₫3M</button><button class="filter-choice" data-browse-budget="5000000">≤ ₫5M</button><button class="filter-choice" data-browse-budget="10000000">≤ ₫10M</button>
+    </div><p class="filter-help">Uses the lowest public collaboration rate as a browse shortcut. Match uses the actual requested collaboration type.</p></div>
+    <div class="filter-footer"><button class="secondary-btn" id="clearBrowseFilters">Clear</button><button class="black-btn" id="applyBrowseFilters">Apply filters</button></div>
+  </div>
+</div>
+
+<script>
+const fmt = n => '₫'+(n>=1000000?(n/1000000).toFixed(n%1000000?1:0)+'M':Math.round(n/1000)+'K');
+const compact = n => n>=1000000?(n/1000000).toFixed(n>=10000000?0:1)+'M':n>=1000?Math.round(n/1000)+'K':String(n);
+
+const creators = {
+  "Anna Nguyen":{
+    initials:"AN",avatar:"a",handle:"@annawellness",location:"Ho Chi Minh City",
+    categories:["Beauty","Wellness","Lifestyle"],primary:"Beauty",
+    openTo:["visit","sponsored","voucher","ugc"],history:["worked","visited"],
+    platforms:{
+      tiktok:{followers:128000,views:1200000,eng:6.3},
+      instagram:{followers:84000,views:210000,eng:5.9},
+      facebook:{followers:31000,views:75000,eng:3.8},
+      youtube:{followers:18000,views:42000,eng:4.1}
+    },
+    rates:{visit:4500000,sponsored:3500000,ugc:2000000,voucher:3000000,event:5500000},
+    audienceLocal:58, formats:["review","short-video","vlog"],
+    socials:{TikTok:"@annawellness",Instagram:"@annawellness",Facebook:"Anna Wellness",YouTube:"Anna Wellness"},
+    past:"Strong results with beauty and wellness businesses."
+  },
+  "Noah Kim":{
+    initials:"NK",avatar:"b",handle:"@noah.travels",location:"Ho Chi Minh City",
+    categories:["Travel","Food","Lifestyle"],primary:"Travel",
+    openTo:["visit","sponsored","voucher","event"],history:["visited"],
+    platforms:{
+      tiktok:{followers:94000,views:684000,eng:5.7},
+      instagram:{followers:61000,views:190000,eng:5.2},
+      youtube:{followers:42000,views:155000,eng:4.8}
+    },
+    rates:{visit:4200000,sponsored:3200000,ugc:0,voucher:2800000,event:5000000},
+    audienceLocal:44, formats:["vlog","city-guide","review"],
+    socials:{TikTok:"@noah.travels",Instagram:"@noah.travels",YouTube:"Noah Travels"},
+    past:"Good local discovery fit; has visited Luna Spa before."
+  },
+  "Maya Patel":{
+    initials:"MP",avatar:"c",handle:"@glowbymaya",location:"Ho Chi Minh City",
+    categories:["Beauty","Skincare","Lifestyle"],primary:"Beauty",
+    openTo:["visit","sponsored","ugc","voucher"],history:["worked"],
+    platforms:{
+      instagram:{followers:119000,views:345000,eng:7.2},
+      tiktok:{followers:76000,views:512000,eng:6.8},
+      facebook:{followers:18000,views:48000,eng:3.5}
+    },
+    rates:{visit:4800000,sponsored:3400000,ugc:2400000,voucher:3200000,event:0},
+    audienceLocal:61, formats:["review","beauty-demo","short-video"],
+    socials:{Instagram:"@glowbymaya",TikTok:"@glowbymaya",Facebook:"Glow by Maya"},
+    past:"High engagement and prior beauty collaboration history."
+  },
+  "Sophie Laurent":{
+    initials:"SL",avatar:"d",handle:"@sophielaurent",location:"Ho Chi Minh City",
+    categories:["Fashion","Beauty","Lifestyle"],primary:"Fashion",
+    openTo:["sponsored","ugc","event"],history:[],
+    platforms:{
+      instagram:{followers:97000,views:284000,eng:6.1},
+      tiktok:{followers:82000,views:438000,eng:5.4}
+    },
+    rates:{visit:0,sponsored:3600000,ugc:2200000,voucher:0,event:4800000},
+    audienceLocal:36, formats:["fashion-edit","short-video","photo"],
+    socials:{Instagram:"@sophielaurent",TikTok:"@sophielaurent"},
+    past:"Strong visual content; less suited to store-visit campaigns."
+  },
+  "Diego Costa":{
+    initials:"DC",avatar:"e",handle:"@diegocosta",location:"Ho Chi Minh City",
+    categories:["Food","Travel","Lifestyle"],primary:"Food",
+    openTo:["visit","sponsored","voucher"],history:["visited"],
+    platforms:{
+      tiktok:{followers:68000,views:396000,eng:4.9},
+      youtube:{followers:37000,views:128000,eng:4.4},
+      facebook:{followers:21000,views:51000,eng:3.4}
+    },
+    rates:{visit:3800000,sponsored:2500000,ugc:0,voucher:2200000,event:0},
+    audienceLocal:49, formats:["review","city-guide","short-video"],
+    socials:{TikTok:"@diegocosta",YouTube:"Diego Costa",Facebook:"Diego Costa"},
+    past:"Affordable local lifestyle reach."
+  }
+};
+
+const goalFit = {
+  customers:{Beauty:5,Wellness:5,Lifestyle:4,Travel:3,Food:2,Fashion:2,Skincare:5},
+  content:{Beauty:4,Wellness:4,Lifestyle:4,Travel:4,Food:4,Fashion:5,Skincare:5},
+  exposure:{Beauty:4,Wellness:4,Lifestyle:5,Travel:5,Food:4,Fashion:4,Skincare:4},
+  offer:{Beauty:5,Wellness:5,Lifestyle:4,Travel:3,Food:3,Fashion:3,Skincare:5}
+};
+
+let brief = {
+  goal:"customers", product:"spa", channels:new Set(["tiktok","instagram"]),
+  collab:"visit", location:"Ho Chi Minh City", min:2500000, max:5000000
+};
+let currentCreator="Anna Nguyen";
+
+function selectedText(set){
+  const labels={tiktok:"TikTok",instagram:"Instagram",facebook:"Facebook",youtube:"YouTube"};
+  return [...set].map(x=>labels[x]).join(" + ");
+}
+function collabLabel(x){return ({visit:"Visit + content",sponsored:"Sponsored post",ugc:"UGC only",voucher:"Voucher promo",event:"Event"})[x]||x}
+function goalLabel(x){return ({customers:"Bring customers",content:"Create content",exposure:"Get exposure",offer:"Promote an offer"})[x]||x}
+function productLabel(x){return ({spa:"90-min Spa Package",facial:"Signature Facial",voucher:"Luna Spa Gift Voucher",brand:"Luna Spa brand"})[x]||x}
+
+function eligible(c){
+  const channelOk=[...brief.channels].some(p=>c.platforms[p]);
+  const collabOk=c.openTo.includes(brief.collab) && Number(c.rates[brief.collab]||0)>0;
+  const locationOk=brief.location==="Any Vietnam city" || c.location===brief.location;
+  const rate=Number(c.rates[brief.collab]||0);
+  const budgetOk=rate>0 && rate<=brief.max;
+  return {ok:channelOk&&collabOk&&locationOk&&budgetOk,channelOk,collabOk,locationOk,budgetOk,rate};
+}
+function rankCreator(c){
+  const hard=eligible(c);
+  if(!hard.ok) return -1;
+  const cat=Math.max(...c.categories.map(x=>goalFit[brief.goal][x]||1));
+  const selected=[...brief.channels].filter(p=>c.platforms[p]);
+  const strongest=Math.max(...selected.map(p=>Math.min(5,(c.platforms[p].views/100000)+(c.platforms[p].eng/3))));
+  const format = brief.collab==="visit" && c.formats.includes("review") ? 5 :
+                 brief.collab==="ugc" && (c.formats.includes("short-video")||c.formats.includes("beauty-demo")) ? 5 : 3;
+  const budgetFit=Math.max(1,5-(hard.rate/brief.max)*3);
+  const history=c.history.includes("worked")?5:c.history.includes("visited")?4:2.5;
+  const local=Math.min(5,c.audienceLocal/12);
+  return cat*2.2 + strongest*1.7 + format*1.4 + budgetFit + history*.8 + local*.6;
+}
+function reasonsFor(c){
+  const reasons=[];
+  const channels=[...brief.channels].filter(p=>c.platforms[p]);
+  if(channels.length){
+    const best=channels.sort((a,b)=>c.platforms[b].views-c.platforms[a].views)[0];
+    reasons.push(`Strong ${best==="tiktok"?"TikTok":best==="instagram"?"Instagram":best==="facebook"?"Facebook":"YouTube"} performance for this brief`);
+  }
+  const fitCats=c.categories.filter(x=>(goalFit[brief.goal][x]||0)>=4).slice(0,2);
+  if(fitCats.length) reasons.push(`${fitCats.join(" + ")} content fits the business goal`);
+  if(c.openTo.includes(brief.collab)) reasons.push(`Open to ${collabLabel(brief.collab).toLowerCase()}`);
+  if(c.audienceLocal>=50) reasons.push(`${c.audienceLocal}% of connected audience is local to HCMC`);
+  if(c.history.includes("worked")) reasons.push("Has worked with Luna Spa before");
+  else if(c.history.includes("visited")) reasons.push("Already knows Luna Spa from a prior visit");
+  if((c.rates[brief.collab]||0)<=brief.max) reasons.push(`Creator-set rate is within your ${fmt(brief.max)} budget`);
+  if(c.past) reasons.push(c.past);
+  return reasons.slice(0,4);
+}
+function bestChannel(c){
+  const pool=[...brief.channels].filter(p=>c.platforms[p]);
+  if(!pool.length) return Object.keys(c.platforms)[0];
+  return pool.sort((a,b)=>c.platforms[b].views-c.platforms[a].views)[0];
+}
+function fitLabel(score){
+  return score>=31?["Strong match",""]:score>=25?["Good match","good"]:["Possible match","good"];
+}
+
+function renderMatches(){
+  const list=document.getElementById("matchList");
+  list.innerHTML="";
+  const ranked=Object.entries(creators).map(([name,c])=>({name,c,score:rankCreator(c)})).filter(x=>x.score>=0).sort((a,b)=>b.score-a.score);
+  document.getElementById("matchCount").textContent=`${ranked.length} eligible creator${ranked.length===1?"":"s"}`;
+  document.getElementById("matchEmpty").style.display=ranked.length?"none":"block";
+  ranked.forEach(({name,c,score})=>{
+    const best=bestChannel(c),m=c.platforms[best],fit=fitLabel(score),reasons=reasonsFor(c);
+    const el=document.createElement("article"); el.className="match-card";
+    el.innerHTML=`
+      <div class="match-top">
+        <div class="avatar ${c.avatar}">${c.initials}</div>
+        <div><div class="name">${name}</div><div class="handle">${c.handle} · ${c.location}</div></div>
+        <span class="fit-badge ${fit[1]}">${fit[0]}</span>
+      </div>
+      <div class="category-line">${c.categories.slice(0,3).map((x,i)=>`<span class="pill ${i===0?"primary":""}">${x}</span>`).join("")}</div>
+      <div class="channel-line"><span class="channel-stat">${best==="tiktok"?"TK":best==="instagram"?"IG":best==="facebook"?"FB":"YT"} ${compact(m.followers)}</span><span class="channel-stat">${compact(m.views)} avg views</span><span class="channel-stat">${m.eng}% engagement</span></div>
+      <div class="why"><div class="why-title">Why this creator fits</div>${reasons.map(r=>`<div class="reason"><span class="tick">✓</span><span>${r}</span></div>`).join("")}</div>
+      <div class="match-footer">
+        <div class="rate"><small>Creator-set rate · ${collabLabel(brief.collab)}</small><strong>${fmt(c.rates[brief.collab])}</strong><div class="eligibility">Eligible for this brief</div></div>
+        <div class="actions"><button class="mini-btn" data-profile="${name}">View</button><button class="mini-btn invite" data-invite="${name}">Invite</button></div>
+      </div>`;
+    list.appendChild(el);
+  });
+  bindDynamicButtons();
+  document.getElementById("briefSummary").querySelector("span").textContent=
+    `${goalLabel(brief.goal)} · ${productLabel(brief.product)} · ${selectedText(brief.channels)} · ${collabLabel(brief.collab)} · ${brief.location==="Ho Chi Minh City"?"HCMC":brief.location} · up to ${fmt(brief.max)}`;
+}
+
+function renderBrowse(){
+  const list=document.getElementById("browseList"); list.innerHTML="";
+  Object.entries(creators).forEach(([name,c])=>{
+    const main=Object.entries(c.platforms).sort((a,b)=>b[1].followers-a[1].followers)[0];
+    const el=document.createElement("div"); el.className="creator-row"; el.dataset.profile=name; el.dataset.name=name.toLowerCase(); el.dataset.categories=c.categories.join(","); el.dataset.channels=Object.keys(c.platforms).join(",");
+    el.dataset.maxfollowers=Math.max(...Object.values(c.platforms).map(x=>x.followers));
+    el.dataset.minrate=Math.min(...Object.values(c.rates).filter(x=>x>0));
+    el.innerHTML=`<div class="avatar ${c.avatar}">${c.initials}</div><div><div class="name">${name}</div><div class="meta">${main[0]==="tiktok"?"TikTok":main[0]==="instagram"?"Instagram":main[0]==="facebook"?"Facebook":"YouTube"} ${compact(main[1].followers)} · ${compact(main[1].views)} avg views<br/>${c.categories.join(" · ")}</div></div><button class="save">♡</button>`;
+    list.appendChild(el);
+  });
+  bindDynamicButtons();
+  applyBrowse();
+}
+
+document.querySelectorAll("#goalGrid .goal-card").forEach(b=>b.addEventListener("click",()=>{
+  brief.goal=b.dataset.goal; document.querySelectorAll("#goalGrid .goal-card").forEach(x=>x.classList.toggle("active",x===b));
+}));
+document.getElementById("briefChannels").querySelectorAll(".choice").forEach(b=>b.addEventListener("click",()=>{
+  const v=b.dataset.value;
+  if(brief.channels.has(v) && brief.channels.size>1) brief.channels.delete(v); else brief.channels.add(v);
+  b.classList.toggle("active",brief.channels.has(v));
+}));
+document.getElementById("briefCollab").querySelectorAll(".choice").forEach(b=>b.addEventListener("click",()=>{
+  brief.collab=b.dataset.value; document.querySelectorAll("#briefCollab .choice").forEach(x=>x.classList.toggle("active",x===b));
+}));
+document.getElementById("findMatches").addEventListener("click",()=>{
+  brief.product=document.getElementById("briefProduct").value;
+  brief.location=document.getElementById("briefLocation").value;
+  brief.min=Number(document.getElementById("budgetMin").value||0);
+  brief.max=Number(document.getElementById("budgetMax").value||999999999);
+  renderMatches(); document.getElementById("matchResults").scrollIntoView({behavior:"smooth",block:"start"});
+});
+
+function showPage(id){
+  document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===id));
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.page===id));
+  document.querySelectorAll(".navitem").forEach(n=>n.classList.toggle("active",n.dataset.goto===id));
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>showPage(t.dataset.page)));
+document.querySelectorAll(".navitem").forEach(t=>t.addEventListener("click",()=>showPage(t.dataset.goto)));
+
+function openProfile(name){
+  const c=creators[name]; if(!c)return; currentCreator=name;
+  const main=Object.entries(c.platforms).sort((a,b)=>b[1].followers-a[1].followers)[0];
+  document.getElementById("profileAvatar").className=`avatar ${c.avatar}`;
+  document.getElementById("profileAvatar").textContent=c.initials;
+  document.getElementById("profileName").textContent=name;
+  document.getElementById("profileHandle").textContent=c.handle;
+  document.getElementById("profileCats").innerHTML=c.categories.map((x,i)=>`<span class="pill ${i===0?"primary":""}">${x}</span>`).join("");
+  document.getElementById("profileFollowers").textContent=compact(main[1].followers);
+  document.getElementById("profileViews").textContent=compact(main[1].views);
+  document.getElementById("profileEng").textContent=main[1].eng+"%";
+  const channelName=main[0]==="tiktok"?"TikTok":main[0]==="instagram"?"Instagram":main[0]==="facebook"?"Facebook":"YouTube";
+  document.getElementById("profileFollowerLabel").textContent=channelName+" followers";
+  document.getElementById("profileViewLabel").textContent=channelName+" avg views";
+  document.getElementById("profileEngLabel").textContent=channelName+" engagement";
+  document.getElementById("profileLocation").textContent=c.location;
+  document.getElementById("profileCategoryText").textContent=c.categories.join(" · ");
+  document.getElementById("profileOpenTo").textContent=c.openTo.map(collabLabel).join(" · ");
+  document.getElementById("profileSocial").innerHTML=Object.entries(c.socials).map(([p,h])=>`<button class="social">${p} · ${h}</button>`).join("");
+  document.getElementById("profileRates").innerHTML=Object.entries(c.rates).filter(([k,v])=>v>0).map(([k,v])=>`<div class="rate-row"><span>${collabLabel(k)}</span><strong>${fmt(v)}+</strong></div>`).join("");
+  document.getElementById("profileReasons").innerHTML=reasonsFor(c).map(r=>`<div class="reason"><span class="tick">✓</span><span>${r}</span></div>`).join("");
+  document.getElementById("profileDrawer").classList.add("open");
+}
+function openInvite(name){
+  currentCreator=name; const c=creators[name];
+  document.getElementById("inviteTo").textContent=name;
+  document.getElementById("inviteCollab").value=c.openTo.includes(brief.collab)?brief.collab:c.openTo[0];
+  const available=[...brief.channels].find(x=>c.platforms[x])||Object.keys(c.platforms)[0];
+  document.getElementById("inviteChannel").value=available;
+  updateInvitePrice();
+  document.getElementById("inviteModal").classList.add("open");
+}
+function updateInvitePrice(){
+  const c=creators[currentCreator],type=document.getElementById("inviteCollab").value,rate=Number(c.rates[type]||0);
+  document.getElementById("inviteListed").textContent=rate?fmt(rate):"Ask for quote";
+  document.getElementById("inviteOffer").value=rate||"";
+}
+document.getElementById("inviteCollab").addEventListener("change",updateInvitePrice);
+document.getElementById("profileInvite").addEventListener("click",()=>{document.getElementById("profileDrawer").classList.remove("open");openInvite(currentCreator)});
+document.getElementById("sendInvite").addEventListener("click",()=>{document.getElementById("inviteModal").classList.remove("open");showPage("collabs")});
+
+function bindDynamicButtons(){
+  document.querySelectorAll("[data-profile]").forEach(b=>{b.onclick=e=>{if(e.target.closest(".save"))return;openProfile(b.dataset.profile)}});
+  document.querySelectorAll("[data-invite]").forEach(b=>{b.onclick=e=>{e.stopPropagation();openInvite(b.dataset.invite)}});
+}
+document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",()=>document.getElementById(b.dataset.close).classList.remove("open")));
+document.querySelectorAll(".drawer,.modal,.filter-drawer").forEach(x=>x.addEventListener("click",e=>{if(e.target===x)x.classList.remove("open")}));
+
+let browseCat="all", browseChannels=new Set(), browseFollower=0, browseBudget=0;
+function applyBrowse(){
+  const q=document.getElementById("browseSearch").value.trim().toLowerCase(); let visible=0;
+  document.querySelectorAll("#browseList .creator-row").forEach(row=>{
+    const cats=row.dataset.categories.split(","),chs=row.dataset.channels.split(",");
+    const c1=browseCat==="all"||cats.includes(browseCat);
+    const c2=browseChannels.size===0||[...browseChannels].some(x=>chs.includes(x));
+    const c3=Number(row.dataset.maxfollowers)>=browseFollower;
+    const c4=!browseBudget||Number(row.dataset.minrate)<=browseBudget;
+    const c5=!q||row.dataset.name.includes(q)||row.dataset.categories.toLowerCase().includes(q);
+    const ok=c1&&c2&&c3&&c4&&c5; row.style.display=ok?"grid":"none"; if(ok)visible++;
+  });
+  document.getElementById("browseEmpty").style.display=visible?"none":"block";
+  const count=(browseCat!=="all"?1:0)+browseChannels.size+(browseFollower?1:0)+(browseBudget?1:0);
+  document.getElementById("filterBadge").textContent=count;
+}
+document.getElementById("browseSearch").addEventListener("input",applyBrowse);
+document.querySelectorAll("#browseQuick .choice").forEach(b=>b.addEventListener("click",()=>{
+  browseCat=b.dataset.cat;document.querySelectorAll("#browseQuick .choice").forEach(x=>x.classList.toggle("active",x===b));applyBrowse();
+}));
+document.getElementById("openFilters").addEventListener("click",()=>document.getElementById("filterDrawer").classList.add("open"));
+document.querySelectorAll("[data-filter-channel]").forEach(b=>b.addEventListener("click",()=>{
+  const v=b.dataset.filterChannel;browseChannels.has(v)?browseChannels.delete(v):browseChannels.add(v);b.classList.toggle("active",browseChannels.has(v));
+}));
+document.querySelectorAll("[data-followers]").forEach(b=>b.addEventListener("click",()=>{
+  const v=Number(b.dataset.followers),was=b.classList.contains("active");document.querySelectorAll("[data-followers]").forEach(x=>x.classList.remove("active"));browseFollower=was?0:v;if(!was)b.classList.add("active");
+}));
+document.querySelectorAll("[data-browse-budget]").forEach(b=>b.addEventListener("click",()=>{
+  const v=Number(b.dataset.browseBudget),was=b.classList.contains("active");document.querySelectorAll("[data-browse-budget]").forEach(x=>x.classList.remove("active"));browseBudget=was?0:v;if(!was)b.classList.add("active");
+}));
+document.getElementById("applyBrowseFilters").addEventListener("click",()=>{applyBrowse();document.getElementById("filterDrawer").classList.remove("open")});
+document.getElementById("clearBrowseFilters").addEventListener("click",()=>{
+  browseChannels.clear();browseFollower=0;browseBudget=0;document.querySelectorAll(".filter-choice").forEach(x=>x.classList.remove("active"));applyBrowse();
+});
+document.getElementById("profileSave").addEventListener("click",e=>{e.target.textContent=e.target.textContent==="Saved"?"Save":"Saved"});
+
+renderMatches(); renderBrowse(); bindDynamicButtons();
+</script>
+</body>
+</html>

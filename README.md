@@ -22,6 +22,8 @@ Go backend + TypeScript mobile/shared-contract workspace
 
 架构入口：[`architecture/README.md`](./architecture/README.md)
 
+UI / 设计规范唯一入口：[`docs/design/README.md`](./docs/design/README.md)。当前全局基线是 R3；旧 preview 与 R1 图标母版只在归档目录中保留，不能作为生产实现依据。
+
 常用命令：
 
 ```bash
