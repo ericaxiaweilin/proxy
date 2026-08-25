@@ -7,7 +7,7 @@
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
 import { useState } from "react";
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { ExperienceAction, ExperienceMenuSection, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { MerchantMeR21 } from "./merchant-me-r21";
@@ -36,6 +36,417 @@ interface MenuSection {
   title: string;
   hint: string;
   rows: MenuRow[];
+}
+
+// 个人主页架构 v3：资料字段模型（值 + 独立展示开关；身体类字段默认不展示）。
+type ProfileField = {
+  key: string;
+  label: string;
+  group: "basic" | "extended";
+  value: string;
+  type: "text" | "date" | "select";
+  options?: string[];
+  visible: boolean;
+};
+
+const DEFAULT_PROFILE_FIELDS: ProfileField[] = [
+  { key: "gender", label: "性别", group: "basic", value: "女", type: "select", options: ["女", "男", "其他", "不填写"], visible: true },
+  { key: "birthday", label: "生日", group: "basic", value: "1996-05-12", type: "date", visible: false },
+  { key: "city", label: "城市", group: "basic", value: "河内", type: "select", options: ["河内", "胡志明市", "岘港"], visible: true },
+  { key: "hometown", label: "家乡", group: "basic", value: "河内", type: "text", visible: false },
+  { key: "languages", label: "语言", group: "basic", value: "越南语 · 中文", type: "text", visible: true },
+  { key: "occupation", label: "职业", group: "basic", value: "Project Manager", type: "text", visible: true },
+  { key: "school", label: "学校", group: "basic", value: "", type: "text", visible: false },
+  { key: "interests", label: "兴趣", group: "basic", value: "旅行 · 咖啡 · 摄影", type: "text", visible: true },
+  { key: "height", label: "身高", group: "extended", value: "145 cm", type: "text", visible: false },
+  { key: "weight", label: "体重", group: "extended", value: "50 kg", type: "text", visible: false },
+  { key: "bust", label: "胸围", group: "extended", value: "", type: "text", visible: false },
+  { key: "waist", label: "腰围", group: "extended", value: "", type: "text", visible: false },
+  { key: "hip", label: "臀围", group: "extended", value: "", type: "text", visible: false }
+];
+
+// 能力与可用时间（原型 my_market_modules v5）：能力类型由 Proxy 定义，用户只维护实例。
+type AbilityType = "同行" | "翻译" | "拍照";
+
+type AbilityInstance = {
+  id: string;
+  type: AbilityType;
+  fields: Array<{ label: string; value: string }>;
+  note?: string;
+};
+
+const ABILITY_SCHEMAS: Record<AbilityType, { icon: string; subtitle: string; fields: Array<{ id: string; label: string; shortLabel: string; type: "select" | "chips"; options: string[] }> }> = {
+  "同行": {
+    icon: "◎",
+    subtitle: "现实场景陪伴与本地协助",
+    fields: [
+      { id: "area", label: "服务区域", shortLabel: "区域", type: "select", options: ["河内", "胡志明市", "岘港"] },
+      { id: "topic", label: "主题", shortLabel: "主题", type: "chips", options: ["旅行", "消费", "美食", "购物", "城市探索"] },
+      { id: "mode", label: "服务方式", shortLabel: "方式", type: "chips", options: ["线下"] },
+      { id: "time", label: "时间规则", shortLabel: "时间", type: "chips", options: ["跟随未来30天行程", "仅已安排时段"] }
+    ]
+  },
+  "翻译": {
+    icon: "译",
+    subtitle: "消费与日常场景的现场沟通",
+    fields: [
+      { id: "pair", label: "语言组合", shortLabel: "语言", type: "select", options: ["中文 ↔ 越南语", "英语 ↔ 越南语", "中文 ↔ 英语"] },
+      { id: "scene", label: "适用场景", shortLabel: "场景", type: "chips", options: ["消费", "日常", "旅行", "简单商务"] },
+      { id: "mode", label: "服务方式", shortLabel: "方式", type: "chips", options: ["线下", "语音", "视频"] },
+      { id: "area", label: "线下区域", shortLabel: "区域", type: "select", options: ["河内", "胡志明市", "岘港", "不限"] }
+    ]
+  },
+  "拍照": {
+    icon: "⌁",
+    subtitle: "旅行与消费场景的轻量拍摄",
+    fields: [
+      { id: "scene", label: "拍摄场景", shortLabel: "场景", type: "chips", options: ["旅行", "探店", "人物", "活动"] },
+      { id: "device", label: "设备", shortLabel: "设备", type: "chips", options: ["手机", "相机"] },
+      { id: "area", label: "服务区域", shortLabel: "区域", type: "select", options: ["河内", "胡志明市", "岘港"] },
+      { id: "time", label: "时间规则", shortLabel: "时间", type: "chips", options: ["跟随未来30天行程", "仅已安排时段"] }
+    ]
+  }
+};
+
+const DEFAULT_ABILITIES: AbilityInstance[] = [
+  {
+    id: "companion",
+    type: "同行",
+    fields: [
+      { label: "区域", value: "河内" },
+      { label: "主题", value: "旅行 / 消费" },
+      { label: "方式", value: "线下" },
+      { label: "时间", value: "跟随行程" }
+    ]
+  },
+  {
+    id: "translation",
+    type: "翻译",
+    fields: [
+      { label: "语言", value: "中文 ↔ 越南语" },
+      { label: "场景", value: "消费 / 日常" },
+      { label: "方式", value: "线下" },
+      { label: "区域", value: "河内" }
+    ]
+  }
+];
+
+// 可用时间：规律 + 按日例外（优先级：按日例外 > 规律）。
+type AvailabilityRule = { days: number[]; start: number; end: number };
+type AvOverride = { type: "full" | "off" | "custom"; start?: number; end?: number };
+
+function avKeyOf(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function avFmt(h: number): string {
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
+function describeAvRule(rule: AvailabilityRule): string {
+  const sorted = [...rule.days].sort((a, b) => a - b);
+  let prefix = "自定义";
+  if (sorted.length === 7) prefix = "每天";
+  else if (JSON.stringify(sorted) === JSON.stringify([1, 2, 3, 4, 5])) prefix = "工作日";
+  else if (JSON.stringify(sorted) === JSON.stringify([0, 6])) prefix = "周末";
+  return `${prefix} · ${avFmt(rule.start)}–${avFmt(rule.end)}`;
+}
+
+function avStateFor(d: Date, rule: AvailabilityRule, overrides: Record<string, AvOverride>): { type: "base" | "full" | "off" | "custom" | "blank"; start?: number; end?: number } {
+  const ov = overrides[avKeyOf(d)];
+  if (ov) return ov;
+  if (rule.days.includes(d.getDay())) return { type: "base", start: rule.start, end: rule.end };
+  return { type: "blank" };
+}
+
+const AV_DAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
+
+// 未来 N 天（今天起，本地时区），供近期可用摘要与 30 天日历使用。
+function nextDays(count: number): Array<{ key: string; date: Date; label: string }> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    const key = avKeyOf(date);
+    const label = index === 0 ? "今天" : index === 1 ? "明天" : `${date.getMonth() + 1}/${date.getDate()} 周${AV_DAY_NAMES[date.getDay()]}`;
+    return { key, date, label };
+  });
+}
+
+// 编辑资料 sheet：字段值 + 独立展示开关（身体类字段默认不对外）。
+function ProfileEditorSheet({
+  open,
+  fields,
+  onClose,
+  onChange
+}: {
+  open: boolean;
+  fields: ProfileField[];
+  onClose: () => void;
+  onChange: (next: ProfileField[]) => void;
+}): React.JSX.Element {
+  const groups: Array<{ id: "basic" | "extended"; title: string; hint: string }> = [
+    { id: "basic", title: "基础资料", hint: "填写后可独立决定是否展示" },
+    { id: "extended", title: "身体资料", hint: "默认不展示，仅你确认后开放" }
+  ];
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
+      <Pressable onPress={onClose} style={styles.availabilityOverlay}>
+        <Pressable onPress={() => undefined} style={[styles.availabilitySheet, styles.profileEditorSheet]}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <Text style={styles.availabilityTitle}>编辑资料</Text>
+            <Text style={styles.availabilitySub}>每个字段都有独立的展示开关；开关只影响个人主页对外呈现。</Text>
+            {groups.map((group) => (
+              <View key={group.id}>
+                <View style={styles.detailSectionHead}>
+                  <Text style={styles.profileGroupTitle}>{group.title}</Text>
+                </View>
+                <Text style={styles.profileGroupHint}>{group.hint}</Text>
+                {fields.filter((field) => field.group === group.id).map((field) => (
+                  <View key={field.key} style={styles.profileFieldRow}>
+                    <View style={styles.profileFieldMain}>
+                      <TextInput
+                        accessibilityLabel={`编辑${field.label}`}
+                        onChangeText={(text) => onChange(fields.map((f) => (f.key === field.key ? { ...f, value: text } : f)))}
+                        placeholder="未填写"
+                        placeholderTextColor="#A59EAA"
+                        style={styles.profileFieldInput}
+                        value={field.value}
+                      />
+                    </View>
+                    <View style={styles.profileFieldSide}>
+                      <Text style={styles.profileFieldLabel}>{field.label}</Text>
+                      <Pressable
+                        accessibilityLabel={`${field.label}展示开关`}
+                        onPress={() => onChange(fields.map((f) => (f.key === field.key ? { ...f, visible: !f.visible } : f)))}
+                        style={[styles.profileVisToggle, field.visible ? styles.profileVisOn : styles.profileVisOff]}
+                      >
+                        <Text style={field.visible ? styles.profileVisTextOn : styles.profileVisTextOff}>{field.visible ? "公开" : "不展示"}</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ))}
+            <Pressable onPress={onClose} style={styles.primaryCta}>
+              <Text style={styles.primaryCtaText}>完成</Text>
+            </Pressable>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// 能力实例 sheet：能力类型由 Proxy 定义（同行 / 翻译 / 拍照），用户只维护实例字段。
+function AbilitySheet({
+  sheet,
+  initialFields,
+  onClose,
+  onSave
+}: {
+  sheet: { mode: "ADD" | "EDIT"; type: AbilityType; id?: string };
+  initialFields?: Array<{ label: string; value: string }> | undefined;
+  onClose: () => void;
+  onSave: (type: AbilityType, fields: Array<{ label: string; value: string }>, id?: string) => void;
+}): React.JSX.Element {
+  const schema = ABILITY_SCHEMAS[sheet.type];
+  const [draft, setDraft] = useState<Map<string, string>>(() => {
+    const map = new Map<string, string>();
+    if (initialFields) {
+      // 编辑：按 shortLabel 回填已有实例字段
+      const byLabel = new Map(initialFields.map((f) => [f.label, f.value]));
+      schema.fields.forEach((f) => map.set(f.id, byLabel.get(f.shortLabel) ?? ""));
+    } else {
+      // 新增：select 默认第一项，chips 默认空
+      schema.fields.forEach((f) => map.set(f.id, f.type === "select" ? (f.options[0] ?? "") : ""));
+    }
+    return map;
+  });
+  const toggleChip = (id: string, option: string): void => {
+    setDraft((prev) => {
+      const next = new Map(prev);
+      const current = (next.get(id) ?? "").split(" / ").filter(Boolean);
+      const idx = current.indexOf(option);
+      if (idx >= 0) current.splice(idx, 1);
+      else current.push(option);
+      next.set(id, current.join(" / "));
+      return next;
+    });
+  };
+  const buildFields = (): Array<{ label: string; value: string }> =>
+    schema.fields.map((f) => ({ label: f.shortLabel, value: draft.get(f.id) ?? "" }));
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible>
+      <Pressable onPress={onClose} style={styles.availabilityOverlay}>
+        <Pressable onPress={() => undefined} style={[styles.availabilitySheet, styles.profileEditorSheet]}>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={styles.abilitySheetHead}>
+              <View style={styles.abilityIcon}><Text style={styles.abilityIconText}>{schema.icon}</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.availabilityTitle}>新增{sheet.type}</Text>
+                <Text style={styles.availabilitySub}>{schema.subtitle}</Text>
+              </View>
+            </View>
+            {schema.fields.map((field) => (
+              <View key={field.id} style={styles.abilityFieldBlock}>
+                <Text style={styles.abilityFieldLabel}>{field.label}</Text>
+                {field.type === "select" ? (
+                  <View style={styles.chipWrap}>
+                    {field.options.map((option) => {
+                      const active = draft.get(field.id) === option;
+                      return (
+                        <Pressable key={option} onPress={() => setDraft((prev) => new Map(prev).set(field.id, option))} style={[styles.chip, active && styles.chipActive]}>
+                          <Text style={active ? styles.chipTextActive : styles.chipText}>{option}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <View style={styles.chipWrap}>
+                    {field.options.map((option) => {
+                      const active = (draft.get(field.id) ?? "").split(" / ").includes(option);
+                      return (
+                        <Pressable key={option} onPress={() => toggleChip(field.id, option)} style={[styles.chip, active && styles.chipActive]}>
+                          <Text style={active ? styles.chipTextActive : styles.chipText}>{option}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            ))}
+            <Pressable onPress={() => onSave(sheet.type, buildFields(), sheet.mode === "EDIT" ? sheet.id : undefined)} style={styles.primaryCta}>
+              <Text style={styles.primaryCtaText}>{sheet.mode === "EDIT" ? "保存" : "添加"}</Text>
+            </Pressable>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// 可用时间：每周规律 sheet（星期多选 + 时间段 chips）。
+function AvRuleSheet({
+  open,
+  rule,
+  onClose,
+  onSave
+}: {
+  open: boolean;
+  rule: AvailabilityRule;
+  onClose: () => void;
+  onSave: (next: AvailabilityRule) => void;
+}): React.JSX.Element {
+  const [days, setDays] = useState<number[]>(rule.days);
+  const [start, setStart] = useState(rule.start);
+  const [end, setEnd] = useState(rule.end);
+  const presets: Array<{ label: string; days: number[] }> = [
+    { label: "每天", days: [0, 1, 2, 3, 4, 5, 6] },
+    { label: "工作日", days: [1, 2, 3, 4, 5] },
+    { label: "周末", days: [0, 6] }
+  ];
+  const slots: Array<[number, number]> = [[9, 12], [12, 18], [18, 23]];
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
+      <Pressable onPress={onClose} style={styles.availabilityOverlay}>
+        <Pressable onPress={() => undefined} style={styles.availabilitySheet}>
+          <Text style={styles.availabilityTitle}>每周规律</Text>
+          <Text style={styles.availabilitySub}>按日例外优先于每周规律；两者都不覆盖时该日不可约。</Text>
+          <Text style={styles.abilityFieldLabel}>重复</Text>
+          <View style={styles.chipWrap}>
+            {[...presets, { label: "自定义", days: [] }].map((preset) => {
+              const active = JSON.stringify([...days].sort((a, b) => a - b)) === JSON.stringify([...preset.days].sort((a, b) => a - b)) || (preset.label === "自定义" && !presets.some((p) => JSON.stringify([...p.days].sort((a, b) => a - b)) === JSON.stringify([...days].sort((a, b) => a - b))));
+              return (
+                <Pressable key={preset.label} onPress={() => preset.days.length > 0 && setDays(preset.days)} style={[styles.chip, active && styles.chipActive]}>
+                  <Text style={active ? styles.chipTextActive : styles.chipText}>{preset.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.chipWrap}>
+            {AV_DAY_NAMES.map((name, index) => {
+              const active = days.includes(index);
+              return (
+                <Pressable key={index} onPress={() => setDays((prev) => (prev.includes(index) ? prev.filter((d) => d !== index) : [...prev, index]))} style={[styles.dayCell, active && styles.chipActive]}>
+                  <Text style={active ? styles.chipTextActive : styles.chipText}>{name}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.abilityFieldLabel}>时间段</Text>
+          <View style={styles.chipWrap}>
+            {slots.map(([s, e]) => {
+              const active = start === s && end === e;
+              return (
+                <Pressable key={s} onPress={() => { setStart(s); setEnd(e); }} style={[styles.chip, active && styles.chipActive]}>
+                  <Text style={active ? styles.chipTextActive : styles.chipText}>{avFmt(s)}–{avFmt(e)}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Pressable onPress={() => { onSave({ days, start, end }); onClose(); }} style={styles.primaryCta}>
+            <Text style={styles.primaryCtaText}>保存规律</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// 按日例外 sheet：全天有空 / 休息 / 自定义时段。
+function AvDaySheet({
+  day,
+  rule,
+  onClose,
+  onSet
+}: {
+  day: { key: string; label: string };
+  rule: AvailabilityRule;
+  onClose: () => void;
+  onSet: (key: string, override: AvOverride | null) => void;
+}): React.JSX.Element {
+  const current = avStateFor(new Date(`${day.key}T00:00:00`), rule, {});
+  const options: Array<{ id: AvOverride["type"] | "follow"; title: string; desc: string }> = [
+    { id: "full", title: "全天有空", desc: "当天按规律时段之外整天开放" },
+    { id: "off", title: "休息", desc: "当天不可约，优先于每周规律" },
+    { id: "custom", title: "自定义时段", desc: "只开放选定的时段" },
+    { id: "follow", title: "跟随每周规律", desc: "清除当天的例外设置" }
+  ];
+  const [customStart, setCustomStart] = useState(18);
+  const [customEnd, setCustomEnd] = useState(22);
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible>
+      <Pressable onPress={onClose} style={styles.availabilityOverlay}>
+        <Pressable onPress={() => undefined} style={styles.availabilitySheet}>
+          <Text style={styles.availabilityTitle}>{day.label}</Text>
+          <Text style={styles.availabilitySub}>当前：{current.type === "blank" ? "不可约" : `${avFmt(current.start ?? rule.start)}–${avFmt(current.end ?? rule.end)}`}</Text>
+          {options.slice(0, 3).map((option) => (
+            <Pressable key={option.id} onPress={() => { onSet(day.key, option.id === "full" ? { type: "full" } : option.id === "off" ? { type: "off" } : { type: "custom", start: customStart, end: customEnd }); onClose(); }} style={styles.availabilityOption}>
+              <View style={styles.availabilityCopy}>
+                <Text style={styles.availabilityOptionTitle}>{option.title}</Text>
+                <Text style={styles.availabilityOptionDesc}>{option.desc}</Text>
+              </View>
+              {option.id === "custom" ? (
+                <View style={styles.chipWrap}>
+                  {([[17, 21], [18, 22], [19, 23]] as Array<[number, number]>).map(([s, e]) => (
+                    <Pressable key={s} onPress={() => { setCustomStart(s); setCustomEnd(e); }} style={[styles.chip, customStart === s && styles.chipActive]}>
+                      <Text style={customStart === s ? styles.chipTextActive : styles.chipText}>{avFmt(s)}–{avFmt(e)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+            </Pressable>
+          ))}
+          <Pressable onPress={() => { onSet(day.key, null); onClose(); }} style={[styles.lightCta, { marginTop: 8 }]}>
+            <Text style={styles.lightCtaText}>跟随每周规律（清除例外）</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
 }
 
 interface PersonaConfig {
@@ -77,7 +488,7 @@ const REQUESTER_ME: PersonaConfig = {
       title: "个人主页",
       hint: "你掌控展示方式",
       rows: [
-        { icon: "profile-ring", label: "主页与二维码", desc: "Proxy 名片、社媒、公开资料与展示顺序", grad: true, route: "personalhub" },
+        { icon: "profile-ring", label: "个人主页", desc: "名片、关于我、能力、可用时间与对外展示", grad: true, route: "personalhub" },
         { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
         { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" }
       ]
@@ -412,9 +823,9 @@ const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; icon: stri
     icon: "◷"
   },
   available: {
-    title: "我现在有空",
-    desc: "开放当前真实可用时间。",
-    icon: "●"
+    title: "能力与可用时间",
+    desc: "能力类型由 Proxy 定义，你维护实例；30 天日历由每周规律 + 按日例外决定。",
+    icon: "◷"
   },
   agentcopilot: {
     title: "智能工作助手",
@@ -846,6 +1257,20 @@ export function MeSurface({
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [enterpriseOpsStage, setEnterpriseOpsStage] = useState<EnterpriseOpsStage>("READY");
   const [enterpriseOpsAssets, setEnterpriseOpsAssets] = useState(3);
+  // 个人主页架构 v3：资料字段（含展示开关）与编辑 sheet。
+  const [profileFields, setProfileFields] = useState<ProfileField[]>(DEFAULT_PROFILE_FIELDS);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  // 能力与可用时间（原型 my_market_modules v5）：能力实例 CRUD + 30 天日历。
+  const [abilities, setAbilities] = useState<AbilityInstance[]>(DEFAULT_ABILITIES);
+  const [abilitySheet, setAbilitySheet] = useState<{ mode: "ADD" | "EDIT"; type: AbilityType; id?: string }>();
+  const [avRule, setAvRule] = useState<AvailabilityRule>({ days: [0, 1, 2, 3, 4, 5, 6], start: 18, end: 23 });
+  const [avOverrides, setAvOverrides] = useState<Record<string, AvOverride>>({
+    "2026-08-27": { type: "off" },
+    "2026-08-30": { type: "full" },
+    "2026-09-03": { type: "custom", start: 19, end: 22 }
+  });
+  const [avRuleSheetOpen, setAvRuleSheetOpen] = useState(false);
+  const [avDaySheet, setAvDaySheet] = useState<{ key: string; label: string }>();
 
   // 轻 CRM 关系图对 BUSINESS 也开放，优先于 R21 商家页
   if (subPage?.route === "friendcrm") {
@@ -1116,19 +1541,133 @@ export function MeSurface({
     }
 
     if (subPage.route === "available") {
-      const rows = [["角色", "接待 · 口译"], ["区域", "西湖 · 巴亭"], ["时间偏好", "18:00–22:00"], ["结算", "平台支付 · 现场现金"], ["最低报酬", "500k"], ["最远距离", "8 公里"]];
+      // 能力与可用时间 v5：能力类型由 Proxy 定义，用户维护实例；30 天日历 = 每周规律 + 按日例外。
       return (
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.detailTitle}>我现在有空</Text>
-            <Text style={styles.detailSub}>这次真实可用时间会继承长期工作偏好作为默认值。</Text>
-            {rows.map(([title, desc]) => <View key={title} style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>{title}</Text><Text style={styles.prototypeCardDesc}>{desc}</Text></View>)}
-            <Pressable style={styles.primaryCta}><Text style={styles.primaryCtaText}>开始挂空闲</Text></Pressable>
-            <Pressable style={styles.lightCta}><Text style={styles.lightCtaText}>编辑长期工作偏好</Text></Pressable>
+            <Text style={styles.detailTitle}>能力与可用时间</Text>
+            <Text style={styles.detailSub}>能力类型由 Proxy 定义；你只维护实例和真实空闲。</Text>
+
+            <View style={styles.detailSectionHead}>
+              <Text style={styles.detailSectionTitle}>我的能力</Text>
+              <Text style={styles.detailSectionHint}>{abilities.length} 个实例</Text>
+            </View>
+            {abilities.map((ability) => (
+              <View key={ability.id} style={styles.prototypeCard}>
+                <View style={styles.abilityHead}>
+                  <View style={styles.abilityIcon}><Text style={styles.abilityIconText}>{ABILITY_SCHEMAS[ability.type].icon}</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.prototypeCardTitle}>{ability.type}</Text>
+                    <Text style={styles.abilitySub}>{ABILITY_SCHEMAS[ability.type].subtitle}</Text>
+                  </View>
+                </View>
+                {ability.fields.filter((field) => field.value.trim().length > 0).map((field) => (
+                  <View key={field.label} style={styles.avDayRow}>
+                    <Text style={styles.avDayRowDate}>{field.label}</Text>
+                    <Text style={styles.avDayRowState}>{field.value}</Text>
+                  </View>
+                ))}
+                {ability.note ? <Text style={styles.abilityNote}>{ability.note}</Text> : null}
+                <View style={styles.chipWrap}>
+                  <Pressable
+                    accessibilityLabel={`编辑${ability.type}`}
+                    onPress={() => setAbilitySheet({ mode: "EDIT", type: ability.type, id: ability.id })}
+                    style={[styles.chip, styles.chipActive]}
+                  >
+                    <Text style={styles.chipTextActive}>编辑</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel={`删除${ability.type}`}
+                    onPress={() => setAbilities((prev) => prev.filter((item) => item.id !== ability.id))}
+                    style={styles.chip}
+                  >
+                    <Text style={styles.chipText}>删除</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+            {(["同行", "翻译", "拍照"] as AbilityType[]).map((type) => (
+              <Pressable
+                key={type}
+                accessibilityLabel={`添加${type}`}
+                onPress={() => setAbilitySheet({ mode: "ADD", type })}
+                style={styles.lightCta}
+              >
+                <Text style={styles.lightCtaText}>{ABILITY_SCHEMAS[type].icon} 添加{type}</Text>
+              </Pressable>
+            ))}
+
+            <View style={styles.detailSectionHead}>
+              <Text style={styles.detailSectionTitle}>可用时间 · 未来 30 天</Text>
+              <Pressable accessibilityLabel="编辑每周规律" onPress={() => setAvRuleSheetOpen(true)}>
+                <Text style={styles.detailSectionHint}>规律：{describeAvRule(avRule)} ›</Text>
+              </Pressable>
+            </View>
+            <View style={styles.avCalendar}>
+              {nextDays(30).map((day) => {
+                const state = avStateFor(day.date, avRule, avOverrides);
+                const label =
+                  state.type === "off" ? "休"
+                  : state.type === "blank" ? "—"
+                  : `${avFmt(state.start ?? avRule.start)}`;
+                return (
+                  <Pressable key={day.key} onPress={() => setAvDaySheet({ key: day.key, label: day.label })} style={[styles.avCell, styles[`avCell_${state.type}`]]}>
+                    <Text style={styles.avCellDay}>{day.label.split(" ")[0]}</Text>
+                    <Text style={styles.avCellWeek}>{day.label.split(" ")[1] ?? `周${AV_DAY_NAMES[day.date.getDay()]}`}</Text>
+                    <Text style={[styles.avCellValue, (state.type === "blank" || state.type === "off") && styles.avCellValueMuted]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.customSectionHint}>点任意一天设置例外：全天 / 休息 / 自定义时段。按日例外优先于每周规律。</Text>
+
+            <Pressable
+              onPress={() => openSubPage("personalhub")}
+              style={[styles.primaryCta, abilities.length === 0 && { opacity: 0.5 }]}
+            >
+              <Text style={styles.primaryCtaText}>预览主页展示</Text>
+            </Pressable>
           </ScrollView>
+          {abilitySheet ? (
+            <AbilitySheet
+              initialFields={
+                abilitySheet.mode === "EDIT" && abilitySheet.id
+                  ? abilities.find((item) => item.id === abilitySheet.id)?.fields
+                  : undefined
+              }
+              key={`${abilitySheet.mode}-${abilitySheet.type}-${abilitySheet.id ?? "new"}`}
+              onClose={() => setAbilitySheet(undefined)}
+              onSave={(type, fields, id) => {
+                if (abilitySheet.mode === "EDIT" && id) {
+                  setAbilities((prev) => prev.map((item) => (item.id === id ? { ...item, type, fields } : item)));
+                } else {
+                  setAbilities((prev) => [...prev, { id: `ability-${Date.now()}`, type, fields }]);
+                }
+                setAbilitySheet(undefined);
+              }}
+              sheet={abilitySheet}
+            />
+          ) : null}
+          <AvRuleSheet onClose={() => setAvRuleSheetOpen(false)} onSave={setAvRule} open={avRuleSheetOpen} rule={avRule} />
+          {avDaySheet ? (
+            <AvDaySheet
+              day={avDaySheet}
+              key={avDaySheet.key}
+              onClose={() => setAvDaySheet(undefined)}
+              onSet={(key, override) =>
+                setAvOverrides((prev) => {
+                  const next = { ...prev };
+                  if (override) next[key] = override;
+                  else delete next[key];
+                  return next;
+                })
+              }
+              rule={avRule}
+            />
+          ) : null}
         </View>
       );
     }
@@ -1303,7 +1842,9 @@ export function MeSurface({
     }
 
     // 原型 .r159Hero + .r159TrustStrip + .r159QRWrap：个人主页 / 个人二维码 / 商家店铺。
+    // 个人主页架构 v3：名片 + 关于我（字段+开关）+ 可以提供 + 近期可用 + 信任与记录 + 资料原则。
     if (subPage.route === "personalhub") {
+      const visibleFields = profileFields.filter((field) => field.visible && field.value.trim().length > 0);
       return (
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
@@ -1335,6 +1876,26 @@ export function MeSurface({
               </View>
             </View>
 
+            {/* 关于我：字段值 + 独立展示开关，只显示已公开且已填写的字段 */}
+            <View style={styles.detailSectionHead}>
+              <Text style={styles.detailSectionTitle}>关于我</Text>
+              <Pressable accessibilityLabel="编辑资料" onPress={() => setProfileEditorOpen(true)}>
+                <Text style={styles.detailSectionHint}>编辑 ›</Text>
+              </Pressable>
+            </View>
+            {visibleFields.length > 0 ? (
+              visibleFields.map((field) => (
+                <View key={field.key} style={styles.prototypeCard}>
+                  <Text style={styles.prototypeCardTitle}>{field.label}</Text>
+                  <Text style={styles.prototypeCardDesc}>{field.value}</Text>
+                </View>
+              ))
+            ) : (
+              <View style={styles.prototypeCard}>
+                <Text style={styles.prototypeCardDesc}>还没有对外展示的资料；编辑后由你决定哪些字段公开。</Text>
+              </View>
+            )}
+
             <QrCard
               title="Proxy Personal QR"
               desc="一个二维码承接你的 Proxy 主页，再由你决定 TikTok、Zalo、Instagram 等是否展示。"
@@ -1342,6 +1903,55 @@ export function MeSurface({
               onAction={() => openSubPage("personalqr")}
             />
 
+            {/* 可以提供：能力实例摘要 → available 全量维护 */}
+            <View style={styles.detailSectionHead}>
+              <Text style={styles.detailSectionTitle}>可以提供</Text>
+              <Pressable accessibilityLabel="管理能力与可用时间" onPress={() => openSubPage("available")}>
+                <Text style={styles.detailSectionHint}>管理 ›</Text>
+              </Pressable>
+            </View>
+            {abilities.map((ability) => (
+              <SocialRow
+                key={ability.id}
+                icon={ABILITY_SCHEMAS[ability.type].icon}
+                label={ability.type}
+                desc={ability.fields.filter((field) => field.value.trim().length > 0).map((field) => `${field.label} ${field.value}`).join(" · ")}
+                onPress={() => openSubPage("available")}
+              />
+            ))}
+            {abilities.length === 0 ? (
+              <View style={styles.prototypeCard}>
+                <Text style={styles.prototypeCardDesc}>还没有添加能力；在能力与可用时间里选择类型并填写。</Text>
+              </View>
+            ) : null}
+
+            {/* 近期可用：规律 + 未来 7 天例外摘要 */}
+            <View style={styles.detailSectionHead}>
+              <Text style={styles.detailSectionTitle}>近期可用</Text>
+              <Text style={styles.detailSectionHint}>{describeAvRule(avRule)}</Text>
+            </View>
+            <View style={styles.prototypeCard}>
+              {nextDays(7).map((day) => {
+                const state = avStateFor(day.date, avRule, avOverrides);
+                return (
+                  <View key={day.key} style={styles.avDayRow}>
+                    <Text style={styles.avDayRowDate}>{day.label}</Text>
+                    <Text style={[styles.avDayRowState, state.type === "blank" ? styles.avDayRowOff : null]}>
+                      {state.type === "off" ? "休息" : state.type === "blank" ? "不可约" : `${avFmt(state.start ?? avRule.start)}–${avFmt(state.end ?? avRule.end)}`}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* 信任与记录：Proxy 信誉优先，外部人气不写入 */}
+            <Text style={styles.customSectionTitle}>信任与记录</Text>
+            <Text style={styles.customSectionHint}>外部粉丝不写入 Proxy 信誉</Text>
+            <View style={styles.prototypeCard}>
+              <Text style={styles.prototypeCardDesc}>信誉来自身份验证、准时、履约、Outcome 与复购；社媒人气只作为发现信号。</Text>
+            </View>
+
+            {/* 对外展示 */}
             <Text style={styles.customSectionTitle}>对外展示</Text>
             <Text style={styles.customSectionHint}>你决定</Text>
             <SocialRow
@@ -1362,8 +1972,15 @@ export function MeSurface({
               desc="知道哪个渠道真的带来聊天、机会与订单"
               onPress={() => openSubPage("socialanalytics")}
             />
+
+            {/* 资料原则 */}
+            <Text style={styles.customSectionTitle}>资料原则</Text>
+            <View style={styles.prototypeCard}>
+              <Text style={styles.prototypeCardDesc}>身体类资料默认不展示；每个字段独立控制公开与否，随时可收回。</Text>
+            </View>
           </ScrollView>
           <AvailabilitySheet current={availability} onClose={() => setAvailabilityOpen(false)} onSelect={setAvailability} open={availabilityOpen} />
+          <ProfileEditorSheet fields={profileFields} onChange={setProfileFields} onClose={() => setProfileEditorOpen(false)} open={profileEditorOpen} />
         </View>
       );
     }
@@ -2588,6 +3205,109 @@ const styles = StyleSheet.create({
   },
   trustStripValue: { color: color.ink, fontSize: 12, fontWeight: "800" },
   trustStripLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
+
+  // 个人主页 v3：编辑资料 sheet + 字段行（值 + 独立展示开关）。
+  profileEditorSheet: { maxHeight: "82%" },
+  profileGroupTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  profileGroupHint: { color: color.muted, fontSize: 10, marginBottom: 4, marginTop: 1 },
+  profileFieldRow: { alignItems: "center", flexDirection: "row", gap: 8 },
+  profileFieldMain: { flex: 1 },
+  profileFieldInput: {
+    backgroundColor: "#F8F6FA",
+    borderColor: "#EAE5ED",
+    borderRadius: 10,
+    borderWidth: 1,
+    color: color.ink,
+    fontSize: 12,
+    marginBottom: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7
+  },
+  profileFieldSide: { alignItems: "flex-end", width: 74 },
+  profileFieldLabel: { color: color.muted, fontSize: 10, fontWeight: "700", marginBottom: 4 },
+  profileVisToggle: {
+    borderRadius: 999,
+    borderWidth: 1,
+    marginBottom: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  profileVisOn: { backgroundColor: "#EEF8D6", borderColor: "#DFEBC7" },
+  profileVisOff: { backgroundColor: "#F3F1F5", borderColor: "#E2DEE6" },
+  profileVisTextOn: { color: "#465C00", fontSize: 10, fontWeight: "900" },
+  profileVisTextOff: { color: "#8B8290", fontSize: 10, fontWeight: "700" },
+
+  // 能力实例卡与 sheet（原型 my_market_modules v5）。
+  abilitySheetHead: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 6 },
+  abilityHead: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 6 },
+  abilityIcon: {
+    alignItems: "center",
+    backgroundColor: "#F5F1F8",
+    borderRadius: 10,
+    height: 30,
+    justifyContent: "center",
+    width: 30
+  },
+  abilityIconText: { color: "#6F37B9", fontSize: 13, fontWeight: "900" },
+  abilitySub: { color: color.muted, fontSize: 10, marginTop: 1 },
+  abilityNote: { color: color.muted, fontSize: 10, lineHeight: 14, marginTop: 4 },
+  abilityFieldBlock: { marginTop: 8 },
+  abilityFieldLabel: { color: color.muted, fontSize: 10, fontWeight: "700", marginBottom: 4 },
+
+  // chips（能力字段选择 / 星期 / 时段共用）。
+  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chip: {
+    backgroundColor: "#F8F6FA",
+    borderColor: "#EAE5ED",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  chipActive: { backgroundColor: color.ink, borderColor: color.ink },
+  chipText: { color: color.ink, fontSize: 10, fontWeight: "700" },
+  chipTextActive: { color: color.white, fontSize: 10, fontWeight: "800" },
+  dayCell: {
+    alignItems: "center",
+    backgroundColor: "#F8F6FA",
+    borderColor: "#EAE5ED",
+    borderRadius: 10,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: 8
+  },
+
+  // 可用时间：近期摘要行 + 30 天日历。
+  avDayRow: {
+    alignItems: "center",
+    borderBottomColor: "#F1EDF3",
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 7
+  },
+  avDayRowDate: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  avDayRowState: { color: "#4A5568", fontSize: 11, fontWeight: "600" },
+  avDayRowOff: { color: "#A59EAA" },
+  avCalendar: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginVertical: 8 },
+  avCell: {
+    alignItems: "center",
+    backgroundColor: "#FDFCFE",
+    borderColor: "#EFEAF2",
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 5,
+    width: "18%"
+  },
+  avCell_base: { backgroundColor: "#F3FBFF", borderColor: "#CBE9F7" },
+  avCell_full: { backgroundColor: "#EEF8D6", borderColor: "#DFEBC7" },
+  avCell_off: { backgroundColor: "#F6EEF0", borderColor: "#EBD9DD" },
+  avCell_custom: { backgroundColor: "#F6F1FC", borderColor: "#E2D4F4" },
+  avCell_blank: { backgroundColor: "#FAF9FB" },
+  avCellDay: { color: color.ink, fontSize: 10, fontWeight: "800" },
+  avCellWeek: { color: "#A59EAA", fontSize: 9 },
+  avCellValue: { color: "#22506E", fontSize: 9, fontWeight: "800", marginTop: 1 },
+  avCellValueMuted: { color: "#B9B3BD" },
 
   // 隐私阶梯（原型 .r159PrivacyLadder）。
   privacyLadder: {

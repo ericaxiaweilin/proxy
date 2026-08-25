@@ -126,15 +126,13 @@ func manifestFor(contextName string) manifest {
 	if contextName == "REQUESTER" {
 		sections = []menuSection{
 			{
-				ID:    "personal_profile",
-				Title: "个人主页",
-				Hint:  "你掌控展示方式",
+				ID: "personal_profile", Title: "个人主页", Hint: "你掌控展示方式",
 				Items: []menuItem{
 					{
 						ID:          "personal_hub",
 						Icon:        "profile-ring",
-						Label:       "主页与二维码",
-						Description: "Proxy 名片、社媒、公开资料与展示顺序",
+						Label:       "个人主页",
+						Description: "名片、关于我、能力、可用时间与对外展示",
 						Accent:      true,
 						Action:      action{Type: "OPEN_REGISTERED_ROUTE", Route: "personalhub"},
 					},
@@ -178,7 +176,7 @@ func manifestFor(contextName string) manifest {
 
 	return manifest{
 		SchemaVersion: "1.0",
-		Revision:      "experience_manifest_r3_friendcrm_me",
+		Revision:      "experience_manifest_r5_personalhub_me",
 		Context:       contextName,
 		Me: meManifest{
 			Mode:     "REPLACE",
