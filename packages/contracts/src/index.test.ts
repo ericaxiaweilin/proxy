@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommandEnvelopeSchema, FeedMediaItemSchema, MAX_AUDIO_DURATION_MS, MediaVariantSchema } from "./index.js";
+import { CommandEnvelopeSchema, FeedMediaItemSchema, MAX_AUDIO_DURATION_MS, MediaVariantSchema } from "./index";
 
 describe("command envelope", () => {
   it("rejects a command without idempotency", () => {

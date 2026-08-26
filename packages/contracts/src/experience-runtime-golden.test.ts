@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { UISchemaSchema, SurfaceDeltaSchema, type SurfaceDelta } from "./experience-runtime.js";
+import { UISchemaSchema, SurfaceDeltaSchema, type SurfaceDelta } from "./experience-runtime";
 
 describe("§24 Golden / Delta Replay / Compatibility", () => {
   it("golden: same Intent+Capability produces stable schema", () => {

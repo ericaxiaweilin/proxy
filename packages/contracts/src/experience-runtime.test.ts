@@ -7,7 +7,7 @@ import {
   canApplyDelta,
   ClientCapabilitySchema,
   getSchemaStats,
-} from "./experience-runtime.js";
+} from "./experience-runtime";
 
 describe("Experience Runtime contracts", () => {
   it("validates ExperienceIntent", () => {

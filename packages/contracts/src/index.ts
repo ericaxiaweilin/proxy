@@ -527,7 +527,7 @@ export const ExperienceManifestSchema = z.object({
 export type ExperienceManifest = z.infer<typeof ExperienceManifestSchema>;
 
 // Media Composition Hint (Social Media Pipeline §5.2.2) — re-export from sibling module
-import { MediaCompositionHintSchema } from "./media-composition.js";
+import { MediaCompositionHintSchema } from "./media-composition";
 export {
   MediaSubjectTypeSchema,
   MediaBoxSchema,
@@ -545,7 +545,7 @@ export {
   COLD_START_TO_FIRST_FRAME_BUDGET_MS,
   shouldPreloadVideo,
   FULLSCREEN_MODE
-} from "./media-composition.js";
+} from "./media-composition";
 export type {
   MediaSubjectType,
   MediaBox,
@@ -553,9 +553,9 @@ export type {
   MediaFillStrategy,
   ImageShape,
   FullscreenMode
-} from "./media-composition.js";
-import type { FeedRenderVariant, FeedRenderSelection } from "./media-composition.js";
+} from "./media-composition";
+import type { FeedRenderVariant, FeedRenderSelection } from "./media-composition";
 export type { FeedRenderVariant, FeedRenderSelection };
 
 // Context-Driven Experience Runtime — re-export
-export * from "./experience-runtime.js";
+export * from "./experience-runtime";

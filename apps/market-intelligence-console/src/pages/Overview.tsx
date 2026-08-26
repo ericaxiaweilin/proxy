@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchExperienceMetrics, type ExperienceMetrics } from "../lib/api.js";
+import { fetchExperienceMetrics, type ExperienceMetrics } from "../lib/api";
 
 export function Overview() {
   const [metrics, setMetrics] = useState<ExperienceMetrics | null>(null);

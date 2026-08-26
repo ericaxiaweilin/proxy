@@ -18,7 +18,7 @@ import {
   COLD_START_TO_FIRST_FRAME_BUDGET_MS,
   shouldPreloadVideo,
   FULLSCREEN_MODE
-} from "./media-composition.js";
+} from "./media-composition";
 
 
 const PORTRAIT_4_5 = 4 / 5; // 0.8

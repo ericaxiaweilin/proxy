@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ExperienceManifestSchema, RegisteredExperienceRouteSchema } from "./index.js";
+import { ExperienceManifestSchema, RegisteredExperienceRouteSchema } from "./index";
 
 describe("ExperienceManifest R1", () => {
   it("accepts the registered Me -> Tasks actions", () => {
