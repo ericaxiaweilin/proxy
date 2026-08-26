@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./media-upload-retry.js";
+import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./media-upload-retry";
 
 describe("original media upload retry", () => {
   it("restarts expired or conflicting resumable sessions from the retained original", () => {

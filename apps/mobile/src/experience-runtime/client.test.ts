@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ExperienceRuntimeClient } from "./client.js";
+import { ExperienceRuntimeClient } from "./client";
 import type { ExperienceIntent, ClientCapability } from "@proxy/contracts";
 
 function mockTransport(responseJson: unknown, status = 200) {

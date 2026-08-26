@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { validateUISchema, validateDelta } from "./validator.js";
-import { buildClientCapability, checkCapabilityForSchema } from "./capability.js";
-import { applyDelta, canApplyDelta } from "./delta-patcher.js";
-import { renderUISchema } from "./renderer.js";
+import { validateUISchema, validateDelta } from "./validator";
+import { buildClientCapability, checkCapabilityForSchema } from "./capability";
+import { applyDelta, canApplyDelta } from "./delta-patcher";
+import { renderUISchema } from "./renderer";
 import type { SurfacePlan, UISchema, SurfaceDelta } from "@proxy/contracts";
 
 describe("experience-runtime mobile", () => {

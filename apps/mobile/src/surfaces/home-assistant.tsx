@@ -8,7 +8,7 @@ import type { MediaClient } from "../media-client";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import { color, shadows } from "../theme";
 import type { MarketTab } from "../market-fixtures";
-import { ExperienceSurfaceBanner } from "../experience-runtime/ExperienceSurfaceBanner.js";
+import { ExperienceSurfaceBanner } from "../experience-runtime/ExperienceSurfaceBanner";
 import type { SurfacePlan, UISchema } from "@proxy/contracts";
 
 const MODE_LABEL: Record<HomeIntentMode, string> = {

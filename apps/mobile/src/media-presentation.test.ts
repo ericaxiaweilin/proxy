@@ -8,7 +8,7 @@ import {
   deriveMediaKind,
   shouldAutoPlayVideo,
   formatCarouselCounter
-} from "./media-presentation.js";
+} from "./media-presentation";
 import type { FeedMediaItem } from "@proxy/contracts";
 
 describe("portrait social media presentation", () => {

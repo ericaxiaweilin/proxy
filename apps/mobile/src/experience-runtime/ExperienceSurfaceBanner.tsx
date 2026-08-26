@@ -1,8 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { UISchema } from "@proxy/contracts";
-import { renderUISchema } from "./renderer.js";
+import { renderUISchema } from "./renderer";
 import type { SurfacePlan } from "@proxy/contracts";
-import { color } from "../theme.js";
+import { color } from "../theme";
 
 export function ExperienceSurfaceBanner({
   plan,

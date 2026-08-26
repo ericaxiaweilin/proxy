@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExperienceRuntimeClient } from "./client.js";
-import { applyDelta, canApplyDelta } from "./delta-patcher.js";
-import { shouldSuppress, recordChange } from "./throttle.js";
+import { ExperienceRuntimeClient } from "./client";
+import { applyDelta, canApplyDelta } from "./delta-patcher";
+import { shouldSuppress, recordChange } from "./throttle";
 import type { SurfacePlan, UISchema, ExperienceIntent, ClientCapability } from "@proxy/contracts";
-import type { SurfaceState } from "./delta-patcher.js";
-import { buildClientCapability } from "./capability.js";
+import type { SurfaceState } from "./delta-patcher";
+import { buildClientCapability } from "./capability";
 
 export type UseExperienceSurfaceOptions = {
   client: ExperienceRuntimeClient;
