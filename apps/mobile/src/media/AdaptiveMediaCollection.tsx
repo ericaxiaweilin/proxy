@@ -444,6 +444,13 @@ function ActiveVideoStage({
     (setup as { preferredForwardBufferDuration?: number }).preferredForwardBufferDuration = 3;
   });
   const videoViewRef = useRef<VideoView>(null);
+  const [isMuted, setIsMuted] = useState(true);
+  // 同步 muted 到原生 player（首播静音，点任意位置出声 — 不做小喇叭）
+  useEffect(() => {
+    try {
+      player.muted = isMuted;
+    } catch {}
+  }, [player, isMuted]);
   // 【fix 2026-08-26 P0 多视频声音】
   // 旧 mount effect 无条件 play / pause —— 不论 isActive、autoPlay，AVPlayer 一挂载就
   // 调一次 play。多个 post 各自 mount → 多个 AVPlayer 同时进入 playing 状态 → iOS
@@ -460,13 +467,18 @@ function ActiveVideoStage({
     else player.pause();
   }, [player, autoPlay]);
   const handlePress = useCallback(() => {
-    // 优选：调 expo-video 原生 enterFullscreen() 走 iOS AVPlayerViewController fullscreen。
-    // 优势：player 已在 background 装帧 + key frame ready → system fullscreen 0ms 装帧。
-    if (videoViewRef.current) {
-      void videoViewRef.current.enterFullscreen();
+    // 首播静音，点任意位置出声（无小喇叭，feed 非全屏，按钮无意义）
+    if (isMuted) {
+      setIsMuted(false);
+      try {
+        player.muted = false;
+      } catch {}
+      claimVideoPlayback(player);
+      player.play();
     }
+    // 仍保留原 onPress 链路（如需埋点），但不再强制 enterFullscreen（非全屏无意义）
     onPress();
-  }, [onPress]);
+  }, [isMuted, player, onPress]);
   return (
     <Pressable
       accessibilityLabel="查看视频"
