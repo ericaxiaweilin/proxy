@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -19,7 +20,21 @@ func NewMediaRepository(pool *pgxpool.Pool) *MediaRepository {
 	return &MediaRepository{pool: pool}
 }
 
+const mediaAssetColumns = `
+	media_asset_id, owner_principal_type, owner_principal_id, media_type,
+	original_storage_key, COALESCE(playback_storage_key,''), COALESCE(thumbnail_storage_key,''),
+	COALESCE(mime_type,''), COALESCE(width,0), COALESCE(height,0), COALESCE(duration_ms,0), COALESCE(codec,''),
+	processing_status, COALESCE(playback_url,''), COALESCE(thumbnail_url,''), COALESCE(source_bytes,0), COALESCE(checksum_sha256,''),
+	COALESCE(orientation,1), COALESCE(color_space,''), has_alpha, animated, moderation_status, visibility_class,
+	composition_hint, COALESCE(composition_recipe_version,''), composition_computed_at, COALESCE(composition_confidence,0),
+	created_at, updated_at
+`
+
 func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) error {
+	hintJSON, hintErr := encodeCompositionHint(a.CompositionHint)
+	if hintErr != nil {
+		return hintErr
+	}
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO media.media_assets (
 			media_asset_id, owner_principal_type, owner_principal_id, media_type,
@@ -27,13 +42,15 @@ func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) e
 			mime_type, width, height, duration_ms, codec,
 			processing_status, playback_url, thumbnail_url, source_bytes, checksum_sha256,
 			orientation, color_space, has_alpha, animated, moderation_status, visibility_class,
+			composition_hint, composition_recipe_version, composition_computed_at, composition_confidence,
 			created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
 		a.MediaAssetID, a.OwnerPrincipalType, a.OwnerPrincipalID, a.MediaType,
 		a.OriginalStorageKey, a.PlaybackStorageKey, a.ThumbnailStorageKey,
 		a.MimeType, a.Width, a.Height, a.DurationMs, a.Codec,
 		a.ProcessingStatus, a.PlaybackURL, a.ThumbnailURL, a.SourceBytes, a.ChecksumSHA256,
 		a.Orientation, a.ColorSpace, a.HasAlpha, a.Animated, a.ModerationStatus, a.VisibilityClass,
+		hintJSON, a.CompositionRecipeVersion, a.CompositionComputedAt, a.CompositionConfidence,
 		a.CreatedAt, a.UpdatedAt,
 	)
 	return err
@@ -41,28 +58,41 @@ func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) e
 
 func (r *MediaRepository) GetAsset(ctx context.Context, id string) (media.MediaAsset, error) {
 	var a media.MediaAsset
+	var hintJSON []byte
+	var computedAt *time.Time
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT media_asset_id, owner_principal_type, owner_principal_id, media_type,
-			original_storage_key, COALESCE(playback_storage_key,''), COALESCE(thumbnail_storage_key,''),
-			COALESCE(mime_type,''), COALESCE(width,0), COALESCE(height,0), COALESCE(duration_ms,0), COALESCE(codec,''),
-			processing_status, COALESCE(playback_url,''), COALESCE(thumbnail_url,''), COALESCE(source_bytes,0), COALESCE(checksum_sha256,''),
-			COALESCE(orientation,1), COALESCE(color_space,''), has_alpha, animated, moderation_status, visibility_class,
-			created_at, updated_at
+		SELECT `+mediaAssetColumns+`
 		FROM media.media_assets WHERE media_asset_id = $1`, id).Scan(
 		&a.MediaAssetID, &a.OwnerPrincipalType, &a.OwnerPrincipalID, &a.MediaType,
 		&a.OriginalStorageKey, &a.PlaybackStorageKey, &a.ThumbnailStorageKey,
 		&a.MimeType, &a.Width, &a.Height, &a.DurationMs, &a.Codec,
 		&a.ProcessingStatus, &a.PlaybackURL, &a.ThumbnailURL, &a.SourceBytes, &a.ChecksumSHA256,
 		&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
+		&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
 		&a.CreatedAt, &a.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return media.MediaAsset{}, media.ErrAssetNotFound
 	}
-	return a, err
+	if err != nil {
+		return media.MediaAsset{}, err
+	}
+	a.CompositionComputedAt = computedAt
+	if len(hintJSON) > 0 {
+		hint, hintErr := decodeCompositionHint(hintJSON)
+		if hintErr != nil {
+			return media.MediaAsset{}, hintErr
+		}
+		a.CompositionHint = hint
+	}
+	return a, nil
 }
 
 func (r *MediaRepository) UpdateAsset(ctx context.Context, a media.MediaAsset, expectedStatus string) error {
+	hintJSON, hintErr := encodeCompositionHint(a.CompositionHint)
+	if hintErr != nil {
+		return hintErr
+	}
 	commandTag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE media.media_assets
 		SET playback_storage_key=$1, thumbnail_storage_key=$2, mime_type=$3,
@@ -70,13 +100,16 @@ func (r *MediaRepository) UpdateAsset(ctx context.Context, a media.MediaAsset, e
 			processing_status=$8, playback_url=$9, thumbnail_url=$10,
 			source_bytes=$11, checksum_sha256=$12, orientation=$13, color_space=$14,
 			has_alpha=$15, animated=$16, moderation_status=$17, visibility_class=$18,
-			updated_at=$19
-		WHERE media_asset_id=$20 AND processing_status=$21`,
+			composition_hint=$19, composition_recipe_version=$20,
+			composition_computed_at=$21, composition_confidence=$22,
+			updated_at=$23
+		WHERE media_asset_id=$24 AND processing_status=$25`,
 		a.PlaybackStorageKey, a.ThumbnailStorageKey, a.MimeType,
 		a.Width, a.Height, a.DurationMs, a.Codec,
 		a.ProcessingStatus, a.PlaybackURL, a.ThumbnailURL,
 		a.SourceBytes, a.ChecksumSHA256, a.Orientation, a.ColorSpace,
 		a.HasAlpha, a.Animated, a.ModerationStatus, a.VisibilityClass,
+		hintJSON, a.CompositionRecipeVersion, a.CompositionComputedAt, a.CompositionConfidence,
 		a.UpdatedAt, a.MediaAssetID, expectedStatus,
 	)
 	if err != nil {
@@ -88,14 +121,47 @@ func (r *MediaRepository) UpdateAsset(ctx context.Context, a media.MediaAsset, e
 	return nil
 }
 
+// UpdateCompositionHint 仅更新 composition hint 字段（worker 跑完 ONNX 推理后调用）。
+// 失败不阻塞：FAILED 状态独立保留。
+func (r *MediaRepository) UpdateCompositionHint(ctx context.Context, assetID string, hint *media.MediaCompositionHint) error {
+	hintJSON, err := encodeCompositionHint(hint)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE media.media_assets
+		SET composition_hint=$1, composition_recipe_version=$2,
+			composition_computed_at=$3, composition_confidence=$4,
+			updated_at=$3
+		WHERE media_asset_id=$5`,
+		hintJSON,
+		func() string {
+			if hint == nil {
+				return ""
+			}
+			return hint.RecipeVersion
+		}(),
+		func() *time.Time {
+			if hint == nil {
+				return nil
+			}
+			t := hint.ComputedAt
+			return &t
+		}(),
+		func() float64 {
+			if hint == nil {
+				return 0
+			}
+			return hint.Confidence
+		}(),
+		assetID,
+	)
+	return err
+}
+
 func (r *MediaRepository) Snapshot(ctx context.Context) ([]media.MediaAsset, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT media_asset_id, owner_principal_type, owner_principal_id, media_type,
-			original_storage_key, COALESCE(playback_storage_key,''), COALESCE(thumbnail_storage_key,''),
-			COALESCE(mime_type,''), COALESCE(width,0), COALESCE(height,0), COALESCE(duration_ms,0), COALESCE(codec,''),
-			processing_status, COALESCE(playback_url,''), COALESCE(thumbnail_url,''), COALESCE(source_bytes,0), COALESCE(checksum_sha256,''),
-			COALESCE(orientation,1), COALESCE(color_space,''), has_alpha, animated, moderation_status, visibility_class,
-			created_at, updated_at
+		SELECT `+mediaAssetColumns+`
 		FROM media.media_assets ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -104,15 +170,26 @@ func (r *MediaRepository) Snapshot(ctx context.Context) ([]media.MediaAsset, err
 	result := []media.MediaAsset{}
 	for rows.Next() {
 		var a media.MediaAsset
+		var hintJSON []byte
+		var computedAt *time.Time
 		if err := rows.Scan(
 			&a.MediaAssetID, &a.OwnerPrincipalType, &a.OwnerPrincipalID, &a.MediaType,
 			&a.OriginalStorageKey, &a.PlaybackStorageKey, &a.ThumbnailStorageKey,
 			&a.MimeType, &a.Width, &a.Height, &a.DurationMs, &a.Codec,
 			&a.ProcessingStatus, &a.PlaybackURL, &a.ThumbnailURL, &a.SourceBytes, &a.ChecksumSHA256,
 			&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
+			&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
 			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, err
+		}
+		a.CompositionComputedAt = computedAt
+		if len(hintJSON) > 0 {
+			hint, hintErr := decodeCompositionHint(hintJSON)
+			if hintErr != nil {
+				return nil, hintErr
+			}
+			a.CompositionHint = hint
 		}
 		result = append(result, a)
 	}
@@ -286,7 +363,27 @@ func (r *MediaRepository) MarkProcessingJobFailed(ctx context.Context, workerID,
 	if tag.RowsAffected() != 1 {
 		return media.ErrProcessingJobNotClaimed
 	}
-	return nil
+	return err
+}
+
+// encodeCompositionHint 把 *MediaCompositionHint 序列化成 JSONB。
+// nil → nil（DB 写入 NULL），与"还没算"语义一致。
+func encodeCompositionHint(h *media.MediaCompositionHint) ([]byte, error) {
+	if h == nil {
+		return nil, nil
+	}
+	return json.Marshal(h)
+}
+
+func decodeCompositionHint(raw []byte) (*media.MediaCompositionHint, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var hint media.MediaCompositionHint
+	if err := json.Unmarshal(raw, &hint); err != nil {
+		return nil, err
+	}
+	return &hint, nil
 }
 
 var _ media.Repository = (*MediaRepository)(nil)

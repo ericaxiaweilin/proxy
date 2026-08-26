@@ -47,12 +47,22 @@ export const FLICK_VELOCITY_PX_PER_MS = 0.5;
 // 阈值即提交退出。只读原生滚动事件，不与子页面/翻页手势竞争。
 
 /** 松手时右滑超过页宽该比例即提交退出，否则回弹。 */
-export const EXIT_COMMIT_RATIO = 0.32;
+export const EXIT_COMMIT_RATIO = 0.18;
+
+/** 快扫通道：越界至少该深度且向右速度达标 → 即使位移不足也退出（iOS 返回手感）。 */
+export const EXIT_FLICK_VELOCITY_PX_PER_MS = 0.5;
+export const EXIT_FLICK_MIN_OVERSCROLL_PX = 12;
 
 /**
- * 退出松手决策：仅接受向右（overscroll 为正）且超过阈值的滑动；
- * 不足阈值或方向不对一律留在模块内，绝不误触。
+ * 退出松手决策：仅接受向右（overscroll 为正）的滑动；
+ * 距离达标直接退出；位移不足但速度够快（flick）也退出；
+ * 反向或两者都不足一律留在模块内，绝不误触。
+ * velocityPxPerMs 为 contentOffset 变化速率，负值 = 手指向右拖。
  */
-export function decideExitRelease(input: { overscrollPx: number; pageWidth: number }): "exit" | "none" {
-  return input.overscrollPx > 0 && input.overscrollPx > input.pageWidth * EXIT_COMMIT_RATIO ? "exit" : "none";
+export function decideExitRelease(input: { overscrollPx: number; pageWidth: number; velocityPxPerMs?: number }): "exit" | "none" {
+  if (input.overscrollPx <= 0) return "none";
+  if (input.overscrollPx > input.pageWidth * EXIT_COMMIT_RATIO) return "exit";
+  const velocity = input.velocityPxPerMs ?? 0;
+  if (input.overscrollPx >= EXIT_FLICK_MIN_OVERSCROLL_PX && velocity <= -EXIT_FLICK_VELOCITY_PX_PER_MS) return "exit";
+  return "none";
 }

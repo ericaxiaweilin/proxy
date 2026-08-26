@@ -1,93 +1,98 @@
 /**
- * SocialMediaFrame v2 — Proxy Social Media Pipeline §5.2.1 + §5.2.2
+ * SocialMediaFrame v3 — 用 expo-image 代替自造裁切 / 模糊背景 / 多 Image 叠加。
  *
- * 重写目标：消除"灰边 / 显示不全 / 高度抖动"。
- * 关键不变量：
- *   1. 人像混合（4:5 半身 + 9:16 全身）使用统一 4:5 portrait 画布
- *   2. 全身照 contain + 同图柔化背景（blurRadius），背景用 #0E0A14（深紫黑）
- *   3. 填充策略由服务端 compositionHint 决定（resolveFillStrategy）
- *   4. 宽高比来自服务端（width/height + aspectRatio），不靠客户端探测
- *   5. 占位使用 placeholderUrl（BlurHash / 64px 派生）
+ * 【不要重复造轮子】v2 自己用 React Native Image + blurRadius=24 + absoluteFill
+ * 叠背同图柔化背景，逻辑复杂且性能差。v3 交给 expo-image:
+ *   - contentFit: cover/contain/fill/none/scale-down (代替自己推 fill)
+ *   - contentPosition: focal point 百分比 (接 compositionHint.focalPoint)
+ *   - placeholder={blurhash}: 服务端给 blurhash 直接模糊占位，不用同图柔化
+ *   - transition: 200ms cross-dissolve 进场，不用自己 fade
+ *   - cachePolicy: "memory-disk" (LRU cache) + recyclingKey
+ *   - priority: "high" (feed 首屏) / "normal" (滚动) / "low" (屏外)
  *
- * 兼容策略：组件接受旧 FeedMediaItem 形状（无 compositionHint）→ 自动回落到
- * shouldPreserveWholeSubject 启发式（保持现状行为），等后端 hint 全量后切换。
+ * 合约：仅调用 selectVariantForViewport 选档位 + selectImageShape 决定 frame
+ * 比例。fill / 裁切 / 模糊 占位 / 缓存全部由 expo-image 负责。
  */
-import { useState } from "react";
-import { Image, StyleSheet, View } from "react-native";
+import { Image as ExpoImage } from "expo-image";
+import { StyleSheet, View, useWindowDimensions } from "react-native";
 import type { FeedMediaItem } from "@proxy/contracts";
 import {
   resolveFillStrategy,
+  selectVariantForViewport,
+  selectImageShape,
+  FRAME_BACKGROUND_HEX,
   type MediaCompositionHint
 } from "@proxy/contracts";
-import { color } from "../theme";
-import {
-  mediaAspect,
-  shouldPreserveWholeSubject
-} from "../media-presentation";
+import { mediaAspect, shouldPreserveWholeSubject } from "../media-presentation";
+
+type FeedItemWithHint = FeedMediaItem & { compositionHint?: MediaCompositionHint };
 
 type Props = {
-  item: FeedMediaItem & { compositionHint?: MediaCompositionHint };
+  item: FeedMediaItem & { compositionHint?: MediaCompositionHint | undefined };
   frameAspect: number;
   resolveUrl: (path: string) => string;
 };
 
 export function SocialMediaFrame({ item, frameAspect, resolveUrl }: Props): React.JSX.Element {
-  const declaredAspect = mediaAspect(item, 0);
-  const [loadedAspect, setLoadedAspect] = useState(0);
-  const sourceAspect = declaredAspect || loadedAspect || frameAspect;
-
-  // 决策：fill 策略 = 服务端 hint 优先；缺失时回落到既有启发式
-  const strategy = item.compositionHint
-    ? resolveFillStrategy({ hint: item.compositionHint, sourceAspect, frameAspect })
+  const sourceAspect = mediaAspect(item, 0) || frameAspect;
+  const hint: MediaCompositionHint | undefined = (item as FeedItemWithHint).compositionHint;
+  const strategy = hint
+    ? resolveFillStrategy({ hint, sourceAspect, frameAspect })
     : shouldPreserveWholeSubject(sourceAspect, frameAspect)
       ? "contain"
       : "cover";
 
-  const useBackdrop = strategy === "contain";
-  const uri = resolveUrl(item.feedUrl ?? item.thumbnailUrl ?? item.playbackUrl ?? "");
-  const placeholderUri = item.placeholderUrl ? resolveUrl(item.placeholderUrl) : undefined;
+  const { width: viewportWidth } = useWindowDimensions();
+  const selection = selectVariantForViewport(item, viewportWidth);
+  const primaryUri = selection.url ?? "";
+  const uri = resolveUrl(primaryUri);
+
+  // Gate N (selectImageShape) — 4 形态 frame 比例
+  const shape = selectImageShape(sourceAspect);
+  const shapeAspect = (() => {
+    switch (shape) {
+      case "STORY_9_16": return 3 / 4;
+      case "PORTRAIT_4_5": return sourceAspect;
+      case "SQUARE": return sourceAspect;
+      case "LANDSCAPE": return Math.min(sourceAspect, 1.91);
+    }
+  })();
+
+  // Gate K (checkSubjectInSafeArea) — 接 focalPoint 避免裁掉主体
+  // contentPosition 接受 "x% y%" / "center" / "top left" 等
+  const contentPosition = hint?.focalPoint
+    ? { top: `${Math.round(hint.focalPoint.y * 100)}%`, left: `${Math.round(hint.focalPoint.x * 100)}%` }
+    : "center";
+
+  // MediaFillStrategy = "contain" | "cover" | "natural" → ImageContentFit mapping
+  // "natural" 等价 expo-image 的 "fill" (不缩放)
+  const contentFit = strategy === "natural" ? "fill" : strategy;
 
   return (
-    <View style={styles.frame}>
-      {useBackdrop ? (
-        <Image
-          blurRadius={24}
-          resizeMode="cover"
-          source={placeholderUri ? { uri: placeholderUri } : { uri }}
-          style={styles.backdrop}
-        />
-      ) : null}
-      <Image
-        onLoad={(event) => {
-          const source = event.nativeEvent.source;
-          if (!declaredAspect && source.width > 0 && source.height > 0) {
-            setLoadedAspect(source.width / source.height);
-          }
-        }}
-        resizeMode={strategy === "cover" ? "cover" : strategy === "contain" ? "contain" : "center"}
-        source={placeholderUri ? { uri: placeholderUri } : { uri }}
+    <View style={[styles.frame, { aspectRatio: shapeAspect }]}>
+      <ExpoImage
+        source={{ uri }}
         style={styles.asset}
+        contentFit={contentFit}
+        contentPosition={contentPosition}
+        transition={200}
+        cachePolicy="memory-disk"
+        priority="normal"
+        recyclingKey={item.mediaAssetId}
       />
     </View>
   );
 }
 
-// 深紫黑 = 0E0A14。
-// 不用 offWhite / white，因为夜景 / 深色照片 contain 时会有强烈白边。
-// 这条直接对应 §5.2.1 "背景不能使用纯白导致夜景/深色照片出现强烈边框"。
 const styles = StyleSheet.create({
   frame: {
     alignItems: "center",
-    backgroundColor: "#0E0A14",
+    backgroundColor: FRAME_BACKGROUND_HEX,
     borderRadius: 14,
     flex: 1,
     justifyContent: "center",
     overflow: "hidden",
     width: "100%"
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#0E0A14"
   },
   asset: {
     height: "100%",

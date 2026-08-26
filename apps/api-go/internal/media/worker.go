@@ -120,22 +120,37 @@ func (s *Service) ProcessAssetNow(ctx context.Context, mediaAssetID string) erro
 		if err := validateQuarantinedImage(ctx, originalPath, asset); err != nil {
 			return err
 		}
-		variants, err := generateImageVariants(ctx, originalPath, s.storeDir, asset, s.clock.Now().UTC())
+		now := s.clock.Now().UTC()
+		// v1 派生（兑底，不可去）。v1 失败 → 阻塞。
+		v1Variants, err := generateImageVariants(ctx, originalPath, s.storeDir, asset, now)
 		if err != nil {
 			return err
 		}
-		for _, variant := range variants {
+		for _, variant := range v1Variants {
 			if err := s.repository.UpsertVariant(ctx, variant); err != nil {
 				return err
+			}
+		}
+		// v2 派生（带 compositionHint）。v2 失败 → 仅该档 FAILED，不阻塞 READY。
+		// 客户端拿 v2 URL 404 时自动兑落到 v1（v1 FEED_1X 还在）。
+		v2Variants, v2Err := generateImageVariantsV2(ctx, originalPath, s.storeDir, asset, asset.CompositionHint, now)
+		if v2Err != nil {
+			s.recordVariantFailure(ctx, asset.MediaAssetID, "v2_derivation_failed", v2Err.Error())
+		} else {
+			for _, variant := range v2Variants {
+				if err := s.repository.UpsertVariant(ctx, variant); err != nil {
+					s.recordVariantFailure(ctx, asset.MediaAssetID, variant.MediaVariantID, err.Error())
+					continue
+				}
 			}
 		}
 		asset.ProcessingStatus = "READY"
 		asset.ModerationStatus = "APPROVED"
 		asset.PlaybackStorageKey = asset.OriginalStorageKey
-		asset.ThumbnailStorageKey = variantStorageKey(variants, "FEED_1X", asset.OriginalStorageKey)
+		asset.ThumbnailStorageKey = variantStorageKey(v1Variants, "FEED_1X", asset.OriginalStorageKey)
 		asset.PlaybackURL = "/v1/media/play/" + asset.MediaAssetID
-		asset.ThumbnailURL = variantURL(variants, "FEED_1X", "/v1/media/thumb/"+asset.MediaAssetID)
-		asset.UpdatedAt = s.clock.Now().UTC()
+		asset.ThumbnailURL = variantURL(v1Variants, "FEED_1X", "/v1/media/thumb/"+asset.MediaAssetID)
+		asset.UpdatedAt = now
 		return s.repository.UpdateAsset(ctx, asset, "PROCESSING")
 	}
 	if s.processor == nil {
@@ -243,4 +258,11 @@ func mediaBackoff(attempt int) time.Duration {
 		attempt = 6
 	}
 	return time.Duration(1<<uint(attempt-1)) * time.Second
+}
+
+// recordVariantFailure 记录单档 variant 失败（仅日志，v2 兑底足够；后续接 metrics）。
+func (s *Service) recordVariantFailure(_ context.Context, assetID, variantID, reason string) {
+	if s.logger != nil {
+		s.logger.Printf("media variant failed: asset=%s variant=%s reason=%s", assetID, variantID, reason)
+	}
 }

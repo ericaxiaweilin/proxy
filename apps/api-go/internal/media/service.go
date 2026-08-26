@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -57,6 +58,11 @@ type MediaAsset struct {
 	Animated            bool      `json:"animated"`
 	ModerationStatus    string    `json:"moderationStatus"`
 	VisibilityClass     string    `json:"visibilityClass"`
+	// CompositionHint：主体类型 + 关键区域。P0 worker 可空，前端低置信度回落。
+	CompositionHint           *MediaCompositionHint `json:"compositionHint,omitempty"`
+	CompositionRecipeVersion  string                `json:"compositionRecipeVersion,omitempty"`
+	CompositionComputedAt     *time.Time            `json:"compositionComputedAt,omitempty"`
+	CompositionConfidence     float64               `json:"compositionConfidence,omitempty"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
 }
@@ -246,6 +252,7 @@ type Service struct {
 	processor  Processor
 	clock      clock.Clock
 	storeDir   string
+	logger     *log.Logger
 }
 
 func New() *Service {
@@ -264,6 +271,13 @@ func NewWithDependencies(repository Repository, processor Processor) *Service {
 // SetStoreDir 覆盖媒体文件本地目录（与 FFmpegProcessor.StoreDir 对齐）。
 func (s *Service) SetStoreDir(dir string) {
 	s.storeDir = dir
+}
+
+// SetLogger 注入 logger（默认 = log.Default()）。v2 派生失败会调这个。
+func (s *Service) SetLogger(l *log.Logger) {
+	if l != nil {
+		s.logger = l
+	}
 }
 
 // SaveUpload persists the authenticated owner's raw upload under the storage

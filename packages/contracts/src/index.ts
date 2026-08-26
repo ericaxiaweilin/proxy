@@ -349,6 +349,8 @@ export const FeedMediaItemSchema = z.object({
   placeholderUrl: z.string().optional(),
   feedUrl: z.string().optional(),
   feed2xUrl: z.string().optional(),
+  feed2xHintUrl: z.string().optional(),
+  feed2xNaturalUrl: z.string().optional(),
   galleryUrl: z.string().optional(),
   originalAvailable: z.boolean().optional(),
   width: z.number().int().nonnegative(),
@@ -357,7 +359,9 @@ export const FeedMediaItemSchema = z.object({
   durationMs: z.number().int().nonnegative().optional(),
   processingStatus: z.string(),
   moderationStatus: z.enum(["QUARANTINED", "APPROVED", "REJECTED_TECHNICAL"]),
-  sortOrder: z.number().int().nonnegative()
+  sortOrder: z.number().int().nonnegative(),
+  // 服务端 composition hint（§5.2.2）。可选；缺时前端走启发式。
+  compositionHint: MediaCompositionHintSchema.optional()
 });
 export type FeedMediaItem = z.infer<typeof FeedMediaItemSchema>;
 
@@ -518,3 +522,34 @@ export const ExperienceManifestSchema = z.object({
 }).strict();
 
 export type ExperienceManifest = z.infer<typeof ExperienceManifestSchema>;
+
+// Media Composition Hint (Social Media Pipeline §5.2.2) — re-export from sibling module
+import { MediaCompositionHintSchema } from "./media-composition.js";
+export {
+  MediaSubjectTypeSchema,
+  MediaBoxSchema,
+  MediaCompositionHintSchema,
+  resolveFillStrategy,
+  selectVariantForViewport,
+  selectVideoPlaybackUrl,
+  isForbiddenInFeed,
+  isFrameBackgroundSafe,
+  FEED_WIDE_BREAKPOINT_PT,
+  FRAME_BACKGROUND_HEX,
+  FEED_FORBIDDEN_PURPOSES,
+  selectImageShape,
+  PREFERRED_FORWARD_BUFFER_SECONDS,
+  COLD_START_TO_FIRST_FRAME_BUDGET_MS,
+  shouldPreloadVideo,
+  FULLSCREEN_MODE
+} from "./media-composition.js";
+export type {
+  MediaSubjectType,
+  MediaBox,
+  MediaCompositionHint,
+  MediaFillStrategy,
+  ImageShape,
+  FullscreenMode
+} from "./media-composition.js";
+import type { FeedRenderVariant, FeedRenderSelection } from "./media-composition.js";
+export type { FeedRenderVariant, FeedRenderSelection };

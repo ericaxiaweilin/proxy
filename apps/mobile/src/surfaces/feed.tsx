@@ -19,6 +19,13 @@ import { createDraftMedia, draftMediaDragTarget, draftMediaRefs, mediaStatusLabe
 import { clearComposerDraft, readComposerDraft, retainComposerImage, writeComposerDraft } from "../expo-composer-draft-store";
 import { isOpportunityPost, mergeFeedContent } from "../feed-content";
 import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
+// v2 重构：深紫黑底 + compositionHint 驱动 fill。Sprint C 替换完成。
+// 旧 AdaptiveMediaCollection / AdaptiveMediaRail / SocialMediaFrame / SinglePostImage
+// 已从本文件迁出 → apps/mobile/src/media/
+import { AdaptiveMediaCollection, SinglePostImage, MediaViewer } from "../media/AdaptiveMediaCollection";
+
+// Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
+export { AdaptiveMediaCollection, SinglePostImage, MediaViewer };
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
@@ -1143,26 +1150,16 @@ export function FeedSurface({
                     setViewer({ postId: post.postId, index });
                   }}
                 />
-              ) : items.length === 1 && items[0] && items[0].mediaType === "VIDEO" && items[0].playbackUrl ? (
-                <VideoCard
-                  videoId={post.postId}
-                  item={items[0]}
-                  active={activeVideoId === post.postId}
-                  muted={muted}
-                  resolveUrl={(path) => localNet.resolveMediaUrl(path)}
-                  onFrame={(frame) => setFrames((prev) => ({ ...prev, [post.postId]: frame }))}
-                  onUnmountFrame={() => setFrames((prev) => {
-                    const next = { ...prev };
-                    delete next[post.postId];
-                    return next;
-                  })}
-                  onToggleMute={() => setMuted((prev) => !prev)}
-                />
               ) : items.length === 1 && items[0] ? (
-                <SinglePostImage
-                  item={items[0]}
+                <AdaptiveMediaCollection
+                  items={items}
+                  currentIndex={0}
                   resolveUrl={(path) => localNet.resolveMediaUrl(path)}
-                  onPress={() => setViewer({ postId: post.postId, index: 0 })}
+                  onIndexChange={() => {}}
+                  onOpen={(index) => {
+                    setMediaPositions((current) => ({ ...current, [post.postId]: index }));
+                    setViewer({ postId: post.postId, index });
+                  }}
                 />
               ) : null}
 
@@ -1337,197 +1334,6 @@ export function FeedSurface({
     </View>
   );
 }
-
-// 人像组图规则：Rail 保持统一画布，半身照约 4:5 铺满；9:16 等全身照
-// 在同一画布内 contain + 柔和背景，保证头顶与脚都不被裁掉，也不会缩成窄条。
-export function AdaptiveMediaCollection({ items, currentIndex, resolveUrl, onIndexChange, onOpen }: {
-  items: FeedMediaItem[];
-  currentIndex: number;
-  resolveUrl: (path: string) => string;
-  onIndexChange: (index: number) => void;
-  onOpen: (index: number) => void;
-}): React.JSX.Element {
-  const mode = mediaCollectionMode(items.length);
-  if (mode === "WALL") {
-    return (
-      <View style={styles.mediaWall}>
-        {items.map((item, index) => (
-          <Pressable
-            accessibilityLabel={`查看第 ${index + 1} 张媒体`}
-            key={item.mediaAssetId}
-            onPress={() => onOpen(index)}
-            style={styles.mediaWallCell}
-          >
-            <SocialMediaFrame item={item} frameAspect={1} resolveUrl={resolveUrl} />
-            <View style={styles.mediaWallBadge}><Text style={styles.mediaBadgeText}>{index + 1}/{items.length}</Text></View>
-          </Pressable>
-        ))}
-      </View>
-    );
-  }
-  return <AdaptiveMediaRail items={items} currentIndex={currentIndex} resolveUrl={resolveUrl} onIndexChange={onIndexChange} onOpen={onOpen} />;
-}
-
-function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onOpen }: {
-  items: FeedMediaItem[];
-  currentIndex: number;
-  resolveUrl: (path: string) => string;
-  onIndexChange: (index: number) => void;
-  onOpen: (index: number) => void;
-}): React.JSX.Element {
-  const [contentWidth, setContentWidth] = useState(320);
-  const railRef = useRef<ScrollView>(null);
-  const metrics = useMemo(() => mediaRailMetrics(items, contentWidth), [items, contentWidth]);
-  useEffect(() => {
-    const target = metrics.offsets[Math.max(0, Math.min(currentIndex, metrics.offsets.length - 1))] ?? 0;
-    railRef.current?.scrollTo({ x: target, animated: false });
-  }, [currentIndex, metrics.offsets]);
-
-  return (
-    <View onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}>
-      <ScrollView
-        decelerationRate="fast"
-        horizontal
-        onMomentumScrollEnd={(event) => onIndexChange(nearestRailIndex(metrics.offsets, event.nativeEvent.contentOffset.x))}
-        ref={railRef}
-        snapToOffsets={metrics.offsets}
-        snapToAlignment="start"
-        showsHorizontalScrollIndicator={false}
-        style={styles.mediaRail}
-      >
-        {items.map((item, index) => {
-          const cardWidth = metrics.cardWidths[index] ?? contentWidth * 0.84;
-          return (
-            <Pressable
-              accessibilityLabel={`查看第 ${index + 1} 张媒体`}
-              key={item.mediaAssetId}
-              onPress={() => onOpen(index)}
-              style={{ height: metrics.railHeight, marginRight: 10, width: cardWidth }}
-            >
-              <SocialMediaFrame
-                item={item}
-                frameAspect={cardWidth / metrics.railHeight}
-                resolveUrl={resolveUrl}
-              />
-              <View style={styles.mediaBadge}>
-                <Text style={styles.mediaBadgeText}>{index + 1}/{items.length}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-      <Text style={styles.mediaRailHint}>{currentIndex + 1}/{items.length} · 左右滑动查看</Text>
-    </View>
-  );
-}
-
-function SocialMediaFrame({ item, frameAspect, resolveUrl }: {
-  item: FeedMediaItem;
-  frameAspect: number;
-  resolveUrl: (path: string) => string;
-}): React.JSX.Element {
-  const declaredAspect = mediaAspect(item, 0);
-  const [loadedAspect, setLoadedAspect] = useState(0);
-  const sourceAspect = declaredAspect || loadedAspect || frameAspect;
-  const preserveWholeSubject = shouldPreserveWholeSubject(sourceAspect, frameAspect);
-  const uri = resolveUrl(item.feedUrl ?? item.thumbnailUrl ?? item.playbackUrl ?? "");
-
-  return (
-    <View style={styles.socialMediaFrame}>
-      {preserveWholeSubject ? (
-        <Image blurRadius={24} resizeMode="cover" source={{ uri }} style={styles.socialMediaBackdrop} />
-      ) : null}
-      <Image
-        onLoad={(event) => {
-          const source = event.nativeEvent.source;
-          if (!declaredAspect && source.width > 0 && source.height > 0) setLoadedAspect(source.width / source.height);
-        }}
-        resizeMode={preserveWholeSubject ? "contain" : "cover"}
-        source={{ uri }}
-        style={styles.socialMediaAsset}
-      />
-    </View>
-  );
-}
-
-// 单图不使用固定高度：常见比例按原比例展示；超长/超宽图限制卡片高度并 contain，
-// 避免默认 Feed 裁掉脸或身体。点击后再进入原比例高清查看。
-export function SinglePostImage({ item, resolveUrl, onPress }: {
-  item: FeedMediaItem;
-  resolveUrl: (path: string) => string;
-  onPress: () => void;
-}): React.JSX.Element {
-  const declaredAspect = item.aspectRatio > 0
-    ? item.aspectRatio
-    : item.width > 0 && item.height > 0
-      ? item.width / item.height
-      : 0;
-  const [loadedAspect, setLoadedAspect] = useState(0);
-  const sourceAspect = declaredAspect || loadedAspect || 4 / 3;
-  const displayAspect = Math.max(4 / 5, Math.min(1.91, sourceAspect));
-  const needsLetterbox = Math.abs(displayAspect - sourceAspect) > 0.01;
-  return (
-    <Pressable accessibilityLabel="查看原图" onPress={onPress} style={[styles.singleMediaStage, { aspectRatio: displayAspect }]}>
-      <Image
-        source={{ uri: resolveUrl(item.feedUrl ?? item.thumbnailUrl ?? item.playbackUrl ?? "") }}
-        onLoad={(event) => {
-          const source = event.nativeEvent.source;
-          if (!declaredAspect && source.width > 0 && source.height > 0) setLoadedAspect(source.width / source.height);
-        }}
-        resizeMode={needsLetterbox ? "contain" : "cover"}
-        style={styles.singleMediaImage}
-      />
-    </Pressable>
-  );
-}
-
-// 图片查看器加载服务端原始文件（playbackUrl 对 IMAGE 指向原文件），缩略图不再被放大。
-// 成熟开源查看器负责 iOS/Android 双指缩放、双击缩放、左右翻页和下滑关闭。
-export function MediaViewer({
-  items,
-  index,
-  author,
-  resolveUrl,
-  onNavigate,
-  onClose
-}: {
-  items: FeedMediaItem[];
-  index: number;
-  author: string;
-  resolveUrl: (path: string) => string;
-  onNavigate: (next: number) => void;
-  onClose: () => void;
-}): React.JSX.Element {
-  const sources = items.map((item) => ({
-    uri: resolveUrl(item.mediaType === "IMAGE" ? (item.galleryUrl ?? item.playbackUrl ?? item.thumbnailUrl ?? "") : (item.thumbnailUrl ?? ""))
-  }));
-  return (
-    <ImageViewing
-      images={sources}
-      imageIndex={index}
-      visible
-      backgroundColor="#050507"
-      onRequestClose={onClose}
-      onImageIndexChange={onNavigate}
-      HeaderComponent={({ imageIndex }) => (
-        <View pointerEvents="box-none" style={styles.viewerTop}>
-          <Text style={styles.viewerCounter}>{imageIndex + 1}/{items.length} · {author}</Text>
-          <Pressable
-            accessibilityLabel="关闭原图"
-            accessibilityRole="button"
-            hitSlop={16}
-            onPress={onClose}
-            onPressIn={onClose}
-            style={styles.viewerClose}
-          >
-            <Text style={styles.viewerCloseText}>×</Text>
-          </Pressable>
-        </View>
-      )}
-    />
-  );
-}
-
 // X 式内联视频卡：滑近视口中心自动播（默认静音）、滑出即停；轻点暂停/继续，角标切静音。
 function VideoCard({
   videoId,

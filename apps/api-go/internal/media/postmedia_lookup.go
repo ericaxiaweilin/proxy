@@ -49,6 +49,10 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 					info.FeedURL = url
 				case "FEED_2X":
 					info.Feed2xURL = url
+				case "FEED_1X_HINT":
+					info.Feed2xHintURL = url
+				case "FEED_1X_NATURAL":
+					info.Feed2xNaturalURL = url
 				case "GALLERY":
 					info.GalleryURL = url
 				case "PLACEHOLDER":
@@ -56,9 +60,52 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 				}
 			}
 		}
+		// 透传 compositionHint（§5.2.2）。为空时 nil，前端走启发式回落。
+		if asset.CompositionHint != nil {
+			info.CompositionHint = toCompositionHintDTO(asset.CompositionHint)
+		}
 		result[id] = info
 	}
 	return result, nil
+}
+
+// toCompositionHintDTO 把 media.MediaCompositionHint 转 wire DTO。
+func toCompositionHintDTO(h *MediaCompositionHint) *localnet.MediaCompositionHintDTO {
+	if h == nil {
+		return nil
+	}
+	dto := &localnet.MediaCompositionHintDTO{
+		SubjectType:   h.SubjectType,
+		SubjectCount:  h.SubjectCount,
+		Confidence:    h.Confidence,
+		RecipeVersion: h.RecipeVersion,
+		FaceBoxes:     toBoxDTOs(h.FaceBoxes),
+		BodyBoxes:     toBoxDTOs(h.BodyBoxes),
+	}
+	if h.TextSafeArea != nil {
+		b := localnet.MediaBoxDTO{X: h.TextSafeArea.X, Y: h.TextSafeArea.Y, Width: h.TextSafeArea.Width, Height: h.TextSafeArea.Height}
+		dto.TextSafeArea = &b
+	}
+	if h.FocalPoint != nil {
+		b := localnet.MediaBoxDTO{X: h.FocalPoint.X, Y: h.FocalPoint.Y, Width: h.FocalPoint.Width, Height: h.FocalPoint.Height}
+		dto.FocalPoint = &b
+	}
+	if h.SafeCropRect != nil {
+		b := localnet.MediaBoxDTO{X: h.SafeCropRect.X, Y: h.SafeCropRect.Y, Width: h.SafeCropRect.Width, Height: h.SafeCropRect.Height}
+		dto.SafeCropRect = &b
+	}
+	return dto
+}
+
+func toBoxDTOs(boxes []MediaBox) []localnet.MediaBoxDTO {
+	if len(boxes) == 0 {
+		return nil
+	}
+	out := make([]localnet.MediaBoxDTO, 0, len(boxes))
+	for _, b := range boxes {
+		out = append(out, localnet.MediaBoxDTO{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height})
+	}
+	return out
 }
 
 func (l *PostMediaLookup) AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error {

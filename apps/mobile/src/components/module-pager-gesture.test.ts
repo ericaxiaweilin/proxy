@@ -6,7 +6,9 @@ import {
   shouldLockHorizontal,
   HORIZONTAL_LOCK_RATIO,
   TAP_SLOP_PX,
-  EXIT_COMMIT_RATIO
+  EXIT_COMMIT_RATIO,
+  EXIT_FLICK_VELOCITY_PX_PER_MS,
+  EXIT_FLICK_MIN_OVERSCROLL_PX
 } from "./module-pager-gesture";
 
 describe("shouldLockHorizontal", () => {
@@ -53,9 +55,15 @@ describe("decideExitRelease（第 1 页右滑过头退模块）", () => {
     expect(decideExitRelease({ overscrollPx: W * EXIT_COMMIT_RATIO + 1, pageWidth: W })).toBe("exit");
     expect(decideExitRelease({ overscrollPx: W * 0.6, pageWidth: W })).toBe("exit");
   });
-  it("不足阈值回弹，不退出", () => {
+  it("不足阈值且慢速回弹，不退出", () => {
     expect(decideExitRelease({ overscrollPx: W * EXIT_COMMIT_RATIO - 1, pageWidth: W })).toBe("none");
-    expect(decideExitRelease({ overscrollPx: 12, pageWidth: W })).toBe("none");
+    expect(decideExitRelease({ overscrollPx: W * EXIT_COMMIT_RATIO - 1, pageWidth: W, velocityPxPerMs: -0.1 })).toBe("none");
+  });
+  it("位移不足但快速右扫（flick）也退出", () => {
+    expect(decideExitRelease({ overscrollPx: 30, pageWidth: W, velocityPxPerMs: -0.8 })).toBe("exit");
+  });
+  it("flick 通道需要最低越界深度，防误触", () => {
+    expect(decideExitRelease({ overscrollPx: EXIT_FLICK_MIN_OVERSCROLL_PX - 1, pageWidth: W, velocityPxPerMs: -5 })).toBe("none");
   });
   it("方向不对（overscroll 非正）绝不触发", () => {
     expect(decideExitRelease({ overscrollPx: -50, pageWidth: W })).toBe("none");

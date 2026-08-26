@@ -56,6 +56,8 @@ type PostMediaItem struct {
 	PlaceholderURL    string  `json:"placeholderUrl,omitempty"`
 	FeedURL           string  `json:"feedUrl,omitempty"`
 	Feed2xURL         string  `json:"feed2xUrl,omitempty"`
+	Feed2xHintURL     string  `json:"feed2xHintUrl,omitempty"`
+	Feed2xNaturalURL  string  `json:"feed2xNaturalUrl,omitempty"`
 	GalleryURL        string  `json:"galleryUrl,omitempty"`
 	OriginalAvailable bool    `json:"originalAvailable,omitempty"`
 	Width             int     `json:"width"`
@@ -65,6 +67,31 @@ type PostMediaItem struct {
 	ProcessingStatus  string  `json:"processingStatus"`
 	ModerationStatus  string  `json:"moderationStatus"`
 	SortOrder         int     `json:"sortOrder"`
+	// CompositionHint：来自 media_assets.composition_hint（见 migration 025 + §5.2.2）。
+	// 前端按此决定 cover vs contain；低置信度（<0.4）必须回落 contain。
+	CompositionHint *MediaCompositionHintDTO `json:"compositionHint,omitempty"`
+}
+
+// MediaCompositionHintDTO 是给前端的 wire 形状（与 @proxy/contracts 一致）。
+// 这里独立定义一次，避免 media 包被 localnet 之外依赖时反向 import contracts。
+type MediaCompositionHintDTO struct {
+	SubjectType   string                 `json:"subjectType"`
+	SubjectCount  int                    `json:"subjectCount"`
+	FaceBoxes     []MediaBoxDTO          `json:"faceBoxes"`
+	BodyBoxes     []MediaBoxDTO          `json:"bodyBoxes"`
+	TextSafeArea  *MediaBoxDTO           `json:"textSafeArea,omitempty"`
+	FocalPoint    *MediaBoxDTO           `json:"focalPoint,omitempty"`
+	SafeCropRect  *MediaBoxDTO           `json:"safeCropRect,omitempty"`
+	Confidence    float64                `json:"confidence"`
+	RecipeVersion string                 `json:"recipeVersion"`
+}
+
+// MediaBoxDTO 归一化矩形（与前端一致）。
+type MediaBoxDTO struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
 }
 
 // MediaLookup 是媒体详情查询接口（由 media 包实现，注入避免循环依赖）。
@@ -82,6 +109,8 @@ type MediaAssetInfo struct {
 	PlaceholderURL    string
 	FeedURL           string
 	Feed2xURL         string
+	Feed2xHintURL     string
+	Feed2xNaturalURL  string
 	GalleryURL        string
 	OriginalAvailable bool
 	Width             int
@@ -90,6 +119,8 @@ type MediaAssetInfo struct {
 	ProcessingStatus  string
 	ModerationStatus  string
 	VisibilityClass   string
+	// CompositionHint：来自 media_assets.composition_hint。
+	CompositionHint *MediaCompositionHintDTO
 }
 
 // ContextRef 是 Post 的结构化上下文关联（PRD §4 PostContextRef）。
@@ -503,6 +534,8 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 					PlaceholderURL:    info.PlaceholderURL,
 					FeedURL:           info.FeedURL,
 					Feed2xURL:         info.Feed2xURL,
+					Feed2xHintURL:     info.Feed2xHintURL,
+					Feed2xNaturalURL:  info.Feed2xNaturalURL,
 					GalleryURL:        info.GalleryURL,
 					OriginalAvailable: info.OriginalAvailable,
 					Width:             info.Width,
@@ -512,6 +545,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 					ProcessingStatus:  info.ProcessingStatus,
 					ModerationStatus:  info.ModerationStatus,
 					SortOrder:         ref.SortOrder,
+					CompositionHint:   info.CompositionHint,
 				})
 			}
 			if len(items) > 0 {

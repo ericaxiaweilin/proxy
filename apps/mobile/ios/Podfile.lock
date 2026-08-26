@@ -43,6 +43,8 @@ PODS:
     - ExpoModulesCore
     - ExpoModulesJSI
     - ReactCommon/turbomodule/core
+  - ExpoImage (57.0.3):
+    - ExpoModulesCore
   - ExpoImagePicker (57.0.12):
     - ExpoModulesCore
   - ExpoKeepAwake (57.0.1):
@@ -2041,6 +2043,7 @@ DEPENDENCIES:
   - "ExpoFileSystem (from `../../../node_modules/.pnpm/expo-file-system@57.0.5_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-co_a536d157c44106a14233dd5d58674f5f/node_modules/expo-file-system/ios/ExpoFileSystem.podspec`)"
   - "ExpoFont (from `../../../node_modules/.pnpm/expo-font@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1_66c827ad71586f33f7bb0108a19cdeda/node_modules/expo-font/ios/ExpoFont.podspec`)"
   - "ExpoGL (from `../../../node_modules/.pnpm/expo-gl@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1_63ecf5ecfbab02b08a44f829a47f8e25/node_modules/expo-gl`)"
+  - "ExpoImage (from `../../../node_modules/.pnpm/expo-image@57.0.3_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8._2a948386cbdb92659162bc8117c82800/node_modules/expo-image/ios/ExpoImage.podspec`)"
   - "ExpoImagePicker (from `../../../node_modules/.pnpm/expo-image-picker@57.0.12_expo@57.0.12/node_modules/expo-image-picker/ios`)"
   - "ExpoKeepAwake (from `../../../node_modules/.pnpm/expo-keep-awake@57.0.1_expo@57.0.12_react@19.2.3/node_modules/expo-keep-awake/ios`)"
   - "ExpoLinking (from `../../../node_modules/.pnpm/expo-linking@57.0.7_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@_74e08933ab54e8573f7074996f7e34e4/node_modules/expo-linking/ios`)"
@@ -2151,6 +2154,8 @@ EXTERNAL SOURCES:
     :podspec: "../../../node_modules/.pnpm/expo-font@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1_66c827ad71586f33f7bb0108a19cdeda/node_modules/expo-font/ios/ExpoFont.podspec"
   ExpoGL:
     :path: "../../../node_modules/.pnpm/expo-gl@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1_63ecf5ecfbab02b08a44f829a47f8e25/node_modules/expo-gl"
+  ExpoImage:
+    :podspec: "../../../node_modules/.pnpm/expo-image@57.0.3_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8._2a948386cbdb92659162bc8117c82800/node_modules/expo-image/ios/ExpoImage.podspec"
   ExpoImagePicker:
     :path: "../../../node_modules/.pnpm/expo-image-picker@57.0.12_expo@57.0.12/node_modules/expo-image-picker/ios"
   ExpoKeepAwake:
@@ -2341,6 +2346,7 @@ SPEC CHECKSUMS:
   ExpoFileSystem: 0e74ed1536e1643f4a352d84ed55d311d795828d
   ExpoFont: 59e1faf66ba9bcd232ae1e2ce58d202a48b6f65e
   ExpoGL: 4f9233cd8fcbbd4d4eab2665d1fa600362eeae09
+  ExpoImage: b37accc4b12647e5cf939b2335eea2bdb874ad7f
   ExpoImagePicker: 09fafe2ab0257a41a0e6625ebbe56d73cb6611fa
   ExpoKeepAwake: c26f14275017370cc8a4b7b43a0e23361f2053a5
   ExpoLinking: 2e9ead00fcb0d3e623a8d4935fadae3cdb6d4d97

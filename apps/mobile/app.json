@@ -8,7 +8,7 @@
     "scheme": "proxy",
     "userInterfaceStyle": "light",
     "ios": {
-      "bundleIdentifier": "com.proxy.app",
+      "bundleIdentifier": "com.proxy.creator.dev.c4673fy8u7",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Proxy 使用相机拍摄并添加到你主动发起的需求或对话。",
@@ -26,7 +26,7 @@
       }
     },
     "android": {
-      "package": "com.proxy.app",
+      "package": "com.proxy.creator.dev.c4673fy8u7",
       "adaptiveIcon": {
         "foregroundImage": "./assets/otter-logo.png",
         "backgroundColor": "#050505"
