@@ -365,12 +365,21 @@ function VideoStage({
   const declaredAspect = mediaAspect(item, 0);
   const sourceAspect = declaredAspect || 16 / 9;
   const displayAspect = frameAspect ?? sourceAspect;
-  // 【fix 2026-08-26 异音】isActive=false 时走 thumbnail ExpoImage 占位。
+  // 【fix 2026-08-26 异音】isActive=false 时走 thumbnail 占位，但仍上报帧供 feed.tsx 选 active。
+  // 否则 inactive 永远不上报 frames → activeVideoId 恒 null → 死锁（真机不播、点也不播）。
   if (isActive === false) {
     return (
       <Pressable
         accessibilityLabel="播放视频"
         onPress={onPress}
+        onLayout={
+          onFrame
+            ? (event) => {
+                const { y, height } = event.nativeEvent.layout;
+                onFrame({ y, height });
+              }
+            : undefined
+        }
         style={[styles.videoStage, { aspectRatio: displayAspect }]}
       >
         <ExpoImage
