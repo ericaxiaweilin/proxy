@@ -92,11 +92,16 @@ export function resolveFillStrategy(input: {
  *   2. viewportWidth >= 410pt → feed2xUrl ?? feedUrl
  *   3. 优先 2x 降级到 1x；任何降级路径都明确，不留全不空
  *   4. 1x/2x 都为空时回退 galleryUrl（最差情况保持能看，不是空白）
+ *   5. 【v2 升级】有 compositionHint 且 confidence ≥ 0.4 → 优先 v2 派生
+ *      - v2 HINT (FEED_1X_HINT): 服务端按 safeCropRect 裁过的人像/商品/文字
+ *      - v2 NATURAL (FEED_1X_NATURAL): 无人脸时的原比例 + 深紫黑补边 contain
+ *      - v2 只有 1X 档，没有 2X；屏宽 ≥ 410pt 时仍降级到普通 FEED_2X
+ *   6. v2 HINT 缺失 → 降级到 v2 NATURAL → 降级到普通 FEED_1X/2X
  *
  * 这条直接对应 §5.2 性能预算（"滚动过程中不得因图片解码持续掉到 45fps 以下"）
  * —— 高密度屏拿 2x = 不拉伸；低密度屏拿 1x = 不浪费流量。
  */
-export type FeedRenderVariant = "FEED_1X" | "FEED_2X" | "GALLERY";
+export type FeedRenderVariant = "FEED_1X" | "FEED_2X" | "FEED_1X_HINT" | "FEED_1X_NATURAL" | "GALLERY";
 
 export type FeedRenderSelection = {
   purpose: FeedRenderVariant;
@@ -116,25 +121,49 @@ export function selectVideoPlaybackUrl(item: { playbackUrl?: string | undefined;
   return item.playbackUrl;
 }
 
+/**
+ * v2 派生使用门槛：compositionHint confidence ≥ 0.4 才消费
+ * (与服务端 image_variants_v2.go:LowConfidenceThreshold 一致)。
+ */
+export const V2_HINT_CONFIDENCE_THRESHOLD = 0.4;
+
 export function selectVariantForViewport(
   item: {
     feedUrl?: string | undefined;
     feed2xUrl?: string | undefined;
+    feed2xHintUrl?: string | undefined;
+    feed2xNaturalUrl?: string | undefined;
     galleryUrl?: string | undefined;
     thumbnailUrl?: string | undefined;
     playbackUrl?: string | undefined;
+    compositionHint?: { confidence?: number | undefined } | undefined;
   },
   viewportWidth: number
 ): FeedRenderSelection {
-  if (viewportWidth >= FEED_WIDE_BREAKPOINT_PT) {
+  // v2 派生准入：compositionHint confidence ≥ 0.4
+  const hint = item.compositionHint;
+  const hasV2Hint = !!(hint && typeof hint.confidence === "number" && hint.confidence >= V2_HINT_CONFIDENCE_THRESHOLD);
+  // 屏宽 < 410pt：v2 派生覆盖 1X 档；屏宽 ≥ 410pt：v2 没有 2X，降级到普通 FEED_2X
+  if (viewportWidth < FEED_WIDE_BREAKPOINT_PT) {
+    if (hasV2Hint) {
+      const hintUrl = item.feed2xHintUrl;
+      if (hintUrl) {
+        return { purpose: "FEED_1X_HINT", url: hintUrl };
+      }
+      const naturalUrl = item.feed2xNaturalUrl;
+      if (naturalUrl) {
+        return { purpose: "FEED_1X_NATURAL", url: naturalUrl };
+      }
+    }
     return {
-      purpose: "FEED_2X",
-      url: item.feed2xUrl ?? item.feedUrl ?? item.galleryUrl ?? item.thumbnailUrl ?? item.playbackUrl
+      purpose: "FEED_1X",
+      url: item.feedUrl ?? item.feed2xUrl ?? item.galleryUrl ?? item.thumbnailUrl ?? item.playbackUrl
     };
   }
+  // 宽屏：v2 没有 2X 派生，直接走普通 FEED_2X 路径
   return {
-    purpose: "FEED_1X",
-    url: item.feedUrl ?? item.feed2xUrl ?? item.galleryUrl ?? item.thumbnailUrl ?? item.playbackUrl
+    purpose: "FEED_2X",
+    url: item.feed2xUrl ?? item.feedUrl ?? item.galleryUrl ?? item.thumbnailUrl ?? item.playbackUrl
   };
 }
 

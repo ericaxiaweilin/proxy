@@ -14,10 +14,11 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { VideoPlayer } from "expo-video";
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import type { ImageSourcePropType, NativeSyntheticEvent, ImageLoadEventData } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Image as ExpoImage } from "expo-image";
 import ImageViewing from "react-native-image-viewing";
 import { useVideoPlayer, VideoView } from "expo-video";
+import { claimVideoPlayback, releaseVideoPlayback } from "./video-playback-registry";
 import type { FeedMediaItem } from "@proxy/contracts";
 import type { MediaCompositionHint } from "@proxy/contracts";
 import {
@@ -35,13 +36,14 @@ import {
   shouldAutoPlayVideo
 } from "../media-presentation";
 import { SocialMediaFrame } from "./SocialMediaFrame";
+import { AudioStage } from "./audio-stage";
 
 function onImageLoad(
-  event: NativeSyntheticEvent<ImageLoadEventData>,
+  event: { source: { width: number; height: number } },
   declaredAspect: number,
   setLoadedAspect: (aspect: number) => void
 ): void {
-  const source = event.nativeEvent.source;
+  const source = event.source;
   if (!declaredAspect && source.width > 0 && source.height > 0) {
     setLoadedAspect(source.width / source.height);
   }
@@ -55,6 +57,14 @@ type Props = {
   resolveUrl: (path: string) => string;
   onIndexChange: (index: number) => void;
   onOpen: (index: number) => void;
+  // 【fix 2026-08-26】X 风格“同屏一个 VIDEO 在播”：父级（feed.tsx）用
+  // 滚动位置 + onVideoFrame 计算 “哪个 VIDEO 离视口中心最近”，传 activeVideoKey。
+  // collection 内只有 VIDEO item.activeKey === activeVideoKey 才走 ActiveVideoStage
+  // （真创建 AVPlayer + play），其他 VIDEO 走 ExpoImage 占位 → 物理上不占 audio session。
+  activeVideoKey?: string | null | undefined;
+  onVideoFrame?: (videoKey: string, frame: { y: number; height: number }) => void;
+  /** collection 归属的 postId，用于拼 videoKey 格式 "postId:index:mediaAssetId" */
+  collectionKey?: string;
 };
 
 const CARD_GAP = 10;
@@ -79,12 +89,20 @@ function renderKindAwareStage(
   aspect: number,
   uri: string,
   onPress: () => void,
-  resolveUrl: (path: string) => string
+  resolveUrl: (path: string) => string,
+  isActive: boolean | undefined,
+  onFrame: ((frame: { y: number; height: number }) => void) | undefined
 ): React.JSX.Element {
   if (item.mediaType === "VIDEO") {
     // §5.2.3 VIDEO 必须走 playbackUrl (原始流)；不能走 thumbnailUrl (JPEG 不能播)
     const playbackUri = resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "");
-    return <VideoStage item={item} uri={playbackUri} autoPlay={shouldAutoPlayVideo(item)} onPress={onPress} />;
+    // exactOptionalPropertyTypes: VideoStage.isActive 是 ?: boolean（不允许显式 undefined），
+    // 透传 isActive: undefined 会被 strict 拒绝。这里只在 isActive 真有 boolean 值时才传。
+    return <VideoStage item={item} uri={playbackUri} autoPlay={shouldAutoPlayVideo(item)} {...(isActive === undefined ? {} : { isActive })} onPress={onPress} frameAspect={aspect} resolveUrl={resolveUrl} {...(onFrame ? { onFrame } : {})} />;
+  }
+  if (item.mediaType === "AUDIO") {
+    // §5.2.3 AUDIO：语音播放卡（无画面），playbackUrl 即原文件；不进图片查看器。
+    return <AudioStage item={item} uri={resolveUrl(item.playbackUrl ?? "")} />;
   }
   return (
     <SinglePostImage
@@ -253,25 +271,20 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
   const declaredAspect = mediaAspect(item, 0);
   const [loadedAspect, setLoadedAspect] = useState(0);
   const sourceAspect = aspect ?? declaredAspect ?? loadedAspect ?? 4 / 3;
-  // Gate N (selectImageShape) — 按 source aspect 分流 4 形态，不强制 0.8–1.91 clamp。
-  // 【裁剪不变量】
-  //   - 9:16 长图 (0.5625) → STORY_9_16 按 3:4 拉满屏 + 底部 60pt caption，不出现上下灰边。
-  //   - 4:5 portrait (0.8) → PORTRAIT_4_5 按原比例。
-  //   - 1:1 / 1.25:1 → SQUARE 按原比例。
-  //   - > 1.91:1 横图 → LANDSCAPE 按原比例。
-  const shape = selectImageShape(sourceAspect);
-  const shapeAspect = (() => {
-    switch (shape) {
-      case "STORY_9_16": return 3 / 4; // 拉满屏。
-      case "PORTRAIT_4_5": return sourceAspect; // 原比例 0.5626–0.8
-      case "SQUARE": return sourceAspect; // 原比例 0.8–1.25
-      case "LANDSCAPE": return Math.min(sourceAspect, 1.91); // 不超过 1.91
-    }
-  })();
+  // 【fix 2026-08-26】信任 caller 传入的 aspect，否则用 declaredAspect，不强制 shapeAspect。
+  // 旧逻辑用 selectImageShape → STORY_9_16 强制 3:4 → 9:16 上下大段深紫黑。
+  // 现逻辑：按 sourceAspect 原比例渲染，contain 模式下 expo-image 自带补深紫黑。
+  // history: 5.2.1 spec 的"不出现上下灰边"原本意图是"不要白/灰边"，用 FRAME_BACKGROUND_HEX + contain
+  // 已保证；强制 3:4 frame 会让 9:16 上下**额外**多出一段深紫黑（实际是双层 pad），看起来"压扁了"。
+  const shapeAspect = sourceAspect;
   // Gate A (selectVariantForViewport) — 屏宽感知档位。与 SocialMediaFrame 保持同一函数，
   // 避免 SINGLE / RAIL / WALL 三个渲染路径走出三套选择逻辑。
   const { width: viewportWidth } = useWindowDimensions();
-  const uri = resolveUrl(selectVariantForViewport(item, viewportWidth).url ?? "");
+  const selection = selectVariantForViewport(item, viewportWidth);
+  const uri = resolveUrl(selection.url ?? "");
+  // 【fix 2026-08-26】SinglePostImage 走 contain（expo-image contentFit="contain" 写死），
+  // contain 模式下图片已完整居中显示，不传 contentPosition。
+  // 历史：v2 focalPoint 透传 → 9:16 portrait 头像图被贴顶 → 看起来"被切了"。
   return (
     <Pressable
       accessibilityLabel="查看原图"
@@ -279,18 +292,22 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
       style={[styles.singleStage, { aspectRatio: shapeAspect }]}
     >
       <View style={styles.singleFill}>
-        <Image
-          onLoad={(event) => onImageLoad(event, declaredAspect, setLoadedAspect)}
-          resizeMode="contain"
-          source={{ uri } as ImageSourcePropType}
+        <ExpoImage
+          source={{ uri }}
           style={styles.singleAsset}
+          contentFit="contain"
+          transition={200}
+          cachePolicy="memory-disk"
+          priority="normal"
+          recyclingKey={item.mediaAssetId}
+          onLoad={(event) => onImageLoad(event, declaredAspect, setLoadedAspect)}
         />
       </View>
     </Pressable>
   );
 }
 
-function SinglePostCollection({ items, resolveUrl, onOpen }: Props): React.JSX.Element {
+function SinglePostCollection({ items, resolveUrl, onOpen, activeVideoKey, onVideoFrame, collectionKey }: Props): React.JSX.Element {
   // §5.2 / §5.2.1 — SINGLE 集合 (3 种)：
   //   1 张         → 原比例
   //   1 VIDEO     → 1/1 autoplay + mute
@@ -303,7 +320,13 @@ function SinglePostCollection({ items, resolveUrl, onOpen }: Props): React.JSX.E
   const uri = item.mediaType === "VIDEO"
     ? resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "")
     : resolveUrl(selectVariantForViewport(item, viewportWidth).url ?? "");
-  return renderKindAwareStage(item, aspect, uri, () => onOpen(0), resolveUrl);
+  const isVideo = item.mediaType === "VIDEO";
+  const videoKey = isVideo ? `${collectionKey ?? "0"}:0:${item.mediaAssetId}` : null;
+  const isActive = isVideo ? activeVideoKey === videoKey : undefined;
+  const onFrame = isVideo && onVideoFrame && videoKey
+    ? (frame: { y: number; height: number }) => onVideoFrame(videoKey, frame)
+    : undefined;
+  return renderKindAwareStage(item, aspect, uri, () => onOpen(0), resolveUrl, isActive, onFrame);
 }
 
 /**
@@ -317,40 +340,115 @@ function VideoStage({
   item,
   uri,
   autoPlay,
-  onPress
+  isActive,
+  onPress,
+  frameAspect,
+  resolveUrl,
+  onFrame
+}: {
+  item: ItemWithHint;
+  uri: string;
+  autoPlay: boolean;
+  // 【fix 2026-08-26】isActive=false 时走 thumbnail ExpoImage 占位，不创建 AVPlayer、不注册
+  // audio session。这是 X/IG 风格 "全屏只一个 VIDEO 在播" 的关键：feed.tsx 计算当前视口中心的
+  // videoId，非 active 那些 VIDEO 都是占位，物理上不存在 AVPlayer，不可能被争用 session。
+  isActive?: boolean;
+  onPress: () => void;
+  // 【fix 2026-08-26】VIDEO 也信任 caller 传入的 frameAspect，避免 RAIL/WALL/SINGLE
+  // 三个路径不同 frame 比例造成黑边。跟 SocialMediaFrame 保持同一原则。
+  frameAspect?: number;
+  resolveUrl: (path: string) => string;
+  // 【fix 2026-08-26】 VIDEO frame 位置上报父级。feed.tsx 用 frames[videoKey] 算
+  // 哪个 VIDEO 离视口中心最近 → activeVideoId → isActive。
+  onFrame?: (frame: { y: number; height: number }) => void;
+}): React.JSX.Element {
+  const declaredAspect = mediaAspect(item, 0);
+  const sourceAspect = declaredAspect || 16 / 9;
+  const displayAspect = frameAspect ?? sourceAspect;
+  // 【fix 2026-08-26 异音】isActive=false 时走 thumbnail ExpoImage 占位。
+  if (isActive === false) {
+    return (
+      <Pressable
+        accessibilityLabel="播放视频"
+        onPress={onPress}
+        style={[styles.videoStage, { aspectRatio: displayAspect }]}
+      >
+        <ExpoImage
+          source={{ uri: resolveUrl(item.thumbnailUrl ?? item.feedUrl ?? "") }}
+          style={styles.videoView}
+          contentFit="contain"
+          transition={150}
+          cachePolicy="memory-disk"
+          recyclingKey={item.mediaAssetId}
+        />
+        <View pointerEvents="none" style={styles.videoBadge}>
+          <Text style={styles.videoBadgeText}>视频</Text>
+          {item.durationMs ? <Text style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
+        </View>
+      </Pressable>
+    );
+  }
+  return (
+    <ActiveVideoStage
+      item={item}
+      uri={uri}
+      autoPlay={autoPlay}
+      onPress={onPress}
+      displayAspect={displayAspect}
+      resolveUrl={resolveUrl}
+      {...(onFrame ? { onFrame } : {})}
+    />
+  );
+}
+
+/**
+ * 真正创建 AVPlayer 的 VideoStage 子组件。
+ * 【fix 2026-08-26】拆出独立组件后，autoPlay 路径才能在父级条件渲染时走实际 mount，
+ * 避免 "同页多个 inactive player 抢 audio session" 的喡喡声。
+ */
+function ActiveVideoStage({
+  item,
+  uri,
+  autoPlay,
+  onPress,
+  displayAspect,
+  resolveUrl: _resolveUrl, // unused, kept for forward-compat with VideoStage interface
+  onFrame
 }: {
   item: ItemWithHint;
   uri: string;
   autoPlay: boolean;
   onPress: () => void;
+  displayAspect: number;
+  resolveUrl: (path: string) => string;
+  onFrame?: (frame: { y: number; height: number }) => void;
 }): React.JSX.Element {
-  const declaredAspect = mediaAspect(item, 0);
-  const sourceAspect = declaredAspect || 16 / 9;
-  // Gate N (selectImageShape) — VIDEO 同样按 4 形态分流，不强制 0.8–1.91 clamp。
-  const shape = selectImageShape(sourceAspect);
-  const displayAspect = (() => {
-    switch (shape) {
-      case "STORY_9_16": return 3 / 4;
-      case "PORTRAIT_4_5": return sourceAspect;
-      case "SQUARE": return sourceAspect;
-      case "LANDSCAPE": return Math.min(sourceAspect, 1.91);
-    }
-  })();
   const player = useVideoPlayer(uri, (setup) => {
     setup.loop = true;
     setup.muted = true;
+    // 【fix 2026-08-26】mixWithOthers 避免 iOS audio session 切换提示音。
+    setup.showNowPlayingNotification = false;
+    setup.audioMixingMode = "mixWithOthers";
     // Gate J (coldStartToFirstFrame) — iOS AVPlayer 提前缓冲 3s，
     // 用户点入全屏时 key frame 已在 player.buffered 中，首帧装帧 < 50ms。
     // TS 类型未导出，但 iOS AVPlayerItem 接受。
     (setup as { preferredForwardBufferDuration?: number }).preferredForwardBufferDuration = 3;
   });
   const videoViewRef = useRef<VideoView>(null);
+  // 【fix 2026-08-26 P0 多视频声音】
+  // 旧 mount effect 无条件 play / pause —— 不论 isActive、autoPlay，AVPlayer 一挂载就
+  // 调一次 play。多个 post 各自 mount → 多个 AVPlayer 同时进入 playing 状态 → iOS
+  // audio session 争用，听到多个声音叠加（甚至还没滚到的 post 也在播）。
+  // 新模型：mount 永远 pause，只有 (autoPlay) 才去 claim 单例播放位；
+  // claim 成功才真 play（registry 内部会先 pause 其他所有 player，再 play 自己）。
+  // unmount 一定 release，确保 AVPlayer 真的退出 audio session。
   useEffect(() => {
-    if (autoPlay) {
-      player.play();
-    } else {
-      player.pause();
-    }
+    claimVideoPlayback(player);
+    return () => releaseVideoPlayback(player);
+  }, [player]);
+  useEffect(() => {
+    if (autoPlay) player.play();
+    else player.pause();
   }, [player, autoPlay]);
   const handlePress = useCallback(() => {
     // 优选：调 expo-video 原生 enterFullscreen() 走 iOS AVPlayerViewController fullscreen。
@@ -364,19 +462,19 @@ function VideoStage({
     <Pressable
       accessibilityLabel="查看视频"
       onPress={handlePress}
+      onLayout={onFrame ? (event) => {
+        const ly = event.nativeEvent.layout;
+        onFrame({ y: ly.y, height: ly.height });
+      } : undefined}
       style={[styles.videoStage, { aspectRatio: displayAspect }]}
     >
       <VideoView
         ref={videoViewRef}
         player={player}
         style={styles.videoView}
-        contentFit="cover"
+        contentFit="contain"
         fullscreenOptions={{ enable: true, orientation: "portrait" }}
         useExoShutter={false}
-        onFirstFrameRender={() => {
-          // Gate J: 首帧已装 → 视频在屏内可观看。
-          // 不需额外状态管理，expo-video 已经渲染 surface。
-        }}
       />
       <View pointerEvents="none" style={styles.videoBadge}>
         <Text style={styles.videoBadgeText}>视频</Text>
@@ -386,7 +484,7 @@ function VideoStage({
   );
 }
 
-function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onOpen }: Props): React.JSX.Element {
+function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onOpen, activeVideoKey, onVideoFrame, collectionKey }: Props): React.JSX.Element {
   const [contentWidth, setContentWidth] = useState(320);
   const railRef = useRef<ScrollView>(null);
   const metrics = useMemo(() => mediaRailMetrics(items, contentWidth), [items, contentWidth]);
@@ -413,6 +511,14 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
           const cardUri = isVideo
             ? resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "")
             : resolveUrl(selectVariantForViewport(item, contentWidth).url ?? "");
+          const videoKey = isVideo ? `${collectionKey ?? "0"}:${index}:${item.mediaAssetId}` : null;
+          // 【fix 2026-08-26】X 风格 active VIDEO：只有 “父级算出的 activeVideoKey”
+          // 且 index === currentIndex（RAIL 水平焦点） 才走 ActiveVideoStage 真播。
+          // 其他 VIDEO 走 ExpoImage 占位 → 物理上不创建 AVPlayer → 不会争用 audio session。
+          const isActive = isVideo && activeVideoKey === videoKey && index === currentIndex;
+          const onFrame = isVideo && onVideoFrame && videoKey
+            ? (frame: { y: number; height: number }) => onVideoFrame(videoKey, frame)
+            : undefined;
           return (
             <Pressable
               accessibilityLabel={`查看第 ${index + 1} 张媒体`}
@@ -425,7 +531,11 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
                   item={item as ItemWithHint}
                   uri={cardUri}
                   autoPlay={shouldAutoPlayVideo(item) && index === currentIndex}
+                  isActive={isActive}
                   onPress={() => onOpen(index)}
+                  frameAspect={cardWidth / metrics.railHeight}
+                  resolveUrl={resolveUrl}
+                  {...(onFrame ? { onFrame } : {})}
                 />
               ) : (
                 <SocialMediaFrame item={item as ItemWithHint} frameAspect={cardWidth / metrics.railHeight} resolveUrl={resolveUrl} />
@@ -440,7 +550,7 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
   );
 }
 
-function MediaWall({ items, resolveUrl, onOpen }: Props): React.JSX.Element {
+function MediaWall({ items, resolveUrl, onOpen, activeVideoKey, onVideoFrame, collectionKey }: Props): React.JSX.Element {
   const [contentWidth, setContentWidth] = useState(320);
   const cellWidth = (contentWidth - WALL_GAP) / 2;
   return (
@@ -448,12 +558,26 @@ function MediaWall({ items, resolveUrl, onOpen }: Props): React.JSX.Element {
       <View style={styles.wall}>
         {items.map((item, index) => {
           const aspect = mediaAspect(item, 1);
-          // 4:5 portrait 画布优先；其他按 sourceAspect；最高 4:5（不被压成横条）
-          const cellAspect = aspect >= 1 ? 1 : Math.max(4 / 5, aspect);
+          // 【fix 2026-08-26】横图不强制 1:1：原比例 clamp 到 [1, 1.91] 避免 1:1 压扁横图 / 被切成竖条。
+          // 竖图仍走 4:5 最低（不被压成横条）— 与原逻辑一致。
+          // 4:5 (0.8) portrait → cellAspect = 0.8  (原比例)
+          // 1:1 square         → cellAspect = 1.0
+          // 4:3 (1.33) 横图     → cellAspect = 1.33  (原比例，不再被压成 1:1)
+          // 16:9 (1.78) 横图   → cellAspect = 1.78
+          // 21:9 (2.33) 电影    → cellAspect = 1.91  (clamp 上限，cover)
+          const cellAspect = aspect >= 1
+            ? Math.min(1.91, Math.max(1, aspect))
+            : Math.max(4 / 5, aspect);
           const isVideo = item.mediaType === "VIDEO";
           const cardUri = isVideo
             ? resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "")
             : resolveUrl(selectVariantForViewport(item, cellWidth).url ?? "");
+          const videoKey = isVideo ? `${collectionKey ?? "0"}:${index}:${item.mediaAssetId}` : null;
+          // 【fix 2026-08-26】同 RAIL：activeVideoKey 匹配 + index===0 才走 ActiveVideoStage。
+          const isActive = isVideo && activeVideoKey === videoKey && index === 0;
+          const onFrame = isVideo && onVideoFrame && videoKey
+            ? (frame: { y: number; height: number }) => onVideoFrame(videoKey, frame)
+            : undefined;
           return (
             <Pressable
               accessibilityLabel={`查看第 ${index + 1} 张媒体`}
@@ -473,7 +597,11 @@ function MediaWall({ items, resolveUrl, onOpen }: Props): React.JSX.Element {
                   item={item as ItemWithHint}
                   uri={cardUri}
                   autoPlay={shouldAutoPlayVideo(item) && index === 0}
+                  isActive={isActive}
                   onPress={() => onOpen(index)}
+                  frameAspect={cellAspect}
+                  resolveUrl={resolveUrl}
+                  {...(onFrame ? { onFrame } : {})}
                 />
               ) : (
                 <SocialMediaFrame item={item as ItemWithHint} frameAspect={cellAspect} resolveUrl={resolveUrl} />

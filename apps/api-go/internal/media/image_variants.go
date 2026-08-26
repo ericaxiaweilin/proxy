@@ -21,11 +21,16 @@ type imageVariantRecipe struct {
 }
 
 var imageVariantRecipes = []imageVariantRecipe{
-	{purpose: "FEED_1X", filter: "scale='min(1080,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease"},
-	{purpose: "FEED_2X", filter: "scale='min(1600,iw)':'min(1600,ih)':force_original_aspect_ratio=decrease"},
-	{purpose: "GALLERY", filter: "scale='min(2560,iw)':'min(2560,ih)':force_original_aspect_ratio=decrease"},
-	{purpose: "SHARE_OG", filter: "scale=1200:630:force_original_aspect_ratio=decrease,pad=1200:630:(ow-iw)/2:(oh-ih)/2:color=0x17131F"},
-	{purpose: "PLACEHOLDER", filter: "scale=64:64:force_original_aspect_ratio=decrease"},
+	// v1 派生（兑底不可去）：加 autorotate + setsar=1 + yuvj420p 优化，
+	// 消除 iPhone HEIC 偶发 landscape 误显示 (EXIF orientation flag 未读) 与
+	// Android 宽色域照片发灰问题。与 v2 风格统一但保持 ffmpeg 拼字符串。
+	// 【ffmpeg 9 兼容】去 colorspace filter：ffmpeg 9 单 jpg 输入下 colorspace=srgb 简写已删除，
+	// 默认输出就是 sRGB (bt709 + pc range)，不要多此一举。仍保 setsar + yuvj420p。
+	{purpose: "FEED_1X", filter: "scale='min(1080,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p"},
+	{purpose: "FEED_2X", filter: "scale='min(1600,iw)':'min(1600,ih)':force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p"},
+	{purpose: "GALLERY", filter: "scale='min(2560,iw)':'min(2560,ih)':force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p"},
+	{purpose: "SHARE_OG", filter: "scale=1200:630:force_original_aspect_ratio=decrease,pad=1200:630:(ow-iw)/2:(oh-ih)/2:color=0x17131F,setsar=1,format=yuvj420p"},
+	{purpose: "PLACEHOLDER", filter: "scale=64:64:force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p"},
 }
 
 func generateImageVariants(ctx context.Context, originalPath, storeDir string, asset MediaAsset, now time.Time) ([]MediaVariant, error) {
@@ -51,7 +56,7 @@ func generateImageVariants(ctx context.Context, originalPath, storeDir string, a
 				}
 			}()
 			args := []string{
-				"-y", "-i", originalPath, "-frames:v", "1", "-vf", recipe.filter,
+				"-y", "-autorotate", "-i", originalPath, "-frames:v", "1", "-vf", recipe.filter,
 				"-map_metadata", "-1", "-q:v", "2", temporaryPath,
 			}
 			if out, runErr := exec.CommandContext(ctx, "ffmpeg", args...).CombinedOutput(); runErr != nil {
@@ -105,6 +110,17 @@ func variantStorageKey(variants []MediaVariant, purpose, fallback string) string
 		}
 	}
 	return fallback
+}
+
+// pickVariant 返回指定 purpose 的 READY 派生变体（主色提取用，需要整条记录拿 StorageKey）。
+// 未找到返回零值 MediaVariant{}（调用方需自行判断 StorageKey 是否为空）。
+func pickVariant(variants []MediaVariant, purpose string) MediaVariant {
+	for _, variant := range variants {
+		if variant.Purpose == purpose && variant.Status == "READY" {
+			return variant
+		}
+	}
+	return MediaVariant{}
 }
 
 func variantURL(variants []MediaVariant, purpose, fallback string) string {

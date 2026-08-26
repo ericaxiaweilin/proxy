@@ -136,5 +136,18 @@ export function nearestRailIndex(offsets: readonly number[], scrollX: number): n
 }
 
 export function shouldPreserveWholeSubject(sourceAspect: number, frameAspect: number): boolean {
-  return sourceAspect < frameAspect * 0.9 || sourceAspect > frameAspect * 1.15;
+  // 【fix 2026-08-26】只对"差异极大"才 contain：避免 4:5 portrait（0.8）在 1.91 frame 里被 contain
+  // （会让 1.91 frame 上下大段空白）。差异 < 30% 信任 frame 比例 cover，> 30% 触发 contain。
+  // 0.5625 portrait in 1.91 frame  ratio = 0.29 → contain (含人像全身)
+  // 0.8 in 0.85 frame            ratio = 0.94 → cover (差不多)
+  // 1.5 in 1.91 frame            ratio = 0.78 → cover
+  // 1.0 in 0.5 frame             ratio = 2.0  → contain
+  if (frameAspect <= 0) return true;
+  const ratio = sourceAspect / frameAspect;
+  // 阈值选 0.75 (4:5 in 3:5 frame ratio=0.75) + 1.34 (4:3 in 16:9 frame)：
+  // 9/16 in 4/5 frame  → 0.703 < 0.75 → contain (保护人像)
+  // 4/5 in 4/5 frame   → 1.0  → cover
+  // 16/9 in 4/3 frame  → 1.33 < 1.34 → cover
+  // 1.0 in 0.5 frame   → 2.0  > 1.34 → contain
+  return ratio <= 0.75 || ratio >= 1.34;
 }

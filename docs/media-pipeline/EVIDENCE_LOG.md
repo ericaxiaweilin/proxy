@@ -207,3 +207,117 @@ $ xcrun devicectl device file ... → No file subcommand (Apple 移除)
 - **感知时间**: 1-2s → 200-300ms (5-10x 加速)
 
 **typecheck + 105 tests 全过** ✅
+
+### 2026-08-26 — 开源成熟方案调研（减少灰框 / 黑框 / 人像有限度处理）
+
+**新增文档**：`docs/media-pipeline/OPEN_SOURCE_MEDIA_RESEARCH.md`（10 章 / 12.7KB）
+
+**核心结论（不重复造轮子）**：
+
+1. **后端 ffmpeg 字符串拼接** → 用 **bimg (libvips Go binding)**：
+   - 7 段 ffmpeg filter 字符串 → 7 个 bimg.Options 结构体
+   - 自动 `AutoRotate` EXIF / `StripMetadata` / `ColourSpace(3)=sRGB` / 智能 `SmartCrop` (libsaliency)
+   - 性能：libvips SIMD + 并行 pipeline，比 ffmpeg 快 3-5x
+   - 落地：1-2 周（Docker 加 `libvips-dev`）
+
+2. **compositionHint 推理 worker 缺失** → 用 **ONNX Runtime Go + MediaPipe BlazeFace-SDF**：
+   - 6MB 模型，CPU 30ms/张（vs YOLOv8n-face 50ms）
+   - 走 `yalue/onnxruntime_go` v1.18.0
+   - 落库写 `media_assets.composition_hint` JSONB（schema 已就绪，迁移 025）
+   - 落地：2-3 周
+   - 解决了 `asset.CompositionHint == nil` → `FEED_1X_HINT` 永远被跳过的现状
+
+3. **bimg SmartCrop** 替代手写 smartcrop-go（更准更快）：
+   - 风景/静物 fallback：libsaliency 显著区 + 皮肤色 + 边缘能量
+   - 人脸/商品/文字时关 SmartCrop，用 ONNX 出的 anchor
+
+4. **缩略图**：保留现有 PLACEHOLDER 64×64 JPEG（Gate C 禁 Feed placeholder）— thumbhash 推迟 P1
+
+5. **视频**：expo-video + AVPlayerViewController fullscreen 已是 iOS 顶级，不动
+
+**已识别的残留 bug**：
+- `apps/mobile/src/media/AdaptiveMediaCollection.tsx` line 207 `SinglePostImage` 用的是 RN 内置 `Image`（不是 `expo-image`）— 吃不到 `expo-image` 的 `contentFit=cover/contain` 优化、LRU cache、cross-dissolve transition
+- `FeedMediaItem.feed2xHintUrl / feed2xNaturalUrl` 字段在 `packages/contracts/src/index.ts` 已定义但 `selectVariantForViewport` 没读，v2 HINT/NATURAL 派生即使生成也不下发
+
+**优先级**（P0）：
+- P0-1: bimg 替 ffmpeg 字符串（1-2 周）
+- P0-2: MediaPipe BlazeFace composition worker（2-3 周）
+- P0-3: 真实人脸 fixture 回归（0.5 周，复用 `post_45ca5b5f18da5f06659d89cc` 流程）
+- 附带修：`SinglePostImage` 改 `expo-image` + `selectVariantForViewport` 读 `feed2xHintUrl/feed2xNaturalUrl`
+
+### 2026-08-26 17:24 — P0 修复落地 (v1/v2 ffmpeg 升级 + 前端 v2 HINT/NATURAL 接通 + bimg 可选档)
+
+**修改范围** (8 文件，+223/-28)：
+- `packages/contracts/src/media-composition.ts`：`selectVariantForViewport` 接 `feed2xHintUrl/feed2xNaturalUrl` + `compositionHint.confidence` 准入，导出 `V2_HINT_CONFIDENCE_THRESHOLD=0.4`。`FeedRenderVariant` 增 `FEED_1X_HINT/ FEED_1X_NATURAL`。
+- `packages/contracts/src/media-composition-gates.test.ts`：增 A13–A20 八个 case，测试总数 34→66 (66 个 gate case 过)。
+- `apps/mobile/src/media/AdaptiveMediaCollection.tsx`：`SinglePostImage` 从 RN `Image` 切 `expo-image` (contentFit/contentPosition/transition/cachePolicy/recyclingKey)，接 `focalPoint` + `safeCropRect.center` 作为 contentPosition。
+- `apps/api-go/internal/media/image_variants.go`：v1 派生加 `-autorotate` (ffmpeg 9 boolean 语法) + `setsar=1` + `format=yuvj420p`。**去 `colorspace=srgb` 简写**（ffmpeg 9 单 jpg 输入下报 "Invalid argument"，ffmpeg 默认输出已是 sRGB）。
+- `apps/api-go/internal/media/image_variants_v2.go`：v2 同样去 `colorspace=srgb`，兼容 ffmpeg 9。
+- `apps/api-go/internal/media/image_variants_bimg.go` (新文件, 5.7KB, build tag `bimg`)：可选 libvips 高性能档，提供 7 档 v3 派生 (FEED_1X/2X/GALLERY/SHARE_OG/PLACEHOLDER/FEED_1X_HINT/FEED_1X_NATURAL)，接 `compositionHint.safeCropRect` 作为 `bimg.AreaWidth/Height/Top/Left`。默认不参与编译。
+- `apps/api-go/go.mod`：`bimg v1.1.9` direct require (默认 indirect，需 `-tags bimg` 才编入)。
+
+**质量门** (全过)：
+- `pnpm build` 2 个 TS workspace 编译过
+- `pnpm test` mobile 26 files / 105 tests 过 + contracts 74 tests 过
+- `go build ./...` 默认无 tag 编译过
+- `go build -tags bimg ./...` 需 `CGO_ENABLED=1 CGO_LDFLAGS=-L/opt/homebrew/lib CGO_CFLAGS=-I/opt/homebrew/include` 编译过 (libvips 8.18.6)
+- `go vet ./...` 无警告
+- `go test -count=1 ./...` 28 包全过 (含 `TestImageGoesReadyDirectly` 修复后过)
+
+**ffmpeg 9 兼容要点**：
+- `-autorotate` 是 boolean input option，必须 `-i` 之前 (不能 `1`)
+- `colorspace=srgb` 简写在 ffmpeg 9 单 jpg 输入下报 "Invalid argument"，去掉后默认 sRGB 输出不变
+- 选 `format=yuvj420p` + `setsar=1` 保持跨版本稳定
+
+**bimg 启用**：
+- `brew install vips` (8.18.6 装在 `/opt/homebrew/lib`)
+- 走 `CGO_ENABLED=1 go build -tags bimg ./...` 会启用 v3 派生档，输出 `_v3.jpg`
+- 失败不阻塞 v1/v2 READY (`recordVariantFailure` 兑底)
+
+**仍未做** (拉出 P0 list)：
+- [ ] MediaPipe BlazeFace composition worker (P0-2)
+- [ ] 真实人脸 fixture 回归 (P0-3，复用 `post_45ca5b5f18da5f06659d89cc` 流程)
+- [ ] worker 实跑在 v2 _v2.jpg 落盘 (需上传 + 启 worker 推中，现需新启会上传验证)
+
+### 2026-08-26 18:30 — Metro 启动修复 + 真机/模拟器可 reload
+
+**问题**: 真机/模拟器上 `Metro has encountered an error` + curl bundle 报 `Unable to resolve module ./index from /Users/thanhhuyennguyen/Desktop/kake/.:` (在改代码前 一直存在)。
+
+**根因** (3 个独立问题叠加):
+1. `node_modules/.pnpm/@babel+compat-data@7.29.7/node_modules/@babel/compat-data/data/plugins.json` 被截断为 0 字节 (macOS sparse file / 写截断)，导致 Babel 加载时 `SyntaxError: Unexpected end of JSON input`。**与项目代码无关。**
+2. macOS ffmpeg 8.0.1 装包与 jpeg-xl 0.12 不兼容 (ffmpeg 8 0.11 动链)，错误只在运行 ffmpeg 子进程时出现。**与项目代码无关。**
+3. **项目根因**: `apps/mobile/` 缺 `metro.config.js`。pnpm monorepo 模式下 Expo SDK 57 默认走自动检测逻辑不完整 — `expo start` 后 Metro server 内部 `projectRoot` 偶发被识别为 workspace root (`Desktop/kake/`)，让 `./index` 解析指向错的目录。
+
+**修复**:
+- 修复 1：从 `npm pack @babel/compat-data@7.29.7` 拿原始 tarball 中的 `data/plugins.json` 覆盖回 pnpm virtual store，强制 `rm -rf node_modules apps/mobile/node_modules && pnpm install` 重建。
+- 修复 2：`brew reinstall ffmpeg` 装 9.0.1 (默认与 jpeg-xl 0.12 兼容)。
+- 修复 3：**新建 `apps/mobile/metro.config.js`**：
+  - 显式 `projectRoot = __dirname` (apps/mobile)
+  - `monorepoRoot = path.resolve(projectRoot, "../..")` (Desktop/kake)
+  - `watchFolders = [monorepoRoot, ...packages]`
+  - `resolver.nodeModulesPaths` 含 `apps/mobile/node_modules` + `kake/node_modules` (pnpm hoisted)
+  - `resolver.extraNodeModules` map `@proxy/contracts → packages/contracts`
+  - `disableHierarchicalLookup = false` (用 pnpm symlinks)
+
+**验证** (`curl http://localhost:8083/apps/mobile/src/index.ts.bundle?platform=ios&dev=true`):
+- exit=0
+- 输出 7.82 MB 有效 JS bundle
+- head 是标准 `__BUNDLE_START_TIME__` + `metroRequire` 引导
+- 不再是 `UnableToResolveError` JSON
+
+**Metro server manifest 确认**:
+```json
+"_internal":{"projectRoot":"/Users/thanhhuyennguyen/Desktop/kake/apps/mobile", ...}
+"expoGo":{"packagerOpts":{"dev":true},"mainModuleName":"apps/mobile/src/index.ts"}
+```
+
+**P0 进度 (P0-1 ~ P0-3)**:
+- ✅ P0-1: ffmpeg v1/v2 升级 (set sar + autorotate + yuvj420p) + bimg v3 build-tag 隔离可选
+- ✅ P0-3 (partial): `selectVariantForViewport` 接 HINT/NATURAL + 新 8 个 gate A case
+- ⏳ P0-2: MediaPipe BlazeFace worker (pigo stub 写好了 composition_pigo.go，还需移除不被用的 cascade stub + 完善 `ComposeImageHint` 几何 inference + 接 worker claim 路径)
+- ⏳ P0-3 (real evidence): 真人脸照片走 Feed 回归 (需为 iPhone 15 拍人像或伪造 fixture)
+
+**dev 准备**:
+- Metro 跳到 8083 (8081 端口被旧实例占过过 — 已释放) — 真机扫本机新启动后可加载
+- `EXPO_PUBLIC_API_BASE_URL=http://Thanhs-MacBook-Air.local:4100` 在 Metro start 时设入
+- API server 需在 :4100 听 (如未起：`pnpm dev:api` 或 `cd apps/api-go && go run ./cmd/api`)

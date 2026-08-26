@@ -2,7 +2,8 @@
 // r157HomeTop + r1572HomeComposer('USER') + 继续/2项 + r157Action 周六新店开业 + r157Action 周末摄影散步
 // + r157MarketPulse + bottom。无 hero / attention / teaser / rail / quick / reusable。
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（rhome，HTML 5197-5203）。
-import { useState } from "react";
+// Experience Runtime 插槽：top_context banner 由 SurfacePlan 驱动（§10 Slots），本地态不被 Delta 覆盖（§15.1）。
+import { useState, type ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
@@ -31,16 +32,19 @@ export function RequesterHome({
   onEnterWorkspace,
   onOpenMarket,
   onOpenFeed,
-  onChat
+  onChat,
+  topContext,
 }: {
   onEnterWorkspace: (selection: RequesterGoal) => void;
   onOpenMarket?: ((tab: MarketTab) => void) | undefined;
   onOpenFeed?: (() => void) | undefined;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
+  topContext?: ReactNode;
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      {topContext ?? null}
       {/* 基线 .r157HomeTop：今天想做什么？ + 河内·还剑湖附近 + 用户⌄ */}
       <View style={styles.homeTop}>
         <View style={styles.homeTopCopy}>

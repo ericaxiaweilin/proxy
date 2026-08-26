@@ -33,12 +33,12 @@ import (
 // HEVC/MOV/奇怪 rotation/不同音频 codec 标准化为 H.264+AAC MP4+faststart。
 // 不做：多码率 HLS / ABR / 转码集群 / 直播 / WebRTC（P0 只要求正常播放）。
 
-// MediaAsset 是媒体资产（IMAGE | VIDEO）。
+// MediaAsset 是媒体资产（IMAGE | VIDEO | AUDIO）。
 type MediaAsset struct {
 	MediaAssetID        string    `json:"mediaAssetId"`
 	OwnerPrincipalType  string    `json:"ownerPrincipalType"`
 	OwnerPrincipalID    string    `json:"ownerPrincipalId"`
-	MediaType           string    `json:"mediaType"` // IMAGE | VIDEO
+	MediaType           string    `json:"mediaType"` // IMAGE | VIDEO | AUDIO
 	OriginalStorageKey  string    `json:"originalStorageKey"`
 	PlaybackStorageKey  string    `json:"playbackStorageKey,omitempty"`
 	ThumbnailStorageKey string    `json:"thumbnailStorageKey,omitempty"`
@@ -63,8 +63,14 @@ type MediaAsset struct {
 	CompositionRecipeVersion  string                `json:"compositionRecipeVersion,omitempty"`
 	CompositionComputedAt     *time.Time            `json:"compositionComputedAt,omitempty"`
 	CompositionConfidence     float64               `json:"compositionConfidence,omitempty"`
+	// DominantColorHex 主色（#RRGGBB），worker v1 派生后填。contain 模式下客户端
+	// 用此色当 frame 背景，替代写死深紫黑 → 消除"图浅/背景深"的强对比灰边。
+	// 失败填 DefaultDominantColor（#0E0A14）兑底。
+	DominantColorHex string `json:"dominantColorHex,omitempty"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
+	// LastError：确定性拒绝原因（如音频超 30s）。仅 FAILED 资产携带，供客户端展示。
+	LastError string `json:"lastError,omitempty"`
 }
 
 // MediaVariant is an immutable, recipe-versioned representation for one UI purpose.
@@ -102,6 +108,8 @@ type VideoMetadata struct {
 	DurationMs int64  `json:"durationMs"`
 	Codec      string `json:"codec"`
 	HasAudio   bool   `json:"hasAudio"`
+	// AudioCodec：音频流 codec 名（aac/opus/…）。纯音频资产（AUDIO）用它填 asset.Codec。
+	AudioCodec string `json:"audioCodec,omitempty"`
 }
 
 // Processor 是媒体处理链接口（worker 实现，dev 用本地 ffmpeg）。
@@ -126,6 +134,9 @@ type Repository interface {
 	GetVariant(ctx context.Context, variantID string) (MediaVariant, error)
 	ListVariants(ctx context.Context, mediaAssetID string) ([]MediaVariant, error)
 	EnqueueProcessingJob(ctx context.Context, job ProcessingJob) error
+	// UpdateCompositionHint 仅更新 composition hint 字段（worker 跑完 ONNX/几何 推理后调用）。
+	// 失败不阻塞：FAILED 状态独立保留。
+	UpdateCompositionHint(ctx context.Context, assetID string, hint *MediaCompositionHint) error
 }
 
 type ProcessingJobRepository interface {
@@ -200,6 +211,20 @@ func (r *MemoryRepository) UpdateAsset(_ context.Context, a MediaAsset, expected
 		return ErrStatusTransition
 	}
 	r.assets[a.MediaAssetID] = a
+	return nil
+}
+
+func (r *MemoryRepository) UpdateCompositionHint(_ context.Context, assetID string, hint *MediaCompositionHint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	asset, ok := r.assets[assetID]
+	if !ok {
+		return ErrAssetNotFound
+	}
+	// hint=nil 表示清空 (worker 调取失败后显式置 UNKNOWN)
+	asset.CompositionHint = hint
+	asset.UpdatedAt = time.Now().UTC()
+	r.assets[assetID] = asset
 	return nil
 }
 
@@ -557,8 +582,14 @@ func detectMediaMime(header []byte) string {
 
 func mediaMimeAllowed(mediaType, declared, detected string) bool {
 	expectedPrefix := "image/"
-	if mediaType == "VIDEO" {
+	switch mediaType {
+	case "VIDEO":
 		expectedPrefix = "video/"
+	case "AUDIO":
+		// 录音产物是 m4a/mp4 容器，http.DetectContentType 探测为 video/mp4；
+		// 只要求声明类型以 audio/ 开头且探测结果不是图片即可，精确校验交给 ffprobe。
+		normalizedDeclared := strings.ToLower(strings.TrimSpace(strings.Split(declared, ";")[0]))
+		return strings.HasPrefix(normalizedDeclared, "audio/") && !strings.HasPrefix(detected, "image/")
 	}
 	if !strings.HasPrefix(detected, expectedPrefix) {
 		return false
@@ -727,7 +758,7 @@ func (s *Service) createAsset(ctx context.Context, e command.Envelope) command.R
 	if !decode(e.Payload, &p) || p.MediaType == "" || p.OriginalStorageKey == "" {
 		return command.Rejected(e, "INVALID_MEDIA_ASSET", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_asset", nil)
 	}
-	if p.MediaType != "IMAGE" && p.MediaType != "VIDEO" {
+	if p.MediaType != "IMAGE" && p.MediaType != "VIDEO" && p.MediaType != "AUDIO" {
 		return command.Rejected(e, "INVALID_MEDIA_TYPE", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_type", map[string]any{"mediaType": p.MediaType})
 	}
 	now := s.clock.Now().UTC()
@@ -1022,6 +1053,7 @@ func probe(ctx context.Context, path string) (VideoMetadata, error) {
 		}
 		if stream.CodecType == "audio" {
 			meta.HasAudio = true
+			meta.AudioCodec = stream.CodecName
 		}
 	}
 	if d, err := strconv.ParseFloat(info.Format.Duration, 64); err == nil {

@@ -103,6 +103,15 @@ Outcome compatibility gate handler
 OpenAPI document generation
 ```
 
+## 新增：Context-Driven Experience Runtime v1（2026-08-26）
+
+```text
+architecture/Proxy_Context_Driven_Experience_Runtime_Enhanced_UI_Architecture_v1.md  已入仓（Architecture Review Draft）
+packages/contracts/src/experience-runtime.ts  已落地：ExperienceIntent / UI Schema / SurfacePlan / Delta / Capability / Action Registry
+packages/contracts/src/experience-runtime.test.ts  已覆盖 §3.1/§6/§9/§10/§12/§20 暴雨下班完整案例
+暴露边界：前端拥有表达能力，不拥有页面；L0-L3 均可后端实时更新；NO_UI_CHANGE 合法
+```
+
 ## 下一步
 
 ```text
@@ -112,6 +121,7 @@ production OTP/passwordless delivery and verification provider adapter
 → canonical Task / TaskSlot persistence migration
 → M3 Agent Passport / Availability
 → M4 Matching / Offer / Order
+→ M5 Experience Runtime：Experience Orchestrator / Surface Compiler / Delta Patcher / Frontend Runtime Renderer
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。

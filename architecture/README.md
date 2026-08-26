@@ -16,8 +16,13 @@ Proxy 是 iOS / Android App-first 产品。Requester、Agent、Business 共用�
 1. [System Architecture](./Proxy_System_Architecture_v1.md)
 2. [Architecture Decisions](./Proxy_Architecture_Decisions_v1.md)
 3. [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)
-4. [Luna Implementation Handoff](./Luna_Implementation_Handoff.md)
-5. [Implementation Status](./Implementation_Status.md)
+4. [Context-Driven Experience Runtime v1](./Proxy_Context_Driven_Experience_Runtime_Enhanced_UI_Architecture_v1.md) — 前端不再拥有页面，页面由后台根据 Context 实时编译
+5. [Luna Implementation Handoff](./Luna_Implementation_Handoff.md)
+6. [Implementation Status](./Implementation_Status.md)
+
+内部后台（与 App/API 物理隔离）：
+
+- Market Intelligence Console v9 — `apps/market-intelligence-console/`（`index.html` 原型 + 独立 `package.json`，不与 `apps/mobile` 复用组件/store）
 
 架构依据：Canonical Registry、Chapter 20/21/21A/21B/21C/21D/25/26，以及 P0 Engineering Acceptance Addendum R3。
 

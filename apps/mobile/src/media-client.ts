@@ -53,22 +53,31 @@ export class MediaClient {
   }) {}
 
   public async uploadImage(image: UploadableImage, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
-    const mimeType = image.mimeType || "image/jpeg";
+    return this.uploadMedia({ ...image, mediaType: "IMAGE", defaultMime: "image/jpeg" }, options);
+  }
+
+  /**
+   * 通用媒体上传（IMAGE / AUDIO）。走同一条断点续传链路：
+   * CreateMediaAsset → 分块 PUT（SHA256 校验）→ CompleteMediaUpload → ProcessMediaAsset → 轮询 READY。
+   * 音频由服务端 ffprobe 复核时长（≤30s），客户端上限只是体验层。
+   */
+  public async uploadMedia(file: UploadableImage & { mediaType: "IMAGE" | "AUDIO"; durationMs?: number; defaultMime?: string }, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
+    const mimeType = file.mimeType || file.defaultMime || "application/octet-stream";
     const accessToken = await this.input.authClient.getAccessToken();
-    if (!accessToken) throw new Error("上传照片前需要有效会话");
-    const localFile = new File(image.uri);
-    if (!localFile.exists) throw new Error("无法读取所选照片");
+    if (!accessToken) throw new Error("上传媒体前需要有效会话");
+    const localFile = new File(file.uri);
+    if (!localFile.exists) throw new Error(file.mediaType === "AUDIO" ? "无法读取录音文件" : "无法读取所选照片");
     const totalBytes = localFile.size;
-    if (!totalBytes || totalBytes <= 0) throw new Error("所选照片为空或大小不可读");
+    if (!totalBytes || totalBytes <= 0) throw new Error(file.mediaType === "AUDIO" ? "录音为空，请重新录制" : "所选照片为空或大小不可读");
 
     const createSession = async (): Promise<ResumableMediaUploadSession> => {
-      const storageKey = `${this.nextId("image")}${extensionFor(mimeType)}`;
+      const storageKey = `${this.nextId(file.mediaType === "AUDIO" ? "audio" : "image")}${extensionFor(mimeType)}`;
       const created = await this.command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, {
-        mediaType: "IMAGE",
+        mediaType: file.mediaType,
         originalStorageKey: storageKey,
         mimeType,
-        width: image.width,
-        height: image.height
+        width: file.width ?? 0,
+        height: file.height ?? 0
       });
       const freshSession = {
         mediaAssetId: stringField(created, "mediaAssetId"),
@@ -243,6 +252,12 @@ function throwIfAborted(signal?: AbortSignal): void {
 function extensionFor(mimeType: string): string {
   if (mimeType === "image/png") return ".png";
   if (mimeType === "image/heic" || mimeType === "image/heif") return ".heic";
+  if (mimeType.startsWith("audio/")) {
+    if (mimeType === "audio/mp4" || mimeType === "audio/aac" || mimeType === "audio/x-m4a" || mimeType === "audio/m4a") return ".m4a";
+    if (mimeType === "audio/wav" || mimeType === "audio/x-wav") return ".wav";
+    if (mimeType === "audio/mpeg") return ".mp3";
+    return ".m4a";
+  }
   return ".jpg";
 }
 

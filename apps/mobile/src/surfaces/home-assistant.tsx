@@ -8,6 +8,8 @@ import type { MediaClient } from "../media-client";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import { color, shadows } from "../theme";
 import type { MarketTab } from "../market-fixtures";
+import { ExperienceSurfaceBanner } from "../experience-runtime/ExperienceSurfaceBanner.js";
+import type { SurfacePlan, UISchema } from "@proxy/contracts";
 
 const MODE_LABEL: Record<HomeIntentMode, string> = {
   SERVICE: "体验",
@@ -33,7 +35,9 @@ export function HomeAssistantSurface({
   onBack,
   onOpenMarket,
   onOpenXiaomei,
-  onOpenFeed
+  onOpenFeed,
+  experiencePlan,
+  experienceSchema,
 }: {
   conversationClient: ConversationClient;
   mediaClient: MediaClient;
@@ -44,6 +48,8 @@ export function HomeAssistantSurface({
   onOpenMarket?: (tab: MarketTab) => void;
   onOpenXiaomei?: () => void;
   onOpenFeed?: () => void;
+  experiencePlan?: SurfacePlan | null;
+  experienceSchema?: UISchema | null;
 }): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string>();
   const [messages, setMessages] = useState<AssistantMessage[]>([
@@ -162,6 +168,9 @@ export function HomeAssistantSurface({
         <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
       </View>
 
+      {experiencePlan && experienceSchema ? (
+        <ExperienceSurfaceBanner plan={experiencePlan} schema={experienceSchema} onAction={(id) => { if (id === "open_fastest_plan" && onOpenMarket) onOpenMarket("OPPORTUNITY"); }} />
+      ) : null}
       <View style={styles.contextCard}>
         <Text style={styles.contextTitle}>Home 语义运行时 · 全功能入口</Text>
         <Text style={styles.contextText}>输入 挑选小美 / 活动 / 机会 / 状态 即可直达对应市场与动态；也支持选人、报价、活动报名等。</Text>

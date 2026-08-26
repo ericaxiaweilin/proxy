@@ -13,6 +13,7 @@ import {
   isFrameBackgroundSafe,
   selectImageShape,
   FEED_WIDE_BREAKPOINT_PT,
+  V2_HINT_CONFIDENCE_THRESHOLD,
   PREFERRED_FORWARD_BUFFER_SECONDS,
   COLD_START_TO_FIRST_FRAME_BUDGET_MS,
   shouldPreloadVideo,
@@ -111,6 +112,111 @@ describe("Gate A · selectVariantForViewport", () => {
 
   it("A12 · 断点常量 = 410 (iPhone Pro Max 起点)", () => {
     expect(FEED_WIDE_BREAKPOINT_PT).toBe(410);
+  });
+
+  // -------------------------------------------------------------------
+  // Gate A v2 — compositionHint 准入 + HINT/NATURAL 优先级
+  //   v2 派生：1X_HINT (按 safeCropRect cover) / 1X_NATURAL (原比例 contain + 深紫黑补边)
+  //   v2 准入阈值 confidence ≥ 0.4（与服务端 image_variants_v2.go:LowConfidenceThreshold 一致）
+  // -------------------------------------------------------------------
+
+  it("A13 · 1X + hint=0.4 + feed2xHintUrl → FEED_1X_HINT (不裁主体)", () => {
+    const sel = selectVariantForViewport(
+      {
+        feedUrl: "/1x",
+        feed2xUrl: "/2x",
+        feed2xHintUrl: "/1x_hint",
+        feed2xNaturalUrl: "/1x_natural",
+        compositionHint: { confidence: 0.4 },
+      },
+      393
+    );
+    expect(sel.purpose).toBe("FEED_1X_HINT");
+    expect(sel.url).toBe("/1x_hint");
+  });
+
+  it("A14 · 1X + hint=0.39 (<0.4) → 走普通 FEED_1X (不进 v2)", () => {
+    // 低置信度：hasV2Hint=false, 跳到降级链。
+    // 旧 selectVariantForViewport 降级链含 feed2xUrl (此处不提供)，会走到 feedUrl。
+    // 关键不变量：purpose 不是 FEED_1X_HINT/NATURAL。
+    const sel = selectVariantForViewport(
+      {
+        feedUrl: "/1x",
+        feed2xHintUrl: "/1x_hint",
+        feed2xNaturalUrl: "/1x_natural",
+        compositionHint: { confidence: 0.39 },
+      },
+      393
+    );
+    expect(sel.purpose).toBe("FEED_1X");
+    expect(sel.url).toBe("/1x");
+  });
+
+  it("A15 · 1X + hint 准入 + HINT 缺失 → 降级 NATURAL", () => {
+    const sel = selectVariantForViewport(
+      {
+        feedUrl: "/1x",
+        feed2xNaturalUrl: "/1x_natural",
+        compositionHint: { confidence: 0.9 },
+      },
+      393
+    );
+    expect(sel.purpose).toBe("FEED_1X_NATURAL");
+    expect(sel.url).toBe("/1x_natural");
+  });
+
+  it("A16 · 1X + hint 准入 + HINT/NATURAL 全缺 → 降级普通 FEED_1X", () => {
+    const sel = selectVariantForViewport(
+      {
+        feedUrl: "/1x",
+        feed2xUrl: "/2x",
+        compositionHint: { confidence: 0.9 },
+      },
+      393
+    );
+    expect(sel.purpose).toBe("FEED_1X");
+    expect(sel.url).toBe("/1x");
+  });
+
+  it("A17 · 宽屏 (430pt) + hint 准入 → 仍走普通 FEED_2X (v2 没 2X 档)", () => {
+    const sel = selectVariantForViewport(
+      {
+        feedUrl: "/1x",
+        feed2xUrl: "/2x",
+        feed2xHintUrl: "/1x_hint",
+        feed2xNaturalUrl: "/1x_natural",
+        compositionHint: { confidence: 0.9 },
+      },
+      430
+    );
+    expect(sel.purpose).toBe("FEED_2X");
+    expect(sel.url).toBe("/2x");
+  });
+
+  it("A18 · 1X + 无 hint 字段 → 不进 v2, 走普通 FEED_1X", () => {
+    const sel = selectVariantForViewport(
+      { feedUrl: "/1x", feed2xHintUrl: "/1x_hint" },
+      393
+    );
+    expect(sel.purpose).toBe("FEED_1X");
+    expect(sel.url).toBe("/1x");
+  });
+
+  it("A19 · V2_HINT_CONFIDENCE_THRESHOLD = 0.4 (与 LowConfidenceThreshold 同步)", () => {
+    expect(V2_HINT_CONFIDENCE_THRESHOLD).toBe(0.4);
+  });
+
+  it("A20 · HINT 优先于 NATURAL（同时存在时选 HINT）", () => {
+    const sel = selectVariantForViewport(
+      {
+        feed2xHintUrl: "/1x_hint",
+        feed2xNaturalUrl: "/1x_natural",
+        compositionHint: { confidence: 0.9 },
+      },
+      393
+    );
+    expect(sel.purpose).toBe("FEED_1X_HINT");
+    expect(sel.url).toBe("/1x_hint");
   });
 });
 

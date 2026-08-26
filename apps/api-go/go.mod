@@ -2,7 +2,10 @@ module github.com/proxy-app/proxy-api
 
 go 1.26.0
 
-require github.com/jackc/pgx/v5 v5.10.0
+require (
+	github.com/h2non/bimg v1.1.9
+	github.com/jackc/pgx/v5 v5.10.0
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

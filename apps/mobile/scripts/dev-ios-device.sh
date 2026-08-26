@@ -36,7 +36,8 @@ if [[ "$cmd" == "build" ]]; then
   exit 0
 fi
 
-DEV_UUID=$(xcrun devicectl list devices 2>/dev/null | awk -v n="$DEVICE_NAME" '$0 ~ n {print $4; exit}')
+# UUID 是 36 字符 (8-4-4-4-12 hex) 形式，Name 词数不固定，用 regex 最稳
+DEV_UUID=$(xcrun devicectl list devices 2>/dev/null | awk -v n="$DEVICE_NAME" '$1 == n {if (match($0, /[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/)) print substr($0, RSTART, RLENGTH); exit}')
 if [[ -z "$DEV_UUID" ]]; then
   echo "Device '${DEVICE_NAME}' not found. Run: xcrun devicectl list devices" >&2
   exit 69

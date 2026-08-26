@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommandEnvelopeSchema, FeedMediaItemSchema, MediaVariantSchema } from "./index.js";
+import { CommandEnvelopeSchema, FeedMediaItemSchema, MAX_AUDIO_DURATION_MS, MediaVariantSchema } from "./index.js";
 
 describe("command envelope", () => {
   it("rejects a command without idempotency", () => {
@@ -59,5 +59,43 @@ describe("social media pipeline contracts", () => {
       sortOrder: 0
     });
     expect(item.galleryUrl).toContain("gallery");
+  });
+});
+
+describe("AUDIO media (voice posts, ≤30s)", () => {
+  it("accepts AUDIO as a FeedMediaItem mediaType", () => {
+    const item = FeedMediaItemSchema.parse({
+      mediaAssetId: "ma_audio_001",
+      mediaType: "AUDIO",
+      playbackUrl: "/v1/media/play/ma_audio_001",
+      width: 0,
+      height: 0,
+      aspectRatio: 0,
+      durationMs: 12_345,
+      processingStatus: "READY",
+      moderationStatus: "APPROVED",
+      sortOrder: 0
+    });
+    expect(item.mediaType).toBe("AUDIO");
+    expect(item.durationMs).toBe(12_345);
+  });
+
+  it("exposes MAX_AUDIO_DURATION_MS = 30s as the shared ceiling", () => {
+    expect(MAX_AUDIO_DURATION_MS).toBe(30_000);
+  });
+
+  it("still rejects unknown media types", () => {
+    expect(() =>
+      FeedMediaItemSchema.parse({
+        mediaAssetId: "ma_x",
+        mediaType: "LIVE_STREAM",
+        width: 0,
+        height: 0,
+        aspectRatio: 0,
+        processingStatus: "READY",
+        moderationStatus: "APPROVED",
+        sortOrder: 0
+      })
+    ).toThrow();
   });
 });

@@ -3,20 +3,28 @@ package experience
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/experience/runtime"
 )
 
 const CommandGetExperienceManifest = "GetExperienceManifest"
 
-type Service struct{}
+const CommandCompileExperienceSurface = "CompileExperienceSurface"
+
+type Service struct {
+	compiler     *runtime.SurfaceCompiler
+	orchestrator *runtime.ExperienceOrchestrator
+}
 
 func New() *Service {
-	return &Service{}
+	c := runtime.NewSurfaceCompiler("surface_policy_v5")
+	return &Service{compiler: c, orchestrator: runtime.NewOrchestrator(c)}
 }
 
 func (s *Service) Supports(commandType string) bool {
-	return commandType == CommandGetExperienceManifest
+	return commandType == CommandGetExperienceManifest || commandType == CommandCompileExperienceSurface
 }
 
 type getManifestPayload struct {
@@ -63,7 +71,12 @@ func (s *Service) Handle(e command.Envelope) command.Result {
 }
 
 func (s *Service) HandleContext(_ context.Context, e command.Envelope) command.Result {
-	if e.CommandType != CommandGetExperienceManifest {
+	switch e.CommandType {
+	case CommandGetExperienceManifest:
+		return s.handleGetManifest(e)
+	case CommandCompileExperienceSurface:
+		return s.handleCompileSurface(e)
+	default:
 		return command.Rejected(
 			e,
 			"EXPERIENCE_COMMAND_UNSUPPORTED",
@@ -73,7 +86,9 @@ func (s *Service) HandleContext(_ context.Context, e command.Envelope) command.R
 			nil,
 		)
 	}
+}
 
+func (s *Service) handleGetManifest(e command.Envelope) command.Result {
 	var payload getManifestPayload
 	rawPayload, err := json.Marshal(e.Payload)
 	if err != nil || json.Unmarshal(rawPayload, &payload) != nil {
@@ -115,6 +130,124 @@ func (s *Service) HandleContext(_ context.Context, e command.Envelope) command.R
 	result.OperationRef = string(raw)
 
 	return result
+}
+
+// CompileExperienceSurface — §7/§8 Experience Orchestrator + Surface Compiler
+type compileSurfacePayload struct {
+	Intent                map[string]any `json:"experience_intent"`
+	Capability            map[string]any `json:"client_capability"`
+	CurrentSurfaceVersion *int           `json:"current_surface_version,omitempty"`
+	PolicyVersion         string         `json:"policy_version,omitempty"`
+}
+
+func (s *Service) handleCompileSurface(e command.Envelope) command.Result {
+	var payload compileSurfacePayload
+	raw, err := json.Marshal(e.Payload)
+	if err != nil || json.Unmarshal(raw, &payload) != nil {
+		return command.Rejected(e, "INVALID_COMPILE_REQUEST", "VALIDATION", "AFTER_USER_ACTION", "experience.invalid_compile_request", nil)
+	}
+	if payload.Intent == nil || payload.Capability == nil {
+		return command.Rejected(e, "MISSING_INTENT_OR_CAPABILITY", "VALIDATION", "AFTER_USER_ACTION", "experience.missing_intent_or_capability", nil)
+	}
+	intent, err := parseIntent(payload.Intent)
+	if err != nil {
+		return command.Rejected(e, "INVALID_INTENT", "VALIDATION", "AFTER_USER_ACTION", "experience.invalid_intent", map[string]any{"error": err.Error()})
+	}
+	capability, err := parseCapability(payload.Capability)
+	if err != nil {
+		return command.Rejected(e, "INVALID_CAPABILITY", "VALIDATION", "AFTER_USER_ACTION", "experience.invalid_capability", map[string]any{"error": err.Error()})
+	}
+	req := runtime.CompileRequest{
+		Intent:                intent,
+		ClientCapability:      capability,
+		CurrentSurfaceVersion: payload.CurrentSurfaceVersion,
+		PolicyVersion:         payload.PolicyVersion,
+	}
+	result, compileErr := s.compiler.Compile(req)
+	if compileErr != nil {
+		// §18.2/§18.4 — compiler fallback or NO_UI_CHANGE
+		if compileErr.Error() == "NO_UI_CHANGE: priority below intervention threshold" || contains(compileErr.Error(), "NO_UI_CHANGE") {
+			// NO_UI_CHANGE is a valid legal result — ACCEPTED with marker
+			accepted := command.Accepted(e, "ExperienceSurface", intent.IntentID, 1, "NO_UI_CHANGE", nil)
+			accepted.OperationRef = mustMarshal(map[string]any{
+				"result": "NO_UI_CHANGE",
+				"reason": compileErr.Error(),
+				"intent_id": intent.IntentID,
+			})
+			return accepted
+		}
+		// otherwise return fallback plan id
+		fb := "fallback_stable_home"
+		if result != nil && result.FallbackPlanID != nil {
+			fb = *result.FallbackPlanID
+		}
+		rejected := command.Rejected(e, "SURFACE_COMPILE_FALLBACK", "BUSINESS_STATE", "SAFE_RETRY", "experience.compile_fallback", map[string]any{"fallback_plan_id": fb, "error": compileErr.Error()})
+		// still surface fallback id in OperationRef for observability
+		rejected.OperationRef = mustMarshal(map[string]any{"fallback_plan_id": fb})
+		return rejected
+	}
+	accepted := command.Accepted(e, "ExperienceSurface", result.SurfacePlan.SurfacePlanID, result.SurfacePlan.SurfaceVersion, "READY", nil)
+	accepted.OperationRef = mustMarshal(result)
+	return accepted
+}
+
+func parseIntent(raw map[string]any) (runtime.ExperienceIntent, error) {
+	b, _ := json.Marshal(raw)
+	// runtime.ExperienceIntent has time.Time expires_at — handle string parse
+	var tmp struct {
+		IntentID          string   `json:"intent_id"`
+		Type              string   `json:"type"`
+		Objective         string   `json:"objective"`
+		Priority          float64  `json:"priority"`
+		InterventionLevel string   `json:"intervention_level"`
+		ContextSnapshotID string   `json:"context_snapshot_id"`
+		DecisionID        string   `json:"decision_id"`
+		AllowedActions    []string `json:"allowed_actions"`
+		ForbiddenActions  []string `json:"forbidden_actions"`
+		RequiredInfo      []string `json:"required_information"`
+		ExpiresAt         string   `json:"expires_at"`
+		ReasonCodes       []string `json:"reason_codes"`
+	}
+	if err := json.Unmarshal(b, &tmp); err != nil {
+		return runtime.ExperienceIntent{}, err
+	}
+	expiresAt, err := time.Parse(time.RFC3339, tmp.ExpiresAt)
+	if err != nil {
+		return runtime.ExperienceIntent{}, err
+	}
+	return runtime.ExperienceIntent{
+		IntentID: tmp.IntentID, Type: tmp.Type, Objective: tmp.Objective, Priority: tmp.Priority,
+		InterventionLevel: tmp.InterventionLevel, ContextSnapshotID: tmp.ContextSnapshotID, DecisionID: tmp.DecisionID,
+		AllowedActions: tmp.AllowedActions, ForbiddenActions: tmp.ForbiddenActions, RequiredInfo: tmp.RequiredInfo,
+		ExpiresAt: expiresAt, ReasonCodes: tmp.ReasonCodes,
+	}, nil
+}
+
+func parseCapability(raw map[string]any) (runtime.ClientCapability, error) {
+	b, _ := json.Marshal(raw)
+	var cap runtime.ClientCapability
+	if err := json.Unmarshal(b, &cap); err != nil {
+		return runtime.ClientCapability{}, err
+	}
+	return cap, nil
+}
+
+func mustMarshal(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || indexOf(s, substr) >= 0)
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }
 
 func manifestFor(contextName string) manifest {

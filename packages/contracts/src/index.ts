@@ -341,9 +341,12 @@ export const MediaVariantSchema = z.object({
 });
 export type MediaVariant = z.infer<typeof MediaVariantSchema>;
 
+// 语音推文上限：录音与上传校验共用。服务端超时长的音频资产直接拒绝。
+export const MAX_AUDIO_DURATION_MS = 30_000;
+
 export const FeedMediaItemSchema = z.object({
   mediaAssetId: z.string().min(1),
-  mediaType: z.enum(["IMAGE", "VIDEO"]),
+  mediaType: z.enum(["IMAGE", "VIDEO", "AUDIO"]),
   thumbnailUrl: z.string().optional(),
   playbackUrl: z.string().optional(),
   placeholderUrl: z.string().optional(),
@@ -553,3 +556,6 @@ export type {
 } from "./media-composition.js";
 import type { FeedRenderVariant, FeedRenderSelection } from "./media-composition.js";
 export type { FeedRenderVariant, FeedRenderSelection };
+
+// Context-Driven Experience Runtime — re-export
+export * from "./experience-runtime.js";

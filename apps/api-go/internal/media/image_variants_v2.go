@@ -43,19 +43,19 @@ var imageVariantRecipesV2 = []imageVariantRecipeV2{
 	{
 		purpose: "FEED_1X",
 		filter: "scale='min(1080,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease," +
-			"setsar=1,format=yuvj420p,colorspace=srgb",
+			"setsar=1,format=yuvj420p",
 		extraArgs: []string{"-map_metadata", "-1"},
 	},
 	{
 		purpose: "FEED_2X",
 		filter: "scale='min(1600,iw)':'min(1600,ih)':force_original_aspect_ratio=decrease," +
-			"setsar=1,format=yuvj420p,colorspace=srgb",
+			"setsar=1,format=yuvj420p",
 		extraArgs: []string{"-map_metadata", "-1"},
 	},
 	{
 		purpose: "GALLERY",
 		filter: "scale='min(2560,iw)':'min(2560,ih)':force_original_aspect_ratio=decrease," +
-			"setsar=1,format=yuvj420p,colorspace=srgb",
+			"setsar=1,format=yuvj420p",
 		extraArgs: []string{"-map_metadata", "-1"},
 	},
 	{
@@ -70,7 +70,7 @@ var imageVariantRecipesV2 = []imageVariantRecipeV2{
 		purpose: "SHARE_OG_FALLBACK",
 		filter: "scale='min(1200,iw)':'min(630,ih)':force_original_aspect_ratio=decrease," +
 			"pad='max(iw,1200)':'max(ih,630)':(ow-iw)/2:(oh-ih)/2:color=" + feedBackdropColorV2 + "," +
-			"setsar=1,format=yuvj420p,colorspace=srgb",
+			"setsar=1,format=yuvj420p",
 		extraArgs: []string{"-map_metadata", "-1"},
 	},
 	{
@@ -86,7 +86,7 @@ var imageVariantRecipesV2 = []imageVariantRecipeV2{
 		// 例：横图 1920x800 → scale 1080x450 不动 → 不 pad。
 		purpose: "FEED_1X_NATURAL",
 		filter: "scale='min(1080,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease," +
-			"setsar=1,format=yuvj420p,colorspace=srgb",
+			"setsar=1,format=yuvj420p",
 		extraArgs: []string{"-map_metadata", "-1"},
 	},
 	{
@@ -171,7 +171,7 @@ func hintFilterForSafeCropRect(probe imageMetadataProbe, rect *MediaBox, assetID
 	// 先切到 rect（按真实像素），再 scale 到 1080 长边。
 	// 注意：ffmpeg 的 crop 语法是 w:h:x:y（先输出 w×h，从 (x,y) 开始切）
 	return fmt.Sprintf(
-		"crop=%d:%d:%d:%d,scale='min(1080,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p,colorspace=srgb",
+		"crop=%d:%d:%d:%d,scale='min(1080,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p",
 		pxW, pxH, pxX, pxY,
 	), nil
 }

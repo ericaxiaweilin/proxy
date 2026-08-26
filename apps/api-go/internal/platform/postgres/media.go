@@ -27,6 +27,7 @@ const mediaAssetColumns = `
 	processing_status, COALESCE(playback_url,''), COALESCE(thumbnail_url,''), COALESCE(source_bytes,0), COALESCE(checksum_sha256,''),
 	COALESCE(orientation,1), COALESCE(color_space,''), has_alpha, animated, moderation_status, visibility_class,
 	composition_hint, COALESCE(composition_recipe_version,''), composition_computed_at, COALESCE(composition_confidence,0),
+	COALESCE(dominant_color_hex,''),
 	created_at, updated_at
 `
 
@@ -43,14 +44,16 @@ func (r *MediaRepository) CreateAsset(ctx context.Context, a media.MediaAsset) e
 			processing_status, playback_url, thumbnail_url, source_bytes, checksum_sha256,
 			orientation, color_space, has_alpha, animated, moderation_status, visibility_class,
 			composition_hint, composition_recipe_version, composition_computed_at, composition_confidence,
+			dominant_color_hex,
 			created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)`,
 		a.MediaAssetID, a.OwnerPrincipalType, a.OwnerPrincipalID, a.MediaType,
 		a.OriginalStorageKey, a.PlaybackStorageKey, a.ThumbnailStorageKey,
 		a.MimeType, a.Width, a.Height, a.DurationMs, a.Codec,
 		a.ProcessingStatus, a.PlaybackURL, a.ThumbnailURL, a.SourceBytes, a.ChecksumSHA256,
 		a.Orientation, a.ColorSpace, a.HasAlpha, a.Animated, a.ModerationStatus, a.VisibilityClass,
 		hintJSON, a.CompositionRecipeVersion, a.CompositionComputedAt, a.CompositionConfidence,
+		a.DominantColorHex,
 		a.CreatedAt, a.UpdatedAt,
 	)
 	return err
@@ -69,6 +72,7 @@ func (r *MediaRepository) GetAsset(ctx context.Context, id string) (media.MediaA
 		&a.ProcessingStatus, &a.PlaybackURL, &a.ThumbnailURL, &a.SourceBytes, &a.ChecksumSHA256,
 		&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
 		&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
+		&a.DominantColorHex,
 		&a.CreatedAt, &a.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -102,14 +106,16 @@ func (r *MediaRepository) UpdateAsset(ctx context.Context, a media.MediaAsset, e
 			has_alpha=$15, animated=$16, moderation_status=$17, visibility_class=$18,
 			composition_hint=$19, composition_recipe_version=$20,
 			composition_computed_at=$21, composition_confidence=$22,
-			updated_at=$23
-		WHERE media_asset_id=$24 AND processing_status=$25`,
+			dominant_color_hex=$23,
+			updated_at=$24
+		WHERE media_asset_id=$25 AND processing_status=$26`,
 		a.PlaybackStorageKey, a.ThumbnailStorageKey, a.MimeType,
 		a.Width, a.Height, a.DurationMs, a.Codec,
 		a.ProcessingStatus, a.PlaybackURL, a.ThumbnailURL,
 		a.SourceBytes, a.ChecksumSHA256, a.Orientation, a.ColorSpace,
 		a.HasAlpha, a.Animated, a.ModerationStatus, a.VisibilityClass,
 		hintJSON, a.CompositionRecipeVersion, a.CompositionComputedAt, a.CompositionConfidence,
+		a.DominantColorHex,
 		a.UpdatedAt, a.MediaAssetID, expectedStatus,
 	)
 	if err != nil {
@@ -179,6 +185,7 @@ func (r *MediaRepository) Snapshot(ctx context.Context) ([]media.MediaAsset, err
 			&a.ProcessingStatus, &a.PlaybackURL, &a.ThumbnailURL, &a.SourceBytes, &a.ChecksumSHA256,
 			&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
 			&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
+			&a.DominantColorHex,
 			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, err

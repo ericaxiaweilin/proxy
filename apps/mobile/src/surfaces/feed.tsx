@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, AppState, Image, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
-import { useVideoPlayer, VideoView } from "expo-video";
 import * as ImagePicker from "expo-image-picker";
 import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
@@ -27,6 +26,7 @@ import { AdaptiveMediaCollection, SinglePostImage, MediaViewer } from "../media/
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
 export { AdaptiveMediaCollection, SinglePostImage, MediaViewer };
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
+import { VoiceRecordPanel } from "../components/voice-record-panel";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
 import { CustomFeedHub } from "./custom-feed";
@@ -277,7 +277,6 @@ export function FeedSurface({
   const [scrollY, setScrollY] = useState(0);
   const [stickyHeaderVisible, setStickyHeaderVisible] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
-  const [muted, setMuted] = useState(true);
   // 长按减少推荐菜单
   const [contextMenu, setContextMenu] = useState<{ postId: string; x: number; y: number } | null>(null);
   const [contextActionBusy, setContextActionBusy] = useState(false);
@@ -347,19 +346,36 @@ export function FeedSurface({
 
   const activeVideoId = useMemo(() => {
     if (viewportHeight === 0) return null;
+    const videoKeys = Object.keys(frames);
+    if (videoKeys.length === 0) return null;
+    if (videoKeys.length === 1) return videoKeys[0]; // 唯一视频 → 强制播放
+
+    // 多视频：按中心距离 + 可见度选
     let best: string | null = null;
-    let bestVisible = 0;
-    for (const [videoId, frame] of Object.entries(frames)) {
-      const cardY = cardYs[videoId] ?? 0;
+    let bestScore = -1;
+    const centerY = scrollY + viewportHeight / 2;
+    for (const videoKey of videoKeys) {
+      const frame = frames[videoKey];
+      if (!frame) continue; // 类型收窄
+      const cardY = cardYs[videoKey.split(':')[0] ?? ''] ?? 0; // postId 是 videoKey 第一段
       const top = cardY + frame.y - scrollY;
       const visible = Math.max(0, Math.min(top + frame.height, viewportHeight) - Math.max(top, 0));
-      if (visible >= frame.height * 0.5 && visible > bestVisible) {
-        best = videoId;
-        bestVisible = visible;
+      if (visible < frame.height * 0.5) continue; // 不足 50% 不参与竞争
+      const frameCenter = top + frame.height / 2;
+      const dist = Math.abs(frameCenter - centerY);
+      const score = visible / (dist + 1); // 可见度/距离 综合分
+      if (score > bestScore) {
+        bestScore = score;
+        best = videoKey;
       }
     }
     return best;
   }, [cardYs, frames, scrollY, viewportHeight]);
+
+  // 【新增】视频帧位置上报：videoKey 格式 "postId:index:mediaAssetId"
+  const onVideoFrame = useCallback((videoKey: string, frame: { y: number; height: number }) => {
+    setFrames((prev) => ({ ...prev, [videoKey]: frame }));
+  }, []);
 
   function onFeedScroll(event: NativeSyntheticEvent<NativeScrollEvent>): void {
     const nextY = Math.max(0, event.nativeEvent.contentOffset.y);
@@ -717,7 +733,12 @@ export function FeedSurface({
         const controller = new AbortController();
         uploadControllersRef.current.set(item.localId, controller);
         try {
-          const uploaded = await mediaClient.uploadImage(item.image, {
+          const isAudio = item.image.mimeType?.startsWith("audio/") ?? false;
+          const uploaded = await mediaClient.uploadMedia({
+            ...item.image,
+            mediaType: isAudio ? "AUDIO" : "IMAGE",
+            defaultMime: isAudio ? "audio/mp4" : "image/jpeg"
+          }, {
             signal: controller.signal,
             ...(item.uploadSession ? { resumeSession: item.uploadSession } : {}),
             onProgress: (progress) => setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
@@ -1060,6 +1081,26 @@ export function FeedSurface({
             >
               <Text style={styles.composerToolText}>拍照</Text>
             </Pressable>
+            <VoiceRecordPanel
+              disabled={publishing || draftMedia.length >= 6}
+              onDone={(recording) => {
+                invalidatePublishAttempt();
+                draftMediaSequenceRef.current += 1;
+                const localId = `draft_media_${Date.now().toString(36)}_${draftMediaSequenceRef.current.toString(36)}`;
+                const item: DraftMediaItem = {
+                  localId,
+                  image: {
+                    uri: recording.uri,
+                    mimeType: "audio/mp4",
+                    width: 0,
+                    height: 0
+                  },
+                  altText: `语音 ${Math.round(recording.durationMs / 1000)} 秒`,
+                  status: "LOCAL"
+                };
+                setDraftMedia((current) => [...current, item].slice(0, 6));
+              }}
+            />
             <Pressable disabled={publishing || (!draft.trim() && draftMedia.length === 0)} onPress={() => void publish()} style={[styles.composerPublish, (publishing || (!draft.trim() && draftMedia.length === 0)) && styles.disabled]}>
               <Text style={styles.composerPublishText}>{publishing ? "发布中…" : "发布"}</Text>
             </Pressable>
@@ -1149,6 +1190,9 @@ export function FeedSurface({
                     setMediaPositions((current) => ({ ...current, [post.postId]: index }));
                     setViewer({ postId: post.postId, index });
                   }}
+                  activeVideoKey={activeVideoId}
+                  onVideoFrame={onVideoFrame}
+                  collectionKey={post.postId}
                 />
               ) : items.length === 1 && items[0] ? (
                 <AdaptiveMediaCollection
@@ -1160,6 +1204,9 @@ export function FeedSurface({
                     setMediaPositions((current) => ({ ...current, [post.postId]: index }));
                     setViewer({ postId: post.postId, index });
                   }}
+                  activeVideoKey={activeVideoId}
+                  onVideoFrame={onVideoFrame}
+                  collectionKey={post.postId}
                 />
               ) : null}
 
@@ -1334,71 +1381,11 @@ export function FeedSurface({
     </View>
   );
 }
-// X 式内联视频卡：滑近视口中心自动播（默认静音）、滑出即停；轻点暂停/继续，角标切静音。
-function VideoCard({
-  videoId,
-  item,
-  active,
-  muted,
-  resolveUrl,
-  onFrame,
-  onUnmountFrame,
-  onToggleMute
-}: {
-  videoId: string;
-  item: FeedMediaItem;
-  active: boolean;
-  muted: boolean;
-  resolveUrl: (path: string) => string;
-  onFrame: (frame: { y: number; height: number }) => void;
-  onUnmountFrame: () => void;
-  onToggleMute: () => void;
-}): React.JSX.Element {
-  const player = useVideoPlayer(resolveUrl(item.playbackUrl ?? ""), (setup) => {
-    setup.loop = true;
-    setup.muted = true;
-  });
-  const activeRef = useRef(active);
-  activeRef.current = active;
-  const onUnmountRef = useRef(onUnmountFrame);
-  onUnmountRef.current = onUnmountFrame;
-  useEffect(() => {
-    if (activeRef.current) {
-      player.play();
-    }
-  }, [player]);
-  useEffect(() => {
-    player.muted = muted;
-  }, [player, muted]);
-  useEffect(() => {
-    if (active) {
-      player.play();
-    } else {
-      player.pause();
-    }
-  }, [player, active]);
-  useEffect(() => {
-    return () => {
-      onUnmountRef.current();
-    };
-  }, []);
-  return (
-    <View style={styles.videoStage} onLayout={(event) => onFrame({ y: event.nativeEvent.layout.y, height: event.nativeEvent.layout.height })}>
-      <VideoView player={player} style={styles.videoView} contentFit="cover" />
-      <Pressable style={styles.videoTap} onPress={() => {
-        if (player.playing) player.pause(); else player.play();
-      }} />
-      <Pressable onPress={onToggleMute} style={styles.videoMute}>
-        <Text style={styles.videoMuteText}>{muted ? "🔇" : "🔊"}</Text>
-      </Pressable>
-      {item.durationMs ? (
-        <View style={styles.mediaBadge}>
-          <Text style={styles.mediaBadgeText}>{formatDurationMs(item.durationMs)}</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-}
+// 【fix 2026-08-26 P0 多视频声音】
+// 旧 VideoCard 已废弃 —— useVideoPlayer 会在所有 FeedMediaItem.VIEO post mount
+// 时创建 AVPlayer 沨入“任意帖都准许播”的状态，与 AdaptiveMediaCollection 的
+// “全屏仅 1 个 VIDEO 在播”语义冲突。视频渲染完全走 AdaptiveMediaCollection 内
+// 的 ActiveVideoStage（入网“同屏一个 VIDEO 在播”单例播放位）。死代码删除。
 
 // 全屏查看器（图片）：视频已改为内联自动播放，不再弹出。
 

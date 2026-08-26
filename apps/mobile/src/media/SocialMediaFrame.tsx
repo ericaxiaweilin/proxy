@@ -47,34 +47,28 @@ export function SocialMediaFrame({ item, frameAspect, resolveUrl }: Props): Reac
   const primaryUri = selection.url ?? "";
   const uri = resolveUrl(primaryUri);
 
-  // Gate N (selectImageShape) — 4 形态 frame 比例
-  const shape = selectImageShape(sourceAspect);
-  const shapeAspect = (() => {
-    switch (shape) {
-      case "STORY_9_16": return 3 / 4;
-      case "PORTRAIT_4_5": return sourceAspect;
-      case "SQUARE": return sourceAspect;
-      case "LANDSCAPE": return Math.min(sourceAspect, 1.91);
-    }
-  })();
-
   // Gate K (checkSubjectInSafeArea) — 接 focalPoint 避免裁掉主体
   // contentPosition 接受 "x% y%" / "center" / "top left" 等
-  const contentPosition = hint?.focalPoint
-    ? { top: `${Math.round(hint.focalPoint.y * 100)}%`, left: `${Math.round(hint.focalPoint.x * 100)}%` }
-    : "center";
-
+  // 【fix 2026-08-26】只在 cover 模式下传：contain 模式图片已完整显示，focalPoint 无意义，
+  // 反而会导致 expo-image 在 contain 下用 focalPoint 位置对齐（实测会"贴边"）。
   // MediaFillStrategy = "contain" | "cover" | "natural" → ImageContentFit mapping
   // "natural" 等价 expo-image 的 "fill" (不缩放)
   const contentFit = strategy === "natural" ? "fill" : strategy;
+  const contentPosition = (contentFit === "cover" && hint?.focalPoint)
+    ? { top: `${Math.round(hint.focalPoint.y * 100)}%`, left: `${Math.round(hint.focalPoint.x * 100)}%` }
+    : undefined;
 
+  // 【fix 2026-08-26】信任 caller 传入的 frameAspect（由 MediaWall/AdaptiveMediaRail/SinglePostImage 各自按 sourceAspect 算好），
+  // 不再内部重算 shapeAspect —— 双重决策会导致 WALL 4:5 portrait 与 SINGLE 1:1 square 走出不同 frame 比例。
+  // history: v3 早期内部调用 selectImageShape(sourceAspect) → shapeAspect，被 caller 的 frameAspect 覆盖，
+  // 但 MediaWall 把 cellAspect 传给 frameAspect 后又被 shapeAspect 压回 0.8（4:5）→ 横图被压成方。
   return (
-    <View style={[styles.frame, { aspectRatio: shapeAspect }]}>
+    <View style={[styles.frame, { aspectRatio: frameAspect }]}>
       <ExpoImage
         source={{ uri }}
         style={styles.asset}
         contentFit={contentFit}
-        contentPosition={contentPosition}
+        {...(contentPosition ? { contentPosition } : {})}
         transition={200}
         cachePolicy="memory-disk"
         priority="normal"

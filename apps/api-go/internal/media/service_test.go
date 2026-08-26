@@ -8,12 +8,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -507,5 +509,128 @@ func TestFFmpegProcessorRealTranscode(t *testing.T) {
 	}
 	if !hasAAC {
 		t.Fatal("output must be AAC")
+	}
+}
+
+// generateTestAudio 用 ffmpeg 生成指定秒数的 m4a（AAC）测试音频。
+func generateTestAudio(t *testing.T, dir string, seconds int) string {
+	t.Helper()
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	path := filepath.Join(dir, "generated_source_"+strconv.Itoa(seconds)+".m4a")
+	gen := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=440:duration=%d", seconds), "-c:a", "aac", path)
+	if out, err := gen.CombinedOutput(); err != nil {
+		t.Skipf("cannot generate test audio: %v %s", err, string(out))
+	}
+	return path
+}
+
+// AUDIO 全链路：create → upload → complete → worker → READY，时长落库，仅 ORIGINAL 一个变体。
+func TestAudioGoesReadyWithOriginalOnly(t *testing.T) {
+	dir := t.TempDir()
+	repository := NewMemoryRepository()
+	s := NewWithDependencies(repository, nil)
+	s.SetStoreDir(dir)
+	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
+		"mediaType": "AUDIO", "originalStorageKey": "voice.m4a", "mimeType": "audio/mp4",
+	}, ""))
+	var view struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	id := view.MediaAssetID
+	audioPath := generateTestAudio(t, dir, 2)
+	f, err := os.Open(audioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := s.SaveUpload(t.Context(), id, "business_001", f, 1<<20); err != nil {
+		t.Fatalf("save audio: %v", err)
+	}
+	r = s.Handle(envelopeFor("CompleteMediaUpload", map[string]any{"originalStorageKey": "voice.m4a"}, id))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("complete: %s %+v", r.Outcome, r.Error)
+	}
+	r = s.Handle(envelopeFor("ProcessMediaAsset", map[string]any{"originalPath": ""}, id))
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "PROCESSING" {
+		t.Fatalf("process: %s/%s", r.Outcome, r.Aggregate.State)
+	}
+	worker := Worker{Repository: repository, Service: s, WorkerID: "test-worker"}
+	if processed, err := worker.RunOnce(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("audio worker: processed=%d err=%v", processed, err)
+	}
+	asset, _ := repository.GetAsset(t.Context(), id)
+	if asset.ProcessingStatus != "READY" || asset.ModerationStatus != "APPROVED" {
+		t.Fatalf("audio must go READY/APPROVED, got %s/%s (%s)", asset.ProcessingStatus, asset.ModerationStatus, asset.LastError)
+	}
+	if asset.DurationMs < 1500 || asset.DurationMs > 3000 {
+		t.Fatalf("duration out of range: %d", asset.DurationMs)
+	}
+	if asset.Codec == "" {
+		t.Fatal("audio codec must be recorded")
+	}
+	variants, err := s.ListReadyVariants(t.Context(), id)
+	if err != nil || len(variants) != 1 {
+		t.Fatalf("want exactly the upload-time ORIGINAL variant, got %d: %v", len(variants), err)
+	}
+	if variants[0].RecipeVersion != "original_v1" || variants[0].Purpose != "ORIGINAL" {
+		t.Fatalf("audio keeps the single ORIGINAL variant, got %s/%s", variants[0].RecipeVersion, variants[0].Purpose)
+	}
+}
+
+// 超 30s 的语音：确定性拒绝（FAILED + REJECTED_TECHNICAL），不重试、不留 READY。
+func TestAudioOverLimitIsRejectedDeterministically(t *testing.T) {
+	dir := t.TempDir()
+	repository := NewMemoryRepository()
+	s := NewWithDependencies(repository, nil)
+	s.SetStoreDir(dir)
+	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
+		"mediaType": "AUDIO", "originalStorageKey": "long_voice.m4a", "mimeType": "audio/mp4",
+	}, ""))
+	var view struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	id := view.MediaAssetID
+	audioPath := generateTestAudio(t, dir, 31)
+	f, err := os.Open(audioPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := s.SaveUpload(t.Context(), id, "business_001", f, 1<<20); err != nil {
+		t.Fatalf("save audio: %v", err)
+	}
+	s.Handle(envelopeFor("CompleteMediaUpload", map[string]any{"originalStorageKey": "long_voice.m4a"}, id))
+	s.Handle(envelopeFor("ProcessMediaAsset", map[string]any{"originalPath": ""}, id))
+	worker := Worker{Repository: repository, Service: s, WorkerID: "test-worker"}
+	// 确定性拒绝 = job 正常完成（processed=1），但资产落 FAILED，不重试。
+	if processed, err := worker.RunOnce(t.Context()); err != nil || processed != 1 {
+		t.Fatalf("over-limit rejection must complete the job once: processed=%d err=%v", processed, err)
+	}
+	if processed, err := worker.RunOnce(t.Context()); err != nil || processed != 0 {
+		t.Fatalf("rejected asset must not be retried: processed=%d err=%v", processed, err)
+	}
+	asset, _ := repository.GetAsset(t.Context(), id)
+	if asset.ProcessingStatus != "FAILED" || asset.ModerationStatus != "REJECTED_TECHNICAL" {
+		t.Fatalf("want FAILED/REJECTED_TECHNICAL, got %s/%s", asset.ProcessingStatus, asset.ModerationStatus)
+	}
+	if asset.LastError == "" {
+		t.Fatal("rejection reason must be recorded")
+	}
+}
+
+// mediaMimeAllowed 对 AUDIO 的判定：声明必须 audio/*；m4a 被探测成 video/mp4 也放行。
+func TestAudioMimeAllowed(t *testing.T) {
+	if !mediaMimeAllowed("AUDIO", "audio/mp4", "video/mp4") {
+		t.Fatal("m4a (detected video/mp4) with declared audio/mp4 must pass")
+	}
+	if mediaMimeAllowed("AUDIO", "video/mp4", "video/mp4") {
+		t.Fatal("declared video/mp4 must NOT pass as AUDIO")
+	}
+	if mediaMimeAllowed("AUDIO", "audio/mp4", "image/jpeg") {
+		t.Fatal("image content must NOT pass as AUDIO")
 	}
 }
