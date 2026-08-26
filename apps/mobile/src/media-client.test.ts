@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { uploadOriginalWithRetry } from "./media-upload-retry.js";
+import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./media-upload-retry.js";
 
 describe("original media upload retry", () => {
+  it("restarts expired or conflicting resumable sessions from the retained original", () => {
+    expect(isRestartableUploadSessionStatus(404)).toBe(true);
+    expect(isRestartableUploadSessionStatus(409)).toBe(true);
+    expect(isRestartableUploadSessionStatus(401)).toBe(false);
+    expect(isRestartableUploadSessionStatus(500)).toBe(false);
+  });
   it("retries transient transport failures without recreating the media asset", async () => {
     const attempt = vi.fn()
       .mockRejectedValueOnce(new Error("network interrupted"))

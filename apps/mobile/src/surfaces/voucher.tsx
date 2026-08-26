@@ -6,6 +6,7 @@ import type { Voucher, VoucherFamily, VoucherRedemption, VoucherSettlementState 
 import { VoucherClient } from "../voucher-client";
 import { ProxyModulePager } from "../components/module-pager";
 import { getLastPage } from "../components/module-pager-store";
+import { useModuleBackHandler } from "../components/module-back";
 
 type Screen = "LIST" | "DETAIL" | "REDEEM" | "SETTLEMENT" | "SUCCESS" | "CREATE";
 type VoucherTab = "AVAILABLE" | "USED" | "EXPIRED";
@@ -64,6 +65,15 @@ function QR(): React.JSX.Element {
 
 export function VoucherSurface({ client, context, onBack }: { client: VoucherClient; context: ActiveContext; onBack: () => void }): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>("LIST");
+  // 规范 §4/§13：Android 硬件返回逐层收起（REDEEM/SETTLEMENT 的父级是详情页）；
+  // iOS 右滑过头退出由 ModulePager onExit 承担，这里不重复注册模块级返回。
+  useModuleBackHandler(
+    screen === "REDEEM" || screen === "SETTLEMENT"
+      ? () => { setScreen("DETAIL"); return true; }
+      : screen === "LIST"
+        ? undefined
+        : () => { setScreen("LIST"); return true; }
+  );
   // 规范 §5 rememberPage：重进模块回到上次停留 Page（内存级，App 会话内有效）。
   const [tab, setTab] = useState<VoucherTab>(() => {
     const last = getLastPage("voucher");
@@ -109,7 +119,7 @@ export function VoucherSurface({ client, context, onBack }: { client: VoucherCli
     <ListHeader tab={tab} availableCount={availableCount} isBusiness={context === "BUSINESS"}
       onJump={(item) => { setTab(item); setPagerPage(["AVAILABLE", "USED", "EXPIRED"].indexOf(item)); }}
       onCreate={() => { setError(undefined); setScreen("CREATE"); }} onExit={onBack} />
-    <ProxyModulePager moduleId="voucher" rememberPage
+    <ProxyModulePager moduleId="voucher" rememberPage onExit={onBack}
       initialPage={["AVAILABLE", "USED", "EXPIRED"].indexOf(tab)}
       page={pagerPage}
       onPageChange={(index) => { setTab(index === 1 ? "USED" : index === 2 ? "EXPIRED" : "AVAILABLE"); setPagerPage(undefined); }}

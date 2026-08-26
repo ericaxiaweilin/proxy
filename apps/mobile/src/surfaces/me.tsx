@@ -6,13 +6,18 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
-import { useState } from "react";
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import type { ExperienceAction, ExperienceMenuSection, RegisteredExperienceRoute } from "@proxy/contracts";
+import { useEffect, useState } from "react";
+import { Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { useModuleBackHandler } from "../components/module-back";
+import * as ImagePicker from "expo-image-picker";
+import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { MerchantMeR21 } from "./merchant-me-r21";
-import { CreatorApplicationCard } from "./creator-application";
+import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
+import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
+import { type LocalNetClient } from "../localnet-client";
+import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 
@@ -38,31 +43,15 @@ interface MenuSection {
   rows: MenuRow[];
 }
 
-// 个人主页架构 v3：资料字段模型（值 + 独立展示开关；身体类字段默认不展示）。
-type ProfileField = {
-  key: string;
-  label: string;
-  group: "basic" | "extended";
-  value: string;
-  type: "text" | "date" | "select";
-  options?: string[];
-  visible: boolean;
-};
+type PersonalHubTab = "FEED" | "PHOTOS" | "RECORDS";
+type SocialVisibility = "仅自己" | "商家可见" | "公开展示";
+type SocialAccount = { key: string; mark: string; dark?: boolean; name: string; handle: string; url: string; visibility: SocialVisibility };
 
-const DEFAULT_PROFILE_FIELDS: ProfileField[] = [
-  { key: "gender", label: "性别", group: "basic", value: "女", type: "select", options: ["女", "男", "其他", "不填写"], visible: true },
-  { key: "birthday", label: "生日", group: "basic", value: "1996-05-12", type: "date", visible: false },
-  { key: "city", label: "城市", group: "basic", value: "河内", type: "select", options: ["河内", "胡志明市", "岘港"], visible: true },
-  { key: "hometown", label: "家乡", group: "basic", value: "河内", type: "text", visible: false },
-  { key: "languages", label: "语言", group: "basic", value: "越南语 · 中文", type: "text", visible: true },
-  { key: "occupation", label: "职业", group: "basic", value: "Project Manager", type: "text", visible: true },
-  { key: "school", label: "学校", group: "basic", value: "", type: "text", visible: false },
-  { key: "interests", label: "兴趣", group: "basic", value: "旅行 · 咖啡 · 摄影", type: "text", visible: true },
-  { key: "height", label: "身高", group: "extended", value: "145 cm", type: "text", visible: false },
-  { key: "weight", label: "体重", group: "extended", value: "50 kg", type: "text", visible: false },
-  { key: "bust", label: "胸围", group: "extended", value: "", type: "text", visible: false },
-  { key: "waist", label: "腰围", group: "extended", value: "", type: "text", visible: false },
-  { key: "hip", label: "臀围", group: "extended", value: "", type: "text", visible: false }
+const INITIAL_SOCIAL_ACCOUNTS: SocialAccount[] = [
+  { key: "tiktok", mark: "TT", dark: true, name: "TikTok", handle: "@huyen.life", url: "https://www.tiktok.com/@huyen.life", visibility: "商家可见" },
+  { key: "threads", mark: "◎", name: "Threads", handle: "@huyen.daily", url: "https://www.threads.net/@huyen.daily", visibility: "仅自己" },
+  { key: "facebook", mark: "f", name: "Facebook", handle: "Huyen Nguyen", url: "https://www.facebook.com/huyen.nguyen", visibility: "公开展示" },
+  { key: "x", mark: "X", dark: true, name: "X", handle: "", url: "", visibility: "仅自己" }
 ];
 
 // 能力与可用时间（原型 my_market_modules v5）：能力类型由 Proxy 定义，用户只维护实例。
@@ -175,71 +164,6 @@ function nextDays(count: number): Array<{ key: string; date: Date; label: string
   });
 }
 
-// 编辑资料 sheet：字段值 + 独立展示开关（身体类字段默认不对外）。
-function ProfileEditorSheet({
-  open,
-  fields,
-  onClose,
-  onChange
-}: {
-  open: boolean;
-  fields: ProfileField[];
-  onClose: () => void;
-  onChange: (next: ProfileField[]) => void;
-}): React.JSX.Element {
-  const groups: Array<{ id: "basic" | "extended"; title: string; hint: string }> = [
-    { id: "basic", title: "基础资料", hint: "填写后可独立决定是否展示" },
-    { id: "extended", title: "身体资料", hint: "默认不展示，仅你确认后开放" }
-  ];
-  return (
-    <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
-      <Pressable onPress={onClose} style={styles.availabilityOverlay}>
-        <Pressable onPress={() => undefined} style={[styles.availabilitySheet, styles.profileEditorSheet]}>
-          <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={styles.availabilityTitle}>编辑资料</Text>
-            <Text style={styles.availabilitySub}>每个字段都有独立的展示开关；开关只影响个人主页对外呈现。</Text>
-            {groups.map((group) => (
-              <View key={group.id}>
-                <View style={styles.detailSectionHead}>
-                  <Text style={styles.profileGroupTitle}>{group.title}</Text>
-                </View>
-                <Text style={styles.profileGroupHint}>{group.hint}</Text>
-                {fields.filter((field) => field.group === group.id).map((field) => (
-                  <View key={field.key} style={styles.profileFieldRow}>
-                    <View style={styles.profileFieldMain}>
-                      <TextInput
-                        accessibilityLabel={`编辑${field.label}`}
-                        onChangeText={(text) => onChange(fields.map((f) => (f.key === field.key ? { ...f, value: text } : f)))}
-                        placeholder="未填写"
-                        placeholderTextColor="#A59EAA"
-                        style={styles.profileFieldInput}
-                        value={field.value}
-                      />
-                    </View>
-                    <View style={styles.profileFieldSide}>
-                      <Text style={styles.profileFieldLabel}>{field.label}</Text>
-                      <Pressable
-                        accessibilityLabel={`${field.label}展示开关`}
-                        onPress={() => onChange(fields.map((f) => (f.key === field.key ? { ...f, visible: !f.visible } : f)))}
-                        style={[styles.profileVisToggle, field.visible ? styles.profileVisOn : styles.profileVisOff]}
-                      >
-                        <Text style={field.visible ? styles.profileVisTextOn : styles.profileVisTextOff}>{field.visible ? "公开" : "不展示"}</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ))}
-            <Pressable onPress={onClose} style={styles.primaryCta}>
-              <Text style={styles.primaryCtaText}>完成</Text>
-            </Pressable>
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
 // 能力实例 sheet：能力类型由 Proxy 定义（同行 / 翻译 / 拍照），用户只维护实例字段。
 function AbilitySheet({
   sheet,
@@ -281,7 +205,7 @@ function AbilitySheet({
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible>
       <Pressable onPress={onClose} style={styles.availabilityOverlay}>
-        <Pressable onPress={() => undefined} style={[styles.availabilitySheet, styles.profileEditorSheet]}>
+        <Pressable onPress={() => undefined} style={styles.availabilitySheet}>
           <ScrollView showsVerticalScrollIndicator={false}>
             <View style={styles.abilitySheetHead}>
               <View style={styles.abilityIcon}><Text style={styles.abilityIconText}>{schema.icon}</Text></View>
@@ -506,10 +430,10 @@ const REQUESTER_ME: PersonaConfig = {
       title: "我的市场",
       hint: "个人资产",
       rows: [
-        { icon: "diamond", label: "我的订单", desc: "我发布的 / 我参与的已成交订单", action: { type: "OPEN_SURFACE", surface: "TASKS", params: { view: "NEED" } } },
+        { icon: "diamond", label: "我的订单", desc: "我发布的 / 我参与的已成交订单", route: "myorders" },
         { icon: "clock", label: "能力与可用时间", desc: "能力、主题、区域与空闲时间", route: "available" },
-        { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", action: { type: "OPEN_SURFACE", surface: "TASKS", params: { view: "ACTIVITY", filter: "MINE" } } },
-        { icon: "star", label: "关注与收藏", desc: "人、商家、动态与活动", route: "postfeed" }
+        { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", route: "myactivities" },
+        { icon: "star", label: "收藏", desc: "商家、Creator、动态与活动", route: "favorites" }
       ]
     },
     {
@@ -608,6 +532,36 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
   );
 }
 
+type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
+const MY_ORDER_ROWS = [
+  { type: "published", title: "同行 · 河内老城区半日", id: "PX-20260825-001284", status: "进行中", fields: [["订单类型", "同行服务"], ["订单金额", "₫350,000"], ["服务时间", "今天 14:00–18:00"], ["地点", "河内 · 还剑湖"], ["对方", "Minh Nguyen"], ["付款状态", "已支付"], ["下单时间", "8月25日 10:42"], ["结算状态", "服务完成后结算"]], actions: ["联系对方", "订单详情"] },
+  { type: "joined", title: "现场翻译 · 美甲店沟通", id: "PX-20260823-000947", status: "待确认", fields: [["订单类型", "翻译"], ["订单金额", "₫220,000"], ["服务时间", "8月27日 16:00"], ["地点", "西湖区"], ["发布者", "Linh Tran"], ["付款状态", "待支付"]], actions: ["拒绝", "接受订单"] },
+  { type: "done", title: "拍照 · 店铺体验记录", id: "PX-20260818-000613", status: "已完成", fields: [["订单金额", "₫180,000"], ["实付金额", "₫180,000"], ["完成时间", "8月18日 17:36"], ["结算状态", "已结算"]], actions: ["再次发布", "查看详情"] },
+  { type: "cancelled", title: "同行 · 西湖夜游", id: "PX-20260812-000421", status: "已取消", fields: [["订单金额", "₫300,000"], ["退款状态", "已退款"], ["取消时间", "8月12日 13:20"], ["取消原因", "行程变更"]], actions: [] }
+] as const;
+
+function MyOrdersSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+  const [filter, setFilter] = useState<OrderFilter>("all");
+  const [detail, setDetail] = useState<(typeof MY_ORDER_ROWS)[number]>();
+  if (detail) return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回订单</Text></Pressable><Text style={styles.detailTitle}>订单详情</Text><View style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{detail.title}</Text><Text style={styles.orderId}>{detail.id}</Text></View><Text style={[styles.orderBadge, detail.status === "进行中" && styles.orderBadgeLive]}>{detail.status}</Text></View><Text style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text></View><View style={styles.orderCard}><Text style={styles.orderTitle}>服务信息</Text><View style={styles.orderGrid}>{detail.fields.map(([label, value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></View></ScrollView></View>;
+  const visible = filter === "all" ? MY_ORDER_ROWS : MY_ORDER_ROWS.filter((item) => item.type === filter);
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>我的订单</Text></View><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}><Text style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{visible.map((item) => <View key={item.id} style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{item.title}</Text><Text style={styles.orderId}>订单编号：{item.id}</Text></View><Text style={[styles.orderBadge, item.status === "进行中" && styles.orderBadgeLive]}>{item.status}</Text></View><View style={styles.orderGrid}>{item.fields.map(([label,value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View>{item.status === "进行中" ? <Text style={styles.orderStatus}>● 已接单 · 等待服务开始</Text> : null}{item.actions.length ? <View style={styles.orderActions}>{item.actions.map((action,index) => <Pressable key={action} onPress={() => action.includes("详情") ? setDetail(item) : undefined} style={[styles.orderAction, index === item.actions.length - 1 && styles.orderActionPrimary]}><Text style={[styles.orderActionText, index === item.actions.length - 1 && styles.orderActionPrimaryText]}>{action}</Text></Pressable>)}</View> : null}</View>)}</ScrollView></View>;
+}
+
+function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+  const [tab, setTab] = useState<"joined" | "created">("joined");
+  const items = tab === "joined" ? [["周末美甲体验", "8月30日 14:00 · Luna Spa"], ["河内 Creator Coffee", "9月6日 10:30 · Tây Hồ"]] : [["西湖摄影散步", "9月12日 15:30 · 已报名 8 人"]];
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>我的活动</Text></View><View style={styles.activityOwnedTabs}><Pressable onPress={() => setTab("joined")} style={[styles.activityOwnedTab, tab === "joined" && styles.activityOwnedTabOn]}><Text style={[styles.activityOwnedTabText, tab === "joined" && styles.activityOwnedTabTextOn]}>已参加</Text></Pressable><Pressable onPress={() => setTab("created")} style={[styles.activityOwnedTab, tab === "created" && styles.activityOwnedTabOn]}><Text style={[styles.activityOwnedTabText, tab === "created" && styles.activityOwnedTabTextOn]}>我发起的</Text></Pressable></View>{items.map(([title,meta]) => <View key={title} style={styles.savedCard}><Text style={styles.orderTitle}>{title}</Text><Text style={styles.savedMeta}>{meta}</Text></View>)}</ScrollView></View>;
+}
+
+type FavoriteTab = "all" | "merchant" | "creator" | "post" | "activity";
+function FavoritesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+  const [tab, setTab] = useState<FavoriteTab>("all");
+  const entries = [{ type: "merchant", title: "Luna Spa", meta: "Beauty & Wellness · 西湖区" }, { type: "creator", title: "Linh Tran", meta: "Creator · 美妆 / Lifestyle" }];
+  const visible = tab === "all" ? entries : entries.filter((item) => item.type === tab);
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>收藏</Text></View><Text style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{visible.length ? visible.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text style={styles.savedThumbText}>☆</Text></View><View><Text style={styles.orderTitle}>{item.title}</Text><Text style={styles.savedMeta}>{item.meta}</Text></View></View>) : <View style={styles.savedCard}><Text style={styles.savedMeta}>这里还没有收藏。</Text></View>}</ScrollView></View>;
+}
+
 // R15.12.18 礼品券入口使用原型中的咖啡券杯子；这只是权益入口图标，
 // 不替换应用 Logo，也不改动礼品券页面的任何卡面。
 function VoucherMenuGlyph({ color: tint }: { color: string }): React.JSX.Element {
@@ -704,10 +658,21 @@ const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; icon: stri
     desc: "钱包是'我的'内页，只展示 Proxy 真正经手或需要记录的资金状态。",
     icon: "₫"
   },
-  postfeed: {
-    title: "关注与收藏",
-    desc: "关注的人、商家和保存的动态。",
-    icon: "☆"
+  myorders: {
+    title: "我的订单",
+    desc: "我发布、参与和已经完成的订单。",
+    icon: "◇"
+  },
+  myactivities: {
+    title: "我的活动",
+    desc: "我参加、感兴趣和发起的活动。",
+    icon: "○"
+  },
+  favorites: {
+    title: "收藏",
+    desc: "很轻的个人备忘夹。以后还想找到，就放这里。",
+    icon: "☆",
+    sections: []
   },
   requestermemory: {
     title: "Proxy 记住了什么？",
@@ -1233,6 +1198,7 @@ function SocialRow({
 
 export function MeSurface({
   context,
+  localNet,
   experienceSections,
   experienceMode,
   onOpenSwitcher,
@@ -1243,6 +1209,7 @@ export function MeSurface({
   onSignOut
 }: {
   context: ActiveContext;
+  localNet: LocalNetClient;
   experienceSections?: ExperienceMenuSection[];
   experienceMode?: "MERGE" | "REPLACE";
   onOpenSwitcher: () => void;
@@ -1253,16 +1220,16 @@ export function MeSurface({
   onSignOut: () => void;
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
+  // 规范 §4/§13：Android 硬件返回先收起子页；其余覆盖层是 RN Modal（onRequestClose 自理）。
+  useModuleBackHandler(subPage ? () => { setSubPage(undefined); return true; } : undefined);
   const [availability, setAvailability] = useState<AvailabilityState>("AVAILABLE");
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [enterpriseOpsStage, setEnterpriseOpsStage] = useState<EnterpriseOpsStage>("READY");
   const [enterpriseOpsAssets, setEnterpriseOpsAssets] = useState(3);
-  // 个人主页架构 v3：资料字段（含展示开关）与编辑 sheet。
-  const [profileFields, setProfileFields] = useState<ProfileField[]>(DEFAULT_PROFILE_FIELDS);
-  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   // 能力与可用时间（原型 my_market_modules v5）：能力实例 CRUD + 30 天日历。
   const [abilities, setAbilities] = useState<AbilityInstance[]>(DEFAULT_ABILITIES);
   const [abilitySheet, setAbilitySheet] = useState<{ mode: "ADD" | "EDIT"; type: AbilityType; id?: string }>();
+  const [availabilityPanel, setAvailabilityPanel] = useState<"ABILITIES" | "CALENDAR">("ABILITIES");
   const [avRule, setAvRule] = useState<AvailabilityRule>({ days: [0, 1, 2, 3, 4, 5, 6], start: 18, end: 23 });
   const [avOverrides, setAvOverrides] = useState<Record<string, AvOverride>>({
     "2026-08-27": { type: "off" },
@@ -1271,6 +1238,33 @@ export function MeSurface({
   });
   const [avRuleSheetOpen, setAvRuleSheetOpen] = useState(false);
   const [avDaySheet, setAvDaySheet] = useState<{ key: string; label: string }>();
+  const [personalHubTab, setPersonalHubTab] = useState<PersonalHubTab>("FEED");
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [profileAvatarUri, setProfileAvatarUri] = useState<string>();
+  const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
+  const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
+  const [profileMediaPositions, setProfileMediaPositions] = useState<Record<string, number>>({});
+  const [profileViewer, setProfileViewer] = useState<{ postId: string; index: number }>();
+  const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
+  const [socialEditor, setSocialEditor] = useState<SocialAccount>();
+  const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
+  const [profileDraft, setProfileDraft] = useState({
+    name: "Huyen",
+    handle: "huyen.hanoi",
+    bio: "喜欢旅行、拍照和城市里的新鲜体验。",
+    city: "河内"
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    void localNet.listFeedPosts().then((read) => {
+      if (cancelled) return;
+      // 个人主页只读取当前用户自己的帖文；不借用 Linh/Mai 等测试用户媒体。
+      setProfilePosts(read.posts.filter((post) => post.authorDisplayName === "你" || post.authorDisplayName === profileDraft.name));
+      setProfileMedia(read.media);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [localNet, profileDraft.name]);
 
   // 轻 CRM 关系图对 BUSINESS 也开放，优先于 R21 商家页
   if (subPage?.route === "friendcrm") {
@@ -1303,10 +1297,6 @@ export function MeSurface({
       : persona.sections;
 
   function openRegisteredRoute(route: RegisteredExperienceRoute): void {
-    if (route === "postfeed") {
-      onOpenFeed();
-      return;
-    }
     if (route === "vouchers") {
       onOpenVouchers();
       return;
@@ -1317,9 +1307,11 @@ export function MeSurface({
   }
 
   function pressRow(row: MenuRow): void {
-    // “关注与收藏”在原型中进入主动态，不是“我的”里的伪子页面。
-    if (row.route === "postfeed") {
-      onOpenFeed();
+    // These are Me-owned account views. A server manifest may change their copy
+    // or icon, but must not turn them back into root Market/Feed navigation.
+    const ownedRoute = meOwnedRouteForLabel(row.label);
+    if (ownedRoute) {
+      openSubPage(ownedRoute);
       return;
     }
     if (row.route === "vouchers") {
@@ -1351,9 +1343,28 @@ export function MeSurface({
     setSubPage({ title: content.title, desc: content.desc, icon: content.icon, route });
   }
 
+  async function chooseProfileAvatar(): Promise<void> {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      mediaTypes: ["images"],
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current,
+      quality: 1,
+      selectionLimit: 1
+    });
+    const selected = result.assets?.[0];
+    if (!result.canceled && selected?.uri) setProfileAvatarUri(selected.uri);
+  }
+
   // 子页面渲染
   if (subPage) {
     const content = SUB_PAGE_CONTENT[subPage.route];
+
+    if (subPage.route === "myorders") return <MyOrdersSurface onBack={() => setSubPage(undefined)} />;
+    if (subPage.route === "myactivities") return <MyActivitiesSurface onBack={() => setSubPage(undefined)} />;
+    if (subPage.route === "favorites") return <FavoritesSurface onBack={() => setSubPage(undefined)} />;
 
     // 原型 screens.appbehavior：不是设置表格，而是一组应用可靠性检查卡片。
     if (subPage.route === "appbehavior") {
@@ -1405,48 +1416,62 @@ export function MeSurface({
 
     // R15.9 Personal Social OS：三个入口各有自己的信息结构，不能落到通用子页。
     if (subPage.route === "socialidentity") {
-      const channels = [
-        ["TT", "TikTok", "@huyen.life", "公开", true],
-        ["Z", "Zalo", "Huyen Nguyen", "合作后", true],
-        ["IG", "Instagram", "@huyen.frames", "公开", true],
-        ["in", "LinkedIn", "未关联", "关联", false]
-      ] as const;
       return (
         <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
+          <ScrollView contentContainerStyle={styles.socialAccountsContent}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.detailTitle}>社媒与联系</Text>
-            <Text style={styles.detailSub}>关联、二维码和公开范围都由你控制。</Text>
-            <CreatorApplicationCard />
-            {channels.map(([mark, name, account, visibility, linked]) => (
-              <View key={name} style={styles.channelCard}>
-                <View style={[styles.channelMark, linked && styles.channelMarkLinked]}>
-                  <Text style={styles.channelMarkText}>{mark}</Text>
+            <Text style={styles.socialAccountsTitle}>社媒账户</Text>
+            <Text style={styles.socialAccountsSub}>管理你的外部社交平台。账号、链接和公开范围都由你控制。</Text>
+            <CreatorInvitationCard />
+            <View style={styles.socialAccountList}>
+            {socialAccounts.map((account) => (
+              <Pressable key={account.key} onPress={() => setSocialEditor({ ...account })} style={styles.socialAccountRow}>
+                <View style={[styles.socialAccountIcon, account.dark ? styles.socialAccountIconDark : null]}>
+                  <Text style={[styles.socialAccountIconText, account.dark ? styles.socialAccountIconTextDark : null]}>{account.mark}</Text>
                 </View>
-                <View style={styles.channelCopy}>
-                  <Text style={styles.channelName}>{name}</Text>
-                  <Text style={styles.channelAccount}>{account}</Text>
+                <View style={styles.socialAccountCopy}>
+                  <Text style={styles.socialAccountName}>{account.name}</Text>
+                  <Text numberOfLines={1} style={styles.socialAccountHandle}>{account.handle || "未关联"}</Text>
+                  <Text numberOfLines={1} style={styles.socialAccountUrl}>{account.url ? account.url.replace(/^https?:\/\/(www\.)?/, "") : "添加账号后可生成主页链接"}</Text>
                 </View>
-                <View style={[styles.channelStatus, linked ? styles.channelStatusOn : styles.channelStatusOff]}>
-                  <Text style={[styles.channelStatusText, linked ? styles.channelStatusTextOn : styles.channelStatusTextOff]}>{visibility}</Text>
+                <View style={styles.socialAccountTrailing}>
+                  <View style={[styles.socialAccountState, account.visibility !== "仅自己" ? styles.socialAccountStateActive : null]}><Text style={[styles.socialAccountStateText, account.visibility !== "仅自己" ? styles.socialAccountStateTextActive : null]}>{account.handle ? account.visibility : "关联"}</Text></View>
+                  <Text style={styles.socialAccountChev}>›</Text>
                 </View>
+              </Pressable>
+            ))}
+            </View>
+
+            <View style={styles.socialSettingsHead}><Text style={styles.socialSettingsTitle}>展示设置</Text><Text style={styles.socialSettingsHint}>按需开放</Text></View>
+            {([['merchant', '商家合作资料', '允许商家在合作场景查看你已开放的社媒账户。'], ['profile', '个人主页入口', '在个人主页显示一个轻量“社媒”入口，不直接铺开账号。'], ['influence', '影响力信息', '后续可向商家展示粉丝量等信息，默认关闭。']] as const).map(([key, title, desc]) => (
+              <View key={key} style={styles.socialSettingRow}>
+                <View style={styles.socialAccountCopy}><Text style={styles.socialSettingName}>{title}</Text><Text style={styles.socialSettingDesc}>{desc}</Text></View>
+                <Pressable accessibilityRole="switch" accessibilityState={{ checked: socialSettings[key] }} onPress={() => setSocialSettings((current) => ({ ...current, [key]: !current[key] }))} style={[styles.socialSwitch, socialSettings[key] ? styles.socialSwitchOn : null]}><View style={[styles.socialSwitchDot, socialSettings[key] ? styles.socialSwitchDotOn : null]} /></Pressable>
               </View>
             ))}
-            <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>联系方式</Text>
-              <Text style={styles.detailSectionHint}>逐级开放</Text>
+
+            <View style={styles.socialShareBox}>
+              <View style={styles.socialSettingsHead}><Text style={styles.socialSettingsTitle}>公开分享链接</Text><Text style={styles.socialSettingsHint}>可选</Text></View>
+              <View style={styles.socialShareLine}><Text numberOfLines={1} style={styles.socialShareLink}>pxy.app/huyen/social</Text><Pressable onPress={() => void Share.share({ message: "https://pxy.app/huyen/social" })} style={styles.socialShareButton}><Text style={styles.socialShareButtonText}>分享</Text></Pressable></View>
+              <Text style={styles.socialShareNote}>只有你设置为“公开展示”的账号会出现在这个分享页。商家可见账号不会自动公开。</Text>
             </View>
-            <Pressable onPress={() => openSubPage("socialprivacy")} style={styles.socialDetailRow}>
-              <View style={styles.socialDetailIcon}><Text style={styles.socialDetailIconText}>☎</Text></View>
-              <View style={styles.socialDetailCopy}>
-                <Text style={styles.socialDetailLabel}>Zalo / 电话</Text>
-                <Text style={styles.socialDetailDesc}>默认合作后开放，可随时收紧</Text>
-              </View>
-              <Text style={styles.socialDetailChev}>›</Text>
-            </Pressable>
           </ScrollView>
+          <Modal animationType="slide" onRequestClose={() => setSocialEditor(undefined)} transparent visible={Boolean(socialEditor)}>
+            <Pressable onPress={() => setSocialEditor(undefined)} style={styles.socialEditorOverlay}>
+              {socialEditor ? <Pressable onPress={(event) => event.stopPropagation()} style={styles.socialEditorSheet}>
+                <View style={styles.socialEditorGrabber} />
+                <View style={styles.socialEditorHead}><Text style={styles.socialEditorTitle}>{socialEditor.name}</Text><Pressable onPress={() => setSocialEditor(undefined)} style={styles.socialEditorClose}><Text style={styles.socialEditorCloseText}>×</Text></Pressable></View>
+                <Text style={styles.socialEditorNote}>账号和主页链接用于跳转外部平台。展示范围可单独控制。</Text>
+                <Text style={styles.socialEditorLabel}>账号</Text><TextInput onChangeText={(handle) => setSocialEditor((current) => current ? { ...current, handle } : current)} style={styles.socialEditorInput} value={socialEditor.handle} />
+                <Text style={styles.socialEditorLabel}>主页链接</Text><TextInput autoCapitalize="none" keyboardType="url" onChangeText={(url) => setSocialEditor((current) => current ? { ...current, url } : current)} style={styles.socialEditorInput} value={socialEditor.url} />
+                <Text style={styles.socialEditorLabel}>谁可以看到</Text><View style={styles.socialVisibilityRow}>{(["仅自己", "商家可见", "公开展示"] as const).map((visibility) => <Pressable key={visibility} onPress={() => setSocialEditor((current) => current ? { ...current, visibility } : current)} style={[styles.socialVisibilityButton, socialEditor.visibility === visibility ? styles.socialVisibilityButtonOn : null]}><Text style={[styles.socialVisibilityText, socialEditor.visibility === visibility ? styles.socialVisibilityTextOn : null]}>{visibility}</Text></Pressable>)}</View>
+                <Pressable disabled={!socialEditor.url} style={styles.socialOpenLink}><Text style={styles.socialOpenLinkText}>打开外部主页</Text><Text style={styles.socialOpenLinkText}>↗</Text></Pressable>
+                <Pressable onPress={() => { setSocialAccounts((current) => current.map((account) => account.key === socialEditor.key ? socialEditor : account)); setSocialEditor(undefined); }} style={styles.socialSave}><Text style={styles.socialSaveText}>保存</Text></Pressable>
+              </Pressable> : null}
+            </Pressable>
+          </Modal>
         </View>
       );
     }
@@ -1541,88 +1566,87 @@ export function MeSurface({
     }
 
     if (subPage.route === "available") {
-      // 能力与可用时间 v5：能力类型由 Proxy 定义，用户维护实例；30 天日历 = 每周规律 + 按日例外。
+      // v5 审计结构：能力与可用时间是同一模块的两个层级，不在一屏堆叠。
+      if (availabilityPanel === "CALENDAR") {
+        const days = nextDays(30);
+        return (
+          <View style={styles.root}>
+            <ScrollView contentContainerStyle={styles.content}>
+              <Pressable onPress={() => setAvailabilityPanel("ABILITIES")} style={styles.subPageBack}>
+                <Text style={styles.subPageBackText}>‹ 返回能力</Text>
+              </Pressable>
+              <Text style={styles.detailTitle}>可用时间</Text>
+              <Text style={styles.availabilityLead}>固定规律只设一次；临时变化点日期覆盖。</Text>
+
+              <View style={styles.availabilityRuleCard}>
+                <View style={styles.availabilityRuleIcon}><ProxySymbolIcon color={color.ink} symbol="clock" size={22} /></View>
+                <View style={styles.availabilityRuleCopy}>
+                  <Text style={styles.availabilityRuleKicker}>常用规律</Text>
+                  <Text style={styles.availabilityRuleValue}>{describeAvRule(avRule)}</Text>
+                </View>
+                <Pressable onPress={() => setAvRuleSheetOpen(true)} style={styles.availabilityEditButton}><Text style={styles.availabilityEditText}>编辑</Text></Pressable>
+              </View>
+
+              <View style={styles.availabilityMonthCard}>
+                <View style={styles.availabilityMonthHead}>
+                  <Text style={styles.availabilityMonthTitle}>未来 30 天</Text>
+                  {Object.keys(avOverrides).length ? <Pressable onPress={() => setAvOverrides({})}><Text style={styles.availabilityClear}>清除例外</Text></Pressable> : null}
+                </View>
+                <View style={styles.availabilityWeekHead}>{["一", "二", "三", "四", "五", "六", "日"].map((name) => <Text key={name} style={styles.availabilityWeekName}>{name}</Text>)}</View>
+                <View style={styles.availabilityMonthGrid}>
+                  {Array.from({ length: days.length ? (days[0]!.date.getDay() + 6) % 7 : 0 }).map((_, index) => <View key={`blank-${index}`} style={styles.availabilityMonthBlank} />)}
+                  {days.map((day) => {
+                    const state = avStateFor(day.date, avRule, avOverrides);
+                    const dateNumber = day.date.getDate();
+                    return (
+                      <Pressable key={day.key} onPress={() => setAvDaySheet({ key: day.key, label: day.label })} style={[styles.availabilityMonthDay, styles[`availabilityMonthDay_${state.type}`]]}>
+                        <Text style={[styles.availabilityMonthNumber, state.type === "off" && styles.availabilityMonthNumberOff]}>{dateNumber}</Text>
+                        {state.type === "base" ? <View style={styles.availabilityBaseDot} /> : null}
+                        {state.type === "off" ? <Text style={styles.availabilityOffMark}>×</Text> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View style={styles.availabilityLegend}>
+                  <Text style={styles.availabilityLegendText}>● 规律可用</Text><Text style={styles.availabilityLegendText}>绿色 全天</Text><Text style={styles.availabilityLegendText}>描边 自定义</Text><Text style={styles.availabilityLegendText}>× 休息</Text>
+                </View>
+              </View>
+            </ScrollView>
+            <AvRuleSheet onClose={() => setAvRuleSheetOpen(false)} onSave={setAvRule} open={avRuleSheetOpen} rule={avRule} />
+            {avDaySheet ? <AvDaySheet day={avDaySheet} key={avDaySheet.key} onClose={() => setAvDaySheet(undefined)} onSet={(key, override) => setAvOverrides((prev) => { const next = { ...prev }; if (override) next[key] = override; else delete next[key]; return next; })} rule={avRule} /> : null}
+          </View>
+        );
+      }
       return (
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+            <Pressable onPress={() => { setAvailabilityPanel("ABILITIES"); setSubPage(undefined); }} style={styles.subPageBack}>
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text style={styles.detailTitle}>能力与可用时间</Text>
-            <Text style={styles.detailSub}>能力类型由 Proxy 定义；你只维护实例和真实空闲。</Text>
+            <Text style={styles.detailSub}>维护你愿意接受邀请的能力。</Text>
 
-            <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>我的能力</Text>
-              <Text style={styles.detailSectionHint}>{abilities.length} 个实例</Text>
-            </View>
+            <Pressable onPress={() => setAvailabilityPanel("CALENDAR")} style={styles.availabilitySummaryCard}>
+              <View style={styles.availabilityRuleIcon}><ProxySymbolIcon color={color.ink} symbol="clock" size={22} /></View>
+              <View style={styles.availabilityRuleCopy}><Text style={styles.prototypeCardTitle}>可用时间</Text><Text style={styles.abilitySub}>{describeAvRule(avRule)} · {Object.keys(avOverrides).length} 个例外</Text></View>
+              <Text style={styles.walletActionArrow}>›</Text>
+            </Pressable>
+
+            <View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>我的能力</Text><Text style={styles.detailSectionHint}>{abilities.length} 项</Text></View>
             {abilities.map((ability) => (
-              <View key={ability.id} style={styles.prototypeCard}>
+              <View key={ability.id} style={styles.abilityCompactCard}>
                 <View style={styles.abilityHead}>
                   <View style={styles.abilityIcon}><Text style={styles.abilityIconText}>{ABILITY_SCHEMAS[ability.type].icon}</Text></View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.prototypeCardTitle}>{ability.type}</Text>
                     <Text style={styles.abilitySub}>{ABILITY_SCHEMAS[ability.type].subtitle}</Text>
                   </View>
+                  <Pressable accessibilityLabel={`编辑${ability.type}`} onPress={() => setAbilitySheet({ mode: "EDIT", type: ability.type, id: ability.id })} style={styles.availabilityEditButton}><Text style={styles.availabilityEditText}>编辑</Text></Pressable>
                 </View>
-                {ability.fields.filter((field) => field.value.trim().length > 0).map((field) => (
-                  <View key={field.label} style={styles.avDayRow}>
-                    <Text style={styles.avDayRowDate}>{field.label}</Text>
-                    <Text style={styles.avDayRowState}>{field.value}</Text>
-                  </View>
-                ))}
-                {ability.note ? <Text style={styles.abilityNote}>{ability.note}</Text> : null}
-                <View style={styles.chipWrap}>
-                  <Pressable
-                    accessibilityLabel={`编辑${ability.type}`}
-                    onPress={() => setAbilitySheet({ mode: "EDIT", type: ability.type, id: ability.id })}
-                    style={[styles.chip, styles.chipActive]}
-                  >
-                    <Text style={styles.chipTextActive}>编辑</Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityLabel={`删除${ability.type}`}
-                    onPress={() => setAbilities((prev) => prev.filter((item) => item.id !== ability.id))}
-                    style={styles.chip}
-                  >
-                    <Text style={styles.chipText}>删除</Text>
-                  </Pressable>
-                </View>
+                <View style={styles.abilityFieldChips}>{ability.fields.filter((field) => field.value.trim().length > 0).map((field) => <View key={field.label} style={styles.abilityFieldChip}><Text style={styles.abilityFieldChipText}><Text style={styles.abilityFieldChipLabel}>{field.label} </Text>{field.value}</Text></View>)}</View>
               </View>
             ))}
-            {(["同行", "翻译", "拍照"] as AbilityType[]).map((type) => (
-              <Pressable
-                key={type}
-                accessibilityLabel={`添加${type}`}
-                onPress={() => setAbilitySheet({ mode: "ADD", type })}
-                style={styles.lightCta}
-              >
-                <Text style={styles.lightCtaText}>{ABILITY_SCHEMAS[type].icon} 添加{type}</Text>
-              </Pressable>
-            ))}
-
-            <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>可用时间 · 未来 30 天</Text>
-              <Pressable accessibilityLabel="编辑每周规律" onPress={() => setAvRuleSheetOpen(true)}>
-                <Text style={styles.detailSectionHint}>规律：{describeAvRule(avRule)} ›</Text>
-              </Pressable>
-            </View>
-            <View style={styles.avCalendar}>
-              {nextDays(30).map((day) => {
-                const state = avStateFor(day.date, avRule, avOverrides);
-                const label =
-                  state.type === "off" ? "休"
-                  : state.type === "blank" ? "—"
-                  : `${avFmt(state.start ?? avRule.start)}`;
-                return (
-                  <Pressable key={day.key} onPress={() => setAvDaySheet({ key: day.key, label: day.label })} style={[styles.avCell, styles[`avCell_${state.type}`]]}>
-                    <Text style={styles.avCellDay}>{day.label.split(" ")[0]}</Text>
-                    <Text style={styles.avCellWeek}>{day.label.split(" ")[1] ?? `周${AV_DAY_NAMES[day.date.getDay()]}`}</Text>
-                    <Text style={[styles.avCellValue, (state.type === "blank" || state.type === "off") && styles.avCellValueMuted]}>{label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Text style={styles.customSectionHint}>点任意一天设置例外：全天 / 休息 / 自定义时段。按日例外优先于每周规律。</Text>
+            <View style={styles.addAbilityRow}>{(["同行", "翻译", "拍照"] as AbilityType[]).map((type) => <Pressable key={type} accessibilityLabel={`添加${type}`} onPress={() => setAbilitySheet({ mode: "ADD", type })} style={styles.addAbilityChip}><Text style={styles.addAbilityChipText}>＋ {type}</Text></Pressable>)}</View>
 
             <Pressable
               onPress={() => openSubPage("personalhub")}
@@ -1842,145 +1866,116 @@ export function MeSurface({
     }
 
     // 原型 .r159Hero + .r159TrustStrip + .r159QRWrap：个人主页 / 个人二维码 / 商家店铺。
-    // 个人主页架构 v3：名片 + 关于我（字段+开关）+ 可以提供 + 近期可用 + 信任与记录 + 资料原则。
+    // 个人主页 v5：轻量名片 + 动态/照片/记录入口；能力、可用时间和合作是可选的产品行为。
     if (subPage.route === "personalhub") {
-      const visibleFields = profileFields.filter((field) => field.visible && field.value.trim().length > 0);
+      const personalPhotos = profilePosts.flatMap((post) => (profileMedia[post.postId] ?? []).map((item, index) => ({ item, index, postId: post.postId }))).filter((entry) => entry.item.mediaType === "IMAGE");
+      const viewedItems = profileViewer ? profileMedia[profileViewer.postId] ?? [] : [];
       return (
         <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
-            </Pressable>
-            <Text style={styles.subPageTitle}>个人主页</Text>
+          <ScrollView contentContainerStyle={styles.personalHubContent}>
+            <View style={styles.personalTopbar}>
+              <Pressable accessibilityLabel="返回" onPress={() => setSubPage(undefined)} style={styles.personalTopbarButton}>
+                <Text style={styles.personalTopbarIcon}>‹</Text>
+              </Pressable>
+              <Text style={styles.personalTopbarHandle}>@{profileDraft.handle}</Text>
+              <Pressable accessibilityLabel="打开二维码" onPress={() => openSubPage("personalqr")} style={styles.personalTopbarButton}>
+                <Text style={styles.personalTopbarMore}>•••</Text>
+              </Pressable>
+            </View>
 
-            <View style={styles.heroCard}>
-              <View style={styles.heroTop}>
-                <Gradient from="#241246" to="#7A2CFF" style={styles.heroAvatar}>
-                  <Text style={styles.heroAvatarText}>H</Text>
-                </Gradient>
-                <View style={styles.heroCopy}>
-                  <Text style={styles.heroName}>Huyen</Text>
-                  <Text style={styles.heroMeta}>河内 · 已验证 · 个人主页公开</Text>
+            <View style={styles.personalProfile}>
+              <View style={styles.personalIdentityRow}>
+                <View style={styles.personalIdentityCopy}>
+                  <Text style={styles.personalDisplayName}>{profileDraft.name}</Text>
+                  <View style={styles.personalHandleRow}>
+                    <Text style={styles.personalHandle}>@{profileDraft.handle}</Text>
+                    <Text style={styles.personalVerified}>✓</Text>
+                  </View>
                 </View>
-                <Pressable accessibilityLabel="设置个人状态" onPress={() => setAvailabilityOpen(true)} style={styles.heroStatus}>
-                  <Text style={styles.heroStatusText}>● {availabilityLabel(availability)}</Text>
+                <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAvatarButton}>
+                  <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.personalAvatarImage} />
+                  <View style={styles.personalAvatarEdit}><Text style={styles.personalAvatarEditText}>＋</Text></View>
                 </Pressable>
               </View>
-              <View style={styles.trustStrip}>
-                {[["98%", "准时"], ["42", "已履约"], ["7", "复购"]].map(([v, l]) => (
-                  <View key={l} style={styles.trustStripItem}>
-                    <Text style={styles.trustStripValue}>{v}</Text>
-                    <Text style={styles.trustStripLabel}>{l}</Text>
+              <Text style={styles.personalBio}>{profileDraft.bio}</Text>
+              <Text style={styles.personalMeta}>{profileDraft.city} · 42 次履约 · 本周六可用</Text>
+              <View style={styles.personalActions}>
+                <Pressable onPress={() => setProfileEditorOpen(true)} style={styles.personalActionButton}>
+                  <Text style={styles.personalActionText}>编辑主页</Text>
+                </Pressable>
+                <Pressable onPress={() => void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` })} style={styles.personalActionButton}>
+                  <Text style={styles.personalActionText}>分享主页</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={styles.personalTabs}>
+              {([['FEED', '动态'], ['PHOTOS', '照片'], ['RECORDS', '记录']] as const).map(([key, label]) => (
+                <Pressable key={key} onPress={() => setPersonalHubTab(key)} style={[styles.personalTab, personalHubTab === key ? styles.personalTabActive : null]}>
+                  <Text style={[styles.personalTabText, personalHubTab === key ? styles.personalTabTextActive : null]}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {personalHubTab === "FEED" ? profilePosts.map((post) => {
+              const items = profileMedia[post.postId] ?? [];
+              return (
+              <View key={post.postId} style={styles.personalPost}>
+                <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.personalPostAvatar} />
+                <View style={styles.personalPostBody}>
+                  <View style={styles.personalPostHead}>
+                    <Text style={styles.personalPostName}>{profileDraft.name} <Text style={styles.personalVerified}>✓</Text></Text>
+                    <Text style={styles.personalPostTime}>{new Date(post.createdAt).toLocaleDateString()}</Text>
                   </View>
-                ))}
-              </View>
-            </View>
-
-            {/* 关于我：字段值 + 独立展示开关，只显示已公开且已填写的字段 */}
-            <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>关于我</Text>
-              <Pressable accessibilityLabel="编辑资料" onPress={() => setProfileEditorOpen(true)}>
-                <Text style={styles.detailSectionHint}>编辑 ›</Text>
-              </Pressable>
-            </View>
-            {visibleFields.length > 0 ? (
-              visibleFields.map((field) => (
-                <View key={field.key} style={styles.prototypeCard}>
-                  <Text style={styles.prototypeCardTitle}>{field.label}</Text>
-                  <Text style={styles.prototypeCardDesc}>{field.value}</Text>
+                  <Text style={styles.personalPostText}>{post.body}</Text>
+                  <Text style={styles.personalPostContext}>{post.contextRefs.map((entry) => entry.contextId).join(" · ")}</Text>
+                  {items.length > 1 ? (
+                    <AdaptiveMediaCollection items={items} currentIndex={profileMediaPositions[post.postId] ?? 0} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onIndexChange={(index) => setProfileMediaPositions((current) => ({ ...current, [post.postId]: index }))} onOpen={(index) => setProfileViewer({ postId: post.postId, index })} />
+                  ) : items[0]?.mediaType === "IMAGE" ? (
+                    <SinglePostImage item={items[0]} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onPress={() => setProfileViewer({ postId: post.postId, index: 0 })} />
+                  ) : null}
+                  <View style={styles.personalPostActions}>
+                    <Text style={styles.personalPostAction}>♡ 24</Text><Text style={styles.personalPostAction}>○ 6</Text><Text style={styles.personalPostAction}>↗ 分享</Text>
+                  </View>
                 </View>
-              ))
-            ) : (
-              <View style={styles.prototypeCard}>
-                <Text style={styles.prototypeCardDesc}>还没有对外展示的资料；编辑后由你决定哪些字段公开。</Text>
               </View>
-            )}
+              );
+            }) : null}
 
-            <QrCard
-              title="Proxy Personal QR"
-              desc="一个二维码承接你的 Proxy 主页，再由你决定 TikTok、Zalo、Instagram 等是否展示。"
-              actionLabel="打开二维码"
-              onAction={() => openSubPage("personalqr")}
-            />
+            {personalHubTab === "FEED" && profilePosts.length === 0 ? <Text style={styles.personalEmpty}>你发布的帖文会显示在这里。</Text> : null}
 
-            {/* 可以提供：能力实例摘要 → available 全量维护 */}
-            <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>可以提供</Text>
-              <Pressable accessibilityLabel="管理能力与可用时间" onPress={() => openSubPage("available")}>
-                <Text style={styles.detailSectionHint}>管理 ›</Text>
-              </Pressable>
-            </View>
-            {abilities.map((ability) => (
-              <SocialRow
-                key={ability.id}
-                icon={ABILITY_SCHEMAS[ability.type].icon}
-                label={ability.type}
-                desc={ability.fields.filter((field) => field.value.trim().length > 0).map((field) => `${field.label} ${field.value}`).join(" · ")}
-                onPress={() => openSubPage("available")}
-              />
-            ))}
-            {abilities.length === 0 ? (
-              <View style={styles.prototypeCard}>
-                <Text style={styles.prototypeCardDesc}>还没有添加能力；在能力与可用时间里选择类型并填写。</Text>
+            {personalHubTab === "PHOTOS" ? (
+              <View style={styles.personalPhotoGrid}>
+                {personalPhotos.map(({ item, index, postId }) => <Pressable key={`${item.mediaAssetId}-${index}`} onPress={() => setProfileViewer({ postId, index })} style={styles.personalPhotoTile}><Image source={{ uri: localNet.resolveMediaUrl(item.feedUrl ?? item.thumbnailUrl ?? item.galleryUrl ?? "") }} resizeMode="cover" style={styles.personalPhotoImage} /></Pressable>)}
               </View>
             ) : null}
 
-            {/* 近期可用：规律 + 未来 7 天例外摘要 */}
-            <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>近期可用</Text>
-              <Text style={styles.detailSectionHint}>{describeAvRule(avRule)}</Text>
-            </View>
-            <View style={styles.prototypeCard}>
-              {nextDays(7).map((day) => {
-                const state = avStateFor(day.date, avRule, avOverrides);
-                return (
-                  <View key={day.key} style={styles.avDayRow}>
-                    <Text style={styles.avDayRowDate}>{day.label}</Text>
-                    <Text style={[styles.avDayRowState, state.type === "blank" ? styles.avDayRowOff : null]}>
-                      {state.type === "off" ? "休息" : state.type === "blank" ? "不可约" : `${avFmt(state.start ?? avRule.start)}–${avFmt(state.end ?? avRule.end)}`}
-                    </Text>
+            {personalHubTab === "RECORDS" ? (
+              <View style={styles.personalRecords}>
+                {[["身份已验证", "手机、邮箱与本人信息已确认", "✓"], ["42 次履约", "准时率 98% · 7 次复购", "42"], ["近期记录", "最近一次合作已完成并确认 Outcome", "›"]].map(([title, desc, value]) => (
+                  <View key={title} style={styles.personalRecordRow}>
+                    <View style={styles.personalRecordCopy}><Text style={styles.personalRecordTitle}>{title}</Text><Text style={styles.personalRecordDesc}>{desc}</Text></View>
+                    <Text style={styles.personalRecordValue}>{value}</Text>
                   </View>
-                );
-              })}
-            </View>
-
-            {/* 信任与记录：Proxy 信誉优先，外部人气不写入 */}
-            <Text style={styles.customSectionTitle}>信任与记录</Text>
-            <Text style={styles.customSectionHint}>外部粉丝不写入 Proxy 信誉</Text>
-            <View style={styles.prototypeCard}>
-              <Text style={styles.prototypeCardDesc}>信誉来自身份验证、准时、履约、Outcome 与复购；社媒人气只作为发现信号。</Text>
-            </View>
-
-            {/* 对外展示 */}
-            <Text style={styles.customSectionTitle}>对外展示</Text>
-            <Text style={styles.customSectionHint}>你决定</Text>
-            <SocialRow
-              icon="↗"
-              label="社媒与联系方式"
-              desc="TikTok 公开 · Zalo 合作后 · Instagram 公开"
-              onPress={() => openSubPage("socialidentity")}
-            />
-            <SocialRow
-              icon="◌"
-              label="可见范围"
-              desc="陌生浏览、聊天后、订单成立后分层开放"
-              onPress={() => openSubPage("socialprivacy")}
-            />
-            <SocialRow
-              icon="⌁"
-              label="访问与转化"
-              desc="知道哪个渠道真的带来聊天、机会与订单"
-              onPress={() => openSubPage("socialanalytics")}
-            />
-
-            {/* 资料原则 */}
-            <Text style={styles.customSectionTitle}>资料原则</Text>
-            <View style={styles.prototypeCard}>
-              <Text style={styles.prototypeCardDesc}>身体类资料默认不展示；每个字段独立控制公开与否，随时可收回。</Text>
-            </View>
+                ))}
+              </View>
+            ) : null}
           </ScrollView>
-          <AvailabilitySheet current={availability} onClose={() => setAvailabilityOpen(false)} onSelect={setAvailability} open={availabilityOpen} />
-          <ProfileEditorSheet fields={profileFields} onChange={setProfileFields} onClose={() => setProfileEditorOpen(false)} open={profileEditorOpen} />
+          <Modal animationType="slide" onRequestClose={() => setProfileEditorOpen(false)} transparent visible={profileEditorOpen}>
+            <View style={styles.profileEditorOverlay}>
+              <View style={styles.profileEditorSheet}>
+                <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => setProfileEditorOpen(false)}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
+                <Pressable onPress={() => void chooseProfileAvatar()} style={styles.profileEditorAvatarRow}>
+                  <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.profileEditorAvatar} />
+                  <View><Text style={styles.profileEditorAvatarTitle}>更换头像</Text><Text style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
+                </Pressable>
+                {([['name', '显示名称'], ['handle', '用户名'], ['bio', '一句话介绍'], ['city', '城市']] as const).map(([key, label]) => (
+                  <View key={key} style={styles.profileEditorField}><Text style={styles.profileEditorLabel}>{label}</Text><TextInput onChangeText={(value) => setProfileDraft((current) => ({ ...current, [key]: value }))} style={styles.profileEditorInput} value={profileDraft[key]} /></View>
+                ))}
+              </View>
+            </View>
+          </Modal>
+          {profileViewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={profileViewer.index} author={profileDraft.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setProfileViewer((current) => current ? { ...current, index } : current)} onClose={() => setProfileViewer(undefined)} /> : null}
         </View>
       );
     }
@@ -2510,6 +2505,43 @@ export function MeSurface({
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 18, paddingHorizontal: 15, paddingTop: 11 },
+  orderPageHead: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 12 },
+  orderBack: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, height: 40, justifyContent: "center", width: 40 },
+  orderBackText: { color: color.ink, fontSize: 22, fontWeight: "800" },
+  orderTabs: { marginBottom: 12 },
+  orderTab: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, marginRight: 7, paddingHorizontal: 13, paddingVertical: 9 },
+  orderTabOn: { backgroundColor: color.ink, borderColor: color.ink },
+  orderTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
+  orderTabTextOn: { color: color.white },
+  orderCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginBottom: 11, padding: 14, ...shadows.card },
+  orderHead: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
+  orderCopy: { flex: 1 },
+  orderTitle: { color: color.ink, fontSize: 14, fontWeight: "900" },
+  orderId: { color: color.muted, fontSize: 11, letterSpacing: 0.2, marginTop: 4 },
+  orderBadge: { backgroundColor: "#F3F1F4", borderRadius: 999, color: "#6D6771", fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5 },
+  orderBadgeLive: { backgroundColor: "#EFFFBD", color: "#3C4700" },
+  orderGrid: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12, paddingTop: 12 },
+  orderField: { width: "47%" },
+  orderFieldLabel: { color: color.muted, fontSize: 11, marginBottom: 3 },
+  orderFieldValue: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 17 },
+  orderStatus: { color: color.muted, fontSize: 11, marginTop: 11 },
+  orderActions: { flexDirection: "row", gap: 7, marginTop: 12 },
+  orderAction: { borderColor: color.line, borderRadius: 12, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 },
+  orderActionPrimary: { backgroundColor: color.ink, borderColor: color.ink },
+  orderActionText: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  orderActionPrimaryText: { color: color.white },
+  orderNotice: { backgroundColor: "#FAF9FB", borderRadius: 14, color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 12, padding: 11 },
+  activityOwnedTabs: { flexDirection: "row", gap: 7, marginBottom: 12 },
+  activityOwnedTab: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 9 },
+  activityOwnedTabOn: { backgroundColor: color.ink, borderColor: color.ink },
+  activityOwnedTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
+  activityOwnedTabTextOn: { color: color.white },
+  savedIntro: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  savedCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginBottom: 11, padding: 14, ...shadows.card },
+  savedRow: { alignItems: "center", flexDirection: "row", gap: 11 },
+  savedThumb: { alignItems: "center", backgroundColor: "#F1EEF2", borderRadius: 14, height: 48, justifyContent: "center", width: 48 },
+  savedThumbText: { color: color.ink, fontSize: 22 },
+  savedMeta: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
   meLocationRow: { alignItems: "center", flexDirection: "row", gap: 8, paddingBottom: 8, paddingHorizontal: 1, paddingTop: 3 },
   meLocationPin: { alignItems: "center", backgroundColor: "#F4EDF8", borderRadius: 10, height: 36, justifyContent: "center", width: 36 },
   meLocationCopy: { flex: 1 },
@@ -2788,6 +2820,60 @@ const styles = StyleSheet.create({
   // R15.9 个人社交入口：渠道、可见范围、归因漏斗均有独立的原型结构。
   detailTitle: { color: color.ink, fontSize: 19, fontWeight: "700", marginTop: 8 },
   detailSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginBottom: 8, marginTop: 3 },
+  socialAccountsContent: { paddingBottom: 36, paddingHorizontal: 18, paddingTop: 10 },
+  socialAccountsTitle: { color: color.ink, fontSize: 29, fontWeight: "900", letterSpacing: -0.6, lineHeight: 34 },
+  socialAccountsSub: { color: color.muted, fontSize: 14, lineHeight: 21, marginBottom: 16, marginTop: 7 },
+  socialAccountList: { borderTopColor: color.line, borderTopWidth: 1, marginTop: 12 },
+  socialAccountRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 13, minHeight: 82 },
+  socialAccountIcon: { alignItems: "center", backgroundColor: "#F3EEF8", borderRadius: 14, height: 44, justifyContent: "center", width: 44 },
+  socialAccountIconDark: { backgroundColor: "#111" },
+  socialAccountIconText: { color: "#6E3DB7", fontSize: 13, fontWeight: "900" },
+  socialAccountIconTextDark: { color: color.white },
+  socialAccountCopy: { flex: 1, minWidth: 0 },
+  socialAccountName: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  socialAccountHandle: { color: "#6E6872", fontSize: 12, marginTop: 4 },
+  socialAccountUrl: { color: color.muted, fontSize: 11, marginTop: 3 },
+  socialAccountTrailing: { alignItems: "center", flexDirection: "row", gap: 7 },
+  socialAccountState: { backgroundColor: "#F5F2F6", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  socialAccountStateActive: { backgroundColor: "#FFF1F6" },
+  socialAccountStateText: { color: "#766F79", fontSize: 11, fontWeight: "900" },
+  socialAccountStateTextActive: { color: color.magenta },
+  socialAccountChev: { color: "#B6AFB9", fontSize: 19 },
+  socialSettingsHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 8, marginTop: 24 },
+  socialSettingsTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  socialSettingsHint: { color: color.muted, fontSize: 11 },
+  socialSettingRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 12, paddingVertical: 15 },
+  socialSettingName: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  socialSettingDesc: { color: "#6E6872", fontSize: 12, lineHeight: 18, marginTop: 4 },
+  socialSwitch: { backgroundColor: "#D9D4DC", borderRadius: 999, height: 28, padding: 3, width: 48 },
+  socialSwitchOn: { backgroundColor: color.ink },
+  socialSwitchDot: { backgroundColor: color.white, borderRadius: 11, height: 22, width: 22 },
+  socialSwitchDotOn: { backgroundColor: "#FF5C99", marginLeft: 20 },
+  socialShareBox: { borderTopColor: color.line, borderTopWidth: 1, marginTop: 22, paddingTop: 0 },
+  socialShareLine: { alignItems: "center", flexDirection: "row", gap: 10, paddingVertical: 12 },
+  socialShareLink: { backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, color: "#5F5963", flex: 1, fontSize: 12, padding: 11 },
+  socialShareButton: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, height: 40, justifyContent: "center", paddingHorizontal: 14 },
+  socialShareButtonText: { color: color.white, fontSize: 12, fontWeight: "900" },
+  socialShareNote: { color: "#A19AA5", fontSize: 11, lineHeight: 16, marginTop: 2 },
+  socialEditorOverlay: { backgroundColor: "rgba(16,12,18,0.28)", flex: 1, justifyContent: "flex-end" },
+  socialEditorSheet: { backgroundColor: color.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 30, paddingHorizontal: 20, paddingTop: 16 },
+  socialEditorGrabber: { alignSelf: "center", backgroundColor: "#D7D1D9", borderRadius: 999, height: 4, marginBottom: 14, width: 34 },
+  socialEditorHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
+  socialEditorTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
+  socialEditorClose: { alignItems: "center", backgroundColor: "#F4F1F5", borderRadius: 17, height: 34, justifyContent: "center", width: 34 },
+  socialEditorCloseText: { color: "#5D5661", fontSize: 20 },
+  socialEditorNote: { color: color.muted, fontSize: 12, lineHeight: 17, marginBottom: 2 },
+  socialEditorLabel: { color: color.muted, fontSize: 11, fontWeight: "800", marginBottom: 7, marginTop: 14 },
+  socialEditorInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, height: 44, paddingHorizontal: 12 },
+  socialVisibilityRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 1 },
+  socialVisibilityButton: { borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 },
+  socialVisibilityButtonOn: { backgroundColor: color.ink, borderColor: color.ink },
+  socialVisibilityText: { color: "#625B66", fontSize: 11, fontWeight: "800" },
+  socialVisibilityTextOn: { color: color.white },
+  socialOpenLink: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 12, paddingVertical: 12 },
+  socialOpenLinkText: { color: "#4D4751", fontSize: 12, fontWeight: "800" },
+  socialSave: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, height: 48, justifyContent: "center", marginTop: 6 },
+  socialSaveText: { color: color.white, fontSize: 14, fontWeight: "900" },
   channelCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, flexDirection: "row", gap: 10, marginVertical: 4, padding: 11, ...shadows.card },
   channelMark: { alignItems: "center", backgroundColor: "#F5F1F8", borderRadius: 11, height: 36, justifyContent: "center", width: 36 },
   channelMarkLinked: { backgroundColor: "#F1E8FF" },
@@ -3206,36 +3292,77 @@ const styles = StyleSheet.create({
   trustStripValue: { color: color.ink, fontSize: 12, fontWeight: "800" },
   trustStripLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
 
-  // 个人主页 v3：编辑资料 sheet + 字段行（值 + 独立展示开关）。
-  profileEditorSheet: { maxHeight: "82%" },
-  profileGroupTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  profileGroupHint: { color: color.muted, fontSize: 11, marginBottom: 4, marginTop: 1 },
-  profileFieldRow: { alignItems: "center", flexDirection: "row", gap: 8 },
-  profileFieldMain: { flex: 1 },
-  profileFieldInput: {
-    backgroundColor: "#F8F6FA",
-    borderColor: "#EAE5ED",
-    borderRadius: 10,
-    borderWidth: 1,
-    color: color.ink,
-    fontSize: 12,
-    marginBottom: 6,
+  // 个人主页 v5：Threads 式轻资料与内容分页。能力与可用时间留在“我的市场”。
+  personalHubContent: { paddingBottom: 0 },
+  personalTopbar: {
+    alignItems: "center",
+    borderBottomColor: "#ECE8EF",
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
     paddingHorizontal: 10,
-    paddingVertical: 7
+    paddingVertical: 12
   },
-  profileFieldSide: { alignItems: "flex-end", width: 74 },
-  profileFieldLabel: { color: color.muted, fontSize: 11, fontWeight: "700", marginBottom: 4 },
-  profileVisToggle: {
-    borderRadius: 999,
-    borderWidth: 1,
-    marginBottom: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4
-  },
-  profileVisOn: { backgroundColor: "#EEF8D6", borderColor: "#DFEBC7" },
-  profileVisOff: { backgroundColor: "#F3F1F5", borderColor: "#E2DEE6" },
-  profileVisTextOn: { color: "#465C00", fontSize: 11, fontWeight: "900" },
-  profileVisTextOff: { color: "#8B8290", fontSize: 11, fontWeight: "700" },
+  personalTopbarButton: { alignItems: "center", height: 34, justifyContent: "center", width: 34 },
+  personalTopbarIcon: { color: color.ink, fontSize: 30, lineHeight: 32 },
+  personalTopbarHandle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  personalTopbarMore: { color: color.ink, fontSize: 17, fontWeight: "800", letterSpacing: 1 },
+  personalProfile: { paddingHorizontal: 12, paddingBottom: 14, paddingTop: 16 },
+  personalIdentityRow: { alignItems: "center", flexDirection: "row" },
+  personalIdentityCopy: { flex: 1 },
+  personalDisplayName: { color: color.ink, fontSize: 24, fontWeight: "900" },
+  personalHandleRow: { alignItems: "center", flexDirection: "row", gap: 5, marginTop: 4 },
+  personalHandle: { color: color.muted, fontSize: 13 },
+  personalVerified: { color: "#7A2CFF", fontSize: 13, fontWeight: "900" },
+  personalAvatar: { alignItems: "center", borderRadius: 30, height: 60, justifyContent: "center", width: 60 },
+  personalAvatarText: { color: color.white, fontSize: 24, fontWeight: "900" },
+  personalAvatarButton: { height: 66, position: "relative", width: 66 },
+  personalAvatarImage: { borderRadius: 33, height: 66, width: 66 },
+  personalAvatarEdit: { alignItems: "center", backgroundColor: color.ink, borderColor: color.white, borderRadius: 11, borderWidth: 2, bottom: -1, height: 22, justifyContent: "center", position: "absolute", right: -1, width: 22 },
+  personalAvatarEditText: { color: color.white, fontSize: 15, fontWeight: "900", lineHeight: 17 },
+  personalBio: { color: color.ink, fontSize: 14, lineHeight: 20, marginTop: 14 },
+  personalMeta: { color: color.muted, fontSize: 12, marginTop: 7 },
+  personalActions: { flexDirection: "row", gap: 9, marginTop: 16 },
+  personalActionButton: { alignItems: "center", borderColor: "#DDD8E1", borderRadius: 10, borderWidth: 1, flex: 1, paddingVertical: 9 },
+  personalActionText: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  personalTabs: { borderBottomColor: "#E9E5EC", borderBottomWidth: 1, flexDirection: "row" },
+  personalTab: { alignItems: "center", flex: 1, paddingVertical: 13 },
+  personalTabActive: { borderBottomColor: color.ink, borderBottomWidth: 2 },
+  personalTabText: { color: color.muted, fontSize: 13, fontWeight: "700" },
+  personalTabTextActive: { color: color.ink, fontWeight: "900" },
+  personalPost: { borderBottomColor: "#E9E5EC", borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 8, paddingVertical: 12 },
+  personalPostAvatar: { alignItems: "center", borderRadius: 18, height: 36, justifyContent: "center", width: 36 },
+  personalPostAvatarText: { color: color.white, fontSize: 14, fontWeight: "900" },
+  personalPostBody: { flex: 1 },
+  personalPostHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  personalPostName: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  personalPostTime: { color: color.muted, fontSize: 11 },
+  personalPostText: { color: color.ink, fontSize: 14, lineHeight: 20, marginTop: 5 },
+  personalPostContext: { color: color.muted, fontSize: 11, marginTop: 5 },
+  personalPostActions: { flexDirection: "row", gap: 22, marginTop: 11 },
+  personalPostAction: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  personalEmpty: { color: color.muted, fontSize: 13, paddingHorizontal: 16, paddingVertical: 32, textAlign: "center" },
+  personalPhotoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 2, paddingTop: 2 },
+  personalPhotoTile: { aspectRatio: 1, width: "33%" },
+  personalPhotoImage: { height: "100%", width: "100%" },
+  personalRecords: { paddingHorizontal: 16, paddingTop: 10 },
+  personalRecordRow: { alignItems: "center", backgroundColor: color.white, borderBottomColor: "#ECE8EF", borderBottomWidth: 1, flexDirection: "row", paddingHorizontal: 4, paddingVertical: 16 },
+  personalRecordCopy: { flex: 1 },
+  personalRecordTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  personalRecordDesc: { color: color.muted, fontSize: 12, marginTop: 4 },
+  personalRecordValue: { color: "#6F37B9", fontSize: 14, fontWeight: "900" },
+  profileEditorOverlay: { backgroundColor: "rgba(20,18,31,0.42)", flex: 1, justifyContent: "flex-end" },
+  profileEditorSheet: { backgroundColor: color.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 30, paddingHorizontal: 20, paddingTop: 18 },
+  profileEditorHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
+  profileEditorTitle: { color: color.ink, fontSize: 18, fontWeight: "900" },
+  profileEditorDone: { color: "#FF0A6C", fontSize: 14, fontWeight: "800" },
+  profileEditorAvatarRow: { alignItems: "center", flexDirection: "row", gap: 12, paddingBottom: 10, paddingTop: 4 },
+  profileEditorAvatar: { borderRadius: 26, height: 52, width: 52 },
+  profileEditorAvatarTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  profileEditorAvatarHint: { color: color.muted, fontSize: 11, marginTop: 3 },
+  profileEditorField: { borderBottomColor: "#ECE8EF", borderBottomWidth: 1, paddingVertical: 10 },
+  profileEditorLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  profileEditorInput: { color: color.ink, fontSize: 14, paddingHorizontal: 0, paddingVertical: 7 },
 
   // 能力实例卡与 sheet（原型 my_market_modules v5）。
   abilitySheetHead: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 6 },
@@ -3308,6 +3435,45 @@ const styles = StyleSheet.create({
   avCellWeek: { color: "#A59EAA", fontSize: 11 },
   avCellValue: { color: "#22506E", fontSize: 11, fontWeight: "800", marginTop: 1 },
   avCellValueMuted: { color: "#B9B3BD" },
+
+  // 能力与可用时间 v5：能力摘要与审计月历分层，避免把 30 天排班堆在能力页。
+  availabilityLead: { color: color.muted, fontSize: 13, lineHeight: 19, marginBottom: 14, marginTop: 5 },
+  availabilitySummaryCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 18, padding: 14, ...shadows.card },
+  availabilityRuleCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 12, padding: 15, ...shadows.card },
+  availabilityRuleIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 14, height: 46, justifyContent: "center", width: 46 },
+  availabilityRuleCopy: { flex: 1 },
+  availabilityRuleKicker: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  availabilityRuleValue: { color: color.ink, fontSize: 16, fontWeight: "900", marginTop: 3 },
+  availabilityEditButton: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+  availabilityEditText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  abilityCompactCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginBottom: 10, padding: 14, ...shadows.card },
+  abilityFieldChips: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 11 },
+  abilityFieldChip: { backgroundColor: "#F7F3F9", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+  abilityFieldChipText: { color: "#514957", fontSize: 11, fontWeight: "600" },
+  abilityFieldChipLabel: { color: color.ink, fontWeight: "800" },
+  addAbilityRow: { flexDirection: "row", gap: 8, marginBottom: 18, marginTop: 2 },
+  addAbilityChip: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 11 },
+  addAbilityChipText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  availabilityMonthCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, padding: 14, ...shadows.card },
+  availabilityMonthHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
+  availabilityMonthTitle: { color: color.ink, fontSize: 16, fontWeight: "900" },
+  availabilityClear: { color: color.muted, fontSize: 11, fontWeight: "800" },
+  availabilityWeekHead: { flexDirection: "row", marginBottom: 5 },
+  availabilityWeekName: { color: "#9C96A0", fontSize: 11, fontWeight: "800", textAlign: "center", width: "14.285%" },
+  availabilityMonthGrid: { flexDirection: "row", flexWrap: "wrap" },
+  availabilityMonthBlank: { aspectRatio: 1, width: "14.285%" },
+  availabilityMonthDay: { alignItems: "center", aspectRatio: 1, backgroundColor: color.white, borderColor: "#EEE9F0", borderRadius: 11, borderWidth: 1, justifyContent: "center", marginBottom: 5, transform: [{ scale: 0.92 }], width: "14.285%" },
+  availabilityMonthDay_base: { backgroundColor: color.white },
+  availabilityMonthDay_full: { backgroundColor: color.lime, borderColor: color.lime },
+  availabilityMonthDay_off: { backgroundColor: "#F1EFF2", borderColor: "#F1EFF2" },
+  availabilityMonthDay_custom: { borderColor: color.ink, borderWidth: 2 },
+  availabilityMonthDay_blank: { backgroundColor: "#FAF9FB" },
+  availabilityMonthNumber: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  availabilityMonthNumberOff: { color: "#AAA4AD" },
+  availabilityBaseDot: { backgroundColor: color.lime, borderRadius: 3, height: 6, marginTop: 4, width: 6 },
+  availabilityOffMark: { bottom: 1, color: "#8D8792", fontSize: 11, fontWeight: "900", position: "absolute" },
+  availabilityLegend: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
+  availabilityLegendText: { color: color.muted, fontSize: 11, fontWeight: "700" },
 
   // 隐私阶梯（原型 .r159PrivacyLadder）。
   privacyLadder: {

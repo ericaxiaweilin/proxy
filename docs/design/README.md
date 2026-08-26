@@ -20,7 +20,9 @@
 |---|---|---|---|
 | 商家「我的」 | R21 Activity Voucher Icon Fix | [`references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html`](./references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html) | 当前页面参考；不得覆盖 R3 全局 Logo、字体、颜色和图标规则 |
 | 商家 Creator 经营 | Creator Center Match v3 | [`references/proxy_creator_center_match_v3.html`](./references/proxy_creator_center_match_v3.html) | 仅作为功能、字段和流程参考；UI/UX 必须沿用当前 R3 与商家模块 |
-| 个人 Creator 申请 | Creator Apply v1 | [`references/proxy_creator_apply_v1.html`](./references/proxy_creator_apply_v1.html) | 仅作为申请流程与审核边界参考；UI/UX 使用当前 R3 |
+| 个人主页 | Personal Profile Architecture v5 · Threads Direction | [`references/proxy_personal_profile_architecture_v5_threads.html`](./references/proxy_personal_profile_architecture_v5_threads.html) | 当前页面参考；不再要求用户维护参数化资料字段 |
+| 社媒与联系 / 合作 | Social Contact Collaboration v2 | [`references/proxy_social_contact_collaboration_v2.html`](./references/proxy_social_contact_collaboration_v2.html) | 当前页面参考；个人只开放合作，商家发起邀请 |
+| 旧 Creator 申请 | Creator Apply v1 | [`references/proxy_creator_apply_v1.html`](./references/proxy_creator_apply_v1.html) | 历史参考，不再作为生产入口；申请流程已移除并改为邀请 |
 
 ## 历史资料规则
 

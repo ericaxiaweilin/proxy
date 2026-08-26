@@ -6,6 +6,7 @@ import { ReactNode, useEffect, useRef, useState } from "react";
 import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { color } from "../theme";
 import { setLastPage } from "./module-pager-store";
+import { decideExitRelease } from "./module-pager-gesture";
 
 /** 规范 §14 PageDefinition：component 直接接已构造元素，页面与模块宿主共享状态。 */
 export interface PagerPageDefinition {
@@ -26,6 +27,11 @@ export interface ProxyModulePagerProps {
   /** 受控页码：外部跳转入口（如点击标题）。与内部滑动经 onPageChange 双向同步。 */
   page?: number | undefined;
   onPageChange?: (index: number) => void;
+  /**
+   * 规范 §4/§13「Back 一律退整个模块」的触屏形态：第 1 页继续右滑越过
+   * 边界阻尼并松手（超过页宽 EXIT_COMMIT_RATIO）即触发。省略时该手势无效果。
+   */
+  onExit?: () => void;
   /** 规范 §7 方案 B 底部圆点弱指示；默认关闭，模块可自带标题式指示（方案 C）。 */
   dots?: boolean;
 }
@@ -42,11 +48,14 @@ export function ProxyModulePager({
   swipeEnabled = true,
   page,
   onPageChange,
+  onExit,
   dots = false
 }: ProxyModulePagerProps): React.JSX.Element {
   const { width } = useWindowDimensions();
   const listRef = useRef<ScrollView>(null);
   const mounted = useRef(false);
+  const exitRef = useRef(onExit);
+  exitRef.current = onExit;
   // initialPage 显式传入时永远赢过停留记录：被动重进的 rememberPage 语义由模块宿主保证
   // （宿主初始化自身状态时读 store，再把结果作为 initialPage 传下来），pager 只负责把滑动
   // 结果持久化写回 store。否则程序化带意图重进（如"完成后跳已使用"）会与宿主状态错位。
@@ -72,7 +81,46 @@ export function ProxyModulePager({
     listRef.current?.scrollTo({ x: target * width, animated: false });
   }, [page, width]);
 
+  // 右滑过头退出（§4/§13）：越界深度在拖拽期用 onScroll 取负向峰值；
+  // 判定同时挂 onScrollEndDrag（手指抬起必发）与 onMomentumScrollEnd
+  // （快速滑动后的减速结束）——iOS 慢速松手没有动量阶段，只挂后者会漏。
+  // 只认「当前在第 1 页 + 向右越界」，翻页拖拽（x≥0）不进入判定。
+  const overscrollPeak = useRef(0);
+
+  function noteOverscroll(x: number): void {
+    if (current === 0 && x < 0 && x < overscrollPeak.current) {
+      overscrollPeak.current = x;
+    }
+  }
+
+  /** 评估峰值并清零；命中阈值返回 true（仅当模块提供了 onExit）。 */
+  function tryExit(): boolean {
+    const peak = -overscrollPeak.current;
+    overscrollPeak.current = 0;
+    return Boolean(onExit) && peak > 0 && decideExitRelease({ overscrollPx: peak, pageWidth: width }) === "exit";
+  }
+
+  function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>): void {
+    noteOverscroll(event.nativeEvent.contentOffset.x);
+  }
+
+  function handleScrollBeginDrag(): void {
+    overscrollPeak.current = 0;
+  }
+
+  function handleScrollEndDrag(event: NativeSyntheticEvent<NativeScrollEvent>): void {
+    noteOverscroll(event.nativeEvent.contentOffset.x);
+    if (tryExit()) {
+      exitRef.current?.();
+      return;
+    }
+  }
+
   function handleMomentumEnd(event: NativeSyntheticEvent<NativeScrollEvent>): void {
+    if (tryExit()) {
+      exitRef.current?.();
+      return;
+    }
     const index = clampIndex(Math.round(event.nativeEvent.contentOffset.x / width), pages.length);
     if (index !== current) {
       commit(index);
@@ -86,8 +134,13 @@ export function ProxyModulePager({
         ref={listRef}
         horizontal
         pagingEnabled
+        alwaysBounceHorizontal={true}
         scrollEnabled={swipeEnabled}
         showsHorizontalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        onScrollBeginDrag={handleScrollBeginDrag}
+        onScrollEndDrag={handleScrollEndDrag}
         onMomentumScrollEnd={handleMomentumEnd}
         style={styles.scroll}
       >

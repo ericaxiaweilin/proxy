@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { useModuleBackHandler } from "../components/module-back";
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { type FulfillmentClient } from "../fulfillment-client";
@@ -125,6 +126,16 @@ export function MarketSurface({
   const [compareOpen, setCompareOpen] = useState(false);
   const [offerBusy, setOfferBusy] = useState(false);
   const [lastOrderId, setLastOrderId] = useState<string>();
+
+  // 规范 §4/§13：Android 硬件返回按真实嵌套深度逐层收起，最上层先消费；
+  // 全部收起后返回 false 交给 shell 关模块。叶子（submission/applicant）最深。
+  useModuleBackHandler(submissionName ? () => { setSubmissionName(null); return true; } : undefined);
+  useModuleBackHandler(applicantName ? () => { setApplicantName(null); return true; } : undefined);
+  useModuleBackHandler(compareOpen ? () => { setCompareOpen(false); return true; } : undefined);
+  useModuleBackHandler(selectOpp ? () => { setSelectOpp(null); return true; } : undefined);
+  useModuleBackHandler(publishOpen ? () => { setPublishOpen(false); return true; } : undefined);
+  useModuleBackHandler(activityDetail ? () => { setActivityDetail(null); return true; } : undefined);
+  useModuleBackHandler(oppDetail ? () => { setOppDetail(null); return true; } : undefined);
   const [offerMsg, setOfferMsg] = useState<string>();
   const [myOffers, setMyOffers] = useState<Array<{ offerId: string; status: string; expiresAt: string }>>([]);
   const [showOffers, setShowOffers] = useState(false);

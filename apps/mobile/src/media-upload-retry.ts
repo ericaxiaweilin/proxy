@@ -1,3 +1,7 @@
+export function isRestartableUploadSessionStatus(status: number): boolean {
+  return status === 404 || status === 409;
+}
+
 export async function uploadOriginalWithRetry(
   attempt: () => Promise<number>,
   sleep: (milliseconds: number) => Promise<void> = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),

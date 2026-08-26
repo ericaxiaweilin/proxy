@@ -80,6 +80,22 @@ func TestRequesterManifest(t *testing.T) {
 	if got := typed.Me.Sections[1].Items[0].Icon; got != "target" {
 		t.Fatalf("friend relationship icon drifted from Module Logo Master: %q", got)
 	}
+	market := typed.Me.Sections[2]
+	if market.ID != "my_market" || len(market.Items) != 4 {
+		t.Fatalf("unexpected my market section: %+v", market)
+	}
+	want := []struct{ id, label, route string }{
+		{"my_orders", "我的订单", "myorders"},
+		{"availability", "能力与可用时间", "available"},
+		{"my_activities", "我的活动", "myactivities"},
+		{"favorites", "收藏", "favorites"},
+	}
+	for index, expected := range want {
+		item := market.Items[index]
+		if item.ID != expected.id || item.Label != expected.label || item.Action.Type != "OPEN_REGISTERED_ROUTE" || item.Action.Route != expected.route {
+			t.Fatalf("my market item %d drifted to an obsolete baseline: %+v", index, item)
+		}
+	}
 }
 
 func TestRejectsUnknownContext(t *testing.T) {

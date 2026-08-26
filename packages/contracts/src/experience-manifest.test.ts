@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ExperienceManifestSchema } from "./index.js";
+import { ExperienceManifestSchema, RegisteredExperienceRouteSchema } from "./index.js";
 
 describe("ExperienceManifest R1", () => {
   it("accepts the registered Me -> Tasks actions", () => {
@@ -119,5 +119,10 @@ describe("ExperienceManifest R1", () => {
         }]
       }
     }).success).toBe(false);
+  });
+
+  it("removes the obsolete postfeed Me route from the protocol", () => {
+    expect(RegisteredExperienceRouteSchema.safeParse("favorites").success).toBe(true);
+    expect(RegisteredExperienceRouteSchema.safeParse("postfeed").success).toBe(false);
   });
 });

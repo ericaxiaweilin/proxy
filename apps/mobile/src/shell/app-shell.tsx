@@ -3,8 +3,8 @@
 // EXPERIENCE 仅作历史路由别名，新 UI 不展示体验货架。
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
-import { useCallback, useEffect, useState } from "react";
-import { AppState, Image, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, BackHandler, Image, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type {
   ExperienceAction,
@@ -23,6 +23,7 @@ import { type MarketplaceClient } from "../marketplace-client";
 import { type ExperienceClient } from "../experience-client";
 import { keepManifestRevision } from "../experience-refresh";
 import { dispatchExperienceAction } from "../experience-dispatcher";
+import { handleModuleBack } from "../components/module-back";
 import { type LocalNetClient } from "../localnet-client";
 import { type MediaClient } from "../media-client";
 import { type SocialSpaceClient } from "../socialspace-client";
@@ -109,9 +110,31 @@ export function AppShell({
   const [feedRefreshTrigger, setFeedRefreshTrigger] = useState(0);
   const [feedPrefsOpen, setFeedPrefsOpen] = useState(false);
   const [feedChromeVisible, setFeedChromeVisible] = useState(true);
+  const [scrollChromeVisible, setScrollChromeVisible] = useState(true);
+  const touchStartY = useRef<number | undefined>(undefined);
+  const lastTouchY = useRef<number | undefined>(undefined);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [homeAssistant, setHomeAssistant] = useState<{ text: string; mode?: HomeIntentMode; attachment?: HomeAttachment }>();
   const [voucherOpen, setVoucherOpen] = useState(false);
+
+  // 规范 §4/§13：Android 硬件返回 = 退整个模块，不逐页退（模块内层级由
+  // useModuleBackHandler 注册栈先消费）。顺序即最上层优先：后挂载的 Tab 状态先判。
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (handleModuleBack()) return true;
+      if (voucherOpen) { setVoucherOpen(false); return true; }
+      if (tab === "ME" && messageChatAuthor) { setMessageChatAuthor(undefined); return true; }
+      if (tab === "MESSAGES" && messageChatAuthor) { setMessageChatAuthor(undefined); return true; }
+      if (tab === "FEED" && feedPrefsOpen) { setFeedPrefsOpen(false); return true; }
+      if (tab === "FEED" && feedChatAuthor) { setFeedChatAuthor(undefined); return true; }
+      if (tab === "MARKET" && openExperience) { setOpenExperience(undefined); return true; }
+      if (tab === "HOME" && homeAssistant) { setHomeAssistant(undefined); return true; }
+      if (tab === "HOME" && workspaceTarget) { setWorkspaceTarget(undefined); return true; }
+      return false;
+    });
+    return () => subscription.remove();
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +176,7 @@ export function AppShell({
 
   function selectTab(next: RootTab): void {
     setFeedChromeVisible(true);
+    setScrollChromeVisible(true);
     if (next === "MARKET") {
       setMarketEntry({ tab: "OPPORTUNITY", viewMode: "LIST" });
       setOpenExperience(undefined);
@@ -215,10 +239,27 @@ export function AppShell({
       <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
       <View style={[styles.root, width >= 768 && styles.rootWide]}>
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
-        <Header compact={compactWidth} />
+        {scrollChromeVisible ? <Header compact={compactWidth} /> : null}
         {/* 首页的本地范围说明属于 root Chrome；“我的”根页由 Me Surface 自己渲染，避免泄漏到其详情页。 */}
-        {tab === "HOME" || tab === "MESSAGES" ? <LocationContext /> : null}
-        <View style={styles.body}>
+        {scrollChromeVisible && (tab === "HOME" || tab === "MESSAGES") ? <LocationContext /> : null}
+        <View
+          onTouchEnd={() => {
+            touchStartY.current = undefined;
+            lastTouchY.current = undefined;
+          }}
+          onTouchMove={(event) => {
+            const y = event.nativeEvent.pageY;
+            const previousY = lastTouchY.current ?? touchStartY.current ?? y;
+            const delta = y - previousY;
+            if (Math.abs(delta) >= 6) setScrollChromeVisible(delta > 0);
+            lastTouchY.current = y;
+          }}
+          onTouchStart={(event) => {
+            touchStartY.current = event.nativeEvent.pageY;
+            lastTouchY.current = event.nativeEvent.pageY;
+          }}
+          style={styles.body}
+        >
         {tab === "HOME" ? (
           homeAssistant ? (
             <HomeAssistantSurface
@@ -305,6 +346,7 @@ export function AppShell({
           ) : (
             <MeSurface
               context={context}
+              localNet={localNet}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,
@@ -324,7 +366,7 @@ export function AppShell({
           )
         )}
         </View>
-        {tab !== "FEED" || feedChromeVisible || feedChatAuthor || feedPrefsOpen ? <RootNav activeTab={tab} compact={compactWidth} onSelect={selectTab} /> : null}
+        {scrollChromeVisible && (tab !== "FEED" || feedChromeVisible || feedChatAuthor || feedPrefsOpen) ? <RootNav activeTab={tab} compact={compactWidth} onSelect={selectTab} /> : null}
         <ContextSwitcherSheet
           current={context}
           onClose={() => setSwitcherOpen(false)}

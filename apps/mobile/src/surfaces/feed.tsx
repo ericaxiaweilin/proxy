@@ -1340,7 +1340,7 @@ export function FeedSurface({
 
 // 人像组图规则：Rail 保持统一画布，半身照约 4:5 铺满；9:16 等全身照
 // 在同一画布内 contain + 柔和背景，保证头顶与脚都不被裁掉，也不会缩成窄条。
-function AdaptiveMediaCollection({ items, currentIndex, resolveUrl, onIndexChange, onOpen }: {
+export function AdaptiveMediaCollection({ items, currentIndex, resolveUrl, onIndexChange, onOpen }: {
   items: FeedMediaItem[];
   currentIndex: number;
   resolveUrl: (path: string) => string;
@@ -1452,7 +1452,7 @@ function SocialMediaFrame({ item, frameAspect, resolveUrl }: {
 
 // 单图不使用固定高度：常见比例按原比例展示；超长/超宽图限制卡片高度并 contain，
 // 避免默认 Feed 裁掉脸或身体。点击后再进入原比例高清查看。
-function SinglePostImage({ item, resolveUrl, onPress }: {
+export function SinglePostImage({ item, resolveUrl, onPress }: {
   item: FeedMediaItem;
   resolveUrl: (path: string) => string;
   onPress: () => void;
@@ -1483,7 +1483,7 @@ function SinglePostImage({ item, resolveUrl, onPress }: {
 
 // 图片查看器加载服务端原始文件（playbackUrl 对 IMAGE 指向原文件），缩略图不再被放大。
 // 成熟开源查看器负责 iOS/Android 双指缩放、双击缩放、左右翻页和下滑关闭。
-function MediaViewer({
+export function MediaViewer({
   items,
   index,
   author,

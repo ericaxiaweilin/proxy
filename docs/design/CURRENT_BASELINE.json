@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-24",
+  "updatedAt": "2026-08-25",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -24,10 +24,16 @@
       "status": "FUNCTIONAL_REFERENCE_ONLY"
     },
     {
-      "scope": "personal-creator-application",
-      "version": "CREATOR_APPLY_V1",
-      "file": "docs/design/references/proxy_creator_apply_v1.html",
-      "status": "FUNCTIONAL_REFERENCE_ONLY"
+      "scope": "personal-profile",
+      "version": "PERSONAL_PROFILE_ARCHITECTURE_V5_THREADS",
+      "file": "docs/design/references/proxy_personal_profile_architecture_v5_threads.html",
+      "status": "ACTIVE_SCREEN_REFERENCE"
+    },
+    {
+      "scope": "social-contact-collaboration",
+      "version": "SOCIAL_CONTACT_COLLABORATION_V2",
+      "file": "docs/design/references/proxy_social_contact_collaboration_v2.html",
+      "status": "ACTIVE_SCREEN_REFERENCE"
     }
   ],
   "legacy": [

@@ -3,7 +3,7 @@ import { File } from "expo-file-system";
 import * as Crypto from "expo-crypto";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
-import { uploadOriginalWithRetry } from "./media-upload-retry";
+import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./media-upload-retry";
 
 export type UploadableImage = {
   uri: string;
@@ -30,6 +30,13 @@ export type ResumableMediaUploadSession = {
 
 const UPLOAD_CHUNK_BYTES = 1024 * 1024;
 
+class UploadSessionUnavailableError extends Error {
+  public constructor(public readonly status: number) {
+    super(`照片续传会话不可用（${status}）`);
+    this.name = "UploadSessionUnavailableError";
+  }
+}
+
 type MediaAuthClient = {
   getAccessToken(): Promise<string | undefined>;
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -54,8 +61,7 @@ export class MediaClient {
     const totalBytes = localFile.size;
     if (!totalBytes || totalBytes <= 0) throw new Error("所选照片为空或大小不可读");
 
-    let session = options.resumeSession?.totalBytes === totalBytes ? options.resumeSession : undefined;
-    if (!session) {
+    const createSession = async (): Promise<ResumableMediaUploadSession> => {
       const storageKey = `${this.nextId("image")}${extensionFor(mimeType)}`;
       const created = await this.command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, {
         mediaType: "IMAGE",
@@ -64,18 +70,51 @@ export class MediaClient {
         width: image.width,
         height: image.height
       });
-      session = {
+      const freshSession = {
         mediaAssetId: stringField(created, "mediaAssetId"),
         storageKey,
         uploadUrl: stringField(created, "uploadUrl"),
         offset: 0,
         totalBytes
       };
-      options.onSession?.(session);
+      options.onSession?.(freshSession);
+      return freshSession;
+    };
+
+    let session = options.resumeSession?.totalBytes === totalBytes ? options.resumeSession : undefined;
+    if (!session) {
+      session = await createSession();
     }
 
-    const uploadEndpoint = `${this.input.baseUrl}${session.uploadUrl}`;
-    let offset = await this.queryUploadOffset(uploadEndpoint, accessToken, options.signal);
+    let uploadEndpoint = `${this.input.baseUrl}${session.uploadUrl}`;
+    let offset: number;
+    try {
+      offset = await this.queryUploadOffset(uploadEndpoint, accessToken, options.signal);
+    } catch (error) {
+      // Upload sessions are intentionally ephemeral. A persisted local draft can
+      // outlive a server restart/session TTL; 404/409 means resume is impossible,
+      // but the retained local original is still valid, so start a fresh asset.
+      if (!(error instanceof UploadSessionUnavailableError) || !isRestartableUploadSessionStatus(error.status)) throw error;
+      if (error.status === 409) {
+        const existing = await this.command("GetMediaAsset", { type: "MediaAsset", id: session.mediaAssetId }, { mediaAssetId: session.mediaAssetId });
+        const asset = existing.asset;
+        const processingStatus = asset && typeof asset === "object" && "processingStatus" in asset
+          ? (asset as { processingStatus?: unknown }).processingStatus
+          : undefined;
+        if (processingStatus === "READY") {
+          options.onProgress?.(1);
+          return { mediaAssetId: session.mediaAssetId, storageKey: session.storageKey };
+        }
+        if (processingStatus === "PROCESSING") {
+          await this.waitUntilReady(session.mediaAssetId, options.signal);
+          options.onProgress?.(1);
+          return { mediaAssetId: session.mediaAssetId, storageKey: session.storageKey };
+        }
+      }
+      session = await createSession();
+      uploadEndpoint = `${this.input.baseUrl}${session.uploadUrl}`;
+      offset = await this.queryUploadOffset(uploadEndpoint, accessToken, options.signal);
+    }
     if (offset < 0 || offset > totalBytes) throw new Error("照片续传位置无效，请重新选择照片");
     session = { ...session, offset };
     options.onSession?.(session);
@@ -135,7 +174,7 @@ export class MediaClient {
       headers: { Authorization: `Bearer ${accessToken}` },
       ...(signal ? { signal } : {})
     });
-    if (response.status < 200 || response.status >= 300) throw new Error(`照片续传会话不可用（${response.status}）`);
+    if (response.status < 200 || response.status >= 300) throw new UploadSessionUnavailableError(response.status);
     const value = Number(response.headers.get("Upload-Offset") ?? "0");
     if (!Number.isInteger(value) || value < 0) throw new Error("照片服务缺少有效续传位置");
     return value;

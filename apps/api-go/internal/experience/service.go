@@ -157,10 +157,10 @@ func manifestFor(contextName string) manifest {
 			{
 				ID: "my_market", Title: "我的市场", Hint: "个人资产",
 				Items: []menuItem{
-					{ID: "my_orders", Icon: "diamond", Label: "我的订单", Description: "我发布的 / 我参与的已成交订单", Action: action{Type: "OPEN_SURFACE", Surface: "TASKS", Params: map[string]any{"view": "NEED"}}},
+					{ID: "my_orders", Icon: "diamond", Label: "我的订单", Description: "我发布的 / 我参与的订单与交易记录", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "myorders"}},
 					{ID: "availability", Icon: "clock", Label: "能力与可用时间", Description: "能力、主题、区域与空闲时间", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "available"}},
-					{ID: "my_activities", Icon: "ring", Label: "我的活动", Description: "已参加 / 我发起的活动", Action: action{Type: "OPEN_SURFACE", Surface: "TASKS", Params: map[string]any{"view": "ACTIVITY", "filter": "MINE"}}},
-					{ID: "following", Icon: "star", Label: "关注与收藏", Description: "人、商家、动态与活动", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "postfeed"}},
+					{ID: "my_activities", Icon: "ring", Label: "我的活动", Description: "已参加 / 我发起的活动", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "myactivities"}},
+					{ID: "favorites", Icon: "star", Label: "收藏", Description: "商家、Creator、动态与活动", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "favorites"}},
 				},
 			},
 			{
@@ -176,7 +176,7 @@ func manifestFor(contextName string) manifest {
 
 	return manifest{
 		SchemaVersion: "1.0",
-		Revision:      "experience_manifest_r5_personalhub_me",
+		Revision:      "experience_manifest_r6_my_market_v5",
 		Context:       contextName,
 		Me: meManifest{
 			Mode:     "REPLACE",

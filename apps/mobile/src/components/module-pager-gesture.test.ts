@@ -2,9 +2,11 @@
 import { describe, expect, it } from "vitest";
 import {
   decideSwipe,
+  decideExitRelease,
   shouldLockHorizontal,
   HORIZONTAL_LOCK_RATIO,
-  TAP_SLOP_PX
+  TAP_SLOP_PX,
+  EXIT_COMMIT_RATIO
 } from "./module-pager-gesture";
 
 describe("shouldLockHorizontal", () => {
@@ -42,6 +44,22 @@ describe("decideSwipe", () => {
   });
   it("慢速小位移既非 tap 也非翻页", () => {
     expect(decideSwipe({ dx: 20, dy: 0, pageWidth: W, vx: 0.1 })).toBe("none");
+  });
+});
+
+describe("decideExitRelease（第 1 页右滑过头退模块）", () => {
+  const W = 390;
+  it("右滑超过页宽阈值 → exit", () => {
+    expect(decideExitRelease({ overscrollPx: W * EXIT_COMMIT_RATIO + 1, pageWidth: W })).toBe("exit");
+    expect(decideExitRelease({ overscrollPx: W * 0.6, pageWidth: W })).toBe("exit");
+  });
+  it("不足阈值回弹，不退出", () => {
+    expect(decideExitRelease({ overscrollPx: W * EXIT_COMMIT_RATIO - 1, pageWidth: W })).toBe("none");
+    expect(decideExitRelease({ overscrollPx: 12, pageWidth: W })).toBe("none");
+  });
+  it("方向不对（overscroll 非正）绝不触发", () => {
+    expect(decideExitRelease({ overscrollPx: -50, pageWidth: W })).toBe("none");
+    expect(decideExitRelease({ overscrollPx: 0, pageWidth: W })).toBe("none");
   });
 });
 

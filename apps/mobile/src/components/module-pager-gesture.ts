@@ -41,3 +41,18 @@ export const SNAP_MS_MIN = 180;
 export const SNAP_MS_MAX = 280;
 export const SNAP_DISTANCE_RATIO = 0.35;
 export const FLICK_VELOCITY_PX_PER_MS = 0.5;
+
+// —— 规范 §4/§13「返回统一退整个模块」的触屏形态：右滑过头退出 ——
+// 第 1 页继续向右拖会越过边界阻尼（offset.x 变负）；松手时越界深度超过
+// 阈值即提交退出。只读原生滚动事件，不与子页面/翻页手势竞争。
+
+/** 松手时右滑超过页宽该比例即提交退出，否则回弹。 */
+export const EXIT_COMMIT_RATIO = 0.32;
+
+/**
+ * 退出松手决策：仅接受向右（overscroll 为正）且超过阈值的滑动；
+ * 不足阈值或方向不对一律留在模块内，绝不误触。
+ */
+export function decideExitRelease(input: { overscrollPx: number; pageWidth: number }): "exit" | "none" {
+  return input.overscrollPx > 0 && input.overscrollPx > input.pageWidth * EXIT_COMMIT_RATIO ? "exit" : "none";
+}
