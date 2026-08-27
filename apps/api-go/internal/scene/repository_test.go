@@ -120,3 +120,98 @@ func TestMemoryRepository_InvitationLifecycle(t *testing.T) {
 		t.Fatalf("expected 0 invitations for unknown invitee, got %d", len(got3))
 	}
 }
+
+// ── Pass 3 audit closures for the 5 new Repository methods ────────
+// The Repository interface was extended (R15.13 P1) with Benefit +
+// Checkin storage but the in-memory implementation was incomplete.
+// Pin the contract so the PG adapter (when it lands) can be
+// verified against the same in-memory behaviour.
+
+func TestMemoryRepository_BenefitLifecycle(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	// Create a scene first so the benefit has a real anchor.
+	if err := repo.Create(ctx, Scene{ID: "scene_b1", HostUserID: "u1", Title: "x", Version: 1}); err != nil {
+		t.Fatalf("seed scene: %v", err)
+	}
+	// CreateBenefit happy path.
+	if err := repo.CreateBenefit(ctx, Benefit{ID: "ben_001", SceneID: "scene_b1", Type: "DRINK", Status: "LOCKED", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateBenefit: %v", err)
+	}
+	// GetBenefit round-trip.
+	got, err := repo.GetBenefit(ctx, "scene_b1")
+	if err != nil { t.Fatalf("GetBenefit: %v", err) }
+	if got.ID != "ben_001" || got.Type != "DRINK" {
+		t.Fatalf("GetBenefit returned wrong record: %#v", got)
+	}
+	// Duplicate create is rejected (one benefit per scene in v1).
+	if err := repo.CreateBenefit(ctx, Benefit{ID: "ben_002", SceneID: "scene_b1", Type: "CASH", Status: "LOCKED", CreatedAt: time.Now()}); err == nil {
+		t.Fatal("expected duplicate-benefit rejection, got nil")
+	}
+	// UpdateBenefit round-trip.
+	got.Status = "UNLOCKED"
+	if err := repo.UpdateBenefit(ctx, got); err != nil { t.Fatalf("UpdateBenefit: %v", err) }
+	got2, _ := repo.GetBenefit(ctx, "scene_b1")
+	if got2.Status != "UNLOCKED" { t.Fatalf("status not updated: %s", got2.Status) }
+	// UpdateBenefit on missing scene returns ErrNotFound.
+	if err := repo.UpdateBenefit(ctx, Benefit{SceneID: "scene_missing"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound on missing scene update, got %v", err)
+	}
+	// GetBenefit on missing scene returns ErrNotFound.
+	if _, err := repo.GetBenefit(ctx, "scene_missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound on missing scene get, got %v", err)
+	}
+}
+
+func TestMemoryRepository_BenefitInputValidation(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	// Empty id rejected.
+	if err := repo.CreateBenefit(ctx, Benefit{SceneID: "x", Type: "DRINK"}); err == nil {
+		t.Fatal("expected error on empty benefit id")
+	}
+	// Empty sceneId rejected.
+	if err := repo.CreateBenefit(ctx, Benefit{ID: "ben_x", Type: "DRINK"}); err == nil {
+		t.Fatal("expected error on empty sceneId")
+	}
+}
+
+func TestMemoryRepository_CheckinLifecycle(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	// Two checkins on the same scene with different users.
+	if err := repo.CreateCheckin(ctx, Checkin{SceneID: "scene_c1", UserID: "u1", Role: "HOST", At: time.Now()}); err != nil {
+		t.Fatalf("CreateCheckin host: %v", err)
+	}
+	if err := repo.CreateCheckin(ctx, Checkin{SceneID: "scene_c1", UserID: "u2", Role: "GUEST", At: time.Now()}); err != nil {
+		t.Fatalf("CreateCheckin guest: %v", err)
+	}
+	// Same user re-checks-in: last write wins (the type system requires
+	// this so a re-arrival after a network blip can update timestamp).
+	if err := repo.CreateCheckin(ctx, Checkin{SceneID: "scene_c1", UserID: "u1", Role: "HOST", At: time.Now().Add(time.Minute)}); err != nil {
+		t.Fatalf("CreateCheckin re-host: %v", err)
+	}
+	got, err := repo.ListCheckins(ctx, "scene_c1")
+	if err != nil { t.Fatalf("ListCheckins: %v", err) }
+	if len(got) != 2 {
+		t.Fatalf("expected 2 checkins (one per user), got %d", len(got))
+	}
+	// Missing scene returns empty list (not error).
+	empty, _ := repo.ListCheckins(ctx, "scene_no_checkins")
+	if len(empty) != 0 {
+		t.Fatalf("expected empty list for missing scene, got %d", len(empty))
+	}
+}
+
+func TestMemoryRepository_CheckinInputValidation(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	// Empty sceneId rejected.
+	if err := repo.CreateCheckin(ctx, Checkin{UserID: "u1"}); err == nil {
+		t.Fatal("expected error on empty sceneId")
+	}
+	// Empty userId rejected.
+	if err := repo.CreateCheckin(ctx, Checkin{SceneID: "x"}); err == nil {
+		t.Fatal("expected error on empty userId")
+	}
+}

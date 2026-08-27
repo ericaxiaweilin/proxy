@@ -411,10 +411,37 @@ func TestRespondInvitation_NotFound(t *testing.T) {
 // ── RecordAttendance / RecordOutcome (accept-only baseline) ───
 
 func TestRecordAttendance_Accepted(t *testing.T) {
+	// R15.13 P1 wiring: RecordAttendance is now wired to the Scene
+	// repository — it locates the Scene by target id, records a
+	// checkin (HOST or GUEST role), and unlocks the benefit once
+	// both sides have checked in. The P0 baseline (accept-only,
+	// no Scene dependency) is no longer the contract; the test
+	// must first create a Scene and then check in against it.
 	svc := New()
-	r := svc.Handle(testEnvelope("RecordAttendance", "att_001", map[string]any{}))
+	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	sceneID := resultAggregateID(t, created)
+	r := svc.Handle(testEnvelope("RecordAttendance", sceneID, map[string]any{}))
 	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "ATTENDED" {
 		t.Fatalf("expected ACCEPTED/ATTENDED, got %#v", r)
+	}
+	// Checkin row should be present.
+	checkins, _ := svc.repo.ListCheckins(context.Background(), sceneID)
+	if len(checkins) != 1 {
+		t.Fatalf("expected 1 checkin, got %d", len(checkins))
+	}
+	if checkins[0].Role != "HOST" {
+		t.Fatalf("expected role=HOST (actor==host), got %s", checkins[0].Role)
+	}
+}
+
+func TestRecordAttendance_NotFound(t *testing.T) {
+	// R15.13 P1 wiring: RecordAttendance against a non-existent
+	// scene is REJECTED with SCENE_NOT_FOUND. P0 baseline
+	// (accept-only) is no longer the contract.
+	svc := New()
+	r := svc.Handle(testEnvelope("RecordAttendance", "scene_does_not_exist", map[string]any{}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "SCENE_NOT_FOUND" {
+		t.Fatalf("expected REJECTED/SCENE_NOT_FOUND, got %#v", r)
 	}
 }
 
@@ -529,5 +556,117 @@ func TestHandle_UnknownCommand_Rejected(t *testing.T) {
 	r := svc.Handle(testEnvelope("DeleteScene", "any", map[string]any{}))
 	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "SCENE_COMMAND_UNSUPPORTED" {
 		t.Fatalf("expected SCENE_COMMAND_UNSUPPORTED, got %#v", r)
+	}
+}
+
+// ── Pass 3 audit closures: R15.13 P1 Scene fields ─────────────────
+
+func TestCreateScene_FundingModeDefaultsToHost(t *testing.T) {
+	svc := New()
+	r := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", r)
+	}
+	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
+	if stored.FundingMode != "HOST" {
+		t.Fatalf("expected default fundingMode=HOST, got %q", stored.FundingMode)
+	}
+}
+
+func TestCreateScene_FundingModeRespected(t *testing.T) {
+	svc := New()
+	p := okCreatePayload()
+	p["fundingMode"] = "SPLIT"
+	r := svc.Handle(testEnvelope("CreateScene", "new", p))
+	if r.Outcome != "ACCEPTED" { t.Fatalf("expected ACCEPTED, got %#v", r) }
+	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
+	if stored.FundingMode != "SPLIT" {
+		t.Fatalf("expected fundingMode=SPLIT, got %q", stored.FundingMode)
+	}
+}
+
+func TestCreateScene_BudgetMinorCarriedThrough(t *testing.T) {
+	svc := New()
+	p := okCreatePayload()
+	p["budgetMinor"] = 80000
+	r := svc.Handle(testEnvelope("CreateScene", "new", p))
+	if r.Outcome != "ACCEPTED" { t.Fatalf("expected ACCEPTED, got %#v", r) }
+	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
+	if stored.BudgetMinor != 80000 {
+		t.Fatalf("expected budgetMinor=80000, got %d", stored.BudgetMinor)
+	}
+}
+
+func TestCreateScene_CurrencyDefaultsToVND(t *testing.T) {
+	svc := New()
+	r := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
+	if stored.Currency != "VND" {
+		t.Fatalf("expected default currency=VND, got %q", stored.Currency)
+	}
+}
+
+func TestCreateScene_PriceCorridorPopulatedByCityAndSceneType(t *testing.T) {
+	svc := New()
+	p := okCreatePayload()
+	p["cityScope"] = "HN"
+	p["venueId"] = "aster_rooftop"
+	p["sceneType"] = "ROOFTOP_PHOTO"
+	r := svc.Handle(testEnvelope("CreateScene", "new", p))
+	if r.Outcome != "ACCEPTED" { t.Fatalf("expected ACCEPTED, got %#v", r) }
+	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
+	if stored.PriceCorridor == nil {
+		t.Fatal("expected priceCorridor to be populated, got nil")
+	}
+	// ROOFTOP keyword → high corridor
+	if got := stored.PriceCorridor["high"]; got != int64(120000) {
+		t.Fatalf("expected ROOFTOP high=120000, got %v", got)
+	}
+	if stored.PriceCorridor["currency"] != "VND" {
+		t.Fatalf("expected currency=VND in corridor, got %v", stored.PriceCorridor["currency"])
+	}
+}
+
+func TestCreateScene_AestheticScoreForPhotoIsHigh(t *testing.T) {
+	svc := New()
+	p := okCreatePayload()
+	// sceneType = "ROOFTOP_PHOTO" is in the strong set → 0.92
+	p["sceneType"] = "ROOFTOP_PHOTO"
+	r := svc.Handle(testEnvelope("CreateScene", "new", p))
+	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
+	if stored.AestheticScore != 0.92 {
+		t.Fatalf("expected aestheticScore=0.92 for ROOFTOP_PHOTO, got %v", stored.AestheticScore)
+	}
+}
+
+func TestCreateScene_AestheticScoreForSpaIsLow(t *testing.T) {
+	svc := New()
+	p := okCreatePayload()
+	p["sceneType"] = "SPA_RELAXATION"
+	r := svc.Handle(testEnvelope("CreateScene", "new", p))
+	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
+	if stored.AestheticScore != 0.45 {
+		t.Fatalf("expected aestheticScore=0.45 for SPA, got %v", stored.AestheticScore)
+	}
+}
+
+func TestUpdateScene_AppliesFundingAndBudgetChange(t *testing.T) {
+	svc := New()
+	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	sceneID := resultAggregateID(t, created)
+	r := svc.Handle(testEnvelope("UpdateScene", sceneID, map[string]any{
+		"expectedVersion": 1,
+		"changes": map[string]any{
+			"fundingMode": "GUEST_SPONSORED",
+			"budgetMinor": float64(150000), // JSON numbers decode as float64
+		},
+	}))
+	if r.Outcome != "ACCEPTED" { t.Fatalf("expected ACCEPTED, got %#v", r) }
+	stored, _ := svc.repo.Get(context.Background(), sceneID)
+	if stored.FundingMode != "GUEST_SPONSORED" {
+		t.Fatalf("expected fundingMode updated, got %q", stored.FundingMode)
+	}
+	if stored.BudgetMinor != 150000 {
+		t.Fatalf("expected budgetMinor updated, got %d", stored.BudgetMinor)
 	}
 }

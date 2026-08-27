@@ -182,6 +182,17 @@ apps/mobile/src/surfaces/business-home.tsx  R15.13 Scene Package 商家可供给
 docs/media-pipeline/{GATE_3_PIPELINE.md, image_recipe_v2_spec.md}  §5.2.2 回落矩阵 + Gate 3 'B' case 重写（TEXT_HEAVY/多人/混合 contain / SCENE 不再 auto crop / dominant color frame 背景）
 architecture/Social_Media_Pipeline_Plan_Gates_R1.md  §5.2.2 表格 + dominant color 不变量
 ```
+
+## 新增：R15.13 P1 Scene Funding / Benefit / Checkin（2026-08-27）
+
+```text
+apps/api-go/internal/scene/service.go  Scene 结构体扩 fundingMode / budgetMinor / currency / aestheticScore / priceCorridor + createPayload 加 fundingMode/budgetMinor/currency/sceneType + applyChange 加 fundingMode/budgetMinor/venueId/aestheticScore
+apps/api-go/internal/scene/service.go  辅助函数：priceCorridorFor(city, merchant, sceneType) + aestheticScoreFor(sceneType) — ROOFTOP/BRUNCH 起步价高、SPA/CINEMA aesthetic 评分低
+apps/api-go/internal/scene/repository.go  Repository 接口加 CreateBenefit / GetBenefit / UpdateBenefit / CreateCheckin / ListCheckins 5 个方法 + Benefit/Checkin struct + memoryRepo 实现
+apps/api-go/internal/scene/scene_test.go  +8 cases: fundingMode 默认 HOST / SPLIT / budgetMinor 透传 / currency 默认 VND / priceCorridor ROOFTOP 高价 / aestheticScore PHOTO 0.92 SPA 0.45 / UpdateScene 修改 fundingMode+budgetMinor
+apps/api-go/internal/scene/repository_test.go  +4 cases: benefit lifecycle / benefit input validation / checkin lifecycle / checkin input validation
+apps/api-go/migrations/029_invite_funding_benefit.sql  scenes 表加 funding_mode / budget_minor / currency / aesthetic_score / price_corridor JSONB + scene.benefits / scene.checkins / scene.price_corridors / scene.memories 4 张新表
+```
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。

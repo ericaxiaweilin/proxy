@@ -24,6 +24,9 @@ type Scene struct {
 	Anchor        map[string]any `json:"anchor,omitempty"`
 	Participation string         `json:"participation"`
 	Cost          string         `json:"cost"`
+	FundingMode   string         `json:"fundingMode"`
+	BudgetMinor   int64          `json:"budgetMinor"`
+	Currency      string         `json:"currency"`
 	Benefits      []map[string]any `json:"benefits"`
 	VenueID       string         `json:"venueId,omitempty"`
 	StartsAt      time.Time      `json:"startsAt"`
@@ -32,6 +35,8 @@ type Scene struct {
 	CapacityMax   int            `json:"capacityMax,omitempty"`
 	HostUserID    string         `json:"hostUserId"`
 	CityScope     string         `json:"cityScope,omitempty"`
+	AestheticScore float64       `json:"aestheticScore"`
+	PriceCorridor map[string]any `json:"priceCorridor"`
 	Status        string         `json:"status"`
 	CreatedAt     time.Time      `json:"createdAt"`
 	UpdatedAt     time.Time      `json:"updatedAt"`
@@ -60,6 +65,18 @@ func evaluateGuard(s Scene) guardResult {
 
 func passesIndependence(s Scene) bool {
 	return s.Anchor != nil && len(s.Anchor) > 0 && s.Title != ""
+}
+func priceCorridorFor(city, merchant, sceneType string) map[string]any {
+	p25, p50, p75 := int64(40000), int64(55000), int64(80000)
+	if strings.Contains(sceneType, "ROOFTOP") { p25, p50, p75 = 60000, 80000, 120000 }
+	if strings.Contains(sceneType, "BRUNCH") { p25, p50, p75 = 50000, 70000, 100000 }
+	return map[string]any{"low": p25, "target": p50, "high": p75, "currency": "VND", "city": city, "merchant": merchant, "sceneType": sceneType}
+}
+func aestheticScoreFor(sceneType string) float64 {
+	strong := map[string]bool{"PHOTO": true, "ROOFTOP_PHOTO": true, "PHOTO_CAFE": true, "BRUNCH": true, "EXHIBITION": true, "ROOFTOP": true}
+	if strong[sceneType] { return 0.92 }
+	if strings.Contains(sceneType, "SPA") || strings.Contains(sceneType, "CINEMA") { return 0.45 }
+	return 0.72
 }
 
 type Service struct {
@@ -106,6 +123,9 @@ type createPayload struct {
 	Anchor        map[string]any   `json:"anchor"`
 	Participation string           `json:"participation"`
 	Cost          string           `json:"cost"`
+	FundingMode   string           `json:"fundingMode"`
+	BudgetMinor   *int64           `json:"budgetMinor"`
+	Currency      string           `json:"currency"`
 	Benefits      []map[string]any `json:"benefits"`
 	VenueID       string           `json:"venueId"`
 	StartsAt      string           `json:"startsAt"`
@@ -113,6 +133,7 @@ type createPayload struct {
 	CapacityMin   *int             `json:"capacityMin"`
 	CapacityMax   *int             `json:"capacityMax"`
 	CityScope     string           `json:"cityScope"`
+	SceneType     string           `json:"sceneType"`
 }
 
 func (s *Service) create(ctx context.Context, e command.Envelope) command.Result {
@@ -127,10 +148,21 @@ func (s *Service) create(ctx context.Context, e command.Envelope) command.Result
 	now := s.clock.Now().UTC()
 	title := strings.TrimSpace(p.Intent)
 	if len(title)>60 { title = title[:60] }
+	fundingMode := p.FundingMode
+	if fundingMode == "" { fundingMode = "HOST" }
+	currency := p.Currency
+	if currency == "" { currency = "VND" }
+	var budget int64
+	if p.BudgetMinor != nil { budget = *p.BudgetMinor }
+	sceneType := p.SceneType
+	if sceneType == "" { sceneType = p.Tool }
+	priceCorridor := priceCorridorFor(p.CityScope, p.VenueID, sceneType)
+	aesthetic := aestheticScoreFor(sceneType)
 	scene := Scene{
 		ID: newID("scene_"), Tool: p.Tool, Title: title, Intent: p.Intent, Anchor: p.Anchor,
-		Participation: p.Participation, Cost: p.Cost, Benefits: p.Benefits, VenueID: p.VenueID,
-		StartsAt: startsAt, EndsAt: endsAt, HostUserID: e.Actor.ID, CityScope: p.CityScope,
+		Participation: p.Participation, Cost: p.Cost, FundingMode: fundingMode, BudgetMinor: budget, Currency: currency,
+		Benefits: p.Benefits, VenueID: p.VenueID, StartsAt: startsAt, EndsAt: endsAt, HostUserID: e.Actor.ID, CityScope: p.CityScope,
+		AestheticScore: aesthetic, PriceCorridor: priceCorridor,
 		Status: "DRAFT", CreatedAt: now, UpdatedAt: now, Version: 1,
 	}
 	if p.CapacityMin != nil { scene.CapacityMin = *p.CapacityMin }
@@ -177,6 +209,7 @@ func (s *Service) publish(ctx context.Context, e command.Envelope) command.Resul
 	scene.UpdatedAt=s.clock.Now().UTC()
 	events:=[]event.DomainEvent{event.New("ScenePublished","Scene",scene.ID,scene.Version,e.Principal.ID,e.CorrelationID,e.CommandID,scene.UpdatedAt,map[string]any{"guard":guard.Result})}
 	if err:=s.repo.Update(ctx,scene,p.ExpectedVersion);err!=nil{return command.Rejected(e,"SCENE_PUBLISH_FAILED","INTERNAL","SAFE_RETRY","scene.publish_failed",nil)}
+	_ = s.repo.CreateBenefit(ctx, Benefit{ID: newID("ben_"), SceneID: scene.ID, Type: "PHOTO_BOOTH", Status: "LOCKED", CreatedAt: scene.UpdatedAt})
 	return command.Accepted(e,"Scene",scene.ID,scene.Version,"INVITING", eventRefs(events))
 }
 type invitationPayload struct {
@@ -206,7 +239,26 @@ func (s *Service) respondInvitation(ctx context.Context, e command.Envelope) com
 	ev:=event.New("InvitationResponded","Invitation",inv.ID,2,e.Principal.ID,e.CorrelationID,e.CommandID,s.clock.Now().UTC(),map[string]any{"decision":p.Decision})
 	return command.Accepted(e,"Invitation",inv.ID,2,p.Decision, eventRefs([]event.DomainEvent{ev}))
 }
-func (s *Service) recordAttendance(ctx context.Context, e command.Envelope) command.Result { return command.Accepted(e,"Attendance",e.Target.ID,1,"ATTENDED", nil) }
+func (s *Service) recordAttendance(ctx context.Context, e command.Envelope) command.Result {
+	scene, err := s.repo.Get(ctx, e.Target.ID)
+	if err != nil { return command.Rejected(e, "SCENE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "scene.not_found", nil) }
+	role := "GUEST"
+	if e.Actor.ID == scene.HostUserID { role = "HOST" }
+	_ = s.repo.CreateCheckin(ctx, Checkin{SceneID: scene.ID, UserID: e.Actor.ID, Role: role, At: s.clock.Now().UTC()})
+	checkins, _ := s.repo.ListCheckins(ctx, scene.ID)
+	hasHost, hasGuest := false, false
+	for _, c := range checkins {
+		if c.Role == "HOST" { hasHost = true }
+		if c.Role == "GUEST" { hasGuest = true }
+	}
+	if hasHost && hasGuest {
+		if ben, err := s.repo.GetBenefit(ctx, scene.ID); err == nil && ben.Status == "LOCKED" {
+			ben.Status = "ACTIVE"
+			_ = s.repo.UpdateBenefit(ctx, ben)
+		}
+	}
+	return command.Accepted(e, "Attendance", scene.ID, 1, "ATTENDED", nil)
+}
 func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command.Result { return command.Accepted(e,"Outcome",e.Target.ID,1,"RECORDED", nil) }
 func (s *Service) listMyScenes(ctx context.Context, e command.Envelope) command.Result {
 	var p struct{ Limit int `json:"limit"`}
@@ -239,9 +291,13 @@ func applyChange(s *Scene, k string, v any){
 	case "intent": if str,ok:=v.(string);ok{ s.Intent=str }
 	case "participation": if str,ok:=v.(string);ok{ s.Participation=str }
 	case "cost": if str,ok:=v.(string);ok{ s.Cost=str }
+	case "fundingMode": if str,ok:=v.(string);ok{ s.FundingMode=str }
+	case "budgetMinor": if n,ok:=v.(float64);ok{ s.BudgetMinor=int64(n) }
 	case "cityScope": if str,ok:=v.(string);ok{ s.CityScope=str }
+	case "venueId": if str,ok:=v.(string);ok{ s.VenueID=str }
 	case "benefits": if arr,ok:=v.([]any);ok{ s.Benefits = toBenefits(arr) }
 	case "anchor": if m,ok:=v.(map[string]any);ok{ s.Anchor=m }
+	case "aestheticScore": if n,ok:=v.(float64);ok{ s.AestheticScore=n }
 	}
 }
 func toBenefits(arr []any) []map[string]any { out:=[]map[string]any{}; for _,v:=range arr{ if m,ok:=v.(map[string]any);ok{out=append(out,m)}}; return out }
