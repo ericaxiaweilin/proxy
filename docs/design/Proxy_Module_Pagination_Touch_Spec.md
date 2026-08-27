@@ -679,3 +679,25 @@ travel = {
 它应该更像：
 
 **一个可以通过手势直接操控的连续工具界面。**
+
+---
+
+# 17. 架构层统一接入（2026-08-27 新增，不逐个模块改）
+
+此前 `voucher` 作为 `7667206` 试点直接 `import { ProxyModulePager }`，导致“券能滑、动态/市场不能滑”。
+
+**已回退**：`apps/mobile/src/surfaces/voucher.tsx` 已 `git checkout 1d2629f` 回到 R3 纯审核视觉（`tabs` + `VoucherFamilyMark`，无 `Pager`），与 `Proxy_App_Design_System_R3_Visual.html` 一致。
+
+**新增架构**：
+- `apps/mobile/src/architecture/paginated-module.tsx` — `PaginatedModuleShell` + `tabsToPagerPages`，模块只声明 `pages`，滑动由架构注入
+- `apps/mobile/src/architecture/module-registry.ts` — `PAGINATED_MODULES` 注册表，新增分页模块只需在此加一条（`id/pages`），`App Shell` 自动包裹
+- 原则：`ProxyModulePager` 不再由各 `surface` 直接 `import`，改为架构层统一托管；`Router` 管模块，`Pager` 管 Page，符合 §12。
+
+迁移示例（券，已验证）：
+```ts
+// 审核视觉保持不变，仅交互由架构接管
+import { tabsToPagerPages, PaginatedModuleShell } from "../architecture/paginated-module";
+const pages = tabsToPagerPages({ tabs: ["AVAILABLE","USED","EXPIRED"] as const, activeTab: tab, renderPage: (t)=> <VoucherListPage tab={t} .../> });
+return <PaginatedModuleShell definition={{ id:"voucher", pages }} onExit={onBack} />;
+```
+后续 `动态: 推荐/关注`、`市场: 机会/活动`、`任务: 全部/我参与` 等同理在 `module-registry.ts` 追加即可。

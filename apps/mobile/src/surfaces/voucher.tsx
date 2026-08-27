@@ -4,9 +4,7 @@ import { color, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 import type { Voucher, VoucherFamily, VoucherRedemption, VoucherSettlementState } from "../voucher-client";
 import { VoucherClient } from "../voucher-client";
-import { ProxyModulePager } from "../components/module-pager";
-import { getLastPage } from "../components/module-pager-store";
-import { useModuleBackHandler } from "../components/module-back";
+import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 
 type Screen = "LIST" | "DETAIL" | "REDEEM" | "SETTLEMENT" | "SUCCESS" | "CREATE";
 type VoucherTab = "AVAILABLE" | "USED" | "EXPIRED";
@@ -34,16 +32,6 @@ function VoucherFamilyMark({ family, size = 34 }: { family: VoucherFamily; size?
   return <View style={{ height: size, width: size }}><View style={[styles.personHead, { backgroundColor: tint, height: size * .25, left: size * .17, top: size * .13, width: size * .25 }]} /><View style={[styles.personHead, { backgroundColor: tint, height: size * .25, right: size * .17, top: size * .13, width: size * .25 }]} /><View style={[styles.personBody, { borderColor: tint, borderRadius: size * .28, borderWidth: Math.max(2, size * .07), bottom: size * .11, height: size * .37, left: size * .05, width: size * .46 }]} /><View style={[styles.personBody, { borderColor: tint, borderRadius: size * .28, borderWidth: Math.max(2, size * .07), bottom: size * .11, height: size * .37, right: size * .05, width: size * .46 }]} /></View>;
 }
 
-// 规范 §7 方案 C「滑动标题」：标题条常驻 pager 上方，点击跳转只是辅助，左右滑动才是主要分页方式。
-function ListHeader({ tab, availableCount, isBusiness, onJump, onCreate, onExit }: { tab: VoucherTab; availableCount: number; isBusiness: boolean; onJump: (tab: VoucherTab) => void; onCreate: () => void; onExit: () => void }): React.JSX.Element {
-  return <View><View style={styles.listHead}><View><Back label="我的" onPress={onExit} /><Text style={styles.pageTitle}>我的礼品券</Text><Text style={styles.pageSub}>统一权益卡面；礼品券不属于钱包余额。</Text></View>{isBusiness ? <Pressable onPress={onCreate} style={styles.createButton}><Text style={styles.createButtonText}>创建礼券</Text></Pressable> : null}</View><View style={styles.tabs}>{(["AVAILABLE", "USED", "EXPIRED"] as VoucherTab[]).map((item) => <Pressable key={item} onPress={() => onJump(item)} style={[styles.tab, tab === item && styles.tabActive]}><Text style={[styles.tabText, tab === item && styles.tabTextActive]}>{item === "AVAILABLE" ? `可用 ${availableCount}` : item === "USED" ? "已使用" : "已过期"}</Text></Pressable>)}</View></View>;
-}
-
-function VoucherListPage({ vouchers, busy, error, tab, onOpen }: { vouchers: Voucher[]; busy: boolean; error?: string | undefined; tab: VoucherTab; onOpen: (voucher: Voucher) => void }): React.JSX.Element {
-  const visible = vouchers.filter((voucher) => tab === "AVAILABLE" ? voucher.status === "AVAILABLE" : tab === "USED" ? voucher.status === "REDEEMED" || voucher.status === "SETTLED" : voucher.status === "EXPIRED");
-  return <ScrollView contentContainerStyle={styles.content}>{busy ? <ActivityIndicator color={color.magenta} style={styles.spinner} /> : null}{error ? <Text style={styles.error}>{error}</Text> : null}<View style={styles.cards}>{visible.map((voucher) => <VoucherCard key={voucher.voucherId} voucher={voucher} onPress={() => onOpen(voucher)} />)}{!busy && visible.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>{tab === "AVAILABLE" ? "暂无可用礼品券" : "这里还没有记录"}</Text><Text style={styles.emptyText}>礼品券的邀请来源与 CRM 归因留在消息和后台，不挤进券面。</Text></View> : null}</View></ScrollView>;
-}
-
 function Back({ onPress, label = "礼品券" }: { onPress: () => void; label?: string }): React.JSX.Element {
   return <Pressable onPress={onPress} style={styles.back}><Text style={styles.backArrow}>‹</Text><Text style={styles.backText}>{label}</Text></Pressable>;
 }
@@ -63,22 +51,31 @@ function QR(): React.JSX.Element {
   return <View style={styles.qr}>{cells.map((on, i) => <View key={i} style={[styles.qrCell, on && styles.qrCellOn]} />)}<View style={styles.qrLogo}><Text style={styles.qrLogoText}>PV</Text></View></View>;
 }
 
+function VoucherListPage({ vouchers, busy, error, tab, onOpen }: { vouchers: Voucher[]; busy: boolean; error?: string | undefined; tab: VoucherTab; onOpen: (voucher: Voucher) => void }): React.JSX.Element {
+  const visible = vouchers.filter((voucher) => (tab === "AVAILABLE" ? voucher.status === "AVAILABLE" : tab === "USED" ? voucher.status === "REDEEMED" || voucher.status === "SETTLED" : voucher.status === "EXPIRED"));
+  return (
+    <ScrollView contentContainerStyle={styles.content}>
+      {busy ? <ActivityIndicator color={color.magenta} style={styles.spinner} /> : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <View style={styles.cards}>
+        {visible.map((voucher) => (
+          <VoucherCard key={voucher.voucherId} voucher={voucher} onPress={() => onOpen(voucher)} />
+        ))}
+        {!busy && visible.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>{tab === "AVAILABLE" ? "暂无可用礼品券" : "这里还没有记录"}</Text>
+            <Text style={styles.emptyText}>礼品券的邀请来源与 CRM 归因留在消息和后台，不挤进券面。</Text>
+          </View>
+        ) : null}
+      </View>
+    </ScrollView>
+  );
+}
+
 export function VoucherSurface({ client, context, onBack }: { client: VoucherClient; context: ActiveContext; onBack: () => void }): React.JSX.Element {
   const [screen, setScreen] = useState<Screen>("LIST");
-  // 规范 §4/§13：Android 硬件返回逐层收起（REDEEM/SETTLEMENT 的父级是详情页）；
-  // iOS 右滑过头退出由 ModulePager onExit 承担，这里不重复注册模块级返回。
-  useModuleBackHandler(
-    screen === "REDEEM" || screen === "SETTLEMENT"
-      ? () => { setScreen("DETAIL"); return true; }
-      : screen === "LIST"
-        ? undefined
-        : () => { setScreen("LIST"); return true; }
-  );
-  // 规范 §5 rememberPage：重进模块回到上次停留 Page（内存级，App 会话内有效）。
-  const [tab, setTab] = useState<VoucherTab>(() => {
-    const last = getLastPage("voucher");
-    return last === 1 ? "USED" : last === 2 ? "EXPIRED" : "AVAILABLE";
-  });
+  const [tab, setTab] = useState<VoucherTab>("AVAILABLE");
+  const [pagerPage, setPagerPage] = useState<number | undefined>(undefined);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [selected, setSelected] = useState<Voucher>();
   const [redemption, setRedemption] = useState<VoucherRedemption>();
@@ -87,8 +84,6 @@ export function VoucherSurface({ client, context, onBack }: { client: VoucherCli
   const [error, setError] = useState<string>();
   const [now, setNow] = useState(Date.now());
   const [family, setFamily] = useState<VoucherFamily>("COFFEE");
-  // 受控跳转页：点击标题时设置，滑动落地后清空（避免同值二次点击失效）。
-  const [pagerPage, setPagerPage] = useState<number>();
   const [value, setValue] = useState("50000");
   const [quantity, setQuantity] = useState("20");
   const [scope, setScope] = useState("Cafe A · Bắc Ninh");
@@ -96,6 +91,9 @@ export function VoucherSurface({ client, context, onBack }: { client: VoucherCli
   async function reload(): Promise<void> { setBusy(true); setError(undefined); try { setVouchers(await client.list()); } catch { setError("礼品券暂时无法加载，请稍后重试。"); } finally { setBusy(false); } }
   useEffect(() => { void reload(); }, []);
   useEffect(() => { const handle = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(handle); }, []);
+  const visible = vouchers.filter((voucher) => tab === "AVAILABLE" ? voucher.status === "AVAILABLE" : tab === "USED" ? voucher.status === "REDEEMED" || voucher.status === "SETTLED" : voucher.status === "EXPIRED");
+  const availableCount = vouchers.filter((voucher) => voucher.status === "AVAILABLE").length;
+
   async function openVoucher(voucher: Voucher): Promise<void> { setSelected(voucher); setScreen("DETAIL"); setError(undefined); try { setSelected(await client.get(voucher.voucherId)); } catch { setError("无法读取礼品券详情。"); } }
   async function startRedeem(): Promise<void> { if (!selected) return; setBusy(true); setError(undefined); try { const result = await client.openRedemption(selected.voucherId); setSelected(result.voucher); setRedemption(result.redemption); setScreen("REDEEM"); } catch { setError("动态核销凭证暂时无法生成，请稍后重试。"); } finally { setBusy(false); } }
   async function confirmRedeem(): Promise<void> { if (!redemption) return; setBusy(true); setError(undefined); try { const result = await client.confirmRedemption(redemption.redemptionId); setSelected(result.voucher); const status = await client.settlement(result.voucher.voucherId); setSettlement(status.states); setScreen("SETTLEMENT"); await reload(); } catch { setError("核销未完成。请确认商家已在有效时间内确认。 "); } finally { setBusy(false); } }
@@ -112,23 +110,57 @@ export function VoucherSurface({ client, context, onBack }: { client: VoucherCli
 
   if (screen === "CREATE") return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Back onPress={() => setScreen("LIST")} /><Text style={styles.pageTitle}>创建礼券</Text><Text style={styles.pageSub}>商家 / Creator / Agent 使用同一发行模型；权限与额度由服务端控制。</Text><Text style={styles.fieldLabel}>类型</Text><View style={styles.chips}>{(Object.keys(FAMILY) as VoucherFamily[]).map((item) => <Pressable key={item} onPress={() => setFamily(item)} style={[styles.chip, family === item && styles.chipActive]}><Text style={[styles.chipText, family === item && styles.chipTextActive]}>{FAMILY[item].label}</Text></Pressable>)}</View><Text style={styles.fieldLabel}>权益价值 <Text style={styles.fieldHint}>VND</Text></Text><TextInput keyboardType="number-pad" onChangeText={setValue} value={value} style={styles.input} /><Text style={styles.fieldLabel}>数量 <Text style={styles.fieldHint}>受发行额度限制</Text></Text><TextInput keyboardType="number-pad" onChangeText={setQuantity} value={quantity} style={styles.input} /><Text style={styles.fieldLabel}>适用范围</Text><TextInput onChangeText={setScope} value={scope} style={styles.input} /><View style={styles.dateRow}><View style={styles.dateBox}><Text style={styles.dateValue}>2026/08/21</Text><Text style={styles.dateLabel}>开始</Text></View><View style={styles.dateBox}><Text style={styles.dateValue}>2026/08/31</Text><Text style={styles.dateLabel}>结束</Text></View></View><View style={styles.policy}><Text style={styles.policyTitle}>Proxy 固定规则</Text><Text style={styles.policyText}>不可提现 / 不兑换现金 / 不找零；不可购买其他礼券；默认不可转售或自由转让；核销必须有真实场景证据。</Text></View><View style={styles.budget}><Text style={styles.budgetLabel}>预计发行预算</Text><Text style={styles.budgetValue}>{money((Number(value.replace(/[^0-9]/g, "")) || 0) * (Number(quantity.replace(/[^0-9]/g, "")) || 0))} VND</Text></View><Pressable disabled={busy} onPress={() => void issue()} style={[styles.primary, busy && styles.primaryDisabled]}><Text style={styles.primaryText}>{busy ? "创建中…" : `创建 ${quantity || "0"} 张${FAMILY[family].label}`}</Text></Pressable>{error ? <Text style={styles.error}>{error}</Text> : null}</ScrollView></View>;
 
-  const availableCount = vouchers.filter((voucher) => voucher.status === "AVAILABLE").length;
-  // 规范 §2/§6：LIST 的三个状态 tab = 模块内三个 Page；§7 方案 C 标题条常驻上方可点跳转，左右滑动为主。
-  // 兜底 = LIST（screen 判定已全部前置）。
-  return <View style={styles.root}>
-    <ListHeader tab={tab} availableCount={availableCount} isBusiness={context === "BUSINESS"}
-      onJump={(item) => { setTab(item); setPagerPage(["AVAILABLE", "USED", "EXPIRED"].indexOf(item)); }}
-      onCreate={() => { setError(undefined); setScreen("CREATE"); }} onExit={onBack} />
-    <ProxyModulePager moduleId="voucher" rememberPage onExit={onBack}
-      initialPage={["AVAILABLE", "USED", "EXPIRED"].indexOf(tab)}
-      page={pagerPage}
-      onPageChange={(index) => { setTab(index === 1 ? "USED" : index === 2 ? "EXPIRED" : "AVAILABLE"); setPagerPage(undefined); }}
-      pages={[
-        { id: "available", title: "可用", component: <VoucherListPage vouchers={vouchers} busy={busy} error={error} tab="AVAILABLE" onOpen={(voucher) => void openVoucher(voucher)} /> },
-        { id: "used", title: "已使用", component: <VoucherListPage vouchers={vouchers} busy={busy} error={error} tab="USED" onOpen={(voucher) => void openVoucher(voucher)} /> },
-        { id: "expired", title: "已过期", component: <VoucherListPage vouchers={vouchers} busy={busy} error={error} tab="EXPIRED" onOpen={(voucher) => void openVoucher(voucher)} /> }
-      ]} />
-  </View>;
+  // 纯审核视觉（tabs）+ 架构层滑动：视觉 100% R3 已审，交互由 PaginatedModuleShell 统一注入
+  // 后续 动态/市场 等所有分页模块同理在此加 pages 即可，无需各自 import Pager
+  const pagerPages = tabsToPagerPages<VoucherTab>({
+    tabs: ["AVAILABLE", "USED", "EXPIRED"] as const,
+    activeTab: tab,
+    titleOf: (t) => (t === "AVAILABLE" ? `可用 ${availableCount}` : t === "USED" ? "已使用" : "已过期"),
+    renderPage: (t) => <VoucherListPage vouchers={vouchers} busy={busy} error={error} tab={t} onOpen={(v) => void openVoucher(v)} />,
+  });
+  return (
+    <View style={styles.root}>
+      <View style={styles.content}>
+        <View style={styles.listHead}>
+          <View>
+            <Back label="我的" onPress={onBack} />
+            <Text style={styles.pageTitle}>我的礼品券</Text>
+            <Text style={styles.pageSub}>统一权益卡面；礼品券不属于钱包余额。</Text>
+          </View>
+          {context === "BUSINESS" ? (
+            <Pressable onPress={() => { setError(undefined); setScreen("CREATE"); }} style={styles.createButton}>
+              <Text style={styles.createButtonText}>创建礼券</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        <View style={styles.tabs}>
+          {(["AVAILABLE", "USED", "EXPIRED"] as VoucherTab[]).map((item) => (
+            <Pressable
+              key={item}
+              onPress={() => {
+                setTab(item);
+                setPagerPage(["AVAILABLE", "USED", "EXPIRED"].indexOf(item));
+              }}
+              style={[styles.tab, tab === item && styles.tabActive]}
+            >
+              <Text style={[styles.tabText, tab === item && styles.tabTextActive]}>
+                {item === "AVAILABLE" ? `可用 ${availableCount}` : item === "USED" ? "已使用" : "已过期"}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <PaginatedModuleShell
+        definition={{ id: "voucher", pages: pagerPages, initialPage: ["AVAILABLE", "USED", "EXPIRED"].indexOf(tab) }}
+        page={pagerPage}
+        onPageChange={(index) => {
+          setTab(index === 1 ? "USED" : index === 2 ? "EXPIRED" : "AVAILABLE");
+          setPagerPage(undefined);
+        }}
+        onExit={onBack}
+      />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
