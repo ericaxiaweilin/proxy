@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
+import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
 import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-shell";
@@ -168,19 +168,12 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
         platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
       });
       setChallengeId(result.challengeId);
-      // 谷歌邮箱自动跳转：Gmail App 优先，失败回退 Chrome/浏览器（模拟环境验证码固定 123456）
-      if (isEmail) {
-        const webUrl = "https://mail.google.com";
-        try {
-          // 先尝试 Gmail App，无需 canOpenURL 阻塞，直接尝试
-          await Linking.openURL("googlegmail://").catch(async () => {
-            // 回退 Chrome / 系统浏览器
-            await Linking.openURL(webUrl).catch(() => undefined);
-          });
-        } catch {
-          await Linking.openURL(webUrl).catch(() => undefined);
-        }
-      }
+      // NOTE: We deliberately do NOT auto-open Gmail / mail.google.com
+      // here. Doing so yanks the user out of the App and makes the OTP
+      // input screen invisible — they come back to a "stuck" feeling
+      // because the App is in the background. The helper text on the
+      // next screen ("验证码已发送至 ...") tells them to switch to the
+      // Mail app themselves when they are ready.
     } catch {
       setError(authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。");
     } finally {
@@ -211,8 +204,10 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
       await loginClient.verifyChallenge(challengeId, code);
       await loginClient.createSessionFromChallenge(challengeId);
       onAuthenticated();
-    } catch {
-      setError("验证码无效或已过期，请重新请求。");
+    } catch (err) {
+      const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      console.warn("[completeLogin] failed:", message);
+      setError(`验证码流程失败：${message}`);
     } finally {
       setBusy(false);
     }
