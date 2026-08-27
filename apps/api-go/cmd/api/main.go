@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -160,10 +162,92 @@ func main() {
 }
 
 func configuredLoginChallengeProvider() (identity.LoginChallengeProvider, bool) {
-	if os.Getenv("PROXY_LOGIN_PROVIDER") != "simulated" {
+	mode := os.Getenv("PROXY_LOGIN_PROVIDER")
+	switch mode {
+	case "simulated":
+		return identity.NewSimulatedLoginChallengeProvider(os.Getenv("PROXY_SIMULATED_OTP_CODE")), true
+	case "smtp", "sms", "production":
+		return configuredProductionLoginChallengeProvider(mode)
+	default:
 		return identity.UnconfiguredLoginChallengeProvider{}, false
 	}
-	return identity.NewSimulatedLoginChallengeProvider(os.Getenv("PROXY_SIMULATED_OTP_CODE")), true
+}
+
+// configuredProductionLoginChallengeProvider wires up the production
+// LoginChallengeProvider by reading env. It always returns a non-nil
+// provider: if the required env is missing, it returns a fail-closed
+// UnconfiguredLoginChallengeProvider and the (provider, simulated) tuple
+// is set so /health/ready surfaces the misconfiguration. A mode of
+// "production" means: use SMTP if PROXY_SMTP_HOST is set, otherwise SMS
+// if PROXY_SMS_URL is set, otherwise fail-closed.
+func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChallengeProvider, bool) {
+	host := os.Getenv("PROXY_SMTP_HOST")
+	url := os.Getenv("PROXY_SMS_URL")
+	var smtpProvider *identity.SMTPLoginChallengeProvider
+	var smsProvider *identity.SMSHTTPLoginChallengeProvider
+	if (mode == "smtp" || mode == "production") && host != "" {
+		portStr := os.Getenv("PROXY_SMTP_PORT")
+		port, err := strconv.Atoi(portStr)
+		if err != nil || port <= 0 {
+			log.Printf("PROXY_SMTP_PORT invalid (%q); smtp provider disabled", portStr)
+		} else {
+			smtpProvider = identity.NewSMTPLoginChallengeProvider(identity.SMTPConfig{
+				Host:     host,
+				Port:     port,
+				Username: os.Getenv("PROXY_SMTP_USERNAME"),
+				Password: os.Getenv("PROXY_SMTP_PASSWORD"),
+				From:     os.Getenv("PROXY_SMTP_FROM"),
+				TLSMode:  os.Getenv("PROXY_SMTP_TLS"),
+				Logger:   slog.Default(),
+			})
+		}
+	}
+	if (mode == "sms" || mode == "production") && url != "" {
+		smsProvider = identity.NewSMSHTTPLoginChallengeProvider(identity.SMSConfig{
+			URL:    url,
+			From:   os.Getenv("PROXY_SMS_FROM"),
+			Token:  os.Getenv("PROXY_SMS_TOKEN"),
+			Logger: slog.Default(),
+		})
+	}
+	// Dev-only smoke resolvers: when PROXY_SMTP_TEST_RECIPIENT is set we
+	// hand every EMAIL LoginChallengeRequest a fixed recipient instead of
+	// looking the LoginIdentity up in storage. This is intentionally
+	// separate from the production path; without the env var, EMAIL
+	// challenges stay fail-closed.
+	if smtpProvider != nil {
+		if testRecipient := os.Getenv("PROXY_SMTP_TEST_RECIPIENT"); testRecipient != "" {
+			identity.RegisterLoginIdentityEmailResolver(func(string) (string, bool) {
+				return testRecipient, true
+			})
+		}
+	}
+	if smsProvider != nil {
+		if testPhone := os.Getenv("PROXY_SMS_TEST_PHONE"); testPhone != "" {
+			identity.RegisterLoginIdentityPhoneResolver(func(string) (string, bool) {
+				return testPhone, true
+			})
+		}
+	}
+	// mode == "production" with no concrete env produces a router with
+	// no concrete providers; that is intentionally fail-closed. mode
+	// "smtp" / "sms" with the required env set produces a router with
+	// one real provider.
+	var emailProvider identity.LoginChallengeProvider
+	if smtpProvider != nil {
+		emailProvider = smtpProvider
+	}
+	var smsProviderIface identity.LoginChallengeProvider
+	if smsProvider != nil {
+		smsProviderIface = smsProvider
+	}
+	router := identity.NewChannelRouter(emailProvider, smsProviderIface)
+	if smtpProvider == nil && smsProvider == nil {
+		log.Printf("PROXY_LOGIN_PROVIDER=%s but no SMTP/SMS env set; login provider fail-closed", mode)
+		return identity.UnconfiguredLoginChallengeProvider{}, false
+	}
+	log.Printf("PROXY_LOGIN_PROVIDER=%s: smtp=%v sms=%v (fail-closed until identity resolver is wired in cmd/api)", mode, smtpProvider != nil, smsProvider != nil)
+	return router, false
 }
 
 // configuredModelStack 装配公共模型底座适配器。业务侧契约：只发任务 ID，
