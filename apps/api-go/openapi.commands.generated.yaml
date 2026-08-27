@@ -61,6 +61,8 @@ commands:
     domain: CityCompanion
   - command: CreateIncident
     domain: Safety
+  - command: CreateInvitation
+    domain: Scene
   - command: CreateLegalHold
     domain: Safety
   - command: CreateMediaAsset
@@ -87,6 +89,8 @@ commands:
     domain: Contribution
   - command: CreateSafetyBlock
     domain: Safety
+  - command: CreateScene
+    domain: Scene
   - command: CreateSession
     domain: Identity
   - command: CreateSlotOffer
@@ -117,6 +121,8 @@ commands:
     domain: LocalContext
   - command: GetMediaAsset
     domain: Media
+  - command: GetMemory
+    domain: Scene
   - command: GetOffer
     domain: Fulfillment
   - command: GetPostEngagement
@@ -157,6 +163,12 @@ commands:
     domain: Media
   - command: ListMyBusinessAccounts
     domain: Business
+  - command: ListMyInvitations
+    domain: Scene
+  - command: ListMyMemories
+    domain: Scene
+  - command: ListMyScenes
+    domain: Scene
   - command: ListRequesterHomeItems
     domain: Demand
   - command: ListStatuses
@@ -173,12 +185,16 @@ commands:
     domain: Demand
   - command: ProcessMediaAsset
     domain: Media
+  - command: PublishScene
+    domain: Scene
   - command: PublishTask
     domain: Demand
   - command: QuerySuppliers
     domain: Supply
   - command: ReactToPost
     domain: Engagement
+  - command: RecordAttendance
+    domain: Scene
   - command: RecordAttribution
     domain: LocalNet
   - command: RecordCandidateViewed
@@ -231,6 +247,8 @@ commands:
     domain: Identity
   - command: ResolveDeepLink
     domain: Notification
+  - command: RespondInvitation
+    domain: Scene
   - command: ReviewAccess
     domain: Contribution
   - command: ReviewContributionAccess
@@ -277,6 +295,8 @@ commands:
     domain: Supply
   - command: UpdateAgentService
     domain: Supply
+  - command: UpdateScene
+    domain: Scene
   - command: UpdateTaskDraft
     domain: Demand
   - command: VerifyCapability

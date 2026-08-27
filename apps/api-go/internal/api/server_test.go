@@ -344,6 +344,11 @@ func TestRequiresAuthentication_SceneCommandsAreProtected(t *testing.T) {
 		"RecordOutcome",
 		"ListMyScenes",
 		"ListMyInvitations",
+		// R15.13 P2: Memory is per-host + per-guest; the tripwire
+		// extends to the new commands so a future "make Memory
+		// public" refactor breaks the build.
+		"ListMyMemories",
+		"GetMemory",
 	}
 	for _, cmd := range sceneCommands {
 		if !requiresAuthentication(cmd) {

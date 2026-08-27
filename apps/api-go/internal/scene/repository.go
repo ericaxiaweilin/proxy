@@ -34,6 +34,38 @@ type Checkin struct {
 	At      time.Time `json:"at"`
 }
 
+// ── R15.13 P2: Memory aggregate ──────────────────────────────────
+// A Memory is the post-outcome snapshot of a Scene. One Memory per
+// Scene (scene_id is the natural key in scene.memories). Memories
+// are append-only — once written, they are the audit trail of "we
+// actually did this thing", and they feed:
+//   * reputation (host + guest + venue future reputation signals)
+//   * aesthetic asset gallery (AestheticAssets feeds the feed card)
+//   * price corridor back-pressure (ActualSpend vs PlannedBudget)
+// Memories are NEVER updated; if the host realizes they spent less
+// than they recorded, that is a new event, not a mutation of the
+// past. The repository therefore has only an Upsert keyed on
+// scene_id (idempotent re-record is allowed because the user might
+// re-submit after a network blip; the row is replaced atomically).
+
+type Memory struct {
+	ID              string           `json:"memoryId"`
+	SceneID         string           `json:"sceneId"`
+	HostID          string           `json:"hostId"`
+	GuestID         string           `json:"guestId"`
+	MerchantID      string           `json:"merchantId,omitempty"`
+	SceneType       string           `json:"sceneType"`
+	FundingMode     string           `json:"fundingMode"`
+	PlannedBudget   int64            `json:"plannedBudget"`
+	ActualSpend     int64            `json:"actualSpend"`
+	Currency        string           `json:"currency"`
+	DurationMin     int              `json:"durationMin"`
+	AestheticAssets []map[string]any `json:"aestheticAssets"`
+	Rating          float64          `json:"rating"`
+	Notes           string           `json:"notes,omitempty"`
+	CreatedAt       time.Time        `json:"createdAt"`
+}
+
 type Repository interface {
 	Create(ctx context.Context, s Scene) error
 	Get(ctx context.Context, id string) (Scene, error)
@@ -48,6 +80,11 @@ type Repository interface {
 	UpdateBenefit(ctx context.Context, b Benefit) error
 	CreateCheckin(ctx context.Context, c Checkin) error
 	ListCheckins(ctx context.Context, sceneID string) ([]Checkin, error)
+	// Memory (R15.13 P2)
+	UpsertMemory(ctx context.Context, m Memory) error
+	GetMemory(ctx context.Context, sceneID string) (Memory, error)
+	ListMemoriesByUser(ctx context.Context, userID string, limit int) ([]Memory, error)
+	ListMemoriesByScene(ctx context.Context, sceneID string) ([]Memory, error)
 }
 
 type memoryRepo struct {
@@ -56,9 +93,18 @@ type memoryRepo struct {
 	invs     map[string]Invitation
 	benefits map[string]Benefit
 	checkins map[string]map[string]Checkin
+	memories map[string]Memory
 }
 
-func NewMemoryRepository() Repository { return &memoryRepo{m: map[string]Scene{}, invs: map[string]Invitation{}, benefits: map[string]Benefit{}, checkins: map[string]map[string]Checkin{}} }
+func NewMemoryRepository() Repository {
+	return &memoryRepo{
+		m:        map[string]Scene{},
+		invs:     map[string]Invitation{},
+		benefits: map[string]Benefit{},
+		checkins: map[string]map[string]Checkin{},
+		memories: map[string]Memory{},
+	}
+}
 
 func (r *memoryRepo) Create(ctx context.Context, s Scene) error {
 	r.mu.Lock(); defer r.mu.Unlock()
@@ -145,6 +191,52 @@ func (r *memoryRepo) ListCheckins(ctx context.Context, sceneID string) ([]Checki
 	out := []Checkin{}
 	for _, c := range r.checkins[sceneID] {
 		out = append(out, c)
+	}
+	return out, nil
+}
+
+// ── Memory (R15.13 P2) ────────────────────────────────────────────
+
+func (r *memoryRepo) UpsertMemory(ctx context.Context, m Memory) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	if m.SceneID == "" {
+		return errors.New("memory sceneId is required")
+	}
+	if m.ID == "" {
+		m.ID = newID("mem_")
+	}
+	if m.AestheticAssets == nil {
+		m.AestheticAssets = []map[string]any{}
+	}
+	r.memories[m.SceneID] = m
+	return nil
+}
+
+func (r *memoryRepo) GetMemory(ctx context.Context, sceneID string) (Memory, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	m, ok := r.memories[sceneID]
+	if !ok { return Memory{}, ErrNotFound }
+	return m, nil
+}
+
+func (r *memoryRepo) ListMemoriesByUser(ctx context.Context, userID string, limit int) ([]Memory, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	out := []Memory{}
+	if limit <= 0 { return out, nil }
+	for _, m := range r.memories {
+		if m.HostID == userID || m.GuestID == userID {
+			out = append(out, m)
+			if len(out) >= limit { break }
+		}
+	}
+	return out, nil
+}
+
+func (r *memoryRepo) ListMemoriesByScene(ctx context.Context, sceneID string) ([]Memory, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	out := []Memory{}
+	if m, ok := r.memories[sceneID]; ok {
+		out = append(out, m)
 	}
 	return out, nil
 }

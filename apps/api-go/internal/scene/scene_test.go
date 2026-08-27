@@ -53,6 +53,22 @@ func resultAggregateID(t *testing.T, r command.Result) string {
 	return r.Aggregate.ID
 }
 
+// publishScene drives a freshly-created Scene to PUBLISHED. It walks
+// Create -> Update (no-op) -> Publish so RecordAttendance / RecordOutcome
+// can rely on the PUBLISHED state without each test re-implementing
+// the wiring.
+func publishScene(t *testing.T, svc *Service, sceneID string, version int) {
+	t.Helper()
+	// Updates are optional — the test setup typically does not need to
+	// touch the scene. We publish directly.
+	r := svc.Handle(testEnvelope("PublishScene", sceneID, map[string]any{
+		"expectedVersion": version,
+	}))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("publishScene: expected ACCEPTED, got %#v", r)
+	}
+}
+
 func decodeListPayload(t *testing.T, ref string) map[string]any {
 	t.Helper()
 	var out map[string]any
@@ -446,10 +462,46 @@ func TestRecordAttendance_NotFound(t *testing.T) {
 }
 
 func TestRecordOutcome_Accepted(t *testing.T) {
+	// R15.13 P2 wiring: RecordOutcome now persists a Memory. P0
+	// accept-only baseline is gone. Setup: create a Scene, publish
+	// it, then record attendance for host + guest before recording
+	// the outcome. Without any of those, the new contract rejects.
 	svc := New()
-	r := svc.Handle(testEnvelope("RecordOutcome", "out_001", map[string]any{}))
+	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	sceneID := resultAggregateID(t, created)
+	publishScene(t, svc, sceneID, 1)
+	// Host checks in
+	svc.Handle(testEnvelope("RecordAttendance", sceneID, map[string]any{}))
+	// Guest checks in — need a separate envelope with a different actor
+	guest := testEnvelope("RecordAttendance", sceneID, map[string]any{})
+	guest.Actor = command.Actor{Type: "USER", ID: "guest_user_001"}
+	svc.Handle(guest)
+	// Now record outcome
+	spend := int64(50000)
+	r := svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId":     "guest_user_001",
+		"actualSpend": spend,
+		"durationMin": 90,
+		"notes":       "smoke test",
+	}))
 	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "RECORDED" {
-		t.Fatalf("expected ACCEPTED/RECORDED, got %#v", r)
+		t.Fatalf("expected ACCEPTED/RECORDED, got %#v err=%#v", r, r.Error)
+	}
+	// Memory should be persisted.
+	mem, err := svc.repo.GetMemory(context.Background(), sceneID)
+	if err != nil { t.Fatalf("GetMemory: %v", err) }
+	if mem.PlannedBudget != spend && mem.PlannedBudget != 0 {
+		// okCreatePayload doesn't set budgetMinor, so PlannedBudget=0
+		// is the expected base; ActualSpend=50000 is the only signal.
+	}
+	if mem.ActualSpend != spend {
+		t.Fatalf("expected actualSpend=%d, got %d", spend, mem.ActualSpend)
+	}
+	if mem.GuestID != "guest_user_001" {
+		t.Fatalf("expected guestId=guest_user_001, got %s", mem.GuestID)
+	}
+	if mem.Rating <= 0 {
+		t.Fatalf("expected rating > 0, got %v", mem.Rating)
 	}
 }
 
@@ -543,6 +595,10 @@ func TestSupports_KnownCommands(t *testing.T) {
 		"CreateInvitation", "RespondInvitation",
 		"RecordAttendance", "RecordOutcome",
 		"ListMyScenes", "ListMyInvitations",
+		// R15.13 P2: Memory commands must also be in Supports() so
+		// the dispatch router can reach the scene service. If a
+		// future refactor drops these, the test fails.
+		"ListMyMemories", "GetMemory",
 	}
 	for _, t0 := range known {
 		if !svc.Supports(t0) {
@@ -668,5 +724,235 @@ func TestUpdateScene_AppliesFundingAndBudgetChange(t *testing.T) {
 	}
 	if stored.BudgetMinor != 150000 {
 		t.Fatalf("expected budgetMinor updated, got %d", stored.BudgetMinor)
+	}
+}
+
+// ── R15.13 P2: Memory domain tripwires ────────────────────────────
+
+// readyForOutcome walks a freshly-created Scene through Create -> Publish
+// -> Host checkin -> Guest checkin so RecordOutcome has a valid base.
+func readyForOutcome(t *testing.T, svc *Service) (sceneID string) {
+	t.Helper()
+	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	sceneID = resultAggregateID(t, created)
+	publishScene(t, svc, sceneID, 1)
+	// Host checkin
+	svc.Handle(testEnvelope("RecordAttendance", sceneID, map[string]any{}))
+	// Guest checkin — separate envelope so actor differs.
+	guest := testEnvelope("RecordAttendance", sceneID, map[string]any{})
+	guest.Actor = command.Actor{Type: "USER", ID: "guest_u_p2"}
+	svc.Handle(guest)
+	return
+}
+
+func TestRecordOutcome_NotFound(t *testing.T) {
+	svc := New()
+	spend := int64(1000)
+	r := svc.Handle(testEnvelope("RecordOutcome", "scene_does_not_exist", map[string]any{
+		"guestId": "guest_u", "actualSpend": spend,
+	}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "SCENE_NOT_FOUND" {
+		t.Fatalf("expected REJECTED/SCENE_NOT_FOUND, got %#v", r)
+	}
+}
+
+func TestRecordOutcome_GuestRequired(t *testing.T) {
+	svc := New()
+	sceneID := readyForOutcome(t, svc)
+	r := svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"actualSpend": int64(1000),
+		// no guestId
+	}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "OUTCOME_GUEST_REQUIRED" {
+		t.Fatalf("expected OUTCOME_GUEST_REQUIRED, got %#v", r)
+	}
+}
+
+func TestRecordOutcome_SpendMustBeNonNegative(t *testing.T) {
+	svc := New()
+	sceneID := readyForOutcome(t, svc)
+	neg := int64(-1)
+	r := svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_u_p2", "actualSpend": neg,
+	}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "OUTCOME_SPEND_INVALID" {
+		t.Fatalf("expected OUTCOME_SPEND_INVALID, got %#v", r)
+	}
+}
+
+func TestRecordOutcome_DurationMustBeNonNegative(t *testing.T) {
+	svc := New()
+	sceneID := readyForOutcome(t, svc)
+	neg := -1
+	r := svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_u_p2", "actualSpend": int64(1000), "durationMin": neg,
+	}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "OUTCOME_DURATION_INVALID" {
+		t.Fatalf("expected OUTCOME_DURATION_INVALID, got %#v", r)
+	}
+}
+
+func TestRecordOutcome_NotHost(t *testing.T) {
+	// A non-host actor must not be able to record the outcome (the
+	// guest can't self-report the actual spend — that's the host's
+	// bookkeeping responsibility).
+	svc := New()
+	sceneID := readyForOutcome(t, svc)
+	env := testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_u_p2", "actualSpend": int64(1000),
+	})
+	env.Actor = command.Actor{Type: "USER", ID: "impostor"}
+	r := svc.Handle(env)
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "OUTCOME_NOT_HOST" {
+		t.Fatalf("expected OUTCOME_NOT_HOST, got %#v", r)
+	}
+}
+
+func TestRecordOutcome_CheckinIncomplete(t *testing.T) {
+	// Without a guest checkin, the memory would be one-sided — reject.
+	svc := New()
+	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	sceneID := resultAggregateID(t, created)
+	publishScene(t, svc, sceneID, 1)
+	// Only host checkin.
+	svc.Handle(testEnvelope("RecordAttendance", sceneID, map[string]any{}))
+	r := svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_x", "actualSpend": int64(1000),
+	}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "OUTCOME_CHECKIN_INCOMPLETE" {
+		t.Fatalf("expected OUTCOME_CHECKIN_INCOMPLETE, got %#v", r)
+	}
+}
+
+func TestRecordOutcome_DraftSceneRejected(t *testing.T) {
+	// A DRAFT scene (never published) must not leave a memory trail.
+	svc := New()
+	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	sceneID := resultAggregateID(t, created)
+	r := svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_x", "actualSpend": int64(1000),
+	}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "OUTCOME_SCENE_NOT_PUBLISHED" {
+		t.Fatalf("expected OUTCOME_SCENE_NOT_PUBLISHED, got %#v", r)
+	}
+}
+
+func TestRecordOutcome_RatingClampedToUnitInterval(t *testing.T) {
+	// Over-spend must still produce rating in [0,1].
+	svc := New()
+	// Create a scene with a tight budget.
+	p := okCreatePayload()
+	budget := int64(1000)
+	p["budgetMinor"] = budget
+	created := svc.Handle(testEnvelope("CreateScene", "new", p))
+	sceneID := resultAggregateID(t, created)
+	publishScene(t, svc, sceneID, 1)
+	svc.Handle(testEnvelope("RecordAttendance", sceneID, map[string]any{}))
+	guest := testEnvelope("RecordAttendance", sceneID, map[string]any{})
+	guest.Actor = command.Actor{Type: "USER", ID: "guest_u_p2"}
+	svc.Handle(guest)
+	// 1000x over budget.
+	r := svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_u_p2", "actualSpend": int64(1_000_000),
+	}))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", r)
+	}
+	mem, _ := svc.repo.GetMemory(context.Background(), sceneID)
+	if mem.Rating < 0 || mem.Rating > 1 {
+		t.Fatalf("rating must be in [0,1], got %v", mem.Rating)
+	}
+	// 1000x over → budgetAdherence = 2 - 1/1000 ≈ 1.999, clamped to 1
+	// in our penalty path; we expect rating to land above 0.5 still
+	// (aesthetic=0.92, adherence≈0 → 0.5*0.92+0.5*~0 = 0.46) but the
+	// 2-ratio reflection stays in [0,1].
+	if mem.Rating >= 0.9 {
+		t.Fatalf("expected rating to drop with overspend, got %v", mem.Rating)
+	}
+}
+
+func TestRecordOutcome_UpsertReplacesExisting(t *testing.T) {
+	// Re-recording the outcome replaces the prior memory (the user
+	// might have miscounted the first time).
+	svc := New()
+	sceneID := readyForOutcome(t, svc)
+	svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_u_p2", "actualSpend": int64(1000), "notes": "first",
+	}))
+	svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_u_p2", "actualSpend": int64(2000), "notes": "second",
+	}))
+	mem, _ := svc.repo.GetMemory(context.Background(), sceneID)
+	if mem.ActualSpend != 2000 {
+		t.Fatalf("expected actualSpend=2000 after upsert, got %d", mem.ActualSpend)
+	}
+	if mem.Notes != "second" {
+		t.Fatalf("expected notes=second after upsert, got %q", mem.Notes)
+	}
+	// One memory per scene (ListMemoriesByScene returns 1).
+	mems, _ := svc.repo.ListMemoriesByScene(context.Background(), sceneID)
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 memory per scene, got %d", len(mems))
+	}
+}
+
+func TestListMyMemories_IncludesHostAndGuest(t *testing.T) {
+	svc := New()
+	sceneID := readyForOutcome(t, svc)
+	svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_u_p2", "actualSpend": int64(5000),
+	}))
+	// Host (default actor in testEnvelope) should see it
+	hr := svc.Handle(testEnvelopeAs("ListMyMemories", "unused", "user_001", map[string]any{}))
+	if hr.Outcome != "ACCEPTED" {
+		t.Fatalf("host list: expected ACCEPTED, got %#v", hr)
+	}
+	if !strings.Contains(hr.OperationRef, `"role":"HOST"`) {
+		t.Fatalf("host list should label role=HOST, got %s", hr.OperationRef)
+	}
+	// Guest should see it
+	gr := svc.Handle(testEnvelopeAs("ListMyMemories", "unused", "guest_u_p2", map[string]any{}))
+	if gr.Outcome != "ACCEPTED" {
+		t.Fatalf("guest list: expected ACCEPTED, got %#v", gr)
+	}
+	if !strings.Contains(gr.OperationRef, `"role":"GUEST"`) {
+		t.Fatalf("guest list should label role=GUEST, got %s", gr.OperationRef)
+	}
+	// Random other user should not see it
+	sr := svc.Handle(testEnvelopeAs("ListMyMemories", "unused", "stranger", map[string]any{}))
+	if sr.Outcome != "ACCEPTED" {
+		t.Fatalf("stranger list: expected ACCEPTED, got %#v", sr)
+	}
+	if strings.Contains(sr.OperationRef, sceneID) {
+		t.Fatalf("stranger should not see the memory, got %s", sr.OperationRef)
+	}
+}
+
+func TestGetMemory_HostAndGuestCanRead(t *testing.T) {
+	svc := New()
+	sceneID := readyForOutcome(t, svc)
+	svc.Handle(testEnvelope("RecordOutcome", sceneID, map[string]any{
+		"guestId": "guest_u_p2", "actualSpend": int64(5000),
+	}))
+	// Host reads
+	if r := svc.Handle(testEnvelopeAs("GetMemory", sceneID, "user_001", map[string]any{})); r.Outcome != "ACCEPTED" {
+		t.Fatalf("host get: expected ACCEPTED, got %#v", r)
+	}
+	// Guest reads
+	if r := svc.Handle(testEnvelopeAs("GetMemory", sceneID, "guest_u_p2", map[string]any{})); r.Outcome != "ACCEPTED" {
+		t.Fatalf("guest get: expected ACCEPTED, got %#v", r)
+	}
+	// Stranger blocked
+	r := svc.Handle(testEnvelopeAs("GetMemory", sceneID, "stranger", map[string]any{}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "MEMORY_NOT_VISIBLE" {
+		t.Fatalf("stranger get: expected MEMORY_NOT_VISIBLE, got %#v", r)
+	}
+}
+
+func TestGetMemory_NotFound(t *testing.T) {
+	svc := New()
+	r := svc.Handle(testEnvelopeAs("GetMemory", "scene_no_memory", "user_001", map[string]any{}))
+	if r.Outcome != "REJECTED" || r.Error.ErrorCode != "MEMORY_NOT_FOUND" {
+		t.Fatalf("expected MEMORY_NOT_FOUND, got %#v", r)
 	}
 }

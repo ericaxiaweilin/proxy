@@ -94,7 +94,7 @@ func NewWithClock(c clock.Clock) *Service { s := New(); s.clock = c; return s }
 
 func (s *Service) Supports(t string) bool {
 	switch t {
-	case "CreateScene", "UpdateScene", "PublishScene", "CreateInvitation", "RespondInvitation", "RecordAttendance", "RecordOutcome", "ListMyScenes", "ListMyInvitations":
+	case "CreateScene", "UpdateScene", "PublishScene", "CreateInvitation", "RespondInvitation", "RecordAttendance", "RecordOutcome", "ListMyScenes", "ListMyInvitations", "ListMyMemories", "GetMemory":
 		return true
 	default: return false
 	}
@@ -113,6 +113,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	case "RecordOutcome": return s.recordOutcome(ctx,e)
 	case "ListMyScenes": return s.listMyScenes(ctx,e)
 	case "ListMyInvitations": return s.listMyInvitations(ctx,e)
+	case "ListMyMemories": return s.listMyMemories(ctx,e)
+	case "GetMemory": return s.getMemory(ctx,e)
 	default: return command.Rejected(e, "SCENE_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "scene.unsupported_command", nil)
 	}
 }
@@ -259,7 +261,150 @@ func (s *Service) recordAttendance(ctx context.Context, e command.Envelope) comm
 	}
 	return command.Accepted(e, "Attendance", scene.ID, 1, "ATTENDED", nil)
 }
-func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command.Result { return command.Accepted(e,"Outcome",e.Target.ID,1,"RECORDED", nil) }
+func (s *Service) recordOutcome(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		GuestID         string           `json:"guestId"`
+		ActualSpend     *int64           `json:"actualSpend"`
+		DurationMin     *int             `json:"durationMin"`
+		AestheticAssets []map[string]any `json:"aestheticAssets"`
+		Notes           string           `json:"notes"`
+	}
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_OUTCOME_PAYLOAD", "VALIDATION", "AFTER_USER_ACTION", "scene.invalid_outcome", nil)
+	}
+	if p.GuestID == "" {
+		return command.Rejected(e, "OUTCOME_GUEST_REQUIRED", "VALIDATION", "AFTER_USER_ACTION", "scene.outcome_guest_required", nil)
+	}
+	if p.ActualSpend == nil || *p.ActualSpend < 0 {
+		return command.Rejected(e, "OUTCOME_SPEND_INVALID", "VALIDATION", "AFTER_USER_ACTION", "scene.outcome_spend_invalid", nil)
+	}
+	if p.DurationMin != nil && *p.DurationMin < 0 {
+		return command.Rejected(e, "OUTCOME_DURATION_INVALID", "VALIDATION", "AFTER_USER_ACTION", "scene.outcome_duration_invalid", nil)
+	}
+	// Locate the scene — only the host can record the outcome, and the
+	// scene must have been published first (we don't want a DRAFT to
+	// leave a memory trail).
+	sc, err := s.repo.Get(ctx, e.Target.ID)
+	if errors.Is(err, ErrNotFound) {
+		return command.Rejected(e, "SCENE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "scene.not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "scene.read_failed", nil)
+	}
+	if sc.HostUserID != e.Actor.ID {
+		return command.Rejected(e, "OUTCOME_NOT_HOST", "AUTHORIZATION", "AFTER_USER_ACTION", "scene.outcome_not_host", nil)
+	}
+	if sc.Status != "INVITING" && sc.Status != "SIGNED_UP" {
+		return command.Rejected(e, "OUTCOME_SCENE_NOT_PUBLISHED", "BUSINESS_STATE", "AFTER_USER_ACTION", "scene.outcome_scene_not_published", map[string]any{"currentStatus": sc.Status})
+	}
+	// Both host + guest must have checked in for the memory to be
+	// trustworthy (no one-side-only records).
+	checkins, _ := s.repo.ListCheckins(ctx, sc.ID)
+	hasHost, hasGuest := false, false
+	for _, c := range checkins {
+		if c.Role == "HOST" { hasHost = true }
+		if c.Role == "GUEST" { hasGuest = true }
+	}
+	if !hasHost || !hasGuest {
+		return command.Rejected(e, "OUTCOME_CHECKIN_INCOMPLETE", "BUSINESS_STATE", "AFTER_USER_ACTION", "scene.outcome_checkin_incomplete", nil)
+	}
+	// Derive rating from aesthetic score (was 0..1) blended with
+	// budget adherence: the closer actual_spend is to planned_budget,
+	// the higher the rating. 0.5 * aesthetic + 0.5 * budgetAdherence.
+	budgetAdherence := 1.0
+	if sc.BudgetMinor > 0 {
+		ratio := float64(*p.ActualSpend) / float64(sc.BudgetMinor)
+		if ratio > 1 { ratio = 2 - ratio } // over-budget symmetric penalty
+		if ratio < 0 { ratio = 0 }
+		budgetAdherence = ratio
+	}
+	rating := 0.5*sc.AestheticScore + 0.5*budgetAdherence
+	if rating < 0 { rating = 0 }
+	if rating > 1 { rating = 1 }
+	dur := 0
+	if p.DurationMin != nil { dur = *p.DurationMin }
+	assets := p.AestheticAssets
+	if assets == nil { assets = []map[string]any{} }
+	mem := Memory{
+		SceneID:         sc.ID,
+		HostID:          sc.HostUserID,
+		GuestID:         p.GuestID,
+		MerchantID:      sc.VenueID,
+		SceneType:       sc.Tool,
+		FundingMode:     sc.FundingMode,
+		PlannedBudget:   sc.BudgetMinor,
+		ActualSpend:     *p.ActualSpend,
+		Currency:        sc.Currency,
+		DurationMin:     dur,
+		AestheticAssets: assets,
+		Rating:          rating,
+		Notes:           p.Notes,
+		CreatedAt:       s.clock.Now().UTC(),
+	}
+	if err := s.repo.UpsertMemory(ctx, mem); err != nil {
+		return command.Rejected(e, "OUTCOME_PERSIST_FAILED", "INTERNAL", "SAFE_RETRY", "scene.outcome_persist_failed", nil)
+	}
+	// Return the persisted memory as the operation ref so callers
+	// can confirm what was actually stored.
+	b, _ := json.Marshal(mem)
+	res := command.Accepted(e, "Memory", mem.SceneID, 1, "RECORDED", nil)
+	res.OperationRef = string(b)
+	return res
+}
+
+func (s *Service) listMyMemories(ctx context.Context, e command.Envelope) command.Result {
+	var p struct{ Limit int `json:"limit"` }
+	_ = decode(e.Payload, &p)
+	if p.Limit <= 0 { p.Limit = 10 }
+	if p.Limit > 50 { p.Limit = 50 }
+	mems, _ := s.repo.ListMemoriesByUser(ctx, e.Actor.ID, p.Limit)
+	items := []map[string]any{}
+	for _, m := range mems {
+		items = append(items, map[string]any{
+			"memoryId":      m.ID,
+			"sceneId":       m.SceneID,
+			"sceneType":     m.SceneType,
+			"actualSpend":   m.ActualSpend,
+			"plannedBudget": m.PlannedBudget,
+			"currency":      m.Currency,
+			"durationMin":   m.DurationMin,
+			"rating":        m.Rating,
+			"createdAt":     m.CreatedAt.Format(time.RFC3339),
+			"role":          roleForUser(m, e.Actor.ID),
+		})
+	}
+	payload := map[string]any{"actorId": e.Actor.ID, "memories": items, "limit": p.Limit}
+	b, _ := json.Marshal(payload)
+	res := command.Accepted(e, "MyMemories", e.Actor.ID, 1, "LISTED", nil)
+	res.OperationRef = string(b)
+	return res
+}
+
+func (s *Service) getMemory(ctx context.Context, e command.Envelope) command.Result {
+	mem, err := s.repo.GetMemory(ctx, e.Target.ID)
+	if errors.Is(err, ErrNotFound) {
+		return command.Rejected(e, "MEMORY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "scene.memory_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MEMORY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "scene.memory_read_failed", nil)
+	}
+	// Only the host, the guest, or an admin (we don't have roles here,
+	// so any authenticated actor that matches either side wins) may
+	// read the memory.
+	if mem.HostID != e.Actor.ID && mem.GuestID != e.Actor.ID {
+		return command.Rejected(e, "MEMORY_NOT_VISIBLE", "AUTHORIZATION", "AFTER_USER_ACTION", "scene.memory_not_visible", nil)
+	}
+	b, _ := json.Marshal(mem)
+	res := command.Accepted(e, "Memory", mem.SceneID, 1, "READ", nil)
+	res.OperationRef = string(b)
+	return res
+}
+
+func roleForUser(m Memory, userID string) string {
+	if m.HostID == userID { return "HOST" }
+	if m.GuestID == userID { return "GUEST" }
+	return ""
+}
 func (s *Service) listMyScenes(ctx context.Context, e command.Envelope) command.Result {
 	var p struct{ Limit int `json:"limit"`}
 	_ = decode(e.Payload,&p); if p.Limit<=0{p.Limit=10}; if p.Limit>50{p.Limit=50}

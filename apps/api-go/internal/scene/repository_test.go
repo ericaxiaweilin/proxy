@@ -3,6 +3,7 @@ package scene
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -213,5 +214,98 @@ func TestMemoryRepository_CheckinInputValidation(t *testing.T) {
 	// Empty userId rejected.
 	if err := repo.CreateCheckin(ctx, Checkin{SceneID: "x"}); err == nil {
 		t.Fatal("expected error on empty userId")
+	}
+}
+
+// ── R15.13 P2: Memory repository tripwires ────────────────────────
+
+func TestMemoryRepository_UpsertMemory_RequiresSceneID(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	if err := repo.UpsertMemory(ctx, Memory{HostID: "h", GuestID: "g"}); err == nil {
+		t.Fatal("expected error on empty sceneId")
+	}
+}
+
+func TestMemoryRepository_UpsertMemory_AssignsID(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	if err := repo.UpsertMemory(ctx, Memory{SceneID: "scene_m1", HostID: "h", GuestID: "g"}); err != nil {
+		t.Fatalf("UpsertMemory: %v", err)
+	}
+	got, err := repo.GetMemory(ctx, "scene_m1")
+	if err != nil { t.Fatalf("GetMemory: %v", err) }
+	if got.ID == "" {
+		t.Fatal("expected UpsertMemory to assign an ID, got empty")
+	}
+	if !strings.HasPrefix(got.ID, "mem_") {
+		t.Fatalf("expected ID prefix mem_, got %s", got.ID)
+	}
+	if got.AestheticAssets == nil {
+		t.Fatal("expected AestheticAssets to default to empty slice, got nil")
+	}
+}
+
+func TestMemoryRepository_UpsertMemory_ReplacesExisting(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	if err := repo.UpsertMemory(ctx, Memory{SceneID: "scene_m1", HostID: "h", GuestID: "g", ActualSpend: 100}); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if err := repo.UpsertMemory(ctx, Memory{SceneID: "scene_m1", HostID: "h", GuestID: "g", ActualSpend: 200}); err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	got, _ := repo.GetMemory(ctx, "scene_m1")
+	if got.ActualSpend != 200 {
+		t.Fatalf("expected upsert to replace, got ActualSpend=%d", got.ActualSpend)
+	}
+	// One memory per scene.
+	mems, _ := repo.ListMemoriesByScene(ctx, "scene_m1")
+	if len(mems) != 1 {
+		t.Fatalf("expected exactly 1 memory per scene, got %d", len(mems))
+	}
+}
+
+func TestMemoryRepository_ListMemoriesByUser_HostAndGuest(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	_ = repo.UpsertMemory(ctx, Memory{SceneID: "s1", HostID: "alice", GuestID: "bob", ActualSpend: 100})
+	_ = repo.UpsertMemory(ctx, Memory{SceneID: "s2", HostID: "carol", GuestID: "alice", ActualSpend: 200})
+	_ = repo.UpsertMemory(ctx, Memory{SceneID: "s3", HostID: "dave", GuestID: "eve", ActualSpend: 300})
+	// Alice is guest of s1 and host of s2 — both should show.
+	got, err := repo.ListMemoriesByUser(ctx, "alice", 0) // limit<=0 → empty per pass-1 fix
+	if err != nil { t.Fatalf("ListMemoriesByUser: %v", err) }
+	if len(got) != 0 {
+		t.Fatalf("expected limit<=0 to return empty, got %d", len(got))
+	}
+	got, err = repo.ListMemoriesByUser(ctx, "alice", 10)
+	if err != nil { t.Fatalf("ListMemoriesByUser: %v", err) }
+	if len(got) != 2 {
+		t.Fatalf("expected alice to see 2 memories, got %d", len(got))
+	}
+	// Bob only appears in s1.
+	got, _ = repo.ListMemoriesByUser(ctx, "bob", 10)
+	if len(got) != 1 {
+		t.Fatalf("expected bob to see 1 memory, got %d", len(got))
+	}
+	// Stranger sees nothing.
+	got, _ = repo.ListMemoriesByUser(ctx, "stranger", 10)
+	if len(got) != 0 {
+		t.Fatalf("expected stranger to see 0 memories, got %d", len(got))
+	}
+}
+
+func TestMemoryRepository_GetMemory_NotFound(t *testing.T) {
+	repo := NewMemoryRepository()
+	if _, err := repo.GetMemory(context.Background(), "scene_no_mem"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestMemoryRepository_ListMemoriesByScene_MissingIsEmpty(t *testing.T) {
+	repo := NewMemoryRepository()
+	got, _ := repo.ListMemoriesByScene(context.Background(), "scene_no_mem")
+	if len(got) != 0 {
+		t.Fatalf("expected empty for missing scene, got %d", len(got))
 	}
 }

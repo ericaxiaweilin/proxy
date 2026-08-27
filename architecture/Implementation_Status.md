@@ -193,6 +193,20 @@ apps/api-go/internal/scene/scene_test.go  +8 cases: fundingMode 默认 HOST / SP
 apps/api-go/internal/scene/repository_test.go  +4 cases: benefit lifecycle / benefit input validation / checkin lifecycle / checkin input validation
 apps/api-go/migrations/029_invite_funding_benefit.sql  scenes 表加 funding_mode / budget_minor / currency / aesthetic_score / price_corridor JSONB + scene.benefits / scene.checkins / scene.price_corridors / scene.memories 4 张新表
 ```
+
+## 新增：R15.13 P2 Memory 域（2026-08-27）
+
+```text
+apps/api-go/internal/scene/repository.go  Memory 聚合根 + 4 个 Repository 方法 UpsertMemory / GetMemory / ListMemoriesByUser / ListMemoriesByScene
+apps/api-go/internal/scene/service.go  recordOutcome 升级到真记 Memory（需 Scene 存在 + PUBLISHED/INVITING/SIGNED_UP + host 必须为 actor + 双侧 checkin + ActualSpend ≥ 0 + DurationMin ≥ 0）；listMyMemories 双视角聚合；getMemory host/guest 可读 其他人 REJECTED MEMORY_NOT_VISIBLE
+apps/api-go/internal/scene/service.go  Supports() 扩展包含 ListMyMemories / GetMemory 保持 dispatch 通畅
+apps/api-go/internal/scene/service.go  rating 派生：0.5 × aesthetic + 0.5 × budgetAdherence（over-spend 反射式惩罚），clamp [0,1]
+apps/api-go/internal/scene/scene_test.go  +11 cases: readyForOutcome 辅助 / NotFound / GuestRequired / SpendMustBeNonNegative / DurationMustBeNonNegative / NotHost / CheckinIncomplete / DraftSceneRejected / RatingClampedToUnitInterval / UpsertReplacesExisting / ListMyMemories 三角色隔离 / GetMemory host+guest 可读 陌生人 REJECTED / GetMemory NotFound / Supports() 包含新命令
+apps/api-go/internal/scene/repository_test.go  +6 cases: UpsertMemory 需 SceneID / 自动分配 ID 前缀 mem_ / upsert 替换 / ListMemoriesByUser host+guest 双视角 + limit<=0 空 / GetMemory NotFound / ListMemoriesByScene missing empty
+apps/api-go/internal/openapicmds/openapicmds.go  DomainDir 补 scene  → openapi commands 生成器扫描 Scene 域（10 个新 entries：CreateScene/UpdateScene/PublishScene/CreateInvitation/RespondInvitation/RecordAttendance/RecordOutcome/ListMyScenes/ListMyInvitations/ListMyMemories/GetMemory）
+apps/api-go/openapi.commands.generated.yaml  138 → 148 entries（重新生成）
+apps/api-go/internal/api/server_test.go  requiresAuthentication tripwire 扩展覆盖 ListMyMemories + GetMemory
+```
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。
