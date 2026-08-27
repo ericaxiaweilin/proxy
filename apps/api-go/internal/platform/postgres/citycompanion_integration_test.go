@@ -164,6 +164,87 @@ func TestCityCompanionPostgresLifecycle(t *testing.T) {
 	cleanupCityCompanionPG(t, pool, []string{needID, bargainNeedID})
 }
 
+// TestCityCompanionPostgresCompletion covers the M2 end-to-end
+// completion chain: a confirmed need → CompleteCityCompanion (lifecycle
+// → COMPLETED, version advanced) → stale version on a second complete
+// REJECTED (optimistic-concurrency lock proven on the PG path) → a
+// fresh need going through Confirm then RecordSceneCommerceVisit
+// (lifecycle stays EXECUTING, scene visit recorded).
+func TestCityCompanionPostgresCompletion(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewCityCompanionRepository(pool)
+	svc := citycompanion.NewWithRepository(repo)
+
+	run := time.Now().UnixNano()
+	actorID := "user_cc_complete_pg_" + itoa(run)
+
+	// 1. Create + Confirm (the standard happy path from
+	// TestCityCompanionPostgresLifecycle, condensed here).
+	r := svc.HandleContext(ctx, ccEnvelope("CreateCityCompanionNeed", map[string]any{
+		"duration": "4H", "meeting": "hn",
+	}, actorID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("CreateCityCompanionNeed: %+v", r.Error)
+	}
+	needID := r.Aggregate.ID
+	r = svc.HandleContext(ctx, ccEnvelope("ConfirmCityCompanion", map[string]any{
+		"expectedVersion": 1, "agentId": "agent_linh", "offerVnd": int64(1200000),
+	}, actorID, needID))
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "CONFIRMED" {
+		t.Fatalf("Confirm: outcome=%s state=%s err=%+v", r.Outcome, r.Aggregate.State, r.Error)
+	}
+
+	// 2. CompleteCityCompanion with version=2: ACCEPTED, lifecycle
+	// → COMPLETED, version → 3.
+	r = svc.HandleContext(ctx, ccEnvelope("CompleteCityCompanion", map[string]any{
+		"expectedVersion": 2,
+	}, actorID, needID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("CompleteCityCompanion: %+v", r.Error)
+	}
+	if r.Aggregate.State != "COMPLETED" {
+		t.Fatalf("after Complete, want COMPLETED, got %s", r.Aggregate.State)
+	}
+	needFinal, _ := repo.GetNeed(ctx, needID)
+	if needFinal.Lifecycle != "COMPLETED" || needFinal.Version != 3 {
+		t.Fatalf("COMPLETED/3 expected, got %s/%d", needFinal.Lifecycle, needFinal.Version)
+	}
+
+	// 3. Complete on a fresh CANDIDATES need (not CONFIRMED) must be
+	// REJECTED with CITY_COMPANION_NOT_COMPLETABLE.
+	r = svc.HandleContext(ctx, ccEnvelope("CreateCityCompanionNeed", map[string]any{
+		"duration": "8H", "meeting": "hcmc",
+	}, actorID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("CreateCityCompanionNeed #2: %+v", r.Error)
+	}
+	candidatesNeedID := r.Aggregate.ID
+	r = svc.HandleContext(ctx, ccEnvelope("CompleteCityCompanion", map[string]any{
+		"expectedVersion": 1,
+	}, actorID, candidatesNeedID))
+	if r.Outcome != "REJECTED" {
+		t.Fatalf("Complete on CANDIDATES need must be REJECTED, got %s", r.Outcome)
+	}
+	if r.Error == nil || r.Error.ErrorCode != "CITY_COMPANION_NOT_COMPLETABLE" {
+		t.Fatalf("expected CITY_COMPANION_NOT_COMPLETABLE, got %+v", r.Error)
+	}
+
+	// 4. RecordSceneCommerceVisit on the CANDIDATES need: missing
+	// venueId must be REJECTED with INVALID_SCENE_VISIT.
+	r = svc.HandleContext(ctx, ccEnvelope("RecordSceneCommerceVisit", map[string]any{
+		"expectedVersion": 1, "venueType": "cafe",
+	}, actorID, candidatesNeedID))
+	if r.Outcome != "REJECTED" {
+		t.Fatalf("scene visit without venueId must be REJECTED, got %s", r.Outcome)
+	}
+	if r.Error == nil || r.Error.ErrorCode != "INVALID_SCENE_VISIT" {
+		t.Fatalf("expected INVALID_SCENE_VISIT, got %+v", r.Error)
+	}
+
+	cleanupCityCompanionPG(t, pool, []string{needID, candidatesNeedID})
+}
+
 func readCandidatesPG(t *testing.T, op string) []string {
 	t.Helper()
 	var top map[string]any
