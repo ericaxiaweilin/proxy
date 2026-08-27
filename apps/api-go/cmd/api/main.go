@@ -128,6 +128,11 @@ func main() {
 		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
 		localNetService = localnet.NewWithMediaLookupAndModelStack(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack)
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
+		// R15.13 P3: bind the scene aggregate to PostgreSQL when
+		// DATABASE_URL is set. Without DATABASE_URL the in-memory
+		// repository continues to serve (the smoke scripts rely on
+		// it for hermetic, no-Docker runs).
+		sceneService = scene.NewWithRepository(postgres.NewSceneRepository(pool))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
