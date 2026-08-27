@@ -41,3 +41,35 @@ PROXY_LOGIN_PROVIDER=simulated PROXY_SIMULATED_OTP_CODE=123456 pnpm dev:api
 ```
 
 模拟账号固定为 `user_001` / `login_001` / `device_001`，支持 `INDIVIDUAL:user_001` 和 `BUSINESS:business_001`。该 Provider 只存在于本地开发路径，挑战在内存中保存 hash、5 分钟过期且只能使用一次；没有配置真实 Provider 时，后端仍然 fail-closed。
+
+### Production LoginChallengeProvider（SMTP / HTTP SMS）
+
+生产 path 需要 `PROXY_LOGIN_PROVIDER=smtp|sms|production`：
+
+```bash
+# 邮件 — 任意 SMTP relay（Mailgun / Postmark / Resend via SMTP / SES / Gmail App Password）
+PROXY_LOGIN_PROVIDER=smtp \
+PROXY_SMTP_HOST=smtp.example.com PROXY_SMTP_PORT=587 \
+PROXY_SMTP_USERNAME=apikey PROXY_SMTP_PASSWORD=... \
+PROXY_SMTP_FROM="Proxy <no-reply@proxy.example>" \
+PROXY_SMTP_TLS=starttls pnpm dev:api
+
+# 短信 — 任意 HTTP webhook（Twilio / MessageMedia / NAPAS / 自建）
+PROXY_LOGIN_PROVIDER=sms \
+PROXY_SMS_URL=https://sms.example.com/v1/messages \
+PROXY_SMS_TOKEN=... PROXY_SMS_FROM=Proxy pnpm dev:api
+```
+
+任何 misconfig / dial failure / upstream non-2xx / 5 wrong attempts / 过期 都
+退回 `ErrLoginChallengeProviderNotReady` (fail-closed)。Plain OTP 永不写入 DB / log /
+response，只存 SHA-256 hash 5 分钟。详细：`architecture/Implementation_Status.md` /
+`apps/api-go/internal/identity/email_smtp_provider.go` /
+`apps/api-go/internal/identity/sms_http_provider.go`。
+
+### 真机 / iPhone smoke
+
+- `apps/mobile/scripts/dev-ios-device.sh` — build + install + launch 到物理 iPhone（Team `C4673FY8U7`）
+- `apps/api-go/scripts/smoke_realdevice_login.sh` — 端到端真机登录 smoke：本地 SMTP sink + 你的 Mac + iPhone via usbmuxd USB 隧道；OTP 发到 `~/.proxy-smoke/last-message.txt`
+- `apps/api-go/scripts/smoke_smtp_login.sh` — 桌面端 curl 验证 provider 全栈
+
+详见 `apps/mobile/scripts/dev-ios-device.sh` 顶部注释。
