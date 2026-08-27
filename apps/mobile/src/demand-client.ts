@@ -71,6 +71,26 @@ export class DemandClient {
     return result;
   }
 
+  // Server-backed Requester Home read model. Returns the actor's
+  // in-progress drafts (lifecycle=DRAFT) and committed tasks
+  // (lifecycle=COMMITTED), ordered by recency, scoped to the
+  // authenticated actor. Replaces the hardcoded "CONTINUE_ITEMS"
+  // placeholder in RequesterHome so the App can hydrate the Continue
+  // strip on relaunch from durable server state.
+  public async listHomeItems(limit: number = 10): Promise<RequesterHomeItemsPayload> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "ListRequesterHomeItems", { type: "RequesterHomeItems", id: session.userAccountId }, {
+      limit
+    });
+    if (result.outcome !== "ACCEPTED") {
+      throw new DemandProtocolError(`home items response outcome=${result.outcome}`);
+    }
+    if (result.aggregate?.type !== "RequesterHomeItems") {
+      throw new DemandProtocolError("home items response did not contain RequesterHomeItems aggregate");
+    }
+    return parseRequesterHomeItemsPayload(result.operationRef);
+  }
+
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new DemandProtocolError("an authenticated principal is required");
@@ -121,4 +141,52 @@ export class DemandClient {
     this.commandSequence += 1;
     return `mobile_demand_${prefix}_${Date.now().toString(36)}_${this.commandSequence.toString(36)}`;
   }
+}
+
+// ---------- Requester Home read-model types ----------
+
+export type RequesterHomeDraftItem = {
+  kind: "DRAFT";
+  id: string;
+  lifecycle: string;
+  version: number;
+  sourceInput: string;
+  draftProgress: number;
+  lastCompletedStep: number;
+  updatedAt: string;
+};
+
+export type RequesterHomeTaskItem = {
+  kind: "TASK";
+  id: string;
+  draftId: string;
+  lifecycle: string;
+  version: number;
+  sourceInput: string;
+  createdAt: string;
+};
+
+export type RequesterHomeItemsPayload = {
+  actorId: string;
+  limit: number;
+  drafts: RequesterHomeDraftItem[];
+  tasks: RequesterHomeTaskItem[];
+};
+
+function parseRequesterHomeItemsPayload(operationRef: string | undefined): RequesterHomeItemsPayload {
+  if (!operationRef) {
+    throw new DemandProtocolError("home items response missing operationRef");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(operationRef);
+  } catch (error) {
+    throw new DemandProtocolError(`home items operationRef not parseable: ${(error as Error).message}`);
+  }
+  const top = parsed as { actorId?: unknown; limit?: unknown; drafts?: unknown; tasks?: unknown };
+  const actorId = typeof top.actorId === "string" ? top.actorId : "";
+  const limit = typeof top.limit === "number" ? top.limit : 0;
+  const drafts = Array.isArray(top.drafts) ? (top.drafts as RequesterHomeDraftItem[]) : [];
+  const tasks = Array.isArray(top.tasks) ? (top.tasks as RequesterHomeTaskItem[]) : [];
+  return { actorId, limit, drafts, tasks };
 }

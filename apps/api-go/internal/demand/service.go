@@ -92,7 +92,7 @@ func NewWithRepositoryAndClock(admissionGate, fundingGate Gate, repository Repos
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreateTaskDraft", "UpdateTaskDraft", "PreviewTaskDraft", "PublishTask":
+	case "CreateTaskDraft", "UpdateTaskDraft", "PreviewTaskDraft", "PublishTask", "ListRequesterHomeItems":
 		return true
 	default:
 		return false
@@ -115,6 +115,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.previewDraft(ctx, e)
 	case "PublishTask":
 		return s.publishTask(ctx, e)
+	case "ListRequesterHomeItems":
+		return s.listRequesterHomeItems(ctx, e)
 	default:
 		return command.Rejected(e, "DEMAND_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "demand.unsupported_command", nil)
 	}
@@ -430,6 +432,93 @@ func expandSlots(value any) []TaskSlot {
 		}
 	}
 	return result
+}
+
+// ---------- ListRequesterHomeItems ----------
+// Server-backed Requester Home read model. Surfaces the actor's
+// in-progress drafts (lifecycle=DRAFT) and committed
+// tasks (lifecycle=COMMITTED) so the App can hydrate the "Continue"
+// strip on relaunch instead of showing hardcoded placeholders.
+// The actor must be the user, and we only return items they own —
+// the read model is per-actor, not a global feed.
+
+type listRequesterHomeItemsPayload struct {
+	Limit int `json:"limit"`
+}
+
+func (s *Service) listRequesterHomeItems(ctx context.Context, e command.Envelope) command.Result {
+	var p listRequesterHomeItemsPayload
+	_ = decode(e.Payload, &p)
+	if p.Limit <= 0 {
+		p.Limit = 10
+	}
+	if p.Limit > 50 {
+		p.Limit = 50
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "HOME_ITEMS_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "demand.home_actor_required", nil)
+	}
+	drafts, err := s.repository.ListDraftsByOwner(ctx, e.Actor.ID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "HOME_ITEMS_READ_FAILED", "INTERNAL", "SAFE_RETRY", "demand.home_read_failed", nil)
+	}
+	tasks, err := s.repository.ListTasksByOwner(ctx, e.Actor.ID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "HOME_ITEMS_READ_FAILED", "INTERNAL", "SAFE_RETRY", "demand.home_read_failed", nil)
+	}
+	// Project to a UI-friendly payload: the App shell does not need
+	// full TaskDraft slots, only enough to render a "Continue" card.
+	draftItems := make([]map[string]any, 0, len(drafts))
+	for _, draft := range drafts {
+		progress := draft.DraftProgress
+		if progress < 0 {
+			progress = 0
+		}
+		if progress > 100 {
+			progress = 100
+		}
+		step := draft.LastCompletedStep
+		draftItems = append(draftItems, map[string]any{
+			"kind":                "DRAFT",
+			"id":                  draft.ID,
+			"lifecycle":           draft.Lifecycle,
+			"version":             draft.Version,
+			"sourceInput":         draft.SourceInput,
+			"draftProgress":       progress,
+			"lastCompletedStep":   step,
+			"updatedAt":           draft.UpdatedAt.Format(time.RFC3339Nano),
+		})
+	}
+	taskItems := make([]map[string]any, 0, len(tasks))
+	for _, task := range tasks {
+		taskItems = append(taskItems, map[string]any{
+			"kind":         "TASK",
+			"id":           task.ID,
+			"draftId":      task.DraftID,
+			"lifecycle":    task.Lifecycle,
+			"version":      task.Version,
+			"sourceInput":  task.SourceInput,
+			"createdAt":    task.CreatedAt.Format(time.RFC3339Nano),
+		})
+	}
+	return acceptedWithPayload(e, "RequesterHomeItems", e.Actor.ID, len(draftItems)+len(taskItems), "LISTED", map[string]any{
+		"actorId":  e.Actor.ID,
+		"drafts":   draftItems,
+		"tasks":    taskItems,
+		"limit":    p.Limit,
+		"note":     "Server-backed Requester Home read model: drafts in DRAFT + committed tasks, ordered by recency, scoped to actor.",
+	}, nil)
+}
+
+func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, version int, state string, payload map[string]any, domainEvents []event.DomainEvent) command.Result {
+	result := command.Accepted(e, aggregateType, aggregateID, version, state, eventRefs(domainEvents))
+	result.OperationRef = encodeRef(payload)
+	return result
+}
+
+func encodeRef(payload map[string]any) string {
+	raw, _ := json.Marshal(payload)
+	return string(raw)
 }
 
 func cloneDraft(draft TaskDraft) TaskDraft {

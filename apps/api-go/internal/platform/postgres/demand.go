@@ -316,6 +316,114 @@ func (r *DemandRepository) Snapshot(ctx context.Context) ([]demand.TaskDraft, er
 	return result, nil
 }
 
+// ListDraftsByOwner returns in-progress task drafts owned by the given
+// user, ordered by updated_at DESC. Used by the server-backed
+// Requester Home read model to surface drafts that the user has
+// started but not yet published — a draft's lifecycle stays non-terminal
+// until PublishTask promotes it to a canonical demand.tasks row.
+func (r *DemandRepository) ListDraftsByOwner(ctx context.Context, ownerUserID string, limit int) ([]demand.TaskDraft, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, owner_user_account_id, principal_type, principal_id, lifecycle, version,
+		       source_input, draft_progress, last_completed_step, changes, slots, updated_at
+		FROM demand.task_drafts
+		WHERE owner_user_account_id = $1
+		  AND lifecycle IN ('DRAFT', 'CANDIDATES')
+		ORDER BY updated_at DESC
+		LIMIT $2`, ownerUserID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanDraftsPG(rows)
+}
+
+// ListTasksByOwner returns canonical (published) tasks owned by the
+// given user, ordered by created_at DESC. Used by the Requester Home
+// read model to surface tasks that the user has already published but
+// not yet completed/cancelled.
+func (r *DemandRepository) ListTasksByOwner(ctx context.Context, ownerUserID string, limit int) ([]demand.Task, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, draft_id, owner_user_account_id, principal_type, principal_id, lifecycle, version,
+		       source_input, changes, created_at, updated_at
+		FROM demand.tasks
+		WHERE owner_user_account_id = $1
+		  AND lifecycle = 'COMMITTED'
+		ORDER BY created_at DESC
+		LIMIT $2`, ownerUserID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []demand.Task{}
+	for rows.Next() {
+		var task demand.Task
+		var principalType, principalID string
+		var changes []byte
+		if err := rows.Scan(
+			&task.ID,
+			&task.DraftID,
+			&task.OwnerUserAccountID,
+			&principalType,
+			&principalID,
+			&task.Lifecycle,
+			&task.Version,
+			&task.SourceInput,
+			&changes,
+			&task.CreatedAt,
+			&task.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		task.Principal = command.Principal{Type: principalType, ID: principalID}
+		if err := json.Unmarshal(changes, &task.Changes); err != nil {
+			return nil, fmt.Errorf("decode task changes: %w", err)
+		}
+		result = append(result, task)
+	}
+	return result, rows.Err()
+}
+
+func scanDraftsPG(rows pgx.Rows) ([]demand.TaskDraft, error) {
+	result := []demand.TaskDraft{}
+	for rows.Next() {
+		var draft demand.TaskDraft
+		var principalType, principalID string
+		var changes, slots []byte
+		if err := rows.Scan(
+			&draft.ID,
+			&draft.OwnerUserAccountID,
+			&principalType,
+			&principalID,
+			&draft.Lifecycle,
+			&draft.Version,
+			&draft.SourceInput,
+			&draft.DraftProgress,
+			&draft.LastCompletedStep,
+			&changes,
+			&slots,
+			&draft.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		draft.Principal = command.Principal{Type: principalType, ID: principalID}
+		if err := json.Unmarshal(changes, &draft.Changes); err != nil {
+			return nil, fmt.Errorf("decode task draft changes: %w", err)
+		}
+		if err := json.Unmarshal(slots, &draft.Slots); err != nil {
+			return nil, fmt.Errorf("decode task draft slots: %w", err)
+		}
+		result = append(result, draft)
+	}
+	return result, rows.Err()
+}
+
 func encodeDraftJSON(draft demand.TaskDraft) ([]byte, []byte, error) {
 	changes, err := json.Marshal(draft.Changes)
 	if err != nil {

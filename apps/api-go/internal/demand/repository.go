@@ -43,6 +43,10 @@ type Repository interface {
 	// Canonical read boundary for committed Tasks.
 	GetTask(ctx context.Context, id string) (Task, error)
 	ListTaskSlots(ctx context.Context, taskID string) ([]TaskSlot, error)
+	// Requester Home read-model projections. Owned by the user;
+	// ordered by recency; limit is advisory.
+	ListDraftsByOwner(ctx context.Context, ownerUserID string, limit int) ([]TaskDraft, error)
+	ListTasksByOwner(ctx context.Context, ownerUserID string, limit int) ([]Task, error)
 }
 
 // TransactionalRepository is implemented by stores that can commit the
@@ -212,5 +216,55 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]TaskDraft, error) {
 		result = append(result, cloneDraft(draft))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
+}
+
+func (r *MemoryRepository) ListDraftsByOwner(_ context.Context, ownerUserID string, limit int) ([]TaskDraft, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	result := make([]TaskDraft, 0, limit)
+	for _, draft := range r.drafts {
+		if draft.OwnerUserAccountID != ownerUserID {
+			continue
+		}
+		if draft.Lifecycle != "DRAFT" && draft.Lifecycle != "CANDIDATES" {
+			continue
+		}
+		result = append(result, cloneDraft(draft))
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].UpdatedAt.After(result[j].UpdatedAt)
+	})
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+func (r *MemoryRepository) ListTasksByOwner(_ context.Context, ownerUserID string, limit int) ([]Task, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	result := make([]Task, 0, limit)
+	for _, task := range r.tasks {
+		if task.OwnerUserAccountID != ownerUserID {
+			continue
+		}
+		if task.Lifecycle != "COMMITTED" {
+			continue
+		}
+		result = append(result, task)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+	if len(result) > limit {
+		result = result[:limit]
+	}
 	return result, nil
 }
