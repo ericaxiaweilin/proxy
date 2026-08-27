@@ -157,6 +157,31 @@ apps/mobile/src/shell/app-shell.tsx + app-shell-selectors.ts  抽取 selectMeTab
 apps/mobile/src/shell/app-shell.test.ts  5 cases: guest 始终优先于 voucher
 apps/api-go/internal/api/server_test.go  requiresAuthentication tripwire：auth-lifecycle / public-read allowlist / scene 全量受保护 / 默认 fail-closed
 ```
+
+## 新增：R14 Cover 收紧 + Dominant Color 透传（2026-08-27）
+
+```text
+packages/contracts/src/media-composition.ts:
+  * shouldUseExtendedBackdrop(): contain 且 aspect delta >3% 才启延展
+  * canSafelyCover(): safeRect 不能超过裁剪窗口（拒绝"只是存在就敢裁"）
+  * resolveFrameBackground(): dominantColorHex 合法时用主色；其余回 #0E0A14
+  * resolveFillStrategy 收紧：TEXT_HEAVY / MIXED_PERSON_TEXT / MIXED_PERSON_PRODUCT / subjectCount>1 永远 contain；cover 只允许 aspect delta ≤3% + safeRect 完整
+packages/contracts/src/media-composition-gates.test.ts  +28 boundary cases (degenerate inputs / 3% 浮点临界 / 8 位 hex / 大小写 / missing # / 非 hex / mix 规则 / 9:16 严格几何)
+apps/api-go/internal/localnet/service.go  PostMediaItem.DominantColorHex + MediaAssetInfo.DominantColorHex 透传到 Feed read model
+apps/api-go/internal/localnet/service_test.go  2 cases: propagation + omitempty 守约
+apps/api-go/internal/media/postmedia_lookup.go  asset.DominantColorHex → info.DominantColorHex（bridge 一行不丢）
+apps/api-go/internal/media/postmedia_lookup_test.go  3 cases: 透传 / 缺资产 skip / nil service 防御
+apps/api-go/internal/media/service_test.go  TestImageGoesReadyDirectly 加 DominantColorHex 非空断言
+apps/mobile/src/localnet-client.ts  ListFeedPosts 走 optionalSession（匿名浏览 / server 公开读配合）
+apps/mobile/src/media/AdaptiveMediaCollection.tsx  接 resolveFrameBackground + shouldUseExtendedBackdrop + MediaBackdrop + 全面用 SOCIAL_MEDIA_* token
+apps/mobile/src/media/SocialMediaFrame.tsx  同上 + hint 为空时不再回 cover，纯 contain
+apps/mobile/src/media/social-media-aesthetics.ts  5 token 集中（RADIUS=12 / GRID_GAP=2 / RAIL_GAP=7 / RAIL_TRAILING_SPACE=14 / BADGE_INSET=7）
+apps/mobile/src/media/social-media-aesthetics.test.ts  2 cases: BADGE_INSET 边界 + closed P0 surface 集合 tripwire
+apps/mobile/src/surfaces/feed.tsx + market.tsx + shell/app-shell.tsx  bottomNavVisible + onChromeVisibilityChange 联动（底 dock 升高 86→120）
+apps/mobile/src/surfaces/business-home.tsx  R15.13 Scene Package 商家可供给场景卡片
+docs/media-pipeline/{GATE_3_PIPELINE.md, image_recipe_v2_spec.md}  §5.2.2 回落矩阵 + Gate 3 'B' case 重写（TEXT_HEAVY/多人/混合 contain / SCENE 不再 auto crop / dominant color frame 背景）
+architecture/Social_Media_Pipeline_Plan_Gates_R1.md  §5.2.2 表格 + dominant color 不变量
+```
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。

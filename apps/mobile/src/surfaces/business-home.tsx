@@ -2,8 +2,8 @@
 // r157HomeTop + r1572HomeComposer('BUSINESS') + 待处理 今天 + 3 × r157Action
 // + r157Resume 经营 + r157BizQuick。无 market pulse。
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（bhome，HTML 5204）。
-import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useRef, useState } from "react";
+import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
@@ -36,16 +36,36 @@ const BIZ_QUICK: ReadonlyArray<{ icon: ProxyIconName; label: string }> = [
 export function BusinessHome({
   onOpenMarket,
   onOpenMe,
-  onChat
+  onChat,
+  onChromeVisibilityChange,
+  bottomNavVisible,
 }: {
   onOpenMarket: (tab: MarketTab) => void;
   onOpenMe: () => void;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
+  onChromeVisibilityChange?: (visible: boolean) => void;
+  bottomNavVisible?: boolean;
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode>();
+  const lastYRef = useRef(0);
+  const dirRef = useRef(0);
+  const visibleRef = useRef(true);
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
+    const y = Math.max(0, e.nativeEvent.contentOffset.y);
+    const delta = y - lastYRef.current;
+    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+    else if (Math.abs(delta) >= 1) {
+      const prevDir = Math.sign(dirRef.current);
+      const nextDir = Math.sign(delta);
+      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
+      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
+    }
+    lastYRef.current = y;
+  }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {/* 基线 .r157HomeTop：Bonsaidon + 今天要推进什么？ + 商家⌄ */}
       <View style={styles.homeTop}>
         <View style={styles.homeTopCopy}>

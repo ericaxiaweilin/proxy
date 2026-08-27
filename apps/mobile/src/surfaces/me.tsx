@@ -6,8 +6,8 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
-import { useEffect, useState } from "react";
-import { Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import * as ImagePicker from "expo-image-picker";
@@ -1218,7 +1218,9 @@ export function MeSurface({
   onOpenVouchers,
   onExperienceAction,
   onOpenConversation,
-  onSignOut
+  onSignOut,
+  onChromeVisibilityChange,
+  bottomNavVisible,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -1230,6 +1232,8 @@ export function MeSurface({
   onExperienceAction: (action: ExperienceAction) => void;
   onOpenConversation?: (author: string) => void;
   onSignOut: () => void;
+  onChromeVisibilityChange?: (visible: boolean) => void;
+  bottomNavVisible?: boolean;
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
   // 规范 §4/§13：Android 硬件返回先收起子页；其余覆盖层是 RN Modal（onRequestClose 自理）。
@@ -2396,10 +2400,25 @@ export function MeSurface({
     );
   }
 
+  const lastYRef = useRef(0);
+  const dirRef = useRef(0);
+  const visibleRef = useRef(true);
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
+    const y = Math.max(0, e.nativeEvent.contentOffset.y);
+    const delta = y - lastYRef.current;
+    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+    else if (Math.abs(delta) >= 1) {
+      const prevDir = Math.sign(dirRef.current);
+      const nextDir = Math.sign(delta);
+      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
+      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
+    }
+    lastYRef.current = y;
+  }
   return (
     <View style={styles.root}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <MeLocationContext />
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
         <View style={styles.pageTitleRow}>
           <Text style={styles.pageTitle}>{persona.pageTitle}</Text>
         </View>

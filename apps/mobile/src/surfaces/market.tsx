@@ -147,14 +147,25 @@ export function MarketSurface({
   const [showOffers, setShowOffers] = useState(false);
   const lastScrollYRef = useRef(0);
   const chromeVisibleRef = useRef(true);
+  const scrollDirectionDistanceRef = useRef(0);
   function onMarketScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
     const y = Math.max(0, e.nativeEvent.contentOffset.y);
     const delta = y - lastScrollYRef.current;
-    if (y <= 20) {
-      if (!chromeVisibleRef.current) { chromeVisibleRef.current = true; onChromeVisibilityChange?.(true); }
-    } else if (Math.abs(delta) >= 2) {
-      if (delta > 6 && chromeVisibleRef.current) { chromeVisibleRef.current = false; onChromeVisibilityChange?.(false); }
-      else if (delta < -10 && !chromeVisibleRef.current) { chromeVisibleRef.current = true; onChromeVisibilityChange?.(true); }
+    if (y <= 48) {
+      chromeVisibleRef.current = true;
+      onChromeVisibilityChange?.(true);
+      scrollDirectionDistanceRef.current = 0;
+    } else if (Math.abs(delta) >= 1) {
+      const prevDir = Math.sign(scrollDirectionDistanceRef.current);
+      const nextDir = Math.sign(delta);
+      scrollDirectionDistanceRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : scrollDirectionDistanceRef.current + delta;
+      if (scrollDirectionDistanceRef.current <= -18) {
+        if (!chromeVisibleRef.current) { chromeVisibleRef.current = true; onChromeVisibilityChange?.(true); }
+        scrollDirectionDistanceRef.current = 0;
+      } else if (scrollDirectionDistanceRef.current >= 28) {
+        if (chromeVisibleRef.current) { chromeVisibleRef.current = false; onChromeVisibilityChange?.(false); }
+        scrollDirectionDistanceRef.current = 0;
+      }
     }
     lastScrollYRef.current = y;
   }
@@ -362,7 +373,7 @@ export function MarketSurface({
   function renderMarketPage(pageTab: "OPPORTUNITY" | "ACTIVITY"): React.JSX.Element {
     const bottomPad = bottomNavVisible === false ? 16 : 120;
     return (
-    <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
         <View>
           <Text style={styles.marketTitle}>市场</Text>
@@ -634,7 +645,7 @@ function OpportunityTab({
   );
 }
 
-// R4 卡：价格三栏（客户预算 / Proxy 公平区间 / 你的类似记录）+ tags + 匹配度 + 双按钮
+// R4 卡：机会用通栏（无两侧空白），活动用卡片
 function R4OpportunityCard({ opportunity, onOpen, onDismiss }: { opportunity: MarketOpportunity; onOpen: () => void; onDismiss: () => void }): React.JSX.Element {
   const budget = opportunity.price;
   const fairLow = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()}₫`;
@@ -643,7 +654,7 @@ function R4OpportunityCard({ opportunity, onOpen, onDismiss }: { opportunity: Ma
   const mine = `约 ${budget}`;
   const reason = opportunity.skills ? `${opportunity.skills} · ${opportunity.match} 匹配` : `${opportunity.match} 匹配`;
   return (
-    <View style={styles.r4Card}>
+    <View style={styles.r4CardFlat}>
       <View style={styles.r4Top}>
         <View style={styles.scenarioIcon}>
           <ProxyIcon color={color.violet} name={scenarioIconForOpportunity(opportunity)} size={14} />
@@ -1244,7 +1255,8 @@ function mapConfig(tab: "OPPORTUNITY" | "ACTIVITY"): {
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
-  content: { paddingBottom: 120, paddingHorizontal: 0, paddingTop: 10 },
+  content: { paddingBottom: 120, paddingHorizontal: 18, paddingTop: 10 },
+  contentFlat: { paddingHorizontal: 0 },
   marketHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginVertical: 4, paddingHorizontal: 12 },
   marketTitle: { color: color.ink, fontSize: 30, fontWeight: "800", lineHeight: 36 },
   marketSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
@@ -1320,7 +1332,8 @@ const styles = StyleSheet.create({
   contextSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   contextBadge: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
   contextBadgeText: { color: "#5B2CB5", fontSize: 11, fontWeight: "800" },
-  r4Card: { backgroundColor: "transparent", borderBottomColor: "rgba(35,28,42,0.09)", borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12, paddingHorizontal: 12, marginVertical: 0 },
+  r4Card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, marginVertical: 5, padding: 12, ...shadows.card },
+  r4CardFlat: { backgroundColor: "transparent", borderBottomColor: "rgba(35,28,42,0.09)", borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12, paddingHorizontal: 12, marginVertical: 0 },
   r4Top: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
   scenarioIcon: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 28, justifyContent: "center", width: 28 },
   marketError: { color: color.magenta, fontSize: 11, lineHeight: 16, marginVertical: 7 },

@@ -879,7 +879,7 @@ export function FeedSurface({
     return <CustomFeedHub onBack={() => setCustomFeedHubOpen(false)} onOpenFeed={(id) => { setSelectedCustomFeed(id); setFeedFilter("ALL"); setCustomFeedHubOpen(false); }} />;
   }
 
-  const bottomPad = bottomNavVisible === false ? 16 : 200;
+  const bottomPad = bottomNavVisible === false ? 16 : 120;
   return (
     <View style={styles.root}>
     <ScrollView

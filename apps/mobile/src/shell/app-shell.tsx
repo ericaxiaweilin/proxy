@@ -5,7 +5,7 @@
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import type {
   ExperienceAction,
   ExperienceManifest,
@@ -243,11 +243,12 @@ export function AppShell({
   const openContextSwitcher = useCallback((): void => {
     setSwitcherOpen(true);
   }, []);
+  const insets = useSafeAreaInsets();
   const isNavVisible = scrollChromeVisible && (tab !== "FEED" || feedChromeVisible || !!feedChatAuthor || feedPrefsOpen);
 
   return (
     <>
-      <SafeAreaView edges={isNavVisible ? ["top", "bottom"] : ["top"]} style={styles.safeArea}>
+      <SafeAreaView edges={["top"]} style={styles.safeArea}>
       <View style={[styles.root, width >= 768 && styles.rootWide]}>
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
         {scrollChromeVisible ? <Header compact={compactWidth} /> : null}
@@ -294,7 +295,7 @@ export function AppShell({
             touchStartX.current = event.nativeEvent.pageX;
             lastTouchX.current = event.nativeEvent.pageX;
           }}
-          style={[styles.body, (isNavVisible && tab !== "FEED" ? { paddingBottom: 120 } : undefined)]}
+          style={styles.body}
         >
         {tab === "HOME" ? (
           sceneComposerTool ? (
@@ -325,6 +326,8 @@ export function AppShell({
               onOpenMarket={() => openMarket({ tab: "OPPORTUNITY" })}
               onOpenMe={() => setTab("ME")}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
+              onChromeVisibilityChange={setScrollChromeVisible}
+              bottomNavVisible={isNavVisible}
             />
           ) : workspaceTarget ? (
             <FulfillmentWorkspace
@@ -341,6 +344,8 @@ export function AppShell({
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
               demandClient={demand}
               onCreateScene={setSceneComposerTool}
+              onChromeVisibilityChange={setScrollChromeVisible}
+              bottomNavVisible={isNavVisible}
             />
           )
         ) : tab === "MARKET" ? (
@@ -380,7 +385,7 @@ export function AppShell({
               onBack={() => setMessageChatAuthor(undefined)}
             />
           ) : (
-            <MessagesSurface onOpenConversation={setMessageChatAuthor} />
+            <MessagesSurface onOpenConversation={setMessageChatAuthor} onChromeVisibilityChange={setScrollChromeVisible} bottomNavVisible={isNavVisible} />
           )
           ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -409,10 +414,12 @@ export function AppShell({
                 setTab("MESSAGES");
               }}
               onSignOut={onSignOut}
+              onChromeVisibilityChange={setScrollChromeVisible}
+              bottomNavVisible={isNavVisible}
             />
           )}
         </View>
-        {isNavVisible ? <RootNav activeTab={tab} compact={compactWidth} onSelect={selectTab} /> : null}
+        {isNavVisible ? <RootNav activeTab={tab} compact={compactWidth} bottomInset={insets.bottom} onSelect={selectTab} /> : null}
         <ContextSwitcherSheet
           current={context}
           onClose={() => setSwitcherOpen(false)}
@@ -502,10 +509,12 @@ function LocationContext(): React.JSX.Element {
 function RootNav({
   activeTab,
   compact,
+  bottomInset,
   onSelect
 }: {
   activeTab: RootTab;
   compact: boolean;
+  bottomInset?: number;
   onSelect: (tab: RootTab) => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
@@ -591,7 +600,7 @@ function RootNav({
   const lensScaleX = 0.45 + velocityNorm * 0.55;
 
   return (
-    <View style={styles.dockWrap}>
+    <View style={[styles.dockWrap, { bottom: (bottomInset ?? 0) + 2 }]}>
       <View
         onLayout={(e) => setMeasuredWidth(e.nativeEvent.layout.width)}
         {...panResponder.panHandlers}

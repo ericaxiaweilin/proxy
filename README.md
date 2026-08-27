@@ -2,7 +2,7 @@
 
 Proxy 是 App-first 产品：Requester、Agent、Business 共用一个 iOS / Android App；Operator Console 仅供内部使用。
 
-## 当前实现：Go Backend + App Foundation + M1/M2 baseline
+## 当前实现：Go Backend + App Foundation + M1/M2 baseline + M3 (Agent Passport) + M6.5 (Outcome) + M7 (Inbox) + M8 (Safety) + M9 (Business Workspace) + R14 Media Pipeline + R15.13 Scene Value Exchange
 
 当前代码从架构基线开始实现：
 
@@ -18,6 +18,20 @@ Go backend + TypeScript mobile/shared-contract workspace
 → Demand Draft / Preview / PublishTask gate baseline
 → Requester Cockpit / Need Capture / Preview / explicit publish confirmation
 → PostgreSQL command Unit of Work (idempotency + aggregate + outbox)
+→ 18 域 PostgreSQL adapter + 21 个集成 test（identity/demand/fulfillment/engagement/
+  media/citycompanion/contribution/business/socialspace/payment/notification/safety/
+  outcome/supply/conversation/localcontext/localnet + outbox）
+→ 生产 OTP Provider (SMTP / HTTP SMS) + production env validator
+→ 生产 LoginChallengeProvider + Keychain 真机 smoke
+→ server-backed Requester Home read model (ListRequesterHomeItems)
+→ M3 Agent Passport / Availability (supply.agents + capability_verifications)
+→ M6.5 Outcome Intelligence (ObservationSet / Delta / Learning)
+→ M7 Inbox / Device / DeepLink
+→ M8 Safety / Operator / Privacy / Legal Hold
+→ M9 Business Workspace (accounts/memberships/stores/venues/tasks/spend)
+→ Context-Driven Experience Runtime v1 (ExperienceIntent / SurfacePlan / Delta)
+→ R14 Media Pipeline (cover 策略收紧 + dominant color 透传 + 柔化延展层)
+→ R15.13 Scene Value Exchange P0 (6 tools / Scene Independence Test / Guard / 9 commands)
 ```
 
 架构入口：[`architecture/README.md`](./architecture/README.md)

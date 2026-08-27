@@ -1,7 +1,7 @@
 // 根级「消息」：按 R15 原型实现为「聊天 + 好友」完整模块，而非只有会话列表。
 // R15.10 §161：添加好友 5 种入口统一在 Messages → 添加好友，不在 My
-import { useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useMemo, useRef, useState } from "react";
+import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { FriendCrmSurface } from "./friend-crm";
@@ -23,7 +23,7 @@ const THREADS = [
   { initial: "○", name: "西湖摄影散步", context: "活动", preview: "Luna：我也会带相机过去。", time: "昨天", unread: "5", dark: false }
 ] as const;
 
-export function MessagesSurface({ onOpenConversation }: { onOpenConversation: (author: string) => void }): React.JSX.Element {
+export function MessagesSurface({ onOpenConversation, onChromeVisibilityChange, bottomNavVisible }: { onOpenConversation: (author: string) => void; onChromeVisibilityChange?: (visible: boolean) => void; bottomNavVisible?: boolean }): React.JSX.Element {
   const [tab, setTab] = useState<MessageTab>("FRIENDS");
   const [composer, setComposer] = useState<ComposerMode>();
   const [search, setSearch] = useState("");
@@ -35,6 +35,22 @@ export function MessagesSurface({ onOpenConversation }: { onOpenConversation: (a
   const [crmFriend, setCrmFriend] = useState<(typeof FRIENDS)[number] | undefined>();
   // R15.10 添加好友 5 种方式归属 Messages，由 FriendCrmSurface 的 ADD_FRIEND 复用 HTML 原型
   const [addFriendOpen, setAddFriendOpen] = useState(false);
+  const lastYRef = useRef(0);
+  const dirRef = useRef(0);
+  const visibleRef = useRef(true);
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
+    const y = Math.max(0, e.nativeEvent.contentOffset.y);
+    const delta = y - lastYRef.current;
+    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+    else if (Math.abs(delta) >= 1) {
+      const prevDir = Math.sign(dirRef.current);
+      const nextDir = Math.sign(delta);
+      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
+      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
+    }
+    lastYRef.current = y;
+  }
   const visibleFriends = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return keyword ? FRIENDS.filter((friend) => `${friend.name}${friend.context}${friend.relation}`.toLowerCase().includes(keyword)) : FRIENDS;
@@ -58,7 +74,7 @@ export function MessagesSurface({ onOpenConversation }: { onOpenConversation: (a
   }
 
   return (
-    <ScrollView keyboardShouldPersistTaps="handled" style={styles.root} contentContainerStyle={styles.content}>
+    <ScrollView keyboardShouldPersistTaps="handled" style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       <View style={styles.head}>
         <View>
           <Text style={styles.title}>消息</Text>
