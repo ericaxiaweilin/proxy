@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
+import { SwipeBackShell } from "../architecture/swipe-back";
 import * as ImagePicker from "expo-image-picker";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
@@ -1358,13 +1359,14 @@ export function MeSurface({
     if (!result.canceled && selected?.uri) setProfileAvatarUri(selected.uri);
   }
 
-  // 子页面渲染
+  // 子页面渲染 — 架构层统一右滑退出（全量小模块）
   if (subPage) {
+    const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => setSubPage(undefined)}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
-    if (subPage.route === "myorders") return <MyOrdersSurface onBack={() => setSubPage(undefined)} />;
-    if (subPage.route === "myactivities") return <MyActivitiesSurface onBack={() => setSubPage(undefined)} />;
-    if (subPage.route === "favorites") return <FavoritesSurface onBack={() => setSubPage(undefined)} />;
+    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
 
     // 原型 screens.appbehavior：不是设置表格，而是一组应用可靠性检查卡片。
     if (subPage.route === "appbehavior") {
@@ -1379,7 +1381,7 @@ export function MeSurface({
         ["通知疲劳", "安全、付款和必须处理的事项可即时通知；普通状态变化合并提醒。"]
       ];
 
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -1416,7 +1418,7 @@ export function MeSurface({
 
     // R15.9 Personal Social OS：三个入口各有自己的信息结构，不能落到通用子页。
     if (subPage.route === "socialidentity") {
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.socialAccountsContent}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -1483,7 +1485,7 @@ export function MeSurface({
         ["3", "订单成立", "可开放 Zalo / 电话用于现实履约", "合作后"],
         ["4", "订单结束", "临时联系权限可自动关闭", "可恢复"]
       ];
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -1524,7 +1526,7 @@ export function MeSurface({
     if (subPage.route === "socialanalytics") {
       const funnel = [["主页访问", "100%", "1,284"], ["合格聊天", "54%", "47"], ["机会", "34%", "18"], ["订单", "22%", "9"], ["复购", "11%", "4"]] as const;
       const sources = [["Proxy 市场", "612", "26", "5"], ["TikTok", "338", "11", "2"], ["Zalo QR", "214", "8", "2"], ["Instagram", "120", "2", "0"]];
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -1569,7 +1571,7 @@ export function MeSurface({
       // v5 审计结构：能力与可用时间是同一模块的两个层级，不在一屏堆叠。
       if (availabilityPanel === "CALENDAR") {
         const days = nextDays(30);
-        return (
+        return contentWrapper(
           <View style={styles.root}>
             <ScrollView contentContainerStyle={styles.content}>
               <Pressable onPress={() => setAvailabilityPanel("ABILITIES")} style={styles.subPageBack}>
@@ -1617,7 +1619,7 @@ export function MeSurface({
           </View>
         );
       }
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => { setAvailabilityPanel("ABILITIES"); setSubPage(undefined); }} style={styles.subPageBack}>
@@ -1703,7 +1705,7 @@ export function MeSurface({
         ["M", "Mai", "好友", "好的，到时候联系你。", "昨天", ""],
         ["○", "西湖摄影散步", "活动", "Luna：我也会带相机过去。", "昨天", "5"]
       ];
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -1742,7 +1744,7 @@ export function MeSurface({
         { key: "language", label: "语言偏好", value: "中文为主 · 可英文", source: "SUGGESTED" }
       ];
 
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -1817,7 +1819,7 @@ export function MeSurface({
 
     // 钱包页面（原型 wallet）
     if (subPage.route === "wallet") {
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -1870,7 +1872,7 @@ export function MeSurface({
     if (subPage.route === "personalhub") {
       const personalPhotos = profilePosts.flatMap((post) => (profileMedia[post.postId] ?? []).map((item, index) => ({ item, index, postId: post.postId }))).filter((entry) => entry.item.mediaType === "IMAGE");
       const viewedItems = profileViewer ? profileMedia[profileViewer.postId] ?? [] : [];
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.personalHubContent}>
             <View style={styles.personalTopbar}>
@@ -1981,7 +1983,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "personalqr") {
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -2029,7 +2031,7 @@ export function MeSurface({
       const draftReady = enterpriseOpsStage !== "READY";
       const confirmed = enterpriseOpsStage === "CONFIRMED" || enterpriseOpsStage === "PUBLISHED";
       const published = enterpriseOpsStage === "PUBLISHED";
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -2100,7 +2102,7 @@ export function MeSurface({
         { initial: "A", name: "An · 活动接待", meta: "河内 · 最近合作 8 天前", rating: "4.9", stats: [["18 次", "完成合作"], ["94%", "按时率"], ["可用", "本周六"]] },
         { initial: "M", name: "Minh · 中越口译", meta: "北宁 / 河内 · 最近合作 12 天前", rating: "4.8", stats: [["12 次", "完成合作"], ["97%", "按时率"], ["可用", "周末"]] }
       ];
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
@@ -2143,7 +2145,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "multislot") {
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
@@ -2157,7 +2159,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "todayboard") {
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
@@ -2172,7 +2174,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "merchantstorefront") {
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -2248,7 +2250,7 @@ export function MeSurface({
     // R15.12.22：经营诊断不是旧版“标题 + 通用信息卡”。它是由 Server
     // UI Recipe 生成的诊断总览；动作只能作为提议，仍要由商家明确确认。
     if (subPage.route === "businessdiagnostic") {
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
@@ -2284,7 +2286,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "bdash") {
-      return (
+      return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -2346,7 +2348,7 @@ export function MeSurface({
     }
 
     // 兜底路由仍遵循原型的“标题 + 独立卡片”页面语法；不再使用错误的巨大图标和表格容器。
-    return (
+    return contentWrapper(
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>

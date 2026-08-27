@@ -402,6 +402,19 @@ async function restoreNativeShell(): Promise<AppShellState> {
       isRestricted: false,
       isOffline: false
     });
+    if (__DEV__) {
+      // Dev-only: lets `idevicesyslog` and the Mac smoke script verify that
+      // the iOS Keychain is actually persisting session tokens across an app
+      // kill / re-launch. Production builds drop this branch entirely.
+      if (restored.state.status === "AUTHENTICATED" && restored.session) {
+        const principalId = restored.session.principal?.id ?? restored.session.userAccountId;
+        console.log(
+          `[proxy.smoke] keychain=present principalId=${principalId} sessionId=${restored.session.auth.sessionId}`
+        );
+      } else {
+        console.log(`[proxy.smoke] keychain=absent status=${restored.state.status}`);
+      }
+    }
     return restored.state;
   } catch {
     // A Keychain/Keystore read failure must never leave an ambiguous session.

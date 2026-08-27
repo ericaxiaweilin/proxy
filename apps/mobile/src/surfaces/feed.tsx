@@ -32,7 +32,6 @@ import { CommunityHub } from "./community";
 import { CustomFeedHub } from "./custom-feed";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
-import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
@@ -237,7 +236,6 @@ export function FeedSurface({
   refreshTrigger?: number;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>("RECOMMENDED");
-  const [pagerPage, setPagerPage] = useState<number | undefined>(undefined);
   const [section, setSection] = useState<FeedSection>("POSTS");
   const [feedFilter, setFeedFilter] = useState<FilterKey>("ALL");
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedPosts.length > 0 ? "READY" : "LOADING");
@@ -871,8 +869,6 @@ export function FeedSurface({
     return true;
   });
   const visible = getVisibleForTab(tab);
-  // 架构层就绪：动态两页（推荐/关注）已可经 PaginatedModuleShell 左右滑，当前仍用单列表保持稳定，切换只需：
-  // const feedPagerPages = tabsToPagerPages({ tabs: ["RECOMMENDED","FOLLOWING"] as const, activeTab: tab, renderPage: (t) => <View>{getVisibleForTab(t as FeedTab).length} 条</View> });
   const quoteTarget = quoteTargetId ? posts.find((post) => post.postId === quoteTargetId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
@@ -950,19 +946,12 @@ export function FeedSurface({
         {searchQuery ? <Pressable accessibilityLabel="清空动态搜索" onPress={() => setSearchQuery("")}><Text style={styles.searchArrow}>×</Text></Pressable> : null}
       </View> : null}
 
-      {/* R15.3 networktabs：2 列（推荐 / 关注）— 架构层统一滑动 */}
+      {/* R15.3 networktabs：2 列（推荐 / 关注） */}
       <View style={styles.tabs}>
         {TABS.map((entry) => {
           const active = tab === entry.id;
           return (
-            <Pressable
-              key={entry.id}
-              onPress={() => {
-                setTab(entry.id);
-                setPagerPage(TABS.findIndex((t) => t.id === entry.id));
-              }}
-              style={styles.tabItem}
-            >
+            <Pressable key={entry.id} onPress={() => setTab(entry.id)} style={styles.tabItem}>
               <Text style={[styles.tabText, active && styles.tabTextActive]}>{entry.label}</Text>
               {active ? (
                 <View style={styles.tabBar}>

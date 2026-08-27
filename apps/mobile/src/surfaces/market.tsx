@@ -23,6 +23,7 @@ import {
   type OpportunityLens
 } from "../market-fixtures";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
+import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
 
@@ -103,6 +104,7 @@ export function MarketSurface({
 }): React.JSX.Element {
   const normalized = normalizeTab(initialTab);
   const [tab, setTab] = useState<"OPPORTUNITY" | "ACTIVITY">(normalized);
+  const [pagerPage, setPagerPage] = useState<number | undefined>(undefined);
   const [view, setView] = useState<MarketViewMode>("LIST");
   const [lens, setLens] = useState<OpportunityLens>("NOW");
   const [oppFilter, setOppFilter] = useState<R7Filter>("RECOMMEND");
@@ -340,7 +342,8 @@ export function MarketSurface({
 
   const remoteLens = lens === "REMOTE";
 
-  return (
+  function renderMarketPage(pageTab: "OPPORTUNITY" | "ACTIVITY"): React.JSX.Element {
+    return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.marketHead}>
         <View>
@@ -368,12 +371,13 @@ export function MarketSurface({
             key={id}
             onPress={() => {
               setTab(id);
+              setPagerPage(id === "ACTIVITY" ? 1 : 0);
               setActivityDetail(null);
               setOppDetail(null);
             }}
-            style={[styles.tab, tab === id && styles.tabOn]}
+            style={[styles.tab, pageTab === id && styles.tabOn]}
           >
-            <Text style={[styles.tabText, tab === id && styles.tabTextOn]}>{label}</Text>
+            <Text style={[styles.tabText, pageTab === id && styles.tabTextOn]}>{label}</Text>
           </Pressable>
         ))}
       </View>
@@ -438,7 +442,7 @@ export function MarketSurface({
         <SelectWorkbench opportunity={selectOpp} onBack={() => setSelectOpp(null)} onOpenApplicant={setApplicantName} onOpenSubmission={setSubmissionName} onCompare={() => setCompareOpen(true)} />
       ) : view === "MAP" ? (
         <MarketMap
-          tab={tab === "OPPORTUNITY" ? "OPPORTUNITY" : "ACTIVITY"}
+          tab={pageTab}
           lens={lens}
           remoteLens={remoteLens}
           marketLabel={marketLabel}
@@ -449,7 +453,7 @@ export function MarketSurface({
           }}
           onOpenActivity={(a) => setActivityDetail(a)}
         />
-      ) : tab === "OPPORTUNITY" ? (
+      ) : pageTab === "OPPORTUNITY" ? (
         oppDetail ? (
           <OpportunityDetail
             opportunity={oppDetail}
@@ -529,6 +533,27 @@ export function MarketSurface({
         </>
       )}
     </ScrollView>
+    );
+  }
+
+  const pagerPages = tabsToPagerPages({
+    tabs: ["OPPORTUNITY", "ACTIVITY"] as const,
+    activeTab: tab,
+    renderPage: renderMarketPage,
+    titleOf: (item) => item === "OPPORTUNITY" ? "机会" : "活动",
+  });
+
+  return (
+    <PaginatedModuleShell
+      definition={{ id: "market", pages: pagerPages, initialPage: normalized === "ACTIVITY" ? 1 : 0 }}
+      page={pagerPage}
+      onPageChange={(index) => {
+        setTab(index === 1 ? "ACTIVITY" : "OPPORTUNITY");
+        setPagerPage(undefined);
+        setActivityDetail(null);
+        setOppDetail(null);
+      }}
+    />
   );
 }
 

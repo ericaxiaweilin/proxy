@@ -54,28 +54,46 @@ export function ProxyModulePager({
   const { width } = useWindowDimensions();
   const listRef = useRef<ScrollView>(null);
   const mounted = useRef(false);
+  const previousWidth = useRef(width);
   const exitRef = useRef(onExit);
   exitRef.current = onExit;
   // initialPage 显式传入时永远赢过停留记录：被动重进的 rememberPage 语义由模块宿主保证
   // （宿主初始化自身状态时读 store，再把结果作为 initialPage 传下来），pager 只负责把滑动
   // 结果持久化写回 store。否则程序化带意图重进（如"完成后跳已使用"）会与宿主状态错位。
   const [current, setCurrent] = useState<number>(() => clampIndex(initialPage, pages.length));
+  const currentRef = useRef(current);
+  currentRef.current = current;
 
   function commit(index: number): void {
+    currentRef.current = index;
     setCurrent(index);
     if (rememberPage) setLastPage(moduleId, index);
   }
 
-  // 挂载时定位到起始页（Android 无 contentOffset 初值，layout 后无动画校正）。
+  // 挂载及窗口宽度变化时校正当前页，避免旋转/分屏/不同设备宽度后偏半页。
   useEffect(() => {
-    if (mounted.current) return;
+    const firstLayout = !mounted.current;
+    const widthChanged = previousWidth.current !== width;
     mounted.current = true;
-    if (current > 0) requestAnimationFrame(() => listRef.current?.scrollTo({ x: current * width, animated: false }));
-  }, [width]);
+    previousWidth.current = width;
+    if ((firstLayout && current > 0) || widthChanged) {
+      requestAnimationFrame(() => listRef.current?.scrollTo({ x: current * width, animated: false }));
+    }
+  }, [current, width]);
+
+  // 页面集合动态缩短时把状态收回有效范围。
+  useEffect(() => {
+    const target = clampIndex(current, pages.length);
+    if (target !== current) {
+      commit(target);
+      listRef.current?.scrollTo({ x: target * width, animated: false });
+      onPageChange?.(target);
+    }
+  }, [pages.length, width]);
 
   // 外部受控跳转（父组件改 page 时吸附过去；notify=false 避免回声）。
   useEffect(() => {
-    if (page === undefined || !Number.isInteger(page) || page === current) return;
+    if (page === undefined || !Number.isInteger(page) || page === currentRef.current) return;
     const target = clampIndex(page, pages.length);
     commit(target);
     listRef.current?.scrollTo({ x: target * width, animated: false });
@@ -88,16 +106,16 @@ export function ProxyModulePager({
   const overscrollPeak = useRef(0);
 
   function noteOverscroll(x: number): void {
-    if (current === 0 && x < 0 && x < overscrollPeak.current) {
+    if (currentRef.current === 0 && x < 0 && x < overscrollPeak.current) {
       overscrollPeak.current = x;
     }
   }
 
   /** 评估峰值并清零；命中阈值返回 true（仅当模块提供了 onExit）。 */
-  function tryExit(): boolean {
+  function tryExit(velocityX = 0): boolean {
     const peak = -overscrollPeak.current;
     overscrollPeak.current = 0;
-    return Boolean(onExit) && peak > 0 && decideExitRelease({ overscrollPx: peak, pageWidth: width }) === "exit";
+    return Boolean(onExit) && peak > 0 && decideExitRelease({ overscrollPx: peak, pageWidth: width, velocityPxPerMs: velocityX }) === "exit";
   }
 
   function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>): void {
@@ -110,9 +128,16 @@ export function ProxyModulePager({
 
   function handleScrollEndDrag(event: NativeSyntheticEvent<NativeScrollEvent>): void {
     noteOverscroll(event.nativeEvent.contentOffset.x);
-    if (tryExit()) {
+    if (tryExit(event.nativeEvent.velocity?.x ?? 0)) {
       exitRef.current?.();
       return;
+    }
+    // 慢拖可能没有 momentum 事件；用系统给出的目标位置同步 Tab 状态。
+    const targetX = event.nativeEvent.targetContentOffset?.x ?? event.nativeEvent.contentOffset.x;
+    const index = clampIndex(Math.round(targetX / width), pages.length);
+    if (index !== currentRef.current) {
+      commit(index);
+      onPageChange?.(index);
     }
   }
 
@@ -122,7 +147,7 @@ export function ProxyModulePager({
       return;
     }
     const index = clampIndex(Math.round(event.nativeEvent.contentOffset.x / width), pages.length);
-    if (index !== current) {
+    if (index !== currentRef.current) {
       commit(index);
       onPageChange?.(index);
     }

@@ -24,7 +24,7 @@ export function PaginatedModuleShell({
   onPageChange,
 }: {
   definition: PaginatedModuleDefinition;
-  onExit: () => void;
+  onExit?: (() => void) | undefined;
   page?: number | undefined;
   onPageChange?: ((index: number) => void) | undefined;
 }): React.JSX.Element {
@@ -32,8 +32,8 @@ export function PaginatedModuleShell({
     moduleId: definition.id,
     pages: definition.pages,
     rememberPage: definition.rememberPage ?? true,
-    onExit,
   };
+  if (onExit !== undefined) pagerProps.onExit = onExit;
   if (definition.initialPage !== undefined) pagerProps.initialPage = definition.initialPage;
   if (page !== undefined) pagerProps.page = page;
   if (onPageChange !== undefined) pagerProps.onPageChange = onPageChange;
