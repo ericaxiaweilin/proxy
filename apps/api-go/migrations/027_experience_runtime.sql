@@ -24,7 +24,10 @@ CREATE TABLE IF NOT EXISTS experience.surface_plan (
   surface_plan_id      TEXT PRIMARY KEY,
   surface_id           TEXT NOT NULL,
   surface_version      INTEGER NOT NULL,
-  decision_id          TEXT NOT NULL REFERENCES experience.experience_intent(decision_id) DEFERRABLE INITIALLY DEFERRED,
+  -- decision_id is a business correlation token, not a foreign key. One
+  -- decision can produce multiple intents / plans over time, so it has
+  -- no uniqueness constraint at the schema layer.
+  decision_id          TEXT NOT NULL,
   experience_intent_id TEXT NOT NULL REFERENCES experience.experience_intent(intent_id),
   context_snapshot_id  TEXT NOT NULL,
   render_mode          TEXT NOT NULL CHECK (render_mode IN ('NATIVE_COMPONENT','PRIMITIVE_COMPOSITION','FALLBACK')),
