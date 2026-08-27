@@ -1,19 +1,42 @@
-// LocationPickerSheet (R15.13 P5)：切换首页/动态顶部的本地范围。
-// 选项以"城市 · 区域"为最小单位（仅城市/区域，没有 GPS、没有设备级精细化）。
-// 视觉基线：复用 ContextSwitcherSheet 的 sheet 形态以保持一致性；
-// 数据范围保持小 — 三个起步城市 + 每城 1-2 个常用区域，避免变成完整地址簿。
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+// LocationPickerSheet v2 (R15.13 P6)：tabbed picker — 推荐地点 / 自定义坐标。
+// 之前 P5 只是 4 个预设地点 (河内还剑湖 / 河内西湖 / 胡志明市 / 岘港)。
+// P6 加"自定义坐标" tab，让用户能 tap / 拖动 SVG 地图上的 pin，
+// 设定 1 / 3 / 5 km 半径，命名保存。地图走 react-native-svg 自绘
+// (不引 react-native-maps，避免 prebuild / pod install 阻塞)，但
+// 给了真实 grid 坐标 + 半径 + 城市名 — 这三件对"feed 怎么用
+// location" 已经够。
+import { useState } from "react";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
+import { MapCanvas, type GridCoord } from "./map-canvas";
 import { color } from "../theme";
 import {
+  CITY_BOUNDS,
   DEFAULT_LOCATION,
+  formatRadius,
+  gridToLatLng,
   LOCATION_OPTIONS,
+  type AnyLocation,
+  type CustomLocation,
   type Location,
-  type LocationOption
+  type PresetLocation,
+  type CustomLocationFields
 } from "./location-options";
+import {
+  loadActiveCustomId,
+  loadCustomHistory,
+  saveCustomLocation
+} from "./location-store";
 
 export { DEFAULT_LOCATION, LOCATION_OPTIONS };
-export type { Location, LocationOption };
+export type { Location, CustomLocation, PresetLocation, AnyLocation, CustomLocationFields };
+
+// gridToLatLng / formatRadius re-export 给 app-shell 单独用 —
+// shell 要把 active location 显示成 "河内 · (5,5) · 3 km" 时
+// 不需要再 import location-options 两次。
+export { gridToLatLng, formatRadius };
+
+type Tab = "PRESET" | "CUSTOM" | "HISTORY";
 
 export function LocationPickerSheet({
   open,
@@ -22,10 +45,65 @@ export function LocationPickerSheet({
   onClose
 }: {
   open: boolean;
-  current: Location;
-  onSelect: (next: Location) => void;
+  current: AnyLocation;
+  onSelect: (next: AnyLocation) => void;
   onClose: () => void;
 }): React.JSX.Element {
+  const [tab, setTab] = useState<Tab>(current.kind === "CUSTOM" ? "CUSTOM" : "PRESET");
+  const [history, setHistory] = useState<CustomLocation[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  // CUSTOM tab state
+  const [customCity, setCustomCity] = useState<string>(current.city || "河内");
+  const [pin, setPin] = useState<GridCoord>(
+    current.kind === "CUSTOM" ? { x: current.custom.gridX, y: current.custom.gridY } : { x: 5, y: 5 }
+  );
+  const [radius, setRadius] = useState<1000 | 3000 | 5000>(
+    current.kind === "CUSTOM" ? current.custom.radiusMeters : 3000
+  );
+  const [label, setLabel] = useState<string>(
+    current.kind === "CUSTOM" ? current.area.replace(/^自定义 · /, "") : ""
+  );
+
+  // 加载历史 — 只在切到 HISTORY tab 时拉一次，避免每次开 sheet 都打 keychain
+  async function openHistory(): Promise<void> {
+    if (!historyLoaded) {
+      const items = await loadCustomHistory();
+      setHistory(items);
+      setHistoryLoaded(true);
+    }
+    setTab("HISTORY");
+  }
+
+  // 切城市时把 pin 居中 — 用户在岘港画了 (5,5)，切到河内还显示
+  // (5,5) 才是符合直觉的。
+  function changeCity(next: string): void {
+    setCustomCity(next);
+    setPin({ x: 5, y: 5 });
+  }
+
+  async function commitCustom(): Promise<void> {
+    const id = `custom_${customCity}_${pin.x}x${pin.y}_r${radius}`;
+    const finalLabel = label.trim() || `${pin.x}, ${pin.y}`;
+    const next: CustomLocation = {
+      id,
+      city: customCity,
+      area: `自定义 · ${finalLabel}`,
+      kind: "CUSTOM",
+      custom: { gridX: pin.x, gridY: pin.y, radiusMeters: radius }
+    };
+    await saveCustomLocation(next);
+    // 立即刷新 history (这样切回 HISTORY tab 时新点已经在头部)
+    const items = await loadCustomHistory();
+    setHistory(items);
+    onSelect(next);
+    onClose();
+  }
+
+  const presetActive = current.kind === "PRESET" && current.id !== undefined;
+  const presetCurrentId = current.kind === "PRESET" ? current.id : undefined;
+  const customActive = current.kind === "CUSTOM";
+  const { lat, lng } = gridToLatLng(customCity, pin.x, pin.y);
+
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
       <Pressable onPress={onClose} style={styles.overlay}>
@@ -36,33 +114,167 @@ export function LocationPickerSheet({
               影响首页、动态、推荐与机会的本地筛选 · 仅城市/区域，不会反向定位你
             </Text>
           </View>
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-            {LOCATION_OPTIONS.map((option) => {
-              const active = current.id === option.id;
-              return (
-                <Pressable
-                  key={option.id}
-                  onPress={() => {
-                    onSelect({ id: option.id, city: option.city, area: option.area });
-                    onClose();
-                  }}
-                  style={[styles.opt, active && styles.optActive]}
-                >
-                  <View style={[styles.optIcon, active && styles.optIconActive]}>
-                    <ProxyIcon color={active ? color.white : color.ink} name={option.icon as ProxyIconName} size={24} />
-                  </View>
-                  <View style={styles.optCopy}>
-                    <Text style={styles.optTitle}>{option.city} · {option.area}</Text>
-                    <Text style={styles.optDesc}>{option.desc}</Text>
-                  </View>
-                  <Text style={styles.optAction}>{active ? "当前" : "切换"}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+
+          {/* Tab strip */}
+          <View style={styles.tabs}>
+            <TabButton active={tab === "PRESET"} label="推荐地点" onPress={() => setTab("PRESET")} />
+            <TabButton active={tab === "CUSTOM"} label="自定义坐标" onPress={() => setTab("CUSTOM")} />
+            <TabButton active={tab === "HISTORY"} label={`历史${history.length > 0 ? ` · ${history.length}` : ""}`} onPress={() => void openHistory()} />
+          </View>
+
+          {tab === "PRESET" ? (
+            <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+              {LOCATION_OPTIONS.map((option) => {
+                const active = presetCurrentId === option.id;
+                return (
+                  <Pressable
+                    key={option.id}
+                    onPress={() => {
+                      const next: PresetLocation = { id: option.id, city: option.city, area: option.area, kind: "PRESET" };
+                      onSelect(next);
+                      onClose();
+                    }}
+                    style={[styles.opt, active && styles.optActive]}
+                  >
+                    <View style={[styles.optIcon, active && styles.optIconActive]}>
+                      <ProxyIcon color={active ? color.white : color.ink} name={option.icon as ProxyIconName} size={24} />
+                    </View>
+                    <View style={styles.optCopy}>
+                      <Text style={styles.optTitle}>{option.city} · {option.area}</Text>
+                      <Text style={styles.optDesc}>{option.desc}</Text>
+                    </View>
+                    <Text style={styles.optAction}>{active ? "当前" : "切换"}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : tab === "CUSTOM" ? (
+            <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+              {/* City selector */}
+              <Text style={styles.fieldLabel}>城市</Text>
+              <View style={styles.cityRow}>
+                {Object.keys(CITY_BOUNDS).map((city) => {
+                  const active = city === customCity;
+                  return (
+                    <Pressable
+                      key={city}
+                      onPress={() => changeCity(city)}
+                      style={[styles.cityChip, active && styles.cityChipActive]}
+                    >
+                      <Text style={[styles.cityChipText, active && styles.cityChipTextActive]}>{city}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Map */}
+              <Text style={styles.fieldLabel}>地图</Text>
+              <MapCanvas
+                cityHint={`${customCity} · 网格 10×10`}
+                initialPin={pin}
+                radiusMeters={radius}
+                onChange={setPin}
+                testID="location-picker-map"
+              />
+              <Text style={styles.mapHint}>
+                点击或拖动地图放置坐标 · 当前位置 {lat.toFixed(4)}, {lng.toFixed(4)}
+              </Text>
+
+              {/* Radius selector */}
+              <Text style={styles.fieldLabel}>覆盖半径</Text>
+              <View style={styles.radiusRow}>
+                {([1000, 3000, 5000] as const).map((r) => {
+                  const active = r === radius;
+                  return (
+                    <Pressable
+                      key={r}
+                      onPress={() => setRadius(r)}
+                      style={[styles.radiusChip, active && styles.radiusChipActive]}
+                    >
+                      <Text style={[styles.radiusChipText, active && styles.radiusChipTextActive]}>
+                        {formatRadius(r)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Label input */}
+              <Text style={styles.fieldLabel}>地点名（可选）</Text>
+              <TextInput
+                maxLength={24}
+                onChangeText={setLabel}
+                placeholder={`例如：还剑湖西南角`}
+                placeholderTextColor="#A9A2B0"
+                style={styles.input}
+                value={label}
+              />
+
+              {/* Confirm */}
+              <Pressable
+                accessibilityLabel="保存自定义坐标并切换"
+                onPress={() => void commitCustom()}
+                style={({ pressed }) => [styles.confirm, pressed && styles.confirmPressed]}
+              >
+                <Text style={styles.confirmText}>
+                  保存并切换到 {customCity} · {label.trim() || `(${pin.x}, ${pin.y})`} · {formatRadius(radius)}
+                </Text>
+              </Pressable>
+            </ScrollView>
+          ) : (
+            <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+              {history.length === 0 ? (
+                <View style={styles.emptyHistory}>
+                  <Text style={styles.emptyTitle}>还没有保存过自定义坐标</Text>
+                  <Text style={styles.emptySub}>
+                    切到"自定义坐标" tab 放置一个 pin，覆盖半径 1 / 3 / 5 km，命名后这里会留一份记录方便复用。
+                  </Text>
+                </View>
+              ) : (
+                history.map((entry) => {
+                  const active = current.kind === "CUSTOM" && current.id === entry.id;
+                  const { lat: eLat, lng: eLng } = gridToLatLng(entry.city, entry.custom.gridX, entry.custom.gridY);
+                  return (
+                    <Pressable
+                      key={entry.id}
+                      onPress={() => {
+                        onSelect(entry);
+                        onClose();
+                      }}
+                      style={[styles.opt, active && styles.optActive]}
+                    >
+                      <View style={[styles.optIcon, active && styles.optIconActive]}>
+                        <ProxyIcon color={active ? color.white : color.ink} name="route" size={24} />
+                      </View>
+                      <View style={styles.optCopy}>
+                        <Text style={styles.optTitle}>{entry.city} · {entry.area.replace(/^自定义 · /, "")}</Text>
+                        <Text style={styles.optDesc}>
+                          ({eLat.toFixed(4)}, {eLng.toFixed(4)}) · 半径 {formatRadius(entry.custom.radiusMeters)}
+                        </Text>
+                      </View>
+                      <Text style={styles.optAction}>{active ? "当前" : "切换"}</Text>
+                    </Pressable>
+                  );
+                })
+              )}
+            </ScrollView>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
+  );
+}
+
+function TabButton({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }): React.JSX.Element {
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={[styles.tab, active && styles.tabActive]}
+    >
+      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -73,12 +285,27 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     padding: 12
   },
-  sheet: { backgroundColor: color.white, borderRadius: 25, maxHeight: "78%", padding: 19 },
+  sheet: { backgroundColor: color.white, borderRadius: 25, maxHeight: "88%", padding: 19 },
   head: { paddingBottom: 10, paddingHorizontal: 1 },
   headTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   headSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  tabs: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 8,
+    marginBottom: 10
+  },
+  tab: {
+    backgroundColor: "#F2EDF5",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7
+  },
+  tabActive: { backgroundColor: color.ink },
+  tabText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  tabTextActive: { color: color.white },
   scroll: { marginTop: 4 },
-  scrollContent: { gap: 7, paddingBottom: 8 },
+  scrollContent: { gap: 8, paddingBottom: 16 },
   opt: {
     alignItems: "center",
     backgroundColor: color.white,
@@ -103,5 +330,54 @@ const styles = StyleSheet.create({
   optCopy: { flex: 1 },
   optTitle: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   optDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
-  optAction: { color: "#62586A", fontSize: 11, fontWeight: "800" }
+  optAction: { color: "#62586A", fontSize: 11, fontWeight: "800" },
+  fieldLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 6 },
+  cityRow: { flexDirection: "row", gap: 6, marginTop: 4 },
+  cityChip: {
+    backgroundColor: "#F2EDF5",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7
+  },
+  cityChipActive: { backgroundColor: color.ink },
+  cityChipText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  cityChipTextActive: { color: color.white },
+  mapHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
+  radiusRow: { flexDirection: "row", gap: 6, marginTop: 4 },
+  radiusChip: {
+    backgroundColor: "#F2EDF5",
+    borderRadius: 999,
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: "center"
+  },
+  radiusChipActive: { backgroundColor: color.ink },
+  radiusChipText: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  radiusChipTextActive: { color: color.white },
+  input: {
+    backgroundColor: "#FCFBFD",
+    borderColor: "#DDD5E3",
+    borderRadius: 13,
+    borderWidth: 1,
+    color: color.ink,
+    fontSize: 14,
+    marginTop: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  confirm: {
+    backgroundColor: color.ink,
+    borderRadius: 14,
+    marginTop: 8,
+    paddingVertical: 13,
+    alignItems: "center"
+  },
+  confirmPressed: { backgroundColor: "#3A2F4A" },
+  confirmText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  emptyHistory: {
+    paddingVertical: 30,
+    paddingHorizontal: 10
+  },
+  emptyTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  emptySub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 4 }
 });

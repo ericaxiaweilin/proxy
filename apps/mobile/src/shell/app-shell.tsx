@@ -16,8 +16,13 @@ import { ContextSwitcherSheet } from "../components/context-switcher";
 import {
   DEFAULT_LOCATION,
   LocationPickerSheet,
-  type Location
+  formatRadius,
+  gridToLatLng,
+  type AnyLocation,
+  type CustomLocation,
+  type PresetLocation
 } from "../components/location-picker-sheet";
+import { loadActiveCustomId, loadCustomHistory } from "../components/location-store";
 import { type ConversationClient } from "../conversation-client";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
@@ -133,8 +138,27 @@ export function AppShell({
   // R15.13 P5：首页/动态顶部的本地范围（仅 city + area，不做 GPS 精确定位）。
   // 之前 LocationContext 是个纯静态的 “河内 · 还剑湖附近 + 切换⌄” 文本，
   // “切换⌄” 点了什么都不会发生 — 现在它真的跳出一个 picker sheet。
-  const [currentLocation, setCurrentLocation] = useState<Location>(DEFAULT_LOCATION);
+  //
+  // R15.13 P6：state 升型为 AnyLocation (PRESET | CUSTOM)。CUSTOM
+  // 多带 gridX/gridY/radiusMeters — 真实 lat/lng 走 gridToLatLng
+  // 计算，仅在渲染时计算一次 (避免在 LocationContext 重复)。
+  const [currentLocation, setCurrentLocation] = useState<AnyLocation>(DEFAULT_LOCATION);
   const [locationSheetOpen, setLocationSheetOpen] = useState(false);
+
+  // R15.13 P6：mount 时拉一次"上次激活的自定义坐标" — 跨会话保留
+  // 用户放置的 pin / 半径。如果从未放过，sheet 也仍能从 history
+  // 拉回 (loadCustomHistory 在 sheet 内部调，这里只关心 active)。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const activeId = await loadActiveCustomId();
+      if (cancelled || !activeId) return;
+      const items = await loadCustomHistory();
+      const found = items.find((entry) => entry.id === activeId);
+      if (!cancelled && found) setCurrentLocation(found);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // 规范 §4/§13：Android 硬件返回 = 退整个模块，不逐页退（模块内层级由
   // useModuleBackHandler 注册栈先消费）。顺序即最上层优先：后挂载的 Tab 状态先判。
@@ -509,13 +533,21 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
 }
 
 // 基线 .locationcontext：⌖ 图标块 + 城市 / 本地范围说明 + 切换⌄。
+// R15.13 P6：如果 location 是 CUSTOM (用户自定义坐标)，在副标题
+// 显示 "lat, lng · 半径 X km" — 让用户记住自己放的位置。
 function LocationContext({
   location,
   onPress
 }: {
-  location: Location;
+  location: AnyLocation;
   onPress: () => void;
 }): React.JSX.Element {
+  const sub = location.kind === "CUSTOM"
+    ? (() => {
+        const { lat, lng } = gridToLatLng(location.city, location.custom.gridX, location.custom.gridY);
+        return `自定义 · ${lat.toFixed(4)}, ${lng.toFixed(4)} · 半径 ${formatRadius(location.custom.radiusMeters)}`;
+      })()
+    : "你正在看的本地范围 · 仅城市 / 区域";
   return (
     <Pressable
       accessibilityLabel="切换本地范围"
@@ -529,7 +561,7 @@ function LocationContext({
       <View style={styles.locationCopy}>
         <Text style={styles.locationCity}>{location.city} · {location.area}</Text>
         <Text numberOfLines={1} style={styles.locationSub}>
-          你正在看的本地范围 · 仅城市 / 区域
+          {sub}
         </Text>
       </View>
       <Text style={styles.locationSwitch}>切换⌄</Text>

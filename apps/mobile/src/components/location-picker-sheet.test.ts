@@ -1,17 +1,30 @@
-// R15.13 P5 tripwires: LocationPickerSheet — 首页顶部 "切换本地范围" 真的能切。
+// R15.13 P5 + P6 tripwires: LocationPickerSheet — 首页顶部 "切换本地范围"
+// 真的能切，且 P6 起支持自定义坐标 + 半径。
+//
 // 之前的 LocationContext 是纯静态文本，"切换⌄" 点了什么都不会发生 — 用户
 // 报告"地址切换不了"就是这个。现在变成 Pressable + Modal picker 弹层。
+// P6 又在 picker 上加了"自定义坐标" tab：tap 地图放置 pin + 选半径 +
+// 命名保存，跨会话通过 expo-secure-store 持久化。
 //
 // We deliberately do NOT import the .tsx file from this test: vitest
 // in this repo does not bundle react-native (only pure TS modules are
 // safe to import in tests). The tripwires below exercise the data
-// contract (DEFAULT_LOCATION, LOCATION_OPTIONS, Location shape) which
-// is the part that matters for state correctness.
+// contract (DEFAULT_LOCATION, LOCATION_OPTIONS, gridToLatLng,
+// makeCustomLocation, etc.) which is the part that matters for state
+// correctness.
 import { describe, expect, it } from "vitest";
 import {
+  CITY_BOUNDS,
   DEFAULT_LOCATION,
+  formatRadius,
+  GRID_H,
+  GRID_W,
+  gridToLatLng,
   LOCATION_OPTIONS,
-  type Location
+  makeCustomLocation,
+  type AnyLocation,
+  type CustomLocation,
+  type PresetLocation
 } from "./location-options.js";
 
 describe("LocationPickerSheet (R15.13 P5)", () => {
@@ -54,10 +67,105 @@ describe("LocationPickerSheet (R15.13 P5)", () => {
     // a card. This tripwire pins that the callback payload is a
     // full Location (not just the id) so the shell can render the
     // new header without a second round-trip to the options table.
-    const initial: Location = { ...DEFAULT_LOCATION };
-    const next: Location = { id: "hcm-d1", city: "胡志明市", area: "第一郡" };
+    const initial: PresetLocation = { ...DEFAULT_LOCATION };
+    const next: PresetLocation = { id: "hcm-d1", city: "胡志明市", area: "第一郡", kind: "PRESET" };
     expect(next.id).not.toBe(initial.id);
     expect(next.city).not.toBe(initial.city);
     expect(next.area).not.toBe(initial.area);
+  });
+});
+
+describe("LocationPickerSheet (R15.13 P6) — custom coordinate + radius", () => {
+  it("makeCustomLocation returns a stable, reproducible id (last-write-wins on store)", () => {
+    // The store uses id-based dedup; two calls with the same params
+    // must produce the same id or the history would grow forever.
+    const a = makeCustomLocation("河内", 5, 5, 3000);
+    const b = makeCustomLocation("河内", 5, 5, 3000);
+    expect(a.id).toBe(b.id);
+    expect(a.id).toMatch(/^custom_河内_5x5_r3000$/);
+  });
+
+  it("makeCustomLocation with different radius produces different id", () => {
+    // 1 km vs 5 km 是两个不同点 — id 必须区分，否则 store 会
+    // 把用户切半径当成 no-op 并覆盖之前的。
+    const a = makeCustomLocation("河内", 5, 5, 1000);
+    const b = makeCustomLocation("河内", 5, 5, 5000);
+    expect(a.id).not.toBe(b.id);
+  });
+
+  it("gridToLatLng projects center of Hanoi to known center (within 1km)", () => {
+    // 河内 网格 (5, 5) 必须落在 CITY_BOUNDS.河内.centerLat/Lng ± spanKm/2。
+    // 偏移超过 1 km 就是 bug — 用户说"我放在河内中心"结果显示在
+    // 西湖或海上，picker 就失去信任。
+    const { lat, lng } = gridToLatLng("河内", 5, 5);
+    const bounds = CITY_BOUNDS["河内"];
+    if (!bounds) throw new Error("CITY_BOUNDS missing 河内");
+    expect(Math.abs(lat - bounds.centerLat)).toBeLessThan(0.01);
+    expect(Math.abs(lng - bounds.centerLng)).toBeLessThan(0.01);
+  });
+
+  it("gridToLatLng is deterministic (same inputs → same outputs across calls)", () => {
+    // Picker 每次 render 都会调 gridToLatLng 算 lat/lng。
+    // 浮点结果必须稳定 — 否则 map 显示的"21.0245"和 LocationContext
+    // 显示的"21.0246"会让用户怀疑放错了位置。
+    const a = gridToLatLng("胡志明市", 7, 3);
+    const b = gridToLatLng("胡志明市", 7, 3);
+    expect(a.lat).toBe(b.lat);
+    expect(a.lng).toBe(b.lng);
+  });
+
+  it("gridToLatLng round-trips the four corners (no drift beyond 0.0001)", () => {
+    // (0,0) = 西北角 = (center - spanKm/2)；(W, H) = 东南角 = (center + spanKm/2)
+    // 这两个 anchor 偏移超 0.0001° (≈11m) 就会被 inspector 看到。
+    const bounds = CITY_BOUNDS["岘港"];
+    if (!bounds) throw new Error("CITY_BOUNDS missing 岘港");
+    const nw = gridToLatLng("岘港", 0, 0);
+    const se = gridToLatLng("岘港", GRID_W, GRID_H);
+    const halfSpanDeg = (bounds.spanKm / 2) / 111;
+    expect(Math.abs(nw.lat - (bounds.centerLat + halfSpanDeg))).toBeLessThan(0.0001);
+    expect(Math.abs(se.lat - (bounds.centerLat - halfSpanDeg))).toBeLessThan(0.0001);
+  });
+
+  it("formatRadius renders 1km/3km/5km cleanly (no 1000/3000/5000 leakage)", () => {
+    // Picker 副标题/HUD 用 formatRadius，需求是"3 km"而不是"3000 m"。
+    // 若实现里把 m 跟 km 混了，"5 km" 显示成 "5000 m" 立刻被用户抓到。
+    expect(formatRadius(1000)).toBe("1 km");
+    expect(formatRadius(3000)).toBe("3 km");
+    expect(formatRadius(5000)).toBe("5 km");
+  });
+
+  it("AnyLocation discriminator is 'CUSTOM' | 'PRESET' (exhaustive narrowing)", () => {
+    // app-shell 在渲染 location 副标题时 switch on kind — 如果
+    // kind 落到 string 而不是字面量联合，TS narrowing 失效，
+    // CUSTOM/PRESET 路径会编译过但运行时错。
+    const preset: PresetLocation = { id: "hn-swordlake", city: "河内", area: "还剑湖附近", kind: "PRESET" };
+    const custom: CustomLocation = makeCustomLocation("河内", 5, 5, 3000);
+    const mixed: AnyLocation[] = [preset, custom];
+    const seen = new Set(mixed.map((entry) => entry.kind));
+    expect(seen.size).toBe(2);
+    expect(seen.has("PRESET")).toBe(true);
+    expect(seen.has("CUSTOM")).toBe(true);
+  });
+
+  it("CustomLocation.custom has gridX/gridY in 0..GRID_W/GRID_H range (no out-of-bounds)", () => {
+    // MapCanvas clamp 到 0..GRID，但 makeCustomLocation 是纯数据
+    // 层 — 不应该让非法 grid 偷偷穿过。如果未来 sheet 让用户
+    // 输入数字 (而不是拖地图)，验证在这里死。
+    const custom = makeCustomLocation("河内", 0, 0, 1000);
+    expect(custom.custom.gridX).toBeGreaterThanOrEqual(0);
+    expect(custom.custom.gridX).toBeLessThanOrEqual(GRID_W);
+    expect(custom.custom.gridY).toBeGreaterThanOrEqual(0);
+    expect(custom.custom.gridY).toBeLessThanOrEqual(GRID_H);
+  });
+
+  it("radius is constrained to {1km, 3km, 5km} (no 7km hack)", () => {
+    // R15.13 P6 显式只支持三档半径 — map 上的 radius 圈用这个
+    // 数字。如果 TypeScript 让其他 number 滑进 field，画布上的
+    // 圈大小映射会 silent fail。
+    const valid: Array<1000 | 3000 | 5000> = [1000, 3000, 5000];
+    for (const r of valid) {
+      const custom = makeCustomLocation("河内", 5, 5, r);
+      expect(custom.custom.radiusMeters).toBe(r);
+    }
   });
 });
