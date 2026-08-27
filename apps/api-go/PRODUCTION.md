@@ -1,0 +1,139 @@
+# Proxy API — Production Environment
+
+This document is the canonical reference for the environment variables
+the `apps/api-go` binary honors on a production deployment. The dev
+defaults live in `.env.example`; this file is what an SRE/operator
+needs to put a real instance into production.
+
+The binary **fails closed** on every provider below: if the env that
+gates a domain is not set, the corresponding adapter returns
+"unconfigured" and the domain's commands become no-ops or reject with
+`PROVIDER_UNCONFIGURED`. There are no silent fallbacks to mock
+implementations in production.
+
+## Core process
+
+| Variable          | Required | Default | Notes |
+|-------------------|----------|---------|-------|
+| `API_HOST`        | no       | `0.0.0.0` | bind address |
+| `API_PORT`        | no       | `4100`  | listen port |
+| `DATABASE_URL`    | yes (prod) | unset (in-memory) | `postgres://user:pass@host:5432/db`. When unset, services fall back to the in-memory repository (dev/test only). |
+
+## Login / Identity
+
+The login provider is selected by `PROXY_LOGIN_PROVIDER`. The
+production-shipped providers are SMTP (email OTP) and SMS (phone OTP).
+A `simulated` provider exists for local development and the smoke
+scripts under `apps/api-go/scripts/`.
+
+### SMTP (email OTP)
+
+| Variable                  | Required | Notes |
+|---------------------------|----------|-------|
+| `PROXY_SMTP_HOST`         | yes      | hostname |
+| `PROXY_SMTP_PORT`         | no       | default 587 |
+| `PROXY_SMTP_USERNAME`     | no       | for authenticated relay |
+| `PROXY_SMTP_PASSWORD`     | no       | for authenticated relay |
+| `PROXY_SMTP_FROM`         | yes      | RFC 5322 From address |
+| `PROXY_SMTP_TLS`          | no       | `starttls` / `tls` / `none` |
+| `PROXY_SMTP_TEST_RECIPIENT` | no     | dev-only: redirect all mail here |
+
+### SMS (phone OTP)
+
+| Variable              | Required | Notes |
+|-----------------------|----------|-------|
+| `PROXY_SMS_URL`       | yes      | provider HTTP endpoint |
+| `PROXY_SMS_FROM`      | yes      | sender id / short code |
+| `PROXY_SMS_TOKEN`     | yes      | bearer token |
+| `PROXY_SMS_TEST_PHONE` | no      | dev-only: redirect all SMS here |
+
+### Simulated (dev only)
+
+`PROXY_LOGIN_PROVIDER=simulated` + `PROXY_SIMULATED_OTP_CODE=123456`.
+Never enable this provider in production. The simulated provider
+exists so the mobile dev shell can run end-to-end without burning
+real OTP quota; turning it on in production would let any caller log
+in as any user.
+
+## Operator gate
+
+| Variable                     | Required | Notes |
+|------------------------------|----------|-------|
+| `PROXY_OPERATOR_PRINCIPALS`  | no (fail-closed) | comma-separated principal ids allowed to execute privileged commands (capability review, contribution moderation, payout authorization, media readiness override). Unset = every operator command rejected. |
+
+## Model Stack (AI)
+
+`apps/api-go` integrates with the platform Model Stack for the
+Experience Runtime. The control plane and gateway must both be
+configured; otherwise the AI features are unavailable and the
+runtime falls back to the in-domain deterministic path.
+
+| Variable                       | Required | Notes |
+|--------------------------------|----------|-------|
+| `MODELSTACK_CONTROL_PLANE_URL` | yes      | routing + failover control plane |
+| `MODELSTACK_GATEWAY_URL`       | yes      | business gateway (OpenAI-compatible) |
+| `MODELSTACK_GATEWAY_API_KEY`   | yes      | never commit, never log |
+
+Any one of the three missing → `modelstack.Unconfigured{}` is wired
+in and every Experience surface returns `PROVIDER_UNCONFIGURED`.
+
+## Object storage + Redis
+
+These are read by libraries the API links against, not the binary
+itself.
+
+| Variable                  | Required | Notes |
+|---------------------------|----------|-------|
+| `REDIS_URL`               | yes (idempotency, rate limit, outbox leases) | `redis://host:6379/0` |
+| `OBJECT_STORAGE_ENDPOINT` | yes (media upload + playback) | S3-compatible |
+| `OBJECT_STORAGE_BUCKET`   | yes      | media quarantine / ready bucket |
+| `OBJECT_STORAGE_ACCESS_KEY` | yes    | S3 access key |
+| `OBJECT_STORAGE_SECRET_KEY` | yes    | S3 secret key |
+
+## Smoke checks
+
+| Script | Purpose |
+|--------|---------|
+| `apps/api-go/scripts/smoke_smtp_login.sh` | send a real OTP email and read it back, asserting the full SMTP loop |
+| `apps/api-go/scripts/smoke_realdevice_login.sh` | drive the mobile keychain restore end-to-end on a real device |
+| `apps/api-go/scripts/smoke_realdevice_keychain.sh` | variant that exercises only the keychain restore path |
+
+## Health probes
+
+| Path | Use |
+|------|-----|
+| `GET /health/live`  | liveness — process is up |
+| `GET /health/ready` | readiness — database pool pinged, idempotency store ready |
+
+The readiness probe degrades to `200 ready` (with `checks` map) when
+optional dependencies (Redis) are missing, so a fresh deploy is not
+marked unready just because Redis has not been wired. The response
+is the source of truth: inspect `checks` before promoting the
+instance behind a load balancer.
+
+## Recommended production topology
+
+1. `DATABASE_URL` points at a managed PostgreSQL ≥15 (read replica
+   can be added later; the API is single-writer today).
+2. `REDIS_URL` points at a managed Redis ≥6 with persistence off
+   (idempotency store is recoverable from `command_id`).
+3. SMTP and SMS providers both configured; one is sufficient for
+   `BeginPasswordlessAuthentication` to accept users, but having
+   both prevents a single provider outage from locking out new
+   logins.
+4. `PROXY_OPERATOR_PRINCIPALS` is set to a short list of
+   human-rotation-on-call principal ids, reviewed quarterly.
+5. `MODELSTACK_*` is set; without it the Experience Runtime falls
+   back to deterministic stubs and the Market Intelligence Console
+   loses its model-routed rankings.
+6. `OBJECT_STORAGE_*` points at a private bucket; the API never
+   serves public-URL media — every URL is signed at request time.
+
+## Rollback
+
+The binary does not migrate the database on startup; migrations are
+applied out of band (CI step before the deploy). To roll back the
+binary without rolling back the database, re-deploy the previous
+binary image. The new image is forward-only with respect to schema
+additions: removing a column is gated on a separate migration
+version so a previous binary can still read the new schema.

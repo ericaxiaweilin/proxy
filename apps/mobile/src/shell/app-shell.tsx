@@ -4,7 +4,7 @@
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, BackHandler, Image, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type {
   ExperienceAction,
@@ -45,6 +45,8 @@ import { VoucherSurface } from "../surfaces/voucher";
 import { color, shadows } from "../theme";
 import { type ActiveContext } from "../uiplan/types";
 import { type MarketTab } from "../market-fixtures";
+import type { SceneToolId } from "@proxy/contracts";
+import { SCENE_TOOLS } from "@proxy/contracts";
 
 // P0 原型的品牌图标，直接使用原始资源，不做裁剪、重绘或视觉加工。
 const OTTER_LOGO = require("../../assets/otter-logo.png");
@@ -113,9 +115,12 @@ export function AppShell({
   const [scrollChromeVisible, setScrollChromeVisible] = useState(true);
   const touchStartY = useRef<number | undefined>(undefined);
   const lastTouchY = useRef<number | undefined>(undefined);
+  const touchStartX = useRef<number | undefined>(undefined);
+  const lastTouchX = useRef<number | undefined>(undefined);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [homeAssistant, setHomeAssistant] = useState<{ text: string; mode?: HomeIntentMode; attachment?: HomeAttachment }>();
   const [voucherOpen, setVoucherOpen] = useState(false);
+  const [sceneComposerTool, setSceneComposerTool] = useState<SceneToolId | undefined>(undefined);
 
   // 规范 §4/§13：Android 硬件返回 = 退整个模块，不逐页退（模块内层级由
   // useModuleBackHandler 注册栈先消费）。顺序即最上层优先：后挂载的 Tab 状态先判。
@@ -131,6 +136,7 @@ export function AppShell({
       if (tab === "MARKET" && openExperience) { setOpenExperience(undefined); return true; }
       if (tab === "HOME" && homeAssistant) { setHomeAssistant(undefined); return true; }
       if (tab === "HOME" && workspaceTarget) { setWorkspaceTarget(undefined); return true; }
+      if (tab === "HOME" && sceneComposerTool) { setSceneComposerTool(undefined); return true; }
       return false;
     });
     return () => subscription.remove();
@@ -244,24 +250,51 @@ export function AppShell({
         {scrollChromeVisible && (tab === "HOME" || tab === "MESSAGES") ? <LocationContext /> : null}
         <View
           onTouchEnd={() => {
+            const startX = touchStartX.current;
+            const endX = lastTouchX.current ?? startX;
+            const startY = touchStartY.current;
+            const endY = lastTouchY.current ?? startY;
+            if (startX !== undefined && endX !== undefined && startY !== undefined && endY !== undefined) {
+              const dx = endX - startX;
+              const dy = endY - startY;
+              const absDx = Math.abs(dx);
+              const absDy = Math.abs(dy);
+              const swipeThreshold = 56;
+              const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
+              const canSwipeRoot = !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen && !openExperience;
+              if (isHorizontalSwipe && canSwipeRoot) {
+                const order: ReadonlyArray<RootTab> = ["HOME", "MARKET", "FEED", "MESSAGES", "ME"];
+                const idx = order.indexOf(tab);
+                if (dx < 0 && idx < order.length - 1) selectTab(order[idx + 1]!);
+                else if (dx > 0 && idx > 0) selectTab(order[idx - 1]!);
+              }
+            }
             touchStartY.current = undefined;
             lastTouchY.current = undefined;
+            touchStartX.current = undefined;
+            lastTouchX.current = undefined;
           }}
           onTouchMove={(event) => {
             const y = event.nativeEvent.pageY;
+            const x = event.nativeEvent.pageX;
             const previousY = lastTouchY.current ?? touchStartY.current ?? y;
             const delta = y - previousY;
             if (Math.abs(delta) >= 6) setScrollChromeVisible(delta > 0);
             lastTouchY.current = y;
+            lastTouchX.current = x;
           }}
           onTouchStart={(event) => {
             touchStartY.current = event.nativeEvent.pageY;
             lastTouchY.current = event.nativeEvent.pageY;
+            touchStartX.current = event.nativeEvent.pageX;
+            lastTouchX.current = event.nativeEvent.pageX;
           }}
           style={styles.body}
         >
         {tab === "HOME" ? (
-          homeAssistant ? (
+          sceneComposerTool ? (
+            <SceneComposerSurface tool={sceneComposerTool} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
+          ) : homeAssistant ? (
             <HomeAssistantSurface
               conversationClient={conversation}
               mediaClient={media}
@@ -301,6 +334,8 @@ export function AppShell({
               onOpenFeed={() => selectTab("FEED")}
               onOpenMarket={(tab) => openMarket({ tab })}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
+              demandClient={demand}
+              onCreateScene={setSceneComposerTool}
             />
           )
         ) : tab === "MARKET" ? (
@@ -399,6 +434,26 @@ function Header({ compact }: { compact: boolean }): React.JSX.Element {
   );
 }
 
+// R15.13 Scene Composer — P0 minimal: Intent → Anchor → Participation → Cost → Benefit → Invite Preview
+function SceneComposerSurface({ tool, onBack, onCreated }: { tool: SceneToolId; onBack: () => void; onCreated: () => void; }): React.JSX.Element {
+  const meta = SCENE_TOOLS.find((t: { id: SceneToolId }) => t.id === tool);
+  const [intent, setIntent] = useState("");
+  const [cost, setCost] = useState("HOST_SPONSORED");
+  const [participation, setParticipation] = useState("OPEN_SIGNUP");
+  return (
+    <View style={styles.composerRoot}>
+      <Pressable onPress={onBack} style={styles.composerBack}><Text style={styles.composerBackText}>‹ 返回</Text></Pressable>
+      <Text style={styles.composerTitle}>{meta?.label ?? tool} · Scene Composer</Text>
+      <Text style={styles.composerSub}>P0: 把意图变成可邀请的 Scene — 预算进场景而非买人</Text>
+      <View style={styles.composerField}><Text style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text style={styles.composerInputText}>{intent || "例如：周六下午想在西湖拍照 · 2–4人"}</Text></View></View>
+      <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text style={styles.composerChipText}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text style={styles.composerChipText}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text style={styles.composerChipText}>混合</Text></Pressable></View>
+      <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text style={styles.composerChipText}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text style={styles.composerChipText}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text style={styles.composerChipText}>商家权益</Text></Pressable></View>
+      <View style={styles.invitePreview}><Text style={styles.invitePreviewTitle}>对方将看到</Text><Text style={styles.invitePreviewBody}>West Lake Rooftop · 周六 16:00 · 3人已确认 · 饮品 included · 交通支持 — 你也会参加</Text><Text style={styles.invitePreviewHint}>拿掉目标人仍成立 · 独立同意</Text></View>
+      <Pressable onPress={onCreated} style={styles.composerCTA}><Text style={styles.composerCTAText}>创建 Scene 草稿</Text></Pressable>
+    </View>
+  );
+}
+
 // 基线 .locationcontext：⌖ 图标块 + 城市 / 本地范围说明 + 切换⌄。
 function LocationContext(): React.JSX.Element {
   return (
@@ -417,7 +472,8 @@ function LocationContext(): React.JSX.Element {
   );
 }
 
-// 基线 .bottom：悬浮白胶囊（圆角 16 + 边框 + 阴影），激活项 magenta 文字 + #FFF0F6 底。
+// iOS 26 / proxy_transparent_swipe_dock_v2.html 基线：透明毛玻璃 + lens 跟手 + 橙标惯性
+// 参 v2.html: --accent #ff8a00, glass blur24 saturate155, lens blur30 saturate180, progress×100%, velocity拉伸, scale/lift/opacity插值
 function RootNav({
   activeTab,
   compact,
@@ -427,24 +483,136 @@ function RootNav({
   compact: boolean;
   onSelect: (tab: RootTab) => void;
 }): React.JSX.Element {
+  const { width } = useWindowDimensions();
+  const tabs = rootTabs();
+  const order: ReadonlyArray<RootTab> = ["HOME", "MARKET", "FEED", "MESSAGES", "ME"];
+  const activeIndex = Math.max(0, order.indexOf(activeTab));
+  const [progress, setProgress] = useState<number>(activeIndex);
+  const [velocity, setVelocity] = useState<number>(0);
+  const [dragging, setDragging] = useState<boolean>(false);
+  const draggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startProgressRef = useRef(activeIndex);
+  const lastXRef = useRef(0);
+  const lastTRef = useRef(0);
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
+
+  useEffect(() => {
+    if (!draggingRef.current) setProgress(activeIndex);
+  }, [activeIndex]);
+
+  const dockWidth = Math.min(620, Math.max(0, width - 28));
+  const slotWidth = dockWidth > 0 ? (dockWidth - 16) / 5 : 72;
+  const dockHeight = compact ? 64 : 66;
+  const lensHeight = compact ? 52 : 54;
+  const accent = "#ff8a00";
+
+  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+  const commit = useCallback((idx: number) => {
+    const next = clamp(Math.round(idx), 0, 4);
+    setDragging(false);
+    draggingRef.current = false;
+    setVelocity(0);
+    const targetTab = order[next];
+    if (targetTab !== undefined) onSelect(targetTab);
+    setProgress(next);
+  }, [onSelect]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 6,
+      onPanResponderGrant: (evt) => {
+        draggingRef.current = true;
+        setDragging(true);
+        startXRef.current = evt.nativeEvent.pageX;
+        lastXRef.current = evt.nativeEvent.pageX;
+        lastTRef.current = Date.now();
+        startProgressRef.current = progressRef.current;
+        setVelocity(0);
+      },
+      onPanResponderMove: (evt) => {
+        if (!draggingRef.current) return;
+        const now = Date.now();
+        const x = evt.nativeEvent.pageX;
+        const dx = x - startXRef.current;
+        const dt = Math.max(1, now - lastTRef.current);
+        const vx = (x - lastXRef.current) / dt;
+        lastXRef.current = x;
+        lastTRef.current = now;
+        setVelocity(vx);
+        const deltaSlots = dx / Math.max(1, slotWidth);
+        const next = clamp(startProgressRef.current + deltaSlots, 0, 4);
+        setProgress(next);
+      },
+      onPanResponderRelease: () => {
+        if (!draggingRef.current) return;
+        const projected = progressRef.current + velocity * 0.22;
+        commit(projected);
+      },
+      onPanResponderTerminate: () => {
+        if (!draggingRef.current) return;
+        const projected = progressRef.current + velocity * 0.22;
+        commit(projected);
+      }
+    })
+  ).current;
+
+  const velocityNorm = Math.min(1, Math.abs(velocity) / 1.2);
+  const lensScaleX = 0.45 + velocityNorm * 0.55;
+
   return (
-    <View style={[styles.nav, compact && styles.navCompact]}>
-      {rootTabs().map((entry) => {
-        const active = activeTab === entry.id;
-        return (
-          <Pressable
-            key={entry.id}
-            onPress={() => onSelect(entry.id)}
-            style={[styles.navItem, active && styles.navItemActive]}
-          >
-            <View style={styles.navIcon}>
-              <ProxyIcon color={active ? color.magenta : "#83798B"} name={entry.icon} size={24} />
-              {entry.badge ? <View style={styles.navBadge}><Text style={styles.navBadgeText}>{entry.badge}</Text></View> : null}
-            </View>
-            <Text style={[styles.navLabel, active && styles.navLabelActive]}>{entry.label}</Text>
-          </Pressable>
-        );
-      })}
+    <View style={styles.dockWrap}>
+      <View style={[styles.hintRow]} pointerEvents="none">
+        <View style={styles.hintLine} />
+        <Text style={styles.hintText}>左右滑动切换</Text>
+        <View style={styles.hintLine} />
+      </View>
+      <View
+        {...panResponder.panHandlers}
+        style={[styles.nav, compact && styles.navCompact, { height: dockHeight }]}
+      >
+        <View pointerEvents="none" style={styles.dockHighlight} />
+        <View
+          pointerEvents="none"
+          style={[
+            styles.lens,
+            {
+              width: slotWidth,
+              height: lensHeight,
+              transform: [{ translateX: progress * slotWidth }],
+            },
+            dragging && styles.lensDragging
+          ]}
+        >
+          <View style={[styles.lensAccent, { transform: [{ scaleX: lensScaleX }] }]} />
+        </View>
+        {tabs.map((entry, i) => {
+          const d = Math.abs(i - progress);
+          const influence = clamp(1 - d, 0, 1);
+          const scale = 1 + influence * 0.1;
+          const lift = -influence * 0.6;
+          const opacity = 0.72 + influence * 0.28;
+          const active = i === Math.round(progress) && !dragging ? i === activeIndex : false;
+          const isActiveVisual = Math.abs(i - progress) < 0.35;
+          return (
+            <Pressable
+              key={entry.id}
+              onPress={() => { if (!draggingRef.current) commit(i); }}
+              style={styles.navItem}
+              hitSlop={8}
+            >
+              <View style={[styles.navIcon, { transform: [{ scale }], opacity, marginTop: lift }]}>
+                <ProxyIcon color={isActiveVisual ? accent : "#8d8d92"} name={entry.icon} size={22} />
+                {entry.badge ? <View style={styles.navBadgeDot} /> : null}
+              </View>
+              <Text style={[styles.navLabel, { opacity, transform: [{ translateY: lift }] }, isActiveVisual && styles.navLabelActive]}>{entry.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -494,24 +662,88 @@ const styles = StyleSheet.create({
   locationSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
   locationSwitch: { color: "#6E6575", fontSize: 12, fontWeight: "800" },
   body: { flex: 1 },
+  dockWrap: {
+    alignSelf: "center",
+    width: "100%",
+    maxWidth: 620,
+    marginHorizontal: 14,
+    marginVertical: 8,
+    alignItems: "center",
+    gap: 8
+  },
+  hintRow: { flexDirection: "row", alignItems: "center", gap: 10, opacity: 0.9, marginBottom: 2 },
+  hintLine: { width: 22, height: 1, backgroundColor: "rgba(17,17,17,0.14)" },
+  hintText: { color: "#9c9c9f", fontSize: 11, letterSpacing: 0.2 },
   nav: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 16,
+    alignSelf: "stretch",
+    backgroundColor: "rgba(255,255,255,0.24)",
+    borderColor: "rgba(255,255,255,0.50)",
+    borderRadius: 24,
     borderWidth: 1,
     flexDirection: "row",
-    height: 62,
-    marginHorizontal: 15,
-    marginVertical: 8,
-    padding: 4,
-    ...shadows.nav
+    height: 66,
+    paddingHorizontal: 8,
+    paddingVertical: 0,
+    alignItems: "center",
+    overflow: "hidden"
   },
-  navCompact: { height: 58, marginHorizontal: 10 },
-  navItem: { alignItems: "center", borderRadius: 11, flex: 1, gap: 1, justifyContent: "center" },
-  navItemActive: { backgroundColor: color.bottomActiveBg },
-  navIcon: { alignItems: "center", height: 24, justifyContent: "center", width: 24 },
-  navBadge: { alignItems: "center", backgroundColor: color.magenta, borderColor: color.white, borderRadius: 8, borderWidth: 1.5, height: 16, justifyContent: "center", minWidth: 16, paddingHorizontal: 3, position: "absolute", right: -12, top: -7 },
-  navBadgeText: { color: color.white, fontSize: 11, fontWeight: "900" },
-  navLabel: { color: "#83798B", fontSize: 11, fontWeight: "700", lineHeight: 14 },
-  navLabelActive: { color: color.magenta }
+  navCompact: { height: 64, borderRadius: 22 },
+  dockHighlight: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 24,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    opacity: 0.5
+  },
+  lens: {
+    position: "absolute",
+    top: 6,
+    left: 8,
+    height: 54,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.48)",
+    borderColor: "rgba(255,255,255,0.78)",
+    borderWidth: 1,
+    zIndex: 1
+  },
+  lensDragging: { opacity: 0.98 },
+  lensAccent: {
+    position: "absolute",
+    left: "50%",
+    bottom: 4,
+    width: 18,
+    height: 2,
+    borderRadius: 999,
+    backgroundColor: "#ff8a00",
+    marginLeft: -9,
+    opacity: 0.95
+  },
+  navItem: { alignItems: "center", flex: 1, gap: 4, justifyContent: "center", height: "100%", backgroundColor: "transparent", zIndex: 2 },
+  navIcon: { alignItems: "center", height: 26, justifyContent: "center", width: 26 },
+  navBadgeDot: { position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: 999, backgroundColor: "#ff8a00", borderColor: "rgba(255,255,255,0.95)", borderWidth: 1.5 },
+  navLabel: { color: "#8d8d92", fontSize: 11, fontWeight: "600", lineHeight: 11, letterSpacing: 0.1 },
+  navLabelActive: { color: "#111111", fontWeight: "700" },
+
+  composerRoot: { flex: 1, padding: 16, gap: 10, backgroundColor: color.offWhite },
+  composerBack: { alignSelf: "flex-start", paddingVertical: 6 },
+  composerBackText: { color: color.muted, fontSize: 14, fontWeight: "700" },
+  composerTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
+  composerSub: { color: color.muted, fontSize: 12, lineHeight: 17 },
+  composerField: { marginTop: 6, gap: 6 },
+  composerLabel: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  composerInput: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, borderRadius: 14, padding: 12 },
+  composerInputText: { color: color.muted, fontSize: 13 },
+  composerRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  composerChip: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  composerChipActive: { backgroundColor: color.ink, borderColor: color.ink },
+  composerChipText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  invitePreview: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, borderRadius: 16, padding: 14, gap: 6, marginTop: 4 },
+  invitePreviewTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  invitePreviewBody: { color: color.ink, fontSize: 13, lineHeight: 18 },
+  invitePreviewHint: { color: color.muted, fontSize: 11 },
+  composerCTA: { backgroundColor: color.ink, borderRadius: 14, paddingVertical: 14, alignItems: "center", marginTop: 8 },
+  composerCTAText: { color: color.white, fontSize: 14, fontWeight: "900" },
 });

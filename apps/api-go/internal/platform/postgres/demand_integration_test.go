@@ -159,6 +159,153 @@ func TestDemandPostgresLifecycle(t *testing.T) {
 	cleanupDemandPG(t, pool, draftID)
 }
 
+func TestDemandPostgresCanonicalTaskAndSlots(t *testing.T) {
+	// Backend Architecture Audit P1 gate #4: "Add canonical Task /
+	// TaskSlot tables rather than retaining committed slots in draft
+	// JSON." This test proves the canonical row set is written
+	// when PublishTask succeeds, and that ListTaskSlots returns
+	// exactly the slots persisted in demand.task_slots (not
+	// reconstructed from a JSON blob on demand.task_drafts).
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewDemandRepositoryWithOutbox(pool, NewOutboxRepository(pool))
+	svc := demand.NewWithRepository(nil, nil, repo)
+
+	ownerID := "user_canonical_pg_" + itoa(time.Now().UnixNano())
+	principalID := "principal_canonical_pg_" + itoa(time.Now().UnixNano())
+	draftID := "draft_canonical_pg_" + itoa(time.Now().UnixNano())
+
+	// 1. CreateDraft
+	r := svc.HandleContext(ctx, demandEnvelope("CreateTaskDraft", map[string]any{
+		"ownerUserAccountId": ownerID,
+		"principal":          map[string]any{"type": "BUSINESS", "id": principalID},
+		"sourceInput":        "河内摄影师",
+	}, ownerID, principalID, "BUSINESS", "draft_target_unused"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("CreateTaskDraft: %+v", r.Error)
+	}
+	if r.Aggregate == nil || r.Aggregate.ID == "" {
+		t.Fatalf("CreateTaskDraft did not return a draft id")
+	}
+	draftID = r.Aggregate.ID
+
+	// 2. Update with the full set of preview fields including
+	// catalogVersion + policySnapshot so PublishTask accepts. The
+	// `slotBindings` shape we add includes a real roleId so the
+	// canonical slot row carries that id into demand.task_slots.
+	fullChanges := map[string]any{
+		"industry":         "TOUR",
+		"scenario":         "CITY_COMPANION",
+		"startAt":          time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
+		"endAt":            time.Now().Add(28 * time.Hour).UTC().Format(time.RFC3339),
+		"location":         "Hanoi Old Quarter",
+		"slotGroups":       []any{map[string]any{"roleId": "photographer_main", "quantity": 1}},
+		"mustRequirements": []any{"speaks Chinese", "knows Old Quarter"},
+		"deliverables":     []any{"4 hours guiding"},
+		"budget":           map[string]any{"amount": 900000, "currency": "VND"},
+		"matchingMode":     "FAST_MATCH",
+		"catalogVersion":   "v1",
+		"policySnapshot":   map[string]any{"policyVersion": "v1"},
+		"confirmation":     map[string]any{"scopeConfirmed": true, "materialChangePolicyConfirmed": true, "fundingAuthorizationConfirmed": true},
+	}
+	r = svc.HandleContext(ctx, demandEnvelope("UpdateTaskDraft", map[string]any{
+		"expectedVersion": 1, "changes": fullChanges,
+	}, ownerID, principalID, "BUSINESS", draftID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("UpdateTaskDraft fullChanges: %+v", r.Error)
+	}
+
+	// 3. PublishTask with permissive gates (default gates are
+	// PENDING because no provider is configured; the canonical
+	// row set is still written by the repository, but we want
+	// ACCEPTED here so subsequent checks are deterministic).
+	allowGate := func(_ *demand.TaskDraft, _ command.Envelope) demand.GateDecision { return demand.GateDecision{Status: "ALLOW"} }
+	svc = demand.NewWithRepository(allowGate, allowGate, repo)
+	r = svc.HandleContext(ctx, demandEnvelope("PublishTask", map[string]any{
+		"expectedVersion": 2, "online": true,
+	}, ownerID, principalID, "BUSINESS", draftID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("PublishTask: %+v", r.Error)
+	}
+
+	// 4. Verify canonical task row in demand.tasks.
+	var canonicalLifecycle string
+	var canonicalVersion int
+	if err := pool.QueryRow(ctx,
+		`SELECT lifecycle, version FROM demand.tasks WHERE id=$1`, draftID,
+	).Scan(&canonicalLifecycle, &canonicalVersion); err != nil {
+		t.Fatalf("query canonical task: %v", err)
+	}
+	if canonicalLifecycle != "COMMITTED" {
+		t.Fatalf("canonical task lifecycle, want COMMITTED got %q", canonicalLifecycle)
+	}
+	if canonicalVersion < 1 {
+		t.Fatalf("canonical task version, want >=1 got %d", canonicalVersion)
+	}
+
+	// 5. Verify the canonical slot row was written to demand.task_slots.
+	var slotRoleID string
+	var slotState string
+	if err := pool.QueryRow(ctx,
+		`SELECT role_id, state FROM demand.task_slots WHERE task_id=$1 LIMIT 1`, draftID,
+	).Scan(&slotRoleID, &slotState); err != nil {
+		t.Fatalf("query canonical task_slot: %v", err)
+	}
+	if slotRoleID != "photographer_main" {
+		t.Fatalf("canonical task_slot role_id, want photographer_main got %q", slotRoleID)
+	}
+	// Slot state is either OPEN (default) or RESERVED if a concurrent
+	// admission already matched; both are valid committed shapes.
+	if slotState != "OPEN" && slotState != "RESERVED" {
+		t.Fatalf("canonical task_slot state, want OPEN or RESERVED got %q", slotState)
+	}
+
+	// 6. Verify repository.GetTask + ListTaskSlots round-trip the
+	// canonical row (this is the path the Requester Home read model
+	// and the matching engine use; if it returned a JSON blob the
+	// task would not be queryable by slot state).
+	task, err := repo.GetTask(ctx, draftID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.ID != draftID {
+		t.Fatalf("GetTask id, want %s got %s", draftID, task.ID)
+	}
+	slots, err := repo.ListTaskSlots(ctx, draftID)
+	if err != nil {
+		t.Fatalf("ListTaskSlots: %v", err)
+	}
+	if len(slots) == 0 {
+		t.Fatalf("ListTaskSlots returned 0 slots after PublishTask; canonical row set is empty")
+	}
+
+	// 7. Verify the demand.task_drafts row was NOT the source of
+	// truth: the draft should be marked lifecycle=COMMITTED and
+	// must not contain a slots JSON field (no fallback to draft).
+	var draftLifecycle string
+	var changesHasSlots bool
+	if err := pool.QueryRow(ctx,
+		`SELECT lifecycle, (changes ? 'slots') FROM demand.task_drafts WHERE id=$1`, draftID,
+	).Scan(&draftLifecycle, &changesHasSlots); err != nil {
+		t.Fatalf("query task_drafts: %v", err)
+	}
+	if draftLifecycle != "COMMITTED" {
+		t.Fatalf("draft lifecycle after publish, want COMMITTED got %q", draftLifecycle)
+	}
+	// "changes ? 'slots'" returns true when the key is present.
+	// We want the canonical shape to be the task_slots table, so the
+	// draft's changes JSON must NOT carry a 'slots' key. This is the
+	// concrete proof that canonical state lives in demand.tasks +
+	// demand.task_slots, not in a JSON blob on the draft.
+	if changesHasSlots {
+		var changesJSON []byte
+		_ = pool.QueryRow(ctx, `SELECT changes FROM demand.task_drafts WHERE id=$1`, draftID).Scan(&changesJSON)
+		t.Fatalf("task_drafts.changes must not contain a 'slots' key after PublishTask (canonical slots must live in demand.task_slots). Actual changes: %s", string(changesJSON))
+	}
+
+	cleanupDemandPG(t, pool, draftID)
+}
+
 func cleanupDemandPG(t *testing.T, pool *pgxpool.Pool, draftID string) {
 	t.Helper()
 	ctx := context.Background()

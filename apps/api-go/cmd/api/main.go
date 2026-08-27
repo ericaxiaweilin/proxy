@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/api"
+	"github.com/proxy-app/proxy-api/internal/bootenv"
 	"github.com/proxy-app/proxy-api/internal/business"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -36,6 +37,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/safety"
+	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
 	"github.com/proxy-app/proxy-api/internal/supply"
 )
@@ -47,6 +49,12 @@ func main() {
 	port := os.Getenv("API_PORT")
 	if port == "" {
 		port = "4100"
+	}
+
+	if warnings := bootenv.Warnings(); len(warnings) > 0 {
+		for _, w := range warnings {
+			log.Printf("BOOT WARNING: %s", w)
+		}
 	}
 
 	var idempotencyStore command.IdempotencyStore = command.NewMemoryIdempotencyStore()
@@ -76,6 +84,7 @@ func main() {
 	notificationService := notification.New()
 	safetyService := safety.New()
 	outcomeService := outcome.New()
+	sceneService := scene.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -96,9 +105,12 @@ func main() {
 			if err := seedPostgresSupply(pool); err != nil {
 				log.Fatalf("seed postgres supply: %v", err)
 			}
-			if err := seedPostgresMedia(pool); err != nil {
-				log.Fatalf("seed postgres media: %v", err)
-			}
+		}
+		// 公开种子帖长期引用这些固定媒体 ID。媒体读模型不能跟登录
+		// Provider（simulated / SMTP / SMS）耦合，否则切换认证方式后会出现
+		// “帖子还在但图片和视频全部消失”的静默数据断链。
+		if err := seedPostgresMedia(pool); err != nil {
+			log.Fatalf("seed postgres media: %v", err)
 		}
 		demandService = demand.NewWithRepository(nil, nil, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
 		localContextService = localcontext.NewWithRepository(postgres.NewLocalContextRepository(pool))
@@ -132,6 +144,7 @@ func main() {
 	server.Notification = notificationService
 	server.Safety = safetyService
 	server.Outcome = outcomeService
+	server.Scene = sceneService
 	// Activity 域（P0 内存读模型）：启动幂等 seed 基线 5 条活动。
 	activityService := activity.New()
 	activityService.SeedDefaults()
@@ -480,3 +493,11 @@ func localIdentityService(provider identity.LoginChallengeProvider, simulated bo
 		Devices: []identity.DeviceRegistration{{ID: "device_001", UserAccountID: "user_001", Platform: "IOS", Status: "ACTIVE"}},
 	}), nil, provider)
 }
+
+// bootEnvWarnings returns a list of human-readable warnings when the
+// current process is missing env that production deployments are
+// expected to set. We never fatal out: an in-memory dev environment
+// is still useful. But the warnings appear in `journalctl` so an SRE
+// triaging a misconfigured prod box sees them on the first lines of
+// the log. Implementation lives in internal/bootenv so it can be
+// unit-tested without touching the process environment.
