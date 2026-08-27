@@ -77,16 +77,24 @@ export function RequesterHome({
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
-  const [homeItemsLoaded, setHomeItemsLoaded] = useState(false);
+  // HomeItemsLoadState distinguishes the three post-auth states:
+  //   "idle"    — no fetch attempted yet (initial render)
+  //   "loading" — fetch in flight (placeholder still visible)
+  //   "loaded"  — fetch succeeded (real items, possibly empty)
+  //   "error"   — fetch failed (placeholder visible + error chip)
+  // Without this, a transient network blip is indistinguishable
+  // from "user has no in-progress needs" or "user is anonymous".
+  const [homeItemsState, setHomeItemsState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
 
   useEffect(() => {
     if (!demandClient) {
       // Anonymous: keep placeholder so the layout is non-empty.
       setContinueItems(PLACEHOLDER_ITEMS);
-      setHomeItemsLoaded(false);
+      setHomeItemsState("idle");
       return;
     }
     let cancelled = false;
+    setHomeItemsState("loading");
     (async () => {
       try {
         const home = await demandClient.listHomeItems(10);
@@ -95,13 +103,14 @@ export function RequesterHome({
         for (const d of home.drafts) cards.push(projectDraft(d));
         for (const t of home.tasks) cards.push(projectTask(t));
         setContinueItems(cards);
-        setHomeItemsLoaded(true);
+        setHomeItemsState("loaded");
       } catch {
         // Fail closed: keep the placeholder strip so a transient
-        // network blip doesn't wipe the surface.
+        // network blip doesn't wipe the surface, but flag the
+        // state so the section header can show an error chip.
         if (!cancelled) {
           setContinueItems(PLACEHOLDER_ITEMS);
-          setHomeItemsLoaded(false);
+          setHomeItemsState("error");
         }
       }
     })();
@@ -147,7 +156,14 @@ export function RequesterHome({
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>继续</Text>
         <Text style={styles.sectionHint}>
-          {continueItems.length} 项{homeItemsLoaded ? "" : " · 占位"}
+          {continueItems.length} 项
+          {homeItemsState === "loaded"
+            ? ""
+            : homeItemsState === "error"
+            ? " · 加载失败"
+            : homeItemsState === "loading"
+            ? " · 加载中"
+            : " · 占位"}
         </Text>
       </View>
       {continueItems.length === 0 ? (
