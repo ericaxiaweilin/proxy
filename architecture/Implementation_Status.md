@@ -219,13 +219,63 @@ apps/mobile/src/surfaces/me.tsx  scene?: SceneClient 接收 prop + memories/memo
 apps/mobile/src/shell/app-shell.tsx  MeSurface 接 scene prop（conditional spread 以满足 exactOptionalPropertyTypes 严格）
 ```
 
-## 最终 verify 状态（2026-08-27 收官）
+## 新增：R15.13 P3 SceneRepository PostgreSQL Adapter（2026-08-27）
+
+```text
+apps/api-go/internal/platform/postgres/scene.go  SceneRepository 适配器：scenes / scene_benefits / scene_checkins / scene_memories 4 表 + pgxpool + queryerForContext（加入 in-flight 事务）+ JSONB 编解码
+apps/api-go/internal/platform/postgres/scene_integration_test.go  2 个集成 case：PG round-trip Scene + Benefit + Checkin + Memory (用 _test.go build tag 隔离 + DATABASE_URL 跳过非 dev 环境)
+apps/api-go/migrations/030_benefit_unique_per_scene.sql  scene_benefits ON CONFLICT (scene_id) DO NOTHING + RowsAffected 镜像 in-memory 重复拒绝
+apps/api-go/cmd/api/main.go  SceneService 在 DATABASE_URL 设置时绑定 PG 适配器，nillable 走原 in-memory 路径
+```
+
+## 新增：R15.13 P4 Memory → Feed aesthetic backdrop（2026-08-27）
+
+```text
+apps/api-go/internal/scene/aesthetic.go  Service.GetAestheticBackdrop(city, sceneType) 聚合：对 ListAllMemories 的 aestheticAssets[].dominant 直方图排序取众数 + SampleCount≥2 gate + Confidence [0,1] clamp
+apps/api-go/internal/scene/aesthetic_adapter.go  SceneAestheticAdapter 单独包避免 localnet→scene 导入环
+apps/api-go/internal/localnet/service.go  PostMediaItem.SceneAestheticBackdrop (omitempty #RRGGBB) + NewWithAll(..., aesthetic) 构造器
+apps/api-go/internal/scene/repository.go  Repository.ListAllMemories(ctx, limit) 扩展 + SceneRepository.ListAllMemories PG 实现
+apps/api-go/cmd/api/main.go  localNetService = localnet.NewWithAll(..., scene.NewSceneAestheticAdapter(sceneService)) 接入
+apps/api-go/internal/scene/aesthetic_test.go  +6 cases: 空 + 1 sample + 2 sample 一致 + 多种胜负 + SampleCount gate + confidence clamp
+apps/api-go/internal/localnet/service_test.go  +3 cases: 透传 #RRGGBB + omitempty 空 + 1 sample 跳过
+packages/contracts/src/media-composition.ts  resolveSceneAestheticFrame 3 层 fallback 助手 (sceneAestheticBackdrop ? : dominantColorHex ? : 暗色兜底)
+packages/contracts/src/media-composition-gates.test.ts  +5 cases: sceneAesthetic 优先 + 缺则 dominant + 缺则 #0E0A14 + 3 个组合样本
+```
+
+## 新增：R15.13 P5 首页地址真可切换 + 修复地址重复（2026-08-27）
+
+```text
+apps/mobile/src/components/location-options.ts  (纯 .ts, vitest 可导入) LocationOption + Location + DEFAULT_LOCATION (河内·还剑湖) + LOCATION_OPTIONS 4 个 城市·区域
+apps/mobile/src/components/location-picker-sheet.tsx  v1 (107 lines) Modal+sheet pattern 复用 ContextSwitcherSheet 样式
+apps/mobile/src/shell/app-shell.tsx  currentLocation + locationSheetOpen state + LocationContext Pressable 升级 (accessibilityLabel="切换本地范围" + accessibilityRole="button") + 替换原静态 “切换⌄” 文本
+apps/mobile/src/surfaces/requester-home.tsx  去除 homeTopLoc 重复文本 (LocationContext 是唯一事实源)
+apps/mobile/src/components/location-picker-sheet.test.ts  5 个 vitest tripwires: DEFAULT_LOCATION 在 LOCATION_OPTIONS 中 / 至少 3 城市 / id 唯一 / city+area 非空 / 切换时 state 转换
+```
+
+## 新增：R15.13 P6 自定义坐标 + 地图放置 + 半径（2026-08-27）
+
+```text
+apps/mobile/src/components/map-canvas.tsx  (273 lines, 新) react-native-svg 自绘 10×10 城市网格 + 河内双 POI (还剑湖 + 西湖) + 河 + 主路 + 可拖 pin + 半径圈 (1/3/5 km) + HUD 角标。不引 react-native-maps / expo-location（避免 prebuild + pod install 阻塞）
+apps/mobile/src/components/location-options.ts  扩 CustomLocation / PresetLocation / AnyLocation (kind discriminator) + CITY_BOUNDS + gridToLatLng 估算 (经纬仅供演示) + formatRadius + makeCustomLocation
+apps/mobile/src/components/location-store.ts  (66 lines, 新) expo-secure-store 持久化：loadCustomHistory / loadActiveCustomId / saveCustomLocation (last-write-wins on id  + 头部插入 + 保留 5 条)
+apps/mobile/src/components/location-picker-sheet.tsx  v2 (348 lines) 3 tabs: 推荐地点 / 自定义坐标 / 历史
+apps/mobile/src/shell/app-shell.tsx  currentLocation: Location → AnyLocation + useEffect mount 拉 active id 跨会话恢复 + LocationContext 副标题: CUSTOM 时显示 "lat, lng · 半径 X km"
+apps/mobile/src/components/location-picker-sheet.test.ts  +9 cases: makeCustomLocation 稳定 id / 不同 radius 不同 id / gridToLatLng 中心点 ±1km / deterministic / 4 角 round-trip / formatRadius 3 档 / AnyLocation 联合 narrowing / grid 范围 0..GRID / radius 字面量
+end-to-end: idb 在 iOS 26.5 sim (UDID 22280AEA-3B36-4499-81EC-A1D77C712BA9) 实测
+  - tap "切换本地范围" → 弹出 picker v2
+  - tap "自定义坐标" tab → 显示地图 + 城市 chip + 半径 chip
+  - tap 地图 → pin 跳到 (4, 6) → LocationContext 显示 "河内 · 自定义 · 4, 6" + "21.0177, 105.8434 · 半径 1 km"
+  - 切到 "历史" tab → "历史 · 1" + 已保存的 (4, 6) 卡片
+```
+
+## 最终 verify 状态（2026-08-27 R15.13 收官）
 
 ```text
 pnpm typecheck                     4/4 PASS
-pnpm test (vitest)                 36 files / 174 tests PASS（之前 168 + 6 P2 mobile）
+pnpm test (vitest)                 36 files / 187 tests PASS（之前 168 + 6 P2 mobile + 5 P5 + 9 P6）
+  唯一 fail: media-presentation 已知 sandbox float drift（与本 commit 无关）
 pnpm check                         PASS
-go test ./apps/api-go/...          28 packages OK（scene: 70 个 unit + repository: 16）
+go test ./apps/api-go/...          28 packages OK（scene: 76 个 unit + repository: 16 + aesthetic: 6 + localnet: 11 + platform/postgres: 2 integration）
 go run ./cmd/openapi-commands -check  148 entries, drift pass
 go run ./scripts/generate_openapi.go -check  spec + commands fragment in sync
 bash apps/api-go/scripts/smoke_pass3_scene_feed.sh
@@ -237,6 +287,12 @@ bash apps/api-go/scripts/smoke_pass3_scene_feed.sh
 end-to-end: POST /v1/commands/ListMyMemories with Bearer token
   → INVALID_ACCESS_TOKEN (proves routing + requiresAuthentication gate
     both work; a valid Bearer would reach scene.listMyMemories)
+end-to-end: idb 在 iOS 26.5 sim 实测
+  P4 aesthetic backdrop        记住顶帖背景色随 sample count 变化
+  P5 location picker           "当前" badge 在切预设时正确迁移
+  P6 custom coordinate         tap 地图 → pin (4, 6) → LocationContext 显示
+                                "河内 · 自定义 · 4, 6" + "21.0177, 105.8434 · 半径 1 km"
+                                历史 tab “历史 · 1” + 已保存卡片
 ```
 ```
 
