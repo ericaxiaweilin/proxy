@@ -4,14 +4,18 @@ import type { TaskDraftChanges } from "@proxy/contracts";
 import type { DemandDraftStore, LocalDemandDraft, LocalDraftSyncState } from "./demand-draft-store";
 
 /**
- * File-backed JSON demand draft store. This is the reference
- * implementation of `DemandDraftStore` for environments where
- * SQLite is not available (web preview, vitest, CI). On native
- * builds (Expo / bare React Native) the production store is a
- * thin wrapper over `expo-sqlite` exposing the same interface; see
- * apps/mobile/src/demand-draft-store-expo-sqlite.ts for the
- * production-ready skeleton (kept in this repo so a future change
- * can swap implementations without touching call-sites).
+ * File-backed JSON demand draft store.
+ *
+ * STATUS: EXPERIMENTAL reference implementation. The current mobile
+ * app is online-only — every CreateTaskDraft call goes straight to
+ * the server via DemandClient.createDraft and there is no in-process
+ * draft state to persist. This class is here so that when the
+ * offline-draft path lands (see audit gate #3 follow-ups), the
+ * implementation is already proven on disk + covered by tests.
+ *
+ * On a real device the production store is a thin wrapper over
+ * `expo-sqlite` exposing the same DemandDraftStore interface; see
+ * ExpoSqliteDemandDraftStore below.
  *
  * The on-disk format is a single JSON object keyed by `localId`.
  * The file is rewritten atomically via rename: write-tmp + rename.

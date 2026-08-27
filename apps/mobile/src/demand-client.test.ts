@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DemandClient, DemandCommandRejectedError, DemandProtocolError, type AuthenticatedCommandTransport } from "./demand-client";
+import { DemandClient, DemandCommandRejectedError, DemandProtocolError, parseRequesterHomeItemsPayload, type AuthenticatedCommandTransport } from "./demand-client";
 import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-session";
 import type { TransportResponse } from "./auth-client";
 
@@ -162,5 +162,49 @@ describe("requester demand client", () => {
       }
     });
     await expect(client.listHomeItems(10)).rejects.toBeInstanceOf(DemandProtocolError);
+  });
+});
+
+describe("parseRequesterHomeItemsPayload", () => {
+  it("throws on undefined operationRef", () => {
+    expect(() => parseRequesterHomeItemsPayload(undefined)).toThrow(DemandProtocolError);
+  });
+
+  it("throws on malformed JSON", () => {
+    expect(() => parseRequesterHomeItemsPayload("{not json")).toThrow(DemandProtocolError);
+  });
+
+  it("returns empty lists when drafts and tasks are missing", () => {
+    const out = parseRequesterHomeItemsPayload(JSON.stringify({ actorId: "u", limit: 10 }));
+    expect(out.drafts).toEqual([]);
+    expect(out.tasks).toEqual([]);
+    expect(out.actorId).toBe("u");
+    expect(out.limit).toBe(10);
+  });
+
+  it("falls back to defaults when actorId is not a string and limit is not a number", () => {
+    const out = parseRequesterHomeItemsPayload(JSON.stringify({ actorId: 42, limit: "ten" }));
+    expect(out.actorId).toBe("");
+    expect(out.limit).toBe(0);
+  });
+
+  it("drops drafts and tasks entries that are not arrays", () => {
+    const out = parseRequesterHomeItemsPayload(JSON.stringify({
+      actorId: "u", limit: 10, drafts: "not an array", tasks: null
+    }));
+    expect(out.drafts).toEqual([]);
+    expect(out.tasks).toEqual([]);
+  });
+
+  it("preserves the typed shape of the parsed items", () => {
+    const out = parseRequesterHomeItemsPayload(JSON.stringify({
+      actorId: "u", limit: 10,
+      drafts: [{ kind: "DRAFT", id: "d1", lifecycle: "DRAFT", version: 1, sourceInput: "x", draftProgress: 10, lastCompletedStep: 1, updatedAt: "2026-08-27T00:00:00.000Z" }],
+      tasks: [{ kind: "TASK", id: "t1", draftId: "d0", lifecycle: "COMMITTED", version: 1, sourceInput: "y", createdAt: "2026-08-27T00:00:00.000Z" }]
+    }));
+    expect(out.drafts[0]?.id).toBe("d1");
+    expect(out.drafts[0]?.kind).toBe("DRAFT");
+    expect(out.tasks[0]?.kind).toBe("TASK");
+    expect(out.tasks[0]?.draftId).toBe("d0");
   });
 });

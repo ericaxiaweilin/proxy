@@ -173,7 +173,11 @@ export type RequesterHomeItemsPayload = {
   tasks: RequesterHomeTaskItem[];
 };
 
-function parseRequesterHomeItemsPayload(operationRef: string | undefined): RequesterHomeItemsPayload {
+// Exported for unit tests in demand-client.test.ts. Treat the
+// returned object as read-only: the consumer must not mutate
+// `drafts` or `tasks` because we deliberately hand back the same
+// references the server sent.
+export function parseRequesterHomeItemsPayload(operationRef: string | undefined): RequesterHomeItemsPayload {
   if (!operationRef) {
     throw new DemandProtocolError("home items response missing operationRef");
   }

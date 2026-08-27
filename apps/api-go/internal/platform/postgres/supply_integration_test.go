@@ -94,3 +94,74 @@ func containsPayload(s, substr string) bool {
 		return false
 	})()
 }
+
+// TestSupplyPostgresVerificationLifecycle covers the second axis of
+// supply.M3: CapabilityVerification write/read round-trip via real
+// PostgreSQL. The first test (TestSupplyPostgresExpiryBlocksEligibility)
+// exercises the eligibility path end-to-end; this test focuses on
+// the schema (supply.capability_verifications) and the
+// GetVerifications read-back path, which is what the Operator
+// "verification flow" depends on for listing an agent's verified
+// capabilities.
+func TestSupplyPostgresVerificationLifecycle(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewSupplyRepository(pool)
+
+	agentID := "agent_verify_pg_" + itoa(time.Now().UnixNano())
+	// 1. Seed an agent profile so the FK chain
+	// capability_verifications -> agents is satisfied.
+	if err := repo.CreateProfile(ctx, supply.AgentProfile{
+		AgentID: agentID, Name: "Test Agent", Status: "ACTIVE",
+		UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM supply.capability_verifications WHERE agent_id=$1`, agentID)
+		_, _ = pool.Exec(ctx, `DELETE FROM supply.agents WHERE id=$1`, agentID)
+	})
+
+	// 2. Three verifications: one VERIFIED (still valid), one
+	// EXPIRED (past expires_at), one PENDING (waiting on operator).
+	now := time.Now().UTC()
+	verifications := []supply.CapabilityVerification{
+		{ID: "v_pg_a", AgentID: agentID, Capability: "TOUR_GUIDE", Status: "VERIFIED", Method: "DOCUMENT", VerifiedBy: "operator_alice", VerifiedAt: now.Add(-1 * time.Hour), ExpiresAt: now.Add(720 * time.Hour)},
+		{ID: "v_pg_b", AgentID: agentID, Capability: "PHOTOGRAPHY", Status: "EXPIRED", Method: "INTERVIEW", VerifiedBy: "operator_bob", VerifiedAt: now.Add(-720 * time.Hour), ExpiresAt: now.Add(-1 * time.Hour)},
+		{ID: "v_pg_c", AgentID: agentID, Capability: "TRANSLATION", Status: "PENDING", Method: "TEST", VerifiedBy: "", VerifiedAt: time.Time{}, ExpiresAt: time.Time{}},
+	}
+	for _, v := range verifications {
+		if err := repo.CreateVerification(ctx, v); err != nil {
+			t.Fatalf("CreateVerification %s: %v", v.ID, err)
+		}
+	}
+
+	// 3. GetVerifications returns all three (the read is the full
+	// history, not the eligible-only projection; eligibility is
+	// derived in service.IsEligibleForOrder which the
+	// expiry-blocks-eligibility test already covers).
+	got, err := repo.GetVerifications(ctx, agentID)
+	if err != nil {
+		t.Fatalf("GetVerifications: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("GetVerifications count: want 3 got %d", len(got))
+	}
+
+	// 4. Direct SQL: confirm the rows carry the right status so
+	// the Operator UI can colour-code VERIFIED vs PENDING vs
+	// EXPIRED without re-deriving from the service.
+	var verifiedCount, expiredCount, pendingCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT
+		   COUNT(*) FILTER (WHERE status = 'VERIFIED'),
+		   COUNT(*) FILTER (WHERE status = 'EXPIRED'),
+		   COUNT(*) FILTER (WHERE status = 'PENDING')
+		 FROM supply.capability_verifications WHERE agent_id=$1`, agentID,
+	).Scan(&verifiedCount, &expiredCount, &pendingCount); err != nil {
+		t.Fatalf("status counts: %v", err)
+	}
+	if verifiedCount != 1 || expiredCount != 1 || pendingCount != 1 {
+		t.Fatalf("status mix: want 1/1/1 got VERIFIED=%d EXPIRED=%d PENDING=%d", verifiedCount, expiredCount, pendingCount)
+	}
+}

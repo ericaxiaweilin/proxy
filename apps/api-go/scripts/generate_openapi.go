@@ -55,8 +55,10 @@ func main() {
 		os.Exit(1)
 	}
 	if *check {
-		// Drift check: ensure committed file matches working tree (no unstaged changes)
-		// We compare the file on disk vs git show HEAD:apps/api-go/openapi.yaml if in git repo.
+		// Drift check: ensure the file on disk matches what is
+		// committed. We compare against `git show HEAD:<path>`
+		// (the last committed version) so the check fires when a
+		// developer modified openapi.yaml but forgot to commit.
 		head, err := exec.Command("git", "show", "HEAD:apps/api-go/openapi.yaml").Output()
 		if err != nil {
 			// No HEAD yet or not a git repo: pass if present
@@ -64,8 +66,18 @@ func main() {
 			return
 		}
 		if !bytes.Equal(bytes.TrimSpace(head), bytes.TrimSpace(data)) {
-			fmt.Fprintln(os.Stderr, "openapi drift detected: committed openapi.yaml differs from HEAD. Run `go run ./scripts/generate_openapi.go` and commit.")
+			fmt.Fprintln(os.Stderr, "openapi drift detected: openapi.yaml on disk differs from HEAD. Run `go run ./scripts/generate_openapi.go` and commit.")
 			os.Exit(2)
+		}
+		// Also fail loud if the file is staged but the staged
+		// version differs from the working-tree version. This is
+		// the "you added a new path to the spec but did not stage
+		// it" case that `git show HEAD:` alone misses.
+		if err := exec.Command("git", "diff", "--exit-code", "--staged", "--", "apps/api-go/openapi.yaml").Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				fmt.Fprintln(os.Stderr, "openapi drift detected: openapi.yaml has staged-but-not-committed changes. Re-stage and commit.")
+				os.Exit(2)
+			}
 		}
 		// Also validate that the generated commands fragment is in
 		// sync with HEAD. This catches the case where a new command
@@ -86,6 +98,14 @@ func main() {
 		if !bytes.Equal(bytes.TrimSpace(genHead), bytes.TrimSpace(genDisk)) {
 			fmt.Fprintln(os.Stderr, "openapi commands drift detected: re-run `go run ./cmd/openapi-commands` and commit the regenerated openapi.commands.generated.yaml.")
 			os.Exit(2)
+		}
+		// Same staged-vs-working-tree check for the commands
+		// fragment as we do for openapi.yaml above.
+		if err := exec.Command("git", "diff", "--exit-code", "--staged", "--", "apps/api-go/openapi.commands.generated.yaml").Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				fmt.Fprintln(os.Stderr, "openapi commands drift detected: openapi.commands.generated.yaml has staged-but-not-committed changes. Re-stage and commit.")
+				os.Exit(2)
+			}
 		}
 		fmt.Println("openapi: drift check passed (spec + generated commands in sync)")
 	} else {

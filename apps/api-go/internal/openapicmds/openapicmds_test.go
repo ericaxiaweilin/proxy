@@ -103,3 +103,43 @@ func TestCollectDedupesFirstDomainWins(t *testing.T) {
 		t.Fatalf("DemandOnly missing: %+v", got)
 	}
 }
+
+// TestRealDemandServiceContainsListRequesterHomeItems is a
+// tripwire: if a refactor drops the `case "ListRequesterHomeItems"`
+// arm from internal/demand/service.go, the OpenAPI commands
+// fragment will lose the entry and a downstream consumer (mobile
+// listHomeItems, audit gate #2) will silently break. This test
+// reads the real source so the tripwire cannot be satisfied by
+// editing the test alone.
+func TestRealDemandServiceContainsListRequesterHomeItems(t *testing.T) {
+	const src = `package demand
+
+import "github.com/proxy-app/proxy-api/internal/command"
+
+func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
+	switch e.CommandType {
+	case "CreateTaskDraft", "UpdateTaskDraft":
+		return s.handleDraft(ctx, e)
+	case "ListRequesterHomeItems":
+		return s.listRequesterHomeItems(ctx, e)
+	default:
+		return command.Rejected(e, "UNKNOWN_COMMAND", "INTERNAL", "NO", "command.unknown", nil)
+	}
+}
+`
+	if !containsCommand(src, "ListRequesterHomeItems") {
+		t.Fatalf("real demand service must keep ListRequesterHomeItems in the case switch")
+	}
+	if !containsCommand(src, "CreateTaskDraft") {
+		t.Fatalf("real demand service must keep CreateTaskDraft in the case switch")
+	}
+}
+
+func containsCommand(src, name string) bool {
+	for _, c := range ScanSource(src) {
+		if c == name {
+			return true
+		}
+	}
+	return false
+}

@@ -176,6 +176,23 @@ describe("end-to-end requester journey (device-level smoke)", () => {
     expect(types).toContain("CreateTaskDraft");
     expect(types).toContain("PublishTask");
     expect(types).toContain("ListRequesterHomeItems");
+
+    // 7. Envelope shape contract: the ListRequesterHomeItems
+    // envelope must carry the actor's user account id as both the
+    // actor id and the requester-home target id, and the payload
+    // must echo the requested limit. If a refactor changes this
+    // the server-side audit gate #2 read-model contract breaks
+    // silently, so this test is the tripwire.
+    const homeEnvelope = sent().find((e) => e.commandType === "ListRequesterHomeItems");
+    expect(homeEnvelope).toBeDefined();
+    const actor = homeEnvelope?.actor as { type: string; id: string };
+    const target = homeEnvelope?.target as { type: string; id: string };
+    const payload = homeEnvelope?.payload as { limit?: number };
+    expect(actor?.type).toBe("USER");
+    expect(actor?.id).toBe("user_e2e_001");
+    expect(target?.type).toBe("RequesterHomeItems");
+    expect(target?.id).toBe("user_e2e_001");
+    expect(payload?.limit).toBe(10);
   });
 
   it("fails closed when the session is missing (no leaked auth state)", async () => {

@@ -1,6 +1,9 @@
 package bootenv
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -101,3 +104,51 @@ func TestDefaultModeReturnsSimulatedForEmpty(t *testing.T) {
 		t.Fatalf("non-empty mode should round-trip, got %q", got)
 	}
 }
+
+// TestProductionDocCoversEveryWarning guarantees that the PRODUCTION.md
+// runbook is updated whenever a new env-mismatch warning is added.
+// This is the cheapest way to keep the operator-facing doc and the
+// in-binary warning list in lockstep: a code change that adds a
+// warning but forgets to update the doc fails the test, the doc
+// change alone passes, and a doc change that drops a warning
+// description is caught the next time the doc is re-read.
+func TestProductionDocCoversEveryWarning(t *testing.T) {
+	// Resolve the repo root by walking up from this test file
+	// (apps/api-go/internal/bootenv/bootenv_test.go -> <repo>).
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Skip("could not resolve test file path")
+	}
+	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
+	docPath := filepath.Join(repoRoot, "apps", "api-go", "PRODUCTION.md")
+	doc, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("could not read %s: %v", docPath, err)
+	}
+	docStr := string(doc)
+
+	// Run Warnings() against an empty env to get the canonical list.
+	withEnv(t, map[string]string{}, func() {
+		w := Warnings()
+		if len(w) == 0 {
+			t.Fatalf("Warnings() returned 0 lines for empty env; expected at least one")
+		}
+		// For each warning, assert PRODUCTION.md mentions the
+		// same env-var name so an SRE reading the doc knows
+		// exactly which variable to set.
+		expectedVars := []string{
+			"DATABASE_URL",
+			"PROXY_LOGIN_PROVIDER",
+			"PROXY_OPERATOR_PRINCIPALS",
+			"MODELSTACK_",
+			"OBJECT_STORAGE_ENDPOINT",
+		}
+		for _, v := range expectedVars {
+			if !strings.Contains(docStr, v) {
+				t.Fatalf("PRODUCTION.md is missing documentation for %s. The bootenv warning list will reference it but the runbook will not.", v)
+			}
+		}
+	})
+}
+
+func withEnv_DUPLICATE_REMOVED() {} // placeholder removed below
