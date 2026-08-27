@@ -50,6 +50,7 @@ describe("social media pipeline contracts", () => {
       thumbnailUrl: "/legacy/thumb",
       feedUrl: "/v1/media/variant/feed",
       galleryUrl: "/v1/media/variant/gallery",
+      dominantColorHex: "#C8B49A",
       originalAvailable: true,
       width: 3024,
       height: 4032,
@@ -59,6 +60,7 @@ describe("social media pipeline contracts", () => {
       sortOrder: 0
     });
     expect(item.galleryUrl).toContain("gallery");
+    expect(item.dominantColorHex).toBe("#C8B49A");
   });
 });
 

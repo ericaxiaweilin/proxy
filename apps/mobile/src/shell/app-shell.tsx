@@ -78,6 +78,8 @@ export function AppShell({
   fulfillment,
   payment,
   notification,
+  scene,
+  isGuest,
   onSignOut
 }: {
   localNet: LocalNetClient;
@@ -93,6 +95,8 @@ export function AppShell({
   fulfillment: FulfillmentClient;
   payment: PaymentClient;
   notification: NotificationClient;
+  scene?: import("../scene-client").SceneClient | undefined;
+  isGuest?: boolean;
   onSignOut: () => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
@@ -239,6 +243,7 @@ export function AppShell({
   const openContextSwitcher = useCallback((): void => {
     setSwitcherOpen(true);
   }, []);
+  const isNavVisible = scrollChromeVisible && (tab !== "FEED" || feedChromeVisible || !!feedChatAuthor || feedPrefsOpen);
 
   return (
     <>
@@ -289,11 +294,11 @@ export function AppShell({
             touchStartX.current = event.nativeEvent.pageX;
             lastTouchX.current = event.nativeEvent.pageX;
           }}
-          style={styles.body}
+          style={[styles.body, (isNavVisible && tab !== "FEED" ? { paddingBottom: 86 } : undefined)]}
         >
         {tab === "HOME" ? (
           sceneComposerTool ? (
-            <SceneComposerSurface tool={sceneComposerTool} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
+            <SceneComposerSurface tool={sceneComposerTool} scene={scene} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
           ) : homeAssistant ? (
             <HomeAssistantSurface
               conversationClient={conversation}
@@ -363,7 +368,7 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} />
+            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} bottomNavVisible={isNavVisible} />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (
@@ -375,8 +380,13 @@ export function AppShell({
           ) : (
             <MessagesSurface onOpenConversation={setMessageChatAuthor} />
           )
-        ) : (
-          voucherOpen ? (
+          ) : isGuest ? (
+          <View style={styles.guestMe}>
+            <Text style={styles.guestMeTitle}>需要登录</Text>
+            <Text style={styles.guestMeSub}>访客可浏览首页/市场/动态，个人资料、关系与订单需登录后查看</Text>
+            <Pressable onPress={onSignOut} style={styles.guestMeCTA}><Text style={styles.guestMeCTAText}>去登录 / 注册</Text></Pressable>
+          </View>
+        ) : voucherOpen ? (
             <VoucherSurface client={vouchers} context={context} onBack={() => setVoucherOpen(false)} />
           ) : (
             <MeSurface
@@ -398,10 +408,9 @@ export function AppShell({
               }}
               onSignOut={onSignOut}
             />
-          )
-        )}
+          )}
         </View>
-        {scrollChromeVisible && (tab !== "FEED" || feedChromeVisible || feedChatAuthor || feedPrefsOpen) ? <RootNav activeTab={tab} compact={compactWidth} onSelect={selectTab} /> : null}
+        {isNavVisible ? <RootNav activeTab={tab} compact={compactWidth} onSelect={selectTab} /> : null}
         <ContextSwitcherSheet
           current={context}
           onClose={() => setSwitcherOpen(false)}
@@ -422,6 +431,8 @@ export function AppShell({
   );
 }
 
+
+
 // 基线 .header.root：只有 Otter logo + Proxy 字标（上下文徽章不在此层，见 Me 的 contextline）。
 function Header({ compact }: { compact: boolean }): React.JSX.Element {
   return (
@@ -435,21 +446,33 @@ function Header({ compact }: { compact: boolean }): React.JSX.Element {
 }
 
 // R15.13 Scene Composer — P0 minimal: Intent → Anchor → Participation → Cost → Benefit → Invite Preview
-function SceneComposerSurface({ tool, onBack, onCreated }: { tool: SceneToolId; onBack: () => void; onCreated: () => void; }): React.JSX.Element {
+function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneToolId; onBack: () => void; onCreated: () => void; scene?: import("../scene-client").SceneClient | undefined }): React.JSX.Element {
   const meta = SCENE_TOOLS.find((t: { id: SceneToolId }) => t.id === tool);
-  const [intent, setIntent] = useState("");
   const [cost, setCost] = useState("HOST_SPONSORED");
   const [participation, setParticipation] = useState("OPEN_SIGNUP");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const guard = cost === "HOST_PAY" ? "HIGH_TRANSACTION_FEELING" : "GOOD_FIT";
+  async function handleCreate(){
+    if(!scene){ onCreated(); return; }
+    setBusy(true); setError(undefined);
+    try{
+      await scene.createScene(tool, meta?.intentPrompt ?? "拍照", participation, cost, new Date(Date.now()+86400000).toISOString());
+      onCreated();
+    }catch(e:any){ setError(e?.result?.error?.messageKey ?? e?.message ?? "创建失败"); } finally{ setBusy(false); }
+  }
   return (
     <View style={styles.composerRoot}>
       <Pressable onPress={onBack} style={styles.composerBack}><Text style={styles.composerBackText}>‹ 返回</Text></Pressable>
       <Text style={styles.composerTitle}>{meta?.label ?? tool} · Scene Composer</Text>
       <Text style={styles.composerSub}>P0: 把意图变成可邀请的 Scene — 预算进场景而非买人</Text>
-      <View style={styles.composerField}><Text style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text style={styles.composerInputText}>{intent || "例如：周六下午想在西湖拍照 · 2–4人"}</Text></View></View>
-      <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text style={styles.composerChipText}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text style={styles.composerChipText}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text style={styles.composerChipText}>混合</Text></Pressable></View>
-      <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text style={styles.composerChipText}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text style={styles.composerChipText}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text style={styles.composerChipText}>商家权益</Text></Pressable></View>
-      <View style={styles.invitePreview}><Text style={styles.invitePreviewTitle}>对方将看到</Text><Text style={styles.invitePreviewBody}>West Lake Rooftop · 周六 16:00 · 3人已确认 · 饮品 included · 交通支持 — 你也会参加</Text><Text style={styles.invitePreviewHint}>拿掉目标人仍成立 · 独立同意</Text></View>
-      <Pressable onPress={onCreated} style={styles.composerCTA}><Text style={styles.composerCTAText}>创建 Scene 草稿</Text></Pressable>
+      <View style={styles.composerField}><Text style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text style={styles.composerInputText}>例如：周六下午想在西湖拍照 · 2–4人</Text></View></View>
+      <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="OPEN_SIGNUP"&&styles.composerChipTextActive]}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="PRIVATE_INVITE"&&styles.composerChipTextActive]}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="HYBRID"&&styles.composerChipTextActive]}>混合</Text></Pressable></View>
+      <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="HOST_SPONSORED"&&styles.composerChipTextActive]}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="AA"&&styles.composerChipTextActive]}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="MERCHANT_SPONSORED"&&styles.composerChipTextActive]}>商家权益</Text></Pressable></View>
+      {guard!=="GOOD_FIT" ? <View style={styles.guardWarn}><Text style={styles.guardWarnText}>Guard: 交易感过重 — 建议加场景权益而非直付</Text></View> : <View style={styles.guardOk}><Text style={styles.guardOkText}>Guard: GOOD_FIT · 拿掉目标人仍成立</Text></View>}
+      <View style={styles.invitePreview}><Text style={styles.invitePreviewTitle}>对方将看到</Text><Text style={styles.invitePreviewBody}>West Lake Rooftop · 周六 16:00 · 3人已确认 · 饮品 included · 交通支持 — 你也会参加</Text><Text style={styles.invitePreviewHint}>独立同意 · 可婉拒</Text></View>
+      {error ? <Text style={styles.guardWarnText}>{error}</Text> : null}
+      <Pressable onPress={handleCreate} style={[styles.composerCTA, busy && {opacity:0.6}]} disabled={busy}><Text style={styles.composerCTAText}>{busy ? "创建中…" : "创建 Scene 草稿"}</Text></Pressable>
     </View>
   );
 }
@@ -502,11 +525,12 @@ function RootNav({
     if (!draggingRef.current) setProgress(activeIndex);
   }, [activeIndex]);
 
-  const dockWidth = Math.min(620, Math.max(0, width - 28));
+  const [measuredWidth, setMeasuredWidth] = useState(0);
+  const dockWidth = measuredWidth > 0 ? measuredWidth : Math.min(620, Math.max(0, width - 28));
   const slotWidth = dockWidth > 0 ? (dockWidth - 16) / 5 : 72;
   const dockHeight = compact ? 64 : 66;
   const lensHeight = compact ? 52 : 54;
-  const accent = "#ff8a00";
+  const accent = color.ink;
 
   const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
@@ -565,12 +589,8 @@ function RootNav({
 
   return (
     <View style={styles.dockWrap}>
-      <View style={[styles.hintRow]} pointerEvents="none">
-        <View style={styles.hintLine} />
-        <Text style={styles.hintText}>左右滑动切换</Text>
-        <View style={styles.hintLine} />
-      </View>
       <View
+        onLayout={(e) => setMeasuredWidth(e.nativeEvent.layout.width)}
         {...panResponder.panHandlers}
         style={[styles.nav, compact && styles.navCompact, { height: dockHeight }]}
       >
@@ -604,11 +624,10 @@ function RootNav({
               style={styles.navItem}
               hitSlop={8}
             >
-              <View style={[styles.navIcon, { transform: [{ scale }], opacity, marginTop: lift }]}>
+              <View style={[styles.navIcon, { transform: [{ scale }, { translateY: lift }], opacity }]}>
                 <ProxyIcon color={isActiveVisual ? accent : "#8d8d92"} name={entry.icon} size={22} />
                 {entry.badge ? <View style={styles.navBadgeDot} /> : null}
               </View>
-              <Text style={[styles.navLabel, { opacity, transform: [{ translateY: lift }] }, isActiveVisual && styles.navLabelActive]}>{entry.label}</Text>
             </Pressable>
           );
         })}
@@ -663,23 +682,25 @@ const styles = StyleSheet.create({
   locationSwitch: { color: "#6E6575", fontSize: 12, fontWeight: "800" },
   body: { flex: 1 },
   dockWrap: {
-    alignSelf: "center",
-    width: "100%",
+    position: "absolute",
+    bottom: 2,
+    left: 14,
+    right: 14,
     maxWidth: 620,
-    marginHorizontal: 14,
-    marginVertical: 8,
+    alignSelf: "center",
     alignItems: "center",
-    gap: 8
+    gap: 0,
+    zIndex: 10
   },
-  hintRow: { flexDirection: "row", alignItems: "center", gap: 10, opacity: 0.9, marginBottom: 2 },
-  hintLine: { width: 22, height: 1, backgroundColor: "rgba(17,17,17,0.14)" },
-  hintText: { color: "#9c9c9f", fontSize: 11, letterSpacing: 0.2 },
+  hintRow: { flexDirection: "row", alignItems: "center", gap: 10, opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" as const },
+  hintLine: { width: 22, height: 1, backgroundColor: "transparent" },
+  hintText: { color: "transparent", fontSize: 1, letterSpacing: 0.2, height: 0 },
   nav: {
     alignSelf: "stretch",
-    backgroundColor: "rgba(255,255,255,0.24)",
-    borderColor: "rgba(255,255,255,0.50)",
+    backgroundColor: color.white,
+    borderColor: color.line,
     borderRadius: 24,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     height: 66,
     paddingHorizontal: 8,
@@ -704,10 +725,15 @@ const styles = StyleSheet.create({
     left: 8,
     height: 54,
     borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.48)",
-    borderColor: "rgba(255,255,255,0.78)",
-    borderWidth: 1,
-    zIndex: 1
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderColor: color.line,
+    borderWidth: StyleSheet.hairlineWidth,
+    zIndex: 1,
+    shadowColor: "rgba(23,19,31,0.14)",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 4
   },
   lensDragging: { opacity: 0.98 },
   lensAccent: {
@@ -717,14 +743,14 @@ const styles = StyleSheet.create({
     width: 18,
     height: 2,
     borderRadius: 999,
-    backgroundColor: "#ff8a00",
+    backgroundColor: color.ink,
     marginLeft: -9,
-    opacity: 0.95
+    opacity: 0.9
   },
   navItem: { alignItems: "center", flex: 1, gap: 4, justifyContent: "center", height: "100%", backgroundColor: "transparent", zIndex: 2 },
   navIcon: { alignItems: "center", height: 26, justifyContent: "center", width: 26 },
-  navBadgeDot: { position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: 999, backgroundColor: "#ff8a00", borderColor: "rgba(255,255,255,0.95)", borderWidth: 1.5 },
-  navLabel: { color: "#8d8d92", fontSize: 11, fontWeight: "600", lineHeight: 11, letterSpacing: 0.1 },
+  navBadgeDot: { position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: 999, backgroundColor: color.ink, borderColor: "rgba(255,255,255,0.95)", borderWidth: 1.5 },
+  navLabel: { color: "#8d8d92", fontSize: 11, fontWeight: "600", lineHeight: 11, letterSpacing: 0.1, textAlign: "center", width: "100%" },
   navLabelActive: { color: "#111111", fontWeight: "700" },
 
   composerRoot: { flex: 1, padding: 16, gap: 10, backgroundColor: color.offWhite },
@@ -740,10 +766,21 @@ const styles = StyleSheet.create({
   composerChip: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   composerChipActive: { backgroundColor: color.ink, borderColor: color.ink },
   composerChipText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  composerChipTextActive: { color: color.white },
   invitePreview: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, borderRadius: 16, padding: 14, gap: 6, marginTop: 4 },
   invitePreviewTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   invitePreviewBody: { color: color.ink, fontSize: 13, lineHeight: 18 },
   invitePreviewHint: { color: color.muted, fontSize: 11 },
   composerCTA: { backgroundColor: color.ink, borderRadius: 14, paddingVertical: 14, alignItems: "center", marginTop: 8 },
   composerCTAText: { color: color.white, fontSize: 14, fontWeight: "900" },
+  guardWarn: { backgroundColor: "#FFF0F3", borderColor: "#FFC4D3", borderWidth: 1, borderRadius: 12, padding: 10 },
+  guardWarnText: { color: "#B5194E", fontSize: 12, fontWeight: "700" },
+  guardOk: { backgroundColor: "#EDF9F6", borderColor: "#1FC8A9", borderWidth: 1, borderRadius: 12, padding: 10 },
+  guardOkText: { color: "#137C6C", fontSize: 12, fontWeight: "700" },
+
+  guestMe: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12, backgroundColor: color.offWhite },
+  guestMeTitle: { color: color.ink, fontSize: 20, fontWeight: "900" },
+  guestMeSub: { color: color.muted, fontSize: 13, textAlign: "center", lineHeight: 18 },
+  guestMeCTA: { backgroundColor: color.ink, borderRadius: 14, paddingHorizontal: 20, paddingVertical: 12, marginTop: 8 },
+  guestMeCTAText: { color: color.white, fontSize: 14, fontWeight: "900" },
 });

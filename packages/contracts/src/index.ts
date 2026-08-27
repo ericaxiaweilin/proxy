@@ -355,6 +355,7 @@ export const FeedMediaItemSchema = z.object({
   feed2xHintUrl: z.string().optional(),
   feed2xNaturalUrl: z.string().optional(),
   galleryUrl: z.string().optional(),
+  dominantColorHex: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   originalAvailable: z.boolean().optional(),
   width: z.number().int().nonnegative(),
   height: z.number().int().nonnegative(),
@@ -533,10 +534,13 @@ export {
   MediaBoxSchema,
   MediaCompositionHintSchema,
   resolveFillStrategy,
+  canSafelyCover,
+  shouldUseExtendedBackdrop,
   selectVariantForViewport,
   selectVideoPlaybackUrl,
   isForbiddenInFeed,
   isFrameBackgroundSafe,
+  resolveFrameBackground,
   FEED_WIDE_BREAKPOINT_PT,
   FRAME_BACKGROUND_HEX,
   FEED_FORBIDDEN_PURPOSES,
@@ -557,5 +561,7 @@ export type {
 import type { FeedRenderVariant, FeedRenderSelection } from "./media-composition";
 export type { FeedRenderVariant, FeedRenderSelection };
 
+// Scene Value Exchange R15.13 — re-export
+export * from "./scene";
 // Context-Driven Experience Runtime — re-export
 export * from "./experience-runtime";

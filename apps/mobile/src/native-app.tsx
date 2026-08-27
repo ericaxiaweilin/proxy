@@ -6,7 +6,7 @@ import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-
 import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
 import { DemandClient } from "./demand-client";
-import { LoginClient } from "./login-client";
+import { LoginClient, LoginCommandRejectedError } from "./login-client";
 import { googleAuthConfigured, type GoogleClientConfig } from "./google-auth-config";
 import { LocalNetClient } from "./localnet-client";
 import { MediaClient } from "./media-client";
@@ -20,6 +20,7 @@ import { FulfillmentClient } from "./fulfillment-client";
 import { PaymentClient } from "./payment-client";
 import { NotificationClient } from "./notification-client";
 import { BusinessClient } from "./business-client";
+import { SceneClient } from "./scene-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { AppShell } from "./shell/app-shell";
@@ -51,6 +52,51 @@ async function getNativeLoginClient(): Promise<LoginClient> {
   nativeLoginClient = new LoginClient({ baseUrl: localApiBaseUrl, deviceId, secureSessionStore, transport: nativeTransport });
   return nativeLoginClient;
 }
+
+async function rotateGuestDeviceIdentity(): Promise<LoginClient> {
+  const deviceId = `device_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+  await nativeSecureStorageDriver.setItem(INSTALLATION_DEVICE_ID_KEY, deviceId);
+  nativeLoginClient = undefined;
+  return getNativeLoginClient();
+}
+
+const GUEST_FLAG_KEY = "proxy.isGuest.v1";
+async function createNativeGuestSession(): Promise<void> {
+  const platform = Platform.OS === "ios" ? "IOS" : "ANDROID";
+  try {
+    await (await getNativeLoginClient()).createAnonymousSession(platform);
+    await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "1");
+    return;
+  } catch (error) {
+    if (error instanceof LoginCommandRejectedError && error.result.error?.errorCode === "ACCOUNT_NOT_ACTIVE") {
+      try {
+        await (await rotateGuestDeviceIdentity()).createAnonymousSession(platform);
+        await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "1");
+        return;
+      } catch {}
+    }
+    // 访客必须可用：API 不可达/限流/服务端错误时降级为本地离线访客，不阻塞浏览
+    const deviceId = (await nativeSecureStorageDriver.getItem(INSTALLATION_DEVICE_ID_KEY)) ?? `guest_${Date.now().toString(36)}`;
+    const guestUserId = `guest_${deviceId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16)}`;
+    const now = new Date();
+    const offlineSession = {
+      userAccountId: guestUserId,
+      principal: { type: "INDIVIDUAL" as const, id: guestUserId },
+      auth: {
+        sessionId: `sess_offline_${Date.now().toString(36)}`,
+        userAccountId: guestUserId,
+        principal: { type: "INDIVIDUAL" as const, id: guestUserId },
+        accessToken: `offline_${Math.random().toString(36).slice(2)}`,
+        refreshToken: `offline_r_${Math.random().toString(36).slice(2)}`,
+        accessExpiresAt: new Date(now.getTime() + 3600_000).toISOString(),
+        refreshExpiresAt: new Date(now.getTime() + 30 * 86400_000).toISOString(),
+        rotation: 1,
+      },
+    };
+    await secureSessionStore.write(offlineSession as any);
+    await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "1");
+  }
+}
 // 服务端驱动 Surface 的认证客户端：读模型/命令全部走 /v1/commands/ envelope。
 const sessionAuthClient = new SessionAuthClient({
   baseUrl: localApiBaseUrl,
@@ -71,7 +117,8 @@ const fulfillmentClient = new FulfillmentClient({ authClient: sessionAuthClient,
 const paymentClient = new PaymentClient({ authClient: sessionAuthClient, secureSessionStore });
 const notificationClient = new NotificationClient({ authClient: sessionAuthClient, secureSessionStore });
 const businessClient = new BusinessClient({ authClient: sessionAuthClient, secureSessionStore });
-type BootPhase = "BOOTSTRAPPING" | "AUTHENTICATED" | "SIGNED_OUT";
+const sceneClient = new SceneClient({ authClient: sessionAuthClient, secureSessionStore });
+type BootPhase = "BOOTSTRAPPING" | "PUBLIC" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {
   // R15 Model-Driven UI：不再内嵌 HTML 原型（Gate O）。
@@ -80,17 +127,24 @@ export function ProxyApp(): React.JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    void restoreNativeShell().then((state) => {
+    void (async () => {
+      const state = await restoreNativeShell().catch(() => null);
       if (cancelled) return;
-      setPhase(state.status === "AUTHENTICATED" ? "AUTHENTICATED" : "SIGNED_OUT");
-    });
+      if (!state) { setPhase("SIGNED_OUT"); return; }
+      const isGuestFlag = await nativeSecureStorageDriver.getItem(GUEST_FLAG_KEY).catch(() => null);
+      if (isGuestFlag === "1" && state.status === "AUTHENTICATED") {
+        setPhase("PUBLIC");
+      } else {
+        setPhase(state.status === "AUTHENTICATED" ? "AUTHENTICATED" : "PUBLIC");
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
   if (phase === "BOOTSTRAPPING") return <BootScreen />;
-  if (phase === "AUTHENTICATED") {
+  if (phase === "AUTHENTICATED" || phase === "PUBLIC") {
     return (
       <AppShell
         localNet={localNetClient}
@@ -106,13 +160,15 @@ export function ProxyApp(): React.JSX.Element {
         fulfillment={fulfillmentClient}
         payment={paymentClient}
         notification={notificationClient}
+        scene={sceneClient}
+        isGuest={phase === "PUBLIC"}
         onSignOut={() => {
-          void secureSessionStore.clear().catch(() => undefined).then(() => setPhase("SIGNED_OUT"));
+          void Promise.all([secureSessionStore.clear().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined)]).then(()=> setPhase("SIGNED_OUT"));
         }}
       />
     );
   }
-  return <AuthenticationEntryScreen onAuthenticated={() => setPhase("AUTHENTICATED")} />;
+  return <AuthenticationEntryScreen onAuthenticated={() => setPhase("AUTHENTICATED")} onGuest={() => setPhase("PUBLIC")} />;
 }
 
 function BootScreen(): React.JSX.Element {
@@ -136,7 +192,7 @@ function BrandMark({ large = false }: { large?: boolean }): React.JSX.Element {
   );
 }
 
-function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () => void }): React.JSX.Element {
+function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticated: () => void; onGuest: () => void }): React.JSX.Element {
   const [challengeId, setChallengeId] = useState<string>();
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [phone, setPhone] = useState("");
@@ -185,9 +241,8 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
     setBusy(true);
     setError(undefined);
     try {
-		const loginClient = await getNativeLoginClient();
-      await loginClient.createAnonymousSession(Platform.OS === "ios" ? "IOS" : "ANDROID");
-      onAuthenticated();
+      await createNativeGuestSession();
+      onGuest();
     } catch {
       setError("暂时无法创建访客会话，请稍后重试。");
     } finally {
@@ -203,6 +258,7 @@ function AuthenticationEntryScreen({ onAuthenticated }: { onAuthenticated: () =>
 		const loginClient = await getNativeLoginClient();
       await loginClient.verifyChallenge(challengeId, code);
       await loginClient.createSessionFromChallenge(challengeId);
+      await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(()=>undefined);
       onAuthenticated();
     } catch (err) {
       const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -362,6 +418,7 @@ function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
         try {
           const loginClient = await getNativeLoginClient();
           await loginClient.authenticateWithGoogle(response.authentication!.idToken!, Platform.OS === "ios" ? "IOS" : "ANDROID");
+          await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(()=>undefined);
           onAuthenticated();
         } catch (error) {
           setError(error instanceof Error ? error.message : "Google 登录失败，请重试或用手机号/邮箱");

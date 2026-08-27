@@ -105,7 +105,7 @@ device notification integration and provider lifecycle
 PostgreSQL-backed Task / TaskSlot canonical tables and migration from draft JSON slots
 real Catalog / Admission / Funding gate adapters
 offline SQLite Draft persistence and iOS real-device Keychain / Keystore smoke verification  ✅ partial (Keychain write confirmed on weilin; restore-on-launch and sign-out wipe pending device verification)
-server-backed Requester Home read model and restart-safe in-progress need hydration
+server-backed Requester Home read model and restart-safe in-progress need hydration  ✅ done (apps/api-go/internal/demand/service.go: ListRequesterHomeItems returns (a) drafts with lifecycle=DRAFT and (b) tasks with lifecycle=COMMITTED, scoped to the actor, ordered by recency, limit 1-50 (default 10). TestRequesterHomePGReadModel covers the full M2 home hydration contract. apps/mobile/src/demand-client.ts exposes listHomeItems(); apps/mobile/src/surfaces/requester-home.tsx hydrates the Continue strip on launch with explicit idle/loading/loaded/error state. **Semantic note**: 'in-progress' here means (draft not yet published) + (published task not yet matched). Tasks that have entered the matching engine but not yet been accepted by an agent surface through the standard order/offer chain, not through the home read model — by design, the home strip is for the actor's own action items, not for live matching state.)
 ObservationTemplate / ObservationSet handlers
 Outcome compatibility gate handler
 OpenAPI document generation  ✅ done (apps/api-go/cmd/openapi-commands: scans `case "X"` arms in every internal/<domain>/service.go, emits apps/api-go/openapi.commands.generated.yaml with 138 commands; apps/api-go/scripts/generate_openapi.go -check now verifies BOTH the hand-authored openapi.yaml AND the generated commands fragment are in sync with HEAD; internal/openapicmds/openapicmds_test.go covers IsLikelyCommand, ScanSource, RenderFragment determinism, and first-domain-wins dedupe)
@@ -137,6 +137,26 @@ production OTP/passwordless delivery and verification provider adapter  ✅ done
 → M4 Matching / Offer / Order
 → M5 Experience Runtime：Experience Orchestrator / Surface Compiler / Delta Patcher / Frontend Runtime Renderer (contracts + first isolated delivery done; Orchestrator/Compiler/Patcher/Renderer pipeline still open)
 → PostgreSQL integration tests for every PG-backed domain  ✅ done (18 lifecycle + 3 infrastructure = 21 PG integration tests, all PASS; covers identity / outbox / demand / fulfillment / engagement / media / citycompanion / contribution / business / socialspace / payment / notification / safety / outcome / supply / conversation / localcontext / localnet; voucher / experience / marketplace / modelstack / activity remain in-memory by design)
+→ M4 — Matching / Offer / Order
+→ M5 Experience Runtime 管线补齐
+
+## 新增：R15.13 Scene Value Exchange P0（2026-08-27）
+
+```text
+packages/contracts/src/scene.ts  已落地：6 Scene Tools (PHOTO/COMPANION/COFFEE_MEAL/ACTIVITY/TRIP/CREATOR)、6 Anchor Types、Participation/Cost/Benefit 枚举、SceneStatus、CreateScenePayloadSchema
+packages/contracts/src/scene.test.ts  enum stability 6 cases
+apps/api-go/internal/scene/service.go  9 commands: CreateScene/UpdateScene/PublishScene/CreateInvitation/RespondInvitation/RecordAttendance/RecordOutcome/ListMyScenes/ListMyInvitations + evaluateGuard (anchor / cost / PHOTO+HOST_PAY+无 benefit → HIGH_TRANSACTION_FEELING) + passesIndependence
+apps/api-go/internal/scene/repository.go  in-memory baseline + 显式 limit<=0 → 0 row 防御
+apps/api-go/internal/scene/scene_test.go  31 cases: 9 commands + 2 guard 函数 + limit clamp + version conflict + authz (non-owner/non-invitee)
+apps/api-go/internal/scene/repository_test.go  4 cases: duplicate/version conflict/limit boundary/invitation lifecycle
+apps/api-go/migrations/028_scene_value_exchange.sql  scene.scenes / scene.invitations / scene.attendances / scene.outcomes 4 张表
+apps/api-go/internal/api/server.go  Scene service 接入 dispatchCommand + requiresAuthentication 公开读扩展到 ListFeedPosts/ListMarketOpportunities/ListActivities/ListStatuses/ListCommunities
+apps/mobile/src/scene-client.ts  envelope 形状、buildEnvelope 同毫秒下三个 ID 不碰撞、principal 缺失 fail-closed
+apps/mobile/src/scene-client.test.ts  6 cases: no session / 形状 / ID 碰撞 / 发送 / server reject / 邀请应答
+apps/mobile/src/shell/app-shell.tsx + app-shell-selectors.ts  抽取 selectMeTabView 纯函数；isGuest guest 视图与 voucher 互不泄漏
+apps/mobile/src/shell/app-shell.test.ts  5 cases: guest 始终优先于 voucher
+apps/api-go/internal/api/server_test.go  requiresAuthentication tripwire：auth-lifecycle / public-read allowlist / scene 全量受保护 / 默认 fail-closed
+```
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。

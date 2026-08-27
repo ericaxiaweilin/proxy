@@ -290,3 +290,76 @@ func TestOperatorGateFailsClosedAndAllowlist(t *testing.T) {
 		t.Fatal("non-allowlisted principal must be denied")
 	}
 }
+
+// Audit tripwire (Pass 1 — Scene R15.13): the public-read allowlist is
+// the single source of truth for "which List* commands can be called
+// without authentication". Adding or removing entries here MUST be
+// intentional. Pinned by these tests so a careless refactor that
+// silently widens public access (or accidentally tightens it and
+// breaks anonymous browse) is caught at unit-test time.
+func TestRequiresAuthentication_PublicReadAllowlist(t *testing.T) {
+	// Auth lifecycle commands — pre-authentication is required to bootstrap
+	// a session, so they must remain public.
+	authLifecycle := []string{
+		"BeginPasswordlessAuthentication",
+		"RequestLoginChallenge",
+		"VerifyLoginChallenge",
+		"CreateSession",
+		"CreateAnonymousSession",
+		"RequestAccountRecovery",
+		"RefreshSession",
+	}
+	for _, cmd := range authLifecycle {
+		if requiresAuthentication(cmd) {
+			t.Fatalf("auth-lifecycle command %q must remain public, but requiresAuthentication returned true", cmd)
+		}
+	}
+	// Public-read surface — anonymous browse of the marketplace. Widening
+	// this list is a privacy decision, not a refactor; tripwire it.
+	publicRead := []string{
+		"ListFeedPosts",
+		"ListMarketOpportunities",
+		"ListActivities",
+		"ListStatuses",
+		"ListCommunities",
+	}
+	for _, cmd := range publicRead {
+		if requiresAuthentication(cmd) {
+			t.Fatalf("public-read command %q must remain public, but requiresAuthentication returned true", cmd)
+		}
+	}
+}
+
+func TestRequiresAuthentication_SceneCommandsAreProtected(t *testing.T) {
+	// Scene R15.13: scene lifecycle is per-host and per-invitee. The
+	// public-read allowlist must NOT include them or anonymous users
+	// could enumerate other users' scenes/invitations.
+	sceneCommands := []string{
+		"CreateScene",
+		"UpdateScene",
+		"PublishScene",
+		"CreateInvitation",
+		"RespondInvitation",
+		"RecordAttendance",
+		"RecordOutcome",
+		"ListMyScenes",
+		"ListMyInvitations",
+	}
+	for _, cmd := range sceneCommands {
+		if !requiresAuthentication(cmd) {
+			t.Fatalf("scene command %q MUST require authentication (per-host / per-invitee), but requiresAuthentication returned false", cmd)
+		}
+	}
+}
+
+func TestRequiresAuthentication_DefaultIsProtected(t *testing.T) {
+	// Anything not on the allowlist defaults to protected. A new
+	// domain command is therefore "fail-closed" at the auth gate,
+	// which is the intended posture.
+	if !requiresAuthentication("CreateTaskDraft") {
+		t.Fatal("CreateTaskDraft must require authentication")
+	}
+	if !requiresAuthentication("DeleteAccount") {
+		t.Fatal("DeleteAccount must require authentication")
+	}
+}

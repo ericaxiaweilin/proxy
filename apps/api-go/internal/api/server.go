@@ -31,6 +31,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/business"
 	"github.com/proxy-app/proxy-api/internal/safety"
+	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"github.com/proxy-app/proxy-api/internal/voucher"
@@ -58,6 +59,7 @@ type Server struct {
 	Notification  *notification.Service
 	Safety        *safety.Service
 	Business      *business.Service
+	Scene         *scene.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -551,6 +553,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Safety.HandleContext(ctx, envelope)
 	case s.Business != nil && s.Business.Supports(envelope.CommandType):
 		return s.Business.HandleContext(ctx, envelope)
+	case s.Scene != nil && s.Scene.Supports(envelope.CommandType):
+		return s.Scene.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}
@@ -562,7 +566,8 @@ func idempotencyScope(envelope command.Envelope) string {
 
 func requiresAuthentication(commandType string) bool {
 	switch commandType {
-	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RequestAccountRecovery", "RefreshSession":
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RequestAccountRecovery", "RefreshSession",
+		"ListFeedPosts", "ListMarketOpportunities", "ListActivities", "ListStatuses", "ListCommunities":
 		return false
 	default:
 		return true
