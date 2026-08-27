@@ -441,6 +441,9 @@ func TestImageGoesReadyDirectly(t *testing.T) {
 	if mediaInfo.FeedURL == "" || mediaInfo.Feed2xURL == "" || mediaInfo.GalleryURL == "" || mediaInfo.PlaceholderURL == "" || !mediaInfo.OriginalAvailable {
 		t.Fatalf("purpose URLs not hydrated: %+v", mediaInfo)
 	}
+	if mediaInfo.DominantColorHex == "" {
+		t.Fatalf("dominant color not hydrated: %+v", mediaInfo)
+	}
 	if _, err := s.ResolveVariantPath(t.Context(), strings.TrimPrefix(mediaInfo.GalleryURL, "/v1/media/variant/")); err == nil {
 		t.Fatal("approved media must remain private until a Post publication transition")
 	}

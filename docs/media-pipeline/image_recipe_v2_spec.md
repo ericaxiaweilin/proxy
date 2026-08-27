@@ -91,8 +91,8 @@ type MediaCompositionHint struct {
 
 ### 5.4 灰边 / 显示不全专项
 
-- 全身 9:16 contain：背景色 = `#0E0A14`，不能出现白/灰边
-- 横图 1.91:1 letterbox：上下深紫黑，无强对比
+- 全身 9:16 contain：优先使用服务端提取的主色补边，缺失时回落 `#0E0A14`，不能出现通用白/灰边
+- 横图 1.91:1 letterbox：上下使用主色或深紫黑回落色，避免强对比
 - 4 图混合横竖：WALL 格子按 sourceAspect 比例，不再 1:1 裁切
 - 文字海报：textSafeArea cover，文字可读
 

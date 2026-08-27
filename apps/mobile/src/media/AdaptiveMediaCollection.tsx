@@ -25,6 +25,8 @@ import {
   selectVariantForViewport,
   selectVideoPlaybackUrl,
   selectImageShape,
+  resolveFrameBackground,
+  shouldUseExtendedBackdrop,
   FRAME_BACKGROUND_HEX
 } from "@proxy/contracts";
 import { color } from "../theme";
@@ -37,6 +39,13 @@ import {
 } from "../media-presentation";
 import { SocialMediaFrame } from "./SocialMediaFrame";
 import { AudioStage } from "./audio-stage";
+import {
+  SOCIAL_MEDIA_BADGE_INSET,
+  SOCIAL_MEDIA_GRID_GAP,
+  SOCIAL_MEDIA_RADIUS,
+  SOCIAL_MEDIA_RAIL_GAP,
+  SOCIAL_MEDIA_RAIL_TRAILING_SPACE
+} from "./social-media-aesthetics";
 
 function onImageLoad(
   event: { source: { width: number; height: number } },
@@ -67,9 +76,9 @@ type Props = {
   collectionKey?: string;
 };
 
-const CARD_GAP = 10;
-const WALL_GAP = 6;
-const RAIL_HORIZONTAL_PADDING = 18;
+const CARD_GAP = SOCIAL_MEDIA_RAIL_GAP;
+const WALL_GAP = SOCIAL_MEDIA_GRID_GAP;
+const RAIL_HORIZONTAL_PADDING = SOCIAL_MEDIA_RAIL_TRAILING_SPACE;
 
 /**
  * §5.2.3 Media Kind Dispatcher。
@@ -282,6 +291,7 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
   const { width: viewportWidth } = useWindowDimensions();
   const selection = selectVariantForViewport(item, viewportWidth);
   const uri = resolveUrl(selection.url ?? "");
+  const frameBackground = resolveFrameBackground(item.dominantColorHex);
   // 【fix 2026-08-26】SinglePostImage 走 contain（expo-image contentFit="contain" 写死），
   // contain 模式下图片已完整居中显示，不传 contentPosition。
   // 历史：v2 focalPoint 透传 → 9:16 portrait 头像图被贴顶 → 看起来"被切了"。
@@ -289,7 +299,7 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
     <Pressable
       accessibilityLabel="查看原图"
       onPress={onPress}
-      style={[styles.singleStage, { aspectRatio: shapeAspect }]}
+      style={[styles.singleStage, { aspectRatio: shapeAspect, backgroundColor: frameBackground }]}
     >
       <View style={styles.singleFill}>
         <ExpoImage
@@ -365,6 +375,9 @@ function VideoStage({
   const declaredAspect = mediaAspect(item, 0);
   const sourceAspect = declaredAspect || 16 / 9;
   const displayAspect = frameAspect ?? sourceAspect;
+  const frameBackground = resolveFrameBackground(item.dominantColorHex);
+  const showExtendedBackdrop = shouldUseExtendedBackdrop({ strategy: "contain", sourceAspect, frameAspect: displayAspect });
+  const posterUri = resolveUrl(item.thumbnailUrl ?? item.feedUrl ?? "");
   // 【fix 2026-08-26 异音】isActive=false 时走 thumbnail 占位，但仍上报帧供 feed.tsx 选 active。
   // 否则 inactive 永远不上报 frames → activeVideoId 恒 null → 死锁（真机不播、点也不播）。
   if (isActive === false) {
@@ -380,10 +393,11 @@ function VideoStage({
               }
             : undefined
         }
-        style={[styles.videoStage, { aspectRatio: displayAspect }]}
+        style={[styles.videoStage, { aspectRatio: displayAspect, backgroundColor: frameBackground }]}
       >
+        {showExtendedBackdrop && posterUri ? <MediaBackdrop item={item} uri={posterUri} /> : null}
         <ExpoImage
-          source={{ uri: resolveUrl(item.thumbnailUrl ?? item.feedUrl ?? "") }}
+          source={{ uri: posterUri }}
           style={styles.videoView}
           contentFit="contain"
           transition={150}
@@ -405,6 +419,9 @@ function VideoStage({
       onPress={onPress}
       displayAspect={displayAspect}
       resolveUrl={resolveUrl}
+      showExtendedBackdrop={showExtendedBackdrop}
+      frameBackground={frameBackground}
+      posterUri={posterUri}
       {...(onFrame ? { onFrame } : {})}
     />
   );
@@ -421,7 +438,10 @@ function ActiveVideoStage({
   autoPlay,
   onPress,
   displayAspect,
-  resolveUrl: _resolveUrl, // unused, kept for forward-compat with VideoStage interface
+  resolveUrl: _resolveUrl,
+  showExtendedBackdrop,
+  frameBackground,
+  posterUri,
   onFrame
 }: {
   item: ItemWithHint;
@@ -430,6 +450,9 @@ function ActiveVideoStage({
   onPress: () => void;
   displayAspect: number;
   resolveUrl: (path: string) => string;
+  showExtendedBackdrop: boolean;
+  frameBackground: string;
+  posterUri: string;
   onFrame?: (frame: { y: number; height: number }) => void;
 }): React.JSX.Element {
   const player = useVideoPlayer(uri, (setup) => {
@@ -487,8 +510,9 @@ function ActiveVideoStage({
         const ly = event.nativeEvent.layout;
         onFrame({ y: ly.y, height: ly.height });
       } : undefined}
-      style={[styles.videoStage, { aspectRatio: displayAspect }]}
+      style={[styles.videoStage, { aspectRatio: displayAspect, backgroundColor: frameBackground }]}
     >
+      {showExtendedBackdrop && posterUri ? <MediaBackdrop item={item} uri={posterUri} /> : null}
       <VideoView
         ref={videoViewRef}
         player={player}
@@ -502,6 +526,21 @@ function ActiveVideoStage({
         {item.durationMs ? <Text style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
       </View>
     </Pressable>
+  );
+}
+
+function MediaBackdrop({ item, uri }: { item: ItemWithHint; uri: string }): React.JSX.Element {
+  return (
+    <ExpoImage
+      accessible={false}
+      blurRadius={32}
+      cachePolicy="memory-disk"
+      contentFit="cover"
+      priority="low"
+      recyclingKey={`${item.mediaAssetId}:video-backdrop`}
+      source={{ uri }}
+      style={styles.mediaBackdrop}
+    />
   );
 }
 
@@ -566,7 +605,6 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
           );
         })}
       </ScrollView>
-      <Text style={styles.railHint}>{currentIndex + 1}/{items.length} · 左右滑动查看</Text>
     </View>
   );
 }
@@ -645,7 +683,7 @@ const styles = StyleSheet.create({
   // 单图：深紫黑底（消除灰边）
   singleStage: {
     backgroundColor: FRAME_BACKGROUND_HEX,
-    borderRadius: 14,
+    borderRadius: SOCIAL_MEDIA_RADIUS,
     overflow: "hidden",
     width: "100%"
   },
@@ -665,26 +703,21 @@ const styles = StyleSheet.create({
   railBadge: {
     backgroundColor: "rgba(14,10,20,0.55)",
     borderRadius: 999,
-    bottom: 8,
+    bottom: SOCIAL_MEDIA_BADGE_INSET,
     paddingHorizontal: 8,
     paddingVertical: 3,
     position: "absolute",
-    right: 8
+    right: SOCIAL_MEDIA_BADGE_INSET
   },
   railBadgeText: {
     color: color.white,
     fontSize: 11,
     fontWeight: "700"
   },
-  railHint: {
-    color: color.muted,
-    fontSize: 11,
-    marginTop: 6
-  },
   // VideoStage
   videoStage: {
     backgroundColor: FRAME_BACKGROUND_HEX,
-    borderRadius: 14,
+    borderRadius: SOCIAL_MEDIA_RADIUS,
     overflow: "hidden",
     width: "100%"
   },
@@ -698,11 +731,11 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     flexDirection: "row",
     gap: 4,
-    left: 8,
+    left: SOCIAL_MEDIA_BADGE_INSET,
     paddingHorizontal: 8,
     paddingVertical: 3,
     position: "absolute",
-    top: 8
+    top: SOCIAL_MEDIA_BADGE_INSET
   },
   videoBadgeText: {
     color: color.white,
@@ -717,8 +750,16 @@ const styles = StyleSheet.create({
   },
   wallCell: {
     backgroundColor: FRAME_BACKGROUND_HEX,
-    borderRadius: 12,
+    borderRadius: SOCIAL_MEDIA_RADIUS,
     marginBottom: WALL_GAP,
     overflow: "hidden"
+  },
+  mediaBackdrop: {
+    height: "112%",
+    left: "-6%",
+    opacity: 0.72,
+    position: "absolute",
+    top: "-6%",
+    width: "112%"
   }
 });

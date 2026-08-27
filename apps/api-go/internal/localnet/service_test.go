@@ -1,6 +1,7 @@
 package localnet
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -195,5 +196,122 @@ func TestRecordAttribution(t *testing.T) {
 	r2 := s.Handle(e2)
 	if r2.Outcome != "REJECTED" || r2.Error.ErrorCode != "INVALID_DEMAND_ORIGIN" {
 		t.Fatalf("want INVALID_DEMAND_ORIGIN, got %s/%+v", r2.Outcome, r2.Error)
+	}
+}
+
+// ── Audit closures for Pass 2 ──────────────────────────────────────────
+
+// stubMediaLookup returns a MediaAssetInfo map keyed by mediaAssetId. The
+// listFeed call only consults LookupMediaAssets + AuthorizeForPost, so the
+// stub is intentionally minimal — just enough to prove that
+// MediaAssetInfo.DominantColorHex is propagated to PostMediaItem.
+type stubMediaLookup struct {
+	assets map[string]MediaAssetInfo
+}
+
+func (s *stubMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (map[string]MediaAssetInfo, error) {
+	out := map[string]MediaAssetInfo{}
+	for _, id := range ids {
+		if info, ok := s.assets[id]; ok {
+			out[id] = info
+		}
+	}
+	return out, nil
+}
+
+func (s *stubMediaLookup) AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error {
+	return nil
+}
+
+func TestListFeedPosts_PropagatesDominantColorHex(t *testing.T) {
+	// Inject a MediaLookup that returns DominantColorHex for the asset,
+	// then create a Post that references it and assert the dominant
+	// color appears in the mediaItems envelope.
+	stub := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"media_001": {
+			MediaAssetID:     "media_001",
+			MediaType:        "IMAGE",
+			Width:            1080,
+			Height:           1440,
+			ProcessingStatus: "READY",
+			ModerationStatus: "APPROVED",
+			VisibilityClass:  "PUBLIC",
+			DominantColorHex: "#FFCC66",
+		},
+	}}
+	s := NewWithMediaLookup(NewMemoryRepository(), stub)
+	post := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT",
+		"body":       "拍夜景试试 #FFCC66",
+		"visibility": "PUBLIC",
+		"cityScope":  "hanoi",
+		"mediaRefs":  []map[string]any{{"mediaAssetId": "media_001", "mediaType": "IMAGE", "sortOrder": 0}},
+	}))
+	if post.Outcome != "ACCEPTED" {
+		t.Fatalf("create post: %s (%+v)", post.Outcome, post.Error)
+	}
+
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed: %s (%+v)", list.Outcome, list.Error)
+	}
+	// OperationRef is the JSON payload: {posts:[{...}], media:{<postId>:[PostMediaItem]}}
+	var view struct {
+		Posts []Post                      `json:"posts"`
+		Media map[string][]map[string]any `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse feed: %v\n%s", err, list.OperationRef)
+	}
+	if len(view.Posts) != 1 {
+		t.Fatalf("want 1 post, got %d", len(view.Posts))
+	}
+	postID := view.Posts[0].ID
+	items, ok := view.Media[postID]
+	if !ok || len(items) != 1 {
+		t.Fatalf("want 1 hydrated media item, got %+v", view.Media)
+	}
+	if got, want := items[0]["dominantColorHex"], "#FFCC66"; got != want {
+		t.Fatalf("dominantColorHex not propagated: want %s, got %v", want, got)
+	}
+}
+
+func TestListFeedPosts_EmptyDominantColorHex_Omitted(t *testing.T) {
+	// omitempty contract: an empty DominantColorHex must NOT appear in
+	// the JSON (otherwise clients see "#" or "" and may render a white
+	// background). Tripwire it.
+	s := New()
+	stub := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"media_no_color": {
+			MediaAssetID:     "media_no_color",
+			MediaType:        "IMAGE",
+			Width:            1080,
+			Height:           1440,
+			ProcessingStatus: "READY",
+			ModerationStatus: "APPROVED",
+			VisibilityClass:  "PUBLIC",
+			// DominantColorHex deliberately empty
+		},
+	}}
+	s = NewWithMediaLookup(NewMemoryRepository(), stub)
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT",
+		"body":       "no color",
+		"visibility": "PUBLIC",
+		"cityScope":  "hanoi",
+		"mediaRefs":  []map[string]any{{"mediaAssetId": "media_no_color", "mediaType": "IMAGE", "sortOrder": 0}},
+	}))
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	var view struct {
+		Posts []Post                      `json:"posts"`
+		Media map[string][]map[string]any `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse feed: %v", err)
+	}
+	postID := view.Posts[0].ID
+	items := view.Media[postID]
+	if _, present := items[0]["dominantColorHex"]; present {
+		t.Fatalf("empty dominantColorHex must be omitted (omitempty), but was present: %+v", items[0])
 	}
 }

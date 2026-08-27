@@ -59,6 +59,7 @@ type PostMediaItem struct {
 	Feed2xHintURL     string  `json:"feed2xHintUrl,omitempty"`
 	Feed2xNaturalURL  string  `json:"feed2xNaturalUrl,omitempty"`
 	GalleryURL        string  `json:"galleryUrl,omitempty"`
+	DominantColorHex  string  `json:"dominantColorHex,omitempty"`
 	OriginalAvailable bool    `json:"originalAvailable,omitempty"`
 	Width             int     `json:"width"`
 	Height            int     `json:"height"`
@@ -112,6 +113,7 @@ type MediaAssetInfo struct {
 	Feed2xHintURL     string
 	Feed2xNaturalURL  string
 	GalleryURL        string
+	DominantColorHex  string
 	OriginalAvailable bool
 	Width             int
 	Height            int
@@ -537,6 +539,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 					Feed2xHintURL:     info.Feed2xHintURL,
 					Feed2xNaturalURL:  info.Feed2xNaturalURL,
 					GalleryURL:        info.GalleryURL,
+					DominantColorHex:  info.DominantColorHex,
 					OriginalAvailable: info.OriginalAvailable,
 					Width:             info.Width,
 					Height:            info.Height,

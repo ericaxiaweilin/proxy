@@ -37,6 +37,7 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 			ProcessingStatus: asset.ProcessingStatus,
 			ModerationStatus: asset.ModerationStatus,
 			VisibilityClass:  asset.VisibilityClass,
+			DominantColorHex: asset.DominantColorHex,
 		}
 		variants, variantErr := l.service.ListReadyVariants(ctx, id)
 		if variantErr == nil {

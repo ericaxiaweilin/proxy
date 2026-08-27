@@ -223,7 +223,8 @@ export function FeedSurface({
   onOpenChat,
   onOpenFeedPrefs,
   onChromeVisibilityChange,
-  refreshTrigger
+  refreshTrigger,
+  bottomNavVisible
 }: {
   localNet: LocalNetClient;
   marketplace: MarketplaceClient;
@@ -234,6 +235,7 @@ export function FeedSurface({
   onOpenFeedPrefs: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
   refreshTrigger?: number;
+  bottomNavVisible?: boolean;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>("RECOMMENDED");
   const [section, setSection] = useState<FeedSection>("POSTS");
@@ -877,12 +879,13 @@ export function FeedSurface({
     return <CustomFeedHub onBack={() => setCustomFeedHubOpen(false)} onOpenFeed={(id) => { setSelectedCustomFeed(id); setFeedFilter("ALL"); setCustomFeedHubOpen(false); }} />;
   }
 
+  const bottomPad = bottomNavVisible === false ? 16 : 200;
   return (
     <View style={styles.root}>
     <ScrollView
       ref={scrollRef}
       style={styles.scrollRoot}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]}
       onScroll={onFeedScroll}
       onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setViewportHeight(ly.height); }}
       scrollEventThrottle={16}
@@ -1153,11 +1156,13 @@ export function FeedSurface({
             >
               {/* posthead */}
               <View style={styles.postHead}>
-                <View style={styles.postAvatar}>
-                  <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
-                </View>
-                <View style={styles.scenarioBadge}>
-                  <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={12} />
+                <View style={styles.postAvatarWrap}>
+                  <View style={styles.postAvatar}>
+                    <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
+                  </View>
+                  <View style={styles.scenarioBadge}>
+                    <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={11} />
+                  </View>
                 </View>
                 <View style={styles.postIdentity}>
                   <Text style={styles.postName}>{name}</Text>
@@ -1546,7 +1551,8 @@ const styles = StyleSheet.create({
     backgroundColor: color.violet,
     borderRadius: 12,
     marginBottom: 10,
-    paddingHorizontal: 14,
+    paddingLeft: 16,
+    paddingRight: 10,
     paddingVertical: 8
   },
   updateBannerText: {
@@ -1655,32 +1661,33 @@ const styles = StyleSheet.create({
   feedEmptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   retryBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   retryBtnText: { color: color.white, fontSize: 11, fontWeight: "700" },
-  // 基线 .postcard：radius 18，margin 9，padding 12。
+  // 连续信息流：帖文不做独立卡片。横向贴近屏幕，仅保留极淡的底部分界。
+  // X / Threads 的信息密度来自统一页面画布，而不是每条内容再套一层圆角容器。
   postCard: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 18,
-    borderWidth: 1,
-    marginVertical: 4.5,
-    padding: 12,
-    ...shadows.card
+    backgroundColor: "transparent",
+    borderBottomColor: "rgba(35,28,42,0.09)",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginHorizontal: -18,
+    paddingHorizontal: 14,
+    paddingVertical: 12
   },
-  postHead: { alignItems: "center", flexDirection: "row", gap: 8 },
+  postHead: { alignItems: "center", flexDirection: "row", gap: 10 },
+  postAvatarWrap: { height: 44, position: "relative", width: 44 },
   postAvatar: {
     alignItems: "center",
     backgroundColor: "#F0EAF5",
     borderRadius: 999,
-    height: 40,
+    height: 44,
     justifyContent: "center",
-    width: 40
+    width: 44
   },
-  postAvatarText: { color: color.ink, fontSize: 15, fontWeight: "700" },
-  scenarioBadge: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 20, justifyContent: "center", width: 20 },
+  postAvatarText: { color: color.ink, fontSize: 16, fontWeight: "700" },
+  scenarioBadge: { alignItems: "center", backgroundColor: color.white, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: -2, height: 20, justifyContent: "center", position: "absolute", right: -3, width: 20 },
   engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },
-  postName: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  postMeta: { color: color.muted, fontSize: 11, marginTop: 1 },
+  postName: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  postMeta: { color: color.muted, fontSize: 12, marginTop: 1 },
   followBtn: {
     backgroundColor: color.white,
     borderColor: color.line,
@@ -1693,8 +1700,8 @@ const styles = StyleSheet.create({
   followBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   followBtnTextOn: { color: color.white },
 
-  postReason: { color: "#81788A", fontSize: 11, marginTop: 7 },
-  postCopy: { color: "#2C2631", fontSize: 11, lineHeight: 16, marginVertical: 7 },
+  postReason: { color: "#81788A", fontSize: 12, marginTop: 6 },
+  postCopy: { color: "#2C2631", fontSize: 15, lineHeight: 21, marginVertical: 7 },
 
   // 基线 .mediaAsset：height 156，radius 14。
   mediaAsset: {

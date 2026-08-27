@@ -18,12 +18,15 @@ import { StyleSheet, View, useWindowDimensions } from "react-native";
 import type { FeedMediaItem } from "@proxy/contracts";
 import {
   resolveFillStrategy,
+  resolveFrameBackground,
+  shouldUseExtendedBackdrop,
   selectVariantForViewport,
   selectImageShape,
   FRAME_BACKGROUND_HEX,
   type MediaCompositionHint
 } from "@proxy/contracts";
-import { mediaAspect, shouldPreserveWholeSubject } from "../media-presentation";
+import { mediaAspect } from "../media-presentation";
+import { SOCIAL_MEDIA_RADIUS } from "./social-media-aesthetics";
 
 type FeedItemWithHint = FeedMediaItem & { compositionHint?: MediaCompositionHint };
 
@@ -38,9 +41,7 @@ export function SocialMediaFrame({ item, frameAspect, resolveUrl }: Props): Reac
   const hint: MediaCompositionHint | undefined = (item as FeedItemWithHint).compositionHint;
   const strategy = hint
     ? resolveFillStrategy({ hint, sourceAspect, frameAspect })
-    : shouldPreserveWholeSubject(sourceAspect, frameAspect)
-      ? "contain"
-      : "cover";
+    : "contain";
 
   const { width: viewportWidth } = useWindowDimensions();
   const selection = selectVariantForViewport(item, viewportWidth);
@@ -54,6 +55,8 @@ export function SocialMediaFrame({ item, frameAspect, resolveUrl }: Props): Reac
   // MediaFillStrategy = "contain" | "cover" | "natural" → ImageContentFit mapping
   // "natural" 等价 expo-image 的 "fill" (不缩放)
   const contentFit = strategy === "natural" ? "fill" : strategy;
+  const frameBackground = resolveFrameBackground(item.dominantColorHex);
+  const showExtendedBackdrop = shouldUseExtendedBackdrop({ strategy, sourceAspect, frameAspect });
   const contentPosition = (contentFit === "cover" && hint?.focalPoint)
     ? { top: `${Math.round(hint.focalPoint.y * 100)}%`, left: `${Math.round(hint.focalPoint.x * 100)}%` }
     : undefined;
@@ -63,7 +66,19 @@ export function SocialMediaFrame({ item, frameAspect, resolveUrl }: Props): Reac
   // history: v3 早期内部调用 selectImageShape(sourceAspect) → shapeAspect，被 caller 的 frameAspect 覆盖，
   // 但 MediaWall 把 cellAspect 传给 frameAspect 后又被 shapeAspect 压回 0.8（4:5）→ 横图被压成方。
   return (
-    <View style={[styles.frame, { aspectRatio: frameAspect }]}>
+    <View style={[styles.frame, { aspectRatio: frameAspect, backgroundColor: frameBackground }]}>
+      {showExtendedBackdrop && uri ? (
+        <ExpoImage
+          accessible={false}
+          source={{ uri }}
+          style={styles.extendedBackdrop}
+          contentFit="cover"
+          blurRadius={32}
+          cachePolicy="memory-disk"
+          priority="low"
+          recyclingKey={`${item.mediaAssetId}:backdrop`}
+        />
+      ) : null}
       <ExpoImage
         source={{ uri }}
         style={styles.asset}
@@ -82,7 +97,7 @@ const styles = StyleSheet.create({
   frame: {
     alignItems: "center",
     backgroundColor: FRAME_BACKGROUND_HEX,
-    borderRadius: 14,
+    borderRadius: SOCIAL_MEDIA_RADIUS,
     flex: 1,
     justifyContent: "center",
     overflow: "hidden",
@@ -91,5 +106,13 @@ const styles = StyleSheet.create({
   asset: {
     height: "100%",
     width: "100%"
+  },
+  extendedBackdrop: {
+    height: "112%",
+    left: "-6%",
+    opacity: 0.72,
+    position: "absolute",
+    top: "-6%",
+    width: "112%"
   }
 });

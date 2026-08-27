@@ -247,7 +247,7 @@ export function AppShell({
 
   return (
     <>
-      <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
+      <SafeAreaView edges={isNavVisible ? ["top", "bottom"] : ["top"]} style={styles.safeArea}>
       <View style={[styles.root, width >= 768 && styles.rootWide]}>
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
         {scrollChromeVisible ? <Header compact={compactWidth} /> : null}
@@ -294,7 +294,7 @@ export function AppShell({
             touchStartX.current = event.nativeEvent.pageX;
             lastTouchX.current = event.nativeEvent.pageX;
           }}
-          style={[styles.body, (isNavVisible && tab !== "FEED" ? { paddingBottom: 86 } : undefined)]}
+          style={[styles.body, (isNavVisible && tab !== "FEED" ? { paddingBottom: 120 } : undefined)]}
         >
         {tab === "HOME" ? (
           sceneComposerTool ? (
@@ -526,6 +526,7 @@ function RootNav({
   }, [activeIndex]);
 
   const [measuredWidth, setMeasuredWidth] = useState(0);
+  const [pressing, setPressing] = useState(false);
   const dockWidth = measuredWidth > 0 ? measuredWidth : Math.min(620, Math.max(0, width - 28));
   const slotWidth = dockWidth > 0 ? (dockWidth - 16) / 5 : 72;
   const dockHeight = compact ? 64 : 66;
@@ -602,7 +603,7 @@ function RootNav({
             {
               width: slotWidth,
               height: lensHeight,
-              transform: [{ translateX: progress * slotWidth }],
+              transform: [{ translateX: progress * slotWidth }, { scale: pressing ? 1.06 : 1 }],
             },
             dragging && styles.lensDragging
           ]}
@@ -621,6 +622,8 @@ function RootNav({
             <Pressable
               key={entry.id}
               onPress={() => { if (!draggingRef.current) commit(i); }}
+              onPressIn={() => setPressing(true)}
+              onPressOut={() => setPressing(false)}
               style={styles.navItem}
               hitSlop={8}
             >
@@ -697,8 +700,8 @@ const styles = StyleSheet.create({
   hintText: { color: "transparent", fontSize: 1, letterSpacing: 0.2, height: 0 },
   nav: {
     alignSelf: "stretch",
-    backgroundColor: color.white,
-    borderColor: color.line,
+    backgroundColor: "rgba(255,255,255,0.84)",
+    borderColor: "rgba(255,255,255,0.48)",
     borderRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
@@ -706,7 +709,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 0,
     alignItems: "center",
-    overflow: "hidden"
+    overflow: "hidden",
+    shadowColor: "rgba(23,19,31,0.10)",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 1,
+    shadowRadius: 16,
+    elevation: 8
   },
   navCompact: { height: 64, borderRadius: 22 },
   dockHighlight: {
@@ -716,8 +724,8 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    opacity: 0.5
+    backgroundColor: "rgba(255,255,255,0.12)",
+    opacity: 0.9
   },
   lens: {
     position: "absolute",
@@ -725,15 +733,15 @@ const styles = StyleSheet.create({
     left: 8,
     height: 54,
     borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderColor: color.line,
+    backgroundColor: "rgba(255,255,255,0.96)",
+    borderColor: "rgba(255,255,255,0.82)",
     borderWidth: StyleSheet.hairlineWidth,
     zIndex: 1,
-    shadowColor: "rgba(23,19,31,0.14)",
-    shadowOffset: { width: 0, height: 4 },
+    shadowColor: "rgba(23,19,31,0.12)",
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 4
+    shadowRadius: 12,
+    elevation: 6
   },
   lensDragging: { opacity: 0.98 },
   lensAccent: {

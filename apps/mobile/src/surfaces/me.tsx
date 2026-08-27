@@ -431,6 +431,7 @@ const REQUESTER_ME: PersonaConfig = {
       title: "我的市场",
       hint: "个人资产",
       rows: [
+        { icon: "◎", label: "我的场景", desc: "R15.13 · 我发起的 Scene 与收到的邀请", route: "myscenes" },
         { icon: "diamond", label: "我的订单", desc: "我发布的 / 我参与的已成交订单", route: "myorders" },
         { icon: "clock", label: "能力与可用时间", desc: "能力、主题、区域与空闲时间", route: "available" },
         { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", route: "myactivities" },
@@ -654,6 +655,16 @@ function MeLocationContext(): React.JSX.Element {
 
 // 原型子页面内容映射 — 每个路由对应原型中的页面标题、描述和关键内容。
 const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; icon: string; sections?: Array<{ title: string; rows: Array<{ label: string; value: string }> }> }> = {
+  myscenes: {
+    title: "我的场景",
+    desc: "R15.13 Scene Value Exchange · 我发起的 Scene 与收到的邀请。预算进场景，不买人。",
+    icon: "◎",
+    sections: [
+      { title: "进行中", rows: [{ label: "West Lake Photo Afternoon", value: "INVITING · 2/4 确认 · 饮品 included" }, { label: "周末西湖聚餐", value: "DRAFT · 需补锚点" }]},
+      { title: "收到的邀请", rows: [{ label: "Rooftop Sunset", value: "David 邀请 · 交通支持100K · 待回应" }]},
+      { title: "历史", rows: [{ label: "已完成 3 · 到场 2", value: "满意度 4.6 · 复访 1" }]},
+    ]
+  },
   wallet: {
     title: "钱包与结算",
     desc: "钱包是'我的'内页，只展示 Proxy 真正经手或需要记录的资金状态。",

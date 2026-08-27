@@ -49,7 +49,7 @@ export class LocalNetClient {
   }
 
   public async listFeedPosts(): Promise<FeedReadModel> {
-    const session = await this.requireSession();
+    const session = await this.optionalSession();
     const result = await this.sendCommand(session, "ListFeedPosts", { type: "Feed", id: "local" }, {});
     const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
     return { posts: payload.posts, media: payload.media };
@@ -70,8 +70,13 @@ export class LocalNetClient {
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 
+  private async optionalSession(): Promise<(StoredSession & { principal: NonNullable<StoredSession["principal"]> }) | undefined> {
+    const session = await this.input.secureSessionStore.read();
+    return session?.principal ? session as StoredSession & { principal: NonNullable<StoredSession["principal"]> } : undefined;
+  }
+
   private async sendCommand(
-    session: StoredSession & { principal: NonNullable<StoredSession["principal"]> },
+    session: (StoredSession & { principal: NonNullable<StoredSession["principal"]> }) | undefined,
     commandType: string,
     target: { type: string; id: string },
     payload: Record<string, unknown>,
@@ -82,11 +87,11 @@ export class LocalNetClient {
       commandId,
       commandType,
       commandVersion: 1,
-      actor: { type: "USER", id: session.userAccountId },
-      principal: session.principal,
+      actor: session ? { type: "USER", id: session.userAccountId } : { type: "PUBLIC", id: "anonymous_reader" },
+      principal: session?.principal ?? { type: "PUBLIC", id: "anonymous_reader" },
       target,
       idempotencyKey: idempotencyKey ?? this.nextId("idempotency"),
-      authContext: { sessionId: session.auth.sessionId },
+      authContext: session ? { sessionId: session.auth.sessionId } : {},
       purpose: "localnet_feed",
       correlationId: this.nextId("correlation"),
       requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),

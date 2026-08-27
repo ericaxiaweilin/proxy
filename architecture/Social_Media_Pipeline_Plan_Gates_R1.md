@@ -177,13 +177,13 @@ MediaCompositionHint
 
 | 内容 | 有可靠服务端 Hint | 无 Hint / 低置信度 |
 |---|---|---|
-| 单人半身/全身 | safeCropRect cover；若身体不完整则 contain | 仅按宽高比判断，宁可 contain 不裁头脚 |
-| 多人合照 | 所有人脸联合安全区 cover | contain |
-| 商品 | 主商品框完整时 cover | contain，避免裁掉商品边缘 |
-| 文字广告/海报 | textSafeArea 完整时 cover | contain，保证文字可读 |
-| 人像 + 商品 | 人体框与商品框联合安全区 | contain |
-| 人像 + 海报 | 人脸/身体/文字安全区联合 | contain |
-| 场景/风景 | focalPoint cover | 宽高比接近时 cover，否则 contain |
+| 单人半身/全身 | 仅当比例差 ≤3% 且 safeCropRect 仍完整时 cover；否则 contain | contain，不裁头脚 |
+| 多人合照 | contain；联合人脸中心只用于视觉定位，不用于裁图 | contain |
+| 商品 | 仅当 cover 后主商品框仍完整时 cover | contain，避免裁掉商品边缘 |
+| 文字广告/海报 | contain，保证整张设计与文字可读 | contain |
+| 人像 + 商品 | contain；联合安全区只用于视觉定位 | contain |
+| 人像 + 海报 | contain；人脸/身体/文字必须全部保留 | contain |
+| 场景/风景 | contain；近乎同尺寸时自然铺满 | contain |
 
 不变量：
 
@@ -191,6 +191,7 @@ MediaCompositionHint
 - 低置信度必须回落到完整展示，不能冒险中心裁切；
 - Gallery 永远恢复完整 GALLERY/ORIGINAL 构图；
 - Worker 的 Hint 必须带 `recipeVersion`，客户端只消费合同，不复制检测逻辑；
+- contain 补边优先使用服务端 `dominantColorHex`，缺失时才回落品牌深色；后续可升级为同图柔化背景，但不得改变前景原图比例；
 - 作者可在发帖器中调整顺序；后续 Gate 增加“调整预览焦点”，但不得修改原文件。
 
 ### 5.2.1 人像混合组图（P0 核心 Case）

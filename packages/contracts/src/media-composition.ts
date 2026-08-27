@@ -43,12 +43,48 @@ export type MediaCompositionHint = z.infer<typeof MediaCompositionHintSchema>;
 /**
  * Front-end fill strategy.
  * "contain" = 整张图，背景用同图 blur（人像 9:16 等）
- * "cover"   = 整画布铺满，仅在 safeCropRect 完整时使用
+ * "cover"   = 仅在源图与画布几乎同尺寸时铺满（最多 3% 比例差）
  * "natural" = 1:1 像素，无变形（spec / logo）
  *
  * 服务端 hint 低置信度 → 必须回落 contain；客户端不得自作主张。
  */
 export type MediaFillStrategy = "contain" | "cover" | "natural";
+
+/**
+ * 只有完整展示会产生可见留边、且源图与画布比例确实不同时才渲染柔化延展层。
+ * 前景仍是 contain 原图；延展层可以 cover，因为它只是背景，不承载内容。
+ */
+export function shouldUseExtendedBackdrop(input: {
+  strategy: MediaFillStrategy;
+  sourceAspect: number;
+  frameAspect: number;
+}): boolean {
+  if (input.strategy !== "contain" || input.sourceAspect <= 0 || input.frameAspect <= 0) return false;
+  return Math.abs(input.sourceAspect - input.frameAspect) / input.frameAspect > 0.03;
+}
+
+/**
+ * 判断 cover 所需的裁剪窗口能否完整包含服务端安全区。
+ * sourceAspect/frameAspect 决定实际会裁宽还是裁高；只看“有 safeCropRect”不够，
+ * 全身 9:16 放进 4:5 时，裁剪窗口高度只有约 70%，必须回退 contain 才不会裁脚。
+ */
+export function canSafelyCover(input: {
+  safeRect: MediaBox | undefined;
+  sourceAspect: number;
+  frameAspect: number;
+}): boolean {
+  const { safeRect, sourceAspect, frameAspect } = input;
+  if (!safeRect || sourceAspect <= 0 || frameAspect <= 0) return false;
+  if (frameAspect > sourceAspect) {
+    const cropHeight = sourceAspect / frameAspect;
+    return safeRect.height <= cropHeight;
+  }
+  if (frameAspect < sourceAspect) {
+    const cropWidth = frameAspect / sourceAspect;
+    return safeRect.width <= cropWidth;
+  }
+  return true;
+}
 
 /**
  * 从服务端 hint + 客户端帧宽高比，解析"该用哪种填充"。
@@ -64,18 +100,25 @@ export function resolveFillStrategy(input: {
   const threshold = input.lowConfidenceThreshold ?? 0.4;
   const hint = input.hint;
   if (!hint || hint.confidence < threshold) {
-    // 低置信度：宁可 contain，绝不中心裁
+    // 无识别结果或低置信度：完整展示，绝不中心裁。
     return "contain";
   }
-  // 文字 / 海报：textSafeArea 完整时 cover
-  if (hint.subjectType === "TEXT_HEAVY" && hint.textSafeArea) return "cover";
-  // 场景 / 风景：focalPoint 存在 + frameAspect 与 sourceAspect 接近时 cover
-  if (hint.subjectType === "SCENE" && hint.focalPoint) {
-    const aspectDelta = Math.abs(input.sourceAspect - input.frameAspect) / input.frameAspect;
-    return aspectDelta < 0.2 ? "cover" : "contain";
+  // 广告/海报、多人、人物与文字/商品混合图禁止自动裁剪。
+  if (
+    hint.subjectType === "TEXT_HEAVY"
+    || hint.subjectType === "MIXED_PERSON_TEXT"
+    || hint.subjectType === "MIXED_PERSON_PRODUCT"
+    || hint.subjectCount > 1
+  ) return "contain";
+
+  // 核心不是裁图。只有源图与画布几乎同一比例、且服务端安全区完整时，
+  // 才允许消除几乎不可见的边缘余量；其余全部完整展示。
+  const aspectDelta = Math.abs(input.sourceAspect - input.frameAspect) / input.frameAspect;
+  if (aspectDelta <= 0.03 && hint.safeCropRect) {
+    return canSafelyCover({ safeRect: hint.safeCropRect, sourceAspect: input.sourceAspect, frameAspect: input.frameAspect })
+      ? "cover"
+      : "contain";
   }
-  // 人物 / 商品：safeCropRect 完整时 cover，否则 contain（人像 + 商品 / 人像 + 文字 → 同理）
-  if (hint.safeCropRect) return "cover";
   return "contain";
 }
 
@@ -237,6 +280,16 @@ export const FULLSCREEN_MODE = "NATIVE_AVPLAYER_VC" as const;
 export type FullscreenMode = typeof FULLSCREEN_MODE;
 
 export const FRAME_BACKGROUND_HEX = "#0E0A14";
+
+/**
+ * contain 留边使用服务端从当前图片派生出的主色；格式异常或缺失时回到审核基色。
+ * 这只改变画布背景，不改变 ORIGINAL/GALLERY，也不参与可见性或审核判断。
+ */
+export function resolveFrameBackground(dominantColorHex: string | undefined): string {
+  return dominantColorHex && /^#[0-9A-Fa-f]{6}$/.test(dominantColorHex)
+    ? dominantColorHex.toUpperCase()
+    : FRAME_BACKGROUND_HEX;
+}
 
 export function isFrameBackgroundSafe(backgroundColor: string | undefined): boolean {
   return backgroundColor === FRAME_BACKGROUND_HEX;

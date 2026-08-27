@@ -45,13 +45,13 @@
 
 ### Gate B — 填充策略 (Fill Strategy)
 
-**不变量**：低置信度 (<0.4) 必须 contain；TEXT_HEAVY + textSafeArea → cover；SCENE + focalPoint + aspect 接近（< 20%）→ cover；人物/商品 + safeCropRect → cover；其他 contain。
+**不变量**：核心是完整展示，不是自动裁图。广告/海报、多人合照、人物+文字、人物+商品始终 contain；其他图片只有源图与画布比例差不超过 3% 且安全区完整时才可 cover。无 Hint 或低置信度一律 contain。
 
 **对应规范**：
 - §5.2.2 "低置信度（<0.4）必须回落 contain"
 - §5.2.2 "客户端不得自作主张"
 
-**实现**：`packages/contracts/src/media-composition.ts` `resolveFillStrategy({ hint, sourceAspect, frameAspect })`
+**实现**：`packages/contracts/src/media-composition.ts` `canSafelyCover(...)` + `resolveFillStrategy({ hint, sourceAspect, frameAspect })`
 
 **调用点**：`SocialMediaFrame.tsx` line 60
 
@@ -59,11 +59,13 @@
 - B1: 无 hint → contain
 - B2: 置信度 0.39 → contain
 - B3: 置信度 0.40 → 走真实逻辑
-- B4: PERSON + safeCropRect → cover
-- B5: PRODUCT + safeCropRect → cover
-- B6: TEXT_HEAVY + textSafeArea → cover
+- B4: 单人 PERSON 仅在比例差 ≤3% 且安全区完整时 cover；否则 contain
+- B5: PRODUCT + safeCropRect 且 cover 后安全区完整 → cover；否则 contain
+- B6: TEXT_HEAVY / MIXED_PERSON_TEXT → contain
 - B7: TEXT_HEAVY 但缺 textSafeArea → contain
-- B8: SCENE + focalPoint + aspect 接近 → cover
+- B8: SCENE 不因 focalPoint 自动裁图
+- B8a: 多人合照 → contain
+- B8b: 人物广告/人物文字图 → contain
 - B9: SCENE + aspect 偏差 > 20% → contain
 - B10: UNKNOWN + 高置信度 → contain
 - B11: custom threshold 0.7 生效
@@ -87,21 +89,20 @@
 
 ### Gate D — 背景色不变量 (Frame Background)
 
-**不变量**：Frame 背景锁定 `#0E0A14`（深紫黑）。不用 offWhite/white：夜景/深色照片 contain 时会出现强白边。
+**不变量**：服务端返回合法 `dominantColorHex` 时，Frame 使用图片主色；缺失或非法时回落 `#0E0A14`（深紫黑）。客户端不得使用通用 offWhite/white 给所有图片补边。
 
 **对应规范**：§5.2.1 "背景不能使用纯白导致夜景/深色照片出现强烈边框"
 
-**实现**：`packages/contracts/src/media-composition.ts` `FRAME_BACKGROUND_HEX` + `isFrameBackgroundSafe(hex)`
+**实现**：`packages/contracts/src/media-composition.ts` `resolveFrameBackground(dominantColorHex)` + `FRAME_BACKGROUND_HEX`
 
-**调用点**：所有 `<View style={styles.frame}>` + `<View style={styles.backdrop}>` + `<View style={styles.singleStage}>` + `<View style={styles.wallCell}>` 都用 `FRAME_BACKGROUND_HEX` (从 contracts import)。
+**调用点**：`SocialMediaFrame`、单图 Stage 与 Rail/Wall 子项均从同一函数取背景；服务端 `MediaAsset.dominant_color_hex` 经 Feed DTO 透传，不由客户端重新分析图片。
 
-**验收 case** (6 个) — `Gate D · isFrameBackgroundSafe`:
-- D1: FRAME_BACKGROUND_HEX = "#0E0A14"
-- D2: #0E0A14 通过
-- D3: 白色禁止
-- D4: offWhite #F7F4F9 禁止
-- D5: undefined 禁止
-- D6: 浅灰 #E5E5E5 禁止
+当 contain 且源图与画布比例差超过 3% 时，使用同一张缓存图片生成低优先级柔化延展层；前景原图仍为 contain。背景层允许 cover，因为它不承载人物、文字或商品内容。
+
+**验收 case** — `Gate D · resolveFrameBackground`:
+- D1: 合法六位十六进制主色原样使用并规范为大写
+- D2: 缺失、三位色值或非法值回落 `#0E0A14`
+- D3: Feed DTO 必须保留 `dominantColorHex`
 
 ### Gate E — 懒加载边界 (Lazy Load Boundary)
 

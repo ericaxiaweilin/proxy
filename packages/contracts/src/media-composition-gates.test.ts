@@ -7,6 +7,9 @@ import { describe, expect, it } from "vitest";
 import {
   FRAME_BACKGROUND_HEX,
   resolveFillStrategy,
+  canSafelyCover,
+  resolveFrameBackground,
+  shouldUseExtendedBackdrop,
   selectVariantForViewport,
   selectVideoPlaybackUrl,
   isForbiddenInFeed,
@@ -24,6 +27,36 @@ import {
 const PORTRAIT_4_5 = 4 / 5; // 0.8
 const PORTRAIT_9_16 = 9 / 16; // 0.5625
 const LANDSCAPE_3_2 = 3 / 2; // 1.5
+
+describe("人物安全裁剪几何", () => {
+  it("9:16 全身安全区无法装进 4:5 cover，必须完整展示", () => {
+    const safeRect = { x: 0.2, y: 0.02, width: 0.6, height: 0.96 };
+    expect(canSafelyCover({ safeRect, sourceAspect: PORTRAIT_9_16, frameAspect: PORTRAIT_4_5 })).toBe(false);
+    expect(resolveFillStrategy({
+      hint: { subjectType: "PERSON", subjectCount: 1, faceBoxes: [], bodyBoxes: [], safeCropRect: safeRect, confidence: 0.95, recipeVersion: "test" },
+      sourceAspect: PORTRAIT_9_16,
+      frameAspect: PORTRAIT_4_5
+    })).toBe("contain");
+  });
+
+  it("4:5 半身安全区可装进相同比例，允许安全铺满", () => {
+    const safeRect = { x: 0.12, y: 0.04, width: 0.76, height: 0.82 };
+    expect(canSafelyCover({ safeRect, sourceAspect: PORTRAIT_4_5, frameAspect: PORTRAIT_4_5 })).toBe(true);
+    expect(resolveFillStrategy({
+      hint: { subjectType: "PERSON", subjectCount: 1, faceBoxes: [], bodyBoxes: [], safeCropRect: safeRect, confidence: 0.95, recipeVersion: "test" },
+      sourceAspect: PORTRAIT_4_5,
+      frameAspect: PORTRAIT_4_5
+    })).toBe("cover");
+  });
+
+  it("横向多人联合安全区过宽时不允许窄画布 cover", () => {
+    expect(canSafelyCover({
+      safeRect: { x: 0.03, y: 0.15, width: 0.94, height: 0.7 },
+      sourceAspect: 16 / 9,
+      frameAspect: 1
+    })).toBe(false);
+  });
+});
 
 // -----------------------------------------------------------------------------
 // Gate A — Variant Selection (档位选择)
@@ -224,8 +257,7 @@ describe("Gate A · selectVariantForViewport", () => {
 // Gate B — Fill Strategy (填充策略)
 //
 // 不变量：低置信度 (<0.4) 必须 contain（人像 9:16 / 商品 / 文字）；
-// TEXT_HEAVY + textSafeArea → cover；SCENE + focalPoint + aspect 接近 → cover；
-// 人物/商品 + safeCropRect → cover；其他 contain。
+// TEXT_HEAVY / 人物 / 商品只有安全区确实容得下 cover 裁剪窗口才铺满；否则 contain。
 // -----------------------------------------------------------------------------
 
 describe("Gate B · resolveFillStrategy", () => {
@@ -245,7 +277,7 @@ describe("Gate B · resolveFillStrategy", () => {
     ).toBe("contain");
   });
 
-  it("B3 · 置信度 0.40 (= 0.4) → 走真实逻辑", () => {
+  it("B3 · 置信度 0.40 (= 0.4) 但比例不同 → 仍完整展示", () => {
     // PERSON + safeCropRect 完整 → cover
     expect(
       resolveFillStrategy({
@@ -257,10 +289,10 @@ describe("Gate B · resolveFillStrategy", () => {
         sourceAspect: PORTRAIT_4_5,
         frameAspect: 1
       })
-    ).toBe("cover");
+    ).toBe("contain");
   });
 
-  it("B4 · PERSON + safeCropRect → cover (不裁主体)", () => {
+  it("B4 · 9:16 PERSON 的全图安全区装不进 4:5 → contain", () => {
     expect(
       resolveFillStrategy({
         hint: {
@@ -271,7 +303,7 @@ describe("Gate B · resolveFillStrategy", () => {
         sourceAspect: PORTRAIT_9_16,
         frameAspect: PORTRAIT_4_5
       })
-    ).toBe("cover");
+    ).toBe("contain");
   });
 
   it("B5 · PRODUCT + safeCropRect → cover", () => {
@@ -288,7 +320,7 @@ describe("Gate B · resolveFillStrategy", () => {
     ).toBe("cover");
   });
 
-  it("B6 · TEXT_HEAVY + textSafeArea → cover（海报/菜单）", () => {
+  it("B6 · 海报文字占满 4:3 原图，放进方形时必须 contain", () => {
     expect(
       resolveFillStrategy({
         hint: {
@@ -299,7 +331,7 @@ describe("Gate B · resolveFillStrategy", () => {
         sourceAspect: 4 / 3,
         frameAspect: 1
       })
-    ).toBe("cover");
+    ).toBe("contain");
   });
 
   it("B7 · TEXT_HEAVY 但缺 textSafeArea → contain（保安全）", () => {
@@ -315,7 +347,7 @@ describe("Gate B · resolveFillStrategy", () => {
     ).toBe("contain");
   });
 
-  it("B8 · SCENE + focalPoint + aspect 接近 → cover", () => {
+  it("B8 · SCENE 即使有 focalPoint 也不自动裁图", () => {
     expect(
       resolveFillStrategy({
         hint: {
@@ -326,7 +358,34 @@ describe("Gate B · resolveFillStrategy", () => {
         sourceAspect: LANDSCAPE_3_2,
         frameAspect: LANDSCAPE_3_2
       })
-    ).toBe("cover");
+    ).toBe("contain");
+  });
+
+  it("B8a · 多人 KTV 合照禁止自动裁剪", () => {
+    expect(resolveFillStrategy({
+      hint: {
+        subjectType: "PERSON", subjectCount: 5,
+        faceBoxes: [], bodyBoxes: [],
+        safeCropRect: { x: 0.08, y: 0.1, width: 0.84, height: 0.75 },
+        confidence: 0.96, recipeVersion: "test"
+      },
+      sourceAspect: 16 / 9,
+      frameAspect: 1
+    })).toBe("contain");
+  });
+
+  it("B8b · 人物广告和文字图禁止自动裁剪", () => {
+    expect(resolveFillStrategy({
+      hint: {
+        subjectType: "MIXED_PERSON_TEXT", subjectCount: 1,
+        faceBoxes: [], bodyBoxes: [],
+        textSafeArea: { x: 0.05, y: 0.04, width: 0.9, height: 0.92 },
+        safeCropRect: { x: 0.05, y: 0.04, width: 0.9, height: 0.92 },
+        confidence: 0.98, recipeVersion: "test"
+      },
+      sourceAspect: 4 / 5,
+      frameAspect: 4 / 5
+    })).toBe("contain");
   });
 
   it("B9 · SCENE + aspect 偏差 > 20% → contain（不中心裁）", () => {
@@ -432,6 +491,44 @@ describe("Gate D · isFrameBackgroundSafe", () => {
 
   it("D6 · 浅灰 #E5E5E5 禁止（不能有白边伪色）", () => {
     expect(isFrameBackgroundSafe("#E5E5E5")).toBe(false);
+  });
+});
+
+describe("Gate D2 · resolveFrameBackground（完整展示无灰边）", () => {
+  it("使用服务端图片主色作为 contain 画布", () => {
+    expect(resolveFrameBackground("#c8b49a")).toBe("#C8B49A");
+  });
+
+  it("缺失或非法主色必须回落审核基色", () => {
+    expect(resolveFrameBackground(undefined)).toBe(FRAME_BACKGROUND_HEX);
+    expect(resolveFrameBackground("gray")).toBe(FRAME_BACKGROUND_HEX);
+    expect(resolveFrameBackground("#FFF")).toBe(FRAME_BACKGROUND_HEX);
+  });
+});
+
+describe("Gate D3 · 同图柔化延展层", () => {
+  it("横图完整放进方形画布时启用延展背景", () => {
+    expect(shouldUseExtendedBackdrop({
+      strategy: "contain",
+      sourceAspect: 16 / 9,
+      frameAspect: 1
+    })).toBe(true);
+  });
+
+  it("近乎同尺寸不重复解码背景图", () => {
+    expect(shouldUseExtendedBackdrop({
+      strategy: "contain",
+      sourceAspect: 0.8,
+      frameAspect: 0.8
+    })).toBe(false);
+  });
+
+  it("前景 cover 时不需要延展背景", () => {
+    expect(shouldUseExtendedBackdrop({
+      strategy: "cover",
+      sourceAspect: 0.8,
+      frameAspect: 1
+    })).toBe(false);
   });
 });
 
@@ -560,5 +657,173 @@ describe("Gate N — selectImageShape (4 形态 frame 比例)", () => {
   });
   it("source 21:9 (2.33) → LANDSCAPE", () => {
     expect(selectImageShape(21 / 9)).toBe("LANDSCAPE");
+  });
+});
+
+// =====================================================================
+// Pass 2 audit closures — boundary tests for the 3 new functions
+// (shouldUseExtendedBackdrop, canSafelyCover, resolveFrameBackground)
+// and the tightened resolveFillStrategy rules. Pinned so a refactor
+// that drops any of these invariants fails at unit-test time.
+// =====================================================================
+
+describe("Pass 2 · shouldUseExtendedBackdrop boundary gates", () => {
+  it("sourceAspect=0 returns false (degenerate input)", () => {
+    expect(shouldUseExtendedBackdrop({ strategy: "contain", sourceAspect: 0, frameAspect: 1 })).toBe(false);
+  });
+  it("frameAspect=0 returns false (degenerate input)", () => {
+    expect(shouldUseExtendedBackdrop({ strategy: "contain", sourceAspect: 1, frameAspect: 0 })).toBe(false);
+  });
+  it("negative sourceAspect returns false", () => {
+    expect(shouldUseExtendedBackdrop({ strategy: "contain", sourceAspect: -1, frameAspect: 1 })).toBe(false);
+  });
+  it("strategy=natural returns false (1:1 pixel; no padded area)", () => {
+    expect(shouldUseExtendedBackdrop({ strategy: "natural", sourceAspect: 0.5, frameAspect: 1 })).toBe(false);
+  });
+  it("exact 3% aspect delta is NOT enough to enable backdrop (>3% required)", () => {
+    // Use rational arithmetic so the comparison is bit-exact: frm=100, src=103
+    // |103-100|/100 = 0.03 → must reject (the function uses `> 0.03`).
+    const frm = 100;
+    const src = 103;
+    expect(shouldUseExtendedBackdrop({ strategy: "contain", sourceAspect: src, frameAspect: frm })).toBe(false);
+  });
+  it("just over 3% aspect delta enables backdrop", () => {
+    // frm=1000, src=1031 → |1031-1000|/1000 = 0.031 > 0.03 → enable
+    const frm = 1000;
+    const src = 1031;
+    expect(shouldUseExtendedBackdrop({ strategy: "contain", sourceAspect: src, frameAspect: frm })).toBe(true);
+  });
+});
+
+describe("Pass 2 · canSafelyCover boundary gates", () => {
+  it("undefined safeRect returns false", () => {
+    expect(canSafelyCover({ safeRect: undefined, sourceAspect: 0.8, frameAspect: 0.8 })).toBe(false);
+  });
+  it("sourceAspect=0 returns false", () => {
+    expect(canSafelyCover({ safeRect: { x: 0, y: 0, width: 1, height: 1 }, sourceAspect: 0, frameAspect: 0.8 })).toBe(false);
+  });
+  it("frameAspect=0 returns false", () => {
+    expect(canSafelyCover({ safeRect: { x: 0, y: 0, width: 1, height: 1 }, sourceAspect: 0.8, frameAspect: 0 })).toBe(false);
+  });
+  it("exact equality: safeRect.height === cropHeight is safe (<=)", () => {
+    // 4:5 source → 1:1 frame: cropHeight = 0.8 / 1.0 = 0.8
+    // safeRect.height = 0.8 → must be safe
+    expect(canSafelyCover({
+      safeRect: { x: 0, y: 0, width: 1, height: 0.8 },
+      sourceAspect: 0.8,
+      frameAspect: 1.0,
+    })).toBe(true);
+  });
+  it("exact equality in width axis: safeRect.width === cropWidth is safe (<=)", () => {
+    // 1:1 source → 4:5 frame: cropWidth = 1.0 * 0.8 = 0.8... wait, 4:5 is 0.8, smaller
+    // Actually: frameAspect(0.8) < sourceAspect(1.0), so we crop the width
+    // cropWidth = 0.8 / 1.0 = 0.8; safeRect.width = 0.8 → safe
+    expect(canSafelyCover({
+      safeRect: { x: 0, y: 0, width: 0.8, height: 1 },
+      sourceAspect: 1.0,
+      frameAspect: 0.8,
+    })).toBe(true);
+  });
+  it("just over the crop window rejects cover (1% over)", () => {
+    expect(canSafelyCover({
+      safeRect: { x: 0, y: 0, width: 1, height: 0.81 }, // 0.81 > 0.8
+      sourceAspect: 0.8,
+      frameAspect: 1.0,
+    })).toBe(false);
+  });
+});
+
+describe("Pass 2 · resolveFrameBackground boundary gates", () => {
+  it("empty string returns the default", () => {
+    expect(resolveFrameBackground("")).toBe(FRAME_BACKGROUND_HEX);
+  });
+  it("8-digit hex (#RRGGBBAA) returns the default (regex anchors 6 digits only)", () => {
+    expect(resolveFrameBackground("#FF00FF80")).toBe(FRAME_BACKGROUND_HEX);
+  });
+  it("non-hex characters in 7-char string return the default", () => {
+    expect(resolveFrameBackground("#FFG000")).toBe(FRAME_BACKGROUND_HEX);
+  });
+  it("missing # prefix returns the default", () => {
+    expect(resolveFrameBackground("FFFFFF")).toBe(FRAME_BACKGROUND_HEX);
+  });
+  it("numeric string returns the default", () => {
+    expect(resolveFrameBackground("123456")).toBe(FRAME_BACKGROUND_HEX);
+  });
+  it("lowercase hex is uppercased", () => {
+    expect(resolveFrameBackground("#abcdef")).toBe("#ABCDEF");
+  });
+  it("mixed case hex is uppercased", () => {
+    expect(resolveFrameBackground("#aBcDeF")).toBe("#ABCDEF");
+  });
+  it("exactly the default hex is returned as-is (uppercased)", () => {
+    expect(resolveFrameBackground("#0e0a14")).toBe("#0E0A14");
+  });
+});
+
+describe("Pass 2 · resolveFillStrategy tightened rules", () => {
+  const personHint = (overrides: Partial<{ subjectType: "PERSON" | "PRODUCT" | "TEXT_HEAVY" | "SCENE" | "MIXED_PERSON_PRODUCT" | "MIXED_PERSON_TEXT" | "UNKNOWN"; subjectCount: number; safeCropRect: { x: number; y: number; width: number; height: number }; confidence: number }> = {}) => ({
+    subjectType: overrides.subjectType ?? "PERSON",
+    subjectCount: overrides.subjectCount ?? 1,
+    faceBoxes: [],
+    bodyBoxes: [],
+    ...(overrides.safeCropRect ? { safeCropRect: overrides.safeCropRect } : {}),
+    confidence: overrides.confidence ?? 0.95,
+    recipeVersion: "test",
+  });
+
+  it("TEXT_HEAVY is always contain, even with a tight safeCropRect", () => {
+    expect(resolveFillStrategy({
+      hint: personHint({ subjectType: "TEXT_HEAVY", safeCropRect: { x: 0, y: 0, width: 1, height: 1 } }),
+      sourceAspect: 0.8, frameAspect: 0.8,
+    })).toBe("contain");
+  });
+  it("MIXED_PERSON_TEXT is always contain (advertising + portrait mix)", () => {
+    expect(resolveFillStrategy({
+      hint: personHint({ subjectType: "MIXED_PERSON_TEXT", safeCropRect: { x: 0, y: 0, width: 1, height: 1 } }),
+      sourceAspect: 0.8, frameAspect: 0.8,
+    })).toBe("contain");
+  });
+  it("MIXED_PERSON_PRODUCT is always contain", () => {
+    expect(resolveFillStrategy({
+      hint: personHint({ subjectType: "MIXED_PERSON_PRODUCT", safeCropRect: { x: 0, y: 0, width: 1, height: 1 } }),
+      sourceAspect: 0.8, frameAspect: 0.8,
+    })).toBe("contain");
+  });
+  it("subjectCount > 1 is always contain (multi-person / group photos)", () => {
+    expect(resolveFillStrategy({
+      hint: personHint({ subjectCount: 2, safeCropRect: { x: 0, y: 0, width: 1, height: 1 } }),
+      sourceAspect: 0.8, frameAspect: 0.8,
+    })).toBe("contain");
+  });
+  it("aspect delta 2% with safe safeCropRect allows cover", () => {
+    expect(resolveFillStrategy({
+      hint: personHint({ safeCropRect: { x: 0, y: 0, width: 1, height: 0.8 } }),
+      sourceAspect: 0.8, frameAspect: 0.816, // delta = 0.016/0.816 ≈ 0.0196 ≈ 2%
+    })).toBe("cover");
+  });
+  it("aspect delta 5% rejects cover even with safe safeCropRect", () => {
+    expect(resolveFillStrategy({
+      hint: personHint({ safeCropRect: { x: 0, y: 0, width: 1, height: 0.8 } }),
+      sourceAspect: 0.8, frameAspect: 0.84, // delta = 0.04/0.84 ≈ 0.0476 ≈ 5%
+    })).toBe("contain");
+  });
+  it("aspect delta 2% with UNSAFE safeCropRect (full-body 9:16) rejects cover", () => {
+    // sourceAspect = 9/16 (0.5625), frameAspect = 0.5738 (≈2% wider)
+    // cropHeight = 0.5625 / 0.5738 ≈ 0.9805
+    // safeRect.height = 0.96 → fits (within 0.9805)
+    // But safeRect.height = 0.99 → fails
+    expect(resolveFillStrategy({
+      hint: personHint({ safeCropRect: { x: 0.02, y: 0.01, width: 0.96, height: 0.99 } }),
+      sourceAspect: 9 / 16, frameAspect: 0.5738,
+    })).toBe("contain");
+  });
+  it("aspect delta 2% with safe 9:16 full-body safeCropRect ALLOWS cover (tight math)", () => {
+    // sourceAspect = 0.5625, frameAspect = 0.5738 (≈2% wider)
+    // cropHeight = 0.5625 / 0.5738 ≈ 0.9805
+    // safeRect.height = 0.98 → 0.98 <= 0.9805 → true
+    expect(resolveFillStrategy({
+      hint: personHint({ safeCropRect: { x: 0.02, y: 0.01, width: 0.96, height: 0.98 } }),
+      sourceAspect: 9 / 16, frameAspect: 0.5738,
+    })).toBe("cover");
   });
 });
