@@ -98,7 +98,7 @@ minimum app version enforcement
 device notification integration and provider lifecycle
 PostgreSQL-backed Task / TaskSlot canonical tables and migration from draft JSON slots
 real Catalog / Admission / Funding gate adapters
-offline SQLite Draft persistence and iOS real-device Keychain / Keystore smoke verification
+offline SQLite Draft persistence and iOS real-device Keychain / Keystore smoke verification  ✅ partial (Keychain write confirmed on weilin; restore-on-launch and sign-out wipe pending device verification)
 server-backed Requester Home read model and restart-safe in-progress need hydration
 ObservationTemplate / ObservationSet handlers
 Outcome compatibility gate handler
@@ -118,7 +118,7 @@ packages/contracts/src/experience-runtime.test.ts  已覆盖 §3.1/§6/§9/§10/
 
 ```text
 production OTP/passwordless delivery and verification provider adapter  ✅ done (SMTPLoginChallengeProvider / SMSHTTPLoginChallengeProvider / ChannelRouter; smoke script apps/api-go/scripts/smoke_smtp_login.sh runs end-to-end against an in-process SMTP sink)
-→ iOS real-device login / Keychain smoke
+→ iOS real-device login / Keychain smoke  ✅ partial (end-to-end OTP against iPhone weilin: 6-digit code 145376 verified, CreateSession stored tokens in iOS Keychain; Keychain restore + sign-out flows still need device-driven verification — see apps/api-go/scripts/smoke_realdevice_login.sh)
 → PostgreSQL integration tests for command Unit of Work rollback  ✅ done (TestTransactionRunnerRollbackOnError / TestIdempotencyAndAggregateAtomic / TestPublishTaskCanonicalAtomic / TestSupplyPostgresExpiryBlocksEligibility)
 → migrate fresh-db schema-check script under the new helper, or retire it
 → canonical Task / TaskSlot persistence migration
