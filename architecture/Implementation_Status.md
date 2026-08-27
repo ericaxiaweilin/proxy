@@ -1,7 +1,7 @@
 # Proxy Implementation Status
 
-**更新时间**：2026-08-22
-**当前阶段**：Creator App shell + Server UI runtime + iOS/Android deterministic delivery + orchestration foundation
+**更新时间**：2026-08-27
+**当前阶段**：Creator App shell + Server UI runtime + iOS/Android deterministic delivery + orchestration foundation + full PostgreSQL integration coverage
 
 ## 已实现
 
@@ -20,6 +20,9 @@ typed Go DomainEvent model aligned with shared contracts
 Demand / Identity mutation + outbox transaction boundaries (Memory and PostgreSQL adapters)
 PostgreSQL command Unit of Work: idempotency claim/completion + aggregate mutation + outbox in one transaction
 PostgreSQL outbox claim / retry / stale-processing lease recovery
+PostgreSQL adapters for every domain with a persistence model: identity, demand, fulfillment, engagement, media, citycompanion, contribution, business, socialspace, payment, notification, safety, outcome, supply, conversation, localcontext, localnet (18 adapters, no silent in-memory fallback in PG mode)
+PostgreSQL outbox dedupe / SKIP LOCKED / typed error / stale-claim recovery covered
+PostgreSQL integration tests for every PG-backed domain: 18 lifecycle / round-trip tests + 1 transaction-runner rollback + 1 idempotency atomic + 1 publish-task canonical + 1 supply-expiry (21 tests in internal/platform/postgres)
 Go worker polling loop with safe-unconfigured delivery mode
 API liveness / readiness
 canonical command endpoint boundary
@@ -80,7 +83,7 @@ Demand domain/API tests  PASS
 Demand API flow  200 / 202 / 409
 Go API health smoke  200
 Go tests  PASS
-PostgreSQL integration tests (UoW rollback / idempotency atomic / PublishTask canonical / Supply expiry)  PASS
+PostgreSQL integration tests  PASS  (21 tests: 18 domain lifecycle + 3 infrastructure)
 Android Pixel_8 native install / Metro / simulated login / session restore  PASS
 iOS 26.5 Platform Support on Xcode 26.6  READY / VERIFIED
 iPhone `weilin` development build signing and install  PASS
@@ -94,6 +97,9 @@ iPhone `weilin` launch + Metro iOS bundle load  PASS
 ```text
 real downstream event delivery providers and inbox consumer handlers
 production OTP/passwordless delivery and verification provider adapter  ✅ done (SMTPLoginChallengeProvider / SMSHTTPLoginChallengeProvider / ChannelRouter; smoke script apps/api-go/scripts/smoke_smtp_login.sh runs end-to-end against an in-process SMTP sink)
+M6.5 Outcome Intelligence PostgreSQL adapter  ✅ done (internal/platform/postgres/outcome.go + outcome_integration_test.go; M6.5 acceptance: DRAFT vs REJECTED comparison, observation append, finalize gate, post-finalize record REJECTED, second set ACCEPTED with deltaId+learningId, third set REJECTED same target/template/venue, CONFIRMED learning persists)
+M7 Notification PostgreSQL adapter  ✅ done (internal/platform/postgres/notification.go + notification_integration_test.go; device register + re-register dedupe, inbox DESC sort, unread filter, cross-tenant isolation, NULL deep-link round-trip)
+M8 Safety PostgreSQL adapter  ✅ done (internal/platform/postgres/safety.go + safety_integration_test.go; incident+block+case, JIT access, expired JIT REJECTED, consent upsert, legal hold active/released, cross-tenant isolation)
 minimum app version enforcement
 device notification integration and provider lifecycle
 PostgreSQL-backed Task / TaskSlot canonical tables and migration from draft JSON slots
@@ -127,6 +133,7 @@ production OTP/passwordless delivery and verification provider adapter  ✅ done
 → M3 Agent Passport / Availability  ✅ backend done; mobile surface wiring + Operator-issuable verification flow remain
 → M4 Matching / Offer / Order
 → M5 Experience Runtime：Experience Orchestrator / Surface Compiler / Delta Patcher / Frontend Runtime Renderer (contracts + first isolated delivery done; Orchestrator/Compiler/Patcher/Renderer pipeline still open)
+→ PostgreSQL integration tests for every PG-backed domain  ✅ done (18 lifecycle + 3 infrastructure = 21 PG integration tests, all PASS; covers identity / outbox / demand / fulfillment / engagement / media / citycompanion / contribution / business / socialspace / payment / notification / safety / outcome / supply / conversation / localcontext / localnet; voucher / experience / marketplace / modelstack / activity remain in-memory by design)
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。
