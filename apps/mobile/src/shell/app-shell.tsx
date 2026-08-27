@@ -13,6 +13,11 @@ import type {
 } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { ContextSwitcherSheet } from "../components/context-switcher";
+import {
+  DEFAULT_LOCATION,
+  LocationPickerSheet,
+  type Location
+} from "../components/location-picker-sheet";
 import { type ConversationClient } from "../conversation-client";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
@@ -125,6 +130,11 @@ export function AppShell({
   const [homeAssistant, setHomeAssistant] = useState<{ text: string; mode?: HomeIntentMode; attachment?: HomeAttachment }>();
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [sceneComposerTool, setSceneComposerTool] = useState<SceneToolId | undefined>(undefined);
+  // R15.13 P5：首页/动态顶部的本地范围（仅 city + area，不做 GPS 精确定位）。
+  // 之前 LocationContext 是个纯静态的 “河内 · 还剑湖附近 + 切换⌄” 文本，
+  // “切换⌄” 点了什么都不会发生 — 现在它真的跳出一个 picker sheet。
+  const [currentLocation, setCurrentLocation] = useState<Location>(DEFAULT_LOCATION);
+  const [locationSheetOpen, setLocationSheetOpen] = useState(false);
 
   // 规范 §4/§13：Android 硬件返回 = 退整个模块，不逐页退（模块内层级由
   // useModuleBackHandler 注册栈先消费）。顺序即最上层优先：后挂载的 Tab 状态先判。
@@ -253,7 +263,12 @@ export function AppShell({
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
         {scrollChromeVisible ? <Header compact={compactWidth} /> : null}
         {/* 首页的本地范围说明属于 root Chrome；“我的”根页由 Me Surface 自己渲染，避免泄漏到其详情页。 */}
-        {scrollChromeVisible && (tab === "HOME" || tab === "MESSAGES") ? <LocationContext /> : null}
+        {scrollChromeVisible && (tab === "HOME" || tab === "MESSAGES") ? (
+          <LocationContext
+            location={currentLocation}
+            onPress={() => setLocationSheetOpen(true)}
+          />
+        ) : null}
         <View
           onTouchEnd={() => {
             const startX = touchStartX.current;
@@ -435,6 +450,12 @@ export function AppShell({
             { id: "BUSINESS", icon: "storeLines", title: "商家", desc: "经营店铺、找服务、发布订单与活动" }
           ]}
         />
+        <LocationPickerSheet
+          current={currentLocation}
+          onClose={() => setLocationSheetOpen(false)}
+          onSelect={setCurrentLocation}
+          open={locationSheetOpen}
+        />
       </View>
       </SafeAreaView>
     </>
@@ -488,20 +509,31 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
 }
 
 // 基线 .locationcontext：⌖ 图标块 + 城市 / 本地范围说明 + 切换⌄。
-function LocationContext(): React.JSX.Element {
+function LocationContext({
+  location,
+  onPress
+}: {
+  location: Location;
+  onPress: () => void;
+}): React.JSX.Element {
   return (
-    <View style={styles.locationRow}>
+    <Pressable
+      accessibilityLabel="切换本地范围"
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.locationRow, pressed && styles.locationRowPressed]}
+    >
       <View style={styles.locationPin}>
         <ProxyIcon color={color.ink} name="route" size={17} />
       </View>
       <View style={styles.locationCopy}>
-        <Text style={styles.locationCity}>河内 · 还剑湖附近</Text>
+        <Text style={styles.locationCity}>{location.city} · {location.area}</Text>
         <Text numberOfLines={1} style={styles.locationSub}>
           你正在看的本地范围 · 仅城市 / 区域
         </Text>
       </View>
       <Text style={styles.locationSwitch}>切换⌄</Text>
-    </View>
+    </Pressable>
   );
 }
 
@@ -683,6 +715,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     paddingTop: 3
   },
+  // R15.13 P5：LocationContext 变成真可按 — “切换⌄” 现在真的会跳出 picker。
+  // pressed 状态给个轻微背景色，用户能看到交互发生。
+  locationRowPressed: { backgroundColor: "#F1EAF7" },
   locationPin: {
     alignItems: "center",
     backgroundColor: "#F1EAF7",

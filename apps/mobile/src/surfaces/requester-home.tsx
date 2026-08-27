@@ -141,11 +141,13 @@ export function RequesterHome({
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
-      {/* 基线 .r157HomeTop：今天想做什么？ + 河内·还剑湖附近 + 用户⌄ */}
+      {/* R15.13 P5：本地范围（河内 · 还剑湖附近 等）现在统一由 app-shell
+          顶部 chrome (LocationContext) 单独呈现，且“切换⌄”真的能点。重复
+          一份 location 文本会造成“地址切换不了”错觉且两份会不同步。
+          Home Top 收紧为只负责问候。 */}
       <View style={styles.homeTop}>
         <View style={styles.homeTopCopy}>
           <Text style={styles.homeTopTitle}>今天想做什么？</Text>
-          <Text style={styles.homeTopLoc}>河内 · 还剑湖附近</Text>
         </View>
       </View>
 
@@ -256,6 +258,8 @@ const styles = StyleSheet.create({
   },
   homeTopCopy: { flex: 1 },
   homeTopTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 34 },
+  // R15.13 P5：homeTopLoc 样式保留但未使用 — LocationContext 是 single
+  // source of truth。见上文 comment。
   homeTopLoc: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
 
   // 基线 .sectionhead：margin-top 10；b 12 / span 9。
