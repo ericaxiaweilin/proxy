@@ -93,7 +93,7 @@ iPhone `weilin` launch + Metro iOS bundle load  PASS
 
 ```text
 real downstream event delivery providers and inbox consumer handlers
-production OTP/passwordless delivery and verification provider adapter
+production OTP/passwordless delivery and verification provider adapter  ✅ done (SMTPLoginChallengeProvider / SMSHTTPLoginChallengeProvider / ChannelRouter; smoke script apps/api-go/scripts/smoke_smtp_login.sh runs end-to-end against an in-process SMTP sink)
 minimum app version enforcement
 device notification integration and provider lifecycle
 PostgreSQL-backed Task / TaskSlot canonical tables and migration from draft JSON slots
@@ -117,7 +117,7 @@ packages/contracts/src/experience-runtime.test.ts  已覆盖 §3.1/§6/§9/§10/
 ## 下一步
 
 ```text
-production OTP/passwordless delivery and verification provider adapter
+production OTP/passwordless delivery and verification provider adapter  ✅ done (SMTPLoginChallengeProvider / SMSHTTPLoginChallengeProvider / ChannelRouter; smoke script apps/api-go/scripts/smoke_smtp_login.sh runs end-to-end against an in-process SMTP sink)
 → iOS real-device login / Keychain smoke
 → PostgreSQL integration tests for command Unit of Work rollback  ✅ done (TestTransactionRunnerRollbackOnError / TestIdempotencyAndAggregateAtomic / TestPublishTaskCanonicalAtomic / TestSupplyPostgresExpiryBlocksEligibility)
 → migrate fresh-db schema-check script under the new helper, or retire it
