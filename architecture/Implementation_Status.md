@@ -62,6 +62,7 @@ API fail-closed authentication when the authenticator is unavailable
 strict 1 MiB JSON command boundary with unknown/trailing field rejection
 Preview authorization separated from irreversible publish/funding confirmation
 Go API M1/M2 parity baseline
+PostgreSQL integration test helper — `internal/platform/postgres/testdb_test.go` (auto-spun one-shot cluster, 27 migrations applied, shared pool lifetime owned by `TestMain`)
 ```
 
 ## 已验证
@@ -79,6 +80,7 @@ Demand domain/API tests  PASS
 Demand API flow  200 / 202 / 409
 Go API health smoke  200
 Go tests  PASS
+PostgreSQL integration tests (UoW rollback / idempotency atomic / PublishTask canonical / Supply expiry)  PASS
 Android Pixel_8 native install / Metro / simulated login / session restore  PASS
 iOS 26.5 Platform Support on Xcode 26.6  READY / VERIFIED
 iPhone `weilin` development build signing and install  PASS
@@ -117,7 +119,8 @@ packages/contracts/src/experience-runtime.test.ts  已覆盖 §3.1/§6/§9/§10/
 ```text
 production OTP/passwordless delivery and verification provider adapter
 → iOS real-device login / Keychain smoke
-→ PostgreSQL integration tests for command Unit of Work rollback
+→ PostgreSQL integration tests for command Unit of Work rollback  ✅ done (TestTransactionRunnerRollbackOnError / TestIdempotencyAndAggregateAtomic / TestPublishTaskCanonicalAtomic / TestSupplyPostgresExpiryBlocksEligibility)
+→ migrate fresh-db schema-check script under the new helper, or retire it
 → canonical Task / TaskSlot persistence migration
 → M3 Agent Passport / Availability
 → M4 Matching / Offer / Order
