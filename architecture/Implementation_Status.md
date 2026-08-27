@@ -103,7 +103,9 @@ server-backed Requester Home read model and restart-safe in-progress need hydrat
 ObservationTemplate / ObservationSet handlers
 Outcome compatibility gate handler
 OpenAPI document generation
-```
+M3 — Agent Passport / Availability  ✅ done (internal/supply in-memory + PostgreSQL adapters, supply_integration_test.go covers expired KYC / availability conflict / location precision redaction / permission denied; 9 unit tests + 1 PG integration test PASS; not yet wired to a mobile surface beyond Me v3+v5 ability CRUD)
+M5 — Experience Runtime v1 first isolated delivery  ✅ done (packages/contracts/src/experience-runtime.ts + 1 case study test; Market Intelligence Console v9 first delivery on top; full Orchestrator / Surface Compiler / Delta Patcher / Frontend Renderer remains open)
+fresh-db schema-check shell script  ✅ retired (apps/api-go/scripts/fresh_db_test.sh removed; superseded by internal/platform/postgres/testdb_test.go which auto-spins a one-shot PG cluster, applies all 28 migrations in lexicographic order, and tears down on process exit)
 
 ## 新增：Context-Driven Experience Runtime v1（2026-08-26）
 
@@ -118,13 +120,13 @@ packages/contracts/src/experience-runtime.test.ts  已覆盖 §3.1/§6/§9/§10/
 
 ```text
 production OTP/passwordless delivery and verification provider adapter  ✅ done (SMTPLoginChallengeProvider / SMSHTTPLoginChallengeProvider / ChannelRouter; smoke script apps/api-go/scripts/smoke_smtp_login.sh runs end-to-end against an in-process SMTP sink)
-→ iOS real-device login / Keychain smoke  ✅ partial (end-to-end OTP against iPhone weilin: 6-digit code 145376 verified, CreateSession stored tokens in iOS Keychain; Keychain restore + sign-out flows still need device-driven verification — see apps/api-go/scripts/smoke_realdevice_login.sh)
+→ iOS real-device login / Keychain smoke  ✅ partial (end-to-end OTP against iPhone weilin: 6-digit code 145376 verified, CreateSession stored tokens in iOS Keychain; Keychain restore + sign-out flows still need device-driven verification — see apps/api-go/scripts/smoke_realdevice_login.sh; new apps/api-go/scripts/smoke_realdevice_keychain.sh drives the kill+relaunch half automatically and reads [proxy.smoke] keychain= markers from idevicesyslog)
 → PostgreSQL integration tests for command Unit of Work rollback  ✅ done (TestTransactionRunnerRollbackOnError / TestIdempotencyAndAggregateAtomic / TestPublishTaskCanonicalAtomic / TestSupplyPostgresExpiryBlocksEligibility)
-→ migrate fresh-db schema-check script under the new helper, or retire it
+→ migrate fresh-db schema-check script under the new helper, or retire it  ✅ retired
 → canonical Task / TaskSlot persistence migration
-→ M3 Agent Passport / Availability
+→ M3 Agent Passport / Availability  ✅ backend done; mobile surface wiring + Operator-issuable verification flow remain
 → M4 Matching / Offer / Order
-→ M5 Experience Runtime：Experience Orchestrator / Surface Compiler / Delta Patcher / Frontend Runtime Renderer
+→ M5 Experience Runtime：Experience Orchestrator / Surface Compiler / Delta Patcher / Frontend Runtime Renderer (contracts + first isolated delivery done; Orchestrator/Compiler/Patcher/Renderer pipeline still open)
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。

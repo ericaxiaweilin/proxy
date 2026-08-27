@@ -70,6 +70,7 @@ response，只存 SHA-256 hash 5 分钟。详细：`architecture/Implementation_
 
 - `apps/mobile/scripts/dev-ios-device.sh` — build + install + launch 到物理 iPhone（Team `C4673FY8U7`）
 - `apps/api-go/scripts/smoke_realdevice_login.sh` — 端到端真机登录 smoke：本地 SMTP sink + 你的 Mac + iPhone via usbmuxd USB 隧道；OTP 发到 `~/.proxy-smoke/last-message.txt`
+- `apps/api-go/scripts/smoke_realdevice_keychain.sh` — Keychain 持久化 smoke（E variant）：等 D variant 登录后从 `idevicesyslog` 抓两次 `[proxy.smoke] keychain=present sessionId=...` 标记（kill+relaunch 之间），断言 `sessionId` 不变以证明 Keychain restore 生效
 - `apps/api-go/scripts/smoke_smtp_login.sh` — 桌面端 curl 验证 provider 全栈
 
 详见 `apps/mobile/scripts/dev-ios-device.sh` 顶部注释。
