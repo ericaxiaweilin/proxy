@@ -356,6 +356,8 @@ export function AppShell({
               initialTab={marketEntry.tab}
               onOpenExperience={setOpenExperience}
               onOpenActivity={() => undefined}
+              onChromeVisibilityChange={setScrollChromeVisible}
+              bottomNavVisible={isNavVisible}
             />
           )
         ) : tab === "FEED" ? (
