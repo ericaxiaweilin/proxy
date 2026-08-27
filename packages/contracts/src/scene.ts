@@ -241,6 +241,51 @@ export const ListMyInvitationsPayloadSchema = z.object({ limit: z.number().int()
 export type ListMyInvitationsPayload = z.infer<typeof ListMyInvitationsPayloadSchema>;
 
 // ── Command Types ──────────────────────────────────────────────
+// ── R15.13 P2: Memory domain (post-outcome audit trail) ──────────
+//
+// A Memory is what happened after the Scene was actually lived. It is
+// the per-scene snapshot that the platform keeps for reputation / feed
+// aesthetic asset re-use / price corridor back-pressure. One Memory
+// per Scene (a re-record is an upsert, not an edit).
+
+export const MemoryRoleSchema = z.enum(["HOST", "GUEST"]);
+export type MemoryRole = z.infer<typeof MemoryRoleSchema>;
+
+export const MemorySchema = z.object({
+  memoryId: z.string().min(1),
+  sceneId: z.string().min(1),
+  sceneType: z.string().min(1).optional(),
+  actualSpend: z.number().int().nonnegative(),
+  plannedBudget: z.number().int().nonnegative().optional(),
+  currency: z.string().length(3).optional(),
+  durationMin: z.number().int().nonnegative().optional(),
+  rating: z.number().min(0).max(1).optional(),
+  notes: z.string().optional(),
+  createdAt: z.string().datetime(),
+  // When the memory is enumerated via ListMyMemories, this role
+  // reflects how the requester participated. When fetched via
+  // GetMemory, the mobile UI infers role from the session's
+  // userAccountId vs the memory's hostId/guestId.
+  role: MemoryRoleSchema.optional(),
+});
+export type Memory = z.infer<typeof MemorySchema>;
+
+export const RecordOutcomePayloadSchema = z.object({
+  guestId: z.string().min(1),
+  actualSpend: z.number().int().nonnegative(),
+  durationMin: z.number().int().nonnegative().optional(),
+  notes: z.string().max(2000).optional(),
+  aestheticAssets: z.array(z.record(z.unknown())).max(20).optional(),
+});
+export type RecordOutcomePayload = z.infer<typeof RecordOutcomePayloadSchema>;
+
+export const ListMyMemoriesPayloadSchema = z.object({ limit: z.number().int().positive().max(50).optional() });
+export type ListMyMemoriesPayload = z.infer<typeof ListMyMemoriesPayloadSchema>;
+
+export const GetMemoryPayloadSchema = z.object({}).strict();
+export type GetMemoryPayload = z.infer<typeof GetMemoryPayloadSchema>;
+
+// ── Command Types ──────────────────────────────────────
 export const SceneCommandTypeSchema = z.enum([
   "CreateScene",
   "UpdateScene",
@@ -251,5 +296,10 @@ export const SceneCommandTypeSchema = z.enum([
   "RecordOutcome",
   "ListMyScenes",
   "ListMyInvitations",
+  // R15.13 P2: Memory commands. The mobile client must include these
+  // in the SceneCommandType union so the envelope builder accepts
+  // them and the dispatch path is type-checked end-to-end.
+  "ListMyMemories",
+  "GetMemory",
 ]);
 export type SceneCommandType = z.infer<typeof SceneCommandTypeSchema>;

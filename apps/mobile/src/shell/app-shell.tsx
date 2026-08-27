@@ -416,6 +416,7 @@ export function AppShell({
               onSignOut={onSignOut}
               onChromeVisibilityChange={setScrollChromeVisible}
               bottomNavVisible={isNavVisible}
+              {...(scene ? { scene } : {})}
             />
           )}
         </View>

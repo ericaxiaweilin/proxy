@@ -1,7 +1,35 @@
-import type { CommandResult } from "@proxy/contracts";
+import type { CommandResult, Memory, RecordOutcomePayload } from "@proxy/contracts";
 import type { AuthenticatedCommandTransport } from "./demand-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+
+// ── R15.13 P2: Memory envelope shape returned by api-go ────────────
+// The server wraps each list/get response in a JSON object inside
+// command.Result.OperationRef. Pin the wire shape so the parser is
+// independent of command type and the OperationRef is the only
+// source of truth for memory rows.
+
+interface ListMyMemoriesRef {
+  actorId: string;
+  limit: number;
+  memories: Memory[];
+}
+
+interface GetMemoryRef {
+  memoryId: string;
+  sceneId: string;
+  hostId: string;
+  guestId: string;
+  sceneType?: string;
+  fundingMode: string;
+  plannedBudget: number;
+  actualSpend: number;
+  currency: string;
+  durationMin: number;
+  rating: number;
+  notes?: string;
+  createdAt: string;
+}
 
 export class SceneClient {
   private seq=0;
@@ -67,5 +95,90 @@ export class SceneClient {
   async respondInvitation(invitationId:string, decision:"ACCEPTED"|"DECLINED"|"ASK"){
     const s=await this.requireSession();
     return this.send(s,"RespondInvitation",{type:"Invitation",id:invitationId},{decision});
+  }
+
+  // ── R15.13 P2: Memory domain (post-outcome audit trail) ──────────
+
+  /**
+   * List the memories in which the current session's user is either
+   * the host or the guest. limit defaults to 10, max 50 (the server
+   * also clamps to 50 so a client override is silently respected).
+   */
+  async listMyMemories(limit?: number): Promise<Memory[]> {
+    const s = await this.requireSession();
+    const result = await this.send(
+      s,
+      "ListMyMemories",
+      { type: "MyMemories", id: "unused" },
+      limit ? { limit } : {},
+    );
+    return this.parseMemoryList(result);
+  }
+
+  /**
+   * Fetch a single memory by scene id. The host or guest who
+   * participated in the scene is allowed to read; anyone else gets
+   * MEMORY_NOT_VISIBLE from the server, which surfaces here as a
+   * thrown result with outcome=REJECTED.
+   */
+  async getMemory(sceneId: string): Promise<Memory> {
+    const s = await this.requireSession();
+    const result = await this.send(
+      s,
+      "GetMemory",
+      { type: "Memory", id: sceneId },
+      {},
+    );
+    return this.parseMemorySingle(result, s.userAccountId);
+  }
+
+  /**
+   * Record the outcome of a Scene after both sides have actually
+   * shown up. Only the host may record (the server enforces this).
+   * On success, returns the persisted Memory (with the derived
+   * rating blended from aesthetic score + budget adherence).
+   */
+  async recordOutcome(sceneId: string, payload: RecordOutcomePayload): Promise<Memory> {
+    const s = await this.requireSession();
+    const result = await this.send(
+      s,
+      "RecordOutcome",
+      { type: "Outcome", id: sceneId },
+      { ...payload },
+    );
+    return this.parseMemorySingle(result, s.userAccountId);
+  }
+
+  // ── internal: OperationRef parsers ────────────────────────────────
+
+  private parseMemoryList(result: CommandResult): Memory[] {
+    if (!result.operationRef) return [];
+    let ref: ListMyMemoriesRef;
+    try { ref = JSON.parse(result.operationRef) as ListMyMemoriesRef; }
+    catch { throw new Error("malformed memory list response"); }
+    return Array.isArray(ref.memories) ? ref.memories : [];
+  }
+
+  private parseMemorySingle(result: CommandResult, viewerUserId: string): Memory {
+    if (!result.operationRef) throw new Error("malformed memory response");
+    let ref: GetMemoryRef;
+    try { ref = JSON.parse(result.operationRef) as GetMemoryRef; }
+    catch { throw new Error("malformed memory response"); }
+    const role: "HOST" | "GUEST" =
+      ref.hostId === viewerUserId ? "HOST" :
+      ref.guestId === viewerUserId ? "GUEST" : "GUEST";
+    return {
+      memoryId: ref.memoryId,
+      sceneId: ref.sceneId,
+      sceneType: ref.sceneType,
+      actualSpend: ref.actualSpend,
+      plannedBudget: ref.plannedBudget,
+      currency: ref.currency,
+      durationMin: ref.durationMin,
+      rating: ref.rating,
+      notes: ref.notes,
+      createdAt: ref.createdAt,
+      role,
+    };
   }
 }

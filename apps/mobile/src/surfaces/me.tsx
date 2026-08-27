@@ -11,7 +11,7 @@ import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, Scrol
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import * as ImagePicker from "expo-image-picker";
-import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, RegisteredExperienceRoute } from "@proxy/contracts";
+import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { MerchantMeR21 } from "./merchant-me-r21";
 import { CreatorInvitationCard } from "./creator-application";
@@ -21,6 +21,7 @@ import { type LocalNetClient } from "../localnet-client";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
+import type { SceneClient } from "../scene-client";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -1221,6 +1222,7 @@ export function MeSurface({
   onSignOut,
   onChromeVisibilityChange,
   bottomNavVisible,
+  scene,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -1234,10 +1236,29 @@ export function MeSurface({
   onSignOut: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
+  // R15.13 P2: when present, the MyScenes subpage appends a "Memories"
+  // section that pulls real post-outcome audit data from the api-go
+  // service via ListMyMemories. If absent, the subpage falls back to
+  // the static SUB_PAGE_CONTENT prototype as before.
+  scene?: SceneClient;
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
   // 规范 §4/§13：Android 硬件返回先收起子页；其余覆盖层是 RN Modal（onRequestClose 自理）。
   useModuleBackHandler(subPage ? () => { setSubPage(undefined); return true; } : undefined);
+  // R15.13 P2: when the myscenes subpage opens and a scene client is
+  // available, fetch the user's memories so the page can show real
+  // post-outcome audit data alongside the static prototype cards.
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memoriesLoadState, setMemoriesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  useEffect(() => {
+    if (subPage?.route !== "myscenes" || !scene) return;
+    let cancelled = false;
+    setMemoriesLoadState("loading");
+    scene.listMyMemories()
+      .then((rows) => { if (!cancelled) { setMemories(rows); setMemoriesLoadState("loaded"); } })
+      .catch(() => { if (!cancelled) { setMemories([]); setMemoriesLoadState("error"); } });
+    return () => { cancelled = true; };
+  }, [subPage?.route, scene]);
   const [availability, setAvailability] = useState<AvailabilityState>("AVAILABLE");
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [enterpriseOpsStage, setEnterpriseOpsStage] = useState<EnterpriseOpsStage>("READY");
@@ -1382,6 +1403,78 @@ export function MeSurface({
     if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    // R15.13 P2: myscenes gets a real-data section appended beneath
+    // the static prototype cards. The prototype shows the high-level
+    // idea (in-progress scenes, received invitations, history); the
+    // real section lists the post-outcome memories fetched from the
+    // api-go service via SceneClient.listMyMemories. If scene is not
+    // wired in (e.g. tests), the section renders in its "loading"
+    // state and never auto-recovers — the static prototype remains
+    // the source of truth so the page is still readable.
+    if (subPage.route === "myscenes") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.detailTitle}>{subPage.title}</Text>
+            <Text style={styles.detailSub}>{subPage.desc}</Text>
+            {content?.sections?.map((section, sIdx) => (
+              <View key={sIdx} style={styles.fallbackSection}>
+                <View style={styles.detailSectionHead}>
+                  <Text style={styles.detailSectionTitle}>{section.title}</Text>
+                </View>
+                {section.rows.map((row, rIdx) => (
+                  <View key={rIdx} style={styles.prototypeCard}>
+                    <Text style={styles.prototypeCardTitle}>{row.label}</Text>
+                    {row.value ? <Text style={styles.prototypeCardDesc}>{row.value}</Text> : null}
+                  </View>
+                ))}
+              </View>
+            ))}
+            <View style={styles.fallbackSection}>
+              <View style={styles.detailSectionHead}>
+                <Text style={styles.detailSectionTitle}>场景记忆 (R15.13 P2 · 真实数据)</Text>
+              </View>
+              {memoriesLoadState === "loading" ? (
+                <View style={styles.prototypeCard}>
+                  <Text style={styles.prototypeCardTitle}>加载中…</Text>
+                  <Text style={styles.prototypeCardDesc}>正在从 Scene 服务拉取你的历史记忆</Text>
+                </View>
+              ) : memoriesLoadState === "error" ? (
+                <View style={styles.prototypeCard}>
+                  <Text style={styles.prototypeCardTitle}>记忆不可用</Text>
+                  <Text style={styles.prototypeCardDesc}>未登录或未写入任何 Scene Outcome</Text>
+                </View>
+              ) : memories.length === 0 ? (
+                <View style={styles.prototypeCard}>
+                  <Text style={styles.prototypeCardTitle}>还没有记忆</Text>
+                  <Text style={styles.prototypeCardDesc}>完成一次场景后会在此生成一条 Memory（host + guest 双视角可见）</Text>
+                </View>
+              ) : (
+                memories.map((m) => (
+                  <View key={m.memoryId} style={styles.prototypeCard}>
+                    <Text style={styles.prototypeCardTitle}>
+                      {m.sceneType ?? "Scene"} · {m.role === "HOST" ? "我是主人" : "我是客人"}
+                    </Text>
+                    <Text style={styles.prototypeCardDesc}>
+                      实际花费 {(m.actualSpend / 1000).toFixed(0)}k {m.currency ?? ""}
+                      {m.durationMin ? ` ·  ${m.durationMin} 分钟` : ""}
+                      {typeof m.rating === "number" ? ` · 评分 ${(m.rating * 100).toFixed(0)}` : ""}
+                    </Text>
+                    {m.notes ? <Text style={styles.prototypeCardDesc}>{m.notes}</Text> : null}
+                  </View>
+                ))
+              )}
+            </View>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.lightCta}>
+              <Text style={styles.lightCtaText}>返回我的</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      );
+    }
 
     // 原型 screens.appbehavior：不是设置表格，而是一组应用可靠性检查卡片。
     if (subPage.route === "appbehavior") {

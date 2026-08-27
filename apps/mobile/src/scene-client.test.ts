@@ -159,4 +159,156 @@ describe("scene client", () => {
     expect(bodies[0]?.target).toEqual({ type: "Invitation", id: "inv_001" });
     expect((bodies[0]?.payload as { decision: string }).decision).toBe("ACCEPTED");
   });
+
+  // ── R15.13 P2: Memory domain tripwires ──────────────────────
+
+  it("listMyMemories sends ListMyMemories and parses the OperationRef list", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date());
+    await writeSession(store);
+    const bodies: Record<string, unknown>[] = [];
+    const transport: AuthenticatedCommandTransport = {
+      request: async (_path, init) => {
+        bodies.push(init.body as Record<string, unknown>);
+        return response(200, {
+          commandId: "1", outcome: "ACCEPTED", aggregate: { type: "MyMemories", id: "user_001", version: 1, state: "LISTED" },
+          eventRefs: [],
+          operationRef: JSON.stringify({
+            actorId: "user_001",
+            limit: 10,
+            memories: [
+              { memoryId: "mem_a", sceneId: "s1", sceneType: "ROOFTOP_PHOTO", actualSpend: 50000, currency: "VND", durationMin: 90, rating: 0.78, createdAt: "2026-08-27T10:00:00.000Z", role: "HOST" },
+              { memoryId: "mem_b", sceneId: "s2", sceneType: "BRUNCH", actualSpend: 200000, currency: "VND", durationMin: 120, rating: 0.91, createdAt: "2026-08-26T10:00:00.000Z", role: "GUEST" },
+            ],
+          }),
+          correlationId: "c1",
+        });
+      },
+    };
+    const client = new SceneClient({ authClient: transport, secureSessionStore: store });
+    const memories = await client.listMyMemories();
+    expect(memories).toHaveLength(2);
+    expect(memories[0]?.role).toBe("HOST");
+    expect(memories[1]?.role).toBe("GUEST");
+    expect(bodies[0]?.commandType).toBe("ListMyMemories");
+    expect(bodies[0]?.target).toEqual({ type: "MyMemories", id: "unused" });
+  });
+
+  it("listMyMemories with limit overrides the payload limit field", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date());
+    await writeSession(store);
+    let captured: Record<string, unknown> | undefined;
+    const transport: AuthenticatedCommandTransport = {
+      request: async (_path, init) => {
+        captured = init.body as Record<string, unknown>;
+        return response(200, { commandId: "1", outcome: "ACCEPTED", aggregate: { type: "MyMemories", id: "x", version: 1, state: "LISTED" }, eventRefs: [], operationRef: "{\"actorId\":\"x\",\"limit\":3,\"memories\":[]}", correlationId: "c1" });
+      },
+    };
+    const client = new SceneClient({ authClient: transport, secureSessionStore: store });
+    await client.listMyMemories(3);
+    expect((captured?.payload as { limit: number }).limit).toBe(3);
+  });
+
+  it("getMemory parses OperationRef and infers HOST role for the host", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date());
+    await writeSession(store);
+    const transport: AuthenticatedCommandTransport = {
+      request: async (_path, init) => {
+        expect((init.body as Record<string, unknown>).commandType).toBe("GetMemory");
+        return response(200, {
+          commandId: "1", outcome: "ACCEPTED", aggregate: { type: "Memory", id: "scene_001", version: 1, state: "READ" },
+          eventRefs: [],
+          operationRef: JSON.stringify({
+            memoryId: "mem_x", sceneId: "scene_001", hostId: "user_001", guestId: "guest_x",
+            sceneType: "BRUNCH", fundingMode: "SPLIT", plannedBudget: 60000, actualSpend: 55000,
+            currency: "VND", durationMin: 90, rating: 0.81, notes: "good", createdAt: "2026-08-27T10:00:00.000Z",
+          }),
+          correlationId: "c1",
+        });
+      },
+    };
+    const client = new SceneClient({ authClient: transport, secureSessionStore: store });
+    const mem = await client.getMemory("scene_001");
+    expect(mem.role).toBe("HOST");
+    expect(mem.actualSpend).toBe(55000);
+    expect(mem.plannedBudget).toBe(60000);
+  });
+
+  it("getMemory infers GUEST role when the viewer is the guest", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date());
+    // Use a different viewer.
+    const session: StoredSession = {
+      userAccountId: "guest_viewer",
+      principal: { type: "INDIVIDUAL", id: "guest_viewer" },
+      auth: {
+        sessionId: "session_001", userAccountId: "guest_viewer",
+        principal: { type: "INDIVIDUAL", id: "guest_viewer" },
+        accessToken: "a", refreshToken: "r",
+        accessExpiresAt: "2026-08-14T00:15:00.000Z", refreshExpiresAt: "2026-09-14T00:00:00.000Z",
+        rotation: 1,
+      },
+    };
+    await store.write(session);
+    const transport: AuthenticatedCommandTransport = {
+      request: async () => response(200, {
+        commandId: "1", outcome: "ACCEPTED", aggregate: { type: "Memory", id: "scene_001", version: 1, state: "READ" },
+        eventRefs: [],
+        operationRef: JSON.stringify({
+          memoryId: "mem_x", sceneId: "scene_001", hostId: "host_user", guestId: "guest_viewer",
+          sceneType: "BRUNCH", fundingMode: "SPLIT", plannedBudget: 60000, actualSpend: 55000,
+          currency: "VND", durationMin: 90, rating: 0.81, createdAt: "2026-08-27T10:00:00.000Z",
+        }),
+        correlationId: "c1",
+      }),
+    };
+    const client = new SceneClient({ authClient: transport, secureSessionStore: store });
+    const mem = await client.getMemory("scene_001");
+    expect(mem.role).toBe("GUEST");
+  });
+
+  it("recordOutcome sends RecordOutcome with guestId/actualSpend/duration/notes", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date());
+    await writeSession(store);
+    let captured: Record<string, unknown> | undefined;
+    const transport: AuthenticatedCommandTransport = {
+      request: async (_path, init) => {
+        captured = init.body as Record<string, unknown>;
+        return response(200, {
+          commandId: "1", outcome: "ACCEPTED", aggregate: { type: "Memory", id: "scene_001", version: 1, state: "RECORDED" },
+          eventRefs: [],
+          operationRef: JSON.stringify({
+            memoryId: "mem_z", sceneId: "scene_001", hostId: "user_001", guestId: "guest_u",
+            sceneType: "PHOTO", fundingMode: "HOST", plannedBudget: 0, actualSpend: 40000,
+            currency: "VND", durationMin: 60, rating: 0.5, createdAt: "2026-08-27T10:00:00.000Z",
+          }),
+          correlationId: "c1",
+        });
+      },
+    };
+    const client = new SceneClient({ authClient: transport, secureSessionStore: store });
+    const mem = await client.recordOutcome("scene_001", {
+      guestId: "guest_u", actualSpend: 40000, durationMin: 60, notes: "loved it",
+    });
+    expect(captured?.commandType).toBe("RecordOutcome");
+    expect(captured?.target).toEqual({ type: "Outcome", id: "scene_001" });
+    const payload = captured?.payload as { guestId: string; actualSpend: number; durationMin: number; notes: string };
+    expect(payload.guestId).toBe("guest_u");
+    expect(payload.actualSpend).toBe(40000);
+    expect(payload.durationMin).toBe(60);
+    expect(payload.notes).toBe("loved it");
+    expect(mem.role).toBe("HOST");
+  });
+
+  it("listMyMemories surfaces server rejection with the result attached", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date());
+    await writeSession(store);
+    const transport: AuthenticatedCommandTransport = {
+      request: async () => response(200, {
+        commandId: "1", outcome: "REJECTED", eventRefs: [],
+        error: { errorCode: "INVALID_ACCESS_TOKEN", category: "AUTHENTICATION", retryability: "AFTER_REAUTH", messageKey: "command.invalid_access_token", safeDetails: {}, correlationId: "c1" },
+        correlationId: "c1",
+      }),
+    };
+    const client = new SceneClient({ authClient: transport, secureSessionStore: store });
+    await expect(client.listMyMemories()).rejects.toThrow(/invalid_access_token/);
+  });
 });

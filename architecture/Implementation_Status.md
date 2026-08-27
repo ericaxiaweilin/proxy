@@ -207,6 +207,37 @@ apps/api-go/internal/openapicmds/openapicmds.go  DomainDir 补 scene  → openap
 apps/api-go/openapi.commands.generated.yaml  138 → 148 entries（重新生成）
 apps/api-go/internal/api/server_test.go  requiresAuthentication tripwire 扩展覆盖 ListMyMemories + GetMemory
 ```
+
+## 新增：R15.13 P2 Memory 域 mobile 端接通（2026-08-27）
+
+```text
+packages/contracts/src/scene.ts  +Memory / RecordOutcomePayload / ListMyMemoriesPayload / GetMemoryPayload / MemoryRole schema；SceneCommandType 枚举加 ListMyMemories + GetMemory
+packages/contracts/src/scene.test.ts  +4 cases: SceneCommandType stability（封闭 11 个命令集合）；MemorySchema happy + 负 actualSpend 拒；RecordOutcomePayload 需 guestId+actualSpend≥0
+apps/mobile/src/scene-client.ts  +3 方法 listMyMemories / getMemory / recordOutcome + ListMyMemoriesRef / GetMemoryRef wire-shape 拆解 + role 推断（host 优先）
+apps/mobile/src/scene-client.test.ts  +6 cases: listMyMemories envelope + OperationRef 拆 list + limit override；getMemory 推断 HOST role；getMemory 推断 GUEST role（不同 viewer）；recordOutcome envelope 字段全 + 返 role；listMyMemories 拒接被 reject 上拋
+apps/mobile/src/surfaces/me.tsx  scene?: SceneClient 接收 prop + memories/memoriesLoadState state + useEffect 拉数据 + 4 个 UI 状态（loading/error/empty/list）+ myscenes 路径 default 替换为真实驱动型 subpage，静态 prototype 保留作为未在线 / 未记入 outcome 时的 fallback
+apps/mobile/src/shell/app-shell.tsx  MeSurface 接 scene prop（conditional spread 以满足 exactOptionalPropertyTypes 严格）
+```
+
+## 最终 verify 状态（2026-08-27 收官）
+
+```text
+pnpm typecheck                     4/4 PASS
+pnpm test (vitest)                 36 files / 174 tests PASS（之前 168 + 6 P2 mobile）
+pnpm check                         PASS
+go test ./apps/api-go/...          28 packages OK（scene: 70 个 unit + repository: 16）
+go run ./cmd/openapi-commands -check  148 entries, drift pass
+go run ./scripts/generate_openapi.go -check  spec + commands fragment in sync
+bash apps/api-go/scripts/smoke_pass3_scene_feed.sh
+  → /health/live 200
+  → ListFeedPosts anonymous ACCEPTED
+  → CreateScene anonymous REJECTED
+  → CreateScene with bearer reaches Scene service
+  → all 5 contract assertions PASS
+end-to-end: POST /v1/commands/ListMyMemories with Bearer token
+  → INVALID_ACCESS_TOKEN (proves routing + requiresAuthentication gate
+    both work; a valid Bearer would reach scene.listMyMemories)
+```
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。
