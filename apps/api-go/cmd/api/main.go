@@ -31,6 +31,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
+	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -70,6 +71,7 @@ func main() {
 	socialSpaceService := socialspace.New()
 	businessService := business.New()
 	paymentService := payment.New()
+	outcomeService := outcome.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -105,6 +107,7 @@ func main() {
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
 		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
+		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
 		localNetService = localnet.NewWithMediaLookupAndModelStack(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack)
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
 		authenticator = identityService
@@ -120,6 +123,7 @@ func main() {
 	server.SocialSpace = socialSpaceService
 	server.Business = businessService
 	server.Payment = paymentService
+	server.Outcome = outcomeService
 	// Activity 域（P0 内存读模型）：启动幂等 seed 基线 5 条活动。
 	activityService := activity.New()
 	activityService.SeedDefaults()
