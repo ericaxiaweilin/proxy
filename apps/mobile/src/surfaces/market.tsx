@@ -2,8 +2,8 @@
 // R4 决策：移除“体验上架”以保护小美身价；机会由客户单向发布，小美报名/报价。
 // 视觉：沿用项目 R3 token（magenta/violet/ink/muted/line/surface），仅复用 R4 的卡片结构与价格可见性，
 // 不引入原型暖黄 #F3A61D 作为主色，保持 Proxy 紫粉基线。
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useModuleBackHandler } from "../components/module-back";
 import type { Activity } from "@proxy/contracts";
@@ -91,7 +91,9 @@ export function MarketSurface({
   marketLabel,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
-  onOpenActivity
+  onOpenActivity,
+  onChromeVisibilityChange,
+  bottomNavVisible
 }: {
   activities: ActivityClient;
   marketplace: MarketplaceClient;
@@ -101,6 +103,8 @@ export function MarketSurface({
   initialTab?: MarketTab;
   onOpenExperience: (experienceId: string) => void;
   onOpenActivity: (activity: Activity) => void;
+  onChromeVisibilityChange?: (visible: boolean) => void;
+  bottomNavVisible?: boolean;
 }): React.JSX.Element {
   const normalized = normalizeTab(initialTab);
   const [tab, setTab] = useState<"OPPORTUNITY" | "ACTIVITY">(normalized);
@@ -141,6 +145,19 @@ export function MarketSurface({
   const [offerMsg, setOfferMsg] = useState<string>();
   const [myOffers, setMyOffers] = useState<Array<{ offerId: string; status: string; expiresAt: string }>>([]);
   const [showOffers, setShowOffers] = useState(false);
+  const lastScrollYRef = useRef(0);
+  const chromeVisibleRef = useRef(true);
+  function onMarketScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
+    const y = Math.max(0, e.nativeEvent.contentOffset.y);
+    const delta = y - lastScrollYRef.current;
+    if (y <= 20) {
+      if (!chromeVisibleRef.current) { chromeVisibleRef.current = true; onChromeVisibilityChange?.(true); }
+    } else if (Math.abs(delta) >= 2) {
+      if (delta > 6 && chromeVisibleRef.current) { chromeVisibleRef.current = false; onChromeVisibilityChange?.(false); }
+      else if (delta < -10 && !chromeVisibleRef.current) { chromeVisibleRef.current = true; onChromeVisibilityChange?.(true); }
+    }
+    lastScrollYRef.current = y;
+  }
 
   const loadActivities = useCallback(async (): Promise<void> => {
     setActivityPhase("LOADING");
@@ -343,8 +360,9 @@ export function MarketSurface({
   const remoteLens = lens === "REMOTE";
 
   function renderMarketPage(pageTab: "OPPORTUNITY" | "ACTIVITY"): React.JSX.Element {
+    const bottomPad = bottomNavVisible === false ? 16 : 120;
     return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
         <View>
           <Text style={styles.marketTitle}>市场</Text>
@@ -585,66 +603,26 @@ function OpportunityTab({
   if (oppFilter === "INVITE") items = items.slice(0, 1);
   return (
     <>
-      <View style={styles.contextBar}>
-        <View style={styles.contextCopy}>
-          <Text style={styles.contextTitle}>小美 · 机会模式</Text>
-          <Text style={styles.contextSub}>公开主页正常 · 机会单向提供 · 小美主动报名</Text>
-        </View>
-        <View style={styles.contextBadge}>
-          <Text style={styles.contextBadgeText}>报名制</Text>
-        </View>
-      </View>
-
       <View style={styles.searchRow}>
         <View style={styles.searchBox}>
-          <TextInput placeholder="搜机会、主题、地点…" placeholderTextColor="#A9A2B0" style={styles.searchInput} />
+          <TextInput placeholder="搜机会…" placeholderTextColor="#A9A2B0" style={styles.searchInput} />
           <Text style={styles.searchIcon}>⌕</Text>
         </View>
       </View>
 
       <View style={styles.oppQuickNav}>
-        {R7_FILTERS.map((f) => (
+        {R7_FILTERS.slice(0,5).map((f) => (
           <Pressable
             key={f.id}
-            onPress={() => {
-              if (f.id === "FILTER") {
-                setOppFilter("FILTER");
-                return;
-              }
-              setOppFilter(f.id);
-            }}
+            onPress={() => setOppFilter(f.id)}
             style={[styles.oppQuickBtn, oppFilter === f.id && styles.oppQuickBtnOn]}
           >
             <View style={styles.oppIcon}>
-              <ProxyIcon color={oppFilter === f.id ? "#A86C00" : color.muted} name={f.icon} size={21} />
+              <ProxyIcon color={oppFilter === f.id ? color.ink : color.muted} name={f.icon} size={20} />
             </View>
             <Text style={[styles.oppQuickLabel, oppFilter === f.id && styles.oppQuickLabelOn]}>{f.label}</Text>
-            {f.id === "INVITE" ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>1</Text>
-              </View>
-            ) : null}
           </Pressable>
         ))}
-      </View>
-      <View style={styles.oppQuickHint}>
-        <View style={styles.oppQuickHintCopy}>
-          <Text style={styles.oppQuickHintTitle}>{R7_FILTER_META[oppFilter].title}</Text>
-          <Text style={styles.oppQuickHintSub}>{R7_FILTER_META[oppFilter].sub}</Text>
-        </View>
-        <View style={styles.oppQuickHintPill}>
-          <Text style={styles.oppQuickHintPillText}>{oppFilter === "VALUE" ? "价值优先" : oppFilter === "INVITE" ? "1 个邀请" : oppFilter === "FILTER" ? "高级" : "实时"}</Text>
-        </View>
-      </View>
-
-      <View style={styles.localScope}>
-        <ProxyIcon color={color.violet} name="route" size={12} />
-        <Text style={styles.localScopeText}>{lens === "REMOTE" ? "远程 · 不受通勤限制" : `${marketLabel} · 默认只展示可履约范围 · 价格先可见`}</Text>
-      </View>
-
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>适合你的机会</Text>
-        <Text style={styles.sectionHint}>先看价格，再决定是否回应</Text>
       </View>
 
       <View style={styles.oppStack}>
@@ -652,7 +630,6 @@ function OpportunityTab({
           <R4OpportunityCard key={opportunity.id} opportunity={opportunity} onDismiss={() => onDismiss(opportunity.id)} onOpen={() => onOpen(opportunity)} />
         ))}
       </View>
-      <Text style={styles.detailHint}>发布需求在右上角 ＋；选人/对比在每个机会的报名明细里（仅发布者可见）。</Text>
     </>
   );
 }
@@ -1267,8 +1244,8 @@ function mapConfig(tab: "OPPORTUNITY" | "ACTIVITY"): {
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
-  content: { paddingBottom: 24, paddingHorizontal: 18, paddingTop: 10 },
-  marketHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginVertical: 4 },
+  content: { paddingBottom: 120, paddingHorizontal: 0, paddingTop: 10 },
+  marketHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginVertical: 4, paddingHorizontal: 12 },
   marketTitle: { color: color.ink, fontSize: 30, fontWeight: "800", lineHeight: 36 },
   marketSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
   headActions: { alignItems: "center", flexDirection: "row", gap: 6 },
@@ -1278,7 +1255,7 @@ const styles = StyleSheet.create({
   viewToggleTextOn: { color: color.white },
   plusBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 44, justifyContent: "center", width: 44 },
   plusBtnText: { color: color.white, fontSize: 22, fontWeight: "700" },
-  offerBar: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  offerBar: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8, paddingHorizontal: 12 },
   offerBtn: { backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
   offerBtnDisabled: { opacity: 0.5 },
   offerBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
@@ -1293,13 +1270,13 @@ const styles = StyleSheet.create({
   offerAccept: { backgroundColor: color.ink, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   offerAcceptText: { color: color.white, fontSize: 11, fontWeight: "800" },
   offerEmpty: { color: color.muted, fontSize: 11, textAlign: "center" },
-  tabs: { backgroundColor: color.surface, borderRadius: 14, flexDirection: "row", gap: 5, marginVertical: 8, padding: 4 },
+  tabs: { backgroundColor: color.surface, borderRadius: 14, flexDirection: "row", gap: 5, marginVertical: 8, marginHorizontal: 12, padding: 4 },
   tab: { borderRadius: 11, flex: 1, minHeight: 44, justifyContent: "center", paddingVertical: 9 },
   tabOn: { backgroundColor: color.white, ...shadows.card },
   tabText: { color: color.muted, fontSize: 14, fontWeight: "800", textAlign: "center" },
   tabTextOn: { color: color.ink },
   oppStack: { marginTop: 4 },
-  searchRow: { marginTop: 6 },
+  searchRow: { marginTop: 6, paddingHorizontal: 12 },
   searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flexDirection: "row", overflow: "hidden" },
   searchInput: { flex: 1, fontSize: 14, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10 },
   searchIcon: { color: color.ink, fontSize: 15, paddingHorizontal: 10 },
@@ -1315,8 +1292,8 @@ const styles = StyleSheet.create({
   lensSmOn: { backgroundColor: color.ink, borderColor: color.ink },
   lensSmText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   lensSmTextOn: { color: color.white },
-  // R7 筛选宫格 6 列 icon-first（固定 footprint，无横滑）
-  oppQuickNav: { flexDirection: "row", gap: 5, marginVertical: 8 },
+  // R7 筛选宫格 5 列
+  oppQuickNav: { flexDirection: "row", gap: 5, marginVertical: 8, paddingHorizontal: 12 },
   oppQuickBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, gap: 4, justifyContent: "center", minHeight: 58, paddingHorizontal: 2, paddingVertical: 7, position: "relative" },
   oppQuickBtnOn: { backgroundColor: "#FFF0F6", borderColor: color.magenta },
   oppIcon: { alignItems: "center", height: 24, justifyContent: "center", width: 24 },
@@ -1343,8 +1320,7 @@ const styles = StyleSheet.create({
   contextSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   contextBadge: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
   contextBadgeText: { color: "#5B2CB5", fontSize: 11, fontWeight: "800" },
-  // R4 机会卡
-  r4Card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, marginVertical: 5, padding: 12, ...shadows.card },
+  r4Card: { backgroundColor: "transparent", borderBottomColor: "rgba(35,28,42,0.09)", borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12, paddingHorizontal: 12, marginVertical: 0 },
   r4Top: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
   scenarioIcon: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 28, justifyContent: "center", width: 28 },
   marketError: { color: color.magenta, fontSize: 11, lineHeight: 16, marginVertical: 7 },
