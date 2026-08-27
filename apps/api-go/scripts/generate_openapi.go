@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 func main() {
@@ -66,7 +67,27 @@ func main() {
 			fmt.Fprintln(os.Stderr, "openapi drift detected: committed openapi.yaml differs from HEAD. Run `go run ./scripts/generate_openapi.go` and commit.")
 			os.Exit(2)
 		}
-		fmt.Println("openapi: drift check passed")
+		// Also validate that the generated commands fragment is in
+		// sync with HEAD. This catches the case where a new command
+		// was added to a service but the spec wasn't updated.
+		genPath := strings.TrimSuffix(openAPIPath, "openapi.yaml") + "openapi.commands.generated.yaml"
+		genDisk, err := os.ReadFile(genPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "openapi drift check: generated commands fragment missing at %s: %v\n", genPath, err)
+			os.Exit(2)
+		}
+		genHead, err := exec.Command("git", "show", "HEAD:apps/api-go/openapi.commands.generated.yaml").Output()
+		if err != nil {
+			// First commit of the fragment: skip drift vs HEAD, but
+			// the file must be present on disk to pass.
+			fmt.Println("openapi: drift check passed (commands fragment has no HEAD yet)")
+			return
+		}
+		if !bytes.Equal(bytes.TrimSpace(genHead), bytes.TrimSpace(genDisk)) {
+			fmt.Fprintln(os.Stderr, "openapi commands drift detected: re-run `go run ./cmd/openapi-commands` and commit the regenerated openapi.commands.generated.yaml.")
+			os.Exit(2)
+		}
+		fmt.Println("openapi: drift check passed (spec + generated commands in sync)")
 	} else {
 		fmt.Printf("openapi: validated %d bytes at %s\n", len(data), openAPIPath)
 	}

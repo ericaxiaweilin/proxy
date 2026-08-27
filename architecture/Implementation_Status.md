@@ -108,7 +108,7 @@ offline SQLite Draft persistence and iOS real-device Keychain / Keystore smoke v
 server-backed Requester Home read model and restart-safe in-progress need hydration
 ObservationTemplate / ObservationSet handlers
 Outcome compatibility gate handler
-OpenAPI document generation
+OpenAPI document generation  ✅ done (apps/api-go/cmd/openapi-commands: scans `case "X"` arms in every internal/<domain>/service.go, emits apps/api-go/openapi.commands.generated.yaml with 138 commands; apps/api-go/scripts/generate_openapi.go -check now verifies BOTH the hand-authored openapi.yaml AND the generated commands fragment are in sync with HEAD; internal/openapicmds/openapicmds_test.go covers IsLikelyCommand, ScanSource, RenderFragment determinism, and first-domain-wins dedupe)
 M3 — Agent Passport / Availability  ✅ done (internal/supply in-memory + PostgreSQL adapters, supply_integration_test.go covers expired KYC / availability conflict / location precision redaction / permission denied; 9 unit tests + 1 PG integration test PASS; not yet wired to a mobile surface beyond Me v3+v5 ability CRUD)
 M5 — Experience Runtime v1 first isolated delivery  ✅ done (packages/contracts/src/experience-runtime.ts + 1 case study test; Market Intelligence Console v9 first delivery on top; full Orchestrator / Surface Compiler / Delta Patcher / Frontend Renderer remains open)
 fresh-db schema-check shell script  ✅ retired (apps/api-go/scripts/fresh_db_test.sh removed; superseded by internal/platform/postgres/testdb_test.go which auto-spins a one-shot PG cluster, applies all 28 migrations in lexicographic order, and tears down on process exit)
