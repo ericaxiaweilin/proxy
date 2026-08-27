@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -14,23 +13,12 @@ import (
 
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		url = "postgres://proxy:proxy@localhost:5432/proxy"
-	}
-	pool, err := Open(context.Background(), url)
-	if err != nil {
-		t.Skipf("postgres not available: %v", err)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		t.Skipf("postgres ping failed: %v", err)
-	}
-	return pool
+	return requireTestPool(t)
 }
 
 func TestTransactionRunnerRollbackOnError(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	// pool lifetime owned by test helper
 	runner := NewTransactionRunner(pool)
 	outbox := NewOutboxRepository(pool)
 	demandRepo := NewDemandRepositoryWithOutbox(pool, outbox)
@@ -71,7 +59,7 @@ func TestTransactionRunnerRollbackOnError(t *testing.T) {
 
 func TestIdempotencyAndAggregateAtomic(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	// pool lifetime owned by test helper
 	runner := NewTransactionRunner(pool)
 	idem := NewIdempotencyStore(pool)
 	outbox := NewOutboxRepository(pool)
@@ -171,7 +159,7 @@ func TestIdempotencyAndAggregateAtomic(t *testing.T) {
 
 func TestPublishTaskCanonicalAtomic(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	// pool lifetime owned by test helper
 	outbox := NewOutboxRepository(pool)
 	repo := NewDemandRepositoryWithOutbox(pool, outbox)
 	ctx := context.Background()

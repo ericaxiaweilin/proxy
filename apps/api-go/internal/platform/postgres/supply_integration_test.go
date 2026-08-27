@@ -11,7 +11,7 @@ import (
 
 func TestSupplyPostgresExpiryBlocksEligibility(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	// pool lifetime owned by test helper
 	ctx := context.Background()
 	repo := NewSupplyRepository(pool)
 	svc := supply.NewWithRepository(repo)
