@@ -296,6 +296,24 @@ export function isFrameBackgroundSafe(backgroundColor: string | undefined): bool
 }
 
 /**
+ * R15.13 P4：客户端在 contain 模式下选 frame 背景时，优先用后端
+ * 经 "Memory aggregate dominant-color" 推荐的 sceneAestheticBackdrop
+ * （代表同场景中已完成的真实场景里最常出现的主色），其次才退到本
+ * 张图的 dominantColorHex，最后是审核基色 FRAME_BACKGROUND_HEX。
+ * 三层 fallback 的顺序不能变：它是“平台记忆 > 单图 > 静态基色”的
+ * 信号递减序列，错位会让 #0E0A14 灰边重新出现并抹掉 P4 的价值。
+ */
+export function resolveSceneAestheticFrame(input: {
+  sceneAestheticBackdrop?: string;
+  dominantColorHex?: string;
+}): string {
+  if (input.sceneAestheticBackdrop && /^#[0-9A-Fa-f]{6}$/.test(input.sceneAestheticBackdrop)) {
+    return input.sceneAestheticBackdrop.toUpperCase();
+  }
+  return resolveFrameBackground(input.dominantColorHex);
+}
+
+/**
  * Gate N — 9:16+ 长图走 STORY 形态 (3:4 拉满 + 底部 60pt caption)。
  * 避免 9:16+ 图在 4:5 frame 上下大片 #0E0A14 灰边。
  * 【用开源代替重复造轮子】选 frame 比例是 React Native 布局层的事，

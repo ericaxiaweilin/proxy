@@ -509,6 +509,37 @@ func (r *SceneRepository) ListMemoriesByScene(ctx context.Context, sceneID strin
 
 // ── helpers ────────────────────────────────────────────────────
 
+// ListAllMemories pulls every memory row for the platform-wide
+// aesthetic aggregate. limit<=0 returns an empty slice (mirrors the
+// in-memory gate). For the P4 launch the memory table is small
+// (<1k rows); the next pass adds a (scene_type) covering index to
+// keep this read path O(matching rows) once growth kicks in.
+func (r *SceneRepository) ListAllMemories(ctx context.Context, limit int) ([]scene.Memory, error) {
+	if limit <= 0 {
+		return []scene.Memory{}, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT scene_id, host_id, guest_id, merchant_id, scene_type,
+		       funding_mode, planned_budget, actual_spend, duration_min,
+		       aesthetic_assets, created_at
+		FROM scene.memories
+		ORDER BY created_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []scene.Memory{}
+	for rows.Next() {
+		m, err := scanMemoryRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
 type memoryRow interface {
 	Scan(dest ...any) error
 }

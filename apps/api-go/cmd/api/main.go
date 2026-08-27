@@ -126,7 +126,7 @@ func main() {
 		notificationService = notification.NewWithRepository(postgres.NewNotificationRepository(pool))
 		safetyService = safety.NewWithRepository(postgres.NewSafetyRepository(pool))
 		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
-		localNetService = localnet.NewWithMediaLookupAndModelStack(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack)
+		localNetService = localnet.NewWithAll(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack, scene.NewSceneAestheticAdapter(sceneService))
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
 		// R15.13 P3: bind the scene aggregate to PostgreSQL when
 		// DATABASE_URL is set. Without DATABASE_URL the in-memory

@@ -315,3 +315,117 @@ func TestListFeedPosts_EmptyDominantColorHex_Omitted(t *testing.T) {
 		t.Fatalf("empty dominantColorHex must be omitted (omitempty), but was present: %+v", items[0])
 	}
 }
+
+// ── R15.13 P4 tripwires: Memory → Feed aesthetic backdrop ─────────
+
+// stubSceneAesthetic returns a fixed backdrop for the (city, type)
+// tuple it was constructed with. Anything else returns the zero
+// value so the caller falls back to the hard-coded frame color.
+type stubSceneAesthetic struct {
+	hex        string
+	sampleCount int
+}
+
+func (s *stubSceneAesthetic) GetAestheticBackdrop(ctx context.Context, cityScope, sceneType string) (SceneAestheticBackdrop, error) {
+	return SceneAestheticBackdrop{Hex: s.hex, SampleCount: s.sampleCount, Confidence: 1.0}, nil
+}
+
+func TestListFeedPosts_SceneAestheticBackdrop_Stamped(t *testing.T) {
+	// When the provider has signal (SampleCount >= 2), the first
+	// media item in the post envelope must carry the recommended
+	// frame color so the client can render contain-mode backgrounds
+	// from real data, not a hard-coded purple.
+	stubML := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"media_b1": {MediaAssetID: "media_b1", MediaType: "IMAGE", ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC", Width: 100, Height: 100},
+	}}
+	stubA := &stubSceneAesthetic{hex: "#AABBCC", sampleCount: 5}
+	s := NewWithAll(NewMemoryRepository(), stubML, nil, stubA)
+	_ = s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "USER",
+		"authorId":   "u_aesthetic_a",
+		"body":       "tripwire backdrop",
+		"visibility": "PUBLIC",
+		"cityScope":  "hanoi",
+		"mediaRefs":  []map[string]any{{"mediaAssetId": "media_b1", "mediaType": "IMAGE", "sortOrder": 0}},
+	}))
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	var view struct {
+		Posts []Post                      `json:"posts"`
+		Media map[string][]map[string]any `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	postID := view.Posts[0].ID
+	items := view.Media[postID]
+	if len(items) == 0 { t.Fatal("expected media items") }
+	got, _ := items[0]["sceneAestheticBackdrop"].(string)
+	if got != "#AABBCC" {
+		t.Fatalf("expected sceneAestheticBackdrop #AABBCC, got %q", got)
+	}
+}
+
+func TestListFeedPosts_SceneAestheticBackdrop_BelowThreshold_Omitted(t *testing.T) {
+	// The provider contract is: SampleCount < 2 → no signal. The
+	// field must be omitted from the wire (omitempty) so the client
+	// falls back to its hard-coded frame color, not to a value
+	// plucked from a single, possibly anomalous memory.
+	stubML := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"media_b2": {MediaAssetID: "media_b2", MediaType: "IMAGE", ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC", Width: 100, Height: 100},
+	}}
+	stubA := &stubSceneAesthetic{hex: "#112233", sampleCount: 1} // below threshold
+	s := NewWithAll(NewMemoryRepository(), stubML, nil, stubA)
+	_ = s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "USER",
+		"authorId":   "u_aesthetic_b",
+		"body":       "tripwire below threshold",
+		"visibility": "PUBLIC",
+		"cityScope":  "hanoi",
+		"mediaRefs":  []map[string]any{{"mediaAssetId": "media_b2", "mediaType": "IMAGE", "sortOrder": 0}},
+	}))
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	var view struct {
+		Posts []Post                      `json:"posts"`
+		Media map[string][]map[string]any `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	postID := view.Posts[0].ID
+	items := view.Media[postID]
+	if _, present := items[0]["sceneAestheticBackdrop"]; present {
+		t.Fatalf("SampleCount<2 must omit sceneAestheticBackdrop, but was present: %+v", items[0])
+	}
+}
+
+func TestListFeedPosts_SceneAestheticBackdrop_NilProvider_StillWorks(t *testing.T) {
+	// The provider is optional — a feed hydrated without the
+	// aesthetic provider must continue to work and must not leak
+	// a zero value into the wire (which would be "#000000" — a
+	// valid hex the client would happily render as a black frame).
+	stubML := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"media_b3": {MediaAssetID: "media_b3", MediaType: "IMAGE", ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC", Width: 100, Height: 100},
+	}}
+	s := NewWithAll(NewMemoryRepository(), stubML, nil, nil)
+	_ = s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "USER",
+		"authorId":   "u_aesthetic_c",
+		"body":       "tripwire nil provider",
+		"visibility": "PUBLIC",
+		"cityScope":  "hanoi",
+		"mediaRefs":  []map[string]any{{"mediaAssetId": "media_b3", "mediaType": "IMAGE", "sortOrder": 0}},
+	}))
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	var view struct {
+		Posts []Post                      `json:"posts"`
+		Media map[string][]map[string]any `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	postID := view.Posts[0].ID
+	items := view.Media[postID]
+	if _, present := items[0]["sceneAestheticBackdrop"]; present {
+		t.Fatalf("nil provider must omit sceneAestheticBackdrop, but was present: %+v", items[0])
+	}
+}

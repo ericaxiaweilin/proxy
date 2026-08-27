@@ -85,6 +85,12 @@ type Repository interface {
 	GetMemory(ctx context.Context, sceneID string) (Memory, error)
 	ListMemoriesByUser(ctx context.Context, userID string, limit int) ([]Memory, error)
 	ListMemoriesByScene(ctx context.Context, sceneID string) ([]Memory, error)
+	// R15.13 P4: Memory → Feed aesthetic feedback. ListAllMemories
+	// returns every persisted memory so the feed hydrator can
+	// aggregate dominant colors across the platform. The PG adapter
+	// is expected to add a (scene_type) index for this read path
+	// when the memory table grows.
+	ListAllMemories(ctx context.Context, limit int) ([]Memory, error)
 }
 
 type memoryRepo struct {
@@ -237,6 +243,21 @@ func (r *memoryRepo) ListMemoriesByScene(ctx context.Context, sceneID string) ([
 	out := []Memory{}
 	if m, ok := r.memories[sceneID]; ok {
 		out = append(out, m)
+	}
+	return out, nil
+}
+
+// ListAllMemories returns every memory in insertion order. limit<=0
+// returns empty (the in-memory repo's defensive gate, mirrored in
+// the PG adapter). Feed aggregates that need "the whole world" pass
+// a large positive limit.
+func (r *memoryRepo) ListAllMemories(ctx context.Context, limit int) ([]Memory, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	if limit <= 0 { return []Memory{}, nil }
+	out := make([]Memory, 0, len(r.memories))
+	for _, m := range r.memories {
+		out = append(out, m)
+		if len(out) >= limit { break }
 	}
 	return out, nil
 }

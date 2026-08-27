@@ -12,6 +12,7 @@ import {
   shouldUseExtendedBackdrop,
   selectVariantForViewport,
   selectVideoPlaybackUrl,
+  resolveSceneAestheticFrame,
   isForbiddenInFeed,
   isFrameBackgroundSafe,
   selectImageShape,
@@ -825,5 +826,46 @@ describe("Pass 2 · resolveFillStrategy tightened rules", () => {
       hint: personHint({ safeCropRect: { x: 0.02, y: 0.01, width: 0.96, height: 0.98 } }),
       sourceAspect: 9 / 16, frameAspect: 0.5738,
     })).toBe("cover");
+  });
+});
+
+// ── R15.13 P4 tripwires: Memory → Feed aesthetic backdrop ─────────
+
+describe("R15.13 P4 resolveSceneAestheticFrame", () => {
+  it("prefers sceneAestheticBackdrop over dominantColorHex", () => {
+    // The P4 contract: platform memory > single image > static base.
+    // Reordering these fallbacks would re-introduce the gray frame
+    // and erase the whole point of the Memory → Feed feedback loop.
+    const out = resolveSceneAestheticFrame({
+      sceneAestheticBackdrop: "#AABBCC",
+      dominantColorHex: "#112233",
+    });
+    expect(out).toBe("#AABBCC");
+  });
+
+  it("falls back to dominantColorHex when sceneAestheticBackdrop is missing", () => {
+    const out = resolveSceneAestheticFrame({ dominantColorHex: "#FF8800" });
+    expect(out).toBe("#FF8800");
+  });
+
+  it("falls back to FRAME_BACKGROUND_HEX when both signals are missing", () => {
+    expect(resolveSceneAestheticFrame({})).toBe(FRAME_BACKGROUND_HEX);
+  });
+
+  it("rejects malformed sceneAestheticBackdrop (not a #RRGGBB string)", () => {
+    // A bad hex must not pass the regex gate; otherwise a stray
+    // "rgb(0,0,0)" would render as transparent / white in the
+    // contain-mode frame, defeating the audit baseline.
+    expect(resolveSceneAestheticFrame({ sceneAestheticBackdrop: "rgb(0,0,0)" }))
+      .toBe(FRAME_BACKGROUND_HEX);
+    expect(resolveSceneAestheticFrame({ sceneAestheticBackdrop: "#GGG" }))
+      .toBe(FRAME_BACKGROUND_HEX);
+    expect(resolveSceneAestheticFrame({ sceneAestheticBackdrop: "" }))
+      .toBe(FRAME_BACKGROUND_HEX);
+  });
+
+  it("uppercases the recommended hex (wire format consistency)", () => {
+    expect(resolveSceneAestheticFrame({ sceneAestheticBackdrop: "#aabbcc" }))
+      .toBe("#AABBCC");
   });
 });

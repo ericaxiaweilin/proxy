@@ -71,20 +71,24 @@ type PostMediaItem struct {
 	// CompositionHint：来自 media_assets.composition_hint（见 migration 025 + §5.2.2）。
 	// 前端按此决定 cover vs contain；低置信度（<0.4）必须回落 contain。
 	CompositionHint *MediaCompositionHintDTO `json:"compositionHint,omitempty"`
+	// SceneAestheticBackdrop：R15.13 P4 推荐 frame 背景，源自在
+	// 同 (cityScope, sceneType) 已完成场景中 Memory.aestheticAssets
+	// dominant 色的众数。为空时前端继续走默认 FRAME_BACKGROUND_HEX。
+	SceneAestheticBackdrop string `json:"sceneAestheticBackdrop,omitempty"`
 }
 
 // MediaCompositionHintDTO 是给前端的 wire 形状（与 @proxy/contracts 一致）。
 // 这里独立定义一次，避免 media 包被 localnet 之外依赖时反向 import contracts。
 type MediaCompositionHintDTO struct {
-	SubjectType   string                 `json:"subjectType"`
-	SubjectCount  int                    `json:"subjectCount"`
-	FaceBoxes     []MediaBoxDTO          `json:"faceBoxes"`
-	BodyBoxes     []MediaBoxDTO          `json:"bodyBoxes"`
-	TextSafeArea  *MediaBoxDTO           `json:"textSafeArea,omitempty"`
-	FocalPoint    *MediaBoxDTO           `json:"focalPoint,omitempty"`
-	SafeCropRect  *MediaBoxDTO           `json:"safeCropRect,omitempty"`
-	Confidence    float64                `json:"confidence"`
-	RecipeVersion string                 `json:"recipeVersion"`
+	SubjectType   string        `json:"subjectType"`
+	SubjectCount  int           `json:"subjectCount"`
+	FaceBoxes     []MediaBoxDTO `json:"faceBoxes"`
+	BodyBoxes     []MediaBoxDTO `json:"bodyBoxes"`
+	TextSafeArea  *MediaBoxDTO  `json:"textSafeArea,omitempty"`
+	FocalPoint    *MediaBoxDTO  `json:"focalPoint,omitempty"`
+	SafeCropRect  *MediaBoxDTO  `json:"safeCropRect,omitempty"`
+	Confidence    float64       `json:"confidence"`
+	RecipeVersion string        `json:"recipeVersion"`
 }
 
 // MediaBoxDTO 归一化矩形（与前端一致）。
@@ -99,6 +103,29 @@ type MediaBoxDTO struct {
 type MediaLookup interface {
 	LookupMediaAssets(ctx context.Context, ids []string) (map[string]MediaAssetInfo, error)
 	AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error
+}
+
+// SceneAestheticProvider is the R15.13 P4 feedback path: given a
+// city + scene type, the feed hydrator asks the scene domain for
+// the most-frequent dominant color in past memories so the client
+// can use it as the contain-mode frame background. Implemented by
+// scene.Service via a thin adapter (cmd/api/main.go) so localnet
+// stays free of a direct scene import.
+type SceneAestheticProvider interface {
+	// GetAestheticBackdrop returns the recommended frame color for
+	// the (cityScope, sceneType) tuple, or ("", 0, 0) when no
+	// signal exists. The caller is expected to fall back to its
+	// default frame background when SampleCount < 2.
+	GetAestheticBackdrop(ctx context.Context, cityScope, sceneType string) (SceneAestheticBackdrop, error)
+}
+
+// SceneAestheticBackdrop is the wire shape returned by the
+// provider. The fields are non-nil zero values; SampleCount==0
+// means "no signal, use the default".
+type SceneAestheticBackdrop struct {
+	Hex         string
+	SampleCount int
+	Confidence  float64
 }
 
 // MediaAssetInfo 是媒体资产的可读视图（READY 过滤在调用方）。
@@ -277,11 +304,12 @@ func clonePost(post Post) Post {
 }
 
 type Service struct {
-	mu          sync.Mutex
-	repository  Repository
-	mediaLookup MediaLookup
-	modelStack  modelstack.Port
-	clock       clock.Clock
+	mu             sync.Mutex
+	repository     Repository
+	mediaLookup    MediaLookup
+	sceneAesthetic SceneAestheticProvider
+	modelStack     modelstack.Port
+	clock          clock.Clock
 }
 
 func New() *Service {
@@ -300,6 +328,25 @@ func NewWithMediaLookupAndModelStack(repository Repository, mediaLookup MediaLoo
 	if ms != nil {
 		s.modelStack = ms
 	}
+	return s
+}
+
+// NewWithMediaLookupAndSceneAesthetic binds both the media lookup
+// and the scene-aesthetic provider. Either may be nil — the feed
+// hydrator tolerates both (media is required for hydrated URLs;
+// aesthetic is a soft hint, the client falls back when missing).
+func NewWithMediaLookupAndSceneAesthetic(repository Repository, mediaLookup MediaLookup, aesthetic SceneAestheticProvider) *Service {
+	s := NewWithMediaLookup(repository, mediaLookup)
+	s.sceneAesthetic = aesthetic
+	return s
+}
+
+// NewWithAll injects every optional dependency. ms and aesthetic
+// may be nil; mediaLookup must be non-nil for production use (the
+// caller would otherwise see placeholder URLs only).
+func NewWithAll(repository Repository, mediaLookup MediaLookup, ms modelstack.Port, aesthetic SceneAestheticProvider) *Service {
+	s := NewWithMediaLookupAndModelStack(repository, mediaLookup, ms)
+	s.sceneAesthetic = aesthetic
 	return s
 }
 
@@ -498,6 +545,18 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	})
 	// R14 §16.5：Feed Read Model Hydrate 媒体（mediaLookup + READY 过滤）
 	feedMedia := make(map[string][]PostMediaItem, len(feed))
+	// R15.13 P4：Memory → Feed 反馈。Post aggregate 暂未携带
+	// SceneType 字段（Post 与 Scene 是不同 aggregate），所以本轮以
+	// 全局 dominant color 作为整 Feed 的统一 frame 背景推荐 —
+	// 客户端在 contain 模式下用此色替代写死深紫黑。后续 Post 加
+	// SceneType 字段后可重构成 per-(city,sceneType) 缓存。
+	var globalBackdrop string
+	if s.sceneAesthetic != nil {
+		bd, err := s.sceneAesthetic.GetAestheticBackdrop(ctx, "", "")
+		if err == nil && bd.SampleCount >= 2 && bd.Hex != "" {
+			globalBackdrop = bd.Hex
+		}
+	}
 	if s.mediaLookup != nil {
 		for _, p := range feed {
 			if len(p.MediaRefs) == 0 {
@@ -550,6 +609,11 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 					SortOrder:         ref.SortOrder,
 					CompositionHint:   info.CompositionHint,
 				})
+				// R15.13 P4: stamp the recommended frame backdrop on
+				// the first item (clients only need it once per post).
+				if len(items) == 1 && globalBackdrop != "" {
+					items[0].SceneAestheticBackdrop = globalBackdrop
+				}
 			}
 			if len(items) > 0 {
 				feedMedia[p.ID] = items
