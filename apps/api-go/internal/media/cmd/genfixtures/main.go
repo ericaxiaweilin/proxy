@@ -19,8 +19,16 @@
 //   landscape-skyline      16:9 → 城市风景
 //   object-product         4:5  → 物体 (杯子) 居中
 //   object-flatlay         1:1  → 物体 (俯拍多件) 4 宫格
-//   ad-banner-text-heavy   16:9 → 广告 / 海报, 文字密 (rejected)
-//   screenshot-ui          9:19.5 → App 截图 (rejected, text-heavy)
+//   ad-banner-text-heavy   16:9 → 广告 / 海报, 文字密, UI 贴 AD
+//                              徽标 (不拒)
+//   screenshot-ui          9:19.5 → App 截图, UI 贴 SCREENSHOT
+//                              徽标, 归类 SYSTEM (不拒)
+//
+// 重要: 11 个 fixture 都不是被拒内容。代理不拒发内容, 最多只在
+// UI 上贴标签 (AD / SCREENSHOT / 等)。内容拒 (黄/政治/暴力)
+// 是 R15.17 计划要加的 moderation 状态机, 现在还没接上, 任何
+// 政策门取决于人工 review (见 architecture/Implementation_Status.md
+// R15.17 计划项)。
 //
 // 用法:
 //   go run ./internal/media/cmd/genfixtures
@@ -57,18 +65,25 @@ type Subject struct {
 }
 
 // FixtureManifest 输出 manifest, 让 Go 测能 expect 预期 dominantColor。
+// IsAdLike / IsScreenshot 标记: 这些图内容上不是被拒 — 跟身
+// 体/政治/黄无关 — 他们在 UI 表达上是"广告/截屏" (贴上标签让
+// 用户识别)。代理会按 PRD 贴 AD/SYSTEM 徽标, 不设限。
 type FixtureManifest struct {
-	Id             string  `json:"id"`
-	Width          int     `json:"width"`
-	Height         int     `json:"height"`
-	AspectRatio    float64 `json:"aspectRatio"`
-	SubjectType    string  `json:"subjectType"`
-	SubjectCount   int     `json:"subjectCount"`
-	ExpectedHueR   uint8   `json:"expectedHueR"`
-	ExpectedHueG   uint8   `json:"expectedHueG"`
-	ExpectedHueB   uint8   `json:"expectedHueB"`
-	ToleranceHue   float64 `json:"toleranceHue"`
-	IsRejectedKind bool    `json:"isRejectedKind"`
+	Id            string  `json:"id"`
+	Width         int     `json:"width"`
+	Height        int     `json:"height"`
+	AspectRatio   float64 `json:"aspectRatio"`
+	SubjectType   string  `json:"subjectType"`
+	SubjectCount  int     `json:"subjectCount"`
+	ExpectedHueR  uint8   `json:"expectedHueR"`
+	ExpectedHueG  uint8   `json:"expectedHueG"`
+	ExpectedHueB  uint8   `json:"expectedHueB"`
+	ToleranceHue  float64 `json:"toleranceHue"`
+	// IsAdLike: 16:9 色彩浓照, UI 贴 AD 徽标, 仍可发 (不被拒)。
+	IsAdLike bool `json:"isAdLike"`
+	// IsScreenshot: 9:19.5 纯 UI 截图, 归类为 SYSTEM 内容 (推文
+	// 墙, 不发 Proxy 动态) — 仍可上传, 只是不指向个人。
+	IsScreenshot bool `json:"isScreenshot"`
 }
 
 func main() {
@@ -211,7 +226,7 @@ func main() {
 				ToleranceHue: 0.50,
 			},
 		},
-		// 10. 广告 banner 16:9 — text-heavy, 应被拒收
+		// 10. 广告 banner 16:9 — 16:9 色彩浓, UI 贴 AD 徽标, 仍可发
 		{
 			id: "ad-banner-text-heavy-16x9", w: 1920, h: 1080,
 			subjects:   []Subject{},
@@ -221,12 +236,12 @@ func main() {
 			},
 			manifest: FixtureManifest{
 				SubjectType: "AD_BANNER", SubjectCount: 0,
-				IsRejectedKind: true,
+				IsAdLike: true,
 				ExpectedHueR: 0, ExpectedHueG: 0, ExpectedHueB: 0, // b&w stripes
 				ToleranceHue: 0.10,
 			},
 		},
-		// 11. App 截图 9:19.5 — text-heavy
+		// 11. App 截图 9:19.5 — SYSTEM 类, UI 贴 SCREENSHOT 徽标
 		{
 			id: "screenshot-ui-9x19.5", w: 1170, h: 2532,
 			subjects:   []Subject{},
@@ -236,7 +251,7 @@ func main() {
 			},
 			manifest: FixtureManifest{
 				SubjectType: "SCREENSHOT", SubjectCount: 0,
-				IsRejectedKind: true,
+				IsScreenshot: true,
 				ExpectedHueR: 128, ExpectedHueG: 0, ExpectedHueB: 0,
 				ToleranceHue: 0.40,
 			},

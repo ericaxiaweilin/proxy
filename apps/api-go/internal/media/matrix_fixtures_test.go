@@ -30,17 +30,18 @@ import (
 )
 
 type fixtureManifest struct {
-	Id             string  `json:"id"`
-	Width          int     `json:"width"`
-	Height         int     `json:"height"`
-	AspectRatio    float64 `json:"aspectRatio"`
-	SubjectType    string  `json:"subjectType"`
-	SubjectCount   int     `json:"subjectCount"`
-	ExpectedHueR   uint8   `json:"expectedHueR"`
-	ExpectedHueG   uint8   `json:"expectedHueG"`
-	ExpectedHueB   uint8   `json:"expectedHueB"`
-	ToleranceHue   float64 `json:"toleranceHue"`
-	IsRejectedKind bool    `json:"isRejectedKind"`
+	Id            string  `json:"id"`
+	Width         int     `json:"width"`
+	Height        int     `json:"height"`
+	AspectRatio   float64 `json:"aspectRatio"`
+	SubjectType   string  `json:"subjectType"`
+	SubjectCount  int     `json:"subjectCount"`
+	ExpectedHueR  uint8   `json:"expectedHueR"`
+	ExpectedHueG  uint8   `json:"expectedHueG"`
+	ExpectedHueB  uint8   `json:"expectedHueB"`
+	ToleranceHue  float64 `json:"toleranceHue"`
+	IsAdLike      bool    `json:"isAdLike"`
+	IsScreenshot  bool    `json:"isScreenshot"`
 }
 
 // fixtureDirFromTest 解析: 测试在 internal/media/ 下,
@@ -197,10 +198,13 @@ func TestMatrixFixtures_DominantColor_Reasonable(t *testing.T) {
 	}
 }
 
-// TestMatrixFixtures_TextHeavy_HasContent 钉明 2 个"拒收"
-// fixture (ad-banner / screenshot) 的 dominant color 仍是有意义色 —
-// 不被全黑/全白卡死, 让 composition worker 后续能正确判断拒收。
-func TestMatrixFixtures_TextHeavy_HasContent(t *testing.T) {
+// TestMatrixFixtures_LabelledKinds_NotRejected 钉明 ad-banner /
+// screenshot 这些"被贴标签"图不被拒。Proxy 产品的拒收门 (跟内容无关):
+//   - 色情 / 政治 / 暴力 — 内容拒 (仍未实现)
+//   - 技术性 (无音频流, > 30s, 不可读) — REJECTED_TECHNICAL
+// ad-banner (16:9 色浓海报) 跟 IsAdLike=true 只是 UI 贴 AD 徽标, 不设限
+// screenshot (9:19.5 UI 截图) 跟 IsScreenshot=true 是 SYSTEM 类, 不指向个人
+func TestMatrixFixtures_LabelledKinds_NotRejected(t *testing.T) {
 	dir := fixtureDirFromTest(t)
 	for _, id := range []string{
 		"ad-banner-text-heavy-16x9",
@@ -208,8 +212,9 @@ func TestMatrixFixtures_TextHeavy_HasContent(t *testing.T) {
 	} {
 		t.Run(id, func(t *testing.T) {
 			m := loadManifest(t, dir, id)
-			if !m.IsRejectedKind {
-				t.Errorf("%s: should be IsRejectedKind=true", id)
+			// 至少一个 flag 被设, 但 fixture 仍可被上传 / 可见
+			if !m.IsAdLike && !m.IsScreenshot {
+				t.Errorf("%s: should have IsAdLike or IsScreenshot flag set", id)
 			}
 			img := loadImage(t, dir, id)
 			r, g, b := dominantColorFromImage(img, 16)

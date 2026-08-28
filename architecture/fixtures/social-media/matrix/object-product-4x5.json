@@ -1,1 +1,1 @@
-{"id":"object-product-4x5","width":1200,"height":1500,"aspectRatio":0.8,"subjectType":"PRODUCT","subjectCount":1,"expectedHueR":0,"expectedHueG":0,"expectedHueB":0,"toleranceHue":0.3,"isRejectedKind":false}
+{"id":"object-product-4x5","width":1200,"height":1500,"aspectRatio":0.8,"subjectType":"PRODUCT","subjectCount":1,"expectedHueR":0,"expectedHueG":0,"expectedHueB":0,"toleranceHue":0.3,"isAdLike":false,"isScreenshot":false}

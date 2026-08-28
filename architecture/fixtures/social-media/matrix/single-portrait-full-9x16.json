@@ -1,1 +1,1 @@
-{"id":"single-portrait-full-9x16","width":900,"height":1600,"aspectRatio":0.5625,"subjectType":"PERSON","subjectCount":1,"expectedHueR":30,"expectedHueG":0,"expectedHueB":0,"toleranceHue":0.3,"isRejectedKind":false}
+{"id":"single-portrait-full-9x16","width":900,"height":1600,"aspectRatio":0.5625,"subjectType":"PERSON","subjectCount":1,"expectedHueR":30,"expectedHueG":0,"expectedHueB":0,"toleranceHue":0.3,"isAdLike":false,"isScreenshot":false}

@@ -376,3 +376,69 @@ end-to-end: idb 在 iOS 26.5 sim 实测
 ```
 
 Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture R3](./Proxy_Outcome_Intelligence_Architecture_R3.md)，不会直接把 HTML local state 当成数据库模型。
+
+## R15.16 收官（2026-08-28）
+
+三件接管的补修（用户授权后接手其他 agent 范围）:
+
+### 1. iCloud 防护 (mediaStoreDir 默认路径)
+
+`apps/api-go/cmd/api/main.go` 默认 `PROXY_MEDIA_STORE_DIR` 走
+`~/Developer/kake-data/media_store` (non-iCloud 固态位置) 而不
+是 `./media_store` (Desktop + iCloud sync 范围)。iCloud 会在
+闲置期 evict 文件, 派生图变 dataless placeholder, 媒体服务
+返超时 / 0 byte。
+
+### 2. 浮点精度门 (mediaRailMetrics)
+
+`mediaRailMetrics` 改用 r3(n) = round(n*1000)/1000 — 避免
+0.8 * 378 = 302.40000000000003 在 IEEE 754 累积, 粉碎 test 期望
+[0, 312.4, 535.025] 精确等。
+
+### 3. wall 高度门 (wallCellAspect 纯函数)
+
+`wallCellAspect(aspect)`: portrait 最低 0.8 (4:5, 9:16 上升),
+landscape [1, 1.91]。9 个 vitest tripwires 钉明边界。
+
+### 4. 11 fixture 规范化照片素材
+
+`architecture/fixtures/social-media/matrix/` 11 个 stdlib 生成
+JPEG + manifest.json:
+
+| id | 比例 | 主体 |
+|---|---|---|
+| single-portrait-half-4x5 | 0.80 | 半身人像 |
+| single-portrait-full-9x16 | 0.56 | 全身人像 |
+| single-landscape-half-4x3 | 1.33 | 横构半身 |
+| single-landscape-full-3x1 | 3.00 | 街拍全身 |
+| group-portrait-2-1x1 | 1.00 | 2 人合拍 |
+| group-portrait-4-1x1 | 1.00 | 4 人合拍 |
+| landscape-skyline-16x9 | 1.78 | 城市风景 |
+| object-product-4x5 | 0.80 | 居中物体 |
+| object-flatlay-1x1 | 1.00 | 4 件平铺 |
+| ad-banner-text-heavy-16x9 | 1.78 | 广告贴 AD 徽标 (不拒) |
+| screenshot-ui-9x19.5 | 0.46 | App 截图归 SYSTEM (不拒) |
+
+复现: `go -C apps/api-go run ./internal/media/cmd/genfixtures`
+tripwires: 6 Go + 14 TS (219 vitest + 6 media 测全 PASS)。
+
+## R15.16 收官遗留（1 个 PRD gap 下放给 R15.17）
+
+```text
+1. 内容拒收门 (nudity / politics / violence)
+   现状: media_assets 状态机有 QUARANTINED / APPROVED /
+   REJECTED_TECHNICAL 3 个 — 但只有 “技术原因” (无音频流 / > 30s)
+   触发器, “内容原因” (黄 / 政治 / 暴力) 不存在。
+   下放: R15.17 增 REJECTED_CONTENT_NUDITY /
+   REJECTED_CONTENT_POLITICS / REJECTED_CONTENT_VIOLENCE 3 个状态
+   + admin 手动 review 路径 + audit log (不变 production 默认, 仅
+   给人工 review API 入口供未来 AI 内容审核接入)。
+
+2. fixture 边界拓展
+   现状: 11 fixture 都是"可以发"主体。内容拒 (黄/政治) 不会在
+   fixture 里造, 以避免落 /tmp 创 不可逆样本 (违反人脸 / 未成年
+   保护）。R15.17 用“纯几何示意 + 明确标签”表示内容拒, 跟
+   real-world 数据集 (NSFW dataset) 解耦。
+```
+
+## R15.17 计划（待启动）
