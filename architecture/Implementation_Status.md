@@ -266,6 +266,15 @@ end-to-end: idb 在 iOS 26.5 sim (UDID 22280AEA-3B36-4499-81EC-A1D77C712BA9) 实
   - tap "自定义坐标" tab → 显示地图 + 城市 chip + 半径 chip
   - tap 地图 → pin 跳到 (4, 6) → LocationContext 显示 "河内 · 自定义 · 4, 6" + "21.0177, 105.8434 · 半径 1 km"
 
+## 新增：R15.15 Post.SceneType + per-(city, sceneType) 背景缓存（2026-08-27）
+
+```text
+apps/api-go/internal/localnet/service.go  Post struct 加 SceneType 字段 + createPostPayload 加 SceneType + allowedSceneTypes 白名单 + 空=UNKNOWN 默认 + 列表外 reject + listFeed 重构 globalBackdrop 走 backdropCache + getBackdrop closure
+apps/api-go/internal/localnet/service_test.go  stubSceneAesthetic 扩 byKey + calls + 5 tripwires: AcceptsSceneType / RejectsUnknownSceneType / EmptySceneTypeDefaultsToUnknown / PerSceneTypeBackdrop / BackdropCacheAvoidsN1
+packages/contracts/src/index.ts  FeedPostSchema + CreatePostPayloadSchema 加 sceneType zod 枚举 (9 选 1 + optional)
+packages/contracts/src/index.test.ts  +2 tripwires: sceneType 接受 + 未知 reject
+```
+
 ## 新增：R15.14 LocationContext 真的影响 feed filter（2026-08-27）
 
 ```text
@@ -284,26 +293,35 @@ end-to-end: curl POST ListFeedPosts payload={viewingCity: 12345}
   → ACCEPTED, unfiltered=true (fail-open)
 ```
 
-## 最终 verify 状态（2026-08-27 R15.14 收官）
+## 最终 verify 状态（2026-08-27 R15.15 P1 收官）
 
 ```text
 pnpm typecheck                     4/4 PASS
-pnpm test (vitest)                 36 files / 187 tests PASS
+pnpm test (vitest)                 36 files / 187 mobile + 145 contracts PASS
   唯一 fail: media-presentation 已知 sandbox float drift
-  R15.14 新增 7 (contracts: 2, localnet: 5)
+  R15.15 P1 新增 7 (contracts: 2, localnet: 5)
 pnpm check:design                  PASS
 go test ./apps/api-go/...          27 packages OK
-  localnet: 15 → 20 (5 new R15.14 tripwires)
+  localnet: 20 → 25 (5 new R15.15 P1 tripwires)
   scene: 76 unit + repository: 16 + aesthetic: 6
   + platform/postgres: 2 integration
 go run ./cmd/openapi-commands -check  148 entries, drift pass
 go run ./scripts/generate_openapi.go -check  spec + commands fragment in sync
 bash apps/api-go/scripts/smoke_pass3_scene_feed.sh  5/5 contract assertions PASS
-end-to-end: curl POST ListFeedPosts payload.viewingCity 走通
-  viewingCity: '河内'     → echo: {viewingCity: '河内', unfiltered: false}
-  viewingCity: '胡志明市' → echo: {viewingCity: '胡志明市', unfiltered: false}
-  无 viewingCity           → echo: {viewingCity: '', unfiltered: true}
-  viewingCity: 12345       → ACCEPTED, unfiltered=true (fail-open)
+end-to-end: Post.SceneType 走通
+  CreatePost sceneType: 'ROOFTOP'  → ACCEPTED, Post.SceneType = 'ROOFTOP'
+  CreatePost sceneType: 'WHATEVER' → REJECTED INVALID_POST_SCENE_TYPE (fail-closed)
+  CreatePost 未传 sceneType         → ACCEPTED, Post.SceneType = 'UNKNOWN' (legacy 兼容)
+  listFeed 3 帖同 (河内, ROOFTOP)   → GetAestheticBackdrop 调用 1 次 (cache 避免 N+1)
+```
+
+## R15.15 收官遗留（1 个 audit gap 下放给 R15.16）
+
+```text
+1. gridToLatLng 接 OSM 逆编码
+   现状: P6 gridToLatLng 是 (city center ± spanKm/2) 简单换算, 演示够。
+   下放: R15.16 接 onGeocode (OpenStreetMap Nominatim 离线 / 在线
+   mix) — 升 map canvas 到 tap 反查 "还剑湖西 · 1.2 km"。
 ```
 
 ## R15.14 收官遗留（2 个 audit gap 主动下放给 R15.15）
