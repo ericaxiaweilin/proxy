@@ -813,3 +813,93 @@ media_review_decisions, 证明 PG 路径 + RLS 体系接合完整)。
    下放: R15.21 改 PG declarative partitioning (PARTITION BY
    RANGE (reviewed_at)) + 12 子表。
 ```
+
+## R15.21 收官 (2026-08-28)
+
+Migration 版本管理 (schema_migrations 表) + CLI + drift 检测 + dry-run。
+
+### 1. Migrator type (内部)
+
+`apps/api-go/internal/platform/postgres/migrator.go`:
+- `Migrator{pool, migrationsDir, allowInitSchema}`
+- 方法: `Apply(ctx, dryRun)` / `ListMigrations(ctx)` /
+  `PendingCount(ctx)` / `AppliedCount(ctx)` / `DriftCount(ctx)` /
+  `VerifyDrift(ctx)`
+- `schema_migrations` 表: version (PK) / applied_at / checksum / filename
+- checksum = SHA-256 文件内容 hex[:12] (防误判足够, 避免存完整 hash)
+- drift = 已 apply + checksum != 当前文件 checksum
+- orphan = applied 但文件不在目录里
+- Apply 语义: `dryRun=true` 列 pending, `dryRun=false` 真 apply 返
+  applied 列表 (pending 总是空)
+
+### 2. CLI (cmd/migrate/main.go)
+
+```
+migrate -dsn <url> -status           # applied/pending/drift/orphan summary
+migrate -dsn <url> -apply            # 真 apply
+migrate -dsn <url> -dry-run          # 列 pending 不真 apply
+migrate -dsn <url> -check-drift      # 退出 1 if drift
+```
+
+环境变量代替 flag: DATABASE_URL / PROXY_MIGRATIONS_DIR。
+
+### 3. 8 个 Go tripwires (migrator_test.go)
+
+- ApplyRecordsAndIdempotent: 跑 3 migration 进表, re-apply 是 no-op
+- StatusAndCounts: PendingCount/AppliedCount/DriftCount 数字正确
+- DryRunDoesNotApply: dry-run 列 pending 但 schema_migrations 空
+- DriftDetected: 改文件 checksum 触发 drift
+- OrphanFromMissingFile: applied 但文件不在目录
+- LexicographicOrder: 乱序文件名按 lex apply
+- FilenameWithDots: "001_a.b_c" 也正确取 version
+- NonSqlFilesIgnored: README.md / .DS_Store 不被当 migration
+
+### 4. e2e (r1521_migrate_e2e.sh) — 8 tripwires
+
+- status 报 34 applied
+- dry-run 报 no pending
+- check-drift no drift + exit 0
+- apply 报 applied 0 + skipped 34 (idempotent)
+- 改文件触发 drift, exit 1
+
+### 5. 跟 R15.20 rls_setup.sh 关系
+
+R15.20 rls_setup.sh 仍独立跑 (CREATE ROLE + GRANT + apply
+migrations + verify policies)。R15.21 migrate CLI 是上层工具,
+production 部署时先用 migrate CLI 跟踪所有 migrations, 然
+后用 rls_setup.sh 加 RLS 体系 (role/policy/grant)。两个脚本
+互补不重复。
+
+### 6. verify
+
+  go -C apps/api-go test ./internal/media/...    52/53 PASS
+                                               (1 pre-existing fail)
+  go -C apps/api-go test ./internal/platform/postgres/... ok (含 8 R15.21)
+  pnpm --filter @proxy/contracts test           147/147 PASS
+  pnpm --filter mobile test                     219/219 PASS
+  bash architecture/scripts/r1517_review_e2e.sh         2/2 PASS
+  bash architecture/scripts/r1518_review_audit_e2e.sh   2/2 PASS
+  bash architecture/scripts/r1519_amend_review_e2e.sh   4/4 PASS
+  bash architecture/scripts/p0_audit_fix.sh             21/21 PASS
+  bash architecture/scripts/e2e_media_security_gate.sh  16/16 PASS
+  bash apps/api-go/scripts/smoke_pass3_scene_feed.sh    5/5 PASS
+  bash architecture/scripts/r1520_pg_path_e2e.sh        3/3 tripwire PASS
+  bash architecture/scripts/r1521_migrate_e2e.sh        8/8 tripwire PASS
+
+## R15.21 收官遗留 (下放 R15.22)
+
+```text
+1. 终端 AI 内容审核接入 (R15.17/18/19/20/21 遗留, 4 轮没动):
+   R15.22 写 worker hook 摄入 QUARANTINED -> ML model ->
+   自动调 ReviewMediaAsset。需 image security / worker 路径
+   调整 (跟其他 agent 的 composition pipeline 重叠, 需协调)。
+
+2. observer role 拆分 (从 R15.20 遗留): R15.22 增
+   proxy_api_observer 用于只读 dashboards, 完全不能执行 SQL。
+
+3. 决策表 partition (从 R15.20 遗留): R15.22 改 PG declarative
+   partitioning (PARTITION BY RANGE (reviewed_at)) + 12 子表。
+
+4. migration 自动载入: R15.22 启动 API 时自动跑 Migrator.Apply
+   (现在只在 CLI 手动跑), 免运维人工跑。
+```
