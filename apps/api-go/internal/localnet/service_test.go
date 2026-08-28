@@ -429,3 +429,177 @@ func TestListFeedPosts_SceneAestheticBackdrop_NilProvider_StillWorks(t *testing.
 		t.Fatalf("nil provider must omit sceneAestheticBackdrop, but was present: %+v", items[0])
 	}
 }
+
+// ── R15.14 LocationContext → ListFeedPosts filter ────────────────────
+//
+// 之前 LocationContext 只是顶 chrome 文本 (P5) — 顶 chip “查看 · 河内”
+// 点哪都不影响 feed content。R15.14 修复这个：客户端在
+// ListFeedPosts payload.viewingCity 传 currentLocation.city，
+// 服务器按 CityScope 严格匹配过滤。逆序：P5 送了 1 个发帖子 +
+// 4 个 tripwires，P4 留下"Post 暂未携带 SceneType" + "LocationContext
+// 不影响 service" 两个明确点 — 本轮关闭后者。
+
+func TestListFeedPosts_ViewingCity_FiltersByCityScope(t *testing.T) {
+	// 顶 chip 选 河内 应当只看到 CityScope=河内 的帖子。
+	// 胡志明市帖 不能被静默包进河内 feed。
+	s := New()
+	posts := []map[string]any{
+		{"authorType": "AGENT", "body": "河内·还剑湖清早", "visibility": "PUBLIC", "cityScope": "河内"},
+		{"authorType": "AGENT", "body": "HCM·Bitexco 夜景", "visibility": "PUBLIC", "cityScope": "胡志明市"},
+		{"authorType": "AGENT", "body": "河内·西湖老店", "visibility": "PUBLIC", "cityScope": "河内"},
+		{"authorType": "AGENT", "body": "岘港·海云岭", "visibility": "PUBLIC", "cityScope": "岘港"},
+	}
+	for _, p := range posts {
+		r := s.Handle(envelopeFor("", "CreatePost", p))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("seed post: %s (%+v)", r.Outcome, r.Error)
+		}
+	}
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"viewingCity": "河内"}))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed: %s (%+v)", list.Outcome, list.Error)
+	}
+	var view struct {
+		Posts       []Post  `json:"posts"`
+		ViewingCity string  `json:"viewingCity"`
+		Unfiltered  bool    `json:"unfiltered"`
+		Media       map[string][]map[string]any `json:"media"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse: %v\n%s", err, list.OperationRef)
+	}
+	if len(view.Posts) != 2 {
+		t.Fatalf("want 2 hanoi posts, got %d (bodies=%+v)", len(view.Posts), view.Posts)
+	}
+	for _, p := range view.Posts {
+		if p.CityScope != "河内" {
+			t.Fatalf("non-hanoi post leaked through filter: cityScope=%s", p.CityScope)
+		}
+	}
+	if view.ViewingCity != "河内" {
+		t.Fatalf("viewingCity echo lost: %q", view.ViewingCity)
+	}
+	if view.Unfiltered {
+		t.Fatalf("unfiltered flag should be false when viewingCity is set")
+	}
+}
+
+func TestListFeedPosts_EmptyViewingCity_FallsBackToUnfiltered(t *testing.T) {
+	// 客户端没传 viewingCity (legacy 路径) 或传空字符串 — 服务端
+	// 不应该静默过滤到 0 帖，而是 echo unfiltered=true 让老调用方
+	// 走全量 feed。
+	s := New()
+	for _, body := range []string{"河内·还剑湖", "HCM·Bitexco", "岘港·海云岭"} {
+		s.Handle(envelopeFor("", "CreatePost", map[string]any{
+			"authorType": "AGENT", "body": body, "visibility": "PUBLIC", "cityScope": "任意",
+		}))
+	}
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed: %s", list.Outcome)
+	}
+	var view struct {
+		Posts       []Post `json:"posts"`
+		ViewingCity string `json:"viewingCity"`
+		Unfiltered  bool   `json:"unfiltered"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(view.Posts) != 3 {
+		t.Fatalf("want 3 posts unfiltered, got %d", len(view.Posts))
+	}
+	if !view.Unfiltered {
+		t.Fatalf("unfiltered flag must be true when viewingCity absent")
+	}
+	if view.ViewingCity != "" {
+		t.Fatalf("viewingCity should echo empty, got %q", view.ViewingCity)
+	}
+
+	// Explicit empty string should also fall back to unfiltered —
+	// location-store load failure / blank state should not zero out feed.
+	list2 := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"viewingCity": ""}))
+	var view2 struct {
+		Posts      []Post `json:"posts"`
+		Unfiltered bool   `json:"unfiltered"`
+	}
+	_ = json.Unmarshal([]byte(list2.OperationRef), &view2)
+	if len(view2.Posts) != 3 {
+		t.Fatalf("empty viewingCity must not filter, got %d posts", len(view2.Posts))
+	}
+	if !view2.Unfiltered {
+		t.Fatalf("empty viewingCity must set unfiltered=true")
+	}
+}
+
+func TestListFeedPosts_ViewingCity_WhitespacesAreTrimmed(t *testing.T) {
+	// "   河内  " 应该等同 "河内" — location-store 可能从 secure
+	// store 读出时多带个空格；服务器必须 trim，不能让空格静默
+	// 造成 0 帖。
+	s := New()
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "河内·还剑湖", "visibility": "PUBLIC", "cityScope": "河内",
+	}))
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "HCM·Bitexco", "visibility": "PUBLIC", "cityScope": "胡志明市",
+	}))
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"viewingCity": "   河内   "}))
+	var view struct {
+		Posts []Post `json:"posts"`
+	}
+	_ = json.Unmarshal([]byte(list.OperationRef), &view)
+	if len(view.Posts) != 1 || view.Posts[0].CityScope != "河内" {
+		t.Fatalf("whitespace padding must trim, got %d posts (bodies=%+v)", len(view.Posts), view.Posts)
+	}
+}
+
+func TestListFeedPosts_ViewingCity_PostsWithoutCityScopePassThrough(t *testing.T) {
+	// 帖子未设 CityScope (老发布路径) — 顶 chip 选任何 city
+	// 都不应过滤掉这种帖子，避免误伤老内容。
+	s := New()
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "没标 city", "visibility": "PUBLIC",
+		// no cityScope
+	}))
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "河内", "visibility": "PUBLIC", "cityScope": "河内",
+	}))
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"viewingCity": "胡志明市"}))
+	var view struct {
+		Posts []Post `json:"posts"`
+	}
+	_ = json.Unmarshal([]byte(list.OperationRef), &view)
+	if len(view.Posts) != 1 {
+		t.Fatalf("want 1 post (legacy without cityScope), got %d", len(view.Posts))
+	}
+	if view.Posts[0].Body != "没标 city" {
+		t.Fatalf("wrong post passed through: %+v", view.Posts[0])
+	}
+}
+
+func TestListFeedPosts_ViewingCity_MalformedPayloadFallsBackToUnfiltered(t *testing.T) {
+	// 客户端发了 garbage payload (e.g. viewingCity=123 数字，不是
+	// string) — decode 失败不应被 reject 整个请求，而应走全量。
+	// 这条是 fail-closed vs fail-open 选型 — 我们选 fail-open 在
+	// 过滤这一层，让 view 不会突然空白。
+	s := New()
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "河内", "visibility": "PUBLIC", "cityScope": "河内",
+	}))
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"viewingCity": 12345}))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("garbage payload must not reject: %s (%+v)", list.Outcome, list.Error)
+	}
+	var view struct {
+		Posts      []Post `json:"posts"`
+		Unfiltered bool   `json:"unfiltered"`
+	}
+	_ = json.Unmarshal([]byte(list.OperationRef), &view)
+	if len(view.Posts) != 1 {
+		t.Fatalf("want 1 post, got %d", len(view.Posts))
+	}
+	if !view.Unfiltered {
+		t.Fatalf("malformed viewingCity must fall back to unfiltered")
+	}
+}
+

@@ -48,9 +48,18 @@ export class LocalNetClient {
     return `${this.input.baseUrl}${path}`;
   }
 
-  public async listFeedPosts(): Promise<FeedReadModel> {
+  public async listFeedPosts(viewingCity?: string): Promise<FeedReadModel> {
+    // R15.14：LocationContext 顶 chip 真的影响 feed。客户端传
+    // currentLocation.city，服务端会逐项与 Post.CityScope 严格
+    // 匹配；空 / undefined = 不过滤 (legacy 行为)，不会 break 现有
+    // 流程。
     const session = await this.optionalSession();
-    const result = await this.sendCommand(session, "ListFeedPosts", { type: "Feed", id: "local" }, {});
+    const result = await this.sendCommand(
+      session,
+      "ListFeedPosts",
+      { type: "Feed", id: "local" },
+      viewingCity ? { viewingCity } : {}
+    );
     const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
     return { posts: payload.posts, media: payload.media };
   }

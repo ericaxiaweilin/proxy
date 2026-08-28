@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CommandEnvelopeSchema, FeedMediaItemSchema, MAX_AUDIO_DURATION_MS, MediaVariantSchema } from "./index";
+import { CommandEnvelopeSchema, FeedMediaItemSchema, ListFeedPostsPayloadSchema, MAX_AUDIO_DURATION_MS, MediaVariantSchema } from "./index";
 
 describe("command envelope", () => {
   it("rejects a command without idempotency", () => {
@@ -84,6 +84,30 @@ describe("AUDIO media (voice posts, ≤30s)", () => {
 
   it("exposes MAX_AUDIO_DURATION_MS = 30s as the shared ceiling", () => {
     expect(MAX_AUDIO_DURATION_MS).toBe(30_000);
+  });
+
+  // R15.14: LocationContext 顶 chip 真的影响 feed — 服务器在
+  // ListFeedPostsPayload 多了两个 echo 字段 (viewingCity,
+  // unfiltered) 证明 filter 跟顶 chip 同源。
+  it("ListFeedPostsPayload accepts viewingCity echo (LocationContext filter evidence)", () => {
+    const parsed = ListFeedPostsPayloadSchema.parse({
+      posts: [],
+      media: {},
+      note: "R15.14 contract smoke",
+      viewingCity: "河内",
+      unfiltered: false
+    });
+    expect(parsed.viewingCity).toBe("河内");
+    expect(parsed.unfiltered).toBe(false);
+  });
+
+  it("ListFeedPostsPayload treats viewingCity as optional (legacy callers unaffected)", () => {
+    // R15.13 P4 / R14 client code 调 listFeedPosts() 不传 viewingCity
+    // — server 现在 echo 空 + unfiltered=true。schema 不能 reject
+    // 老 shape，否则 client 升级中转 P4 → P14 出现类型竞争。
+    const parsed = ListFeedPostsPayloadSchema.parse({ posts: [], media: {} });
+    expect(parsed.viewingCity).toBeUndefined();
+    expect(parsed.unfiltered).toBeUndefined();
   });
 
   it("still rejects unknown media types", () => {

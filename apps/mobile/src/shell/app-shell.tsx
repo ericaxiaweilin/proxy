@@ -414,7 +414,7 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} bottomNavVisible={isNavVisible} />
+            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} bottomNavVisible={isNavVisible} viewingCity={currentLocation.city} />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (

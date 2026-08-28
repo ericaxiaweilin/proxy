@@ -224,7 +224,10 @@ export function FeedSurface({
   onOpenFeedPrefs,
   onChromeVisibilityChange,
   refreshTrigger,
-  bottomNavVisible
+  bottomNavVisible,
+  // R15.14: LocationContext — 顶 chip 选的城市。变化时 feed
+  // 重新拉。空 / undefined = 不过滤 (legacy)。
+  viewingCity
 }: {
   localNet: LocalNetClient;
   marketplace: MarketplaceClient;
@@ -236,6 +239,7 @@ export function FeedSurface({
   onChromeVisibilityChange?: (visible: boolean) => void;
   refreshTrigger?: number;
   bottomNavVisible?: boolean;
+  viewingCity?: string;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>("RECOMMENDED");
   const [section, setSection] = useState<FeedSection>("POSTS");
@@ -486,14 +490,14 @@ export function FeedSurface({
     }
     try {
       const [postResult, marketResult] = await Promise.allSettled([
-        localNet.listFeedPosts(),
+        localNet.listFeedPosts(viewingCity),
         marketplace.list()
       ]);
       if (postResult.status === "rejected" && marketResult.status === "rejected") throw new Error("feed sources unavailable");
       let read = postResult.status === "fulfilled" ? postResult.value : { posts: [], media: {} };
       if (postResult.status === "fulfilled" && read.posts.length === 0) {
         await seedDemoPosts();
-        read = await localNet.listFeedPosts();
+        read = await localNet.listFeedPosts(viewingCity);
       }
       const opportunities = marketResult.status === "fulfilled" ? marketResult.value : [];
       const unifiedPosts = mergeFeedContent(read.posts, opportunities, Date.now());
@@ -508,13 +512,13 @@ export function FeedSurface({
     } catch {
       setPhase("ERROR");
     }
-  }, [localNet, marketplace, seedDemoPosts]);
+  }, [localNet, marketplace, seedDemoPosts, viewingCity]);
 
   // 后台静默刷新：不显示 LOADING，只检测新帖
   const backgroundRefresh = useCallback(async (): Promise<void> => {
     try {
       const [postResult, marketResult] = await Promise.allSettled([
-        localNet.listFeedPosts(),
+        localNet.listFeedPosts(viewingCity),
         marketplace.list()
       ]);
       if (postResult.status === "rejected" && marketResult.status === "rejected") return;
@@ -532,7 +536,7 @@ export function FeedSurface({
     } catch {
       // 静默失败
     }
-  }, [localNet, marketplace]);
+  }, [localNet, marketplace, viewingCity]);
 
   // 切换到 Feed tab 时触发后台刷新
   useEffect(() => {

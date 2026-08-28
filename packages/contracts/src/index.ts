@@ -372,7 +372,14 @@ export type FeedMediaItem = z.infer<typeof FeedMediaItemSchema>;
 export const ListFeedPostsPayloadSchema = z.object({
   posts: z.array(FeedPostSchema),
   media: z.record(z.string(), z.array(FeedMediaItemSchema)).default({}),
-  note: z.string().optional()
+  note: z.string().optional(),
+  // R15.14: 回显服务端实际使用的过滤 city。客户端用这个字段证明
+  // 顶 chip “查看 · 河内” 与 feed content 真的同源。如果客户端传
+  // viewingCity=“河内” 服务端仅河内帖子过滤，field 就是 “河内”；
+  // 不传或空，服务端全量，field 也会是 undefined。无法静默降级。
+  viewingCity: z.string().optional(),
+  // R15.14: 同样回显全量不过滤 (client 没传或传 "" 等于 “全量”).
+  unfiltered: z.boolean().optional()
 });
 export type ListFeedPostsPayload = z.infer<typeof ListFeedPostsPayloadSchema>;
 

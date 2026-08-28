@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -510,12 +511,31 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 // ---------- ListFeedPosts ----------
 // PRD §8 Feed 管道：Eligibility → Hydration → Utility Ranking → Diversity/Mixing。
 // 排序目标是有用的本地连接，不是最大化纯互动。
+//
+// R15.14：LocationContext (顶 chip) 真的影响 feed — 客户端在
+// payload.viewingCity 传当前 location.city（如 “河内” /
+// “胡志明市” / “岘港”）。服务器拿这个与 Post.CityScope
+// （发布时手动设置 / 默认为 actor city）逐项做严格匹配；空
+// string 或字段未传都走 “不过滤" 路径，保证向后兼容。
+// 响应里 echo viewingCity + unfiltered，让客户端顶 chip 与
+// 实际过滤状态对得上。
+
+type listFeedPayload struct {
+	// R15.14：viewer 当前的本地范围 city. 空 = 不过滤。
+	ViewingCity string `json:"viewingCity"`
+}
 
 func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
 	posts, err := s.repository.Snapshot(ctx)
 	if err != nil {
 		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)
 	}
+	// R15.14：LocationContext 过滤 — 从 payload.viewingCity 读 viewer
+	// 当前城市。空 = 不过滤 (legacy 行为)。
+	var payload listFeedPayload
+	_ = decode(e.Payload, &payload) // payload 可选, decode 失败静默退到全量
+	filterCity := strings.TrimSpace(payload.ViewingCity)
+	unfiltered := filterCity == ""
 	// Utility Ranking：时间衰减 + 上下文关联权重（Eligibility：PUBLIC + 可见）
 	feed := make([]Post, 0, len(posts))
 	for _, p := range posts {
@@ -529,6 +549,16 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		// of treating FOLLOWERS as public; authors may still see their own post.
 		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
 			continue
+		}
+		// R15.14：LocationContext 过滤。
+		// 严格匹配 CityScope == viewingCity 是有意为之 — 用户在
+		// 河内选了“只显示河内帖子”，在 HCMC 的帖子不会错误地出现。
+		// 帖子没设 CityScope 的全量出现，避免误伤。
+		if !unfiltered {
+			postCity := strings.TrimSpace(p.CityScope)
+			if postCity != "" && postCity != filterCity {
+				continue
+			}
 		}
 		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
 		if p.MediaRefs == nil {
@@ -624,6 +654,9 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		"posts": feed,
 		"media": feedMedia, // postId → []PostMediaItem（R14 Adaptive Media Rail Read Model）
 		"note":  "实时交易事实（价格/可用性/商家状态）由读取时 Hydration 获得，Post 不是 Source of Truth；媒体只呈现 READY",
+		// R15.14：回显过滤状态，顶 chip 与实际过滤同源
+		"viewingCity": filterCity,
+		"unfiltered":  unfiltered,
 	}, nil)
 }
 
