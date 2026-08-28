@@ -7,7 +7,8 @@ import {
   shouldPreserveWholeSubject,
   deriveMediaKind,
   shouldAutoPlayVideo,
-  formatCarouselCounter
+  formatCarouselCounter,
+  wallCellAspect
 } from "./media-presentation";
 import type { FeedMediaItem } from "@proxy/contracts";
 
@@ -28,8 +29,8 @@ describe("portrait social media presentation", () => {
     expect(layout.portraitCardWidth / layout.railHeight).toBeCloseTo(0.8);
   });
 
-  it("fills a 4:5 half-body image but preserves an entire 9:16 body", () => {
-    expect(shouldPreserveWholeSubject(4 / 5, 4 / 5)).toBe(false);
+  it("preserves both half-body and full-body photos instead of guessing a crop from aspect", () => {
+    expect(shouldPreserveWholeSubject(4 / 5, 4 / 5)).toBe(true);
     expect(shouldPreserveWholeSubject(9 / 16, 4 / 5)).toBe(true);
   });
 
@@ -46,7 +47,7 @@ describe("portrait social media presentation", () => {
       { aspectRatio: 9 / 16, width: 2160, height: 3840 },
       { aspectRatio: 3 / 4, width: 2250, height: 3000 }
     ], 360);
-    expect(metrics.offsets).toEqual([0, 312.4, 624.8]);
+    expect(metrics.offsets).toEqual([0, 312.4, 535.025]);
     expect(nearestRailIndex(metrics.offsets, 330)).toBe(1);
     expect(nearestRailIndex(metrics.offsets, 610)).toBe(2);
   });
@@ -211,5 +212,53 @@ describe("Gate H · formatCarouselCounter", () => {
 
   it("H5 · 单张轮播 → '1/1'", () => {
     expect(formatCarouselCounter(0, 1)).toBe("1/1");
+  });
+});
+
+describe("wallCellAspect (R15.16 P1) — wall 2列 row 高度门", () => {
+  it("portrait 4:5 保持 0.8 (不被压成横条)", () => {
+    expect(wallCellAspect(4 / 5)).toBeCloseTo(0.8, 3);
+  });
+
+  it("portrait 9:16 上升至 4:5 最低 (0.8) (wall cell 隱含 cover)", () => {
+    // 9:16 全身在 Pinterest-style wall 会被 cell 上下裁一些 —
+    // 这是 wall 设计隐含, RAIL/SINGLE 才是保留全身的路径。
+    // tripwire 钉明: wall cellAspect 最低 0.8。
+    expect(wallCellAspect(9 / 16)).toBeCloseTo(4 / 5, 3);
+  });
+
+  it("portrait 0.4 (极端长 portrait) 上升至 4:5 最低 (0.8)", () => {
+    // 1:2.5 这种超长不会发生于手机, 但 cellHeight = cellWidth / 0.4
+    // 会使 cell 变 2.5 倍 cellWidth — Pinterest 体验上不能接受。
+    // clamp 到 4:5, image 走 cover 填 cell 上下边。
+    expect(wallCellAspect(0.4)).toBeCloseTo(4 / 5, 3);
+  });
+
+  it("landscape 1:1 (9 宫图) 保持 1.0", () => {
+    expect(wallCellAspect(1)).toBe(1);
+  });
+
+  it("landscape 4:3 (1.33) 保持 1.33 (原比例)", () => {
+    expect(wallCellAspect(4 / 3)).toBeCloseTo(4 / 3, 3);
+  });
+
+  it("landscape 16:9 (1.78) 保持 1.78", () => {
+    expect(wallCellAspect(16 / 9)).toBeCloseTo(16 / 9, 3);
+  });
+
+  it("landscape 21:9 cinema (2.33) clamp 到 1.91 (不超长 cell 高)", () => {
+    // 21:9 banner 在 cell 高度 = cellWidth / 2.33 = 0.43 cellW
+    // 是矮 cell — wall 会留下很多黑边。clamp 到 1.91 (16:9 上限)
+    // 使 cellHeight 变 0.52 cellW, 仍能 cover + 不会过净。
+    expect(wallCellAspect(21 / 9)).toBeCloseTo(1.91, 3);
+  });
+
+  it("landscape 3:1 (超长 banner) clamp 到 1.91", () => {
+    expect(wallCellAspect(3)).toBeCloseTo(1.91, 3);
+  });
+
+  it("非正值 (0 / 负数) 返 1 (square fallback)", () => {
+    expect(wallCellAspect(0)).toBe(1);
+    expect(wallCellAspect(-1)).toBe(1);
   });
 });

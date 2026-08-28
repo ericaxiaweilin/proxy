@@ -35,7 +35,8 @@ import {
   mediaCollectionMode,
   mediaRailMetrics,
   nearestRailIndex,
-  shouldAutoPlayVideo
+  shouldAutoPlayVideo,
+  wallCellAspect
 } from "../media-presentation";
 import { SocialMediaFrame } from "./SocialMediaFrame";
 import { AudioStage } from "./audio-stage";
@@ -306,6 +307,7 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
           source={{ uri }}
           style={styles.singleAsset}
           contentFit="contain"
+          contentPosition="center"
           transition={200}
           cachePolicy="memory-disk"
           priority="normal"
@@ -567,6 +569,7 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
       >
         {items.map((item, index) => {
           const cardWidth = metrics.cardWidths[index] ?? contentWidth * 0.84;
+          const cardHeight = metrics.cardHeights[index] ?? metrics.railHeight;
           const isVideo = item.mediaType === "VIDEO";
           const cardUri = isVideo
             ? resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "")
@@ -584,7 +587,7 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
               accessibilityLabel={`查看第 ${index + 1} 张媒体`}
               key={item.mediaAssetId}
               onPress={() => onOpen(index)}
-              style={{ height: metrics.railHeight, marginRight: CARD_GAP, width: cardWidth }}
+              style={{ alignSelf: "center", height: cardHeight, marginRight: CARD_GAP, width: cardWidth }}
             >
               {isVideo ? (
                 <VideoStage
@@ -593,12 +596,12 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
                   autoPlay={shouldAutoPlayVideo(item) && index === currentIndex}
                   isActive={isActive}
                   onPress={() => onOpen(index)}
-                  frameAspect={cardWidth / metrics.railHeight}
+                  frameAspect={cardWidth / cardHeight}
                   resolveUrl={resolveUrl}
                   {...(onFrame ? { onFrame } : {})}
                 />
               ) : (
-                <SocialMediaFrame item={item as ItemWithHint} frameAspect={cardWidth / metrics.railHeight} resolveUrl={resolveUrl} />
+                <SocialMediaFrame item={item as ItemWithHint} frameAspect={cardWidth / cardHeight} resolveUrl={resolveUrl} />
               )}
               <View style={styles.railBadge}><Text style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
             </Pressable>
@@ -612,32 +615,38 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
 function MediaWall({ items, resolveUrl, onOpen, activeVideoKey, onVideoFrame, collectionKey }: Props): React.JSX.Element {
   const [contentWidth, setContentWidth] = useState(320);
   const cellWidth = (contentWidth - WALL_GAP) / 2;
+  const columns = [
+    items.map((item, index) => ({ item, index })).filter(({ index }) => index % 2 === 0),
+    items.map((item, index) => ({ item, index })).filter(({ index }) => index % 2 === 1)
+  ];
   return (
     <View onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}>
       <View style={styles.wall}>
-        {items.map((item, index) => {
-          const aspect = mediaAspect(item, 1);
-          // 【fix 2026-08-26】横图不强制 1:1：原比例 clamp 到 [1, 1.91] 避免 1:1 压扁横图 / 被切成竖条。
-          // 竖图仍走 4:5 最低（不被压成横条）— 与原逻辑一致。
-          // 4:5 (0.8) portrait → cellAspect = 0.8  (原比例)
-          // 1:1 square         → cellAspect = 1.0
-          // 4:3 (1.33) 横图     → cellAspect = 1.33  (原比例，不再被压成 1:1)
-          // 16:9 (1.78) 横图   → cellAspect = 1.78
-          // 21:9 (2.33) 电影    → cellAspect = 1.91  (clamp 上限，cover)
-          const cellAspect = aspect >= 1
-            ? Math.min(1.91, Math.max(1, aspect))
-            : Math.max(4 / 5, aspect);
-          const isVideo = item.mediaType === "VIDEO";
-          const cardUri = isVideo
-            ? resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "")
-            : resolveUrl(selectVariantForViewport(item, cellWidth).url ?? "");
-          const videoKey = isVideo ? `${collectionKey ?? "0"}:${index}:${item.mediaAssetId}` : null;
-          // 【fix 2026-08-26】同 RAIL：activeVideoKey 匹配 + index===0 才走 ActiveVideoStage。
-          const isActive = isVideo && activeVideoKey === videoKey && index === 0;
-          const onFrame = isVideo && onVideoFrame && videoKey
-            ? (frame: { y: number; height: number }) => onVideoFrame(videoKey, frame)
-            : undefined;
-          return (
+        {columns.map((column, columnIndex) => (
+          <View key={`wall-column-${columnIndex}`} style={[styles.wallColumn, columnIndex === 0 ? { marginRight: WALL_GAP } : null]}>
+            {column.map(({ item, index }) => {
+              // Wall cell aspect: portrait 走 4:5 最低 (不被压
+              // 成横条)，landscape 走 1:1 最高 (不超长到撑爆 row)。
+              // 9:16 (0.56) portrait → 0.56  (原比例)
+              // 4:5 (0.8) portrait   → 0.8
+              // 1:1 (1.0) square     → 1.0
+              // 4:3 (1.33) landscape  → 1.33
+              // 16:9 (1.78) landscape → 1.78
+              // 21:9 (2.33) cinema   → 1.91 (clamp, cover 模式)
+              // Tripwire 在 media-presentation.test.ts: wallCellAspect
+              // 跑 6 个 boundary。
+              const aspect = mediaAspect(item, 1);
+              const cellAspect = aspect >= 1 ? Math.min(1.91, Math.max(1, aspect)) : Math.max(4 / 5, aspect);
+              const isVideo = item.mediaType === "VIDEO";
+              const cardUri = isVideo
+                ? resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "")
+                : resolveUrl(selectVariantForViewport(item, cellWidth).url ?? "");
+              const videoKey = isVideo ? `${collectionKey ?? "0"}:${index}:${item.mediaAssetId}` : null;
+              const isActive = isVideo && activeVideoKey === videoKey && index === 0;
+              const onFrame = isVideo && onVideoFrame && videoKey
+                ? (frame: { y: number; height: number }) => onVideoFrame(videoKey, frame)
+                : undefined;
+              return (
             <Pressable
               accessibilityLabel={`查看第 ${index + 1} 张媒体`}
               key={item.mediaAssetId}
@@ -646,7 +655,6 @@ function MediaWall({ items, resolveUrl, onOpen, activeVideoKey, onVideoFrame, co
                 styles.wallCell,
                 {
                   height: cellWidth / cellAspect,
-                  marginRight: index % 2 === 0 ? WALL_GAP : 0,
                   width: cellWidth
                 }
               ]}
@@ -667,8 +675,10 @@ function MediaWall({ items, resolveUrl, onOpen, activeVideoKey, onVideoFrame, co
               )}
               <View style={styles.railBadge}><Text style={styles.railBadgeText}>{index + 1}/{items.length}</Text></View>
             </Pressable>
-          );
-        })}
+              );
+            })}
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -748,6 +758,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "flex-start"
   },
+  wallColumn: { flex: 1 },
   wallCell: {
     backgroundColor: FRAME_BACKGROUND_HEX,
     borderRadius: SOCIAL_MEDIA_RADIUS,

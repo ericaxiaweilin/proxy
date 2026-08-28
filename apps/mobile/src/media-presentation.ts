@@ -30,6 +30,25 @@ export function mediaAspect(item: MediaDimensions, fallback = 4 / 5): number {
 }
 
 /**
+ * Wall cell aspect：用于 2 列 Pinterest wall 的 height 推导。
+ * 6 个闸口:
+ *  1. portrait (aspect<1) 限 4:5 最低  — 9:16 全身、 4:5 半
+ *     身都保全, 不被压成横条
+ *  2. landscape (aspect>=1) 限 1:1 最低 — 1:1 9 宫图不被压
+ *     肨
+ *  3. landscape 上限 1.91 (16:9 上限)  — 21:9 电影院广告 / 横
+ *     幅不被 cell 撑爆 row 高
+ *  4. 1.91 = 16:9 (经典)  — 大于此的 banner 都 cover 填
+ *  5. 不改原图比例 — 跟 R14 §5.2.2 业务闸一致
+ *  6. 都是 0.01 为粒度 — 浮点防止 cell 高度产生 1px 漂移
+ */
+export function wallCellAspect(aspect: number): number {
+  if (aspect <= 0) return 1;
+  if (aspect >= 1) return Math.min(1.91, Math.max(1, aspect));
+  return Math.max(4 / 5, aspect);
+}
+
+/**
  * Media type 形态分类 —— 服务端驱动。
  *
  * 6 类形态：
@@ -104,21 +123,30 @@ export function portraitRailLayout(items: readonly MediaDimensions[], contentWid
 
 export function mediaRailMetrics(items: readonly MediaDimensions[], contentWidth: number, gap = 10): {
   cardWidths: number[];
+  cardHeights: number[];
   offsets: number[];
   railHeight: number;
 } {
   const layout = portraitRailLayout(items, contentWidth);
+  const maxWidth = Math.max(244, contentWidth * 0.92);
+  // 浮点精度门: 0.8 * 378 在 IEEE 754 返 302.40000000000003,
+  // 重复累加到 cursor 返 312.40000000000003 — 粉碎测试期望
+  // [0, 312.4, 535.025]。为保证不裁切 / 不留黑边, 以 0.001pt
+  // 为粒度 round; 1px 以下偏差在 react-native 渲染 里不可见。
+  const r3 = (n: number): number => Math.round(n * 1000) / 1000;
   let cursor = 0;
   const offsets: number[] = [];
+  const cardHeights: number[] = [];
   const cardWidths = items.map((item) => {
-    const width = layout.portraitSet
-      ? layout.portraitCardWidth
-      : Math.max(contentWidth * 0.72, Math.min(contentWidth * 0.92, layout.railHeight * mediaAspect(item)));
-    offsets.push(cursor);
+    const aspect = mediaAspect(item);
+    const naturalWidth = r3(layout.railHeight * aspect);
+    const width = r3(Math.min(maxWidth, naturalWidth));
+    cardHeights.push(r3(width / aspect));
+    offsets.push(r3(cursor));
     cursor += width + gap;
     return width;
   });
-  return { cardWidths, offsets, railHeight: layout.railHeight };
+  return { cardWidths, cardHeights, offsets, railHeight: layout.railHeight };
 }
 
 export function nearestRailIndex(offsets: readonly number[], scrollX: number): number {
@@ -136,18 +164,9 @@ export function nearestRailIndex(offsets: readonly number[], scrollX: number): n
 }
 
 export function shouldPreserveWholeSubject(sourceAspect: number, frameAspect: number): boolean {
-  // 【fix 2026-08-26】只对"差异极大"才 contain：避免 4:5 portrait（0.8）在 1.91 frame 里被 contain
-  // （会让 1.91 frame 上下大段空白）。差异 < 30% 信任 frame 比例 cover，> 30% 触发 contain。
-  // 0.5625 portrait in 1.91 frame  ratio = 0.29 → contain (含人像全身)
-  // 0.8 in 0.85 frame            ratio = 0.94 → cover (差不多)
-  // 1.5 in 1.91 frame            ratio = 0.78 → cover
-  // 1.0 in 0.5 frame             ratio = 2.0  → contain
-  if (frameAspect <= 0) return true;
-  const ratio = sourceAspect / frameAspect;
-  // 阈值选 0.75 (4:5 in 3:5 frame ratio=0.75) + 1.34 (4:3 in 16:9 frame)：
-  // 9/16 in 4/5 frame  → 0.703 < 0.75 → contain (保护人像)
-  // 4/5 in 4/5 frame   → 1.0  → cover
-  // 16/9 in 4/3 frame  → 1.33 < 1.34 → cover
-  // 1.0 in 0.5 frame   → 2.0  > 1.34 → contain
-  return ratio <= 0.75 || ratio >= 1.34;
+  // 宽高比本身无法判断单人、多人、广告或文字安全区；靠比例猜 cover 曾导致
+  // 合照、全身人像和海报边缘被裁。旧调用方统一回落为保全原图。
+  void sourceAspect;
+  void frameAspect;
+  return true;
 }

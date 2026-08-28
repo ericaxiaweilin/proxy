@@ -52,7 +52,20 @@ func main() {
 	}
 	mediaStoreDir := strings.TrimSpace(os.Getenv("PROXY_MEDIA_STORE_DIR"))
 	if mediaStoreDir == "" {
-		mediaStoreDir = filepath.Join(".", "media_store")
+		// iCloud 防护: 项目在 Desktop + iCloud sync 范围时, media_store
+		// 会被 iCloud "evict" — 文件被替换成 dataless 占位, 媒体
+		// 服务返超时 / 0 byte。默认跳过 iCloud 路径, 走非同步位置。
+		// 优先用  ~/Developer/kake-data/media_store, 推不到再回项目内。
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			candidate := filepath.Join(home, "Developer", "kake-data", "media_store")
+			if err := os.MkdirAll(candidate, 0o755); err == nil {
+				mediaStoreDir = candidate
+			}
+		}
+		if mediaStoreDir == "" || mediaStoreDir == filepath.Join(".", "media_store") {
+			mediaStoreDir = filepath.Join(".", "media_store")
+		}
 	}
 
 	if warnings := bootenv.Warnings(); len(warnings) > 0 {
