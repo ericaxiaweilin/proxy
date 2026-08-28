@@ -22,6 +22,7 @@ import {
   gridToLatLng,
   LOCATION_OPTIONS,
   makeCustomLocation,
+  reverseGeocode,
   type AnyLocation,
   type CustomLocation,
   type PresetLocation
@@ -167,5 +168,80 @@ describe("LocationPickerSheet (R15.13 P6) — custom coordinate + radius", () =>
       const custom = makeCustomLocation("河内", 5, 5, r);
       expect(custom.custom.radiusMeters).toBe(r);
     }
+  });
+});
+
+describe("reverseGeocode (R15.15 P2) — OSM Nominatim + offline-grid fallback", () => {
+  it("returns remote shape when Nominatim responds (no real fetch in test)", async () => {
+    // stub fetcher 代替真的 fetch — vitest 不打 Nominatim。
+    // 这调上成功路径: response.ok + display_name 提取。
+    const stubFetcher = async (_url: string): Promise<{ ok: boolean; json: () => Promise<unknown> }> => ({
+      ok: true,
+      json: async () => ({
+        display_name: "Hoàn Kiếm Lake, Hà Nội",
+        address: { road: "Đinh Tiên Hoàng", attraction: "Hoàn Kiếm Lake" }
+      })
+    });
+    const r = await reverseGeocode("河内", 21.0285, 105.8542, { fetcher: stubFetcher });
+    expect(r.source).toBe("remote");
+    expect(r.displayName).toContain("Hoàn Kiếm");
+    expect(r.road).toBe("Đinh Tiên Hoàng");
+    expect(r.poi).toBe("Hoàn Kiếm Lake");
+  });
+
+  it("falls back to offline-grid when fetcher absent (no network in tests)", async () => {
+    // 不传 fetcher — 代表 SSR / 测试 / 无网场景。reverseGeocode
+    // 必须 fall back 到 gridToLatLngToGrid + CITY_POIS, 不能
+    // 抛错。
+    const r = await reverseGeocode("河内", 21.0285, 105.8542);
+    expect(r.source).toBe("offline-grid");
+    expect(r.displayName.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to offline-grid when fetcher throws (network error)", async () => {
+    // Nominatim 击沉 / 5xx / 超时 — 不让 reverseGeocode reject
+    // (逆编码失败不能让用户不能保存 pin)。 
+    const failingFetcher = async (): Promise<{ ok: boolean; json: () => Promise<unknown> }> => {
+      throw new Error("ECONNREFUSED");
+    };
+    const r = await reverseGeocode("河内", 21.0285, 105.8542, { fetcher: failingFetcher });
+    expect(r.source).toBe("offline-grid");
+  });
+
+  it("falls back to offline-grid when Nominatim returns 503", async () => {
+    // fetcher ok=false — 走同 offline 路径。
+    const errorFetcher = async (): Promise<{ ok: boolean; json: () => Promise<unknown> }> => ({
+      ok: false,
+      json: async () => ({})
+    });
+    const r = await reverseGeocode("河内", 21.0285, 105.8542, { fetcher: errorFetcher });
+    expect(r.source).toBe("offline-grid");
+  });
+
+  it("offline-grid pinpoint finds Hanoi Hoan Kiem Lake (grid 4,6)", async () => {
+    // 河内 4,6 = 还剑湖。如果 gridToLatLngToGrid 走错，poi
+    // 不会被认出来。这是手动拔 POINT_OF_INTEREST 跟 grid
+    // 映射的 tripwire。
+    const r = await reverseGeocode("河内", 21.0285, 105.8542);
+    // center 5,5 离 (4,6) 距离 2, (8,3) 距离 5 — 最近是还剑湖
+    expect(r.displayName).toContain("还剑湖");
+  });
+
+  it("offline-grid HCMC D1 Bitexco (grid 5,4)", async () => {
+    const r = await reverseGeocode("胡志明市", 10.776, 106.701);
+    expect(r.displayName).toContain("Bitexco");
+  });
+
+  it("offline-grid Da Nang Han River (grid 5,5)", async () => {
+    const r = await reverseGeocode("岘港", 16.054, 108.202);
+    expect(r.displayName).toContain("龙桥");
+  });
+
+  it("offline-grid for unknown city still returns readable name (no crash)", async () => {
+    // 不在 CITY_POIS 表的 city 返 “(city) · 网格 (x, y)”，不能
+    // 拵错也不能返“河内 附近”（这是 state 会调张的 bug）。
+    const r = await reverseGeocode("下龙湾", 20.91, 107.18);
+    expect(r.displayName).toContain("下龙湾");
+    expect(r.displayName).toContain("网格");
   });
 });

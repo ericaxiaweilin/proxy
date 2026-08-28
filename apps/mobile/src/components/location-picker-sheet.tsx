@@ -5,7 +5,7 @@
 // (不引 react-native-maps，避免 prebuild / pod install 阻塞)，但
 // 给了真实 grid 坐标 + 半径 + 城市名 — 这三件对"feed 怎么用
 // location" 已经够。
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { MapCanvas, type GridCoord } from "./map-canvas";
@@ -16,11 +16,13 @@ import {
   formatRadius,
   gridToLatLng,
   LOCATION_OPTIONS,
+  reverseGeocode,
   type AnyLocation,
   type CustomLocation,
   type Location,
   type PresetLocation,
-  type CustomLocationFields
+  type CustomLocationFields,
+  type ReverseGeocodeShape
 } from "./location-options";
 import {
   loadActiveCustomId,
@@ -29,12 +31,13 @@ import {
 } from "./location-store";
 
 export { DEFAULT_LOCATION, LOCATION_OPTIONS };
-export type { Location, CustomLocation, PresetLocation, AnyLocation, CustomLocationFields };
+export type { Location, CustomLocation, PresetLocation, AnyLocation, CustomLocationFields, ReverseGeocodeShape };
 
-// gridToLatLng / formatRadius re-export 给 app-shell 单独用 —
+// gridToLatLng / formatRadius / reverseGeocode re-export 给 app-shell 单独用 —
 // shell 要把 active location 显示成 "河内 · (5,5) · 3 km" 时
-// 不需要再 import location-options 两次。
-export { gridToLatLng, formatRadius };
+// 不需要再 import location-options 两次。reverseGeocode 让 shell
+// 在自定义 tab 里把 lat/lng 走 Nominatim 反查"还剑湖附近"。
+export { gridToLatLng, formatRadius, reverseGeocode };
 
 type Tab = "PRESET" | "CUSTOM" | "HISTORY";
 
@@ -63,6 +66,25 @@ export function LocationPickerSheet({
   const [label, setLabel] = useState<string>(
     current.kind === "CUSTOM" ? current.area.replace(/^自定义 · /, "") : ""
   );
+  // lat/lng 提前计算 — useEffect dep + 渲染两处都需要。
+  const { lat, lng } = gridToLatLng(customCity, pin.x, pin.y);
+  // R15.15 P2: 逆编码 — 拍 pin 以后从 lat/lng 拿 “还剑湖附近”
+  // 这样的人话描述。Nominatim 查不到时 fallback 到 “POI 附近”
+  // (走 gridToLatLngToGrid + CITY_POIS)。
+  const [reverse, setReverse] = useState<ReverseGeocodeShape | undefined>(undefined);
+  useEffect(() => {
+    // 只在 CUSTOM tab 才调 — PRESET tab 不需要。
+    if (tab !== "CUSTOM") {
+      setReverse(undefined);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const r = await reverseGeocode(customCity, lat, lng);
+      if (!cancelled) setReverse(r);
+    })();
+    return () => { cancelled = true; };
+  }, [tab, customCity, lat, lng]);
 
   // 加载历史 — 只在切到 HISTORY tab 时拉一次，避免每次开 sheet 都打 keychain
   async function openHistory(): Promise<void> {
@@ -102,7 +124,6 @@ export function LocationPickerSheet({
   const presetActive = current.kind === "PRESET" && current.id !== undefined;
   const presetCurrentId = current.kind === "PRESET" ? current.id : undefined;
   const customActive = current.kind === "CUSTOM";
-  const { lat, lng } = gridToLatLng(customCity, pin.x, pin.y);
 
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={open}>
@@ -178,6 +199,7 @@ export function LocationPickerSheet({
               />
               <Text style={styles.mapHint}>
                 点击或拖动地图放置坐标 · 当前位置 {lat.toFixed(4)}, {lng.toFixed(4)}
+                {reverse ? ` · ${reverse.displayName}` : ""}
               </Text>
 
               {/* Radius selector */}

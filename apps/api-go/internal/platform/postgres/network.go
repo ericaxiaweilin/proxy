@@ -31,29 +31,70 @@ func (r *LocalNetRepository) CreatePost(ctx context.Context, post localnet.Post)
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, status, context_refs, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			visibility, city_scope, scene_type, status, context_refs, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		post.ID, post.AuthorType, post.AuthorID, post.AuthorDisplayName, post.Body, mediaRefs,
-		post.Visibility, post.CityScope, post.Status, contextRefs, post.CreatedAt,
+		post.Visibility, post.CityScope, nullIfEmptyNetwork(post.SceneType), post.Status, contextRefs, post.CreatedAt,
 	)
 	return err
+}
+
+// UpsertPost idempotently inserts/updates a post (used by Service.SeedDemoPosts
+// to seed visitor-visible content without creating duplicates on restart).
+// R15.15 P1: scene_type added to ON CONFLICT clause so the seed keeps the
+// type field in sync if the row was first created without it.
+func (r *LocalNetRepository) UpsertPost(ctx context.Context, post localnet.Post) error {
+	mediaRefs, contextRefs, err := encodePostJSON(post)
+	if err != nil {
+		return err
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body, media_refs,
+			visibility, city_scope, scene_type, status, context_refs, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		ON CONFLICT (id) DO UPDATE SET
+			author_type=EXCLUDED.author_type,
+			author_id=EXCLUDED.author_id,
+			author_display_name=EXCLUDED.author_display_name,
+			body=EXCLUDED.body,
+			media_refs=EXCLUDED.media_refs,
+			visibility=EXCLUDED.visibility,
+			city_scope=EXCLUDED.city_scope,
+			scene_type=EXCLUDED.scene_type,
+			status=EXCLUDED.status,
+			context_refs=EXCLUDED.context_refs`,
+		post.ID, post.AuthorType, post.AuthorID, post.AuthorDisplayName, post.Body, mediaRefs,
+		post.Visibility, post.CityScope, nullIfEmptyNetwork(post.SceneType), post.Status, contextRefs, post.CreatedAt,
+	)
+	return err
+}
+
+func nullIfEmptyNetwork(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func (r *LocalNetRepository) GetPost(ctx context.Context, id string) (localnet.Post, error) {
 	var post localnet.Post
 	var mediaRefs, contextRefs []byte
+	var sceneType *string
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, status, context_refs, created_at
+			visibility, city_scope, scene_type, status, context_refs, created_at
 		FROM localnet.posts WHERE id = $1`, id).Scan(
 		&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
-		&post.Visibility, &post.CityScope, &post.Status, &contextRefs, &post.CreatedAt,
+		&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return localnet.Post{}, localnet.ErrPostNotFound
 	}
 	if err != nil {
 		return localnet.Post{}, err
+	}
+	if sceneType != nil {
+		post.SceneType = *sceneType
 	}
 	if err := json.Unmarshal(mediaRefs, &post.MediaRefs); err != nil {
 		return post, fmt.Errorf("decode media refs: %w", err)
@@ -80,7 +121,7 @@ func (r *LocalNetRepository) UpdatePost(ctx context.Context, post localnet.Post,
 func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, status, context_refs, created_at
+			visibility, city_scope, scene_type, status, context_refs, created_at
 		FROM localnet.posts ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -90,14 +131,18 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 	for rows.Next() {
 		var post localnet.Post
 		var mediaRefs, contextRefs []byte
+		var sceneType *string
 		if err := rows.Scan(
 			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
-			&post.Visibility, &post.CityScope, &post.Status, &contextRefs, &post.CreatedAt,
+			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(mediaRefs, &post.MediaRefs)
 		_ = json.Unmarshal(contextRefs, &post.ContextRefs)
+		if sceneType != nil {
+			post.SceneType = *sceneType
+		}
 		result = append(result, post)
 	}
 	if err := rows.Err(); err != nil {

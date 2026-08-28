@@ -50,6 +50,10 @@ func main() {
 	if port == "" {
 		port = "4100"
 	}
+	mediaStoreDir := strings.TrimSpace(os.Getenv("PROXY_MEDIA_STORE_DIR"))
+	if mediaStoreDir == "" {
+		mediaStoreDir = filepath.Join(".", "media_store")
+	}
 
 	if warnings := bootenv.Warnings(); len(warnings) > 0 {
 		for _, w := range warnings {
@@ -67,6 +71,13 @@ func main() {
 	localContextService := localcontext.New()
 	modelStack := configuredModelStack()
 	localNetService := localnet.NewWithModelStack(nil, modelStack)
+	// R15.15 P2: in-memory 访客空流修补 — 同步跱演示帖 (Linh /
+	// Mai / Huyen / Bonsaidon), 幂等:重启不会重复。不会走 PG 路径
+	// (PG 路径在 migration 后会调用 seedPostgresPosts, 本 commit
+	// 不动 — PG 有 25 帖, 不需要补)。
+	if seedErr := localNetService.SeedDemoPosts(context.Background()); seedErr != nil {
+		log.Printf("seed demo posts: %v (continuing without seed)", seedErr)
+	}
 	if modelStack.Available() {
 		log.Printf("proxy api go model stack adapter configured (business side sends task ids only)")
 	} else {
@@ -77,6 +88,7 @@ func main() {
 	fulfillmentService := fulfillment.New()
 	supplyService := supply.New()
 	mediaService := media.New()
+	mediaService.SetStoreDir(mediaStoreDir)
 	contributionService := contribution.New()
 	socialSpaceService := socialspace.New()
 	businessService := business.New()
@@ -118,7 +130,8 @@ func main() {
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
-		mediaService = media.NewWithDependencies(postgres.NewMediaRepository(pool), media.NewFFmpegProcessor(filepath.Join("media_store")))
+		mediaService = media.NewWithDependencies(postgres.NewMediaRepository(pool), media.NewFFmpegProcessor(mediaStoreDir))
+		mediaService.SetStoreDir(mediaStoreDir)
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
 		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))

@@ -100,6 +100,123 @@ export function gridToLatLng(city: string, gridX: number, gridY: number): { lat:
   return { lat: Math.round(lat * 1e4) / 1e4, lng: Math.round(lng * 1e4) / 1e4 };
 }
 
+// R15.15 P2: ReverseGeocodeShape — onGeocode 逆编码查询返
+// 回报。不是 OSM 原生 response (那是 array + lat/lon + display_name +
+// address.road / address.attraction / address.tourism) — 我们
+// 只提取“用户能看到”的几个字段。
+export interface ReverseGeocodeShape {
+  // 总显示名: "Hoàn Kiếm, Hà Nội" / "Bitexco Financial Tower, HCMC"
+  displayName: string;
+  // 街道名: "Đinh Tiên Hoàng" / undefined
+  road?: string;
+  // POI 名: "Hoàn Kiếm Lake" / undefined
+  poi?: string;
+  // source: "remote" | "offline-grid" | "offline-grid-x" (cells-from-center)
+  // 告诉调用方走的是 Nominatim 还是 P6 估算。
+  source: "remote" | "offline-grid";
+}
+
+// 逆编码 default impl: R15.15 P2 线上走 Nominatim, 离线
+// (无 fetch / Nominatim 拵错) 走 gridToLatLng 的“原点 + 偏移
+// 描述” 路径。vitest 可以传 onGeocode 覆盖为 stub, 不打真 fetch。
+const DEFAULT_NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
+
+export type NominatimFetcher = (url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
+
+export async function reverseGeocode(
+  city: string,
+  lat: number,
+  lng: number,
+  options?: {
+    fetcher?: NominatimFetcher;
+    nominatimUrl?: string;
+    signal?: AbortSignal;
+  }
+): Promise<ReverseGeocodeShape> {
+  // 尝试走 Nominatim。不传 fetcher 时跳过远程 (测试 / SSR 友好)。
+  const fetcher = options?.fetcher;
+  if (fetcher) {
+    try {
+      const url = `${options?.nominatimUrl ?? DEFAULT_NOMINATIM_URL}?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+      const res = await fetcher(url);
+      if (res.ok) {
+        const body = (await res.json()) as { display_name?: string; address?: { road?: string; attraction?: string; tourism?: string; pedestrian?: string } };
+        if (body.display_name) {
+          return {
+            displayName: body.display_name,
+            ...(body.address?.road ? { road: body.address.road } : {}),
+            ...(body.address?.attraction || body.address?.tourism || body.address?.pedestrian
+              ? { poi: body.address?.attraction ?? body.address?.tourism ?? body.address?.pedestrian! }
+              : {}),
+            source: "remote"
+          };
+        }
+      }
+    } catch {
+      // fall through to offline-grid
+    }
+  }
+  // Offline-grid fallback: 拿 (lat, lng) 对回 gridX/gridY, 然后
+  // 从 POI_LIST 找最近, 有就返 “<poi>附近”, 没有返 “(x, y)”。
+  const { gridX, gridY } = gridToLatLngToGrid(city, lat, lng);
+  const nearest = nearestPoi(city, gridX, gridY);
+  if (nearest) {
+    return {
+      displayName: `${nearest.label}附近`,
+      ...(nearest.label ? { poi: nearest.label } : {}),
+      source: "offline-grid"
+    };
+  }
+  return {
+    displayName: `${city} · 网格 (${gridX}, ${gridY})`,
+    source: "offline-grid"
+  };
+}
+
+// 内部工具: gridToLatLng 的逆函数 (lat, lng) → gridX/gridY。
+// P6 只在数据层需要走“逆编码”路径时才用。精确到 cell 即可,
+// 不是 sub-cell。
+function gridToLatLngToGrid(city: string, lat: number, lng: number): { gridX: number; gridY: number } {
+  const bounds: CityBounds = (city in CITY_BOUNDS ? CITY_BOUNDS[city] : { city: "河内", centerLat: 21.0285, centerLng: 105.8542, spanKm: 12 }) as CityBounds;
+  const halfSpanDeg = (bounds.spanKm / 2) / 111;
+  const xRaw = ((lng - bounds.centerLng) / (2 * halfSpanDeg)) * GRID_W + GRID_W / 2;
+  const yRaw = ((bounds.centerLat - lat) / (2 * halfSpanDeg)) * GRID_H + GRID_H / 2;
+  const gridX = Math.max(0, Math.min(GRID_W, Math.round(xRaw)));
+  const gridY = Math.max(0, Math.min(GRID_H, Math.round(yRaw)));
+  return { gridX, gridY };
+}
+
+// P6 地图上有 2 个河内 POI (还剑湖 + 西湖) — 但 POI 位置是
+// 硬编码在 MapCanvas 里的 SVG 点, 跟 grid 是独立坐标。这里手动
+// 映射 POI 中心点对应到 (gridX, gridY) 上, 给逆编码 fallback
+// 用。
+const CITY_POIS: Record<string, ReadonlyArray<{ label: string; gridX: number; gridY: number }>> = {
+  河内: [
+    { label: "还剑湖", gridX: 4, gridY: 6 },
+    { label: "西湖", gridX: 8, gridY: 3 }
+  ],
+  胡志明市: [
+    { label: "Bitexco", gridX: 5, gridY: 4 },
+    { label: "范五老", gridX: 3, gridY: 6 }
+  ],
+  岘港: [
+    { label: "龙桥", gridX: 5, gridY: 5 },
+    { label: "韩江", gridX: 6, gridY: 5 }
+  ]
+};
+
+function nearestPoi(city: string, gridX: number, gridY: number): { label: string; gridX: number; gridY: number } | undefined {
+  const pois = CITY_POIS[city] ?? [];
+  let best: { label: string; gridX: number; gridY: number; d: number } | undefined;
+  for (const p of pois) {
+    const d = Math.abs(p.gridX - gridX) + Math.abs(p.gridY - gridY);
+    if (!best || d < best.d) {
+      best = { ...p, d };
+    }
+  }
+  return best ? { label: best.label, gridX: best.gridX, gridY: best.gridY } : undefined;
+}
+
 // 半径格式化 — 给 LocationContext 用 "3 km" / "5 km" 这样的简短显示。
 export function formatRadius(m: number): string {
   if (m >= 1000) return `${m / 1000} km`;

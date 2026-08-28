@@ -44,9 +44,6 @@ let cachedPostIds: Set<string> = new Set();
 let cachedComposerDraft = "";
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
-const SEED_IMAGE_IDS = ["seed_media_hoankiem", "seed_media_coffee", "seed_media_westlake"];
-const SEED_VIDEO_ID = "seed_media_route_video";
-const SEED_OPENING_VIDEO_ID = "seed_media_opening_video";
 
 const AUTHOR_TYPE_META: Record<FeedPost["authorType"], { label: string; reason: string }> = {
   USER: { label: "用户 · 河内", reason: "为你推荐：本地用户的公开动态" },
@@ -430,59 +427,6 @@ export function FeedSurface({
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
   }
 
-  // 首次空读模型时经 CreatePost 写入演示帖（内容归服务端所有，前端不内嵌）。
-  const seedDemoPosts = useCallback(async (): Promise<void> => {
-    const linhBody = "今天带第一次来河内的客人走了一条“少景点、多咖啡和拍照”的路线。下午太热，所以把西湖放晚一点，中间多留了一个室内咖啡休息。";
-    const linhId = await localNet.createPost({
-      authorType: "AGENT",
-      authorDisplayName: "Linh",
-      body: linhBody,
-      mediaRefs: SEED_IMAGE_IDS.map((id, index) => ({ mediaAssetId: id, sortOrder: index })),
-      visibility: "PUBLIC",
-      cityScope: "hn",
-      contextRefs: [
-        { contextType: "SERVICE", contextId: "城市同行" },
-        { contextType: "ROUTE", contextId: "轻松拍照路线" },
-        { contextType: "VENUE", contextId: "木光咖啡" }
-      ]
-    });
-    await localNet.createPost({
-      authorType: "AGENT",
-      authorDisplayName: "Mai",
-      body: "明天下午 13:00–18:00 临时空出来。想轻松逛西湖、喝咖啡、拍点照片的话可以直接聊，我会先看你想要什么节奏。",
-      mediaRefs: [{ mediaAssetId: SEED_VIDEO_ID, sortOrder: 0 }],
-      visibility: "PUBLIC",
-      cityScope: "hn",
-      contextRefs: [
-        { contextType: "SERVICE", contextId: "城市同行" },
-        { contextType: "AVAILABILITY", contextId: "明天下午可接" }
-      ]
-    });
-    await localNet.createPost({
-      authorType: "USER",
-      authorDisplayName: "Huyen",
-      body: "周六下午有人想一起找家好看的咖啡店互相拍照吗？不收服务费，各自点自己的饮料就行。",
-      visibility: "PUBLIC",
-      cityScope: "hn",
-      contextRefs: [
-        { contextType: "ACTIVITY", contextId: "用户活动" },
-        { contextType: "QUOTE_POST", contextId: linhId }
-      ]
-    });
-    await localNet.createPost({
-      authorType: "MERCHANT",
-      authorDisplayName: "Bonsaidon",
-      body: "周六新店开业，现场准备了小型品鉴环节。欢迎来坐坐，也欢迎认识更多本地朋友。",
-      mediaRefs: [{ mediaAssetId: SEED_OPENING_VIDEO_ID, sortOrder: 0 }],
-      visibility: "PUBLIC",
-      cityScope: "hn",
-      contextRefs: [
-        { contextType: "VENUE", contextId: "门店场景" },
-        { contextType: "ACTIVITY", contextId: "周六新店开业" }
-      ]
-    });
-  }, [localNet]);
-
   const loadFeed = useCallback(async (): Promise<void> => {
     // 有缓存时不显示 LOADING
     if (cachedPosts.length === 0) {
@@ -494,11 +438,7 @@ export function FeedSurface({
         marketplace.list()
       ]);
       if (postResult.status === "rejected" && marketResult.status === "rejected") throw new Error("feed sources unavailable");
-      let read = postResult.status === "fulfilled" ? postResult.value : { posts: [], media: {} };
-      if (postResult.status === "fulfilled" && read.posts.length === 0) {
-        await seedDemoPosts();
-        read = await localNet.listFeedPosts(viewingCity);
-      }
+      const read = postResult.status === "fulfilled" ? postResult.value : { posts: [], media: {} };
       const opportunities = marketResult.status === "fulfilled" ? marketResult.value : [];
       const unifiedPosts = mergeFeedContent(read.posts, opportunities, Date.now());
       // “全部”是统一内容流：帖子 + 服务端市场机会/需求。
@@ -512,7 +452,7 @@ export function FeedSurface({
     } catch {
       setPhase("ERROR");
     }
-  }, [localNet, marketplace, seedDemoPosts, viewingCity]);
+  }, [localNet, marketplace, viewingCity]);
 
   // 后台静默刷新：不显示 LOADING，只检测新帖
   const backgroundRefresh = useCallback(async (): Promise<void> => {
@@ -1002,6 +942,18 @@ export function FeedSurface({
         </Pressable>
       ) : null}
 
+      {/* R15.14 跟随地点的过滤指示器 — 访客不会因“换了城市但
+          feed 空”而以为是 bug。顶 LocationContext 在 app-shell
+          里，这里在 feed 表面重复一次 (另可点击"换城市" 不能
+          — 仅提示。LocationContext 是唯一的切换入口)。 */}
+      {viewingCity ? (
+        <View style={styles.locationFilterBanner}>
+          <Text style={styles.locationFilterBannerText}>
+            正在显示 {viewingCity} 的本地动态。顶 LocationContext 可换。
+          </Text>
+        </View>
+      ) : null}
+
       {/* 发布器（X 式 compose：正文 + 照片/普通视频 + 引用绑定 → CreatePost） */}
       {composerOpen ? (
         <View style={styles.composer}>
@@ -1135,7 +1087,9 @@ export function FeedSurface({
       ) : visible.length === 0 ? (
         <View style={styles.feedEmpty}>
           <Text style={styles.feedEmptyText}>
-            {feedFilter !== "ALL"
+            {viewingCity
+              ? `${viewingCity} 还无人在 Proxy 发帖。换个城市, 或你作为首位发布者 — 任何一条都会被推到。`
+              : feedFilter !== "ALL"
               ? `当前筛选下没有足够内容。换个筛选，或直接搜索你想找的东西。`
               : "这里还没有足够的动态。关注本地的人和商家后会更有用。"}
           </Text>
@@ -1561,6 +1515,24 @@ const styles = StyleSheet.create({
   },
   updateBannerText: {
     color: color.white,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  // R15.14: 地点过滤指示器 — 走 visit 模式 (轻量横条) 不夺
+  // 焦点。区别于 updateBanner (dynamic purple 变装)，这里
+  // 走低调灰底 + 紫边。
+  locationFilterBanner: {
+    backgroundColor: "#F2EDF5",
+    borderColor: "#DDD5E3",
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7
+  },
+  locationFilterBannerText: {
+    color: "#62586A",
     fontSize: 11,
     fontWeight: "700",
     textAlign: "center"

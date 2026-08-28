@@ -189,6 +189,7 @@ type NeedFromPost struct {
 
 type Repository interface {
 	CreatePost(ctx context.Context, post Post) error
+	UpsertPost(ctx context.Context, post Post) error
 	GetPost(ctx context.Context, id string) (Post, error)
 	UpdatePost(ctx context.Context, post Post, expectedVersion int) error
 	Snapshot(ctx context.Context) ([]Post, error)
@@ -227,12 +228,109 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{posts: make(map[string]Post)}
 }
 
+// SeedDemoPosts idempotently inserts a small set of demo posts so a
+// fresh visitor doesn't see an empty feed. The seeds deliberately
+// have NO cityScope — per PostsWithoutCityScopePassThrough they
+// pass through any viewingCity filter, so the visitor sees content
+// no matter which city LocationContext lands on.
+//
+// Identity (authorType / authorId / authorDisplayName) is the same
+// shape as the previous client-side seedDemoPosts (Linh / Mai /
+// Huyen / Bonsaidon) so existing screenshots / fixtures stay
+// consistent.
+func (s *Service) SeedDemoPosts(ctx context.Context) error {
+	if s.repository == nil {
+		return nil
+	}
+	now := s.clock.Now().UTC()
+	seeds := []Post{
+		{
+			ID:                "post_seed_linh_01",
+			AuthorType:        "AGENT",
+			AuthorID:          "agent_linh",
+			AuthorDisplayName: "Linh",
+			Body:              "今天带第一次来河内的客人走了一条“少景点、多咖啡和拍照”的路线。下午太热，所以把西湖放晚一点，中间多留了一个室内咖啡休息。",
+			MediaRefs: []PostMediaRef{
+				{MediaAssetID: "seed_media_hoankiem", SortOrder: 0},
+				{MediaAssetID: "seed_media_coffee", SortOrder: 1},
+				{MediaAssetID: "seed_media_westlake", SortOrder: 2},
+			},
+			Visibility:  "PUBLIC",
+			CityScope:   "", // 无 cityScope 走全 city filter
+			SceneType:   "PHOTO",
+			Status:      "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "SERVICE", ContextID: "城市同行"}, {ContextType: "ROUTE", ContextID: "轻松拍照路线"}, {ContextType: "VENUE", ContextID: "木光咖啡"}},
+			CreatedAt:   now.Add(-2 * time.Hour),
+		},
+		{
+			ID:                "post_seed_mai_01",
+			AuthorType:        "AGENT",
+			AuthorID:          "agent_mai",
+			AuthorDisplayName: "Mai",
+			Body:              "明天下午 13:00–18:00 临时空出来。想轻松看西湖、喝咖啡、拍点照片的话可以直接聊，我会先看你想要什么节奏。",
+			MediaRefs:         []PostMediaRef{{MediaAssetID: "seed_media_route_video", SortOrder: 0}},
+			Visibility:        "PUBLIC",
+			CityScope:         "",
+			SceneType:         "COFFEE",
+			Status:            "PUBLISHED",
+			ContextRefs:       []ContextRef{{ContextType: "SERVICE", ContextID: "城市同行"}, {ContextType: "AVAILABILITY", ContextID: "明天下午可接"}},
+			CreatedAt:         now.Add(-90 * time.Minute),
+		},
+		{
+			ID:                "post_seed_huyen_01",
+			AuthorType:        "USER",
+			AuthorID:          "user_huyen",
+			AuthorDisplayName: "Huyen",
+			Body:              "周六下午有人想一起找家好看的咖啡店互相拍照吗？不收服务费，各自点自己的饮料就行。",
+			Visibility:        "PUBLIC",
+			CityScope:         "",
+			SceneType:         "COFFEE",
+			Status:            "PUBLISHED",
+			ContextRefs:       []ContextRef{{ContextType: "ACTIVITY", ContextID: "用户活动"}, {ContextType: "QUOTE_POST", ContextID: "post_seed_linh_01"}},
+			CreatedAt:         now.Add(-60 * time.Minute),
+		},
+		{
+			ID:                "post_seed_bonsai_01",
+			AuthorType:        "MERCHANT",
+			AuthorID:          "merchant_bonsai",
+			AuthorDisplayName: "Bonsaidon",
+			Body:              "周六新店开业，现场准备了小型品鉴环节。欢迎来坐坐，也欢迎认识更多本地朋友。",
+			MediaRefs:         []PostMediaRef{{MediaAssetID: "seed_media_opening_video", SortOrder: 0}},
+			Visibility:        "PUBLIC",
+			CityScope:         "",
+			SceneType:         "COFFEE",
+			Status:            "PUBLISHED",
+			ContextRefs:       []ContextRef{{ContextType: "VENUE", ContextID: "门店场景"}, {ContextType: "ACTIVITY", ContextID: "周六新店开业"}},
+			CreatedAt:         now.Add(-30 * time.Minute),
+		},
+	}
+	for _, post := range seeds {
+		// idempotent: if id already in store, skip. Repository
+		// 里有冪等性要求的 (Postgres 上是 ON CONFLICT DO NOTHING，
+		// Memory 是 contains check) — 都话 call CreatePost 能
+		// 产生重复 ID, 所以直接 Upsert。
+		if err := s.repository.UpsertPost(ctx, post); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *MemoryRepository) CreatePost(_ context.Context, post Post) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.posts[post.ID]; exists {
 		return errors.New("post already exists")
 	}
+	r.posts[post.ID] = clonePost(post)
+	return nil
+}
+
+func (r *MemoryRepository) UpsertPost(_ context.Context, post Post) error {
+	// 幂等 — 走 seed 时重起不会重复。现有 ID 被覆盖 (本次走同 ID
+	// 代表 “二次启动” 而原 post 未变)。
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.posts[post.ID] = clonePost(post)
 	return nil
 }
@@ -439,7 +537,7 @@ type createPostPayload struct {
 	// 让 listFeed 能调 s.sceneAesthetic.GetAestheticBackdrop(ctx,
 	// post.CityScope, post.SceneType) 走 per-(city, sceneType)
 	// 记忆轮。不传默认 UNKNOWN（依然能查到，只是样本少）。
-	SceneType  string   `json:"sceneType"`
+	SceneType   string       `json:"sceneType"`
 	ContextRefs []ContextRef `json:"contextRefs"`
 }
 
@@ -626,8 +724,8 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	// 算众数。补一个 feed-level cache (N 个 post 调同一份同样
 	// (city, sceneType) 背景的只查一次)，避免 N+1 调用。
 	type backdropKey struct {
-		City     string
-		Scene    string
+		City  string
+		Scene string
 	}
 	backdropCache := map[backdropKey]string{}
 	getBackdrop := func(city, scene string) string {
