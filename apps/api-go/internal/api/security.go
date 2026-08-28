@@ -61,6 +61,9 @@ var operatorCommandTypes = map[string]bool{
 	// R15.18: audit list — operator 查 content review 决策历史。
 	// 同走 PROXY_OPERATOR_PRINCIPALS 门 (server 验证在 /v1/commands 边界)。
 	"ListMediaReviewDecisions": true,
+	// R15.19: 修订决策 (append-only 多 1 行)。同走 operator 门,
+	// 写新行 note="amends:<prev_id>:<reason>:<note>", prev 行不动。
+	"AmendMediaReviewDecision": true,
 	// Money movement and settlement confirmation are server/operator actions.
 	// Mobile users may create a payment intent, but cannot impersonate a bank
 	// callback, mint/refund value, or release held payout funds.

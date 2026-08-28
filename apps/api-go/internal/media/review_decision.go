@@ -35,6 +35,9 @@ type ReviewDecisionRepository interface {
 	AppendReviewDecision(ctx context.Context, d MediaReviewDecision) error
 	// ListReviewDecisions 按 mediaAssetID 过滤 (空 = 全部),按 reviewedAt 倒序。
 	ListReviewDecisions(ctx context.Context, mediaAssetID string, limit int) ([]MediaReviewDecision, error)
+	// GetReviewDecision 按 decision_id 单取一行 (R15.19 amend 需要查 prev)。
+	// 不存在返 ErrReviewDecisionNotFound。
+	GetReviewDecision(ctx context.Context, decisionID string) (MediaReviewDecision, error)
 }
 
 var (
@@ -88,6 +91,17 @@ func (r *MemoryReviewDecisionRepository) ListReviewDecisions(_ context.Context, 
 		filtered = filtered[:limit]
 	}
 	return filtered, nil
+}
+
+func (r *MemoryReviewDecisionRepository) GetReviewDecision(_ context.Context, decisionID string) (MediaReviewDecision, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, d := range r.decisions {
+		if d.DecisionID == decisionID {
+			return d, nil
+		}
+	}
+	return MediaReviewDecision{}, ErrReviewDecisionNotFound
 }
 
 // Snapshot 用于 audit 导出 / 测试。

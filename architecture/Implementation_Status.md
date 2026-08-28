@@ -657,3 +657,78 @@ MemoryReviewDecisionRepository)。
    生成新一行 note='amends:<prev_decision_id>' 的决策,
    prev 行不动 (保持 append-only 语义)。
 ```
+
+## R15.19 收官 (2026-08-28)
+
+决定编辑不丢历史 + 审计身份拆 read-only。
+
+### 1. AmendMediaReviewDecision 命令 (append-only 修订行)
+
+`/v1/commands/AmendMediaReviewDecision` (operator-gated):
+- payload: { decisionId, amendReason, amendNote }
+- amendReason 限 NOTE_CORRECTION / REASON_RECLASS
+- 写 1 行: from = prev.fromStatus (不动), to = prev.toStatus (不动),
+            reason = prev.reason (不动), note = "amends:<prev_id>:<reason>:<note>",
+            operator_id = 当前 operator, reviewed_at = server clock
+- prev 行完全不动 — append-only 语义保留
+- 跨资产修订拒绝 (target ID 跟 prev.MediaAssetID 不匹配 -> MEDIA_AMEND_ASSET_MISMATCH)
+- 失败 (prev 不存在) -> MEDIA_REVIEW_DECISION_NOT_FOUND
+- nil 决策仓库不阻塞 (软 audit 丢可重补)
+
+需在 ReviewDecisionRepository 接口加 GetReviewDecision (memory +
+postgres 实现, pgx.ErrNoRows 返 ErrReviewDecisionNotFound)。
+
+7 个 Go tripwires (r1519_amend_review_test.go) 钉修订行不动
+prev / note 携带 amends marker / NOTE_CORRECTION + REASON_RECLASS
+两原因均接受 / 缺 ID 拒 / 缺 reason 拒 / prev not found 拒 / nil
+仓库 soft-fail。
+
+### 2. Auditor role 拆分 (migration 033)
+
+`apps/api-go/migrations/033_media_auditor_role.sql`:
+- 新 role `proxy_api_auditor` NOLOGIN (production only)
+- GRANT USAGE ON SCHEMA media + SELECT ON media_review_decisions
+- REVOKE INSERT/UPDATE/DELETE/TRUNCATE 写操作
+- 新 RLS policy `media_review_decisions_select_auditor` FOR SELECT
+  TO proxy_api_auditor USING(true)
+- dev/test 跳过 (role 不存在, 不影响集成测试)
+- proxy_api_operator (R15.18) 保留, 不动其能力
+
+### 3. openapi drift — 151 commands (was 150)
+
+`openapi.commands.generated.yaml` 重新生成, 包含
+AmendMediaReviewDecision。drift check pass。
+
+### 4. e2e — 4 server gate + openapi + migration tripwires pass
+
+`architecture/scripts/r1519_amend_review_e2e.sh`:
+- non-operator AmendMediaReviewDecision -> OPERATOR_PRIVILEGE_REQUIRED
+- openapi commands 含 AmendMediaReviewDecision
+- migration 033 含 proxy_api_auditor role + media_review_decisions_select_auditor policy
+- integration pg cluster 应用 033 migration 无错 (postgres package test pass)
+
+修订写行 6 路径由 service 单测覆盖 (7 tripwires)。e2e 只能验
+server gate — 跟 R15.17/18 一样, server 强制 envelope.Principal
+重置闭路问题。
+
+## R15.19 收官遗留 (下放 R15.20)
+
+```text
+1. 终端 AI 内容审核接入 (从 R15.17/18 下放过来, 2 轮遗留)
+   现状: ReviewMediaAsset 只接人工, AI classifier 没接。
+   下放: R15.20 写 worker hook: 摄入已 QUARANTINED 资产,
+   调 ML model, 产出审核 event -> ReviewMediaAsset 自动调用。
+   需 image security / worker 路径调整 (跟其他 agent 的
+   composition pipeline 重叠, 需协调)。
+
+2. PG path e2e
+   现状: 所有 R15.16-19 e2e 走 in-mem 模式, PG 路径未走 e2e
+   验证。R15.20 加 pg mode e2e: 启动 API 接 DATABASE_URL,
+   apply migrations 1-33, 跑同一套 fixture + 决策写, 验证
+   PG 实现跟 memory 实现语义一致。
+
+3. RLS 启用脚本
+   现状: migration 032/033 启用 RLS, 但仅当 proxy_api_operator
+   role 存在。R15.20 写一个 production setup 脚本: CREATE ROLE
+   + GRANT + 应用 R15.18/033 migrations + 验证 policy。
+```

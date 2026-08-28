@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/media"
 )
@@ -83,4 +84,22 @@ func (r *MediaReviewDecisionRepository) ListReviewDecisions(ctx context.Context,
 		return nil, err
 	}
 	return out, nil
+}
+
+func (r *MediaReviewDecisionRepository) GetReviewDecision(ctx context.Context, decisionID string) (media.MediaReviewDecision, error) {
+	var d media.MediaReviewDecision
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT `+mediaReviewDecisionColumns+`
+		FROM media.media_review_decisions
+		WHERE decision_id = $1`, decisionID).Scan(
+		&d.DecisionID, &d.MediaAssetID, &d.FromStatus, &d.ToStatus,
+		&d.Reason, &d.Note, &d.OperatorID, &d.ReviewedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return media.MediaReviewDecision{}, media.ErrReviewDecisionNotFound
+		}
+		return media.MediaReviewDecision{}, err
+	}
+	return d, nil
 }

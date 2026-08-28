@@ -762,6 +762,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	// 按 mediaAssetId 过滤 (空 = 所有),按 reviewedAt 倒序。
 	case "ListMediaReviewDecisions":
 		return s.listMediaReviewDecisions(ctx, e)
+	// R15.19: 修订决策 (append-only 加修订行)。amends 语义, 不改 prev
+	// 行的 from/to/reason/operator — 只多 1 行 note="amends:<prev_id>:<reason>:<note>"
+	// 钉审计历史。
+	case "AmendMediaReviewDecision":
+		return s.amendMediaReviewDecision(ctx, e)
 	default:
 		return command.Rejected(e, "MEDIA_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "media.unsupported_command", nil)
 	}
@@ -1359,4 +1364,79 @@ func (s *Service) listMediaReviewDecisions(ctx context.Context, e command.Envelo
 		"limit":        p.Limit,
 		"count":        len(decisions),
 	}, nil)
+}
+
+// ---------- R15.19: AmendMediaReviewDecision ----------
+// 修订决策 (append-only)。不改 prev 行的 from/to/reason/operator。
+// 多 1 行: from = prev.from, to = prev.to, reason = prev.reason,
+//          note = "amends:<prev_decision_id>:<amend_reason>:<amend_note>"
+// 这样审计行链可用 "amends:<id>" 关系串成 revision tree。
+// 修订本身: 只允许同 asset_id 范围, 防跨资产伪装。
+
+type amendMediaReviewDecisionPayload struct {
+	DecisionID  string `json:"decisionId"`
+	AmendReason string `json:"amendReason"` // e.g. "NOTE_CORRECTION" / "REASON_RECLASS"
+	AmendNote   string `json:"amendNote"`
+}
+
+func (s *Service) amendMediaReviewDecision(ctx context.Context, e command.Envelope) command.Result {
+	var p amendMediaReviewDecisionPayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_AMEND", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_amend", nil)
+	}
+	if p.DecisionID == "" {
+		return command.Rejected(e, "INVALID_AMEND_DECISION_ID", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_amend_decision_id", nil)
+	}
+	if p.AmendReason == "" {
+		return command.Rejected(e, "INVALID_AMEND_REASON", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_amend_reason", map[string]any{"allowed": []string{"NOTE_CORRECTION", "REASON_RECLASS"}})
+	}
+	prev, err := s.reviewDecisionRepo.GetReviewDecision(ctx, p.DecisionID)
+	if errors.Is(err, ErrReviewDecisionNotFound) {
+		return command.Rejected(e, "MEDIA_REVIEW_DECISION_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.review_decision_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MEDIA_REVIEW_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.review_read_failed", nil)
+	}
+	// Amend 跟 prev 同资产 (防跨资产)。
+	if e.Target.ID != "" && e.Target.ID != prev.MediaAssetID {
+		return command.Rejected(e, "MEDIA_AMEND_ASSET_MISMATCH", "VALIDATION", "AFTER_USER_ACTION", "media.amend_asset_mismatch", map[string]any{"target": e.Target.ID, "decisionAsset": prev.MediaAssetID})
+	}
+	now := s.clock.Now().UTC()
+	amendNote := "amends:" + prev.DecisionID + ":" + p.AmendReason
+	if p.AmendNote != "" {
+		amendNote = amendNote + ":" + p.AmendNote
+	}
+	amend := MediaReviewDecision{
+		DecisionID:   "mrd_" + uuidHex(),
+		MediaAssetID: prev.MediaAssetID,
+		FromStatus:   prev.FromStatus, // 不动
+		ToStatus:     prev.ToStatus,   // 不动
+		Reason:       prev.Reason,     // 不动
+		Note:         amendNote,
+		OperatorID:   e.Principal.ID,
+		ReviewedAt:   now,
+	}
+	// 写入 (AppendReviewDecision 失败不阻塞 — 软 audit 丢可重补)
+	if s.reviewDecisionRepo != nil {
+		if err := s.reviewDecisionRepo.AppendReviewDecision(ctx, amend); err != nil {
+			// 软记录
+			domainEvents := []event.DomainEvent{event.New("MediaReviewDecisionAmendPersistFailed", "MediaReviewDecision", amend.DecisionID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+				"prevDecisionId": prev.DecisionID,
+				"reason":         err.Error(),
+			})}
+			return acceptedWithPayload(e, "MediaReviewDecision", amend.DecisionID, 1, "AMEND_PERSIST_FAILED", map[string]any{
+				"amend": amend,
+				"error": err.Error(),
+			}, domainEvents)
+		}
+	}
+	domainEvents := []event.DomainEvent{event.New("MediaReviewDecisionAmended", "MediaReviewDecision", amend.DecisionID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"amendDecisionId": amend.DecisionID,
+		"prevDecisionId":  prev.DecisionID,
+		"amendReason":     p.AmendReason,
+	})}
+	return acceptedWithPayload(e, "MediaReviewDecision", amend.DecisionID, 1, "AMENDED", map[string]any{
+		"amend":          amend,
+		"prevDecisionId": prev.DecisionID,
+	}, domainEvents)
 }
