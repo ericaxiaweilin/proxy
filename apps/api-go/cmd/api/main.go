@@ -119,6 +119,42 @@ func main() {
 			log.Fatalf("open postgres: %v", err)
 		}
 		databaseCloser = pool.Close
+		// R15.22: 启动时自动 apply migrations (免运维手动跑 migrate CLI)。
+		// 仅在 DATABASE_URL 设置 + migrations dir 可访问时跑。
+		// fail-fast: 启动期 migrations 失败应该阻断 service 启动, 不是 warn 后继续。
+		if migDir := os.Getenv("PROXY_MIGRATIONS_DIR"); migDir != "" {
+			if _, err := os.Stat(migDir); err == nil {
+				migrator := postgres.NewMigrator(pool, migDir)
+				drift, driftErr := migrator.VerifyDrift(ctx)
+				if driftErr != nil {
+					log.Fatalf("verify migration drift: %v", driftErr)
+				}
+				if drift != nil {
+					log.Fatalf("migration drift detected: %s (current=%s stored=%s). Run 'migrate -check-drift' and reconcile before starting service.",
+						drift.Version, drift.Checksum, drift.StoredChecksum)
+				}
+				applied, _, applyErr := migrator.Apply(ctx, false)
+				if applyErr != nil {
+					log.Fatalf("auto-apply migrations: %v", applyErr)
+				}
+				if len(applied) > 0 {
+					log.Printf("auto-applied %d migration(s): %v", len(applied), applied)
+				} else {
+					log.Printf("migrations up-to-date (%d applied, 0 pending)", len(func() []string {
+						statuses, _ := migrator.ListMigrations(ctx)
+						out := make([]string, 0, len(statuses))
+						for _, s := range statuses {
+							if s.Applied {
+								out = append(out, s.Version)
+							}
+						}
+						return out
+					}()))
+				}
+			} else {
+				log.Printf("PROXY_MIGRATIONS_DIR set but inaccessible: %s (skipping auto-apply)", migDir)
+			}
+		}
 		idempotencyStore = postgres.NewIdempotencyStore(pool)
 		outboxRepository := postgres.NewOutboxRepository(pool)
 		readyCheck = pool.Ping

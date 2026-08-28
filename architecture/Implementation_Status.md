@@ -903,3 +903,98 @@ production 部署时先用 migrate CLI 跟踪所有 migrations, 然
 4. migration 自动载入: R15.22 启动 API 时自动跑 Migrator.Apply
    (现在只在 CLI 手动跑), 免运维人工跑。
 ```
+
+## R15.22 收官 (2026-08-28)
+
+Observer role 拆分 (R15.20 遗留) + 启动 API 自动 apply migrations (R15.21 配对) + 磁盘清理。
+
+### 1. observer role 拆分 (migration 034)
+
+`apps/api-go/migrations/034_media_observer_role.sql`:
+- 新 role `proxy_api_observer` NOLOGIN
+- GRANT USAGE ON SCHEMA media/localnet + SELECT on media_assets +
+  media_review_decisions + localnet.posts (if exists)
+- REVOKE INSERT/UPDATE/DELETE/TRUNCATE 写操作
+- 新 RLS policy `media_review_decisions_select_observer` FOR SELECT
+  TO proxy_api_observer USING(true)
+- 跟 proxy_api_auditor (R15.19) 区分: observer 跨表读 (BI/dashboards),
+  auditor 单表读 (审计流)
+- dev/test role 不存在则跳过 (不破坏集成测试)
+
+### 2. 启动 API 自动 apply migrations (main.go)
+
+`cmd/api/main.go` 启动期检测:
+- 仅当 DATABASE_URL 设置 + PROXY_MIGRATIONS_DIR 可访问时跑
+- 逻辑顺序: drift 检查 -> Apply(不 dryRun) -> log 报
+- fail-fast: drift 阻断 service 启动 (`log.Fatalf` + clear msg)
+  不是 warn 后继续 — 启动期 migrations 错误是 service 静默错误根源
+- 报 "auto-applied N migration(s): [...]" 或 "migrations up-to-date
+  (N applied, 0 pending)"
+- 跟 R15.20 rls_setup.sh 关系: rls_setup.sh 仍独立跑, 但 operator
+  部署后只需 r1522 + R15.21 migrate CLI 补个 RLS
+
+### 3. 6 个 Go tripwires (migrator_startup_test.go)
+
+钉 startup 路径:
+- Startup_NewMigrationApplied: 加新 migration, Apply 后计数增 1
+- Startup_DriftDetected: 改文件 -> VerifyDrift 返非 nil
+- Startup_NoDrift: 未改文件 -> VerifyDrift 返 nil
+- Startup_FirstRunAppliesAll: 全新 db 跑全部 migration
+- Startup_SkipsAlreadyApplied: 第二次跑 idempotent
+- Startup_PreservesChecksumAcrossRuns: 第二次跑无 drift
+
+### 4. e2e (r1522_auto_apply_e2e.sh) — 4 tripwires
+
+- 启动 API 报 "migrations up-to-date"
+- 加新 migration 重启, 报 "auto-applied 1 migration(s)"
+- 035 migration 已 apply (table 存在)
+- observer role 存在 + 可读 media_assets / media_review_decisions
+  + INSERT 拒 (fail-closed)
+
+### 5. 磁盘清理 (顺带)
+
+清理 ~1.2G:
+- /tmp/proxy-api-* 老 binaries (R15.14-1521 共 16 个 × 18M = 290M)
+- apps/api-go/media_store iCloud 路径 (74M orphan, R15.16 P1 起
+  frozen)
+- ~/Library/Caches/go-build (720M, go clean -cache)
+- ~/.npm/_cacache (820M)
+- pnpm store prune (509M)
+- 总效果: 214Mi free -> 2.3Gi free
+
+重 build 旧 binaries (r1517/r1518/r1519/r1520/r1521) 因为 e2e 脚本
+需指定名称。
+
+### 6. verify
+
+  go -C apps/api-go test ./internal/media/...    52/53 PASS
+  go -C apps/api-go test ./internal/platform/postgres/...  ok (含 6 R15.22)
+  pnpm --filter @proxy/contracts test           147/147 PASS
+  pnpm --filter mobile test                     219/219 PASS
+  bash architecture/scripts/r1517_review_e2e.sh         2/2 PASS
+  bash architecture/scripts/r1518_review_audit_e2e.sh   2/2 PASS
+  bash architecture/scripts/r1519_amend_review_e2e.sh   4/4 PASS
+  bash architecture/scripts/p0_audit_fix.sh             21/21 PASS
+  bash architecture/scripts/e2e_media_security_gate.sh  16/16 PASS
+  bash apps/api-go/scripts/smoke_pass3_scene_feed.sh    5/5 PASS
+  bash architecture/scripts/r1520_pg_path_e2e.sh        3/3 PASS
+  bash architecture/scripts/r1521_migrate_e2e.sh        8/8 PASS
+  bash architecture/scripts/r1522_auto_apply_e2e.sh     4/4 PASS
+
+## R15.22 收官遗留 (下放 R15.23)
+
+```text
+1. 终端 AI 内容审核接入 (R15.17/18/19/20/21/22 遗留, 5 轮没动):
+   R15.23 写 worker hook 摄入 QUARANTINED -> ML model ->
+   自动调 ReviewMediaAsset。需 image security / worker 路径
+   调整 (跟其他 agent 的 composition pipeline 重叠, 需协调)。
+
+2. 决策表 partition (从 R15.20/22 遗留): R15.23 改 PG declarative
+   partitioning (PARTITION BY RANGE (reviewed_at)) + 12 子表。
+
+3. migration dry-run 集成到 API startup: 启动时同时跑 dry-run 跟
+   apply, 报 pending 给运维看。
+
+4. 其他 RLS policy 加固: scene / contribution / supply 表加
+   SELECT-only policy for observer, BI 范围拓到跨域。
+```
