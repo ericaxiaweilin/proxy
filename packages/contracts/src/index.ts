@@ -315,6 +315,10 @@ export const FeedPostSchema = z.object({
   mediaRefs: z.array(PostMediaRefSchema).default([]),
   visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY"]).optional(),
   cityScope: z.string().optional(),
+  // R15.15 P1: Post.SceneType — 解锁 per-(city, sceneType) 背景
+  // 缓存。不传 = UNKNOWN，listFeed 仍查到样本 (只是会跌进
+  // UNKNOWN 同一区。
+  sceneType: z.enum(["UNKNOWN", "ROOFTOP", "BRUNCH", "SPA", "CINEMA", "PHOTO", "NIGHTLIFE", "OUTDOOR", "COFFEE"]).optional(),
   status: z.string(),
   contextRefs: z.array(PostContextRefSchema).default([]),
   createdAt: z.string()
@@ -390,6 +394,9 @@ export const CreatePostPayloadSchema = z.object({
   mediaRefs: z.array(PostMediaRefSchema).max(6).optional(),
   visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY"]).optional(),
   cityScope: z.string().optional(),
+  // R15.15 P1: Post.SceneType。Server 在 CreatePost 处
+  // 验证合法性。不传=UNKNOWN（依然合规）。发虚假值服务器 reject。
+  sceneType: z.enum(["UNKNOWN", "ROOFTOP", "BRUNCH", "SPA", "CINEMA", "PHOTO", "NIGHTLIFE", "OUTDOOR", "COFFEE"]).optional(),
   contextRefs: z.array(PostContextRefSchema).optional()
 });
 export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;

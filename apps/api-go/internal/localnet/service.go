@@ -39,6 +39,14 @@ type Post struct {
 	Status            string         `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
 	ContextRefs       []ContextRef   `json:"contextRefs"`
 	CreatedAt         time.Time      `json:"createdAt"`
+	// R15.15 P1: SceneType 是 Post 与 Scene aggregate 之间的选择
+	// 门 (ROOFTOP | BRUNCH | SPA | CINEMA | PHOTO | NIGHTLIFE |
+	// OUTDOOR | COFFEE | UNKNOWN). 跟 Scene.SceneType 同样枚举
+	// (mirror @proxy/contracts scene.ts SceneTypeSchema). 有了这个
+	// 字段, listFeed 可以调 s.sceneAesthetic.GetAestheticBackdrop
+	// (ctx, post.CityScope, post.SceneType) 而不只是全局一个色 —
+	// 不同场景类型的帖背景都不一样。
+	SceneType string `json:"sceneType,omitempty"`
 }
 
 // PostMediaRef 是 Post 的媒体引用（R14 §16.5：sort_order = 作者确认的展示顺序）。
@@ -426,7 +434,31 @@ type createPostPayload struct {
 	MediaRefs         []PostMediaRef `json:"mediaRefs"` // R14：{mediaAssetId, sortOrder}，≤6
 	Visibility        string         `json:"visibility"`
 	CityScope         string         `json:"cityScope"`
-	ContextRefs       []ContextRef   `json:"contextRefs"`
+	// R15.15 P1：Post 可带 SceneType（ROOFTOP / BRUNCH / SPA /
+	// CINEMA / PHOTO / NIGHTLIFE / OUTDOOR / COFFEE / UNKNOWN），
+	// 让 listFeed 能调 s.sceneAesthetic.GetAestheticBackdrop(ctx,
+	// post.CityScope, post.SceneType) 走 per-(city, sceneType)
+	// 记忆轮。不传默认 UNKNOWN（依然能查到，只是样本少）。
+	SceneType  string   `json:"sceneType"`
+	ContextRefs []ContextRef `json:"contextRefs"`
+}
+
+// allowedSceneTypes 是 Post.SceneType 的允许集。需要保持与
+// @proxy/contracts scene.ts SceneTypeSchema 同源。这是列表是
+// 唯一应该被 listFeed 接叏去 sceneAesthetic provider 的输入。
+// 注：scene 包内 Memory.SceneType 是更细的混合标签 (如
+// 'ROOFTOP_PHOTO')。Post.SceneType 这里用顶层类别以保持发布者
+// 选择负担小，不动起 scene 包类别字典。
+var allowedSceneTypes = map[string]struct{}{
+	"UNKNOWN":   {},
+	"ROOFTOP":   {},
+	"BRUNCH":    {},
+	"SPA":       {},
+	"CINEMA":    {},
+	"PHOTO":     {},
+	"NIGHTLIFE": {},
+	"OUTDOOR":   {},
+	"COFFEE":    {},
 }
 
 func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Result {
@@ -439,6 +471,15 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	}
 	if p.Body == "" && len(p.MediaRefs) == 0 {
 		return command.Rejected(e, "POST_EMPTY_CONTENT", "VALIDATION", "AFTER_USER_ACTION", "localnet.post_empty_content", nil)
+	}
+	// R15.15 P1: SceneType 可选 — 客户端发布时可填。未知 / 拼错的值
+	// 不被静默接受，会 reject 避免下游 sceneAesthetic.GetAestheticBackdrop
+	// 拿到垃圾输入。空串=UNKNOWN，计为合规。
+	if p.SceneType == "" {
+		p.SceneType = "UNKNOWN"
+	}
+	if _, ok := allowedSceneTypes[p.SceneType]; !ok {
+		return command.Rejected(e, "INVALID_POST_SCENE_TYPE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_scene_type", map[string]any{"got": p.SceneType})
 	}
 	// R14 §16.1：P0 max = 6 Media/Post；超过不静默截断
 	if len(p.MediaRefs) > 6 {
@@ -483,6 +524,7 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		CityScope:         p.CityScope,
 		Status:            "PUBLISHED",
 		ContextRefs:       mergeClassificationRefs(p.ContextRefs, classifyPostFallback(p.Body)),
+		SceneType:         p.SceneType,
 		CreatedAt:         s.clock.Now().UTC(),
 	}
 	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, map[string]any{
@@ -575,17 +617,36 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	})
 	// R14 §16.5：Feed Read Model Hydrate 媒体（mediaLookup + READY 过滤）
 	feedMedia := make(map[string][]PostMediaItem, len(feed))
-	// R15.13 P4：Memory → Feed 反馈。Post aggregate 暂未携带
-	// SceneType 字段（Post 与 Scene 是不同 aggregate），所以本轮以
-	// 全局 dominant color 作为整 Feed 的统一 frame 背景推荐 —
-	// 客户端在 contain 模式下用此色替代写死深紫黑。后续 Post 加
-	// SceneType 字段后可重构成 per-(city,sceneType) 缓存。
-	var globalBackdrop string
-	if s.sceneAesthetic != nil {
-		bd, err := s.sceneAesthetic.GetAestheticBackdrop(ctx, "", "")
-		if err == nil && bd.SampleCount >= 2 && bd.Hex != "" {
-			globalBackdrop = bd.Hex
+	// R15.15 P1: Memory → Feed 反馈重构。R15.13 P4 用了
+	// globalBackdrop (CityScope="", SceneType="") 一色走全 Feed —
+	// Post aggregate 不携带 SceneType 不得不这么干。本轮 Post
+	// 有了 SceneType 字段后, 按 (CityScope, SceneType) 去
+	// GetAestheticBackdrop 取，该函数在 SceneService 里
+	// ListAllMemories 后 filter 出同 (city, sceneType) 的子集再
+	// 算众数。补一个 feed-level cache (N 个 post 调同一份同样
+	// (city, sceneType) 背景的只查一次)，避免 N+1 调用。
+	type backdropKey struct {
+		City     string
+		Scene    string
+	}
+	backdropCache := map[backdropKey]string{}
+	getBackdrop := func(city, scene string) string {
+		if s.sceneAesthetic == nil {
+			return ""
 		}
+		key := backdropKey{City: city, Scene: scene}
+		if cached, ok := backdropCache[key]; ok {
+			return cached
+		}
+		bd, err := s.sceneAesthetic.GetAestheticBackdrop(ctx, city, scene)
+		if err != nil || bd.SampleCount < 2 || bd.Hex == "" {
+			// 与 P4 一致: 不到 2 个 sample 不能推 (黑骀 会误“在一
+			// 个老帖”里查到一个颜色推到全 Feed), 返空。
+			backdropCache[key] = ""
+			return ""
+		}
+		backdropCache[key] = bd.Hex
+		return bd.Hex
 	}
 	if s.mediaLookup != nil {
 		for _, p := range feed {
@@ -639,10 +700,14 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 					SortOrder:         ref.SortOrder,
 					CompositionHint:   info.CompositionHint,
 				})
-				// R15.13 P4: stamp the recommended frame backdrop on
-				// the first item (clients only need it once per post).
-				if len(items) == 1 && globalBackdrop != "" {
-					items[0].SceneAestheticBackdrop = globalBackdrop
+				// R15.15 P1: 按 (post.CityScope, post.SceneType) 取
+				// 背景 — 不同场景类型的帖背景会不一样。相同 (city,
+				// scene) 只调一次场景服务 (见 getBackdrop 内的
+				// backdropCache)。
+				if len(items) == 1 {
+					if bd := getBackdrop(p.CityScope, p.SceneType); bd != "" {
+						items[0].SceneAestheticBackdrop = bd
+					}
 				}
 			}
 			if len(items) > 0 {

@@ -110,6 +110,34 @@ describe("AUDIO media (voice posts, ≤30s)", () => {
     expect(parsed.unfiltered).toBeUndefined();
   });
 
+  // R15.15 P1: Post.SceneType 字段 — 解锁 per-(city, sceneType)
+  // 背景缓存。
+  it("FeedPostSchema accepts sceneType (per-(city, sceneType) backdrop unlock)", () => {
+    const parsed = ListFeedPostsPayloadSchema.parse({
+      posts: [{
+        postId: "p1", authorType: "AGENT", authorId: "u1",
+        body: "rooftop", status: "PUBLISHED", createdAt: "2026-08-28T00:00:00Z",
+        cityScope: "河内", sceneType: "ROOFTOP"
+      }],
+      media: {}
+    });
+    expect(parsed.posts[0].sceneType).toBe("ROOFTOP");
+  });
+
+  it("FeedPostSchema rejects unknown sceneType (fail-closed on contract drift)", () => {
+    // 如果 server 调 CreatePost 接受 WHATEVER_THIS_IS，client
+    // 拿到的 sceneType 就不在 zod 联合里 — schema 需 reject。
+    const result = ListFeedPostsPayloadSchema.safeParse({
+      posts: [{
+        postId: "p1", authorType: "AGENT", authorId: "u1",
+        body: "x", status: "PUBLISHED", createdAt: "2026-08-28T00:00:00Z",
+        sceneType: "WHATEVER_THIS_IS"
+      }],
+      media: {}
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("still rejects unknown media types", () => {
     expect(() =>
       FeedMediaItemSchema.parse({

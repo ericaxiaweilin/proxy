@@ -321,12 +321,30 @@ func TestListFeedPosts_EmptyDominantColorHex_Omitted(t *testing.T) {
 // stubSceneAesthetic returns a fixed backdrop for the (city, type)
 // tuple it was constructed with. Anything else returns the zero
 // value so the caller falls back to the hard-coded frame color.
+//
+// R15.15 P1: 加 byKey (按 sceneType 返不同色) + calls (计数
+// 调 调用 — 验证 cache 避免 N+1)。老调用 (hex + sampleCount)
+// 仍然走.
 type stubSceneAesthetic struct {
-	hex        string
+	hex         string
 	sampleCount int
+	// byKey 映射 sceneType → hex。cityScope 任意, sceneType 匹配
+	// 就返这色。默认 sampleCount=2 (在阈值上)。
+	byKey map[string]string
+	// calls 记录 city+"\x00"+scene 调用次数 (判断 cache 是否生效)。
+	calls map[string]int
 }
 
 func (s *stubSceneAesthetic) GetAestheticBackdrop(ctx context.Context, cityScope, sceneType string) (SceneAestheticBackdrop, error) {
+	if s.calls == nil {
+		s.calls = map[string]int{}
+	}
+	s.calls[cityScope+"\x00"+sceneType]++
+	if s.byKey != nil {
+		if hex, ok := s.byKey[sceneType]; ok {
+			return SceneAestheticBackdrop{Hex: hex, SampleCount: 2, Confidence: 1.0}, nil
+		}
+	}
 	return SceneAestheticBackdrop{Hex: s.hex, SampleCount: s.sampleCount, Confidence: 1.0}, nil
 }
 
@@ -602,4 +620,158 @@ func TestListFeedPosts_ViewingCity_MalformedPayloadFallsBackToUnfiltered(t *test
 		t.Fatalf("malformed viewingCity must fall back to unfiltered")
 	}
 }
+
+// ── R15.15 P1 Post.SceneType + per-(city,sceneType) backdrop ─────────
+//
+// R15.13 P4 走全局 一色 ("", "")。R15.15 解锁 Post.SceneType
+// 后可以 per-(city, sceneType) 取样，3 个 tripwires 验证:
+//   1. CreatePost 接受合法 SceneType + 在 Post struct 跟读
+//   2. CreatePost 拒绝未知 SceneType (fail-closed)
+//   3. listFeed 按 post.SceneType 调 GetAestheticBackdrop
+
+func TestCreatePost_AcceptsSceneType(t *testing.T) {
+	// 发布者填 ROOFTOP 应当走到 Post.SceneType 字段，被 listFeed
+	// 读出。
+	s := New()
+	r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT",
+		"body":       "露台拍摄", "visibility": "PUBLIC", "cityScope": "河内",
+		"sceneType":  "ROOFTOP",
+	}))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create with sceneType=ROOFTOP: %s (%+v)", r.Outcome, r.Error)
+	}
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	var view struct {
+		Posts []Post `json:"posts"`
+	}
+	_ = json.Unmarshal([]byte(list.OperationRef), &view)
+	if len(view.Posts) != 1 {
+		t.Fatalf("want 1 post, got %d", len(view.Posts))
+	}
+	if view.Posts[0].SceneType != "ROOFTOP" {
+		t.Fatalf("want SceneType=ROOFTOP, got %q", view.Posts[0].SceneType)
+	}
+}
+
+func TestCreatePost_RejectsUnknownSceneType(t *testing.T) {
+	// 不在白名单的 SceneType 应当被 reject。不准静默跳成 UNKNOWN
+	// — 发布者拼错了会一直被误推荐到 UNKNOWN bucket。
+	s := New()
+	r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT",
+		"body":       "x", "visibility": "PUBLIC", "cityScope": "河内",
+		"sceneType":  "WHATEVER_THIS_IS",
+	}))
+	if r.Outcome != "REJECTED" {
+		t.Fatalf("unknown sceneType must reject, got %s", r.Outcome)
+	}
+	if r.Error == nil || r.Error.ErrorCode != "INVALID_POST_SCENE_TYPE" {
+		t.Fatalf("want INVALID_POST_SCENE_TYPE, got %+v", r.Error)
+	}
+}
+
+func TestCreatePost_EmptySceneTypeDefaultsToUnknown(t *testing.T) {
+	// 老 client 路径不传 sceneType — 服务端应该默认值成
+	// UNKNOWN（不报 reject），保持 wire 兼容。
+	s := New()
+	r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "x", "visibility": "PUBLIC", "cityScope": "河内",
+	}))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("legacy no sceneType must accept, got %s", r.Outcome)
+	}
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	var view struct {
+		Posts []Post `json:"posts"`
+	}
+	_ = json.Unmarshal([]byte(list.OperationRef), &view)
+	if view.Posts[0].SceneType != "UNKNOWN" {
+		t.Fatalf("want default UNKNOWN, got %q", view.Posts[0].SceneType)
+	}
+}
+
+func TestListFeedPosts_PerSceneTypeBackdrop(t *testing.T) {
+	// 两个不同 SceneType 的帖应当拿不同的背景色。需要一个
+	// 返色 provider 返两不同背景代表 ROOFTOP vs BRUNCH。
+	stub := &stubSceneAesthetic{
+		byKey: map[string]string{
+			"ROOFTOP": "#2A1A0F", // warm dark
+			"BRUNCH":  "#FFF4E0", // soft cream
+		},
+	}
+	media := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"media_a": {MediaAssetID: "media_a", MediaType: "IMAGE", Width: 100, Height: 100, ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC"},
+		"media_b": {MediaAssetID: "media_b", MediaType: "IMAGE", Width: 100, Height: 100, ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC"},
+	}}
+	s := NewWithAll(NewMemoryRepository(), media, nil, stub)
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "rooftop", "visibility": "PUBLIC", "cityScope": "河内",
+		"sceneType": "ROOFTOP", "mediaRefs": []map[string]any{{"mediaAssetId": "media_a", "mediaType": "IMAGE", "sortOrder": 0}},
+	}))
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "brunch", "visibility": "PUBLIC", "cityScope": "河内",
+		"sceneType": "BRUNCH", "mediaRefs": []map[string]any{{"mediaAssetId": "media_b", "mediaType": "IMAGE", "sortOrder": 0}},
+	}))
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	var view struct {
+		Posts []Post                      `json:"posts"`
+		Media map[string][]map[string]any `json:"media"`
+	}
+	_ = json.Unmarshal([]byte(list.OperationRef), &view)
+	if len(view.Posts) != 2 {
+		t.Fatalf("want 2 posts, got %d", len(view.Posts))
+	}
+	// 同一 cityScope="河内" 下, 背垊色按 sceneType 区分。
+	colors := map[string]string{}
+	for _, p := range view.Posts {
+		items := view.Media[p.ID]
+		if len(items) != 1 {
+			t.Fatalf("post %s: want 1 media item, got %d", p.ID, len(items))
+		}
+		bd, present := items[0]["sceneAestheticBackdrop"]
+		if !present {
+			t.Fatalf("post %s (sceneType=%s): missing sceneAestheticBackdrop", p.ID, p.SceneType)
+		}
+		colors[p.SceneType] = bd.(string)
+	}
+	if colors["ROOFTOP"] == colors["BRUNCH"] {
+		t.Fatalf("ROOFTOP and BRUNCH must get different backdrops, both got %q", colors["ROOFTOP"])
+	}
+	if colors["ROOFTOP"] != "#2A1A0F" {
+		t.Fatalf("ROOFTOP backdrop wrong: %q", colors["ROOFTOP"])
+	}
+	if colors["BRUNCH"] != "#FFF4E0" {
+		t.Fatalf("BRUNCH backdrop wrong: %q", colors["BRUNCH"])
+	}
+}
+
+func TestListFeedPosts_BackdropCacheAvoidsN1(t *testing.T) {
+	// 三个同 (city="河内", sceneType="ROOFTOP") 的帖 — 期待
+	// GetAestheticBackdrop 只调一次 (不是 3 次)。这是性能
+	// contract，不竟 3 个帖 3 个调用会让 O(n) 调用压到 Scene service。
+	stub := &stubSceneAesthetic{
+		byKey: map[string]string{"ROOFTOP": "#2A1A0F"},
+	}
+	media := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"ma": {MediaAssetID: "ma", MediaType: "IMAGE", Width: 100, Height: 100, ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC"},
+		"mb": {MediaAssetID: "mb", MediaType: "IMAGE", Width: 100, Height: 100, ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC"},
+		"mc": {MediaAssetID: "mc", MediaType: "IMAGE", Width: 100, Height: 100, ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC"},
+	}}
+	s := NewWithAll(NewMemoryRepository(), media, nil, stub)
+	for i, ma := range []string{"ma", "mb", "mc"} {
+		s.Handle(envelopeFor("", "CreatePost", map[string]any{
+			"authorType": "AGENT", "body": "rooftop", "visibility": "PUBLIC", "cityScope": "河内",
+			"sceneType": "ROOFTOP",
+			"mediaRefs": []map[string]any{{"mediaAssetId": ma, "mediaType": "IMAGE", "sortOrder": 0}},
+			"_iteration": i,
+		}))
+	}
+	_ = s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	if got := stub.calls["河内\x00ROOFTOP"]; got != 1 {
+		// 第一个是 "河内"+ROOFTOP — 期望1次调用
+		t.Fatalf("expected 1 GetAestheticBackdrop call for shared (city, sceneType), got %d", got)
+	}
+}
+
 
