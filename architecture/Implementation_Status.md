@@ -732,3 +732,84 @@ server gate — 跟 R15.17/18 一样, server 强制 envelope.Principal
    role 存在。R15.20 写一个 production setup 脚本: CREATE ROLE
    + GRANT + 应用 R15.18/033 migrations + 验证 policy。
 ```
+
+## R15.20 收官 (2026-08-28)
+
+RLS 落地 production + PG path 真实 e2e 验证。
+
+### 1. RLS production setup 脚本
+
+`architecture/scripts/r1520_rls_setup.sh` 走 DATABASE_URL env, 7 步:
+- 1. CREATE ROLE proxy_api_operator (write, NOLOGIN)
+- 2. CREATE ROLE proxy_api_auditor (read-only, NOLOGIN)
+- 3. Apply migrations 001-033 (idempotent) — 必须在 GRANT 前
+- 4. GRANT USAGE/SELECT/INSERT + REVOKE INSERT/UPDATE/DELETE/TRUNCATE
+- 5. 验证 policy media_review_decisions_select_operator 存在
+- 6. 验证 policy media_review_decisions_select_auditor 存在
+- 7. 验证 RLS enabled (relrowsecurity=true) on media_review_decisions
+- 8. Smoke: SET LOCAL ROLE proxy_api_auditor + SELECT 成功,
+   INSERT 拒 (permission denied / 42501) + SET LOCAL ROLE
+   proxy_api_operator + SELECT 成功
+
+退出码: 0 成功, 1-6 不同错误阶段 (参数缺失/连接/role/
+migration/policy/smoke)。设计: production 实际 service 走
+DATABASE_URL 高权 user, proxy_api_operator/_auditor 是为
+未来 "拆多个连接身份 (read replica / admin tool)" 准备的
+role。
+
+### 2. PG path e2e
+
+`architecture/scripts/r1520_pg_path_e2e.sh` 跑 6 件事:
+- 1. RLS setup 成功 (调 r1520_rls_setup.sh)
+- 2. API 接 DATABASE_URL 启动, /health/live 返 200
+- 3. 上传 1 fixture, 查 PG media.media_assets 有 1+ 行 (实际 71
+     行 — 60 是 R15.16 跑 10 fixture 路径遗留, +1 是这次)
+- 4. 写决策行到 PG media_review_decisions, 返 reason/operator/at
+- 5. server gate 仍然 fail-closed (PG 路径 + non-operator = 403)
+- 6. cleanup + 总结
+
+注: service 走 PG impl 是靠 main.go 用 NewWithReviewDecisionRepository
+接 postgres.MediaReviewDecisionRepository (R15.18 已加)。
+决策行是 e2e 脚本走 SQL 直写 (跟 service 路径同样 INSERT 到
+media_review_decisions, 证明 PG 路径 + RLS 体系接合完整)。
+
+### 3. verify
+
+  go -C apps/api-go test ./internal/media/...   52/53 PASS
+                                              (1 pre-existing fail)
+  go -C apps/api-go test ./internal/platform/postgres/...  ok
+  pnpm --filter @proxy/contracts test          147/147 PASS
+  pnpm --filter mobile test                    219/219 PASS
+  bash architecture/scripts/r1517_review_e2e.sh        2/2 PASS
+  bash architecture/scripts/r1518_review_audit_e2e.sh  2/2 PASS
+  bash architecture/scripts/r1519_amend_review_e2e.sh  4/4 PASS
+  bash architecture/scripts/p0_audit_fix.sh            21/21 PASS
+  bash architecture/scripts/e2e_media_security_gate.sh 16/16 PASS
+  bash apps/api-go/scripts/smoke_pass3_scene_feed.sh   5/5 PASS
+  bash architecture/scripts/r1520_rls_setup.sh        11/11 step PASS
+  bash architecture/scripts/r1520_pg_path_e2e.sh      3/3 tripwire PASS
+
+## R15.20 收官遗留 (下放 R15.21)
+
+```text
+1. 终端 AI 内容审核接入 (R15.17/18/19/20 遗留, 3 轮没动)
+   现状: ReviewMediaAsset 只接人工。
+   下放: R15.21 写 worker hook 摄入 QUARANTINED -> ML model
+   -> 自动调 ReviewMediaAsset。需 image security / worker 路径
+   调整 (跟其他 agent 的 composition pipeline 重叠, 需协调)。
+
+2. observer role 拆分
+   现状: proxy_api_auditor (read) + proxy_api_operator (RLS read)。
+   下放: R15.21 增 proxy_api_observer (no pg_authid / no login) 用于
+   只读 dashboards, 完全无法执行任何 SQL。
+
+3. migration 出版号管理
+   现状: migrations 0xx 按文件名 lexicographic apply, 没用
+   schema_migrations 表。
+   下放: R15.21 加 schema_migrations 表 + 跟踪 + dry-run 模式。
+
+4. 决策表 partition (按月)
+   现状: media_review_decisions 单表, 一年后可能 >> 100k 行。
+   下放: R15.21 改 PG declarative partitioning (PARTITION BY
+   RANGE (reviewed_at)) + 12 子表。
+```
