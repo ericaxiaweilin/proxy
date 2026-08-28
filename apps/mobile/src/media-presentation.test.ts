@@ -12,6 +12,20 @@ import {
 } from "./media-presentation";
 import type { FeedMediaItem } from "@proxy/contracts";
 
+// 11 fixture-aspect inputs (from architecture/fixtures/social-media/matrix/manifest.json)
+const FIXTURE_ASPECTS: ReadonlyArray<{ id: string; w: number; h: number; expectedMode: "SINGLE" | "RAIL" | "WALL" }> = [
+  { id: "single-portrait-half-4x5",     w: 1200, h: 1500, expectedMode: "SINGLE" },
+  { id: "single-portrait-full-9x16",    w: 900,  h: 1600, expectedMode: "SINGLE" },
+  { id: "single-landscape-half-4x3",    w: 1600, h: 1200, expectedMode: "SINGLE" },
+  { id: "single-landscape-full-3x1",    w: 1800, h: 600,  expectedMode: "SINGLE" },
+  { id: "group-portrait-2-1x1",         w: 1500, h: 1500, expectedMode: "SINGLE" },
+  { id: "group-portrait-4-1x1",         w: 1500, h: 1500, expectedMode: "SINGLE" },
+  { id: "landscape-skyline-16x9",       w: 1920, h: 1080, expectedMode: "SINGLE" },
+  { id: "object-product-4x5",           w: 1200, h: 1500, expectedMode: "SINGLE" },
+  { id: "object-flatlay-1x1",           w: 1500, h: 1500, expectedMode: "SINGLE" },
+  { id: "ad-banner-text-heavy-16x9",    w: 1920, h: 1080, expectedMode: "SINGLE" },
+  { id: "screenshot-ui-9x19.5",         w: 1170, h: 2532, expectedMode: "SINGLE" },
+];
 describe("portrait social media presentation", () => {
   it("uses a large single, rails for 2/3/5, and walls for 4/6", () => {
     expect([1, 2, 3, 4, 5, 6].map(mediaCollectionMode)).toEqual([
@@ -260,5 +274,68 @@ describe("wallCellAspect (R15.16 P1) — wall 2列 row 高度门", () => {
   it("非正值 (0 / 负数) 返 1 (square fallback)", () => {
     expect(wallCellAspect(0)).toBe(1);
     expect(wallCellAspect(-1)).toBe(1);
+  });
+});
+
+describe("R15.16 P2 — 11 fixture 走 mediaCollectionMode/wallCellAspect 门", () => {
+  for (const fix of FIXTURE_ASPECTS) {
+    it(`${fix.id} (${fix.w}x${fix.h}) SINGLE 模式 + wallCellAspect 不越界`, () => {
+      // 1. 单个 fixture 走 SINGLE 模式 — 6 个 PORTRAIT 主体都是
+      //    SINGLE (不管 portrait/landscape 比例, SINGLE 只看
+      //    item count = 1)。
+      expect(mediaCollectionMode(1)).toBe(fix.expectedMode);
+      // 2. aspect 提取走 mediaAspect() — aspectRatio 字段优先。
+      const item: FeedMediaItem = {
+        mediaAssetId: `mock_${fix.id}`,
+        mediaType: "IMAGE",
+        aspectRatio: fix.w / fix.h
+      } as FeedMediaItem;
+      const ar = item.aspectRatio;
+      // wallCellAspect 永远 >= 0.8 且 <= 1.91 (除非 raw aspect 已在
+      // 范围内) — tripwire 钉所有 fixture 都能安全走 wall。
+      const wc = wallCellAspect(ar);
+      expect(wc).toBeGreaterThanOrEqual(0.8);
+      expect(wc).toBeLessThanOrEqual(1.91);
+    });
+  }
+
+  it("2 / 3 / 5 个 fixture 走 RAIL (竖 portrait 主导)", () => {
+    expect(mediaCollectionMode(2)).toBe("RAIL");
+    expect(mediaCollectionMode(3)).toBe("RAIL");
+    expect(mediaCollectionMode(5)).toBe("RAIL");
+  });
+
+  it("4 / 6 个 fixture 走 WALL (双列)", () => {
+    expect(mediaCollectionMode(4)).toBe("WALL");
+    expect(mediaCollectionMode(6)).toBe("WALL");
+  });
+
+  it("rail 对 11 个 fixture aspect 都不超过 maxWidth", () => {
+    // RAIL 走 portraitSet — portraitSet 是 portrait 计数 >= items/2。
+    // 11 fixture 中只有 ad-banner (1.778) 和 single-landscape-full-3x1 (3.0)
+    // 算 landscape — 不在 portraitSet。剩下 9 个 portrait 主导。
+    const items = FIXTURE_ASPECTS.map((fix) => ({
+      mediaAssetId: `mock_${fix.id}`,
+      mediaType: "IMAGE" as const,
+      aspectRatio: fix.w / fix.h,
+      width: fix.w,
+      height: fix.h
+    }));
+    const layout = portraitRailLayout(items, 360);
+    // railHeight 在 [190, 440] (portraitSet false 时最小 190,
+    // portraitSet true 时上限 440)
+    expect(layout.railHeight).toBeGreaterThanOrEqual(190);
+    expect(layout.railHeight).toBeLessThanOrEqual(440);
+    const maxWidth = Math.max(244, 360 * 0.92); // 331.2
+    const metrics = mediaRailMetrics(items, 360);
+    for (let i = 0; i < metrics.cardWidths.length; i++) {
+      const w = metrics.cardWidths[i]!;
+      // card width 必须 <= maxWidth (防越界)
+      expect(w).toBeLessThanOrEqual(maxWidth);
+      // card height = width / aspect
+      const h = metrics.cardHeights[i]!;
+      const expectedH = w / items[i]!.aspectRatio!;
+      expect(h).toBeCloseTo(expectedH, 1);
+    }
   });
 });
