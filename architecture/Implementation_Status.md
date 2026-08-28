@@ -379,9 +379,11 @@ Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture
 
 ## R15.16 收官（2026-08-28）
 
-三件接管的补修（用户授权后接手其他 agent 范围）:
+接管范围全面 ship, 4 commit / 4 个子集:
 
-### 1. iCloud 防护 (mediaStoreDir 默认路径)
+### 1. R15.16 P1 (c45ed71) — 接管补修 (iCloud / 浮点 / wall)
+
+#### 1a. iCloud 防护 (mediaStoreDir 默认路径)
 
 `apps/api-go/cmd/api/main.go` 默认 `PROXY_MEDIA_STORE_DIR` 走
 `~/Developer/kake-data/media_store` (non-iCloud 固态位置) 而不
@@ -389,13 +391,19 @@ Outcome Intelligence 的实现顺序仍遵循 [Outcome Intelligence Architecture
 闲置期 evict 文件, 派生图变 dataless placeholder, 媒体服务
 返超时 / 0 byte。
 
-### 2. 浮点精度门 (mediaRailMetrics)
+### 2. R15.16 P2 (fd7af57) — 11 fixture 规范化照片素材 (R15.16 P2 重点)
+
+genfixtures Go stdlib 生成 11 个 JPEG + manifest, 覆盖 6 单人 +
+2 多人 + 1 风景 + 2 贴标 (ad / screenshot)。6 Go tripwires + 14
+TS tripwires。
+
+#### 2a. 浮点精度门 (mediaRailMetrics)
 
 `mediaRailMetrics` 改用 r3(n) = round(n*1000)/1000 — 避免
 0.8 * 378 = 302.40000000000003 在 IEEE 754 累积, 粉碎 test 期望
 [0, 312.4, 535.025] 精确等。
 
-### 3. wall 高度门 (wallCellAspect 纯函数)
+#### 2b. wall 高度门 (wallCellAspect 纯函数)
 
 `wallCellAspect(aspect)`: portrait 最低 0.8 (4:5, 9:16 上升),
 landscape [1, 1.91]。9 个 vitest tripwires 钉明边界。
@@ -421,6 +429,28 @@ JPEG + manifest.json:
 
 复现: `go -C apps/api-go run ./internal/media/cmd/genfixtures`
 tripwires: 6 Go + 14 TS (219 vitest + 6 media 测全 PASS)。
+
+### 3. R15.16 P3 (d87f2d2) — 风控策略 E2E 验证
+
+`architecture/scripts/e2e_media_security_gate.sh` 11 fixture 走完
+init→upload(204)→complete(ACCEPTED) + 5 negative cases (no-auth
+401 / bad-token 401 / cross-user 403 / ghost 404 / html-bytes 415)
++ bomb quarantine fail-closed。**16/16 PASS**。
+
+### 4. R15.16 P0 (P0 audit fix) — fixture 接入 feed
+
+`architecture/scripts/p0_audit_fix.sh` 11 fixture → Upload → CreatePost
+→ ListFeedPosts 端到端 21/21 PASS:
+
+  Step 1: 11 fixture init+upload+complete (11/11)
+  Step 2: 4 个 CreatePost (Linh/Mai/Huyen/Bonsaidon) 用 fixture asset
+  Step 3: ListFeedPosts 可见 (feed ≥ 4 帖, 4 fixture post 全在)
+  Step 4: viewingCity=胡志明市 过滤 (empty cityScope 仍过, R15.14
+          tripwire 工作, 10 帖)
+  Step 5: SceneType PHOTO / COFFEE 走 per-(city,sceneType) cache
+
+  *** P0 audit fix 填补之前 R15.16 P2 一个真 bug: 11 fixture
+  走通 media pipeline 但没真接 Post→Feed。本脚本补接。***
 
 ## R15.16 收官遗留（1 个 PRD gap 下放给 R15.17）
 
