@@ -152,4 +152,41 @@ describe("AUDIO media (voice posts, ≤30s)", () => {
       })
     ).toThrow();
   });
+
+  // R15.17: content rejection statuses — 扩入 3 个新 status
+  // (NUDITY / POLITICS / VIOLENCE), 仍只 admin ReviewMediaAsset 写入。
+  it("R15.17 accepts the three content rejection statuses", () => {
+    for (const status of [
+      "REJECTED_CONTENT_NUDITY",
+      "REJECTED_CONTENT_POLITICS",
+      "REJECTED_CONTENT_VIOLENCE"
+    ]) {
+      const item = FeedMediaItemSchema.parse({
+        mediaAssetId: "ma_r1517",
+        mediaType: "IMAGE",
+        width: 100,
+        height: 100,
+        aspectRatio: 1.0,
+        processingStatus: "READY",
+        moderationStatus: status,
+        sortOrder: 0
+      });
+      expect(item.moderationStatus).toBe(status);
+    }
+  });
+
+  it("R15.17 still rejects unknown moderation status", () => {
+    expect(() =>
+      FeedMediaItemSchema.parse({
+        mediaAssetId: "ma_r1517_bad",
+        mediaType: "IMAGE",
+        width: 100,
+        height: 100,
+        aspectRatio: 1.0,
+        processingStatus: "READY",
+        moderationStatus: "REJECTED_CONTENT_OTHER",
+        sortOrder: 0
+      })
+    ).toThrow();
+  });
 });

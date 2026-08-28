@@ -710,7 +710,9 @@ func (s *Service) AuthorizeForPost(ctx context.Context, ids []string, ownerPrinc
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateMediaAsset", "CompleteMediaUpload", "ProcessMediaAsset",
-		"MarkMediaReady", "GetMediaAsset", "ListMediaAssets":
+		"MarkMediaReady", "GetMediaAsset", "ListMediaAssets",
+		// R15.17: admin review command — media 域接手 dispatch。
+		"ReviewMediaAsset":
 		return true
 	default:
 		return false
@@ -737,6 +739,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.getAsset(ctx, e)
 	case "ListMediaAssets":
 		return s.listAssets(ctx, e)
+	// R15.17: admin 手动 content review 路径。仅 operator (PROXY_OPERATOR_PRINCIPALS)
+	// 可调用。ReviewMediaAsset 只能把 asset 从 QUARANTINED/APPROVED
+	// 过渡到 REJECTED_CONTENT_NUDITY / _POLITICS / _VIOLENCE, 或
+	// 从任一状态返回 APPROVED (unblock)。
+	case "ReviewMediaAsset":
+		return s.reviewMediaAsset(ctx, e)
 	default:
 		return command.Rejected(e, "MEDIA_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "media.unsupported_command", nil)
 	}
@@ -923,6 +931,92 @@ func (s *Service) markReady(ctx context.Context, e command.Envelope) command.Res
 		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
 	}
 	return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, "READY", eventRefs(domainEvents))
+}
+
+// ---------- ReviewMediaAsset (R15.17) ----------
+// admin 手动 content review 路径。由 operator (PROXY_OPERATOR_PRINCIPALS)
+// 调用。/v1/commands 层在 dispatch 前检 requiresOperator — 未设 env 或
+// principal 不在白名单都被 OPERATOR_PRIVILEGE_REQUIRED 拒。
+//
+// allowed transitions:
+//   - QUARANTINED → REJECTED_CONTENT_NUDITY / _POLITICS / _VIOLENCE
+//   - APPROVED     → REJECTED_CONTENT_NUDITY / _POLITICS / _VIOLENCE
+//                     (post-publish takedown, 不常见但需支持)
+//   - REJECTED_CONTENT_* → APPROVED  (unblock)
+//
+// disallowed:
+//   - REJECTED_TECHNICAL → 任何 CONTENT_*  (技术拒不可转内容拒, 保护 audit trail)
+//   - FAILED / UPLOADING → CONTENT_*       (资产未完成处理不能走 content 门)
+//   - CONTENT_* → CONTENT_* 不同类         (不双发 reject 同一 asset)
+//
+// audit trail: 写进 asset.LastError, 格式 'content-review:<reason>:<operator_id>'。
+// 未来接 AI 内容审核会自动产生 review 事件, 在这里存原状。
+
+type reviewMediaAssetPayload struct {
+	// Reason — 取下列之一:
+	//   "APPROVE"        (unblock)
+	//   "REJECT_NUDITY"
+	//   "REJECT_POLITICS"
+	//   "REJECT_VIOLENCE"
+	Reason string `json:"reason"`
+	// Note — 人工 review 记录。可选, 但存 LastError 里帮 audit。
+	Note string `json:"note"`
+}
+
+var reviewReasonToStatus = map[string]string{
+	"APPROVE":         "APPROVED",
+	"REJECT_NUDITY":   "REJECTED_CONTENT_NUDITY",
+	"REJECT_POLITICS": "REJECTED_CONTENT_POLITICS",
+	"REJECT_VIOLENCE": "REJECTED_CONTENT_VIOLENCE",
+}
+
+func (s *Service) reviewMediaAsset(ctx context.Context, e command.Envelope) command.Result {
+	var p reviewMediaAssetPayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_REVIEW", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_review", nil)
+	}
+	target, ok := reviewReasonToStatus[p.Reason]
+	if !ok {
+		return command.Rejected(e, "INVALID_REVIEW_REASON", "VALIDATION", "AFTER_USER_ACTION", "media.invalid_review_reason", map[string]any{"allowed": []string{"APPROVE", "REJECT_NUDITY", "REJECT_POLITICS", "REJECT_VIOLENCE"}})
+	}
+	asset, err := s.repository.GetAsset(ctx, e.Target.ID)
+	if errors.Is(err, ErrAssetNotFound) {
+		return command.Rejected(e, "MEDIA_ASSET_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.asset_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MEDIA_READ_FAILED", "INTERNAL", "SAFE_RETRY", "media.read_failed", nil)
+	}
+	// disallowed transitions
+	from := asset.ModerationStatus
+	if from == "REJECTED_TECHNICAL" {
+		return command.Rejected(e, "MEDIA_REVIEW_DISALLOWED", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.review_disallowed_technical", map[string]any{"from": from, "to": target})
+	}
+	if from == "UPLOADING" || from == "FAILED" || asset.ProcessingStatus == "UPLOADING" {
+		return command.Rejected(e, "MEDIA_REVIEW_DISALLOWED", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.review_disallowed_incomplete", map[string]any{"processingStatus": asset.ProcessingStatus})
+	}
+	if from == target {
+		return command.Rejected(e, "MEDIA_REVIEW_NOOP", "BUSINESS_STATE", "AFTER_USER_ACTION", "media.review_noop", map[string]any{"status": from})
+	}
+	expectedStatus := asset.ProcessingStatus
+	asset.ModerationStatus = target
+	auditNote := "content-review:" + p.Reason + ":" + e.Principal.ID
+	if p.Note != "" {
+		auditNote = auditNote + ":" + p.Note
+	}
+	asset.LastError = auditNote
+	asset.UpdatedAt = s.clock.Now().UTC()
+	domainEvents := []event.DomainEvent{event.New("MediaAssetReviewed", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, asset.UpdatedAt, map[string]any{
+		"mediaAssetId": asset.MediaAssetID,
+		"from":         from,
+		"to":           target,
+		"operatorId":   e.Principal.ID,
+		"reason":       p.Reason,
+		"note":         p.Note,
+	})}
+	if err := s.repository.UpdateAsset(ctx, asset, expectedStatus); err != nil {
+		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
+	}
+	return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, target, eventRefs(domainEvents))
 }
 
 // ---------- GetMediaAsset / ListMediaAssets ----------

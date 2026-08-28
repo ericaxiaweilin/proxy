@@ -366,7 +366,18 @@ export const FeedMediaItemSchema = z.object({
   aspectRatio: z.number(),
   durationMs: z.number().int().nonnegative().optional(),
   processingStatus: z.string(),
-  moderationStatus: z.enum(["QUARANTINED", "APPROVED", "REJECTED_TECHNICAL"]),
+  moderationStatus: z.enum([
+    "QUARANTINED",
+    "APPROVED",
+    "REJECTED_TECHNICAL",
+    // R15.17: 内容拒 — admin 手动 review 路径
+    // 现在是状态机位, 不接 production 默认门, 仅给
+    // ReviewMediaAsset (operator-gated) 写入。未来 AI 内容审核
+    // 接入也走 ReviewMediaAsset, 不在 server 隐式 reject。
+    "REJECTED_CONTENT_NUDITY",
+    "REJECTED_CONTENT_POLITICS",
+    "REJECTED_CONTENT_VIOLENCE"
+  ]),
   sortOrder: z.number().int().nonnegative(),
   // 服务端 composition hint（§5.2.2）。可选；缺时前端走启发式。
   compositionHint: MediaCompositionHintSchema.optional()

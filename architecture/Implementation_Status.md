@@ -471,4 +471,77 @@ init→upload(204)→complete(ACCEPTED) + 5 negative cases (no-auth
    real-world 数据集 (NSFW dataset) 解耦。
 ```
 
-## R15.17 计划（待启动）
+## R15.17 收官（2026-08-28）
+
+内容拒 (黄 / 政治 / 暴力) 状态机从'仅技术拒'扩到'技术+内容'两路线。
+
+### 1. contracts — 3 个新 status (REJECTED_CONTENT_*)
+
+`packages/contracts/src/index.ts` moderationStatus zod enum
+增 3 个值: `REJECTED_CONTENT_NUDITY` / `REJECTED_CONTENT_POLITICS`
+/ `REJECTED_CONTENT_VIOLENCE`。2 个 vitest tripwires
+(R15.17 AcceptsContentRejectionStatuses + RejectsUnknownContentStatus)。
+
+### 2. service — ReviewMediaAsset 手动 content review 路径
+
+`apps/api-go/internal/media/service.go` 加 `ReviewMediaAsset`
+command:
+
+  - 被允许的过渡 (source → target):
+    QUARANTINED / APPROVED → REJECTED_CONTENT_NUDITY/_POLITICS/_VIOLENCE
+    REJECTED_CONTENT_* → APPROVED (unblock)
+  - 不允许的过渡 (保护 audit trail):
+    REJECTED_TECHNICAL → CONTENT_* (技术不可转内容)
+    UPLOADING / FAILED → CONTENT_* (资产未完成处理不能走 content 门)
+    CONTENT_* → 同类 (no-op)
+  - audit 写在 asset.LastError, 格式
+    `content-review:<reason>:<operator_id>[:<note>]`。
+  - 同时发 `MediaAssetReviewed` domain event (供未来 outbox / audit log)。
+
+8 个 Go tripwires 钉状态机: QUARANTINED→NUDITY / APPROVED→
+POLITICS takedown / VIOLENCE→APPROVED unblock / REJECTED_TECHNICAL
+拒 / UPLOADING 拒 / invalid reason 拒 / not found 拒 / no-op 拒。
+
+### 3. server boundary — operator allowlist 门 fail-closed
+
+`apps/api-go/internal/api/security.go` operatorCommandTypes 增
+`ReviewMediaAsset: true`。重设 /v1/commands 边界会重置
+envelope.Principal / Actor / AuthContext 为 session 里的, 客户端
+无法伪造身份。PROXY_OPERATOR_PRINCIPALS env 未设 / principal ID
+不在 allowlist → OPERATOR_PRIVILEGE_REQUIRED (403 fail-closed)。
+
+### 4. openapi drift — 149 commands (was 148)
+
+`openapi.commands.generated.yaml` 重新生成, 包含新增
+`ReviewMediaAsset` (media 域)。drift check pass。
+
+### 5. e2e — 2 server gate tripwires pass
+
+`architecture/scripts/r1517_review_e2e.sh` 启 server 无
+allowlist + user principal 不在 allowlist 两路, 验证 server
+边界 OPERATOR_PRIVILEGE_REQUIRED fail-closed。
+
+注: 状态机走查 6 路径 (Test 3-6) 由 service 单元测试
+(`apps/api-go/internal/media/r1517_review_test.go` 8 个 tripwire)
+覆盖。e2e 只能验 server gate — 因为 server 强制 envelope.Principal
+重置为 session principal.ID, 测试要传另一个 principal ID 调
+ReviewMediaAsset, 必须为那个 ID 发新 session, 那个 ID 要在 allowlist,
+而 allowlist 是 server env, 是闭路问题。
+
+## R15.17 收官遗留 (下放 R15.18)
+
+```text
+1. 终端 AI 内容审核接入
+   现状: ReviewMediaAsset 只接人工, 未来 AI (NSFW classifier
+   / political keywords) 不会自动调。
+   下放: R15.18 写一个 worker hook, 摄入已 QUARANTINED 资产,
+   调 ML model, 产出审核 event -> ReviewMediaAsset 自动调用。
+   需要 Postgres migration 加 review_decisions 表 (决策
+   记录不可丢)。
+
+2. review_decisions 不可丢
+   现状: 决策只在 asset.LastError 字串里, 难查。
+   下放: R15.18 增 media_review_decisions 表
+   (asset_id, from, to, reason, note, operator_id, reviewed_at),
+   加 RLS 锁 admin 读 + auditor read-only。
+```

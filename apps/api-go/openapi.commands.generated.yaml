@@ -257,6 +257,8 @@ commands:
     domain: Contribution
   - command: ReviewDomain
     domain: Contribution
+  - command: ReviewMediaAsset
+    domain: Media
   - command: ReviewRewardGate
     domain: Contribution
   - command: RevokeAllSessions
