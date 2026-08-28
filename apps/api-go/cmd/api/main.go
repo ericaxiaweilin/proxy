@@ -143,7 +143,11 @@ func main() {
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
-		mediaService = media.NewWithDependencies(postgres.NewMediaRepository(pool), media.NewFFmpegProcessor(mediaStoreDir))
+		mediaService = media.NewWithReviewDecisionRepository(
+			postgres.NewMediaRepository(pool),
+			postgres.NewMediaReviewDecisionRepository(pool),
+			media.NewFFmpegProcessor(mediaStoreDir),
+		)
 		mediaService.SetStoreDir(mediaStoreDir)
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))

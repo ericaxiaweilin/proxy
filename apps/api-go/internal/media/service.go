@@ -272,25 +272,36 @@ func (r *MemoryRepository) GetVariant(_ context.Context, variantID string) (Medi
 }
 
 type Service struct {
-	mu         sync.Mutex
-	repository Repository
-	processor  Processor
-	clock      clock.Clock
-	storeDir   string
-	logger     *log.Logger
+	mu                   sync.Mutex
+	repository           Repository
+	reviewDecisionRepo   ReviewDecisionRepository
+	processor            Processor
+	clock                clock.Clock
+	storeDir             string
+	logger               *log.Logger
 }
 
 func New() *Service {
-	return NewWithDependencies(NewMemoryRepository(), nil)
+	return NewWithReviewDecisionRepository(NewMemoryRepository(), NewMemoryReviewDecisionRepository(), nil)
 }
 
 // NewWithDependencies 注入 repository 和 processor。
 // processor 为 nil 时用 NoopProcessor（单测/无 ffmpeg 环境）。
+// reviewDecisionRepo 为 nil 时用 MemoryReviewDecisionRepository,
+// 是默认 (R15.18 让 memory 模式也能 持久化决策)。
 func NewWithDependencies(repository Repository, processor Processor) *Service {
+	return NewWithReviewDecisionRepository(repository, NewMemoryReviewDecisionRepository(), processor)
+}
+
+// NewWithReviewDecisionRepository R15.18 入口: 注入决策仓库。
+func NewWithReviewDecisionRepository(repository Repository, reviewDecisionRepo ReviewDecisionRepository, processor Processor) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}
-	return &Service{repository: repository, processor: processor, clock: clock.System{}, storeDir: filepath.Join(".", "media_store")}
+	if reviewDecisionRepo == nil {
+		reviewDecisionRepo = NewMemoryReviewDecisionRepository()
+	}
+	return &Service{repository: repository, reviewDecisionRepo: reviewDecisionRepo, processor: processor, clock: clock.System{}, storeDir: filepath.Join(".", "media_store")}
 }
 
 // SetStoreDir 覆盖媒体文件本地目录（与 FFmpegProcessor.StoreDir 对齐）。
@@ -745,6 +756,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	// 从任一状态返回 APPROVED (unblock)。
 	case "ReviewMediaAsset":
 		return s.reviewMediaAsset(ctx, e)
+	// R15.18: audit 列表 — operator 查 content review 决策历史。
+	// 逻辑: operator in PROXY_OPERATOR_PRINCIPALS (server 门已验)
+	// 看到所有 asset 的决策行,不能只看到自己作为 operator 的。
+	// 按 mediaAssetId 过滤 (空 = 所有),按 reviewedAt 倒序。
+	case "ListMediaReviewDecisions":
+		return s.listMediaReviewDecisions(ctx, e)
 	default:
 		return command.Rejected(e, "MEDIA_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "media.unsupported_command", nil)
 	}
@@ -1016,6 +1033,27 @@ func (s *Service) reviewMediaAsset(ctx context.Context, e command.Envelope) comm
 	if err := s.repository.UpdateAsset(ctx, asset, expectedStatus); err != nil {
 		return command.Rejected(e, "MEDIA_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "media.update_failed", nil)
 	}
+	// R15.18: 持久化决策行到 media_review_decisions 表 (memory / postgres)。
+	// 失败不阻塞主命品 — audit 丢可重补, asset 状态已经定下。
+	if s.reviewDecisionRepo != nil {
+		decision := MediaReviewDecision{
+			DecisionID:   "mrd_" + uuidHex(),
+			MediaAssetID: asset.MediaAssetID,
+			FromStatus:   from,
+			ToStatus:     target,
+			Reason:       p.Reason,
+			Note:         p.Note,
+			OperatorID:   e.Principal.ID,
+			ReviewedAt:   asset.UpdatedAt,
+		}
+		if err := s.reviewDecisionRepo.AppendReviewDecision(ctx, decision); err != nil {
+			// 软记录: 不返错, 只写入 result payload 的 audit warning
+			domainEvents = append(domainEvents, event.New("MediaReviewDecisionPersistFailed", "MediaAsset", asset.MediaAssetID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+				"mediaAssetId": asset.MediaAssetID,
+				"reason":       err.Error(),
+			}))
+		}
+	}
 	return command.Accepted(e, "MediaAsset", asset.MediaAssetID, 1, target, eventRefs(domainEvents))
 }
 
@@ -1273,4 +1311,52 @@ func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, 
 func encodeRef(payload map[string]any) string {
 	raw, _ := json.Marshal(payload)
 	return string(raw)
+}
+
+// uuidHex 生成 32 字符 hex。R15.18 用于 review decision ID。
+// 不用 google/uuid 库: repo 避免加依赖。
+func uuidHex() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand 不可用, 走时戳 + 纳秒 fallback
+		now := time.Now().UnixNano()
+		for i := 0; i < 16; i++ {
+			b[i] = byte(now >> (i * 4))
+		}
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// ---------- R15.18: ListMediaReviewDecisions ----------
+// operator 查 content review 决策审计行。
+// 逻辑: 按 mediaAssetId 过滤,默认返回所有 (server门已限制为 operator)。
+// limit 默认 100, 上限 1000。
+
+type listMediaReviewDecisionsPayload struct {
+	MediaAssetID string `json:"mediaAssetId,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+}
+
+func (s *Service) listMediaReviewDecisions(ctx context.Context, e command.Envelope) command.Result {
+	var p listMediaReviewDecisionsPayload
+	// payload 可选 (空 = 查所有)。无法 decode = 视为空。
+	if e.Payload != nil {
+		_ = decode(e.Payload, &p)
+	}
+	if p.Limit <= 0 {
+		p.Limit = 100
+	}
+	if p.Limit > 1000 {
+		p.Limit = 1000
+	}
+	decisions, err := s.reviewDecisionRepo.ListReviewDecisions(ctx, p.MediaAssetID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "MEDIA_REVIEW_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "media.review_list_failed", nil)
+	}
+	return acceptedWithPayload(e, "MediaReviewDecision", "", len(decisions), "LIST", map[string]any{
+		"decisions":    decisions,
+		"mediaAssetId": p.MediaAssetID,
+		"limit":        p.Limit,
+		"count":        len(decisions),
+	}, nil)
 }

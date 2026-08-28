@@ -161,6 +161,8 @@ commands:
     domain: LocalNet
   - command: ListMediaAssets
     domain: Media
+  - command: ListMediaReviewDecisions
+    domain: Media
   - command: ListMyBusinessAccounts
     domain: Business
   - command: ListMyInvitations

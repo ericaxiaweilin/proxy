@@ -58,6 +58,9 @@ var operatorCommandTypes = map[string]bool{
 	// R15.17: admin content review — nudity / politics / violence.
 	// 仍需通过 PROXY_OPERATOR_PRINCIPALS 白名单检。未设 = 拒。
 	"ReviewMediaAsset":         true,
+	// R15.18: audit list — operator 查 content review 决策历史。
+	// 同走 PROXY_OPERATOR_PRINCIPALS 门 (server 验证在 /v1/commands 边界)。
+	"ListMediaReviewDecisions": true,
 	// Money movement and settlement confirmation are server/operator actions.
 	// Mobile users may create a payment intent, but cannot impersonate a bank
 	// callback, mint/refund value, or release held payout funds.

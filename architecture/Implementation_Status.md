@@ -545,3 +545,115 @@ ReviewMediaAsset, 必须为那个 ID 发新 session, 那个 ID 要在 allowlist,
    (asset_id, from, to, reason, note, operator_id, reviewed_at),
    加 RLS 锁 admin 读 + auditor read-only。
 ```
+
+## R15.18 收官 (2026-08-28)
+
+内容审核决策从 asset.LastError 字串上抽到独立审计表 + 决策列表命令。
+
+### 1. 决策持久化 (append-only audit)
+
+`media/media_review_decisions` schema 增新表,字段:
+- decision_id: 主键 mrd_<32hex>, service 用 crypto/rand 生成
+- media_asset_id: 资产 ID, FK 锁 media.media_assets
+- from_status: 来源 ModerationStatus
+- to_status: 目标 ModerationStatus
+- reason: APPROVE / REJECT_NUDITY / REJECT_POLITICS / REJECT_VIOLENCE
+- note: operator 自由文本
+- operator_id: PROXY_OPERATOR_PRINCIPALS 门验过的 principal.ID
+- reviewed_at: server clock, default now()
+
+CHECK 约束锁 reason + from/to_status 在合法集合 (跟
+service.reviewReasonToStatus + contracts ModerationStatus 同步)。
+append-only: 没 UPDATE/DELETE 路径在 service 里。FK ON DELETE
+RESTRICT 防孤儿行。
+
+### 2. Repository 接口隔离
+
+`media.ReviewDecisionRepository` 接口:
+- AppendReviewDecision: 追加一行, 重复 ID 返错
+- ListReviewDecisions: 按 mediaAssetId 过滤, 按 reviewedAt 倒序, limit 默认 100 / 上限 1000
+
+实现:
+- `media.MemoryReviewDecisionRepository`: 测试 / 演示默认
+- `platform/postgres.MediaReviewDecisionRepository`: PG 路径,走
+  `media.media_review_decisions` 表 + RLS policy
+  (`media_review_decisions_select_operator` 仅允许 `proxy_api_operator`
+  role 读, dev/test 环境 role 不存在则跳过 RLS 启用)
+
+服务接口隔离: 主 Repository interface 不动, 决策仓库是独立
+字段, 跟其他 agents 改动 (composition_pigo.go / image_variants_*)
+零冲突。
+
+### 3. ReviewMediaAsset 成功路径多写一行
+
+service.reviewMediaAsset 在 UpdateAsset 成功后调
+reviewDecisionRepo.AppendReviewDecision。失败不阻塞 — audit
+丢可重补, 资产状态已经定下。失败 event (MediaReviewDecisionPersistFailed)
+发到 domain event 流, 供未来告警。
+
+8 个 Go tripwires (r1518_review_decision_test.go) 钉决策
+表/状态机/列表/append-only/软失败:
+- AppendsAfterReview: ReviewMediaAsset 后, decision row 写到 in-memory repo
+- AppendsForUnblock: REJECT_NUDITY -> APPROVE 双决策均写
+- FilterByAsset: ListMediaReviewDecisions 按 mediaAssetId 过滤
+- NoFilterReturnsAll: 空 filter 返所有
+- OrderedByReviewedAtDesc: 倒序
+- LimitRespected: limit 生效, unfiltered 返完整
+- AppendRejectsDuplicateID: 主键冲突返错
+- NilRepo_DoesNotBlock: nil 决策仓库不阻塞 review
+
+### 4. ListMediaReviewDecisions 命令
+
+`/v1/commands/ListMediaReviewDecisions` (operator-gated):
+- payload: { mediaAssetId?: string, limit?: number }
+- response: 决策数组 (倒序) + count + limit + 过滤 asset id
+- server boundary: `requiresOperator` 门, 跟 ReviewMediaAsset 一样
+  走 `PROXY_OPERATOR_PRINCIPALS` 白名单。未设 = 拒。
+- `media_review_decision_repository.go` 实现: postgres
+  + memory (默认)
+
+### 5. openapi drift — 150 commands (was 149)
+
+`openapi.commands.generated.yaml` 重新生成, 包含
+ListMediaReviewDecisions。drift check pass。
+
+### 6. e2e — 2 server gate tripwires pass
+
+`architecture/scripts/r1518_review_audit_e2e.sh` 启 server 无
+allowlist + openapi 包含新 command, 验证 server 边界
+OPERATOR_PRIVILEGE_REQUIRED fail-closed + 命令存在。
+
+注: 决策列表 4 路径 (Test 3-6) 由 service 单元测试覆盖
+(8 tripwires)。e2e 只能验 server gate — 跟 R15.17 一样,
+server 强制 envelope.Principal 重置, 测试其他 principal ID
+需为它发 session, 那 ID 要在 allowlist (env), 闭路问题。
+
+### 7. main.go 接线 (Postgres 模式)
+
+`cmd/api/main.go` Postgres 模式改用
+`media.NewWithReviewDecisionRepository` 注入 3 个 deps:
+postgres.MediaRepository + postgres.MediaReviewDecisionRepository
++ media.FFmpegProcessor。in-mem 模式走 `media.New()` (默认
+MemoryReviewDecisionRepository)。
+
+## R15.18 收官遗留 (下放 R15.19)
+
+```text
+1. 终端 AI 内容审核接入 (从 R15.17 下放过来)
+   现状: ReviewMediaAsset 只接人工, AI classifier 没接。
+   下放: R15.19 写 worker hook: 摄入已 QUARANTINED 资产,
+   调 ML model, 产出审核 event -> ReviewMediaAsset 自动调用。
+   需 image security / worker 路径调整 (跟其他 agent 的
+   composition pipeline 重叠, 需协调)。
+
+2. auditor read-only 角色拆分
+   现状: proxy_api_operator role 是 R15.18 RLS 的唯读身份。
+   下放: R15.19 增 proxy_api_auditor role, 只能 SELECT
+   media_review_decisions, 不能写 / 不能读其他表。
+
+3. decision 编辑 (补 note / 改 reason)
+   现状: append-only, 不能改。
+   下放: R15.19 加 AmendReviewDecision 命令 (operator),
+   生成新一行 note='amends:<prev_decision_id>' 的决策,
+   prev 行不动 (保持 append-only 语义)。
+```
