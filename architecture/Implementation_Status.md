@@ -265,6 +265,67 @@ end-to-end: idb 在 iOS 26.5 sim (UDID 22280AEA-3B36-4499-81EC-A1D77C712BA9) 实
   - tap "切换本地范围" → 弹出 picker v2
   - tap "自定义坐标" tab → 显示地图 + 城市 chip + 半径 chip
   - tap 地图 → pin 跳到 (4, 6) → LocationContext 显示 "河内 · 自定义 · 4, 6" + "21.0177, 105.8434 · 半径 1 km"
+
+## 新增：R15.14 LocationContext 真的影响 feed filter（2026-08-27）
+
+```text
+apps/api-go/internal/localnet/service.go  listFeedPayload (ViewingCity) + filterCity 严格匹配逻辑 + 响应 echo viewingCity + unfiltered
+apps/api-go/internal/localnet/service_test.go  +5 cases: ViewingCity_FiltersByCityScope / EmptyViewingCity_FallsBackToUnfiltered / ViewingCity_WhitespacesAreTrimmed / ViewingCity_PostsWithoutCityScopePassThrough / ViewingCity_MalformedPayloadFallsBackToUnfiltered
+packages/contracts/src/index.ts  ListFeedPostsPayloadSchema 加 viewingCity + unfiltered 可选字段
+packages/contracts/src/index.test.ts  +2 cases: echo 接受 + 老 caller 不破坏
+apps/mobile/src/localnet-client.ts  listFeedPosts(viewingCity?: string) 透传到 payload
+apps/mobile/src/surfaces/feed.tsx  FeedSurface 新增 viewingCity prop + loadFeed + backgroundRefresh 传 + 入 dep 数组
+apps/mobile/src/shell/app-shell.tsx  FeedSurface viewingCity={currentLocation.city}
+end-to-end: curl POST ListFeedPosts payload={viewingCity:'河内'}
+  → response.operationRef: {viewingCity: '河内', unfiltered: false}
+end-to-end: curl POST ListFeedPosts payload={}
+  → response.operationRef: {viewingCity: '', unfiltered: true}
+end-to-end: curl POST ListFeedPosts payload={viewingCity: 12345}
+  → ACCEPTED, unfiltered=true (fail-open)
+```
+
+## 最终 verify 状态（2026-08-27 R15.14 收官）
+
+```text
+pnpm typecheck                     4/4 PASS
+pnpm test (vitest)                 36 files / 187 tests PASS
+  唯一 fail: media-presentation 已知 sandbox float drift
+  R15.14 新增 7 (contracts: 2, localnet: 5)
+pnpm check:design                  PASS
+go test ./apps/api-go/...          27 packages OK
+  localnet: 15 → 20 (5 new R15.14 tripwires)
+  scene: 76 unit + repository: 16 + aesthetic: 6
+  + platform/postgres: 2 integration
+go run ./cmd/openapi-commands -check  148 entries, drift pass
+go run ./scripts/generate_openapi.go -check  spec + commands fragment in sync
+bash apps/api-go/scripts/smoke_pass3_scene_feed.sh  5/5 contract assertions PASS
+end-to-end: curl POST ListFeedPosts payload.viewingCity 走通
+  viewingCity: '河内'     → echo: {viewingCity: '河内', unfiltered: false}
+  viewingCity: '胡志明市' → echo: {viewingCity: '胡志明市', unfiltered: false}
+  无 viewingCity           → echo: {viewingCity: '', unfiltered: true}
+  viewingCity: 12345       → ACCEPTED, unfiltered=true (fail-open)
+```
+
+## R15.14 收官遗留（2 个 audit gap 主动下放给 R15.15）
+
+```text
+1. Post.SceneType 字段
+   现状: Post 跟 Scene 是不同 aggregate，Post 没有 sceneType 字段，
+   所以 Memory→Feed aesthetic backdrop (R15.13 P4) 只能走全局
+   同一色 (s.GetAestheticBackdrop(ctx, '', ''))，不能 per-(city,
+   sceneType) 缓存。
+   下放: R15.15 引入 Post.SceneType，per-(city, sceneType) 缓存，
+   重构 s.GetAestheticBackdrop(ctx, post.CityScope, post.SceneType)。
+
+2. gridToLatLng 接 OSM 逆编码
+   现状: P6 gridToLatLng 是 (city center ± spanKm/2) 的简单换算，
+   精度 ±11m 足够演示，不反查 POI。
+   下放: R15.15 接 onGeocode (OpenStreetMap Nominatim 离线 / 在线
+   mix) — 升 map canvas 到 tap 反查“还剑湖西 ‧ 1.2 km”。
+```
+```text
+pnpm typecheck                     4/4 PASS
+pnpm test (vitest)                 36 files / 187 tests PASS（之前 168 + 6 P2 mobile + 5 P5 + 9 P6）
   - 切到 "历史" tab → "历史 · 1" + 已保存的 (4, 6) 卡片
 ```
 
