@@ -755,7 +755,7 @@ function RootNav({
         ============================================================
         底栏 (nav): GlassContainer + GlassView glassEffectStyle="clear"
           (8px padding, 0.32 hairline border, dock 高度 60/68)
-        水滴 (lens): GlassContainer + GlassView glassEffectStyle="regular"
+        水滴 (lens): 与 dock 同一 GlassContainer 的兄弟 GlassView
           静态基线:
             · width  = lensWBase = min(64, slotWidth-6)   (窄于 slot 6px+)
             · height = lensHeight = 50/54
@@ -767,24 +767,23 @@ function RootNav({
             · glassEffectStyle = "regular", tintColor undefined
             · 子件 lensAccent opacity 0 (静态隐藏)
           交互态仅增, 不改基线:
-            · 按压 pressing: width ×1.18, height ×1.08,
-              scale 1.12, tintColor rgba(255,255,255,0.20)
+            · 按压 pressing: scale 1.12, material regular → clear
         后续 PR 动静态值必须更新本注释并附 evidence。
         ============================================================
       */}
-      <GlassContainer style={[styles.glassContainer, { width: dockWidth }]}>
+      <GlassContainer spacing={12} style={[styles.glassContainer, { width: dockWidth }]}>
         <GlassView
           glassEffectStyle="clear"
           isInteractive={false}
           onLayout={(e) => setMeasuredWidth(e.nativeEvent.layout.width)}
-          {...panResponder.panHandlers}
           style={[styles.nav, compact && styles.navCompact, { height: dockHeight, overflow: "hidden" }]}
         >
           <View pointerEvents="none" style={styles.topRefraction} />
           <View pointerEvents="none" style={styles.bottomRefraction} />
           <View pointerEvents="none" style={styles.leftGlint} />
           <View pointerEvents="none" style={styles.rightGlint} />
-          <Animated.View
+        </GlassView>
+        <Animated.View
             pointerEvents="none"
             style={[
               styles.lens,
@@ -812,25 +811,26 @@ function RootNav({
               }
             ]}
           >
-            <GlassContainer style={StyleSheet.absoluteFill}>
-              <GlassView
-                glassEffectStyle={{
-                  style: pressing ? "clear" : "regular",
-                  animate: true,
-                  animationDuration: 0.12
-                }}
-                isInteractive={false}
-                style={[
-                  StyleSheet.absoluteFill,
-                  { borderRadius: 28, overflow: "hidden" }
-                ]}
-              >
-                {/* R15.22 lens 静态冻结子件: lensSheen opacity 0.16, lensAccent opacity 0 */}
-                <View pointerEvents="none" style={[styles.lensSheen, pressing && styles.lensSheenPressed]} />
-                <View pointerEvents="none" style={styles.lensAccent} />
-              </GlassView>
-            </GlassContainer>
+            <GlassView
+              glassEffectStyle={{
+                style: pressing ? "clear" : "regular",
+                animate: true,
+                animationDuration: 0.12
+              }}
+              isInteractive={false}
+              style={[
+                StyleSheet.absoluteFill,
+                { borderRadius: 28, overflow: "hidden" }
+              ]}
+            >
+              <View pointerEvents="none" style={[styles.lensSheen, pressing && styles.lensSheenPressed]} />
+              <View pointerEvents="none" style={styles.lensAccent} />
+            </GlassView>
           </Animated.View>
+        <View
+          {...panResponder.panHandlers}
+          style={[styles.navInteractionLayer, { height: dockHeight }]}
+        >
           {tabs.map((entry, i) => {
             // dock tab influence: progress 浮点跟手指平滑
             // 离散高亮: i === initialTabIdx (commit 后才更新)
@@ -873,7 +873,7 @@ function RootNav({
               </Pressable>
             );
           })}
-        </GlassView>
+        </View>
       </GlassContainer>
     </View>
   );
@@ -989,6 +989,17 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.12)"
   },
   glassContainer: { width: "100%" },
+  navInteractionLayer: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: "center",
+    flexDirection: "row",
+    paddingHorizontal: 8,
+    zIndex: 2
+  },
   lens: {
     position: "absolute",
     top: 7,
