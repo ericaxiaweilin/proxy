@@ -775,7 +775,7 @@ function RootNav({
       <GlassContainer style={[styles.glassContainer, { width: dockWidth }]}>
         <GlassView
           glassEffectStyle="clear"
-          isInteractive
+          isInteractive={false}
           onLayout={(e) => setMeasuredWidth(e.nativeEvent.layout.width)}
           {...panResponder.panHandlers}
           style={[styles.nav, compact && styles.navCompact, { height: dockHeight, overflow: "hidden" }]}
@@ -788,6 +788,7 @@ function RootNav({
             pointerEvents="none"
             style={[
               styles.lens,
+              pressing && styles.lensPressed,
               {
                 width: lensWBase,
                 height: lensHeight,
@@ -818,15 +819,14 @@ function RootNav({
                   animate: true,
                   animationDuration: 0.12
                 }}
-                isInteractive
-                {...(pressing ? { tintColor: "rgba(255,255,255,0.015)" } : {})}
+                isInteractive={false}
                 style={[
                   StyleSheet.absoluteFill,
                   { borderRadius: 28, overflow: "hidden" }
                 ]}
               >
                 {/* R15.22 lens 静态冻结子件: lensSheen opacity 0.16, lensAccent opacity 0 */}
-                <View pointerEvents="none" style={styles.lensSheen} />
+                <View pointerEvents="none" style={[styles.lensSheen, pressing && styles.lensSheenPressed]} />
                 <View pointerEvents="none" style={styles.lensAccent} />
               </GlassView>
             </GlassContainer>
@@ -1002,6 +1002,10 @@ const styles = StyleSheet.create({
     zIndex: 1,
     overflow: "hidden"
   },
+  lensPressed: {
+    backgroundColor: "rgba(255,255,255,0)",
+    borderColor: "rgba(255,255,255,0.12)"
+  },
   lensDragging: { opacity: 1 },
   lensSheen: {
     position: "absolute",
@@ -1013,6 +1017,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.7)",
     opacity: 0.16
   },
+  lensSheenPressed: { opacity: 0 },
   lensAccent: {
     position: "absolute",
     left: "50%",
