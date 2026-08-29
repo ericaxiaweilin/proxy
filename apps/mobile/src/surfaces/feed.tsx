@@ -224,7 +224,8 @@ export function FeedSurface({
   bottomNavVisible,
   // R15.14: LocationContext — 顶 chip 选的城市。变化时 feed
   // 重新拉。空 / undefined = 不过滤 (legacy)。
-  viewingCity
+  viewingCity,
+  initialTab
 }: {
   localNet: LocalNetClient;
   marketplace: MarketplaceClient;
@@ -237,8 +238,10 @@ export function FeedSurface({
   refreshTrigger?: number;
   bottomNavVisible?: boolean;
   viewingCity?: string;
+  // R15.22 sub-page sync (initialTab from RootNav 8-page sequence)
+  initialTab?: FeedTab;
 }): React.JSX.Element {
-  const [tab, setTab] = useState<FeedTab>("RECOMMENDED");
+  const [tab, setTab] = useState<FeedTab>(initialTab ?? "RECOMMENDED");
   const [section, setSection] = useState<FeedSection>("POSTS");
   const [feedFilter, setFeedFilter] = useState<FilterKey>("ALL");
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedPosts.length > 0 ? "READY" : "LOADING");

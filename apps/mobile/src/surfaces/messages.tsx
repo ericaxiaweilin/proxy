@@ -23,7 +23,8 @@ const THREADS = [
   { initial: "○", name: "西湖摄影散步", context: "活动", preview: "Luna：我也会带相机过去。", time: "昨天", unread: "5", dark: false }
 ] as const;
 
-export function MessagesSurface({ onOpenConversation, onChromeVisibilityChange, bottomNavVisible }: { onOpenConversation: (author: string) => void; onChromeVisibilityChange?: (visible: boolean) => void; bottomNavVisible?: boolean }): React.JSX.Element {
+export function MessagesSurface({ onOpenConversation, onChromeVisibilityChange, bottomNavVisible, initialTab }: { onOpenConversation: (author: string) => void; onChromeVisibilityChange?: (visible: boolean) => void; bottomNavVisible?: boolean; initialTab?: "CHAT" | "FRIENDS" }): React.JSX.Element {
+  // R15.22 sub-page sync (initialTab from RootNav 8-page sequence)
   const [tab, setTab] = useState<MessageTab>("FRIENDS");
   const [composer, setComposer] = useState<ComposerMode>();
   const [search, setSearch] = useState("");
