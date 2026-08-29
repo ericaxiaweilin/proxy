@@ -91,6 +91,22 @@ export class DemandClient {
     return parseRequesterHomeItemsPayload(result.operationRef);
   }
 
+  // R15.22 fix: RequesterHome 匿名不应误报 "加载失败". 让 caller
+  // (RequesterHomeSurface) 能先查询 session 是否就绪 — 不就绪保持
+  // placeholder + idle 状态, 不调 listHomeItems 避免
+  // DemandProtocolError (an authenticated principal is required).
+  // 读 session 本身可能拒 (expo-secure-store keychain entitlement 缺失
+  // 时会抛 KeyChainException — 在 simulator / 没有设置 entitlement 的设备
+  // 出现), 这种情况当作 anonymous 看待, 返回 false, 不让 caller 误报 error.
+  public async hasAuthenticatedSession(): Promise<boolean> {
+    try {
+      const session = await this.input.secureSessionStore.read();
+      return Boolean(session?.principal);
+    } catch {
+      return false;
+    }
+  }
+
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new DemandProtocolError("an authenticated principal is required");

@@ -11,6 +11,8 @@ import { type MarketTab } from "../market-fixtures";
 import { color, shadows } from "../theme";
 import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
+import type { MarketplaceClient } from "../marketplace-client";
+import type { ActivityClient } from "../activity-client";
 import { SCENE_TOOLS, type SceneToolId } from "@proxy/contracts";
 
 export interface RequesterGoal {
@@ -65,6 +67,8 @@ export function RequesterHome({
   onChat,
   topContext,
   demandClient,
+  marketplace,
+  activities,
   onCreateScene,
   onChromeVisibilityChange,
   bottomNavVisible,
@@ -75,12 +79,27 @@ export function RequesterHome({
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
   topContext?: ReactNode;
   demandClient?: DemandClient;
+  // R15.22 fix: 机会/活动计数从 API 拉, 替换 r157MarketPulse 硬编码 24/46/18.
+  // server 端 ListMarketOpportunities / ListActivities 不限 actor, 匿名可读.
+  marketplace?: MarketplaceClient;
+  activities?: ActivityClient;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
+  // R15.22 fix: 市场脉动计数状态.
+  //   - opportunityCount: server 端 ListMarketOpportunities 返的 list 长度
+  //   - activityCount:    server 端 ListActivities 返的 list 长度
+  //   - experienceCount:  暂无法从 server 拿 (ListExperiences 未联), 保留
+  //     r157 基线 24 作为 fallback, 避免 UI 突变 — 拉倒后 可查后补 API.
+  //   - pulseState: "idle" | "loading" | "loaded" | "error"
+  //     初始 state="loading", 拉成功→loaded, 失败→error 但继续展示
+  //     最后已知计数 (或 fallback) — 与 homeItemsState 互不干扰.
+  const [opportunityCount, setOpportunityCount] = useState<number | null>(null);
+  const [activityCount, setActivityCount] = useState<number | null>(null);
+  const [pulseState, setPulseState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   // HomeItemsLoadState distinguishes the three post-auth states:
   //   "idle"    — no fetch attempted yet (initial render)
   //   "loading" — fetch in flight (placeholder still visible)
@@ -100,6 +119,22 @@ export function RequesterHome({
     let cancelled = false;
     setHomeItemsState("loading");
     (async () => {
+      // R15.22 fix: 匿名 session 没 principal, listHomeItems 调
+      // requireSession() 立即抛 DemandProtocolError — 不应误报 "加载失败"
+      // 仍保持 placeholder + idle 状态, 由顶 chip 提示登入。
+      // hasAuthenticatedSession 内部已包 try/catch, 但这里仍 wrap 一层以防意外.
+      let hasSession = false;
+      try {
+        hasSession = await demandClient.hasAuthenticatedSession();
+      } catch {
+        hasSession = false;
+      }
+      if (!hasSession) {
+        if (cancelled) return;
+        setContinueItems(PLACEHOLDER_ITEMS);
+        setHomeItemsState("idle");
+        return;
+      }
       try {
         const home = await demandClient.listHomeItems(10);
         if (cancelled) return;
@@ -122,6 +157,53 @@ export function RequesterHome({
       cancelled = true;
     };
   }, [demandClient]);
+
+  // R15.22 fix: 市场脉动计数 (机会/活动) 从 server 拉 — 替代 r157MarketPulse
+  // 硬编码 24/46/18. 体验 暂保留 fallback 24 (ListExperiences 未联, 调后补).
+  // marketplace / activities 跟 demandClient 同样为 undefined 表示匿名
+  // (R15.22 WIP 期间, 上层可能未传), 跟 homeItemsState 一样保持
+  // placeholder, 不报 "加载失败".
+  useEffect(() => {
+    if (!marketplace && !activities) {
+      setPulseState("idle");
+      return;
+    }
+    let cancelled = false;
+    setPulseState("loading");
+    (async () => {
+      // 并行拉取, 各自包 try/catch — 某个失败不影响另一个.
+      const next: { opportunityCount: number | null; activityCount: number | null; anyError: boolean } = {
+        opportunityCount: null,
+        activityCount: null,
+        anyError: false
+      };
+      if (marketplace) {
+        try {
+          const opportunities = await marketplace.list();
+          if (cancelled) return;
+          next.opportunityCount = opportunities.length;
+        } catch {
+          next.anyError = true;
+        }
+      }
+      if (activities) {
+        try {
+          const list = await activities.listActivities();
+          if (cancelled) return;
+          next.activityCount = list.length;
+        } catch {
+          next.anyError = true;
+        }
+      }
+      if (cancelled) return;
+      if (next.opportunityCount !== null) setOpportunityCount(next.opportunityCount);
+      if (next.activityCount !== null) setActivityCount(next.activityCount);
+      setPulseState(next.anyError ? "error" : "loaded");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [marketplace, activities]);
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
   const visibleRef = useRef(true);
@@ -218,7 +300,10 @@ export function RequesterHome({
         ))
       )}
 
-      {/* 基线 .r157MarketPulse：市场正在发生 24 体验 / 46 机会 / 18 活动（点入市场） */}
+      {/* R15.22 fix: 市场脉动计数 (机会 / 活动) 从 server 拉, 体验 仍使用 r157
+          基线 24 作 fallback (ListExperiences 暂未联). 拉倒后空闲, onPress
+          仍走 "OPPORTUNITY" — R15.22 WIP 期间保持 visual baseline, 待
+          owner 补 ListExperiences 后再加 experience tab. */}
       <Pressable onPress={() => onOpenMarket?.("OPPORTUNITY")} style={styles.marketPulse}>
         <View style={styles.marketPulseGradient}>
           <View style={styles.marketPulseCopy}>
@@ -229,8 +314,8 @@ export function RequesterHome({
             {(
               [
                 ["24", "体验"],
-                ["46", "机会"],
-                ["18", "活动"]
+                [opportunityCount !== null ? String(opportunityCount) : "—", "机会"],
+                [activityCount !== null ? String(activityCount) : "—", "活动"]
               ] as const
             ).map(([value, label]) => (
               <View key={label} style={styles.marketPulseNum}>

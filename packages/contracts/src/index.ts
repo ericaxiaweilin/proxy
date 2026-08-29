@@ -407,7 +407,25 @@ export const CreatePostPayloadSchema = z.object({
   cityScope: z.string().optional(),
   // R15.15 P1: Post.SceneType。Server 在 CreatePost 处
   // 验证合法性。不传=UNKNOWN（依然合规）。发虚假值服务器 reject。
-  sceneType: z.enum(["UNKNOWN", "ROOFTOP", "BRUNCH", "SPA", "CINEMA", "PHOTO", "NIGHTLIFE", "OUTDOOR", "COFFEE"]).optional(),
+  // R15.22 扩: 同 FeedPostSchema.sceneType — 加 FOOD/WALK/MARKET/BIKE/
+  // DINNER/ACTIVITY, 保持两端一致.
+  sceneType: z.enum([
+    "UNKNOWN",
+    "ROOFTOP",
+    "BRUNCH",
+    "SPA",
+    "CINEMA",
+    "PHOTO",
+    "NIGHTLIFE",
+    "OUTDOOR",
+    "COFFEE",
+    "FOOD",
+    "WALK",
+    "MARKET",
+    "BIKE",
+    "DINNER",
+    "ACTIVITY"
+  ]).optional(),
   contextRefs: z.array(PostContextRefSchema).optional()
 });
 export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;

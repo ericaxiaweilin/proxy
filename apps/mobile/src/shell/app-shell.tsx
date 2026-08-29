@@ -412,6 +412,8 @@ export function AppShell({
               onOpenMarket={(tab) => openMarket({ tab })}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
               demandClient={demand}
+              marketplace={marketplace}
+              activities={activities}
               onCreateScene={setSceneComposerTool}
               onChromeVisibilityChange={setScrollChromeVisible}
               bottomNavVisible={isNavVisible}

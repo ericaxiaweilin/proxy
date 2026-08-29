@@ -37,7 +37,15 @@ export class SessionAuthClient {
   ) {}
 
   public async getAccessToken(): Promise<string | undefined> {
-    const session = await this.input.secureSessionStore.read();
+    // R15.22 fix: keychain 读失败 (expo-secure-store entitlement 缺失) 不该抦住
+    // 匿名读路径. server 端 requiresAuthentication 不会拒 ListMarketOpportunities
+    // / ListActivities, 返 undefined 代表"未登入, 不带 bearer".
+    let session: Awaited<ReturnType<typeof this.input.secureSessionStore.read>>;
+    try {
+      session = await this.input.secureSessionStore.read();
+    } catch {
+      return undefined;
+    }
     if (!session) return undefined;
     const now = (this.input.now ?? (() => new Date()))().getTime();
     const skew = this.input.refreshSkewMs ?? 30_000;
@@ -99,7 +107,13 @@ export class SessionAuthClient {
   }
 
   private async performRefresh(): Promise<SessionAuthTokens> {
-    const current = await this.input.secureSessionStore.read();
+    // R15.22 fix: 同 getAccessToken — keychain 读失败 看作“session 过期”, 不抦 caller.
+    let current: Awaited<ReturnType<typeof this.input.secureSessionStore.read>>;
+    try {
+      current = await this.input.secureSessionStore.read();
+    } catch {
+      throw new SessionExpiredError();
+    }
     if (!current) throw new SessionExpiredError();
     const response = await this.send("/v1/commands/RefreshSession", {
       method: "POST",
