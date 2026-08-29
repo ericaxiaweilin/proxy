@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-25",
+  "updatedAt": "2026-08-29",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -11,6 +11,14 @@
     "theme": "apps/mobile/src/theme.tsx"
   },
   "screenReferences": [
+    {
+      "scope": "root-dock",
+      "version": "R15_22_STATIC_FREEZE",
+      "file": "docs/design/references/proxy_dock_liquid_glass_v6.html",
+      "status": "ACTIVE_SCREEN_REFERENCE",
+      "implementationBaseline": "docs/design/baselines/Proxy_Root_Dock_R15_22_Static_Freeze.md",
+      "implementationStatus": "STATIC_UI_APPROVED_MOTION_INCOMPLETE"
+    },
     {
       "scope": "merchant-me",
       "version": "R21_ACTIVITY_VOUCHER_ICON_FIX",

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Proxy Transparent Dock</title>
+<style>
+  :root{
+    --accent:#ff8a00;
+    --text:#111111;
+    --muted:#8d8d92;
+    --glass:rgba(255,255,255,.24);
+    --glass-strong:rgba(255,255,255,.42);
+    --line:rgba(255,255,255,.50);
+    --hairline:rgba(17,17,17,.06);
+    --progress:0;
+  }
+
+  *{box-sizing:border-box}
+  html,body{
+    width:100%;
+    min-height:100%;
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif;
+    color:var(--text);
+  }
+
+  body{
+    min-height:100vh;
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+    background:
+      radial-gradient(circle at 18% 22%, rgba(255,181,98,.14), transparent 30%),
+      radial-gradient(circle at 82% 78%, rgba(255,222,185,.14), transparent 34%),
+      linear-gradient(180deg,#f7f5f2 0%,#ece8e2 100%);
+  }
+
+  .stage{
+    width:min(980px,100vw);
+    min-height:100vh;
+    position:relative;
+    display:flex;
+    align-items:flex-end;
+    justify-content:center;
+    padding:48px 24px calc(34px + env(safe-area-inset-bottom));
+  }
+
+  .dock-wrap{
+    width:min(620px, calc(100vw - 28px));
+    position:relative;
+    touch-action:pan-y;
+    user-select:none;
+    -webkit-user-select:none;
+  }
+
+  .dock{
+    position:relative;
+    height:66px;
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    align-items:center;
+    padding:0 8px;
+    border-radius:24px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.36), rgba(255,255,255,.18));
+    border:1px solid var(--line);
+    backdrop-filter:blur(24px) saturate(155%);
+    -webkit-backdrop-filter:blur(24px) saturate(155%);
+    box-shadow:none;
+    overflow:hidden;
+    isolation:isolate;
+  }
+
+  .dock::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:inherit;
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.26),transparent 38%),
+      linear-gradient(90deg,transparent,rgba(255,255,255,.10),transparent);
+    pointer-events:none;
+    z-index:0;
+  }
+
+  .lens{
+    --slot-w: calc((100% - 16px)/5);
+    position:absolute;
+    top:6px;
+    left:8px;
+    width:var(--slot-w);
+    height:54px;
+    border-radius:18px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.64), rgba(255,255,255,.32));
+    border:1px solid rgba(255,255,255,.78);
+    backdrop-filter:blur(30px) saturate(180%);
+    -webkit-backdrop-filter:blur(30px) saturate(180%);
+    transform:translateX(calc(var(--progress) * 100%));
+    transition:transform .34s cubic-bezier(.22,.9,.18,1);
+    z-index:1;
+    pointer-events:none;
+  }
+
+  .dock.dragging .lens{ transition:none; }
+
+  .lens::after{
+    content:"";
+    position:absolute;
+    left:50%;
+    bottom:4px;
+    width:18px;
+    height:2px;
+    border-radius:999px;
+    background:var(--accent);
+    transform:translateX(-50%) scaleX(calc(.45 + min(1, var(--velocity,0)) * .55));
+    opacity:.95;
+  }
+
+  .tab{
+    position:relative;
+    z-index:2;
+    height:100%;
+    border:0;
+    background:transparent;
+    padding:0;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:4px;
+    color:var(--muted);
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  .icon-wrap{
+    width:26px;
+    height:26px;
+    display:grid;
+    place-items:center;
+    position:relative;
+    transform:scale(var(--scale,1));
+    transition:transform .22s ease, color .22s ease;
+  }
+
+  .tab svg{
+    width:22px;
+    height:22px;
+    stroke:currentColor;
+    fill:none;
+    stroke-width:1.8;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+  }
+
+  .label{
+    font-size:11px;
+    line-height:1;
+    letter-spacing:.01em;
+    font-weight:600;
+    transform:translateY(var(--lift,0));
+    transition:color .22s ease, transform .22s ease, opacity .22s ease;
+  }
+
+  .tab.active{
+    color:var(--text);
+  }
+
+  .tab.active .icon-wrap{
+    color:var(--accent);
+  }
+
+  .tab.active .label{
+    color:var(--text);
+  }
+
+  .badge{
+    position:absolute;
+    top:-1px;
+    right:-2px;
+    width:7px;
+    height:7px;
+    border-radius:999px;
+    background:var(--accent);
+    border:1.5px solid rgba(255,255,255,.95);
+  }
+
+  .gesture-hint{
+    position:absolute;
+    left:50%;
+    bottom:calc(112px + env(safe-area-inset-bottom));
+    transform:translateX(-50%);
+    font-size:12px;
+    color:#9c9c9f;
+    letter-spacing:.02em;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    opacity:.9;
+    white-space:nowrap;
+  }
+
+  .gesture-hint::before,
+  .gesture-hint::after{
+    content:"";
+    width:22px;
+    height:1px;
+    background:rgba(17,17,17,.14);
+  }
+
+  @media (max-width:640px){
+    .stage{
+      align-items:flex-end;
+      padding-left:14px;
+      padding-right:14px;
+      padding-bottom:calc(18px + env(safe-area-inset-bottom));
+    }
+    .dock-wrap{
+      width:100%;
+    }
+    .dock{
+      height:64px;
+      border-radius:22px;
+    }
+    .lens{
+      height:52px;
+      border-radius:17px;
+    }
+    .gesture-hint{
+      bottom:calc(98px + env(safe-area-inset-bottom));
+      font-size:11px;
+    }
+  }
+</style>
+</head>
+<body>
+  <main class="stage">
+    <div class="gesture-hint">左右滑动切换</div>
+
+    <div class="dock-wrap" id="dockWrap">
+      <nav class="dock" id="dock" aria-label="Proxy 主导航">
+        <div class="lens" id="lens"></div>
+
+        <button class="tab active" data-index="0" aria-label="首页">
+          <span class="icon-wrap">
+            <svg viewBox="0 0 24 24"><path d="M3.5 10.3 12 3.5l8.5 6.8v9.2a1 1 0 0 1-1 1h-5v-6h-5v6h-5a1 1 0 0 1-1-1z"/></svg>
+          </span>
+          <span class="label">首页</span>
+        </button>
+
+        <button class="tab" data-index="1" aria-label="发现">
+          <span class="icon-wrap">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m14.9 9.1-1.8 4-4 1.8 1.8-4z"/></svg>
+          </span>
+          <span class="label">发现</span>
+        </button>
+
+        <button class="tab" data-index="2" aria-label="消息">
+          <span class="icon-wrap">
+            <svg viewBox="0 0 24 24"><path d="M4 5.5h16v10.2H9l-5 3.1z"/><path d="M8 10.6h.01M12 10.6h.01M16 10.6h.01"/></svg>
+            <span class="badge"></span>
+          </span>
+          <span class="label">消息</span>
+        </button>
+
+        <button class="tab" data-index="3" aria-label="礼券">
+          <span class="icon-wrap">
+            <svg viewBox="0 0 24 24"><path d="M4 6.5h16v11H4z"/><path d="M8.2 6.5v11M15.8 6.5v11"/><path d="M12 9.2v5.6"/></svg>
+          </span>
+          <span class="label">礼券</span>
+        </button>
+
+        <button class="tab" data-index="4" aria-label="我的">
+          <span class="icon-wrap">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.8-4 3.2-6 7-6s6.2 2 7 6"/></svg>
+          </span>
+          <span class="label">我的</span>
+        </button>
+      </nav>
+    </div>
+  </main>
+
+<script>
+(() => {
+  const dock = document.getElementById('dock');
+  const tabs = [...dock.querySelectorAll('.tab')];
+  const root = document.documentElement;
+
+  let activeIndex = 0;
+  let currentProgress = 0;
+  let dragging = false;
+  let startX = 0;
+  let startProgress = 0;
+  let lastX = 0;
+  let lastT = 0;
+  let velocity = 0;
+
+  const clamp = (v,min,max) => Math.min(max,Math.max(min,v));
+
+  function slotWidth(){
+    const rect = dock.getBoundingClientRect();
+    return (rect.width - 16) / 5;
+  }
+
+  function render(progress, animate = true){
+    currentProgress = clamp(progress,0,4);
+    root.style.setProperty('--progress', currentProgress.toFixed(4));
+    root.style.setProperty('--velocity', Math.min(1, Math.abs(velocity) / 1.2).toFixed(3));
+    dock.classList.toggle('dragging', !animate);
+
+    tabs.forEach((tab,i)=>{
+      const d = Math.abs(i-currentProgress);
+      const influence = clamp(1-d,0,1);
+      tab.style.setProperty('--scale', (1 + influence*0.10).toFixed(3));
+      tab.style.setProperty('--lift', `${(-influence*0.6).toFixed(2)}px`);
+      tab.style.opacity = (0.72 + influence*0.28).toFixed(3);
+    });
+  }
+
+  function commit(index){
+    activeIndex = clamp(index,0,4);
+    tabs.forEach((tab,i)=>tab.classList.toggle('active', i===activeIndex));
+    dock.classList.remove('dragging');
+    velocity = 0;
+    render(activeIndex,true);
+  }
+
+  tabs.forEach(tab=>{
+    tab.addEventListener('click', ()=>{
+      if (dragging) return;
+      commit(Number(tab.dataset.index));
+    });
+  });
+
+  dock.addEventListener('pointerdown', (e)=>{
+    dragging = true;
+    startX = lastX = e.clientX;
+    startProgress = currentProgress;
+    lastT = performance.now();
+    velocity = 0;
+    dock.setPointerCapture?.(e.pointerId);
+    render(currentProgress,false);
+  });
+
+  dock.addEventListener('pointermove', (e)=>{
+    if(!dragging) return;
+    const now = performance.now();
+    const dx = e.clientX - startX;
+    const deltaSlots = dx / slotWidth();
+
+    const dt = Math.max(1, now-lastT);
+    velocity = (e.clientX-lastX)/dt;
+    lastX = e.clientX;
+    lastT = now;
+
+    render(startProgress + deltaSlots,false);
+  });
+
+  function endDrag(){
+    if(!dragging) return;
+    dragging = false;
+
+    const projected = currentProgress + velocity * 0.22;
+    const target = clamp(Math.round(projected),0,4);
+    commit(target);
+  }
+
+  dock.addEventListener('pointerup', endDrag);
+  dock.addEventListener('pointercancel', endDrag);
+  dock.addEventListener('lostpointercapture', ()=>{ if(dragging) endDrag(); });
+
+  window.addEventListener('resize', ()=>render(activeIndex,true));
+  render(0,true);
+})();
+</script>
+</body>
+</html>

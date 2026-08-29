@@ -4,8 +4,9 @@
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { GlassContainer, GlassView } from "expo-glass-effect";
 import type {
   ExperienceAction,
   ExperienceManifest,
@@ -63,6 +64,19 @@ const OTTER_LOGO = require("../../assets/otter-logo.png");
 
 // R15.12.7 冻结：第二 Tab = 市场，对全部身份固定为「市场」。
 type RootTab = "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
+// R15.22 子页序列：horizontal swipe 跨 7 page (HOME, MARKET_OPP, MARKET_ACT, FEED_REC, FEED_FOLLOW, MSG_CHAT, MSG_FRIENDS, ME)
+type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_REC" | "FEED_FOLLOW" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
+const PAGE_SEQUENCE: ReadonlyArray<PageId> = ["HOME", "MARKET_OPP", "MARKET_ACT", "FEED_REC", "FEED_FOLLOW", "MSG_CHAT", "MSG_FRIENDS", "ME"];
+const PAGE_TO_ROOT: Record<PageId, RootTab> = {
+  HOME: "HOME", MARKET_OPP: "MARKET", MARKET_ACT: "MARKET",
+  FEED_REC: "FEED", FEED_FOLLOW: "FEED",
+  MSG_CHAT: "MESSAGES", MSG_FRIENDS: "MESSAGES",
+  ME: "ME"
+};
+const ROOT_TO_FIRST_PAGE: Record<RootTab, PageId> = {
+  HOME: "HOME", MARKET: "MARKET_OPP", FEED: "FEED_REC",
+  MESSAGES: "MSG_FRIENDS", ME: "ME"
+};
 
 function rootTabs(): ReadonlyArray<{ id: RootTab; icon: ProxyIconName; label: string; badge?: string }> {
   return [
@@ -120,6 +134,22 @@ export function AppShell({
     tab: MarketTab;
     viewMode: MarketViewMode;
   }>({ tab: "OPPORTUNITY", viewMode: "LIST" });
+  // R15.22: 子页 override (swipe 跨 7 page). null = 跟随 tab + sub-tab 状态.
+  const [pageOverride, setPageOverride] = useState<PageId | undefined>();
+  const currentPage: PageId = pageOverride ?? ((): PageId => {
+    if (tab === "HOME") return "HOME";
+    if (tab === "MARKET") return marketEntry.tab === "ACTIVITY" ? "MARKET_ACT" : "MARKET_OPP";
+    if (tab === "FEED") return "FEED_REC";
+    if (tab === "MESSAGES") return "MSG_FRIENDS";
+    return "ME";
+  })();
+  const goToPage = (page: PageId): void => {
+    setPageOverride(page);
+    const root = PAGE_TO_ROOT[page];
+    if (root !== tab) setTab(root);
+    if (page === "MARKET_OPP") setMarketEntry((s) => ({ ...s, tab: "OPPORTUNITY" }));
+    else if (page === "MARKET_ACT") setMarketEntry((s) => ({ ...s, tab: "ACTIVITY" }));
+  };
   const [openExperience, setOpenExperience] = useState<string>();
   const [experienceManifest, setExperienceManifest] =
     useState<ExperienceManifest>();
@@ -308,10 +338,10 @@ export function AppShell({
               const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
               const canSwipeRoot = !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen && !openExperience;
               if (isHorizontalSwipe && canSwipeRoot) {
-                const order: ReadonlyArray<RootTab> = ["HOME", "MARKET", "FEED", "MESSAGES", "ME"];
-                const idx = order.indexOf(tab);
-                if (dx < 0 && idx < order.length - 1) selectTab(order[idx + 1]!);
-                else if (dx > 0 && idx > 0) selectTab(order[idx - 1]!);
+                const idx = PAGE_SEQUENCE.indexOf(currentPage);
+                if (idx < 0) return;
+                if (dx < 0 && idx < PAGE_SEQUENCE.length - 1) goToPage(PAGE_SEQUENCE[idx + 1]!);
+                else if (dx > 0 && idx > 0) goToPage(PAGE_SEQUENCE[idx - 1]!);
               }
             }
             touchStartY.current = undefined;
@@ -414,7 +444,7 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} bottomNavVisible={isNavVisible} viewingCity={currentLocation.city} />
+            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} bottomNavVisible={isNavVisible} viewingCity={currentLocation.city} initialTab={currentPage === "FEED_FOLLOW" ? "FOLLOWING" : "RECOMMENDED"} />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (
@@ -424,7 +454,7 @@ export function AppShell({
               onBack={() => setMessageChatAuthor(undefined)}
             />
           ) : (
-            <MessagesSurface onOpenConversation={setMessageChatAuthor} onChromeVisibilityChange={setScrollChromeVisible} bottomNavVisible={isNavVisible} />
+            <MessagesSurface onOpenConversation={setMessageChatAuthor} onChromeVisibilityChange={setScrollChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
           ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -459,7 +489,7 @@ export function AppShell({
             />
           )}
         </View>
-        {isNavVisible ? <RootNav activeTab={tab} compact={compactWidth} bottomInset={insets.bottom} onSelect={selectTab} /> : null}
+        {isNavVisible ? <RootNav activePage={currentPage} compact={compactWidth} bottomInset={insets.bottom} onCommitPage={goToPage} /> : null}
         <ContextSwitcherSheet
           current={context}
           onClose={() => setSwitcherOpen(false)}
@@ -572,54 +602,83 @@ function LocationContext({
 // iOS 26 / proxy_transparent_swipe_dock_v2.html 基线：透明毛玻璃 + lens 跟手 + 橙标惯性
 // 参 v2.html: --accent #ff8a00, glass blur24 saturate155, lens blur30 saturate180, progress×100%, velocity拉伸, scale/lift/opacity插值
 function RootNav({
-  activeTab,
+  activePage,
   compact,
   bottomInset,
-  onSelect
+  onCommitPage
 }: {
-  activeTab: RootTab;
+  activePage: PageId;
   compact: boolean;
   bottomInset?: number;
-  onSelect: (tab: RootTab) => void;
+  onCommitPage: (page: PageId) => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
   const tabs = rootTabs();
-  const order: ReadonlyArray<RootTab> = ["HOME", "MARKET", "FEED", "MESSAGES", "ME"];
-  const activeIndex = Math.max(0, order.indexOf(activeTab));
-  const [progress, setProgress] = useState<number>(activeIndex);
-  const [velocity, setVelocity] = useState<number>(0);
-  const [dragging, setDragging] = useState<boolean>(false);
-  const draggingRef = useRef(false);
-  const startXRef = useRef(0);
-  const startProgressRef = useRef(activeIndex);
-  const lastXRef = useRef(0);
-  const lastTRef = useRef(0);
-  const progressRef = useRef(progress);
-  progressRef.current = progress;
-
-  useEffect(() => {
-    if (!draggingRef.current) setProgress(activeIndex);
-  }, [activeIndex]);
-
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const [pressing, setPressing] = useState(false);
-  const dockWidth = measuredWidth > 0 ? measuredWidth : Math.min(620, Math.max(0, width - 28));
-  const slotWidth = dockWidth > 0 ? (dockWidth - 16) / 5 : 72;
-  const dockHeight = compact ? 64 : 66;
-  const lensHeight = compact ? 52 : 54;
+  const [liquidMotion, setLiquidMotion] = useState(0);
+  const [liquidLean, setLiquidLean] = useState(0);
+  const dockWidth = measuredWidth > 0 ? measuredWidth : Math.min(430, Math.max(0, width - 28));
+  const edge = 6;
+  const slotWidth = dockWidth > 0 ? (dockWidth - edge * 2) / 5 : 72;
+  const dockHeight = compact ? 60 : 68;
+  const lensHeight = compact ? 50 : 54;
+  const lensWBase = Math.min(64, slotWidth - 6);
   const accent = color.ink;
 
   const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+  const lensPosition = useCallback((tabProgress: number) => edge + tabProgress * slotWidth + (slotWidth - lensWBase) / 2, [lensWBase, slotWidth]);
 
-  const commit = useCallback((idx: number) => {
-    const next = clamp(Math.round(idx), 0, 4);
-    setDragging(false);
-    draggingRef.current = false;
-    setVelocity(0);
-    const targetTab = order[next];
-    if (targetTab !== undefined) onSelect(targetTab);
-    setProgress(next);
-  }, [onSelect]);
+  // ============================================================
+  // REANIMATED-VALUE-DRIVEN LENS (RN 内置 Animated + useNativeDriver):
+  //   lensX = Animated.Value, 跟手指 setValue 跳过 React 渲染.
+  //   commit 时 spring 动画 (damping 24, stiffness 285, mass 0.72).
+  //   dock tab 高亮 离散 (仅 activePage 变才更新, dragging 中不变).
+  // ============================================================
+  const initialTabIdx = Math.max(0, tabs.findIndex((t) => t.id === PAGE_TO_ROOT[activePage]));
+  const lensX = useRef(new Animated.Value(lensPosition(initialTabIdx))).current;
+  const progressRef = useRef<number>(initialTabIdx);
+  const draggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startProgressRef = useRef(initialTabIdx);
+  const lastXRef = useRef(0);
+  const lastTRef = useRef(0);
+  const velocityRef = useRef(0);
+  // progress 浮点 用于 dock tab scale/lift/opacity influence (跟手指平滑)
+  const [progress, setProgress] = useState<number>(initialTabIdx);
+
+  // activePage 外部变 → spring lens 到新位置 + 更新 progress (供 dock influence 用)
+  useEffect(() => {
+    if (draggingRef.current) return;
+    const tabIdx = tabs.findIndex((t) => t.id === PAGE_TO_ROOT[activePage]);
+    if (tabIdx < 0) return;
+    progressRef.current = tabIdx;
+    setProgress(tabIdx);
+    Animated.spring(lensX, {
+      toValue: lensPosition(tabIdx),
+      useNativeDriver: true,
+      damping: 24,
+      stiffness: 285,
+      mass: 0.72
+    }).start();
+  }, [activePage, lensPosition, tabs, lensX]);
+
+  const commit = useCallback((tabProgress: number) => {
+    const tabIdx = clamp(Math.round(tabProgress), 0, tabs.length - 1);
+    progressRef.current = tabIdx;
+    setProgress(tabIdx);
+    const targetTab = tabs[tabIdx];
+    if (!targetTab) return;
+    const targetPage = ROOT_TO_FIRST_PAGE[targetTab.id];
+    onCommitPage(targetPage);
+    Animated.spring(lensX, {
+      toValue: lensPosition(tabIdx),
+      useNativeDriver: true,
+      damping: 24,
+      stiffness: 285,
+      mass: 0.72
+    }).start();
+  }, [tabs, lensPosition, lensX, onCommitPage]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -627,12 +686,12 @@ function RootNav({
       onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 6,
       onPanResponderGrant: (evt) => {
         draggingRef.current = true;
-        setDragging(true);
         startXRef.current = evt.nativeEvent.pageX;
         lastXRef.current = evt.nativeEvent.pageX;
         lastTRef.current = Date.now();
         startProgressRef.current = progressRef.current;
-        setVelocity(0);
+        velocityRef.current = 0;
+        lensX.stopAnimation();
       },
       onPanResponderMove: (evt) => {
         if (!draggingRef.current) return;
@@ -643,74 +702,150 @@ function RootNav({
         const vx = (x - lastXRef.current) / dt;
         lastXRef.current = x;
         lastTRef.current = now;
-        setVelocity(vx);
+        velocityRef.current = vx;
+        setLiquidMotion(clamp(Math.abs(dx) / 90 + Math.abs(vx) / 1.8, 0, 1));
+        setLiquidLean(clamp(vx / 1.8, -1, 1));
         const deltaSlots = dx / Math.max(1, slotWidth);
-        const next = clamp(startProgressRef.current + deltaSlots, 0, 4);
+        const next = clamp(startProgressRef.current + deltaSlots, 0, tabs.length - 1);
+        progressRef.current = next;
+        // setValue 走 native thread — 跳过 React 渲染, 60fps 顺滑
+        lensX.setValue(lensPosition(next));
+        // setProgress 走 React 渲染 (dock tab influence 需要)
         setProgress(next);
       },
       onPanResponderRelease: () => {
         if (!draggingRef.current) return;
-        const projected = progressRef.current + velocity * 0.22;
+        draggingRef.current = false;
+        const projected = progressRef.current + velocityRef.current * 0.02;
+        setLiquidMotion(0);
+        setLiquidLean(0);
         commit(projected);
       },
       onPanResponderTerminate: () => {
         if (!draggingRef.current) return;
-        const projected = progressRef.current + velocity * 0.22;
+        draggingRef.current = false;
+        const projected = progressRef.current + velocityRef.current * 0.02;
+        setLiquidMotion(0);
+        setLiquidLean(0);
         commit(projected);
       }
     })
   ).current;
 
-  const velocityNorm = Math.min(1, Math.abs(velocity) / 1.2);
-  const lensScaleX = 0.45 + velocityNorm * 0.55;
-
   return (
-    <View style={[styles.dockWrap, { bottom: (bottomInset ?? 0) + 2 }]}>
-      <View
-        onLayout={(e) => setMeasuredWidth(e.nativeEvent.layout.width)}
-        {...panResponder.panHandlers}
-        style={[styles.nav, compact && styles.navCompact, { height: dockHeight }]}
-      >
-        <View pointerEvents="none" style={styles.dockHighlight} />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.lens,
-            {
-              width: slotWidth,
-              height: lensHeight,
-              transform: [{ translateX: progress * slotWidth }, { scale: pressing ? 1.06 : 1 }],
-            },
-            dragging && styles.lensDragging
-          ]}
+    <View style={[styles.dockWrap, { bottom: Math.max(bottomInset ?? 0, 8), width: dockWidth }]}>
+      {/*
+        ============================================================
+        LIQUID-GLASS DOCK — 静态冻结基线 (R15.22 审核过)
+        ============================================================
+        底栏 (nav): GlassContainer + GlassView glassEffectStyle="clear"
+          (8px padding, 0.32 hairline border, dock 高度 60/68)
+        水滴 (lens): GlassContainer + GlassView glassEffectStyle="regular"
+          静态基线:
+            · width  = lensWBase = min(64, slotWidth-6)   (窄于 slot 6px+)
+            · height = lensHeight = 50/54
+            · borderRadius 28, borderCurve "continuous"
+            · border hairline rgba(255,255,255,0.34)
+            · top 7, left 0, overflow hidden
+            · transform translateX = lensX (snap 到 tab center)
+            · scale = 1 (静态不加)
+            · glassEffectStyle = "regular", tintColor undefined
+            · 子件 lensAccent opacity 0 (静态隐藏)
+          交互态仅增, 不改基线:
+            · 按压 pressing: width ×1.18, height ×1.08,
+              scale 1.12, tintColor rgba(255,255,255,0.20)
+        后续 PR 动静态值必须更新本注释并附 evidence。
+        ============================================================
+      */}
+      <GlassContainer style={[styles.glassContainer, { width: dockWidth }]}>
+        <GlassView
+          glassEffectStyle="clear"
+          isInteractive={false}
+          onLayout={(e) => setMeasuredWidth(e.nativeEvent.layout.width)}
+          {...panResponder.panHandlers}
+          style={[styles.nav, compact && styles.navCompact, { height: dockHeight, overflow: "hidden" }]}
         >
-          <View style={[styles.lensAccent, { transform: [{ scaleX: lensScaleX }] }]} />
-        </View>
-        {tabs.map((entry, i) => {
-          const d = Math.abs(i - progress);
-          const influence = clamp(1 - d, 0, 1);
-          const scale = 1 + influence * 0.1;
-          const lift = -influence * 0.6;
-          const opacity = 0.72 + influence * 0.28;
-          const active = i === Math.round(progress) && !dragging ? i === activeIndex : false;
-          const isActiveVisual = Math.abs(i - progress) < 0.35;
-          return (
-            <Pressable
-              key={entry.id}
-              onPress={() => { if (!draggingRef.current) commit(i); }}
-              onPressIn={() => setPressing(true)}
-              onPressOut={() => setPressing(false)}
-              style={styles.navItem}
-              hitSlop={8}
-            >
-              <View style={[styles.navIcon, { transform: [{ scale }, { translateY: lift }], opacity }]}>
-                <ProxyIcon color={isActiveVisual ? accent : "#8d8d92"} name={entry.icon} size={22} />
-                {entry.badge ? <View style={styles.navBadgeDot} /> : null}
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
+          <View pointerEvents="none" style={styles.topRefraction} />
+          <View pointerEvents="none" style={styles.bottomRefraction} />
+          <View pointerEvents="none" style={styles.leftGlint} />
+          <View pointerEvents="none" style={styles.rightGlint} />
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.lens,
+              {
+                width: lensWBase,
+                height: lensHeight,
+                transform: [
+                  { translateX: lensX },
+                  { translateY: liquidMotion * 0.4 },
+                  { scaleX: (pressing ? 1.08 : 1) + liquidMotion * 0.16 },
+                  { scaleY: (pressing ? 1.04 : 1) - liquidMotion * 0.055 },
+                  { rotate: `${liquidLean * 1.15}deg` }
+                ]
+              }
+            ]}
+          >
+            <GlassContainer style={StyleSheet.absoluteFill}>
+              <GlassView
+                glassEffectStyle="regular"
+                isInteractive={false}
+                tintColor={pressing ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.13)"}
+                style={[
+                  StyleSheet.absoluteFill,
+                  { borderRadius: 28, overflow: "hidden" }
+                ]}
+              >
+                {/* R15.22 lens 静态冻结子件: lensSheen opacity 0.16, lensAccent opacity 0 */}
+                <View pointerEvents="none" style={styles.lensSheen} />
+                <View pointerEvents="none" style={styles.lensAccent} />
+              </GlassView>
+            </GlassContainer>
+          </Animated.View>
+          {tabs.map((entry, i) => {
+            // dock tab influence: progress 浮点跟手指平滑
+            // 离散高亮: i === initialTabIdx (commit 后才更新)
+            const isActiveVisual = i === initialTabIdx;
+            const d = Math.abs(i - progress);
+            const influence = clamp(1 - d * 0.7, 0, 1);
+            const scale = 1 + influence * 0.1;
+            const lift = -influence * 0.6;
+            const opacity = 0.72 + influence * 0.28;
+            return (
+              <Pressable
+                key={entry.id}
+                onPress={() => {
+                  if (draggingRef.current) return;
+                  commit(i);
+                }}
+                onPressIn={() => setPressing(true)}
+                onPressOut={() => setPressing(false)}
+                style={styles.navItem}
+                hitSlop={8}
+              >
+                <View style={[
+                  styles.navContent,
+                  { transform: [{ scale }, { translateY: lift }], opacity }
+                ]}>
+                  <View style={styles.navIcon}>
+                    <ProxyIcon color={isActiveVisual ? accent : "#8d8d92"} name={entry.icon} size={22} />
+                    {entry.badge ? <View style={styles.navBadgeDot} /> : null}
+                  </View>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.navLabel,
+                      isActiveVisual ? styles.navLabelActive : null
+                    ]}
+                  >
+                    {entry.label}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </GlassView>
+      </GlassContainer>
     </View>
   );
 }
@@ -765,64 +900,90 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   dockWrap: {
     position: "absolute",
-    bottom: 2,
-    left: 14,
-    right: 14,
-    maxWidth: 620,
     alignSelf: "center",
     alignItems: "center",
     gap: 0,
-    zIndex: 10
+    zIndex: 100
   },
   hintRow: { flexDirection: "row", alignItems: "center", gap: 10, opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" as const },
   hintLine: { width: 22, height: 1, backgroundColor: "transparent" },
   hintText: { color: "transparent", fontSize: 1, letterSpacing: 0.2, height: 0 },
   nav: {
     alignSelf: "stretch",
-    backgroundColor: "rgba(255,255,255,0.84)",
-    borderColor: "rgba(255,255,255,0.48)",
-    borderRadius: 24,
+    backgroundColor: "rgba(255,255,255,0.055)",
+    borderColor: "rgba(255,255,255,0.28)",
+    borderRadius: 34,
+    borderCurve: "continuous",
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: "row",
     height: 66,
     paddingHorizontal: 8,
     paddingVertical: 0,
     alignItems: "center",
-    overflow: "hidden",
-    shadowColor: "rgba(23,19,31,0.10)",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 1,
-    shadowRadius: 16,
-    elevation: 8
+    overflow: "hidden"
   },
-  navCompact: { height: 64, borderRadius: 22 },
-  dockHighlight: {
+  navCompact: { height: 60, borderRadius: 30 },
+  topRefraction: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 24,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    opacity: 0.9
+    top: 1,
+    left: 24,
+    right: 24,
+    height: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.50)"
   },
+  bottomRefraction: {
+    position: "absolute",
+    bottom: 1,
+    left: 34,
+    right: 34,
+    height: StyleSheet.hairlineWidth,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.10)"
+  },
+  leftGlint: {
+    position: "absolute",
+    left: 2,
+    top: 18,
+    width: StyleSheet.hairlineWidth,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.20)"
+  },
+  rightGlint: {
+    position: "absolute",
+    right: 2,
+    top: 18,
+    width: StyleSheet.hairlineWidth,
+    height: 28,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.12)"
+  },
+  glassContainer: { width: "100%" },
   lens: {
     position: "absolute",
-    top: 6,
-    left: 8,
+    top: 7,
+    left: 0,
     height: 54,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.96)",
-    borderColor: "rgba(255,255,255,0.82)",
+    borderRadius: 28,
+    borderCurve: "continuous",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    borderColor: "rgba(255,255,255,0.34)",
     borderWidth: StyleSheet.hairlineWidth,
     zIndex: 1,
-    shadowColor: "rgba(23,19,31,0.12)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 6
+    overflow: "hidden"
   },
-  lensDragging: { opacity: 0.98 },
+  lensDragging: { opacity: 1 },
+  lensSheen: {
+    position: "absolute",
+    top: 4,
+    left: 8,
+    right: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.7)",
+    opacity: 0.16
+  },
   lensAccent: {
     position: "absolute",
     left: "50%",
@@ -832,13 +993,14 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: color.ink,
     marginLeft: -9,
-    opacity: 0.9
+    opacity: 0
   },
   navItem: { alignItems: "center", flex: 1, gap: 4, justifyContent: "center", height: "100%", backgroundColor: "transparent", zIndex: 2 },
+  navContent: { alignItems: "center", flexDirection: "column", gap: 2, justifyContent: "center" },
   navIcon: { alignItems: "center", height: 26, justifyContent: "center", width: 26 },
   navBadgeDot: { position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: 999, backgroundColor: color.ink, borderColor: "rgba(255,255,255,0.95)", borderWidth: 1.5 },
-  navLabel: { color: "#8d8d92", fontSize: 11, fontWeight: "600", lineHeight: 11, letterSpacing: 0.1, textAlign: "center", width: "100%" },
-  navLabelActive: { color: "#111111", fontWeight: "700" },
+  navLabel: { color: "#8d8d92", fontSize: 10.5, fontWeight: "500", lineHeight: 13, letterSpacing: -0.12, textAlign: "center" },
+  navLabelActive: { color: "#111111", fontWeight: "600" },
 
   composerRoot: { flex: 1, padding: 16, gap: 10, backgroundColor: color.offWhite },
   composerBack: { alignSelf: "flex-start", paddingVertical: 6 },
