@@ -42,6 +42,12 @@
       "version": "SOCIAL_CONTACT_COLLABORATION_V2",
       "file": "docs/design/references/proxy_social_contact_collaboration_v2.html",
       "status": "ACTIVE_SCREEN_REFERENCE"
+    },
+    {
+      "scope": "chat-lotus-aligned",
+      "version": "CHAT_ALIGNED_WITH_LOTUS_V0_1_DRAFT",
+      "file": "docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md",
+      "status": "DRAFT_RFC_AWAITING_REVIEW"
     }
   ],
   "legacy": [
