@@ -618,6 +618,7 @@ function RootNav({
   const [pressing, setPressing] = useState(false);
   const [liquidMotion, setLiquidMotion] = useState(0);
   const [liquidLean, setLiquidLean] = useState(0);
+  const pressProgress = useRef(new Animated.Value(0)).current;
   const dockWidth = measuredWidth > 0 ? measuredWidth : Math.min(430, Math.max(0, width - 28));
   const edge = 6;
   const slotWidth = dockWidth > 0 ? (dockWidth - edge * 2) / 5 : 72;
@@ -628,6 +629,17 @@ function RootNav({
 
   const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
   const lensPosition = useCallback((tabProgress: number) => edge + tabProgress * slotWidth + (slotWidth - lensWBase) / 2, [lensWBase, slotWidth]);
+
+  const setLensPressed = useCallback((next: boolean) => {
+    setPressing(next);
+    Animated.spring(pressProgress, {
+      toValue: next ? 1 : 0,
+      useNativeDriver: true,
+      damping: 22,
+      stiffness: 320,
+      mass: 0.55
+    }).start();
+  }, [pressProgress]);
 
   // ============================================================
   // REANIMATED-VALUE-DRIVEN LENS (RN 内置 Animated + useNativeDriver):
@@ -692,6 +704,7 @@ function RootNav({
         startProgressRef.current = progressRef.current;
         velocityRef.current = 0;
         lensX.stopAnimation();
+        setLensPressed(true);
       },
       onPanResponderMove: (evt) => {
         if (!draggingRef.current) return;
@@ -719,6 +732,7 @@ function RootNav({
         const projected = progressRef.current + velocityRef.current * 0.02;
         setLiquidMotion(0);
         setLiquidLean(0);
+        setLensPressed(false);
         commit(projected);
       },
       onPanResponderTerminate: () => {
@@ -727,6 +741,7 @@ function RootNav({
         const projected = progressRef.current + velocityRef.current * 0.02;
         setLiquidMotion(0);
         setLiquidLean(0);
+        setLensPressed(false);
         commit(projected);
       }
     })
@@ -760,7 +775,7 @@ function RootNav({
       <GlassContainer style={[styles.glassContainer, { width: dockWidth }]}>
         <GlassView
           glassEffectStyle="clear"
-          isInteractive={false}
+          isInteractive
           onLayout={(e) => setMeasuredWidth(e.nativeEvent.layout.width)}
           {...panResponder.panHandlers}
           style={[styles.nav, compact && styles.navCompact, { height: dockHeight, overflow: "hidden" }]}
@@ -779,8 +794,18 @@ function RootNav({
                 transform: [
                   { translateX: lensX },
                   { translateY: liquidMotion * 0.4 },
-                  { scaleX: (pressing ? 1.08 : 1) + liquidMotion * 0.16 },
-                  { scaleY: (pressing ? 1.04 : 1) - liquidMotion * 0.055 },
+                  {
+                    scaleX: Animated.add(
+                      pressProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] }),
+                      liquidMotion * 0.16
+                    )
+                  },
+                  {
+                    scaleY: Animated.add(
+                      pressProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] }),
+                      -liquidMotion * 0.055
+                    )
+                  },
                   { rotate: `${liquidLean * 1.15}deg` }
                 ]
               }
@@ -788,9 +813,13 @@ function RootNav({
           >
             <GlassContainer style={StyleSheet.absoluteFill}>
               <GlassView
-                glassEffectStyle="regular"
-                isInteractive={false}
-                tintColor={pressing ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.13)"}
+                glassEffectStyle={{
+                  style: pressing ? "clear" : "regular",
+                  animate: true,
+                  animationDuration: 0.12
+                }}
+                isInteractive
+                {...(pressing ? { tintColor: "rgba(255,255,255,0.015)" } : {})}
                 style={[
                   StyleSheet.absoluteFill,
                   { borderRadius: 28, overflow: "hidden" }
@@ -818,8 +847,8 @@ function RootNav({
                   if (draggingRef.current) return;
                   commit(i);
                 }}
-                onPressIn={() => setPressing(true)}
-                onPressOut={() => setPressing(false)}
+                onPressIn={() => setLensPressed(true)}
+                onPressOut={() => setLensPressed(false)}
                 style={styles.navItem}
                 hitSlop={8}
               >
