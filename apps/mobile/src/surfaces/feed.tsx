@@ -924,7 +924,7 @@ export function FeedSurface({
         })}
       </View>
 
-      {/* R15.3 feedfilterrail：横滑筛选可滑（filterRail 自消费）与帖文区横滑切页（PAGE_SEQUENCE）解绑 */}
+      {/* R15.3 feedfilterrail：横滑筛选可滑（filterRail 自消费，dx>dy 时锁住外层 PAGE_SEQUENCE 切页）— 帖文区仍可横滑切页 */}
       <View {...filterRailPanResponder.panHandlers} style={styles.filterRailCapture}>
         <ScrollView
           ref={filterRailRef}
@@ -936,6 +936,10 @@ export function FeedSurface({
             filterRailScrollXRef.current = e.nativeEvent.contentOffset.x;
           }}
           scrollEventThrottle={16}
+          // View 响应者链：横滑时由本 ScrollView 成为响应者并拒绝外层抢占，保证可滑
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={(_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy)}
+          onResponderTerminationRequest={() => false}
         >
         {FILTERS.map((f) => {
           const active = feedFilter === f.id;
@@ -1653,7 +1657,12 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     borderBottomColor: "#E8E8E8",
     borderBottomWidth: 1,
-    paddingHorizontal: 18,
+    // The page chrome already owns 18pt horizontal padding. Break the feed
+    // row back out to the screen edge so it is not inset twice: avatar stays
+    // at 18pt, while text/media can use the full width on the right.
+    marginHorizontal: -18,
+    paddingLeft: 18,
+    paddingRight: 0,
     paddingTop: 16,
     paddingBottom: 14
   },
@@ -1680,7 +1689,8 @@ const styles = StyleSheet.create({
   postMenu: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
   postMenuText: { color: "#555", fontSize: 19, lineHeight: 22 },
 
-  // R15.23: postBody 整体 paddingLeft 48 (18 outer + 38 avatar - 8 = 48, 让 body 跟 name 起始对齐)
+  // 38pt avatar + 10pt gap: body aligns with the identity while the row's
+  // right edge remains flush with the screen.
   postBody: { marginTop: -12, paddingLeft: 48 },
   postReason: { color: "#81788A", fontSize: 11, marginTop: 5 },
   // R15.23: post-text 严格规范 fontSize 14 lineHeight 1.48 ≈ 20.72 → 21
