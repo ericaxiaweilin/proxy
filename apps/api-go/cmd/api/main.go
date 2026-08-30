@@ -111,6 +111,7 @@ func main() {
 	outcomeService := outcome.New()
 	sceneService := scene.New()
 	marketplaceService := marketplace.New()
+	activityService := activity.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -201,6 +202,7 @@ func main() {
 		// it for hermetic, no-Docker runs).
 		sceneService = scene.NewWithRepository(postgres.NewSceneRepository(pool))
 		marketplaceService = marketplace.NewWithRepository(postgres.NewMarketplaceRepository(pool))
+		activityService = activity.NewWithRepository(postgres.NewActivityRepository(pool))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -218,8 +220,7 @@ func main() {
 	server.Safety = safetyService
 	server.Outcome = outcomeService
 	server.Scene = sceneService
-	// Activity 域（P0 内存读模型）：启动幂等 seed 基线 5 条活动。
-	activityService := activity.New()
+	// Activity 域：启动幂等 seed 基线；DATABASE_URL 存在时写入持久仓储。
 	activityService.SeedDefaults()
 	server.Activity = activityService
 	marketplaceService.SeedDefaults()
