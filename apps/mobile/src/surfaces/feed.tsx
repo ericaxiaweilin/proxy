@@ -904,12 +904,12 @@ export function FeedSurface({
         })}
       </View>
 
-      {/* R15.3 feedfilterrail：横滑筛选，彻底隔离外层 9-page 横滑（PanResponder + View 双链） */}
+      {/* R15.3 feedfilterrail：横滑筛选（可滑）与外层 9-page 横滑（动态↔状态）解绑 — 筛选项可横滑，帖文区可横滑切页 */}
       <View
-        // View 链捕获
-        onStartShouldSetResponderCapture={() => true}
-        onMoveShouldSetResponderCapture={() => true}
-        onResponderTerminationRequest={() => false}
+        // 捕获 PanResponder 链（外层 PAGE_SEQUENCE 的 PanResponder 在 View 链之后）
+        onStartShouldSetPanResponderCapture={() => true}
+        onMoveShouldSetPanResponderCapture={(_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy)}
+        onPanResponderTerminationRequest={() => false}
         style={styles.filterRailCapture}
       >
         <ScrollView
@@ -917,9 +917,9 @@ export function FeedSurface({
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.filterRail}
-          // ScrollView 自身的横滑由其内部 PanResponder 处理，外层不再拦截
+          // ScrollView 横滑由自身处理，外层不再抢占
           onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
+          onMoveShouldSetResponder={(_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy)}
           onResponderTerminationRequest={() => false}
         >
         {FILTERS.map((f) => {
