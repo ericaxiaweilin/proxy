@@ -23,6 +23,20 @@ func TestEngagementPostgresRoundTrip(t *testing.T) {
 	// Use a unique post id per test run so cross-test bleed is impossible.
 	postID := "post_eng_pg_" + time.Now().Format("150405.000000")
 
+	// Seed a real localnet.posts row. Migration 042 installs a trigger on
+	// engagement.reactions INSERT that bumps localnet.post_stats.reactions
+	// for the post; post_stats.post_id FKs back to localnet.posts.id, so
+	// reactions written against a post that does not exist trigger
+	// post_stats_post_id_fkey. We don't go through the localnet service
+	// here — the engagement contract is what we're testing, not localnet
+	// round-trip.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body, visibility, city_scope, status, created_at)
+		VALUES ($1, 'USER', 'agent_linh', 'Linh', 'engagement test seed', 'PUBLIC', 'hanoi', 'PUBLISHED', NOW())
+		ON CONFLICT (id) DO NOTHING`, postID); err != nil {
+		t.Fatalf("seed post: %v", err)
+	}
+
 	r := svc.HandleContext(ctx, engagementEnvelope("FollowProfile", map[string]any{"followeeId": "agent_linh"}, "user_001"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("FollowProfile: outcome=%s err=%v", r.Outcome, r.Error)
@@ -110,6 +124,8 @@ func TestEngagementPostgresRoundTrip(t *testing.T) {
 
 	// Cleanup. We do not touch engagement.follows globally (other tests
 	// share the user_001 row); only the per-post rows we created.
+	// Delete the post last — post_stats cascade on localnet.posts delete,
+	// so the post_stats row will be removed automatically.
 	if _, err := pool.Exec(ctx, `DELETE FROM engagement.reactions WHERE post_id=$1`, postID); err != nil {
 		t.Fatalf("cleanup reactions: %v", err)
 	}
@@ -127,6 +143,9 @@ func TestEngagementPostgresRoundTrip(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM engagement.post_reports WHERE post_id=$1`, postID); err != nil {
 		t.Fatalf("cleanup post_reports: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM localnet.posts WHERE id=$1`, postID); err != nil {
+		t.Fatalf("cleanup posts: %v", err)
 	}
 }
 

@@ -45,6 +45,22 @@ func okCreatePayload() map[string]any {
 	}
 }
 
+// okInviteCardPayload returns a card that satisfies validInviteCard:
+// the scene service requires what / where / when / who / hostLabel to be
+// non-empty strings. Earlier fixtures used {"hi":"there"} which was
+// silently rejected with INVALID_INVITE_CARD; this helper keeps tests
+// focused on the CreateInvitation / RespondInvitation / ListMyInvitations
+// behavior they were actually trying to exercise.
+func okInviteCardPayload() map[string]any {
+	return map[string]any{
+		"what":      "周六下午在西湖边拍照, 走街串巷那种节奏",
+		"where":     "西湖断桥北, 灵隐路 1 号",
+		"when":      "2026-09-05 16:00-18:00",
+		"who":       "会带一台胶片机, 想拼两三个人一起",
+		"hostLabel": "Linh",
+	}
+}
+
 func resultAggregateID(t *testing.T, r command.Result) string {
 	t.Helper()
 	if r.Aggregate == nil {
@@ -344,7 +360,7 @@ func TestCreateInvitation_Accepted(t *testing.T) {
 	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
 	sceneID := resultAggregateID(t, created)
 	r := svc.Handle(testEnvelope("CreateInvitation", "new", map[string]any{
-		"sceneId": sceneID, "inviteeUserId": "user_002", "card": map[string]any{"hi": "there"},
+		"sceneId": sceneID, "inviteeUserId": "user_002", "card": okInviteCardPayload(),
 	}))
 	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "PENDING" {
 		t.Fatalf("expected ACCEPTED/PENDING, got %#v", r)
@@ -378,7 +394,7 @@ func TestRespondInvitation_Accepted_UpdatesStatus(t *testing.T) {
 	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
 	sceneID := resultAggregateID(t, created)
 	inv := svc.Handle(testEnvelope("CreateInvitation", "new", map[string]any{
-		"sceneId": sceneID, "inviteeUserId": "user_002",
+		"sceneId": sceneID, "inviteeUserId": "user_002", "card": okInviteCardPayload(),
 	}))
 	invID := resultAggregateID(t, inv)
 	// Switch actor to the invitee
@@ -393,7 +409,7 @@ func TestRespondInvitation_RejectsInvalidDecision(t *testing.T) {
 	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
 	sceneID := resultAggregateID(t, created)
 	inv := svc.Handle(testEnvelope("CreateInvitation", "new", map[string]any{
-		"sceneId": sceneID, "inviteeUserId": "user_002",
+		"sceneId": sceneID, "inviteeUserId": "user_002", "card": okInviteCardPayload(),
 	}))
 	invID := resultAggregateID(t, inv)
 	r := svc.Handle(testEnvelopeAs("RespondInvitation", invID, "user_002", map[string]any{"decision": "MAYBE"}))
@@ -407,7 +423,7 @@ func TestRespondInvitation_RejectsNonInvitee(t *testing.T) {
 	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
 	sceneID := resultAggregateID(t, created)
 	inv := svc.Handle(testEnvelope("CreateInvitation", "new", map[string]any{
-		"sceneId": sceneID, "inviteeUserId": "user_002",
+		"sceneId": sceneID, "inviteeUserId": "user_002", "card": okInviteCardPayload(),
 	}))
 	invID := resultAggregateID(t, inv)
 	r := svc.Handle(testEnvelopeAs("RespondInvitation", invID, "user_evil", map[string]any{"decision": "ACCEPTED"}))
@@ -570,13 +586,13 @@ func TestListMyInvitations_FiltersByInvitee(t *testing.T) {
 	sceneID := resultAggregateID(t, created)
 	// Two invitations to user_002, one to user_003
 	svc.Handle(testEnvelope("CreateInvitation", "new", map[string]any{
-		"sceneId": sceneID, "inviteeUserId": "user_002",
+		"sceneId": sceneID, "inviteeUserId": "user_002", "card": okInviteCardPayload(),
 	}))
 	svc.Handle(testEnvelope("CreateInvitation", "new", map[string]any{
-		"sceneId": sceneID, "inviteeUserId": "user_002",
+		"sceneId": sceneID, "inviteeUserId": "user_002", "card": okInviteCardPayload(),
 	}))
 	svc.Handle(testEnvelope("CreateInvitation", "new", map[string]any{
-		"sceneId": sceneID, "inviteeUserId": "user_003",
+		"sceneId": sceneID, "inviteeUserId": "user_003", "card": okInviteCardPayload(),
 	}))
 	r := svc.Handle(testEnvelopeAs("ListMyInvitations", "list", "user_002", map[string]any{"limit": 10}))
 	payload := decodeListPayload(t, r.OperationRef)
