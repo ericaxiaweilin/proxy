@@ -17,6 +17,7 @@ import { MerchantMeR21 } from "./merchant-me-r21";
 import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
 import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
+import { ThreadsPostMedia } from "../components/threads-post-media";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import { type LocalNetClient } from "../localnet-client";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
@@ -2070,10 +2071,8 @@ export function MeSurface({
                     <View style={styles.personalPostContext}>
                       {post.contextRefs.map((entry) => <Text key={entry.contextId} style={styles.personalPostSceneChip}>{entry.contextId}</Text>)}
                     </View>
-                    {items.length > 1 ? (
-                      <AdaptiveMediaCollection items={items} currentIndex={profileMediaPositions[post.postId] ?? 0} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onIndexChange={(index) => setProfileMediaPositions((current) => ({ ...current, [post.postId]: index }))} onOpen={(index) => setProfileViewer({ postId: post.postId, index })} />
-                    ) : items[0]?.mediaType === "IMAGE" ? (
-                      <SinglePostImage item={items[0]} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onPress={() => setProfileViewer({ postId: post.postId, index: 0 })} />
+                    {items.length > 0 ? (
+                      <ThreadsPostMedia items={items} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onOpen={(index) => setProfileViewer({ postId: post.postId, index })} />
                     ) : null}
                     {/* R15.23: .post-actions flex gap 20 marginTop 12 font 12 color #666 */}
                     <View style={styles.personalPostActions}>
