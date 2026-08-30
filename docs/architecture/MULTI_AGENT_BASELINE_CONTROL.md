@@ -16,6 +16,8 @@ there was no single writer, ownership boundary, or integration gate.
 2. External agents inspect the integration workspace read-only.
 3. An agent that must edit receives an isolated worktree, branch, objective,
    and explicit file allowlist.
+   Mutable dependency/cache directories must not be shared with the integration
+   workspace through symlinks.
 4. The agent returns a patch/commit and evidence. The commander reviews and
    selectively integrates it.
 5. Only the commander runs integration tests, updates the true device, and
@@ -47,4 +49,3 @@ The recovery baseline keeps the global chronological public Feed, guest media
 read fix, full-width timeline layout, and a single filter-rail horizontal
 gesture owner. Nested responder callbacks that capture every move are not part
 of the baseline.
-

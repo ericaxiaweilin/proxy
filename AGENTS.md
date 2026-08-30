@@ -22,6 +22,10 @@ interactive terminal agents.
 - If another change overlaps the owned lines, stop and report the conflict.
 - Do not silently fix unrelated failures or include unrelated files in a
   commit.
+- Do not symlink `node_modules`, build outputs, caches, DerivedData, or other
+  mutable dependency directories from the integration workspace. An isolated
+  worktree must use its own dependencies, or leave integration verification to
+  the commander.
 
 ## Required checks
 
@@ -44,4 +48,3 @@ interactive terminal agents.
   bind a provider/model directly.
 - Empty wire collections are `[]`, never `null`, when the contract declares an
   array. One malformed media item must not erase an entire feed.
-
