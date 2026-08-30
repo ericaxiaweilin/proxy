@@ -1658,8 +1658,8 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 14
   },
-  // postHead 改 grid 3 列: avatar 38 + body (1fr) + menu 32, gap 10
-  postHead: { alignItems: "center", flexDirection: "row", gap: 10 },
+  // R15.23: postHead 严格按规范 grid 3 列: 38px avatar + 1fr body + 32px menu, gap 10
+  postHead: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
   postAvatarWrap: { height: 38, position: "relative", width: 38 },
   postAvatar: {
     alignItems: "center",
@@ -1677,13 +1677,14 @@ const styles = StyleSheet.create({
   postNameLine: { alignItems: "center", flexDirection: "row", gap: 6, minWidth: 0 },
   postName: { color: color.ink, fontSize: 13, fontWeight: "700" },
   postMeta: { color: color.muted, fontSize: 11 },
-  // R15.23: Threads UX 没有 follow 按钮, 改 ⋯ 菜单 (32pt 宽)
+  // R15.23: Threads UX 没有 follow 按钮, 改 ⋯ 菜单 (32pt 宽, 19px 文字 #555)
   postMenu: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
   postMenuText: { color: "#555", fontSize: 19, lineHeight: 22 },
 
   // R15.23: postBody 整体 paddingLeft 48 (18 outer + 38 avatar - 8 = 48, 让 body 跟 name 起始对齐)
   postBody: { marginTop: -12, paddingLeft: 48 },
   postReason: { color: "#81788A", fontSize: 11, marginTop: 5 },
+  // R15.23: post-text 严格规范 fontSize 14 lineHeight 1.48 ≈ 20.72 → 21
   postCopy: { color: color.ink, fontSize: 14, lineHeight: 21, marginTop: 5 },
 
   // 基线 .mediaAsset：height 156，radius 14。
