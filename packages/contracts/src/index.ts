@@ -608,3 +608,8 @@ export type { FeedRenderVariant, FeedRenderSelection };
 export * from "./scene";
 // Context-Driven Experience Runtime — re-export
 export * from "./experience-runtime";
+// R15.22: canonical city key (LocationContext.filter ↔ Post.CityScope).
+// The mobile cache store and LocationContext composer both import
+// normalizeCityKey from "@proxy/contracts"; re-exporting here keeps the
+// single-source-of-truth in src/city-key.ts.
+export * from "./city-key";
