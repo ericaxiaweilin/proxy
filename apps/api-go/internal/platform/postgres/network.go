@@ -122,7 +122,7 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
 			visibility, city_scope, scene_type, status, context_refs, created_at
-		FROM localnet.posts ORDER BY created_at DESC`)
+		FROM localnet.posts ORDER BY created_at DESC, id ASC`)
 	if err != nil {
 		return nil, err
 	}

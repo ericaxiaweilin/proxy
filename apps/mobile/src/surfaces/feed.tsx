@@ -12,11 +12,10 @@ import * as ImagePicker from "expo-image-picker";
 import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type EngagementClient } from "../engagement-client";
-import { type MarketplaceClient } from "../marketplace-client";
 import { type MediaClient } from "../media-client";
 import { createDraftMedia, draftMediaDragTarget, draftMediaRefs, mediaStatusLabel, moveDraftMedia, normalizeRestoredDraftMedia, pendingDraftMedia, type DraftMediaItem } from "../composer-media";
 import { clearComposerDraft, readComposerDraft, retainComposerImage, writeComposerDraft } from "../expo-composer-draft-store";
-import { isOpportunityPost, mergeFeedContent } from "../feed-content";
+import { isOpportunityPost } from "../feed-content";
 import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
 // v2 重构：深紫黑底 + compositionHint 驱动 fill。Sprint C 替换完成。
 // 旧 AdaptiveMediaCollection / AdaptiveMediaRail / SocialMediaFrame / SinglePostImage
@@ -213,7 +212,6 @@ function ComposerMediaCard({
 
 export function FeedSurface({
   localNet,
-  marketplace,
   mediaClient,
   engagement,
   socialSpace,
@@ -222,15 +220,11 @@ export function FeedSurface({
   onChromeVisibilityChange,
   refreshTrigger,
   bottomNavVisible,
-  // R15.14: LocationContext — 顶 chip 选的城市。变化时 feed
-  // 重新拉。空 / undefined = 不过滤 (legacy)。
-  viewingCity,
   initialTab,
   currentSection,
   onSectionChange
 }: {
   localNet: LocalNetClient;
-  marketplace: MarketplaceClient;
   mediaClient: MediaClient;
   engagement: EngagementClient;
   socialSpace: SocialSpaceClient;
@@ -239,7 +233,6 @@ export function FeedSurface({
   onChromeVisibilityChange?: (visible: boolean) => void;
   refreshTrigger?: number;
   bottomNavVisible?: boolean;
-  viewingCity?: string;
   // R15.22 sub-page sync (initialTab from RootNav 8-page sequence)
   initialTab?: FeedTab;
   // R15.23: section (动态/状态/社区) 改 controlled — 由 AppShell 同步 swipe 跨 page 状态
@@ -447,49 +440,35 @@ export function FeedSurface({
       setPhase("LOADING");
     }
     try {
-      const [postResult, marketResult] = await Promise.allSettled([
-        localNet.listFeedPosts(),
-        marketplace.list()
-      ]);
-      if (postResult.status === "rejected" && marketResult.status === "rejected") throw new Error("feed sources unavailable");
-      const read = postResult.status === "fulfilled" ? postResult.value : { posts: [], media: {} };
-      const opportunities = marketResult.status === "fulfilled" ? marketResult.value : [];
-      const unifiedPosts = mergeFeedContent(read.posts, opportunities, Date.now());
-      cachedPosts = unifiedPosts;
+      const read = await localNet.listFeedPosts();
+      cachedPosts = read.posts;
       cachedMedia = read.media;
-      cachedPostIds = new Set(unifiedPosts.map((p) => p.postId));
+      cachedPostIds = new Set(read.posts.map((p) => p.postId));
       postIdsRef.current = cachedPostIds;
-      setPosts(unifiedPosts);
+      setPosts(read.posts);
       setMedia(read.media);
       setPhase("READY");
     } catch {
       setPhase("ERROR");
     }
-  }, [localNet, marketplace]);
+  }, [localNet]);
 
   // 后台静默刷新：不显示 LOADING，只检测新帖（同解绑）
   const backgroundRefresh = useCallback(async (): Promise<void> => {
     try {
-      const [postResult, marketResult] = await Promise.allSettled([
-        localNet.listFeedPosts(),
-        marketplace.list()
-      ]);
-      if (postResult.status === "rejected" && marketResult.status === "rejected") return;
-      const read = postResult.status === "fulfilled" ? postResult.value : { posts: [], media: {} };
-      const opportunities = marketResult.status === "fulfilled" ? marketResult.value : [];
-      const unifiedPosts = mergeFeedContent(read.posts, opportunities, Date.now());
-      if (unifiedPosts.length === 0) return;
+      const read = await localNet.listFeedPosts();
+      if (read.posts.length === 0) return;
       const currentIds = postIdsRef.current;
-      const newPosts = unifiedPosts.filter((p) => !currentIds.has(p.postId));
+      const newPosts = read.posts.filter((p) => !currentIds.has(p.postId));
       if (newPosts.length > 0) {
         setPendingCount(newPosts.length);
-        setPendingPosts(unifiedPosts);
+        setPendingPosts(read.posts);
         setPendingMedia(read.media);
       }
     } catch {
       // 静默失败
     }
-  }, [localNet, marketplace]);
+  }, [localNet]);
 
   // 切换到 Feed tab 时触发后台刷新
   useEffect(() => {
@@ -931,9 +910,6 @@ export function FeedSurface({
         onStartShouldSetResponderCapture={() => true}
         onMoveShouldSetResponderCapture={() => true}
         onResponderTerminationRequest={() => false}
-        // PanResponder 链捕获（外层 PAGE_SEQUENCE 的 PanResponder 在 View 链之后，需双保险）
-        onStartShouldSetPanResponderCapture={() => true}
-        onMoveShouldSetPanResponderCapture={() => true}
         style={styles.filterRailCapture}
       >
         <ScrollView
@@ -1660,8 +1636,8 @@ const styles = StyleSheet.create({
   // R15.23: Threads UX (.post padding 16 18 14, 38px avatar, 3 列 grid 38+1fr+32)
   postCard: {
     backgroundColor: "transparent",
-    borderBottomColor: "rgba(35,28,42,0.09)",
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#E8E8E8",
+    borderBottomWidth: 1,
     paddingHorizontal: 18,
     paddingTop: 16,
     paddingBottom: 14
@@ -1671,13 +1647,13 @@ const styles = StyleSheet.create({
   postAvatarWrap: { height: 38, position: "relative", width: 38 },
   postAvatar: {
     alignItems: "center",
-    backgroundColor: "#F0EAF5",
+    backgroundColor: "#111",
     borderRadius: 999,
     height: 38,
     justifyContent: "center",
     width: 38
   },
-  postAvatarText: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  postAvatarText: { color: color.white, fontSize: 14, fontWeight: "700" },
   scenarioBadge: { alignItems: "center", backgroundColor: color.white, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: -2, height: 18, justifyContent: "center", position: "absolute", right: -3, width: 18 },
   engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },

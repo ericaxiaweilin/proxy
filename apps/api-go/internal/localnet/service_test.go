@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
@@ -450,18 +451,12 @@ func TestListFeedPosts_SceneAestheticBackdrop_NilProvider_StillWorks(t *testing.
 	}
 }
 
-// ── R15.14 LocationContext → ListFeedPosts filter ────────────────────
-//
-// 之前 LocationContext 只是顶 chrome 文本 (P5) — 顶 chip “查看 · 河内”
-// 点哪都不影响 feed content。R15.14 修复这个：客户端在
-// ListFeedPosts payload.viewingCity 传 currentLocation.city，
-// 服务器按 CityScope 严格匹配过滤。逆序：P5 送了 1 个发帖子 +
-// 4 个 tripwires，P4 留下"Post 暂未携带 SceneType" + "LocationContext
-// 不影响 service" 两个明确点 — 本轮关闭后者。
+// ── Feed ALL is global and independent from LocationContext ─────────
+// CityScope is metadata for an explicit nearby filter. Legacy callers may
+// still send viewingCity, but ListFeedPosts must ignore it and return the
+// complete visible timeline.
 
-func TestListFeedPosts_ViewingCity_FiltersByCityScope(t *testing.T) {
-	// 顶 chip 选 河内 应当只看到 CityScope=河内 的帖子。
-	// 胡志明市帖 不能被静默包进河内 feed。
+func TestListFeedPosts_ViewingCity_DoesNotFilterAll(t *testing.T) {
 	s := New()
 	posts := []map[string]any{
 		{"authorType": "AGENT", "body": "河内·还剑湖清早", "visibility": "PUBLIC", "cityScope": "河内"},
@@ -488,19 +483,11 @@ func TestListFeedPosts_ViewingCity_FiltersByCityScope(t *testing.T) {
 	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
 		t.Fatalf("parse: %v\n%s", err, list.OperationRef)
 	}
-	if len(view.Posts) != 2 {
-		t.Fatalf("want 2 hanoi posts, got %d (bodies=%+v)", len(view.Posts), view.Posts)
+	if len(view.Posts) != 4 {
+		t.Fatalf("ALL must include every city, got %d posts: %+v", len(view.Posts), view.Posts)
 	}
-	for _, p := range view.Posts {
-		if p.CityScope != "河内" {
-			t.Fatalf("non-hanoi post leaked through filter: cityScope=%s", p.CityScope)
-		}
-	}
-	if view.ViewingCity != "河内" {
-		t.Fatalf("viewingCity echo lost: %q", view.ViewingCity)
-	}
-	if view.Unfiltered {
-		t.Fatalf("unfiltered flag should be false when viewingCity is set")
+	if !view.Unfiltered {
+		t.Fatalf("ALL must always report unfiltered")
 	}
 }
 
@@ -525,8 +512,8 @@ func TestListFeedPosts_ViewingCity_AcceptsHistoricalAliases(t *testing.T) {
 	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
 		t.Fatalf("parse aliases: %v", err)
 	}
-	if len(view.Posts) != 4 {
-		t.Fatalf("want all 4 Hanoi aliases and no HCMC post, got %d: %+v", len(view.Posts), view.Posts)
+	if len(view.Posts) != 5 {
+		t.Fatalf("city aliases must not affect ALL, got %d: %+v", len(view.Posts), view.Posts)
 	}
 }
 
@@ -594,8 +581,8 @@ func TestListFeedPosts_ViewingCity_WhitespacesAreTrimmed(t *testing.T) {
 		Posts []Post `json:"posts"`
 	}
 	_ = json.Unmarshal([]byte(list.OperationRef), &view)
-	if len(view.Posts) != 1 || view.Posts[0].CityScope != "河内" {
-		t.Fatalf("whitespace padding must trim, got %d posts (bodies=%+v)", len(view.Posts), view.Posts)
+	if len(view.Posts) != 2 {
+		t.Fatalf("viewingCity whitespace must not filter ALL, got %d posts: %+v", len(view.Posts), view.Posts)
 	}
 }
 
@@ -615,11 +602,28 @@ func TestListFeedPosts_ViewingCity_PostsWithoutCityScopePassThrough(t *testing.T
 		Posts []Post `json:"posts"`
 	}
 	_ = json.Unmarshal([]byte(list.OperationRef), &view)
-	if len(view.Posts) != 1 {
-		t.Fatalf("want 1 post (legacy without cityScope), got %d", len(view.Posts))
+	if len(view.Posts) != 2 {
+		t.Fatalf("ALL must include scoped and unscoped posts, got %d", len(view.Posts))
 	}
-	if view.Posts[0].Body != "没标 city" {
-		t.Fatalf("wrong post passed through: %+v", view.Posts[0])
+}
+
+func TestMemorySnapshot_StableNewestFirstOrder(t *testing.T) {
+	repository := NewMemoryRepository()
+	stamp := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	for _, id := range []string{"post_c", "post_a", "post_b"} {
+		if err := repository.CreatePost(t.Context(), Post{ID: id, Status: "PUBLISHED", Visibility: "PUBLIC", CreatedAt: stamp}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	posts, err := repository.Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"post_a", "post_b", "post_c"}
+	for index, id := range want {
+		if posts[index].ID != id {
+			t.Fatalf("stable order[%d]=%s, want %s", index, posts[index].ID, id)
+		}
 	}
 }
 

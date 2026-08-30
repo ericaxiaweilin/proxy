@@ -465,7 +465,6 @@ export function AppShell({
             <FeedSurface
               engagement={engagement}
               localNet={localNet}
-              marketplace={marketplace}
               mediaClient={media}
               socialSpace={socialSpace}
               onChromeVisibilityChange={setFeedChromeVisible}
@@ -473,7 +472,6 @@ export function AppShell({
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
               refreshTrigger={feedRefreshTrigger}
               bottomNavVisible={isNavVisible}
-              viewingCity={currentLocation.city}
               // R15.23: sub-tab 推荐/关注 保留（initialTab）；section 动态/状态/社区 由 app-shell 控
               initialTab="RECOMMENDED"
               // R15.23: section 改 controlled — swipe 跨 page 时 app-shell 同步更新
