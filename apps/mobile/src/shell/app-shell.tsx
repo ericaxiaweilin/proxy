@@ -763,24 +763,6 @@ function RootNav({
             selectedIndex={initialTabIdx}
             style={StyleSheet.absoluteFill}
           />
-          <View pointerEvents="none" style={styles.nativeTabOverlay}>
-            {tabs.map((entry, index) => {
-              const isActive = index === initialTabIdx;
-              return (
-                <View key={entry.id} style={styles.navItem}>
-                  <View style={[styles.navContent, { opacity: isActive ? 1 : 0.72 }]}>
-                    <View style={styles.navIcon}>
-                      <ProxyIcon color={isActive ? accent : "#8d8d92"} name={entry.icon} size={22} />
-                      {entry.badge ? <View style={styles.navBadgeDot} /> : null}
-                    </View>
-                    <Text numberOfLines={1} style={[styles.navLabel, isActive ? styles.navLabelActive : null]}>
-                      {entry.label}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
         </View>
       </View>
     );
