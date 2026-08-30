@@ -1126,37 +1126,35 @@ export function FeedSurface({
               style={styles.postCard}
               onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); }}
             >
-              {/* posthead */}
+              {/* posthead — Threads UX: avatar 38 + name+time + ⋯ menu (no follow button) */}
               <View style={styles.postHead}>
                 <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatar}>
                     <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
                   </View>
                   <View style={styles.scenarioBadge}>
-                    <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={11} />
+                    <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
                   </View>
                 </View>
                 <View style={styles.postIdentity}>
-                  <Text style={styles.postName}>{name}</Text>
-                  <Text numberOfLines={1} style={styles.postMeta}>
-                    {meta.label} · {relativeTime(post.createdAt)}
-                  </Text>
+                  <View style={styles.postNameLine}>
+                    <Text style={styles.postName}>{name}</Text>
+                    <Text style={styles.postMeta}>· {relativeTime(post.createdAt)}</Text>
+                  </View>
+                  {meta.label ? <Text style={styles.postMeta}>{meta.label}</Text> : null}
                 </View>
-                {name !== "你" ? (
-                  <Pressable
-                    disabled={isFollow || engagementBusy.has(`follow:${post.authorId}`)}
-                    onPress={() => void commitEngagement(`follow:${post.authorId}`, post.authorId, () => engagement.followProfile(post.authorId), setFollowing, following)}
-                    style={[styles.followBtn, isFollow && styles.followBtnOn]}
-                  >
-                    <Text style={[styles.followBtnText, isFollow && styles.followBtnTextOn]}>
-                      {isFollow ? "已关注" : "关注"}
-                    </Text>
-                  </Pressable>
-                ) : null}
+                <Pressable
+                  accessibilityLabel="更多"
+                  onPress={() => { /* TODO: open post menu (report / not interested / mute author) */ }}
+                  style={styles.postMenu}
+                >
+                  <Text style={styles.postMenuText}>⋯</Text>
+                </Pressable>
               </View>
 
-              <Text style={styles.postReason}>{meta.reason}</Text>
-              <Text style={styles.postCopy}>{post.body}</Text>
+              <View style={styles.postBody}>
+                <Text style={styles.postReason}>{meta.reason}</Text>
+                <Text style={styles.postCopy}>{post.body}</Text>
 
               {/* 服务端媒体（READY Hydrate）：多图横滑轨 / 单图全宽 / 视频内联自动播放（X 式，滑近中心播、滑出停，带声音） */}
               {items.length > 1 ? (
@@ -1254,6 +1252,7 @@ export function FeedSurface({
                   </Pressable>
                 </View>
               ) : null}
+              </View>
             </View>
           );
         })}
@@ -1367,8 +1366,8 @@ export function FeedSurface({
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1, position: "relative" },
   scrollRoot: { flex: 1 },
-  // R15.23: 对齐 me.tsx styles.content (15pt 外 + 8pt 内部 = 23pt 总留白) — 头像距屏左/右各 23pt
-  content: { paddingBottom: 88, paddingHorizontal: 15, paddingTop: 10 },
+  // R15.23: 对齐 threads 规范 (.post padding 18 18 14, 430pt 屏幕)。iPhone 15 (393pt) 头像距屏 18pt
+  content: { paddingBottom: 88, paddingHorizontal: 18, paddingTop: 10 },
 
   // 基线 .feedhead：h2 21 bold。
   feedHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 2, marginTop: 5 },
@@ -1650,44 +1649,42 @@ const styles = StyleSheet.create({
   retryBtnText: { color: color.white, fontSize: 11, fontWeight: "700" },
   // 连续信息流：帖文不做独立卡片。横向贴近屏幕，仅保留极淡的底部分界。
   // X / Threads 的信息密度来自统一页面画布，而不是每条内容再套一层圆角容器。
+  // R15.23: Threads UX (.post padding 16 18 14, 38px avatar, 3 列 grid 38+1fr+32)
   postCard: {
     backgroundColor: "transparent",
     borderBottomColor: "rgba(35,28,42,0.09)",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 8,
-    paddingVertical: 12
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 14
   },
-  postHead: { alignItems: "center", flexDirection: "row", gap: 8 },
-  postAvatarWrap: { height: 44, position: "relative", width: 44 },
+  // postHead 改 grid 3 列: avatar 38 + body (1fr) + menu 32, gap 10
+  postHead: { alignItems: "center", flexDirection: "row", gap: 10 },
+  postAvatarWrap: { height: 38, position: "relative", width: 38 },
   postAvatar: {
     alignItems: "center",
     backgroundColor: "#F0EAF5",
     borderRadius: 999,
-    height: 44,
+    height: 38,
     justifyContent: "center",
-    width: 44
+    width: 38
   },
-  postAvatarText: { color: color.ink, fontSize: 16, fontWeight: "700" },
-  scenarioBadge: { alignItems: "center", backgroundColor: color.white, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: -2, height: 20, justifyContent: "center", position: "absolute", right: -3, width: 20 },
+  postAvatarText: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  scenarioBadge: { alignItems: "center", backgroundColor: color.white, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: -2, height: 18, justifyContent: "center", position: "absolute", right: -3, width: 18 },
   engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },
-  postName: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  postNameLine: { alignItems: "center", flexDirection: "row", gap: 6, minWidth: 0 },
+  postName: { color: color.ink, fontSize: 13, fontWeight: "700" },
   postMeta: { color: color.muted, fontSize: 11 },
-  followBtn: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 9,
-    paddingVertical: 5
-  },
-  followBtnOn: { backgroundColor: color.ink, borderColor: color.ink },
-  followBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  followBtnTextOn: { color: color.white },
+  // R15.23: Threads UX 没有 follow 按钮, 改 ⋯ 菜单 (32pt 宽)
+  postMenu: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
+  postMenuText: { color: "#555", fontSize: 19, lineHeight: 22 },
 
+  // R15.23: postBody 整体 paddingLeft 48 (18 outer + 38 avatar - 8 = 48, 让 body 跟 name 起始对齐)
+  postBody: { marginTop: -12, paddingLeft: 48 },
   postReason: { color: "#81788A", fontSize: 11, marginTop: 5 },
-  postCopy: { color: color.ink, fontSize: 14, lineHeight: 20, marginTop: 5 },
+  postCopy: { color: color.ink, fontSize: 14, lineHeight: 21, marginTop: 5 },
 
   // 基线 .mediaAsset：height 156，radius 14。
   mediaAsset: {
@@ -1808,10 +1805,11 @@ const styles = StyleSheet.create({
   },
   postUtilityText: { color: "#5A6536", fontSize: 11, lineHeight: 15 },
 
+  // R15.23: actions gap 22 → 20, marginTop 11 → 12 (Threads 规范)
   postActions: {
     flexDirection: "row",
-    gap: 22,
-    marginTop: 11
+    gap: 20,
+    marginTop: 12
   },
   postAction: { alignItems: "center", flex: 1, paddingVertical: 5 },
   postActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
