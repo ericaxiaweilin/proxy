@@ -1294,14 +1294,14 @@ export function MeSurface({
 
   useEffect(() => {
     let cancelled = false;
-    void localNet.listFeedPosts().then((read) => {
+    void localNet.listMyFeedPosts().then((read) => {
       if (cancelled) return;
-      // 个人主页只读取当前用户自己的帖文；不借用 Linh/Mai 等测试用户媒体。
-      setProfilePosts(read.posts.filter((post) => post.authorDisplayName === "你" || post.authorDisplayName === profileDraft.name));
+      // 个人主页按账户 ID 读取，不再依赖易变的“你/Huyen”显示名。
+      setProfilePosts(read.posts);
       setProfileMedia(read.media);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [localNet, profileDraft.name]);
+  }, [localNet]);
 
   // 轻 CRM 关系图对 BUSINESS 也开放，优先于 R21 商家页
   if (subPage?.route === "friendcrm") {

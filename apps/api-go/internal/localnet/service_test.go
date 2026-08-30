@@ -376,7 +376,9 @@ func TestListFeedPosts_SceneAestheticBackdrop_Stamped(t *testing.T) {
 	}
 	postID := view.Posts[0].ID
 	items := view.Media[postID]
-	if len(items) == 0 { t.Fatal("expected media items") }
+	if len(items) == 0 {
+		t.Fatal("expected media items")
+	}
 	got, _ := items[0]["sceneAestheticBackdrop"].(string)
 	if got != "#AABBCC" {
 		t.Fatalf("expected sceneAestheticBackdrop #AABBCC, got %q", got)
@@ -478,9 +480,9 @@ func TestListFeedPosts_ViewingCity_FiltersByCityScope(t *testing.T) {
 		t.Fatalf("list feed: %s (%+v)", list.Outcome, list.Error)
 	}
 	var view struct {
-		Posts       []Post  `json:"posts"`
-		ViewingCity string  `json:"viewingCity"`
-		Unfiltered  bool    `json:"unfiltered"`
+		Posts       []Post                      `json:"posts"`
+		ViewingCity string                      `json:"viewingCity"`
+		Unfiltered  bool                        `json:"unfiltered"`
 		Media       map[string][]map[string]any `json:"media"`
 	}
 	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
@@ -499,6 +501,32 @@ func TestListFeedPosts_ViewingCity_FiltersByCityScope(t *testing.T) {
 	}
 	if view.Unfiltered {
 		t.Fatalf("unfiltered flag should be false when viewingCity is set")
+	}
+}
+
+func TestListFeedPosts_ViewingCity_AcceptsHistoricalAliases(t *testing.T) {
+	s := New()
+	for _, city := range []string{"河内", "hn", "Hanoi", "Hà Nội"} {
+		r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+			"authorType": "AGENT", "body": city, "visibility": "PUBLIC", "cityScope": city,
+		}))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("seed alias %q: %s", city, r.Outcome)
+		}
+	}
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "HCMC", "visibility": "PUBLIC", "cityScope": "hcm",
+	}))
+
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"viewingCity": "河内"}))
+	var view struct {
+		Posts []Post `json:"posts"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse aliases: %v", err)
+	}
+	if len(view.Posts) != 4 {
+		t.Fatalf("want all 4 Hanoi aliases and no HCMC post, got %d: %+v", len(view.Posts), view.Posts)
 	}
 }
 
@@ -636,7 +664,7 @@ func TestCreatePost_AcceptsSceneType(t *testing.T) {
 	r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
 		"authorType": "AGENT",
 		"body":       "露台拍摄", "visibility": "PUBLIC", "cityScope": "河内",
-		"sceneType":  "ROOFTOP",
+		"sceneType": "ROOFTOP",
 	}))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create with sceneType=ROOFTOP: %s (%+v)", r.Outcome, r.Error)
@@ -661,7 +689,7 @@ func TestCreatePost_RejectsUnknownSceneType(t *testing.T) {
 	r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
 		"authorType": "AGENT",
 		"body":       "x", "visibility": "PUBLIC", "cityScope": "河内",
-		"sceneType":  "WHATEVER_THIS_IS",
+		"sceneType": "WHATEVER_THIS_IS",
 	}))
 	if r.Outcome != "REJECTED" {
 		t.Fatalf("unknown sceneType must reject, got %s", r.Outcome)
@@ -762,8 +790,8 @@ func TestListFeedPosts_BackdropCacheAvoidsN1(t *testing.T) {
 	for i, ma := range []string{"ma", "mb", "mc"} {
 		s.Handle(envelopeFor("", "CreatePost", map[string]any{
 			"authorType": "AGENT", "body": "rooftop", "visibility": "PUBLIC", "cityScope": "河内",
-			"sceneType": "ROOFTOP",
-			"mediaRefs": []map[string]any{{"mediaAssetId": ma, "mediaType": "IMAGE", "sortOrder": 0}},
+			"sceneType":  "ROOFTOP",
+			"mediaRefs":  []map[string]any{{"mediaAssetId": ma, "mediaType": "IMAGE", "sortOrder": 0}},
 			"_iteration": i,
 		}))
 	}
@@ -773,5 +801,3 @@ func TestListFeedPosts_BackdropCacheAvoidsN1(t *testing.T) {
 		t.Fatalf("expected 1 GetAestheticBackdrop call for shared (city, sceneType), got %d", got)
 	}
 }
-
-

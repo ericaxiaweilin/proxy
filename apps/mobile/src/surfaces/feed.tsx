@@ -1204,10 +1204,6 @@ export function FeedSurface({
                 </View>
               ) : null}
 
-              <View style={styles.postUtility}>
-                <Text style={styles.postUtilityText}>服务端读模型 · 媒体 READY Hydration · 可见性 fail-closed</Text>
-              </View>
-
               {/* postactions：♡ / 回复 / 引用 / 收藏 / 分享 / ···(更多) */}
               <View style={styles.postActions}>
                 <Pressable disabled={isLiked || engagementBusy.has(`like:${post.postId}`)} onPress={() => void commitEngagement(`like:${post.postId}`, post.postId, () => engagement.reactToPost(post.postId), setLiked, liked)} style={styles.postAction}>
@@ -1647,10 +1643,10 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(35,28,42,0.09)",
     borderBottomWidth: StyleSheet.hairlineWidth,
     marginHorizontal: -18,
-    paddingHorizontal: 14,
+    paddingHorizontal: 8,
     paddingVertical: 12
   },
-  postHead: { alignItems: "center", flexDirection: "row", gap: 10 },
+  postHead: { alignItems: "center", flexDirection: "row", gap: 8 },
   postAvatarWrap: { height: 44, position: "relative", width: 44 },
   postAvatar: {
     alignItems: "center",
@@ -1665,8 +1661,8 @@ const styles = StyleSheet.create({
   engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },
-  postName: { color: color.ink, fontSize: 14, fontWeight: "700" },
-  postMeta: { color: color.muted, fontSize: 12, marginTop: 1 },
+  postName: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  postMeta: { color: color.muted, fontSize: 11, marginTop: 1 },
   followBtn: {
     backgroundColor: color.white,
     borderColor: color.line,
@@ -1679,8 +1675,8 @@ const styles = StyleSheet.create({
   followBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   followBtnTextOn: { color: color.white },
 
-  postReason: { color: "#81788A", fontSize: 12, marginTop: 6 },
-  postCopy: { color: "#2C2631", fontSize: 15, lineHeight: 21, marginVertical: 7 },
+  postReason: { color: "#81788A", fontSize: 11, lineHeight: 15, marginTop: 5 },
+  postCopy: { color: color.ink, fontSize: 14, lineHeight: 20, marginVertical: 5 },
 
   // 基线 .mediaAsset：height 156，radius 14。
   mediaAsset: {

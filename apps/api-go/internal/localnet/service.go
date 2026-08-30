@@ -665,6 +665,24 @@ type listFeedPayload struct {
 	ViewingCity string `json:"viewingCity"`
 }
 
+// canonicalFeedCity keeps old and new city representations compatible.
+// Historical posts used short codes (hn), English names (Hanoi), and localized
+// display names (河内). LocationContext sends the localized label. Comparing
+// raw strings made a healthy feed look empty after UI updates.
+func canonicalFeedCity(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "hn", "hanoi", "ha noi", "hà nội", "河内":
+		return "hanoi"
+	case "hcm", "hcmc", "ho chi minh", "ho chi minh city", "hồ chí minh", "胡志明市":
+		return "ho-chi-minh"
+	case "dn", "danang", "da nang", "đà nẵng", "岘港":
+		return "da-nang"
+	default:
+		return normalized
+	}
+}
+
 func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
 	posts, err := s.repository.Snapshot(ctx)
 	if err != nil {
@@ -675,6 +693,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	var payload listFeedPayload
 	_ = decode(e.Payload, &payload) // payload 可选, decode 失败静默退到全量
 	filterCity := strings.TrimSpace(payload.ViewingCity)
+	canonicalFilterCity := canonicalFeedCity(filterCity)
 	unfiltered := filterCity == ""
 	// Utility Ranking：时间衰减 + 上下文关联权重（Eligibility：PUBLIC + 可见）
 	feed := make([]Post, 0, len(posts))
@@ -696,7 +715,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		// 帖子没设 CityScope 的全量出现，避免误伤。
 		if !unfiltered {
 			postCity := strings.TrimSpace(p.CityScope)
-			if postCity != "" && postCity != filterCity {
+			if postCity != "" && canonicalFeedCity(postCity) != canonicalFilterCity {
 				continue
 			}
 		}

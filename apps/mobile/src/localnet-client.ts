@@ -64,6 +64,15 @@ export class LocalNetClient {
     return { posts: payload.posts, media: payload.media };
   }
 
+  public async listMyFeedPosts(): Promise<FeedReadModel> {
+    const session = await this.requireSession();
+    const read = await this.listFeedPosts();
+    return {
+      posts: read.posts.filter((post) => post.authorId === session.userAccountId),
+      media: read.media
+    };
+  }
+
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "CreatePost", { type: "Post", id: "new" }, payload as unknown as Record<string, unknown>, idempotencyKey);
