@@ -110,6 +110,7 @@ func main() {
 	safetyService := safety.New()
 	outcomeService := outcome.New()
 	sceneService := scene.New()
+	marketplaceService := marketplace.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -199,6 +200,7 @@ func main() {
 		// repository continues to serve (the smoke scripts rely on
 		// it for hermetic, no-Docker runs).
 		sceneService = scene.NewWithRepository(postgres.NewSceneRepository(pool))
+		marketplaceService = marketplace.NewWithRepository(postgres.NewMarketplaceRepository(pool))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -220,7 +222,6 @@ func main() {
 	activityService := activity.New()
 	activityService.SeedDefaults()
 	server.Activity = activityService
-	marketplaceService := marketplace.New()
 	marketplaceService.SeedDefaults()
 	server.Marketplace = marketplaceService
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
