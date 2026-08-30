@@ -442,13 +442,13 @@ export function FeedSurface({
   }
 
   const loadFeed = useCallback(async (): Promise<void> => {
-    // 有缓存时不显示 LOADING
+    // 动态帖文与地址解绑：帖文不按 viewingCity 过滤，地址仅作 Status/社区等筛选项
     if (cachedPosts.length === 0) {
       setPhase("LOADING");
     }
     try {
       const [postResult, marketResult] = await Promise.allSettled([
-        localNet.listFeedPosts(viewingCity),
+        localNet.listFeedPosts(),
         marketplace.list()
       ]);
       if (postResult.status === "rejected" && marketResult.status === "rejected") throw new Error("feed sources unavailable");
@@ -466,13 +466,13 @@ export function FeedSurface({
     } catch {
       setPhase("ERROR");
     }
-  }, [localNet, marketplace, viewingCity]);
+  }, [localNet, marketplace]);
 
-  // 后台静默刷新：不显示 LOADING，只检测新帖
+  // 后台静默刷新：不显示 LOADING，只检测新帖（同解绑）
   const backgroundRefresh = useCallback(async (): Promise<void> => {
     try {
       const [postResult, marketResult] = await Promise.allSettled([
-        localNet.listFeedPosts(viewingCity),
+        localNet.listFeedPosts(),
         marketplace.list()
       ]);
       if (postResult.status === "rejected" && marketResult.status === "rejected") return;
@@ -490,7 +490,7 @@ export function FeedSurface({
     } catch {
       // 静默失败
     }
-  }, [localNet, marketplace, viewingCity]);
+  }, [localNet, marketplace]);
 
   // 切换到 Feed tab 时触发后台刷新
   useEffect(() => {
