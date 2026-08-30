@@ -455,7 +455,6 @@ export function FeedSurface({
       const read = postResult.status === "fulfilled" ? postResult.value : { posts: [], media: {} };
       const opportunities = marketResult.status === "fulfilled" ? marketResult.value : [];
       const unifiedPosts = mergeFeedContent(read.posts, opportunities, Date.now());
-      // “全部”是统一内容流：帖子 + 服务端市场机会/需求。
       cachedPosts = unifiedPosts;
       cachedMedia = read.media;
       cachedPostIds = new Set(unifiedPosts.map((p) => p.postId));
@@ -926,12 +925,15 @@ export function FeedSurface({
         })}
       </View>
 
-      {/* R15.3 feedfilterrail：横滑筛选，横向手势不冒泡至外层 9-page 横滑（FEED_POSTS↔FEED_STATUS） */}
+      {/* R15.3 feedfilterrail：横滑筛选，彻底隔离外层 9-page 横滑（PanResponder + View 双链） */}
       <View
-        // 捕获阶段即抢占横滑，避免外层 PAGE_SEQUENCE 的 PanResponder 将 filterRail 横滑误判为切页
+        // View 链捕获
         onStartShouldSetResponderCapture={() => true}
         onMoveShouldSetResponderCapture={() => true}
         onResponderTerminationRequest={() => false}
+        // PanResponder 链捕获（外层 PAGE_SEQUENCE 的 PanResponder 在 View 链之后，需双保险）
+        onStartShouldSetPanResponderCapture={() => true}
+        onMoveShouldSetPanResponderCapture={() => true}
         style={styles.filterRailCapture}
       >
         <ScrollView
@@ -971,18 +973,6 @@ export function FeedSurface({
         <Pressable onPress={showLatest} style={styles.updateBanner}>
           <Text style={styles.updateBannerText}>{pendingCount} 条更新 · 点击查看最新</Text>
         </Pressable>
-      ) : null}
-
-      {/* R15.14 跟随地点的过滤指示器 — 访客不会因“换了城市但
-          feed 空”而以为是 bug。顶 LocationContext 在 app-shell
-          里，这里在 feed 表面重复一次 (另可点击"换城市" 不能
-          — 仅提示。LocationContext 是唯一的切换入口)。 */}
-      {viewingCity ? (
-        <View style={styles.locationFilterBanner}>
-          <Text style={styles.locationFilterBannerText}>
-            正在显示 {viewingCity} 的本地动态。顶 LocationContext 可换。
-          </Text>
-        </View>
       ) : null}
 
       {/* 发布器（X 式 compose：正文 + 照片/普通视频 + 引用绑定 → CreatePost） */}
@@ -1118,11 +1108,9 @@ export function FeedSurface({
       ) : visible.length === 0 ? (
         <View style={styles.feedEmpty}>
           <Text style={styles.feedEmptyText}>
-            {viewingCity
-              ? `${viewingCity} 还无人在 Proxy 发帖。换个城市, 或你作为首位发布者 — 任何一条都会被推到。`
-              : feedFilter !== "ALL"
-              ? `当前筛选下没有足够内容。换个筛选，或直接搜索你想找的东西。`
-              : "这里还没有足够的动态。关注本地的人和商家后会更有用。"}
+			{feedFilter !== "ALL"
+			  ? `当前筛选下没有足够内容。换个筛选，或直接搜索你想找的东西。`
+			  : "这里还没有足够的动态。关注本地的人和商家后会更有用。"}
           </Text>
         </View>
       ) : (
