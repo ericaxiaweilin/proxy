@@ -301,6 +301,25 @@ export function FeedSurface({
   const scrollDirectionDistanceRef = useRef(0);
   const chromeVisibleRef = useRef(true);
   const postIdsRef = useRef<Set<string>>(cachedPostIds);
+  // 隔离 filterRail 横滑与 PAGE_SEQUENCE 横滑：filterRail 横滑只滚动自身，不触发 动态↔状态 切页
+  const filterRailRef = useRef<ScrollView>(null);
+  const filterRailScrollXRef = useRef(0);
+  const filterRailPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 6,
+      onPanResponderGrant: () => {
+        // 记录当前 scroll 偏移（由 ScrollView 的 onScroll 更新）
+      },
+      onPanResponderMove: (_, gs) => {
+        // 横滑时由 filterRail 自身消费，不让外层 PAGE_SEQUENCE 的 PanResponder 抢占
+        // 直接滚动 filterRail 的 ScrollView
+        filterRailRef.current?.scrollTo({ x: filterRailScrollXRef.current - gs.dx, animated: false });
+      },
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
+    })
+  ).current;
 
   useEffect(() => {
     let active = true;
@@ -448,7 +467,8 @@ export function FeedSurface({
       setPosts(read.posts);
       setMedia(read.media);
       setPhase("READY");
-    } catch {
+    } catch (error) {
+      console.error("[proxy.feed] public feed load failed", error);
       setPhase("ERROR");
     }
   }, [localNet]);
@@ -904,18 +924,19 @@ export function FeedSurface({
         })}
       </View>
 
-      {/* R15.3 feedfilterrail：横滑筛选可滑，帖文区横滑切页 — 两者解绑 */}
-      <ScrollView
-        contentContainerStyle={styles.filterRailContent}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterRail}
-        // 本 ScrollView 横滑时成为 View 响应者且拒绝外层 PAGE_SEQUENCE 的 PanResponder 抢占
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={(_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy)}
-        onResponderTerminationRequest={() => false}
-        onResponderTerminate={() => {}}
-      >
+      {/* R15.3 feedfilterrail：横滑筛选可滑（filterRail 自消费）与帖文区横滑切页（PAGE_SEQUENCE）解绑 */}
+      <View {...filterRailPanResponder.panHandlers} style={styles.filterRailCapture}>
+        <ScrollView
+          ref={filterRailRef}
+          contentContainerStyle={styles.filterRailContent}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterRail}
+          onScroll={(e) => {
+            filterRailScrollXRef.current = e.nativeEvent.contentOffset.x;
+          }}
+          scrollEventThrottle={16}
+        >
         {FILTERS.map((f) => {
           const active = feedFilter === f.id;
           return (
@@ -924,7 +945,8 @@ export function FeedSurface({
             </Pressable>
           );
         })}
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* R15.3 preferencehint：推荐由你和算法共同决定 */}
       <View style={styles.prefHint}>
