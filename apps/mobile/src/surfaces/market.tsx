@@ -14,7 +14,6 @@ import { type MediaClient } from "../media-client";
 import {
   MAP_DISTRICTS,
   MARKET_EXPERIENCES,
-  MARKET_OPPORTUNITIES,
   OPPORTUNITY_LENS_LABEL,
   OPPORTUNITY_MAP_COORDS,
   marketExperience,
@@ -117,7 +116,7 @@ export function MarketSurface({
   const [activityPhase, setActivityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [activityItems, setActivityItems] = useState<Activity[]>([]);
   const [opportunityPhase, setOpportunityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
-  const [opportunityItems, setOpportunityItems] = useState<MarketOpportunity[]>(MARKET_OPPORTUNITIES);
+  const [opportunityItems, setOpportunityItems] = useState<MarketOpportunity[]>([]);
   const [opportunityError, setOpportunityError] = useState<string>();
   const [activityDetail, setActivityDetail] = useState<Activity | null>(null);
   const [interestedIn, setInterestedIn] = useState<ReadonlySet<string>>(new Set());
@@ -192,8 +191,8 @@ export function MarketSurface({
       setOpportunityError(undefined);
       setOpportunityPhase("READY");
     } catch {
-      setOpportunityItems(MARKET_OPPORTUNITIES);
-      setOpportunityError("机会服务暂时不可用；当前为只读基线，发布与报名需要重试。");
+      setOpportunityItems([]);
+      setOpportunityError("机会服务暂时不可用，请检查连接后重试。");
       setOpportunityPhase("ERROR");
     }
   }, [marketplace]);
@@ -472,6 +471,7 @@ export function MarketSurface({
       ) : view === "MAP" ? (
         <MarketMap
           tab={pageTab}
+          opportunities={opportunityItems}
           lens={lens}
           remoteLens={remoteLens}
           marketLabel={marketLabel}
@@ -1134,6 +1134,7 @@ function CompareScene({ onBack, onOpenApplicant }: { onBack: () => void; onOpenA
 
 function MarketMap({
   tab,
+  opportunities,
   lens,
   remoteLens,
   marketLabel,
@@ -1142,6 +1143,7 @@ function MarketMap({
   onOpenActivity
 }: {
   tab: "OPPORTUNITY" | "ACTIVITY";
+  opportunities: MarketOpportunity[];
   lens: OpportunityLens;
   remoteLens: boolean;
   marketLabel: string;
@@ -1149,7 +1151,7 @@ function MarketMap({
   onOpenOpportunity: (id: string) => void;
   onOpenActivity: (activity: Activity) => void;
 }): React.JSX.Element {
-  const config = mapConfig(tab);
+  const config = mapConfig(tab, opportunities);
   return (
     <View style={styles.mapWrap}>
       <View style={styles.mapLegend}>
@@ -1192,7 +1194,7 @@ function MarketMap({
   );
 }
 
-function mapConfig(tab: "OPPORTUNITY" | "ACTIVITY"): {
+function mapConfig(tab: "OPPORTUNITY" | "ACTIVITY", opportunities: MarketOpportunity[]): {
   title: string;
   sub: string;
   privacyTitle: string;
@@ -1201,7 +1203,7 @@ function mapConfig(tab: "OPPORTUNITY" | "ACTIVITY"): {
   results: React.JSX.Element;
 } {
   if (tab === "OPPORTUNITY") {
-    const local = MARKET_OPPORTUNITIES.filter((o) => o.location !== "远程").slice(0, 6);
+    const local = opportunities.filter((o) => o.location !== "远程").slice(0, 6);
     return {
       title: "机会地图",
       sub: "河内 · 仅公开 / 粗粒度任务区域",

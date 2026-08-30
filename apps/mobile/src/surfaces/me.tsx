@@ -7,7 +7,7 @@
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
 import { useEffect, useRef, useState } from "react";
-import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import * as ImagePicker from "expo-image-picker";
@@ -17,6 +17,7 @@ import { MerchantMeR21 } from "./merchant-me-r21";
 import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
 import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
+import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import { type LocalNetClient } from "../localnet-client";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
@@ -536,19 +537,19 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
 }
 
 type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
-const MY_ORDER_ROWS = [
-  { type: "published", title: "同行 · 河内老城区半日", id: "PX-20260825-001284", status: "进行中", fields: [["订单类型", "同行服务"], ["订单金额", "₫350,000"], ["服务时间", "今天 14:00–18:00"], ["地点", "河内 · 还剑湖"], ["对方", "Minh Nguyen"], ["付款状态", "已支付"], ["下单时间", "8月25日 10:42"], ["结算状态", "服务完成后结算"]], actions: ["联系对方", "订单详情"] },
-  { type: "joined", title: "现场翻译 · 美甲店沟通", id: "PX-20260823-000947", status: "待确认", fields: [["订单类型", "翻译"], ["订单金额", "₫220,000"], ["服务时间", "8月27日 16:00"], ["地点", "西湖区"], ["发布者", "Linh Tran"], ["付款状态", "待支付"]], actions: ["拒绝", "接受订单"] },
-  { type: "done", title: "拍照 · 店铺体验记录", id: "PX-20260818-000613", status: "已完成", fields: [["订单金额", "₫180,000"], ["实付金额", "₫180,000"], ["完成时间", "8月18日 17:36"], ["结算状态", "已结算"]], actions: ["再次发布", "查看详情"] },
-  { type: "cancelled", title: "同行 · 西湖夜游", id: "PX-20260812-000421", status: "已取消", fields: [["订单金额", "₫300,000"], ["退款状态", "已退款"], ["取消时间", "8月12日 13:20"], ["取消原因", "行程变更"]], actions: [] }
-] as const;
+function orderStatus(order: FulfillmentOrder): string { return ({ OFFERED: "待确认", CONFIRMED: "已确认", EXECUTING: "进行中", COMPLETED: "已完成", CANCELLED: "已取消" } as const)[order.lifecycle]; }
+function orderMoney(order: FulfillmentOrder): string { return `${order.snapshot.agreedCompensation.toLocaleString()} ${order.snapshot.currency || "VND"}`; }
 
-function MyOrdersSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+function MyOrdersSurface({ client, onBack }: { client: FulfillmentClient; onBack: () => void }): React.JSX.Element {
   const [filter, setFilter] = useState<OrderFilter>("all");
-  const [detail, setDetail] = useState<(typeof MY_ORDER_ROWS)[number]>();
-  if (detail) return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回订单</Text></Pressable><Text style={styles.detailTitle}>订单详情</Text><View style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{detail.title}</Text><Text style={styles.orderId}>{detail.id}</Text></View><Text style={[styles.orderBadge, detail.status === "进行中" && styles.orderBadgeLive]}>{detail.status}</Text></View><Text style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text></View><View style={styles.orderCard}><Text style={styles.orderTitle}>服务信息</Text><View style={styles.orderGrid}>{detail.fields.map(([label, value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></View></ScrollView></View>;
-  const visible = filter === "all" ? MY_ORDER_ROWS : MY_ORDER_ROWS.filter((item) => item.type === filter);
-  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>我的订单</Text></View><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}><Text style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{visible.map((item) => <View key={item.id} style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{item.title}</Text><Text style={styles.orderId}>订单编号：{item.id}</Text></View><Text style={[styles.orderBadge, item.status === "进行中" && styles.orderBadgeLive]}>{item.status}</Text></View><View style={styles.orderGrid}>{item.fields.map(([label,value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View>{item.status === "进行中" ? <Text style={styles.orderStatus}>● 已接单 · 等待服务开始</Text> : null}{item.actions.length ? <View style={styles.orderActions}>{item.actions.map((action,index) => <Pressable key={action} onPress={() => action.includes("详情") ? setDetail(item) : undefined} style={[styles.orderAction, index === item.actions.length - 1 && styles.orderActionPrimary]}><Text style={[styles.orderActionText, index === item.actions.length - 1 && styles.orderActionPrimaryText]}>{action}</Text></Pressable>)}</View> : null}</View>)}</ScrollView></View>;
+  const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
+  const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [detail, setDetail] = useState<FulfillmentOrder>();
+  useEffect(() => { let active = true; setPhase("LOADING"); void client.listMyOrders().then((rows) => { if (active) { setOrders(rows); setPhase("READY"); } }).catch(() => { if (active) setPhase("ERROR"); }); return () => { active = false; }; }, [client]);
+  const visible = orders.filter((order) => filter === "all" || filter === "published" && order.viewerRole === "REQUESTER" || filter === "joined" && order.viewerRole === "AGENT" || filter === "done" && order.lifecycle === "COMPLETED" || filter === "cancelled" && order.lifecycle === "CANCELLED");
+  const fields = (order: FulfillmentOrder): Array<[string,string]> => [["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"], ["地点", order.snapshot.meetingContext || "待确认"], ["时长", order.snapshot.duration || "待确认"], ["结算", order.snapshot.settlementMode || "待确认"]];
+  if (detail) return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回订单</Text></Pressable><Text style={styles.detailTitle}>订单详情</Text><View style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{detail.snapshot.serviceSku || "Proxy 订单"}</Text><Text style={styles.orderId}>{detail.orderId}</Text></View><Text style={[styles.orderBadge, detail.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(detail)}</Text></View><Text style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text></View><View style={styles.orderCard}><Text style={styles.orderTitle}>服务信息</Text><View style={styles.orderGrid}>{fields(detail).map(([label, value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></View></ScrollView></View>;
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>我的订单</Text></View><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}><Text style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}{phase === "ERROR" ? <Text style={styles.personalEmpty}>订单服务暂时不可用，请稍后重试。</Text> : null}{phase === "READY" && visible.length === 0 ? <Text style={styles.personalEmpty}>当前分类还没有订单。</Text> : null}{visible.map((item) => <Pressable key={item.orderId} onPress={() => setDetail(item)} style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{item.snapshot.serviceSku || "Proxy 订单"}</Text><Text style={styles.orderId}>订单编号：{item.orderId}</Text></View><Text style={[styles.orderBadge, item.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(item)}</Text></View><View style={styles.orderGrid}>{fields(item).slice(0,4).map(([label,value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></Pressable>)}</ScrollView></View>;
 }
 
 function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
@@ -1212,6 +1213,7 @@ function SocialRow({
 export function MeSurface({
   context,
   localNet,
+  fulfillment,
   experienceSections,
   experienceMode,
   onOpenSwitcher,
@@ -1226,6 +1228,7 @@ export function MeSurface({
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
+  fulfillment: FulfillmentClient;
   experienceSections?: ExperienceMenuSection[];
   experienceMode?: "MERGE" | "REPLACE";
   onOpenSwitcher: () => void;
@@ -1400,7 +1403,7 @@ export function MeSurface({
     const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => setSubPage(undefined)}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
-    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     // R15.13 P2: myscenes gets a real-data section appended beneath

@@ -106,6 +106,57 @@ func TestTraceableHumanOrder(t *testing.T) {
 	}
 }
 
+func TestListMyOrdersOnlyReturnsActorOrdersWithViewerRole(t *testing.T) {
+	s := New()
+	orderID := createOffer(t, s)
+
+	requester := envelopeFor("ListMyOrders", map[string]any{}, "mine")
+	r := s.Handle(requester)
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("requester list: %s (%+v)", r.Outcome, r.Error)
+	}
+	var requesterView struct {
+		Orders []struct {
+			OrderID    string `json:"orderId"`
+			ViewerRole string `json:"viewerRole"`
+		} `json:"orders"`
+	}
+	if err := json.Unmarshal([]byte(r.OperationRef), &requesterView); err != nil {
+		t.Fatal(err)
+	}
+	if len(requesterView.Orders) != 1 || requesterView.Orders[0].OrderID != orderID || requesterView.Orders[0].ViewerRole != "REQUESTER" {
+		t.Fatalf("unexpected requester view: %+v", requesterView.Orders)
+	}
+
+	agent := envelopeFor("ListMyOrders", map[string]any{}, "mine")
+	agent.Actor.ID = "agent_linh"
+	r = s.Handle(agent)
+	var agentView struct {
+		Orders []struct {
+			ViewerRole string `json:"viewerRole"`
+		} `json:"orders"`
+	}
+	if err := json.Unmarshal([]byte(r.OperationRef), &agentView); err != nil {
+		t.Fatal(err)
+	}
+	if len(agentView.Orders) != 1 || agentView.Orders[0].ViewerRole != "AGENT" {
+		t.Fatalf("unexpected agent view: %+v", agentView.Orders)
+	}
+
+	outsider := envelopeFor("ListMyOrders", map[string]any{}, "mine")
+	outsider.Actor.ID = "other_user"
+	r = s.Handle(outsider)
+	var outsiderView struct {
+		Orders []json.RawMessage `json:"orders"`
+	}
+	if err := json.Unmarshal([]byte(r.OperationRef), &outsiderView); err != nil {
+		t.Fatal(err)
+	}
+	if len(outsiderView.Orders) != 0 {
+		t.Fatalf("outsider saw private orders: %+v", outsiderView.Orders)
+	}
+}
+
 func TestSettlementModeIsolation(t *testing.T) {
 	s := New()
 	orderID := createOffer(t, s)
@@ -180,7 +231,9 @@ func createSlotOffer(t *testing.T, s *Service, taskID, slotID, agentID string) s
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create slot offer: %s %+v", r.Outcome, r.Error)
 	}
-	var view struct{ OfferID string `json:"offerId"`}
+	var view struct {
+		OfferID string `json:"offerId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	if view.OfferID == "" {
 		view.OfferID = r.Aggregate.ID
@@ -292,7 +345,9 @@ func TestCheckInAndEvidence(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("accept: %s %+v", r.Outcome, r.Error)
 	}
-	var view struct{ OrderID string `json:"orderId"`}
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	orderID := view.OrderID
 	// offline check-in denied: try CheckIn with CONFIRMED -> should succeed and move to EXECUTING

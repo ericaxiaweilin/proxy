@@ -105,17 +105,17 @@ type RepeatRelationship struct {
 }
 
 type Offer struct {
-	ID         string    `json:"offerId"`
-	TaskID     string    `json:"taskId"`
-	SlotID     string    `json:"slotId"`
-	RequesterID string   `json:"requesterId"`
-	AgentID    string    `json:"agentId"`
-	BatchID    string    `json:"batchId,omitempty"`
-	Status     string    `json:"status"` // OFFERED | ACCEPTED | EXPIRED | CANCELLED
-	ExpiresAt  time.Time `json:"expiresAt"`
-	Version    int       `json:"version"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID          string    `json:"offerId"`
+	TaskID      string    `json:"taskId"`
+	SlotID      string    `json:"slotId"`
+	RequesterID string    `json:"requesterId"`
+	AgentID     string    `json:"agentId"`
+	BatchID     string    `json:"batchId,omitempty"`
+	Status      string    `json:"status"` // OFFERED | ACCEPTED | EXPIRED | CANCELLED
+	ExpiresAt   time.Time `json:"expiresAt"`
+	Version     int       `json:"version"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type Repository interface {
@@ -139,10 +139,10 @@ type TransactionalRepository interface {
 }
 
 var (
-	ErrOrderNotFound   = errors.New("order not found")
-	ErrOfferNotFound   = errors.New("offer not found")
-	ErrVersionConflict = errors.New("order version conflict")
-	ErrOfferExpired    = errors.New("offer expired")
+	ErrOrderNotFound     = errors.New("order not found")
+	ErrOfferNotFound     = errors.New("offer not found")
+	ErrVersionConflict   = errors.New("order version conflict")
+	ErrOfferExpired      = errors.New("offer expired")
 	ErrOfferNotAvailable = errors.New("offer not available")
 )
 
@@ -376,6 +376,7 @@ func NewWithRepository(repository TransactionalRepository) *Service {
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateOffer", "CreateSlotOffer", "AcceptSlotOffer", "GetOffer", "ListAgentOffers",
+		"ListMyOrders",
 		"CheckInOrder", "SubmitEvidence",
 		"ConfirmCooperation", "StartExecution", "RecordDirectSettlement",
 		"RecordOutcome", "RecordSatisfaction", "RecordMaterialOrderChange":
@@ -403,6 +404,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.getOffer(ctx, e)
 	case "ListAgentOffers":
 		return s.listAgentOffers(ctx, e)
+	case "ListMyOrders":
+		return s.listMyOrders(ctx, e)
 	case "CheckInOrder":
 		return s.checkInOrder(ctx, e)
 	case "SubmitEvidence":
@@ -422,6 +425,29 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	default:
 		return command.Rejected(e, "FULFILLMENT_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.unsupported_command", nil)
 	}
+}
+
+func (s *Service) listMyOrders(ctx context.Context, e command.Envelope) command.Result {
+	orders, err := s.repository.Snapshot(ctx)
+	if err != nil {
+		return command.Rejected(e, "ORDER_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_list_failed", nil)
+	}
+	type visibleOrder struct {
+		Order
+		ViewerRole string `json:"viewerRole"`
+	}
+	visible := make([]visibleOrder, 0, len(orders))
+	for _, order := range orders {
+		if order.RequesterID == e.Actor.ID {
+			visible = append(visible, visibleOrder{Order: order, ViewerRole: "REQUESTER"})
+		} else if order.AgentID == e.Actor.ID {
+			visible = append(visible, visibleOrder{Order: order, ViewerRole: "AGENT"})
+		}
+	}
+	r := command.Accepted(e, "OrderCollection", e.Actor.ID, 1, "READY", nil)
+	raw, _ := json.Marshal(map[string]any{"orders": visible})
+	r.OperationRef = string(raw)
+	return r
 }
 
 // ---------- CreateOffer ----------
@@ -633,7 +659,9 @@ func (s *Service) acceptSlotOffer(ctx context.Context, e command.Envelope) comma
 func (s *Service) getOffer(ctx context.Context, e command.Envelope) command.Result {
 	offerID := e.Target.ID
 	if offerID == "" {
-		var p struct{ OfferID string `json:"offerId"`}
+		var p struct {
+			OfferID string `json:"offerId"`
+		}
 		if !decode(e.Payload, &p) || p.OfferID == "" {
 			return command.Rejected(e, "INVALID_OFFER_QUERY", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.invalid_offer_query", nil)
 		}

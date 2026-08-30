@@ -65,17 +65,21 @@ const OTTER_LOGO = require("../../assets/otter-logo.png");
 
 // R15.12.7 冻结：第二 Tab = 市场，对全部身份固定为「市场」。
 type RootTab = "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
-// R15.22 子页序列：horizontal swipe 跨 7 page (HOME, MARKET_OPP, MARKET_ACT, FEED_REC, FEED_FOLLOW, MSG_CHAT, MSG_FRIENDS, ME)
-type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_REC" | "FEED_FOLLOW" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
-const PAGE_SEQUENCE: ReadonlyArray<PageId> = ["HOME", "MARKET_OPP", "MARKET_ACT", "FEED_REC", "FEED_FOLLOW", "MSG_CHAT", "MSG_FRIENDS", "ME"];
+// R15.22 子页序列：horizontal swipe 跨 9 page (HOME, MARKET_OPP, MARKET_ACT, FEED_POSTS, FEED_STATUS, FEED_COMMUNITY, MSG_CHAT, MSG_FRIENDS, ME)
+// R15.23 改：FEED tab 内部 3 个 section (动态/状态/社区) 各自独立成 page — 横向 swipe 必须先走完 section 才到 MESSAGES，避免 "动态 → 直接消息" 的跳页。
+type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_POSTS" | "FEED_STATUS" | "FEED_COMMUNITY" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
+const PAGE_SEQUENCE: ReadonlyArray<PageId> = ["HOME", "MARKET_OPP", "MARKET_ACT", "FEED_POSTS", "FEED_STATUS", "FEED_COMMUNITY", "MSG_CHAT", "MSG_FRIENDS", "ME"];
 const PAGE_TO_ROOT: Record<PageId, RootTab> = {
   HOME: "HOME", MARKET_OPP: "MARKET", MARKET_ACT: "MARKET",
-  FEED_REC: "FEED", FEED_FOLLOW: "FEED",
+  FEED_POSTS: "FEED", FEED_STATUS: "FEED", FEED_COMMUNITY: "FEED",
   MSG_CHAT: "MESSAGES", MSG_FRIENDS: "MESSAGES",
   ME: "ME"
 };
+const PAGE_TO_FEED_SECTION: Partial<Record<PageId, "POSTS" | "STATUS" | "COMMUNITY">> = {
+  FEED_POSTS: "POSTS", FEED_STATUS: "STATUS", FEED_COMMUNITY: "COMMUNITY"
+};
 const ROOT_TO_FIRST_PAGE: Record<RootTab, PageId> = {
-  HOME: "HOME", MARKET: "MARKET_OPP", FEED: "FEED_REC",
+  HOME: "HOME", MARKET: "MARKET_OPP", FEED: "FEED_POSTS",
   MESSAGES: "MSG_FRIENDS", ME: "ME"
 };
 
@@ -137,10 +141,18 @@ export function AppShell({
   }>({ tab: "OPPORTUNITY", viewMode: "LIST" });
   // R15.22: 子页 override (swipe 跨 7 page). null = 跟随 tab + sub-tab 状态.
   const [pageOverride, setPageOverride] = useState<PageId | undefined>();
+  // R15.23: feedSection 是 FEED tab 内部的 section 状态 (动态/状态/社区)。
+  // 跨 page 切到 FEED_* 时同步设过来；swipe 切到 next/prev page 时也同步更新。
+  const [feedSection, setFeedSection] = useState<"POSTS" | "STATUS" | "COMMUNITY">("POSTS");
   const currentPage: PageId = pageOverride ?? ((): PageId => {
     if (tab === "HOME") return "HOME";
     if (tab === "MARKET") return marketEntry.tab === "ACTIVITY" ? "MARKET_ACT" : "MARKET_OPP";
-    if (tab === "FEED") return "FEED_REC";
+    if (tab === "FEED") {
+      // R15.23: 跟随 feedSection 而非写死 FEED_REC
+      if (feedSection === "STATUS") return "FEED_STATUS";
+      if (feedSection === "COMMUNITY") return "FEED_COMMUNITY";
+      return "FEED_POSTS";
+    }
     if (tab === "MESSAGES") return "MSG_FRIENDS";
     return "ME";
   })();
@@ -150,6 +162,9 @@ export function AppShell({
     if (root !== tab) setTab(root);
     if (page === "MARKET_OPP") setMarketEntry((s) => ({ ...s, tab: "OPPORTUNITY" }));
     else if (page === "MARKET_ACT") setMarketEntry((s) => ({ ...s, tab: "ACTIVITY" }));
+    // R15.23: 同步 FEED section
+    const nextFeedSection = PAGE_TO_FEED_SECTION[page];
+    if (nextFeedSection) setFeedSection(nextFeedSection);
   };
   const [openExperience, setOpenExperience] = useState<string>();
   const [experienceManifest, setExperienceManifest] =
@@ -447,7 +462,24 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} bottomNavVisible={isNavVisible} viewingCity={currentLocation.city} initialTab={currentPage === "FEED_FOLLOW" ? "FOLLOWING" : "RECOMMENDED"} />
+            <FeedSurface
+              engagement={engagement}
+              localNet={localNet}
+              marketplace={marketplace}
+              mediaClient={media}
+              socialSpace={socialSpace}
+              onChromeVisibilityChange={setFeedChromeVisible}
+              onOpenChat={setFeedChatAuthor}
+              onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
+              refreshTrigger={feedRefreshTrigger}
+              bottomNavVisible={isNavVisible}
+              viewingCity={currentLocation.city}
+              // R15.23: sub-tab 推荐/关注 保留（initialTab）；section 动态/状态/社区 由 app-shell 控
+              initialTab="RECOMMENDED"
+              // R15.23: section 改 controlled — swipe 跨 page 时 app-shell 同步更新
+              currentSection={feedSection}
+              onSectionChange={setFeedSection}
+            />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (
@@ -471,6 +503,7 @@ export function AppShell({
             <MeSurface
               context={context}
               localNet={localNet}
+              fulfillment={fulfillment}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,
