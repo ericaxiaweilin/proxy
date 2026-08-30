@@ -100,7 +100,10 @@ func toCompositionHintDTO(h *MediaCompositionHint) *localnet.MediaCompositionHin
 
 func toBoxDTOs(boxes []MediaBox) []localnet.MediaBoxDTO {
 	if len(boxes) == 0 {
-		return nil
+		// Wire contract uses arrays for detected regions. JSON null makes the
+		// whole feed payload fail validation on clients, so an empty detection
+		// result must be encoded as [] rather than null.
+		return make([]localnet.MediaBoxDTO, 0)
 	}
 	out := make([]localnet.MediaBoxDTO, 0, len(boxes))
 	for _, b := range boxes {

@@ -90,6 +90,15 @@ export class SessionAuthClient {
     return retry;
   }
 
+  /**
+   * Public read transport. It deliberately never reads, refreshes, or sends a
+   * stored session token. A stale/expired/offline guest session must not be
+   * able to prevent anonymous users from reading public server data.
+   */
+  public async requestPublic(path: string, init: { method: TransportRequest["method"]; body?: unknown } = { method: "GET" }): Promise<TransportResponse> {
+    return this.send(path, init);
+  }
+
   public async signOut(): Promise<void> {
     await this.input.secureSessionStore.clear();
   }

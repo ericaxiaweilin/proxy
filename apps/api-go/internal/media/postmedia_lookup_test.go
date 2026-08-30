@@ -2,8 +2,22 @@ package media
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func TestCompositionHintEmptyBoxesEncodeAsArrays(t *testing.T) {
+	dto := toCompositionHintDTO(&MediaCompositionHint{})
+	encoded, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatalf("marshal composition hint: %v", err)
+	}
+	value := string(encoded)
+	if !strings.Contains(value, `"faceBoxes":[]`) || !strings.Contains(value, `"bodyBoxes":[]`) {
+		t.Fatalf("empty detection boxes must encode as arrays, got %s", value)
+	}
+}
 
 // Pass 2 audit closure: PostMediaLookup is the bridge that carries
 // MediaAsset.DominantColorHex into the Feed read model. The wiring

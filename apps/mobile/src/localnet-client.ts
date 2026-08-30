@@ -9,6 +9,7 @@ import type { SecureSessionStore, StoredSession } from "./secure-session";
 
 export type AuthenticatedCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
+  requestPublic?(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
 };
 
 export type LocalNetClientOptions = {
@@ -51,12 +52,13 @@ export class LocalNetClient {
   public async listFeedPosts(): Promise<FeedReadModel> {
     // 动态 ALL 固定读取全局公开时间流。地址只用于用户显式选择的
     // 二级筛选，不能进入服务端 ListFeedPosts payload。
-    const session = await this.optionalSession();
     const result = await this.sendCommand(
-      session,
+      undefined,
       "ListFeedPosts",
       { type: "Feed", id: "local" },
-      {}
+      {},
+      undefined,
+      true
     );
     const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
     return { posts: payload.posts, media: payload.media };
@@ -96,7 +98,8 @@ export class LocalNetClient {
     commandType: string,
     target: { type: string; id: string },
     payload: Record<string, unknown>,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    publicRead = false
   ): Promise<CommandResult> {
     const commandId = this.nextId("command");
     const envelope = {
@@ -113,7 +116,10 @@ export class LocalNetClient {
       requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),
       payload
     };
-    const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
+    const request = publicRead && this.input.authClient.requestPublic
+      ? this.input.authClient.requestPublic.bind(this.input.authClient)
+      : this.input.authClient.request.bind(this.input.authClient);
+    const response = await request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new LocalNetProtocolError("localnet command response was malformed");
     if (result.outcome === "REJECTED") throw new LocalNetCommandRejectedError(result);
