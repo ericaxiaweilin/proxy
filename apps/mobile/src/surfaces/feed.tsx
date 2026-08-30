@@ -1367,10 +1367,11 @@ export function FeedSurface({
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1, position: "relative" },
   scrollRoot: { flex: 1 },
-  content: { paddingBottom: 88, paddingHorizontal: 0, paddingTop: 10 },
+  // R15.23: 对齐 me.tsx styles.content (15pt 外 + 8pt 内部 = 23pt 总留白) — 头像距屏左/右各 23pt
+  content: { paddingBottom: 88, paddingHorizontal: 15, paddingTop: 10 },
 
   // 基线 .feedhead：h2 21 bold。
-  feedHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 2, marginTop: 5, paddingHorizontal: 8 },
+  feedHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 2, marginTop: 5 },
   feedTitle: { color: color.ink, fontSize: 28, fontWeight: "800", lineHeight: 34 },
   feedTools: { flexDirection: "row", gap: 6 },
   stickyFeedHead: {
@@ -1401,7 +1402,7 @@ const styles = StyleSheet.create({
     width: 44
   },
   iconBtnText: { color: color.ink, fontSize: 14, fontWeight: "900" },
-  sectionTabs: { backgroundColor: "#F0EBF3", borderRadius: 16, flexDirection: "row", gap: 4, marginBottom: 10, marginTop: 9, padding: 4, paddingHorizontal: 8 },
+  sectionTabs: { backgroundColor: "#F0EBF3", borderRadius: 16, flexDirection: "row", gap: 4, marginBottom: 10, marginTop: 9, padding: 4 },
   sectionTab: { alignItems: "center", borderRadius: 12, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 42, paddingHorizontal: 8 },
   sectionTabOn: { backgroundColor: color.ink },
   sectionTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
@@ -1436,7 +1437,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 7,
     marginBottom: 9,
-    marginHorizontal: 8,
     marginTop: 5,
     paddingHorizontal: 11,
     minHeight: 52,
@@ -1468,7 +1468,7 @@ const styles = StyleSheet.create({
     marginBottom: 6
   },
   filterRailContent: { gap: 8, paddingRight: 18 },
-  customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, marginHorizontal: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6 },
   customFeedBannerText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   customFeedBannerAction: { color: color.muted, fontSize: 11, fontWeight: "700" },
   filterChip: {
@@ -1619,7 +1619,7 @@ const styles = StyleSheet.create({
   replySubmitText: { color: color.white, fontSize: 12, fontWeight: "800" },
 
   // 基线 .networktabs：border-bottom var(--ln)。
-  tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", paddingHorizontal: 8 },
+  tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row" },
   tabItem: { alignItems: "center", flex: 1, paddingBottom: 9, paddingTop: 11 },
   tabText: { color: color.muted, fontSize: 11, fontWeight: "800" },
   tabTextActive: { color: color.ink },
