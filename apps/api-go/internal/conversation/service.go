@@ -47,12 +47,16 @@ type Message struct {
 	ID             string     `json:"messageId"`
 	ConversationID string     `json:"conversationId"`
 	SenderID       string     `json:"senderId"`
-	MessageType    string     `json:"messageType"` // TEXT | IMAGE | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
+	MessageType    string     `json:"messageType"` // TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
 	Body           string     `json:"body,omitempty"`
 	MediaRef       string     `json:"mediaRef,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	EditedAt       *time.Time `json:"editedAt,omitempty"`
 	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
+	// Protection is the per-message anti-leak envelope. See
+	// message_protection.go and RFC v0.1 §3. Defaults applied in
+	// sendMessage; per-type rules in DefaultProtectionFor.
+	Protection MessageProtection `json:"protection"`
 }
 
 // NeedDraft 是 Conversation 内的显式 Need Draft（Gate D：普通消息不创建正式 Need）。
@@ -69,6 +73,13 @@ type Repository interface {
 	CreateConversation(ctx context.Context, c Conversation) error
 	GetConversation(ctx context.Context, id string) (Conversation, error)
 	AppendMessage(ctx context.Context, m Message) error
+	// UpdateMessage replaces a message in place. Used for read-counting
+	// (MarkMessageRead) and protection metadata. Must return
+	// ErrMessageNotFound when the message is absent.
+	UpdateMessage(ctx context.Context, m Message) error
+	// GetMessage returns a single message by ID. Walks every
+	// conversation's list; PG adapter should index by message ID.
+	GetMessage(ctx context.Context, id string) (Message, error)
 	Messages(ctx context.Context, conversationID string) ([]Message, error)
 	SaveNeedDraft(ctx context.Context, d NeedDraft) error
 	GetNeedDraft(ctx context.Context, draftID string) (NeedDraft, error)
@@ -79,6 +90,7 @@ type Repository interface {
 var (
 	ErrConversationNotFound = errors.New("conversation not found")
 	ErrDraftNotFound        = errors.New("need draft not found")
+	ErrMessageNotFound      = errors.New("message not found")
 )
 
 type MemoryRepository struct {
@@ -137,6 +149,43 @@ func (r *MemoryRepository) Messages(_ context.Context, conversationID string) ([
 		result[i] = cloneMessage(m)
 	}
 	return result, nil
+}
+
+// GetMessage fetches a single message by ID. The implementation walks every
+// conversation's message list — fine for in-memory tests, a Postgres adapter
+// should index by message ID. Used by protection read / screenshot events.
+func (r *MemoryRepository) GetMessage(_ context.Context, id string) (Message, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, list := range r.messages {
+		for _, m := range list {
+			if m.ID == id {
+				return cloneMessage(m), nil
+			}
+		}
+	}
+	return Message{}, ErrMessageNotFound
+}
+
+// UpdateMessage replaces a message in place. Used for view-counting after
+// recipient reads, and for protection overrides applied at send time. The
+// caller (service layer) is responsible for version / lifecycle checks; the
+// repository just persists.
+func (r *MemoryRepository) UpdateMessage(_ context.Context, m Message) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list, exists := r.messages[m.ConversationID]
+	if !exists {
+		return ErrMessageNotFound
+	}
+	for i, existing := range list {
+		if existing.ID == m.ID {
+			list[i] = cloneMessage(m)
+			r.messages[m.ConversationID] = list
+			return nil
+		}
+	}
+	return ErrMessageNotFound
 }
 
 func (r *MemoryRepository) SaveNeedDraft(_ context.Context, d NeedDraft) error {
@@ -206,10 +255,20 @@ func New() *Service {
 }
 
 func NewWithRepository(repository Repository) *Service {
+	return NewWithRepositoryAndClock(repository, clock.System{})
+}
+
+// NewWithRepositoryAndClock is the test-friendly constructor. Added in
+// PR 2 (Message.Protection) so TTL / view-limit tests can advance the
+// clock deterministically.
+func NewWithRepositoryAndClock(repository Repository, clk clock.Clock) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}
-	return &Service{repository: repository, clock: clock.System{}, modelStack: modelstack.Unconfigured{}}
+	if clk == nil {
+		clk = clock.System{}
+	}
+	return &Service{repository: repository, clock: clk, modelStack: modelstack.Unconfigured{}}
 }
 
 func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
@@ -224,7 +283,7 @@ func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "StartConversation", "SendMessage", "ListConversationMessages",
+	case "StartConversation", "SendMessage", "ListConversationMessages", "MarkMessageRead", "RecordScreenshot", "ForwardMessage",
 		"CreateNeedDraft", "ConfirmNeedDraft":
 		return true
 	default:
@@ -246,6 +305,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.sendMessage(ctx, e)
 	case "ListConversationMessages":
 		return s.listMessages(ctx, e)
+	case "MarkMessageRead":
+		return s.markMessageRead(ctx, e)
+	case "RecordScreenshot":
+		return s.recordScreenshot(ctx, e)
+	case "ForwardMessage":
+		return s.forwardMessage(ctx, e)
 	case "CreateNeedDraft":
 		return s.createNeedDraft(ctx, e)
 	case "ConfirmNeedDraft":
@@ -366,6 +431,10 @@ type sendMessagePayload struct {
 	MediaRef              string `json:"mediaRef"`
 	AssistantMode         string `json:"assistantMode"`
 	TemporaryUIResponseID string `json:"temporaryUIResponseId"`
+	// ProtectionOverride is the user-controlled layer on top of the
+	// per-type default (see message_protection.go). All fields are
+	// optional; only set fields override.
+	ProtectionOverride *ProtectionOverride `json:"protectionOverride,omitempty"`
 }
 
 func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.Result {
@@ -376,7 +445,7 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if p.MessageType == "" {
 		p.MessageType = "TEXT"
 	}
-	validTypes := map[string]bool{"TEXT": true, "IMAGE": true, "SYSTEM_CONTEXT": true, "STRUCTURED_SUGGESTION": true}
+	validTypes := map[string]bool{"TEXT": true, "IMAGE": true, "VIDEO": true, "LOCATION": true, "SYSTEM_CONTEXT": true, "STRUCTURED_SUGGESTION": true}
 	if !validTypes[p.MessageType] {
 		return command.Rejected(e, "INVALID_MESSAGE_TYPE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_message_type", map[string]any{"messageType": p.MessageType})
 	}
@@ -386,6 +455,12 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	}
 	if p.MessageType == "IMAGE" && strings.TrimSpace(p.Body) == "" && strings.TrimSpace(p.MediaRef) == "" {
 		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", nil)
+	}
+	if p.MessageType == "VIDEO" && strings.TrimSpace(p.MediaRef) == "" {
+		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", map[string]any{"messageType": p.MessageType})
+	}
+	if p.MessageType == "LOCATION" && strings.TrimSpace(p.Body) == "" {
+		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", map[string]any{"messageType": p.MessageType})
 	}
 	// 兼容：前端对纯图用 " " 占位，这里归一为空以便历史拼接
 	if p.MessageType == "IMAGE" && strings.TrimSpace(p.Body) == "" {
@@ -401,6 +476,19 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if !isParticipant(conv, e.Actor.ID) {
 		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
 	}
+
+	// Apply per-type protection defaults, then the user override.
+	base := DefaultProtectionFor(p.MessageType, conv.Type)
+	var protection MessageProtection
+	if p.ProtectionOverride != nil {
+		protection, err = Apply(base, *p.ProtectionOverride, s.clock.Now().UTC())
+		if err != nil {
+			return command.Rejected(e, "INVALID_PROTECTION", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_protection", map[string]any{"reason": err.Error()})
+		}
+	} else {
+		protection = base
+	}
+
 	msg := Message{
 		ID:             newID("msg_"),
 		ConversationID: conv.ID,
@@ -409,6 +497,7 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		Body:           p.Body,
 		MediaRef:       p.MediaRef,
 		CreatedAt:      s.clock.Now().UTC(),
+		Protection:     protection,
 	}
 	domainEvents := []event.DomainEvent{event.New("MessageSent", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, msg.CreatedAt, map[string]any{
 		"messageId":   msg.ID,
@@ -700,9 +789,203 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 	if err != nil {
 		return command.Rejected(e, "MESSAGE_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
 	}
+	// Filter out TTL-expired and view-limit-consumed messages for the
+	// recipient. Sender still sees their own messages so the chat
+	// history looks complete on the sender's device.
+	now := s.clock.Now().UTC()
+	visible := make([]Message, 0, len(messages))
+	for _, m := range messages {
+		if m.SenderID == e.Actor.ID {
+			visible = append(visible, m)
+			continue
+		}
+		if m.Protection.ViewLimitExceeded() {
+			continue
+		}
+		if m.Protection.IsExpiredAt(now) {
+			continue
+		}
+		visible = append(visible, m)
+	}
 	return acceptedWithPayload(e, "Conversation", e.Target.ID, 1, conv.State, map[string]any{
-		"messages": messages,
+		"messages": visible,
 	}, nil)
+}
+
+// ---------- MarkMessageRead ----------
+// Bumps the recipient's view count. Sender's own reads do not count.
+
+type markMessageReadPayload struct {
+	MessageID string `json:"messageId"`
+}
+
+func (s *Service) markMessageRead(ctx context.Context, e command.Envelope) command.Result {
+	var p markMessageReadPayload
+	if !decode(e.Payload, &p) || p.MessageID == "" {
+		return command.Rejected(e, "INVALID_READ", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_read", nil)
+	}
+	msg, err := s.repository.GetMessage(ctx, p.MessageID)
+	if errors.Is(err, ErrMessageNotFound) {
+		return command.Rejected(e, "MESSAGE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.message_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MESSAGE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.message_read_failed", nil)
+	}
+	conv, err := s.repository.GetConversation(ctx, msg.ConversationID)
+	if err != nil {
+		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	if !isParticipant(conv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
+	if msg.SenderID == e.Actor.ID {
+		return acceptedWithPayload(e, "Message", msg.ID, 1, "READ", map[string]any{
+			"messageId": msg.ID,
+			"viewCount": msg.Protection.ViewCount,
+			"viewLimit": msg.Protection.ViewLimit,
+			"consumed":  false,
+			"selfRead":  true,
+		}, nil)
+	}
+	if msg.Protection.IsExpiredAt(s.clock.Now().UTC()) {
+		return command.Rejected(e, "MESSAGE_EXPIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.message_expired", map[string]any{"messageId": msg.ID})
+	}
+	if msg.Protection.ViewLimitExceeded() {
+		return command.Rejected(e, "VIEW_LIMIT_EXCEEDED", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.view_limit_exceeded", map[string]any{"messageId": msg.ID, "viewCount": msg.Protection.ViewCount, "viewLimit": msg.Protection.ViewLimit})
+	}
+	msg.Protection.ViewCount++
+	consumed := msg.Protection.ViewLimitExceeded()
+	if err := s.repository.UpdateMessage(ctx, msg); err != nil {
+		return command.Rejected(e, "MESSAGE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.message_read_failed", nil)
+	}
+	domainEvents := []event.DomainEvent{event.New("MessageRead", "Message", msg.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"messageId": msg.ID,
+		"viewerId":  e.Actor.ID,
+		"viewCount": msg.Protection.ViewCount,
+		"viewLimit": msg.Protection.ViewLimit,
+		"consumed":  consumed,
+	})}
+	return acceptedWithPayload(e, "Message", msg.ID, 1, "READ", map[string]any{
+		"messageId": msg.ID,
+		"viewCount": msg.Protection.ViewCount,
+		"viewLimit": msg.Protection.ViewLimit,
+		"consumed":  consumed,
+	}, domainEvents)
+}
+
+// ---------- RecordScreenshot ----------
+// Recipient's device detects a screenshot of a protected message and
+// fires this event. The server publishes a SECURITY_ALERT back to the
+// original sender so their app can show "对方在 14:23 截了您发的消息".
+
+type recordScreenshotPayload struct {
+	MessageID string `json:"messageId"`
+}
+
+func (s *Service) recordScreenshot(ctx context.Context, e command.Envelope) command.Result {
+	var p recordScreenshotPayload
+	if !decode(e.Payload, &p) || p.MessageID == "" {
+		return command.Rejected(e, "INVALID_SCREENSHOT_EVENT", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_screenshot", nil)
+	}
+	msg, err := s.repository.GetMessage(ctx, p.MessageID)
+	if errors.Is(err, ErrMessageNotFound) {
+		return command.Rejected(e, "MESSAGE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.message_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MESSAGE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.message_read_failed", nil)
+	}
+	conv, err := s.repository.GetConversation(ctx, msg.ConversationID)
+	if err != nil {
+		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	if !isParticipant(conv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
+	if msg.SenderID == e.Actor.ID {
+		return command.Rejected(e, "SELF_SCREENSHOT", "VALIDATION", "AFTER_USER_ACTION", "conversation.self_screenshot", nil)
+	}
+	if !msg.Protection.ScreenshotWarn {
+		return acceptedWithPayload(e, "Message", msg.ID, 1, "SCREENSHOT_IGNORED", map[string]any{
+			"messageId": msg.ID,
+			"reason":    "protection.screenshotWarn is false",
+		}, nil)
+	}
+	now := s.clock.Now().UTC()
+	domainEvents := []event.DomainEvent{event.New("ScreenshotDetected", "Message", msg.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"messageId": msg.ID,
+		"shooterId": e.Actor.ID,
+		"senderId":  msg.SenderID,
+	})}
+	domainEvents = append(domainEvents, event.New("SecurityAlert", "Message", msg.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, now, map[string]any{
+		"messageId": msg.ID,
+		"alertType": "SCREENSHOT_DETECTED",
+		"targetId":  msg.SenderID,
+		"triggerId": e.Actor.ID,
+	}))
+	return acceptedWithPayload(e, "Message", msg.ID, 1, "SCREENSHOT_RECORDED", map[string]any{
+		"messageId": msg.ID,
+	}, domainEvents)
+}
+
+// ---------- ForwardMessage ----------
+// "Forward" means: re-send the same content to a different conversation.
+// We refuse this when the source message's protection disallows it. The
+// actual re-send is a normal SendMessage against the target conversation;
+// this command only validates the source and audits the forward.
+
+type forwardMessagePayload struct {
+	SourceMessageID      string `json:"sourceMessageId"`
+	TargetConversationID string `json:"targetConversationId"`
+}
+
+func (s *Service) forwardMessage(ctx context.Context, e command.Envelope) command.Result {
+	var p forwardMessagePayload
+	if !decode(e.Payload, &p) || p.SourceMessageID == "" || p.TargetConversationID == "" {
+		return command.Rejected(e, "INVALID_FORWARD", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_forward", nil)
+	}
+	src, err := s.repository.GetMessage(ctx, p.SourceMessageID)
+	if errors.Is(err, ErrMessageNotFound) {
+		return command.Rejected(e, "MESSAGE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.message_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "MESSAGE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.message_read_failed", nil)
+	}
+	srcConv, err := s.repository.GetConversation(ctx, src.ConversationID)
+	if err != nil {
+		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	if !isParticipant(srcConv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
+	dstConv, err := s.repository.GetConversation(ctx, p.TargetConversationID)
+	if errors.Is(err, ErrConversationNotFound) {
+		return command.Rejected(e, "CONVERSATION_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	if !isParticipant(dstConv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
+	if !src.Protection.Forwardable {
+		return command.Rejected(e, "PROTECTION_VIOLATION", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.forward_blocked", map[string]any{
+			"messageId": src.ID,
+			"reason":    "protection.forwardable is false",
+		})
+	}
+	if src.Protection.IsExpiredAt(s.clock.Now().UTC()) {
+		return command.Rejected(e, "MESSAGE_EXPIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.message_expired", map[string]any{"messageId": src.ID})
+	}
+	domainEvents := []event.DomainEvent{event.New("MessageForwarded", "Message", src.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"sourceMessageId":      src.ID,
+		"sourceConversationId": src.ConversationID,
+		"targetConversationId": p.TargetConversationID,
+		"forwarderId":          e.Actor.ID,
+	})}
+	return acceptedWithPayload(e, "Message", src.ID, 1, "FORWARD_OK", map[string]any{
+		"sourceMessageId":      src.ID,
+		"targetConversationId": p.TargetConversationID,
+	}, domainEvents)
 }
 
 // ---------- CreateNeedDraft ----------

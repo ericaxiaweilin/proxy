@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassContainer, GlassView } from "expo-glass-effect";
+import { ProxyNativeTabBarView } from "../components/proxy-native-tab-bar";
 import type {
   ExperienceAction,
   ExperienceManifest,
@@ -749,6 +750,42 @@ function RootNav({
     })
   ).current;
 
+  // iOS must use the real UIKit tab bar. Its selected lens samples live
+  // content behind the dock and produces system refraction; opacity/blur
+  // layers cannot reproduce that behavior. Android retains the custom dock
+  // below as its platform fallback.
+  if (Platform.OS === "ios") {
+    return (
+      <View style={[styles.dockWrap, { bottom: Math.max(bottomInset ?? 0, 8), width: dockWidth }]}>
+        <View style={[styles.nativeTabShell, { height: dockHeight, width: dockWidth }]}>
+          <ProxyNativeTabBarView
+            onTabSelect={(event) => commit(event.nativeEvent.index)}
+            selectedIndex={initialTabIdx}
+            style={StyleSheet.absoluteFill}
+          />
+          <View pointerEvents="none" style={styles.nativeTabOverlay}>
+            {tabs.map((entry, index) => {
+              const isActive = index === initialTabIdx;
+              return (
+                <View key={entry.id} style={styles.navItem}>
+                  <View style={[styles.navContent, { opacity: isActive ? 1 : 0.72 }]}>
+                    <View style={styles.navIcon}>
+                      <ProxyIcon color={isActive ? accent : "#8d8d92"} name={entry.icon} size={22} />
+                      {entry.badge ? <View style={styles.navBadgeDot} /> : null}
+                    </View>
+                    <Text numberOfLines={1} style={[styles.navLabel, isActive ? styles.navLabelActive : null]}>
+                      {entry.label}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.dockWrap, { bottom: Math.max(bottomInset ?? 0, 8), width: dockWidth }]}>
       {/*
@@ -935,6 +972,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 0,
     zIndex: 100
+  },
+  nativeTabShell: { overflow: "visible" },
+  nativeTabOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: "center",
+    flexDirection: "row",
+    paddingHorizontal: 8
   },
   hintRow: { flexDirection: "row", alignItems: "center", gap: 10, opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" as const },
   hintLine: { width: 22, height: 1, backgroundColor: "transparent" },
