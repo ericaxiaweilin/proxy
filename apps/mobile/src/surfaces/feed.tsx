@@ -938,7 +938,7 @@ export function FeedSurface({
           scrollEventThrottle={16}
           // View 响应者链：横滑时由本 ScrollView 成为响应者并拒绝外层抢占，保证可滑
           onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={(_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy)}
+          onMoveShouldSetResponder={() => true}
           onResponderTerminationRequest={() => false}
         >
         {FILTERS.map((f) => {
@@ -1258,8 +1258,6 @@ export function FeedSurface({
         })}
         </>
       )}
-      </>
-      )}
 
       {/* 全屏媒体查看器（真实文件：图片 thumbnailUrl / 视频 playbackUrl） */}
       {viewer && viewerPost && viewerItems[viewer.index] ? (
@@ -1329,6 +1327,8 @@ export function FeedSurface({
           </Pressable>
         </Modal>
       ) : null}
+      </>
+      )}
 
     </ScrollView>
     {stickyHeaderVisible ? (
