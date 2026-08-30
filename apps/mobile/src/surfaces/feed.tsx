@@ -225,7 +225,9 @@ export function FeedSurface({
   // R15.14: LocationContext — 顶 chip 选的城市。变化时 feed
   // 重新拉。空 / undefined = 不过滤 (legacy)。
   viewingCity,
-  initialTab
+  initialTab,
+  currentSection,
+  onSectionChange
 }: {
   localNet: LocalNetClient;
   marketplace: MarketplaceClient;
@@ -240,9 +242,18 @@ export function FeedSurface({
   viewingCity?: string;
   // R15.22 sub-page sync (initialTab from RootNav 8-page sequence)
   initialTab?: FeedTab;
+  // R15.23: section (动态/状态/社区) 改 controlled — 由 AppShell 同步 swipe 跨 page 状态
+  currentSection?: FeedSection;
+  onSectionChange?: (section: FeedSection) => void;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>(initialTab ?? "RECOMMENDED");
-  const [section, setSection] = useState<FeedSection>("POSTS");
+  // R15.23: 优先用 controlled prop (currentSection)，fallback 到内部 state (用于独立 mount / 测试)
+  const [internalSection, setInternalSection] = useState<FeedSection>("POSTS");
+  const section = currentSection ?? internalSection;
+  const setSection = (next: FeedSection): void => {
+    if (currentSection === undefined) setInternalSection(next);
+    onSectionChange?.(next);
+  };
   const [feedFilter, setFeedFilter] = useState<FilterKey>("ALL");
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedPosts.length > 0 ? "READY" : "LOADING");
   const [posts, setPosts] = useState<FeedPost[]>(cachedPosts);
@@ -1356,10 +1367,10 @@ export function FeedSurface({
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1, position: "relative" },
   scrollRoot: { flex: 1 },
-  content: { paddingBottom: 88, paddingHorizontal: 18, paddingTop: 10 },
+  content: { paddingBottom: 88, paddingHorizontal: 0, paddingTop: 10 },
 
   // 基线 .feedhead：h2 21 bold。
-  feedHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 2, marginTop: 5 },
+  feedHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 2, marginTop: 5, paddingHorizontal: 8 },
   feedTitle: { color: color.ink, fontSize: 28, fontWeight: "800", lineHeight: 34 },
   feedTools: { flexDirection: "row", gap: 6 },
   stickyFeedHead: {
@@ -1390,7 +1401,7 @@ const styles = StyleSheet.create({
     width: 44
   },
   iconBtnText: { color: color.ink, fontSize: 14, fontWeight: "900" },
-  sectionTabs: { backgroundColor: "#F0EBF3", borderRadius: 16, flexDirection: "row", gap: 4, marginBottom: 10, marginTop: 9, padding: 4 },
+  sectionTabs: { backgroundColor: "#F0EBF3", borderRadius: 16, flexDirection: "row", gap: 4, marginBottom: 10, marginTop: 9, padding: 4, paddingHorizontal: 8 },
   sectionTab: { alignItems: "center", borderRadius: 12, flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", minHeight: 42, paddingHorizontal: 8 },
   sectionTabOn: { backgroundColor: color.ink },
   sectionTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
@@ -1425,6 +1436,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 7,
     marginBottom: 9,
+    marginHorizontal: 8,
     marginTop: 5,
     paddingHorizontal: 11,
     minHeight: 52,
@@ -1456,7 +1468,7 @@ const styles = StyleSheet.create({
     marginBottom: 6
   },
   filterRailContent: { gap: 8, paddingRight: 18 },
-  customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, marginHorizontal: 8, paddingHorizontal: 10, paddingVertical: 6 },
   customFeedBannerText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   customFeedBannerAction: { color: color.muted, fontSize: 11, fontWeight: "700" },
   filterChip: {
@@ -1607,7 +1619,7 @@ const styles = StyleSheet.create({
   replySubmitText: { color: color.white, fontSize: 12, fontWeight: "800" },
 
   // 基线 .networktabs：border-bottom var(--ln)。
-  tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row" },
+  tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", paddingHorizontal: 8 },
   tabItem: { alignItems: "center", flex: 1, paddingBottom: 9, paddingTop: 11 },
   tabText: { color: color.muted, fontSize: 11, fontWeight: "800" },
   tabTextActive: { color: color.ink },
@@ -1642,7 +1654,6 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     borderBottomColor: "rgba(35,28,42,0.09)",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    marginHorizontal: -18,
     paddingHorizontal: 8,
     paddingVertical: 12
   },
@@ -1662,7 +1673,7 @@ const styles = StyleSheet.create({
   engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },
   postName: { color: color.ink, fontSize: 13, fontWeight: "900" },
-  postMeta: { color: color.muted, fontSize: 11, marginTop: 1 },
+  postMeta: { color: color.muted, fontSize: 11 },
   followBtn: {
     backgroundColor: color.white,
     borderColor: color.line,
@@ -1675,8 +1686,8 @@ const styles = StyleSheet.create({
   followBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   followBtnTextOn: { color: color.white },
 
-  postReason: { color: "#81788A", fontSize: 11, lineHeight: 15, marginTop: 5 },
-  postCopy: { color: color.ink, fontSize: 14, lineHeight: 20, marginVertical: 5 },
+  postReason: { color: "#81788A", fontSize: 11, marginTop: 5 },
+  postCopy: { color: color.ink, fontSize: 14, lineHeight: 20, marginTop: 5 },
 
   // 基线 .mediaAsset：height 156，radius 14。
   mediaAsset: {
@@ -1798,15 +1809,13 @@ const styles = StyleSheet.create({
   postUtilityText: { color: "#5A6536", fontSize: 11, lineHeight: 15 },
 
   postActions: {
-    borderTopColor: "#F2EDF4",
-    borderTopWidth: 1,
     flexDirection: "row",
-    marginTop: 7,
-    paddingTop: 7
+    gap: 22,
+    marginTop: 11
   },
   postAction: { alignItems: "center", flex: 1, paddingVertical: 5 },
-  postActionText: { color: "#756D7A", fontSize: 11, fontWeight: "600" },
-  postActionOn: { color: "#6C36C8", fontWeight: "700" },
+  postActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  postActionOn: { color: "#6C36C8" },
 
   postIntent: { flexDirection: "row", gap: 6, marginTop: 8 },
   intentChat: { backgroundColor: color.ink, borderRadius: 12, flex: 1, padding: 9 },
