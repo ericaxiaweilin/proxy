@@ -926,17 +926,24 @@ export function FeedSurface({
         })}
       </View>
 
-      {/* R15.3 feedfilterrail：横滑筛选，横向手势不冒泡至 sectionTabs 的 动态-状态-社区 swipe */}
-      <ScrollView
-        contentContainerStyle={styles.filterRailContent}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterRail}
-        // 关键：横滑时由本 ScrollView 捕获，不让外层 section 的 PanResponder 误判为切页
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
+      {/* R15.3 feedfilterrail：横滑筛选，横向手势不冒泡至外层 9-page 横滑（FEED_POSTS↔FEED_STATUS） */}
+      <View
+        // 捕获阶段即抢占横滑，避免外层 PAGE_SEQUENCE 的 PanResponder 将 filterRail 横滑误判为切页
+        onStartShouldSetResponderCapture={() => true}
+        onMoveShouldSetResponderCapture={() => true}
         onResponderTerminationRequest={() => false}
+        style={styles.filterRailCapture}
       >
+        <ScrollView
+          contentContainerStyle={styles.filterRailContent}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterRail}
+          // ScrollView 自身的横滑由其内部 PanResponder 处理，外层不再拦截
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderTerminationRequest={() => false}
+        >
         {FILTERS.map((f) => {
           const active = feedFilter === f.id;
           return (
@@ -945,7 +952,8 @@ export function FeedSurface({
             </Pressable>
           );
         })}
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* R15.3 preferencehint：推荐由你和算法共同决定 */}
       <View style={styles.prefHint}>
@@ -1471,9 +1479,12 @@ const styles = StyleSheet.create({
   },
   searchArrow: { color: color.muted, fontSize: 15 },
 
-  // 基线 .feedfilterrail：横滑筛选。
-  filterRail: {
+  // 基线 .feedfilterrail：横滑筛选。外层 View 捕获横滑以隔离 PAGE_SEQUENCE 切页
+  filterRailCapture: {
     marginBottom: 6
+  },
+  filterRail: {
+    // 内层 ScrollView 实际横滑
   },
   filterRailContent: { gap: 8, paddingRight: 18 },
   customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6 },
