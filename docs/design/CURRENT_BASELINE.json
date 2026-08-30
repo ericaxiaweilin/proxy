@@ -10,6 +10,12 @@
     "iconRegistry": "apps/mobile/src/components/proxy-icon.tsx",
     "theme": "apps/mobile/src/theme.tsx"
   },
+  "integration": {
+    "policy": "docs/architecture/MULTI_AGENT_BASELINE_CONTROL.md",
+    "workspaceMode": "SINGLE_WRITER",
+    "externalAgentMode": "ISOLATED_WORKTREE",
+    "recoveryBaselineTag": "baseline/r15.23-command-clean-20260830"
+  },
   "screenReferences": [
     {
       "scope": "root-dock",

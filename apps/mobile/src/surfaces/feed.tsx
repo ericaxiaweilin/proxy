@@ -924,7 +924,8 @@ export function FeedSurface({
         })}
       </View>
 
-      {/* R15.3 feedfilterrail：横滑筛选可滑（filterRail 自消费，dx>dy 时锁住外层 PAGE_SEQUENCE 切页）— 帖文区仍可横滑切页 */}
+      {/* R15.3 feedfilterrail：只由外层 PanResponder 判定横向手势并驱动本 ScrollView。
+          不在内层再注册 responder，避免纵向滚动被第二套手势逻辑截获。 */}
       <View {...filterRailPanResponder.panHandlers} style={styles.filterRailCapture}>
         <ScrollView
           ref={filterRailRef}
@@ -936,10 +937,6 @@ export function FeedSurface({
             filterRailScrollXRef.current = e.nativeEvent.contentOffset.x;
           }}
           scrollEventThrottle={16}
-          // View 响应者链：横滑时由本 ScrollView 成为响应者并拒绝外层抢占，保证可滑
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderTerminationRequest={() => false}
         >
         {FILTERS.map((f) => {
           const active = feedFilter === f.id;
