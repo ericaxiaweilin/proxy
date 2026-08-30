@@ -926,8 +926,17 @@ export function FeedSurface({
         })}
       </View>
 
-      {/* R15.3 feedfilterrail：可横滑筛选 + 附近按钮 */}
-      <ScrollView contentContainerStyle={styles.filterRailContent} horizontal showsHorizontalScrollIndicator={false} style={styles.filterRail}>
+      {/* R15.3 feedfilterrail：横滑筛选，横向手势不冒泡至 sectionTabs 的 动态-状态-社区 swipe */}
+      <ScrollView
+        contentContainerStyle={styles.filterRailContent}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterRail}
+        // 关键：横滑时由本 ScrollView 捕获，不让外层 section 的 PanResponder 误判为切页
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderTerminationRequest={() => false}
+      >
         {FILTERS.map((f) => {
           const active = feedFilter === f.id;
           return (
