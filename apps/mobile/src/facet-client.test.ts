@@ -50,7 +50,7 @@ describe("FacetClient.listObjects", () => {
     });
     const out = await client.listObjects();
     expect(out.objects).toHaveLength(1);
-    expect(out.objects[0].id).toBe("ken");
+    expect(out.objects[0]!.id).toBe("ken");
     expect(out.totalObjects).toBe(1);
     expect(out.freshAssets).toBe(5);
     expect(out.shownAssets).toBe(16);

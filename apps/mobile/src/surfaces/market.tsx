@@ -11,6 +11,7 @@ import { type ActivityClient } from "../activity-client";
 import { type FulfillmentClient } from "../fulfillment-client";
 import { type MarketplaceClient } from "../marketplace-client";
 import { type MediaClient } from "../media-client";
+import { type SupplyClient } from "../supply-client";
 import {
   MAP_DISTRICTS,
   MARKET_EXPERIENCES,
@@ -87,6 +88,7 @@ export function MarketSurface({
   marketplace,
   fulfillment,
   media,
+  supply,
   marketLabel,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
@@ -98,6 +100,7 @@ export function MarketSurface({
   marketplace: MarketplaceClient;
   fulfillment?: FulfillmentClient;
   media?: MediaClient;
+  supply?: SupplyClient;
   marketLabel: string;
   initialTab?: MarketTab;
   onOpenExperience: (experienceId: string) => void;
@@ -118,6 +121,9 @@ export function MarketSurface({
   const [opportunityPhase, setOpportunityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [opportunityItems, setOpportunityItems] = useState<MarketOpportunity[]>([]);
   const [opportunityError, setOpportunityError] = useState<string>();
+  // M4: 真实供给匹配（QuerySuppliers）— 按市场/能力过滤，展示给“适合你”筛选
+  const [supplierMatches, setSupplierMatches] = useState<unknown[] | undefined>(undefined);
+  const [supplierError, setSupplierError] = useState<string | undefined>(undefined);
   const [activityDetail, setActivityDetail] = useState<Activity | null>(null);
   const [interestedIn, setInterestedIn] = useState<ReadonlySet<string>>(new Set());
   const [joinedIds, setJoinedIds] = useState<ReadonlySet<string>>(new Set());
@@ -200,6 +206,21 @@ export function MarketSurface({
   useEffect(() => {
     if (tab === "OPPORTUNITY") void loadOpportunities();
   }, [tab, loadOpportunities]);
+
+  // M4: 当“推荐”筛选激活时，拉取真实供给（QuerySuppliers market=hn capability=ZH），用于“适合你”排序依据
+  useEffect(() => {
+    if (!supply || tab !== "OPPORTUNITY" || oppFilter !== "RECOMMEND") {
+      setSupplierMatches(undefined);
+      setSupplierError(undefined);
+      return;
+    }
+    let cancelled = false;
+    // 轻量拉取，不阻塞机会列表
+    supply.querySuppliers({ marketId: "hn", capability: "ZH", limit: 6 })
+      .then((list) => { if (!cancelled) { setSupplierMatches(list); setSupplierError(undefined); } })
+      .catch((e) => { if (!cancelled) setSupplierError(e instanceof Error ? e.message : String(e)); });
+    return () => { cancelled = true; };
+  }, [supply, tab, oppFilter]);
 
   async function dismissOpportunity(id: string): Promise<void> {
     if (busy) return;
@@ -431,6 +452,11 @@ export function MarketSurface({
         </Pressable>
       </View>
       {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}
+      {supply && oppFilter === "RECOMMEND" ? (
+        <Text style={styles.offerMsg}>
+          {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
+        </Text>
+      ) : null}
       {showOffers ? (
         <View style={styles.offerList}>
           {myOffers.length === 0 ? (

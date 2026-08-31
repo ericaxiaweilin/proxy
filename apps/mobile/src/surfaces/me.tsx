@@ -25,6 +25,8 @@ import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 import type { SceneClient } from "../scene-client";
+import type { BusinessClient } from "../business-client";
+import type { SupplyClient } from "../supply-client";
 // R15.25 FACET — 对象化内容运营 (Phase 1 = list).
 // 接线: SessionAuthClient (main 注入) → FacetClient → FacetHomeSurface。
 // Surface 内部 useEffect 调 GET /v1/facet/objects, 失败 → 显示 "服务暂时不可用"。
@@ -33,7 +35,7 @@ import { FacetClient } from "../facet-client";
 // R15.25: 从 native-app 拿 module-level const 构造 FacetClient.
 // native-app 提前 export 了 sessionAuthClient + localApiBaseUrl, 避免
 // 给 AppShell / MeSurface 增 prop.
-import { sessionAuthClient, localApiBaseUrl } from "../native-app";
+import { sessionAuthClient, localApiBaseUrl } from "../native-clients";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -1256,6 +1258,8 @@ export function MeSurface({
   onChromeVisibilityChange,
   bottomNavVisible,
   scene,
+  business,
+  supply,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -1275,6 +1279,8 @@ export function MeSurface({
   // service via ListMyMemories. If absent, the subpage falls back to
   // the static SUB_PAGE_CONTENT prototype as before.
   scene?: SceneClient;
+  business?: BusinessClient;
+  supply?: SupplyClient;
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
   // 规范 §4/§13：Android 硬件返回先收起子页；其余覆盖层是 RN Modal（onRequestClose 自理）。
@@ -1293,6 +1299,37 @@ export function MeSurface({
       .catch(() => { if (!cancelled) { setMemories([]); setMemoriesLoadState("error"); } });
     return () => { cancelled = true; };
   }, [subPage?.route, scene]);
+  // M3: Agent Passport hydrate — 能力护照与可用时间从 supply 真读模型拉取
+  const [passportError, setPassportError] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!supply) return;
+    let cancelled = false;
+    supply.getAgentPassport().then((p) => {
+      if (cancelled) return;
+      // 将已声明/已核验的 capability 映射回本地 AbilityInstance（仅用于展示“已核验”徽标）
+      const capMap: Record<string, AbilityType> = { PHOTOGRAPHY: "拍照", ZH: "翻译", VI: "翻译", EN: "翻译" };
+      const seen = new Map<AbilityType, { verified: boolean }>();
+      for (const c of p.capabilities ?? []) {
+        const t = capMap[c.capability];
+        if (!t) continue;
+        const cur = seen.get(t);
+        seen.set(t, { verified: (cur?.verified ?? false) || !!c.verified });
+      }
+      if (seen.size > 0) {
+        // 保留 DEFAULT_ABILITIES 结构，但为已核验项打上 verified 标记（UI 侧透出）
+        setAbilities((prev) => prev.map((item) => {
+          const v = seen.get(item.type);
+          if (!v) return item;
+          // 把 verified 状态编码进 note 字段，前端徽标读取
+          const hasBadge = v.verified && !(item.note ?? "").includes("已核验");
+          return hasBadge ? { ...item, note: item.note ? `${item.note} · 已核验` : "已核验" } : item;
+        }));
+      }
+      // 可用时间：若有 availability 窗口，取第一条映射为 AVAILABLE，否则保持本地
+      if ((p.availability?.length ?? 0) > 0) setAvailability("AVAILABLE");
+    }).catch((e) => { if (!cancelled) setPassportError(e instanceof Error ? e.message : String(e)); });
+    return () => { cancelled = true; };
+  }, [supply]);
   const [availability, setAvailability] = useState<AvailabilityState>("AVAILABLE");
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [enterpriseOpsStage, setEnterpriseOpsStage] = useState<EnterpriseOpsStage>("READY");
@@ -1794,7 +1831,8 @@ export function MeSurface({
               <Text style={styles.walletActionArrow}>›</Text>
             </Pressable>
 
-            <View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>我的能力</Text><Text style={styles.detailSectionHint}>{abilities.length} 项</Text></View>
+            <View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>我的能力</Text><Text style={styles.detailSectionHint}>{abilities.length} 项 · {passportError ? "同步失败" : "已接 supply"}</Text></View>
+            {passportError ? <Text style={{ color: "#B00020", fontSize: 11, marginBottom: 6 }}>{passportError}</Text> : null}
             {abilities.map((ability) => (
               <View key={ability.id} style={styles.abilityCompactCard}>
                 <View style={styles.abilityHead}>
@@ -1831,6 +1869,12 @@ export function MeSurface({
                   setAbilities((prev) => prev.map((item) => (item.id === id ? { ...item, type, fields } : item)));
                 } else {
                   setAbilities((prev) => [...prev, { id: `ability-${Date.now()}`, type, fields }]);
+                }
+                // M3: 同步声明到 supply.Capability（后端 PG 持久化，operator 侧可核验）
+                if (supply) {
+                  const capMap: Record<AbilityType, string> = { "同行": "GUIDE", "翻译": "ZH", "拍照": "PHOTOGRAPHY" };
+                  const cap = capMap[type];
+                  if (cap) supply.declareCapability({ capability: cap }).catch((e) => setPassportError(e instanceof Error ? e.message : String(e)));
                 }
                 setAbilitySheet(undefined);
               }}

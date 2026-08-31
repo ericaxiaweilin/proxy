@@ -1,8 +1,18 @@
 // 已登记但尚未实现的稳定 Surface 的占位渲染（R15 Product Freeze：
 // Surface 名单冻结，实现按排期推进；占位卡不得演化为新页面路由）。
+// ORDER_EXECUTION / OUTCOME 已去占位化：分别接 fulfillment / outcome 真实读模型。
 import { StyleSheet, Text, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { SurfaceId } from "../uiplan/types";
+import { OrderExecutionSurface } from "./order-execution";
+import { OutcomeSurface } from "./outcome";
+import { MerchantStorefrontSurface } from "./merchant-storefront";
+import { ActivityDetailSurface } from "./activity-detail";
+import { SkillWorkspaceSurface } from "./skill-workspace";
+import type { FulfillmentClient } from "../fulfillment-client";
+import type { OutcomeClient } from "../outcome-client";
+import type { BusinessClient } from "../business-client";
+import type { ActivityClient } from "../activity-client";
 
 const SURFACE_LABEL: Partial<Record<SurfaceId, string>> = {
   BUSINESS_HOME: "商家首页",
@@ -14,7 +24,22 @@ const SURFACE_LABEL: Partial<Record<SurfaceId, string>> = {
   ACTIVITY_DETAIL: "活动详情"
 };
 
-export function ComingSoonSurface({ surface }: { surface: SurfaceId }): React.JSX.Element {
+export function ComingSoonSurface({ surface, fulfillment, outcome, business, activities }: { surface: SurfaceId; fulfillment?: FulfillmentClient; outcome?: OutcomeClient; business?: BusinessClient; activities?: ActivityClient }): React.JSX.Element {
+  if (surface === "ORDER_EXECUTION" && fulfillment) {
+    return <OrderExecutionSurface client={fulfillment} />;
+  }
+  if (surface === "OUTCOME" && outcome) {
+    return <OutcomeSurface client={outcome} />;
+  }
+  if (surface === "MERCHANT_STOREFRONT" && business) {
+    return <MerchantStorefrontSurface client={business} />;
+  }
+  if (surface === "ACTIVITY_DETAIL" && activities) {
+    return <ActivityDetailSurface client={activities} />;
+  }
+  if (surface === "SKILL_WORKSPACE") {
+    return <SkillWorkspaceSurface />;
+  }
   return (
     <View style={styles.root}>
       <View style={styles.card}>

@@ -43,6 +43,8 @@ import { type SocialSpaceClient } from "../socialspace-client";
 import { type FulfillmentClient } from "../fulfillment-client";
 import { type PaymentClient } from "../payment-client";
 import { type NotificationClient } from "../notification-client";
+import { type BusinessClient } from "../business-client";
+import { type SupplyClient } from "../supply-client";
 import { BusinessHome } from "../surfaces/business-home";
 import { ConversationSurface } from "../surfaces/conversation";
 import { FeedSurface } from "../surfaces/feed";
@@ -110,6 +112,8 @@ export function AppShell({
   fulfillment,
   payment,
   notification,
+  business,
+  supply,
   scene,
   isGuest,
   ensureConversationSession,
@@ -128,6 +132,8 @@ export function AppShell({
   fulfillment: FulfillmentClient;
   payment: PaymentClient;
   notification: NotificationClient;
+  business: BusinessClient;
+  supply: SupplyClient;
   scene?: import("../scene-client").SceneClient | undefined;
   isGuest?: boolean;
   ensureConversationSession?: (() => Promise<void>) | undefined;
@@ -477,6 +483,7 @@ export function AppShell({
               marketplace={marketplace}
               fulfillment={fulfillment}
               media={media}
+              supply={supply}
               marketLabel="河内"
               initialTab={marketEntry.tab}
               onOpenExperience={setOpenExperience}
@@ -535,6 +542,8 @@ export function AppShell({
               context={context}
               localNet={localNet}
               fulfillment={fulfillment}
+              business={business}
+              supply={supply}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,

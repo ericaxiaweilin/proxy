@@ -21,10 +21,12 @@ import { PaymentClient } from "./payment-client";
 import { NotificationClient } from "./notification-client";
 import { BusinessClient } from "./business-client";
 import { SceneClient } from "./scene-client";
+import { SupplyClient } from "./supply-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
+import { sessionAuthClient, localApiBaseUrl } from "./native-clients";
 
 const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, right: 0, top: 0 };
 
@@ -32,7 +34,6 @@ WebBrowser.maybeCompleteAuthSession();
 
 const secureSessionStore = new SecureSessionStore(nativeSecureStorageDriver);
 const INSTALLATION_DEVICE_ID_KEY = "proxy.installation.device-id.v1";
-const localApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL ?? (Platform.OS === "android" ? "http://10.0.2.2:4100" : "http://127.0.0.1:4100");
 const nativeTransport: Transport = async (request) => {
   const response = await fetch(request.url, {
     method: request.method,
@@ -110,17 +111,8 @@ async function ensureNativeGuestSession(): Promise<void> {
   }
   await createNativeGuestSession();
 }
-// 服务端驱动 Surface 的认证客户端：读模型/命令全部走 /v1/commands/ envelope。
-const sessionAuthClient = new SessionAuthClient({
-  baseUrl: localApiBaseUrl,
-  secureSessionStore,
-  transport: nativeTransport
-});
-// R15.25 FACET (匿名 GET) 需要 sessionAuthClient + baseUrl. 这两个是
-// module-level const, 在 ProxyApp 启动前已经创建好. 手动 export 让
-// me.tsx 可以 inline 创建 FacetClient, 避免给 AppShell 增 1 个
-// facetClient prop. (FACET Phase 1 只有一个 endpoint, 不值得传 prop).
-export { sessionAuthClient, localApiBaseUrl };
+// sessionAuthClient + localApiBaseUrl 现在来自 ./native-clients 避免 require cycle。
+// (FACET Phase 1 只需要 baseUrl + 一个匿名 GET transport, 拆到独立 module)
 const localNetClient = new LocalNetClient({ authClient: sessionAuthClient, secureSessionStore, baseUrl: localApiBaseUrl });
 const activityClient = new ActivityClient({ authClient: sessionAuthClient, secureSessionStore });
 const experienceClient = new ExperienceClient({ authClient: sessionAuthClient, secureSessionStore });
@@ -136,6 +128,7 @@ const paymentClient = new PaymentClient({ authClient: sessionAuthClient, secureS
 const notificationClient = new NotificationClient({ authClient: sessionAuthClient, secureSessionStore });
 const businessClient = new BusinessClient({ authClient: sessionAuthClient, secureSessionStore });
 const sceneClient = new SceneClient({ authClient: sessionAuthClient, secureSessionStore });
+const supplyClient = new SupplyClient({ authClient: sessionAuthClient, secureSessionStore });
 type BootPhase = "BOOTSTRAPPING" | "PUBLIC" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {
@@ -197,6 +190,8 @@ export function ProxyApp(): React.JSX.Element {
         fulfillment={fulfillmentClient}
         payment={paymentClient}
         notification={notificationClient}
+        business={businessClient}
+        supply={supplyClient}
         scene={sceneClient}
         isGuest={phase === "PUBLIC"}
         ensureConversationSession={phase === "PUBLIC" ? ensureNativeGuestSession : undefined}

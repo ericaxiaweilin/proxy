@@ -25,6 +25,8 @@ commands:
     domain: Supply
   - command: BookmarkPost
     domain: Engagement
+  - command: BurnDisplayIdentity
+    domain: Identity
   - command: CheckInOrder
     domain: Fulfillment
   - command: CheckJITAccess
@@ -61,6 +63,8 @@ commands:
     domain: Supply
   - command: CreateCityCompanionNeed
     domain: CityCompanion
+  - command: CreateDisplayIdentity
+    domain: Identity
   - command: CreateIncident
     domain: Safety
   - command: CreateInvitation
@@ -111,6 +115,8 @@ commands:
     domain: Outcome
   - command: FollowProfile
     domain: Engagement
+  - command: ForwardMessage
+    domain: Conversation
   - command: GenerateCityCompanionRoute
     domain: CityCompanion
   - command: GetAgentPassport
@@ -155,6 +161,10 @@ commands:
     domain: Contribution
   - command: ListConversationMessages
     domain: Conversation
+  - command: ListConversations
+    domain: Conversation
+  - command: ListDisplayIdentities
+    domain: Identity
   - command: ListFeedPosts
     domain: LocalNet
   - command: ListInbox
@@ -171,6 +181,8 @@ commands:
     domain: Scene
   - command: ListMyMemories
     domain: Scene
+  - command: ListMyOrders
+    domain: Fulfillment
   - command: ListMyScenes
     domain: Scene
   - command: ListRequesterHomeItems
@@ -183,6 +195,8 @@ commands:
     domain: Notification
   - command: MarkMediaReady
     domain: Media
+  - command: MarkMessageRead
+    domain: Conversation
   - command: OpenVoucherRedemption
     domain: Voucher
   - command: PreviewTaskDraft
@@ -227,6 +241,8 @@ commands:
     domain: Fulfillment
   - command: RecordSceneCommerceVisit
     domain: CityCompanion
+  - command: RecordScreenshot
+    domain: Conversation
   - command: RefreshSession
     domain: Identity
   - command: RefundPaymentIntent
