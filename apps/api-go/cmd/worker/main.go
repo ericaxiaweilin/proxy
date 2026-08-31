@@ -67,6 +67,17 @@ func main() {
 		Repository: mediaRepository, Service: mediaService, WorkerID: workerID,
 		BatchSize: 4, MaxAttempts: 5,
 	}
+	// Lotus RFC §5: hourly purge of expired messages (protection.expiresAt). Uses
+	// partial index idx_conversation_messages_expires_at; cheap even with large table.
+	conversationRepository := postgres.NewConversationRepository(pool)
+	sweeperTicker := time.NewTicker(time.Hour)
+	defer sweeperTicker.Stop()
+	// Run once on startup so dev restarts immediately clean up stale fixtures.
+	if n, err := conversationRepository.PurgeExpiredMessages(ctx, time.Now().UTC()); err != nil {
+		log.Printf("conversation sweep startup failed: %v", err)
+	} else if n > 0 {
+		log.Printf("conversation sweep startup purged: count=%d", n)
+	}
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -89,6 +100,12 @@ func main() {
 			}
 			if mediaProcessed > 0 {
 				log.Printf("media processing batch completed: count=%d", mediaProcessed)
+			}
+		case <-sweeperTicker.C:
+			if n, err := conversationRepository.PurgeExpiredMessages(ctx, time.Now().UTC()); err != nil {
+				log.Printf("conversation sweep failed: %v", err)
+			} else if n > 0 {
+				log.Printf("conversation sweep purged: count=%d", n)
 			}
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -515,6 +516,20 @@ func (r *ConversationRepository) Snapshot(ctx context.Context) ([]conversation.C
 		return nil, err
 	}
 	return result, nil
+}
+
+// PurgeExpiredMessages hard-deletes rows past protection.expiresAt.
+// Lotus RFC §5: uses partial index idx_conversation_messages_expires_at.
+// Production sweeper runs hourly; dev can call directly via worker.
+func (r *ConversationRepository) PurgeExpiredMessages(ctx context.Context, now time.Time) (int64, error) {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		DELETE FROM conversation.messages
+		WHERE protection->>'expiresAt' IS NOT NULL
+		  AND (protection->>'expiresAt')::timestamptz <= $1`, now.UTC())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 var _ conversation.Repository = (*ConversationRepository)(nil)

@@ -85,6 +85,10 @@ type Repository interface {
 	GetNeedDraft(ctx context.Context, draftID string) (NeedDraft, error)
 	UpdateNeedDraft(ctx context.Context, d NeedDraft) error
 	Snapshot(ctx context.Context) ([]Conversation, error)
+	// PurgeExpiredMessages hard-deletes messages past protection.ExpiresAt.
+	// Lotus RFC §5 (30-day default TTL). PG impl uses index on
+	// protection->>'expiresAt'; Memory impl scans. Returns deleted count.
+	PurgeExpiredMessages(ctx context.Context, now time.Time) (int64, error)
 }
 
 var (
@@ -226,6 +230,32 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]Conversation, error) {
 	return result, nil
 }
 
+// PurgeExpiredMessages hard-deletes messages whose protection.ExpiresAt <= now.
+// Lotus RFC §5: default 30d TTL (per-type). Caller (worker) passes clock.Now().
+func (r *MemoryRepository) PurgeExpiredMessages(_ context.Context, now time.Time) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var deleted int64
+	for convID, list := range r.messages {
+		kept := list[:0]
+		for _, m := range list {
+			if m.Protection.IsExpiredAt(now) {
+				deleted++
+				continue
+			}
+			kept = append(kept, m)
+		}
+		if len(kept) != len(list) {
+			if len(kept) == 0 {
+				delete(r.messages, convID)
+			} else {
+				r.messages[convID] = kept
+			}
+		}
+	}
+	return deleted, nil
+}
+
 func cloneConversation(c Conversation) Conversation {
 	c.Participants = append([]string(nil), c.Participants...)
 	return c
@@ -248,6 +278,15 @@ type Service struct {
 	repository Repository
 	clock      clock.Clock
 	modelStack modelstack.Port
+}
+
+// SweepExpiredMessages hard-deletes messages past protection.ExpiresAt.
+// Lotus RFC §5 (30d default, per-type). Worker calls this hourly; unit
+// tests call PurgeExpiredMessages directly with a controllable clock.
+func (s *Service) SweepExpiredMessages(ctx context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.repository.PurgeExpiredMessages(ctx, s.clock.Now().UTC())
 }
 
 func New() *Service {
