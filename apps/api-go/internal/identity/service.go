@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,10 @@ type Session struct {
 	ExpiresAt     time.Time         `json:"expiresAt"`
 	Version       int               `json:"version"`
 }
+
+// MaxConcurrentSessions is the Lotus-aligned device cap (RFC §6). A UserAccount
+// may hold at most 2 ACTIVE sessions; a new login auto-evicts the oldest.
+const MaxConcurrentSessions = 2
 
 type Seed struct {
 	User          UserAccount
@@ -184,6 +189,9 @@ func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope
 		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.account_not_active", nil)
 	}
 	now := s.clock.Now().UTC()
+	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
+		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
+	}
 	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
 	domainEvents := []event.DomainEvent{event.New("AnonymousSessionCreated", "Session", session.ID, session.Version, user.ID, e.CorrelationID, e.CommandID, now, map[string]any{"userAccountId": user.ID, "deviceId": device.ID, "accountCreated": created})}
 	if s.tokenManager == nil {
@@ -404,6 +412,9 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 		return command.Rejected(e, "PRINCIPAL_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.principal_not_allowed", nil)
 	}
 	now := s.clock.Now().UTC()
+	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
+		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
+	}
 	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: p.RequestedPrincipal, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
 	domainEvents := []event.DomainEvent{event.New("SessionCreated", "Session", session.ID, session.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"userAccountId": session.UserAccountID,
@@ -720,6 +731,9 @@ func (s *Service) authenticateWithGoogle(ctx context.Context, e command.Envelope
 		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.account_not_active", nil)
 	}
 	now := s.clock.Now().UTC()
+	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
+		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
+	}
 	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
 	if s.tokenManager == nil {
 		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
@@ -842,6 +856,45 @@ func (s *Service) sessionUsable(ctx context.Context, session *Session) bool {
 	}
 	device, err := s.repository.GetDevice(ctx, session.DeviceID)
 	return err == nil && device.Status == "ACTIVE"
+}
+
+// enforceMaxConcurrentSessions revokes the oldest ACTIVE sessions so a new
+// login can fit within MaxConcurrentSessions. Lotus RFC §6 (max 2 devices).
+// It is called inside the service mutex, so List + Revoke is atomic vs
+// concurrent logins in this process. PG callers get transactional outbox via
+// persistUpdateSession.
+func (s *Service) enforceMaxConcurrentSessions(ctx context.Context, userID string, e command.Envelope) error {
+	sessions, err := s.repository.ListSessionsByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	active := make([]Session, 0, len(sessions))
+	for _, sess := range sessions {
+		if sess.Status == "ACTIVE" {
+			active = append(active, sess)
+		}
+	}
+	if len(active) < MaxConcurrentSessions {
+		return nil
+	}
+	sort.Slice(active, func(i, j int) bool { return active[i].IssuedAt.Before(active[j].IssuedAt) })
+	toEvict := len(active) - MaxConcurrentSessions + 1
+	now := s.clock.Now().UTC()
+	for i := 0; i < toEvict; i++ {
+		sess := active[i]
+		prev := sess.Version
+		sess.Status = "REVOKED"
+		sess.Version++
+		ev := event.New("SessionRevoked", "Session", sess.ID, sess.Version, userID, e.CorrelationID, e.CommandID, now, map[string]any{
+			"reason": "AUTO_EVICT_NEW_LOGIN",
+			"userAccountId": userID,
+			"evictedDeviceId": sess.DeviceID,
+		})
+		if err := s.persistUpdateSession(ctx, sess, prev, []event.DomainEvent{ev}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func decode(payload map[string]any, target any) bool {

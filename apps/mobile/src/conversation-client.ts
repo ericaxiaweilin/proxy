@@ -11,6 +11,14 @@ export type ConversationClientOptions = {
   now?: () => Date;
 };
 
+export type ProtectionOverride = {
+  forwardable?: boolean;
+  copyable?: boolean;
+  warn?: boolean;
+  viewLimit?: number;
+  ttlSeconds?: number;
+};
+
 export class ConversationClient {
   private commandSequence = 0;
 
@@ -32,27 +40,52 @@ export class ConversationClient {
     return result;
   }
 
-  public async sendMessage(conversationId: string, body: string, assistantMode?: string, temporaryUIResponseId?: string, mediaRef?: string): Promise<Record<string, unknown>> {
+  public async sendMessage(
+    conversationId: string,
+    body: string,
+    assistantMode?: string,
+    temporaryUIResponseId?: string,
+    mediaRef?: string,
+    protectionOverride?: ProtectionOverride,
+    messageType?: "TEXT" | "IMAGE" | "VIDEO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION"
+  ): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const isImage = Boolean(mediaRef);
+    const resolvedType = messageType ?? (isImage ? "IMAGE" : "TEXT");
     const result = await this.sendCommand(session, "SendMessage", { type: "Conversation", id: conversationId }, {
-      messageType: isImage ? "IMAGE" : "TEXT",
+      messageType: resolvedType,
       body: body || (isImage ? " " : ""),
       ...(mediaRef ? { mediaRef } : {}),
       ...(assistantMode ? { assistantMode } : {}),
-      ...(temporaryUIResponseId ? { temporaryUIResponseId } : {})
+      ...(temporaryUIResponseId ? { temporaryUIResponseId } : {}),
+      ...(protectionOverride ? { protectionOverride } : {})
     });
     return result;
   }
 
-  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string): Promise<Record<string, unknown>> {
-    return this.sendMessage(conversationId, caption?.trim() || " ", undefined, undefined, mediaRef);
+  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, caption?.trim() || " ", undefined, undefined, mediaRef, protectionOverride, "IMAGE");
   }
 
   public async listMessages(conversationId: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "ListConversationMessages", { type: "Conversation", id: conversationId }, {});
     return result;
+  }
+
+  public async markMessageRead(messageId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "MarkMessageRead", { type: "Message", id: messageId }, { messageId });
+  }
+
+  public async recordScreenshot(messageId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "RecordScreenshot", { type: "Message", id: messageId }, { messageId });
+  }
+
+  public async forwardMessage(sourceMessageId: string, targetConversationId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "ForwardMessage", { type: "Message", id: sourceMessageId }, { sourceMessageId, targetConversationId });
   }
 
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
