@@ -70,10 +70,10 @@ const styles = StyleSheet.create({
   input: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 13, paddingHorizontal: 10, paddingVertical: 8 },
   cta: { backgroundColor: color.ink, borderRadius: 999, marginTop: 10, paddingVertical: 12, alignItems: "center" },
   ctaText: { color: color.white, fontSize: 13, fontWeight: "800" },
-  mono: { color: color.muted, fontSize: 10, marginTop: 4 },
+  mono: { color: color.muted, fontSize: 11, marginTop: 4 },
   logCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 14, ...shadows.card },
   logTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   empty: { color: color.muted, fontSize: 12, marginTop: 6 },
   logLine: { color: color.ink, fontSize: 11, lineHeight: 14, marginTop: 4 },
-  hint: { color: color.muted, fontSize: 10, lineHeight: 13 },
+  hint: { color: color.muted, fontSize: 11, lineHeight: 13 },
 });

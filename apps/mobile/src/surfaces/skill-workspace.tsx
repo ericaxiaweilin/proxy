@@ -48,9 +48,9 @@ const styles = StyleSheet.create({
   cardSub: { color: color.muted, fontSize: 11, lineHeight: 14, marginTop: 4 },
   row: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12, ...shadows.card },
   badge: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
-  badgeText: { color: color.white, fontSize: 10, fontWeight: "800" },
+  badgeText: { color: color.white, fontSize: 11, fontWeight: "800" },
   copy: { flex: 1 },
   name: { color: color.ink, fontSize: 13, fontWeight: "800" },
   desc: { color: color.muted, fontSize: 11, lineHeight: 14, marginTop: 2 },
-  hint: { color: color.muted, fontSize: 10, lineHeight: 13 },
+  hint: { color: color.muted, fontSize: 11, lineHeight: 13 },
 });
