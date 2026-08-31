@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -138,7 +139,7 @@ func (s *Server) Handler() http.Handler {
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.
 	mux.HandleFunc("/v1/facet/objects", s.facetObjects)
-	return s.recoverMiddleware(mux)
+	return s.recoverMiddleware(s.versionMiddleware(mux))
 }
 
 func (s *Server) mediaVariantFile(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +315,60 @@ func (s *Server) mediaFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeFile(w, r, path)
+}
+
+// versionMiddleware enforces minimum app version when PROXY_MIN_APP_VERSION is set.
+// Clients must send X-Proxy-App-Version (e.g. 1.0.0); older clients receive 426 Upgrade Required.
+func (s *Server) versionMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		minVersion := strings.TrimSpace(os.Getenv("PROXY_MIN_APP_VERSION"))
+		if minVersion == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Health probes are version-agnostic
+		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		clientVersion := strings.TrimSpace(r.Header.Get("X-Proxy-App-Version"))
+		if clientVersion == "" {
+			// 未带版本头的旧客户端视为需升级（但匿名 GET /v1/facet/objects 仍放行以便引导页可读）
+			if r.URL.Path == "/v1/facet/objects" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeJSON(w, http.StatusUpgradeRequired, map[string]string{"error": "app_version_required", "min_version": minVersion})
+			return
+		}
+		if compareVersion(clientVersion, minVersion) < 0 {
+			writeJSON(w, http.StatusUpgradeRequired, map[string]string{"error": "app_version_too_old", "min_version": minVersion, "client_version": clientVersion})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func compareVersion(a, b string) int {
+	parse := func(s string) []int {
+		parts := strings.Split(strings.TrimPrefix(s, "v"), ".")
+		out := make([]int, 3)
+		for i := 0; i < 3 && i < len(parts); i++ {
+			n, _ := strconv.Atoi(strings.TrimSpace(parts[i]))
+			out[i] = n
+		}
+		return out
+	}
+	pa, pb := parse(a), parse(b)
+	for i := 0; i < 3; i++ {
+		if pa[i] < pb[i] {
+			return -1
+		}
+		if pa[i] > pb[i] {
+			return 1
+		}
+	}
+	return 0
 }
 
 // recoverMiddleware keeps a panic inside any command handler from crashing the

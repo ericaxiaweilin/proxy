@@ -17,6 +17,8 @@ import { SessionAuthClient, type Transport } from "./auth-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 
+const APP_VERSION = "1.0.0";
+
 export const localApiBaseUrl =
   process.env.EXPO_PUBLIC_API_BASE_URL ??
   (Platform.OS === "android" ? "http://10.0.2.2:4100" : "http://127.0.0.1:4100");
@@ -26,9 +28,19 @@ export const localApiBaseUrl =
 // envelope 不冲突 (get-only)。任何 surface 用这个 transport 就保证跟
 // 其它 client 一致走 fetch, 没 side effect。
 const nativeTransport: Transport = async (request) => {
+  const headers: Record<string, string> = {};
+  const src: unknown = request.headers;
+  if (src) {
+    if (typeof Headers !== "undefined" && src instanceof Headers) {
+      src.forEach((v, k) => { headers[k] = v; });
+    } else if (typeof src === "object") {
+      Object.assign(headers, src as Record<string, string>);
+    }
+  }
+  headers["X-Proxy-App-Version"] = APP_VERSION;
   const response = await fetch(request.url, {
     method: request.method,
-    headers: request.headers,
+    headers,
     ...(request.body !== undefined ? { body: request.body } : {})
   });
   return { status: response.status, json: () => response.json() };

@@ -28,6 +28,8 @@ import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
 import { sessionAuthClient, localApiBaseUrl } from "./native-clients";
 
+const APP_VERSION = "1.0.0";
+
 const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, right: 0, top: 0 };
 
 WebBrowser.maybeCompleteAuthSession();
@@ -35,9 +37,19 @@ WebBrowser.maybeCompleteAuthSession();
 const secureSessionStore = new SecureSessionStore(nativeSecureStorageDriver);
 const INSTALLATION_DEVICE_ID_KEY = "proxy.installation.device-id.v1";
 const nativeTransport: Transport = async (request) => {
+  const headers: Record<string, string> = {};
+  const src: unknown = request.headers;
+  if (src) {
+    if (typeof Headers !== "undefined" && src instanceof Headers) {
+      src.forEach((v, k) => { headers[k] = v; });
+    } else if (typeof src === "object") {
+      Object.assign(headers, src as Record<string, string>);
+    }
+  }
+  headers["X-Proxy-App-Version"] = APP_VERSION;
   const response = await fetch(request.url, {
     method: request.method,
-    headers: request.headers,
+    headers,
     ...(request.body !== undefined ? { body: request.body } : {})
   });
   return { status: response.status, json: () => response.json() };
