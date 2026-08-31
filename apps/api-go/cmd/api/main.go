@@ -355,6 +355,21 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 // 模型选择/Provider/凭证/failover 全部由底座负责。任一配置缺失时返回
 // fail-closed 的 Unconfigured 适配器，Domain 能力视为不可用。
 func configuredModelStack() modelstack.Port {
+	if strings.EqualFold(os.Getenv("MODELSTACK_USE_PI_CONFIG"), "true") {
+		modelsPath := os.Getenv("MODELSTACK_PI_MODELS_PATH")
+		settingsPath := os.Getenv("MODELSTACK_PI_SETTINGS_PATH")
+		if modelsPath == "" || settingsPath == "" {
+			log.Printf("MODELSTACK_USE_PI_CONFIG=true but Pi config paths are missing; model tasks fail-closed")
+			return modelstack.Unconfigured{}
+		}
+		provider, err := modelstack.NewFromPiConfig(modelsPath, settingsPath)
+		if err != nil {
+			log.Printf("Pi model-stack adapter unavailable: %v", err)
+			return modelstack.Unconfigured{}
+		}
+		log.Printf("model-stack development adapter enabled from Pi provider registry")
+		return provider
+	}
 	controlPlaneURL := os.Getenv("MODELSTACK_CONTROL_PLANE_URL")
 	gatewayURL := os.Getenv("MODELSTACK_GATEWAY_URL")
 	gatewayAPIKey := os.Getenv("MODELSTACK_GATEWAY_API_KEY")
