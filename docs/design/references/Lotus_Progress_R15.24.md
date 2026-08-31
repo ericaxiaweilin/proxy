@@ -13,11 +13,11 @@
 | 3 | RN 防截屏 overlay + 截屏检测 | 2d | ✅ Done (JS+Native 桩) | `mobile/lib/screenshot-protection.ts` `mobile/android/ScreenProtectionModule.kt` `mobile/ios/ScreenProtectionModule.swift`+Bridge | `npx tsc --skipLibCheck` 改动文件无新增报错；真机 `FLAG_SECURE`/通知待 commander 验收 |
 | 4 | KMS 静态加密 + E2EE 徽标 | 1.5d | ✅ Placeholder Done | `platform/kms/kms.go` (AES-GCM local / Noop) `surfaces/conversation.tsx:174` `components/security-settings.tsx:12` | `go build` ok；生产切 `AWS/GCP KMS` 仅改 wiring |
 | 5 | 30天 TTL 清理 | 1d | ✅ Done | `conversation/service.go:72,244` `platform/postgres/network.go:523` `cmd/worker/main.go:70` `conversation/sweep_test.go` `migrations/035` idx | `TestPurgeExpiredMessages` pass；worker 小时扫 |
-| 6 | Session max 2 + 踢旧 | 0.5d | ✅ Done | `identity/service.go:48,874,191,412,731` `platform/postgres/identity.go` (via ListSessionsByUser) | `go test identity` ok；`enforceMaxConcurrentSessions` 单测可补 |
+| 6 | Session max 2 + 踢旧 | 0.5d | ✅ Done | `identity/service.go:48,874,191,412,731` `platform/postgres/identity.go` `identity/lotus_e2e_test.go` `scripts/verify-lotus.sh` | `TestLotus_MaxConcurrentSessions_EvictsOldest` pass；`go test identity` 12 pass |
 | 7 | RN UI 身份切换器 + 会话防外传开关 | 3d | ✅ Done | `components/identity-switcher.tsx` `surfaces/messages.tsx:77` `surfaces/conversation.tsx:30` `components/security-settings.tsx` | 手动 UI 验收待 commander |
 | 8 | 营销文案 + 设置安全区块 | 0.5d | ✅ Done | `components/security-settings.tsx` `surfaces/me.tsx:10,1291,1483` | 已接入 `Me→设置与隐私·安全` |
 
-**合计 13.5 工日** 已在 7 次提交内完成 (±1d 误差)。
+**合计 13.5 工日** 已在 11 次提交内完成 (±1d 误差)。
 
 ## 提交链
 
@@ -33,6 +33,9 @@ e79cbf0 wire SecuritySettings into Me
 fcd3a09 sweep test
 9813bb5 wire DisplayIdentity commands
 980fc77 wire DisplayIdentity PG in api
+bc54879 docs progress 8/8
+308beff e2e eviction test
+1daefa3 verify-lotus.sh
 ```
 
 ## 未做 (RFC 明确排除)
@@ -41,6 +44,6 @@ fcd3a09 sweep test
 
 ## 待 commander
 
-- `git show` 审 10 提交，合入 `fix/r15.23-mobile-home-and-pulse`
+- `git show` 审 13 提交，合入 `fix/r15.23-mobile-home-and-pulse`（`bash scripts/verify-lotus.sh` 一键校验）
 - `pnpm --filter @proxy/mobile typecheck` 全量 (需 `pnpm install` 恢复 `@proxy/contracts` 链接)
 - 真机验证: `FLAG_SECURE` 黑屏、iOS 截屏气泡、`SECURITY_ALERT` 推送、2 设备踢旧、`BURNER 7d` 自动销毁、`阅后即焚 1次` 二次 `VIEW_LIMIT_EXCEEDED`
