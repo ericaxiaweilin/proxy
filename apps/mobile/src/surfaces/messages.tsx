@@ -51,9 +51,117 @@ export function MessagesSurface({
   const [panel, setPanel] = useState<HomePanel>("dialogs");
   const [folder, setFolder] = useState<Folder>("all");
   const [search, setSearch] = useState("");
+  const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
+  const [personName, setPersonName] = useState("Linh");
+  const [contactSearch, setContactSearch] = useState("");
 
   const filteredPinned = useMemo(() => filterByFolder(DIALOGS_PINNED, folder, search), [folder, search]);
   const filteredRecent = useMemo(() => filterByFolder(DIALOGS_RECENT, folder, search), [folder, search]);
+
+  const openRequests = () => {
+    if (onOpenRequests) onOpenRequests();
+    else setSubView("requests");
+  };
+  const openContacts = () => {
+    if (onOpenContacts) onOpenContacts();
+    else setSubView("contacts");
+  };
+  const openPerson = (name: string) => {
+    setPersonName(name);
+    setSubView("person");
+  };
+
+  if (subView === "requests") {
+    return (
+      <View style={styles.app}>
+        <View style={styles.safe} />
+        <View style={styles.topbar}>
+          <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
+          <View style={styles.centerTitle}><Text style={styles.centerMain}>陌生消息</Text><Text style={styles.centerSub}>Mặc Kệ</Text></View>
+          <View style={{ width: 38 }} />
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+          <Text style={styles.requestIntro}>陌生人的消息自动进入 Mặc Kệ，不打扰正常 Dialog。回复或移到关注后，才进入正常消息流。</Text>
+          <View style={styles.mackeBanner}>
+            <Text style={styles.mackeIcon}>💬</Text>
+            <View style={{ flex: 1 }}><Text style={styles.mackeTitle}>默认静音</Text><Text style={styles.mackeMeta}>这里的消息不推送通知。你可以回复、移到关注，或把普通 Dialog 反向移进来。</Text></View>
+          </View>
+          {[
+            { name: "Ngoc Ha", handle: "@ngocha · 通过你的动态找到你", msg: "你好，我看到你发的河内周末动态，想问一下那个活动还可以参加吗？" },
+            { name: "Quang Vu", handle: "没有共同联系人", msg: "你好，想问一下你发布的西湖路线。" },
+          ].map((r) => (
+            <View key={r.name} style={styles.requestCard}>
+              <View style={styles.requestTop}><View style={styles.avatar}><Text style={styles.avatarText}>{r.name.slice(0, 2)}</Text></View><View style={{ flex: 1 }}><Text style={styles.dialogName}>{r.name}</Text><Text style={styles.centerSub}>{r.handle}</Text></View></View>
+              <Text style={styles.requestMsg}>{r.msg}</Text>
+              <View style={styles.btnRow}><Pressable onPress={() => setSubView("home")} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable style={styles.btn}><Text style={styles.btnText}>忽略</Text></Pressable></View>
+            </View>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (subView === "contacts") {
+    const CONTACTS = [
+      { name: "Linh", username: "@linh.ng", note: "备注：Linh · 西湖", meta: "通讯录：Nguyễn Linh · 08•• ••• 721", warm: true, online: true },
+      { name: "Mai Khanh", username: "@maikhanh", note: "备注：Khanh · Coffee", meta: "通讯录：Mai Khanh · 09•• ••• 188", blue: true },
+      { name: "Tuan", username: "联系人", note: "通讯录：Anh Tuấn · 03•• ••• 915" },
+    ];
+    const filtered = CONTACTS.filter((c) => !contactSearch || `${c.name}${c.username}`.toLowerCase().includes(contactSearch.toLowerCase()));
+    return (
+      <View style={styles.app}>
+        <View style={styles.safe} />
+        <View style={styles.topbar}>
+          <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
+          <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 / Username</Text></View>
+          <Pressable style={styles.icon}><ProxyIcon color={color.ink} name="plus" size={18} /></Pressable>
+        </View>
+        <View style={styles.contactHeadSearch}>
+          <ProxyIcon color="#97938b" name="search" size={17} />
+          <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名、手机号或 Username" placeholderTextColor="#9a968f" style={styles.contactInput} />
+        </View>
+        <ScrollView style={{ flex: 1 }}>
+          <Text style={styles.contactSection}>已在 Proxy</Text>
+          {filtered.map((c) => (
+            <Pressable key={c.name} onPress={() => openPerson(c.name)} style={styles.contactRow}>
+              <View style={[styles.avatar, c.warm && styles.avatarWarm, c.blue && styles.avatarBlue]}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text>{c.online ? <View style={styles.online} /> : null}</View>
+              <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name} <Text style={styles.usernameBadge}>{c.username}</Text></Text><Text style={styles.contactMeta}>{c.note}</Text><Text style={styles.contactMeta}>{c.meta}</Text></View>
+              <Text style={styles.contactAction}>聊天 ›</Text>
+            </Pressable>
+          ))}
+          <Text style={styles.contactSection}>邀请加入 Proxy</Text>
+          <Pressable style={styles.contactRow}><View style={styles.avatar}><Text style={styles.avatarText}>HA</Text></View><View style={{ flex: 1 }}><Text style={styles.contactName}>Hà Anh</Text><Text style={styles.contactMeta}>尚未使用 Proxy</Text></View><Text style={[styles.contactAction, { color: "#8d681b" }]}>邀请</Text></Pressable>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (subView === "person") {
+    return (
+      <View style={styles.app}>
+        <View style={styles.safe} />
+        <View style={styles.topbar}>
+          <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
+          <View style={styles.centerTitle}><Text style={styles.centerMain}>联系人</Text></View>
+          <Pressable style={styles.icon}><Text style={styles.ellipsis}>⋯</Text></Pressable>
+        </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+          <View style={styles.personHero}><View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View><Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>@{personName.toLowerCase()}.ng · 在线</Text></View>
+          <View style={styles.personActions}>
+            <Pressable onPress={() => onOpenConversation(personName)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
+            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="infoCircle" size={18} /></View><Text style={styles.personActionText}>资料</Text></Pressable>
+            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
+            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>⋯</Text></View><Text style={styles.personActionText}>更多</Text></Pressable>
+          </View>
+          <View style={{ paddingHorizontal: 16, gap: 8 }}>
+            <View style={styles.aliasCard}><Text style={styles.aliasLabel}>别名</Text><Text style={styles.aliasValue}>{personName} · 西湖</Text></View>
+            <View style={styles.aliasCard}><Text style={styles.aliasLabel}>Username</Text><Text style={styles.aliasValue}>@{personName.toLowerCase()}.ng</Text></View>
+            <View style={styles.aliasCard}><Text style={styles.aliasLabel}>手机号</Text><Text style={styles.privateValue}>08•• ••• 721 · 仅你可见</Text></View>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.app}>
@@ -81,13 +189,13 @@ export function MessagesSurface({
               <ProxyIcon color={color.ink} name="infoCircle" size={20} />
               <View style={styles.bellDot} />
             </Pressable>
-            <Pressable accessibilityLabel="新聊天" onPress={onOpenContacts} style={styles.icon}>
+            <Pressable accessibilityLabel="新聊天" onPress={openContacts} style={styles.icon}>
               <ProxyIcon color={color.ink} name="plus" size={18} />
             </Pressable>
           </View>
         </View>
 
-        <Pressable onPress={onOpenContacts} style={styles.searchBox}>
+        <Pressable onPress={openContacts} style={styles.searchBox}>
           <ProxyIcon color="#9a968f" name="search" size={17} />
           <Text style={styles.searchPlaceholder}>搜索聊天、联系人和消息</Text>
         </Pressable>
@@ -183,7 +291,7 @@ export function MessagesSurface({
             )}
 
             {/* 请求入口 — Mặc Kệ */}
-            <Pressable onPress={onOpenRequests} style={styles.dialog}>
+            <Pressable onPress={openRequests} style={styles.dialog}>
               <View style={[styles.avatar]}><Text style={styles.avatarText}>?</Text></View>
               <View style={styles.dialogMain}>
                 <View style={styles.dialogTop}><Text style={styles.dialogName}>消息请求</Text></View>
@@ -288,4 +396,42 @@ const styles = StyleSheet.create({
   convoFoot: { flexDirection: "row", alignItems: "center", marginTop: 9 },
   convoFootText: { flex: 1, fontSize: 10, color: "#99958d" },
   convoFootTime: { fontSize: 10, fontWeight: "700", color: "#54514b" },
+  topbar: { height: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "rgba(255,253,248,0.98)" },
+  centerTitle: { flex: 1, alignItems: "center" },
+  centerMain: { fontSize: 14, fontWeight: "700", color: "#11110f" },
+  centerSub: { fontSize: 10.5, color: "#8d8982", marginTop: 2 },
+  backText: { fontSize: 22, color: "#11110f", textAlign: "center", width: 38 },
+  ellipsis: { fontSize: 18, color: "#88847c", width: 38, textAlign: "center" },
+  requestIntro: { paddingHorizontal: 16, paddingTop: 15, paddingBottom: 8, fontSize: 11.5, lineHeight: 18, color: "#77736c" },
+  mackeBanner: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 14, padding: 11, backgroundColor: "#fff9eb", flexDirection: "row", gap: 9, alignItems: "flex-start" },
+  mackeIcon: { fontSize: 18 },
+  mackeTitle: { fontSize: 11.5, fontWeight: "700", color: "#654e1e" },
+  mackeMeta: { fontSize: 9.8, lineHeight: 14, color: "#8c8065", marginTop: 2 },
+  requestCard: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 16, padding: 13, backgroundColor: "#fffefa" },
+  requestTop: { flexDirection: "row", alignItems: "center", gap: 10 },
+  requestMsg: { fontSize: 13, lineHeight: 19, color: "#48453f", marginVertical: 11 },
+  btnRow: { flexDirection: "row", gap: 8 },
+  btn: { height: 34, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 18, paddingHorizontal: 14, justifyContent: "center", backgroundColor: "transparent" },
+  btnPrimary: { backgroundColor: "#11110f", borderColor: "#11110f" },
+  btnPrimaryText: { fontSize: 11.5, fontWeight: "700", color: "#fff", textAlign: "center" },
+  btnText: { fontSize: 11.5, fontWeight: "700", color: "#11110f", textAlign: "center" },
+  contactHeadSearch: { marginHorizontal: 14, marginTop: 8, height: 39, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#f6f3ee", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 11 },
+  contactInput: { flex: 1, fontSize: 12.5, color: "#11110f" },
+  contactSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, fontSize: 10, fontWeight: "700", color: "#9b978f", letterSpacing: 0.3 },
+  contactRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
+  contactName: { fontSize: 13, fontWeight: "700", color: "#11110f" },
+  usernameBadge: { fontSize: 10, fontWeight: "600", color: "#737068", backgroundColor: "#f6f3ee", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  contactMeta: { fontSize: 9.8, color: "#aaa69e", marginTop: 2 },
+  contactAction: { fontSize: 10.5, fontWeight: "700", color: "#6e6962" },
+  personHero: { alignItems: "center", paddingTop: 18, paddingBottom: 12 },
+  personName: { fontSize: 17, fontWeight: "700", color: "#11110f", marginTop: 9 },
+  personUser: { fontSize: 10.5, color: "#8f8b83", marginTop: 3 },
+  personActions: { flexDirection: "row", justifyContent: "space-around", paddingHorizontal: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#e8e3da" },
+  personAction: { alignItems: "center", gap: 5 },
+  personActionIcon: { width: 40, height: 40, borderRadius: 14, backgroundColor: "#f6f3ee", alignItems: "center", justifyContent: "center" },
+  personActionText: { fontSize: 9.5, fontWeight: "600", color: "#11110f" },
+  aliasCard: { borderWidth: 1, borderColor: "#e8e3da", borderRadius: 14, padding: 11, backgroundColor: "#fffefa" },
+  aliasLabel: { fontSize: 9.5, color: "#9a968e", marginBottom: 4 },
+  aliasValue: { fontSize: 11.5, fontWeight: "600", color: "#11110f" },
+  privateValue: { fontSize: 10, color: "#8d8981" },
 });
