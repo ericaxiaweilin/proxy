@@ -12,7 +12,9 @@ if [[ -f .env ]]; then
 fi
 set +a
 
-if ! "${repo_dir}/scripts/ensure-modelstack-tunnel.sh"; then
+if [[ "${MODELSTACK_USE_PI_CONFIG:-}" == "true" ]]; then
+  echo "model-stack: using Pi provider registry; SSH gateway tunnel skipped"
+elif ! "${repo_dir}/scripts/ensure-modelstack-tunnel.sh"; then
   echo "Model-stack tunnel is unavailable; starting the API with model tasks fail-closed." >&2
 fi
 exec go -C apps/api-go run ./cmd/api

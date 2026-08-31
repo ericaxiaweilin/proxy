@@ -1,5 +1,5 @@
 // Package activity 是本地活动域（基线 activityhub / activitydetail）。
-// Activity = 平台 / 商家 / 用户发起的本地活动（P0 内存读模型；计数服务端权威）。
+// Activity = 平台 / 商家 / 用户发起的本地活动；目录与计数均由服务端仓储权威维护。
 // 命令：ListActivities / ToggleActivityInterest / JoinActivity。
 // 规则（基线 activitydetail）：公开层用「感兴趣」而不是点赞；只有确认参加后
 // 才开放活动群聊；名额满后不能再参加。
@@ -8,6 +8,7 @@ package activity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"sync"
 
@@ -41,28 +42,44 @@ type Activity struct {
 	joinedBy     map[string]bool
 }
 
-// Service 处理活动命令（P0：内存仓储，进程内权威计数）。
+// Service 处理活动命令。生产使用 PostgreSQL；New() 保留内存仓储供隔离测试使用。
 type Service struct {
+	repository Repository
+}
+
+var (
+	ErrActivityNotFound = errors.New("activity not found")
+	ErrAlreadyJoined    = errors.New("activity already joined")
+	ErrActivityFull     = errors.New("activity full")
+)
+
+type Repository interface {
+	Seed(ctx context.Context, activities []Activity) error
+	List(ctx context.Context) ([]Activity, error)
+	ToggleInterest(ctx context.Context, activityID, actorID string) (Activity, bool, error)
+	Join(ctx context.Context, activityID, actorID string) (Activity, error)
+}
+
+type MemoryRepository struct {
 	mu         sync.Mutex
 	activities map[string]*Activity
 	order      []string
 }
 
 func New() *Service {
-	return &Service{activities: make(map[string]*Activity)}
+	return NewWithRepository(&MemoryRepository{activities: make(map[string]*Activity)})
 }
+
+func NewWithRepository(repository Repository) *Service { return &Service{repository: repository} }
 
 // SeedDefaults 幂等写入基线 5 条活动（平台/商家数据，启动时 seed）。
 func (s *Service) SeedDefaults() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, seed := range defaultCatalog() {
-		if _, exists := s.activities[seed.ID]; exists {
-			continue
-		}
-		s.activities[seed.ID] = seed
-		s.order = append(s.order, seed.ID)
+	seeds := defaultCatalog()
+	items := make([]Activity, 0, len(seeds))
+	for _, seed := range seeds {
+		items = append(items, *seed)
 	}
+	_ = s.repository.Seed(context.Background(), items)
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -78,16 +95,14 @@ func (s *Service) Handle(e command.Envelope) command.Result {
 	return s.HandleContext(context.Background(), e)
 }
 
-func (s *Service) HandleContext(_ context.Context, e command.Envelope) command.Result {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	switch e.CommandType {
 	case "ListActivities":
-		return s.listActivities(e)
+		return s.listActivities(ctx, e)
 	case "ToggleActivityInterest":
-		return s.toggleInterest(e)
+		return s.toggleInterest(ctx, e)
 	case "JoinActivity":
-		return s.joinActivity(e)
+		return s.joinActivity(ctx, e)
 	default:
 		return command.Rejected(e, "ACTIVITY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "activity.unsupported_command", nil)
 	}
@@ -95,12 +110,10 @@ func (s *Service) HandleContext(_ context.Context, e command.Envelope) command.R
 
 // ---------- ListActivities ----------
 
-func (s *Service) listActivities(e command.Envelope) command.Result {
-	list := make([]Activity, 0, len(s.order))
-	for _, id := range s.order {
-		if a, ok := s.activities[id]; ok {
-			list = append(list, *a)
-		}
+func (s *Service) listActivities(ctx context.Context, e command.Envelope) command.Result {
+	list, err := s.repository.List(ctx)
+	if err != nil {
+		return command.Rejected(e, "ACTIVITY_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "activity.list_failed", nil)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Interested > list[j].Interested })
 	return acceptedWithPayload(e, "Activity", "", 0, "LISTED", map[string]any{
@@ -115,64 +128,118 @@ type activityRefPayload struct {
 	ActivityID string `json:"activityId"`
 }
 
-func (s *Service) toggleInterest(e command.Envelope) command.Result {
+func (s *Service) toggleInterest(ctx context.Context, e command.Envelope) command.Result {
 	var p activityRefPayload
 	if !decode(e.Payload, &p) || p.ActivityID == "" {
 		return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)
 	}
-	a, ok := s.activities[p.ActivityID]
-	if !ok {
-		return command.Rejected(e, "ACTIVITY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_found", nil)
-	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
-	if a.interestedBy == nil {
-		a.interestedBy = make(map[string]bool)
+	a, interested, err := s.repository.ToggleInterest(ctx, p.ActivityID, e.Actor.ID)
+	if errors.Is(err, ErrActivityNotFound) {
+		return command.Rejected(e, "ACTIVITY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_found", nil)
 	}
-	if a.interestedBy[e.Actor.ID] {
-		delete(a.interestedBy, e.Actor.ID)
-		a.Interested--
-	} else {
-		a.interestedBy[e.Actor.ID] = true
-		a.Interested++
+	if err != nil {
+		return command.Rejected(e, "ACTIVITY_INTEREST_FAILED", "INTERNAL", "SAFE_RETRY", "activity.interest_failed", nil)
 	}
 	return acceptedWithPayload(e, "Activity", a.ID, 1, "INTEREST_UPDATED", map[string]any{
-		"activity":   *a,
-		"interested": a.interestedBy[e.Actor.ID],
+		"activity": a, "interested": interested,
 	}, nil)
 }
 
 // ---------- JoinActivity ----------
 
-func (s *Service) joinActivity(e command.Envelope) command.Result {
+func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.Result {
 	var p activityRefPayload
 	if !decode(e.Payload, &p) || p.ActivityID == "" {
 		return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)
 	}
-	a, ok := s.activities[p.ActivityID]
-	if !ok {
-		return command.Rejected(e, "ACTIVITY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_found", nil)
-	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
-	if a.joinedBy == nil {
-		a.joinedBy = make(map[string]bool)
+	a, err := s.repository.Join(ctx, p.ActivityID, e.Actor.ID)
+	if errors.Is(err, ErrActivityNotFound) {
+		return command.Rejected(e, "ACTIVITY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.not_found", nil)
 	}
-	if a.joinedBy[e.Actor.ID] {
+	if errors.Is(err, ErrAlreadyJoined) {
 		return command.Rejected(e, "ACTIVITY_ALREADY_JOINED", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.already_joined", nil)
 	}
-	if a.Capacity > 0 && a.Joined >= a.Capacity {
+	if errors.Is(err, ErrActivityFull) {
 		return command.Rejected(e, "ACTIVITY_FULL", "BUSINESS_STATE", "AFTER_USER_ACTION", "activity.full", map[string]any{"capacity": a.Capacity})
 	}
-	a.joinedBy[e.Actor.ID] = true
-	a.Joined++
+	if err != nil {
+		return command.Rejected(e, "ACTIVITY_JOIN_FAILED", "INTERNAL", "SAFE_RETRY", "activity.join_failed", nil)
+	}
 	return acceptedWithPayload(e, "Activity", a.ID, 1, "JOINED", map[string]any{
-		"activity": *a,
+		"activity": a,
 		"joined":   true,
 		"note":     "确认参加后开放活动群聊",
 	}, nil)
+}
+
+func (r *MemoryRepository) Seed(_ context.Context, activities []Activity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range activities {
+		item := activities[i]
+		if _, exists := r.activities[item.ID]; !exists {
+			r.activities[item.ID] = &item
+			r.order = append(r.order, item.ID)
+		}
+	}
+	return nil
+}
+func (r *MemoryRepository) List(_ context.Context) ([]Activity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := make([]Activity, 0, len(r.order))
+	for _, id := range r.order {
+		if item := r.activities[id]; item != nil {
+			items = append(items, *item)
+		}
+	}
+	return items, nil
+}
+func (r *MemoryRepository) ToggleInterest(_ context.Context, activityID, actorID string) (Activity, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item := r.activities[activityID]
+	if item == nil {
+		return Activity{}, false, ErrActivityNotFound
+	}
+	if item.interestedBy == nil {
+		item.interestedBy = make(map[string]bool)
+	}
+	interested := !item.interestedBy[actorID]
+	if interested {
+		item.interestedBy[actorID] = true
+		item.Interested++
+	} else {
+		delete(item.interestedBy, actorID)
+		item.Interested--
+	}
+	return *item, interested, nil
+}
+func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string) (Activity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item := r.activities[activityID]
+	if item == nil {
+		return Activity{}, ErrActivityNotFound
+	}
+	if item.joinedBy == nil {
+		item.joinedBy = make(map[string]bool)
+	}
+	if item.joinedBy[actorID] {
+		return *item, ErrAlreadyJoined
+	}
+	if item.Capacity > 0 && item.Joined >= item.Capacity {
+		return *item, ErrActivityFull
+	}
+	item.joinedBy[actorID] = true
+	item.Joined++
+	return *item, nil
 }
 
 // ---------- helpers ----------

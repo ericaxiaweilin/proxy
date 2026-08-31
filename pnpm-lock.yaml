@@ -72,6 +72,9 @@ importers:
       expo-gl:
         specifier: ~57.0.2
         version: 57.0.2(expo@57.0.12)(react-dom@19.2.8(react@19.2.3))(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+      expo-glass-effect:
+        specifier: ^57.0.1
+        version: 57.0.1(expo@57.0.12)(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       expo-image:
         specifier: 57.0.3
         version: 57.0.3(expo@57.0.12)(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
@@ -1778,6 +1781,13 @@ packages:
         optional: true
       react-native-web:
         optional: true
+
+  expo-glass-effect@57.0.1:
+    resolution: {integrity: sha512-m/n8maxqNcHk6ZDhuqXBfD5Kt1Iz3M8xykVgdB0iSCIXvF70IqWXmQhX8Psswhrp8eZ+3r0mAD0Jh/2gFA3QaA==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
+      react-native: '*'
 
   expo-image-loader@57.0.1:
     resolution: {integrity: sha512-uhrZKLT/cTl2mXyR28kPpVkS5O+PK9N1QA/07IFM4f5T4g0lTW1JHT3NEWwEEsGFldPmVX4j7LwUVVZxE+woug==}
@@ -4849,6 +4859,12 @@ snapshots:
       react-native: 0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)
     optionalDependencies:
       react-dom: 19.2.8(react@19.2.3)
+
+  expo-glass-effect@57.0.1(expo@57.0.12)(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3):
+    dependencies:
+      expo: 57.0.12(@babel/core@7.29.7(supports-color@8.1.1))(@expo/dom-webview@57.0.1)(react-dom@19.2.8(react@19.2.3))(react-native-webview@14.0.1(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)(typescript@6.0.3)
+      react: 19.2.3
+      react-native: 0.86.2(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)
 
   expo-image-loader@57.0.1(expo@57.0.12):
     dependencies:

@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "proxy://schemas/messaging/message-v1",
+  "title": "Proxy Message Object v1",
+  "type": "object",
+  "required": [
+    "id",
+    "dialog_id",
+    "sender",
+    "kind",
+    "created_at",
+    "delivery"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "dialog_id": {
+      "type": "string"
+    },
+    "convo_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sender": {
+      "type": "object",
+      "required": [
+        "user_id",
+        "identity_snapshot"
+      ],
+      "properties": {
+        "user_id": {
+          "type": "string"
+        },
+        "alias_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_snapshot": {
+          "type": "object",
+          "required": [
+            "display_name"
+          ],
+          "properties": {
+            "display_name": {
+              "type": "string"
+            },
+            "avatar_ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "username": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "image",
+        "video",
+        "file",
+        "location",
+        "contact",
+        "proxy_object",
+        "poll",
+        "call_recording",
+        "system_event"
+      ]
+    },
+    "text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proxy_object": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "object_type": {
+          "type": "string",
+          "enum": [
+            "invitation",
+            "activity",
+            "opportunity",
+            "voucher",
+            "post",
+            "order"
+          ]
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "snapshot": {
+          "type": "object"
+        },
+        "live_state": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "media_type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "file",
+              "audio"
+            ]
+          },
+          "url_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mime": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "reply_to": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "message_id": {
+          "type": "string"
+        },
+        "snapshot": {
+          "type": "string"
+        }
+      }
+    },
+    "mentions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "all"
+            ]
+          },
+          "user_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "reactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "emoji",
+          "count"
+        ],
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "reacted_by_me": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "poll": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "poll_id": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array"
+        },
+        "multiple_choice": {
+          "type": "boolean"
+        },
+        "expires_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "call_recording": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "recording_id": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "convo_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "security": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "secure"
+          ]
+        },
+        "ciphertext_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delete_after_read_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "view_limit": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "view_duration_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "forward_allowed": {
+          "type": "boolean"
+        },
+        "copy_allowed": {
+          "type": "boolean"
+        },
+        "save_allowed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "sending",
+            "sent",
+            "delivered",
+            "read",
+            "failed"
+          ]
+        },
+        "read_by_count": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "edited_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "deleted_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

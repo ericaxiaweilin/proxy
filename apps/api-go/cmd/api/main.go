@@ -110,6 +110,8 @@ func main() {
 	safetyService := safety.New()
 	outcomeService := outcome.New()
 	sceneService := scene.New()
+	marketplaceService := marketplace.New()
+	activityService := activity.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -159,6 +161,9 @@ func main() {
 		outboxRepository := postgres.NewOutboxRepository(pool)
 		readyCheck = pool.Ping
 		identityService = identity.NewWithRepositoryAndClockAndChallengeProvider(postgres.NewIdentityRepositoryWithOutbox(pool, outboxRepository), nil, loginProvider)
+		// Lotus §1: DisplayIdentity PG persistence (038) — wire PG repo so
+		// CreateDisplayIdentity/List/Burn survive restarts.
+		identityService.SetDisplayIdentityRepository(postgres.NewDisplayIdentityRepository(pool))
 		if simulatedLogin {
 			if err := seedPostgresIdentity(pool); err != nil {
 				log.Fatalf("seed postgres identity: %v", err)
@@ -199,6 +204,8 @@ func main() {
 		// repository continues to serve (the smoke scripts rely on
 		// it for hermetic, no-Docker runs).
 		sceneService = scene.NewWithRepository(postgres.NewSceneRepository(pool))
+		marketplaceService = marketplace.NewWithRepository(postgres.NewMarketplaceRepository(pool))
+		activityService = activity.NewWithRepository(postgres.NewActivityRepository(pool))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -216,11 +223,9 @@ func main() {
 	server.Safety = safetyService
 	server.Outcome = outcomeService
 	server.Scene = sceneService
-	// Activity 域（P0 内存读模型）：启动幂等 seed 基线 5 条活动。
-	activityService := activity.New()
+	// Activity 域：启动幂等 seed 基线；DATABASE_URL 存在时写入持久仓储。
 	activityService.SeedDefaults()
 	server.Activity = activityService
-	marketplaceService := marketplace.New()
 	marketplaceService.SeedDefaults()
 	server.Marketplace = marketplaceService
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
@@ -350,6 +355,21 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 // 模型选择/Provider/凭证/failover 全部由底座负责。任一配置缺失时返回
 // fail-closed 的 Unconfigured 适配器，Domain 能力视为不可用。
 func configuredModelStack() modelstack.Port {
+	if strings.EqualFold(os.Getenv("MODELSTACK_USE_PI_CONFIG"), "true") {
+		modelsPath := os.Getenv("MODELSTACK_PI_MODELS_PATH")
+		settingsPath := os.Getenv("MODELSTACK_PI_SETTINGS_PATH")
+		if modelsPath == "" || settingsPath == "" {
+			log.Printf("MODELSTACK_USE_PI_CONFIG=true but Pi config paths are missing; model tasks fail-closed")
+			return modelstack.Unconfigured{}
+		}
+		provider, err := modelstack.NewFromPiConfig(modelsPath, settingsPath)
+		if err != nil {
+			log.Printf("Pi model-stack adapter unavailable: %v", err)
+			return modelstack.Unconfigured{}
+		}
+		log.Printf("model-stack development adapter enabled from Pi provider registry")
+		return provider
+	}
 	controlPlaneURL := os.Getenv("MODELSTACK_CONTROL_PLANE_URL")
 	gatewayURL := os.Getenv("MODELSTACK_GATEWAY_URL")
 	gatewayAPIKey := os.Getenv("MODELSTACK_GATEWAY_API_KEY")

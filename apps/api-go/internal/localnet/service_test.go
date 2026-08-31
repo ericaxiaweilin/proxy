@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
@@ -376,7 +377,9 @@ func TestListFeedPosts_SceneAestheticBackdrop_Stamped(t *testing.T) {
 	}
 	postID := view.Posts[0].ID
 	items := view.Media[postID]
-	if len(items) == 0 { t.Fatal("expected media items") }
+	if len(items) == 0 {
+		t.Fatal("expected media items")
+	}
 	got, _ := items[0]["sceneAestheticBackdrop"].(string)
 	if got != "#AABBCC" {
 		t.Fatalf("expected sceneAestheticBackdrop #AABBCC, got %q", got)
@@ -448,18 +451,12 @@ func TestListFeedPosts_SceneAestheticBackdrop_NilProvider_StillWorks(t *testing.
 	}
 }
 
-// ── R15.14 LocationContext → ListFeedPosts filter ────────────────────
-//
-// 之前 LocationContext 只是顶 chrome 文本 (P5) — 顶 chip “查看 · 河内”
-// 点哪都不影响 feed content。R15.14 修复这个：客户端在
-// ListFeedPosts payload.viewingCity 传 currentLocation.city，
-// 服务器按 CityScope 严格匹配过滤。逆序：P5 送了 1 个发帖子 +
-// 4 个 tripwires，P4 留下"Post 暂未携带 SceneType" + "LocationContext
-// 不影响 service" 两个明确点 — 本轮关闭后者。
+// ── Feed ALL is global and independent from LocationContext ─────────
+// CityScope is metadata for an explicit nearby filter. Legacy callers may
+// still send viewingCity, but ListFeedPosts must ignore it and return the
+// complete visible timeline.
 
-func TestListFeedPosts_ViewingCity_FiltersByCityScope(t *testing.T) {
-	// 顶 chip 选 河内 应当只看到 CityScope=河内 的帖子。
-	// 胡志明市帖 不能被静默包进河内 feed。
+func TestListFeedPosts_ViewingCity_DoesNotFilterAll(t *testing.T) {
 	s := New()
 	posts := []map[string]any{
 		{"authorType": "AGENT", "body": "河内·还剑湖清早", "visibility": "PUBLIC", "cityScope": "河内"},
@@ -478,27 +475,45 @@ func TestListFeedPosts_ViewingCity_FiltersByCityScope(t *testing.T) {
 		t.Fatalf("list feed: %s (%+v)", list.Outcome, list.Error)
 	}
 	var view struct {
-		Posts       []Post  `json:"posts"`
-		ViewingCity string  `json:"viewingCity"`
-		Unfiltered  bool    `json:"unfiltered"`
+		Posts       []Post                      `json:"posts"`
+		ViewingCity string                      `json:"viewingCity"`
+		Unfiltered  bool                        `json:"unfiltered"`
 		Media       map[string][]map[string]any `json:"media"`
 	}
 	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
 		t.Fatalf("parse: %v\n%s", err, list.OperationRef)
 	}
-	if len(view.Posts) != 2 {
-		t.Fatalf("want 2 hanoi posts, got %d (bodies=%+v)", len(view.Posts), view.Posts)
+	if len(view.Posts) != 4 {
+		t.Fatalf("ALL must include every city, got %d posts: %+v", len(view.Posts), view.Posts)
 	}
-	for _, p := range view.Posts {
-		if p.CityScope != "河内" {
-			t.Fatalf("non-hanoi post leaked through filter: cityScope=%s", p.CityScope)
+	if !view.Unfiltered {
+		t.Fatalf("ALL must always report unfiltered")
+	}
+}
+
+func TestListFeedPosts_ViewingCity_AcceptsHistoricalAliases(t *testing.T) {
+	s := New()
+	for _, city := range []string{"河内", "hn", "Hanoi", "Hà Nội"} {
+		r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+			"authorType": "AGENT", "body": city, "visibility": "PUBLIC", "cityScope": city,
+		}))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("seed alias %q: %s", city, r.Outcome)
 		}
 	}
-	if view.ViewingCity != "河内" {
-		t.Fatalf("viewingCity echo lost: %q", view.ViewingCity)
+	s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "body": "HCMC", "visibility": "PUBLIC", "cityScope": "hcm",
+	}))
+
+	list := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"viewingCity": "河内"}))
+	var view struct {
+		Posts []Post `json:"posts"`
 	}
-	if view.Unfiltered {
-		t.Fatalf("unfiltered flag should be false when viewingCity is set")
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatalf("parse aliases: %v", err)
+	}
+	if len(view.Posts) != 5 {
+		t.Fatalf("city aliases must not affect ALL, got %d: %+v", len(view.Posts), view.Posts)
 	}
 }
 
@@ -566,8 +581,8 @@ func TestListFeedPosts_ViewingCity_WhitespacesAreTrimmed(t *testing.T) {
 		Posts []Post `json:"posts"`
 	}
 	_ = json.Unmarshal([]byte(list.OperationRef), &view)
-	if len(view.Posts) != 1 || view.Posts[0].CityScope != "河内" {
-		t.Fatalf("whitespace padding must trim, got %d posts (bodies=%+v)", len(view.Posts), view.Posts)
+	if len(view.Posts) != 2 {
+		t.Fatalf("viewingCity whitespace must not filter ALL, got %d posts: %+v", len(view.Posts), view.Posts)
 	}
 }
 
@@ -587,11 +602,28 @@ func TestListFeedPosts_ViewingCity_PostsWithoutCityScopePassThrough(t *testing.T
 		Posts []Post `json:"posts"`
 	}
 	_ = json.Unmarshal([]byte(list.OperationRef), &view)
-	if len(view.Posts) != 1 {
-		t.Fatalf("want 1 post (legacy without cityScope), got %d", len(view.Posts))
+	if len(view.Posts) != 2 {
+		t.Fatalf("ALL must include scoped and unscoped posts, got %d", len(view.Posts))
 	}
-	if view.Posts[0].Body != "没标 city" {
-		t.Fatalf("wrong post passed through: %+v", view.Posts[0])
+}
+
+func TestMemorySnapshot_StableNewestFirstOrder(t *testing.T) {
+	repository := NewMemoryRepository()
+	stamp := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	for _, id := range []string{"post_c", "post_a", "post_b"} {
+		if err := repository.CreatePost(t.Context(), Post{ID: id, Status: "PUBLISHED", Visibility: "PUBLIC", CreatedAt: stamp}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	posts, err := repository.Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"post_a", "post_b", "post_c"}
+	for index, id := range want {
+		if posts[index].ID != id {
+			t.Fatalf("stable order[%d]=%s, want %s", index, posts[index].ID, id)
+		}
 	}
 }
 
@@ -636,7 +668,7 @@ func TestCreatePost_AcceptsSceneType(t *testing.T) {
 	r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
 		"authorType": "AGENT",
 		"body":       "露台拍摄", "visibility": "PUBLIC", "cityScope": "河内",
-		"sceneType":  "ROOFTOP",
+		"sceneType": "ROOFTOP",
 	}))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create with sceneType=ROOFTOP: %s (%+v)", r.Outcome, r.Error)
@@ -661,7 +693,7 @@ func TestCreatePost_RejectsUnknownSceneType(t *testing.T) {
 	r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
 		"authorType": "AGENT",
 		"body":       "x", "visibility": "PUBLIC", "cityScope": "河内",
-		"sceneType":  "WHATEVER_THIS_IS",
+		"sceneType": "WHATEVER_THIS_IS",
 	}))
 	if r.Outcome != "REJECTED" {
 		t.Fatalf("unknown sceneType must reject, got %s", r.Outcome)
@@ -762,8 +794,8 @@ func TestListFeedPosts_BackdropCacheAvoidsN1(t *testing.T) {
 	for i, ma := range []string{"ma", "mb", "mc"} {
 		s.Handle(envelopeFor("", "CreatePost", map[string]any{
 			"authorType": "AGENT", "body": "rooftop", "visibility": "PUBLIC", "cityScope": "河内",
-			"sceneType": "ROOFTOP",
-			"mediaRefs": []map[string]any{{"mediaAssetId": ma, "mediaType": "IMAGE", "sortOrder": 0}},
+			"sceneType":  "ROOFTOP",
+			"mediaRefs":  []map[string]any{{"mediaAssetId": ma, "mediaType": "IMAGE", "sortOrder": 0}},
 			"_iteration": i,
 		}))
 	}
@@ -773,5 +805,3 @@ func TestListFeedPosts_BackdropCacheAvoidsN1(t *testing.T) {
 		t.Fatalf("expected 1 GetAestheticBackdrop call for shared (city, sceneType), got %d", got)
 	}
 }
-
-

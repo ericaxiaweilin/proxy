@@ -45,6 +45,8 @@ PODS:
     - ExpoModulesCore
     - ExpoModulesJSI
     - ReactCommon/turbomodule/core
+  - ExpoGlassEffect (57.0.1):
+    - ExpoModulesCore
   - ExpoImage (57.0.3):
     - ExpoModulesCore
   - ExpoImagePicker (57.0.12):
@@ -99,6 +101,8 @@ PODS:
   - hermes-engine (250829098.0.16):
     - hermes-engine/Pre-built (= 250829098.0.16)
   - hermes-engine/Pre-built (250829098.0.16)
+  - ProxyNativeTabBar (1.0.0):
+    - ExpoModulesCore
   - RCTDeprecation (0.86.2)
   - RCTRequired (0.86.2)
   - RCTSwiftUI (0.86.2)
@@ -2038,14 +2042,15 @@ PODS:
 DEPENDENCIES:
   - "EXApplication (from `../../../node_modules/.pnpm/expo-application@57.0.2_expo@57.0.12/node_modules/expo-application/ios`)"
   - "EXConstants (from `../../../node_modules/.pnpm/expo-constants@57.0.13_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-col_164925f94bf212184f304a368a653d60/node_modules/expo-constants/ios`)"
-  - "Expo (from `../../../node_modules/.pnpm/expo@57.0.12_@babel+core@7.29.7_supports-color@8.1.1__@expo+dom-webview@57.0.1_react-na_67ef97b23caca0ce6392be9c8378dbc9/node_modules/expo`)"
+  - "Expo (from `../../../node_modules/.pnpm/expo@57.0.12_@babel+core@7.29.7_supports-color@8.1.1__@expo+dom-webview@57.0.1_react-do_dfcab389c0ed814c3724132c2d193e33/node_modules/expo`)"
   - "ExpoAsset (from `../../../node_modules/.pnpm/expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8_2f548c49a560756b2f323de94f824054/node_modules/expo-asset/ios`)"
   - "ExpoAudio (from `../../../node_modules/.pnpm/expo-audio@57.0.4_expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29._ad656b07e45440d1edcf06126209f749/node_modules/expo-audio/ios`)"
   - "ExpoCrypto (from `../../../node_modules/.pnpm/expo-crypto@57.0.1_expo@57.0.12/node_modules/expo-crypto/ios`)"
   - "ExpoDomWebView (from `../../../node_modules/.pnpm/@expo+dom-webview@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-c_797694d88359341a42e63ef165daca13/node_modules/@expo/dom-webview/ios`)"
   - "ExpoFileSystem (from `../../../node_modules/.pnpm/expo-file-system@57.0.5_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-co_a536d157c44106a14233dd5d58674f5f/node_modules/expo-file-system/ios/ExpoFileSystem.podspec`)"
   - "ExpoFont (from `../../../node_modules/.pnpm/expo-font@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1_66c827ad71586f33f7bb0108a19cdeda/node_modules/expo-font/ios/ExpoFont.podspec`)"
-  - "ExpoGL (from `../../../node_modules/.pnpm/expo-gl@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1_63ecf5ecfbab02b08a44f829a47f8e25/node_modules/expo-gl`)"
+  - "ExpoGL (from `../../../node_modules/.pnpm/expo-gl@57.0.2_expo@57.0.12_react-dom@19.2.8_react@19.2.3__react-native@0.86.2_@babel+c_63d5050bb8a9a57ff20c71490776926d/node_modules/expo-gl`)"
+  - "ExpoGlassEffect (from `../../../node_modules/.pnpm/expo-glass-effect@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-c_5d95a838bab83164ee060c6963f63a9c/node_modules/expo-glass-effect/ios`)"
   - "ExpoImage (from `../../../node_modules/.pnpm/expo-image@57.0.3_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8._2a948386cbdb92659162bc8117c82800/node_modules/expo-image/ios/ExpoImage.podspec`)"
   - "ExpoImagePicker (from `../../../node_modules/.pnpm/expo-image-picker@57.0.12_expo@57.0.12/node_modules/expo-image-picker/ios`)"
   - "ExpoKeepAwake (from `../../../node_modules/.pnpm/expo-keep-awake@57.0.1_expo@57.0.12_react@19.2.3/node_modules/expo-keep-awake/ios`)"
@@ -2061,6 +2066,7 @@ DEPENDENCIES:
   - "ExpoWebBrowser (from `../../../node_modules/.pnpm/expo-web-browser@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-co_3ac5962e5bcfe946c43b738567478600/node_modules/expo-web-browser/ios`)"
   - "FBLazyVector (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/Libraries/FBLazyVector`)"
   - "hermes-engine (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)"
+  - ProxyNativeTabBar (from `../modules/proxy-native-tab-bar/ios`)
   - "RCTDeprecation (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)"
   - "RCTRequired (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/Libraries/Required`)"
   - "RCTSwiftUI (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/RCTSwiftUI`)"
@@ -2144,7 +2150,7 @@ EXTERNAL SOURCES:
   EXConstants:
     :path: "../../../node_modules/.pnpm/expo-constants@57.0.13_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-col_164925f94bf212184f304a368a653d60/node_modules/expo-constants/ios"
   Expo:
-    :path: "../../../node_modules/.pnpm/expo@57.0.12_@babel+core@7.29.7_supports-color@8.1.1__@expo+dom-webview@57.0.1_react-na_67ef97b23caca0ce6392be9c8378dbc9/node_modules/expo"
+    :path: "../../../node_modules/.pnpm/expo@57.0.12_@babel+core@7.29.7_supports-color@8.1.1__@expo+dom-webview@57.0.1_react-do_dfcab389c0ed814c3724132c2d193e33/node_modules/expo"
   ExpoAsset:
     :path: "../../../node_modules/.pnpm/expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8_2f548c49a560756b2f323de94f824054/node_modules/expo-asset/ios"
   ExpoAudio:
@@ -2158,7 +2164,9 @@ EXTERNAL SOURCES:
   ExpoFont:
     :podspec: "../../../node_modules/.pnpm/expo-font@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1_66c827ad71586f33f7bb0108a19cdeda/node_modules/expo-font/ios/ExpoFont.podspec"
   ExpoGL:
-    :path: "../../../node_modules/.pnpm/expo-gl@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1_63ecf5ecfbab02b08a44f829a47f8e25/node_modules/expo-gl"
+    :path: "../../../node_modules/.pnpm/expo-gl@57.0.2_expo@57.0.12_react-dom@19.2.8_react@19.2.3__react-native@0.86.2_@babel+c_63d5050bb8a9a57ff20c71490776926d/node_modules/expo-gl"
+  ExpoGlassEffect:
+    :path: "../../../node_modules/.pnpm/expo-glass-effect@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-c_5d95a838bab83164ee060c6963f63a9c/node_modules/expo-glass-effect/ios"
   ExpoImage:
     :podspec: "../../../node_modules/.pnpm/expo-image@57.0.3_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8._2a948386cbdb92659162bc8117c82800/node_modules/expo-image/ios/ExpoImage.podspec"
   ExpoImagePicker:
@@ -2190,6 +2198,8 @@ EXTERNAL SOURCES:
   hermes-engine:
     :podspec: "../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec"
     :tag: hermes-v250829098.0.16
+  ProxyNativeTabBar:
+    :path: "../modules/proxy-native-tab-bar/ios"
   RCTDeprecation:
     :path: "../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -2352,6 +2362,7 @@ SPEC CHECKSUMS:
   ExpoFileSystem: 0e74ed1536e1643f4a352d84ed55d311d795828d
   ExpoFont: 59e1faf66ba9bcd232ae1e2ce58d202a48b6f65e
   ExpoGL: 4f9233cd8fcbbd4d4eab2665d1fa600362eeae09
+  ExpoGlassEffect: 4b62afb489e6b84357701737ce002137c9d5fdbc
   ExpoImage: b37accc4b12647e5cf939b2335eea2bdb874ad7f
   ExpoImagePicker: 09fafe2ab0257a41a0e6625ebbe56d73cb6611fa
   ExpoKeepAwake: c26f14275017370cc8a4b7b43a0e23361f2053a5
@@ -2367,6 +2378,7 @@ SPEC CHECKSUMS:
   ExpoWebBrowser: 9b98d939d5f1c5dd8f523f0a0683056fb1204434
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
   hermes-engine: 16e790118c4aefa1c09a1119de194e86d22cfa15
+  ProxyNativeTabBar: 8c769bb027f5ba481406304e348dd14cf2a32c57
   RCTDeprecation: bccb6545c26db881ecddfd83a3f9ea82aba1605f
   RCTRequired: b2f74764d596fc0051f00fee94b49bf41a6f7f5a
   RCTSwiftUI: c6d6a31b849b9dfa64c33b55dc91ac15dd55774c

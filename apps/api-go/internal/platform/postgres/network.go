@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -122,7 +123,7 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
 			visibility, city_scope, scene_type, status, context_refs, created_at
-		FROM localnet.posts ORDER BY created_at DESC`)
+		FROM localnet.posts ORDER BY created_at DESC, id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -337,11 +338,20 @@ func (r *ConversationRepository) GetConversation(ctx context.Context, id string)
 	return c, nil
 }
 
+// AppendMessage persists a message plus its MessageProtection envelope
+// (Lotus Chat RFC v0.1 §3). The protection column is JSONB so future
+// anti-leak fields can land without a migration. ViewCount is column-level
+// because it is the hot path for MarkMessageRead (PG-side CAS via
+// `view_count = view_count + 1` in UpdateMessage).
 func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversation.Message) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt,
+	protectionJSON, err := json.Marshal(m.Protection)
+	if err != nil {
+		return fmt.Errorf("encode protection: %w", err)
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount,
 	)
 	if err != nil {
 		return err
@@ -355,7 +365,7 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 
 func (r *ConversationRepository) Messages(ctx context.Context, conversationID string) ([]conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count
 		FROM conversation.messages WHERE conversation_id = $1 ORDER BY created_at`, conversationID)
 	if err != nil {
 		return nil, err
@@ -363,8 +373,8 @@ func (r *ConversationRepository) Messages(ctx context.Context, conversationID st
 	defer rows.Close()
 	result := []conversation.Message{}
 	for rows.Next() {
-		var m conversation.Message
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.MessageType, &m.Body, &m.MediaRef, &m.CreatedAt); err != nil {
+		m, err := scanConversationMessage(rows)
+		if err != nil {
 			return nil, err
 		}
 		result = append(result, m)
@@ -373,6 +383,85 @@ func (r *ConversationRepository) Messages(ctx context.Context, conversationID st
 		return nil, err
 	}
 	return result, nil
+}
+
+// GetMessage fetches a single message by ID. Used by MarkMessageRead
+// (bump view_count), RecordScreenshot (publish SECURITY_ALERT), and
+// ForwardMessage (enforce Forwardable=false → PROTECTION_VIOLATION).
+//
+// Protection JSONB unmarshalling is best-effort: legacy rows from before
+// migration 035 have `{}` and decode into a zero MessageProtection, which
+// DefaultProtectionFor semantics (or service-layer defaults) can layer on
+// top. We deliberately do NOT silently rehydrate defaults here — that
+// would mask the fact that the seed path skipped protection.
+func (r *ConversationRepository) GetMessage(ctx context.Context, id string) (conversation.Message, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count
+		FROM conversation.messages WHERE id = $1`, id)
+	if err != nil {
+		return conversation.Message{}, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return conversation.Message{}, conversation.ErrMessageNotFound
+	}
+	m, err := scanConversationMessage(rows)
+	if err != nil {
+		return conversation.Message{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return conversation.Message{}, err
+	}
+	return m, nil
+}
+
+// UpdateMessage replaces a message in place. Currently the only mutation
+// the lotus-RFC path needs is bumping view_count on MarkMessageRead, but
+// the method is fully general (Body / MediaRef / Protection overwrite)
+// so future command handlers (e.g. edit-with-protection-override) can
+// reuse it without a second method.
+//
+// Note: the caller (service layer) is responsible for deciding whether
+// the new view_count is legal (i.e. <= protection.view_limit). The
+// repository just persists; it does not enforce view-limit accounting.
+func (r *ConversationRepository) UpdateMessage(ctx context.Context, m conversation.Message) error {
+	protectionJSON, err := json.Marshal(m.Protection)
+	if err != nil {
+		return fmt.Errorf("encode protection: %w", err)
+	}
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE conversation.messages
+		SET body = $1, media_ref = $2, protection = $3, view_count = $4
+		WHERE id = $5`,
+		m.Body, m.MediaRef, protectionJSON, m.Protection.ViewCount, m.ID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return conversation.ErrMessageNotFound
+	}
+	return nil
+}
+
+// scanConversationMessage reads one row from conversation.messages into
+// a conversation.Message. Shared by Messages + GetMessage so the column
+// list stays in sync — drift here would silently drop protection fields.
+func scanConversationMessage(rows pgx.Rows) (conversation.Message, error) {
+	var m conversation.Message
+	var protection []byte
+	if err := rows.Scan(
+		&m.ID, &m.ConversationID, &m.SenderID, &m.MessageType,
+		&m.Body, &m.MediaRef, &m.CreatedAt, &protection, &m.Protection.ViewCount,
+	); err != nil {
+		return conversation.Message{}, err
+	}
+	if len(protection) > 0 {
+		if err := json.Unmarshal(protection, &m.Protection); err != nil {
+			return m, fmt.Errorf("decode protection: %w", err)
+		}
+	}
+	return m, nil
 }
 
 func (r *ConversationRepository) SaveNeedDraft(ctx context.Context, d conversation.NeedDraft) error {
@@ -427,6 +516,20 @@ func (r *ConversationRepository) Snapshot(ctx context.Context) ([]conversation.C
 		return nil, err
 	}
 	return result, nil
+}
+
+// PurgeExpiredMessages hard-deletes rows past protection.expiresAt.
+// Lotus RFC §5: uses partial index idx_conversation_messages_expires_at.
+// Production sweeper runs hourly; dev can call directly via worker.
+func (r *ConversationRepository) PurgeExpiredMessages(ctx context.Context, now time.Time) (int64, error) {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		DELETE FROM conversation.messages
+		WHERE protection->>'expiresAt' IS NOT NULL
+		  AND (protection->>'expiresAt')::timestamptz <= $1`, now.UTC())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 var _ conversation.Repository = (*ConversationRepository)(nil)

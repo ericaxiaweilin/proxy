@@ -36,7 +36,10 @@ export class ActivityClient {
   public constructor(private readonly input: ActivityClientOptions) {}
 
   public async listActivities(): Promise<Activity[]> {
-    const session = await this.requireSession();
+    // R15.22 fix: 匿名 iPhone 端也要看到活动计数 (Home tab "机会 / 活动"硬编码
+    // 24/46/18 随 R15.22 WIP 被改为 API 加载 — server 端 ListActivities 不限
+    // actor type, 仅需 optional session, 不再要 requireSession.
+    const session = await this.optionalSession();
     const result = await this.sendCommand(session, "ListActivities", { type: "Activity", id: "local" }, {});
     return ListActivitiesPayloadSchema.parse(this.decodeOperationRef(result)).activities;
   }
@@ -59,22 +62,39 @@ export class ActivityClient {
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 
+  // R15.22 fix: 同 LocalNetClient.optionalSession — server 端 ListActivities
+  // (server.go: server listActivities) 不需 actor, 读 anonymouse 读 OK.
+  // 报 "an authenticated principal is required" 是 R15.22 WIP 沿用
+  // requireSession 造成 — 匿名本可读. 读 session 本身抛错 (keychain
+  // entitlement 缺失) 时 返回 undefined, 跳过 actor/principal 字段.
+  private async optionalSession(): Promise<(StoredSession & { principal: NonNullable<StoredSession["principal"]> }) | undefined> {
+    try {
+      const session = await this.input.secureSessionStore.read();
+      return session?.principal ? (session as StoredSession & { principal: NonNullable<StoredSession["principal"]> }) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async sendCommand(
-    session: StoredSession & { principal: NonNullable<StoredSession["principal"]> },
+    session: (StoredSession & { principal: NonNullable<StoredSession["principal"]> }) | undefined,
     commandType: string,
     target: { type: string; id: string },
     payload: Record<string, unknown>
   ): Promise<CommandResult> {
     const commandId = this.nextId("command");
+    // R15.22 fix: optionalSession 允许匿名走 PUBLIC actor (同
+    // LocalNetClient.optionalSession 模式). server 端 requiresAuthentication
+    // 不会拒 ListActivities.
     const envelope = {
       commandId,
       commandType,
       commandVersion: 1,
-      actor: { type: "USER", id: session.userAccountId },
-      principal: session.principal,
+      actor: session ? { type: "USER", id: session.userAccountId } : { type: "PUBLIC", id: "anonymous_reader" },
+      principal: session?.principal ?? { type: "PUBLIC", id: "anonymous_reader" },
       target,
       idempotencyKey: this.nextId("idempotency"),
-      authContext: { sessionId: session.auth.sessionId },
+      authContext: session ? { sessionId: session.auth.sessionId } : {},
       purpose: "local_activity_hub",
       correlationId: this.nextId("correlation"),
       requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),

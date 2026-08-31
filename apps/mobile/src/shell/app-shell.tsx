@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassContainer, GlassView } from "expo-glass-effect";
+import { ProxyNativeTabBarView } from "../components/proxy-native-tab-bar";
 import type {
   ExperienceAction,
   ExperienceManifest,
@@ -64,17 +65,21 @@ const OTTER_LOGO = require("../../assets/otter-logo.png");
 
 // R15.12.7 冻结：第二 Tab = 市场，对全部身份固定为「市场」。
 type RootTab = "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
-// R15.22 子页序列：horizontal swipe 跨 7 page (HOME, MARKET_OPP, MARKET_ACT, FEED_REC, FEED_FOLLOW, MSG_CHAT, MSG_FRIENDS, ME)
-type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_REC" | "FEED_FOLLOW" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
-const PAGE_SEQUENCE: ReadonlyArray<PageId> = ["HOME", "MARKET_OPP", "MARKET_ACT", "FEED_REC", "FEED_FOLLOW", "MSG_CHAT", "MSG_FRIENDS", "ME"];
+// R15.22 子页序列：horizontal swipe 跨 9 page (HOME, MARKET_OPP, MARKET_ACT, FEED_POSTS, FEED_STATUS, FEED_COMMUNITY, MSG_CHAT, MSG_FRIENDS, ME)
+// R15.23 改：FEED tab 内部 3 个 section (动态/状态/社区) 各自独立成 page — 横向 swipe 必须先走完 section 才到 MESSAGES，避免 "动态 → 直接消息" 的跳页。
+type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_POSTS" | "FEED_STATUS" | "FEED_COMMUNITY" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
+const PAGE_SEQUENCE: ReadonlyArray<PageId> = ["HOME", "MARKET_OPP", "MARKET_ACT", "FEED_POSTS", "FEED_STATUS", "FEED_COMMUNITY", "MSG_CHAT", "MSG_FRIENDS", "ME"];
 const PAGE_TO_ROOT: Record<PageId, RootTab> = {
   HOME: "HOME", MARKET_OPP: "MARKET", MARKET_ACT: "MARKET",
-  FEED_REC: "FEED", FEED_FOLLOW: "FEED",
+  FEED_POSTS: "FEED", FEED_STATUS: "FEED", FEED_COMMUNITY: "FEED",
   MSG_CHAT: "MESSAGES", MSG_FRIENDS: "MESSAGES",
   ME: "ME"
 };
+const PAGE_TO_FEED_SECTION: Partial<Record<PageId, "POSTS" | "STATUS" | "COMMUNITY">> = {
+  FEED_POSTS: "POSTS", FEED_STATUS: "STATUS", FEED_COMMUNITY: "COMMUNITY"
+};
 const ROOT_TO_FIRST_PAGE: Record<RootTab, PageId> = {
-  HOME: "HOME", MARKET: "MARKET_OPP", FEED: "FEED_REC",
+  HOME: "HOME", MARKET: "MARKET_OPP", FEED: "FEED_POSTS",
   MESSAGES: "MSG_FRIENDS", ME: "ME"
 };
 
@@ -104,6 +109,7 @@ export function AppShell({
   notification,
   scene,
   isGuest,
+  ensureConversationSession,
   onSignOut
 }: {
   localNet: LocalNetClient;
@@ -121,6 +127,7 @@ export function AppShell({
   notification: NotificationClient;
   scene?: import("../scene-client").SceneClient | undefined;
   isGuest?: boolean;
+  ensureConversationSession?: (() => Promise<void>) | undefined;
   onSignOut: () => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
@@ -129,17 +136,26 @@ export function AppShell({
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
-  const [messageChatAuthor, setMessageChatAuthor] = useState<string>();
+  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string }>();
+  const messageChatAuthor = messageChat?.author;
   const [marketEntry, setMarketEntry] = useState<{
     tab: MarketTab;
     viewMode: MarketViewMode;
   }>({ tab: "OPPORTUNITY", viewMode: "LIST" });
   // R15.22: 子页 override (swipe 跨 7 page). null = 跟随 tab + sub-tab 状态.
   const [pageOverride, setPageOverride] = useState<PageId | undefined>();
+  // R15.23: feedSection 是 FEED tab 内部的 section 状态 (动态/状态/社区)。
+  // 跨 page 切到 FEED_* 时同步设过来；swipe 切到 next/prev page 时也同步更新。
+  const [feedSection, setFeedSection] = useState<"POSTS" | "STATUS" | "COMMUNITY">("POSTS");
   const currentPage: PageId = pageOverride ?? ((): PageId => {
     if (tab === "HOME") return "HOME";
     if (tab === "MARKET") return marketEntry.tab === "ACTIVITY" ? "MARKET_ACT" : "MARKET_OPP";
-    if (tab === "FEED") return "FEED_REC";
+    if (tab === "FEED") {
+      // R15.23: 跟随 feedSection 而非写死 FEED_REC
+      if (feedSection === "STATUS") return "FEED_STATUS";
+      if (feedSection === "COMMUNITY") return "FEED_COMMUNITY";
+      return "FEED_POSTS";
+    }
     if (tab === "MESSAGES") return "MSG_FRIENDS";
     return "ME";
   })();
@@ -149,6 +165,9 @@ export function AppShell({
     if (root !== tab) setTab(root);
     if (page === "MARKET_OPP") setMarketEntry((s) => ({ ...s, tab: "OPPORTUNITY" }));
     else if (page === "MARKET_ACT") setMarketEntry((s) => ({ ...s, tab: "ACTIVITY" }));
+    // R15.23: 同步 FEED section
+    const nextFeedSection = PAGE_TO_FEED_SECTION[page];
+    if (nextFeedSection) setFeedSection(nextFeedSection);
   };
   const [openExperience, setOpenExperience] = useState<string>();
   const [experienceManifest, setExperienceManifest] =
@@ -197,8 +216,8 @@ export function AppShell({
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (handleModuleBack()) return true;
       if (voucherOpen) { setVoucherOpen(false); return true; }
-      if (tab === "ME" && messageChatAuthor) { setMessageChatAuthor(undefined); return true; }
-      if (tab === "MESSAGES" && messageChatAuthor) { setMessageChatAuthor(undefined); return true; }
+      if (tab === "ME" && messageChatAuthor) { setMessageChat(undefined); return true; }
+      if (tab === "MESSAGES" && messageChatAuthor) { setMessageChat(undefined); return true; }
       if (tab === "FEED" && feedPrefsOpen) { setFeedPrefsOpen(false); return true; }
       if (tab === "FEED" && feedChatAuthor) { setFeedChatAuthor(undefined); return true; }
       if (tab === "MARKET" && openExperience) { setOpenExperience(undefined); return true; }
@@ -267,7 +286,7 @@ export function AppShell({
       setFeedChatAuthor(undefined);
       setFeedPrefsOpen(false);
     }
-    if (next !== "MESSAGES") setMessageChatAuthor(undefined);
+    if (next !== "MESSAGES") setMessageChat(undefined);
     if (next !== "ME") setVoucherOpen(false);
   }
 
@@ -277,7 +296,7 @@ export function AppShell({
     setWorkspaceTarget(undefined);
     setHomeAssistant(undefined);
     setFeedChatAuthor(undefined);
-    setMessageChatAuthor(undefined);
+    setMessageChat(undefined);
     setTab("MARKET");
   }
 
@@ -376,6 +395,7 @@ export function AppShell({
               initialText={homeAssistant.text}
               {...(homeAssistant.attachment ? { initialAttachment: homeAssistant.attachment } : {})}
               {...(homeAssistant.mode ? { mode: homeAssistant.mode } : {})}
+              {...(ensureConversationSession ? { ensureSession: ensureConversationSession } : {})}
               onBack={() => setHomeAssistant(undefined)}
               onOpenMarket={(tab) => {
                 setHomeAssistant(undefined);
@@ -412,6 +432,8 @@ export function AppShell({
               onOpenMarket={(tab) => openMarket({ tab })}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
               demandClient={demand}
+              marketplace={marketplace}
+              activities={activities}
               onCreateScene={setSceneComposerTool}
               onChromeVisibilityChange={setScrollChromeVisible}
               bottomNavVisible={isNavVisible}
@@ -444,17 +466,33 @@ export function AppShell({
           ) : feedPrefsOpen ? (
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
-            <FeedSurface engagement={engagement} localNet={localNet} marketplace={marketplace} mediaClient={media} socialSpace={socialSpace} onChromeVisibilityChange={setFeedChromeVisible} onOpenChat={setFeedChatAuthor} onOpenFeedPrefs={() => setFeedPrefsOpen(true)} refreshTrigger={feedRefreshTrigger} bottomNavVisible={isNavVisible} viewingCity={currentLocation.city} initialTab={currentPage === "FEED_FOLLOW" ? "FOLLOWING" : "RECOMMENDED"} />
+            <FeedSurface
+              engagement={engagement}
+              localNet={localNet}
+              mediaClient={media}
+              socialSpace={socialSpace}
+              onChromeVisibilityChange={setFeedChromeVisible}
+              onOpenChat={setFeedChatAuthor}
+              onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
+              refreshTrigger={feedRefreshTrigger}
+              bottomNavVisible={isNavVisible}
+              // R15.23: sub-tab 推荐/关注 保留（initialTab）；section 动态/状态/社区 由 app-shell 控
+              initialTab="RECOMMENDED"
+              // R15.23: section 改 controlled — swipe 跨 page 时 app-shell 同步更新
+              currentSection={feedSection}
+              onSectionChange={setFeedSection}
+            />
           )
         ) : tab === "MESSAGES" ? (
           messageChatAuthor ? (
             <ConversationSurface
               author={messageChatAuthor}
+              {...(messageChat?.conversationId ? { conversationId: messageChat.conversationId } : {})}
               conversationClient={conversation}
-              onBack={() => setMessageChatAuthor(undefined)}
+              onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface onOpenConversation={setMessageChatAuthor} onChromeVisibilityChange={setScrollChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
+            <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId) => setMessageChat(conversationId ? { author, conversationId } : { author })} onChromeVisibilityChange={setScrollChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
           ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -468,6 +506,7 @@ export function AppShell({
             <MeSurface
               context={context}
               localNet={localNet}
+              fulfillment={fulfillment}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,
@@ -479,7 +518,7 @@ export function AppShell({
               onOpenVouchers={() => setVoucherOpen(true)}
               onExperienceAction={executeExperienceAction}
               onOpenConversation={(author) => {
-                setMessageChatAuthor(author);
+                setMessageChat({ author });
                 setTab("MESSAGES");
               }}
               onSignOut={onSignOut}
@@ -747,6 +786,24 @@ function RootNav({
     })
   ).current;
 
+  // iOS must use the real UIKit tab bar. Its selected lens samples live
+  // content behind the dock and produces system refraction; opacity/blur
+  // layers cannot reproduce that behavior. Android retains the custom dock
+  // below as its platform fallback.
+  if (Platform.OS === "ios") {
+    return (
+      <View style={[styles.dockWrap, { bottom: Math.max(bottomInset ?? 0, 8), width: dockWidth }]}>
+        <View style={[styles.nativeTabShell, { height: dockHeight, width: dockWidth }]}>
+          <ProxyNativeTabBarView
+            onTabSelect={(event) => commit(event.nativeEvent.index)}
+            selectedIndex={initialTabIdx}
+            style={StyleSheet.absoluteFill}
+          />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.dockWrap, { bottom: Math.max(bottomInset ?? 0, 8), width: dockWidth }]}>
       {/*
@@ -933,6 +990,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 0,
     zIndex: 100
+  },
+  nativeTabShell: { overflow: "visible" },
+  nativeTabOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: "center",
+    flexDirection: "row",
+    paddingHorizontal: 8
   },
   hintRow: { flexDirection: "row", alignItems: "center", gap: 10, opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" as const },
   hintLine: { width: 22, height: 1, backgroundColor: "transparent" },

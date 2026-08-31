@@ -13,6 +13,31 @@ export type SlotOffer = {
   expiresAt: string;
 };
 
+export type FulfillmentOrder = {
+  orderId: string;
+  requesterId: string;
+  agentId: string;
+  needId: string;
+  lifecycle: "OFFERED" | "CONFIRMED" | "EXECUTING" | "COMPLETED" | "CANCELLED";
+  snapshot: {
+    requester: string;
+    agent: string;
+    serviceSku: string;
+    duration: string;
+    startTime: string;
+    meetingContext: string;
+    agreedCompensation: number;
+    currency: string;
+    includedScope: string;
+    excludedScope: string;
+    settlementMode: string;
+    paymentMethodLabel: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  viewerRole: "REQUESTER" | "AGENT";
+};
+
 export class FulfillmentClient {
   private sequence = 0;
   public constructor(
@@ -53,6 +78,12 @@ export class FulfillmentClient {
     const body = this.body(await this.command("ListAgentOffers", { type: "Offer", id: "list" }, {}));
     if (!Array.isArray(body.offers)) throw new Error("offers malformed");
     return body.offers as SlotOffer[];
+  }
+
+  public async listMyOrders(): Promise<FulfillmentOrder[]> {
+    const body = this.body(await this.command("ListMyOrders", { type: "OrderCollection", id: "mine" }, {}));
+    if (!Array.isArray(body.orders)) throw new Error("orders malformed");
+    return body.orders as FulfillmentOrder[];
   }
 
   public async checkInOrder(orderId: string, input: { marketId: string; locationLabel: string }): Promise<void> {

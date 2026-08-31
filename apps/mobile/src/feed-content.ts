@@ -16,7 +16,13 @@ export function opportunityAsPost(opportunity: MarketOpportunity, index: number,
     body: `${opportunity.title}\n${opportunity.date} ${opportunity.time} · ${opportunity.location} · ${opportunity.price}`,
     mediaRefs: [],
     visibility: "PUBLIC",
-    cityScope: opportunity.location.includes("河内") ? "hn" : "vn",
+    cityScope: opportunity.location.includes("河内")
+      ? "hn"
+      : opportunity.location.includes("远程")
+        ? ""
+        : opportunity.location.includes("北宁")
+          ? "hanoi"
+          : "",
     status: "PUBLISHED",
     contextRefs: [
       { contextType: "OPPORTUNITY", contextId: opportunity.title, relationType: opportunity.id },

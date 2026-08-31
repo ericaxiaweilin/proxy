@@ -1,5 +1,7 @@
 import type { ResumableMediaUploadSession, UploadableImage } from "./media-client";
 
+export const MAX_ALT_LENGTH = 280;
+
 export type DraftMediaStatus = "LOCAL" | "UPLOADING" | "PAUSED" | "READY" | "FAILED";
 
 export type DraftMediaItem = {

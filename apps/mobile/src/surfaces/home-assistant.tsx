@@ -38,6 +38,7 @@ export function HomeAssistantSurface({
   onOpenFeed,
   experiencePlan,
   experienceSchema,
+  ensureSession,
 }: {
   conversationClient: ConversationClient;
   mediaClient: MediaClient;
@@ -50,6 +51,7 @@ export function HomeAssistantSurface({
   onOpenFeed?: () => void;
   experiencePlan?: SurfacePlan | null;
   experienceSchema?: UISchema | null;
+  ensureSession?: () => Promise<void>;
 }): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string>();
   const [messages, setMessages] = useState<AssistantMessage[]>([
@@ -66,6 +68,11 @@ export function HomeAssistantSurface({
   useEffect(() => {
     let cancelled = false;
     const start = async (): Promise<Record<string, unknown>> => {
+      if (ensureSession) {
+        setStatus("正在连接 Proxy…");
+        await ensureSession();
+        setStatus(undefined);
+      }
       let mediaRef: string | undefined;
       if (initialAttachment) {
         setStatus("正在安全上传照片…");
@@ -96,7 +103,7 @@ export function HomeAssistantSurface({
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [conversationClient, initialAttachment, initialText, mediaClient, mode]);
+  }, [conversationClient, ensureSession, initialAttachment, initialText, mediaClient, mode]);
 
   useEffect(() => {
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);

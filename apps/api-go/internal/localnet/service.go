@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -303,6 +302,138 @@ func (s *Service) SeedDemoPosts(ctx context.Context) error {
 			ContextRefs:       []ContextRef{{ContextType: "VENUE", ContextID: "门店场景"}, {ContextType: "ACTIVITY", ContextID: "周六新店开业"}},
 			CreatedAt:         now.Add(-30 * time.Minute),
 		},
+		// R15.22 增量 seed — 未登录访客应能看到丰富 feed. 增补 18 帖覆盖
+		// 河内 / 胡志明市 / 岘港 三城 × 多种 scene × 带/不带 city scope.
+		// CityScope 故意保留原始中文, 验证 canonicalCityKey() 能否跨别名匹配.
+		{
+			ID: "post_seed_hn_cafe_01", AuthorType: "AGENT", AuthorID: "agent_phuong", AuthorDisplayName: "Phương",
+			Body:       "老街区 Bún Chả 店推荐, 坐在门口吃能看到街边老人们下棋, 烟火气很足。",
+			Visibility: "PUBLIC", CityScope: "hn", SceneType: "FOOD", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "VENUE", ContextID: "老街小吃"}, {ContextType: "SERVICE", ContextID: "本地推荐"}},
+			CreatedAt:   now.Add(-4 * time.Hour),
+		},
+		{
+			ID: "post_seed_hn_cafe_02", AuthorType: "USER", AuthorID: "user_khoa", AuthorDisplayName: "Khoa",
+			Body:       "想找一个有 co-working 区的咖啡店过周末, 有网络 + 安静 + 饮品好喝三要素. 推荐一下吧。",
+			Visibility: "PUBLIC", CityScope: "Hanoi", SceneType: "COFFEE", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ACTIVITY", ContextID: "找咖啡店"}},
+			CreatedAt:   now.Add(-5 * time.Hour),
+		},
+		{
+			ID: "post_seed_hn_photo_01", AuthorType: "AGENT", AuthorID: "agent_nam", AuthorDisplayName: "Nam",
+			Body:       "今天下午我会在火车街拍老式火车, 预计 15:30 经过。有摄影兴趣的朋友可以同在。",
+			MediaRefs:  []PostMediaRef{{MediaAssetID: "seed_media_train_street", SortOrder: 0}},
+			Visibility: "PUBLIC", CityScope: "河内", SceneType: "PHOTO", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ACTIVITY", ContextID: "街头摄影"}},
+			CreatedAt:   now.Add(-6 * time.Hour),
+		},
+		{
+			ID: "post_seed_hn_walk_01", AuthorType: "AGENT", AuthorID: "agent_trang", AuthorDisplayName: "Trang",
+			Body:       "晚上 18:00 想找 1-2 个人一起走老城区, 边走边聊. 不太拍照, 主要散步 + 试试路边小饭馆。",
+			Visibility: "PUBLIC", CityScope: "河内", SceneType: "WALK", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "SERVICE", ContextID: "城市同行"}, {ContextType: "AVAILABILITY", ContextID: "今晚可接"}},
+			CreatedAt:   now.Add(-7 * time.Hour),
+		},
+		{
+			ID: "post_seed_hn_market_01", AuthorType: "MERCHANT", AuthorID: "merchant_dongxuan", AuthorDisplayName: "Đồng Xuân Market",
+			Body:       "周末 8:00-18:00 老市场开市, 手工编织包和本地艺术品都上新. 不接受退换, 但价格是最实在的。",
+			Visibility: "PUBLIC", CityScope: "河内", SceneType: "MARKET", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "VENUE", ContextID: "传统市场"}},
+			CreatedAt:   now.Add(-8 * time.Hour),
+		},
+		{
+			ID: "post_seed_hn_bike_01", AuthorType: "USER", AuthorID: "user_long", AuthorDisplayName: "Long",
+			Body:       "周日早上 6:30 想在还剑湖跑圈 5km, 配速 6'30, 走 4 走快 1 间隔. 一起越冷越起劲。",
+			Visibility: "PUBLIC", CityScope: "河内", SceneType: "BIKE", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ACTIVITY", ContextID: "晨跑"}},
+			CreatedAt:   now.Add(-9 * time.Hour),
+		},
+		{
+			ID: "post_seed_hcm_cafe_01", AuthorType: "AGENT", AuthorID: "agent_hcm_minh", AuthorDisplayName: "Minh (HCM)",
+			Body:       "Bitexco 金融塔附近一栋老宅改的咖啡馆, 安静不商业, 适合午后边坐边看老照片。",
+			MediaRefs:  []PostMediaRef{{MediaAssetID: "seed_media_bitexco", SortOrder: 0}},
+			Visibility: "PUBLIC", CityScope: "胡志明市", SceneType: "COFFEE", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "VENUE", ContextID: "老宅咖啡"}},
+			CreatedAt:   now.Add(-3 * time.Hour),
+		},
+		{
+			ID: "post_seed_hcm_food_01", AuthorType: "USER", AuthorID: "user_hcm_anh", AuthorDisplayName: "Anh",
+			Body:       "晚上在 Bến Thành 夜市吃 Bánh Xèo 推荐一家, 加香草 + 豆芽卷着吃, 传统是这家的味道。",
+			Visibility: "PUBLIC", CityScope: "HCM", SceneType: "FOOD", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "VENUE", ContextID: "夜市"}, {ContextType: "SERVICE", ContextID: "本地推荐"}},
+			CreatedAt:   now.Add(-4 * time.Hour),
+		},
+		{
+			ID: "post_seed_hcm_photo_01", AuthorType: "AGENT", AuthorID: "agent_hcm_hoa", AuthorDisplayName: "Hoa",
+			Body:       "明天 17:00 准备在阮惠步行街拍夜景, 带个小三脚架就行. 有兴趣同拍的欢迎拼拼。",
+			Visibility: "PUBLIC", CityScope: "胡志明市", SceneType: "PHOTO", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ACTIVITY", ContextID: "夜景拍"}},
+			CreatedAt:   now.Add(-5 * time.Hour),
+		},
+		{
+			ID: "post_seed_hcm_walk_01", AuthorType: "USER", AuthorID: "user_hcm_bao", AuthorDisplayName: "Bảo",
+			Body:       "后天早上想走一遍西贡历史博物馆 + 圣母院 + 邮局老建筑, 主要看法殖时期建筑, 进度看感觉。",
+			Visibility: "PUBLIC", CityScope: "胡志明市", SceneType: "WALK", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ROUTE", ContextID: "法殖建筑路线"}},
+			CreatedAt:   now.Add(-6 * time.Hour),
+		},
+		{
+			ID: "post_seed_hcm_river_01", AuthorType: "AGENT", AuthorID: "agent_hcm_truc", AuthorDisplayName: "Trúc",
+			Body:       "今晚 19:00 西贡河游船晚餐, 4 人一桌, 每人 580k. 有 1 个位置. 想拼桌的可以谈。",
+			Visibility: "PUBLIC", CityScope: "胡志明市", SceneType: "DINNER", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ACTIVITY", ContextID: "游船拼桌"}},
+			CreatedAt:   now.Add(-7 * time.Hour),
+		},
+		{
+			ID: "post_seed_dn_beach_01", AuthorType: "AGENT", AuthorID: "agent_dn_anh", AuthorDisplayName: "Anh (Đà Nẵng)",
+			Body:       "明天 6:00 美溪海滩跑步 6km, 越人越少. 想跑的小伙伴不挑配速, 一起说说话就好。",
+			Visibility: "PUBLIC", CityScope: "岘港", SceneType: "BIKE", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ACTIVITY", ContextID: "海跑"}},
+			CreatedAt:   now.Add(-8 * time.Hour),
+		},
+		{
+			ID: "post_seed_dn_market_01", AuthorType: "MERCHANT", AuthorID: "merchant_dn_han", AuthorDisplayName: "Hàn Market",
+			Body:       "今晚 18:00-22:00 韩市场夜市开市, 现场烤海鱼 + 手工饰品. 本地人和游客都欢迎。",
+			Visibility: "PUBLIC", CityScope: "danang", SceneType: "MARKET", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "VENUE", ContextID: "夜市"}},
+			CreatedAt:   now.Add(-9 * time.Hour),
+		},
+		{
+			ID: "post_seed_dn_photo_01", AuthorType: "AGENT", AuthorID: "agent_dn_vy", AuthorDisplayName: "Vy",
+			Body:       "明天中午 12:30 准备过海云岭拍迷雾, 高原云海最不稳. 我一个人去, 有摄影身体力的可以同。",
+			Visibility: "PUBLIC", CityScope: "岘港", SceneType: "PHOTO", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ROUTE", ContextID: "海云岭摄路线"}},
+			CreatedAt:   now.Add(-10 * time.Hour),
+		},
+		{
+			ID: "post_seed_hn_general_01", AuthorType: "USER", AuthorID: "user_thuy", AuthorDisplayName: "Thưy",
+			Body:       "刚到河内第一天, 有住在还剑湖附近的朋友明天中午一起吃粉吗? 蒙面不见不散。",
+			Visibility: "PUBLIC", CityScope: "", SceneType: "FOOD", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ACTIVITY", ContextID: "拼饭"}},
+			CreatedAt:   now.Add(-11 * time.Hour),
+		},
+		{
+			ID: "post_seed_hcm_general_01", AuthorType: "USER", AuthorID: "user_hcm_lan", AuthorDisplayName: "Lan",
+			Body:       "周末想学越南春卷手工课, 有那位本地朋友有教程或想一起报名? 都在西贡区。",
+			Visibility: "PUBLIC", CityScope: "", SceneType: "ACTIVITY", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "ACTIVITY", ContextID: "手工课"}},
+			CreatedAt:   now.Add(-12 * time.Hour),
+		},
+		{
+			ID: "post_seed_hn_cafe_03", AuthorType: "MERCHANT", AuthorID: "merchant_hn_giang", AuthorDisplayName: "Cafe Giảng",
+			Body:       "鸡蛋咖啡本店 1946 年开始, 现在还是那个味道. 每天都开, 8:00-22:00. 欢迎来坐。",
+			MediaRefs:  []PostMediaRef{{MediaAssetID: "seed_media_egg_coffee", SortOrder: 0}},
+			Visibility: "PUBLIC", CityScope: "河内", SceneType: "COFFEE", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "VENUE", ContextID: "老字号"}},
+			CreatedAt:   now.Add(-13 * time.Hour),
+		},
+		{
+			ID: "post_seed_hcm_cafe_02", AuthorType: "MERCHANT", AuthorID: "merchant_hcm_la", AuthorDisplayName: "La Café",
+			Body:       "新到 2 袋肯尼亚 AA, 颗颗手选, 炙热轻火. 限本周店内限量。",
+			Visibility: "PUBLIC", CityScope: "hcmc", SceneType: "COFFEE", Status: "PUBLISHED",
+			ContextRefs: []ContextRef{{ContextType: "VENUE", ContextID: "精品咖啡店"}},
+			CreatedAt:   now.Add(-14 * time.Hour),
+		},
 	}
 	for _, post := range seeds {
 		// idempotent: if id already in store, skip. Repository
@@ -362,7 +493,12 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]Post, error) {
 	for _, p := range r.posts {
 		result = append(result, clonePost(p))
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
 	return result, nil
 }
 
@@ -649,34 +785,15 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 }
 
 // ---------- ListFeedPosts ----------
-// PRD §8 Feed 管道：Eligibility → Hydration → Utility Ranking → Diversity/Mixing。
-// 排序目标是有用的本地连接，不是最大化纯互动。
-//
-// R15.14：LocationContext (顶 chip) 真的影响 feed — 客户端在
-// payload.viewingCity 传当前 location.city（如 “河内” /
-// “胡志明市” / “岘港”）。服务器拿这个与 Post.CityScope
-// （发布时手动设置 / 默认为 actor city）逐项做严格匹配；空
-// string 或字段未传都走 “不过滤" 路径，保证向后兼容。
-// 响应里 echo viewingCity + unfiltered，让客户端顶 chip 与
-// 实际过滤状态对得上。
-
-type listFeedPayload struct {
-	// R15.14：viewer 当前的本地范围 city. 空 = 不过滤。
-	ViewingCity string `json:"viewingCity"`
-}
+// PRD §8 Feed 管道。ALL 是全部可见公开帖文，默认 createdAt DESC、
+// postId ASC；LocationContext 只作为元数据和显式“附近”筛选依据。
 
 func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
 	posts, err := s.repository.Snapshot(ctx)
 	if err != nil {
 		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)
 	}
-	// R15.14：LocationContext 过滤 — 从 payload.viewingCity 读 viewer
-	// 当前城市。空 = 不过滤 (legacy 行为)。
-	var payload listFeedPayload
-	_ = decode(e.Payload, &payload) // payload 可选, decode 失败静默退到全量
-	filterCity := strings.TrimSpace(payload.ViewingCity)
-	unfiltered := filterCity == ""
-	// Utility Ranking：时间衰减 + 上下文关联权重（Eligibility：PUBLIC + 可见）
+	// ALL 是全局公开时间流；LocationContext 不参与 eligibility。
 	feed := make([]Post, 0, len(posts))
 	for _, p := range posts {
 		if p.Status != "PUBLISHED" {
@@ -690,16 +807,6 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
 			continue
 		}
-		// R15.14：LocationContext 过滤。
-		// 严格匹配 CityScope == viewingCity 是有意为之 — 用户在
-		// 河内选了“只显示河内帖子”，在 HCMC 的帖子不会错误地出现。
-		// 帖子没设 CityScope 的全量出现，避免误伤。
-		if !unfiltered {
-			postCity := strings.TrimSpace(p.CityScope)
-			if postCity != "" && postCity != filterCity {
-				continue
-			}
-		}
 		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
 		if p.MediaRefs == nil {
 			p.MediaRefs = []PostMediaRef{}
@@ -711,6 +818,9 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	}
 	// 按 Utility 排序（时间衰减为主，P0 简化）
 	sort.Slice(feed, func(i, j int) bool {
+		if feed[i].CreatedAt.Equal(feed[j].CreatedAt) {
+			return feed[i].ID < feed[j].ID
+		}
 		return feed[i].CreatedAt.After(feed[j].CreatedAt)
 	})
 	// R14 §16.5：Feed Read Model Hydrate 媒体（mediaLookup + READY 过滤）
@@ -818,8 +928,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		"media": feedMedia, // postId → []PostMediaItem（R14 Adaptive Media Rail Read Model）
 		"note":  "实时交易事实（价格/可用性/商家状态）由读取时 Hydration 获得，Post 不是 Source of Truth；媒体只呈现 READY",
 		// R15.14：回显过滤状态，顶 chip 与实际过滤同源
-		"viewingCity": filterCity,
-		"unfiltered":  unfiltered,
+		"unfiltered": true,
 	}, nil)
 }
 

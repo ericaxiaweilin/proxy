@@ -11,6 +11,21 @@ export type ConversationClientOptions = {
   now?: () => Date;
 };
 
+export type ProtectionOverride = {
+  forwardable?: boolean;
+  copyable?: boolean;
+  warn?: boolean;
+  viewLimit?: number;
+  ttlSeconds?: number;
+};
+
+export type ConversationInboxItem = {
+  conversation: { conversationId: string; conversationType: string; originType: string; originId: string; state: string; participants: string[]; lastMessageAt: string };
+  latestMessage?: { messageId: string; senderId: string; body?: string; messageType: string; createdAt: string; senderSnapshot?: { displayName?: string; avatarRef?: string } };
+  counterpartyId?: string;
+  counterpartySnapshot?: { displayName?: string; avatarRef?: string };
+};
+
 export class ConversationClient {
   private commandSequence = 0;
 
@@ -32,27 +47,68 @@ export class ConversationClient {
     return result;
   }
 
-  public async sendMessage(conversationId: string, body: string, assistantMode?: string, temporaryUIResponseId?: string, mediaRef?: string): Promise<Record<string, unknown>> {
+  public async sendMessage(
+    conversationId: string,
+    body: string,
+    assistantMode?: string,
+    temporaryUIResponseId?: string,
+    mediaRef?: string,
+    protectionOverride?: ProtectionOverride,
+    messageType?: "TEXT" | "IMAGE" | "VIDEO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION",
+    proxyObject?: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> }
+  ): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const isImage = Boolean(mediaRef);
+    const resolvedType = messageType ?? (proxyObject ? "TEXT" : isImage ? "IMAGE" : "TEXT");
     const result = await this.sendCommand(session, "SendMessage", { type: "Conversation", id: conversationId }, {
-      messageType: isImage ? "IMAGE" : "TEXT",
+      messageType: resolvedType,
       body: body || (isImage ? " " : ""),
       ...(mediaRef ? { mediaRef } : {}),
       ...(assistantMode ? { assistantMode } : {}),
-      ...(temporaryUIResponseId ? { temporaryUIResponseId } : {})
+      ...(temporaryUIResponseId ? { temporaryUIResponseId } : {}),
+      ...(protectionOverride ? { protectionOverride } : {}),
+      ...(proxyObject ? { proxyObject } : {})
     });
     return result;
   }
 
-  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string): Promise<Record<string, unknown>> {
-    return this.sendMessage(conversationId, caption?.trim() || " ", undefined, undefined, mediaRef);
+  public async sendProxyObject(conversationId: string, proxyObject: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> }): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, proxyObject.snapshot.title as string ?? "", undefined, undefined, undefined, undefined, "TEXT", proxyObject);
+  }
+
+  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, caption?.trim() || " ", undefined, undefined, mediaRef, protectionOverride, "IMAGE");
   }
 
   public async listMessages(conversationId: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "ListConversationMessages", { type: "Conversation", id: conversationId }, {});
     return result;
+  }
+
+  public async listConversations(): Promise<ConversationInboxItem[]> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "ListConversations", { type: "ConversationInbox", id: session.userAccountId }, {});
+    if (typeof result.operationRef !== "string") return [];
+    try {
+      const payload = JSON.parse(result.operationRef) as { conversations?: ConversationInboxItem[] };
+      return Array.isArray(payload.conversations) ? payload.conversations : [];
+    } catch { return []; }
+  }
+
+  public async markMessageRead(messageId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "MarkMessageRead", { type: "Message", id: messageId }, { messageId });
+  }
+
+  public async recordScreenshot(messageId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "RecordScreenshot", { type: "Message", id: messageId }, { messageId });
+  }
+
+  public async forwardMessage(sourceMessageId: string, targetConversationId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "ForwardMessage", { type: "Message", id: sourceMessageId }, { sourceMessageId, targetConversationId });
   }
 
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {

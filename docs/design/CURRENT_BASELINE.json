@@ -10,6 +10,12 @@
     "iconRegistry": "apps/mobile/src/components/proxy-icon.tsx",
     "theme": "apps/mobile/src/theme.tsx"
   },
+  "integration": {
+    "policy": "docs/architecture/MULTI_AGENT_BASELINE_CONTROL.md",
+    "workspaceMode": "SINGLE_WRITER",
+    "externalAgentMode": "ISOLATED_WORKTREE",
+    "recoveryBaselineTag": "baseline/r15.23-command-clean-20260830"
+  },
   "screenReferences": [
     {
       "scope": "root-dock",
@@ -42,6 +48,12 @@
       "version": "SOCIAL_CONTACT_COLLABORATION_V2",
       "file": "docs/design/references/proxy_social_contact_collaboration_v2.html",
       "status": "ACTIVE_SCREEN_REFERENCE"
+    },
+    {
+      "scope": "chat-lotus-aligned",
+      "version": "CHAT_ALIGNED_WITH_LOTUS_V0_1_DRAFT",
+      "file": "docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md",
+      "status": "DRAFT_RFC_AWAITING_REVIEW"
     }
   ],
   "legacy": [

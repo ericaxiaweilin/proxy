@@ -97,6 +97,19 @@ async function createNativeGuestSession(): Promise<void> {
     await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "1");
   }
 }
+
+async function ensureNativeGuestSession(): Promise<void> {
+  try {
+    const stored = await secureSessionStore.read();
+    if (stored) {
+      await sessionAuthClient.refresh();
+      return;
+    }
+  } catch {
+    // refresh() clears an invalid server session; recreate it below.
+  }
+  await createNativeGuestSession();
+}
 // 服务端驱动 Surface 的认证客户端：读模型/命令全部走 /v1/commands/ envelope。
 const sessionAuthClient = new SessionAuthClient({
   baseUrl: localApiBaseUrl,
@@ -132,6 +145,25 @@ export function ProxyApp(): React.JSX.Element {
       if (cancelled) return;
       if (!state) { setPhase("SIGNED_OUT"); return; }
       const isGuestFlag = await nativeSecureStorageDriver.getItem(GUEST_FLAG_KEY).catch(() => null);
+      // Local/API restarts invalidate an in-memory server session while iOS
+      // Keychain correctly keeps the old token. Validate it at boot instead
+      // of letting the first Home conversation fail inside the auth pipeline.
+      // Anonymous users are recovered transparently; registered users return
+      // to sign-in rather than being silently converted into a guest.
+      if (state.status === "AUTHENTICATED") {
+        try {
+          await sessionAuthClient.refresh();
+        } catch {
+          if (isGuestFlag === "1") {
+            await createNativeGuestSession();
+            if (!cancelled) setPhase("PUBLIC");
+            return;
+          }
+          if (!cancelled) setPhase("SIGNED_OUT");
+          return;
+        }
+      }
+      if (cancelled) return;
       if (isGuestFlag === "1" && state.status === "AUTHENTICATED") {
         setPhase("PUBLIC");
       } else {
@@ -162,6 +194,7 @@ export function ProxyApp(): React.JSX.Element {
         notification={notificationClient}
         scene={sceneClient}
         isGuest={phase === "PUBLIC"}
+        ensureConversationSession={phase === "PUBLIC" ? ensureNativeGuestSession : undefined}
         onSignOut={() => {
           void Promise.all([secureSessionStore.clear().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined)]).then(()=> setPhase("SIGNED_OUT"));
         }}

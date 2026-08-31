@@ -221,6 +221,40 @@ func TestSendMessageAndList(t *testing.T) {
 	}
 }
 
+func TestListConversationsReturnsOnlyActorInboxWithLatestMessage(t *testing.T) {
+	s := New()
+	created := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"originType": "PROFILE", "originId": "profile_linh", "participantId": "user_linh",
+	}, ""))
+	var createdView struct {
+		ConversationID string `json:"conversationId"`
+	}
+	_ = json.Unmarshal([]byte(created.OperationRef), &createdView)
+	_ = s.Handle(envelopeFor("SendMessage", map[string]any{"messageType": "TEXT", "body": "真实收件箱消息"}, createdView.ConversationID))
+
+	other := envelopeFor("StartConversation", map[string]any{
+		"originType": "PROFILE", "originId": "profile_other", "participantId": "user_other",
+	}, "")
+	other.Actor = command.Actor{Type: "USER", ID: "user_outside"}
+	other.Principal = command.Principal{Type: "INDIVIDUAL", ID: "user_outside"}
+	_ = s.Handle(other)
+
+	result := s.Handle(envelopeFor("ListConversations", map[string]any{}, "user_001"))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("list conversations: %s", result.Outcome)
+	}
+	var view struct {
+		Conversations []ConversationSummary `json:"conversations"`
+	}
+	_ = json.Unmarshal([]byte(result.OperationRef), &view)
+	if len(view.Conversations) != 1 {
+		t.Fatalf("want actor's 1 conversation, got %d", len(view.Conversations))
+	}
+	if view.Conversations[0].LatestMessage == nil || view.Conversations[0].LatestMessage.Body != "真实收件箱消息" {
+		t.Fatalf("latest message missing: %+v", view.Conversations[0].LatestMessage)
+	}
+}
+
 // Gate D：普通消息不创建 Need；Need Draft → 用户确认 → 正式 Need。
 func TestNeedDraftExplicitConfirm(t *testing.T) {
 	s := New()

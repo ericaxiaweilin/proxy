@@ -7,7 +7,7 @@
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
 import { useEffect, useRef, useState } from "react";
-import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import * as ImagePicker from "expo-image-picker";
@@ -17,6 +17,9 @@ import { MerchantMeR21 } from "./merchant-me-r21";
 import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
 import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
+import { ThreadsPostMedia } from "../components/threads-post-media";
+import { SecuritySettings } from "../components/security-settings";
+import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import { type LocalNetClient } from "../localnet-client";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
@@ -536,19 +539,19 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
 }
 
 type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
-const MY_ORDER_ROWS = [
-  { type: "published", title: "同行 · 河内老城区半日", id: "PX-20260825-001284", status: "进行中", fields: [["订单类型", "同行服务"], ["订单金额", "₫350,000"], ["服务时间", "今天 14:00–18:00"], ["地点", "河内 · 还剑湖"], ["对方", "Minh Nguyen"], ["付款状态", "已支付"], ["下单时间", "8月25日 10:42"], ["结算状态", "服务完成后结算"]], actions: ["联系对方", "订单详情"] },
-  { type: "joined", title: "现场翻译 · 美甲店沟通", id: "PX-20260823-000947", status: "待确认", fields: [["订单类型", "翻译"], ["订单金额", "₫220,000"], ["服务时间", "8月27日 16:00"], ["地点", "西湖区"], ["发布者", "Linh Tran"], ["付款状态", "待支付"]], actions: ["拒绝", "接受订单"] },
-  { type: "done", title: "拍照 · 店铺体验记录", id: "PX-20260818-000613", status: "已完成", fields: [["订单金额", "₫180,000"], ["实付金额", "₫180,000"], ["完成时间", "8月18日 17:36"], ["结算状态", "已结算"]], actions: ["再次发布", "查看详情"] },
-  { type: "cancelled", title: "同行 · 西湖夜游", id: "PX-20260812-000421", status: "已取消", fields: [["订单金额", "₫300,000"], ["退款状态", "已退款"], ["取消时间", "8月12日 13:20"], ["取消原因", "行程变更"]], actions: [] }
-] as const;
+function orderStatus(order: FulfillmentOrder): string { return ({ OFFERED: "待确认", CONFIRMED: "已确认", EXECUTING: "进行中", COMPLETED: "已完成", CANCELLED: "已取消" } as const)[order.lifecycle]; }
+function orderMoney(order: FulfillmentOrder): string { return `${order.snapshot.agreedCompensation.toLocaleString()} ${order.snapshot.currency || "VND"}`; }
 
-function MyOrdersSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+function MyOrdersSurface({ client, onBack }: { client: FulfillmentClient; onBack: () => void }): React.JSX.Element {
   const [filter, setFilter] = useState<OrderFilter>("all");
-  const [detail, setDetail] = useState<(typeof MY_ORDER_ROWS)[number]>();
-  if (detail) return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回订单</Text></Pressable><Text style={styles.detailTitle}>订单详情</Text><View style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{detail.title}</Text><Text style={styles.orderId}>{detail.id}</Text></View><Text style={[styles.orderBadge, detail.status === "进行中" && styles.orderBadgeLive]}>{detail.status}</Text></View><Text style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text></View><View style={styles.orderCard}><Text style={styles.orderTitle}>服务信息</Text><View style={styles.orderGrid}>{detail.fields.map(([label, value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></View></ScrollView></View>;
-  const visible = filter === "all" ? MY_ORDER_ROWS : MY_ORDER_ROWS.filter((item) => item.type === filter);
-  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>我的订单</Text></View><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}><Text style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{visible.map((item) => <View key={item.id} style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{item.title}</Text><Text style={styles.orderId}>订单编号：{item.id}</Text></View><Text style={[styles.orderBadge, item.status === "进行中" && styles.orderBadgeLive]}>{item.status}</Text></View><View style={styles.orderGrid}>{item.fields.map(([label,value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View>{item.status === "进行中" ? <Text style={styles.orderStatus}>● 已接单 · 等待服务开始</Text> : null}{item.actions.length ? <View style={styles.orderActions}>{item.actions.map((action,index) => <Pressable key={action} onPress={() => action.includes("详情") ? setDetail(item) : undefined} style={[styles.orderAction, index === item.actions.length - 1 && styles.orderActionPrimary]}><Text style={[styles.orderActionText, index === item.actions.length - 1 && styles.orderActionPrimaryText]}>{action}</Text></Pressable>)}</View> : null}</View>)}</ScrollView></View>;
+  const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
+  const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [detail, setDetail] = useState<FulfillmentOrder>();
+  useEffect(() => { let active = true; setPhase("LOADING"); void client.listMyOrders().then((rows) => { if (active) { setOrders(rows); setPhase("READY"); } }).catch(() => { if (active) setPhase("ERROR"); }); return () => { active = false; }; }, [client]);
+  const visible = orders.filter((order) => filter === "all" || filter === "published" && order.viewerRole === "REQUESTER" || filter === "joined" && order.viewerRole === "AGENT" || filter === "done" && order.lifecycle === "COMPLETED" || filter === "cancelled" && order.lifecycle === "CANCELLED");
+  const fields = (order: FulfillmentOrder): Array<[string,string]> => [["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"], ["地点", order.snapshot.meetingContext || "待确认"], ["时长", order.snapshot.duration || "待确认"], ["结算", order.snapshot.settlementMode || "待确认"]];
+  if (detail) return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回订单</Text></Pressable><Text style={styles.detailTitle}>订单详情</Text><View style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{detail.snapshot.serviceSku || "Proxy 订单"}</Text><Text style={styles.orderId}>{detail.orderId}</Text></View><Text style={[styles.orderBadge, detail.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(detail)}</Text></View><Text style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text></View><View style={styles.orderCard}><Text style={styles.orderTitle}>服务信息</Text><View style={styles.orderGrid}>{fields(detail).map(([label, value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></View></ScrollView></View>;
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>我的订单</Text></View><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}><Text style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}{phase === "ERROR" ? <Text style={styles.personalEmpty}>订单服务暂时不可用，请稍后重试。</Text> : null}{phase === "READY" && visible.length === 0 ? <Text style={styles.personalEmpty}>当前分类还没有订单。</Text> : null}{visible.map((item) => <Pressable key={item.orderId} onPress={() => setDetail(item)} style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{item.snapshot.serviceSku || "Proxy 订单"}</Text><Text style={styles.orderId}>订单编号：{item.orderId}</Text></View><Text style={[styles.orderBadge, item.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(item)}</Text></View><View style={styles.orderGrid}>{fields(item).slice(0,4).map(([label,value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></Pressable>)}</ScrollView></View>;
 }
 
 function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
@@ -1212,6 +1215,7 @@ function SocialRow({
 export function MeSurface({
   context,
   localNet,
+  fulfillment,
   experienceSections,
   experienceMode,
   onOpenSwitcher,
@@ -1226,6 +1230,7 @@ export function MeSurface({
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
+  fulfillment: FulfillmentClient;
   experienceSections?: ExperienceMenuSection[];
   experienceMode?: "MERGE" | "REPLACE";
   onOpenSwitcher: () => void;
@@ -1285,6 +1290,8 @@ export function MeSurface({
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
   const [socialEditor, setSocialEditor] = useState<SocialAccount>();
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
+  const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
+  const [screenshotWarn, setScreenshotWarn] = useState(true);
   const [profileDraft, setProfileDraft] = useState({
     name: "Huyen",
     handle: "huyen.hanoi",
@@ -1294,14 +1301,14 @@ export function MeSurface({
 
   useEffect(() => {
     let cancelled = false;
-    void localNet.listFeedPosts().then((read) => {
+    void localNet.listMyFeedPosts().then((read) => {
       if (cancelled) return;
-      // 个人主页只读取当前用户自己的帖文；不借用 Linh/Mai 等测试用户媒体。
-      setProfilePosts(read.posts.filter((post) => post.authorDisplayName === "你" || post.authorDisplayName === profileDraft.name));
+      // 个人主页按账户 ID 读取，不再依赖易变的“你/Huyen”显示名。
+      setProfilePosts(read.posts);
       setProfileMedia(read.media);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [localNet, profileDraft.name]);
+  }, [localNet]);
 
   // 轻 CRM 关系图对 BUSINESS 也开放，优先于 R21 商家页
   if (subPage?.route === "friendcrm") {
@@ -1400,7 +1407,7 @@ export function MeSurface({
     const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => setSubPage(undefined)}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
-    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     // R15.13 P2: myscenes gets a real-data section appended beneath
@@ -1477,6 +1484,7 @@ export function MeSurface({
     }
 
     // 原型 screens.appbehavior：不是设置表格，而是一组应用可靠性检查卡片。
+    // Lotus §8: 安全区块前置于行为检查之上
     if (subPage.route === "appbehavior") {
       const checks = [
         ["安全区域", "底部操作不能被系统手势区域遮挡。"],
@@ -1495,7 +1503,16 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.appBehaviorTitle}>应用行为检查</Text>
+            <Text style={styles.appBehaviorTitle}>设置与隐私 · 安全</Text>
+            <SecuritySettings
+              retentionDays={securityRetention}
+              onRetentionChange={setSecurityRetention}
+              screenshotWarnEnabled={screenshotWarn}
+              onToggleScreenshotWarn={setScreenshotWarn}
+              onManageIdentities={() => setSubPage(undefined)}
+              onManageDevices={() => setSubPage(undefined)}
+            />
+            <Text style={[styles.appBehaviorTitle, { marginTop: 24 }]}>应用行为检查</Text>
             {checks.map(([title, desc], index) => (
               <View key={title} style={[styles.appBehaviorCard, index === checks.length - 1 && styles.appBehaviorCardDark]}>
                 <Text style={[styles.appBehaviorCardTitle, index === checks.length - 1 && styles.appBehaviorCardTitleDark]}>{title}</Text>
@@ -1983,16 +2000,25 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.personalHubContent}>
+            {/* R15.23: 1:1 复刻 .topbar (h48 p 0 14 flex align center border-b 1 line bg rgba(255,255,255,.96)) */}
             <View style={styles.personalTopbar}>
               <Pressable accessibilityLabel="返回" onPress={() => setSubPage(undefined)} style={styles.personalTopbarButton}>
                 <Text style={styles.personalTopbarIcon}>‹</Text>
               </Pressable>
-              <Text style={styles.personalTopbarHandle}>@{profileDraft.handle}</Text>
-              <Pressable accessibilityLabel="打开二维码" onPress={() => openSubPage("personalqr")} style={styles.personalTopbarButton}>
-                <Text style={styles.personalTopbarMore}>•••</Text>
+              <Text numberOfLines={1} style={styles.personalTopbarHandle}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
+              <Pressable accessibilityLabel="更多" onPress={() => openSubPage("personalqr")} style={styles.personalTopbarButton}>
+                <Text style={styles.personalTopbarIcon}>⋯</Text>
               </Pressable>
             </View>
 
+            {/* R15.23: .prototype-view (p 9 16 flex alignItems center gap 10 font 11 muted) */}
+            <View style={styles.personalPrototypeBar}>
+              <Text style={styles.personalPrototypeLabel}>原型视角</Text>
+              <Text style={styles.personalPrototypeHint}>验证关系权限，不属于正式主页 UI</Text>
+              <Text style={styles.personalPrototypeSelect}>本人 ▾</Text>
+            </View>
+
+            {/* R15.23: .profile (p 20 18 15) + .profile-head grid 1fr 78px */}
             <View style={styles.personalProfile}>
               <View style={styles.personalIdentityRow}>
                 <View style={styles.personalIdentityCopy}>
@@ -2008,62 +2034,100 @@ export function MeSurface({
                 </Pressable>
               </View>
               <Text style={styles.personalBio}>{profileDraft.bio}</Text>
-              <Text style={styles.personalMeta}>{profileDraft.city} · 42 次履约 · 本周六可用</Text>
+              <View style={styles.personalMeta}>
+                <Text>{profileDraft.city}</Text>
+                <View style={styles.personalMetaDot} />
+                <Text>42 次已履约</Text>
+                <View style={styles.personalMetaDot} />
+                <View style={styles.personalAvailability}>
+                  <View style={styles.personalAvailabilityDot} />
+                  <Text>可接单</Text>
+                </View>
+              </View>
+              {/* R15.23: .profile-actions grid 1fr 1fr gap 8 + .action.primary/lime */}
               <View style={styles.personalActions}>
-                <Pressable onPress={() => setProfileEditorOpen(true)} style={styles.personalActionButton}>
-                  <Text style={styles.personalActionText}>编辑主页</Text>
+                <Pressable onPress={() => setProfileEditorOpen(true)} style={[styles.personalActionButton, styles.personalActionPrimary]}>
+                  <Text style={styles.personalActionPrimaryText}>编辑主页</Text>
                 </Pressable>
-                <Pressable onPress={() => void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` })} style={styles.personalActionButton}>
-                  <Text style={styles.personalActionText}>分享主页</Text>
+                <Pressable onPress={() => void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` })} style={[styles.personalActionButton, styles.personalActionLime]}>
+                  <Text style={styles.personalActionLimeText}>分享主页</Text>
                 </Pressable>
               </View>
             </View>
 
+            {/* R15.23: .tabs (h 47 grid 3 1fr border-b 1 line bg #fff) + .tab.active::after 1.5px underline */}
             <View style={styles.personalTabs}>
               {([['FEED', '动态'], ['PHOTOS', '照片'], ['RECORDS', '记录']] as const).map(([key, label]) => (
-                <Pressable key={key} onPress={() => setPersonalHubTab(key)} style={[styles.personalTab, personalHubTab === key ? styles.personalTabActive : null]}>
-                  <Text style={[styles.personalTabText, personalHubTab === key ? styles.personalTabTextActive : null]}>{label}</Text>
+                <Pressable key={key} onPress={() => setPersonalHubTab(key)} style={styles.personalTab}>
+                  <Text style={[styles.personalTabText, personalHubTab === key && styles.personalTabTextActive]}>{label}</Text>
+                  {personalHubTab === key ? <View style={styles.personalTabUnderline} /> : null}
                 </Pressable>
               ))}
             </View>
 
+            {/* R15.23: .post (p 16 18 14 border-b 1 line) + .post-head grid 38/1fr/32 + .post-body paddingLeft 48 marginTop -12 */}
             {personalHubTab === "FEED" ? profilePosts.map((post) => {
               const items = profileMedia[post.postId] ?? [];
               return (
               <View key={post.postId} style={styles.personalPost}>
-                <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.personalPostAvatar} />
-                <View style={styles.personalPostBody}>
-                  <View style={styles.personalPostHead}>
-                    <Text style={styles.personalPostName}>{profileDraft.name} <Text style={styles.personalVerified}>✓</Text></Text>
-                    <Text style={styles.personalPostTime}>{new Date(post.createdAt).toLocaleDateString()}</Text>
+                <View style={styles.personalPostHead}>
+                  <View style={styles.personalPostAvatar}>
+                    {profileAvatarUri ? <Image source={{ uri: profileAvatarUri }} style={styles.personalPostAvatarImage} /> : <Text style={styles.personalPostAvatarText}>{(profileDraft.name || "?").charAt(0).toUpperCase()}</Text>}
                   </View>
-                  <Text style={styles.personalPostText}>{post.body}</Text>
-                  <Text style={styles.personalPostContext}>{post.contextRefs.map((entry) => entry.contextId).join(" · ")}</Text>
-                  {items.length > 1 ? (
-                    <AdaptiveMediaCollection items={items} currentIndex={profileMediaPositions[post.postId] ?? 0} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onIndexChange={(index) => setProfileMediaPositions((current) => ({ ...current, [post.postId]: index }))} onOpen={(index) => setProfileViewer({ postId: post.postId, index })} />
-                  ) : items[0]?.mediaType === "IMAGE" ? (
-                    <SinglePostImage item={items[0]} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onPress={() => setProfileViewer({ postId: post.postId, index: 0 })} />
-                  ) : null}
-                  <View style={styles.personalPostActions}>
-                    <Text style={styles.personalPostAction}>♡ 24</Text><Text style={styles.personalPostAction}>○ 6</Text><Text style={styles.personalPostAction}>↗ 分享</Text>
+                  <View style={styles.personalPostBody}>
+                    <View style={styles.personalPostNameLine}>
+                      <Text numberOfLines={1} style={styles.personalPostName}>{profileDraft.name}</Text>
+                      <Text numberOfLines={1} style={styles.personalPostTime}>· {new Date(post.createdAt).toLocaleDateString()}</Text>
+                    </View>
+                    <Text style={styles.personalPostText}>{post.body}</Text>
+                    {/* R15.23: .scene-line flex alignItems center gap 7 marginTop 9 font 11 color #666 + .scene-chip */}
+                    <View style={styles.personalPostContext}>
+                      {post.contextRefs.map((entry) => <Text key={entry.contextId} style={styles.personalPostSceneChip}>{entry.contextId}</Text>)}
+                    </View>
+                    {items.length > 0 ? (
+                      <ThreadsPostMedia items={items} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onOpen={(index) => setProfileViewer({ postId: post.postId, index })} />
+                    ) : null}
+                    {/* R15.23: .post-actions flex gap 20 marginTop 12 font 12 color #666 */}
+                    <View style={styles.personalPostActions}>
+                      <Pressable><Text style={styles.personalPostAction}>♡ 喜欢</Text></Pressable>
+                      <Pressable><Text style={styles.personalPostAction}>◯ 回复</Text></Pressable>
+                      <Pressable><Text style={styles.personalPostAction}>↗ 分享</Text></Pressable>
+                    </View>
+                    {/* R15.23: .owner-menu (own posts only) */}
+                    <View style={styles.personalPostOwnerMenu}>
+                      <Pressable><Text style={styles.personalPostOwnerItem}>编辑</Text></Pressable>
+                      <Pressable><Text style={styles.personalPostOwnerDanger}>删除</Text></Pressable>
+                      <Text style={styles.personalPostOwnerBadge}>所有人</Text>
+                    </View>
                   </View>
+                  {/* R15.23: .post-menu (32pt, 19px, #555, ⋯) */}
+                  <Pressable accessibilityLabel="更多" style={styles.personalPostMenu}><Text style={styles.personalPostMenuText}>⋯</Text></Pressable>
                 </View>
               </View>
               );
             }) : null}
 
-            {personalHubTab === "FEED" && profilePosts.length === 0 ? <Text style={styles.personalEmpty}>你发布的帖文会显示在这里。</Text> : null}
+            {personalHubTab === "FEED" && profilePosts.length === 0 ? <View style={styles.personalEmpty}><Text style={styles.personalEmptyTitle}>还没有动态</Text><Text>主页只展示内容，不再堆叠个人资料字段。</Text></View> : null}
 
+            {/* R15.23: .media-grid grid 3 1fr gap 1px bg #fff p 1 + button aspectRatio 1 */}
             {personalHubTab === "PHOTOS" ? (
               <View style={styles.personalPhotoGrid}>
-                {personalPhotos.map(({ item, index, postId }) => <Pressable key={`${item.mediaAssetId}-${index}`} onPress={() => setProfileViewer({ postId, index })} style={styles.personalPhotoTile}><Image source={{ uri: localNet.resolveMediaUrl(item.feedUrl ?? item.thumbnailUrl ?? item.galleryUrl ?? "") }} resizeMode="cover" style={styles.personalPhotoImage} /></Pressable>)}
+                {personalPhotos.map(({ item, index, postId }) => (
+                  <Pressable key={`${item.mediaAssetId}-${index}`} onPress={() => setProfileViewer({ postId, index })} style={styles.personalPhotoTile}>
+                    <Image source={{ uri: localNet.resolveMediaUrl(item.feedUrl ?? item.thumbnailUrl ?? item.galleryUrl ?? "") }} resizeMode="cover" style={styles.personalPhotoImage} />
+                    {/* R15.23: .media-private (privacy badge) */}
+                    <Text style={styles.personalPhotoPrivate}>仅自己</Text>
+                  </Pressable>
+                ))}
               </View>
             ) : null}
 
+            {/* R15.23: .record (p 15 18 border-b 1 line grid 42/1fr/auto gap 11) + .record-icon 40x40 */}
             {personalHubTab === "RECORDS" ? (
               <View style={styles.personalRecords}>
-                {[["身份已验证", "手机、邮箱与本人信息已确认", "✓"], ["42 次履约", "准时率 98% · 7 次复购", "42"], ["近期记录", "最近一次合作已完成并确认 Outcome", "›"]].map(([title, desc, value]) => (
+                {[["✓", "身份已验证", "Proxy 完成真实性校验", "已完成"], ["42", "42 次已履约", "平台内可验证记录", "98% 准时"], ["↻", "7 次复购", "来自已完成服务", "稳定"]].map(([icon, title, desc, value]) => (
                   <View key={title} style={styles.personalRecordRow}>
+                    <View style={styles.personalRecordIcon}><Text style={styles.personalRecordValue}>{icon}</Text></View>
                     <View style={styles.personalRecordCopy}><Text style={styles.personalRecordTitle}>{title}</Text><Text style={styles.personalRecordDesc}>{desc}</Text></View>
                     <Text style={styles.personalRecordValue}>{value}</Text>
                   </View>
@@ -3419,63 +3483,135 @@ const styles = StyleSheet.create({
 
   // 个人主页 v5：Threads 式轻资料与内容分页。能力与可用时间留在“我的市场”。
   personalHubContent: { paddingBottom: 0 },
+  // R15.23: 1:1 复刻 proxy_personal_profile_architecture_v5_threads.html
+  // .topbar: h48 p 0 14 grid 42/1fr/42 alignItems center border-b 1 line position relative top 0 bg rgba(255,255,255,.96) z-index 20
   personalTopbar: {
     alignItems: "center",
-    borderBottomColor: "#ECE8EF",
+    backgroundColor: "rgba(255,255,255,.96)",
+    borderBottomColor: "#E8E8E8",
     borderBottomWidth: 1,
     flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 10,
-    paddingVertical: 12
+    height: 48,
+    paddingHorizontal: 14,
+    position: "relative",
+    top: 0,
+    zIndex: 20
   },
-  personalTopbarButton: { alignItems: "center", height: 34, justifyContent: "center", width: 34 },
-  personalTopbarIcon: { color: color.ink, fontSize: 30, lineHeight: 32 },
-  personalTopbarHandle: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  personalTopbarMore: { color: color.ink, fontSize: 17, fontWeight: "800", letterSpacing: 1 },
-  personalProfile: { paddingHorizontal: 12, paddingBottom: 14, paddingTop: 16 },
-  personalIdentityRow: { alignItems: "center", flexDirection: "row" },
-  personalIdentityCopy: { flex: 1 },
-  personalDisplayName: { color: color.ink, fontSize: 24, fontWeight: "900" },
-  personalHandleRow: { alignItems: "center", flexDirection: "row", gap: 5, marginTop: 4 },
-  personalHandle: { color: color.muted, fontSize: 13 },
-  personalVerified: { color: "#7A2CFF", fontSize: 13, fontWeight: "900" },
-  personalAvatar: { alignItems: "center", borderRadius: 30, height: 60, justifyContent: "center", width: 60 },
-  personalAvatarText: { color: color.white, fontSize: 24, fontWeight: "900" },
-  personalAvatarButton: { height: 66, position: "relative", width: 66 },
-  personalAvatarImage: { borderRadius: 33, height: 66, width: 66 },
+  // .icon-btn: 38x38 radius 50% font 21 grid place center
+  personalTopbarButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },
+  personalTopbarIcon: { color: color.ink, fontSize: 21, fontWeight: "300", lineHeight: 24 },
+  // .top-title: text center font 15 weight 650 overflow ellipsis nowrap
+  personalTopbarHandle: { color: color.ink, flex: 1, fontSize: 15, fontWeight: "700", overflow: "hidden", textAlign: "center" },
+  // .prototype-view: border-b 1 line p 9 16 flex alignItems center gap 10 font 11 muted
+  personalPrototypeBar: { alignItems: "center", borderBottomColor: "#E8E8E8", borderBottomWidth: 1, flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 9 },
+  personalPrototypeLabel: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  personalPrototypeHint: { color: "#777", flex: 1, fontSize: 11 },
+  personalPrototypeSelect: { backgroundColor: "#F5F5F5", borderRadius: 999, color: color.ink, fontSize: 11, paddingHorizontal: 10, paddingVertical: 7 },
+  // .profile: p 20 18 15
+  personalProfile: { paddingBottom: 15, paddingHorizontal: 18, paddingTop: 20 },
+  // .profile-head: grid 1fr 78px gap 16 alignItems start
+  personalIdentityRow: { alignItems: "flex-start", flexDirection: "row", gap: 16 },
+  personalIdentityCopy: { flex: 1, minWidth: 0 },
+  // .display-name: font 22 weight 720 letterSpacing -.35 lineHeight 1.12 marginTop 2
+  personalDisplayName: { color: color.ink, fontSize: 22, fontWeight: "800", letterSpacing: -0.35, lineHeight: 25, marginTop: 2 },
+  // .handle-row: flex alignItems center gap 7 marginTop 7 font 13
+  personalHandleRow: { alignItems: "center", flexDirection: "row", gap: 7, marginTop: 7 },
+  // .handle: color #333
+  personalHandle: { color: "#333", fontSize: 13 },
+  // .verified: 16x16 radius 50% bg #111 color #fff grid place center font 10 weight 800 (Proxy 改成 11 满足 R3 baseline)
+  personalVerified: { alignItems: "center", backgroundColor: "#111", borderRadius: 8, color: color.white, fontSize: 11, fontWeight: "800", height: 16, justifyContent: "center", lineHeight: 13, width: 16 },
+  // .avatar: 76x76 radius 50% bg #111 color #fff grid place center font 28 weight 720 alignSelf end overflow hidden
+  personalAvatar: { alignItems: "center", backgroundColor: "#111", borderRadius: 38, color: color.white, fontSize: 28, fontWeight: "800", height: 76, justifyContent: "center", overflow: "hidden", width: 76 },
+  personalAvatarText: { color: color.white, fontSize: 28, fontWeight: "800" },
+  personalAvatarImage: { borderRadius: 38, height: 76, width: 76 },
+  // avatar 编辑角标 (owner only)
   personalAvatarEdit: { alignItems: "center", backgroundColor: color.ink, borderColor: color.white, borderRadius: 11, borderWidth: 2, bottom: -1, height: 22, justifyContent: "center", position: "absolute", right: -1, width: 22 },
   personalAvatarEditText: { color: color.white, fontSize: 15, fontWeight: "900", lineHeight: 17 },
-  personalBio: { color: color.ink, fontSize: 14, lineHeight: 20, marginTop: 14 },
-  personalMeta: { color: color.muted, fontSize: 12, marginTop: 7 },
-  personalActions: { flexDirection: "row", gap: 9, marginTop: 16 },
-  personalActionButton: { alignItems: "center", borderColor: "#DDD8E1", borderRadius: 10, borderWidth: 1, flex: 1, paddingVertical: 9 },
-  personalActionText: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  personalTabs: { borderBottomColor: "#E9E5EC", borderBottomWidth: 1, flexDirection: "row" },
-  personalTab: { alignItems: "center", flex: 1, paddingVertical: 13 },
-  personalTabActive: { borderBottomColor: color.ink, borderBottomWidth: 2 },
-  personalTabText: { color: color.muted, fontSize: 13, fontWeight: "700" },
-  personalTabTextActive: { color: color.ink, fontWeight: "900" },
-  personalPost: { borderBottomColor: "#E9E5EC", borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 8, paddingVertical: 12 },
-  personalPostAvatar: { alignItems: "center", borderRadius: 18, height: 36, justifyContent: "center", width: 36 },
-  personalPostAvatarText: { color: color.white, fontSize: 14, fontWeight: "900" },
-  personalPostBody: { flex: 1 },
-  personalPostHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  personalPostName: { color: color.ink, fontSize: 13, fontWeight: "900" },
-  personalPostTime: { color: color.muted, fontSize: 11 },
-  personalPostText: { color: color.ink, fontSize: 14, lineHeight: 20, marginTop: 5 },
-  personalPostContext: { color: color.muted, fontSize: 11, marginTop: 5 },
-  personalPostActions: { flexDirection: "row", gap: 22, marginTop: 11 },
-  personalPostAction: { color: color.ink, fontSize: 12, fontWeight: "700" },
-  personalEmpty: { color: color.muted, fontSize: 13, paddingHorizontal: 16, paddingVertical: 32, textAlign: "center" },
-  personalPhotoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 2, paddingTop: 2 },
-  personalPhotoTile: { aspectRatio: 1, width: "33%" },
+  personalAvatarButton: { height: 76, position: "relative", width: 76 },
+  // .bio: font 14 lh 1.48 marginTop 14 maxWidth 370
+  personalBio: { color: color.ink, fontSize: 14, lineHeight: 21, marginTop: 14, maxWidth: 370 },
+  // .profile-meta: marginTop 12 flex alignItems center gap 7 wrap font 12 muted
+  personalMeta: { alignItems: "center", color: "#777", flexDirection: "row", flexWrap: "wrap", fontSize: 12, gap: 7, marginTop: 12 },
+  // .dot: 2x2 radius 50% bg #aaa
+  personalMetaDot: { backgroundColor: "#AAA", borderRadius: 1, height: 2, width: 2 },
+  // .availability: inline-flex alignItems center gap 5 color #111
+  personalAvailability: { alignItems: "center", color: color.ink, flexDirection: "row", gap: 5 },
+  // .availability::before: 7x7 radius 50% bg lime (Proxy: 用单独 View)
+  personalAvailabilityDot: { backgroundColor: "#C9FF08", borderRadius: 3.5, height: 7, width: 7 },
+  // .profile-actions: grid 1fr 1fr gap 8 marginTop 16
+  personalActions: { flexDirection: "row", gap: 8, marginTop: 16 },
+  // .action: h38 border 1 #d7d7d7 bg #fff radius 10 font 13 weight 650
+  personalActionButton: { alignItems: "center", backgroundColor: color.white, borderColor: "#D7D7D7", borderRadius: 10, borderWidth: 1, flex: 1, height: 38, justifyContent: "center" },
+  personalActionText: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  // .action.primary: bg #111 color #fff border #111
+  personalActionPrimary: { backgroundColor: "#111", borderColor: "#111" },
+  personalActionPrimaryText: { color: color.white, fontSize: 13, fontWeight: "700" },
+  // .action.lime: bg lime border lime color #111
+  personalActionLime: { backgroundColor: "#C9FF08", borderColor: "#C9FF08" },
+  personalActionLimeText: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  // .tabs: h 47 grid 3 1fr border-b 1 line position relative top 48 bg #fff z 18
+  personalTabs: { backgroundColor: color.white, borderBottomColor: "#E8E8E8", borderBottomWidth: 1, flexDirection: "row", height: 47, position: "relative", top: 0, zIndex: 18 },
+  // .tab: position relative border 0 bg #fff color #8a8a8a font 13 weight 560
+  personalTab: { alignItems: "center", flex: 1, height: 47, justifyContent: "center", position: "relative" },
+  // .tab.active::after: position abs left 16% right 16% bottom -1 h 1.5 bg #111
+  personalTabUnderline: { backgroundColor: "#111", bottom: -1, height: 1.5, left: "16%", position: "absolute", right: "16%" },
+  personalTabText: { color: "#8A8A8A", fontSize: 13, fontWeight: "600" },
+  personalTabTextActive: { color: color.ink, fontWeight: "700" },
+  // .post: p 16 18 14 border-b 1 line
+  personalPost: { borderBottomColor: "#E8E8E8", borderBottomWidth: 1, paddingBottom: 14, paddingHorizontal: 18, paddingTop: 16 },
+  // .post-head: grid 38/1fr/32 gap 10 alignItems start
+  personalPostHead: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  // .mini-avatar: 38x38 radius 50% bg #111 color #fff grid place center font 14 weight 700
+  personalPostAvatar: { alignItems: "center", backgroundColor: "#111", borderRadius: 19, color: color.white, fontSize: 14, fontWeight: "700", height: 38, justifyContent: "center", overflow: "hidden", width: 38 },
+  personalPostAvatarText: { color: color.white, fontSize: 14, fontWeight: "700" },
+  personalPostAvatarImage: { borderRadius: 19, height: 38, width: 38 },
+  // .post-body: paddingLeft 48 marginTop -12
+  personalPostBody: { flex: 1, marginTop: -12, paddingLeft: 48 },
+  // .post-name-line: flex gap 6 alignItems center minWidth 0
+  personalPostNameLine: { alignItems: "center", flexDirection: "row", gap: 6, minWidth: 0 },
+  // .post-name: font 13 weight 680
+  personalPostName: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  // .post-time: font 11 color muted nowrap
+  personalPostTime: { color: "#777", fontSize: 11, lineHeight: 14 },
+  // .post-menu: border 0 bg transparent font 19 lh 1 p 0 h 28 color #555
+  personalPostMenu: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
+  personalPostMenuText: { color: "#555", fontSize: 19, lineHeight: 22 },
+  // .post-text: font 14 lh 1.48 whiteSpace pre-wrap
+  personalPostText: { color: color.ink, fontSize: 14, lineHeight: 21, marginTop: 5 },
+  // .scene-line: flex alignItems center gap 7 marginTop 9 font 11 color #666
+  personalPostContext: { alignItems: "center", color: "#666", flexDirection: "row", flexWrap: "wrap", fontSize: 11, gap: 7, marginTop: 9 },
+  // .scene-chip: border 1 #ddd radius 999 p 4 8 color #111 bg #fff
+  personalPostSceneChip: { backgroundColor: color.white, borderColor: "#DDD", borderRadius: 999, borderWidth: 1, color: color.ink, fontSize: 11, fontWeight: "600", paddingHorizontal: 8, paddingVertical: 4 },
+  // .post-actions: flex gap 20 marginTop 12 font 12 color #666
+  personalPostActions: { flexDirection: "row", gap: 20, marginTop: 12 },
+  personalPostAction: { color: "#666", fontSize: 12, fontWeight: "500" },
+  // .owner-menu: flex gap 10 marginTop 10 (own posts only)
+  personalPostOwnerMenu: { flexDirection: "row", gap: 10, marginTop: 10 },
+  personalPostOwnerItem: { color: "#777", fontSize: 11, fontWeight: "600" },
+  personalPostOwnerDanger: { color: "#E5484D", fontSize: 11, fontWeight: "600" },
+  personalPostOwnerBadge: { color: "#777", fontSize: 11, fontWeight: "500" },
+  // .empty
+  personalEmpty: { color: "#777", fontSize: 12, lineHeight: 18, paddingHorizontal: 32, paddingVertical: 58, textAlign: "center" },
+  personalEmptyTitle: { color: color.ink, fontSize: 16, fontWeight: "700", marginBottom: 7 },
+  // .media-grid: grid 3 1fr gap 1px bg #fff p 1
+  personalPhotoGrid: { backgroundColor: color.white, flexDirection: "row", flexWrap: "wrap", padding: 1 },
+  // .media-grid button: aspect-ratio 1 border 0 p 0 bg #eee overflow hidden position relative
+  personalPhotoTile: { aspectRatio: 1, backgroundColor: "#EEE", flexBasis: "33.333%", overflow: "hidden", padding: 0, position: "relative" },
   personalPhotoImage: { height: "100%", width: "100%" },
-  personalRecords: { paddingHorizontal: 16, paddingTop: 10 },
-  personalRecordRow: { alignItems: "center", backgroundColor: color.white, borderBottomColor: "#ECE8EF", borderBottomWidth: 1, flexDirection: "row", paddingHorizontal: 4, paddingVertical: 16 },
+  // .media-private: pos abs right 5 top 5 bg rgba(0,0,0,.65) color #fff radius 999 p 3 5 font 8
+  personalPhotoPrivate: { backgroundColor: "rgba(0,0,0,.65)", borderRadius: 999, color: color.white, fontSize: 11, fontWeight: "700", paddingHorizontal: 5, paddingVertical: 3, position: "absolute", right: 5, top: 5 },
+  // .record: p 15 18 border-b 1 line grid 42/1fr/auto gap 11 alignItems center
+  personalRecords: { },
+  personalRecordRow: { alignItems: "center", borderBottomColor: "#E8E8E8", borderBottomWidth: 1, flexDirection: "row", gap: 11, paddingHorizontal: 18, paddingVertical: 15 },
+  // .record-icon: 40x40 radius 50% bg soft grid place center font 14 weight 700
+  personalRecordIcon: { alignItems: "center", backgroundColor: "#F5F5F5", borderRadius: 20, color: color.ink, fontSize: 14, fontWeight: "700", height: 40, justifyContent: "center", width: 40 },
   personalRecordCopy: { flex: 1 },
-  personalRecordTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  personalRecordDesc: { color: color.muted, fontSize: 12, marginTop: 4 },
-  personalRecordValue: { color: "#6F37B9", fontSize: 14, fontWeight: "900" },
+  // .record b: font 13 weight 650
+  personalRecordTitle: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  // .record span: display block color muted font 11 marginTop 4
+  personalRecordDesc: { color: "#777", fontSize: 11, lineHeight: 14, marginTop: 4 },
+  // .record strong: font 12 weight 650
+  personalRecordValue: { color: color.ink, fontSize: 12, fontWeight: "700" },
   profileEditorOverlay: { backgroundColor: "rgba(20,18,31,0.42)", flex: 1, justifyContent: "flex-end" },
   profileEditorSheet: { backgroundColor: color.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 30, paddingHorizontal: 20, paddingTop: 18 },
   profileEditorHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 10 },
