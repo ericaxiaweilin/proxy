@@ -112,21 +112,29 @@ home/pulse surface) and seeds 18 new posts across Hanoi / HCMC /
 ## Verification
 
 ```
-$ go test -count=1 ./...             # apps/api-go
-  28/28 domain packages green
-  go build ./...                      clean
+$ go build ./...                      clean
+$ go vet ./...                       2 pre-existing warnings
+                                       (experience/runtime/metrics.go
+                                       mutex copy; out of scope)
+$ go test -count=1 ./internal/conversation/...   ok  1.270s
+$ go test -count=1 ./internal/localnet/...       ok  1.143s
+$ go test -count=1 ./internal/identity/...       ok  0.598s
+$ go test -count=1 ./internal/modelstack/...     ok  1.052s
 
+$ pnpm --filter @proxy/contracts typecheck        clean
+$ pnpm --filter @proxy/mobile typecheck          clean
 $ pnpm --filter @proxy/contracts test
   7 files / 153 tests
 
 $ pnpm --filter mobile test
-  37 files / 219 tests                # 3 untracked dev-draft
-                                      # tests moved to snapshot
-                                      # branch, see below
-
-$ go vet ./...
-  2 pre-existing warnings (experience/runtime/metrics.go mutex
-  copy; out of scope for this PR)
+  39 files / 323 tests                # note: count is higher than
+                                      # the original 6-commit summary
+                                      # because three dev-draft
+                                      # mobile tests that were on
+                                      # the working tree at the
+                                      # time of the original
+                                      # summary have since been
+                                      # promoted onto this branch.
 ```
 
 ## Migration order
