@@ -11,12 +11,6 @@ import type { MarketTab } from "../market-fixtures";
 import { ExperienceSurfaceBanner } from "../experience-runtime/ExperienceSurfaceBanner";
 import type { SurfacePlan, UISchema } from "@proxy/contracts";
 
-const MODE_LABEL: Record<HomeIntentMode, string> = {
-  SERVICE: "体验",
-  ORDER: "机会",
-  ACTIVITY: "活动"
-};
-
 interface AssistantMessage {
   id: string;
   body: string;
@@ -188,7 +182,6 @@ export function HomeAssistantSurface({
     }
   }
 
-  const routeLabel = mode ? `语义路由 · ${MODE_LABEL[mode]}` : "语义路由 · 自动理解";
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.root, embedded && styles.embeddedRoot]}>
       {!embedded ? <View style={styles.header}>
@@ -196,15 +189,13 @@ export function HomeAssistantSurface({
           <Text style={styles.backText}>‹</Text>
         </Pressable>
         <View style={styles.headerCopy}>
-          <Text style={styles.headerTitle}>和 Proxy 对话</Text>
-          <Text style={styles.headerSub}>{routeLabel} · 不直接跳页面</Text>
+          <Text style={styles.headerTitle}>Proxy</Text>
         </View>
         <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
       </View> : (
         <View style={styles.embeddedHeader}>
           <View>
-            <Text style={styles.embeddedTitle}>Home 事件窗口</Text>
-            <Text style={styles.headerSub}>{routeLabel} · 连续处理，不跳主模块</Text>
+            <Text style={styles.embeddedTitle}>Proxy</Text>
           </View>
           <Pressable accessibilityLabel="总结并结束 Home 会话" disabled={sending || !conversationId} onPress={() => void finishEvent()} style={[styles.embeddedClose, (sending || !conversationId) && styles.disabled]}>
             <Text style={styles.embeddedCloseText}>{sending ? "总结中…" : "完成"}</Text>
@@ -215,22 +206,6 @@ export function HomeAssistantSurface({
       {experiencePlan && experienceSchema ? (
         <ExperienceSurfaceBanner plan={experiencePlan} schema={experienceSchema} onAction={(id) => { if (id === "open_fastest_plan" && onOpenMarket) onOpenMarket("OPPORTUNITY"); }} />
       ) : null}
-      {!embedded ? <View style={styles.contextCard}>
-        <Text style={styles.contextTitle}>Home 语义运行时 · 全功能入口</Text>
-        <Text style={styles.contextText}>输入 挑选小美 / 活动 / 机会 / 状态 即可直达对应市场与动态；也支持选人、报价、活动报名等。</Text>
-      </View> : null}
-      {!embedded ? <View style={styles.quickRow}>
-        {[
-          { label: "挑选小美", text: "帮我挑选小美" },
-          { label: "看活动", text: "最近有什么活动" },
-          { label: "找机会", text: "有什么适合我的机会" },
-          { label: "看状态", text: "看看临时状态" }
-        ].map((q) => (
-          <Pressable key={q.label} onPress={() => setDraft(q.text)} style={styles.quickPill}>
-            <Text style={styles.quickText}>{q.label}</Text>
-          </Pressable>
-        ))}
-      </View> : null}
 
       <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messageContent} keyboardShouldPersistTaps="handled">
         {messages.map((message) => (
