@@ -598,7 +598,8 @@ func configuredDemandGates() (demand.Gate, demand.Gate) {
 		log.Printf("proxy demand gates: ALLOW (PROXY_DEMAND_GATES=allow) — PublishTask will ACCEPT in this environment")
 		return allow, allow
 	}
-	return nil, nil
+	// 真实闸：catalog / funding 校验，正确 payload 下直接 ACCEPT，无需 env
+	return demand.CatalogAdmissionGate, demand.FundingGate
 }
 
 // bootEnvWarnings returns a list of human-readable warnings when the

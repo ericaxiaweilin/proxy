@@ -50,9 +50,9 @@ func main() {
 	if workerID == "" {
 		workerID, _ = os.Hostname()
 	}
-	delivery := outbox.Delivery(unavailableDelivery{})
-	if os.Getenv("OUTBOX_DELIVERY") == "log" {
-		delivery = logDelivery{}
+	delivery := outbox.Delivery(logDelivery{})
+	if os.Getenv("OUTBOX_DELIVERY") == "unavailable" {
+		delivery = unavailableDelivery{}
 	}
 	outboxWorker := outbox.Worker{
 		Repository:  postgres.NewOutboxRepository(pool),
