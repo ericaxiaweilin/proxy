@@ -164,6 +164,30 @@ export function HomeAssistantSurface({
     }
   }
 
+  async function finishEvent(): Promise<void> {
+    if (!conversationId || sending) return;
+    setSending(true);
+    setStatus("正在整理本次事件总结…");
+    try {
+      const result = await conversationClient.sendMessage(
+        conversationId,
+        "请把本次 Home 事件整理成一段简洁总结，包含目标、已确认条件、待确认事项和下一步。",
+        mode
+      );
+      const payload = parseOperationRef(result);
+      if (!payload?.aiMessage) {
+        setStatus("总结暂未生成，请稍后重试完成。");
+        return;
+      }
+      appendAIReply(payload, setMessages);
+      onBack();
+    } catch (error: unknown) {
+      setStatus(error instanceof Error ? error.message : "事件总结生成失败，请重试");
+    } finally {
+      setSending(false);
+    }
+  }
+
   const routeLabel = mode ? `语义路由 · ${MODE_LABEL[mode]}` : "语义路由 · 自动理解";
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.root, embedded && styles.embeddedRoot]}>
@@ -182,8 +206,8 @@ export function HomeAssistantSurface({
             <Text style={styles.embeddedTitle}>Home 事件窗口</Text>
             <Text style={styles.headerSub}>{routeLabel} · 连续处理，不跳主模块</Text>
           </View>
-          <Pressable accessibilityLabel="结束 Home 会话" onPress={onBack} style={styles.embeddedClose}>
-            <Text style={styles.embeddedCloseText}>完成</Text>
+          <Pressable accessibilityLabel="总结并结束 Home 会话" disabled={sending || !conversationId} onPress={() => void finishEvent()} style={[styles.embeddedClose, (sending || !conversationId) && styles.disabled]}>
+            <Text style={styles.embeddedCloseText}>{sending ? "总结中…" : "完成"}</Text>
           </Pressable>
         </View>
       )}
