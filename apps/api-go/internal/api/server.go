@@ -20,6 +20,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/experience"
+	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
@@ -60,6 +61,7 @@ type Server struct {
 	Safety        *safety.Service
 	Business      *business.Service
 	Scene         *scene.Service
+	Facet         *facet.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -100,7 +102,7 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if readyCheck != nil {
 		readyMode = "configured"
 	}
-	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.New(), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120)}
+	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.New(), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Scene: scene.New(), Facet: facet.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -132,6 +134,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)
 	mux.HandleFunc("/v1/media/variant/", s.mediaVariantFile)
+	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
+	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
+	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.
+	mux.HandleFunc("/v1/facet/objects", s.facetObjects)
 	return s.recoverMiddleware(mux)
 }
 
@@ -667,4 +673,40 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// facetObjects 列出当前用户的所有 FACET 对象（R15.25 Phase 1）。
+//
+// Phase 1 = 静态 mock 三条数据（与 Proxy_COMPLETE_FiveRoot_FACET_v11.html
+// prototype 的 facetObjects 一致）：
+//   - ken  = 重点关系 (BUILDING_TRUST)
+//   - linh = 朋友     (SHARED_INTEREST)
+//   - spa  = 合作     (CREATOR_COLLAB)
+//
+// 行为契约：
+//   - GET only, 其它方法 → 405
+//   - 不需要 auth（Phase 1 不做持久化）
+//   - 返回 ListFacetObjectsPayload（{ objects, totalObjects, freshAssets, shownAssets }）
+//   - Phase 1 NOT-IN-SCOPE：图片 URL 永远 = ""（UI 显示 placeholder）；
+//     不做 LIBRARY / OBJECTS / OBJECT DETAIL / 关系规则引擎 / 真实持久化。
+//
+// 后端 facade shape 必须跟 packages/contracts/src/facet.ts 严格对齐：
+// schema rename 一旦发生, 编译期会爆 (zod 解析)。
+// R15.25.1 起：数据来自 facet.Service（PG持久化或内存seed），不再hardcode mock，
+// 但 wire shape 与mock完全一致，保证前端zod不漂。
+func (s *Server) facetObjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	if s.Facet == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "facet_not_configured"})
+		return
+	}
+	payload, err := s.Facet.List(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "facet_list_failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
 }

@@ -25,6 +25,15 @@ import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 import type { SceneClient } from "../scene-client";
+// R15.25 FACET — 对象化内容运营 (Phase 1 = list).
+// 接线: SessionAuthClient (main 注入) → FacetClient → FacetHomeSurface。
+// Surface 内部 useEffect 调 GET /v1/facet/objects, 失败 → 显示 "服务暂时不可用"。
+import { FacetHomeSurface } from "../facet/FacetHomeSurface";
+import { FacetClient } from "../facet-client";
+// R15.25: 从 native-app 拿 module-level const 构造 FacetClient.
+// native-app 提前 export 了 sessionAuthClient + localApiBaseUrl, 避免
+// 给 AppShell / MeSurface 增 prop.
+import { sessionAuthClient, localApiBaseUrl } from "../native-app";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -451,6 +460,18 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "gear", label: "设置与隐私", desc: "推荐、通知、权限与隐私", route: "appbehavior" },
         { icon: "store-lines", label: "我的企业 / 店铺", desc: "有经营权限时进入 Business Workspace", route: "bdash" }
       ]
+    },
+    // R15.25 FACET — “不是第 6 个 root”：是 ME tab 内的深度模块。
+    // 后端 hardcode 返 3 个 mock 对象 (Ken / Linh / ABC Spa)。
+    // avatarUrl 永远 = ""，UI 显示 initial placeholder。
+    // Phase 1 NOT-IN-SCOPE：LIBRARY / OBJECT DETAIL / OBJECT PREVIEW / OPS。
+    {
+      id: "facet",
+      title: "对象化运营",
+      hint: "FACET · 同一份真实素材，按对象重新组织",
+      rows: [
+        { icon: "spark", label: "FACET", desc: "对象列表 · 关系目标 · 缺口判定", grad: true, route: "facet" }
+      ]
     }
   ]
 };
@@ -688,6 +709,14 @@ const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; icon: stri
     title: "收藏",
     desc: "很轻的个人备忘夹。以后还想找到，就放这里。",
     icon: "☆",
+    sections: []
+  },
+  // R15.25 FACET entry. 实际页面在 FacetHomeSurface 渲染 (line ~1415),
+  // 这里只提供 title / desc / icon 给 subPage header 文字 fallback.
+  facet: {
+    title: "FACET · 对象化内容运营",
+    desc: "同一份真实素材，针对不同对象重新组织呈现方式。",
+    icon: "✨",
     sections: []
   },
   requestermemory: {
@@ -1410,6 +1439,12 @@ export function MeSurface({
     if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    // R15.25 FACET: 走 FacetClient → GET /v1/facet/objects → FacetHomeSurface.
+    // facet client 不依赖任何现有 client (它是 anonymous GET), 这里按需创建.
+    if (subPage.route === "facet") {
+      const facetClient = new FacetClient({ requester: sessionAuthClient, baseUrl: localApiBaseUrl });
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} onComingSoon={(label) => { console.log(`[facet] ${label} · 开发中`); }} /></SwipeBackShell>;
+    }
     // R15.13 P2: myscenes gets a real-data section appended beneath
     // the static prototype cards. The prototype shows the high-level
     // idea (in-progress scenes, received invitations, history); the

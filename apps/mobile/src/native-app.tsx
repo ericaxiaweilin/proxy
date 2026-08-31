@@ -116,6 +116,11 @@ const sessionAuthClient = new SessionAuthClient({
   secureSessionStore,
   transport: nativeTransport
 });
+// R15.25 FACET (匿名 GET) 需要 sessionAuthClient + baseUrl. 这两个是
+// module-level const, 在 ProxyApp 启动前已经创建好. 手动 export 让
+// me.tsx 可以 inline 创建 FacetClient, 避免给 AppShell 增 1 个
+// facetClient prop. (FACET Phase 1 只有一个 endpoint, 不值得传 prop).
+export { sessionAuthClient, localApiBaseUrl };
 const localNetClient = new LocalNetClient({ authClient: sessionAuthClient, secureSessionStore, baseUrl: localApiBaseUrl });
 const activityClient = new ActivityClient({ authClient: sessionAuthClient, secureSessionStore });
 const experienceClient = new ExperienceClient({ authClient: sessionAuthClient, secureSessionStore });

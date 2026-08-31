@@ -36,6 +36,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
+	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -79,7 +80,8 @@ func main() {
 	var authenticator api.Authenticator
 	loginProvider, simulatedLogin := configuredLoginChallengeProvider()
 	identityService := localIdentityService(loginProvider, simulatedLogin)
-	demandService := demand.New(nil, nil)
+	admissionGate, fundingGate := configuredDemandGates()
+	demandService := demand.New(admissionGate, fundingGate)
 	cityCompanionService := citycompanion.New()
 	localContextService := localcontext.New()
 	modelStack := configuredModelStack()
@@ -112,6 +114,8 @@ func main() {
 	sceneService := scene.New()
 	marketplaceService := marketplace.New()
 	activityService := activity.New()
+	facetService := facet.New()
+	facetService.SeedDefaults()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -178,7 +182,7 @@ func main() {
 		if err := seedPostgresMedia(pool); err != nil {
 			log.Fatalf("seed postgres media: %v", err)
 		}
-		demandService = demand.NewWithRepository(nil, nil, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
+		demandService = demand.NewWithRepository(admissionGate, fundingGate, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
 		localContextService = localcontext.NewWithRepository(postgres.NewLocalContextRepository(pool))
 		conversationService = conversation.NewWithModelStack(postgres.NewConversationRepository(pool), modelStack)
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
@@ -206,6 +210,8 @@ func main() {
 		sceneService = scene.NewWithRepository(postgres.NewSceneRepository(pool))
 		marketplaceService = marketplace.NewWithRepository(postgres.NewMarketplaceRepository(pool))
 		activityService = activity.NewWithRepository(postgres.NewActivityRepository(pool))
+		facetService = facet.NewWithRepository(postgres.NewFacetRepository(pool))
+		facetService.SeedDefaults()
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -223,6 +229,7 @@ func main() {
 	server.Safety = safetyService
 	server.Outcome = outcomeService
 	server.Scene = sceneService
+	server.Facet = facetService
 	// Activity 域：启动幂等 seed 基线；DATABASE_URL 存在时写入持久仓储。
 	activityService.SeedDefaults()
 	server.Activity = activityService
@@ -583,6 +590,15 @@ func localIdentityService(provider identity.LoginChallengeProvider, simulated bo
 		},
 		Devices: []identity.DeviceRegistration{{ID: "device_001", UserAccountID: "user_001", Platform: "IOS", Status: "ACTIVE"}},
 	}), nil, provider)
+}
+
+func configuredDemandGates() (demand.Gate, demand.Gate) {
+	if v := strings.TrimSpace(os.Getenv("PROXY_DEMAND_GATES")); strings.EqualFold(v, "allow") {
+		allow := func(*demand.TaskDraft, command.Envelope) demand.GateDecision { return demand.GateDecision{Status: "ALLOW"} }
+		log.Printf("proxy demand gates: ALLOW (PROXY_DEMAND_GATES=allow) — PublishTask will ACCEPT in this environment")
+		return allow, allow
+	}
+	return nil, nil
 }
 
 // bootEnvWarnings returns a list of human-readable warnings when the

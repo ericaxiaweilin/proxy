@@ -642,3 +642,9 @@ export * from "./experience-runtime";
 // normalizeCityKey from "@proxy/contracts"; re-exporting here keeps the
 // single-source-of-truth in src/city-key.ts.
 export * from "./city-key";
+
+// R15.25: FACET — object-oriented content operation (Phase 1 = list only).
+// Single-source-of-truth for the wire shape. Both mobile (FacetHomeSurface)
+// and the localnet GET handler (facet-objects.go) import from this module,
+// so any rename forces a compile error on both ends.
+export * from "./facet";
