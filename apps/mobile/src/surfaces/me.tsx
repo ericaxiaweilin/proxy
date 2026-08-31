@@ -18,6 +18,7 @@ import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
 import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
 import { ThreadsPostMedia } from "../components/threads-post-media";
+import { SecuritySettings } from "../components/security-settings";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import { type LocalNetClient } from "../localnet-client";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
@@ -1289,6 +1290,8 @@ export function MeSurface({
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
   const [socialEditor, setSocialEditor] = useState<SocialAccount>();
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
+  const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
+  const [screenshotWarn, setScreenshotWarn] = useState(true);
   const [profileDraft, setProfileDraft] = useState({
     name: "Huyen",
     handle: "huyen.hanoi",
@@ -1481,6 +1484,7 @@ export function MeSurface({
     }
 
     // 原型 screens.appbehavior：不是设置表格，而是一组应用可靠性检查卡片。
+    // Lotus §8: 安全区块前置于行为检查之上
     if (subPage.route === "appbehavior") {
       const checks = [
         ["安全区域", "底部操作不能被系统手势区域遮挡。"],
@@ -1499,7 +1503,16 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
-            <Text style={styles.appBehaviorTitle}>应用行为检查</Text>
+            <Text style={styles.appBehaviorTitle}>设置与隐私 · 安全</Text>
+            <SecuritySettings
+              retentionDays={securityRetention}
+              onRetentionChange={setSecurityRetention}
+              screenshotWarnEnabled={screenshotWarn}
+              onToggleScreenshotWarn={setScreenshotWarn}
+              onManageIdentities={() => setSubPage(undefined)}
+              onManageDevices={() => setSubPage(undefined)}
+            />
+            <Text style={[styles.appBehaviorTitle, { marginTop: 24 }]}>应用行为检查</Text>
             {checks.map(([title, desc], index) => (
               <View key={title} style={[styles.appBehaviorCard, index === checks.length - 1 && styles.appBehaviorCardDark]}>
                 <Text style={[styles.appBehaviorCardTitle, index === checks.length - 1 && styles.appBehaviorCardTitleDark]}>{title}</Text>

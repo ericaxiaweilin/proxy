@@ -161,6 +161,9 @@ func main() {
 		outboxRepository := postgres.NewOutboxRepository(pool)
 		readyCheck = pool.Ping
 		identityService = identity.NewWithRepositoryAndClockAndChallengeProvider(postgres.NewIdentityRepositoryWithOutbox(pool, outboxRepository), nil, loginProvider)
+		// Lotus §1: DisplayIdentity PG persistence (038) — wire PG repo so
+		// CreateDisplayIdentity/List/Burn survive restarts.
+		identityService.SetDisplayIdentityRepository(postgres.NewDisplayIdentityRepository(pool))
 		if simulatedLogin {
 			if err := seedPostgresIdentity(pool); err != nil {
 				log.Fatalf("seed postgres identity: %v", err)
