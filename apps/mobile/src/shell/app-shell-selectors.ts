@@ -7,6 +7,17 @@
 
 export type MeTabView = "guest" | "voucher" | "me";
 
+export function selectShellChromeVisible(input: {
+  tab: "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
+  feedChromeVisible: boolean;
+  feedChatOpen: boolean;
+  feedPrefsOpen: boolean;
+}): boolean {
+  if (input.tab !== "FEED") return true;
+  if (input.feedChatOpen || input.feedPrefsOpen) return true;
+  return input.feedChromeVisible;
+}
+
 /**
  * The "Me" tab body selector.
  * - isGuest=true → "need to sign in" view (anonymous browser can't see

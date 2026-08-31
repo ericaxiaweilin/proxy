@@ -59,6 +59,7 @@ import { type ActiveContext } from "../uiplan/types";
 import { type MarketTab } from "../market-fixtures";
 import type { SceneToolId } from "@proxy/contracts";
 import { SCENE_TOOLS } from "@proxy/contracts";
+import { selectShellChromeVisible } from "./app-shell-selectors";
 
 // P0 原型的品牌图标，直接使用原始资源，不做裁剪、重绘或视觉加工。
 const OTTER_LOGO = require("../../assets/otter-logo.png");
@@ -175,7 +176,6 @@ export function AppShell({
   const [feedRefreshTrigger, setFeedRefreshTrigger] = useState(0);
   const [feedPrefsOpen, setFeedPrefsOpen] = useState(false);
   const [feedChromeVisible, setFeedChromeVisible] = useState(true);
-  const [scrollChromeVisible, setScrollChromeVisible] = useState(true);
   const touchStartY = useRef<number | undefined>(undefined);
   const lastTouchY = useRef<number | undefined>(undefined);
   const touchStartX = useRef<number | undefined>(undefined);
@@ -269,7 +269,6 @@ export function AppShell({
 
   function selectTab(next: RootTab): void {
     setFeedChromeVisible(true);
-    setScrollChromeVisible(true);
     if (next === "MARKET") {
       setMarketEntry({ tab: "OPPORTUNITY", viewMode: "LIST" });
       setOpenExperience(undefined);
@@ -327,16 +326,24 @@ export function AppShell({
     setSwitcherOpen(true);
   }, []);
   const insets = useSafeAreaInsets();
-  const isNavVisible = scrollChromeVisible && (tab !== "FEED" || feedChromeVisible || !!feedChatAuthor || feedPrefsOpen);
+  // Only the primary Feed stream owns scroll-driven shell chrome. Chat,
+  // Home/Market/Me forms and Feed's nested chat/preferences keep navigation
+  // stable so moving through messages cannot unexpectedly summon/hide it.
+  const isNavVisible = selectShellChromeVisible({
+    tab,
+    feedChromeVisible,
+    feedChatOpen: Boolean(feedChatAuthor),
+    feedPrefsOpen
+  });
 
   return (
     <>
       <SafeAreaView edges={["top"]} style={styles.safeArea}>
       <View style={[styles.root, width >= 768 && styles.rootWide]}>
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
-        {scrollChromeVisible ? <Header compact={compactWidth} /> : null}
+        {isNavVisible ? <Header compact={compactWidth} /> : null}
         {/* 首页的本地范围说明属于 root Chrome；“我的”根页由 Me Surface 自己渲染，避免泄漏到其详情页。 */}
-        {scrollChromeVisible && (tab === "HOME" || tab === "MESSAGES") ? (
+        {isNavVisible && (tab === "HOME" || tab === "MESSAGES") ? (
           <LocationContext
             location={currentLocation}
             onPress={() => setLocationSheetOpen(true)}
@@ -371,9 +378,6 @@ export function AppShell({
           onTouchMove={(event) => {
             const y = event.nativeEvent.pageY;
             const x = event.nativeEvent.pageX;
-            const previousY = lastTouchY.current ?? touchStartY.current ?? y;
-            const delta = y - previousY;
-            if (Math.abs(delta) >= 6) setScrollChromeVisible(delta > 0);
             lastTouchY.current = y;
             lastTouchX.current = x;
           }}
@@ -415,7 +419,6 @@ export function AppShell({
               onOpenMarket={() => openMarket({ tab: "OPPORTUNITY" })}
               onOpenMe={() => setTab("ME")}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
-              onChromeVisibilityChange={setScrollChromeVisible}
               bottomNavVisible={isNavVisible}
             />
           ) : workspaceTarget ? (
@@ -435,7 +438,6 @@ export function AppShell({
               marketplace={marketplace}
               activities={activities}
               onCreateScene={setSceneComposerTool}
-              onChromeVisibilityChange={setScrollChromeVisible}
               bottomNavVisible={isNavVisible}
             />
           )
@@ -452,7 +454,6 @@ export function AppShell({
               initialTab={marketEntry.tab}
               onOpenExperience={setOpenExperience}
               onOpenActivity={() => undefined}
-              onChromeVisibilityChange={setScrollChromeVisible}
               bottomNavVisible={isNavVisible}
             />
           )
@@ -492,7 +493,7 @@ export function AppShell({
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId) => setMessageChat(conversationId ? { author, conversationId } : { author })} onChromeVisibilityChange={setScrollChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
+            <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId) => setMessageChat(conversationId ? { author, conversationId } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
           ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -522,7 +523,6 @@ export function AppShell({
                 setTab("MESSAGES");
               }}
               onSignOut={onSignOut}
-              onChromeVisibilityChange={setScrollChromeVisible}
               bottomNavVisible={isNavVisible}
               {...(scene ? { scene } : {})}
             />

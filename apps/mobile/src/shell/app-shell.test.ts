@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectMeTabView } from "./app-shell-selectors";
+import { selectMeTabView, selectShellChromeVisible } from "./app-shell-selectors";
 
 describe("app shell guest path", () => {
   it("anonymous browser sees the 'need to sign in' view, not MeSurface", () => {
@@ -24,5 +24,17 @@ describe("app shell guest path", () => {
     // If a refactor drops the prop, the shell must NOT silently start
     // showing the guest view; it should still render MeSurface.
     expect(selectMeTabView({ isGuest: false, voucherOpen: false })).toBe("me");
+  });
+});
+
+describe("app shell scroll chrome ownership", () => {
+  it.each(["HOME", "MARKET", "MESSAGES", "ME"] as const)("keeps chrome visible on %s", (tab) => {
+    expect(selectShellChromeVisible({ tab, feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false })).toBe(true);
+  });
+
+  it("lets only the primary Feed stream hide chrome", () => {
+    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false })).toBe(false);
+    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: true, feedPrefsOpen: false })).toBe(true);
+    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: true })).toBe(true);
   });
 });
