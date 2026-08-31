@@ -2,7 +2,7 @@
 // 基于 Feed 的"聊一下"入口进入的会话界面。
 // 接入模型底座：SendMessage 后服务端调用 modelStack.Complete() 生成 AI 回复。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Dimensions, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import type { ConversationClient, ProtectionOverride } from "../conversation-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
@@ -39,7 +39,24 @@ export function ConversationSurface({
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
   const [ephemeral, setEphemeral] = useState(false);
   const [noForward, setNoForward] = useState(true);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
+
+  // This surface lives inside AppShell's fixed-height body, where nested
+  // KeyboardAvoidingView layouts are unreliable on iOS. Track the keyboard's
+  // actual screen frame and reserve exactly the overlapping height instead.
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    const frameSub = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
+      const windowHeight = Dimensions.get("window").height;
+      setKeyboardInset(Math.max(0, windowHeight - event.endCoordinates.screenY));
+    });
+    const hideSub = Keyboard.addListener("keyboardWillHide", () => setKeyboardInset(0));
+    return () => {
+      frameSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Lotus §4: 截屏上报 → RecordScreenshot → SECURITY_ALERT
   useEffect(() => {
@@ -51,6 +68,12 @@ export function ConversationSurface({
   useEffect(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   }, [messages]);
+
+  useEffect(() => {
+    if (keyboardInset > 0) {
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: false }));
+    }
+  }, [keyboardInset]);
 
   // 解析命令结果中的 operationRef
   const parseOperationRef = useCallback((result: Record<string, unknown>): Record<string, unknown> | undefined => {
@@ -205,7 +228,7 @@ export function ConversationSurface({
   }
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={onBack} style={styles.backBtn}>
@@ -253,12 +276,7 @@ export function ConversationSurface({
         {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
       </ScrollView>
 
-      {/* Only the footer follows the keyboard. Moving the whole surface
-          clips persisted history; leaving the footer static covers input. */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "position" : undefined}
-        keyboardVerticalOffset={0}
-      >
+      {/* Footer remains in normal layout; root padding follows the keyboard. */}
         {/* Protection toggles (Lotus §3 per-message) */}
         <View style={styles.protectionRow}>
           <Pressable onPress={() => setEphemeral((v) => !v)} style={[styles.chip, ephemeral && styles.chipActive]}>
@@ -292,7 +310,6 @@ export function ConversationSurface({
             <Text style={styles.sendBtnText}>{sending ? "..." : "发送"}</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
     </View>
   );
 }
