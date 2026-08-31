@@ -2,6 +2,7 @@
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
@@ -54,6 +55,10 @@ export function MessagesSurface({
   const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
   const [personName, setPersonName] = useState("Linh");
   const [contactSearch, setContactSearch] = useState("");
+  const [folders, setFolders] = useState<FolderV1[]>([
+    { id: "f1", name: "工作", dialogIds: ["linh"] },
+    { id: "f2", name: "生活", dialogIds: ["sunday"] },
+  ]);
 
   const filteredPinned = useMemo(() => filterByFolder(DIALOGS_PINNED, folder, search), [folder, search]);
   const filteredRecent = useMemo(() => filterByFolder(DIALOGS_RECENT, folder, search), [folder, search]);
@@ -229,6 +234,12 @@ export function MessagesSurface({
           </Pressable>
         </ScrollView>
       </View>
+
+      <FolderManager
+        folders={folders}
+        onCreate={(name) => setFolders((prev) => [...prev, { id: `f_${Date.now()}`, name, dialogIds: [] }])}
+        onMove={(folderId, dialogId) => setFolders((prev) => prev.map((f) => (f.id === folderId ? { ...f, dialogIds: [...f.dialogIds, dialogId] } : f)))}
+      />
 
       {/* search (fallback) */}
       {search.length > 0 ? (
