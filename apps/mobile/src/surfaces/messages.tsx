@@ -1,6 +1,6 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
@@ -55,6 +55,7 @@ export function MessagesSurface({
   const [panel, setPanel] = useState<HomePanel>("dialogs");
   const [folder, setFolder] = useState<Folder>("all");
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<TextInput>(null);
   const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
   const [personName, setPersonName] = useState("Linh");
   const [contactSearch, setContactSearch] = useState("");
@@ -208,14 +209,11 @@ export function MessagesSurface({
         <View style={styles.homeTitle}>
           <Text style={styles.homeTitleText}>信息</Text>
           <View style={styles.homeActions}>
-            <Pressable accessibilityLabel="搜索" style={styles.icon}>
+            <Pressable accessibilityLabel="搜索" onPress={() => searchInputRef.current?.focus()} style={styles.icon}>
               <ProxyIcon color={color.ink} name="search" size={20} />
             </Pressable>
-            <Pressable accessibilityLabel="存储" style={styles.icon}>
-              <ProxyIcon color={color.ink} name="infoCircle" size={20} />
-            </Pressable>
-            <Pressable accessibilityLabel="通知" style={styles.iconBell}>
-              <ProxyIcon color={color.ink} name="infoCircle" size={20} />
+            <Pressable accessibilityLabel="消息请求" onPress={openRequests} style={styles.iconBell}>
+              <ProxyIcon color={color.ink} name="mail" size={20} />
               <View style={styles.bellDot} />
             </Pressable>
             <Pressable accessibilityLabel="新聊天" onPress={openContacts} style={styles.icon}>
@@ -224,10 +222,19 @@ export function MessagesSurface({
           </View>
         </View>
 
-        <Pressable onPress={openContacts} style={styles.searchBox}>
+        <View style={styles.searchBox}>
           <ProxyIcon color="#9a968f" name="search" size={17} />
-          <Text style={styles.searchPlaceholder}>搜索聊天、联系人和消息</Text>
-        </Pressable>
+          <TextInput
+            ref={searchInputRef}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="搜索聊天、联系人和消息"
+            placeholderTextColor="#9a968f"
+            returnKeyType="search"
+            style={styles.searchInput}
+          />
+          {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text style={styles.inlineClearText}>清除</Text></Pressable> : null}
+        </View>
 
         <View style={styles.homeTabs}>
           <Pressable onPress={() => setPanel("dialogs")} style={[styles.homeTab, panel === "dialogs" && styles.homeTabActive]}>
@@ -264,16 +271,6 @@ export function MessagesSurface({
         onCreate={(name) => setFolders((prev) => [...prev, { id: `f_${Date.now()}`, name, dialogIds: [] }])}
         onMove={(folderId, dialogId) => setFolders((prev) => prev.map((f) => (f.id === folderId ? { ...f, dialogIds: [...f.dialogIds, dialogId] } : f)))}
       />
-
-      {/* search (fallback) */}
-      {search.length > 0 ? (
-        <View style={styles.inlineSearch}>
-          <TextInput value={search} onChangeText={setSearch} placeholder="搜索" placeholderTextColor="#9a968f" style={styles.inlineSearchInput} />
-          <Pressable onPress={() => setSearch("")} style={styles.inlineClear}>
-            <Text style={styles.inlineClearText}>清除</Text>
-          </Pressable>
-        </View>
-      ) : null}
 
       {/* body */}
       <ScrollView style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }}>
@@ -401,7 +398,7 @@ const styles = StyleSheet.create({
   iconBell: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", position: "relative" },
   bellDot: { position: "absolute", right: 6, top: 6, width: 7, height: 7, borderRadius: 3.5, backgroundColor: "#f2ad29", borderWidth: 1, borderColor: "#fffdf8" },
   searchBox: { height: 38, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#f6f3ee", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 11, marginTop: 5, marginBottom: 13 },
-  searchPlaceholder: { fontSize: 13.5, color: "#9a968f" },
+  searchInput: { flex: 1, fontSize: 13.5, color: "#11110f", paddingVertical: 0 },
   homeTabs: { flexDirection: "row", gap: 25, borderBottomWidth: 1, borderBottomColor: "#e8e3da" },
   homeTab: { height: 42, flexDirection: "row", alignItems: "center", paddingHorizontal: 1, borderBottomWidth: 2, borderBottomColor: "transparent" },
   homeTabActive: { borderBottomColor: "#11110f" },
