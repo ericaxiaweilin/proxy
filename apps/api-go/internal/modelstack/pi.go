@@ -105,7 +105,11 @@ func (p *PiProvider) Complete(ctx context.Context, taskID string, messages []Cha
 	if strings.TrimSpace(taskID) == "" || len(messages) == 0 {
 		return Completion{}, fmt.Errorf("%w: empty task or messages", ErrTaskNotRoutable)
 	}
-	result, err := p.gateway.Chat(ctx, p.model, taskID, messages, 2048, 90*time.Second)
+	timeout := 90 * time.Second
+	if strings.Contains(taskID, "vision") {
+		timeout = 40 * time.Second
+	}
+	result, err := p.gateway.Chat(ctx, p.model, taskID, messages, 2048, timeout)
 	if err != nil {
 		return Completion{}, err
 	}

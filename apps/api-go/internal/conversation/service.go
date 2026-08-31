@@ -972,6 +972,16 @@ func (s *Service) imageDataURI(ref string) string {
 	if ref == "" {
 		return ""
 	}
+	assetID := ""
+	originalRef := ref
+	if strings.HasPrefix(ref, "asset:") {
+		parts := strings.SplitN(ref, ":", 3)
+		if len(parts) == 3 {
+			assetID = strings.TrimSpace(parts[1])
+			originalRef = strings.TrimSpace(parts[2])
+			ref = originalRef
+		}
+	}
 	// 防目录穿越
 	if strings.Contains(ref, "..") || strings.ContainsAny(ref, "/\\") && filepath.Base(ref) != ref && !strings.HasPrefix(ref, "mobile_media_") {
 		// storageKey 本身不含路径，仅文件名；若含 / 则拒绝
@@ -979,13 +989,22 @@ func (s *Service) imageDataURI(ref string) string {
 			return ""
 		}
 	}
-	candidates := []string{
+	candidates := []string{}
+	if assetID != "" && !strings.ContainsAny(assetID, "/\\") && !strings.Contains(assetID, "..") {
+		// Vision does not need the full camera original. Prefer the processed
+		// natural-aspect derivative to cut base64 size and model latency.
+		candidates = append(candidates,
+			filepath.Join("media_store", "mv_"+assetID+"_feed_1x_v2.jpg"),
+			filepath.Join("media_store", "mv_"+assetID+"_feed_1x_v1.jpg"),
+		)
+	}
+	candidates = append(candidates,
 		filepath.Join("media_store", ref),
 		filepath.Join("apps", "api-go", "media_store", ref),
 		filepath.Join(".", "media_store", ref),
 		filepath.Join(os.TempDir(), ref),
 		ref,
-	}
+	)
 	var data []byte
 	var err error
 	for _, p := range candidates {

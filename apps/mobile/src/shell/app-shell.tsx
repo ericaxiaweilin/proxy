@@ -395,7 +395,7 @@ export function AppShell({
         {tab === "HOME" ? (
           sceneComposerTool ? (
             <SceneComposerSurface tool={sceneComposerTool} scene={scene} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
-          ) : homeAssistant ? (
+          ) : homeAssistant && context === "BUSINESS" ? (
             <HomeAssistantSurface
               conversationClient={conversation}
               mediaClient={media}
@@ -437,6 +437,30 @@ export function AppShell({
               onOpenFeed={() => selectTab("FEED")}
               onOpenMarket={(tab) => openMarket({ tab })}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
+              conversationPanel={homeAssistant ? (
+                <HomeAssistantSurface
+                  embedded
+                  conversationClient={conversation}
+                  mediaClient={media}
+                  initialText={homeAssistant.text}
+                  {...(homeAssistant.attachment ? { initialAttachment: homeAssistant.attachment } : {})}
+                  {...(homeAssistant.mode ? { mode: homeAssistant.mode } : {})}
+                  {...(ensureConversationSession ? { ensureSession: ensureConversationSession } : {})}
+                  onBack={() => setHomeAssistant(undefined)}
+                  onOpenMarket={(tab) => {
+                    setHomeAssistant(undefined);
+                    openMarket({ tab });
+                  }}
+                  onOpenXiaomei={() => {
+                    setHomeAssistant(undefined);
+                    openMarket({ tab: "OPPORTUNITY" });
+                  }}
+                  onOpenFeed={() => {
+                    setHomeAssistant(undefined);
+                    selectTab("FEED");
+                  }}
+                />
+              ) : undefined}
               demandClient={demand}
               marketplace={marketplace}
               activities={activities}

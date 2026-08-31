@@ -65,6 +65,7 @@ export function RequesterHome({
   onOpenMarket,
   onOpenFeed,
   onChat,
+  conversationPanel,
   topContext,
   demandClient,
   marketplace,
@@ -77,6 +78,7 @@ export function RequesterHome({
   onOpenMarket?: ((tab: MarketTab) => void) | undefined;
   onOpenFeed?: (() => void) | undefined;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
+  conversationPanel?: ReactNode;
   topContext?: ReactNode;
   demandClient?: DemandClient;
   // R15.22 fix: 机会/活动计数从 API 拉, 替换 r157MarketPulse 硬编码 24/46/18.
@@ -244,7 +246,7 @@ export function RequesterHome({
       </View>
 
       {/* 基线 .r1572HomeComposer('USER')：HomeChatBox（无示例 / 无提示） */}
-      {onChat ? (
+      {conversationPanel ?? (onChat ? (
         <HomeChatBox
           contextLabel="用户"
           placeholder="例如：周六下午想在西湖拍照"
@@ -254,7 +256,7 @@ export function RequesterHome({
           }}
           onSend={(text, mode, attachment) => onChat(text, mode, attachment)}
         />
-      ) : null}
+      ) : null)}
 
       {/* 基线 继续 / 2 项 → 服务端 ListRequesterHomeItems */}
       <View style={styles.sectionHead}>

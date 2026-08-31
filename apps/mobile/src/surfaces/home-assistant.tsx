@@ -39,6 +39,7 @@ export function HomeAssistantSurface({
   experiencePlan,
   experienceSchema,
   ensureSession,
+  embedded = false,
 }: {
   conversationClient: ConversationClient;
   mediaClient: MediaClient;
@@ -52,6 +53,7 @@ export function HomeAssistantSurface({
   experiencePlan?: SurfacePlan | null;
   experienceSchema?: UISchema | null;
   ensureSession?: () => Promise<void>;
+  embedded?: boolean;
 }): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string>();
   const [messages, setMessages] = useState<AssistantMessage[]>([
@@ -77,8 +79,9 @@ export function HomeAssistantSurface({
       if (initialAttachment) {
         setStatus("正在安全上传照片…");
         const uploaded = await mediaClient.uploadImage(initialAttachment);
-        // 视觉任务需要 storageKey 直读文件，assetId 仅用于播放；此处传 storageKey 供模型底座读取
-        mediaRef = (uploaded as unknown as { storageKey?: string }).storageKey || uploaded.mediaAssetId;
+        // Keep both identities: the server prefers the processed 1080px
+        // derivative for vision latency and can still fall back to ORIGINAL.
+        mediaRef = `asset:${uploaded.mediaAssetId}:${uploaded.storageKey}`;
         setStatus(undefined);
       }
       return conversationClient.startConversation({
@@ -163,8 +166,8 @@ export function HomeAssistantSurface({
 
   const routeLabel = mode ? `语义路由 · ${MODE_LABEL[mode]}` : "语义路由 · 自动理解";
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
-      <View style={styles.header}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.root, embedded && styles.embeddedRoot]}>
+      {!embedded ? <View style={styles.header}>
         <Pressable accessibilityLabel="返回 Home" onPress={onBack} style={styles.backButton}>
           <Text style={styles.backText}>‹</Text>
         </Pressable>
@@ -173,16 +176,26 @@ export function HomeAssistantSurface({
           <Text style={styles.headerSub}>{routeLabel} · 不直接跳页面</Text>
         </View>
         <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
-      </View>
+      </View> : (
+        <View style={styles.embeddedHeader}>
+          <View>
+            <Text style={styles.embeddedTitle}>Home 事件窗口</Text>
+            <Text style={styles.headerSub}>{routeLabel} · 连续处理，不跳主模块</Text>
+          </View>
+          <Pressable accessibilityLabel="结束 Home 会话" onPress={onBack} style={styles.embeddedClose}>
+            <Text style={styles.embeddedCloseText}>完成</Text>
+          </Pressable>
+        </View>
+      )}
 
       {experiencePlan && experienceSchema ? (
         <ExperienceSurfaceBanner plan={experiencePlan} schema={experienceSchema} onAction={(id) => { if (id === "open_fastest_plan" && onOpenMarket) onOpenMarket("OPPORTUNITY"); }} />
       ) : null}
-      <View style={styles.contextCard}>
+      {!embedded ? <View style={styles.contextCard}>
         <Text style={styles.contextTitle}>Home 语义运行时 · 全功能入口</Text>
         <Text style={styles.contextText}>输入 挑选小美 / 活动 / 机会 / 状态 即可直达对应市场与动态；也支持选人、报价、活动报名等。</Text>
-      </View>
-      <View style={styles.quickRow}>
+      </View> : null}
+      {!embedded ? <View style={styles.quickRow}>
         {[
           { label: "挑选小美", text: "帮我挑选小美" },
           { label: "看活动", text: "最近有什么活动" },
@@ -193,7 +206,7 @@ export function HomeAssistantSurface({
             <Text style={styles.quickText}>{q.label}</Text>
           </Pressable>
         ))}
-      </View>
+      </View> : null}
 
       <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messageContent} keyboardShouldPersistTaps="handled">
         {messages.map((message) => (
@@ -278,6 +291,11 @@ function statusMessage(value: unknown): string | undefined {
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
+  embeddedRoot: { borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 0, height: 520, overflow: "hidden", ...shadows.card },
+  embeddedHeader: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 11 },
+  embeddedTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  embeddedClose: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 6 },
+  embeddedCloseText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   header: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
   backButton: { alignItems: "center", height: 32, justifyContent: "center", width: 30 },
   backText: { color: color.ink, fontSize: 26, lineHeight: 30 },

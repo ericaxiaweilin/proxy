@@ -67,6 +67,27 @@
       "enabled": true
     },
     {
+      "id": "proxy.conversation.vision_assist",
+      "project_id": "proxy",
+      "project_name": "proxy",
+      "module": "conversation",
+      "module_label": "conversation",
+      "task_name": "Home 图片需求理解助手",
+      "kind": "chat",
+      "capability": "multimodal_understanding",
+      "request_class": "vision_demand_assist",
+      "quality_tier": "standard",
+      "cost_sensitivity": "balanced",
+      "latency_budget_ms": 40000,
+      "structured_output": false,
+      "structured_output_mode": "none",
+      "fallback_policy": "allow_tier_fallback",
+      "route_preference": "commercial_stable_first",
+      "local_first": false,
+      "commercial_anomaly_guard": false,
+      "enabled": true
+    },
+    {
       "id": "proxy.citycompanion.guide_qa",
       "project_id": "proxy",
       "project_name": "proxy",
