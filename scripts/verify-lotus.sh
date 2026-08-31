@@ -14,9 +14,9 @@ echo "-- Go tests: identity + conversation + sweep + eviction --"
 ( cd "$ROOT/apps/api-go" && go test ./internal/identity -count=1 2>&1 | tail -n 5 )
 
 echo "-- Migrations --"
-ls -1 "$ROOT/apps/api-go/migrations/038_display_identity.sql" "$ROOT/apps/api-go/migrations/035_message_protection_persistence.sql" >/dev/null && echo "migrations 035/038 present"
+ls -1 "$ROOT/apps/api-go/migrations/038_display_identity.sql" "$ROOT/apps/api-go/migrations/035_message_protection_persistence.sql" "$ROOT/apps/api-go/migrations/039_message_v1.sql" "$ROOT/apps/api-go/migrations/040_dialog_convo_folder.sql" >/dev/null && echo "migrations 035/038/039/040 present"
 
 echo "-- Mobile touched files tsc (skipLibCheck) --"
-( cd "$ROOT/apps/mobile" && npx tsc -p tsconfig.json --noEmit --skipLibCheck 2>&1 | grep -E "conversation-client|display-identity|identity-switcher|security-settings|screenshot-protection" | head -n 20 || echo "mobile touched files: no new errors" )
+( cd "$ROOT/apps/mobile" && npx tsc -p tsconfig.json --noEmit --skipLibCheck 2>&1 | grep -E "conversation-client|display-identity|identity-switcher|security-settings|screenshot-protection|message-renderer" | head -n 20 || echo "mobile touched files: no new errors" )
 
 echo "== verify done =="

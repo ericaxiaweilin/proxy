@@ -17,7 +17,7 @@
 | 7 | RN UI 身份切换器 + 会话防外传开关 | 3d | ✅ Done | `components/identity-switcher.tsx` `surfaces/messages.tsx:77` `surfaces/conversation.tsx:30` `components/security-settings.tsx` | 手动 UI 验收待 commander |
 | 8 | 营销文案 + 设置安全区块 | 0.5d | ✅ Done | `components/security-settings.tsx` `surfaces/me.tsx:10,1291,1483` | 已接入 `Me→设置与隐私·安全` |
 
-**合计 13.5 工日** 已在 16 次提交内完成 (±1d 误差)。
+**合计 13.5 工日** 已在 21 次提交内完成 (±1d 误差)。
 
 ## 提交链
 
@@ -42,6 +42,8 @@ ec4c8b1 port v8 Home
 a35fa56 Message v1 additive
 d35e5fa Dialog/Convo/Folder
 35f9fe6 MessageRenderer
+39085ac docs sync 16 commits
+1db6edc MessageRenderer+proxy_object wire (v9)
 ```
 
 ## 未做 (RFC 明确排除)
@@ -50,6 +52,6 @@ d35e5fa Dialog/Convo/Folder
 
 ## 待 commander
 
-- `git show` 审 16 提交，合入 `fix/r15.23-mobile-home-and-pulse`（`bash scripts/verify-lotus.sh` 一键校验）
+- `git show` 审 21 提交，合入 `fix/r15.23-mobile-home-and-pulse`（`bash scripts/verify-lotus.sh` 一键校验）
 - `pnpm --filter @proxy/mobile typecheck` 全量 (需 `pnpm install` 恢复 `@proxy/contracts` 链接)
 - 真机验证: `FLAG_SECURE` 黑屏、iOS 截屏气泡、`SECURITY_ALERT` 推送、2 设备踢旧、`BURNER 7d` 自动销毁、`阅后即焚 1次` 二次 `VIEW_LIMIT_EXCEEDED`
