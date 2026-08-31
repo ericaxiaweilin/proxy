@@ -306,6 +306,26 @@ export const PostContextRefSchema = z.object({
 });
 export type PostContextRef = z.infer<typeof PostContextRefSchema>;
 
+// R15.24 P0：Post.Poll — 简单的帖内投票。
+// 后端尚未实现。发送时 client 依然走 body 序列化作为兼容路径（ComposerV2Screen 的
+// assembleComposerBody），后端落地后可同时填 ephemeralUntil / poll，服务端优先以新字段为准。
+export const PostPollOptionSchema = z.object({
+  optionId: z.string().min(1),
+  label: z.string().min(1).max(80),
+  // 顺序：0..n-1，UI 渲染时按此排序
+  sortOrder: z.number().int().nonnegative()
+});
+export type PostPollOption = z.infer<typeof PostPollOptionSchema>;
+
+export const PostPollSchema = z.object({
+  // 投票到期时间（ISO 8601）。过后 server 自动关闭。
+  expiresAt: z.string(),
+  options: z.array(PostPollOptionSchema).min(2).max(8),
+  // 是否多选；不传 / undefined = 单选。
+  multiSelect: z.boolean().optional()
+});
+export type PostPoll = z.infer<typeof PostPollSchema>;
+
 export const FeedPostSchema = z.object({
   postId: z.string().min(1),
   authorType: z.enum(["USER", "AGENT", "MERCHANT", "PLATFORM_SPECIAL"]),
@@ -321,7 +341,12 @@ export const FeedPostSchema = z.object({
   sceneType: z.enum(["UNKNOWN", "ROOFTOP", "BRUNCH", "SPA", "CINEMA", "PHOTO", "NIGHTLIFE", "OUTDOOR", "COFFEE"]).optional(),
   status: z.string(),
   contextRefs: z.array(PostContextRefSchema).default([]),
-  createdAt: z.string()
+  createdAt: z.string(),
+  // R15.24 P0：Post.EphemeralUntil — 临时动态到期时间。
+  // 已过期帖子 feed 不返回（除非显式未过滤）。不传 = 永久动态。
+  ephemeralUntil: z.string().optional(),
+  // R15.24 P0：Post.Poll — 帖内投票。
+  poll: PostPollSchema.optional()
 });
 export type FeedPost = z.infer<typeof FeedPostSchema>;
 
@@ -426,7 +451,11 @@ export const CreatePostPayloadSchema = z.object({
     "DINNER",
     "ACTIVITY"
   ]).optional(),
-  contextRefs: z.array(PostContextRefSchema).optional()
+  contextRefs: z.array(PostContextRefSchema).optional(),
+  // R15.24 P0：可携带 ephemeralUntil 和 poll。后端尚未实现，发送时
+  // client 仍然走 body 序列化作为兼容路径。等后端落地后，本字段成为单一事实来源。
+  ephemeralUntil: z.string().optional(),
+  poll: PostPollSchema.optional()
 });
 export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;
 

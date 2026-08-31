@@ -108,19 +108,25 @@ function renderKindAwareStage(
     const playbackUri = resolveUrl(selectVideoPlaybackUrl(item) ?? item.playbackUrl ?? "");
     // exactOptionalPropertyTypes: VideoStage.isActive 是 ?: boolean（不允许显式 undefined），
     // 透传 isActive: undefined 会被 strict 拒绝。这里只在 isActive 真有 boolean 值时才传。
-    return <VideoStage item={item} uri={playbackUri} autoPlay={shouldAutoPlayVideo(item)} {...(isActive === undefined ? {} : { isActive })} onPress={onPress} frameAspect={aspect} resolveUrl={resolveUrl} {...(onFrame ? { onFrame } : {})} />;
+    return (
+      <View style={styles.singleInset}>
+        <VideoStage item={item} uri={playbackUri} autoPlay={shouldAutoPlayVideo(item)} {...(isActive === undefined ? {} : { isActive })} onPress={onPress} frameAspect={aspect} resolveUrl={resolveUrl} {...(onFrame ? { onFrame } : {})} />
+      </View>
+    );
   }
   if (item.mediaType === "AUDIO") {
     // §5.2.3 AUDIO：语音播放卡（无画面），playbackUrl 即原文件；不进图片查看器。
     return <AudioStage item={item} uri={resolveUrl(item.playbackUrl ?? "")} />;
   }
   return (
-    <SinglePostImage
-      item={item}
-      aspect={aspect}
-      resolveUrl={resolveUrl}
-      onPress={onPress}
-    />
+    <View style={styles.singleInset}>
+      <SinglePostImage
+        item={item}
+        aspect={aspect}
+        resolveUrl={resolveUrl}
+        onPress={onPress}
+      />
+    </View>
   );
 }
 
@@ -280,7 +286,14 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
 }): React.JSX.Element {
   const declaredAspect = mediaAspect(item, 0);
   const [loadedAspect, setLoadedAspect] = useState(0);
-  const sourceAspect = aspect ?? declaredAspect ?? loadedAspect ?? 4 / 3;
+  const [availableWidth, setAvailableWidth] = useState(0);
+  // The decoded asset is authoritative. A stale/missing server aspect used to
+  // lock portrait photos into a landscape frame, producing contain side bands.
+  const sourceAspect = loadedAspect || aspect || declaredAspect || 4 / 3;
+  const maxDisplayHeight = availableWidth > 0 ? Math.min(440, availableWidth * 1.25) : 0;
+  const displayWidth = availableWidth > 0 && sourceAspect < 0.8
+    ? Math.min(availableWidth, maxDisplayHeight * sourceAspect)
+    : availableWidth;
   // 【fix 2026-08-26】信任 caller 传入的 aspect，否则用 declaredAspect，不强制 shapeAspect。
   // 旧逻辑用 selectImageShape → STORY_9_16 强制 3:4 → 9:16 上下大段深紫黑。
   // 现逻辑：按 sourceAspect 原比例渲染，contain 模式下 expo-image 自带补深紫黑。
@@ -297,25 +310,29 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
   // contain 模式下图片已完整居中显示，不传 contentPosition。
   // 历史：v2 focalPoint 透传 → 9:16 portrait 头像图被贴顶 → 看起来"被切了"。
   return (
-    <Pressable
-      accessibilityLabel="查看原图"
-      onPress={onPress}
-      style={[styles.singleStage, { aspectRatio: shapeAspect, backgroundColor: frameBackground }]}
-    >
-      <View style={styles.singleFill}>
-        <ExpoImage
-          source={{ uri }}
-          style={styles.singleAsset}
-          contentFit="contain"
-          contentPosition="center"
-          transition={200}
-          cachePolicy="memory-disk"
-          priority="normal"
-          recyclingKey={item.mediaAssetId}
-          onLoad={(event) => onImageLoad(event, declaredAspect, setLoadedAspect)}
-        />
-      </View>
-    </Pressable>
+    <View onLayout={(event) => setAvailableWidth(event.nativeEvent.layout.width)} style={styles.singleMeasure}>
+      {displayWidth > 0 ? (
+        <Pressable
+          accessibilityLabel="查看原图"
+          onPress={onPress}
+          style={[styles.singleStage, { aspectRatio: shapeAspect, backgroundColor: frameBackground, width: displayWidth }]}
+        >
+          <View style={styles.singleFill}>
+            <ExpoImage
+              source={{ uri }}
+              style={styles.singleAsset}
+              contentFit="contain"
+              contentPosition="center"
+              transition={200}
+              cachePolicy="memory-disk"
+              priority="normal"
+              recyclingKey={item.mediaAssetId}
+              onLoad={(event) => onImageLoad(event, declaredAspect, setLoadedAspect)}
+            />
+          </View>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -560,6 +577,9 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
         contentContainerStyle={{ paddingLeft: 0, paddingRight: RAIL_HORIZONTAL_PADDING }}
         decelerationRate="fast"
         horizontal
+        // A media rail owns horizontal drags. Stop the shell's bubbled-touch
+        // page switcher from interpreting photo paging as module navigation.
+        onTouchStart={(event) => event.stopPropagation()}
         onMomentumScrollEnd={(event) => onIndexChange(nearestRailIndex(metrics.offsets, event.nativeEvent.contentOffset.x))}
         ref={railRef}
         snapToOffsets={metrics.offsets}
@@ -690,6 +710,15 @@ function onOpenResolveUrl(_path: string): string {
 }
 
 const styles = StyleSheet.create({
+  // Text may use the feed's full right edge; a lone photo/video keeps a small
+  // independent gutter so its rounded frame never feels clipped by the screen.
+  singleInset: {
+    marginRight: 8
+  },
+  singleMeasure: {
+    alignItems: "flex-start",
+    width: "100%"
+  },
   // 单图：深紫黑底（消除灰边）
   singleStage: {
     backgroundColor: FRAME_BACKGROUND_HEX,

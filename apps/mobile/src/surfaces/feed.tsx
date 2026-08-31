@@ -5,16 +5,14 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, AppState, Image, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, Image, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
-import * as ImagePicker from "expo-image-picker";
-import type { CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
+import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
-import { createDraftMedia, draftMediaDragTarget, draftMediaRefs, mediaStatusLabel, moveDraftMedia, normalizeRestoredDraftMedia, pendingDraftMedia, type DraftMediaItem } from "../composer-media";
-import { clearComposerDraft, readComposerDraft, retainComposerImage, writeComposerDraft } from "../expo-composer-draft-store";
+import { ComposerV2Screen } from "./ComposerV2Screen";
 import { isOpportunityPost } from "../feed-content";
 import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
 // v2 重构：深紫黑底 + compositionHint 驱动 fill。Sprint C 替换完成。
@@ -25,7 +23,6 @@ import { AdaptiveMediaCollection, SinglePostImage, MediaViewer } from "../media/
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
 export { AdaptiveMediaCollection, SinglePostImage, MediaViewer };
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
-import { VoiceRecordPanel } from "../components/voice-record-panel";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
 import { CustomFeedHub } from "./custom-feed";
@@ -40,7 +37,6 @@ type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情
 let cachedPosts: FeedPost[] = [];
 let cachedMedia: Record<string, FeedMediaItem[]> = {};
 let cachedPostIds: Set<string> = new Set();
-let cachedComposerDraft = "";
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
 
@@ -111,105 +107,6 @@ const CUSTOM_FEED_LABELS: Readonly<Record<string, string>> = {
   startup: "创业"
 };
 
-const COMPOSER_MEDIA_ITEM_SPAN = 236;
-
-function ComposerMediaCard({
-  item,
-  index,
-  itemCount,
-  publishing,
-  onAltText,
-  onCancel,
-  onMove,
-  onPause,
-  onRemove,
-  onReplace
-}: {
-  item: DraftMediaItem;
-  index: number;
-  itemCount: number;
-  publishing: boolean;
-  onAltText: (altText: string) => void;
-  onCancel: () => void;
-  onMove: (from: number, to: number) => void;
-  onPause: () => void;
-  onRemove: () => void;
-  onReplace: () => void;
-}): React.JSX.Element {
-  const dragX = useRef(new Animated.Value(0)).current;
-  const [dragging, setDragging] = useState(false);
-  const dragResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => !publishing,
-    onMoveShouldSetPanResponder: (_event, gesture) => !publishing && Math.abs(gesture.dx) > 4,
-    onPanResponderTerminationRequest: () => false,
-    onShouldBlockNativeResponder: () => true,
-    onPanResponderGrant: () => setDragging(true),
-    onPanResponderMove: (_event, gesture) => dragX.setValue(gesture.dx),
-    onPanResponderRelease: (_event, gesture) => {
-      const target = draftMediaDragTarget(index, gesture.dx, COMPOSER_MEDIA_ITEM_SPAN, itemCount);
-      dragX.setValue(0);
-      setDragging(false);
-      if (target !== index) onMove(index, target);
-    },
-    onPanResponderTerminate: () => {
-      dragX.setValue(0);
-      setDragging(false);
-    }
-  }), [dragX, index, itemCount, onMove, publishing]);
-
-  return (
-    <Animated.View style={[styles.composerMediaItem, dragging && styles.composerMediaItemDragging, { transform: [{ translateX: dragX }] }]}>
-      <View
-        accessibilityLabel={`拖动第 ${index + 1} 张照片排序`}
-        accessibilityRole="adjustable"
-        style={styles.composerMediaDragHandle}
-        {...dragResponder.panHandlers}
-      >
-        <Text style={styles.composerMediaDragText}>按住左右拖动排序</Text>
-        <Text style={styles.composerMediaDragGlyph}>≡</Text>
-      </View>
-      <Image resizeMode="contain" source={{ uri: item.image.uri }} style={styles.composerMediaThumb} />
-      <Text style={[styles.composerMediaStatus, item.status === "FAILED" && styles.composerMediaStatusFailed]}>{mediaStatusLabel(item)}</Text>
-      <TextInput
-        accessibilityLabel={`第 ${index + 1} 张照片替代文本`}
-        editable={!publishing}
-        maxLength={500}
-        onChangeText={onAltText}
-        placeholder="描述照片（可选）"
-        placeholderTextColor={color.muted}
-        style={styles.composerMediaAlt}
-        value={item.altText}
-      />
-      <View style={styles.composerMediaActions}>
-        <Pressable disabled={publishing || index === 0} onPress={() => onMove(index, index - 1)}>
-          <Text style={[styles.composerMediaAction, index === 0 && styles.disabledText]}>前移</Text>
-        </Pressable>
-        <Pressable disabled={publishing || index === itemCount - 1} onPress={() => onMove(index, index + 1)}>
-          <Text style={[styles.composerMediaAction, index === itemCount - 1 && styles.disabledText]}>后移</Text>
-        </Pressable>
-        {item.status === "UPLOADING" ? (
-          <>
-            <Pressable onPress={onPause}>
-              <Text style={styles.composerMediaAction}>暂停</Text>
-            </Pressable>
-            <Pressable onPress={onCancel}>
-              <Text style={styles.composerMediaRemove}>取消</Text>
-            </Pressable>
-          </>
-        ) : (
-          <Pressable disabled={publishing} onPress={onReplace}>
-            <Text style={styles.composerMediaAction}>替换</Text>
-          </Pressable>
-        )}
-        <Pressable disabled={publishing} onPress={onRemove}>
-          <Text style={styles.composerMediaRemove}>移除</Text>
-        </Pressable>
-      </View>
-      {item.error ? <Text numberOfLines={2} style={styles.composerMediaError}>{item.error}</Text> : null}
-    </Animated.View>
-  );
-}
-
 export function FeedSurface({
   localNet,
   mediaClient,
@@ -260,23 +157,11 @@ export function FeedSurface({
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [replying, setReplying] = useState(false);
-  // 发布器状态（X 式 compose）
+  // 发布器状态（v2 全面迁出到 ComposerV2Screen；这里只保留触发器）
   const [composerOpen, setComposerOpen] = useState(false);
+  const [composerQuoteId, setComposerQuoteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [draft, setDraft] = useState(cachedComposerDraft);
-  const [draftMedia, setDraftMedia] = useState<DraftMediaItem[]>([]);
-  const [draftVisibility, setDraftVisibility] = useState<"PUBLIC" | "FOLLOWERS">("PUBLIC");
-  const [draftIncludeCity, setDraftIncludeCity] = useState(true);
-  const [composerError, setComposerError] = useState<string>();
-  const [quoteTargetId, setQuoteTargetId] = useState<string | null>(null);
-  const [publishing, setPublishing] = useState(false);
-  const publishingRef = useRef(false);
-  const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
-  const uploadActionsRef = useRef<Map<string, "PAUSE" | "CANCEL">>(new Map());
-  const draftMediaSequenceRef = useRef(0);
-  const publishIdempotencyRef = useRef<string | undefined>(undefined);
-  const draftRestoredRef = useRef(false);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
   const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
@@ -321,57 +206,8 @@ export function FeedSurface({
     })
   ).current;
 
-  useEffect(() => {
-    let active = true;
-    void readComposerDraft().then((snapshot) => {
-      if (!active) return;
-      if (snapshot && (snapshot.body.trim() || snapshot.media.length > 0 || snapshot.quoteTargetId)) {
-        cachedComposerDraft = snapshot.body;
-        setDraft(snapshot.body);
-        setDraftMedia(normalizeRestoredDraftMedia(snapshot.media));
-        setDraftVisibility(snapshot.visibility);
-        setDraftIncludeCity(snapshot.includeCity);
-        setQuoteTargetId(snapshot.quoteTargetId);
-        publishIdempotencyRef.current = snapshot.publishIdempotencyKey;
-        setComposerOpen(true);
-      }
-      draftRestoredRef.current = true;
-    });
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => () => {
-    for (const controller of uploadControllersRef.current.values()) controller.abort();
-    uploadControllersRef.current.clear();
-  }, []);
-
-  useEffect(() => {
-    if (!draftRestoredRef.current) return;
-    const persist = (): void => {
-      try {
-        writeComposerDraft({
-          version: 1,
-          body: draft,
-          media: draftMedia,
-          visibility: draftVisibility,
-          includeCity: draftIncludeCity,
-          quoteTargetId,
-          publishIdempotencyKey: publishIdempotencyRef.current,
-          updatedAt: new Date().toISOString()
-        });
-      } catch {
-        // Draft remains in memory; the composer reports upload failures separately.
-      }
-    };
-    const timer = setTimeout(persist, 250);
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "inactive" || state === "background") persist();
-    });
-    return () => {
-      clearTimeout(timer);
-      subscription.remove();
-    };
-  }, [draft, draftIncludeCity, draftMedia, draftVisibility, quoteTargetId]);
+  // 发布器状态全部迁出到 ComposerV2Screen（包含上传、草稿、状态机）。
+  // 父组件只管打开/关闭，初始 quoteId 通过 composerQuoteId 透传。
 
   const activeVideoId = useMemo(() => {
     if (viewportHeight === 0) return null;
@@ -447,9 +283,17 @@ export function FeedSurface({
   function toggleEmbeddedComposer(): void {
     if (composerOpen) {
       setComposerOpen(false);
+      setComposerQuoteId(null);
       return;
     }
-    openComposer();
+    setComposerQuoteId(null);
+    setComposerOpen(true);
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
+  }
+
+  function openComposerFor(quoteId: string): void {
+    setComposerQuoteId(quoteId);
+    setComposerOpen(true);
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
   }
 
@@ -593,180 +437,8 @@ export function FeedSurface({
     }
   }
 
-  function openComposer(quoteId?: string): void {
-    if ((quoteId ?? null) !== quoteTargetId) publishIdempotencyRef.current = undefined;
-    setQuoteTargetId(quoteId ?? null);
-    setComposerOpen(true);
-  }
-
-  function invalidatePublishAttempt(): void {
-    publishIdempotencyRef.current = undefined;
-  }
-
-  async function pickComposerImages(source: "camera" | "library"): Promise<void> {
-    setComposerError(undefined);
-    const permission = source === "camera"
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) { setComposerError(source === "camera" ? "需要相机权限才能拍照。" : "需要照片权限才能选择图片。"); return; }
-    const result = source === "camera"
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 1 })
-      : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ["images"],
-          quality: 1,
-          allowsMultipleSelection: true,
-          selectionLimit: Math.max(1, 6 - draftMedia.length),
-          preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current
-        });
-    if (result.canceled) return;
-    const selected = result.assets.map((asset) => ({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) }));
-    invalidatePublishAttempt();
-    const localItems = selected.map((image) => {
-      draftMediaSequenceRef.current += 1;
-      return createDraftMedia(image, `draft_media_${Date.now().toString(36)}_${draftMediaSequenceRef.current.toString(36)}`);
-    });
-    let retentionFailed = false;
-    const retained = await Promise.all(localItems.map(async (item) => {
-      try {
-        return await retainComposerImage(item);
-      } catch {
-        retentionFailed = true;
-        return item;
-      }
-    }));
-    setDraftMedia((current) => [...current, ...retained].slice(0, 6));
-    if (retentionFailed) setComposerError("部分照片暂时无法复制到草稿目录；当前会话仍可发布，重启 App 前请完成或重新选择。 ");
-  }
-
-  async function replaceComposerImage(localId: string): Promise<void> {
-    setComposerError(undefined);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) { setComposerError("需要照片权限才能替换图片。"); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 1,
-      allowsMultipleSelection: false,
-      selectionLimit: 1,
-      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current
-    });
-    const asset = result.canceled ? undefined : result.assets[0];
-    if (!asset) return;
-    const current = draftMedia.find((item) => item.localId === localId);
-    if (!current) return;
-    invalidatePublishAttempt();
-    const replacement = {
-      ...createDraftMedia({
-        uri: asset.uri,
-        width: asset.width,
-        height: asset.height,
-        ...(asset.fileName ? { fileName: asset.fileName } : {}),
-        ...(asset.mimeType ? { mimeType: asset.mimeType } : {})
-      }, localId),
-      altText: current.altText
-    };
-    try {
-      const retained = await retainComposerImage(replacement);
-      setDraftMedia((items) => items.map((item) => item.localId === localId ? retained : item));
-    } catch {
-      setDraftMedia((items) => items.map((item) => item.localId === localId ? replacement : item));
-      setComposerError("替换照片暂时无法复制到草稿目录；重启 App 前请完成发布或重新选择。");
-    }
-  }
-
-  async function publish(): Promise<void> {
-    if ((!draft.trim() && draftMedia.length === 0) || publishingRef.current) return;
-    publishingRef.current = true;
-    setPublishing(true);
-    setComposerError(undefined);
-    try {
-      const pending = pendingDraftMedia(draftMedia);
-      if (pending.length > 0) {
-        const pendingIds = new Set(pending.map((item) => item.localId));
-        setDraftMedia((current) => current.map((item) => pendingIds.has(item.localId)
-          ? { ...item, status: "UPLOADING", progress: item.progress ?? 0, error: undefined }
-          : item));
-      }
-      let uploadPaused = false;
-      const uploadResults = await Promise.allSettled(pending.map(async (item) => {
-        const controller = new AbortController();
-        uploadControllersRef.current.set(item.localId, controller);
-        try {
-          const isAudio = item.image.mimeType?.startsWith("audio/") ?? false;
-          const uploaded = await mediaClient.uploadMedia({
-            ...item.image,
-            mediaType: isAudio ? "AUDIO" : "IMAGE",
-            defaultMime: isAudio ? "audio/mp4" : "image/jpeg"
-          }, {
-            signal: controller.signal,
-            ...(item.uploadSession ? { resumeSession: item.uploadSession } : {}),
-            onProgress: (progress) => setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
-              ? { ...candidate, progress }
-              : candidate)),
-            onSession: (uploadSession) => setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
-              ? { ...candidate, uploadSession }
-              : candidate))
-          });
-          setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
-            ? { ...candidate, status: "READY", progress: 1, mediaAssetId: uploaded.mediaAssetId, uploadSession: undefined, error: undefined }
-            : candidate));
-          return { localId: item.localId, mediaAssetId: uploaded.mediaAssetId };
-        } catch (error) {
-          const action = uploadActionsRef.current.get(item.localId);
-          const paused = controller.signal.aborted && action === "PAUSE";
-          if (paused) uploadPaused = true;
-          const message = paused ? "上传已暂停，点击发布即可续传" : controller.signal.aborted ? "照片上传已取消" : error instanceof Error ? error.message : "上传失败";
-          setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId
-            ? { ...candidate, status: paused ? "PAUSED" : "FAILED", error: message }
-            : candidate));
-          throw error;
-        } finally {
-          uploadControllersRef.current.delete(item.localId);
-          uploadActionsRef.current.delete(item.localId);
-        }
-      }));
-      if (uploadResults.some((result) => result.status === "rejected")) {
-        setComposerError(uploadPaused
-          ? "照片上传已暂停，草稿和断点均已保留；再次点击发布即可续传。"
-          : "有照片上传或处理失败。失败项已保留，可直接重试；帖子尚未发布。");
-        return;
-      }
-      const uploadedById = new Map(uploadResults.flatMap((result) => result.status === "fulfilled" ? [[result.value.localId, result.value.mediaAssetId] as const] : []));
-      const completedMedia = draftMedia.map((item) => {
-        const mediaAssetId = uploadedById.get(item.localId) ?? item.mediaAssetId;
-        return mediaAssetId ? { ...item, status: "READY" as const, progress: 1, mediaAssetId, uploadSession: undefined, error: undefined } : item;
-      });
-      setDraftMedia(completedMedia);
-      const mediaRefs = draftMediaRefs(completedMedia);
-      if (completedMedia.length > 0 && !mediaRefs) {
-        setComposerError("照片尚未全部就绪，帖子没有发布。请重试失败项。");
-        return;
-      }
-      const payload: CreatePostPayload = {
-        authorType: "USER",
-        authorDisplayName: "你",
-        body: draft.trim(),
-        visibility: draftVisibility,
-        ...(draftIncludeCity ? { cityScope: "hn" } : {})
-      };
-      if (mediaRefs && mediaRefs.length > 0) payload.mediaRefs = mediaRefs;
-      if (quoteTargetId) payload.contextRefs = [{ contextType: "QUOTE_POST", contextId: quoteTargetId }];
-      publishIdempotencyRef.current ??= `mobile_post_publish_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-      await localNet.createPost(payload, publishIdempotencyRef.current);
-      setDraft("");
-      cachedComposerDraft = "";
-      setDraftMedia([]);
-      setQuoteTargetId(null);
-      setComposerOpen(false);
-      publishIdempotencyRef.current = undefined;
-      clearComposerDraft();
-      await loadFeed();
-    } catch (error) {
-      setComposerError(error instanceof Error ? error.message : "发布失败，请稍后重试。");
-    } finally {
-      publishingRef.current = false;
-      setPublishing(false);
-    }
-  }
+  // 发布器 (pickComposerImages / replaceComposerImage / publish) 全部迁出到 ComposerV2Screen。
+  // 这里只保留打开入口（toggleEmbeddedComposer）。
 
   function mediaFor(postId: string): FeedMediaItem[] {
     return (media[postId] ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
@@ -827,7 +499,7 @@ export function FeedSurface({
     return true;
   });
   const visible = getVisibleForTab(tab);
-  const quoteTarget = quoteTargetId ? posts.find((post) => post.postId === quoteTargetId) : undefined;
+  const quoteTarget = composerQuoteId ? posts.find((post) => post.postId === composerQuoteId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
 
@@ -967,121 +639,16 @@ export function FeedSurface({
         </Pressable>
       ) : null}
 
-      {/* 发布器（X 式 compose：正文 + 照片/普通视频 + 引用绑定 → CreatePost） */}
-      {composerOpen ? (
-        <View style={styles.composer}>
-          <TextInput
-            value={draft}
-            onChangeText={(value) => { invalidatePublishAttempt(); cachedComposerDraft = value; setDraft(value); }}
-            multiline
-            maxLength={1000}
-            placeholder="说点本地的事情…"
-            placeholderTextColor={color.muted}
-            style={styles.composerInput}
-          />
-          {quoteTarget ? (
-            <View style={styles.composerQuote}>
-              <Text style={styles.composerQuoteText} numberOfLines={1}>
-                引用 {authorName(quoteTarget)}：{quoteTarget.body}
-              </Text>
-              <Pressable onPress={() => { invalidatePublishAttempt(); setQuoteTargetId(null); }}>
-                <Text style={styles.composerQuoteRemove}>移除</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          {draftMedia.length > 0 ? (
-            <ScrollView
-              contentContainerStyle={styles.composerMediaPreviewContent}
-              horizontal
-              keyboardShouldPersistTaps="handled"
-              showsHorizontalScrollIndicator={false}
-              style={styles.composerMediaPreview}
-            >
-              {draftMedia.map((item, index) => (
-                <ComposerMediaCard
-                  index={index}
-                  item={item}
-                  itemCount={draftMedia.length}
-                  key={item.localId}
-                  onAltText={(altText) => {
-                    invalidatePublishAttempt();
-                    setDraftMedia((current) => current.map((candidate) => candidate.localId === item.localId ? { ...candidate, altText } : candidate));
-                  }}
-                  onCancel={() => {
-                    uploadActionsRef.current.set(item.localId, "CANCEL");
-                    uploadControllersRef.current.get(item.localId)?.abort();
-                    invalidatePublishAttempt();
-                    setDraftMedia((current) => current.filter((candidate) => candidate.localId !== item.localId));
-                  }}
-                  onMove={(from, to) => {
-                    invalidatePublishAttempt();
-                    setDraftMedia((current) => moveDraftMedia(current, from, to));
-                  }}
-                  onPause={() => {
-                    uploadActionsRef.current.set(item.localId, "PAUSE");
-                    uploadControllersRef.current.get(item.localId)?.abort();
-                  }}
-                  onRemove={() => {
-                    invalidatePublishAttempt();
-                    setDraftMedia((current) => current.filter((candidate) => candidate.localId !== item.localId));
-                  }}
-                  onReplace={() => void replaceComposerImage(item.localId)}
-                  publishing={publishing}
-                />
-              ))}
-            </ScrollView>
-          ) : null}
-          <View style={styles.composerMetaRow}>
-            <Pressable onPress={() => { invalidatePublishAttempt(); setDraftVisibility((value) => value === "PUBLIC" ? "FOLLOWERS" : "PUBLIC"); }} style={styles.composerMetaChip}>
-              <Text style={styles.composerMetaText}>{draftVisibility === "PUBLIC" ? "所有人可见" : "仅关注者"}</Text>
-            </Pressable>
-            <Pressable onPress={() => { invalidatePublishAttempt(); setDraftIncludeCity((value) => !value); }} style={[styles.composerMetaChip, draftIncludeCity && styles.composerMetaChipOn]}>
-              <Text style={styles.composerMetaText}>{draftIncludeCity ? "河内 · 已添加" : "不添加位置"}</Text>
-            </Pressable>
-            <Text style={styles.composerCount}>{draft.length}/1000</Text>
-          </View>
-          <View style={styles.composerTools}>
-            <Pressable
-              disabled={draftMedia.length >= 6 || publishing}
-              onPress={() => void pickComposerImages("library")}
-              style={[styles.composerTool, (draftMedia.length >= 6 || publishing) && styles.disabled]}
-            >
-              <Text style={styles.composerToolText}>照片 {draftMedia.length}/6</Text>
-            </Pressable>
-            <Pressable
-              disabled={draftMedia.length >= 6 || publishing}
-              onPress={() => void pickComposerImages("camera")}
-              style={[styles.composerTool, (draftMedia.length >= 6 || publishing) && styles.disabled]}
-            >
-              <Text style={styles.composerToolText}>拍照</Text>
-            </Pressable>
-            <VoiceRecordPanel
-              disabled={publishing || draftMedia.length >= 6}
-              onDone={(recording) => {
-                invalidatePublishAttempt();
-                draftMediaSequenceRef.current += 1;
-                const localId = `draft_media_${Date.now().toString(36)}_${draftMediaSequenceRef.current.toString(36)}`;
-                const item: DraftMediaItem = {
-                  localId,
-                  image: {
-                    uri: recording.uri,
-                    mimeType: "audio/mp4",
-                    width: 0,
-                    height: 0
-                  },
-                  altText: `语音 ${Math.round(recording.durationMs / 1000)} 秒`,
-                  status: "LOCAL"
-                };
-                setDraftMedia((current) => [...current, item].slice(0, 6));
-              }}
-            />
-            <Pressable disabled={publishing || (!draft.trim() && draftMedia.length === 0)} onPress={() => void publish()} style={[styles.composerPublish, (publishing || (!draft.trim() && draftMedia.length === 0)) && styles.disabled]}>
-              <Text style={styles.composerPublishText}>{publishing ? "发布中…" : "发布"}</Text>
-            </Pressable>
-          </View>
-          {composerError ? <Text style={styles.composerError}>{composerError}</Text> : null}
-        </View>
-      ) : null}
+      {/* 发布器 v2 — 全部状态/上传/草稿都在 ComposerV2Screen 内部，父组件只透传 trigger */}
+      <ComposerV2Screen
+        initialQuoteId={composerQuoteId}
+        localNet={localNet}
+        mediaClient={mediaClient}
+        onClose={() => { setComposerOpen(false); setComposerQuoteId(null); }}
+        onPublished={async () => { setComposerOpen(false); setComposerQuoteId(null); await loadFeed(); }}
+        posts={posts}
+        visible={composerOpen}
+      />
 
       {engagementError ? <Text style={styles.engagementError}>{engagementError}</Text> : null}
       {engagementNotice ? <Text style={styles.engagementNotice}>{engagementNotice}</Text> : null}
@@ -1123,7 +690,7 @@ export function FeedSurface({
               style={styles.postCard}
               onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); }}
             >
-              {/* posthead — Threads UX: avatar 38 + name+time + ⋯ menu (no follow button) */}
+              {/* posthead — larger avatar on the compact 14pt feed edge */}
               <View style={styles.postHead}>
                 <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatar}>
@@ -1220,7 +787,7 @@ export function FeedSurface({
                 <Pressable onPress={() => { setReplyTargetId(post.postId); setReplyDraft(""); }} style={styles.postAction}>
                   <Text style={styles.postActionText}>回复</Text>
                 </Pressable>
-                <Pressable onPress={() => openComposer(post.postId)} style={styles.postAction}>
+                <Pressable onPress={() => openComposerFor(post.postId)} style={styles.postAction}>
                   <Text style={styles.postActionText}>引用</Text>
                 </Pressable>
                 <Pressable disabled={isSaved || engagementBusy.has(`bookmark:${post.postId}`)} onPress={() => void commitEngagement(`bookmark:${post.postId}`, post.postId, () => engagement.bookmarkPost(post.postId), setBookmarked, bookmarked)} style={styles.postAction}>
@@ -1548,65 +1115,15 @@ const styles = StyleSheet.create({
     textAlign: "center"
   },
 
+  // 发布器 (composer / composerInput / composerQuote / composerMedia* / composerMeta* /
+  // composerTool* / composerPublish* / composerError / composerError) 全部迁出到
+  // ComposerV2Screen。父组件只保留 trigger 状态与样式。
+
   // 基线 .postcompose：bg white border ln radius 17 padding 11。
-  composer: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 17,
-    borderWidth: 1,
-    marginBottom: 8,
-    padding: 11,
-    ...shadows.card
-  },
-  composerInput: { color: color.ink, fontSize: 15, lineHeight: 22, minHeight: 112, paddingHorizontal: 2, paddingTop: 4, textAlignVertical: "top" },
-  composerQuote: {
-    alignItems: "center",
-    backgroundColor: "#F8F5FA",
-    borderRadius: 10,
-    flexDirection: "row",
-    gap: 6,
-    marginTop: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 6
-  },
-  composerQuoteText: { color: color.muted, flex: 1, fontSize: 11 },
-  composerQuoteRemove: { color: "#B91451", fontSize: 11, fontWeight: "700" },
-  composerMediaPreview: { marginTop: 8 },
-  composerMediaPreviewContent: { gap: 8, paddingRight: 12 },
-  composerMediaItem: { backgroundColor: "#FAF8FB", borderColor: color.line, borderRadius: 12, borderWidth: 1, padding: 8, width: 228 },
-  composerMediaItemDragging: { elevation: 8, opacity: 0.94, shadowColor: "#17121F", shadowOffset: { height: 5, width: 0 }, shadowOpacity: 0.22, shadowRadius: 10, zIndex: 20 },
-  composerMediaDragHandle: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 30, paddingBottom: 5, paddingHorizontal: 2 },
-  composerMediaDragText: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  composerMediaDragGlyph: { color: color.ink, fontSize: 18, fontWeight: "800", lineHeight: 20 },
-  composerMediaThumb: { backgroundColor: "#F0ECF3", borderRadius: 9, height: 142, width: "100%" },
-  composerMediaStatus: { color: "#4F6840", fontSize: 11, fontWeight: "700", marginTop: 4 },
-  composerMediaStatusFailed: { color: "#B91451" },
-  composerMediaAlt: { backgroundColor: color.white, borderColor: color.line, borderRadius: 8, borderWidth: 1, color: color.ink, fontSize: 11, marginTop: 6, minHeight: 36, paddingHorizontal: 8, paddingVertical: 6 },
-  composerMediaActions: { flexDirection: "row", gap: 14, marginTop: 6 },
-  composerMediaAction: { color: color.violet, fontSize: 11, fontWeight: "700" },
-  composerMediaRemove: { color: "#B91451", fontSize: 11, fontWeight: "700", marginTop: 2, textAlign: "center" },
-  composerMediaError: { color: "#B91451", fontSize: 11, lineHeight: 15, marginTop: 4 },
-  disabledText: { color: color.muted, opacity: 0.45 },
-  composerMetaRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
-  composerMetaChip: { backgroundColor: "#F8F5FA", borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 5 },
-  composerMetaChipOn: { backgroundColor: color.lime, borderColor: color.lime },
-  composerMetaText: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  composerCount: { color: color.muted, fontSize: 11, marginLeft: "auto" },
-  composerTools: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
-  composerTool: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 9,
-    paddingVertical: 6
-  },
-  composerToolOn: { backgroundColor: color.ink, borderColor: color.ink },
-  composerToolText: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  composerPublish: { backgroundColor: color.lime, borderRadius: 999, marginLeft: "auto", paddingHorizontal: 14, paddingVertical: 6 },
-  composerPublishText: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  composerError: { color: "#B91451", fontSize: 11, lineHeight: 15, marginTop: 7 },
+  // 仍被 ComposerV2Screen 外部容器/外层其它 UI 引用，保留为视觉基线。
   disabled: { opacity: 0.45 },
+  disabledText: { color: color.muted, opacity: 0.45 },
+
   replyOverlay: { alignItems: "center", backgroundColor: "rgba(17,13,22,0.45)", flex: 1, justifyContent: "flex-end", padding: 18 },
   replySheet: { backgroundColor: color.white, borderRadius: 18, padding: 14, width: "100%", ...shadows.card },
   replyTitle: { color: color.ink, fontSize: 17, fontWeight: "800" },
@@ -1649,33 +1166,34 @@ const styles = StyleSheet.create({
   retryBtnText: { color: color.white, fontSize: 11, fontWeight: "700" },
   // 连续信息流：帖文不做独立卡片。横向贴近屏幕，仅保留极淡的底部分界。
   // X / Threads 的信息密度来自统一页面画布，而不是每条内容再套一层圆角容器。
-  // R15.23: Threads UX (.post padding 16 18 14, 38px avatar, 3 列 grid 38+1fr+32)
+  // Use a compact 14pt feed edge and break out the parent's right gutter so copy can
+  // use the screen. Media independently preserves its decoded source aspect.
   postCard: {
     backgroundColor: "transparent",
     borderBottomColor: "#E8E8E8",
     borderBottomWidth: 1,
     // The page chrome already owns 18pt horizontal padding. Break the feed
-    // row back out to the screen edge so it is not inset twice: avatar stays
-    // at 18pt, while text/media can use the full width on the right.
+    // row back out to the screen edge so it is not inset twice: avatar sits
+    // at 14pt, while text/media can use the full width on the right.
     marginHorizontal: -18,
-    paddingLeft: 18,
+    paddingLeft: 14,
     paddingRight: 0,
     paddingTop: 16,
     paddingBottom: 14
   },
-  // R15.23: postHead 严格按规范 grid 3 列: 38px avatar + 1fr body + 32px menu, gap 10
+  // 44pt avatar + flexible identity + 32pt menu, gap 10.
   postHead: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
-  postAvatarWrap: { height: 38, position: "relative", width: 38 },
+  postAvatarWrap: { height: 44, position: "relative", width: 44 },
   postAvatar: {
     alignItems: "center",
     backgroundColor: "#111",
     borderRadius: 999,
-    height: 38,
+    height: 44,
     justifyContent: "center",
-    width: 38
+    width: 44
   },
-  postAvatarText: { color: color.white, fontSize: 14, fontWeight: "700" },
-  scenarioBadge: { alignItems: "center", backgroundColor: color.white, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: -2, height: 18, justifyContent: "center", position: "absolute", right: -3, width: 18 },
+  postAvatarText: { color: color.white, fontSize: 16, fontWeight: "700" },
+  scenarioBadge: { alignItems: "center", backgroundColor: color.white, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: -2, height: 20, justifyContent: "center", position: "absolute", right: -3, width: 20 },
   engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },
@@ -1686,9 +1204,9 @@ const styles = StyleSheet.create({
   postMenu: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
   postMenuText: { color: "#555", fontSize: 19, lineHeight: 22 },
 
-  // 38pt avatar + 10pt gap: body aligns with the identity while the row's
+  // 44pt avatar + 10pt gap: body aligns with the identity while the row's
   // right edge remains flush with the screen.
-  postBody: { marginTop: -12, paddingLeft: 48 },
+  postBody: { marginTop: -12, paddingLeft: 54 },
   postReason: { color: "#81788A", fontSize: 11, marginTop: 5 },
   // R15.23: post-text 严格规范 fontSize 14 lineHeight 1.48 ≈ 20.72 → 21
   postCopy: { color: color.ink, fontSize: 14, lineHeight: 21, marginTop: 5 },
