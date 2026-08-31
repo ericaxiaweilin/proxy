@@ -134,7 +134,8 @@ export function AppShell({
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
-  const [messageChatAuthor, setMessageChatAuthor] = useState<string>();
+  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string }>();
+  const messageChatAuthor = messageChat?.author;
   const [marketEntry, setMarketEntry] = useState<{
     tab: MarketTab;
     viewMode: MarketViewMode;
@@ -213,8 +214,8 @@ export function AppShell({
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (handleModuleBack()) return true;
       if (voucherOpen) { setVoucherOpen(false); return true; }
-      if (tab === "ME" && messageChatAuthor) { setMessageChatAuthor(undefined); return true; }
-      if (tab === "MESSAGES" && messageChatAuthor) { setMessageChatAuthor(undefined); return true; }
+      if (tab === "ME" && messageChatAuthor) { setMessageChat(undefined); return true; }
+      if (tab === "MESSAGES" && messageChatAuthor) { setMessageChat(undefined); return true; }
       if (tab === "FEED" && feedPrefsOpen) { setFeedPrefsOpen(false); return true; }
       if (tab === "FEED" && feedChatAuthor) { setFeedChatAuthor(undefined); return true; }
       if (tab === "MARKET" && openExperience) { setOpenExperience(undefined); return true; }
@@ -283,7 +284,7 @@ export function AppShell({
       setFeedChatAuthor(undefined);
       setFeedPrefsOpen(false);
     }
-    if (next !== "MESSAGES") setMessageChatAuthor(undefined);
+    if (next !== "MESSAGES") setMessageChat(undefined);
     if (next !== "ME") setVoucherOpen(false);
   }
 
@@ -293,7 +294,7 @@ export function AppShell({
     setWorkspaceTarget(undefined);
     setHomeAssistant(undefined);
     setFeedChatAuthor(undefined);
-    setMessageChatAuthor(undefined);
+    setMessageChat(undefined);
     setTab("MARKET");
   }
 
@@ -483,11 +484,12 @@ export function AppShell({
           messageChatAuthor ? (
             <ConversationSurface
               author={messageChatAuthor}
+              {...(messageChat?.conversationId ? { conversationId: messageChat.conversationId } : {})}
               conversationClient={conversation}
-              onBack={() => setMessageChatAuthor(undefined)}
+              onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface onOpenConversation={setMessageChatAuthor} onChromeVisibilityChange={setScrollChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
+            <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId) => setMessageChat(conversationId ? { author, conversationId } : { author })} onChromeVisibilityChange={setScrollChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
           ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -513,7 +515,7 @@ export function AppShell({
               onOpenVouchers={() => setVoucherOpen(true)}
               onExperienceAction={executeExperienceAction}
               onOpenConversation={(author) => {
-                setMessageChatAuthor(author);
+                setMessageChat({ author });
                 setTab("MESSAGES");
               }}
               onSignOut={onSignOut}

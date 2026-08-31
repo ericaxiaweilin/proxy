@@ -54,5 +54,5 @@ const styles = StyleSheet.create({
   input: { flex: 1, height: 36, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, paddingHorizontal: 10, fontSize: 12 },
   createBtn: { backgroundColor: "#11110f", borderRadius: 12, paddingHorizontal: 14, justifyContent: "center" },
   createText: { fontSize: 11, fontWeight: "700", color: "#fff" },
-  hint: { fontSize: 9.5, color: "#9a968e", marginTop: 4 },
+  hint: { fontSize: 11, color: "#9a968e", marginTop: 4 },
 });

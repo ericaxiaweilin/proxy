@@ -63,6 +63,33 @@ export function ConversationSurface({
     }
   }, []);
 
+  // Existing conversations open their persisted server history. Creating a
+  // new conversation is reserved for entry points that do not provide an id.
+  useEffect(() => {
+    if (!initialConvId) return;
+    let cancelled = false;
+    setLoading(true);
+    conversationClient.listMessages(initialConvId).then((result) => {
+      if (cancelled) return;
+      const payload = parseOperationRef(result);
+      const rows = Array.isArray(payload?.messages) ? payload.messages as Array<Record<string, unknown>> : [];
+      const actorId = typeof payload?.actorId === "string" ? payload.actorId : undefined;
+      setMessages(rows.map((row) => ({
+        id: String(row.messageId ?? `message_${Date.now()}`),
+        sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? "对方"),
+        body: String(row.body ?? (row.messageType === "IMAGE" ? "[图片]" : row.messageType === "VIDEO" ? "[视频]" : "")),
+        time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+        isOwn: row.senderId === actorId,
+      })));
+      setError(undefined);
+    }).catch(() => {
+      if (!cancelled) setError("历史消息加载失败，请重试");
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [initialConvId, conversationClient, parseOperationRef]);
+
   // 挂载时创建会话
   useEffect(() => {
     if (convId) { setLoading(false); return; }
@@ -320,7 +347,7 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: "#EEE3FF", borderColor: color.proxyPurple },
   chipText: { color: color.muted, fontSize: 11, fontWeight: "700" },
   chipTextActive: { color: "#5822A4" },
-  hint: { color: color.muted, fontSize: 10, marginLeft: "auto" },
+  hint: { color: color.muted, fontSize: 11, marginLeft: "auto" },
 
   composer: {
     alignItems: "center",
@@ -354,7 +381,7 @@ const styles = StyleSheet.create({
   sendBtnText: { color: color.white, fontSize: 11, fontWeight: "700" },
   cardBtn: { backgroundColor: "#fff4da", borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8 },
   cardBtnDisabled: { opacity: 0.5 },
-  cardBtnText: { fontSize: 10, fontWeight: "700", color: "#795817" },
+  cardBtnText: { fontSize: 11, fontWeight: "700", color: "#795817" },
   v1Wrap: { maxWidth: "80%", marginVertical: 2 },
   v1Own: { alignSelf: "flex-end" },
   v1Other: { alignSelf: "flex-start" },

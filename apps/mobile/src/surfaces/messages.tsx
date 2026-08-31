@@ -1,17 +1,18 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
+import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
 
 type HomePanel = "dialogs" | "convos";
 type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock — 与 HTML 1:1，去掉后端依赖先保证视觉对齐
-type Dialog = { id: string; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder };
+type Dialog = { id: string; conversationId?: string; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder };
 const DIALOGS_PINNED: Dialog[] = [
   { id: "linh", initial: "L", name: "Linh", badge: "同行 · 已接受", preview: "你：好，那我们 16:00 在西湖见。", time: "07:02", unread: "2", warm: true, online: true, folder: "friends" as Folder },
   { id: "sunday", initial: "SC", name: "Sunday Coffee Walk", badge: "活动群", preview: "Minh：我把路线放到 Convo 里了。", time: "06:51", unread: "6", dark: true, folder: "activity" as Folder },
@@ -38,8 +39,9 @@ export function MessagesSurface({
   displayIdentityClient,
   activeIdentityId,
   onSwitchIdentity,
+  conversationClient,
 }: {
-  onOpenConversation: (author: string) => void;
+  onOpenConversation: (author: string, conversationId?: string) => void;
   onOpenRequests?: () => void;
   onOpenContacts?: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -48,6 +50,7 @@ export function MessagesSurface({
   displayIdentityClient?: import("../display-identity-client").DisplayIdentityClient;
   activeIdentityId?: string;
   onSwitchIdentity?: (id: string) => void;
+  conversationClient?: ConversationClient;
 }): React.JSX.Element {
   const [panel, setPanel] = useState<HomePanel>("dialogs");
   const [folder, setFolder] = useState<Folder>("all");
@@ -60,8 +63,29 @@ export function MessagesSurface({
     { id: "f2", name: "生活", dialogIds: ["sunday"] },
   ]);
 
-  const filteredPinned = useMemo(() => filterByFolder(DIALOGS_PINNED, folder, search), [folder, search]);
-  const filteredRecent = useMemo(() => filterByFolder(DIALOGS_RECENT, folder, search), [folder, search]);
+  const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
+  const [inboxError, setInboxError] = useState(false);
+
+  useEffect(() => {
+    if (!conversationClient) return;
+    let cancelled = false;
+    conversationClient.listConversations().then((items) => {
+      if (cancelled) return;
+      setServerDialogs(items.map(toDialog));
+      setInboxError(false);
+    }).catch(() => {
+      if (!cancelled) setInboxError(true);
+    });
+    return () => { cancelled = true; };
+  }, [conversationClient]);
+
+  const inboxLoaded = serverDialogs !== undefined || inboxError;
+  const usingServerData = Boolean(serverDialogs?.length);
+  const pinnedSource = usingServerData || !inboxLoaded ? [] : DIALOGS_PINNED;
+  const recentSource = usingServerData ? serverDialogs ?? [] : inboxLoaded ? DIALOGS_RECENT : [];
+
+  const filteredPinned = useMemo(() => filterByFolder(pinnedSource, folder, search), [pinnedSource, folder, search]);
+  const filteredRecent = useMemo(() => filterByFolder(recentSource, folder, search), [recentSource, folder, search]);
 
   const openRequests = () => {
     if (onOpenRequests) onOpenRequests();
@@ -259,7 +283,7 @@ export function MessagesSurface({
               <>
                 <Text style={styles.sectionLabel}>置顶</Text>
                 {filteredPinned.map((d) => (
-                  <Pressable key={d.id} onPress={() => onOpenConversation(d.name)} style={styles.dialog}>
+                  <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId)} style={styles.dialog}>
                     <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                       <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                       {(d as Dialog).online ? <View style={styles.online} /> : null}
@@ -280,10 +304,10 @@ export function MessagesSurface({
               </>
             ) : null}
 
-            <Text style={styles.sectionLabel}>最近</Text>
+            <Text style={styles.sectionLabel}>最近{!usingServerData && inboxLoaded ? " · 演示数据" : ""}</Text>
             {filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
-                <Pressable key={d.id} onPress={() => onOpenConversation(d.name)} style={styles.dialog}>
+                <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId)} style={styles.dialog}>
                   <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                     <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                   </View>
@@ -344,6 +368,28 @@ function filterByFolder<T extends { folder: Folder; name: string; preview: strin
   });
 }
 
+function toDialog(item: ConversationInboxItem): Dialog {
+  const latest = item.latestMessage;
+  const snapshotName = item.counterpartySnapshot?.displayName?.trim();
+  const name = snapshotName || item.counterpartyId || "对话";
+  const preview = latest
+    ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.body?.trim() || "新消息"
+    : "暂无消息";
+  const timestamp = latest?.createdAt || item.conversation.lastMessageAt;
+  const parsed = new Date(timestamp);
+  const time = Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return {
+    id: item.conversation.conversationId,
+    conversationId: item.conversation.conversationId,
+    initial: name.slice(0, 2).toUpperCase(),
+    name,
+    preview,
+    time,
+    badge: item.conversation.originType,
+    folder: item.conversation.originType === "ACTIVITY" ? "activity" : item.conversation.originType === "PROFILE" ? "friends" : "all",
+  };
+}
+
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: "#fffdf8" },
   safe: { height: 13, backgroundColor: "#fffdf8" },
@@ -363,12 +409,12 @@ const styles = StyleSheet.create({
   homeTabTextActive: { color: "#11110f", fontWeight: "700" },
   countBadge: { minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center", marginLeft: 4 },
   countBadgeMuted: { backgroundColor: "#e8e3da" },
-  countBadgeText: { fontSize: 9, fontWeight: "700", color: "#fff" },
+  countBadgeText: { fontSize: 11, fontWeight: "700", color: "#fff" },
   folderRowWrap: { borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "#fffefa" },
   folderRow: { flexDirection: "row", gap: 7, paddingHorizontal: 16, paddingVertical: 10, alignItems: "center" },
   folderChip: { height: 29, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, paddingHorizontal: 11, justifyContent: "center", backgroundColor: "transparent" },
   folderChipActive: { backgroundColor: "#11110f", borderColor: "#11110f" },
-  folderChipText: { fontSize: 10.5, fontWeight: "600", color: "#77736c" },
+  folderChipText: { fontSize: 11, fontWeight: "600", color: "#77736c" },
   folderChipTextActive: { color: "#fff" },
   folderAdd: { width: 32, height: 29, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
   folderAddText: { fontSize: 15, color: "#777" },
@@ -390,34 +436,34 @@ const styles = StyleSheet.create({
   dialogTop: { flexDirection: "row", alignItems: "center", gap: 6 },
   dialogName: { fontSize: 14.5, fontWeight: "700", color: "#11110f" },
   badge: { height: 19, borderRadius: 10, paddingHorizontal: 7, backgroundColor: "#fff4da", justifyContent: "center" },
-  badgeText: { fontSize: 10, fontWeight: "700", color: "#795817" },
+  badgeText: { fontSize: 11, fontWeight: "700", color: "#795817" },
   preview: { marginTop: 4, fontSize: 13, color: "#7d7972" },
   dialogSide: { alignItems: "flex-end", minWidth: 40 },
-  time: { fontSize: 10.5, color: "#aaa69e" },
+  time: { fontSize: 11, color: "#aaa69e" },
   unread: { marginTop: 7, minWidth: 19, height: 19, borderRadius: 10, paddingHorizontal: 5, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
-  unreadText: { fontSize: 10, fontWeight: "700", color: "#fff" },
+  unreadText: { fontSize: 11, fontWeight: "700", color: "#fff" },
   empty: { textAlign: "center", paddingVertical: 24, fontSize: 12, color: "#aaa69e" },
   convoCard: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, padding: 12, backgroundColor: "#fffefa" },
   convoHead: { flexDirection: "row", alignItems: "center", gap: 9 },
   convoMark: { width: 36, height: 36, borderRadius: 11, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
   convoCopy: { flex: 1, minWidth: 0 },
   convoName: { fontSize: 13.5, fontWeight: "700", color: "#11110f" },
-  convoParent: { fontSize: 10.5, color: "#8d8982", marginTop: 2 },
+  convoParent: { fontSize: 11, color: "#8d8982", marginTop: 2 },
   convoPreview: { marginTop: 9, fontSize: 12.5, lineHeight: 18, color: "#68645e" },
   convoFoot: { flexDirection: "row", alignItems: "center", marginTop: 9 },
-  convoFootText: { flex: 1, fontSize: 10, color: "#99958d" },
-  convoFootTime: { fontSize: 10, fontWeight: "700", color: "#54514b" },
+  convoFootText: { flex: 1, fontSize: 11, color: "#99958d" },
+  convoFootTime: { fontSize: 11, fontWeight: "700", color: "#54514b" },
   topbar: { height: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "rgba(255,253,248,0.98)" },
   centerTitle: { flex: 1, alignItems: "center" },
   centerMain: { fontSize: 14, fontWeight: "700", color: "#11110f" },
-  centerSub: { fontSize: 10.5, color: "#8d8982", marginTop: 2 },
+  centerSub: { fontSize: 11, color: "#8d8982", marginTop: 2 },
   backText: { fontSize: 22, color: "#11110f", textAlign: "center", width: 38 },
   ellipsis: { fontSize: 18, color: "#88847c", width: 38, textAlign: "center" },
   requestIntro: { paddingHorizontal: 16, paddingTop: 15, paddingBottom: 8, fontSize: 11.5, lineHeight: 18, color: "#77736c" },
   mackeBanner: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 14, padding: 11, backgroundColor: "#fff9eb", flexDirection: "row", gap: 9, alignItems: "flex-start" },
   mackeIcon: { fontSize: 18 },
   mackeTitle: { fontSize: 11.5, fontWeight: "700", color: "#654e1e" },
-  mackeMeta: { fontSize: 9.8, lineHeight: 14, color: "#8c8065", marginTop: 2 },
+  mackeMeta: { fontSize: 11, lineHeight: 15, color: "#8c8065", marginTop: 2 },
   requestCard: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 16, padding: 13, backgroundColor: "#fffefa" },
   requestTop: { flexDirection: "row", alignItems: "center", gap: 10 },
   requestMsg: { fontSize: 13, lineHeight: 19, color: "#48453f", marginVertical: 11 },
@@ -428,21 +474,21 @@ const styles = StyleSheet.create({
   btnText: { fontSize: 11.5, fontWeight: "700", color: "#11110f", textAlign: "center" },
   contactHeadSearch: { marginHorizontal: 14, marginTop: 8, height: 39, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#f6f3ee", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 11 },
   contactInput: { flex: 1, fontSize: 12.5, color: "#11110f" },
-  contactSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, fontSize: 10, fontWeight: "700", color: "#9b978f", letterSpacing: 0.3 },
+  contactSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, fontSize: 11, fontWeight: "700", color: "#9b978f", letterSpacing: 0.3 },
   contactRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
   contactName: { fontSize: 13, fontWeight: "700", color: "#11110f" },
-  usernameBadge: { fontSize: 10, fontWeight: "600", color: "#737068", backgroundColor: "#f6f3ee", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
-  contactMeta: { fontSize: 9.8, color: "#aaa69e", marginTop: 2 },
-  contactAction: { fontSize: 10.5, fontWeight: "700", color: "#6e6962" },
+  usernameBadge: { fontSize: 11, fontWeight: "600", color: "#737068", backgroundColor: "#f6f3ee", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  contactMeta: { fontSize: 11, color: "#aaa69e", marginTop: 2 },
+  contactAction: { fontSize: 11, fontWeight: "700", color: "#6e6962" },
   personHero: { alignItems: "center", paddingTop: 18, paddingBottom: 12 },
   personName: { fontSize: 17, fontWeight: "700", color: "#11110f", marginTop: 9 },
-  personUser: { fontSize: 10.5, color: "#8f8b83", marginTop: 3 },
+  personUser: { fontSize: 11, color: "#8f8b83", marginTop: 3 },
   personActions: { flexDirection: "row", justifyContent: "space-around", paddingHorizontal: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#e8e3da" },
   personAction: { alignItems: "center", gap: 5 },
   personActionIcon: { width: 40, height: 40, borderRadius: 14, backgroundColor: "#f6f3ee", alignItems: "center", justifyContent: "center" },
-  personActionText: { fontSize: 9.5, fontWeight: "600", color: "#11110f" },
+  personActionText: { fontSize: 11, fontWeight: "600", color: "#11110f" },
   aliasCard: { borderWidth: 1, borderColor: "#e8e3da", borderRadius: 14, padding: 11, backgroundColor: "#fffefa" },
-  aliasLabel: { fontSize: 9.5, color: "#9a968e", marginBottom: 4 },
+  aliasLabel: { fontSize: 11, color: "#9a968e", marginBottom: 4 },
   aliasValue: { fontSize: 11.5, fontWeight: "600", color: "#11110f" },
-  privateValue: { fontSize: 10, color: "#8d8981" },
+  privateValue: { fontSize: 11, color: "#8d8981" },
 });

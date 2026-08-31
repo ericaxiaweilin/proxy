@@ -19,6 +19,13 @@ export type ProtectionOverride = {
   ttlSeconds?: number;
 };
 
+export type ConversationInboxItem = {
+  conversation: { conversationId: string; conversationType: string; originType: string; originId: string; state: string; participants: string[]; lastMessageAt: string };
+  latestMessage?: { messageId: string; senderId: string; body?: string; messageType: string; createdAt: string; senderSnapshot?: { displayName?: string; avatarRef?: string } };
+  counterpartyId?: string;
+  counterpartySnapshot?: { displayName?: string; avatarRef?: string };
+};
+
 export class ConversationClient {
   private commandSequence = 0;
 
@@ -77,6 +84,16 @@ export class ConversationClient {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "ListConversationMessages", { type: "Conversation", id: conversationId }, {});
     return result;
+  }
+
+  public async listConversations(): Promise<ConversationInboxItem[]> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "ListConversations", { type: "ConversationInbox", id: session.userAccountId }, {});
+    if (typeof result.operationRef !== "string") return [];
+    try {
+      const payload = JSON.parse(result.operationRef) as { conversations?: ConversationInboxItem[] };
+      return Array.isArray(payload.conversations) ? payload.conversations : [];
+    } catch { return []; }
   }
 
   public async markMessageRead(messageId: string): Promise<Record<string, unknown>> {

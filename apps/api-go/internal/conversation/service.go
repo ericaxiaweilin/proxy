@@ -46,23 +46,23 @@ type Conversation struct {
 // docs/design/references/Proxy_Message_Object_Schema_v1.json 与
 // Proxy_Messaging_Engineering_Spec_v1.md §2/§11。
 type Message struct {
-	ID             string     `json:"messageId"`
-	ConversationID string     `json:"conversationId"` // legacy; 同义 dialog_id
-	DialogID       string     `json:"dialogId,omitempty"` // v1 正式；与 ConversationID 同值过渡期双写
-	ConvoID        *string    `json:"convoId,omitempty"`  // v1: 所属 Convo 分支
-	SenderID       string     `json:"senderId"`
-	SenderSnapshot *IdentitySnapshot `json:"senderSnapshot,omitempty"` // v1: 发送时固化的 displayName/avatar/username
-	MessageType    string     `json:"messageType"` // v0: TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
-	Kind           string     `json:"kind,omitempty"` // v1: text|image|video|file|location|contact|proxy_object|poll|call_recording|system_event
-	Body           string     `json:"body,omitempty"` // v1 text 仍用 body
-	MediaRef       string     `json:"mediaRef,omitempty"`
-	ProxyObject    *ProxyObjectRef `json:"proxyObject,omitempty"` // v1
-	SecurityV1     *MessageSecurityV1 `json:"security,omitempty"` // v1; 与 Protection 双写过渡
-	Delivery       *MessageDelivery `json:"delivery,omitempty"` // v1
-	Seq            int64      `json:"seq,omitempty"` // v1: dialog 内递增，用于 ReadCursor
-	CreatedAt      time.Time  `json:"createdAt"`
-	EditedAt       *time.Time `json:"editedAt,omitempty"`
-	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
+	ID             string             `json:"messageId"`
+	ConversationID string             `json:"conversationId"`     // legacy; 同义 dialog_id
+	DialogID       string             `json:"dialogId,omitempty"` // v1 正式；与 ConversationID 同值过渡期双写
+	ConvoID        *string            `json:"convoId,omitempty"`  // v1: 所属 Convo 分支
+	SenderID       string             `json:"senderId"`
+	SenderSnapshot *IdentitySnapshot  `json:"senderSnapshot,omitempty"` // v1: 发送时固化的 displayName/avatar/username
+	MessageType    string             `json:"messageType"`              // v0: TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
+	Kind           string             `json:"kind,omitempty"`           // v1: text|image|video|file|location|contact|proxy_object|poll|call_recording|system_event
+	Body           string             `json:"body,omitempty"`           // v1 text 仍用 body
+	MediaRef       string             `json:"mediaRef,omitempty"`
+	ProxyObject    *ProxyObjectRef    `json:"proxyObject,omitempty"` // v1
+	SecurityV1     *MessageSecurityV1 `json:"security,omitempty"`    // v1; 与 Protection 双写过渡
+	Delivery       *MessageDelivery   `json:"delivery,omitempty"`    // v1
+	Seq            int64              `json:"seq,omitempty"`         // v1: dialog 内递增，用于 ReadCursor
+	CreatedAt      time.Time          `json:"createdAt"`
+	EditedAt       *time.Time         `json:"editedAt,omitempty"`
+	DeletedAt      *time.Time         `json:"deletedAt,omitempty"`
 	// Protection is the per-message anti-leak envelope. See
 	// message_protection.go and RFC v0.1 §3. Defaults applied in
 	// sendMessage; per-type rules in DefaultProtectionFor.
@@ -85,14 +85,14 @@ type ProxyObjectRef struct {
 }
 
 type MessageSecurityV1 struct {
-	Mode             string `json:"mode"` // normal|secure
-	ViewLimit        *int   `json:"viewLimit,omitempty"`
-	ViewDurationSec  *int   `json:"viewDurationSeconds,omitempty"`
-	ForwardAllowed   bool   `json:"forwardAllowed"`
-	CopyAllowed      bool   `json:"copyAllowed"`
-	SaveAllowed      bool   `json:"saveAllowed"`
-	CiphertextRef    *string `json:"ciphertextRef,omitempty"`
-	DeleteAfterReadSec *int `json:"deleteAfterReadSeconds,omitempty"`
+	Mode               string  `json:"mode"` // normal|secure
+	ViewLimit          *int    `json:"viewLimit,omitempty"`
+	ViewDurationSec    *int    `json:"viewDurationSeconds,omitempty"`
+	ForwardAllowed     bool    `json:"forwardAllowed"`
+	CopyAllowed        bool    `json:"copyAllowed"`
+	SaveAllowed        bool    `json:"saveAllowed"`
+	CiphertextRef      *string `json:"ciphertextRef,omitempty"`
+	DeleteAfterReadSec *int    `json:"deleteAfterReadSeconds,omitempty"`
 }
 
 type MessageDelivery struct {
@@ -466,7 +466,7 @@ func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "StartConversation", "SendMessage", "ListConversationMessages", "MarkMessageRead", "RecordScreenshot", "ForwardMessage",
+	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "RecordScreenshot", "ForwardMessage",
 		"CreateNeedDraft", "ConfirmNeedDraft":
 		return true
 	default:
@@ -486,6 +486,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.startConversation(ctx, e)
 	case "SendMessage":
 		return s.sendMessage(ctx, e)
+	case "ListConversations":
+		return s.listConversations(ctx, e)
 	case "ListConversationMessages":
 		return s.listMessages(ctx, e)
 	case "MarkMessageRead":
@@ -501,6 +503,53 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	default:
 		return command.Rejected(e, "CONVERSATION_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "conversation.unsupported_command", nil)
 	}
+}
+
+type ConversationSummary struct {
+	Conversation         Conversation      `json:"conversation"`
+	LatestMessage        *Message          `json:"latestMessage,omitempty"`
+	CounterpartyID       string            `json:"counterpartyId,omitempty"`
+	CounterpartySnapshot *IdentitySnapshot `json:"counterpartySnapshot,omitempty"`
+}
+
+func (s *Service) listConversations(ctx context.Context, e command.Envelope) command.Result {
+	conversations, err := s.repository.Snapshot(ctx)
+	if err != nil {
+		return command.Rejected(e, "CONVERSATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
+	}
+	summaries := make([]ConversationSummary, 0, len(conversations))
+	for _, conv := range conversations {
+		if !isParticipant(conv, e.Actor.ID) || conv.State == "BLOCKED" {
+			continue
+		}
+		summary := ConversationSummary{Conversation: conv}
+		for _, participantID := range conv.Participants {
+			if participantID != e.Actor.ID {
+				summary.CounterpartyID = participantID
+				break
+			}
+		}
+		messages, messageErr := s.repository.Messages(ctx, conv.ID)
+		if messageErr != nil {
+			return command.Rejected(e, "MESSAGE_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
+		}
+		if len(messages) > 0 {
+			latest := messages[len(messages)-1]
+			summary.LatestMessage = &latest
+			for index := len(messages) - 1; index >= 0; index-- {
+				if messages[index].SenderID != e.Actor.ID && messages[index].SenderSnapshot != nil {
+					snapshot := *messages[index].SenderSnapshot
+					summary.CounterpartySnapshot = &snapshot
+					break
+				}
+			}
+		}
+		summaries = append(summaries, summary)
+	}
+	sort.SliceStable(summaries, func(i, j int) bool {
+		return summaries[i].Conversation.LastMessageAt.After(summaries[j].Conversation.LastMessageAt)
+	})
+	return acceptedWithPayload(e, "ConversationInbox", e.Actor.ID, 1, "READY", map[string]any{"conversations": summaries}, nil)
 }
 
 // ---------- StartConversation ----------
@@ -1017,6 +1066,7 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 	}
 	return acceptedWithPayload(e, "Conversation", e.Target.ID, 1, conv.State, map[string]any{
 		"messages": visible,
+		"actorId":  e.Actor.ID,
 	}, nil)
 }
 
