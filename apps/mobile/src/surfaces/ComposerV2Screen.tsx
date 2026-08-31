@@ -968,11 +968,14 @@ export function ComposerV2Screen({
                 : i % 3 === 1
                   ? styles.gifPickAlt2
                   : styles.gifPickAlt3;
+              const isSelected = gifWord === w;
               return (
                 <Pressable
                   key={w}
+                  accessibilityLabel={`选择 GIF：${w}${isSelected ? "，已选中" : ""}`}
+                  accessibilityState={{ selected: isSelected }}
                   onPress={() => { setGifWord(w); setOpenSheet(null); }}
-                  style={[styles.gifPick, altStyle]}
+                  style={[styles.gifPick, altStyle, isSelected ? styles.gifPickSelected : null]}
                 >
                   <Text style={styles.gifPickText}>{w}</Text>
                 </Pressable>
@@ -1672,6 +1675,7 @@ const styles = StyleSheet.create({
   gifPickAlt1: { backgroundColor: "#2a2a2a" },
   gifPickAlt2: { backgroundColor: "#444" },
   gifPickAlt3: { backgroundColor: "#111" },
+  gifPickSelected: { borderColor: color.lime, borderWidth: 2 },
   gifPickText: { color: "#fff", fontSize: 24, fontWeight: "800" },
   // 长文编辑器
   longTextRoot: { backgroundColor: color.surface, flex: 1 },
