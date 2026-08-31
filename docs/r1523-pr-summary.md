@@ -1,7 +1,16 @@
-# R15.22 + R15.23 — Home and Pulse Surface
+# R15.22 + R15.23 + Lotus v0.1 — Home, Pulse and Messaging
 
-Branch: `fix/r15.23-mobile-home-and-pulse` (6 commits ahead of `main`)
+Branch: `fix/r15.23-mobile-home-and-pulse` (69 commits ahead of `main`,
+1 merge commit absorbing `agent/lotus-message-20260831`)
 Target: `main`
+
+> Note: this PR supersedes the original 6-commit "Home and Pulse" scope.
+> It now also carries the full Lotus Chat RFC v0.1 Phase 1 backend
+> foundation (24 commits, merged in via `b37b769`) plus the R15.22
+> canonical city key, the R15.23 home/pulse surface, the Pi provider
+> dev adapter, the stale-guest-session recovery, and a series of
+> mobile typography / filter-rail fixes. See the full commit list
+> via `git log --oneline main..fix/r15.23-mobile-home-and-pulse`.
 
 ## TL;DR
 
@@ -122,13 +131,19 @@ $ go vet ./...
 
 ## Migration order
 
-`035_message_protection_persistence.sql` (this PR) and the dev-draft
-`035_media_review_decisions_partition.sql` (snapshot branch
-`dev/r1522-draft-snapshot`) both use version `035`. They cannot ship
-together — the production Migrator will fail on duplicate version.
-Resolution: the partition migration must be re-numbered (045 or
-later) when it lands. The snapshot branch preserves it under its
-current name so we can move it.
+This PR ships exactly one `035_` file: `035_message_protection_persistence.sql`.
+
+The dev-draft `035_media_review_decisions_partition.sql` previously
+lived on `dev/r1522-draft-snapshot` and is being re-numbered to
+`045_media_review_decisions_partition.sql` on the same snapshot branch
+in this PR's prep step. Production Migrator is no longer blocked on
+duplicate version 035.
+
+Migrations also carried in by the lotus merge:
+
+- `038_display_identity.sql`
+- `039_message_v1.sql`
+- `040_dialog_convo_folder.sql`
 
 ## Out of scope (snapshotted, not in this PR)
 
@@ -153,21 +168,23 @@ discarded.
 ## Risk
 
 - **Migration 035 conflict** — see "Migration order" above. The
-  dev-draft `035_media_review_decisions_partition.sql` MUST be
-  re-numbered before any cluster applies it. Block on that
-  re-number for the partition work to merge.
+  dev-draft `035_media_review_decisions_partition.sql` is re-numbered
+  to `045_media_review_decisions_partition.sql` on the
+  `dev/r1522-draft-snapshot` branch as part of this PR's prep
+  (committer of the partition work is expected to land the rename
+  themselves; see the commit on snapshot). Until that lands on
+  snapshot, the partition migration must not be applied.
 - **Canonical key return value** — previous Go implementation
   returned `ho-chi-minh` / `da-nang` (kebab-case); the new one
   returns `hcmc` / `danang` to match the TS module. Any consumer
   comparing the canonical string to a literal needs to update.
   None found in the current code base, but a quick grep before
   merge is prudent.
-- **TTL sweeper not landed** — migration 035 adds the partial
-  index and column, but the background worker that scans
-  `expires_at < now()` is R15.23 P1 follow-up. Without the
-  worker, expired messages stay readable until the next read.
-  This matches the in-memory behaviour today, so it is not a
-  regression, but the P1 worker should land before R15.24 ships.
+- **TTL sweeper** — already landed in `agent/lotus-message-20260831`
+  and carried into this PR by `b37b769`. Implementation:
+  `apps/api-go/internal/conversation/sweep.go` + `sweep_test.go`,
+  RFC §5. The previous P1 follow-up risk in the original 6-commit
+  summary is **closed**.
 
 ## Review focus
 
@@ -189,3 +206,16 @@ discarded.
       (one accept on the second call) match what we want the
       OTA to assert, or do we want a more specific invariant
       (e.g. count stability)?
+
+## Additional latent changes not in the original 6-commit summary
+
+- `fix(auth): recover stale guest sessions at app boot` (`73b9eb6`)
+  — first commit on this branch; revives Keychain-restored sessions
+  whose `expiresAt` has passed but whose `refreshToken` is still
+  valid. Reviewer should confirm the `SessionAuthClient.refreshIfNeeded`
+  path is the only entry point.
+- `feat(modelstack): add Pi provider development adapter` (`eba415d`)
+  — new `apps/api-go/internal/modelstack/pi.go` (123 LOC) +
+  `pi_test.go` (99 LOC). Wires Pi as an LLM provider for the
+  modelstack in development only. No production impact; gated by
+  `PROXY_MODELSTACK_PROVIDER=pi` in `.env.example`.

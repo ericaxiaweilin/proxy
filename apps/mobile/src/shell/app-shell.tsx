@@ -109,6 +109,7 @@ export function AppShell({
   notification,
   scene,
   isGuest,
+  ensureConversationSession,
   onSignOut
 }: {
   localNet: LocalNetClient;
@@ -126,6 +127,7 @@ export function AppShell({
   notification: NotificationClient;
   scene?: import("../scene-client").SceneClient | undefined;
   isGuest?: boolean;
+  ensureConversationSession?: (() => Promise<void>) | undefined;
   onSignOut: () => void;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
@@ -393,6 +395,7 @@ export function AppShell({
               initialText={homeAssistant.text}
               {...(homeAssistant.attachment ? { initialAttachment: homeAssistant.attachment } : {})}
               {...(homeAssistant.mode ? { mode: homeAssistant.mode } : {})}
+              {...(ensureConversationSession ? { ensureSession: ensureConversationSession } : {})}
               onBack={() => setHomeAssistant(undefined)}
               onOpenMarket={(tab) => {
                 setHomeAssistant(undefined);

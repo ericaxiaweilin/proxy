@@ -97,6 +97,19 @@ async function createNativeGuestSession(): Promise<void> {
     await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "1");
   }
 }
+
+async function ensureNativeGuestSession(): Promise<void> {
+  try {
+    const stored = await secureSessionStore.read();
+    if (stored) {
+      await sessionAuthClient.refresh();
+      return;
+    }
+  } catch {
+    // refresh() clears an invalid server session; recreate it below.
+  }
+  await createNativeGuestSession();
+}
 // 服务端驱动 Surface 的认证客户端：读模型/命令全部走 /v1/commands/ envelope。
 const sessionAuthClient = new SessionAuthClient({
   baseUrl: localApiBaseUrl,
@@ -181,6 +194,7 @@ export function ProxyApp(): React.JSX.Element {
         notification={notificationClient}
         scene={sceneClient}
         isGuest={phase === "PUBLIC"}
+        ensureConversationSession={phase === "PUBLIC" ? ensureNativeGuestSession : undefined}
         onSignOut={() => {
           void Promise.all([secureSessionStore.clear().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined)]).then(()=> setPhase("SIGNED_OUT"));
         }}
