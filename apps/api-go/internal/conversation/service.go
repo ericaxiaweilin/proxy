@@ -42,14 +42,24 @@ type Conversation struct {
 	LastMessageAt time.Time `json:"lastMessageAt"`
 }
 
-// Message 是对话消息。
+// Message 是对话消息。v0 字段 (ConversationID/MessageType) 保留兼容；v1 契约见
+// docs/design/references/Proxy_Message_Object_Schema_v1.json 与
+// Proxy_Messaging_Engineering_Spec_v1.md §2/§11。
 type Message struct {
 	ID             string     `json:"messageId"`
-	ConversationID string     `json:"conversationId"`
+	ConversationID string     `json:"conversationId"` // legacy; 同义 dialog_id
+	DialogID       string     `json:"dialogId,omitempty"` // v1 正式；与 ConversationID 同值过渡期双写
+	ConvoID        *string    `json:"convoId,omitempty"`  // v1: 所属 Convo 分支
 	SenderID       string     `json:"senderId"`
-	MessageType    string     `json:"messageType"` // TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
-	Body           string     `json:"body,omitempty"`
+	SenderSnapshot *IdentitySnapshot `json:"senderSnapshot,omitempty"` // v1: 发送时固化的 displayName/avatar/username
+	MessageType    string     `json:"messageType"` // v0: TEXT | IMAGE | VIDEO | LOCATION | SYSTEM_CONTEXT | STRUCTURED_SUGGESTION
+	Kind           string     `json:"kind,omitempty"` // v1: text|image|video|file|location|contact|proxy_object|poll|call_recording|system_event
+	Body           string     `json:"body,omitempty"` // v1 text 仍用 body
 	MediaRef       string     `json:"mediaRef,omitempty"`
+	ProxyObject    *ProxyObjectRef `json:"proxyObject,omitempty"` // v1
+	SecurityV1     *MessageSecurityV1 `json:"security,omitempty"` // v1; 与 Protection 双写过渡
+	Delivery       *MessageDelivery `json:"delivery,omitempty"` // v1
+	Seq            int64      `json:"seq,omitempty"` // v1: dialog 内递增，用于 ReadCursor
 	CreatedAt      time.Time  `json:"createdAt"`
 	EditedAt       *time.Time `json:"editedAt,omitempty"`
 	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
@@ -57,6 +67,37 @@ type Message struct {
 	// message_protection.go and RFC v0.1 §3. Defaults applied in
 	// sendMessage; per-type rules in DefaultProtectionFor.
 	Protection MessageProtection `json:"protection"`
+}
+
+// v1 辅助类型 — 与 JSON Schema 1:1
+
+type IdentitySnapshot struct {
+	DisplayName string  `json:"displayName"`
+	AvatarRef   *string `json:"avatarRef,omitempty"`
+	Username    *string `json:"username,omitempty"`
+}
+
+type ProxyObjectRef struct {
+	ObjectType string         `json:"objectType"` // invitation|activity|opportunity|voucher|post|order
+	ObjectID   string         `json:"objectId"`
+	Snapshot   map[string]any `json:"snapshot"`
+	LiveState  map[string]any `json:"liveState,omitempty"`
+}
+
+type MessageSecurityV1 struct {
+	Mode             string `json:"mode"` // normal|secure
+	ViewLimit        *int   `json:"viewLimit,omitempty"`
+	ViewDurationSec  *int   `json:"viewDurationSeconds,omitempty"`
+	ForwardAllowed   bool   `json:"forwardAllowed"`
+	CopyAllowed      bool   `json:"copyAllowed"`
+	SaveAllowed      bool   `json:"saveAllowed"`
+	CiphertextRef    *string `json:"ciphertextRef,omitempty"`
+	DeleteAfterReadSec *int `json:"deleteAfterReadSeconds,omitempty"`
+}
+
+type MessageDelivery struct {
+	State       string `json:"state"` // sending|sent|delivered|read|failed
+	ReadByCount *int   `json:"readByCount,omitempty"`
 }
 
 // NeedDraft 是 Conversation 内的显式 Need Draft（Gate D：普通消息不创建正式 Need）。
@@ -270,7 +311,110 @@ func cloneMessage(m Message) Message {
 		t := *m.DeletedAt
 		m.DeletedAt = &t
 	}
+	if m.ConvoID != nil {
+		v := *m.ConvoID
+		m.ConvoID = &v
+	}
+	if m.SenderSnapshot != nil {
+		cp := *m.SenderSnapshot
+		if m.SenderSnapshot.AvatarRef != nil {
+			v := *m.SenderSnapshot.AvatarRef
+			cp.AvatarRef = &v
+		}
+		if m.SenderSnapshot.Username != nil {
+			v := *m.SenderSnapshot.Username
+			cp.Username = &v
+		}
+		m.SenderSnapshot = &cp
+	}
+	if m.ProxyObject != nil {
+		cp := *m.ProxyObject
+		cp.Snapshot = cloneMap(m.ProxyObject.Snapshot)
+		cp.LiveState = cloneMap(m.ProxyObject.LiveState)
+		m.ProxyObject = &cp
+	}
+	if m.SecurityV1 != nil {
+		cp := *m.SecurityV1
+		if m.SecurityV1.ViewLimit != nil {
+			v := *m.SecurityV1.ViewLimit
+			cp.ViewLimit = &v
+		}
+		if m.SecurityV1.ViewDurationSec != nil {
+			v := *m.SecurityV1.ViewDurationSec
+			cp.ViewDurationSec = &v
+		}
+		if m.SecurityV1.CiphertextRef != nil {
+			v := *m.SecurityV1.CiphertextRef
+			cp.CiphertextRef = &v
+		}
+		if m.SecurityV1.DeleteAfterReadSec != nil {
+			v := *m.SecurityV1.DeleteAfterReadSec
+			cp.DeleteAfterReadSec = &v
+		}
+		m.SecurityV1 = &cp
+	}
+	if m.Delivery != nil {
+		cp := *m.Delivery
+		if m.Delivery.ReadByCount != nil {
+			v := *m.Delivery.ReadByCount
+			cp.ReadByCount = &v
+		}
+		m.Delivery = &cp
+	}
+	if m.DialogID == "" && m.ConversationID != "" {
+		m.DialogID = m.ConversationID
+	}
+	if m.Kind == "" && m.MessageType != "" {
+		m.Kind = messageTypeToKind(m.MessageType)
+	}
 	return m
+}
+
+func cloneMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string]any, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
+}
+
+func messageTypeToKind(t string) string {
+	switch t {
+	case "TEXT", "SYSTEM_CONTEXT", "STRUCTURED_SUGGESTION":
+		return "text"
+	case "IMAGE":
+		return "image"
+	case "VIDEO":
+		return "video"
+	case "LOCATION":
+		return "location"
+	default:
+		return "text"
+	}
+}
+
+func protectionToSecurityV1(p MessageProtection) *MessageSecurityV1 {
+	mode := "normal"
+	if p.EndToEndEncrypted && p.ScreenshotProtected {
+		mode = "secure"
+	}
+	sec := &MessageSecurityV1{
+		Mode:           mode,
+		ForwardAllowed: p.Forwardable,
+		CopyAllowed:    p.Copyable,
+		SaveAllowed:    p.Forwardable,
+	}
+	if p.ViewLimit > 0 {
+		v := p.ViewLimit
+		sec.ViewLimit = &v
+	}
+	if p.ExpiresAt != nil {
+		// delete_after_read not used for TTL; viewDuration for ephemeral
+	}
+	return sec
 }
 
 type Service struct {
@@ -409,22 +553,35 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	if err := s.repository.CreateConversation(ctx, conv); err != nil {
 		return command.Rejected(e, "CONVERSATION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.create_failed", nil)
 	}
-	// 首条消息（如果有）
+	// 首条消息（如果有）— v1 双写 DialogID/Kind/Security/Delivery/Seq
 	if p.FirstMessage != "" {
+		prot := DefaultProtectionFor("TEXT", conv.Type)
 		msg := Message{
 			ID:             newID("msg_"),
 			ConversationID: conv.ID,
+			DialogID:       conv.ID,
 			SenderID:       e.Actor.ID,
 			MessageType:    "TEXT",
+			Kind:           "text",
 			Body:           p.FirstMessage,
 			CreatedAt:      s.clock.Now().UTC(),
+			Protection:     prot,
+			SecurityV1:     protectionToSecurityV1(prot),
+			Delivery:       &MessageDelivery{State: "sent"},
+			Seq:            1,
 		}
 		_ = s.repository.AppendMessage(ctx, msg)
 	}
 	if p.MediaRef != "" {
+		prot := DefaultProtectionFor("IMAGE", conv.Type)
+		seq := int64(1)
+		if p.FirstMessage != "" {
+			seq = 2
+		}
 		_ = s.repository.AppendMessage(ctx, Message{
-			ID: newID("msg_"), ConversationID: conv.ID, SenderID: e.Actor.ID,
-			MessageType: "IMAGE", MediaRef: p.MediaRef, CreatedAt: s.clock.Now().UTC(),
+			ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID, SenderID: e.Actor.ID,
+			MessageType: "IMAGE", Kind: "image", MediaRef: p.MediaRef, CreatedAt: s.clock.Now().UTC(),
+			Protection: prot, SecurityV1: protectionToSecurityV1(prot), Delivery: &MessageDelivery{State: "sent"}, Seq: seq,
 		})
 	}
 	payload := map[string]any{
@@ -474,6 +631,7 @@ type sendMessagePayload struct {
 	// per-type default (see message_protection.go). All fields are
 	// optional; only set fields override.
 	ProtectionOverride *ProtectionOverride `json:"protectionOverride,omitempty"`
+	ProxyObject        *ProxyObjectRef     `json:"proxyObject,omitempty"` // v1
 }
 
 func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.Result {
@@ -528,15 +686,26 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		protection = base
 	}
 
+	existing, _ := s.repository.Messages(ctx, conv.ID)
+	kind := messageTypeToKind(p.MessageType)
+	if p.ProxyObject != nil {
+		kind = "proxy_object"
+	}
 	msg := Message{
 		ID:             newID("msg_"),
 		ConversationID: conv.ID,
+		DialogID:       conv.ID,
 		SenderID:       e.Actor.ID,
 		MessageType:    p.MessageType,
+		Kind:           kind,
 		Body:           p.Body,
 		MediaRef:       p.MediaRef,
+		ProxyObject:    p.ProxyObject,
 		CreatedAt:      s.clock.Now().UTC(),
 		Protection:     protection,
+		SecurityV1:     protectionToSecurityV1(protection),
+		Delivery:       &MessageDelivery{State: "sent"},
+		Seq:            int64(len(existing) + 1),
 	}
 	domainEvents := []event.DomainEvent{event.New("MessageSent", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, msg.CreatedAt, map[string]any{
 		"messageId":   msg.ID,
