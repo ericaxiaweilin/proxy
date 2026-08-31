@@ -335,7 +335,8 @@ export function AppShell({
     tab,
     feedChromeVisible,
     feedChatOpen: Boolean(feedChatAuthor),
-    feedPrefsOpen
+    feedPrefsOpen,
+    messageChatOpen: Boolean(messageChatAuthor)
   });
 
   return (

@@ -12,7 +12,17 @@ export function selectShellChromeVisible(input: {
   feedChromeVisible: boolean;
   feedChatOpen: boolean;
   feedPrefsOpen: boolean;
+  /**
+   * The MESSAGES home inbox opened a 1:1 conversation. The conversation
+   * surface is a fullscreen overlay with its own header + composer, so
+   * the bottom nav must be hidden regardless of which tab is active.
+   * (Symmetric with feedChatOpen, which forces chrome visible while
+   * the feed's nested chat sheet is open.)
+   */
+  messageChatOpen: boolean;
 }): boolean {
+  // 1:1 conversation overlay is a fullscreen takeover — hide chrome.
+  if (input.messageChatOpen) return false;
   if (input.tab !== "FEED") return true;
   if (input.feedChatOpen || input.feedPrefsOpen) return true;
   return input.feedChromeVisible;

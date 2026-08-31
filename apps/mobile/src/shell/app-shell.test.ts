@@ -29,13 +29,30 @@ describe("app shell guest path", () => {
 
 describe("app shell scroll chrome ownership", () => {
   it.each(["HOME", "MARKET", "MESSAGES", "ME"] as const)("keeps chrome visible on %s", (tab) => {
-    expect(selectShellChromeVisible({ tab, feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false })).toBe(true);
+    expect(selectShellChromeVisible({ tab, feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
   });
 
   it("lets only the primary Feed stream hide chrome", () => {
-    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false })).toBe(false);
-    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: true, feedPrefsOpen: false })).toBe(true);
-    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: true })).toBe(true);
+    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(false);
+    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: true, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
+    expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: true, messageChatOpen: false })).toBe(true);
+  });
+
+  it("hides chrome whenever a 1:1 conversation overlay is open, regardless of tab", () => {
+    // Tab-agnostic: 1:1 conversation owns its own header + composer.
+    for (const tab of ["HOME", "MARKET", "FEED", "MESSAGES", "ME"] as const) {
+      expect(
+        selectShellChromeVisible({ tab, feedChromeVisible: true, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: true })
+      ).toBe(false);
+    }
+  });
+
+  it("1:1 conversation overlay beats the Feed chat open override", () => {
+    // The 1:1 overlay is a hard takeover; feedChatOpen's "force visible"
+    // does not resurrect chrome while a 1:1 conversation is on screen.
+    expect(
+      selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: true, feedPrefsOpen: false, messageChatOpen: true })
+    ).toBe(false);
   });
 });
 
