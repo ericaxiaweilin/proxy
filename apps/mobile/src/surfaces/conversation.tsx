@@ -205,16 +205,7 @@ export function ConversationSurface({
   }
 
   return (
-    <KeyboardAvoidingView
-      // Keep the conversation header and persisted history inside the
-      // viewport. `position` translates the whole surface above the iOS
-      // keyboard and clips older messages in AppShell's fixed-height body.
-      // `padding` instead reduces the message viewport while leaving the
-      // composer immediately above the keyboard.
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={0}
-      style={styles.root}
-    >
+    <View style={styles.root}>
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={onBack} style={styles.backBtn}>
@@ -262,40 +253,47 @@ export function ConversationSurface({
         {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
       </ScrollView>
 
-      {/* Protection toggles (Lotus §3 per-message) */}
-      <View style={styles.protectionRow}>
-        <Pressable onPress={() => setEphemeral((v) => !v)} style={[styles.chip, ephemeral && styles.chipActive]}>
-          <Text style={[styles.chipText, ephemeral && styles.chipTextActive]}>阅后即焚 {ephemeral ? "1次" : "关"}</Text>
-        </Pressable>
-        <Pressable onPress={() => setNoForward((v) => !v)} style={[styles.chip, noForward && styles.chipActive]}>
-          <Text style={[styles.chipText, noForward && styles.chipTextActive]}>{noForward ? "禁止转发 ✓" : "允许转发"}</Text>
-        </Pressable>
-        <Text style={styles.hint}>🔒 端到端加密</Text>
-      </View>
+      {/* Only the footer follows the keyboard. Moving the whole surface
+          clips persisted history; leaving the footer static covers input. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "position" : undefined}
+        keyboardVerticalOffset={0}
+      >
+        {/* Protection toggles (Lotus §3 per-message) */}
+        <View style={styles.protectionRow}>
+          <Pressable onPress={() => setEphemeral((v) => !v)} style={[styles.chip, ephemeral && styles.chipActive]}>
+            <Text style={[styles.chipText, ephemeral && styles.chipTextActive]}>阅后即焚 {ephemeral ? "1次" : "关"}</Text>
+          </Pressable>
+          <Pressable onPress={() => setNoForward((v) => !v)} style={[styles.chip, noForward && styles.chipActive]}>
+            <Text style={[styles.chipText, noForward && styles.chipTextActive]}>{noForward ? "禁止转发 ✓" : "允许转发"}</Text>
+          </Pressable>
+          <Text style={styles.hint}>🔒 端到端加密</Text>
+        </View>
 
-      {/* Composer — 业务卡片快捷入口 (v1 proxy_object) */}
-      <View style={styles.composer}>
-        <Pressable onPress={() => void sendProxyObject()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
-          <Text style={styles.cardBtnText}>活动</Text>
-        </Pressable>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={convId ? "输入消息..." : "连接中..."}
-          placeholderTextColor="#A9A2B0"
-          style={styles.composerInput}
-          multiline
-          editable={!!convId && !sending}
-        />
-        <Pressable
-          disabled={!draft.trim() || sending || !convId}
-          onPress={() => void send()}
-          style={[styles.sendBtn, (!draft.trim() || sending || !convId) && styles.sendBtnDisabled]}
-        >
-          <Text style={styles.sendBtnText}>{sending ? "..." : "发送"}</Text>
-        </Pressable>
-      </View>
-    </KeyboardAvoidingView>
+        {/* Composer — 业务卡片快捷入口 (v1 proxy_object) */}
+        <View style={styles.composer}>
+          <Pressable onPress={() => void sendProxyObject()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
+            <Text style={styles.cardBtnText}>活动</Text>
+          </Pressable>
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder={convId ? "输入消息..." : "连接中..."}
+            placeholderTextColor="#A9A2B0"
+            style={styles.composerInput}
+            multiline
+            editable={!!convId && !sending}
+          />
+          <Pressable
+            disabled={!draft.trim() || sending || !convId}
+            onPress={() => void send()}
+            style={[styles.sendBtn, (!draft.trim() || sending || !convId) && styles.sendBtnDisabled]}
+          >
+            <Text style={styles.sendBtnText}>{sending ? "..." : "发送"}</Text>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
