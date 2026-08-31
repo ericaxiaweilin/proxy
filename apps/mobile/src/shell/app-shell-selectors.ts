@@ -33,3 +33,17 @@ export function selectMeTabView(input: { isGuest: boolean; voucherOpen: boolean 
   if (input.voucherOpen) return "voucher";
   return "me";
 }
+
+/**
+ * R15.22 motion patch: how the liquid dock should respond to a press
+ * given the system Reduce Motion setting.
+ *
+ *   reduceMotion = false  →  Animated.spring (default, ~100ms)
+ *   reduceMotion = true   →  setValue immediate, no animation
+ *
+ * Returned object is consumed by both the press spring in setLensPressed
+ * and the drag-driven liquid motion in onPanResponderMove.
+ */
+export function selectMotionProfile(reduceMotion: boolean): { useSpring: boolean } {
+  return { useSpring: !reduceMotion };
+}

@@ -5,6 +5,7 @@
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { AccessibilityInfo } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import { ProxyNativeTabBarView } from "../components/proxy-native-tab-bar";
@@ -60,6 +61,7 @@ import { type MarketTab } from "../market-fixtures";
 import type { SceneToolId } from "@proxy/contracts";
 import { SCENE_TOOLS } from "@proxy/contracts";
 import { selectShellChromeVisible } from "./app-shell-selectors";
+import { selectMotionProfile } from "./app-shell-selectors";
 
 // P0 原型的品牌图标，直接使用原始资源，不做裁剪、重绘或视觉加工。
 const OTTER_LOGO = require("../../assets/otter-logo.png");
@@ -657,6 +659,16 @@ function RootNav({
   const [pressing, setPressing] = useState(false);
   const [liquidMotion, setLiquidMotion] = useState(0);
   const [liquidLean, setLiquidLean] = useState(0);
+  // R15.22 motion patch: Reduce Motion 系统设置降级 (无障碍).
+  // 用户开 Reduce Motion 时, liquid dock 的拖动拉伸 + press spring 全部停掉,
+  // 仅保留静态 lens 状态, 符合 iOS/Android 系统级动效偏好.
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((v) => { if (mounted) setReduceMotion(!!v); });
+    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", (e) => setReduceMotion(!!e));
+    return () => { mounted = false; sub.remove(); };
+  }, []);
   const pressProgress = useRef(new Animated.Value(0)).current;
   const dockWidth = measuredWidth > 0 ? measuredWidth : Math.min(430, Math.max(0, width - 28));
   const edge = 6;
@@ -671,6 +683,12 @@ function RootNav({
 
   const setLensPressed = useCallback((next: boolean) => {
     setPressing(next);
+    const { useSpring } = selectMotionProfile(reduceMotion);
+    if (!useSpring) {
+      // Reduce Motion: 直接跳到目标值, 不 spring.
+      pressProgress.setValue(next ? 1 : 0);
+      return;
+    }
     Animated.spring(pressProgress, {
       toValue: next ? 1 : 0,
       useNativeDriver: true,
@@ -678,7 +696,7 @@ function RootNav({
       stiffness: 320,
       mass: 0.55
     }).start();
-  }, [pressProgress]);
+  }, [pressProgress, reduceMotion]);
 
   // ============================================================
   // REANIMATED-VALUE-DRIVEN LENS (RN 内置 Animated + useNativeDriver):
@@ -755,8 +773,14 @@ function RootNav({
         lastXRef.current = x;
         lastTRef.current = now;
         velocityRef.current = vx;
-        setLiquidMotion(clamp(Math.abs(dx) / 90 + Math.abs(vx) / 1.8, 0, 1));
-        setLiquidLean(clamp(vx / 1.8, -1, 1));
+        // Reduce Motion: 拖动拉伸归零, 仅保留按压 spring.
+        if (reduceMotion) {
+          setLiquidMotion(0);
+          setLiquidLean(0);
+        } else {
+          setLiquidMotion(clamp(Math.abs(dx) / 90 + Math.abs(vx) / 1.8, 0, 1));
+          setLiquidLean(clamp(vx / 1.8, -1, 1));
+        }
         const deltaSlots = dx / Math.max(1, slotWidth);
         const next = clamp(startProgressRef.current + deltaSlots, 0, tabs.length - 1);
         progressRef.current = next;
@@ -769,8 +793,10 @@ function RootNav({
         if (!draggingRef.current) return;
         draggingRef.current = false;
         const projected = progressRef.current + velocityRef.current * 0.02;
-        setLiquidMotion(0);
-        setLiquidLean(0);
+        if (!reduceMotion) {
+          setLiquidMotion(0);
+          setLiquidLean(0);
+        }
         setLensPressed(false);
         commit(projected);
       },
@@ -778,8 +804,10 @@ function RootNav({
         if (!draggingRef.current) return;
         draggingRef.current = false;
         const projected = progressRef.current + velocityRef.current * 0.02;
-        setLiquidMotion(0);
-        setLiquidLean(0);
+        if (!reduceMotion) {
+          setLiquidMotion(0);
+          setLiquidLean(0);
+        }
         setLensPressed(false);
         commit(projected);
       }
@@ -882,6 +910,21 @@ function RootNav({
             >
               <View pointerEvents="none" style={[styles.lensSheen, pressing && styles.lensSheenPressed]} />
               <View pointerEvents="none" style={styles.lensAccent} />
+              {/* R15.22 motion patch: lens 内部折射层 — 随 lean 同向增亮, 静态 opacity 0. */}
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.lensGlintLeft,
+                  { opacity: liquidMotion * Math.max(0, -liquidLean) * 0.5 }
+                ]}
+              />
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.lensGlintRight,
+                  { opacity: liquidMotion * Math.max(0, liquidLean) * 0.5 }
+                ]}
+              />
             </GlassView>
           </Animated.View>
         <View
@@ -1097,6 +1140,9 @@ const styles = StyleSheet.create({
     opacity: 0.16
   },
   lensSheenPressed: { opacity: 0 },
+  // R15.22 motion patch: lens 内部折射层, Reduce Motion 下保持 opacity 0.
+  lensGlintLeft: { position: "absolute", left: 2, top: 8, width: 1.5, height: 22, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.85)", opacity: 0 },
+  lensGlintRight: { position: "absolute", right: 2, top: 8, width: 1.5, height: 22, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.85)", opacity: 0 },
   lensAccent: {
     position: "absolute",
     left: "50%",

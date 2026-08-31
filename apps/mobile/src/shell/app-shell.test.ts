@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectMeTabView, selectShellChromeVisible } from "./app-shell-selectors";
+import { selectMeTabView, selectShellChromeVisible, selectMotionProfile } from "./app-shell-selectors";
 
 describe("app shell guest path", () => {
   it("anonymous browser sees the 'need to sign in' view, not MeSurface", () => {
@@ -36,5 +36,15 @@ describe("app shell scroll chrome ownership", () => {
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false })).toBe(false);
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: true, feedPrefsOpen: false })).toBe(true);
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: true })).toBe(true);
+  });
+});
+
+describe("app shell motion profile (R15.22 reduce-motion downgrade)", () => {
+  it("uses Animated.spring when Reduce Motion is off", () => {
+    expect(selectMotionProfile(false)).toEqual({ useSpring: true });
+  });
+
+  it("skips spring when Reduce Motion is on (a11y)", () => {
+    expect(selectMotionProfile(true)).toEqual({ useSpring: false });
   });
 });
