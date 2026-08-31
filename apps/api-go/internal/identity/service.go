@@ -57,11 +57,12 @@ type Seed struct {
 }
 
 type Service struct {
-	mu                sync.Mutex
-	repository        Repository
-	clock             clock.Clock
-	tokenManager      *TokenManager
-	challengeProvider LoginChallengeProvider
+	mu                     sync.Mutex
+	repository             Repository
+	clock                  clock.Clock
+	tokenManager           *TokenManager
+	challengeProvider      LoginChallengeProvider
+	displayIdentityService *DisplayIdentityService
 }
 
 func New(seed *Seed) *Service {
@@ -90,16 +91,23 @@ func NewWithRepositoryAndClockAndChallengeProvider(repository Repository, domain
 	if provider == nil {
 		provider = UnconfiguredLoginChallengeProvider{}
 	}
-	service := &Service{repository: repository, clock: domainClock, challengeProvider: provider}
+	service := &Service{repository: repository, clock: domainClock, challengeProvider: provider, displayIdentityService: NewDisplayIdentityService(nil, domainClock)}
 	if tokenRepository, ok := repository.(TokenRepository); ok {
 		service.tokenManager = NewTokenManager(tokenRepository, repository, domainClock)
 	}
 	return service
 }
 
+func (s *Service) SetDisplayIdentityRepository(repo DisplayIdentityRepository) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.displayIdentityService = NewDisplayIdentityService(repo, s.clock)
+}
+
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "AuthenticateWithGoogle":
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "AuthenticateWithGoogle",
+		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity":
 		return true
 	default:
 		return false
@@ -138,6 +146,12 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.refreshSession(ctx, envelope)
 	case "AuthenticateWithGoogle":
 		return s.authenticateWithGoogle(ctx, envelope)
+	case "CreateDisplayIdentity":
+		return s.createDisplayIdentity(ctx, envelope)
+	case "ListDisplayIdentities":
+		return s.listDisplayIdentities(ctx, envelope)
+	case "BurnDisplayIdentity":
+		return s.burnDisplayIdentity(ctx, envelope)
 	default:
 		return command.Rejected(envelope, "IDENTITY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "identity.unsupported_command", nil)
 	}
@@ -856,6 +870,107 @@ func (s *Service) sessionUsable(ctx context.Context, session *Session) bool {
 	}
 	device, err := s.repository.GetDevice(ctx, session.DeviceID)
 	return err == nil && device.Status == "ACTIVE"
+}
+
+// DisplayIdentity commands — Lotus RFC §1 (PUBLIC/PRIVATE/BURNER, max 3, 7d auto-burn)
+
+type createDisplayIdentityPayload struct {
+	Type        string `json:"type"`
+	Alias       string `json:"alias"`
+	DisplayName string `json:"displayName"`
+	AvatarRef   string `json:"avatarRef"`
+}
+
+func (s *Service) createDisplayIdentity(ctx context.Context, e command.Envelope) command.Result {
+	var p createDisplayIdentityPayload
+	if !decode(e.Payload, &p) || strings.TrimSpace(p.Alias) == "" || strings.TrimSpace(p.DisplayName) == "" {
+		return command.Rejected(e, "INVALID_DISPLAY_IDENTITY", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_display_identity", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "DISPLAY_IDENTITY_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.display_identity_forbidden", nil)
+	}
+	typ := DisplayIdentityType(strings.ToUpper(strings.TrimSpace(p.Type)))
+	if typ == "" {
+		typ = DisplayIdentityPublic
+	}
+	d, err := s.displayIdentityService.Create(ctx, CreateInput{
+		OwnerID:     e.Actor.ID,
+		Type:        typ,
+		Alias:       p.Alias,
+		DisplayName: p.DisplayName,
+		AvatarRef:   p.AvatarRef,
+	})
+	if errors.Is(err, ErrDisplayIdentityCapReached) {
+		return command.Rejected(e, "DISPLAY_IDENTITY_CAP_REACHED", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.display_identity_cap_reached", nil)
+	}
+	if errors.Is(err, ErrDisplayIdentityAliasInvalid) {
+		return command.Rejected(e, "INVALID_DISPLAY_IDENTITY", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_display_identity", nil)
+	}
+	if errors.Is(err, ErrDisplayIdentityConflict) {
+		return command.Rejected(e, "DISPLAY_IDENTITY_CONFLICT", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.display_identity_conflict", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "DISPLAY_IDENTITY_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.display_identity_create_failed", nil)
+	}
+	ev := event.New("DisplayIdentityCreated", "DisplayIdentity", d.ID, d.Version, e.Actor.ID, e.CorrelationID, e.CommandID, d.CreatedAt, map[string]any{"type": d.Type, "alias": d.Alias})
+	return command.Accepted(e, "DisplayIdentity", d.ID, d.Version, string(d.Type), eventRefs([]event.DomainEvent{ev}))
+}
+
+func (s *Service) listDisplayIdentities(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "DISPLAY_IDENTITY_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.display_identity_forbidden", nil)
+	}
+	list, err := s.displayIdentityService.ListByOwner(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "DISPLAY_IDENTITY_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "identity.display_identity_list_failed", nil)
+	}
+	// OperationRef carries identities as JSON for mobile client
+	payload, _ := json.Marshal(map[string]any{"identities": list})
+	result := command.Accepted(e, "DisplayIdentity", e.Actor.ID, 1, "LISTED", nil)
+	result.OperationRef = string(payload)
+	return result
+}
+
+type burnDisplayIdentityPayload struct {
+	IdentityID string `json:"identityId"`
+	ID         string `json:"id"`
+}
+
+func (s *Service) burnDisplayIdentity(ctx context.Context, e command.Envelope) command.Result {
+	var p burnDisplayIdentityPayload
+	_ = decode(e.Payload, &p)
+	id := p.IdentityID
+	if id == "" {
+		id = p.ID
+	}
+	if id == "" {
+		id = e.Target.ID
+	}
+	if id == "" {
+		return command.Rejected(e, "INVALID_DISPLAY_IDENTITY_BURN", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_display_identity_burn", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "DISPLAY_IDENTITY_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.display_identity_forbidden", nil)
+	}
+	d, err := s.displayIdentityService.Burn(ctx, BurnInput{IdentityID: id, OwnerID: e.Actor.ID})
+	if errors.Is(err, ErrDisplayIdentityNotFound) {
+		return command.Rejected(e, "DISPLAY_IDENTITY_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.display_identity_not_found", nil)
+	}
+	if errors.Is(err, ErrDisplayIdentityForbidden) {
+		return command.Rejected(e, "DISPLAY_IDENTITY_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.display_identity_forbidden", nil)
+	}
+	if errors.Is(err, ErrDisplayIdentityBurned) {
+		return command.Rejected(e, "DISPLAY_IDENTITY_ALREADY_BURNED", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.display_identity_already_burned", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "DISPLAY_IDENTITY_BURN_FAILED", "INTERNAL", "SAFE_RETRY", "identity.display_identity_burn_failed", nil)
+	}
+	now := s.clock.Now().UTC()
+	if d.BurnedAt != nil {
+		now = *d.BurnedAt
+	}
+	ev := event.New("DisplayIdentityBurned", "DisplayIdentity", d.ID, d.Version, e.Actor.ID, e.CorrelationID, e.CommandID, now, map[string]any{"ownerId": d.OwnerID})
+	return command.Accepted(e, "DisplayIdentity", d.ID, d.Version, "BURNED", eventRefs([]event.DomainEvent{ev}))
 }
 
 // enforceMaxConcurrentSessions revokes the oldest ACTIVE sessions so a new
