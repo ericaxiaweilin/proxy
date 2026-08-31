@@ -221,7 +221,14 @@ export function ConversationSurface({
       </View>
 
       {/* Messages */}
-      <ScrollView ref={scrollRef} style={styles.messageList} contentContainerStyle={styles.messageContent}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.messageList}
+        contentContainerStyle={styles.messageContent}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+        onLayout={() => scrollRef.current?.scrollToEnd({ animated: false })}
+      >
         {loading && (
           <View style={styles.systemMsg}>
             <Text style={styles.systemMsgText}>正在创建会话...</Text>
@@ -307,11 +314,7 @@ const styles = StyleSheet.create({
   headerStatus: { color: "#4CAF50", fontSize: 11 },
 
   messageList: { flex: 1 },
-  // flexGrow:1 lets the ScrollView content container shrink when
-  // KeyboardAvoidingView applies its bottom padding. Without it, the
-  // keyboard still covers the composer row even though the parent
-  // surface has been resized.
-  messageContent: { flexGrow: 1, padding: 14, gap: 10 },
+  messageContent: { padding: 14, gap: 10 },
 
   messageBubble: {
     borderRadius: 16,
