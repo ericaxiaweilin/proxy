@@ -206,7 +206,15 @@ export function ConversationSurface({
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      // behavior="position" + keyboardVerticalOffset is the React Native
+      // recommendation for in-screen surfaces (not full-screen modals).
+      // "padding" only works when the parent view's height can shrink
+      // (Modal-style full-screen surfaces). ConversationSurface is
+      // rendered inside AppShell's <View style={styles.body}> which
+      // has flex:1 in a fixed-height parent, so padding has no effect;
+      // position pushes the view up out of the keyboard instead.
+      behavior={Platform.OS === "ios" ? "position" : undefined}
+      keyboardVerticalOffset={0}
       style={styles.root}
     >
       {/* Header */}
