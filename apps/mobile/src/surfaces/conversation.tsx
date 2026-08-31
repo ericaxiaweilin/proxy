@@ -4,7 +4,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
-import type { ConversationClient } from "../conversation-client";
+import type { ConversationClient, ProtectionOverride } from "../conversation-client";
+import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { color } from "../theme";
 
 interface Message {
@@ -34,7 +35,15 @@ export function ConversationSurface({
   const [loading, setLoading] = useState(!initialConvId);
   const [error, setError] = useState<string | undefined>();
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
+  const [ephemeral, setEphemeral] = useState(false);
+  const [noForward, setNoForward] = useState(true);
   const scrollRef = useRef<ScrollView>(null);
+
+  // Lotus §4: 截屏上报 → RecordScreenshot → SECURITY_ALERT
+  useEffect(() => {
+    const sub = attachScreenshotReporter(conversationClient, () => messages.filter((m) => !m.isOwn).map((m) => m.id));
+    return () => sub.remove();
+  }, [conversationClient, messages]);
 
   // 自动滚到底部
   useEffect(() => {
@@ -110,7 +119,9 @@ export function ConversationSurface({
     setTemporaryUI(undefined);
 
     try {
-      const result = await conversationClient.sendMessage(convId, userText, undefined, temporaryUIResponseId);
+      const protectionOverride: ProtectionOverride | undefined =
+        ephemeral || noForward !== true ? { viewLimit: ephemeral ? 1 : undefined, forwardable: noForward ? false : true } : undefined;
+      const result = await conversationClient.sendMessage(convId, userText, undefined, temporaryUIResponseId, undefined, protectionOverride);
       // 解析 AI 回复
       const payload = parseOperationRef(result);
       setTemporaryUI(readServerTemporaryUI(payload?.temporaryUI));
@@ -169,6 +180,17 @@ export function ConversationSurface({
         ))}
         {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
       </ScrollView>
+
+      {/* Protection toggles (Lotus §3 per-message) */}
+      <View style={styles.protectionRow}>
+        <Pressable onPress={() => setEphemeral((v) => !v)} style={[styles.chip, ephemeral && styles.chipActive]}>
+          <Text style={[styles.chipText, ephemeral && styles.chipTextActive]}>阅后即焚 {ephemeral ? "1次" : "关"}</Text>
+        </Pressable>
+        <Pressable onPress={() => setNoForward((v) => !v)} style={[styles.chip, noForward && styles.chipActive]}>
+          <Text style={[styles.chipText, noForward && styles.chipTextActive]}>{noForward ? "禁止转发 ✓" : "允许转发"}</Text>
+        </Pressable>
+        <Text style={styles.hint}>🔒 端到端加密</Text>
+      </View>
 
       {/* Composer */}
       <View style={styles.composer}>
@@ -250,6 +272,13 @@ const styles = StyleSheet.create({
     paddingVertical: 6
   },
   systemMsgText: { color: color.muted, fontSize: 11 },
+
+  protectionRow: { alignItems: "center", backgroundColor: color.white, borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  chip: { backgroundColor: "#F4F1F6", borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  chipActive: { backgroundColor: "#EEE3FF", borderColor: color.proxyPurple },
+  chipText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  chipTextActive: { color: "#5822A4" },
+  hint: { color: color.muted, fontSize: 10, marginLeft: "auto" },
 
   composer: {
     alignItems: "center",

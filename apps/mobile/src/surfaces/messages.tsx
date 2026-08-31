@@ -2,6 +2,7 @@
 // R15.10 §161：添加好友 5 种入口统一在 Messages → 添加好友，不在 My
 import { useMemo, useRef, useState } from "react";
 import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { IdentitySwitcher } from "../components/identity-switcher";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { FriendCrmSurface } from "./friend-crm";
@@ -23,7 +24,23 @@ const THREADS = [
   { initial: "○", name: "西湖摄影散步", context: "活动", preview: "Luna：我也会带相机过去。", time: "昨天", unread: "5", dark: false }
 ] as const;
 
-export function MessagesSurface({ onOpenConversation, onChromeVisibilityChange, bottomNavVisible, initialTab }: { onOpenConversation: (author: string) => void; onChromeVisibilityChange?: (visible: boolean) => void; bottomNavVisible?: boolean; initialTab?: "CHAT" | "FRIENDS" }): React.JSX.Element {
+export function MessagesSurface({
+  onOpenConversation,
+  onChromeVisibilityChange,
+  bottomNavVisible,
+  initialTab,
+  displayIdentityClient,
+  activeIdentityId,
+  onSwitchIdentity,
+}: {
+  onOpenConversation: (author: string) => void;
+  onChromeVisibilityChange?: (visible: boolean) => void;
+  bottomNavVisible?: boolean;
+  initialTab?: "CHAT" | "FRIENDS";
+  displayIdentityClient?: import("../display-identity-client").DisplayIdentityClient;
+  activeIdentityId?: string;
+  onSwitchIdentity?: (id: string) => void;
+}): React.JSX.Element {
   // R15.22 sub-page sync (initialTab from RootNav 8-page sequence)
   const [tab, setTab] = useState<MessageTab>("FRIENDS");
   const [composer, setComposer] = useState<ComposerMode>();
@@ -76,6 +93,11 @@ export function MessagesSurface({ onOpenConversation, onChromeVisibilityChange, 
 
   return (
     <ScrollView keyboardShouldPersistTaps="handled" style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
+      {displayIdentityClient && onSwitchIdentity ? (
+        <View style={{ marginBottom: 10 }}>
+          <IdentitySwitcher client={displayIdentityClient} activeId={activeIdentityId} onSwitch={onSwitchIdentity} />
+        </View>
+      ) : null}
       <View style={styles.head}>
         <View>
           <Text style={styles.title}>消息</Text>
