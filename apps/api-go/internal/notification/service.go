@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -101,9 +102,21 @@ func (r *MemoryRepository) MarkRead(_ context.Context, itemID, recipientID strin
 	return nil
 }
 
+type PushProvider interface {
+	Push(ctx context.Context, item InboxItem) error
+}
+
+type LogPushProvider struct{}
+
+func (LogPushProvider) Push(_ context.Context, item InboxItem) error {
+	log.Printf("notification push: recipient=%s type=%s title=%q deepLink=%q", item.RecipientID, item.Type, item.Title, item.DeepLink)
+	return nil
+}
+
 type Service struct {
 	mu   sync.Mutex
 	repo Repository
+	push PushProvider
 	clock clock.Clock
 }
 
@@ -112,7 +125,17 @@ func NewWithRepository(repo Repository) *Service {
 	if repo == nil {
 		repo = NewMemoryRepository()
 	}
-	return &Service{repo: repo, clock: clock.System{}}
+	return &Service{repo: repo, push: LogPushProvider{}, clock: clock.System{}}
+}
+
+func NewWithPushProvider(repo Repository, push PushProvider) *Service {
+	if repo == nil {
+		repo = NewMemoryRepository()
+	}
+	if push == nil {
+		push = LogPushProvider{}
+	}
+	return &Service{repo: repo, push: push, clock: clock.System{}}
 }
 func (s *Service) Supports(t string) bool {
 	switch t {
@@ -178,6 +201,10 @@ func (s *Service) sendInbox(ctx context.Context, e command.Envelope) command.Res
 	now := s.clock.Now().UTC()
 	item := InboxItem{ID: newID("inbox_"), RecipientID: p.RecipientID, Type: p.Type, Title: p.Title, Body: p.Body, DeepLink: p.DeepLink, Read: false, CreatedAt: now}
 	_ = s.repo.CreateInboxItem(ctx, item)
+	// Push lifecycle: best-effort, log only, never fail the inbox write
+	if s.push != nil {
+		_ = s.push.Push(ctx, item)
+	}
 	ev := event.New("InboxItemCreated", "InboxItem", item.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"recipientId": p.RecipientID, "type": p.Type})
 	return acceptedWithPayload(e, "InboxItem", item.ID, 1, "CREATED", map[string]any{"inboxId": item.ID, "deepLink": item.DeepLink}, []event.DomainEvent{ev})
 }

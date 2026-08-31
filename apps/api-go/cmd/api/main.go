@@ -109,7 +109,7 @@ func main() {
 	socialSpaceService := socialspace.New()
 	businessService := business.New()
 	paymentService := payment.New()
-	notificationService := notification.New()
+	notificationService := notification.NewWithPushProvider(nil, configuredNotificationPush())
 	safetyService := safety.New()
 	outcomeService := outcome.New()
 	sceneService := scene.New()
@@ -200,7 +200,7 @@ func main() {
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
 		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
-		notificationService = notification.NewWithRepository(postgres.NewNotificationRepository(pool))
+		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())
 		safetyService = safety.NewWithRepository(postgres.NewSafetyRepository(pool))
 		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
 		localNetService = localnet.NewWithAll(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack, scene.NewSceneAestheticAdapter(sceneService))
@@ -604,6 +604,14 @@ func configuredDemandGates() (demand.Gate, demand.Gate) {
 	}
 	// 真实闸：catalog / funding 校验，正确 payload 下直接 ACCEPT，无需 env
 	return demand.CatalogAdmissionGate, demand.FundingGate
+}
+
+func configuredNotificationPush() notification.PushProvider {
+	if v := strings.TrimSpace(os.Getenv("NOTIFICATION_PUSH")); strings.EqualFold(v, "off") || strings.EqualFold(v, "disabled") {
+		log.Printf("notification push: disabled (NOTIFICATION_PUSH=off)")
+		return nil
+	}
+	return notification.LogPushProvider{}
 }
 
 // bootEnvWarnings returns a list of human-readable warnings when the
