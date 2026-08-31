@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -113,3 +114,16 @@ func (r *DisplayIdentityRepository) Update(ctx context.Context, d identity.Displ
 }
 
 var _ identity.DisplayIdentityRepository = (*DisplayIdentityRepository)(nil)
+
+// SweepExpiredBurners marks all BURNER identities past expires_at as burned (Lotus §1, 7d).
+// Returns count burned. Used by worker hourly sweeper.
+func (r *DisplayIdentityRepository) SweepExpiredBurners(ctx context.Context, now time.Time) (int64, error) {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE identity.display_identities
+		SET burned_at = $1, version = version + 1
+		WHERE type = 'BURNER' AND burned_at IS NULL AND expires_at IS NOT NULL AND expires_at <= $1`, now.UTC())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
