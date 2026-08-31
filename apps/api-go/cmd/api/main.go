@@ -33,6 +33,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/notification"
+	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
@@ -116,6 +117,7 @@ func main() {
 	activityService := activity.New()
 	facetService := facet.New()
 	facetService.SeedDefaults()
+	experienceService := experience.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -212,6 +214,7 @@ func main() {
 		activityService = activity.NewWithRepository(postgres.NewActivityRepository(pool))
 		facetService = facet.NewWithRepository(postgres.NewFacetRepository(pool))
 		facetService.SeedDefaults()
+		experienceService = experience.NewWithRepository(postgres.NewExperienceRepository(pool))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -230,6 +233,7 @@ func main() {
 	server.Outcome = outcomeService
 	server.Scene = sceneService
 	server.Facet = facetService
+	server.Experience = experienceService
 	// Activity 域：启动幂等 seed 基线；DATABASE_URL 存在时写入持久仓储。
 	activityService.SeedDefaults()
 	server.Activity = activityService

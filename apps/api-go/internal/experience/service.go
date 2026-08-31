@@ -13,14 +13,25 @@ const CommandGetExperienceManifest = "GetExperienceManifest"
 
 const CommandCompileExperienceSurface = "CompileExperienceSurface"
 
+type Repository interface {
+	CreateIntent(ctx context.Context, intent runtime.ExperienceIntent) error
+	CreateSurfacePlan(ctx context.Context, plan runtime.SurfacePlan) error
+}
+
 type Service struct {
 	compiler     *runtime.SurfaceCompiler
 	orchestrator *runtime.ExperienceOrchestrator
+	repository   Repository
 }
 
 func New() *Service {
 	c := runtime.NewSurfaceCompiler("surface_policy_v5")
 	return &Service{compiler: c, orchestrator: runtime.NewOrchestrator(c)}
+}
+
+func NewWithRepository(repo Repository) *Service {
+	c := runtime.NewSurfaceCompiler("surface_policy_v5")
+	return &Service{compiler: c, orchestrator: runtime.NewOrchestrator(c), repository: repo}
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -70,12 +81,12 @@ func (s *Service) Handle(e command.Envelope) command.Result {
 	return s.HandleContext(context.Background(), e)
 }
 
-func (s *Service) HandleContext(_ context.Context, e command.Envelope) command.Result {
+func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	switch e.CommandType {
 	case CommandGetExperienceManifest:
 		return s.handleGetManifest(e)
 	case CommandCompileExperienceSurface:
-		return s.handleCompileSurface(e)
+		return s.handleCompileSurface(ctx, e)
 	default:
 		return command.Rejected(
 			e,
@@ -140,7 +151,7 @@ type compileSurfacePayload struct {
 	PolicyVersion         string         `json:"policy_version,omitempty"`
 }
 
-func (s *Service) handleCompileSurface(e command.Envelope) command.Result {
+func (s *Service) handleCompileSurface(ctx context.Context, e command.Envelope) command.Result {
 	var payload compileSurfacePayload
 	raw, err := json.Marshal(e.Payload)
 	if err != nil || json.Unmarshal(raw, &payload) != nil {
@@ -185,6 +196,11 @@ func (s *Service) handleCompileSurface(e command.Envelope) command.Result {
 		// still surface fallback id in OperationRef for observability
 		rejected.OperationRef = mustMarshal(map[string]any{"fallback_plan_id": fb})
 		return rejected
+	}
+	if s.repository != nil {
+		// 持久化意图与计划，供后续审计/回放；失败不阻塞编译结果（soft persist）
+		_ = s.repository.CreateIntent(ctx, intent)
+		_ = s.repository.CreateSurfacePlan(ctx, result.SurfacePlan)
 	}
 	accepted := command.Accepted(e, "ExperienceSurface", result.SurfacePlan.SurfacePlanID, result.SurfacePlan.SurfaceVersion, "READY", nil)
 	accepted.OperationRef = mustMarshal(result)
