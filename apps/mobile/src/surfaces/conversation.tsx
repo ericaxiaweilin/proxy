@@ -6,6 +6,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import type { ConversationClient, ProtectionOverride } from "../conversation-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
+import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
 import { color } from "../theme";
 
 interface Message {
@@ -15,6 +16,7 @@ interface Message {
   time: string;
   isOwn: boolean;
   isAI?: boolean;
+  v1?: MessageV1;
 }
 
 export function ConversationSurface({
@@ -102,6 +104,30 @@ export function ConversationSurface({
     return () => { cancelled = true; };
   }, [convId, author, conversationClient, parseOperationRef]);
 
+  async function sendProxyObject(): Promise<void> {
+    if (sending || !convId) return;
+    setSending(true);
+    const proxyForService = { objectType: "activity" as const, objectId: "act_westlake", snapshot: { title: "Sunday Coffee Walk", state: "24 / 30 已参加", time: "今天 16:00" }, liveState: { state: "当前：已结束" } };
+    const proxyForV1 = { object_type: "activity" as const, object_id: "act_westlake", snapshot: { title: "Sunday Coffee Walk", state: "24 / 30 已参加", time: "今天 16:00" }, liveState: { state: "当前：已结束" } };
+    const v1: MessageV1 = { id: `msg_${Date.now()}`, kind: "proxy_object", proxy_object: proxyForV1, text: "活动卡片" };
+    const userMsg: Message = {
+      id: v1.id,
+      sender: "你",
+      body: "活动卡片",
+      time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+      isOwn: true,
+      v1,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    try {
+      await conversationClient.sendProxyObject(convId, proxyForService);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "发送活动卡片失败");
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function send(preparedText?: string, temporaryUIResponseId?: string): Promise<void> {
     const text = (preparedText ?? draft).trim();
     if (!text || sending || !convId) return;
@@ -119,8 +145,13 @@ export function ConversationSurface({
     setTemporaryUI(undefined);
 
     try {
-      const protectionOverride: ProtectionOverride | undefined =
-        ephemeral || noForward !== true ? { viewLimit: ephemeral ? 1 : undefined, forwardable: noForward ? false : true } : undefined;
+      const protectionOverride: ProtectionOverride | undefined = (() => {
+        if (!ephemeral && noForward === true) return undefined;
+        const o: ProtectionOverride = {};
+        if (ephemeral) o.viewLimit = 1;
+        o.forwardable = noForward ? false : true;
+        return o;
+      })();
       const result = await conversationClient.sendMessage(convId, userText, undefined, temporaryUIResponseId, undefined, protectionOverride);
       // 解析 AI 回复
       const payload = parseOperationRef(result);
@@ -171,13 +202,21 @@ export function ConversationSurface({
             <Text style={styles.systemMsgText}>{error}</Text>
           </View>
         )}
-        {messages.map((msg) => (
-          <View key={msg.id} style={[styles.messageBubble, msg.isOwn ? styles.messageOwn : msg.isAI ? styles.messageAI : styles.messageOther]}>
-            {!msg.isOwn && <Text style={styles.messageSender}>{msg.sender}</Text>}
-            <Text style={[styles.messageBody, msg.isOwn && styles.messageBodyOwn]}>{msg.body}</Text>
-            <Text style={[styles.messageTime, msg.isOwn && styles.messageTimeOwn]}>{msg.time}</Text>
-          </View>
-        ))}
+        {messages.map((msg) =>
+          msg.v1 ? (
+            <View key={msg.id} style={[styles.v1Wrap, msg.isOwn ? styles.v1Own : styles.v1Other]}>
+              {!msg.isOwn && <Text style={styles.messageSender}>{msg.sender}</Text>}
+              <MessageRenderer message={msg.v1} />
+              <Text style={[styles.messageTime, msg.isOwn && styles.messageTimeOwn]}>{msg.time}</Text>
+            </View>
+          ) : (
+            <View key={msg.id} style={[styles.messageBubble, msg.isOwn ? styles.messageOwn : msg.isAI ? styles.messageAI : styles.messageOther]}>
+              {!msg.isOwn && <Text style={styles.messageSender}>{msg.sender}</Text>}
+              <Text style={[styles.messageBody, msg.isOwn && styles.messageBodyOwn]}>{msg.body}</Text>
+              <Text style={[styles.messageTime, msg.isOwn && styles.messageTimeOwn]}>{msg.time}</Text>
+            </View>
+          )
+        )}
         {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
       </ScrollView>
 
@@ -192,8 +231,11 @@ export function ConversationSurface({
         <Text style={styles.hint}>🔒 端到端加密</Text>
       </View>
 
-      {/* Composer */}
+      {/* Composer — 业务卡片快捷入口 (v1 proxy_object) */}
       <View style={styles.composer}>
+        <Pressable onPress={() => void sendProxyObject()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
+          <Text style={styles.cardBtnText}>活动</Text>
+        </Pressable>
         <TextInput
           value={draft}
           onChangeText={setDraft}
@@ -309,5 +351,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10
   },
   sendBtnDisabled: { opacity: 0.5 },
-  sendBtnText: { color: color.white, fontSize: 11, fontWeight: "700" }
+  sendBtnText: { color: color.white, fontSize: 11, fontWeight: "700" },
+  cardBtn: { backgroundColor: "#fff4da", borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8 },
+  cardBtnDisabled: { opacity: 0.5 },
+  cardBtnText: { fontSize: 10, fontWeight: "700", color: "#795817" },
+  v1Wrap: { maxWidth: "80%", marginVertical: 2 },
+  v1Own: { alignSelf: "flex-end" },
+  v1Other: { alignSelf: "flex-start" },
 });

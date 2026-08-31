@@ -47,20 +47,26 @@ export class ConversationClient {
     temporaryUIResponseId?: string,
     mediaRef?: string,
     protectionOverride?: ProtectionOverride,
-    messageType?: "TEXT" | "IMAGE" | "VIDEO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION"
+    messageType?: "TEXT" | "IMAGE" | "VIDEO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION",
+    proxyObject?: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> }
   ): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const isImage = Boolean(mediaRef);
-    const resolvedType = messageType ?? (isImage ? "IMAGE" : "TEXT");
+    const resolvedType = messageType ?? (proxyObject ? "TEXT" : isImage ? "IMAGE" : "TEXT");
     const result = await this.sendCommand(session, "SendMessage", { type: "Conversation", id: conversationId }, {
       messageType: resolvedType,
       body: body || (isImage ? " " : ""),
       ...(mediaRef ? { mediaRef } : {}),
       ...(assistantMode ? { assistantMode } : {}),
       ...(temporaryUIResponseId ? { temporaryUIResponseId } : {}),
-      ...(protectionOverride ? { protectionOverride } : {})
+      ...(protectionOverride ? { protectionOverride } : {}),
+      ...(proxyObject ? { proxyObject } : {})
     });
     return result;
+  }
+
+  public async sendProxyObject(conversationId: string, proxyObject: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> }): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, proxyObject.snapshot.title as string ?? "", undefined, undefined, undefined, undefined, "TEXT", proxyObject);
   }
 
   public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride): Promise<Record<string, unknown>> {
