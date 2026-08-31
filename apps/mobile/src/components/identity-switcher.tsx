@@ -12,7 +12,7 @@ export function IdentitySwitcher({
   onSwitch,
 }: {
   client: DisplayIdentityClient;
-  activeId?: string;
+  activeId?: string | undefined;
   onSwitch: (id: string) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
