@@ -2,7 +2,7 @@
 // 基于 Feed 的"聊一下"入口进入的会话界面。
 // 接入模型底座：SendMessage 后服务端调用 modelStack.Complete() 生成 AI 回复。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import type { ConversationClient, ProtectionOverride } from "../conversation-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
@@ -205,7 +205,10 @@ export function ConversationSurface({
   }
 
   return (
-    <View style={styles.root}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={styles.root}
+    >
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={onBack} style={styles.backBtn}>
@@ -280,7 +283,7 @@ export function ConversationSurface({
           <Text style={styles.sendBtnText}>{sending ? "..." : "发送"}</Text>
         </Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -304,7 +307,11 @@ const styles = StyleSheet.create({
   headerStatus: { color: "#4CAF50", fontSize: 11 },
 
   messageList: { flex: 1 },
-  messageContent: { padding: 14, gap: 10 },
+  // flexGrow:1 lets the ScrollView content container shrink when
+  // KeyboardAvoidingView applies its bottom padding. Without it, the
+  // keyboard still covers the composer row even though the parent
+  // surface has been resized.
+  messageContent: { flexGrow: 1, padding: 14, gap: 10 },
 
   messageBubble: {
     borderRadius: 16,
