@@ -35,7 +35,14 @@ func main() {
 		{"duplicate_refresh_token_hashes", `SELECT count(*) FROM (SELECT refresh_token_hash FROM identity.session_tokens GROUP BY 1 HAVING count(*) > 1) q`},
 		{"orphan_session_users", `SELECT count(*) FROM identity.sessions s LEFT JOIN identity.user_accounts u ON u.id=s.user_account_id WHERE u.id IS NULL`},
 		{"orphan_session_devices", `SELECT count(*) FROM identity.sessions s LEFT JOIN identity.device_registrations d ON d.id=s.device_id WHERE d.id IS NULL`},
-		{"invalid_media_state_rows", `SELECT count(*) FROM media.media_assets WHERE owner_principal_type NOT IN ('INDIVIDUAL','BUSINESS') OR media_type NOT IN ('IMAGE','VIDEO','AUDIO') OR processing_status NOT IN ('UPLOADING','PROCESSING','READY','FAILED')`},
+		{"invalid_media_owner_rows", `SELECT count(*) FROM media.media_assets WHERE owner_principal_type NOT IN ('INDIVIDUAL','BUSINESS','PLATFORM')`},
+		{"invalid_media_type_rows", `SELECT count(*) FROM media.media_assets WHERE media_type NOT IN ('IMAGE','VIDEO','AUDIO')`},
+		{"invalid_media_processing_rows", `SELECT count(*) FROM media.media_assets WHERE processing_status NOT IN ('UPLOADING','PROCESSING','READY','FAILED')`},
+		{"observer_raw_table_privileges", `SELECT count(*) FROM (VALUES
+			('scene.scenes'), ('scene.invitations'), ('contribution.contributions'),
+			('supply.agent_profiles'), ('supply.availability_windows')) AS raw(table_name)
+			WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname='proxy_api_observer')
+			  AND has_table_privilege('proxy_api_observer', raw.table_name, 'SELECT')`},
 	}
 	unsafe := false
 	for _, check := range checks {
@@ -46,7 +53,60 @@ func main() {
 		fmt.Printf("%s=%d\n", check.name, count)
 		unsafe = unsafe || count != 0
 	}
+	var hardeningObjects int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+		  (SELECT count(*) FROM pg_indexes WHERE schemaname='identity' AND indexname IN ('uq_login_identity_active_identifier','uq_session_tokens_access_hash','uq_session_tokens_refresh_hash'))
+		+ (SELECT count(*) FROM pg_constraint WHERE conname IN (
+		  'identity_user_status_check','identity_login_channel_check','identity_login_status_check',
+		  'identity_device_platform_check','identity_device_status_check','identity_session_status_check',
+		  'identity_session_principal_type_check','identity_session_lifetime_check','identity_token_lifetime_check',
+		  'identity_sessions_user_fk','identity_sessions_device_fk','media_asset_owner_type_check',
+		  'media_asset_type_check','media_asset_processing_status_check','media_asset_moderation_status_check',
+		  'media_asset_visibility_check','media_asset_dimensions_check','media_asset_checksum_check',
+		  'business_owner_user_fk','business_membership_user_fk','payment_intent_currency_check',
+		  'ledger_currency_check','payout_currency_check'))`).Scan(&hardeningObjects); err != nil {
+		log.Fatalf("hardening objects: %v", err)
+	}
+	fmt.Printf("hardening_objects=%d/26\n", hardeningObjects)
+	unsafe = unsafe || hardeningObjects != 26
+	printGroups(ctx, pool, "legacy_media_owner", `
+		SELECT owner_principal_type, count(*)
+		FROM media.media_assets
+		WHERE owner_principal_type NOT IN ('INDIVIDUAL','BUSINESS','PLATFORM')
+		GROUP BY owner_principal_type ORDER BY owner_principal_type`)
+	printGroups(ctx, pool, "legacy_media_processing", `
+		SELECT processing_status, count(*)
+		FROM media.media_assets
+		WHERE processing_status NOT IN ('UPLOADING','PROCESSING','READY','FAILED')
+		GROUP BY processing_status ORDER BY processing_status`)
+	printGroups(ctx, pool, "legacy_media_processing_detail", `
+		SELECT processing_status || '|moderation=' || moderation_status ||
+		       '|playback=' || CASE WHEN COALESCE(playback_url, '') <> '' THEN 'yes' ELSE 'no' END,
+		       count(*)
+		FROM media.media_assets
+		WHERE processing_status NOT IN ('UPLOADING','PROCESSING','READY','FAILED')
+		GROUP BY 1 ORDER BY 1`)
 	if unsafe {
 		os.Exit(2)
+	}
+}
+
+func printGroups(ctx context.Context, pool *pgxpool.Pool, name, query string) {
+	rows, err := pool.Query(ctx, query)
+	if err != nil {
+		log.Fatalf("%s: %v", name, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var value string
+		var count int64
+		if err := rows.Scan(&value, &count); err != nil {
+			log.Fatalf("%s scan: %v", name, err)
+		}
+		fmt.Printf("%s[%q]=%d\n", name, value, count)
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatalf("%s rows: %v", name, err)
 	}
 }
