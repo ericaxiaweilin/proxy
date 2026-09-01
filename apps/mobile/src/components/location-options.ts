@@ -181,6 +181,28 @@ export async function reverseGeocode(
   };
 }
 
+// R15.32.1.3: 从 Nominatim 的 display_name 里拿城市。
+// Nominatim 返的是越南文 / 英文 ("Hà Nội" / "TP Hồ Chí Minh")，
+// LOCATION_OPTIONS 用中文 ("河内" / "胡志明市")，需要映射。
+// 不区分重音符号 — "Hà Nội" / "Ha Noi" 都能识别。匹配不到
+// (例如 Nominatim 返 "District 1, Vietnam" 这种含糊形式) 返回
+// undefined，调用方会保持 customCity 不变。
+export function pickCityFromDisplayName(displayName: string): string | undefined {
+  // 同时检查原文和脱重音后的形式：Nominatim 有时返 "Ha Noi" /
+  // "Hà Nội" / "Hanoi" 三种。重音拆解后 "ha noi" 是匹配词，但
+  // "hanoi" 拆重音后还是 "hanoi" — 也要直接返 "河内"。
+  const raw = displayName.toLowerCase();
+  const normLower = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (normLower.includes("ha noi") || raw.includes("hanoi")) return "河内";
+  if (normLower.includes("ho chi minh") || raw.includes("hcmc") || raw.includes("saigon")) return "胡志明市";
+  if (normLower.includes("da nang")) return "岘港";
+  if (normLower.includes("hai phong")) return "海防";
+  if (normLower.includes("can tho")) return "芹苴";
+  if (normLower.includes("hue")) return "顺化";
+  if (normLower.includes("bien hoa")) return "边和";
+  return undefined;
+}
+
 // 内部工具: gridToLatLng 的逆函数 (lat, lng) → gridX/gridY。
 // P6 只在数据层需要走“逆编码”路径时才用。精确到 cell 即可,
 // 不是 sub-cell。

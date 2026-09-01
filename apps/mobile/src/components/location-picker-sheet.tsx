@@ -5,7 +5,7 @@
 // (不引 react-native-maps，避免 prebuild / pod install 阻塞)，但
 // 给了真实 grid 坐标 + 半径 + 城市名 — 这三件对"feed 怎么用
 // location" 已经够。
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { MapCanvas } from "./map-canvas";
@@ -17,6 +17,7 @@ import {
   formatRadius,
   gridToLatLng,
   LOCATION_OPTIONS,
+  pickCityFromDisplayName,
   reverseGeocode,
   type AnyLocation,
   type CustomLocation,
@@ -104,13 +105,57 @@ export function LocationPickerSheet({
     setPin({ x: 5, y: 5 });
   }
 
+  // R15.32.1.3: 算 commitCustom 要用的最终标签。
+  // 优先级：用户手填 label > 逆编码 displayName > 网格坐标。
+  // city 同样优先逆编码里的部分，最后才 fallback 到 customCity
+  // chip（GPS 定位到另外一个城市时，customCity 会被忽略，改用
+  // reverse.displayName 拆出来的城市名 — 不会出现"都到胡志明
+  // 了还强制河内"的迷惑感）。
+  const finalCommit = useMemo(() => {
+    const userLabel = label.trim();
+    const reverseName = reverse?.displayName?.trim();
+    // 从 displayName 拿 area：Nominatim 返 "POI, City, Country"，
+    // 取最后两段拼成 "POI, City" — POI + 城市名都很有用。
+    let resolvedArea: string;
+    if (reverse?.source === "remote" && reverseName) {
+      const parts = reverseName.split(",").map((p) => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        resolvedArea = parts.slice(-2).join(", ");
+      } else if (parts.length === 1) {
+        resolvedArea = parts[0]!;
+      } else {
+        resolvedArea = reverseName;
+      }
+    } else if (reverseName) {
+      // 离线 grid fallback：例如 "还剑湖附近" — area 就是这个
+      resolvedArea = reverseName;
+    } else {
+      // 逆编码还在进行中：用网格坐标作最后 fallback
+      resolvedArea = `(${pin.x}, ${pin.y})`;
+    }
+    // user label 覆盖：用户手输了"家"，就用 "家"
+    const area = userLabel || resolvedArea;
+    // 标头：用户手输了 label 就不附加 "并切换" 之类的话
+    const header = userLabel ? "保存" : "保存并切换";
+    // city：优先用 reverse 拆出的越南文 city（走 LOCATION_OPTIONS
+    // 里的 city 映射表，把 "Hà Nội" / "TP Hồ Chí Minh" 翻译成
+    // "河内" / "胡志明市"）。没匹配上就保持 customCity。
+    const cityFromDisplayName = reverse?.source === "remote" && reverseName
+      ? pickCityFromDisplayName(reverseName)
+      : undefined;
+    return {
+      header,
+      area,
+      city: cityFromDisplayName ?? customCity,
+      id: `custom_${cityFromDisplayName ?? customCity}_${pin.x}x${pin.y}_r${radius}`
+    };
+  }, [label, reverse, customCity, pin.x, pin.y, radius]);
+
   async function commitCustom(): Promise<void> {
-    const id = `custom_${customCity}_${pin.x}x${pin.y}_r${radius}`;
-    const finalLabel = label.trim() || `${pin.x}, ${pin.y}`;
     const next: CustomLocation = {
-      id,
-      city: customCity,
-      area: `自定义 · ${finalLabel}`,
+      id: finalCommit.id,
+      city: finalCommit.city,
+      area: `自定义 · ${finalCommit.area}`,
       kind: "CUSTOM",
       custom: { gridX: pin.x, gridY: pin.y, radiusMeters: radius }
     };
@@ -284,12 +329,16 @@ export function LocationPickerSheet({
           {tab === "CUSTOM" && (
             <View style={styles.footer}>
               <Pressable
-                accessibilityLabel="保存自定义坐标并切换"
+                accessibilityLabel={`保存到 ${finalCommit.city} 的 ${finalCommit.area}`}
                 onPress={() => void commitCustom()}
                 style={({ pressed }) => [styles.confirm, pressed && styles.confirmPressed]}
               >
                 <Text style={styles.confirmText} numberOfLines={1}>
-                  ✓ 保存并切换到 {customCity} · {label.trim() || `(${pin.x}, ${pin.y})`} · {formatRadius(radius)}
+                  ✓ {finalCommit.header} · {finalCommit.area} · {formatRadius(radius)}
+                </Text>
+                <Text style={styles.confirmSubText} numberOfLines={1}>
+                  {finalCommit.city} · {lat.toFixed(4)}, {lng.toFixed(4)}
+                  {reverse?.source === "offline-grid" ? " · 离线估算" : ""}
                 </Text>
               </Pressable>
             </View>
@@ -422,6 +471,9 @@ const styles = StyleSheet.create({
   },
   confirmPressed: { backgroundColor: "#3A2F4A" },
   confirmText: { color: color.white, fontSize: 14, fontWeight: "800" },
+  // R15.32.1.3: 小字副标 — city + lat/lng + offline 标记，
+  // 告诉用户 GPS 定位后的“真实地点 + 坐标”。
+  confirmSubText: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: "500", marginTop: 2 },
   // R15.32.1: sticky footer under the scroll. Pinned at the bottom
   // of the sheet so the user can always tap save even if the city
   // / map / radius / label inputs push it off-screen.

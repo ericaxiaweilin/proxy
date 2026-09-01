@@ -22,6 +22,7 @@ import {
   gridToLatLng,
   LOCATION_OPTIONS,
   makeCustomLocation,
+  pickCityFromDisplayName,
   reverseGeocode,
   type AnyLocation,
   type CustomLocation,
@@ -243,5 +244,37 @@ describe("reverseGeocode (R15.15 P2) — OSM Nominatim + offline-grid fallback",
     const r = await reverseGeocode("下龙湾", 20.91, 107.18);
     expect(r.displayName).toContain("下龙湾");
     expect(r.displayName).toContain("网格");
+  });
+});
+
+// R15.32.1.3: pickCityFromDisplayName 把 Nominatim 的英文/越南文
+// display_name 映射到我们 LOCATION_OPTIONS 里的中文城市。GPS
+// 定位后 sheet 会用这个函数拿真实城市，避免“到 HCM 了还强制河内”
+// 的迷惑感。
+describe("pickCityFromDisplayName", () => {
+  it("returns 河内 for Hanoi variants", () => {
+    expect(pickCityFromDisplayName("Hoàn Kiếm, Hà Nội, Vietnam")).toBe("河内");
+    expect(pickCityFromDisplayName("Ha Noi, Vietnam")).toBe("河内");
+    expect(pickCityFromDisplayName("hanoi, vietnam")).toBe("河内");
+  });
+  it("returns 胡志明市 for HCMC variants", () => {
+    expect(pickCityFromDisplayName("Bitexco, TP Hồ Chí Minh, Vietnam")).toBe("胡志明市");
+    expect(pickCityFromDisplayName("Ho Chi Minh City, Vietnam")).toBe("胡志明市");
+    expect(pickCityFromDisplayName("Saigon, Vietnam")).toBe("胡志明市");
+    expect(pickCityFromDisplayName("HCMC, Vietnam")).toBe("胡志明市");
+  });
+  it("returns 岘港 for Da Nang", () => {
+    expect(pickCityFromDisplayName("Da Nang, Vietnam")).toBe("岘港");
+  });
+  it("returns 海防 / 芹苴 / 顺化 / 边和 for the other 4 cities", () => {
+    expect(pickCityFromDisplayName("Hai Phong, Vietnam")).toBe("海防");
+    expect(pickCityFromDisplayName("Can Tho, Vietnam")).toBe("芹苴");
+    expect(pickCityFromDisplayName("Hue, Vietnam")).toBe("顺化");
+    expect(pickCityFromDisplayName("Bien Hoa, Vietnam")).toBe("边和");
+  });
+  it("returns undefined for non-VN or unrecognised strings", () => {
+    expect(pickCityFromDisplayName("District 1, Vietnam")).toBeUndefined();
+    expect(pickCityFromDisplayName("Some place, Bangkok, Thailand")).toBeUndefined();
+    expect(pickCityFromDisplayName("")).toBeUndefined();
   });
 });
