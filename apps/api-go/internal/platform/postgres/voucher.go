@@ -70,7 +70,7 @@ func (r *VoucherRepository) UpsertVoucher(ctx context.Context, actorID string, v
 			valid_from, valid_until, redeem_time_window, minimum_spend, per_person_limit,
 			status, issuer_label, settlement_value, funding_proxy, funding_creator, funding_merchant,
 			reservation_needed, version
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		ON CONFLICT (actor_id, voucher_id) DO UPDATE SET
 			status=EXCLUDED.status, version=EXCLUDED.version, updated_at=now()`,
 		actorID, v.ID, string(v.Family), v.DisplayValue, v.Currency, v.ScopeName, v.ScopeDetail,
@@ -93,7 +93,7 @@ func (r *VoucherRepository) EnsureDefaults(ctx context.Context, actorID string) 
 				valid_from, valid_until, redeem_time_window, minimum_spend, per_person_limit,
 				status, issuer_label, settlement_value, funding_proxy, funding_creator, funding_merchant,
 				reservation_needed, version
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 			ON CONFLICT (actor_id, voucher_id) DO NOTHING`,
 			actorID, v.ID, string(v.Family), v.DisplayValue, v.Currency, v.ScopeName, v.ScopeDetail,
 			v.ValidFrom, v.ValidUntil, v.RedeemTimeWindow, v.MinimumSpend, v.PerPersonLimit,
