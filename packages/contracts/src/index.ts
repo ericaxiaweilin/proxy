@@ -419,7 +419,9 @@ export const ListFeedPostsPayloadSchema = z.object({
   // 不传或空，服务端全量，field 也会是 undefined。无法静默降级。
   viewingCity: z.string().optional(),
   // R15.14: 同样回显全量不过滤 (client 没传或传 "" 等于 “全量”).
-  unfiltered: z.boolean().optional()
+  unfiltered: z.boolean().optional(),
+  nextCursor: z.string().optional(),
+  hasMore: z.boolean().optional()
 });
 export type ListFeedPostsPayload = z.infer<typeof ListFeedPostsPayloadSchema>;
 

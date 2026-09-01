@@ -152,6 +152,52 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 	return result, nil
 }
 
+func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, before time.Time, beforeID string, limit int) ([]localnet.Post, error) {
+	if limit <= 0 || limit > 51 {
+		limit = 26
+	}
+	var beforeValue any
+	if !before.IsZero() {
+		beforeValue = before.UTC()
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, author_type, author_id, author_display_name, body, media_refs,
+			visibility, city_scope, scene_type, status, context_refs, created_at
+		FROM localnet.posts
+		WHERE status='PUBLISHED'
+		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1))
+		  AND ($2::timestamptz IS NULL OR created_at < $2 OR (created_at = $2 AND id > $3))
+		ORDER BY created_at DESC, id ASC
+		LIMIT $4`, actorID, beforeValue, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]localnet.Post, 0, limit)
+	for rows.Next() {
+		var post localnet.Post
+		var mediaRefs, contextRefs []byte
+		var sceneType *string
+		if err := rows.Scan(
+			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
+			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(mediaRefs, &post.MediaRefs); err != nil {
+			return nil, fmt.Errorf("decode media refs: %w", err)
+		}
+		if err := json.Unmarshal(contextRefs, &post.ContextRefs); err != nil {
+			return nil, fmt.Errorf("decode context refs: %w", err)
+		}
+		if sceneType != nil {
+			post.SceneType = *sceneType
+		}
+		result = append(result, post)
+	}
+	return result, rows.Err()
+}
+
 func (r *LocalNetRepository) SaveNeedFromPost(ctx context.Context, record localnet.NeedFromPost) error {
 	lineage, err := json.Marshal(record.Lineage)
 	if err != nil {

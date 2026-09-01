@@ -57,6 +57,38 @@ func TestServeMediaPathSupportsHeadRangeAndRevalidation(t *testing.T) {
 	}
 }
 
+func TestPublicFeedIsCacheableAndRevalidates(t *testing.T) {
+	localNet := localnet.New()
+	if err := localNet.SeedDemoPosts(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localNet, localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New())
+	handler := server.Handler()
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/v1/feed?limit=2", nil))
+	if first.Code != http.StatusOK || first.Header().Get("ETag") == "" || first.Header().Get("Cache-Control") == "" {
+		t.Fatalf("feed status=%d headers=%v body=%s", first.Code, first.Header(), first.Body.String())
+	}
+	var payload struct {
+		Posts      []localnet.Post `json:"posts"`
+		NextCursor string          `json:"nextCursor"`
+		HasMore    bool            `json:"hasMore"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Posts) != 2 || !payload.HasMore || payload.NextCursor == "" {
+		t.Fatalf("unexpected first page: %+v", payload)
+	}
+	revalidate := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/feed?limit=2", nil)
+	req.Header.Set("If-None-Match", first.Header().Get("ETag"))
+	handler.ServeHTTP(revalidate, req)
+	if revalidate.Code != http.StatusNotModified {
+		t.Fatalf("revalidation status=%d", revalidate.Code)
+	}
+}
+
 func apiEnvelope(commandType string, payload map[string]any, target command.Target, idempotency string) command.Envelope {
 	return command.Envelope{
 		CommandID:      "cmd_" + idempotency,

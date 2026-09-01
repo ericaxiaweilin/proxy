@@ -107,6 +107,7 @@ func main() {
 	facetService.SeedDefaults()
 	experienceService := experience.New()
 	voucherService := voucher.New()
+	demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -210,6 +211,7 @@ func main() {
 		facetService.SeedDefaults()
 		experienceService = experience.NewWithRepository(postgres.NewExperienceRepository(pool))
 		voucherService = voucher.NewWithRepository(postgres.NewVoucherRepository(pool))
+		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -619,6 +621,81 @@ func configuredNotificationPush() notification.PushProvider {
 		return nil
 	}
 	return notification.LogPushProvider{}
+}
+
+func newSupplyBatchCreator(supplyService *supply.Service) demand.BatchCreator {
+	return &demand.SupplyBatchCreator{
+		CreateFunc: func(ctx context.Context, draft demand.TaskDraft) error {
+			startAt, _ := draft.Changes["startAt"].(string)
+			endAt, _ := draft.Changes["endAt"].(string)
+			if startAt == "" {
+				return nil
+			}
+			durationH := 8
+			if s, err := time.Parse(time.RFC3339, startAt); err == nil {
+				if e, err2 := time.Parse(time.RFC3339, endAt); err2 == nil {
+					h := int(e.Sub(s).Hours())
+					if h > 0 && h <= 24 {
+						durationH = h
+					}
+				}
+			}
+			marketID := "hn"
+			if loc, ok := draft.Changes["location"].(map[string]any); ok {
+				if label, ok := loc["label"].(string); ok && (label == "HCM" || label == "hcm" || label == "胡志明") {
+					marketID = "hcm"
+				}
+			}
+			// languages / capabilities from mustRequirements
+			var languages []string
+			var capabilities []string
+			if reqs, ok := draft.Changes["mustRequirements"].([]any); ok {
+				for _, r := range reqs {
+					if s, ok := r.(string); ok {
+						switch s {
+						case "ZH", "VI", "EN":
+							languages = append(languages, s)
+						case "PHOTOGRAPHY", "GUIDE":
+							capabilities = append(capabilities, s)
+						}
+					}
+				}
+			}
+			payload := map[string]any{
+				"needId":    draft.ID,
+				"marketId":  marketID,
+				"startAt":   startAt,
+				"durationH": durationH,
+			}
+			if len(languages) > 0 {
+				payload["languages"] = languages
+			}
+			if len(capabilities) > 0 {
+				payload["capabilities"] = capabilities
+			}
+			env := command.Envelope{
+				CommandID:      "batch_" + draft.ID,
+				CommandType:    "CreateCandidateBatch",
+				CommandVersion: 1,
+				Actor:          command.Actor{Type: "SYSTEM", ID: "system_batch"},
+				Principal:      command.Principal{Type: "SYSTEM", ID: "system_batch"},
+				Target:         command.Target{Type: "CandidateBatch", ID: draft.ID},
+				IdempotencyKey: "batch_" + draft.ID,
+				AuthContext:    map[string]any{"system": true},
+				Purpose:        "auto_batch",
+				CorrelationID:  "batch_" + draft.ID,
+				RequestedAt:    time.Now().UTC().Format(time.RFC3339),
+				Payload:        payload,
+			}
+			result := supplyService.HandleContext(ctx, env)
+			if result.Outcome == "REJECTED" {
+				log.Printf("auto batch: rejected need=%s err=%v", draft.ID, result.Error)
+				return nil
+			}
+			log.Printf("auto batch: created for need=%s market=%s duration=%d", draft.ID, marketID, durationH)
+			return nil
+		},
+	}
 }
 
 // bootEnvWarnings returns a list of human-readable warnings when the

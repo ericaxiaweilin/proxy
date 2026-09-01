@@ -44,13 +44,20 @@ type GateDecision struct {
 
 type Gate func(*TaskDraft, command.Envelope) GateDecision
 
+type BatchCreator interface {
+	CreateBatchForTask(ctx context.Context, draft TaskDraft) error
+}
+
 type Service struct {
 	mu            sync.Mutex
 	repository    Repository
 	admissionGate Gate
 	fundingGate   Gate
+	batchCreator  BatchCreator
 	clock         clock.Clock
 }
+
+func (s *Service) SetBatchCreator(b BatchCreator) { s.batchCreator = b }
 
 func New(admissionGate, fundingGate Gate) *Service {
 	return NewWithRepository(admissionGate, fundingGate, NewMemoryRepository())
@@ -314,6 +321,9 @@ func (s *Service) publishTask(ctx context.Context, e command.Envelope) command.R
 			return command.Rejected(e, "TASK_DRAFT_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "demand.draft_version_conflict", map[string]any{"expectedVersion": p.ExpectedVersion})
 		}
 		return command.Rejected(e, "TASK_DRAFT_PUBLISH_FAILED", "INTERNAL", "SAFE_RETRY", "demand.publish_failed", nil)
+	}
+	if s.batchCreator != nil {
+		_ = s.batchCreator.CreateBatchForTask(ctx, draft)
 	}
 	return command.Accepted(e, "Task", draft.ID, draft.Version, "COMMITTED", eventRefs(domainEvents))
 }

@@ -3,6 +3,7 @@ package localnet
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -196,6 +197,10 @@ type Repository interface {
 	SnapshotNeeds(ctx context.Context) ([]NeedFromPost, error)
 	AppendInteractionEvent(ctx context.Context, ie InteractionEvent) error
 	ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]InteractionEvent, error)
+}
+
+type FeedPageRepository interface {
+	ListFeedPage(ctx context.Context, actorID string, before time.Time, beforeID string, limit int) ([]Post, error)
 }
 
 // InteractionEvent 是网络交互事件（C1 Event Stream 最小底座）。
@@ -789,7 +794,33 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 // postId ASC；LocationContext 只作为元数据和显式“附近”筛选依据。
 
 func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
-	posts, err := s.repository.Snapshot(ctx)
+	var request struct {
+		Cursor string `json:"cursor"`
+		Limit  int    `json:"limit"`
+	}
+	_ = decode(e.Payload, &request) // legacy malformed payloads keep first-page behavior
+	if request.Limit <= 0 {
+		request.Limit = 25
+	}
+	if request.Limit > 50 {
+		request.Limit = 50
+	}
+	var cursor struct {
+		CreatedAt time.Time `json:"createdAt"`
+		PostID    string    `json:"postId"`
+	}
+	if request.Cursor != "" {
+		if raw, decodeErr := base64.RawURLEncoding.DecodeString(request.Cursor); decodeErr == nil {
+			_ = json.Unmarshal(raw, &cursor)
+		}
+	}
+	var posts []Post
+	var err error
+	if pageRepository, ok := s.repository.(FeedPageRepository); ok {
+		posts, err = pageRepository.ListFeedPage(ctx, e.Actor.ID, cursor.CreatedAt, cursor.PostID, request.Limit+1)
+	} else {
+		posts, err = s.repository.Snapshot(ctx)
+	}
 	if err != nil {
 		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)
 	}
@@ -805,6 +836,9 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		// Follow-graph authorization is not implemented yet. Fail closed instead
 		// of treating FOLLOWERS as public; authors may still see their own post.
 		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
+			continue
+		}
+		if !cursor.CreatedAt.IsZero() && (p.CreatedAt.After(cursor.CreatedAt) || (p.CreatedAt.Equal(cursor.CreatedAt) && p.ID <= cursor.PostID)) {
 			continue
 		}
 		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
@@ -823,6 +857,16 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		}
 		return feed[i].CreatedAt.After(feed[j].CreatedAt)
 	})
+	hasMore := len(feed) > request.Limit
+	if hasMore {
+		feed = feed[:request.Limit]
+	}
+	nextCursor := ""
+	if hasMore && len(feed) > 0 {
+		last := feed[len(feed)-1]
+		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
+		nextCursor = base64.RawURLEncoding.EncodeToString(raw)
+	}
 	// R14 §16.5：Feed Read Model Hydrate 媒体（mediaLookup + READY 过滤）
 	feedMedia := make(map[string][]PostMediaItem, len(feed))
 	// R15.15 P1: Memory → Feed 反馈重构。R15.13 P4 用了
@@ -938,6 +982,8 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		"note":  "实时交易事实（价格/可用性/商家状态）由读取时 Hydration 获得，Post 不是 Source of Truth；媒体只呈现 READY",
 		// R15.14：回显过滤状态，顶 chip 与实际过滤同源
 		"unfiltered": true,
+		"nextCursor": nextCursor,
+		"hasMore":    hasMore,
 	}, nil)
 }
 

@@ -150,6 +150,10 @@ export function FeedSurface({
   const feedRetryAttemptRef = useRef(0);
   const [posts, setPosts] = useState<FeedPost[]>(cachedPosts);
   const [media, setMedia] = useState<Record<string, FeedMediaItem[]>>(cachedMedia);
+  const [nextCursor, setNextCursor] = useState<string>();
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
   const [following, setFollowing] = useState<ReadonlySet<string>>(new Set());
   const [liked, setLiked] = useState<ReadonlySet<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
@@ -278,6 +282,10 @@ export function FeedSurface({
       }
     }
     lastScrollYRef.current = nextY;
+    const { contentSize, layoutMeasurement } = event.nativeEvent;
+    if (contentSize.height - (nextY + layoutMeasurement.height) < 900) {
+      void loadMoreFeed();
+    }
   }
 
   useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
@@ -312,6 +320,8 @@ export function FeedSurface({
       postIdsRef.current = cachedPostIds;
       setPosts(read.posts);
       setMedia(read.media);
+      setNextCursor(read.nextCursor);
+      setHasMore(read.hasMore);
       writeFeedDiskCache(read.posts, read.media);
       feedRetryAttemptRef.current = 0;
       setPhase("READY");
@@ -322,6 +332,32 @@ export function FeedSurface({
       setPhase(cachedPosts.length > 0 ? "READY" : "ERROR");
     }
   }, [localNet]);
+
+  async function loadMoreFeed(): Promise<void> {
+    if (!hasMore || !nextCursor || loadingMoreRef.current || phase !== "READY") return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const read = await localNet.listFeedPosts(nextCursor);
+      const known = new Set(cachedPosts.map((post) => post.postId));
+      const appended = read.posts.filter((post) => !known.has(post.postId));
+      cachedPosts = [...cachedPosts, ...appended];
+      cachedMedia = { ...cachedMedia, ...read.media };
+      cachedPostIds = new Set(cachedPosts.map((post) => post.postId));
+      postIdsRef.current = cachedPostIds;
+      setPosts(cachedPosts);
+      setMedia(cachedMedia);
+      setNextCursor(read.nextCursor);
+      setHasMore(read.hasMore);
+      writeFeedDiskCache(cachedPosts, cachedMedia);
+    } catch (error) {
+      console.error("[proxy.feed] next page load failed", error);
+      // Keep the current timeline and cursor; the next near-end scroll retries.
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }
 
   // 后台静默刷新：不显示 LOADING，只检测新帖（同解绑）
   const backgroundRefresh = useCallback(async (): Promise<void> => {
@@ -384,9 +420,9 @@ export function FeedSurface({
 
   // 点击"展示最新"：将 pending 内容刷入正式列表
   function showLatest(): void {
-    // 更新缓存
-    cachedPosts = pendingPosts;
-    cachedMedia = pendingMedia;
+    const pendingIDs = new Set(pendingPosts.map((post) => post.postId));
+    cachedPosts = [...pendingPosts, ...posts.filter((post) => !pendingIDs.has(post.postId))];
+    cachedMedia = { ...media, ...pendingMedia };
     cachedPostIds = new Set(pendingPosts.map((p) => p.postId));
     postIdsRef.current = cachedPostIds;
     setPosts(pendingPosts);
@@ -394,6 +430,7 @@ export function FeedSurface({
     setPendingCount(0);
     setPendingPosts([]);
     setPendingMedia({});
+    writeFeedDiskCache(cachedPosts, cachedMedia);
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
@@ -856,6 +893,11 @@ export function FeedSurface({
             </View>
           );
         })}
+        {loadingMore ? (
+          <View style={styles.feedEmpty}>
+            <ActivityIndicator color={color.magenta} />
+          </View>
+        ) : null}
         </>
       )}
 

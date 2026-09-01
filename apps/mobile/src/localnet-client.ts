@@ -22,6 +22,8 @@ export type LocalNetClientOptions = {
 export type FeedReadModel = {
   posts: FeedPost[];
   media: Record<string, FeedMediaItem[]>;
+  nextCursor: string | undefined;
+  hasMore: boolean;
 };
 
 export class LocalNetProtocolError extends Error {
@@ -49,19 +51,19 @@ export class LocalNetClient {
     return `${this.input.baseUrl}${path}`;
   }
 
-  public async listFeedPosts(): Promise<FeedReadModel> {
+  public async listFeedPosts(cursor?: string, limit = 25): Promise<FeedReadModel> {
     // 动态 ALL 固定读取全局公开时间流。地址只用于用户显式选择的
     // 二级筛选，不能进入服务端 ListFeedPosts payload。
     const result = await this.sendCommand(
       undefined,
       "ListFeedPosts",
       { type: "Feed", id: "local" },
-      {},
+      { cursor, limit },
       undefined,
       true
     );
     const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
-    return { posts: payload.posts, media: payload.media };
+    return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
   }
 
   public async listMyFeedPosts(): Promise<FeedReadModel> {
@@ -69,7 +71,9 @@ export class LocalNetClient {
     const read = await this.listFeedPosts();
     return {
       posts: read.posts.filter((post) => post.authorId === session.userAccountId),
-      media: read.media
+      media: read.media,
+      nextCursor: read.nextCursor,
+      hasMore: read.hasMore
     };
   }
 

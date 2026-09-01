@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -135,11 +137,58 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/media/play/", s.mediaFile)
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)
 	mux.HandleFunc("/v1/media/variant/", s.mediaVariantFile)
+	mux.HandleFunc("/v1/feed", s.publicFeed)
 	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.
 	mux.HandleFunc("/v1/facet/objects", s.facetObjects)
 	return s.recoverMiddleware(s.versionMiddleware(mux))
+}
+
+// publicFeed is the cacheable anonymous read projection for edge delivery.
+// Commands remain the write boundary; Cloudflare must not cache command POSTs.
+func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	if s.LocalNet == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "feed_not_configured"})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 50 {
+		limit = 25
+	}
+	now := time.Now().UTC()
+	result := s.LocalNet.HandleContext(r.Context(), command.Envelope{
+		CommandID: "public_feed_" + strconv.FormatInt(now.UnixNano(), 36), CommandType: "ListFeedPosts", CommandVersion: 1,
+		Actor: command.Actor{Type: "PUBLIC", ID: "anonymous_reader"}, Principal: command.Principal{Type: "PUBLIC", ID: "anonymous_reader"},
+		Target: command.Target{Type: "Feed", ID: "public"}, Purpose: "public_feed_read", RequestedAt: now.Format(time.RFC3339Nano),
+		Payload: map[string]any{"cursor": r.URL.Query().Get("cursor"), "limit": limit},
+	})
+	if result.Outcome != "ACCEPTED" || result.OperationRef == "" || !json.Valid([]byte(result.OperationRef)) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "feed_temporarily_unavailable"})
+		return
+	}
+	payload := []byte(result.OperationRef)
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(payload))
+	w.Header().Set("Cache-Control", "public, max-age=15, stale-while-revalidate=120, stale-if-error=86400")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Vary", "Accept-Encoding")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
 }
 
 func (s *Server) mediaVariantFile(w http.ResponseWriter, r *http.Request) {
