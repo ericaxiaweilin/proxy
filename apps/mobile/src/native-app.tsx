@@ -210,6 +210,8 @@ export function ProxyApp(): React.JSX.Element {
         scene={sceneClient}
         isGuest={phase === "PUBLIC"}
         ensureConversationSession={phase === "PUBLIC" ? ensureNativeGuestSession : undefined}
+        sessionAuthClient={sessionAuthClient}
+        localApiBaseUrl={localApiBaseUrl}
         onSignOut={() => {
 		  void Promise.all([sessionAuthClient.signOut().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined)]).then(()=> setPhase("SIGNED_OUT"));
         }}

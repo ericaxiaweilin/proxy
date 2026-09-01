@@ -650,3 +650,9 @@ export * from "./city-key";
 // and the localnet GET handler (facet-objects.go) import from this module,
 // so any rename forces a compile error on both ends.
 export * from "./facet";
+
+// R15.32: MapExploreSurface — bbox-keyed anonymous read for the
+// Instagram-style map view. /v1/map/items returns posts / agents /
+// orders as separate arrays so the client can render a unified pin
+// layer without reshaping.
+export * from "./map";

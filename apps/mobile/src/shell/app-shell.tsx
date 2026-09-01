@@ -55,6 +55,7 @@ import { MarketExperienceSurface } from "../surfaces/market-experience";
 import { MarketSurface, type MarketViewMode } from "../surfaces/market";
 import { MeSurface } from "../surfaces/me";
 import { MessagesSurface } from "../surfaces/messages";
+import { MapExploreSurface } from "../surfaces/map-explore";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
 import { VoucherSurface } from "../surfaces/voucher";
 import { color, shadows } from "../theme";
@@ -69,7 +70,7 @@ import { selectMotionProfile } from "./app-shell-selectors";
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
 // R15.12.7 冻结：第二 Tab = 市场，对全部身份固定为「市场」。
-type RootTab = "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
+type RootTab = "HOME" | "MARKET" | "FEED" | "MAP" | "MESSAGES" | "ME";
 // R15.22 子页序列：horizontal swipe 跨 9 page (HOME, MARKET_OPP, MARKET_ACT, FEED_POSTS, FEED_STATUS, FEED_COMMUNITY, MSG_CHAT, MSG_FRIENDS, ME)
 // R15.23 改：FEED tab 内部 3 个 section (动态/状态/社区) 各自独立成 page — 横向 swipe 必须先走完 section 才到 MESSAGES，避免 "动态 → 直接消息" 的跳页。
 type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_POSTS" | "FEED_STATUS" | "FEED_COMMUNITY" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
@@ -80,12 +81,14 @@ const PAGE_TO_ROOT: Record<PageId, RootTab> = {
   MSG_CHAT: "MESSAGES", MSG_FRIENDS: "MESSAGES",
   ME: "ME"
 };
+// R15.32: MAP tab is its own page (no horizontal swipe siblings — it
+// owns the full screen). Defined alongside PageId below.
 const PAGE_TO_FEED_SECTION: Partial<Record<PageId, "POSTS" | "STATUS" | "COMMUNITY">> = {
   FEED_POSTS: "POSTS", FEED_STATUS: "STATUS", FEED_COMMUNITY: "COMMUNITY"
 };
 const ROOT_TO_FIRST_PAGE: Record<RootTab, PageId> = {
   HOME: "HOME", MARKET: "MARKET_OPP", FEED: "FEED_POSTS",
-  MESSAGES: "MSG_FRIENDS", ME: "ME"
+  MESSAGES: "MSG_FRIENDS", ME: "ME", MAP: "HOME" // not used; MAP is full-screen
 };
 
 function rootTabs(): ReadonlyArray<{ id: RootTab; icon: ProxyIconName; label: string; badge?: string }> {
@@ -93,6 +96,7 @@ function rootTabs(): ReadonlyArray<{ id: RootTab; icon: ProxyIconName; label: st
     { id: "HOME", icon: "home", label: "首页" },
     { id: "MARKET", icon: "diamond", label: "市场" },
     { id: "FEED", icon: "target", label: "动态" },
+    { id: "MAP", icon: "pin", label: "地图" },
     { id: "MESSAGES", icon: "chat", label: "消息", badge: "9+" },
     { id: "ME", icon: "meRing", label: "我的" }
   ];
@@ -117,7 +121,9 @@ export function AppShell({
   scene,
   isGuest,
   ensureConversationSession,
-  onSignOut
+  onSignOut,
+  sessionAuthClient,
+  localApiBaseUrl
 }: {
   localNet: LocalNetClient;
   activities: ActivityClient;
@@ -138,6 +144,8 @@ export function AppShell({
   isGuest?: boolean;
   ensureConversationSession?: (() => Promise<void>) | undefined;
   onSignOut: () => void;
+  sessionAuthClient: import("../auth-client").SessionAuthClient;
+  localApiBaseUrl: string;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
   const compactWidth = width < 375;
@@ -529,7 +537,16 @@ export function AppShell({
           ) : (
             <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId) => setMessageChat(conversationId ? { author, conversationId } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
-          ) : isGuest ? (
+        ) : tab === "MAP" ? (
+          // R15.32: Instagram-style map. Anonymous GET /v1/map/items,
+          // uses sessionAuthClient.requestPublic. The full-screen map
+          // ignores isNavVisible since it has its own bottom HUD.
+          <MapExploreSurface
+            requester={sessionAuthClient}
+            baseUrl={localApiBaseUrl}
+            onClose={isNavVisible ? undefined : () => setTab("HOME")}
+          />
+        ) : isGuest ? (
           <View style={styles.guestMe}>
             <Text style={styles.guestMeTitle}>需要登录</Text>
             <Text style={styles.guestMeSub}>访客可浏览首页/市场/动态，个人资料、关系与订单需登录后查看</Text>

@@ -17,6 +17,7 @@ export type ProxyIconName =
   | "arrowUpRight"
   | "arrowUp"
   | "chevronLeft"
+  | "pin"
   | "close"
   | "plus"
   | "clock"
@@ -98,6 +99,10 @@ function MasterModuleIcon({ name, size, color }: { name: ProxyIconName; size: nu
       return canvas(<Path {...common} d="M12 4 20 12 12 20 4 12z"/>);
     case "target":
       return canvas(<><Circle {...common} cx="12" cy="12" r="7"/><Circle {...common} cx="12" cy="12" r="3"/></>);
+    case "pin":
+      // R15.32: map pin (teardrop) with a small inner circle. Drawn
+      // from M12 22 to suggest the tip anchored at the pin's lat/lng.
+      return canvas(<><Path {...common} d="M12 21s-7-6.5-7-12a7 7 0 1 1 14 0c0 5.5-7 12-7 12z"/><Circle {...common} cx="12" cy="9" r="2.5"/></>);
     case "chat":
       return canvas(<Path {...common} d="M5 6h14v9H9l-4 3z"/>);
     case "meRing":
