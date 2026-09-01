@@ -3,6 +3,28 @@ import { LocalNetClient } from "./localnet-client";
 import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-session";
 
 describe("LocalNetClient post publishing", () => {
+  it("reads the anonymous feed through the cacheable GET projection", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    const requests: string[] = [];
+    const client = new LocalNetClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      authClient: {
+        request: async () => { throw new Error("command fallback must not run"); },
+        requestPublic: async (path, init) => {
+          requests.push(`${init.method} ${path}`);
+          return {
+            status: 200,
+            json: async () => ({ posts: [], media: {}, nextCursor: "next_page", hasMore: true })
+          };
+        }
+      }
+    });
+    const page = await client.listFeedPosts("opaque cursor", 20);
+    expect(requests).toEqual(["GET /v1/feed?limit=20&cursor=opaque%20cursor"]);
+    expect(page).toMatchObject({ nextCursor: "next_page", hasMore: true });
+  });
+
   it("reuses the caller's stable idempotency key for a publish retry", async () => {
     const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date("2026-08-24T00:00:00.000Z"));
     await store.write({

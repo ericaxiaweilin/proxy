@@ -9,7 +9,7 @@ import type { SecureSessionStore, StoredSession } from "./secure-session";
 
 export type AuthenticatedCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
-  requestPublic?(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
+  requestPublic?(path: string, init: { method: "GET" } | { method: "POST"; body: unknown }): Promise<TransportResponse>;
 };
 
 export type LocalNetClientOptions = {
@@ -54,6 +54,22 @@ export class LocalNetClient {
   public async listFeedPosts(cursor?: string, limit = 25): Promise<FeedReadModel> {
     // 动态 ALL 固定读取全局公开时间流。地址只用于用户显式选择的
     // 二级筛选，不能进入服务端 ListFeedPosts payload。
+    if (this.input.authClient.requestPublic) {
+      const query = [`limit=${Math.max(1, Math.min(50, limit))}`];
+      if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`);
+      const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
+      if (response.status < 200 || response.status >= 300) {
+        throw new LocalNetProtocolError(`动态服务暂时不可用（${response.status}），请稍后重试`);
+      }
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        throw new LocalNetProtocolError("动态服务返回异常，请稍后重试");
+      }
+      const payload = ListFeedPostsPayloadSchema.parse(body);
+      return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+    }
     const result = await this.sendCommand(
       undefined,
       "ListFeedPosts",
