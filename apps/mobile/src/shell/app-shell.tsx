@@ -734,7 +734,7 @@ function RootNav({
   const pressProgress = useRef(new Animated.Value(0)).current;
   const dockWidth = measuredWidth > 0 ? measuredWidth : Math.min(430, Math.max(0, width - 28));
   const edge = 6;
-  const slotWidth = dockWidth > 0 ? (dockWidth - edge * 2) / 5 : 72;
+  const slotWidth = dockWidth > 0 ? (dockWidth - edge * 2) / tabs.length : 72;
   const dockHeight = compact ? 60 : 68;
   const lensHeight = compact ? 50 : 54;
   const lensWBase = Math.min(64, slotWidth - 6);
