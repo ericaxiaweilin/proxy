@@ -213,7 +213,10 @@ func (s *Service) openRedemption(ctx context.Context, e command.Envelope) comman
 	now := s.clock()
 	r := &Redemption{ID: fmt.Sprintf("redemption_%s_%d", v.ID, s.sequence), VoucherID: v.ID, ActorID: e.Actor.ID, Code: fmt.Sprintf("PV-%04d-%02d", now.Unix()%10000, s.sequence%100), ExpiresAt: now.Add(60 * time.Second)}
 	if s.repo != nil {
-		_ = s.repo.CreateRedemption(ctx, *r)
+		if err := s.repo.CreateRedemption(ctx, *r); err != nil {
+			log.Printf("voucher storage: create redemption %s: %v", r.ID, err)
+			return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
+		}
 	}
 	s.redemptions[r.ID] = r
 	return accepted(e, "VoucherRedemption", r.ID, "ACTIVE", map[string]any{
@@ -230,7 +233,12 @@ func (s *Service) confirmRedemption(ctx context.Context, e command.Envelope) com
 	}
 	r, ok := s.redemptions[p.RedemptionID]
 	if !ok && s.repo != nil {
-		if rr, ok2, _ := s.repo.GetRedemption(ctx, p.RedemptionID); ok2 {
+		rr, ok2, err := s.repo.GetRedemption(ctx, p.RedemptionID)
+		if err != nil {
+			log.Printf("voucher storage: get redemption %s: %v", p.RedemptionID, err)
+			return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
+		}
+		if ok2 {
 			r, ok = rr, true
 			// cache for in-memory fallback
 			s.redemptions[r.ID] = r
@@ -251,7 +259,10 @@ func (s *Service) confirmRedemption(ctx context.Context, e command.Envelope) com
 	}
 	r.Used = true
 	if s.repo != nil {
-		_ = s.repo.UpdateRedemption(ctx, *r)
+		if err := s.repo.UpdateRedemption(ctx, *r); err != nil {
+			log.Printf("voucher storage: update redemption %s: %v", r.ID, err)
+			return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
+		}
 	}
 	v.Status, v.Version = "REDEEMED", v.Version+1
 	s.upsertWithContext(ctx, e.Actor.ID, *v)
@@ -343,8 +354,12 @@ func (s *Service) expire(actorID string) {
 }
 func (s *Service) ensureDefaultsWithContext(ctx context.Context, actorID string) {
 	if s.repo != nil {
-		_ = s.repo.EnsureDefaults(ctx, actorID)
-		_ = s.repo.ExpireVouchers(ctx, actorID, s.clock().Format("2006-01-02"))
+		if err := s.repo.EnsureDefaults(ctx, actorID); err != nil {
+			log.Printf("voucher storage: ensure defaults %s: %v", actorID, err)
+		}
+		if err := s.repo.ExpireVouchers(ctx, actorID, s.clock().Format("2006-01-02")); err != nil {
+			log.Printf("voucher storage: expire %s: %v", actorID, err)
+		}
 		return
 	}
 	s.ensureDefaults(actorID)
@@ -352,7 +367,9 @@ func (s *Service) ensureDefaultsWithContext(ctx context.Context, actorID string)
 }
 func (s *Service) expireWithContext(ctx context.Context, actorID string) {
 	if s.repo != nil {
-		_ = s.repo.ExpireVouchers(ctx, actorID, s.clock().Format("2006-01-02"))
+		if err := s.repo.ExpireVouchers(ctx, actorID, s.clock().Format("2006-01-02")); err != nil {
+			log.Printf("voucher storage: expire %s: %v", actorID, err)
+		}
 		return
 	}
 	s.expire(actorID)

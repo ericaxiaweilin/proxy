@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/voucher"
 )
@@ -51,8 +53,11 @@ func (r *VoucherRepository) GetVoucher(ctx context.Context, actorID, voucherID s
 		&v.ValidFrom, &v.ValidUntil, &v.RedeemTimeWindow, &v.MinimumSpend, &v.PerPersonLimit,
 		&v.Status, &v.IssuerLabel, &v.SettlementValue, &v.Funding.Proxy, &v.Funding.Creator, &v.Funding.Merchant,
 		&v.ReservationNeeded, &v.Version)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
 	}
 	v.Family = voucher.Family(fam)
 	return &v, true, nil

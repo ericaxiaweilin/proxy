@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/outbox"
@@ -47,6 +48,47 @@ func (d inboxDedupeDelivery) Deliver(ctx context.Context, e event.DomainEvent) e
 	return d.inner.Deliver(ctx, e)
 }
 
+type businessInboxDelivery struct {
+	inner outbox.Delivery
+	pool  *pgxpool.Pool
+}
+
+func (d businessInboxDelivery) Deliver(ctx context.Context, e event.DomainEvent) error {
+	// Best-effort inbox notification for P0 business events; never fail the outbox batch
+	_ = d.createInboxForEvent(ctx, e)
+	return d.inner.Deliver(ctx, e)
+}
+
+func (d businessInboxDelivery) createInboxForEvent(ctx context.Context, e event.DomainEvent) error {
+	// Map domain events to inbox notifications (recipient = actor for now, P0 simple)
+	var title, body, deepLink string
+	switch e.EventType {
+	case "TaskPublished":
+		title, body, deepLink = "需求已发布", "你的需求已进入撮合", "/tasks/"+e.AggregateID
+	case "TaskSlotsCreated":
+		return nil // skip noisy
+	case "OfferCreated", "SlotOfferCreated":
+		title, body, deepLink = "收到 Offer", "客户已发 Offer，5分钟内有效", "/offers/"+e.AggregateID
+	case "OrderCreated", "OfferAccepted":
+		title, body, deepLink = "订单已成立", "已生成订单，可打卡", "/orders/"+e.AggregateID
+	case "VoucherRedeemed", "VoucherSettled":
+		title, body, deepLink = "凭证动态", e.EventType, "/vouchers/"+e.AggregateID
+	default:
+		return nil
+	}
+	// Use the event's PrincipalID as recipient (fallback to AggregateID)
+	recipient := e.PrincipalID
+	if recipient == "" {
+		recipient = e.AggregateID
+	}
+	// Direct PG insert to notification.inbox_items (bypass service to avoid auth)
+	_, err := d.pool.Exec(ctx, `
+		INSERT INTO notification.inbox_items (id, recipient_id, type, title, body, deep_link, read, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,false,now()) ON CONFLICT (id) DO NOTHING`,
+		"inbox_"+e.EventID, recipient, e.EventType, title, body, deepLink)
+	return err
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -72,7 +114,8 @@ func main() {
 	if os.Getenv("OUTBOX_DELIVERY") == "unavailable" {
 		baseDelivery = unavailableDelivery{}
 	}
-	delivery := outbox.Delivery(inboxDedupeDelivery{inner: baseDelivery, inbox: postgres.NewInboxRepository(pool)})
+	deduped := inboxDedupeDelivery{inner: baseDelivery, inbox: postgres.NewInboxRepository(pool)}
+	delivery := outbox.Delivery(businessInboxDelivery{inner: deduped, pool: pool})
 	outboxWorker := outbox.Worker{
 		Repository:  postgres.NewOutboxRepository(pool),
 		Delivery:    delivery,
