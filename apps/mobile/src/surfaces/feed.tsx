@@ -19,6 +19,7 @@ import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, s
 // 旧 AdaptiveMediaCollection / AdaptiveMediaRail / SocialMediaFrame / SinglePostImage
 // 已从本文件迁出 → apps/mobile/src/media/
 import { AdaptiveMediaCollection, SinglePostImage, MediaViewer } from "../media/AdaptiveMediaCollection";
+import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
 
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
 export { AdaptiveMediaCollection, SinglePostImage, MediaViewer };
@@ -219,7 +220,7 @@ export function FeedSurface({
     // 多视频：按中心距离 + 可见度选
     let best: string | null = null;
     let bestScore = -1;
-    const centerY = scrollY + viewportHeight / 2;
+    const centerY = viewportHeight / 2;
     for (const videoKey of videoKeys) {
       const frame = frames[videoKey];
       if (!frame) continue; // 类型收窄
@@ -311,6 +312,7 @@ export function FeedSurface({
       postIdsRef.current = cachedPostIds;
       setPosts(read.posts);
       setMedia(read.media);
+      writeFeedDiskCache(read.posts, read.media);
       feedRetryAttemptRef.current = 0;
       setPhase("READY");
     } catch (error) {
@@ -345,9 +347,24 @@ export function FeedSurface({
     }
   }, [refreshTrigger, phase, backgroundRefresh]);
 
-  // 首次加载
+  // 首屏先读手机磁盘，再静默刷新服务器。App 重启、API 短暂离线时
+  // 仍能立即显示上次成功同步的完整时间线。
   useEffect(() => {
-    void loadFeed();
+    let cancelled = false;
+    void (async () => {
+      const disk = await readFeedDiskCache();
+      if (!cancelled && disk && cachedPosts.length === 0) {
+        cachedPosts = disk.posts;
+        cachedMedia = disk.media;
+        cachedPostIds = new Set(disk.posts.map((post) => post.postId));
+        postIdsRef.current = cachedPostIds;
+        setPosts(disk.posts);
+        setMedia(disk.media);
+        setPhase("READY");
+      }
+      if (!cancelled) await loadFeed();
+    })();
+    return () => { cancelled = true; };
   }, [loadFeed]);
 
   // P0 availability: recover without requiring the user to kill/reopen the app.

@@ -474,7 +474,7 @@ function ActiveVideoStage({
   posterUri: string;
   onFrame?: (frame: { y: number; height: number }) => void;
 }): React.JSX.Element {
-  const player = useVideoPlayer(uri, (setup) => {
+  const player = useVideoPlayer({ uri, useCaching: true, contentType: "progressive" }, (setup) => {
     setup.loop = true;
     setup.muted = true;
     // 【fix 2026-08-26】mixWithOthers 避免 iOS audio session 切换提示音。
@@ -498,11 +498,7 @@ function ActiveVideoStage({
     const subscription = player.addListener("timeUpdate", ({ currentTime }) => {
       if (currentTime > 0.01) setHasRenderedFrame(true);
     });
-    // Some iOS AVPlayer items do not emit timeUpdate until after the native view
-    // has painted. Never let the poster become a permanent cover in that case.
-    const fallback = setTimeout(() => setHasRenderedFrame(true), 450);
     return () => {
-      clearTimeout(fallback);
       subscription.remove();
     };
   }, [player, uri]);
