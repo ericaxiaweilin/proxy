@@ -19,7 +19,8 @@ func (r *VoucherRepository) ListVouchers(ctx context.Context, actorID string) ([
 		       valid_from, valid_until, redeem_time_window, minimum_spend, per_person_limit,
 		       status, issuer_label, settlement_value, funding_proxy, funding_creator, funding_merchant,
 		       reservation_needed, version
-		FROM voucher.vouchers WHERE actor_id=$1 ORDER BY family, voucher_id`, actorID)
+		FROM voucher.vouchers WHERE actor_id=$1
+		ORDER BY CASE family WHEN 'COFFEE' THEN 1 WHEN 'EXPERIENCE' THEN 2 WHEN 'ACTIVITY' THEN 3 ELSE 4 END, voucher_id`, actorID)
 	if err != nil {
 		return nil, err
 	}

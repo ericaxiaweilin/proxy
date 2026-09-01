@@ -23,8 +23,8 @@ func (r *DialogRepository) CreateDialog(ctx context.Context, d conversation.Dial
 	folderIDs, _ := json.Marshal(d.FolderIDs)
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO conversation.dialogs (id, type, title, avatar_ref, member_ids, folder_ids, is_pinned, is_muted, is_macke, latest_seq, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
-		d.ID, d.Type, d.Title, d.AvatarRef, memberIDs, folderIDs, d.IsPinned, d.IsMuted, d.IsMacKe, d.LatestSeq, d.CreatedAt,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		d.ID, d.Type, d.Title, d.AvatarRef, memberIDs, folderIDs, d.IsPinned, d.IsMuted, d.IsMacKe, d.LatestSeq, d.CreatedAt, d.UpdatedAt,
 	)
 	return err
 }

@@ -65,11 +65,37 @@ func (m *Metrics) RecordSnapshotRecovery() {
 	m.mu.Unlock()
 }
 
-func (m *Metrics) Snapshot() Metrics {
+// MetricsSnapshot is the plain copy of Metrics handed out by Snapshot.
+// It carries no lock; copying the embedded sync.Mutex out of Metrics is
+// exactly what `go vet` (copylocks) forbids.
+type MetricsSnapshot struct {
+	CompileCount        int64
+	CompileLatencyP50   time.Duration
+	CompileLatencyP95   time.Duration
+	ValidationFailCount int64
+	CapabilityFallbackCount int64
+	DeltaApplySuccess   int64
+	DeltaRejectCount    int64
+	SnapshotRecoveryCount int64
+	RenderErrorCount    int64
+	NoUIChangeCount     int64
+}
+
+func (m *Metrics) Snapshot() MetricsSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cp := *m
-	cp.latencies = nil
+	cp := MetricsSnapshot{
+		CompileCount:        m.CompileCount,
+		CompileLatencyP50:   m.CompileLatencyP50,
+		CompileLatencyP95:  m.CompileLatencyP95,
+		ValidationFailCount: m.ValidationFailCount,
+		CapabilityFallbackCount: m.CapabilityFallbackCount,
+		DeltaApplySuccess:   m.DeltaApplySuccess,
+		DeltaRejectCount:    m.DeltaRejectCount,
+		SnapshotRecoveryCount: m.SnapshotRecoveryCount,
+		RenderErrorCount:    m.RenderErrorCount,
+		NoUIChangeCount:     m.NoUIChangeCount,
+	}
 	return cp
 }
 
