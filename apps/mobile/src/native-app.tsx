@@ -95,6 +95,10 @@ async function createNativeGuestSession(): Promise<void> {
     const offlineSession = {
       userAccountId: guestUserId,
       principal: { type: "INDIVIDUAL" as const, id: guestUserId },
+      // R15.34.1: 标记这是本地离线 fallback session，server 端
+      //   没有这条记录，accessToken 是 fake — 不能发写命令 (CreatePost
+      //   / Engagement / Demand 等)。读匿名路径仍可用。
+      serverSession: false,
       auth: {
         sessionId: `sess_offline_${Date.now().toString(36)}`,
         userAccountId: guestUserId,

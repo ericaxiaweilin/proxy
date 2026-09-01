@@ -229,6 +229,7 @@ export class MediaClient {
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new Error("上传照片前需要登录或访客会话");
+    if (session.serverSession === false) throw new Error("上传照片需要真实登录 (offline session 不能上传)");
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 

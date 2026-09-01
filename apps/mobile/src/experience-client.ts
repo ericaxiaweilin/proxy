@@ -92,6 +92,12 @@ export class ExperienceClient {
       );
     }
 
+    if (session.serverSession === false) {
+      throw new ExperienceProtocolError(
+        "experience actions require a real sign-in (offline session cannot act)"
+      );
+    }
+
     return session as StoredSession & {
       principal: NonNullable<StoredSession["principal"]>;
     };

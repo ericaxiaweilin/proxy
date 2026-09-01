@@ -2,10 +2,56 @@ import type { PrincipalContext, SessionAuthTokens } from "@proxy/contracts";
 
 export const SECURE_SESSION_STORAGE_KEY = "proxy.secure.session.v1";
 
+// R15.34.1 P0 fix: 拒绝 “离线 fallback guest” 走写路径。
+//   createNativeGuestSession 在 API 不可达/限流/服务端错误时会降级
+//   造一个 fake accessToken 的本地 session，让用户能读匿名内容。
+//   但 server 端没有这条 session 记录，accessToken 是假的，发写命令
+//   (CreatePost / Engagement / Demand / Scene / Conversation 等)
+//   必被 server 拒。客户端必须先拦在门口，不要让用户看见 “发布中”
+//   再出“远端抛 INVALID_ACCESS_TOKEN”的脱节体验。
+//   读路径 (listFeedPosts / listMarketplace 走 requestPublic) 不走这里。
+export class OfflineFallbackSessionError extends Error {
+  public constructor() {
+    super("offline fallback session cannot perform write operations — sign in to continue");
+    this.name = "OfflineFallbackSessionError";
+  }
+}
+
+export type AuthenticatedStoredSession = StoredSession & { principal: NonNullable<StoredSession["principal"]> };
+
+/**
+ * Read the current session and require that it is a real server-issued
+ * session (not the offline fallback from createNativeGuestSession).
+ *
+ * Throws OfflineFallbackSessionError if the session exists but is the
+ * offline fallback, and a generic Error if there is no session at all.
+ */
+export async function requireAuthenticatedServerSession(input: {
+  store: SecureSessionStore;
+}): Promise<AuthenticatedStoredSession> {
+  const session = await input.store.read();
+  if (!session?.principal) {
+    throw new Error("an authenticated principal is required");
+  }
+  if (session.serverSession === false) {
+    throw new OfflineFallbackSessionError();
+  }
+  return session as AuthenticatedStoredSession;
+}
+
 export type StoredSession = {
 	userAccountId: string;
 	auth: SessionAuthTokens;
 	principal?: PrincipalContext;
+	// R15.34.1: 标志这个 session 是不是由 server (BeginPasswordlessAuthentication
+	//   / createAnonymousSession) 真实签发。
+	//   - undefined / true = 真实 server session，可以发写命令 (CreatePost,
+	//     Engagement, Demand 等)
+	//   - false = 本地离线 fallback (createNativeGuestSession 在 API
+	//     不可达时降级生成的 fake session)，只允许读匿名路径，不能发
+	//     写命令 — server 侧也拿不到有效 access token，提交必拒。
+	//   旧 session (升级前写的) 默认按 true 处理 (向后兼容)。
+	serverSession?: boolean;
 };
 
 /**
@@ -51,7 +97,17 @@ export class SecureSessionStore {
       await this.driver.deleteItem(SECURE_SESSION_STORAGE_KEY);
       return undefined;
     }
-    return cloneSession(decoded);
+    const cloned = cloneSession(decoded);
+    // R15.34.2 P0 追打: 补标记 “旧版” 离线 fallback session。
+    //   升级前在 keychain 里的离线 session 没有 serverSession 字段 (看起来像真实
+    //   session), 但其 accessToken 以 "offline_" 开头, sessionId 以
+    //   "sess_offline_" 开头 — 可以凭此识别出它是 createNativeGuestSession
+    //   API-downgrade 产生的假 session, 这里是补上 serverSession: false 标记。
+    //   透出到 caller 后, requireSession 会照样拦下。
+    if (cloned.serverSession === undefined && looksLikeOfflineFallback(cloned)) {
+      cloned.serverSession = false;
+    }
+    return cloned;
   }
 
   public async write(session: StoredSession): Promise<void> {
@@ -69,10 +125,12 @@ export class SecureSessionStore {
 
 function isStoredSession(value: unknown): value is StoredSession {
   if (!value || typeof value !== "object") return false;
-	const candidate = value as { userAccountId?: unknown; auth?: unknown; principal?: unknown };
+	const candidate = value as { userAccountId?: unknown; auth?: unknown; principal?: unknown; serverSession?: unknown };
 	if (typeof candidate.userAccountId !== "string" || candidate.userAccountId.length === 0) return false;
   if (!isSessionAuthTokens(candidate.auth)) return false;
   if (candidate.principal !== undefined && !isPrincipal(candidate.principal)) return false;
+  // R15.34.1: serverSession 可选, 必须是 boolean 或 undefined.
+  if (candidate.serverSession !== undefined && typeof candidate.serverSession !== "boolean") return false;
   return true;
 }
 
@@ -136,7 +194,11 @@ function cloneSession(session: StoredSession): StoredSession {
       refreshExpiresAt: session.auth.refreshExpiresAt,
       rotation: session.auth.rotation
     },
-    ...(session.principal ? { principal: { type: session.principal.type, id: session.principal.id } } : {})
+    ...(session.principal ? { principal: { type: session.principal.type, id: session.principal.id } } : {}),
+    // R15.34.1: 保留 serverSession 标志 (false = 离线 fallback).
+    //   旧 session 不写这个字段， clone 后为 undefined → 默认看作真实
+    //   server session (向下兼容)。
+    ...(session.serverSession !== undefined ? { serverSession: session.serverSession } : {})
   };
 }
 
@@ -155,4 +217,19 @@ export class InMemorySecureStorageDriver implements SecureStorageDriver {
   public async deleteItem(key: string): Promise<void> {
     this.values.delete(key);
   }
+}
+
+// R15.34.2 P0 追打: 判断一个 session 是不是 createNativeGuestSession API-downgrade
+//   产生的假 session (升级前在 keychain 里没有 serverSession 字段时用)。
+//   这类 session 的两个明显特征:
+//     - accessToken 以 "offline_" 开头 (createNativeGuestSession 内部生成)
+//     - sessionId 以 "sess_offline_" 开头
+//   只要任一条件成立就判定为 offline fallback。需要保守: 误判真实 session
+//   为 fallback 代价是用户需要重新登录 (轻), 漏判则是 P0 违例 (重)。
+function looksLikeOfflineFallback(session: StoredSession): boolean {
+  const access = session.auth?.accessToken ?? "";
+  const sid = session.auth?.sessionId ?? "";
+  if (typeof access === "string" && access.startsWith("offline_")) return true;
+  if (typeof sid === "string" && sid.startsWith("sess_offline_")) return true;
+  return false;
 }

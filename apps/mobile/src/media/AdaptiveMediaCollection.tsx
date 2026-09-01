@@ -18,6 +18,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensio
 import { Image as ExpoImage } from "expo-image";
 import ImageViewing from "react-native-image-viewing";
 import { useVideoPlayer, VideoView } from "expo-video";
+import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { claimVideoPlayback, releaseVideoPlayback } from "./video-playback-registry";
 import type { FeedMediaItem } from "@proxy/contracts";
 import type { MediaCompositionHint } from "@proxy/contracts";
@@ -604,20 +605,24 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
   }, [currentIndex, metrics.offsets]);
   return (
     <View onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}>
-      <ScrollView
+      {/* R15.34.2: 多图横滑。 HorizontalSwipeRail 隔离 iOS 系统 tab 切换 / Android PAGE_SEQUENCE
+         切页手势, onTouchStart stopPropagation() 在 iOS 上不够 (系统级手势不走 React TouchEvent 冒泡)。
+         snap behavior + onMomentumScrollEnd 保留。 */}
+      <HorizontalSwipeRail
         contentContainerStyle={{ paddingLeft: 0, paddingRight: RAIL_HORIZONTAL_PADDING }}
-        decelerationRate="fast"
-        horizontal
-        // A media rail owns horizontal drags. Stop the shell's bubbled-touch
-        // page switcher from interpreting photo paging as module navigation.
-        onTouchStart={(event) => event.stopPropagation()}
-        onMomentumScrollEnd={(event) => onIndexChange(nearestRailIndex(metrics.offsets, event.nativeEvent.contentOffset.x))}
-        ref={railRef}
-        snapToOffsets={metrics.offsets}
-        snapToAlignment="start"
-        showsHorizontalScrollIndicator={false}
         style={styles.rail}
       >
+        <ScrollView
+          contentContainerStyle={{ paddingLeft: 0, paddingRight: RAIL_HORIZONTAL_PADDING }}
+          decelerationRate="fast"
+          horizontal
+          onMomentumScrollEnd={(event) => onIndexChange(nearestRailIndex(metrics.offsets, event.nativeEvent.contentOffset.x))}
+          ref={railRef}
+          snapToOffsets={metrics.offsets}
+          snapToAlignment="start"
+          showsHorizontalScrollIndicator={false}
+          style={styles.rail}
+        >
         {items.map((item, index) => {
           const cardWidth = metrics.cardWidths[index] ?? contentWidth * 0.84;
           const cardHeight = metrics.cardHeights[index] ?? metrics.railHeight;
@@ -658,7 +663,8 @@ function AdaptiveMediaRail({ items, currentIndex, resolveUrl, onIndexChange, onO
             </Pressable>
           );
         })}
-      </ScrollView>
+        </ScrollView>
+      </HorizontalSwipeRail>
     </View>
   );
 }

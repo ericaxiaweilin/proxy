@@ -34,7 +34,7 @@ interface GetMemoryRef {
 export class SceneClient {
   private seq=0;
   constructor(private readonly input: { authClient: AuthenticatedCommandTransport; secureSessionStore: SecureSessionStore; now?: ()=>Date } ){}
-  private async requireSession(){ const s=await this.input.secureSessionStore.read(); if(!s?.principal) throw new Error("principal required"); return s as StoredSession & {principal: NonNullable<StoredSession["principal"]>} }
+  private async requireSession(){ const s=await this.input.secureSessionStore.read(); if(!s?.principal) throw new Error("principal required"); if(s.serverSession === false) throw new Error("scene actions require a real sign-in (offline session cannot act)"); return s as StoredSession & {principal: NonNullable<StoredSession["principal"]>} }
   private nextId(p:string){
     // Per-bucket counters: commandId / idempotencyKey / correlationId must
     // never collide even when they all sit in the same millisecond.

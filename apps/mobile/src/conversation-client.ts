@@ -114,6 +114,7 @@ export class ConversationClient {
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new Error("an authenticated principal is required");
+    if (session.serverSession === false) throw new Error("sending messages requires a real sign-in (offline session cannot act)");
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 

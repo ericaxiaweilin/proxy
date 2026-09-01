@@ -105,6 +105,15 @@ export class LocalNetClient {
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new LocalNetProtocolError("an authenticated principal is required");
+    // R15.34.1 P0 fix: 防止“离线 fallback guest”能发写命令 (CreatePost)。
+    //   createNativeGuestSession 在 API 不可达/限流/服务端错误时会降级
+    //   造一个 fake accessToken 的本地 session，让用户能读匿名内容。
+    //   但这条 session server 端没有记录，accessToken 是假的，CreatePost
+    //   上去 server 一定返 INVALID_ACCESS_TOKEN。客户端必须先拦。
+    //   读路径 (listFeedPosts 走 publicRead) 不走这里，不受限制。
+    if (session.serverSession === false) {
+      throw new LocalNetProtocolError("publishing requires a real sign-in (offline session cannot post)");
+    }
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 

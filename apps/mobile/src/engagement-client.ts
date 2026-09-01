@@ -89,6 +89,10 @@ export class EngagementClient {
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new EngagementProtocolError("an authenticated principal is required");
+    // R15.34.1 P0: 拒绝离线 fallback session 发写命令
+    if (session.serverSession === false) {
+      throw new EngagementProtocolError("engagement actions require a real sign-in (offline session cannot react)");
+    }
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 

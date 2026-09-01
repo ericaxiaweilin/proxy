@@ -66,6 +66,7 @@ export class BusinessClient {
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new Error("authenticated principal required");
+    if (session.serverSession === false) throw new Error("business actions require a real sign-in (offline session cannot act)");
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 

@@ -13,7 +13,19 @@ import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
-import { SCENE_TOOLS, type SceneToolId } from "@proxy/contracts";
+import { type SceneToolId } from "@proxy/contracts";
+import { FilterChipRail } from "../components/filter-chip-rail";
+import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
+import {
+  CONTINUE_FIXTURES,
+  RECOMMEND_FILTER_CHIPS,
+  RECOMMEND_MODE_ORDER,
+  SCENE_RECOMMEND,
+  type ContinueItem,
+  type RecommendFeed,
+  type RecommendFilter,
+  type RecommendPerson
+} from "../recommend-fixtures";
 
 export interface RequesterGoal {
   category: HardDemandCategory;
@@ -91,6 +103,31 @@ export function RequesterHome({
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
+  // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
+  // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
+  // 看到摄影好搭子。
+  const [recommendMode, setRecommendMode] = useState<string>(RECOMMEND_MODE_ORDER[0]!);
+  // R15.34: 筛选 sheet 开 / 关 + 已选 chip。空数组 = "全部"。
+  const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
+  const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
+
+  // R15.34: 算当前 mode 的推荐 feed + 应用筛选过滤
+  //   - filter: 多个 chip 可叠加 (附近 AND 最近活跃), 都需满足
+  //   - "在线" 过滤：要求 person.online
+  //   - "会中文" 过滤：要求 person.tags 里有 "会中文" lang tag
+  //   - "共同好友" 过滤：要求 mutualFriends >= 1
+  //   - "最近活跃" 过滤：要求 person.tags 里有 "最近活跃" social tag
+  //   - "附近" 过滤：要求 distanceM < 1000
+  // server 端接上后，filter 逻辑移过去；这里只负责本地预览。
+  const recommendFeed: RecommendFeed = SCENE_RECOMMEND[recommendMode] ?? SCENE_RECOMMEND[RECOMMEND_MODE_ORDER[0]!]!;
+  const filteredPeople: ReadonlyArray<RecommendPerson> = recommendFeed.people.filter((p) => {
+    if (activeFilters.includes("online") && !p.online) return false;
+    if (activeFilters.includes("lang_zh") && !p.tags.some((t) => t.text === "会中文" && t.kind === "lang")) return false;
+    if (activeFilters.includes("mutual") && p.mutualFriends < 1) return false;
+    if (activeFilters.includes("active") && !p.tags.some((t) => t.text === "最近活跃" && t.kind === "social")) return false;
+    if (activeFilters.includes("near") && p.distanceM >= 1000) return false;
+    return true;
+  });
   // R15.22 fix: 市场脉动计数状态.
   //   - opportunityCount: server 端 ListMarketOpportunities 返的 list 长度
   //   - activityCount:    server 端 ListActivities 返的 list 长度
@@ -235,16 +272,109 @@ export function RequesterHome({
         </View>
       </View>
 
-      {/* R15.13：Scene Tool Entry — 首页意图 6 宫格 */}
-      <View style={styles.sceneTools}>
-        {SCENE_TOOLS.map((tool: { id: SceneToolId; label: string; intentPrompt: string }) => (
-          <Pressable key={tool.id} onPress={() => onCreateScene?.(tool.id)} style={styles.sceneTool}>
-            <Text style={styles.sceneToolLabel}>{tool.label}</Text>
-            <Text style={styles.sceneToolPrompt}>{tool.intentPrompt}</Text>
-          </Pressable>
-        ))}
+      {/* R15.34: 推荐人 mode 切换 — 单行路由。
+          6 个 SCENE_TOOLS + 2 个用户列出的额外场景（翻译、陪诊）。
+          默认走 PHOTO。点切 mode 会重置 activeFilters (筛选跟模式走)。 */}
+      <View style={styles.recommendModes}>
+        <FilterChipRail
+          items={RECOMMEND_MODE_ORDER.map((modeId) => {
+            const feed = SCENE_RECOMMEND[modeId];
+            return {
+              id: modeId,
+              label: feed ? (
+                modeId === "PHOTO" ? "拍照" : modeId === "COMPANION" ? "同行" : modeId === "COFFEE_MEAL" ? "吃饭" : modeId === "ACTIVITY" ? "活动" : modeId === "TRIP" ? "出去玩" : modeId === "CREATOR" ? "创作" : modeId === "TRANSLATE" ? "翻译" : "陪诊"
+              ) : modeId
+            };
+          })}
+          activeId={recommendMode}
+          onChange={(id) => {
+            setRecommendMode(id);
+            setActiveFilters([]);
+          }}
+          marginBottom={4}
+          testPrefix="推荐人模式"
+        />
       </View>
 
+      {/* R15.34: 推荐人 section — 标题 + stories 横滑 + cards 横滑。
+          stories 是小圆形 avatar (首字母 + online 指示点 + 共同好友/场景
+          tag)，cards 是 165×220 portrait card (大首字母 + 距离 + 2 tag)。 */}
+      <View style={styles.peopleHead}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.peopleTitle}>{recommendFeed.title}</Text>
+          <Text style={styles.peopleSub}>{recommendFeed.subtitle}</Text>
+        </View>
+        <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger}>
+          <Text style={styles.filterTriggerText}>筛选 〉</Text>
+        </Pressable>
+      </View>
+
+      {/* stories — 圆形 avatar 横滑 */}
+      {/* R15.34.2: 包 HorizontalSwipeRail 隔离 iOS 系统 tab 切换手势 */}
+      <HorizontalSwipeRail
+        style={styles.stories}
+        contentContainerStyle={styles.storiesContent}
+      >
+        {filteredPeople.map((p) => (
+          <Pressable
+            key={`story:${p.id}`}
+            onPress={() => onChat?.(`找 ${p.name} 同 ${recommendFeed.sceneTag}`, undefined, undefined)}
+            style={styles.story}
+            accessibilityLabel={`推荐人 ${p.name}，${p.online ? "在线" : "离线"}`}
+          >
+            <View style={styles.avatar}>
+              <View style={styles.avatarInner}>
+                <Text style={styles.avatarInitials}>{p.initials}</Text>
+              </View>
+              {p.online ? <View style={styles.onlineDot} /> : null}
+            </View>
+            <Text style={styles.storyName} numberOfLines={1}>{p.name}</Text>
+            <Text style={styles.storyHint} numberOfLines={1}>
+              {p.mutualFriends > 0 ? `${p.mutualFriends} 位共同好友` : recommendFeed.sceneTag}
+            </Text>
+          </Pressable>
+        ))}
+      </HorizontalSwipeRail>
+
+      {/* cards — portrait card 横滑 */}
+      {/* R15.34.2: 包 HorizontalSwipeRail 隔离 iOS 系统 tab 切换手势 */}
+      <HorizontalSwipeRail
+        style={styles.cards}
+        contentContainerStyle={styles.cardsContent}
+      >
+        {filteredPeople.map((p, i) => (
+          <Pressable
+            key={`card:${p.id}`}
+            onPress={() => onChat?.(`想和 ${p.name} 聊聊 ${recommendFeed.sceneTag}`, undefined, undefined)}
+            style={[styles.recCard, i % 3 === 1 ? styles.recCardAlt1 : i % 3 === 2 ? styles.recCardAlt2 : null]}
+            accessibilityLabel={`推荐人名片 ${p.name}，距离 ${p.distanceM} 米`}
+          >
+            <View style={styles.recCardPortrait}>
+              <Text style={styles.recCardInitials}>{p.initials}</Text>
+            </View>
+            <View style={styles.recCardDist}>
+              <Text style={styles.recCardDistText}>⌖ {p.distanceM} m</Text>
+            </View>
+            <View style={styles.recCardInfo}>
+              <Text style={styles.recCardName} numberOfLines={1}>{p.name}</Text>
+              <View style={styles.recCardTags}>
+                <View style={styles.recCardTag}>
+                  <Text style={styles.recCardTagText}>{recommendFeed.sceneTag}</Text>
+                </View>
+                <View style={styles.recCardTag}>
+                  <Text style={styles.recCardTagText}>{p.online ? "附近" : "最近活跃"}</Text>
+                </View>
+              </View>
+            </View>
+          </Pressable>
+        ))}
+      </HorizontalSwipeRail>
+
+      <View style={styles.loadMoreRow}>
+        <Text style={styles.loadMoreText}>
+          继续刷 · <Text style={styles.loadMoreCount}>{filteredPeople.length}</Text>/{recommendFeed.people.length}
+        </Text>
+      </View>
       {/* 基线 .r1572HomeComposer('USER')：HomeChatBox（无示例 / 无提示） */}
       {conversationPanel ?? (onChat ? (
         <HomeChatBox
@@ -258,13 +388,16 @@ export function RequesterHome({
         />
       ) : null)}
 
-      {/* 基线 继续 / 2 项 → 服务端 ListRequesterHomeItems */}
+      {/* R15.34: 继续进行 — 大 thumb 卡片 list。
+          取代基线 "继续 / 2 项" list 样式，模仿 HTML prototype 里的
+          "继续进行" West Lake photography 卡片 (thumb + 标题 + 副标 + chevron)。
+          优先用 server 返回的 continueItems，匿名 / 加载中 / 失败时
+          fallback 到 CONTINUE_FIXTURES (mock)。 */}
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>继续</Text>
+        <Text style={styles.sectionTitle}>继续进行</Text>
         <Text style={styles.sectionHint}>
-          {continueItems.length} 项
           {homeItemsState === "loaded"
-            ? ""
+            ? `${continueItems.length} 项`
             : homeItemsState === "error"
             ? " · 加载失败"
             : homeItemsState === "loading"
@@ -280,14 +413,19 @@ export function RequesterHome({
           </View>
         </View>
       ) : (
-        continueItems.map((item) => (
-          <Pressable key={item.key} onPress={() => onOpenMarket?.("OPPORTUNITY")} style={styles.actionCard}>
-            <View style={styles.actionIcon}>
-              <ProxyIcon color={color.ink} name={item.icon} size={20} />
+        (homeItemsState === "loaded" ? continueItems : []).map((item) => (
+          <Pressable
+            key={item.key}
+            onPress={() => onOpenMarket?.("OPPORTUNITY")}
+            style={styles.continueCard}
+            accessibilityLabel={`继续进行 ${item.title}`}
+          >
+            <View style={styles.continueThumb}>
+              <Text style={styles.continueThumbText}>{(item.title[0] ?? "?").toUpperCase()}</Text>
             </View>
-            <View style={styles.actionCopy}>
-              <Text style={styles.actionTitle}>{item.title}</Text>
-              <Text style={styles.actionSub}>{item.sub}</Text>
+            <View style={styles.continueCopy}>
+              <Text style={styles.continueTitle} numberOfLines={1}>{item.title}</Text>
+              <Text style={styles.continueSub} numberOfLines={1}>{item.sub}</Text>
             </View>
             {item.progress !== undefined ? (
               <View style={styles.actionTag}>
@@ -297,10 +435,33 @@ export function RequesterHome({
               <View style={styles.actionTag}>
                 <Text style={styles.actionTagText}>{item.headcount}</Text>
               </View>
-            ) : null}
+            ) : (
+              <Text style={styles.continueChevron}>›</Text>
+            )}
           </Pressable>
         ))
       )}
+      {homeItemsState !== "loaded" ? (
+        <>
+          {CONTINUE_FIXTURES.map((item: ContinueItem) => (
+            <Pressable
+              key={item.key}
+              onPress={() => onOpenMarket?.("OPPORTUNITY")}
+              style={styles.continueCard}
+              accessibilityLabel={`继续进行 ${item.title}`}
+            >
+              <View style={[styles.continueThumb, { backgroundColor: item.thumbColor }]}>
+                <Text style={styles.continueThumbText}>{item.thumbLabel}</Text>
+              </View>
+              <View style={styles.continueCopy}>
+                <Text style={styles.continueTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.continueSub} numberOfLines={1}>{item.subtitle}</Text>
+              </View>
+              <Text style={styles.continueChevron}>›</Text>
+            </Pressable>
+          ))}
+        </>
+      ) : null}
 
       {/* R15.22 fix: 市场脉动计数 (机会 / 活动) 从 server 拉, 体验 仍使用 r157
           基线 24 作 fallback (ListExperiences 暂未联). 拉倒后空闲, onPress
@@ -328,6 +489,48 @@ export function RequesterHome({
           </View>
         </View>
       </Pressable>
+
+      {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)。
+          打开时为模态，点击遮罩或"应用"按钮关闭。
+          隐藏在 screen 之外 (right: -1000)，状态控制位置/不透明。 */}
+      {filterSheetOpen ? (
+        <Pressable
+          style={styles.sheetBackdrop}
+          onPress={() => setFilterSheetOpen(false)}
+          accessibilityLabel="关闭筛选"
+        >
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetGrab} />
+            <Text style={styles.sheetTitle}>推荐筛选</Text>
+            <View style={styles.filterChips}>
+              {RECOMMEND_FILTER_CHIPS.map((chip: RecommendFilter) => {
+                const on = activeFilters.includes(chip.id);
+                return (
+                  <Pressable
+                    key={chip.id}
+                    onPress={() => {
+                      setActiveFilters((prev) =>
+                        prev.includes(chip.id) ? prev.filter((c) => c !== chip.id) : [...prev, chip.id]
+                      );
+                    }}
+                    style={[styles.filterChip, on && styles.filterChipOn]}
+                    accessibilityLabel={`筛选 ${chip.label}${on ? "，已选" : ""}`}
+                  >
+                    <Text style={[styles.filterChipText, on && styles.filterChipTextOn]}>{chip.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Pressable
+              onPress={() => setFilterSheetOpen(false)}
+              style={styles.sheetApplyBtn}
+              accessibilityLabel="应用筛选"
+            >
+              <Text style={styles.sheetApplyText}>应用</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      ) : null}
     </ScrollView>
   );
 }
@@ -416,8 +619,129 @@ const styles = StyleSheet.create({
   marketPulseValue: { color: color.white, fontSize: 20, fontWeight: "900", lineHeight: 24, textAlign: "center" },
   marketPulseNumLabel: { color: "#D4CAD9", fontSize: 11, lineHeight: 15, textAlign: "center" },
 
-  sceneTools: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10, marginBottom: 6 },
-  sceneTool: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, minWidth: 92, alignItems: "center", ...shadows.card },
-  sceneToolLabel: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  sceneToolPrompt: { color: color.muted, fontSize: 11, marginTop: 2 },
+  // R15.34.1: 推荐人 mode 切换单行路由 — 不够就左右滑动
+  //   走共享 FilterChipRail (见 components/filter-chip-rail.tsx)。
+  //   这里只保留外层 marginTop。FilterChipRail 内部已带 PanResponder
+  //   隔离外层 PAGE_SEQUENCE 切页。
+  recommendModes: { marginTop: 16 },
+
+  // R15.34: 推荐人 section 头
+  peopleHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginTop: 18, marginBottom: 12 },
+  peopleTitle: { color: color.ink, fontSize: 22, fontWeight: "800", lineHeight: 26 },
+  peopleSub: { color: color.muted, fontSize: 12, lineHeight: 16, marginTop: 4 },
+  filterTrigger: { paddingHorizontal: 4, paddingVertical: 4 },
+  filterTriggerText: { color: color.muted, fontSize: 13, fontWeight: "600" },
+
+  // R15.34: stories 横滑
+  stories: { marginHorizontal: -16 },
+  storiesContent: { paddingHorizontal: 16, gap: 12, paddingBottom: 8 },
+  story: { alignItems: "center", minWidth: 64, maxWidth: 80 },
+  avatar: {
+    backgroundColor: color.lime,
+    borderRadius: 999,
+    height: 62,
+    padding: 2,
+    position: "relative",
+    width: 62
+  },
+  avatarInner: {
+    alignItems: "center",
+    backgroundColor: "#F0ECE8",
+    borderColor: color.offWhite,
+    borderRadius: 999,
+    borderWidth: 3,
+    flex: 1,
+    justifyContent: "center",
+    width: "100%"
+  },
+  avatarInitials: { color: color.ink, fontSize: 18, fontWeight: "800" },
+  onlineDot: { backgroundColor: color.lime, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: 2, height: 11, position: "absolute", right: 2, width: 11 },
+  storyName: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 5, textAlign: "center" },
+  storyHint: { color: color.muted, fontSize: 11, marginTop: 1, textAlign: "center" },
+
+  // R15.34: cards 横滑
+  cards: { marginHorizontal: -16, marginTop: 8 },
+  cardsContent: { gap: 10, paddingHorizontal: 16, paddingBottom: 6 },
+  recCard: {
+    backgroundColor: "#E4DED7",
+    borderRadius: 20,
+    height: 220,
+    minWidth: 165,
+    overflow: "hidden",
+    position: "relative"
+  },
+  recCardAlt1: { backgroundColor: "#9DA9AF" },
+  recCardAlt2: { backgroundColor: "#B99D88" },
+  recCardPortrait: { alignItems: "center", flex: 1, justifyContent: "center" },
+  recCardInitials: { color: "rgba(255,255,255,0.92)", fontSize: 44, fontWeight: "900", textShadowColor: "rgba(0,0,0,0.12)", textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 20 },
+  recCardDist: { backgroundColor: "rgba(255,255,255,0.88)", borderRadius: 11, left: 10, paddingHorizontal: 8, paddingVertical: 6, position: "absolute", top: 10 },
+  recCardDistText: { color: color.ink, fontSize: 11, fontWeight: "600" },
+  recCardInfo: { bottom: 12, left: 12, paddingTop: 24, position: "absolute", right: 10 },
+  recCardName: { color: color.white, fontSize: 17, fontWeight: "800" },
+  recCardTags: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 6 },
+  recCardTag: { backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 8, paddingHorizontal: 6, paddingVertical: 4 },
+  recCardTagText: { color: color.white, fontSize: 11, fontWeight: "600" },
+
+  loadMoreRow: { alignItems: "center", marginTop: 4 },
+  loadMoreText: { color: color.ink, fontSize: 12, fontWeight: "600" },
+  loadMoreCount: { color: color.ink, fontSize: 12, fontWeight: "800" },
+
+  // R15.34: 继续进行卡片 (大 thumb + 标题 + 副标 + chevron)
+  continueCard: {
+    alignItems: "center",
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 11,
+    marginVertical: 5,
+    padding: 11,
+    ...shadows.card
+  },
+  continueThumb: {
+    alignItems: "center",
+    backgroundColor: "#B7C9D2",
+    borderRadius: 13,
+    height: 52,
+    justifyContent: "center",
+    width: 62
+  },
+  continueThumbText: { color: color.white, fontSize: 18, fontWeight: "900" },
+  continueCopy: { flex: 1 },
+  continueTitle: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  continueSub: { color: color.muted, fontSize: 12, marginTop: 4 },
+  continueChevron: { color: color.muted, fontSize: 22, fontWeight: "300" },
+
+  // R15.34: 推荐筛选 sheet (覆盖层)
+  sheetBackdrop: {
+    backgroundColor: "rgba(0,0,0,0.32)",
+    bottom: 0,
+    justifyContent: "flex-end",
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 50
+  },
+  sheet: {
+    backgroundColor: color.white,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    bottom: 0,
+    left: 0,
+    padding: 18,
+    paddingBottom: 32,
+    position: "absolute",
+    right: 0
+  },
+  sheetGrab: { alignSelf: "center", backgroundColor: "#DDD", borderRadius: 4, height: 4, marginBottom: 14, width: 42 },
+  sheetTitle: { color: color.ink, fontSize: 20, fontWeight: "800", marginBottom: 12 },
+  filterChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  filterChip: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9 },
+  filterChipOn: { backgroundColor: color.lime, borderColor: color.lime },
+  filterChipText: { color: color.ink, fontSize: 13, fontWeight: "600" },
+  filterChipTextOn: { color: color.ink, fontWeight: "800" },
+  sheetApplyBtn: { backgroundColor: color.ink, borderRadius: 16, marginTop: 18, padding: 13 },
+  sheetApplyText: { color: color.white, fontSize: 14, fontWeight: "800", textAlign: "center" },
 });

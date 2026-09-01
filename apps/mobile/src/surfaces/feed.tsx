@@ -5,7 +5,7 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, AppState, Image, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
@@ -13,6 +13,7 @@ import { type LocalNetClient } from "../localnet-client";
 import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
+import { FilterChipRail } from "../components/filter-chip-rail";
 import { isOpportunityPost } from "../feed-content";
 import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
 // v2 重构：深紫黑底 + compositionHint 驱动 fill。Sprint C 替换完成。
@@ -192,25 +193,11 @@ export function FeedSurface({
   const scrollDirectionDistanceRef = useRef(0);
   const chromeVisibleRef = useRef(true);
   const postIdsRef = useRef<Set<string>>(cachedPostIds);
-  // 隔离 filterRail 横滑与 PAGE_SEQUENCE 横滑：filterRail 横滑只滚动自身，不触发 动态↔状态 切页
-  const filterRailRef = useRef<ScrollView>(null);
-  const filterRailScrollXRef = useRef(0);
-  const filterRailPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 6,
-      onPanResponderGrant: () => {
-        // 记录当前 scroll 偏移（由 ScrollView 的 onScroll 更新）
-      },
-      onPanResponderMove: (_, gs) => {
-        // 横滑时由 filterRail 自身消费，不让外层 PAGE_SEQUENCE 的 PanResponder 抢占
-        // 直接滚动 filterRail 的 ScrollView
-        filterRailRef.current?.scrollTo({ x: filterRailScrollXRef.current - gs.dx, animated: false });
-      },
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
-    })
-  ).current;
+  // R15.34.1: filterRail 横滑逻辑已抽到共享组件 FilterChipRail
+  // (components/filter-chip-rail.tsx)。原本 feed 这边的
+  // filterRailRef / filterRailScrollXRef / filterRailPanResponder
+  // 全部删除。Home (推荐人 mode) 和 FEED (动态筛选) 现在用同一份
+  // 公共组件，PanResponder 隔离外层 PAGE_SEQUENCE 切页的逻辑一致。
 
   // 发布器状态全部迁出到 ComposerV2Screen（包含上传、草稿、状态机）。
   // 父组件只管打开/关闭，初始 quoteId 通过 composerQuoteId 透传。
@@ -670,29 +657,20 @@ export function FeedSurface({
       </View>
 
       {/* R15.3 feedfilterrail：只由外层 PanResponder 判定横向手势并驱动本 ScrollView。
-          不在内层再注册 responder，避免纵向滚动被第二套手势逻辑截获。 */}
-      <View {...filterRailPanResponder.panHandlers} style={styles.filterRailCapture}>
-        <ScrollView
-          ref={filterRailRef}
-          contentContainerStyle={styles.filterRailContent}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterRail}
-          onScroll={(e) => {
-            filterRailScrollXRef.current = e.nativeEvent.contentOffset.x;
-          }}
-          scrollEventThrottle={16}
-        >
-        {FILTERS.map((f) => {
-          const active = feedFilter === f.id;
-          return (
-            <Pressable key={f.id} onPress={() => { setFeedFilter(f.id); setSelectedCustomFeed(null); }} style={[styles.filterChip, active && styles.filterChipActive]}>
-              <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{f.label}</Text>
-            </Pressable>
-          );
-        })}
-        </ScrollView>
-      </View>
+          不在内层再注册 responder，避免纵向滚动被第二套手势逻辑截获。
+          R15.34.1: 抽到共享 FilterChipRail (components/filter-chip-rail.tsx)，
+          requester-home 复用同一份。feed 这边的 filterRailRef /
+          filterRailScrollXRef / filterRailPanResponder 已删除。 */}
+      <FilterChipRail
+        items={FILTERS.map((f) => ({ id: f.id, label: f.label }))}
+        activeId={feedFilter}
+        onChange={(id) => {
+          setFeedFilter(id as FilterKey);
+          setSelectedCustomFeed(null);
+        }}
+        marginBottom={6}
+        testPrefix="动态筛选"
+      />
 
       {/* R15.3 preferencehint：推荐由你和算法共同决定 */}
       <View style={styles.prefHint}>
@@ -1105,39 +1083,12 @@ const styles = StyleSheet.create({
   searchArrow: { color: color.muted, fontSize: 15 },
 
   // 基线 .feedfilterrail：横滑筛选。外层 View 捕获横滑以隔离 PAGE_SEQUENCE 切页
-  filterRailCapture: {
-    marginBottom: 6
-  },
-  filterRail: {
-    // 内层 ScrollView 实际横滑
-  },
-  filterRailContent: { gap: 8, paddingRight: 18 },
+  //   R15.34.1: 抽到共享 FilterChipRail (components/filter-chip-rail.tsx)。
+  //   requester-home 也复用同一份。feed 这里的 filterRailCapture /
+  //   filterRail / filterRailContent / filterChip* 样式不再使用，删除。
   customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6 },
   customFeedBannerText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   customFeedBannerAction: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  filterChip: {
-    alignItems: "center",
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 999,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 44,
-    paddingHorizontal: 13,
-    paddingVertical: 8
-  },
-  filterChipActive: {
-    backgroundColor: color.ink,
-    borderColor: color.ink
-  },
-  filterChipText: {
-    color: "#62596A",
-    fontSize: 12,
-    fontWeight: "800"
-  },
-  filterChipTextActive: {
-    color: color.white
-  },
 
   // 基线 .preferencehint：bg #F8F5FA border #ECE4F0 radius 12 padding 9 8。
   prefHint: {

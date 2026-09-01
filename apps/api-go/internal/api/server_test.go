@@ -368,6 +368,79 @@ func TestProtectedCommandFailsClosedWithoutAuthenticator(t *testing.T) {
 	}
 }
 
+// R15.34.1 P0: 匿名 / 离线 fallback 不能发 CreatePost。
+//   server 必须拒绝 (ACCESS_TOKEN_REQUIRED / INVALID_ACCESS_TOKEN),
+//   不要让 mobile 的 fake offline session 成功发布。
+type strictAuthenticator struct {
+	// validTokens: access token 白名单。空 token 不在表里，返错误。
+	validTokens map[string]identity.AuthenticatedSession
+}
+
+func (a strictAuthenticator) Authenticate(_ context.Context, raw string) (identity.AuthenticatedSession, error) {
+	if raw == "" {
+		return identity.AuthenticatedSession{}, errors.New("access token required")
+	}
+	if session, ok := a.validTokens[raw]; ok {
+		return session, nil
+	}
+	return identity.AuthenticatedSession{}, errors.New("invalid access token")
+}
+
+func TestCreatePostRejectsAnonymous(t *testing.T) {
+	auth := strictAuthenticator{
+		validTokens: map[string]identity.AuthenticatedSession{
+			"valid_access_001": {
+				Actor:       command.Actor{Type: "USER", ID: "user_real_001"},
+				Principal:   command.Principal{Type: "INDIVIDUAL", ID: "user_real_001"},
+				SessionID:   "session_real_001",
+				AuthContext: map[string]any{"sessionId": "session_real_001"},
+			},
+		},
+	}
+	server := NewServerWithDependenciesAndAuthenticator(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil, auth)
+	handler := server.Handler()
+	// 场景 1: 没有任何 Authorization header
+	noAuth := requestWithBearer(handler, http.MethodPost, "/v1/commands/CreatePost", apiEnvelope("CreatePost", map[string]any{
+		"body":        "匿名发文测试，不应成功",
+		"authorType":  "USER",
+		"visibility":  "PUBLIC",
+	}, command.Target{Type: "Post", ID: "new"}, "idem_anon_createpost_001"), "")
+	if noAuth.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous CreatePost should be 401, got %d body=%s", noAuth.Code, noAuth.Body.String())
+	}
+	var result command.Result
+	if err := json.Unmarshal(noAuth.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "ACCESS_TOKEN_REQUIRED" {
+		t.Fatalf("expected ACCESS_TOKEN_REQUIRED, got %+v", result.Error)
+	}
+	// 场景 2: 离线 fallback 用的 fake token (offline_*) 必须被拒
+	fakeAuth := requestWithBearer(handler, http.MethodPost, "/v1/commands/CreatePost", apiEnvelope("CreatePost", map[string]any{
+		"body":        "fake token 发文测试，不应成功",
+		"authorType":  "USER",
+		"visibility":  "PUBLIC",
+	}, command.Target{Type: "Post", ID: "new"}, "idem_faketoken_createpost_001"), "offline_fake_token_xyz")
+	if fakeAuth.Code != http.StatusUnauthorized {
+		t.Fatalf("fake-token CreatePost should be 401, got %d body=%s", fakeAuth.Code, fakeAuth.Body.String())
+	}
+	if err := json.Unmarshal(fakeAuth.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "INVALID_ACCESS_TOKEN" {
+		t.Fatalf("expected INVALID_ACCESS_TOKEN, got %+v", result.Error)
+	}
+	// 场景 3: 真实 access token 能成功发布 (回归测试，确保拒绝逻辑没误伤)
+	real := requestWithBearer(handler, http.MethodPost, "/v1/commands/CreatePost", apiEnvelope("CreatePost", map[string]any{
+		"body":        "真实登录发文，应该成功",
+		"authorType":  "USER",
+		"visibility":  "PUBLIC",
+	}, command.Target{Type: "Post", ID: "new"}, "idem_real_createpost_001"), "valid_access_001")
+	if real.Code != http.StatusOK {
+		t.Fatalf("real CreatePost should be 200, got %d body=%s", real.Code, real.Body.String())
+	}
+}
+
 func TestCommandUsesConfiguredTransactionRunner(t *testing.T) {
 	runner := &recordingTransactionRunner{}
 	server := NewServerWithRuntime(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil, stubAuthenticator{}, runner)
