@@ -50,14 +50,16 @@ export function mapEngagementError(error: unknown, fallback: string): string {
     // R15.38.4: server 返回 500 (e.g. command_transaction_failed) 时
     //   engagement-client 抛 EngagementProtocolError 包了 status+body。
     //   这不是 "网络问题" — 是 server 内部事务挂了。告诉用户明确, 别
-    //   再说 "检查连接" (误导)。
+    //   再说 "检查连接" (误导)。包含 "登录后重试" 是因为 server 500
+    //   在 R15.39 之后最常见的原因是 keychain 里有个 server 不知道
+    //   的 session, 重新登录可以清掉。
     if (msg.includes("command_transaction_failed") || msg.includes("(status=5")) {
-      return "服务器处理出错，请稍后重试或反馈给我们。";
+      return "服务器处理出错，请稍后重试。如果还是不行，请退出后重新登录。";
     }
     // R15.38.4: 其他解析失败 (e.g. body 不是 commandResult 格式) 也
     //   几乎都是 server 端 bug, 不是说用户网不行。
     if (msg.includes("malformed")) {
-      return "服务器响应异常，请稍后重试。";
+      return "服务器响应异常，请稍后重试或重新登录。";
     }
   }
   return fallback;
