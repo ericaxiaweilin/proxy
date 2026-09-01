@@ -637,3 +637,53 @@ func TestAudioMimeAllowed(t *testing.T) {
 		t.Fatal("image content must NOT pass as AUDIO")
 	}
 }
+
+func TestProcessAssetNowFailsWhenOriginalMissing(t *testing.T) {
+	dir := t.TempDir()
+	repository := NewMemoryRepository()
+	s := NewWithDependencies(repository, &failingProcessor{})
+	s.SetStoreDir(dir)
+	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
+		"mediaType": "IMAGE", "originalStorageKey": "missing.jpg", "mimeType": "image/jpeg",
+	}, ""))
+	var view struct{ MediaAssetID string `json:"mediaAssetId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	id := view.MediaAssetID
+	// 先上传一个有效 JPEG 以便 SourceBytes>0，再删掉以模拟 iCloud 蒸发
+	tmp := filepath.Join(dir, "tmp.jpg")
+	func() {
+		img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+		for y := 0; y < 10; y++ {
+			for x := 0; x < 10; x++ {
+				img.Set(x, y, color.RGBA{uint8(x * 25), uint8(y * 25), 128, 255})
+			}
+		}
+		f, _ := os.Create(tmp)
+		_ = jpeg.Encode(f, img, &jpeg.Options{Quality: 80})
+		_ = f.Close()
+	}()
+	f, _ := os.Open(tmp)
+	_, _ = s.SaveUpload(t.Context(), id, "business_001", f, 1<<20)
+	_ = f.Close()
+	// 检查上传后 SourceBytes 已记录
+	if a, _ := repository.GetAsset(t.Context(), id); a.SourceBytes == 0 {
+		t.Fatalf("SourceBytes should be >0 after SaveUpload, got 0")
+	}
+	s.Handle(envelopeFor("CompleteMediaUpload", map[string]any{"originalStorageKey": "missing.jpg"}, id))
+	// 删掉已落盘的原文件
+	missingPath := filepath.Join(dir, "missing.jpg")
+	_ = os.Remove(missingPath)
+	if _, err := os.Stat(missingPath); !os.IsNotExist(err) {
+		t.Fatalf("missing file should be deleted, stat err=%v", err)
+	}
+	err := s.ProcessAssetNow(t.Context(), id)
+	t.Logf("ProcessAssetNow err=%v", err)
+	asset, _ := repository.GetAsset(t.Context(), id)
+	t.Logf("after: status=%s lastError=%q", asset.ProcessingStatus, asset.LastError)
+	if err == nil {
+		t.Fatal("missing original must fail integrity check")
+	}
+	if asset.ProcessingStatus != "FAILED" || !strings.Contains(asset.LastError, "integrity") {
+		t.Fatalf("want FAILED with integrity error, got %s %q", asset.ProcessingStatus, asset.LastError)
+	}
+}
