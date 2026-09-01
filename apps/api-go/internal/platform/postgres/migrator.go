@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -23,10 +24,11 @@ import (
 //   - 漂移 (drift) — 已 apply 的 migration 跟当前文件 checksum 不一致
 //
 // 用法:
-//   m := NewMigrator(pool, migrationsDir)
-//   m.Status(ctx)  -> 已 apply + pending + drift
-//   m.Apply(ctx, false)  -> 真 apply, 记 schema_migrations
-//   m.Apply(ctx, true)   -> dry-run, 只列 pending 不真 apply
+//
+//	m := NewMigrator(pool, migrationsDir)
+//	m.Status(ctx)  -> 已 apply + pending + drift
+//	m.Apply(ctx, false)  -> 真 apply, 记 schema_migrations
+//	m.Apply(ctx, true)   -> dry-run, 只列 pending 不真 apply
 type Migrator struct {
 	pool          *pgxpool.Pool
 	migrationsDir string
@@ -46,14 +48,14 @@ func (m *Migrator) WithAllowInitSchema(b bool) *Migrator {
 
 // MigrationStatus 一行 migration 的当前状态。
 type MigrationStatus struct {
-	Version    string    // e.g. "033_media_auditor_role"
-	Filename   string    // "033_media_auditor_role.sql"
-	Applied    bool      // 是否已 apply
-	AppliedAt  time.Time // zero if not applied
-	Checksum   string    // 当前文件 SHA-256 (hex 12 chars)
-	OnDisk     bool      // 文件在 migrations 目录里
-	Drift      bool      // Applied + Checksum != stored
-	StoredChecksum string // 之前 apply 时存的 checksum (空 = 还没 apply)
+	Version        string    // e.g. "033_media_auditor_role"
+	Filename       string    // "033_media_auditor_role.sql"
+	Applied        bool      // 是否已 apply
+	AppliedAt      time.Time // zero if not applied
+	Checksum       string    // 当前文件 SHA-256 (hex 12 chars)
+	OnDisk         bool      // 文件在 migrations 目录里
+	Drift          bool      // Applied + Checksum != stored
+	StoredChecksum string    // 之前 apply 时存的 checksum (空 = 还没 apply)
 }
 
 // ListMigrations 读 migrations 目录 + 跟 schema_migrations 表对账,
@@ -156,6 +158,13 @@ func (m *Migrator) Apply(ctx context.Context, dryRun bool) (applied []string, pe
 	if err != nil {
 		return nil, nil, err
 	}
+	// Never apply new work on top of altered history. Previously Apply could
+	// report drift yet still execute pending files, which made recovery harder.
+	for _, f := range files {
+		if prev, ok := already[f.Version]; ok && prev.Checksum != sha256Hex([]byte(f.Content)) {
+			return nil, nil, fmt.Errorf("%w: %s", ErrDriftDetected, f.Filename)
+		}
+	}
 	for _, f := range files {
 		if _, ok := already[f.Version]; ok {
 			continue
@@ -245,10 +254,12 @@ func (m *Migrator) recordApplied(ctx context.Context, version, checksum string) 
 }
 
 type migrationFile struct {
-	Version string // e.g. "033_media_auditor_role"
+	Version  string // e.g. "033_media_auditor_role"
 	Filename string // "033_media_auditor_role.sql"
-	Content string
+	Content  string
 }
+
+var migrationVersionPattern = regexp.MustCompile(`^[0-9]{3}_[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 func (m *Migrator) readMigrationFiles() ([]migrationFile, error) {
 	entries, err := os.ReadDir(m.migrationsDir)
@@ -270,6 +281,9 @@ func (m *Migrator) readMigrationFiles() ([]migrationFile, error) {
 		}
 		// Version = filename 不带 .sql 后缀
 		ver := strings.TrimSuffix(e.Name(), ".sql")
+		if !migrationVersionPattern.MatchString(ver) {
+			return nil, fmt.Errorf("unsafe migration filename %q: expected NNN_name.sql without whitespace or copy suffixes", e.Name())
+		}
 		files = append(files, migrationFile{
 			Version:  ver,
 			Filename: e.Name(),

@@ -1,12 +1,12 @@
 // R15.21 — Migrator 钉 8 个 tripwire:
-//   1. Apply 跑完后所有 migration 进 schema_migrations 表
-//   2. Re-apply 幂等 (count 仍 = N, 没新 apply)
-//   3. Status 报 applied=N pending=0 drift=0
-//   4. DryRun 列 pending 但不 apply (count 不变)
-//   5. PendingCount / AppliedCount / DriftCount 数字正确
-//   6. 漂移检测: 改一个文件 checksum, VerifyDrift 返非 nil
-//   7. 顺序: migration 按文件名 lexicographic apply
-//   8. 孤儿: applied 但文件不在目录里 -> ListMigrations 标 orphan
+//  1. Apply 跑完后所有 migration 进 schema_migrations 表
+//  2. Re-apply 幂等 (count 仍 = N, 没新 apply)
+//  3. Status 报 applied=N pending=0 drift=0
+//  4. DryRun 列 pending 但不 apply (count 不变)
+//  5. PendingCount / AppliedCount / DriftCount 数字正确
+//  6. 漂移检测: 改一个文件 checksum, VerifyDrift 返非 nil
+//  7. 顺序: migration 按文件名 lexicographic apply
+//  8. 孤儿: applied 但文件不在目录里 -> ListMigrations 标 orphan
 package postgres
 
 import (
@@ -184,6 +184,29 @@ func TestMigrator_DriftDetected(t *testing.T) {
 	}
 	if drift.Checksum == drift.StoredChecksum {
 		t.Fatal("drift checksums should differ")
+	}
+}
+
+func TestMigrator_ApplyRefusesDriftBeforePending(t *testing.T) {
+	m, _, dir := setupMigratorTest(t)
+	ctx := context.Background()
+	writeMigration(t, dir, "001_init.sql", "SELECT 1;\n")
+	if _, _, err := m.Apply(ctx, false); err != nil {
+		t.Fatalf("initial apply: %v", err)
+	}
+	writeMigration(t, dir, "001_init.sql", "SELECT 999;\n")
+	writeMigration(t, dir, "002_pending.sql", "SELECT 2;\n")
+	if _, _, err := m.Apply(ctx, false); err == nil || !strings.Contains(err.Error(), ErrDriftDetected.Error()) {
+		t.Fatalf("expected drift refusal, got %v", err)
+	}
+}
+
+func TestMigrator_RejectsFilesystemCopySuffix(t *testing.T) {
+	dir := t.TempDir()
+	m := NewMigrator(nil, dir)
+	writeMigration(t, dir, "035_history 2.sql", "SELECT 1;\n")
+	if _, err := m.ListMigrations(context.Background()); err == nil || !strings.Contains(err.Error(), "unsafe migration filename") {
+		t.Fatalf("expected unsafe filename error, got %v", err)
 	}
 }
 
