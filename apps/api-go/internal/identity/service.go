@@ -248,7 +248,7 @@ func (s *Service) beginPasswordlessAuthentication(ctx context.Context, e command
 	if err != nil {
 		return command.Rejected(e, "PASSWORDLESS_IDENTITY_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "identity.passwordless_identity_unavailable", nil)
 	}
-	providerChallenge, err := s.challengeProvider.Request(ctx, LoginChallengeRequest{LoginIdentityID: identity.ID, DeviceID: device.ID, Channel: p.Channel, Purpose: e.Purpose, CorrelationID: e.CorrelationID})
+	providerChallenge, err := s.challengeProvider.Request(ctx, LoginChallengeRequest{LoginIdentityID: identity.ID, DeviceID: device.ID, Channel: p.Channel, Purpose: e.Purpose, CorrelationID: e.CorrelationID, Identifier: identity.Identifier})
 	if errors.Is(err, ErrLoginChallengeProviderNotReady) {
 		return command.Rejected(e, "LOGIN_PROVIDER_NOT_CONFIGURED", "PROVIDER", "SAFE_RETRY", "identity.login_provider_not_configured", nil)
 	}
@@ -281,12 +281,17 @@ func (s *Service) requestLoginChallenge(ctx context.Context, e command.Envelope)
 	if err != nil || device.UserAccountID != loginIdentity.UserAccountID || device.Status != "ACTIVE" {
 		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_challenge_request_failed", nil)
 	}
+	// loginIdentity (fetched above) already carries the verified
+	// Identifier; thread it to the provider so delivery never depends on
+	// the global lookup hooks (unwired in production — OTP delivery was
+	// dead on both channels).
 	providerChallenge, err := s.challengeProvider.Request(ctx, LoginChallengeRequest{
 		LoginIdentityID: p.LoginIdentityID,
 		DeviceID:        p.DeviceID,
 		Channel:         p.Channel,
 		Purpose:         e.Purpose,
 		CorrelationID:   e.CorrelationID,
+		Identifier:      loginIdentity.Identifier,
 	})
 	if errors.Is(err, ErrLoginChallengeProviderNotReady) {
 		return command.Rejected(e, "LOGIN_PROVIDER_NOT_CONFIGURED", "PROVIDER", "SAFE_RETRY", "identity.login_provider_not_configured", nil)

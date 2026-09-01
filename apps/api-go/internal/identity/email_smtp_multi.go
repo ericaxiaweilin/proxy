@@ -148,7 +148,13 @@ func (m *SMTPMultiProvider) Request(ctx context.Context, req LoginChallengeReque
 	if req.Channel != "EMAIL" {
 		return ProviderChallenge{}, fmt.Errorf("smtp multi: unsupported channel %q", req.Channel)
 	}
-	recipient, ok := lookupEmailForLoginIdentity(req.LoginIdentityID)
+	recipient, ok := req.Identifier, req.Identifier != ""
+	if !ok {
+		// Fallback for direct provider tests that never wired the
+		// identifier through LoginChallengeRequest. Production always
+		// threads it (service layer resolves the LoginIdentity row).
+		recipient, ok = lookupEmailForLoginIdentity(req.LoginIdentityID)
+	}
 	if !ok {
 		return ProviderChallenge{}, ErrLoginChallengeProviderNotReady
 	}

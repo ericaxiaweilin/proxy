@@ -127,7 +127,13 @@ func (p *SMTPLoginChallengeProvider) Request(ctx context.Context, req LoginChall
 		// Mis-wired: this provider only handles EMAIL.
 		return ProviderChallenge{}, fmt.Errorf("smtp provider: unsupported channel %q", req.Channel)
 	}
-	recipient, ok := lookupEmailForLoginIdentity(req.LoginIdentityID)
+	recipient, ok := req.Identifier, req.Identifier != ""
+	if !ok {
+		// Fallback for direct provider tests that never wired the
+		// identifier through LoginChallengeRequest. Production always
+		// threads it (service layer resolves the LoginIdentity row).
+		recipient, ok = lookupEmailForLoginIdentity(req.LoginIdentityID)
+	}
 	if !ok {
 		// We do not know the address from this call site; production
 		// callers are expected to thread it through LoginChallengeRequest

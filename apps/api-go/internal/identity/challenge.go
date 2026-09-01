@@ -37,6 +37,11 @@ type LoginChallengeRequest struct {
 	Channel         string
 	Purpose         string
 	CorrelationID   string
+	// Identifier is the verified address (EMAIL) or E.164 number (SMS)
+	// resolved by the service layer from the LoginIdentity row. The
+	// providers use it as the delivery recipient; the legacy global
+	// lookup hooks are kept only as a fallback for direct provider tests.
+	Identifier string
 }
 
 type ProviderChallenge struct {

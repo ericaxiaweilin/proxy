@@ -109,7 +109,13 @@ func (p *SMSHTTPLoginChallengeProvider) Request(ctx context.Context, req LoginCh
 	if req.Channel != "SMS" {
 		return ProviderChallenge{}, fmt.Errorf("sms provider: unsupported channel %q", req.Channel)
 	}
-	phone, ok := lookupPhoneForLoginIdentity(req.LoginIdentityID)
+	phone, ok := req.Identifier, req.Identifier != ""
+	if !ok {
+		// Fallback for direct provider tests that never wired the
+		// identifier through LoginChallengeRequest. Production always
+		// threads it (service layer resolves the LoginIdentity row).
+		phone, ok = lookupPhoneForLoginIdentity(req.LoginIdentityID)
+	}
 	if !ok {
 		return ProviderChallenge{}, ErrLoginChallengeProviderNotReady
 	}
