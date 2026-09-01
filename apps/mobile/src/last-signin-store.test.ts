@@ -59,6 +59,23 @@ describe("last-signin-store", () => {
     const store = createLastSignInStore(driver);
     expect(await store.read()).toBeUndefined();
   });
+
+  it("does not clobber a fresh write with an old entry", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = createLastSignInStore(driver);
+    const original: LastSignIn = {
+      channel: "EMAIL",
+      identifier: "thanh@gmail.com",
+      signedInAt: "2026-09-01T10:00:00.000Z"
+    };
+    await store.write(original);
+    // 重新读 — 应该还是原来的 entry
+    expect(await store.read()).toEqual(original);
+    // 写一个更新的 — 应该覆盖
+    const updated: LastSignIn = { ...original, signedInAt: "2026-09-02T10:00:00.000Z" };
+    await store.write(updated);
+    expect(await store.read()).toEqual(updated);
+  });
 });
 
 describe("maskIdentifier", () => {

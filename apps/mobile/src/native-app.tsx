@@ -195,6 +195,29 @@ export function ProxyApp(): React.JSX.Element {
     };
   }, []);
 
+  // R15.36.1: 如果用户已经 authed 了但 lastSignIn entry 还没设
+  //   (迁移场景: 之前没记, 或被旧 onSignOut 误清了), 现在补一个。
+  //   以后他们点退出会看到 “继续使用” 卡片。
+  //   placeholder 形式: "Proxy 账号" — 等后续 server 返回
+  //   principal.email / principal.phone 就能换回真实 identifier。
+  useEffect(() => {
+    if (phase !== "AUTHENTICATED") return;
+    let cancelled = false;
+    void (async () => {
+      const existing = await lastSignInStore.read().catch(() => undefined);
+      if (cancelled) return;
+      if (existing) return;
+      await lastSignInStore.write({
+        channel: "EMAIL",
+        identifier: "proxy@account",
+        signedInAt: new Date().toISOString()
+      }).catch(() => undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase]);
+
   if (phase === "BOOTSTRAPPING") return <BootScreen />;
   if (phase === "AUTHENTICATED" || phase === "PUBLIC") {
     return (
@@ -220,7 +243,10 @@ export function ProxyApp(): React.JSX.Element {
         sessionAuthClient={sessionAuthClient}
         localApiBaseUrl={localApiBaseUrl}
         onSignOut={() => {
-		  void Promise.all([sessionAuthClient.signOut().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined), lastSignInStore.clear().catch(()=>undefined)]).then(() => setPhase("SIGNED_OUT"));
+		  // R15.36.1: 退出登录不重写 lastSignIn — 反而是
+		  // 历史登录账户显示的时机。sessionAuthClient.signOut() 只清
+		  // accessToken, keychain 里的 lastSignIn entry 保留。
+		  void Promise.all([sessionAuthClient.signOut().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined)]).then(() => setPhase("SIGNED_OUT"));
         }}
       />
     );
