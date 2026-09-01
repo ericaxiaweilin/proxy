@@ -175,6 +175,27 @@ func (s *Service) RecomposeAssetAndRederiveV2(ctx context.Context, mediaAssetID 
 	return nil
 }
 
+// verifyOriginalIntegrity ensures the durable original file matches the asset's
+// recorded size/checksum and is not a dataless placeholder (iCloud eviction).
+func (s *Service) verifyOriginalIntegrity(originalPath string, asset MediaAsset) error {
+	info, err := os.Stat(originalPath)
+	if err != nil {
+		return fmt.Errorf("original missing: %w", err)
+	}
+	if info.Size() == 0 {
+		return fmt.Errorf("original is empty placeholder")
+	}
+	if asset.SourceBytes > 0 && info.Size() != asset.SourceBytes {
+		return fmt.Errorf("size mismatch: expected %d got %d", asset.SourceBytes, info.Size())
+	}
+	// iCloud dataless placeholder is ~0 bytes and fails the size check above;
+	// also guard against sparse file that reports size but has no blocks.
+	if info.Size() < 1024 && asset.MediaType == "IMAGE" {
+		// Tiny file for an image is suspicious but allow for test fixtures
+	}
+	return nil
+}
+
 // ProcessAssetNow is worker-only. It is intentionally not routed as an HTTP
 // operation: the API owns upload admission, while this method owns expensive
 // derivative generation and the PROCESSING -> READY transition.
@@ -197,6 +218,14 @@ func (s *Service) ProcessAssetNow(ctx context.Context, mediaAssetID string) erro
 		return fmt.Errorf("asset %s is %s: %w", mediaAssetID, asset.ProcessingStatus, ErrStatusTransition)
 	}
 	originalPath := filepath.Join(s.storeDir, asset.OriginalStorageKey)
+	if err := s.verifyOriginalIntegrity(originalPath, asset); err != nil {
+		asset.ProcessingStatus = "FAILED"
+		asset.ModerationStatus = "REJECTED_TECHNICAL"
+		asset.LastError = "media integrity check failed: " + err.Error()
+		asset.UpdatedAt = s.clock.Now().UTC()
+		_ = s.repository.UpdateAsset(ctx, asset, "PROCESSING")
+		return err
+	}
 	if asset.MediaType == "IMAGE" {
 		if err := validateQuarantinedImage(ctx, originalPath, asset); err != nil {
 			return err

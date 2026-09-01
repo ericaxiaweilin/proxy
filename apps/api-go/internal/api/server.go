@@ -169,7 +169,7 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cursor := r.URL.Query().Get("cursor")
-	if len(cursor) > 512 {
+	if len(cursor) > 1024 {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_cursor"})
 		return

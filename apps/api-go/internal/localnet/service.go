@@ -2,12 +2,16 @@ package localnet
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -17,6 +21,42 @@ import (
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 )
+
+func cursorHMACKey() []byte {
+	if key := strings.TrimSpace(os.Getenv("PROXY_CURSOR_HMAC_KEY")); key != "" {
+		return []byte(key)
+	}
+	if dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL")); dbURL != "" {
+		sum := sha256.Sum256([]byte(dbURL))
+		return sum[:16]
+	}
+	return []byte("proxy-dev-cursor-hmac-key")
+}
+
+func signCursor(payload []byte) string {
+	mac := hmac.New(sha256.New, cursorHMACKey())
+	mac.Write(payload)
+	sig := hex.EncodeToString(mac.Sum(nil)[:8])
+	return base64.RawURLEncoding.EncodeToString(payload) + "." + sig
+}
+
+func verifyCursor(cursor string) ([]byte, bool) {
+	parts := strings.Split(cursor, ".")
+	if len(parts) != 2 {
+		return nil, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, false
+	}
+	mac := hmac.New(sha256.New, cursorHMACKey())
+	mac.Write(raw)
+	expected := hex.EncodeToString(mac.Sum(nil)[:8])
+	if !hmac.Equal([]byte(expected), []byte(parts[1])) {
+		return nil, false
+	}
+	return raw, true
+}
 
 // Local Life Social Demand Network（R13 PRD Chapter21H）。
 // 核心规则：
@@ -810,8 +850,13 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		PostID    string    `json:"postId"`
 	}
 	if request.Cursor != "" {
-		if raw, decodeErr := base64.RawURLEncoding.DecodeString(request.Cursor); decodeErr == nil {
+		if raw, ok := verifyCursor(request.Cursor); ok {
 			_ = json.Unmarshal(raw, &cursor)
+		} else if raw, err := base64.RawURLEncoding.DecodeString(request.Cursor); err == nil {
+			// 兼容旧明文游标（滚动升级期），下个版本收紧为仅验签
+			_ = json.Unmarshal(raw, &cursor)
+		} else {
+			_ = json.Unmarshal([]byte("{}"), &cursor)
 		}
 	}
 	var posts []Post
@@ -865,7 +910,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	if hasMore && len(feed) > 0 {
 		last := feed[len(feed)-1]
 		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
-		nextCursor = base64.RawURLEncoding.EncodeToString(raw)
+		nextCursor = signCursor(raw)
 	}
 	// R14 §16.5：Feed Read Model Hydrate 媒体（mediaLookup + READY 过滤）
 	feedMedia := make(map[string][]PostMediaItem, len(feed))
