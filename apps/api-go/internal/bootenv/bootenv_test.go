@@ -43,14 +43,14 @@ func TestWarningsAllExpectedWhenNoEnv(t *testing.T) {
 
 func TestWarningsAllClearWhenProdEnvIsSet(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":               "postgres://u:p@h:5432/d",
-		"PROXY_LOGIN_PROVIDER":       "smtp",
-		"PROXY_SMTP_HOST":            "smtp.example.com",
-		"PROXY_OPERATOR_PRINCIPALS":  "prin_alice,prin_bob",
+		"DATABASE_URL":                 "postgres://u:p@h:5432/d",
+		"PROXY_LOGIN_PROVIDER":         "smtp",
+		"PROXY_SMTP_HOST":              "smtp.example.com",
+		"PROXY_OPERATOR_PRINCIPALS":    "prin_alice,prin_bob",
 		"MODELSTACK_CONTROL_PLANE_URL": "http://cp:14041",
 		"MODELSTACK_GATEWAY_URL":       "http://gw:14042",
 		"MODELSTACK_GATEWAY_API_KEY":   "secret",
-		"OBJECT_STORAGE_ENDPOINT":    "https://s3.example.com",
+		"OBJECT_STORAGE_ENDPOINT":      "https://s3.example.com",
 	}, func() {
 		w := Warnings()
 		if len(w) != 0 {
@@ -92,6 +92,17 @@ func TestWarningsTreatsEmptyOperatorPrincipalsAsFailClosed(t *testing.T) {
 		joined := strings.Join(w, "\n")
 		if !strings.Contains(joined, "PROXY_OPERATOR_PRINCIPALS is unset") {
 			t.Fatalf("empty operator principals should warn, got: %s", joined)
+		}
+	})
+}
+
+func TestWarningsRemindsOperatorToRestrictCloudflareOrigin(t *testing.T) {
+	withEnv(t, map[string]string{
+		"PROXY_TRUST_CLOUDFLARE_IP": "true",
+	}, func() {
+		joined := strings.Join(Warnings(), "\n")
+		if !strings.Contains(joined, "origin must reject direct public traffic") {
+			t.Fatalf("missing Cloudflare origin warning: %s", joined)
 		}
 	})
 }

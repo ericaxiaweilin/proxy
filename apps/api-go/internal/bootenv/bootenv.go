@@ -13,6 +13,8 @@ package bootenv
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 // Getenv is the indirection used to look up environment variables.
@@ -52,6 +54,26 @@ func Warnings() []string {
 	if Getenv("OBJECT_STORAGE_ENDPOINT") == "" {
 		warnings = append(warnings, "OBJECT_STORAGE_ENDPOINT is unset; media uploads will use the local filesystem sink (no CDN, no bucket lifecycle)")
 	}
+	if value := Getenv("PROXY_TRUST_CLOUDFLARE_IP"); value == "1" || value == "true" || value == "yes" || value == "on" {
+		warnings = append(warnings, "PROXY_TRUST_CLOUDFLARE_IP is enabled; the origin must reject direct public traffic before CF-Connecting-IP can be trusted")
+	}
+	if value := Getenv("PROXY_DB_MAX_CONNS"); value != "" {
+		if n, err := parseInt32(value); err != nil || n < 1 || n > 200 {
+			warnings = append(warnings, fmt.Sprintf("PROXY_DB_MAX_CONNS=%q is out of range 1-200; using safe default 20", value))
+		}
+	}
+	if value := Getenv("PROXY_DB_MIN_CONNS"); value != "" {
+		if n, err := parseInt32(value); err != nil || n < 0 {
+			warnings = append(warnings, fmt.Sprintf("PROXY_DB_MIN_CONNS=%q is invalid; using safe default", value))
+		} else if maxStr := Getenv("PROXY_DB_MAX_CONNS"); maxStr != "" {
+			if maxVal, err := parseInt32(maxStr); err == nil && n > maxVal {
+				warnings = append(warnings, fmt.Sprintf("PROXY_DB_MIN_CONNS=%q exceeds PROXY_DB_MAX_CONNS=%q; using safe default", value, maxStr))
+			}
+		}
+	}
+	if value := Getenv("PROXY_MIN_APP_VERSION"); value != "" && !isValidSemver(value) {
+		warnings = append(warnings, fmt.Sprintf("PROXY_MIN_APP_VERSION=%q is not a valid semver (expected e.g. 1.0.0); version enforcement will be best-effort", value))
+	}
 	return warnings
 }
 
@@ -60,4 +82,31 @@ func defaultMode(mode string) string {
 		return "simulated"
 	}
 	return mode
+}
+
+func parseInt32(s string) (int32, error) {
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return int32(n), nil
+}
+
+func isValidSemver(s string) bool {
+	s = strings.TrimSpace(strings.TrimPrefix(s, "v"))
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		for _, ch := range p {
+			if ch < '0' || ch > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }

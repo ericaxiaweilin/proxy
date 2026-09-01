@@ -18,6 +18,14 @@ implementations in production.
 | `API_HOST`        | no       | `0.0.0.0` | bind address |
 | `API_PORT`        | no       | `4100`  | listen port |
 | `DATABASE_URL`    | yes (prod) | unset (in-memory) | `postgres://user:pass@host:5432/db`. When unset, services fall back to the in-memory repository (dev/test only). |
+| `PROXY_DB_MAX_CONNS` | no | `20` | Per-process PostgreSQL connection ceiling (1–200). Lower this behind Hyperdrive/another pooler. |
+| `PROXY_DB_MIN_CONNS` | no | `2` | Warm connections (0–`PROXY_DB_MAX_CONNS`). Invalid values fail back to the safe default. |
+| `PROXY_TRUST_CLOUDFLARE_IP` | no | `false` | When true, rate limiting uses a validated `CF-Connecting-IP`. Enable only after firewall/Tunnel rules make the origin unreachable except through Cloudflare. `X-Forwarded-For` is deliberately ignored. |
+
+The anonymous feed read projection has a four-second origin deadline, bounded
+page size/cursor length, per-IP rate limiting, and `no-store` on failures.
+These controls prevent a slow database or attacker-controlled cache keys from
+exhausting the API while allowing successful pages to be cached at the edge.
 
 ## Login / Identity
 
@@ -115,6 +123,9 @@ instance behind a load balancer.
 
 1. `DATABASE_URL` points at a managed PostgreSQL ≥15 (read replica
    can be added later; the API is single-writer today).
+   The API bounds every process pool and periodically checks idle connections;
+   use `PROXY_DB_MAX_CONNS` to keep the total across replicas below the database
+   or Hyperdrive connection budget.
 2. `REDIS_URL` points at a managed Redis ≥6 with persistence off
    (idempotency store is recoverable from `command_id`).
 3. SMTP and SMS providers both configured; one is sufficient for
@@ -128,6 +139,8 @@ instance behind a load balancer.
    loses its model-routed rankings.
 6. `OBJECT_STORAGE_*` points at a private bucket; the API never
    serves public-URL media — every URL is signed at request time.
+7. If `PROXY_TRUST_CLOUDFLARE_IP=true`, block direct origin ingress first.
+   Otherwise a client can forge the header and evade per-IP controls.
 
 ## Rollback
 

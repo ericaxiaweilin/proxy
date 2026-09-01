@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -86,6 +87,43 @@ func TestPublicFeedIsCacheableAndRevalidates(t *testing.T) {
 	handler.ServeHTTP(revalidate, req)
 	if revalidate.Code != http.StatusNotModified {
 		t.Fatalf("revalidation status=%d", revalidate.Code)
+	}
+}
+
+func TestClientIPIgnoresSpoofedForwardingHeadersByDefault(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/feed", nil)
+	req.RemoteAddr = "192.0.2.10:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.90")
+	req.Header.Set("CF-Connecting-IP", "198.51.100.7")
+	if got := clientIP(req, false); got != "192.0.2.10" {
+		t.Fatalf("clientIP=%q, want socket peer", got)
+	}
+}
+
+func TestClientIPUsesValidatedCloudflareHeaderOnlyWhenTrusted(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/feed", nil)
+	req.RemoteAddr = "192.0.2.10:1234"
+	req.Header.Set("CF-Connecting-IP", "198.51.100.7")
+	if got := clientIP(req, true); got != "198.51.100.7" {
+		t.Fatalf("clientIP=%q, want Cloudflare client", got)
+	}
+	req.Header.Set("CF-Connecting-IP", "not-an-ip")
+	if got := clientIP(req, true); got != "192.0.2.10" {
+		t.Fatalf("invalid header clientIP=%q, want socket peer", got)
+	}
+}
+
+func TestPublicFeedRateLimitIsFailClosedAndNotCacheable(t *testing.T) {
+	localNet := localnet.New()
+	server := NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localNet, localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New())
+	server.RateLimit = NewRateLimiter(time.Minute, 1)
+	handler := server.Handler()
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/v1/feed", nil))
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/v1/feed", nil))
+	if second.Code != http.StatusTooManyRequests || second.Header().Get("Cache-Control") != "no-store" || second.Header().Get("Retry-After") == "" {
+		t.Fatalf("status=%d headers=%v body=%s", second.Code, second.Header(), second.Body.String())
 	}
 }
 

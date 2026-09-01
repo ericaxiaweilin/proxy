@@ -72,6 +72,11 @@ type Server struct {
 	Transactions  TransactionRunner
 	Operator      OperatorGate
 	RateLimit     *RateLimiter
+	// TrustCloudflareIP must only be enabled when the origin is reachable
+	// exclusively through Cloudflare. Otherwise CF-Connecting-IP is client
+	// controlled and must be ignored.
+	TrustCloudflareIP bool
+	ReadTimeout       time.Duration
 }
 
 type Authenticator interface {
@@ -105,7 +110,7 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if readyCheck != nil {
 		readyMode = "configured"
 	}
-	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.New(), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Scene: scene.New(), Facet: facet.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120)}
+	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.New(), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Scene: scene.New(), Facet: facet.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120), TrustCloudflareIP: envBool("PROXY_TRUST_CLOUDFLARE_IP"), ReadTimeout: 4 * time.Second}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -153,7 +158,20 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.LocalNet == nil {
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "feed_not_configured"})
+		return
+	}
+	if !s.rateAllow("ip:" + clientIP(r, s.TrustCloudflareIP) + ":public_feed") {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Retry-After", "60")
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate_limited"})
+		return
+	}
+	cursor := r.URL.Query().Get("cursor")
+	if len(cursor) > 512 {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_cursor"})
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -161,11 +179,17 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 		limit = 25
 	}
 	now := time.Now().UTC()
-	result := s.LocalNet.HandleContext(r.Context(), command.Envelope{
+	readTimeout := s.ReadTimeout
+	if readTimeout <= 0 {
+		readTimeout = 4 * time.Second
+	}
+	readContext, cancel := context.WithTimeout(r.Context(), readTimeout)
+	defer cancel()
+	result := s.LocalNet.HandleContext(readContext, command.Envelope{
 		CommandID: "public_feed_" + strconv.FormatInt(now.UnixNano(), 36), CommandType: "ListFeedPosts", CommandVersion: 1,
 		Actor: command.Actor{Type: "PUBLIC", ID: "anonymous_reader"}, Principal: command.Principal{Type: "PUBLIC", ID: "anonymous_reader"},
 		Target: command.Target{Type: "Feed", ID: "public"}, Purpose: "public_feed_read", RequestedAt: now.Format(time.RFC3339Nano),
-		Payload: map[string]any{"cursor": r.URL.Query().Get("cursor"), "limit": limit},
+		Payload: map[string]any{"cursor": cursor, "limit": limit},
 	})
 	if result.Outcome != "ACCEPTED" || result.OperationRef == "" || !json.Valid([]byte(result.OperationRef)) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -176,6 +200,7 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(payload))
 	w.Header().Set("Cache-Control", "public, max-age=15, stale-while-revalidate=120, stale-if-error=86400")
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Vary", "Accept-Encoding")
 	if r.Header.Get("If-None-Match") == etag {
@@ -502,7 +527,7 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	}
 	// Pre-auth per-IP rate limit: protects authentication and every command
 	// route from brute force (also bounds OTP challenge requests).
-	if !s.rateAllow("ip:" + clientIP(r) + ":" + envelope.CommandType) {
+	if !s.rateAllow("ip:" + clientIP(r, s.TrustCloudflareIP) + ":" + envelope.CommandType) {
 		result := command.Rejected(envelope, "RATE_LIMITED", "RESOURCE", "SAFE_RETRY", "command.rate_limited", nil)
 		writeResult(w, http.StatusTooManyRequests, result)
 		return
@@ -719,17 +744,32 @@ func (s *Server) rateAllow(scope string) bool {
 	return s.RateLimit.Allow(scope, time.Now())
 }
 
-func clientIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		first, _, _ := strings.Cut(forwarded, ",")
-		if first = strings.TrimSpace(first); first != "" {
-			return first
+func clientIP(r *http.Request, trustCloudflare bool) string {
+	if trustCloudflare {
+		if candidate := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); candidate != "" {
+			if parsed := net.ParseIP(candidate); parsed != nil {
+				return parsed.String()
+			}
 		}
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
+		if parsed := net.ParseIP(host); parsed != nil {
+			return parsed.String()
+		}
 	}
-	return r.RemoteAddr
+	if parsed := net.ParseIP(strings.TrimSpace(r.RemoteAddr)); parsed != nil {
+		return parsed.String()
+	}
+	return "unknown"
+}
+
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateEnvelope(envelope command.Envelope, routeCommandType string) *command.Result {

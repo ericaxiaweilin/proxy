@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -71,11 +73,36 @@ func runInTransaction(ctx context.Context, pool *pgxpool.Pool, operation func(co
 }
 
 func Open(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	config, err := poolConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	return pgxpool.NewWithConfig(ctx, config)
+}
+
+func poolConfig(databaseURL string) (*pgxpool.Config, error) {
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
 	}
+	maxConnections := envInt32("PROXY_DB_MAX_CONNS", 20, 1, 200)
+	minConnections := envInt32("PROXY_DB_MIN_CONNS", 2, 0, maxConnections)
+	config.MaxConns = maxConnections
+	config.MinConns = minConnections
 	config.MaxConnLifetime = 30 * time.Minute
+	config.MaxConnLifetimeJitter = 5 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
-	return pgxpool.NewWithConfig(ctx, config)
+	config.HealthCheckPeriod = 30 * time.Second
+	if config.ConnConfig.ConnectTimeout <= 0 {
+		config.ConnConfig.ConnectTimeout = 5 * time.Second
+	}
+	return config, nil
+}
+
+func envInt32(key string, fallback, minimum, maximum int32) int32 {
+	value, err := strconv.ParseInt(os.Getenv(key), 10, 32)
+	if err != nil || value < int64(minimum) || value > int64(maximum) {
+		return fallback
+	}
+	return int32(value)
 }
