@@ -40,6 +40,7 @@ export class SessionAuthClient {
       transport: Transport;
       now?: () => Date;
       refreshSkewMs?: number;
+      deviceProofProvider?: () => Promise<{ deviceId: string; deviceCredential: string }>;
     }
   ) {}
 
@@ -113,6 +114,11 @@ export class SessionAuthClient {
     } catch {
       current = undefined;
     }
+    // R15.38.6 DEBUG
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(`[proxy.R15.38.6.DEBUG.signOut] enter current=${current ? "present" : "absent"} current.signedOut=${current?.signedOut ?? "absent"}`);
+    }
     // R15.39: signOut 改为 "soft sign out" — 留 session 在 keychain 里
     //   (refreshToken 还在), 加 signedOut=true + signedOutAt 锁定状态。
     //   这样下次用户点 “继续” 可以走 silent re-auth (用 refreshToken
@@ -140,10 +146,18 @@ export class SessionAuthClient {
       };
       try {
         await this.input.secureSessionStore.write(signedOutSession);
-      } catch {
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          // eslint-disable-next-line no-console
+          console.log(`[proxy.R15.38.6.DEBUG.signOut] write signedOut=true succeeded, refreshExpiresAt=${signedOutSession.auth.refreshExpiresAt}`);
+        }
+      } catch (writeErr) {
         // 如果 keychain 写入失败 (e.g. refreshToken 过期), 最后手段是
         // 真正清掉, 避免后面 restoreNativeShell 又拿这个失效的 session 走
         // restore 逻辑。
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          // eslint-disable-next-line no-console
+          console.log(`[proxy.R15.38.6.DEBUG.signOut] write FAILED err=${writeErr instanceof Error ? writeErr.message : String(writeErr)}, falling back to clear()`);
+        }
         await this.input.secureSessionStore.clear().catch(() => undefined);
       }
     } else {
@@ -173,6 +187,7 @@ export class SessionAuthClient {
       throw new SessionExpiredError();
     }
     if (!current) throw new SessionExpiredError();
+    const deviceProof = await this.input.deviceProofProvider?.();
     const response = await this.send("/v1/commands/RefreshSession", {
       method: "POST",
       body: {
@@ -187,7 +202,11 @@ export class SessionAuthClient {
         purpose: "session_refresh",
         correlationId: this.nextCommandId("corr"),
         requestedAt: new Date((this.input.now ?? (() => new Date()))()).toISOString(),
-        payload: { refreshToken: current.auth.refreshToken }
+        payload: {
+          refreshToken: current.auth.refreshToken,
+          deviceId: deviceProof?.deviceId ?? "",
+          deviceCredential: deviceProof?.deviceCredential ?? ""
+        }
       }
     });
     let body: unknown;

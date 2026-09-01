@@ -29,6 +29,7 @@ import { createLastSignInStore, maskIdentifier, avatarLetterFor, type LastSignIn
 import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
 import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore } from "./native-clients";
+import { getOrCreateDeviceIdentity, rotateDeviceIdentity, INSTALLATION_DEVICE_ID_KEY } from "./device-credential";
 
 const APP_VERSION = "1.0.0";
 
@@ -37,7 +38,6 @@ const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, r
 WebBrowser.maybeCompleteAuthSession();
 
 const secureSessionStore = nativeSecureSessionStore;
-const INSTALLATION_DEVICE_ID_KEY = "proxy.installation.device-id.v1";
 // R15.36: 历史登录账户 — UI hint 存储层 (avatar + 脱敏 identifier)。
 const lastSignInStore = createLastSignInStore(nativeSecureStorageDriver);
 const nativeTransport: Transport = async (request) => {
@@ -61,18 +61,13 @@ const nativeTransport: Transport = async (request) => {
 let nativeLoginClient: LoginClient | undefined;
 async function getNativeLoginClient(): Promise<LoginClient> {
   if (nativeLoginClient) return nativeLoginClient;
-  let deviceId = await nativeSecureStorageDriver.getItem(INSTALLATION_DEVICE_ID_KEY);
-  if (!deviceId) {
-    deviceId = `device_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
-    await nativeSecureStorageDriver.setItem(INSTALLATION_DEVICE_ID_KEY, deviceId);
-  }
-  nativeLoginClient = new LoginClient({ baseUrl: localApiBaseUrl, deviceId, secureSessionStore, transport: nativeTransport });
+  const { deviceId, deviceCredential } = await getOrCreateDeviceIdentity(nativeSecureStorageDriver);
+  nativeLoginClient = new LoginClient({ baseUrl: localApiBaseUrl, deviceId, deviceCredential, secureSessionStore, transport: nativeTransport });
   return nativeLoginClient;
 }
 
 async function rotateGuestDeviceIdentity(): Promise<LoginClient> {
-  const deviceId = `device_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
-  await nativeSecureStorageDriver.setItem(INSTALLATION_DEVICE_ID_KEY, deviceId);
+  await rotateDeviceIdentity(nativeSecureStorageDriver);
   nativeLoginClient = undefined;
   return getNativeLoginClient();
 }

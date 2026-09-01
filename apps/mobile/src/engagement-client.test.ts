@@ -33,4 +33,31 @@ describe("EngagementClient moderation actions", () => {
     const client = new EngagementClient({ secureSessionStore: store, authClient: { request: async () => { throw new Error("should not reach"); } } });
     await expect(client.recordFeedPreference("post_1", "REDUCE_AUTHOR", "author_1")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
   });
+
+  // R15.38.5: 软登出后 (signedOut=true, accessToken="revoked", refreshToken 保留),
+  //   点 like 应该拋 OfflineFallbackSessionError, 不调 transport.
+  //   配合 mapEngagementError, UI 应该看到 "请登录重试", 不是 "检查连接"。
+  it("throws OfflineFallbackSessionError after soft signOut (signedOut=true)", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    await store.write({
+      userAccountId: "user_001",
+      auth: {
+        sessionId: "session_001",
+        userAccountId: "user_001",
+        principal: { type: "INDIVIDUAL", id: "user_001" },
+        accessToken: "revoked",
+        refreshToken: "refresh_keep_for_silent_reauth",
+        accessExpiresAt: "2026-08-14T01:00:00.000Z",
+        refreshExpiresAt: "2026-09-13T00:00:00.000Z",
+        rotation: 1
+      },
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      signedOut: true,
+      signedOutAt: "2026-08-14T00:00:00.000Z"
+    });
+    let transportCalled = false;
+    const client = new EngagementClient({ secureSessionStore: store, authClient: { request: async () => { transportCalled = true; throw new Error("should not be called"); } } });
+    await expect(client.reactToPost("post_1")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
+    expect(transportCalled).toBe(false);
+  });
 });
