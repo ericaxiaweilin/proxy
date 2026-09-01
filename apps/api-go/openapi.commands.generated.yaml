@@ -79,6 +79,8 @@ commands:
     domain: LocalNet
   - command: CreateObservationSet
     domain: Outcome
+  - command: CreateObservationTemplate
+    domain: Outcome
   - command: CreateOffer
     domain: Fulfillment
   - command: CreateOperatorCase
@@ -131,6 +133,8 @@ commands:
     domain: Media
   - command: GetMemory
     domain: Scene
+  - command: GetObservationTemplate
+    domain: Outcome
   - command: GetOffer
     domain: Fulfillment
   - command: GetPostEngagement
@@ -185,6 +189,8 @@ commands:
     domain: Fulfillment
   - command: ListMyScenes
     domain: Scene
+  - command: ListObservationTemplates
+    domain: Outcome
   - command: ListRequesterHomeItems
     domain: Demand
   - command: ListStatuses

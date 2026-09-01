@@ -50,6 +50,19 @@ type Learning struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type ObservationTemplate struct {
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Keys        []TemplateKey `json:"keys"`
+	CreatedAt   time.Time     `json:"createdAt"`
+}
+type TemplateKey struct {
+	Key         string `json:"key"`
+	Unit        string `json:"unit"`
+	Description string `json:"description"`
+}
+
 type Repository interface {
 	CreateSet(ctx context.Context, s ObservationSet) error
 	GetSet(ctx context.Context, id string) (ObservationSet, error)
@@ -58,18 +71,22 @@ type Repository interface {
 	CreateLearning(ctx context.Context, l Learning) error
 	GetLearning(ctx context.Context, id string) (Learning, error)
 	UpdateLearning(ctx context.Context, l Learning) error
+	CreateTemplate(ctx context.Context, t ObservationTemplate) error
+	GetTemplate(ctx context.Context, id string) (ObservationTemplate, error)
+	ListTemplates(ctx context.Context) ([]ObservationTemplate, error)
 }
 
 type MemoryRepository struct {
-	mu       sync.Mutex
-	sets     map[string]ObservationSet
-	deltas   map[string]OutcomeDelta
+	mu        sync.Mutex
+	sets      map[string]ObservationSet
+	deltas    map[string]OutcomeDelta
 	learnings map[string]Learning
-	events   []event.DomainEvent
+	templates map[string]ObservationTemplate
+	events    []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{sets: make(map[string]ObservationSet), deltas: make(map[string]OutcomeDelta), learnings: make(map[string]Learning)}
+	return &MemoryRepository{sets: make(map[string]ObservationSet), deltas: make(map[string]OutcomeDelta), learnings: make(map[string]Learning), templates: make(map[string]ObservationTemplate)}
 }
 func (r *MemoryRepository) CreateSet(_ context.Context, s ObservationSet) error {
 	r.mu.Lock()
@@ -119,6 +136,30 @@ func (r *MemoryRepository) UpdateLearning(_ context.Context, l Learning) error {
 	r.learnings[l.ID] = l
 	return nil
 }
+func (r *MemoryRepository) CreateTemplate(_ context.Context, t ObservationTemplate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.templates[t.ID] = t
+	return nil
+}
+func (r *MemoryRepository) GetTemplate(_ context.Context, id string) (ObservationTemplate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.templates[id]
+	if !ok {
+		return ObservationTemplate{}, errors.New("template not found")
+	}
+	return t, nil
+}
+func (r *MemoryRepository) ListTemplates(_ context.Context) ([]ObservationTemplate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]ObservationTemplate, 0, len(r.templates))
+	for _, t := range r.templates {
+		out = append(out, t)
+	}
+	return out, nil
+}
 
 type Service struct {
 	mu   sync.Mutex
@@ -135,7 +176,8 @@ func NewWithRepository(repo Repository) *Service {
 }
 func (s *Service) Supports(t string) bool {
 	switch t {
-	case "CreateObservationSet", "RecordOutcomeObservation", "FinalizeObservationSet", "CreateOutcomeComparison", "ConfirmOutcomeLearning", "DismissOutcomeLearning":
+	case "CreateObservationSet", "RecordOutcomeObservation", "FinalizeObservationSet", "CreateOutcomeComparison", "ConfirmOutcomeLearning", "DismissOutcomeLearning",
+		"CreateObservationTemplate", "GetObservationTemplate", "ListObservationTemplates":
 		return true
 	}
 	return false
@@ -157,6 +199,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.confirmLearning(ctx, e)
 	case "DismissOutcomeLearning":
 		return s.dismissLearning(ctx, e)
+	case "CreateObservationTemplate":
+		return s.createTemplate(ctx, e)
+	case "GetObservationTemplate":
+		return s.getTemplate(ctx, e)
+	case "ListObservationTemplates":
+		return s.listTemplates(ctx, e)
 	default:
 		return command.Rejected(e, "OUTCOME_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "outcome.unsupported", nil)
 	}
@@ -170,6 +218,13 @@ func (s *Service) createSet(ctx context.Context, e command.Envelope) command.Res
 	}
 	if !decode(e.Payload, &p) || p.TargetID == "" || p.TemplateID == "" || p.VenueID == "" {
 		return command.Rejected(e, "INVALID_SET", "VALIDATION", "AFTER_USER_ACTION", "outcome.invalid_set", nil)
+	}
+	// Template must exist if provided (enforces compatibility gate)
+	if _, err := s.repo.GetTemplate(ctx, p.TemplateID); err != nil {
+		// Allow legacy template IDs when no templates yet (bootstrap), otherwise enforce
+		if templates, _ := s.repo.ListTemplates(ctx); len(templates) > 0 {
+			return command.Rejected(e, "TEMPLATE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "outcome.template_not_found", nil)
+		}
 	}
 	now := s.clock.Now().UTC()
 	set := ObservationSet{ID: newID("os_"), TargetID: p.TargetID, TemplateID: p.TemplateID, VenueID: p.VenueID, Status: "DRAFT", CreatedAt: now}
@@ -310,6 +365,41 @@ func (s *Service) dismissLearning(ctx context.Context, e command.Envelope) comma
 	_ = s.repo.UpdateLearning(ctx, l)
 	ev := event.New("OutcomeLearningDismissed", "Learning", l.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), nil)
 	return command.Accepted(e, "Learning", l.ID, 1, l.Status, []string{ev.EventID})
+}
+func (s *Service) createTemplate(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		Name        string        `json:"name"`
+		Description string        `json:"description"`
+		Keys        []TemplateKey `json:"keys"`
+	}
+	if !decode(e.Payload, &p) || p.Name == "" {
+		return command.Rejected(e, "INVALID_TEMPLATE", "VALIDATION", "AFTER_USER_ACTION", "outcome.invalid_template", nil)
+	}
+	t := ObservationTemplate{ID: newID("tmpl_"), Name: p.Name, Description: p.Description, Keys: p.Keys, CreatedAt: s.clock.Now().UTC()}
+	_ = s.repo.CreateTemplate(ctx, t)
+	ev := event.New("ObservationTemplateCreated", "ObservationTemplate", t.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, t.CreatedAt, map[string]any{"name": t.Name})
+	return acceptedWithPayload(e, "ObservationTemplate", t.ID, 1, "CREATED", map[string]any{"template": t}, []event.DomainEvent{ev})
+}
+func (s *Service) getTemplate(ctx context.Context, e command.Envelope) command.Result {
+	id := e.Target.ID
+	if id == "" {
+		var p struct{ TemplateID string `json:"templateId"`}
+		if decode(e.Payload, &p) && p.TemplateID != "" {
+			id = p.TemplateID
+		}
+	}
+	if id == "" {
+		return command.Rejected(e, "INVALID_TEMPLATE_REF", "VALIDATION", "AFTER_USER_ACTION", "outcome.invalid_template_ref", nil)
+	}
+	t, err := s.repo.GetTemplate(ctx, id)
+	if err != nil {
+		return command.Rejected(e, "TEMPLATE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "outcome.template_not_found", nil)
+	}
+	return acceptedWithPayload(e, "ObservationTemplate", t.ID, 1, "FOUND", map[string]any{"template": t}, nil)
+}
+func (s *Service) listTemplates(ctx context.Context, e command.Envelope) command.Result {
+	items, _ := s.repo.ListTemplates(ctx)
+	return acceptedWithPayload(e, "ObservationTemplate", "", 1, "LISTED", map[string]any{"templates": items}, nil)
 }
 
 func decode(payload map[string]any, target any) bool {

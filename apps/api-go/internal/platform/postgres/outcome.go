@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -102,6 +103,45 @@ func (r *OutcomeRepository) UpdateLearning(ctx context.Context, l outcome.Learni
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE outcome.learnings SET status=$2 WHERE id=$1`, l.ID, l.Status)
 	return err
+}
+
+func (r *OutcomeRepository) CreateTemplate(ctx context.Context, t outcome.ObservationTemplate) error {
+	keys, _ := json.Marshal(t.Keys)
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO outcome.observation_templates (id, name, description, keys, created_at)
+		VALUES ($1,$2,$3,$4,$5)`, t.ID, t.Name, t.Description, keys, t.CreatedAt)
+	return err
+}
+
+func (r *OutcomeRepository) GetTemplate(ctx context.Context, id string) (outcome.ObservationTemplate, error) {
+	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, name, description, keys, created_at FROM outcome.observation_templates WHERE id=$1`, id)
+	var t outcome.ObservationTemplate
+	var keys []byte
+	if err := row.Scan(&t.ID, &t.Name, &t.Description, &keys, &t.CreatedAt); err != nil {
+		return outcome.ObservationTemplate{}, fmt.Errorf("%w: %v", errors.New("template not found"), err)
+	}
+	_ = json.Unmarshal(keys, &t.Keys)
+	return t, nil
+}
+
+func (r *OutcomeRepository) ListTemplates(ctx context.Context) ([]outcome.ObservationTemplate, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT id, name, description, keys, created_at FROM outcome.observation_templates ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []outcome.ObservationTemplate
+	for rows.Next() {
+		var t outcome.ObservationTemplate
+		var keys []byte
+		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &keys, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(keys, &t.Keys)
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 var _ outcome.Repository = (*OutcomeRepository)(nil)
