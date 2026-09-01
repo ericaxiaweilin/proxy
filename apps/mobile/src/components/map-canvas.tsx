@@ -222,16 +222,15 @@ export function MapCanvas({
         <Marker
           coordinate={pinLatLng}
           draggable
-          // R15.32.1: pinColor="magenta" is the closest valid
-          // react-native-maps system color to Proxy violet (#8033F0).
-          // Previously we tried a custom <MapPin> child but the SVG
-          // did not render inside the MapKit marker view on iOS,
-          // which left the entire map blank from the user's POV
-          // (the marker view occupied space but the pin never painted,
-          // and the surrounding layout broke). System pin is reliable
-          // + draggable + ~violet tone, which is good enough until we
-          // move to an Image-backed icon in R15.32.2.
-          pinColor="magenta"
+          // R15.32.1.2: PNG-backed violet teardrop icon. The
+          // <Marker icon={require(...)}> path is the recommended way
+          // for a custom marker on iOS MapKit — it gives us a
+          // proper UIImage-backed annotation view (vs an SVG child
+          // which never paints inside the MapKit view hierarchy).
+          // Asset: 24×30 logical, 48×60 @2x, 72×90 @3x.
+          // Anchor defaults to (0.5, 1.0) — bottom-center, so the
+          // teardrop tip sits exactly on the marker's coordinate.
+          icon={require("../../assets/map-pin/pin-violet.png")}
           title={cityHint}
           description={`半径 ${radiusMeters / 1000} km`}
         />
