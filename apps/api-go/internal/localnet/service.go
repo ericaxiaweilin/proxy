@@ -852,11 +852,14 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	if request.Cursor != "" {
 		if raw, ok := verifyCursor(request.Cursor); ok {
 			_ = json.Unmarshal(raw, &cursor)
+		} else if strings.Contains(request.Cursor, ".") {
+			// 带签名的游标验签失败 → 视为篡改，拒绝而非回退首屏（防缓存投毒）
+			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
 		} else if raw, err := base64.RawURLEncoding.DecodeString(request.Cursor); err == nil {
 			// 兼容旧明文游标（滚动升级期），下个版本收紧为仅验签
 			_ = json.Unmarshal(raw, &cursor)
 		} else {
-			_ = json.Unmarshal([]byte("{}"), &cursor)
+			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
 		}
 	}
 	var posts []Post

@@ -127,6 +127,29 @@ func TestPublicFeedRateLimitIsFailClosedAndNotCacheable(t *testing.T) {
 	}
 }
 
+func TestPublicFeedTamperedCursorIsNotCacheable(t *testing.T) {
+	t.Setenv("PROXY_CURSOR_HMAC_KEY", "test-cursor-key-123")
+	localNet := localnet.New()
+	// 先让 feed 产生一个合法签名游标
+	for i := 0; i < 2; i++ {
+		localNet.Handle(command.Envelope{CommandID: "c1", CommandType: "CreatePost", CommandVersion: 1, Actor: command.Actor{Type: "USER", ID: "user_001"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_001"}, Target: command.Target{Type: "Post", ID: "new"}, IdempotencyKey: "k1", Purpose: "test", CorrelationID: "corr", RequestedAt: time.Now().Format(time.RFC3339), Payload: map[string]any{"authorType": "AGENT", "body": "post", "visibility": "PUBLIC"}})
+	}
+	first := localNet.Handle(command.Envelope{CommandID: "c2", CommandType: "ListFeedPosts", CommandVersion: 1, Actor: command.Actor{Type: "PUBLIC", ID: "anonymous_reader"}, Principal: command.Principal{Type: "PUBLIC", ID: "anonymous_reader"}, Target: command.Target{Type: "Feed", ID: "public"}, IdempotencyKey: "k2", Purpose: "public_feed_read", CorrelationID: "corr2", RequestedAt: time.Now().Format(time.RFC3339), Payload: map[string]any{"limit": 1}})
+	var payload struct {
+		NextCursor string `json:"nextCursor"`
+	}
+	_ = json.Unmarshal([]byte(first.OperationRef), &payload)
+	tampered := payload.NextCursor + "x"
+	server := NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localNet, localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New())
+	handler := server.Handler()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/feed?cursor="+tampered, nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("tampered cursor must be 400 no-store, got %d %v body=%s", rec.Code, rec.Header(), rec.Body.String())
+	}
+}
+
 func apiEnvelope(commandType string, payload map[string]any, target command.Target, idempotency string) command.Envelope {
 	return command.Envelope{
 		CommandID:      "cmd_" + idempotency,

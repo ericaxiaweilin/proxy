@@ -833,10 +833,9 @@ func TestListFeedPosts_BackdropCacheAvoidsN1(t *testing.T) {
 	}
 }
 
-func TestListFeedPosts_CursorIsSignedAndTamperFallsBackToFirstPage(t *testing.T) {
+func TestListFeedPosts_CursorIsSignedAndTamperIsRejected(t *testing.T) {
 	t.Setenv("PROXY_CURSOR_HMAC_KEY", "test-cursor-key-123")
 	s := New()
-	// 创建 3 个帖以便分页
 	for i := 0; i < 3; i++ {
 		s.Handle(envelopeFor("", "CreatePost", map[string]any{
 			"authorType": "AGENT", "body": "post", "visibility": "PUBLIC",
@@ -855,32 +854,15 @@ func TestListFeedPosts_CursorIsSignedAndTamperFallsBackToFirstPage(t *testing.T)
 	if firstPayload.NextCursor == "" || !firstPayload.HasMore {
 		t.Fatal("expected nextCursor")
 	}
-	// 篡改：改一个字符，签名应失效并回退首屏（不泄露）
+	// 篡改：改一个字符，签名应失效并返回 INVALID_CURSOR
 	tampered := firstPayload.NextCursor[:len(firstPayload.NextCursor)-1] + "x"
 	secondTampered := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"cursor": tampered, "limit": 1}))
-	if secondTampered.Outcome != "ACCEPTED" {
-		t.Fatalf("tampered cursor should not error, got %v", secondTampered.Error)
-	}
-	var tamperedPayload struct {
-		Posts []map[string]any `json:"posts"`
-	}
-	_ = json.Unmarshal([]byte(secondTampered.OperationRef), &tamperedPayload)
-	if len(tamperedPayload.Posts) != 1 {
-		t.Fatalf("tampered should fallback to first page, got %d", len(tamperedPayload.Posts))
+	if secondTampered.Outcome != "REJECTED" || secondTampered.Error == nil || secondTampered.Error.ErrorCode != "INVALID_CURSOR" {
+		t.Fatalf("tampered cursor must be REJECTED INVALID_CURSOR, got %+v", secondTampered)
 	}
 	// 正常游标应翻到第二页
 	second := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"cursor": firstPayload.NextCursor, "limit": 1}))
 	if second.Outcome != "ACCEPTED" {
 		t.Fatalf("second page: %v", second.Error)
-	}
-	var secondPayload struct {
-		Posts []map[string]any `json:"posts"`
-	}
-	_ = json.Unmarshal([]byte(second.OperationRef), &secondPayload)
-	if len(secondPayload.Posts) != 1 {
-		t.Fatal("second page missing")
-	}
-	if secondPayload.Posts[0]["postId"] == tamperedPayload.Posts[0]["postId"] {
-		t.Fatal("tampered cursor should not equal valid second page")
 	}
 }

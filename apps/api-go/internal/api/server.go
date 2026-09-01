@@ -191,6 +191,11 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 		Target: command.Target{Type: "Feed", ID: "public"}, Purpose: "public_feed_read", RequestedAt: now.Format(time.RFC3339Nano),
 		Payload: map[string]any{"cursor": cursor, "limit": limit},
 	})
+	if result.Error != nil && result.Error.ErrorCode == "INVALID_CURSOR" {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_cursor"})
+		return
+	}
 	if result.Outcome != "ACCEPTED" || result.OperationRef == "" || !json.Valid([]byte(result.OperationRef)) {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "feed_temporarily_unavailable"})
