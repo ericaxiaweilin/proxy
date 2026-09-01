@@ -321,9 +321,13 @@ const styles = StyleSheet.create({
     padding: 12
   },
   // R15.32.1: the sheet is now a column with head + tabs + scroll +
-  // optional footer. maxHeight caps the whole stack; the scroll view
-  // flexes inside to absorb the footer's space.
-  sheet: { backgroundColor: color.white, borderRadius: 25, maxHeight: "92%", padding: 19, paddingBottom: 12 },
+  // optional footer. `maxHeight` caps the whole stack; `flex: 1` is
+  // required so the sheet fills the available vertical space inside
+  // the overlay (which is itself a flex column with `flex: 1`). Without
+  // `flex: 1` the sheet would shrink to its content's natural height
+  // and the inner `ScrollView flex: 1` would collapse to 0, hiding the
+  // map entirely.
+  sheet: { backgroundColor: color.white, borderRadius: 25, flex: 1, maxHeight: "92%", padding: 19, paddingBottom: 12 },
   head: { paddingBottom: 10, paddingHorizontal: 1 },
   headTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   headSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
