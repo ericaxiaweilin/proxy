@@ -57,3 +57,33 @@ func TestDynamicRedemptionCodeExpires(t *testing.T) {
 		t.Fatalf("expected expiry, got %#v", result)
 	}
 }
+
+func TestRedemptionIsNotReplayable(t *testing.T) {
+	s := New()
+	s.clock = func() time.Time { return time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC) }
+	opened := s.Handle(envelope("OpenVoucherRedemption", map[string]any{"voucherId": "CV2508210001"}))
+	if opened.Outcome != "ACCEPTED" {
+		t.Fatalf("open must succeed, got %#v Error=%+v", opened, opened.Error)
+	}
+	redemptionRaw, ok := payload(t, opened)["redemption"].(map[string]any)
+	if !ok {
+		t.Fatalf("redemption missing in payload: %s", opened.OperationRef)
+	}
+	rid, _ := redemptionRaw["redemptionId"].(string)
+	if rid == "" {
+		t.Fatalf("redemptionId missing")
+	}
+	first := s.Handle(envelope("ConfirmVoucherRedemption", map[string]any{"redemptionId": rid}))
+	if first.Outcome != "ACCEPTED" {
+		t.Fatalf("first confirm must succeed, got %#v", first)
+	}
+	second := s.Handle(envelope("ConfirmVoucherRedemption", map[string]any{"redemptionId": rid}))
+	if second.Error == nil || second.Error.ErrorCode != "REDEMPTION_ALREADY_USED" {
+		t.Fatalf("replay must be rejected, got %#v", second)
+	}
+	// Redemption already used must not allow a second voucher state transition
+	settled := s.Handle(envelope("SettleVoucher", map[string]any{"voucherId": "CV2508210001"}))
+	if settled.Outcome != "ACCEPTED" {
+		t.Fatalf("settle after first confirm must succeed, got %#v", settled)
+	}
+}
