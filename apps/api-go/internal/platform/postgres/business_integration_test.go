@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/business"
+	"github.com/proxy-app/proxy-api/internal/command"
 )
 
 // TestBusinessPostgresRoundTrip exercises the M9 business workspace
@@ -29,6 +29,12 @@ func TestBusinessPostgresRoundTrip(t *testing.T) {
 	ownerA := "user_biz_pg_ownerA_" + itoa(run)
 	ownerB := "user_biz_pg_ownerB_" + itoa(run)
 	stranger := "user_biz_pg_stranger_" + itoa(run)
+	staff := "user_biz_pg_staff_" + itoa(run)
+	imposter := "user_biz_pg_imposter_" + itoa(run)
+	invalidRoleUser := "user_biz_pg_x_" + itoa(run)
+	users := []string{ownerA, ownerB, stranger, staff, imposter, invalidRoleUser}
+	seedBusinessUsersPG(t, pool, users)
+	t.Cleanup(func() { cleanupBusinessUsersPG(t, pool, users) })
 
 	// 1. Create a business account for owner A.
 	r := svc.HandleContext(ctx, bizEnvelope("CreateBusinessAccount", map[string]any{
@@ -62,7 +68,7 @@ func TestBusinessPostgresRoundTrip(t *testing.T) {
 
 	// 4. AddBusinessMember as owner A — must ACCEPT.
 	r = svc.HandleContext(ctx, bizEnvelope("AddBusinessMember", map[string]any{
-		"businessId": bizA, "userId": "user_biz_pg_staff_" + itoa(run), "role": "OPERATOR",
+		"businessId": bizA, "userId": staff, "role": "OPERATOR",
 	}, ownerA))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("AddBusinessMember as owner: %+v", r.Error)
@@ -71,7 +77,7 @@ func TestBusinessPostgresRoundTrip(t *testing.T) {
 	// 5. AddBusinessMember as a stranger — must be REJECTED with
 	// BUSINESS_ADMIN_REQUIRED.
 	r = svc.HandleContext(ctx, bizEnvelope("AddBusinessMember", map[string]any{
-		"businessId": bizA, "userId": "user_biz_pg_imposter_" + itoa(run), "role": "ADMIN",
+		"businessId": bizA, "userId": imposter, "role": "ADMIN",
 	}, stranger))
 	if r.Outcome != "REJECTED" {
 		t.Fatalf("stranger AddBusinessMember must be REJECTED, got %s", r.Outcome)
@@ -83,7 +89,7 @@ func TestBusinessPostgresRoundTrip(t *testing.T) {
 	// 6. AddBusinessMember with a role outside the allow-list must be
 	// REJECTED (validation, not authorization).
 	r = svc.HandleContext(ctx, bizEnvelope("AddBusinessMember", map[string]any{
-		"businessId": bizA, "userId": "user_biz_pg_x_" + itoa(run), "role": "GOD_MODE",
+		"businessId": bizA, "userId": invalidRoleUser, "role": "GOD_MODE",
 	}, ownerA))
 	if r.Outcome != "REJECTED" {
 		t.Fatalf("invalid role must be REJECTED, got %s", r.Outcome)
@@ -189,6 +195,25 @@ func cleanupBusinessPG(t *testing.T, pool *pgxpool.Pool, ids []string) {
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM business.accounts WHERE id = ANY($1)`, ids); err != nil {
 		t.Logf("cleanup accounts: %v", err)
+	}
+}
+
+func seedBusinessUsersPG(t *testing.T, pool *pgxpool.Pool, userIDs []string) {
+	t.Helper()
+	for _, userID := range userIDs {
+		if _, err := pool.Exec(context.Background(), `
+			INSERT INTO identity.user_accounts (id, status)
+			VALUES ($1, 'ACTIVE') ON CONFLICT (id) DO NOTHING`, userID); err != nil {
+			t.Fatalf("seed business user %s: %v", userID, err)
+		}
+	}
+}
+
+func cleanupBusinessUsersPG(t *testing.T, pool *pgxpool.Pool, userIDs []string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		DELETE FROM identity.user_accounts WHERE id = ANY($1)`, userIDs); err != nil {
+		t.Logf("cleanup business users: %v", err)
 	}
 }
 
