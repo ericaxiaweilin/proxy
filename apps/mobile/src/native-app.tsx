@@ -7,6 +7,7 @@ import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
 import { DemandClient } from "./demand-client";
 import { LoginClient, LoginCommandRejectedError } from "./login-client";
+import { formatVietnamesePhoneForDisplay, normalizeVietnamesePhone, vietnamesePhoneReady } from "./vn-phone";
 import { googleAuthConfigured, type GoogleClientConfig } from "./google-auth-config";
 import { LocalNetClient } from "./localnet-client";
 import { MediaClient } from "./media-client";
@@ -257,11 +258,16 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     // 自动补全 gmail.com 后缀（用户只输用户名时）
     if (isEmail && rawEmail && !rawEmail.includes("@")) rawEmail = `${rawEmail}@gmail.com`;
     if (isEmail && rawEmail !== googleEmail.trim().toLowerCase()) setGoogleEmail(rawEmail);
-    const identifier = isEmail ? rawEmail : `+84${phone.replace(/\D/g, "")}`;
+    const identifier = isEmail ? rawEmail : normalizeVietnamesePhone(phone);
     if (isEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
       setError("请输入有效的 Google 邮箱地址（可只输用户名自动补全 @gmail.com）。");
       setBusy(false);
     } else {
+      if (!isEmail && identifier === "") {
+        setError("请输入有效的越南手机号（09xxxxxxxx / +84xxxxxxxxx），座机请带区号如 02412345678。");
+        setBusy(false);
+        return;
+      }
       try {
         const loginClient = await getNativeLoginClient();
         const result = await loginClient.beginPasswordlessAuthentication({
@@ -307,13 +313,13 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           if (!retrySucceeded) {
             setError(
               `DEBUG ${err instanceof Error ? err.message : String(err)}`.slice(0, 240) ||
-                (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。")
+                (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号格式（09xxxxxxxx / +84xxxxxxxxx）。")
             );
           }
         } else {
           setError(
             `DEBUG ${err instanceof Error ? err.message : String(err)}`.slice(0, 240) ||
-              (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。")
+              (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号格式（09xxxxxxxx / +84xxxxxxxxx）。")
           );
         }
       } finally {
@@ -373,7 +379,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
         <Text style={styles.secondary}>{authMode === "login" ? "手机号/邮箱验证登录" : "手机号/邮箱验证后自动注册，默认 Individual Requester"}</Text>
         {challengeId ? (
           <>
-            <Text style={styles.helper}>验证码已发送至 {authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : `+84 ${phone.replace(/\D/g, "")}`}</Text>
+            <Text style={styles.helper}>验证码已发送至 {authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : formatVietnamesePhoneForDisplay(normalizeVietnamesePhone(phone))}</Text>
             <TextInput
               autoFocus
               blurOnSubmit
@@ -425,11 +431,11 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
               </>
             ) : (
               <>
-                <Text style={styles.divider}>或使用越南手机号</Text>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="请输入手机号" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
-                <View style={[styles.button, busy || phone.replace(/\D/g, "").length < 8 ? styles.disabled : null]}>
+                <Text style={styles.divider}>或使用越南手机号（可输 09… / +84… / 0084…）</Text>
+                <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="0912345678 或粘贴 +84 号码" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
+                <View style={[styles.button, busy || !vietnamesePhoneReady(phone) ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
-                  <Pressable disabled={busy || phone.replace(/\D/g, "").length < 8} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
+                  <Pressable disabled={busy || !vietnamesePhoneReady(phone)} onPress={() => void requestChallenge()} style={styles.buttonPressable}>
                     <Text style={styles.buttonText}>{busy ? "发送中…" : "获取验证码"}</Text>
                   </Pressable>
                 </View>
