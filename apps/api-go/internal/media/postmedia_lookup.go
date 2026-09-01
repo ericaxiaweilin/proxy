@@ -7,6 +7,14 @@ import (
 	"github.com/proxy-app/proxy-api/internal/localnet"
 )
 
+// bulkReadRepository is implemented by durable repositories so a feed page is
+// hydrated with two bounded queries instead of one asset + one variant query
+// per media item. Memory/custom repositories continue through the safe fallback.
+type bulkReadRepository interface {
+	GetAssets(ctx context.Context, ids []string) ([]MediaAsset, error)
+	ListVariantsForAssets(ctx context.Context, ids []string) ([]MediaVariant, error)
+}
+
 // PostMediaLookup 实现 localnet.MediaLookup：Feed Read Model 的媒体详情 Hydrate。
 type PostMediaLookup struct {
 	service *Service
@@ -21,53 +29,71 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 		return nil, errors.New("media service not configured")
 	}
 	result := make(map[string]localnet.MediaAssetInfo, len(ids))
+	if bulk, ok := l.service.repository.(bulkReadRepository); ok {
+		assets, err := bulk.GetAssets(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		variants, err := bulk.ListVariantsForAssets(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		variantsByAsset := make(map[string][]MediaVariant, len(assets))
+		for _, variant := range variants {
+			if variant.Status == "READY" {
+				variantsByAsset[variant.MediaAssetID] = append(variantsByAsset[variant.MediaAssetID], variant)
+			}
+		}
+		for _, asset := range assets {
+			result[asset.MediaAssetID] = mediaAssetInfo(asset, variantsByAsset[asset.MediaAssetID])
+		}
+		return result, nil
+	}
 	for _, id := range ids {
 		asset, err := l.service.repository.GetAsset(ctx, id)
 		if err != nil {
 			continue // 找不到的媒体跳过（不阻塞 Feed）
 		}
-		info := localnet.MediaAssetInfo{
-			MediaAssetID:     asset.MediaAssetID,
-			MediaType:        asset.MediaType,
-			ThumbnailURL:     asset.ThumbnailURL,
-			PlaybackURL:      asset.PlaybackURL,
-			Width:            asset.Width,
-			Height:           asset.Height,
-			DurationMs:       asset.DurationMs,
-			ProcessingStatus: asset.ProcessingStatus,
-			ModerationStatus: asset.ModerationStatus,
-			VisibilityClass:  asset.VisibilityClass,
-			DominantColorHex: asset.DominantColorHex,
-		}
 		variants, variantErr := l.service.ListReadyVariants(ctx, id)
-		if variantErr == nil {
-			for _, variant := range variants {
-				url := "/v1/media/variant/" + variant.MediaVariantID
-				switch variant.Purpose {
-				case "ORIGINAL":
-					info.OriginalAvailable = true
-				case "FEED_1X":
-					info.FeedURL = url
-				case "FEED_2X":
-					info.Feed2xURL = url
-				case "FEED_1X_HINT":
-					info.Feed2xHintURL = url
-				case "FEED_1X_NATURAL":
-					info.Feed2xNaturalURL = url
-				case "GALLERY":
-					info.GalleryURL = url
-				case "PLACEHOLDER":
-					info.PlaceholderURL = url
-				}
-			}
+		if variantErr != nil {
+			variants = nil
 		}
-		// 透传 compositionHint（§5.2.2）。为空时 nil，前端走启发式回落。
-		if asset.CompositionHint != nil {
-			info.CompositionHint = toCompositionHintDTO(asset.CompositionHint)
-		}
-		result[id] = info
+		result[id] = mediaAssetInfo(asset, variants)
 	}
 	return result, nil
+}
+
+func mediaAssetInfo(asset MediaAsset, variants []MediaVariant) localnet.MediaAssetInfo {
+	info := localnet.MediaAssetInfo{
+		MediaAssetID: asset.MediaAssetID, MediaType: asset.MediaType,
+		ThumbnailURL: asset.ThumbnailURL, PlaybackURL: asset.PlaybackURL,
+		Width: asset.Width, Height: asset.Height, DurationMs: asset.DurationMs,
+		ProcessingStatus: asset.ProcessingStatus, ModerationStatus: asset.ModerationStatus,
+		VisibilityClass: asset.VisibilityClass, DominantColorHex: asset.DominantColorHex,
+	}
+	for _, variant := range variants {
+		url := "/v1/media/variant/" + variant.MediaVariantID
+		switch variant.Purpose {
+		case "ORIGINAL":
+			info.OriginalAvailable = true
+		case "FEED_1X":
+			info.FeedURL = url
+		case "FEED_2X":
+			info.Feed2xURL = url
+		case "FEED_1X_HINT":
+			info.Feed2xHintURL = url
+		case "FEED_1X_NATURAL":
+			info.Feed2xNaturalURL = url
+		case "GALLERY":
+			info.GalleryURL = url
+		case "PLACEHOLDER":
+			info.PlaceholderURL = url
+		}
+	}
+	if asset.CompositionHint != nil {
+		info.CompositionHint = toCompositionHintDTO(asset.CompositionHint)
+	}
+	return info
 }
 
 // toCompositionHintDTO 把 media.MediaCompositionHint 转 wire DTO。

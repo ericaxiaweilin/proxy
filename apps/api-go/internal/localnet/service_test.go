@@ -207,10 +207,12 @@ func TestRecordAttribution(t *testing.T) {
 // stub is intentionally minimal — just enough to prove that
 // MediaAssetInfo.DominantColorHex is propagated to PostMediaItem.
 type stubMediaLookup struct {
-	assets map[string]MediaAssetInfo
+	assets      map[string]MediaAssetInfo
+	lookupCalls int
 }
 
 func (s *stubMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (map[string]MediaAssetInfo, error) {
+	s.lookupCalls++
 	out := map[string]MediaAssetInfo{}
 	for _, id := range ids {
 		if info, ok := s.assets[id]; ok {
@@ -218,6 +220,31 @@ func (s *stubMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 		}
 	}
 	return out, nil
+}
+
+func TestListFeedPosts_BatchesMediaHydrationAcrossPosts(t *testing.T) {
+	lookup := &stubMediaLookup{assets: map[string]MediaAssetInfo{
+		"a": {MediaAssetID: "a", MediaType: "IMAGE", ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC"},
+		"b": {MediaAssetID: "b", MediaType: "VIDEO", ProcessingStatus: "READY", ModerationStatus: "APPROVED", VisibilityClass: "PUBLIC"},
+	}}
+	s := NewWithMediaLookup(NewMemoryRepository(), lookup)
+	for _, id := range []string{"a", "b"} {
+		result := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+			"body": id, "visibility": "PUBLIC",
+			"mediaRefs": []map[string]any{{"mediaAssetId": id, "sortOrder": 0}},
+		}))
+		if result.Outcome != "ACCEPTED" {
+			t.Fatalf("create post %s: %+v", id, result.Error)
+		}
+	}
+	lookup.lookupCalls = 0 // Ignore publication authorization calls.
+	result := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed: %+v", result.Error)
+	}
+	if lookup.lookupCalls != 1 {
+		t.Fatalf("expected one page-wide media lookup, got %d", lookup.lookupCalls)
+	}
 }
 
 func (s *stubMediaLookup) AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error {

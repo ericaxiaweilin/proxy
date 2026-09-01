@@ -92,6 +92,48 @@ func (r *MediaRepository) GetAsset(ctx context.Context, id string) (media.MediaA
 	return a, nil
 }
 
+// GetAssets hydrates one feed page in a single query. Missing IDs are omitted;
+// callers treat missing media as an item-level degradation, not a feed failure.
+func (r *MediaRepository) GetAssets(ctx context.Context, ids []string) ([]media.MediaAsset, error) {
+	if len(ids) == 0 {
+		return []media.MediaAsset{}, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT `+mediaAssetColumns+`
+		FROM media.media_assets WHERE media_asset_id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]media.MediaAsset, 0, len(ids))
+	for rows.Next() {
+		var a media.MediaAsset
+		var hintJSON []byte
+		var computedAt *time.Time
+		if err := rows.Scan(
+			&a.MediaAssetID, &a.OwnerPrincipalType, &a.OwnerPrincipalID, &a.MediaType,
+			&a.OriginalStorageKey, &a.PlaybackStorageKey, &a.ThumbnailStorageKey,
+			&a.MimeType, &a.Width, &a.Height, &a.DurationMs, &a.Codec,
+			&a.ProcessingStatus, &a.PlaybackURL, &a.ThumbnailURL, &a.SourceBytes, &a.ChecksumSHA256,
+			&a.Orientation, &a.ColorSpace, &a.HasAlpha, &a.Animated, &a.ModerationStatus, &a.VisibilityClass,
+			&hintJSON, &a.CompositionRecipeVersion, &computedAt, &a.CompositionConfidence,
+			&a.DominantColorHex, &a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		a.CompositionComputedAt = computedAt
+		if len(hintJSON) > 0 {
+			hint, err := decodeCompositionHint(hintJSON)
+			if err != nil {
+				return nil, err
+			}
+			a.CompositionHint = hint
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
 func (r *MediaRepository) UpdateAsset(ctx context.Context, a media.MediaAsset, expectedStatus string) error {
 	hintJSON, hintErr := encodeCompositionHint(a.CompositionHint)
 	if hintErr != nil {
@@ -234,6 +276,35 @@ func (r *MediaRepository) ListVariants(ctx context.Context, mediaAssetID string)
 	}
 	defer rows.Close()
 	result := []media.MediaVariant{}
+	for rows.Next() {
+		var variant media.MediaVariant
+		if err := rows.Scan(
+			&variant.MediaVariantID, &variant.MediaAssetID, &variant.Purpose, &variant.RecipeVersion,
+			&variant.Format, &variant.Width, &variant.Height, &variant.Bytes, &variant.StorageKey,
+			&variant.ContentHash, &variant.Status, &variant.CreatedAt, &variant.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, variant)
+	}
+	return result, rows.Err()
+}
+
+func (r *MediaRepository) ListVariantsForAssets(ctx context.Context, ids []string) ([]media.MediaVariant, error) {
+	if len(ids) == 0 {
+		return []media.MediaVariant{}, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT media_variant_id, media_asset_id, purpose, recipe_version, format,
+			width, height, COALESCE(bytes,0), storage_key, COALESCE(content_hash,''), status, created_at, updated_at
+		FROM media.media_variants
+		WHERE media_asset_id = ANY($1) AND status='READY'
+		ORDER BY media_asset_id, purpose`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]media.MediaVariant, 0, len(ids)*2)
 	for rows.Next() {
 		var variant media.MediaVariant
 		if err := rows.Scan(

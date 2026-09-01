@@ -28,6 +28,25 @@ func (logDelivery) Deliver(_ context.Context, e event.DomainEvent) error {
 	return nil
 }
 
+type inboxDedupeDelivery struct {
+	inner outbox.Delivery
+	inbox *postgres.InboxRepository
+}
+
+func (d inboxDedupeDelivery) Deliver(ctx context.Context, e event.DomainEvent) error {
+	if d.inbox != nil {
+		ok, err := d.inbox.TryProcess(ctx, e.EventID, e.EventType, e.AggregateType, e.AggregateID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			log.Printf("outbox inbox dedupe: skip duplicate event_id=%s", e.EventID)
+			return nil
+		}
+	}
+	return d.inner.Deliver(ctx, e)
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -49,10 +68,11 @@ func main() {
 	if workerID == "" {
 		workerID, _ = os.Hostname()
 	}
-	delivery := outbox.Delivery(logDelivery{})
+	baseDelivery := outbox.Delivery(logDelivery{})
 	if os.Getenv("OUTBOX_DELIVERY") == "unavailable" {
-		delivery = unavailableDelivery{}
+		baseDelivery = unavailableDelivery{}
 	}
+	delivery := outbox.Delivery(inboxDedupeDelivery{inner: baseDelivery, inbox: postgres.NewInboxRepository(pool)})
 	outboxWorker := outbox.Worker{
 		Repository:  postgres.NewOutboxRepository(pool),
 		Delivery:    delivery,

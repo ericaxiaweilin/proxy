@@ -857,16 +857,25 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		return bd.Hex
 	}
 	if s.mediaLookup != nil {
+		// One page-wide hydration call. The durable media repository implements
+		// this as two bounded SQL queries (assets + variants), eliminating the
+		// previous posts × media N+1 pattern.
+		mediaIDs := make([]string, 0)
+		seenMediaIDs := make(map[string]struct{})
+		for _, p := range feed {
+			for _, ref := range p.MediaRefs {
+				if _, seen := seenMediaIDs[ref.MediaAssetID]; !seen {
+					seenMediaIDs[ref.MediaAssetID] = struct{}{}
+					mediaIDs = append(mediaIDs, ref.MediaAssetID)
+				}
+			}
+		}
+		assets, lookupErr := s.mediaLookup.LookupMediaAssets(ctx, mediaIDs)
+		if lookupErr != nil {
+			assets = map[string]MediaAssetInfo{}
+		}
 		for _, p := range feed {
 			if len(p.MediaRefs) == 0 {
-				continue
-			}
-			ids := make([]string, 0, len(p.MediaRefs))
-			for _, ref := range p.MediaRefs {
-				ids = append(ids, ref.MediaAssetID)
-			}
-			assets, err := s.mediaLookup.LookupMediaAssets(ctx, ids)
-			if err != nil {
 				continue
 			}
 			items := make([]PostMediaItem, 0, len(p.MediaRefs))
