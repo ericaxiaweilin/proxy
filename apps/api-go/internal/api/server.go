@@ -1032,6 +1032,7 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 				Name     string `json:"name"`
 				Street   string `json:"street"`
 				City     string `json:"city"`
+				State    string `json:"state"`
 				District string `json:"district"`
 				Country  string `json:"country"`
 				Type     string `json:"type"`
@@ -1075,6 +1076,17 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 	if props.City != "" {
 		out["city"] = props.City
 	}
+	// R15.32.1.5: pass through state / district too. Mobile used to
+	// only read `city`, but Photon's `city` is sometimes a
+	// district (e.g. "District 1" for HCMC inner wards). When
+	// `state` is non-empty, the mobile side prefers
+	// city ?? state as the canonical city label.
+	if props.State != "" {
+		out["state"] = props.State
+	}
+	if props.District != "" {
+		out["district"] = props.District
+	}
 	_ = zoom // reserved for future Nominatim fallback
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1087,6 +1099,7 @@ func buildPhotonDisplayName(p struct {
 	Name     string `json:"name"`
 	Street   string `json:"street"`
 	City     string `json:"city"`
+	State    string `json:"state"`
 	District string `json:"district"`
 	Country  string `json:"country"`
 	Type     string `json:"type"`

@@ -22,7 +22,6 @@ import {
   gridToLatLng,
   LOCATION_OPTIONS,
   makeCustomLocation,
-  pickCityFromDisplayName,
   reverseGeocode,
   reverseGeocodeViaProxy,
   type AnyLocation,
@@ -248,38 +247,6 @@ describe("reverseGeocode (R15.15 P2) — OSM Nominatim + offline-grid fallback",
   });
 });
 
-// R15.32.1.3: pickCityFromDisplayName 把 Nominatim 的英文/越南文
-// display_name 映射到我们 LOCATION_OPTIONS 里的中文城市。GPS
-// 定位后 sheet 会用这个函数拿真实城市，避免“到 HCM 了还强制河内”
-// 的迷惑感。
-describe("pickCityFromDisplayName", () => {
-  it("returns 河内 for Hanoi variants", () => {
-    expect(pickCityFromDisplayName("Hoàn Kiếm, Hà Nội, Vietnam")).toBe("河内");
-    expect(pickCityFromDisplayName("Ha Noi, Vietnam")).toBe("河内");
-    expect(pickCityFromDisplayName("hanoi, vietnam")).toBe("河内");
-  });
-  it("returns 胡志明市 for HCMC variants", () => {
-    expect(pickCityFromDisplayName("Bitexco, TP Hồ Chí Minh, Vietnam")).toBe("胡志明市");
-    expect(pickCityFromDisplayName("Ho Chi Minh City, Vietnam")).toBe("胡志明市");
-    expect(pickCityFromDisplayName("Saigon, Vietnam")).toBe("胡志明市");
-    expect(pickCityFromDisplayName("HCMC, Vietnam")).toBe("胡志明市");
-  });
-  it("returns 岘港 for Da Nang", () => {
-    expect(pickCityFromDisplayName("Da Nang, Vietnam")).toBe("岘港");
-  });
-  it("returns 海防 / 芹苴 / 顺化 / 边和 for the other 4 cities", () => {
-    expect(pickCityFromDisplayName("Hai Phong, Vietnam")).toBe("海防");
-    expect(pickCityFromDisplayName("Can Tho, Vietnam")).toBe("芹苴");
-    expect(pickCityFromDisplayName("Hue, Vietnam")).toBe("顺化");
-    expect(pickCityFromDisplayName("Bien Hoa, Vietnam")).toBe("边和");
-  });
-  it("returns undefined for non-VN or unrecognised strings", () => {
-    expect(pickCityFromDisplayName("District 1, Vietnam")).toBeUndefined();
-    expect(pickCityFromDisplayName("Some place, Bangkok, Thailand")).toBeUndefined();
-    expect(pickCityFromDisplayName("")).toBeUndefined();
-  });
-});
-
 // R15.32.1.3: reverseGeocodeViaProxy 跳 Proxy 自己的
 // /v1/geocode/reverse, 避免直接打 Nominatim(该服务从 cloud IP
 // 打经常返 403 / 限流)。这些 tripwires 不打真网络：仅验证 URL
@@ -353,6 +320,33 @@ describe("reverseGeocodeViaProxy", () => {
     try {
       await reverseGeocodeViaProxy("http://api.local:4100/", 1, 2);
       expect(calls[0]).toBe("http://api.local:4100/v1/geocode/reverse?lat=1&lng=2");
+    } finally {
+      (globalThis as unknown as { fetch: typeof fetch }).fetch = original as typeof fetch;
+    }
+  });
+  it("R15.32.1.5: passes through city/state/district/country", async () => {
+    const fakeFetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        displayName: "Bắc Ninh, Việt Nam",
+        city: "Bắc Ninh",
+        state: "Bac Ninh",
+        country: "Việt Nam",
+        source: "remote"
+      })
+    })) as unknown as typeof fetch;
+    const original = (globalThis as { fetch?: typeof fetch }).fetch;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fakeFetch;
+    try {
+      const r = await reverseGeocodeViaProxy("http://api.local:4100", 21.1861, 106.0707);
+      // Bắc Ninh is NOT in our 7-city preset list — but the
+      // proxy should still surface the actual city verbatim.
+      // The picker later reads r.city to fill CustomLocation.city.
+      expect(r.city).toBe("Bắc Ninh");
+      expect(r.state).toBe("Bac Ninh");
+      expect(r.country).toBe("Việt Nam");
+      expect(r.displayName).toBe("Bắc Ninh, Việt Nam");
     } finally {
       (globalThis as unknown as { fetch: typeof fetch }).fetch = original as typeof fetch;
     }

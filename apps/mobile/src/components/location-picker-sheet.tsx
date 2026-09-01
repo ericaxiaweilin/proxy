@@ -17,7 +17,6 @@ import {
   formatRadius,
   gridToLatLng,
   LOCATION_OPTIONS,
-  pickCityFromDisplayName,
   reverseGeocode,
   reverseGeocodeViaProxy,
   type AnyLocation,
@@ -126,49 +125,55 @@ export function LocationPickerSheet({
     setPin({ x: 5, y: 5 });
   }
 
-  // R15.32.1.3: 算 commitCustom 要用的最终标签。
-  // 优先级：用户手填 label > 逆编码 displayName > 网格坐标。
-  // city 同样优先逆编码里的部分，最后才 fallback 到 customCity
-  // chip（GPS 定位到另外一个城市时，customCity 会被忽略，改用
-  // reverse.displayName 拆出来的城市名 — 不会出现"都到胡志明
-  // 了还强制河内"的迷惑感）。
+  // R15.32.1.5: 算 commitCustom 要用的最终标签。
+  // 关键修改 — 去掉硬编码的 7 城映射。用户在全球任何地方定位
+  // 都要如实显示，不强制到 "河内" / "胡志明市" 这些预设城市。
+  //
+  // 优先级:
+  //   area  = user label > reverse.displayName > 网格坐标
+  //   city  = reverse.city > reverse.state > customCity
+  //   header = user label ? "保存" : "保存并切换"
+  // Photon 的 city 可能是市 / 镇 / 县 / 乡；state 是上一级省。
+  // 都不是 7 城表里的没事 — city 是个 free-form 字符串，只用于显示。
   const finalCommit = useMemo(() => {
     const userLabel = label.trim();
     const reverseName = reverse?.displayName?.trim();
-    // 从 displayName 拿 area：Nominatim 返 "POI, City, Country"，
-    // 取最后两段拼成 "POI, City" — POI + 城市名都很有用。
+    // area
     let resolvedArea: string;
     if (reverse?.source === "remote" && reverseName) {
-      const parts = reverseName.split(",").map((p) => p.trim()).filter(Boolean);
-      if (parts.length >= 2) {
-        resolvedArea = parts.slice(-2).join(", ");
-      } else if (parts.length === 1) {
-        resolvedArea = parts[0]!;
-      } else {
-        resolvedArea = reverseName;
-      }
+      // Photon 的 displayName 已经是 "POI, City, Country"，
+      // 但里面可能不带 city (例如北宁返 "Bắc Ninh, Việt Nam" 没有
+      // POI)。直接用 displayName — 已是对人最友好的形式。
+      resolvedArea = reverseName;
     } else if (reverseName) {
-      // 离线 grid fallback：例如 "还剑湖附近" — area 就是这个
       resolvedArea = reverseName;
     } else {
       // 逆编码还在进行中：用网格坐标作最后 fallback
       resolvedArea = `(${pin.x}, ${pin.y})`;
     }
-    // user label 覆盖：用户手输了"家"，就用 "家"
     const area = userLabel || resolvedArea;
-    // 标头：用户手输了 label 就不附加 "并切换" 之类的话
     const header = userLabel ? "保存" : "保存并切换";
-    // city：优先用 reverse 拆出的越南文 city（走 LOCATION_OPTIONS
-    // 里的 city 映射表，把 "Hà Nội" / "TP Hồ Chí Minh" 翻译成
-    // "河内" / "胡志明市"）。没匹配上就保持 customCity。
-    const cityFromDisplayName = reverse?.source === "remote" && reverseName
-      ? pickCityFromDisplayName(reverseName)
-      : undefined;
+    // city: 优先 Photon 的 city，其次 state，最后 customCity
+    //  (customCity 只有在 离线/未完成 逆编码时才用，remote 时
+    //  绝不应该出现 "都北宁了还显示河内" 的迷惑感)
+    let resolvedCity: string;
+    if (reverse?.source === "remote") {
+      if (reverse.city) {
+        resolvedCity = reverse.city;
+      } else if (reverse.state) {
+        resolvedCity = reverse.state;
+      } else {
+        resolvedCity = customCity;
+      }
+    } else {
+      // 离线 fallback — 用 chip 的 customCity
+      resolvedCity = customCity;
+    }
     return {
       header,
       area,
-      city: cityFromDisplayName ?? customCity,
-      id: `custom_${cityFromDisplayName ?? customCity}_${pin.x}x${pin.y}_r${radius}`
+      city: resolvedCity,
+      id: `custom_${resolvedCity}_${pin.x}x${pin.y}_r${radius}`
     };
   }, [label, reverse, customCity, pin.x, pin.y, radius]);
 

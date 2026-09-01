@@ -50,6 +50,7 @@ func TestReverseGeocode_OK(t *testing.T) {
 				"name": "Lê Thánh Tôn",
 				"street": "Lê Thánh Tôn",
 				"city": "Thành phố Hồ Chí Minh",
+				"district": "Quận 1",
 				"country": "Việt Nam",
 				"type": "street"
 			}
@@ -82,6 +83,20 @@ func TestReverseGeocode_OK(t *testing.T) {
 	if body.City != "Thành phố Hồ Chí Minh" {
 		t.Errorf("expected city in props, got %q", body.City)
 	}
+	// R15.32.1.5: state and district must be passed through too.
+	// In practice Photon's response for Vietnam only fills
+	// city/district, not state — but the proxy must still pass
+	// the field through when present. Test fixture doesn't include
+	// a state, so we just verify the district roundtrip.
+	var raw struct {
+		State    string `json:"state"`
+		District string `json:"district"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &raw)
+	// District was "Sài Gòn" in the HCM test fixture.
+	if raw.District == "" {
+		t.Errorf("expected district to be passthrough, got empty")
+	}
 	if rt.callCount != 1 {
 		t.Errorf("expected 1 upstream call, got %d", rt.callCount)
 	}
@@ -90,6 +105,57 @@ func TestReverseGeocode_OK(t *testing.T) {
 	}
 	if !strings.Contains(rt.lastURL, "lon=106.701") || !strings.Contains(rt.lastURL, "lat=10.776") {
 		t.Errorf("upstream URL missing lat/lng: %q", rt.lastURL)
+	}
+}
+
+// TestReverseGeocode_NonSevenCity covers R15.32.1.5: a location
+// outside our 7-city preset list (e.g. Bắc Ninh) must still be
+// returned correctly so the mobile doesn't fall back to a wrong
+// default. State is filled for VN provinces; the proxy must pass
+// it through verbatim.
+func TestReverseGeocode_NonSevenCity(t *testing.T) {
+	photonBody := `{
+		"type": "FeatureCollection",
+		"features": [{
+			"properties": {
+				"name": "Phố Nguyễn Huy Tưởng",
+				"street": "Phố Nguyễn Huy Tưởng",
+				"locality": "Suối Hoa 2",
+				"city": "Bắc Ninh",
+				"state": "Bac Ninh",
+				"country": "Việt Nam",
+				"type": "house"
+			}
+		}]
+	}`
+	rt := &stubRoundTripper{status: 200, body: photonBody}
+	srv := newReverseGeocodeTestServer(rt)
+	req := httptest.NewRequest(http.MethodGet, "/v1/geocode/reverse?lat=21.1861&lng=106.0707", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var body struct {
+		DisplayName string `json:"displayName"`
+		City        string `json:"city"`
+		State       string `json:"state"`
+		Source      string `json:"source"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.City != "Bắc Ninh" {
+		t.Errorf("expected city=Bắc Ninh, got %q", body.City)
+	}
+	if body.State != "Bac Ninh" {
+		t.Errorf("expected state=Bac Ninh, got %q", body.State)
+	}
+	if body.DisplayName == "" {
+		t.Errorf("displayName must not be empty for non-7-city location")
+	}
+	if body.Source != "remote" {
+		t.Errorf("expected source=remote, got %q", body.Source)
 	}
 }
 
