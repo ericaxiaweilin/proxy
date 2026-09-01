@@ -78,8 +78,23 @@ export class EngagementClient {
       payload
     };
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
-    const result = parseCommandResult(await response.json());
-    if (!result) throw new EngagementProtocolError("engagement command response was malformed");
+    let responseBody: unknown;
+    try {
+      responseBody = await response.json();
+    } catch (err) {
+      throw new EngagementProtocolError("engagement response body read failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+    // R15.38 DEBUG: log full response for diagnosis (guarded for test env)
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      const bodyStr = (() => { try { return JSON.stringify(responseBody); } catch { return String(responseBody); } })();
+      console.log(`[proxy.R15.38.DEBUG.engagement] ${commandType} status=${response.status} body=${bodyStr.slice(0, 600)}`);
+    }
+    const result = parseCommandResult(responseBody);
+    if (!result) {
+      const bodyStr = (() => { try { return JSON.stringify(responseBody); } catch { return String(responseBody); } })();
+      throw new EngagementProtocolError(`engagement command response was malformed (status=${response.status}): ${bodyStr.slice(0, 200)}`);
+    }
     if (result.outcome === "REJECTED") throw new EngagementCommandRejectedError(result);
     if (response.status < 200 || response.status >= 300) {
       throw new EngagementProtocolError(`unexpected engagement command status: ${response.status}`);

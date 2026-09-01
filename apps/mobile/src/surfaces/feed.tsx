@@ -441,7 +441,7 @@ export function FeedSurface({
       apply(new Set(current).add(stateKey));
     } catch (error) {
       // R15.38 DEBUG: 临时诊断, 看新逻辑是否走对路径
-      if (__DEV__) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
         // eslint-disable-next-line no-console
         console.log(
           `[proxy.R15.38.DEBUG] engagement error type=${error instanceof Error ? error.name : typeof error} ` +

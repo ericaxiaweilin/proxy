@@ -106,15 +106,16 @@ describe("mobile session auth client", () => {
     expect(requests).toBe(0);
   });
 
-  it("soft sign out — marks session as signedOut, keeps keychain for silent re-auth, even when server revocation is offline", async () => {
+  it("soft sign out locks locally without revoking the refresh token needed by Continue", async () => {
     const driver = new InMemorySecureStorageDriver();
     const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
     await store.write(initialSession);
+    let requests = 0;
     const client = new SessionAuthClient({
       baseUrl: "https://api.proxy.test",
       secureSessionStore: store,
       now: () => new Date("2026-08-14T00:00:00.000Z"),
-      transport: async () => { throw new Error("offline"); }
+      transport: async () => { requests += 1; throw new Error("unexpected network request"); }
     });
     await client.signOut();
     // R15.39: signOut 不再 clear keychain — 改为设 signedOut=true,
@@ -130,5 +131,25 @@ describe("mobile session auth client", () => {
     expect(after?.auth.accessToken).toBe("revoked");
     // refreshToken 保留 — silent re-auth 要用
     expect(after?.auth.refreshToken).toBe(initialSession.auth.refreshToken);
+    expect(requests).toBe(0);
+  });
+
+  it("refresh after soft sign out restores the remembered account in one tap", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    await store.write(initialSession);
+    const client = new SessionAuthClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      now: () => new Date("2026-08-14T00:00:00.000Z"),
+      transport: async (request) => {
+        if (!request.url.endsWith("RefreshSession")) throw new Error("unexpected request");
+        return response(200, { auth: { ...initialSession.auth, accessToken: "access_2", refreshToken: "refresh_2", rotation: 2 } });
+      }
+    });
+    await client.signOut();
+    const tokens = await client.refresh();
+    expect(tokens.accessToken).toBe("access_2");
+    expect((await store.read())?.signedOut).toBeUndefined();
   });
 });

@@ -117,28 +117,10 @@ export class SessionAuthClient {
     //   (refreshToken 还在), 加 signedOut=true + signedOutAt 锁定状态。
     //   这样下次用户点 “继续” 可以走 silent re-auth (用 refreshToken
     //   拿新 accessToken, 不用走 OTP)。
-    //   服务器侧 RevokeSession 还是发 (best effort) — 但即使失败,
-    //   客户端也不会困在 "signed-in" UI 里 (有 signedOut gate)。
+    //   普通退出只锁定本机，不撤销服务端 refresh token。否则历史账户
+    //   的“继续”按钮不可能静默恢复。彻底撤销会话应由独立的
+    //   “移除此账户 / 退出所有设备”动作执行。
     if (current) {
-      // Best-effort server revoke, but don't block on it.
-      void this.send("/v1/commands/RevokeSession", {
-        method: "POST",
-        body: {
-          commandId: this.nextCommandId("signout"),
-          commandType: "RevokeSession",
-          commandVersion: 1,
-          actor: { type: "USER", id: current.userAccountId },
-          principal: current.principal ?? current.auth.principal,
-          target: { type: "Session", id: current.auth.sessionId },
-          idempotencyKey: this.nextCommandId("idem"),
-          authContext: { sessionId: current.auth.sessionId },
-          purpose: "user_sign_out",
-          correlationId: this.nextCommandId("corr"),
-          requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),
-          payload: { reason: "USER_LOGOUT" }
-        }
-      }, current.auth.accessToken).catch(() => undefined);
-
       // 本地清 accessToken + 锁定状态, 写回 keychain。
       // 不调用 clear() — refreshToken 要保留, silent re-auth 要用。
       const nowIso = new Date((this.input.now ?? (() => new Date()))()).toISOString();
