@@ -4,15 +4,23 @@
 //   这里区分:
 //   - OfflineFallbackSessionError / "require a real sign-in" / "principal required"
 //     → 改口为 "请登录后重试"
+//   - SessionExpiredError (server 实际 拒了, keychain 清掉, 仍需重登)
+//     → "会话过期，请重新登录后重试"
 //   - 其他 (真网络) → 保持原 fallback
 //
 // 独立成 module 以便 unit test (feed.tsx 拖 React Native, 加载慢)。
 
 import { OfflineFallbackSessionError, SignedOutSessionError } from "../secure-session";
+import { SessionExpiredError } from "../auth-client";
 
 export function mapEngagementError(error: unknown, fallback: string): string {
   if (error instanceof OfflineFallbackSessionError || error instanceof SignedOutSessionError) {
     return "访客不能点赞 / 回复 / 举报，请登录后重试。";
+  }
+  if (error instanceof SessionExpiredError) {
+    // auth-client 在 server 拒接 (401) 且 refresh 失败后 扊掉 keychain,
+    //   扊不掉走 authClient.request() 调 engagement 的时候。
+    return "会话已过期，请重新登录后重试。";
   }
   if (error instanceof Error) {
     const msg = error.message;

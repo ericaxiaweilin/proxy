@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mapEngagementError } from "./feed-error-map";
 import { OfflineFallbackSessionError, SignedOutSessionError } from "../secure-session";
 import { EngagementProtocolError } from "../engagement-client";
+import { SessionExpiredError } from "../auth-client";
 
 describe("mapEngagementError", () => {
   const fallback = "互动没有提交成功，请检查连接后重试。";
@@ -41,6 +42,14 @@ describe("mapEngagementError", () => {
     //   走错。补上这个判断。
     const err = new Error("an authenticated principal is required");
     expect(mapEngagementError(err, fallback)).toContain("请登录");
+  });
+
+  it("maps SessionExpiredError to a re-login hint (R15.38.2)", () => {
+    // auth-client 在 server 拒接 (401/403) 且 refresh 失败后 扊 keychain,
+    //   扊不掉走 authClient.request() 调 engagement 的时候。
+    //   之前的 mapEngagementError 误为 “网络问题”。
+    const err = new SessionExpiredError();
+    expect(mapEngagementError(err, fallback)).toContain("重新登录");
   });
 
   it("falls back to original message for unknown errors", () => {
