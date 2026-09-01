@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/activity"
+	"github.com/proxy-app/proxy-api/internal/business"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/contribution"
@@ -31,7 +32,6 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
-	"github.com/proxy-app/proxy-api/internal/business"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -143,7 +143,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) mediaVariantFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
@@ -161,7 +161,7 @@ func (s *Server) mediaVariantFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_variant_not_available"})
 		return
 	}
-	http.ServeFile(w, r, path)
+	serveMediaPath(w, r, path, "public, max-age=31536000, immutable")
 }
 
 // mediaUpload is a narrow authenticated raw-body endpoint. Metadata and state
@@ -291,7 +291,7 @@ func writeMediaUploadError(w http.ResponseWriter, err error, expectedOffset int6
 // 内容可见性已由 Feed 管道 fail-closed 控制，P0 不再叠加会话鉴权；
 // 非 READY / 不存在一律 404。
 func (s *Server) mediaFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
@@ -312,6 +312,26 @@ func (s *Server) mediaFile(w http.ResponseWriter, r *http.Request) {
 	path, err := s.Media.ResolveServingPath(r.Context(), id, kind)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_not_available"})
+		return
+	}
+	// Asset routes are stable identifiers. They may point at a newer recipe after
+	// an explicit re-derivation, so keep the browser cache bounded and validate by
+	// ETag. Variant routes above are recipe-versioned and fully immutable.
+	serveMediaPath(w, r, path, "public, max-age=86400, stale-while-revalidate=604800")
+}
+
+func serveMediaPath(w http.ResponseWriter, r *http.Request, path, cacheControl string) {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_object_missing"})
+		return
+	}
+	etag := `W/"` + strconv.FormatInt(info.Size(), 36) + "-" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + `"`
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Cache-Control", cacheControl)
+	w.Header().Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 	http.ServeFile(w, r, path)

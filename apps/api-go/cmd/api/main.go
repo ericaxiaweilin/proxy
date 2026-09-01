@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,6 +24,8 @@ import (
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/engagement"
+	"github.com/proxy-app/proxy-api/internal/experience"
+	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
@@ -33,16 +34,14 @@ import (
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/notification"
-	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
-	"github.com/proxy-app/proxy-api/internal/facet"
-	"github.com/proxy-app/proxy-api/internal/voucher"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
 	"github.com/proxy-app/proxy-api/internal/supply"
+	"github.com/proxy-app/proxy-api/internal/voucher"
 )
 
 func main() {
@@ -53,22 +52,9 @@ func main() {
 	if port == "" {
 		port = "4100"
 	}
-	mediaStoreDir := strings.TrimSpace(os.Getenv("PROXY_MEDIA_STORE_DIR"))
-	if mediaStoreDir == "" {
-		// iCloud 防护: 项目在 Desktop + iCloud sync 范围时, media_store
-		// 会被 iCloud "evict" — 文件被替换成 dataless 占位, 媒体
-		// 服务返超时 / 0 byte。默认跳过 iCloud 路径, 走非同步位置。
-		// 优先用  ~/Developer/kake-data/media_store, 推不到再回项目内。
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			candidate := filepath.Join(home, "Developer", "kake-data", "media_store")
-			if err := os.MkdirAll(candidate, 0o755); err == nil {
-				mediaStoreDir = candidate
-			}
-		}
-		if mediaStoreDir == "" || mediaStoreDir == filepath.Join(".", "media_store") {
-			mediaStoreDir = filepath.Join(".", "media_store")
-		}
+	mediaStoreDir, err := media.ResolveLocalStoreDir(os.Getenv("PROXY_MEDIA_STORE_DIR"))
+	if err != nil {
+		log.Fatalf("configure media store: %v", err)
 	}
 
 	if warnings := bootenv.Warnings(); len(warnings) > 0 {
@@ -101,6 +87,7 @@ func main() {
 		log.Printf("proxy api go model stack adapter unconfigured (fail-closed)")
 	}
 	conversationService := conversation.NewWithModelStack(nil, modelStack)
+	conversationService.SetMediaStoreDir(mediaStoreDir)
 	engagementService := engagement.New()
 	fulfillmentService := fulfillment.New()
 	supplyService := supply.New()
@@ -193,6 +180,7 @@ func main() {
 		demandService = demand.NewWithRepository(admissionGate, fundingGate, postgres.NewDemandRepositoryWithOutbox(pool, outboxRepository))
 		localContextService = localcontext.NewWithRepository(postgres.NewLocalContextRepository(pool))
 		conversationService = conversation.NewWithModelStack(postgres.NewConversationRepository(pool), modelStack)
+		conversationService.SetMediaStoreDir(mediaStoreDir)
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
@@ -224,6 +212,15 @@ func main() {
 		voucherService = voucher.NewWithRepository(postgres.NewVoucherRepository(pool))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
+	}
+	databaseReadyCheck := readyCheck
+	readyCheck = func(ctx context.Context) error {
+		if databaseReadyCheck != nil {
+			if err := databaseReadyCheck(ctx); err != nil {
+				return err
+			}
+		}
+		return mediaService.CheckStorage(ctx)
 	}
 	defer func() {
 		if databaseCloser != nil {
@@ -606,7 +603,9 @@ func localIdentityService(provider identity.LoginChallengeProvider, simulated bo
 
 func configuredDemandGates() (demand.Gate, demand.Gate) {
 	if v := strings.TrimSpace(os.Getenv("PROXY_DEMAND_GATES")); strings.EqualFold(v, "allow") {
-		allow := func(*demand.TaskDraft, command.Envelope) demand.GateDecision { return demand.GateDecision{Status: "ALLOW"} }
+		allow := func(*demand.TaskDraft, command.Envelope) demand.GateDecision {
+			return demand.GateDecision{Status: "ALLOW"}
+		}
 		log.Printf("proxy demand gates: ALLOW (PROXY_DEMAND_GATES=allow) — PublishTask will ACCEPT in this environment")
 		return allow, allow
 	}

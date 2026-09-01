@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -62,7 +61,12 @@ func main() {
 		MaxAttempts: 10,
 	}
 	mediaRepository := postgres.NewMediaRepository(pool)
-	mediaService := media.NewWithDependencies(mediaRepository, media.NewFFmpegProcessor(filepath.Join("media_store")))
+	mediaStoreDir, err := media.ResolveLocalStoreDir(os.Getenv("PROXY_MEDIA_STORE_DIR"))
+	if err != nil {
+		log.Fatalf("configure media store: %v", err)
+	}
+	mediaService := media.NewWithDependencies(mediaRepository, media.NewFFmpegProcessor(mediaStoreDir))
+	mediaService.SetStoreDir(mediaStoreDir)
 	mediaWorker := media.Worker{
 		Repository: mediaRepository, Service: mediaService, WorkerID: workerID,
 		BatchSize: 4, MaxAttempts: 5,
@@ -88,7 +92,7 @@ func main() {
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	log.Printf("proxy worker listening worker_id=%s", workerID)
+	log.Printf("proxy worker listening worker_id=%s media_store=%s", workerID, mediaStoreDir)
 	for {
 		select {
 		case <-ctx.Done():

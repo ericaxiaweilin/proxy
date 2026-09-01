@@ -418,10 +418,11 @@ func protectionToSecurityV1(p MessageProtection) *MessageSecurityV1 {
 }
 
 type Service struct {
-	mu         sync.Mutex
-	repository Repository
-	clock      clock.Clock
-	modelStack modelstack.Port
+	mu            sync.Mutex
+	repository    Repository
+	clock         clock.Clock
+	modelStack    modelstack.Port
+	mediaStoreDir string
 }
 
 // SweepExpiredMessages hard-deletes messages past protection.ExpiresAt.
@@ -462,6 +463,12 @@ func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
 		ms = modelstack.Unconfigured{}
 	}
 	return &Service{repository: repository, clock: clock.System{}, modelStack: ms}
+}
+
+// SetMediaStoreDir wires the same object-store root used by the API and media
+// worker. Vision must not guess relative working directories.
+func (s *Service) SetMediaStoreDir(dir string) {
+	s.mediaStoreDir = strings.TrimSpace(dir)
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -989,22 +996,21 @@ func (s *Service) imageDataURI(ref string) string {
 			return ""
 		}
 	}
+	storeDir := s.mediaStoreDir
 	candidates := []string{}
 	if assetID != "" && !strings.ContainsAny(assetID, "/\\") && !strings.Contains(assetID, "..") {
 		// Vision does not need the full camera original. Prefer the processed
 		// natural-aspect derivative to cut base64 size and model latency.
-		candidates = append(candidates,
-			filepath.Join("media_store", "mv_"+assetID+"_feed_1x_v2.jpg"),
-			filepath.Join("media_store", "mv_"+assetID+"_feed_1x_v1.jpg"),
-		)
+		if storeDir != "" {
+			candidates = append(candidates,
+				filepath.Join(storeDir, "mv_"+assetID+"_feed_1x_v2.jpg"),
+				filepath.Join(storeDir, "mv_"+assetID+"_feed_1x_v1.jpg"),
+			)
+		}
 	}
-	candidates = append(candidates,
-		filepath.Join("media_store", ref),
-		filepath.Join("apps", "api-go", "media_store", ref),
-		filepath.Join(".", "media_store", ref),
-		filepath.Join(os.TempDir(), ref),
-		ref,
-	)
+	if storeDir != "" {
+		candidates = append(candidates, filepath.Join(storeDir, ref))
+	}
 	var data []byte
 	var err error
 	for _, p := range candidates {
@@ -1020,11 +1026,11 @@ func (s *Service) imageDataURI(ref string) string {
 			return fmt.Sprintf("data:%s;base64,%s", mime, b64)
 		}
 	}
-	// 兼容：ref 可能是 assetId，尝试按 media_store 中同前缀文件查找（开发环境）
-	if entries, rerr := os.ReadDir("media_store"); rerr == nil {
+	// 兼容：ref 可能是 assetId，限定在唯一 store root 内按前缀查找。
+	if entries, rerr := os.ReadDir(storeDir); storeDir != "" && rerr == nil {
 		for _, e := range entries {
 			if strings.HasPrefix(e.Name(), ref) || strings.HasPrefix(ref, e.Name()) {
-				if d, err2 := os.ReadFile(filepath.Join("media_store", e.Name())); err2 == nil {
+				if d, err2 := os.ReadFile(filepath.Join(storeDir, e.Name())); err2 == nil {
 					mime := guessImageMime(e.Name())
 					return fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(d))
 				}

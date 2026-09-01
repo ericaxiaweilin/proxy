@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
@@ -24,6 +26,36 @@ import (
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/supply"
 )
+
+func TestServeMediaPathSupportsHeadRangeAndRevalidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	head := httptest.NewRecorder()
+	serveMediaPath(head, httptest.NewRequest(http.MethodHead, "/v1/media/play/a", nil), path, "public, max-age=86400")
+	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("head status=%d bytes=%d headers=%v", head.Code, head.Body.Len(), head.Header())
+	}
+
+	rangeResponse := httptest.NewRecorder()
+	rangeRequest := httptest.NewRequest(http.MethodGet, "/v1/media/play/a", nil)
+	rangeRequest.Header.Set("Range", "bytes=2-5")
+	serveMediaPath(rangeResponse, rangeRequest, path, "public, max-age=86400")
+	if rangeResponse.Code != http.StatusPartialContent || rangeResponse.Body.String() != "2345" {
+		t.Fatalf("range status=%d body=%q", rangeResponse.Code, rangeResponse.Body.String())
+	}
+
+	revalidate := httptest.NewRecorder()
+	revalidateRequest := httptest.NewRequest(http.MethodGet, "/v1/media/play/a", nil)
+	revalidateRequest.Header.Set("If-None-Match", head.Header().Get("ETag"))
+	serveMediaPath(revalidate, revalidateRequest, path, "public, max-age=86400")
+	if revalidate.Code != http.StatusNotModified {
+		t.Fatalf("revalidate status=%d", revalidate.Code)
+	}
+}
 
 func apiEnvelope(commandType string, payload map[string]any, target command.Target, idempotency string) command.Envelope {
 	return command.Envelope{
