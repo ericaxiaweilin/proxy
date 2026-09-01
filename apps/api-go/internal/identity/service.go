@@ -104,6 +104,14 @@ func (s *Service) SetDisplayIdentityRepository(repo DisplayIdentityRepository) {
 	s.displayIdentityService = NewDisplayIdentityService(repo, s.clock)
 }
 
+// Repository exposes the identity repository so transport-layer code
+// (e.g. wiring the SMTP LoginChallengeProvider email resolver) can look
+// up LoginIdentity rows by id without re-creating one. Returned interface
+// is read-only at the call site; the service keeps the only mutable handle.
+func (s *Service) Repository() Repository {
+	return s.repository
+}
+
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "AuthenticateWithGoogle",
@@ -119,6 +127,7 @@ func (s *Service) Handle(envelope command.Envelope) command.Result {
 }
 
 func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) command.Result {
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch envelope.CommandType {

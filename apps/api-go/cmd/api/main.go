@@ -38,6 +38,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/facet"
+	"github.com/proxy-app/proxy-api/internal/voucher"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -118,6 +119,7 @@ func main() {
 	facetService := facet.New()
 	facetService.SeedDefaults()
 	experienceService := experience.New()
+	_ = voucher.New() // declared in cmd/api/main; voucher wiring lands in the dedicated voucher push (tracked separately)
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -170,6 +172,10 @@ func main() {
 		// Lotus §1: DisplayIdentity PG persistence (038) — wire PG repo so
 		// CreateDisplayIdentity/List/Burn survive restarts.
 		identityService.SetDisplayIdentityRepository(postgres.NewDisplayIdentityRepository(pool))
+		// R15.27 SMTP 真实发信：把 identity repo 注入 SMTP provider 的
+		// email resolver, 让它能用 LoginIdentityID 查到 identifier (email).
+		// 必须在 createdLoginProvider 之后、challenge 产生之前 wire.
+		wireIdentityEmailResolver(identityService)
 		if simulatedLogin {
 			if err := seedPostgresIdentity(pool); err != nil {
 				log.Fatalf("seed postgres identity: %v", err)
@@ -324,9 +330,9 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 	}
 	// Dev-only smoke resolvers: when PROXY_SMTP_TEST_RECIPIENT is set we
 	// hand every EMAIL LoginChallengeRequest a fixed recipient instead of
-	// looking the LoginIdentity up in storage. This is intentionally
-	// separate from the production path; without the env var, EMAIL
-	// challenges stay fail-closed.
+	// looking the LoginIdentity up in storage. The production path
+	// (LoginIdentityID → identifier via PG) is wired in main() via
+	// wireIdentityEmailResolver(identityService) after the PG repo is open.
 	if smtpProvider != nil {
 		if testRecipient := os.Getenv("PROXY_SMTP_TEST_RECIPIENT"); testRecipient != "" {
 			identity.RegisterLoginIdentityEmailResolver(func(string) (string, bool) {
@@ -358,7 +364,7 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 		log.Printf("PROXY_LOGIN_PROVIDER=%s but no SMTP/SMS env set; login provider fail-closed", mode)
 		return identity.UnconfiguredLoginChallengeProvider{}, false
 	}
-	log.Printf("PROXY_LOGIN_PROVIDER=%s: smtp=%v sms=%v (fail-closed until identity resolver is wired in cmd/api)", mode, smtpProvider != nil, smsProvider != nil)
+	log.Printf("PROXY_LOGIN_PROVIDER=%s: smtp=%v sms=%v", mode, smtpProvider != nil, smsProvider != nil)
 	return router, false
 }
 
@@ -621,3 +627,23 @@ func configuredNotificationPush() notification.PushProvider {
 // triaging a misconfigured prod box sees them on the first lines of
 // the log. Implementation lives in internal/bootenv so it can be
 // unit-tested without touching the process environment.
+
+// wireIdentityEmailResolver 把 identity repo 暴露给 SMTP challenge provider,
+// 这样 Request 拿 LoginIdentityID 就能找到对应的 email identifier 发邮件。
+// resolver 必须是 idempotent + 并发安全 (多 goroutine 同时触发 challenge).
+// 不注册此 resolver 会让 SMTP 走 fail-closed 路径, EMAIL challenge 返
+// LOGIN_PROVIDER_NOT_CONFIGURED — 因此 PG 模式启动时必须调用。
+func wireIdentityEmailResolver(svc *identity.Service) {
+	identity.RegisterLoginIdentityEmailResolver(func(loginIdentityID string) (string, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		li, err := svc.Repository().GetLoginIdentity(ctx, loginIdentityID)
+		if err != nil {
+			return "", false
+		}
+		if li.Channel != "EMAIL" {
+			return "", false
+		}
+		return li.Identifier, true
+	})
+}
