@@ -63,6 +63,10 @@ export type MapExploreSurfaceProps = {
   baseUrl: string;
   initialRegion?: Region;
   onClose?: (() => void) | undefined;
+  // R15.32.2: when the user taps the sheet's "open" action, the
+  // host (app-shell) decides where to navigate. We keep navigation
+  // out of MapExploreSurface so the surface stays portable.
+  onOpenItem?: ((item: SelectedPin) => void) | undefined;
 };
 
 export function MapExploreSurface(props: MapExploreSurfaceProps) {
@@ -74,7 +78,7 @@ export function MapExploreSurface(props: MapExploreSurfaceProps) {
   const [region, setRegion] = useState<Region>(props.initialRegion ?? DEFAULT_REGION);
   const [filter, setFilter] = useState<FilterKind>("all");
   const [payload, setPayload] = useState<MapItemsPayload | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<SelectedPin | null>(null);
 
@@ -239,6 +243,9 @@ export function MapExploreSurface(props: MapExploreSurfaceProps) {
       </Pressable>
 
       {/* Bottom HUD: result count + status */}
+      <View style={styles.attribution} pointerEvents="none">
+        <Text style={styles.attributionText}>由 Apple Maps 提供支持</Text>
+      </View>
       <View style={styles.hud} pointerEvents="box-none">
         {loading ? (
           <ActivityIndicator size="small" color={color.ink} />
@@ -252,7 +259,14 @@ export function MapExploreSurface(props: MapExploreSurfaceProps) {
       </View>
 
       {/* Pin preview bottom sheet */}
-      {selected && <PinPreview selected={selected} baseUrl={props.baseUrl} onClose={() => setSelected(null)} />}
+      {selected && (
+        <PinPreview
+          selected={selected}
+          baseUrl={props.baseUrl}
+          onClose={() => setSelected(null)}
+          onOpenItem={props.onOpenItem}
+        />
+      )}
 
       {/* Close button (if launched as subpage) */}
       {props.onClose && (
@@ -264,7 +278,12 @@ export function MapExploreSurface(props: MapExploreSurfaceProps) {
   );
 }
 
-function PinPreview(props: { selected: SelectedPin; baseUrl: string; onClose: () => void }) {
+function PinPreview(props: {
+  selected: SelectedPin;
+  baseUrl: string;
+  onClose: () => void;
+  onOpenItem?: ((item: SelectedPin) => void) | undefined;
+}) {
   const { selected, onClose } = props;
   return (
     <View style={styles.sheet}>
@@ -298,9 +317,31 @@ function PinPreview(props: { selected: SelectedPin; baseUrl: string; onClose: ()
             {selected.pin.cityScope} · {selected.pin.mediaCount} 个媒体 ·{" "}
             {selected.pin.sceneType !== "UNKNOWN" ? selected.pin.sceneType : ""}
           </Text>
-          <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
-            <Text style={styles.sheetActionText}>关闭</Text>
-          </Pressable>
+          {props.onOpenItem ? (
+            <View style={styles.sheetActionRow}>
+              <Pressable
+                style={[styles.sheetAction, styles.sheetActionSecondary]}
+                onPress={onClose}
+                accessibilityRole="button"
+              >
+                <Text style={styles.sheetActionText}>关闭</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.sheetAction, styles.sheetActionPrimary]}
+                onPress={() => props.onOpenItem?.(selected)}
+                accessibilityRole="button"
+                accessibilityLabel="查看详情"
+              >
+                <Text style={[styles.sheetActionText, styles.sheetActionPrimaryText]}>
+                  查看详情 →
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
+              <Text style={styles.sheetActionText}>关闭</Text>
+            </Pressable>
+          )}
         </>
       )}
       {selected.kind === "agent" && (
@@ -340,9 +381,31 @@ function PinPreview(props: { selected: SelectedPin; baseUrl: string; onClose: ()
               </View>
             ))}
           </View>
-          <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
-            <Text style={styles.sheetActionText}>关闭</Text>
-          </Pressable>
+          {props.onOpenItem ? (
+            <View style={styles.sheetActionRow}>
+              <Pressable
+                style={[styles.sheetAction, styles.sheetActionSecondary]}
+                onPress={onClose}
+                accessibilityRole="button"
+              >
+                <Text style={styles.sheetActionText}>关闭</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.sheetAction, styles.sheetActionPrimary]}
+                onPress={() => props.onOpenItem?.(selected)}
+                accessibilityRole="button"
+                accessibilityLabel="查看名片"
+              >
+                <Text style={[styles.sheetActionText, styles.sheetActionPrimaryText]}>
+                  查看名片 →
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
+              <Text style={styles.sheetActionText}>关闭</Text>
+            </Pressable>
+          )}
         </>
       )}
       {selected.kind === "order" && (
@@ -365,9 +428,31 @@ function PinPreview(props: { selected: SelectedPin; baseUrl: string; onClose: ()
           <Text style={styles.sheetMeta}>
             {[selected.pin.city, selected.pin.area].filter(Boolean).join(" · ")}
           </Text>
-          <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
-            <Text style={styles.sheetActionText}>关闭</Text>
-          </Pressable>
+          {props.onOpenItem ? (
+            <View style={styles.sheetActionRow}>
+              <Pressable
+                style={[styles.sheetAction, styles.sheetActionSecondary]}
+                onPress={onClose}
+                accessibilityRole="button"
+              >
+                <Text style={styles.sheetActionText}>关闭</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.sheetAction, styles.sheetActionPrimary]}
+                onPress={() => props.onOpenItem?.(selected)}
+                accessibilityRole="button"
+                accessibilityLabel="查看订单"
+              >
+                <Text style={[styles.sheetActionText, styles.sheetActionPrimaryText]}>
+                  查看订单 →
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
+              <Text style={styles.sheetActionText}>关闭</Text>
+            </Pressable>
+          )}
         </>
       )}
     </View>
@@ -438,6 +523,19 @@ const styles = StyleSheet.create({
   },
   hudText: { fontSize: HUD_FONT_SIZE, color: color.muted },
   hudError: { fontSize: HUD_FONT_SIZE, color: "#C0392B" },
+  // R15.32.2: small attribution line above the bottom HUD. Apple
+  // Maps ToS requires "Maps" attribution. Kept compact so it doesn't
+  // crowd the result count.
+  attribution: {
+    position: "absolute",
+    bottom: 80,
+    right: 12,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  attributionText: { fontSize: HUD_FONT_SIZE, color: color.muted, fontWeight: "500" },
   sheet: {
     position: "absolute",
     bottom: 0,
@@ -520,7 +618,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: "center",
   },
+  sheetActionRow: { flexDirection: "row", gap: 8 },
+  sheetActionSecondary: { flex: 1, backgroundColor: color.surface },
+  sheetActionPrimary: { flex: 1.4, backgroundColor: color.ink },
   sheetActionText: { fontSize: HUD_FONT_SIZE + 1, color: color.ink, fontWeight: "600" },
+  sheetActionPrimaryText: { color: color.white, fontWeight: "700" },
   closeBtn: {
     position: "absolute",
     top: 56,

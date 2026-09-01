@@ -545,6 +545,17 @@ export function AppShell({
             requester={sessionAuthClient}
             baseUrl={localApiBaseUrl}
             onClose={isNavVisible ? undefined : () => setTab("HOME")}
+            // R15.32.2: when the user taps the sheet's primary
+            // "查看详情 / 名片 / 订单" button, switch to the most
+            // relevant tab. There's no per-post detail surface yet,
+            // so we land on FEED (which has the inline post card) or
+            // a hypothetical future workspace. The map sheet's
+            // "关闭" still closes the sheet without leaving the map.
+            onOpenItem={(item) => {
+              if (item.kind === "post") setTab("FEED");
+              else if (item.kind === "agent") setTab("ME");
+              else if (item.kind === "order") setTab("MARKET");
+            }}
           />
         ) : isGuest ? (
           <View style={styles.guestMe}>
