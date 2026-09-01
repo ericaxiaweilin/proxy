@@ -21,11 +21,18 @@ implementations in production.
 | `PROXY_DB_MAX_CONNS` | no | `20` | Per-process PostgreSQL connection ceiling (1–200). Lower this behind Hyperdrive/another pooler. |
 | `PROXY_DB_MIN_CONNS` | no | `2` | Warm connections (0–`PROXY_DB_MAX_CONNS`). Invalid values fail back to the safe default. |
 | `PROXY_TRUST_CLOUDFLARE_IP` | no | `false` | When true, rate limiting uses a validated `CF-Connecting-IP`. Enable only after firewall/Tunnel rules make the origin unreachable except through Cloudflare. `X-Forwarded-For` is deliberately ignored. |
+| `PROXY_CURSOR_HMAC_KEY` | no | `DATABASE_URL` derived | HMAC key for feed cursor signing. Set a stable 32+ char secret in production; rotation invalidates all outstanding cursors. |
+| `PROXY_MIN_APP_VERSION` | no | unset (no enforcement) | e.g. `1.0.0`. When set, `X-Proxy-App-Version` below this receives `426 Upgrade Required` (`/health` + `facet` exempt). |
 
-The anonymous feed read projection has a four-second origin deadline, bounded
-page size/cursor length, per-IP rate limiting, and `no-store` on failures.
+The anonymous feed read projection has a four-second origin deadline, signed
+cursors (HMAC, `PROXY_CURSOR_HMAC_KEY`), bounded page size (`25-50`) and
+cursor length (`1024`), per-IP rate limiting (`120/min` via `RateLimiter`),
+and `no-store` on failures. `ETag` is `sha256(payload)` with
+`Cache-Control: public, max-age=15, stale-while-revalidate=120`.
 These controls prevent a slow database or attacker-controlled cache keys from
 exhausting the API while allowing successful pages to be cached at the edge.
+Media originals are verified for size/checksum before `PROCESSING→READY`; a
+dataless iCloud placeholder fails `integrity` and lands `FAILED/REJECTED_TECHNICAL`.
 
 ## Login / Identity
 
@@ -84,6 +91,12 @@ runtime falls back to the in-domain deterministic path.
 
 Any one of the three missing → `modelstack.Unconfigured{}` is wired
 in and every Experience surface returns `PROVIDER_UNCONFIGURED`.
+
+## Client version gate
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `PROXY_MIN_APP_VERSION` | no | When set, every `POST /v1/commands/*` and `GET /v1/feed` must carry `X-Proxy-App-Version >= min`; otherwise `426 Upgrade Required` (`/health` + `facet` exempt). Mobile sends `1.0.0` via `Constants.expoConfig.version`. |
 
 ## Object storage + Redis
 

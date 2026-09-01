@@ -170,6 +170,9 @@ func TestProductionDocCoversEveryWarning(t *testing.T) {
 			"PROXY_OPERATOR_PRINCIPALS",
 			"MODELSTACK_",
 			"OBJECT_STORAGE_ENDPOINT",
+			"PROXY_TRUST_CLOUDFLARE_IP",
+			"PROXY_DB_MAX_CONNS",
+			"PROXY_MIN_APP_VERSION",
 		}
 		for _, v := range expectedVars {
 			if !strings.Contains(docStr, v) {
