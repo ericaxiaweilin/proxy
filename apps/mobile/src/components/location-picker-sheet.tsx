@@ -19,6 +19,7 @@ import {
   LOCATION_OPTIONS,
   pickCityFromDisplayName,
   reverseGeocode,
+  reverseGeocodeViaProxy,
   type AnyLocation,
   type CustomLocation,
   type Location,
@@ -46,11 +47,19 @@ type Tab = "PRESET" | "CUSTOM" | "HISTORY";
 export function LocationPickerSheet({
   open,
   current,
+  baseUrl,
   onSelect,
   onClose
 }: {
   open: boolean;
   current: AnyLocation;
+  // R15.32.1.3: baseUrl is used by the custom-tab reverse geocode
+  // lookup. We call Proxy's own /v1/geocode/reverse so the result
+  // is observable / cacheable from the server side, and we don't
+  // need to whitelist nominatim.openstreetmap.org in the iOS ATS.
+  // Optional — ComposerV2Screen and other call sites without a
+  // network context fall through to the local grid POI lookup.
+  baseUrl?: string;
   onSelect: (next: AnyLocation) => void;
   onClose: () => void;
 }): React.JSX.Element {
@@ -70,23 +79,35 @@ export function LocationPickerSheet({
   );
   // lat/lng 提前计算 — useEffect dep + 渲染两处都需要。
   const { lat, lng } = gridToLatLng(customCity, pin.x, pin.y);
-  // R15.15 P2: 逆编码 — 拍 pin 以后从 lat/lng 拿 “还剑湖附近”
-  // 这样的人话描述。Nominatim 查不到时 fallback 到 “POI 附近”
-  // (走 gridToLatLngToGrid + CITY_POIS)。
+  // R15.15 P2 + R15.32.1.3: 逆编码 — 拍 pin 以后从 lat/lng 拿
+  // "还剑湖附近" / "Lê Thánh Tôn, Thành phố Hồ Chí Minh" 这样
+  // 的人话描述。优先走我们的 /v1/geocode/reverse（背后是
+  // Photon），离线/抓不到时 fallback 到 gridToLatLng + CITY_POIS。
   const [reverse, setReverse] = useState<ReverseGeocodeShape | undefined>(undefined);
   useEffect(() => {
-    // 只在 CUSTOM tab 才调 — PRESET tab 不需要。
     if (tab !== "CUSTOM") {
       setReverse(undefined);
       return;
     }
+    const ac = new AbortController();
     let cancelled = false;
     (async () => {
-      const r = await reverseGeocode(customCity, lat, lng);
-      if (!cancelled) setReverse(r);
+      let remote: ReverseGeocodeShape | undefined;
+      if (baseUrl) {
+        remote = await reverseGeocodeViaProxy(baseUrl, lat, lng, { signal: ac.signal });
+      }
+      if (cancelled) return;
+      if (remote && remote.source === "remote" && remote.displayName) {
+        setReverse(remote);
+        return;
+      }
+      // Offline / no network / no baseUrl — fall back to local grid
+      // POI lookup so the user still sees something readable.
+      const fallback = await reverseGeocode(customCity, lat, lng, { signal: ac.signal });
+      if (!cancelled) setReverse(fallback);
     })();
-    return () => { cancelled = true; };
-  }, [tab, customCity, lat, lng]);
+    return () => { cancelled = true; ac.abort(); };
+  }, [tab, baseUrl, customCity, lat, lng]);
 
   // 加载历史 — 只在切到 HISTORY tab 时拉一次，避免每次开 sheet 都打 keychain
   async function openHistory(): Promise<void> {

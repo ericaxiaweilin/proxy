@@ -131,6 +131,48 @@ const DEFAULT_NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse";
 
 export type NominatimFetcher = (url: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
 
+// R15.32.1.3: 线上逆编码走 Proxy 自己的 /v1/geocode/reverse，理由：
+//   1. Nominatim 公共点经常限流 / 拒服务，状状不稳定
+//      (用 cloud IP 打默认会有 403)。
+//   2. 走我们的 server 可以加 cache、观测、同一个 log line。
+//   3. iPhone 不需要配置 ATS 例外，公共点都走 http://localhost:4100。
+// Server 内部会调 Photon / Nominatim 并翻译成同一个 shape。
+export async function reverseGeocodeViaProxy(
+  baseUrl: string,
+  lat: number,
+  lng: number,
+  options?: { signal?: AbortSignal }
+): Promise<ReverseGeocodeShape> {
+  try {
+    const url = `${baseUrl.replace(/\/$/, "")}/v1/geocode/reverse?lat=${lat}&lng=${lng}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      ...(options?.signal ? { signal: options.signal } : {})
+    });
+    if (!res.ok) {
+      return { displayName: "", source: "offline-grid" };
+    }
+    const body = (await res.json()) as {
+      displayName?: string;
+      road?: string;
+      poi?: string;
+      source?: "remote" | "offline";
+    };
+    if (body.source === "offline" || !body.displayName) {
+      return { displayName: "", source: "offline-grid" };
+    }
+    return {
+      displayName: body.displayName,
+      ...(body.road ? { road: body.road } : {}),
+      ...(body.poi ? { poi: body.poi } : {}),
+      source: "remote"
+    };
+  } catch {
+    return { displayName: "", source: "offline-grid" };
+  }
+}
+
 export async function reverseGeocode(
   city: string,
   lat: number,

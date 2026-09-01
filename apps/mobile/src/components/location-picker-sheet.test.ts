@@ -24,6 +24,7 @@ import {
   makeCustomLocation,
   pickCityFromDisplayName,
   reverseGeocode,
+  reverseGeocodeViaProxy,
   type AnyLocation,
   type CustomLocation,
   type PresetLocation
@@ -276,5 +277,84 @@ describe("pickCityFromDisplayName", () => {
     expect(pickCityFromDisplayName("District 1, Vietnam")).toBeUndefined();
     expect(pickCityFromDisplayName("Some place, Bangkok, Thailand")).toBeUndefined();
     expect(pickCityFromDisplayName("")).toBeUndefined();
+  });
+});
+
+// R15.32.1.3: reverseGeocodeViaProxy 跳 Proxy 自己的
+// /v1/geocode/reverse, 避免直接打 Nominatim(该服务从 cloud IP
+// 打经常返 403 / 限流)。这些 tripwires 不打真网络：仅验证 URL
+// 拼接 + JSON 解析路径 + 离线 / 错误处理 fallback。
+describe("reverseGeocodeViaProxy", () => {
+  it("builds the right URL and parses a remote response", async () => {
+    const calls: string[] = [];
+    const fakeFetch = (async (url: string) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          displayName: "Lê Thánh Tôn, Thành phố Hồ Chí Minh, Việt Nam",
+          poi: "Lê Thánh Tôn",
+          city: "Thành phố Hồ Chí Minh",
+          source: "remote"
+        })
+      };
+    }) as unknown as typeof fetch;
+    const original = (globalThis as { fetch?: typeof fetch }).fetch;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fakeFetch;
+    try {
+      const r = await reverseGeocodeViaProxy("http://api.local:4100", 10.776, 106.701);
+      expect(calls.length).toBe(1);
+      expect(calls[0]).toContain("/v1/geocode/reverse?lat=10.776&lng=106.701");
+      expect(r.source).toBe("remote");
+      expect(r.displayName).toContain("Hồ Chí Minh");
+      expect(r.poi).toBe("Lê Thánh Tôn");
+    } finally {
+      (globalThis as unknown as { fetch: typeof fetch }).fetch = original as typeof fetch;
+    }
+  });
+  it("falls back to offline when proxy returns source=offline", async () => {
+    const fakeFetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ displayName: "", source: "offline" })
+    })) as unknown as typeof fetch;
+    const original = (globalThis as { fetch?: typeof fetch }).fetch;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fakeFetch;
+    try {
+      const r = await reverseGeocodeViaProxy("http://api.local:4100", 0, 0);
+      expect(r.source).toBe("offline-grid");
+      expect(r.displayName).toBe("");
+    } finally {
+      (globalThis as unknown as { fetch: typeof fetch }).fetch = original as typeof fetch;
+    }
+  });
+  it("falls back to offline-grid on network error (no throw)", async () => {
+    const fakeFetch = (async () => {
+      throw new Error("Connection reset by peer");
+    }) as unknown as typeof fetch;
+    const original = (globalThis as { fetch?: typeof fetch }).fetch;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fakeFetch;
+    try {
+      const r = await reverseGeocodeViaProxy("http://api.local:4100", 0, 0);
+      expect(r.source).toBe("offline-grid");
+    } finally {
+      (globalThis as unknown as { fetch: typeof fetch }).fetch = original as typeof fetch;
+    }
+  });
+  it("trims trailing slash on baseUrl", async () => {
+    const calls: string[] = [];
+    const fakeFetch = (async (url: string) => {
+      calls.push(url);
+      return { ok: true, status: 200, json: async () => ({ displayName: "x", source: "remote" }) };
+    }) as unknown as typeof fetch;
+    const original = (globalThis as { fetch?: typeof fetch }).fetch;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fakeFetch;
+    try {
+      await reverseGeocodeViaProxy("http://api.local:4100/", 1, 2);
+      expect(calls[0]).toBe("http://api.local:4100/v1/geocode/reverse?lat=1&lng=2");
+    } finally {
+      (globalThis as unknown as { fetch: typeof fetch }).fetch = original as typeof fetch;
+    }
   });
 });

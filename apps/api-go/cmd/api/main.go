@@ -257,6 +257,9 @@ func main() {
 	server.Safety = safetyService
 	server.Outcome = outcomeService
 	server.Scene = sceneService
+	// R15.32.1.3: /v1/geocode/reverse talks to Nominatim. Wire a
+	// 4s-timeout client so a slow upstream doesn't hang the picker.
+	server.HTTPClient = &http.Client{Timeout: 4 * time.Second}
 	server.Facet = facetService
 	// R15.32: Map explore.
 	server.Map = mapService

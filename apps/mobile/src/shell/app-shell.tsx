@@ -609,6 +609,7 @@ export function AppShell({
         />
         <LocationPickerSheet
           current={currentLocation}
+          baseUrl={localApiBaseUrl}
           onClose={() => setLocationSheetOpen(false)}
           onSelect={setCurrentLocation}
           open={locationSheetOpen}
