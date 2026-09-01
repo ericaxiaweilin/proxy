@@ -1376,6 +1376,26 @@ export function MeSurface({
     return () => { cancelled = true; };
   }, [localNet]);
 
+  // 滚动方向 / 可见性 refs — 必须在所有早期 return 之前声明，
+  // 否则在 subPage 切换时 hooks 数量从 N 变成 N+3，触发
+  // "Rendered fewer hooks than expected" 错误。
+  const lastYRef = useRef(0);
+  const dirRef = useRef(0);
+  const visibleRef = useRef(true);
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
+    const y = Math.max(0, e.nativeEvent.contentOffset.y);
+    const delta = y - lastYRef.current;
+    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+    else if (Math.abs(delta) >= 1) {
+      const prevDir = Math.sign(dirRef.current);
+      const nextDir = Math.sign(delta);
+      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
+      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
+    }
+    lastYRef.current = y;
+  }
+
   // 轻 CRM 关系图对 BUSINESS 也开放，优先于 R21 商家页
   if (subPage?.route === "friendcrm") {
     return <FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} />;
@@ -2636,22 +2656,6 @@ export function MeSurface({
     );
   }
 
-  const lastYRef = useRef(0);
-  const dirRef = useRef(0);
-  const visibleRef = useRef(true);
-  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const y = Math.max(0, e.nativeEvent.contentOffset.y);
-    const delta = y - lastYRef.current;
-    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-    else if (Math.abs(delta) >= 1) {
-      const prevDir = Math.sign(dirRef.current);
-      const nextDir = Math.sign(delta);
-      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
-      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
-    }
-    lastYRef.current = y;
-  }
   return (
     <View style={styles.root}>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
