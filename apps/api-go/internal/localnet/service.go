@@ -114,6 +114,7 @@ type PostMediaItem struct {
 	Height            int     `json:"height"`
 	AspectRatio       float64 `json:"aspectRatio"`
 	DurationMs        int64   `json:"durationMs,omitempty"`
+	Animated          bool    `json:"animated,omitempty"`
 	ProcessingStatus  string  `json:"processingStatus"`
 	ModerationStatus  string  `json:"moderationStatus"`
 	SortOrder         int     `json:"sortOrder"`
@@ -194,6 +195,7 @@ type MediaAssetInfo struct {
 	Width             int
 	Height            int
 	DurationMs        int64
+	Animated          bool
 	ProcessingStatus  string
 	ModerationStatus  string
 	VisibilityClass   string
@@ -1004,6 +1006,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 					Height:            info.Height,
 					AspectRatio:       aspect,
 					DurationMs:        info.DurationMs,
+					Animated:          info.Animated,
 					ProcessingStatus:  info.ProcessingStatus,
 					ModerationStatus:  info.ModerationStatus,
 					SortOrder:         ref.SortOrder,

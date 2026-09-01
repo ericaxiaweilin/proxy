@@ -18,6 +18,8 @@ type sourceImageMetadata struct {
 	ColorSpace  string
 	HasAlpha    bool
 	Animated    bool
+	FrameCount  int
+	DurationMs  int64
 }
 
 func readSourceImageMetadata(ctx context.Context, path, mime string) sourceImageMetadata {
@@ -161,7 +163,7 @@ func mergeFFProbeImageMetadata(ctx context.Context, path string, meta *sourceIma
 		return
 	}
 	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "quiet", "-print_format", "json",
-		"-show_entries", "stream=width,height,pix_fmt,color_space,color_primaries,nb_frames:stream_tags=rotate:stream_side_data=rotation", path)
+		"-show_entries", "stream=width,height,pix_fmt,color_space,color_primaries,nb_frames,duration:format=duration:stream_tags=rotate:stream_side_data=rotation", path)
 	out, err := cmd.Output()
 	if err != nil {
 		return
@@ -174,6 +176,7 @@ func mergeFFProbeImageMetadata(ctx context.Context, path string, meta *sourceIma
 			ColorSpace     string `json:"color_space"`
 			ColorPrimaries string `json:"color_primaries"`
 			Frames         string `json:"nb_frames"`
+			Duration       string `json:"duration"`
 			Tags           struct {
 				Rotate string `json:"rotate"`
 			} `json:"tags"`
@@ -181,6 +184,9 @@ func mergeFFProbeImageMetadata(ctx context.Context, path string, meta *sourceIma
 				Rotation int `json:"rotation"`
 			} `json:"side_data_list"`
 		} `json:"streams"`
+		Format struct {
+			Duration string `json:"duration"`
+		} `json:"format"`
 	}
 	if json.Unmarshal(out, &info) != nil || len(info.Streams) == 0 {
 		return
@@ -206,6 +212,14 @@ func mergeFFProbeImageMetadata(ctx context.Context, path string, meta *sourceIma
 	}
 	if frames, err := strconv.Atoi(stream.Frames); err == nil && frames > 1 {
 		meta.Animated = true
+		meta.FrameCount = frames
+	}
+	duration := stream.Duration
+	if duration == "" || duration == "N/A" {
+		duration = info.Format.Duration
+	}
+	if seconds, err := strconv.ParseFloat(duration, 64); err == nil && seconds > 0 {
+		meta.DurationMs = int64(seconds*1000 + 0.5)
 	}
 	if meta.Orientation == 0 {
 		rotation := 0

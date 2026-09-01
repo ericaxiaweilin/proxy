@@ -237,6 +237,25 @@ func TestQuarantineRejectsDecompressionBombDimensions(t *testing.T) {
 	}
 }
 
+func TestQuarantineAcceptsBoundedAnimatedGIF(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required for animated GIF admission test")
+	}
+	path := filepath.Join(t.TempDir(), "safe.gif")
+	cmd := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc=size=32x24:rate=4:duration=1", "-y", path)
+	if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		t.Fatalf("create GIF fixture: %v: %s", runErr, output)
+	}
+	meta := readSourceImageMetadata(t.Context(), path, "image/gif")
+	if !meta.Animated || meta.FrameCount < 2 || meta.DurationMs <= 0 {
+		t.Fatalf("animated GIF metadata incomplete: %+v", meta)
+	}
+	if err := validateQuarantinedImage(t.Context(), path, MediaAsset{MediaType: "IMAGE", MimeType: "image/gif"}); err != nil {
+		t.Fatalf("bounded animated GIF must be accepted: %v", err)
+	}
+}
+
 func TestSaveUploadRejectsDeclaredImageWithHTMLBytes(t *testing.T) {
 	s := New()
 	s.SetStoreDir(t.TempDir())
@@ -646,7 +665,9 @@ func TestProcessAssetNowFailsWhenOriginalMissing(t *testing.T) {
 	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
 		"mediaType": "IMAGE", "originalStorageKey": "missing.jpg", "mimeType": "image/jpeg",
 	}, ""))
-	var view struct{ MediaAssetID string `json:"mediaAssetId"` }
+	var view struct {
+		MediaAssetID string `json:"mediaAssetId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	id := view.MediaAssetID
 	// 先上传一个有效 JPEG 以便 SourceBytes>0，再删掉以模拟 iCloud 蒸发

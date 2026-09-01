@@ -14,6 +14,8 @@ const (
 	maxImageSourceBytes = int64(25 << 20)
 	maxImageDimension   = 20_000
 	maxImagePixels      = int64(80_000_000)
+	maxAnimatedFrames   = 600
+	maxAnimatedDuration = int64(30_000)
 )
 
 var supportedImageMIMEs = map[string]bool{
@@ -22,6 +24,7 @@ var supportedImageMIMEs = map[string]bool{
 	"image/webp": true,
 	"image/heic": true,
 	"image/avif": true,
+	"image/gif":  true,
 }
 
 // validateQuarantinedImage performs format and decompression-bomb admission
@@ -57,7 +60,15 @@ func validateQuarantinedImage(ctx context.Context, path string, asset MediaAsset
 		return fmt.Errorf("image dimensions %dx%d exceed safe decode limits", metadata.Width, metadata.Height)
 	}
 	if metadata.Animated {
-		return errors.New("animated images are not supported in the P0 photo pipeline")
+		if detected != "image/gif" {
+			return errors.New("animated images are currently supported only as GIF")
+		}
+		if metadata.FrameCount <= 1 || metadata.FrameCount > maxAnimatedFrames {
+			return fmt.Errorf("animated image frame count %d is outside the processing limit", metadata.FrameCount)
+		}
+		if metadata.DurationMs <= 0 || metadata.DurationMs > maxAnimatedDuration {
+			return fmt.Errorf("animated image duration %dms is outside the processing limit", metadata.DurationMs)
+		}
 	}
 	return nil
 }

@@ -67,7 +67,7 @@ func mediaAssetInfo(asset MediaAsset, variants []MediaVariant) localnet.MediaAss
 	info := localnet.MediaAssetInfo{
 		MediaAssetID: asset.MediaAssetID, MediaType: asset.MediaType,
 		ThumbnailURL: asset.ThumbnailURL, PlaybackURL: asset.PlaybackURL,
-		Width: asset.Width, Height: asset.Height, DurationMs: asset.DurationMs,
+		Width: asset.Width, Height: asset.Height, DurationMs: asset.DurationMs, Animated: asset.Animated,
 		ProcessingStatus: asset.ProcessingStatus, ModerationStatus: asset.ModerationStatus,
 		VisibilityClass: asset.VisibilityClass, DominantColorHex: asset.DominantColorHex,
 	}
