@@ -470,3 +470,43 @@ func TestRequiresAuthentication_DefaultIsProtected(t *testing.T) {
 		t.Fatal("DeleteAccount must require authentication")
 	}
 }
+
+func TestVersionMiddlewareRequiresUpgrade(t *testing.T) {
+	t.Setenv("PROXY_MIN_APP_VERSION", "1.0.0")
+	server := NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New())
+	handler := server.Handler()
+	// health is exempt
+	health := httptest.NewRecorder()
+	handler.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health/live", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("health must not be version-gated, got %d", health.Code)
+	}
+	// facet anonymous read is also exempt (to allow upgrade guidance page to load)
+	facet := httptest.NewRecorder()
+	handler.ServeHTTP(facet, httptest.NewRequest(http.MethodGet, "/v1/facet/objects", nil))
+	if facet.Code != http.StatusOK {
+		t.Fatalf("facet must not be version-gated, got %d", facet.Code)
+	}
+	// missing header -> 426
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodPost, "/v1/commands/CreateTaskDraft", nil))
+	if missing.Code != http.StatusUpgradeRequired {
+		t.Fatalf("missing version must be 426, got %d", missing.Code)
+	}
+	// old version -> 426
+	oldReq := httptest.NewRequest(http.MethodPost, "/v1/commands/CreateTaskDraft", nil)
+	oldReq.Header.Set("X-Proxy-App-Version", "0.9.9")
+	oldRec := httptest.NewRecorder()
+	handler.ServeHTTP(oldRec, oldReq)
+	if oldRec.Code != http.StatusUpgradeRequired {
+		t.Fatalf("old version must be 426, got %d", oldRec.Code)
+	}
+	// current version -> not version-gated (will be 401 due to missing auth, not 426)
+	okReq := httptest.NewRequest(http.MethodPost, "/v1/commands/CreateTaskDraft", nil)
+	okReq.Header.Set("X-Proxy-App-Version", "1.0.0")
+	okRec := httptest.NewRecorder()
+	handler.ServeHTTP(okRec, okReq)
+	if okRec.Code == http.StatusUpgradeRequired {
+		t.Fatalf("current version must not be 426, got %d", okRec.Code)
+	}
+}

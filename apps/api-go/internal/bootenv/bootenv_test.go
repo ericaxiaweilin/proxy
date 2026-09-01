@@ -107,6 +107,23 @@ func TestWarningsRemindsOperatorToRestrictCloudflareOrigin(t *testing.T) {
 	})
 }
 
+func TestWarningsDetectsInvalidPoolBoundsAndSemver(t *testing.T) {
+	withEnv(t, map[string]string{
+		"PROXY_DB_MAX_CONNS":      "1000",
+		"PROXY_DB_MIN_CONNS":      "99",
+		"PROXY_MIN_APP_VERSION":   "not-semver",
+		"PROXY_TRUST_CLOUDFLARE_IP": "false",
+	}, func() {
+		joined := strings.Join(Warnings(), "\n")
+		if !strings.Contains(joined, "PROXY_DB_MAX_CONNS") {
+			t.Fatalf("invalid max conns should warn, got: %s", joined)
+		}
+		if !strings.Contains(joined, "PROXY_MIN_APP_VERSION") {
+			t.Fatalf("invalid semver should warn, got: %s", joined)
+		}
+	})
+}
+
 func TestDefaultModeReturnsSimulatedForEmpty(t *testing.T) {
 	if got := defaultMode(""); got != "simulated" {
 		t.Fatalf("empty mode should map to simulated, got %q", got)
