@@ -323,6 +323,63 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 			})
 		}
 	}
+
+	// Per-domain SMTP routes (R15.28): allow Gmail/QQ/163/126 etc. to be
+	// served by their local SMTP backends so mainland-China users (where
+	// Gmail is blocked) still receive OTP mail. If no routes are
+	// configured, fall through to the single `smtpProvider` above.
+	var smtpMultiProvider *identity.SMTPMultiProvider
+	if (mode == "smtp" || mode == "production") {
+		routeDomains := os.Getenv("PROXY_SMTP_ROUTE_DOMAINS")
+		if routeDomains != "" {
+			var defaultCfg identity.SMTPConfig
+			if smtpProvider != nil {
+				defaultCfg = identity.SMTPConfig{
+					Host: host, Port: parseSMTPPortOrZero(os.Getenv("PROXY_SMTP_PORT")),
+					Username: os.Getenv("PROXY_SMTP_USERNAME"),
+					Password: os.Getenv("PROXY_SMTP_PASSWORD"),
+					From:     os.Getenv("PROXY_SMTP_FROM"),
+					TLSMode:  os.Getenv("PROXY_SMTP_TLS"),
+					Logger:   slog.Default(),
+				}
+			}
+			var routes []identity.SMTPMultiRoute
+			for _, dom := range strings.Split(routeDomains, ",") {
+				dom = strings.TrimSpace(dom)
+				if dom == "" {
+					continue
+				}
+				// env-var naming rule: dots in the domain are converted
+				// to underscores so the variable is a legal shell
+				// identifier (e.g. gmail.com -> GMAIL_COM).
+				prefix := "PROXY_SMTP_ROUTE_" + strings.ReplaceAll(strings.ToUpper(dom), ".", "_") + "_"
+				host := os.Getenv(prefix + "HOST")
+				if host == "" {
+					log.Printf("SMTP-ROUTES-DEBUG: no host env for domain %q (looked for %s)", dom, prefix+"HOST")
+					continue
+				}
+				port := parseSMTPPortOrZero(os.Getenv(prefix + "PORT"))
+				if port == 0 {
+					port = 587
+				}
+				routes = append(routes, identity.SMTPMultiRoute{
+					Domain: dom,
+					Cfg: identity.SMTPConfig{
+						Host:     host,
+						Port:     port,
+						Username: os.Getenv(prefix + "USERNAME"),
+						Password: os.Getenv(prefix + "PASSWORD"),
+						From:     os.Getenv(prefix + "FROM"),
+						TLSMode:  os.Getenv(prefix + "TLS"),
+						Logger:   slog.Default(),
+					},
+				})
+			}
+			if len(routes) > 0 {
+				smtpMultiProvider = identity.NewSMTPMultiProvider(defaultCfg, routes, slog.Default())
+			}
+		}
+	}
 	if (mode == "sms" || mode == "production") && url != "" {
 		smsProvider = identity.NewSMSHTTPLoginChallengeProvider(identity.SMSConfig{
 			URL:    url,
@@ -355,7 +412,10 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 	// "smtp" / "sms" with the required env set produces a router with
 	// one real provider.
 	var emailProvider identity.LoginChallengeProvider
-	if smtpProvider != nil {
+	switch {
+	case smtpMultiProvider != nil:
+		emailProvider = smtpMultiProvider
+	case smtpProvider != nil:
 		emailProvider = smtpProvider
 	}
 	var smsProviderIface identity.LoginChallengeProvider
@@ -363,11 +423,20 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 		smsProviderIface = smsProvider
 	}
 	router := identity.NewChannelRouter(emailProvider, smsProviderIface)
-	if smtpProvider == nil && smsProvider == nil {
+	if smtpProvider == nil && smsProvider == nil && smtpMultiProvider == nil {
 		log.Printf("PROXY_LOGIN_PROVIDER=%s but no SMTP/SMS env set; login provider fail-closed", mode)
 		return identity.UnconfiguredLoginChallengeProvider{}, false
 	}
-	log.Printf("PROXY_LOGIN_PROVIDER=%s: smtp=%v sms=%v", mode, smtpProvider != nil, smsProvider != nil)
+	routesActive := 0
+	if smtpMultiProvider != nil {
+		domains := strings.Split(os.Getenv("PROXY_SMTP_ROUTE_DOMAINS"), ",")
+		for _, d := range domains {
+			if strings.TrimSpace(d) != "" {
+				routesActive++
+			}
+		}
+	}
+	log.Printf("PROXY_LOGIN_PROVIDER=%s: smtp=%v smtp_routes=%d sms=%v", mode, smtpProvider != nil, routesActive, smsProvider != nil)
 	return router, false
 }
 
@@ -751,4 +820,18 @@ func wireIdentityEmailResolver(svc *identity.Service) {
 		}
 		return li.Identifier, true
 	})
+}
+
+// parseSMTPPortOrZero is a tolerant wrapper around strconv.Atoi that
+// returns 0 on parse failure or empty input. The caller decides what
+// 0 means (e.g. fall back to a default port).
+func parseSMTPPortOrZero(s string) int {
+	if s == "" {
+		return 0
+	}
+	port, err := strconv.Atoi(s)
+	if err != nil || port <= 0 {
+		return 0
+	}
+	return port
 }
