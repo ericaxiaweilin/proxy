@@ -399,9 +399,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
         // next screen ("验证码已发送至 ...") tells them to switch to the
         // Mail app themselves when they are ready.
       } catch (err) {
-        // DEBUG (R15.27): surface the real error so we know why fetch/begin fails on iPhone.
-        // eslint-disable-next-line no-console
-        console.log("[proxy.login] beginPasswordlessAuthentication ERROR:", err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+        if (__DEV__) console.warn("[proxy.login] begin passwordless failed", err);
         // R15.27: if device is already bound to a different user (anonymous/legacy),
         // rotate the deviceId and retry once. Same pattern as createNativeGuestSession.
         if (
@@ -427,16 +425,14 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             console.log("[proxy.login] retry after rotate FAILED:", retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : String(retryErr));
           }
           if (!retrySucceeded) {
-            setError(
-              `DEBUG ${err instanceof Error ? err.message : String(err)}`.slice(0, 240) ||
-                (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号格式（09xxxxxxxx / +84xxxxxxxxx）。")
-            );
+            setError(authChannel === "EMAIL"
+              ? "暂时无法发送 Gmail 验证码，请稍后重试或改用手机号。"
+              : "暂时无法发送验证码，请检查手机号后重试。");
           }
         } else {
-          setError(
-            `DEBUG ${err instanceof Error ? err.message : String(err)}`.slice(0, 240) ||
-              (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号格式（09xxxxxxxx / +84xxxxxxxxx）。")
-          );
+          setError(authChannel === "EMAIL"
+            ? "暂时无法发送 Gmail 验证码，请稍后重试或改用手机号。"
+            : "暂时无法发送验证码，请检查手机号后重试。");
         }
       } finally {
         setBusy(false);

@@ -34,6 +34,15 @@ describe("mapEngagementError", () => {
     expect(mapEngagementError(err, fallback)).toContain("请登录");
   });
 
+  it("maps 'principal required' message to a sign-in hint (R15.38.1)", () => {
+    // 刚从 R15.38 修过的: fresh guest 走 engagement-client requireSession,
+    //   keychain 完全空, 抛 EngagementProtocolError("an authenticated principal is required")。
+    //   之前的 mapEngagementError 没认识这个, 误判为 “网络问题”, 提示
+    //   走错。补上这个判断。
+    const err = new Error("an authenticated principal is required");
+    expect(mapEngagementError(err, fallback)).toContain("请登录");
+  });
+
   it("falls back to original message for unknown errors", () => {
     expect(mapEngagementError(new Error("network timeout"), fallback)).toBe(fallback);
   });

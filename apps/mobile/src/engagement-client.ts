@@ -89,11 +89,13 @@ export class EngagementClient {
 
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
-    if (!session?.principal) throw new EngagementProtocolError("an authenticated principal is required");
-    // R15.34.1 P0: 拒绝离线 fallback session 发写命令
+    // R15.38: 三种 "不能写" 状态都抛 OfflineFallbackSessionError, 让
+    //   feed 表面能统一识别 "访客不能 X" 这个提示, 不再说 "请检查连接"。
+    //   - 根本没 session (fresh guest) — keychain 完全空
+    //   - 离线 fallback (serverSession === false) — 是 “伪” session
+    //   - 软登出 (signedOut === true) — session 还在但被锁
+    if (!session?.principal) throw new OfflineFallbackSessionError();
     if (session.serverSession === false) {
-      // R15.38: 抛标准错误类, 让 feed 表面能识别“需登录”而不是
-      //   统一渲染为“请检查连接后重试”。
       throw new OfflineFallbackSessionError();
     }
     if (session.signedOut === true) throw new OfflineFallbackSessionError();

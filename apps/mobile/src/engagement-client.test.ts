@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EngagementClient } from "./engagement-client";
-import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-session";
+import { InMemorySecureStorageDriver, OfflineFallbackSessionError, SecureSessionStore } from "./secure-session";
 
 describe("EngagementClient moderation actions", () => {
   it("sends feed preference and report facts to the server", async () => {
@@ -21,5 +21,16 @@ describe("EngagementClient moderation actions", () => {
     expect(envelopes.map((item) => item.commandType)).toEqual(["RecordFeedPreference", "ReportPost"]);
     expect(envelopes[0]?.payload).toEqual({ postId: "post_1", action: "REDUCE_AUTHOR", authorId: "author_1" });
     expect(envelopes[1]?.payload).toEqual({ postId: "post_1", reason: "SPAM" });
+  });
+
+  // R15.38.1: guest (keychain 完全空) 点赞, requireSession 现在抛
+  //   OfflineFallbackSessionError, feed 表面 mapEngagementError 能识别
+  //   "请登录" 而不是误报 "请检查连接"。主路径之前的 "an authenticated
+  //   principal is required" 文案不直接进 UI (但 mapEngagementError 也
+  //   补了一个 fallback 匹配)。
+  it("throws OfflineFallbackSessionError when session is empty (guest)", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    const client = new EngagementClient({ secureSessionStore: store, authClient: { request: async () => { throw new Error("should not reach"); } } });
+    await expect(client.recordFeedPreference("post_1", "REDUCE_AUTHOR", "author_1")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
   });
 });

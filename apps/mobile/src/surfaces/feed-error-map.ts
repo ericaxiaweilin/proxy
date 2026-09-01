@@ -2,7 +2,7 @@
 //   之前 catch 全用同一句 "请检查连接后重试", 遮掩了
 //   "未登录" 这种情况 — 访客点赞也会看到这句话。
 //   这里区分:
-//   - OfflineFallbackSessionError / "require a real sign-in"
+//   - OfflineFallbackSessionError / "require a real sign-in" / "principal required"
 //     → 改口为 "请登录后重试"
 //   - 其他 (真网络) → 保持原 fallback
 //
@@ -28,6 +28,16 @@ export function mapEngagementError(error: unknown, fallback: string): string {
     // R15.39: signedOut session
     if (msg.includes("signed out") || msg.includes("re-authenticate")) {
       return "会话已登出，请登录后重试。";
+    }
+    // R15.38.1: engagement-client requireSession 在 fresh guest (keychain
+    //   完全空) 走的是 "an authenticated principal is required"。这是
+    //   "未登录" 的另一种表达 — 不能被 fallback 当成 "网络问题"。
+    if (
+      msg.includes("principal required") ||
+      msg.includes("an authenticated principal") ||
+      msg.includes("authenticated principal")
+    ) {
+      return "访客不能点赞 / 回复 / 举报，请登录后重试。";
     }
   }
   return fallback;
