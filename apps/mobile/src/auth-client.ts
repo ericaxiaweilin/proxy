@@ -110,29 +110,63 @@ export class SessionAuthClient {
     let current: StoredSession | undefined;
     try {
       current = await this.input.secureSessionStore.read();
-      if (current) {
-        await this.send("/v1/commands/RevokeSession", {
-          method: "POST",
-          body: {
-            commandId: this.nextCommandId("signout"),
-            commandType: "RevokeSession",
-            commandVersion: 1,
-            actor: { type: "USER", id: current.userAccountId },
-            principal: current.principal ?? current.auth.principal,
-            target: { type: "Session", id: current.auth.sessionId },
-            idempotencyKey: this.nextCommandId("idem"),
-            authContext: { sessionId: current.auth.sessionId },
-            purpose: "user_sign_out",
-            correlationId: this.nextCommandId("corr"),
-            requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),
-            payload: { reason: "USER_LOGOUT" }
-          }
-        }, current.auth.accessToken).catch(() => undefined);
+    } catch {
+      current = undefined;
+    }
+    // R15.39: signOut 改为 "soft sign out" — 留 session 在 keychain 里
+    //   (refreshToken 还在), 加 signedOut=true + signedOutAt 锁定状态。
+    //   这样下次用户点 “继续” 可以走 silent re-auth (用 refreshToken
+    //   拿新 accessToken, 不用走 OTP)。
+    //   服务器侧 RevokeSession 还是发 (best effort) — 但即使失败,
+    //   客户端也不会困在 "signed-in" UI 里 (有 signedOut gate)。
+    if (current) {
+      // Best-effort server revoke, but don't block on it.
+      void this.send("/v1/commands/RevokeSession", {
+        method: "POST",
+        body: {
+          commandId: this.nextCommandId("signout"),
+          commandType: "RevokeSession",
+          commandVersion: 1,
+          actor: { type: "USER", id: current.userAccountId },
+          principal: current.principal ?? current.auth.principal,
+          target: { type: "Session", id: current.auth.sessionId },
+          idempotencyKey: this.nextCommandId("idem"),
+          authContext: { sessionId: current.auth.sessionId },
+          purpose: "user_sign_out",
+          correlationId: this.nextCommandId("corr"),
+          requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),
+          payload: { reason: "USER_LOGOUT" }
+        }
+      }, current.auth.accessToken).catch(() => undefined);
+
+      // 本地清 accessToken + 锁定状态, 写回 keychain。
+      // 不调用 clear() — refreshToken 要保留, silent re-auth 要用。
+      const nowIso = new Date((this.input.now ?? (() => new Date()))()).toISOString();
+      const signedOutSession: StoredSession = {
+        ...current,
+        auth: {
+          ...current.auth,
+          // accessToken 置为 “revoked” — 不能用 valid 格式绕过 isSessionAuthTokens
+          //   (accessToken 要求非空)。这个 placeholder 不会走任何 server 命令
+          //   — 任何走 authClient 的调用都会因为 isValidAccessToken 失败而转去
+          //   refreshToken 路径, 而 refreshToken 路径才能被 silent re-auth 复用。
+          // refreshToken 不动, 留给 silent re-auth。
+          accessToken: "revoked"
+        },
+        signedOut: true,
+        signedOutAt: nowIso
+      };
+      try {
+        await this.input.secureSessionStore.write(signedOutSession);
+      } catch {
+        // 如果 keychain 写入失败 (e.g. refreshToken 过期), 最后手段是
+        // 真正清掉, 避免后面 restoreNativeShell 又拿这个失效的 session 走
+        // restore 逻辑。
+        await this.input.secureSessionStore.clear().catch(() => undefined);
       }
-    } finally {
-      // Logout is local-authoritative: a network outage must never trap the
-      // user in a signed-in UI. Server revocation is best effort.
-      await this.input.secureSessionStore.clear();
+    } else {
+      // 本来就没有 session (双重 signOut / 升级迁移), 确保 keychain 干净。
+      await this.input.secureSessionStore.clear().catch(() => undefined);
     }
   }
 

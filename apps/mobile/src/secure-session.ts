@@ -36,7 +36,24 @@ export async function requireAuthenticatedServerSession(input: {
   if (session.serverSession === false) {
     throw new OfflineFallbackSessionError();
   }
+  // R15.39: signOut 不再全清 keychain — 改为设 signedOut=true。
+  //   随后任何走 requireSession / requireAuthenticatedServerSession 的
+  //   写路径都被拦下, 跟 "离线 fallback" 一样。读路径依旧可用。
+  if (session.signedOut === true) {
+    throw new SignedOutSessionError();
+  }
   return session as AuthenticatedStoredSession;
+}
+
+// R15.39: 区分 "本地离线 fallback" (createNativeGuestSession API-downgrade
+//   产生的假 session, server 端无记录) 和 "本地已登出" (用户主动登出, 但
+//   refreshToken 还在 keychain 里, 可作 silent re-auth 用)。
+//   两个错误名字不同, UI 可以分别提示。
+export class SignedOutSessionError extends Error {
+  public constructor() {
+    super("user is signed out — re-authenticate to perform write operations");
+    this.name = "SignedOutSessionError";
+  }
 }
 
 export type StoredSession = {
@@ -52,6 +69,17 @@ export type StoredSession = {
 	//     写命令 — server 侧也拿不到有效 access token，提交必拒。
 	//   旧 session (升级前写的) 默认按 true 处理 (向后兼容)。
 	serverSession?: boolean;
+	// R15.39: 用户主动登出 (signOut) 后, session 留在 keychain 里供
+	//   silent re-auth 用, 同时设 signedOut=true + signedOutAt 锁定“本
+	//   地登出”状态。这两个字段只在 "曾经是真实 server session" 才出现;
+	//   离线 fallback 不会走到这里。
+	//   - signedOut=true + signedOutAt: 任何写路径 (requireSession /
+	//     requireAuthenticatedServerSession) 都会抛 SignedOutSessionError,
+	//     UI 上面跟 "未登录" 一样表现 (但错误类不同, 能区分是不是 silent
+	//     re-auth 可选)。
+	//   - signedOut=undefined: 正常 server session。
+	signedOut?: boolean;
+	signedOutAt?: string;
 };
 
 /**
@@ -125,12 +153,17 @@ export class SecureSessionStore {
 
 function isStoredSession(value: unknown): value is StoredSession {
   if (!value || typeof value !== "object") return false;
-	const candidate = value as { userAccountId?: unknown; auth?: unknown; principal?: unknown; serverSession?: unknown };
+	const candidate = value as { userAccountId?: unknown; auth?: unknown; principal?: unknown; serverSession?: unknown; signedOut?: unknown; signedOutAt?: unknown };
 	if (typeof candidate.userAccountId !== "string" || candidate.userAccountId.length === 0) return false;
   if (!isSessionAuthTokens(candidate.auth)) return false;
   if (candidate.principal !== undefined && !isPrincipal(candidate.principal)) return false;
   // R15.34.1: serverSession 可选, 必须是 boolean 或 undefined.
   if (candidate.serverSession !== undefined && typeof candidate.serverSession !== "boolean") return false;
+  // R15.39: signedOut / signedOutAt 可选, 必须是 boolean / ISO string 或 undefined.
+  if (candidate.signedOut !== undefined && typeof candidate.signedOut !== "boolean") return false;
+  if (candidate.signedOutAt !== undefined) {
+    if (typeof candidate.signedOutAt !== "string" || Number.isNaN(Date.parse(candidate.signedOutAt))) return false;
+  }
   return true;
 }
 
@@ -198,7 +231,10 @@ function cloneSession(session: StoredSession): StoredSession {
     // R15.34.1: 保留 serverSession 标志 (false = 离线 fallback).
     //   旧 session 不写这个字段， clone 后为 undefined → 默认看作真实
     //   server session (向下兼容)。
-    ...(session.serverSession !== undefined ? { serverSession: session.serverSession } : {})
+    ...(session.serverSession !== undefined ? { serverSession: session.serverSession } : {}),
+    // R15.39: signedOut / signedOutAt 同理。undefined = 正常 server session.
+    ...(session.signedOut !== undefined ? { signedOut: session.signedOut } : {}),
+    ...(session.signedOutAt !== undefined ? { signedOutAt: session.signedOutAt } : {})
   };
 }
 

@@ -13,6 +13,7 @@ import {
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { OfflineFallbackSessionError } from "./secure-session";
 
 export type ExperienceCommandTransport = {
   request(
@@ -97,6 +98,7 @@ export class ExperienceClient {
         "experience actions require a real sign-in (offline session cannot act)"
       );
     }
+    if (session.signedOut === true) throw new OfflineFallbackSessionError();
 
     return session as StoredSession & {
       principal: NonNullable<StoredSession["principal"]>;

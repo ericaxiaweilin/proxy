@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mapEngagementError } from "./feed-error-map";
-import { OfflineFallbackSessionError } from "../secure-session";
+import { OfflineFallbackSessionError, SignedOutSessionError } from "../secure-session";
 import { EngagementProtocolError } from "../engagement-client";
 
 describe("mapEngagementError", () => {
@@ -8,6 +8,10 @@ describe("mapEngagementError", () => {
 
   it("maps OfflineFallbackSessionError to a sign-in hint", () => {
     expect(mapEngagementError(new OfflineFallbackSessionError(), fallback)).toContain("请登录");
+  });
+
+  it("maps SignedOutSessionError to a sign-in hint (R15.39)", () => {
+    expect(mapEngagementError(new SignedOutSessionError(), fallback)).toContain("请登录");
   });
 
   it("maps EngagementProtocolError with offline-fallback message to a sign-in hint", () => {
@@ -22,6 +26,11 @@ describe("mapEngagementError", () => {
   it("maps LocalNetProtocolError 'publishing requires a real sign-in' to a sign-in hint", () => {
     // 发帖路径的 fallback message。
     const err = new Error("publishing requires a real sign-in (offline session cannot post)");
+    expect(mapEngagementError(err, fallback)).toContain("请登录");
+  });
+
+  it("maps signedOut-style error message to a sign-in hint (R15.39)", () => {
+    const err = new Error("user is signed out — re-authenticate to perform write operations");
     expect(mapEngagementError(err, fallback)).toContain("请登录");
   });
 

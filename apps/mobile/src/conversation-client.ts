@@ -1,4 +1,5 @@
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { OfflineFallbackSessionError } from "./secure-session";
 
 export type AuthenticatedCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<{ status: number; json: () => Promise<unknown> }>;
@@ -115,6 +116,7 @@ export class ConversationClient {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new Error("an authenticated principal is required");
     if (session.serverSession === false) throw new Error("sending messages requires a real sign-in (offline session cannot act)");
+    if (session.signedOut === true) throw new OfflineFallbackSessionError();
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 

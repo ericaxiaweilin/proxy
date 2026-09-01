@@ -6,6 +6,7 @@ import {
   requireAuthenticatedServerSession,
   SECURE_SESSION_STORAGE_KEY,
   SecureSessionStore,
+  SignedOutSessionError,
   type StoredSession
 } from "./secure-session";
 
@@ -102,5 +103,69 @@ describe("secure mobile session boundary", () => {
     expect(read?.serverSession).toBe(false);
     // requireAuthenticatedServerSession 现在能拒
     await expect(requireAuthenticatedServerSession({ store })).rejects.toBeInstanceOf(OfflineFallbackSessionError);
+  });
+
+  // R15.39: 用户主动登出后, session 留在 keychain 里, 带 signedOut=true
+  //   + signedOutAt. restore 阶段不认这个 session (变 SIGNED_OUT 状态),
+  //   写路径 (requireAuthenticatedServerSession) 也要拒。
+  it("treats signedOut sessions as unauthenticated on restore and write", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    const softSignedOut: StoredSession = {
+      ...session,
+      // 模拟 R15.39 signOut 的写回: accessToken 置为 “revoked” (非空但
+      //   无效), signedOut 标 true
+      auth: { ...session.auth, accessToken: "revoked" },
+      signedOut: true,
+      signedOutAt: "2026-08-14T00:00:00.000Z"
+    };
+    await store.write(softSignedOut);
+    const restored = await restoreAppShell({ secureSessionStore: store, isRestricted: false, isOffline: false });
+    // restore 阶段识别 signedOut, 走 SIGNED_OUT 状态 (跟 “没 session” 一样)
+    expect(restored.state).toEqual({ status: "SIGNED_OUT", initialRoute: "auth" });
+    // 但 session 还在 keychain 里 (silent re-auth 可用)
+    expect(await driver.getItem(SECURE_SESSION_STORAGE_KEY)).not.toBeNull();
+    // requireAuthenticatedServerSession 拒
+    await expect(requireAuthenticatedServerSession({ store })).rejects.toBeInstanceOf(SignedOutSessionError);
+  });
+
+  // R15.39: signedOut 之后读路径仍然能走 (写路径才拒)。这是设计选择
+  //   — signedOut 不是 “删 session”，只是 “锁写” 。
+  it("signedOut session is still readable (write-only lock)", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    const softSignedOut: StoredSession = {
+      ...session,
+      signedOut: true,
+      signedOutAt: "2026-08-14T00:00:00.000Z"
+    };
+    await store.write(softSignedOut);
+    // store.read() 不拒 — 读路径继续能用 (浏览 feed, 看历史)
+    const read = await store.read();
+    expect(read?.userAccountId).toBe("user_001");
+    expect(read?.signedOut).toBe(true);
+  });
+
+  // R15.39: signedOutAt 字段被严格验证 (ISO 字符串)。垃圾值会让
+  //   isStoredSession 拒掉, 进而被读路径的 auto-cleanup 删掉。
+  it("rejects malformed signedOutAt on read", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    const malformed: StoredSession = {
+      ...session,
+      signedOut: true,
+      signedOutAt: "not-an-iso-date"
+    };
+    // 直接写 raw JSON 绕过 isStoredSession 验证
+    await driver.setItem(SECURE_SESSION_STORAGE_KEY, JSON.stringify({
+      userAccountId: malformed.userAccountId,
+      auth: malformed.auth,
+      principal: malformed.principal,
+      signedOut: true,
+      signedOutAt: "not-an-iso-date"
+    }));
+    // 读不出来 — auto-clear
+    expect(await store.read()).toBeUndefined();
+    expect(await driver.getItem(SECURE_SESSION_STORAGE_KEY)).toBeNull();
   });
 });

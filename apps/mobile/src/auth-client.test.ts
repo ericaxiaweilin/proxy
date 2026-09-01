@@ -106,16 +106,29 @@ describe("mobile session auth client", () => {
     expect(requests).toBe(0);
   });
 
-  it("clears local credentials on sign out even when server revocation is offline", async () => {
+  it("soft sign out — marks session as signedOut, keeps keychain for silent re-auth, even when server revocation is offline", async () => {
     const driver = new InMemorySecureStorageDriver();
     const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
     await store.write(initialSession);
     const client = new SessionAuthClient({
       baseUrl: "https://api.proxy.test",
       secureSessionStore: store,
+      now: () => new Date("2026-08-14T00:00:00.000Z"),
       transport: async () => { throw new Error("offline"); }
     });
     await client.signOut();
-    expect(await store.read()).toBeUndefined();
+    // R15.39: signOut 不再 clear keychain — 改为设 signedOut=true,
+    //   保留 refreshToken 以供后续 silent re-auth (点 “继续” 按钮) 使用。
+    //   写路径 (requireSession) 仍会拒 (signedOut gate), 跟 “未登录”
+    //   一样表现。
+    const after = await store.read();
+    expect(after).toBeDefined();
+    expect(after?.signedOut).toBe(true);
+    expect(after?.signedOutAt).toBe("2026-08-14T00:00:00.000Z");
+    // accessToken 被置为 "revoked" — 避免起动时 getAccessToken 走
+    //   “老 accessToken 有效” 路径
+    expect(after?.auth.accessToken).toBe("revoked");
+    // refreshToken 保留 — silent re-auth 要用
+    expect(after?.auth.refreshToken).toBe(initialSession.auth.refreshToken);
   });
 });

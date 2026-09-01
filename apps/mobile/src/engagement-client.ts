@@ -96,6 +96,7 @@ export class EngagementClient {
       //   统一渲染为“请检查连接后重试”。
       throw new OfflineFallbackSessionError();
     }
+    if (session.signedOut === true) throw new OfflineFallbackSessionError();
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 

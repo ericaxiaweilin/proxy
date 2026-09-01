@@ -3,6 +3,7 @@ import type { MarketOpportunity } from "./market-fixtures";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { OfflineFallbackSessionError } from "./secure-session";
 
 export type MarketApplication = { applicationId: string; opportunityId: string; quote: string; scope: string; status: string };
 
@@ -60,7 +61,8 @@ export class MarketplaceClient {
     if (response.status < 200 || response.status >= 300) throw new Error(`unexpected market command status: ${response.status}`);
     return result;
   }
-  private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> { const session = await this.input.secureSessionStore.read(); if (!session?.principal) throw new Error("an authenticated principal is required"); if (session.serverSession === false) throw new Error("marketplace actions require a real sign-in (offline session cannot act)"); return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> }; }
+  private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> { const session = await this.input.secureSessionStore.read(); if (!session?.principal) throw new Error("an authenticated principal is required"); if (session.serverSession === false) throw new Error("marketplace actions require a real sign-in (offline session cannot act)");
+    if (session.signedOut === true) throw new OfflineFallbackSessionError(); return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> }; }
   // R15.22 fix: 同 LocalNetClient.optionalSession — 读 session 抛错或空, 返回
   // undefined, 走 PUBLIC actor.
   private async optionalSession(): Promise<(StoredSession & { principal: NonNullable<StoredSession["principal"]> }) | undefined> {

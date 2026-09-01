@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
+import Svg, { Path } from "react-native-svg";
 import { restoreAppShell, resolveInitialRoute, type AppShellState } from "./app-shell";
 import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
@@ -265,20 +266,19 @@ function BootScreen(): React.JSX.Element {
   );
 }
 
-function BrandMark({ large = false }: { large?: boolean }): React.JSX.Element {
+function BrandMark({ large = false, showSlogan = true }: { large?: boolean; showSlogan?: boolean }): React.JSX.Element {
   return (
     <View style={styles.brandBlock}>
       <Image accessibilityLabel="Proxy" source={require("../assets/otter-logo.png")} style={[styles.otterLogo, large && styles.otterLogoLarge]} />
       <Text style={[styles.brandName, large && styles.brandNameLarge]}>Proxy</Text>
-      <Text style={styles.brandSlogan}>让时间遇见需要。</Text>
-      <Text style={styles.brandSloganEn}>Where time meets need.</Text>
+      {showSlogan ? <><Text style={styles.brandSlogan}>让时间遇见需要。</Text><Text style={styles.brandSloganEn}>Where time meets need.</Text></> : null}
     </View>
   );
 }
 
 function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticated: () => void; onGuest: () => void }): React.JSX.Element {
   const [challengeId, setChallengeId] = useState<string>();
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authMode, setAuthMode] = useState<"login" | "register" | "guest">("login");
   const [phone, setPhone] = useState("");
   const [googleEmail, setGoogleEmail] = useState("");
   const [authChannel, setAuthChannel] = useState<"SMS" | "EMAIL">("SMS");
@@ -306,6 +306,10 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
   // "继续" 按钮: 不需要用户重新输 identifier, 直接填 + 发起验证码。
   // 复用了 requestChallenge() 的核心路径 — 但在调用前先填表单状态,
   // 让用户能在 OTP 输入屏幕看到 “验证码已发送至 ...” 中的地址。
+  // R15.39: 优先走 silent re-auth — keychain 里还存着 refreshToken
+  //   (signOut 只设了 signedOut=true, 没 clear)。如果 server 接受
+  //   refreshToken (RevokeSession 可能没完全作废 refresh), user
+  //   一步登入, 不走 OTP。失败才走 OTP fallback。
   async function continueAsLastSignIn(entry: LastSignIn): Promise<void> {
     setAuthMode("login");
     setAuthChannel(entry.channel);
@@ -321,6 +325,33 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     setError(undefined);
     setBusy(true);
     try {
+      // 1) Silent re-auth: 用 keychain 里的 refreshToken 换新 accessToken。
+      //    sessionAuthClient.refresh() 内部会:
+      //    - 读 keychain session
+      //    - 调 /v1/commands/RefreshSession
+      //    - 成功 → write 新 session (拿回 signedOut=undefined)
+      //    - 失败 → 跳到 catch
+      const tokens = await sessionAuthClient.refresh().catch(() => undefined);
+      if (tokens && tokens.accessToken) {
+        // 成功: user 登入, 不需 OTP
+        // sessionAuthClient.refresh() 成功后会 write 新 session,
+        // 但 signedOut 状态可能仍为 true (因为 write 用的不是完整 session)。
+        // 这里我们清掉 signedOut, 写一次干净 session。
+        try {
+          const current = await secureSessionStore.read();
+          if (current?.signedOut) {
+            // 清除 signedOut / signedOutAt 标记, 写回为正常 session
+            const restored: typeof current = { ...current } as typeof current;
+            delete (restored as { signedOut?: boolean }).signedOut;
+            delete (restored as { signedOutAt?: string }).signedOutAt;
+            await secureSessionStore.write(restored as Parameters<typeof secureSessionStore.write>[0]);
+          }
+        } catch {}
+        await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(() => undefined);
+        onAuthenticated();
+        return;
+      }
+      // 2) Silent re-auth 失败, 走 OTP fallback
       const loginClient = await getNativeLoginClient();
       const result = await loginClient.beginPasswordlessAuthentication({
         channel: entry.channel,
@@ -458,7 +489,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.screenInner}>
             <View style={styles.card}>
-        <BrandMark />
+        <BrandMark showSlogan={false} />
         {authMode === "login" && lastSignIn && !lastSignInDismissed ? (
           <View style={styles.rememberedCard}>
             <View style={styles.rememberedAvatar}>
@@ -498,10 +529,17 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           <Pressable onPress={() => { setAuthMode("register"); setAuthChannel("SMS"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "register" && styles.authTabActive]}>
             <Text style={[styles.authTabText, authMode === "register" && styles.authTabTextActive]}>注册</Text>
           </Pressable>
+          <Pressable onPress={() => { setAuthMode("guest"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, styles.authGuestTab, authMode === "guest" && styles.authTabActive]}>
+            <Text style={[styles.authTabText, authMode === "guest" && styles.authTabTextActive]}>访客</Text>
+          </Pressable>
         </View>
-        <Text style={styles.title}>{authMode === "login" ? "欢迎回来" : "创建账户"}</Text>
-        <Text style={styles.secondary}>{authMode === "login" ? "手机号/邮箱验证登录" : "手机号/邮箱验证后自动注册，默认 Individual Requester"}</Text>
-        {challengeId ? (
+        {authMode === "guest" ? (
+          <View style={styles.guestPanel}>
+            <Text style={styles.guestTitle}>先逛逛 Proxy</Text>
+            <Text style={styles.guestDescription}>可浏览首页、市场和动态；发布、互动、交易与长期保存时再登录。</Text>
+            <View style={[styles.button, busy && styles.disabled]}><Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} /><Pressable disabled={busy} onPress={() => void continueAsGuest()} style={styles.buttonPressable}><Text style={styles.buttonText}>{busy ? "进入中…" : "以访客身份进入"}</Text></Pressable></View>
+          </View>
+        ) : challengeId ? (
           <>
             <Text style={styles.helper}>验证码已发送至 {authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : formatVietnamesePhoneForDisplay(normalizeVietnamesePhone(phone))}</Text>
             <TextInput
@@ -565,8 +603,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                 </View>
               </>
             )}
-            <Pressable disabled={busy} onPress={() => void continueAsGuest()} style={styles.guestButton}><Text style={styles.guestText}>暂不登录，直接使用 Proxy</Text></Pressable>
-            <Text style={styles.oauthHint}>访客会保存当前设备、会话与使用记录；需要发布、交易或长期保存时再升级登录。</Text>
+            <Text style={styles.oauthHint}>可用 Google 或手机号继续；访客模式可在上方直接进入。</Text>
             <Pressable onPress={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(undefined); }} style={styles.switchAuthRow}>
               <Text style={styles.switchAuthText}>{authMode === "login" ? "没有账号？去注册" : "已有账号？去登录"}</Text>
             </Pressable>
@@ -606,6 +643,10 @@ function GoogleSignInSlot(props: GoogleSignInProps): React.JSX.Element {
     return <GoogleEmailFallback {...props} />;
   }
   return <ConfiguredGoogleSignIn {...props} />;
+}
+
+function GoogleMark(): React.JSX.Element {
+  return <Svg accessibilityLabel="Google" height={21} viewBox="0 0 24 24" width={21}><Path d="M21.35 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.23a4.47 4.47 0 0 1-1.94 2.93v2.43h3.14c1.84-1.7 2.92-4.2 2.92-7.19z" fill="#4285F4"/><Path d="M12 21.75c2.63 0 4.84-.87 6.45-2.36l-3.14-2.43c-.87.58-1.98.92-3.31.92-2.54 0-4.69-1.72-5.46-4.03H3.3v2.51A9.75 9.75 0 0 0 12 21.75z" fill="#34A853"/><Path d="M6.54 13.85A5.86 5.86 0 0 1 6.23 12c0-.64.11-1.26.31-1.85V7.64H3.3A9.75 9.75 0 0 0 2.25 12c0 1.57.38 3.05 1.05 4.36l3.24-2.51z" fill="#FBBC05"/><Path d="M12 6.12c1.43 0 2.71.49 3.72 1.45l2.79-2.79C16.84 3.15 14.63 2.25 12 2.25a9.75 9.75 0 0 0-8.7 5.39l3.24 2.51c.77-2.31 2.92-4.03 5.46-4.03z" fill="#EA4335"/></Svg>;
 }
 
 function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
@@ -670,7 +711,7 @@ function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
       }}
       style={[styles.googleButton, props.active && styles.googleButtonActive, (props.busy || !request) && styles.disabled]}
     >
-      <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 继续</Text>
+      <GoogleMark /><Text style={styles.googleLabel}>使用 Google 继续</Text>
     </Pressable>
   );
 }
@@ -688,7 +729,7 @@ function GoogleEmailFallback(props: GoogleSignInProps): React.JSX.Element {
       }}
       style={[styles.googleButton, props.active && styles.googleButtonActive, props.busy && styles.disabled]}
     >
-      <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 邮箱</Text>
+      <GoogleMark /><Text style={styles.googleLabel}>使用 Google 邮箱</Text>
     </Pressable>
   );
 }
@@ -744,8 +785,8 @@ const styles = StyleSheet.create({
     width: "100%"
   },
   brandBlock: { alignItems: "center", marginBottom: 26 },
-  otterLogo: { height: 56, resizeMode: "contain", width: 56 },
-  otterLogoLarge: { height: 76, width: 76 },
+  otterLogo: { borderRadius: 18, height: 56, overflow: "hidden", resizeMode: "contain", width: 56 },
+  otterLogoLarge: { borderRadius: 24, height: 76, width: 76 },
   brandName: { color: color.ink, fontSize: 30, fontWeight: "900", letterSpacing: 2, marginTop: 16 },
   brandNameLarge: { fontSize: 34 },
   brandSlogan: { color: color.muted, fontSize: 12, letterSpacing: 0.4, marginTop: 6 },
@@ -783,8 +824,9 @@ const styles = StyleSheet.create({
     textAlign: "center",
     width: "100%"
   },
-  authTabs: { flexDirection: "row", backgroundColor: color.surface, borderRadius: 12, padding: 3, marginTop: 14, width: "100%" },
-  authTab: { flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 8 },
+  authTabs: { flexDirection: "row", backgroundColor: "#F5F2F8", borderRadius: 21, padding: 5, marginTop: 14, width: "100%" },
+  authTab: { alignItems: "center", borderRadius: 17, flex: 1, minHeight: 48, justifyContent: "center", paddingVertical: 8 },
+  authGuestTab: { flex: 1.15 },
   authTabActive: { backgroundColor: color.white, ...shadows.card },
   authTabText: { color: color.muted, fontSize: 14, fontWeight: "700" },
   authTabTextActive: { color: color.ink },
@@ -794,7 +836,6 @@ const styles = StyleSheet.create({
   googleButtonRow: { flexDirection: "row", gap: 8, width: "100%" },
   googleButtonActive: { borderColor: color.violet, backgroundColor: "#F0EBF5" },
   googleButtonSmall: { flex: 0.4 },
-  googleText: { color: "#4285F4", fontSize: 20, fontWeight: "900", marginRight: 10 },
   googleLabel: { color: color.ink, fontSize: 15, fontWeight: "800" },
   divider: { color: color.muted, fontSize: 12, marginTop: 20 },
   phoneRow: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", marginTop: 10, minHeight: 52, paddingHorizontal: 16, width: "100%" },
@@ -802,6 +843,9 @@ const styles = StyleSheet.create({
   phoneInput: { color: color.ink, flex: 1, fontSize: 16, paddingVertical: 12 },
   guestButton: { alignItems: "center", marginTop: 18, paddingVertical: 10 },
   guestText: { color: color.violet, fontSize: 14, fontWeight: "800" },
+  guestPanel: { alignSelf: "stretch", paddingTop: 27 },
+  guestTitle: { color: color.ink, fontSize: 22, fontWeight: "900", textAlign: "center" },
+  guestDescription: { color: color.muted, fontSize: 14, lineHeight: 21, marginTop: 10, textAlign: "center" },
   inlineActions: { flexDirection: "row", gap: 28, justifyContent: "center", marginTop: 18 },
   linkText: { color: color.violet, fontSize: 13, fontWeight: "700" },
   oauthHint: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 18, textAlign: "center" },

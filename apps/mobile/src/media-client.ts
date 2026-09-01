@@ -3,6 +3,7 @@ import { File } from "expo-file-system";
 import * as Crypto from "expo-crypto";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { OfflineFallbackSessionError } from "./secure-session";
 import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./media-upload-retry";
 
 // 纯逻辑/类型已抽到 media-classify.ts（零原生依赖，供 Vitest 单测使用）。
@@ -230,6 +231,7 @@ export class MediaClient {
     const session = await this.input.secureSessionStore.read();
     if (!session?.principal) throw new Error("上传照片前需要登录或访客会话");
     if (session.serverSession === false) throw new Error("上传照片需要真实登录 (offline session 不能上传)");
+    if (session.signedOut === true) throw new OfflineFallbackSessionError();
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 

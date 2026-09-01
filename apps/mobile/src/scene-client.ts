@@ -2,6 +2,7 @@ import type { CommandResult, Memory, RecordOutcomePayload } from "@proxy/contrac
 import type { AuthenticatedCommandTransport } from "./demand-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { OfflineFallbackSessionError } from "./secure-session";
 
 // ── R15.13 P2: Memory envelope shape returned by api-go ────────────
 // The server wraps each list/get response in a JSON object inside
@@ -34,7 +35,7 @@ interface GetMemoryRef {
 export class SceneClient {
   private seq=0;
   constructor(private readonly input: { authClient: AuthenticatedCommandTransport; secureSessionStore: SecureSessionStore; now?: ()=>Date } ){}
-  private async requireSession(){ const s=await this.input.secureSessionStore.read(); if(!s?.principal) throw new Error("principal required"); if(s.serverSession === false) throw new Error("scene actions require a real sign-in (offline session cannot act)"); return s as StoredSession & {principal: NonNullable<StoredSession["principal"]>} }
+  private async requireSession(){ const s=await this.input.secureSessionStore.read(); if(!s?.principal) throw new Error("principal required"); if(s.serverSession === false) throw new Error("scene actions require a real sign-in (offline session cannot act)"); if(s.signedOut === true) throw new OfflineFallbackSessionError(); return s as StoredSession & {principal: NonNullable<StoredSession["principal"]>} }
   private nextId(p:string){
     // Per-bucket counters: commandId / idempotencyKey / correlationId must
     // never collide even when they all sit in the same millisecond.

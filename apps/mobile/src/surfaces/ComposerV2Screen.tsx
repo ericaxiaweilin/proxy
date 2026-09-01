@@ -135,7 +135,9 @@ export function ComposerV2Screen({
       if (cancelled) return;
       // 1. 有 session.principal
       // 2. serverSession !== false (未签发的离线 fallback 不行)
-      const ok = !!session?.principal && session.serverSession !== false;
+      // 3. signedOut !== true (R15.39: 登出后设了 signedOut=true, 仍需
+      //    silent re-auth 才能写)
+      const ok = !!session?.principal && session.serverSession !== false && session.signedOut !== true;
       setIsAuthenticatedForWrite(ok);
     }).catch(() => {
       if (!cancelled) setIsAuthenticatedForWrite(false);
