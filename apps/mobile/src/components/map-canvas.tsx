@@ -31,6 +31,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { CITY_BOUNDS, GRID_W, GRID_H, type GridCoord, gridToLatLng } from "./location-options";
 import { color } from "../theme";
+import { MapPin } from "./map-pin";
 
 export interface MapCanvasProps {
   // 初始 pin 位置（grid coord）。0,0 = 城市西北角；
@@ -222,10 +223,14 @@ export function MapCanvas({
         <Marker
           coordinate={pinLatLng}
           draggable
-          pinColor="#8033F0"
+          // R15.32.1: custom violet teardrop replaces the system
+          // balloon pin (which renders as a Google-Maps red drop on
+          // iOS and clashes with the Proxy brand color).
           title={cityHint}
           description={`半径 ${radiusMeters / 1000} km`}
-        />
+        >
+          <MapPin size={36} />
+        </Marker>
         <Circle
           center={pinLatLng}
           fillColor="rgba(128, 51, 240, 0.10)"

@@ -233,16 +233,10 @@ export function LocationPickerSheet({
                 value={label}
               />
 
-              {/* Confirm */}
-              <Pressable
-                accessibilityLabel="保存自定义坐标并切换"
-                onPress={() => void commitCustom()}
-                style={({ pressed }) => [styles.confirm, pressed && styles.confirmPressed]}
-              >
-                <Text style={styles.confirmText}>
-                  保存并切换到 {customCity} · {label.trim() || `(${pin.x}, ${pin.y})`} · {formatRadius(radius)}
-                </Text>
-              </Pressable>
+              {/* Extra padding so content doesn't get hidden by the
+                  sticky save bar. The bar lives in the sheet footer
+                  (outside this ScrollView) and stays visible. */}
+              <View style={styles.scrollFooterPad} />
             </ScrollView>
           ) : (
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
@@ -282,6 +276,24 @@ export function LocationPickerSheet({
               )}
             </ScrollView>
           )}
+
+          {/* Sticky footer — only show in CUSTOM tab so the user can
+              always reach "save & switch" without scrolling. PRESET
+              and HISTORY are short lists and commit on tap so they
+              don't need a footer. */}
+          {tab === "CUSTOM" && (
+            <View style={styles.footer}>
+              <Pressable
+                accessibilityLabel="保存自定义坐标并切换"
+                onPress={() => void commitCustom()}
+                style={({ pressed }) => [styles.confirm, pressed && styles.confirmPressed]}
+              >
+                <Text style={styles.confirmText} numberOfLines={1}>
+                  ✓ 保存并切换到 {customCity} · {label.trim() || `(${pin.x}, ${pin.y})`} · {formatRadius(radius)}
+                </Text>
+              </Pressable>
+            </View>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
@@ -308,7 +320,10 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     padding: 12
   },
-  sheet: { backgroundColor: color.white, borderRadius: 25, maxHeight: "88%", padding: 19 },
+  // R15.32.1: the sheet is now a column with head + tabs + scroll +
+  // optional footer. maxHeight caps the whole stack; the scroll view
+  // flexes inside to absorb the footer's space.
+  sheet: { backgroundColor: color.white, borderRadius: 25, maxHeight: "92%", padding: 19, paddingBottom: 12 },
   head: { paddingBottom: 10, paddingHorizontal: 1 },
   headTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   headSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
@@ -327,8 +342,13 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: color.ink },
   tabText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   tabTextActive: { color: color.white },
-  scroll: { marginTop: 4 },
+  // R15.32.1: ScrollView flexes (flex: 1) so the optional sticky
+  // footer below it always has room. Previously the scroll's
+  // content was sized by its own contentContainerStyle, hiding the
+  // save button at the bottom of a long list.
+  scroll: { flex: 1, marginTop: 4 },
   scrollContent: { gap: 8, paddingBottom: 16 },
+  scrollFooterPad: { height: 8 },
   opt: {
     alignItems: "center",
     backgroundColor: color.white,
@@ -391,12 +411,21 @@ const styles = StyleSheet.create({
   confirm: {
     backgroundColor: color.ink,
     borderRadius: 14,
-    marginTop: 8,
-    paddingVertical: 13,
-    alignItems: "center"
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center"
   },
   confirmPressed: { backgroundColor: "#3A2F4A" },
-  confirmText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  confirmText: { color: color.white, fontSize: 14, fontWeight: "800" },
+  // R15.32.1: sticky footer under the scroll. Pinned at the bottom
+  // of the sheet so the user can always tap save even if the city
+  // / map / radius / label inputs push it off-screen.
+  footer: {
+    paddingTop: 10,
+    borderTopColor: color.line,
+    borderTopWidth: 0.5
+  },
   emptyHistory: {
     paddingVertical: 30,
     paddingHorizontal: 10
