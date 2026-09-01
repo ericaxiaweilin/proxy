@@ -2,6 +2,7 @@ import type { CommandResult } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { OfflineFallbackSessionError } from "./secure-session";
 
 export type EngagementCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -91,7 +92,9 @@ export class EngagementClient {
     if (!session?.principal) throw new EngagementProtocolError("an authenticated principal is required");
     // R15.34.1 P0: 拒绝离线 fallback session 发写命令
     if (session.serverSession === false) {
-      throw new EngagementProtocolError("engagement actions require a real sign-in (offline session cannot react)");
+      // R15.38: 抛标准错误类, 让 feed 表面能识别“需登录”而不是
+      //   统一渲染为“请检查连接后重试”。
+      throw new OfflineFallbackSessionError();
     }
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }

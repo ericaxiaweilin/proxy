@@ -11,6 +11,7 @@ import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore } from "../secure-session";
+import { mapEngagementError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
@@ -438,8 +439,8 @@ export function FeedSurface({
     try {
       await command();
       apply(new Set(current).add(stateKey));
-    } catch {
-      setEngagementError("互动没有提交成功，请检查连接后重试。");
+    } catch (error) {
+      setEngagementError(mapEngagementError(error, "互动没有提交成功，请检查连接后重试。"));
     } finally {
       setEngagementBusy((value) => {
         const next = new Set(value);
@@ -457,8 +458,8 @@ export function FeedSurface({
       await engagement.replyToPost(replyTargetId, replyDraft);
       setReplyTargetId(null);
       setReplyDraft("");
-    } catch {
-      setEngagementError("回复没有提交成功，请检查连接后重试。");
+    } catch (error) {
+      setEngagementError(mapEngagementError(error, "回复没有提交成功，请检查连接后重试。"));
     } finally {
       setReplying(false);
     }
@@ -477,8 +478,8 @@ export function FeedSurface({
       setEngagementNotice(action === "REDUCE_AUTHOR" ? "已记录：将减少推荐此作者。" : action === "REDUCE_TOPIC" ? "已记录：将减少推荐类似内容。" : "已隐藏，并记录到推荐偏好。");
       setContextMenu(null);
       setReportMode(false);
-    } catch {
-      setEngagementError("偏好没有保存成功，请检查连接后重试。");
+    } catch (error) {
+      setEngagementError(mapEngagementError(error, "偏好没有保存成功，请检查连接后重试。"));
     } finally {
       setContextActionBusy(false);
     }
@@ -494,8 +495,8 @@ export function FeedSurface({
       setEngagementNotice("举报已提交，平台将按审核流程处理。");
       setContextMenu(null);
       setReportMode(false);
-    } catch {
-      setEngagementError("举报没有提交成功，请检查连接后重试。");
+    } catch (error) {
+      setEngagementError(mapEngagementError(error, "举报没有提交成功，请检查连接后重试。"));
     } finally {
       setContextActionBusy(false);
     }
