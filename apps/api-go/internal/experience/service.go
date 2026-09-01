@@ -320,6 +320,16 @@ func manifestFor(contextName string) manifest {
 					{ID: "business_workspace", Icon: "store-lines", Label: "我的企业 / 店铺", Description: "有经营权限时进入 Business Workspace", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "bdash"}},
 				},
 			},
+			// R15.40.3: FACET 是 ME tab 内的深度模块（不是第 6 个 root）。
+			//   me.tsx REQUESTER_ME.sections 里有 facet section，但 server
+			//   manifestFor REQUESTER 之前没返 — REPLACE 模式把整段覆盖，
+			//   facet 入口在 iPhone 上消失。补回与 mobile persona 同步。
+			{
+				ID: "facet", Title: "对象化运营", Hint: "FACET · 同一份真实素材，按对象重新组织",
+				Items: []menuItem{
+					{ID: "facet_home", Icon: "spark", Label: "FACET", Description: "对象列表 · 关系目标 · 缺口判定", Accent: true, Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "facet"}},
+				},
+			},
 		}
 	}
 

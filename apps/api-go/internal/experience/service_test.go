@@ -62,8 +62,8 @@ func TestRequesterManifest(t *testing.T) {
 	}
 
 	sections, ok := me["sections"].([]any)
-	if !ok || len(sections) != 4 {
-		t.Fatalf("expected four server-composed Me sections, got %+v", me["sections"])
+	if !ok || len(sections) != 5 {
+		t.Fatalf("expected five server-composed Me sections, got %+v", me["sections"])
 	}
 
 	if me["mode"] != "REPLACE" {
@@ -83,6 +83,14 @@ func TestRequesterManifest(t *testing.T) {
 	market := typed.Me.Sections[2]
 	if market.ID != "my_market" || len(market.Items) != 4 {
 		t.Fatalf("unexpected my market section: %+v", market)
+	}
+	// R15.40.3: facet section 补回（与 me.tsx REQUESTER_ME.sections 同步）。
+	facet := typed.Me.Sections[4]
+	if facet.ID != "facet" || len(facet.Items) != 1 {
+		t.Fatalf("unexpected facet section: %+v", facet)
+	}
+	if facet.Items[0].ID != "facet_home" || facet.Items[0].Action.Route != "facet" {
+		t.Fatalf("facet item drifted: %+v", facet.Items[0])
 	}
 	want := []struct{ id, label, route string }{
 		{"my_orders", "我的订单", "myorders"},
