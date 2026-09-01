@@ -486,14 +486,24 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 		{"seed_media_opening_video", "VIDEO", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_thumb.jpg", "video/mp4", "h264", 320, 240, 2020},
 	}
 	for _, a := range assets {
+		// owner_principal_type is constrained to 'INDIVIDUAL' or 'BUSINESS'
+		// by migration 049 (NOT VALID — but new inserts still must comply).
+		// Seed rows use 'INDIVIDUAL' with a fixed 'seed' principal id;
+		// these are demo assets referenced by the seed posts.
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO media.media_assets (
 				media_asset_id, owner_principal_type, owner_principal_id, media_type,
 				original_storage_key, playback_storage_key, thumbnail_storage_key,
 				mime_type, width, height, duration_ms, codec,
 				processing_status, playback_url, thumbnail_url, moderation_status, visibility_class, created_at, updated_at
-			) VALUES ($1,'PLATFORM','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY',$11,$12,'APPROVED','PUBLIC',$13,$13)
+			) VALUES ($1,'INDIVIDUAL','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY',$11,$12,'APPROVED','PUBLIC',$13,$13)
 			ON CONFLICT (media_asset_id) DO UPDATE SET
+				-- R15.31: migration 049 added owner_principal_type CHECK;
+				-- legacy seed rows used 'PLATFORM' (now invalid). Re-write
+				-- both principal type/id so the ON CONFLICT path also
+				-- migrates the existing row, not just inserts.
+				owner_principal_type=EXCLUDED.owner_principal_type,
+				owner_principal_id=EXCLUDED.owner_principal_id,
 				playback_storage_key=EXCLUDED.playback_storage_key,
 				thumbnail_storage_key=EXCLUDED.thumbnail_storage_key,
 				processing_status='READY', moderation_status='APPROVED', visibility_class='PUBLIC', updated_at=EXCLUDED.updated_at`,
