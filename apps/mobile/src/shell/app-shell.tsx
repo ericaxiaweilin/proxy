@@ -189,10 +189,39 @@ export function AppShell({
   const [feedRefreshTrigger, setFeedRefreshTrigger] = useState(0);
   const [feedPrefsOpen, setFeedPrefsOpen] = useState(false);
   const [feedChromeVisible, setFeedChromeVisible] = useState(true);
-  const touchStartY = useRef<number | undefined>(undefined);
-  const lastTouchY = useRef<number | undefined>(undefined);
-  const touchStartX = useRef<number | undefined>(undefined);
-  const lastTouchX = useRef<number | undefined>(undefined);
+  // R15.34.3: body 横滑切页 panResponder — 转换自 onTouchStart/Move/End,
+  //   让 RN responder 谈判系统能识别 “子组件先抢” (FilterChipRail /
+  //   multi-image ScrollView / stories), 避免原来的 plain touch
+  //   handler 总是赢走横滑。
+  const bodySwipePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => {
+        const absDx = Math.abs(gs.dx);
+        const absDy = Math.abs(gs.dy);
+        const swipeThreshold = 56;
+        return absDx > swipeThreshold && absDx > absDy * 1.25;
+      },
+      onPanResponderRelease: (_, gs) => {
+        const dx = gs.dx;
+        const dy = gs.dy;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        const swipeThreshold = 56;
+        const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
+        const canSwipeRoot = !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen && !openExperience;
+        if (isHorizontalSwipe && canSwipeRoot) {
+          const idx = PAGE_SEQUENCE.indexOf(currentPage);
+          if (idx < 0) return;
+          if (dx < 0 && idx < PAGE_SEQUENCE.length - 1) goToPage(PAGE_SEQUENCE[idx + 1]!);
+          else if (dx > 0 && idx > 0) goToPage(PAGE_SEQUENCE[idx - 1]!);
+        }
+      },
+      onPanResponderTerminate: () => {
+        // 什么都不做 — 子组件接管了
+      }
+    })
+  ).current;
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [homeAssistant, setHomeAssistant] = useState<{ text: string; mode?: HomeIntentMode; attachment?: HomeAttachment }>();
   const [voucherOpen, setVoucherOpen] = useState(false);
@@ -363,44 +392,29 @@ export function AppShell({
             onPress={() => setLocationSheetOpen(true)}
           />
         ) : null}
+        {/*
+          ============================================================
+          R15.34.3 — Body 横滑切页: 改用 PanResponder
+          ============================================================
+          之前 onTouchStart/Move/End 是 plain touch handler, 不会走
+          RN responder 谈判 → 任何子组件 (FilterChipRail / 多图
+          ScrollView / stories) 的 PanResponder 都拦不住 body 拿到的
+          原始 touch events, 所以 swipe 总是被外层 PAGE_SEQUENCE 抢走
+          切 tab。
+
+          现在改成 PanResponder:
+          - onStartShouldSetPanResponder: () => false (start 不抢, 让
+            子组件先抢)
+          - onMoveShouldSetPanResponder: 必须在 dx > 56 + dx > dy*1.25
+            才抢 (跟原来 onTouchEnd 一样的逻辑)
+          - 这样子组件的 PanResponder (dx > 6, 或 start 抢) 会先于 body
+            拿到 responder, body 的 PanResponder 抢不到, 不触发切页
+          - 触摸到了没被任何子组件接住的地方 (比如空白背景), body 自己的
+            PanResponder 才有机会拿到, 这时是真正的 “扫切 tab”
+          ============================================================
+        */}
         <View
-          onTouchEnd={() => {
-            const startX = touchStartX.current;
-            const endX = lastTouchX.current ?? startX;
-            const startY = touchStartY.current;
-            const endY = lastTouchY.current ?? startY;
-            if (startX !== undefined && endX !== undefined && startY !== undefined && endY !== undefined) {
-              const dx = endX - startX;
-              const dy = endY - startY;
-              const absDx = Math.abs(dx);
-              const absDy = Math.abs(dy);
-              const swipeThreshold = 56;
-              const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
-              const canSwipeRoot = !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen && !openExperience;
-              if (isHorizontalSwipe && canSwipeRoot) {
-                const idx = PAGE_SEQUENCE.indexOf(currentPage);
-                if (idx < 0) return;
-                if (dx < 0 && idx < PAGE_SEQUENCE.length - 1) goToPage(PAGE_SEQUENCE[idx + 1]!);
-                else if (dx > 0 && idx > 0) goToPage(PAGE_SEQUENCE[idx - 1]!);
-              }
-            }
-            touchStartY.current = undefined;
-            lastTouchY.current = undefined;
-            touchStartX.current = undefined;
-            lastTouchX.current = undefined;
-          }}
-          onTouchMove={(event) => {
-            const y = event.nativeEvent.pageY;
-            const x = event.nativeEvent.pageX;
-            lastTouchY.current = y;
-            lastTouchX.current = x;
-          }}
-          onTouchStart={(event) => {
-            touchStartY.current = event.nativeEvent.pageY;
-            lastTouchY.current = event.nativeEvent.pageY;
-            touchStartX.current = event.nativeEvent.pageX;
-            lastTouchX.current = event.nativeEvent.pageX;
-          }}
+          {...bodySwipePanResponder.panHandlers}
           style={styles.body}
         >
         {tab === "HOME" ? (
