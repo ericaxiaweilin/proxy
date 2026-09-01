@@ -381,7 +381,7 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 		}
 	}
 	if (mode == "sms" || mode == "production") && url != "" {
-		smsProvider = identity.NewSMSHTTPLoginChallengeProvider(identity.SMSConfig{
+		smsProvider = buildSMSProvider(os.Getenv("PROXY_SMS_PROVIDER"), identity.SMSConfig{
 			URL:    url,
 			From:   os.Getenv("PROXY_SMS_FROM"),
 			Token:  os.Getenv("PROXY_SMS_TOKEN"),
@@ -834,4 +834,58 @@ func parseSMTPPortOrZero(s string) int {
 		return 0
 	}
 	return port
+}
+
+// buildSMSProvider returns the right SMSHTTPLoginChallengeProvider for
+// the chosen vendor. The base `cfg` carries the OTP bookkeeping; the
+// per-vendor adapter replaces the transport layer so the same generic
+// request/response loop works for all of them.
+//
+// Recognized vendors (PROXY_SMS_PROVIDER):
+//
+//	"generic"  - bare bearer-token + JSON (the original behavior)
+//	"twilio"   - Twilio Programmable SMS (Basic auth, form-encoded)
+//	"esms"     - eSMS.vn SendMultipleMessage_V4_get (GET + query params)
+//	"speedsms" - SpeedSMS.vn (POST + JSON with access_token)
+//
+// Anything else (including empty) falls back to "generic".
+func buildSMSProvider(vendor string, cfg identity.SMSConfig) *identity.SMSHTTPLoginChallengeProvider {
+	switch strings.ToLower(strings.TrimSpace(vendor)) {
+	case "twilio":
+		sid := os.Getenv("PROXY_SMS_TWILIO_ACCOUNT_SID")
+		token := os.Getenv("PROXY_SMS_TWILIO_AUTH_TOKEN")
+		from := os.Getenv("PROXY_SMS_TWILIO_FROM")
+		if from == "" {
+			from = cfg.From
+		}
+		if sid == "" || token == "" || from == "" {
+			log.Printf("PROXY_SMS_PROVIDER=twilio but missing TWILIO_ACCOUNT_SID/AUTH_TOKEN/FROM; falling back to generic")
+			return identity.NewSMSHTTPLoginChallengeProvider(cfg)
+		}
+		log.Printf("SMS provider: twilio (AccountSID=%s, From=%s)", sid, from)
+		return identity.NewTwilioSMSProvider(cfg, sid, token, from, slog.Default())
+	case "esms":
+		apiKey := os.Getenv("PROXY_SMS_ESMS_API_KEY")
+		secretKey := os.Getenv("PROXY_SMS_ESMS_SECRET_KEY")
+		brandname := os.Getenv("PROXY_SMS_ESMS_BRANDNAME")
+		smsType := os.Getenv("PROXY_SMS_ESMS_SMS_TYPE")
+		if apiKey == "" || secretKey == "" {
+			log.Printf("PROXY_SMS_PROVIDER=esms but missing ESMS_API_KEY/SECRET_KEY; falling back to generic")
+			return identity.NewSMSHTTPLoginChallengeProvider(cfg)
+		}
+		log.Printf("SMS provider: esms.vn (brandname=%q, smsType=%s)", brandname, smsType)
+		return identity.NewESMSSMSProvider(cfg, apiKey, secretKey, brandname, smsType, slog.Default())
+	case "speedsms":
+		accessToken := os.Getenv("PROXY_SMS_SPEEDSMS_ACCESS_TOKEN")
+		sender := os.Getenv("PROXY_SMS_SPEEDSMS_SENDER")
+		if accessToken == "" || sender == "" {
+			log.Printf("PROXY_SMS_PROVIDER=speedsms but missing SPEEDSMS_ACCESS_TOKEN/SENDER; falling back to generic")
+			return identity.NewSMSHTTPLoginChallengeProvider(cfg)
+		}
+		log.Printf("SMS provider: speedsms.vn (sender=%s)", sender)
+		return identity.NewSpeedSMSSMSProvider(cfg, accessToken, sender, slog.Default())
+	default:
+		log.Printf("SMS provider: generic bearer-token webhook")
+		return identity.NewSMSHTTPLoginChallengeProvider(cfg)
+	}
 }
