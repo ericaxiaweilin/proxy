@@ -5,7 +5,7 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Image, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, AppState, Image, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
@@ -146,6 +146,7 @@ export function FeedSurface({
   };
   const [feedFilter, setFeedFilter] = useState<FilterKey>("ALL");
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedPosts.length > 0 ? "READY" : "LOADING");
+  const feedRetryAttemptRef = useRef(0);
   const [posts, setPosts] = useState<FeedPost[]>(cachedPosts);
   const [media, setMedia] = useState<Record<string, FeedMediaItem[]>>(cachedMedia);
   const [following, setFollowing] = useState<ReadonlySet<string>>(new Set());
@@ -310,10 +311,13 @@ export function FeedSurface({
       postIdsRef.current = cachedPostIds;
       setPosts(read.posts);
       setMedia(read.media);
+      feedRetryAttemptRef.current = 0;
       setPhase("READY");
     } catch (error) {
       console.error("[proxy.feed] public feed load failed", error);
-      setPhase("ERROR");
+      feedRetryAttemptRef.current += 1;
+      // A transient API restart must not blank an already hydrated timeline.
+      setPhase(cachedPosts.length > 0 ? "READY" : "ERROR");
     }
   }, [localNet]);
 
@@ -345,6 +349,21 @@ export function FeedSurface({
   useEffect(() => {
     void loadFeed();
   }, [loadFeed]);
+
+  // P0 availability: recover without requiring the user to kill/reopen the app.
+  useEffect(() => {
+    if (phase !== "ERROR") return;
+    const delay = Math.min(8_000, 1_000 * 2 ** Math.min(feedRetryAttemptRef.current, 3));
+    const timer = setTimeout(() => void loadFeed(), delay);
+    return () => clearTimeout(timer);
+  }, [phase, loadFeed]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active" && (phase === "ERROR" || cachedPosts.length === 0)) void loadFeed();
+    });
+    return () => subscription.remove();
+  }, [phase, loadFeed]);
 
   // 点击"展示最新"：将 pending 内容刷入正式列表
   function showLatest(): void {

@@ -120,12 +120,20 @@ export class LocalNetClient {
       ? this.input.authClient.requestPublic.bind(this.input.authClient)
       : this.input.authClient.request.bind(this.input.authClient);
     const response = await request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
-    const result = parseCommandResult(await response.json());
+    if (response.status < 200 || response.status >= 300) {
+      throw new LocalNetProtocolError(`动态服务暂时不可用（${response.status}），请稍后重试`);
+    }
+    let responseBody: unknown;
+    try {
+      responseBody = await response.json();
+    } catch {
+      // Reverse proxies may return an HTML error page while the API restarts.
+      // Never leak the raw JSON parser "unexpected character <" error into UI.
+      throw new LocalNetProtocolError("动态服务返回异常，请稍后重试");
+    }
+    const result = parseCommandResult(responseBody);
     if (!result) throw new LocalNetProtocolError("localnet command response was malformed");
     if (result.outcome === "REJECTED") throw new LocalNetCommandRejectedError(result);
-    if (response.status < 200 || response.status >= 300) {
-      throw new LocalNetProtocolError(`unexpected localnet command status: ${response.status}`);
-    }
     return result;
   }
 

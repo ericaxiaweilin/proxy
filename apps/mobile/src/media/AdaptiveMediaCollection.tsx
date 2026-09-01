@@ -484,9 +484,28 @@ function ActiveVideoStage({
     // 用户点入全屏时 key frame 已在 player.buffered 中，首帧装帧 < 50ms。
     // TS 类型未导出，但 iOS AVPlayerItem 接受。
     (setup as { preferredForwardBufferDuration?: number }).preferredForwardBufferDuration = 3;
+    setup.timeUpdateEventInterval = 0.1;
   });
   const videoViewRef = useRef<VideoView>(null);
   const [isMuted, setIsMuted] = useState(true);
+  const [hasRenderedFrame, setHasRenderedFrame] = useState(false);
+  // Disk/network cache only avoids downloading again; AVPlayer still needs a short
+  // decode window after this stage becomes active. Keep the cached poster above the
+  // native surface until playback advances, so scrolling never exposes its black
+  // initialization frame.
+  useEffect(() => {
+    setHasRenderedFrame(false);
+    const subscription = player.addListener("timeUpdate", ({ currentTime }) => {
+      if (currentTime > 0.01) setHasRenderedFrame(true);
+    });
+    // Some iOS AVPlayer items do not emit timeUpdate until after the native view
+    // has painted. Never let the poster become a permanent cover in that case.
+    const fallback = setTimeout(() => setHasRenderedFrame(true), 450);
+    return () => {
+      clearTimeout(fallback);
+      subscription.remove();
+    };
+  }, [player, uri]);
   // 同步 muted 到原生 player（首播静音，点任意位置出声 — 不做小喇叭）
   useEffect(() => {
     try {
@@ -540,6 +559,17 @@ function ActiveVideoStage({
         fullscreenOptions={{ enable: true, orientation: "portrait" }}
         useExoShutter={false}
       />
+      {!hasRenderedFrame && posterUri ? (
+        <ExpoImage
+          accessible={false}
+          cachePolicy="memory-disk"
+          contentFit="contain"
+          recyclingKey={`${item.mediaAssetId}:active-poster`}
+          source={{ uri: posterUri }}
+          style={styles.videoPosterOverlay}
+          transition={0}
+        />
+      ) : null}
       <View pointerEvents="none" style={styles.videoBadge}>
         <Text style={styles.videoBadgeText}>视频</Text>
         {item.durationMs ? <Text style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
@@ -763,6 +793,14 @@ const styles = StyleSheet.create({
   videoView: {
     height: "100%",
     width: "100%"
+  },
+  videoPosterOverlay: {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 2
   },
   videoBadge: {
     alignItems: "center",
