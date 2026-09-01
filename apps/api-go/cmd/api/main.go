@@ -173,6 +173,16 @@ func main() {
 			if err := seedPostgresIdentity(pool); err != nil {
 				log.Fatalf("seed postgres identity: %v", err)
 			}
+			// R15.32: Supply seed (3 demo agents) used to also run
+			// only in simulated mode, but the MapExploreSurface needs
+			// at least these 3 agents to show a populated agent pin
+			// layer. We re-enabled it on every boot in R15.32.2, but
+			// supply.agent_profiles currently has FORCE ROW LEVEL
+			// SECURITY with no write policy for the `proxy` role, so
+			// the seed fails on SMTP mode. Leaving it gated to
+			// simulatedLogin for now — the agents get inserted the
+			// first time someone logs in with simulated mode, and
+			// subsequent restarts see them in the DB already.
 			if err := seedPostgresSupply(pool); err != nil {
 				log.Fatalf("seed postgres supply: %v", err)
 			}

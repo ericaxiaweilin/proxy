@@ -54,6 +54,11 @@ export const PostPinSchema = z.object({
   body: z.string(),
   createdAt: z.string(),
   mediaCount: z.number().int().nonnegative(),
+  // R15.32.2: optional cover image. Server returns the storage key
+  // reshaped to /v1/media/thumb/{key}. Empty when the post has no
+  // media. The mobile client falls back to a colored placeholder.
+  mediaType: z.string().optional(),
+  thumbnailUrl: z.string().optional(),
 });
 export type PostPin = z.infer<typeof PostPinSchema>;
 

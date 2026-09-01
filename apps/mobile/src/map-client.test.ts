@@ -14,7 +14,7 @@ const samplePayload: MapItemsPayload = {
   bbox: { swLat: 0, swLng: 0, neLat: 1, neLng: 1 },
   count: 3,
   posts: [
-    { kind: "post", id: "p1", lat: 0.5, lng: 0.5, authorId: "u", authorName: "X", cityScope: "hn", sceneType: "X", body: "", createdAt: "2026-01-01", mediaCount: 0 },
+    { kind: "post", id: "p1", lat: 0.5, lng: 0.5, authorId: "u", authorName: "X", cityScope: "hn", sceneType: "X", body: "", createdAt: "2026-01-01", mediaCount: 0, mediaType: "IMAGE", thumbnailUrl: "/v1/media/thumb/abc.jpg" },
   ],
   agents: [
     { kind: "agent", id: "a1", lat: 0.5, lng: 0.5, name: "Linh", bio: "", serviceAreas: ["hn"], languages: ["ZH"], photoCount: 0, availability: "AVAILABLE" },

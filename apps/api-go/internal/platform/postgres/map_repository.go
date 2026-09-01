@@ -21,11 +21,25 @@ func (r *MapRepository) ListPostsInBBox(ctx context.Context, b mapx.BBox, limit 
 	if limit <= 0 {
 		limit = 200
 	}
+	// LEFT JOIN with post_media + media_assets to pull the cover
+	// image (lowest sort_order). Posts with no media get NULLs which
+	// we surface as empty thumbnail URLs.
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.id, p.lat, p.lng, p.author_id, p.author_display_name,
 		       COALESCE(p.city_scope, ''), p.scene_type, p.body, p.created_at,
-		       (SELECT count(*) FROM localnet.post_media pm WHERE pm.post_id = p.id) AS media_count
+		       (SELECT count(*) FROM localnet.post_media pm WHERE pm.post_id = p.id) AS media_count,
+		       COALESCE(ma.media_type, ''),
+		       COALESCE(ma.thumbnail_storage_key, '')
 		FROM localnet.posts p
+		LEFT JOIN LATERAL (
+		    SELECT pm.media_asset_id
+		    FROM localnet.post_media pm
+		    WHERE pm.post_id = p.id
+		    ORDER BY pm.sort_order ASC
+		    LIMIT 1
+		) first_media ON true
+		LEFT JOIN media.media_assets ma
+		    ON ma.media_asset_id = first_media.media_asset_id
 		WHERE p.status = 'PUBLISHED'
 		  AND p.lat BETWEEN $1 AND $2
 		  AND p.lng BETWEEN $3 AND $4
@@ -40,10 +54,19 @@ func (r *MapRepository) ListPostsInBBox(ctx context.Context, b mapx.BBox, limit 
 	for rows.Next() {
 		var p mapx.PostPin
 		if err := rows.Scan(&p.ID, &p.Lat, &p.Lng, &p.AuthorID, &p.AuthorName,
-			&p.CityScope, &p.SceneType, &p.Body, &p.CreatedAt, &p.MediaCount); err != nil {
+			&p.CityScope, &p.SceneType, &p.Body, &p.CreatedAt, &p.MediaCount,
+			&p.MediaType, &p.ThumbnailURL); err != nil {
 			return nil, fmt.Errorf("scan post: %w", err)
 		}
 		p.Kind = mapx.KindPost
+		// Reshape the storage key into the public /v1/media/thumb/
+		// path. The mobile client concatenates baseUrl + path. We
+		// only include the thumb path (not the full playback) so the
+		// map doesn't accidentally start a 1080p video decode just
+		// for a 80×80 cover.
+		if p.ThumbnailURL != "" {
+			p.ThumbnailURL = "/v1/media/thumb/" + p.ThumbnailURL
+		}
 		out = append(out, p)
 	}
 	return out, rows.Err()

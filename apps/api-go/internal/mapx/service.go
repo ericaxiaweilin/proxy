@@ -121,18 +121,25 @@ func ParseLimit(q map[string][]string) int {
 // PostPin is the projection of a localnet.posts row onto a map pin.
 // ID, author and timestamp let the client render an Instagram-style
 // "tap pin → bottom sheet preview" without a follow-up fetch.
+//
+// ThumbnailURL is the best-effort cover image (first media asset's
+// thumbnail). Empty when the post has no media or the cover hasn't
+// been transcoded yet. The mobile client falls back to a colored
+// placeholder in that case.
 type PostPin struct {
-	Kind       ItemKind `json:"kind"`
-	ID         string    `json:"id"`
-	Lat        float64   `json:"lat"`
-	Lng        float64   `json:"lng"`
-	AuthorID   string    `json:"authorId"`
-	AuthorName string    `json:"authorName"`
-	CityScope  string    `json:"cityScope"`
-	SceneType  string    `json:"sceneType"`
-	Body       string    `json:"body"`
-	CreatedAt  time.Time `json:"createdAt"`
-	MediaCount int       `json:"mediaCount"`
+	Kind         ItemKind `json:"kind"`
+	ID           string    `json:"id"`
+	Lat          float64   `json:"lat"`
+	Lng          float64   `json:"lng"`
+	AuthorID     string    `json:"authorId"`
+	AuthorName   string    `json:"authorName"`
+	CityScope    string    `json:"cityScope"`
+	SceneType    string    `json:"sceneType"`
+	Body         string    `json:"body"`
+	CreatedAt    time.Time `json:"createdAt"`
+	MediaCount   int       `json:"mediaCount"`
+	MediaType    string    `json:"mediaType,omitempty"`
+	ThumbnailURL string    `json:"thumbnailUrl,omitempty"`
 }
 
 // AgentPin is the projection of a supply.agent_profiles row.

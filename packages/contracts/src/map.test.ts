@@ -100,6 +100,7 @@ describe("MapItemsPayloadSchema", () => {
         kind: "post", id: "p", lat: 0.5, lng: 0.5,
         authorId: "u", authorName: "X", cityScope: "hn", sceneType: "X", body: "",
         createdAt: "2026-01-01T00:00:00Z", mediaCount: 0,
+        mediaType: "IMAGE", thumbnailUrl: "/v1/media/thumb/abc.jpg",
       }],
     });
     expect(ok.success).toBe(true);

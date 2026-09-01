@@ -16,6 +16,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -251,7 +252,7 @@ export function MapExploreSurface(props: MapExploreSurfaceProps) {
       </View>
 
       {/* Pin preview bottom sheet */}
-      {selected && <PinPreview selected={selected} onClose={() => setSelected(null)} />}
+      {selected && <PinPreview selected={selected} baseUrl={props.baseUrl} onClose={() => setSelected(null)} />}
 
       {/* Close button (if launched as subpage) */}
       {props.onClose && (
@@ -263,7 +264,7 @@ export function MapExploreSurface(props: MapExploreSurfaceProps) {
   );
 }
 
-function PinPreview(props: { selected: SelectedPin; onClose: () => void }) {
+function PinPreview(props: { selected: SelectedPin; baseUrl: string; onClose: () => void }) {
   const { selected, onClose } = props;
   return (
     <View style={styles.sheet}>
@@ -278,30 +279,95 @@ function PinPreview(props: { selected: SelectedPin; onClose: () => void }) {
       {selected.kind === "post" && (
         <>
           <Text style={styles.sheetTitle}>{selected.pin.authorName}</Text>
+          {selected.pin.thumbnailUrl ? (
+            <Image
+              source={{ uri: `${props.baseUrl}${selected.pin.thumbnailUrl}` }}
+              style={styles.sheetCover}
+              resizeMode="cover"
+              accessibilityLabel="帖封面"
+            />
+          ) : (
+            <View style={[styles.sheetCover, styles.sheetCoverPlaceholder]}>
+              <Text style={styles.sheetCoverPlaceholderText}>
+                {selected.pin.mediaType === "VIDEO" ? "🎬" : selected.pin.mediaCount > 0 ? "📷" : "📝"}
+              </Text>
+            </View>
+          )}
           <Text style={styles.sheetBody}>{truncate(selected.pin.body, 160) || "(无文字)"}</Text>
           <Text style={styles.sheetMeta}>
-            {selected.pin.cityScope} · {selected.pin.mediaCount} 个媒体
+            {selected.pin.cityScope} · {selected.pin.mediaCount} 个媒体 ·{" "}
+            {selected.pin.sceneType !== "UNKNOWN" ? selected.pin.sceneType : ""}
           </Text>
+          <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
+            <Text style={styles.sheetActionText}>关闭</Text>
+          </Pressable>
         </>
       )}
       {selected.kind === "agent" && (
         <>
-          <Text style={styles.sheetTitle}>{selected.pin.name}</Text>
+          <View style={styles.sheetAgentHeader}>
+            <View
+              style={[
+                styles.sheetAgentAvatar,
+                selected.pin.availability === "AVAILABLE" && styles.sheetAgentAvatarOnline,
+              ]}
+            >
+              <Text style={styles.sheetAgentAvatarText}>
+                {selected.pin.name.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sheetTitle}>{selected.pin.name}</Text>
+              <Text style={styles.sheetAvailability}>
+                {selected.pin.availability === "AVAILABLE"
+                  ? "🟢 当前在线"
+                  : selected.pin.availability === "BUSY"
+                    ? "🟠 忙碌"
+                    : "⚪ 离线"}
+              </Text>
+            </View>
+          </View>
           <Text style={styles.sheetBody}>{truncate(selected.pin.bio, 160) || "(无简介)"}</Text>
-          <Text style={styles.sheetMeta}>
-            {selected.pin.languages.join(" / ")} · {selected.pin.serviceAreas.join(" / ")}
-          </Text>
+          <View style={styles.sheetChips}>
+            {selected.pin.languages.map((lang) => (
+              <View key={lang} style={styles.sheetChip}>
+                <Text style={styles.sheetChipText}>{lang}</Text>
+              </View>
+            ))}
+            {selected.pin.serviceAreas.map((area) => (
+              <View key={area} style={[styles.sheetChip, styles.sheetChipArea]}>
+                <Text style={styles.sheetChipText}>📍 {area}</Text>
+              </View>
+            ))}
+          </View>
+          <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
+            <Text style={styles.sheetActionText}>关闭</Text>
+          </Pressable>
         </>
       )}
       {selected.kind === "order" && (
         <>
           <Text style={styles.sheetTitle}>{selected.pin.title || "(未命名)"}</Text>
-          <Text style={styles.sheetBody}>
-            {selected.pin.status} · {selected.pin.budget.toLocaleString()} ₫
-          </Text>
+          <View style={styles.sheetOrderRow}>
+            <Text style={styles.sheetOrderBudget}>
+              {selected.pin.budget > 0 ? `${selected.pin.budget.toLocaleString()} ₫` : "面议"}
+            </Text>
+            <View
+              style={[
+                styles.sheetStatus,
+                selected.pin.status === "OPEN" && styles.sheetStatusOpen,
+                selected.pin.status === "IN_PROGRESS" && styles.sheetStatusProgress,
+              ]}
+            >
+              <Text style={styles.sheetStatusText}>{selected.pin.status}</Text>
+            </View>
+          </View>
           <Text style={styles.sheetMeta}>
             {[selected.pin.city, selected.pin.area].filter(Boolean).join(" · ")}
           </Text>
+          <Pressable style={styles.sheetAction} onPress={onClose} accessibilityRole="button">
+            <Text style={styles.sheetActionText}>关闭</Text>
+          </Pressable>
         </>
       )}
     </View>
@@ -396,6 +462,65 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 17, fontWeight: "700", color: color.ink, marginBottom: 4 },
   sheetBody: { fontSize: HUD_FONT_SIZE + 1, color: color.ink, marginBottom: 6, lineHeight: 18 },
   sheetMeta: { fontSize: HUD_FONT_SIZE, color: color.muted },
+  // R15.32.2: cover image (when post has media) + placeholder fallback.
+  sheetCover: {
+    width: "100%",
+    height: 140,
+    backgroundColor: color.line,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  sheetCoverPlaceholder: {
+    backgroundColor: color.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetCoverPlaceholderText: { fontSize: 36 },
+  // R15.32.2: agent card with avatar + availability dot.
+  sheetAgentHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
+  sheetAgentAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: color.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: color.line,
+  },
+  sheetAgentAvatarOnline: { borderColor: "#1FC8A9" },
+  sheetAgentAvatarText: { fontSize: 18, fontWeight: "800", color: color.ink },
+  sheetAvailability: { fontSize: HUD_FONT_SIZE, color: color.muted, marginTop: 2 },
+  // R15.32.2: language / area chip row.
+  sheetChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  sheetChip: {
+    backgroundColor: color.surface,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  sheetChipArea: { backgroundColor: "#FAF6E5" },
+  sheetChipText: { fontSize: HUD_FONT_SIZE, color: color.ink, fontWeight: "600" },
+  // R15.32.2: order card with budget + status pill.
+  sheetOrderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 },
+  sheetOrderBudget: { fontSize: 20, fontWeight: "800", color: color.ink },
+  sheetStatus: {
+    backgroundColor: color.line,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  sheetStatusOpen: { backgroundColor: "#1FC8A9" },
+  sheetStatusProgress: { backgroundColor: "#FFD86A" },
+  sheetStatusText: { fontSize: HUD_FONT_SIZE, color: color.ink, fontWeight: "700" },
+  sheetAction: {
+    marginTop: 12,
+    backgroundColor: color.surface,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  sheetActionText: { fontSize: HUD_FONT_SIZE + 1, color: color.ink, fontWeight: "600" },
   closeBtn: {
     position: "absolute",
     top: 56,
