@@ -390,6 +390,7 @@ export const FeedMediaItemSchema = z.object({
   height: z.number().int().nonnegative(),
   aspectRatio: z.number(),
   durationMs: z.number().int().nonnegative().optional(),
+  animated: z.boolean().optional(),
   processingStatus: z.string(),
   moderationStatus: z.enum([
     "QUARANTINED",
@@ -651,8 +652,4 @@ export * from "./city-key";
 // so any rename forces a compile error on both ends.
 export * from "./facet";
 
-// R15.32: MapExploreSurface — bbox-keyed anonymous read for the
-// Instagram-style map view. /v1/map/items returns posts / agents /
-// orders as separate arrays so the client can render a unified pin
-// layer without reshaping.
-export * from "./map";
+// R15.33: map contracts 撤了 — 独立 map tab 已删。

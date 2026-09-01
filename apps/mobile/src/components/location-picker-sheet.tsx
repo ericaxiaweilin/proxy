@@ -66,7 +66,11 @@ export function LocationPickerSheet({
   const [history, setHistory] = useState<CustomLocation[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   // CUSTOM tab state
-  const [customCity, setCustomCity] = useState<string>(current.city || "河内");
+  // R15.33: customCity 仍存在但仅作离线 fallback — 线上时
+  // reverse.city 才是真相。原来默认 "河内" 会误导全球用户
+  // (北宁/曼谷/三藩 定位后被硬覆盖)，现在默认改为 "" —
+  // 首次 reverse 完成前不预任何 city。
+  const [customCity, setCustomCity] = useState<string>(current.city || "");
   const [pin, setPin] = useState<GridCoord>(
     current.kind === "CUSTOM" ? { x: current.custom.gridX, y: current.custom.gridY } : { x: 5, y: 5 }
   );
@@ -76,6 +80,11 @@ export function LocationPickerSheet({
   const [label, setLabel] = useState<string>(
     current.kind === "CUSTOM" ? current.area.replace(/^自定义 · /, "") : ""
   );
+  // R15.33: 选型 pin 时 实际 lat/lng 听 MapCanvas 的 onChange。
+  // MapCanvas 以前返 GridCoord，现在走“地图世界” — 我们记住
+  // 上一次 tap 时的 lat/lng + 网格初始点，用于“点击别的城市
+  // city chip 时重置 pin”的逻辑。
+  const [lastLatLng, setLastLatLng] = useState<{ lat: number; lng: number } | undefined>(undefined);
   // lat/lng 提前计算 — useEffect dep + 渲染两处都需要。
   const { lat, lng } = gridToLatLng(customCity, pin.x, pin.y);
   // R15.15 P2 + R15.32.1.3: 逆编码 — 拍 pin 以后从 lat/lng 拿
@@ -118,12 +127,9 @@ export function LocationPickerSheet({
     setTab("HISTORY");
   }
 
-  // 切城市时把 pin 居中 — 用户在岘港画了 (5,5)，切到河内还显示
-  // (5,5) 才是符合直觉的。
-  function changeCity(next: string): void {
-    setCustomCity(next);
-    setPin({ x: 5, y: 5 });
-  }
+  // R15.33: changeCity 拿了 — 城市 chip 删了，customCity 现在仅
+  // 充“离线 fallback”。User GPS 后 Photon 拿真实城市，customCity
+  // 只是 chip 未选时给个默认值。
 
   // R15.32.1.5: 算 commitCustom 要用的最终标签。
   // 关键修改 — 去掉硬编码的 7 城映射。用户在全球任何地方定位
@@ -243,35 +249,41 @@ export function LocationPickerSheet({
             </ScrollView>
           ) : tab === "CUSTOM" ? (
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-              {/* City selector */}
-              <Text style={styles.fieldLabel}>城市</Text>
-              <View style={styles.cityRow}>
-                {Object.keys(CITY_BOUNDS).map((city) => {
-                  const active = city === customCity;
-                  return (
-                    <Pressable
-                      key={city}
-                      onPress={() => changeCity(city)}
-                      style={[styles.cityChip, active && styles.cityChipActive]}
-                    >
-                      <Text style={[styles.cityChipText, active && styles.cityChipTextActive]}>{city}</Text>
-                    </Pressable>
-                  );
-                })}
+              {/* R15.33: 城市 chip 拿掉了 — user 在全球任意地方定位，
+                  Photon 直接拿真实城市，硬编码的 7 城表会误导
+                  (在北宁定位却显示“河内”正是这个 bug)。
+                  customCity 仅在 “离线 / 反向地理编码未完成” 时
+                  作为 fallback 保留。 */}
+
+              {/* R15.33: 地址作为标题显眼 — MapCanvas 下面
+                  “点击地图” 提示。中间是主地图。 */}
+              <View style={styles.addressHeader}>
+                <Text style={styles.addressLabel}>当前位置</Text>
+                <Text style={styles.addressText} numberOfLines={2}>
+                  {reverse?.displayName || `定位中… · ${lat.toFixed(4)}, ${lng.toFixed(4)}`}
+                </Text>
+                {reverse?.source === "offline-grid" && (
+                  <Text style={styles.addressHint}>
+                    离线估算 · 点地图重新定位
+                  </Text>
+                )}
               </View>
 
-              {/* Map */}
-              <Text style={styles.fieldLabel}>地图</Text>
-              <MapCanvas
-                cityHint={`${customCity} · 网格 10×10`}
-                initialPin={pin}
-                radiusMeters={radius}
-                onChange={setPin}
-                testID="location-picker-map"
-              />
+              {/* Map — the dominant element in CUSTOM tab.
+                  R15.33: 高度从 aspectRatio:1 调到 300 (路牌习惯的
+                  "高一点" 地图) 。 */}
+              <View style={styles.mapWrapper}>
+                <MapCanvas
+                  cityHint={customCity}
+                  initialPin={pin}
+                  radiusMeters={radius}
+                  onChange={setPin}
+                  testID="location-picker-map"
+                />
+              </View>
               <Text style={styles.mapHint}>
-                点击或拖动地图放置坐标 · 当前位置 {lat.toFixed(4)}, {lng.toFixed(4)}
-                {reverse ? ` · ${reverse.displayName}` : ""}
+                点地图或拖动 pin 重新定位
+                {lat !== undefined && lng !== undefined ? ` · 坐标 ${lat.toFixed(4)}, ${lng.toFixed(4)}` : ""}
               </Text>
 
               {/* Radius selector */}
@@ -454,17 +466,47 @@ const styles = StyleSheet.create({
   optDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   optAction: { color: "#62586A", fontSize: 11, fontWeight: "800" },
   fieldLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 6 },
-  cityRow: { flexDirection: "row", gap: 6, marginTop: 4 },
-  cityChip: {
-    backgroundColor: "#F2EDF5",
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7
-  },
-  cityChipActive: { backgroundColor: color.ink },
-  cityChipText: { color: color.ink, fontSize: 12, fontWeight: "700" },
-  cityChipTextActive: { color: color.white },
+  // R15.33: 删了 cityRow / cityChip / cityChipActive / cityChipText
+  //  — 城市 chip 不用了。
   mapHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
+  // R15.33: 地址标题 + 包装：MapCanvas 上面。作为 sheet 第一眼
+  // 看到的"你现在在哪里" — 不再是“河内”。
+  addressHeader: {
+    paddingHorizontal: 4,
+    paddingTop: 4,
+    paddingBottom: 8
+  },
+  addressLabel: {
+    fontSize: 11,
+    color: color.muted,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 4
+  },
+  addressText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: color.ink,
+    lineHeight: 22
+  },
+  addressHint: {
+    fontSize: 11,
+    color: "#C97A1F",
+    fontWeight: "500",
+    marginTop: 4
+  },
+  // R15.33: 地图占主位。高度 280 + fullWidth，代替原来
+  // aspectRatio:1 那个方块。
+  mapWrapper: {
+    height: 280,
+    width: "100%",
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: color.line,
+    marginTop: 4
+  },
   radiusRow: { flexDirection: "row", gap: 6, marginTop: 4 },
   radiusChip: {
     backgroundColor: "#F2EDF5",

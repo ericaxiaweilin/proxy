@@ -30,7 +30,6 @@ import (
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
-	"github.com/proxy-app/proxy-api/internal/mapx"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
@@ -106,9 +105,8 @@ func main() {
 	activityService := activity.New()
 	facetService := facet.New()
 	facetService.SeedDefaults()
-	// R15.32: Map explore service. Empty repo when no DATABASE_URL —
-	// the handler returns 503 in that case.
-	mapService := mapx.New(nil)
+	// R15.33: mapx 撤了 — /v1/map/items 不再起；LocationPicker
+	// 调 /v1/geocode/reverse 拿真实地址，不需要 map service。
 	experienceService := experience.New()
 	voucherService := voucher.New()
 	voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
@@ -224,9 +222,6 @@ func main() {
 		activityService = activity.NewWithRepository(postgres.NewActivityRepository(pool))
 		facetService = facet.NewWithRepository(postgres.NewFacetRepository(pool))
 		facetService.SeedDefaults()
-		// R15.32: Map explore. Same wiring pattern as facet: PG-backed
-		// repo (bboxes use the (lat, lng) index from migration 050).
-		mapService = mapx.New(postgres.NewMapRepository(pool))
 		experienceService = experience.NewWithRepository(postgres.NewExperienceRepository(pool))
 		voucherService = voucher.NewWithRepository(postgres.NewVoucherRepository(pool))
 		voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
@@ -261,8 +256,6 @@ func main() {
 	// 4s-timeout client so a slow upstream doesn't hang the picker.
 	server.HTTPClient = &http.Client{Timeout: 4 * time.Second}
 	server.Facet = facetService
-	// R15.32: Map explore.
-	server.Map = mapService
 	server.Experience = experienceService
 	server.Voucher = voucherService
 	// Activity 域：启动幂等 seed 基线；DATABASE_URL 存在时写入持久仓储。

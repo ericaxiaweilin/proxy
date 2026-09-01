@@ -8,7 +8,7 @@
 export type MeTabView = "guest" | "voucher" | "me";
 
 export function selectShellChromeVisible(input: {
-  tab: "HOME" | "MARKET" | "FEED" | "MAP" | "MESSAGES" | "ME";
+  tab: "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
   feedChromeVisible: boolean;
   feedChatOpen: boolean;
   feedPrefsOpen: boolean;
@@ -23,8 +23,7 @@ export function selectShellChromeVisible(input: {
 }): boolean {
   // 1:1 conversation overlay is a fullscreen takeover — hide chrome.
   if (input.messageChatOpen) return false;
-  // R15.32: MAP is a full-screen map with its own HUD; no bottom nav.
-  if (input.tab === "MAP") return false;
+  // R15.33: MAP tab 撤了；底栏一直可见。
   if (input.tab !== "FEED") return true;
   if (input.feedChatOpen || input.feedPrefsOpen) return true;
   return input.feedChromeVisible;

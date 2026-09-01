@@ -29,7 +29,6 @@ import (
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
-	"github.com/proxy-app/proxy-api/internal/mapx"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -66,7 +65,6 @@ type Server struct {
 	Business      *business.Service
 	Scene         *scene.Service
 	Facet         *facet.Service
-	Map           *mapx.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -153,9 +151,10 @@ func (s *Server) Handler() http.Handler {
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.
 	mux.HandleFunc("/v1/facet/objects", s.facetObjects)
-	// R15.32: MapExploreSurface — bbox-keyed anonymous GET. Powers the
-	// Instagram-style map view (posts / agents / orders).
-	mux.HandleFunc("/v1/map/items", s.mapItems)
+	// R15.33: /v1/map/items 撤了 — LocationPickerSheet 直接用
+	// /v1/geocode/reverse (Photon proxy) 拿真实地址，不需要 server
+	// 拿 bbox 查 post/agent/order pin。Post pin overlay 如果要
+	// 重做，起新端点 /v1/feed/local (Phase 2, not yet)。
 	// R15.32.1.3: reverse geocode proxy. Mobile LocationPickerSheet
 	// calls this with (lat, lng) after GPS snap and the server relays
 	// the request to Nominatim. Server-side proxy gives us
@@ -890,49 +889,6 @@ func (s *Server) facetObjects(w http.ResponseWriter, r *http.Request) {
 	payload, err := s.Facet.List(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "facet_list_failed"})
-		return
-	}
-	writeJSON(w, http.StatusOK, payload)
-}
-
-// mapItems returns posts / agents / orders within a bounding box.
-// Anonymous GET, like facet/objects. The mobile MapExploreSurface
-// (R15.32) calls this on every map pan/zoom. Optional ?types=posts,agents,orders
-// restricts the response to a subset; default is all three.
-//
-// Query params (all required except types and limit):
-//
-//	sw_lat, sw_lng — south-west corner
-//	ne_lat, ne_lng — north-east corner
-//	types          — comma list of {posts,agents,orders}; default = all
-//	limit          — 1..500, default 200
-//
-// Response: { posts?, agents?, orders?, bbox, count }
-func (s *Server) mapItems(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
-		return
-	}
-	if s.Map == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "map_not_configured"})
-		return
-	}
-	q := r.URL.Query()
-	bbox, err := mapx.ParseBBox(q)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_bbox", "detail": err.Error()})
-		return
-	}
-	kinds, err := mapx.ParseKinds(q)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_types", "detail": err.Error()})
-		return
-	}
-	limit := mapx.ParseLimit(q)
-	payload, err := s.Map.Items(r.Context(), bbox, kinds, limit)
-	if err != nil {
-		log.Printf("map items: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "map_items_failed"})
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)

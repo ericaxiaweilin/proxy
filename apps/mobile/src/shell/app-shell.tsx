@@ -55,7 +55,6 @@ import { MarketExperienceSurface } from "../surfaces/market-experience";
 import { MarketSurface, type MarketViewMode } from "../surfaces/market";
 import { MeSurface } from "../surfaces/me";
 import { MessagesSurface } from "../surfaces/messages";
-import { MapExploreSurface } from "../surfaces/map-explore";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
 import { VoucherSurface } from "../surfaces/voucher";
 import { color, shadows } from "../theme";
@@ -70,7 +69,7 @@ import { selectMotionProfile } from "./app-shell-selectors";
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
 // R15.12.7 冻结：第二 Tab = 市场，对全部身份固定为「市场」。
-type RootTab = "HOME" | "MARKET" | "FEED" | "MAP" | "MESSAGES" | "ME";
+type RootTab = "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
 // R15.22 子页序列：horizontal swipe 跨 9 page (HOME, MARKET_OPP, MARKET_ACT, FEED_POSTS, FEED_STATUS, FEED_COMMUNITY, MSG_CHAT, MSG_FRIENDS, ME)
 // R15.23 改：FEED tab 内部 3 个 section (动态/状态/社区) 各自独立成 page — 横向 swipe 必须先走完 section 才到 MESSAGES，避免 "动态 → 直接消息" 的跳页。
 type PageId = "HOME" | "MARKET_OPP" | "MARKET_ACT" | "FEED_POSTS" | "FEED_STATUS" | "FEED_COMMUNITY" | "MSG_CHAT" | "MSG_FRIENDS" | "ME";
@@ -81,14 +80,13 @@ const PAGE_TO_ROOT: Record<PageId, RootTab> = {
   MSG_CHAT: "MESSAGES", MSG_FRIENDS: "MESSAGES",
   ME: "ME"
 };
-// R15.32: MAP tab is its own page (no horizontal swipe siblings — it
-// owns the full screen). Defined alongside PageId below.
+// R15.33: 撤了 MAP tab。这里原本是 6 tab 跳页表，现在变回 5 tab。
 const PAGE_TO_FEED_SECTION: Partial<Record<PageId, "POSTS" | "STATUS" | "COMMUNITY">> = {
   FEED_POSTS: "POSTS", FEED_STATUS: "STATUS", FEED_COMMUNITY: "COMMUNITY"
 };
 const ROOT_TO_FIRST_PAGE: Record<RootTab, PageId> = {
   HOME: "HOME", MARKET: "MARKET_OPP", FEED: "FEED_POSTS",
-  MESSAGES: "MSG_FRIENDS", ME: "ME", MAP: "HOME" // not used; MAP is full-screen
+  MESSAGES: "MSG_FRIENDS", ME: "ME"
 };
 
 function rootTabs(): ReadonlyArray<{ id: RootTab; icon: ProxyIconName; label: string; badge?: string }> {
@@ -96,7 +94,6 @@ function rootTabs(): ReadonlyArray<{ id: RootTab; icon: ProxyIconName; label: st
     { id: "HOME", icon: "home", label: "首页" },
     { id: "MARKET", icon: "diamond", label: "市场" },
     { id: "FEED", icon: "target", label: "动态" },
-    { id: "MAP", icon: "pin", label: "地图" },
     { id: "MESSAGES", icon: "chat", label: "消息", badge: "9+" },
     { id: "ME", icon: "meRing", label: "我的" }
   ];
@@ -537,26 +534,6 @@ export function AppShell({
           ) : (
             <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId) => setMessageChat(conversationId ? { author, conversationId } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
-        ) : tab === "MAP" ? (
-          // R15.32: Instagram-style map. Anonymous GET /v1/map/items,
-          // uses sessionAuthClient.requestPublic. The full-screen map
-          // ignores isNavVisible since it has its own bottom HUD.
-          <MapExploreSurface
-            requester={sessionAuthClient}
-            baseUrl={localApiBaseUrl}
-            onClose={isNavVisible ? undefined : () => setTab("HOME")}
-            // R15.32.2: when the user taps the sheet's primary
-            // "查看详情 / 名片 / 订单" button, switch to the most
-            // relevant tab. There's no per-post detail surface yet,
-            // so we land on FEED (which has the inline post card) or
-            // a hypothetical future workspace. The map sheet's
-            // "关闭" still closes the sheet without leaving the map.
-            onOpenItem={(item) => {
-              if (item.kind === "post") setTab("FEED");
-              else if (item.kind === "agent") setTab("ME");
-              else if (item.kind === "order") setTab("MARKET");
-            }}
-          />
         ) : isGuest ? (
           <View style={styles.guestMe}>
             <Text style={styles.guestMeTitle}>需要登录</Text>
