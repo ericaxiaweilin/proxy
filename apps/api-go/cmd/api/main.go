@@ -648,20 +648,45 @@ func newSupplyBatchCreator(supplyService *supply.Service) demand.BatchCreator {
 					marketID = "hcm"
 				}
 			}
-			// languages / capabilities from mustRequirements
-			var languages []string
-			var capabilities []string
+			// languages / capabilities from mustRequirements + slotGroups (dynamic, not hard-coded)
+			languagesSet := map[string]bool{}
+			capabilitiesSet := map[string]bool{}
+			collectLangCap := func(s string) {
+				ls := strings.ToLower(s)
+				if strings.Contains(ls, "zh") || strings.Contains(ls, "中文") || strings.Contains(ls, "chinese") {
+					languagesSet["ZH"] = true
+				} else if strings.Contains(ls, "vi") || strings.Contains(ls, "越南") {
+					languagesSet["VI"] = true
+				} else if strings.Contains(ls, "en") || strings.Contains(ls, "英语") || strings.Contains(ls, "english") {
+					languagesSet["EN"] = true
+				} else if ls != "" {
+					// treat as capability code (upper)
+					capabilitiesSet[strings.ToUpper(strings.TrimSpace(s))] = true
+				}
+			}
 			if reqs, ok := draft.Changes["mustRequirements"].([]any); ok {
 				for _, r := range reqs {
 					if s, ok := r.(string); ok {
-						switch s {
-						case "ZH", "VI", "EN":
-							languages = append(languages, s)
-						case "PHOTOGRAPHY", "GUIDE":
-							capabilities = append(capabilities, s)
+						collectLangCap(s)
+					}
+				}
+			}
+			if groups, ok := draft.Changes["slotGroups"].([]any); ok {
+				for _, g := range groups {
+					if gm, ok := g.(map[string]any); ok {
+						if role, ok := gm["roleId"].(string); ok {
+							collectLangCap(role)
 						}
 					}
 				}
+			}
+			var languages []string
+			for k := range languagesSet {
+				languages = append(languages, k)
+			}
+			var capabilities []string
+			for k := range capabilitiesSet {
+				capabilities = append(capabilities, k)
 			}
 			payload := map[string]any{
 				"needId":    draft.ID,
