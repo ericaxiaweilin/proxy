@@ -42,6 +42,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { CreatePostPayload, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type MediaClient } from "../media-client";
+import { type SecureSessionStore } from "../secure-session";
 import {
   createDraftMedia,
   draftMediaDragTarget,
@@ -104,6 +105,9 @@ type Props = {
   onPublished: () => void | Promise<void>;
   localNet: LocalNetClient;
   mediaClient: MediaClient;
+  // R15.37: composet 需要知道当前 session 以供
+  //   “未登录不发” + “未登录不点发布” 这两个 UI gate 用。
+  secureSessionStore?: SecureSessionStore | undefined;
   // 从父组件传入的初始值（quote: 由 feed.tsx 的 openComposer(quoteId?) 透传）
   initialQuoteId?: string | null;
   posts: FeedPost[];
@@ -115,10 +119,31 @@ export function ComposerV2Screen({
   onPublished,
   localNet,
   mediaClient,
+  secureSessionStore,
   initialQuoteId,
   posts
 }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  // R15.37: P0 “未登录不发布” 强 gate — 准仅发布按钮状态。
+  //   未设置 store (开发环境 / 离线 unit test) 默认为 “可发” 以免
+  //   拑入别的 race; 运行时总是传入 store。
+  const [isAuthenticatedForWrite, setIsAuthenticatedForWrite] = useState<boolean>(secureSessionStore === undefined);
+  useEffect(() => {
+    if (!secureSessionStore) return;
+    let cancelled = false;
+    void secureSessionStore.read().then((session) => {
+      if (cancelled) return;
+      // 1. 有 session.principal
+      // 2. serverSession !== false (未签发的离线 fallback 不行)
+      const ok = !!session?.principal && session.serverSession !== false;
+      setIsAuthenticatedForWrite(ok);
+    }).catch(() => {
+      if (!cancelled) setIsAuthenticatedForWrite(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [secureSessionStore, visible]);
   // —— 顶层状态 ——
   const [body, setBody] = useState("");
   const [media, setMedia] = useState<DraftMediaItem[]>([]);
@@ -188,7 +213,7 @@ export function ComposerV2Screen({
     topic ||
     quoteId
   );
-  const isReady = hasAnyContent && !publishing;
+  const isReady = hasAnyContent && !publishing && isAuthenticatedForWrite;
   const showCountWarn = effectiveBodyLength > MAX_BODY_LENGTH - 40;
 
   function showToast(message: string): void {
@@ -610,6 +635,16 @@ export function ComposerV2Screen({
             </Text>
           </Pressable>
         </View>
+
+        {/* R15.37: 未登录 / 离线 fallback 访客 的明确提示。
+            发布按钮被 gate (见 isReady) 点不动; 报报说明为什么不能发布,
+            提供 “去登录” 出口 避免用户在一个不能用的 composer 里干靠。 */}
+        {secureSessionStore !== undefined && !isAuthenticatedForWrite ? (
+          <View style={styles.authWall} accessibilityLiveRegion="polite">
+            <Text style={styles.authWallTitle}>发布需登录</Text>
+            <Text style={styles.authWallBody}>完成手机号 / 邮箱验证 或 Google 登录后, 才能在动态上发文、 送图。访客可以浏览、点赞、引用，但发布需要身份。</Text>
+          </View>
+        ) : null}
 
         <ScrollView contentContainerStyle={styles.composerBody} keyboardShouldPersistTaps="handled">
           <View style={styles.postRow}>
@@ -1330,6 +1365,28 @@ const styles = StyleSheet.create({
   publishBtnReady: { backgroundColor: color.ink },
   publishBtnText: { color: color.muted, fontSize: 14, fontWeight: "700" },
   publishBtnTextReady: { color: color.white },
+  // R15.37: 未登录发不了帖子的提示条。
+  //   与其他子页面的 “请先登录” 一致: 紫粉色填充 + 10pt 圆角 + 11px 文字。
+  authWall: {
+    backgroundColor: "#F4ECF4",
+    borderColor: color.violet,
+    borderRadius: 10,
+    borderWidth: 1,
+    margin: 12,
+    marginBottom: 0,
+    padding: 12
+  },
+  authWallTitle: {
+    color: color.violet,
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 4
+  },
+  authWallBody: {
+    color: color.ink,
+    fontSize: 12,
+    lineHeight: 18
+  },
   // 主内容
   composerBody: { padding: 18, paddingBottom: 24 },
   postRow: { flexDirection: "row", gap: 12 },

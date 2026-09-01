@@ -234,6 +234,7 @@ export function ProxyApp(): React.JSX.Element {
         socialSpace={socialSpaceClient}
         fulfillment={fulfillmentClient}
         payment={paymentClient}
+        secureSessionStore={secureSessionStore}
         notification={notificationClient}
         business={businessClient}
         supply={supplyClient}

@@ -10,6 +10,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
+import { type SecureSessionStore } from "../secure-session";
 import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
@@ -114,6 +115,7 @@ export function FeedSurface({
   mediaClient,
   engagement,
   socialSpace,
+  secureSessionStore,
   onOpenChat,
   onOpenFeedPrefs,
   onChromeVisibilityChange,
@@ -127,6 +129,8 @@ export function FeedSurface({
   mediaClient: MediaClient;
   engagement: EngagementClient;
   socialSpace: SocialSpaceClient;
+  // R15.37: 透传给 composer 以拦截 "未登录发帖"。
+  secureSessionStore?: SecureSessionStore | undefined;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -695,6 +699,7 @@ export function FeedSurface({
         initialQuoteId={composerQuoteId}
         localNet={localNet}
         mediaClient={mediaClient}
+        secureSessionStore={secureSessionStore}
         onClose={() => { setComposerOpen(false); setComposerQuoteId(null); }}
         onPublished={async () => { setComposerOpen(false); setComposerQuoteId(null); await loadFeed(); }}
         posts={posts}

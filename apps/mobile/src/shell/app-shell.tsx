@@ -38,6 +38,7 @@ import { keepManifestRevision } from "../experience-refresh";
 import { dispatchExperienceAction } from "../experience-dispatcher";
 import { handleModuleBack } from "../components/module-back";
 import { type LocalNetClient } from "../localnet-client";
+import { type SecureSessionStore } from "../secure-session";
 import { type MediaClient } from "../media-client";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { type FulfillmentClient } from "../fulfillment-client";
@@ -120,7 +121,9 @@ export function AppShell({
   ensureConversationSession,
   onSignOut,
   sessionAuthClient,
-  localApiBaseUrl
+  localApiBaseUrl,
+  // R15.37: 透传到 FeedSurface → ComposerV2Screen，拦 “未登录不发”。
+  secureSessionStore
 }: {
   localNet: LocalNetClient;
   activities: ActivityClient;
@@ -143,6 +146,7 @@ export function AppShell({
   onSignOut: () => void;
   sessionAuthClient: import("../auth-client").SessionAuthClient;
   localApiBaseUrl: string;
+  secureSessionStore?: SecureSessionStore | undefined;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
   const compactWidth = width < 375;
@@ -525,6 +529,7 @@ export function AppShell({
               localNet={localNet}
               mediaClient={media}
               socialSpace={socialSpace}
+              secureSessionStore={secureSessionStore}
               onChromeVisibilityChange={setFeedChromeVisible}
               onOpenChat={setFeedChatAuthor}
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
