@@ -3,6 +3,7 @@
 // 接入模型底座：SendMessage 后服务端调用 modelStack.Complete() 生成 AI 回复。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dimensions, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import type { ConversationClient, ProtectionOverride } from "../conversation-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
@@ -228,8 +229,9 @@ export function ConversationSurface({
   }
 
   return (
-    <View style={[styles.root, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
-      {/* Header */}
+    <SwipeBackShell onExit={onBack}>
+      <View style={[styles.root, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
+        {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={onBack} style={styles.backBtn}>
           <Text style={styles.backText}>‹</Text>
@@ -310,7 +312,8 @@ export function ConversationSurface({
             <Text style={styles.sendBtnText}>{sending ? "..." : "发送"}</Text>
           </Pressable>
         </View>
-    </View>
+      </View>
+    </SwipeBackShell>
   );
 }
 
