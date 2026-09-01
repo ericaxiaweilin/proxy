@@ -12,6 +12,15 @@ if [[ -f .env ]]; then
 fi
 set +a
 
+# The mobile app relies on persisted identities and refresh tokens. Starting the
+# developer API with the in-memory identity repository makes a successful login
+# disappear on the next API restart, while the UI still shows a remembered
+# account. Fail loudly instead of creating that misleading, unrecoverable state.
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  echo "DATABASE_URL is required by scripts/dev-api.sh; refusing to start with ephemeral identity/session storage." >&2
+  exit 1
+fi
+
 if [[ "${MODELSTACK_USE_PI_CONFIG:-}" == "true" ]]; then
   echo "model-stack: using Pi provider registry; SSH gateway tunnel skipped"
 elif ! "${repo_dir}/scripts/ensure-modelstack-tunnel.sh"; then
