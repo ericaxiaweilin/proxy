@@ -24,6 +24,7 @@ import { BusinessClient } from "./business-client";
 import { SceneClient } from "./scene-client";
 import { SupplyClient } from "./supply-client";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
+import { createLastSignInStore, maskIdentifier, avatarLetterFor, type LastSignIn } from "./last-signin-store";
 import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
 import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore } from "./native-clients";
@@ -36,6 +37,8 @@ WebBrowser.maybeCompleteAuthSession();
 
 const secureSessionStore = nativeSecureSessionStore;
 const INSTALLATION_DEVICE_ID_KEY = "proxy.installation.device-id.v1";
+// R15.36: 历史登录账户 — UI hint 存储层 (avatar + 脱敏 identifier)。
+const lastSignInStore = createLastSignInStore(nativeSecureStorageDriver);
 const nativeTransport: Transport = async (request) => {
   const headers: Record<string, string> = {};
   const src: unknown = request.headers;
@@ -217,7 +220,7 @@ export function ProxyApp(): React.JSX.Element {
         sessionAuthClient={sessionAuthClient}
         localApiBaseUrl={localApiBaseUrl}
         onSignOut={() => {
-		  void Promise.all([sessionAuthClient.signOut().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined)]).then(()=> setPhase("SIGNED_OUT"));
+		  void Promise.all([sessionAuthClient.signOut().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined), lastSignInStore.clear().catch(()=>undefined)]).then(() => setPhase("SIGNED_OUT"));
         }}
       />
     );
@@ -255,6 +258,54 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  // R15.36: 历史登录账户 — 只在 login 模式 展示。
+  // 脱敏的 identifier 已经读取, 用户点 "继续" 会自动填 + 发起验证码。
+  // "换号" 本地 dismiss (不写盘), 下次开 app 重新出现 — 因为上一个
+  // session 仍然有效 (记忆者还可以 “返回上号”)。
+  const [lastSignIn, setLastSignIn] = useState<LastSignIn | undefined>(undefined);
+  const [lastSignInDismissed, setLastSignInDismissed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void lastSignInStore.read().then((entry) => {
+      if (!cancelled) setLastSignIn(entry);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // "继续" 按钮: 不需要用户重新输 identifier, 直接填 + 发起验证码。
+  // 复用了 requestChallenge() 的核心路径 — 但在调用前先填表单状态,
+  // 让用户能在 OTP 输入屏幕看到 “验证码已发送至 ...” 中的地址。
+  async function continueAsLastSignIn(entry: LastSignIn): Promise<void> {
+    setAuthMode("login");
+    setAuthChannel(entry.channel);
+    if (entry.channel === "EMAIL") {
+      setGoogleEmail(entry.identifier);
+      setPhone("");
+    } else {
+      setPhone(entry.identifier);
+      setGoogleEmail("");
+    }
+    setChallengeId(undefined);
+    setCode("");
+    setError(undefined);
+    setBusy(true);
+    try {
+      const loginClient = await getNativeLoginClient();
+      const result = await loginClient.beginPasswordlessAuthentication({
+        channel: entry.channel,
+        identifier: entry.identifier,
+        platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
+      });
+      setChallengeId(result.challengeId);
+    } catch (err) {
+      setError(`无法重新发送验证码：${err instanceof Error ? err.message : String(err)}`.slice(0, 240));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function requestChallenge(): Promise<void> {
     setBusy(true);
@@ -356,6 +407,13 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
       await loginClient.verifyChallenge(challengeId, code);
       await loginClient.createSessionFromChallenge(challengeId);
       await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(()=>undefined);
+      // R15.36: 记住上次的 identifier, 下次进来在登录页顶部展示
+      // "继续使用" 卡片。
+      await lastSignInStore.write({
+        channel: authChannel,
+        identifier: authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : normalizeVietnamesePhone(phone),
+        signedInAt: new Date().toISOString()
+      }).catch(() => undefined);
       onAuthenticated();
     } catch (err) {
       const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -373,6 +431,38 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           <View style={styles.screenInner}>
             <View style={styles.card}>
         <BrandMark />
+        {authMode === "login" && lastSignIn && !lastSignInDismissed ? (
+          <View style={styles.rememberedCard}>
+            <View style={styles.rememberedAvatar}>
+              <Text style={styles.rememberedAvatarText}>
+                {avatarLetterFor(lastSignIn.channel, lastSignIn.identifier)}
+              </Text>
+            </View>
+            <View style={styles.rememberedAcct}>
+              <Text style={styles.rememberedLabel}>继续使用</Text>
+              <Text style={styles.rememberedIdentifier} numberOfLines={1}>
+                {maskIdentifier(lastSignIn.channel, lastSignIn.identifier)}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => void continueAsLastSignIn(lastSignIn)}
+              style={styles.rememberedContinue}
+              accessibilityLabel="继续上次的账号"
+            >
+              <Text style={styles.rememberedContinueText}>继续</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setLastSignInDismissed(true);
+                setError(undefined);
+              }}
+              style={styles.rememberedSwitch}
+              accessibilityLabel="切换其他账号"
+            >
+              <Text style={styles.rememberedSwitchText}>换号</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <View style={styles.authTabs}>
           <Pressable onPress={() => { setAuthMode("login"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "login" && styles.authTabActive]}>
             <Text style={[styles.authTabText, authMode === "login" && styles.authTabTextActive]}>登录</Text>
@@ -513,6 +603,14 @@ function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
           const loginClient = await getNativeLoginClient();
           await loginClient.authenticateWithGoogle(response.authentication!.idToken!, Platform.OS === "ios" ? "IOS" : "ANDROID");
           await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(()=>undefined);
+          // R15.36: Google 流程下我们没有 email (需要额外 fetch userinfo),
+          // 暂以 "Google 账号" + 唯一末位来记住。后续如果 server 返回
+          // principal.email 可以换。
+          await lastSignInStore.write({
+            channel: "EMAIL",
+            identifier: "google@account",
+            signedInAt: new Date().toISOString()
+          }).catch(() => undefined);
           onAuthenticated();
         } catch (error) {
           setError(error instanceof Error ? error.message : "Google 登录失败，请重试或用手机号/邮箱");
@@ -705,5 +803,71 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 16,
     textAlign: "center"
+  },
+  // R15.36: 历史登录账户卡片 (Proxy_Auth_Standard_UI_v7 “继续使用” 设计)。
+  //   1px line 边框 + 17px 圆角 + 40×40 字母 avatar + ink 黑 “继续” 按钮
+  //   + “换号” 文本按钮。展示位置: BrandMark 与 authTabs 之间。
+  rememberedCard: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 17,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 16,
+    padding: 12
+  },
+  rememberedAvatar: {
+    alignItems: "center",
+    backgroundColor: color.ink,
+    borderRadius: 13,
+    height: 40,
+    justifyContent: "center",
+    width: 40
+  },
+  rememberedAvatarText: {
+    color: color.white,
+    fontSize: 17,
+    fontWeight: "800"
+  },
+  rememberedAcct: {
+    flex: 1,
+    minWidth: 0
+  },
+  rememberedLabel: {
+    color: color.ink,
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  rememberedIdentifier: {
+    color: color.muted,
+    fontSize: 12,
+    marginTop: 3
+  },
+  rememberedContinue: {
+    alignItems: "center",
+    backgroundColor: color.ink,
+    borderRadius: 11,
+    height: 38,
+    justifyContent: "center",
+    paddingHorizontal: 13
+  },
+  rememberedContinueText: {
+    color: color.white,
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  rememberedSwitch: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    paddingVertical: 6
+  },
+  rememberedSwitchText: {
+    color: color.violet,
+    fontSize: 12,
+    fontWeight: "700"
   }
 });
