@@ -107,6 +107,7 @@ func main() {
 	facetService.SeedDefaults()
 	experienceService := experience.New()
 	voucherService := voucher.New()
+	voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
 	demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
 	authenticator = identityService
 	var transactions api.TransactionRunner
@@ -211,6 +212,7 @@ func main() {
 		facetService.SeedDefaults()
 		experienceService = experience.NewWithRepository(postgres.NewExperienceRepository(pool))
 		voucherService = voucher.NewWithRepository(postgres.NewVoucherRepository(pool))
+		voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
 		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)

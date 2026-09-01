@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -75,13 +76,25 @@ type Repository interface {
 // Service is currently an in-memory P0 adapter. Its command contract is
 // production-shaped (actor scoped, idempotent at the API boundary), so a
 // repository can replace this storage without changing the mobile protocol.
+type SettlementCreator interface {
+	CreateSettlement(ctx context.Context, voucherID, actorID string, amount int) error
+}
+
+type LogSettlementCreator struct{}
+
+func (LogSettlementCreator) CreateSettlement(_ context.Context, voucherID, actorID string, amount int) error {
+	log.Printf("voucher settlement: voucher=%s actor=%s amount=%d", voucherID, actorID, amount)
+	return nil
+}
+
 type Service struct {
-	mu          sync.Mutex
-	vouchers    map[string]*Voucher // actor|voucherId -> projection (fallback when repo==nil)
-	redemptions map[string]*Redemption
-	clock       func() time.Time
-	sequence    int
-	repo        Repository
+	mu                sync.Mutex
+	vouchers          map[string]*Voucher // actor|voucherId -> projection (fallback when repo==nil)
+	redemptions       map[string]*Redemption
+	clock             func() time.Time
+	sequence          int
+	repo              Repository
+	settlementCreator SettlementCreator
 }
 
 func New() *Service {
@@ -91,6 +104,8 @@ func New() *Service {
 func NewWithRepository(repo Repository) *Service {
 	return &Service{vouchers: make(map[string]*Voucher), redemptions: make(map[string]*Redemption), clock: func() time.Time { return time.Now().UTC() }, repo: repo}
 }
+
+func (s *Service) SetSettlementCreator(c SettlementCreator) { s.settlementCreator = c }
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
@@ -282,6 +297,9 @@ func (s *Service) settle(ctx context.Context, e command.Envelope) command.Result
 	// is a ledger-worker concern and is never controlled by the consumer UI.
 	v.Status, v.Version = "SETTLED", v.Version+1
 	s.upsertWithContext(ctx, e.Actor.ID, *v)
+	if s.settlementCreator != nil {
+		_ = s.settlementCreator.CreateSettlement(ctx, v.ID, e.Actor.ID, v.SettlementValue)
+	}
 	return accepted(e, "Voucher", v.ID, "SETTLED", map[string]any{"voucher": *v, "receipt": map[string]any{"settledAt": s.clock().Format(time.RFC3339), "settlementValue": v.SettlementValue}, "notice": "P0 模拟结算已完成；未创建真实支付、可提现余额或商家账本分录。"})
 }
 
