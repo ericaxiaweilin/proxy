@@ -275,8 +275,14 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
       // because the App is in the background. The helper text on the
       // next screen ("验证码已发送至 ...") tells them to switch to the
       // Mail app themselves when they are ready.
-    } catch {
-      setError(authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。");
+    } catch (err) {
+      // DEBUG (R15.27): surface the real error so we know why fetch/begin fails on iPhone.
+      // eslint-disable-next-line no-console
+      console.log("[proxy.login] beginPasswordlessAuthentication ERROR:", err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+      setError(
+        `DEBUG ${err instanceof Error ? err.message : String(err)}`.slice(0, 240) ||
+          (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。")
+      );
     } finally {
       setBusy(false);
     }

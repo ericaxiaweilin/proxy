@@ -138,3 +138,11 @@ func (r *VoucherRepository) UpdateRedemption(ctx context.Context, red voucher.Re
 		UPDATE voucher.redemptions SET used=$1 WHERE redemption_id=$2`, red.Used, red.ID)
 	return err
 }
+
+func (r *VoucherRepository) CreateSettlement(ctx context.Context, s voucher.Settlement) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO voucher.settlements (settlement_id, voucher_id, actor_id, amount, currency, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (settlement_id) DO NOTHING`,
+		s.ID, s.VoucherID, s.ActorID, s.Amount, s.Currency, s.CreatedAt)
+	return err
+}

@@ -62,6 +62,15 @@ type Redemption struct {
 	Used      bool
 }
 
+type Settlement struct {
+	ID        string    `json:"settlementId"`
+	VoucherID string    `json:"voucherId"`
+	ActorID   string    `json:"actorId"`
+	Amount    int       `json:"amount"`
+	Currency  string    `json:"currency"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type Repository interface {
 	ListVouchers(ctx context.Context, actorID string) ([]Voucher, error)
 	GetVoucher(ctx context.Context, actorID, voucherID string) (*Voucher, bool, error)
@@ -71,6 +80,7 @@ type Repository interface {
 	CreateRedemption(ctx context.Context, r Redemption) error
 	GetRedemption(ctx context.Context, redemptionID string) (*Redemption, bool, error)
 	UpdateRedemption(ctx context.Context, r Redemption) error
+	CreateSettlement(ctx context.Context, s Settlement) error
 }
 
 // Service is currently an in-memory P0 adapter. Its command contract is
@@ -320,6 +330,9 @@ func (s *Service) settle(ctx context.Context, e command.Envelope) command.Result
 	// is a ledger-worker concern and is never controlled by the consumer UI.
 	v.Status, v.Version = "SETTLED", v.Version+1
 	s.upsertWithContext(ctx, e.Actor.ID, *v)
+	if s.repo != nil {
+		_ = s.repo.CreateSettlement(ctx, Settlement{ID: "stl_" + v.ID + "_" + e.Actor.ID, VoucherID: v.ID, ActorID: e.Actor.ID, Amount: v.SettlementValue, Currency: v.Currency, CreatedAt: s.clock()})
+	}
 	if s.settlementCreator != nil {
 		_ = s.settlementCreator.CreateSettlement(ctx, v.ID, e.Actor.ID, v.SettlementValue)
 	}

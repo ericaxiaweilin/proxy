@@ -83,6 +83,9 @@ export class LoginClient {
       deviceId: this.input.deviceId,
       platform: input.platform
     });
+    // DEBUG (R15.27): log full result so iPhone console shows why outcome is not PENDING.
+    // eslint-disable-next-line no-console
+    console.log("[proxy.login] beginPasswordlessAuthentication result:", JSON.stringify(result));
     if (result.outcome !== "PENDING" || !result.operationRef) {
       throw new LoginProtocolError("passwordless authentication response did not contain a pending operation");
     }
