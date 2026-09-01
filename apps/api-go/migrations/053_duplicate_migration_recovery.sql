@@ -1,8 +1,17 @@
 -- Recover from filesystem duplicate files ("name 2.sql") that were briefly
 -- interpreted as new migrations. Remove only those accidental history rows and
 -- reassert the least-privilege observer boundary after the duplicated old 047.
+-- Guarded: the test harness applies raw .sql files with no migrator bookkeeping
+-- table, so this must no-op when public.schema_migrations is absent.
 
-DELETE FROM public.schema_migrations WHERE version ~ ' 2$';
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_name = 'schema_migrations') THEN
+    DELETE FROM public.schema_migrations WHERE version ~ ' 2$';
+  END IF;
+END
+$$;
 
 DO $$
 BEGIN
