@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SessionAuthClient, SessionExpiredError, type TransportRequest, type TransportResponse } from "./auth-client";
+import { SessionAuthClient, SessionExpiredError, SessionRefreshUnavailableError, type TransportRequest, type TransportResponse } from "./auth-client";
 import { InMemorySecureStorageDriver, SecureSessionStore, type StoredSession } from "./secure-session";
 
 const initialSession: StoredSession = {
@@ -75,6 +75,47 @@ describe("mobile session auth client", () => {
       transport: async () => response(401, { error: { errorCode: "REFRESH_TOKEN_INVALID" } })
     });
     await expect(client.refresh()).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(await store.read()).toBeUndefined();
+  });
+
+  it("preserves secure credentials when refresh service is temporarily unavailable", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    await store.write(initialSession);
+    const client = new SessionAuthClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      transport: async () => response(503, { error: "temporarily_unavailable" })
+    });
+    await expect(client.refresh()).rejects.toBeInstanceOf(SessionRefreshUnavailableError);
+    expect((await store.read())?.auth.refreshToken).toBe("refresh_1");
+  });
+
+  it("does not refresh a valid remembered session on app startup", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    await store.write({ ...initialSession, auth: { ...initialSession.auth, accessExpiresAt: "2026-08-14T00:15:00.000Z" } });
+    let requests = 0;
+    const client = new SessionAuthClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      now: () => new Date("2026-08-14T00:00:00.000Z"),
+      transport: async () => { requests += 1; return response(500, {}); }
+    });
+    expect(await client.getAccessToken()).toBe("access_1");
+    expect(requests).toBe(0);
+  });
+
+  it("clears local credentials on sign out even when server revocation is offline", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    await store.write(initialSession);
+    const client = new SessionAuthClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      transport: async () => { throw new Error("offline"); }
+    });
+    await client.signOut();
     expect(await store.read()).toBeUndefined();
   });
 });

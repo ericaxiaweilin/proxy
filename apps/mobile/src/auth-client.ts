@@ -22,6 +22,13 @@ export class SessionExpiredError extends Error {
   }
 }
 
+export class SessionRefreshUnavailableError extends Error {
+  public constructor(public readonly status?: number) {
+    super("session refresh temporarily unavailable");
+    this.name = "SessionRefreshUnavailableError";
+  }
+}
+
 export class SessionAuthClient {
   private refreshInFlight: Promise<SessionAuthTokens> | undefined;
   private commandSequence = 0;
@@ -100,7 +107,33 @@ export class SessionAuthClient {
   }
 
   public async signOut(): Promise<void> {
-    await this.input.secureSessionStore.clear();
+    let current: StoredSession | undefined;
+    try {
+      current = await this.input.secureSessionStore.read();
+      if (current) {
+        await this.send("/v1/commands/RevokeSession", {
+          method: "POST",
+          body: {
+            commandId: this.nextCommandId("signout"),
+            commandType: "RevokeSession",
+            commandVersion: 1,
+            actor: { type: "USER", id: current.userAccountId },
+            principal: current.principal ?? current.auth.principal,
+            target: { type: "Session", id: current.auth.sessionId },
+            idempotencyKey: this.nextCommandId("idem"),
+            authContext: { sessionId: current.auth.sessionId },
+            purpose: "user_sign_out",
+            correlationId: this.nextCommandId("corr"),
+            requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),
+            payload: { reason: "USER_LOGOUT" }
+          }
+        }, current.auth.accessToken).catch(() => undefined);
+      }
+    } finally {
+      // Logout is local-authoritative: a network outage must never trap the
+      // user in a signed-in UI. Server revocation is best effort.
+      await this.input.secureSessionStore.clear();
+    }
   }
 
   private async send(path: string, init: { method: TransportRequest["method"]; body?: unknown }, accessToken?: string): Promise<TransportResponse> {
@@ -141,12 +174,22 @@ export class SessionAuthClient {
         payload: { refreshToken: current.auth.refreshToken }
       }
     });
-    const body = await response.json();
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new SessionRefreshUnavailableError(response.status);
+    }
     const auth = parseSessionAuthTokens(isRecord(body) ? body.auth : undefined);
-    if (response.status < 200 || response.status >= 300 || !auth) {
+    if (response.status === 401 || response.status === 403) {
       await this.input.secureSessionStore.clear();
       throw new SessionExpiredError();
     }
+	if (response.status < 200 || response.status >= 300 || !auth) {
+		// 429/5xx/proxy HTML/protocol drift are availability failures, not proof
+		// that the refresh token is invalid. Preserve Keychain and retry later.
+		throw new SessionRefreshUnavailableError(response.status);
+	}
 		const updated: StoredSession = {
 			userAccountId: current.userAccountId,
 			auth,

@@ -48,12 +48,12 @@ const nativeTransport: Transport = async (request) => {
 
 // 跟 native-app.tsx 里的 secureSessionStore 等价的 Keychain-backed store。
 // 各 surface 拿到同一个 principalId / sessionId, 不需要 singleton。
-const secureSessionStore = new SecureSessionStore(nativeSecureStorageDriver);
+export const nativeSecureSessionStore = new SecureSessionStore(nativeSecureStorageDriver);
 
 // 服务端驱动 Surface 的认证客户端：读模型/命令全部走 /v1/commands/ envelope。
 // 也兼任匿名 GET transport (response.json()), 跟 transport.ts 共享底层 fetch。
 export const sessionAuthClient = new SessionAuthClient({
   baseUrl: localApiBaseUrl,
-  secureSessionStore,
+  secureSessionStore: nativeSecureSessionStore,
   transport: nativeTransport
 });

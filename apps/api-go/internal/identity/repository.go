@@ -354,13 +354,20 @@ func (r *MemoryRepository) ListSessionsByUser(_ context.Context, userID string) 
 func (r *MemoryRepository) RevokeAllSessions(_ context.Context, userID string) ([]Session, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return revokeAllSessionsLocked(r.sessions, userID), nil
+	result := revokeAllSessionsLocked(r.sessions, userID)
+	for _, session := range result {
+		delete(r.tokens, session.ID)
+	}
+	return result, nil
 }
 
 func (r *MemoryRepository) RevokeAllSessionsAndPublish(_ context.Context, userID string, buildEvents func([]Session) []event.DomainEvent) ([]Session, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	result := revokeAllSessionsLocked(r.sessions, userID)
+	for _, session := range result {
+		delete(r.tokens, session.ID)
+	}
 	r.events = append(r.events, buildEvents(result)...)
 	return result, nil
 }
@@ -390,6 +397,9 @@ func (r *MemoryRepository) UpdateSessionAndPublish(_ context.Context, session Se
 		return ErrSessionVersionConflict
 	}
 	r.sessions[session.ID] = session
+	if session.Status == "REVOKED" {
+		delete(r.tokens, session.ID)
+	}
 	r.events = append(r.events, domainEvents...)
 	return nil
 }

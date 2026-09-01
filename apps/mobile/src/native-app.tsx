@@ -22,11 +22,10 @@ import { NotificationClient } from "./notification-client";
 import { BusinessClient } from "./business-client";
 import { SceneClient } from "./scene-client";
 import { SupplyClient } from "./supply-client";
-import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
-import { sessionAuthClient, localApiBaseUrl } from "./native-clients";
+import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore } from "./native-clients";
 
 const APP_VERSION = "1.0.0";
 
@@ -34,7 +33,7 @@ const absoluteFillStyle = { bottom: 0, left: 0, position: "absolute" as const, r
 
 WebBrowser.maybeCompleteAuthSession();
 
-const secureSessionStore = new SecureSessionStore(nativeSecureStorageDriver);
+const secureSessionStore = nativeSecureSessionStore;
 const INSTALLATION_DEVICE_ID_KEY = "proxy.installation.device-id.v1";
 const nativeTransport: Transport = async (request) => {
   const headers: Record<string, string> = {};
@@ -155,21 +154,24 @@ export function ProxyApp(): React.JSX.Element {
       if (cancelled) return;
       if (!state) { setPhase("SIGNED_OUT"); return; }
       const isGuestFlag = await nativeSecureStorageDriver.getItem(GUEST_FLAG_KEY).catch(() => null);
-      // Local/API restarts invalidate an in-memory server session while iOS
-      // Keychain correctly keeps the old token. Validate it at boot instead
-      // of letting the first Home conversation fail inside the auth pipeline.
-      // Anonymous users are recovered transparently; registered users return
-      // to sign-in rather than being silently converted into a guest.
+      // Do not rotate refresh tokens on every launch. A still-valid access
+      // token is enough; getAccessToken refreshes only near expiry. Transient
+      // network/server failures preserve the Keychain session and the app can
+      // retry when an authenticated action is made.
       if (state.status === "AUTHENTICATED") {
         try {
-          await sessionAuthClient.refresh();
-        } catch {
+          const accessToken = await sessionAuthClient.getAccessToken();
+          if (!accessToken) throw new Error("session_expired");
+        } catch (error) {
           if (isGuestFlag === "1") {
-            await createNativeGuestSession();
             if (!cancelled) setPhase("PUBLIC");
             return;
           }
-          if (!cancelled) setPhase("SIGNED_OUT");
+          // A retained Keychain record means this may only be a temporary
+		  // refresh outage. Keep the account signed in; explicit auth rejection
+		  // clears the record inside SessionAuthClient and reaches SIGNED_OUT.
+		  const retained = await secureSessionStore.read().catch(() => undefined);
+		  if (!cancelled) setPhase(retained ? "AUTHENTICATED" : "SIGNED_OUT");
           return;
         }
       }
@@ -208,7 +210,7 @@ export function ProxyApp(): React.JSX.Element {
         isGuest={phase === "PUBLIC"}
         ensureConversationSession={phase === "PUBLIC" ? ensureNativeGuestSession : undefined}
         onSignOut={() => {
-          void Promise.all([secureSessionStore.clear().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined)]).then(()=> setPhase("SIGNED_OUT"));
+		  void Promise.all([sessionAuthClient.signOut().catch(()=>undefined), nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY,"0").catch(()=>undefined)]).then(()=> setPhase("SIGNED_OUT"));
         }}
       />
     );

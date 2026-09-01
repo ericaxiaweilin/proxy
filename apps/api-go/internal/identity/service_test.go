@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -196,6 +197,24 @@ func TestRefreshTokenRotationRejectsReplay(t *testing.T) {
 	authenticated, err := service.Authenticate(context.Background(), rotated.Auth.AccessToken)
 	if err != nil || authenticated.SessionID != created.Aggregate.ID || authenticated.Principal.ID != "business_001" {
 		t.Fatalf("expected rotated access token to authenticate, session=%#v err=%v", authenticated, err)
+	}
+}
+
+func TestRevokeSessionDeletesTokens(t *testing.T) {
+	service := testService()
+	created := service.Handle(testEnvelope("CreateSession", map[string]any{
+		"userAccountId": "user_001", "loginIdentityId": "login_001", "deviceId": "device_001", "challengeId": "challenge_001",
+		"requestedPrincipal": map[string]any{"type": "BUSINESS", "id": "business_001"},
+	}, command.Target{Type: "Session", ID: "new"}))
+	if created.Outcome != "ACCEPTED" || created.Auth == nil {
+		t.Fatalf("expected session, got %#v", created)
+	}
+	revoked := service.Handle(testEnvelope("RevokeSession", map[string]any{"reason": "USER_LOGOUT"}, command.Target{Type: "Session", ID: created.Aggregate.ID}))
+	if revoked.Outcome != "ACCEPTED" {
+		t.Fatalf("expected revoked session, got %#v", revoked)
+	}
+	if _, err := service.Authenticate(context.Background(), created.Auth.AccessToken); !errors.Is(err, ErrTokenNotFound) {
+		t.Fatalf("revoked access token remained stored: %v", err)
 	}
 }
 

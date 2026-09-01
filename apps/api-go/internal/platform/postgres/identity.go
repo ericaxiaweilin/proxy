@@ -593,7 +593,18 @@ func revokeAllSessionsTx(ctx context.Context, tx pgx.Tx, userID string) ([]ident
 		session.Status = "REVOKED"
 		session.Version = newVersion
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM identity.session_tokens WHERE session_id = ANY($1)`, sessionIDs(sessions)); err != nil {
+		return nil, err
+	}
 	return sessions, nil
+}
+
+func sessionIDs(sessions []identity.Session) []string {
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		ids = append(ids, session.ID)
+	}
+	return ids
 }
 
 func (r *IdentityRepository) UpdateSession(ctx context.Context, session identity.Session, expectedVersion int) error {
@@ -628,6 +639,11 @@ func (r *IdentityRepository) UpdateSessionAndPublish(ctx context.Context, sessio
 	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
 		if err := updateSession(transactionContext, transaction, session, expectedVersion); err != nil {
 			return err
+		}
+		if session.Status == "REVOKED" {
+			if _, err := transaction.Exec(transactionContext, `DELETE FROM identity.session_tokens WHERE session_id = $1`, session.ID); err != nil {
+				return err
+			}
 		}
 		for _, domainEvent := range domainEvents {
 			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
