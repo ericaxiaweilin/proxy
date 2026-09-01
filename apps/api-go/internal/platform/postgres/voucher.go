@@ -124,8 +124,11 @@ func (r *VoucherRepository) GetRedemption(ctx context.Context, redemptionID stri
 		SELECT redemption_id, voucher_id, actor_id, code, expires_at, used
 		FROM voucher.redemptions WHERE redemption_id=$1`, redemptionID).Scan(
 		&red.ID, &red.VoucherID, &red.ActorID, &red.Code, &red.ExpiresAt, &red.Used)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
 	}
 	return &red, true, nil
 }

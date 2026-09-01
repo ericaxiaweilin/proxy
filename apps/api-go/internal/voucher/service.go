@@ -168,7 +168,11 @@ type createPayload struct {
 }
 
 func (s *Service) list(ctx context.Context, e command.Envelope) command.Result {
-	items := s.listWithContext(ctx, e.Actor.ID)
+	items, err := s.listWithContext(ctx, e.Actor.ID)
+	if err != nil {
+		log.Printf("voucher storage: list %s: %v", e.Actor.ID, err)
+		return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
+	}
 	// Product order is intentional: the P0 wallet introduces the common
 	// Coffee → Experience → Activity families in the same order as the frozen
 	// prototype, rather than leaking internal voucher IDs into presentation.
@@ -190,7 +194,11 @@ func (s *Service) get(ctx context.Context, e command.Envelope) command.Result {
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
+	v, ok, err := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
+	if err != nil {
+		log.Printf("voucher storage: get %s/%s: %v", e.Actor.ID, p.VoucherID, err)
+		return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
+	}
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
@@ -202,7 +210,11 @@ func (s *Service) openRedemption(ctx context.Context, e command.Envelope) comman
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
+	v, ok, err := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
+	if err != nil {
+		log.Printf("voucher storage: get %s/%s: %v", e.Actor.ID, p.VoucherID, err)
+		return reject(e, "VOUCHER_STORAGE_FAILED", "voucher.storage_failed")
+	}
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
@@ -253,7 +265,7 @@ func (s *Service) confirmRedemption(ctx context.Context, e command.Envelope) com
 	if !s.clock().Before(r.ExpiresAt) {
 		return reject(e, "REDEMPTION_TOKEN_EXPIRED", "voucher.redemption_token_expired")
 	}
-	v, ok := s.voucherWithContext(ctx, e.Actor.ID, r.VoucherID)
+	v, ok, _ := s.voucherWithContext(ctx, e.Actor.ID, r.VoucherID)
 	if !ok || v.Status != "AVAILABLE" {
 		return reject(e, "VOUCHER_NOT_AVAILABLE", "voucher.not_available")
 	}
@@ -277,7 +289,7 @@ func (s *Service) settlement(ctx context.Context, e command.Envelope) command.Re
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
+	v, ok, _ := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
@@ -297,7 +309,7 @@ func (s *Service) settle(ctx context.Context, e command.Envelope) command.Result
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
+	v, ok, _ := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
@@ -378,20 +390,16 @@ func (s *Service) voucher(actorID, id string) (*Voucher, bool) {
 	v, ok := s.vouchers[s.key(actorID, id)]
 	return v, ok
 }
-func (s *Service) voucherWithContext(ctx context.Context, actorID, id string) (*Voucher, bool) {
+func (s *Service) voucherWithContext(ctx context.Context, actorID, id string) (*Voucher, bool, error) {
 	if s.repo != nil {
-		if v, ok, _ := s.repo.GetVoucher(ctx, actorID, id); ok {
-			return v, true
-		}
-		return nil, false
+		return s.repo.GetVoucher(ctx, actorID, id)
 	}
-	return s.voucher(actorID, id)
+	v, ok := s.voucher(actorID, id)
+	return v, ok, nil
 }
-func (s *Service) listWithContext(ctx context.Context, actorID string) []Voucher {
+func (s *Service) listWithContext(ctx context.Context, actorID string) ([]Voucher, error) {
 	if s.repo != nil {
-		if items, err := s.repo.ListVouchers(ctx, actorID); err == nil {
-			return items
-		}
+		return s.repo.ListVouchers(ctx, actorID)
 	}
 	items := make([]Voucher, 0)
 	for prefix, voucher := range s.vouchers {
@@ -399,13 +407,16 @@ func (s *Service) listWithContext(ctx context.Context, actorID string) []Voucher
 			items = append(items, *voucher)
 		}
 	}
-	return items
+	return items, nil
 }
-func (s *Service) upsertWithContext(ctx context.Context, actorID string, v Voucher) {
+func (s *Service) upsertWithContext(ctx context.Context, actorID string, v Voucher) error {
 	if s.repo != nil {
-		_ = s.repo.UpsertVoucher(ctx, actorID, v)
+		if err := s.repo.UpsertVoucher(ctx, actorID, v); err != nil {
+			return err
+		}
 	}
 	s.vouchers[s.key(actorID, v.ID)] = &v
+	return nil
 }
 func (s *Service) key(actorID, id string) string { return actorID + "|" + id }
 func validFamily(f Family) bool                  { return f == Coffee || f == Experience || f == Activity }
