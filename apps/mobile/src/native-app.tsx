@@ -250,41 +250,73 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
   async function requestChallenge(): Promise<void> {
     setBusy(true);
     setError(undefined);
-    try {
-		const loginClient = await getNativeLoginClient();
-      const isEmail = authChannel === "EMAIL";
-      let rawEmail = googleEmail.trim().toLowerCase();
-      // 自动补全 gmail.com 后缀（用户只输用户名时）
-      if (isEmail && rawEmail && !rawEmail.includes("@")) rawEmail = `${rawEmail}@gmail.com`;
-      if (isEmail && rawEmail !== googleEmail.trim().toLowerCase()) setGoogleEmail(rawEmail);
-      const identifier = isEmail ? rawEmail : `+84${phone.replace(/\D/g, "")}`;
-      if (isEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
-        setError("请输入有效的 Google 邮箱地址（可只输用户名自动补全 @gmail.com）。");
-        setBusy(false);
-        return;
-      }
-      const result = await loginClient.beginPasswordlessAuthentication({
-        channel: isEmail ? "EMAIL" : "SMS",
-        identifier,
-        platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
-      });
-      setChallengeId(result.challengeId);
-      // NOTE: We deliberately do NOT auto-open Gmail / mail.google.com
-      // here. Doing so yanks the user out of the App and makes the OTP
-      // input screen invisible — they come back to a "stuck" feeling
-      // because the App is in the background. The helper text on the
-      // next screen ("验证码已发送至 ...") tells them to switch to the
-      // Mail app themselves when they are ready.
-    } catch (err) {
-      // DEBUG (R15.27): surface the real error so we know why fetch/begin fails on iPhone.
-      // eslint-disable-next-line no-console
-      console.log("[proxy.login] beginPasswordlessAuthentication ERROR:", err instanceof Error ? `${err.name}: ${err.message}` : String(err));
-      setError(
-        `DEBUG ${err instanceof Error ? err.message : String(err)}`.slice(0, 240) ||
-          (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。")
-      );
-    } finally {
+    const isEmail = authChannel === "EMAIL";
+    let rawEmail = googleEmail.trim().toLowerCase();
+    // 自动补全 gmail.com 后缀（用户只输用户名时）
+    if (isEmail && rawEmail && !rawEmail.includes("@")) rawEmail = `${rawEmail}@gmail.com`;
+    if (isEmail && rawEmail !== googleEmail.trim().toLowerCase()) setGoogleEmail(rawEmail);
+    const identifier = isEmail ? rawEmail : `+84${phone.replace(/\D/g, "")}`;
+    if (isEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
+      setError("请输入有效的 Google 邮箱地址（可只输用户名自动补全 @gmail.com）。");
       setBusy(false);
+    } else {
+      try {
+        const loginClient = await getNativeLoginClient();
+        const result = await loginClient.beginPasswordlessAuthentication({
+          channel: isEmail ? "EMAIL" : "SMS",
+          identifier,
+          platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
+        });
+        setChallengeId(result.challengeId);
+        // NOTE: We deliberately do NOT auto-open Gmail / mail.google.com
+        // here. Doing so yanks the user out of the App and makes the OTP
+        // input screen invisible — they come back to a "stuck" feeling
+        // because the App is in the background. The helper text on the
+        // next screen ("验证码已发送至 ...") tells them to switch to the
+        // Mail app themselves when they are ready.
+      } catch (err) {
+        // DEBUG (R15.27): surface the real error so we know why fetch/begin fails on iPhone.
+        // eslint-disable-next-line no-console
+        console.log("[proxy.login] beginPasswordlessAuthentication ERROR:", err instanceof Error ? `${err.name}: ${err.message}` : String(err));
+        // R15.27: if device is already bound to a different user (anonymous/legacy),
+        // rotate the deviceId and retry once. Same pattern as createNativeGuestSession.
+        if (
+          err instanceof LoginCommandRejectedError &&
+          (err.result.error?.errorCode === "PASSWORDLESS_IDENTITY_UNAVAILABLE" ||
+            err.result.error?.errorCode === "LOGIN_PROVIDER_NOT_CONFIGURED" ||
+            err.result.error?.errorCode === "ACCOUNT_NOT_ACTIVE")
+        ) {
+          let retrySucceeded = false;
+          try {
+            // eslint-disable-next-line no-console
+            console.log("[proxy.login] rotating deviceId and retrying BeginPasswordlessAuthentication");
+            const rotated = await rotateGuestDeviceIdentity();
+            const result = await rotated.beginPasswordlessAuthentication({
+              channel: isEmail ? "EMAIL" : "SMS",
+              identifier,
+              platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
+            });
+            setChallengeId(result.challengeId);
+            retrySucceeded = true;
+          } catch (retryErr) {
+            // eslint-disable-next-line no-console
+            console.log("[proxy.login] retry after rotate FAILED:", retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : String(retryErr));
+          }
+          if (!retrySucceeded) {
+            setError(
+              `DEBUG ${err instanceof Error ? err.message : String(err)}`.slice(0, 240) ||
+                (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。")
+            );
+          }
+        } else {
+          setError(
+            `DEBUG ${err instanceof Error ? err.message : String(err)}`.slice(0, 240) ||
+              (authChannel === "EMAIL" ? "无法发送验证码到该邮箱，请检查地址或使用手机号。" : "无法发送验证码。请检查越南手机号和认证服务配置。")
+          );
+        }
+      } finally {
+        setBusy(false);
+      }
     }
   }
 
@@ -433,26 +465,23 @@ const googleClientConfig: GoogleClientConfig = {
 };
 
 function GoogleSignInSlot(props: GoogleSignInProps): React.JSX.Element {
+  // R15.29: the platform check is a module-level constant, not a runtime
+  // decision, so we can compute it at top of every render without changing
+  // hook order. The actual branch happens here in the slot, and each branch
+  // is a SEPARATE component so neither one mixes hooks with the other.
   const platform = Platform.OS === "ios" ? "ios" : Platform.OS === "android" ? "android" : "web";
   if (!googleAuthConfigured(platform, googleClientConfig)) {
-    return (
-      <Pressable
-        disabled={props.busy}
-        onPress={() => {
-          props.setError(undefined);
-          props.onSelectEmail();
-        }}
-        style={[styles.googleButton, props.active && styles.googleButtonActive, props.busy && styles.disabled]}
-      >
-        <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 邮箱</Text>
-      </Pressable>
-    );
+    return <GoogleEmailFallback {...props} />;
   }
   return <ConfiguredGoogleSignIn {...props} />;
 }
 
 function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
   const { onAuthenticated, setBusy, setError } = props;
+  // R15.29: this component is keyed on isConfigured by the slot, so we
+  // either always have a config (mounted under "cfg") or always render
+  // the unconfigured fallback (mounted under "plain"). useAuthRequest is
+  // only called when the config is valid.
   const [request, response, promptAsync] = Google.useAuthRequest({
     ...googleClientConfig,
     scopes: ["openid", "profile", "email"],
@@ -484,6 +513,9 @@ function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
     }
   }, [onAuthenticated, response, setBusy, setError]);
 
+  // If we got here but the config is not actually valid, the useAuthRequest
+  // above will have already thrown — so the only way to reach this line is
+  // when Google is configured. Render the "press to start auth" button.
   return (
     <Pressable
       disabled={props.busy || !request}
@@ -499,6 +531,24 @@ function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
       style={[styles.googleButton, props.active && styles.googleButtonActive, (props.busy || !request) && styles.disabled]}
     >
       <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 继续</Text>
+    </Pressable>
+  );
+}
+
+// R15.29: when Google is not configured, render a fallback "use Google
+// email" entry. This is a separate component (NOT a branch inside the
+// hooks-using ConfiguredGoogleSignIn) so hook count stays 0.
+function GoogleEmailFallback(props: GoogleSignInProps): React.JSX.Element {
+  return (
+    <Pressable
+      disabled={props.busy}
+      onPress={() => {
+        props.setError(undefined);
+        props.onSelectEmail();
+      }}
+      style={[styles.googleButton, props.active && styles.googleButtonActive, props.busy && styles.disabled]}
+    >
+      <Text style={styles.googleText}>G</Text><Text style={styles.googleLabel}>使用 Google 邮箱</Text>
     </Pressable>
   );
 }
