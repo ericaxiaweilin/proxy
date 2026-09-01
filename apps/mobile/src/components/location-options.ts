@@ -65,6 +65,14 @@ export const DEFAULT_LOCATION: PresetLocation = {
 export const GRID_W = 10;
 export const GRID_H = 10;
 
+// GridCoord: 城市网格里的一个 cell。MapCanvas 内部用 (lat, lng)
+// 操作，但 sheet / store / picker 都用这个 grid coord 存储 + 显示
+// ("(3, 4) · 河内" 比 "21.0285, 105.8512" 对用户友好)。
+export interface GridCoord {
+  x: number; // 0..GRID_W
+  y: number; // 0..GRID_H
+}
+
 // cityBounds 描述"自定义坐标"怎么从 grid coord 映射到现实 (lat, lng)。
 // 这是粗略的城市中心 + 半径估算 — P6 阶段不接 OSM/Geocoding，
 // 但要保证"我放在还剑湖附近" 显示的坐标看起来在河内，不能是

@@ -8,7 +8,8 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
-import { MapCanvas, type GridCoord } from "./map-canvas";
+import { MapCanvas } from "./map-canvas";
+import type { GridCoord } from "./location-options";
 import { color } from "../theme";
 import {
   CITY_BOUNDS,
