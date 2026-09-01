@@ -25,6 +25,15 @@ func main() {
 		log.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
+	var currentRole, reviewTableOwner string
+	var canAssumeOperator bool
+	if err := pool.QueryRow(ctx, `
+		SELECT current_user, pg_get_userbyid(c.relowner),
+		       pg_has_role(current_user, 'proxy_api_operator', 'MEMBER')
+		FROM pg_class c WHERE c.oid='media.media_review_decisions'::regclass`).Scan(&currentRole, &reviewTableOwner, &canAssumeOperator); err != nil {
+		log.Fatalf("database role boundary: %v", err)
+	}
+	fmt.Printf("database_role=%q review_table_owner=%q can_assume_operator=%t\n", currentRole, reviewTableOwner, canAssumeOperator)
 
 	checks := []struct {
 		name  string
@@ -40,7 +49,8 @@ func main() {
 		{"invalid_media_processing_rows", `SELECT count(*) FROM media.media_assets WHERE processing_status NOT IN ('UPLOADING','PROCESSING','READY','FAILED')`},
 		{"observer_raw_table_privileges", `SELECT count(*) FROM (VALUES
 			('scene.scenes'), ('scene.invitations'), ('contribution.contributions'),
-			('supply.agent_profiles'), ('supply.availability_windows')) AS raw(table_name)
+			('supply.agent_profiles'), ('supply.availability_windows'),
+			('media.media_assets'), ('media.media_review_decisions'), ('localnet.posts')) AS raw(table_name)
 			WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname='proxy_api_observer')
 			  AND has_table_privilege('proxy_api_observer', raw.table_name, 'SELECT')`},
 	}
