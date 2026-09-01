@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
   },
   hudCity: { color: color.ink, fontSize: 12, fontWeight: "800" },
   hudCoord: { color: color.muted, fontSize: 11, fontWeight: "500", marginTop: 1 },
-  hudHint: { color: color.muted, fontSize: 10, fontWeight: "500", marginTop: 2 },
+  hudHint: { color: color.muted, fontSize: 11, fontWeight: "500", marginTop: 2 },
   androidFallback: {
     alignItems: "center",
     backgroundColor: "#F2EDE3",
