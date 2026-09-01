@@ -47,6 +47,18 @@ export function mapEngagementError(error: unknown, fallback: string): string {
     ) {
       return "访客不能点赞 / 回复 / 举报，请登录后重试。";
     }
+    // R15.38.4: server 返回 500 (e.g. command_transaction_failed) 时
+    //   engagement-client 抛 EngagementProtocolError 包了 status+body。
+    //   这不是 "网络问题" — 是 server 内部事务挂了。告诉用户明确, 别
+    //   再说 "检查连接" (误导)。
+    if (msg.includes("command_transaction_failed") || msg.includes("(status=5")) {
+      return "服务器处理出错，请稍后重试或反馈给我们。";
+    }
+    // R15.38.4: 其他解析失败 (e.g. body 不是 commandResult 格式) 也
+    //   几乎都是 server 端 bug, 不是说用户网不行。
+    if (msg.includes("malformed")) {
+      return "服务器响应异常，请稍后重试。";
+    }
   }
   return fallback;
 }

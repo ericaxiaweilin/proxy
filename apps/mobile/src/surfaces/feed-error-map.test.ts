@@ -52,6 +52,17 @@ describe("mapEngagementError", () => {
     expect(mapEngagementError(err, fallback)).toContain("重新登录");
   });
 
+  it("maps server 500 'command_transaction_failed' to a server-error hint (R15.38.4)", () => {
+    // R15.38.4: server 返回 500 + 非 commandResult 格式的 body
+    //   {"error":"command_transaction_failed"}, engagement-client 抛
+    //   EngagementProtocolError, 文案里含 "command_transaction_failed"。
+    //   之前的 mapEngagementError 走到 fallback “检查连接” — 误导。
+    const err = new Error("engagement command response was malformed (status=500): {\"error\":\"command_transaction_failed\"}");
+    const result = mapEngagementError(err, fallback);
+    expect(result).toContain("服务器");
+    expect(result).not.toContain("请检查连接");
+  });
+
   it("falls back to original message for unknown errors", () => {
     expect(mapEngagementError(new Error("network timeout"), fallback)).toBe(fallback);
   });
