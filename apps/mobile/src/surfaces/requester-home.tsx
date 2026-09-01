@@ -262,15 +262,9 @@ export function RequesterHome({
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
-      {/* R15.13 P5：本地范围（河内 · 还剑湖附近 等）现在统一由 app-shell
-          顶部 chrome (LocationContext) 单独呈现，且“切换⌄”真的能点。重复
-          一份 location 文本会造成“地址切换不了”错觉且两份会不同步。
-          Home Top 收紧为只负责问候。 */}
-      <View style={styles.homeTop}>
-        <View style={styles.homeTopCopy}>
-          <Text style={styles.homeTopTitle}>今天想做什么？</Text>
-        </View>
-      </View>
+      {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
+          用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
+          不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
 
       {/* R15.34: 推荐人 mode 切换 — 单行路由。
           6 个 SCENE_TOOLS + 2 个用户列出的额外场景（翻译、陪诊）。
@@ -539,19 +533,9 @@ const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 13 },
 
-  // 基线 .r157HomeTop：flex space-between。
-  homeTop: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 7
-  },
-  homeTopCopy: { flex: 1 },
-  homeTopTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 34 },
-  // R15.13 P5：homeTopLoc 样式保留但未使用 — LocationContext 是 single
-  // source of truth。见上文 comment。
-  homeTopLoc: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
-
+  // R15.35: 移除 "今天想做什么？" 标题相关样式（homeTop / homeTopCopy /
+  // homeTopTitle / homeTopLoc 都已无使用点）。直接让 mode chips 紧接
+  // 顶部 LocationContext 出现，不再需要招招呼局。
   // 基线 .sectionhead：margin-top 10；b 12 / span 9。
   sectionHead: {
     alignItems: "flex-end",
@@ -623,7 +607,7 @@ const styles = StyleSheet.create({
   //   走共享 FilterChipRail (见 components/filter-chip-rail.tsx)。
   //   这里只保留外层 marginTop。FilterChipRail 内部已带 PanResponder
   //   隔离外层 PAGE_SEQUENCE 切页。
-  recommendModes: { marginTop: 16 },
+  recommendModes: { marginTop: 4 },
 
   // R15.34: 推荐人 section 头
   peopleHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginTop: 18, marginBottom: 12 },
