@@ -104,3 +104,29 @@ func (r *VoucherRepository) ExpireVouchers(ctx context.Context, actorID string, 
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `UPDATE voucher.vouchers SET status='EXPIRED', version=version+1, updated_at=now() WHERE actor_id=$1 AND status='AVAILABLE' AND valid_until < $2`, actorID, today)
 	return err
 }
+
+func (r *VoucherRepository) CreateRedemption(ctx context.Context, red voucher.Redemption) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO voucher.redemptions (redemption_id, voucher_id, actor_id, code, expires_at, used)
+		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (redemption_id) DO NOTHING`,
+		red.ID, red.VoucherID, red.ActorID, red.Code, red.ExpiresAt, red.Used)
+	return err
+}
+
+func (r *VoucherRepository) GetRedemption(ctx context.Context, redemptionID string) (*voucher.Redemption, bool, error) {
+	var red voucher.Redemption
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT redemption_id, voucher_id, actor_id, code, expires_at, used
+		FROM voucher.redemptions WHERE redemption_id=$1`, redemptionID).Scan(
+		&red.ID, &red.VoucherID, &red.ActorID, &red.Code, &red.ExpiresAt, &red.Used)
+	if err != nil {
+		return nil, false, nil
+	}
+	return &red, true, nil
+}
+
+func (r *VoucherRepository) UpdateRedemption(ctx context.Context, red voucher.Redemption) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE voucher.redemptions SET used=$1 WHERE redemption_id=$2`, red.Used, red.ID)
+	return err
+}

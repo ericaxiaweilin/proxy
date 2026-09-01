@@ -52,7 +52,7 @@ type Funding struct {
 	Merchant int `json:"merchantFunding"`
 }
 
-type redemption struct {
+type Redemption struct {
 	ID        string
 	VoucherID string
 	ActorID   string
@@ -67,6 +67,9 @@ type Repository interface {
 	UpsertVoucher(ctx context.Context, actorID string, v Voucher) error
 	EnsureDefaults(ctx context.Context, actorID string) error
 	ExpireVouchers(ctx context.Context, actorID string, today string) error
+	CreateRedemption(ctx context.Context, r Redemption) error
+	GetRedemption(ctx context.Context, redemptionID string) (*Redemption, bool, error)
+	UpdateRedemption(ctx context.Context, r Redemption) error
 }
 
 // Service is currently an in-memory P0 adapter. Its command contract is
@@ -75,18 +78,18 @@ type Repository interface {
 type Service struct {
 	mu          sync.Mutex
 	vouchers    map[string]*Voucher // actor|voucherId -> projection (fallback when repo==nil)
-	redemptions map[string]*redemption
+	redemptions map[string]*Redemption
 	clock       func() time.Time
 	sequence    int
 	repo        Repository
 }
 
 func New() *Service {
-	return &Service{vouchers: make(map[string]*Voucher), redemptions: make(map[string]*redemption), clock: func() time.Time { return time.Now().UTC() }}
+	return &Service{vouchers: make(map[string]*Voucher), redemptions: make(map[string]*Redemption), clock: func() time.Time { return time.Now().UTC() }}
 }
 
 func NewWithRepository(repo Repository) *Service {
-	return &Service{vouchers: make(map[string]*Voucher), redemptions: make(map[string]*redemption), clock: func() time.Time { return time.Now().UTC() }, repo: repo}
+	return &Service{vouchers: make(map[string]*Voucher), redemptions: make(map[string]*Redemption), clock: func() time.Time { return time.Now().UTC() }, repo: repo}
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -193,7 +196,10 @@ func (s *Service) openRedemption(ctx context.Context, e command.Envelope) comman
 	}
 	s.sequence++
 	now := s.clock()
-	r := &redemption{ID: fmt.Sprintf("redemption_%s_%d", v.ID, s.sequence), VoucherID: v.ID, ActorID: e.Actor.ID, Code: fmt.Sprintf("PV-%04d-%02d", now.Unix()%10000, s.sequence%100), ExpiresAt: now.Add(60 * time.Second)}
+	r := &Redemption{ID: fmt.Sprintf("redemption_%s_%d", v.ID, s.sequence), VoucherID: v.ID, ActorID: e.Actor.ID, Code: fmt.Sprintf("PV-%04d-%02d", now.Unix()%10000, s.sequence%100), ExpiresAt: now.Add(60 * time.Second)}
+	if s.repo != nil {
+		_ = s.repo.CreateRedemption(ctx, *r)
+	}
 	s.redemptions[r.ID] = r
 	return accepted(e, "VoucherRedemption", r.ID, "ACTIVE", map[string]any{
 		"voucher":    *v,
@@ -208,6 +214,13 @@ func (s *Service) confirmRedemption(ctx context.Context, e command.Envelope) com
 		return reject(e, "INVALID_REDEMPTION_REF", "voucher.invalid_redemption_ref")
 	}
 	r, ok := s.redemptions[p.RedemptionID]
+	if !ok && s.repo != nil {
+		if rr, ok2, _ := s.repo.GetRedemption(ctx, p.RedemptionID); ok2 {
+			r, ok = rr, true
+			// cache for in-memory fallback
+			s.redemptions[r.ID] = r
+		}
+	}
 	if !ok || r.ActorID != e.Actor.ID {
 		return reject(e, "REDEMPTION_NOT_FOUND", "voucher.redemption_not_found")
 	}
@@ -222,6 +235,9 @@ func (s *Service) confirmRedemption(ctx context.Context, e command.Envelope) com
 		return reject(e, "VOUCHER_NOT_AVAILABLE", "voucher.not_available")
 	}
 	r.Used = true
+	if s.repo != nil {
+		_ = s.repo.UpdateRedemption(ctx, *r)
+	}
 	v.Status, v.Version = "REDEEMED", v.Version+1
 	s.upsertWithContext(ctx, e.Actor.ID, *v)
 	return accepted(e, "Voucher", v.ID, "REDEEMED", map[string]any{
