@@ -15,7 +15,8 @@ import type { CreatePostPayload, FeedPost } from "@proxy/contracts";
 import {
   type LocalNetClient
 } from "./localnet-client";
-import { type MediaClient } from "./media-client";
+import { mediaTypeForMime } from "./media-classify";
+import type { MediaClient } from "./media-client";
 import type { DraftMediaItem } from "./composer-media";
 import { assembleComposerBody, parsePollDurationMs, shouldSerializePoll } from "./composer-body";
 import type { AnyLocation } from "./components/location-picker-sheet";
@@ -54,11 +55,11 @@ export async function uploadPendingMedia(
   return Promise.all(
     pending.map(async (item) => {
       try {
-        const isAudio = item.image.mimeType?.startsWith("audio/") ?? false;
+        const mediaType = mediaTypeForMime(item.image.mimeType);
         const uploaded = await mediaClient.uploadMedia({
           ...item.image,
-          mediaType: isAudio ? "AUDIO" : "IMAGE",
-          defaultMime: isAudio ? "audio/mp4" : "image/jpeg"
+          mediaType,
+          defaultMime: mediaType === "AUDIO" ? "audio/mp4" : mediaType === "VIDEO" ? "video/mp4" : "image/jpeg"
         }, {
           ...(item.uploadSession ? { resumeSession: item.uploadSession } : {}),
           onProgress: (progress) => onProgress?.(item.localId, progress)

@@ -59,7 +59,10 @@ function onImageLoad(
   }
 }
 
-type ItemWithHint = FeedMediaItem & { compositionHint?: MediaCompositionHint | undefined };
+type ItemWithHint = FeedMediaItem & {
+  compositionHint?: MediaCompositionHint | undefined;
+  animated?: boolean | undefined;
+};
 
 type Props = {
   items: FeedMediaItem[];
@@ -304,7 +307,9 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
   // 避免 SINGLE / RAIL / WALL 三个渲染路径走出三套选择逻辑。
   const { width: viewportWidth } = useWindowDimensions();
   const selection = selectVariantForViewport(item, viewportWidth);
-  const uri = resolveUrl(selection.url ?? "");
+  // Animated GIF must use the immutable original playback object. Feed JPEG
+  // variants are intentionally static first-frame thumbnails.
+  const uri = resolveUrl(item.animated && item.playbackUrl ? item.playbackUrl : selection.url ?? "");
   const frameBackground = resolveFrameBackground(item.dominantColorHex);
   // 【fix 2026-08-26】SinglePostImage 走 contain（expo-image contentFit="contain" 写死），
   // contain 模式下图片已完整居中显示，不传 contentPosition。

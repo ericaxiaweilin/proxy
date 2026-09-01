@@ -5,27 +5,23 @@ import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./media-upload-retry";
 
-export type UploadableImage = {
-  uri: string;
-  fileName?: string;
-  mimeType?: string;
-  width: number;
-  height: number;
-};
+// 纯逻辑/类型已抽到 media-classify.ts（零原生依赖，供 Vitest 单测使用）。
+// 这里 re-export 保持既有 import 路径兼容。
+import {
+  isAnimatedImageMime,
+  mediaTypeForMime,
+  type ResumableMediaUploadSession,
+  type UploadMediaType,
+  type UploadableImage
+} from "./media-classify";
+export { isAnimatedImageMime, mediaTypeForMime } from "./media-classify";
+export type { ResumableMediaUploadSession, UploadMediaType, UploadableImage } from "./media-classify";
 
 export type MediaUploadOptions = {
   onProgress?: (progress: number) => void;
   onSession?: (session: ResumableMediaUploadSession) => void;
   resumeSession?: ResumableMediaUploadSession;
   signal?: AbortSignal;
-};
-
-export type ResumableMediaUploadSession = {
-  mediaAssetId: string;
-  storageKey: string;
-  uploadUrl: string;
-  offset: number;
-  totalBytes: number;
 };
 
 const UPLOAD_CHUNK_BYTES = 1024 * 1024;
@@ -57,11 +53,11 @@ export class MediaClient {
   }
 
   /**
-   * 通用媒体上传（IMAGE / AUDIO）。走同一条断点续传链路：
+   * 通用媒体上传（IMAGE / VIDEO / AUDIO）。走同一条断点续传链路：
    * CreateMediaAsset → 分块 PUT（SHA256 校验）→ CompleteMediaUpload → ProcessMediaAsset → 轮询 READY。
    * 音频由服务端 ffprobe 复核时长（≤30s），客户端上限只是体验层。
    */
-  public async uploadMedia(file: UploadableImage & { mediaType: "IMAGE" | "AUDIO"; durationMs?: number; defaultMime?: string }, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
+  public async uploadMedia(file: UploadableImage & { mediaType: UploadMediaType; durationMs?: number; defaultMime?: string }, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
     const mimeType = file.mimeType || file.defaultMime || "application/octet-stream";
     const accessToken = await this.input.authClient.getAccessToken();
     if (!accessToken) throw new Error("上传媒体前需要有效会话");
@@ -71,7 +67,7 @@ export class MediaClient {
     if (!totalBytes || totalBytes <= 0) throw new Error(file.mediaType === "AUDIO" ? "录音为空，请重新录制" : "所选照片为空或大小不可读");
 
     const createSession = async (): Promise<ResumableMediaUploadSession> => {
-      const storageKey = `${this.nextId(file.mediaType === "AUDIO" ? "audio" : "image")}${extensionFor(mimeType)}`;
+      const storageKey = `${this.nextId(file.mediaType.toLowerCase())}${extensionFor(mimeType)}`;
       const created = await this.command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, {
         mediaType: file.mediaType,
         originalStorageKey: storageKey,
@@ -250,6 +246,9 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 function extensionFor(mimeType: string): string {
+  if (mimeType === "image/gif") return ".gif";
+  if (mimeType === "image/webp") return ".webp";
+  if (mimeType === "image/avif") return ".avif";
   if (mimeType === "image/png") return ".png";
   if (mimeType === "image/heic" || mimeType === "image/heif") return ".heic";
   if (mimeType.startsWith("audio/")) {
@@ -257,6 +256,11 @@ function extensionFor(mimeType: string): string {
     if (mimeType === "audio/wav" || mimeType === "audio/x-wav") return ".wav";
     if (mimeType === "audio/mpeg") return ".mp3";
     return ".m4a";
+  }
+  if (mimeType.startsWith("video/")) {
+    if (mimeType === "video/quicktime") return ".mov";
+    if (mimeType === "video/webm") return ".webm";
+    return ".mp4";
   }
   return ".jpg";
 }

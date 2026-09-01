@@ -1,4 +1,4 @@
-import type { ResumableMediaUploadSession, UploadableImage } from "./media-client";
+import type { ResumableMediaUploadSession, UploadableImage } from "./media-classify";
 
 export const MAX_ALT_LENGTH = 280;
 

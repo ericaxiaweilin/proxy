@@ -17,8 +17,14 @@ const snapshotFile = new File(draftDirectory, "draft-v1.json");
 
 export async function retainComposerImage(item: DraftMediaItem): Promise<DraftMediaItem> {
   draftDirectory.create({ idempotent: true, intermediates: true });
-  const extension = item.image.mimeType === "image/png" ? ".png"
+  const extension = item.image.mimeType === "image/gif" ? ".gif"
+    : item.image.mimeType === "image/webp" ? ".webp"
+    : item.image.mimeType === "image/avif" ? ".avif"
+    : item.image.mimeType === "image/png" ? ".png"
     : item.image.mimeType === "image/heic" || item.image.mimeType === "image/heif" ? ".heic"
+      : item.image.mimeType === "video/quicktime" ? ".mov"
+      : item.image.mimeType === "video/webm" ? ".webm"
+      : item.image.mimeType?.startsWith("video/") ? ".mp4"
       : ".jpg";
   const retained = new File(draftDirectory, `${item.localId}${extension}`);
   await new File(item.image.uri).copy(retained, { overwrite: true });

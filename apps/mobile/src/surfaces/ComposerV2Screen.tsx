@@ -59,6 +59,7 @@ import {
   retainComposerImage,
   writeComposerDraft
 } from "../expo-composer-draft-store";
+import { mediaTypeForMime } from "../media-client";
 import { color } from "../theme";
 import { ProxyIcon } from "../components/proxy-icon";
 import { LocationPickerSheet, type AnyLocation, DEFAULT_LOCATION } from "../components/location-picker-sheet";
@@ -388,11 +389,11 @@ export function ComposerV2Screen({
         const controller = new AbortController();
         uploadControllersRef.current.set(item.localId, controller);
         try {
-          const isAudio = item.image.mimeType?.startsWith("audio/") ?? false;
+          const mediaType = mediaTypeForMime(item.image.mimeType);
           const uploaded = await mediaClient.uploadMedia({
             ...item.image,
-            mediaType: isAudio ? "AUDIO" : "IMAGE",
-            defaultMime: isAudio ? "audio/mp4" : "image/jpeg"
+            mediaType,
+            defaultMime: mediaType === "AUDIO" ? "audio/mp4" : mediaType === "VIDEO" ? "video/mp4" : "image/jpeg"
           }, {
             signal: controller.signal,
             ...(item.uploadSession ? { resumeSession: item.uploadSession } : {}),

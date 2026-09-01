@@ -1,5 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { isRestartableUploadSessionStatus, uploadOriginalWithRetry } from "./media-upload-retry";
+import { mediaTypeForMime } from "./media-classify";
+
+describe("composer media MIME routing", () => {
+  it("routes GIF through the image pipeline without flattening its MIME", () => {
+    expect(mediaTypeForMime("image/gif")).toBe("IMAGE");
+  });
+
+  it("routes video and audio to their native server pipelines", () => {
+    expect(mediaTypeForMime("video/mp4")).toBe("VIDEO");
+    expect(mediaTypeForMime("video/quicktime")).toBe("VIDEO");
+    expect(mediaTypeForMime("audio/mp4")).toBe("AUDIO");
+  });
+});
 
 describe("original media upload retry", () => {
   it("restarts expired or conflicting resumable sessions from the retained original", () => {
