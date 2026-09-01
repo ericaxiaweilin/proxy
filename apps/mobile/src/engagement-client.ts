@@ -104,6 +104,15 @@ export class EngagementClient {
 
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
     const session = await this.input.secureSessionStore.read();
+    // R15.38.5 DEBUG: 看清楚 keychain 里到底是设是设
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[proxy.R15.38.5.DEBUG.engagement] requireSession session=${session ? "present" : "absent"} ` +
+        `principal=${session?.principal ? `${session.principal.type}:${session.principal.id}` : "absent"} ` +
+        `serverSession=${session?.serverSession} signedOut=${session?.signedOut ?? false}`
+      );
+    }
     // R15.38: 三种 "不能写" 状态都抛 OfflineFallbackSessionError, 让
     //   feed 表面能统一识别 "访客不能 X" 这个提示, 不再说 "请检查连接"。
     //   - 根本没 session (fresh guest) — keychain 完全空

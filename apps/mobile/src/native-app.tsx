@@ -743,8 +743,9 @@ async function restoreNativeShell(): Promise<AppShellState> {
       // kill / re-launch. Production builds drop this branch entirely.
       if (restored.state.status === "AUTHENTICATED" && restored.session) {
         const principalId = restored.session.principal?.id ?? restored.session.userAccountId;
+        const signedOut = restored.session.signedOut ? " signedOut=true" : "";
         console.log(
-          `[proxy.smoke] keychain=present principalId=${principalId} sessionId=${restored.session.auth.sessionId}`
+          `[proxy.smoke] keychain=present principalId=${principalId} sessionId=${restored.session.auth.sessionId}${signedOut}`
         );
       } else {
         console.log(`[proxy.smoke] keychain=absent status=${restored.state.status}`);
