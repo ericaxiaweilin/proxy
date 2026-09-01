@@ -1398,7 +1398,7 @@ export function MeSurface({
 
   // 轻 CRM 关系图对 BUSINESS 也开放，优先于 R21 商家页
   if (subPage?.route === "friendcrm") {
-    return <FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} />;
+    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
   }
   // R21 是商家“我的”的独立产品页面，不与旧的个人菜单卡片语法混用。
   // 必须在所有 hooks 之后再分支，避免身份切换时破坏 hook 顺序。
@@ -1777,11 +1777,11 @@ export function MeSurface({
 
     // 个人轻 CRM：接线 proxy_add_friend_detail.html 的 5 种加好友原型，不再是静态宫格
     if (subPage.route === "addfriend") {
-      return <FriendCrmSurface initialView="ADD_FRIEND" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} />;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="ADD_FRIEND" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
     }
 
     if (subPage.route === "friendcrm") {
-      return <FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} />;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
     }
 
     if (subPage.route === "available") {
