@@ -53,6 +53,13 @@ func main() {
 			('media.media_assets'), ('media.media_review_decisions'), ('localnet.posts')) AS raw(table_name)
 			WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname='proxy_api_observer')
 			  AND has_table_privilege('proxy_api_observer', raw.table_name, 'SELECT')`},
+		{"orphan_post_media_assets", `SELECT count(*) FROM localnet.post_media pm LEFT JOIN media.media_assets m ON m.media_asset_id=pm.media_asset_id WHERE m.media_asset_id IS NULL`},
+		{"missing_post_media_json_assets", `SELECT count(*) FROM localnet.posts p CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(p.media_refs)='array' THEN p.media_refs ELSE '[]'::jsonb END) ref LEFT JOIN media.media_assets m ON m.media_asset_id=ref->>'mediaAssetId' WHERE COALESCE(ref->>'mediaAssetId','')<>'' AND m.media_asset_id IS NULL`},
+		{"missing_post_media_projection_rows", `SELECT count(*) FROM localnet.posts p CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(p.media_refs)='array' THEN p.media_refs ELSE '[]'::jsonb END) ref JOIN media.media_assets m ON m.media_asset_id=ref->>'mediaAssetId' LEFT JOIN localnet.post_media pm ON pm.post_id=p.id AND pm.media_asset_id=m.media_asset_id WHERE pm.post_id IS NULL`},
+		{"orphan_post_reactions", `SELECT count(*) FROM engagement.reactions e LEFT JOIN localnet.posts p ON p.id=e.post_id WHERE p.id IS NULL`},
+		{"orphan_post_replies", `SELECT count(*) FROM engagement.replies e LEFT JOIN localnet.posts p ON p.id=e.post_id WHERE p.id IS NULL`},
+		{"orphan_post_reposts", `SELECT count(*) FROM engagement.reposts e LEFT JOIN localnet.posts p ON p.id=e.post_id WHERE p.id IS NULL`},
+		{"orphan_post_bookmarks", `SELECT count(*) FROM engagement.bookmarks e LEFT JOIN localnet.posts p ON p.id=e.post_id WHERE p.id IS NULL`},
 	}
 	unsafe := false
 	for _, check := range checks {
