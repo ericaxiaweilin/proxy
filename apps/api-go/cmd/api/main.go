@@ -119,7 +119,7 @@ func main() {
 	facetService := facet.New()
 	facetService.SeedDefaults()
 	experienceService := experience.New()
-	_ = voucher.New() // declared in cmd/api/main; voucher wiring lands in the dedicated voucher push (tracked separately)
+	voucherService := voucher.New()
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -221,6 +221,7 @@ func main() {
 		facetService = facet.NewWithRepository(postgres.NewFacetRepository(pool))
 		facetService.SeedDefaults()
 		experienceService = experience.NewWithRepository(postgres.NewExperienceRepository(pool))
+		voucherService = voucher.NewWithRepository(postgres.NewVoucherRepository(pool))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -240,6 +241,7 @@ func main() {
 	server.Scene = sceneService
 	server.Facet = facetService
 	server.Experience = experienceService
+	server.Voucher = voucherService
 	// Activity 域：启动幂等 seed 基线；DATABASE_URL 存在时写入持久仓储。
 	activityService.SeedDefaults()
 	server.Activity = activityService

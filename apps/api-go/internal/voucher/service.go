@@ -61,19 +61,32 @@ type redemption struct {
 	Used      bool
 }
 
+type Repository interface {
+	ListVouchers(ctx context.Context, actorID string) ([]Voucher, error)
+	GetVoucher(ctx context.Context, actorID, voucherID string) (*Voucher, bool, error)
+	UpsertVoucher(ctx context.Context, actorID string, v Voucher) error
+	EnsureDefaults(ctx context.Context, actorID string) error
+	ExpireVouchers(ctx context.Context, actorID string, today string) error
+}
+
 // Service is currently an in-memory P0 adapter. Its command contract is
 // production-shaped (actor scoped, idempotent at the API boundary), so a
 // repository can replace this storage without changing the mobile protocol.
 type Service struct {
 	mu          sync.Mutex
-	vouchers    map[string]*Voucher // actor|voucherId -> projection
+	vouchers    map[string]*Voucher // actor|voucherId -> projection (fallback when repo==nil)
 	redemptions map[string]*redemption
 	clock       func() time.Time
 	sequence    int
+	repo        Repository
 }
 
 func New() *Service {
 	return &Service{vouchers: make(map[string]*Voucher), redemptions: make(map[string]*redemption), clock: func() time.Time { return time.Now().UTC() }}
+}
+
+func NewWithRepository(repo Repository) *Service {
+	return &Service{vouchers: make(map[string]*Voucher), redemptions: make(map[string]*redemption), clock: func() time.Time { return time.Now().UTC() }, repo: repo}
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -89,29 +102,29 @@ func (s *Service) Handle(e command.Envelope) command.Result {
 	return s.HandleContext(context.Background(), e)
 }
 
-func (s *Service) HandleContext(_ context.Context, e command.Envelope) command.Result {
+func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "VOUCHER_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_REAUTH", "voucher.actor_required", nil)
 	}
-	s.ensureDefaults(e.Actor.ID)
-	s.expire(e.Actor.ID)
+	s.ensureDefaultsWithContext(ctx, e.Actor.ID)
+	s.expireWithContext(ctx, e.Actor.ID)
 	switch e.CommandType {
 	case "ListVouchers":
-		return s.list(e)
+		return s.list(ctx, e)
 	case "GetVoucher":
-		return s.get(e)
+		return s.get(ctx, e)
 	case "OpenVoucherRedemption":
-		return s.openRedemption(e)
+		return s.openRedemption(ctx, e)
 	case "ConfirmVoucherRedemption":
-		return s.confirmRedemption(e)
+		return s.confirmRedemption(ctx, e)
 	case "GetVoucherSettlement":
-		return s.settlement(e)
+		return s.settlement(ctx, e)
 	case "SettleVoucher":
-		return s.settle(e)
+		return s.settle(ctx, e)
 	case "CreateVoucher":
-		return s.create(e)
+		return s.create(ctx, e)
 	default:
 		return command.Rejected(e, "VOUCHER_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "voucher.unsupported_command", nil)
 	}
@@ -136,13 +149,8 @@ type createPayload struct {
 	PerPersonLimit   int    `json:"perPersonLimit"`
 }
 
-func (s *Service) list(e command.Envelope) command.Result {
-	items := make([]Voucher, 0)
-	for prefix, voucher := range s.vouchers {
-		if strings.HasPrefix(prefix, e.Actor.ID+"|") {
-			items = append(items, *voucher)
-		}
-	}
+func (s *Service) list(ctx context.Context, e command.Envelope) command.Result {
+	items := s.listWithContext(ctx, e.Actor.ID)
 	// Product order is intentional: the P0 wallet introduces the common
 	// Coffee → Experience → Activity families in the same order as the frozen
 	// prototype, rather than leaking internal voucher IDs into presentation.
@@ -159,24 +167,24 @@ func (s *Service) list(e command.Envelope) command.Result {
 	})
 }
 
-func (s *Service) get(e command.Envelope) command.Result {
+func (s *Service) get(ctx context.Context, e command.Envelope) command.Result {
 	var p voucherRef
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok := s.voucher(e.Actor.ID, p.VoucherID)
+	v, ok := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
 	return accepted(e, "Voucher", v.ID, v.Status, map[string]any{"voucher": *v})
 }
 
-func (s *Service) openRedemption(e command.Envelope) command.Result {
+func (s *Service) openRedemption(ctx context.Context, e command.Envelope) command.Result {
 	var p voucherRef
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok := s.voucher(e.Actor.ID, p.VoucherID)
+	v, ok := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
@@ -194,7 +202,7 @@ func (s *Service) openRedemption(e command.Envelope) command.Result {
 	})
 }
 
-func (s *Service) confirmRedemption(e command.Envelope) command.Result {
+func (s *Service) confirmRedemption(ctx context.Context, e command.Envelope) command.Result {
 	var p redemptionRef
 	if !decode(e.Payload, &p) || p.RedemptionID == "" {
 		return reject(e, "INVALID_REDEMPTION_REF", "voucher.invalid_redemption_ref")
@@ -209,24 +217,25 @@ func (s *Service) confirmRedemption(e command.Envelope) command.Result {
 	if !s.clock().Before(r.ExpiresAt) {
 		return reject(e, "REDEMPTION_TOKEN_EXPIRED", "voucher.redemption_token_expired")
 	}
-	v, ok := s.voucher(e.Actor.ID, r.VoucherID)
+	v, ok := s.voucherWithContext(ctx, e.Actor.ID, r.VoucherID)
 	if !ok || v.Status != "AVAILABLE" {
 		return reject(e, "VOUCHER_NOT_AVAILABLE", "voucher.not_available")
 	}
 	r.Used = true
 	v.Status, v.Version = "REDEEMED", v.Version+1
+	s.upsertWithContext(ctx, e.Actor.ID, *v)
 	return accepted(e, "Voucher", v.ID, "REDEEMED", map[string]any{
 		"voucher": *v,
 		"receipt": map[string]any{"redemptionId": r.ID, "redeemedAt": s.clock().Format(time.RFC3339), "evidenceStatus": "MERCHANT_CONFIRMED"},
 	})
 }
 
-func (s *Service) settlement(e command.Envelope) command.Result {
+func (s *Service) settlement(ctx context.Context, e command.Envelope) command.Result {
 	var p voucherRef
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok := s.voucher(e.Actor.ID, p.VoucherID)
+	v, ok := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
@@ -241,12 +250,12 @@ func (s *Service) settlement(e command.Envelope) command.Result {
 	return accepted(e, "Voucher", v.ID, settlement, map[string]any{"voucher": *v, "states": []map[string]string{{"name": "REDEEMED", "status": map[bool]string{true: "COMPLETED", false: "PENDING"}[v.Status == "REDEEMED" || v.Status == "SETTLED"]}, {"name": "RISK_CHECK", "status": risk}, {"name": "SETTLEMENT", "status": settlement}}})
 }
 
-func (s *Service) settle(e command.Envelope) command.Result {
+func (s *Service) settle(ctx context.Context, e command.Envelope) command.Result {
 	var p voucherRef
 	if !decode(e.Payload, &p) || p.VoucherID == "" {
 		return reject(e, "INVALID_VOUCHER_REF", "voucher.invalid_ref")
 	}
-	v, ok := s.voucher(e.Actor.ID, p.VoucherID)
+	v, ok := s.voucherWithContext(ctx, e.Actor.ID, p.VoucherID)
 	if !ok {
 		return reject(e, "VOUCHER_NOT_FOUND", "voucher.not_found")
 	}
@@ -256,10 +265,11 @@ func (s *Service) settle(e command.Envelope) command.Result {
 	// This action is intentionally a local P0 simulator. Production settlement
 	// is a ledger-worker concern and is never controlled by the consumer UI.
 	v.Status, v.Version = "SETTLED", v.Version+1
+	s.upsertWithContext(ctx, e.Actor.ID, *v)
 	return accepted(e, "Voucher", v.ID, "SETTLED", map[string]any{"voucher": *v, "receipt": map[string]any{"settledAt": s.clock().Format(time.RFC3339), "settlementValue": v.SettlementValue}, "notice": "P0 模拟结算已完成；未创建真实支付、可提现余额或商家账本分录。"})
 }
 
-func (s *Service) create(e command.Envelope) command.Result {
+func (s *Service) create(ctx context.Context, e command.Envelope) command.Result {
 	var p createPayload
 	if !decode(e.Payload, &p) || !validFamily(p.Family) || p.DisplayValue <= 0 || p.Quantity <= 0 || p.ScopeName == "" || p.ValidFrom == "" || p.ValidUntil == "" {
 		return reject(e, "INVALID_VOUCHER_CREATE", "voucher.invalid_create")
@@ -270,7 +280,7 @@ func (s *Service) create(e command.Envelope) command.Result {
 	s.sequence++
 	id := fmt.Sprintf("issued_%s_%d", strings.ToLower(string(p.Family)), s.sequence)
 	v := &Voucher{ID: id, Family: p.Family, DisplayValue: p.DisplayValue, Currency: "VND", ScopeName: p.ScopeName, ScopeDetail: p.ScopeDetail, ValidFrom: p.ValidFrom, ValidUntil: p.ValidUntil, RedeemTimeWindow: p.RedeemTimeWindow, MinimumSpend: p.MinimumSpend, PerPersonLimit: p.PerPersonLimit, Status: "AVAILABLE", IssuerLabel: "当前经营主体", SettlementValue: p.DisplayValue * 60 / 100, Funding: Funding{Merchant: p.DisplayValue * 40 / 100, Creator: p.DisplayValue * 10 / 100, Proxy: p.DisplayValue * 10 / 100}, ReservationNeeded: p.Family != Coffee, Version: 1}
-	s.vouchers[s.key(e.Actor.ID, id)] = v
+	s.upsertWithContext(ctx, e.Actor.ID, *v)
 	return accepted(e, "VoucherIssue", id, "ISSUED", map[string]any{"voucher": *v, "issuedQuantity": p.Quantity, "estimatedBudget": p.DisplayValue * p.Quantity, "policy": map[string]bool{"cashConvertible": false, "withdrawable": false, "changeGiven": false, "canBuyVoucher": false, "transferable": false, "resaleAllowed": false}})
 }
 
@@ -297,9 +307,54 @@ func (s *Service) expire(actorID string) {
 		}
 	}
 }
+func (s *Service) ensureDefaultsWithContext(ctx context.Context, actorID string) {
+	if s.repo != nil {
+		_ = s.repo.EnsureDefaults(ctx, actorID)
+		_ = s.repo.ExpireVouchers(ctx, actorID, s.clock().Format("2006-01-02"))
+		return
+	}
+	s.ensureDefaults(actorID)
+	s.expire(actorID)
+}
+func (s *Service) expireWithContext(ctx context.Context, actorID string) {
+	if s.repo != nil {
+		_ = s.repo.ExpireVouchers(ctx, actorID, s.clock().Format("2006-01-02"))
+		return
+	}
+	s.expire(actorID)
+}
 func (s *Service) voucher(actorID, id string) (*Voucher, bool) {
 	v, ok := s.vouchers[s.key(actorID, id)]
 	return v, ok
+}
+func (s *Service) voucherWithContext(ctx context.Context, actorID, id string) (*Voucher, bool) {
+	if s.repo != nil {
+		if v, ok, _ := s.repo.GetVoucher(ctx, actorID, id); ok {
+			return v, true
+		}
+		return nil, false
+	}
+	return s.voucher(actorID, id)
+}
+func (s *Service) listWithContext(ctx context.Context, actorID string) []Voucher {
+	if s.repo != nil {
+		if items, err := s.repo.ListVouchers(ctx, actorID); err == nil {
+			return items
+		}
+	}
+	items := make([]Voucher, 0)
+	for prefix, voucher := range s.vouchers {
+		if strings.HasPrefix(prefix, actorID+"|") {
+			items = append(items, *voucher)
+		}
+	}
+	return items
+}
+func (s *Service) upsertWithContext(ctx context.Context, actorID string, v Voucher) {
+	if s.repo != nil {
+		_ = s.repo.UpsertVoucher(ctx, actorID, v)
+	}
+	s.vouchers[s.key(actorID, v.ID)] = &v
 }
 func (s *Service) key(actorID, id string) string { return actorID + "|" + id }
 func validFamily(f Family) bool                  { return f == Coffee || f == Experience || f == Activity }
