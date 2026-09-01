@@ -1,27 +1,34 @@
-// R15.29: Real Apple Maps via MapKit (iOS) using react-native-maps.
-// The previous SVG-grid implementation served as a stand-in while
-// MapKit / react-native-maps was considered too heavy (prebuild + pod
-// install cost). Now that we want a real map for the Location Picker
-// (河内 / 胡志明 / 岘港 with real roads, water, POIs), the cost is
-// worth it — MapKit is free, requires no API key, and matches the
-// native iOS look users expect.
+// R15.29 + R15.30: Real Apple Maps (MapKit) with optional GPS positioning.
+// Previously the picker rendered a hand-drawn SVG grid (10×10 cells
+// faking 河内/胡志明/岘港). Now it's a real MapKit-backed MapView from
+// react-native-maps 1.29, and `expo-location` 17.x powers the
+// "use my location" button so users can snap the pin to where they
+// actually are without manual pan/zoom.
 //
-// Coordinate model is unchanged: the picker still passes a GridCoord
-// (0..10 × 0..10) and we project it to a real (lat, lng) via
-// `gridToLatLng(city, x, y)` from location-options. Tap/drag on the
-// real map fires back a new lat/lng, we invert it to GridCoord and
-// call onChange — the rest of the location-picker-sheet code keeps
-// working without changes.
+// Permission flow:
+//   - User taps "📍 用我当前位置" → `requestForegroundPermissionsAsync`
+//   - iOS shows the system dialog with `NSLocationWhenInUseUsageDescription`
+//   - If granted: `getCurrentPositionAsync` → snap MapView to that
+//     coordinate (accuracy: Balanced) and drop the pin there
+//   - If denied: inline hint, picker keeps working manually
+//   - showsUserLocation: true draws the blue dot in MapKit when the
+//     app already has permission (we don't double-prompt)
+//
+// Coordinate model is unchanged: the picker still uses GridCoord
+// (0..10 × 0..10) for storage and display, and a small latLngToGrid
+// function projects real-world coords back into a grid cell so the
+// rest of the picker / store / surface code keeps working without
+// change. Tap and pin-drag both commit on idle (throttled so
+// onChange doesn't fire every frame).
 //
 // Android: react-native-maps is installed but the provider is hard
 // pinned to Apple (PROVIDER_DEFAULT = MapKit on iOS, but on Android
-// that resolves to Google Maps and needs an API key). To avoid the
-// Android-side key requirement we don't export a working map on
-// Android yet; if you build for Android, drop in PROVIDER_GOOGLE
-// with your key. See R15.30+ for the Android setup.
+// that resolves to Google Maps and needs an API key). R15.30+ will
+// add Google Maps key for Android.
 import MapView, { Circle, Marker, type LatLng, type Region } from "react-native-maps";
+import * as Location from "expo-location";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { CITY_BOUNDS, GRID_W, GRID_H, type GridCoord, gridToLatLng } from "./location-options";
 import { color } from "../theme";
 
@@ -60,6 +67,26 @@ function latLngToGrid(city: string, lat: number, lng: number): GridCoord {
   return { x: gx, y: gy };
 }
 
+// Find the nearest city in CITY_BOUNDS to a given (lat, lng).
+// Used to auto-snap "use my location" to the closest supported city
+// so the user gets a sensible cityHint + zoom level even if they
+// happen to be a few km outside the hardcoded 12 km city span.
+function nearestCity(lat: number, lng: number): string {
+  let best = "河内";
+  let bestDist = Infinity;
+  for (const key of Object.keys(CITY_BOUNDS)) {
+    const b = CITY_BOUNDS[key]!;
+    const dx = (b.centerLng - lng) * 111 * Math.cos((lat * Math.PI) / 180);
+    const dy = (b.centerLat - lat) * 111;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) {
+      bestDist = d;
+      best = key;
+    }
+  }
+  return best;
+}
+
 export function MapCanvas({
   initialPin,
   radiusMeters,
@@ -90,6 +117,13 @@ export function MapCanvas({
   // Region state — tracks user pan/zoom so the HUD shows the current view
   const [region, setRegion] = useState<Region>(initialRegion);
 
+  // Map ref so we can imperatively animate to the user's GPS coord
+  const mapRef = useRef<MapView | null>(null);
+
+  // GPS button state
+  const [locBusy, setLocBusy] = useState<boolean>(false);
+  const [locError, setLocError] = useState<string | null>(null);
+
   // Sync external pin changes (e.g. radius change resets pin)
   useEffect(() => {
     setPin(initialPin);
@@ -114,9 +148,55 @@ export function MapCanvas({
     onChange(g);
   };
 
+  // "Use my location" — request foreground permission, then snap the
+  // map + pin to the user's coords. Errors fall through to inline
+  // `locError` so the user knows why nothing happened.
+  async function useMyLocation(): Promise<void> {
+    if (locBusy) return;
+    setLocError(null);
+    setLocBusy(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setLocError("未授权定位 — 在 iOS 设置 → Proxy → 位置 里开"  );
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced
+      });
+      const { latitude, longitude } = pos.coords;
+      // Snap to nearest known city (河内/胡志明/岘港). The grid
+      // model only knows those three, so a user somewhere in
+      // Đà Lạt would get rounded to the closest city bounds —
+      // acceptable for P7 since we still show the real (lat,lng)
+      // in the picker.
+      const targetCity = nearestCity(latitude, longitude);
+      const g = latLngToGrid(targetCity, latitude, longitude);
+      lastCommittedRef.current = g;
+      setPin(g);
+      onChange(g);
+      // Animate map camera to the GPS coord. We use a tight delta
+      // (~ 2 km) so the user sees the immediate neighborhood.
+      if (mapRef.current) {
+        mapRef.current.animateToRegion({
+          latitude,
+          longitude,
+          latitudeDelta: 0.02,
+          longitudeDelta: 0.02
+        }, 350);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "获取位置失败";
+      setLocError(msg);
+    } finally {
+      setLocBusy(false);
+    }
+  }
+
   return (
     <View testID={testID} style={styles.canvas}>
       <MapView
+        ref={mapRef}
         initialRegion={initialRegion}
         onRegionChangeComplete={setRegion}
         // Pin drag — drag-end commit
@@ -129,8 +209,9 @@ export function MapCanvas({
         rotateEnabled={false}
         scrollEnabled
         style={StyleSheet.absoluteFill}
-        // iOS-only MapKit polish: show the user's current location dot
-        // (we don't request permission here; OS shows the "?" if not granted)
+        // iOS-only MapKit polish: show the user's current location dot.
+        // iOS only shows this if the app already has WhenInUse auth;
+        // until then the dot is hidden (no "?" appears).
         showsUserLocation
         showsCompass={false}
         showsMyLocationButton={false}
@@ -153,13 +234,49 @@ export function MapCanvas({
           strokeWidth={1.5}
         />
       </MapView>
+
+      {/* Top-right: 用我当前位置 button. Sits on top of the map
+          (pointerEvents=box-none so taps fall through except on the
+          button itself). */}
+      <View pointerEvents="box-none" style={styles.topBar}>
+        <Pressable
+          accessibilityLabel="用我当前位置"
+          disabled={locBusy}
+          onPress={() => {
+            void useMyLocation();
+          }}
+          style={({ pressed }) => [styles.locButton, pressed && styles.locButtonPressed, locBusy && styles.locButtonBusy]}
+        >
+          {locBusy ? (
+            <ActivityIndicator color={color.white} size="small" />
+          ) : (
+            <Text style={styles.locButtonText}>📍 用我当前位置</Text>
+          )}
+        </Pressable>
+      </View>
+
+      {/* Error banner — shown when GPS request fails. Auto-clears
+          when the user retries (or pans / drags the pin). */}
+      {locError ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{locError}</Text>
+          <Pressable
+            accessibilityLabel="关闭错误提示"
+            onPress={() => setLocError(null)}
+            style={styles.errorClose}
+          >
+            <Text style={styles.errorCloseText}>×</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {/* HUD 角标：城市 + 当前 grid + 半径 */}
       <View pointerEvents="none" style={styles.hud}>
         <Text style={styles.hudCity}>{cityHint}</Text>
         <Text style={styles.hudCoord}>
           ({pin.x}, {pin.y}) · 半径 {radiusMeters / 1000} km
         </Text>
-        <Text style={styles.hudHint}>拖 pin 或点地图移动 · 双指捏放缩放</Text>
+        <Text style={styles.hudHint}>拖 pin / 点地图 / 📍用我位置</Text>
       </View>
     </View>
   );
@@ -186,7 +303,6 @@ function FallbackNotice({
         R15.29 已接 Apple Maps (MapKit)。Android 端需要 Google Maps key
         (R15.30+)。当前 grid 坐标: ({pin.x}, {pin.y}) · 半径 {radiusMeters / 1000} km
       </Text>
-      {/* 不可见 Pressable to keep onChange callable in case caller relies on it */}
       <View style={{ display: "none" }} onTouchEnd={() => onChange(pin)} />
       <Text style={styles.androidHint}>{cityHint}</Text>
     </View>
@@ -203,6 +319,62 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "relative",
     width: "100%"
+  },
+  topBar: {
+    position: "absolute",
+    right: 10,
+    top: 10,
+    flexDirection: "row"
+  },
+  locButton: {
+    backgroundColor: "rgba(128, 51, 240, 0.92)",
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    elevation: 2
+  },
+  locButtonPressed: {
+    backgroundColor: "rgba(98, 25, 200, 0.96)"
+  },
+  locButtonBusy: {
+    backgroundColor: "rgba(128, 51, 240, 0.55)"
+  },
+  locButtonText: {
+    color: color.white,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  errorBanner: {
+    backgroundColor: "rgba(214, 78, 70, 0.95)",
+    borderRadius: 8,
+    bottom: 70,
+    flexDirection: "row",
+    left: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    position: "absolute",
+    right: 10,
+    alignItems: "center"
+  },
+  errorText: {
+    color: color.white,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "500"
+  },
+  errorClose: {
+    marginLeft: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 0
+  },
+  errorCloseText: {
+    color: color.white,
+    fontSize: 18,
+    fontWeight: "800"
   },
   hud: {
     backgroundColor: "rgba(255,255,255,0.92)",
