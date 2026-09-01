@@ -294,7 +294,8 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
   useEffect(() => {
     let cancelled = false;
     void lastSignInStore.read().then((entry) => {
-      if (!cancelled) setLastSignIn(entry);
+      if (cancelled) return;
+      setLastSignIn(entry);
     });
     return () => {
       cancelled = true;
