@@ -59,6 +59,15 @@ export class MediaClient {
    * 音频由服务端 ffprobe 复核时长（≤30s），客户端上限只是体验层。
    */
   public async uploadMedia(file: UploadableImage & { mediaType: UploadMediaType; durationMs?: number; defaultMime?: string }, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
+    try {
+    return await this.uploadMediaInternal(file, options);
+    } catch (err) {
+      console.log(`[proxy.R15.63.DEBUG.media] uploadMedia THROW message=${err instanceof Error ? err.message : String(err)} stack=${err instanceof Error ? err.stack?.split("\n").slice(0, 3).join(" | ") : "no stack"}`);
+      throw err;
+    }
+  }
+
+  private async uploadMediaInternal(file: UploadableImage & { mediaType: UploadMediaType; durationMs?: number; defaultMime?: string }, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
     const mimeType = file.mimeType || file.defaultMime || "application/octet-stream";
     console.log(`[proxy.R15.63.DEBUG.media] uploadMedia start mime=${mimeType} mediaType=${file.mediaType} uri=${file.uri.slice(0, 40)}`);
     const accessToken = await this.input.authClient.getAccessToken();
@@ -218,11 +227,13 @@ export class MediaClient {
       purpose: "conversation_media", correlationId: this.nextId("correlation"),
       requestedAt: (this.input.now ?? (() => new Date()))().toISOString(), payload
     };
+    console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} start mediaAssetId=${target.id}`);
     const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
-    if (!result) throw new Error("媒体服务返回格式错误");
-    if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey || "媒体命令被拒绝");
-    if (response.status < 200 || response.status >= 300) throw new Error(`媒体命令失败（${response.status}）`);
+    if (!result) { console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} FAIL: parse result null`); throw new Error("媒体服务返回格式错误"); }
+    if (result.outcome === "REJECTED") { console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} REJECTED messageKey=${result.error?.messageKey ?? "?"} errorCode=${result.error?.errorCode ?? "?"} category=${result.error?.category ?? "?"} retryability=${result.error?.retryability ?? "?"} requiredAction=${result.error?.requiredAction ?? "?"} safeDetails=${JSON.stringify(result.error?.safeDetails ?? {})}`); throw new Error(result.error?.messageKey || "媒体命令被拒绝"); }
+    if (response.status < 200 || response.status >= 300) { console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} http status=${response.status}`); throw new Error(`媒体命令失败（${response.status}）`); }
+    console.log(`[proxy.R15.63.DEBUG.media] command ${commandType} ok status=${response.status}`);
     if (!result.operationRef) return {};
     try {
       const value = JSON.parse(result.operationRef) as unknown;
