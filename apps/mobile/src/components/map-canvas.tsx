@@ -41,7 +41,8 @@ export interface MapCanvasProps {
   // 城市名（显示在角标）
   cityHint: string;
   // pin / 拖动 / 完成时回调 (新 grid coord)
-  onChange: (next: GridCoord) => void;
+  initialCoordinate?: { lat: number; lng: number } | undefined;
+  onChange: (next: GridCoord, coordinate?: { lat: number; lng: number }) => void;
   // 可选：测试 ID
   testID?: string;
 }
@@ -91,6 +92,7 @@ export function MapCanvas({
   initialPin,
   radiusMeters,
   cityHint,
+  initialCoordinate,
   onChange,
   testID
 }: MapCanvasProps): React.JSX.Element {
@@ -99,10 +101,12 @@ export function MapCanvas({
 
   // 当前 pin (grid → lat/lng for the marker)
   const [pin, setPin] = useState<GridCoord>(initialPin);
+  const [exactCoordinate, setExactCoordinate] = useState<LatLng | undefined>(initialCoordinate ? { latitude: initialCoordinate.lat, longitude: initialCoordinate.lng } : undefined);
   const pinLatLng = useMemo<LatLng>(() => {
+    if (exactCoordinate) return exactCoordinate;
     const { lat, lng } = gridToLatLng(cityKey, pin.x, pin.y);
     return { latitude: lat, longitude: lng };
-  }, [cityKey, pin.x, pin.y]);
+  }, [cityKey, exactCoordinate, pin.x, pin.y]);
 
   // Initial region = city center with the city span. We use a roughly
   // square deltaLat / deltaLng from `spanKm` so the whole city fits.
@@ -127,7 +131,8 @@ export function MapCanvas({
   // Sync external pin changes (e.g. radius change resets pin)
   useEffect(() => {
     setPin(initialPin);
-  }, [initialPin.x, initialPin.y]);
+    setExactCoordinate(initialCoordinate ? { latitude: initialCoordinate.lat, longitude: initialCoordinate.lng } : undefined);
+  }, [initialCoordinate?.lat, initialCoordinate?.lng, initialPin.x, initialPin.y]);
 
   // Skip the map entirely on Android for now (no Google key yet).
   // Render a simple fallback so the rest of the UI doesn't break.
@@ -145,7 +150,8 @@ export function MapCanvas({
     if (g.x === lastCommittedRef.current.x && g.y === lastCommittedRef.current.y) return;
     lastCommittedRef.current = g;
     setPin(g);
-    onChange(g);
+    setExactCoordinate(coord);
+    onChange(g, { lat: coord.latitude, lng: coord.longitude });
   };
 
   // "Use my location" — request foreground permission, then snap the
@@ -174,7 +180,8 @@ export function MapCanvas({
       const g = latLngToGrid(targetCity, latitude, longitude);
       lastCommittedRef.current = g;
       setPin(g);
-      onChange(g);
+      setExactCoordinate({ latitude, longitude });
+      onChange(g, { lat: latitude, lng: longitude });
       // Animate map camera to the GPS coord. We use a tight delta
       // (~ 2 km) so the user sees the immediate neighborhood.
       if (mapRef.current) {

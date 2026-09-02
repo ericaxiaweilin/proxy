@@ -149,9 +149,11 @@ func (p *SMTPLoginChallengeProvider) Request(ctx context.Context, req LoginChall
 // LoginIdentity row before calling.
 func (p *SMTPLoginChallengeProvider) RequestWithRecipient(ctx context.Context, req LoginChallengeRequest, recipient string) (ProviderChallenge, error) {
 	if p == nil || !p.Configured() {
+		p.logger.Warn("smtp not configured", slog.String("host", p.host), slog.Int("port", p.port), slog.String("from", p.fromAddress))
 		return ProviderChallenge{}, ErrLoginChallengeProviderNotReady
 	}
 	if !validEmail(recipient) {
+		p.logger.Warn("smtp invalid email", slog.String("recipient", recipient))
 		return ProviderChallenge{}, ErrLoginChallengeProviderNotReady
 	}
 	plainCode, err := generateOTPCode()
@@ -170,6 +172,7 @@ func (p *SMTPLoginChallengeProvider) RequestWithRecipient(ctx context.Context, r
 		// the error category (not the code) for ops.
 		p.logger.Warn("smtp login challenge send failed",
 			slog.String("error_category", classifySMTPError(err)),
+			slog.String("error", err.Error()),
 			slog.String("login_identity_id", req.LoginIdentityID),
 			slog.String("device_id", req.DeviceID),
 			slog.String("correlation_id", req.CorrelationID),

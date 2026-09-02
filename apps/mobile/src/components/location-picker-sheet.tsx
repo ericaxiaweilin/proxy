@@ -84,9 +84,14 @@ export function LocationPickerSheet({
   // MapCanvas 以前返 GridCoord，现在走“地图世界” — 我们记住
   // 上一次 tap 时的 lat/lng + 网格初始点，用于“点击别的城市
   // city chip 时重置 pin”的逻辑。
-  const [lastLatLng, setLastLatLng] = useState<{ lat: number; lng: number } | undefined>(undefined);
+  const [lastLatLng, setLastLatLng] = useState<{ lat: number; lng: number } | undefined>(
+    current.kind === "CUSTOM" && current.custom.lat !== undefined && current.custom.lng !== undefined
+      ? { lat: current.custom.lat, lng: current.custom.lng }
+      : undefined
+  );
   // lat/lng 提前计算 — useEffect dep + 渲染两处都需要。
-  const { lat, lng } = gridToLatLng(customCity, pin.x, pin.y);
+  const gridLatLng = gridToLatLng(customCity, pin.x, pin.y);
+  const { lat, lng } = lastLatLng ?? gridLatLng;
   // R15.15 P2 + R15.32.1.3: 逆编码 — 拍 pin 以后从 lat/lng 拿
   // "还剑湖附近" / "Lê Thánh Tôn, Thành phố Hồ Chí Minh" 这样
   // 的人话描述。优先走我们的 /v1/geocode/reverse（背后是
@@ -109,13 +114,18 @@ export function LocationPickerSheet({
         setReverse(remote);
         return;
       }
-      // Offline / no network / no baseUrl — fall back to local grid
-      // POI lookup so the user still sees something readable.
+      // 精确 GPS/地图坐标不能再退回任一预设城市网格；离线时展示坐标，
+      // 恢复网络后由服务端重新解析全球行政区。
+      if (lastLatLng) {
+        setReverse({ displayName: `${lat.toFixed(5)}, ${lng.toFixed(5)}`, source: "offline-grid" });
+        return;
+      }
+      // 仅旧版、没有真实坐标的数据继续使用网格兼容层。
       const fallback = await reverseGeocode(customCity, lat, lng, { signal: ac.signal });
       if (!cancelled) setReverse(fallback);
     })();
     return () => { cancelled = true; ac.abort(); };
-  }, [tab, baseUrl, customCity, lat, lng]);
+  }, [tab, baseUrl, customCity, lastLatLng, lat, lng]);
 
   // 加载历史 — 只在切到 HISTORY tab 时拉一次，避免每次开 sheet 都打 keychain
   async function openHistory(): Promise<void> {
@@ -173,15 +183,19 @@ export function LocationPickerSheet({
       }
     } else {
       // 离线 fallback — 用 chip 的 customCity
-      resolvedCity = customCity;
+      resolvedCity = lastLatLng ? "当前位置" : customCity;
     }
+    const coordinateKey = lastLatLng
+      ? `${lastLatLng.lat.toFixed(5)}_${lastLatLng.lng.toFixed(5)}`
+      : `${pin.x}x${pin.y}`;
     return {
       header,
       area,
       city: resolvedCity,
-      id: `custom_${resolvedCity}_${pin.x}x${pin.y}_r${radius}`
+      // ID 不依赖会随行政区调整而变化的地名。
+      id: `custom_geo_${coordinateKey}_r${radius}`
     };
-  }, [label, reverse, customCity, pin.x, pin.y, radius]);
+  }, [label, reverse, customCity, lastLatLng, pin.x, pin.y, radius]);
 
   async function commitCustom(): Promise<void> {
     const next: CustomLocation = {
@@ -189,7 +203,14 @@ export function LocationPickerSheet({
       city: finalCommit.city,
       area: `自定义 · ${finalCommit.area}`,
       kind: "CUSTOM",
-      custom: { gridX: pin.x, gridY: pin.y, radiusMeters: radius }
+      custom: {
+        gridX: pin.x,
+        gridY: pin.y,
+        radiusMeters: radius,
+        ...(lastLatLng ? { lat: lastLatLng.lat, lng: lastLatLng.lng } : {}),
+        ...(reverse?.provider ? { geocodeProvider: reverse.provider } : {}),
+        ...(reverse?.version ? { geocodeVersion: reverse.version } : {})
+      }
     };
     await saveCustomLocation(next);
     // 立即刷新 history (这样切回 HISTORY tab 时新点已经在头部)
@@ -276,8 +297,16 @@ export function LocationPickerSheet({
                 <MapCanvas
                   cityHint={customCity}
                   initialPin={pin}
+                  initialCoordinate={lastLatLng}
                   radiusMeters={radius}
-                  onChange={setPin}
+                  onChange={(nextPin, coordinate) => {
+                    setPin(nextPin);
+                    if (coordinate) {
+                      setLastLatLng(coordinate);
+                      // 清掉预设城市提示，避免全球坐标在解析期间显示旧城市。
+                      setCustomCity("");
+                    }
+                  }}
                   testID="location-picker-map"
                 />
               </View>

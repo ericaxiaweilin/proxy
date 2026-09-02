@@ -640,7 +640,7 @@ const styles = StyleSheet.create({
   // Tagged
   taggedTile: { position: "relative" },
   taggedOverlay: { position: "absolute", bottom: 4, left: 4, backgroundColor: "rgba(0,0,0,0.5)", paddingHorizontal: 4, paddingVertical: 2, borderRadius: 3 },
-  taggedOverlayText: { color: "#fff", fontSize: 9, fontWeight: "600" },
+  taggedOverlayText: { color: "#fff", fontSize: 11, fontWeight: "600" },
   // Saved
   savedHint: { paddingHorizontal: 16, paddingVertical: 6 },
   savedHintText: { fontSize: 11, color: "#94a3b8" },
@@ -661,7 +661,7 @@ const styles = StyleSheet.create({
   aboutStat: { flex: 1, alignItems: "center" },
   aboutStatValue: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
   aboutStatLabel: { fontSize: 11, color: "#64748b", marginTop: 2 },
-  aboutStatHint: { fontSize: 10, color: "#94a3b8" },
+  aboutStatHint: { fontSize: 11, color: "#94a3b8" },
   aboutStatBig: { alignItems: "center" },
   aboutStatBigLabel: { fontSize: 11, color: "#64748b" },
   aboutStatBigValue: { fontSize: 18, fontWeight: "800", color: "#0f172a", marginTop: 4 },

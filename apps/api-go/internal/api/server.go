@@ -904,9 +904,10 @@ func (s *Server) facetObjects(w http.ResponseWriter, r *http.Request) {
 }
 
 // facetSideSpace 处理 R15.43 副空间 CRUD：
-//   GET    /v1/facet/objects/:id/side-space/posts
-//   POST   /v1/facet/objects/:id/side-space/posts   body: { postId }
-//   DELETE /v1/facet/objects/:id/side-space/posts/:postId
+//
+//	GET    /v1/facet/objects/:id/side-space/posts
+//	POST   /v1/facet/objects/:id/side-space/posts   body: { postId }
+//	DELETE /v1/facet/objects/:id/side-space/posts/:postId
 //
 // 设计：仅 CREATOR_COLLAB 关系能添加。post 必须在 catalog 里。
 // 完整 catalog 走 GET /v1/facet/side-space/catalog（Phase 1 mock）。
@@ -1014,8 +1015,9 @@ func (s *Server) facetSideSpaceCatalog(w http.ResponseWriter, r *http.Request) {
 }
 
 // facetConfig 处理 R15.51 运营阈值 CRUD:
-//   GET   /v1/facet/config     → 返当前 FacetConfig
-//   POST  /v1/facet/config     body: { expectedVersion, patch } → 更新 + 返新 config
+//
+//	GET   /v1/facet/config     → 返当前 FacetConfig
+//	POST  /v1/facet/config     body: { expectedVersion, patch } → 更新 + 返新 config
 //
 // 设计: GET 匿名可读 (跟 ListFacetObjects 一致); POST 需要更新人
 // (UpdatedBy 必填) — 匿名返回 401。 Phase 1.5 匿名能 POST, 不出生产。
@@ -1035,7 +1037,7 @@ func (s *Server) facetConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, cfg)
 	case http.MethodPost:
 		var req struct {
-			ExpectedVersion int                   `json:"expectedVersion"`
+			ExpectedVersion int                    `json:"expectedVersion"`
 			Patch           facet.FacetConfigPatch `json:"patch"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1066,7 +1068,9 @@ func (s *Server) facetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // facetSideSpaceSuggestions 返回 R15.52 server 推送的副空间推荐.
-//   GET /v1/facet/side-space/suggestions?limit=3
+//
+//	GET /v1/facet/side-space/suggestions?limit=3
+//
 // 返 { suggestions: { [objectId]: SideSpaceSuggestions } }.
 // 不需要的 objectId (如已满足 / 非合作方) 返空 posts (client 跳过).
 func (s *Server) facetSideSpaceSuggestions(w http.ResponseWriter, r *http.Request) {
@@ -1185,13 +1189,14 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 				// "name" is the most specific hit (street / POI).
 				// We prefer "name" for displayName, with city +
 				// country as suffixes when present.
-				Name     string `json:"name"`
-				Street   string `json:"street"`
-				City     string `json:"city"`
-				State    string `json:"state"`
-				District string `json:"district"`
-				Country  string `json:"country"`
-				Type     string `json:"type"`
+				Name        string `json:"name"`
+				Street      string `json:"street"`
+				City        string `json:"city"`
+				State       string `json:"state"`
+				District    string `json:"district"`
+				Country     string `json:"country"`
+				CountryCode string `json:"countrycode"`
+				Type        string `json:"type"`
 			} `json:"properties"`
 		} `json:"features"`
 	}
@@ -1219,6 +1224,8 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"displayName": display,
 		"source":      "remote",
+		"provider":    "photon",
+		"version":     "wgs84-v1",
 	}
 	if props.Name != "" {
 		// POI: only treat as POI if the type is a specific landmark
@@ -1243,6 +1250,12 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 	if props.District != "" {
 		out["district"] = props.District
 	}
+	if props.Country != "" {
+		out["country"] = props.Country
+	}
+	if props.CountryCode != "" {
+		out["countryCode"] = strings.ToUpper(props.CountryCode)
+	}
 	_ = zoom // reserved for future Nominatim fallback
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1252,13 +1265,14 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 // returns (so the mobile pickCityFromDisplayName can reuse the
 // same "City, Country" detection).
 func buildPhotonDisplayName(p struct {
-	Name     string `json:"name"`
-	Street   string `json:"street"`
-	City     string `json:"city"`
-	State    string `json:"state"`
-	District string `json:"district"`
-	Country  string `json:"country"`
-	Type     string `json:"type"`
+	Name        string `json:"name"`
+	Street      string `json:"street"`
+	City        string `json:"city"`
+	State       string `json:"state"`
+	District    string `json:"district"`
+	Country     string `json:"country"`
+	CountryCode string `json:"countrycode"`
+	Type        string `json:"type"`
 }) string {
 	// "Lê Thánh Tôn, Thành phố Hồ Chí Minh, Việt Nam"
 	parts := []string{}

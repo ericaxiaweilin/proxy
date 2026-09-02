@@ -124,6 +124,7 @@ export function FeedSurface({
   secureSessionStore,
   onOpenChat,
   onOpenFeedPrefs,
+  onOpenProfile,
   onChromeVisibilityChange,
   refreshTrigger,
   bottomNavVisible,
@@ -139,6 +140,7 @@ export function FeedSurface({
   secureSessionStore?: SecureSessionStore | undefined;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
+  onOpenProfile?: ((target: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]> }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   refreshTrigger?: number;
   bottomNavVisible?: boolean;
@@ -159,6 +161,7 @@ export function FeedSurface({
   const [feedFilter, setFeedFilter] = useState<FilterKey>("ALL");
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedPosts.length > 0 ? "READY" : "LOADING");
   const feedRetryAttemptRef = useRef(0);
+  const [lastFeedError, setLastFeedError] = useState<string | undefined>();
   const [posts, setPosts] = useState<FeedPost[]>(cachedPosts);
   const [media, setMedia] = useState<Record<string, FeedMediaItem[]>>(cachedMedia);
   const [nextCursor, setNextCursor] = useState<string>();
@@ -326,10 +329,11 @@ export function FeedSurface({
       feedRetryAttemptRef.current = 0;
       setPhase("READY");
     } catch (error) {
-      console.error("[proxy.feed] public feed load failed", error);
+      console.error("[proxy.feed] public feed load failed", error, (error as Error)?.message, (error as Error)?.stack);
       feedRetryAttemptRef.current += 1;
       // A transient API restart must not blank an already hydrated timeline.
       setPhase(cachedPosts.length > 0 ? "READY" : "ERROR");
+      (global as any).__lastFeedError = error;
     }
   }, [localNet]);
 
@@ -790,6 +794,7 @@ export function FeedSurface({
       ) : phase === "ERROR" ? (
         <View style={styles.feedEmpty}>
           <Text style={styles.feedEmptyText}>读模型暂时不可用（本地 API 未连接？）。</Text>
+          {lastFeedError ? <Text style={[styles.feedEmptyText, { marginTop: 8, color: color.error }]}>{lastFeedError}</Text> : null}
           <Pressable onPress={() => void loadFeed()} style={styles.retryBtn}>
             <Text style={styles.retryBtnText}>重试</Text>
           </Pressable>
@@ -822,6 +827,7 @@ export function FeedSurface({
             >
               {/* posthead — larger avatar on the compact 14pt feed edge */}
               <View style={styles.postHead}>
+                <Pressable accessibilityLabel={`查看 ${name} 的主页`} onPress={() => onOpenProfile?.({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media })} style={styles.postProfileTrigger}>
                 <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatar}>
                     <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
@@ -837,6 +843,7 @@ export function FeedSurface({
                   </View>
                   {meta.label ? <Text style={styles.postMeta}>{meta.label}</Text> : null}
                 </View>
+                </Pressable>
                 <Pressable
                   accessibilityLabel="更多"
                   onPress={() => openPostMenu(post.postId)}
@@ -1301,6 +1308,7 @@ const styles = StyleSheet.create({
   },
   // 44pt avatar + flexible identity + 32pt menu, gap 10.
   postHead: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  postProfileTrigger: { alignItems: "flex-start", flex: 1, flexDirection: "row", gap: 10, minWidth: 0 },
   postAvatarWrap: { height: 44, position: "relative", width: 44 },
   postAvatar: {
     alignItems: "center",

@@ -17,6 +17,7 @@ import type { ExperienceClient } from "../experience-client";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
+import Svg, { Circle, Path } from "react-native-svg";
 import {
   CONTINUE_FIXTURES,
   RECOMMEND_FILTER_CHIPS,
@@ -85,6 +86,9 @@ export function RequesterHome({
   activities,
   experiences,
   onCreateScene,
+  onOpenSceneMap,
+  locationLabel,
+  onSwitchLocation,
   onChromeVisibilityChange,
   bottomNavVisible,
 }: {
@@ -102,6 +106,9 @@ export function RequesterHome({
   // R15.49 — experience count 从 server 拉 (替换 hardcode 24).
   experiences?: ExperienceClient;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
+  onOpenSceneMap?: (() => void) | undefined;
+  locationLabel?: string | undefined;
+  onSwitchLocation?: (() => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
@@ -278,6 +285,24 @@ export function RequesterHome({
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
+      {onOpenSceneMap ? (
+        <View style={styles.sceneMapEntry}>
+        <Pressable accessibilityLabel={`打开${locationLabel ?? "当前区域"}场景地图`} onPress={onOpenSceneMap} style={styles.sceneMapMain}>
+          <View style={styles.sceneMapVisual}>
+            <Svg height="100%" viewBox="0 0 72 58" width="100%">
+              <Path d="M-5 18 C12 8 17 28 31 20 S50 5 78 14" fill="none" stroke="#C8DDE8" strokeLinecap="round" strokeWidth="7" />
+              <Path d="M8 62 C18 43 29 48 38 34 S55 25 69 -4" fill="none" stroke="#D8D1DF" strokeLinecap="round" strokeWidth="2.4" />
+              <Path d="M-4 42 C17 36 28 40 43 31 S62 22 77 27" fill="none" stroke="#E3DDE7" strokeLinecap="round" strokeWidth="2" />
+              <Circle cx="15" cy="17" fill={color.violet} r="5.5" /><Circle cx="52" cy="22" fill={color.magenta} r="5.5" /><Circle cx="34" cy="46" fill={color.muted} r="5" />
+              <Circle cx="15" cy="17" fill="none" r="8" stroke="rgba(255,255,255,0.9)" strokeWidth="2" />
+            </Svg>
+          </View>
+          <View style={styles.sceneMapCopy}><Text style={styles.sceneMapEyebrow}>SCENE MAP · {locationLabel ?? "当前区域"}</Text><Text style={styles.sceneMapTitle}>30 个还没去过</Text><Text style={styles.sceneMapSub}>3 个正在发生 · 17 个已留下足迹</Text></View>
+          <Text style={styles.sceneMapChevron}>›</Text>
+        </Pressable>
+        {onSwitchLocation ? <Pressable accessibilityLabel="切换城市或区域" onPress={onSwitchLocation} style={styles.sceneMapSwitch}><Text style={styles.sceneMapSwitchText}>切换⌄</Text></Pressable> : null}
+        </View>
+      ) : null}
       {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
           用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
           不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
@@ -546,6 +571,12 @@ export function RequesterHome({
 }
 
 const styles = StyleSheet.create({
+  sceneMapEntry: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginBottom: 10, overflow: "hidden" },
+  sceneMapMain: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 78, paddingHorizontal: 13, paddingTop: 10 },
+  sceneMapSwitch: { alignItems: "center", alignSelf: "flex-end", justifyContent: "center", minHeight: 34, paddingHorizontal: 15 },
+  sceneMapSwitchText: { color: color.violet, fontSize: 12, fontWeight: "800" },
+  sceneMapVisual: { backgroundColor: "#EEF2F5", borderColor: color.line, borderRadius: 15, borderWidth: 1, height: 58, overflow: "hidden", width: 72 },
+  sceneMapCopy: { flex: 1 }, sceneMapEyebrow: { color: color.violet, fontSize: 11, fontWeight: "800", letterSpacing: 0.5 }, sceneMapTitle: { color: color.ink, fontSize: 17, fontWeight: "900", marginTop: 3 }, sceneMapSub: { color: color.muted, fontSize: 11, marginTop: 3 }, sceneMapChevron: { color: color.muted, fontSize: 27 },
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 13 },
 

@@ -29,6 +29,12 @@ export interface CustomLocationFields {
   gridX: number; // 0..GRID_W (城市网格坐标)
   gridY: number; // 0..GRID_H
   radiusMeters: 1000 | 3000 | 5000;
+  // 真实地图坐标是定位真相；grid 仅保留给旧数据和离线 UI。
+  lat?: number;
+  lng?: number;
+  // 地址标签会变化，坐标不会。provider/version 便于服务端行政区更新后重解析。
+  geocodeProvider?: string;
+  geocodeVersion?: string;
 }
 
 // LocationKind 区分"预设地点"和"自定义坐标"。新字段 — 旧的
@@ -127,6 +133,9 @@ export interface ReverseGeocodeShape {
   state?: string;
   district?: string;
   country?: string;
+  countryCode?: string;
+  provider?: string;
+  version?: string;
   // source: "remote" | "offline-grid" | "offline-grid-x" (cells-from-center)
   // 告诉调用方走的是 Nominatim 还是 P6 估算。
   source: "remote" | "offline-grid";
@@ -169,6 +178,9 @@ export async function reverseGeocodeViaProxy(
       state?: string;
       district?: string;
       country?: string;
+      countryCode?: string;
+      provider?: string;
+      version?: string;
       source?: "remote" | "offline";
     };
     if (body.source === "offline" || !body.displayName) {
@@ -182,6 +194,9 @@ export async function reverseGeocodeViaProxy(
       ...(body.state ? { state: body.state } : {}),
       ...(body.district ? { district: body.district } : {}),
       ...(body.country ? { country: body.country } : {}),
+      ...(body.countryCode ? { countryCode: body.countryCode } : {}),
+      ...(body.provider ? { provider: body.provider } : {}),
+      ...(body.version ? { version: body.version } : {}),
       source: "remote"
     };
   } catch {

@@ -1381,58 +1381,22 @@ export function MeSurface({
   // R15.54: 关注数 / 粉丝数 — 从 server 拉, ProfileTabs stats 行使用
   // R15.59: 接 server GetFollowCounts (authed); 未登录时为 undefined
   const [personalFollowCounts, setPersonalFollowCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
-  // R15.59: viewer mode 状态 + 关注状态机
-  const viewingProfileId = viewerAccountId; // Phase 2: 路由控
-  const isSelfProfile = !viewerAccountId || viewingProfileId === viewerAccountId;
-  const [otherIsFollowing, setOtherIsFollowing] = useState(false);
-  const [followBusy, setFollowBusy] = useState(false);
+  // MeSurface 只呈现当前账户。其他人的主页由 OtherProfileSurface 承载，
+  // 避免把 viewerAccountId 同时解释为 viewer 和 profile owner。
+  const viewingProfileId = viewerAccountId;
+  const isSelfProfile = true;
   useEffect(() => {
-    if (!engagement || isSelfProfile || !viewingProfileId) return;
+    if (!engagement || !viewingProfileId) return;
     let cancelled = false;
     engagement.getFollowCounts(viewingProfileId)
       .then((c) => { if (!cancelled) setPersonalFollowCounts({ followers: c.followers, following: c.following }); })
       .catch(() => { if (!cancelled) setPersonalFollowCounts({ followers: 0, following: 0 }); });
-    engagement.isFollowing(viewerAccountId!, viewingProfileId)
-      .then((v) => { if (!cancelled) setOtherIsFollowing(v); })
-      .catch(() => { if (!cancelled) setOtherIsFollowing(false); });
     return () => { cancelled = true; };
   }, [engagement, isSelfProfile, viewingProfileId, viewerAccountId]);
   // R15.61/62: 拉自己 (viewer) 的 reply / bookmark 列表, 填 ProfileTabs REPLIES/SAVED tab
   // REPLIES: server RepliedPost → minimal FeedPost (postId, authorId=viewer, body, sceneType=COMMENT)
   // SAVED: bookmark postId[] + localNet.listFeedPosts() 拿全 feed, filter 包含 postId
   // (useEffect 需在 profileDraft 之后, 见下方 useEffect.)
-  const handleFollow = async (): Promise<void> => {
-    if (!engagement || !viewerAccountId || !viewingProfileId || isSelfProfile) return;
-    setFollowBusy(true);
-    try {
-      // R15.54: followProfile 是 server 端的 command (PostProfile social). 現阶段调用为占位。
-      // 实际 server endpoint 在 R15.60 接入。本次 demo 只调 unfollow / isFollowing 进行状态验证。
-      setOtherIsFollowing(true);
-      setPersonalFollowCounts((p) => p ? { ...p, followers: p.followers + 1 } : undefined);
-    } finally {
-      setFollowBusy(false);
-    }
-  };
-  const handleUnfollow = async (): Promise<void> => {
-    if (!engagement || !viewerAccountId || !viewingProfileId || isSelfProfile) return;
-    setFollowBusy(true);
-    try {
-      const state = await engagement.unfollowProfile(viewingProfileId);
-      if (state === "UNFOLLOWED" || state === "NOT_FOLLOWING") {
-        setOtherIsFollowing(state === "UNFOLLOWED");
-        if (state === "UNFOLLOWED") {
-          setPersonalFollowCounts((p) => p ? { ...p, followers: Math.max(0, p.followers - 1) } : undefined);
-        }
-      }
-    } catch {
-      // 静默: 体验不让 error toast 打断 profile
-    } finally {
-      setFollowBusy(false);
-    }
-  };
-  const handleSendMessage = (): void => {
-    if (viewingProfileId) onOpenConversation?.(viewingProfileId);
-  };
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
@@ -1490,7 +1454,7 @@ export function MeSurface({
     void engagement.listUserReplies(viewerAccountId, 30)
       .then((r) => {
         if (cancelled) return;
-        const replyPosts: FeedPost[] = r.replies.map((rep) => ({
+        const replyPosts: FeedPost[] = r.replies.map((rep: { replyId: string; postId: string; parentPostId: string; body: string; createdAt: string }) => ({
           postId: rep.postId,
           authorType: "USER" as const,
           authorId: viewerAccountId,
@@ -2378,11 +2342,11 @@ export function MeSurface({
               onComingSoon={(label) => { console.log(`[profile] ${label} · 开发中`); }}
               onOpenScene={(sceneId) => { console.log(`[profile] scene:${sceneId} · 开发中`); }}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
-              isFollowing={otherIsFollowing}
-              followBusy={followBusy}
-              onFollow={() => { void handleFollow(); }}
-              onUnfollow={() => { void handleUnfollow(); }}
-              onSendMessage={handleSendMessage}
+              isFollowing={false}
+              followBusy={false}
+              onFollow={undefined}
+              onUnfollow={undefined}
+              onSendMessage={undefined}
               resolveMediaUrl={localNet.resolveMediaUrl}
               fallbackLogo={OTTER_LOGO}
               color={color}
