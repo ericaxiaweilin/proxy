@@ -2279,6 +2279,12 @@ export function MeSurface({
               onOpenRealitySceneMap={onOpenRealitySceneMap}
               onComingSoon={(label) => { console.log(`[profile] ${label} · 开发中`); }}
               onOpenScene={(sceneId) => { console.log(`[profile] scene:${sceneId} · 开发中`); }}
+              viewerMode="SELF"
+              isFollowing={false}
+              followBusy={false}
+              onFollow={() => { console.log(`[profile] follow · 开发中`); }}
+              onUnfollow={() => { console.log(`[profile] unfollow · 开发中`); }}
+              onSendMessage={() => { console.log(`[profile] send message · 开发中`); }}
               resolveMediaUrl={localNet.resolveMediaUrl}
               fallbackLogo={OTTER_LOGO}
               color={color}

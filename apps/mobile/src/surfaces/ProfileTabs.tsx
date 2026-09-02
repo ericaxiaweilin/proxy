@@ -60,6 +60,13 @@ export interface ProfileTabsProps {
     violet: string;
   };
   onShareProfile?: (() => void) | undefined;
+  // R15.55: 关注图谱 — 区分自己/他人 profile 行为
+  viewerMode?: "SELF" | "OTHER" | undefined;  // 决定 "编辑主页" vs "关注/已关注"
+  isFollowing?: boolean | undefined;          // viewerMode=OTHER 时显示状态
+  followBusy?: boolean | undefined;           // 处理中状态
+  onFollow?: (() => void | Promise<void>) | undefined;
+  onUnfollow?: (() => void | Promise<void>) | undefined;
+  onSendMessage?: (() => void) | undefined;
 }
 
 // ---------- 组件 ----------
@@ -89,25 +96,53 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
         </View>
       </View>
 
-      {/* 行动按钮 — 编辑/分享 + 场景足迹入口 */}
+      {/* 行动按钮 — 自己 profile = 编辑/分享 / 他人 profile = 关注/消息 (R15.55) */}
       <View style={styles.actionsRow}>
-        <Pressable
-          accessibilityLabel="编辑主页"
-          onPress={() => props.onComingSoon?.("edit profile")}
-          style={[styles.actionBtn, styles.actionPrimary]}
-        >
-          <Text style={styles.actionPrimaryText}>编辑主页</Text>
-        </Pressable>
-        <Pressable
-          accessibilityLabel="分享主页"
-          onPress={() => {
-            if (props.onShareProfile) props.onShareProfile();
-            else void Share.share({ message: `查看 ${props.profileDraft.name} 的 Proxy 主页` });
-          }}
-          style={[styles.actionBtn, styles.actionSecondary]}
-        >
-          <Text style={styles.actionSecondaryText}>分享主页</Text>
-        </Pressable>
+        {props.viewerMode === "OTHER" ? (
+          <>
+            <Pressable
+              accessibilityLabel={props.isFollowing ? "已关注" : "关注"}
+              onPress={() => {
+                if (props.followBusy) return;
+                if (props.isFollowing) void props.onUnfollow?.();
+                else void props.onFollow?.();
+              }}
+              disabled={props.followBusy}
+              style={[styles.actionBtn, props.isFollowing ? styles.actionSecondary : styles.actionPrimary]}
+            >
+              <Text style={props.isFollowing ? styles.actionSecondaryText : styles.actionPrimaryText}>
+                {props.followBusy ? "处理中…" : props.isFollowing ? "✓ 已关注" : "+ 关注"}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityLabel="发送消息"
+              onPress={props.onSendMessage}
+              style={[styles.actionBtn, styles.actionSecondary]}
+            >
+              <Text style={styles.actionSecondaryText}>💬 消息</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Pressable
+              accessibilityLabel="编辑主页"
+              onPress={() => props.onComingSoon?.("edit profile")}
+              style={[styles.actionBtn, styles.actionPrimary]}
+            >
+              <Text style={styles.actionPrimaryText}>编辑主页</Text>
+            </Pressable>
+            <Pressable
+              accessibilityLabel="分享主页"
+              onPress={() => {
+                if (props.onShareProfile) props.onShareProfile();
+                else void Share.share({ message: `查看 ${props.profileDraft.name} 的 Proxy 主页` });
+              }}
+              style={[styles.actionBtn, styles.actionSecondary]}
+            >
+              <Text style={styles.actionSecondaryText}>分享主页</Text>
+            </Pressable>
+          </>
+        )}
       </View>
       {props.onOpenRealitySceneMap ? (
         <Pressable
