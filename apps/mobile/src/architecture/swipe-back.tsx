@@ -15,6 +15,10 @@ export function SwipeBackShell({ onExit, children }: { onExit: () => void; child
   const responder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      // Capture 阶段也询问 — 提前锁定 responder, 避免 child ScrollView 在
+      // 同一个 move 事件上踩着 onMoveShould 返回 true 后被 negotiate 走。
+      onMoveShouldSetPanResponderCapture: (_, g) => shouldStartSwipeBack({ startX: g.x0, dx: g.dx, dy: g.dy }),
       // 只允许从系统返回边缘开始，避免抢占照片横滑、筛选 rail 和横向分页。
       onMoveShouldSetPanResponder: (_, g) => shouldStartSwipeBack({ startX: g.x0, dx: g.dx, dy: g.dy }),
       onPanResponderGrant: () => {
@@ -33,6 +37,10 @@ export function SwipeBackShell({ onExit, children }: { onExit: () => void; child
       onPanResponderTerminate: () => {
         overscroll.current = 0;
       },
+      // 一旦拿到 responder 就拒绝 child 的 termination request,
+      // 避免 ScrollView 在 onMoveShouldSetPanResponder 协商后把
+      // SwipeBackShell 强行夺走。
+      onPanResponderTerminationRequest: () => false
     })
   ).current;
   return <View style={{ flex: 1 }} {...responder.panHandlers}>{children}</View>;

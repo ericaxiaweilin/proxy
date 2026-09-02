@@ -2,6 +2,7 @@
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { SwipeBackShell } from "../architecture/swipe-back";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
 import { ProxyIcon } from "../components/proxy-icon";
@@ -103,31 +104,33 @@ export function MessagesSurface({
 
   if (subView === "requests") {
     return (
-      <View style={styles.app}>
-        <View style={styles.safe} />
-        <View style={styles.topbar}>
-          <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
-          <View style={styles.centerTitle}><Text style={styles.centerMain}>陌生消息</Text><Text style={styles.centerSub}>Mặc Kệ</Text></View>
-          <View style={{ width: 38 }} />
-        </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-          <Text style={styles.requestIntro}>陌生人的消息自动进入 Mặc Kệ，不打扰正常 Dialog。回复或移到关注后，才进入正常消息流。</Text>
-          <View style={styles.mackeBanner}>
-            <Text style={styles.mackeIcon}>💬</Text>
-            <View style={{ flex: 1 }}><Text style={styles.mackeTitle}>默认静音</Text><Text style={styles.mackeMeta}>这里的消息不推送通知。你可以回复、移到关注，或把普通 Dialog 反向移进来。</Text></View>
+      <SwipeBackShell onExit={() => setSubView("home")}>
+        <View style={styles.app}>
+          <View style={styles.safe} />
+          <View style={styles.topbar}>
+            <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
+            <View style={styles.centerTitle}><Text style={styles.centerMain}>陌生消息</Text><Text style={styles.centerSub}>Mặc Kệ</Text></View>
+            <View style={{ width: 38 }} />
           </View>
-          {[
-            { name: "Ngoc Ha", handle: "@ngocha · 通过你的动态找到你", msg: "你好，我看到你发的河内周末动态，想问一下那个活动还可以参加吗？" },
-            { name: "Quang Vu", handle: "没有共同联系人", msg: "你好，想问一下你发布的西湖路线。" },
-          ].map((r) => (
-            <View key={r.name} style={styles.requestCard}>
-              <View style={styles.requestTop}><View style={styles.avatar}><Text style={styles.avatarText}>{r.name.slice(0, 2)}</Text></View><View style={{ flex: 1 }}><Text style={styles.dialogName}>{r.name}</Text><Text style={styles.centerSub}>{r.handle}</Text></View></View>
-              <Text style={styles.requestMsg}>{r.msg}</Text>
-              <View style={styles.btnRow}><Pressable onPress={() => setSubView("home")} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable style={styles.btn}><Text style={styles.btnText}>忽略</Text></Pressable></View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+            <Text style={styles.requestIntro}>陌生人的消息自动进入 Mặc Kệ，不打扰正常 Dialog。回复或移到关注后，才进入正常消息流。</Text>
+            <View style={styles.mackeBanner}>
+              <Text style={styles.mackeIcon}>💬</Text>
+              <View style={{ flex: 1 }}><Text style={styles.mackeTitle}>默认静音</Text><Text style={styles.mackeMeta}>这里的消息不推送通知。你可以回复、移到关注，或把普通 Dialog 反向移进来。</Text></View>
             </View>
-          ))}
-        </ScrollView>
-      </View>
+            {[
+              { name: "Ngoc Ha", handle: "@ngocha · 通过你的动态找到你", msg: "你好，我看到你发的河内周末动态，想问一下那个活动还可以参加吗？" },
+              { name: "Quang Vu", handle: "没有共同联系人", msg: "你好，想问一下你发布的西湖路线。" },
+            ].map((r) => (
+              <View key={r.name} style={styles.requestCard}>
+                <View style={styles.requestTop}><View style={styles.avatar}><Text style={styles.avatarText}>{r.name.slice(0, 2)}</Text></View><View style={{ flex: 1 }}><Text style={styles.dialogName}>{r.name}</Text><Text style={styles.centerSub}>{r.handle}</Text></View></View>
+                <Text style={styles.requestMsg}>{r.msg}</Text>
+                <View style={styles.btnRow}><Pressable onPress={() => setSubView("home")} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable style={styles.btn}><Text style={styles.btnText}>忽略</Text></Pressable></View>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </SwipeBackShell>
     );
   }
 
@@ -139,43 +142,46 @@ export function MessagesSurface({
     ];
     const filtered = CONTACTS.filter((c) => !contactSearch || `${c.name}${c.username}`.toLowerCase().includes(contactSearch.toLowerCase()));
     return (
-      <View style={styles.app}>
-        <View style={styles.safe} />
-        <View style={styles.topbar}>
-          <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
-          <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 / Username</Text></View>
-          <Pressable style={styles.icon}><ProxyIcon color={color.ink} name="plus" size={18} /></Pressable>
+      <SwipeBackShell onExit={() => setSubView("home")}>
+        <View style={styles.app}>
+          <View style={styles.safe} />
+          <View style={styles.topbar}>
+            <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
+            <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 / Username</Text></View>
+            <Pressable style={styles.icon}><ProxyIcon color={color.ink} name="plus" size={18} /></Pressable>
+          </View>
+          <View style={styles.contactHeadSearch}>
+            <ProxyIcon color="#97938b" name="search" size={17} />
+            <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名、手机号或 Username" placeholderTextColor="#9a968f" style={styles.contactInput} />
+          </View>
+          <ScrollView style={{ flex: 1 }}>
+            <Text style={styles.contactSection}>已在 Proxy</Text>
+            {filtered.map((c) => (
+              <Pressable key={c.name} onPress={() => openPerson(c.name)} style={styles.contactRow}>
+                <View style={[styles.avatar, c.warm && styles.avatarWarm, c.blue && styles.avatarBlue]}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text>{c.online ? <View style={styles.online} /> : null}</View>
+                <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name} <Text style={styles.usernameBadge}>{c.username}</Text></Text><Text style={styles.contactMeta}>{c.note}</Text><Text style={styles.contactMeta}>{c.meta}</Text></View>
+                <Text style={styles.contactAction}>聊天 ›</Text>
+              </Pressable>
+            ))}
+            <Text style={styles.contactSection}>邀请加入 Proxy</Text>
+            <Pressable style={styles.contactRow}><View style={styles.avatar}><Text style={styles.avatarText}>HA</Text></View><View style={{ flex: 1 }}><Text style={styles.contactName}>Hà Anh</Text><Text style={styles.contactMeta}>尚未使用 Proxy</Text></View><Text style={[styles.contactAction, { color: "#8d681b" }]}>邀请</Text></Pressable>
+          </ScrollView>
         </View>
-        <View style={styles.contactHeadSearch}>
-          <ProxyIcon color="#97938b" name="search" size={17} />
-          <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名、手机号或 Username" placeholderTextColor="#9a968f" style={styles.contactInput} />
-        </View>
-        <ScrollView style={{ flex: 1 }}>
-          <Text style={styles.contactSection}>已在 Proxy</Text>
-          {filtered.map((c) => (
-            <Pressable key={c.name} onPress={() => openPerson(c.name)} style={styles.contactRow}>
-              <View style={[styles.avatar, c.warm && styles.avatarWarm, c.blue && styles.avatarBlue]}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text>{c.online ? <View style={styles.online} /> : null}</View>
-              <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name} <Text style={styles.usernameBadge}>{c.username}</Text></Text><Text style={styles.contactMeta}>{c.note}</Text><Text style={styles.contactMeta}>{c.meta}</Text></View>
-              <Text style={styles.contactAction}>聊天 ›</Text>
-            </Pressable>
-          ))}
-          <Text style={styles.contactSection}>邀请加入 Proxy</Text>
-          <Pressable style={styles.contactRow}><View style={styles.avatar}><Text style={styles.avatarText}>HA</Text></View><View style={{ flex: 1 }}><Text style={styles.contactName}>Hà Anh</Text><Text style={styles.contactMeta}>尚未使用 Proxy</Text></View><Text style={[styles.contactAction, { color: "#8d681b" }]}>邀请</Text></Pressable>
-        </ScrollView>
-      </View>
+      </SwipeBackShell>
     );
   }
 
   if (subView === "person") {
     return (
-      <View style={styles.app}>
-        <View style={styles.safe} />
-        <View style={styles.topbar}>
-          <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
-          <View style={styles.centerTitle}><Text style={styles.centerMain}>联系人</Text></View>
-          <Pressable style={styles.icon}><Text style={styles.ellipsis}>⋯</Text></Pressable>
-        </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
+      <SwipeBackShell onExit={() => setSubView("contacts")}>
+        <View style={styles.app}>
+          <View style={styles.safe} />
+          <View style={styles.topbar}>
+            <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
+            <View style={styles.centerTitle}><Text style={styles.centerMain}>联系人</Text></View>
+            <Pressable style={styles.icon}><Text style={styles.ellipsis}>⋯</Text></Pressable>
+          </View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
           <View style={styles.personHero}><View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View><Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>@{personName.toLowerCase()}.ng · 在线</Text></View>
           <View style={styles.personActions}>
             <Pressable onPress={() => onOpenConversation(personName)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
@@ -189,7 +195,8 @@ export function MessagesSurface({
             <View style={styles.aliasCard}><Text style={styles.aliasLabel}>手机号</Text><Text style={styles.privateValue}>08•• ••• 721 · 仅你可见</Text></View>
           </View>
         </ScrollView>
-      </View>
+        </View>
+      </SwipeBackShell>
     );
   }
 
