@@ -81,3 +81,37 @@ export type ListFacetObjectsPayload = z.infer<typeof ListFacetObjectsPayloadSche
 export function parseListFacetObjectsPayload(raw: unknown): ListFacetObjectsPayload {
   return ListFacetObjectsPayloadSchema.parse(raw);
 }
+
+// ---------- R15.49 ListExperiences ----------
+
+// ExperienceSummary R15.49 — server ListExperiences 返回的轻量 DTO。
+// 跟 server experience.ExperienceSummary 1:1 对应。
+export const ExperienceSummarySchema = z.object({
+  experienceId: z.string().min(1),
+  title: z.string(),
+  category: z.string(),
+  origin: z.enum(["PLATFORM", "MERCHANT", "USER"]),
+  city: z.string().optional(),
+  startTime: z.string().optional(),
+  price: z.string().optional(),
+  status: z.string().optional(),
+  capacity: z.number().int().nonnegative().optional(),
+  interested: z.number().int().nonnegative()
+});
+export type ExperienceSummary = z.infer<typeof ExperienceSummarySchema>;
+
+// ListExperiencesPayload R15.49 — server 返 { experiences, count }.
+// 跟 ListActivitiesPayloadSchema 同形 (已存在, 不再 import).
+export const ListExperiencesPayloadSchema = z.object({
+  experiences: z.array(ExperienceSummarySchema),
+  count: z.number().int().nonnegative()
+});
+export type ListExperiencesPayload = z.infer<typeof ListExperiencesPayloadSchema>;
+
+/**
+ * Type guard: 校验 payload 是否符合 ListExperiences 形状。
+ * UI / client 收到后端响应后必须调用 (fail-closed).
+ */
+export function parseListExperiencesPayload(raw: unknown): ListExperiencesPayload {
+  return ListExperiencesPayloadSchema.parse(raw);
+}

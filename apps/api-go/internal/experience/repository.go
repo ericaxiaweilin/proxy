@@ -1,92 +1,71 @@
-package postgres
+package experience
 
 import (
 	"context"
-	"encoding/json"
+	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/experience/runtime"
 )
 
-type ExperienceRepository struct{ pool *pgxpool.Pool }
-
-func NewExperienceRepository(pool *pgxpool.Pool) *ExperienceRepository { return &ExperienceRepository{pool: pool} }
-
-func (r *ExperienceRepository) CreateIntent(ctx context.Context, intent runtime.ExperienceIntent) error {
-	allowed, _ := json.Marshal(intent.AllowedActions)
-	forbidden, _ := json.Marshal(intent.ForbiddenActions)
-	required, _ := json.Marshal(intent.RequiredInfo)
-	reasonCodes, _ := json.Marshal(intent.ReasonCodes)
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO experience.experience_intent (
-			intent_id, type, objective, priority, intervention_level,
-			context_snapshot_id, decision_id, allowed_actions, forbidden_actions,
-			required_information, expires_at, reason_codes
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		ON CONFLICT (intent_id) DO NOTHING`,
-		intent.IntentID, intent.Type, intent.Objective, intent.Priority, intent.InterventionLevel,
-		intent.ContextSnapshotID, intent.DecisionID, allowed, forbidden, required, intent.ExpiresAt, reasonCodes,
-	)
-	return err
-}
-
-func (r *ExperienceRepository) CreateSurfacePlan(ctx context.Context, plan runtime.SurfacePlan) error {
-	slots, _ := json.Marshal(plan.Slots)
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO experience.surface_plan (
-			surface_plan_id, surface_id, surface_version, decision_id, experience_intent_id,
-			context_snapshot_id, render_mode, native_component, schema_ref, slots, ttl_s, fallback_plan_id, policy_version
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-		ON CONFLICT (surface_plan_id) DO NOTHING`,
-		plan.SurfacePlanID, plan.SurfaceID, plan.SurfaceVersion, plan.DecisionID, plan.ExperienceIntentID,
-		plan.ContextSnapshotID, plan.RenderMode, plan.NativeComponent, plan.SchemaRef, slots, plan.TTLS, plan.FallbackPlanID, plan.PolicyVersion,
-	)
-	return err
-}
-
-// ListExperiences R15.49 — 查 experience.experiences 表，PG 表为空时返内存默认 24 条。
+// MemoryRepository — R15.49 引入的 InMemory 实现，server 启动时塞 24 条体验 mock 数据。
 //
-// Phase 1 策略: server 启动时表可能没种 (migration 还没跑) — 返内存 mock，UI 能显示；
-// Phase 2 接入真实数据后, 该表会被业务侧填充, 读 DB。两者并存不冲突。
-func (r *ExperienceRepository) ListExperiences(ctx context.Context) ([]experience.ExperienceSummary, error) {
-	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT experience_id, title, category, origin, COALESCE(city, ''), COALESCE(start_time::text, ''), COALESCE(price, ''), COALESCE(status, ''), COALESCE(capacity, 0), COALESCE(interested, 0)
-		FROM experience.experiences
-		WHERE status <> 'CLOSED' OR status IS NULL
-		ORDER BY interested DESC, experience_id ASC`)
-	if err != nil {
-		// 表可能不存在（migration 未跑）— 退到内存 mock
-		return defaultExperiencesFallback(), nil
+// 设计：ListExperiences 现在有真 data source（不再 hardcode 24），但 server 没接 PG
+// 体验表 — Phase 1 内存 mock，Phase 2 接入 experience schema 表（如果需要）。
+//
+// 24 是 R15.49 之前 home "体验" 计数用的 baseline (跟 ListMarketOpportunities 的
+// MarketOpportunity / ListActivities 的 Activity 数量级一致 — "三四十个" 体量)。
+type MemoryRepository struct {
+	mu           sync.Mutex
+	intents      map[string]runtime.ExperienceIntent
+	surfacePlans map[string]runtime.SurfacePlan
+	experiences  []ExperienceSummary
+}
+
+func NewMemoryRepository() *MemoryRepository {
+	return &MemoryRepository{
+		intents:      make(map[string]runtime.ExperienceIntent),
+		surfacePlans: make(map[string]runtime.SurfacePlan),
+		experiences:  defaultExperiences(),
 	}
-	defer rows.Close()
-	out := []experience.ExperienceSummary{}
-	for rows.Next() {
-		var e experience.ExperienceSummary
-		if err := rows.Scan(&e.ExperienceID, &e.Title, &e.Category, &e.Origin, &e.City, &e.StartTime, &e.Price, &e.Status, &e.Capacity, &e.Interested); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
+}
+
+func NewMemoryRepositoryWithSeed(seed []ExperienceSummary) *MemoryRepository {
+	if seed == nil {
+		seed = defaultExperiences()
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	return &MemoryRepository{
+		intents:      make(map[string]runtime.ExperienceIntent),
+		surfacePlans: make(map[string]runtime.SurfacePlan),
+		experiences:  seed,
 	}
-	if len(out) == 0 {
-		// 表存在但空 (没 seed) — 返内存 mock，保证 UI 看到 24
-		return defaultExperiencesFallback(), nil
-	}
+}
+
+func (r *MemoryRepository) CreateIntent(_ context.Context, intent runtime.ExperienceIntent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.intents[intent.IntentID] = intent
+	return nil
+}
+
+func (r *MemoryRepository) CreateSurfacePlan(_ context.Context, plan runtime.SurfacePlan) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.surfacePlans[plan.SurfacePlanID] = plan
+	return nil
+}
+
+func (r *MemoryRepository) ListExperiences(_ context.Context) ([]ExperienceSummary, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]ExperienceSummary, len(r.experiences))
+	copy(out, r.experiences)
 	return out, nil
 }
 
-// defaultExperiencesFallback — PG 表为空/不存在时返的 24 条 mock。
-// 跟 experience.MemoryRepository 默认同源 (避免两边漂移)。
-// Phase 2 接入真实数据后可删。
-func defaultExperiencesFallback() []experience.ExperienceSummary {
-	// 跟 experience.MemoryRepository 共享 24 条 seed — 这里用子集
-	// (platform/postgres 不能 import experience.NewMemoryRepository 因为
-	// memory 用了 runtime.ExperienceIntent — 不希望循环依赖)。
-	// 直接列 24 条最简版。
-	return []experience.ExperienceSummary{
+// defaultExperiences — 24 条 R15.49 baseline mock, 跟 home "体验 24" 旧 hardcode 对齐。
+// 多类别多 city 多 origin — 覆盖 client 后续可能加的 filter。
+func defaultExperiences() []ExperienceSummary {
+	return []ExperienceSummary{
 		{ExperienceID: "exp_city_walk_hcmc", Title: "西贡老巷漫步", Category: "CITY_WALK", Origin: "PLATFORM", City: "HCMC", Status: "OPEN", Capacity: 12, Interested: 8},
 		{ExperienceID: "exp_cafe_quiet_hcmc", Title: "安静咖啡馆下午", Category: "CAFE", Origin: "PLATFORM", City: "HCMC", Status: "OPEN", Capacity: 6, Interested: 4},
 		{ExperienceID: "exp_street_food_hcmc", Title: "西贡街头小吃路线", Category: "FOOD", Origin: "MERCHANT", City: "HCMC", Status: "OPEN", Capacity: 10, Interested: 7},
@@ -96,19 +75,23 @@ func defaultExperiencesFallback() []experience.ExperienceSummary {
 		{ExperienceID: "exp_live_music_hcmc", Title: "地下乐队现场", Category: "NIGHTLIFE", Origin: "PLATFORM", City: "HCMC", Status: "OPEN", Capacity: 30, Interested: 22},
 		{ExperienceID: "exp_yoga_park_hcmc", Title: "公园晨练瑜伽", Category: "WELLNESS", Origin: "USER", City: "HCMC", Status: "OPEN", Capacity: 20, Interested: 9},
 		{ExperienceID: "exp_book_club_hcmc", Title: "独立书店读书会", Category: "CULTURE", Origin: "USER", City: "HCMC", Status: "OPEN", Capacity: 10, Interested: 5},
+
 		{ExperienceID: "exp_temple_tour_hanoi", Title: "河内古寺半日", Category: "SIGHTSEEING", Origin: "PLATFORM", City: "HANOI", Status: "OPEN", Capacity: 15, Interested: 11},
 		{ExperienceID: "exp_pho_tour_hanoi", Title: "老城河粉地图", Category: "FOOD", Origin: "MERCHANT", City: "HANOI", Status: "OPEN", Capacity: 8, Interested: 7},
 		{ExperienceID: "exp_lake_walk_hanoi", Title: "还剑湖晨跑团", Category: "WELLNESS", Origin: "USER", City: "HANOI", Status: "OPEN", Capacity: 20, Interested: 14},
 		{ExperienceID: "exp_oldsquarter_hanoi", Title: "三十六街老巷导览", Category: "CITY_WALK", Origin: "PLATFORM", City: "HANOI", Status: "OPEN", Capacity: 12, Interested: 9},
 		{ExperienceID: "exp_brewery_hanoi", Title: "精酿啤酒工坊参观", Category: "WORKSHOP", Origin: "MERCHANT", City: "HANOI", Status: "OPEN", Capacity: 16, Interested: 4},
 		{ExperienceID: "exp_theatre_hanoi", Title: "木偶戏传统剧场", Category: "CULTURE", Origin: "PLATFORM", City: "HANOI", Status: "OPEN", Capacity: 40, Interested: 18},
+
 		{ExperienceID: "exp_oldtown_danang", Title: "岘港古城徒步", Category: "CITY_WALK", Origin: "PLATFORM", City: "DANANG", Status: "OPEN", Capacity: 12, Interested: 5},
 		{ExperienceID: "exp_dragonbridge_danang", Title: "龙桥周末夜市", Category: "FOOD", Origin: "PLATFORM", City: "DANANG", Status: "OPEN", Capacity: 50, Interested: 31},
 		{ExperienceID: "exp_seafood_danang", Title: "海鲜大排档", Category: "FOOD", Origin: "MERCHANT", City: "DANANG", Status: "OPEN", Capacity: 20, Interested: 13},
 		{ExperienceID: "exp_surf_danang", Title: "美溪海滩冲浪课", Category: "WORKSHOP", Origin: "MERCHANT", City: "DANANG", Status: "OPEN", Capacity: 6, Interested: 4},
+
 		{ExperienceID: "exp_holyoke_hue", Title: "顺化皇城一日", Category: "CULTURE", Origin: "PLATFORM", City: "HUE", Status: "OPEN", Capacity: 15, Interested: 6},
 		{ExperienceID: "exp_boat_hue", Title: "香江游船黄昏", Category: "SIGHTSEEING", Origin: "MERCHANT", City: "HUE", Status: "OPEN", Capacity: 30, Interested: 8},
 		{ExperienceID: "exp_cuisine_hue", Title: "顺化宫廷菜", Category: "FOOD", Origin: "MERCHANT", City: "HUE", Status: "OPEN", Capacity: 10, Interested: 5},
+
 		{ExperienceID: "exp_quiet_hoian", Title: "会安灯笼夜放", Category: "CULTURE", Origin: "PLATFORM", City: "HOIAN", Status: "OPEN", Capacity: 20, Interested: 17},
 		{ExperienceID: "exp_tailor_hoian", Title: "会安裁缝定制半日", Category: "WORKSHOP", Origin: "MERCHANT", City: "HOIAN", Status: "OPEN", Capacity: 6, Interested: 3},
 	}
