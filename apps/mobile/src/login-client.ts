@@ -12,6 +12,7 @@ export type LoginChallengeChannel = "EMAIL" | "SMS";
 export type LoginClientOptions = {
   baseUrl: string;
   deviceId: string;
+  deviceCredential?: string; // 64-hex hash for migration 055 session_tokens device_credential_hash
   transport: Transport;
   secureSessionStore: SecureSessionStore;
   now?: () => Date;
@@ -163,6 +164,7 @@ export class LoginClient {
   public async createSessionFromChallenge(challengeId: string): Promise<StoredSession> {
     const result = await this.sendCommand("CreateSession", { type: "Session", id: "new" }, {
       deviceId: this.input.deviceId,
+      deviceCredential: this.input.deviceCredential ?? "",
       challengeId
     });
     if (result.outcome !== "ACCEPTED" || !result.aggregate?.id) throw new LoginProtocolError("session response was not accepted");

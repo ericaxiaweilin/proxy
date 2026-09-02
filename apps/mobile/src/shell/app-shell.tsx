@@ -165,6 +165,19 @@ export function AppShell({
   // R15.23: feedSection 是 FEED tab 内部的 section 状态 (动态/状态/社区)。
   // 跨 page 切到 FEED_* 时同步设过来；swipe 切到 next/prev page 时也同步更新。
   const [feedSection, setFeedSection] = useState<"POSTS" | "STATUS" | "COMMUNITY">("POSTS");
+  // R15.59: viewerAccountId 是当前 session 的用户 ID (用于区分 self / other profile).
+  // 启动时从 keychain 拿 — 现在是 async + 启动后不变 (登录一次后到登出前保持).
+  const [viewerAccountId, setViewerAccountId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!secureSessionStore) return;
+      const session = await secureSessionStore.read().catch(() => undefined);
+      if (cancelled) return;
+      if (session?.userAccountId) setViewerAccountId(session.userAccountId);
+    })();
+    return () => { cancelled = true; };
+  }, [secureSessionStore]);
   const currentPage: PageId = pageOverride ?? ((): PageId => {
     if (tab === "HOME") return "HOME";
     if (tab === "MARKET") return marketEntry.tab === "ACTIVITY" ? "MARKET_ACT" : "MARKET_OPP";
@@ -569,6 +582,8 @@ export function AppShell({
               fulfillment={fulfillment}
               business={business}
               supply={supply}
+              engagement={engagement}
+              viewerAccountId={viewerAccountId}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,
