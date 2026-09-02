@@ -1381,7 +1381,10 @@ export function MeSurface({
   // R15.61/62/63: 3 列表接 server (R15.61 reply, R15.62 bookmark, R15.63 tagged 暂空)
   const [personalReplyPosts, setPersonalReplyPosts] = useState<FeedPost[]>([]);
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
-  const [personalTaggedPosts] = useState<FeedPost[]>([]); // R15.63 (Phase 2: server mentions endpoint)
+  // R15.72: TAGGED tab — client 扫 ListFeedPosts, 在 body 找 @自己的帖 (因为
+  //   server mentions endpoint 还没建, Phase 2 需新 server model).
+  //   轻量 client-side 实现: @handle (含 @ 前缀) + contextType==="MENTION" 都算
+  const [personalTaggedPosts, setPersonalTaggedPosts] = useState<FeedPost[]>([]);
   // R15.54: 关注数 / 粉丝数 — 从 server 拉, ProfileTabs stats 行使用
   // R15.59: 接 server GetFollowCounts (authed); 未登录时为 undefined
   const [personalFollowCounts, setPersonalFollowCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
@@ -1484,6 +1487,20 @@ export function MeSurface({
           setPersonalSavedPosts(saved);
         } catch {
           if (!cancelled) setPersonalSavedPosts([]);
+        }
+        // R15.72: TAGGED — 扫全 feed body 找 @viewerAccountId 或 contextRefs MENTION
+        //   server mentions endpoint 还没建, Phase 2 server-side 实现后会盖这个 client 实现.
+        try {
+          if (cancelled) return;
+          const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
+          const tagged = feed.posts.filter((p) => {
+            if (p.authorId === viewerAccountId) return false;
+            if (p.body.includes(myHandle)) return true;
+            return p.contextRefs.some((ref) => ref.contextType === "MENTION" && ref.contextId === viewerAccountId);
+          });
+          setPersonalTaggedPosts(tagged);
+        } catch {
+          if (!cancelled) setPersonalTaggedPosts([]);
         }
       })
       .catch(() => { if (!cancelled) setPersonalSavedPosts([]); });
