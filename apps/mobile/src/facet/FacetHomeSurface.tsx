@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { extractShownCount } from "./extract-shown-count";
-import type { FacetObject, FacetSideSpacePost, ListFacetObjectsPayload, SideSpaceCatalogPost } from "@proxy/contracts";
+import type { FacetConfig, FacetObject, FacetSideSpacePost, ListFacetObjectsPayload, SideSpaceCatalogPost } from "@proxy/contracts";
 import { FacetClient, FacetProtocolError } from "../facet-client";
 import { ProxyIcon } from "../components/proxy-icon";
 import { Gradient, color, shadows } from "../theme";
@@ -419,13 +419,10 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
             </View>
           ) : null}
           {view === "OPS" ? (
-            <View style={styles.subPageCard}>
-              <Text style={styles.opsTitle}>运营边界</Text>
-              <Text style={styles.opsBody}>· 每份素材仅在允许的对象上展示，不虚构人设</Text>
-              <Text style={styles.opsBody}>· 缺口判定基于最近 7 天展示与互动，1 句总结</Text>
-              <Text style={styles.opsBody}>· 下次展示时间由 gap.nextShowAt 决定，前端仅展示不改写</Text>
-              <Text style={styles.subPageHint}>高级生成 / 规则引擎在后续版本开放</Text>
-            </View>
+            <OpsConfigPanel
+              client={client}
+              onClose={() => setView("HOME")}
+            />
           ) : null}
         </ScrollView>
       </View>
@@ -733,6 +730,27 @@ const styles = StyleSheet.create({
   groupChevron: { color: color.muted, fontSize: 14 },
   opsTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
   opsBody: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  // R15.51: 阈值滑块 / 按钮 / footer
+  opsError: { color: "#dc2626", fontSize: 11, lineHeight: 16, marginTop: 8, padding: 6, backgroundColor: "rgba(220, 38, 38, 0.08)", borderRadius: 4 },
+  opsSliderRow: { marginTop: 14, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(0,0,0,0.08)" },
+  opsSliderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  opsSliderLabel: { color: color.ink, fontSize: 12, fontWeight: "600", flex: 1 },
+  opsSliderValue: { color: color.magenta, fontSize: 16, fontWeight: "800", marginLeft: 8 },
+  opsSliderHint: { color: color.muted, fontSize: 10, lineHeight: 14, marginTop: 2 },
+  opsSliderControls: { flexDirection: "row", alignItems: "center", marginTop: 8 },
+  opsSliderBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: color.line, alignItems: "center", justifyContent: "center" },
+  opsSliderBtnText: { color: color.ink, fontSize: 16, fontWeight: "800" },
+  opsSliderBar: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", marginHorizontal: 8, height: 32 },
+  opsSliderDot: { width: 4, height: 16, backgroundColor: color.line, marginHorizontal: 1, borderRadius: 1 },
+  opsSliderDotActive: { backgroundColor: color.magenta },
+  opsConfigFooter: { marginTop: 16, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(0,0,0,0.12)" },
+  opsConfigVersion: { color: color.muted, fontSize: 10, lineHeight: 14, marginBottom: 8 },
+  opsConfigActions: { flexDirection: "row", justifyContent: "space-between" },
+  opsConfigCancel: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: color.line, alignItems: "center", marginRight: 8 },
+  opsConfigCancelText: { color: color.ink, fontSize: 12, fontWeight: "600" },
+  opsConfigSave: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: color.magenta, alignItems: "center" },
+  opsConfigSaveDisabled: { opacity: 0.4 },
+  opsConfigSaveText: { color: color.white, fontSize: 12, fontWeight: "700" },
 });
 
 // ---------- R15.43: 副空间添加 Modal ----------
@@ -785,5 +803,205 @@ function SideSpaceAddModal({ open, catalog, existing, busy, onClose, onAdd }: Si
         </View>
       </View>
     </Modal>
+  );
+}
+
+// ---------- R15.51 OpsConfigPanel (运营阈值实时编辑) ----------
+
+type OpsConfigPanelProps = {
+  client: FacetClient;
+  onClose: () => void;
+};
+
+function OpsConfigPanel({ client, onClose }: OpsConfigPanelProps): React.JSX.Element {
+  const [config, setConfig] = useState<FacetConfig | undefined>();
+  const [draft, setDraft] = useState<FacetConfig | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  // 加载当前 config
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    client.listFacetConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        setConfig(cfg);
+        setDraft(cfg);
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [client]);
+
+  // 拨动 draft (本地, 不发请求)
+  function updateDraft<K extends keyof FacetConfig>(key: K, value: FacetConfig[K]): void {
+    if (!draft) return;
+    setDraft({ ...draft, [key]: value });
+  }
+
+  // 提交 (乐观锁 expectedVersion)
+  async function handleSave(): Promise<void> {
+    if (!config || !draft) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      const updated = await client.updateFacetConfig({
+        expectedVersion: config.version,
+        patch: {
+          sideSpaceHighThreshold: draft.sideSpaceHighThreshold,
+          sideSpaceMidThreshold: draft.sideSpaceMidThreshold,
+          priorityMidBoundary: draft.priorityMidBoundary,
+          priorityHighBoundary: draft.priorityHighBoundary,
+          confidenceFloor: draft.confidenceFloor,
+          updatedBy: "ops_panel" // Phase 1.5 placeholder, 后续接 user id
+        }
+      });
+      setConfig(updated);
+      setDraft(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.subPageCard}>
+        <Text style={styles.opsTitle}>加载中…</Text>
+      </View>
+    );
+  }
+  if (!draft || !config) {
+    return (
+      <View style={styles.subPageCard}>
+        <Text style={styles.opsTitle}>加载失败</Text>
+        {error ? <Text style={styles.opsError}>{error}</Text> : null}
+      </View>
+    );
+  }
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(config);
+
+  return (
+    <View style={styles.subPageCard}>
+      <Text style={styles.opsTitle}>运营阈值</Text>
+      <Text style={styles.opsBody}>改动后点保存 — 乐观锁, 并发更新会被拒绝 (409)</Text>
+
+      <SliderRow
+        label="副空间 高意向阈值 (portfolio/capability)"
+        value={draft.sideSpaceHighThreshold}
+        min={0} max={10} step={1}
+        hint="够了就算「足够」 · 默认 2"
+        onChange={(v) => updateDraft("sideSpaceHighThreshold", v)}
+      />
+      <SliderRow
+        label="副空间 中意向阈值 (intro/services)"
+        value={draft.sideSpaceMidThreshold}
+        min={0} max={10} step={1}
+        hint="中意向 (priority 30-59) 专用 · 默认 2"
+        onChange={(v) => updateDraft("sideSpaceMidThreshold", v)}
+      />
+      <SliderRow
+        label="priority 中位边界"
+        value={draft.priorityMidBoundary}
+        min={0} max={100} step={5}
+        hint="CollaborationIntent ≥ 此值为中意向 · 默认 30"
+        onChange={(v) => updateDraft("priorityMidBoundary", v)}
+      />
+      <SliderRow
+        label="priority 高位边界"
+        value={draft.priorityHighBoundary}
+        min={0} max={100} step={5}
+        hint="CollaborationIntent ≥ 此值为高意向 · 默认 60"
+        onChange={(v) => updateDraft("priorityHighBoundary", v)}
+      />
+      <SliderRow
+        label="confidence 最低线"
+        value={draft.confidenceFloor}
+        min={0} max={100} step={5}
+        hint="低于此 confidence 的推荐不展示 · 默认 50"
+        onChange={(v) => updateDraft("confidenceFloor", v)}
+      />
+
+      <View style={styles.opsConfigFooter}>
+        <Text style={styles.opsConfigVersion}>Version: {config.version} (期望匹配才会保存)</Text>
+        {error ? <Text style={styles.opsError}>{error}</Text> : null}
+        <View style={styles.opsConfigActions}>
+          <Pressable
+            onPress={() => { setDraft(config); setError(undefined); }}
+            style={styles.opsConfigCancel}
+            disabled={!dirty || saving}
+          >
+            <Text style={styles.opsConfigCancelText}>重置</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => void handleSave()}
+            style={[styles.opsConfigSave, (!dirty || saving) ? styles.opsConfigSaveDisabled : null]}
+            disabled={!dirty || saving}
+          >
+            <Text style={styles.opsConfigSaveText}>{saving ? "保存中…" : "保存"}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+type SliderRowProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  hint: string;
+  onChange: (v: number) => void;
+};
+
+function SliderRow({ label, value, min, max, step, hint, onChange }: SliderRowProps): React.JSX.Element {
+  return (
+    <View style={styles.opsSliderRow}>
+      <View style={styles.opsSliderHeader}>
+        <Text style={styles.opsSliderLabel}>{label}</Text>
+        <Text style={styles.opsSliderValue}>{value}</Text>
+      </View>
+      <Text style={styles.opsSliderHint}>{hint}</Text>
+      {/* Phase 1.5: 用 +/- 按钮组代替 Slider (避免引入 react-native-community/slider 依赖) */}
+      <View style={styles.opsSliderControls}>
+        <Pressable
+          accessibilityLabel={`${label} 减少`}
+          onPress={() => onChange(Math.max(min, value - step))}
+          style={styles.opsSliderBtn}
+        >
+          <Text style={styles.opsSliderBtnText}>−</Text>
+        </Pressable>
+        <View style={styles.opsSliderBar}>
+          {Array.from({ length: Math.floor((max - min) / step) + 1 }, (_, i) => {
+            const v = min + i * step;
+            const active = v <= value;
+            return (
+              <View
+                key={v}
+                style={[styles.opsSliderDot, active ? styles.opsSliderDotActive : null]}
+              />
+            );
+          })}
+        </View>
+        <Pressable
+          accessibilityLabel={`${label} 增加`}
+          onPress={() => onChange(Math.min(max, value + step))}
+          style={styles.opsSliderBtn}
+        >
+          <Text style={styles.opsSliderBtnText}>＋</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }

@@ -153,6 +153,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/facet/objects", s.facetObjects)
 	mux.HandleFunc("/v1/facet/objects/", s.facetSideSpace)
 	mux.HandleFunc("/v1/facet/side-space/catalog", s.facetSideSpaceCatalog)
+	mux.HandleFunc("/v1/facet/config", s.facetConfig)
 	// R15.33: /v1/map/items 撤了 — LocationPickerSheet 直接用
 	// /v1/geocode/reverse (Photon proxy) 拿真实地址，不需要 server
 	// 拿 bbox 查 post/agent/order pin。Post pin overlay 如果要
@@ -1004,6 +1005,58 @@ func (s *Server) facetSideSpaceCatalog(w http.ResponseWriter, r *http.Request) {
 		posts = []facet.SideSpaceCatalogPost{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"posts": posts})
+}
+
+// facetConfig 处理 R15.51 运营阈值 CRUD:
+//   GET   /v1/facet/config     → 返当前 FacetConfig
+//   POST  /v1/facet/config     body: { expectedVersion, patch } → 更新 + 返新 config
+//
+// 设计: GET 匿名可读 (跟 ListFacetObjects 一致); POST 需要更新人
+// (UpdatedBy 必填) — 匿名返回 401。 Phase 1.5 匿名能 POST, 不出生产。
+// 乐观锁 expectedVersion 跟 repo.Update 一致, 不匹配返 409.
+func (s *Server) facetConfig(w http.ResponseWriter, r *http.Request) {
+	if s.Facet == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "facet_not_configured"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		cfg, err := s.Facet.ListFacetConfig(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "facet_config_get_failed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, cfg)
+	case http.MethodPost:
+		var req struct {
+			ExpectedVersion int                   `json:"expectedVersion"`
+			Patch           facet.FacetConfigPatch `json:"patch"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			return
+		}
+		if req.Patch.UpdatedBy == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "updated_by_required"})
+			return
+		}
+		updated, err := s.Facet.UpdateFacetConfig(r.Context(), req.ExpectedVersion, req.Patch)
+		if err != nil {
+			if errors.Is(err, facet.ErrConfigVersionMismatch) {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "config_version_mismatch"})
+				return
+			}
+			if errors.Is(err, facet.ErrConfigInvalidValue) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "config_invalid_value"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "facet_config_update_failed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, updated)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+	}
 }
 
 // reverseGeocode is a thin server-side proxy to Nominatim OpenStreetMap.

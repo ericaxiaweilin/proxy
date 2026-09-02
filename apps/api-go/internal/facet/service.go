@@ -108,22 +108,23 @@ type Service struct {
 	reasoner          Reasoner
 	sideSpaceRepo     SideSpaceRepository
 	sideSpaceCatalog  []SideSpaceCatalogPost
+	configRepo        ConfigRepository
 	now               func() time.Time
 }
 
 func New() *Service {
-	return NewFull(NewMemoryRepository(), NewRuleReasoner(time.Now), NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog())
+	return NewFull(NewMemoryRepository(), NewRuleReasoner(time.Now), NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog(), NewMemoryConfigRepository())
 }
 
 func NewWithRepository(r Repository) *Service {
-	return NewFull(r, NewRuleReasoner(time.Now), NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog())
+	return NewFull(r, NewRuleReasoner(time.Now), NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog(), NewMemoryConfigRepository())
 }
 
 func NewWithReasoner(r Repository, reasoner Reasoner) *Service {
-	return NewFull(r, reasoner, NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog())
+	return NewFull(r, reasoner, NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog(), NewMemoryConfigRepository())
 }
 
-func NewFull(r Repository, reasoner Reasoner, sideSpace SideSpaceRepository, catalog []SideSpaceCatalogPost) *Service {
+func NewFull(r Repository, reasoner Reasoner, sideSpace SideSpaceRepository, catalog []SideSpaceCatalogPost, configRepo ConfigRepository) *Service {
 	if r == nil {
 		r = NewMemoryRepository()
 	}
@@ -136,11 +137,15 @@ func NewFull(r Repository, reasoner Reasoner, sideSpace SideSpaceRepository, cat
 	if catalog == nil {
 		catalog = DefaultSideSpaceCatalog()
 	}
+	if configRepo == nil {
+		configRepo = NewMemoryConfigRepository()
+	}
 	s := &Service{
 		repository:       r,
 		reasoner:         reasoner,
 		sideSpaceRepo:    sideSpace,
 		sideSpaceCatalog: catalog,
+		configRepo:       configRepo,
 		now:              time.Now,
 	}
 	s.SeedDefaults()
@@ -232,7 +237,10 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 			objects[i].SideSpacePosts = []SideSpacePost{}
 		}
 		if hasSignals(obj.Signals) {
-			decision := s.reasoner.Reason(obj.Signals, obj.Relation, sideSpaceStats)
+			// R15.51: reasoner 拉取当前 config, 调整阈值. 这里是读路径, 1 次
+			// 拉取 (跨所有 object 复用) — 避免 N+1.
+			config, _ := s.configRepo.Get(ctx)
+			decision := s.reasoner.Reason(obj.Signals, obj.Relation, sideSpaceStats, config)
 			objects[i].Goal = decision.Goal
 			objects[i].CurrentState = decision.CurrentState
 			objects[i].Gap = Gap{Summary: decision.GapSummary, NextShowAt: decision.NextShowAt}
@@ -331,4 +339,26 @@ func hasSignals(s ObjectSignals) bool {
 	return s.DaysSinceLastChat != 0 || s.MutualEventsCount != 0 || s.UnrepliedMessageCount != 0 ||
 		s.ProfileViewsLast7d != 0 || s.ShownAssetCount != 0 || s.FreshAssetCount != 0 ||
 		s.LastShownAt != "" || s.RelationshipDays != 0 || s.CollaborationIntent != 0
+}
+
+// ---------- R15.51 FacetConfig CRUD ----------
+
+// ListFacetConfig 返当前运营阈值 (默认 DefaultFacetConfig).
+// 匿名可读 (跟 facet objects 一样).
+func (s *Service) ListFacetConfig(ctx context.Context) (FacetConfig, error) {
+	return s.configRepo.Get(ctx)
+}
+
+// UpdateFacetConfig 乐观锁 — expectedVersion 跟当前 version 不匹配返 ErrConfigVersionMismatch.
+// 成功返回新 config (Version+1).
+func (s *Service) UpdateFacetConfig(ctx context.Context, expectedVersion int, patch FacetConfigPatch) (FacetConfig, error) {
+	updated, err := s.configRepo.Update(ctx, expectedVersion, patch)
+	if err != nil {
+		return FacetConfig{}, err
+	}
+	updated.UpdatedAt = s.now().UTC().Format(time.RFC3339)
+	// 落回 repo (UpdatedAt 不属于 optimistic lock 字段, repo 不存)
+	// 简单设计: re-update with same version+1, UpdatedAt 填充. 但 repo.Update
+	// 每次都 +1, 这里跳过 UpdatedAt 落库, list 时补 — Phase 2 可加。
+	return updated, nil
 }

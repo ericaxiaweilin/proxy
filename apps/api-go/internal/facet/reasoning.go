@@ -74,8 +74,10 @@ type SideSpaceStats struct {
 //
 // R15.44 起 Reason 签名加 SideSpaceStats 参数，让副空间缺口判定
 // 实时反映副空间现状（不再仅靠 ShownAssetCount mock）。
+// R15.51: 加 FacetConfig 参数 — 运营可调阈值 (sideSpace threshold / priority
+// boundary / confidence floor) 从 config 读。
 type Reasoner interface {
-	Reason(signals ObjectSignals, relation string, sideSpace SideSpaceStats) ReasonedDecision
+	Reason(signals ObjectSignals, relation string, sideSpace SideSpaceStats, config FacetConfig) ReasonedDecision
 }
 
 // NewRuleReasoner 返回基于规则的 Reasoner。now 用于计算 nextShowAt。
@@ -100,15 +102,15 @@ type RuleReasoner struct {
 
 // Reason 是入口。relation 是 Object.Relation 字段（"BUILDING_TRUST"
 // 等）。signals 是 Object.Signals。sideSpace 是 R15.44 起的副空间
-// 实时统计（Service.List 算好传入）。
-func (r *RuleReasoner) Reason(signals ObjectSignals, relation string, sideSpace SideSpaceStats) ReasonedDecision {
+// 实时统计（Service.List 算好传入）。config 是 R15.51 运营阈值。
+func (r *RuleReasoner) Reason(signals ObjectSignals, relation string, sideSpace SideSpaceStats, config FacetConfig) ReasonedDecision {
 	switch relation {
 	case "BUILDING_TRUST":
-		return r.reasonBuildingTrust(signals, sideSpace)
+		return r.reasonBuildingTrust(signals, sideSpace, config)
 	case "SHARED_INTEREST":
-		return r.reasonSharedInterest(signals, sideSpace)
+		return r.reasonSharedInterest(signals, sideSpace, config)
 	case "CREATOR_COLLAB":
-		return r.reasonCreatorCollab(signals, sideSpace)
+		return r.reasonCreatorCollab(signals, sideSpace, config)
 	default:
 		// 未知 relation：返回低置信度的通用决策，不静默失败。
 		return ReasonedDecision{
@@ -133,7 +135,7 @@ func (r *RuleReasoner) Reason(signals ObjectSignals, relation string, sideSpace 
 //   - 其他 → 默认真实日常
 //
 // 重点关系无副空间概念（SideSpaceGap = ""）。
-func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals, _ SideSpaceStats) ReasonedDecision {
+func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals, _ SideSpaceStats, _ FacetConfig) ReasonedDecision {
 	if s.DaysSinceLastChat >= 7 && s.UnrepliedMessageCount > 0 {
 		return ReasonedDecision{
 			Goal:            "打破沉默，重建互动",
@@ -178,7 +180,7 @@ func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals, _ SideSpaceStats) Re
 //   - 默认 photo（摄影是常见 shared interest）
 //
 // 朋友无副空间概念（SideSpaceGap = ""）。
-func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals, _ SideSpaceStats) ReasonedDecision {
+func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals, _ SideSpaceStats, _ FacetConfig) ReasonedDecision {
 	if s.FreshAssetCount > 0 && s.DaysSinceLastChat <= 3 {
 		return ReasonedDecision{
 			Goal:            "趁热打铁激活共同兴趣",
@@ -229,11 +231,11 @@ func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals, _ SideSpaceStats) R
 //   - 副空间 intro/services >= 2 → 副空间已足够
 //   - 副空间 0 条 → 推 "还缺第一个"
 //   - 1 条 → 推 "还差 1 个"
-func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals, ss SideSpaceStats) ReasonedDecision {
-	if s.CollaborationIntent >= 60 {
+func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals, ss SideSpaceStats, config FacetConfig) ReasonedDecision {
+	if s.CollaborationIntent >= config.PriorityHighBoundary {
 		// 高意向：盯 portfolio/capability
 		count := ss.KindCounts["portfolio/capability"]
-		sideGap, fulfilled := sideSpaceGapForKind(ss, "portfolio/capability", 2)
+		sideGap, fulfilled := sideSpaceGapForKind(ss, "portfolio/capability", config.SideSpaceHighThreshold)
 		if fulfilled {
 			sideGap = fmt.Sprintf("副空间已有 %d 个作品 / %d 个 portfolio/capability, 已足够, 下一个可以拓展合作案例对比图", ss.Total, count)
 		}
@@ -249,10 +251,10 @@ func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals, ss SideSpaceStats) R
 			SideSpaceFulfilled: fulfilled,
 		}
 	}
-	if s.CollaborationIntent >= 30 {
+	if s.CollaborationIntent >= config.PriorityMidBoundary {
 		// 中意向：盯 intro/services
 		count := ss.KindCounts["intro/services"]
-		sideGap, fulfilled := sideSpaceGapForKind(ss, "intro/services", 2)
+		sideGap, fulfilled := sideSpaceGapForKind(ss, "intro/services", config.SideSpaceMidThreshold)
 		if fulfilled {
 			sideGap = fmt.Sprintf("副空间已有 %d 个作品 / %d 个 intro/services, 已足够, 下一个可以拓展服务过程近景", ss.Total, count)
 		}

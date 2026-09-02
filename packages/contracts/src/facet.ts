@@ -199,3 +199,52 @@ export type ListExperiencesPayload = z.infer<typeof ListExperiencesPayloadSchema
 export function parseListExperiencesPayload(raw: unknown): ListExperiencesPayload {
   return ListExperiencesPayloadSchema.parse(raw);
 }
+
+// ---------- R15.51 FacetConfig ----------
+
+// FacetConfig — 运营可调的 reasoner 阈值 (server config.go 1:1 对应).
+// 阈值变化会立即影响下一次 reasoner 调用 (Service.List 拉 config 后注入).
+export const FacetConfigSchema = z.object({
+  sideSpaceHighThreshold: z.number().int().min(0).max(20),
+  sideSpaceMidThreshold: z.number().int().min(0).max(20),
+  priorityMidBoundary: z.number().int().min(0).max(100),
+  priorityHighBoundary: z.number().int().min(0).max(100),
+  confidenceFloor: z.number().int().min(0).max(100),
+  updatedAt: z.string(),
+  updatedBy: z.string(),
+  version: z.number().int().min(1)
+});
+export type FacetConfig = z.infer<typeof FacetConfigSchema>;
+
+// FacetConfigPatchSchema — POST body, 字段均 optional (只更非空字段).
+// updatedBy 必填 (server 拒空).
+export const FacetConfigPatchSchema = z.object({
+  sideSpaceHighThreshold: z.number().int().min(0).max(20).optional(),
+  sideSpaceMidThreshold: z.number().int().min(0).max(20).optional(),
+  priorityMidBoundary: z.number().int().min(0).max(100).optional(),
+  priorityHighBoundary: z.number().int().min(0).max(100).optional(),
+  confidenceFloor: z.number().int().min(0).max(100).optional(),
+  updatedBy: z.string().min(1)
+});
+export type FacetConfigPatch = z.infer<typeof FacetConfigPatchSchema>;
+
+// UpdateFacetConfigPayloadSchema — POST /v1/facet/config body 完整形状.
+export const UpdateFacetConfigPayloadSchema = z.object({
+  expectedVersion: z.number().int().min(1),
+  patch: FacetConfigPatchSchema
+});
+export type UpdateFacetConfigPayload = z.infer<typeof UpdateFacetConfigPayloadSchema>;
+
+/**
+ * Type guard: 校验 ListFacetConfig 响应 (server 返 FacetConfig JSON).
+ */
+export function parseFacetConfig(raw: unknown): FacetConfig {
+  return FacetConfigSchema.parse(raw);
+}
+
+/**
+ * Type guard: 校验 UpdateFacetConfig 请求 body (client 出).
+ */
+export function parseUpdateFacetConfigPayload(raw: unknown): UpdateFacetConfigPayload {
+  return UpdateFacetConfigPayloadSchema.parse(raw);
+}
