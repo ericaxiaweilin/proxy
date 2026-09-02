@@ -100,3 +100,97 @@ func TestFeedPreferenceAndReportRejectUnknownValues(t *testing.T) {
 		t.Fatalf("unexpected report result: %#v", result)
 	}
 }
+
+// ---------- R15.45 MuteAuthor ----------
+
+// TestMuteAuthor_HappyPath —— 正常 mute，state = MUTED
+func TestMuteAuthor_HappyPath(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": "author_xyz"}, "user_001"))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", result)
+	}
+	if result.Aggregate.State != "MUTED" {
+		t.Errorf("expected state=MUTED, got %q", result.Aggregate.State)
+	}
+	if result.Aggregate == nil || result.Aggregate.ID == "" {
+		t.Error("expected Aggregate.ID (mute id)")
+	}
+}
+
+// TestMuteAuthor_Idempotent —— 重复 mute 同 author → ALREADY_MUTED，不发新事件
+func TestMuteAuthor_Idempotent(t *testing.T) {
+	s := New()
+	r1 := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": "author_xyz"}, "user_001"))
+	if r1.Aggregate.State != "MUTED" {
+		t.Fatalf("first mute should be MUTED, got %q", r1.Aggregate.State)
+	}
+	r2 := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": "author_xyz"}, "user_001"))
+	if r2.Aggregate.State != "ALREADY_MUTED" {
+		t.Errorf("second mute should be ALREADY_MUTED, got %q", r2.Aggregate.State)
+	}
+	if r1.Aggregate.ID != r2.Aggregate.ID {
+		t.Errorf("idempotent should return same id, got %s vs %s", r1.Aggregate.ID, r2.Aggregate.ID)
+	}
+}
+
+// TestMuteAuthor_CannotMuteSelf —— actor == author 拒绝
+// envelopeFor hardcodes actor.ID = "user_001", so authorId = "user_001" simulates self-mute.
+func TestMuteAuthor_CannotMuteSelf(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": "user_001"}, "user_001"))
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("self-mute should be REJECTED, got %#v", result)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "CANNOT_MUTE_SELF" {
+		t.Errorf("expected CANNOT_MUTE_SELF, got %#v", result.Error)
+	}
+}
+
+// TestMuteAuthor_RequiresAuthorID —— 缺 authorId 拒绝
+func TestMuteAuthor_RequiresAuthorID(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeFor("MuteAuthor", map[string]any{}, "user_001"))
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("missing authorId should be REJECTED, got %#v", result)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "INVALID_MUTE_AUTHOR" {
+		t.Errorf("expected INVALID_MUTE_AUTHOR, got %#v", result.Error)
+	}
+}
+
+// TestMuteAuthor_GuestNotAllowed —— 访客不能 mute
+func TestMuteAuthor_GuestNotAllowed(t *testing.T) {
+	s := New()
+	// 用 PUBLIC actor (不是 USER) — 应被拒
+	env := envelopeFor("MuteAuthor", map[string]any{"authorId": "author_xyz"}, "public_reader")
+	env.Actor.Type = "PUBLIC"
+	result := s.Handle(env)
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("guest mute should be REJECTED, got %#v", result)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "MUTE_AUTHOR_NOT_ALLOWED" {
+		t.Errorf("expected MUTE_AUTHOR_NOT_ALLOWED, got %#v", result.Error)
+	}
+}
+
+// TestMuteAuthor_PerUserIsolation —— 同一 author 被不同 user mute 是独立记录
+// (envelopeFor hardcodes actor.ID="user_001"; 模拟第二个用户需要新建 envelope)
+func TestMuteAuthor_PerUserIsolation(t *testing.T) {
+	s := New()
+	r1 := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": "author_xyz"}, "user_001"))
+	if r1.Aggregate.State != "MUTED" {
+		t.Fatalf("user_001 mute failed: %#v", r1)
+	}
+	// 第二个用户用独立 envelope (手动构造)
+	env2 := envelopeFor("MuteAuthor", map[string]any{"authorId": "author_xyz"}, "user_001")
+	env2.Actor = command.Actor{Type: "USER", ID: "user_002"}
+	env2.Principal = command.Principal{Type: "INDIVIDUAL", ID: "user_002"}
+	r2 := s.Handle(env2)
+	if r2.Aggregate.State != "MUTED" {
+		t.Errorf("user_002 mute should be fresh MUTED, got %q", r2.Aggregate.State)
+	}
+	if r1.Aggregate.ID == r2.Aggregate.ID {
+		t.Error("per-user mutes should have different ids")
+	}
+}

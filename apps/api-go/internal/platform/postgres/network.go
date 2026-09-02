@@ -649,6 +649,38 @@ func (r *EngagementRepository) AddPostReport(ctx context.Context, report engagem
 	return err
 }
 
+// AddMutedAuthor R15.45 — 幂等 mute 记录。
+// ON CONFLICT (actor_id, author_id) DO NOTHING + RETURNING 用于检测是否新插入。
+// 返回 (record, alreadyExisted, error).
+func (r *EngagementRepository) AddMutedAuthor(ctx context.Context, mute engagement.MutedAuthor) (engagement.MutedAuthor, bool, error) {
+	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		INSERT INTO engagement.muted_authors (id, actor_id, author_id, created_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (actor_id, author_id) DO NOTHING
+		RETURNING id, actor_id, author_id, created_at`, mute.ID, mute.ActorID, mute.AuthorID, mute.CreatedAt)
+	var out engagement.MutedAuthor
+	if err := row.Scan(&out.ID, &out.ActorID, &out.AuthorID, &out.CreatedAt); err != nil {
+		// ON CONFLICT 不命中: SELECT 现有记录
+		if err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+			SELECT id, actor_id, author_id, created_at FROM engagement.muted_authors
+			WHERE actor_id=$1 AND author_id=$2`, mute.ActorID, mute.AuthorID).Scan(&out.ID, &out.ActorID, &out.AuthorID, &out.CreatedAt); err != nil {
+			return engagement.MutedAuthor{}, false, err
+		}
+		return out, true, nil
+	}
+	return out, false, nil
+}
+
+func (r *EngagementRepository) IsMuted(ctx context.Context, actorID, authorID string) (bool, error) {
+	var count int
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT COUNT(*) FROM engagement.muted_authors
+		WHERE actor_id=$1 AND author_id=$2`, actorID, authorID).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r *EngagementRepository) Engagement(ctx context.Context, postID string) (engagement.PostEngagement, error) {
 	e := engagement.PostEngagement{PostID: postID}
 	var reactions, replies, reposts int

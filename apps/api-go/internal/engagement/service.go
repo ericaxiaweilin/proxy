@@ -77,6 +77,23 @@ type PostReport struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// MutedAuthor 是 R15.45 引入的"屏蔽作者"关系记录。
+//
+// 设计：与 FeedPreference.REDUCE_AUTHOR 区别：
+//   - REDUCE_AUTHOR 是 feed 推荐信号（"少推 Ta"），算法层
+//   - MuteAuthor 是关系层（"我屏蔽 Ta，全部看不到"），UI 层
+//
+// 二者都持久化，但 MuteAuthor 优先级更高 — 一旦 mute，feed 应
+// 直接过滤（不展示任何 Ta 的 post），跟 REDUCE_AUTHOR 是否存在无关。
+//
+// 复合主键 (ActorID, AuthorID) — 重复 mute 同一作者幂等。
+type MutedAuthor struct {
+	ID        string    `json:"muteId"`
+	ActorID   string    `json:"actorId"`
+	AuthorID  string    `json:"authorId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // PostEngagement 是某帖子的互动汇总（读取视图）。
 type PostEngagement struct {
 	PostID     string `json:"postId"`
@@ -95,6 +112,10 @@ type Repository interface {
 	AddBookmark(ctx context.Context, b Bookmark) error
 	AddFeedPreference(ctx context.Context, preference FeedPreference) error
 	AddPostReport(ctx context.Context, report PostReport) error
+	// AddMutedAuthor 幂等：同一 (ActorID, AuthorID) 重复 mute 返回已存在记录。
+	// IsMuted 查 actor 是否屏蔽了 author（feed 过滤用）。
+	AddMutedAuthor(ctx context.Context, mute MutedAuthor) (MutedAuthor, bool, error)
+	IsMuted(ctx context.Context, actorID, authorID string) (bool, error)
 	Engagement(ctx context.Context, postID string) (PostEngagement, error)
 }
 
@@ -109,6 +130,7 @@ type MemoryRepository struct {
 	bookmarks   map[string]Bookmark
 	preferences map[string]FeedPreference
 	reports     map[string]PostReport
+	mutes       map[string]MutedAuthor // key = actorID + "|" + authorID
 	events      []event.DomainEvent
 }
 
@@ -121,6 +143,7 @@ func NewMemoryRepository() *MemoryRepository {
 		bookmarks:   make(map[string]Bookmark),
 		preferences: make(map[string]FeedPreference),
 		reports:     make(map[string]PostReport),
+		mutes:       make(map[string]MutedAuthor),
 	}
 }
 
@@ -173,6 +196,26 @@ func (r *MemoryRepository) AddPostReport(_ context.Context, report PostReport) e
 	return nil
 }
 
+// AddMutedAuthor 幂等：同一 (ActorID, AuthorID) 重复 mute 返回已存在记录。
+// 返回 (record, alreadyExisted, error) — alreadyExisted=true 时 record 是旧的。
+func (r *MemoryRepository) AddMutedAuthor(_ context.Context, mute MutedAuthor) (MutedAuthor, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := mute.ActorID + "|" + mute.AuthorID
+	if existing, ok := r.mutes[key]; ok {
+		return existing, true, nil
+	}
+	r.mutes[key] = mute
+	return mute, false, nil
+}
+
+func (r *MemoryRepository) IsMuted(_ context.Context, actorID, authorID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.mutes[actorID+"|"+authorID]
+	return ok, nil
+}
+
 func (r *MemoryRepository) Engagement(_ context.Context, postID string) (PostEngagement, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -214,7 +257,7 @@ func NewWithRepository(repository Repository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "FollowProfile", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost":
+	case "FollowProfile", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor":
 		return true
 	default:
 		return false
@@ -245,6 +288,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordFeedPreference(ctx, e)
 	case "ReportPost":
 		return s.reportPost(ctx, e)
+	case "MuteAuthor":
+		return s.muteAuthor(ctx, e)
 	default:
 		return command.Rejected(e, "ENGAGEMENT_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "engagement.unsupported_command", nil)
 	}
@@ -421,6 +466,44 @@ func (s *Service) reportPost(ctx context.Context, e command.Envelope) command.Re
 		return command.Rejected(e, "POST_REPORT_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.post_report_failed", nil)
 	}
 	return command.Accepted(e, "PostReport", report.ID, 1, report.State, nil)
+}
+
+// ---------- MuteAuthor ----------
+
+type muteAuthorPayload struct {
+	AuthorID string `json:"authorId"`
+}
+
+func (s *Service) muteAuthor(ctx context.Context, e command.Envelope) command.Result {
+	var p muteAuthorPayload
+	if !decode(e.Payload, &p) || p.AuthorID == "" {
+		return command.Rejected(e, "INVALID_MUTE_AUTHOR", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_mute_author", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "MUTE_AUTHOR_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.mute_author_not_allowed", nil)
+	}
+	if e.Actor.ID == p.AuthorID {
+		return command.Rejected(e, "CANNOT_MUTE_SELF", "VALIDATION", "AFTER_USER_ACTION", "engagement.cannot_mute_self", nil)
+	}
+	mute := MutedAuthor{ID: newID("mute_"), ActorID: e.Actor.ID, AuthorID: p.AuthorID, CreatedAt: s.clock.Now().UTC()}
+	stored, alreadyExisted, err := s.repository.AddMutedAuthor(ctx, mute)
+	if err != nil {
+		return command.Rejected(e, "MUTE_AUTHOR_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.mute_author_failed", nil)
+	}
+	// 幂等：重复 mute 不发新事件（避免 audit log 重复）。
+	var eventRefsOut []string
+	if !alreadyExisted {
+		domainEvents := []event.DomainEvent{event.New("AuthorMuted", "MuteAuthor", stored.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, stored.CreatedAt, map[string]any{
+			"actorId":  stored.ActorID,
+			"authorId": stored.AuthorID,
+		})}
+		eventRefsOut = eventRefs(domainEvents)
+	}
+	state := "MUTED"
+	if alreadyExisted {
+		state = "ALREADY_MUTED"
+	}
+	return command.Accepted(e, "MutedAuthor", stored.ID, 1, state, eventRefsOut)
 }
 
 func oneOf(value string, allowed ...string) bool {

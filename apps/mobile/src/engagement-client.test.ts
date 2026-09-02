@@ -61,3 +61,70 @@ describe("EngagementClient moderation actions", () => {
     expect(transportCalled).toBe(false);
   });
 });
+
+// ---------- R15.45: MuteAuthor ----------
+
+describe("EngagementClient.muteAuthor", () => {
+  async function makeAuthenticatedStore() {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    await store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+    });
+    return store;
+  }
+
+  it("POSTs MuteAuthor command with { authorId } body", async () => {
+    let capturedPath = "";
+    let capturedMethod = "";
+    let capturedBody: unknown = null;
+    const store = await makeAuthenticatedStore();
+    const client = new EngagementClient({
+      secureSessionStore: store,
+      authClient: {
+        request: async (path, init) => {
+          capturedPath = path;
+          capturedMethod = String(init.method);
+          capturedBody = init.body;
+          const envelope = init.body as Record<string, unknown>;
+          return { status: 200, json: async () => ({ commandId: envelope.commandId, outcome: "ACCEPTED", aggregate: { id: "mute_1", state: "MUTED" }, eventRefs: [], correlationId: envelope.correlationId }) };
+        }
+      }
+    });
+    await client.muteAuthor("author_xyz");
+    expect(capturedPath).toBe("/v1/commands/MuteAuthor");
+    expect(capturedMethod).toBe("POST");
+    const body = capturedBody as { payload?: { authorId?: string } };
+    expect(body?.payload?.authorId).toBe("author_xyz");
+  });
+
+  it("throws on server rejection (e.g. cannot mute self)", async () => {
+    const store = await makeAuthenticatedStore();
+    const client = new EngagementClient({
+      secureSessionStore: store,
+      authClient: {
+        request: async () => ({
+          status: 200,
+          json: async () => ({ outcome: "REJECTED", error: { errorCode: "CANNOT_MUTE_SELF", messageKey: "engagement.cannot_mute_self" }, eventRefs: [] })
+        })
+      }
+    });
+    await expect(client.muteAuthor("user_001")).rejects.toThrow();
+  });
+
+  it("throws on offline fallback session", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    await store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 },
+      serverSession: false
+    });
+    const client = new EngagementClient({
+      secureSessionStore: store,
+      authClient: { request: async () => { throw new Error("should not be called"); } }
+    });
+    await expect(client.muteAuthor("author_xyz")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
+  });
+});
