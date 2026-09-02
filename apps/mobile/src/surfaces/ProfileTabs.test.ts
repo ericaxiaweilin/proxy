@@ -200,3 +200,33 @@ describe("R15.56 — 置顶帖状态 (ProfileTabs.pinnedPost)", () => {
     expect(sortPinnedFirst(posts, [])).toEqual(["post_1", "post_2"]);
   });
 });
+
+describe("R15.59 — viewer mode 决定 (SELF vs OTHER)", () => {
+  // me.tsx 逻辑: isSelfProfile = !viewerAccountId || viewingProfileId === viewerAccountId
+  function isSelfProfile(viewerAccountId: string | undefined, viewingProfileId: string | undefined): boolean {
+    if (!viewerAccountId) return true;
+    return viewingProfileId === viewerAccountId;
+  }
+  function viewerModeFor(viewerAccountId: string | undefined, viewingProfileId: string | undefined): "SELF" | "OTHER" {
+    return isSelfProfile(viewerAccountId, viewingProfileId) ? "SELF" : "OTHER";
+  }
+
+  it("未登录 → SELF (看自己 profile demo)", () => {
+    expect(viewerModeFor(undefined, undefined)).toBe("SELF");
+  });
+
+  it("已登录 + 看自己 → SELF", () => {
+    expect(viewerModeFor("user_001", "user_001")).toBe("SELF");
+  });
+
+  it("已登录 + 看别人 → OTHER", () => {
+    expect(viewerModeFor("user_001", "user_002")).toBe("OTHER");
+  });
+
+  it("已登录 + viewingProfileId = undefined → OTHER (实现是 viewingProfileId || viewerAccountId default)", () => {
+    // me.tsx: const viewingProfileId = viewerAccountId; // Phase 2: 路由控
+    // 所以 viewingProfileId 实际不会 undefined, 总是 fallback to viewerAccountId.
+    // 这个 case 测: 严格按 isSelfProfile 逻辑
+    expect(viewerModeFor("user_001", undefined)).toBe("OTHER");
+  });
+});

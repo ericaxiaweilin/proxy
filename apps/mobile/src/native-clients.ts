@@ -16,6 +16,7 @@ import { Platform } from "react-native";
 import { SessionAuthClient, type Transport } from "./auth-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
+import { EngagementClient } from "./engagement-client";
 
 const APP_VERSION = "1.0.0";
 
@@ -57,3 +58,6 @@ export const sessionAuthClient = new SessionAuthClient({
   secureSessionStore: nativeSecureSessionStore,
   transport: nativeTransport
 });
+
+// R15.59: 关注/置顶/点赞/举报 client. 跨 surface 共享 (me, profile, feed, ...).
+export const nativeEngagementClient = new EngagementClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });

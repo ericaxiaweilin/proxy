@@ -29,6 +29,7 @@ import { createLastSignInStore, maskIdentifier, avatarLetterFor, type LastSignIn
 import { AppShell } from "./shell/app-shell";
 import { color, Gradient, shadows } from "./theme";
 import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore } from "./native-clients";
+import { SECURE_SESSION_STORAGE_KEY } from "./secure-session";
 import { getOrCreateDeviceIdentity, rotateDeviceIdentity, INSTALLATION_DEVICE_ID_KEY } from "./device-credential";
 
 const APP_VERSION = "1.0.0";
@@ -68,8 +69,11 @@ async function getNativeLoginClient(): Promise<LoginClient> {
 
 async function rotateGuestDeviceIdentity(): Promise<LoginClient> {
   await rotateDeviceIdentity(nativeSecureStorageDriver);
+  // 重建 client 并更新 module-level cache, 避免后续调用仍用旧 deviceId
   nativeLoginClient = undefined;
-  return getNativeLoginClient();
+  const client = await getNativeLoginClient();
+  nativeLoginClient = client;
+  return client;
 }
 
 const GUEST_FLAG_KEY = "proxy.isGuest.v1";
@@ -401,12 +405,22 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           err instanceof LoginCommandRejectedError &&
           (err.result.error?.errorCode === "PASSWORDLESS_IDENTITY_UNAVAILABLE" ||
             err.result.error?.errorCode === "LOGIN_PROVIDER_NOT_CONFIGURED" ||
-            err.result.error?.errorCode === "ACCOUNT_NOT_ACTIVE")
+            err.result.error?.errorCode === "ACCOUNT_NOT_ACTIVE" ||
+            err.result.error?.errorCode === "INVALID_ACCESS_TOKEN")
         ) {
           let retrySucceeded = false;
           try {
             // eslint-disable-next-line no-console
             console.log("[proxy.login] rotating deviceId and retrying BeginPasswordlessAuthentication");
+            // INVALID_ACCESS_TOKEN = 旧 keychain session 失效 (server 重启), 先清 keychain
+            if (err.result.error?.errorCode === "INVALID_ACCESS_TOKEN") {
+              try {
+                await nativeSecureStorageDriver.deleteItem(SECURE_SESSION_STORAGE_KEY);
+                console.log("[proxy.login] cleared stale keychain session for INVALID_ACCESS_TOKEN");
+              } catch (clearErr) {
+                console.log("[proxy.login] keychain clear skipped:", clearErr instanceof Error ? clearErr.message : String(clearErr));
+              }
+            }
             const rotated = await rotateGuestDeviceIdentity();
             const result = await rotated.beginPasswordlessAuthentication({
               channel: isEmail ? "EMAIL" : "SMS",
