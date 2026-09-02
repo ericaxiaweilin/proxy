@@ -1,6 +1,7 @@
 package experience
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -116,5 +117,99 @@ func TestRejectsUnknownContext(t *testing.T) {
 
 	if result.Error == nil || result.Error.ErrorCode != "INVALID_EXPERIENCE_CONTEXT" {
 		t.Fatalf("unexpected error: %+v", result.Error)
+	}
+}
+
+// ---------- R15.49 ListExperiences ----------
+
+func TestListExperiences_HappyPath(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	result := svc.HandleContext(context.Background(), envelopeForListExperiences())
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", result)
+	}
+	if result.Aggregate.State != "LISTED" {
+		t.Errorf("expected state=LISTED, got %q", result.Aggregate.State)
+	}
+	var payload struct {
+		Experiences []ExperienceSummary `json:"experiences"`
+		Count       int                 `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &payload); err != nil {
+		t.Fatalf("failed to parse OperationRef: %v", err)
+	}
+	if payload.Count != 24 {
+		t.Errorf("expected 24 default experiences, got %d", payload.Count)
+	}
+	if len(payload.Experiences) != 24 {
+		t.Errorf("expected 24 entries, got %d", len(payload.Experiences))
+	}
+	// 验证字段被正确序列化
+	first := payload.Experiences[0]
+	if first.ExperienceID == "" || first.Title == "" || first.Category == "" || first.Origin == "" {
+		t.Errorf("first experience missing required fields: %+v", first)
+	}
+}
+
+func TestListExperiences_AnonymousAllowed(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	env := envelopeForListExperiences()
+	env.Actor = command.Actor{Type: "PUBLIC", ID: "anon"}
+	result := svc.HandleContext(context.Background(), env)
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("anonymous should be allowed, got %#v", result)
+	}
+}
+
+func TestListExperiences_CustomSeed(t *testing.T) {
+	custom := []ExperienceSummary{
+		{ExperienceID: "exp_a", Title: "A", Category: "X", Origin: "PLATFORM", City: "HCMC", Status: "OPEN", Capacity: 5, Interested: 2},
+		{ExperienceID: "exp_b", Title: "B", Category: "Y", Origin: "MERCHANT", City: "HANOI", Status: "OPEN", Capacity: 10, Interested: 3},
+	}
+	repo := NewMemoryRepositoryWithSeed(custom)
+	svc := NewWithRepository(repo)
+	result := svc.HandleContext(context.Background(), envelopeForListExperiences())
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", result)
+	}
+	var payload struct {
+		Experiences []ExperienceSummary `json:"experiences"`
+		Count       int                 `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &payload); err != nil {
+		t.Fatalf("failed to parse OperationRef: %v", err)
+	}
+	if payload.Count != 2 {
+		t.Errorf("expected 2 seeded, got %d", payload.Count)
+	}
+	if payload.Experiences[0].City != "HCMC" || payload.Experiences[1].City != "HANOI" {
+		t.Errorf("seeded data not preserved: %+v", payload.Experiences)
+	}
+}
+
+func TestListExperiences_NoRepository(t *testing.T) {
+	svc := New() // 不带 repository
+	result := svc.HandleContext(context.Background(), envelopeForListExperiences())
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("expected REJECTED without repository, got %#v", result)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "EXPERIENCE_LIST_NO_REPOSITORY" {
+		t.Errorf("expected EXPERIENCE_LIST_NO_REPOSITORY, got %#v", result.Error)
+	}
+}
+
+func envelopeForListExperiences() command.Envelope {
+	return command.Envelope{
+		CommandID:      "cmd_list_exp_001",
+		CommandType:    CommandListExperiences,
+		CommandVersion: 1,
+		Actor:          command.Actor{Type: "USER", ID: "user_001"},
+		Principal:      command.Principal{Type: "INDIVIDUAL", ID: "user_001"},
+		Target:         command.Target{Type: "Experience", ID: "list"},
+		IdempotencyKey: "test_list_exp_123",
+		AuthContext:    map[string]any{"session": "s1"},
+		Purpose:        "test",
 	}
 }

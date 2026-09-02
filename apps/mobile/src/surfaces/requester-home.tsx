@@ -13,6 +13,7 @@ import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
+import type { ExperienceClient } from "../experience-client";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
@@ -82,6 +83,7 @@ export function RequesterHome({
   demandClient,
   marketplace,
   activities,
+  experiences,
   onCreateScene,
   onChromeVisibilityChange,
   bottomNavVisible,
@@ -97,6 +99,8 @@ export function RequesterHome({
   // server 端 ListMarketOpportunities / ListActivities 不限 actor, 匿名可读.
   marketplace?: MarketplaceClient;
   activities?: ActivityClient;
+  // R15.49 — experience count 从 server 拉 (替换 hardcode 24).
+  experiences?: ExperienceClient;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
@@ -131,13 +135,14 @@ export function RequesterHome({
   // R15.22 fix: 市场脉动计数状态.
   //   - opportunityCount: server 端 ListMarketOpportunities 返的 list 长度
   //   - activityCount:    server 端 ListActivities 返的 list 长度
-  //   - experienceCount:  暂无法从 server 拿 (ListExperiences 未联), 保留
-  //     r157 基线 24 作为 fallback, 避免 UI 突变 — 拉倒后 可查后补 API.
+  //   - experienceCount:  R15.49 接入 server ListExperiences 返 list 长度,
+  //     替换 r157 基线 24 hardcode.
   //   - pulseState: "idle" | "loading" | "loaded" | "error"
   //     初始 state="loading", 拉成功→loaded, 失败→error 但继续展示
   //     最后已知计数 (或 fallback) — 与 homeItemsState 互不干扰.
   const [opportunityCount, setOpportunityCount] = useState<number | null>(null);
   const [activityCount, setActivityCount] = useState<number | null>(null);
+  const [experienceCount, setExperienceCount] = useState<number | null>(null);
   const [pulseState, setPulseState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   // HomeItemsLoadState distinguishes the three post-auth states:
   //   "idle"    — no fetch attempted yet (initial render)
@@ -198,12 +203,12 @@ export function RequesterHome({
   }, [demandClient]);
 
   // R15.22 fix: 市场脉动计数 (机会/活动) 从 server 拉 — 替代 r157MarketPulse
-  // 硬编码 24/46/18. 体验 暂保留 fallback 24 (ListExperiences 未联, 调后补).
-  // marketplace / activities 跟 demandClient 同样为 undefined 表示匿名
+  // 硬编码 24/46/18. R15.49 把"体验 24"也接入 ListExperiences.
+  // marketplace / activities / experiences 跟 demandClient 同样为 undefined 表示匿名
   // (R15.22 WIP 期间, 上层可能未传), 跟 homeItemsState 一样保持
   // placeholder, 不报 "加载失败".
   useEffect(() => {
-    if (!marketplace && !activities) {
+    if (!marketplace && !activities && !experiences) {
       setPulseState("idle");
       return;
     }
@@ -211,9 +216,10 @@ export function RequesterHome({
     setPulseState("loading");
     (async () => {
       // 并行拉取, 各自包 try/catch — 某个失败不影响另一个.
-      const next: { opportunityCount: number | null; activityCount: number | null; anyError: boolean } = {
+      const next: { opportunityCount: number | null; activityCount: number | null; experienceCount: number | null; anyError: boolean } = {
         opportunityCount: null,
         activityCount: null,
+        experienceCount: null,
         anyError: false
       };
       if (marketplace) {
@@ -234,15 +240,25 @@ export function RequesterHome({
           next.anyError = true;
         }
       }
+      if (experiences) {
+        try {
+          const list = await experiences.listExperiences();
+          if (cancelled) return;
+          next.experienceCount = list.length;
+        } catch {
+          next.anyError = true;
+        }
+      }
       if (cancelled) return;
       if (next.opportunityCount !== null) setOpportunityCount(next.opportunityCount);
       if (next.activityCount !== null) setActivityCount(next.activityCount);
+      if (next.experienceCount !== null) setExperienceCount(next.experienceCount);
       setPulseState(next.anyError ? "error" : "loaded");
     })();
     return () => {
       cancelled = true;
     };
-  }, [marketplace, activities]);
+  }, [marketplace, activities, experiences]);
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
   const visibleRef = useRef(true);
@@ -470,7 +486,7 @@ export function RequesterHome({
           <View style={styles.marketPulseNums}>
             {(
               [
-                ["24", "体验"],
+                [experienceCount !== null ? String(experienceCount) : "—", "体验"],
                 [opportunityCount !== null ? String(opportunityCount) : "—", "机会"],
                 [activityCount !== null ? String(activityCount) : "—", "活动"]
               ] as const

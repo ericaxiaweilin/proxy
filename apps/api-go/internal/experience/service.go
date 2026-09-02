@@ -13,9 +13,36 @@ const CommandGetExperienceManifest = "GetExperienceManifest"
 
 const CommandCompileExperienceSurface = "CompileExperienceSurface"
 
+// R15.49 — ListExperiences: 拉取所有可见体验。request home "体验"计数从 24 hardcode
+// 改走 server。client 匿名可调（跟 ListMarketOpportunities / ListActivities 同策略）。
+const CommandListExperiences = "ListExperiences"
+
+// ExperienceSummary — R15.49 拉“可见体验”列表的轻量 DTO。
+// 不走 runtime.SurfacePlan (那会调用 Decision Engine 拼 schema，太重)。
+// 列出“体验名/类别/位置/状态”，client 用来:
+//   - Home tab 计数 (体验 24/机会 18/活动 46 → 从 server 拉)
+//   - future: 体验列表 UI (类似 activities 列表)
+//
+// Origin: PLATFORM (平台预置) | MERCHANT (商家发布) | USER (用户自建)
+type ExperienceSummary struct {
+	ExperienceID string  `json:"experienceId"`
+	Title        string  `json:"title"`
+	Category     string  `json:"category"`
+	Origin       string  `json:"origin"`
+	City         string  `json:"city,omitempty"`
+	StartTime    *string `json:"startTime,omitempty"`
+	Price        string  `json:"price,omitempty"`
+	Status       string  `json:"status,omitempty"`
+	Capacity     int     `json:"capacity,omitempty"`
+	Interested   int     `json:"interested"`
+}
+
 type Repository interface {
 	CreateIntent(ctx context.Context, intent runtime.ExperienceIntent) error
 	CreateSurfacePlan(ctx context.Context, plan runtime.SurfacePlan) error
+	// R15.49 — ListExperiences 的数据源。
+	// 返 ExperienceSummary 列表，列表为”可见体验”子集，client 不需 filter。
+	ListExperiences(ctx context.Context) ([]ExperienceSummary, error)
 }
 
 type Service struct {
@@ -35,7 +62,7 @@ func NewWithRepository(repo Repository) *Service {
 }
 
 func (s *Service) Supports(commandType string) bool {
-	return commandType == CommandGetExperienceManifest || commandType == CommandCompileExperienceSurface
+	return commandType == CommandGetExperienceManifest || commandType == CommandCompileExperienceSurface || commandType == CommandListExperiences
 }
 
 type getManifestPayload struct {
@@ -87,6 +114,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.handleGetManifest(e)
 	case CommandCompileExperienceSurface:
 		return s.handleCompileSurface(ctx, e)
+	case CommandListExperiences:
+		return s.listExperiences(ctx, e)
 	default:
 		return command.Rejected(
 			e,
@@ -251,6 +280,30 @@ func parseCapability(raw map[string]any) (runtime.ClientCapability, error) {
 func mustMarshal(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// ---------- R15.49 ListExperiences ----------
+
+// listExperiences 拉所有可见体验。匿名可调 — context 由 server.auth.go 放行。
+// 返体格式: { experiences: ExperienceSummary[] } 走 Accepted.OperationRef (跟
+// ListActivities / ListMarketOpportunities 一致)。
+func (s *Service) listExperiences(ctx context.Context, e command.Envelope) command.Result {
+	if s.repository == nil {
+		return command.Rejected(e, "EXPERIENCE_LIST_NO_REPOSITORY", "INTERNAL", "AFTER_USER_ACTION", "experience.list_no_repository", nil)
+	}
+	list, err := s.repository.ListExperiences(ctx)
+	if err != nil {
+		return command.Rejected(e, "EXPERIENCE_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "experience.list_failed", nil)
+	}
+	if list == nil {
+		list = []ExperienceSummary{}
+	}
+	accepted := command.Accepted(e, "Experience", "", 0, "LISTED", nil)
+	accepted.OperationRef = mustMarshal(map[string]any{
+		"experiences": list,
+		"count":       len(list),
+	})
+	return accepted
 }
 
 func contains(s, substr string) bool {

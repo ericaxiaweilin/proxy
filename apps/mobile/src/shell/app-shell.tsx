@@ -493,6 +493,7 @@ export function AppShell({
               demandClient={demand}
               marketplace={marketplace}
               activities={activities}
+              experiences={experience}
               onCreateScene={setSceneComposerTool}
               bottomNavVisible={isNavVisible}
             />
