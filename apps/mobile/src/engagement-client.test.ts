@@ -198,3 +198,61 @@ describe("EngagementClient R15.54 follow graph", () => {
     expect(is).toBe(false);
   });
 });
+
+describe("EngagementClient R15.56 post pin (置顶)", () => {
+  function newAuthedClient(responder: (env: Record<string, unknown>) => Record<string, unknown>) {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+    });
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
+      const envelope = init.body as Record<string, unknown>;
+      const body = responder(envelope);
+      return { status: 200, json: async () => body };
+    } } });
+  }
+
+  it("pinPost: returns PINNED state", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "PostPin", id: "user_001|post_1", version: 1, state: "PINNED" },
+      correlationId: env.correlationId
+    }));
+    const state = await client.pinPost("post_1");
+    expect(state).toBe("PINNED");
+  });
+
+  it("pinPost: ALREADY_PINNED idempotent", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "PostPin", id: "user_001|post_1", version: 1, state: "ALREADY_PINNED" },
+      correlationId: env.correlationId
+    }));
+    const state = await client.pinPost("post_1");
+    expect(state).toBe("ALREADY_PINNED");
+  });
+
+  it("unpinPost: returns UNPINNED", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "PostPin", id: "user_001|post_1", version: 1, state: "UNPINNED" },
+      correlationId: env.correlationId
+    }));
+    const state = await client.unpinPost("post_1");
+    expect(state).toBe("UNPINNED");
+  });
+
+  it("listPinnedPosts: parses { ownerId, postIds, count }", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "PostPin", id: "user_001", version: 1, state: "LISTED" },
+      operationRef: JSON.stringify({ ownerId: "user_001", postIds: ["post_1", "post_2"], count: 2 }),
+      correlationId: env.correlationId
+    }));
+    const out = await client.listPinnedPosts("user_001");
+    expect(out.count).toBe(2);
+    expect(out.postIds).toEqual(["post_1", "post_2"]);
+  });
+});

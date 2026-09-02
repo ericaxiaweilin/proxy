@@ -636,6 +636,65 @@ func (r *EngagementRepository) IsFollowing(ctx context.Context, followerID, foll
 	return exists, err
 }
 
+// R15.56 — AddPostPin: ON CONFLICT 幂等返 (stored, created=false, nil) 如果已存在
+func (r *EngagementRepository) AddPostPin(ctx context.Context, p engagement.PostPin) (engagement.PostPin, bool, error) {
+	var created bool
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		INSERT INTO engagement.post_pins (pin_id, owner_id, post_id, created_at)
+		VALUES ($1,$2,$3,$4) ON CONFLICT (owner_id, post_id) DO NOTHING RETURNING (xmax <> 0)`,
+		p.PinID, p.OwnerID, p.PostID, p.CreatedAt,
+	).Scan(&created)
+	if err != nil {
+		// 无 RETURNING 行 = 冲突, 查现存的
+		if err.Error() == "no rows in result set" {
+			var existing engagement.PostPin
+			err2 := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+				SELECT pin_id, owner_id, post_id, created_at FROM engagement.post_pins
+				WHERE owner_id = $1 AND post_id = $2`,
+				p.OwnerID, p.PostID,
+			).Scan(&existing.PinID, &existing.OwnerID, &existing.PostID, &existing.CreatedAt)
+			if err2 != nil {
+				return engagement.PostPin{}, false, err2
+			}
+			return existing, false, nil
+		}
+		return engagement.PostPin{}, false, err
+	}
+	return p, created, nil
+}
+
+// R15.56 — RemovePostPin
+func (r *EngagementRepository) RemovePostPin(ctx context.Context, ownerID, postID string) (bool, error) {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		DELETE FROM engagement.post_pins WHERE owner_id = $1 AND post_id = $2`,
+		ownerID, postID,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// R15.56 — ListPinnedPosts: 按 created_at ASC 返 postID 列表
+func (r *EngagementRepository) ListPinnedPosts(ctx context.Context, ownerID string) ([]string, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT post_id FROM engagement.post_pins WHERE owner_id = $1 ORDER BY created_at ASC`,
+		ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 func (r *EngagementRepository) AddReaction(ctx context.Context, re engagement.Reaction) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at)

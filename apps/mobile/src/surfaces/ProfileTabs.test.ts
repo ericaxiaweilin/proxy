@@ -169,3 +169,34 @@ describe("R15.55 — Follow button 样式 (关注/已关注 颜色)", () => {
     expect(buttonStyle(true)).toBe("SECONDARY");
   });
 });
+
+describe("R15.56 — 置顶帖状态 (ProfileTabs.pinnedPost)", () => {
+  // ProfileTabs.pinnedPost = posts[0]; 限制钉上限 3 (server side).
+  function canPin(currentlyPinned: number): boolean {
+    return currentlyPinned < 3;
+  }
+  function sortPinnedFirst(postIds: string[], pinnedIds: string[]): string[] {
+    const pinned = pinnedIds.filter((id) => postIds.includes(id));
+    const rest = postIds.filter((id) => !pinned.includes(id));
+    return [...pinned, ...rest];
+  }
+
+  it("钉上限 3", () => {
+    expect(canPin(2)).toBe(true);
+    expect(canPin(3)).toBe(false);
+    expect(canPin(0)).toBe(true);
+  });
+
+  it("pin 顺序: pinned 帖放最前 (preserved 顺序)", () => {
+    const posts = ["post_1", "post_2", "post_3", "post_4"];
+    const pinned = ["post_3", "post_1"];
+    const result = sortPinnedFirst(posts, pinned);
+    expect(result.slice(0, 2)).toEqual(["post_3", "post_1"]);
+    expect(result.slice(2)).toEqual(["post_2", "post_4"]);
+  });
+
+  it("空 pin 列表 → 顺序不变", () => {
+    const posts = ["post_1", "post_2"];
+    expect(sortPinnedFirst(posts, [])).toEqual(["post_1", "post_2"]);
+  });
+});

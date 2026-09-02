@@ -1,7 +1,8 @@
-import type { CommandResult, FollowCounts, FollowingState } from "@proxy/contracts";
+import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList } from "@proxy/contracts";
 import {
   parseFollowCounts,
-  parseFollowingState
+  parseFollowingState,
+  parsePinnedPostsList
 } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -102,6 +103,27 @@ export class EngagementClient {
     }
     const state: FollowingState = parseFollowingState(JSON.parse(result.operationRef));
     return state.isFollowing;
+  }
+
+  // R15.56 — PinPost: 幂等 (ALREADY_PINNED). 限 3 个上限 (server PIN_LIMIT_EXCEEDED)
+  public async pinPost(postId: string): Promise<"PINNED" | "ALREADY_PINNED"> {
+    const result = await this.command("PinPost", { type: "Post", id: postId }, { postId });
+    return result.aggregate?.state === "ALREADY_PINNED" ? "ALREADY_PINNED" : "PINNED";
+  }
+
+  // R15.56 — UnpinPost: 幂等 (NOT_PINNED)
+  public async unpinPost(postId: string): Promise<"UNPINNED" | "NOT_PINNED"> {
+    const result = await this.command("UnpinPost", { type: "Post", id: postId }, { postId });
+    return result.aggregate?.state === "NOT_PINNED" ? "NOT_PINNED" : "UNPINNED";
+  }
+
+  // R15.56 — ListPinnedPosts: 返 { ownerId, postIds, count }
+  public async listPinnedPosts(ownerId: string): Promise<PinnedPostsList> {
+    const result = await this.command("ListPinnedPosts", { type: "Profile", id: ownerId }, { ownerId });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("listPinnedPosts response missing operationRef");
+    }
+    return parsePinnedPostsList(JSON.parse(result.operationRef));
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {

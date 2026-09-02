@@ -52,6 +52,14 @@ type Repost struct {
 }
 
 // Bookmark 是收藏。
+// R15.56 — PostPin: 置顶帖 (per user)
+type PostPin struct {
+	PinID     string    `json:"pinId"`
+	OwnerID   string    `json:"ownerId"`
+	PostID    string    `json:"postId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type Bookmark struct {
 	ID        string    `json:"bookmarkId"`
 	PostID    string    `json:"postId"`
@@ -114,6 +122,10 @@ type Repository interface {
 	AddReply(ctx context.Context, r Reply) error
 	AddRepost(ctx context.Context, r Repost) error
 	AddBookmark(ctx context.Context, b Bookmark) error
+	// R15.56 — 置顶: 幂等 (同一 user+post 重复 pin 返旧), 限 3 个上限
+	AddPostPin(ctx context.Context, p PostPin) (PostPin, bool, error)
+	RemovePostPin(ctx context.Context, ownerID, postID string) (bool, error)
+	ListPinnedPosts(ctx context.Context, ownerID string) ([]string, error)
 	AddFeedPreference(ctx context.Context, preference FeedPreference) error
 	AddPostReport(ctx context.Context, report PostReport) error
 	// AddMutedAuthor 幂等：同一 (ActorID, AuthorID) 重复 mute 返回已存在记录。
@@ -135,11 +147,15 @@ type MemoryRepository struct {
 	preferences map[string]FeedPreference
 	reports     map[string]PostReport
 	mutes       map[string]MutedAuthor // key = actorID + "|" + authorID
+	pins        map[string]PostPin     // key = ownerID + "|" + postID (R15.56 幂等)
+	pinOrder    map[string][]string    // key = ownerID → postIDs in pin order (R15.56)
 	events      []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
+		pins:     make(map[string]PostPin),
+		pinOrder: make(map[string][]string),
 		follows:     make(map[string]Follow),
 		reactions:   make(map[string]Reaction),
 		replies:     make(map[string]Reply),
@@ -202,6 +218,48 @@ func (r *MemoryRepository) IsFollowing(_ context.Context, followerID, followeeID
 	defer r.mu.Unlock()
 	_, ok := r.follows[followerID+"|"+followeeID]
 	return ok, nil
+}
+
+// R15.56 — AddPostPin: 幂等返 (stored, created bool, error)
+func (r *MemoryRepository) AddPostPin(_ context.Context, p PostPin) (PostPin, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := p.OwnerID + "|" + p.PostID
+	if existing, ok := r.pins[key]; ok {
+		return existing, false, nil // 幂等
+	}
+	r.pins[key] = p
+	r.pinOrder[p.OwnerID] = append(r.pinOrder[p.OwnerID], p.PostID)
+	return p, true, nil
+}
+
+// R15.56 — RemovePostPin: 幂等返 (true=删了, false=之前没有)
+func (r *MemoryRepository) RemovePostPin(_ context.Context, ownerID, postID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := ownerID + "|" + postID
+	if _, ok := r.pins[key]; !ok {
+		return false, nil
+	}
+	delete(r.pins, key)
+	// 维护 pinOrder: 过滤掉
+	order := r.pinOrder[ownerID]
+	for i, id := range order {
+		if id == postID {
+			r.pinOrder[ownerID] = append(order[:i], order[i+1:]...)
+			break
+		}
+	}
+	return true, nil
+}
+
+// R15.56 — ListPinnedPosts: 返 owner pin 顺序的 postIDs
+func (r *MemoryRepository) ListPinnedPosts(_ context.Context, ownerID string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.pinOrder[ownerID]))
+	copy(out, r.pinOrder[ownerID])
+	return out, nil
 }
 
 func (r *MemoryRepository) AddReaction(_ context.Context, re Reaction) error {
@@ -307,7 +365,7 @@ func NewWithRepository(repository Repository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor":
+	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor", "PinPost", "UnpinPost", "ListPinnedPosts":
 		return true
 	default:
 		return false
@@ -346,6 +404,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.reportPost(ctx, e)
 	case "MuteAuthor":
 		return s.muteAuthor(ctx, e)
+	case "PinPost":
+		return s.pinPost(ctx, e)
+	case "UnpinPost":
+		return s.unpinPost(ctx, e)
+	case "ListPinnedPosts":
+		return s.listPinnedPosts(ctx, e)
 	default:
 		return command.Rejected(e, "ENGAGEMENT_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "engagement.unsupported_command", nil)
 	}
@@ -545,6 +609,119 @@ func (s *Service) repost(ctx context.Context, e command.Envelope) command.Result
 		return command.Rejected(e, "REPOST_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.repost_failed", nil)
 	}
 	return command.Accepted(e, "Post", p.PostID, 1, "REPOSTED", eventRefs(domainEvents))
+}
+
+// ---------- PinPost (R15.56) ----------
+
+const maxPinnedPostsPerUser = 3
+
+type pinPostPayload struct {
+	PostID string `json:"postId"`
+}
+
+func (s *Service) pinPost(ctx context.Context, e command.Envelope) command.Result {
+	var p pinPostPayload
+	if !decode(e.Payload, &p) || p.PostID == "" {
+		return command.Rejected(e, "INVALID_PIN", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_pin", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PIN_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.pin_not_allowed", nil)
+	}
+	existing, err := s.repository.ListPinnedPosts(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "PIN_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.pin_failed", nil)
+	}
+	// 幂等: 已经在列表里 → 返 ALREADY_PINNED
+	for _, id := range existing {
+		if id == p.PostID {
+			return command.Accepted(e, "PostPin", e.Actor.ID+"|"+p.PostID, 1, "ALREADY_PINNED", nil)
+		}
+	}
+	// 上限检查
+	if len(existing) >= maxPinnedPostsPerUser {
+		return command.Rejected(e, "PIN_LIMIT_EXCEEDED", "VALIDATION", "AFTER_USER_ACTION", "engagement.pin_limit_exceeded", map[string]any{"max": maxPinnedPostsPerUser})
+	}
+	pin := PostPin{
+		PinID:     newID("pin_"),
+		OwnerID:   e.Actor.ID,
+		PostID:    p.PostID,
+		CreatedAt: s.clock.Now().UTC(),
+	}
+	stored, created, err := s.repository.AddPostPin(ctx, pin)
+	if err != nil {
+		return command.Rejected(e, "PIN_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.pin_failed", nil)
+	}
+	state := "PINNED"
+	if !created {
+		state = "ALREADY_PINNED"
+	}
+	domainEvents := []event.DomainEvent{event.New("PostPinned", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, stored.CreatedAt, map[string]any{
+		"pinId":   stored.PinID,
+		"ownerId": stored.OwnerID,
+		"postId":  stored.PostID,
+	})}
+	return command.Accepted(e, "PostPin", e.Actor.ID+"|"+p.PostID, 1, state, eventRefs(domainEvents))
+}
+
+// ---------- UnpinPost (R15.56) ----------
+
+func (s *Service) unpinPost(ctx context.Context, e command.Envelope) command.Result {
+	var p pinPostPayload
+	if !decode(e.Payload, &p) || p.PostID == "" {
+		return command.Rejected(e, "INVALID_UNPIN", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_unpin", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "UNPIN_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.unpin_not_allowed", nil)
+	}
+	removed, err := s.repository.RemovePostPin(ctx, e.Actor.ID, p.PostID)
+	if err != nil {
+		return command.Rejected(e, "UNPIN_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.unpin_failed", nil)
+	}
+	state := "UNPINNED"
+	if !removed {
+		state = "NOT_PINNED"
+	}
+	domainEvents := []event.DomainEvent{event.New("PostUnpinned", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"ownerId": e.Actor.ID,
+		"postId":  p.PostID,
+		"removed": removed,
+	})}
+	return command.Accepted(e, "PostPin", e.Actor.ID+"|"+p.PostID, 1, state, eventRefs(domainEvents))
+}
+
+// ---------- ListPinnedPosts (R15.56) ----------
+
+type listPinnedPostsPayload struct {
+	OwnerID string `json:"ownerId"`
+}
+
+type pinnedPostsList struct {
+	OwnerID string   `json:"ownerId"`
+	PostIDs []string `json:"postIds"`
+	Count   int      `json:"count"`
+}
+
+func (s *Service) listPinnedPosts(ctx context.Context, e command.Envelope) command.Result {
+	var p listPinnedPostsPayload
+	if !decode(e.Payload, &p) || p.OwnerID == "" {
+		return command.Rejected(e, "INVALID_LIST_PINNED", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_list_pinned", nil)
+	}
+	ids, err := s.repository.ListPinnedPosts(ctx, p.OwnerID)
+	if err != nil {
+		return command.Rejected(e, "LIST_PINNED_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.list_pinned_failed", nil)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return func() command.Result {
+		accepted := command.Accepted(e, "PostPin", p.OwnerID, 1, "LISTED", nil)
+		accepted.OperationRef = mustMarshal(pinnedPostsList{
+			OwnerID: p.OwnerID,
+			PostIDs: ids,
+			Count:   len(ids),
+		})
+		return accepted
+	}()
 }
 
 // ---------- BookmarkPost ----------
