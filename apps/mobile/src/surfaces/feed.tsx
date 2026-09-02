@@ -128,6 +128,8 @@ export function FeedSurface({
   onChromeVisibilityChange,
   refreshTrigger,
   bottomNavVisible,
+  // R15.63: 当前 session userAccountId, 用来在 feed post menu 区分自己/他人 (pin 项只对自己)
+  viewerAccountId,
   initialTab,
   currentSection,
   onSectionChange
@@ -142,6 +144,7 @@ export function FeedSurface({
   onOpenFeedPrefs: () => void;
   onOpenProfile?: ((target: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]> }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
+  viewerAccountId?: string | undefined;
   refreshTrigger?: number;
   bottomNavVisible?: boolean;
   // R15.22 sub-page sync (initialTab from RootNav 8-page sequence)
@@ -172,6 +175,9 @@ export function FeedSurface({
   const [postMenuPostId, setPostMenuPostId] = useState<string | undefined>();
   const [mutedAuthors, setMutedAuthors] = useState<ReadonlySet<string>>(new Set());
   const [postMenuError, setPostMenuError] = useState<string | undefined>();
+  // R15.63: viewer 点开自己 post 的 menu 时, 可调 engagement.pinPost
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [liked, setLiked] = useState<ReadonlySet<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
@@ -579,6 +585,45 @@ export function FeedSurface({
       closePostMenu();
     } catch (err) {
       setPostMenuError(err instanceof Error ? err.message : "屏蔽失败");
+    }
+  }
+
+  // R15.63: post menu 的 "置顶/取消置顶" — R15.56 PinPost endpoint 接线
+  async function handlePinPost(): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    setPinBusy(true);
+    try {
+      const result = await engagement.pinPost(postMenuPost.postId);
+      if (result === "PINNED" || result === "ALREADY_PINNED") {
+        setPinnedIds((prev) => new Set(prev).add(postMenuPost.postId));
+      }
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "置顶失败");
+    } finally {
+      setPinBusy(false);
+    }
+  }
+
+  async function handleUnpinPost(): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    setPinBusy(true);
+    try {
+      const result = await engagement.unpinPost(postMenuPost.postId);
+      if (result === "UNPINNED" || result === "NOT_PINNED") {
+        setPinnedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(postMenuPost.postId);
+          return next;
+        });
+      }
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "取消置顶失败");
+    } finally {
+      setPinBusy(false);
     }
   }
 
@@ -1058,7 +1103,7 @@ export function FeedSurface({
         <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
       </Pressable>
     ) : null}
-    {/* R15.45: post menu modal (举报 / 不感兴趣 / 屏蔽作者) */}
+    {/* R15.45 + R15.63: post menu modal (举报 / 不感兴趣 / 屏蔽作者 / 置顶(仅自己)) */}
     <PostMenuModal
       open={postMenuPostId !== undefined}
       post={postMenuPost}
@@ -1067,6 +1112,11 @@ export function FeedSurface({
       onReport={handleReportPost}
       onNotInterested={handleNotInterested}
       onMuteAuthor={handleMuteAuthor}
+      isOwn={!!viewerAccountId && !!postMenuPost && postMenuPost.authorId === viewerAccountId}
+      isPinned={postMenuPost ? pinnedIds.has(postMenuPost.postId) : false}
+      pinBusy={pinBusy}
+      onPin={handlePinPost}
+      onUnpin={handleUnpinPost}
     />
     </View>
   );
@@ -1565,9 +1615,15 @@ type PostMenuModalProps = {
   onReport: (reason: PostReportReason) => Promise<void> | void;
   onNotInterested: () => Promise<void> | void;
   onMuteAuthor: () => Promise<void> | void;
+  // R15.63: viewer 是 post 作者本人时显示置顶项 (R15.56 endpoint 接线)
+  isOwn?: boolean | undefined;
+  isPinned?: boolean | undefined;
+  pinBusy?: boolean | undefined;
+  onPin?: (() => Promise<void> | void) | undefined;
+  onUnpin?: (() => Promise<void> | void) | undefined;
 };
 
-function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, onMuteAuthor }: PostMenuModalProps): React.JSX.Element {
+function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, onMuteAuthor, isOwn, isPinned, pinBusy, onPin, onUnpin }: PostMenuModalProps): React.JSX.Element {
   const [showReportReasons, setShowReportReasons] = useState(false);
   if (!open) return <View />;
   return (
@@ -1600,6 +1656,19 @@ function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, 
                   <Text style={postMenuStyles.rowHint}>不再看 Ta 的任何内容</Text>
                 </View>
               </Pressable>
+              {isOwn ? (
+                <Pressable
+                  disabled={pinBusy}
+                  onPress={() => { if (isPinned) { void onUnpin?.(); } else { void onPin?.(); } }}
+                  style={postMenuStyles.row}
+                >
+                  <Text style={postMenuStyles.rowIcon}>{isPinned ? "📍" : "📌"}</Text>
+                  <View style={postMenuStyles.rowCopy}>
+                    <Text style={postMenuStyles.rowTitle}>{isPinned ? "取消置顶" : "置顶到个人主页"}</Text>
+                    <Text style={postMenuStyles.rowHint}>{isPinned ? "在个人主页不再置顶显示" : "在个人主页顶部显示（最多 3 篇）"}</Text>
+                  </View>
+                </Pressable>
+              ) : null}
               <Pressable onPress={onClose} style={postMenuStyles.cancel}>
                 <Text style={postMenuStyles.cancelText}>取消</Text>
               </Pressable>
