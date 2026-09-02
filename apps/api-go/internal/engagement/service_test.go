@@ -2,6 +2,7 @@ package engagement
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -290,5 +291,75 @@ func TestIsFollowing_AnonymousReturnsFalse(t *testing.T) {
 	_ = json.Unmarshal([]byte(result.OperationRef), &state)
 	if state["isFollowing"] != false {
 		t.Errorf("expected isFollowing=false for anonymous, got %v", state["isFollowing"])
+	}
+}
+
+// ---------- R15.56 PinPost / UnpinPost / ListPinnedPosts ----------
+
+func TestPinPost_HappyPath(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": "post_1"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s", result.Outcome)
+	}
+	if result.Aggregate.State != "PINNED" {
+		t.Errorf("expected PINNED, got %s", result.Aggregate.State)
+	}
+}
+
+func TestPinPost_Idempotent(t *testing.T) {
+	s := New()
+	s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": "post_1"}))
+	result := s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": "post_1"}))
+	if result.Outcome != "ACCEPTED" || result.Aggregate.State != "ALREADY_PINNED" {
+		t.Errorf("expected ALREADY_PINNED idempotent, got %s %s", result.Outcome, result.Aggregate.State)
+	}
+}
+
+func TestPinPost_LimitExceeded(t *testing.T) {
+	s := New()
+	for i := 1; i <= 3; i++ {
+		s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": fmt.Sprintf("post_%d", i)}))
+	}
+	result := s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": "post_4"}))
+	if result.Outcome != "REJECTED" {
+		t.Errorf("expected REJECTED (limit), got %s", result.Outcome)
+	}
+}
+
+func TestUnpinPost_HappyPath(t *testing.T) {
+	s := New()
+	s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": "post_1"}))
+	result := s.Handle(envelopeWithActor("UnpinPost", "user_001", map[string]any{"postId": "post_1"}))
+	if result.Outcome != "ACCEPTED" || result.Aggregate.State != "UNPINNED" {
+		t.Errorf("expected UNPINNED, got %s %s", result.Outcome, result.Aggregate.State)
+	}
+}
+
+func TestUnpinPost_NotPinned(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("UnpinPost", "user_001", map[string]any{"postId": "post_999"}))
+	if result.Outcome != "ACCEPTED" || result.Aggregate.State != "NOT_PINNED" {
+		t.Errorf("expected NOT_PINNED idempotent, got %s %s", result.Outcome, result.Aggregate.State)
+	}
+}
+
+func TestListPinnedPosts(t *testing.T) {
+	s := New()
+	s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": "post_1"}))
+	s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": "post_2"}))
+	s.Handle(envelopeWithActor("PinPost", "user_001", map[string]any{"postId": "post_3"}))
+	result := s.Handle(envelopeWithActor("ListPinnedPosts", "user_001", map[string]any{"ownerId": "user_001"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s", result.Outcome)
+	}
+	var out map[string]any
+	_ = json.Unmarshal([]byte(result.OperationRef), &out)
+	if int(out["count"].(float64)) != 3 {
+		t.Errorf("expected 3 pins, got %v", out["count"])
+	}
+	ids := out["postIds"].([]any)
+	if ids[0] != "post_1" || ids[1] != "post_2" || ids[2] != "post_3" {
+		t.Errorf("expected post order [post_1, post_2, post_3], got %v", ids)
 	}
 }

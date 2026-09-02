@@ -70,3 +70,51 @@ export function parseFollowCounts(raw: unknown): FollowCounts {
 export function parseFollowingState(raw: unknown): FollowingState {
   return FollowingStateSchema.parse(raw);
 }
+
+// ---------- R15.56 Post pin (置顶) ----------
+
+// PostPin — 置顶 aggregate
+export const PostPinSchema = z.object({
+  pinId: z.string().min(1),
+  ownerId: z.string().min(1),
+  postId: z.string().min(1),
+  createdAt: z.string()
+});
+export type PostPin = z.infer<typeof PostPinSchema>;
+
+// PinnedPostsList — ListPinnedPosts 返 { ownerId, postIds, count }
+export const PinnedPostsListSchema = z.object({
+  ownerId: z.string().min(1),
+  postIds: z.array(z.string()),
+  count: z.number().int().min(0)
+});
+export type PinnedPostsList = z.infer<typeof PinnedPostsListSchema>;
+
+// PinPostPayload / UnpinPostPayload
+export const PinPostPayloadSchema = z.object({
+  postId: z.string().min(1)
+});
+export type PinPostPayload = z.infer<typeof PinPostPayloadSchema>;
+export const UnpinPostPayloadSchema = z.object({
+  postId: z.string().min(1)
+});
+export type UnpinPostPayload = z.infer<typeof UnpinPostPayloadSchema>;
+
+// ListPinnedPostsPayload
+export const ListPinnedPostsPayloadSchema = z.object({
+  ownerId: z.string().min(1)
+});
+export type ListPinnedPostsPayload = z.infer<typeof ListPinnedPostsPayloadSchema>;
+
+export function parsePinPostPayload(raw: unknown): PinPostPayload {
+  return PinPostPayloadSchema.parse(raw);
+}
+export function parseUnpinPostPayload(raw: unknown): UnpinPostPayload {
+  return UnpinPostPayloadSchema.parse(raw);
+}
+export function parseListPinnedPostsPayload(raw: unknown): ListPinnedPostsPayload {
+  return ListPinnedPostsPayloadSchema.parse(raw);
+}
+export function parsePinnedPostsList(raw: unknown): PinnedPostsList {
+  return PinnedPostsListSchema.parse(raw);
+}
