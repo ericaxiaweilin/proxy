@@ -600,6 +600,7 @@ export function AppShell({
               onOpenSwitcher={openContextSwitcher}
               onOpenFeed={() => selectTab("FEED")}
               onOpenVouchers={() => setVoucherOpen(true)}
+              onOpenRealitySceneMap={() => setRealitySceneOpen(true)}
               onExperienceAction={executeExperienceAction}
               onOpenConversation={(author) => {
                 setMessageChat({ author });

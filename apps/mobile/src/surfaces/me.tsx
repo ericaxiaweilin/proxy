@@ -2352,8 +2352,8 @@ export function MeSurface({
               stats={{ posts: profilePosts.length, followers: personalFollowCounts?.followers ?? 0, following: personalFollowCounts?.following ?? 0 }}
               onOpenMedia={(entry) => setProfileViewer(entry)}
               onOpenRealitySceneMap={onOpenRealitySceneMap}
-              onComingSoon={(label) => { console.log(`[profile] ${label} · 开发中`); }}
-              onOpenScene={(sceneId) => { console.log(`[profile] scene:${sceneId} · 开发中`); }}
+              onComingSoon={() => { /* R15.71: 5-tab 空数组 fallback, 不再 console.log */ }}
+              onOpenScene={(sceneId) => onOpenRealitySceneMap?.()}
               onEditProfile={() => setProfileEditorOpen(true)}
               onShareProfile={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
