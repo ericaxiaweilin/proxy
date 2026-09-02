@@ -60,6 +60,7 @@ export interface ProfileTabsProps {
     violet: string;
   };
   onShareProfile?: (() => void) | undefined;
+  onEditProfile?: (() => void) | undefined;
   // R15.55: 关注图谱 — 区分自己/他人 profile 行为
   viewerMode?: "SELF" | "OTHER" | undefined;  // 决定 "编辑主页" vs "关注/已关注"
   isFollowing?: boolean | undefined;          // viewerMode=OTHER 时显示状态
@@ -126,7 +127,10 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           <>
             <Pressable
               accessibilityLabel="编辑主页"
-              onPress={() => props.onComingSoon?.("edit profile")}
+              onPress={() => {
+                if (props.onEditProfile) props.onEditProfile();
+                else props.onComingSoon?.("edit profile");
+              }}
               style={[styles.actionBtn, styles.actionPrimary]}
             >
               <Text style={styles.actionPrimaryText}>编辑主页</Text>

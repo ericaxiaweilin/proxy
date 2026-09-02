@@ -447,7 +447,7 @@ const REQUESTER_ME: PersonaConfig = {
       title: "个人主页",
       hint: "你掌控展示方式",
       rows: [
-        { icon: "profile-ring", label: "预览公开主页", desc: "名片、关于我、能力、可用时间与对外展示", grad: true, route: "personalhub" },
+        { icon: "profile-ring", label: "个人主页", desc: "名片、关于我、能力、可用时间与对外展示", grad: true, route: "personalhub" },
         { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
         { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" }
       ]
@@ -2314,15 +2314,8 @@ export function MeSurface({
                   <Text>可接单</Text>
                 </View>
               </View>
-              {/* R15.23: .profile-actions grid 1fr 1fr gap 8 + .action.primary/lime */}
-              <View style={styles.personalActions}>
-                <Pressable onPress={() => setProfileEditorOpen(true)} style={[styles.personalActionButton, styles.personalActionPrimary]}>
-                  <Text style={styles.personalActionPrimaryText}>编辑主页</Text>
-                </Pressable>
-                <Pressable onPress={() => void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` })} style={[styles.personalActionButton, styles.personalActionLime]}>
-                  <Text style={styles.personalActionLimeText}>分享主页</Text>
-                </Pressable>
-              </View>
+              {/* 编辑/分享按钮由下面 <ProfileTabs /> 的 actionsRow 渲染 (R15.53 + R15.55).
+                  重复按钮已去掉, 免得跟 ProfileTabs 里的 actionsRow 视觉重叠。 */}
             </View>
 
             {/* R15.23: .tabs (h 47 grid 3 1fr border-b 1 line bg #fff) + .tab.active::after 1.5px underline */}
@@ -2341,6 +2334,8 @@ export function MeSurface({
               onOpenRealitySceneMap={onOpenRealitySceneMap}
               onComingSoon={(label) => { console.log(`[profile] ${label} · 开发中`); }}
               onOpenScene={(sceneId) => { console.log(`[profile] scene:${sceneId} · 开发中`); }}
+              onEditProfile={() => setProfileEditorOpen(true)}
+              onShareProfile={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
               isFollowing={false}
               followBusy={false}
