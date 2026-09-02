@@ -662,5 +662,6 @@ export * from "./city-key";
 // and the localnet GET handler (facet-objects.go) import from this module,
 // so any rename forces a compile error on both ends.
 export * from "./facet";
+export * from "./engagement";
 
 // R15.33: map contracts 撤了 — 独立 map tab 已删。

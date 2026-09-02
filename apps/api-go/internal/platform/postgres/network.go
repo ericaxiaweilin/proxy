@@ -599,6 +599,43 @@ func (r *EngagementRepository) AddFollow(ctx context.Context, f engagement.Follo
 	return err
 }
 
+// R15.54 — RemoveFollow: 幂等返 (true=刪了, false=之前没有)
+func (r *EngagementRepository) RemoveFollow(ctx context.Context, followerID, followeeID string) (bool, error) {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		DELETE FROM engagement.follows WHERE follower_id = $1 AND followee_id = $2`,
+		followerID, followeeID,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// R15.54 — CountFollowers: 数 FolloweeID == userID
+func (r *EngagementRepository) CountFollowers(ctx context.Context, userID string) (int, error) {
+	var n int
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT COUNT(*) FROM engagement.follows WHERE followee_id = $1`, userID).Scan(&n)
+	return n, err
+}
+
+// R15.54 — CountFollowing: 数 FollowerID == userID
+func (r *EngagementRepository) CountFollowing(ctx context.Context, userID string) (int, error) {
+	var n int
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT COUNT(*) FROM engagement.follows WHERE follower_id = $1`, userID).Scan(&n)
+	return n, err
+}
+
+// R15.54 — IsFollowing: actor 是否 follow 了 target
+func (r *EngagementRepository) IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error) {
+	var exists bool
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM engagement.follows WHERE follower_id = $1 AND followee_id = $2)`,
+		followerID, followeeID).Scan(&exists)
+	return exists, err
+}
+
 func (r *EngagementRepository) AddReaction(ctx context.Context, re engagement.Reaction) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at)

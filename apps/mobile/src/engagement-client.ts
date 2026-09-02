@@ -1,4 +1,8 @@
-import type { CommandResult } from "@proxy/contracts";
+import type { CommandResult, FollowCounts, FollowingState } from "@proxy/contracts";
+import {
+  parseFollowCounts,
+  parseFollowingState
+} from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
@@ -73,6 +77,31 @@ export class EngagementClient {
    */
   public async muteAuthor(authorId: string): Promise<void> {
     await this.command("MuteAuthor", { type: "Profile", id: authorId }, { authorId });
+  }
+
+  // R15.54 — UnfollowProfile: 幂等, 之前没 follow 返 NOT_FOLLOWING
+  public async unfollowProfile(followeeId: string): Promise<"UNFOLLOWED" | "NOT_FOLLOWING"> {
+    const result = await this.command("UnfollowProfile", { type: "Profile", id: followeeId }, { followeeId });
+    return result.aggregate?.state === "UNFOLLOWED" ? "UNFOLLOWED" : "NOT_FOLLOWING";
+  }
+
+  // R15.54 — GetFollowCounts: 返 { userId, followers, following }
+  public async getFollowCounts(userId: string): Promise<FollowCounts> {
+    const result = await this.command("GetFollowCounts", { type: "Profile", id: userId }, { userId });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("getFollowCounts response missing operationRef");
+    }
+    return parseFollowCounts(JSON.parse(result.operationRef));
+  }
+
+  // R15.54 — IsFollowing: anonymous OK (followerId="" 返 false)
+  public async isFollowing(followerId: string, followeeId: string): Promise<boolean> {
+    const result = await this.command("IsFollowing", { type: "Profile", id: followeeId }, { followerId, followeeId });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("isFollowing response missing operationRef");
+    }
+    const state: FollowingState = parseFollowingState(JSON.parse(result.operationRef));
+    return state.isFollowing;
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {

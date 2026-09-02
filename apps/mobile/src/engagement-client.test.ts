@@ -128,3 +128,73 @@ describe("EngagementClient.muteAuthor", () => {
     await expect(client.muteAuthor("author_xyz")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
   });
 });
+
+describe("EngagementClient R15.54 follow graph", () => {
+  function newAuthedClient(responder: (envelope: Record<string, unknown>) => Record<string, unknown>) {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+    });
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
+      const envelope = init.body as Record<string, unknown>;
+      const body = responder(envelope);
+      return { status: 200, json: async () => body };
+    } } });
+  }
+
+  it("unfollowProfile: returns UNFOLLOWED state", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "Follow", id: "user_001|user_002", version: 1, state: "UNFOLLOWED" },
+      correlationId: env.correlationId
+    }));
+    const state = await client.unfollowProfile("user_002");
+    expect(state).toBe("UNFOLLOWED");
+  });
+
+  it("unfollowProfile: NOT_FOLLOWING (idempotent) state", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "Follow", id: "user_001|user_999", version: 1, state: "NOT_FOLLOWING" },
+      correlationId: env.correlationId
+    }));
+    const state = await client.unfollowProfile("user_999");
+    expect(state).toBe("NOT_FOLLOWING");
+  });
+
+  it("getFollowCounts: parses operationRef JSON", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "FollowCounts", id: "user_001", version: 1, state: "OK" },
+      operationRef: JSON.stringify({ userId: "user_001", followers: 128, following: 56 }),
+      correlationId: env.correlationId
+    }));
+    const counts = await client.getFollowCounts("user_001");
+    expect(counts.followers).toBe(128);
+    expect(counts.following).toBe(56);
+  });
+
+  it("isFollowing: returns true", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "FollowingState", id: "user_001|user_002", version: 1, state: "OK" },
+      operationRef: JSON.stringify({ isFollowing: true }),
+      correlationId: env.correlationId
+    }));
+    const is = await client.isFollowing("user_001", "user_002");
+    expect(is).toBe(true);
+  });
+
+  it("isFollowing: returns false", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "FollowingState", id: "user_001|user_003", version: 1, state: "OK" },
+      operationRef: JSON.stringify({ isFollowing: false }),
+      correlationId: env.correlationId
+    }));
+    const is = await client.isFollowing("user_001", "user_003");
+    expect(is).toBe(false);
+  });
+});
