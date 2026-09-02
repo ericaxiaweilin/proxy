@@ -1374,9 +1374,10 @@ export function MeSurface({
   const [personalHubTab, setPersonalHubTab] = useState<PersonalHubTab>("FEED");
   // R15.53: ProfileTabs 新组件使用 (IG/Threads 5 tabs)
   //   REPLIES / SAVED / TAGGED — Phase 1.5 mock 空数组 (后端未提供)
-  const [personalReplyPosts] = useState<FeedPost[]>([]);
-  const [personalSavedPosts] = useState<FeedPost[]>([]);
-  const [personalTaggedPosts] = useState<FeedPost[]>([]);
+  // R15.61/62/63: 3 列表接 server (R15.61 reply, R15.62 bookmark, R15.63 tagged 暂空)
+  const [personalReplyPosts, setPersonalReplyPosts] = useState<FeedPost[]>([]);
+  const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
+  const [personalTaggedPosts] = useState<FeedPost[]>([]); // R15.63 (Phase 2: server mentions endpoint)
   // R15.54: 关注数 / 粉丝数 — 从 server 拉, ProfileTabs stats 行使用
   // R15.59: 接 server GetFollowCounts (authed); 未登录时为 undefined
   const [personalFollowCounts, setPersonalFollowCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
@@ -1396,6 +1397,10 @@ export function MeSurface({
       .catch(() => { if (!cancelled) setOtherIsFollowing(false); });
     return () => { cancelled = true; };
   }, [engagement, isSelfProfile, viewingProfileId, viewerAccountId]);
+  // R15.61/62: 拉自己 (viewer) 的 reply / bookmark 列表, 填 ProfileTabs REPLIES/SAVED tab
+  // REPLIES: server RepliedPost → minimal FeedPost (postId, authorId=viewer, body, sceneType=COMMENT)
+  // SAVED: bookmark postId[] + localNet.listFeedPosts() 拿全 feed, filter 包含 postId
+  // (useEffect 需在 profileDraft 之后, 见下方 useEffect.)
   const handleFollow = async (): Promise<void> => {
     if (!engagement || !viewerAccountId || !viewingProfileId || isSelfProfile) return;
     setFollowBusy(true);
@@ -1477,6 +1482,45 @@ export function MeSurface({
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [localNet]);
+
+  // R15.61/62 useEffect: 放在 profileDraft 后才可访问。
+  useEffect(() => {
+    if (!engagement || !viewerAccountId) return;
+    let cancelled = false;
+    void engagement.listUserReplies(viewerAccountId, 30)
+      .then((r) => {
+        if (cancelled) return;
+        const replyPosts: FeedPost[] = r.replies.map((rep) => ({
+          postId: rep.postId,
+          authorType: "USER" as const,
+          authorId: viewerAccountId,
+          authorDisplayName: profileDraft.name,
+          body: rep.body,
+          mediaRefs: [],
+          sceneType: "UNKNOWN" as const,
+          status: "ACTIVE",
+          contextRefs: [],
+          createdAt: rep.createdAt
+        }));
+        setPersonalReplyPosts(replyPosts);
+      })
+      .catch(() => { if (!cancelled) setPersonalReplyPosts([]); });
+    void engagement.listUserBookmarks(viewerAccountId, 60)
+      .then(async (b) => {
+        if (cancelled) return;
+        try {
+          const feed = await localNet.listFeedPosts();
+          if (cancelled) return;
+          const bookmarkedSet = new Set(b.bookmarks);
+          const saved = feed.posts.filter((p) => bookmarkedSet.has(p.postId));
+          setPersonalSavedPosts(saved);
+        } catch {
+          if (!cancelled) setPersonalSavedPosts([]);
+        }
+      })
+      .catch(() => { if (!cancelled) setPersonalSavedPosts([]); });
+    return () => { cancelled = true; };
+  }, [engagement, viewerAccountId, localNet, profileDraft.name]);
 
   // 滚动方向 / 可见性 refs — 必须在所有早期 return 之前声明，
   // 否则在 subPage 切换时 hooks 数量从 N 变成 N+3，触发

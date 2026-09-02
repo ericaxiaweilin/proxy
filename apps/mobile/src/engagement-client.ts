@@ -1,8 +1,10 @@
-import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList } from "@proxy/contracts";
+import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList } from "@proxy/contracts";
 import {
   parseFollowCounts,
   parseFollowingState,
-  parsePinnedPostsList
+  parsePinnedPostsList,
+  parseUserRepliesList,
+  parseUserBookmarksList
 } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -124,6 +126,24 @@ export class EngagementClient {
       throw new EngagementProtocolError("listPinnedPosts response missing operationRef");
     }
     return parsePinnedPostsList(JSON.parse(result.operationRef));
+  }
+
+  // R15.61 — ListUserReplies: 返 user 全部 reply 帖 (含父 post 上下文)
+  public async listUserReplies(userId: string, limit?: number): Promise<UserRepliesList> {
+    const result = await this.command("ListUserReplies", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("listUserReplies response missing operationRef");
+    }
+    return parseUserRepliesList(JSON.parse(result.operationRef));
+  }
+
+  // R15.62 — ListUserBookmarks: 返 user 全部 bookmark post IDs
+  public async listUserBookmarks(userId: string, limit?: number): Promise<UserBookmarksList> {
+    const result = await this.command("ListUserBookmarks", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("listUserBookmarks response missing operationRef");
+    }
+    return parseUserBookmarksList(JSON.parse(result.operationRef));
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {

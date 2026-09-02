@@ -695,6 +695,60 @@ func (r *EngagementRepository) ListPinnedPosts(ctx context.Context, ownerID stri
 	return out, nil
 }
 
+// R15.61 — ListRepliesByActor (ORDER BY created_at DESC, LIMIT)
+func (r *EngagementRepository) ListRepliesByActor(ctx context.Context, actorID string, limit int) ([]engagement.Reply, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT reply_id, post_id, actor_id, body, created_at
+		FROM engagement.replies
+		WHERE actor_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2`,
+		actorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []engagement.Reply
+	for rows.Next() {
+		var r engagement.Reply
+		if err := rows.Scan(&r.ID, &r.PostID, &r.ActorID, &r.Body, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// R15.62 — ListBookmarksByActor (ORDER BY created_at DESC, LIMIT)
+func (r *EngagementRepository) ListBookmarksByActor(ctx context.Context, actorID string, limit int) ([]engagement.Bookmark, error) {
+	if limit <= 0 {
+		limit = 60
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT bookmark_id, post_id, actor_id, created_at
+		FROM engagement.bookmarks
+		WHERE actor_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2`,
+		actorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []engagement.Bookmark
+	for rows.Next() {
+		var b engagement.Bookmark
+		if err := rows.Scan(&b.ID, &b.PostID, &b.ActorID, &b.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
 func (r *EngagementRepository) AddReaction(ctx context.Context, re engagement.Reaction) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at)

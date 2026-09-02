@@ -256,3 +256,69 @@ describe("EngagementClient R15.56 post pin (置顶)", () => {
     expect(out.postIds).toEqual(["post_1", "post_2"]);
   });
 });
+
+describe("EngagementClient R15.61/R15.62 list user replies/bookmarks", () => {
+  function newAuthedClient(responder: (env: Record<string, unknown>) => Record<string, unknown>) {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+    });
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
+      const envelope = init.body as Record<string, unknown>;
+      const body = responder(envelope);
+      return { status: 200, json: async () => body };
+    } } });
+  }
+
+  it("listUserReplies: parses { userId, replies[], count }", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "Reply", id: "user_001", version: 1, state: "LISTED" },
+      operationRef: JSON.stringify({
+        userId: "user_001",
+        replies: [
+          { replyId: "r_1", postId: "post_1", parentPostId: "post_1", body: "comment A", createdAt: "2026-09-01T00:00:00Z" }
+        ],
+        count: 1
+      }),
+      correlationId: env.correlationId
+    }));
+    const out = await client.listUserReplies("user_001");
+    expect(out.count).toBe(1);
+    expect(out.replies[0]?.body).toBe("comment A");
+  });
+
+  it("listUserBookmarks: parses { userId, bookmarks[], count }", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "Bookmark", id: "user_001", version: 1, state: "LISTED" },
+      operationRef: JSON.stringify({
+        userId: "user_001",
+        bookmarks: ["post_1", "post_2"],
+        count: 2
+      }),
+      correlationId: env.correlationId
+    }));
+    const out = await client.listUserBookmarks("user_001");
+    expect(out.count).toBe(2);
+    expect(out.bookmarks).toEqual(["post_1", "post_2"]);
+  });
+
+  it("listUserBookmarks: limit optional", async () => {
+    let capturedLimit: number | undefined = undefined;
+    const client = newAuthedClient((env) => {
+      const payload = env.payload as Record<string, unknown>;
+      capturedLimit = payload.limit as number | undefined;
+      return {
+        commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+        aggregate: { type: "Bookmark", id: "user_001", version: 1, state: "LISTED" },
+        operationRef: JSON.stringify({ userId: "user_001", bookmarks: [], count: 0 }),
+        correlationId: env.correlationId
+      };
+    });
+    await client.listUserBookmarks("user_001", 30);
+    expect(capturedLimit).toBe(30);
+  });
+});
