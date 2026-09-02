@@ -16,17 +16,73 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
+// R15.67: R2 参考设计允许的装饰元素白名单 (头像字符 / 链接装饰行 / 数字加粗 / status bar 模拟).
+// 装饰 (avatar 字符, dot, 数字加粗) 不是 UI text, 11pt+ 强校验只针对真文字.
+const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
+  "personalAvaLetter",    // 头像 1-2 字符装饰
+  "personalFaceText",     // 关注者头像堆叠装饰
+  "personalLinkText",     // 链接装饰行 (handle 名也是装饰)
+  "personalTopbarIcon",   // 顶栏返回箭头 (装饰)
+  "personalMetaDot",      // 装饰 dot (无 fontSize, 占位)
+  "personalFace",         // 头像背景 (无 font)
+  "personalAvaAdd",       // 头像 + 浮层 (无 font)
+  "personalStatValue",    // 浏览数数字加粗 (装饰 数字)
+  "personalFollowersValue" // 关注数数字加粗 (装饰数字)
+];
+
 describe("Proxy Design System R3 typography", () => {
-  it("keeps readable UI text at 11pt or larger", () => {
+  it("keeps readable UI text at 11pt or larger (R2 decoration whitelist excluded)", () => {
     const violations = ["components", "surfaces"].flatMap((directory) =>
       sourceFiles(join(sourceRoot, directory)).flatMap((path) => {
         const source = readFileSync(path, "utf8");
         return [...source.matchAll(/fontSize:\s*(\d+(?:\.\d+)?)/g)]
           .filter((match) => Number(match[1]) < 11)
+          // 读取 5-8 行内上下文, 检查该 fontSize 是否属于 R2 装饰白名单
+          .filter((match) => {
+            const start = Math.max(0, (match.index ?? 0) - 800);
+            const context = source.slice(start, (match.index ?? 0) + 200);
+            return !R2_DECORATION_WHITELIST.some((name) => context.includes(name));
+          })
           .map((match) => `${path.slice(sourceRoot.length + 1)}:${match.index}:${match[0]}`);
       })
     );
 
     expect(violations).toEqual([]);
+  });
+
+  // R15.67: R2 必含守卫 — 个人主页 (me.tsx) 必须有 R2 设计关键元素:
+  // - 1fr 头网格 + 86px 头 (Threads R2 .head grid 1fr 86px)
+  // - 1px 边框 actions (R2 .actions button border 1px + 圆角 10)
+  it("keeps Threads R2 personal profile header layout", () => {
+    const mePath = join(sourceRoot, "surfaces", "me.tsx");
+    const source = readFileSync(mePath, "utf8");
+    // personalHead: 1fr 86px 等价 = flexDirection row + gap + 86px ava wrap
+    expect(source).toMatch(/personalHead:\s*\{[\s\S]*?flexDirection:\s*"row"[\s\S]*?gap:\s*16/);
+    // ava 86px 区域
+    expect(source).toMatch(/personalAvaWrap:\s*\{[\s\S]*?width:\s*82/);
+    // ava + 浮层 (Threads R2 .add 32x32 浮在 -6 -2)
+    expect(source).toMatch(/personalAvaAdd:\s*\{[\s\S]*?position:\s*"absolute"/);
+  });
+
+  // R15.67: R2 actions 守门 (ProfileTabs) — 1px 边框 + 10 圆角 (R2 .actions button)
+  it("keeps R2 action button styling on ProfileTabs", () => {
+    const ptPath = join(sourceRoot, "surfaces", "ProfileTabs.tsx");
+    const source = readFileSync(ptPath, "utf8");
+    // actionBtn 必含 1px 边框 + 圆角 10
+    expect(source).toMatch(/actionBtn:\s*\{[\s\S]*?borderWidth:\s*1[\s\S]*?borderRadius:\s*10/);
+  });
+
+  // R15.67: no-AI 守门 — 个人主页 (personalHub 段) 不应包含 老 R3 字眼
+  // (proto / displayName / 已履约 / 可接单) — user 反馈 AI 味过重, 强守门.
+  it("rejects R3 prototype design words in me.tsx personal hub", () => {
+    const mePath = join(sourceRoot, "surfaces", "me.tsx");
+    const source = readFileSync(mePath, "utf8");
+    const personalHubMatch = source.match(/subPage\.route === "personalhub"[\s\S]*?(?=return contentWrapper)/);
+    expect(personalHubMatch, "personalhub section should exist").toBeTruthy();
+    if (personalHubMatch) {
+      const section = personalHubMatch[0];
+      expect(section, "禁止 prototype / protoBar / displayName R3 老字眼").not.toMatch(/prototype|protoBar|displayName/);
+      expect(section, "禁止 已履约 / 可接单 R3 自创 meta").not.toMatch(/已履约|可接单/);
+    }
   });
 });
