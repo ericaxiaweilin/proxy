@@ -141,9 +141,9 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
                 if (props.onShareProfile) props.onShareProfile();
                 else void Share.share({ message: `查看 ${props.profileDraft.name} 的 Proxy 主页` });
               }}
-              style={[styles.actionBtn, styles.actionSecondary]}
+              style={[styles.actionBtn, styles.actionLime]}
             >
-              <Text style={styles.actionSecondaryText}>分享主页</Text>
+              <Text style={styles.actionLimeText}>分享主页</Text>
             </Pressable>
           </>
         )}
@@ -592,6 +592,8 @@ const styles = StyleSheet.create({
   actionPrimaryText: { color: "#fff", fontSize: 13, fontWeight: "600" },
   actionSecondary: { backgroundColor: "#f1f5f9" },
   actionSecondaryText: { color: "#0f172a", fontSize: 13, fontWeight: "600" },
+  actionLime: { backgroundColor: "#C9FF08" },
+  actionLimeText: { color: "#0f172a", fontSize: 13, fontWeight: "700" },
   // 场景
   sceneEntry: { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginBottom: 12, padding: 12, backgroundColor: "#f8fafc", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0" },
   sceneEntryEmoji: { fontSize: 22, marginRight: 10 },
