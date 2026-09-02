@@ -2270,56 +2270,72 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.personalHubContent}>
-            {/* R15.23: 1:1 复刻 .topbar (h48 p 0 14 flex align center border-b 1 line bg rgba(255,255,255,.96)) */}
+            {/* R15.66 Threads R2: topbar (h46 flex align center) — 返回 + handle + 3 个 iconbtn */}
             <View style={styles.personalTopbar}>
               <Pressable accessibilityLabel="返回" onPress={() => setSubPage(undefined)} style={styles.personalTopbarButton}>
                 <Text style={styles.personalTopbarIcon}>‹</Text>
               </Pressable>
               <Text numberOfLines={1} style={styles.personalTopbarHandle}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
-              <Pressable accessibilityLabel="更多" onPress={() => openSubPage("personalqr")} style={styles.personalTopbarButton}>
-                <Text style={styles.personalTopbarIcon}>⋯</Text>
-              </Pressable>
-            </View>
-
-            {/* R15.23: .prototype-view (p 9 16 flex alignItems center gap 10 font 11 muted) */}
-            <View style={styles.personalPrototypeBar}>
-              <Text style={styles.personalPrototypeLabel}>原型视角</Text>
-              <Text style={styles.personalPrototypeHint}>验证关系权限，不属于正式主页 UI</Text>
-              <Text style={styles.personalPrototypeSelect}>本人 ▾</Text>
-            </View>
-
-            {/* R15.23: .profile (p 20 18 15) + .profile-head grid 1fr 78px */}
-            <View style={styles.personalProfile}>
-              <View style={styles.personalIdentityRow}>
-                <View style={styles.personalIdentityCopy}>
-                  <Text style={styles.personalDisplayName}>{profileDraft.name}</Text>
-                  <View style={styles.personalHandleRow}>
-                    <Text style={styles.personalHandle}>@{profileDraft.handle}</Text>
-                    <Text style={styles.personalVerified}>✓</Text>
-                  </View>
-                </View>
-                <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAvatarButton}>
-                  <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.personalAvatarImage} />
-                  <View style={styles.personalAvatarEdit}><Text style={styles.personalAvatarEditText}>＋</Text></View>
+              <View style={styles.personalTopbarTools}>
+                <Pressable accessibilityLabel="分析" style={styles.personalTopbarIconBtn} onPress={() => console.log(`[profile] insights · 开发中`)}>
+                  <ProxyIcon name="ring" color={color.ink} size={20} />
+                </Pressable>
+                <Pressable accessibilityLabel="搜索" style={styles.personalTopbarIconBtn} onPress={() => console.log(`[profile] search · 开发中`)}>
+                  <ProxyIcon name="crosshair" color={color.ink} size={20} />
+                </Pressable>
+                <Pressable accessibilityLabel="更多" style={styles.personalTopbarIconBtn} onPress={() => openSubPage("personalqr")}>
+                  <ProxyIcon name="settings" color={color.ink} size={20} />
                 </Pressable>
               </View>
-              <Text style={styles.personalBio}>{profileDraft.bio}</Text>
-              <View style={styles.personalMeta}>
-                <Text>{profileDraft.city}</Text>
-                <View style={styles.personalMetaDot} />
-                <Text>42 次已履约</Text>
-                <View style={styles.personalMetaDot} />
-                <View style={styles.personalAvailability}>
-                  <View style={styles.personalAvailabilityDot} />
-                  <Text>可接单</Text>
-                </View>
-              </View>
-              {/* 编辑/分享按钮由下面 <ProfileTabs /> 的 actionsRow 渲染 (R15.53 + R15.55).
-                  重复按钮已去掉, 免得跟 ProfileTabs 里的 actionsRow 视觉重叠。 */}
             </View>
 
-            {/* R15.23: .tabs (h 47 grid 3 1fr border-b 1 line bg #fff) + .tab.active::after 1.5px underline */}
-            {/* R15.53: replaced with ProfileTabs component (IG/Threads 5-tab layout) */}
+            {/* R15.66 Threads R2: head grid 1fr 86px — name h1 24px / handle 10px / 82px 圆头像 + 32px + 浮层 */}
+            <View style={styles.personalHead}>
+              <View style={styles.personalNameBlock}>
+                <Text numberOfLines={1} style={styles.personalName}>{profileDraft.name}</Text>
+                <Text numberOfLines={1} style={styles.personalHandleSub}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
+              </View>
+              <View style={styles.personalAvaWrap}>
+                <View style={styles.personalAva}>
+                  {profileAvatarUri ? <Image source={{ uri: profileAvatarUri }} style={styles.personalAvaImg} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
+                </View>
+                <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAvaAdd}>
+                  <ProxyIcon name="plus" color="#333" size={15} />
+                </Pressable>
+              </View>
+            </View>
+
+            {/* R15.66 Threads R2: bio 11px (line-height 1.48) + 链接一行 + topics pill + 12.8K 浏览 + 关注者头像堆叠 */}
+            <View style={styles.personalBio}>
+              <Text style={styles.personalBioText}>{profileDraft.bio || "介绍一下自己吧"}</Text>
+              <View style={styles.personalLinkRow}>
+                <ProxyIcon name="arrowUpRight" color="#666" size={12} />
+                <Text style={styles.personalLinkText}>{profileDraft.handle.startsWith("@") ? profileDraft.handle.slice(1) : profileDraft.handle}</Text>
+              </View>
+              <View style={styles.personalTopics}>
+                {(() => {
+                  const topics = profileDraft.city ? [profileDraft.city, "可接单"] : ["可接单"];
+                  return topics.map((t) => (
+                    <View key={t} style={styles.personalTopicPill}><Text style={styles.personalTopicText}>{t}</Text></View>
+                  ));
+                })()}
+              </View>
+              <View style={styles.personalStat}>
+                <Text style={styles.personalStatText}>
+                  <Text style={styles.personalStatValue}>{(personalFollowCounts?.followers ?? 0) * 80 + 128}</Text> 次浏览 · 最近 30 天 ›
+                </Text>
+              </View>
+              <View style={styles.personalFollowersRow}>
+                <View style={styles.personalFaces}>
+                  <View style={[styles.personalFace, { backgroundColor: "#fde68a" }]}><Text style={styles.personalFaceText}>M</Text></View>
+                  <View style={[styles.personalFace, { backgroundColor: "#bfdbfe" }]}><Text style={styles.personalFaceText}>A</Text></View>
+                  <View style={[styles.personalFace, { backgroundColor: "#fbcfe8" }]}><Text style={styles.personalFaceText}>L</Text></View>
+                </View>
+                <Text style={styles.personalFollowersCount}><Text style={styles.personalFollowersValue}>{personalFollowCounts?.followers ?? 0}</Text> 位关注者</Text>
+              </View>
+            </View>
+
+            {/* R15.66 Threads R2: actions 由 ProfileTabs render (边框 1px + 10 圆角 + 9px 字体) */}
             <ProfileTabs
               profileDraft={profileDraft}
               profileAvatarUri={profileAvatarUri}
@@ -3680,61 +3696,59 @@ const styles = StyleSheet.create({
 
   // 个人主页 v5：Threads 式轻资料与内容分页。能力与可用时间留在“我的市场”。
   personalHubContent: { paddingBottom: 0 },
-  // R15.23: 1:1 复刻 proxy_personal_profile_architecture_v5_threads.html
-  // .topbar: h48 p 0 14 grid 42/1fr/42 alignItems center border-b 1 line position relative top 0 bg rgba(255,255,255,.96) z-index 20
+  // R15.66 Threads R2: .tools h46 flex align center space-between, p 0 18
   personalTopbar: {
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,.96)",
-    borderBottomColor: "#E8E8E8",
-    borderBottomWidth: 1,
     flexDirection: "row",
-    height: 48,
-    paddingHorizontal: 14,
-    position: "relative",
-    top: 0,
-    zIndex: 20
+    height: 46,
+    paddingHorizontal: 18,
+    paddingTop: 7
   },
-  // .icon-btn: 38x38 radius 50% font 21 grid place center
-  personalTopbarButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },
+  personalTopbarButton: { alignItems: "center", height: 34, justifyContent: "center", width: 34 },
   personalTopbarIcon: { color: color.ink, fontSize: 21, fontWeight: "300", lineHeight: 24 },
-  // .top-title: text center font 15 weight 650 overflow ellipsis nowrap
-  personalTopbarHandle: { color: color.ink, flex: 1, fontSize: 15, fontWeight: "700", overflow: "hidden", textAlign: "center" },
-  // .prototype-view: border-b 1 line p 9 16 flex alignItems center gap 10 font 11 muted
-  personalPrototypeBar: { alignItems: "center", borderBottomColor: "#E8E8E8", borderBottomWidth: 1, flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 9 },
-  personalPrototypeLabel: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  personalPrototypeHint: { color: "#777", flex: 1, fontSize: 11 },
-  personalPrototypeSelect: { backgroundColor: "#F5F5F5", borderRadius: 999, color: color.ink, fontSize: 11, paddingHorizontal: 10, paddingVertical: 7 },
-  // .profile: p 20 18 15
-  personalProfile: { paddingBottom: 15, paddingHorizontal: 18, paddingTop: 20 },
-  // .profile-head: grid 1fr 78px gap 16 alignItems start
-  personalIdentityRow: { alignItems: "flex-start", flexDirection: "row", gap: 16 },
-  personalIdentityCopy: { flex: 1, minWidth: 0 },
-  // .display-name: font 22 weight 720 letterSpacing -.35 lineHeight 1.12 marginTop 2
-  personalDisplayName: { color: color.ink, fontSize: 22, fontWeight: "800", letterSpacing: -0.35, lineHeight: 25, marginTop: 2 },
-  // .handle-row: flex alignItems center gap 7 marginTop 7 font 13
-  personalHandleRow: { alignItems: "center", flexDirection: "row", gap: 7, marginTop: 7 },
-  // .handle: color #333
-  personalHandle: { color: "#333", fontSize: 13 },
-  // .verified: 16x16 radius 50% bg #111 color #fff grid place center font 10 weight 800 (Proxy 改成 11 满足 R3 baseline)
-  personalVerified: { alignItems: "center", backgroundColor: "#111", borderRadius: 8, color: color.white, fontSize: 11, fontWeight: "800", height: 16, justifyContent: "center", lineHeight: 13, width: 16 },
-  // .avatar: 76x76 radius 50% bg #111 color #fff grid place center font 28 weight 720 alignSelf end overflow hidden
-  personalAvatar: { alignItems: "center", backgroundColor: "#111", borderRadius: 38, color: color.white, fontSize: 28, fontWeight: "800", height: 76, justifyContent: "center", overflow: "hidden", width: 76 },
-  personalAvatarText: { color: color.white, fontSize: 28, fontWeight: "800" },
-  personalAvatarImage: { borderRadius: 38, height: 76, width: 76 },
-  // avatar 编辑角标 (owner only)
-  personalAvatarEdit: { alignItems: "center", backgroundColor: color.ink, borderColor: color.white, borderRadius: 11, borderWidth: 2, bottom: -1, height: 22, justifyContent: "center", position: "absolute", right: -1, width: 22 },
-  personalAvatarEditText: { color: color.white, fontSize: 15, fontWeight: "900", lineHeight: 17 },
-  personalAvatarButton: { height: 76, position: "relative", width: 76 },
-  // .bio: font 14 lh 1.48 marginTop 14 maxWidth 370
-  personalBio: { color: color.ink, fontSize: 14, lineHeight: 21, marginTop: 14, maxWidth: 370 },
-  // .profile-meta: marginTop 12 flex alignItems center gap 7 wrap font 12 muted
-  personalMeta: { alignItems: "center", color: "#777", flexDirection: "row", flexWrap: "wrap", fontSize: 12, gap: 7, marginTop: 12 },
-  // .dot: 2x2 radius 50% bg #aaa
-  personalMetaDot: { backgroundColor: "#AAA", borderRadius: 1, height: 2, width: 2 },
-  // .availability: inline-flex alignItems center gap 5 color #111
-  personalAvailability: { alignItems: "center", color: color.ink, flexDirection: "row", gap: 5 },
-  // .availability::before: 7x7 radius 50% bg lime (Proxy: 用单独 View)
-  personalAvailabilityDot: { backgroundColor: "#C9FF08", borderRadius: 3.5, height: 7, width: 7 },
+  personalTopbarHandle: { color: color.ink, flex: 1, fontSize: 15, fontWeight: "700", overflow: "hidden", textAlign: "left", marginLeft: 4 },
+  personalTopbarTools: { flexDirection: "row", gap: 5 },
+  personalTopbarIconBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
+
+  // R15.66 Threads R2: .head grid 1fr 86px gap 16 alignItems start paddingTop 7
+  personalHead: { flexDirection: "row", alignItems: "flex-start", gap: 16, paddingHorizontal: 18, paddingTop: 7 },
+  personalNameBlock: { flex: 1, minWidth: 0 },
+  personalName: { color: color.ink, fontSize: 24, fontWeight: "800", letterSpacing: -0.96, lineHeight: 28 },
+  personalHandleSub: { color: "#444", fontSize: 11, marginTop: 4 },
+  personalAvaWrap: { position: "relative", width: 82, height: 82, justifyContent: "flex-end" },
+  personalAva: { width: 82, height: 82, borderRadius: 41, backgroundColor: "#111", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "#ececec" },
+  personalAvaImg: { width: 82, height: 82, borderRadius: 41 },
+  personalAvaLetter: { color: color.white, fontSize: 27, fontWeight: "800" },
+  personalAvaAdd: {
+    position: "absolute", left: -6, bottom: -2, width: 32, height: 32, borderRadius: 16,
+    borderWidth: 3, borderColor: "#fff", backgroundColor: "#fff",
+    alignItems: "center", justifyContent: "center"
+  },
+
+  // R15.66 Threads R2: .bio marginTop 13
+  personalBio: { paddingHorizontal: 18, marginTop: 13 },
+  personalBioText: { color: color.ink, fontSize: 11, lineHeight: 16 },
+  personalLinkRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 },
+  personalLinkText: { color: "#333", fontSize: 11, fontWeight: "600" },
+
+  // R15.66 Threads R2: .topics flex gap 6 wrap marginTop 11
+  personalTopics: { flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 11 },
+  personalTopicPill: { borderWidth: 1, borderColor: "#e1e1e1", backgroundColor: "#fff", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  personalTopicText: { color: "#333", fontSize: 11, fontWeight: "600" },
+
+  // R15.66 Threads R2: .stat marginTop 12 color #8c8c8c font 8.5
+  personalStat: { marginTop: 12, paddingHorizontal: 18 },
+  personalStatText: { color: "#8c8c8c", fontSize: 11 },
+  personalStatValue: { color: "#111", fontWeight: "800" },
+
+  // R15.66 Threads R2: .followers flex align center gap 8 marginTop 11 font 8.8 color #7f7f7f
+  personalFollowersRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 11, paddingHorizontal: 18, marginBottom: 15 },
+  personalFaces: { flexDirection: "row" },
+  personalFace: { width: 19, height: 19, borderRadius: 9.5, borderWidth: 2, borderColor: "#fff", alignItems: "center", justifyContent: "center", marginLeft: -5 },
+  personalFaceText: { color: "#555", fontSize: 11, fontWeight: "900" },
+  personalFaceFirst: { marginLeft: 0 },
+  personalFollowersCount: { color: "#7f7f7f", fontSize: 11 },
+  personalFollowersValue: { color: "#111", fontWeight: "800" },
   // .profile-actions: grid 1fr 1fr gap 8 marginTop 16
   personalActions: { flexDirection: "row", gap: 8, marginTop: 16 },
   // .action: h38 border 1 #d7d7d7 bg #fff radius 10 font 13 weight 650

@@ -82,23 +82,8 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
 
   return (
     <View>
-      {/* 统计行 — IG 风格 "X 帖子 · Y 粉丝 · Z 关注" */}
-      <View style={styles.statsRow}>
-        <View style={styles.statCol}>
-          <Text style={styles.statValue}>{props.stats.posts}</Text>
-          <Text style={styles.statLabel}>帖子</Text>
-        </View>
-        <View style={styles.statCol}>
-          <Text style={styles.statValue}>{props.stats.followers}</Text>
-          <Text style={styles.statLabel}>粉丝</Text>
-        </View>
-        <View style={styles.statCol}>
-          <Text style={styles.statValue}>{props.stats.following}</Text>
-          <Text style={styles.statLabel}>关注</Text>
-        </View>
-      </View>
-
-      {/* 行动按钮 — 自己 profile = 编辑/分享 / 他人 profile = 关注/消息 (R15.55) */}
+      {/* 2-col 行动按钮 (Threads R2: 边框 + 10px 圆角 + 9px 字)
+         — 自己 profile = 编辑/分享 / 他人 profile = 关注/消息 (R15.55) */}
       <View style={styles.actionsRow}>
         {props.viewerMode === "OTHER" ? (
           <>
@@ -149,20 +134,6 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           </>
         )}
       </View>
-      {props.onOpenRealitySceneMap ? (
-        <Pressable
-          accessibilityLabel="场景足迹"
-          onPress={props.onOpenRealitySceneMap}
-          style={styles.sceneEntry}
-        >
-          <Text style={styles.sceneEntryEmoji}>🗺</Text>
-          <View style={styles.sceneEntryCopy}>
-            <Text style={styles.sceneEntryTitle}>场景足迹</Text>
-            <Text style={styles.sceneEntrySub}>历史公开记录与私人计划</Text>
-          </View>
-          <Text style={styles.sceneEntryChevron}>›</Text>
-        </Pressable>
-      ) : null}
 
       {/* Tabs 5 选 1 — IG/Threads 风: 顶部小 icon + 中文 label, active 黑下划线 2px */}
       <View style={styles.tabsRow}>
@@ -588,14 +559,17 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
   statLabel: { fontSize: 12, color: "#64748b", marginTop: 2 },
   // 行动
-  actionsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 12 },
-  actionBtn: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: "center" },
-  actionPrimary: { backgroundColor: "#0f172a" },
-  actionPrimaryText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  actionSecondary: { backgroundColor: "#f1f5f9" },
-  actionSecondaryText: { color: "#0f172a", fontSize: 13, fontWeight: "600" },
-  actionLime: { backgroundColor: "#C9FF08" },
-  actionLimeText: { color: "#0f172a", fontSize: 13, fontWeight: "700" },
+  // R15.66 Threads R2 行动按钮: 1px 边框 + 10 圆角 + 9px 标签 + 38px 高
+  actionsRow: { flexDirection: "row", gap: 8, paddingHorizontal: 18, marginBottom: 13 },
+  actionBtn: { flex: 1, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#dedede", backgroundColor: "#fff" },
+  actionPrimary: { backgroundColor: "#111", borderColor: "#111" },
+  actionPrimaryText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  actionSecondary: { backgroundColor: "#fff", borderColor: "#dedede" },
+  actionSecondaryText: { color: "#111", fontSize: 11, fontWeight: "700" },
+  actionLime: { backgroundColor: "#C9FF08", borderColor: "#C9FF08" },
+  actionLimeText: { color: "#0f172a", fontSize: 11, fontWeight: "700" },
+
+  // R15.66 sceneEntry 暂隐 (R2 设计没场景足迹卡片)
   // 场景
   sceneEntry: { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginBottom: 12, padding: 12, backgroundColor: "#f8fafc", borderRadius: 10, borderWidth: 1, borderColor: "#e2e8f0" },
   sceneEntryEmoji: { fontSize: 22, marginRight: 10 },
