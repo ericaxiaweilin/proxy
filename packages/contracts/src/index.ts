@@ -136,7 +136,8 @@ export const IdentityCommandTypeSchema = z.enum([
   "RevokeAllSessions",
   "SwitchPrincipalContext",
   "RequestAccountRecovery",
-  "RefreshSession"
+  "RefreshSession",
+  "ResumeTrustedDeviceSession"
 ]);
 export type IdentityCommandType = z.infer<typeof IdentityCommandTypeSchema>;
 
@@ -148,7 +149,8 @@ export type PrincipalContext = z.infer<typeof PrincipalContextSchema>;
 
 export const CreateAnonymousSessionPayloadSchema = z.object({
   deviceId: z.string().min(1),
-  platform: z.enum(["IOS", "ANDROID"])
+  platform: z.enum(["IOS", "ANDROID"]),
+  deviceCredential: z.string().min(32)
 });
 export type CreateAnonymousSessionPayload = z.infer<typeof CreateAnonymousSessionPayloadSchema>;
 
@@ -170,6 +172,7 @@ export const CreateSessionPayloadSchema = z.object({
   loginIdentityId: z.string().min(1),
   deviceId: z.string().min(1),
   challengeId: z.string().min(1),
+  deviceCredential: z.string().min(32),
   requestedPrincipal: PrincipalContextSchema
 });
 export type CreateSessionPayload = z.infer<typeof CreateSessionPayloadSchema>;
@@ -204,9 +207,17 @@ export const RequestAccountRecoveryPayloadSchema = z.object({
 export type RequestAccountRecoveryPayload = z.infer<typeof RequestAccountRecoveryPayloadSchema>;
 
 export const RefreshSessionPayloadSchema = z.object({
-  refreshToken: z.string().min(1)
+  refreshToken: z.string().min(1),
+  deviceId: z.string().min(1),
+  deviceCredential: z.string().min(32)
 });
 export type RefreshSessionPayload = z.infer<typeof RefreshSessionPayloadSchema>;
+
+export const ResumeTrustedDeviceSessionPayloadSchema = z.object({
+  deviceId: z.string().min(1),
+  deviceCredential: z.string().min(32)
+});
+export type ResumeTrustedDeviceSessionPayload = z.infer<typeof ResumeTrustedDeviceSessionPayloadSchema>;
 
 export const DemandCommandTypeSchema = z.enum([
   "CreateTaskDraft",
@@ -338,7 +349,7 @@ export const FeedPostSchema = z.object({
   // R15.15 P1: Post.SceneType — 解锁 per-(city, sceneType) 背景
   // 缓存。不传 = UNKNOWN，listFeed 仍查到样本 (只是会跌进
   // UNKNOWN 同一区。
-  sceneType: z.enum(["UNKNOWN", "ROOFTOP", "BRUNCH", "SPA", "CINEMA", "PHOTO", "NIGHTLIFE", "OUTDOOR", "COFFEE"]).optional(),
+  sceneType: z.enum(["UNKNOWN", "ROOFTOP", "BRUNCH", "SPA", "CINEMA", "PHOTO", "NIGHTLIFE", "OUTDOOR", "COFFEE", "FOOD", "WALK", "MARKET", "BIKE", "DINNER", "ACTIVITY"]).optional(),
   status: z.string(),
   contextRefs: z.array(PostContextRefSchema).default([]),
   createdAt: z.string(),
