@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
+import { ProfileTabs } from "./ProfileTabs";
 import * as ImagePicker from "expo-image-picker";
 import { Directory, File, Paths } from "expo-file-system";
 import { createProfileStore, DEFAULT_PROFILE, type ProfileRecord } from "../profile-store";
@@ -1269,6 +1270,7 @@ export function MeSurface({
   onOpenSwitcher,
   onOpenFeed,
   onOpenVouchers,
+  onOpenRealitySceneMap,
   onExperienceAction,
   onOpenConversation,
   onSignOut,
@@ -1298,6 +1300,7 @@ export function MeSurface({
   scene?: SceneClient;
   business?: BusinessClient;
   supply?: SupplyClient;
+  onOpenRealitySceneMap?: (() => void) | undefined;
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
   // 规范 §4/§13：Android 硬件返回先收起子页；其余覆盖层是 RN Modal（onRequestClose 自理）。
@@ -1364,6 +1367,11 @@ export function MeSurface({
   const [avRuleSheetOpen, setAvRuleSheetOpen] = useState(false);
   const [avDaySheet, setAvDaySheet] = useState<{ key: string; label: string }>();
   const [personalHubTab, setPersonalHubTab] = useState<PersonalHubTab>("FEED");
+  // R15.53: ProfileTabs 新组件使用 (IG/Threads 5 tabs)
+  //   REPLIES / SAVED / TAGGED — Phase 1.5 mock 空数组 (后端未提供)
+  const [personalReplyPosts] = useState<FeedPost[]>([]);
+  const [personalSavedPosts] = useState<FeedPost[]>([]);
+  const [personalTaggedPosts] = useState<FeedPost[]>([]);
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
@@ -2254,84 +2262,26 @@ export function MeSurface({
             </View>
 
             {/* R15.23: .tabs (h 47 grid 3 1fr border-b 1 line bg #fff) + .tab.active::after 1.5px underline */}
-            <View style={styles.personalTabs}>
-              {([['FEED', '动态'], ['PHOTOS', '照片'], ['RECORDS', '记录']] as const).map(([key, label]) => (
-                <Pressable key={key} onPress={() => setPersonalHubTab(key)} style={styles.personalTab}>
-                  <Text style={[styles.personalTabText, personalHubTab === key && styles.personalTabTextActive]}>{label}</Text>
-                  {personalHubTab === key ? <View style={styles.personalTabUnderline} /> : null}
-                </Pressable>
-              ))}
-            </View>
+            {/* R15.53: replaced with ProfileTabs component (IG/Threads 5-tab layout) */}
+            <ProfileTabs
+              profileDraft={profileDraft}
+              profileAvatarUri={profileAvatarUri}
+              posts={profilePosts}
+              mediaByPost={profileMedia}
+              photos={personalPhotos}
+              replyPosts={personalReplyPosts}
+              savedPosts={personalSavedPosts}
+              taggedPosts={personalTaggedPosts}
+              stats={{ posts: profilePosts.length, followers: 128, following: 56 }}
+              onOpenMedia={(entry) => setProfileViewer(entry)}
+              onOpenRealitySceneMap={onOpenRealitySceneMap}
+              onComingSoon={(label) => { console.log(`[profile] ${label} · 开发中`); }}
+              onOpenScene={(sceneId) => { console.log(`[profile] scene:${sceneId} · 开发中`); }}
+              resolveMediaUrl={localNet.resolveMediaUrl}
+              fallbackLogo={OTTER_LOGO}
+              color={color}
+            />
 
-            {/* R15.23: .post (p 16 18 14 border-b 1 line) + .post-head grid 38/1fr/32 + .post-body paddingLeft 48 marginTop -12 */}
-            {personalHubTab === "FEED" ? profilePosts.map((post) => {
-              const items = profileMedia[post.postId] ?? [];
-              return (
-              <View key={post.postId} style={styles.personalPost}>
-                <View style={styles.personalPostHead}>
-                  <View style={styles.personalPostAvatar}>
-                    {profileAvatarUri ? <Image source={{ uri: profileAvatarUri }} style={styles.personalPostAvatarImage} /> : <Text style={styles.personalPostAvatarText}>{(profileDraft.name || "?").charAt(0).toUpperCase()}</Text>}
-                  </View>
-                  <View style={styles.personalPostBody}>
-                    <View style={styles.personalPostNameLine}>
-                      <Text numberOfLines={1} style={styles.personalPostName}>{profileDraft.name}</Text>
-                      <Text numberOfLines={1} style={styles.personalPostTime}>· {new Date(post.createdAt).toLocaleDateString()}</Text>
-                    </View>
-                    <Text style={styles.personalPostText}>{post.body}</Text>
-                    {/* R15.23: .scene-line flex alignItems center gap 7 marginTop 9 font 11 color #666 + .scene-chip */}
-                    <View style={styles.personalPostContext}>
-                      {post.contextRefs.map((entry) => <Text key={entry.contextId} style={styles.personalPostSceneChip}>{entry.contextId}</Text>)}
-                    </View>
-                    {items.length > 0 ? (
-                      <ThreadsPostMedia items={items} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onOpen={(index) => setProfileViewer({ postId: post.postId, index })} />
-                    ) : null}
-                    {/* R15.23: .post-actions flex gap 20 marginTop 12 font 12 color #666 */}
-                    <View style={styles.personalPostActions}>
-                      <Pressable><Text style={styles.personalPostAction}>♡ 喜欢</Text></Pressable>
-                      <Pressable><Text style={styles.personalPostAction}>◯ 回复</Text></Pressable>
-                      <Pressable><Text style={styles.personalPostAction}>↗ 分享</Text></Pressable>
-                    </View>
-                    {/* R15.23: .owner-menu (own posts only) */}
-                    <View style={styles.personalPostOwnerMenu}>
-                      <Pressable><Text style={styles.personalPostOwnerItem}>编辑</Text></Pressable>
-                      <Pressable><Text style={styles.personalPostOwnerDanger}>删除</Text></Pressable>
-                      <Text style={styles.personalPostOwnerBadge}>所有人</Text>
-                    </View>
-                  </View>
-                  {/* R15.23: .post-menu (32pt, 19px, #555, ⋯) */}
-                  <Pressable accessibilityLabel="更多" style={styles.personalPostMenu}><Text style={styles.personalPostMenuText}>⋯</Text></Pressable>
-                </View>
-              </View>
-              );
-            }) : null}
-
-            {personalHubTab === "FEED" && profilePosts.length === 0 ? <View style={styles.personalEmpty}><Text style={styles.personalEmptyTitle}>还没有动态</Text><Text>主页只展示内容，不再堆叠个人资料字段。</Text></View> : null}
-
-            {/* R15.23: .media-grid grid 3 1fr gap 1px bg #fff p 1 + button aspectRatio 1 */}
-            {personalHubTab === "PHOTOS" ? (
-              <View style={styles.personalPhotoGrid}>
-                {personalPhotos.map(({ item, index, postId }) => (
-                  <Pressable key={`${item.mediaAssetId}-${index}`} onPress={() => setProfileViewer({ postId, index })} style={styles.personalPhotoTile}>
-                    <Image source={{ uri: localNet.resolveMediaUrl(item.feedUrl ?? item.thumbnailUrl ?? item.galleryUrl ?? "") }} resizeMode="cover" style={styles.personalPhotoImage} />
-                    {/* R15.23: .media-private (privacy badge) */}
-                    <Text style={styles.personalPhotoPrivate}>仅自己</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ) : null}
-
-            {/* R15.23: .record (p 15 18 border-b 1 line grid 42/1fr/auto gap 11) + .record-icon 40x40 */}
-            {personalHubTab === "RECORDS" ? (
-              <View style={styles.personalRecords}>
-                {[["✓", "身份已验证", "Proxy 完成真实性校验", "已完成"], ["42", "42 次已履约", "平台内可验证记录", "98% 准时"], ["↻", "7 次复购", "来自已完成服务", "稳定"]].map(([icon, title, desc, value]) => (
-                  <View key={title} style={styles.personalRecordRow}>
-                    <View style={styles.personalRecordIcon}><Text style={styles.personalRecordValue}>{icon}</Text></View>
-                    <View style={styles.personalRecordCopy}><Text style={styles.personalRecordTitle}>{title}</Text><Text style={styles.personalRecordDesc}>{desc}</Text></View>
-                    <Text style={styles.personalRecordValue}>{value}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
           </ScrollView>
           <Modal animationType="slide" onRequestClose={() => setProfileEditorOpen(false)} transparent visible={profileEditorOpen}>
             <View style={styles.profileEditorOverlay}>
