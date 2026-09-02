@@ -369,8 +369,9 @@ func TestProtectedCommandFailsClosedWithoutAuthenticator(t *testing.T) {
 }
 
 // R15.34.1 P0: 匿名 / 离线 fallback 不能发 CreatePost。
-//   server 必须拒绝 (ACCESS_TOKEN_REQUIRED / INVALID_ACCESS_TOKEN),
-//   不要让 mobile 的 fake offline session 成功发布。
+//
+//	server 必须拒绝 (ACCESS_TOKEN_REQUIRED / INVALID_ACCESS_TOKEN),
+//	不要让 mobile 的 fake offline session 成功发布。
 type strictAuthenticator struct {
 	// validTokens: access token 白名单。空 token 不在表里，返错误。
 	validTokens map[string]identity.AuthenticatedSession
@@ -401,9 +402,9 @@ func TestCreatePostRejectsAnonymous(t *testing.T) {
 	handler := server.Handler()
 	// 场景 1: 没有任何 Authorization header
 	noAuth := requestWithBearer(handler, http.MethodPost, "/v1/commands/CreatePost", apiEnvelope("CreatePost", map[string]any{
-		"body":        "匿名发文测试，不应成功",
-		"authorType":  "USER",
-		"visibility":  "PUBLIC",
+		"body":       "匿名发文测试，不应成功",
+		"authorType": "USER",
+		"visibility": "PUBLIC",
 	}, command.Target{Type: "Post", ID: "new"}, "idem_anon_createpost_001"), "")
 	if noAuth.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous CreatePost should be 401, got %d body=%s", noAuth.Code, noAuth.Body.String())
@@ -417,9 +418,9 @@ func TestCreatePostRejectsAnonymous(t *testing.T) {
 	}
 	// 场景 2: 离线 fallback 用的 fake token (offline_*) 必须被拒
 	fakeAuth := requestWithBearer(handler, http.MethodPost, "/v1/commands/CreatePost", apiEnvelope("CreatePost", map[string]any{
-		"body":        "fake token 发文测试，不应成功",
-		"authorType":  "USER",
-		"visibility":  "PUBLIC",
+		"body":       "fake token 发文测试，不应成功",
+		"authorType": "USER",
+		"visibility": "PUBLIC",
 	}, command.Target{Type: "Post", ID: "new"}, "idem_faketoken_createpost_001"), "offline_fake_token_xyz")
 	if fakeAuth.Code != http.StatusUnauthorized {
 		t.Fatalf("fake-token CreatePost should be 401, got %d body=%s", fakeAuth.Code, fakeAuth.Body.String())
@@ -432,9 +433,9 @@ func TestCreatePostRejectsAnonymous(t *testing.T) {
 	}
 	// 场景 3: 真实 access token 能成功发布 (回归测试，确保拒绝逻辑没误伤)
 	real := requestWithBearer(handler, http.MethodPost, "/v1/commands/CreatePost", apiEnvelope("CreatePost", map[string]any{
-		"body":        "真实登录发文，应该成功",
-		"authorType":  "USER",
-		"visibility":  "PUBLIC",
+		"body":       "真实登录发文，应该成功",
+		"authorType": "USER",
+		"visibility": "PUBLIC",
 	}, command.Target{Type: "Post", ID: "new"}, "idem_real_createpost_001"), "valid_access_001")
 	if real.Code != http.StatusOK {
 		t.Fatalf("real CreatePost should be 200, got %d body=%s", real.Code, real.Body.String())
@@ -506,6 +507,7 @@ func TestRequiresAuthentication_PublicReadAllowlist(t *testing.T) {
 		"CreateAnonymousSession",
 		"RequestAccountRecovery",
 		"RefreshSession",
+		"ResumeTrustedDeviceSession",
 	}
 	for _, cmd := range authLifecycle {
 		if requiresAuthentication(cmd) {
@@ -582,6 +584,12 @@ func TestVersionMiddlewareRequiresUpgrade(t *testing.T) {
 	handler.ServeHTTP(facet, httptest.NewRequest(http.MethodGet, "/v1/facet/objects", nil))
 	if facet.Code != http.StatusOK {
 		t.Fatalf("facet must not be version-gated, got %d", facet.Code)
+	}
+	// feed anonymous read must also be exempt — guest mode would 426 otherwise (proxy.feed load failed)
+	feed := httptest.NewRecorder()
+	handler.ServeHTTP(feed, httptest.NewRequest(http.MethodGet, "/v1/feed", nil))
+	if feed.Code == http.StatusUpgradeRequired {
+		t.Fatalf("feed must not be version-gated for guest, got 426")
 	}
 	// missing header -> 426
 	missing := httptest.NewRecorder()
