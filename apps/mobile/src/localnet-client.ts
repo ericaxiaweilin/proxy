@@ -96,10 +96,13 @@ export class LocalNetClient {
 
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {
     const session = await this.requireSession();
+    console.log(`[proxy.R15.63.DEBUG.post] CreatePost start bodyLen=${payload.body?.length ?? 0} mediaRefs=${payload.mediaRefs?.length ?? 0} idempotencyKey=${idempotencyKey ?? "none"}`);
     const result = await this.sendCommand(session, "CreatePost", { type: "Post", id: "new" }, payload as unknown as Record<string, unknown>, idempotencyKey);
     if (result.aggregate?.type !== "Post") {
+      console.log(`[proxy.R15.63.DEBUG.post] CreatePost FAIL: aggregate.type=${result.aggregate?.type} outcome=${result.outcome} error=${JSON.stringify(result.error ?? null)}`);
       throw new LocalNetProtocolError("create post response did not contain a Post aggregate");
     }
+    console.log(`[proxy.R15.63.DEBUG.post] CreatePost ok postId=${result.aggregate.id}`);
     return result.aggregate.id;
   }
 

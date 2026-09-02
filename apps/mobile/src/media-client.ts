@@ -60,12 +60,14 @@ export class MediaClient {
    */
   public async uploadMedia(file: UploadableImage & { mediaType: UploadMediaType; durationMs?: number; defaultMime?: string }, options: MediaUploadOptions = {}): Promise<{ mediaAssetId: string; storageKey: string }> {
     const mimeType = file.mimeType || file.defaultMime || "application/octet-stream";
+    console.log(`[proxy.R15.63.DEBUG.media] uploadMedia start mime=${mimeType} mediaType=${file.mediaType} uri=${file.uri.slice(0, 40)}`);
     const accessToken = await this.input.authClient.getAccessToken();
-    if (!accessToken) throw new Error("上传媒体前需要有效会话");
+    if (!accessToken) { console.log("[proxy.R15.63.DEBUG.media] uploadMedia FAIL: no access token"); throw new Error("上传媒体前需要有效会话"); }
     const localFile = new File(file.uri);
-    if (!localFile.exists) throw new Error(file.mediaType === "AUDIO" ? "无法读取录音文件" : "无法读取所选照片");
+    if (!localFile.exists) { console.log(`[proxy.R15.63.DEBUG.media] uploadMedia FAIL: file not exists uri=${file.uri}`); throw new Error(file.mediaType === "AUDIO" ? "无法读取录音文件" : "无法读取所选照片"); }
     const totalBytes = localFile.size;
-    if (!totalBytes || totalBytes <= 0) throw new Error(file.mediaType === "AUDIO" ? "录音为空，请重新录制" : "所选照片为空或大小不可读");
+    if (!totalBytes || totalBytes <= 0) { console.log(`[proxy.R15.63.DEBUG.media] uploadMedia FAIL: empty file bytes=${totalBytes}`); throw new Error(file.mediaType === "AUDIO" ? "录音为空，请重新录制" : "所选照片为空或大小不可读"); }
+    console.log(`[proxy.R15.63.DEBUG.media] uploadMedia file ok totalBytes=${totalBytes}`);
 
     const createSession = async (): Promise<ResumableMediaUploadSession> => {
       const storageKey = `${this.nextId(file.mediaType.toLowerCase())}${extensionFor(mimeType)}`;
@@ -90,6 +92,7 @@ export class MediaClient {
     let session = options.resumeSession?.totalBytes === totalBytes ? options.resumeSession : undefined;
     if (!session) {
       session = await createSession();
+      console.log(`[proxy.R15.63.DEBUG.media] CreateMediaAsset ok mediaAssetId=${session.mediaAssetId} uploadUrl=${session.uploadUrl}`);
     }
 
     let uploadEndpoint = `${this.input.baseUrl}${session.uploadUrl}`;
@@ -150,6 +153,8 @@ export class MediaClient {
           });
           return response.status;
         }, undefined, 3, options.signal);
+        const chunkStatus = response ?? { status: 0 } as Response;
+        console.log(`[proxy.R15.63.DEBUG.media] upload chunk status=${chunkStatus.status} range=${offset}-${end}/${totalBytes} uploadOffset=${chunkStatus.headers.get("Upload-Offset")}`);
         const acceptedOffset = Number(response?.headers.get("Upload-Offset") ?? end + 1);
         if (!Number.isInteger(acceptedOffset) || acceptedOffset < end + 1 || acceptedOffset > totalBytes) {
           throw new Error("照片服务返回了无效续传位置");
