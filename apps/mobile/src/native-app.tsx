@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
@@ -149,29 +149,6 @@ const businessClient = new BusinessClient({ authClient: sessionAuthClient, secur
 const sceneClient = new SceneClient({ authClient: sessionAuthClient, secureSessionStore });
 const supplyClient = new SupplyClient({ authClient: sessionAuthClient, secureSessionStore });
 type BootPhase = "BOOTSTRAPPING" | "PUBLIC" | "AUTHENTICATED" | "SIGNED_OUT";
-
-// R15.66 DEBUG: 全局未捕获错误 handler — 打印 stack 定位 'input of undefined' 来源
-// 复用 React Native 的 ErrorUtils, 装上堆栈 + message 打印。
-const __originalErrorHandler = (globalThis as { ErrorUtils?: { getGlobalHandler?: () => unknown; setGlobalHandler?: (h: unknown) => void } }).ErrorUtils;
-if (__originalErrorHandler?.setGlobalHandler) {
-  __originalErrorHandler.setGlobalHandler((err: Error, isFatal?: boolean) => {
-    console.log(`[proxy.R15.66.DEBUG.gobalError] isFatal=${isFatal} message=${err?.message} stack=${err?.stack?.split("\n").slice(0, 10).join(" | ")}`);
-    // 不吞错, 走原 handler (RN 默认会弹 red box)
-    const orig = __originalErrorHandler.getGlobalHandler?.();
-    if (typeof orig === "function") (orig as (e: Error, f?: boolean) => void)(err, isFatal);
-  });
-}
-
-// R15.66 DEBUG: 包装 console.error 抓红框前的 'input of undefined' 源头
-const __originalConsoleError = console.error.bind(console);
-(console as typeof console).error = (...args: unknown[]) => {
-  const first = args[0];
-  if (typeof first === "string" && first.includes("input of undefined")) {
-    console.log(`[proxy.R15.66.DEBUG.consoleError] match 'input of undefined' — full args: ${JSON.stringify(args).slice(0, 2000)}`);
-    console.log(`[proxy.R15.66.DEBUG.consoleError] stack=${new Error().stack?.split("\n").slice(0, 15).join(" | ")}`);
-  }
-  __originalConsoleError(...args);
-};
 
 export function ProxyApp(): React.JSX.Element {
   // R15 Model-Driven UI：不再内嵌 HTML 原型（Gate O）。

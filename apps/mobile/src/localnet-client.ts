@@ -53,11 +53,7 @@ export class LocalNetClient {
     // R15.65: 防御 — caller 可能以裸方法 (this 丢) 传过来。
     // 拿不到 input.baseUrl 时返回空串, 避免 TypeError: Cannot read property 'input' of undefined
     const baseUrl = (this as unknown as { input?: { baseUrl?: string } })?.input?.baseUrl;
-    if (!baseUrl) {
-      // R15.66 DEBUG: 打印 stack 定位 caller (who 把裸方法传过来, 调时丢 this)
-      console.log(`[proxy.R15.66.DEBUG.localnet] resolveMediaUrl: this.input.baseUrl missing, path=${path} stack=${new Error().stack?.split("\n").slice(0, 5).join(" | ")}`);
-      return "";
-    }
+    if (!baseUrl) return "";
     return `${baseUrl}${path}`;
   }
 
