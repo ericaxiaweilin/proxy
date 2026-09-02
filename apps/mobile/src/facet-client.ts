@@ -19,13 +19,16 @@ import type {
   ListFacetObjectsPayload,
   ListSideSpaceCatalogPayload,
   ListSideSpacePostsPayload,
-  FacetSideSpacePost
+  FacetSideSpacePost,
+  FacetConfig,
+  UpdateFacetConfigPayload
 } from "@proxy/contracts";
 import {
   parseListFacetObjectsPayload,
   parseListSideSpacePostsPayload,
   parseListSideSpaceCatalogPayload,
-  parseFacetSideSpacePost
+  parseFacetSideSpacePost,
+  parseFacetConfig
 } from "@proxy/contracts";
 import type { TransportResponse, TransportRequest } from "./auth-client";
 
@@ -139,5 +142,42 @@ export class FacetClient {
     }
     const raw = await response.json();
     return parseListSideSpaceCatalogPayload(raw);
+  }
+
+  /**
+   * R15.51 — 拉取当前运营阈值 (FacetConfig).
+   * 匿名可读 (跟 ListFacetObjects 同策略) — OPS 页面加载时拉取展示 + 编辑.
+   */
+  public async listFacetConfig(): Promise<FacetConfig> {
+    const path = "/v1/facet/config";
+    const response = await this.input.requester.requestPublic(path, { method: "GET" });
+    if (response.status < 200 || response.status >= 300) {
+      throw new FacetProtocolError(`facet listFacetConfig unexpected status: ${response.status}`);
+    }
+    const raw = await response.json();
+    return parseFacetConfig(raw);
+  }
+
+  /**
+   * R15.51 — 提交阈值更新 (乐观锁 expectedVersion).
+   * 成功 → 新 config (Version+1); version mismatch → 409 (throw FacetProtocolError).
+   */
+  public async updateFacetConfig(payload: UpdateFacetConfigPayload): Promise<FacetConfig> {
+    const path = "/v1/facet/config";
+    const response = await this.input.requester.requestPublic(path, {
+      method: "POST",
+      body: payload
+    });
+    if (response.status === 409) {
+      throw new FacetProtocolError("facet config version mismatch (refresh and retry)");
+    }
+    if (response.status === 400) {
+      throw new FacetProtocolError("facet config invalid value or updated_by missing");
+    }
+    if (response.status < 200 || response.status >= 300) {
+      throw new FacetProtocolError(`facet updateFacetConfig unexpected status: ${response.status}`);
+    }
+    const raw = await response.json();
+    return parseFacetConfig(raw);
   }
 }

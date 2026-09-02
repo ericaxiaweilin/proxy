@@ -19,7 +19,7 @@ func TestReasoner_BuildingTrust_LongSilence(t *testing.T) {
 		UnrepliedMessageCount: 2,
 		ProfileViewsLast7d:    3,
 		ShownAssetCount:       16,
-	}, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "personal/honest" {
 		t.Errorf("expected personal/honest, got %q", d.RecommendedKind)
 	}
@@ -41,7 +41,7 @@ func TestReasoner_BuildingTrust_HighProfileViews(t *testing.T) {
 		DaysSinceLastChat:  10,
 		ProfileViewsLast7d: 4,
 		ShownAssetCount:    10,
-	}, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "personal/real-life" {
 		t.Errorf("expected personal/real-life, got %q", d.RecommendedKind)
 	}
@@ -58,7 +58,7 @@ func TestReasoner_BuildingTrust_Stable(t *testing.T) {
 		ProfileViewsLast7d: 1,
 		ShownAssetCount:    30,
 		RelationshipDays:   60,
-	}, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "personal/real-life" {
 		t.Errorf("expected personal/real-life, got %q", d.RecommendedKind)
 	}
@@ -74,7 +74,7 @@ func TestReasoner_SharedInterest_FreshAsset(t *testing.T) {
 		DaysSinceLastChat: 1,
 		FreshAssetCount:   2,
 		ShownAssetCount:   22,
-	}, "SHARED_INTEREST", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "SHARED_INTEREST", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "city/travel" {
 		t.Errorf("expected city/travel, got %q", d.RecommendedKind)
 	}
@@ -91,7 +91,7 @@ func TestReasoner_SharedInterest_MutualEvents(t *testing.T) {
 		MutualEventsCount: 4,
 		ShownAssetCount:   15,
 		RelationshipDays:  120,
-	}, "SHARED_INTEREST", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "SHARED_INTEREST", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "shared-experience" {
 		t.Errorf("expected shared-experience, got %q", d.RecommendedKind)
 	}
@@ -103,7 +103,7 @@ func TestReasoner_SharedInterest_Default(t *testing.T) {
 	d := r.Reason(ObjectSignals{
 		DaysSinceLastChat: 7,
 		ShownAssetCount:   10,
-	}, "SHARED_INTEREST", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "SHARED_INTEREST", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "photo" {
 		t.Errorf("expected photo, got %q", d.RecommendedKind)
 	}
@@ -117,7 +117,7 @@ func TestReasoner_CreatorCollab_HighIntent(t *testing.T) {
 		ProfileViewsLast7d:  5,
 		RelationshipDays:    30,
 		ShownAssetCount:     8,
-	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "portfolio/capability" {
 		t.Errorf("expected portfolio/capability, got %q", d.RecommendedKind)
 	}
@@ -136,7 +136,7 @@ func TestReasoner_CreatorCollab_MidIntent(t *testing.T) {
 		CollaborationIntent: 45,
 		DaysSinceLastChat:   5,
 		ShownAssetCount:     5,
-	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "intro/services" {
 		t.Errorf("expected intro/services, got %q", d.RecommendedKind)
 	}
@@ -148,7 +148,7 @@ func TestReasoner_CreatorCollab_LowIntent(t *testing.T) {
 	d := r.Reason(ObjectSignals{
 		CollaborationIntent: 15,
 		RelationshipDays:    5,
-	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind != "personal/real-life" {
 		t.Errorf("expected personal/real-life (build trust first), got %q", d.RecommendedKind)
 	}
@@ -160,7 +160,7 @@ func TestReasoner_UnknownRelation(t *testing.T) {
 	d := r.Reason(ObjectSignals{
 		ShownAssetCount: 10,
 		FreshAssetCount: 1,
-	}, "UNKNOWN_RELATION", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "UNKNOWN_RELATION", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.RecommendedKind == "" {
 		t.Error("unknown relation should still produce a recommendedKind")
 	}
@@ -182,7 +182,7 @@ func TestReasoner_NextShowAtIsFuture(t *testing.T) {
 		{"UNKNOWN", ObjectSignals{}},
 	}
 	for _, c := range cases {
-		d := r.Reason(c.signals, c.relation, SideSpaceStats{KindCounts: map[string]int{}})
+		d := r.Reason(c.signals, c.relation, SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 		next, err := time.Parse(time.RFC3339, d.NextShowAt)
 		if err != nil {
 			t.Errorf("[%s] NextShowAt not RFC3339: %q err=%v", c.relation, d.NextShowAt, err)
@@ -219,7 +219,7 @@ func TestReasoner_RecommendedKindAlwaysAllowed(t *testing.T) {
 				RelationshipDays:      i * 7,
 				CollaborationIntent:   i * 10,
 			}
-			d := r.Reason(s, relation, SideSpaceStats{KindCounts: map[string]int{}})
+			d := r.Reason(s, relation, SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 			if !allowed[d.RecommendedKind] {
 				t.Errorf("[%s] recommendedKind %q not in whitelist", relation, d.RecommendedKind)
 			}
@@ -234,8 +234,8 @@ func TestReasoner_Determinism(t *testing.T) {
 		DaysSinceLastChat: 8, UnrepliedMessageCount: 2, ProfileViewsLast7d: 3,
 		ShownAssetCount: 16, RelationshipDays: 45,
 	}
-	d1 := r.Reason(s, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}})
-	d2 := r.Reason(s, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}})
+	d1 := r.Reason(s, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
+	d2 := r.Reason(s, "BUILDING_TRUST", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d1 != d2 {
 		t.Errorf("non-deterministic: %+v vs %+v", d1, d2)
 	}
@@ -247,7 +247,7 @@ func TestReasoner_SideSpace_HighIntent(t *testing.T) {
 	d := r.Reason(ObjectSignals{
 		CollaborationIntent: 75, ProfileViewsLast7d: 5, RelationshipDays: 30,
 		ShownAssetCount: 8,
-	}, "CREATOR_COLLAB", SideSpaceStats{Total: 0, KindCounts: map[string]int{}})
+	}, "CREATOR_COLLAB", SideSpaceStats{Total: 0, KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.SideSpaceGap == "" {
 		t.Error("high intent should produce sideSpaceGap")
 	}
@@ -267,7 +267,7 @@ func TestReasoner_SideSpace_MidIntent(t *testing.T) {
 	r := NewRuleReasoner(frozenTime)
 	d := r.Reason(ObjectSignals{
 		CollaborationIntent: 45, ShownAssetCount: 3,
-	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.SideSpaceGap == "" {
 		t.Error("mid intent should produce sideSpaceGap")
 	}
@@ -281,7 +281,7 @@ func TestReasoner_SideSpace_LowIntent(t *testing.T) {
 	r := NewRuleReasoner(frozenTime)
 	d := r.Reason(ObjectSignals{
 		CollaborationIntent: 15, RelationshipDays: 5,
-	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}})
+	}, "CREATOR_COLLAB", SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.SideSpaceGap != "" {
 		t.Errorf("low intent should NOT produce sideSpaceGap, got %q", d.SideSpaceGap)
 	}
@@ -297,7 +297,7 @@ func TestReasoner_SideSpace_NonCollabEmpty(t *testing.T) {
 		d := r.Reason(ObjectSignals{
 			DaysSinceLastChat: 1, FreshAssetCount: 5, MutualEventsCount: 3,
 			ShownAssetCount: 20, RelationshipDays: 100, ProfileViewsLast7d: 10,
-		}, relation, SideSpaceStats{KindCounts: map[string]int{}})
+		}, relation, SideSpaceStats{KindCounts: map[string]int{}}, DefaultFacetConfig())
 		if d.SideSpaceGap != "" {
 			t.Errorf("[%s] non-collab should have empty sideSpaceGap, got %q", relation, d.SideSpaceGap)
 		}
@@ -317,7 +317,7 @@ func TestReasoner_R15_44_SideSpaceEmpty(t *testing.T) {
 	r := NewRuleReasoner(frozenTime)
 	d := r.Reason(ObjectSignals{
 		CollaborationIntent: 75, ShownAssetCount: 8,
-	}, "CREATOR_COLLAB", SideSpaceStats{Total: 0, KindCounts: map[string]int{}})
+	}, "CREATOR_COLLAB", SideSpaceStats{Total: 0, KindCounts: map[string]int{}}, DefaultFacetConfig())
 	if d.SideSpaceFulfilled {
 		t.Error("empty side space should NOT be fulfilled")
 	}
@@ -333,7 +333,7 @@ func TestReasoner_R15_44_SideSpaceOnePiece(t *testing.T) {
 		CollaborationIntent: 75,
 	}, "CREATOR_COLLAB", SideSpaceStats{
 		Total: 1, KindCounts: map[string]int{"portfolio/capability": 1},
-	})
+	}, DefaultFacetConfig())
 	if d.SideSpaceFulfilled {
 		t.Error("1 piece should NOT be fulfilled (threshold=2)")
 	}
@@ -349,7 +349,7 @@ func TestReasoner_R15_44_SideSpaceFulfilled(t *testing.T) {
 		CollaborationIntent: 75,
 	}, "CREATOR_COLLAB", SideSpaceStats{
 		Total: 3, KindCounts: map[string]int{"portfolio/capability": 2, "intro/services": 1},
-	})
+	}, DefaultFacetConfig())
 	if !d.SideSpaceFulfilled {
 		t.Error("2+ portfolio/capability should be fulfilled")
 	}
@@ -368,7 +368,7 @@ func TestReasoner_R15_44_MidIntentFulfilled(t *testing.T) {
 		CollaborationIntent: 45,
 	}, "CREATOR_COLLAB", SideSpaceStats{
 		Total: 2, KindCounts: map[string]int{"intro/services": 2},
-	})
+	}, DefaultFacetConfig())
 	if !d.SideSpaceFulfilled {
 		t.Error("mid intent + 2 intro/services should be fulfilled")
 	}
@@ -384,7 +384,7 @@ func TestReasoner_R15_44_CurrentStateMentionsSideSpaceTotal(t *testing.T) {
 		CollaborationIntent: 75, ProfileViewsLast7d: 3, RelationshipDays: 20,
 	}, "CREATOR_COLLAB", SideSpaceStats{
 		Total: 4, KindCounts: map[string]int{"portfolio/capability": 1, "intro/services": 3},
-	})
+	}, DefaultFacetConfig())
 	if !strings.Contains(d.CurrentState, "副空间 4 条") {
 		t.Errorf("CurrentState should mention 副空间 4 条, got %q", d.CurrentState)
 	}

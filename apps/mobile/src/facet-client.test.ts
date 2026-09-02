@@ -4,12 +4,9 @@ import type { PublicRequester } from "./facet-client";
 import type { TransportResponse } from "./auth-client";
 
 // 模拟最小化 public requester — 不依赖 SessionAuthClient / network。
-function makeRequester(handler: (path: string) => TransportResponse): PublicRequester {
+function makeRequester(handler: (path: string, init: { method: string; body?: unknown }) => TransportResponse): PublicRequester {
   return {
-    requestPublic: async (path, init) => {
-      if (init.method !== "GET") throw new Error("test: expected GET");
-      return handler(path);
-    }
+    requestPublic: async (path, init) => handler(path, init)
   };
 }
 
@@ -179,5 +176,91 @@ describe("FacetClient.listObjects", () => {
       baseUrl: "http://localhost:3000"
     });
     await expect(client.listSideSpacePosts("spa")).rejects.toThrow();
+  });
+});
+
+// ---------- R15.51 FacetConfig ----------
+
+describe("FacetClient.config", () => {
+  it("R15.51: listFacetConfig GET /v1/facet/config returns parsed FacetConfig", async () => {
+    let capturedPath = "";
+    let capturedMethod = "";
+    const client = new FacetClient({
+      requester: makeRequester((path, init) => {
+        capturedPath = path;
+        capturedMethod = init.method;
+        return ok({
+          sideSpaceHighThreshold: 2,
+          sideSpaceMidThreshold: 2,
+          priorityMidBoundary: 30,
+          priorityHighBoundary: 60,
+          confidenceFloor: 50,
+          updatedAt: "2026-09-01T00:00:00Z",
+          updatedBy: "ops_default",
+          version: 1
+        });
+      }),
+      baseUrl: "http://localhost:3000"
+    });
+    const cfg = await client.listFacetConfig();
+    expect(capturedPath).toBe("/v1/facet/config");
+    expect(capturedMethod).toBe("GET");
+    expect(cfg.sideSpaceHighThreshold).toBe(2);
+    expect(cfg.priorityHighBoundary).toBe(60);
+    expect(cfg.version).toBe(1);
+  });
+
+  it("R15.51: updateFacetConfig POST /v1/facet/config with version+patch returns new config", async () => {
+    let capturedPath = "";
+    let capturedMethod = "";
+    let capturedBody: unknown = null;
+    const client = new FacetClient({
+      requester: makeRequester((path, init) => {
+        capturedPath = path;
+        capturedMethod = init.method;
+        capturedBody = init.body;
+        return ok({
+          sideSpaceHighThreshold: 3,
+          sideSpaceMidThreshold: 2,
+          priorityMidBoundary: 30,
+          priorityHighBoundary: 60,
+          confidenceFloor: 50,
+          updatedAt: "2026-09-01T00:00:00Z",
+          updatedBy: "ops_alice",
+          version: 2
+        });
+      }),
+      baseUrl: "http://localhost:3000"
+    });
+    const out = await client.updateFacetConfig({
+      expectedVersion: 1,
+      patch: { sideSpaceHighThreshold: 3, updatedBy: "ops_alice" }
+    });
+    expect(capturedPath).toBe("/v1/facet/config");
+    expect(capturedMethod).toBe("POST");
+    expect((capturedBody as { expectedVersion?: number }).expectedVersion).toBe(1);
+    expect((capturedBody as { patch?: { updatedBy?: string } }).patch?.updatedBy).toBe("ops_alice");
+    expect(out.version).toBe(2);
+    expect(out.sideSpaceHighThreshold).toBe(3);
+  });
+
+  it("R15.51: updateFacetConfig 409 throws FacetProtocolError (version mismatch)", async () => {
+    const client = new FacetClient({
+      requester: makeRequester(() => ({ status: 409, json: async () => ({ error: "config_version_mismatch" }) })),
+      baseUrl: "http://localhost:3000"
+    });
+    await expect(
+      client.updateFacetConfig({ expectedVersion: 1, patch: { updatedBy: "ops" } })
+    ).rejects.toBeInstanceOf(FacetProtocolError);
+  });
+
+  it("R15.51: updateFacetConfig 400 throws FacetProtocolError (invalid)", async () => {
+    const client = new FacetClient({
+      requester: makeRequester(() => ({ status: 400, json: async () => ({ error: "config_invalid_value" }) })),
+      baseUrl: "http://localhost:3000"
+    });
+    await expect(
+      client.updateFacetConfig({ expectedVersion: 1, patch: { updatedBy: "ops" } })
+    ).rejects.toBeInstanceOf(FacetProtocolError);
   });
 });
