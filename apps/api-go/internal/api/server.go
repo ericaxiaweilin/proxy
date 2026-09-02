@@ -450,8 +450,13 @@ func (s *Server) versionMiddleware(next http.Handler) http.Handler {
 		}
 		clientVersion := strings.TrimSpace(r.Header.Get("X-Proxy-App-Version"))
 		if clientVersion == "" {
-			// 未带版本头的旧客户端视为需升级（但匿名 GET /v1/facet/objects 仍放行以便引导页可读）
-			if r.URL.Path == "/v1/facet/objects" {
+			// 未带版本头的旧客户端视为需升级（但匿名 GET 仍放行以便引导页/访客 feed 可读）
+			if r.URL.Path == "/v1/facet/objects" || r.URL.Path == "/v1/feed" || r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// facet 副空间及 catalog 也是匿名可读的引导页相关
+			if strings.HasPrefix(r.URL.Path, "/v1/facet/") {
 				next.ServeHTTP(w, r)
 				return
 			}
