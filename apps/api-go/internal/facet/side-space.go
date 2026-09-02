@@ -151,10 +151,10 @@ func isAllowedSideSpaceKind(kind string) bool {
 // 设计：用户「添加副空间内容」时，从这个池选一个 post 加到某个
 // 合作方的副空间。池子 5 条，每条 kind 不同，方便演示。
 type SideSpaceCatalogPost struct {
-	ID       string
-	Kind     string
-	Title    string
-	ImageURL string
+	ID       string `json:"id"`
+	Kind     string `json:"kind"`
+	Title    string `json:"title"`
+	ImageURL string `json:"imageUrl"`
 }
 
 // DefaultSideSpaceCatalog 返回 5 个 mock 全局 post。

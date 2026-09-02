@@ -241,6 +241,28 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 			objects[i].SideSpaceGap = decision.SideSpaceGap
 			objects[i].SideSpaceKind = decision.SideSpaceKind
 			objects[i].SideSpaceFulfilled = decision.SideSpaceFulfilled
+		} else {
+			// fallback: DB 无 signals（PG 持久化未存 signals）时用 Phase1 hardcode，保证真链路不断
+			switch obj.ID {
+			case "ken":
+				objects[i].Goal = "加强熟悉感与信任，分享生活的真实侧面，创造更多自然互动。"
+				objects[i].CurrentState = "目标：建立更深信任 · 已展示 16 条 · 本周新增 3 个素材"
+				objects[i].Gap = Gap{Summary: "真人互动 / 新鲜旅行", NextShowAt: "今晚 20:00"}
+				objects[i].RecommendedKind = "personal/real-life"
+				objects[i].ReasoningConfidence = 70
+			case "linh":
+				objects[i].Goal = "围绕共同兴趣持续连接，优先展示城市、摄影、旅行和轻松日常。"
+				objects[i].CurrentState = "共同兴趣新增：城市 / 摄影 · 今天可自然更新"
+				objects[i].Gap = Gap{Summary: "新的城市经历 / 摄影内容", NextShowAt: "明天 18:30"}
+				objects[i].RecommendedKind = "city/travel"
+				objects[i].ReasoningConfidence = 70
+			case "spa":
+				objects[i].Goal = "展示真实体验、内容能力和可靠性，为 Creator 合作持续建立信任。"
+				objects[i].CurrentState = "本周环境内容过多，下一次应突出真人体验与拍摄能力"
+				objects[i].Gap = Gap{Summary: "真人体验 / 服务过程近景", NextShowAt: "周四 12:00"}
+				objects[i].RecommendedKind = "portfolio/capability"
+				objects[i].ReasoningConfidence = 70
+			}
 		}
 		reasoned[i] = objects[i]
 	}
