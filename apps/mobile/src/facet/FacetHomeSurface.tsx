@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { extractShownCount } from "./extract-shown-count";
 import type { FacetObject, FacetSideSpacePost, ListFacetObjectsPayload, SideSpaceCatalogPost } from "@proxy/contracts";
 import { FacetClient, FacetProtocolError } from "../facet-client";
 import { ProxyIcon } from "../components/proxy-icon";
@@ -268,8 +269,39 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
             <Text style={styles.sectionCardTitle}>TA 将看到的你</Text>
             <Text style={styles.sectionCardHint}>同一份真实素材，按对象重新组织 · 人没有变，只是最相关的一面被优先呈现</Text>
             <View style={styles.previewFeed}>
-              <View style={styles.previewFeedItem}><Text style={styles.previewFeedLabel}>旅行 · 摄影</Text><Text style={styles.previewFeedText}>本周优先展示“{previewObject.gap.summary}”方向的内容</Text></View>
-              <View style={styles.previewFeedItem}><Text style={styles.previewFeedLabel}>日常 · 真实侧面</Text><Text style={styles.previewFeedText}>已展示 16 条 · 本周新增 3 个素材</Text></View>
+              {/* R15.50: 预览 feed 从 server 字段生成 (不再 hardcode) */}
+              {/* 1) 下一次推荐 — 来自 AI recommendedKind + gap */}
+              <View style={styles.previewFeedItem}>
+                <Text style={styles.previewFeedLabel}>优先 · {KIND_LABEL[previewObject.recommendedKind] ?? "未推荐"}</Text>
+                <Text style={styles.previewFeedText}>
+                  {previewObject.gap.summary} · 下次“{previewObject.gap.nextShowAt}”补 1 条
+                </Text>
+              </View>
+              {/* 2) 现状计数 — 从 currentState 拆出“已展示 N 条” */}
+              {(() => {
+                const shown = extractShownCount(previewObject.currentState);
+                return (
+                  <View style={styles.previewFeedItem}>
+                    <Text style={styles.previewFeedLabel}>已展示</Text>
+                    <Text style={styles.previewFeedText}>
+                      {shown !== null ? `已展示 ${shown} 条` : previewObject.currentState}
+                    </Text>
+                  </View>
+                );
+              })()}
+              {/* 3) 副空间补充 — 仅合作方 (CREATOR_COLLAB) 显示, 拿 sideSpacePosts.length */}
+              {previewObject.relation === "CREATOR_COLLAB" ? (
+                <View style={styles.previewFeedItem}>
+                  <Text style={styles.previewFeedLabel}>副空间 · 合作方可见</Text>
+                  <Text style={styles.previewFeedText}>
+                    {previewObject.sideSpaceFulfilled
+                      ? `已补 ${previewObject.sideSpacePosts.length} 条 · 足够`
+                      : previewObject.sideSpacePosts.length > 0
+                      ? `已补 ${previewObject.sideSpacePosts.length} 条 · 还需 ${previewObject.sideSpaceGap.replace(/^还差\s*/, "") || "更多"}`
+                      : "尚未补充副空间 · TA 看不到你隐藏的一面"}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           </View>
           {/* R15.43: 副空间面板 — 仅合作方（CREATOR_COLLAB）显示 */}
