@@ -48,8 +48,13 @@ export class LocalNetClient {
 
   /** 相对媒体 URL（/v1/media/play|thumb/{id}）拼接 API base，供 Image/播放器使用。 */
   public resolveMediaUrl(path: string): string {
+    if (!path) return "";
     if (path.startsWith("http://") || path.startsWith("https://")) return path;
-    return `${this.input.baseUrl}${path}`;
+    // R15.65: 防御 — caller 可能以裸方法 (this 丢) 传过来。
+    // 拿不到 input.baseUrl 时返回空串, 避免 TypeError: Cannot read property 'input' of undefined
+    const baseUrl = (this as unknown as { input?: { baseUrl?: string } })?.input?.baseUrl;
+    if (!baseUrl) return "";
+    return `${baseUrl}${path}`;
   }
 
   public async listFeedPosts(cursor?: string, limit = 25): Promise<FeedReadModel> {

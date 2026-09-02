@@ -2342,7 +2342,7 @@ export function MeSurface({
               onFollow={undefined}
               onUnfollow={undefined}
               onSendMessage={undefined}
-              resolveMediaUrl={localNet.resolveMediaUrl}
+              resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)}
               fallbackLogo={OTTER_LOGO}
               color={color}
             />
