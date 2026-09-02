@@ -45,12 +45,25 @@ export type FacetObjectGap = z.infer<typeof FacetObjectGapSchema>;
  *  - id           稳定 id（后端 mock 用 'ken' / 'linh' / 'spa'）
  *  - displayName  UI 显示名（"小帅 Ken" / "Linh" / "ABC Spa"）
  *  - relation     关系类型 enum
- *  - goal         关系目标（中文 free-form，1 句）
- *  - currentState 当前运营状态（中文 1 句，如"已展示 16 条 · 本周新增 3 个素材"）
+ *  - goal         关系目标（中文 free-form，1 句）— R15.41 起由 AI 推理
+ *  - currentState 当前运营状态（中文 1 句）— R15.41 起由 AI 推理
  *  - pillLabel    pill 文本（"重点关系" / "朋友" / "合作"）
  *  - gap          当前缺口 + 下次展示时间
  *  - avatarUrl    头像 URL（Phase 1 = 空字符串，UI 显示 placeholder）
+ *  - recommendedKind   R15.41: AI 推荐下次展示的内容类型
+ *  - reasoningConfidence R15.41: AI 推理置信度 0-100
  */
+export const FacetRecommendedKindSchema = z.enum([
+  "personal/real-life",
+  "personal/honest",
+  "city/travel",
+  "photo",
+  "shared-experience",
+  "portfolio/capability",
+  "intro/services"
+]);
+export type FacetRecommendedKind = z.infer<typeof FacetRecommendedKindSchema>;
+
 export const FacetObjectSchema = z.object({
   id: z.string().min(1),
   displayName: z.string().min(1),
@@ -59,7 +72,9 @@ export const FacetObjectSchema = z.object({
   currentState: z.string().min(1),
   pillLabel: z.string().min(1),
   gap: FacetObjectGapSchema,
-  avatarUrl: z.string()
+  avatarUrl: z.string(),
+  recommendedKind: FacetRecommendedKindSchema,
+  reasoningConfidence: z.number().int().min(0).max(100)
 });
 export type FacetObject = z.infer<typeof FacetObjectSchema>;
 

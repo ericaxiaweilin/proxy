@@ -29,7 +29,9 @@ const KEN = {
   currentState: "已展示 16 条",
   pillLabel: "重点关系",
   gap: { summary: "真人互动", nextShowAt: "今晚 20:00" },
-  avatarUrl: ""
+  avatarUrl: "",
+  recommendedKind: "personal/real-life",
+  reasoningConfidence: 70
 };
 
 const VALID_PAYLOAD = {

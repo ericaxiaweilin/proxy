@@ -12,7 +12,9 @@ describe("FACET contracts", () => {
         currentState: "进行中",
         pillLabel: "重点关系",
         gap: { summary: "真人互动", nextShowAt: "今晚 20:00" },
-        avatarUrl: ""
+        avatarUrl: "",
+        recommendedKind: "personal/honest",
+        reasoningConfidence: 88
       },
       {
         id: "linh",
@@ -22,7 +24,9 @@ describe("FACET contracts", () => {
         currentState: "新城市经历待展示",
         pillLabel: "朋友",
         gap: { summary: "城市经历", nextShowAt: "明天 18:30" },
-        avatarUrl: ""
+        avatarUrl: "",
+        recommendedKind: "city/travel",
+        reasoningConfidence: 85
       },
       {
         id: "spa",
@@ -32,7 +36,9 @@ describe("FACET contracts", () => {
         currentState: "环境内容过多",
         pillLabel: "合作",
         gap: { summary: "真人体验", nextShowAt: "周四 12:00" },
-        avatarUrl: ""
+        avatarUrl: "",
+        recommendedKind: "portfolio/capability",
+        reasoningConfidence: 90
       }
     ];
     for (const s of samples) {
@@ -43,7 +49,7 @@ describe("FACET contracts", () => {
   it("ListFacetObjectsPayloadSchema accepts a list of 3", () => {
     const raw = {
       objects: [
-        { id: "ken", displayName: "Ken", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x", gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "" }
+        { id: "ken", displayName: "Ken", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x", gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 70 }
       ],
       totalObjects: 1,
       freshAssets: 5,
@@ -55,7 +61,21 @@ describe("FACET contracts", () => {
   it("rejects bad relation enum", () => {
     expect(() => FacetObjectSchema.parse({
       id: "x", displayName: "x", relation: "BAD", goal: "x", currentState: "x", pillLabel: "x",
-      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: ""
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 70
+    })).toThrow();
+  });
+
+  it("rejects bad recommendedKind enum", () => {
+    expect(() => FacetObjectSchema.parse({
+      id: "x", displayName: "x", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x",
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "BOGUS_KIND", reasoningConfidence: 70
+    })).toThrow();
+  });
+
+  it("rejects reasoningConfidence out of range", () => {
+    expect(() => FacetObjectSchema.parse({
+      id: "x", displayName: "x", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x",
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 150
     })).toThrow();
   });
 
