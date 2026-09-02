@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { FacetObjectSchema, ListFacetObjectsPayloadSchema, parseListFacetObjectsPayload } from "./facet";
+import { FacetObjectSchema, ListFacetObjectsPayloadSchema, parseListFacetObjectsPayload, parseFacetSideSpacePost, parseListSideSpacePostsPayload, parseListSideSpaceCatalogPayload } from "./facet";
 
 describe("FACET contracts", () => {
   it("FacetObjectSchema accepts the 3 prototype rows", () => {
