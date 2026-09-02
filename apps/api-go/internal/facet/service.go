@@ -48,6 +48,7 @@ type ObjectSignals struct {
 // 关系有意义，其他关系恒为 ""。
 // R15.43 起加 SideSpacePosts —— 副空间内容池（已加入的 post 列表）。
 //	非合作方恒为 []。
+// R15.44 起加 SideSpaceFulfilled —— 副空间缺口是否被填上（仅合作方）。
 type Object struct {
 	ID                  string          `json:"id"`
 	DisplayName         string          `json:"displayName"`
@@ -62,6 +63,7 @@ type Object struct {
 	SideSpaceGap        string          `json:"sideSpaceGap"`
 	SideSpaceKind       string          `json:"sideSpaceKind"`
 	SideSpacePosts      []SideSpacePost `json:"sideSpacePosts"`
+	SideSpaceFulfilled  bool            `json:"sideSpaceFulfilled"`
 	// Signals 是 server-internal，不写进 wire JSON。ReasoningEngine
 	// 在 Service.List 内部消费它。
 	Signals ObjectSignals `json:"-"`
@@ -208,10 +210,29 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 	// 值的对象（fallback）保留 Phase 1 的 hardcode 字段。
 	// R15.42: 额外填 SideSpaceGap + SideSpaceKind（仅合作方有意义）。
 	// R15.43: 额外填 SideSpacePosts（合作方才有，非合作方 = []）。
+	// R15.44: 调 Reasoner 之前先拉副空间内容 + 算 SideSpaceStats
+	// （副空间数据用于 R15.44 缺口实时判定）。
 	reasoned := make([]Object, len(objects))
 	for i, obj := range objects {
+		// R15.43: 拉副空间内容（合作方才有）
+		var sideSpaceStats SideSpaceStats
+		sideSpaceStats.KindCounts = map[string]int{}
+		if obj.Relation == "CREATOR_COLLAB" {
+			posts, err := s.sideSpaceRepo.List(ctx, obj.ID)
+			if err == nil && posts != nil {
+				objects[i].SideSpacePosts = posts
+			} else {
+				objects[i].SideSpacePosts = []SideSpacePost{}
+			}
+			for _, p := range objects[i].SideSpacePosts {
+				sideSpaceStats.Total++
+				sideSpaceStats.KindCounts[p.Kind]++
+			}
+		} else {
+			objects[i].SideSpacePosts = []SideSpacePost{}
+		}
 		if hasSignals(obj.Signals) {
-			decision := s.reasoner.Reason(obj.Signals, obj.Relation)
+			decision := s.reasoner.Reason(obj.Signals, obj.Relation, sideSpaceStats)
 			objects[i].Goal = decision.Goal
 			objects[i].CurrentState = decision.CurrentState
 			objects[i].Gap = Gap{Summary: decision.GapSummary, NextShowAt: decision.NextShowAt}
@@ -219,17 +240,7 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 			objects[i].ReasoningConfidence = decision.Confidence
 			objects[i].SideSpaceGap = decision.SideSpaceGap
 			objects[i].SideSpaceKind = decision.SideSpaceKind
-		}
-		// R15.43: 拉副空间内容
-		if objects[i].Relation == "CREATOR_COLLAB" {
-			posts, err := s.sideSpaceRepo.List(ctx, objects[i].ID)
-			if err == nil && posts != nil {
-				objects[i].SideSpacePosts = posts
-			} else {
-				objects[i].SideSpacePosts = []SideSpacePost{}
-			}
-		} else {
-			objects[i].SideSpacePosts = []SideSpacePost{}
+			objects[i].SideSpaceFulfilled = decision.SideSpaceFulfilled
 		}
 		reasoned[i] = objects[i]
 	}

@@ -100,7 +100,9 @@ export const FacetObjectSchema = z.object({
   sideSpaceGap: z.string(),
   sideSpaceKind: FacetRecommendedKindSchema.or(z.literal("")),
   // R15.43: 副空间内容池 — 非合作方恒为 []
-  sideSpacePosts: z.array(FacetSideSpacePostSchema)
+  sideSpacePosts: z.array(FacetSideSpacePostSchema),
+  // R15.44: 副空间缺口是否被填上 (实时数据) — 仅合作方有意义
+  sideSpaceFulfilled: z.boolean()
 });
 export type FacetObject = z.infer<typeof FacetObjectSchema>;
 

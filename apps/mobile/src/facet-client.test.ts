@@ -34,7 +34,8 @@ const KEN = {
   reasoningConfidence: 70,
   sideSpaceGap: "",
   sideSpaceKind: "",
-  sideSpacePosts: []
+  sideSpacePosts: [],
+  sideSpaceFulfilled: false
 };
 
 const VALID_PAYLOAD = {

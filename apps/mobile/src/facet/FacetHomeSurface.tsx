@@ -277,13 +277,20 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
             <View style={styles.sectionCard}>
               <View style={styles.sideSpaceHeaderRow}>
                 <Text style={styles.sectionCardTitle}>副空间</Text>
-                <View style={styles.sideSpaceCountChip}>
-                  <Text style={styles.sideSpaceCountChipText}>{previewObject.sideSpacePosts.length} 条</Text>
+                <View style={styles.sideSpaceHeaderRight}>
+                  {previewObject.sideSpaceFulfilled ? (
+                    <View style={styles.sideSpaceFulfilledChip}>
+                      <Text style={styles.sideSpaceFulfilledChipText}>✓ 已足够</Text>
+                    </View>
+                  ) : null}
+                  <View style={styles.sideSpaceCountChip}>
+                    <Text style={styles.sideSpaceCountChipText}>{previewObject.sideSpacePosts.length} 条</Text>
+                  </View>
                 </View>
               </View>
               {previewObject.sideSpaceGap ? (
-                <View style={styles.sideSpaceGapBlock}>
-                  <Text style={styles.sideSpaceGapLabel}>AI 副空间缺口</Text>
+                <View style={[styles.sideSpaceGapBlock, previewObject.sideSpaceFulfilled ? styles.sideSpaceGapBlockFulfilled : null]}>
+                  <Text style={styles.sideSpaceGapLabel}>{previewObject.sideSpaceFulfilled ? "AI 副空间已足够" : "AI 副空间缺口"}</Text>
                   <Text style={styles.sideSpaceGapText}>{previewObject.sideSpaceGap}</Text>
                 </View>
               ) : null}
@@ -642,8 +649,12 @@ const styles = StyleSheet.create({
   sideSpaceCountChip: { backgroundColor: "rgba(139, 92, 246, 0.18)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   sideSpaceCountChipText: { color: "#7c3aed", fontSize: 11, fontWeight: "600" },
   sideSpaceGapBlock: { backgroundColor: "rgba(245, 158, 11, 0.12)", borderLeftColor: "#f59e0b", borderLeftWidth: 3, borderRadius: 6, padding: 10, marginBottom: 12 },
+  sideSpaceGapBlockFulfilled: { backgroundColor: "rgba(16, 185, 129, 0.12)", borderLeftColor: "#10b981" },
   sideSpaceGapLabel: { color: "#b45309", fontSize: 10, fontWeight: "700", marginBottom: 4, letterSpacing: 0.4 },
   sideSpaceGapText: { color: color.ink, fontSize: 13, lineHeight: 19 },
+  sideSpaceHeaderRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  sideSpaceFulfilledChip: { backgroundColor: "rgba(16, 185, 129, 0.18)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  sideSpaceFulfilledChipText: { color: "#059669", fontSize: 11, fontWeight: "600" },
   sideSpaceList: { marginBottom: 4 },
   sideSpaceEmpty: { color: color.muted, fontSize: 12, lineHeight: 18, paddingVertical: 8, textAlign: "center" },
   sideSpaceRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(0,0,0,0.08)" },

@@ -45,15 +45,37 @@ type ReasonedDecision struct {
 	// 允许值同 RecommendedKind 集合（白名单复用）。
 	// CREATOR_COLLAB 默认 "portfolio/capability"；非合作方为空字符串。
 	SideSpaceKind string
+	// SideSpaceFulfilled：R15.44 起 — 副空间缺口是否已被填上。
+	//
+	// true 意味着副空间已经有足够多与 SideSpaceKind 同类的内容，
+	// AI 不再推 "还缺 X"。Mobile UI 可以展示绿色“已足够”状态。
+	//
+	// 只对 CREATOR_COLLAB 关系有意义，其他关系为 false。
+	SideSpaceFulfilled bool
+}
+
+// SideSpaceStats 是 R15.44 新增的副空间实时统计，由 Service.List
+// 在调 Reasoner 之前从 SideSpaceRepository.List() 算出来。
+//
+// 设计：Reasoner 是纯函数（signals + stats + relation → decision），
+// 不直接访问 Repository，保持可测性。
+type SideSpaceStats struct {
+	// Total：副空间 post 总数
+	Total int
+	// KindCounts：按 kind 统计的 post 数量
+	KindCounts map[string]int
 }
 
 // Reasoner 接口。
 //
 // Phase 1.5 实现：RuleReasoner（确定性规则）。
-// Phase 2 计划：LLMReasoner，input 同 ObjectSignals + Relation，
-// output 同 ReasonedDecision。保持接口稳定，Service.List 不动。
+// Phase 2 计划：LLMReasoner，input 同 ObjectSignals + SideSpaceStats +
+// Relation，output 同 ReasonedDecision。保持接口稳定，Service.List 不动。
+//
+// R15.44 起 Reason 签名加 SideSpaceStats 参数，让副空间缺口判定
+// 实时反映副空间现状（不再仅靠 ShownAssetCount mock）。
 type Reasoner interface {
-	Reason(signals ObjectSignals, relation string) ReasonedDecision
+	Reason(signals ObjectSignals, relation string, sideSpace SideSpaceStats) ReasonedDecision
 }
 
 // NewRuleReasoner 返回基于规则的 Reasoner。now 用于计算 nextShowAt。
@@ -77,26 +99,28 @@ type RuleReasoner struct {
 }
 
 // Reason 是入口。relation 是 Object.Relation 字段（"BUILDING_TRUST"
-// 等）。signals 是 Object.Signals。
-func (r *RuleReasoner) Reason(signals ObjectSignals, relation string) ReasonedDecision {
+// 等）。signals 是 Object.Signals。sideSpace 是 R15.44 起的副空间
+// 实时统计（Service.List 算好传入）。
+func (r *RuleReasoner) Reason(signals ObjectSignals, relation string, sideSpace SideSpaceStats) ReasonedDecision {
 	switch relation {
 	case "BUILDING_TRUST":
-		return r.reasonBuildingTrust(signals)
+		return r.reasonBuildingTrust(signals, sideSpace)
 	case "SHARED_INTEREST":
-		return r.reasonSharedInterest(signals)
+		return r.reasonSharedInterest(signals, sideSpace)
 	case "CREATOR_COLLAB":
-		return r.reasonCreatorCollab(signals)
+		return r.reasonCreatorCollab(signals, sideSpace)
 	default:
 		// 未知 relation：返回低置信度的通用决策，不静默失败。
 		return ReasonedDecision{
-			Goal:            "持续连接",
-			CurrentState:    fmt.Sprintf("已展示 %d 条 · 本周新增 %d 个素材", signals.ShownAssetCount, signals.FreshAssetCount),
-			GapSummary:      "保持节奏",
-			NextShowAt:      r.now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
-			RecommendedKind: "personal/real-life",
-			Confidence:      30,
-			SideSpaceGap:    "",
-			SideSpaceKind:   "",
+			Goal:              "持续连接",
+			CurrentState:      fmt.Sprintf("已展示 %d 条 · 本周新增 %d 个素材", signals.ShownAssetCount, signals.FreshAssetCount),
+			GapSummary:        "保持节奏",
+			NextShowAt:        r.now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
+			RecommendedKind:   "personal/real-life",
+			Confidence:        30,
+			SideSpaceGap:      "",
+			SideSpaceKind:     "",
+			SideSpaceFulfilled: false,
 		}
 	}
 }
@@ -109,7 +133,7 @@ func (r *RuleReasoner) Reason(signals ObjectSignals, relation string) ReasonedDe
 //   - 其他 → 默认真实日常
 //
 // 重点关系无副空间概念（SideSpaceGap = ""）。
-func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals) ReasonedDecision {
+func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals, _ SideSpaceStats) ReasonedDecision {
 	if s.DaysSinceLastChat >= 7 && s.UnrepliedMessageCount > 0 {
 		return ReasonedDecision{
 			Goal:            "打破沉默，重建互动",
@@ -154,7 +178,7 @@ func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals) ReasonedDecision {
 //   - 默认 photo（摄影是常见 shared interest）
 //
 // 朋友无副空间概念（SideSpaceGap = ""）。
-func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals) ReasonedDecision {
+func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals, _ SideSpaceStats) ReasonedDecision {
 	if s.FreshAssetCount > 0 && s.DaysSinceLastChat <= 3 {
 		return ReasonedDecision{
 			Goal:            "趁热打铁激活共同兴趣",
@@ -198,48 +222,79 @@ func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals) ReasonedDecision {
 //   - 中等意向 → 推 intro / services 建立初步信任
 //   - 低意向 → 推 personal/real-life 先建立关系
 //
-// R15.42 起，合作方额外输出 SideSpaceGap + SideSpaceKind（双轨）：
-//   - 高意向 + 已展示 5+ → 副空间需更多能力对比 / 客户案例
-//   - 中意向 + 已展示 < 5 → 副空间需服务介绍 / 过程近景
-//   - 低意向 → 副空间尚未启动，不需要运营
-func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals) ReasonedDecision {
+// R15.42 起，合作方额外输出 SideSpaceGap + SideSpaceKind（双轨）。
+// R15.44 起，缺口判定用 SideSpaceStats 实时数据（不再仅看
+// signals.ShownAssetCount）。阈值：
+//   - 副空间 portfolio/capability >= 2 → 副空间已足够，gap 变为鼓励语
+//   - 副空间 intro/services >= 2 → 副空间已足够
+//   - 副空间 0 条 → 推 "还缺第一个"
+//   - 1 条 → 推 "还差 1 个"
+func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals, ss SideSpaceStats) ReasonedDecision {
 	if s.CollaborationIntent >= 60 {
-		// 副空间缺口：合作方在评估，需要 1-2 个能力对比图 / 客户案例
-		sideGap := fmt.Sprintf("副空间已有 %d 个作品，还缺 1 个能力对比 / 客户合作案例", s.ShownAssetCount)
+		// 高意向：盯 portfolio/capability
+		count := ss.KindCounts["portfolio/capability"]
+		sideGap, fulfilled := sideSpaceGapForKind(ss, "portfolio/capability", 2)
+		if fulfilled {
+			sideGap = fmt.Sprintf("副空间已有 %d 个作品 / %d 个 portfolio/capability, 已足够, 下一个可以拓展合作案例对比图", ss.Total, count)
+		}
 		return ReasonedDecision{
-			Goal:            "推动合作成交",
-			CurrentState:    fmt.Sprintf("合作意向 %d%% · 主页浏览 %d 次 · 关系 %d 天", s.CollaborationIntent, s.ProfileViewsLast7d, s.RelationshipDays),
-			GapSummary:      "对方在评估能力，需要直接的作品 / 案例展示",
-			NextShowAt:      r.now().Add(4 * time.Hour).UTC().Format(time.RFC3339),
-			RecommendedKind: "portfolio/capability",
-			Confidence:      90,
-			SideSpaceGap:    sideGap,
-			SideSpaceKind:   "portfolio/capability",
+			Goal:              "推动合作成交",
+			CurrentState:      fmt.Sprintf("合作意向 %d%% · 主页浏览 %d 次 · 关系 %d 天 · 副空间 %d 条", s.CollaborationIntent, s.ProfileViewsLast7d, s.RelationshipDays, ss.Total),
+			GapSummary:        "对方在评估能力，需要直接的作品 / 案例展示",
+			NextShowAt:        r.now().Add(4 * time.Hour).UTC().Format(time.RFC3339),
+			RecommendedKind:   "portfolio/capability",
+			Confidence:        90,
+			SideSpaceGap:      sideGap,
+			SideSpaceKind:     "portfolio/capability",
+			SideSpaceFulfilled: fulfilled,
 		}
 	}
 	if s.CollaborationIntent >= 30 {
-		// 副空间缺口：还在初期，需要服务过程近景 / 真实环境
-		sideGap := fmt.Sprintf("副空间已有 %d 个作品，还缺 1 个服务过程 / 真实环境近景", s.ShownAssetCount)
+		// 中意向：盯 intro/services
+		count := ss.KindCounts["intro/services"]
+		sideGap, fulfilled := sideSpaceGapForKind(ss, "intro/services", 2)
+		if fulfilled {
+			sideGap = fmt.Sprintf("副空间已有 %d 个作品 / %d 个 intro/services, 已足够, 下一个可以拓展服务过程近景", ss.Total, count)
+		}
 		return ReasonedDecision{
-			Goal:            "建立初步信任",
-			CurrentState:    fmt.Sprintf("合作意向 %d%% · 距上次聊天 %d 天", s.CollaborationIntent, s.DaysSinceLastChat),
-			GapSummary:      "对方在观望，需要服务介绍 / 真实案例",
-			NextShowAt:      r.now().Add(10 * time.Hour).UTC().Format(time.RFC3339),
-			RecommendedKind: "intro/services",
-			Confidence:      72,
-			SideSpaceGap:    sideGap,
-			SideSpaceKind:   "intro/services",
+			Goal:              "建立初步信任",
+			CurrentState:      fmt.Sprintf("合作意向 %d%% · 距上次聊天 %d 天 · 副空间 %d 条", s.CollaborationIntent, s.DaysSinceLastChat, ss.Total),
+			GapSummary:        "对方在观望，需要服务介绍 / 真实案例",
+			NextShowAt:        r.now().Add(10 * time.Hour).UTC().Format(time.RFC3339),
+			RecommendedKind:   "intro/services",
+			Confidence:        72,
+			SideSpaceGap:      sideGap,
+			SideSpaceKind:     "intro/services",
+			SideSpaceFulfilled: fulfilled,
 		}
 	}
 	// 低意向：副空间还没起动，缺口为空（无需副空间运营）
 	return ReasonedDecision{
-		Goal:            "先建立关系",
-		CurrentState:    fmt.Sprintf("合作意向 %d%% · 关系早期", s.CollaborationIntent),
-		GapSummary:      "信任不足，先以真实日常建立连接",
-		NextShowAt:      r.now().Add(20 * time.Hour).UTC().Format(time.RFC3339),
-		RecommendedKind: "personal/real-life",
-		Confidence:      55,
-		SideSpaceGap:    "",
-		SideSpaceKind:   "",
+		Goal:              "先建立关系",
+		CurrentState:      fmt.Sprintf("合作意向 %d%% · 关系早期", s.CollaborationIntent),
+		GapSummary:        "信任不足，先以真实日常建立连接",
+		NextShowAt:        r.now().Add(20 * time.Hour).UTC().Format(time.RFC3339),
+		RecommendedKind:   "personal/real-life",
+		Confidence:        55,
+		SideSpaceGap:      "",
+		SideSpaceKind:     "",
+		SideSpaceFulfilled: false,
 	}
+}
+
+// sideSpaceGapForKind 算某个 kind 的副空间缺口 + 是否已足够。
+//
+// 规则：
+//   - 0 条  → 缺口 = "副空间还没有, 需加第一个" + fulfilled = false
+//   - 1 条  → 缺口 = "副空间有 1 个, 还差 1 个" + fulfilled = false
+//   - >= threshold 条 → fulfilled = true（缺口文由 caller 写）
+func sideSpaceGapForKind(ss SideSpaceStats, kind string, threshold int) (string, bool) {
+	count := ss.KindCounts[kind]
+	if count >= threshold {
+		return "", true
+	}
+	if count == 0 {
+		return "副空间还没有, 加第一个 " + kind + " 类型的作品", false
+	}
+	return fmt.Sprintf("副空间已有 %d 个, 还差 %d 个 %s 类型", count, threshold-count, kind), false
 }

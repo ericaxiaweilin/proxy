@@ -17,7 +17,8 @@ describe("FACET contracts", () => {
         reasoningConfidence: 88,
         sideSpaceGap: "",
         sideSpaceKind: "",
-        sideSpacePosts: []
+        sideSpacePosts: [],
+        sideSpaceFulfilled: false
       },
       {
         id: "linh",
@@ -32,7 +33,8 @@ describe("FACET contracts", () => {
         reasoningConfidence: 85,
         sideSpaceGap: "",
         sideSpaceKind: "",
-        sideSpacePosts: []
+        sideSpacePosts: [],
+        sideSpaceFulfilled: false
       },
       {
         id: "spa",
@@ -49,7 +51,8 @@ describe("FACET contracts", () => {
         sideSpaceKind: "portfolio/capability",
         sideSpacePosts: [
           { id: "ss-store-env", kind: "intro/services", title: "门店环境", imageUrl: "", addedAt: "2026-09-01T00:00:00Z" }
-        ]
+        ],
+        sideSpaceFulfilled: false
       }
     ];
     for (const s of samples) {
@@ -60,7 +63,8 @@ describe("FACET contracts", () => {
   it("ListFacetObjectsPayloadSchema accepts a list of 3", () => {
     const raw = {
       objects: [
-        { id: "ken", displayName: "Ken", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x", gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 70, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: [] }
+        { id: "ken", displayName: "Ken", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x", gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 70, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: [],
+        sideSpaceFulfilled: false }
       ],
       totalObjects: 1,
       freshAssets: 5,
@@ -72,39 +76,45 @@ describe("FACET contracts", () => {
   it("rejects bad relation enum", () => {
     expect(() => FacetObjectSchema.parse({
       id: "x", displayName: "x", relation: "BAD", goal: "x", currentState: "x", pillLabel: "x",
-      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 70, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: []
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 70, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: [],
+        sideSpaceFulfilled: false
     })).toThrow();
   });
 
   it("rejects bad recommendedKind enum", () => {
     expect(() => FacetObjectSchema.parse({
       id: "x", displayName: "x", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x",
-      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "BOGUS_KIND", reasoningConfidence: 70, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: []
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "BOGUS_KIND", reasoningConfidence: 70, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: [],
+        sideSpaceFulfilled: false
     })).toThrow();
   });
 
   it("rejects reasoningConfidence out of range", () => {
     expect(() => FacetObjectSchema.parse({
       id: "x", displayName: "x", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x",
-      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 150, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: []
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 150, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: [],
+        sideSpaceFulfilled: false
     })).toThrow();
   });
 
   it("R15.42: sideSpaceKind accepts recommendedKind enum or empty string", () => {
     expect(() => FacetObjectSchema.parse({
       id: "x", displayName: "x", relation: "CREATOR_COLLAB", goal: "x", currentState: "x", pillLabel: "x",
-      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "portfolio/capability", reasoningConfidence: 80, sideSpaceGap: "x", sideSpaceKind: "portfolio/capability", sideSpacePosts: []
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "portfolio/capability", reasoningConfidence: 80, sideSpaceGap: "x", sideSpaceKind: "portfolio/capability", sideSpacePosts: [],
+        sideSpaceFulfilled: false
     })).not.toThrow();
     expect(() => FacetObjectSchema.parse({
       id: "x", displayName: "x", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x",
-      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 80, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: []
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 80, sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: [],
+        sideSpaceFulfilled: false
     })).not.toThrow();
   });
 
   it("R15.42: sideSpaceKind rejects bogus kind", () => {
     expect(() => FacetObjectSchema.parse({
       id: "x", displayName: "x", relation: "CREATOR_COLLAB", goal: "x", currentState: "x", pillLabel: "x",
-      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "portfolio/capability", reasoningConfidence: 80, sideSpaceGap: "x", sideSpaceKind: "BOGUS_SIDE_KIND", sideSpacePosts: []
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "portfolio/capability", reasoningConfidence: 80, sideSpaceGap: "x", sideSpaceKind: "BOGUS_SIDE_KIND", sideSpacePosts: [],
+        sideSpaceFulfilled: false
     })).toThrow();
   });
 
@@ -139,6 +149,22 @@ describe("FACET contracts", () => {
     // 此处验证 wire format 接受所有 FacetRecommendedKind。
     expect(() => parseListSideSpaceCatalogPayload({
       posts: [{ id: "x", kind: "personal/real-life", title: "t", imageUrl: "" }]
+    })).not.toThrow();
+  });
+
+  it("R15.44: sideSpaceFulfilled accepts true for fulfilled collab", () => {
+    expect(() => FacetObjectSchema.parse({
+      id: "spa", displayName: "Spa", relation: "CREATOR_COLLAB", goal: "x", currentState: "x", pillLabel: "x",
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "portfolio/capability", reasoningConfidence: 90,
+      sideSpaceGap: "已足够", sideSpaceKind: "portfolio/capability", sideSpacePosts: [], sideSpaceFulfilled: true
+    })).not.toThrow();
+  });
+
+  it("R15.44: sideSpaceFulfilled accepts false for non-collab", () => {
+    expect(() => FacetObjectSchema.parse({
+      id: "ken", displayName: "Ken", relation: "BUILDING_TRUST", goal: "x", currentState: "x", pillLabel: "x",
+      gap: { summary: "x", nextShowAt: "x" }, avatarUrl: "", recommendedKind: "personal/real-life", reasoningConfidence: 70,
+      sideSpaceGap: "", sideSpaceKind: "", sideSpacePosts: [], sideSpaceFulfilled: false
     })).not.toThrow();
   });
 
