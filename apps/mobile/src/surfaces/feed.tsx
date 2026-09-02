@@ -26,6 +26,11 @@ import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
 
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
 export { AdaptiveMediaCollection, SinglePostImage, MediaViewer };
+
+// R15.50: 举报原因白名单提到 module 顶层
+// (R15.45 原在 FeedSurface 函数内 const, PostMenuModal 引用不到 — 随手修).
+const POST_REPORT_REASONS = ["SPAM", "HARASSMENT", "UNSAFE", "OTHER"] as const;
+export type PostReportReason = (typeof POST_REPORT_REASONS)[number];
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
@@ -520,8 +525,7 @@ export function FeedSurface({
   // ---------- R15.45: post menu handlers (举报 / 不感兴趣 / 屏蔽作者) ----------
 
   // 举报原因白名单 (跟 server engagement.service.go reportPost payload 对齐)
-  const POST_REPORT_REASONS = ["SPAM", "HARASSMENT", "UNSAFE", "OTHER"] as const;
-  type PostReportReason = (typeof POST_REPORT_REASONS)[number];
+  // R15.50: 提到 module 顶层 (line 32) — PostMenuModal 要用.
 
   const openPostMenu = useCallback((postId: string) => {
     setPostMenuError(undefined);
@@ -1047,7 +1051,6 @@ export function FeedSurface({
         <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
       </Pressable>
     ) : null}
-    </View>
     {/* R15.45: post menu modal (举报 / 不感兴趣 / 屏蔽作者) */}
     <PostMenuModal
       open={postMenuPostId !== undefined}
@@ -1058,6 +1061,7 @@ export function FeedSurface({
       onNotInterested={handleNotInterested}
       onMuteAuthor={handleMuteAuthor}
     />
+    </View>
   );
 }
 // 【fix 2026-08-26 P0 多视频声音】

@@ -93,6 +93,7 @@ describe("ExperienceClient.listExperiences (R15.49)", () => {
     const client = new ExperienceClient({
       secureSessionStore: store,
       authClient: {
+        request: async () => { throw new Error("anonymous should not use request"); },
         requestPublic: async (_path, init) => ({
           status: 200,
           json: async () => ({
@@ -113,6 +114,7 @@ describe("ExperienceClient.listExperiences (R15.49)", () => {
     const client = new ExperienceClient({
       secureSessionStore: store,
       authClient: {
+        request: async () => { throw new Error("anonymous should not use request"); },
         requestPublic: async (_path, init) => ({
           status: 200,
           json: async () => ({
