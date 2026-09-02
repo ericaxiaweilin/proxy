@@ -244,10 +244,12 @@ export class MediaClient {
   }
 
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
+    console.log(`[proxy.R15.63.DEBUG.media] requireSession start`);
     const session = await this.input.secureSessionStore.read();
-    if (!session?.principal) throw new Error("上传照片前需要登录或访客会话");
-    if (session.serverSession === false) throw new Error("上传照片需要真实登录 (offline session 不能上传)");
-    if (session.signedOut === true) throw new OfflineFallbackSessionError();
+    if (!session?.principal) { console.log(`[proxy.R15.63.DEBUG.media] requireSession FAIL: no session or no principal session=${!!session} principal=${!!session?.principal}`); throw new Error("上传照片前需要登录或访客会话"); }
+    if (session.serverSession === false) { console.log(`[proxy.R15.63.DEBUG.media] requireSession FAIL: serverSession=false`); throw new Error("上传照片需要真实登录 (offline session 不能上传)"); }
+    if (session.signedOut === true) { console.log(`[proxy.R15.63.DEBUG.media] requireSession FAIL: signedOut=true`); throw new OfflineFallbackSessionError(); }
+    console.log(`[proxy.R15.63.DEBUG.media] requireSession ok userAccountId=${session.userAccountId} principal=${session.principal.type}:${session.principal.id}`);
     return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
   }
 
