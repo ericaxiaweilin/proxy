@@ -162,6 +162,17 @@ if (__originalErrorHandler?.setGlobalHandler) {
   });
 }
 
+// R15.66 DEBUG: 包装 console.error 抓红框前的 'input of undefined' 源头
+const __originalConsoleError = console.error.bind(console);
+(console as typeof console).error = (...args: unknown[]) => {
+  const first = args[0];
+  if (typeof first === "string" && first.includes("input of undefined")) {
+    console.log(`[proxy.R15.66.DEBUG.consoleError] match 'input of undefined' — full args: ${JSON.stringify(args).slice(0, 2000)}`);
+    console.log(`[proxy.R15.66.DEBUG.consoleError] stack=${new Error().stack?.split("\n").slice(0, 15).join(" | ")}`);
+  }
+  __originalConsoleError(...args);
+};
+
 export function ProxyApp(): React.JSX.Element {
   // R15 Model-Driven UI：不再内嵌 HTML 原型（Gate O）。
   // 启动引导 → 统一认证入口 → 认证后渲染 App Shell。
