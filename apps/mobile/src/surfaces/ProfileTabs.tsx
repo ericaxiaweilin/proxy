@@ -12,6 +12,7 @@ import React, { useMemo, useState } from "react";
 import { Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { ThreadsPostMedia } from "../components/threads-post-media";
+import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import type { LocalNetClient } from "../localnet-client";
 
 // ---------- 类型 ----------
@@ -163,22 +164,23 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
         </Pressable>
       ) : null}
 
-      {/* Tabs 5 选 1 — IG 风格 underline */}
+      {/* Tabs 5 选 1 — IG/Threads 风: 顶部小 icon + 中文 label, active 黑下划线 2px */}
       <View style={styles.tabsRow}>
         {([
-          ["POSTS", "🗂"],
-          ["REPLIES", "💬"],
-          ["SAVED", "🔖"],
-          ["TAGGED", "@"],
-          ["ABOUT", "i"]
-        ] as Array<[ProfileTabKey, string]>).map(([key, icon]) => (
+          ["POSTS", "sparkle", "帖子"],
+          ["REPLIES", "spark", "回复"],
+          ["SAVED", "star", "收藏"],
+          ["TAGGED", "target", "标签"],
+          ["ABOUT", "ring", "关于"]
+        ] as Array<[ProfileTabKey, ProxyIconName, string]>).map(([key, iconName, label]) => (
           <Pressable
             key={key}
             accessibilityLabel={`${key} tab`}
             onPress={() => setTab(key)}
             style={styles.tabBtn}
           >
-            <Text style={[styles.tabIcon, tab === key && styles.tabIconActive]}>{icon}</Text>
+            <ProxyIcon name={iconName} color={tab === key ? props.color.ink : props.color.muted} size={20} />
+            <Text style={[styles.tabLabel, tab === key && styles.tabLabelActive]}>{label}</Text>
             {tab === key ? <View style={styles.tabUnderline} /> : null}
           </Pressable>
         ))}
@@ -601,12 +603,12 @@ const styles = StyleSheet.create({
   sceneEntryTitle: { fontSize: 14, fontWeight: "700", color: "#0f172a" },
   sceneEntrySub: { fontSize: 11, color: "#64748b", marginTop: 1 },
   sceneEntryChevron: { fontSize: 22, color: "#94a3b8" },
-  // Tabs
+  // Tabs — IG/Threads 风: icon + 中文 label, active 黑下划线
   tabsRow: { flexDirection: "row", borderTopWidth: 1, borderTopColor: "#e2e8f0", borderBottomWidth: 1, borderBottomColor: "#e2e8f0", backgroundColor: "#fff" },
-  tabBtn: { flex: 1, alignItems: "center", paddingVertical: 12, position: "relative" },
-  tabIcon: { fontSize: 18, color: "#94a3b8" },
-  tabIconActive: { color: "#0f172a" },
-  tabUnderline: { position: "absolute", bottom: 0, left: 12, right: 12, height: 1.5, backgroundColor: "#0f172a" },
+  tabBtn: { flex: 1, alignItems: "center", paddingVertical: 10, position: "relative" },
+  tabLabel: { fontSize: 11, color: "#94a3b8", marginTop: 4, fontWeight: "600" },
+  tabLabelActive: { color: "#0f172a" },
+  tabUnderline: { position: "absolute", bottom: 0, left: 12, right: 12, height: 2, backgroundColor: "#0f172a", borderRadius: 1 },
   // View toggle (LIST / GRID)
   viewToggleRow: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 16, paddingVertical: 8 },
   viewToggle: { flexDirection: "row", backgroundColor: "#f1f5f9", borderRadius: 6, padding: 2 },
