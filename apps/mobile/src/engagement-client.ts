@@ -61,6 +61,20 @@ export class EngagementClient {
     await this.command("ReportPost", { type: "Post", id: postId }, { postId, reason });
   }
 
+  /**
+   * MuteAuthor (R15.45) — 屏蔽一个作者。
+   *
+   * 与 recordFeedPreference(REDUCE_AUTHOR) 的区别：
+   *   - REDUCE_AUTHOR: feed 算法信号（"少推 Ta"），可能仍偶尔出现
+   *   - MuteAuthor: 关系层（"我屏蔽 Ta"），feed 永久过滤
+   *
+   * 幂等：重复 mute 同一 author 不报错。
+   * 不可逆：当前 client 不提供 unmute；Phase 2 在 "我屏蔽的人" 列表里 unmute。
+   */
+  public async muteAuthor(authorId: string): Promise<void> {
+    await this.command("MuteAuthor", { type: "Profile", id: authorId }, { authorId });
+  }
+
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {
     const session = await this.requireSession();
     const envelope = {

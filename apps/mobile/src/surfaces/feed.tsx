@@ -161,6 +161,9 @@ export function FeedSurface({
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
   const [following, setFollowing] = useState<ReadonlySet<string>>(new Set());
+  const [postMenuPostId, setPostMenuPostId] = useState<string | undefined>();
+  const [mutedAuthors, setMutedAuthors] = useState<ReadonlySet<string>>(new Set());
+  const [postMenuError, setPostMenuError] = useState<string | undefined>();
   const [liked, setLiked] = useState<ReadonlySet<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
@@ -514,6 +517,63 @@ export function FeedSurface({
   // 发布器 (pickComposerImages / replaceComposerImage / publish) 全部迁出到 ComposerV2Screen。
   // 这里只保留打开入口（toggleEmbeddedComposer）。
 
+  // ---------- R15.45: post menu handlers (举报 / 不感兴趣 / 屏蔽作者) ----------
+
+  // 举报原因白名单 (跟 server engagement.service.go reportPost payload 对齐)
+  const POST_REPORT_REASONS = ["SPAM", "HARASSMENT", "UNSAFE", "OTHER"] as const;
+  type PostReportReason = (typeof POST_REPORT_REASONS)[number];
+
+  const openPostMenu = useCallback((postId: string) => {
+    setPostMenuError(undefined);
+    setPostMenuPostId(postId);
+  }, []);
+
+  const closePostMenu = useCallback(() => {
+    setPostMenuPostId(undefined);
+    setPostMenuError(undefined);
+  }, []);
+
+  const postMenuPost = postMenuPostId ? posts.find((p) => p.postId === postMenuPostId) : undefined;
+
+  async function handleReportPost(reason: PostReportReason): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    try {
+      await engagement.reportPost(postMenuPost.postId, reason);
+      setPosts((prev) => prev.filter((p) => p.postId !== postMenuPost.postId));
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "举报失败");
+    }
+  }
+
+  async function handleNotInterested(): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    try {
+      await engagement.recordFeedPreference(postMenuPost.postId, "NOT_INTERESTED");
+      setPosts((prev) => prev.filter((p) => p.postId !== postMenuPost.postId));
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "操作失败");
+    }
+  }
+
+  async function handleMuteAuthor(): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    try {
+      await engagement.muteAuthor(postMenuPost.authorId);
+      // 本地记录 + 立即过滤该作者所有 post (跟 server mute 同步)
+      const mutedId = postMenuPost.authorId;
+      setMutedAuthors((prev) => new Set(prev).add(mutedId));
+      setPosts((prev) => prev.filter((p) => p.authorId !== mutedId));
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "屏蔽失败");
+    }
+  }
+
   function mediaFor(postId: string): FeedMediaItem[] {
     return (media[postId] ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
   }
@@ -775,7 +835,7 @@ export function FeedSurface({
                 </View>
                 <Pressable
                   accessibilityLabel="更多"
-                  onPress={() => { /* TODO: open post menu (report / not interested / mute author) */ }}
+                  onPress={() => openPostMenu(post.postId)}
                   style={styles.postMenu}
                 >
                   <Text style={styles.postMenuText}>⋯</Text>
@@ -988,6 +1048,16 @@ export function FeedSurface({
       </Pressable>
     ) : null}
     </View>
+    {/* R15.45: post menu modal (举报 / 不感兴趣 / 屏蔽作者) */}
+    <PostMenuModal
+      open={postMenuPostId !== undefined}
+      post={postMenuPost}
+      error={postMenuError}
+      onClose={closePostMenu}
+      onReport={handleReportPost}
+      onNotInterested={handleNotInterested}
+      onMuteAuthor={handleMuteAuthor}
+    />
   );
 }
 // 【fix 2026-08-26 P0 多视频声音】
@@ -1471,4 +1541,97 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     textAlign: "center"
   }
+});
+
+// ---------- R15.45: PostMenuModal ----------
+
+type PostMenuModalProps = {
+  open: boolean;
+  post: FeedPost | undefined;
+  error: string | undefined;
+  onClose: () => void;
+  onReport: (reason: PostReportReason) => Promise<void> | void;
+  onNotInterested: () => Promise<void> | void;
+  onMuteAuthor: () => Promise<void> | void;
+};
+
+function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, onMuteAuthor }: PostMenuModalProps): React.JSX.Element {
+  const [showReportReasons, setShowReportReasons] = useState(false);
+  if (!open) return <View />;
+  return (
+    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={postMenuStyles.backdrop}>
+        <Pressable onPress={(e) => e.stopPropagation()} style={postMenuStyles.sheet}>
+          {!showReportReasons ? (
+            <>
+              <Text style={postMenuStyles.title}>更多操作</Text>
+              <Text style={postMenuStyles.subtitle}>选一项作用于这篇帖子</Text>
+              {error ? <Text style={postMenuStyles.error}>{error}</Text> : null}
+              <Pressable onPress={() => { void onNotInterested(); }} style={postMenuStyles.row}>
+                <Text style={postMenuStyles.rowIcon}>👎</Text>
+                <View style={postMenuStyles.rowCopy}>
+                  <Text style={postMenuStyles.rowTitle}>不感兴趣</Text>
+                  <Text style={postMenuStyles.rowHint}>减少类似内容推送</Text>
+                </View>
+              </Pressable>
+              <Pressable onPress={() => setShowReportReasons(true)} style={postMenuStyles.row}>
+                <Text style={postMenuStyles.rowIcon}>⚠️</Text>
+                <View style={postMenuStyles.rowCopy}>
+                  <Text style={postMenuStyles.rowTitle}>举报</Text>
+                  <Text style={postMenuStyles.rowHint}>按平台规则处理</Text>
+                </View>
+              </Pressable>
+              <Pressable onPress={() => { void onMuteAuthor(); }} style={postMenuStyles.row}>
+                <Text style={postMenuStyles.rowIcon}>🚫</Text>
+                <View style={postMenuStyles.rowCopy}>
+                  <Text style={postMenuStyles.rowTitle}>屏蔽作者</Text>
+                  <Text style={postMenuStyles.rowHint}>不再看 Ta 的任何内容</Text>
+                </View>
+              </Pressable>
+              <Pressable onPress={onClose} style={postMenuStyles.cancel}>
+                <Text style={postMenuStyles.cancelText}>取消</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={postMenuStyles.title}>举报原因</Text>
+              <Text style={postMenuStyles.subtitle}>选一个最贴近的</Text>
+              {error ? <Text style={postMenuStyles.error}>{error}</Text> : null}
+              <Pressable onPress={() => { void onReport("SPAM"); }} style={postMenuStyles.row}>
+                <Text style={postMenuStyles.rowTitle}>垃圾广告</Text>
+              </Pressable>
+              <Pressable onPress={() => { void onReport("HARASSMENT"); }} style={postMenuStyles.row}>
+                <Text style={postMenuStyles.rowTitle}>骚扰 / 人身攻击</Text>
+              </Pressable>
+              <Pressable onPress={() => { void onReport("UNSAFE"); }} style={postMenuStyles.row}>
+                <Text style={postMenuStyles.rowTitle}>不安全 / 违规</Text>
+              </Pressable>
+              <Pressable onPress={() => { void onReport("OTHER"); }} style={postMenuStyles.row}>
+                <Text style={postMenuStyles.rowTitle}>其他</Text>
+              </Pressable>
+              <Pressable onPress={() => setShowReportReasons(false)} style={postMenuStyles.cancel}>
+                <Text style={postMenuStyles.cancelText}>返回</Text>
+              </Pressable>
+            </>
+          )}
+          {post ? null : null}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const postMenuStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  sheet: { backgroundColor: color.appBg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 24 },
+  title: { color: color.ink, fontSize: 16, fontWeight: "700", marginBottom: 4 },
+  subtitle: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  error: { color: "#dc2626", fontSize: 12, lineHeight: 18, marginBottom: 10, padding: 8, backgroundColor: "rgba(220, 38, 38, 0.08)", borderRadius: 6 },
+  row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(0,0,0,0.08)" },
+  rowIcon: { fontSize: 18, marginRight: 12 },
+  rowCopy: { flex: 1 },
+  rowTitle: { color: color.ink, fontSize: 14, fontWeight: "500", marginBottom: 2 },
+  rowHint: { color: color.muted, fontSize: 11, lineHeight: 16 },
+  cancel: { marginTop: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: "rgba(0,0,0,0.12)", alignItems: "center" },
+  cancelText: { color: color.ink, fontSize: 13, fontWeight: "500" }
 });
