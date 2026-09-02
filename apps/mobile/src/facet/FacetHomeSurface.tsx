@@ -6,8 +6,8 @@
 // Phase 1.5 在 Phase 1 基础上补齐：真实 logo、ProxyIcon、重试/下拉刷新、对象预览与 LIBRARY/OBJECTS/OPS 子页.
 
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { FacetObject, ListFacetObjectsPayload } from "@proxy/contracts";
+import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import type { FacetObject, FacetSideSpacePost, ListFacetObjectsPayload, SideSpaceCatalogPost } from "@proxy/contracts";
 import { FacetClient, FacetProtocolError } from "../facet-client";
 import { ProxyIcon } from "../components/proxy-icon";
 import { Gradient, color, shadows } from "../theme";
@@ -19,6 +19,29 @@ const RELATION_PILL: Record<FacetObject["relation"], string> = {
   SHARED_INTEREST: "朋友",
   CREATOR_COLLAB: "合作",
 };
+
+// R15.43: FacetRecommendedKind 中文 label（副空间项 / 缺口推荐都用）
+const KIND_LABEL: Record<string, string> = {
+  "personal/real-life": "真实日常",
+  "personal/honest": "真实软肋",
+  "city/travel": "城市 · 旅行",
+  "photo": "摄影",
+  "shared-experience": "共同回忆",
+  "portfolio/capability": "作品 · 能力",
+  "intro/services": "服务介绍"
+};
+
+function kindLabel(kind: string): string {
+  return KIND_LABEL[kind] ?? kind;
+}
+
+function formatAddedAt(iso: string): string {
+  // Phase 1.5: 简单转 "MM-DD HH:mm"，避免 Intl 依赖 (Hermes 不全)
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number): string => (n < 10 ? `0${n}` : String(n));
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 type Phase = "LOADING" | "READY" | "ERROR";
 type FacetView = "HOME" | "LIBRARY" | "OBJECTS" | "OPS" | "PREVIEW";
@@ -37,6 +60,11 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
   const [view, setView] = useState<FacetView>("HOME");
   const [previewObject, setPreviewObject] = useState<FacetObject | undefined>();
   const [refreshing, setRefreshing] = useState(false);
+  // R15.43: 副空间 state — catalog / add modal / 局部错误
+  const [sideSpaceCatalog, setSideSpaceCatalog] = useState<SideSpaceCatalogPost[]>([]);
+  const [sideSpaceAddOpen, setSideSpaceAddOpen] = useState(false);
+  const [sideSpaceError, setSideSpaceError] = useState<string | undefined>();
+  const [sideSpaceBusy, setSideSpaceBusy] = useState(false);
 
   const fetchObjects = useCallback(async (showLoading: boolean) => {
     if (showLoading) setPhase("LOADING");
@@ -45,6 +73,13 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
       setPayload(data);
       setPhase("READY");
       setErrorMessage(undefined);
+      // R15.43: 同步拿副空间 catalog（Phase 1.5 = 5 条 mock），用于“添加副空间”选择器
+      try {
+        const cat = await client.listSideSpaceCatalog();
+        setSideSpaceCatalog(cat.posts);
+      } catch {
+        // catalog 拿不到不影响主列表，setSideSpaceCatalog 保持空
+      }
     } catch (err: unknown) {
       setErrorMessage(err instanceof FacetProtocolError ? err.message : "FACET 服务暂时不可用");
       setPhase("ERROR");
@@ -79,6 +114,115 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
     void fetchObjects(true);
   }, [fetchObjects]);
 
+  // ---------- R15.43 副空间操作 ----------
+  // 乐观更新策略: add/remove 后本地立刻改 sideSpacePosts + previewObject，
+  // 失败时回滚 + 错误提示。这样用户看到是瞬间响应，不需要重新拉列表。
+
+  const refreshPreviewSideSpace = useCallback(async (objectId: string) => {
+    try {
+      const out = await client.listSideSpacePosts(objectId);
+      setPayload((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          objects: prev.objects.map((o) => o.id === objectId ? { ...o, sideSpacePosts: out.posts } : o)
+        };
+      });
+      setPreviewObject((prev) => prev && prev.id === objectId ? { ...prev, sideSpacePosts: out.posts } : prev);
+    } catch {
+      // 静默: 乐观更新已经够用
+    }
+  }, [client]);
+
+  const handleOpenAddSideSpace = useCallback(() => {
+    if (sideSpaceCatalog.length === 0) {
+      setSideSpaceError("副空间 catalog 尚未加载，请稍后再试");
+      return;
+    }
+    setSideSpaceError(undefined);
+    setSideSpaceAddOpen(true);
+  }, [sideSpaceCatalog.length]);
+
+  const handleAddSideSpacePost = useCallback(async (postId: string) => {
+    if (!previewObject) return;
+    setSideSpaceBusy(true);
+    setSideSpaceError(undefined);
+    // 乐观加一条到本地
+    const cat = sideSpaceCatalog.find((p) => p.id === postId);
+    if (cat) {
+      const optimistic: FacetSideSpacePost = {
+        id: cat.id, kind: cat.kind, title: cat.title, imageUrl: cat.imageUrl,
+        addedAt: new Date().toISOString()
+      };
+      setPayload((prev) => prev ? {
+        ...prev,
+        objects: prev.objects.map((o) => o.id === previewObject.id
+          ? { ...o, sideSpacePosts: [optimistic, ...o.sideSpacePosts] }
+          : o)
+      } : prev);
+      setPreviewObject({ ...previewObject, sideSpacePosts: [optimistic, ...previewObject.sideSpacePosts] });
+    }
+    try {
+      await client.addSideSpacePost(previewObject.id, postId);
+      setSideSpaceAddOpen(false);
+      // 服务器返回准确 addedAt，重新拉一次
+      await refreshPreviewSideSpace(previewObject.id);
+    } catch (err) {
+      // 回滚乐观
+      setPayload((prev) => prev ? {
+        ...prev,
+        objects: prev.objects.map((o) => o.id === previewObject.id
+          ? { ...o, sideSpacePosts: o.sideSpacePosts.filter((p) => p.id !== postId) }
+          : o)
+      } : prev);
+      setPreviewObject((prev) => prev ? {
+        ...prev,
+        sideSpacePosts: prev.sideSpacePosts.filter((p) => p.id !== postId)
+      } : prev);
+      setSideSpaceError(err instanceof FacetProtocolError ? err.message : "加入副空间失败");
+    } finally {
+      setSideSpaceBusy(false);
+    }
+  }, [client, previewObject, sideSpaceCatalog, refreshPreviewSideSpace]);
+
+  const handleRemoveSideSpacePost = useCallback(async (postId: string) => {
+    if (!previewObject) return;
+    setSideSpaceBusy(true);
+    setSideSpaceError(undefined);
+    // 乐观移除
+    const removed = previewObject.sideSpacePosts.find((p) => p.id === postId);
+    setPayload((prev) => prev ? {
+      ...prev,
+      objects: prev.objects.map((o) => o.id === previewObject.id
+        ? { ...o, sideSpacePosts: o.sideSpacePosts.filter((p) => p.id !== postId) }
+        : o)
+    } : prev);
+    setPreviewObject({
+      ...previewObject,
+      sideSpacePosts: previewObject.sideSpacePosts.filter((p) => p.id !== postId)
+    });
+    try {
+      await client.removeSideSpacePost(previewObject.id, postId);
+    } catch (err) {
+      // 回滚
+      if (removed) {
+        setPayload((prev) => prev ? {
+          ...prev,
+          objects: prev.objects.map((o) => o.id === previewObject.id
+            ? { ...o, sideSpacePosts: [removed, ...o.sideSpacePosts] }
+            : o)
+        } : prev);
+        setPreviewObject((prev) => prev ? {
+          ...prev,
+          sideSpacePosts: [removed, ...prev.sideSpacePosts]
+        } : prev);
+      }
+      setSideSpaceError(err instanceof FacetProtocolError ? err.message : "移除副空间内容失败");
+    } finally {
+      setSideSpaceBusy(false);
+    }
+  }, [client, previewObject]);
+
   function openPreview(obj: FacetObject): void {
     setPreviewObject(obj);
     setView("PREVIEW");
@@ -95,6 +239,7 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
   // 子页：PREVIEW / LIBRARY / OBJECTS / OPS
   if (view === "PREVIEW" && previewObject) {
     return (
+      <>
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           <Pressable onPress={() => setView("HOME")} style={styles.backRow}>
@@ -127,9 +272,66 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
               <View style={styles.previewFeedItem}><Text style={styles.previewFeedLabel}>日常 · 真实侧面</Text><Text style={styles.previewFeedText}>已展示 16 条 · 本周新增 3 个素材</Text></View>
             </View>
           </View>
+          {/* R15.43: 副空间面板 — 仅合作方（CREATOR_COLLAB）显示 */}
+          {previewObject.relation === "CREATOR_COLLAB" ? (
+            <View style={styles.sectionCard}>
+              <View style={styles.sideSpaceHeaderRow}>
+                <Text style={styles.sectionCardTitle}>副空间</Text>
+                <View style={styles.sideSpaceCountChip}>
+                  <Text style={styles.sideSpaceCountChipText}>{previewObject.sideSpacePosts.length} 条</Text>
+                </View>
+              </View>
+              {previewObject.sideSpaceGap ? (
+                <View style={styles.sideSpaceGapBlock}>
+                  <Text style={styles.sideSpaceGapLabel}>AI 副空间缺口</Text>
+                  <Text style={styles.sideSpaceGapText}>{previewObject.sideSpaceGap}</Text>
+                </View>
+              ) : null}
+              <View style={styles.sideSpaceList}>
+                {previewObject.sideSpacePosts.length === 0 ? (
+                  <Text style={styles.sideSpaceEmpty}>副空间还空，添加内容后只对{previewObject.displayName}可见</Text>
+                ) : (
+                  previewObject.sideSpacePosts.map((post) => (
+                    <View key={post.id} style={styles.sideSpaceRow}>
+                      <View style={styles.sideSpaceImagePlaceholder}><Text style={styles.sideSpaceImagePlaceholderText}>图</Text></View>
+                      <View style={styles.sideSpaceRowCopy}>
+                        <Text style={styles.sideSpaceRowTitle}>{post.title}</Text>
+                        <Text style={styles.sideSpaceRowMeta}>{kindLabel(post.kind)} · {formatAddedAt(post.addedAt)}</Text>
+                      </View>
+                      <Pressable
+                        onPress={() => { void handleRemoveSideSpacePost(post.id); }}
+                        disabled={sideSpaceBusy}
+                        style={styles.sideSpaceRemoveBtn}
+                      >
+                        <Text style={styles.sideSpaceRemoveBtnText}>移除</Text>
+                      </Pressable>
+                    </View>
+                  ))
+                )}
+              </View>
+              {sideSpaceError ? <Text style={styles.sideSpaceError}>{sideSpaceError}</Text> : null}
+              <Pressable
+                onPress={handleOpenAddSideSpace}
+                disabled={sideSpaceBusy}
+                style={styles.sideSpaceAddBtn}
+              >
+                <Text style={styles.sideSpaceAddBtnText}>+ 添加到副空间</Text>
+              </Pressable>
+              <Text style={styles.sectionCardHint}>仅 {previewObject.displayName} 在“合作方副空间”看到这个池子，不会进入主空间 feed</Text>
+            </View>
+          ) : null}
           <Text style={styles.previewFoot}>Phase 1.5：预览为本地组织逻辑演示，后续接入真实素材分发</Text>
         </ScrollView>
       </View>
+      <SideSpaceAddModal
+        open={sideSpaceAddOpen}
+        catalog={sideSpaceCatalog}
+        existing={previewObject.sideSpacePosts}
+        busy={sideSpaceBusy}
+        onClose={() => setSideSpaceAddOpen(false)}
+        onAdd={handleAddSideSpacePost}
+      />
+      </>
     );
   }
 
@@ -435,6 +637,41 @@ const styles = StyleSheet.create({
   previewFeedLabel: { color: color.ink, fontSize: 11, fontWeight: "800" },
   previewFeedText: { color: color.muted, fontSize: 11, marginTop: 4 },
   previewFoot: { color: color.muted, fontSize: 10, lineHeight: 15, marginTop: 14, textAlign: "center" },
+  // R15.43 副空间样式
+  sideSpaceHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  sideSpaceCountChip: { backgroundColor: "rgba(139, 92, 246, 0.18)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  sideSpaceCountChipText: { color: "#7c3aed", fontSize: 11, fontWeight: "600" },
+  sideSpaceGapBlock: { backgroundColor: "rgba(245, 158, 11, 0.12)", borderLeftColor: "#f59e0b", borderLeftWidth: 3, borderRadius: 6, padding: 10, marginBottom: 12 },
+  sideSpaceGapLabel: { color: "#b45309", fontSize: 10, fontWeight: "700", marginBottom: 4, letterSpacing: 0.4 },
+  sideSpaceGapText: { color: color.ink, fontSize: 13, lineHeight: 19 },
+  sideSpaceList: { marginBottom: 4 },
+  sideSpaceEmpty: { color: color.muted, fontSize: 12, lineHeight: 18, paddingVertical: 8, textAlign: "center" },
+  sideSpaceRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(0,0,0,0.08)" },
+  sideSpaceImagePlaceholder: { width: 44, height: 44, borderRadius: 8, backgroundColor: "rgba(139, 92, 246, 0.12)", alignItems: "center", justifyContent: "center", marginRight: 10 },
+  sideSpaceImagePlaceholderText: { color: "#7c3aed", fontSize: 12, fontWeight: "600" },
+  sideSpaceRowCopy: { flex: 1, marginRight: 8 },
+  sideSpaceRowTitle: { color: color.ink, fontSize: 13, fontWeight: "500", marginBottom: 2 },
+  sideSpaceRowMeta: { color: color.muted, fontSize: 10 },
+  sideSpaceRemoveBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: "rgba(239, 68, 68, 0.4)" },
+  sideSpaceRemoveBtnText: { color: "#dc2626", fontSize: 11, fontWeight: "600" },
+  sideSpaceError: { color: "#dc2626", fontSize: 12, lineHeight: 18, marginTop: 8 },
+  sideSpaceAddBtn: { marginTop: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: "#7c3aed", alignItems: "center" },
+  sideSpaceAddBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
+  // R15.43 Add 模态框
+  sideSpaceModalRoot: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  sideSpaceModalSheet: { backgroundColor: color.appBg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 24, maxHeight: "80%" },
+  sideSpaceModalTitle: { color: color.ink, fontSize: 16, fontWeight: "700", marginBottom: 6 },
+  sideSpaceModalDesc: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 14 },
+  sideSpaceCatalogRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(0,0,0,0.08)" },
+  sideSpaceCatalogImage: { width: 40, height: 40, borderRadius: 6, backgroundColor: "rgba(139, 92, 246, 0.12)", alignItems: "center", justifyContent: "center", marginRight: 10 },
+  sideSpaceCatalogImageText: { color: "#7c3aed", fontSize: 11, fontWeight: "600" },
+  sideSpaceCatalogCopy: { flex: 1, marginRight: 8 },
+  sideSpaceCatalogTitle: { color: color.ink, fontSize: 13, fontWeight: "500", marginBottom: 2 },
+  sideSpaceCatalogMeta: { color: color.muted, fontSize: 10 },
+  sideSpaceCatalogAddBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: "#7c3aed" },
+  sideSpaceCatalogAddBtnText: { color: "#fff", fontSize: 11, fontWeight: "600" },
+  sideSpaceModalClose: { marginTop: 14, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: "rgba(0,0,0,0.12)", alignItems: "center" },
+  sideSpaceModalCloseText: { color: color.ink, fontSize: 13, fontWeight: "500" },
   subPageTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginTop: 8 },
   subPageDesc: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
   subPageCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 12, padding: 12, ...shadows.card },
@@ -454,3 +691,56 @@ const styles = StyleSheet.create({
   opsTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
   opsBody: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
 });
+
+// ---------- R15.43: 副空间添加 Modal ----------
+
+type SideSpaceAddModalProps = {
+  open: boolean;
+  catalog: SideSpaceCatalogPost[];
+  existing: FacetSideSpacePost[];
+  busy: boolean;
+  onClose: () => void;
+  onAdd: (postId: string) => void;
+};
+
+function SideSpaceAddModal({ open, catalog, existing, busy, onClose, onAdd }: SideSpaceAddModalProps): React.JSX.Element {
+  const existingIds = new Set(existing.map((p) => p.id));
+  const available = catalog.filter((p) => !existingIds.has(p.id));
+  return (
+    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sideSpaceModalRoot}>
+        <View style={styles.sideSpaceModalSheet}>
+          <Text style={styles.sideSpaceModalTitle}>添加到副空间</Text>
+          <Text style={styles.sideSpaceModalDesc}>
+            从内容池选择一条内容，只对你正在运营的合作方可见，不进入你的主空间 feed。
+          </Text>
+          {available.length === 0 ? (
+            <Text style={styles.sideSpaceEmpty}>所有内容都已在副空间里</Text>
+          ) : (
+            <ScrollView style={{ maxHeight: 360 }}>
+              {available.map((p) => (
+                <View key={p.id} style={styles.sideSpaceCatalogRow}>
+                  <View style={styles.sideSpaceCatalogImage}><Text style={styles.sideSpaceCatalogImageText}>图</Text></View>
+                  <View style={styles.sideSpaceCatalogCopy}>
+                    <Text style={styles.sideSpaceCatalogTitle}>{p.title}</Text>
+                    <Text style={styles.sideSpaceCatalogMeta}>{kindLabel(p.kind)}</Text>
+                  </View>
+                  <Pressable
+                    onPress={() => onAdd(p.id)}
+                    disabled={busy}
+                    style={styles.sideSpaceCatalogAddBtn}
+                  >
+                    <Text style={styles.sideSpaceCatalogAddBtnText}>{busy ? "…" : "添加"}</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+          <Pressable onPress={onClose} style={styles.sideSpaceModalClose}>
+            <Text style={styles.sideSpaceModalCloseText}>关闭</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}

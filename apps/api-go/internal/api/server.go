@@ -74,8 +74,8 @@ type Server struct {
 	// Nominatim. Tests inject a stub via NewServerWithHTTPClient;
 	// production wires a 4s-timeout client in main.go.
 	HTTPClient *http.Client
-	Operator      OperatorGate
-	RateLimit     *RateLimiter
+	Operator   OperatorGate
+	RateLimit  *RateLimiter
 	// TrustCloudflareIP must only be enabled when the origin is reachable
 	// exclusively through Cloudflare. Otherwise CF-Connecting-IP is client
 	// controlled and must be ignored.
@@ -151,6 +151,8 @@ func (s *Server) Handler() http.Handler {
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.
 	mux.HandleFunc("/v1/facet/objects", s.facetObjects)
+	mux.HandleFunc("/v1/facet/objects/", s.facetSideSpace)
+	mux.HandleFunc("/v1/facet/side-space/catalog", s.facetSideSpaceCatalog)
 	// R15.33: /v1/map/items 撤了 — LocationPickerSheet 直接用
 	// /v1/geocode/reverse (Photon proxy) 拿真实地址，不需要 server
 	// 拿 bbox 查 post/agent/order pin。Post pin overlay 如果要
@@ -740,7 +742,7 @@ func idempotencyScope(envelope command.Envelope) string {
 
 func requiresAuthentication(commandType string) bool {
 	switch commandType {
-	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RequestAccountRecovery", "RefreshSession",
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession",
 		"ListFeedPosts", "ListMarketOpportunities", "ListActivities", "ListStatuses", "ListCommunities":
 		return false
 	default:
@@ -892,6 +894,116 @@ func (s *Server) facetObjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+// facetSideSpace 处理 R15.43 副空间 CRUD：
+//   GET    /v1/facet/objects/:id/side-space/posts
+//   POST   /v1/facet/objects/:id/side-space/posts   body: { postId }
+//   DELETE /v1/facet/objects/:id/side-space/posts/:postId
+//
+// 设计：仅 CREATOR_COLLAB 关系能添加。post 必须在 catalog 里。
+// 完整 catalog 走 GET /v1/facet/side-space/catalog（Phase 1 mock）。
+func (s *Server) facetSideSpace(w http.ResponseWriter, r *http.Request) {
+	if s.Facet == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "facet_not_configured"})
+		return
+	}
+	// 解析 path: /v1/facet/objects/:id/side-space/posts[/postId]
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/facet/objects/")
+	parts := strings.Split(rest, "/")
+	// 合法 shape: parts 长度 >= 3 且 [0]=objectID [1]="side-space" [2]="posts"
+	// 可选: parts[3] = postID (DELETE path param)
+	if len(parts) < 3 || parts[1] != "side-space" || parts[2] != "posts" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	objectID := parts[0]
+	pathPostID := ""
+	if len(parts) >= 4 && parts[3] != "" {
+		pathPostID = parts[3]
+	}
+	ctx := r.Context()
+	switch r.Method {
+	case http.MethodGet:
+		posts, err := s.Facet.ListSideSpacePosts(ctx, objectID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "facet_sidespace_list_failed"})
+			return
+		}
+		if posts == nil {
+			posts = []facet.SideSpacePost{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"posts": posts})
+	case http.MethodPost:
+		// POST: postID 来自 request body { postId }, pathPostID 不需要
+		var body struct {
+			PostID string `json:"postId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			return
+		}
+		if body.PostID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "post_id_required"})
+			return
+		}
+		post, err := s.Facet.AddSideSpacePost(ctx, objectID, body.PostID)
+		if err != nil {
+			switch {
+			case errors.Is(err, facet.ErrSideSpaceAlreadyAdded):
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "already_added"})
+			case errors.Is(err, facet.ErrSideSpaceInvalidKind):
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_kind"})
+			default:
+				if strings.HasPrefix(err.Error(), "side_space: object not found") {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "object_not_found"})
+				} else if strings.HasPrefix(err.Error(), "side_space: object is not CREATOR_COLLAB") {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "object_not_creator_collab"})
+				} else if strings.HasPrefix(err.Error(), "side_space: post not in catalog") {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": "post_not_in_catalog"})
+				} else {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "facet_sidespace_add_failed"})
+				}
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, post)
+	case http.MethodDelete:
+		if pathPostID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "post_id_required"})
+			return
+		}
+		if err := s.Facet.RemoveSideSpacePost(ctx, objectID, pathPostID); err != nil {
+			if errors.Is(err, facet.ErrSideSpaceNotFound) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_in_sidespace"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "facet_sidespace_remove_failed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+	}
+}
+
+// facetSideSpaceCatalog 返回 R15.43 全局 catalog（Phase 1 mock 5 条）。
+//
+// GET /v1/facet/side-space/catalog
+func (s *Server) facetSideSpaceCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	if s.Facet == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "facet_not_configured"})
+		return
+	}
+	posts := s.Facet.ListSideSpaceCatalog()
+	if posts == nil {
+		posts = []facet.SideSpaceCatalogPost{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"posts": posts})
 }
 
 // reverseGeocode is a thin server-side proxy to Nominatim OpenStreetMap.

@@ -2,6 +2,7 @@ package facet
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -45,19 +46,22 @@ type ObjectSignals struct {
 //
 // R15.42 起加 SideSpaceGap + SideSpaceKind —— 只对合作方（CREATOR_COLLAB）
 // 关系有意义，其他关系恒为 ""。
+// R15.43 起加 SideSpacePosts —— 副空间内容池（已加入的 post 列表）。
+//	非合作方恒为 []。
 type Object struct {
-	ID                string        `json:"id"`
-	DisplayName       string        `json:"displayName"`
-	Relation          string        `json:"relation"`
-	Goal              string        `json:"goal"`
-	CurrentState      string        `json:"currentState"`
-	PillLabel         string        `json:"pillLabel"`
-	Gap               Gap           `json:"gap"`
-	AvatarURL         string        `json:"avatarUrl"`
-	RecommendedKind   string        `json:"recommendedKind"`
-	ReasoningConfidence int          `json:"reasoningConfidence"`
-	SideSpaceGap      string        `json:"sideSpaceGap"`
-	SideSpaceKind     string        `json:"sideSpaceKind"`
+	ID                  string          `json:"id"`
+	DisplayName         string          `json:"displayName"`
+	Relation            string          `json:"relation"`
+	Goal                string          `json:"goal"`
+	CurrentState        string          `json:"currentState"`
+	PillLabel           string          `json:"pillLabel"`
+	Gap                 Gap             `json:"gap"`
+	AvatarURL           string          `json:"avatarUrl"`
+	RecommendedKind     string          `json:"recommendedKind"`
+	ReasoningConfidence int             `json:"reasoningConfidence"`
+	SideSpaceGap        string          `json:"sideSpaceGap"`
+	SideSpaceKind       string          `json:"sideSpaceKind"`
+	SideSpacePosts      []SideSpacePost `json:"sideSpacePosts"`
 	// Signals 是 server-internal，不写进 wire JSON。ReasoningEngine
 	// 在 Service.List 内部消费它。
 	Signals ObjectSignals `json:"-"`
@@ -98,27 +102,45 @@ func (r *MemoryRepository) Seed(_ context.Context, objects []Object) error {
 }
 
 type Service struct {
-	repository Repository
-	reasoner   Reasoner
-	now        func() time.Time
+	repository        Repository
+	reasoner          Reasoner
+	sideSpaceRepo     SideSpaceRepository
+	sideSpaceCatalog  []SideSpaceCatalogPost
+	now               func() time.Time
 }
 
 func New() *Service {
-	return NewWithReasoner(NewMemoryRepository(), NewRuleReasoner(time.Now))
+	return NewFull(NewMemoryRepository(), NewRuleReasoner(time.Now), NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog())
 }
 
 func NewWithRepository(r Repository) *Service {
-	return NewWithReasoner(r, NewRuleReasoner(time.Now))
+	return NewFull(r, NewRuleReasoner(time.Now), NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog())
 }
 
 func NewWithReasoner(r Repository, reasoner Reasoner) *Service {
+	return NewFull(r, reasoner, NewMemorySideSpaceRepository(), DefaultSideSpaceCatalog())
+}
+
+func NewFull(r Repository, reasoner Reasoner, sideSpace SideSpaceRepository, catalog []SideSpaceCatalogPost) *Service {
 	if r == nil {
 		r = NewMemoryRepository()
 	}
 	if reasoner == nil {
 		reasoner = NewRuleReasoner(time.Now)
 	}
-	s := &Service{repository: r, reasoner: reasoner, now: time.Now}
+	if sideSpace == nil {
+		sideSpace = NewMemorySideSpaceRepository()
+	}
+	if catalog == nil {
+		catalog = DefaultSideSpaceCatalog()
+	}
+	s := &Service{
+		repository:       r,
+		reasoner:         reasoner,
+		sideSpaceRepo:    sideSpace,
+		sideSpaceCatalog: catalog,
+		now:              time.Now,
+	}
 	s.SeedDefaults()
 	return s
 }
@@ -159,6 +181,18 @@ func (s *Service) SeedDefaults() {
 			},
 		},
 	})
+
+	// R15.43: Spa 副空间默认 seed 3 条 — 演示「AI 推缺 1 个能力对比 /
+	// 客户合作案例」时用户能看到 3 条副空间内容。
+	ctx := context.Background()
+	spaSeed := []SideSpacePost{
+		{ID: "ss-store-env", Kind: "intro/services", Title: "门店环境（早 9 点）", ImageURL: ""},
+		{ID: "ss-service-1", Kind: "intro/services", Title: "服务过程近景（肩颈按摩）", ImageURL: ""},
+		{ID: "ss-client-1", Kind: "portfolio/capability", Title: "客户故事：从失眠到深度睡眠", ImageURL: ""},
+	}
+	for _, p := range spaSeed {
+		_, _ = s.sideSpaceRepo.Add(ctx, "spa", p)
+	}
 }
 
 func (s *Service) List(ctx context.Context) (Payload, error) {
@@ -173,6 +207,7 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 	// CurrentState / Gap / RecommendedKind / Confidence。signals 为零
 	// 值的对象（fallback）保留 Phase 1 的 hardcode 字段。
 	// R15.42: 额外填 SideSpaceGap + SideSpaceKind（仅合作方有意义）。
+	// R15.43: 额外填 SideSpacePosts（合作方才有，非合作方 = []）。
 	reasoned := make([]Object, len(objects))
 	for i, obj := range objects {
 		if hasSignals(obj.Signals) {
@@ -185,11 +220,77 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 			objects[i].SideSpaceGap = decision.SideSpaceGap
 			objects[i].SideSpaceKind = decision.SideSpaceKind
 		}
+		// R15.43: 拉副空间内容
+		if objects[i].Relation == "CREATOR_COLLAB" {
+			posts, err := s.sideSpaceRepo.List(ctx, objects[i].ID)
+			if err == nil && posts != nil {
+				objects[i].SideSpacePosts = posts
+			} else {
+				objects[i].SideSpacePosts = []SideSpacePost{}
+			}
+		} else {
+			objects[i].SideSpacePosts = []SideSpacePost{}
+		}
 		reasoned[i] = objects[i]
 	}
 	// freshAssets / shownAssets 跟对象列表解耦，是 hero 用的全局统计。
 	// Phase 1.5 仍 hardcode 386/17；Phase 2 接 real 数据源再算。
 	return Payload{Objects: reasoned, TotalObjects: len(reasoned), FreshAssets: 17, ShownAssets: 386}, nil
+}
+
+// AddSideSpacePost 把一个全局 catalog post 加入到某个对象的副空间。
+//
+// 校验：
+//   - objectID 必须存在
+//   - postID 必须在 catalog 里
+//   - post.Kind 必须在副空间白名单里（不允许 personal/*）
+//
+// 成功返回完整的 SideSpacePost（带 AddedAt）。
+func (s *Service) AddSideSpacePost(ctx context.Context, objectID, postID string) (SideSpacePost, error) {
+	objects, err := s.repository.List(ctx)
+	if err != nil {
+		return SideSpacePost{}, err
+	}
+	found := false
+	for _, o := range objects {
+		if o.ID == objectID {
+			found = true
+			if o.Relation != "CREATOR_COLLAB" {
+				return SideSpacePost{}, errors.New("side_space: object is not CREATOR_COLLAB")
+			}
+			break
+		}
+	}
+	if !found {
+		return SideSpacePost{}, errors.New("side_space: object not found")
+	}
+	cat, ok := SideSpaceCatalogByID(s.sideSpaceCatalog, postID)
+	if !ok {
+		return SideSpacePost{}, errors.New("side_space: post not in catalog")
+	}
+	return s.sideSpaceRepo.Add(ctx, objectID, SideSpacePost{
+		ID:       cat.ID,
+		Kind:     cat.Kind,
+		Title:    cat.Title,
+		ImageURL: cat.ImageURL,
+	})
+}
+
+// RemoveSideSpacePost 从某个对象的副空间移除一条 post。
+func (s *Service) RemoveSideSpacePost(ctx context.Context, objectID, postID string) error {
+	return s.sideSpaceRepo.Remove(ctx, objectID, postID)
+}
+
+// ListSideSpacePosts 列出某个对象的副空间内容。
+func (s *Service) ListSideSpacePosts(ctx context.Context, objectID string) ([]SideSpacePost, error) {
+	return s.sideSpaceRepo.List(ctx, objectID)
+}
+
+// ListSideSpaceCatalog 返回全局 catalog（供 mobile "添加" modal 用）。
+func (s *Service) ListSideSpaceCatalog() []SideSpaceCatalogPost {
+	out := make([]SideSpaceCatalogPost, len(s.sideSpaceCatalog))
+	copy(out, s.sideSpaceCatalog)
+	return out
 }
 
 // hasSignals 判空 —— 全 0 / 全空字符串视为没接数据源，触发 fallback。

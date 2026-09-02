@@ -52,6 +52,9 @@ export type FacetObjectGap = z.infer<typeof FacetObjectGapSchema>;
  *  - avatarUrl    头像 URL（Phase 1 = 空字符串，UI 显示 placeholder）
  *  - recommendedKind   R15.41: AI 推荐下次展示的内容类型
  *  - reasoningConfidence R15.41: AI 推理置信度 0-100
+ *  - sideSpaceGap      R15.42: 副空间缺口描述（仅合作方）
+ *  - sideSpaceKind     R15.42: 副空间推荐类型（仅合作方）
+ *  - sideSpacePosts    R15.43: 副空间已加入的内容池（仅合作方）
  */
 export const FacetRecommendedKindSchema = z.enum([
   "personal/real-life",
@@ -63,6 +66,24 @@ export const FacetRecommendedKindSchema = z.enum([
   "intro/services"
 ]);
 export type FacetRecommendedKind = z.infer<typeof FacetRecommendedKindSchema>;
+
+/**
+ * FacetSideSpacePost — 副空间内容条目（R15.43）
+ *
+ * 设计：副空间 = Creator 精心挑选的、只对合作方可见的内容池。
+ * 每条 post 关联一个 FacetObject（合作方）。
+ * Phase 1.5: 5 个全局 catalog post（"门店环境" / "服务过程" /
+ * "客户故事" / "能力对比" / "合作案例"），用户 add 选一个。
+ * Phase 2: 真实用户发布内容。
+ */
+export const FacetSideSpacePostSchema = z.object({
+  id: z.string().min(1),
+  kind: FacetRecommendedKindSchema,
+  title: z.string().min(1),
+  imageUrl: z.string(),
+  addedAt: z.string().min(1)
+});
+export type FacetSideSpacePost = z.infer<typeof FacetSideSpacePostSchema>;
 
 export const FacetObjectSchema = z.object({
   id: z.string().min(1),
@@ -77,7 +98,9 @@ export const FacetObjectSchema = z.object({
   reasoningConfidence: z.number().int().min(0).max(100),
   // R15.42: 副空间双轨 — 仅 CREATOR_COLLAB 关系有意义，其他关系 = ""
   sideSpaceGap: z.string(),
-  sideSpaceKind: FacetRecommendedKindSchema.or(z.literal(""))
+  sideSpaceKind: FacetRecommendedKindSchema.or(z.literal("")),
+  // R15.43: 副空间内容池 — 非合作方恒为 []
+  sideSpacePosts: z.array(FacetSideSpacePostSchema)
 });
 export type FacetObject = z.infer<typeof FacetObjectSchema>;
 
@@ -98,4 +121,45 @@ export type ListFacetObjectsPayload = z.infer<typeof ListFacetObjectsPayloadSche
  */
 export function parseListFacetObjectsPayload(raw: unknown): ListFacetObjectsPayload {
   return ListFacetObjectsPayloadSchema.parse(raw);
+}
+
+/**
+ * R15.43: 副空间 CRUD 响应 schema
+ *
+ *   - ListSideSpacePostsPayload: GET 某个对象的副空间内容列表
+ *   - SideSpaceCatalog:         GET 全局 catalog（mock 5 条）
+ *   - AddSideSpacePostPayload:  POST 返回的完整 SideSpacePost
+ *
+ * Wire shape 与 server side-space.go / server.go facetSideSpace handler
+ * 严格对齐。
+ */
+export const ListSideSpacePostsPayloadSchema = z.object({
+  posts: z.array(FacetSideSpacePostSchema)
+});
+export type ListSideSpacePostsPayload = z.infer<typeof ListSideSpacePostsPayloadSchema>;
+
+/**
+ * R15.43: 全局 catalog post (mock 5 条，Phase 2 接真实内容池)
+ */
+export const SideSpaceCatalogPostSchema = z.object({
+  id: z.string().min(1),
+  kind: FacetRecommendedKindSchema,
+  title: z.string().min(1),
+  imageUrl: z.string()
+});
+export type SideSpaceCatalogPost = z.infer<typeof SideSpaceCatalogPostSchema>;
+
+export const ListSideSpaceCatalogPayloadSchema = z.object({
+  posts: z.array(SideSpaceCatalogPostSchema)
+});
+export type ListSideSpaceCatalogPayload = z.infer<typeof ListSideSpaceCatalogPayloadSchema>;
+
+export function parseListSideSpacePostsPayload(raw: unknown): ListSideSpacePostsPayload {
+  return ListSideSpacePostsPayloadSchema.parse(raw);
+}
+export function parseListSideSpaceCatalogPayload(raw: unknown): ListSideSpaceCatalogPayload {
+  return ListSideSpaceCatalogPayloadSchema.parse(raw);
+}
+export function parseFacetSideSpacePost(raw: unknown): FacetSideSpacePost {
+  return FacetSideSpacePostSchema.parse(raw);
 }

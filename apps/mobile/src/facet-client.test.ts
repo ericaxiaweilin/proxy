@@ -33,7 +33,8 @@ const KEN = {
   recommendedKind: "personal/real-life",
   reasoningConfidence: 70,
   sideSpaceGap: "",
-  sideSpaceKind: ""
+  sideSpaceKind: "",
+  sideSpacePosts: []
 };
 
 const VALID_PAYLOAD = {
@@ -86,5 +87,96 @@ describe("FacetClient.listObjects", () => {
       baseUrl: "http://localhost:3000"
     });
     await expect(client.listObjects()).rejects.toThrow();
+  });
+
+  // ---------- R15.43 副空间 CRUD ----------
+
+  it("listSideSpacePosts returns parsed posts", async () => {
+    const client = new FacetClient({
+      requester: makeRequester((path) => {
+        expect(path).toBe("/v1/facet/objects/spa/side-space/posts");
+        return ok({
+          posts: [
+            { id: "ss-store-env", kind: "intro/services", title: "门店环境", imageUrl: "", addedAt: "2026-09-01T00:00:00Z" }
+          ]
+        });
+      }),
+      baseUrl: "http://localhost:3000"
+    });
+    const out = await client.listSideSpacePosts("spa");
+    expect(out.posts).toHaveLength(1);
+    expect(out.posts[0]!.id).toBe("ss-store-env");
+  });
+
+  it("addSideSpacePost POSTs with { postId } body and parses response", async () => {
+    let capturedPath = "";
+    let capturedMethod = "";
+    let capturedBody: unknown = null;
+    const client = new FacetClient({
+      requester: {
+        requestPublic: async (path, init) => {
+          capturedPath = path;
+          capturedMethod = String(init.method);
+          capturedBody = init.body;
+          return ok({
+            id: "ss-store-env", kind: "intro/services", title: "门店环境", imageUrl: "", addedAt: "2026-09-01T00:00:00Z"
+          });
+        }
+      },
+      baseUrl: "http://localhost:3000"
+    });
+    const out = await client.addSideSpacePost("spa", "ss-store-env");
+    expect(capturedPath).toBe("/v1/facet/objects/spa/side-space/posts");
+    expect(capturedMethod).toBe("POST");
+    expect(capturedBody).toEqual({ postId: "ss-store-env" });
+    expect(out.id).toBe("ss-store-env");
+  });
+
+  it("removeSideSpacePost DELETEs the correct path", async () => {
+    let capturedPath = "";
+    let capturedMethod = "";
+    const client = new FacetClient({
+      requester: {
+        requestPublic: async (path, init) => {
+          capturedPath = path;
+          capturedMethod = String(init.method);
+          return { status: 200, json: async () => ({ status: "removed" }) };
+        }
+      },
+      baseUrl: "http://localhost:3000"
+    });
+    await client.removeSideSpacePost("spa", "ss-store-env");
+    expect(capturedPath).toBe("/v1/facet/objects/spa/side-space/posts/ss-store-env");
+    expect(capturedMethod).toBe("DELETE");
+  });
+
+  it("listSideSpaceCatalog returns 5 mock posts", async () => {
+    const client = new FacetClient({
+      requester: makeRequester((path) => {
+        expect(path).toBe("/v1/facet/side-space/catalog");
+        return ok({
+          posts: [
+            { id: "ss-store-env", kind: "intro/services", title: "门店", imageUrl: "" },
+            { id: "ss-service-1", kind: "intro/services", title: "服务", imageUrl: "" },
+            { id: "ss-client-1", kind: "portfolio/capability", title: "客户", imageUrl: "" },
+            { id: "ss-capability-compare", kind: "portfolio/capability", title: "能力对比", imageUrl: "" },
+            { id: "ss-collab-1", kind: "portfolio/capability", title: "合作", imageUrl: "" }
+          ]
+        });
+      }),
+      baseUrl: "http://localhost:3000"
+    });
+    const out = await client.listSideSpaceCatalog();
+    expect(out.posts).toHaveLength(5);
+  });
+
+  it("R15.43: sideSpace post with bad kind is rejected by zod", async () => {
+    const client = new FacetClient({
+      requester: makeRequester(() => ok({
+        posts: [{ id: "x", kind: "BOGUS_KIND", title: "t", imageUrl: "", addedAt: "2026-09-01T00:00:00Z" }]
+      })),
+      baseUrl: "http://localhost:3000"
+    });
+    await expect(client.listSideSpacePosts("spa")).rejects.toThrow();
   });
 });

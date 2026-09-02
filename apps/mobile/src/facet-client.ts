@@ -10,17 +10,32 @@
 //    （fail-closed），UI 必须 catch。
 //  - Phase 1 NOT-IN-SCOPE：LIBRARY / OBJECTS list / OBJECT DETAIL /
 //    OBJECT PREVIEW / 关系规则引擎 / 真实持久化。
+//  - R15.43：副空间 CRUD（add/remove/list/catalog）也走匿名 transport。
+//    限制：add/remove 仅对 CREATOR_COLLAB 关系有效（server 端校验）。
+//    设计目的：副空间是"用户主动运营"，不是"用户之间互动"，所以
+//    走匿名没问题；Phase 2 加 auth 也只是补 server header。
 
-import type { ListFacetObjectsPayload } from "@proxy/contracts";
-import { parseListFacetObjectsPayload } from "@proxy/contracts";
-import type { TransportResponse } from "./auth-client";
+import type {
+  ListFacetObjectsPayload,
+  ListSideSpaceCatalogPayload,
+  ListSideSpacePostsPayload,
+  FacetSideSpacePost
+} from "@proxy/contracts";
+import {
+  parseListFacetObjectsPayload,
+  parseListSideSpacePostsPayload,
+  parseListSideSpaceCatalogPayload,
+  parseFacetSideSpacePost
+} from "@proxy/contracts";
+import type { TransportResponse, TransportRequest } from "./auth-client";
 
 /**
- * PublicRequester 是匿名 GET 调用的最小 transport 接口。
- * 跟 SessionAuthClient.requestPublic 形状完全一致。
+ * PublicRequester 是匿名 transport 的最小接口。
+ * 跟 SessionAuthClient.requestPublic 形状完全一致，支持 GET / POST /
+ * DELETE / body JSON。
  */
 export type PublicRequester = {
-  requestPublic(path: string, init: { method: "GET" }): Promise<TransportResponse>;
+  requestPublic(path: string, init: { method: TransportRequest["method"]; body?: unknown }): Promise<TransportResponse>;
 };
 
 export type FacetClientOptions = {
@@ -43,6 +58,10 @@ export class FacetClient {
    * 后端 hardcode 返回 3 个 mock 对象 (Ken / Linh / ABC Spa)；
    * avatarUrl 永远 = ""（Phase 1 不做图片，UI 显示 placeholder）。
    *
+   * R15.41 起：每个对象附带 recommendedKind / reasoningConfidence /
+   * sideSpaceGap / sideSpaceKind。
+   * R15.43 起：CREATOR_COLLAB 关系附带 sideSpacePosts 列表。
+   *
    * 失败原因 (UI 必须 catch)：
    *  - FacetProtocolError "non_2xx": HTTP status 4xx/5xx
    *  - ZodError: 响应字段不匹配 contract（schema 漂移，立刻崩）
@@ -55,5 +74,70 @@ export class FacetClient {
     }
     const raw = await response.json();
     return parseListFacetObjectsPayload(raw);
+  }
+
+  // ---------- R15.43 副空间 CRUD ----------
+
+  /**
+   * 列出某个对象的副空间内容（R15.43）。
+   * 返回的 posts 已按 AddedAt 倒序（最新在前）。
+   */
+  public async listSideSpacePosts(objectId: string): Promise<ListSideSpacePostsPayload> {
+    const path = `/v1/facet/objects/${encodeURIComponent(objectId)}/side-space/posts`;
+    const response = await this.input.requester.requestPublic(path, { method: "GET" });
+    if (response.status < 200 || response.status >= 300) {
+      throw new FacetProtocolError(`facet listSideSpacePosts unexpected status: ${response.status}`);
+    }
+    const raw = await response.json();
+    return parseListSideSpacePostsPayload(raw);
+  }
+
+  /**
+   * 把全局 catalog 里的某个 post 加入到某个对象的副空间。
+   * 仅对 CREATOR_COLLAB 关系有效。
+   * 失败：
+   *   - 400 object_not_creator_collab: 对象不是合作方
+   *   - 404 post_not_in_catalog: postId 不在 catalog
+   *   - 404 object_not_found: 对象不存在
+   *   - 409 already_added: 已经在副空间
+   *   - 400 invalid_kind: post kind 不在副空间白名单
+   */
+  public async addSideSpacePost(objectId: string, postId: string): Promise<FacetSideSpacePost> {
+    const path = `/v1/facet/objects/${encodeURIComponent(objectId)}/side-space/posts`;
+    const response = await this.input.requester.requestPublic(path, {
+      method: "POST",
+      body: { postId }
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new FacetProtocolError(`facet addSideSpacePost unexpected status: ${response.status} body=${JSON.stringify(response).slice(0, 200)}`);
+    }
+    const raw = await response.json();
+    return parseFacetSideSpacePost(raw);
+  }
+
+  /**
+   * 从某个对象的副空间移除一条 post。
+   * 失败：404 not_in_sidespace
+   */
+  public async removeSideSpacePost(objectId: string, postId: string): Promise<void> {
+    const path = `/v1/facet/objects/${encodeURIComponent(objectId)}/side-space/posts/${encodeURIComponent(postId)}`;
+    const response = await this.input.requester.requestPublic(path, { method: "DELETE" });
+    if (response.status < 200 || response.status >= 300) {
+      throw new FacetProtocolError(`facet removeSideSpacePost unexpected status: ${response.status}`);
+    }
+  }
+
+  /**
+   * 列出全局副空间 catalog（Phase 1.5 = 5 个 mock post）。
+   * UI 用这个渲染"添加副空间"选择器。
+   */
+  public async listSideSpaceCatalog(): Promise<ListSideSpaceCatalogPayload> {
+    const path = "/v1/facet/side-space/catalog";
+    const response = await this.input.requester.requestPublic(path, { method: "GET" });
+    if (response.status < 200 || response.status >= 300) {
+      throw new FacetProtocolError(`facet listSideSpaceCatalog unexpected status: ${response.status}`);
+    }
+    const raw = await response.json();
+    return parseListSideSpaceCatalogPayload(raw);
   }
 }
