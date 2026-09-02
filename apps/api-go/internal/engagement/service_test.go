@@ -363,3 +363,80 @@ func TestListPinnedPosts(t *testing.T) {
 		t.Errorf("expected post order [post_1, post_2, post_3], got %v", ids)
 	}
 }
+
+// ---------- R15.61 ListUserReplies ----------
+
+func TestListUserReplies_Empty(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("ListUserReplies", "user_001", map[string]any{"userId": "user_001"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s", result.Outcome)
+	}
+	var out map[string]any
+	_ = json.Unmarshal([]byte(result.OperationRef), &out)
+	if int(out["count"].(float64)) != 0 {
+		t.Errorf("expected 0 replies, got %v", out["count"])
+	}
+}
+
+func TestListUserReplies_WithReplies(t *testing.T) {
+	s := New()
+	// 2 个 reply from user_001 + 1 from user_002
+	s.Handle(envelopeWithActor("ReplyToPost", "user_001", map[string]any{"postId": "post_1", "body": "comment A"}))
+	s.Handle(envelopeWithActor("ReplyToPost", "user_001", map[string]any{"postId": "post_2", "body": "comment B"}))
+	s.Handle(envelopeWithActor("ReplyToPost", "user_002", map[string]any{"postId": "post_3", "body": "comment C"}))
+	result := s.Handle(envelopeWithActor("ListUserReplies", "user_001", map[string]any{"userId": "user_001"}))
+	var out map[string]any
+	_ = json.Unmarshal([]byte(result.OperationRef), &out)
+	if int(out["count"].(float64)) != 2 {
+		t.Errorf("expected 2 replies for user_001, got %v", out["count"])
+	}
+}
+
+func TestListUserReplies_LimitClamp(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("ListUserReplies", "user_001", map[string]any{"userId": "user_001", "limit": 9999}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s", result.Outcome)
+	}
+}
+
+// ---------- R15.62 ListUserBookmarks ----------
+
+func TestListUserBookmarks_Empty(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("ListUserBookmarks", "user_001", map[string]any{"userId": "user_001"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s", result.Outcome)
+	}
+	var out map[string]any
+	_ = json.Unmarshal([]byte(result.OperationRef), &out)
+	if int(out["count"].(float64)) != 0 {
+		t.Errorf("expected 0 bookmarks, got %v", out["count"])
+	}
+}
+
+func TestListUserBookmarks_WithBookmarks(t *testing.T) {
+	s := New()
+	s.Handle(envelopeWithActor("BookmarkPost", "user_001", map[string]any{"postId": "post_1"}))
+	s.Handle(envelopeWithActor("BookmarkPost", "user_001", map[string]any{"postId": "post_2"}))
+	s.Handle(envelopeWithActor("BookmarkPost", "user_002", map[string]any{"postId": "post_3"}))
+	result := s.Handle(envelopeWithActor("ListUserBookmarks", "user_001", map[string]any{"userId": "user_001"}))
+	var out map[string]any
+	_ = json.Unmarshal([]byte(result.OperationRef), &out)
+	if int(out["count"].(float64)) != 2 {
+		t.Errorf("expected 2 bookmarks for user_001, got %v", out["count"])
+	}
+	ids := out["bookmarks"].([]any)
+	if len(ids) != 2 {
+		t.Errorf("expected 2 ids, got %d", len(ids))
+	}
+}
+
+func TestListUserBookmarks_InvalidUserId(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("ListUserBookmarks", "user_001", map[string]any{"userId": ""}))
+	if result.Outcome != "REJECTED" {
+		t.Errorf("expected REJECTED (empty userId), got %s", result.Outcome)
+	}
+}

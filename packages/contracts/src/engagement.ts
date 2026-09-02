@@ -118,3 +118,57 @@ export function parseListPinnedPostsPayload(raw: unknown): ListPinnedPostsPayloa
 export function parsePinnedPostsList(raw: unknown): PinnedPostsList {
   return PinnedPostsListSchema.parse(raw);
 }
+
+// ---------- R15.61 ListUserReplies ----------
+
+// RepliedPost (单条 reply summary, 包含父 post)
+export const RepliedPostSchema = z.object({
+  replyId: z.string().min(1),
+  postId: z.string().min(1),
+  parentPostId: z.string().min(1),
+  body: z.string(),
+  createdAt: z.string()
+});
+export type RepliedPost = z.infer<typeof RepliedPostSchema>;
+
+export const UserRepliesListSchema = z.object({
+  userId: z.string().min(1),
+  replies: z.array(RepliedPostSchema),
+  count: z.number().int().min(0)
+});
+export type UserRepliesList = z.infer<typeof UserRepliesListSchema>;
+
+export const ListUserRepliesPayloadSchema = z.object({
+  userId: z.string().min(1),
+  limit: z.number().int().positive().optional()
+});
+export type ListUserRepliesPayload = z.infer<typeof ListUserRepliesPayloadSchema>;
+
+export function parseListUserRepliesPayload(raw: unknown): ListUserRepliesPayload {
+  return ListUserRepliesPayloadSchema.parse(raw);
+}
+export function parseUserRepliesList(raw: unknown): UserRepliesList {
+  return UserRepliesListSchema.parse(raw);
+}
+
+// ---------- R15.62 ListUserBookmarks ----------
+
+export const UserBookmarksListSchema = z.object({
+  userId: z.string().min(1),
+  bookmarks: z.array(z.string()),
+  count: z.number().int().min(0)
+});
+export type UserBookmarksList = z.infer<typeof UserBookmarksListSchema>;
+
+export const ListUserBookmarksPayloadSchema = z.object({
+  userId: z.string().min(1),
+  limit: z.number().int().positive().optional()
+});
+export type ListUserBookmarksPayload = z.infer<typeof ListUserBookmarksPayloadSchema>;
+
+export function parseListUserBookmarksPayload(raw: unknown): ListUserBookmarksPayload {
+  return ListUserBookmarksPayloadSchema.parse(raw);
+}
+export function parseUserBookmarksList(raw: unknown): UserBookmarksList {
+  return UserBookmarksListSchema.parse(raw);
+}

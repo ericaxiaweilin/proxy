@@ -51,6 +51,28 @@ type Repost struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// R15.61 — UserRepliesList (反查该 user 的全部 reply posts)
+type UserRepliesList struct {
+	UserID  string         `json:"userId"`
+	Replies []RepliedPost  `json:"replies"`
+	Count   int            `json:"count"`
+}
+
+type RepliedPost struct {
+	ReplyID   string    `json:"replyId"`
+	PostID    string    `json:"postId"`
+	ParentPostID string `json:"parentPostId"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// R15.62 — UserBookmarksList (反查该 user 的全部 bookmark posts)
+type UserBookmarksList struct {
+	UserID    string   `json:"userId"`
+	Bookmarks []string `json:"bookmarks"`
+	Count     int      `json:"count"`
+}
+
 // Bookmark 是收藏。
 // R15.56 — PostPin: 置顶帖 (per user)
 type PostPin struct {
@@ -122,6 +144,9 @@ type Repository interface {
 	AddReply(ctx context.Context, r Reply) error
 	AddRepost(ctx context.Context, r Repost) error
 	AddBookmark(ctx context.Context, b Bookmark) error
+	// R15.61 / R15.62 — 反查 user 的 reply / bookmark 列表 (profile 5-tab)
+	ListRepliesByActor(ctx context.Context, actorID string, limit int) ([]Reply, error)
+	ListBookmarksByActor(ctx context.Context, actorID string, limit int) ([]Bookmark, error)
 	// R15.56 — 置顶: 幂等 (同一 user+post 重复 pin 返旧), 限 3 个上限
 	AddPostPin(ctx context.Context, p PostPin) (PostPin, bool, error)
 	RemovePostPin(ctx context.Context, ownerID, postID string) (bool, error)
@@ -259,6 +284,53 @@ func (r *MemoryRepository) ListPinnedPosts(_ context.Context, ownerID string) ([
 	defer r.mu.Unlock()
 	out := make([]string, len(r.pinOrder[ownerID]))
 	copy(out, r.pinOrder[ownerID])
+	return out, nil
+}
+
+// R15.61 — ListRepliesByActor: 返该 actor 的全部 reply (按 created_at DESC, 上限 limit)
+func (r *MemoryRepository) ListRepliesByActor(_ context.Context, actorID string, limit int) ([]Reply, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []Reply
+	for _, rep := range r.replies {
+		if rep.ActorID == actorID {
+			out = append(out, rep)
+		}
+	}
+	// 排序: 最新在前
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].CreatedAt.After(out[i].CreatedAt) {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// R15.62 — ListBookmarksByActor: 返该 actor 的全部 bookmark (按 created_at DESC, 上限 limit)
+func (r *MemoryRepository) ListBookmarksByActor(_ context.Context, actorID string, limit int) ([]Bookmark, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []Bookmark
+	for _, bm := range r.bookmarks {
+		if bm.ActorID == actorID {
+			out = append(out, bm)
+		}
+	}
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].CreatedAt.After(out[i].CreatedAt) {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 
@@ -410,6 +482,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.unpinPost(ctx, e)
 	case "ListPinnedPosts":
 		return s.listPinnedPosts(ctx, e)
+	case "ListUserReplies":
+		return s.listUserReplies(ctx, e)
+	case "ListUserBookmarks":
+		return s.listUserBookmarks(ctx, e)
 	default:
 		return command.Rejected(e, "ENGAGEMENT_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "engagement.unsupported_command", nil)
 	}
@@ -720,6 +796,82 @@ func (s *Service) listPinnedPosts(ctx context.Context, e command.Envelope) comma
 			PostIDs: ids,
 			Count:   len(ids),
 		})
+		return accepted
+	}()
+}
+
+// ---------- ListUserReplies (R15.61) ----------
+
+type listUserRepliesPayload struct {
+	UserID string `json:"userId"`
+	Limit  int    `json:"limit"`
+}
+
+const defaultListUserRepliesLimit = 30
+const maxListUserRepliesLimit = 100
+
+func (s *Service) listUserReplies(ctx context.Context, e command.Envelope) command.Result {
+	var p listUserRepliesPayload
+	if !decode(e.Payload, &p) || p.UserID == "" {
+		return command.Rejected(e, "INVALID_LIST_REPLIES", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_list_replies", nil)
+	}
+	limit := p.Limit
+	if limit <= 0 {
+		limit = defaultListUserRepliesLimit
+	}
+	if limit > maxListUserRepliesLimit {
+		limit = maxListUserRepliesLimit
+	}
+	replies, err := s.repository.ListRepliesByActor(ctx, p.UserID, limit)
+	if err != nil {
+		return command.Rejected(e, "LIST_REPLIES_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.list_replies_failed", nil)
+	}
+	out := make([]RepliedPost, 0, len(replies))
+	for _, r := range replies {
+		out = append(out, RepliedPost{
+			ReplyID: r.ID, PostID: r.PostID, ParentPostID: r.PostID, Body: r.Body, CreatedAt: r.CreatedAt,
+		})
+	}
+	return func() command.Result {
+		accepted := command.Accepted(e, "Reply", p.UserID, 1, "LISTED", nil)
+		accepted.OperationRef = mustMarshal(UserRepliesList{UserID: p.UserID, Replies: out, Count: len(out)})
+		return accepted
+	}()
+}
+
+// ---------- ListUserBookmarks (R15.62) ----------
+
+type listUserBookmarksPayload struct {
+	UserID string `json:"userId"`
+	Limit  int    `json:"limit"`
+}
+
+const defaultListUserBookmarksLimit = 60
+const maxListUserBookmarksLimit = 200
+
+func (s *Service) listUserBookmarks(ctx context.Context, e command.Envelope) command.Result {
+	var p listUserBookmarksPayload
+	if !decode(e.Payload, &p) || p.UserID == "" {
+		return command.Rejected(e, "INVALID_LIST_BOOKMARKS", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_list_bookmarks", nil)
+	}
+	limit := p.Limit
+	if limit <= 0 {
+		limit = defaultListUserBookmarksLimit
+	}
+	if limit > maxListUserBookmarksLimit {
+		limit = maxListUserBookmarksLimit
+	}
+	bms, err := s.repository.ListBookmarksByActor(ctx, p.UserID, limit)
+	if err != nil {
+		return command.Rejected(e, "LIST_BOOKMARKS_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.list_bookmarks_failed", nil)
+	}
+	ids := make([]string, 0, len(bms))
+	for _, b := range bms {
+		ids = append(ids, b.PostID)
+	}
+	return func() command.Result {
+		accepted := command.Accepted(e, "Bookmark", p.UserID, 1, "LISTED", nil)
+		accepted.OperationRef = mustMarshal(UserBookmarksList{UserID: p.UserID, Bookmarks: ids, Count: len(ids)})
 		return accepted
 	}()
 }
