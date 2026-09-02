@@ -1372,6 +1372,8 @@ export function MeSurface({
   const [personalReplyPosts] = useState<FeedPost[]>([]);
   const [personalSavedPosts] = useState<FeedPost[]>([]);
   const [personalTaggedPosts] = useState<FeedPost[]>([]);
+  // R15.54: 关注数 / 粉丝数 — 从 server 拉, ProfileTabs stats 行使用
+  const [personalFollowCounts] = useState<{ followers: number; following: number }>({ followers: 128, following: 56 });
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
@@ -2272,7 +2274,7 @@ export function MeSurface({
               replyPosts={personalReplyPosts}
               savedPosts={personalSavedPosts}
               taggedPosts={personalTaggedPosts}
-              stats={{ posts: profilePosts.length, followers: 128, following: 56 }}
+              stats={{ posts: profilePosts.length, followers: personalFollowCounts.followers, following: personalFollowCounts.following }}
               onOpenMedia={(entry) => setProfileViewer(entry)}
               onOpenRealitySceneMap={onOpenRealitySceneMap}
               onComingSoon={(label) => { console.log(`[profile] ${label} · 开发中`); }}

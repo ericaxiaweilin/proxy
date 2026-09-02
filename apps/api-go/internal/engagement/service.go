@@ -106,6 +106,10 @@ type PostEngagement struct {
 
 type Repository interface {
 	AddFollow(ctx context.Context, f Follow) error
+	RemoveFollow(ctx context.Context, followerID, followeeID string) (bool, error)
+	CountFollowers(ctx context.Context, userID string) (int, error)
+	CountFollowing(ctx context.Context, userID string) (int, error)
+	IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error)
 	AddReaction(ctx context.Context, r Reaction) error
 	AddReply(ctx context.Context, r Reply) error
 	AddRepost(ctx context.Context, r Repost) error
@@ -152,6 +156,52 @@ func (r *MemoryRepository) AddFollow(_ context.Context, f Follow) error {
 	defer r.mu.Unlock()
 	r.follows[f.FollowerID+"|"+f.FolloweeID] = f
 	return nil
+}
+
+// R15.54 — RemoveFollow: 幂等返 (true=删了, false=之前没有)
+func (r *MemoryRepository) RemoveFollow(_ context.Context, followerID, followeeID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := followerID + "|" + followeeID
+	if _, ok := r.follows[key]; !ok {
+		return false, nil
+	}
+	delete(r.follows, key)
+	return true, nil
+}
+
+// R15.54 — CountFollowers: 数 FolloweeID == userID 的 follow 数
+func (r *MemoryRepository) CountFollowers(_ context.Context, userID string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, f := range r.follows {
+		if f.FolloweeID == userID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// R15.54 — CountFollowing: 数 FollowerID == userID 的 follow 数
+func (r *MemoryRepository) CountFollowing(_ context.Context, userID string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, f := range r.follows {
+		if f.FollowerID == userID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// R15.54 — IsFollowing: actor 是否 follow 了 target
+func (r *MemoryRepository) IsFollowing(_ context.Context, followerID, followeeID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.follows[followerID+"|"+followeeID]
+	return ok, nil
 }
 
 func (r *MemoryRepository) AddReaction(_ context.Context, re Reaction) error {
@@ -257,7 +307,7 @@ func NewWithRepository(repository Repository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "FollowProfile", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor":
+	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor":
 		return true
 	default:
 		return false
@@ -274,6 +324,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	switch e.CommandType {
 	case "FollowProfile":
 		return s.follow(ctx, e)
+	case "UnfollowProfile":
+		return s.unfollow(ctx, e)
+	case "GetFollowCounts":
+		return s.getFollowCounts(ctx, e)
+	case "IsFollowing":
+		return s.isFollowing(ctx, e)
 	case "ReactToPost":
 		return s.react(ctx, e)
 	case "ReplyToPost":
@@ -318,6 +374,106 @@ func (s *Service) follow(ctx context.Context, e command.Envelope) command.Result
 		return command.Rejected(e, "FOLLOW_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.follow_failed", nil)
 	}
 	return command.Accepted(e, "Follow", e.Actor.ID+"|"+p.FolloweeID, 1, "FOLLOWING", eventRefs(domainEvents))
+}
+
+// ---------- UnfollowProfile (R15.54) ----------
+
+func (s *Service) unfollow(ctx context.Context, e command.Envelope) command.Result {
+	var p followPayload
+	if !decode(e.Payload, &p) || p.FolloweeID == "" {
+		return command.Rejected(e, "INVALID_UNFOLLOW", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_unfollow", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "UNFOLLOW_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.unfollow_not_allowed", nil)
+	}
+	if p.FolloweeID == e.Actor.ID {
+		return command.Rejected(e, "CANNOT_UNFOLLOW_SELF", "VALIDATION", "AFTER_USER_ACTION", "engagement.cannot_unfollow_self", nil)
+	}
+	removed, err := s.repository.RemoveFollow(ctx, e.Actor.ID, p.FolloweeID)
+	if err != nil {
+		return command.Rejected(e, "UNFOLLOW_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.unfollow_failed", nil)
+	}
+	state := "UNFOLLOWED"
+	if !removed {
+		state = "NOT_FOLLOWING" // 幂等: 之前就没 follow
+	}
+	domainEvents := []event.DomainEvent{event.New("ProfileUnfollowed", "Follow", e.Actor.ID+"|"+p.FolloweeID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+		"followerId": e.Actor.ID,
+		"followeeId": p.FolloweeID,
+		"removed":     removed,
+	})}
+	return command.Accepted(e, "Follow", e.Actor.ID+"|"+p.FolloweeID, 1, state, eventRefs(domainEvents))
+}
+
+// ---------- GetFollowCounts (R15.54) ----------
+
+type getFollowCountsPayload struct {
+	UserID string `json:"userId"`
+}
+
+type followCounts struct {
+	UserID     string `json:"userId"`
+	Followers  int    `json:"followers"`
+	Following  int    `json:"following"`
+}
+
+func (s *Service) getFollowCounts(ctx context.Context, e command.Envelope) command.Result {
+	var p getFollowCountsPayload
+	if !decode(e.Payload, &p) || p.UserID == "" {
+		return command.Rejected(e, "INVALID_GET_FOLLOW_COUNTS", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_get_follow_counts", nil)
+	}
+	followers, err := s.repository.CountFollowers(ctx, p.UserID)
+	if err != nil {
+		return command.Rejected(e, "FOLLOW_COUNTS_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.follow_counts_failed", nil)
+	}
+	following, err := s.repository.CountFollowing(ctx, p.UserID)
+	if err != nil {
+		return command.Rejected(e, "FOLLOW_COUNTS_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.follow_counts_failed", nil)
+	}
+	return func() command.Result {
+		accepted := command.Accepted(e, "FollowCounts", p.UserID, 1, "OK", nil)
+		accepted.OperationRef = mustMarshal(followCounts{
+			UserID:    p.UserID,
+			Followers: followers,
+			Following: following,
+		})
+		return accepted
+	}()
+}
+
+// ---------- IsFollowing (R15.54) ----------
+
+type isFollowingPayload struct {
+	FollowerID string `json:"followerId"`
+	FolloweeID string `json:"followeeID"`
+}
+
+type followingState struct {
+	IsFollowing bool `json:"isFollowing"`
+}
+
+func (s *Service) isFollowing(ctx context.Context, e command.Envelope) command.Result {
+	var p isFollowingPayload
+	if !decode(e.Payload, &p) || p.FolloweeID == "" {
+		return command.Rejected(e, "INVALID_IS_FOLLOWING", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_is_following", nil)
+	}
+	if p.FollowerID == "" {
+		// 匿名查: 默认 false
+		return func() command.Result {
+		accepted := command.Accepted(e, "FollowingState", p.FollowerID+"|"+p.FolloweeID, 1, "OK", nil)
+		accepted.OperationRef = mustMarshal(followingState{IsFollowing: false})
+		return accepted
+	}()
+	}
+	is, err := s.repository.IsFollowing(ctx, p.FollowerID, p.FolloweeID)
+	if err != nil {
+		return command.Rejected(e, "IS_FOLLOWING_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.is_following_failed", nil)
+	}
+	return func() command.Result {
+		accepted := command.Accepted(e, "FollowingState", p.FollowerID+"|"+p.FolloweeID, 1, "OK", nil)
+		accepted.OperationRef = mustMarshal(followingState{IsFollowing: is})
+		return accepted
+	}()
 }
 
 // ---------- ReactToPost ----------
@@ -562,4 +718,9 @@ func sortFollows(follows map[string]Follow) []Follow {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
 	return result
+}
+
+func mustMarshal(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }

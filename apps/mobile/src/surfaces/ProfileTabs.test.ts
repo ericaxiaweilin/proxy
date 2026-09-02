@@ -31,7 +31,8 @@ describe("R15.53 — 主页 pinned 帖", () => {
     const post: FeedPost = {
       postId: "p1", authorType: "AGENT", authorId: "u1",
       body: "first", status: "PUBLISHED", createdAt: "2026-09-01T00:00:00Z",
-      contextRefs: []
+      contextRefs: [],
+      mediaRefs: []
     };
     const { pinned, rest } = pickPinnedAndRest([post]);
     expect(pinned?.postId).toBe("p1");
@@ -42,7 +43,8 @@ describe("R15.53 — 主页 pinned 帖", () => {
     const posts: FeedPost[] = [1, 2, 3].map((i) => ({
       postId: `p${i}`, authorType: "AGENT", authorId: "u1",
       body: `post ${i}`, status: "PUBLISHED", createdAt: "2026-09-01T00:00:00Z",
-      contextRefs: []
+      contextRefs: [],
+      mediaRefs: []
     }));
     const { pinned, rest } = pickPinnedAndRest(posts);
     expect(pinned?.postId).toBe("p1");

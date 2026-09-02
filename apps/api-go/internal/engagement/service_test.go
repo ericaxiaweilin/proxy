@@ -194,3 +194,101 @@ func TestMuteAuthor_PerUserIsolation(t *testing.T) {
 		t.Error("per-user mutes should have different ids")
 	}
 }
+
+// ---------- R15.54 UnfollowProfile / GetFollowCounts / IsFollowing ----------
+
+func envelopeWithActor(commandType, actorID string, payload map[string]any) command.Envelope {
+	env := envelopeFor(commandType, payload, "x")
+	env.Actor = command.Actor{Type: "USER", ID: actorID}
+	env.Principal = command.Principal{Type: "INDIVIDUAL", ID: actorID}
+	return env
+}
+
+func TestUnfollow_HappyPath(t *testing.T) {
+	s := New()
+	// 先 follow
+	s.Handle(envelopeWithActor("FollowProfile", "user_001", map[string]any{"followeeId": "user_002"}))
+	// 再 unfollow
+	result := s.Handle(envelopeWithActor("UnfollowProfile", "user_001", map[string]any{"followeeId": "user_002"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s (%+v)", result.Outcome, result.Error)
+	}
+	if result.Aggregate.State != "UNFOLLOWED" {
+		t.Errorf("expected UNFOLLOWED, got %s", result.Aggregate.State)
+	}
+}
+
+func TestUnfollow_Idempotent(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("UnfollowProfile", "user_001", map[string]any{"followeeId": "user_999"}))
+	if result.Outcome != "ACCEPTED" || result.Aggregate.State != "NOT_FOLLOWING" {
+		t.Errorf("expected ACCEPTED + NOT_FOLLOWING (idempotent), got %s %s", result.Outcome, result.Aggregate.State)
+	}
+}
+
+func TestUnfollow_CannotUnfollowSelf(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("UnfollowProfile", "user_001", map[string]any{"followeeId": "user_001"}))
+	if result.Outcome != "REJECTED" {
+		t.Errorf("expected REJECTED self, got %s", result.Outcome)
+	}
+}
+
+func TestGetFollowCounts(t *testing.T) {
+	s := New()
+	// user_002 follow user_001; user_003 follow user_001; user_001 follow user_004
+	s.Handle(envelopeWithActor("FollowProfile", "user_002", map[string]any{"followeeId": "user_001"}))
+	s.Handle(envelopeWithActor("FollowProfile", "user_003", map[string]any{"followeeId": "user_001"}))
+	s.Handle(envelopeWithActor("FollowProfile", "user_001", map[string]any{"followeeId": "user_004"}))
+	result := s.Handle(envelopeWithActor("GetFollowCounts", "user_001", map[string]any{"userId": "user_001"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s", result.Outcome)
+	}
+	if result.OperationRef == "" {
+		t.Fatal("expected OperationRef to contain counts")
+	}
+	var counts map[string]any
+	if err := json.Unmarshal([]byte(result.OperationRef), &counts); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if int(counts["followers"].(float64)) != 2 {
+		t.Errorf("expected 2 followers, got %v", counts["followers"])
+	}
+	if int(counts["following"].(float64)) != 1 {
+		t.Errorf("expected 1 following, got %v", counts["following"])
+	}
+}
+
+func TestIsFollowing(t *testing.T) {
+	s := New()
+	// user_001 follow user_002
+	s.Handle(envelopeWithActor("FollowProfile", "user_001", map[string]any{"followeeId": "user_002"}))
+
+	// user_001 IS following user_002
+	result := s.Handle(envelopeWithActor("IsFollowing", "user_001", map[string]any{"followerId": "user_001", "followeeId": "user_002"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s", result.Outcome)
+	}
+	var state map[string]any
+	_ = json.Unmarshal([]byte(result.OperationRef), &state)
+	if state["isFollowing"] != true {
+		t.Errorf("expected isFollowing=true, got %v", state["isFollowing"])
+	}
+
+	// user_001 NOT following user_003
+	result = s.Handle(envelopeWithActor("IsFollowing", "user_001", map[string]any{"followerId": "user_001", "followeeId": "user_003"}))
+	_ = json.Unmarshal([]byte(result.OperationRef), &state)
+	if state["isFollowing"] != false {
+		t.Errorf("expected isFollowing=false, got %v", state["isFollowing"])
+	}
+}
+
+func TestIsFollowing_AnonymousReturnsFalse(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("IsFollowing", "user_001", map[string]any{"followerId": "", "followeeId": "user_002"}))
+	var state map[string]any
+	_ = json.Unmarshal([]byte(result.OperationRef), &state)
+	if state["isFollowing"] != false {
+		t.Errorf("expected isFollowing=false for anonymous, got %v", state["isFollowing"])
+	}
+}
