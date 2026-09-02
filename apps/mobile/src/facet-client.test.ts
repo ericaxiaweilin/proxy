@@ -264,3 +264,55 @@ describe("FacetClient.config", () => {
     ).rejects.toBeInstanceOf(FacetProtocolError);
   });
 });
+
+describe("FacetClient.sideSpaceSuggestions (R15.52)", () => {
+  it("GET /v1/facet/side-space/suggestions?limit=3 returns parsed payload", async () => {
+    let capturedPath = "";
+    let capturedMethod = "";
+    const client = new FacetClient({
+      requester: makeRequester((path, init) => {
+        capturedPath = path;
+        capturedMethod = init.method;
+        return ok({
+          suggestions: {
+            spa: {
+              objectId: "spa",
+              sideSpaceKind: "portfolio/capability",
+              posts: [
+                { post: { id: "ss-collab-1", kind: "portfolio/capability", title: "合作", imageUrl: "" }, reason: "匹配 portfolio/capability 缺口", rank: 1 }
+              ]
+            }
+          }
+        });
+      }),
+      baseUrl: "http://localhost:3000"
+    });
+    const out = await client.listSideSpaceSuggestions(3);
+    expect(capturedPath).toBe("/v1/facet/side-space/suggestions?limit=3");
+    expect(capturedMethod).toBe("GET");
+    expect(out.suggestions.spa).toBeDefined();
+    expect(out.suggestions.spa?.sideSpaceKind).toBe("portfolio/capability");
+    expect(out.suggestions.spa?.posts[0]?.rank).toBe(1);
+  });
+
+  it("uses default limit=3 when arg omitted", async () => {
+    let capturedPath = "";
+    const client = new FacetClient({
+      requester: makeRequester((path) => {
+        capturedPath = path;
+        return ok({ suggestions: {} });
+      }),
+      baseUrl: "http://localhost:3000"
+    });
+    await client.listSideSpaceSuggestions();
+    expect(capturedPath).toBe("/v1/facet/side-space/suggestions?limit=3");
+  });
+
+  it("rejects on malformed payload (zod fail-closed)", async () => {
+    const client = new FacetClient({
+      requester: makeRequester(() => ok({ wrong: "shape" })),
+      baseUrl: "http://localhost:3000"
+    });
+    await expect(client.listSideSpaceSuggestions(3)).rejects.toThrow();
+  });
+});

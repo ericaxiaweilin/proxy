@@ -153,6 +153,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/facet/objects", s.facetObjects)
 	mux.HandleFunc("/v1/facet/objects/", s.facetSideSpace)
 	mux.HandleFunc("/v1/facet/side-space/catalog", s.facetSideSpaceCatalog)
+	mux.HandleFunc("/v1/facet/side-space/suggestions", s.facetSideSpaceSuggestions)
 	mux.HandleFunc("/v1/facet/config", s.facetConfig)
 	// R15.33: /v1/map/items 撤了 — LocationPickerSheet 直接用
 	// /v1/geocode/reverse (Photon proxy) 拿真实地址，不需要 server
@@ -1057,6 +1058,35 @@ func (s *Server) facetConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 	}
+}
+
+// facetSideSpaceSuggestions 返回 R15.52 server 推送的副空间推荐.
+//   GET /v1/facet/side-space/suggestions?limit=3
+// 返 { suggestions: { [objectId]: SideSpaceSuggestions } }.
+// 不需要的 objectId (如已满足 / 非合作方) 返空 posts (client 跳过).
+func (s *Server) facetSideSpaceSuggestions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	if s.Facet == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "facet_not_configured"})
+		return
+	}
+	limit := 3
+	if v := r.URL.Query().Get("limit"); v != "" {
+		// 简单 parse (Phase 1.5 信任输入; Phase 2 加 zod / 严格)
+		var parsed int
+		if _, err := fmt.Sscanf(v, "%d", &parsed); err == nil && parsed > 0 && parsed <= 10 {
+			limit = parsed
+		}
+	}
+	suggestions, err := s.Facet.SideSpaceSuggestionsForAll(r.Context(), limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "facet_suggestions_failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
 }
 
 // reverseGeocode is a thin server-side proxy to Nominatim OpenStreetMap.

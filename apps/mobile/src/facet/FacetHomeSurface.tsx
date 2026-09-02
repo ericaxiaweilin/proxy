@@ -64,6 +64,8 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
   // R15.43: 副空间 state — catalog / add modal / 局部错误
   const [sideSpaceCatalog, setSideSpaceCatalog] = useState<SideSpaceCatalogPost[]>([]);
   const [sideSpaceAddOpen, setSideSpaceAddOpen] = useState(false);
+  // R15.52: server 推卸的副空间推荐 — 准 TikTok FYP 风: 1-N 个 post + 采纳按钮.
+  const [pushSuggestions, setPushSuggestions] = useState<{ post: SideSpaceCatalogPost; reason: string; rank: number }[]>([]);
   const [sideSpaceError, setSideSpaceError] = useState<string | undefined>();
   const [sideSpaceBusy, setSideSpaceBusy] = useState(false);
 
@@ -227,6 +229,32 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
   function openPreview(obj: FacetObject): void {
     setPreviewObject(obj);
     setView("PREVIEW");
+    // R15.52: 打开 PREVIEW 时, 拉 server 推送的副空间推荐 (如果需要).
+    void loadPushSuggestions(obj.id);
+  }
+
+  // R15.52: 拉某对象的副空间推送 (server 启发式: 匹配 kind 缺口, 排除已加).
+  async function loadPushSuggestions(objectId: string): Promise<void> {
+    try {
+      const payload = await client.listSideSpaceSuggestions(3);
+      const s = payload.suggestions[objectId];
+      if (s && s.posts.length > 0) {
+        setPushSuggestions(s.posts.map((p) => ({ post: p.post, reason: p.reason, rank: p.rank })));
+      } else {
+        setPushSuggestions([]);
+      }
+    } catch {
+      // 静默失败 — 不动 UI 状态 (banner 隐藏)
+      setPushSuggestions([]);
+    }
+  }
+
+  // R15.52: 采纳推送 → 走现有 addSideSpacePost 路径 (乐观更新 + rollback).
+  async function handleAcceptPush(postId: string): Promise<void> {
+    if (!previewObject) return;
+    // 复用 addSideSpacePost: 客户端先把推送清除, server 成功不需重新拉推卸
+    setPushSuggestions((prev) => prev.filter((p) => p.post.id !== postId));
+    await handleAddSideSpacePost(postId);
   }
 
   function handleNav(label: string, target: FacetView): void {
@@ -349,6 +377,30 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
                 )}
               </View>
               {sideSpaceError ? <Text style={styles.sideSpaceError}>{sideSpaceError}</Text> : null}
+              {/* R15.52: 推送 banner — 显示 server 推卸的 1-N 个 post, 点一下加进副空间 */}
+              {!previewObject.sideSpaceFulfilled && pushSuggestions.length > 0 ? (
+                <View style={styles.sideSpacePushBanner}>
+                  <View style={styles.sideSpacePushHeader}>
+                    <Text style={styles.sideSpacePushHeaderLabel}>✨ 为你推荐</Text>
+                    <Text style={styles.sideSpacePushHeaderHint}>AI 判断, 匹配缺口</Text>
+                  </View>
+                  {pushSuggestions.map((s) => (
+                    <View key={s.post.id} style={styles.sideSpacePushRow}>
+                      <View style={styles.sideSpacePushCopy}>
+                        <Text style={styles.sideSpacePushTitle}>{s.post.title}</Text>
+                        <Text style={styles.sideSpacePushReason}>{s.reason}</Text>
+                      </View>
+                      <Pressable
+                        onPress={() => { void handleAcceptPush(s.post.id); }}
+                        disabled={sideSpaceBusy}
+                        style={styles.sideSpacePushAccept}
+                      >
+                        <Text style={styles.sideSpacePushAcceptText}>采纳</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
               <Pressable
                 onPress={handleOpenAddSideSpace}
                 disabled={sideSpaceBusy}
@@ -697,6 +749,17 @@ const styles = StyleSheet.create({
   sideSpaceError: { color: "#dc2626", fontSize: 12, lineHeight: 18, marginTop: 8 },
   sideSpaceAddBtn: { marginTop: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: "#7c3aed", alignItems: "center" },
   sideSpaceAddBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
+  // R15.52 push banner styles
+  sideSpacePushBanner: { backgroundColor: "rgba(168, 85, 247, 0.08)", borderRadius: 10, padding: 10, marginTop: 10, borderWidth: 1, borderColor: "rgba(168, 85, 247, 0.25)" },
+  sideSpacePushHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  sideSpacePushHeaderLabel: { color: "#7c3aed", fontSize: 12, fontWeight: "700" },
+  sideSpacePushHeaderHint: { color: color.muted, fontSize: 10, lineHeight: 14 },
+  sideSpacePushRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(168, 85, 247, 0.15)" },
+  sideSpacePushCopy: { flex: 1, marginRight: 8 },
+  sideSpacePushTitle: { color: color.ink, fontSize: 12, fontWeight: "600" },
+  sideSpacePushReason: { color: color.muted, fontSize: 10, lineHeight: 14, marginTop: 1 },
+  sideSpacePushAccept: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6, backgroundColor: "#7c3aed" },
+  sideSpacePushAcceptText: { color: "#fff", fontSize: 11, fontWeight: "600" },
   // R15.43 Add 模态框
   sideSpaceModalRoot: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   sideSpaceModalSheet: { backgroundColor: color.appBg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 24, maxHeight: "80%" },
