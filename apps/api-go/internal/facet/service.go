@@ -42,6 +42,9 @@ type ObjectSignals struct {
 // ObjectSignals 动态生成。如果 signals 为零值（空 Object{}），
 // Service.List 走 fallback 路径返回 Phase 1 的 hardcode 字符串
 // —— 保留向后兼容，避免改动炸开所有现有 mock。
+//
+// R15.42 起加 SideSpaceGap + SideSpaceKind —— 只对合作方（CREATOR_COLLAB）
+// 关系有意义，其他关系恒为 ""。
 type Object struct {
 	ID                string        `json:"id"`
 	DisplayName       string        `json:"displayName"`
@@ -53,6 +56,8 @@ type Object struct {
 	AvatarURL         string        `json:"avatarUrl"`
 	RecommendedKind   string        `json:"recommendedKind"`
 	ReasoningConfidence int          `json:"reasoningConfidence"`
+	SideSpaceGap      string        `json:"sideSpaceGap"`
+	SideSpaceKind     string        `json:"sideSpaceKind"`
 	// Signals 是 server-internal，不写进 wire JSON。ReasoningEngine
 	// 在 Service.List 内部消费它。
 	Signals ObjectSignals `json:"-"`
@@ -167,6 +172,7 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 	// R15.41: 对每个对象调 ReasoningEngine，把 Signals 翻译成 Goal /
 	// CurrentState / Gap / RecommendedKind / Confidence。signals 为零
 	// 值的对象（fallback）保留 Phase 1 的 hardcode 字段。
+	// R15.42: 额外填 SideSpaceGap + SideSpaceKind（仅合作方有意义）。
 	reasoned := make([]Object, len(objects))
 	for i, obj := range objects {
 		if hasSignals(obj.Signals) {
@@ -176,6 +182,8 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 			objects[i].Gap = Gap{Summary: decision.GapSummary, NextShowAt: decision.NextShowAt}
 			objects[i].RecommendedKind = decision.RecommendedKind
 			objects[i].ReasoningConfidence = decision.Confidence
+			objects[i].SideSpaceGap = decision.SideSpaceGap
+			objects[i].SideSpaceKind = decision.SideSpaceKind
 		}
 		reasoned[i] = objects[i]
 	}

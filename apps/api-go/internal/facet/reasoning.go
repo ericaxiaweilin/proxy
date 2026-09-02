@@ -31,6 +31,20 @@ type ReasonedDecision struct {
 	RecommendedKind string
 	// Confidence：推理置信度 0-100
 	Confidence int
+	// SideSpaceGap：R15.42 起 — 副空间缺口描述。
+	//
+	// 双轨架构：
+	//   - 主空间 gap = GapSummary（"你需要发什么"）— UGC 维护
+	//   - 副空间 gap = SideSpaceGap（"副空间还缺什么"）— 促成交
+	//
+	// 适用于 CREATOR_COLLAB 关系（合作方）；其他关系为空字符串
+	// （非合作方不需要副空间）。
+	SideSpaceGap string
+	// SideSpaceKind：R15.42 起 — 副空间推荐内容类型
+	//
+	// 允许值同 RecommendedKind 集合（白名单复用）。
+	// CREATOR_COLLAB 默认 "portfolio/capability"；非合作方为空字符串。
+	SideSpaceKind string
 }
 
 // Reasoner 接口。
@@ -81,6 +95,8 @@ func (r *RuleReasoner) Reason(signals ObjectSignals, relation string) ReasonedDe
 			NextShowAt:      r.now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
 			RecommendedKind: "personal/real-life",
 			Confidence:      30,
+			SideSpaceGap:    "",
+			SideSpaceKind:   "",
 		}
 	}
 }
@@ -91,6 +107,8 @@ func (r *RuleReasoner) Reason(signals ObjectSignals, relation string) ReasonedDe
 //   - 7 天没聊 + 未回复 → 对方在观望，给"真实软肋"破冰
 //   - 高 ProfileViews + 久未互动 → 对方关注但沉默，给"近况"
 //   - 其他 → 默认真实日常
+//
+// 重点关系无副空间概念（SideSpaceGap = ""）。
 func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals) ReasonedDecision {
 	if s.DaysSinceLastChat >= 7 && s.UnrepliedMessageCount > 0 {
 		return ReasonedDecision{
@@ -100,6 +118,8 @@ func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals) ReasonedDecision {
 			NextShowAt:      r.now().Add(2 * time.Hour).UTC().Format(time.RFC3339),
 			RecommendedKind: "personal/honest",
 			Confidence:      88,
+			SideSpaceGap:    "",
+			SideSpaceKind:   "",
 		}
 	}
 	if s.ProfileViewsLast7d >= 3 {
@@ -110,6 +130,8 @@ func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals) ReasonedDecision {
 			NextShowAt:      r.now().Add(6 * time.Hour).UTC().Format(time.RFC3339),
 			RecommendedKind: "personal/real-life",
 			Confidence:      82,
+			SideSpaceGap:    "",
+			SideSpaceKind:   "",
 		}
 	}
 	return ReasonedDecision{
@@ -119,6 +141,8 @@ func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals) ReasonedDecision {
 		NextShowAt:      r.now().Add(12 * time.Hour).UTC().Format(time.RFC3339),
 		RecommendedKind: "personal/real-life",
 		Confidence:      65,
+		SideSpaceGap:    "",
+		SideSpaceKind:   "",
 	}
 }
 
@@ -128,6 +152,8 @@ func (r *RuleReasoner) reasonBuildingTrust(s ObjectSignals) ReasonedDecision {
 //   - 有 fresh asset + 短期互动 → 推 city/travel 激活
 //   - 有共同活动 → 推 shared-experience
 //   - 默认 photo（摄影是常见 shared interest）
+//
+// 朋友无副空间概念（SideSpaceGap = ""）。
 func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals) ReasonedDecision {
 	if s.FreshAssetCount > 0 && s.DaysSinceLastChat <= 3 {
 		return ReasonedDecision{
@@ -137,6 +163,8 @@ func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals) ReasonedDecision {
 			NextShowAt:      r.now().Add(3 * time.Hour).UTC().Format(time.RFC3339),
 			RecommendedKind: "city/travel",
 			Confidence:      85,
+			SideSpaceGap:    "",
+			SideSpaceKind:   "",
 		}
 	}
 	if s.MutualEventsCount > 0 {
@@ -147,6 +175,8 @@ func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals) ReasonedDecision {
 			NextShowAt:      r.now().Add(8 * time.Hour).UTC().Format(time.RFC3339),
 			RecommendedKind: "shared-experience",
 			Confidence:      80,
+			SideSpaceGap:    "",
+			SideSpaceKind:   "",
 		}
 	}
 	return ReasonedDecision{
@@ -156,6 +186,8 @@ func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals) ReasonedDecision {
 		NextShowAt:      r.now().Add(18 * time.Hour).UTC().Format(time.RFC3339),
 		RecommendedKind: "photo",
 		Confidence:      60,
+		SideSpaceGap:    "",
+		SideSpaceKind:   "",
 	}
 }
 
@@ -165,8 +197,15 @@ func (r *RuleReasoner) reasonSharedInterest(s ObjectSignals) ReasonedDecision {
 //   - 高合作意向（>=60）→ 推 portfolio / capability 推动合作成交
 //   - 中等意向 → 推 intro / services 建立初步信任
 //   - 低意向 → 推 personal/real-life 先建立关系
+//
+// R15.42 起，合作方额外输出 SideSpaceGap + SideSpaceKind（双轨）：
+//   - 高意向 + 已展示 5+ → 副空间需更多能力对比 / 客户案例
+//   - 中意向 + 已展示 < 5 → 副空间需服务介绍 / 过程近景
+//   - 低意向 → 副空间尚未启动，不需要运营
 func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals) ReasonedDecision {
 	if s.CollaborationIntent >= 60 {
+		// 副空间缺口：合作方在评估，需要 1-2 个能力对比图 / 客户案例
+		sideGap := fmt.Sprintf("副空间已有 %d 个作品，还缺 1 个能力对比 / 客户合作案例", s.ShownAssetCount)
 		return ReasonedDecision{
 			Goal:            "推动合作成交",
 			CurrentState:    fmt.Sprintf("合作意向 %d%% · 主页浏览 %d 次 · 关系 %d 天", s.CollaborationIntent, s.ProfileViewsLast7d, s.RelationshipDays),
@@ -174,9 +213,13 @@ func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals) ReasonedDecision {
 			NextShowAt:      r.now().Add(4 * time.Hour).UTC().Format(time.RFC3339),
 			RecommendedKind: "portfolio/capability",
 			Confidence:      90,
+			SideSpaceGap:    sideGap,
+			SideSpaceKind:   "portfolio/capability",
 		}
 	}
 	if s.CollaborationIntent >= 30 {
+		// 副空间缺口：还在初期，需要服务过程近景 / 真实环境
+		sideGap := fmt.Sprintf("副空间已有 %d 个作品，还缺 1 个服务过程 / 真实环境近景", s.ShownAssetCount)
 		return ReasonedDecision{
 			Goal:            "建立初步信任",
 			CurrentState:    fmt.Sprintf("合作意向 %d%% · 距上次聊天 %d 天", s.CollaborationIntent, s.DaysSinceLastChat),
@@ -184,8 +227,11 @@ func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals) ReasonedDecision {
 			NextShowAt:      r.now().Add(10 * time.Hour).UTC().Format(time.RFC3339),
 			RecommendedKind: "intro/services",
 			Confidence:      72,
+			SideSpaceGap:    sideGap,
+			SideSpaceKind:   "intro/services",
 		}
 	}
+	// 低意向：副空间还没起动，缺口为空（无需副空间运营）
 	return ReasonedDecision{
 		Goal:            "先建立关系",
 		CurrentState:    fmt.Sprintf("合作意向 %d%% · 关系早期", s.CollaborationIntent),
@@ -193,5 +239,7 @@ func (r *RuleReasoner) reasonCreatorCollab(s ObjectSignals) ReasonedDecision {
 		NextShowAt:      r.now().Add(20 * time.Hour).UTC().Format(time.RFC3339),
 		RecommendedKind: "personal/real-life",
 		Confidence:      55,
+		SideSpaceGap:    "",
+		SideSpaceKind:   "",
 	}
 }

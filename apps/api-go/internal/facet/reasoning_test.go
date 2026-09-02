@@ -240,3 +240,66 @@ func TestReasoner_Determinism(t *testing.T) {
 		t.Errorf("non-deterministic: %+v vs %+v", d1, d2)
 	}
 }
+
+// TestReasoner_SideSpace_HighIntent —— R15.42 副空间：合作方高意向
+func TestReasoner_SideSpace_HighIntent(t *testing.T) {
+	r := NewRuleReasoner(frozenTime)
+	d := r.Reason(ObjectSignals{
+		CollaborationIntent: 75, ProfileViewsLast7d: 5, RelationshipDays: 30,
+		ShownAssetCount: 8,
+	}, "CREATOR_COLLAB")
+	if d.SideSpaceGap == "" {
+		t.Error("high intent should produce sideSpaceGap")
+	}
+	if d.SideSpaceKind != "portfolio/capability" {
+		t.Errorf("high intent should recommend portfolio/capability, got %q", d.SideSpaceKind)
+	}
+	if !strings.Contains(d.SideSpaceGap, "8") {
+		t.Errorf("sideSpaceGap should mention ShownAssetCount=8, got %q", d.SideSpaceGap)
+	}
+}
+
+// TestReasoner_SideSpace_MidIntent —— R15.42 副空间：合作方中等意向
+func TestReasoner_SideSpace_MidIntent(t *testing.T) {
+	r := NewRuleReasoner(frozenTime)
+	d := r.Reason(ObjectSignals{
+		CollaborationIntent: 45, ShownAssetCount: 3,
+	}, "CREATOR_COLLAB")
+	if d.SideSpaceGap == "" {
+		t.Error("mid intent should produce sideSpaceGap")
+	}
+	if d.SideSpaceKind != "intro/services" {
+		t.Errorf("mid intent should recommend intro/services, got %q", d.SideSpaceKind)
+	}
+}
+
+// TestReasoner_SideSpace_LowIntent —— R15.42 副空间：合作方低意向不需副空间
+func TestReasoner_SideSpace_LowIntent(t *testing.T) {
+	r := NewRuleReasoner(frozenTime)
+	d := r.Reason(ObjectSignals{
+		CollaborationIntent: 15, RelationshipDays: 5,
+	}, "CREATOR_COLLAB")
+	if d.SideSpaceGap != "" {
+		t.Errorf("low intent should NOT produce sideSpaceGap, got %q", d.SideSpaceGap)
+	}
+	if d.SideSpaceKind != "" {
+		t.Errorf("low intent sideSpaceKind should be empty, got %q", d.SideSpaceKind)
+	}
+}
+
+// TestReasoner_SideSpace_NonCollabEmpty —— R15.42 副空间：非合作方恒空
+func TestReasoner_SideSpace_NonCollabEmpty(t *testing.T) {
+	r := NewRuleReasoner(frozenTime)
+	for _, relation := range []string{"BUILDING_TRUST", "SHARED_INTEREST"} {
+		d := r.Reason(ObjectSignals{
+			DaysSinceLastChat: 1, FreshAssetCount: 5, MutualEventsCount: 3,
+			ShownAssetCount: 20, RelationshipDays: 100, ProfileViewsLast7d: 10,
+		}, relation)
+		if d.SideSpaceGap != "" {
+			t.Errorf("[%s] non-collab should have empty sideSpaceGap, got %q", relation, d.SideSpaceGap)
+		}
+		if d.SideSpaceKind != "" {
+			t.Errorf("[%s] non-collab should have empty sideSpaceKind, got %q", relation, d.SideSpaceKind)
+		}
+	}
+}

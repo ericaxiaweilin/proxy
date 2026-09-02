@@ -31,7 +31,9 @@ const KEN = {
   gap: { summary: "真人互动", nextShowAt: "今晚 20:00" },
   avatarUrl: "",
   recommendedKind: "personal/real-life",
-  reasoningConfidence: 70
+  reasoningConfidence: 70,
+  sideSpaceGap: "",
+  sideSpaceKind: ""
 };
 
 const VALID_PAYLOAD = {

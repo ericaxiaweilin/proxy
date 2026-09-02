@@ -74,7 +74,10 @@ export const FacetObjectSchema = z.object({
   gap: FacetObjectGapSchema,
   avatarUrl: z.string(),
   recommendedKind: FacetRecommendedKindSchema,
-  reasoningConfidence: z.number().int().min(0).max(100)
+  reasoningConfidence: z.number().int().min(0).max(100),
+  // R15.42: 副空间双轨 — 仅 CREATOR_COLLAB 关系有意义，其他关系 = ""
+  sideSpaceGap: z.string(),
+  sideSpaceKind: FacetRecommendedKindSchema.or(z.literal(""))
 });
 export type FacetObject = z.infer<typeof FacetObjectSchema>;
 
