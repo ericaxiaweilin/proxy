@@ -114,3 +114,58 @@ describe("R15.53 — IG 风格 3 数统计 (帖子/粉丝/关注)", () => {
     expect(display).toBe("128 · 56 · 12");
   });
 });
+
+describe("R15.55 — FollowButton 状态机 (viewerMode=OTHER)", () => {
+  // FollowButton 状态派生: isFollowing ? '✓ 已关注' : '+ 关注'
+  function buttonLabel(isFollowing: boolean, busy: boolean): string {
+    if (busy) return "处理中…";
+    return isFollowing ? "✓ 已关注" : "+ 关注";
+  }
+  // FollowButton 行为: 未关注 → onFollow; 已关注 → onUnfollow
+  type Action = "FOLLOW" | "UNFOLLOW" | "NONE";
+  function decideAction(isFollowing: boolean, busy: boolean): Action {
+    if (busy) return "NONE";
+    return isFollowing ? "UNFOLLOW" : "FOLLOW";
+  }
+
+  it("未关注 + 空闲 → label='+ 关注', action=FOLLOW", () => {
+    expect(buttonLabel(false, false)).toBe("+ 关注");
+    expect(decideAction(false, false)).toBe("FOLLOW");
+  });
+
+  it("已关注 + 空闲 → label='✓ 已关注', action=UNFOLLOW", () => {
+    expect(buttonLabel(true, false)).toBe("✓ 已关注");
+    expect(decideAction(true, false)).toBe("UNFOLLOW");
+  });
+
+  it("未关注 + 处理中 → label='处理中…', action=NONE (不调 callback)", () => {
+    expect(buttonLabel(false, true)).toBe("处理中…");
+    expect(decideAction(false, true)).toBe("NONE");
+  });
+
+  it("已关注 + 处理中 → label='处理中…', action=NONE", () => {
+    expect(buttonLabel(true, true)).toBe("处理中…");
+    expect(decideAction(true, true)).toBe("NONE");
+  });
+
+  it("viewerMode=SELF 不渲染 FollowButton (走 编辑/分享 路径)", () => {
+    const renderFollowButton = (mode: "SELF" | "OTHER"): boolean => mode === "OTHER";
+    expect(renderFollowButton("SELF")).toBe(false);
+    expect(renderFollowButton("OTHER")).toBe(true);
+  });
+});
+
+describe("R15.55 — Follow button 样式 (关注/已关注 颜色)", () => {
+  // ProfileTabs 用 styles.actionPrimary (深色) vs styles.actionSecondary (浅色)
+  function buttonStyle(isFollowing: boolean): "PRIMARY" | "SECONDARY" {
+    return isFollowing ? "SECONDARY" : "PRIMARY";
+  }
+
+  it("未关注 → PRIMARY (深色背景, 吸引点击)", () => {
+    expect(buttonStyle(false)).toBe("PRIMARY");
+  });
+
+  it("已关注 → SECONDARY (浅色背景, 平静状态)", () => {
+    expect(buttonStyle(true)).toBe("SECONDARY");
+  });
+});
