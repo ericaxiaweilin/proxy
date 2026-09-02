@@ -447,7 +447,7 @@ const REQUESTER_ME: PersonaConfig = {
       title: "个人主页",
       hint: "你掌控展示方式",
       rows: [
-        { icon: "profile-ring", label: "个人主页", desc: "名片、关于我、能力、可用时间与对外展示", grad: true, route: "personalhub" },
+        { icon: "profile-ring", label: "预览公开主页", desc: "名片、关于我、能力、可用时间与对外展示", grad: true, route: "personalhub" },
         { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
         { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" }
       ]
