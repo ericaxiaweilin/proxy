@@ -334,6 +334,26 @@ func (s *Service) ListSideSpaceCatalog() []SideSpaceCatalogPost {
 	return out
 }
 
+// R15.52 — SideSpaceSuggestionsForAll 返所有 objects 的副空间推荐.
+// 给 mobile "推卸" (推卸 = 推送建议) 面板用, 避免 N+1.
+// 未满足的对象返空切片 (客户端跳过).
+func (s *Service) SideSpaceSuggestionsForAll(ctx context.Context, limit int) (map[string]SideSpaceSuggestions, error) {
+	objects, err := s.repository.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// 拉所有对象的副空间 (N+1 防住: 先批量拉, Phase 2 加 Repo.ListAll)
+	sideSpacesByObject := make(map[string][]SideSpacePost, len(objects))
+	for _, obj := range objects {
+		posts, err := s.sideSpaceRepo.List(ctx, obj.ID)
+		if err != nil {
+			return nil, err
+		}
+		sideSpacesByObject[obj.ID] = posts
+	}
+	return SuggestForAllObjects(objects, sideSpacesByObject, s.sideSpaceCatalog, limit), nil
+}
+
 // hasSignals 判空 —— 全 0 / 全空字符串视为没接数据源，触发 fallback。
 func hasSignals(s ObjectSignals) bool {
 	return s.DaysSinceLastChat != 0 || s.MutualEventsCount != 0 || s.UnrepliedMessageCount != 0 ||

@@ -19,6 +19,7 @@ import type {
   ListFacetObjectsPayload,
   ListSideSpaceCatalogPayload,
   ListSideSpacePostsPayload,
+  ListSideSpaceSuggestionsPayload,
   FacetSideSpacePost,
   FacetConfig,
   UpdateFacetConfigPayload
@@ -28,7 +29,8 @@ import {
   parseListSideSpacePostsPayload,
   parseListSideSpaceCatalogPayload,
   parseFacetSideSpacePost,
-  parseFacetConfig
+  parseFacetConfig,
+  parseListSideSpaceSuggestionsPayload
 } from "@proxy/contracts";
 import type { TransportResponse, TransportRequest } from "./auth-client";
 
@@ -179,5 +181,21 @@ export class FacetClient {
     }
     const raw = await response.json();
     return parseFacetConfig(raw);
+  }
+
+  /**
+   * R15.52 — 拉取 server 推送的副空间推荐.
+   * 返 { suggestions: { [objectId]: SideSpaceSuggestions } } — 未满足的对象 key 不存在
+   * 或 posts 为空 (UI 跳过).
+   * limit 默认 3 (server cap 10).
+   */
+  public async listSideSpaceSuggestions(limit: number = 3): Promise<ListSideSpaceSuggestionsPayload> {
+    const path = `/v1/facet/side-space/suggestions?limit=${limit}`;
+    const response = await this.input.requester.requestPublic(path, { method: "GET" });
+    if (response.status < 200 || response.status >= 300) {
+      throw new FacetProtocolError(`facet listSideSpaceSuggestions unexpected status: ${response.status}`);
+    }
+    const raw = await response.json();
+    return parseListSideSpaceSuggestionsPayload(raw);
   }
 }

@@ -248,3 +248,35 @@ export function parseFacetConfig(raw: unknown): FacetConfig {
 export function parseUpdateFacetConfigPayload(raw: unknown): UpdateFacetConfigPayload {
   return UpdateFacetConfigPayloadSchema.parse(raw);
 }
+
+// ---------- R15.52 SideSpaceSuggestions ----------
+
+// SuggestedSideSpacePost — R15.52 server 推送的副空间推荐.
+// 跟 SideSpaceCatalogPost 一致, 多 reason (推卸说明) + rank.
+export const SuggestedSideSpacePostSchema = z.object({
+  post: SideSpaceCatalogPostSchema,
+  reason: z.string().min(1),
+  rank: z.number().int().min(1)
+});
+export type SuggestedSideSpacePost = z.infer<typeof SuggestedSideSpacePostSchema>;
+
+// SideSpaceSuggestionsSchema — 单个对象的推荐组.
+export const SideSpaceSuggestionsSchema = z.object({
+  objectId: z.string().min(1),
+  sideSpaceKind: z.string(), // "" 表示不推荐
+  posts: z.array(SuggestedSideSpacePostSchema)
+});
+export type SideSpaceSuggestions = z.infer<typeof SideSpaceSuggestionsSchema>;
+
+// ListSideSpaceSuggestionsPayload — GET 返 { suggestions: { [id]: SideSpaceSuggestions } }.
+export const ListSideSpaceSuggestionsPayloadSchema = z.object({
+  suggestions: z.record(z.string(), SideSpaceSuggestionsSchema)
+});
+export type ListSideSpaceSuggestionsPayload = z.infer<typeof ListSideSpaceSuggestionsPayloadSchema>;
+
+/**
+ * Type guard: 校验 GET /v1/facet/side-space/suggestions 响应.
+ */
+export function parseListSideSpaceSuggestionsPayload(raw: unknown): ListSideSpaceSuggestionsPayload {
+  return ListSideSpaceSuggestionsPayloadSchema.parse(raw);
+}
