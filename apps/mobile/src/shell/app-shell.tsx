@@ -548,6 +548,8 @@ export function AppShell({
               mediaClient={media}
               socialSpace={socialSpace}
               secureSessionStore={secureSessionStore}
+              // R15.63: pin 菜单 — 需 viewerAccountId 区分自己/他人
+              viewerAccountId={viewerAccountId}
               onChromeVisibilityChange={setFeedChromeVisible}
               onOpenChat={setFeedChatAuthor}
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
