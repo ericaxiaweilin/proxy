@@ -11,6 +11,9 @@ import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEven
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import * as ImagePicker from "expo-image-picker";
+import { Directory, File, Paths } from "expo-file-system";
+import { createProfileStore, DEFAULT_PROFILE, type ProfileRecord } from "../profile-store";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { MerchantMeR21 } from "./merchant-me-r21";
@@ -38,6 +41,20 @@ import { FacetClient } from "../facet-client";
 import { sessionAuthClient, localApiBaseUrl } from "../native-clients";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
+
+// profileStore — SecureStore 持久化, “我的” 页 profile 编辑“完成”后真正写盘。
+// 跟随 SecureSessionStore / LastSignInStore 的模式: module-level 单例。
+const profileStore = createProfileStore(nativeSecureStorageDriver);
+
+// profile 头像存到 documentDirectory/proxy-profile/avatar.jpg。
+// 选完相册后, 原 file:// URI 复制到这里; 沙盒跨重启仍可读, app 重启后
+// profileStore 读出稳定路径, Image 用 { uri: path } 重新加载。
+const PROFILE_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
+function nextProfileAvatarFile(): File {
+  // A new URI also invalidates React Native/iOS image caches. Overwriting one
+  // fixed avatar.jpg can otherwise keep rendering the previous bitmap.
+  return new File(PROFILE_AVATAR_DIR, `avatar-${Date.now()}.jpg`);
+}
 
 type MeSubPage = { title: string; desc: string; icon: string; route: string } | undefined;
 type AvailabilityState = "AVAILABLE" | "BUSY" | "PAUSED" | "HIDDEN";
@@ -1348,7 +1365,7 @@ export function MeSurface({
   const [avDaySheet, setAvDaySheet] = useState<{ key: string; label: string }>();
   const [personalHubTab, setPersonalHubTab] = useState<PersonalHubTab>("FEED");
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
-  const [profileAvatarUri, setProfileAvatarUri] = useState<string>();
+  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
   const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
   const [profileMediaPositions, setProfileMediaPositions] = useState<Record<string, number>>({});
@@ -1359,11 +1376,32 @@ export function MeSurface({
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
   const [profileDraft, setProfileDraft] = useState({
-    name: "Huyen",
-    handle: "huyen.hanoi",
-    bio: "喜欢旅行、拍照和城市里的新鲜体验。",
-    city: "河内"
+    name: DEFAULT_PROFILE.name,
+    handle: DEFAULT_PROFILE.handle,
+    bio: DEFAULT_PROFILE.bio,
+    city: DEFAULT_PROFILE.city
   });
+  // mount 后异步从 profileStore 读 profile. 如果读到 avatarPath 且文件仍在,
+  // 覆盖 profileAvatarUri; profileDraft 也要覆盖才能让 "我的" 顶部展示真实名称。
+  // 仅在首次 mount 后读一次, 用户在 me tab 后续编辑不应被 store 重置。
+  const profileHydratedRef = useRef(false);
+  const profileTouchedRef = useRef(false);
+  useEffect(() => {
+    if (profileHydratedRef.current) return;
+    let cancelled = false;
+    void profileStore.read().then((record) => {
+      // Never let a late storage read replace an avatar/profile the user has
+      // just selected while this screen was mounting.
+      if (cancelled || profileTouchedRef.current || !record) return;
+      profileHydratedRef.current = true;
+      setProfileDraft({ name: record.name, handle: record.handle, bio: record.bio, city: record.city });
+      if (record.avatarPath) {
+        const file = new File(record.avatarPath);
+        if (file.exists) setProfileAvatarUri(file.uri);
+      }
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1485,7 +1523,68 @@ export function MeSurface({
       selectionLimit: 1
     });
     const selected = result.assets?.[0];
-    if (!result.canceled && selected?.uri) setProfileAvatarUri(selected.uri);
+    if (result.canceled || !selected?.uri) return;
+    // 复制原 file:// URI 到 documentDirectory/proxy-profile/avatar.jpg —
+    // 原 URI 跨 app 重启可能失效, 稳定路径才能让 profileStore 记住。
+    try {
+      PROFILE_AVATAR_DIR.create({ idempotent: true, intermediates: true });
+      const avatarFile = nextProfileAvatarFile();
+      await new File(selected.uri).copy(avatarFile, { overwrite: true });
+      profileTouchedRef.current = true;
+      profileHydratedRef.current = true;
+      setProfileAvatarUri(avatarFile.uri);
+      // Avatar selection is itself a committed action. Persist immediately so
+      // back navigation or switching modules cannot discard it.
+      await profileStore.write({
+        ...profileDraft,
+        avatarPath: avatarFile.uri,
+        updatedAt: new Date().toISOString()
+      });
+    } catch {
+      // Keep the picker result visible for this editing session. We do not
+      // claim it was saved when the durable copy/write failed.
+      setProfileAvatarUri(selected.uri);
+    }
+  }
+
+  async function saveProfile(): Promise<void> {
+    // 将当前 profileDraft + profileAvatarUri 写盘, 然后关掉编辑 Modal。
+    // 稳定目录内的头像直接保存；如果用户没动头像，则保留上次写入的路径。
+    let avatarPath: string | undefined;
+    if (profileAvatarUri?.startsWith(PROFILE_AVATAR_DIR.uri)) {
+      avatarPath = profileAvatarUri;
+    } else if (profileAvatarUri) {
+      // 异常路径: 上次复制失败, 此次以编辑会话内 URI 落盘为稳定路径。
+      try {
+        PROFILE_AVATAR_DIR.create({ idempotent: true, intermediates: true });
+        const avatarFile = nextProfileAvatarFile();
+        await new File(profileAvatarUri).copy(avatarFile, { overwrite: true });
+        avatarPath = avatarFile.uri;
+        setProfileAvatarUri(avatarFile.uri);
+      } catch {
+        avatarPath = undefined;
+      }
+    } else {
+      // 用户清空头像 / 未选: 保留上次路径 (读 store) 或 undefined。
+      const existing = await profileStore.read().catch(() => undefined);
+      avatarPath = existing?.avatarPath;
+    }
+    const record: ProfileRecord = {
+      name: profileDraft.name,
+      handle: profileDraft.handle,
+      bio: profileDraft.bio,
+      city: profileDraft.city,
+      avatarPath,
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      await profileStore.write(record);
+    } catch {
+      // 写入失败: 不关 Modal, 让用户重试。
+      return;
+    }
+    profileHydratedRef.current = true;
+    setProfileEditorOpen(false);
   }
 
   // 子页面渲染 — 架构层统一右滑退出（全量小模块）
@@ -2237,7 +2336,7 @@ export function MeSurface({
           <Modal animationType="slide" onRequestClose={() => setProfileEditorOpen(false)} transparent visible={profileEditorOpen}>
             <View style={styles.profileEditorOverlay}>
               <View style={styles.profileEditorSheet}>
-                <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => setProfileEditorOpen(false)}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
+                <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => void saveProfile()}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
                 <Pressable onPress={() => void chooseProfileAvatar()} style={styles.profileEditorAvatarRow}>
                   <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.profileEditorAvatar} />
                   <View><Text style={styles.profileEditorAvatarTitle}>更换头像</Text><Text style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
