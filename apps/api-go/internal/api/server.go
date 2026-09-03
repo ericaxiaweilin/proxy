@@ -145,6 +145,19 @@ func (s *Server) Handler() http.Handler {
 	// consent gate. The handler serves the v1.1 Vietnam 2026-08-31
 	// drafts embedded in the binary (see legal.go).
 	mux.HandleFunc("/v1/legal/", s.legalDoc)
+	// R16.10-P1-F: privacy request center (Vietnam PDP 91/2025/QH15
+	// Art. 31/32 + PRD v1.4 LC-15). GET /v1/privacy/me assembles a
+	// user data export on demand; POST /v1/privacy/export and POST
+	// /v1/privacy/delete submit new requests; POST /v1/privacy/cancel
+	// withdraws a delete request inside the 30-day grace window; GET
+	// /v1/privacy/status?requestId=... polls for status; GET
+	// /v1/privacy/requests returns the full history.
+	mux.HandleFunc("/v1/privacy/me", s.privacyMe)
+	mux.HandleFunc("/v1/privacy/export", s.privacyExportRequest)
+	mux.HandleFunc("/v1/privacy/delete", s.privacyDeleteRequest)
+	mux.HandleFunc("/v1/privacy/cancel", s.privacyCancelRequest)
+	mux.HandleFunc("/v1/privacy/status", s.privacyStatus)
+	mux.HandleFunc("/v1/privacy/requests", s.privacyList)
 	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.

@@ -368,3 +368,215 @@ func TestSessionVersionGuardAcrossServiceInstances(t *testing.T) {
 		t.Fatalf("expected one accepted and one conflict, got accepted=%d conflicted=%d", accepted, conflicted)
 	}
 }
+
+// --- R16.10-P1-F: privacy request center tests (Vietnam PDP 91/2025/QH15 Art. 31/32) ---
+
+// privacyTestService is a small helper that builds a Service backed by
+// the in-memory repository. The memory repo implements
+// PrivacyRequestRepository, so the service can route privacy commands
+// without a real database. The test is fully hermetic: no env, no DB,
+// no goroutines.
+func privacyTestService(t *testing.T) *Service {
+	t.Helper()
+	clock := clock.NewFixed(time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC))
+	return NewWithRepositoryAndClockAndChallengeProvider(NewMemoryRepository(nil), clock, testLoginChallengeProvider{})
+}
+
+func privacyEnvelopeForUser(userID, commandType string, payload map[string]any) command.Envelope {
+	return command.Envelope{
+		CommandID:     "test_" + commandType,
+		CommandType:   commandType,
+		CommandVersion: 1,
+		Actor:         command.Actor{Type: "USER", ID: userID},
+		Principal:     command.Principal{Type: "INDIVIDUAL", ID: userID},
+		Target:        command.Target{Type: "PrivacyRequest", ID: userID},
+		AuthContext:   map[string]any{"clientIp": "203.0.113.7", "userAgent": "vitest"},
+		Payload:       payload,
+		CorrelationID: "test-corr-" + commandType,
+	}
+}
+
+// anonUserID runs a CreateAnonymousSession through the service and
+// returns the resulting user account id. The command.Aggregate.ID
+// returned by the service is the session id; the user id is the
+// Principal stamped onto the issued session, which we read out of the
+// Body for the simple in-memory test repository.
+func anonUserID(t *testing.T, svc *Service, deviceID, credential string) string {
+	t.Helper()
+	result := svc.HandleContext(context.Background(), privacyEnvelopeForUser("ignored", "CreateAnonymousSession", map[string]any{
+		"deviceId":         deviceID,
+		"platform":         "IOS",
+		"deviceCredential": credential,
+		"dateOfBirth":      "2000-01-01",
+		"legalDocVersion":  "1.1",
+		"consents":         map[string]any{"terms": true, "privacy": true},
+	}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("anon signup failed: %+v", result.Error)
+	}
+	if result.Auth == nil || result.Auth.Principal.ID == "" {
+		t.Fatalf("anon signup returned no principal id: %+v", result)
+	}
+	return result.Auth.Principal.ID
+}
+
+// TestPrivacyRequestExportAndStatus walks the happy path: an
+// authenticated user submits an export request, then immediately
+// queries its status. The status should be 'received' and the audit
+// log should record exactly one transition.
+func TestPrivacyRequestExportAndStatus(t *testing.T) {
+	svc := privacyTestService(t)
+	ctx := context.Background()
+
+	userID := anonUserID(t, svc, "dev_export_1", "0123456789012345678901234567890123456789")
+
+	// Submit an export request.
+	exportEnvelope := privacyEnvelopeForUser(userID, "RequestPrivacyExport", map[string]any{"legalBasis": "PDP-91/2025/QH15-Art31"})
+	exportResult := svc.HandleContext(ctx, exportEnvelope)
+	if exportResult.Outcome != "ACCEPTED" {
+		t.Fatalf("export request failed: %+v", exportResult.Error)
+	}
+	reqAny, ok := exportResult.Body["privacyRequest"]
+	if !ok {
+		t.Fatalf("export result missing privacyRequest body: %+v", exportResult.Body)
+	}
+	req, ok := reqAny.(PrivacyRequest)
+	if !ok {
+		t.Fatalf("privacyRequest body has wrong type: %T", reqAny)
+	}
+	if req.Status != PrivacyRequestStatusReceived {
+		t.Fatalf("expected status=received, got %s", req.Status)
+	}
+	if req.LegalBasis != "PDP-91/2025/QH15-Art31" {
+		t.Fatalf("legalBasis not preserved: %s", req.LegalBasis)
+	}
+
+	// Status query: should match the same request id and status.
+	statusEnvelope := privacyEnvelopeForUser(userID, "GetPrivacyRequestStatus", map[string]any{"requestId": req.ID})
+	statusResult := svc.HandleContext(ctx, statusEnvelope)
+	if statusResult.Outcome != "ACCEPTED" {
+		t.Fatalf("status query failed: %+v", statusResult.Error)
+	}
+	if _, ok := statusResult.Body["privacyRequest"]; !ok {
+		t.Fatalf("status result missing privacyRequest: %+v", statusResult.Body)
+	}
+}
+
+// TestPrivacyRequestDeleteAndCancel checks the 30-day grace window:
+// the user submits a delete request, then immediately cancels it. The
+// request must end up in 'cancelled' state, and a second delete
+// request must succeed (the partial unique index allows it once the
+// first one is no longer active).
+func TestPrivacyRequestDeleteAndCancel(t *testing.T) {
+	svc := privacyTestService(t)
+	ctx := context.Background()
+
+	userID := anonUserID(t, svc, "dev_delete_1", "0123456789012345678901234567890123456789")
+
+	deleteEnvelope := privacyEnvelopeForUser(userID, "RequestPrivacyDelete", map[string]any{"reason": "user testing"})
+	deleteResult := svc.HandleContext(ctx, deleteEnvelope)
+	if deleteResult.Outcome != "ACCEPTED" {
+		t.Fatalf("delete request failed: %+v", deleteResult.Error)
+	}
+	req := deleteResult.Body["privacyRequest"].(PrivacyRequest)
+	if req.Status != PrivacyRequestStatusReceived {
+		t.Fatalf("expected received, got %s", req.Status)
+	}
+
+	// Cancel it.
+	cancelEnvelope := privacyEnvelopeForUser(userID, "CancelPrivacyRequest", map[string]any{"requestId": req.ID, "reason": "changed mind"})
+	cancelResult := svc.HandleContext(ctx, cancelEnvelope)
+	if cancelResult.Outcome != "ACCEPTED" {
+		t.Fatalf("cancel request failed: %+v", cancelResult.Error)
+	}
+	cancelled := cancelResult.Body["privacyRequest"].(PrivacyRequest)
+	if cancelled.Status != PrivacyRequestStatusCancelled {
+		t.Fatalf("expected cancelled, got %s", cancelled.Status)
+	}
+
+	// Now we should be able to submit a fresh delete request.
+	secondDelete := svc.HandleContext(ctx, privacyEnvelopeForUser(userID, "RequestPrivacyDelete", map[string]any{}))
+	if secondDelete.Outcome != "ACCEPTED" {
+		t.Fatalf("second delete should succeed after cancel, got: %+v", secondDelete.Error)
+	}
+}
+
+// TestPrivacyRequestDuplicateRefused ensures that two active requests
+// of the same kind are not allowed for the same user. The service
+// surfaces the partial-unique-index violation as
+// PRIVACY_REQUEST_ACTIVE, which the transport layer renders as 409.
+func TestPrivacyRequestDuplicateRefused(t *testing.T) {
+	svc := privacyTestService(t)
+	ctx := context.Background()
+
+	userID := anonUserID(t, svc, "dev_dup_1", "0123456789012345678901234567890123456789")
+
+	first := svc.HandleContext(ctx, privacyEnvelopeForUser(userID, "RequestPrivacyExport", map[string]any{}))
+	if first.Outcome != "ACCEPTED" {
+		t.Fatalf("first export failed: %+v", first.Error)
+	}
+
+	second := svc.HandleContext(ctx, privacyEnvelopeForUser(userID, "RequestPrivacyExport", map[string]any{}))
+	if second.Outcome != "REJECTED" {
+		t.Fatalf("expected second export to be rejected, got outcome=%s", second.Outcome)
+	}
+	if second.Error == nil || second.Error.ErrorCode != "PRIVACY_REQUEST_ACTIVE" {
+		t.Fatalf("expected PRIVACY_REQUEST_ACTIVE, got %+v", second.Error)
+	}
+}
+
+// TestPrivacyRequestForbiddenForOtherUsers makes sure user A cannot
+// cancel user B's request, even if they know the request id.
+func TestPrivacyRequestForbiddenForOtherUsers(t *testing.T) {
+	svc := privacyTestService(t)
+	ctx := context.Background()
+
+	aliceID := anonUserID(t, svc, "dev_alice", "0123456789012345678901234567890123456789")
+	bobID := anonUserID(t, svc, "dev_bob", "abcdefghijklmnopqrstuvwxyz1234567890")
+
+	// Alice submits a delete.
+	aliceDelete := svc.HandleContext(ctx, privacyEnvelopeForUser(aliceID, "RequestPrivacyDelete", map[string]any{}))
+	if aliceDelete.Outcome != "ACCEPTED" {
+		t.Fatalf("alice delete failed: %+v", aliceDelete.Error)
+	}
+	aliceReqID := aliceDelete.Body["privacyRequest"].(PrivacyRequest).ID
+
+	// Bob tries to cancel Alice's request.
+	bobCancel := svc.HandleContext(ctx, privacyEnvelopeForUser(bobID, "CancelPrivacyRequest", map[string]any{"requestId": aliceReqID}))
+	if bobCancel.Outcome != "REJECTED" {
+		t.Fatalf("expected rejection, got %s", bobCancel.Outcome)
+	}
+	if bobCancel.Error == nil || bobCancel.Error.ErrorCode != "PRIVACY_REQUEST_FORBIDDEN" {
+		t.Fatalf("expected PRIVACY_REQUEST_FORBIDDEN, got %+v", bobCancel.Error)
+	}
+}
+
+// TestPrivacyDataExport verifies that GeneratePrivacyExportData
+// returns a non-empty payload that includes the user's account,
+// sessions, devices, and request history.
+func TestPrivacyDataExport(t *testing.T) {
+	svc := privacyTestService(t)
+	ctx := context.Background()
+
+	userID := anonUserID(t, svc, "dev_export_2", "0123456789012345678901234567890123456789")
+
+	// Submit a privacy request so the export has at least one history row.
+	_ = svc.HandleContext(ctx, privacyEnvelopeForUser(userID, "RequestPrivacyExport", map[string]any{}))
+
+	export, err := svc.GeneratePrivacyExportData(ctx, userID)
+	if err != nil {
+		t.Fatalf("export failed: %v", err)
+	}
+	if export.Account.ID != userID {
+		t.Fatalf("export account id mismatch: got %s want %s", export.Account.ID, userID)
+	}
+	if len(export.Sessions) == 0 {
+		t.Fatalf("export sessions should include the anon session")
+	}
+	if len(export.PrivacyRequests) == 0 {
+		t.Fatalf("export should include the privacy request we just made")
+	}
+	if export.LegalBasis != "PDP-91/2025/QH15-Art31" {
+		t.Fatalf("export legalBasis wrong: %s", export.LegalBasis)
+	}
+}

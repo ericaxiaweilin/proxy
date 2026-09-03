@@ -97,7 +97,8 @@ describe("Proxy Design System R3 typography", () => {
   // - 1px 边框 actions (R2 .actions button border 1px + 圆角 10)
   it("keeps Threads R2 personal profile header layout", () => {
     const mePath = join(sourceRoot, "surfaces", "me.tsx");
-    const source = readFileSync(mePath, "utf8");
+    const stylesPath = join(sourceRoot, "surfaces", "me-styles.ts");
+    const source = readFileSync(mePath, "utf8") + "\n" + readFileSync(stylesPath, "utf8");
     // personalHead: 1fr 86px 等价 = flexDirection row + gap + 86px ava wrap
     expect(source).toMatch(/personalHead:\s*\{[\s\S]*?flexDirection:\s*"row"[\s\S]*?gap:\s*16/);
     // ava 86px 区域

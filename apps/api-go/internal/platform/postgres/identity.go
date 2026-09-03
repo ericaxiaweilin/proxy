@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -831,6 +832,238 @@ func (r *IdentityRepository) RecordLegalConsent(ctx context.Context, userID, doc
 	return err
 }
 
+// ListLegalConsents returns the consent rows the user has on file, in
+// reverse chronological order. Used by GeneratePrivacyExportData to
+// include the consent history in the data export payload (PRD v1.4
+// LC-15 — the export must include the legal texts the user accepted
+// and the timestamps of acceptance).
+func (r *IdentityRepository) ListLegalConsents(ctx context.Context, userID string) ([]identity.LegalConsentSnapshot, error) {
+	q := queryerForContext(ctx, r.pool)
+	rows, err := q.Query(ctx, `
+		SELECT doc_kind, doc_version, accepted_at, required
+		FROM privacy.legal_consent_records
+		WHERE user_id = $1
+		ORDER BY accepted_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]identity.LegalConsentSnapshot, 0)
+	for rows.Next() {
+		var snap identity.LegalConsentSnapshot
+		var kind string
+		if err := rows.Scan(&kind, &snap.DocVersion, &snap.AcceptedAt, &snap.Required); err != nil {
+			return nil, err
+		}
+		snap.DocKind = kind
+		out = append(out, snap)
+	}
+	return out, rows.Err()
+}
+
+// --- R16.10-P1-F: privacy request center persistence ---
+
+// CreatePrivacyRequest inserts a new privacy request. The service
+// layer is expected to have already checked that no active request of
+// the same (user, kind) exists; the partial unique index
+// uq_privacy_requests_user_kind_active is the database-level safety net
+// for the rare race where two requests are submitted in parallel.
+func (r *IdentityRepository) CreatePrivacyRequest(ctx context.Context, req identity.PrivacyRequest) error {
+	q := queryerForContext(ctx, r.pool)
+	_, err := q.Exec(ctx, `
+		INSERT INTO privacy.privacy_requests (
+			id, user_id, kind, status, requested_at, completed_at, erased_at,
+			export_snapshot_url, export_sha256, export_retention_until,
+			legal_basis, client_ip, user_agent, rejection_reason
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULLIF($12, '')::inet, NULLIF($13, ''), NULLIF($14, '')
+		)
+	`,
+		req.ID, req.UserID, string(req.Kind), string(req.Status), req.RequestedAt,
+		derefTime(req.CompletedAt), derefTime(req.ErasedAt),
+		req.ExportSnapshotURL, req.ExportSHA256, derefTime(req.ExportRetentionUntil),
+		req.LegalBasis, req.ClientIP, req.UserAgent, req.RejectionReason,
+	)
+	if err != nil {
+		// Map the partial unique violation to ErrPrivacyRequestActive
+		// so the service layer can return the same error code as the
+		// in-memory repository.
+		if strings.Contains(err.Error(), "uq_privacy_requests_user_kind_active") {
+			return identity.ErrPrivacyRequestActive
+		}
+		return err
+	}
+	return nil
+}
+
+// GetActivePrivacyRequest returns the user's currently active request
+// of the given kind, or ErrPrivacyRequestNotFound.
+func (r *IdentityRepository) GetActivePrivacyRequest(ctx context.Context, userID string, kind identity.PrivacyRequestKind) (identity.PrivacyRequest, error) {
+	q := queryerForContext(ctx, r.pool)
+	row := q.QueryRow(ctx, `
+		SELECT id, user_id, kind, status, requested_at, completed_at, erased_at,
+			export_snapshot_url, export_sha256, export_retention_until,
+			legal_basis, COALESCE(host(client_ip), ''), COALESCE(user_agent, ''), COALESCE(rejection_reason, ''),
+			1
+		FROM privacy.privacy_requests
+		WHERE user_id = $1 AND kind = $2 AND status IN ('received','in_progress')
+		ORDER BY requested_at DESC
+		LIMIT 1
+	`, userID, string(kind))
+	return scanPrivacyRequest(row)
+}
+
+// GetPrivacyRequest fetches a request by id.
+func (r *IdentityRepository) GetPrivacyRequest(ctx context.Context, id string) (identity.PrivacyRequest, error) {
+	q := queryerForContext(ctx, r.pool)
+	row := q.QueryRow(ctx, `
+		SELECT id, user_id, kind, status, requested_at, completed_at, erased_at,
+			export_snapshot_url, export_sha256, export_retention_until,
+			legal_basis, COALESCE(host(client_ip), ''), COALESCE(user_agent, ''), COALESCE(rejection_reason, ''),
+			1
+		FROM privacy.privacy_requests
+		WHERE id = $1
+	`, id)
+	return scanPrivacyRequest(row)
+}
+
+// ListPrivacyRequestsByUser returns every request the user has
+// submitted, newest first.
+func (r *IdentityRepository) ListPrivacyRequestsByUser(ctx context.Context, userID string) ([]identity.PrivacyRequest, error) {
+	q := queryerForContext(ctx, r.pool)
+	rows, err := q.Query(ctx, `
+		SELECT id, user_id, kind, status, requested_at, completed_at, erased_at,
+			export_snapshot_url, export_sha256, export_retention_until,
+			legal_basis, COALESCE(host(client_ip), ''), COALESCE(user_agent, ''), COALESCE(rejection_reason, ''),
+			1
+		FROM privacy.privacy_requests
+		WHERE user_id = $1
+		ORDER BY requested_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]identity.PrivacyRequest, 0)
+	for rows.Next() {
+		req, err := scanPrivacyRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, req)
+	}
+	return out, rows.Err()
+}
+
+// UpdatePrivacyRequest applies a status transition with optimistic
+// concurrency. The version column is the source of truth; if a
+// concurrent writer beat us, the WHERE clause matches no rows and we
+// return ErrSessionVersionConflict (the same error the in-memory
+// repository uses, so the service layer can stay neutral).
+func (r *IdentityRepository) UpdatePrivacyRequest(ctx context.Context, req identity.PrivacyRequest, expectedVersion int) error {
+	q := queryerForContext(ctx, r.pool)
+	tag, err := q.Exec(ctx, `
+		UPDATE privacy.privacy_requests
+		SET status = $2,
+			completed_at = $3,
+			erased_at = $4,
+			export_snapshot_url = NULLIF($5, ''),
+			export_sha256 = NULLIF($6, ''),
+			export_retention_until = $7,
+			rejection_reason = NULLIF($8, '')
+		WHERE id = $1 AND status IN ('received','in_progress')
+	`, req.ID, string(req.Status),
+		derefTime(req.CompletedAt), derefTime(req.ErasedAt),
+		req.ExportSnapshotURL, req.ExportSHA256, derefTime(req.ExportRetentionUntil),
+		req.RejectionReason,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		// Either the row is gone or the previous transition already
+		// happened. We map both to ErrSessionVersionConflict so the
+		// service layer retries-or-rejects consistently with the
+		// in-memory repository.
+		return identity.ErrSessionVersionConflict
+	}
+	return nil
+}
+
+// AppendPrivacyRequestEvent records a status transition in the audit
+// log. The privacy center never deletes from this log; the schema's
+// ON DELETE CASCADE only fires if a parent row is hard-deleted, which
+// the service layer never does.
+func (r *IdentityRepository) AppendPrivacyRequestEvent(ctx context.Context, evt identity.PrivacyRequestEvent) error {
+	q := queryerForContext(ctx, r.pool)
+	_, err := q.Exec(ctx, `
+		INSERT INTO privacy.privacy_request_events
+			(request_id, from_status, to_status, occurred_at, actor, notes)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, NULLIF($6, ''))
+	`, evt.RequestID, evt.FromStatus, evt.ToStatus, evt.OccurredAt, evt.Actor, evt.Notes)
+	return err
+}
+
+// scanPrivacyRequest reads a single privacy_requests row from either a
+// QueryRow or a Rows iterator. The two surfaces accept the same Scan
+// signature, so the same scan helper works for both.
+func scanPrivacyRequest(scanner interface {
+	Scan(dest ...any) error
+}) (identity.PrivacyRequest, error) {
+	var (
+		req            identity.PrivacyRequest
+		kind           string
+		status         string
+		completedAt    *time.Time
+		erasedAt       *time.Time
+		snapshotURL    *string
+		snapshotSHA    *string
+		retentionUntil *time.Time
+		clientIP       string
+		userAgent      string
+		rejection      string
+		version        int
+	)
+	if err := scanner.Scan(
+		&req.ID, &req.UserID, &kind, &status, &req.RequestedAt,
+		&completedAt, &erasedAt, &snapshotURL, &snapshotSHA, &retentionUntil,
+		&req.LegalBasis, &clientIP, &userAgent, &rejection, &version,
+	); err != nil {
+		if err.Error() == "no rows in result set" {
+			return identity.PrivacyRequest{}, identity.ErrPrivacyRequestNotFound
+		}
+		return identity.PrivacyRequest{}, err
+	}
+	req.Kind = identity.PrivacyRequestKind(kind)
+	req.Status = identity.PrivacyRequestStatus(status)
+	req.CompletedAt = completedAt
+	req.ErasedAt = erasedAt
+	if snapshotURL != nil {
+		req.ExportSnapshotURL = *snapshotURL
+	}
+	if snapshotSHA != nil {
+		req.ExportSHA256 = *snapshotSHA
+	}
+	req.ExportRetentionUntil = retentionUntil
+	req.ClientIP = clientIP
+	req.UserAgent = userAgent
+	req.RejectionReason = rejection
+	req.Version = version
+	return req, nil
+}
+
+// nullableTime and nullableString convert Go values to the nullable
+// shapes pgx expects. They are tiny helpers rather than a generic
+// library because the privacy surface only ever needs these two.
+func derefTime(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return *t
+}
+
 var _ identity.Repository = (*IdentityRepository)(nil)
+var _ identity.PrivacyRequestRepository = (*IdentityRepository)(nil)
 var _ identity.TransactionalRepository = (*IdentityRepository)(nil)
 var _ identity.TokenRepository = (*IdentityRepository)(nil)

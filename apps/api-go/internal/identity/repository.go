@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
@@ -16,7 +17,90 @@ var (
 	ErrDeviceNotFound         = errors.New("device registration not found")
 	ErrSessionNotFound        = errors.New("session not found")
 	ErrSessionVersionConflict = errors.New("session version conflict")
+	// ErrPrivacyRequestNotFound is returned by PrivacyRequestRepository
+	// lookups when the request id is unknown. Service-layer code turns
+	// this into a 404 for the privacy center endpoints.
+	ErrPrivacyRequestNotFound = errors.New("privacy request not found")
+	// ErrPrivacyRequestActive is returned when a user tries to submit a
+	// new request of the same kind while a previous one is still
+	// 'received' or 'in_progress'. The user must wait, cancel, or reject
+	// the active request before submitting a new one.
+	ErrPrivacyRequestActive = errors.New("an active privacy request of this kind already exists")
 )
+
+// PrivacyRequestKind enumerates the two request categories supported by
+// the privacy request center. 'export' is the data subject access right
+// (PDP 91/2025/QH15 Art. 31). 'delete' is the erasure right (Art. 32).
+// Adding a new kind requires a migration to widen the CHECK constraint
+// and a new endpoint — neither is on the current roadmap.
+type PrivacyRequestKind string
+
+const (
+	PrivacyRequestKindExport PrivacyRequestKind = "export"
+	PrivacyRequestKindDelete PrivacyRequestKind = "delete"
+)
+
+// PrivacyRequestStatus is the lifecycle state. The semantics are
+// documented in migrations/060_privacy_requests.sql; transitions are
+// validated by the service layer, not by the database.
+type PrivacyRequestStatus string
+
+const (
+	PrivacyRequestStatusReceived    PrivacyRequestStatus = "received"
+	PrivacyRequestStatusInProgress  PrivacyRequestStatus = "in_progress"
+	PrivacyRequestStatusCompleted   PrivacyRequestStatus = "completed"
+	PrivacyRequestStatusRejected    PrivacyRequestStatus = "rejected"
+	PrivacyRequestStatusCancelled   PrivacyRequestStatus = "cancelled"
+)
+
+// PrivacyRequest is the on-the-wire record of a single user-driven
+// privacy request. The struct is intentionally small: the export payload
+// itself is large, lives in object storage, and is referenced by
+// ExportSnapshotURL. Keep the public surface area here aligned with
+// migrations/060_privacy_requests.sql.
+type PrivacyRequest struct {
+	ID                    string                `json:"id"`
+	UserID                string                `json:"userId"`
+	Kind                  PrivacyRequestKind    `json:"kind"`
+	Status                PrivacyRequestStatus  `json:"status"`
+	RequestedAt           time.Time             `json:"requestedAt"`
+	CompletedAt           *time.Time            `json:"completedAt,omitempty"`
+	ErasedAt              *time.Time            `json:"erasedAt,omitempty"`
+	ExportSnapshotURL     string                `json:"exportSnapshotUrl,omitempty"`
+	ExportSHA256          string                `json:"exportSha256,omitempty"`
+	ExportRetentionUntil  *time.Time            `json:"exportRetentionUntil,omitempty"`
+	LegalBasis            string                `json:"legalBasis"`
+	ClientIP              string                `json:"clientIp,omitempty"`
+	UserAgent             string                `json:"userAgent,omitempty"`
+	RejectionReason       string                `json:"rejectionReason,omitempty"`
+	Version               int                   `json:"version"`
+}
+
+// PrivacyRequestEvent is an append-only audit log entry. The privacy
+// request center writes one row per status transition so that auditors
+// can reconstruct the timeline without trusting the parent row.
+type PrivacyRequestEvent struct {
+	ID          int64     `json:"id"`
+	RequestID   string    `json:"requestId"`
+	FromStatus  string    `json:"fromStatus,omitempty"`
+	ToStatus    string    `json:"toStatus"`
+	OccurredAt  time.Time `json:"occuredAt"`
+	Actor       string    `json:"actor"`
+	Notes       string    `json:"notes,omitempty"`
+}
+
+// PrivacyRequestRepository is the persistence boundary for privacy
+// requests. Methods are split from the main Repository interface so
+// that future schemas (e.g. a separate privacy warehouse) can swap
+// implementations without touching the identity aggregates.
+type PrivacyRequestRepository interface {
+	CreatePrivacyRequest(ctx context.Context, req PrivacyRequest) error
+	GetActivePrivacyRequest(ctx context.Context, userID string, kind PrivacyRequestKind) (PrivacyRequest, error)
+	GetPrivacyRequest(ctx context.Context, id string) (PrivacyRequest, error)
+	ListPrivacyRequestsByUser(ctx context.Context, userID string) ([]PrivacyRequest, error)
+	UpdatePrivacyRequest(ctx context.Context, req PrivacyRequest, expectedVersion int) error
+	AppendPrivacyRequestEvent(ctx context.Context, evt PrivacyRequestEvent) error
+}
 
 // Repository is the canonical persistence boundary for Identity aggregates.
 // Session updates must enforce expectedVersion atomically.
@@ -60,15 +144,18 @@ type TransactionalRepository interface {
 }
 
 type MemoryRepository struct {
-	mu              sync.Mutex
-	users           map[string]UserAccount
-	loginIdentities map[string]LoginIdentity
-	devices         map[string]DeviceRegistration
-	memberships     []Membership
-	sessions        map[string]Session
-	events          []event.DomainEvent
-	tokens          map[string]SessionToken
-	challenges      map[string]LoginChallenge
+	mu                sync.Mutex
+	users             map[string]UserAccount
+	loginIdentities   map[string]LoginIdentity
+	devices           map[string]DeviceRegistration
+	memberships       []Membership
+	sessions          map[string]Session
+	events            []event.DomainEvent
+	tokens            map[string]SessionToken
+	challenges        map[string]LoginChallenge
+	privacyRequests   map[string]PrivacyRequest
+	privacyEvents     []PrivacyRequestEvent
+	privacyEventSeq   int64
 }
 
 func NewMemoryRepository(seed *Seed) *MemoryRepository {
@@ -80,6 +167,7 @@ func NewMemoryRepository(seed *Seed) *MemoryRepository {
 		sessions:        make(map[string]Session),
 		tokens:          make(map[string]SessionToken),
 		challenges:      make(map[string]LoginChallenge),
+		privacyRequests: make(map[string]PrivacyRequest),
 	}
 	if seed != nil {
 		repository.users[seed.User.ID] = seed.User
@@ -526,3 +614,120 @@ func revokeAllSessionsLocked(sessions map[string]Session, userID string) []Sessi
 
 var _ TransactionalRepository = (*MemoryRepository)(nil)
 var _ TokenRepository = (*MemoryRepository)(nil)
+
+// CreatePrivacyRequest records a new privacy request. The service
+// layer must check for an active request of the same (user, kind) before
+// calling this method; the memory implementation refuses to do that
+// lookup itself because the service is responsible for surfacing the
+// appropriate error code (LE-15 contract: "an active request already
+// exists, wait or cancel it first").
+func (r *MemoryRepository) CreatePrivacyRequest(_ context.Context, req PrivacyRequest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.privacyRequests[req.ID]; exists {
+		return errors.New("privacy request already exists")
+	}
+	for _, existing := range r.privacyRequests {
+		if existing.UserID == req.UserID && existing.Kind == req.Kind &&
+			(existing.Status == PrivacyRequestStatusReceived || existing.Status == PrivacyRequestStatusInProgress) {
+			return ErrPrivacyRequestActive
+		}
+	}
+	r.privacyRequests[req.ID] = req
+	return nil
+}
+
+// GetActivePrivacyRequest returns the user's currently active (received
+// or in_progress) request of the given kind, or ErrPrivacyRequestNotFound
+// if there is none.
+func (r *MemoryRepository) GetActivePrivacyRequest(_ context.Context, userID string, kind PrivacyRequestKind) (PrivacyRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.privacyRequests {
+		if existing.UserID == userID && existing.Kind == kind &&
+			(existing.Status == PrivacyRequestStatusReceived || existing.Status == PrivacyRequestStatusInProgress) {
+			return existing, nil
+		}
+	}
+	return PrivacyRequest{}, ErrPrivacyRequestNotFound
+}
+
+// GetPrivacyRequest fetches a request by id without filtering on status
+// or user. The transport layer is responsible for ensuring the caller
+// owns the request before exposing the result.
+func (r *MemoryRepository) GetPrivacyRequest(_ context.Context, id string) (PrivacyRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	req, exists := r.privacyRequests[id]
+	if !exists {
+		return PrivacyRequest{}, ErrPrivacyRequestNotFound
+	}
+	return req, nil
+}
+
+// ListPrivacyRequestsByUser returns every privacy request the user has
+// ever submitted, newest first. The privacy center surface uses this
+// to render the history panel.
+func (r *MemoryRepository) ListPrivacyRequestsByUser(_ context.Context, userID string) ([]PrivacyRequest, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]PrivacyRequest, 0)
+	for _, req := range r.privacyRequests {
+		if req.UserID == userID {
+			result = append(result, req)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].RequestedAt.After(result[j].RequestedAt) })
+	return result, nil
+}
+
+// UpdatePrivacyRequest applies a status transition. The service layer
+// must bump the version and pass the previous version as
+// expectedVersion; the memory implementation refuses to clobber a
+// concurrent update.
+func (r *MemoryRepository) UpdatePrivacyRequest(_ context.Context, req PrivacyRequest, expectedVersion int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, exists := r.privacyRequests[req.ID]
+	if !exists {
+		return ErrPrivacyRequestNotFound
+	}
+	if current.Version != expectedVersion {
+		return ErrSessionVersionConflict
+	}
+	r.privacyRequests[req.ID] = req
+	return nil
+}
+
+// AppendPrivacyRequestEvent records a status transition in the audit
+// log. The privacy center never deletes from this log; the schema's
+// ON DELETE CASCADE on privacy_request_events only fires if a parent
+// row is hard-deleted, which the service layer never does.
+func (r *MemoryRepository) AppendPrivacyRequestEvent(_ context.Context, evt PrivacyRequestEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.privacyEventSeq++
+	evt.ID = r.privacyEventSeq
+	r.privacyEvents = append(r.privacyEvents, evt)
+	return nil
+}
+
+// ListLegalConsents returns the legal-consent rows the user has
+// recorded, for inclusion in a PrivacyDataExport payload. The in-memory
+// repository is consulted by the service's type-assertion in
+// GeneratePrivacyExportData; the postgres repository implements its own
+// version. We deliberately keep the method separate from the main
+// Repository interface so older deployments that predate migration 059
+// still compile.
+func (r *MemoryRepository) ListLegalConsents(_ context.Context, userID string) ([]LegalConsentSnapshot, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// The in-memory repository does not currently persist consent rows
+	// (those go straight to postgres via the typed recorder). We return
+	// an empty slice rather than synthesise data, because the export
+	// payload is allowed to omit the consents field for users who
+	// consented on a different deployment than the one being queried.
+	return []LegalConsentSnapshot{}, nil
+}
+
+var _ PrivacyRequestRepository = (*MemoryRepository)(nil)

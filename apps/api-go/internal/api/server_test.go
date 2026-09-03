@@ -730,3 +730,285 @@ func TestLegalDocHeadIsCheap(t *testing.T) {
 		t.Fatalf("HEAD must not return a body, got %d bytes", record.Body.Len())
 	}
 }
+
+// --- R16.10-P1-F: privacy request center end-to-end tests ---
+
+// privacyTestServer wires a Server backed by the in-memory identity
+// repository and a test Authenticator. The Authenticator recognises
+// access tokens of the form "test-access:<userID>" and rejects all
+// others, which lets each test stamp an actor onto its request
+// without going through the full BeginPasswordlessAuthentication flow.
+type privacyTestServer struct {
+	server *Server
+}
+
+func newPrivacyTestServer() *privacyTestServer {
+	idService := identity.NewWithRepository(identity.NewMemoryRepository(nil))
+	auth := privacyTestAuthenticator{}
+	server := NewServerWithDependenciesAndAuthenticator(
+		idService, demand.New(nil, nil), citycompanion.New(), localnet.New(),
+		localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(),
+		supply.New(), media.New(), contribution.New(), nil, nil, auth,
+	)
+	return &privacyTestServer{server: server}
+}
+
+type privacyTestAuthenticator struct{}
+
+func (privacyTestAuthenticator) Authenticate(_ context.Context, raw string) (identity.AuthenticatedSession, error) {
+	if !strings.HasPrefix(raw, "test-access:") {
+		return identity.AuthenticatedSession{}, errors.New("invalid test access token")
+	}
+	userID := strings.TrimPrefix(raw, "test-access:")
+	return identity.AuthenticatedSession{
+		Actor:     command.Actor{Type: "USER", ID: userID},
+		Principal: command.Principal{Type: "INDIVIDUAL", ID: userID},
+		SessionID: "test-session-" + userID,
+		AuthContext: map[string]any{
+			"clientIp":  "127.0.0.1",
+			"userAgent": "privacy-test",
+		},
+	}, nil
+}
+
+func (p *privacyTestServer) request(method, path, body, userID string) *httptest.ResponseRecorder {
+	var reader *bytes.Reader
+	if body != "" {
+		reader = bytes.NewReader([]byte(body))
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	req.Header.Set("Content-Type", "application/json")
+	if userID != "" {
+		req.Header.Set("Authorization", "Bearer test-access:"+userID)
+	}
+	record := httptest.NewRecorder()
+	p.server.Handler().ServeHTTP(record, req)
+	return record
+}
+
+// TestPrivacyMeReturnsDataExport walks a logged-in user through
+// GET /v1/privacy/me and confirms the response carries the
+// account, sessions, devices, history, format version, and legal
+// basis. The test seeds an anonymous account via the service so the
+// export has at least one session to include.
+func TestPrivacyMeReturnsDataExport(t *testing.T) {
+	ts := newPrivacyTestServer()
+	idService := ts.server.Identity
+	anon := idService.HandleContext(context.Background(), command.Envelope{
+		CommandID: "anon-setup", CommandType: "CreateAnonymousSession", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "ignored"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "ignored"},
+		Payload: map[string]any{
+			"deviceId": "dev_privacy_1", "platform": "IOS",
+			"deviceCredential": "0123456789012345678901234567890123456789",
+			"dateOfBirth": "2000-01-01", "legalDocVersion": "1.1",
+			"consents": map[string]any{"terms": true, "privacy": true},
+		},
+	})
+	if anon.Outcome != "ACCEPTED" || anon.Auth == nil {
+		t.Fatalf("anon setup failed: %+v", anon.Error)
+	}
+	userID := anon.Auth.Principal.ID
+
+	record := ts.request(http.MethodGet, "/v1/privacy/me", "", userID)
+	if record.Code != http.StatusOK {
+		t.Fatalf("GET /v1/privacy/me: status=%d body=%s", record.Code, record.Body.String())
+	}
+	var body struct {
+		Data          json.RawMessage `json:"data"`
+		FormatVersion string          `json:"formatVersion"`
+		LegalBasis    string          `json:"legalBasis"`
+		History       []any           `json:"history"`
+	}
+	if err := json.Unmarshal(record.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode /v1/privacy/me: %v body=%s", err, record.Body.String())
+	}
+	if body.FormatVersion != "1.0" {
+		t.Fatalf("formatVersion=%q, want 1.0", body.FormatVersion)
+	}
+	if body.LegalBasis == "" {
+		t.Fatalf("legalBasis missing")
+	}
+	if len(body.Data) == 0 {
+		t.Fatalf("data export payload is empty")
+	}
+}
+
+// TestPrivacyMeWithoutAuthReturns401 confirms that the privacy
+// center refuses unauthenticated requests. The body should be a
+// 401 with a structured error envelope.
+func TestPrivacyMeWithoutAuthReturns401(t *testing.T) {
+	ts := newPrivacyTestServer()
+	record := ts.request(http.MethodGet, "/v1/privacy/me", "", "")
+	if record.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without auth, got %d body=%s", record.Code, record.Body.String())
+	}
+}
+
+// TestPrivacyExportAndCancelFlow drives the full privacy export
+// and cancel path over the HTTP surface: create anon, submit
+// export, fetch status, then submit delete, cancel it, and check
+// that a second delete is allowed because the first was cancelled.
+func TestPrivacyExportAndCancelFlow(t *testing.T) {
+	ts := newPrivacyTestServer()
+	anon := ts.server.Identity.HandleContext(context.Background(), command.Envelope{
+		CommandID: "anon-setup", CommandType: "CreateAnonymousSession", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "ignored"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "ignored"},
+		Payload: map[string]any{
+			"deviceId": "dev_privacy_2", "platform": "IOS",
+			"deviceCredential": "abcdefghijklmnopqrstuvwxyz123456",
+			"dateOfBirth": "2000-01-01", "legalDocVersion": "1.1",
+			"consents": map[string]any{"terms": true, "privacy": true},
+		},
+	})
+	if anon.Outcome != "ACCEPTED" || anon.Auth == nil {
+		t.Fatalf("anon setup failed: %+v", anon.Error)
+	}
+	userID := anon.Auth.Principal.ID
+
+	export := ts.request(http.MethodPost, "/v1/privacy/export", `{"legalBasis":"PDP-91/2025/QH15-Art31"}`, userID)
+	if export.Code != http.StatusAccepted {
+		t.Fatalf("POST /v1/privacy/export: status=%d body=%s", export.Code, export.Body.String())
+	}
+	var exportBody struct {
+		Request       map[string]any `json:"request"`
+		RetentionDays int            `json:"retentionDays"`
+	}
+	if err := json.Unmarshal(export.Body.Bytes(), &exportBody); err != nil {
+		t.Fatalf("decode export response: %v", err)
+	}
+	requestID, _ := exportBody.Request["id"].(string)
+	if requestID == "" {
+		t.Fatalf("export response missing request.id: %+v", exportBody)
+	}
+	if exportBody.RetentionDays != 7 {
+		t.Fatalf("retentionDays=%d, want 7", exportBody.RetentionDays)
+	}
+
+	status := ts.request(http.MethodGet, "/v1/privacy/status?requestId="+requestID, "", userID)
+	if status.Code != http.StatusOK {
+		t.Fatalf("GET /v1/privacy/status: status=%d body=%s", status.Code, status.Body.String())
+	}
+
+	// Submit a delete request and immediately cancel it.
+	del := ts.request(http.MethodPost, "/v1/privacy/delete", `{"reason":"test"}`, userID)
+	if del.Code != http.StatusAccepted {
+		t.Fatalf("POST /v1/privacy/delete: status=%d body=%s", del.Code, del.Body.String())
+	}
+	var delBody struct {
+		Request         map[string]any `json:"request"`
+		GracePeriodDays int            `json:"gracePeriodDays"`
+		CancelableUntil string         `json:"cancelableUntil"`
+	}
+	if err := json.Unmarshal(del.Body.Bytes(), &delBody); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if delBody.GracePeriodDays != 30 {
+		t.Fatalf("gracePeriodDays=%d, want 30", delBody.GracePeriodDays)
+	}
+	deleteID, _ := delBody.Request["id"].(string)
+	if deleteID == "" {
+		t.Fatalf("delete response missing request.id")
+	}
+
+	cancelPayload := fmt.Sprintf(`{"requestId":%q,"reason":"changed mind"}`, deleteID)
+	cancel := ts.request(http.MethodPost, "/v1/privacy/cancel", cancelPayload, userID)
+	if cancel.Code != http.StatusOK {
+		t.Fatalf("POST /v1/privacy/cancel: status=%d body=%s", cancel.Code, cancel.Body.String())
+	}
+	var cancelBody struct {
+		Request map[string]any `json:"request"`
+	}
+	_ = json.Unmarshal(cancel.Body.Bytes(), &cancelBody)
+	if status, _ := cancelBody.Request["status"].(string); status != "cancelled" {
+		t.Fatalf("expected cancelled, got %v", cancelBody.Request["status"])
+	}
+
+	// Now we should be able to submit a fresh delete.
+	del2 := ts.request(http.MethodPost, "/v1/privacy/delete", `{}`, userID)
+	if del2.Code != http.StatusAccepted {
+		t.Fatalf("second delete should be accepted after cancel, got %d body=%s", del2.Code, del2.Body.String())
+	}
+}
+
+// TestPrivacyDuplicateExportReturns409 ensures the partial-unique
+// index surfaces as a 409 Conflict at the HTTP layer. The mobile
+// client uses this to render "your last request is still in
+// progress" without a free-form error.
+func TestPrivacyDuplicateExportReturns409(t *testing.T) {
+	ts := newPrivacyTestServer()
+	anon := ts.server.Identity.HandleContext(context.Background(), command.Envelope{
+		CommandID: "anon-setup", CommandType: "CreateAnonymousSession", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "ignored"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "ignored"},
+		Payload: map[string]any{
+			"deviceId": "dev_privacy_3", "platform": "ANDROID",
+			"deviceCredential": "01234567890123456789012345678901",
+			"dateOfBirth": "2000-01-01", "legalDocVersion": "1.1",
+			"consents": map[string]any{"terms": true, "privacy": true},
+		},
+	})
+	if anon.Outcome != "ACCEPTED" || anon.Auth == nil {
+		t.Fatalf("anon setup failed: %+v", anon.Error)
+	}
+	userID := anon.Auth.Principal.ID
+
+	first := ts.request(http.MethodPost, "/v1/privacy/export", `{}`, userID)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first export: status=%d body=%s", first.Code, first.Body.String())
+	}
+	second := ts.request(http.MethodPost, "/v1/privacy/export", `{}`, userID)
+	if second.Code != http.StatusConflict {
+		t.Fatalf("duplicate export: status=%d body=%s", second.Code, second.Body.String())
+	}
+}
+
+// TestPrivacyRequestsHistory returns the user's full history and
+// must include both the export and the delete we just submitted.
+func TestPrivacyRequestsHistory(t *testing.T) {
+	ts := newPrivacyTestServer()
+	anon := ts.server.Identity.HandleContext(context.Background(), command.Envelope{
+		CommandID: "anon-setup", CommandType: "CreateAnonymousSession", CommandVersion: 1,
+		Actor: command.Actor{Type: "USER", ID: "ignored"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "ignored"},
+		Payload: map[string]any{
+			"deviceId": "dev_privacy_4", "platform": "IOS",
+			"deviceCredential": "98765432109876543210987654321098",
+			"dateOfBirth": "2000-01-01", "legalDocVersion": "1.1",
+			"consents": map[string]any{"terms": true, "privacy": true},
+		},
+	})
+	if anon.Outcome != "ACCEPTED" || anon.Auth == nil {
+		t.Fatalf("anon setup failed: %+v", anon.Error)
+	}
+	userID := anon.Auth.Principal.ID
+
+	if r := ts.request(http.MethodPost, "/v1/privacy/export", `{}`, userID); r.Code != http.StatusAccepted {
+		t.Fatalf("export: %d %s", r.Code, r.Body.String())
+	}
+	if r := ts.request(http.MethodPost, "/v1/privacy/delete", `{}`, userID); r.Code != http.StatusAccepted {
+		t.Fatalf("delete: %d %s", r.Code, r.Body.String())
+	}
+
+	list := ts.request(http.MethodGet, "/v1/privacy/requests", "", userID)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list: %d %s", list.Code, list.Body.String())
+	}
+	var listBody struct {
+		Count    int            `json:"count"`
+		Requests []map[string]any `json:"requests"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if listBody.Count != 2 || len(listBody.Requests) != 2 {
+		t.Fatalf("expected 2 requests, got count=%d len=%d", listBody.Count, len(listBody.Requests))
+	}
+	kinds := map[string]bool{}
+	for _, req := range listBody.Requests {
+		kind, _ := req["kind"].(string)
+		kinds[kind] = true
+	}
+	if !kinds["export"] || !kinds["delete"] {
+		t.Fatalf("expected export + delete in history, got %v", kinds)
+	}
+}

@@ -61,6 +61,13 @@ type Result struct {
 	OperationRef  string         `json:"operationRef,omitempty"`
 	Auth          *AuthTokens    `json:"auth,omitempty"`
 	Error         *ErrorEnvelope `json:"error,omitempty"`
+	// Body carries command-specific response data that is not modelled
+	// by Aggregate (the write side) or Error (the reject side). It is
+	// intentionally `any` because the privacy request center, the
+	// data export endpoint, and any future handler may each want a
+	// different shape; the transport layer writes Body verbatim into
+	// the HTTP response when present.
+	Body          map[string]any `json:"body,omitempty"`
 	CorrelationID string         `json:"correlationId"`
 }
 
@@ -128,4 +135,31 @@ func Pending(envelope Envelope, operationRef, code, category, messageKey string,
 			CorrelationID: envelope.CorrelationID,
 		},
 	}
+}
+
+// AuthContextIP returns the client IP that the transport layer stashed
+// on the envelope during authentication. The transport is expected to
+// populate this via the X-Forwarded-For / CF-Connecting-IP / RemoteAddr
+// resolution in middleware.go; if it didn't, the empty string falls
+// through to a NULL column.
+func (e Envelope) AuthContextIP() string {
+	if e.AuthContext == nil {
+		return ""
+	}
+	if v, ok := e.AuthContext["clientIp"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// AuthContextUA returns the user-agent string the transport layer
+// captured at authentication time. Same fallback rules as AuthContextIP.
+func (e Envelope) AuthContextUA() string {
+	if e.AuthContext == nil {
+		return ""
+	}
+	if v, ok := e.AuthContext["userAgent"].(string); ok {
+		return v
+	}
+	return ""
 }

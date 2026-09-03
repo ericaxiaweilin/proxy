@@ -116,7 +116,8 @@ func (s *Service) Repository() Repository {
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
-		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity":
+		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
+		"RequestPrivacyExport", "RequestPrivacyDelete", "CancelPrivacyRequest", "GetPrivacyRequestStatus", "ListPrivacyRequests":
 		return true
 	default:
 		return false
@@ -164,6 +165,20 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.listDisplayIdentities(ctx, envelope)
 	case "BurnDisplayIdentity":
 		return s.burnDisplayIdentity(ctx, envelope)
+	case "RequestPrivacyExport":
+		return s.requestPrivacyExport(ctx, envelope)
+	case "RequestPrivacyDelete":
+		return s.requestPrivacyDelete(ctx, envelope)
+	case "CancelPrivacyRequest":
+		return s.cancelPrivacyRequest(ctx, envelope)
+	case "GetPrivacyRequestStatus":
+		// The route is GET /v1/privacy/status?requestId=...; the
+		// request id is in the payload, the user id is the actor.
+		// We delegate to a small wrapper that takes the id from the
+		// envelope payload.
+		return s.getPrivacyRequestStatus(ctx, envelope, firstString(envelope.Payload, "requestId"))
+	case "ListPrivacyRequests":
+		return s.listPrivacyRequests(ctx, envelope)
 	default:
 		return command.Rejected(envelope, "IDENTITY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "identity.unsupported_command", nil)
 	}
@@ -1186,4 +1201,385 @@ func normalizeLoginIdentifier(channel, value string) string {
 		return identifier
 	}
 	return ""
+}
+
+// firstString returns the value of payload[key] if it is a non-empty
+// string, otherwise "". Privacy request handlers stash small string
+// fields in the payload (requestId, reason, legalBasis) rather than
+// a typed struct, so this helper keeps the service code readable.
+func firstString(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	if v, ok := payload[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// --- R16.10-P1-F: privacy request center (Vietnam PDP 91/2025/QH15 Art. 31/32) ---
+
+// PrivacyDeleteGracePeriod is the number of days between a delete
+// request and the actual hard-wipe of personal data. Vietnam PDP
+// Art. 32 gives the controller up to 30 days to action erasure; the
+// R16.7 plan §6 P1-F chose 30 days to match the law. Within this
+// window the user can cancel the request.
+const PrivacyDeleteGracePeriod = 30 * 24 * time.Hour
+
+// PrivacyExportRetention is how long the export snapshot URL stays
+// downloadable. After this window the platform purges the snapshot
+// (it is the user's responsibility to download it within the window).
+const PrivacyExportRetention = 7 * 24 * time.Hour
+
+// PrivacyDataExport is the shape of the data the platform returns when
+// the user invokes their access right. The shape is deliberately
+// conservative: account identity, legal consents, device list, and
+// session history. Chat messages, feed posts, and engagement events
+// are intentionally not included in this initial R16.10 surface —
+// they live behind their own services and will be added as a follow-up
+// (P1-F follow-up per R16.7 plan §6).
+type PrivacyDataExport struct {
+	Account       UserAccount                     `json:"account"`
+	Consents      []LegalConsentSnapshot          `json:"consents"`
+	Devices       []DeviceRegistration            `json:"devices"`
+	Sessions      []Session                       `json:"sessions"`
+	PrivacyRequests []PrivacyRequest              `json:"privacyRequests"`
+	GeneratedAt   time.Time                       `json:"generatedAt"`
+	LegalBasis    string                          `json:"legalBasis"`
+	FormatVersion string                          `json:"formatVersion"`
+}
+
+// LegalConsentSnapshot is a trimmed view of the legal_consent_records
+// row that is safe to include in a user-facing data export. The raw
+// row carries ip / user_agent which the export should not echo back
+// to the user verbatim; the snapshot keeps only the consent metadata
+// the user themselves chose.
+type LegalConsentSnapshot struct {
+	DocKind    string    `json:"docKind"`
+	DocVersion string    `json:"docVersion"`
+	AcceptedAt time.Time `json:"acceptedAt"`
+	Required   bool      `json:"required"`
+}
+
+// requestPrivacyAccessPayload is the body the client sends to
+// POST /v1/privacy/export. The service then writes a received row
+// and (in a follow-up background job) transitions it to in_progress,
+// then completed with the snapshot URL.
+type requestPrivacyExportPayload struct {
+	LegalBasis string `json:"legalBasis"`
+}
+
+type requestPrivacyDeletePayload struct {
+	LegalBasis string `json:"legalBasis"`
+	Reason     string `json:"reason"`
+}
+
+type cancelPrivacyRequestPayload struct {
+	RequestID string `json:"requestId"`
+	Reason    string `json:"reason"`
+}
+
+// privacyPrivacyRequestActor extracts the audit 'actor' string from the
+// envelope. The transport layer is expected to populate AuthContext
+// with clientIp and userAgent (see command_dispatch.go); the actor
+// string is the user account id for user-driven requests.
+func privacyRequestActor(e command.Envelope) string {
+	if e.Actor.Type == "USER" && e.Actor.ID != "" {
+		return "user:" + e.Actor.ID
+	}
+	if e.Actor.Type == "SYSTEM" {
+		return "system"
+	}
+	return "unknown"
+}
+
+// requestPrivacyExport creates a received 'export' request. The
+// service is the single point of validation: it refuses if the user
+// already has an active export request, refuses if the user cannot be
+// authenticated, and writes the audit event in the same logical
+// step. Export generation itself is a background job; the request
+// status moves to in_progress / completed via the operator API.
+func (s *Service) requestPrivacyExport(ctx context.Context, e command.Envelope) command.Result {
+	var p requestPrivacyExportPayload
+	_ = decode(e.Payload, &p)
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PRIVACY_REQUEST_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.privacy_request_forbidden", nil)
+	}
+	if s.privacyRepo() == nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_UNAVAILABLE", "INTERNAL", "AFTER_USER_ACTION", "identity.privacy_request_unavailable", nil)
+	}
+	legalBasis := strings.TrimSpace(p.LegalBasis)
+	if legalBasis == "" {
+		legalBasis = "PDP-91/2025/QH15-Art31"
+	}
+	now := s.clock.Now().UTC()
+	req := PrivacyRequest{
+		ID:          newID("preq_"),
+		UserID:      e.Actor.ID,
+		Kind:        PrivacyRequestKindExport,
+		Status:      PrivacyRequestStatusReceived,
+		RequestedAt: now,
+		LegalBasis:  legalBasis,
+		ClientIP:    e.AuthContextIP(),
+		UserAgent:   e.AuthContextUA(),
+		Version:     1,
+	}
+	if err := s.privacyRepo().CreatePrivacyRequest(ctx, req); err != nil {
+		if errors.Is(err, ErrPrivacyRequestActive) {
+			return command.Rejected(e, "PRIVACY_REQUEST_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.privacy_request_active", nil)
+		}
+		return command.Rejected(e, "PRIVACY_REQUEST_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.privacy_request_write_failed", nil)
+	}
+	if err := s.privacyRepo().AppendPrivacyRequestEvent(ctx, PrivacyRequestEvent{
+		RequestID:  req.ID,
+		FromStatus: "",
+		ToStatus:   string(PrivacyRequestStatusReceived),
+		OccurredAt: now,
+		Actor:      privacyRequestActor(e),
+		Notes:      "user-initiated export request",
+	}); err != nil {
+		log.Printf("privacy request event write failed request=%s err=%v", req.ID, err)
+	}
+	result := command.Accepted(e, "PrivacyRequest", req.ID, req.Version, string(req.Status), nil)
+	result.Body = map[string]any{
+		"privacyRequest": req,
+		"status":         string(req.Status),
+		"retentionDays":  int(PrivacyExportRetention / (24 * time.Hour)),
+	}
+	return result
+}
+
+// requestPrivacyDelete creates a received 'delete' request. Same
+// validation surface as the export path. The service does NOT
+// immediately hard-delete any data; the 30-day grace window is run
+// by a background job that flips the status to in_progress at
+// requested_at + 24h, then to completed at requested_at + 30d.
+func (s *Service) requestPrivacyDelete(ctx context.Context, e command.Envelope) command.Result {
+	var p requestPrivacyDeletePayload
+	_ = decode(e.Payload, &p)
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PRIVACY_REQUEST_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.privacy_request_forbidden", nil)
+	}
+	if s.privacyRepo() == nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_UNAVAILABLE", "INTERNAL", "AFTER_USER_ACTION", "identity.privacy_request_unavailable", nil)
+	}
+	legalBasis := strings.TrimSpace(p.LegalBasis)
+	if legalBasis == "" {
+		legalBasis = "PDP-91/2025/QH15-Art32"
+	}
+	now := s.clock.Now().UTC()
+	req := PrivacyRequest{
+		ID:          newID("preq_"),
+		UserID:      e.Actor.ID,
+		Kind:        PrivacyRequestKindDelete,
+		Status:      PrivacyRequestStatusReceived,
+		RequestedAt: now,
+		LegalBasis:  legalBasis,
+		ClientIP:    e.AuthContextIP(),
+		UserAgent:   e.AuthContextUA(),
+		Version:     1,
+	}
+	if err := s.privacyRepo().CreatePrivacyRequest(ctx, req); err != nil {
+		if errors.Is(err, ErrPrivacyRequestActive) {
+			return command.Rejected(e, "PRIVACY_REQUEST_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.privacy_request_active", nil)
+		}
+		return command.Rejected(e, "PRIVACY_REQUEST_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.privacy_request_write_failed", nil)
+	}
+	notes := "user-initiated delete request"
+	if p.Reason != "" {
+		notes = "user-initiated delete request: " + p.Reason
+	}
+	if err := s.privacyRepo().AppendPrivacyRequestEvent(ctx, PrivacyRequestEvent{
+		RequestID:  req.ID,
+		FromStatus: "",
+		ToStatus:   string(PrivacyRequestStatusReceived),
+		OccurredAt: now,
+		Actor:      privacyRequestActor(e),
+		Notes:      notes,
+	}); err != nil {
+		log.Printf("privacy request event write failed request=%s err=%v", req.ID, err)
+	}
+	completedAt := now.Add(PrivacyDeleteGracePeriod)
+	erasedAt := completedAt
+	result := command.Accepted(e, "PrivacyRequest", req.ID, req.Version, string(req.Status), nil)
+	result.Body = map[string]any{
+		"privacyRequest": req,
+		"status":         string(req.Status),
+		"gracePeriodDays": int(PrivacyDeleteGracePeriod / (24 * time.Hour)),
+		"erasedAt":       erasedAt,
+		"cancelableUntil": completedAt,
+	}
+	return result
+}
+
+// cancelPrivacyRequest transitions a received or in_progress delete
+// request to cancelled. The user can only cancel their OWN request,
+// and only while the grace period is still open.
+func (s *Service) cancelPrivacyRequest(ctx context.Context, e command.Envelope) command.Result {
+	var p cancelPrivacyRequestPayload
+	_ = decode(e.Payload, &p)
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PRIVACY_REQUEST_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.privacy_request_forbidden", nil)
+	}
+	if s.privacyRepo() == nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_UNAVAILABLE", "INTERNAL", "AFTER_USER_ACTION", "identity.privacy_request_unavailable", nil)
+	}
+	if p.RequestID == "" {
+		return command.Rejected(e, "INVALID_PRIVACY_REQUEST_CANCEL", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_privacy_request_cancel", nil)
+	}
+	req, err := s.privacyRepo().GetPrivacyRequest(ctx, p.RequestID)
+	if err != nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_NOT_FOUND", "NOT_FOUND", "AFTER_USER_ACTION", "identity.privacy_request_not_found", nil)
+	}
+	if req.UserID != e.Actor.ID {
+		return command.Rejected(e, "PRIVACY_REQUEST_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.privacy_request_forbidden", nil)
+	}
+	if req.Status != PrivacyRequestStatusReceived && req.Status != PrivacyRequestStatusInProgress {
+		return command.Rejected(e, "PRIVACY_REQUEST_NOT_CANCELLABLE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.privacy_request_not_cancellable", nil)
+	}
+	now := s.clock.Now().UTC()
+	previousStatus := req.Status
+	req.Status = PrivacyRequestStatusCancelled
+	req.CompletedAt = &now
+	req.Version++
+	if err := s.privacyRepo().UpdatePrivacyRequest(ctx, req, req.Version-1); err != nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.privacy_request_write_failed", nil)
+	}
+	if err := s.privacyRepo().AppendPrivacyRequestEvent(ctx, PrivacyRequestEvent{
+		RequestID:  req.ID,
+		FromStatus: string(previousStatus),
+		ToStatus:   string(PrivacyRequestStatusCancelled),
+		OccurredAt: now,
+		Actor:      privacyRequestActor(e),
+		Notes:      p.Reason,
+	}); err != nil {
+		log.Printf("privacy request event write failed request=%s err=%v", req.ID, err)
+	}
+	result := command.Accepted(e, "PrivacyRequest", req.ID, req.Version, string(req.Status), nil)
+	result.Body = map[string]any{
+		"privacyRequest": req,
+		"status":         string(req.Status),
+	}
+	return result
+}
+
+// getPrivacyRequestStatus returns the current status of a request the
+// user owns. Used by the mobile client to poll for completion.
+func (s *Service) getPrivacyRequestStatus(ctx context.Context, e command.Envelope, requestID string) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PRIVACY_REQUEST_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.privacy_request_forbidden", nil)
+	}
+	if s.privacyRepo() == nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_UNAVAILABLE", "INTERNAL", "AFTER_USER_ACTION", "identity.privacy_request_unavailable", nil)
+	}
+	if requestID == "" {
+		return command.Rejected(e, "INVALID_PRIVACY_REQUEST_GET", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_privacy_request_get", nil)
+	}
+	req, err := s.privacyRepo().GetPrivacyRequest(ctx, requestID)
+	if err != nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_NOT_FOUND", "NOT_FOUND", "AFTER_USER_ACTION", "identity.privacy_request_not_found", nil)
+	}
+	if req.UserID != e.Actor.ID {
+		return command.Rejected(e, "PRIVACY_REQUEST_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.privacy_request_forbidden", nil)
+	}
+	result := command.Accepted(e, "PrivacyRequest", req.ID, req.Version, string(req.Status), nil)
+	result.Body = map[string]any{
+		"privacyRequest": req,
+		"status":         string(req.Status),
+	}
+	return result
+}
+
+// listPrivacyRequests returns the user's full request history,
+// newest first.
+func (s *Service) listPrivacyRequests(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PRIVACY_REQUEST_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.privacy_request_forbidden", nil)
+	}
+	if s.privacyRepo() == nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_UNAVAILABLE", "INTERNAL", "AFTER_USER_ACTION", "identity.privacy_request_unavailable", nil)
+	}
+	rows, err := s.privacyRepo().ListPrivacyRequestsByUser(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "PRIVACY_REQUEST_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.privacy_request_read_failed", nil)
+	}
+	result := command.Accepted(e, "PrivacyRequest", e.Actor.ID, 1, "LISTED", nil)
+	result.Body = map[string]any{
+		"privacyRequests": rows,
+		"count":           len(rows),
+	}
+	return result
+}
+
+// generatePrivacyExportData assembles the PrivacyDataExport payload.
+// This is the synchronous counterpart of an 'export' request; in
+// production the same code runs in the background job that flips
+// the status to completed.
+func (s *Service) GeneratePrivacyExportData(ctx context.Context, userID string) (PrivacyDataExport, error) {
+	if s.repository == nil {
+		return PrivacyDataExport{}, errors.New("identity repository not configured")
+	}
+	user, err := s.repository.GetUser(ctx, userID)
+	if err != nil {
+		return PrivacyDataExport{}, err
+	}
+	now := s.clock.Now().UTC()
+	export := PrivacyDataExport{
+		Account:       user,
+		Consents:      []LegalConsentSnapshot{},
+		Devices:       []DeviceRegistration{},
+		Sessions:      []Session{},
+		PrivacyRequests: []PrivacyRequest{},
+		GeneratedAt:   now,
+		LegalBasis:    "PDP-91/2025/QH15-Art31",
+		FormatVersion: "1.0",
+	}
+	// Walk the same repository surface that /v1/identity/me uses so the
+	// export stays in sync with what the user sees in-app. We deliberately
+	// do not call into other services (engagement, demand, etc.) here —
+	// the cross-service export is a follow-up.
+	sessions, _ := s.repository.ListSessionsByUser(ctx, userID)
+	export.Sessions = sessions
+	if s.privacyRepo() != nil {
+		rows, _ := s.privacyRepo().ListPrivacyRequestsByUser(ctx, userID)
+		export.PrivacyRequests = rows
+	}
+	// Devices and consents are best-effort: the device list lives on
+	// the same MemoryRepository but is gathered by walking the sessions
+	// (which carry DeviceID). Real devices come from a separate query
+	// once postgres is in scope; for the memory repository the snapshot
+	// is good enough for tests.
+	seen := map[string]struct{}{}
+	for _, sess := range sessions {
+		if _, ok := seen[sess.DeviceID]; ok {
+			continue
+		}
+		seen[sess.DeviceID] = struct{}{}
+		if dev, err := s.repository.GetDevice(ctx, sess.DeviceID); err == nil {
+			export.Devices = append(export.Devices, dev)
+		}
+	}
+	if s.repository != nil {
+		if snapshot, ok := s.repository.(interface {
+			ListLegalConsents(ctx context.Context, userID string) ([]LegalConsentSnapshot, error)
+		}); ok {
+			if rows, err := snapshot.ListLegalConsents(ctx, userID); err == nil {
+				export.Consents = rows
+			}
+		}
+	}
+	return export, nil
+}
+
+// privacyRepo is a small adapter that lets the Service look up the
+// PrivacyRequestRepository on the underlying Repository without making
+// the main Repository interface wider than it needs to be. If the
+// repository does not implement privacy-request persistence (e.g. an
+// older deployment that predates migration 060) the service still
+// compiles, it just returns PRIVACY_REQUEST_UNAVAILABLE at runtime.
+func (s *Service) privacyRepo() PrivacyRequestRepository {
+	if r, ok := s.repository.(PrivacyRequestRepository); ok {
+		return r
+	}
+	return nil
 }
