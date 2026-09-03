@@ -413,7 +413,11 @@ function RepliesTab(props: {
       {props.replies.map((reply) => (
         <View key={reply.postId} style={styles.replyCard}>
           <View style={styles.replyMeta}>
-            <Text style={styles.replyTarget}>回复 @{reply.authorId} 的帖子</Text>
+            {/* R15.87 fix: 之前 '回复 @{reply.authorId} 的帖子' 永远显示回复自己
+                 (me.tsx listUserReplies handler hardcode authorId=viewerAccountId).
+                 改为 '你回复了' 跟原始帖 ID. server Reply 暂没 parentPostId 字段
+                 (commander 域), Phase 2 加 schema. */}
+            <Text style={styles.replyTarget}>你回复了</Text>
             <Text style={styles.replyTime}>· {new Date(reply.createdAt).toLocaleDateString()}</Text>
           </View>
           <Text style={styles.replyText}>{reply.body}</Text>
