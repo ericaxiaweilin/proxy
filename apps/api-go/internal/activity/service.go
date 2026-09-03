@@ -18,7 +18,7 @@ import (
 // Activity 是本地活动（对齐基线 activityCatalog 字段）。
 type Activity struct {
 	ID             string `json:"activityId"`
-	Origin         string `json:"origin"` // PLATFORM | MERCHANT | USER
+	Origin         string `json:"origin"` // PLATFORM | MERCHANT | USER | AI_PERSONA | TEST
 	Title          string `json:"title"`
 	Time           string `json:"time"`
 	People         string `json:"people"`
@@ -38,6 +38,13 @@ type Activity struct {
 	Capacity       int    `json:"capacity,omitempty"`
 	Shares         int    `json:"shares"`
 	ParentTitle    string `json:"parentTitle,omitempty"`
+
+	// R15.x+: AI_PERSONA origin 专有字段，origin 不是 AI_PERSONA 时为空。
+	// 合规：origin = AI_PERSONA 时客户端必显示 "AI 数字人" 徽标 + 头像
+	// + 名字 (跟 X / Threads / 抖音 / 小红书的 "AI 生成" 标注一致)。
+	AIPersonaID     string `json:"aiPersonaId,omitempty"`
+	AIPersonaName   string `json:"aiPersonaName,omitempty"`
+	AIPersonaAvatar string `json:"aiPersonaAvatar,omitempty"`
 
 	interestedBy map[string]bool
 	joinedBy     map[string]bool
@@ -288,19 +295,28 @@ func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, 
 }
 
 // defaultCatalog 是基线 activityCatalog 的 5 条活动。
+//
+// R15.x+: 5 条全部重命名为 AI_PERSONA origin — 平台 "没有 mock 数据"，
+// 任何占位活动都明确是 AI 数字人分身发起的，UI 端通过 aiPersona 字段
+// 显式渲染 "AI 数字人" 徽标 + 头像 + 名字。参考 X / Threads / 抖音 /
+// 小红书的 "AI 生成" 标注。
+//
+// 每条绑一个固定的 ai persona (ai_001..ai_005)，persona 自身有 avatar
+// 和 name — 客户端用这两个字段渲染，不需要再单独查 persona service。
 func defaultCatalog() []*Activity {
 	return []*Activity{
 		{
-			ID: "proxy_coffee_weekend", Origin: "PLATFORM", Title: "Proxy 周末咖啡企划",
+			ID: "proxy_coffee_weekend", Origin: "AI_PERSONA", Title: "Proxy 周末咖啡企划",
 			Time: "本周六至周日", People: "特别企划", Price: "0₫", Consumption: "按门店场次",
 			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
 			Desc:    "周末限定主题场次，联合合作咖啡店开放。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 4, Interested: 36, Joined: 18, Capacity: 24, Shares: 12,
+			AIPersonaID: "ai_001", AIPersonaName: "小美 · 周末企划", AIPersonaAvatar: "☕",
 		},
 		{
-			ID: "merchant_photo_day", Origin: "MERCHANT", Title: "木光咖啡 · 周日下午拍照季",
+			ID: "merchant_photo_day", Origin: "AI_PERSONA", Title: "木光咖啡 · 周日下午拍照季",
 			Time: "周日 15:00–17:00", People: "6 / 10 人", Price: "0₫", Consumption: "各自消费",
 			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
@@ -308,27 +324,30 @@ func defaultCatalog() []*Activity {
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 3, Interested: 18, Joined: 6, Capacity: 10, Shares: 7,
 			ParentTitle: "Proxy 周末咖啡企划",
+			AIPersonaID: "ai_002", AIPersonaName: "小美 · 拍照季", AIPersonaAvatar: "📸",
 		},
 		{
-			ID: "user_photo_buddy", Origin: "USER", Title: "周六 咖啡拍照搭子",
+			ID: "user_photo_buddy", Origin: "AI_PERSONA", Title: "周六 咖啡拍照搭子",
 			Time: "周六 15:00–17:00", People: "找 1 位", Price: "0₫", Consumption: "各自消费",
 			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
 			Desc:    "互相帮对方拍照，一起喝咖啡；到店消费各自承担。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 1, Interested: 5, Joined: 1, Capacity: 2, Shares: 2,
+			AIPersonaID: "ai_003", AIPersonaName: "小美 · 拍照搭子", AIPersonaAvatar: "🤝",
 		},
 		{
-			ID: "merchant_tasting", Origin: "MERCHANT", Title: "岚庭餐厅 · 新菜尝鲜晚餐",
+			ID: "merchant_tasting", Origin: "AI_PERSONA", Title: "岚庭餐厅 · 新菜尝鲜晚餐",
 			Time: "周五 18:30–20:30", People: "4 / 6 人", Price: "0₫", Consumption: "活动套餐 399k / 人",
 			VenueIcon: "🍽️", VenueName: "岚庭餐厅 · 西湖", RealitySceneID: "westlake", VenueSpend: "380,000–650,000₫ / 人",
 			VenueType: "RESTAURANT", VenueTypeLabel: "餐厅",
 			Desc:    "餐厅开放新品尝鲜场次，按活动套餐到店消费。",
 			Benefit: "Proxy 活动预订赠餐后甜点",
 			QACount: 2, Interested: 24, Joined: 4, Capacity: 6, Shares: 9,
+			AIPersonaID: "ai_004", AIPersonaName: "小美 · 餐厅尝鲜", AIPersonaAvatar: "🍽️",
 		},
 		{
-			ID: "user_dinner_group", Origin: "USER", Title: "周五一起吃新菜",
+			ID: "user_dinner_group", Origin: "AI_PERSONA", Title: "周五一起吃新菜",
 			Time: "周五 18:30–20:30", People: "2 / 4 人", Price: "0₫", Consumption: "各自消费",
 			VenueIcon: "🍽️", VenueName: "岚庭餐厅 · 西湖", RealitySceneID: "westlake", VenueSpend: "380,000–650,000₫ / 人",
 			VenueType: "RESTAURANT", VenueTypeLabel: "餐厅",
@@ -336,6 +355,7 @@ func defaultCatalog() []*Activity {
 			Benefit: "Proxy 活动预订赠餐后甜点",
 			QACount: 1, Interested: 8, Joined: 2, Capacity: 4, Shares: 3,
 			ParentTitle: "岚庭餐厅 · 新菜尝鲜晚餐",
+			AIPersonaID: "ai_005", AIPersonaName: "小美 · 饭局召集", AIPersonaAvatar: "🍜",
 		},
 	}
 }

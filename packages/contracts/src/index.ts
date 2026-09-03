@@ -480,7 +480,7 @@ export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;
 
 export const ActivitySchema = z.object({
   activityId: z.string().min(1),
-  origin: z.enum(["PLATFORM", "MERCHANT", "USER"]),
+  origin: z.enum(["PLATFORM", "MERCHANT", "USER", "AI_PERSONA", "TEST"]),
   title: z.string().min(1),
   time: z.string(),
   people: z.string(),
@@ -499,7 +499,13 @@ export const ActivitySchema = z.object({
   joined: z.number().int().nonnegative(),
   capacity: z.number().int().positive().optional(),
   shares: z.number().int().nonnegative(),
-  parentTitle: z.string().optional()
+  parentTitle: z.string().optional(),
+  // R15.x+: AI_PERSONA origin 专有字段。origin = AI_PERSONA 时客户端
+  // 必显示 "AI 数字人" 徽标 + 头像 + 名字 (跟 X / Threads / 抖音 /
+  // 小红书的 "AI 生成" 标注一致)。其他 origin 这三个字段 omitempty。
+  aiPersonaId: z.string().min(1).optional(),
+  aiPersonaName: z.string().min(1).optional(),
+  aiPersonaAvatar: z.string().optional()
 });
 export type Activity = z.infer<typeof ActivitySchema>;
 

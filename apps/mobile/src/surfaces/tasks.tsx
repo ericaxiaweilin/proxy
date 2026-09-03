@@ -47,7 +47,13 @@ type ActivityFilter = "RECOMMENDED" | "CAFE" | "RESTAURANT" | "MINE";
 const ORIGIN_META: Record<Activity["origin"], { label: string; bg: string; fg: string }> = {
   PLATFORM: { label: "Proxy 特别活动", bg: "#EEE6FF", fg: "#5D32A4" },
   MERCHANT: { label: "商家活动", bg: "#F1FFD1", fg: "#445C00" },
-  USER: { label: "用户发起", bg: "#EAF8F4", fg: "#176F60" }
+  USER: { label: "用户发起", bg: "#EAF8F4", fg: "#176F60" },
+  // R15.x+: AI 数字人发起的活动。蓝紫调 + "AI 数字人" 文案 (跟 X /
+  // Threads / 抖音 / 小红书的 "AI 生成" 标注一致)。同时 aiPersona 字段
+  // 会被单独的 AIBadge 子组件渲染 (头像 + 名字)。
+  AI_PERSONA: { label: "AI 数字人", bg: "#EEF0FF", fg: "#3949AB" },
+  // TEST 不会被发送到客户端 (server 端 List 过滤)，保留以防万一。
+  TEST: { label: "测试", bg: "#F5F5F5", fg: "#9E9E9E" }
 };
 
 const ACTIVITY_FILTERS: ReadonlyArray<{ id: ActivityFilter; label: string }> = [
@@ -314,6 +320,11 @@ export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: (
           <View style={[styles.originBadge, { backgroundColor: origin.bg }]}>
             <Text style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
           </View>
+          {item.origin === "AI_PERSONA" && item.aiPersonaName ? (
+            <Text style={styles.exampleAIPersona}>
+              {item.aiPersonaAvatar ?? "🤖"} {item.aiPersonaName} 发起
+            </Text>
+          ) : null}
           <Text style={styles.exampleName}>{item.title}</Text>
           <Text style={styles.exampleMeta}>
             {item.time} · {item.people}
@@ -391,6 +402,15 @@ export function ActivityDetail({
             <Text style={styles.detailPriceSmall}>活动价格</Text>
           </View>
         </View>
+        {item.origin === "AI_PERSONA" && item.aiPersonaName ? (
+          <View style={styles.detailAIPersonaRow}>
+            <Text style={styles.detailAIPersonaAvatar}>{item.aiPersonaAvatar ?? "🤖"}</Text>
+            <View style={styles.detailAIPersonaTextCol}>
+              <Text style={styles.detailAIPersonaName}>{item.aiPersonaName}</Text>
+              <Text style={styles.detailAIPersonaDisclaimer}>AI 数字人发起的活动 · 平台代表</Text>
+            </View>
+          </View>
+        ) : null}
         <Text style={styles.detailTitle}>{item.title}</Text>
         <Text style={styles.detailDesc}>{item.desc}</Text>
       </Gradient>
@@ -517,6 +537,12 @@ export function ActivityDetail({
           <Text style={styles.ctaLightText}>找人一起参加</Text>
         </Pressable>
       ) : null}
+      {item.origin === "AI_PERSONA" ? (
+        <Text style={styles.aiPersonaDisclaimerFooter}>
+          本活动由 AI 数字人 "{item.aiPersonaName ?? "小美"}" 发起，平台代表
+          对内容负责。如有不适可在详情页点击「向平台反馈」。
+        </Text>
+      ) : null}
       {item.realitySceneId && onOpenRealityScene ? (
         <Pressable onPress={() => onOpenRealityScene(item.realitySceneId!)} style={styles.ctaLight}>
           <Text style={styles.ctaLightText}>查看场景地图</Text>
@@ -635,6 +661,13 @@ const styles = StyleSheet.create({
   detailPriceSmall: { color: "#CFC6D8", fontSize: 11, marginTop: 1 },
   detailTitle: { color: color.white, fontSize: 18, fontWeight: "700", marginTop: 9 },
   detailDesc: { color: "#D8D1DF", fontSize: 11, lineHeight: 15, marginTop: 3 },
+  // R15.x+: AI 数字人详情页 — 在 desc 上方加 persona 头像 + 名字 + 声明
+  detailAIPersonaRow: { flexDirection: "row", alignItems: "center", marginTop: 12, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 10, padding: 8 },
+  detailAIPersonaAvatar: { fontSize: 22, marginRight: 9 },
+  detailAIPersonaTextCol: { flex: 1 },
+  detailAIPersonaName: { color: color.white, fontSize: 13, fontWeight: "800" },
+  detailAIPersonaDisclaimer: { color: "#D8D1DF", fontSize: 11, marginTop: 1 },
+  aiPersonaDisclaimerFooter: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 8, paddingHorizontal: 4 },
 
   // 基线 .sceneanchor：#17131F radius 16 padding 10 gap 9 margin 8 0。
   sceneAnchor: {
@@ -819,6 +852,8 @@ const styles = StyleSheet.create({
   originBadgeText: { color: "#B91451", fontSize: 11, fontWeight: "900" },
   exampleName: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 5 },
   exampleMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
+  // R15.x+: AI 数字人发起的活动 — 列表卡上在 title 上方加一行 "X 发起" 标识
+  exampleAIPersona: { color: "#3949AB", fontSize: 11, fontWeight: "700", marginTop: 5 },
   examplePrice: { alignItems: "flex-end" },
   examplePriceStrong: { color: color.ink, fontSize: 16, fontWeight: "700" },
   examplePriceSmall: { color: color.muted, fontSize: 11, marginTop: 1 },
