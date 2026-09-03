@@ -2,12 +2,15 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/engagement"
@@ -750,39 +753,98 @@ func (r *EngagementRepository) ListBookmarksByActor(ctx context.Context, actorID
 }
 
 func (r *EngagementRepository) AddReaction(ctx context.Context, re engagement.Reaction) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+	return insertEngagementRow(ctx, r.pool, `
 		INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at)
 		VALUES ($1,$2,$3,$4,$5)`,
-		re.ID, re.PostID, re.ActorID, re.Kind, re.CreatedAt,
+		[]any{re.ID, re.PostID, re.ActorID, re.Kind, re.CreatedAt},
+		engagement.ErrReactionAlreadyExists,
 	)
-	return err
 }
 
 func (r *EngagementRepository) AddReply(ctx context.Context, re engagement.Reply) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+	return insertEngagementRow(ctx, r.pool, `
 		INSERT INTO engagement.replies (reply_id, post_id, actor_id, body, created_at)
 		VALUES ($1,$2,$3,$4,$5)`,
-		re.ID, re.PostID, re.ActorID, re.Body, re.CreatedAt,
+		[]any{re.ID, re.PostID, re.ActorID, re.Body, re.CreatedAt},
+		nil, // replies 无 UNIQUE(post,actor) — 只有 FK 违例需要映射
 	)
-	return err
 }
 
 func (r *EngagementRepository) AddRepost(ctx context.Context, re engagement.Repost) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+	return insertEngagementRow(ctx, r.pool, `
 		INSERT INTO engagement.reposts (id, post_id, actor_id, created_at)
 		VALUES ($1,$2,$3,$4)`,
-		re.ID, re.PostID, re.ActorID, re.CreatedAt,
+		[]any{re.ID, re.PostID, re.ActorID, re.CreatedAt},
+		engagement.ErrRepostAlreadyExists,
 	)
-	return err
 }
 
 func (r *EngagementRepository) AddBookmark(ctx context.Context, b engagement.Bookmark) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+	return insertEngagementRow(ctx, r.pool, `
 		INSERT INTO engagement.bookmarks (bookmark_id, post_id, actor_id, created_at)
 		VALUES ($1,$2,$3,$4)`,
-		b.ID, b.PostID, b.ActorID, b.CreatedAt,
+		[]any{b.ID, b.PostID, b.ActorID, b.CreatedAt},
+		engagement.ErrBookmarkAlreadyExists,
 	)
-	return err
+}
+
+// insertEngagementRow 执行 engagement 写路径 INSERT, 并把 PG 约束违例翻译成域哨兵错误。
+//
+// R16.12 背景 (audit 2026-09-03): 直接 Exec 时, UNIQUE(post_id, actor_id) 冲突 (23505)
+// 或 FK(post_id) 违例 (23503) 会把外层 command dispatch 事务毒死 — 后续
+// Idempotency.Complete 在同一事务里写幂等记录时撞 25P02 (transaction aborted),
+// 整个命令变成 500 command_transaction_failed, 吞掉 service 层本该返回的业务 REJECTED。
+//
+// 方案: SAVEPOINT 包住 INSERT。违例时 ROLLBACK TO SAVEPOINT 只回滚这一条,
+// 外层事务保持可用 (幂等记录能正常落库), 同时把 pgconn.PgError 翻译成域错误:
+//   - 23505 unique_violation → alreadyExistsErr (调用方指定, 如 ErrReactionAlreadyExists)
+//   - 23503 foreign_key_violation → engagement.ErrPostNotFound (帖子不存在)
+// 其余错误原样上抛 (含非事务上下文里的写失败)。
+func insertEngagementRow(ctx context.Context, pool *pgxpool.Pool, sql string, args []any, alreadyExistsErr error) error {
+	q := queryerForContext(ctx, pool)
+	savepointID := "engagement_write_" + newSavepointToken()
+	if _, err := q.Exec(ctx, "SAVEPOINT "+savepointID); err != nil {
+		// 保存点建不起来 (连接故障等) — 直接执行原始 INSERT, 保留旧行为
+		_, execErr := q.Exec(ctx, sql, args...)
+		return execErr
+	}
+	if _, err := q.Exec(ctx, sql, args...); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && (pgErr.Code == "23505" || pgErr.Code == "23503") {
+			// 约束违例是预期内的业务分支: 回滚保存点救活外层事务, 返域哨兵
+			if _, rollbackErr := q.Exec(ctx, "ROLLBACK TO SAVEPOINT "+savepointID); rollbackErr != nil {
+				return rollbackErr
+			}
+			if pgErr.Code == "23505" {
+				if alreadyExistsErr != nil {
+					return alreadyExistsErr
+				}
+				return err
+			}
+			return engagement.ErrPostNotFound
+		}
+		return err
+	}
+	if _, err := q.Exec(ctx, "RELEASE SAVEPOINT "+savepointID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// newSavepointToken 生成 SAVEPOINT 名里的随机段, 避免嵌套调用时撞名。
+var savepointSource = randomTokenSource{}
+
+func newSavepointToken() string { return savepointSource.token() }
+
+type randomTokenSource struct{}
+
+func (randomTokenSource) token() string {
+	buf := make([]byte, 6)
+	if _, err := rand.Read(buf); err != nil {
+		// 不可依赖 crypto 随机时退化为时间戳 — savepoint 名只需同事务内唯一
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 func (r *EngagementRepository) AddFeedPreference(ctx context.Context, preference engagement.FeedPreference) error {
