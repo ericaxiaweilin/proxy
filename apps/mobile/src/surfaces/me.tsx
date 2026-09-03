@@ -1511,7 +1511,7 @@ export function MeSurface({
         }
         if (cancelled) return;
         const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
-        const filtered = allPosts.filter((post) => post.authorDisplayName === profileDraft.name || post.body.includes(myHandle) || post.authorId === profileDraft.handle || post.authorId === profileDraft.name);
+        const filtered = allPosts.filter((post) => post.authorId === viewerAccountId || post.authorDisplayName === profileDraft.name || post.body.includes(myHandle) || post.authorId === profileDraft.handle || post.authorId === profileDraft.name);
         if (filtered.length > 0) {
           const media: Record<string, FeedMediaItem[]> = {};
           for (const post of filtered) { const items = allMedia[post.postId]; if (items) media[post.postId] = items; }
@@ -1539,7 +1539,7 @@ export function MeSurface({
           }
           if (cancelled) return;
           const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
-          const filtered = allPosts.filter((post) => post.authorDisplayName === profileDraft.name || post.body.includes(myHandle));
+          const filtered = allPosts.filter((post) => post.authorId === viewerAccountId || post.authorDisplayName === profileDraft.name || post.body.includes(myHandle));
           if (filtered.length > 0) {
             const media: Record<string, FeedMediaItem[]> = {};
             for (const post of filtered) { const items = allMedia[post.postId]; if (items) media[post.postId] = items; }
@@ -1550,7 +1550,7 @@ export function MeSurface({
       }
     })();
     return () => { cancelled = true; };
-  }, [localNet, profileDraft.name, profileDraft.handle]);
+  }, [localNet, profileDraft.name, profileDraft.handle, viewerAccountId]);
 
   // R15.73: 置顶帖 ID 列表 — server ListPinnedPosts (R15.56)
   useEffect(() => {
