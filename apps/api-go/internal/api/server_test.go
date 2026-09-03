@@ -614,3 +614,50 @@ func TestVersionMiddlewareRequiresUpgrade(t *testing.T) {
 		t.Fatalf("current version must not be 426, got %d", okRec.Code)
 	}
 }
+
+// R16.6: /health/ready must surface login provider status so an operator
+// running with PROXY_LOGIN_PROVIDER=smtp but no PROXY_SMTP_HOST sees the
+// "fail_closed_no_smtp_env" status instead of a silent REJECTED every login.
+// Boot-time log.Fatalf in cmd/api/main.go is the primary guard; this test
+//// ensures the runtime fallback path (UnconfiguredLoginChallengeProvider)
+// is also observable.
+func TestReadyEndpointSurfacesLoginProviderFailClosed(t *testing.T) {
+	t.Setenv("PROXY_LOGIN_PROVIDER", "smtp")
+	os.Unsetenv("PROXY_SMTP_HOST")
+
+	record := httptest.NewRecorder()
+	server := NewServerWithDependencies(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil)
+	server.Handler().ServeHTTP(record, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	if record.Code != http.StatusOK {
+		t.Fatalf("expected ready probe to return 200 (server is up), got %d", record.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(record.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode ready body: %v", err)
+	}
+	checks, ok := body["checks"].(map[string]any)
+	if !ok {
+		t.Fatalf("ready body missing checks map: %+v", body)
+	}
+	if status, _ := checks["login_provider"].(string); status != "fail_closed_no_smtp_env" {
+		t.Fatalf("expected login_provider=fail_closed_no_smtp_env when SMTP env missing, got %v (body=%+v)", checks["login_provider"], body)
+	}
+}
+
+func TestReadyEndpointSurfacesLoginProviderOK(t *testing.T) {
+	t.Setenv("PROXY_LOGIN_PROVIDER", "smtp")
+	t.Setenv("PROXY_SMTP_HOST", "smtp.gmail.com")
+	t.Setenv("PROXY_SMTP_PORT", "587")
+
+	record := httptest.NewRecorder()
+	server := NewServerWithDependencies(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil)
+	server.Handler().ServeHTTP(record, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
+	var body map[string]any
+	if err := json.Unmarshal(record.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode ready body: %v", err)
+	}
+	checks := body["checks"].(map[string]any)
+	if status, _ := checks["login_provider"].(string); status != "smtp_configured" {
+		t.Fatalf("expected login_provider=smtp_configured when env present, got %v", status)
+	}
+}

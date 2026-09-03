@@ -28,6 +28,8 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "personalAvaAdd",       // 头像 + 浮层 (无 font)
   "personalStatValue",    // 浏览数数字加粗 (装饰 数字)
   "personalFollowersValue", // 关注数数字加粗 (装饰数字)
+  // R15.96: scene map entry eyebrow ("SCENE MAP · 河内") — 8pt 装饰，跟 personalAvaLetter 同类
+  "sceneMapEyebrow",
   // R15.76: R1 AI Identity System PRD — 头像下 AI 徽章 (frontstage 透明度义务).
   //   9pt "AI" 字符跟 personalAvaLetter 同类装饰.
   "aiAuthorBadgeText",

@@ -34,6 +34,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
+	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -64,6 +65,7 @@ type Server struct {
 	Safety        *safety.Service
 	Business      *business.Service
 	Scene         *scene.Service
+	RealityScene  *realityscene.Service
 	Facet         *facet.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
@@ -114,7 +116,7 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if readyCheck != nil {
 		readyMode = "configured"
 	}
-	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.NewWithRepository(experience.NewMemoryRepository()), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Scene: scene.New(), Facet: facet.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120), TrustCloudflareIP: envBool("PROXY_TRUST_CLOUDFLARE_IP"), ReadTimeout: 4 * time.Second}
+	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.NewWithRepository(experience.NewMemoryRepository()), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Scene: scene.New(), RealityScene: realityscene.New(), Facet: facet.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120), TrustCloudflareIP: envBool("PROXY_TRUST_CLOUDFLARE_IP"), ReadTimeout: 4 * time.Second}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -147,6 +149,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/media/thumb/", s.mediaFile)
 	mux.HandleFunc("/v1/media/variant/", s.mediaVariantFile)
 	mux.HandleFunc("/v1/feed", s.publicFeed)
+	mux.HandleFunc("/v1/reality-scenes", s.publicRealityScenes)
 	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.
@@ -528,7 +531,35 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		checks["database"] = "ok"
 		checks["redis"] = "not_configured_optional"
 	}
+	// R16.6: surface login provider status in /health/ready so operators can
+	// see "fail-closed" SMTP at probe time (before users notice OTP never
+	// arrives). Boot-time log.Fatal already prevents this state in main.go,
+	// but a non-strict operator who comments the log.Fatal out won't get a
+	// silent outage any more.
+	checks["login_provider"] = loginProviderStatus()
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "service": "proxy-api", "checks": checks})
+}
+
+func loginProviderStatus() string {
+	mode := os.Getenv("PROXY_LOGIN_PROVIDER")
+	switch mode {
+	case "":
+		return "unset"
+	case "simulated":
+		return "simulated"
+	case "smtp":
+		if os.Getenv("PROXY_SMTP_HOST") == "" {
+			return "fail_closed_no_smtp_env"
+		}
+		return "smtp_configured"
+	case "sms":
+		if os.Getenv("PROXY_SMS_URL") == "" {
+			return "fail_closed_no_sms_env"
+		}
+		return "sms_configured"
+	default:
+		return "unknown_mode_" + mode
+	}
 }
 
 func (s *Server) command(w http.ResponseWriter, r *http.Request) {
@@ -744,6 +775,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Business.HandleContext(ctx, envelope)
 	case s.Scene != nil && s.Scene.Supports(envelope.CommandType):
 		return s.Scene.HandleContext(ctx, envelope)
+	case s.RealityScene != nil && s.RealityScene.Supports(envelope.CommandType):
+		return s.RealityScene.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}

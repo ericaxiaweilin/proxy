@@ -302,7 +302,25 @@ func configuredLoginChallengeProvider() (identity.LoginChallengeProvider, bool) 
 	switch mode {
 	case "simulated":
 		return identity.NewSimulatedLoginChallengeProvider(os.Getenv("PROXY_SIMULATED_OTP_CODE")), true
-	case "smtp", "sms", "production":
+	case "smtp":
+		// R16.6: fail-fast if smtp mode declared but SMTP env is missing.
+		// Without this guard, an operator who exports PROXY_LOGIN_PROVIDER=smtp
+		// without sourcing .env ends up with UnconfiguredLoginChallengeProvider
+		// — login challenges REJECTED, no email is sent, users see "no OTP
+		// arrived" without any boot-time signal. Catch it at boot.
+		if os.Getenv("PROXY_SMTP_HOST") == "" {
+			log.Fatalf("PROXY_LOGIN_PROVIDER=smtp but PROXY_SMTP_HOST is empty; source .env (PROXY_SMTP_*) before starting the API. Refusing to run with login provider fail-closed.")
+		}
+		return configuredProductionLoginChallengeProvider(mode)
+	case "sms":
+		if os.Getenv("PROXY_SMS_URL") == "" {
+			log.Fatalf("PROXY_LOGIN_PROVIDER=sms but PROXY_SMS_URL is empty; configure SMS provider before starting the API.")
+		}
+		return configuredProductionLoginChallengeProvider(mode)
+	case "production":
+		if os.Getenv("PROXY_SMTP_HOST") == "" && os.Getenv("PROXY_SMS_URL") == "" {
+			log.Fatalf("PROXY_LOGIN_PROVIDER=production but neither PROXY_SMTP_HOST nor PROXY_SMS_URL is set; configure one before starting the API.")
+		}
 		return configuredProductionLoginChallengeProvider(mode)
 	default:
 		return identity.UnconfiguredLoginChallengeProvider{}, false

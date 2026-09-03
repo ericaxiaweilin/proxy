@@ -108,13 +108,31 @@ export class LocalNetClient {
 
   public async listMyFeedPosts(): Promise<FeedReadModel> {
     const session = await this.requireSession();
-    const read = await this.listFeedPosts();
-    return {
-      posts: read.posts.filter((post) => post.authorId === session.userAccountId),
-      media: read.media,
-      nextCursor: read.nextCursor,
-      hasMore: read.hasMore
-    };
+    // R16.6 fix: paginate through the feed until we find posts owned by the
+    // current viewer. Without paging, the newest N posts (often agent_linh
+    // integration seeds or other users) shadow the viewer's older content and
+    // the profile goes blank. Cap at 10 pages × 50 = 500 to avoid runaway.
+    const PAGE_CAP = 10;
+    const PAGE_SIZE = 50;
+    const mine: FeedReadModel = { posts: [], media: {}, nextCursor: undefined, hasMore: false };
+    let cursor: string | undefined;
+    for (let page = 0; page < PAGE_CAP; page += 1) {
+      const read = await this.listFeedPosts(cursor, PAGE_SIZE);
+      const ownPosts = read.posts.filter((post) => post.authorId === session.userAccountId);
+      mine.posts.push(...ownPosts);
+      for (const post of ownPosts) {
+        const items = read.media[post.postId];
+        if (items) mine.media[post.postId] = items;
+      }
+      if (ownPosts.length > 0) {
+        mine.nextCursor = read.nextCursor;
+        mine.hasMore = read.hasMore;
+        return mine;
+      }
+      if (!read.hasMore || !read.nextCursor) break;
+      cursor = read.nextCursor;
+    }
+    return mine;
   }
 
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {
