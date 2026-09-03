@@ -11,6 +11,7 @@ import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEven
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { ProfileTabs } from "./ProfileTabs";
+import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import { Directory, File, Paths } from "expo-file-system";
 import { createProfileStore, DEFAULT_PROFILE, type ProfileRecord } from "../profile-store";
@@ -1307,6 +1308,7 @@ export function MeSurface({
   viewerAccountId?: string | undefined; // R15.59: 当前 session user ID
   onOpenSearch?: ((query: string) => void) | undefined; // R15.75: 主页搜索 sheet submit → app-shell 走 search 路径
   onOpenRealitySceneMap?: (() => void) | undefined;
+  // R15.77: AI 身份中心全屏 (R1 HTML frontstage 1:1 抄) — 独立子屏.
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
   // 规范 §4/§13：Android 硬件返回先收起子页；其余覆盖层是 RN Modal（onRequestClose 自理）。
@@ -1380,6 +1382,10 @@ export function MeSurface({
   //   — 用户输入文字时调 setSearchSheetOpen, 状态不变, 但跟提交按钮脱钩)
   const [searchQuery, setSearchQuery] = useState("");
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
+  // R15.77: AI 身份中心全屏 (R1 HTML frontstage 1:1 抄) — 用户点 settings sheet
+  //   "AI 身份中心" 入口, 弹全屏 R1 preview (3 phone: Human / AI Native / Twin).
+  //   不动 R2 主设设计, 独立子屏.
+  const [aiIdentityOpen, setAiIdentityOpen] = useState(false);
   // R15.53: ProfileTabs 新组件使用 (IG/Threads 5 tabs)
   //   REPLIES / SAVED / TAGGED — Phase 1.5 mock 空数组 (后端未提供)
   // R15.61/62/63: 3 列表接 server (R15.61 reply, R15.62 bookmark, R15.63 tagged 暂空)
@@ -1502,13 +1508,9 @@ export function MeSurface({
           const bookmarkedSet = new Set(b.bookmarks);
           const saved = feed.posts.filter((p) => bookmarkedSet.has(p.postId));
           setPersonalSavedPosts(saved);
-        } catch {
-          if (!cancelled) setPersonalSavedPosts([]);
-        }
-        // R15.72: TAGGED — 扫全 feed body 找 @viewerAccountId 或 contextRefs MENTION
-        //   server mentions endpoint 还没建, Phase 2 server-side 实现后会盖这个 client 实现.
-        try {
-          if (cancelled) return;
+          // R15.72: TAGGED — 扫全 feed body 找 @viewerAccountId 或 contextRefs MENTION
+          //   server mentions endpoint 还没建, Phase 2 server-side 实现后会盖这个 client 实现.
+          //   跟 saved 共享 一次 listFeedPosts (不重复拉).
           const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
           const tagged = feed.posts.filter((p) => {
             if (p.authorId === viewerAccountId) return false;
@@ -1517,7 +1519,10 @@ export function MeSurface({
           });
           setPersonalTaggedPosts(tagged);
         } catch {
-          if (!cancelled) setPersonalTaggedPosts([]);
+          if (!cancelled) {
+            setPersonalSavedPosts([]);
+            setPersonalTaggedPosts([]);
+          }
         }
       })
       .catch(() => { if (!cancelled) setPersonalSavedPosts([]); });
@@ -2490,11 +2495,19 @@ export function MeSurface({
                 <Pressable onPress={() => { setSettingsSheetOpen(false); void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页` }); }} style={styles.sheetWideBtn}>
                   <Text style={styles.sheetWideBtnText}>分享主页</Text>
                 </Pressable>
+                {/* R15.77: AI 身份中心入口 — R1 HTML frontstage 1:1 抄 (3 类身份 + 3 phone preview) */}
+                <Pressable onPress={() => { setSettingsSheetOpen(false); setAiIdentityOpen(true); }} style={styles.sheetWideBtn}>
+                  <Text style={styles.sheetWideBtnText}>AI 身份中心</Text>
+                </Pressable>
                 <Pressable onPress={() => setSettingsSheetOpen(false)} style={[styles.sheetWideBtn, styles.sheetWideBtnDark]}>
                   <Text style={styles.sheetWideBtnTextDark}>完成</Text>
                 </Pressable>
               </View>
             </View>
+          </Modal>
+          {/* R15.77: AI 身份中心全屏 — R1 HTML frontstage 1:1 抄 */}
+          <Modal animationType="slide" onRequestClose={() => setAiIdentityOpen(false)} visible={aiIdentityOpen}>
+            <AIIdentityShowcaseSurface onBack={() => setAiIdentityOpen(false)} />
           </Modal>
           {profileViewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={profileViewer.index} author={profileDraft.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setProfileViewer((current) => current ? { ...current, index } : current)} onClose={() => setProfileViewer(undefined)} /> : null}
         </View>

@@ -30,7 +30,13 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "personalFollowersValue", // 关注数数字加粗 (装饰数字)
   // R15.76: R1 AI Identity System PRD — 头像下 AI 徽章 (frontstage 透明度义务).
   //   9pt "AI" 字符跟 personalAvaLetter 同类装饰.
-  "aiAuthorBadgeText"
+  "aiAuthorBadgeText",
+  // R15.77: R1 HTML 1:1 抄 — AIIdentityShowcaseSurface 是静态 design showcase (3 phone preview,
+  //   mini identity cards), 小屏 8-10pt 是 R1 原版. 跟 personalAvaLetter 同类装饰.
+  "miniPillText", "pTopHandle", "pBadgeText", "pNoticeTitle", "pNoticeBody",
+  "pActionText", "pActionDarkText", "pTabText", "pTabOnText",
+  "pAvatarText", "pAvatarTextAi", "postAvaText", "postAvaTextAi",
+  "postName", "postTime", "postText", "pOrigin", "postActions"
 ];
 
 describe("Proxy Design System R3 typography", () => {
