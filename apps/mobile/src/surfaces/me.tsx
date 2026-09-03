@@ -1385,6 +1385,9 @@ export function MeSurface({
   //   server mentions endpoint 还没建, Phase 2 需新 server model).
   //   轻量 client-side 实现: @handle (含 @ 前缀) + contextType==="MENTION" 都算
   const [personalTaggedPosts, setPersonalTaggedPosts] = useState<FeedPost[]>([]);
+  // R15.73: 置顶帖 ID 列表 — server ListPinnedPosts 拉 (R15.56 endpoint),
+  //   传 ProfileTabs.pinnedIds, 取代 posts[0] mock.
+  const [personalPinnedIds, setPersonalPinnedIds] = useState<ReadonlyArray<string>>([]);
   // R15.54: 关注数 / 粉丝数 — 从 server 拉, ProfileTabs stats 行使用
   // R15.59: 接 server GetFollowCounts (authed); 未登录时为 undefined
   const [personalFollowCounts, setPersonalFollowCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
@@ -1453,6 +1456,16 @@ export function MeSurface({
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [localNet]);
+
+  // R15.73: 置顶帖 ID 列表 — server ListPinnedPosts (R15.56)
+  useEffect(() => {
+    if (!engagement || !viewerAccountId) return;
+    let cancelled = false;
+    void engagement.listPinnedPosts(viewerAccountId)
+      .then((r) => { if (!cancelled) setPersonalPinnedIds(r.postIds ?? []); })
+      .catch(() => { if (!cancelled) setPersonalPinnedIds([]); });
+    return () => { cancelled = true; };
+  }, [engagement, viewerAccountId]);
 
   // R15.61/62 useEffect: 放在 profileDraft 后才可访问。
   useEffect(() => {
@@ -2360,6 +2373,7 @@ export function MeSurface({
             <ProfileTabs
               profileDraft={profileDraft}
               profileAvatarUri={profileAvatarUri}
+              pinnedIds={personalPinnedIds}
               posts={profilePosts}
               mediaByPost={profileMedia}
               photos={personalPhotos}

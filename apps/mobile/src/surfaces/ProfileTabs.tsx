@@ -36,6 +36,8 @@ export interface ProfileTabsProps {
   posts: FeedPost[];                          // POSTS tab + 置顶用
   mediaByPost: Record<string, FeedMediaItem[]>; // POSTS media
   photos: ProfileMediaEntry[];                // PHOTOS (IG 3-列网格 in POSTS)
+  // R15.73: 置顶帖 ID 列表 (server 返, ListPinnedPosts). pinnedIds[0] 渲染置顶, 其余标 "已置顶" 标记.
+  pinnedIds?: ReadonlyArray<string> | undefined;
   replyPosts: FeedPost[];                     // REPLIES tab (Phase 1 mock)
   savedPosts: FeedPost[];                     // SAVED tab (Phase 1 mock)
   taggedPosts: FeedPost[];                    // TAGGED tab (Phase 1 mock)
@@ -76,9 +78,15 @@ export interface ProfileTabsProps {
 export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
   const [tab, setTab] = useState<ProfileTabKey>("POSTS");
 
-  // 置顶帖 (Phase 1: 第 1 条算置顶, IG/Threads 是用户手 pin 的; 我们
-  // 没后端 pin 字段, 取最新 1 条当置顶演示, 跟下面 posts 列表重复 = 演示)
-  const pinnedPost = useMemo(() => props.posts[0], [props.posts]);
+  // R15.73: 置顶帖 = server 返的 pinnedIds 中第一个, 不在 profilePosts 时走 fallback.
+  // 之前 (Phase 1) 取 posts[0] mock — 跟 post 列表重复, 只是占位.
+  const pinnedPost = useMemo(() => {
+    if (props.pinnedIds && props.pinnedIds.length > 0) {
+      const hit = props.posts.find((p) => p.postId === props.pinnedIds?.[0]);
+      if (hit) return hit;
+    }
+    return props.posts[0];
+  }, [props.posts, props.pinnedIds]);
 
   return (
     <View>
