@@ -1714,7 +1714,7 @@ export function MeSurface({
     // facet client 不依赖任何现有 client (它是 anonymous GET), 这里按需创建.
     if (subPage.route === "facet") {
       const facetClient = new FacetClient({ requester: sessionAuthClient, baseUrl: localApiBaseUrl });
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} onComingSoon={(label) => { console.log(`[facet] ${label} · 开发中`); }} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     }
     // R15.13 P2: myscenes gets a real-data section appended beneath
     // the static prototype cards. The prototype shows the high-level
