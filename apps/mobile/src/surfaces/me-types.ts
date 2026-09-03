@@ -1,0 +1,146 @@
+import type { ExperienceAction } from "@proxy/contracts";
+
+export type MeSubPage = { title: string; desc: string; icon: string; route: string } | undefined;
+export type AvailabilityState = "AVAILABLE" | "BUSY" | "PAUSED" | "HIDDEN";
+export type EnterpriseOpsStage = "READY" | "DRAFT_READY" | "CONFIRMED" | "PUBLISHED";
+
+export interface MenuRow {
+  icon: string;
+  label: string;
+  desc: string;
+  grad?: boolean;
+  action?: ExperienceAction;
+  route?: string;
+}
+
+export interface MenuSection {
+  id?: string;
+  title: string;
+  hint: string;
+  rows: MenuRow[];
+}
+
+export type PersonalHubTab = "FEED" | "PHOTOS" | "RECORDS";
+export type SocialVisibility = "仅自己" | "商家可见" | "公开展示";
+export type SocialAccount = { key: string; mark: string; dark?: boolean; name: string; handle: string; url: string; visibility: SocialVisibility };
+
+export const INITIAL_SOCIAL_ACCOUNTS: SocialAccount[] = [
+  { key: "tiktok", mark: "TT", dark: true, name: "TikTok", handle: "@huyen.life", url: "https://www.tiktok.com/@huyen.life", visibility: "商家可见" },
+  { key: "threads", mark: "◎", name: "Threads", handle: "@huyen.daily", url: "https://www.threads.net/@huyen.daily", visibility: "仅自己" },
+  { key: "facebook", mark: "f", name: "Facebook", handle: "Huyen Nguyen", url: "https://www.facebook.com/huyen.nguyen", visibility: "公开展示" },
+  { key: "x", mark: "X", dark: true, name: "X", handle: "", url: "", visibility: "仅自己" }
+];
+
+export const AVAILABILITY_OPTIONS: ReadonlyArray<{ id: AvailabilityState; title: string; desc: string }> = [
+  { id: "AVAILABLE", title: "可接单", desc: "进入人物发现与合适机会分发" },
+  { id: "BUSY", title: "忙碌", desc: "保留主页，降低即时机会" },
+  { id: "PAUSED", title: "暂不接单", desc: "暂停机会分发" },
+  { id: "HIDDEN", title: "隐身", desc: "从公开人物发现中隐藏" }
+];
+
+export type AbilityType = "同行" | "翻译" | "拍照";
+
+export type AbilityInstance = {
+  id: string;
+  type: AbilityType;
+  fields: Array<{ label: string; value: string }>;
+  note?: string;
+};
+
+export const ABILITY_SCHEMAS: Record<AbilityType, { icon: string; subtitle: string; fields: Array<{ id: string; label: string; shortLabel: string; type: "select" | "chips"; options: string[] }> }> = {
+  "同行": {
+    icon: "◎",
+    subtitle: "现实场景陪伴与本地协助",
+    fields: [
+      { id: "area", label: "服务区域", shortLabel: "区域", type: "select", options: ["河内", "胡志明市", "岘港"] },
+      { id: "topic", label: "主题", shortLabel: "主题", type: "chips", options: ["旅行", "消费", "美食", "购物", "城市探索"] },
+      { id: "mode", label: "服务方式", shortLabel: "方式", type: "chips", options: ["线下"] },
+      { id: "time", label: "时间规则", shortLabel: "时间", type: "chips", options: ["跟随未来30天行程", "仅已安排时段"] }
+    ]
+  },
+  "翻译": {
+    icon: "译",
+    subtitle: "消费与日常场景的现场沟通",
+    fields: [
+      { id: "pair", label: "语言组合", shortLabel: "语言", type: "select", options: ["中文 ↔ 越南语", "英语 ↔ 越南语", "中文 ↔ 英语"] },
+      { id: "scene", label: "适用场景", shortLabel: "场景", type: "chips", options: ["消费", "日常", "旅行", "简单商务"] },
+      { id: "mode", label: "服务方式", shortLabel: "方式", type: "chips", options: ["线下", "语音", "视频"] },
+      { id: "area", label: "线下区域", shortLabel: "区域", type: "select", options: ["河内", "胡志明市", "岘港", "不限"] }
+    ]
+  },
+  "拍照": {
+    icon: "⌁",
+    subtitle: "旅行与消费场景的轻量拍摄",
+    fields: [
+      { id: "scene", label: "拍摄场景", shortLabel: "场景", type: "chips", options: ["旅行", "探店", "人物", "活动"] },
+      { id: "device", label: "设备", shortLabel: "设备", type: "chips", options: ["手机", "相机"] },
+      { id: "area", label: "服务区域", shortLabel: "区域", type: "select", options: ["河内", "胡志明市", "岘港"] },
+      { id: "time", label: "时间规则", shortLabel: "时间", type: "chips", options: ["跟随未来30天行程", "仅已安排时段"] }
+    ]
+  }
+};
+
+export const DEFAULT_ABILITIES: AbilityInstance[] = [
+  {
+    id: "companion",
+    type: "同行",
+    fields: [
+      { label: "区域", value: "河内" },
+      { label: "主题", value: "旅行 / 消费" },
+      { label: "方式", value: "线下" },
+      { label: "时间", value: "跟随行程" }
+    ]
+  },
+  {
+    id: "translation",
+    type: "翻译",
+    fields: [
+      { label: "语言", value: "中文 ↔ 越南语" },
+      { label: "场景", value: "消费 / 日常" },
+      { label: "方式", value: "线下" },
+      { label: "区域", value: "河内" }
+    ]
+  }
+];
+
+export type AvailabilityRule = { days: number[]; start: number; end: number };
+export type AvOverride = { type: "full" | "off" | "custom"; start?: number; end?: number };
+
+export function avKeyOf(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+export function avFmt(h: number): string {
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
+export function describeAvRule(rule: AvailabilityRule): string {
+  const sorted = [...rule.days].sort((a, b) => a - b);
+  let prefix = "自定义";
+  if (sorted.length === 7) prefix = "每天";
+  else if (JSON.stringify(sorted) === JSON.stringify([1, 2, 3, 4, 5])) prefix = "工作日";
+  else if (JSON.stringify(sorted) === JSON.stringify([0, 6])) prefix = "周末";
+  return `${prefix} · ${avFmt(rule.start)}–${avFmt(rule.end)}`;
+}
+
+export function avStateFor(d: Date, rule: AvailabilityRule, overrides: Record<string, AvOverride>): { type: "base" | "full" | "off" | "custom" | "blank"; start?: number; end?: number } {
+  const ov = overrides[avKeyOf(d)];
+  if (ov) return ov;
+  if (rule.days.includes(d.getDay())) return { type: "base", start: rule.start, end: rule.end };
+  return { type: "blank" };
+}
+
+export const AV_DAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
+
+export function nextDays(count: number): Array<{ key: string; date: Date; label: string }> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    const key = avKeyOf(date);
+    const label = index === 0 ? "今天" : index === 1 ? "明天" : `${date.getMonth() + 1}/${date.getDate()} 周${AV_DAY_NAMES[date.getDay()]}`;
+    return { key, date, label };
+  });
+}
