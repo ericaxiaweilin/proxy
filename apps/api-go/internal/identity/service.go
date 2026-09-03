@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -27,7 +28,7 @@ type LoginIdentity struct {
 	Verified                               bool
 	Status                                 string
 }
-type DeviceRegistration struct{ ID, UserAccountID, Platform, Status, PushTokenRef string }
+type DeviceRegistration struct{ ID, UserAccountID, Platform, Status, PushTokenRef, CredentialHash string }
 type Membership struct {
 	Principal             command.Principal
 	UserAccountID, Status string
@@ -114,7 +115,7 @@ func (s *Service) Repository() Repository {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "AuthenticateWithGoogle",
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity":
 		return true
 	default:
@@ -153,6 +154,8 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.requestAccountRecovery(envelope)
 	case "RefreshSession":
 		return s.refreshSession(ctx, envelope)
+	case "ResumeTrustedDeviceSession":
+		return s.resumeTrustedDeviceSession(ctx, envelope)
 	case "AuthenticateWithGoogle":
 		return s.authenticateWithGoogle(ctx, envelope)
 	case "CreateDisplayIdentity":
@@ -178,6 +181,7 @@ type createSessionPayload struct {
 	LoginIdentityID    string            `json:"loginIdentityId"`
 	DeviceID           string            `json:"deviceId"`
 	ChallengeID        string            `json:"challengeId"`
+	DeviceCredential   string            `json:"deviceCredential"`
 	RequestedPrincipal command.Principal `json:"requestedPrincipal"`
 }
 
@@ -195,14 +199,49 @@ type beginPasswordlessAuthenticationPayload struct {
 }
 
 type createAnonymousSessionPayload struct {
-	DeviceID string `json:"deviceId"`
-	Platform string `json:"platform"`
+	DeviceID         string `json:"deviceId"`
+	Platform         string `json:"platform"`
+	DeviceCredential string `json:"deviceCredential"`
+	// R16.7-P0-A/B/C: legal consent + 18+ age gate. Date of birth is
+	// YYYY-MM-DD parsed as UTC midnight. LegalDocVersion is the version
+	// string of the Terms / Privacy doc the user accepted (e.g. "1.1");
+	// empty string falls back to "1.1" so the server never silently
+	// accepts an unsigned-by-version consent.
+	DateOfBirth      string                  `json:"dateOfBirth"`
+	Consents         *createAnonConsentBlock `json:"consents"`
+	LegalDocVersion  string                  `json:"legalDocVersion"`
+}
+
+type createAnonConsentBlock struct {
+	Terms   bool `json:"terms"`
+	Privacy bool `json:"privacy"`
 }
 
 func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope) command.Result {
 	var p createAnonymousSessionPayload
-	if !decode(e.Payload, &p) || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
+	if !decode(e.Payload, &p) || p.DeviceID == "" || len(p.DeviceCredential) < 32 || (p.Platform != "IOS" && p.Platform != "ANDROID") {
 		return command.Rejected(e, "INVALID_ANONYMOUS_SESSION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_anonymous_session", nil)
+	}
+	// R16.7-P0-A/B: legal consent + 18+ age gate, server-side. Defense in
+	// depth: mobile already enforces this, but the server is the trust
+	// anchor. Age < 18 and missing Terms/Privacy are both fatal.
+	if p.Consents == nil || !p.Consents.Terms || !p.Consents.Privacy {
+		return command.Rejected(e, "LEGAL_CONSENT_REQUIRED", "VALIDATION", "AFTER_USER_ACTION", "identity.legal_consent_required", nil)
+	}
+	docVersion := p.LegalDocVersion
+	if docVersion == "" {
+		docVersion = "1.1"
+	}
+	if p.DateOfBirth == "" {
+		return command.Rejected(e, "AGE_RESTRICTED", "VALIDATION", "AFTER_USER_ACTION", "identity.age_restricted", nil)
+	}
+	dob, err := time.Parse("2006-01-02", p.DateOfBirth)
+	if err != nil {
+		return command.Rejected(e, "AGE_RESTRICTED", "VALIDATION", "AFTER_USER_ACTION", "identity.age_restricted", nil)
+	}
+	ageYears := time.Since(dob).Hours() / (365.25 * 24)
+	if ageYears < 18 {
+		return command.Rejected(e, "AGE_RESTRICTED", "VALIDATION", "AFTER_USER_ACTION", "identity.age_restricted", nil)
 	}
 	user, device, created, err := s.repository.EnsureAnonymousIdentity(ctx, p.DeviceID, p.Platform)
 	if err != nil {
@@ -220,16 +259,55 @@ func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope
 	if s.tokenManager == nil {
 		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
 	}
-	pair, tokenRecord, err := s.tokenManager.Prepare(session)
+	pair, tokenRecord, err := s.tokenManager.Prepare(session, p.DeviceCredential)
 	if err != nil {
 		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
 	}
 	if err := s.persistCreateAnonymousSession(ctx, session, tokenRecord, domainEvents); err != nil {
 		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
 	}
+	// R16.7-P0-C: persist the Terms + Privacy consent records so the user
+	// has an auditable trail of the legal text they accepted and when. We
+	// do this best-effort after the session is created: a consent-write
+	// failure is logged but does not roll back the session, because the
+	// legal obligation is to capture the user-facing consent and the
+	// failure should be visible to ops rather than block the user.
+	if err := s.recordLegalConsents(ctx, session.UserAccountID, docVersion, e); err != nil {
+		log.Printf("legal consent write failed user=%s err=%v", session.UserAccountID, err)
+	}
 	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, eventRefs(domainEvents))
 	result.Auth = authTokens(pair, session)
 	return result
+}
+
+// recordLegalConsents persists the Terms + Privacy acceptance for a user
+// account. The Repository interface only exposes the minimum surface
+// needed; if the implementation does not support legal-consent writes we
+// skip silently so the rest of the signup flow is not coupled to the
+// privacy schema (which is independently deployed).
+func (s *Service) recordLegalConsents(ctx context.Context, userID, docVersion string, e command.Envelope) error {
+	if s.repository == nil {
+		return nil
+	}
+	if recorder, ok := s.repository.(interface {
+		RecordLegalConsent(ctx context.Context, userID, docKind, docVersion, ip, userAgent string) error
+	}); ok {
+		ip, ua := clientFingerprint(e)
+		if err := recorder.RecordLegalConsent(ctx, userID, "TERMS", docVersion, ip, ua); err != nil {
+			return err
+		}
+		return recorder.RecordLegalConsent(ctx, userID, "PRIVACY", docVersion, ip, ua)
+	}
+	return nil
+}
+
+func clientFingerprint(e command.Envelope) (string, string) {
+	if e.AuthContext == nil {
+		return "", ""
+	}
+	ip, _ := e.AuthContext["clientIp"].(string)
+	ua, _ := e.AuthContext["userAgent"].(string)
+	return ip, ua
 }
 
 // beginPasswordlessAuthentication is the public entry point for sign-up and
@@ -377,7 +455,7 @@ func (s *Service) verifyLoginChallenge(ctx context.Context, e command.Envelope) 
 
 func (s *Service) createSession(ctx context.Context, e command.Envelope) command.Result {
 	var p createSessionPayload
-	if !decode(e.Payload, &p) || p.DeviceID == "" || p.ChallengeID == "" {
+	if !decode(e.Payload, &p) || p.DeviceID == "" || p.ChallengeID == "" || len(p.DeviceCredential) < 32 {
 		return command.Rejected(e, "INVALID_CREATE_SESSION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_create_session", nil)
 	}
 	// Passwordless clients only hold a verified challenge. Derive account,
@@ -439,6 +517,10 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 	if !allowed {
 		return command.Rejected(e, "PRINCIPAL_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.principal_not_allowed", nil)
 	}
+	trustedDevices, ok := s.repository.(TrustedDeviceRepository)
+	if !ok || trustedDevices.BindDeviceCredential(ctx, device.ID, user.ID, hashToken(p.DeviceCredential)) != nil {
+		return command.Rejected(e, "DEVICE_PROOF_REGISTRATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.device_proof_registration_failed", nil)
+	}
 	now := s.clock.Now().UTC()
 	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
 		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
@@ -459,7 +541,7 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 	var tokenRecord SessionToken
 	if s.tokenManager != nil {
 		var tokenErr error
-		pair, tokenRecord, tokenErr = s.tokenManager.Prepare(session)
+		pair, tokenRecord, tokenErr = s.tokenManager.Prepare(session, p.DeviceCredential)
 		if tokenErr != nil {
 			return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
 		}
@@ -700,21 +782,25 @@ func (s *Service) requestAccountRecovery(e command.Envelope) command.Result {
 }
 
 type refreshSessionPayload struct {
-	RefreshToken string `json:"refreshToken"`
+	RefreshToken     string `json:"refreshToken"`
+	DeviceID         string `json:"deviceId"`
+	DeviceCredential string `json:"deviceCredential"`
 }
 
 func (s *Service) refreshSession(ctx context.Context, e command.Envelope) command.Result {
 	var p refreshSessionPayload
-	if !decode(e.Payload, &p) || p.RefreshToken == "" {
+	if !decode(e.Payload, &p) || p.RefreshToken == "" || p.DeviceID == "" || len(p.DeviceCredential) < 32 {
 		return command.Rejected(e, "INVALID_REFRESH_SESSION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_refresh_session", nil)
 	}
 	if s.tokenManager == nil {
 		return command.Rejected(e, "SESSION_TOKEN_REFRESH_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "identity.session_token_refresh_unavailable", nil)
 	}
-	pair, session, err := s.tokenManager.Rotate(ctx, p.RefreshToken)
+	pair, session, err := s.tokenManager.Rotate(ctx, p.RefreshToken, p.DeviceID, p.DeviceCredential)
 	switch {
 	case errors.Is(err, ErrTokenNotFound), errors.Is(err, ErrTokenExpired):
 		return command.Rejected(e, "REFRESH_TOKEN_INVALID", "AUTHENTICATION", "AFTER_REAUTH", "identity.refresh_token_invalid", nil)
+	case errors.Is(err, ErrDeviceProofInvalid):
+		return command.Rejected(e, "DEVICE_PROOF_INVALID", "AUTHENTICATION", "AFTER_REAUTH", "identity.device_proof_invalid", nil)
 	case errors.Is(err, ErrTokenRotationConflict):
 		return command.Rejected(e, "REFRESH_TOKEN_ALREADY_USED", "CONCURRENCY", "AFTER_REAUTH", "identity.refresh_token_already_used", nil)
 	case errors.Is(err, ErrSessionNotFound):
@@ -727,15 +813,56 @@ func (s *Service) refreshSession(ctx context.Context, e command.Envelope) comman
 	return result
 }
 
+type resumeTrustedDeviceSessionPayload struct {
+	DeviceID         string `json:"deviceId"`
+	DeviceCredential string `json:"deviceCredential"`
+}
+
+func (s *Service) resumeTrustedDeviceSession(ctx context.Context, e command.Envelope) command.Result {
+	var p resumeTrustedDeviceSessionPayload
+	if !decode(e.Payload, &p) || p.DeviceID == "" || len(p.DeviceCredential) < 32 {
+		return command.Rejected(e, "INVALID_DEVICE_PROOF", "VALIDATION", "AFTER_REAUTH", "identity.invalid_device_proof", nil)
+	}
+	trustedDevices, ok := s.repository.(TrustedDeviceRepository)
+	if !ok {
+		return command.Rejected(e, "TRUSTED_DEVICE_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "identity.trusted_device_unavailable", nil)
+	}
+	device, err := trustedDevices.GetTrustedDevice(ctx, p.DeviceID, hashToken(p.DeviceCredential))
+	if err != nil {
+		return command.Rejected(e, "DEVICE_PROOF_INVALID", "AUTHENTICATION", "AFTER_REAUTH", "identity.device_proof_invalid", nil)
+	}
+	user, err := s.repository.GetUser(ctx, device.UserAccountID)
+	if err != nil || !canHoldSession(user.Status) {
+		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_REAUTH", "identity.account_not_active", nil)
+	}
+	now := s.clock.Now().UTC()
+	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
+		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
+	}
+	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
+	pair, tokenRecord, err := s.tokenManager.Prepare(session, p.DeviceCredential)
+	if err != nil {
+		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
+	}
+	events := []event.DomainEvent{event.New("TrustedDeviceSessionCreated", "Session", session.ID, session.Version, user.ID, e.CorrelationID, e.CommandID, now, map[string]any{"deviceId": device.ID})}
+	if err := s.persistCreateGoogleSession(ctx, session, tokenRecord, events); err != nil {
+		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
+	}
+	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, eventRefs(events))
+	result.Auth = authTokens(pair, session)
+	return result
+}
+
 type authenticateWithGooglePayload struct {
-	IdToken  string `json:"idToken"`
-	DeviceID string `json:"deviceId"`
-	Platform string `json:"platform"`
+	IdToken          string `json:"idToken"`
+	DeviceID         string `json:"deviceId"`
+	Platform         string `json:"platform"`
+	DeviceCredential string `json:"deviceCredential"`
 }
 
 func (s *Service) authenticateWithGoogle(ctx context.Context, e command.Envelope) command.Result {
 	var p authenticateWithGooglePayload
-	if !decode(e.Payload, &p) || strings.TrimSpace(p.IdToken) == "" || strings.TrimSpace(p.DeviceID) == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
+	if !decode(e.Payload, &p) || strings.TrimSpace(p.IdToken) == "" || strings.TrimSpace(p.DeviceID) == "" || len(p.DeviceCredential) < 32 || (p.Platform != "IOS" && p.Platform != "ANDROID") {
 		return command.Rejected(e, "INVALID_GOOGLE_AUTH", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_google_auth", nil)
 	}
 	email, err := verifyGoogleIDToken(ctx, p.IdToken)
@@ -758,6 +885,10 @@ func (s *Service) authenticateWithGoogle(ctx context.Context, e command.Envelope
 	if !canHoldSession(user.Status) {
 		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.account_not_active", nil)
 	}
+	trustedDevices, ok := s.repository.(TrustedDeviceRepository)
+	if !ok || trustedDevices.BindDeviceCredential(ctx, device.ID, user.ID, hashToken(p.DeviceCredential)) != nil {
+		return command.Rejected(e, "DEVICE_PROOF_REGISTRATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.device_proof_registration_failed", nil)
+	}
 	now := s.clock.Now().UTC()
 	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
 		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
@@ -766,7 +897,7 @@ func (s *Service) authenticateWithGoogle(ctx context.Context, e command.Envelope
 	if s.tokenManager == nil {
 		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
 	}
-	pair, tokenRecord, err := s.tokenManager.Prepare(session)
+	pair, tokenRecord, err := s.tokenManager.Prepare(session, p.DeviceCredential)
 	if err != nil {
 		return command.Rejected(e, "SESSION_TOKEN_ISSUE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_token_issue_failed", nil)
 	}
@@ -1015,8 +1146,8 @@ func (s *Service) enforceMaxConcurrentSessions(ctx context.Context, userID strin
 		sess.Status = "REVOKED"
 		sess.Version++
 		ev := event.New("SessionRevoked", "Session", sess.ID, sess.Version, userID, e.CorrelationID, e.CommandID, now, map[string]any{
-			"reason": "AUTO_EVICT_NEW_LOGIN",
-			"userAccountId": userID,
+			"reason":          "AUTO_EVICT_NEW_LOGIN",
+			"userAccountId":   userID,
 			"evictedDeviceId": sess.DeviceID,
 		})
 		if err := s.persistUpdateSession(ctx, sess, prev, []event.DomainEvent{ev}); err != nil {

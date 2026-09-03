@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +39,11 @@ func testService() *Service {
 }
 
 func testEnvelope(commandType string, payload map[string]any, target command.Target) command.Envelope {
+	if commandType == "CreateSession" || commandType == "CreateAnonymousSession" || commandType == "RefreshSession" || commandType == "AuthenticateWithGoogle" {
+		if _, exists := payload["deviceCredential"]; !exists {
+			payload["deviceCredential"] = strings.Repeat("a", 64)
+		}
+	}
 	expectedVersion := 1
 	return command.Envelope{
 		CommandID:                "cmd_" + commandType,
@@ -142,8 +148,9 @@ func TestPasswordlessEmailCreatesAccountThenSessionWithoutClientAccountIDs(t *te
 
 func TestAnonymousSessionIsDurableAndReusesDeviceIdentity(t *testing.T) {
 	service := NewWithRepositoryAndClock(NewMemoryRepository(nil), clock.NewFixed(time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)))
-	first := service.Handle(testEnvelope("CreateAnonymousSession", map[string]any{"deviceId": "device_guest", "platform": "ANDROID"}, command.Target{Type: "Session", ID: "new"}))
-	second := service.Handle(testEnvelope("CreateAnonymousSession", map[string]any{"deviceId": "device_guest", "platform": "ANDROID"}, command.Target{Type: "Session", ID: "new"}))
+	anonPayload := map[string]any{"deviceId": "device_guest", "platform": "ANDROID", "dateOfBirth": "1990-01-01", "consents": map[string]any{"terms": true, "privacy": true}, "legalDocVersion": "1.1"}
+	first := service.Handle(testEnvelope("CreateAnonymousSession", anonPayload, command.Target{Type: "Session", ID: "new"}))
+	second := service.Handle(testEnvelope("CreateAnonymousSession", anonPayload, command.Target{Type: "Session", ID: "new"}))
 	if first.Outcome != "ACCEPTED" || first.Auth == nil || second.Outcome != "ACCEPTED" || second.Auth == nil {
 		t.Fatalf("expected anonymous sessions with tokens, got %#v %#v", first, second)
 	}
@@ -155,7 +162,7 @@ func TestAnonymousSessionIsDurableAndReusesDeviceIdentity(t *testing.T) {
 func TestPhoneUpgradeKeepsGuestPersonAndExistingCredentialWins(t *testing.T) {
 	repository := NewMemoryRepository(nil)
 	service := NewWithRepositoryAndClockAndChallengeProvider(repository, clock.NewFixed(time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)), testLoginChallengeProvider{})
-	guest := service.Handle(testEnvelope("CreateAnonymousSession", map[string]any{"deviceId": "device_guest", "platform": "ANDROID"}, command.Target{Type: "Session", ID: "new"}))
+	guest := service.Handle(testEnvelope("CreateAnonymousSession", map[string]any{"deviceId": "device_guest", "platform": "ANDROID", "dateOfBirth": "1990-01-01", "consents": map[string]any{"terms": true, "privacy": true}, "legalDocVersion": "1.1"}, command.Target{Type: "Session", ID: "new"}))
 	if guest.Outcome != "ACCEPTED" || guest.Auth == nil {
 		t.Fatalf("expected guest session, got %#v", guest)
 	}
@@ -184,7 +191,7 @@ func TestRefreshTokenRotationRejectsReplay(t *testing.T) {
 		t.Fatalf("expected token pair on session creation, got %#v", created)
 	}
 	refresh := func(token string) command.Result {
-		return service.Handle(testEnvelope("RefreshSession", map[string]any{"refreshToken": token}, command.Target{Type: "Session", ID: created.Aggregate.ID}))
+		return service.Handle(testEnvelope("RefreshSession", map[string]any{"refreshToken": token, "deviceId": "device_001"}, command.Target{Type: "Session", ID: created.Aggregate.ID}))
 	}
 	rotated := refresh(created.Auth.RefreshToken)
 	if rotated.Outcome != "ACCEPTED" || rotated.Auth == nil || rotated.Auth.Rotation != 2 {
@@ -197,6 +204,36 @@ func TestRefreshTokenRotationRejectsReplay(t *testing.T) {
 	authenticated, err := service.Authenticate(context.Background(), rotated.Auth.AccessToken)
 	if err != nil || authenticated.SessionID != created.Aggregate.ID || authenticated.Principal.ID != "business_001" {
 		t.Fatalf("expected rotated access token to authenticate, session=%#v err=%v", authenticated, err)
+	}
+}
+
+func TestRefreshRejectsCopiedTokenWithoutOriginalDeviceProof(t *testing.T) {
+	service := testService()
+	created := service.Handle(testEnvelope("CreateSession", map[string]any{
+		"userAccountId": "user_001", "loginIdentityId": "login_001", "deviceId": "device_001", "challengeId": "challenge_001",
+		"deviceCredential":   strings.Repeat("a", 64),
+		"requestedPrincipal": map[string]any{"type": "BUSINESS", "id": "business_001"},
+	}, command.Target{Type: "Session", ID: "new"}))
+	if created.Outcome != "ACCEPTED" || created.Auth == nil {
+		t.Fatalf("expected session, got %#v", created)
+	}
+
+	wrongSecret := service.Handle(testEnvelope("RefreshSession", map[string]any{
+		"refreshToken":     created.Auth.RefreshToken,
+		"deviceId":         "device_001",
+		"deviceCredential": strings.Repeat("b", 64),
+	}, command.Target{Type: "Session", ID: created.Aggregate.ID}))
+	if wrongSecret.Outcome != "REJECTED" || wrongSecret.Error == nil || wrongSecret.Error.ErrorCode != "DEVICE_PROOF_INVALID" {
+		t.Fatalf("copied token without device credential must be rejected, got %#v", wrongSecret)
+	}
+
+	wrongDevice := service.Handle(testEnvelope("RefreshSession", map[string]any{
+		"refreshToken":     created.Auth.RefreshToken,
+		"deviceId":         "device_other",
+		"deviceCredential": strings.Repeat("a", 64),
+	}, command.Target{Type: "Session", ID: created.Aggregate.ID}))
+	if wrongDevice.Outcome != "REJECTED" || wrongDevice.Error == nil || wrongDevice.Error.ErrorCode != "DEVICE_PROOF_INVALID" {
+		t.Fatalf("original credential on a different device id must be rejected, got %#v", wrongDevice)
 	}
 }
 
@@ -218,6 +255,37 @@ func TestRevokeSessionDeletesTokens(t *testing.T) {
 	}
 }
 
+func TestTrustedDeviceCanCreateFreshSessionAfterLogoutButOtherDeviceCannot(t *testing.T) {
+	service := testService()
+	credential := strings.Repeat("c", 64)
+	created := service.Handle(testEnvelope("CreateSession", map[string]any{
+		"userAccountId": "user_001", "loginIdentityId": "login_001", "deviceId": "device_001", "challengeId": "challenge_001",
+		"deviceCredential":   credential,
+		"requestedPrincipal": map[string]any{"type": "INDIVIDUAL", "id": "user_001"},
+	}, command.Target{Type: "Session", ID: "new"}))
+	if created.Outcome != "ACCEPTED" {
+		t.Fatalf("expected initial verified login, got %#v", created)
+	}
+	revoked := service.Handle(testEnvelope("RevokeSession", map[string]any{"reason": "USER_LOGOUT"}, command.Target{Type: "Session", ID: created.Aggregate.ID}))
+	if revoked.Outcome != "ACCEPTED" {
+		t.Fatalf("expected real server logout, got %#v", revoked)
+	}
+
+	wrong := service.Handle(testEnvelope("ResumeTrustedDeviceSession", map[string]any{
+		"deviceId": "device_001", "deviceCredential": strings.Repeat("d", 64),
+	}, command.Target{Type: "Session", ID: "new"}))
+	if wrong.Outcome != "REJECTED" || wrong.Error == nil || wrong.Error.ErrorCode != "DEVICE_PROOF_INVALID" {
+		t.Fatalf("wrong installation proof must be rejected, got %#v", wrong)
+	}
+
+	resumed := service.Handle(testEnvelope("ResumeTrustedDeviceSession", map[string]any{
+		"deviceId": "device_001", "deviceCredential": credential,
+	}, command.Target{Type: "Session", ID: "new"}))
+	if resumed.Outcome != "ACCEPTED" || resumed.Auth == nil || resumed.Auth.SessionID == created.Auth.SessionID {
+		t.Fatalf("trusted device must receive a fresh session after logout, got %#v", resumed)
+	}
+}
+
 func TestRefreshTokenRaceHasOneWinner(t *testing.T) {
 	service := testService()
 	created := service.Handle(testEnvelope("CreateSession", map[string]any{
@@ -234,7 +302,7 @@ func TestRefreshTokenRaceHasOneWinner(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			_, _, err := service.tokenManager.Rotate(context.Background(), created.Auth.RefreshToken)
+			_, _, err := service.tokenManager.Rotate(context.Background(), created.Auth.RefreshToken, "device_001", strings.Repeat("a", 64))
 			results <- err
 		}()
 	}

@@ -29,7 +29,9 @@ func TestIdentityPostgresRoundTrip(t *testing.T) {
 	// 1. First anonymous session: creates a new user (Status=ANONYMOUS)
 	// and binds deviceA to that user.
 	r := svc.HandleContext(ctx, idEnvelope("CreateAnonymousSession", map[string]any{
-		"deviceId": deviceA, "platform": "IOS",
+		"deviceId": deviceA, "platform": "IOS", "dateOfBirth": "1990-01-01",
+		"consents":       map[string]any{"terms": true, "privacy": true},
+		"legalDocVersion": "1.1",
 	}, "anon_init"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("CreateAnonymousSession #1: %+v", r.Error)
@@ -50,7 +52,9 @@ func TestIdentityPostgresRoundTrip(t *testing.T) {
 	// EnsureAnonymousIdentity held the per-device user invariant
 	// through real PostgreSQL, not just the in-memory map.
 	r = svc.HandleContext(ctx, idEnvelope("CreateAnonymousSession", map[string]any{
-		"deviceId": deviceA, "platform": "IOS",
+		"deviceId": deviceA, "platform": "IOS", "dateOfBirth": "1990-01-01",
+		"consents":       map[string]any{"terms": true, "privacy": true},
+		"legalDocVersion": "1.1",
 	}, "anon_init"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("CreateAnonymousSession #2: %+v", r.Error)
@@ -64,7 +68,9 @@ func TestIdentityPostgresRoundTrip(t *testing.T) {
 	// the per-device user creation is keyed on device, not on
 	// global counter.
 	r = svc.HandleContext(ctx, idEnvelope("CreateAnonymousSession", map[string]any{
-		"deviceId": deviceB, "platform": "ANDROID",
+		"deviceId": deviceB, "platform": "ANDROID", "dateOfBirth": "1990-01-01",
+		"consents":       map[string]any{"terms": true, "privacy": true},
+		"legalDocVersion": "1.1",
 	}, "anon_init"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("CreateAnonymousSession deviceB: %+v", r.Error)
@@ -162,6 +168,11 @@ func cleanupIdentityPG(t *testing.T, pool *pgxpool.Pool, ids []string) {
 }
 
 func idEnvelope(commandType string, payload map[string]any, actorID string, targetID ...string) command.Envelope {
+	if commandType == "CreateSession" || commandType == "CreateAnonymousSession" || commandType == "RefreshSession" || commandType == "AuthenticateWithGoogle" {
+		if _, exists := payload["deviceCredential"]; !exists {
+			payload["deviceCredential"] = strings.Repeat("b", 64)
+		}
+	}
 	envelope := command.Envelope{
 		CommandID:      "cmd_id_pg_" + commandType,
 		CommandType:    commandType,
@@ -179,4 +190,83 @@ func idEnvelope(commandType string, payload map[string]any, actorID string, targ
 		envelope.Target = command.Target{Type: "UserAccount", ID: targetID[0]}
 	}
 	return envelope
+}
+
+// R16.7-P0-A/B/C: anonymous-session legal-consent + age gate. Defense in
+// depth: the same predicates enforced on the mobile client must also
+// hold server-side. Any of the three failure modes must reject before
+// the user row is created.
+func TestCreateAnonymousSessionRejectsMissingConsents(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewIdentityRepositoryWithOutbox(pool, NewOutboxRepository(pool))
+	svc := identity.NewWithRepositoryAndClockAndChallengeProvider(repo, nil, nil)
+
+	run := time.Now().UnixNano()
+	deviceID := "dev_consent_missing_" + itoa(run)
+
+	r := svc.HandleContext(ctx, idEnvelope("CreateAnonymousSession", map[string]any{
+		"deviceId": deviceID, "platform": "IOS", "dateOfBirth": "1990-01-01",
+	}, "anon_no_consent"))
+	if r.Outcome != "REJECTED" {
+		t.Fatalf("expected REJECTED without consents, got %+v", r)
+	}
+	if r.Error == nil || r.Error.ErrorCode != "LEGAL_CONSENT_REQUIRED" {
+		t.Fatalf("expected LEGAL_CONSENT_REQUIRED, got %+v", r.Error)
+	}
+}
+
+func TestCreateAnonymousSessionRejectsUnder18(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewIdentityRepositoryWithOutbox(pool, NewOutboxRepository(pool))
+	svc := identity.NewWithRepositoryAndClockAndChallengeProvider(repo, nil, nil)
+
+	run := time.Now().UnixNano()
+	deviceID := "dev_under_18_" + itoa(run)
+
+	r := svc.HandleContext(ctx, idEnvelope("CreateAnonymousSession", map[string]any{
+		"deviceId": deviceID, "platform": "IOS", "dateOfBirth": "2015-01-01",
+		"consents":        map[string]any{"terms": true, "privacy": true},
+		"legalDocVersion": "1.1",
+	}, "anon_under_18"))
+	if r.Outcome != "REJECTED" {
+		t.Fatalf("expected REJECTED under 18, got %+v", r)
+	}
+	if r.Error == nil || r.Error.ErrorCode != "AGE_RESTRICTED" {
+		t.Fatalf("expected AGE_RESTRICTED, got %+v", r.Error)
+	}
+}
+
+func TestCreateAnonymousSessionPersistsLegalConsentRows(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewIdentityRepositoryWithOutbox(pool, NewOutboxRepository(pool))
+	svc := identity.NewWithRepositoryAndClockAndChallengeProvider(repo, nil, nil)
+
+	run := time.Now().UnixNano()
+	deviceID := "dev_consent_ok_" + itoa(run)
+
+	r := svc.HandleContext(ctx, idEnvelope("CreateAnonymousSession", map[string]any{
+		"deviceId": deviceID, "platform": "ANDROID", "dateOfBirth": "1990-01-01",
+		"consents":        map[string]any{"terms": true, "privacy": true},
+		"legalDocVersion": "1.1",
+	}, "anon_consent_ok"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("CreateAnonymousSession with consent: %+v", r.Error)
+	}
+	userID := lookupUserIDForDevicePG(t, pool, deviceID)
+	if userID == "" {
+		t.Fatalf("no user bound to %s after success", deviceID)
+	}
+	var termsCount, privacyCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM privacy.legal_consent_records WHERE user_id = $1 AND doc_kind = 'TERMS' AND doc_version = '1.1'`, userID).Scan(&termsCount); err != nil {
+		t.Fatalf("count terms consents: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM privacy.legal_consent_records WHERE user_id = $1 AND doc_kind = 'PRIVACY' AND doc_version = '1.1'`, userID).Scan(&privacyCount); err != nil {
+		t.Fatalf("count privacy consents: %v", err)
+	}
+	if termsCount != 1 || privacyCount != 1 {
+		t.Fatalf("expected 1 TERMS + 1 PRIVACY row for user %s, got terms=%d privacy=%d", userID, termsCount, privacyCount)
+	}
 }

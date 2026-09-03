@@ -244,6 +244,34 @@ func (r *IdentityRepository) GetDevice(ctx context.Context, id string) (identity
 	return device, nil
 }
 
+func (r *IdentityRepository) BindDeviceCredential(ctx context.Context, deviceID, userAccountID, credentialHash string) error {
+	tag, err := execerForContext(ctx, r.pool).Exec(ctx, `
+		UPDATE identity.device_registrations
+		SET credential_hash = $1, updated_at = now()
+		WHERE id = $2 AND user_account_id = $3 AND status = 'ACTIVE'`, credentialHash, deviceID, userAccountID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return identity.ErrDeviceNotFound
+	}
+	return nil
+}
+
+func (r *IdentityRepository) GetTrustedDevice(ctx context.Context, deviceID, credentialHash string) (identity.DeviceRegistration, error) {
+	var device identity.DeviceRegistration
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, user_account_id, platform, status, COALESCE(push_token_ref, ''), COALESCE(credential_hash, '')
+		FROM identity.device_registrations
+		WHERE id = $1 AND credential_hash = $2 AND status = 'ACTIVE'`, deviceID, credentialHash).Scan(
+		&device.ID, &device.UserAccountID, &device.Platform, &device.Status, &device.PushTokenRef, &device.CredentialHash,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return identity.DeviceRegistration{}, identity.ErrDeviceNotFound
+	}
+	return device, err
+}
+
 func (r *IdentityRepository) UpsertDevice(ctx context.Context, device identity.DeviceRegistration) error {
 	return upsertDevice(ctx, execerForContext(ctx, r.pool), device)
 }
@@ -319,14 +347,15 @@ func insertSessionTokens(ctx context.Context, execer sqlExecer, tokens identity.
 	_, err := execer.Exec(ctx, `
 		INSERT INTO identity.session_tokens (
 			session_id, access_token_hash, refresh_token_hash,
-			access_expires_at, refresh_expires_at, rotation
-		) VALUES ($1, $2, $3, $4, $5, $6)`,
+			access_expires_at, refresh_expires_at, rotation, device_credential_hash
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		tokens.SessionID,
 		tokens.AccessTokenHash,
 		tokens.RefreshTokenHash,
 		tokens.AccessExpiresAt,
 		tokens.RefreshExpiresAt,
 		tokens.Rotation,
+		tokens.DeviceCredentialHash,
 	)
 	return err
 }
@@ -460,7 +489,7 @@ func (r *IdentityRepository) getSessionToken(ctx context.Context, predicate stri
 	var tokens identity.SessionToken
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT session_id, access_token_hash, refresh_token_hash,
-		       access_expires_at, refresh_expires_at, rotation
+		       access_expires_at, refresh_expires_at, rotation, device_credential_hash
 		FROM identity.session_tokens `+predicate, value).Scan(
 		&tokens.SessionID,
 		&tokens.AccessTokenHash,
@@ -468,6 +497,7 @@ func (r *IdentityRepository) getSessionToken(ctx context.Context, predicate stri
 		&tokens.AccessExpiresAt,
 		&tokens.RefreshExpiresAt,
 		&tokens.Rotation,
+		&tokens.DeviceCredentialHash,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return identity.SessionToken{}, identity.ErrTokenNotFound
@@ -483,13 +513,15 @@ func (r *IdentityRepository) RotateSessionTokens(ctx context.Context, sessionID 
 		    access_expires_at = $3,
 		    refresh_expires_at = $4,
 		    rotation = $5,
+		    device_credential_hash = $6,
 		    updated_at = now()
-		WHERE session_id = $6 AND rotation = $7`,
+		WHERE session_id = $7 AND rotation = $8`,
 		replacement.AccessTokenHash,
 		replacement.RefreshTokenHash,
 		replacement.AccessExpiresAt,
 		replacement.RefreshExpiresAt,
 		replacement.Rotation,
+		replacement.DeviceCredentialHash,
 		sessionID,
 		expectedRotation,
 	)
@@ -783,6 +815,20 @@ func nullableTime(value time.Time) any {
 		return nil
 	}
 	return value
+}
+
+// R16.7-P0-C: persist a Terms / Privacy acceptance record. Idempotent on
+// (user_id, doc_kind, doc_version) — a re-consent on the same version
+// hits the UNIQUE constraint and is silently ignored (the audit row from
+// the first acceptance stands).
+func (r *IdentityRepository) RecordLegalConsent(ctx context.Context, userID, docKind, docVersion, ip, userAgent string) error {
+	id := "consent_" + userID + "_" + docKind + "_" + docVersion + "_" + time.Now().UTC().Format("20060102150405.000000")
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO privacy.legal_consent_records (id, user_id, doc_kind, doc_version, accepted_at, required, ip, user_agent)
+		VALUES ($1, $2, $3, $4, now(), TRUE, NULLIF($5, '')::inet, NULLIF($6, ''))
+		ON CONFLICT (user_id, doc_kind, doc_version) DO NOTHING
+	`, id, userID, docKind, docVersion, ip, userAgent)
+	return err
 }
 
 var _ identity.Repository = (*IdentityRepository)(nil)

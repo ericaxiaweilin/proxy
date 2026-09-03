@@ -12,7 +12,7 @@ export type LoginChallengeChannel = "EMAIL" | "SMS";
 export type LoginClientOptions = {
   baseUrl: string;
   deviceId: string;
-  deviceCredential?: string; // 64-hex hash for migration 055 session_tokens device_credential_hash
+  deviceCredential: string;
   transport: Transport;
   secureSessionStore: SecureSessionStore;
   now?: () => Date;
@@ -21,6 +21,16 @@ export type LoginClientOptions = {
 export type RequestLoginChallengeInput = {
   loginIdentityId: string;
   channel: LoginChallengeChannel;
+};
+
+// R16.7-P0-A/B: explicit signup payload for anonymous session creation.
+// Caller must have already surfaced the Terms / Privacy docs and obtained
+// active user consent (checkbox), and captured a valid 18+ date of birth.
+export type AnonymousSessionSignup = {
+  dateOfBirth: string; // YYYY-MM-DD
+  consents: { terms: boolean; privacy: boolean };
+  legalDocVersion?: string; // e.g. "1.1"; defaults to "1.1" if omitted
+  now?: () => Date; // injectable clock for age calculation in tests
 };
 
 export type BeginPasswordlessAuthenticationInput = {
@@ -93,10 +103,36 @@ export class LoginClient {
     return { challengeId: result.operationRef, result };
   }
 
-  public async createAnonymousSession(platform: "ANDROID" | "IOS"): Promise<StoredSession> {
+  public async createAnonymousSession(platform: "ANDROID" | "IOS", signup?: AnonymousSessionSignup): Promise<StoredSession> {
+    // R16.7-P0-A/B: Terms + Privacy consent and 18+ age gate (PRD v1.4
+    // LC-04, LC-12, LC-15; Vietnam PDP 91/2025/QH15). Fail-closed at the
+    // client: never even send the request without both consents and a
+    // parseable DOB whose computed age is >= 18.
+    const consent = signup?.consents;
+    if (!consent || !consent.terms || !consent.privacy) {
+      throw new LoginProtocolError("terms and privacy consent are required to create an account");
+    }
+    const dateOfBirth = signup?.dateOfBirth;
+    if (!dateOfBirth || !/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
+      throw new LoginProtocolError("date of birth in YYYY-MM-DD is required to create an account");
+    }
+    const dob = new Date(`${dateOfBirth}T00:00:00.000Z`);
+    if (Number.isNaN(dob.getTime())) {
+      throw new LoginProtocolError("date of birth is not a valid calendar date");
+    }
+    const now = signup?.now ?? this.input.now ?? (() => new Date());
+    const ageMs = now().getTime() - dob.getTime();
+    const ageYears = ageMs / (365.25 * 24 * 60 * 60 * 1000);
+    if (ageYears < 18) {
+      throw new LoginProtocolError("age must be 18 or older to create an account");
+    }
     const result = await this.sendCommand("CreateAnonymousSession", { type: "Session", id: "new" }, {
       deviceId: this.input.deviceId,
-      platform
+      platform,
+      deviceCredential: this.input.deviceCredential,
+      dateOfBirth,
+      consents: { terms: consent.terms, privacy: consent.privacy },
+      legalDocVersion: signup?.legalDocVersion ?? "1.1"
     });
     if (result.outcome !== "ACCEPTED") throw new LoginProtocolError("anonymous session response was not accepted");
     const auth = parseSessionAuthTokens(result.auth);
@@ -110,11 +146,25 @@ export class LoginClient {
     const result = await this.sendCommand("AuthenticateWithGoogle", { type: "Session", id: "new" }, {
       idToken,
       deviceId: this.input.deviceId,
-      platform
+      platform,
+      deviceCredential: this.input.deviceCredential
     });
     if (result.outcome !== "ACCEPTED") throw new LoginProtocolError(result.error?.messageKey ?? "Google authentication rejected");
     const auth = parseSessionAuthTokens(result.auth);
     if (!auth) throw new LoginProtocolError("Google authentication did not return valid auth tokens");
+    const session: StoredSession = { userAccountId: auth.userAccountId, auth, principal: auth.principal };
+    await this.input.secureSessionStore.write(session);
+    return session;
+  }
+
+  public async resumeTrustedDeviceSession(): Promise<StoredSession> {
+    const result = await this.sendCommand("ResumeTrustedDeviceSession", { type: "Session", id: "new" }, {
+      deviceId: this.input.deviceId,
+      deviceCredential: this.input.deviceCredential
+    });
+    if (result.outcome !== "ACCEPTED") throw new LoginProtocolError("trusted device verification was rejected");
+    const auth = parseSessionAuthTokens(result.auth);
+    if (!auth) throw new LoginProtocolError("trusted device response did not contain valid auth tokens");
     const session: StoredSession = { userAccountId: auth.userAccountId, auth, principal: auth.principal };
     await this.input.secureSessionStore.write(session);
     return session;
@@ -143,6 +193,7 @@ export class LoginClient {
       loginIdentityId: input.loginIdentityId,
       deviceId: this.input.deviceId,
       challengeId: input.challengeId,
+      deviceCredential: this.input.deviceCredential,
       requestedPrincipal: input.requestedPrincipal
     });
     if (result.outcome !== "ACCEPTED") {
@@ -164,8 +215,8 @@ export class LoginClient {
   public async createSessionFromChallenge(challengeId: string): Promise<StoredSession> {
     const result = await this.sendCommand("CreateSession", { type: "Session", id: "new" }, {
       deviceId: this.input.deviceId,
-      deviceCredential: this.input.deviceCredential ?? "",
-      challengeId
+      challengeId,
+      deviceCredential: this.input.deviceCredential
     });
     if (result.outcome !== "ACCEPTED" || !result.aggregate?.id) throw new LoginProtocolError("session response was not accepted");
     const auth = parseSessionAuthTokens(result.auth);

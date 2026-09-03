@@ -162,25 +162,30 @@ export function ProxyApp(): React.JSX.Element {
       if (cancelled) return;
       if (!state) { setPhase("SIGNED_OUT"); return; }
       const isGuestFlag = await nativeSecureStorageDriver.getItem(GUEST_FLAG_KEY).catch(() => null);
-      // Do not rotate refresh tokens on every launch. A still-valid access
-      // token is enough; getAccessToken refreshes only near expiry. Transient
-      // network/server failures preserve the Keychain session and the app can
-      // retry when an authenticated action is made.
+      // A Keychain record is not proof that the server still accepts it.
+      // Security migrations/revocation can invalidate server tokens while the
+      // phone keeps an apparently valid access token. Validate on cold start;
+      // if refresh is no longer usable, recover only through this trusted
+      // installation's device credential. This prevents a false "logged in"
+      // UI that fails later on CreatePost/media upload.
       if (state.status === "AUTHENTICATED") {
+        const expectedUserAccountId = (await secureSessionStore.read().catch(() => undefined))?.userAccountId;
         try {
-          const accessToken = await sessionAuthClient.getAccessToken();
-          if (!accessToken) throw new Error("session_expired");
+          await sessionAuthClient.refresh();
         } catch (error) {
           if (isGuestFlag === "1") {
             if (!cancelled) setPhase("PUBLIC");
             return;
           }
-          // A retained Keychain record means this may only be a temporary
-		  // refresh outage. Keep the account signed in; explicit auth rejection
-		  // clears the record inside SessionAuthClient and reaches SIGNED_OUT.
-		  const retained = await secureSessionStore.read().catch(() => undefined);
-		  if (!cancelled) setPhase(retained ? "AUTHENTICATED" : "SIGNED_OUT");
-          return;
+          const resumed = await (await getNativeLoginClient()).resumeTrustedDeviceSession().catch(() => undefined);
+          if (!resumed || (expectedUserAccountId && resumed.userAccountId !== expectedUserAccountId)) {
+            // A temporary outage must not erase credentials, but neither may
+            // it claim write access. The sign-in screen can retry trusted
+            // resume or OTP without losing the remembered account card.
+            if (!cancelled) setPhase("SIGNED_OUT");
+            return;
+          }
+          await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(() => undefined);
         }
       }
       if (cancelled) return;
@@ -206,11 +211,13 @@ export function ProxyApp(): React.JSX.Element {
     void (async () => {
       const existing = await lastSignInStore.read().catch(() => undefined);
       if (cancelled) return;
-      if (existing) return;
+      const storedSession = await secureSessionStore.read().catch(() => undefined);
+      if (existing?.userAccountId || !storedSession?.userAccountId) return;
       await lastSignInStore.write({
-        channel: "EMAIL",
-        identifier: "proxy@account",
-        signedInAt: new Date().toISOString()
+        channel: existing?.channel ?? "EMAIL",
+        identifier: existing?.identifier ?? "proxy@account",
+        signedInAt: existing?.signedInAt ?? new Date().toISOString(),
+        userAccountId: storedSession.userAccountId
       }).catch(() => undefined);
     })();
     return () => {
@@ -284,6 +291,12 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  // R16.7-P0-A/B/C: register-time legal consent + 18+ DOB.
+  // Reset to defaults whenever the user switches between auth modes so a
+  // partially-completed signup does not leak into the next attempt.
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   // R15.36: 历史登录账户 — 只在 login 模式 展示。
   // 脱敏的 identifier 已经读取, 用户点 "继续" 会自动填 + 发起验证码。
   // "换号" 本地 dismiss (不写盘), 下次开 app 重新出现 — 因为上一个
@@ -324,31 +337,16 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     setError(undefined);
     setBusy(true);
     try {
-      // 1) Silent re-auth: 用 keychain 里的 refreshToken 换新 accessToken。
-      //    sessionAuthClient.refresh() 内部会:
-      //    - 读 keychain session
-      //    - 调 /v1/commands/RefreshSession
-      //    - 成功 → write 新 session (拿回 signedOut=undefined)
-      //    - 失败 → 跳到 catch
-      const tokens = await sessionAuthClient.refresh().catch(() => undefined);
-      if (tokens && tokens.accessToken) {
-        // 成功: user 登入, 不需 OTP
-        // sessionAuthClient.refresh() 成功后会 write 新 session,
-        // 但 signedOut 状态可能仍为 true (因为 write 用的不是完整 session)。
-        // 这里我们清掉 signedOut, 写一次干净 session。
-        try {
-          const current = await secureSessionStore.read();
-          if (current?.signedOut) {
-            // 清除 signedOut / signedOutAt 标记, 写回为正常 session
-            const restored: typeof current = { ...current } as typeof current;
-            delete (restored as { signedOut?: boolean }).signedOut;
-            delete (restored as { signedOutAt?: string }).signedOutAt;
-            await secureSessionStore.write(restored as Parameters<typeof secureSessionStore.write>[0]);
-          }
-        } catch {}
+      // A remembered card is only a hint. Passwordless resume is allowed only
+      // when this installation proves its Keychain/Keystore credential and the
+      // server maps that trusted device back to the same account.
+      if (entry.userAccountId) {
+        const resumed = await (await getNativeLoginClient()).resumeTrustedDeviceSession().catch(() => undefined);
+        if (resumed?.userAccountId === entry.userAccountId) {
         await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(() => undefined);
         onAuthenticated();
         return;
+        }
       }
       // 2) Silent re-auth 失败, 走 OTP fallback
       const loginClient = await getNativeLoginClient();
@@ -383,6 +381,34 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
         setBusy(false);
         return;
       }
+      // R16.7-P0-A/B: register requires Terms + Privacy consent and 18+ DOB
+      // before requesting a verification challenge. Server will
+      // re-validate (fail-closed defense in depth).
+      if (authMode === "register") {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
+          setError("请输入有效的出生日期 (YYYY-MM-DD)。");
+          setBusy(false);
+          return;
+        }
+        const dob = new Date(`${dateOfBirth}T00:00:00.000Z`);
+        if (Number.isNaN(dob.getTime())) {
+          setError("出生日期不是合法日期。");
+          setBusy(false);
+          return;
+        }
+        const now = new Date();
+        const ageYears = (now.getTime() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+        if (ageYears < 18) {
+          setError("需年满 18 岁才能注册。");
+          setBusy(false);
+          return;
+        }
+        if (!termsAccepted || !privacyAccepted) {
+          setError("请勾选《服务使用协议》和《隐私政策》。");
+          setBusy(false);
+          return;
+        }
+      }
       try {
         const loginClient = await getNativeLoginClient();
         const result = await loginClient.beginPasswordlessAuthentication({
@@ -390,6 +416,20 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           identifier,
           platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
         });
+        // R16.7-P0-A/B: once the challenge is accepted by the server, persist
+        // the legal consent + DOB so they can be forwarded to the eventual
+        // session creation step. Backlog: P1-A wires the server-side
+        // privacy.legal_consent_records write for the passwordless path
+        // (today only the anonymous-session path writes the record).
+        if (authMode === "register") {
+          await nativeSecureStorageDriver.setItem("proxy.legalConsent.v1", JSON.stringify({
+            dateOfBirth,
+            termsAccepted: true,
+            privacyAccepted: true,
+            legalDocVersion: "1.1",
+            acceptedAt: new Date().toISOString()
+          }));
+        }
         setChallengeId(result.challengeId);
         // NOTE: We deliberately do NOT auto-open Gmail / mail.google.com
         // here. Doing so yanks the user out of the App and makes the OTP
@@ -449,7 +489,34 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     }
   }
 
+  // R16.7-P0-A: open the legal document bundle in the system browser. The
+  // exact URL is operator-supplied (backlog P1-A will host these under
+  // /v1/legal/terms and /v1/legal/privacy on the API server). Until that
+  // ships, the operator must provision the URLs at build time via the
+  // EXPO_PUBLIC_PROXY_LEGAL_TERMS_URL / _PRIVACY_URL env vars; if absent,
+  // we show an inline notice so the user is not silently sent to a
+  // placeholder.
+  function openLegalDoc(kind: "terms" | "privacy"): void {
+    const url = kind === "terms"
+      ? (process.env.EXPO_PUBLIC_PROXY_LEGAL_TERMS_URL as string | undefined)
+      : (process.env.EXPO_PUBLIC_PROXY_LEGAL_PRIVACY_URL as string | undefined);
+    if (!url) {
+      setError(kind === "terms" ? "服务使用协议尚未上线，请稍后再试或联系运营。" : "隐私政策尚未上线，请稍后再试或联系运营。");
+      return;
+    }
+    void WebBrowser.openBrowserAsync(url).catch(() => setError("无法打开浏览器，请稍后重试。"));
+  }
+
   async function continueAsGuest(): Promise<void> {
+    // R16.7-P0-A: even guest browsing touches Proxy APIs (anonymous
+    // session creation, /v1/feed reads with IP / UA logged), so the user
+    // must accept the Privacy Policy before continuing. The server-side
+    // CreateAnonymousSession command will independently enforce this
+    // (fail-closed) on the request that creates the ANONYMOUS user.
+    if (!privacyAccepted) {
+      setError("请先勾选《隐私政策》再以访客身份进入。");
+      return;
+    }
     setBusy(true);
     setError(undefined);
     try {
@@ -469,14 +536,15 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     try {
 		const loginClient = await getNativeLoginClient();
       await loginClient.verifyChallenge(challengeId, code);
-      await loginClient.createSessionFromChallenge(challengeId);
+      const session = await loginClient.createSessionFromChallenge(challengeId);
       await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(()=>undefined);
       // R15.36: 记住上次的 identifier, 下次进来在登录页顶部展示
       // "继续使用" 卡片。
       await lastSignInStore.write({
         channel: authChannel,
         identifier: authChannel === "EMAIL" ? googleEmail.trim().toLowerCase() : normalizeVietnamesePhone(phone),
-        signedInAt: new Date().toISOString()
+        signedInAt: new Date().toISOString(),
+        userAccountId: session.userAccountId
       }).catch(() => undefined);
       onAuthenticated();
     } catch (err) {
@@ -531,10 +599,10 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           <Pressable onPress={() => { setAuthMode("login"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "login" && styles.authTabActive]}>
             <Text style={[styles.authTabText, authMode === "login" && styles.authTabTextActive]}>登录</Text>
           </Pressable>
-          <Pressable onPress={() => { setAuthMode("register"); setAuthChannel("SMS"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, authMode === "register" && styles.authTabActive]}>
+          <Pressable onPress={() => { setAuthMode("register"); setAuthChannel("SMS"); setChallengeId(undefined); setCode(""); setError(undefined); setDateOfBirth(""); setTermsAccepted(false); setPrivacyAccepted(false); }} style={[styles.authTab, authMode === "register" && styles.authTabActive]}>
             <Text style={[styles.authTabText, authMode === "register" && styles.authTabTextActive]}>注册</Text>
           </Pressable>
-          <Pressable onPress={() => { setAuthMode("guest"); setChallengeId(undefined); setCode(""); setError(undefined); }} style={[styles.authTab, styles.authGuestTab, authMode === "guest" && styles.authTabActive]}>
+          <Pressable onPress={() => { setAuthMode("guest"); setChallengeId(undefined); setCode(""); setError(undefined); setTermsAccepted(false); setPrivacyAccepted(false); }} style={[styles.authTab, styles.authGuestTab, authMode === "guest" && styles.authTabActive]}>
             <Text style={[styles.authTabText, authMode === "guest" && styles.authTabTextActive]}>访客</Text>
           </Pressable>
         </View>
@@ -542,7 +610,11 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           <View style={styles.guestPanel}>
             <Text style={styles.guestTitle}>先逛逛 Proxy</Text>
             <Text style={styles.guestDescription}>可浏览首页、市场和动态；发布、互动、交易与长期保存时再登录。</Text>
-            <View style={[styles.button, busy && styles.disabled]}><Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} /><Pressable disabled={busy} onPress={() => void continueAsGuest()} style={styles.buttonPressable}><Text style={styles.buttonText}>{busy ? "进入中…" : "以访客身份进入"}</Text></Pressable></View>
+            <Pressable onPress={() => setPrivacyAccepted((v) => !v)} style={styles.consentRow}>
+              <View style={[styles.consentBox, privacyAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{privacyAccepted ? "✓" : ""}</Text></View>
+              <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("privacy")}>《隐私政策》</Text> (v1.1, 越南)</Text>
+            </Pressable>
+            <View style={[styles.button, busy || !privacyAccepted ? styles.disabled : null]}><Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} /><Pressable disabled={busy || !privacyAccepted} onPress={() => void continueAsGuest()} style={styles.buttonPressable}><Text style={styles.buttonText}>{busy ? "进入中…" : "以访客身份进入"}</Text></Pressable></View>
           </View>
         ) : challengeId ? (
           <>
@@ -586,6 +658,31 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                 <Text style={styles.googleLabel}>手机</Text>
               </Pressable>
             </View>
+            {authMode === "register" ? (
+              <View style={styles.dobBlock}>
+                <Text style={styles.dobLabel}>出生日期 (YYYY-MM-DD) · 需年满 18 岁</Text>
+                <TextInput
+                  blurOnSubmit
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={10}
+                  onChangeText={setDateOfBirth}
+                  onSubmitEditing={() => Keyboard.dismiss()}
+                  placeholder="1990-01-01"
+                  placeholderTextColor="#A9A2B0"
+                  returnKeyType="done"
+                  style={styles.dobInput}
+                  value={dateOfBirth}
+                />
+                <Pressable onPress={() => setTermsAccepted((v) => !v)} style={styles.consentRow}>
+                  <View style={[styles.consentBox, termsAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{termsAccepted ? "✓" : ""}</Text></View>
+                  <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("terms")}>《服务使用协议》</Text> (v1.1, 越南)</Text>
+                </Pressable>
+                <Pressable onPress={() => setPrivacyAccepted((v) => !v)} style={styles.consentRow}>
+                  <View style={[styles.consentBox, privacyAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{privacyAccepted ? "✓" : ""}</Text></View>
+                  <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("privacy")}>《隐私政策》</Text> (v1.1, 越南)</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {authChannel === "EMAIL" ? (
               <>
                 <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整 Gmail（自动补全 @gmail.com）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
@@ -675,7 +772,7 @@ function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
         setError(undefined);
         try {
           const loginClient = await getNativeLoginClient();
-          await loginClient.authenticateWithGoogle(response.authentication!.idToken!, Platform.OS === "ios" ? "IOS" : "ANDROID");
+          const session = await loginClient.authenticateWithGoogle(response.authentication!.idToken!, Platform.OS === "ios" ? "IOS" : "ANDROID");
           await nativeSecureStorageDriver.setItem(GUEST_FLAG_KEY, "0").catch(()=>undefined);
           // R15.36: Google 流程下我们没有 email (需要额外 fetch userinfo),
           // 暂以 "Google 账号" + 唯一末位来记住。后续如果 server 返回
@@ -683,7 +780,8 @@ function ConfiguredGoogleSignIn(props: GoogleSignInProps): React.JSX.Element {
           await lastSignInStore.write({
             channel: "EMAIL",
             identifier: "google@account",
-            signedInAt: new Date().toISOString()
+            signedInAt: new Date().toISOString(),
+            userAccountId: session.userAccountId
           }).catch(() => undefined);
           onAuthenticated();
         } catch (error) {
@@ -850,6 +948,39 @@ const styles = StyleSheet.create({
   guestButton: { alignItems: "center", marginTop: 18, paddingVertical: 10 },
   guestText: { color: color.violet, fontSize: 14, fontWeight: "800" },
   guestPanel: { alignSelf: "stretch", paddingTop: 27 },
+  // R16.7-P0-A/B: register-time consent + DOB form.
+  dobBlock: { alignSelf: "stretch", marginTop: 12 },
+  dobLabel: { color: color.muted, fontSize: 12, marginTop: 8, textAlign: "left" },
+  dobInput: {
+    backgroundColor: color.surface,
+    borderColor: color.line,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: color.ink,
+    fontSize: 15,
+    letterSpacing: 1,
+    marginTop: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    textAlign: "left"
+  },
+  consentRow: { alignItems: "flex-start", flexDirection: "row", marginTop: 12, paddingVertical: 4 },
+  consentBox: {
+    alignItems: "center",
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    height: 22,
+    justifyContent: "center",
+    marginRight: 10,
+    marginTop: 2,
+    width: 22
+  },
+  consentBoxOn: { backgroundColor: color.violet, borderColor: color.violet },
+  consentBoxMark: { color: color.white, fontSize: 14, fontWeight: "900", lineHeight: 18 },
+  consentText: { color: color.ink, flex: 1, fontSize: 12, lineHeight: 18 },
+  consentLink: { color: color.violet, fontWeight: "800" },
   guestTitle: { color: color.ink, fontSize: 22, fontWeight: "900", textAlign: "center" },
   guestDescription: { color: color.muted, fontSize: 14, lineHeight: 21, marginTop: 10, textAlign: "center" },
   inlineActions: { flexDirection: "row", gap: 28, justifyContent: "center", marginTop: 18 },
