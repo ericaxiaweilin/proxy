@@ -2471,6 +2471,8 @@ export function MeSurface({
                         setSearchSheetOpen(false);
                         // R15.91: onOpenSearch 仍 undefined (app-shell 还没接).
                         //   提交时跳 feed 全局 — Phase 2 server 接 search 后再传 query.
+                        // R15.96: 清空 searchQuery (sheet 重新打开时是干净状态).
+                        setSearchQuery("");
                         onOpenFeed();
                       }
                     }}
@@ -2484,6 +2486,8 @@ export function MeSurface({
                     if (q.length > 0) {
                       setSearchSheetOpen(false);
                       // R15.91: 跟 onSubmitEditing 一致 — 跳 feed 全局, 后续 Phase 2 接 search query.
+                      // R15.96: 清空 searchQuery (sheet 重新打开时是干净状态).
+                      setSearchQuery("");
                       onOpenFeed();
                     }
                   }}
