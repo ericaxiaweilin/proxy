@@ -247,6 +247,61 @@ func TestListFeedPosts_BatchesMediaHydrationAcrossPosts(t *testing.T) {
 	}
 }
 
+// R15.95: ListFeedPosts 接受 search 字段, server 端 filter body.
+func TestListFeedPosts_SearchFilterOnBody(t *testing.T) {
+	s := New()
+	for _, body := range []string{"西湖昨天夕阳", "河内夜市美食", "西湖水上日出"} {
+		r := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+			"body": body, "visibility": "PUBLIC",
+		}))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("create post %q: %+v", body, r.Error)
+		}
+	}
+	// 搜 "西湖" 期待 2 笔
+	r := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"search": "西湖"}))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed search: %+v", r.Error)
+	}
+	var payload struct {
+		Posts []map[string]any `json:"posts"`
+	}
+	if err := json.Unmarshal([]byte(r.OperationRef), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if len(payload.Posts) != 2 {
+		t.Fatalf("expected 2 posts matching '西湖', got %d", len(payload.Posts))
+	}
+	// 搜 "河内" 期待 1 笔
+	r2 := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"search": "河内"}))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed search 2: %+v", r2.Error)
+	}
+	var payload2 struct {
+		Posts []map[string]any `json:"posts"`
+	}
+	if err := json.Unmarshal([]byte(r2.OperationRef), &payload2); err != nil {
+		t.Fatalf("unmarshal payload 2: %v", err)
+	}
+	if len(payload2.Posts) != 1 {
+		t.Fatalf("expected 1 post matching '河内', got %d", len(payload2.Posts))
+	}
+	// 搜 "西" 大小写不敏感
+	r3 := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"search": "西"}))
+	if r3.Outcome != "ACCEPTED" {
+		t.Fatalf("list feed search 3: %+v", r3.Error)
+	}
+	var payload3 struct {
+		Posts []map[string]any `json:"posts"`
+	}
+	if err := json.Unmarshal([]byte(r3.OperationRef), &payload3); err != nil {
+		t.Fatalf("unmarshal payload 3: %v", err)
+	}
+	if len(payload3.Posts) != 2 {
+		t.Fatalf("expected 2 posts matching '西', got %d", len(payload3.Posts))
+	}
+}
+
 func (s *stubMediaLookup) AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error {
 	return nil
 }
