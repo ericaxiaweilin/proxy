@@ -1485,14 +1485,47 @@ export function MeSurface({
 
   useEffect(() => {
     let cancelled = false;
-    void localNet.listMyFeedPosts().then((read) => {
-      if (cancelled) return;
-      // 个人主页按账户 ID 读取，不再依赖易变的“你/Huyen”显示名。
-      setProfilePosts(read.posts);
-      setProfileMedia(read.media);
-    }).catch(() => undefined);
+    void (async () => {
+      try {
+        const read = await localNet.listMyFeedPosts();
+        if (cancelled) return;
+        if (read.posts.length > 0) {
+          setProfilePosts(read.posts);
+          setProfileMedia(read.media);
+          return;
+        }
+        // 兜底：已发很多但按 authorId 过滤为 0 时，回退按 handle/名称扫全量 feed，避免空主页
+        const fallback = await localNet.listFeedPosts();
+        if (cancelled) return;
+        const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
+        const filtered = fallback.posts.filter((post) => post.authorDisplayName === profileDraft.name || post.body.includes(myHandle) || post.authorId === profileDraft.handle);
+        if (filtered.length > 0) {
+          const media: Record<string, FeedMediaItem[]> = {};
+          for (const post of filtered) { const items = fallback.media[post.postId]; if (items) media[post.postId] = items; }
+          setProfilePosts(filtered);
+          setProfileMedia(media);
+        } else {
+          // 仍用原 read（空）避免闪烁
+          setProfilePosts(read.posts);
+          setProfileMedia(read.media);
+        }
+      } catch {
+        try {
+          const fallback = await localNet.listFeedPosts();
+          if (cancelled) return;
+          const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
+          const filtered = fallback.posts.filter((post) => post.authorDisplayName === profileDraft.name || post.body.includes(myHandle));
+          if (filtered.length > 0) {
+            const media: Record<string, FeedMediaItem[]> = {};
+            for (const post of filtered) { const items = fallback.media[post.postId]; if (items) media[post.postId] = items; }
+            setProfilePosts(filtered);
+            setProfileMedia(media);
+          }
+        } catch {}
+      }
+    })();
     return () => { cancelled = true; };
-  }, [localNet]);
+  }, [localNet, profileDraft.name, profileDraft.handle]);
 
   // R15.73: 置顶帖 ID 列表 — server ListPinnedPosts (R15.56)
   useEffect(() => {
