@@ -44,9 +44,9 @@ describe("PrivacyClient", () => {
     const result = await client.fetchMe();
     expect(result.formatVersion).toBe("1.0");
     expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0].method).toBe("GET");
-    expect(fake.calls[0].url).toBe("http://127.0.0.1:4100/v1/privacy/me");
-    expect(fake.calls[0].body).toBeUndefined();
+    expect(fake.calls[0]!.method).toBe("GET");
+    expect(fake.calls[0]!.url).toBe("http://127.0.0.1:4100/v1/privacy/me");
+    expect(fake.calls[0]!.body).toBeUndefined();
   });
 
   it("requestExport issues POST with legalBasis payload", async () => {
@@ -67,9 +67,9 @@ describe("PrivacyClient", () => {
     const result = await client.requestExport({ legalBasis: "PDP-91/2025/QH15-Art31" });
     expect(result.retentionDays).toBe(7);
     expect(result.request.kind).toBe("export");
-    expect(fake.calls[0].method).toBe("POST");
-    expect(fake.calls[0].url).toBe("http://127.0.0.1:4100/v1/privacy/export");
-    expect(JSON.parse(fake.calls[0].body!)).toEqual({ legalBasis: "PDP-91/2025/QH15-Art31" });
+    expect(fake.calls[0]!.method).toBe("POST");
+    expect(fake.calls[0]!.url).toBe("http://127.0.0.1:4100/v1/privacy/export");
+    expect(JSON.parse(fake.calls[0]!.body!)).toEqual({ legalBasis: "PDP-91/2025/QH15-Art31" });
   });
 
   it("requestDelete reports the 30-day grace window", async () => {
@@ -110,7 +110,7 @@ describe("PrivacyClient", () => {
     const client = new PrivacyClient({ baseUrl: "http://127.0.0.1:4100", transport: fake.transport });
     const result = await client.cancelRequest({ requestId: "preq_2", reason: "changed mind" });
     expect(result.request.status).toBe("cancelled");
-    expect(JSON.parse(fake.calls[0].body!)).toEqual({ requestId: "preq_2", reason: "changed mind" });
+    expect(JSON.parse(fake.calls[0]!.body!)).toEqual({ requestId: "preq_2", reason: "changed mind" });
   });
 
   it("fetchStatus encodes requestId in the query string", async () => {
@@ -129,7 +129,7 @@ describe("PrivacyClient", () => {
     const client = new PrivacyClient({ baseUrl: "http://127.0.0.1:4100/", transport: fake.transport });
     const result = await client.fetchStatus("preq 3/with space");
     expect(result.request.id).toBe("preq_3");
-    expect(fake.calls[0].url).toBe("http://127.0.0.1:4100/v1/privacy/status?requestId=preq%203%2Fwith%20space");
+    expect(fake.calls[0]!.url).toBe("http://127.0.0.1:4100/v1/privacy/status?requestId=preq%203%2Fwith%20space");
   });
 
   it("throws PrivacyError on non-2xx", async () => {
@@ -168,7 +168,7 @@ describe("PrivacyClient", () => {
     const client = new PrivacyClient({ baseUrl: "http://127.0.0.1:4100", transport: fake.transport });
     const result = await client.listRequests();
     expect(result.count).toBe(2);
-    expect(result.requests[0].kind).toBe("delete");
-    expect(result.requests[1].kind).toBe("export");
+    expect(result.requests[0]!.kind).toBe("delete");
+    expect(result.requests[1]!.kind).toBe("export");
   });
 });

@@ -101,7 +101,7 @@ export type PrivacyErrorCode =
 export class PrivacyError extends Error {
   readonly status: number;
   readonly code: PrivacyErrorCode | string;
-  readonly correlationId?: string;
+  readonly correlationId?: string | undefined;
   constructor(status: number, code: PrivacyErrorCode | string, message: string, correlationId?: string) {
     super(message);
     this.name = "PrivacyError";
@@ -115,7 +115,7 @@ export type PrivacyClientOptions = {
   baseUrl: string;
   transport: Transport;
   // Optional override for tests; defaults to a 30-second timeout.
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
 };
 
 export class PrivacyClient {
@@ -130,7 +130,7 @@ export class PrivacyClient {
       url: this.url(path),
       method,
       headers: { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body)
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {})
     };
     let response: TransportResponse;
     try {
