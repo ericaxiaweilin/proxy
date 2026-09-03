@@ -1494,30 +1494,55 @@ export function MeSurface({
           setProfileMedia(read.media);
           return;
         }
-        // 兜底：已发很多但按 authorId 过滤为 0 时，回退按 handle/名称扫全量 feed，避免空主页
-        const fallback = await localNet.listFeedPosts();
+        // 兜底：authorId 过滤为 0 时，分页扫全量 feed（50/页，最多 200）按 handle/名称匹配，避免空主页
+        let cursor: string | undefined = undefined;
+        let hasMore = true;
+        const allPosts: typeof read.posts = [];
+        const allMedia: Record<string, FeedMediaItem[]> = {};
+        let pages = 0;
+        while (hasMore && pages < 4 && !cancelled) {
+          const page = await localNet.listFeedPosts(cursor, 50);
+          if (cancelled) return;
+          allPosts.push(...page.posts);
+          Object.assign(allMedia, page.media);
+          cursor = page.nextCursor;
+          hasMore = page.hasMore;
+          pages += 1;
+        }
         if (cancelled) return;
         const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
-        const filtered = fallback.posts.filter((post) => post.authorDisplayName === profileDraft.name || post.body.includes(myHandle) || post.authorId === profileDraft.handle);
+        const filtered = allPosts.filter((post) => post.authorDisplayName === profileDraft.name || post.body.includes(myHandle) || post.authorId === profileDraft.handle || post.authorId === profileDraft.name);
         if (filtered.length > 0) {
           const media: Record<string, FeedMediaItem[]> = {};
-          for (const post of filtered) { const items = fallback.media[post.postId]; if (items) media[post.postId] = items; }
+          for (const post of filtered) { const items = allMedia[post.postId]; if (items) media[post.postId] = items; }
           setProfilePosts(filtered);
           setProfileMedia(media);
         } else {
-          // 仍用原 read（空）避免闪烁
           setProfilePosts(read.posts);
           setProfileMedia(read.media);
         }
       } catch {
         try {
-          const fallback = await localNet.listFeedPosts();
+          let cursor: string | undefined = undefined;
+          let hasMore = true;
+          const allPosts: FeedPost[] = [];
+          const allMedia: Record<string, FeedMediaItem[]> = {};
+          let pages = 0;
+          while (hasMore && pages < 4 && !cancelled) {
+            const page = await localNet.listFeedPosts(cursor, 50);
+            if (cancelled) return;
+            allPosts.push(...page.posts);
+            Object.assign(allMedia, page.media);
+            cursor = page.nextCursor;
+            hasMore = page.hasMore;
+            pages += 1;
+          }
           if (cancelled) return;
           const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
-          const filtered = fallback.posts.filter((post) => post.authorDisplayName === profileDraft.name || post.body.includes(myHandle));
+          const filtered = allPosts.filter((post) => post.authorDisplayName === profileDraft.name || post.body.includes(myHandle));
           if (filtered.length > 0) {
             const media: Record<string, FeedMediaItem[]> = {};
-            for (const post of filtered) { const items = fallback.media[post.postId]; if (items) media[post.postId] = items; }
+            for (const post of filtered) { const items = allMedia[post.postId]; if (items) media[post.postId] = items; }
             setProfilePosts(filtered);
             setProfileMedia(media);
           }
