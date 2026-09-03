@@ -50,11 +50,14 @@ let cachedPostIds: Set<string> = new Set();
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
 
-const AUTHOR_TYPE_META: Record<FeedPost["authorType"], { label: string; reason: string }> = {
+const AUTHOR_TYPE_META: Record<FeedPost["authorType"], { label: string; reason: string; aiBadge?: boolean }> = {
   USER: { label: "用户 · 河内", reason: "为你推荐：本地用户的公开动态" },
   AGENT: { label: "城市同行 · 已验证", reason: "为你推荐：当前可用时间与你最近需求接近" },
   MERCHANT: { label: "商家 · 河内", reason: "为你推荐：附近商家的公开动态" },
-  PLATFORM_SPECIAL: { label: "Proxy 特别企划", reason: "为你推荐：平台特别企划" }
+  PLATFORM_SPECIAL: { label: "Proxy 特别企划", reason: "为你推荐：平台特别企划" },
+  // R15.76: R1 AI Identity System PRD — AI Native (平台虚拟供给) 在 4 个
+  //   authorType 之外独立一档. 限 mock 帖表现 (server schema 暂不返, 前面是 PLATFORM_SPECIAL 视觉但加 aiBadge).
+  AI_NATIVE: { label: "AI 助手 · 河内", reason: "为你推荐：平台虚拟供给, 由 Proxy 透明生成", aiBadge: true }
 };
 
 function scenarioIconForPost(post: FeedPost): ProxyIconName {
@@ -916,6 +919,11 @@ export function FeedSurface({
                   <View style={styles.scenarioBadge}>
                     <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
                   </View>
+                  {meta.aiBadge ? (
+                    <View style={styles.aiAuthorBadge} accessibilityLabel="AI 生成">
+                      <Text style={styles.aiAuthorBadgeText}>AI</Text>
+                    </View>
+                  ) : null}
                 </View>
                 </Pressable>
                 <Pressable
@@ -1435,6 +1443,10 @@ const styles = StyleSheet.create({
   },
   postAvatarText: { color: color.white, fontSize: 16, fontWeight: "700" },
   scenarioBadge: { alignItems: "center", backgroundColor: color.white, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: -2, height: 20, justifyContent: "center", position: "absolute", right: -3, width: 20 },
+  // R15.76: AI 徽章 — 在头像左下角贴贴 (跟 scenarioBadge 不撞位置). 设计上 8pt
+  //   装饰文字 (R2/R3 守门免白名单: AI 徽章装饰跟 personalAvaLetter 同).
+  aiAuthorBadge: { alignItems: "center", backgroundColor: color.violet, borderColor: color.white, borderRadius: 999, borderWidth: 2, bottom: -2, height: 16, justifyContent: "center", left: -3, position: "absolute", width: 22 },
+  aiAuthorBadgeText: { color: color.white, fontSize: 9, fontWeight: "800", lineHeight: 11 },
   engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },

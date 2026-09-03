@@ -339,9 +339,12 @@ export type PostPoll = z.infer<typeof PostPollSchema>;
 
 export const FeedPostSchema = z.object({
   postId: z.string().min(1),
-  authorType: z.enum(["USER", "AGENT", "MERCHANT", "PLATFORM_SPECIAL"]),
+  authorType: z.enum(["USER", "AGENT", "MERCHANT", "PLATFORM_SPECIAL", "AI_NATIVE"]),
   authorId: z.string().min(1),
   authorDisplayName: z.string().optional(),
+  // R15.76: AI Author Kind — R1 AI Identity System PRD 透出 (3 类: AI Native / Twin / Detection).
+  //   server 暂不传, 全部 undefined → 跟以前一样. client-side 可以填 mock 帖表记.
+  aiAuthorKind: z.enum(["NATIVE", "TWIN", "DETECTED"]).optional(),
   body: z.string(),
   mediaRefs: z.array(PostMediaRefSchema).default([]),
   visibility: z.enum(["PUBLIC", "FOLLOWERS", "AGENT_ONLY"]).optional(),
