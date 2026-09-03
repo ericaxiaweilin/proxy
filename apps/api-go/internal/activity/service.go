@@ -45,6 +45,7 @@ type Activity struct {
 // Service 处理活动命令。生产使用 PostgreSQL；New() 保留内存仓储供隔离测试使用。
 type Service struct {
 	repository Repository
+	participations *ParticipationStore
 }
 
 var (
@@ -69,8 +70,9 @@ type MemoryRepository struct {
 func New() *Service {
 	return NewWithRepository(&MemoryRepository{activities: make(map[string]*Activity)})
 }
+func NewWithParticipations(repo Repository, ps *ParticipationStore) *Service { return &Service{repository: repo, participations: ps} }
 
-func NewWithRepository(repository Repository) *Service { return &Service{repository: repository} }
+func NewWithRepository(repository Repository) *Service { return &Service{repository: repository, participations: NewParticipationStore()} }
 
 // SeedDefaults 幂等写入基线 5 条活动（平台/商家数据，启动时 seed）。
 func (s *Service) SeedDefaults() {
@@ -84,7 +86,7 @@ func (s *Service) SeedDefaults() {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "ListActivities", "ToggleActivityInterest", "JoinActivity":
+	case "ListActivities", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
 		return true
 	default:
 		return false
@@ -103,6 +105,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.toggleInterest(ctx, e)
 	case "JoinActivity":
 		return s.joinActivity(ctx, e)
+	case "CancelActivity":
+		return s.cancelActivity(ctx, e)
+	case "CheckinActivity":
+		return s.checkinActivity(ctx, e)
+	case "MarkNoShow":
+		return s.markNoShow(ctx, e)
 	default:
 		return command.Rejected(e, "ACTIVITY_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "activity.unsupported_command", nil)
 	}
@@ -176,6 +184,25 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 		"joined":   true,
 		"note":     "确认参加后开放活动群聊",
 	}, nil)
+}
+
+func (s *Service) cancelActivity(ctx context.Context, e command.Envelope) command.Result {
+	var p activityRefPayload
+	if !decode(e.Payload, &p) || p.ActivityID == "" { return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)}
+	if s.participations != nil { s.participations.UpdateState(p.ActivityID, e.Actor.ID, PartCancelled) }
+	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "CANCELLED", map[string]any{"activityId": p.ActivityID}, nil)
+}
+func (s *Service) checkinActivity(ctx context.Context, e command.Envelope) command.Result {
+	var p activityRefPayload
+	if !decode(e.Payload, &p) || p.ActivityID == "" { return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)}
+	if s.participations != nil { s.participations.UpdateState(p.ActivityID, e.Actor.ID, PartAttended) }
+	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "ATTENDED", map[string]any{"activityId": p.ActivityID}, nil)
+}
+func (s *Service) markNoShow(ctx context.Context, e command.Envelope) command.Result {
+	var p activityRefPayload
+	if !decode(e.Payload, &p) || p.ActivityID == "" { return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)}
+	if s.participations != nil { s.participations.UpdateState(p.ActivityID, e.Actor.ID, PartNoShow) }
+	return acceptedWithPayload(e, "Activity", p.ActivityID, 1, "NO_SHOW", map[string]any{"activityId": p.ActivityID}, nil)
 }
 
 func (r *MemoryRepository) Seed(_ context.Context, activities []Activity) error {
