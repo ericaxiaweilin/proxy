@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/activity"
+	"github.com/proxy-app/proxy-api/internal/benefit"
 	"github.com/proxy-app/proxy-api/internal/business"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/compliance"
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
@@ -63,10 +65,18 @@ type Server struct {
 	// It is a separate service so the consent reads / writes do not
 	// pay the load cost of the full identity service.
 	Location      *location.Service
+	// Benefit owns the benefit routing network (R16.11 / Master PRD v1.4 §12 §3).
+	Benefit       *benefit.Service
 	// LocationRepo is the storage handle the history endpoint reads
 	// from. Kept separate from the Service so tests can inject an
 	// in-memory repository without standing up a service.
 	LocationRepo  location.Repository
+	// Compliance owns the remote legal kill switch (R16.7-P1-G).
+	// The HTTP layer uses Compliance.IsEnabled to gate regulated
+	// endpoints; the public /v1/legal/status route reads
+	// Compliance.GlobalStatus to expose the active switches to
+	// the mobile client at boot.
+	Compliance    *compliance.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -177,6 +187,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/location/consent/grant", s.locationConsentGrant)
 	mux.HandleFunc("/v1/location/consent/revoke", s.locationConsentRevoke)
 	mux.HandleFunc("/v1/location/consent/history", s.locationConsentHistory)
+	// R16.7-P1-G: remote legal kill switch (LC-16). The public
+	// /v1/legal/status route is read at mobile boot so the client
+	// can show a "service paused" banner and disable regulated
+	// subpages; the operator routes require an authenticated
+	// operator and an OperatorGate allowlist.
+	mux.HandleFunc("/v1/legal/status", s.legalStatus)
+	mux.HandleFunc("/v1/operator/legal/kill-switch", s.operatorKillSwitchKill)
+	mux.HandleFunc("/v1/operator/legal/kill-switch/", s.operatorKillSwitchRearm)
+	mux.HandleFunc("/v1/operator/legal/kill-switches", s.operatorKillSwitchList)
 	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.

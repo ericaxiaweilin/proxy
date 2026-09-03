@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/compliance"
 )
 
 func (s *Server) command(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +115,14 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		envelope.AuthContext = authenticated.AuthContext
 	}
 
+	// R16.7-P1-G: enforce any active kill switch for the
+	// command's category. Runs after authentication so the
+	// operator's own commands can still be served (operators
+	// may need to inspect a disabled category).
+	if blocked, blockedStatus := s.enforceKillSwitch(envelope); blocked != nil {
+		writeResult(w, blockedStatus, *blocked)
+		return
+	}
 	result, status, err := s.executeCommand(r.Context(), envelope)
 	if err != nil {
 		log.Printf("command transaction failed: command=%s key=%s err=%v", envelope.CommandType, envelope.IdempotencyKey, err)
@@ -121,6 +130,38 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeResult(w, status, result)
+}
+
+// enforceKillSwitch returns a command.Result and a status code
+// if the request is blocked by an active kill switch. It
+// returns (nil, 0) when the command is allowed. The check
+// runs after the route has been authenticated and before the
+// command body is dispatched, so the operator can flip a
+// switch and have it take effect on the very next request.
+func (s *Server) enforceKillSwitch(envelope command.Envelope) (*command.Result, int) {
+	category := commandKillSwitchCategory(envelope.CommandType)
+	if category == "" {
+		return nil, 0
+	}
+	if s.Compliance == nil {
+		return nil, 0
+	}
+	cat, err := compliance.NormalizeCategory(category)
+	if err != nil {
+		return nil, 0
+	}
+	// We use a fresh background context (not the request
+	// context) so a slow upstream cannot cause the gate to
+	// fail-open. The call is cheap: one in-memory map read or
+	// one indexed Postgres query.
+	if s.Compliance.IsEnabled(context.Background(), cat) {
+		return nil, 0
+	}
+	result := command.Rejected(envelope, "SERVICE_DISABLED", "BUSINESS_STATE", "AFTER_OPERATOR_ACTION", "compliance.service_disabled", map[string]any{
+		"category":   category,
+		"commandType": envelope.CommandType,
+	})
+	return &result, http.StatusServiceUnavailable
 }
 
 func (s *Server) executeCommand(ctx context.Context, envelope command.Envelope) (command.Result, int, error) {
@@ -230,6 +271,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.RealityScene.HandleContext(ctx, envelope)
 	case s.Location != nil && s.Location.Supports(envelope.CommandType):
 		return s.Location.HandleContext(ctx, envelope)
+	case s.Benefit != nil && s.Benefit.Supports(envelope.CommandType):
+		return s.Benefit.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}
@@ -247,6 +290,22 @@ func requiresAuthentication(commandType string) bool {
 	default:
 		return true
 	}
+}
+
+// commandKillSwitchCategory returns the compliance.Category
+// that gates the given command type, or empty string if the
+// command is not affected by any kill switch. The mapping
+// here is the single source of truth for "which kill switch
+// blocks which command"; the HTTP /v1/legal/status route and
+// the mobile client both read this shape.
+func commandKillSwitchCategory(commandType string) string {
+	switch commandType {
+	case "CreateOrder", "SubmitPayment", "ConfirmOrder":
+		return "MARKETPLACE"
+	case "PublishAIPost", "GenerateAIContent":
+		return "AI_MEDIA"
+	}
+	return ""
 }
 
 func bearerToken(header string) (string, bool) {

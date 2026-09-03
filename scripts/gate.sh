@@ -56,7 +56,7 @@ gate_g2_tests() {
   set -e
   set -o pipefail
   echo "=== G2: tests (api-go -count=1, mobile --run) ==="
-  go -C apps/api-go test -count=1 ./... || return $?
+  go -C apps/api-go test -count=1 -p 1 ./... || return $?
   echo "  api-go test: OK"
   pnpm --filter @proxy/mobile test --run || return $?
   echo "  mobile test: OK"
@@ -78,6 +78,8 @@ gate_g3_e2e() {
   echo "  privacy-e2e: OK"
   bash scripts/location-consent-e2e.sh || return $?
   echo "  location-consent-e2e: OK"
+  bash scripts/kill-switch-e2e.sh || return $?
+  echo "  kill-switch-e2e: OK"
   bash scripts/legal-e2e.sh || return $?
   echo "  legal-e2e: OK"
 }

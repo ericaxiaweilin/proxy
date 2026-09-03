@@ -20,6 +20,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/business"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/compliance"
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
@@ -283,6 +284,18 @@ func main() {
 		locationService := location.NewService(locationRepo)
 		server.Location = locationService
 		server.LocationRepo = locationRepo
+	}
+	// R16.7-P1-G: remote legal kill switch. Same wiring shape
+	// as the location service: Postgres when the pool is
+	// available, in-memory otherwise.
+	if pool != nil {
+		complianceRepo := postgres.NewKillSwitchRepository(pool)
+		complianceService := compliance.NewService(complianceRepo)
+		server.Compliance = complianceService
+	} else {
+		complianceRepo := compliance.NewMemoryRepository(time.Now)
+		complianceService := compliance.NewService(complianceRepo)
+		server.Compliance = complianceService
 	}
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
 	// 未配置时 fail-closed：特权命令（审核/发奖/能力核验/媒体就绪覆盖）一律拒绝。
