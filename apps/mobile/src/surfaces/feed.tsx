@@ -201,6 +201,7 @@ export function FeedSurface({
   // R15.93: externalSearchQuery 同步 (主页 search sheet 提交时 app-shell 传).
   //   接受后同时拉一次 listFeedPosts(q) — 刷新过滤后的 feed.
   //   跟 local searchQuery (line 793 TextInput) 互不干扰.
+  // R15.97: externalQuery 存最近一次外部 query, 给 user 显示 '搜索: 关键字' 提示.
   const [externalQuery, setExternalQuery] = useState<string | undefined>(undefined);
   useEffect(() => {
     if (externalSearchQuery !== undefined && externalSearchQuery.length > 0) {
@@ -796,6 +797,29 @@ export function FeedSurface({
           <Text style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? selectedCustomFeed}</Text>
           <Pressable onPress={() => setSelectedCustomFeed(null)}>
             <Text style={styles.customFeedBannerAction}>退出频道</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {/* R15.97: 搜索 query banner — 主页 search sheet 提交后显示 '搜索: 关键字' 跟 '清空' 按钮.
+           跟 customFeedBanner 同视觉一致. */}
+      {externalQuery ? (
+        <View style={styles.customFeedBanner}>
+          <Text style={styles.customFeedBannerText}>搜索 · {externalQuery}</Text>
+          <Pressable
+            onPress={() => {
+              setExternalQuery(undefined);
+              setSearchQuery("");
+              // 重拉全 feed (无 search 过滤).
+              void localNet.listFeedPosts().then((read) => {
+                setPosts(read.posts);
+                setMediaByPost(read.media);
+                setFeedCursor(read.nextCursor);
+                setHasMore(read.hasMore === true);
+                setPhase("LOADED");
+              }).catch(() => undefined);
+            }}
+          >
+            <Text style={styles.customFeedBannerAction}>退出搜索</Text>
           </Pressable>
         </View>
       ) : null}
