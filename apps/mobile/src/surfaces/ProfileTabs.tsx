@@ -49,7 +49,6 @@ export interface ProfileTabsProps {
   };
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenRealitySceneMap?: (() => void) | undefined;
-  onComingSoon?: ((label: string) => void) | undefined;
   onOpenScene?: ((sceneId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;                      // OTTER_LOGO / ProxyIcon
@@ -123,7 +122,6 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
               accessibilityLabel="编辑主页"
               onPress={() => {
                 if (props.onEditProfile) props.onEditProfile();
-                else props.onComingSoon?.("edit profile");
               }}
               style={[styles.actionBtn, styles.actionPrimary]}
             >
@@ -185,7 +183,6 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           replies={props.replyPosts}
           avatarUri={props.profileAvatarUri}
           name={props.profileDraft.name}
-          onComingSoon={props.onComingSoon}
           color={props.color}
         />
       ) : null}
@@ -406,7 +403,6 @@ function RepliesTab(props: {
   replies: FeedPost[];
   avatarUri?: string | undefined;
   name: string;
-  onComingSoon?: ((label: string) => void) | undefined;
   color: ProfileTabsProps["color"];
 }): React.JSX.Element {
   if (props.replies.length === 0) {
