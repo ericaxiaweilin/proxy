@@ -4,6 +4,7 @@
 // R15.78: + R1 audit 段 (审计日志) 5 列 table + 5 过滤
 // R15.79: + R1 provenance 段 (Content Provenance Pipeline + 3 sample + 4 维度评分)
 // R15.80: + R1 risk 段 (3 风险卡 + 5 规则 + 推荐/指标 6 toggles)
+// R15.81: + R1 identity 段 (Account≠ContentProvenance + 权限矩阵 8 行 + 注册链路 + 数据模型 modal)
 //
 // 设计: 1:1 抄 R1 HTML 视觉, 不自创.
 //
@@ -158,14 +159,35 @@ function ProfilePreview({ kind }: { kind: PreviewKind }): React.JSX.Element {
 }
 
 export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+  const [archOpen, setArchOpen] = useState(false);
   return (
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.pageHead}>
           <Text onPress={onBack} style={styles.back}>‹</Text>
           <Text style={styles.title}>AI 身份中心</Text>
+          <View style={{ flex: 1 }} />
+          <Pressable
+            onPress={() => setArchOpen(true)}
+            style={styles.archBtn}
+            accessibilityLabel="查看数据模型"
+          >
+            <Text style={styles.archBtnText}>数据模型</Text>
+          </Pressable>
         </View>
         <Text style={styles.subtitle}>R1 透明度义务 · Vietnam AI Law 134/2025</Text>
+
+        {/* R15.81: R1 identity 段 — Account≠ContentProvenance (2 cards + 4 content badges) */}
+        <Text style={styles.sectionTitle}>Account Identity ≠ Content Provenance</Text>
+        <Text style={styles.sectionSub}>两套标签独立存在。</Text>
+        <IdentitySplit />
+
+        <Text style={[styles.sectionSub, { marginTop: 14, marginBottom: 6 }]}>权限矩阵</Text>
+        <Text style={[styles.sectionSub, { marginBottom: 6 }]}>前端按钮必须从权限读取, 不能只做视觉隐藏。</Text>
+        <PermissionMatrix />
+
+        <Text style={[styles.sectionSub, { marginTop: 14, marginBottom: 6 }]}>注册与创建链路</Text>
+        <SignupFlow />
 
         <Text style={styles.sectionTitle}>三类身份</Text>
         <Text style={styles.sectionSub}>Account Identity 与 Content Provenance 是两套独立真相。</Text>
@@ -201,6 +223,7 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
         <Text style={[styles.sectionSub, { marginTop: 14, marginBottom: 6 }]}>推荐与指标防污染</Text>
         <RecommendationToggles />
       </ScrollView>
+      {archOpen ? <DataContractModal onClose={() => setArchOpen(false)} /> : null}
     </View>
   );
 }
@@ -371,7 +394,50 @@ const styles = StyleSheet.create({
   toggleAi: { backgroundColor: "#6d28d9" },
   toggleDisabled: { opacity: 0.7 },
   toggleKnob: { width: 12, height: 12, borderRadius: 999, backgroundColor: color.white },
-  toggleKnobOn: { transform: [{ translateX: 12 }] }
+  toggleKnobOn: { transform: [{ translateX: 12 }] },
+
+  // R15.81: R1 identity 段 (Account≠Content + 权限矩阵 + 注册链路 + 数据模型 modal)
+  archBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, borderWidth: 1, borderColor: color.cardBorder, backgroundColor: color.white },
+  archBtnText: { fontSize: 11, fontWeight: "700", color: color.ink },
+
+  identityGrid: { flexDirection: "row", gap: 8 },
+  identityCard: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10 },
+  identityCardTitle: { fontSize: 12, fontWeight: "800", color: color.ink, marginBottom: 4 },
+  identityCardSub: { fontSize: 9, color: color.muted, lineHeight: 13 },
+  contentBadgesCol: { marginTop: 8, gap: 6 },
+  contentBadge: { alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  contentBadgeText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.3 },
+
+  permTableWrap: { borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, backgroundColor: color.white, overflow: "hidden" },
+  permHeaderRow: { flexDirection: "row", backgroundColor: color.appBg, paddingVertical: 6, paddingHorizontal: 8 },
+  permHeaderCell: { flex: 1, fontSize: 9, fontWeight: "800", color: color.ink, paddingHorizontal: 2 },
+  permRow: { flexDirection: "row", paddingVertical: 5, paddingHorizontal: 8, borderTopWidth: 1, borderTopColor: color.cardBorder, alignItems: "center" },
+  permCellCap: { fontSize: 9, fontWeight: "700", color: color.ink, paddingRight: 4 },
+  permCell: { flex: 1, alignItems: "center", paddingVertical: 3, marginHorizontal: 1, borderRadius: 4 },
+  permCellText: { fontSize: 8, fontWeight: "800", textAlign: "center" },
+  permPolicy: { fontSize: 8, color: color.muted, lineHeight: 11, paddingLeft: 4 },
+
+  signupFlow: { flexDirection: "row", alignItems: "stretch", gap: 4, marginBottom: 4 },
+  signupFlowRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: 4 },
+  signupBox: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 10, padding: 8, alignItems: "center" },
+  signupBoxAi: { borderColor: "#6d28d9" },
+  signupBoxKind: { fontSize: 11, fontWeight: "800", color: color.ink, marginBottom: 2 },
+  signupBoxKindAi: { color: "#6d28d9" },
+  signupBoxSteps: { fontSize: 8, color: color.muted, textAlign: "center", lineHeight: 11 },
+  signupFlowArrow: { fontSize: 16, color: color.muted, paddingHorizontal: 2 },
+
+  archOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.38)", alignItems: "center", justifyContent: "center", padding: 20 },
+  archDialog: { width: "94%", maxWidth: 620, maxHeight: "88%", backgroundColor: color.white, borderRadius: 20, borderWidth: 1, borderColor: "#ddd", padding: 17 },
+  archHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 },
+  archTitle: { fontSize: 14, fontWeight: "800", color: color.ink },
+  archSub: { fontSize: 9, color: color.muted, marginTop: 4 },
+  archClose: { borderWidth: 0, backgroundColor: "transparent" },
+  archCloseText: { fontSize: 18, color: color.ink, paddingHorizontal: 4 },
+  archScroll: { marginVertical: 4 },
+  archCode: { fontFamily: "Menlo", backgroundColor: "#111", color: "#ddd", borderRadius: 13, padding: 12, fontSize: 9, lineHeight: 14 },
+  archActions: { flexDirection: "row", justifyContent: "flex-end", gap: 7, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: color.line },
+  archCloseBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: color.cardBorder, backgroundColor: color.white },
+  archCloseBtnText: { fontSize: 11, fontWeight: "700", color: color.ink }
 });
 
 // R15.78: R1 HTML audit mock data (5 笔) — 1:1 抄 R1 audits[] 数组.
@@ -731,6 +797,194 @@ function RecommendationToggles(): React.JSX.Element {
       <View style={styles.recoCard}>
         <Text style={styles.recoCardTitle}>指标系统</Text>
         {METRIC_TOGGLES.map((t) => <ToggleRow key={t.title} t={t} />)}
+      </View>
+    </View>
+  );
+}
+
+// R15.81: R1 identity 段 1:1 抄 — Account ≠ Content Provenance
+const CONTENT_BADGES: ReadonlyArray<{ label: string; tint: string; bg: string }> = [
+  { label: "HUMAN_CREATED", tint: "#0f172a", bg: "#f1f5f9" },
+  { label: "AI_ASSISTED", tint: "#6d28d9", bg: "#f3e8ff" },
+  { label: "AI_GENERATED", tint: "#6d28d9", bg: "#f3e8ff" },
+  { label: "AI_TWIN_GENERATED", tint: "#6d28d9", bg: "#f3e8ff" }
+];
+
+function IdentitySplit(): React.JSX.Element {
+  return (
+    <View style={styles.identityGrid}>
+      <View style={styles.identityCard}>
+        <Text style={styles.identityCardTitle}>账户身份</Text>
+        <Text style={styles.identityCardSub}>回答 \"这个账号是谁 / 谁负责\"。固定为 HUMAN、AI_NATIVE、AI_TWIN 三种, 不根据帖子内容改变。</Text>
+        <View style={{ marginTop: 10 }}>
+          <MiniIdentityCards />
+        </View>
+      </View>
+      <View style={styles.identityCard}>
+        <Text style={styles.identityCardTitle}>内容来源</Text>
+        <Text style={styles.identityCardSub}>回答 \"这条内容怎么产生\"。真人账号也可以发布 AI 内容; AI Twin 也可以转发真人素材。</Text>
+        <View style={styles.contentBadgesCol}>
+          {CONTENT_BADGES.map((b) => (
+            <View key={b.label} style={[styles.contentBadge, { backgroundColor: b.bg }]}>
+              <Text style={[styles.contentBadgeText, { color: b.tint }]}>{b.label}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// R15.81: R1 权限矩阵 (1:1 抄 8 行)
+type CellKind = "yes" | "no" | "limit";
+const PERMISSION_MATRIX: ReadonlyArray<{
+  capability: string; human: CellKind; native: CellKind; twin: CellKind; policy: string;
+}> = [
+  { capability: "发帖 / 评论", human: "yes", native: "yes", twin: "yes", policy: "内容来源单独标识" },
+  { capability: "公开 DM / 问答", human: "yes", native: "limit", twin: "limit", policy: "进入对话时再次提示 AI 身份" },
+  { capability: "读取 Creator Availability", human: "yes", native: "no", twin: "yes", policy: "Twin 可告诉用户 \"当前可用\", 不可修改" },
+  { capability: "收集 / 结构化邀约", human: "yes", native: "no", twin: "yes", policy: "生成待真人确认 Draft" },
+  { capability: "接受现实邀约", human: "yes", native: "no", twin: "no", policy: "Human Confirm Gate" },
+  { capability: "Scene Check-in / 到店", human: "yes", native: "no", twin: "no", policy: "禁止制造虚假现实足迹" },
+  { capability: "收款 / 结算", human: "yes", native: "no", twin: "no", policy: "绑定 Human / Business 责任主体" },
+  { capability: "服务评价 / 社会证明", human: "yes", native: "no", twin: "no", policy: "AI 互动不进入真人评分" }
+];
+
+const CELL_TEXT: Record<CellKind, string> = {
+  yes: "允许",
+  no: "禁止",
+  limit: "受限"
+};
+const CELL_TINT: Record<CellKind, { bg: string; fg: string }> = {
+  yes: { bg: "#dcfce7", fg: "#15803d" },
+  no: { bg: "#fee2e2", fg: "#b91c1c" },
+  limit: { bg: "#fde68a", fg: "#b45309" }
+};
+
+function PermissionCell({ kind, suffix }: { kind: CellKind; suffix?: string }): React.JSX.Element {
+  const tint = CELL_TINT[kind];
+  return (
+    <View style={[styles.permCell, { backgroundColor: tint.bg }]}>
+      <Text style={[styles.permCellText, { color: tint.fg }]}>{CELL_TEXT[kind]}{suffix ? ` · ${suffix}` : ""}</Text>
+    </View>
+  );
+}
+
+function PermissionMatrix(): React.JSX.Element {
+  return (
+    <View style={styles.permTableWrap}>
+      <View style={styles.permHeaderRow}>
+        <Text style={[styles.permHeaderCell, { flex: 1.6 }]}>能力</Text>
+        <Text style={styles.permHeaderCell}>Human</Text>
+        <Text style={styles.permHeaderCell}>AI Native</Text>
+        <Text style={styles.permHeaderCell}>AI Twin</Text>
+        <Text style={[styles.permHeaderCell, { flex: 1.6 }]}>Policy</Text>
+      </View>
+      {PERMISSION_MATRIX.map((row) => (
+        <View key={row.capability} style={styles.permRow}>
+          <Text style={[styles.permCellCap, { flex: 1.6 }]}>{row.capability}</Text>
+          <PermissionCell kind={row.human} suffix={row.human === "yes" && row.capability.includes("评论") ? "标 AI" : undefined} />
+          <PermissionCell
+            kind={row.native}
+            suffix={
+              row.native === "yes" ? "标 AI" :
+              row.native === "limit" ? "明示 AI" : undefined
+            }
+          />
+          <PermissionCell
+            kind={row.twin}
+            suffix={
+              row.twin === "yes" ? "按授权" :
+              row.twin === "limit" ? "按授权" : undefined
+            }
+          />
+          <Text style={[styles.permPolicy, { flex: 1.6 }]}>{row.policy}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// R15.81: R1 注册与创建链路 (3 flow box)
+const SIGNUP_FLOWS: ReadonlyArray<{ kind: string; steps: string }> = [
+  { kind: "HUMAN", steps: "signup → phone/email → profile → optional KYC" },
+  { kind: "AI_NATIVE", steps: "createPlatformAI() → Proxy operator → policy preset" },
+  { kind: "AI_TWIN", steps: "createCreatorTwin(owner_id) → consent → scope → model" }
+];
+
+function SignupFlow(): React.JSX.Element {
+  return (
+    <View style={styles.signupFlow}>
+      {SIGNUP_FLOWS.map((f, i) => (
+        <View key={f.kind} style={styles.signupFlowRow}>
+          <View style={[styles.signupBox, f.kind !== "HUMAN" ? styles.signupBoxAi : undefined]}>
+            <Text style={[styles.signupBoxKind, f.kind !== "HUMAN" ? styles.signupBoxKindAi : undefined]}>{f.kind}</Text>
+            <Text style={styles.signupBoxSteps}>{f.steps}</Text>
+          </View>
+          {i < SIGNUP_FLOWS.length - 1 ? <Text style={styles.signupFlowArrow}>|</Text> : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// R15.81: R1 数据模型 modal (1:1 抄 4 schema)
+const DATA_CONTRACT = `AccountIdentity {
+  id
+  type: HUMAN | AI_NATIVE | AI_TWIN
+  owner_id?: HUMAN | PROXY_PLATFORM
+  can_login: boolean
+  disclosure_required: boolean
+}
+
+ContentProvenance {
+  content_id
+  creator_account_id
+  source: HUMAN_CREATED | AI_ASSISTED | AI_GENERATED | AI_TWIN_GENERATED
+  evidence: PLATFORM_REGISTRY | C2PA | WATERMARK | DECLARATION | DETECTOR
+  confidence
+  review_state
+}
+
+TwinConsent {
+  owner_id
+  likeness_image
+  likeness_video
+  voice_clone
+  public_reply
+  private_dm
+  ad_usage
+  revoked_at?
+}
+
+RealityGate {
+  scene_checkin: HUMAN_ONLY
+  invite_accept: HUMAN_ONLY
+  payment: HUMAN_OR_BUSINESS
+  review: COMPLETED_HUMAN_ORDER_ONLY
+}`;
+
+function DataContractModal({ onClose }: { onClose: () => void }): React.JSX.Element {
+  return (
+    <View style={styles.archOverlay}>
+      <View style={styles.archDialog}>
+        <View style={styles.archHead}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.archTitle}>Proxy AI Identity · Data Contract</Text>
+            <Text style={styles.archSub}>AI 不伪造 Human Identity, Twin 必须有唯一 owner。</Text>
+          </View>
+          <Pressable onPress={onClose} style={styles.archClose} accessibilityLabel="关闭数据模型">
+            <Text style={styles.archCloseText}>×</Text>
+          </Pressable>
+        </View>
+        <ScrollView style={styles.archScroll}>
+          <Text style={styles.archCode}>{DATA_CONTRACT}</Text>
+        </ScrollView>
+        <View style={styles.archActions}>
+          <Pressable onPress={onClose} style={styles.archCloseBtn} accessibilityLabel="关闭">
+            <Text style={styles.archCloseBtnText}>关闭</Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );

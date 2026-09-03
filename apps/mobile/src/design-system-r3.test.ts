@@ -48,7 +48,12 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   // R15.80: R1 risk 段 (3 risk cards + 5 rules + 6 toggles + reco card).
   "riskCardTitle", "riskCardSub",
   "ruleTitle", "ruleReason", "ruleActionText", "ruleOpBtnText",
-  "recoCardTitle", "toggleRowTitle", "toggleRowSub"
+  "recoCardTitle", "toggleRowTitle", "toggleRowSub",
+  // R15.81: R1 identity 段 (Account≠Content + 权限矩阵 + 注册链路 + 数据模型 modal).
+  "archBtnText", "identityCardTitle", "identityCardSub", "contentBadgeText",
+  "permHeaderCell", "permCellCap", "permCellText", "permPolicy",
+  "signupBoxKind", "signupBoxSteps",
+  "archTitle", "archSub", "archCode", "archCloseBtnText"
 ];
 
 describe("Proxy Design System R3 typography", () => {
