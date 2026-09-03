@@ -760,7 +760,7 @@ func (r *EngagementRepository) AddReaction(ctx context.Context, re engagement.Re
 
 func (r *EngagementRepository) AddReply(ctx context.Context, re engagement.Reply) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO engagement.replies (id, post_id, actor_id, body, created_at)
+		INSERT INTO engagement.replies (reply_id, post_id, actor_id, body, created_at)
 		VALUES ($1,$2,$3,$4,$5)`,
 		re.ID, re.PostID, re.ActorID, re.Body, re.CreatedAt,
 	)
@@ -778,7 +778,7 @@ func (r *EngagementRepository) AddRepost(ctx context.Context, re engagement.Repo
 
 func (r *EngagementRepository) AddBookmark(ctx context.Context, b engagement.Bookmark) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO engagement.bookmarks (id, post_id, actor_id, created_at)
+		INSERT INTO engagement.bookmarks (bookmark_id, post_id, actor_id, created_at)
 		VALUES ($1,$2,$3,$4)`,
 		b.ID, b.PostID, b.ActorID, b.CreatedAt,
 	)

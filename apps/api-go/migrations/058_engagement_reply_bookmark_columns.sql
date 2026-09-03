@@ -17,3 +17,8 @@
 
 ALTER TABLE engagement.replies RENAME COLUMN id TO reply_id;
 ALTER TABLE engagement.bookmarks RENAME COLUMN id TO bookmark_id;
+
+-- R16.4.1: trigger sync_reply_count 调用 localnet.adjust_post_stat, 写 localnet.post_stats.
+--   但 R16.4 测试发现 post_stats 没 GRANT 给 proxy role, INSERT 会 permission denied.
+--   长期 fix: grant ALL 给 proxy, 跟现有 posts/identity role 一致.
+GRANT ALL ON localnet.post_stats TO proxy;
