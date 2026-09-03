@@ -49,6 +49,38 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo, clock: systemClock{}}
 }
 
+func (s *Service) Supports(commandType string) bool {
+	switch commandType {
+	case "CreateCampaign", "ActivateCampaign", "PauseCampaign", "AllocateBenefit", "ClaimBenefit", "RedeemBenefit":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) Handle(e command.Envelope) command.Result {
+	return s.HandleContext(context.Background(), e)
+}
+
+func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
+	switch e.CommandType {
+	case "CreateCampaign":
+		return s.HandleCreateCampaign(ctx, e)
+	case "ActivateCampaign":
+		return s.HandleActivateCampaign(ctx, e)
+	case "PauseCampaign":
+		return s.HandlePauseCampaign(ctx, e)
+	case "AllocateBenefit":
+		return s.HandleAllocateBenefit(ctx, e)
+	case "ClaimBenefit":
+		return s.HandleClaimBenefit(ctx, e)
+	case "RedeemBenefit":
+		return s.HandleRedeemBenefit(ctx, e)
+	default:
+		return command.Rejected(e, "BENEFIT_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "benefit.unsupported", nil)
+	}
+}
+
 func NewServiceWithClock(repo Repository, clock Clock) *Service {
 	return &Service{repo: repo, clock: clock}
 }
