@@ -65,7 +65,10 @@ export class LocalNetClient {
     if (this.input.authClient.requestPublic) {
       const query = [`limit=${Math.max(1, Math.min(50, limit))}`];
       if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`);
-      // R15.92: 暂不把 searchQuery 传 server, client 侧 filter.
+      // R15.94: 真正传 server (server listFeed service.go R15.94 接 Search 字段).
+      if (searchQuery && searchQuery.trim().length > 0) {
+        query.push(`search=${encodeURIComponent(searchQuery.trim())}`);
+      }
       const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
       if (response.status < 200 || response.status >= 300) {
         throw new LocalNetProtocolError(`动态服务暂时不可用（${response.status}），请稍后重试`);

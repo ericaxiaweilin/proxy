@@ -196,6 +196,8 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 50 {
 		limit = 25
 	}
+	// R15.94: 透传 search query (server 端 filter, 跟 R15.92 client filter 兼容).
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
 	now := time.Now().UTC()
 	readTimeout := s.ReadTimeout
 	if readTimeout <= 0 {
@@ -203,11 +205,15 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	readContext, cancel := context.WithTimeout(r.Context(), readTimeout)
 	defer cancel()
+	feedPayload := map[string]any{"cursor": cursor, "limit": limit}
+	if search != "" {
+		feedPayload["search"] = search
+	}
 	result := s.LocalNet.HandleContext(readContext, command.Envelope{
 		CommandID: "public_feed_" + strconv.FormatInt(now.UnixNano(), 36), CommandType: "ListFeedPosts", CommandVersion: 1,
 		Actor: command.Actor{Type: "PUBLIC", ID: "anonymous_reader"}, Principal: command.Principal{Type: "PUBLIC", ID: "anonymous_reader"},
 		Target: command.Target{Type: "Feed", ID: "public"}, Purpose: "public_feed_read", RequestedAt: now.Format(time.RFC3339Nano),
-		Payload: map[string]any{"cursor": cursor, "limit": limit},
+		Payload: feedPayload,
 	})
 	if result.Error != nil && result.Error.ErrorCode == "INVALID_CURSOR" {
 		w.Header().Set("Cache-Control", "no-store")

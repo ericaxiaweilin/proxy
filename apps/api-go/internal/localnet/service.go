@@ -839,8 +839,11 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	var request struct {
 		Cursor string `json:"cursor"`
 		Limit  int    `json:"limit"`
+		// R15.94: search query — server 侧 filter (body 包含 search, case-insensitive).
+		Search string `json:"search"`
 	}
 	_ = decode(e.Payload, &request) // legacy malformed payloads keep first-page behavior
+	search := strings.ToLower(strings.TrimSpace(request.Search))
 	if request.Limit <= 0 {
 		request.Limit = 25
 	}
@@ -881,6 +884,11 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 			continue
 		}
 		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
+			continue
+		}
+		// R15.94: server 端 search filter (body 包含, case-insensitive).
+		//   跟 R15.92 client 端 filter 一致, 但放在 server 节省 传输量.
+		if search != "" && !strings.Contains(strings.ToLower(p.Body), search) {
 			continue
 		}
 		// Follow-graph authorization is not implemented yet. Fail closed instead
