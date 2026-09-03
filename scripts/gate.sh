@@ -56,10 +56,44 @@ gate_g2_tests() {
   set -e
   set -o pipefail
   echo "=== G2: tests (api-go -count=1, mobile --run) ==="
+  # The integration tests share a Postgres cluster with the live
+  # server. When the live server is up, it mutates the same tables
+  # the migrator / contribution / inbox tests depend on, and the
+  # tests flake. Kill any live server first, then re-spawn after
+  # the suite is done.
+  local server_pid
+  server_pid=$(lsof -i :4100 -t 2>/dev/null | head -1 || true)
+  local killed_server=0
+  if [ -n "$server_pid" ]; then
+    echo "  api-go test: stopping live server (pid $server_pid) to avoid DB contention..."
+    kill "$server_pid" 2>/dev/null || true
+    for _ in $(seq 1 10); do
+      if ! lsof -i :4100 -t >/dev/null 2>&1; then break; fi
+      sleep 1
+    done
+    killed_server=1
+  fi
   go -C apps/api-go test -count=1 -p 1 ./... || return $?
   echo "  api-go test: OK"
+  # Re-spawn the live server if we killed one. Use the same
+  # env-loading shape as the install/run docs.
+  if [ "$killed_server" = "1" ]; then
+    echo "  api-go test: re-spawning live server for g3 e2e..."
+    if [ -f ./.env ]; then
+      set -a; . ./.env; set +a
+    fi
+    (cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && nohup go -C apps/api-go run ./cmd/api > /tmp/api-go-gate.log 2>&1 &) >/dev/null 2>&1
+    for _ in $(seq 1 20); do
+      if curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4100/health/live 2>/dev/null | grep -q "200"; then
+        break
+      fi
+      sleep 1
+    done
+  fi
   pnpm --filter @proxy/mobile test --run || return $?
   echo "  mobile test: OK"
+  pnpm --filter @proxy/contracts test --run || return $?
+  echo "  contracts test: OK"
 }
 
 gate_g3_e2e() {
@@ -80,6 +114,8 @@ gate_g3_e2e() {
   echo "  location-consent-e2e: OK"
   bash scripts/kill-switch-e2e.sh || return $?
   echo "  kill-switch-e2e: OK"
+  bash scripts/benefit-eligibility-e2e.sh || return $?
+  echo "  benefit-eligibility-e2e: OK"
   bash scripts/legal-e2e.sh || return $?
   echo "  legal-e2e: OK"
 }
@@ -121,9 +157,33 @@ gate_g4_drift() {
   if grep -q 'MAP_DISTRICTS' apps/mobile/src/surfaces/market.tsx 2>/dev/null; then
     bad_fixtures+=("apps/mobile/src/surfaces/market.tsx still imports MAP_DISTRICTS")
   fi
+  # R16.7 audit followup: the constants also live in market-fixtures.ts.
+  # The original fix only deleted the import from market.tsx; the
+  # exports in market-fixtures.ts are now orphans. Guard both files
+  # so a future import from market-fixtures.ts is caught too.
+  if grep -q 'OPPORTUNITY_MAP_COORDS' apps/mobile/src/surfaces/market.tsx 2>/dev/null \
+     || grep -q 'OPPORTUNITY_MAP_COORDS' apps/mobile/src/market-fixtures.ts 2>/dev/null; then
+    bad_fixtures+=("OPPORTUNITY_MAP_COORDS reappeared in market.tsx or market-fixtures.ts")
+  fi
+  if grep -q 'MAP_DISTRICTS' apps/mobile/src/surfaces/market.tsx 2>/dev/null \
+     || grep -q 'MAP_DISTRICTS' apps/mobile/src/market-fixtures.ts 2>/dev/null; then
+    bad_fixtures+=("MAP_DISTRICTS reappeared in market.tsx or market-fixtures.ts")
+  fi
   # MarketMap must use react-native-maps (real MapKit / Google Maps)
   if ! grep -q 'from "react-native-maps"' apps/mobile/src/surfaces/market.tsx 2>/dev/null; then
     bad_fixtures+=("apps/mobile/src/surfaces/market.tsx MarketMap lost the react-native-maps import")
+  fi
+  # R15.x+: activity defaultCatalog 不该出现 PLATFORM / MERCHANT / USER
+  # origin (那是硬编码 "假人假活动" 伪装成平台/商家/用户发起)。R15.x
+  # 原则：平台没有 mock 数据，所有占位都明确标 AI_PERSONA (合规) 或
+  # TEST (server 端 filter 掉)。回归拦：defaultCatalog 块内出现
+  # Origin: "PLATFORM" / "MERCHANT" / "USER" 任意一个都拒绝 commit。
+  if awk '/defaultCatalog/,/^}/' apps/api-go/internal/activity/service.go 2>/dev/null | grep -E 'Origin:[[:space:]]*"(PLATFORM|MERCHANT|USER)"' >/dev/null 2>&1; then
+    bad_fixtures+=("apps/api-go/internal/activity/service.go defaultCatalog has non-AI origin (PLATFORM/MERCHANT/USER) — must be AI_PERSONA or TEST")
+  fi
+  # R15.x+: List 端点必须在 SQL 过滤掉 origin='TEST' 的 fixture 残留
+  if ! grep -q "origin'.*'TEST'\|origin.*=.*'TEST'" apps/api-go/internal/platform/postgres/activity.go 2>/dev/null; then
+    bad_fixtures+=("apps/api-go/internal/platform/postgres/activity.go List() must filter out origin='TEST' rows so PG fixture residue does not leak to client")
   fi
   if [ ${#bad_fixtures[@]} -gt 0 ]; then
     echo "  FAIL: hard-coded map fixture regression detected:" >&2
@@ -132,7 +192,7 @@ gate_g4_drift() {
     done
     return 1
   fi
-  echo "  semantic fixtures: OK (no fake map regressions)"
+  echo "  semantic fixtures: OK (no fake map regressions, no non-AI activity origins)"
 }
 
 OVERALL=0

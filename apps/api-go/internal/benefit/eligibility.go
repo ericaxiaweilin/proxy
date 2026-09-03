@@ -12,6 +12,15 @@ type EligibilityEngine struct {
 	clock Clock
 }
 
+// Evaluator is the small interface Service depends on. Production
+// wires an *EligibilityEngine; tests may inject a stub.
+type Evaluator interface {
+	Evaluate(ctx context.Context, ec *EligibilityContext) (*EligibilityResult, error)
+}
+
+// Compile-time assertion: *EligibilityEngine implements Evaluator.
+var _ Evaluator = (*EligibilityEngine)(nil)
+
 func NewEligibilityEngine(repo Repository, clock Clock) *EligibilityEngine {
 	return &EligibilityEngine{repo: repo, clock: clock}
 }

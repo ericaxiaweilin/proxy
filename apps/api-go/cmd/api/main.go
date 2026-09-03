@@ -21,6 +21,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/compliance"
+	"github.com/proxy-app/proxy-api/internal/benefit"
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
@@ -297,6 +298,15 @@ func main() {
 		complianceService := compliance.NewService(complianceRepo)
 		server.Compliance = complianceService
 	}
+	// R0 / R16.7-P1-H prep: Benefit Routing Network. No Postgres
+	// repo is shipped yet (memory_repo.go is the only implementation);
+	// we use the memory repo in both pool and no-pool paths so
+	// /v1/commands/{CreateCampaign,ClaimBenefit,RedeemBenefit,...}
+	// is reachable end-to-end. The eligibility engine is wired
+	// inside NewService and fires on every Claim / Redeem.
+	benefitRepo := benefit.NewMemoryRepository()
+	benefitService := benefit.NewService(benefitRepo)
+	server.Benefit = benefitService
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
 	// 未配置时 fail-closed：特权命令（审核/发奖/能力核验/媒体就绪覆盖）一律拒绝。
 	if operatorPrincipals := os.Getenv("PROXY_OPERATOR_PRINCIPALS"); operatorPrincipals != "" {

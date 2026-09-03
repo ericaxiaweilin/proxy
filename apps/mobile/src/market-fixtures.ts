@@ -354,19 +354,3 @@ export const OPPORTUNITY_LENS_LABEL: Record<OpportunityLens, string> = {
   BOOKED: "预约",
   REMOTE: "远程"
 };
-
-// MAP 使用的行政区标签（相对 geoMap 容器）。
-export const MAP_DISTRICTS: Array<{ label: string; left: number; top: number }> = [
-  { label: "西湖", left: 12, top: 19 },
-  { label: "还剑", left: 58, top: 29 },
-  { label: "Cầu Giấy", left: 66, top: 67 }
-];
-
-export const OPPORTUNITY_MAP_COORDS: Array<[number, number]> = [
-  [61, 37],
-  [28, 31],
-  [78, 18],
-  [39, 58],
-  [23, 49],
-  [58, 75]
-];

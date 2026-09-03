@@ -229,3 +229,137 @@ func TestAllocateAndList(t *testing.T) {
 		t.Fatalf("expected quota 20, got %d", allocs[0].Quota)
 	}
 }
+
+// TestEligibilityEngineWiredInClaimPath proves the eligibility
+// engine actually fires inside HandleClaimBenefit / HandleRedeemBenefit.
+// Before the wiring (07ec788 era) the engine was dead code; this
+// test is the tripwire that fails loud if the engine is ever
+// accidentally bypassed again.
+func TestEligibilityEngineWiredInClaimPath(t *testing.T) {
+	repo := NewMemoryRepository()
+	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
+	svc := NewServiceWithClock(repo, clock)
+	ctx := context.Background()
+
+	// 1. Build a campaign + benefit + capacity pool + activate it.
+	campResult := svc.HandleCreateCampaign(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT", ID: "m1"},
+		Payload: map[string]any{
+			"type": "SCENE_IGNITION", "ownerType": "merchant", "ownerId": "m1",
+			"budgetMinor": 1000000, "currency": "VND",
+			"startAt": "2026-09-03T00:00:00Z", "endAt": "2026-09-30T23:59:59Z",
+		},
+	})
+	campaignID := campResult.Aggregate.ID
+	_ = repo.CreateBenefitDefinition(ctx, &BenefitDefinition{
+		ID: "b1", CampaignID: campaignID, Kind: FreeDrink,
+		RetailValueMinor: 45000, UserPayMinor: 0, Currency: "VND",
+		CreatedAt: clock.Now(),
+	})
+	_ = repo.UpsertCapacityPool(ctx, &CapacityPool{
+		ID: "p1", CampaignID: campaignID, TotalCapacity: 5, Version: 1,
+		CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
+	})
+	_ = svc.HandleActivateCampaign(ctx, command.Envelope{
+		Actor:  command.Actor{Type: "MERCHANT", ID: "m1"},
+		Payload: map[string]any{"campaignId": campaignID},
+	})
+
+	// 2. Replace the engine with a stub that always rejects. If the
+	// wiring is in place the claim must be rejected.
+	svc.WithEligibility(&stubEngine{eligible: false, reason: "RISK_FLAGGED"})
+	claimResult := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if claimResult.Outcome != "REJECTED" {
+		t.Fatalf("eligibility should block claim, got %s", claimResult.Outcome)
+	}
+	if claimResult.Error == nil || claimResult.Error.ErrorCode != "ELIGIBILITY_FAILED" {
+		t.Fatalf("expected ELIGIBILITY_FAILED, got %+v", claimResult.Error)
+	}
+	// The reasonCode is propagated through Error.SafeDetails for clients.
+	if claimResult.Error == nil || claimResult.Error.SafeDetails["reasonCode"] != "RISK_FLAGGED" {
+		t.Fatalf("expected reasonCode=RISK_FLAGGED in SafeDetails, got %+v", claimResult.Error)
+	}
+
+	// 3. Switch the stub to eligible=true and confirm the claim
+	// succeeds. This proves the engine is not just blindly rejecting.
+	svc.WithEligibility(&stubEngine{eligible: true})
+	okResult := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "INDIVIDUAL", ID: "u2"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if okResult.Outcome != "ACCEPTED" {
+		t.Fatalf("eligible=true should allow claim, got %s: %+v", okResult.Outcome, okResult.Error)
+	}
+}
+
+// stubEngine is a test-only EligibilityEngine replacement.
+type stubEngine struct {
+	eligible bool
+	reason   string
+}
+
+func (s *stubEngine) Evaluate(ctx context.Context, ec *EligibilityContext) (*EligibilityResult, error) {
+	return &EligibilityResult{Eligible: s.eligible, ReasonCode: s.reason}, nil
+}
+
+// TestEligibilityEngineWiredInRedeemPath proves the same gate
+// runs at redemption time. A claim made when the user was eligible
+// can be blocked at redemption when the signal flips (lifecycle
+// rules, max_redemptions reached, etc.).
+func TestEligibilityEngineWiredInRedeemPath(t *testing.T) {
+	repo := NewMemoryRepository()
+	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
+	svc := NewServiceWithClock(repo, clock)
+	ctx := context.Background()
+
+	// Build + claim a benefit (default engine is open-campaign).
+	campResult := svc.HandleCreateCampaign(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT", ID: "m1"},
+		Payload: map[string]any{
+			"type": "SCENE_IGNITION", "ownerType": "merchant", "ownerId": "m1",
+			"budgetMinor": 1000000, "currency": "VND",
+			"startAt": "2026-09-03T00:00:00Z", "endAt": "2026-09-30T23:59:59Z",
+		},
+	})
+	campaignID := campResult.Aggregate.ID
+	_ = repo.CreateBenefitDefinition(ctx, &BenefitDefinition{
+		ID: "b1", CampaignID: campaignID, Kind: FreeDrink,
+		RetailValueMinor: 45000, UserPayMinor: 0, Currency: "VND",
+		CreatedAt: clock.Now(),
+	})
+	_ = repo.UpsertCapacityPool(ctx, &CapacityPool{
+		ID: "p1", CampaignID: campaignID, TotalCapacity: 5, Version: 1,
+		CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
+	})
+	_ = svc.HandleActivateCampaign(ctx, command.Envelope{
+		Actor:  command.Actor{Type: "MERCHANT", ID: "m1"},
+		Payload: map[string]any{"campaignId": campaignID},
+	})
+	claim := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if claim.Outcome != "ACCEPTED" {
+		t.Fatalf("claim expected ACCEPTED, got %s", claim.Outcome)
+	}
+	token := claim.Body["claimToken"].(string)
+
+	// Now flip the engine to reject. The redemption must be blocked.
+	svc.WithEligibility(&stubEngine{eligible: false, reason: "MAX_REDEMPTIONS_REACHED"})
+	redeem := svc.HandleRedeemBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT_STAFF", ID: "s1"},
+		Payload: map[string]any{
+			"claimToken": token, "merchantId": "m1", "staffId": "s1",
+			"evidenceType": "MERCHANT_SCAN", "idempotencyKey": "k1",
+		},
+	})
+	if redeem.Outcome != "REJECTED" {
+		t.Fatalf("eligibility should block redeem, got %s", redeem.Outcome)
+	}
+	if redeem.Error == nil || redeem.Error.ErrorCode != "ELIGIBILITY_FAILED" {
+		t.Fatalf("expected ELIGIBILITY_FAILED, got %+v", redeem.Error)
+	}
+}

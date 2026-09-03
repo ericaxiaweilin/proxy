@@ -33,8 +33,9 @@ var (
 
 // Service implements the Benefit Routing Network business logic.
 type Service struct {
-	repo     Repository
-	clock    Clock
+	repo    Repository
+	clock   Clock
+	eligibility Evaluator
 }
 
 type Clock interface {
@@ -46,7 +47,15 @@ type systemClock struct{}
 func (systemClock) Now() time.Time { return time.Now().UTC() }
 
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo, clock: systemClock{}}
+	return &Service{repo: repo, clock: systemClock{}, eligibility: NewEligibilityEngine(repo, systemClock{})}
+}
+
+// WithEligibility replaces the default eligibility engine. Used by
+// tests that want to inject a stub. The default engine is wired in
+// NewService, so production callers do not need to call this.
+func (s *Service) WithEligibility(engine Evaluator) *Service {
+	s.eligibility = engine
+	return s
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -268,6 +277,29 @@ func (s *Service) HandleClaimBenefit(ctx context.Context, e command.Envelope) co
 	if c.Status != CampaignActive {
 		return command.Rejected(e, "CAMPAIGN_NOT_ACTIVE", "STATE", "AFTER_USER_ACTION", "benefit.campaign_not_active", nil)
 	}
+	// R16.7-P1-H prep: eligibility gate. Fires before the claim is
+	// written so a RISK_FLAGGED or SOURCE_NOT_ALLOWED user does not
+	// pollute the capacity counter or the claim ledger. The signals
+	// are best-effort defaults (AccountAge=0, DeviceCount=1,
+	// AccountCount=1); the engine accepts partial signals and only
+	// blocks when the rules say so.
+	if s.eligibility != nil {
+		result, err := s.eligibility.Evaluate(ctx, &EligibilityContext{
+			UserID:      e.Actor.ID,
+			CampaignID:  p.CampaignID,
+			BenefitID:   p.BenefitID,
+			AccountStatus: "ACTIVE",
+		})
+		if err != nil {
+			return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)
+		}
+		if !result.Eligible {
+			result := command.Rejected(e, "ELIGIBILITY_FAILED", "VALIDATION", "AFTER_USER_ACTION", "benefit.eligibility_failed", map[string]any{
+				"reasonCode": result.ReasonCode,
+			})
+			return result
+		}
+	}
 	// Check capacity
 	pool, err := s.repo.GetCapacityPool(ctx, p.CampaignID, nil)
 	if err == nil && pool.Claimed >= pool.TotalCapacity {
@@ -336,6 +368,28 @@ func (s *Service) HandleRedeemBenefit(ctx context.Context, e command.Envelope) c
 	}
 	if cl.Status != ClaimClaimed && cl.Status != ClaimReserved {
 		return command.Rejected(e, "CLAIM_NOT_REDEEMABLE", "STATE", "AFTER_USER_ACTION", "benefit.claim_not_redeemable", nil)
+	}
+	// R16.7-P1-H prep: eligibility re-check at redemption. A claim
+	// that was eligible at claim time may have aged out (max
+	// redemptions reached, account suspended, risk score changed).
+	// Running the engine again here is cheap and is the natural
+	// place to apply lifecycle-based rules.
+	if s.eligibility != nil {
+		result, err := s.eligibility.Evaluate(ctx, &EligibilityContext{
+			UserID:      cl.UserID,
+			CampaignID:  cl.CampaignID,
+			BenefitID:   cl.BenefitID,
+			AccountStatus: "ACTIVE",
+		})
+		if err != nil {
+			return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)
+		}
+		if !result.Eligible {
+			result := command.Rejected(e, "ELIGIBILITY_FAILED", "VALIDATION", "AFTER_USER_ACTION", "benefit.eligibility_failed", map[string]any{
+				"reasonCode": result.ReasonCode,
+			})
+			return result
+		}
 	}
 	// Get benefit definition for cost breakdown
 	benefit, err := s.repo.GetBenefitDefinition(ctx, cl.BenefitID)
