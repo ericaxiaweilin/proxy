@@ -436,7 +436,9 @@ const REQUESTER_ME: PersonaConfig = {
   identityActionLabel: "切换身份",
   identityActionSwitch: true,
   profileCard: {
-    route: "personalhub",
+    // R16.8: profileCard onPress 跳 personalmanage (个人总管理, 含 3 段: 基本信息/二维码/状态管理),
+    // 不跳 personalhub (Threads R2 1:1 抄 对外展示页, 不放状态管理/二维码).
+    route: "personalmanage",
     status: "● 可接单",
     social: ["TT", "Z", "IG", "in"]
   },
@@ -3054,9 +3056,14 @@ export function MeSurface({
                   <Text style={styles.profileMetaText}>已验证 · 准时 98%</Text>
                 </View>
               </View>
-              <View style={styles.profileStatus}>
+              <Pressable
+                accessibilityLabel="选择状态"
+                onPress={(event) => { event.stopPropagation?.(); setAvRuleSheetOpen(true); }}
+                style={styles.profileStatus}
+                hitSlop={4}
+              >
                 <Text style={styles.profileStatusText}>● {availabilityLabel(availability)}</Text>
-              </View>
+              </Pressable>
             </View>
             <View style={styles.profileSocial}>
               {persona.profileCard.social.map((s) => (
