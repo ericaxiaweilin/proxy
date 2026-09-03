@@ -38,7 +38,13 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "pAvatarText", "pAvatarTextAi", "postAvaText", "postAvaTextAi",
   "postName", "postTime", "postText", "pOrigin", "postActions",
   // R15.78: R1 audit 段 (table + filter) — 装饰 8-10pt (R1 1:1 抄原版).
-  "auditFilterText", "auditHeaderCell", "auditCell"
+  "auditFilterText", "auditHeaderCell", "auditCell",
+  // R15.79: R1 provenance 段 (pipeline + detection sample + signals) — 装饰 8-12pt.
+  "pipeNumText", "pipeStepTitle", "pipeStepSub",
+  "sampleVisualText", "sampleVisualTextAi", "sampleTitle", "sampleSub",
+  "detectResultTitle", "detectResultSub",
+  "signalLabel", "signalHint", "signalValue",
+  "decisionTitle", "decisionSub", "riskPillText"
 ];
 
 describe("Proxy Design System R3 typography", () => {

@@ -2,6 +2,7 @@
 //
 // R15.77: 3 个 phone preview (Human / AI Native / Twin) + 顶部 mini identity cards
 // R15.78: + R1 audit 段 (审计日志) 5 列 table + 5 过滤
+// R15.79: + R1 provenance 段 (Content Provenance Pipeline + 3 sample + 4 维度评分)
 //
 // 设计: 1:1 抄 R1 HTML 视觉, 不自创.
 //
@@ -180,6 +181,15 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
         <Text style={styles.sectionTitle}>审计日志</Text>
         <Text style={styles.sectionSub}>所有 AI 生成、授权、策略拦截都可追溯。</Text>
         <AuditTable />
+
+        {/* R15.79: R1 provenance 段 — 5 步 pipeline + 3 sample + 4 维度评分 */}
+        <Text style={styles.sectionTitle}>Content Provenance Pipeline</Text>
+        <Text style={styles.sectionSub}>Detection 是 signal, 不是绝对真相。</Text>
+        <ProvenancePipeline />
+
+        <Text style={[styles.sectionTitle, { marginTop: 18 }]}>检测实验台</Text>
+        <Text style={styles.sectionSub}>点击样本后运行。</Text>
+        <DetectionTable />
       </ScrollView>
     </View>
   );
@@ -274,7 +284,52 @@ const styles = StyleSheet.create({
   auditCellIdentityTwin: { color: "#6d28d9", fontWeight: "700" },
   auditCellIdentityHuman: { color: color.ink, fontWeight: "700" },
   auditCellPolicy: { color: color.muted, fontStyle: "italic" },
-  auditCellResultReview: { color: "#b45309", fontWeight: "700" }
+  auditCellResultReview: { color: "#b45309", fontWeight: "700" },
+
+  // R15.79: R1 provenance pipeline (5 步)
+  pipelineRow: { flexDirection: "row", gap: 6, marginBottom: 14 },
+  pipeStep: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 10, padding: 8, alignItems: "center" },
+  pipeStepAi: { borderColor: "#6d28d9" },
+  pipeNum: { width: 18, height: 18, borderRadius: 999, backgroundColor: color.ink, alignItems: "center", justifyContent: "center", marginBottom: 4 },
+  pipeNumAi: { backgroundColor: "#6d28d9" },
+  pipeNumText: { color: color.white, fontSize: 9, fontWeight: "800" },
+  pipeStepTitle: { fontSize: 10, fontWeight: "800", color: color.ink, textAlign: "center", marginBottom: 2 },
+  pipeStepSub: { fontSize: 8, color: color.muted, textAlign: "center", lineHeight: 11 },
+
+  // R15.79: R1 detection 段 (sample grid + result)
+  detectGrid: { flexDirection: "row", gap: 10 },
+  sampleGrid: { gap: 6 },
+  sampleCard: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 10, padding: 8 },
+  sampleCardOn: { borderColor: color.ink, backgroundColor: color.appBg },
+  sampleVisual: { width: 30, height: 30, borderRadius: 999, backgroundColor: color.ink, alignItems: "center", justifyContent: "center" },
+  sampleVisualAi: { backgroundColor: "#6d28d9" },
+  sampleVisualText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  sampleVisualTextAi: { fontSize: 8 },
+  sampleTitle: { fontSize: 11, fontWeight: "800", color: color.ink },
+  sampleSub: { fontSize: 9, color: color.muted },
+
+  detectResult: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10 },
+  detectResultTitle: { fontSize: 12, fontWeight: "800", color: color.ink, marginBottom: 2 },
+  detectResultSub: { fontSize: 8, color: "#777", marginBottom: 8 },
+
+  signalRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
+  signalLabelWrap: { flex: 1.4 },
+  signalLabel: { fontSize: 9, fontWeight: "700", color: color.ink },
+  signalHint: { fontSize: 8, color: color.muted },
+  signalBarTrack: { flex: 1.6, height: 6, backgroundColor: color.appBg, borderRadius: 3, overflow: "hidden" },
+  signalBarFill: { height: 6, backgroundColor: color.ink, borderRadius: 3 },
+  signalBarFillAi: { backgroundColor: "#6d28d9" },
+  signalValue: { width: 30, fontSize: 9, fontWeight: "800", color: color.ink, textAlign: "right" },
+
+  decisionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: color.cardBorder },
+  decisionTitle: { fontSize: 11, fontWeight: "800", color: color.ink },
+  decisionSub: { fontSize: 8, color: color.muted },
+  riskPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  riskPillLow: { backgroundColor: "#dcfce7" },
+  riskPillReview: { backgroundColor: "#fde68a" },
+  riskPillText: { fontSize: 9, fontWeight: "800" },
+  riskPillTextLow: { color: "#15803d" },
+  riskPillTextReview: { color: "#b45309" }
 });
 
 // R15.78: R1 HTML audit mock data (5 笔) — 1:1 抄 R1 audits[] 数组.
@@ -348,6 +403,138 @@ function AuditTable(): React.JSX.Element {
             </View>
           ))}
         </View>
+      </View>
+    </View>
+  );
+}
+
+// R15.79: R1 HTML provenance 段 (1:1 抄) — 5 步 pipeline
+const PIPELINE_STEPS: ReadonlyArray<{ num: number; title: string; sub: string; ai?: boolean }> = [
+  { num: 1, title: "平台生成记录", sub: "Proxy 自己生成时直接写入 provenance, 不需要猜。" },
+  { num: 2, title: "Metadata / C2PA", sub: "读取可验证生成来源、签名、水印和文件元数据。" },
+  { num: 3, title: "用户声明", sub: "上传时声明 Human / AI-assisted / AI-generated。" },
+  { num: 4, title: "模型检测", sub: "只作为风险评分, 不能单独给用户盖 \"假图\" 结论。", ai: true },
+  { num: 5, title: "Policy Decision", sub: "展示标签、放行、降分、人工复核或拒绝。" }
+];
+
+function ProvenancePipeline(): React.JSX.Element {
+  return (
+    <View style={styles.pipelineRow}>
+      {PIPELINE_STEPS.map((step) => (
+        <View key={step.num} style={[styles.pipeStep, step.ai ? styles.pipeStepAi : undefined]}>
+          <View style={[styles.pipeNum, step.ai ? styles.pipeNumAi : undefined]}>
+            <Text style={styles.pipeNumText}>{step.num}</Text>
+          </View>
+          <Text style={styles.pipeStepTitle}>{step.title}</Text>
+          <Text style={styles.pipeStepSub}>{step.sub}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// R15.79: R1 detection 段 (1:1 抄) — 3 sample (human/external/twin) + 4 维度评分
+type SampleKey = "human" | "external" | "twin";
+const SAMPLE_DATA: Record<SampleKey, {
+  title: string; sub: string; letter: string; ai: boolean;
+  scores: ReadonlyArray<[string, number, string]>;
+  decision: string; prov: string; risk: "LOW" | "REVIEW";
+}> = {
+  human: {
+    title: "真人上传照片", sub: "用户声明 Human-created", letter: "H", ai: false,
+    scores: [
+      ["平台生成记录", 0, "无记录"],
+      ["C2PA / Metadata", 14, "普通相机 / 编辑链"],
+      ["用户声明", 92, "Human-created"],
+      ["AI Detector", 18, "低 AI likelihood"]
+    ],
+    decision: "允许发布", prov: "HUMAN_CREATED", risk: "LOW"
+  },
+  external: {
+    title: "外部 AI 美女图", sub: "无平台记录 · 用户未声明", letter: "AI", ai: true,
+    scores: [
+      ["平台生成记录", 0, "无记录"],
+      ["C2PA / Metadata", 76, "发现生成工具痕迹"],
+      ["用户声明", 0, "未声明"],
+      ["AI Detector", 91, "高 AI likelihood"]
+    ],
+    decision: "要求 AI 标注 + 可复核", prov: "AI_GENERATED", risk: "REVIEW"
+  },
+  twin: {
+    title: "Linh AI 分身视频", sub: "Proxy Twin Pipeline 生成", letter: "T", ai: true,
+    scores: [
+      ["平台生成记录", 100, "Twin job #A193"],
+      ["C2PA / Metadata", 100, "签名有效"],
+      ["用户声明", 100, "AI Twin"],
+      ["AI Detector", 94, "与生成记录一致"]
+    ],
+    decision: "自动标注后允许", prov: "AI_TWIN_GENERATED", risk: "LOW"
+  }
+};
+
+function DetectionTable(): React.JSX.Element {
+  const [selected, setSelected] = useState<SampleKey>("human");
+  const [ran, setRan] = useState(false);
+  const data = ran ? SAMPLE_DATA[selected] : undefined;
+  return (
+    <View style={styles.detectGrid}>
+      <View>
+        <View style={styles.sampleGrid}>
+          {(Object.keys(SAMPLE_DATA) as SampleKey[]).map((key) => {
+            const s = SAMPLE_DATA[key];
+            return (
+              <Pressable
+                key={key}
+                onPress={() => { setSelected(key); setRan(false); }}
+                style={[styles.sampleCard, selected === key ? styles.sampleCardOn : undefined]}
+                accessibilityLabel={`样本 ${s.title}`}
+              >
+                <View style={[styles.sampleVisual, s.ai ? styles.sampleVisualAi : undefined]}>
+                  <Text style={[styles.sampleVisualText, s.ai ? styles.sampleVisualTextAi : undefined]}>{s.letter}</Text>
+                </View>
+                <Text style={styles.sampleTitle}>{s.title}</Text>
+                <Text style={styles.sampleSub}>{s.sub}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Pressable onPress={() => setRan(true)} style={[styles.sheetWideBtnDark, { marginTop: 9 }]} accessibilityLabel="运行检测">
+          <Text style={styles.sheetWideBtnTextDark}>运行检测</Text>
+        </Pressable>
+      </View>
+      <View style={styles.detectResult}>
+        {data ? (
+          <>
+            <Text style={styles.detectResultTitle}>{data.title}</Text>
+            <Text style={styles.detectResultSub}>综合证据, 不由单一 detector 决策。</Text>
+            {data.scores.map(([label, value, hint]) => (
+              <View key={label} style={styles.signalRow}>
+                <View style={styles.signalLabelWrap}>
+                  <Text style={styles.signalLabel}>{label}</Text>
+                  <Text style={styles.signalHint}>{hint}</Text>
+                </View>
+                <View style={styles.signalBarTrack}>
+                  <View style={[styles.signalBarFill, value > 70 ? styles.signalBarFillAi : undefined, { width: `${value}%` }]} />
+                </View>
+                <Text style={styles.signalValue}>{value}%</Text>
+              </View>
+            ))}
+            <View style={styles.decisionRow}>
+              <View>
+                <Text style={styles.decisionTitle}>{data.decision}</Text>
+                <Text style={styles.decisionSub}>Content Provenance · {data.prov}</Text>
+              </View>
+              <View style={[styles.riskPill, data.risk === "LOW" ? styles.riskPillLow : styles.riskPillReview]}>
+                <Text style={[styles.riskPillText, data.risk === "LOW" ? styles.riskPillTextLow : styles.riskPillTextReview]}>{data.risk}</Text>
+              </View>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.detectResultTitle}>等待检测</Text>
+            <Text style={styles.detectResultSub}>系统会合并已知来源、元数据、声明与 detector signal。</Text>
+          </>
+        )}
       </View>
     </View>
   );
