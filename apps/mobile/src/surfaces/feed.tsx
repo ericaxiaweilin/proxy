@@ -130,6 +130,8 @@ export function FeedSurface({
   onOpenFeedPrefs,
   onOpenProfile,
   onChromeVisibilityChange,
+  // R15.93: 外部传入 search query (主页 sheet 提交时 app-shell set 进 feed)
+  externalSearchQuery,
   refreshTrigger,
   bottomNavVisible,
   // R15.63: 当前 session userAccountId, 用来在 feed post menu 区分自己/他人 (pin 项只对自己)
@@ -196,6 +198,24 @@ export function FeedSurface({
   const [composerQuoteId, setComposerQuoteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // R15.93: externalSearchQuery 同步 (主页 search sheet 提交时 app-shell 传).
+  //   接受后同时拉一次 listFeedPosts(q) — 刷新过滤后的 feed.
+  //   跟 local searchQuery (line 793 TextInput) 互不干扰.
+  const [externalQuery, setExternalQuery] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (externalSearchQuery !== undefined && externalSearchQuery.length > 0) {
+      setExternalQuery(externalSearchQuery);
+      setSearchQuery(externalSearchQuery);
+      // R15.93: 触发 listFeedPosts(q) 重拉
+      void localNet.listFeedPosts(undefined, 25, externalSearchQuery).then((read) => {
+        setPosts(read.posts);
+        setMediaByPost(read.media);
+        setFeedCursor(read.nextCursor);
+        setHasMore(read.hasMore === true);
+        setPhase("LOADED");
+      }).catch(() => undefined);
+    }
+  }, [externalSearchQuery, localNet]);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
   const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);

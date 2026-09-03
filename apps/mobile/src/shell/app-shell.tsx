@@ -253,6 +253,8 @@ export function AppShell({
   const [currentLocation, setCurrentLocation] = useState<AnyLocation>(DEFAULT_LOCATION);
   const [locationSheetOpen, setLocationSheetOpen] = useState(false);
   const [realitySceneOpen, setRealitySceneOpen] = useState(false);
+  // R15.93: global search query — 主页 search sheet 提交时 set, 传 FeedSurface 拉过滤后 feed.
+  const [globalSearchQuery, setGlobalSearchQuery] = useState<string | undefined>(undefined);
   const [otherProfile, setOtherProfile] = useState<OtherProfileTarget>();
 
   // R15.13 P6：mount 时拉一次"上次激活的自定义坐标" — 跨会话保留
@@ -548,6 +550,7 @@ export function AppShell({
               mediaClient={media}
               socialSpace={socialSpace}
               secureSessionStore={secureSessionStore}
+              externalSearchQuery={globalSearchQuery}
               // R15.63: pin 菜单 — 需 viewerAccountId 区分自己/他人
               viewerAccountId={viewerAccountId}
               onChromeVisibilityChange={setFeedChromeVisible}
@@ -602,12 +605,10 @@ export function AppShell({
               onOpenVouchers={() => setVoucherOpen(true)}
               onOpenRealitySceneMap={() => setRealitySceneOpen(true)}
               onOpenSearch={(q) => {
-                // R15.92: 主页搜索 sheet 提交 — 跳 FEED tab. localNet.listFeedPosts(q)
-                //   在 R15.92 走 client 侧 filter, 但接主路径需要 app-shell 调 localNet.
-                //   Phase 2 接 server search 后, 走 localNet.listFeedPosts(undefined, 25, q) 过滤.
-                //   现阶段: 跳 FEED + 记录 query (后续接 feed search bar).
+                // R15.93: 主页 search sheet 提交 — 跳 FEED + set globalSearchQuery,
+                //   FeedSurface useEffect 接住 + 调 localNet.listFeedPosts(q) 拉过滤后 feed.
                 selectTab("FEED");
-                console.debug(`[shell] search query: ${q}`);
+                setGlobalSearchQuery(q);
               }}
               onExperienceAction={executeExperienceAction}
               onOpenConversation={(author) => {
