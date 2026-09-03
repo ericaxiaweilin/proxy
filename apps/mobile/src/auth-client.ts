@@ -5,7 +5,7 @@ export type TransportRequest = {
   method: "GET" | "POST" | "PUT" | "DELETE";
   url: string;
   headers: Record<string, string>;
-  body?: string;
+  body?: string | null;
 };
 
 export type TransportResponse = {

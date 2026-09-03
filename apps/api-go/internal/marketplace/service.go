@@ -19,6 +19,15 @@ type Service struct {
 	repository Repository
 }
 
+// R16.11 / Master PRD v1.4 §3: 统一物化规则（Materialization Rule）
+// Opportunity -> Invite -> Order -> Activity Participation 必须有唯一业务对象流向。
+// 防止多 Truth：同一响应不能同时生成多个不同类型业务对象。
+var materializationRule = map[string]string{
+	"opportunity": "invite",
+	"invite": "order",
+	"order": "activity_participation",
+}
+
 var ErrOpportunityNotFound = errors.New("market opportunity not found")
 
 type Repository interface {
