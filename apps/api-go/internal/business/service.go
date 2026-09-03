@@ -325,6 +325,18 @@ func (s *Service) hasRole(ctx context.Context, businessID, userID string, roles 
 	return false
 }
 
+// R16.10-P1-F / Master PRD v1.4 §12: 合规场景分类强制（Category Policy 门禁）
+// 防止业务绕合规：付费一对一私人陪伴/喝酒/亲密陪伴等不能因为换文案进入 Opportunity/Invite。
+var forbiddenOpportunityCategories = map[string]bool{
+	"private_intimate": true,
+	"paid_companion_alcohol": true,
+	"paid_private_drink": true,
+}
+
+func (s *Service) enforceCategoryPolicy(category string) bool {
+	return !forbiddenOpportunityCategories[category]
+}
+
 func decode(payload map[string]any, target any) bool {
 	raw, err := json.Marshal(payload)
 	return err == nil && json.Unmarshal(raw, target) == nil

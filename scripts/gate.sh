@@ -76,6 +76,8 @@ gate_g3_e2e() {
   echo "  health: OK ($base/health/live 200)"
   bash scripts/privacy-e2e.sh || return $?
   echo "  privacy-e2e: OK"
+  bash scripts/location-consent-e2e.sh || return $?
+  echo "  location-consent-e2e: OK"
   bash scripts/legal-e2e.sh || return $?
   echo "  legal-e2e: OK"
 }

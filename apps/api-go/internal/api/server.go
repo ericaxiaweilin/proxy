@@ -18,6 +18,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/identity"
+	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
@@ -58,6 +59,14 @@ type Server struct {
 	Scene         *scene.Service
 	RealityScene  *realityscene.Service
 	Facet         *facet.Service
+	// Location owns the precise-location consent ledger (R16.7-P1-J).
+	// It is a separate service so the consent reads / writes do not
+	// pay the load cost of the full identity service.
+	Location      *location.Service
+	// LocationRepo is the storage handle the history endpoint reads
+	// from. Kept separate from the Service so tests can inject an
+	// in-memory repository without standing up a service.
+	LocationRepo  location.Repository
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -158,6 +167,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/privacy/cancel", s.privacyCancelRequest)
 	mux.HandleFunc("/v1/privacy/status", s.privacyStatus)
 	mux.HandleFunc("/v1/privacy/requests", s.privacyList)
+	// R16.7-P1-J: precise location opt-in + time limit (LC-08).
+	// GET /v1/location/consent returns the current consent status
+	// (NONE / GRANTED / EXPIRED). POST /v1/location/consent/grant
+	// opts the user in with a duration choice. POST
+	// /v1/location/consent/revoke opts out. GET
+	// /v1/location/consent/history returns the full history.
+	mux.HandleFunc("/v1/location/consent", s.locationConsentGet)
+	mux.HandleFunc("/v1/location/consent/grant", s.locationConsentGrant)
+	mux.HandleFunc("/v1/location/consent/revoke", s.locationConsentRevoke)
+	mux.HandleFunc("/v1/location/consent/history", s.locationConsentHistory)
 	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.

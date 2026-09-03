@@ -228,6 +228,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Scene.HandleContext(ctx, envelope)
 	case s.RealityScene != nil && s.RealityScene.Supports(envelope.CommandType):
 		return s.RealityScene.HandleContext(ctx, envelope)
+	case s.Location != nil && s.Location.Supports(envelope.CommandType):
+		return s.Location.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}

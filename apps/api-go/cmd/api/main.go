@@ -29,6 +29,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
+	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
@@ -114,8 +115,9 @@ func main() {
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
+	var pool *pgxpool.Pool
 	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
-		pool, err := postgres.Open(ctx, databaseURL)
+		pool, err = postgres.Open(ctx, databaseURL)
 		if err != nil {
 			log.Fatalf("open postgres: %v", err)
 		}
@@ -263,6 +265,25 @@ func main() {
 	server.Activity = activityService
 	marketplaceService.SeedDefaults()
 	server.Marketplace = marketplaceService
+	// R16.7-P1-J: precise location consent ledger. We use the
+	// Postgres repository when the pool is available; otherwise
+	// the in-memory implementation covers tests + local dev.
+	if pool != nil {
+		locationRepo := postgres.NewLocationConsentRepository(pool)
+		locationService := location.NewService(locationRepo)
+		server.Location = locationService
+		server.LocationRepo = locationRepo
+	} else if identityService != nil {
+		// No pool: fall back to in-memory so /v1/location/* still
+		// works in dev mode (the privacy request center does the
+		// same fallback). The repository is in-process so consent
+		// state is lost on restart, matching the rest of the
+		// in-memory dev path.
+		locationRepo := location.NewMemoryRepository(time.Now)
+		locationService := location.NewService(locationRepo)
+		server.Location = locationService
+		server.LocationRepo = locationRepo
+	}
 	// Operator 门禁白名单（env PROXY_OPERATOR_PRINCIPALS，逗号分隔 principal id）。
 	// 未配置时 fail-closed：特权命令（审核/发奖/能力核验/媒体就绪覆盖）一律拒绝。
 	if operatorPrincipals := os.Getenv("PROXY_OPERATOR_PRINCIPALS"); operatorPrincipals != "" {
