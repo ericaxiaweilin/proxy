@@ -950,15 +950,20 @@ func verifyGoogleIDToken(ctx context.Context, idToken string) (string, error) {
 	client := &http.Client{Timeout: 8 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		// 外网不可达时回退本地 JWT 解析（仅验 exp 与 email 存在，不验签名，仅用于开发）
-		return fallbackParseGoogleJWT(idToken)
+		// 外网不可达时：仅在开发环境回退本地 JWT 解析（仅验 exp 与 email 存在，不验签名）
+		if os.Getenv("PROXY_ENV") == "dev" || os.Getenv("PROXY_ENV") == "local" {
+			return fallbackParseGoogleJWT(idToken)
+		}
+		return "", fmt.Errorf("google tokeninfo unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode != http.StatusOK {
-		// 回退本地解析
-		if email, ferr := fallbackParseGoogleJWT(idToken); ferr == nil && email != "" {
-			return email, nil
+		// 非 200 响应：仅在开发环境回退本地解析
+		if os.Getenv("PROXY_ENV") == "dev" || os.Getenv("PROXY_ENV") == "local" {
+			if email, ferr := fallbackParseGoogleJWT(idToken); ferr == nil && email != "" {
+				return email, nil
+			}
 		}
 		return "", fmt.Errorf("tokeninfo %d: %s", resp.StatusCode, string(body))
 	}
@@ -974,8 +979,12 @@ func verifyGoogleIDToken(ctx context.Context, idToken string) (string, error) {
 	if info.Email == "" {
 		return "", fmt.Errorf("email missing in tokeninfo")
 	}
-	// 可选：校验 aud 是否在允许的 ClientID 列表中
-	if allowed := os.Getenv("GOOGLE_ALLOWED_CLIENT_IDS"); allowed != "" {
+	// 校验 aud 是否在允许的 ClientID 列表中（生产环境必须配置）
+	allowed := os.Getenv("GOOGLE_ALLOWED_CLIENT_IDS")
+	if allowed == "" && os.Getenv("PROXY_ENV") != "dev" && os.Getenv("PROXY_ENV") != "local" {
+		return "", fmt.Errorf("GOOGLE_ALLOWED_CLIENT_IDS not configured")
+	}
+	if allowed != "" {
 		found := false
 		for _, v := range strings.Split(allowed, ",") {
 			if strings.TrimSpace(v) != "" && strings.TrimSpace(v) == info.Aud {

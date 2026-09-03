@@ -28,7 +28,7 @@ export const localApiBaseUrl =
 // 只用作 PublicRequester 跟 SessionAuthClient 内部访问网络, 跟 command
 // envelope 不冲突 (get-only)。任何 surface 用这个 transport 就保证跟
 // 其它 client 一致走 fetch, 没 side effect。
-const nativeTransport: Transport = async (request) => {
+export const nativeTransport: Transport = async (request) => {
   const headers: Record<string, string> = {};
   const src: unknown = request.headers;
   if (src) {

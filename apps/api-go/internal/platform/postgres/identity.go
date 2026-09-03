@@ -971,12 +971,13 @@ func (r *IdentityRepository) UpdatePrivacyRequest(ctx context.Context, req ident
 			export_snapshot_url = NULLIF($5, ''),
 			export_sha256 = NULLIF($6, ''),
 			export_retention_until = $7,
-			rejection_reason = NULLIF($8, '')
-		WHERE id = $1 AND status IN ('received','in_progress')
+			rejection_reason = NULLIF($8, ''),
+			version = version + 1
+		WHERE id = $1 AND status IN ('received','in_progress') AND version = $9
 	`, req.ID, string(req.Status),
 		derefTime(req.CompletedAt), derefTime(req.ErasedAt),
 		req.ExportSnapshotURL, req.ExportSHA256, derefTime(req.ExportRetentionUntil),
-		req.RejectionReason,
+		req.RejectionReason, expectedVersion,
 	)
 	if err != nil {
 		return err
