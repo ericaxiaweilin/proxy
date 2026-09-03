@@ -3,6 +3,7 @@
 // R15.77: 3 个 phone preview (Human / AI Native / Twin) + 顶部 mini identity cards
 // R15.78: + R1 audit 段 (审计日志) 5 列 table + 5 过滤
 // R15.79: + R1 provenance 段 (Content Provenance Pipeline + 3 sample + 4 维度评分)
+// R15.80: + R1 risk 段 (3 风险卡 + 5 规则 + 推荐/指标 6 toggles)
 //
 // 设计: 1:1 抄 R1 HTML 视觉, 不自创.
 //
@@ -190,6 +191,15 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
         <Text style={[styles.sectionTitle, { marginTop: 18 }]}>检测实验台</Text>
         <Text style={styles.sectionSub}>点击样本后运行。</Text>
         <DetectionTable />
+
+        {/* R15.80: R1 risk 段 — 3 风险卡 + 5 规则 + 6 toggles */}
+        <Text style={[styles.sectionTitle, { marginTop: 18 }]}>风险控制策略</Text>
+        <Text style={styles.sectionSub}>身份 × 内容 × 现实行为。</Text>
+        <RiskCards />
+        <Text style={[styles.sectionSub, { marginTop: 12, marginBottom: 6 }]}>策略规则</Text>
+        <RiskRules />
+        <Text style={[styles.sectionSub, { marginTop: 14, marginBottom: 6 }]}>推荐与指标防污染</Text>
+        <RecommendationToggles />
       </ScrollView>
     </View>
   );
@@ -329,7 +339,39 @@ const styles = StyleSheet.create({
   riskPillReview: { backgroundColor: "#fde68a" },
   riskPillText: { fontSize: 9, fontWeight: "800" },
   riskPillTextLow: { color: "#15803d" },
-  riskPillTextReview: { color: "#b45309" }
+  riskPillTextReview: { color: "#b45309" },
+
+  // R15.80: R1 risk 段
+  riskGrid: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  riskCard: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10 },
+  riskCardTitle: { fontSize: 12, fontWeight: "800", color: color.ink, marginBottom: 4 },
+  riskCardSub: { fontSize: 9, color: color.muted, lineHeight: 13 },
+
+  ruleCard: { backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10, marginBottom: 6 },
+  ruleTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 },
+  ruleTitle: { flex: 1, fontSize: 11, fontWeight: "800", color: color.ink, paddingRight: 8 },
+  ruleActionPill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999 },
+  ruleActionText: { fontSize: 9, fontWeight: "800" },
+  ruleReason: { fontSize: 9, color: color.muted, lineHeight: 13, marginBottom: 6 },
+  ruleOps: { flexDirection: "row", gap: 6 },
+  ruleOpBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: color.cardBorder, backgroundColor: color.appBg },
+  ruleOpBtnText: { fontSize: 9, fontWeight: "700", color: color.ink },
+  ruleDivider: { height: 1, backgroundColor: color.cardBorder, marginVertical: 6 },
+
+  recoGrid: { flexDirection: "row", gap: 8 },
+  recoCard: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10 },
+  recoCardTitle: { fontSize: 12, fontWeight: "800", color: color.ink, marginBottom: 6 },
+
+  toggleRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 5, borderTopWidth: 1, borderTopColor: color.cardBorder },
+  toggleRowCopy: { flex: 1 },
+  toggleRowTitle: { fontSize: 10, fontWeight: "800", color: color.ink },
+  toggleRowSub: { fontSize: 8, color: color.muted, marginTop: 1 },
+  toggle: { width: 28, height: 16, borderRadius: 999, backgroundColor: color.cardBorder, padding: 2, justifyContent: "center" },
+  toggleOn: { backgroundColor: color.ink },
+  toggleAi: { backgroundColor: "#6d28d9" },
+  toggleDisabled: { opacity: 0.7 },
+  toggleKnob: { width: 12, height: 12, borderRadius: 999, backgroundColor: color.white },
+  toggleKnobOn: { transform: [{ translateX: 12 }] }
 });
 
 // R15.78: R1 HTML audit mock data (5 笔) — 1:1 抄 R1 audits[] 数组.
@@ -535,6 +577,160 @@ function DetectionTable(): React.JSX.Element {
             <Text style={styles.detectResultSub}>系统会合并已知来源、元数据、声明与 detector signal。</Text>
           </>
         )}
+      </View>
+    </View>
+  );
+}
+
+// R15.80: R1 risk 段 1:1 抄 — 3 风险卡 (身份/内容/现实)
+const RISK_CARDS: ReadonlyArray<{ title: string; sub: string }> = [
+  { title: "身份风险", sub: "冒充真人、未授权 Twin、同一真人创建矩阵 Twin、AI 被误标为 Human。" },
+  { title: "内容风险", sub: "真实人物 likeness 未授权、AI 视频未标识、内容来源与账户身份混淆。" },
+  { title: "现实风险", sub: "AI 声称 \"我在这里\"、虚假到店、替真人接受邀约、AI 评价真实服务。" }
+];
+
+function RiskCards(): React.JSX.Element {
+  return (
+    <View style={styles.riskGrid}>
+      {RISK_CARDS.map((c) => (
+        <View key={c.title} style={styles.riskCard}>
+          <Text style={styles.riskCardTitle}>{c.title}</Text>
+          <Text style={styles.riskCardSub}>{c.sub}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// R15.80: R1 risk rules (1:1 抄 5 规则)
+const RISK_RULES: ReadonlyArray<{
+  title: string; policy: string; action: "BLOCK" | "REVIEW" | "ENFORCE" | "DROP_SIGNAL"; reason: string;
+}> = [
+  {
+    title: "AI Native 声称 \"我今晚在西湖\"",
+    policy: "REALITY_IMPERSONATION",
+    action: "BLOCK",
+    reason: "AI 不存在物理 Presence。"
+  },
+  {
+    title: "AI Twin 尝试接受 500k 付费邀约",
+    policy: "HUMAN_CONFIRM_REQUIRED",
+    action: "BLOCK",
+    reason: "生成待确认邀约, 通知真人 Owner。"
+  },
+  {
+    title: "真人上传高 AI likelihood 图片但声明真人拍摄",
+    policy: "PROVENANCE_CONFLICT",
+    action: "REVIEW",
+    reason: "Detector 不是最终证据, 进入人工复核。"
+  },
+  {
+    title: "Creator 撤销视频 likeness 授权",
+    policy: "CONSENT_REVOKED",
+    action: "ENFORCE",
+    reason: "立即停止后续生成任务并冻结相关模型调用。"
+  },
+  {
+    title: "AI Native 给另一个 AI Native 连续点赞",
+    policy: "SYNTHETIC_SOCIAL_SIGNAL",
+    action: "DROP_SIGNAL",
+    reason: "保留日志, 但不进入趋势与推荐权重。"
+  }
+];
+
+const ACTION_TINT: Record<typeof RISK_RULES[number]["action"], { bg: string; fg: string }> = {
+  BLOCK: { bg: "#fee2e2", fg: "#b91c1c" },
+  REVIEW: { bg: "#fde68a", fg: "#b45309" },
+  ENFORCE: { bg: "#dbeafe", fg: "#1d4ed8" },
+  DROP_SIGNAL: { bg: "#fde68a", fg: "#b45309" }
+};
+
+function RiskRules(): React.JSX.Element {
+  return (
+    <View>
+      {RISK_RULES.map((r, i) => {
+        const tint = ACTION_TINT[r.action];
+        return (
+          <View key={r.title} style={styles.ruleCard}>
+            <View style={styles.ruleTop}>
+              <Text style={styles.ruleTitle}>{r.title}</Text>
+              <View style={[styles.ruleActionPill, { backgroundColor: tint.bg }]}>
+                <Text style={[styles.ruleActionText, { color: tint.fg }]}>{r.action}</Text>
+              </View>
+            </View>
+            <Text style={styles.ruleReason}>{r.policy} · {r.reason}</Text>
+            <View style={styles.ruleOps}>
+              <Pressable
+                onPress={() => { /* R15.80: 静态展示 (R1 模拟) */ }}
+                style={styles.ruleOpBtn}
+                accessibilityLabel={`查看 ${r.title} 证据`}
+              >
+                <Text style={styles.ruleOpBtnText}>证据</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { /* R15.80: 静态展示 (R1 模拟) */ }}
+                style={styles.ruleOpBtn}
+                accessibilityLabel={`模拟执行 ${r.action}`}
+              >
+                <Text style={styles.ruleOpBtnText}>模拟执行</Text>
+              </Pressable>
+            </View>
+            {i < RISK_RULES.length - 1 ? <View style={styles.ruleDivider} /> : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// R15.80: R1 推荐 + 指标防污染 (1:1 抄 6 toggles)
+type Toggle = { title: string; sub: string; defaultOn: boolean; disabled?: boolean; ai?: boolean };
+const RECOMMEND_TOGGLES: ReadonlyArray<Toggle> = [
+  { title: "AI 内容占比上限", sub: "默认 For You 不超过 15%", defaultOn: true, ai: true },
+  { title: "AI ↔ AI 信号剔除", sub: "不形成趋势和社交证明", defaultOn: true },
+  { title: "真人内容优先探索", sub: "真人新用户获得最低曝光池", defaultOn: true }
+];
+const METRIC_TOGGLES: ReadonlyArray<Toggle> = [
+  { title: "Human MAU 独立", sub: "AI 活动不计入真人活跃", defaultOn: true, disabled: true },
+  { title: "Human GMV 独立", sub: "AI 不产生真实成交", defaultOn: true, disabled: true },
+  { title: "Scene 真实性保护", sub: "只有 Human / Business 可产生到店足迹", defaultOn: true, disabled: true }
+];
+
+function ToggleRow({ t }: { t: Toggle }): React.JSX.Element {
+  const [on, setOn] = useState(t.defaultOn);
+  const interactive = !t.disabled;
+  return (
+    <View style={styles.toggleRow}>
+      <View style={styles.toggleRowCopy}>
+        <Text style={styles.toggleRowTitle}>{t.title}</Text>
+        <Text style={styles.toggleRowSub}>{t.sub}</Text>
+      </View>
+      <Pressable
+        onPress={interactive ? () => setOn(!on) : undefined}
+        style={[
+          styles.toggle,
+          on ? styles.toggleOn : undefined,
+          t.ai ? styles.toggleAi : undefined,
+          t.disabled ? styles.toggleDisabled : undefined
+        ]}
+        accessibilityLabel={`${t.title} 开关`}
+      >
+        <View style={[styles.toggleKnob, on ? styles.toggleKnobOn : undefined]} />
+      </Pressable>
+    </View>
+  );
+}
+
+function RecommendationToggles(): React.JSX.Element {
+  return (
+    <View style={styles.recoGrid}>
+      <View style={styles.recoCard}>
+        <Text style={styles.recoCardTitle}>推荐系统</Text>
+        {RECOMMEND_TOGGLES.map((t) => <ToggleRow key={t.title} t={t} />)}
+      </View>
+      <View style={styles.recoCard}>
+        <Text style={styles.recoCardTitle}>指标系统</Text>
+        {METRIC_TOGGLES.map((t) => <ToggleRow key={t.title} t={t} />)}
       </View>
     </View>
   );

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Proxy · 个人主页架构 v3</title>
+<style>
+:root{
+  --bg:#f7f5f8;--card:#fff;--text:#111;--muted:#8d8792;--line:#e9e6eb;
+  --lime:#c9ff08;--lime-soft:#f2ffd1;--soft:#f2f0f3;--dark:#111;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:#ece9ee;color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Helvetica Neue",Arial,sans-serif
+}
+button,input,select,textarea{font:inherit} button{cursor:pointer}
+.app{
+  width:min(430px,100%);min-height:100vh;margin:auto;background:var(--bg);
+  padding:20px 16px 50px
+}
+.status{display:flex;justify-content:space-between;font-size:14px;font-weight:800;padding-bottom:18px}
+.brand{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:900;margin-bottom:18px}
+.logo{width:36px;height:36px;border:2px solid #111;border-radius:50%;display:grid;place-items:center;background:#fff}
+.preview{background:#111;color:#fff;border-radius:18px;padding:13px;margin-bottom:12px}
+.preview small{color:#bdbdbd;font-weight:800}
+.tabs{display:flex;gap:7px;overflow:auto;margin-top:9px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{border:1px solid #444;background:#1f1f1f;color:#ddd;border-radius:999px;padding:8px 11px;font-size:12px;font-weight:850;white-space:nowrap}
+.tab.active{background:var(--lime);border-color:var(--lime);color:#111}
+
+.ownerbar{
+  display:none;background:var(--lime);border-radius:18px;padding:12px 13px;
+  margin-bottom:12px;align-items:center;gap:10px
+}
+.ownerbar.show{display:flex}
+.ownerbar b{font-size:14px}
+.ownerbar span{display:block;font-size:10px;color:#455000;margin-top:3px;line-height:1.4}
+.ownerbar button{margin-left:auto;border:none;background:#111;color:#fff;border-radius:12px;padding:9px 11px;font-weight:900}
+
+.note{background:#faf9fb;border:1px dashed #d9d4dc;border-radius:15px;padding:10px 12px;font-size:11px;color:#726c76;line-height:1.45;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:16px;margin-bottom:12px}
+.identity{display:flex;align-items:center;gap:12px}
+.avatar{width:62px;height:62px;border-radius:20px;background:#111;color:#fff;display:grid;place-items:center;font-size:27px;font-weight:900}
+.grow{flex:1;min-width:0}
+.name{font-size:22px;font-weight:900}
+.meta{font-size:12px;color:var(--muted);margin-top:4px}
+.live{background:var(--lime-soft);border:1px solid #d9eda4;border-radius:999px;padding:8px 10px;font-size:11px;font-weight:900;color:#3e5100}
+.intro{font-size:14px;line-height:1.55;margin-top:13px}
+.edit-inline{display:none;margin-top:9px;border:none;background:var(--soft);border-radius:11px;padding:8px 10px;font-size:11px;font-weight:850}
+.edit-inline.show{display:inline-block}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:13px}
+.stat{background:#f8f7f9;border-radius:14px;padding:10px;text-align:center}
+.stat b{display:block;font-size:17px}.stat span{font-size:10px;color:var(--muted)}
+.actions{display:flex;gap:8px;margin-top:13px}
+.action{flex:1;height:44px;border-radius:14px;border:1px solid var(--line);background:#fff;font-weight:900}
+.action.dark{background:#111;color:#fff;border-color:#111}.action.lime{background:var(--lime);border-color:var(--lime)}
+
+.head{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}
+.title{font-size:17px;font-weight:900}
+.link,.editbtn{font-size:11px;color:#756e79;font-weight:850;border:none;background:transparent}
+.editbtn{display:none;background:var(--soft);border-radius:10px;padding:7px 9px}.editbtn.show{display:block}
+.item{display:flex;align-items:center;gap:11px;padding:10px 0}.item+.item{border-top:1px solid var(--line)}
+.icon{width:42px;height:42px;border-radius:14px;background:var(--lime);display:grid;place-items:center;font-weight:900}
+.ititle{font-size:14px;font-weight:900}.isub{font-size:11px;color:var(--muted);margin-top:3px}.right{margin-left:auto;font-size:11px;font-weight:850;color:#6d6670}
+.chips{display:flex;gap:7px;flex-wrap:wrap}.chip{background:#f2f0f3;border-radius:999px;padding:7px 9px;font-size:10px;font-weight:850}.chip.lime{background:var(--lime-soft);color:#3e4a00}
+
+.profile-facts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.fact{background:#f8f7f9;border-radius:14px;padding:10px;min-height:57px}
+.fact .label{font-size:9px;color:var(--muted);font-weight:750}
+.fact .value{font-size:12px;font-weight:900;line-height:1.35;margin-top:4px}
+.fact.full{grid-column:1/-1}
+
+.private{margin-top:11px;border:1px solid var(--line);background:#faf9fb;border-radius:13px;padding:10px;display:flex;gap:9px;align-items:center}
+.private .grow b{font-size:11px}.private .grow span{display:block;font-size:9px;color:var(--muted);margin-top:3px;line-height:1.4}
+.private button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:7px 8px;font-size:9px;font-weight:850}
+.hidden{display:none!important}
+.footer{margin-top:18px;border-top:1px solid var(--line);padding-top:15px}
+.footer h3{font-size:14px;margin:0 0 8px}
+.rule{display:flex;gap:9px;font-size:10px;color:#6e6872;line-height:1.45;padding:7px 0}
+.rule b{color:#111;min-width:54px}
+
+/* editor */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.28);display:none;align-items:flex-end;justify-content:center;z-index:99}
+.mask.show{display:flex}
+.sheet{width:min(430px,100%);background:#fff;border-radius:26px 26px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
+.sheethead{display:flex;justify-content:space-between;gap:12px;margin-bottom:15px}
+.sheettitle{font-size:20px;font-weight:900}
+.sheetsub{font-size:10px;color:var(--muted);line-height:1.45;margin-top:4px}
+.close{width:34px;height:34px;border:none;border-radius:50%;background:var(--soft);font-size:20px}
+.section-label{font-size:12px;font-weight:900;margin:16px 0 8px}
+.edit-row{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.edit-row:first-of-type{border-top:none}
+.edit-main{min-width:0}
+.edit-label{font-size:10px;color:var(--muted);font-weight:800;margin-bottom:5px}
+.input{width:100%;border:1px solid var(--line);border-radius:13px;padding:10px 11px;background:#fff;outline:none}
+.textarea{height:72px;resize:none}
+.toggle-wrap{display:flex;align-items:center;gap:6px}
+.toggle-label{font-size:9px;color:var(--muted);font-weight:800}
+.toggle{width:44px;height:26px;border:none;border-radius:999px;background:#d8d4da;position:relative;padding:0}
+.toggle::after{content:"";position:absolute;width:20px;height:20px;border-radius:50%;left:3px;top:3px;background:#fff;transition:.18s}
+.toggle.on{background:#111}.toggle.on::after{left:21px;background:var(--lime)}
+.body-note{background:#faf9fb;border:1px solid var(--line);border-radius:13px;padding:10px;font-size:9px;color:var(--muted);line-height:1.45}
+.locked{margin-top:15px;background:#faf9fb;border:1px solid var(--line);border-radius:13px;padding:10px}
+.locked b{font-size:11px}.locked span{display:block;font-size:9px;color:var(--muted);line-height:1.4;margin-top:4px}
+.savebar{display:flex;gap:9px;margin-top:15px;position:sticky;bottom:-18px;background:#fff;padding:10px 0 2px}
+.savebar button{flex:1;height:46px;border-radius:13px;font-weight:900}
+.cancel{border:1px solid var(--line);background:#fff}.save{border:none;background:var(--lime)}
+
+@media(min-width:431px){body{padding:24px}.app{border:1px solid #ddd;border-radius:34px;min-height:880px}.sheet{border-radius:26px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="status"><span>4:57</span><span>● ● ●</span></div>
+  <div class="brand"><div class="logo">◉</div>Proxy</div>
+
+  <div class="preview">
+    <small>主页预览 · 同一份资料，不同关系只改变允许展示的内容和顺序</small>
+    <div class="tabs">
+      <button class="tab" data-view="owner">本人 · 编辑</button>
+      <button class="tab active" data-view="stranger">陌生人</button>
+      <button class="tab" data-view="friend">好友</button>
+      <button class="tab" data-view="merchant">商家</button>
+      <button class="tab" data-view="customer">已成交</button>
+    </div>
+  </div>
+
+  <div class="ownerbar" id="ownerbar">
+    <div><b>这是你的公开主页</b><span>资料属于你。填写可选，展示可开关，随时可改。</span></div>
+    <button onclick="openEditor()">编辑资料</button>
+  </div>
+
+  <div class="note" id="viewnote">陌生人视角：只展示你主动打开的资料、粗粒度可用性和可验证记录。</div>
+
+  <section class="card">
+    <div class="identity">
+      <div class="avatar">H</div>
+      <div class="grow">
+        <div class="name" id="name">Huyen</div>
+        <div class="meta"><span id="cityMeta">河内</span> · 身份已验证</div>
+      </div>
+      <div class="live">● 可接单</div>
+    </div>
+    <div class="intro" id="intro">熟悉河内旅行与消费场景，可提供同行和中越沟通协助。</div>
+    <button class="edit-inline" id="inlineEdit" onclick="openEditor()">✎ 编辑身份资料</button>
+
+    <div class="stats">
+      <div class="stat"><b>98%</b><span>准时</span></div>
+      <div class="stat"><b>42</b><span>已履约</span></div>
+      <div class="stat"><b>7</b><span>复购</span></div>
+    </div>
+    <div class="actions">
+      <button class="action dark" id="a1">加好友</button>
+      <button class="action lime" id="a2">发起需求</button>
+    </div>
+  </section>
+
+  <section class="card" id="personalFacts">
+    <div class="head">
+      <div class="title">关于我</div>
+      <button class="editbtn owner-edit" onclick="openEditor()">编辑</button>
+    </div>
+    <div class="profile-facts" id="factGrid"></div>
+  </section>
+
+  <section class="card hidden" id="relationship">
+    <div class="head"><div class="title">与你的关系</div></div>
+    <div class="item"><div class="icon">◎</div><div><div class="ititle" id="relTitle">好友</div><div class="isub" id="relSub">共同参加过 2 次活动</div></div></div>
+  </section>
+
+  <section class="card" id="abilities">
+    <div class="head"><div class="title">可以提供</div><span class="link">查看全部 ›</span></div>
+    <div class="item"><div class="icon">◎</div><div><div class="ititle">同行</div><div class="isub">河内 · 旅行 / 消费场景</div></div><div class="right">可约</div></div>
+    <div class="item"><div class="icon">译</div><div><div class="ititle">翻译</div><div class="isub">中文 ↔ 越南语 · 线下</div></div><div class="right">可约</div></div>
+  </section>
+
+  <section class="card" id="availability">
+    <div class="head"><div class="title">近期可用</div><span class="link">查看可用时间 ›</span></div>
+    <div class="chips"><span class="chip lime">今天 18:00 后</span><span class="chip">明天 18:00 后</span><span class="chip">周六 全天</span></div>
+  </section>
+
+  <section class="card" id="trust">
+    <div class="head"><div class="title">信任与记录</div></div>
+    <div class="item"><div class="icon">✓</div><div><div class="ititle">身份已验证</div><div class="isub">平台完成真实性校验</div></div></div>
+    <div class="item"><div class="icon">42</div><div><div class="ititle">42 次已完成履约</div><div class="isub">仅展示 Proxy 内可验证的聚合记录</div></div></div>
+  </section>
+
+  <section class="card" id="social">
+    <div class="head"><div class="title">公开社媒</div><button class="editbtn owner-edit">编辑展示</button></div>
+    <div class="item"><div class="icon">↗</div><div><div class="ititle">TikTok</div><div class="isub">@huyen.life</div></div></div>
+    <div class="item"><div class="icon">↗</div><div><div class="ititle">Instagram</div><div class="isub">@huyen.frames</div></div></div>
+  </section>
+
+  <section class="card hidden" id="contact">
+    <div class="head"><div class="title">联系方式</div></div>
+    <div class="item"><div class="icon">Z</div><div><div class="ititle">Zalo</div><div class="isub">根据关系权限开放</div></div><div class="right">打开 ›</div></div>
+  </section>
+
+  <section class="card hidden" id="commerce">
+    <div class="head"><div class="title">合作偏好</div></div>
+    <div class="item"><div class="icon">◇</div><div><div class="ititle">到店体验 / UGC / 同行需求</div><div class="isub">仅展示本人主动开放的合作类型</div></div></div>
+  </section>
+
+  <div class="footer">
+    <h3>当前资料原则</h3>
+    <div class="rule"><b>用户控制</b><span>资料可以填写但不代表必须公开；每个字段都有独立展示开关。</span></div>
+    <div class="rule"><b>公开主页</b><span>只读取“有值 + 已打开展示”的字段。</span></div>
+    <div class="rule"><b>实名/KYC</b><span>证件、法定姓名、验证记录与公开主页分离。</span></div>
+  </div>
+</div>
+
+<div class="mask" id="editor" onclick="if(event.target===this)closeEditor()">
+  <div class="sheet">
+    <div class="sheethead">
+      <div>
+        <div class="sheettitle">编辑个人资料</div>
+        <div class="sheetsub">Proxy 提供资料空间；是否填写、是否展示由你决定。</div>
+      </div>
+      <button class="close" onclick="closeEditor()">×</button>
+    </div>
+
+    <div class="section-label">基本资料</div>
+    <div id="basicEditor"></div>
+
+    <div class="section-label">扩展资料</div>
+    <div id="extendedEditor"></div>
+
+    <div class="body-note">
+      身体类资料默认不展示。只有你主动打开“展示”后，才会进入公开主页。
+    </div>
+
+    <div class="locked">
+      <b>✓ 身份已验证</b>
+      <span>实名/KYC、手机号、证件等属于账户与验证层，不在普通主页资料编辑器里修改。</span>
+    </div>
+
+    <div class="savebar">
+      <button class="cancel" onclick="closeEditor()">取消</button>
+      <button class="save" onclick="saveProfile()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const profileFields = [
+  {key:"gender", label:"性别", group:"basic", value:"女", type:"select", options:["女","男","其他","不填写"], visible:true},
+  {key:"birthday", label:"生日", group:"basic", value:"1996-05-12", type:"date", visible:false},
+  {key:"city", label:"城市", group:"basic", value:"河内", type:"select", options:["河内","胡志明市","岘港"], visible:true},
+  {key:"hometown", label:"家乡", group:"basic", value:"河内", type:"text", visible:false},
+  {key:"languages", label:"语言", group:"basic", value:"越南语 · 中文", type:"text", visible:true},
+  {key:"occupation", label:"职业", group:"basic", value:"Project Manager", type:"text", visible:true},
+  {key:"school", label:"学校", group:"basic", value:"", type:"text", visible:false},
+  {key:"interests", label:"兴趣", group:"basic", value:"旅行 · 咖啡 · 摄影", type:"text", visible:true},
+
+  {key:"height", label:"身高", group:"extended", value:"145 cm", type:"text", visible:false},
+  {key:"weight", label:"体重", group:"extended", value:"50 kg", type:"text", visible:false},
+  {key:"bust", label:"胸围", group:"extended", value:"", type:"text", visible:false},
+  {key:"waist", label:"腰围", group:"extended", value:"", type:"text", visible:false},
+  {key:"hip", label:"臀围", group:"extended", value:"", type:"text", visible:false}
+];
+
+const cfg={
+ owner:{note:"本人编辑视角：所有已填写资料都可以看到，并可单独控制是否展示。",a1:"预览公开主页",a2:"分享主页",relation:false,contact:true,commerce:false,owner:true,order:["personalFacts","abilities","availability","trust","social","contact"]},
+ stranger:{note:"陌生人视角：只展示你主动打开的资料、粗粒度可用性和可验证记录。",a1:"加好友",a2:"发起需求",relation:false,contact:false,commerce:false,owner:false,order:["personalFacts","abilities","availability","trust","social"]},
+ friend:{note:"好友视角：增加双方关系信息；个人资料仍严格受你自己的展示开关控制。",a1:"发消息",a2:"一起计划",relation:true,contact:true,commerce:false,owner:false,rel:"好友",relsub:"共同参加过 2 次活动",order:["relationship","personalFacts","availability","abilities","social","trust","contact"]},
+ merchant:{note:"商家视角：优先能力和履约记录；个人资料不会因为“商家身份”自动多暴露。",a1:"发消息",a2:"邀请合作",relation:false,contact:false,commerce:true,owner:false,order:["abilities","availability","trust","commerce","personalFacts","social"]},
+ customer:{note:"已成交视角：优先已有交易关系和再次联系；个人资料仍按展示开关处理。",a1:"发消息",a2:"再次下单",relation:true,contact:true,commerce:false,owner:false,rel:"已完成 2 次服务",relsub:"最近一次：8月18日 · 已完成",order:["relationship","availability","abilities","trust","personalFacts","contact","social"]}
+};
+let currentView="stranger";
+
+function renderFacts(){
+  const grid=document.getElementById("factGrid");
+  grid.innerHTML="";
+  const fields=profileFields.filter(f=>{
+    if(!f.value) return false;
+    if(currentView==="owner") return true;
+    return f.visible;
+  });
+  if(!fields.length){
+    document.getElementById("personalFacts").classList.add("hidden");
+    return;
+  }
+  document.getElementById("personalFacts").classList.remove("hidden");
+  fields.forEach(f=>{
+    const div=document.createElement("div");
+    div.className="fact";
+    div.innerHTML='<div class="label">'+f.label+'</div><div class="value">'+escapeHtml(f.value)+(currentView==="owner"&&!f.visible?' <span style="color:#999;font-weight:700">· 已隐藏</span>':'')+'</div>';
+    grid.appendChild(div);
+  });
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+function setView(v){
+  currentView=v;
+  const c=cfg[v];
+  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x.dataset.view===v));
+  viewnote.textContent=c.note;
+  a1.textContent=c.a1; a2.textContent=c.a2;
+  ownerbar.classList.toggle("show",!!c.owner);
+  inlineEdit.classList.toggle("show",!!c.owner);
+  document.querySelectorAll(".owner-edit").forEach(x=>x.classList.toggle("show",!!c.owner));
+  relationship.classList.toggle("hidden",!c.relation);
+  contact.classList.toggle("hidden",!c.contact);
+  commerce.classList.toggle("hidden",!c.commerce);
+  if(c.rel){relTitle.textContent=c.rel;relSub.textContent=c.relsub}
+  const footer=document.querySelector(".footer");
+  c.order.forEach(id=>{
+    const el=document.getElementById(id);
+    if(el && !el.classList.contains("hidden")) footer.parentNode.insertBefore(el,footer);
+  });
+  renderFacts();
+}
+
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+
+function makeEditorRow(f){
+  const row=document.createElement("div");
+  row.className="edit-row";
+  const main=document.createElement("div");
+  main.className="edit-main";
+  const label=document.createElement("div");
+  label.className="edit-label";
+  label.textContent=f.label;
+  main.appendChild(label);
+
+  let input;
+  if(f.type==="select"){
+    input=document.createElement("select");
+    f.options.forEach(o=>input.add(new Option(o,o)));
+  }else{
+    input=document.createElement("input");
+    input.type=f.type==="date"?"date":"text";
+  }
+  input.className="input";
+  input.id="field-"+f.key;
+  input.value=f.value;
+  main.appendChild(input);
+
+  const right=document.createElement("div");
+  right.className="toggle-wrap";
+  const tlabel=document.createElement("span");
+  tlabel.className="toggle-label";
+  tlabel.textContent="展示";
+  const toggle=document.createElement("button");
+  toggle.className="toggle"+(f.visible?" on":"");
+  toggle.dataset.key=f.key;
+  toggle.onclick=()=>toggle.classList.toggle("on");
+  right.appendChild(tlabel);right.appendChild(toggle);
+
+  row.appendChild(main);row.appendChild(right);
+  return row;
+}
+
+function buildEditor(){
+  basicEditor.innerHTML=""; extendedEditor.innerHTML="";
+  profileFields.forEach(f=>{
+    const row=makeEditorRow(f);
+    (f.group==="basic"?basicEditor:extendedEditor).appendChild(row);
+  });
+}
+
+function openEditor(){
+  buildEditor();
+  editor.classList.add("show");
+}
+function closeEditor(){editor.classList.remove("show")}
+
+function saveProfile(){
+  profileFields.forEach(f=>{
+    const input=document.getElementById("field-"+f.key);
+    const toggle=document.querySelector('.toggle[data-key="'+f.key+'"]');
+    f.value=input.value.trim();
+    f.visible=toggle.classList.contains("on");
+  });
+  const cityField=profileFields.find(f=>f.key==="city");
+  if(cityField && cityField.value) cityMeta.textContent=cityField.value;
+  editor.classList.remove("show");
+  renderFacts();
+}
+
+setView("stranger");
+</script>
+</body>
+</html>

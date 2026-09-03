@@ -1,0 +1,2430 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proxy Market Intelligence & Decision Engine Console v9</title>
+<style>
+:root{
+  --bg:#f7f7f8;--panel:#fff;--text:#151218;--muted:#7e7883;--line:#e7e4e9;
+  --soft:#f1eff3;--accent:#ff2f7d;--accent-soft:#fff0f6;--dark:#17131a;
+  --purple:#7b3fe4;--purple-soft:#f3ecff;--green:#16794c;--green-soft:#ebf8f1;
+  --orange:#9b5a00;--orange-soft:#fff4df;--red:#c32655;--red-soft:#fff0f4;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Helvetica Neue",Arial,sans-serif}
+button,input,select{font:inherit}
+.shell{display:block;min-height:100vh}
+.sidebar{
+  background:#111015;color:#fff;padding:22px 16px 20px;
+  position:fixed;left:0;top:0;bottom:0;width:240px;height:100dvh;
+  overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  scrollbar-width:thin;scrollbar-color:#3a3540 #111015;z-index:40;
+}
+.sidebar::-webkit-scrollbar{width:7px}
+.sidebar::-webkit-scrollbar-track{background:#111015}
+.sidebar::-webkit-scrollbar-thumb{background:#3a3540;border-radius:999px}
+.main{min-width:0;margin-left:240px;min-height:100vh}
+.brand{display:flex;align-items:center;gap:10px;font-size:22px;font-weight:900;margin:4px 8px 28px}
+.logo{width:34px;height:34px;border-radius:11px;background:#fff;color:#111;display:grid;place-items:center;font-size:20px}
+.navgroup{font-size:10px;text-transform:uppercase;color:#77717b;font-weight:850;margin:22px 10px 8px;letter-spacing:.08em}
+.nav{display:flex;flex-direction:column;gap:4px}
+.nav button{
+  border:0;background:transparent;color:#bbb5bf;text-align:left;border-radius:10px;
+  padding:10px 12px;font-size:13px;font-weight:750;width:100%;line-height:1.35;
+}
+.nav button.active{background:#fff;color:#111}
+.nav button:hover{background:#211e25;color:#fff}
+.nav button.active:hover{background:#fff;color:#111}
+.sidebar-foot{
+  position:static;margin:22px 10px 2px;padding:14px 0 4px;
+  border-top:1px solid #28242d;color:#77717b;font-size:9px;line-height:1.55;
+}
+.nav button:focus{outline:none}
+.nav button:focus-visible{outline:1px solid #4a4550;outline-offset:1px}
+
+.topbar{
+  height:68px;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:12px;padding:0 24px;position:sticky;top:0;z-index:10;
+}
+.titlewrap{flex:1}
+.title{font-size:19px;font-weight:900}
+.subtitle{font-size:11px;color:var(--muted);margin-top:2px}
+.filters{display:flex;gap:8px;align-items:center}
+.select,.search{
+  height:36px;border:1px solid var(--line);background:#fff;border-radius:10px;padding:0 10px;font-size:11px;color:#544d58;outline:none;
+}
+.search{width:210px}
+.content{padding:22px 24px 40px}
+.page{display:none}.page.active{display:block}
+.section-title{display:flex;justify-content:space-between;align-items:end;margin:22px 0 10px}
+.section-title:first-child{margin-top:0}
+.section-title h2{font-size:15px;margin:0}.section-title span{font-size:10px;color:var(--muted)}
+
+.kpi-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px}
+.kpi .label{font-size:10px;color:var(--muted);font-weight:800}
+.kpi .value{font-size:23px;font-weight:900;margin-top:6px}
+.kpi .meta{font-size:9px;color:#6e6872;margin-top:4px}
+.delta.up{color:var(--green)}.delta.down{color:var(--red)}
+
+.grid-2{display:grid;grid-template-columns:1.1fr .9fr;gap:12px}
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;min-width:0}
+.card h3{font-size:13px;margin:0 0 12px}
+.card .hint{font-size:9px;color:var(--muted);margin-top:-7px;margin-bottom:10px}
+.funnel-row{display:grid;grid-template-columns:125px 1fr 58px 58px;gap:8px;align-items:center;padding:7px 0}
+.funnel-row .name{font-size:10px;color:#655f69}
+.track{height:8px;border-radius:999px;background:#efecf1;overflow:hidden}
+.bar{height:100%;border-radius:999px;background:linear-gradient(90deg,#a36af1,#7b3fe4)}
+.num,.rate{text-align:right;font-size:10px;font-weight:850}.rate{color:var(--muted)}
+.spark{height:90px;display:flex;align-items:end;gap:5px;padding-top:10px}
+.spark i{display:block;flex:1;background:#d9d4dd;border-radius:4px 4px 0 0}
+.spark i.hot{background:#17131a}
+.legend{display:flex;gap:12px;font-size:9px;color:var(--muted);margin-top:10px}
+.legend b{color:#222}
+.tagbox{display:flex;flex-wrap:wrap;gap:7px}
+.tag{padding:7px 9px;background:#f2eff4;border-radius:999px;font-size:10px;font-weight:750;color:#57505b}
+.tag.hot{background:#17131a;color:#fff}.tag.neg{background:var(--red-soft);color:var(--red)}
+.score-list{display:flex;flex-direction:column}
+.score-row{display:grid;grid-template-columns:1fr 48px;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
+.score-row:first-child{border-top:none}.score-row .name{font-size:10px;font-weight:800}.score-row .sub{font-size:9px;color:var(--muted);margin-top:3px}.score{font-size:11px;font-weight:900;text-align:right}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff}
+table{width:100%;border-collapse:collapse;min-width:760px}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:10px;text-align:left;white-space:nowrap}
+th{background:#f5f3f6;color:#77717b;font-weight:850;position:sticky;top:0}
+td.numc{text-align:right;font-weight:800}tr:last-child td{border-bottom:none}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:5px 8px;font-size:9px;font-weight:850;background:#f1eff3;color:#625b66}
+.badge.good{background:var(--green-soft);color:var(--green)}
+.badge.warn{background:var(--orange-soft);color:var(--orange)}
+.badge.bad{background:var(--red-soft);color:var(--red)}
+.badge.purple{background:var(--purple-soft);color:var(--purple)}
+.mini-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.mini{border:1px solid var(--line);border-radius:12px;padding:11px;background:#fff}
+.mini b{display:block;font-size:18px}.mini span{font-size:9px;color:var(--muted)}
+.barline{height:7px;border-radius:999px;background:#eeeaf0;margin-top:8px;overflow:hidden}
+.barline i{display:block;height:100%;background:#17131a;border-radius:999px}
+.event-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.event{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px}
+.event .e{font-size:10px;font-weight:850}.event .n{font-size:18px;font-weight:900;margin-top:5px}.event .m{font-size:9px;color:var(--muted);margin-top:4px}
+.notice{background:#f4f1f6;border:1px solid var(--line);border-radius:13px;padding:12px;font-size:10px;color:#655f69;line-height:1.5}
+.notice b{color:#17131a}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:1180px){.kpi-grid{grid-template-columns:repeat(3,1fr)}.grid-3{grid-template-columns:1fr}}
+
+.matrix{display:grid;grid-template-columns:120px repeat(5,minmax(72px,1fr));border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff}
+.mcell{padding:10px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);font-size:10px;min-height:38px}
+.mhead{background:#f5f3f6;color:#756e79;font-weight:850}.mlabel{font-weight:850;background:#fbfafc}.h1{background:#f7f3ff}.h2{background:#eee5ff}.h3{background:#dfd0ff}.h4{background:#c8afff}.h5{background:#aa82ff;color:#211438;font-weight:900}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.controls select,.controls button{height:34px;border:1px solid var(--line);background:#fff;border-radius:9px;padding:0 10px;font-size:10px;color:#4f4853}.controls button{background:#17131d;color:#fff;border-color:#17131d}
+.prov{display:flex;gap:6px;flex-wrap:wrap}.prov span{padding:5px 7px;border-radius:999px;font-size:9px;font-weight:850;background:#f0edf2;color:#625b66}.prov .d{background:#f0eaff;color:#6b3cd4}.prov .o{background:#edf3ff;color:#2c67d8}.prov .t{background:#eaf8f1;color:#177a4d}.prov .i{background:#fff4df;color:#9b5a00}
+.user360{display:grid;grid-template-columns:180px 1fr;gap:12px}.uhead{background:#17131d;color:#fff;border-radius:14px;padding:14px}.uhead b{font-size:16px}.uhead span{display:block;color:#aaa3ad;font-size:9px;margin-top:5px;line-height:1.5}
+
+
+/* v4 modeling depth */
+.model-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:12px}
+.model-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.model-tabs button{border:1px solid var(--line);background:#fff;border-radius:9px;padding:7px 10px;font-size:9px;font-weight:800;color:#615a65}
+.model-tabs button.active{background:#17131d;color:#fff;border-color:#17131d}
+.model-panel{display:none}.model-panel.active{display:block}
+.feature-hero{display:grid;grid-template-columns:1fr 150px;gap:14px;align-items:start}
+.feature-score{font-size:34px;font-weight:950;letter-spacing:-1px}
+.feature-meta{font-size:9px;color:var(--muted);margin-top:5px;line-height:1.5}
+.contribution{display:flex;flex-direction:column;gap:7px;margin-top:12px}
+.contrib-row{display:grid;grid-template-columns:96px 1fr 42px;gap:8px;align-items:center}
+.contrib-row span{font-size:9px;color:#68616c}.contrib-row b{font-size:9px;text-align:right}
+.trendline{height:84px;display:flex;align-items:end;gap:4px;padding-top:8px}
+.trendline i{display:block;flex:1;border-radius:4px 4px 0 0;background:#d9d3de}
+.trendline i.p{background:#7b3fe4}.trendline i.n{background:#ff7fa8}
+.edge-row{display:grid;grid-template-columns:1fr 62px 62px 62px;gap:8px;padding:9px 0;border-top:1px solid var(--line);font-size:9px}
+.edge-row:first-child{border-top:none}.edge-row b{text-align:right}
+.lifecycle{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:8px;overflow:auto;padding-bottom:3px}
+.life{border:1px solid var(--line);border-radius:12px;background:#fff;padding:11px;min-width:110px}
+.life .stage{font-size:9px;color:var(--muted);font-weight:800}.life .count{font-size:20px;font-weight:900;margin-top:5px}
+.life .conv{font-size:8px;color:#6e6872;margin-top:4px}
+.branch-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.trace{display:flex;align-items:stretch;gap:7px;overflow:auto;padding-bottom:4px}
+.trace-step{min-width:145px;border:1px solid var(--line);border-radius:12px;padding:10px;background:#fff;position:relative}
+.trace-step:after{content:"→";position:absolute;right:-10px;top:50%;transform:translateY(-50%);color:#aaa3ad;font-weight:900}
+.trace-step:last-child:after{display:none}.trace-step .k{font-size:8px;color:var(--muted);font-weight:800}.trace-step .v{font-size:10px;font-weight:900;margin-top:4px}.trace-step .d{font-size:8px;color:#746d78;margin-top:4px;line-height:1.4}
+.cal-row{display:grid;grid-template-columns:76px 1fr 54px 54px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.cal-row:first-child{border-top:none}.cal-row span,.cal-row b{font-size:9px}.cal-row b{text-align:right}
+.timeline2{display:grid;grid-template-columns:92px 1fr;gap:10px}
+.tdate{font-size:8px;color:var(--muted);padding-top:2px;text-align:right}
+.tbody{border-left:1px solid var(--line);padding:0 0 13px 13px;position:relative}
+.tbody:before{content:"";position:absolute;width:7px;height:7px;border-radius:50%;background:#17131d;left:-4px;top:3px}
+.tbody .t{font-size:9px;font-weight:850}.tbody .d{font-size:8px;color:var(--muted);margin-top:3px;line-height:1.45}
+.ledger td{white-space:normal;vertical-align:top}.ledger th{white-space:nowrap}
+.decision{border:1px solid var(--line);border-radius:12px;padding:11px;background:#fff;margin-bottom:8px}
+.decision .head2{display:flex;justify-content:space-between;gap:10px}.decision .head2 b{font-size:10px}.decision .why{font-size:8px;color:var(--muted);line-height:1.5;margin-top:7px}
+.policy-grid{display:grid;grid-template-columns:160px repeat(4,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.pcell{padding:9px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);font-size:8px}.pcell.h{background:#f5f3f6;font-weight:850;color:#6e6872}.pcell.k{font-weight:850;background:#fbfafc}
+.pcell:last-child{border-right:none}
+@media(max-width:1180px){.model-grid{grid-template-columns:1fr}.feature-hero{grid-template-columns:1fr}.lifecycle{grid-template-columns:repeat(3,1fr)}}
+
+
+/* v5 granular tag center */
+.tag-toolbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.tag-toolbar input,.tag-toolbar select,.tag-toolbar button{height:32px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:0 9px;font-size:9px;color:#4e4752}
+.tag-toolbar input{width:260px}.tag-toolbar button.dark{background:#17131a;color:#fff;border-color:#17131a}
+.tag-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.rawtag{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 8px;font-size:8px;font-weight:800;color:#4f4853}
+.rawtag.neg{background:var(--red-soft);color:var(--red);border-color:#ffd8e4}.rawtag.intent{background:#f1ebff;color:#6938c4;border-color:#e5d9ff}.rawtag.tx{background:var(--green-soft);color:var(--green);border-color:#d3efdf}.rawtag.obs{background:var(--blue-bg);color:var(--blue);border-color:#dae6ff}
+.tagcloud{display:flex;flex-wrap:wrap;gap:6px}
+.rule{border:1px solid var(--line);border-radius:12px;background:#fff;padding:11px;margin-bottom:8px}.rule:last-child{margin-bottom:0}
+.rule .rtitle{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:900}.rule .rmeta{font-size:8px;color:var(--muted);line-height:1.5;margin-top:5px}
+.rulecode{margin-top:8px;background:#f7f5f8;border-radius:9px;padding:9px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:8px;line-height:1.55;color:#4f4853;white-space:pre-wrap}
+.tag-row-detail{font-size:8px;color:var(--muted);line-height:1.35;margin-top:3px;white-space:normal}
+.co-grid{display:grid;grid-template-columns:190px 1fr;gap:12px}.co-list{display:flex;flex-direction:column;gap:5px}.co-item{border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px;font-size:8px;font-weight:800;cursor:pointer}.co-item.active{background:#17131a;color:#fff;border-color:#17131a}
+.co-bars{display:flex;flex-direction:column;gap:9px}.co-bar{display:grid;grid-template-columns:180px 1fr 48px;gap:8px;align-items:center}.co-bar span{font-size:8px;color:#5f5863}.co-bar b{font-size:8px;text-align:right}
+.tag-history{display:flex;flex-direction:column}.tag-history-row{display:grid;grid-template-columns:115px 1fr 72px 68px;gap:9px;padding:8px 0;border-top:1px solid var(--line);font-size:8px}.tag-history-row:first-child{border-top:none}.tag-history-row .event{font-weight:850}.tag-history-row .reason{color:#746d78;line-height:1.4}
+.bag-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.softnote{font-size:8px;color:var(--muted);line-height:1.5}
+@media(max-width:1180px){.tag-kpis{grid-template-columns:repeat(3,1fr)}.co-grid,.bag-grid{grid-template-columns:1fr}}
+
+
+/* v6 · Decision Engine integrated into Market Intelligence */
+.engine-hero{
+  background:#17131a;color:#fff;border-radius:14px;padding:15px;border:1px solid #29232d;
+}
+.engine-hero h2{font-size:16px;margin:0 0 6px}
+.engine-hero p{font-size:9px;color:#aaa3ad;line-height:1.55;margin:0}
+.engine-flow{
+  display:grid;grid-template-columns:repeat(8,minmax(112px,1fr));gap:7px;margin-top:12px;overflow:auto
+}
+.engine-node{
+  min-width:112px;background:#211c24;border:1px solid #332c38;border-radius:11px;padding:10px
+}
+.engine-node .k{font-size:7px;color:#837a88;font-weight:900;text-transform:uppercase}
+.engine-node .v{font-size:9px;font-weight:900;margin-top:4px}
+.engine-node .d{font-size:7px;color:#9d95a1;line-height:1.4;margin-top:4px}
+
+.engine-status{
+  display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px
+}
+.engine-mini{
+  border:1px solid var(--line);background:#fff;border-radius:12px;padding:11px
+}
+.engine-mini .k{font-size:8px;color:var(--muted);font-weight:850}
+.engine-mini .v{font-size:18px;font-weight:900;margin-top:5px}
+.engine-mini .d{font-size:8px;color:#756e79;margin-top:3px}
+
+.api-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.api-box{border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px;min-width:0}
+.api-box h3{font-size:11px;margin:0 0 8px}
+.api-code{
+  background:#f6f4f7;border-radius:9px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:8px;line-height:1.55;color:#4d4651;white-space:pre-wrap;overflow:auto;max-height:460px
+}
+.endpoint{
+  display:grid;grid-template-columns:54px 245px 1fr 85px;gap:8px;padding:9px 0;border-top:1px solid var(--line);align-items:center
+}
+.endpoint:first-child{border-top:0}.endpoint span,.endpoint b{font-size:8px}.endpoint .path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:850}
+.method{
+  display:inline-flex;justify-content:center;border-radius:7px;padding:5px 6px;background:#17131a;color:#fff;font-size:7px;font-weight:900
+}
+.method.async{background:#6c3ed1}.method.read{background:#2c67d8}
+
+.state-strip{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:7px;overflow:auto}
+.state-card{border:1px solid var(--line);border-radius:11px;padding:10px;background:#fff;min-width:110px}
+.state-card .s{font-size:9px;font-weight:900}.state-card .d{font-size:7px;color:var(--muted);line-height:1.4;margin-top:4px}
+.state-card.hot{background:#17131a;color:#fff;border-color:#17131a}.state-card.hot .d{color:#aaa3ad}
+.state-card.block{background:var(--red-soft);color:var(--red);border-color:#ffd6e2}
+
+.guard-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.guard{
+  border:1px solid var(--line);background:#fff;border-radius:11px;padding:10px
+}
+.guard .gk{font-size:8px;color:var(--muted);font-weight:850}
+.guard .gv{font-size:14px;font-weight:900;margin-top:4px}
+.guard .gd{font-size:7px;color:#77707b;line-height:1.4;margin-top:4px}
+
+.trace-v6{display:flex;gap:7px;overflow:auto;padding-bottom:4px}
+.trace-v6 .step{
+  min-width:150px;border:1px solid var(--line);border-radius:11px;background:#fff;padding:10px;position:relative
+}
+.trace-v6 .step:after{content:"→";position:absolute;right:-11px;top:50%;color:#aaa3ad;font-weight:900}
+.trace-v6 .step:last-child:after{display:none}
+.trace-v6 .step .k{font-size:7px;color:var(--muted);font-weight:850}
+.trace-v6 .step .v{font-size:9px;font-weight:900;margin-top:4px}
+.trace-v6 .step .d{font-size:7px;color:#756e79;line-height:1.4;margin-top:4px}
+
+.control-plane{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.cp-card{background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px}
+.cp-card h3{font-size:11px;margin:0 0 9px}
+.cp-item{padding:8px 0;border-top:1px solid var(--line)}
+.cp-item:first-of-type{border-top:0}.cp-item b{font-size:9px}.cp-item div{font-size:7px;color:var(--muted);line-height:1.45;margin-top:3px}
+
+.api-lab{display:grid;grid-template-columns:350px 1fr;gap:10px}
+.api-lab .controls2{border:1px solid var(--line);background:#fff;border-radius:12px;padding:11px}
+.ctrl2{display:grid;grid-template-columns:115px 1fr;gap:8px;padding:7px 0;border-top:1px solid var(--line);align-items:center}
+.ctrl2:first-child{border-top:0}.ctrl2 label{font-size:8px;font-weight:800}.ctrl2 select,.ctrl2 input{
+  height:31px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:0 8px;font-size:8px
+}
+.api-run{height:34px;width:100%;border:0;background:#17131a;color:#fff;border-radius:9px;font-size:9px;font-weight:900;margin-top:8px}
+.response-box{border-radius:12px;background:#17131a;color:#fff;padding:12px}
+.response-box .status{font-size:19px;font-weight:950}
+.response-box .meta{font-size:8px;color:#aaa3ad;margin-top:4px}
+.response-box pre{
+  background:#211c24;border-radius:9px;padding:10px;font-size:8px;line-height:1.5;color:#d4ced8;white-space:pre-wrap;overflow:auto
+}
+
+.engine-inline{
+  border-left:3px solid #17131a;background:#f5f3f6;border-radius:10px;padding:10px 11px;font-size:8px;color:#615a65;line-height:1.5
+}
+.engine-inline b{color:#17131a}
+.engine-link{
+  display:inline-flex;border-radius:999px;background:#17131a;color:#fff;padding:5px 8px;font-size:7px;font-weight:850;margin-left:5px
+}
+
+.policy-row{display:grid;grid-template-columns:190px 1fr 74px 74px;gap:8px;padding:9px 0;border-top:1px solid var(--line);align-items:center}
+.policy-row:first-child{border-top:0}.policy-row span,.policy-row b{font-size:8px}.policy-row b{text-align:right}
+
+@media(max-width:1180px){
+ .engine-status{grid-template-columns:repeat(3,1fr)}
+ .api-grid,.api-lab,.control-plane{grid-template-columns:1fr}
+ .guard-grid{grid-template-columns:repeat(3,1fr)}
+ .engine-flow{grid-template-columns:repeat(4,1fr)}
+}
+
+
+/* v7 · Engine governance */
+.tier-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tier{border:1px solid var(--line);border-radius:13px;background:#fff;padding:12px;position:relative;overflow:hidden}
+.tier:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#17131a}
+.tier.hot:before{background:#c32655}.tier.warm:before{background:#7b3fe4}.tier.cold:before{background:#6f747b}
+.tier .tk{font-size:8px;color:var(--muted);font-weight:900;text-transform:uppercase}.tier .tv{font-size:18px;font-weight:950;margin-top:5px}.tier .td{font-size:8px;color:#746d78;line-height:1.5;margin-top:5px}
+.tier .budget{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding-top:8px;margin-top:9px;font-size:8px}.tier .budget b{font-weight:900}
+
+.domain-stack{display:flex;flex-direction:column;gap:7px}.domain{display:grid;grid-template-columns:34px 210px 1fr 90px;gap:8px;align-items:center;border:1px solid var(--line);border-radius:11px;background:#fff;padding:9px}
+.domain .n{width:26px;height:26px;border-radius:8px;background:#17131a;color:#fff;display:grid;place-items:center;font-size:8px;font-weight:900}.domain .name{font-size:9px;font-weight:900}.domain .desc{font-size:8px;color:var(--muted);line-height:1.4}.domain .mode{text-align:right;font-size:8px;font-weight:850}
+
+.resolve-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.resolve-case{border:1px solid var(--line);border-radius:12px;background:#fff;padding:11px}.resolve-case h3{font-size:10px;margin:0 0 8px}.resolve-case .line{display:grid;grid-template-columns:150px 1fr 68px;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line);font-size:8px}.resolve-case .line:first-of-type{border-top:0}.resolve-case .winner{font-weight:900;text-align:right}
+
+.plane-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.plane{border:1px solid var(--line);border-radius:13px;background:#fff;padding:12px}.plane h3{font-size:11px;margin:0 0 4px}.plane .sla{font-size:8px;color:var(--muted);margin-bottom:9px}.plane .item{padding:7px 0;border-top:1px solid var(--line)}.plane .item:first-of-type{border-top:0}.plane .item b{font-size:8px}.plane .item div{font-size:7px;color:#77707b;line-height:1.4;margin-top:3px}
+
+.dsl-split{display:grid;grid-template-columns:1fr 1fr;gap:10px}.dsl-col{border:1px solid var(--line);border-radius:12px;background:#fff;padding:11px}.dsl-col h3{font-size:10px;margin:0 0 8px}.dsl-chip{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:5px 7px;font-size:8px;font-weight:800;margin:0 5px 6px 0;background:#faf9fb}.dsl-chip.no{background:var(--red-soft);color:var(--red);border-color:#ffd7e3}
+
+.parity{display:grid;grid-template-columns:180px 1fr 95px 95px 95px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:8px}.parity:first-child{border-top:0}.parity b{text-align:right}.parity .ok{color:var(--green)}.parity .bad2{color:var(--red)}
+
+.utility-score{display:grid;grid-template-columns:1.4fr repeat(6,90px) 90px;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line);font-size:8px}.utility-score:first-child{border-top:0}.utility-score b{text-align:right}.utility-score .u-name{font-weight:900}.utility-score .sub{font-size:7px;color:var(--muted);margin-top:3px}
+
+.lifecycle-bar{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}.life2{border:1px solid var(--line);background:#fff;border-radius:11px;padding:10px}.life2 .k{font-size:7px;color:var(--muted);font-weight:850}.life2 .v{font-size:10px;font-weight:900;margin-top:4px}.life2 .d{font-size:7px;color:#77707b;line-height:1.4;margin-top:3px}
+
+.slo-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.slo{border:1px solid var(--line);background:#fff;border-radius:11px;padding:10px}.slo .k{font-size:8px;color:var(--muted);font-weight:850}.slo .v{font-size:17px;font-weight:900;margin-top:4px}.slo .d{font-size:7px;color:#77707b;margin-top:3px}
+
+.governance-banner{background:#17131a;color:#fff;border-radius:13px;padding:13px}.governance-banner b{font-size:12px}.governance-banner div{font-size:8px;color:#aaa3ad;line-height:1.55;margin-top:5px}
+@media(max-width:1180px){.tier-grid,.plane-grid,.dsl-split,.resolve-grid{grid-template-columns:1fr}.lifecycle-bar,.slo-grid{grid-template-columns:repeat(3,1fr)}.utility-score{grid-template-columns:1fr 80px 80px 80px}}
+
+
+/* v8 · Context Field + Surface Composition */
+.context-field-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.field-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px}
+.field-card h3{font-size:11px;margin:0 0 8px}
+.field-card .metric{display:grid;grid-template-columns:1fr 74px;gap:8px;padding:7px 0;border-top:1px solid var(--line);align-items:center}
+.field-card .metric:first-of-type{border-top:0}
+.field-card .metric span,.field-card .metric b{font-size:8px}.field-card .metric b{text-align:right}
+.context-vector{background:#17131a;color:#fff;border-radius:13px;padding:13px;border:1px solid #2b2530}
+.context-vector h3{font-size:11px;margin:0 0 8px}
+.vector-row{display:grid;grid-template-columns:150px 1fr 56px;gap:8px;align-items:center;padding:7px 0;border-top:1px solid #2b2530}
+.vector-row:first-of-type{border-top:0}.vector-row span,.vector-row b{font-size:8px}.vector-row b{text-align:right}
+.vector-track{height:7px;border-radius:999px;background:#2b2530;overflow:hidden}.vector-track i{display:block;height:100%;background:#fff;border-radius:999px}
+.surface-map{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.surface-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;min-height:125px}
+.surface-card .topline{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.surface-card .name{font-size:9px;font-weight:900}.surface-card .priority{font-size:7px;color:var(--muted)}
+.surface-card .body{font-size:7px;line-height:1.45;color:#746d78;margin-top:8px}
+.surface-card.active{border-color:#17131a;box-shadow:inset 0 0 0 1px #17131a}.surface-card.blocked{background:#fffafb;border-color:#ffd2df}.surface-card.hidden{opacity:.45}
+.compose-preview{display:grid;grid-template-columns:300px 1fr;gap:12px}
+.phone{background:#111015;border-radius:26px;padding:10px;width:100%;max-width:300px;margin:auto}
+.screen{background:#f7f7f8;border-radius:18px;min-height:560px;padding:10px;overflow:hidden}
+.pill{height:22px;border-radius:999px;background:#e7e5e8;margin-bottom:8px}
+.module{background:#fff;border:1px solid #e3e1e5;border-radius:12px;padding:10px;margin-bottom:8px}
+.module b{font-size:9px}.module div{font-size:7px;color:#77717b;line-height:1.45;margin-top:4px}
+.module.hero2{min-height:110px}.module.compact{min-height:58px}.module.muted{opacity:.45}
+.research-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.research-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px}
+.research-card h3{font-size:10px;margin:0 0 7px}.research-card p{font-size:7px;line-height:1.5;color:var(--muted);margin:0}
+.research-card .stage{display:inline-flex;margin-top:8px;border-radius:999px;padding:4px 7px;background:#f1eef3;font-size:7px;font-weight:850}
+.research-card .stage.prod{background:var(--green-soft);color:var(--green)}.research-card .stage.shadow{background:var(--purple-soft);color:var(--purple)}.research-card .stage.lab{background:#eef3ff;color:#2c67d8}
+.field-flow{display:flex;gap:7px;overflow:auto;padding-bottom:3px}.field-step{min-width:145px;border:1px solid var(--line);border-radius:11px;background:#fff;padding:10px;position:relative}
+.field-step:after{content:"→";position:absolute;right:-11px;top:50%;color:#aaa3ad;font-weight:900}.field-step:last-child:after{display:none}
+.field-step .k{font-size:7px;color:var(--muted);font-weight:850}.field-step .v{font-size:9px;font-weight:900;margin-top:4px}.field-step .d{font-size:7px;color:#756f79;line-height:1.4;margin-top:4px}
+.context-badge{display:inline-flex;border-radius:999px;padding:4px 7px;background:#17131a;color:#fff;font-size:7px;font-weight:850}.context-badge.soft{background:#f1eef3;color:#5e5664}.context-badge.warn{background:var(--yellow-soft);color:#8a5600}
+@media(max-width:1180px){.context-field-grid,.research-grid,.surface-map{grid-template-columns:1fr 1fr}.compose-preview{grid-template-columns:1fr}}
+
+
+@media(max-width:900px){
+  .sidebar{width:220px}
+  .main{margin-left:220px}
+  .topbar{padding-left:18px;padding-right:18px}
+}
+
+/* v8.2 layout hardening */
+:root{--sidebar-w:240px}
+html,body{min-height:100%;overflow-x:hidden}
+.shell{display:block!important;min-height:100vh;width:100%}
+.sidebar{
+  position:fixed!important;
+  left:0!important;top:0!important;bottom:0!important;
+  width:var(--sidebar-w)!important;
+  height:100vh!important;height:100dvh!important;
+  overflow-y:auto!important;overflow-x:hidden!important;
+  padding:22px 16px 22px!important;
+  background:#111015!important;z-index:50!important;
+  scrollbar-width:thin;scrollbar-color:#3a3540 #111015;
+}
+.sidebar::-webkit-scrollbar{width:7px}
+.sidebar::-webkit-scrollbar-track{background:#111015}
+.sidebar::-webkit-scrollbar-thumb{background:#3a3540;border-radius:999px}
+.sidebar-foot{
+  position:static!important;
+  left:auto!important;right:auto!important;bottom:auto!important;
+  margin:24px 10px 0!important;
+  padding:14px 0 8px!important;
+  border-top:1px solid #29252e!important;
+}
+.main{
+  margin-left:var(--sidebar-w)!important;
+  width:calc(100% - var(--sidebar-w))!important;
+  min-width:0!important;min-height:100vh!important;
+}
+.navgroup,.nav{position:static!important}
+.nav button{display:block;width:100%}
+.nav button:focus{outline:none}
+.nav button:focus-visible{outline:1px solid #4a4550;outline-offset:1px}
+@media(max-width:900px){
+  :root{--sidebar-w:210px}
+  .content{padding-left:18px;padding-right:18px}
+}
+@media(max-width:680px){
+  :root{--sidebar-w:184px}
+  .sidebar{padding-left:10px!important;padding-right:10px!important}
+  .nav button{font-size:11px;padding:9px}
+  .navgroup{font-size:9px;margin-left:8px;margin-right:8px}
+  .brand{font-size:18px;margin-left:6px}
+  .filters{display:none}
+}
+
+
+/* v9 · Market Execution */
+.exec-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.exec-kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px}
+.exec-kpi .k{font-size:8px;color:var(--muted);font-weight:850}.exec-kpi .v{font-size:18px;font-weight:900;margin-top:5px}.exec-kpi .d{font-size:7px;color:#756f79;line-height:1.45;margin-top:4px}
+
+.clarify-matrix{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.cq{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px}
+.cq .state{font-size:9px;font-weight:900}.cq .desc{font-size:7px;color:var(--muted);line-height:1.45;margin-top:5px}
+.cq.allow{border-color:#cce8d8}.cq.warn{border-color:#ecd6ae}.cq.block{background:#fffafb;border-color:#ffd2df}
+.question-preview{background:#17131a;color:#fff;border-radius:13px;padding:13px}
+.question-preview .eyebrow{font-size:7px;color:#8e8792;font-weight:850}
+.question-preview .qtext{font-size:15px;font-weight:900;margin-top:8px}
+.question-preview .choices{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.question-preview .choice{background:#fff;color:#17131a;border-radius:999px;padding:7px 10px;font-size:8px;font-weight:850}
+.question-preview .meta{font-size:7px;color:#aaa3ad;line-height:1.5;margin-top:10px}
+
+.supply-health{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.supply-band{display:grid;grid-template-columns:130px 1fr 65px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.supply-band:first-child{border-top:0}.supply-band span,.supply-band b{font-size:8px}.supply-band b{text-align:right}
+.healthbar{height:8px;background:#efedf0;border-radius:999px;overflow:hidden}.healthbar i{display:block;height:100%;border-radius:999px;background:#17131a}
+.healthbar i.warn{background:#b87510}.healthbar i.bad{background:#c52c5b}
+
+.activation-ladder{display:flex;gap:7px;overflow:auto;padding-bottom:3px}
+.activation-step{min-width:150px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px;position:relative}
+.activation-step:after{content:"→";position:absolute;right:-11px;top:50%;color:#aaa3ad;font-weight:900}.activation-step:last-child:after{display:none}
+.activation-step .k{font-size:7px;color:var(--muted);font-weight:850}.activation-step .v{font-size:9px;font-weight:900;margin-top:4px}.activation-step .d{font-size:7px;color:#756f79;line-height:1.45;margin-top:4px}
+
+.latency-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.budget-row{display:grid;grid-template-columns:155px 1fr 62px 72px;gap:8px;padding:8px 0;border-top:1px solid var(--line);align-items:center}
+.budget-row:first-child{border-top:0}.budget-row span,.budget-row b{font-size:8px}.budget-row b{text-align:right}
+.mode-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px}
+.mode-card h3{font-size:11px;margin:0 0 8px}.mode-card p{font-size:7px;line-height:1.5;color:var(--muted);margin:0}
+.mode-card .tagline{display:inline-flex;margin-top:9px;border-radius:999px;padding:4px 7px;font-size:7px;font-weight:850;background:#f1eef3}
+.mode-card.sync{border-color:#cfe2ff}.mode-card.async{border-color:#d9cff9}
+
+.attrib-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.attrib{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px}
+.attrib h3{font-size:10px;margin:0 0 7px}.attrib .item{padding:6px 0;border-top:1px solid var(--line);font-size:8px}.attrib .item:first-of-type{border-top:0}
+.attrib .route{font-size:7px;color:var(--muted);margin-top:6px;line-height:1.45}
+.attribution-record{background:#f5f3f6;border-radius:11px;padding:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:8px;line-height:1.55;white-space:pre-wrap}
+
+.metric-groups{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.metric-group{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px}
+.metric-group h3{font-size:9px;margin:0 0 8px}.metric-group .mrow{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:7px}.metric-group .mrow:first-of-type{border-top:0}.metric-group .mrow b{font-size:8px}
+
+.fallback-tree{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+.fallback-node{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px;position:relative}
+.fallback-node:after{content:"→";position:absolute;right:-10px;top:50%;color:#aaa3ad;font-weight:900}.fallback-node:last-child:after{display:none}
+.fallback-node .n{font-size:8px;font-weight:900}.fallback-node .d{font-size:7px;color:var(--muted);line-height:1.4;margin-top:4px}
+
+@media(max-width:1180px){
+  .exec-grid,.clarify-matrix,.metric-groups,.attrib-grid{grid-template-columns:repeat(2,1fr)}
+  .supply-health,.latency-grid{grid-template-columns:1fr}
+}
+@media(max-width:760px){
+  .exec-grid,.clarify-matrix,.metric-groups,.attrib-grid{grid-template-columns:1fr}
+  .fallback-tree{grid-template-columns:1fr}
+  .fallback-node:after{display:none}
+}
+
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">🦦</div>Proxy</div>
+
+    <div class="navgroup">Intelligence</div>
+    <div class="nav">
+      <button class="active" data-page="overview">总览</button>
+      <button data-page="population">用户构成</button>
+      <button data-page="behavior">行为与兴趣</button>
+      <button data-page="tags">标签中心</button>
+      <button data-page="intent">意图与撮合</button>
+      <button data-page="orchestration">编排与调度</button>
+    </div>
+
+
+    <div class="navgroup">Decision Engine</div>
+    <div class="nav">
+      <button data-page="engine">引擎总览</button>
+      <button data-page="engineapi">API / Runtime</button>
+      <button data-page="engstate">State / 生命周期</button>
+      <button data-page="policyresolver">Policy Resolver</button>
+      <button data-page="featureparity">Feature / DSL</button>
+      <button data-page="tagutility">Tag Utility</button>
+      <button data-page="enginepolicy">策略与阈值</button>
+      <button data-page="enginetrace">Decision Trace</button>
+    </div>
+
+
+    <div class="navgroup">Context & Experience</div>
+    <div class="nav">
+      <button data-page="contextfield">Context / Gravity Field</button>
+      <button data-page="surface">Surface Composition</button>
+      <button data-page="research">Geometry Research</button>
+    </div>
+
+
+    <div class="navgroup">Market Execution</div>
+    <div class="nav">
+      <button data-page="clarification">Clarification Gate</button>
+      <button data-page="supplyactivation">Supply Activation</button>
+      <button data-page="executionruntime">Execution Runtime</button>
+      <button data-page="fulfillmentattr">Fulfillment Attribution</button>
+    </div>
+
+    <div class="navgroup">Market</div>
+    <div class="nav">
+      <button data-page="merchant">商家与投放</button>
+      <button data-page="retention">留存与复购</button>
+      <button data-page="trust">信任与风险</button>
+    </div>
+
+    <div class="navgroup">Data</div>
+    <div class="nav">
+      <button data-page="quality">数据治理</button>
+      <button data-page="workbench">交叉分析工作台</button>
+    </div>
+
+    <div class="sidebar-foot">
+      Internal only · Market Intelligence + Decision Engine<br>
+      Decision / Exposure / Outcome 全链路可审计<br>
+      Model inference ≠ Fact
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="titlewrap">
+        <div class="title" id="pageTitle">平台总览</div>
+        <div class="subtitle">Proxy Market Intelligence + Decision Engine v9 · Context / Clarification / Supply Activation / Sync-Async Orchestration / Fulfillment Attribution</div>
+      </div>
+      <div class="filters">
+        <input class="search" placeholder="搜索 segment / campaign / merchant">
+        <select class="select"><option>越南 · 全部城市</option><option>河内</option><option>胡志明市</option><option>岘港</option></select>
+        <select class="select"><option>过去 30 天</option><option>过去 7 天</option><option>过去 90 天</option></select>
+        <select class="select"><option>全部性别</option><option>Female</option><option>Male</option><option>Other / Unknown</option></select>
+        <select class="select"><option>全部年龄</option><option>18–22</option><option>23–30</option><option>31–40</option><option>41+</option></select>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <section class="page active" id="overview">
+        <div class="section-title"><h2>North Star</h2><span>从流量一直看到真实履约</span></div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="label">MAU</div><div class="value">186K</div><div class="meta delta up">↑ 12.8%</div></div>
+          <div class="kpi"><div class="label">有效意图</div><div class="value">24.8K</div><div class="meta">13.3% of MAU</div></div>
+          <div class="kpi"><div class="label">成功撮合</div><div class="value">8,612</div><div class="meta delta up">↑ 9.4%</div></div>
+          <div class="kpi"><div class="label">完成履约</div><div class="value">5,218</div><div class="meta">60.6% of matches</div></div>
+          <div class="kpi"><div class="label">30D 复购/复用</div><div class="value">38.4%</div><div class="meta delta up">↑ 3.1pp</div></div>
+          <div class="kpi"><div class="label">负反馈率</div><div class="value">1.7%</div><div class="meta delta down">↓ 0.4pp</div></div>
+        </div>
+
+        <div class="section-title"><h2>全链路漏斗</h2><span>Browse → Intent → Match → Commit → Fulfill</span></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>30 天用户行为漏斗</h3>
+            <div class="funnel-row"><div class="name">有效曝光</div><div class="track"><div class="bar" style="width:100%"></div></div><div class="num">3.82M</div><div class="rate">100%</div></div>
+            <div class="funnel-row"><div class="name">深度浏览</div><div class="track"><div class="bar" style="width:72%"></div></div><div class="num">2.75M</div><div class="rate">72%</div></div>
+            <div class="funnel-row"><div class="name">明确意图</div><div class="track"><div class="bar" style="width:42%"></div></div><div class="num">24.8K</div><div class="rate">13.3%</div></div>
+            <div class="funnel-row"><div class="name">候选匹配</div><div class="track"><div class="bar" style="width:31%"></div></div><div class="num">17.1K</div><div class="rate">68.9%</div></div>
+            <div class="funnel-row"><div class="name">双方确认</div><div class="track"><div class="bar" style="width:23%"></div></div><div class="num">8.61K</div><div class="rate">50.3%</div></div>
+            <div class="funnel-row"><div class="name">完成履约</div><div class="track"><div class="bar" style="width:15%"></div></div><div class="num">5.22K</div><div class="rate">60.6%</div></div>
+          </div>
+
+          <div class="card">
+            <h3>每日有效意图趋势</h3>
+            <div class="hint">不是 PV，而是可进入 Matching 的 Intent</div>
+            <div class="spark">
+              <i style="height:42%"></i><i style="height:49%"></i><i style="height:46%"></i><i style="height:60%"></i>
+              <i style="height:58%"></i><i style="height:71%"></i><i class="hot" style="height:83%"></i><i style="height:74%"></i>
+              <i style="height:79%"></i><i class="hot" style="height:92%"></i><i style="height:81%"></i><i style="height:88%"></i>
+            </div>
+            <div class="legend"><span><b>峰值：</b>周五 19:00–22:00</span><span><b>Top 场景：</b>同行 / 本地消费 / UGC</span></div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>系统健康</h2><span>市场是否“能撮合起来”</span></div>
+        <div class="mini-grid">
+          <div class="mini"><b>8.4m</b><span>Median Time-to-Match</span><div class="barline"><i style="width:74%"></i></div></div>
+          <div class="mini"><b>46%</b><span>候选接受率</span><div class="barline"><i style="width:46%"></i></div></div>
+          <div class="mini"><b>14%</b><span>重新匹配率</span><div class="barline"><i style="width:14%"></i></div></div>
+          <div class="mini"><b>91%</b><span>有足够供给的 Intent</span><div class="barline"><i style="width:91%"></i></div></div>
+        </div>
+
+        
+        <div class="section-title"><h2>Context Field Snapshot</h2><span>User Context + World Context + Market Context</span></div>
+        <div class="engine-inline">
+          <b>当前世界状态：</b>
+          <span class="context-badge">Workday 11:55</span>
+          <span class="context-badge soft">Hanoi</span>
+          <span class="context-badge soft">Light rain</span>
+          <span class="context-badge soft">Meal gravity rising</span>
+          <span class="context-badge warn">Lunch supply 0.82×</span>
+          <br><br>所有下游决策读取同一份 versioned ContextSnapshot。
+        </div>
+<div class="section-title"><h2>Decision Engine Runtime</h2><span>业务智能已经直接连接到底层在线决策引擎</span></div>
+        <div class="engine-status">
+          <div class="engine-mini"><div class="k">Decision API</div><div class="v">18.6M</div><div class="d">30D evaluate calls</div></div>
+          <div class="engine-mini"><div class="k">p99 Latency</div><div class="v">82ms</div><div class="d">target &lt; 150ms</div></div>
+          <div class="engine-mini"><div class="k">Evidence PASS</div><div class="v">71.4%</div><div class="d">qualified decision states</div></div>
+          <div class="engine-mini"><div class="k">Active Orchestrate</div><div class="v">8.2%</div><div class="d">all proactive candidates</div></div>
+          <div class="engine-mini"><div class="k">Human Value Block</div><div class="v">4.2%</div><div class="d">Gain / Anger guardrail</div></div>
+          <div class="engine-mini"><div class="k">Lineage Complete</div><div class="v">99.92%</div><div class="d">decision→exposure→outcome</div></div>
+        </div>
+        <div class="engine-inline" style="margin-top:10px">
+          <b>在线主链：</b> Proxy Surface → <span class="engine-link">POST /v1/decisions/evaluate</span>
+          → Gravity / Intent → Evidence Gate → Resource → Human Value → Eligibility → Retrieval / Rank → Orchestration → DecisionResponse。
+          下面所有 Tag、Intent、Merchant、Trust、Retention 数据都不再只是分析结果，而是这条在线决策链的输入或 Outcome。
+        </div>
+      </section>
+
+
+      <section class="page" id="population">
+        <div class="section-title"><h2>用户构成 / Population</h2><span>内部聚合分析 · 人口属性不自动等于公开资料或商家可定向条件</span></div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="label">注册用户</div><div class="value">428K</div><div class="meta">累计</div></div>
+          <div class="kpi"><div class="label">MAU</div><div class="value">186K</div><div class="meta">43.5% registered</div></div>
+          <div class="kpi"><div class="label">新增 30D</div><div class="value">31.2K</div><div class="meta delta up">↑ 16.2%</div></div>
+          <div class="kpi"><div class="label">有交易行为</div><div class="value">72.4K</div><div class="meta">17.0%</div></div>
+          <div class="kpi"><div class="label">供给侧用户</div><div class="value">48.7K</div><div class="meta">Creator / Service / Peer</div></div>
+          <div class="kpi"><div class="label">多角色用户</div><div class="value">29.8%</div><div class="meta">Demand + Supply</div></div>
+        </div>
+
+        <div class="section-title"><h2>人口与账户属性</h2><span>每个维度都可继续穿透 Intent / Match / Fulfillment / Retention</span></div>
+        <div class="grid-3">
+          <div class="card"><h3>性别</h3><div class="funnel-row"><span>Female</span><div class="track"><div class="bar" style="width:61%"></div></div><div class="val">61%</div></div><div class="funnel-row"><span>Male</span><div class="track"><div class="bar" style="width:34%"></div></div><div class="val">34%</div></div><div class="funnel-row"><span>Other / Unknown</span><div class="track"><div class="bar" style="width:5%"></div></div><div class="val">5%</div></div><div class="prov"><span class="d">Declared 71%</span><span class="i">Inferred 19%</span><span>Unknown 10%</span></div></div>
+          <div class="card"><h3>年龄段</h3><div class="funnel-row"><span>18–22</span><div class="track"><div class="bar" style="width:31%"></div></div><div class="val">19%</div></div><div class="funnel-row"><span>23–30</span><div class="track"><div class="bar" style="width:72%"></div></div><div class="val">44%</div></div><div class="funnel-row"><span>31–40</span><div class="track"><div class="bar" style="width:42%"></div></div><div class="val">26%</div></div><div class="funnel-row"><span>41+</span><div class="track"><div class="bar" style="width:18%"></div></div><div class="val">11%</div></div></div>
+          <div class="card"><h3>Top Cities</h3><div class="score-list"><div class="score-row"><div><div class="name">河内</div><div class="sub">MAU 86K</div></div><div class="score">46%</div></div><div class="score-row"><div><div class="name">胡志明市</div><div class="sub">MAU 54K</div></div><div class="score">29%</div></div><div class="score-row"><div><div class="name">岘港</div><div class="sub">MAU 18K</div></div><div class="score">10%</div></div><div class="score-row"><div><div class="name">其他</div><div class="sub">MAU 28K</div></div><div class="score">15%</div></div></div></div>
+        </div>
+
+        <div class="section-title"><h2>Gender × Market Outcome</h2><span>看行为与市场结果，不只看人口占比</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Segment</th><th>MAU</th><th>Intent Rate</th><th>Match Rate</th><th>Fulfillment</th><th>30D Reuse</th><th>Avg Transaction</th><th>Provenance</th></tr></thead><tbody>
+          <tr><td>Female</td><td class="numc">113K</td><td class="numc">15.8%</td><td class="numc">38.2%</td><td class="numc">63.1%</td><td class="numc">41.7%</td><td class="numc">₫428K</td><td><span class="badge purple">Mixed</span></td></tr>
+          <tr><td>Male</td><td class="numc">63K</td><td class="numc">10.2%</td><td class="numc">32.4%</td><td class="numc">57.8%</td><td class="numc">33.9%</td><td class="numc">₫392K</td><td><span class="badge purple">Mixed</span></td></tr>
+          <tr><td>Other / Unknown</td><td class="numc">10K</td><td class="numc">8.4%</td><td class="numc">29.1%</td><td class="numc">55.2%</td><td class="numc">29.8%</td><td class="numc">₫365K</td><td><span class="badge warn">High unknown</span></td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section class="page" id="behavior">
+        <div class="section-title"><h2>Behavior + Interest Modeling</h2><span>从事件到长期兴趣图谱，不把“看过一次”误判成“喜欢”</span></div>
+
+        <div class="event-grid">
+          <div class="event"><div class="e">有效深度浏览</div><div class="n">2.75M</div><div class="m">dwell / reopen / scroll depth</div></div>
+          <div class="event"><div class="e">强正向信号</div><div class="n">446K</div><div class="m">save / follow / repeat / purchase</div></div>
+          <div class="event"><div class="e">弱负向信号</div><div class="n">1.06M</div><div class="m">quick skip / short dwell</div></div>
+          <div class="event"><div class="e">强负向信号</div><div class="n">64K</div><div class="m">hide / not interested / block</div></div>
+        </div>
+
+        <div class="section-title"><h2>Interest Graph Explorer</h2><span>score + confidence + freshness + decay + provenance</span></div>
+        <div class="model-grid">
+          <div class="card">
+            <div class="model-tabs">
+              <button class="active" onclick="switchModelTab('interest','profile',this)">Feature Profile</button>
+              <button onclick="switchModelTab('interest','edges',this)">Graph Edges</button>
+              <button onclick="switchModelTab('interest','context',this)">Context</button>
+              <button onclick="switchModelTab('interest','health',this)">Model Health</button>
+            </div>
+
+            <div class="model-panel active" data-model="interest" data-panel="profile">
+              <div class="feature-hero">
+                <div>
+                  <div style="font-size:9px;color:var(--muted);font-weight:850">SELECTED FEATURE</div>
+                  <div style="font-size:16px;font-weight:900;margin-top:3px">coffee_interest</div>
+                  <div class="feature-score">0.82</div>
+                  <div class="feature-meta">confidence 0.91 · updated 2h ago · decay 30d · model interest_v7.4</div>
+                  <div class="contribution">
+                    <div class="contrib-row"><span>Observed</span><div class="track"><div class="bar" style="width:55%"></div></div><b>55%</b></div>
+                    <div class="contrib-row"><span>Transactional</span><div class="track"><div class="bar" style="width:25%"></div></div><b>25%</b></div>
+                    <div class="contrib-row"><span>Declared</span><div class="track"><div class="bar" style="width:10%"></div></div><b>10%</b></div>
+                    <div class="contrib-row"><span>Inferred</span><div class="track"><div class="bar" style="width:10%"></div></div><b>10%</b></div>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size:9px;color:var(--muted);font-weight:850">90D SCORE TREND</div>
+                  <div class="trendline">
+                    <i style="height:28%"></i><i style="height:33%"></i><i style="height:38%"></i><i style="height:36%"></i>
+                    <i class="p" style="height:52%"></i><i class="p" style="height:61%"></i><i class="p" style="height:68%"></i><i class="p" style="height:74%"></i>
+                    <i class="p" style="height:82%"></i><i class="p" style="height:78%"></i><i class="p" style="height:84%"></i><i class="p" style="height:82%"></i>
+                  </div>
+                  <div class="legend"><span><b>+：</b>3 redeemed coffee offers</span><span><b>-：</b>promo skips</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="model-panel" data-model="interest" data-panel="edges">
+              <div class="edge-row"><span><b>Connected Feature</b></span><b>Edge</b><b>Lift</b><b>Users</b></div>
+              <div class="edge-row"><span>photography_interest</span><b>0.71</b><b>1.82×</b><b>42K</b></div>
+              <div class="edge-row"><span>weekend_local_activity</span><b>0.66</b><b>1.53×</b><b>37K</b></div>
+              <div class="edge-row"><span>creator_ugc_interest</span><b>0.42</b><b>1.31×</b><b>21K</b></div>
+              <div class="edge-row"><span>high_frequency_promo_dislike</span><b>-0.38</b><b>0.64×</b><b>18K</b></div>
+              <div class="notice" style="margin-top:10px"><b>Graph use:</b> Edge 只用于建模关联，不自动推导公开标签。强相关也不代表因果。</div>
+            </div>
+
+            <div class="model-panel" data-model="interest" data-panel="context">
+              <div class="table-wrap" style="border:0;border-radius:0"><table style="min-width:620px">
+                <thead><tr><th>Context</th><th>Interest Score</th><th>Response</th><th>Negative Signal</th><th>Best Use</th></tr></thead>
+                <tbody>
+                  <tr><td>Weekday 17:00–21:00 · ≤3km</td><td class="numc">0.91</td><td class="numc">18.7%</td><td class="numc">1.2%</td><td>Local merchant matching</td></tr>
+                  <tr><td>Weekend morning · ≤8km</td><td class="numc">0.78</td><td class="numc">14.1%</td><td class="numc">1.9%</td><td>Activity / brunch</td></tr>
+                  <tr><td>Distance &gt; 20km</td><td class="numc">0.33</td><td class="numc">3.2%</td><td class="numc">7.8%</td><td>Downrank</td></tr>
+                </tbody>
+              </table></div>
+            </div>
+
+            <div class="model-panel" data-model="interest" data-panel="health">
+              <div class="grid-2">
+                <div class="mini"><b>92.4%</b><span>Feature coverage</span><div class="barline"><i style="width:92%"></i></div></div>
+                <div class="mini"><b>7.1%</b><span>Stale feature rate</span><div class="barline"><i style="width:7%"></i></div></div>
+                <div class="mini"><b>0.86</b><span>Mean calibration</span><div class="barline"><i style="width:86%"></i></div></div>
+                <div class="mini"><b>3.8%</b><span>High-conf contradiction</span><div class="barline"><i style="width:4%"></i></div></div>
+              </div>
+              <div class="notice" style="margin-top:10px"><b>Contradiction:</b> 当用户显式“不感兴趣”与模型高分兴趣冲突时，Declared negative 应优先并触发特征降权。</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Population Interest Movement</h3>
+            <div class="score-list">
+              <div class="score-row"><div><div class="name">短途旅行</div><div class="sub">7D trend · Hanoi 23–30</div></div><div class="score">+18%</div></div>
+              <div class="score-row"><div><div class="name">咖啡 / Brunch</div><div class="sub">稳定高响应</div></div><div class="score">+7%</div></div>
+              <div class="score-row"><div><div class="name">SPA 优惠</div><div class="sub">曝光上升但负反馈同步增加</div></div><div class="score">-11%</div></div>
+              <div class="score-row"><div><div class="name">UGC / 探店</div><div class="sub">Creator supply 增长</div></div><div class="score">+14%</div></div>
+            </div>
+            <div class="section-title" style="margin-top:16px"><h2>Negative Preference</h2><span>减少打扰</span></div>
+            <div class="tagbox">
+              <span class="tag neg">高频促销 .81</span><span class="tag neg">远距离活动 .67</span>
+              <span class="tag neg">陌生私聊 .63</span><span class="tag neg">高客单 SPA .41</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Feature Registry</h2><span>所有特征都要能追溯来源和用途</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Feature</th><th>Type</th><th>Score</th><th>Confidence</th><th>Source Mix</th><th>Freshness</th><th>Decay</th><th>Allowed Use</th></tr></thead>
+          <tbody>
+            <tr><td>travel_interest</td><td>Positive</td><td class="numc">0.84</td><td class="numc">0.88</td><td>Obs 49 / Tx 20 / Dec 16 / Inf 15</td><td>5h</td><td>45d</td><td><span class="badge good">Recommend + Match</span></td></tr>
+            <tr><td>coffee_interest</td><td>Positive</td><td class="numc">0.82</td><td class="numc">0.91</td><td>Obs 55 / Tx 25 / Dec 10 / Inf 10</td><td>2h</td><td>30d</td><td><span class="badge good">Recommend + Match</span></td></tr>
+            <tr><td>high_freq_promo_dislike</td><td>Negative</td><td class="numc">0.87</td><td class="numc">0.93</td><td>Obs 72 / Dec 28</td><td>1h</td><td>90d</td><td><span class="badge warn">Downrank only</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      
+      <section class="page" id="tags">
+        <div class="section-title"><h2>Tag Center · 细粒度标签仓</h2><span>先保留真实差异，再让数据决定是否归并</span></div>
+        <div class="notice"><b>建模原则：</b> 不强制把几万种标签先塞进少数“高级人格类别”。标签首先是对真实行为、交易、场景、偏好和状态的具体描述。允许同义、相近、短生命周期标签并存；通过共现、转化、留存和模型效果再决定是否合并。分类只用于导航，不作为真相。</div>
+        <div class="engine-inline" style="margin-top:9px"><b>v7 Runtime Rule：</b> Tag namespace 可以持续增长，但 User×Tag 在线状态必须分层。历史标签进入 Cold，当前有效标签进入 Warm，只有与当前 Event/Context 相关的 Hot Decision Set 才允许进入 /v1/decisions/evaluate。标签多 ≠ 每次全量读取。</div>
+
+        <div class="section-title"><h2>Tag Warehouse Health</h2><span>标签可以很多，但必须可追溯、可失效、可分析</span></div>
+        <div class="tag-kpis">
+          <div class="kpi"><div class="label">Active Tags</div><div class="value">38,642</div><div class="meta">当前可用标签类型</div></div>
+          <div class="kpi"><div class="label">30D New Tags</div><div class="value">1,284</div><div class="meta up">由新行为/新业务产生</div></div>
+          <div class="kpi"><div class="label">Tagged Users</div><div class="value">178K</div><div class="meta">95.7% of MAU</div></div>
+          <div class="kpi"><div class="label">Median Tags / User</div><div class="value">73</div><div class="meta">active snapshot</div></div>
+          <div class="kpi"><div class="label">Expired / 30D</div><div class="value">4.8M</div><div class="meta">短期状态自然失效</div></div>
+          <div class="kpi"><div class="label">Conflict Rate</div><div class="value">2.7%</div><div class="meta down">显式反馈优先</div></div>
+        </div>
+
+        <div class="section-title"><h2>标签检索</h2><span>不要先问“属于哪个大类”，先看它到底记录了什么</span></div>
+        <div class="tag-toolbar">
+          <input id="tagSearch" placeholder="搜索标签名 / tag_id / event / rule">
+          <select><option>全部来源</option><option>Observed</option><option>Transactional</option><option>Declared</option><option>Rule</option><option>Inferred</option></select>
+          <select><option>全部用途</option><option>Recommendation</option><option>Matching</option><option>Orchestration</option><option>Merchant</option><option>Frequency control</option></select>
+          <select><option>全部状态</option><option>Active</option><option>Stale</option><option>Deprecated</option></select>
+          <button class="dark" onclick="filterTagTable()">筛选</button>
+        </div>
+
+        <div class="table-wrap">
+          <table id="tagTable">
+            <thead><tr><th>Tag</th><th>Tag ID</th><th>Users</th><th>Source</th><th>Freshness / TTL</th><th>Signal / Rule</th><th>Primary Use</th><th>7D Trend</th></tr></thead>
+            <tbody>
+              <tr><td><b>周末18–22点高活跃</b><div class="tag-row-detail">过去28天，周五/六晚间 session 占比 ≥ 60%</div></td><td>bhv_weekend_evening_active_v3</td><td class="numc">64.2K</td><td><span class="rawtag obs">Observed</span></td><td>2h / 14d</td><td>session_window_ratio ≥ .60</td><td>Scheduling / Ads timing</td><td class="numc">+6.2%</td></tr>
+              <tr><td><b>河内3km咖啡高响应</b><div class="tag-row-detail">本地咖啡内容、优惠或搜索在3km内出现高响应</div></td><td>ctx_hanoi_coffee_3km_highresp_v5</td><td class="numc">28.7K</td><td><span class="rawtag obs">Observed</span> <span class="rawtag tx">Tx</span></td><td>18m / 21d</td><td>dwell + claim + redeem + radius</td><td>Merchant match</td><td class="numc">+11.4%</td></tr>
+              <tr><td><b>最近7天保存宁平内容≥3</b><div class="tag-row-detail">非常具体的短期兴趣信号，不先抽象成“旅行人格”</div></td><td>evt_save_ninhbinh_7d_gte3</td><td class="numc">9.8K</td><td><span class="rawtag obs">Observed</span></td><td>41m / 7d</td><td>save(destination=ninh_binh) ≥ 3</td><td>Intent evidence</td><td class="numc">+18.1%</td></tr>
+              <tr><td><b>过去30天优惠券核销≥2</b><div class="tag-row-detail">真实交易行为，不等价于“便宜敏感”人格推断</div></td><td>tx_coupon_redeem_30d_gte2</td><td class="numc">18.4K</td><td><span class="rawtag tx">Transactional</span></td><td>6m / 30d</td><td>redeem_count_30d ≥ 2</td><td>Retention / merchant</td><td class="numc">+3.9%</td></tr>
+              <tr><td><b>连续3次快速划走SPA推广</b><div class="tag-row-detail">负向标签，用于减少打扰，不自动公开为用户偏好</div></td><td>neg_spa_promo_quickskip_3x</td><td class="numc">11.1K</td><td><span class="rawtag neg">Negative</span> <span class="rawtag obs">Observed</span></td><td>12m / 30d</td><td>quick_skip(spa_promo) consecutive ≥ 3</td><td>Frequency cap / downrank</td><td class="numc">+9.5%</td></tr>
+              <tr><td><b>Creator合作响应≤2小时</b><div class="tag-row-detail">供给侧执行能力标签，来自真实合作响应记录</div></td><td>sup_creator_reply_lte2h_30d</td><td class="numc">7.2K</td><td><span class="rawtag tx">Transactional</span></td><td>1h / 30d</td><td>median_creator_reply_time ≤ 2h</td><td>Merchant matching</td><td class="numc">+14.7%</td></tr>
+              <tr><td><b>同行履约率≥90%</b><div class="tag-row-detail">场景化可信度，不把“靠谱”抽象成一个总人格分</div></td><td>trust_companion_fulfill_gte90</td><td class="numc">14.6K</td><td><span class="rawtag tx">Transactional</span></td><td>4m / 90d</td><td>companion_fulfilled / committed ≥ .90</td><td>Matching trust</td><td class="numc">+2.1%</td></tr>
+              <tr><td><b>TikTok外链点击≥2 / 14d</b><div class="tag-row-detail">表示近期主动查看外部内容资产，不直接推断Creator身份</div></td><td>bhv_tiktok_outclick_14d_gte2</td><td class="numc">21.3K</td><td><span class="rawtag obs">Observed</span></td><td>33m / 14d</td><td>social_out_click(tiktok) ≥ 2</td><td>Content / cooperation</td><td class="numc">+5.6%</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="section-title"><h2>Tag Factory</h2><span>规则尽量贴近原始事实，避免过早造“人格概念”</span></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>规则标签 · 示例</h3>
+            <div class="rule">
+              <div class="rtitle"><span class="rawtag obs">Observed</span> 河内周末3km咖啡高响应</div>
+              <div class="rmeta">目标不是定义“咖啡型女生”，而是保存一个可验证、可过期的具体市场状态。</div>
+              <div class="rulecode">city = "hanoi"
+AND weekend_session_ratio_28d &gt;= 0.60
+AND coffee_content_dwell_p75_30d &gt;= 8s
+AND local_radius_response_30d &lt;= 3km
+AND (coffee_coupon_claim_30d + coffee_search_30d) &gt;= 3</div>
+            </div>
+            <div class="rule">
+              <div class="rtitle"><span class="rawtag neg">Negative</span> 高频促销疲劳</div>
+              <div class="rulecode">promo_impressions_7d &gt;= 12
+AND (
+  promo_quick_skip_rate_7d &gt;= 0.70
+  OR hide_promotion_30d &gt;= 2
+)</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>创建时先看实际样本</h3>
+            <div class="metric-list">
+              <div class="metric-row"><div><div class="name">命中用户</div><div class="sub">不是理论估算</div></div><div class="score">28,742</div></div>
+              <div class="metric-row"><div><div class="name">30D Merchant Response</div><div class="sub">vs overall population</div></div><div class="score">2.18×</div></div>
+              <div class="metric-row"><div><div class="name">Negative feedback</div><div class="sub">如果过高就说明规则失真</div></div><div class="score">1.1%</div></div>
+              <div class="metric-row"><div><div class="name">30D stability</div><div class="sub">标签是否持续存在</div></div><div class="score">67%</div></div>
+            </div>
+            <div class="notice" style="margin-top:10px"><b>原则：</b> 标签名、规则、命中样本、下游效果一起审核。先看“这个标签是否真的区分了行为”，再考虑把它归入哪个抽象体系。</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>标签共现分析</h2><span>让数据告诉我们哪些标签天然形成群体</span></div>
+        <div class="co-grid">
+          <div class="co-list">
+            <div class="co-item active">周末18–22点高活跃</div>
+            <div class="co-item">最近7天保存宁平内容≥3</div>
+            <div class="co-item">河内3km咖啡高响应</div>
+            <div class="co-item">过去30天优惠券核销≥2</div>
+            <div class="co-item">Creator合作响应≤2小时</div>
+          </div>
+          <div class="card">
+            <h3>与「周末18–22点高活跃」最强共现</h3>
+            <div class="co-bars">
+              <div class="co-bar"><span>周末本地消费响应高</span><div class="track"><div class="bar" style="width:88%"></div></div><b>2.34×</b></div>
+              <div class="co-bar"><span>短途旅行内容保存高</span><div class="track"><div class="bar" style="width:74%"></div></div><b>1.92×</b></div>
+              <div class="co-bar"><span>活动类帖子深度浏览</span><div class="track"><div class="bar" style="width:69%"></div></div><b>1.71×</b></div>
+              <div class="co-bar"><span>工作日午间低响应</span><div class="track"><div class="bar" style="width:61%"></div></div><b>1.53×</b></div>
+              <div class="co-bar"><span>陌生私聊低响应</span><div class="track"><div class="bar" style="width:47%"></div></div><b>1.28×</b></div>
+            </div>
+            <div class="softnote" style="margin-top:10px">共现只说明统计关联。不要因为5个标签经常一起出现，就马上创造一个“周末生活家”抽象人格。</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>单用户 Tag Bag · 示例</h2><span>User 360消费的是具体标签快照，而不是固定人格</span></div>
+        <div class="bag-grid">
+          <div class="card">
+            <h3>PX-102839 · Active 73 tags</h3>
+            <div class="tagcloud">
+              <span class="rawtag">河内常驻</span><span class="rawtag">23–30 · declared</span>
+              <span class="rawtag obs">周末18–22点高活跃</span><span class="rawtag obs">最近7天保存宁平内容≥3</span>
+              <span class="rawtag tx">同行履约率≥90%</span><span class="rawtag tx">30天优惠券核销≥2</span>
+              <span class="rawtag obs">TikTok外链点击≥2</span><span class="rawtag neg">连续3次快速划走SPA推广</span>
+              <span class="rawtag intent">宁平同行 Intent · TTL 5d</span>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Tag Change Log</h3>
+            <div class="tag-history">
+              <div class="tag-history-row"><div>Aug 26 · 10:14</div><div><span class="event">+ 30天优惠券核销≥2</span><div class="reason">第二次真实核销完成</div></div><div>Tx</div><div>TTL 30d</div></div>
+              <div class="tag-history-row"><div>Aug 25 · 21:11</div><div><span class="event">+ 宁平同行 Intent</span><div class="reason">post + search + save evidence</div></div><div>Intent</div><div>TTL 5d</div></div>
+              <div class="tag-history-row"><div>Aug 23 · 19:20</div><div><span class="event">+ 连续3次快速划走SPA推广</span><div class="reason">第三次 quick skip 达到规则阈值</div></div><div>Observed</div><div>TTL 30d</div></div>
+              <div class="tag-history-row"><div>Aug 20</div><div><span class="event">- 午间咖啡高响应</span><div class="reason">标签到期，近期行为不再满足</div></div><div>Expired</div><div>—</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>标签使用边界</h2><span>标签很多 ≠ 所有系统都能随便使用</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Tag</th><th>Analytics</th><th>Recommendation</th><th>Matching</th><th>Orchestration</th><th>Merchant Target</th><th>Public</th></tr></thead>
+            <tbody>
+              <tr><td>周末18–22点高活跃</td><td>✓</td><td>✓</td><td>✓ context</td><td>✓ timing</td><td>Aggregated / policy</td><td>✕</td></tr>
+              <tr><td>同行履约率≥90%</td><td>✓</td><td>—</td><td>✓ trust</td><td>✓</td><td>Qualified supply only</td><td>✕ raw</td></tr>
+              <tr><td>gender_declared:female</td><td>✓</td><td>Restricted</td><td>User-controlled</td><td>Contextual</td><td>Restricted</td><td>User-opened only</td></tr>
+              <tr><td>连续3次快速划走SPA推广</td><td>✓</td><td>Downrank</td><td>—</td><td>—</td><td>Frequency cap only</td><td>✕</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+
+      <section class="page" id="intent">
+        <div class="section-title"><h2>Intent Graph + Matching Readiness</h2><span>Interest ≠ Intent；Intent 是有生命周期和过期时间的可执行状态</span></div>
+
+        <div class="lifecycle">
+          <div class="life"><div class="stage">Detected</div><div class="count">31.4K</div><div class="conv">100%</div></div>
+          <div class="life"><div class="stage">Qualified</div><div class="count">24.8K</div><div class="conv">79.0%</div></div>
+          <div class="life"><div class="stage">Clarified</div><div class="count">20.1K</div><div class="conv">81.0%</div></div>
+          <div class="life"><div class="stage">Matched</div><div class="count">17.1K</div><div class="conv">85.1%</div></div>
+          <div class="life"><div class="stage">Committed</div><div class="count">8.61K</div><div class="conv">50.3%</div></div>
+          <div class="life"><div class="stage">Fulfilled</div><div class="count">5.22K</div><div class="conv">60.6%</div></div>
+        </div>
+
+        <div class="section-title"><h2>Intent Explorer</h2><span>触发来源、缺失条件、TTL、供给状态、下一步动作</span></div>
+        <div class="model-grid">
+          <div class="card">
+            <h3>Active Intent Queue</h3>
+            <div class="table-wrap" style="border:0;border-radius:0"><table style="min-width:760px">
+              <thead><tr><th>Intent</th><th>Confidence</th><th>Trigger</th><th>Missing</th><th>TTL</th><th>Supply</th><th>Next Action</th></tr></thead>
+              <tbody>
+                <tr><td>Weekend companion · Hanoi→Ninh Binh</td><td class="numc">0.91</td><td>post + save + search</td><td>party_size</td><td>5d</td><td><span class="badge good">1.42×</span></td><td><span class="badge purple">Clarify once</span></td></tr>
+                <tr><td>Local coffee · ≤3km</td><td class="numc">0.79</td><td>search + coupon_view</td><td>none</td><td>6h</td><td><span class="badge good">2.31×</span></td><td><span class="badge good">Match now</span></td></tr>
+                <tr><td>Creator / UGC cooperation</td><td class="numc">0.84</td><td>profile + social + merchant</td><td>budget</td><td>14d</td><td><span class="badge warn">0.88×</span></td><td><span class="badge purple">Price guidance</span></td></tr>
+                <tr><td>Chinese↔Vietnamese translation</td><td class="numc">0.63</td><td>search</td><td>time, duration</td><td>2d</td><td><span class="badge bad">0.45×</span></td><td><span class="badge warn">Expand supply</span></td></tr>
+              </tbody>
+            </table></div>
+          </div>
+
+          <div class="card">
+            <h3>Trigger Attribution</h3>
+            <div class="score-list">
+              <div class="score-row"><div><div class="name">Explicit create / search</div><div class="sub">最高确定性</div></div><div class="score">41%</div></div>
+              <div class="score-row"><div><div class="name">Post / content semantics</div><div class="sub">用户自然表达</div></div><div class="score">23%</div></div>
+              <div class="score-row"><div><div class="name">Repeated behavior</div><div class="sub">save / reopen / market filter</div></div><div class="score">19%</div></div>
+              <div class="score-row"><div><div class="name">Merchant / offer response</div><div class="sub">coupon / booking / inquiry</div></div><div class="score">11%</div></div>
+              <div class="score-row"><div><div class="name">Pure inference only</div><div class="sub">默认不直接触发高承诺流程</div></div><div class="score">6%</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Intent Quality & Calibration</h2><span>不仅看 confidence，还看这个 confidence 到底准不准</span></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Confidence Calibration</h3>
+            <div class="cal-row"><span>0.90–1.00</span><div class="track"><div class="bar" style="width:91%"></div></div><b>Pred 94%</b><b>Actual 91%</b></div>
+            <div class="cal-row"><span>0.80–0.89</span><div class="track"><div class="bar" style="width:82%"></div></div><b>Pred 84%</b><b>Actual 82%</b></div>
+            <div class="cal-row"><span>0.70–0.79</span><div class="track"><div class="bar" style="width:74%"></div></div><b>Pred 75%</b><b>Actual 74%</b></div>
+            <div class="cal-row"><span>0.60–0.69</span><div class="track"><div class="bar" style="width:61%"></div></div><b>Pred 64%</b><b>Actual 61%</b></div>
+          </div>
+          <div class="card">
+            <h3>Lifecycle Loss</h3>
+            <div class="branch-grid">
+              <div class="mini"><b>3.4K</b><span>Expired</span><div class="barline"><i style="width:34%"></i></div></div>
+              <div class="mini"><b>2.1K</b><span>Abandoned</span><div class="barline"><i style="width:21%"></i></div></div>
+              <div class="mini"><b>1.3K</b><span>No supply</span><div class="barline"><i style="width:13%"></i></div></div>
+            </div>
+            <div class="notice" style="margin-top:10px"><b>Priority:</b> Expired 不等于失败。短 TTL 本地消费 Intent 应在数小时内处理；旅行/Creator 合作允许更长生命周期。</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Intent → Decision Engine Trace</h2><span>Intent 只是一层；强撮合必须经过完整 Engine Gate</span></div>
+        <div class="trace-v6">
+          <div class="step"><div class="k">01 · SIGNAL</div><div class="v">Travel gravity .93</div><div class="d">Post + saves + search + Friday rhythm</div></div>
+          <div class="step"><div class="k">02 · INTENT</div><div class="v">Companion .91</div><div class="d">Hanoi → Ninh Binh · TTL 5d</div></div>
+          <div class="step"><div class="k">03 · EVIDENCE</div><div class="v">PASS</div><div class="d">coverage .88 · contamination .07</div></div>
+          <div class="step"><div class="k">04 · RESOURCE</div><div class="v">PASS</div><div class="d">time / distance / budget compatible</div></div>
+          <div class="step"><div class="k">05 · HUMAN VALUE</div><div class="v">Gain .82</div><div class="d">anger .09 · intervention budget 2</div></div>
+          <div class="step"><div class="k">06 · ELIGIBILITY</div><div class="v">128 candidates</div><div class="d">privacy + circle + time + location + trust</div></div>
+          <div class="step"><div class="k">07 · RANK</div><div class="v">Top 12</div><div class="d">compatibility + relation + reliability</div></div>
+          <div class="step"><div class="k">08 · ORCHESTRATE</div><div class="v">Group of 3</div><div class="d">A + B primary · C fallback</div></div>
+        </div>
+      </section>
+
+<section class="page" id="orchestration">
+        <div class="section-title"><h2>Orchestration Health</h2><span>不是“推荐谁”，而是“怎么让事情发生”</span></div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="label">Median Time-to-Match</div><div class="value">8.4m</div><div class="meta delta up">↓ 1.2m</div></div>
+          <div class="kpi"><div class="label">Group Fill Rate</div><div class="value">72%</div><div class="meta">目标人数按时满足</div></div>
+          <div class="kpi"><div class="label">Re-plan Rate</div><div class="value">14%</div><div class="meta">首次方案未成立</div></div>
+          <div class="kpi"><div class="label">Capacity Conflicts</div><div class="value">6.8%</div><div class="meta">资源/名额冲突</div></div>
+          <div class="kpi"><div class="label">Late Cancellation</div><div class="value">4.1%</div><div class="meta">临近执行取消</div></div>
+          <div class="kpi"><div class="label">Fulfillment SLA</div><div class="value">92%</div><div class="meta">按计划完成</div></div>
+        </div>
+
+
+        <div class="section-title"><h2>Engine → Orchestration Bridge</h2><span>只有 ACTIVE_ORCHESTRATE 才进入复杂编排</span></div>
+        <div class="trace-v6">
+          <div class="step"><div class="k">PUBLIC API</div><div class="v">Decision evaluate</div><div class="d">decision_type=companion_group</div></div>
+          <div class="step"><div class="k">GATE</div><div class="v">ACTIVE_ORCHESTRATE</div><div class="d">Evidence + Resource + Value all PASS</div></div>
+          <div class="step"><div class="k">RETRIEVAL</div><div class="v">128 eligible</div><div class="d">geo / time / privacy / trust</div></div>
+          <div class="step"><div class="k">RANK</div><div class="v">12 shortlist</div><div class="d">pair / group compatibility</div></div>
+          <div class="step"><div class="k">OPTIMIZER</div><div class="v">CP-SAT</div><div class="d">group size / schedule / pickup / capacity</div></div>
+          <div class="step"><div class="k">PLAN</div><div class="v">plan_40219</div><div class="d">feasible=.87 · fallback ready</div></div>
+        </div>
+
+        <div class="section-title"><h2>实时供需缺口</h2><span>决定哪里要增长供给、哪里要压制曝光</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>场景</th><th>区域</th><th>需求</th><th>可用供给</th><th>Supply / Demand</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td>同行 · 宁平</td><td>河内</td><td class="numc">428</td><td class="numc">291</td><td class="numc">0.68</td><td><span class="badge warn">供给偏紧</span></td></tr>
+            <tr><td>中越翻译</td><td>河内</td><td class="numc">211</td><td class="numc">96</td><td class="numc">0.45</td><td><span class="badge bad">明显不足</span></td></tr>
+            <tr><td>UGC 探店</td><td>胡志明市</td><td class="numc">307</td><td class="numc">421</td><td class="numc">1.37</td><td><span class="badge good">健康</span></td></tr>
+            <tr><td>SPA 优惠</td><td>河内</td><td class="numc">512</td><td class="numc">1,142</td><td class="numc">2.23</td><td><span class="badge purple">供给过剩</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section class="page" id="merchant">
+        <div class="section-title"><h2>商家与投放</h2><span>曝光只是开始，最终看到核销和复购</span></div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="label">活跃商家</div><div class="value">1,842</div><div class="meta delta up">↑ 8.2%</div></div>
+          <div class="kpi"><div class="label">有效 Campaign</div><div class="value">3,406</div><div class="meta">当前周期</div></div>
+          <div class="kpi"><div class="label">Qualified Reach</div><div class="value">72%</div><div class="meta">符合资格的有效触达</div></div>
+          <div class="kpi"><div class="label">优惠领取率</div><div class="value">18.4%</div><div class="meta">qualified audience</div></div>
+          <div class="kpi"><div class="label">核销率</div><div class="value">41.2%</div><div class="meta">claim → redeem</div></div>
+          <div class="kpi"><div class="label">30D 复购</div><div class="value">22.7%</div><div class="meta">redeemed users</div></div>
+        </div>
+
+        <div class="section-title"><h2>Campaign 表现</h2><span>支持定向活动 / 优惠券 / Creator 合作</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Campaign</th><th>Merchant</th><th>类型</th><th>目标用户</th><th>有效触达</th><th>领取/响应</th><th>履约/核销</th><th>负反馈</th></tr></thead>
+          <tbody>
+            <tr><td>西湖周末 SPA</td><td>Lotus Spa</td><td>优惠券</td><td class="numc">8,420</td><td class="numc">6,118</td><td class="numc">1,204</td><td class="numc">492</td><td class="numc">1.2%</td></tr>
+            <tr><td>咖啡新品探店</td><td>Mori Coffee</td><td>Creator</td><td class="numc">1,240</td><td class="numc">914</td><td class="numc">184</td><td class="numc">71</td><td class="numc">0.8%</td></tr>
+            <tr><td>宁平同行套餐</td><td>Ninh Binh Trip</td><td>活动</td><td class="numc">4,612</td><td class="numc">3,904</td><td class="numc">621</td><td class="numc">288</td><td class="numc">2.3%</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section class="page" id="retention">
+        <div class="section-title"><h2>留存与复购</h2><span>Proxy 的目标不是刷得久，而是回来继续解决事情</span></div>
+        <div class="grid-2">
+          <div class="card"><h3>用户 Cohort</h3>
+            <div class="table-wrap" style="border:0;border-radius:0"><table style="min-width:0">
+              <thead><tr><th>Cohort</th><th>D1</th><th>D7</th><th>D30</th><th>2nd Fulfillment</th></tr></thead>
+              <tbody>
+                <tr><td>首次同行</td><td class="numc">61%</td><td class="numc">42%</td><td class="numc">28%</td><td class="numc">22%</td></tr>
+                <tr><td>首次领券</td><td class="numc">53%</td><td class="numc">31%</td><td class="numc">19%</td><td class="numc">15%</td></tr>
+                <tr><td>首次 Creator 合作</td><td class="numc">68%</td><td class="numc">49%</td><td class="numc">37%</td><td class="numc">31%</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+          <div class="card"><h3>复用路径</h3><div class="score-list">
+            <div class="score-row"><div><div class="name">同行 → 本地消费</div><div class="sub">跨场景复用</div></div><div class="score">18%</div></div>
+            <div class="score-row"><div><div class="name">优惠券 → 复购同商家</div><div class="sub">Merchant retention</div></div><div class="score">22%</div></div>
+            <div class="score-row"><div><div class="name">Creator 合作 → 再次合作</div><div class="sub">Repeat deal</div></div><div class="score">31%</div></div>
+          </div></div>
+        </div>
+      </section>
+
+      <section class="page" id="trust">
+        <div class="section-title"><h2>信任与风险</h2><span>按场景建模，不用一个总评分覆盖所有关系</span></div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="label">身份验证覆盖</div><div class="value">71%</div><div class="meta">active supply users</div></div>
+          <div class="kpi"><div class="label">No-show</div><div class="value">2.8%</div><div class="meta delta down">↓ 0.3pp</div></div>
+          <div class="kpi"><div class="label">争议率</div><div class="value">0.9%</div><div class="meta">fulfilled transactions</div></div>
+          <div class="kpi"><div class="label">举报率</div><div class="value">0.3%</div><div class="meta">exposures</div></div>
+          <div class="kpi"><div class="label">异常账户</div><div class="value">418</div><div class="meta">risk review queue</div></div>
+          <div class="kpi"><div class="label">风控拦截</div><div class="value">1,204</div><div class="meta">past 30d</div></div>
+        </div>
+
+        <div class="section-title"><h2>风险队列</h2><span>内部使用 · 需要审计和权限控制</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>类型</th><th>数量</th><th>趋势</th><th>主要来源</th><th>严重度</th></tr></thead>
+          <tbody>
+            <tr><td>重复爽约</td><td class="numc">128</td><td class="numc">+7%</td><td>同行 / 服务</td><td><span class="badge warn">Medium</span></td></tr>
+            <tr><td>异常优惠券核销</td><td class="numc">64</td><td class="numc">-12%</td><td>商家活动</td><td><span class="badge bad">High</span></td></tr>
+            <tr><td>骚扰式触达</td><td class="numc">91</td><td class="numc">+2%</td><td>私聊 / 合作邀请</td><td><span class="badge warn">Medium</span></td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section class="page" id="quality">
+        <div class="section-title"><h2>数据质量与画像来源</h2><span>事实、声明、行为和推断必须分开</span></div>
+        <div class="grid-2">
+          <div class="card"><h3>Feature Provenance</h3><div class="score-list">
+            <div class="score-row"><div><div class="name">Transactional</div><div class="sub">履约 / 核销 / 支付事实</div></div><div class="score">99.2%</div></div>
+            <div class="score-row"><div><div class="name">Explicit / Declared</div><div class="sub">用户主动设置或表达</div></div><div class="score">94.8%</div></div>
+            <div class="score-row"><div><div class="name">Observed</div><div class="sub">浏览 / 收藏 / 划走等行为</div></div><div class="score">97.1%</div></div>
+            <div class="score-row"><div><div class="name">Inferred</div><div class="sub">模型推断标签</div></div><div class="score">82.6%</div></div>
+          </div></div>
+
+          <div class="card"><h3>数据健康</h3><div class="score-list">
+            <div class="score-row"><div><div class="name">Event completeness</div><div class="sub">关键事件是否完整到达</div></div><div class="score">99.4%</div></div>
+            <div class="score-row"><div><div class="name">Freshness &lt; 5m</div><div class="sub">实时特征更新</div></div><div class="score">96.7%</div></div>
+            <div class="score-row"><div><div class="name">Duplicate events</div><div class="sub">重复事件率</div></div><div class="score">0.18%</div></div>
+            <div class="score-row"><div><div class="name">Unresolved identity</div><div class="sub">跨设备身份未归一</div></div><div class="score">1.9%</div></div>
+          </div></div>
+        </div>
+
+        <div class="section-title"><h2>Feature 使用边界</h2><span>内部工程约束</span></div>
+        <div class="notice">
+          <b>Data ≠ Visible Data ≠ Matchable Data.</b><br>
+          每个特征必须记录来源、置信度、更新时间和允许用途。用户主动声明、交易事实、观察行为、AI 推断不能合并成同一种“事实”；用于推荐、撮合、商家定向、风控的权限也应分别控制。
+          <br><br><b>Decision Engine lineage:</b> 任何系统曝光产生的 click / save / redeem 必须挂 decision_id + exposure_id。
+          system_exposed evidence 与 organic evidence 分开计权；缺少 lineage 的系统行为默认只能进入 LEARN_ONLY，禁止直接提升强决策置信度。
+        </div>
+      </section>
+
+      <section class="page" id="workbench">
+        <div class="section-title"><h2>交叉分析工作台</h2><span>产品 / 运营 / 算法自由切维度，不用为每个问题重新做 Dashboard</span></div>
+        <div class="controls"><select id="rowDim"><option>Gender</option><option>Age</option><option>City</option><option>Interest</option><option>Relationship</option><option>Source</option></select><select id="colDim"><option>Intent Type</option><option>Match Stage</option><option>Merchant Category</option><option>Distance Band</option><option>Retention</option></select><select><option>Metric: Fulfillment Rate</option><option>Match Rate</option><option>Intent Rate</option><option>Repeat Rate</option><option>Avg Transaction</option></select><button onclick="runWorkbench()">运行分析</button></div>
+        <div id="wbTitle" style="font-size:12px;font-weight:900;margin-bottom:9px">Gender × Intent Type · Fulfillment Rate</div>
+        <div class="matrix"><div class="mcell mhead">Dimension</div><div class="mcell mhead">Local</div><div class="mcell mhead">Companion</div><div class="mcell mhead">Creator</div><div class="mcell mhead">Translation</div><div class="mcell mhead">Other</div><div class="mcell mlabel">Female</div><div class="mcell h5">66%</div><div class="mcell h5">68%</div><div class="mcell h4">61%</div><div class="mcell h3">55%</div><div class="mcell h3">53%</div><div class="mcell mlabel">Male</div><div class="mcell h4">59%</div><div class="mcell h3">54%</div><div class="mcell h3">57%</div><div class="mcell h4">60%</div><div class="mcell h2">49%</div><div class="mcell mlabel">Other/Unknown</div><div class="mcell h3">54%</div><div class="mcell h2">49%</div><div class="mcell h2">47%</div><div class="mcell h3">52%</div><div class="mcell h2">45%</div></div>
+
+        <div class="section-title"><h2>User 360 · 高权限调查视图</h2><span>Snapshot 只是入口，重点是时间、来源和决策链</span></div>
+        <div class="user360">
+          <div class="uhead">
+            <b>PX-102839</b>
+            <span>Huyen · Hanoi · Verified<br>Female (Declared) · 23–30<br>Active 18m ago · Risk Low</span>
+            <div class="prov" style="margin-top:12px"><span class="d">Declared</span><span class="o">Observed</span><span class="t">Transactional</span><span class="i">Inferred</span></div>
+          </div>
+          <div class="card">
+            <div class="model-tabs">
+              <button class="active" onclick="switchModelTab('u360','snapshot',this)">Snapshot</button>
+              <button onclick="switchModelTab('u360','timeline',this)">Timeline</button>
+              <button onclick="switchModelTab('u360','features',this)">Feature Ledger</button>
+              <button onclick="switchModelTab('u360','decisions',this)">Decision Trace</button>
+              <button onclick="switchModelTab('u360','permissions',this)">Permissions</button>
+            </div>
+
+            <div class="model-panel active" data-model="u360" data-panel="snapshot">
+              <div class="mini-grid">
+                <div class="mini"><b>28</b><span>30D Sessions</span></div><div class="mini"><b>184</b><span>Deep Views</span></div>
+                <div class="mini"><b>31</b><span>Saves</span></div><div class="mini"><b>12</b><span>Market Searches</span></div>
+              </div>
+              <div style="height:10px"></div>
+              <div class="chips"><span class="chip hot">Travel .91</span><span class="chip hot">Coffee .84</span><span class="chip">Photography .78</span><span class="chip neg">High-frequency ads -.87</span></div>
+              <div style="height:10px"></div>
+              <div class="score-list">
+                <div class="score-row"><div><div class="name">Current Intent · Weekend companion</div><div class="sub">Hanoi → Ninh Binh · next 7d · TTL 5d</div></div><div class="score">0.89</div></div>
+                <div class="score-row"><div><div class="name">Market History</div><div class="sub">12 Need · 8 Match · 6 Fulfilled · 1 Cancelled</div></div><div class="score">96%</div></div>
+              </div>
+            </div>
+
+            <div class="model-panel" data-model="u360" data-panel="timeline">
+              <div class="timeline2"><div class="tdate">Aug 26 · 10:12</div><div class="tbody"><div class="t">Coupon redeemed · Coffee</div><div class="d">Transactional fact · Hanoi 2.1km · increases local_coffee_intent and merchant affinity.</div></div></div>
+              <div class="timeline2"><div class="tdate">Aug 26 · 09:54</div><div class="tbody"><div class="t">Saved Ninh Binh travel post</div><div class="d">Observed strong positive · 4th related save within 9 days.</div></div></div>
+              <div class="timeline2"><div class="tdate">Aug 25 · 21:11</div><div class="tbody"><div class="t">Intent qualified · Weekend companion</div><div class="d">Confidence .89 after post semantics + search + repeated saves.</div></div></div>
+              <div class="timeline2"><div class="tdate">Aug 23 · 19:20</div><div class="tbody"><div class="t">SPA promotion hidden</div><div class="d">Strong negative · high-frequency promotion dislike raised .74 → .87.</div></div></div>
+              <div class="timeline2"><div class="tdate">Aug 17</div><div class="tbody"><div class="t">Companion fulfillment completed</div><div class="d">Transactional · completion + trust + relationship edge updated.</div></div></div>
+            </div>
+
+            <div class="model-panel" data-model="u360" data-panel="features">
+              <div class="table-wrap" style="border:0;border-radius:0"><table class="ledger" style="min-width:760px">
+                <thead><tr><th>Feature</th><th>Current</th><th>30D Δ</th><th>Confidence</th><th>Primary Evidence</th><th>Freshness</th><th>Model</th></tr></thead>
+                <tbody>
+                  <tr><td>travel_interest</td><td class="numc">0.91</td><td class="numc">+0.14</td><td class="numc">0.94</td><td>6 saves · 3 searches · 1 fulfillment</td><td>18m</td><td>interest_v7.4</td></tr>
+                  <tr><td>coffee_interest</td><td class="numc">0.84</td><td class="numc">+0.08</td><td class="numc">0.91</td><td>redeem + repeat visits + dwell</td><td>6m</td><td>interest_v7.4</td></tr>
+                  <tr><td>weekend_companion_intent</td><td class="numc">0.89</td><td class="numc">+0.51</td><td class="numc">0.90</td><td>post + search + related saves</td><td>51m</td><td>intent_v5.2</td></tr>
+                  <tr><td>high_freq_promo_dislike</td><td class="numc">0.87</td><td class="numc">+0.13</td><td class="numc">0.93</td><td>hide ×2 + quick_skip ×11</td><td>13h</td><td>negative_pref_v3</td></tr>
+                </tbody>
+              </table></div>
+            </div>
+
+            <div class="model-panel" data-model="u360" data-panel="decisions">
+              <div class="decision"><div class="head2"><b>dec_82A1 · Match Candidate A · INCLUDED</b><span class="badge good">ACTIVE_ORCH · .92</span></div><div class="why">Evidence PASS · Resource PASS · Gain .84 · Anger .08 · contamination .06 · Time overlap 1.0 · same destination .98 · trust .94 · relation distance 2-hop · similar travel pace .83 · privacy eligibility passed.</div></div>
+              <div class="decision"><div class="head2"><b>Match Candidate B · INCLUDED</b><span class="badge good">score .88</span></div><div class="why">High compatibility and strong reliability; slightly farther pickup point but within acceptable travel-time budget.</div></div>
+              <div class="decision"><div class="head2"><b>Match Candidate C · FALLBACK</b><span class="badge warn">score .79</span></div><div class="why">Time window partially overlaps. Kept as fallback instead of primary group member.</div></div>
+              <div class="decision"><div class="head2"><b>dec_82C7 · Merchant Offer M-284 · BLOCKED</b><span class="badge bad">Human Value / frequency</span></div><div class="why">Anger risk .61 · promo fatigue .87 · intervention budget low · Category interest moderate, but user recently produced strong negative signals to repeated SPA promotions. Frequency-control policy overrides predicted CTR.</div></div>
+            </div>
+
+            <div class="model-panel" data-model="u360" data-panel="permissions">
+              <div class="policy-grid">
+                <div class="pcell h">Feature / Data</div><div class="pcell h">Internal Analytics</div><div class="pcell h">Matching</div><div class="pcell h">Merchant Target</div><div class="pcell h">Public</div>
+                <div class="pcell k">gender_declared</div><div class="pcell">✓</div><div class="pcell">User-controlled</div><div class="pcell">Restricted</div><div class="pcell">✕</div>
+                <div class="pcell k">travel_interest</div><div class="pcell">✓</div><div class="pcell">✓</div><div class="pcell">Aggregate / policy</div><div class="pcell">✕</div>
+                <div class="pcell k">transaction_history</div><div class="pcell">✓</div><div class="pcell">Contextual</div><div class="pcell">✕ raw data</div><div class="pcell">✕</div>
+                <div class="pcell k">public_social_link</div><div class="pcell">✓</div><div class="pcell">✓</div><div class="pcell">User-opened</div><div class="pcell">User-opened</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="notice" style="margin-top:12px"><b>Access policy:</b> User 360 必须高权限 + 审计。这里可以查看详细建模证据，但任何单用户敏感/推断画像都不能直接变成商家的“客户数据库”。</div>
+      </section>
+
+
+
+      <section class="page" id="engine">
+        <div class="section-title"><h2>Decision Intelligence Engine</h2><span>Proxy 后台的数据、建模、撮合已经统一进入这一条在线决策主链</span></div>
+        <div class="engine-hero">
+          <h2>一个 Decision API，连接整个 Proxy</h2>
+          <p>Feed、Market、同行、Creator、优惠券、商家投放不分别实现自己的推荐逻辑。Proxy Backend 调用统一 Decision API；引擎内部读取本 Console 里的 Feature / Tag / Graph / Intent / Trust / Merchant / Outcome，并执行实时推演与防护。</p>
+          <div class="engine-flow">
+            <div class="engine-node"><div class="k">SURFACE</div><div class="v">Proxy</div><div class="d">Feed / Market / Merchant / Companion</div></div>
+            <div class="engine-node"><div class="k">API</div><div class="v">Decision</div><div class="d">/v1/decisions/evaluate</div></div>
+            <div class="engine-node"><div class="k">STATE</div><div class="v">Feature + Tags</div><div class="d">Graph + recent events</div></div><div class="engine-node"><div class="k">FIELD</div><div class="v">Context Snapshot</div><div class="d">user + world + market</div></div>
+            <div class="engine-node"><div class="k">FORECAST</div><div class="v">Gravity + Intent</div><div class="d">future pull + current desire</div></div>
+            <div class="engine-node"><div class="k">EVIDENCE</div><div class="v">Trust Gate</div><div class="d">coverage / contamination / cooldown</div></div>
+            <div class="engine-node"><div class="k">VALUE</div><div class="v">Human Guard</div><div class="d">resource / gain / anger / budget</div></div>
+            <div class="engine-node"><div class="k">DECIDE</div><div class="v">Match / Rank</div><div class="d">eligibility / retrieval / ranking</div></div>
+            <div class="engine-node"><div class="k">ACT</div><div class="v">Orchestrate</div><div class="d">plan / fulfill / learn</div></div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Engine Governance</h2><span>让引擎可以持续演化，而不是两年后变成规则和状态垃圾场</span></div>
+        <div class="governance-banner"><b>4 个横向治理器</b><div>State Budget & Lifecycle Manager 控制状态膨胀；Policy Resolver 解决规则语义冲突；Feature Registry + Parity Guard 防止 Online/Offline 定义漂移；Tag Utility Manager 用真实下游价值决定标签保留、降级与归档。</div></div>
+
+        
+        <div class="section-title"><h2>v8.2 Runtime Contract</h2><span>Context Field 与 Surface Plan 已进入正式主链</span></div>
+        <div class="trace-v6">
+          <div class="step"><div class="k">01</div><div class="v">State Resolver</div><div class="d">Cold / Warm → Hot working set</div></div>
+          <div class="step"><div class="k">02</div><div class="v">ContextSnapshot</div><div class="d">User + World + Market</div></div>
+          <div class="step"><div class="k">03</div><div class="v">Gravity / Intent</div><div class="d">需求逼近 + 当前需求</div></div>
+          <div class="step"><div class="k">04</div><div class="v">Evidence</div><div class="d">coverage / contamination / lineage</div></div>
+          <div class="step"><div class="k">05</div><div class="v">Human Value</div><div class="d">Resource + Gain + Anger</div></div>
+          <div class="step"><div class="k">06</div><div class="v">Policy Resolver</div><div class="d">语义优先级 / hard block</div></div>
+          <div class="step"><div class="k">07</div><div class="v">Decision</div><div class="d">candidate / surface / orchestration plan</div></div>
+          <div class="step"><div class="k">08</div><div class="v">Outcome</div><div class="d">exposure → commit → fulfillment</div></div>
+        </div>
+
+        <div class="section-title"><h2>v9 Market Execution Chain</h2><span>从“理解需求”继续走到“形成供给、执行、归因”</span></div>
+        <div class="trace-v6">
+          <div class="step"><div class="k">01</div><div class="v">Gravity / Intent</div><div class="d">需求正在逼近 / 当前任务</div></div>
+          <div class="step"><div class="k">02</div><div class="v">Evidence</div><div class="d">可信度 / coverage / contamination</div></div>
+          <div class="step"><div class="k">03</div><div class="v">Clarification</div><div class="d">只补齐已存在 Intent 的关键缺口</div></div>
+          <div class="step"><div class="k">04</div><div class="v">Human Value</div><div class="d">Resource / Gain / Anger</div></div>
+          <div class="step"><div class="k">05</div><div class="v">Supply Health</div><div class="d">coverage / elasticity / latent supply</div></div>
+          <div class="step"><div class="k">06</div><div class="v">Activate / Alternative</div><div class="d">形成供给或挽救 Intent</div></div>
+          <div class="step"><div class="k">07</div><div class="v">Sync / Async OR</div><div class="d">按复杂度选择执行平面</div></div>
+          <div class="step"><div class="k">08</div><div class="v">Fulfillment</div><div class="d">Commit → real-world completion</div></div>
+          <div class="step"><div class="k">09</div><div class="v">Attribution</div><div class="d">知道失败到底发生在哪里</div></div>
+        </div>
+
+        <div class="section-title"><h2>Execution Health</h2><span>当前示例基线</span></div>
+        <div class="exec-grid">
+          <div class="exec-kpi"><div class="k">Supply Coverage</div><div class="v">84.7%</div><div class="d">高频 Intent eligible supply coverage</div></div>
+          <div class="exec-kpi"><div class="k">Alternative Salvage</div><div class="v">18.3%</div><div class="d">原始供给不足后被替代方案救回</div></div>
+          <div class="exec-kpi"><div class="k">Commit → Fulfill</div><div class="v">60.6%</div><div class="d">目标通过归因和供给治理继续提升</div></div>
+          <div class="exec-kpi"><div class="k">Async OR p95</div><div class="v">620ms</div><div class="d">复杂组局 / 路线 / capacity plan</div></div>
+        </div>
+
+        <div class="section-title"><h2>Market Execution Metrics</h2><span>引擎健康不能只看 CTR / QPS</span></div>
+        <div class="metric-groups">
+          <div class="metric-group"><h3>Engine Health</h3><div class="mrow"><span>Decision p99</span><b>82ms</b></div><div class="mrow"><span>Solver fallback</span><b>0.38%</b></div><div class="mrow"><span>Feature freshness</span><b>97.1%</b></div></div>
+          <div class="metric-group"><h3>Market Health</h3><div class="mrow"><span>Supply coverage</span><b>84.7%</b></div><div class="mrow"><span>Activation response</span><b>26.4%</b></div><div class="mrow"><span>Alternative salvage</span><b>18.3%</b></div></div>
+          <div class="metric-group"><h3>Fulfillment Health</h3><div class="mrow"><span>Commit → Fulfill</span><b>60.6%</b></div><div class="mrow"><span>Attribution coverage</span><b>92.8%</b></div><div class="mrow"><span>Repeat fulfill</span><b>31.4%</b></div></div>
+          <div class="metric-group"><h3>Human Value Health</h3><div class="mrow"><span>Anger block</span><b>4.2%</b></div><div class="mrow"><span>Post-exposure hide</span><b>1.8%</b></div><div class="mrow"><span>Clarify abandonment</span><b>3.1%</b></div></div>
+        </div>
+<div class="section-title"><h2>Runtime Health</h2><span>在线决策系统运行状态</span></div>
+        <div class="engine-status">
+          <div class="engine-mini"><div class="k">Requests / sec</div><div class="v">214</div><div class="d">decision evaluate</div></div>
+          <div class="engine-mini"><div class="k">p50</div><div class="v">31ms</div><div class="d">decision latency</div></div>
+          <div class="engine-mini"><div class="k">p99</div><div class="v">82ms</div><div class="d">target &lt;150ms</div></div>
+          <div class="engine-mini"><div class="k">Feature freshness</div><div class="v">97.1%</div><div class="d">&lt;5m critical features</div></div>
+          <div class="engine-mini"><div class="k">Outcome join</div><div class="v">98.6%</div><div class="d">decision → outcome</div></div>
+          <div class="engine-mini"><div class="k">Lineage</div><div class="v">99.92%</div><div class="d">exposure attribution</div></div>
+        </div>
+
+        <div class="section-title"><h2>这个后台各模块如何进入 Engine</h2><span>不再是孤立 Dashboard</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Console Module</th><th>Engine Role</th><th>Runtime Object</th><th>Read / Write</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr><td>行为与兴趣</td><td>长期/中期状态输入</td><td>FeatureValue / embedding</td><td>Read</td><td>coffee_interest=.82</td></tr>
+            <tr><td>标签中心</td><td>可解释、可过滤状态</td><td>UserTag</td><td>Read</td><td>宁平保存≥3 / 7d</td></tr>
+            <tr><td>意图与撮合</td><td>当前 Intent / lifecycle</td><td>UserEventState</td><td>Read + Update</td><td>weekend_companion=.91</td></tr>
+            <tr><td>编排与调度</td><td>强决策执行器</td><td>OrchestrationPlan</td><td>Write</td><td>3人组局 + fallback</td></tr>
+            <tr><td>Clarification Gate</td><td>补齐已存在任务缺失字段</td><td>ClarificationPlan</td><td>Read + Write</td><td>“周六上午还是下午？”</td></tr>
+            <tr><td>Supply Activation</td><td>长尾供给激活 / alternative</td><td>SupplyPlan</td><td>Read + Write</td><td>中越翻译 0.45× coverage</td></tr>
+            <tr><td>Fulfillment Attribution</td><td>失败归因与模型路由</td><td>AttributionRecord</td><td>Write-back</td><td>provider_timeout → supply reliability</td></tr>
+            <tr><td>商家与投放</td><td>候选供给 / campaign constraints</td><td>Merchant / Offer</td><td>Read</td><td>coupon / creator campaign</td></tr>
+            <tr><td>信任与风险</td><td>Eligibility / safety gate</td><td>TrustState</td><td>Read</td><td>no-show / dispute / permission</td></tr>
+            <tr><td>留存与复购</td><td>Outcome / reward</td><td>OutcomeRecord</td><td>Write-back</td><td>repeat fulfillment</td></tr>
+            <tr><td>数据治理</td><td>Lineage / allowed_use</td><td>Evidence metadata</td><td>Read / Audit</td><td>organic vs system_exposed</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section class="page" id="engineapi">
+        <div class="section-title"><h2>Engine API / Runtime</h2><span>业务只依赖稳定 Public Contract；内部算法服务可以独立演进</span></div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Public API</h3>
+            <div class="endpoint"><span class="method">POST</span><span class="path">/v1/decisions/evaluate</span><span>统一在线决策入口</span><span class="badge good">SYNC</span></div>
+            <div class="endpoint"><span class="method async">POST</span><span class="path">/v1/events</span><span>行为 / 交易事件回流</span><span class="badge purple">ASYNC</span></div>
+            <div class="endpoint"><span class="method async">POST</span><span class="path">/v1/decisions/{id}/exposures</span><span>记录系统曝光 lineage</span><span class="badge purple">ASYNC</span></div>
+            <div class="endpoint"><span class="method async">POST</span><span class="path">/v1/decisions/{id}/outcomes</span><span>Commit / Fulfillment / Cancel / Repeat</span><span class="badge purple">ASYNC</span></div>
+            <div class="endpoint"><span class="method">POST</span><span class="path">/v1/decisions/{id}/clarifications</span><span>提交当前任务的澄清答案</span><span class="badge good">SYNC</span></div>
+            <div class="endpoint"><span class="method read">GET</span><span class="path">/v1/orchestration/jobs/{id}</span><span>查询复杂异步编排结果</span><span class="badge blue">READ</span></div>
+          </div>
+          <div class="card">
+            <h3>Internal Services</h3>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/context/resolve</span><span>实时场景解析</span><span>≤8ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/state/resolve</span><span>Hot working set 选择</span><span>≤10ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/gravity/evaluate</span><span>Gravity / hazard</span><span>≤12ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/evidence/evaluate</span><span>Evidence Gate</span><span>≤8ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/human-value/evaluate</span><span>Gain / Anger Guardrail</span><span>≤10ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/policy/resolve</span><span>跨 Domain 冲突解析</span><span>≤5ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/clarification/evaluate</span><span>判断是否允许澄清</span><span>≤5ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/supply/coverage</span><span>供给健康 / latent supply</span><span>≤8ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/supply/activate</span><span>激活供给计划</span><span>async</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/alternatives/resolve</span><span>候补 / AI / hybrid fallback</span><span>≤12ms</span></div>
+            <div class="endpoint"><span class="method read">POST</span><span class="path">/internal/fulfillment/attribute</span><span>履约失败归因</span><span>async</span></div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>API Contract</h2><span>客户端只能执行 state，不能自行升级干预等级</span></div>
+        <div class="api-grid">
+          <div class="api-box">
+            <h3>Request</h3>
+            <div class="api-code">POST /v1/decisions/evaluate
+
+{
+  "request_id": "req_01J...",
+  "user_id": "PX-102839",
+  "surface": "market_feed",
+  "decision_type": "recommend",
+
+  "context": {
+    "timestamp": "2026-08-26T11:55:00+07:00",
+    "city": "hanoi",
+    "geo_h3": "884...",
+    "session_id": "sess_...",
+    "context_snapshot_id": "ctx_20260826_1155"
+  },
+
+  "event_hint": {
+    "event_type": "MEAL"
+  },
+
+  "constraints": {
+    "max_distance_m": 2500,
+    "time_budget_min": 45
+  },
+
+  "execution": {
+    "mode": "online",
+    "trace_level": "summary"
+  }
+}</div>
+          </div>
+          <div class="api-box">
+            <h3>Response</h3>
+            <div class="api-code">{
+  "decision_id": "dec_82A1",
+  "state": "SOFT_NUDGE",
+
+  "action": {
+    "type": "SHOW_MARKET_CARD",
+    "delivery": "in_surface"
+  },
+
+  "event_state": {
+    "event_type": "MEAL",
+    "gravity_probability": 0.91,
+    "intent_score": 0.73
+  },
+
+  "guardrails": {
+    "evidence": "PASS",
+    "resource": "PASS",
+    "human_value": "PASS"
+  },
+
+  "runtime": {
+    "hot_state_count": 31,
+    "policy_resolution": "PASS",
+    "feature_parity_version": "2026.08.26"
+  },
+
+  "candidates": [...],
+
+  "execution": {
+    "mode": "SYNC",
+    "latency_budget_ms": 120,
+    "orchestration_job_id": null
+  },
+
+  "fallback_plan": null,
+
+  "surface_plan": {
+    "surface": "market_feed",
+    "modules": [
+      {"id":"nearby_meal","priority":1,"mode":"hero"},
+      {"id":"fast_delivery","priority":2,"mode":"compact"},
+      {"id":"coupon_wallet","priority":3,"mode":"compact"}
+    ]
+  },
+
+  "expires_at": "2026-08-26T12:05:00+07:00",
+  "trace_id": "trace_82A1"
+}</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Runtime API Lab</h2><span>静态原型里模拟一次 Engine 调用</span></div>
+        <div class="api-lab">
+          <div class="controls2">
+            <div class="ctrl2"><label>Surface</label><select id="labSurface"><option>market_feed</option><option>home_feed</option><option>companion</option><option>merchant_offer</option></select></div>
+            <div class="ctrl2"><label>Event</label><select id="labEvent"><option>MEAL</option><option>WEEKEND_TRIP</option><option>COFFEE</option><option>CREATOR_COOP</option></select></div>
+            <div class="ctrl2"><label>Probability</label><input id="labProb" type="number" min="0" max="1" step=".01" value=".91"></div>
+            <div class="ctrl2"><label>Coverage</label><input id="labCoverage" type="number" min="0" max="1" step=".01" value=".94"></div>
+            <div class="ctrl2"><label>Contamination</label><input id="labContam" type="number" min="0" max="1" step=".01" value=".08"></div>
+            <div class="ctrl2"><label>Gain</label><input id="labGain" type="number" min="0" max="1" step=".01" value=".78"></div>
+            <div class="ctrl2"><label>Anger</label><input id="labAnger" type="number" min="0" max="1" step=".01" value=".18"></div>
+            <button class="api-run" onclick="runEngineLab()">模拟 POST /v1/decisions/evaluate</button>
+          </div>
+          <div class="response-box">
+            <div style="font-size:8px;color:#88818d;font-weight:850">ENGINE RESPONSE</div>
+            <div class="status" id="labState">SOFT_NUDGE</div>
+            <div class="meta" id="labMeta">decision_id dec_sim_001 · trace_id trace_sim_001</div>
+            <pre id="labResponse"></pre>
+          </div>
+        </div>
+      </section>
+
+
+      <section class="page" id="engstate">
+        <div class="section-title"><h2>State Budget & Lifecycle Manager</h2><span>Tag 类型可以很多；Online Working Set 必须严格受预算控制</span></div>
+        <div class="tier-grid">
+          <div class="tier hot"><div class="tk">HOT · Online Decision</div><div class="tv">24–80 / user</div><div class="td">只保存当前 Event / Context 相关的决策状态。进入 Decision API 的低延迟 working set。</div><div class="budget"><span>Target read</span><b>&lt;10ms</b></div></div>
+          <div class="tier warm"><div class="tk">WARM · Active State</div><div class="tv">80–300 / user</div><div class="td">当前仍有效的标签、近线特征、关系与 Intent。按 TTL / decay 管理，可随场景被提升到 Hot。</div><div class="budget"><span>Refresh</span><b>sec–min</b></div></div>
+          <div class="tier cold"><div class="tk">COLD · Historical</div><div class="tv">1K+ / user</div><div class="td">历史 Tag、过期状态、完整事件与长期序列。保留用于训练、Replay、审计，不进入在线主链。</div><div class="budget"><span>Retention</span><b>months+</b></div></div>
+        </div>
+
+        <div class="section-title"><h2>当前 State Budget</h2><span>真正需要控制的是 User×State 实例、更新频率和读取集合，而不是 Tag Definition 数量</span></div>
+        <div class="slo-grid">
+          <div class="slo"><div class="k">Active Tag Definitions</div><div class="v">38.6K</div><div class="d">namespace</div></div>
+          <div class="slo"><div class="k">Median Warm / User</div><div class="v">176</div><div class="d">active state</div></div>
+          <div class="slo"><div class="k">Median Hot / Decision</div><div class="v">31</div><div class="d">resolved read set</div></div>
+          <div class="slo"><div class="k">State Read p99</div><div class="v">7.8ms</div><div class="d">target &lt;10ms</div></div>
+          <div class="slo"><div class="k">TTL Write Amplification</div><div class="v">1.18×</div><div class="d">lazy-expire + sweeper</div></div>
+        </div>
+
+        <div class="section-title"><h2>TTL / Decay Execution</h2><span>不为每一个 UserTag 创建独立 timer</span></div>
+        <div class="lifecycle-bar">
+          <div class="life2"><div class="k">CREATE</div><div class="v">Tag / Feature</div><div class="d">写 last_seen / expires_at / source</div></div>
+          <div class="life2"><div class="k">ACTIVE</div><div class="v">Warm</div><div class="d">近线更新，按证据重新计算</div></div>
+          <div class="life2"><div class="k">PROMOTE</div><div class="v">Hot</div><div class="d">当前 Event Resolver 选择相关状态</div></div>
+          <div class="life2"><div class="k">LAZY EXPIRE</div><div class="v">Read-time</div><div class="d">now &gt; expires_at 即视为 inactive</div></div>
+          <div class="life2"><div class="k">SWEEP</div><div class="v">Bucket cleanup</div><div class="d">小时/日 bucket 后台回收</div></div>
+          <div class="life2"><div class="k">ARCHIVE</div><div class="v">Cold</div><div class="d">保留 history，不占在线 working set</div></div>
+        </div>
+
+        <div class="section-title"><h2>Context State Resolver</h2><span>Decision API 不读取用户全部状态</span></div>
+        <div class="api-grid">
+          <div class="api-box"><h3>Request Context</h3><div class="api-code">event_type: MEAL
+surface: market_feed
+city: hanoi
+local_time: 11:55
+geo_h3: office_cluster
+
+resolver namespaces:
+  - food/*
+  - workday_lunch/*
+  - local_distance/*
+  - price_envelope/*
+  - negative_food/*
+  - intervention/*
+  - merchant_affinity/*</div></div>
+          <div class="api-box"><h3>Resolved Hot Set</h3><div class="api-code">31 states loaded
+
+meal_rhythm_p60=.91
+lunch_price_p50=52K
+lunch_price_p75=68K
+distance_p75=2.5km
+food_promo_fatigue=.12
+sushi_affinity=.76
+merchant_repeat_affinity=...
+intervention_budget=2
+...
+
+239 warm states NOT loaded</div></div>
+        </div>
+      </section>
+
+      <section class="page" id="policyresolver">
+        <div class="section-title"><h2>Policy Conflict Resolver</h2><span>不要用一个 priority=999 的数字表解决所有冲突</span></div>
+        <div class="domain-stack">
+          <div class="domain"><div class="n">1</div><div class="name">Safety / Legal / Privacy</div><div class="desc">法规、用户隐私、安全、账户权限。</div><div class="mode">HARD BLOCK</div></div>
+          <div class="domain"><div class="n">2</div><div class="name">Explicit User Negative</div><div class="desc">Not interested / Hide / Block / explicit opt-out。</div><div class="mode">OVERRIDE</div></div>
+          <div class="domain"><div class="n">3</div><div class="name">Hard Resource Constraint</div><div class="desc">时间、距离、营业、库存、容量、预算硬边界。</div><div class="mode">ELIGIBILITY</div></div>
+          <div class="domain"><div class="n">4</div><div class="name">Intervention / Frequency Budget</div><div class="desc">主动干预预算、Cooldown、频次上限。</div><div class="mode">ACTION CAP</div></div>
+          <div class="domain"><div class="n">5</div><div class="name">Evidence Gate</div><div class="desc">Confidence / Coverage / contamination / source diversity。</div><div class="mode">TRUST GATE</div></div>
+          <div class="domain"><div class="n">6</div><div class="name">Human Value</div><div class="desc">Gain / Anger / privacy creep / manipulation feeling。</div><div class="mode">VALUE GATE</div></div>
+          <div class="domain"><div class="n">7</div><div class="name">Business Eligibility</div><div class="desc">Campaign / merchant / supply / scenario rules。</div><div class="mode">FILTER</div></div>
+          <div class="domain"><div class="n">8</div><div class="name">Ranking Preference</div><div class="desc">Interest、距离、价格、信任、embedding、graph。</div><div class="mode">SCORE</div></div>
+          <div class="domain"><div class="n">9</div><div class="name">Commercial Objective</div><div class="desc">GMV、库存、商家目标只能在前面全部通过后参与。</div><div class="mode">LAST</div></div>
+        </div>
+
+        <div class="section-title"><h2>Rule 输出契约</h2><span>Rule 不允许直接 PUSH / BOOK / MATCH；只能产生 Signal / Constraint / Penalty / Eligibility</span></div>
+        <div class="resolve-grid">
+          <div class="resolve-case"><h3>错误模式</h3><div class="api-code">if coffee_interest &gt; .80:
+    PUSH(coffee_offer)
+
+if merchant_bid &gt; threshold:
+    SHOW_TOP_1()
+
+# 业务逻辑散落，无法审计 / 冲突 / 回滚</div></div>
+          <div class="resolve-case"><h3>正确模式</h3><div class="api-code">rule coffee_affinity:
+  emit signal +0.18
+
+rule promo_fatigue:
+  emit penalty -0.31
+
+rule user_blocked_merchant:
+  emit constraint HARD_BLOCK
+
+Decision Engine:
+  resolve(policy_domains)
+  → final action</div></div>
+        </div>
+
+        <div class="section-title"><h2>Context Specificity Resolver</h2><span>同一 Domain 内再按具体程度、证据权威和新鲜度解决冲突</span></div>
+        <div class="resolve-case">
+          <div class="line"><span><b>coffee_interest=.86</b><br><span style="color:var(--muted)">general · 30d</span></span><span>长期喜欢咖啡</span><span class="winner">LOSE</span></div>
+          <div class="line"><span><b>weekday_morning_coffee_low=.81</b><br><span style="color:var(--muted)">specific · 14d</span></span><span>Tuesday 09:00 场景更具体</span><span class="winner">WIN</span></div>
+          <div class="line"><span><b>not_interested:coffee_promo</b><br><span style="color:var(--muted)">explicit · fresh</span></span><span>显式负反馈直接覆盖弱正向推断</span><span class="winner">OVERRIDE</span></div>
+        </div>
+      </section>
+
+      <section class="page" id="featureparity">
+        <div class="section-title"><h2>Feature Registry / DSL Boundary</h2><span>DSL 负责组合，算法负责计算</span></div>
+        <div class="plane-grid">
+          <div class="plane"><h3>OFFLINE</h3><div class="sla">minutes → hours</div><div class="item"><b>Model Training</b><div>CatBoost / Two-Tower / sequence / survival</div></div><div class="item"><b>Graph / Embedding</b><div>long history / GNN / vector learning</div></div><div class="item"><b>Long Window</b><div>90d / 180d statistics / replay</div></div></div>
+          <div class="plane"><h3>NEARLINE</h3><div class="sla">seconds → minutes</div><div class="item"><b>Tag Generation</b><div>rules / TTL / decay / conflict state</div></div><div class="item"><b>User State</b><div>session / relationship / market updates</div></div><div class="item"><b>Event Aggregation</b><div>7d / 30d rolling features</div></div></div>
+          <div class="plane"><h3>ONLINE</h3><div class="sla">single-digit → tens ms</div><div class="item"><b>Context Resolve</b><div>Hot state / current geo / time</div></div><div class="item"><b>Policy DSL</b><div>compose features + constraints</div></div><div class="item"><b>Decision</b><div>guard / eligibility / rank / action</div></div></div>
+        </div>
+
+        <div class="section-title"><h2>DSL Capability Boundary</h2><span>避免把模型、图计算、优化器重新塞回规则语言</span></div>
+        <div class="dsl-split">
+          <div class="dsl-col"><h3>DSL 可以做</h3><span class="dsl-chip">AND / OR / NOT</span><span class="dsl-chip">&gt; / &lt; / =</span><span class="dsl-chip">COUNT / SUM / AVG</span><span class="dsl-chip">WINDOW 7d / 30d</span><span class="dsl-chip">RECENCY</span><span class="dsl-chip">WITHIN_RADIUS</span><span class="dsl-chip">SOURCE</span><span class="dsl-chip">CONFIDENCE</span><div class="api-code" style="margin-top:5px">COUNT(save
+  WHERE destination="ninh_binh"
+  WINDOW 7d) &gt;= 3
+
+AND meal_hazard_60m &gt; .85
+AND anger_risk &lt; .25</div></div>
+          <div class="dsl-col"><h3>DSL 不做</h3><span class="dsl-chip no">Train Transformer</span><span class="dsl-chip no">Run GNN</span><span class="dsl-chip no">Build Embedding</span><span class="dsl-chip no">ANN Search</span><span class="dsl-chip no">CP-SAT</span><span class="dsl-chip no">Hawkes Fitting</span><div class="notice" style="margin-top:7px"><b>Rule:</b> 算法先计算并注册成 Feature / Score，例如 <code>meal_hazard_60m=.91</code>、<code>graph_trust_affinity=.82</code>；DSL 只引用这些结果完成组合。</div></div>
+        </div>
+
+        <div class="section-title"><h2>Online / Offline Semantic Parity</h2><span>同名 Feature 不能在线和离线各算一套语义</span></div>
+        <div class="card">
+          <div class="parity"><span><b>coffee_search_7d:v4</b></span><span>rolling 168h · event-time</span><b>Offline 6</b><b>Online 6</b><b class="ok">MATCH</b></div>
+          <div class="parity"><span><b>weekend_session_ratio:v3</b></span><span>Fri/Sat 18–22 · last 28d</span><b>.67</b><b>.66</b><b class="ok">PASS</b></div>
+          <div class="parity"><span><b>merchant_repeat_30d:v2</b></span><span>fulfilled tx only · rolling 720h</span><b>3</b><b>4</b><b class="bad2">DRIFT</b></div>
+        </div>
+        <div class="engine-inline" style="margin-top:9px"><b>Version Rule：</b> Feature definition、window、event-time semantics、source 或 null handling 任一变化，都必须升版本；禁止偷偷覆盖同名 Feature。</div>
+      </section>
+
+      <section class="page" id="tagutility">
+        <div class="section-title"><h2>Tag Utility / Economics Manager</h2><span>允许标签很多，但每个标签必须证明自己值得占用状态、计算和认知成本</span></div>
+        <div class="slo-grid">
+          <div class="slo"><div class="k">Active Tags</div><div class="v">38,642</div><div class="d">definitions</div></div>
+          <div class="slo"><div class="k">Used by Decision / 30D</div><div class="v">61%</div><div class="d">direct or derived</div></div>
+          <div class="slo"><div class="k">Archive Candidates</div><div class="v">4,218</div><div class="d">low utility</div></div>
+          <div class="slo"><div class="k">High-Value Niche</div><div class="v">1,947</div><div class="d">small coverage, high lift</div></div>
+          <div class="slo"><div class="k">Redundant Clusters</div><div class="v">682</div><div class="d">candidate merge review</div></div>
+        </div>
+
+        <div class="section-title"><h2>Utility Scorecard</h2><span>少众不等于低价值；大覆盖也不等于值得保留</span></div>
+        <div class="card">
+          <div class="utility-score"><div><div class="u-name">Tag</div></div><b>Coverage</b><b>Decision Use</b><b>Unique Info</b><b>Fulfill Lift</b><b>Cost</b><b>Last Used</b><b>Status</b></div>
+          <div class="utility-score"><div><div class="u-name">凌晨出发接受</div><div class="sub">travel / companion</div></div><b>3.2K</b><b>18.7K</b><b>.91</b><b>2.70×</b><b>Low</b><b>3m</b><span class="badge good">KEEP</span></div>
+          <div class="utility-score"><div><div class="u-name">周末喜欢外出</div><div class="sub">broad behavioral tag</div></div><b>82K</b><b>4</b><b>.03</b><b>1.00×</b><b>1.2GB</b><b>38d</b><span class="badge bad">ARCHIVE</span></div>
+          <div class="utility-score"><div><div class="u-name">最近7天保存宁平≥3</div><div class="sub">short-term intent evidence</div></div><b>9.8K</b><b>41K</b><b>.78</b><b>1.92×</b><b>Med</b><b>18m</b><span class="badge good">KEEP</span></div>
+          <div class="utility-score"><div><div class="u-name">城市短途旅游偏好</div><div class="sub">possible overlap cluster</div></div><b>31K</b><b>6.2K</b><b>.21</b><b>1.08×</b><b>Med</b><b>6d</b><span class="badge warn">REVIEW</span></div>
+        </div>
+
+        <div class="section-title"><h2>Tag Lifecycle Policy</h2><span>不因为“太多”就抽象掉；也不因为“细”就永久保留</span></div>
+        <div class="trace-v6">
+          <div class="step"><div class="k">CREATE</div><div class="v">Concrete Fact</div><div class="d">贴近行为 / 场景 / transaction</div></div>
+          <div class="step"><div class="k">OBSERVE</div><div class="v">Sample</div><div class="d">hit users / stability / conflict</div></div>
+          <div class="step"><div class="k">USE</div><div class="v">Decision</div><div class="d">measure query frequency / lift</div></div>
+          <div class="step"><div class="k">COMPARE</div><div class="v">Redundancy</div><div class="d">co-occurrence / information gain</div></div>
+          <div class="step"><div class="k">DECIDE</div><div class="v">Keep / Merge</div><div class="d">data decides, not taxonomy preference</div></div>
+          <div class="step"><div class="k">ARCHIVE</div><div class="v">Cold</div><div class="d">stop online state, retain history</div></div>
+        </div>
+      </section>
+
+      <section class="page" id="enginepolicy">
+        <div class="section-title"><h2>Decision Policy & Guardrails</h2><span>Threshold 不写死在业务代码；Control Plane 统一配置、版本和回滚</span></div>
+
+        <div class="state-strip">
+          <div class="state-card"><div class="s">OBSERVE</div><div class="d">收集证据，不影响线上</div></div>
+          <div class="state-card"><div class="s">LEARN_ONLY</div><div class="d">允许训练，不允许强决策</div></div>
+          <div class="state-card"><div class="s">PASSIVE</div><div class="d">用户主动请求时参与 Rank</div></div>
+          <div class="state-card hot"><div class="s">SOFT_NUDGE</div><div class="d">低打扰，在当前 surface 自然呈现</div></div>
+          <div class="state-card"><div class="s">ACTIVE_ORCHESTRATE</div><div class="d">主动邀请 / Push / 组局</div></div>
+          <div class="state-card block"><div class="s">BLOCKED</div><div class="d">Guardrail 一票否决</div></div>
+        </div>
+
+        <div class="section-title"><h2>当前 Food / Local Policy</h2><span>User × Event × Context × Action</span></div>
+        <div class="guard-grid">
+          <div class="guard"><div class="gk">Probability</div><div class="gv">≥ .90</div><div class="gd">Push only；Feed threshold lower</div></div>
+          <div class="guard"><div class="gk">Evidence Coverage</div><div class="gv">≥ .70</div><div class="gd">多来源覆盖</div></div>
+          <div class="guard"><div class="gk">Contamination</div><div class="gv">≤ .20</div><div class="gd">系统诱导证据占比受控</div></div>
+          <div class="guard"><div class="gk">Gain</div><div class="gv">≥ .65</div><div class="gd">用户真实获得感</div></div>
+          <div class="guard"><div class="gk">Anger Risk</div><div class="gv">≤ .25</div><div class="gd">高于即禁止主动触达</div></div>
+        </div>
+
+        <div class="section-title"><h2>Threshold Registry</h2><span>不同 Action 使用不同门槛</span></div>
+        <div class="card">
+          <div class="policy-row"><span><b>MEAL · workday lunch · Feed</b></span><span class="track"><div class="bar" style="width:72%"></div></span><b>θ .72</b><span class="badge good">prod</span></div>
+          <div class="policy-row"><span><b>MEAL · workday lunch · Push</b></span><span class="track"><div class="bar" style="width:91%"></div></span><b>θ .91</b><span class="badge good">prod</span></div>
+          <div class="policy-row"><span><b>WEEKEND_TRIP · group invite</b></span><span class="track"><div class="bar" style="width:88%"></div></span><b>θ .88</b><span class="badge purple">shadow</span></div>
+          <div class="policy-row"><span><b>MERCHANT_OFFER · proactive</b></span><span class="track"><div class="bar" style="width:93%"></div></span><b>θ .93</b><span class="badge warn">canary</span></div>
+        </div>
+
+        <div class="section-title"><h2>Promotion Workflow</h2><span>强干预策略必须经过 Replay / Shadow / Canary</span></div>
+        <div class="trace-v6">
+          <div class="step"><div class="k">01</div><div class="v">Draft</div><div class="d">rule / model / threshold</div></div>
+          <div class="step"><div class="k">02</div><div class="v">Validate</div><div class="d">schema / unit / contract</div></div>
+          <div class="step"><div class="k">03</div><div class="v">Replay</div><div class="d">7D / 30D history</div></div>
+          <div class="step"><div class="k">04</div><div class="v">Shadow</div><div class="d">real traffic, no UI effect</div></div>
+          <div class="step"><div class="k">05</div><div class="v">Canary</div><div class="d">1–5% traffic</div></div>
+          <div class="step"><div class="k">06</div><div class="v">Prod</div><div class="d">20 → 50 → 100%</div></div>
+          <div class="step"><div class="k">07</div><div class="v">Rollback</div><div class="d">last-good policy</div></div>
+        </div>
+      </section>
+
+      <section class="page" id="enginetrace">
+        <div class="section-title"><h2>Decision Trace</h2><span>从 API 请求一直穿透到 User 360、Matching 和 Outcome</span></div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Selected Decision · dec_82A1</h3>
+            <div class="score-list">
+              <div class="score-row"><div><div class="name">Surface</div><div class="sub">market_feed · Hanoi · 11:55</div></div><div class="score">ONLINE</div></div>
+              <div class="score-row"><div><div class="name">Event</div><div class="sub">MEAL · p60=.91</div></div><div class="score">.91</div></div>
+              <div class="score-row"><div><div class="name">Evidence</div><div class="sub">coverage .94 · contamination .08</div></div><div class="score">PASS</div></div>
+              <div class="score-row"><div><div class="name">Human Value</div><div class="sub">gain .78 · anger .18</div></div><div class="score">PASS</div></div>
+              <div class="score-row"><div><div class="name">Final</div><div class="sub">in-surface card only</div></div><div class="score">SOFT</div></div>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Decision Version Snapshot</h3>
+            <div class="api-code">decision_policy: local_decision_v12
+threshold_policy: meal_hanoi_workday_v8
+feature_snapshot: fs_rt_20260826_1154
+tag_snapshot: tagbag_102839_20260826
+gravity_model: meal_gravity_v5.2
+resource_model: resource_local_v3.7
+human_value_model: value_guard_v1.4
+ranker: local_rank_v7.1
+orchestrator: not_called</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>End-to-End Trace</h2><span>每一步都能解释“为什么继续 / 为什么停止”</span></div>
+        <div class="trace-v6">
+          <div class="step"><div class="k">REQUEST</div><div class="v">market_feed</div><div class="d">PX-102839 · req_82A1</div></div>
+          <div class="step"><div class="k">CONTEXT</div><div class="v">11:55 · Office</div><div class="d">Hanoi · weekday · 45m budget</div></div>
+          <div class="step"><div class="k">GRAVITY</div><div class="v">Meal .91</div><div class="d">personal rhythm + no recent meal</div></div>
+          <div class="step"><div class="k">EVIDENCE</div><div class="v">PASS</div><div class="d">coverage .94 · contam .08</div></div>
+          <div class="step"><div class="k">RESOURCE</div><div class="v">52K median</div><div class="d">P75 68K · distance 2.5km</div></div>
+          <div class="step"><div class="k">VALUE</div><div class="v">Gain .78</div><div class="d">anger .18 · budget available</div></div>
+          <div class="step"><div class="k">ELIGIBILITY</div><div class="v">64 / 487</div><div class="d">geo / open / capacity / price</div></div>
+          <div class="step"><div class="k">RANK</div><div class="v">Top 8</div><div class="d">distance / price / affinity / queue</div></div>
+          <div class="step"><div class="k">ACTION</div><div class="v">SOFT_NUDGE</div><div class="d">Push threshold not crossed</div></div>
+          <div class="step"><div class="k">OUTCOME</div><div class="v">Redeemed</div><div class="d">exp_761 → tx_9901 → fulfillment</div></div>
+        </div>
+
+        <div class="section-title"><h2>Exposure Lineage</h2><span>防止反向污染的主键链</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>ID</th><th>Type</th><th>Origin</th><th>Linked Decision</th><th>Evidence Weight</th><th>Downstream Use</th></tr></thead>
+          <tbody>
+            <tr><td>evt_5501</td><td>coffee_search</td><td>organic</td><td>—</td><td class="numc">1.00</td><td>Interest + Intent</td></tr>
+            <tr><td>exp_761</td><td>merchant_card_exposure</td><td>system_exposed</td><td>dec_82A1</td><td class="numc">—</td><td>lineage root</td></tr>
+            <tr><td>evt_7612</td><td>merchant_click</td><td>system_exposed</td><td>dec_82A1 / exp_761</td><td class="numc">0.22</td><td>weak interest</td></tr>
+            <tr><td>tx_9901</td><td>coupon_redeem</td><td>transactional</td><td>dec_82A1 / exp_761</td><td class="numc">0.95</td><td>Outcome + resource</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+
+
+      <section class="page" id="contextfield">
+        <div class="section-title"><h2>Context / Gravity Field</h2><span>用户、世界与市场状态统一进入一次决策</span></div>
+        <div class="engine-hero">
+          <h2>Context Field = User × World × Market</h2>
+          <p>节日、天气、周末、发薪日、演唱会、机场到达、供给紧张、库存变化不再写成各自 if-else。它们先进入 ContextSnapshot，再被 Gravity、Resource、Human Value、Supply、Ranking 和 Surface Composition 消费。</p>
+          <div class="engine-flow">
+            <div class="engine-node"><div class="k">USER</div><div class="v">Personal State</div><div class="d">Tags / Features / history / graph</div></div>
+            <div class="engine-node"><div class="k">WORLD</div><div class="v">External Context</div><div class="d">holiday / weather / local event / time</div></div>
+            <div class="engine-node"><div class="k">MARKET</div><div class="v">Supply Context</div><div class="d">inventory / capacity / demand pressure</div></div>
+            <div class="engine-node"><div class="k">SNAPSHOT</div><div class="v">Context Field</div><div class="d">versioned decision input</div></div>
+            <div class="engine-node"><div class="k">FORECAST</div><div class="v">Gravity</div><div class="d">event probability / hazard</div></div>
+            <div class="engine-node"><div class="k">BOUNDARY</div><div class="v">Resource</div><div class="d">money / time / distance / attention</div></div>
+            <div class="engine-node"><div class="k">VALUE</div><div class="v">Gain / Anger</div><div class="d">体感边界随场景变化</div></div>
+            <div class="engine-node"><div class="k">EXPERIENCE</div><div class="v">Surface Plan</div><div class="d">当前应该呈现什么</div></div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Context Snapshot · ctx_20260826_1155</h2><span>所有下游服务共享同一份快照</span></div>
+        <div class="context-field-grid">
+          <div class="field-card"><h3>User Context</h3>
+            <div class="metric"><span>Location</span><b>Hanoi</b></div><div class="metric"><span>Local state</span><b>Office</b></div>
+            <div class="metric"><span>Time budget</span><b>45m</b></div><div class="metric"><span>Lunch median</span><b>52K</b></div><div class="metric"><span>Intervention budget</span><b>2</b></div>
+          </div>
+          <div class="field-card"><h3>World Context</h3>
+            <div class="metric"><span>Calendar</span><b>Workday</b></div><div class="metric"><span>Weather</span><b>Light rain</b></div>
+            <div class="metric"><span>Holiday proximity</span><b>Low</b></div><div class="metric"><span>Local event pressure</span><b>.12</b></div><div class="metric"><span>Mobility friction</span><b>.27</b></div>
+          </div>
+          <div class="field-card"><h3>Market Context</h3>
+            <div class="metric"><span>Meal demand pressure</span><b>.76</b></div><div class="metric"><span>Supply / demand</span><b>.82×</b></div>
+            <div class="metric"><span>Median queue</span><b>9m</b></div><div class="metric"><span>Coupon density</span><b>.41</b></div><div class="metric"><span>Delivery capacity</span><b>.88</b></div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Context-conditioned Decision</h2><span>同一个人、同一个候选，在不同场景下有效距离不同</span></div>
+        <div class="grid-2">
+          <div class="context-vector"><h3>Normal Workday</h3>
+            <div class="vector-row"><span>Meal gravity</span><div class="vector-track"><i style="width:84%"></i></div><b>.84</b></div>
+            <div class="vector-row"><span>Celebration utility</span><div class="vector-track"><i style="width:12%"></i></div><b>.12</b></div>
+            <div class="vector-row"><span>Price stretch tolerance</span><div class="vector-track"><i style="width:31%"></i></div><b>.31</b></div>
+            <div class="vector-row"><span>Social dining likelihood</span><div class="vector-track"><i style="width:34%"></i></div><b>.34</b></div>
+          </div>
+          <div class="context-vector"><h3>Christmas Evening · same user</h3>
+            <div class="vector-row"><span>Meal gravity</span><div class="vector-track"><i style="width:91%"></i></div><b>.91</b></div>
+            <div class="vector-row"><span>Celebration utility</span><div class="vector-track"><i style="width:88%"></i></div><b>.88</b></div>
+            <div class="vector-row"><span>Price stretch tolerance</span><div class="vector-track"><i style="width:71%"></i></div><b>.71</b></div>
+            <div class="vector-row"><span>Social dining likelihood</span><div class="vector-track"><i style="width:79%"></i></div><b>.79</b></div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Infrastructure Boundary</h2><span>Gravity 预测峰值，但不替代 SRE 降级</span></div>
+        <div class="engine-inline"><b>业务层：</b>节日/天气可提前改变供给、库存、缓存与推荐策略。<br>
+        <b>基础设施层：</b>Redis timeout、Kafka backlog、Feature Store failure 仍需要 circuit breaker、load shedding、backpressure、fallback。<br>
+        <b>规则：</b>Gravity 可以帮助提前扩容，但不能取消 Graceful Degradation。</div>
+      </section>
+
+      <section class="page" id="surface">
+        <div class="section-title"><h2>Surface Composition Engine</h2><span>Decision 不只回答“推荐什么”，还回答“当前页面怎么组成”</span></div>
+        <div class="compose-preview">
+          <div class="phone"><div class="screen">
+            <div class="pill" style="width:36%;margin-left:auto;margin-right:auto;background:#d8d5db"></div>
+            <div class="module hero2"><b>附近午餐</b><div>Meal gravity .91 · 1.2km · queue low · price fit</div></div>
+            <div class="module compact"><b>快速配送</b><div>轻雨，出行摩擦上升</div></div>
+            <div class="module compact"><b>优惠券</b><div>仅展示当前可用、低干扰优惠</div></div>
+            <div class="module compact muted"><b>SPA</b><div>promo fatigue .87 → hidden/downranked</div></div>
+          </div></div>
+          <div>
+            <div class="surface-map">
+              <div class="surface-card active"><div class="topline"><div class="name">nearby_meal</div><div class="priority">P1 · HERO</div></div><div class="body">Gravity + Resource + Gain 共同选中，不由单个 Tag 直接映射。</div></div>
+              <div class="surface-card active"><div class="topline"><div class="name">fast_delivery</div><div class="priority">P2 · COMPACT</div></div><div class="body">World Context=Light rain，提高便利价值。</div></div>
+              <div class="surface-card active"><div class="topline"><div class="name">coupon_wallet</div><div class="priority">P3 · COMPACT</div></div><div class="body">商业价值只能在 Guardrail 之后参与。</div></div>
+              <div class="surface-card blocked"><div class="topline"><div class="name">spa_promo</div><div class="priority">BLOCKED</div></div><div class="body">Negative Preference 优先于商业目标。</div></div>
+            </div>
+            <div class="section-title" style="margin-top:12px"><h2>Surface Plan Contract</h2><span>前端只执行，不自行升级</span></div>
+            <div class="api-code">{
+  "surface_plan": {
+    "surface": "market_feed",
+    "version": "surface_policy_v4",
+    "modules": [
+      {"id":"nearby_meal","priority":1,"mode":"hero"},
+      {"id":"fast_delivery","priority":2,"mode":"compact"},
+      {"id":"coupon_wallet","priority":3,"mode":"compact"}
+    ],
+    "blocked_modules": [
+      {"id":"spa_promo","reason":"NEGATIVE_PREFERENCE"}
+    ],
+    "ttl_s": 600
+  }
+}</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Surface Composition Rule</h2><span>Tag → UI 直接映射禁止</span></div>
+        <div class="field-flow">
+          <div class="field-step"><div class="k">INPUT</div><div class="v">User State</div><div class="d">features / tags / graph</div></div>
+          <div class="field-step"><div class="k">FIELD</div><div class="v">Context Snapshot</div><div class="d">world + market</div></div>
+          <div class="field-step"><div class="k">FORECAST</div><div class="v">Gravity / Intent</div><div class="d">当前什么最相关</div></div>
+          <div class="field-step"><div class="k">GUARD</div><div class="v">Evidence / Value</div><div class="d">不能越界</div></div>
+          <div class="field-step"><div class="k">PLAN</div><div class="v">Surface Plan</div><div class="d">module / priority / density / mode</div></div>
+          <div class="field-step"><div class="k">CLIENT</div><div class="v">Render</div><div class="d">前端执行 plan</div></div>
+        </div>
+
+        <div class="section-title"><h2>Hot Update Boundary</h2><span>配置可热更，安全边界不可绕过</span></div>
+        <div class="engine-inline">允许热更新：module priority、layout mode、eligibility、threshold、experiment traffic、surface policy version。<br>
+        禁止绕过：Evidence Gate、Explicit Negative、Privacy、Hard Resource、Anger Block。<br>
+        新 UI module 仍需客户端已注册该组件；后台只组合已有能力，不远程注入任意代码。</div>
+      </section>
+
+      <section class="page" id="research">
+        <div class="section-title"><h2>Geometry / Contextual Metric Research</h2><span>研究层，不让物理比喻污染正式 API</span></div>
+        <div class="research-grid">
+          <div class="research-card"><h3>Baseline · GBDT / CatBoost</h3><p>User / Candidate / Context / cross-features。所有复杂实验必须击败它。</p><span class="stage prod">PROD BASELINE</span></div>
+          <div class="research-card"><h3>Context-aware Two-Tower</h3><p>User、candidate、context embedding 联合召回/排序。</p><span class="stage shadow">SHADOW</span></div>
+          <div class="research-card"><h3>Context-conditioned Metric</h3><p>学习 d(u,v|c)，例如 Mahalanobis / neural metric。</p><span class="stage lab">LAB</span></div>
+          <div class="research-card"><h3>Hyperbolic / Manifold</h3><p>只有真实层级/长尾结构证明有效时才使用，不因“Gravity”隐喻直接采用。</p><span class="stage lab">RESEARCH</span></div>
+          <div class="research-card"><h3>Evaluation</h3><p>Fulfillment、Gain、Anger、Calibration、Repeat、False Fire、Latency。</p><span class="stage prod">REQUIRED</span></div>
+          <div class="research-card"><h3>Promotion Rule</h3><p>Offline → Replay → Shadow → Canary → Prod。</p><span class="stage prod">GOVERNED</span></div>
+        </div>
+
+        <div class="section-title"><h2>推荐实验顺序</h2><span>先证明复杂几何有价值，再引入</span></div>
+        <div class="trace-v6">
+          <div class="step"><div class="k">01</div><div class="v">CatBoost</div><div class="d">context cross features</div></div>
+          <div class="step"><div class="k">02</div><div class="v">Two-Tower + Context</div><div class="d">ANN retrieval</div></div>
+          <div class="step"><div class="k">03</div><div class="v">Metric Learning</div><div class="d">d(user,item|context)</div></div>
+          <div class="step"><div class="k">04</div><div class="v">Hyperbolic</div><div class="d">only if structure demands</div></div>
+          <div class="step"><div class="k">05</div><div class="v">Keep Winner</div><div class="d">based on fulfillment/value</div></div>
+        </div>
+
+        <div class="section-title"><h2>数学与架构边界</h2><span>正式 Contract 只保留可测、可版本、可回滚对象</span></div>
+        <div class="api-code">正式生产对象：
+ContextSnapshot
+GravityState
+ResourceEnvelope
+EvidenceState
+HumanValueResult
+EligibilityResult
+RankScore
+SurfacePlan
+OrchestrationPlan
+OutcomeRecord
+
+研究对象：
+ContextEmbedding
+MetricMatrix M(c)
+HyperbolicEmbedding
+ManifoldDistance
+
+不进入正式 Policy 语义：
+Lorentz transformation
+Planck constant
+negative mass
+wave-function collapse</div>
+      </section>
+
+
+
+      <section class="page" id="clarification">
+        <div class="section-title"><h2>Clarification Gate</h2><span>Clarification 用来完成已存在的 Intent，不允许拿来制造 Intent</span></div>
+
+        <div class="clarify-matrix">
+          <div class="cq allow">
+            <div class="state">ALLOW · Inline</div>
+            <div class="desc">用户主动进入任务；缺失字段会显著改变匹配/可行性；当前 session 内轻量询问。</div>
+          </div>
+          <div class="cq allow">
+            <div class="state">ALLOW · Task-blocking</div>
+            <div class="desc">例如已明确“周六去宁平”，但时间完全缺失；不问就无法形成有效 Plan。</div>
+          </div>
+          <div class="cq warn">
+            <div class="state">PASSIVE ONLY</div>
+            <div class="desc">Intent 来自弱推断；可以在用户主动打开相关 Surface 时提供可选筛选，不主动 Push。</div>
+          </div>
+          <div class="cq block">
+            <div class="state">FORBIDDEN</div>
+            <div class="desc">仅因为模型“想知道更多”而主动 Push 用户，或借问询制造新的偏好证据。</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Eligibility Formula</h2><span>澄清本身也要过门槛</span></div>
+        <div class="api-code">Clarify =
+  ExistingIntent = TRUE
+  AND IntentSource IN {explicit, user_initiated_task}
+  AND MissingFieldImpact >= M_min
+  AND ExpectedDecisionLift >= L_min
+  AND QuestionBurden <= B_max
+  AND AngerRisk <= A_max
+  AND CurrentSurfaceAllowsInteraction = TRUE
+
+FORBIDDEN:
+  inferred_intent + out_of_session_push
+  "ask to create evidence"
+  repeated clarification after user skipped</div>
+
+        <div class="section-title"><h2>Example · Weekend Companion</h2><span>只问一次真正改变计划的问题</span></div>
+        <div class="grid-2">
+          <div class="question-preview">
+            <div class="eyebrow">CURRENT TASK · 宁平同行</div>
+            <div class="qtext">周六上午还是下午出发？</div>
+            <div class="choices"><span class="choice">上午</span><span class="choice">下午</span><span class="choice">都可以</span></div>
+            <div class="meta">reason: time_window materially changes candidate pool from 128 → 41 / 67<br>persist_to_profile: false by default</div>
+          </div>
+          <div class="card">
+            <h3>ClarificationPlan</h3>
+            <div class="api-code">{
+  "state": "INLINE_ALLOWED",
+  "question_id": "cq_819",
+  "field": "departure_window",
+  "reason": "MATCH_FEASIBILITY",
+  "max_questions": 1,
+  "expires_in_s": 900,
+  "answer_scope": "CURRENT_TASK",
+  "write_to_profile": false,
+  "evidence_class": "EXPLICIT_TASK_CONTEXT"
+}</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Anti-contamination Rule</h2><span>回答是明确任务证据，但不自动变成长期人格标签</span></div>
+        <div class="engine-inline"><b>例：</b>用户回答“周六上午” → 当前 `WEEKEND_TRIP` task 的 time constraint 可以立即更新；但不能自动写成 `#喜欢上午旅行`。只有后续重复、自然、跨任务证据达到独立门槛才允许形成长期状态。</div>
+      </section>
+
+      <section class="page" id="supplyactivation">
+        <div class="section-title"><h2>Supply Activation & Alternative Resolver</h2><span>Proxy 不只找已有供给，也要知道何时形成供给、何时提供替代</span></div>
+
+        <div class="exec-grid">
+          <div class="exec-kpi"><div class="k">High-frequency Supply Coverage</div><div class="v">84.7%</div><div class="d">eligible supply / qualified demand</div></div>
+          <div class="exec-kpi"><div class="k">Severe Gaps</div><div class="v">7</div><div class="d">coverage &lt; 0.60 的高价值 Intent</div></div>
+          <div class="exec-kpi"><div class="k">Latent Supply Activation</div><div class="v">26.4%</div><div class="d">被精准激活的潜在供给响应率</div></div>
+          <div class="exec-kpi"><div class="k">Alternative Salvage</div><div class="v">18.3%</div><div class="d">无原始供给时仍完成目标</div></div>
+        </div>
+
+        <div class="section-title"><h2>Supply Health · 中越翻译</h2><span>当前 coverage = 0.45×，属于严重供给不足示例</span></div>
+        <div class="supply-health">
+          <div class="card">
+            <div class="supply-band"><span>Qualified demand</span><div class="healthbar"><i style="width:100%"></i></div><b>100</b></div>
+            <div class="supply-band"><span>Active supply</span><div class="healthbar"><i class="bad" style="width:45%"></i></div><b>45</b></div>
+            <div class="supply-band"><span>Latent supply</span><div class="healthbar"><i class="warn" style="width:70%"></i></div><b>70</b></div>
+            <div class="supply-band"><span>Activation probability</span><div class="healthbar"><i style="width:43%"></i></div><b>.43</b></div>
+            <div class="supply-band"><span>Median response</span><div class="healthbar"><i style="width:58%"></i></div><b>12m</b></div>
+          </div>
+          <div class="card">
+            <h3>SupplyState</h3>
+            <div class="api-code">{
+  "intent_type": "ZH_VI_TRANSLATION",
+  "coverage": 0.45,
+  "state": "SEVERE_SHORTAGE",
+  "active_supply": 45,
+  "latent_supply": 70,
+  "activation_probability": 0.43,
+  "median_response_min": 12,
+  "price_elasticity": 0.62,
+  "alternative_modes": [
+    "AI_TRANSLATION",
+    "HUMAN_AI_HYBRID",
+    "WAITLIST"
+  ]
+}</div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Activation Ladder</h2><span>先形成供给 / 调整可行条件，再考虑平台激励</span></div>
+        <div class="activation-ladder">
+          <div class="activation-step"><div class="k">01</div><div class="v">Latent Supply</div><div class="d">通知已 opt-in 且高相关的兼职/Creator/服务方</div></div>
+          <div class="activation-step"><div class="k">02</div><div class="v">Time / Radius</div><div class="d">只在用户资源边界允许时扩大时间窗或范围</div></div>
+          <div class="activation-step"><div class="k">03</div><div class="v">Batch / Waitlist</div><div class="d">合并需求、排队、候补，不直接丢 Intent</div></div>
+          <div class="activation-step"><div class="k">04</div><div class="v">Alternative</div><div class="d">AI / human+AI / adjacent service</div></div>
+          <div class="activation-step"><div class="k">05</div><div class="v">Platform Incentive</div><div class="d">补贴 / 降佣 / lead priority / minimum guarantee</div></div>
+        </div>
+
+        <div class="section-title"><h2>Pricing Boundary</h2><span>Supply shortage ≠ 看人下菜碟</span></div>
+        <div class="engine-inline"><b>禁止：</b>“这个用户资源能力高 → 缺供给时给他个人涨价”。<br><b>允许：</b>公开透明的市场级价格、平台补贴、供给侧激励、时间/服务规格变化。Resource Envelope 用于判断方案是否合适，不用于隐性个体差别定价。</div>
+
+        <div class="section-title"><h2>Fallback Plan</h2><span>找不到人工供给时也尽量不让 Intent 直接死亡</span></div>
+        <div class="fallback-tree">
+          <div class="fallback-node"><div class="n">Human Live</div><div class="d">实时人工翻译</div></div>
+          <div class="fallback-node"><div class="n">Human Delayed</div><div class="d">扩大时间窗</div></div>
+          <div class="fallback-node"><div class="n">Hybrid</div><div class="d">AI 初译 + 人审</div></div>
+          <div class="fallback-node"><div class="n">AI Toolkit</div><div class="d">即时满足基础需求</div></div>
+          <div class="fallback-node"><div class="n">Waitlist</div><div class="d">等待可用供给并保留 Intent</div></div>
+        </div>
+      </section>
+
+      <section class="page" id="executionruntime">
+        <div class="section-title"><h2>Sync / Async Orchestration Runtime</h2><span>Decision 主链和复杂现实世界编排使用不同延迟预算</span></div>
+
+        <div class="latency-grid">
+          <div class="mode-card sync">
+            <h3>Real-time Decision Plane</h3>
+            <p>Feed / Market / search / lightweight match。目标是在一次页面请求中返回，不执行复杂组合优化。</p>
+            <span class="tagline">SYNC · p99 target &lt; 120ms</span>
+          </div>
+          <div class="mode-card async">
+            <h3>Async Orchestration Plane</h3>
+            <p>组局、多人时间协调、车辆/路线、复杂 capacity、fallback planning。Decision 先返回 job_id，再异步生成 Plan。</p>
+            <span class="tagline">ASYNC · p95 target &lt; 2s</span>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Sync Latency Budget</h2><span>以下为当前策略起点，不是行业固定值</span></div>
+        <div class="card">
+          <div class="budget-row"><span>Context + State</span><div class="track"><div class="bar" style="width:18%"></div></div><b>15ms</b><span class="badge good">HARD</span></div>
+          <div class="budget-row"><span>Gravity / Intent</span><div class="track"><div class="bar" style="width:14%"></div></div><b>12ms</b><span class="badge good">HARD</span></div>
+          <div class="budget-row"><span>Evidence / Value / Policy</span><div class="track"><div class="bar" style="width:16%"></div></div><b>14ms</b><span class="badge good">HARD</span></div>
+          <div class="budget-row"><span>Supply Health / Alternative</span><div class="track"><div class="bar" style="width:10%"></div></div><b>8ms</b><span class="badge good">CACHE</span></div>
+          <div class="budget-row"><span>Eligibility + Retrieval</span><div class="track"><div class="bar" style="width:22%"></div></div><b>20ms</b><span class="badge good">HARD</span></div>
+          <div class="budget-row"><span>Ranking</span><div class="track"><div class="bar" style="width:28%"></div></div><b>25ms</b><span class="badge warn">SOFT</span></div>
+          <div class="budget-row"><span>Serialization / Network headroom</span><div class="track"><div class="bar" style="width:18%"></div></div><b>16ms</b><span class="badge">BUFFER</span></div>
+        </div>
+
+        <div class="section-title"><h2>Solver Circuit Breaker</h2><span>只对确实需要同步的小型优化启用</span></div>
+        <div class="api-code">if orchestration.complexity <= SMALL:
+    try CP-SAT / exact solver
+    soft_budget = 20ms
+    hard_budget = 35ms
+
+    if timeout:
+        use GREEDY / HEURISTIC
+        emit solver_fallback = true
+
+else:
+    return {
+      "state": "ACTIVE_ORCHESTRATE",
+      "execution.mode": "ASYNC",
+      "orchestration_job_id": "job_..."
+    }</div>
+
+        <div class="section-title"><h2>Async Job State</h2><span>复杂任务不用阻塞 Decision API</span></div>
+        <div class="state-strip">
+          <div class="state-card hot"><div class="s">QUEUED</div><div class="d">已接受复杂编排任务</div></div>
+          <div class="state-card"><div class="s">SOLVING</div><div class="d">CP-SAT / routing / assignment</div></div>
+          <div class="state-card"><div class="s">PLAN_READY</div><div class="d">主计划已生成</div></div>
+          <div class="state-card"><div class="s">FALLBACK_READY</div><div class="d">候补计划同步生成</div></div>
+          <div class="state-card"><div class="s">COMMITTED</div><div class="d">用户/供给确认</div></div>
+          <div class="state-card block"><div class="s">FAILED</div><div class="d">进入 Attribution，不静默丢弃</div></div>
+        </div>
+      </section>
+
+      <section class="page" id="fulfillmentattr">
+        <div class="section-title"><h2>Fulfillment Attribution Engine</h2><span>未履约不能统一记成 negative reward；必须知道错在哪里</span></div>
+
+        <div class="exec-grid">
+          <div class="exec-kpi"><div class="k">Committed</div><div class="v">8.61K</div><div class="d">当前漏斗示例</div></div>
+          <div class="exec-kpi"><div class="k">Fulfilled</div><div class="v">5.22K</div><div class="d">commit → fulfill 60.6%</div></div>
+          <div class="exec-kpi"><div class="k">Not Fulfilled</div><div class="v">3.39K</div><div class="d">必须结构化归因</div></div>
+          <div class="exec-kpi"><div class="k">Attributed</div><div class="v">92.8%</div><div class="d">有足够证据给出主因/辅因</div></div>
+        </div>
+
+        <div class="section-title"><h2>Failure Taxonomy</h2><span>主因 + 辅因 + 置信度，不强迫所有失败只有一个原因</span></div>
+        <div class="attrib-grid">
+          <div class="attrib"><h3>Demand-side</h3><div class="item">user_cancel</div><div class="item">user_no_show</div><div class="item">changed_mind</div><div class="item">price_regret</div><div class="route">→ Intent / Resource / Trust</div></div>
+          <div class="attrib"><h3>Supply-side</h3><div class="item">provider_timeout</div><div class="item">provider_cancel</div><div class="item">capacity_lost</div><div class="item">quality_issue</div><div class="route">→ Supply reliability / Activation</div></div>
+          <div class="attrib"><h3>Match-side</h3><div class="item">compatibility_error</div><div class="item">distance_error</div><div class="item">schedule_conflict</div><div class="item">expectation_mismatch</div><div class="route">→ Eligibility / Ranking</div></div>
+          <div class="attrib"><h3>Orchestration</h3><div class="item">group_not_filled</div><div class="item">route_failure</div><div class="item">fallback_failed</div><div class="item">late_replan</div><div class="route">→ Solver / fallback policy</div></div>
+          <div class="attrib"><h3>Platform</h3><div class="item">payment_error</div><div class="item">notification_failure</div><div class="item">latency_timeout</div><div class="item">technical_error</div><div class="route">→ Product / SRE</div></div>
+          <div class="attrib"><h3>External</h3><div class="item">weather</div><div class="item">traffic</div><div class="item">venue_closed</div><div class="item">policy_event</div><div class="route">→ Context Field / replanning</div></div>
+        </div>
+
+        <div class="section-title"><h2>AttributionRecord</h2><span>每个失败把修正信号路由给真正负责的系统</span></div>
+        <div class="grid-2">
+          <div class="attribution-record">{
+  "fulfillment_id": "ful_8821",
+  "decision_id": "dec_82A1",
+  "status": "NOT_FULFILLED",
+
+  "primary_cause": {
+    "code": "PROVIDER_TIMEOUT",
+    "domain": "SUPPLY",
+    "confidence": 0.91
+  },
+
+  "contributing_causes": [
+    {"code":"TIGHT_SUPPLY","weight":0.62},
+    {"code":"LATE_ACTIVATION","weight":0.31}
+  ],
+
+  "evidence_ids": [
+    "evt_provider_no_reply",
+    "activation_402"
+  ],
+
+  "route_to": [
+    "supply_reliability",
+    "activation_policy"
+  ]
+}</div>
+          <div class="card">
+            <h3>Feedback Routing</h3>
+            <div class="contract"><b>provider_timeout</b><div>降低该供给方 reliability；训练 Supply Activation response model。</div></div>
+            <div class="contract"><b>price_regret</b><div>回流 Resource Envelope + Human Value，不简单惩罚 Gravity。</div></div>
+            <div class="contract"><b>schedule_conflict</b><div>回流 Eligibility / Orchestration constraint model。</div></div>
+            <div class="contract"><b>payment_error</b><div>进入 Platform/SRE，不污染用户兴趣和匹配模型。</div></div>
+          </div>
+        </div>
+
+        <div class="section-title"><h2>Reward Boundary</h2><span>Outcome 必须按原因拆解，防止错误学习</span></div>
+        <div class="engine-inline"><b>禁止：</b>`not_fulfilled → reward = -1 → 所有上游模型一起背锅`。<br><b>正确：</b>先 Attribution，再将可学习信号路由到 Gravity、Resource、Supply、Ranking、Orchestration、Trust 或 Platform。无法归因时保留 `UNKNOWN`，不要制造假原因。</div>
+      </section>
+
+
+    </div>
+  </main>
+</div>
+<script>
+
+function switchModelTab(model,panel,btn){
+  document.querySelectorAll('.model-panel[data-model="'+model+'"]').forEach(x=>x.classList.remove('active'));
+  const target=document.querySelector('.model-panel[data-model="'+model+'"][data-panel="'+panel+'"]');
+  if(target) target.classList.add('active');
+  const wrap=btn.closest('.model-tabs');
+  if(wrap) wrap.querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+}
+const titles={
+  clarification:'Clarification Gate',supplyactivation:'Supply Activation',executionruntime:'Execution Runtime',fulfillmentattr:'Fulfillment Attribution',
+  contextfield:'Context / Gravity Field',surface:'Surface Composition',research:'Geometry Research',
+  overview:'平台总览',population:'用户构成',behavior:'行为与兴趣',tags:'标签中心',intent:'意图与撮合',orchestration:'编排与调度',
+  engine:'Decision Engine',engineapi:'API / Runtime',engstate:'State / 生命周期',policyresolver:'Policy Resolver',featureparity:'Feature / DSL',tagutility:'Tag Utility',enginepolicy:'策略与阈值',enginetrace:'Decision Trace',
+  merchant:'商家与投放',retention:'留存与复购',trust:'信任与风险',quality:'数据治理',workbench:'交叉分析工作台'
+};
+function runWorkbench(){
+    const r = document.getElementById('rowDim').value;
+    const c = document.getElementById('colDim').value;
+    const metricSelect = document.querySelector('#wbTitle + select, .controls select:nth-child(3)');
+    const m = metricSelect ? metricSelect.value : 'Fulfillment Rate';
+    
+    // Show loading state
+    const wbTitle = document.getElementById('wbTitle');
+    wbTitle.textContent = '计算中...';
+    wbTitle.style.color = '#ff2f7d';
+    
+    // Simulate calculation delay
+    setTimeout(() => {
+        // Generate sample data based on selections
+        const matrixData = generateWorkbenchData(r, c, m);
+        
+        // Update title
+        wbTitle.textContent = r + ' × ' + c + ' · ' + m;
+        wbTitle.style.color = '';
+        
+        // Update matrix display
+        updateWorkbenchMatrix(matrixData, r, c);
+    }, 800);
+}
+
+// Sample data generator for workbench
+function generateWorkbenchData(rowDim, colDim, metric) {
+    // Define sample datasets for different dimensions
+    const dataSets = {
+        'Gender': ['Female', 'Male', 'Other/Unknown'],
+        'Age': ['18–22', '23–30', '31–40', '41+'],
+        'City': ['河内', '胡志明市', '岘港', '其他'],
+        'Interest': ['旅行', '咖啡', '摄影', 'UGC/探店', 'SPA优惠'],
+        'Relationship': ['单身', '恋爱中', '已婚', '其他'],
+        'Source': ['Observed', 'Transactional', 'Declared', 'Inferred'],
+        'Intent Type': ['Local', 'Companion', 'Creator', 'Translation', 'Other'],
+        'Match Stage': ['Detected', 'Qualified', 'Clarified', 'Matched', 'Committed', 'Fulfilled'],
+        'Merchant Category': ['餐饮', '旅游', '美容', '教育', '娱乐'],
+        'Distance Band': ['0-1km', '1-3km', '3-5km', '5km+'],
+        'Retention': ['D1', 'D7', 'D30', '2nd Fulfillment']
+    };
+    
+    // Define metrics with calculation logic
+    const metrics = {
+        'Fulfillment Rate': () => (Math.random() * 0.4 + 0.5).toFixed(0) + '%',
+        'Match Rate': () => (Math.random() * 0.3 + 0.6).toFixed(0) + '%',
+        'Intent Rate': () => (Math.random() * 0.2 + 0.1).toFixed(0) + '%',
+        'Repeat Rate': () => (Math.random() * 0.3 + 0.2).toFixed(0) + '%',
+        'Avg Transaction': () => '₫' + Math.floor(Math.random() * 300000 + 200000)
+    };
+    
+    const rowLabels = dataSets[rowDim] || ['N/A'];
+    const colLabels = dataSets[colDim] || ['N/A'];
+    const metricFunc = metrics[metric] || metrics['Fulfillment Rate'];
+    
+    // Generate matrix data
+    const matrix = [];
+    for (let i = 0; i < rowLabels.length; i++) {
+        const row = [];
+        for (let j = 0; j < colLabels.length; j++) {
+            row.push(metricFunc());
+        }
+        matrix.push(row);
+    }
+    
+    return { rowLabels, colLabels, matrix };
+}
+
+// Update the workbench matrix display
+function updateWorkbenchMatrix(data, rowDim, colDim) {
+    const matrixContainer = document.querySelector('#workbench .matrix');
+    if (!matrixContainer) return;
+    
+    // Clear existing content
+    matrixContainer.innerHTML = '';
+    
+    // Create header cell (empty top-left)
+    const headerCell = document.createElement('div');
+    headerCell.className = 'mcell mhead';
+    headerCell.textContent = 'Dimension';
+    matrixContainer.appendChild(headerCell);
+    
+    // Add column headers
+    data.colLabels.forEach(label => {
+        const cell = document.createElement('div');
+        cell.className = 'mcell mhead';
+        cell.textContent = label;
+        matrixContainer.appendChild(cell);
+    });
+    
+    // Add row headers and data
+    data.rowLabels.forEach((rowLabel, rowIndex) => {
+        // Row header
+        const rowHeader = document.createElement('div');
+        rowHeader.className = 'mcell mlabel';
+        rowHeader.textContent = rowLabel;
+        matrixContainer.appendChild(rowHeader);
+        
+        // Row data
+        data.matrix[rowIndex].forEach(cellValue => {
+            const cell = document.createElement('div');
+            // Determine header level based on value for visual variation
+            const numValue = parseFloat(cellValue) || 0;
+            let headerClass = 'h3';
+            if (numValue >= 70) headerClass = 'h2';
+            else if (numValue >= 50) headerClass = 'h3';
+            else if (numValue >= 30) headerClass = 'h4';
+            else headerClass = 'h5';
+            
+            cell.className = `mcell ${headerClass}`;
+            cell.textContent = cellValue;
+            matrixContainer.appendChild(cell);
+        });
+    });
+}
+document.querySelectorAll('.nav button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
+    btn.classList.add('active');
+    const p=btn.dataset.page;
+    document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+    const target=document.getElementById(p);
+    if(!target) return;
+    target.classList.add('active');
+    const pageTitle=document.getElementById('pageTitle');
+    if(pageTitle) pageTitle.textContent=titles[p] || btn.textContent.trim();
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+});
+
+function filterTagTable(){
+  const q=(document.getElementById('tagSearch')?.value||'').trim().toLowerCase();
+  document.querySelectorAll('#tagTable tbody tr').forEach(row=>{
+    row.style.display=!q || row.innerText.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+document.getElementById('tagSearch')?.addEventListener('input',filterTagTable);
+
+
+function runEngineLab(){
+  const surface=document.getElementById('labSurface')?.value||'market_feed';
+  const event=document.getElementById('labEvent')?.value||'MEAL';
+  const p=Number(document.getElementById('labProb')?.value||0);
+  const cov=Number(document.getElementById('labCoverage')?.value||0);
+  const contam=Number(document.getElementById('labContam')?.value||0);
+  const gain=Number(document.getElementById('labGain')?.value||0);
+  const anger=Number(document.getElementById('labAnger')?.value||0);
+
+  let state='PASSIVE';
+  let action='RANK_ONLY';
+  const evidencePass=cov>=.70 && contam<=.20;
+  const valuePass=gain>=.65 && anger<=.25;
+
+  if(!evidencePass) {
+    state='LEARN_ONLY'; action='NONE';
+  } else if(!valuePass) {
+    state='BLOCKED'; action='NONE';
+  } else if(p>=.90) {
+    state='ACTIVE_ORCHESTRATE'; action=event==='WEEKEND_TRIP'?'CREATE_MATCH_PLAN':'PROACTIVE_ACTION';
+  } else if(p>=.75) {
+    state='SOFT_NUDGE'; action='SHOW_IN_SURFACE';
+  }
+
+  const payload={
+    decision_id:'dec_sim_'+Math.random().toString(36).slice(2,8),
+    state,
+    action:{type:action,delivery:state==='SOFT_NUDGE'?'in_surface':state==='ACTIVE_ORCHESTRATE'?'active':'none'},
+    input:{surface,event_type:event},
+    event_state:{probability:p},
+    guardrails:{
+      evidence:evidencePass?'PASS':'FAIL',
+      coverage:cov,
+      contamination_risk:contam,
+      human_value:valuePass?'PASS':'FAIL',
+      gain_score:gain,
+      anger_risk:anger
+    },
+    clarification_plan:null,
+    supply:{
+      coverage:event==='MEAL'?.82:.74,
+      state:event==='MEAL'?'TIGHT':'UNDER_SUPPLIED'
+    },
+    execution:{
+      mode:state==='ACTIVE_ORCHESTRATE'&&event==='WEEKEND_TRIP'?'ASYNC':'SYNC',
+      orchestration_job_id:state==='ACTIVE_ORCHESTRATE'&&event==='WEEKEND_TRIP'?'job_sim_01':null
+    },
+    fallback_plan:null,
+    surface_plan:{
+      surface,
+      modules: state==='BLOCKED'||state==='LEARN_ONLY' ? [] : [
+        {id:event==='MEAL'?'nearby_meal':'context_primary',priority:1,mode:state==='ACTIVE_ORCHESTRATE'?'hero':'compact'}
+      ]
+    },
+    trace_id:'trace_sim_'+Math.random().toString(36).slice(2,8)
+  };
+  const st=document.getElementById('labState');
+  const meta=document.getElementById('labMeta');
+  const resp=document.getElementById('labResponse');
+  if(st) st.textContent=state;
+  if(meta) meta.textContent='surface '+surface+' · event '+event+' · simulated runtime';
+  if(resp) resp.textContent=JSON.stringify(payload,null,2);
+}
+document.addEventListener('DOMContentLoaded', function() {
+    if(document.getElementById('labResponse')) runEngineLab();
+    
+    // ===== STATE PERSISTENCE =====
+    // Save and load UI state from localStorage
+    const STATE_KEY = 'proxy_console_ui_state';
+    
+    function saveUIState() {
+        const state = {
+            workbench: {
+                rowDim: document.getElementById('rowDim')?.value,
+                colDim: document.getElementById('colDim')?.value,
+                metric: document.querySelector('#wbTitle + select, .controls select:nth-child(3)')?.value
+            },
+            filters: {
+                search: document.querySelector('.search')?.value,
+                location: document.querySelectorAll('.select')[0]?.value,
+                timeRange: document.querySelectorAll('.select')[1]?.value,
+                gender: document.querySelectorAll('.select')[2]?.value,
+                age: document.querySelectorAll('.select')[3]?.value
+            }
+        };
+        try {
+            localStorage.setItem(STATE_KEY, JSON.stringify(state));
+        } catch (e) {
+            console.warn('Failed to save UI state:', e);
+        }
+    }
+    
+    function loadUIState() {
+        try {
+            const state = localStorage.getItem(STATE_KEY);
+            if (state) {
+                const parsed = JSON.parse(state);
+                // Restore workbench state
+                if (parsed.workbench) {
+                    if (parsed.workbench.rowDim) document.getElementById('rowDim')?.value = parsed.workbench.rowDim;
+                    if (parsed.workbench.colDim) document.getElementById('colDim')?.value = parsed.workbench.colDim;
+                    if (parsed.workbench.metric) document.querySelector('#wbTitle + select, .controls select:nth-child(3)')?.value = parsed.workbench.metric;
+                }
+                // Restore filters
+                if (parsed.filters) {
+                    if (parsed.filters.search) document.querySelector('.search')?.value = parsed.filters.search;
+                    if (parsed.filters.location) document.querySelectorAll('.select')[0]?.value = parsed.filters.location;
+                    if (parsed.filters.timeRange) document.querySelectorAll('.select')[1]?.value = parsed.filters.timeRange;
+                    if (parsed.filters.gender) document.querySelectorAll('.select')[2]?.value = parsed.filters.gender;
+                    if (parsed.filters.age) document.querySelectorAll('.select')[3]?.value = parsed.filters.age;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to load UI state:', e);
+        }
+    }
+    
+    // Save state on changes
+    document.querySelectorAll('.select, .search').forEach(input => {
+        input.addEventListener('change', saveUIState);
+        input.addEventListener('input', saveUIState);
+    });
+    
+    // Load state on init
+    loadUIState();
+    
+    // ===== TABLE SORTING FUNCTIONALITY =====
+    // Make all tables with class 'sortable' have clickable headers to sort
+    document.querySelectorAll('table.sortable th, table.table-wrap th').forEach(function(th) {
+        // Add visual indicator that it's sortable
+        th.style.cursor = 'pointer';
+        th.title = '点击排序';
+        
+        // Add sort indicator (initially unsorted)
+        const sortIndicator = document.createElement('span');
+        sortIndicator.style.cssText = 'margin-left: 4px; font-size: 0.8em; opacity: 0.5;';
+        sortIndicator.textContent = '⇅';
+        th.appendChild(sortIndicator);
+        
+        // Add click handler
+        th.addEventListener('click', function() {
+            const table = th.closest('table');
+            if (!table) return;
+            
+            // Determine column index
+            const columnIndex = Array.from(th.parentNode.children).indexOf(th);
+            
+            // Get current sort direction from data attribute or default to asc
+            const currentDir = th.getAttribute('data-sort-dir') || 'asc';
+            const newDir = currentDir === 'asc' ? 'desc' : 'asc';
+            
+            // Clear sort indicators from other headers in this table
+            table.querySelectorAll('th').forEach(function(header) {
+                header.removeAttribute('data-sort-dir');
+                const indicator = header.querySelector('span');
+                if (indicator) {
+                    indicator.style.opacity = '0.5';
+                }
+            });
+            
+            // Set new sort direction and update indicator
+            th.setAttribute('data-sort-dir', newDir);
+            const newIndicator = th.querySelector('span');
+            if (newIndicator) {
+                newIndicator.style.opacity = '1';
+                newIndicator.textContent = newDir === 'asc' ? '↑' : '↓';
+            }
+            
+            // Get table body rows
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            
+            // Convert NodeList to array for sorting
+            const rowsArray = Array.from(tbody.querySelectorAll('tr'));
+            
+            // Sort rows based on cell content in the column
+            rowsArray.sort(function(rowA, rowB) {
+                const cellA = rowA.children[columnIndex];
+                const cellB = rowB.children[columnIndex];
+                
+                if (!cellA || !cellB) return 0;
+                
+                // Get text content
+                let textA = cellA.textContent.trim();
+                let textB = cellB.textContent.trim();
+                
+                // Try to parse as number for numeric sorting
+                const numA = parseFloat(textA.replace(/[^\d.-]/g, ''));
+                const numB = parseFloat(textB.replace(/[^\d.-]/g, ''));
+                
+                // If both are valid numbers, sort numerically
+                if (!isNaN(numA) && !isNaN(numB)) {
+                    return newDir === 'asc' ? numA - numB : numB - numA;
+                }
+                
+                // Otherwise sort as strings (case-insensitive)
+                return newDir === 'asc'
+                    ? textA.localeCompare(textB, undefined, { sensitivity: 'base' })
+                    : textB.localeCompare(textA, undefined, { sensitivity: 'base' });
+            });
+            
+            // Clear and re-add sorted rows
+            tbody.innerHTML = '';
+            rowsArray.forEach(function(row) {
+                tbody.appendChild(row);
+            });
+        });
+    });
+    
+    // Add sortable class to common tables for better UX
+    document.querySelectorAll('#tagTable, .table-wrap table').forEach(function(table) {
+        table.classList.add('sortable');
+    });
+});
+
+</script>
+</body>
+</html>

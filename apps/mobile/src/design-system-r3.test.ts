@@ -44,7 +44,11 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "sampleVisualText", "sampleVisualTextAi", "sampleTitle", "sampleSub",
   "detectResultTitle", "detectResultSub",
   "signalLabel", "signalHint", "signalValue",
-  "decisionTitle", "decisionSub", "riskPillText"
+  "decisionTitle", "decisionSub", "riskPillText",
+  // R15.80: R1 risk 段 (3 risk cards + 5 rules + 6 toggles + reco card).
+  "riskCardTitle", "riskCardSub",
+  "ruleTitle", "ruleReason", "ruleActionText", "ruleOpBtnText",
+  "recoCardTitle", "toggleRowTitle", "toggleRowSub"
 ];
 
 describe("Proxy Design System R3 typography", () => {

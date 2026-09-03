@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Proxy · 我的市场</title>
+<style>
+:root{
+  --bg:#f7f5f8; --card:#fff; --text:#131313; --muted:#8b858f;
+  --line:#ece8ee; --lime:#c9ff08; --soft:#f3f1f4; --green:#efffc0;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#ece9ee;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Helvetica Neue",Arial,sans-serif;color:var(--text)}
+button,input{font:inherit}
+.app{width:min(430px,100%);min-height:100vh;margin:auto;background:var(--bg);position:relative;overflow:hidden}
+.screen{display:none;min-height:100vh;padding:22px 16px 110px}.screen.active{display:block}
+.status{display:flex;justify-content:space-between;font-weight:700;font-size:14px;padding-bottom:18px}
+.brand{display:flex;align-items:center;gap:10px;font-size:21px;font-weight:850;margin-bottom:28px}
+.logo{width:34px;height:34px;border:2px solid #111;border-radius:50%;display:grid;place-items:center;background:#fff}
+.section-head{display:flex;justify-content:space-between;align-items:end;margin:0 2px 14px}.section-head h1{margin:0;font-size:26px}.section-head span{font-size:14px;color:#9a949e}
+.copy{font-size:14px;color:var(--muted);line-height:1.55;margin:6px 2px 18px}
+.module-list{display:flex;flex-direction:column;gap:12px}
+.module{display:flex;align-items:center;gap:16px;background:#fff;border:1px solid #f0edf1;border-radius:28px;padding:20px 16px;width:100%;text-align:left;cursor:pointer}
+.module-icon{width:64px;height:64px;flex:0 0 64px;border-radius:20px;background:var(--lime);display:grid;place-items:center;font-size:29px}
+.module-title{font-size:21px;font-weight:850}.module-sub{font-size:14px;color:#918b95;margin-top:6px}.chev{margin-left:auto;font-size:28px;color:#aaa3ad}
+.detail-top{display:flex;align-items:center;gap:13px;margin-bottom:20px}.back{width:40px;height:40px;border:1px solid var(--line);border-radius:14px;background:#fff;font-size:22px}.detail-title{font-size:26px;font-weight:850}.spacer{margin-left:auto}
+.tabs{display:flex;gap:8px;overflow:auto;scrollbar-width:none;padding-bottom:12px}.tabs::-webkit-scrollbar{display:none}
+.tab{border:1px solid var(--line);background:#fff;color:#77717b;border-radius:999px;padding:10px 14px;font-size:14px;font-weight:750;white-space:nowrap}.tab.active{background:#111;color:#fff;border-color:#111}
+.card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:16px;margin-bottom:12px}
+.row{display:flex;align-items:center;gap:12px}.grow{flex:1;min-width:0}.title-sm{font-size:16px;font-weight:850}.meta{font-size:13px;color:#908a94;line-height:1.45;margin-top:5px}
+.thumb{width:54px;height:54px;border-radius:16px;background:#f1eef2;display:grid;place-items:center;font-size:24px;flex:0 0 54px}
+.badge{display:inline-flex;padding:5px 9px;border-radius:999px;background:var(--soft);font-size:12px;font-weight:800;color:#6d6771}
+.badge.live{background:var(--green);color:#3c4700}.amount{font-size:18px;font-weight:900}
+.divider{height:1px;background:var(--line);margin:14px 0}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px 14px}
+.info-item .label{font-size:12px;color:#9a949d;margin-bottom:4px}.info-item .value{font-size:14px;font-weight:750;line-height:1.35}
+.order-id{font-size:12px;color:#9a949d;margin-top:4px;letter-spacing:.2px}
+.order-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.order-actions{display:flex;gap:8px;margin-top:14px}
+.btn{border:1px solid var(--line);background:#fff;border-radius:13px;padding:9px 12px;font-size:13px;font-weight:800;cursor:pointer}.btn.primary{background:#111;color:#fff;border-color:#111}.btn.lime{background:var(--lime);border-color:var(--lime);color:#111}
+.notice{background:#faf9fb;border-radius:16px;padding:12px;font-size:12px;color:#77717b;line-height:1.5;margin-top:12px}
+.status-strip{display:flex;align-items:center;gap:8px;font-size:12px;color:#77717b;margin-top:12px}.dot{width:8px;height:8px;border-radius:50%;background:#111}.dot.green{background:#79b900}
+.simple-card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:16px;margin-bottom:12px}
+.skill-line,.save-line{display:flex;align-items:center;gap:12px}.skill-line+.skill-line,.save-line+.save-line{margin-top:12px}
+.pill{padding:6px 9px;background:#f3f1f4;border-radius:999px;font-size:12px;font-weight:800}
+.switch{margin-left:auto;width:46px;height:28px;background:#111;border:none;border-radius:999px;position:relative}.switch:after{content:"";position:absolute;top:3px;right:3px;width:22px;height:22px;background:var(--lime);border-radius:50%}
+.bottom-nav{position:absolute;left:0;right:0;bottom:0;height:90px;background:rgba(255,255,255,.97);border-top:1px solid var(--line);display:flex;justify-content:space-around;align-items:center;padding-bottom:14px}
+.nav{font-size:12px;color:#7c7680;display:flex;flex-direction:column;align-items:center;gap:6px}.nav b{width:22px;height:22px;border:2px solid currentColor;border-radius:7px}.nav.active{color:#111;font-weight:800}.nav.active b{background:var(--lime)}
+.toast{position:fixed;left:50%;bottom:120px;transform:translateX(-50%) translateY(20px);background:#111;color:#fff;padding:11px 16px;border-radius:999px;opacity:0;transition:.2s;z-index:99;font-size:13px}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(min-width:431px){body{padding:24px}.app{min-height:880px;border-radius:34px;border:1px solid #ddd}.screen{min-height:880px}}
+
+/* Ability CRUD */
+.ability-toolbar{display:flex;justify-content:space-between;align-items:center;margin:2px 2px 12px}
+.ability-toolbar .hint{font-size:13px;color:var(--muted)}
+.icon-btn{width:36px;height:36px;border:1px solid var(--line);background:#fff;border-radius:12px;font-size:20px;font-weight:800;cursor:pointer}
+.ability-card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:16px;margin-bottom:12px}
+.ability-main{display:flex;align-items:flex-start;gap:12px}
+.ability-type-icon{width:46px;height:46px;border-radius:15px;background:var(--lime);display:grid;place-items:center;font-size:21px;flex:0 0 46px}
+.ability-actions{display:flex;gap:8px;margin-left:auto}
+.ability-fields{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.field-chip{padding:6px 9px;border-radius:999px;background:#f3f1f4;font-size:12px;color:#625d65;font-weight:750}
+.field-chip strong{color:#1b1b1b;margin-right:3px}
+.sheet-mask{position:fixed;inset:0;background:rgba(0,0,0,.26);display:none;align-items:flex-end;justify-content:center;z-index:100}
+.sheet-mask.show{display:flex}
+.sheet{width:min(430px,100%);background:#fff;border-radius:26px 26px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.sheet-title{font-size:20px;font-weight:900}
+.sheet-close{border:none;background:#f3f1f4;width:34px;height:34px;border-radius:50%;font-size:20px;cursor:pointer}
+.form-row{margin-bottom:14px}
+.form-label{display:block;font-size:13px;font-weight:800;margin-bottom:7px}
+.form-control{width:100%;border:1px solid var(--line);background:#fff;border-radius:14px;padding:12px 13px;color:#1c1c1c;outline:none}
+.form-control:focus{border-color:#b8b2bc}
+.check-grid{display:flex;flex-wrap:wrap;gap:8px}
+.check-chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:9px 11px;font-size:13px;font-weight:700;cursor:pointer}
+.check-chip.on{background:var(--lime);border-color:var(--lime);color:#111}
+.sheet-actions{display:flex;gap:10px;position:sticky;bottom:-18px;background:#fff;padding:12px 0 2px}
+.sheet-actions button{flex:1}
+.danger-link{border:none;background:transparent;color:#c63232;font-weight:800;padding:8px 0;cursor:pointer}
+.system-note{font-size:12px;line-height:1.5;color:#817b84;background:#faf9fb;border:1px solid var(--line);border-radius:14px;padding:11px 12px;margin-bottom:14px}
+
+
+/* Hourly availability planner */
+.schedule-summary{
+  background:#fff;border:1px solid var(--line);border-radius:22px;padding:16px;margin-bottom:12px
+}
+.schedule-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.schedule-stat{font-size:24px;font-weight:900;letter-spacing:-.4px}
+.schedule-stat small{font-size:13px;color:var(--muted);font-weight:700;margin-left:4px}
+.schedule-note{font-size:12px;color:#8d8791;line-height:1.45;margin-top:5px}
+.schedule-list{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.schedule-item{
+  display:flex;align-items:center;gap:12px;padding:12px;border-radius:16px;background:#faf9fb;border:1px solid #f0edf2
+}
+.schedule-date{
+  width:48px;height:48px;border-radius:14px;background:var(--lime);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05;flex:0 0 48px
+}
+.schedule-date b{font-size:17px}.schedule-date span{font-size:10px;font-weight:800;margin-top:3px}
+.schedule-time{font-size:15px;font-weight:850}
+.schedule-duration{font-size:12px;color:#8d8791;margin-top:3px}
+.schedule-remove{margin-left:auto;border:none;background:transparent;color:#9b949e;font-size:20px;cursor:pointer}
+.time-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.constraint{
+  display:flex;align-items:center;gap:8px;background:#faf9fb;border:1px solid var(--line);
+  border-radius:14px;padding:10px 11px;font-size:12px;color:#78717b;margin-bottom:14px
+}
+.constraint b{color:#111}
+
+
+/* Integrated reviewed availability v2 */
+#availability-screen .availability-subtitle{font-size:14px;color:#8d8792;line-height:1.5;margin:8px 2px 18px}
+#availability-screen .availability-card{background:#fff;border:1px solid #e9e6eb;border-radius:22px;padding:16px;margin-bottom:12px}
+#availability-screen .availability-rule-row{display:flex;align-items:center;gap:12px}
+#availability-screen .availability-rule-icon{width:46px;height:46px;border-radius:15px;background:var(--lime);display:grid;place-items:center;font-size:21px;font-weight:900}
+#availability-screen .availability-kicker{font-size:12px;color:#8d8792;font-weight:750}
+#availability-screen .availability-rule-text{font-size:18px;font-weight:900;margin-top:3px}
+#availability-screen .availability-edit{border:1px solid var(--line);background:#fff;border-radius:13px;padding:8px 12px;font-size:13px;font-weight:850}
+#availability-screen .availability-month-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+#availability-screen .availability-month-title{font-size:18px;font-weight:900}
+#availability-screen .availability-reset{border:none;background:transparent;color:#7f7982;font-size:12px;font-weight:800;padding:6px 0}
+#availability-screen .availability-weekdays,
+#availability-screen .availability-calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}
+#availability-screen .availability-weekday{text-align:center;color:#9c96a0;font-size:11px;font-weight:850;padding:3px 0}
+#availability-screen .availability-day{
+  aspect-ratio:1/1;border:1px solid var(--line);background:#fff;border-radius:15px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;padding:0;min-width:0
+}
+#availability-screen .availability-day.blank{background:#fff}
+#availability-screen .availability-day.base{background:#fff}
+#availability-screen .availability-day.base::after{
+  content:"";position:absolute;bottom:7px;width:7px;height:7px;border-radius:50%;
+  background:var(--lime);box-shadow:0 0 0 1px #a8d600 inset
+}
+#availability-screen .availability-day.full{background:var(--lime);border-color:var(--lime)}
+#availability-screen .availability-day.custom{background:#fff;border:2px solid #111}
+#availability-screen .availability-day.off{background:#f1eff2;color:#aaa4ad;border-color:#f1eff2}
+#availability-screen .availability-day.off::after{content:"×";position:absolute;bottom:3px;font-size:14px;font-weight:900;color:#8d8792}
+#availability-screen .availability-day .num{font-size:15px;font-weight:900;line-height:1}
+#availability-screen .availability-day .monthmark{font-size:8px;color:#8d8792;margin-top:4px;font-weight:800}
+#availability-screen .availability-day .custom-pill{
+  margin-top:5px;background:#111;color:#fff;border-radius:999px;padding:2px 5px;
+  font-size:8px;font-weight:850;line-height:1.2
+}
+#availability-screen .availability-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:13px}
+#availability-screen .availability-legend-item{display:flex;align-items:center;gap:6px;font-size:11px;color:#7d7681}
+#availability-screen .availability-lg{width:11px;height:11px;border-radius:4px;border:1px solid var(--line);background:#fff}
+#availability-screen .availability-lg.base{width:7px;height:7px;border-radius:50%;background:var(--lime);border-color:#a8d600}
+#availability-screen .availability-lg.full{background:var(--lime);border-color:var(--lime)}
+#availability-screen .availability-lg.custom{border:2px solid #111}
+#availability-screen .availability-lg.off{background:#f1eff2;border-color:#f1eff2}
+#availability-screen .availability-tip{
+  margin-top:13px;padding:11px 12px;border-radius:14px;background:#faf9fb;border:1px solid var(--line);
+  color:#7f7982;font-size:12px;line-height:1.5
+}
+.av-mask{position:fixed;inset:0;background:rgba(0,0,0,.25);display:none;align-items:flex-end;justify-content:center;z-index:120}
+.av-mask.show{display:flex}
+.av-sheet{width:min(430px,100%);background:#fff;border-radius:26px 26px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:86vh;overflow:auto}
+.av-sheet-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.av-sheet-title{font-size:20px;font-weight:900}
+.av-close{border:none;background:#f2f0f3;width:34px;height:34px;border-radius:50%;font-size:20px}
+.av-presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.av-preset{border:1px solid var(--line);background:#fff;border-radius:999px;padding:10px 13px;font-size:13px;font-weight:800}
+.av-preset.active{background:var(--lime);border-color:var(--lime)}
+.av-days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:14px}
+.av-wd{height:38px;border:1px solid var(--line);background:#fff;border-radius:12px;font-size:12px;font-weight:800}
+.av-wd.active{background:#111;color:#fff;border-color:#111}
+.av-time-row{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
+.av-control{height:50px;border:1px solid var(--line);border-radius:14px;background:#fff;padding:0 12px;width:100%}
+.av-arrow{color:#999;font-weight:900}
+.av-sheet-actions{display:flex;gap:10px;margin-top:16px}
+.av-sheet-actions button{flex:1;height:50px;border-radius:15px;font-weight:900}
+.av-secondary{border:1px solid var(--line);background:#fff}
+.av-primary{border:none;background:var(--lime)}
+.av-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.av-action{border:1px solid var(--line);background:#fff;border-radius:17px;padding:14px;text-align:left}
+.av-action strong{display:block;font-size:15px}
+.av-action span{display:block;font-size:11px;color:#8d8792;margin-top:4px}
+.av-action.full{background:var(--lime);border-color:var(--lime)}
+.av-custom-box{display:none;margin-top:14px}
+.av-custom-box.show{display:block}
+
+</style>
+</head>
+<body>
+<div class="app">
+
+<section class="screen active" id="home">
+  <div class="status"><span>9:41</span><span>● ● ●</span></div>
+  <div class="brand"><div class="logo">◉</div>Proxy</div>
+  <div class="section-head"><h1>我的市场</h1><span>个人资产</span></div>
+
+  <div class="module-list">
+    <button class="module" data-target="orders">
+      <div class="module-icon">◇</div>
+      <div><div class="module-title">我的订单</div><div class="module-sub">我发布的 / 我参与的订单与交易记录</div></div>
+      <div class="chev">›</div>
+    </button>
+    <button class="module" data-target="skills">
+      <div class="module-icon">◷</div>
+      <div><div class="module-title">能力与可用时间</div><div class="module-sub">能力、主题、区域与空闲时间</div></div>
+      <div class="chev">›</div>
+    </button>
+    <button class="module" data-target="events">
+      <div class="module-icon">○</div>
+      <div><div class="module-title">我的活动</div><div class="module-sub">已参加 / 我发起的活动</div></div>
+      <div class="chev">›</div>
+    </button>
+    <button class="module" data-target="saves">
+      <div class="module-icon">☆</div>
+      <div><div class="module-title">收藏</div><div class="module-sub">商家、Creator、动态与活动</div></div>
+      <div class="chev">›</div>
+    </button>
+  </div>
+
+  <nav class="bottom-nav">
+    <div class="nav"><b></b><span>首页</span></div>
+    <div class="nav active"><b></b><span>市场</span></div>
+    <div class="nav"><b></b><span>动态</span></div>
+    <div class="nav"><b></b><span>消息</span></div>
+    <div class="nav"><b></b><span>我的</span></div>
+  </nav>
+</section>
+
+<section class="screen" id="orders">
+  <div class="detail-top">
+    <button class="back" data-back>‹</button>
+    <div class="detail-title">我的订单</div>
+  </div>
+  <div class="tabs">
+    <button class="tab active" data-og="all">全部</button>
+    <button class="tab" data-og="published">我发布的</button>
+    <button class="tab" data-og="joined">我参与的</button>
+    <button class="tab" data-og="done">已完成</button>
+    <button class="tab" data-og="cancelled">已取消</button>
+  </div>
+
+  <div class="order-card card" data-type="published">
+    <div class="order-head">
+      <div>
+        <div class="title-sm">同行 · 河内老城区半日</div>
+        <div class="order-id">订单编号：PX-20260825-001284</div>
+      </div>
+      <span class="badge live">进行中</span>
+    </div>
+    <div class="divider"></div>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">订单类型</div><div class="value">同行服务</div></div>
+      <div class="info-item"><div class="label">订单金额</div><div class="value">₫350,000</div></div>
+      <div class="info-item"><div class="label">服务时间</div><div class="value">今天 14:00–18:00</div></div>
+      <div class="info-item"><div class="label">地点</div><div class="value">河内 · 还剑湖</div></div>
+      <div class="info-item"><div class="label">对方</div><div class="value">Minh Nguyen</div></div>
+      <div class="info-item"><div class="label">付款状态</div><div class="value">已支付</div></div>
+      <div class="info-item"><div class="label">下单时间</div><div class="value">8月25日 10:42</div></div>
+      <div class="info-item"><div class="label">结算状态</div><div class="value">服务完成后结算</div></div>
+    </div>
+    <div class="status-strip"><span class="dot green"></span><span>已接单 · 等待服务开始</span></div>
+    <div class="order-actions">
+      <button class="btn" onclick="toast('打开消息')">联系对方</button>
+      <button class="btn primary" onclick="showDetail()">订单详情</button>
+    </div>
+  </div>
+
+  <div class="order-card card" data-type="joined">
+    <div class="order-head">
+      <div>
+        <div class="title-sm">现场翻译 · 美甲店沟通</div>
+        <div class="order-id">订单编号：PX-20260823-000947</div>
+      </div>
+      <span class="badge">待确认</span>
+    </div>
+    <div class="divider"></div>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">订单类型</div><div class="value">翻译</div></div>
+      <div class="info-item"><div class="label">订单金额</div><div class="value">₫220,000</div></div>
+      <div class="info-item"><div class="label">服务时间</div><div class="value">8月27日 16:00</div></div>
+      <div class="info-item"><div class="label">地点</div><div class="value">西湖区</div></div>
+      <div class="info-item"><div class="label">发布者</div><div class="value">Linh Tran</div></div>
+      <div class="info-item"><div class="label">付款状态</div><div class="value">待支付</div></div>
+    </div>
+    <div class="order-actions">
+      <button class="btn" onclick="toast('已拒绝')">拒绝</button>
+      <button class="btn lime" onclick="toast('已接受订单')">接受订单</button>
+    </div>
+  </div>
+
+  <div class="order-card card" data-type="done">
+    <div class="order-head">
+      <div>
+        <div class="title-sm">拍照 · 店铺体验记录</div>
+        <div class="order-id">订单编号：PX-20260818-000613</div>
+      </div>
+      <span class="badge">已完成</span>
+    </div>
+    <div class="divider"></div>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">订单金额</div><div class="value">₫180,000</div></div>
+      <div class="info-item"><div class="label">实付金额</div><div class="value">₫180,000</div></div>
+      <div class="info-item"><div class="label">完成时间</div><div class="value">8月18日 17:36</div></div>
+      <div class="info-item"><div class="label">结算状态</div><div class="value">已结算</div></div>
+    </div>
+    <div class="order-actions">
+      <button class="btn" onclick="toast('再次发布类似需求')">再次发布</button>
+      <button class="btn primary" onclick="showDetail()">查看详情</button>
+    </div>
+  </div>
+
+  <div class="order-card card" data-type="cancelled">
+    <div class="order-head">
+      <div>
+        <div class="title-sm">同行 · 西湖夜游</div>
+        <div class="order-id">订单编号：PX-20260812-000421</div>
+      </div>
+      <span class="badge">已取消</span>
+    </div>
+    <div class="divider"></div>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">订单金额</div><div class="value">₫300,000</div></div>
+      <div class="info-item"><div class="label">退款状态</div><div class="value">已退款</div></div>
+      <div class="info-item"><div class="label">取消时间</div><div class="value">8月12日 13:20</div></div>
+      <div class="info-item"><div class="label">取消原因</div><div class="value">行程变更</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="order-detail">
+  <div class="detail-top">
+    <button class="back" onclick="show('orders')">‹</button>
+    <div class="detail-title">订单详情</div>
+  </div>
+
+  <div class="card">
+    <div class="order-head">
+      <div>
+        <div class="title-sm">同行 · 河内老城区半日</div>
+        <div class="order-id">PX-20260825-001284</div>
+      </div>
+      <span class="badge live">进行中</span>
+    </div>
+    <div class="notice">订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</div>
+  </div>
+
+  <div class="card">
+    <div class="title-sm">服务信息</div>
+    <div class="divider"></div>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">类型</div><div class="value">同行服务</div></div>
+      <div class="info-item"><div class="label">服务时间</div><div class="value">8月25日 14:00–18:00</div></div>
+      <div class="info-item"><div class="label">地点</div><div class="value">河内 · 还剑湖</div></div>
+      <div class="info-item"><div class="label">需求方</div><div class="value">Huyen Nguyen</div></div>
+      <div class="info-item"><div class="label">服务方</div><div class="value">Minh Nguyen</div></div>
+      <div class="info-item"><div class="label">下单时间</div><div class="value">8月25日 10:42</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="title-sm">费用与结算</div>
+    <div class="divider"></div>
+    <div class="info-grid">
+      <div class="info-item"><div class="label">服务金额</div><div class="value">₫350,000</div></div>
+      <div class="info-item"><div class="label">优惠</div><div class="value">₫0</div></div>
+      <div class="info-item"><div class="label">实付金额</div><div class="value">₫350,000</div></div>
+      <div class="info-item"><div class="label">付款方式</div><div class="value">Proxy Wallet</div></div>
+      <div class="info-item"><div class="label">付款状态</div><div class="value">已支付</div></div>
+      <div class="info-item"><div class="label">结算状态</div><div class="value">待服务完成</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="title-sm">订单进度</div>
+    <div class="divider"></div>
+    <div class="meta">10:42　订单创建</div>
+    <div class="meta">10:44　支付成功</div>
+    <div class="meta">10:51　Minh 已接单</div>
+    <div class="meta">14:00　等待服务开始</div>
+  </div>
+
+  <div class="order-actions">
+    <button class="btn" onclick="toast('打开退款/取消规则')">取消 / 退款</button>
+    <button class="btn primary" onclick="toast('打开与对方的聊天')">联系对方</button>
+  </div>
+</section>
+
+<section class="screen" id="skills">
+  <div class="detail-top">
+    <button class="back" data-back>‹</button>
+    <div class="detail-title">能力与可用时间</div>
+    <div class="spacer"></div>
+    <button class="icon-btn" onclick="openAbilitySheet()">＋</button>
+  </div>
+
+  <div class="copy">从 Proxy 提供的能力类型中选择，再补充你的实际范围与服务条件。时间统一按小时（H）管理，最多安排未来 30 天。</div>
+
+  <div class="ability-toolbar">
+    <div class="hint">已启用 2 项能力</div>
+    <button class="btn" onclick="show('availability-screen')">可用时间</button>
+  </div>
+
+  <div id="ability-list">
+    <div class="ability-card" data-id="companion" data-type="同行">
+      <div class="ability-main">
+        <div class="ability-type-icon">◎</div>
+        <div class="grow">
+          <div class="title-sm">同行</div>
+          <div class="meta">现实场景陪伴与本地协助</div>
+        </div>
+        <div class="ability-actions">
+          <button class="btn" onclick="editAbility('companion')">编辑</button>
+        </div>
+      </div>
+      <div class="ability-fields">
+        <span class="field-chip"><strong>区域</strong> 河内</span>
+        <span class="field-chip"><strong>主题</strong> 旅行 / 消费</span>
+        <span class="field-chip"><strong>方式</strong> 线下</span>
+        <span class="field-chip"><strong>时间</strong> 跟随行程</span>
+      </div>
+    </div>
+
+    <div class="ability-card" data-id="translation" data-type="翻译">
+      <div class="ability-main">
+        <div class="ability-type-icon">译</div>
+        <div class="grow">
+          <div class="title-sm">翻译</div>
+          <div class="meta">消费与日常场景的现场沟通</div>
+        </div>
+        <div class="ability-actions">
+          <button class="btn" onclick="editAbility('translation')">编辑</button>
+        </div>
+      </div>
+      <div class="ability-fields">
+        <span class="field-chip"><strong>语言</strong> 中文 ↔ 越南语</span>
+        <span class="field-chip"><strong>场景</strong> 消费 / 日常</span>
+        <span class="field-chip"><strong>方式</strong> 线下</span>
+        <span class="field-chip"><strong>区域</strong> 河内</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Ability editor -->
+<div class="sheet-mask" id="ability-sheet" onclick="if(event.target===this) closeAbilitySheet()">
+  <div class="sheet">
+    <div class="sheet-head">
+      <div class="sheet-title" id="ability-sheet-title">添加能力</div>
+      <button class="sheet-close" onclick="closeAbilitySheet()">×</button>
+    </div>
+
+    <div class="system-note">能力类型与字段由 Proxy 定义，用户只维护自己的能力实例。这样搜索、匹配、下单和后续扩展都能使用同一套结构化数据。</div>
+
+    <div class="form-row">
+      <label class="form-label">能力类型</label>
+      <select class="form-control" id="ability-type" onchange="renderAbilityFields()">
+        <option value="同行">同行</option>
+        <option value="翻译">翻译</option>
+        <option value="拍照">拍照</option>
+      </select>
+    </div>
+
+    <div id="dynamic-fields"></div>
+
+    <div class="form-row">
+      <label class="form-label">补充说明（可选）</label>
+      <input class="form-control" id="ability-note" placeholder="例如：更熟悉老城区与西湖一带" />
+    </div>
+
+    <div id="delete-wrap" style="display:none">
+      <button class="danger-link" onclick="deleteAbility()">删除这项能力</button>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn" onclick="closeAbilitySheet()">取消</button>
+      <button class="btn lime" onclick="saveAbility()">保存</button>
+    </div>
+  </div>
+</div>
+
+
+<section class="screen" id="availability-screen">
+  <div class="detail-top">
+    <button class="back" onclick="show('skills')">‹</button>
+    <div class="detail-title">可用时间</div>
+  </div>
+  <div class="availability-subtitle">固定规律只设一次。临时变化直接点日期覆盖；没有规律的人直接点空白日期。</div>
+
+  <div class="availability-card">
+    <div class="availability-rule-row">
+      <div class="availability-rule-icon">◷</div>
+      <div class="grow">
+        <div class="availability-kicker">常用规律</div>
+        <div class="availability-rule-text" id="avRuleText">每天 · 18:00–23:00</div>
+      </div>
+      <button class="availability-edit" onclick="avOpenRule()">编辑</button>
+    </div>
+  </div>
+
+  <div class="availability-card">
+    <div class="availability-month-head">
+      <div class="availability-month-title">未来 30 天</div>
+      <button class="availability-reset" id="avResetExceptions" onclick="avResetAllOverrides()">清除例外</button>
+    </div>
+
+    <div class="availability-weekdays">
+      <div class="availability-weekday">一</div><div class="availability-weekday">二</div><div class="availability-weekday">三</div>
+      <div class="availability-weekday">四</div><div class="availability-weekday">五</div><div class="availability-weekday">六</div><div class="availability-weekday">日</div>
+    </div>
+    <div class="availability-calendar" id="avCalendar"></div>
+
+    <div class="availability-legend">
+      <div class="availability-legend-item"><span class="availability-lg base"></span>规律可用</div>
+      <div class="availability-legend-item"><span class="availability-lg full"></span>全天可用</div>
+      <div class="availability-legend-item"><span class="availability-lg custom"></span>自定义时段</div>
+      <div class="availability-legend-item"><span class="availability-lg off"></span>不可用</div>
+    </div>
+
+    <div class="availability-tip">
+      日历不重复显示默认时间。规律只在上面显示一次；日历只强调例外状态。
+    </div>
+  </div>
+</section>
+
+<!-- Availability recurring rule -->
+<div class="av-mask" id="avRuleMask" onclick="if(event.target===this) avCloseRule()">
+  <div class="av-sheet">
+    <div class="av-sheet-head">
+      <div class="av-sheet-title">常用规律</div>
+      <button class="av-close" onclick="avCloseRule()">×</button>
+    </div>
+    <div class="av-presets">
+      <button class="av-preset active" data-av-preset="daily">每天</button>
+      <button class="av-preset" data-av-preset="weekday">工作日</button>
+      <button class="av-preset" data-av-preset="weekend">周末</button>
+      <button class="av-preset" data-av-preset="custom">自定义</button>
+    </div>
+    <div class="av-days">
+      <button class="av-wd active" data-av-day="1">一</button>
+      <button class="av-wd active" data-av-day="2">二</button>
+      <button class="av-wd active" data-av-day="3">三</button>
+      <button class="av-wd active" data-av-day="4">四</button>
+      <button class="av-wd active" data-av-day="5">五</button>
+      <button class="av-wd active" data-av-day="6">六</button>
+      <button class="av-wd active" data-av-day="0">日</button>
+    </div>
+    <div class="av-time-row">
+      <select class="av-control" id="avRuleStart"></select>
+      <div class="av-arrow">→</div>
+      <select class="av-control" id="avRuleEnd"></select>
+    </div>
+    <div class="av-sheet-actions">
+      <button class="av-secondary" onclick="avClearRule()">清除规律</button>
+      <button class="av-primary" onclick="avSaveRule()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Availability day override -->
+<div class="av-mask" id="avDayMask" onclick="if(event.target===this) avCloseDay()">
+  <div class="av-sheet">
+    <div class="av-sheet-head">
+      <div>
+        <div class="av-sheet-title" id="avDayTitle">8月27日</div>
+        <div class="availability-kicker" id="avDayCurrent">跟随规律</div>
+      </div>
+      <button class="av-close" onclick="avCloseDay()">×</button>
+    </div>
+    <div class="av-actions">
+      <button class="av-action full" onclick="avApplyDay('full')">
+        <strong>全天可用</strong><span>点一下完成</span>
+      </button>
+      <button class="av-action" onclick="avApplyDay('off')">
+        <strong>不可用</strong><span>覆盖当天</span>
+      </button>
+      <button class="av-action" onclick="avToggleCustom()">
+        <strong>自定义时段</strong><span>只改这一天</span>
+      </button>
+      <button class="av-action" onclick="avApplyDay('inherit')">
+        <strong>恢复默认</strong><span>彻底删除当天例外</span>
+      </button>
+    </div>
+    <div class="av-custom-box" id="avCustomBox">
+      <div class="av-time-row">
+        <select class="av-control" id="avCustomStart"></select>
+        <div class="av-arrow">→</div>
+        <select class="av-control" id="avCustomEnd"></select>
+      </div>
+      <button class="av-primary" style="width:100%;height:50px;border-radius:15px;font-weight:900;margin-top:12px" onclick="avSaveCustom()">保存时段</button>
+    </div>
+  </div>
+</div>
+
+
+<section class="screen" id="events">
+  <div class="detail-top"><button class="back" data-back>‹</button><div class="detail-title">我的活动</div></div>
+  <div class="tabs"><button class="tab active">已参加</button><button class="tab">我发起的</button></div>
+  <div class="simple-card"><div class="title-sm">周末美甲体验</div><div class="meta">8月30日 14:00 · Luna Spa</div></div>
+  <div class="simple-card"><div class="title-sm">河内 Creator Coffee</div><div class="meta">9月6日 10:30 · Tây Hồ</div></div>
+</section>
+
+<section class="screen" id="saves">
+  <div class="detail-top"><button class="back" data-back>‹</button><div class="detail-title">收藏</div></div>
+  <div class="copy">很轻的个人备忘夹。以后还想找到，就放这里。</div>
+  <div class="tabs"><button class="tab active">全部</button><button class="tab">商家</button><button class="tab">Creator</button><button class="tab">动态</button><button class="tab">活动</button></div>
+  <div class="simple-card save-line"><div class="thumb">☆</div><div class="grow"><div class="title-sm">Luna Spa</div><div class="meta">Beauty & Wellness · 西湖区</div></div></div>
+  <div class="simple-card save-line"><div class="thumb">☆</div><div class="grow"><div class="title-sm">Linh Tran</div><div class="meta">Creator · 美妆 / Lifestyle</div></div></div>
+</section>
+
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+function show(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active', s.id===id));
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('[data-target]').forEach(b=>b.onclick=()=>show(b.dataset.target));
+document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show('home'));
+function showDetail(){show('order-detail')}
+function toast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  clearTimeout(window.tt);window.tt=setTimeout(()=>t.classList.remove('show'),1400);
+}
+document.querySelectorAll('[data-og]').forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll('[data-og]').forEach(x=>x.classList.remove('active'));
+    btn.classList.add('active');
+    const f=btn.dataset.og;
+    document.querySelectorAll('.order-card').forEach(c=>{
+      c.style.display=(f==='all'||c.dataset.type===f)?'block':'none';
+    });
+  }
+});
+
+let editingAbilityId = null;
+
+const abilitySchemas = {
+  "同行": {
+    icon:"◎",
+    subtitle:"现实场景陪伴与本地协助",
+    fields:[
+      {id:"area", label:"服务区域", type:"select", options:["河内","胡志明市","岘港"]},
+      {id:"topic", label:"主题", type:"chips", options:["旅行","消费","美食","购物","城市探索"]},
+      {id:"mode", label:"服务方式", type:"chips", options:["线下"]},
+      {id:"time", label:"时间规则", type:"chips", options:["跟随未来30天行程","仅已安排时段"]}
+    ]
+  },
+  "翻译": {
+    icon:"译",
+    subtitle:"消费与日常场景的现场沟通",
+    fields:[
+      {id:"pair", label:"语言组合", type:"select", options:["中文 ↔ 越南语","英语 ↔ 越南语","中文 ↔ 英语"]},
+      {id:"scene", label:"适用场景", type:"chips", options:["消费","日常","旅行","简单商务"]},
+      {id:"mode", label:"服务方式", type:"chips", options:["线下","语音","视频"]},
+      {id:"area", label:"线下区域", type:"select", options:["河内","胡志明市","岘港","不限"]}
+    ]
+  },
+  "拍照": {
+    icon:"⌁",
+    subtitle:"旅行与消费场景的轻量拍摄",
+    fields:[
+      {id:"scene", label:"拍摄场景", type:"chips", options:["旅行","探店","人物","活动"]},
+      {id:"device", label:"设备", type:"chips", options:["手机","相机"]},
+      {id:"area", label:"服务区域", type:"select", options:["河内","胡志明市","岘港"]},
+      {id:"time", label:"时间规则", type:"chips", options:["跟随未来30天行程","仅已安排时段"]}
+    ]
+  }
+};
+
+function openAbilitySheet(type){
+  editingAbilityId = null;
+  document.getElementById('ability-sheet-title').textContent='添加能力';
+  document.getElementById('delete-wrap').style.display='none';
+  document.getElementById('ability-type').disabled=false;
+  if(type) document.getElementById('ability-type').value=type;
+  renderAbilityFields();
+  document.getElementById('ability-note').value='';
+  document.getElementById('ability-sheet').classList.add('show');
+}
+function closeAbilitySheet(){document.getElementById('ability-sheet').classList.remove('show')}
+
+function renderAbilityFields(){
+  const type=document.getElementById('ability-type').value;
+  const schema=abilitySchemas[type];
+  const wrap=document.getElementById('dynamic-fields');
+  wrap.innerHTML='';
+  schema.fields.forEach((f,idx)=>{
+    const row=document.createElement('div');
+    row.className='form-row';
+    const label=document.createElement('label');
+    label.className='form-label';
+    label.textContent=f.label;
+    row.appendChild(label);
+    if(f.type==='select'){
+      const sel=document.createElement('select');
+      sel.className='form-control'; sel.dataset.field=f.id;
+      f.options.forEach(o=>{const op=document.createElement('option');op.textContent=o;op.value=o;sel.appendChild(op)});
+      row.appendChild(sel);
+    }else{
+      const grid=document.createElement('div');grid.className='check-grid';grid.dataset.field=f.id;
+      f.options.forEach((o,i)=>{
+        const b=document.createElement('button');b.type='button';b.className='check-chip'+(i===0?' on':'');b.textContent=o;
+        b.onclick=()=>b.classList.toggle('on');
+        grid.appendChild(b);
+      });
+      row.appendChild(grid);
+    }
+    wrap.appendChild(row);
+  });
+}
+
+function editAbility(id){
+  editingAbilityId=id;
+  const card=document.querySelector(`[data-id="${id}"]`);
+  const type=card.dataset.type;
+  document.getElementById('ability-sheet-title').textContent='编辑能力';
+  document.getElementById('ability-type').value=type;
+  document.getElementById('ability-type').disabled=true;
+  document.getElementById('delete-wrap').style.display='block';
+  renderAbilityFields();
+  document.getElementById('ability-sheet').classList.add('show');
+}
+
+function collectAbilityValues(){
+  const vals=[];
+  document.querySelectorAll('#dynamic-fields [data-field]').forEach(el=>{
+    const label=el.closest('.form-row').querySelector('.form-label').textContent;
+    if(el.tagName==='SELECT') vals.push([label,el.value]);
+    else{
+      const selected=[...el.querySelectorAll('.check-chip.on')].map(x=>x.textContent);
+      if(selected.length) vals.push([label,selected.join(' / ')]);
+    }
+  });
+  return vals;
+}
+
+function saveAbility(){
+  const type=document.getElementById('ability-type').value;
+  const schema=abilitySchemas[type];
+  const vals=collectAbilityValues();
+  const mapLabel = {"服务区域":"区域","主题":"主题","服务方式":"方式","能力可用时间":"时间","时间规则":"时间","语言组合":"语言","适用场景":"场景","线下区域":"区域","拍摄场景":"场景","设备":"设备"};
+  let card;
+  if(editingAbilityId){
+    card=document.querySelector(`[data-id="${editingAbilityId}"]`);
+  }else{
+    const id='ability-'+Date.now();
+    card=document.createElement('div');
+    card.className='ability-card'; card.dataset.id=id; card.dataset.type=type;
+    document.getElementById('ability-list').appendChild(card);
+  }
+  card.dataset.type=type;
+  card.innerHTML=`
+    <div class="ability-main">
+      <div class="ability-type-icon">${schema.icon}</div>
+      <div class="grow"><div class="title-sm">${type}</div><div class="meta">${schema.subtitle}</div></div>
+      <div class="ability-actions"><button class="btn" onclick="editAbility('${card.dataset.id}')">编辑</button></div>
+    </div>
+    <div class="ability-fields">
+      ${vals.slice(0,4).map(([k,v])=>`<span class="field-chip"><strong>${mapLabel[k]||k}</strong> ${v}</span>`).join('')}
+    </div>`;
+  closeAbilitySheet(); toast(editingAbilityId?'能力已更新':'能力已添加');
+}
+
+function deleteAbility(){
+  if(!editingAbilityId) return;
+  const card=document.querySelector(`[data-id="${editingAbilityId}"]`);
+  if(card) card.remove();
+  closeAbilitySheet(); toast('能力已删除');
+}
+
+
+
+
+
+// ===== Availability: reviewed v2 integrated =====
+const avToday = new Date(2026,7,25);
+const avHorizon = 30;
+
+// Priority retained for future integration: external manual online/offline > manual day > manual rule > AI day > AI rule.
+// This screen owns schedule only. The separate online/offline switch remains outside this module.
+let avRule = {days:[0,1,2,3,4,5,6], start:18, end:23, source:"manual"};
+let avOverrides = {
+  "2026-08-27": {type:"off", source:"manual"},
+  "2026-08-30": {type:"full", source:"manual"},
+  "2026-09-03": {type:"custom", start:19, end:22, source:"manual"}
+};
+let avSelectedKey = null;
+
+function avPad(n){return String(n).padStart(2,"0")}
+function avKeyOf(d){return d.getFullYear()+"-"+avPad(d.getMonth()+1)+"-"+avPad(d.getDate())}
+function avFmt(h){return avPad(h)+":00"}
+
+function avRuleApplies(d){return avRule && avRule.days.includes(d.getDay())}
+function avStateFor(d){
+  const k=avKeyOf(d);
+  if(avOverrides[k]) return avOverrides[k];
+  if(avRuleApplies(d)) return {type:"base",start:avRule.start,end:avRule.end};
+  return {type:"blank"};
+}
+
+function avRenderCalendar(){
+  const cal=document.getElementById("avCalendar");
+  if(!cal) return;
+  cal.innerHTML="";
+  const mondayIndex=(avToday.getDay()+6)%7;
+  for(let i=0;i<mondayIndex;i++){
+    const x=document.createElement("div");
+    x.className="availability-day blank";
+    x.style.visibility="hidden";
+    cal.appendChild(x);
+  }
+
+  for(let i=0;i<avHorizon;i++){
+    const d=new Date(avToday);
+    d.setDate(avToday.getDate()+i);
+    const s=avStateFor(d);
+    const b=document.createElement("button");
+    b.className="availability-day "+s.type;
+
+    let inner='<span class="num">'+d.getDate()+'</span>';
+    if(d.getDate()===1) inner+='<span class="monthmark">'+(d.getMonth()+1)+'月</span>';
+    if(s.type==="custom") inner+='<span class="custom-pill">'+avPad(s.start)+'–'+avPad(s.end)+'</span>';
+    b.innerHTML=inner;
+
+    b.onclick=()=>{
+      if(s.type==="blank"){
+        avOverrides[avKeyOf(d)]={type:"full",source:"manual"};
+        avRenderCalendar();
+        toast("已设为全天可用");
+      }else{
+        avOpenDay(d);
+      }
+    };
+    cal.appendChild(b);
+  }
+
+  const reset=document.getElementById("avResetExceptions");
+  if(reset) reset.style.visibility = Object.keys(avOverrides).length ? "visible" : "hidden";
+}
+
+function avDescribeRule(){
+  if(!avRule) return "未设置";
+  const sorted=[...avRule.days].sort((a,b)=>a-b);
+  let prefix="自定义";
+  if(sorted.length===7) prefix="每天";
+  else if(JSON.stringify(sorted)===JSON.stringify([1,2,3,4,5])) prefix="工作日";
+  else if(JSON.stringify(sorted)===JSON.stringify([0,6])) prefix="周末";
+  return prefix+" · "+avFmt(avRule.start)+"–"+avFmt(avRule.end);
+}
+function avRefreshRule(){
+  const el=document.getElementById("avRuleText");
+  if(el) el.textContent=avDescribeRule();
+}
+
+function avInitTimes(){
+  [["avRuleStart",0,23],["avCustomStart",0,23],["avRuleEnd",1,24],["avCustomEnd",1,24]].forEach(([id,min,max])=>{
+    const s=document.getElementById(id);
+    if(!s || s.options.length) return;
+    for(let h=min;h<=max;h++){
+      const label=h===24?"24:00":avFmt(h);
+      s.add(new Option(label,h));
+    }
+  });
+  if(document.getElementById("avRuleStart")){
+    avRuleStart.value=18; avRuleEnd.value=23;
+    avCustomStart.value=19; avCustomEnd.value=22;
+  }
+}
+
+function avOpenRule(){avInitTimes();document.getElementById("avRuleMask").classList.add("show")}
+function avCloseRule(){document.getElementById("avRuleMask").classList.remove("show")}
+function avSaveRule(){
+  const days=[...document.querySelectorAll(".av-wd.active")].map(x=>Number(x.dataset.avDay));
+  const start=Number(avRuleStart.value),end=Number(avRuleEnd.value);
+  if(!days.length){toast("至少选择一天");return}
+  if(end<=start){toast("结束时间需晚于开始时间");return}
+  avRule={days,start,end,source:"manual"};
+  avCloseRule(); avRefreshRule(); avRenderCalendar(); toast("规律已保存");
+}
+function avClearRule(){
+  avRule=null;
+  avCloseRule(); avRefreshRule(); avRenderCalendar(); toast("规律已清除");
+}
+function avResetAllOverrides(){
+  avOverrides={};
+  avRenderCalendar();
+  toast("所有日期已恢复默认");
+}
+function avApplyPreset(name){
+  const map={daily:[0,1,2,3,4,5,6],weekday:[1,2,3,4,5],weekend:[0,6],custom:[]};
+  document.querySelectorAll(".av-wd").forEach(b=>{
+    b.classList.toggle("active",map[name].includes(Number(b.dataset.avDay)));
+  });
+  document.querySelectorAll(".av-preset").forEach(p=>p.classList.toggle("active",p.dataset.avPreset===name));
+}
+document.querySelectorAll(".av-preset").forEach(p=>p.onclick=()=>avApplyPreset(p.dataset.avPreset));
+document.querySelectorAll(".av-wd").forEach(b=>b.onclick=()=>{
+  b.classList.toggle("active");
+  document.querySelectorAll(".av-preset").forEach(p=>p.classList.remove("active"));
+  const custom=document.querySelector('[data-av-preset="custom"]');
+  if(custom) custom.classList.add("active");
+});
+
+function avOpenDay(d){
+  avInitTimes();
+  avSelectedKey=avKeyOf(d);
+  const s=avStateFor(d);
+  document.getElementById("avDayTitle").textContent=(d.getMonth()+1)+"月"+d.getDate()+"日";
+  let cur="当前：跟随规律";
+  if(s.type==="full") cur="当前：全天可用";
+  if(s.type==="off") cur="当前：不可用";
+  if(s.type==="custom") cur="当前："+avFmt(s.start)+"–"+avFmt(s.end);
+  document.getElementById("avDayCurrent").textContent=cur;
+  document.getElementById("avCustomBox").classList.remove("show");
+  if(s.start!=null) avCustomStart.value=s.start;
+  if(s.end!=null) avCustomEnd.value=s.end;
+  document.getElementById("avDayMask").classList.add("show");
+}
+function avCloseDay(){
+  document.getElementById("avDayMask").classList.remove("show");
+  document.getElementById("avCustomBox").classList.remove("show");
+}
+function avApplyDay(type){
+  if(type==="inherit"){
+    delete avOverrides[avSelectedKey];
+    avCloseDay(); avRenderCalendar(); toast("已恢复默认"); return;
+  }
+  avOverrides[avSelectedKey]={type,source:"manual"};
+  avCloseDay(); avRenderCalendar();
+  toast(type==="full"?"已设为全天可用":"已设为不可用");
+}
+function avToggleCustom(){
+  document.getElementById("avCustomBox").classList.toggle("show");
+}
+function avSaveCustom(){
+  const start=Number(avCustomStart.value),end=Number(avCustomEnd.value);
+  if(end<=start){toast("结束时间需晚于开始时间");return}
+  avOverrides[avSelectedKey]={type:"custom",start,end,source:"manual"};
+  avCloseDay(); avRenderCalendar(); toast("时段已更新");
+}
+
+avInitTimes();
+avRefreshRule();
+avRenderCalendar();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,1389 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proxy Decision Intelligence Engineering Console v4</title>
+<style>
+:root{
+  --bg:#f6f7f8;--panel:#fff;--text:#15171a;--muted:#70757d;--line:#e2e5e8;
+  --dark:#101214;--dark2:#181b1f;--accent:#ff3f82;--purple:#7257ff;
+  --good:#147a4b;--goodbg:#ebf8f1;--warn:#9a5b00;--warnbg:#fff4df;
+  --bad:#c42754;--badbg:#fff0f4;--blue:#2866d7;--bluebg:#edf3ff;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif}
+button,input,select{font:inherit}
+.shell{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:100vh}
+.side{background:var(--dark);color:#fff;height:100vh;position:sticky;top:0;padding:16px 12px;overflow:auto}
+.brand{display:flex;align-items:center;gap:9px;font-weight:900;font-size:19px;padding:6px 8px 18px}
+.logo{width:32px;height:32px;border-radius:9px;background:#fff;color:#111;display:grid;place-items:center}
+.env{margin-left:auto;border:1px solid #34383e;color:#868c95;font-size:8px;border-radius:999px;padding:4px 7px}
+.group{font-size:8px;color:#626871;letter-spacing:.1em;text-transform:uppercase;font-weight:900;margin:16px 9px 6px}
+.nav{display:flex;flex-direction:column;gap:3px}
+.nav button{border:0;background:transparent;color:#b6bbc3;text-align:left;border-radius:8px;padding:9px 10px;font-size:10px;font-weight:760;cursor:pointer}
+.nav button:hover{background:#1c2024;color:#fff}
+.nav button.active{background:#fff;color:#111}
+.sidefoot{border-top:1px solid #262a30;margin-top:16px;padding:12px 9px;color:#747b84;font-size:8px;line-height:1.55}
+.main{min-width:0}
+.top{height:66px;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding:0 18px;position:sticky;top:0;z-index:20}
+.tt{flex:1}.tt b{font-size:16px}.tt div{font-size:8px;color:var(--muted);margin-top:3px}
+.top select,.top input{height:32px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 9px;font-size:9px;color:#4d535a}
+.top input{width:200px}
+.content{padding:18px 20px 40px}
+.page{display:none}.page.active{display:block}
+.head{display:flex;justify-content:space-between;align-items:end;margin:18px 0 8px}.head:first-child{margin-top:0}
+.head h2{font-size:13px;margin:0}.head span{font-size:8px;color:var(--muted)}
+.panel{background:#fff;border:1px solid var(--line);border-radius:11px;padding:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.hero{background:#111316;color:#fff;border-radius:13px;padding:15px}
+.hero h1{font-size:19px;margin:0 0 6px}.hero p{font-size:8px;color:#a6adb6;line-height:1.6;margin:0}
+.dag{display:grid;grid-template-columns:repeat(10,minmax(105px,1fr));gap:6px;margin-top:12px;overflow:auto}
+.node{min-width:105px;background:#1a1e22;border:1px solid #2a2f35;border-radius:9px;padding:9px}
+.node .k{font-size:7px;color:#69707a;font-weight:900}.node .v{font-size:9px;font-weight:900;margin-top:3px}.node .d{font-size:7px;color:#8c939c;line-height:1.4;margin-top:3px}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px}
+.kpi .l{font-size:8px;color:var(--muted);font-weight:800}.kpi b{display:block;font-size:18px;margin-top:4px}.kpi .m{font-size:7px;color:#777d85;margin-top:3px}
+.table{overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff}
+table{border-collapse:collapse;width:100%;min-width:880px}
+th,td{padding:8px 9px;border-bottom:1px solid var(--line);font-size:8px;text-align:left;white-space:nowrap;vertical-align:top}
+th{background:#f4f5f6;color:#70757c;font-weight:850}
+tr:last-child td{border-bottom:none}.num{text-align:right;font-weight:850}
+.badge{display:inline-flex;padding:4px 6px;border-radius:999px;background:#f0f1f2;color:#5d636a;font-size:7px;font-weight:850}
+.badge.good{background:var(--goodbg);color:var(--good)}.badge.warn{background:var(--warnbg);color:var(--warn)}.badge.bad{background:var(--badbg);color:var(--bad)}.badge.blue{background:var(--bluebg);color:var(--blue)}
+.code{background:#f4f5f6;border-radius:8px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:8px;line-height:1.55;white-space:pre-wrap;color:#454b52}
+.schema{display:grid;grid-template-columns:160px 1fr;gap:10px}
+.schema .keys{display:flex;flex-direction:column;gap:5px}
+.schema .keys button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px;text-align:left;font-size:8px;font-weight:800;cursor:pointer}
+.schema .keys button.active{background:#15171a;color:#fff;border-color:#15171a}
+.trace{display:flex;gap:6px;overflow:auto}
+.tstep{min-width:150px;border:1px solid var(--line);border-radius:9px;background:#fff;padding:9px;position:relative}
+.tstep:after{content:"→";position:absolute;right:-10px;top:50%;color:#a6abb1}.tstep:last-child:after{display:none}
+.tstep .k{font-size:7px;color:#7b8087;font-weight:850}.tstep .v{font-size:9px;font-weight:900;margin-top:3px}.tstep .d{font-size:7px;color:#777d85;line-height:1.4;margin-top:4px}
+.state{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}
+.sbox{border:1px solid var(--line);border-radius:9px;padding:9px;background:#fff}
+.sbox .s{font-size:8px;font-weight:900}.sbox .d{font-size:7px;color:#757b82;line-height:1.4;margin-top:4px}
+.sbox.current{border-color:#111;background:#111;color:#fff}.sbox.current .d{color:#aaa}
+.flowcols{display:grid;grid-template-columns:1fr 50px 1fr;gap:8px;align-items:stretch}
+.arrow{display:grid;place-items:center;color:#9ba0a6;font-weight:900}
+.contract{border:1px solid var(--line);border-radius:9px;padding:9px;background:#fff;margin-bottom:7px}
+.contract b{font-size:9px}.contract div{font-size:7px;color:#747a82;line-height:1.45;margin-top:3px}
+.rulegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.rule{border:1px solid var(--line);border-radius:9px;padding:9px;background:#fff}
+.rule .rt{font-size:9px;font-weight:900}.rule .rd{font-size:7px;color:#767c83;line-height:1.45;margin-top:4px}
+.lab{display:grid;grid-template-columns:360px 1fr;gap:12px}
+.controls{background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px}
+.ctrl{display:grid;grid-template-columns:140px 1fr 42px;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line)}
+.ctrl:first-child{border-top:none}.ctrl label,.ctrl output{font-size:8px}.ctrl output{text-align:right;font-weight:850}
+.ctrl input[type=range]{width:100%}
+.result{background:#111316;color:#fff;border-radius:10px;padding:12px}
+.result .status{font-size:22px;font-weight:950;letter-spacing:-.5px}
+.result .reason{font-size:8px;color:#aeb4bc;line-height:1.55;margin-top:8px}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
+.check{border:1px solid #2b3036;border-radius:8px;padding:8px}.check .k{font-size:7px;color:#777f88}.check .v{font-size:9px;font-weight:900;margin-top:3px}
+.timeline{display:grid;grid-template-columns:100px 1fr;gap:8px}
+.time{font-size:7px;color:#777d84;text-align:right;padding-top:2px}
+.ev{border-left:1px solid var(--line);padding:0 0 10px 12px;position:relative}.ev:before{content:"";position:absolute;left:-4px;top:2px;width:7px;height:7px;border-radius:50%;background:#111}
+.ev b{font-size:8px}.ev div{font-size:7px;color:#767c83;line-height:1.45;margin-top:3px}
+.alert{border-left:3px solid var(--warn);background:var(--warnbg);padding:9px 10px;border-radius:7px;font-size:8px;line-height:1.5;color:#684800}
+.pricegrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.price{border:1px solid var(--line);border-radius:9px;background:#fff;padding:9px}.price b{font-size:17px}.price div{font-size:7px;color:#747a81;line-height:1.45;margin-top:4px}.price.bad{background:#fffafb;border-color:#f1cad5}.price.warn{border-color:#ecd7b2}.price.good{border-color:#cae6d7}
+@media(max-width:1200px){.shell{grid-template-columns:210px 1fr}.kpis{grid-template-columns:repeat(3,1fr)}.grid3,.grid4,.grid2,.lab{grid-template-columns:1fr}.state{grid-template-columns:repeat(3,1fr)}}
+
+/* v4 governance + context + surface */
+.side{
+  height:100dvh;
+  min-height:100vh;
+  position:sticky;
+  top:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:thin;
+  scrollbar-color:#34383e transparent;
+}
+.side::-webkit-scrollbar{width:6px}
+.side::-webkit-scrollbar-thumb{background:#34383e;border-radius:999px}
+.sidefoot{position:static!important;margin-top:18px!important}
+.nav button:focus{outline:none}
+.nav button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+.govgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.govcard{background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px}
+.govcard .k{font-size:8px;color:var(--muted);font-weight:850}.govcard .v{font-size:15px;font-weight:900;margin-top:5px}.govcard .d{font-size:7px;color:#757b82;line-height:1.45;margin-top:4px}
+.stack3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.layer{background:#fff;border:1px solid var(--line);border-radius:11px;padding:11px}
+.layer h3{font-size:10px;margin:0 0 8px}.layer .line{padding:7px 0;border-top:1px solid var(--line);font-size:8px}.layer .line:first-of-type{border-top:0}
+.priority{display:grid;grid-template-columns:32px 210px 1fr 72px;gap:8px;padding:8px 0;border-top:1px solid var(--line);align-items:center}
+.priority:first-child{border-top:0}.priority span,.priority b{font-size:8px}.priority .n{font-weight:950}
+.dslgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.utility{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.utility .u{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px}.utility .u .k{font-size:7px;color:var(--muted)}.utility .u b{display:block;font-size:13px;margin-top:4px}
+.context3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.contextbox{background:#fff;border:1px solid var(--line);border-radius:11px;padding:11px}.contextbox h3{font-size:10px;margin:0 0 7px}.contextbox .r{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:8px}.contextbox .r:first-of-type{border-top:0}
+.surfacegrid{display:grid;grid-template-columns:280px 1fr;gap:12px}
+.phone{background:#111316;border-radius:25px;padding:10px}.phonescreen{background:#f6f7f8;border-radius:17px;min-height:520px;padding:10px}.mod{background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px;margin-bottom:8px}.mod b{font-size:9px}.mod div{font-size:7px;color:#747a82;line-height:1.4;margin-top:4px}.mod.hero2{min-height:105px}.mod.muted{opacity:.4}
+.surfacerules{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.srule{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px}.srule b{font-size:9px}.srule div{font-size:7px;color:#757b82;line-height:1.45;margin-top:4px}
+.research{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.research .rbox{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px}.rbox h3{font-size:9px;margin:0 0 6px}.rbox p{font-size:7px;color:var(--muted);line-height:1.45;margin:0}.rbox .stage{display:inline-flex;margin-top:8px;border-radius:999px;padding:4px 6px;background:#f0f1f2;font-size:7px;font-weight:850}
+.stateflow{display:flex;gap:7px;overflow:auto}.stateflow .sf{min-width:135px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px;position:relative}.stateflow .sf:after{content:"→";position:absolute;right:-11px;top:50%;color:#9ca2a9}.stateflow .sf:last-child:after{display:none}.sf .k{font-size:7px;color:var(--muted);font-weight:850}.sf .v{font-size:9px;font-weight:900;margin-top:4px}.sf .d{font-size:7px;color:#757b82;line-height:1.4;margin-top:4px}
+@media(max-width:1200px){
+  .govgrid,.utility,.research{grid-template-columns:repeat(2,1fr)}
+  .stack3,.context3,.surfacegrid,.dslgrid{grid-template-columns:1fr}
+}
+
+</style>
+</head>
+<body>
+<div class="shell">
+<aside class="side">
+  <div class="brand"><div class="logo">🦦</div>Proxy <span class="env">ENG</span></div>
+
+  <div class="group">System</div>
+  <div class="nav">
+    <button class="active" data-page="topology">系统拓扑</button>
+    <button data-page="contracts">数据对象 / Contracts</button>
+    <button data-page="runtime">在线 / 离线链路</button>
+  </div>
+
+  <div class="group">Modeling</div>
+  <div class="nav">
+    <button data-page="tags">Tag / Feature Engine</button>
+    <button data-page="gravity">Gravity / Intent Engine</button>
+    <button data-page="evidence">Evidence Gate</button>
+    <button data-page="value">Human Value Guardrail</button>
+  </div>
+
+
+  <div class="group">Governance</div>
+  <div class="nav">
+    <button data-page="state">State / 生命周期</button>
+    <button data-page="policy">Policy Resolver</button>
+    <button data-page="dsl">Feature / DSL</button>
+    <button data-page="tagutility">Tag Utility</button>
+  </div>
+
+  <div class="group">Context & Experience</div>
+  <div class="nav">
+    <button data-page="contextfield">Context / Gravity Field</button>
+    <button data-page="surface">Surface Composition</button>
+    <button data-page="geometry">Geometry Research</button>
+  </div>
+
+  <div class="group">Decision</div>
+  <div class="nav">
+    <button data-page="decision">Decision Pipeline</button>
+    <button data-page="lab">Decision Lab</button>
+    <button data-page="inspector">User × Event Inspector</button>
+  </div>
+
+  <div class="group">Engine API</div>
+  <div class="nav">
+    <button data-page="gateway">API Gateway</button>
+    <button data-page="apiflow">Proxy Integration</button>
+    <button data-page="controlplane">Control Plane</button>
+  </div>
+
+  <div class="group">Ops</div>
+  <div class="nav">
+    <button data-page="registry">Rules / Model Registry</button>
+    <button data-page="observability">Observability</button>
+  </div>
+
+  <div class="sidefoot">
+    核心约束：<br>
+    Model inference ≠ Fact<br>
+    System-induced ≠ Organic<br>
+    Prediction ≠ Feasibility<br>
+    High CTR ≠ High User Value
+  </div>
+</aside>
+
+<main class="main">
+<div class="top">
+  <div class="tt"><b id="pageTitle">系统拓扑</b><div>Proxy Decision Intelligence Engineering Console v4</div></div>
+  <input placeholder="user_id / event_id / decision_id">
+  <select><option>prod-shadow</option><option>staging</option></select>
+  <select><option>Hanoi</option><option>All Vietnam</option></select>
+</div>
+
+<div class="content">
+
+<section class="page active" id="topology">
+  <div class="hero">
+    <h1>工程目标：实时理解状态，而不是静态描述用户</h1>
+    <p>Proxy 的个性化不是“十几种 Persona + 推荐模型”，而是 Event → Feature/Tag → Graph/Context → Gravity/Intent → Evidence Gate → Human Value Guardrail → Eligibility → Retrieval → Rank → Orchestration → Outcome 的实时闭环。</p>
+    <div class="dag">
+      <div class="node"><div class="k">01 RAW</div><div class="v">Event Stream</div><div class="d">真实行为、交易、拒绝、曝光 lineage</div></div>
+      <div class="node"><div class="k">02 STATE</div><div class="v">Feature Store</div><div class="d">连续特征、滑窗、时序状态</div></div>
+      <div class="node"><div class="k">03 EXPLAIN</div><div class="v">Tag Store</div><div class="d">几万种细标签，可组合、TTL、衰减</div></div>
+      <div class="node"><div class="k">04 RELATION</div><div class="v">Market Graph</div><div class="d">人/商家/地点/交易/关系结构</div></div>
+      <div class="node"><div class="k">05 FIELD</div><div class="v">Context Snapshot</div><div class="d">User + World + Market</div></div>
+      <div class="node"><div class="k">06 FORECAST</div><div class="v">Gravity</div><div class="d">时间引力、未来事件、hazard</div></div>
+      <div class="node"><div class="k">06 NOW</div><div class="v">Intent</div><div class="d">当前明确/隐式需求，带 TTL</div></div>
+      <div class="node"><div class="k">07 SAFETY</div><div class="v">Evidence + Value</div><div class="d">可信度、污染、获得感、愤怒感</div></div>
+      <div class="node"><div class="k">08 ACT</div><div class="v">Decision Engine</div><div class="d">Eligibility / Retrieval / Rank / OR</div></div>
+      <div class="node"><div class="k">09 LEARN</div><div class="v">Outcome</div><div class="d">履约、复购、取消、投诉、usage drop</div></div>
+    </div>
+  </div>
+
+  <div class="head"><h2>核心 Runtime Service</h2><span>不是 UI 模块，是在线决策服务边界</span></div>
+  <div class="grid3">
+    <div class="panel"><div class="contract"><b>event-ingestion</b><div>接收 client/server/merchant event；写 exposure lineage；保证 event_id 幂等。</div></div><div class="contract"><b>feature-compute</b><div>Flink/streaming 滑窗 + batch backfill；online/offline parity。</div></div><div class="contract"><b>tag-engine</b><div>Rule/SQL/derived tag；TTL/decay/conflict；Tag→Users 倒排。</div></div></div>
+    <div class="panel"><div class="contract"><b>context-resolver</b><div>统一 User / World / Market ContextSnapshot；禁止下游各自解释场景。</div></div><div class="contract"><b>gravity-engine</b><div>事件模板 + personal rhythm + ContextSnapshot + hazard。</div></div><div class="contract"><b>intent-engine</b><div>Explicit + NLP + behavior evidence；输出 intent state。</div></div><div class="contract"><b>evidence-gate</b><div>coverage / confidence / contamination / cooldown / source diversity。</div></div></div>
+    <div class="panel"><div class="contract"><b>value-guardrail</b><div>Gain Score + Anger Risk + Intervention Budget。</div></div><div class="contract"><b>decision-engine</b><div>Eligibility → Retrieval → Ranking → Orchestration。</div></div><div class="contract"><b>outcome-service</b><div>记录结果与 counterfactual / propensity / reward。</div></div></div>
+  </div>
+
+  <div class="head"><h2>必须独立存储的状态</h2><span>否则后续无法重建和纠错</span></div>
+  <div class="kpis">
+    <div class="kpi"><div class="l">Raw Events</div><b>Immutable</b><div class="m">原始事实不可被 Tag 覆盖</div></div>
+    <div class="kpi"><div class="l">Features</div><b>Numeric</b><div class="m">连续值 / 滑窗 / raw stats</div></div>
+    <div class="kpi"><div class="l">Tags</div><b>38K+</b><div class="m">可解释状态</div></div>
+    <div class="kpi"><div class="l">UserEvent</div><b>Stateful</b><div class="m">人×事件×场景</div></div>
+    <div class="kpi"><div class="l">Decision Trace</div><b>Audited</b><div class="m">为什么触发 / 为什么拦截</div></div>
+    <div class="kpi"><div class="l">Outcome</div><b>Feedback</b><div class="m">模型真正学习来源</div></div>
+  </div>
+</section>
+
+<section class="page" id="contracts">
+  <div class="head"><h2>数据对象 / Contracts</h2><span>每个对象必须有 owner、schema、version、TTL、lineage</span></div>
+  <div class="schema">
+    <div class="keys">
+      <button class="active" onclick="showSchema('event',this)">RawEvent</button>
+      <button onclick="showSchema('feature',this)">FeatureValue</button>
+      <button onclick="showSchema('tag',this)">UserTag</button>
+      <button onclick="showSchema('gravity',this)">GravityEventState</button>
+      <button onclick="showSchema('userEvent',this)">UserEventState</button>
+      <button onclick="showSchema('decision',this)">DecisionRecord</button>
+      <button onclick="showSchema('outcome',this)">OutcomeRecord</button>
+      <button onclick="showSchema('context',this)">ContextSnapshot</button>
+      <button onclick="showSchema('surfaceplan',this)">SurfacePlan</button>
+    </div>
+    <div class="panel">
+      <div id="schemaTitle" style="font-size:11px;font-weight:900;margin-bottom:8px">RawEvent v4</div>
+      <div class="code" id="schemaCode">{
+  "event_id": "evt_...",
+  "user_id": "PX-102839",
+  "ts": "2026-08-26T11:55:03+07:00",
+  "event_type": "content_save",
+
+  "object": {
+    "type": "post",
+    "id": "post_..."
+  },
+
+  "context": {
+    "session_id": "...",
+    "city": "hanoi",
+    "geo_h3": "...",
+    "local_hour": 11,
+    "weekday": 3
+  },
+
+  "origin": "organic",
+
+  "exposure_lineage": {
+    "exposed_by_system": false,
+    "recommendation_id": null,
+    "policy_id": null,
+    "rank_position": null,
+    "predicted_score": null
+  },
+
+  "properties": {...}
+}</div>
+    </div>
+  </div>
+
+  <div class="head"><h2>Contract 约束</h2><span>防工程层失真</span></div>
+  <div class="table">
+    <table>
+      <thead><tr><th>Contract</th><th>Required</th><th>Why</th><th>Failure Action</th></tr></thead>
+      <tbody>
+        <tr><td>event_id idempotency</td><td>100%</td><td>避免重复行为强化特征</td><td><span class="badge bad">Drop duplicate</span></td></tr>
+        <tr><td>origin / lineage</td><td>推荐曝光相关事件必须有</td><td>防 system-induced 污染 organic evidence</td><td><span class="badge bad">LEARN_ONLY</span></td></tr>
+        <tr><td>feature timestamp</td><td>所有 online feature</td><td>判断 freshness / stale</td><td><span class="badge warn">Fallback</span></td></tr>
+        <tr><td>tag ttl/decay</td><td>短中期 tag 必须有</td><td>避免标签永久化</td><td><span class="badge warn">Auto-expire</span></td></tr>
+        <tr><td>decision_id</td><td>所有主动触达</td><td>后续 outcome / causal attribution</td><td><span class="badge bad">Do not fire</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="page" id="runtime">
+  <div class="head"><h2>在线 / 离线双链路</h2><span>保证训练和线上决策特征一致</span></div>
+  <div class="flowcols">
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Online Path · 10–100ms</h3>
+      <div class="trace">
+        <div class="tstep"><div class="k">CLIENT</div><div class="v">Event</div><div class="d">click / save / redeem / geo</div></div>
+        <div class="tstep"><div class="k">STREAM</div><div class="v">Flink</div><div class="d">rolling windows / counters</div></div>
+        <div class="tstep"><div class="k">ONLINE FS</div><div class="v">Feature Read</div><div class="d">recent state</div></div>
+        <div class="tstep"><div class="k">DECISION</div><div class="v">Gate + Rank</div><div class="d">low latency</div></div>
+      </div>
+    </div>
+    <div class="arrow">↔</div>
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Offline Path · hours/day</h3>
+      <div class="trace">
+        <div class="tstep"><div class="k">LAKE</div><div class="v">Raw History</div><div class="d">full event sequence</div></div>
+        <div class="tstep"><div class="k">BATCH</div><div class="v">Backfill</div><div class="d">long windows / joins</div></div>
+        <div class="tstep"><div class="k">TRAIN</div><div class="v">Models</div><div class="d">gravity / rank / resource</div></div>
+        <div class="tstep"><div class="k">REGISTRY</div><div class="v">Versioned</div><div class="d">promote / rollback</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="head"><h2>数据基础设施建议</h2><span>可以替换，不把技术选型写死</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Capability</th><th>候选</th><th>职责</th><th>关键工程指标</th></tr></thead>
+    <tbody>
+      <tr><td>Event Bus</td><td>Kafka / Pulsar</td><td>原始行为流</td><td>ordering / replay / retention</td></tr>
+      <tr><td>Streaming</td><td>Flink</td><td>实时滑窗、计数、状态</td><td>event-time / watermark / exactly-once</td></tr>
+      <tr><td>Online Feature</td><td>Redis / Cassandra / RocksDB</td><td>低延迟读取</td><td>p99 latency / freshness</td></tr>
+      <tr><td>Offline Store</td><td>Lakehouse / ClickHouse</td><td>历史分析、训练</td><td>backfill / lineage</td></tr>
+      <tr><td>Geo</td><td>H3 / S2 / PostGIS</td><td>距离硬过滤</td><td>candidate accuracy</td></tr>
+      <tr><td>ANN</td><td>HNSW / FAISS</td><td>embedding 召回</td><td>recall@K / latency</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="page" id="tags">
+  <div class="head"><h2>Tag / Feature Engine</h2><span>标签先具体，不急着抽象人格</span></div>
+  <div class="grid2">
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Rule Tag 示例</h3>
+      <div class="code">tag_id: evt_save_ninhbinh_7d_gte3
+
+source:
+  observed
+
+rule:
+  count(
+    event_type = content_save
+    AND destination = "ninh_binh"
+    window = 7d
+  ) >= 3
+
+ttl: 7d
+decay: none
+evidence_min: 3
+allowed_use:
+  analytics: true
+  intent_evidence: true
+  merchant_targeting: false</div>
+    </div>
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Feature 与 Tag 不互相覆盖</h3>
+      <div class="rulegrid">
+        <div class="rule"><div class="rt">Feature</div><div class="rd">ninhbinh_save_7d = 4<br>last_save = 41m<br>unique_days = 3</div></div>
+        <div class="rule"><div class="rt">Tag</div><div class="rd">最近7天保存宁平内容≥3<br>TTL 7d<br>confidence .94</div></div>
+        <div class="rule"><div class="rt">Embedding</div><div class="rd">user vector 512d<br>用于ANN，不用于解释</div></div>
+        <div class="rule"><div class="rt">Graph</div><div class="rd">visited / saved / fulfilled_with<br>保留关系结构</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="head"><h2>Tag Warehouse</h2><span>几万种标签允许存在，核心是质量控制</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Tag</th><th>Source</th><th>Users</th><th>TTL</th><th>Evidence Min</th><th>Conflict Policy</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td>周末18–22点高活跃</td><td>Observed</td><td class="num">64.2K</td><td>14d</td><td>4 weekends</td><td>recompute</td><td>Scheduling</td></tr>
+      <tr><td>最近7天保存宁平内容≥3</td><td>Observed</td><td class="num">9.8K</td><td>7d</td><td>3 saves</td><td>expire</td><td>Intent evidence</td></tr>
+      <tr><td>同行履约率≥90%</td><td>Transactional</td><td class="num">14.6K</td><td>90d</td><td>5 commits</td><td>recompute</td><td>Trust / Match</td></tr>
+      <tr><td>连续3次快速划走SPA推广</td><td>Observed negative</td><td class="num">11.1K</td><td>30d</td><td>3 exposures</td><td>explicit negative wins</td><td>Downrank</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="page" id="gravity">
+  <div class="head"><h2>Gravity / Intent Engine</h2><span>Interest ≠ Gravity ≠ Intent</span></div>
+  <div class="grid3">
+    <div class="panel"><h3 style="font-size:11px;margin-top:0">Interest</h3><div class="code">coffee_interest:
+  score: .82
+  confidence: .91
+  horizon: long
+  meaning: "长期偏好"</div></div>
+    <div class="panel"><h3 style="font-size:11px;margin-top:0">Gravity</h3><div class="code">meal_gravity:
+  p_60m: .91
+  hazard: rising
+  event: MEAL
+  meaning: "需求正在逼近"</div></div>
+    <div class="panel"><h3 style="font-size:11px;margin-top:0">Intent</h3><div class="code">sushi_lunch_intent:
+  score: .73
+  ttl: 2h
+  missing: none
+  meaning: "现在具体想做"</div></div>
+  </div>
+
+  <div class="head"><h2>Gravity Event State</h2><span>人 × 事件 × 时间</span></div>
+  <div class="grid2">
+    <div class="panel">
+      <div class="row"><span>11:00</span><div class="track"><div class="bar p" style="width:30%"></div></div><b>.30</b></div>
+      <div class="row"><span>11:30</span><div class="track"><div class="bar p" style="width:61%"></div></div><b>.61</b></div>
+      <div class="row"><span>12:00</span><div class="track"><div class="bar p" style="width:84%"></div></div><b>.84</b></div>
+      <div class="row"><span>12:30</span><div class="track"><div class="bar p" style="width:96%"></div></div><b>.96</b></div>
+    </div>
+    <div class="panel"><div class="code">Gravity = f(
+  event_template,
+  personal_rhythm,
+  recent_evidence,
+  realtime_context,
+  resource_feasibility
+)
+
+Phase 1:
+  histogram / KDE
+  logistic / LightGBM
+  survival / hazard
+
+Phase 2+:
+  Hawkes / TPP
+  sequence model</div></div>
+  </div>
+</section>
+
+<section class="page" id="evidence">
+  <div class="head"><h2>Evidence Gate</h2><span>核心任务：别让系统把自己骗了</span></div>
+
+  <div class="state">
+    <div class="sbox"><div class="s">OBSERVE</div><div class="d">只有弱证据，不影响线上</div></div>
+    <div class="sbox"><div class="s">LEARN_ONLY</div><div class="d">可训练，不能决策</div></div>
+    <div class="sbox"><div class="s">PASSIVE</div><div class="d">用户主动行为时可用于排序</div></div>
+    <div class="sbox current"><div class="s">SOFT_NUDGE</div><div class="d">低打扰自然呈现</div></div>
+    <div class="sbox"><div class="s">ACTIVE_ORCH</div><div class="d">主动撮合 / Push</div></div>
+    <div class="sbox"><div class="s">BLOCKED</div><div class="d">负反馈 / 资源 / 风险拦截</div></div>
+  </div>
+
+  <div class="head"><h2>Evidence Lineage</h2><span>模型推断永远不能自动升级成事实</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Evidence</th><th>Base Trust</th><th>Exposure Dependency</th><th>Can Promote Tag?</th><th>Can Fire?</th></tr></thead>
+    <tbody>
+      <tr><td>Explicit declaration</td><td>High</td><td>0</td><td>Yes</td><td>Context dependent</td></tr>
+      <tr><td>Transactional fulfillment</td><td>High</td><td>0</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>Repeated organic behavior</td><td>Medium–High</td><td>Low</td><td>Yes after threshold</td><td>Soft/Active after Gate</td></tr>
+      <tr><td>System-exposed click</td><td>Low</td><td>High</td><td>Weak only</td><td>No direct fire</td></tr>
+      <tr><td>Pure model inference</td><td>Lowest</td><td>Model-origin</td><td>No</td><td>Explore / learn only</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="head"><h2>User × Event Gate</h2><span>不是一个全局 confidence 阈值</span></div>
+  <div class="code">gate_key = (user_id, event_type, context_key, action_type)
+
+Probability         = 0.91
+Confidence          = 0.90
+Evidence Coverage   = 0.94
+Contamination Risk  = 0.08
+Negative Breaker    = false
+Freshness           = 18m
+
+θ(feed_card)         = 0.72
+θ(push)              = 0.91
+
+=> Feed: PASS
+=> Push: continue to Human Value Guardrail</div>
+</section>
+
+<section class="page" id="value">
+  <div class="head"><h2>Human Value Guardrail</h2><span>模型算对了，也不代表值得主动打扰</span></div>
+
+  <div class="pricegrid">
+    <div class="price"><b>20K</b><div>0.38× lunch median<br>便宜但可能质量错配；Gain 不必然高。</div></div>
+    <div class="price good"><b>50K</b><div>≈1.0× median<br>典型工作餐，安全区。</div></div>
+    <div class="price warn"><b>100K</b><div>1.92× median<br>只有 Value Justification 足够高才可主动推荐。</div></div>
+    <div class="price bad"><b>200K</b><div>3.85× median<br>普通工作午餐无额外价值 → Anger Risk HIGH。</div></div>
+  </div>
+
+  <div class="head"><h2>Gain / Anger 拆解</h2><span>Anger Risk 具有阻断优先级</span></div>
+  <div class="grid2">
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Gain Score</h3>
+      <div class="row"><span>Convenience</span><div class="track"><div class="bar g" style="width:82%"></div></div><b>.82</b></div>
+      <div class="row"><span>Interest fit</span><div class="track"><div class="bar g" style="width:76%"></div></div><b>.76</b></div>
+      <div class="row"><span>Time saved</span><div class="track"><div class="bar g" style="width:68%"></div></div><b>.68</b></div>
+      <div class="row"><span>Price value</span><div class="track"><div class="bar g" style="width:41%"></div></div><b>.41</b></div>
+    </div>
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Anger / Violation Risk</h3>
+      <div class="row"><span>Price stretch</span><div class="track"><div class="bar r" style="width:72%"></div></div><b>.72</b></div>
+      <div class="row"><span>Repetition</span><div class="track"><div class="bar r" style="width:18%"></div></div><b>.18</b></div>
+      <div class="row"><span>Privacy creep</span><div class="track"><div class="bar r" style="width:9%"></div></div><b>.09</b></div>
+      <div class="row"><span>Manipulation feel</span><div class="track"><div class="bar r" style="width:31%"></div></div><b>.31</b></div>
+    </div>
+  </div>
+
+  <div class="head"><h2>最终点火公式</h2><span>工程条件，而不是营销口号</span></div>
+  <div class="code">Fire =
+  Eligible
+  AND Score > θ(user,event,context,action)
+  AND EvidenceCoverage >= E_min
+  AND ContaminationRisk <= C_max
+  AND NegativeBreaker = false
+  AND ResourceGuardrail = PASS
+  AND GainScore >= G_min
+  AND AngerRisk <= A_max
+  AND InterventionBudget > 0</div>
+</section>
+
+<section class="page" id="decision">
+  <div class="head"><h2>Decision Pipeline</h2><span>Prediction 与 Feasibility 分离；Rank 与 Orchestration 分离</span></div>
+  <div class="trace">
+    <div class="tstep"><div class="k">01</div><div class="v">Gravity / Intent</div><div class="d">预测需求</div></div>
+    <div class="tstep"><div class="k">02</div><div class="v">Evidence Gate</div><div class="d">是否可信</div></div>
+    <div class="tstep"><div class="k">03</div><div class="v">Human Value</div><div class="d">是否值得主动</div></div>
+    <div class="tstep"><div class="k">04</div><div class="v">Eligibility</div><div class="d">钱 / 时 / 空 / 权限 / 容量</div></div>
+    <div class="tstep"><div class="k">05</div><div class="v">Retrieval</div><div class="d">Geo + Tag index + ANN</div></div>
+    <div class="tstep"><div class="k">06</div><div class="v">Ranking</div><div class="d">CatBoost / LightGBM → deep rank</div></div>
+    <div class="tstep"><div class="k">07</div><div class="v">Orchestration</div><div class="d">CP-SAT / Flow / Routing</div></div>
+    <div class="tstep"><div class="k">08</div><div class="v">Outcome</div><div class="d">真实结果回流</div></div>
+  </div>
+
+  <div class="head"><h2>Eligibility 一票否决</h2><span>不要把硬失败折进 Score</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Guard</th><th>Candidate</th><th>Status</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Time</td><td>Restaurant A</td><td><span class="badge good">PASS</span></td><td>11:30–14:00 open</td></tr>
+      <tr><td>Distance</td><td>Restaurant A</td><td><span class="badge good">PASS</span></td><td>1.2km ≤ 2.5km</td></tr>
+      <tr><td>Price hard bound</td><td>Restaurant A</td><td><span class="badge warn">SOFT</span></td><td>100K above P75 but within tested stretch</td></tr>
+      <tr><td>Price hard bound</td><td>Restaurant B</td><td><span class="badge bad">BLOCK</span></td><td>300K outside context envelope</td></tr>
+      <tr><td>Capacity</td><td>Restaurant C</td><td><span class="badge bad">BLOCK</span></td><td>no seats within 45min window</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="page" id="lab">
+  <div class="head"><h2>Decision Lab</h2><span>把阈值、Guardrail 和状态机变成可测试对象</span></div>
+  <div class="lab">
+    <div class="controls">
+      <div class="ctrl"><label>Base Probability</label><input id="prob" type="range" min="0" max="1" step=".01" value=".91"><output id="probO">.91</output></div>
+      <div class="ctrl"><label>Confidence</label><input id="conf" type="range" min="0" max="1" step=".01" value=".90"><output id="confO">.90</output></div>
+      <div class="ctrl"><label>Evidence Coverage</label><input id="cov" type="range" min="0" max="1" step=".01" value=".94"><output id="covO">.94</output></div>
+      <div class="ctrl"><label>Contamination Risk</label><input id="cont" type="range" min="0" max="1" step=".01" value=".08"><output id="contO">.08</output></div>
+      <div class="ctrl"><label>Gain Score</label><input id="gain" type="range" min="0" max="1" step=".01" value=".78"><output id="gainO">.78</output></div>
+      <div class="ctrl"><label>Anger Risk</label><input id="anger" type="range" min="0" max="1" step=".01" value=".22"><output id="angerO">.22</output></div>
+      <div class="ctrl"><label>Intervention Budget</label><input id="budget" type="range" min="0" max="3" step="1" value="2"><output id="budgetO">2</output></div>
+      <div class="ctrl"><label>Action Threshold</label><input id="theta" type="range" min=".5" max="1" step=".01" value=".91"><output id="thetaO">.91</output></div>
+    </div>
+    <div class="result">
+      <div style="font-size:8px;color:#8e959e;font-weight:850">DECISION STATE</div>
+      <div class="status" id="decisionState">ACTIVE_ORCHESTRATE</div>
+      <div class="reason" id="decisionReason">全部高风险闸门通过，可进入主动编排。最终候选仍需 Eligibility + Ranking + Orchestration。</div>
+      <div class="checks">
+        <div class="check"><div class="k">Probability Gate</div><div class="v" id="cProb">PASS</div></div>
+        <div class="check"><div class="k">Evidence</div><div class="v" id="cCov">PASS</div></div>
+        <div class="check"><div class="k">Contamination</div><div class="v" id="cCont">PASS</div></div>
+        <div class="check"><div class="k">Human Value</div><div class="v" id="cValue">PASS</div></div>
+        <div class="check"><div class="k">Budget</div><div class="v" id="cBudget">PASS</div></div>
+        <div class="check"><div class="k">Confidence</div><div class="v" id="cConf">PASS</div></div>
+      </div>
+      <div class="alert" style="margin-top:10px">Lab 只是策略模拟器。线上阈值必须按 user × event × context × action 做 calibration，不把 0.75 / 0.9 当成固定“行业真理”。</div>
+    </div>
+  </div>
+</section>
+
+<section class="page" id="inspector">
+  <div class="head"><h2>User × Event Inspector</h2><span>真正调查某一个人、某一个事件为何被触发/拦截</span></div>
+  <div class="grid2">
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">PX-102839 × MEAL × 11:55 OFFICE</h3>
+      <div class="code">context_key:
+  city=hanoi
+  geo=office_cluster_12
+  local_time=11:55
+  weekday=wed
+  social_mode=unknown
+
+gravity:
+  p_60m=.91
+  confidence=.90
+
+resource:
+  lunch_p50=52K
+  lunch_p75=68K
+  distance_p75=2.5km
+  time_budget=45m
+
+negative:
+  food_promo_fatigue=.12
+  spa_promo_fatigue=.87
+
+intervention_budget=2</div>
+    </div>
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">当前 Decision Trace</h3>
+      <div class="timeline">
+        <div class="time">11:54:51</div><div class="ev"><b>Gravity recompute</b><div>p_60m .84 → .91；personal lunch rhythm + no recent meal evidence。</div></div>
+        <div class="time">11:54:53</div><div class="ev"><b>Evidence Gate PASS</b><div>coverage .94；organic+transactional source diversity 3；contamination .08。</div></div>
+        <div class="time">11:54:54</div><div class="ev"><b>Value Guardrail</b><div>50K candidate gain .81 / anger .06；100K gain .67 / anger .28；200K blocked。</div></div>
+        <div class="time">11:54:56</div><div class="ev"><b>Eligibility</b><div>487 merchants → 64 geo/time/capacity eligible。</div></div>
+        <div class="time">11:54:58</div><div class="ev"><b>Ranking</b><div>64 → top 8；price stretch、distance、merchant affinity、queue time。</div></div>
+        <div class="time">11:55:00</div><div class="ev"><b>Action</b><div>Feed soft nudge；Push not fired because action threshold not exceeded with margin。</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="head"><h2>Exposure Lineage</h2><span>调查反向污染</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Evidence Event</th><th>Origin</th><th>System Exposure?</th><th>Evidence Weight</th><th>Used In</th></tr></thead>
+    <tbody>
+      <tr><td>coffee_search</td><td>organic</td><td>No</td><td class="num">1.00</td><td>coffee_interest / local_food_intent</td></tr>
+      <tr><td>coffee_coupon_redeem</td><td>transactional</td><td>Yes, but downstream transaction</td><td class="num">0.95</td><td>resource / merchant affinity</td></tr>
+      <tr><td>coffee_card_click</td><td>system_exposed</td><td>Yes</td><td class="num">0.22</td><td>weak interest only</td></tr>
+      <tr><td>model inferred coffee affinity</td><td>pure inference</td><td>N/A</td><td class="num">0.05</td><td>exploration only</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="page" id="registry">
+  <div class="head"><h2>Rules / Model Registry</h2><span>任何线上策略必须 versioned、可回滚、可影子验证</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Name</th><th>Type</th><th>Version</th><th>Status</th><th>Traffic</th><th>Owner</th><th>Metric</th><th>Rollback</th></tr></thead>
+    <tbody>
+      <tr><td>meal_gravity</td><td>LightGBM + survival features</td><td>v5.2</td><td><span class="badge good">prod</span></td><td>80%</td><td>relevance</td><td>Brier .081</td><td>v5.1</td></tr>
+      <tr><td>evidence_gate_food</td><td>rule + calibrated thresholds</td><td>v3.8</td><td><span class="badge good">prod</span></td><td>100%</td><td>safety</td><td>false-fire .7%</td><td>v3.7</td></tr>
+      <tr><td>anger_guard_lunch</td><td>rule + CatBoost</td><td>v1.4</td><td><span class="badge blue">shadow</span></td><td>20%</td><td>user-value</td><td>hide lift -12%</td><td>off</td></tr>
+      <tr><td>local_ranker</td><td>CatBoost</td><td>v7.1</td><td><span class="badge good">prod</span></td><td>90%</td><td>ranking</td><td>NDCG +4.8%</td><td>v7.0</td></tr>
+      <tr><td>group_orchestrator</td><td>CP-SAT</td><td>policy-22</td><td><span class="badge good">prod</span></td><td>100%</td><td>market</td><td>fill +7.2%</td><td>policy-21</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="head"><h2>阈值 Registry</h2><span>阈值不是写死在代码里</span></div>
+  <div class="code">threshold_key:
+  event_type: MEAL
+  context: WORKDAY_LUNCH
+  action: PUSH
+
+policy:
+  probability_min: .90
+  confidence_min: .82
+  evidence_coverage_min: .70
+  contamination_max: .20
+  gain_min: .65
+  anger_max: .25
+  intervention_budget_min: 1
+
+calibration:
+  segment: hanoi_active_users
+  last_updated: 2026-08-23
+  experiment_id: exp_gate_meal_0823</div>
+</section>
+
+<section class="page" id="observability">
+  <div class="head"><h2>Observability</h2><span>不是只看 QPS / latency，还要监控“系统有没有变坏”</span></div>
+  <div class="kpis">
+    <div class="kpi"><div class="l">Decision p99</div><b>82ms</b><div class="m">target &lt;100ms</div></div>
+    <div class="kpi"><div class="l">Feature Freshness</div><b>97.1%</b><div class="m">&lt;5m</div></div>
+    <div class="kpi"><div class="l">Lineage Missing</div><b>0.18%</b><div class="m">must trend to 0</div></div>
+    <div class="kpi"><div class="l">False Fire</div><b>0.7%</b><div class="m">post-hoc estimate</div></div>
+    <div class="kpi"><div class="l">Anger Block</div><b>4.2%</b><div class="m">active trigger candidates</div></div>
+    <div class="kpi"><div class="l">Outcome Join</div><b>98.6%</b><div class="m">decision→outcome linked</div></div>
+  </div>
+
+  <div class="head"><h2>关键告警</h2><span>这些问题比单纯模型 AUC 更危险</span></div>
+  <div class="grid2">
+    <div class="panel">
+      <div class="contract"><b>Exposure lineage missing ↑</b><div>一旦推荐产生的行为无法追溯来源，会直接污染后续兴趣/Intent。</div></div>
+      <div class="contract"><b>Tag explosion without downstream lift</b><div>标签数量增长但没有任何区分度，要降级/归档，而不是继续堆。</div></div>
+      <div class="contract"><b>Confidence high but coverage low</b><div>典型“模型过度自信”；强决策必须阻断。</div></div>
+    </div>
+    <div class="panel">
+      <div class="contract"><b>Fulfillment ↑ but anger ↑</b><div>说明系统可能在“逼用户成交”，不能因为交易完成就判定成功。</div></div>
+      <div class="contract"><b>System-induced evidence ratio ↑</b><div>推荐系统正在越来越依赖自己制造的数据。</div></div>
+      <div class="contract"><b>Intervention saturation</b><div>主动触达频率高导致 usage drop / hide / mute 增加。</div></div>
+    </div>
+  </div>
+</section>
+
+
+
+<section class="page" id="state">
+  <div class="head"><h2>State Budget & Lifecycle</h2><span>Tag namespace 可以很大，但在线 working set 必须有预算</span></div>
+  <div class="govgrid">
+    <div class="govcard"><div class="k">Tag Definitions</div><div class="v">38,642</div><div class="d">允许持续增长</div></div>
+    <div class="govcard"><div class="k">Historical / User</div><div class="v">2,140</div><div class="d">Cold history，不进入每次决策</div></div>
+    <div class="govcard"><div class="k">Warm Active / User</div><div class="v">184</div><div class="d">TTL / decay 后仍有效</div></div>
+    <div class="govcard"><div class="k">Hot Decision Set</div><div class="v">31</div><div class="d">MEAL 请求真实读取</div></div>
+  </div>
+
+  <div class="head"><h2>Hot / Warm / Cold</h2><span>不是“用户所有标签 → Decision API”</span></div>
+  <div class="stateflow">
+    <div class="sf"><div class="k">COLD</div><div class="v">Historical State</div><div class="d">长期归档、分析、训练</div></div>
+    <div class="sf"><div class="k">WARM</div><div class="v">Active State</div><div class="d">仍在 TTL / decay 生命周期</div></div>
+    <div class="sf"><div class="k">RESOLVE</div><div class="v">State Resolver</div><div class="d">按 event / surface / context 取相关 namespace</div></div>
+    <div class="sf"><div class="k">HOT</div><div class="v">Decision Working Set</div><div class="d">10–100 个真正参与在线决策</div></div>
+    <div class="sf"><div class="k">API</div><div class="v">Decision</div><div class="d">低延迟读取</div></div>
+  </div>
+
+  <div class="head"><h2>TTL Engineering</h2><span>禁止为每个 UserTag 建独立 timer</span></div>
+  <div class="grid2">
+    <div class="panel"><div class="code">UserTag {
+  tag_id
+  strength
+  confidence
+  last_seen
+  expires_at
+  decay_policy
+  storage_tier
+}
+
+Read:
+  if now > expires_at
+    => inactive
+
+Cleanup:
+  bucket sweeper
+  archive / compact</div></div>
+    <div class="panel">
+      <div class="contract"><b>Lazy Expire</b><div>读取时判断 expires_at，不依赖精确秒级 delete。</div></div>
+      <div class="contract"><b>Bucket Sweeper</b><div>按小时/日分桶清理，减少 timer 数量和 write amplification。</div></div>
+      <div class="contract"><b>Decay Instead of Rewrite</b><div>长期兴趣尽量用公式衰减，避免高频状态写入。</div></div>
+      <div class="contract"><b>State Budget</b><div>监控 active/user、hot/user、memory/user、state-read p99。</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="page" id="policy">
+  <div class="head"><h2>Policy Conflict Resolver</h2><span>冲突不是一串 priority=999，而是先按语义 Domain 决议</span></div>
+  <div class="panel">
+    <div class="priority"><div class="n">1</div><b>Safety / Legal / Privacy</b><span>绝对边界</span><span class="badge bad">BLOCK</span></div>
+    <div class="priority"><div class="n">2</div><b>Explicit User Negative</b><span>Not interested / Hide / Block</span><span class="badge bad">OVERRIDE</span></div>
+    <div class="priority"><div class="n">3</div><b>Hard Resource Constraint</b><span>价格 / 时间 / 距离 / 资格</span><span class="badge bad">BLOCK</span></div>
+    <div class="priority"><div class="n">4</div><b>Intervention / Frequency Budget</b><span>主动干预预算</span><span class="badge warn">LIMIT</span></div>
+    <div class="priority"><div class="n">5</div><b>Evidence Gate</b><span>Coverage / contamination / lineage</span><span class="badge warn">GATE</span></div>
+    <div class="priority"><div class="n">6</div><b>Human Value</b><span>Gain / Anger</span><span class="badge warn">GATE</span></div>
+    <div class="priority"><div class="n">7</div><b>Business Eligibility</b><span>库存 / 营业 / capacity</span><span class="badge blue">FILTER</span></div>
+    <div class="priority"><div class="n">8</div><b>Ranking Preference</b><span>相关性与排序偏好</span><span class="badge blue">RANK</span></div>
+    <div class="priority"><div class="n">9</div><b>Commercial Objective</b><span>GMV / campaign / bid</span><span class="badge">LAST</span></div>
+  </div>
+
+  <div class="head"><h2>Rule Output Contract</h2><span>Rule 不允许直接产生 PUSH / BOOK / MATCH</span></div>
+  <div class="grid2">
+    <div class="panel"><div class="code">ALLOWED:
+Signal
+Constraint
+Penalty
+Eligibility
+Evidence
+
+FORBIDDEN:
+PUSH
+BOOK
+MATCH
+CREATE_GROUP
+FORCE_SURFACE</div></div>
+    <div class="panel"><div class="code">coffee_affinity_rule
+  → signal +0.18
+
+promo_fatigue_rule
+  → penalty -0.31
+
+blocked_merchant_rule
+  → eligibility BLOCK
+
+Decision Engine
+  → final action</div></div>
+  </div>
+</section>
+
+<section class="page" id="dsl">
+  <div class="head"><h2>Feature / DSL Boundary</h2><span>DSL 负责组合，算法负责计算</span></div>
+  <div class="dslgrid">
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">DSL Can Do</h3>
+      <div class="code">AND / OR / NOT
+> / < / =
+COUNT / SUM / AVG / PERCENTILE
+WINDOW
+RECENCY
+WITHIN_RADIUS
+SOURCE
+CONFIDENCE
+
+Example:
+COUNT(
+  save
+  WHERE destination="ninh_binh"
+  WINDOW 7d
+) >= 3</div>
+    </div>
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">DSL Must Not Implement</h3>
+      <div class="code">Transformer
+GNN
+Embedding generation
+ANN search
+Hawkes fitting
+Survival training
+CP-SAT
+Routing solver
+
+These produce registered
+features / scores / plans.</div>
+    </div>
+  </div>
+
+  <div class="head"><h2>Three Execution Planes</h2><span>复杂度按照延迟和职责隔离</span></div>
+  <div class="stack3">
+    <div class="layer"><h3>OFFLINE</h3><div class="line">Model training</div><div class="line">Embedding</div><div class="line">GNN / long-window features</div><div class="line">hours / day</div></div>
+    <div class="layer"><h3>NEARLINE</h3><div class="line">Tag generation</div><div class="line">TTL / decay</div><div class="line">relationship update</div><div class="line">seconds / minutes</div></div>
+    <div class="layer"><h3>ONLINE</h3><div class="line">Context resolve</div><div class="line">Hot features</div><div class="line">DSL policy / guard</div><div class="line">tens of ms</div></div>
+  </div>
+
+  <div class="head"><h2>Feature Semantic Parity</h2><span>同名 Feature 的 offline / online 定义必须完全一致</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Feature</th><th>Version</th><th>Offline</th><th>Online</th><th>Parity</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td>coffee_search_7d</td><td>v4</td><td>past 168h = 6</td><td>past 168h = 6</td><td><span class="badge good">MATCH</span></td><td>serve</td></tr>
+      <tr><td>merchant_repeat_30d</td><td>v2</td><td>3</td><td>4</td><td><span class="badge bad">DRIFT</span></td><td>block promotion</td></tr>
+      <tr><td>weekend_ratio_28d</td><td>v5</td><td>event-time</td><td>event-time</td><td><span class="badge good">MATCH</span></td><td>serve</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="page" id="tagutility">
+  <div class="head"><h2>Tag Utility / Economics</h2><span>标签可以细，但必须证明信息价值；不是永不清理</span></div>
+  <div class="utility">
+    <div class="u"><div class="k">Coverage</div><b>Users</b></div>
+    <div class="u"><div class="k">Decision Usage</div><b>Calls</b></div>
+    <div class="u"><div class="k">Unique Information</div><b>MI / Lift</b></div>
+    <div class="u"><div class="k">Outcome Lift</div><b>Fulfill</b></div>
+    <div class="u"><div class="k">Cost</div><b>Store+CPU</b></div>
+  </div>
+  <div class="head"><h2>Tag Utility Examples</h2><span>小众不等于无价值</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Tag</th><th>Users</th><th>Decision Usage</th><th>Unique Info</th><th>Fulfillment Lift</th><th>Cost</th><th>State</th></tr></thead>
+    <tbody>
+      <tr><td>凌晨出发接受</td><td>3.2K</td><td>18.4K</td><td>.71</td><td>2.70×</td><td>Low</td><td><span class="badge good">KEEP</span></td></tr>
+      <tr><td>最近7天保存宁平≥3</td><td>9.8K</td><td>41.2K</td><td>.64</td><td>1.84×</td><td>Low</td><td><span class="badge good">KEEP</span></td></tr>
+      <tr><td>周末喜欢外出</td><td>82K</td><td>4</td><td>.03</td><td>1.00×</td><td>High</td><td><span class="badge warn">ARCHIVE</span></td></tr>
+      <tr><td>年轻旅行用户</td><td>128K</td><td>9.1K</td><td>.08</td><td>1.04×</td><td>Medium</td><td><span class="badge warn">REVIEW</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="page" id="contextfield">
+  <div class="head"><h2>Context / Gravity Field</h2><span>User Context + World Context + Market Context</span></div>
+  <div class="hero">
+    <h1>同一个用户，在不同世界状态下不是同一个 Decision Point</h1>
+    <p>节日、天气、本地事件、发薪日、供需、库存、配送能力统一写入 versioned ContextSnapshot；Gravity、Resource、Gain/Anger、Ranking 和 Surface Composition 消费同一份快照。</p>
+  </div>
+  <div class="head"><h2>Context Snapshot</h2><span>ctx_20260826_1155</span></div>
+  <div class="context3">
+    <div class="contextbox"><h3>User Context</h3><div class="r"><span>Location</span><b>Hanoi</b></div><div class="r"><span>State</span><b>Office</b></div><div class="r"><span>Lunch P50</span><b>52K</b></div><div class="r"><span>Time budget</span><b>45m</b></div></div>
+    <div class="contextbox"><h3>World Context</h3><div class="r"><span>Calendar</span><b>Workday</b></div><div class="r"><span>Weather</span><b>Light rain</b></div><div class="r"><span>Holiday</span><b>Low</b></div><div class="r"><span>Mobility friction</span><b>.27</b></div></div>
+    <div class="contextbox"><h3>Market Context</h3><div class="r"><span>Demand pressure</span><b>.76</b></div><div class="r"><span>Supply / demand</span><b>.82×</b></div><div class="r"><span>Queue</span><b>9m</b></div><div class="r"><span>Delivery capacity</span><b>.88</b></div></div>
+  </div>
+
+  <div class="head"><h2>Normal vs Christmas · Same User</h2><span>Context 改变有效兼容度，但不自动降低 Evidence Gate</span></div>
+  <div class="grid2">
+    <div class="panel"><div class="row"><span>Celebration utility</span><div class="track"><div class="bar" style="width:12%"></div></div><b>.12</b></div><div class="row"><span>Price stretch tolerance</span><div class="track"><div class="bar" style="width:31%"></div></div><b>.31</b></div><div class="row"><span>Social dining</span><div class="track"><div class="bar" style="width:34%"></div></div><b>.34</b></div></div>
+    <div class="panel"><div class="row"><span>Celebration utility</span><div class="track"><div class="bar" style="width:88%"></div></div><b>.88</b></div><div class="row"><span>Price stretch tolerance</span><div class="track"><div class="bar" style="width:71%"></div></div><b>.71</b></div><div class="row"><span>Social dining</span><div class="track"><div class="bar" style="width:79%"></div></div><b>.79</b></div></div>
+  </div>
+
+  <div class="head"><h2>Reliability Boundary</h2><span>Business Gravity ≠ Infrastructure Capacity</span></div>
+  <div class="alert">Gravity Event 可以预测节日/暴雨需求并提前扩容、预热缓存、调供给，但 Redis/Kafka/Feature Store 故障仍必须使用 circuit breaker、load shedding、backpressure 和 fallback。强 Gravity 也不能自动把 Evidence 门槛从 3 降成 1。</div>
+</section>
+
+<section class="page" id="surface">
+  <div class="head"><h2>Surface Composition Engine</h2><span>Decision Engine 也可以返回页面组合计划</span></div>
+  <div class="surfacegrid">
+    <div class="phone"><div class="phonescreen">
+      <div class="mod hero2"><b>附近午餐</b><div>Meal .91 · price fit · 1.2km</div></div>
+      <div class="mod"><b>快速配送</b><div>轻雨，提高便利价值</div></div>
+      <div class="mod"><b>优惠券</b><div>低干扰附加价值</div></div>
+      <div class="mod muted"><b>SPA</b><div>promo fatigue .87 → blocked</div></div>
+    </div></div>
+    <div>
+      <div class="surfacerules">
+        <div class="srule"><b>nearby_meal · P1</b><div>Gravity + Resource + Gain 共同决定。</div></div>
+        <div class="srule"><b>fast_delivery · P2</b><div>World Context=rain 提高便利收益。</div></div>
+        <div class="srule"><b>coupon_wallet · P3</b><div>商业目标只能在 Guardrail 后参与。</div></div>
+        <div class="srule"><b>spa_promo · BLOCKED</b><div>Negative Preference 覆盖商业目标。</div></div>
+      </div>
+      <div class="head"><h2>SurfacePlan Contract</h2><span>Tag → UI 直接映射禁止</span></div>
+      <div class="code">{
+  "surface": "market_feed",
+  "version": "surface_policy_v4",
+  "modules": [
+    {"id":"nearby_meal","priority":1,"mode":"hero"},
+    {"id":"fast_delivery","priority":2,"mode":"compact"},
+    {"id":"coupon_wallet","priority":3,"mode":"compact"}
+  ],
+  "blocked_modules": [
+    {"id":"spa_promo","reason":"NEGATIVE_PREFERENCE"}
+  ],
+  "ttl_s": 600
+}</div>
+    </div>
+  </div>
+  <div class="head"><h2>Hot Update Boundary</h2><span>后台组合已注册组件，不远程注入任意代码</span></div>
+  <div class="alert">可热更新：module priority、layout mode、eligibility、threshold、experiment traffic。不可绕过：Privacy、Explicit Negative、Evidence Gate、Hard Resource、Anger Block。新组件能力本身仍需客户端发版注册。</div>
+</section>
+
+<section class="page" id="geometry">
+  <div class="head"><h2>Geometry / Contextual Metric Research</h2><span>物理类比只作为发现问题的工具，不作为生产技术绑架</span></div>
+  <div class="research">
+    <div class="rbox"><h3>CatBoost / GBDT</h3><p>User + Candidate + Context cross-features。生产基线。</p><span class="stage">PROD</span></div>
+    <div class="rbox"><h3>Context-aware Two-Tower</h3><p>User / item / context embedding 联合召回。</p><span class="stage">SHADOW</span></div>
+    <div class="rbox"><h3>Context Metric</h3><p>实验 d(user,item|context)，Mahalanobis / neural metric。</p><span class="stage">LAB</span></div>
+    <div class="rbox"><h3>Hyperbolic / Manifold</h3><p>只有真实指标证明必要时采用。</p><span class="stage">RESEARCH</span></div>
+  </div>
+  <div class="head"><h2>Research Promotion</h2><span>复杂数学必须击败简单基线</span></div>
+  <div class="trace">
+    <div class="tstep"><div class="k">01</div><div class="v">GBDT</div><div class="d">baseline</div></div>
+    <div class="tstep"><div class="k">02</div><div class="v">Two-Tower</div><div class="d">context embedding</div></div>
+    <div class="tstep"><div class="k">03</div><div class="v">Metric Learning</div><div class="d">d(u,v|c)</div></div>
+    <div class="tstep"><div class="k">04</div><div class="v">Manifold</div><div class="d">only if needed</div></div>
+    <div class="tstep"><div class="k">05</div><div class="v">Winner</div><div class="d">Fulfillment / Gain / Anger / latency</div></div>
+  </div>
+  <div class="head"><h2>正式 Contract vs 研究对象</h2></div>
+  <div class="grid2">
+    <div class="panel"><div class="code">PRODUCTION:
+ContextSnapshot
+GravityState
+ResourceEnvelope
+EvidenceState
+HumanValueResult
+EligibilityResult
+RankScore
+SurfacePlan
+OrchestrationPlan
+OutcomeRecord</div></div>
+    <div class="panel"><div class="code">RESEARCH:
+ContextEmbedding
+MetricMatrix M(c)
+HyperbolicEmbedding
+ManifoldDistance
+
+NOT POLICY SEMANTICS:
+Lorentz transformation
+Planck constant
+negative mass
+wave-function collapse</div></div>
+  </div>
+</section>
+
+<section class="page" id="gateway">
+  <div class="head"><h2>Decision Intelligence Engine API Gateway</h2><span>Proxy 产品层只依赖稳定 Decision Contract</span></div>
+
+  <div class="hero">
+    <h1>一个入口调用整套智能决策</h1>
+    <p>业务页面不分别调用 Tag、Gravity、Evidence、Ranking。Proxy Backend 只调用 POST /v1/decisions/evaluate；引擎内部负责状态解析、推演、Guardrail、候选检索、Ranking 与 Orchestration。</p>
+    <div class="dag">
+      <div class="node"><div class="k">CLIENT</div><div class="v">Proxy UI</div><div class="d">Feed / Market / Merchant / Companion</div></div>
+      <div class="node"><div class="k">BFF</div><div class="v">Proxy Backend</div><div class="d">业务会话 / auth / transaction</div></div>
+      <div class="node"><div class="k">PUBLIC API</div><div class="v">Decision API</div><div class="d">stable contract</div></div>
+      <div class="node"><div class="k">RESOLVE</div><div class="v">Context + State</div><div class="d">Feature / Tag / Graph / Event</div></div>
+      <div class="node"><div class="k">FORECAST</div><div class="v">Gravity + Intent</div><div class="d">future pull / current want</div></div>
+      <div class="node"><div class="k">GUARD</div><div class="v">Evidence + Value</div><div class="d">污染 / 获得感 / 愤怒感</div></div>
+      <div class="node"><div class="k">DECIDE</div><div class="v">Eligibility + Rank</div><div class="d">filter / retrieval / rank</div></div>
+      <div class="node"><div class="k">PLAN</div><div class="v">Orchestration</div><div class="d">group / schedule / capacity</div></div>
+      <div class="node"><div class="k">RETURN</div><div class="v">DecisionResponse</div><div class="d">state / action / candidates / TTL</div></div>
+    </div>
+  </div>
+
+  <div class="head"><h2>Public Endpoints</h2><span>Product-facing contract</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th><th>Consumer</th><th>Audit</th></tr></thead>
+    <tbody>
+      <tr><td>POST</td><td><b>/v1/decisions/evaluate</b></td><td>统一决策入口</td><td>Proxy Backend</td><td><span class="badge good">decision_id</span></td></tr>
+      <tr><td>POST</td><td>/v1/events</td><td>行为/交易事件回流</td><td>Backend / Event SDK</td><td><span class="badge good">event_id</span></td></tr>
+      <tr><td>POST</td><td>/v1/decisions/{id}/exposures</td><td>记录系统曝光</td><td>Proxy Backend</td><td><span class="badge good">exposure_id</span></td></tr>
+      <tr><td>POST</td><td>/v1/decisions/{id}/outcomes</td><td>履约/取消/复购结果</td><td>Transaction / Fulfillment</td><td><span class="badge good">joined</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="head"><h2>Decision Contract</h2><span>客户端不允许自行升级引擎状态</span></div>
+  <div class="grid2">
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Request</h3>
+      <div class="code">POST /v1/decisions/evaluate
+
+{
+  "request_id": "req_...",
+  "user_id": "PX-102839",
+  "surface": "market_feed",
+  "decision_type": "recommend",
+
+  "context": {
+    "timestamp": "...",
+    "city": "hanoi",
+    "geo_h3": "...",
+    "session_id": "..."
+  },
+
+  "user_action": {
+    "type": "open_market"
+  },
+
+  "event_hint": {
+    "event_type": "MEAL"
+  },
+
+  "constraints": {
+    "max_distance_m": 2500,
+    "time_budget_min": 45
+  },
+
+  "execution": {
+    "mode": "online",
+    "trace_level": "summary"
+  }
+}</div>
+    </div>
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Response</h3>
+      <div class="code">{
+  "decision_id": "dec_...",
+  "state": "SOFT_NUDGE",
+
+  "action": {
+    "type": "SHOW_MARKET_CARD",
+    "delivery": "in_surface"
+  },
+
+  "event_state": {
+    "event_type": "MEAL",
+    "gravity_probability": .91,
+    "intent_score": .73
+  },
+
+  "guardrails": {
+    "evidence": "PASS",
+    "resource": "PASS",
+    "human_value": "PASS"
+  },
+
+  "candidates": [...],
+
+  "surface_plan": {
+    "surface": "market_feed",
+    "modules": [
+      {"id":"nearby_meal","priority":1,"mode":"hero"},
+      {"id":"fast_delivery","priority":2,"mode":"compact"},
+      {"id":"coupon_wallet","priority":3,"mode":"compact"}
+    ],
+    "ttl_s": 600
+  },
+
+  "orchestration": null,
+  "expires_at": "...",
+  "trace_id": "trace_..."
+}</div>
+    </div>
+  </div>
+
+  <div class="head"><h2>Decision State → Product Behavior</h2><span>UI 是执行层，不重新解释策略</span></div>
+  <div class="table"><table>
+    <thead><tr><th>State</th><th>Proxy Behavior</th><th>Allowed Intervention</th><th>Client Can Upgrade?</th></tr></thead>
+    <tbody>
+      <tr><td>OBSERVE</td><td>无界面影响</td><td>None</td><td><span class="badge bad">No</span></td></tr>
+      <tr><td>LEARN_ONLY</td><td>仅模型学习</td><td>None</td><td><span class="badge bad">No</span></td></tr>
+      <tr><td>PASSIVE</td><td>用户主动打开时参与排序</td><td>Rank only</td><td><span class="badge bad">No</span></td></tr>
+      <tr><td>SOFT_NUDGE</td><td>Feed / Market 自然呈现</td><td>In-surface</td><td><span class="badge bad">No</span></td></tr>
+      <tr><td>ACTIVE_ORCHESTRATE</td><td>主动组局 / 邀请 / Push</td><td>Active</td><td><span class="badge bad">No</span></td></tr>
+      <tr><td>BLOCKED</td><td>禁止该主动行为</td><td>None</td><td><span class="badge bad">No</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="page" id="apiflow">
+  <div class="head"><h2>Proxy Integration</h2><span>产品业务和决策智能解耦</span></div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Proxy Owns</h3>
+      <div class="contract"><b>Experience</b><div>Feed、Profile、Market、Chat、Merchant、Coupon、Activity。</div></div>
+      <div class="contract"><b>Identity & Permission</b><div>登录、账户、公开可见性、业务权限。</div></div>
+      <div class="contract"><b>Transaction</b><div>订单、支付、优惠券、预约。</div></div>
+      <div class="contract"><b>Fulfillment</b><div>到店、核销、组局完成、取消、异常。</div></div>
+    </div>
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Decision Engine Owns</h3>
+      <div class="contract"><b>Understand</b><div>Feature / Tags / Graph / Context。</div></div>
+      <div class="contract"><b>Forecast</b><div>Gravity / Intent / Resource。</div></div>
+      <div class="contract"><b>Guard</b><div>Evidence / contamination / Gain / Anger / frequency。</div></div>
+      <div class="contract"><b>Decide</b><div>Eligibility / Retrieval / Ranking / Orchestration。</div></div>
+    </div>
+  </div>
+
+  <div class="head"><h2>典型调用 · 用户 11:55 打开 Market</h2><span>端到端 Trace</span></div>
+  <div class="timeline">
+    <div class="time">T+0ms</div><div class="ev"><b>Proxy Backend → Decision API</b><div>surface=market_feed, decision_type=recommend, event_hint=MEAL。</div></div>
+    <div class="time">T+7ms</div><div class="ev"><b>Context Resolver</b><div>Hanoi / 11:55 / office cluster / weekday / session state。</div></div>
+    <div class="time">T+16ms</div><div class="ev"><b>State Read</b><div>Feature Store + Tags + Graph + recent event sequence。</div></div>
+    <div class="time">T+28ms</div><div class="ev"><b>Gravity / Intent</b><div>Meal p60=.91；Sushi lunch intent=.73。</div></div>
+    <div class="time">T+36ms</div><div class="ev"><b>Evidence + Resource + Value</b><div>Coverage .94 / contamination .08 / lunch P50 52K / Gain-Anger guard。</div></div>
+    <div class="time">T+51ms</div><div class="ev"><b>Eligibility + Retrieval</b><div>487 merchants → 64 eligible。</div></div>
+    <div class="time">T+67ms</div><div class="ev"><b>Ranking</b><div>64 → top 8；包含 price stretch / distance / queue / affinity。</div></div>
+    <div class="time">T+74ms</div><div class="ev"><b>DecisionResponse</b><div>SOFT_NUDGE；TTL 10min；trace_id returned。</div></div>
+    <div class="time">Later</div><div class="ev"><b>Exposure / Outcome 回流</b><div>必须挂 decision_id + exposure_id，形成完整 lineage。</div></div>
+  </div>
+
+  <div class="head"><h2>Execution Modes</h2><span>模型上线前不直接打真实用户</span></div>
+  <div class="grid4">
+    <div class="panel"><b style="font-size:10px">ONLINE</b><div class="note">真实影响用户体验。必须使用已批准 Policy。</div></div>
+    <div class="panel"><b style="font-size:10px">SHADOW</b><div class="note">新模型并行运行，但不改变结果。比较 old vs new。</div></div>
+    <div class="panel"><b style="font-size:10px">REPLAY</b><div class="note">历史事件重放，检查策略在过去会发生什么。</div></div>
+    <div class="panel"><b style="font-size:10px">SIMULATION</b><div class="note">Decision Lab 手工修改阈值与状态。</div></div>
+  </div>
+
+  <div class="head"><h2>Fail-safe</h2><span>智能系统失败时降级，不允许 fail-open 到强干预</span></div>
+  <div class="trace">
+    <div class="tstep"><div class="k">PRIMARY</div><div class="v">Full Engine</div><div class="d">完整 Gravity + Guard + Rank</div></div>
+    <div class="tstep"><div class="k">FALLBACK 1</div><div class="v">Safe Rule Rank</div><div class="d">只使用高可信 Feature + 硬过滤</div></div>
+    <div class="tstep"><div class="k">FALLBACK 2</div><div class="v">Passive Market</div><div class="d">不做主动触达</div></div>
+    <div class="tstep"><div class="k">FALLBACK 3</div><div class="v">No Intervention</div><div class="d">安全关闭 proactive action</div></div>
+  </div>
+</section>
+
+<section class="page" id="controlplane">
+  <div class="head"><h2>Decision Intelligence Control Plane</h2><span>刚才这套后台正式成为引擎控制面</span></div>
+
+  <div class="grid3">
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Data & Modeling</h3>
+      <div class="contract"><b>Feature Registry</b><div>Feature schema / owner / freshness / online-offline parity。</div></div>
+      <div class="contract"><b>Tag Factory</b><div>Tag rule / TTL / evidence min / use boundary。</div></div>
+      <div class="contract"><b>Gravity / Intent</b><div>Event template / model / calibration / current drift。</div></div>
+      <div class="contract"><b>Resource Envelope</b><div>scene-specific money/time/distance envelope。</div></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Decision Safety</h3>
+      <div class="contract"><b>Evidence Gate</b><div>Coverage / Confidence / contamination / source lineage。</div></div>
+      <div class="contract"><b>Negative Breaker</b><div>Cooldown / not interested / hide / block。</div></div>
+      <div class="contract"><b>Human Value</b><div>Gain / Anger / privacy creep / intervention budget。</div></div>
+      <div class="contract"><b>Eligibility</b><div>硬过滤与 policy guard。</div></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="font-size:11px;margin-top:0">Decision Ops</h3>
+      <div class="contract"><b>Threshold Registry</b><div>User × Event × Context × Action policy。</div></div>
+      <div class="contract"><b>Model Registry</b><div>version / traffic / shadow / rollback。</div></div>
+      <div class="contract"><b>Decision Trace</b><div>每个 decision 可重放和解释。</div></div>
+      <div class="contract"><b>Experiment</b><div>A/B / holdout / propensity / causal attribution。</div></div>
+    </div>
+  </div>
+
+  <div class="head"><h2>服务边界</h2><span>控制面不能直接写死业务结果</span></div>
+  <div class="table"><table>
+    <thead><tr><th>Service</th><th>Reads</th><th>Writes</th><th>Online?</th><th>Owner</th></tr></thead>
+    <tbody>
+      <tr><td>decision-api</td><td>context / policies</td><td>DecisionRecord</td><td>Yes</td><td>decision-platform</td></tr>
+      <tr><td>feature-service</td><td>events</td><td>FeatureValue</td><td>Yes</td><td>data-platform</td></tr>
+      <tr><td>tag-engine</td><td>features / events</td><td>UserTag</td><td>Nearline</td><td>relevance</td></tr>
+      <tr><td>gravity-engine</td><td>features / event history</td><td>GravityState</td><td>Yes</td><td>relevance</td></tr>
+      <tr><td>evidence-gate</td><td>lineage / tags / features</td><td>GateResult</td><td>Yes</td><td>safety</td></tr>
+      <tr><td>human-value</td><td>resource / candidate / history</td><td>ValueResult</td><td>Yes</td><td>user-value</td></tr>
+      <tr><td>orchestrator</td><td>eligible candidate set</td><td>Plan</td><td>Conditional</td><td>market</td></tr>
+      <tr><td>outcome-service</td><td>decision / transaction</td><td>OutcomeRecord</td><td>Async</td><td>decision-platform</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="head"><h2>Promotion Workflow</h2><span>配置/模型不能直接从编辑变成生产</span></div>
+  <div class="trace">
+    <div class="tstep"><div class="k">DRAFT</div><div class="v">Edit</div><div class="d">规则 / threshold / model</div></div>
+    <div class="tstep"><div class="k">VALIDATE</div><div class="v">Schema + Unit</div><div class="d">Contract / offline checks</div></div>
+    <div class="tstep"><div class="k">REPLAY</div><div class="v">Historical</div><div class="d">过去7/30天重放</div></div>
+    <div class="tstep"><div class="k">SHADOW</div><div class="v">Real Traffic</div><div class="d">不影响用户</div></div>
+    <div class="tstep"><div class="k">CANARY</div><div class="v">1–5%</div><div class="d">安全小流量</div></div>
+    <div class="tstep"><div class="k">PROD</div><div class="v">Ramp</div><div class="d">20 → 50 → 100%</div></div>
+    <div class="tstep"><div class="k">ROLLBACK</div><div class="v">One Click</div><div class="d">恢复 last-good</div></div>
+  </div>
+</section>
+
+</div>
+</main>
+</div>
+
+<script>
+const titles={
+  state:'State / 生命周期',policy:'Policy Resolver',dsl:'Feature / DSL',tagutility:'Tag Utility',
+  contextfield:'Context / Gravity Field',surface:'Surface Composition',geometry:'Geometry Research',
+  topology:'系统拓扑',contracts:'数据对象 / Contracts',runtime:'在线 / 离线链路',
+  tags:'Tag / Feature Engine',gravity:'Gravity / Intent Engine',evidence:'Evidence Gate',
+  value:'Human Value Guardrail',decision:'Decision Pipeline',lab:'Decision Lab',
+  inspector:'User × Event Inspector',gateway:'API Gateway',apiflow:'Proxy Integration',controlplane:'Control Plane',registry:'Rules / Model Registry',observability:'Observability'
+};
+document.querySelectorAll('.nav button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
+    btn.classList.add('active');
+    const p=btn.dataset.page;
+    document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));
+    document.getElementById(p).classList.add('active');
+    document.getElementById('pageTitle').textContent=titles[p];
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+});
+
+const schemas={
+event:['RawEvent v4',`{
+  "event_id": "...",
+  "user_id": "...",
+  "ts": "...",
+  "event_type": "...",
+  "object": {...},
+  "context": {...},
+  "origin": "organic|explicit|transactional|system_exposed|merchant_exposed",
+  "exposure_lineage": {
+    "recommendation_id": null,
+    "policy_id": null,
+    "rank_position": null,
+    "predicted_score": null
+  },
+  "properties": {...}
+}`],
+feature:['FeatureValue v3',`{
+  "entity_id": "PX-102839",
+  "feature_name": "weekend_evening_activity_ratio_28d",
+  "value": 0.67,
+  "event_time": "...",
+  "computed_at": "...",
+  "freshness_s": 41,
+  "source_job": "flink_behavior_v7",
+  "version": 3
+}`],
+tag:['UserTag v5',`{
+  "user_id": "PX-102839",
+  "tag_id": "evt_save_ninhbinh_7d_gte3",
+  "state": "active",
+  "strength": 1.0,
+  "confidence": 0.94,
+  "source": "observed",
+  "evidence_count": 4,
+  "source_diversity": 2,
+  "first_seen": "...",
+  "last_seen": "...",
+  "ttl_s": 604800,
+  "allowed_use": {...}
+}`],
+gravity:['GravityEventState v2',`{
+  "user_id": "PX-102839",
+  "event_type": "MEAL",
+  "context_key": "WORKDAY_LUNCH_HANOI",
+  "p_30m": 0.71,
+  "p_60m": 0.91,
+  "hazard": 0.084,
+  "confidence": 0.90,
+  "coverage": 0.94,
+  "computed_at": "...",
+  "model_version": "meal_gravity_v5.2"
+}`],
+userEvent:['UserEventState v6',`{
+  "key": {
+    "user_id": "PX-102839",
+    "event_type": "MEAL",
+    "context_key": "WORKDAY_LUNCH_HANOI"
+  },
+  "probability": 0.91,
+  "confidence": 0.90,
+  "evidence_coverage": 0.94,
+  "contamination_risk": 0.08,
+  "negative_breaker": false,
+  "cooldown_until": null,
+  "resource_feasibility": "PASS",
+  "gain_score": 0.78,
+  "anger_risk": 0.22,
+  "decision_state": "SOFT_NUDGE"
+}`],
+decision:['DecisionRecord v7',`{
+  "decision_id": "dec_...",
+  "user_event_key": {...},
+  "action": "FEED_CARD",
+  "thresholds": {...},
+  "evidence_snapshot": {...},
+  "resource_snapshot": {...},
+  "value_snapshot": {...},
+  "eligibility_result": {...},
+  "candidate_ids": [...],
+  "ranked_ids": [...],
+  "orchestration_plan_id": null,
+  "final_state": "FIRED",
+  "policy_version": "decision_policy_2026_08_23"
+}`],
+outcome:['OutcomeRecord v4',`{
+  "decision_id": "dec_...",
+  "exposure": true,
+  "response": "CLICK",
+  "commit": false,
+  "fulfillment": false,
+  "negative_feedback": null,
+  "repeat_within_30d": null,
+  "usage_delta_7d": null,
+  "propensity": 0.41,
+  "holdout": false,
+  "joined_at": "..."
+}`],
+context:['ContextSnapshot v1',`{
+  "context_id": "ctx_...",
+  "timestamp": "...",
+  "user": {
+    "geo_h3": "...",
+    "local_state": "office",
+    "time_budget_min": 45
+  },
+  "world": {
+    "holiday": null,
+    "weather": "light_rain",
+    "local_event_pressure": 0.12
+  },
+  "market": {
+    "demand_pressure": 0.76,
+    "supply_demand_ratio": 0.82,
+    "delivery_capacity": 0.88
+  },
+  "version": 1
+}`],
+surfaceplan:['SurfacePlan v1',`{
+  "surface": "market_feed",
+  "policy_version": "surface_policy_v4",
+  "modules": [
+    {"id":"nearby_meal","priority":1,"mode":"hero"},
+    {"id":"fast_delivery","priority":2,"mode":"compact"}
+  ],
+  "blocked_modules": [
+    {"id":"spa_promo","reason":"NEGATIVE_PREFERENCE"}
+  ],
+  "ttl_s": 600
+}`]
+};
+function showSchema(k,btn){
+  document.querySelectorAll('.schema .keys button').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('schemaTitle').textContent=schemas[k][0];
+  document.getElementById('schemaCode').textContent=schemas[k][1];
+}
+
+const ids=['prob','conf','cov','cont','gain','anger','budget','theta'];
+ids.forEach(id=>{
+  const el=document.getElementById(id);
+  const out=document.getElementById(id+'O');
+  if(!el)return;
+  const update=()=>{out.textContent=(id==='budget'?el.value:Number(el.value).toFixed(2));simulate()};
+  el.addEventListener('input',update);
+});
+function simulate(){
+  const p=+prob.value,c=+conf.value,v=+cov.value,x=+cont.value,g=+gain.value,a=+anger.value,b=+budget.value,t=+theta.value;
+  const checks={
+    prob:p>=t, conf:c>=.80, cov:v>=.70, cont:x<=.20, value:g>=.65&&a<=.25, budget:b>0
+  };
+  cProb.textContent=checks.prob?'PASS':'FAIL';
+  cConf.textContent=checks.conf?'PASS':'FAIL';
+  cCov.textContent=checks.cov?'PASS':'FAIL';
+  cCont.textContent=checks.cont?'PASS':'FAIL';
+  cValue.textContent=checks.value?'PASS':'FAIL';
+  cBudget.textContent=checks.budget?'PASS':'FAIL';
+
+  let state='ACTIVE_ORCHESTRATE',reason='全部高风险闸门通过，可进入主动编排。最终候选仍需 Eligibility + Ranking + Orchestration。';
+  if(!checks.budget){state='PASSIVE';reason='Intervention Budget 已耗尽，不主动触达；仅保留被动排序能力。'}
+  if(!checks.value){state='BLOCKED';reason=a>.25?'Anger Risk 超过上限，必须阻断主动点火。':'Gain 不足，不值得主动打扰用户。'}
+  if(!checks.cont){state='LEARN_ONLY';reason='污染风险过高，数据可学习但不能用于强线上决策。'}
+  if(!checks.cov||!checks.conf){state='LEARN_ONLY';reason='Evidence Coverage / Confidence 不足，禁止强决策。'}
+  if(!checks.prob && checks.cov && checks.conf && checks.cont){state='PASSIVE';reason='当前概率未越过该 Action 的动态阈值，只允许被动响应。'}
+  decisionState.textContent=state;
+  decisionReason.textContent=reason;
+}
+simulate();
+</script>
+</body>
+</html>

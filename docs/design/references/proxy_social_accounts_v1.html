@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Proxy · 社媒账户</title>
+<style>
+:root{
+  --bg:#fbfafc;--surface:#fff;--text:#151218;--muted:#8f8993;--line:#ece8ee;
+  --soft:#f5f2f6;--accent:#ff2f7d;--accent-soft:#fff1f6;--dark:#151218;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#e9e6eb;color:var(--text)}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Helvetica Neue",Arial,sans-serif}
+button,input{font:inherit} button{cursor:pointer}
+.phone{width:min(430px,100%);min-height:100vh;margin:auto;background:var(--bg);padding:12px 22px calc(96px + env(safe-area-inset-bottom));position:relative}
+.status{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 4px;font-size:15px;font-weight:800}
+.brand{display:flex;align-items:center;gap:10px;margin-top:10px;margin-bottom:28px}
+.logo{width:40px;height:40px;border-radius:12px;background:#111;color:#fff;display:grid;place-items:center;font-size:24px}
+.brand b{font-size:28px;letter-spacing:-.6px}
+.back{border:0;background:transparent;padding:0;margin:0 0 34px;color:var(--accent);font-size:15px;font-weight:800}
+h1{font-size:29px;margin:0 0 7px;letter-spacing:-.6px;line-height:1.15}
+.sub{font-size:14px;color:var(--muted);line-height:1.5;margin-bottom:24px}
+.section-title{display:flex;align-items:center;justify-content:space-between;margin:24px 0 8px}
+.section-title b{font-size:13px}.section-title span{font-size:11px;color:var(--muted)}
+.list{border-top:1px solid var(--line)}
+.row{display:flex;align-items:center;gap:13px;min-height:82px;border-bottom:1px solid var(--line)}
+.picon{width:44px;height:44px;border-radius:14px;background:#f3eef8;display:grid;place-items:center;flex:0 0 auto;font-weight:900;font-size:13px;color:#6e3db7}
+.picon.dark{background:#111;color:#fff}
+.grow{flex:1;min-width:0}
+.name{font-size:15px;font-weight:850;line-height:1.2}
+.handle{font-size:12px;color:#6e6872;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.url{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trailing{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+.state{border-radius:999px;padding:7px 10px;background:var(--soft);color:#766f79;font-size:10px;font-weight:850;white-space:nowrap}
+.state.active{background:var(--accent-soft);color:var(--accent)}
+.chev{font-size:19px;color:#b6afb9}
+.setting{display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid var(--line)}
+.setting:last-child{border-bottom:0}
+.setting .grow .name{font-size:14px}.setting .grow .handle{line-height:1.45}
+.switch{width:48px;height:28px;border:0;border-radius:999px;background:#d9d4dc;position:relative;padding:0;flex:0 0 auto}
+.switch::after{content:"";position:absolute;left:3px;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:.18s}
+.switch.on{background:#17131a}.switch.on::after{left:23px;background:#ff5c99}
+.sharebox{margin-top:22px;border-top:1px solid var(--line);padding-top:18px}
+.shareline{display:flex;align-items:center;gap:10px;padding:12px 0}
+.sharelink{flex:1;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:11px 12px;font-size:12px;color:#5f5963;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.copy{height:40px;padding:0 14px;border:0;border-radius:12px;background:#17131a;color:#fff;font-weight:850;font-size:12px}
+.note{margin-top:14px;font-size:11px;color:#a19aa5;line-height:1.5}
+.nav{position:fixed;left:50%;transform:translateX(-50%);bottom:0;width:min(430px,100%);display:grid;grid-template-columns:repeat(5,1fr);background:rgba(255,255,255,.96);border-top:1px solid var(--line);padding:8px 10px calc(8px + env(safe-area-inset-bottom));backdrop-filter:blur(16px);z-index:20}
+.navitem{text-align:center;color:#8e8792;font-size:10px;font-weight:750}
+.navitem .ni{font-size:21px;line-height:1.1;margin-bottom:3px}.navitem.active{color:var(--accent)}
+.mask{position:fixed;inset:0;background:rgba(16,12,18,.28);display:none;align-items:flex-end;justify-content:center;z-index:50}
+.mask.show{display:flex}
+.sheet{width:min(430px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:24px 24px 0 0;padding:16px 20px calc(24px + env(safe-area-inset-bottom))}
+.grabber{width:34px;height:4px;border-radius:999px;background:#d7d1d9;margin:0 auto 14px}
+.sheethead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sheettitle{font-size:22px;font-weight:900}
+.close{width:34px;height:34px;border:0;border-radius:50%;background:#f4f1f5;color:#5d5661;font-size:20px}
+.sheetnote{font-size:12px;color:var(--muted);line-height:1.45;margin-bottom:16px}
+.label{font-size:11px;color:var(--muted);font-weight:800;margin:14px 0 7px}
+.input{width:100%;height:44px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:0 12px;outline:none;color:var(--text)}
+.visibility{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.vbtn{border:1px solid var(--line);background:#fff;color:#625b66;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:800}
+.vbtn.on{background:#17131a;border-color:#17131a;color:#fff}
+.openlink{display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding:12px 0;border-top:1px solid var(--line);color:#4d4751;font-size:12px;font-weight:800}
+.save{margin-top:18px;width:100%;height:48px;border:0;border-radius:14px;background:#17131a;color:#fff;font-size:14px;font-weight:900}
+@media(min-width:431px){body{padding:18px 0}.phone{min-height:900px;border-radius:36px;overflow:hidden}.nav{bottom:18px;border-radius:0 0 36px 36px}}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="status"><span>11:05</span><span>••• ◒ ▰</span></div>
+  <div class="brand"><div class="logo">🦦</div><b>Proxy</b></div>
+  <button class="back">‹ 返回</button>
+  <h1>社媒账户</h1>
+  <div class="sub">管理你的外部社交平台。账号、链接和公开范围都由你控制。</div>
+
+  <div class="list">
+    <div class="row" onclick="openEdit('tiktok')" style="cursor:pointer">
+      <div class="picon dark">TT</div>
+      <div class="grow"><div class="name">TikTok</div><div class="handle">@huyen.life</div><div class="url">tiktok.com/@huyen.life</div></div>
+      <div class="trailing"><span class="state active">商家可见</span><span class="chev">›</span></div>
+    </div>
+
+    <div class="row" onclick="openEdit('threads')" style="cursor:pointer">
+      <div class="picon">◎</div>
+      <div class="grow"><div class="name">Threads</div><div class="handle">@huyen.daily</div><div class="url">threads.net/@huyen.daily</div></div>
+      <div class="trailing"><span class="state">未展示</span><span class="chev">›</span></div>
+    </div>
+
+    <div class="row" onclick="openEdit('facebook')" style="cursor:pointer">
+      <div class="picon">f</div>
+      <div class="grow"><div class="name">Facebook</div><div class="handle">Huyen Nguyen</div><div class="url">facebook.com/huyen.nguyen</div></div>
+      <div class="trailing"><span class="state active">公开展示</span><span class="chev">›</span></div>
+    </div>
+
+    <div class="row" onclick="openEdit('x')" style="cursor:pointer">
+      <div class="picon dark">X</div>
+      <div class="grow"><div class="name">X</div><div class="handle">未关联</div><div class="url">添加账号后可生成主页链接</div></div>
+      <div class="trailing"><span class="state">关联</span><span class="chev">›</span></div>
+    </div>
+  </div>
+
+  <div class="section-title"><b>展示设置</b><span>按需开放</span></div>
+  <div>
+    <div class="setting">
+      <div class="grow"><div class="name">商家合作资料</div><div class="handle">允许商家在合作场景查看你已开放的社媒账户。</div></div>
+      <button class="switch on" onclick="this.classList.toggle('on')"></button>
+    </div>
+    <div class="setting">
+      <div class="grow"><div class="name">个人主页入口</div><div class="handle">在个人主页显示一个轻量“社媒”入口，不直接铺开账号。</div></div>
+      <button class="switch" onclick="this.classList.toggle('on')"></button>
+    </div>
+    <div class="setting">
+      <div class="grow"><div class="name">影响力信息</div><div class="handle">后续可向商家展示粉丝量等信息，默认关闭。</div></div>
+      <button class="switch" onclick="this.classList.toggle('on')"></button>
+    </div>
+  </div>
+
+  <div class="sharebox">
+    <div class="section-title" style="margin:0"><b>公开分享链接</b><span>可选</span></div>
+    <div class="shareline">
+      <div class="sharelink" id="shareLink">pxy.app/huyen/social</div>
+      <button class="copy" onclick="copyLink()">复制</button>
+    </div>
+    <div class="note">只有你设置为“公开展示”的账号会出现在这个分享页。商家可见账号不会自动公开。</div>
+  </div>
+</div>
+
+<div class="nav">
+  <div class="navitem"><div class="ni">⌂</div>首页</div>
+  <div class="navitem"><div class="ni">◇</div>市场</div>
+  <div class="navitem"><div class="ni">◎</div>动态</div>
+  <div class="navitem"><div class="ni">▣</div>消息</div>
+  <div class="navitem active"><div class="ni">◉</div>我的</div>
+</div>
+
+<div class="mask" id="mask" onclick="if(event.target===this)closeSheet()">
+  <div class="sheet">
+    <div class="grabber"></div>
+    <div class="sheethead"><div class="sheettitle" id="sheetTitle">TikTok</div><button class="close" onclick="closeSheet()">×</button></div>
+    <div class="sheetnote">账号和主页链接用于跳转外部平台。展示范围可单独控制。</div>
+    <div class="label">账号</div>
+    <input class="input" id="handleInput" value="@huyen.life">
+    <div class="label">主页链接</div>
+    <input class="input" id="urlInput" value="https://www.tiktok.com/@huyen.life">
+    <div class="label">谁可以看到</div>
+    <div class="visibility">
+      <button class="vbtn" onclick="pickVisibility(this)">仅自己</button>
+      <button class="vbtn on" onclick="pickVisibility(this)">商家可见</button>
+      <button class="vbtn" onclick="pickVisibility(this)">公开展示</button>
+    </div>
+    <div class="openlink"><span>打开外部主页</span><span>↗</span></div>
+    <button class="save" onclick="saveEdit()">保存</button>
+  </div>
+</div>
+
+<script>
+const accounts={
+  tiktok:{title:'TikTok',handle:'@huyen.life',url:'https://www.tiktok.com/@huyen.life'},
+  threads:{title:'Threads',handle:'@huyen.daily',url:'https://www.threads.net/@huyen.daily'},
+  facebook:{title:'Facebook',handle:'Huyen Nguyen',url:'https://www.facebook.com/huyen.nguyen'},
+  x:{title:'X',handle:'',url:''}
+};
+let currentKey='tiktok';
+function openEdit(key){
+  currentKey=key;
+  const a=accounts[key];
+  document.getElementById('sheetTitle').textContent=a.title;
+  document.getElementById('handleInput').value=a.handle;
+  document.getElementById('urlInput').value=a.url;
+  document.getElementById('mask').classList.add('show');
+}
+function closeSheet(){document.getElementById('mask').classList.remove('show')}
+function pickVisibility(btn){
+  document.querySelectorAll('.vbtn').forEach(x=>x.classList.remove('on'));
+  btn.classList.add('on');
+}
+function saveEdit(){
+  accounts[currentKey].handle=document.getElementById('handleInput').value.trim();
+  accounts[currentKey].url=document.getElementById('urlInput').value.trim();
+  closeSheet();
+}
+function copyLink(){
+  const t=document.getElementById('shareLink').textContent;
+  if(navigator.clipboard){navigator.clipboard.writeText(t)}
+  const btn=document.querySelector('.copy');
+  const old=btn.textContent;
+  btn.textContent='已复制';
+  setTimeout(()=>btn.textContent=old,1200);
+}
+</script>
+</body>
+</html>

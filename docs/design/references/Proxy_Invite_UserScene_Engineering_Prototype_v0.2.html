@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proxy · 邀约工程原型 v0.2</title>
+<style>
+:root{--bg:#f7f7f4;--card:#fff;--text:#111;--muted:#73736d;--line:#dcdcd6;--soft:#efefeb;--accent:#f4a62a;--accentSoft:#fff3dc;--ok:#2e6c4d;--warn:#9a6510;--bad:#b84738}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif}
+button{font:inherit;cursor:pointer} .app{max-width:1380px;margin:auto;padding:22px}.top{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:18px}.brand{display:flex;gap:10px;align-items:center}.logo{width:38px;height:38px;border:1.5px solid #111;border-radius:12px;display:grid;place-items:center;background:#fff;font-size:20px}.brand b{font-size:18px}.brand small{display:block;color:var(--muted);margin-top:2px}.pill{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 10px;font-size:11px;color:var(--muted)}
+.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:18px}.side{background:#fff;border:1px solid var(--line);border-radius:17px;padding:9px;height:max-content;position:sticky;top:18px}.nav{width:100%;border:0;background:transparent;color:var(--muted);padding:11px 12px;border-radius:11px;text-align:left;margin:2px 0}.nav.active{background:#111;color:#fff}.screen{display:none}.screen.active{display:block}.head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:14px}.kicker{font-size:10px;letter-spacing:.12em;font-weight:800;color:var(--muted)}h2{margin:4px 0 0;font-size:27px;letter-spacing:-.7px}.desc{font-size:12px;line-height:1.55;color:var(--muted);max-width:520px}
+.card{background:#fff;border:1px solid var(--line);border-radius:17px;padding:16px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.label{font-size:11px;font-weight:750;margin-bottom:8px}.muted{color:var(--muted);font-size:11px;line-height:1.5}
+.segment{display:flex;gap:7px;flex-wrap:wrap}.seg{border:1px solid var(--line);background:#fff;padding:8px 12px;border-radius:999px;font-size:11px}.seg.active{background:#111;color:#fff;border-color:#111}.club{border:1px solid var(--line);background:#fff;padding:8px 10px;border-radius:12px;font-size:11px}.club.active{border-color:var(--accent);background:var(--accentSoft)}.preset{border:1px solid var(--line);background:#fff;padding:10px;border-radius:13px;text-align:left}.preset.active{border-color:#111}.preset b{display:block;font-size:12px}.preset small{display:block;color:var(--muted);margin-top:3px}
+.vector{display:grid;grid-template-columns:145px 1fr 38px;gap:8px;align-items:center;margin:8px 0}.vector span{font-size:10px;color:var(--muted)}.bar{height:7px;border-radius:99px;background:var(--soft);overflow:hidden}.fill{height:100%;background:#111;border-radius:99px}.val{font-size:10px;text-align:right}
+.levels{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.lvl{border:1px solid var(--line);border-radius:13px;padding:10px;min-height:92px}.lvl.active{border-color:var(--accent);background:var(--accentSoft)}.lvl b{font-size:12px}.lvl small{display:block;color:var(--muted);font-size:10px;margin-top:5px;line-height:1.35}
+.scene{border:1px solid var(--line);border-radius:15px;padding:13px;background:#fff;text-align:left;width:100%}.scene.active{border-color:#111}.scene.locked{opacity:.48}.sTop{display:flex;justify-content:space-between;gap:10px}.sTop b{font-size:13px}.price{font-size:12px;font-weight:800}.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:9px}.tag{font-size:9px;border:1px solid var(--line);border-radius:999px;padding:5px 7px;color:var(--muted)}
+.checks{display:grid;gap:7px}.check{display:grid;grid-template-columns:64px 1fr auto;gap:9px;align-items:center;border-bottom:1px solid var(--line);padding:8px 0}.check:last-child{border:0}.cp{font-size:9px;color:var(--muted);font-weight:800}.check b{font-size:11px}.status{font-size:9px;font-weight:800;border-radius:999px;padding:5px 7px}.pass{color:var(--ok);background:#eef6f1}.warn{color:var(--warn);background:#fff5df}.block{color:var(--bad);background:#fff0ed}
+.action{border:1px solid #111;background:#111;color:#fff;border-radius:11px;padding:11px 13px;font-weight:700}.action.orange{background:var(--accent);border-color:var(--accent);color:#111}.action.secondary{background:#fff;color:#111;border-color:var(--line)}
+.phone{width:350px;max-width:100%;border:1.5px solid #111;border-radius:29px;background:#fff;padding:16px;margin:auto}.phone h3{font-size:22px;margin:10px 0 5px;letter-spacing:-.5px}.phone .sub{font-size:11px;color:var(--muted)}.included{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:13px 0}.mini{background:var(--soft);border-radius:12px;padding:10px}.mini small{color:var(--muted);font-size:9px}.mini b{display:block;font-size:11px;line-height:1.4;margin-top:4px}.notice{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:11px 0;font-size:10px;line-height:1.55;color:var(--muted)}
+.rowActions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:12px}.rowActions button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 5px;font-size:11px}.rowActions .primary{background:#111;color:#fff;border-color:#111}.history{display:grid;gap:7px}.hrow{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding-bottom:8px;font-size:11px}.hrow:last-child{border:0}.lockedBox{border:1px dashed var(--line);border-radius:13px;padding:13px;color:var(--muted);font-size:11px;text-align:center}.engine{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.eng{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fff}.eng b{font-size:12px}.eng p{font-size:10px;color:var(--muted);line-height:1.5;margin:5px 0 0}
+@media(max-width:900px){.app{padding:13px}.layout{grid-template-columns:1fr}.side{position:static;display:flex;overflow:auto}.nav{width:auto;min-width:max-content}.grid2,.grid3,.grid4,.engine{grid-template-columns:1fr}.levels{grid-template-columns:1fr 1fr}.head{display:block}.desc{margin-top:8px}.vector{grid-template-columns:112px 1fr 32px}}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="top">
+  <div class="brand"><div class="logo">🦦</div><div><b>Proxy · 邀约工程台</b><small>User Scene Intelligence + Scene Exchange Engine</small></div></div>
+  <div class="pill">v0.2 · Trust Unlock</div>
+</div>
+<div class="layout">
+<aside class="side">
+  <button class="nav active" data-screen="signal">01 · 小美信号</button>
+  <button class="nav" data-screen="unlock">02 · 解锁等级</button>
+  <button class="nav" data-screen="compose">03 · Scene Composer</button>
+  <button class="nav" data-screen="gate">04 · 工程检查点</button>
+  <button class="nav" data-screen="invite">05 · Guest 邀约</button>
+  <button class="nav" data-screen="history">06 · 履历 / 评价</button>
+  <button class="nav" data-screen="engine">07 · 底层沉淀</button>
+</aside>
+<main>
+
+<section id="signal" class="screen active">
+<div class="head"><div><div class="kicker">USER SCENE INTELLIGENCE</div><h2>不问她是谁，让行为自己说</h2></div><div class="desc">Club 只产生带置信度的 signal，不直接推断身高、收入或“等级”。内部维护动态 Scene Vector。</div></div>
+<div class="grid2">
+  <div class="card">
+    <div class="label">冷启动 Archetype</div>
+    <div class="grid2" id="presetGroup">
+      <button class="preset active" data-preset="photo"><b>出片型</b><small>美学 / 展示 / Photo 强</small></button>
+      <button class="preset" data-preset="value"><b>精致省钱型</b><small>高审美 + 价格敏感</small></button>
+      <button class="preset" data-preset="host"><b>Host-benefit 型</b><small>Host affinity 高，交易敏感</small></button>
+      <button class="preset" data-preset="independent"><b>独立消费型</b><small>Self-pay 高，Host affinity 低</small></button>
+    </div>
+    <div class="label" style="margin-top:16px">Club Signals</div>
+    <div class="segment" id="clubGroup">
+      <button class="club active" data-club="photo">周末出片</button>
+      <button class="club" data-club="170">170俱乐部</button>
+      <button class="club active" data-club="roof">Rooftop</button>
+      <button class="club" data-club="50k">50K咖啡</button>
+      <button class="club" data-club="value">精致省钱</button>
+      <button class="club" data-club="premium">Premium Weekend</button>
+    </div>
+    <p class="muted" style="margin-top:12px">Signal confidence：Club Join 低于真实消费 / Scene Complete。加入「170俱乐部」只说明相关身份与审美兴趣，不等于 height=170+。</p>
+  </div>
+  <div class="card">
+    <div class="label">内部 User Scene Vector</div>
+    <div id="vectorBox"></div>
+    <div class="grid3" style="margin-top:14px">
+      <div class="mini"><small>Coffee Price</small><b id="coffeePrice">55K normal</b></div>
+      <div class="mini"><small>Photo Cafe</small><b id="photoAffinity">0.94</b></div>
+      <div class="mini"><small>Rooftop</small><b id="roofAffinity">0.91</b></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<section id="unlock" class="screen">
+<div class="head"><div><div class="kicker">TRUST / SCENE MATURITY</div><h2>不是所有人都看到所有功能</h2></div><div class="desc">越高金额、越长时间、越强关系压力的功能，越需要真实完成记录和 Reliability 解锁。</div></div>
+<div class="card">
+  <div class="levels" id="levelBox"></div>
+</div>
+<div class="grid2" style="margin-top:12px">
+  <div class="card"><div class="label">当前已解锁</div><div id="unlockedFeatures" class="segment"></div></div>
+  <div class="card"><div class="label">下一等级需要</div><div id="nextNeeds" class="muted"></div></div>
+</div>
+</section>
+
+<section id="compose" class="screen">
+<div class="head"><div><div class="kicker">SCENE COMPOSER</div><h2>人 × 价格 × Funding × 解锁等级</h2></div><div class="desc">同样 500K 预算，对不同 Guest 应该生成不同 Scene 和不同 Funding，而不是统一推“贵一点的店”。</div></div>
+<div class="grid2">
+  <div class="card">
+    <div class="label">Scene Goal</div>
+    <div class="segment" id="goalGroup">
+      <button class="seg active" data-goal="photo">出片</button>
+      <button class="seg" data-goal="easy">轻松</button>
+      <button class="seg" data-goal="memory">纪念感</button>
+    </div>
+    <div class="label" style="margin-top:15px">Host Budget</div>
+    <div class="grid4" id="budgetGroup">
+      <button class="seg" data-budget="200">200K</button>
+      <button class="seg active" data-budget="500">500K</button>
+      <button class="seg" data-budget="900">900K</button>
+      <button class="seg" data-budget="1500">1.5M</button>
+    </div>
+    <div class="label" style="margin-top:15px">Funding</div>
+    <div class="segment" id="fundingGroup">
+      <button class="seg" data-funding="aa">AA</button>
+      <button class="seg active" data-funding="host">我请客</button>
+      <button class="seg" data-funding="upgrade">我负责升级</button>
+    </div>
+    <div style="margin-top:14px" class="mini"><small>Funding Fit</small><b id="fundingFit">HOST / HOST_UPGRADE 推荐</b></div>
+  </div>
+  <div>
+    <div class="label">推荐 Scene</div>
+    <div id="sceneList" style="display:grid;gap:8px"></div>
+  </div>
+</div>
+</section>
+
+<section id="gate" class="screen">
+<div class="head"><div><div class="kicker">ENGINEERING CHECKPOINTS</div><h2>发布前必须过 Gate</h2></div><div class="desc">不是“算法觉得不错”就发布。每个 Invite 都必须通过访问、价格、Scene 独立性、双边获得感、交易风险和 Benefit Unlock 等检查。</div></div>
+<div class="card"><div class="checks" id="checks"></div></div>
+<div id="gateSummary" class="card" style="margin-top:12px"></div>
+</section>
+
+<section id="invite" class="screen">
+<div class="head"><div><div class="kicker">GUEST VIEW</div><h2>前台只展示她需要知道的</h2></div><div class="desc">User Scene Vector、Peer Comparison、Transaction Sensitivity 都是内部数据，不暴露给 Host 或 Guest。</div></div>
+<div class="phone">
+  <div class="pill" id="inviteLevel" style="display:inline-block">L2 · Reliable</div>
+  <h3 id="inviteTitle">Sunset Rooftop Photo</h3>
+  <div class="sub" id="inviteSub">周六 16:30 · 约 2.5 小时</div>
+  <div class="included">
+    <div class="mini"><small>Scene 包含</small><b id="inviteIncludes">Coffee · Dessert · Rooftop</b></div>
+    <div class="mini"><small>美学资产</small><b id="inviteAsset">★★★★★ · 人像 / OOTD / 日落</b></div>
+  </div>
+  <div class="notice"><b style="color:#111">Hosted by David</b><br>接受只代表参加当前 Scene。Host 的付费不会产生当前 Scene 之外的关系义务；核心 Benefit 在实际到场后激活。</div>
+  <div class="rowActions"><button>婉拒</button><button>先问问</button><button class="primary">参加</button></div>
+</div>
+</section>
+
+<section id="history" class="screen">
+<div class="head"><div><div class="kicker">HISTORY / RATING</div><h2>履历和评价也要解锁</h2></div><div class="desc">不是把 Dating Review 公开化，而是用 Scene 行为数据建立可信度。敏感信息默认内部或双方关系域可见。</div></div>
+<div class="grid2">
+  <div class="card">
+    <div class="label">公开可见</div>
+    <div class="history" id="publicHistory"></div>
+  </div>
+  <div class="card">
+    <div class="label">更高等级 / 双方关系域</div>
+    <div id="privateHistory"></div>
+  </div>
+</div>
+<div class="card" style="margin-top:12px">
+  <div class="label">允许评价的维度</div>
+  <div class="segment">
+    <span class="club">按时到场</span><span class="club">沟通</span><span class="club">尊重</span><span class="club">Scene参与</span><span class="club">Reliability</span><span class="club">愿意再次参加</span>
+  </div>
+  <p class="muted" style="margin-top:10px">禁止：颜值评分、身材评分、“值不值这个钱”、亲密行为评价、谁给谁花了多少钱。</p>
+</div>
+</section>
+
+<section id="engine" class="screen">
+<div class="head"><div><div class="kicker">CORE ASSETS</div><h2>真正沉淀出的 12 个工程模块</h2></div><div class="desc">邀约只是第一个业务入口；这套底座以后复用到同行、活动、Creator、商家场景、旅行和多人局。</div></div>
+<div class="engine">
+  <div class="eng"><b>01 Signal Collector</b><p>Club / Browse / Save / Spend / Complete。</p></div>
+  <div class="eng"><b>02 Club Engine</b><p>自选择身份和 Scene signal 冷启动。</p></div>
+  <div class="eng"><b>03 User Scene Vector</b><p>动态理解 Aesthetic / Funding / Price / Reliability。</p></div>
+  <div class="eng"><b>04 Trust Unlock</b><p>功能和高阶 Scene 逐级开放。</p></div>
+  <div class="eng"><b>05 Aesthetic Model</b><p>Scene Potential × Personal Value。</p></div>
+  <div class="eng"><b>06 Price Affinity</b><p>按 Coffee / Beauty / Travel 等品类学习。</p></div>
+  <div class="eng"><b>07 Funding Fit</b><p>AA / HOST / HOST_UPGRADE 个性化。</p></div>
+  <div class="eng"><b>08 Scene Composer</b><p>Host × Guest × Merchant × Price。</p></div>
+  <div class="eng"><b>09 Value Balance</b><p>Host Gain / Guest Gain 同时为正。</p></div>
+  <div class="eng"><b>10 Commitment / Benefit</b><p>Accept 只绑定当前 Scene，到场激活。</p></div>
+  <div class="eng"><b>11 Scene Memory</b><p>消费、关系、资产、Outcome。</p></div>
+  <div class="eng"><b>12 Repeat Learning</b><p>完成后更新 Vector / Trust / Next Scene。</p></div>
+</div>
+</section>
+
+</main>
+</div>
+</div>
+<script>
+const presets={
+ photo:{aesthetic:.94,display:.88,peer:.72,self:.55,host:.76,transaction:.84,reliability:.88,coffee:55,photo:.95,roof:.92},
+ value:{aesthetic:.90,display:.76,peer:.65,self:.48,host:.84,transaction:.90,reliability:.86,coffee:45,photo:.92,roof:.82},
+ host:{aesthetic:.91,display:.82,peer:.69,self:.36,host:.92,transaction:.94,reliability:.87,coffee:50,photo:.94,roof:.90},
+ independent:{aesthetic:.82,display:.65,peer:.42,self:.91,host:.24,transaction:.93,reliability:.92,coffee:60,photo:.72,roof:.68}
+};
+let state={preset:'photo',clubs:new Set(['photo','roof']),level:2,goal:'photo',budget:500,funding:'host',scene:0};
+function base(){return {...presets[state.preset]}}
+function vector(){
+ const v=base();
+ if(state.clubs.has('photo')){v.aesthetic=Math.min(1,v.aesthetic+.02);v.display=Math.min(1,v.display+.02);v.photo=Math.min(1,v.photo+.03)}
+ if(state.clubs.has('roof'))v.roof=Math.min(1,v.roof+.03);
+ if(state.clubs.has('value')){v.self=Math.max(0,v.self-.03);v.host=Math.min(1,v.host+.03)}
+ if(state.clubs.has('premium')){v.aesthetic=Math.min(1,v.aesthetic+.02);v.peer=Math.min(1,v.peer+.03)}
+ if(state.clubs.has('50k'))v.coffee=50;
+ if(state.clubs.has('170')){v.display=Math.min(1,v.display+.01);v.peer=Math.min(1,v.peer+.01)}
+ return v;
+}
+function nav(id){document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('.nav').forEach(x=>x.classList.toggle('active',x.dataset.screen===id))}
+document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>nav(b.dataset.screen));
+function renderVector(){
+ const v=vector(); const rows=[['Aesthetic',v.aesthetic],['Display',v.display],['Peer Compare',v.peer],['Self-pay',v.self],['Host-funded',v.host],['Transaction Sens.',v.transaction],['Reliability',v.reliability]];
+ document.getElementById('vectorBox').innerHTML=rows.map(r=>`<div class="vector"><span>${r[0]}</span><div class="bar"><div class="fill" style="width:${r[1]*100}%"></div></div><div class="val">${r[1].toFixed(2)}</div></div>`).join('');
+ document.getElementById('coffeePrice').textContent=v.coffee+'K normal';document.getElementById('photoAffinity').textContent=v.photo.toFixed(2);document.getElementById('roofAffinity').textContent=v.roof.toFixed(2);
+}
+document.querySelectorAll('.preset').forEach(b=>b.onclick=()=>{state.preset=b.dataset.preset;document.querySelectorAll('.preset').forEach(x=>x.classList.toggle('active',x===b));render()});
+document.querySelectorAll('.club').forEach(b=>{if(!b.dataset.club)return;b.onclick=()=>{state.clubs.has(b.dataset.club)?state.clubs.delete(b.dataset.club):state.clubs.add(b.dataset.club);b.classList.toggle('active');render()}});
+const levelData=[
+ {n:0,name:'New',feat:['Browse','Club','SELF','AA'],need:'完成基础验证'},
+ {n:1,name:'Verified',feat:['Basic Invite','Host Upgrade','Low Host-sponsored','Basic Rating'],need:'完成 ≥3 个 Scene'},
+ {n:2,name:'Reliable',feat:['Host Sponsored','履历摘要','中等预算','Workshop / Dinner'],need:'完成 ≥8 个 Scene + 长期 Reliability'},
+ {n:3,name:'Trusted',feat:['Half-day','Short Trip','高预算 Scene','Repeat History'],need:'长期高质量记录'}
+];
+function renderLevels(){
+ document.getElementById('levelBox').innerHTML=levelData.map(l=>`<button class="lvl ${state.level===l.n?'active':''}" data-level="${l.n}"><b>L${l.n} · ${l.name}</b><small>${l.feat.join(' · ')}</small></button>`).join('');
+ document.querySelectorAll('.lvl').forEach(b=>b.onclick=()=>{state.level=Number(b.dataset.level);render()});
+ const cur=levelData[state.level];document.getElementById('unlockedFeatures').innerHTML=cur.feat.map(x=>`<span class="club active">${x}</span>`).join('');
+ document.getElementById('nextNeeds').textContent=state.level<3?levelData[state.level].need:'已进入高信任层；后续由长期表现决定 Creator / Community Host 权限。';
+}
+const sceneCatalog={
+ photo:[
+  {name:'Photo Cafe + Walk',min:0,level:0,price:220,asset:.82,dur:'2h',inc:'Coffee ×2 · Dessert · Walk'},
+  {name:'Sunset Rooftop Photo',min:300,level:1,price:460,asset:.94,dur:'2.5h',inc:'Rooftop · Coffee · Dessert · Photo'},
+  {name:'Exhibition + Rooftop',min:700,level:2,price:850,asset:.91,dur:'4h',inc:'Ticket ×2 · Rooftop · Coffee'},
+  {name:'Half-day Photo Trip',min:1200,level:3,price:1450,asset:.97,dur:'6h',inc:'Transport · Viewpoint · F&B'}
+ ],
+ easy:[
+  {name:'Coffee + Short Walk',min:0,level:0,price:160,asset:.55,dur:'1.5h',inc:'Coffee ×2 · Walk'},
+  {name:'Cafe + Dessert',min:300,level:1,price:330,asset:.68,dur:'2h',inc:'Coffee ×2 · Dessert'},
+  {name:'Brunch + Sunset',min:700,level:2,price:780,asset:.78,dur:'3h',inc:'Brunch · Drinks · Sunset'}
+ ],
+ memory:[
+  {name:'Photo Booth + Coffee',min:0,level:0,price:240,asset:.88,dur:'2h',inc:'Coffee ×2 · Photo Booth'},
+  {name:'Pottery + Coffee',min:300,level:1,price:620,asset:.76,dur:'3.5h',inc:'Workshop ×2 · Coffee'},
+  {name:'Flower Workshop + Dinner',min:700,level:2,price:1050,asset:.89,dur:'5h',inc:'Flower Workshop · Dinner'}
+ ]
+};
+function available(){return sceneCatalog[state.goal].filter(s=>state.budget>=s.min)}
+function selected(){const a=available();state.scene=Math.min(state.scene,Math.max(0,a.length-1));return a[state.scene]||sceneCatalog[state.goal][0]}
+function renderScenes(){
+ const a=available().slice().reverse();state.scene=0;
+ document.getElementById('sceneList').innerHTML=a.map((s,i)=>`<button class="scene ${i===0?'active':''} ${state.level<s.level?'locked':''}" data-i="${i}" ${state.level<s.level?'disabled':''}><div class="sTop"><div><b>${s.name}</b><div class="muted">${s.dur} · Unlock L${s.level}</div></div><div class="price">${Math.min(state.budget,s.price)}K</div></div><div class="tags"><span class="tag">Aesthetic ${(s.asset*100).toFixed(0)}</span><span class="tag">${s.inc}</span>${state.level<s.level?'<span class="tag">LOCKED</span>':''}</div></button>`).join('');
+ document.querySelectorAll('.scene:not([disabled])').forEach(b=>b.onclick=()=>{document.querySelectorAll('.scene').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.scene=Number(b.dataset.i);renderInvite();renderChecks()});
+ renderInvite();renderChecks();
+}
+document.querySelectorAll('#goalGroup .seg').forEach(b=>b.onclick=()=>{state.goal=b.dataset.goal;document.querySelectorAll('#goalGroup .seg').forEach(x=>x.classList.toggle('active',x===b));renderScenes()});
+document.querySelectorAll('#budgetGroup .seg').forEach(b=>b.onclick=()=>{state.budget=Number(b.dataset.budget);document.querySelectorAll('#budgetGroup .seg').forEach(x=>x.classList.toggle('active',x===b));renderScenes()});
+document.querySelectorAll('#fundingGroup .seg').forEach(b=>b.onclick=()=>{state.funding=b.dataset.funding;document.querySelectorAll('#fundingGroup .seg').forEach(x=>x.classList.toggle('active',x===b));render()});
+function fundingFit(){const v=vector();if(v.host>.8&&v.transaction>.85)return state.funding==='upgrade'?'.95':state.funding==='host'?'.88':'.62';if(v.self>.8)return state.funding==='aa'?'.94':state.funding==='upgrade'?'.86':'.44';return state.funding==='host'?'.82':'.78'}
+function renderFunding(){const v=vector();let txt=v.host>.8&&v.transaction>.85?'HOST_UPGRADE / HOST 推荐':v.self>.8?'AA / HOST_UPGRADE 推荐':'HOST / AA 均可';document.getElementById('fundingFit').textContent=txt+' · 当前 Fit '+fundingFit()}
+function currentScene(){const buttons=[...document.querySelectorAll('.scene:not([disabled])')];const active=buttons.find(x=>x.classList.contains('active'));if(!active)return available().filter(s=>state.level>=s.level).slice(-1)[0]||sceneCatalog[state.goal][0];const shown=available().slice().reverse().filter(s=>state.level>=s.level);return shown[Number(active.dataset.i)]||shown[0]}
+function renderChecks(){
+ const v=vector();const s=currentScene();const priceFit=state.budget>=s.price*.75;const access=state.level>=s.level;const hostGain=(s.dur.includes('1.5')?.58:s.dur.includes('2')?.72:.82);const guestGain=Math.min(1,(s.asset*(.55+.45*v.aesthetic)));const transRisk=state.funding==='host'?v.transaction*.28:state.funding==='upgrade'?v.transaction*.15:v.transaction*.08;const partRisk=(1-v.reliability)*.75+(s.level>=3?.08:0);
+ const rows=[
+ ['CP-01','Access / Unlock',access,'PASS','ACCESS_LOCKED'],
+ ['CP-02','Scene Independence',true,'PASS','BLOCK'],
+ ['CP-03','Funding Legitimacy',true,'PASS','BLOCK'],
+ ['CP-04','Price Fit',priceFit,priceFit?'PASS':'WARN','PRICE_OVERREACH'],
+ ['CP-05','Aesthetic Fit',guestGain>.55,'PASS','WARN'],
+ ['CP-06','Funding Fit',Number(fundingFit())>.55,'PASS','WARN'],
+ ['CP-07','Host Gain',hostGain>.55,'PASS','BLOCK'],
+ ['CP-08','Guest Gain',guestGain>.55,'PASS','BLOCK'],
+ ['CP-09','Transaction Risk',transRisk<.30,'PASS','BLOCK'],
+ ['CP-10','Participation Risk',partRisk<.30,'PASS','WARN'],
+ ['CP-11','Merchant / Price Evidence',true,'PASS','BLOCK'],
+ ['CP-12','Benefit Unlock',true,'PASS','BLOCK']
+ ];
+ document.getElementById('checks').innerHTML=rows.map(r=>`<div class="check"><div class="cp">${r[0]}</div><b>${r[1]}</b><span class="status ${r[2]?'pass':(r[3]==='WARN'?'warn':'block')}">${r[2]?'PASS':r[4]}</span></div>`).join('');
+ const blockers=rows.filter(r=>!r[2]&&r[3]!=='WARN');document.getElementById('gateSummary').innerHTML=`<b style="font-size:13px">${blockers.length?'当前不可发布':'当前可发布'}</b><div class="muted" style="margin-top:5px">${blockers.length?'需要解决：'+blockers.map(x=>x[4]).join(' / '):'12 个检查点无硬阻断。高金额 / Trip Scene 仍受 Trust Level 控制。'}</div>`;
+}
+function renderInvite(){
+ const s=currentScene();if(!s)return;
+ document.getElementById('inviteLevel').textContent=`L${state.level} · ${levelData[state.level].name}`;document.getElementById('inviteTitle').textContent=s.name;document.getElementById('inviteSub').textContent=`周六 16:30 · 约 ${s.dur}`;document.getElementById('inviteIncludes').textContent=s.inc;document.getElementById('inviteAsset').textContent=`${'★'.repeat(Math.max(1,Math.round(s.asset*5)))}${'☆'.repeat(5-Math.round(s.asset*5))} · Scene Asset`;
+}
+function renderHistory(){
+ const pub=document.getElementById('publicHistory');pub.innerHTML=`<div class="hrow"><span>Completed Scenes</span><b>${state.level===0?0:state.level===1?2:state.level===2?5:11}</b></div><div class="hrow"><span>Reliability</span><b>${Math.round(vector().reliability*100)}%</b></div><div class="hrow"><span>Scene Pattern</span><b>Photo · Rooftop</b></div>`;
+ document.getElementById('privateHistory').innerHTML=state.level>=2?`<div class="history"><div class="hrow"><span>Repeat Signal</span><b>Positive</b></div><div class="hrow"><span>Mutual Scene Rating</span><b>Unlocked</b></div><div class="hrow"><span>Invite History Summary</span><b>Available</b></div></div>`:`<div class="lockedBox">L2 Reliable 后解锁邀约履历摘要与更高权重评价</div>`;
+}
+function render(){renderVector();renderLevels();renderFunding();renderScenes();renderHistory()}
+render();
+</script>
+</body>
+</html>
