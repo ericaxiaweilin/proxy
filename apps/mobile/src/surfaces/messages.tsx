@@ -13,7 +13,7 @@ type HomePanel = "dialogs" | "convos";
 type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock — 与 HTML 1:1，去掉后端依赖先保证视觉对齐
-type Dialog = { id: string; conversationId?: string; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder };
+type Dialog = { id: string; conversationId?: string; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
 const DIALOGS_PINNED: Dialog[] = [
   { id: "linh", initial: "L", name: "Linh", badge: "同行 · 已接受", preview: "你：好，那我们 16:00 在西湖见。", time: "07:02", unread: "2", warm: true, online: true, folder: "friends" as Folder },
   { id: "sunday", initial: "SC", name: "Sunday Coffee Walk", badge: "活动群", preview: "Minh：我把路线放到 Convo 里了。", time: "06:51", unread: "6", dark: true, folder: "activity" as Folder },
@@ -25,10 +25,9 @@ const DIALOGS_RECENT: Dialog[] = [
   { id: "proxy", initial: "P", name: "Proxy", preview: "你的礼品券已到账。", time: "周四", unread: "", dark: true, folder: "invite" as Folder },
 ] as const;
 
-const CONVOS = [
-  { id: "westlake", name: "西湖碰面", parent: "Sunday Coffee Walk · 3 人", preview: "Linh：好，我 16:00 在入口等你。", foot: "起点：16:00 左右可以…", time: "07:01", unread: "5" },
-  { id: "route", name: "周末路线", parent: "Sunday Coffee Walk · 7 人", preview: "Ha：我把第二条路线也发进来了。", foot: "起点：投票结束后去哪里？", time: "昨天", unread: "" },
-] as const;
+// R15.74: CONVOS 写死 mock 已删, 改走 server listConversations() 返的
+//   conversation.conversationType === "GROUP" | "SUPPORT" filter. (DM 在 dialogs tab).
+// 之前 mock: westlake / route. 现在 client-side filter (空集合时显示 "还没有群组对话").
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
 
@@ -85,6 +84,17 @@ export function MessagesSurface({
   const usingServerData = Boolean(serverDialogs?.length);
   const pinnedSource = usingServerData || !inboxLoaded ? [] : DIALOGS_PINNED;
   const recentSource = usingServerData ? serverDialogs ?? [] : inboxLoaded ? DIALOGS_RECENT : [];
+  // R15.74: Convo tab (panel="convos") — 从 serverDialogs 拿 GROUP/SUPPORT conversation
+  //   之前 (Phase 1) 走写死 CONVOS mock — 跟 server listConversations 不接.
+  const groupDialogs = useMemo(
+    () => (serverDialogs ?? []).filter((d) => {
+      // 上一行 toDialog 已把 conversation.conversationType 透出到 type 字段 (见下).
+      // 没 type 字段时 fallback 视为 DM 不显示在 Convo 标签.
+      const t = (d as unknown as { type?: string }).type;
+      return t === "GROUP" || t === "SUPPORT";
+    }),
+    [serverDialogs]
+  );
 
   const filteredPinned = useMemo(() => filterByFolder(pinnedSource, folder, search), [pinnedSource, folder, search]);
   const filteredRecent = useMemo(() => filterByFolder(recentSource, folder, search), [recentSource, folder, search]);
@@ -342,18 +352,21 @@ export function MessagesSurface({
         ) : (
           <>
             <Text style={styles.sectionLabel}>关注的 Convo</Text>
-            {CONVOS.map((c) => (
-              <Pressable key={c.id} onPress={() => onOpenConversation(c.name)} style={styles.convoCard}>
+            {groupDialogs.length === 0 ? (
+              <Text style={styles.preview}>还没有群组对话</Text>
+            ) : null}
+            {groupDialogs.map((c) => (
+              <Pressable key={c.id} onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
                 <View style={styles.convoHead}>
                   <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
                   <View style={styles.convoCopy}>
                     <Text style={styles.convoName}>{c.name}</Text>
-                    <Text style={styles.convoParent}>{c.parent}</Text>
+                    <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
                   </View>
                   {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
                 </View>
                 <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
-                <View style={styles.convoFoot}><Text style={styles.convoFootText}>{c.foot}</Text><Text style={styles.convoFootTime}>{c.time}</Text></View>
+                <View style={styles.convoFoot}><Text style={styles.convoFootText}>{c.time}</Text></View>
               </Pressable>
             ))}
           </>
@@ -390,6 +403,8 @@ function toDialog(item: ConversationInboxItem): Dialog {
     preview,
     time,
     badge: item.conversation.originType,
+    // R15.74: 透出 conversationType 给 Convo tab filter (GROUP/SUPPORT)
+    type: item.conversation.conversationType,
     folder: item.conversation.originType === "ACTIVITY" ? "activity" : item.conversation.originType === "PROFILE" ? "friends" : "all",
   };
 }
