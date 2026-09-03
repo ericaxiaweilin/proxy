@@ -171,6 +171,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           pinnedPost={pinnedPost}
           posts={props.posts.slice(1)} // 排除置顶
           mediaByPost={props.mediaByPost}
+          pinnedIds={props.pinnedIds}
           avatarUri={props.profileAvatarUri}
           name={props.profileDraft.name}
           onOpenMedia={props.onOpenMedia}
@@ -229,9 +230,14 @@ function PostsTab(props: {
   onOpenScene?: ((sceneId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;
+  // R15.99: 接 pinnedIds 进来 — ProfileTabs 顶层 hasRealPin 闭包不传进 PostsTab,
+  //   而 PostsTab 内部 PinnedCard render 条件需要.
+  pinnedIds?: ReadonlyArray<string> | undefined;
   color: ProfileTabsProps["color"];
 }): React.JSX.Element {
   const [view, setView] = useState<"LIST" | "GRID">("LIST");
+  // R15.99: hasRealPin local — 跟 ProfileTabs 顶层同逻辑.
+  const hasRealPin = !!(props.pinnedIds && props.pinnedIds.length > 0);
   const allMediaEntries = useMemo(() => {
     const out: ProfileMediaEntry[] = [];
     for (const post of props.posts) {
