@@ -2392,7 +2392,16 @@ export function MeSurface({
               stats={{ posts: profilePosts.length, followers: personalFollowCounts?.followers ?? 0, following: personalFollowCounts?.following ?? 0 }}
               onOpenMedia={(entry) => setProfileViewer(entry)}
               onOpenRealitySceneMap={onOpenRealitySceneMap}
-              onOpenScene={(sceneId) => onOpenRealitySceneMap?.()}
+              onOpenScene={(sceneId) => {
+                // R15.88: ProfileTabs 传 entry.contextId (chip text, e.g. OPPORTUNITY title),
+                //   不是真 sceneId. 跳场景地图 + 带 chip 文本作为 hint. RealitySceneMapSurface
+                //   接受 sceneId?, 不接 = 跟 R15.71 行为一致 (全屏地图).
+                onOpenRealitySceneMap?.();
+                if (sceneId && sceneId.length > 0) {
+                  // 轻微 hint: console.debug 即可, 不入产品 (跳转本身就是 context)
+                  console.debug(`[profile] scene chip context: ${sceneId}`);
+                }
+              }}
               onEditProfile={() => setProfileEditorOpen(true)}
               onShareProfile={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
