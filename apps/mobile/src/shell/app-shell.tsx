@@ -601,6 +601,14 @@ export function AppShell({
               onOpenFeed={() => selectTab("FEED")}
               onOpenVouchers={() => setVoucherOpen(true)}
               onOpenRealitySceneMap={() => setRealitySceneOpen(true)}
+              onOpenSearch={(q) => {
+                // R15.92: 主页搜索 sheet 提交 — 跳 FEED tab. localNet.listFeedPosts(q)
+                //   在 R15.92 走 client 侧 filter, 但接主路径需要 app-shell 调 localNet.
+                //   Phase 2 接 server search 后, 走 localNet.listFeedPosts(undefined, 25, q) 过滤.
+                //   现阶段: 跳 FEED + 记录 query (后续接 feed search bar).
+                selectTab("FEED");
+                console.debug(`[shell] search query: ${q}`);
+              }}
               onExperienceAction={executeExperienceAction}
               onOpenConversation={(author) => {
                 setMessageChat({ author });

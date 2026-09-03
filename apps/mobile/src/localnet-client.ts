@@ -57,12 +57,15 @@ export class LocalNetClient {
     return `${baseUrl}${path}`;
   }
 
-  public async listFeedPosts(cursor?: string, limit = 25): Promise<FeedReadModel> {
+  public async listFeedPosts(cursor?: string, limit = 25, searchQuery?: string): Promise<FeedReadModel> {
     // 动态 ALL 固定读取全局公开时间流。地址只用于用户显式选择的
     // 二级筛选，不能进入服务端 ListFeedPosts payload。
+    // R15.92: searchQuery — client 端过滤 (server ListFeedPosts 暂不接 search params,
+    //   Phase 2 server 加 search 后可走 ListFeedPosts search 或独立 SearchPosts 端点).
     if (this.input.authClient.requestPublic) {
       const query = [`limit=${Math.max(1, Math.min(50, limit))}`];
       if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`);
+      // R15.92: 暂不把 searchQuery 传 server, client 侧 filter.
       const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
       if (response.status < 200 || response.status >= 300) {
         throw new LocalNetProtocolError(`动态服务暂时不可用（${response.status}），请稍后重试`);
@@ -74,7 +77,13 @@ export class LocalNetClient {
         throw new LocalNetProtocolError("动态服务返回异常，请稍后重试");
       }
       const payload = ListFeedPostsPayloadSchema.parse(body);
-      return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+      const posts = searchQuery && searchQuery.trim().length > 0
+        ? payload.posts.filter((p) => {
+            const q = searchQuery.toLowerCase();
+            return p.body.toLowerCase().includes(q) || (p.authorDisplayName?.toLowerCase().includes(q) ?? false);
+          })
+        : payload.posts;
+      return { posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
     }
     const result = await this.sendCommand(
       undefined,
@@ -85,7 +94,13 @@ export class LocalNetClient {
       true
     );
     const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
-    return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+    const posts = searchQuery && searchQuery.trim().length > 0
+      ? payload.posts.filter((p) => {
+          const q = searchQuery.toLowerCase();
+          return p.body.toLowerCase().includes(q) || (p.authorDisplayName?.toLowerCase().includes(q) ?? false);
+        })
+      : payload.posts;
+    return { posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
   }
 
   public async listMyFeedPosts(): Promise<FeedReadModel> {
