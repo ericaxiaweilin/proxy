@@ -2376,7 +2376,7 @@ export function MeSurface({
             <Text style={styles.customSectionHint}>决定你出现在人物发现、机会分发的方式</Text>
             <Pressable
               accessibilityLabel="选择状态"
-              onPress={() => setAvRuleSheetOpen(true)}
+              onPress={() => setAvailabilityOpen(true)}
               style={styles.profileManageStatusRow}
             >
               <View style={styles.profileManageStatusDot} />
@@ -2386,20 +2386,10 @@ export function MeSurface({
               </View>
               <Text style={styles.profileManageStatusChev}>›</Text>
             </Pressable>
-            <View style={styles.profileManageStatusList}>
-              {AVAILABILITY_OPTIONS.map((option) => (
-                <Pressable
-                  key={option.id}
-                  accessibilityLabel={`选择${option.title}`}
-                  onPress={() => { setAvailability(option.id); setAvRuleSheetOpen(false); }}
-                  style={[styles.profileManageStatusItem, availability === option.id && styles.profileManageStatusItemOn]}
-                >
-                  <Text style={[styles.profileManageStatusItemText, availability === option.id && styles.profileManageStatusItemTextOn]}>{option.title}</Text>
-                  <Text style={styles.profileManageStatusItemDesc}>{option.desc}</Text>
-                </Pressable>
-              ))}
-            </View>
           </ScrollView>
+
+          <AvailabilitySheet current={availability} open={availabilityOpen} onClose={() => setAvailabilityOpen(false)} onSelect={(next) => setAvailability(next)} />
+
         </View>
       );
     }
