@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -92,7 +93,10 @@ func (s *Server) privacyMe(w http.ResponseWriter, r *http.Request) {
 	// requests" without a second round-trip.
 	history := make([]privacyRequestEnvelope, 0)
 	if repo := s.identityPrivacyRepository(); repo != nil {
-		if rows, err := repo.ListPrivacyRequestsByUser(r.Context(), authenticated.Principal.ID); err == nil {
+		if rows, err := repo.ListPrivacyRequestsByUser(r.Context(), authenticated.Principal.ID); err != nil {
+			// Log but don't fail — export data is the primary payload
+			slog.Warn("privacy_me: failed to list privacy requests", "err", err, "userId", authenticated.Principal.ID)
+		} else {
 			for _, row := range rows {
 				history = append(history, renderPrivacyRequest(row))
 			}
@@ -287,6 +291,10 @@ func readPrivacyPayload(r *http.Request) map[string]any {
 	if r.Body == nil {
 		return payload
 	}
+	defer func() {
+		io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+	}()
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 8192))
 	if len(body) == 0 {
 		return payload

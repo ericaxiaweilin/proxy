@@ -50,14 +50,25 @@ echo "  OK: 401 with access_token_required body"
 
 echo ""
 echo "=== 3. run a full CreateAnonymousSession through /v1/commands/ to get a token ==="
-# R16.7 payload: deviceId, platform, deviceCredential, dateOfBirth, legalDocVersion, consents
+# R16.7 payload: deviceId, platform, deviceCredential, dateOfBirth, legalDocVersion, consents.
+# The command envelope has strict validation (see
+# validateEnvelope in apps/api-go/internal/api/command_dispatch.go):
+# every field must be present and idempotencyKey must be >= 8 chars.
+requested_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 anon_payload=$(cat <<EOF
 {
   "commandType": "CreateAnonymousSession",
+  "commandVersion": 1,
   "commandId": "e2e-anon-${TS}",
+  "idempotencyKey": "e2e-anon-${TS}-key",
   "actor": { "type": "USER", "id": "ignored" },
   "principal": { "type": "INDIVIDUAL", "id": "ignored" },
   "target": { "type": "Session", "id": "ignored" },
+  "authContext": { "clientIp": "127.0.0.1" },
+  "purpose": "e2e_privacy_setup",
+  "correlationId": "e2e-anon-${TS}",
+  "causationId": "",
+  "requestedAt": "${requested_at}",
   "payload": {
     "deviceId": "e2e-privacy-${TS}",
     "platform": "IOS",
@@ -156,10 +167,17 @@ echo "=== 12. cross-user privacy isolation: a second user cannot cancel the firs
 anon2_payload=$(cat <<EOF
 {
   "commandType": "CreateAnonymousSession",
+  "commandVersion": 1,
   "commandId": "e2e-anon2-${TS}",
+  "idempotencyKey": "e2e-anon2-${TS}-key",
   "actor": { "type": "USER", "id": "ignored" },
   "principal": { "type": "INDIVIDUAL", "id": "ignored" },
   "target": { "type": "Session", "id": "ignored" },
+  "authContext": { "clientIp": "127.0.0.1" },
+  "purpose": "e2e_privacy_user2",
+  "correlationId": "e2e-anon2-${TS}",
+  "causationId": "",
+  "requestedAt": "${requested_at}",
   "payload": {
     "deviceId": "e2e-privacy2-${TS}",
     "platform": "IOS",

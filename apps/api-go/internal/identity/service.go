@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"sort"
@@ -243,10 +244,6 @@ func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope
 	if p.Consents == nil || !p.Consents.Terms || !p.Consents.Privacy {
 		return command.Rejected(e, "LEGAL_CONSENT_REQUIRED", "VALIDATION", "AFTER_USER_ACTION", "identity.legal_consent_required", nil)
 	}
-	docVersion := p.LegalDocVersion
-	if docVersion == "" {
-		docVersion = "1.1"
-	}
 	if p.DateOfBirth == "" {
 		return command.Rejected(e, "AGE_RESTRICTED", "VALIDATION", "AFTER_USER_ACTION", "identity.age_restricted", nil)
 	}
@@ -254,8 +251,9 @@ func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope
 	if err != nil {
 		return command.Rejected(e, "AGE_RESTRICTED", "VALIDATION", "AFTER_USER_ACTION", "identity.age_restricted", nil)
 	}
-	ageYears := time.Since(dob).Hours() / (365.25 * 24)
-	if ageYears < 18 {
+	// Use exact calendar-day comparison to avoid floating-point edge cases
+	// (e.g., rejecting users exactly on their 18th birthday)
+	if dob.AddDate(18, 0, 0).After(s.clock.Now().UTC()) {
 		return command.Rejected(e, "AGE_RESTRICTED", "VALIDATION", "AFTER_USER_ACTION", "identity.age_restricted", nil)
 	}
 	user, device, created, err := s.repository.EnsureAnonymousIdentity(ctx, p.DeviceID, p.Platform)
@@ -281,14 +279,22 @@ func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope
 	if err := s.persistCreateAnonymousSession(ctx, session, tokenRecord, domainEvents); err != nil {
 		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
 	}
-	// R16.7-P0-C: persist the Terms + Privacy consent records so the user
-	// has an auditable trail of the legal text they accepted and when. We
-	// do this best-effort after the session is created: a consent-write
-	// failure is logged but does not roll back the session, because the
-	// legal obligation is to capture the user-facing consent and the
-	// failure should be visible to ops rather than block the user.
-	if err := s.recordLegalConsents(ctx, session.UserAccountID, docVersion, e); err != nil {
-		log.Printf("legal consent write failed user=%s err=%v", session.UserAccountID, err)
+	// R16.7-P0-C: persist the Terms / Privacy consent records so the user
+	// has an auditable trail of the legal text they accepted and when.
+	//
+	// R16.10 follow-up: the consent write MUST NOT run inside the
+	// session-creation transaction. The privacy schema is a separate
+	// deployment unit (migration 059 may not have run yet in dev
+	// mode), and a missing table would poison the parent transaction
+	// and roll the session back. We call the post-commit writer
+	// directly here (rather than via the api-layer hook) so unit
+	// tests and other in-process callers of the service also persist
+	// the audit row. The detached context is important: the parent
+	// transaction may have aborted before we get here.
+	if s.repository != nil {
+		if err := s.RecordLegalConsentsDetached(context.WithoutCancel(ctx), session.UserAccountID, e); err != nil {
+			log.Printf("legal consent write failed user=%s err=%v", session.UserAccountID, err)
+		}
 	}
 	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, eventRefs(domainEvents))
 	result.Auth = authTokens(pair, session)
@@ -314,6 +320,25 @@ func (s *Service) recordLegalConsents(ctx context.Context, userID, docVersion st
 		return recorder.RecordLegalConsent(ctx, userID, "PRIVACY", docVersion, ip, ua)
 	}
 	return nil
+}
+
+// RecordLegalConsentsDetached writes the Terms / Privacy consent
+// rows for a user who just signed up, using a fresh, post-commit
+// context. This is the post-commit variant of recordLegalConsents,
+// invoked by the api/privacy surface after the session-creation
+// transaction has committed. The detached context is important: a
+// poison from the parent transaction would otherwise abort the
+// write, which is exactly what the user-facing signup is trying to
+// avoid.
+func (s *Service) RecordLegalConsentsDetached(ctx context.Context, userID string, e command.Envelope) error {
+	if s.repository == nil {
+		return nil
+	}
+	docVersion := firstString(e.Payload, "legalDocVersion")
+	if docVersion == "" {
+		docVersion = "1.1"
+	}
+	return s.recordLegalConsents(ctx, userID, docVersion, e)
 }
 
 func clientFingerprint(e command.Envelope) (string, string) {
@@ -1452,6 +1477,7 @@ func (s *Service) cancelPrivacyRequest(ctx context.Context, e command.Envelope) 
 	req.CompletedAt = &now
 	req.Version++
 	if err := s.privacyRepo().UpdatePrivacyRequest(ctx, req, req.Version-1); err != nil {
+		log.Printf("privacy request cancel update failed request=%s user=%s err=%v", req.ID, e.Actor.ID, err)
 		return command.Rejected(e, "PRIVACY_REQUEST_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.privacy_request_write_failed", nil)
 	}
 	if err := s.privacyRepo().AppendPrivacyRequestEvent(ctx, PrivacyRequestEvent{
@@ -1547,10 +1573,16 @@ func (s *Service) GeneratePrivacyExportData(ctx context.Context, userID string) 
 	// export stays in sync with what the user sees in-app. We deliberately
 	// do not call into other services (engagement, demand, etc.) here —
 	// the cross-service export is a follow-up.
-	sessions, _ := s.repository.ListSessionsByUser(ctx, userID)
+	sessions, err := s.repository.ListSessionsByUser(ctx, userID)
+	if err != nil {
+		slog.Warn("privacy_export: failed to list sessions", "err", err, "userId", userID)
+	}
 	export.Sessions = sessions
 	if s.privacyRepo() != nil {
-		rows, _ := s.privacyRepo().ListPrivacyRequestsByUser(ctx, userID)
+		rows, err := s.privacyRepo().ListPrivacyRequestsByUser(ctx, userID)
+		if err != nil {
+			slog.Warn("privacy_export: failed to list privacy requests", "err", err, "userId", userID)
+		}
 		export.PrivacyRequests = rows
 	}
 	// Devices and consents are best-effort: the device list lives on

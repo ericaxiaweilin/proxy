@@ -177,7 +177,44 @@ func (s *Server) executeCommand(ctx context.Context, envelope command.Envelope) 
 		// transactional store may have rolled the claim back already).
 		_ = s.Idempotency.Release(context.WithoutCancel(ctx), scope, envelope.IdempotencyKey, fingerprint)
 	}
+	// Post-commit best-effort work. Anything that should NOT roll the
+	// transaction back on failure (e.g. the legal-consent audit
+	// writer, which must not block the user if the privacy schema
+	// isn't deployed yet) runs here with a fresh context so a tx
+	// abort does not poison it. Failures are logged, never surfaced
+	// to the client.
+	if result.Outcome == "ACCEPTED" && envelope.CommandType == "CreateAnonymousSession" {
+		s.recordLegalConsentsPostCommit(envelope, result)
+	}
 	return result, status, err
+}
+
+// recordLegalConsentsPostCommit writes the Terms / Privacy consent
+// rows for an anonymous signup after the session creation
+// transaction has committed. It uses a detached context so a poison
+// from the parent transaction cannot fail the write, and it logs
+// (but does not surface) any error — the legal obligation is to
+// capture the consent; failing to do so must be visible to ops, not
+// the user. This is the same intent as
+// identity.recordLegalConsents but moved out of the transaction.
+func (s *Server) recordLegalConsentsPostCommit(envelope command.Envelope, result command.Result) {
+	if s.Identity == nil {
+		return
+	}
+	if result.Auth == nil || result.Auth.UserAccountID == "" {
+		return
+	}
+	detached := context.WithoutCancel(envelopeRequestedContext(envelope))
+	if err := s.Identity.RecordLegalConsentsDetached(detached, result.Auth.UserAccountID, envelope); err != nil {
+		log.Printf("legal consent write failed user=%s err=%v", result.Auth.UserAccountID, err)
+	}
+}
+
+// envelopeRequestedContext returns a fresh Background-backed context
+// for post-commit hooks. The original ctx is not safe because the
+// parent transaction may have already aborted.
+func envelopeRequestedContext(_ command.Envelope) context.Context {
+	return context.Background()
 }
 
 func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope) command.Result {
