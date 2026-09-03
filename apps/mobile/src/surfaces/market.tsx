@@ -2,8 +2,15 @@
 // R4 决策：移除“体验上架”以保护小美身价；机会由客户单向发布，小美报名/报价。
 // 视觉：沿用项目 R3 token（magenta/violet/ink/muted/line/surface），仅复用 R4 的卡片结构与价格可见性，
 // 不引入原型暖黄 #F3A61D 作为主色，保持 Proxy 紫粉基线。
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+// R15.x: MAP 视图换成 react-native-maps 真地图 + expo-location GPS。
+//   - 初始 region = 当前 user location（未授权时用机会 centroid）
+//   - pin 位置 = MarketOpportunity.coord (grid) → gridToLatLng 转真实经纬度
+//   - “热门地点” = MARKER 显式声明的探索点 (VENDOR_SPOT) — 重要但仅是探索，不会被默认高亮
+//   - “快速真实地址” = showUserLocation 蓝点 + “用我当前位置”按钮
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import MapView, { Circle, Marker, type Region } from "react-native-maps";
+import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import { useModuleBackHandler } from "../components/module-back";
 import type { Activity } from "@proxy/contracts";
@@ -13,19 +20,28 @@ import { type MarketplaceClient } from "../marketplace-client";
 import { type MediaClient } from "../media-client";
 import { type SupplyClient } from "../supply-client";
 import {
-  MAP_DISTRICTS,
   MARKET_EXPERIENCES,
   OPPORTUNITY_LENS_LABEL,
-  OPPORTUNITY_MAP_COORDS,
   marketExperience,
   type MarketOpportunity,
   type MarketTab,
   type OpportunityLens
 } from "../market-fixtures";
+import { gridToLatLng } from "../components/location-options";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
+
+// “热门探索点” = 可以是河内市中心的著名地点 (西湖、还剑湖)，
+// 不过是真实经纬度，作为"探索"显示的独立 marker (PURPLE_HOT)。
+// 这些不是“用户附近”，是“运营推广点”。如果 server 返回了
+// 真实推荐点，该结构被覆盖。
+const EXPLORER_SPOTS: ReadonlyArray<{ id: string; name: string; lat: number; lng: number; tag: "HOT" | "EXPLORE" }> = [
+  { id: "spot_westlake", name: "西湖", lat: 21.057, lng: 105.821, tag: "HOT" },
+  { id: "spot_hoankiem", name: "还剑湖", lat: 21.0285, lng: 105.8524, tag: "EXPLORE" },
+  { id: "spot_oldquarter", name: "老城区", lat: 21.034, lng: 105.847, tag: "EXPLORE" }
+];
 
 export type MarketViewMode = "LIST" | "MAP";
 
@@ -76,7 +92,8 @@ function scenarioIconForOpportunity(opportunity: MarketOpportunity): ProxyIconNa
   return "diamond";
 }
 
-const OPPORTUNITY_COORDS: Array<[number, number]> = OPPORTUNITY_MAP_COORDS;
+// OPPORTUNITY_COORDS removed: pin locations now derive from
+// MarketOpportunity.coord via gridToLatLng (see MarketMap).
 
 function normalizeTab(tab: MarketTab): "OPPORTUNITY" | "ACTIVITY" {
   if (tab === "ACTIVITY") return "ACTIVITY";
@@ -1180,37 +1197,148 @@ function MarketMap({
   onOpenOpportunity: (id: string) => void;
   onOpenActivity: (activity: Activity) => void;
 }): React.JSX.Element {
-  const config = mapConfig(tab, opportunities);
+  // 机会的本地集：跳过“远程”不显示；用 MARKET_OPPORTUNITIES fixture
+  // 里机会的 coord 走 gridToLatLng 投影到真实经纬度。
+  const localOpportunities = useMemo(
+    () => opportunities.filter((o) => o.location !== "远程"),
+    [opportunities]
+  );
+  const opportunityPins = useMemo(
+    () =>
+      localOpportunities
+        .map((o, i) => {
+          if (!o.coord) return null;
+          const { lat, lng } = gridToLatLng(marketLabel, o.coord[0], o.coord[1]);
+          return { id: o.id, label: String(i + 1), title: o.shortTitle, lat, lng };
+        })
+        .filter(
+          (p): p is { id: string; label: string; title: string; lat: number; lng: number } => p !== null
+        ),
+    [localOpportunities, marketLabel]
+  );
+  // 默认 region: 用本地机会的 centroid (未拿到 GPS 之前)。
+  const fallbackRegion: Region = useMemo(() => {
+    if (opportunityPins.length === 0) {
+      return { latitude: 21.0285, longitude: 105.8542, latitudeDelta: 0.12, longitudeDelta: 0.12 };
+    }
+    const avgLat = opportunityPins.reduce((s, p) => s + p.lat, 0) / opportunityPins.length;
+    const avgLng = opportunityPins.reduce((s, p) => s + p.lng, 0) / opportunityPins.length;
+    return { latitude: avgLat, longitude: avgLng, latitudeDelta: 0.08, longitudeDelta: 0.08 };
+  }, [opportunityPins]);
+  const mapRef = useRef<MapView | null>(null);
+  const [userRegion, setUserRegion] = useState<Region | null>(null);
+  const [locBusy, setLocBusy] = useState(false);
+  const [locError, setLocError] = useState<string | null>(null);
+  const [locGranted, setLocGranted] = useState(false);
+  // 以 ~2km delta 跟 map-canvas.tsx 一致：用户看到的是“附近”的街景。
+  const userRegionDelta = { latitudeDelta: 0.02, longitudeDelta: 0.02 };
+  async function useMyLocation(): Promise<void> {
+    if (locBusy) return;
+    setLocError(null);
+    setLocBusy(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setLocError("未授权定位 — iOS: 设置 → Proxy → 位置");
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = pos.coords;
+      const region: Region = { latitude, longitude, ...userRegionDelta };
+      setUserRegion(region);
+      setLocGranted(true);
+      if (mapRef.current) {
+        mapRef.current.animateToRegion(region, 350);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "获取位置失败";
+      setLocError(msg);
+    } finally {
+      setLocBusy(false);
+    }
+  }
+  const isOpportunity = tab === "OPPORTUNITY";
+  const titleText = isOpportunity ? "机会地图" : "活动地图";
+  const subText =
+    locGranted && userRegion
+      ? "以您当前位置为中心 — 蓝点是您"
+      : "默认以机会分布为中心 — 需点击右下角“用我当前位置”";
+  const privacyTitle = "地址粒度";
+  const privacyText =
+    "您看到的真实地址仅供探索；具体商户地址需由业务确实需要且您授权后才提升精度。热门推荐点是参考点，不代表您当前位置。";
+  const onPinPress = isOpportunity
+    ? (id: string) => onOpenOpportunity(id)
+    : (id: string) => onOpenActivity(id as unknown as Activity);
   return (
     <View style={styles.mapWrap}>
       <View style={styles.mapLegend}>
-        <Text style={styles.mapLegendTitle}>{config.title}</Text>
-        <Text style={styles.mapLegendSub}>{config.sub}</Text>
+        <Text style={styles.mapLegendTitle}>{titleText}</Text>
+        <Text style={styles.mapLegendSub}>{subText}</Text>
       </View>
       <View style={styles.geoMap}>
-        {MAP_DISTRICTS.map((district) => (
-          <Text key={district.label} style={[styles.geoDistrict, { left: `${district.left}%`, top: `${district.top}%` }]}>
-            {district.label}
+        <MapView
+          ref={mapRef}
+          style={StyleSheet.absoluteFill}
+          initialRegion={fallbackRegion}
+          showsUserLocation={locGranted}
+          showsMyLocationButton={false}
+          showsCompass
+          provider={Platform.OS === "ios" ? undefined : "google"}
+          testID="market-map-view"
+        >
+          {opportunityPins.map((pin) => (
+            <Marker
+              key={pin.id}
+              coordinate={{ latitude: pin.lat, longitude: pin.lng }}
+              title={pin.title}
+              description="可点开查看机会详情"
+              onPress={() => onPinPress(pin.id)}
+              pinColor="#0B7A73"
+            />
+          ))}
+          {/* 热门探索点：紫色 marker，仅作为“可以去看看” — 不走 onPinPress */}
+          {EXPLORER_SPOTS.map((spot) => (
+            <Marker
+              key={spot.id}
+              coordinate={{ latitude: spot.lat, longitude: spot.lng }}
+              title={spot.name}
+              description={spot.tag === "HOT" ? "热门探索点" : "探索点"}
+              pinColor={spot.tag === "HOT" ? "#7A2DC7" : "#9A8AB5"}
+              opacity={0.85}
+            />
+          ))}
+          {/* 您当前位置的覆盖圈：准确可视、但隐私级别仍然是“粗粒度” */}
+          {userRegion ? (
+            <Circle
+              center={{ latitude: userRegion.latitude, longitude: userRegion.longitude }}
+              radius={250}
+              strokeColor="rgba(11,122,115,0.45)"
+              fillColor="rgba(11,122,115,0.10)"
+            />
+          ) : null}
+        </MapView>
+        <Pressable
+          style={styles.geoLocateBtn}
+          onPress={useMyLocation}
+          disabled={locBusy}
+          testID="market-map-locate"
+        >
+          <ProxyIcon color={locGranted ? color.white : color.ink} name="route" size={14} />
+          <Text style={locGranted ? styles.geoLocateBtnTextOn : styles.geoLocateBtnText}>
+            {locBusy ? "定位中..." : locGranted ? "已用我的位置" : "用我当前位置"}
           </Text>
-        ))}
-        {config.pins.map((pin) => (
-          <Pressable
-            key={pin.label}
-            onPress={() => {
-              if (tab === "OPPORTUNITY") onOpenOpportunity(pin.id);
-              else onOpenActivity(pin.activity as Activity);
-            }}
-            style={[styles.geoPin, { left: `${pin.left}%`, top: `${pin.top}%` }]}
-          >
-            <Text style={styles.geoPinText}>{pin.label}</Text>
-          </Pressable>
-        ))}
+        </Pressable>
+        {locError ? (
+          <View style={styles.geoLocateError}>
+            <Text style={styles.geoLocateErrorText}>{locError}</Text>
+          </View>
+        ) : null}
       </View>
       <View style={styles.geoPrivacy}>
         <ProxyIcon color={color.ink} name="route" size={14} />
         <View style={styles.geoPrivacyCopy}>
-          <Text style={styles.geoPrivacyTitle}>{config.privacyTitle}</Text>
-          <Text style={styles.geoPrivacyText}>{config.privacyText}</Text>
+          <Text style={styles.geoPrivacyTitle}>{privacyTitle}</Text>
+          <Text style={styles.geoPrivacyText}>{privacyText}</Text>
         </View>
       </View>
       {remoteLens ? (
@@ -1218,70 +1346,15 @@ function MarketMap({
           <Text style={styles.mapRemoteText}>远程机会不依赖地理位置。{"\n"}地图仅保留可定位的本地机会；远程机会请切回列表查看完整结果。</Text>
         </View>
       ) : null}
-      {config.results}
     </View>
   );
 }
 
-function mapConfig(tab: "OPPORTUNITY" | "ACTIVITY", opportunities: MarketOpportunity[]): {
-  title: string;
-  sub: string;
-  privacyTitle: string;
-  privacyText: string;
-  pins: Array<{ id: string; label: string; left: number; top: number; activity?: Activity }>;
-  results: React.JSX.Element;
-} {
-  if (tab === "OPPORTUNITY") {
-    const local = opportunities.filter((o) => o.location !== "远程").slice(0, 6);
-    return {
-      title: "机会地图",
-      sub: "河内 · 仅公开 / 粗粒度任务区域",
-      privacyTitle: "任务区域",
-      privacyText: "地图用于附近探索与可达性判断；具体地址仅在业务确实需要且授权后提升精度。",
-      pins: local.map((o, i) => ({ id: o.id, label: String(i + 1), left: (OPPORTUNITY_COORDS[i % OPPORTUNITY_COORDS.length] ?? [50, 50])[0], top: (OPPORTUNITY_COORDS[i % OPPORTUNITY_COORDS.length] ?? [50, 50])[1] })),
-      results: (
-        <View>
-          {local.slice(0, 2).map((o) => (
-            <View key={o.id} style={styles.mapResult}>
-              <Text style={styles.mapResultTitle}>{o.shortTitle}</Text>
-              <Text style={styles.mapResultMeta}>
-                {o.date} {o.time} · {o.location}
-                {o.travel != null ? ` · ${o.travel}min 可达` : ""}
-              </Text>
-              <Pressable style={styles.mapResultBtn}>
-                <Text style={styles.mapResultBtnText}>查看机会</Text>
-              </Pressable>
-            </View>
-          ))}
-        </View>
-      )
-    };
-  }
-  return {
-    title: "活动地图",
-    sub: "公开 Activity Venue / 区域",
-    privacyTitle: "公开活动地点",
-    privacyText: "只展示 Activity 对外公开的 Venue / 区域；参与者和 Creator 的实时位置不展示。",
-    pins: [
-      { id: "photo_walk", label: "1", left: 28, top: 34 },
-      { id: "coffee_chat", label: "2", left: 66, top: 40 },
-      { id: "merchant_open", label: "3", left: 22, top: 54 },
-      { id: "proxy_meetup", label: "4", left: 54, top: 68 }
-    ],
-    results: (
-      <View>
-        {MARKET_EXPERIENCES.slice(0, 2).map((experience) => (
-          <View key={experience.id} style={styles.mapResult}>
-            <Text style={styles.mapResultTitle}>{experience.title}</Text>
-            <Text style={styles.mapResultMeta}>{experience.meta} · 已参加</Text>
-            <Pressable style={styles.mapResultBtn}>
-              <Text style={styles.mapResultBtnText}>查看活动</Text>
-            </Pressable>
-          </View>
-        ))}
-      </View>
-    )
-  };
+function mapConfig(): { _removed: true } {
+  // R15.x: 旧 mapConfig 被 MarketMap 内的 useMemo + state 取代。
+  // 保留一个 stub 以免外部遗留调用导致编译失败（defensive — 当前
+  // 文件内未发现额外调用方）。如闲置超过 1 个 release 可删除。
+  return { _removed: true };
 }
 
 const styles = StyleSheet.create({
@@ -1440,6 +1513,11 @@ const styles = StyleSheet.create({
   geoDistrict: { backgroundColor: "rgba(255,255,255,0.78)", borderRadius: 8, color: "#8E8595", fontSize: 11, fontWeight: "900", paddingHorizontal: 6, paddingVertical: 4, position: "absolute" },
   geoPin: { alignItems: "center", backgroundColor: "#0B7A73", borderColor: color.white, borderRadius: 999, borderWidth: 2, height: 31, justifyContent: "center", minWidth: 31, paddingHorizontal: 7, position: "absolute", transform: [{ translateX: -15.5 }, { translateY: -15.5 }] },
   geoPinText: { color: color.white, fontSize: 11, fontWeight: "900" },
+  geoLocateBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, bottom: 10, flexDirection: "row", gap: 5, paddingHorizontal: 10, paddingVertical: 7, position: "absolute", right: 10, ...shadows.card },
+  geoLocateBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  geoLocateBtnTextOn: { color: color.white, fontSize: 11, fontWeight: "700" },
+  geoLocateError: { backgroundColor: "rgba(255,255,255,0.92)", borderColor: "#E6B100", borderRadius: 10, borderWidth: 1, left: 10, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", right: 10, top: 10 },
+  geoLocateErrorText: { color: "#7A5B00", fontSize: 11, fontWeight: "700" },
   geoPrivacy: { alignItems: "flex-start", backgroundColor: "#FFF8DF", borderColor: "#F0DA85", borderRadius: 13, borderWidth: 1, flexDirection: "row", gap: 7, marginVertical: 7, padding: 9 },
   geoPrivacyGlyph: { color: color.ink, fontSize: 12 },
   geoPrivacyCopy: { flex: 1 },

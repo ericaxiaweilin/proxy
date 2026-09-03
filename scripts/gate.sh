@@ -109,6 +109,30 @@ gate_g4_drift() {
     return 1
   fi
   echo "  handler files: OK (all canonical files tracked)"
+  echo "  semantic fixtures: checking known hard-coded placeholders..."
+  local bad_fixtures=()
+  # R15.x: market.tsx used to render a fake SVG map with hard-coded
+  # OPPORTUNITY_MAP_COORDS / MAP_DISTRICTS instead of real react-native-maps.
+  # The fix lands the coordinates into real (lat, lng) via gridToLatLng.
+  # This check rejects a regression where the fake fixtures reappear.
+  if grep -q 'OPPORTUNITY_MAP_COORDS' apps/mobile/src/surfaces/market.tsx 2>/dev/null; then
+    bad_fixtures+=("apps/mobile/src/surfaces/market.tsx still imports OPPORTUNITY_MAP_COORDS")
+  fi
+  if grep -q 'MAP_DISTRICTS' apps/mobile/src/surfaces/market.tsx 2>/dev/null; then
+    bad_fixtures+=("apps/mobile/src/surfaces/market.tsx still imports MAP_DISTRICTS")
+  fi
+  # MarketMap must use react-native-maps (real MapKit / Google Maps)
+  if ! grep -q 'from "react-native-maps"' apps/mobile/src/surfaces/market.tsx 2>/dev/null; then
+    bad_fixtures+=("apps/mobile/src/surfaces/market.tsx MarketMap lost the react-native-maps import")
+  fi
+  if [ ${#bad_fixtures[@]} -gt 0 ]; then
+    echo "  FAIL: hard-coded map fixture regression detected:" >&2
+    for b in "${bad_fixtures[@]}"; do
+      echo "    - $b" >&2
+    done
+    return 1
+  fi
+  echo "  semantic fixtures: OK (no fake map regressions)"
 }
 
 OVERALL=0

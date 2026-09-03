@@ -1,7 +1,7 @@
 #!/bin/bash
 # R16.11: pre-commit hook. Runs the fast subset of the gate matrix:
-# G1 (build) and G2 (tests). G3 (live e2e) and G4 (drift) are
-# slower and are deferred to pre-push, where the operator has more
+# G1 (build), G2 (tests), G4 (drift + semantic fixtures).
+# G3 (live e2e) is deferred to pre-push, where the operator has more
 # context to react to a failure.
 #
 # This script is installed automatically by scripts/install-hooks.sh
@@ -17,3 +17,6 @@ bash scripts/gate.sh g1
 
 echo "[pre-commit] running gate g2 (tests)"
 bash scripts/gate.sh g2
+
+echo "[pre-commit] running gate g4 (drift + semantic fixtures)"
+bash scripts/gate.sh g4
