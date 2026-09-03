@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
+import { ActivityIndicator, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
 import Svg, { Path } from "react-native-svg";
@@ -8,6 +8,7 @@ import { type Transport, SessionAuthClient } from "./auth-client";
 import { ConversationClient } from "./conversation-client";
 import { DemandClient } from "./demand-client";
 import { LoginClient, LoginCommandRejectedError } from "./login-client";
+import { LegalDocClient, type LegalDoc, type LegalDocKind } from "./legal-doc";
 import { formatVietnamesePhoneForDisplay, normalizeVietnamesePhone, vietnamesePhoneReady } from "./vn-phone";
 import { googleAuthConfigured, type GoogleClientConfig } from "./google-auth-config";
 import { LocalNetClient } from "./localnet-client";
@@ -282,6 +283,63 @@ function BrandMark({ large = false, showSlogan = true }: { large?: boolean; show
   );
 }
 
+// R16.9: in-app fullscreen legal doc viewer. Fetches the Terms /
+// Privacy text from /v1/legal/{kind} on the API server and renders it
+// in a scrollable modal. The user must be able to actually read the
+// text BEFORE the consent checkbox is enabled; we explicitly do not
+// rely on a "the link works" promise or an external browser.
+function LegalDocViewer({ kind, onClose }: { kind: LegalDocKind; onClose: () => void }): React.JSX.Element {
+  const [doc, setDoc] = useState<LegalDoc | null>(null);
+  const [error, setError] = useState<string | undefined>();
+  const [busy, setBusy] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setBusy(true);
+    setError(undefined);
+    setDoc(null);
+    new LegalDocClient({ baseUrl: localApiBaseUrl })
+      .load(kind)
+      .then((loaded) => {
+        if (!cancelled) setDoc(loaded);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kind]);
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent={false} visible>
+      <View style={styles.legalScreen}>
+        <View style={styles.legalHeader}>
+          <Text style={styles.legalHeaderTitle}>{kind === "terms" ? "服务使用协议" : "隐私政策"} (v{doc?.version ?? "1.1"})</Text>
+          <Pressable disabled={busy} onPress={onClose} style={styles.legalCloseBtn}><Text style={styles.legalCloseBtnText}>关闭</Text></Pressable>
+        </View>
+        {busy ? (
+          <View style={styles.legalBusy}><ActivityIndicator color={color.violet} /><Text style={styles.legalBusyText}>加载中…</Text></View>
+        ) : error ? (
+          <View style={styles.legalErrorBlock}>
+            <Text style={styles.legalErrorTitle}>无法加载条款</Text>
+            <Text style={styles.legalErrorBody}>{error}</Text>
+            <Text style={styles.legalErrorHint}>请检查网络或稍后再试。条款未成功加载前，不能勾选同意。</Text>
+          </View>
+        ) : doc ? (
+          <ScrollView contentContainerStyle={styles.legalScroll}>
+            <Text style={styles.legalTitle}>{doc.title}</Text>
+            <Text style={styles.legalMeta}>适用地区：{doc.locale} · 更新日期：{doc.updatedAt.slice(0, 10)}</Text>
+            <Text style={styles.legalBody}>{doc.content}</Text>
+            <Text style={styles.legalFooter}>本版本仍属于产品法律草案。正式发布前，应由当地执业律师依据实际法人、许可证/登记状态、技术架构、支付模式和数据流进行最终法律审阅。</Text>
+          </ScrollView>
+        ) : null}
+      </View>
+    </Modal>
+  );
+}
+
 function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticated: () => void; onGuest: () => void }): React.JSX.Element {
   const [challengeId, setChallengeId] = useState<string>();
   const [authMode, setAuthMode] = useState<"login" | "register" | "guest">("login");
@@ -297,6 +355,9 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  // R16.9: which legal doc is currently being shown in the in-app
+  // LegalDocViewer modal. null = modal hidden.
+  const [openLegal, setOpenLegal] = useState<LegalDocKind | null>(null);
   // R15.36: 历史登录账户 — 只在 login 模式 展示。
   // 脱敏的 identifier 已经读取, 用户点 "继续" 会自动填 + 发起验证码。
   // "换号" 本地 dismiss (不写盘), 下次开 app 重新出现 — 因为上一个
@@ -489,22 +550,13 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     }
   }
 
-  // R16.7-P0-A: open the legal document bundle in the system browser. The
-  // exact URL is operator-supplied (backlog P1-A will host these under
-  // /v1/legal/terms and /v1/legal/privacy on the API server). Until that
-  // ships, the operator must provision the URLs at build time via the
-  // EXPO_PUBLIC_PROXY_LEGAL_TERMS_URL / _PRIVACY_URL env vars; if absent,
-  // we show an inline notice so the user is not silently sent to a
-  // placeholder.
-  function openLegalDoc(kind: "terms" | "privacy"): void {
-    const url = kind === "terms"
-      ? (process.env.EXPO_PUBLIC_PROXY_LEGAL_TERMS_URL as string | undefined)
-      : (process.env.EXPO_PUBLIC_PROXY_LEGAL_PRIVACY_URL as string | undefined);
-    if (!url) {
-      setError(kind === "terms" ? "服务使用协议尚未上线，请稍后再试或联系运营。" : "隐私政策尚未上线，请稍后再试或联系运营。");
-      return;
-    }
-    void WebBrowser.openBrowserAsync(url).catch(() => setError("无法打开浏览器，请稍后重试。"));
+  // R16.9: open the legal doc in an in-app modal. The LegalDocViewer
+  // fetches the actual text from /v1/legal/{kind} on the API server
+  // and shows it inline; the user can scroll the full text without
+  // leaving the app. The checkbox is gated until the doc loads
+  // successfully (see requestChallenge + continueAsGuest).
+  function openLegalDoc(kind: LegalDocKind): void {
+    setOpenLegal(kind);
   }
 
   async function continueAsGuest(): Promise<void> {
@@ -716,6 +768,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           </View>
         </TouchableWithoutFeedback>
       </ScrollView>
+      {openLegal ? <LegalDocViewer kind={openLegal} onClose={() => setOpenLegal(null)} /> : null}
     </KeyboardAvoidingView>
   );
 }
@@ -981,6 +1034,23 @@ const styles = StyleSheet.create({
   consentBoxMark: { color: color.white, fontSize: 14, fontWeight: "900", lineHeight: 18 },
   consentText: { color: color.ink, flex: 1, fontSize: 12, lineHeight: 18 },
   consentLink: { color: color.violet, fontWeight: "800" },
+  // R16.9 legal doc viewer styles.
+  legalScreen: { backgroundColor: color.white, flex: 1, paddingTop: 50 },
+  legalHeader: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12 },
+  legalHeaderTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
+  legalCloseBtn: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 8, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
+  legalCloseBtnText: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  legalBusy: { alignItems: "center", flex: 1, justifyContent: "center" },
+  legalBusyText: { color: color.muted, fontSize: 13, marginTop: 8 },
+  legalErrorBlock: { padding: 24 },
+  legalErrorTitle: { color: color.ink, fontSize: 16, fontWeight: "800", marginBottom: 8 },
+  legalErrorBody: { color: color.muted, fontSize: 13, marginBottom: 12 },
+  legalErrorHint: { color: color.ink, fontSize: 12, lineHeight: 18 },
+  legalScroll: { padding: 20, paddingBottom: 60 },
+  legalTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 6 },
+  legalMeta: { color: color.muted, fontSize: 12, marginBottom: 16 },
+  legalBody: { color: color.ink, fontSize: 13, lineHeight: 20 },
+  legalFooter: { color: color.muted, fontSize: 11, fontStyle: "italic", lineHeight: 18, marginTop: 24 },
   guestTitle: { color: color.ink, fontSize: 22, fontWeight: "900", textAlign: "center" },
   guestDescription: { color: color.muted, fontSize: 14, lineHeight: 21, marginTop: 10, textAlign: "center" },
   inlineActions: { flexDirection: "row", gap: 28, justifyContent: "center", marginTop: 18 },

@@ -1,0 +1,323 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/proxy-app/proxy-api/internal/command"
+)
+
+func (s *Server) command(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	routeCommandType := strings.TrimPrefix(r.URL.Path, "/v1/commands/")
+	if routeCommandType == "" || strings.Contains(routeCommandType, "/") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "command_route_not_found"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var envelope command.Envelope
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&envelope); err != nil {
+		result := invalidEnvelope("unknown", "invalid_envelope", "command.invalid_envelope", r)
+		writeResult(w, http.StatusBadRequest, result)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		result := invalidEnvelope("unknown", "invalid_envelope", "command.invalid_envelope", r)
+		writeResult(w, http.StatusBadRequest, result)
+		return
+	}
+	if result := validateEnvelope(envelope, routeCommandType); result != nil {
+		writeResult(w, http.StatusBadRequest, *result)
+		return
+	}
+	// Pre-auth per-IP rate limit: protects authentication and every command
+	// route from brute force (also bounds OTP challenge requests).
+	if !s.rateAllow("ip:" + clientIP(r, s.TrustCloudflareIP) + ":" + envelope.CommandType) {
+		result := command.Rejected(envelope, "RATE_LIMITED", "RESOURCE", "SAFE_RETRY", "command.rate_limited", nil)
+		writeResult(w, http.StatusTooManyRequests, result)
+		return
+	}
+	if requiresAuthentication(envelope.CommandType) {
+		if s.Authenticator == nil {
+			result := command.Rejected(envelope, "AUTHENTICATION_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "command.authentication_unavailable", nil)
+			writeResult(w, http.StatusServiceUnavailable, result)
+			return
+		}
+		rawAccessToken, ok := bearerToken(r.Header.Get("Authorization"))
+		if !ok {
+			result := command.Rejected(envelope, "ACCESS_TOKEN_REQUIRED", "AUTHENTICATION", "AFTER_REAUTH", "command.access_token_required", nil)
+			writeResult(w, http.StatusUnauthorized, result)
+			return
+		}
+		authenticated, err := s.Authenticator.Authenticate(r.Context(), rawAccessToken)
+		if err != nil {
+			result := command.Rejected(envelope, "INVALID_ACCESS_TOKEN", "AUTHENTICATION", "AFTER_REAUTH", "command.invalid_access_token", nil)
+			writeResult(w, http.StatusUnauthorized, result)
+			return
+		}
+		// The App may send actor/principal as a UI hint, but the server owned
+		// session is authoritative for command scope and idempotency.
+		envelope.Actor = authenticated.Actor
+		envelope.Principal = authenticated.Principal
+		envelope.AuthContext = authenticated.AuthContext
+		// Privileged commands (capability verification, contribution review /
+		// reward, media readiness override) require operator rights. Fail closed.
+		if requiresOperator(envelope.CommandType) {
+			if s.Operator == nil || !s.Operator.IsOperator(envelope.Actor, envelope.Principal, envelope.AuthContext) {
+				result := command.Rejected(envelope, "OPERATOR_PRIVILEGE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "command.operator_privilege_required", nil)
+				writeResult(w, http.StatusForbidden, result)
+				return
+			}
+		}
+		// Per-actor rate limit on top of the IP limit: rotating idempotency
+		// keys must not allow unbounded command volume per session.
+		if !s.rateAllow("actor:" + envelope.Actor.Type + ":" + envelope.Actor.ID + ":" + envelope.CommandType) {
+			result := command.Rejected(envelope, "RATE_LIMITED", "RESOURCE", "SAFE_RETRY", "command.rate_limited", nil)
+			writeResult(w, http.StatusTooManyRequests, result)
+			return
+		}
+	}
+	// Passwordless authentication is normally public. When it is initiated
+	// from an existing Guest session, however, preserve that server-authenticated
+	// person so the new credential upgrades it instead of creating a duplicate.
+	if envelope.CommandType == "BeginPasswordlessAuthentication" && r.Header.Get("Authorization") != "" {
+		if s.Authenticator == nil {
+			result := command.Rejected(envelope, "AUTHENTICATION_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "command.authentication_unavailable", nil)
+			writeResult(w, http.StatusServiceUnavailable, result)
+			return
+		}
+		rawAccessToken, ok := bearerToken(r.Header.Get("Authorization"))
+		if !ok {
+			result := command.Rejected(envelope, "INVALID_ACCESS_TOKEN", "AUTHENTICATION", "AFTER_REAUTH", "command.invalid_access_token", nil)
+			writeResult(w, http.StatusUnauthorized, result)
+			return
+		}
+		authenticated, err := s.Authenticator.Authenticate(r.Context(), rawAccessToken)
+		if err != nil {
+			result := command.Rejected(envelope, "INVALID_ACCESS_TOKEN", "AUTHENTICATION", "AFTER_REAUTH", "command.invalid_access_token", nil)
+			writeResult(w, http.StatusUnauthorized, result)
+			return
+		}
+		envelope.Actor = authenticated.Actor
+		envelope.Principal = authenticated.Principal
+		envelope.AuthContext = authenticated.AuthContext
+	}
+
+	result, status, err := s.executeCommand(r.Context(), envelope)
+	if err != nil {
+		log.Printf("command transaction failed: command=%s key=%s err=%v", envelope.CommandType, envelope.IdempotencyKey, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "command_transaction_failed"})
+		return
+	}
+	writeResult(w, status, result)
+}
+
+func (s *Server) executeCommand(ctx context.Context, envelope command.Envelope) (command.Result, int, error) {
+	fingerprint := fingerprintFor(envelope)
+	scope := idempotencyScope(envelope)
+	var result command.Result
+	status := http.StatusInternalServerError
+
+	operation := func(operationContext context.Context) error {
+		decision, previous, err := s.Idempotency.Begin(operationContext, scope, envelope.IdempotencyKey, fingerprint)
+		if err != nil {
+			log.Printf("idempotency begin failed: command=%s err=%v", envelope.CommandType, err)
+			return err
+		}
+		switch decision {
+		case command.IdempotencyConflict:
+			result = command.Rejected(envelope, "IDEMPOTENCY_KEY_REUSED", "CONCURRENCY", "AFTER_USER_ACTION", "command.idempotency_key_reused", map[string]any{"idempotencyKey": envelope.IdempotencyKey})
+			status = http.StatusConflict
+			return nil
+		case command.IdempotencyInProgress:
+			result = command.Rejected(envelope, "IDEMPOTENCY_IN_PROGRESS", "CONCURRENCY", "SAFE_RETRY", "command.idempotency_in_progress", map[string]any{"idempotencyKey": envelope.IdempotencyKey})
+			status = http.StatusConflict
+			return nil
+		case command.IdempotencyReplay:
+			if previous == nil {
+				return errors.New("idempotency replay record is missing")
+			}
+			result = previous.Result
+			result.Outcome = "ALREADY_APPLIED"
+			status = http.StatusOK
+			return nil
+		case command.IdempotencyClaimed:
+			result = s.dispatchCommand(operationContext, envelope)
+			if err := s.Idempotency.Complete(operationContext, scope, envelope.IdempotencyKey, command.IdempotencyRecord{Fingerprint: fingerprint, Result: result}); err != nil {
+				log.Printf("idempotency complete failed: command=%s outcome=%s err=%v", envelope.CommandType, result.Outcome, err)
+				return err
+			}
+			status = statusFor(result)
+			return nil
+		default:
+			return errors.New("unknown idempotency decision")
+		}
+	}
+
+	var err error
+	if s.Transactions != nil {
+		err = s.Transactions.WithinTransaction(ctx, operation)
+	} else {
+		err = operation(ctx)
+	}
+	if err != nil {
+		// Dispatch/transaction failed: release the inflight idempotency claim
+		// so the key does not stay IN_PROGRESS forever (best effort; the
+		// transactional store may have rolled the claim back already).
+		_ = s.Idempotency.Release(context.WithoutCancel(ctx), scope, envelope.IdempotencyKey, fingerprint)
+	}
+	return result, status, err
+}
+
+func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope) command.Result {
+	switch {
+	case s.Identity != nil && s.Identity.Supports(envelope.CommandType):
+		return s.Identity.HandleContext(ctx, envelope)
+	case s.Demand != nil && s.Demand.Supports(envelope.CommandType):
+		return s.Demand.HandleContext(ctx, envelope)
+	case s.CityCompanion != nil && s.CityCompanion.Supports(envelope.CommandType):
+		return s.CityCompanion.HandleContext(ctx, envelope)
+	case s.LocalNet != nil && s.LocalNet.Supports(envelope.CommandType):
+		return s.LocalNet.HandleContext(ctx, envelope)
+	case s.LocalContext != nil && s.LocalContext.Supports(envelope.CommandType):
+		return s.LocalContext.HandleContext(ctx, envelope)
+	case s.Conversation != nil && s.Conversation.Supports(envelope.CommandType):
+		return s.Conversation.HandleContext(ctx, envelope)
+	case s.Engagement != nil && s.Engagement.Supports(envelope.CommandType):
+		return s.Engagement.HandleContext(ctx, envelope)
+	case s.Fulfillment != nil && s.Fulfillment.Supports(envelope.CommandType):
+		return s.Fulfillment.HandleContext(ctx, envelope)
+	case s.Supply != nil && s.Supply.Supports(envelope.CommandType):
+		return s.Supply.HandleContext(ctx, envelope)
+	case s.Media != nil && s.Media.Supports(envelope.CommandType):
+		return s.Media.HandleContext(ctx, envelope)
+	case s.Activity != nil && s.Activity.Supports(envelope.CommandType):
+		return s.Activity.HandleContext(ctx, envelope)
+	case s.Contribution != nil && s.Contribution.Supports(envelope.CommandType):
+		return s.Contribution.HandleContext(ctx, envelope)
+	case s.Experience != nil && s.Experience.Supports(envelope.CommandType):
+		return s.Experience.HandleContext(ctx, envelope)
+	case s.Voucher != nil && s.Voucher.Supports(envelope.CommandType):
+		return s.Voucher.HandleContext(ctx, envelope)
+	case s.Marketplace != nil && s.Marketplace.Supports(envelope.CommandType):
+		return s.Marketplace.HandleContext(ctx, envelope)
+	case s.SocialSpace != nil && s.SocialSpace.Supports(envelope.CommandType):
+		return s.SocialSpace.HandleContext(ctx, envelope)
+	case s.Payment != nil && s.Payment.Supports(envelope.CommandType):
+		return s.Payment.HandleContext(ctx, envelope)
+	case s.Outcome != nil && s.Outcome.Supports(envelope.CommandType):
+		return s.Outcome.HandleContext(ctx, envelope)
+	case s.Notification != nil && s.Notification.Supports(envelope.CommandType):
+		return s.Notification.HandleContext(ctx, envelope)
+	case s.Safety != nil && s.Safety.Supports(envelope.CommandType):
+		return s.Safety.HandleContext(ctx, envelope)
+	case s.Business != nil && s.Business.Supports(envelope.CommandType):
+		return s.Business.HandleContext(ctx, envelope)
+	case s.Scene != nil && s.Scene.Supports(envelope.CommandType):
+		return s.Scene.HandleContext(ctx, envelope)
+	case s.RealityScene != nil && s.RealityScene.Supports(envelope.CommandType):
+		return s.RealityScene.HandleContext(ctx, envelope)
+	default:
+		return notImplemented(envelope)
+	}
+}
+
+func idempotencyScope(envelope command.Envelope) string {
+	return envelope.Actor.Type + ":" + envelope.Actor.ID + "|" + envelope.Principal.Type + ":" + envelope.Principal.ID
+}
+
+func requiresAuthentication(commandType string) bool {
+	switch commandType {
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession",
+		"ListFeedPosts", "ListMarketOpportunities", "ListActivities", "ListStatuses", "ListCommunities":
+		return false
+	default:
+		return true
+	}
+}
+
+func bearerToken(header string) (string, bool) {
+	parts := strings.Fields(header)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
+}
+
+func validateEnvelope(envelope command.Envelope, routeCommandType string) *command.Result {
+	if envelope.CommandID == "" || envelope.CommandType == "" || envelope.CommandVersion <= 0 || envelope.Actor.Type == "" || envelope.Actor.ID == "" || envelope.Principal.Type == "" || envelope.Principal.ID == "" || envelope.Target.Type == "" || envelope.Target.ID == "" || len(envelope.IdempotencyKey) < 8 || envelope.AuthContext == nil || envelope.Purpose == "" || envelope.CorrelationID == "" || envelope.RequestedAt == "" || envelope.Payload == nil {
+		result := invalidEnvelope(envelope.CommandID, envelope.CorrelationID, "command.invalid_envelope", nil)
+		return &result
+	}
+	if _, err := time.Parse(time.RFC3339, envelope.RequestedAt); err != nil {
+		result := command.Rejected(envelope, "INVALID_COMMAND_ENVELOPE", "VALIDATION", "AFTER_USER_ACTION", "command.invalid_envelope", map[string]any{"field": "requestedAt"})
+		return &result
+	}
+	if envelope.CommandType != routeCommandType {
+		result := command.Rejected(envelope, "COMMAND_TYPE_MISMATCH", "VALIDATION", "AFTER_USER_ACTION", "command.type_mismatch", map[string]any{"routeCommandType": routeCommandType})
+		return &result
+	}
+	return nil
+}
+
+func invalidEnvelope(commandID, correlationID, messageKey string, _ *http.Request) command.Result {
+	if correlationID == "" {
+		correlationID = "http_invalid"
+	}
+	return command.Result{CommandID: commandID, Outcome: "REJECTED", EventRefs: []string{}, CorrelationID: correlationID, Error: &command.ErrorEnvelope{ErrorCode: "INVALID_COMMAND_ENVELOPE", Category: "VALIDATION", Retryability: "AFTER_USER_ACTION", MessageKey: messageKey, SafeDetails: map[string]any{}, CorrelationID: correlationID}}
+}
+
+func notImplemented(envelope command.Envelope) command.Result {
+	return command.Rejected(envelope, "COMMAND_NOT_IMPLEMENTED", "BUSINESS_STATE", "AFTER_USER_ACTION", "foundation.command_not_implemented", map[string]any{"commandType": envelope.CommandType})
+}
+
+func fingerprintFor(envelope command.Envelope) string {
+	value := struct {
+		CommandType              string            `json:"commandType"`
+		CommandVersion           int               `json:"commandVersion"`
+		Actor                    command.Actor     `json:"actor"`
+		Principal                command.Principal `json:"principal"`
+		Target                   command.Target    `json:"target"`
+		ExpectedAggregateVersion *int              `json:"expectedAggregateVersion,omitempty"`
+		PolicySnapshot           map[string]any    `json:"policySnapshot,omitempty"`
+		AuthContext              map[string]any    `json:"authContext"`
+		Purpose                  string            `json:"purpose"`
+		Payload                  map[string]any    `json:"payload"`
+	}{envelope.CommandType, envelope.CommandVersion, envelope.Actor, envelope.Principal, envelope.Target, envelope.ExpectedAggregateVersion, envelope.PolicySnapshot, envelope.AuthContext, envelope.Purpose, envelope.Payload}
+	bytes, _ := json.Marshal(value)
+	return string(bytes)
+}
+
+func statusFor(result command.Result) int {
+	switch result.Outcome {
+	case "PENDING":
+		return http.StatusAccepted
+	case "REJECTED":
+		if result.Error != nil && result.Error.ErrorCode == "COMMAND_NOT_IMPLEMENTED" {
+			return http.StatusNotImplemented
+		}
+		return http.StatusConflict
+	default:
+		return http.StatusOK
+	}
+}
+
+func writeResult(w http.ResponseWriter, status int, result command.Result) {
+	writeJSON(w, status, result)
+}
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}

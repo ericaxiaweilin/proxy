@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -659,5 +660,73 @@ func TestReadyEndpointSurfacesLoginProviderOK(t *testing.T) {
 	checks := body["checks"].(map[string]any)
 	if status, _ := checks["login_provider"].(string); status != "smtp_configured" {
 		t.Fatalf("expected login_provider=smtp_configured when env present, got %v", status)
+	}
+}
+
+// R16.9: GET /v1/legal/{terms,privacy} must return the embedded v1.1
+// Vietnam legal docs so the mobile signup consent gate can show the
+// user the actual text they are agreeing to (PRD v1.4 LC-15).
+func TestLegalDocServesTermsAndPrivacy(t *testing.T) {
+	server := NewServerWithDependencies(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil)
+	handler := server.Handler()
+
+	for _, kind := range []string{"terms", "privacy"} {
+		record := httptest.NewRecorder()
+		handler.ServeHTTP(record, httptest.NewRequest(http.MethodGet, "/v1/legal/"+kind, nil))
+		if record.Code != http.StatusOK {
+			t.Fatalf("/v1/legal/%s: expected 200, got %d body=%s", kind, record.Code, record.Body.String())
+		}
+		var body legalDocEnvelope
+		if err := json.Unmarshal(record.Body.Bytes(), &body); err != nil {
+			t.Fatalf("/v1/legal/%s: decode envelope: %v", kind, err)
+		}
+		if body.Kind != kind {
+			t.Fatalf("/v1/legal/%s: kind=%q in envelope", kind, body.Kind)
+		}
+		if body.Version != "1.1" {
+			t.Fatalf("/v1/legal/%s: version=%q in envelope, want 1.1", kind, body.Version)
+		}
+		if body.Locale != "vi-VN" {
+			t.Fatalf("/v1/legal/%s: locale=%q in envelope, want vi-VN", kind, body.Locale)
+		}
+		if len(body.Content) < 1000 {
+			t.Fatalf("/v1/legal/%s: content is suspiciously short (%d bytes) — the embedded file is probably empty", kind, len(body.Content))
+		}
+		if body.ContentSHA256 == "" {
+			t.Fatalf("/v1/legal/%s: missing contentSha256", kind)
+		}
+		// Sanity: the body must contain some CN-only phrases that are
+		// in the operator-supplied v1.1 drafts. The signup gate
+		// is meaningless if the user is "consenting" to an empty
+		// body.
+		if kind == "terms" && !strings.Contains(body.Content, "服务使用协议") {
+			t.Fatalf("/v1/legal/terms: body does not contain 服务使用协议 — embedded file is wrong")
+		}
+		if kind == "privacy" && !strings.Contains(body.Content, "个人数据") {
+			t.Fatalf("/v1/legal/privacy: body does not contain 个人数据 — embedded file is wrong")
+		}
+	}
+}
+
+func TestLegalDocRejectsUnknownKind(t *testing.T) {
+	server := NewServerWithDependencies(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil)
+	handler := server.Handler()
+	record := httptest.NewRecorder()
+	handler.ServeHTTP(record, httptest.NewRequest(http.MethodGet, "/v1/legal/cookie-policy", nil))
+	if record.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown legal doc kind, got %d", record.Code)
+	}
+}
+
+func TestLegalDocHeadIsCheap(t *testing.T) {
+	server := NewServerWithDependencies(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localnet.New(), localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New(), nil, nil)
+	handler := server.Handler()
+	record := httptest.NewRecorder()
+	handler.ServeHTTP(record, httptest.NewRequest(http.MethodHead, "/v1/legal/terms", nil))
+	if record.Code != http.StatusOK {
+		t.Fatalf("HEAD expected 200, got %d", record.Code)
+	}
+	if record.Body.Len() != 0 {
+		t.Fatalf("HEAD must not return a body, got %d bytes", record.Body.Len())
 	}
 }
