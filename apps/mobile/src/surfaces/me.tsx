@@ -2357,7 +2357,9 @@ export function MeSurface({
               </View>
               <View style={styles.personalTopics}>
                 {(() => {
-                  const topics = profileDraft.city ? [profileDraft.city, "可接单"] : ["可接单"];
+                  // R15.90: 之前 topics 包含 '可接单' (R3 老字眼, R15.66 1:1 抄 R2 设计删除).
+                  //   R2 参考是 [city, "已认证"] 或 [city]. 保持只显示 city.
+                  const topics = profileDraft.city ? [profileDraft.city] : [];
                   return topics.map((t) => (
                     <View key={t} style={styles.personalTopicPill}><Text style={styles.personalTopicText}>{t}</Text></View>
                   ));
