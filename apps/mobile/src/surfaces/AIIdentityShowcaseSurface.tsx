@@ -6,6 +6,7 @@
 // R15.80: + R1 risk 段 (3 风险卡 + 5 规则 + 推荐/指标 6 toggles)
 // R15.81: + R1 identity 段 (Account≠ContentProvenance + 权限矩阵 8 行 + 注册链路 + 数据模型 modal)
 // R15.82: + R1 native 段 (3 AI Persona 列表 + 冷启动 4 toggles + 2 强守门 rule)
+// R15.83: + R1 twin 段 (2 Twin + 8 授权 toggles + Human Confirm Gate 3 flow)
 //
 // 设计: 1:1 抄 R1 HTML 视觉, 不自创.
 //
@@ -196,6 +197,9 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
 
         {/* R15.82: R1 native 段 — 3 AI Persona 列表 + 冷启动 4 toggles + 2 强守门 rule */}
         <NativeSection />
+
+        {/* R15.83: R1 twin 段 — 2 Twin + 8 授权 toggles + Human Confirm Gate 3 flow */}
+        <TwinSection />
 
         <Text style={styles.sectionTitle}>前台身份与内容标识</Text>
         <Text style={styles.sectionSub}>用户第一眼就知道谁是真人、谁是 AI、谁是谁的 Twin。</Text>
@@ -473,7 +477,15 @@ const styles = StyleSheet.create({
   coldRowBlocked: { opacity: 0.5 },
   coldRowCopy: { flex: 1 },
   coldRowTitle: { fontSize: 10, fontWeight: "800", color: color.ink },
-  coldRowSub: { fontSize: 8, color: color.muted, marginTop: 1 }
+  coldRowSub: { fontSize: 8, color: color.muted, marginTop: 1 },
+
+  // R15.83: R1 twin 段 (2 Twin + 8 授权 toggles + Human Confirm 3 flow)
+  confirmFlow: { flexDirection: "row", alignItems: "stretch", gap: 4, marginTop: 12 },
+  confirmBox: { flex: 1, backgroundColor: color.appBg, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 8, padding: 6, alignItems: "center", justifyContent: "center" },
+  confirmBoxOn: { backgroundColor: "#dcfce7", borderColor: "#15803d" },
+  confirmBoxTitle: { fontSize: 9, fontWeight: "800", color: color.ink, marginBottom: 2, textAlign: "center" },
+  confirmBoxSub: { fontSize: 8, color: color.muted, textAlign: "center", lineHeight: 11 },
+  confirmArrow: { fontSize: 14, color: color.muted, alignSelf: "center" }
 });
 
 // R15.78: R1 HTML audit mock data (5 笔) — 1:1 抄 R1 audits[] 数组.
@@ -1130,6 +1142,133 @@ function NativeSection(): React.JSX.Element {
             </View>
             <Text style={styles.ruleReason}>AI 账号之间的 Like / Reply / Follow 不形成趋势信号, 不参与自然推荐权重。</Text>
           </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// R15.83: R1 twin 段 1:1 抄 — 2 Twin 列表 (1:1 抄 R1 S.twins) + 8 授权 toggles + Human Confirm 3 flow
+const AI_TWINS: ReadonlyArray<{ name: string; owner: string; scope: string; state: string }> = [
+  { name: "Linh", owner: "@linh.hn", scope: "照片 · 公开回复 · 邀约收集", state: "运行中" },
+  { name: "Mai", owner: "@mai.hanoi", scope: "照片 · 视频 · 公开回复", state: "草稿" }
+];
+
+const TWIN_CONSENT_TOGGLES: ReadonlyArray<{ title: string; defaultOn: boolean; disabled?: boolean; blockedHint?: string }> = [
+  { title: "用本人照片生成新图片", defaultOn: true },
+  { title: "生成本人 AI 视频", defaultOn: true },
+  { title: "声音克隆", defaultOn: false },
+  { title: "自动回复公开评论", defaultOn: true },
+  { title: "自动回复私信", defaultOn: false },
+  { title: "收集 / 整理邀约", defaultOn: true },
+  { title: "自动接受邀约", defaultOn: false, disabled: true, blockedHint: "必须真人确认, 不可授权给 Twin" },
+  { title: "广告投放使用 likeness", defaultOn: false }
+];
+
+function TwinConsentToggle({ t }: { t: typeof TWIN_CONSENT_TOGGLES[number] }): React.JSX.Element {
+  const [on, setOn] = useState(t.defaultOn);
+  return (
+    <View style={[styles.coldRow, t.disabled ? styles.coldRowBlocked : undefined]}>
+      <View style={styles.coldRowCopy}>
+        <Text style={styles.coldRowTitle}>{t.title}</Text>
+        {t.blockedHint ? <Text style={styles.coldRowSub}>{t.blockedHint}</Text> : null}
+      </View>
+      {t.disabled ? (
+        <View style={[styles.toggle, styles.toggleDisabled]}>
+          <View style={styles.toggleKnob} />
+        </View>
+      ) : (
+        <Pressable
+          onPress={() => setOn(!on)}
+          style={[styles.toggle, on ? styles.toggleOn : undefined, styles.toggleAi]}
+          accessibilityLabel={`${t.title} 开关`}
+        >
+          <View style={[styles.toggleKnob, on ? styles.toggleKnobOn : undefined]} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function TwinSection(): React.JSX.Element {
+  return (
+    <View style={{ marginTop: 18 }}>
+      <Text style={styles.sectionTitle}>Creator AI Twin</Text>
+      <Text style={styles.sectionSub}>一位真人最多绑定一个官方 Twin。</Text>
+      <View style={styles.nativeGrid}>
+        <View>
+          {AI_TWINS.map((t) => (
+            <View key={t.name} style={styles.personaRow}>
+              <View style={styles.personaAvatar}>
+                <Text style={styles.personaAvatarText}>{t.name.charAt(0)}</Text>
+              </View>
+              <View style={styles.personaCopy}>
+                <View style={styles.personaNameRow}>
+                  <Text style={styles.personaName}>{t.name} AI</Text>
+                  <View style={[styles.personaBadge, styles.personaBadgeAi]}><Text style={styles.personaBadgeText}>AI TWIN</Text></View>
+                </View>
+                <Text style={styles.personaRole}>Owner {t.owner}</Text>
+                <Text style={styles.personaOwner}>{t.scope}</Text>
+              </View>
+              <View style={styles.personaActions}>
+                <Text style={styles.personaState}>{t.state}</Text>
+                <Pressable
+                  onPress={() => { /* R15.83: 静态展示 (R1 模拟 twinPolicy) */ }}
+                  style={styles.personaPolicyBtn}
+                  accessibilityLabel={`${t.name} 授权`}
+                >
+                  <Text style={styles.personaPolicyBtnText}>授权</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+          <Pressable
+            onPress={() => { /* R15.83: 静态展示 (R1 模拟 openTwinModal) */ }}
+            style={styles.personaCreateBtn}
+            accessibilityLabel="创建 Creator AI Twin"
+          >
+            <Text style={[styles.personaCreateBtnText, { color: color.ink }]}>＋ 创建 Creator AI Twin</Text>
+          </Pressable>
+        </View>
+        <View style={styles.coldCard}>
+          <Text style={styles.coldCardTitle}>Human Confirm Gate</Text>
+          <Text style={styles.coldCardSub}>AI Twin 可以把大量聊天、问题和邀约压缩成真人需要做的少数决策, 但现实承诺不能自动完成。</Text>
+          <View style={styles.confirmFlow}>
+            <View style={styles.confirmBox}>
+              <Text style={styles.confirmBoxTitle}>用户提出需求</Text>
+              <Text style={styles.confirmBoxSub}>时间 / Scene / 预算 / 场景</Text>
+            </View>
+            <Text style={styles.confirmArrow}>→</Text>
+            <View style={styles.confirmBox}>
+              <Text style={styles.confirmBoxTitle}>AI Twin 整理</Text>
+              <Text style={styles.confirmBoxSub}>检查 Facet、Availability、边界</Text>
+            </View>
+            <Text style={styles.confirmArrow}>→</Text>
+            <View style={[styles.confirmBox, styles.confirmBoxOn]}>
+              <Text style={[styles.confirmBoxTitle, { color: "#15803d" }]}>真人确认</Text>
+              <Text style={styles.confirmBoxSub}>Accept / Decline / Modify</Text>
+            </View>
+          </View>
+          <View style={[styles.ruleCard, { marginTop: 8 }]}>
+            <View style={styles.ruleTop}>
+              <Text style={styles.ruleTitle}>Owner 撤销权</Text>
+              <View style={[styles.ruleActionPill, { backgroundColor: "#dcfce7" }]}>
+                <Text style={[styles.ruleActionText, { color: "#15803d" }]}>必需</Text>
+              </View>
+            </View>
+            <Text style={styles.ruleReason}>Creator 可以一键暂停 Twin、撤销某项授权、删除视觉模型或关闭对话能力。</Text>
+          </View>
+          <View style={styles.ruleCard}>
+            <View style={styles.ruleTop}>
+              <Text style={styles.ruleTitle}>授权按用途拆分</Text>
+              <View style={[styles.ruleActionPill, { backgroundColor: "#fde68a" }]}>
+                <Text style={[styles.ruleActionText, { color: "#b45309" }]}>重要</Text>
+              </View>
+            </View>
+            <Text style={styles.ruleReason}>照片生成、视频生成、声音、公开回复、私信、广告使用不能合并成一个 \"全部同意\"。</Text>
+          </View>
+          <Text style={[styles.coldRowTitle, { marginTop: 10, marginBottom: 4 }]}>授权范围</Text>
+          {TWIN_CONSENT_TOGGLES.map((t) => <TwinConsentToggle key={t.title} t={t} />)}
         </View>
       </View>
     </View>

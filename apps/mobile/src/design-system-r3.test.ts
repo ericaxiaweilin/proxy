@@ -58,7 +58,9 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "personaName", "personaRole", "personaOwner", "personaState",
   "personaPolicyBtnText", "personaCreateBtnText", "personaAvatarText",
   "personaBadgeText",
-  "coldCardTitle", "coldCardSub", "coldRowTitle", "coldRowSub"
+  "coldCardTitle", "coldCardSub", "coldRowTitle", "coldRowSub",
+  // R15.83: R1 twin 段 (2 Twin + 8 授权 toggles + Human Confirm 3 flow).
+  "confirmBoxTitle", "confirmBoxSub"
 ];
 
 describe("Proxy Design System R3 typography", () => {
