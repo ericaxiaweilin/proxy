@@ -53,7 +53,12 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "archBtnText", "identityCardTitle", "identityCardSub", "contentBadgeText",
   "permHeaderCell", "permCellCap", "permCellText", "permPolicy",
   "signupBoxKind", "signupBoxSteps",
-  "archTitle", "archSub", "archCode", "archCloseBtnText"
+  "archTitle", "archSub", "archCode", "archCloseBtnText",
+  // R15.82: R1 native 段 (3 persona + 冷启动 4 toggles + 2 强守门).
+  "personaName", "personaRole", "personaOwner", "personaState",
+  "personaPolicyBtnText", "personaCreateBtnText", "personaAvatarText",
+  "personaBadgeText",
+  "coldCardTitle", "coldCardSub", "coldRowTitle", "coldRowSub"
 ];
 
 describe("Proxy Design System R3 typography", () => {

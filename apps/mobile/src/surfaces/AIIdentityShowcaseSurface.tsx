@@ -5,6 +5,7 @@
 // R15.79: + R1 provenance 段 (Content Provenance Pipeline + 3 sample + 4 维度评分)
 // R15.80: + R1 risk 段 (3 风险卡 + 5 规则 + 推荐/指标 6 toggles)
 // R15.81: + R1 identity 段 (Account≠ContentProvenance + 权限矩阵 8 行 + 注册链路 + 数据模型 modal)
+// R15.82: + R1 native 段 (3 AI Persona 列表 + 冷启动 4 toggles + 2 强守门 rule)
 //
 // 设计: 1:1 抄 R1 HTML 视觉, 不自创.
 //
@@ -192,6 +193,9 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
         <Text style={styles.sectionTitle}>三类身份</Text>
         <Text style={styles.sectionSub}>Account Identity 与 Content Provenance 是两套独立真相。</Text>
         <MiniIdentityCards />
+
+        {/* R15.82: R1 native 段 — 3 AI Persona 列表 + 冷启动 4 toggles + 2 强守门 rule */}
+        <NativeSection />
 
         <Text style={styles.sectionTitle}>前台身份与内容标识</Text>
         <Text style={styles.sectionSub}>用户第一眼就知道谁是真人、谁是 AI、谁是谁的 Twin。</Text>
@@ -437,7 +441,39 @@ const styles = StyleSheet.create({
   archCode: { fontFamily: "Menlo", backgroundColor: "#111", color: "#ddd", borderRadius: 13, padding: 12, fontSize: 9, lineHeight: 14 },
   archActions: { flexDirection: "row", justifyContent: "flex-end", gap: 7, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: color.line },
   archCloseBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: color.cardBorder, backgroundColor: color.white },
-  archCloseBtnText: { fontSize: 11, fontWeight: "700", color: color.ink }
+  archCloseBtnText: { fontSize: 11, fontWeight: "700", color: color.ink },
+
+  // R15.82: R1 native 段 (3 persona + 冷启动 4 toggles + 2 强守门)
+  nativeGrid: { flexDirection: "row", gap: 10 },
+  personaRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 10, padding: 8, marginBottom: 6 },
+  personaAvatar: { width: 32, height: 32, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  personaAvatarAi: { backgroundColor: "#6d28d9" },
+  personaAvatarText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  personaCopy: { flex: 1 },
+  personaNameRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  personaName: { fontSize: 11, fontWeight: "800", color: color.ink },
+  personaBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999 },
+  personaBadgeAi: { backgroundColor: "#f3e8ff" },
+  personaBadgeText: { fontSize: 8, fontWeight: "800", color: "#6d28d9" },
+  personaRole: { fontSize: 9, color: color.muted, marginTop: 1 },
+  personaOwner: { fontSize: 8, color: color.muted },
+  personaActions: { alignItems: "flex-end" },
+  personaState: { fontSize: 9, color: color.muted, fontStyle: "italic", marginBottom: 4 },
+  personaPolicyBtn: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: color.cardBorder, backgroundColor: color.appBg },
+  personaPolicyBtnText: { fontSize: 9, fontWeight: "700", color: color.ink },
+
+  personaCreateBtn: { paddingVertical: 8, borderRadius: 8, alignItems: "center", borderWidth: 1 },
+  personaCreateBtnAi: { backgroundColor: "#6d28d9", borderColor: "#6d28d9" },
+  personaCreateBtnText: { fontSize: 10, fontWeight: "800", color: color.white },
+
+  coldCard: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 10 },
+  coldCardTitle: { fontSize: 12, fontWeight: "800", color: color.ink, marginBottom: 4 },
+  coldCardSub: { fontSize: 9, color: color.muted, lineHeight: 13 },
+  coldRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 5, borderTopWidth: 1, borderTopColor: color.cardBorder },
+  coldRowBlocked: { opacity: 0.5 },
+  coldRowCopy: { flex: 1 },
+  coldRowTitle: { fontSize: 10, fontWeight: "800", color: color.ink },
+  coldRowSub: { fontSize: 8, color: color.muted, marginTop: 1 }
 });
 
 // R15.78: R1 HTML audit mock data (5 笔) — 1:1 抄 R1 audits[] 数组.
@@ -984,6 +1020,116 @@ function DataContractModal({ onClose }: { onClose: () => void }): React.JSX.Elem
           <Pressable onPress={onClose} style={styles.archCloseBtn} accessibilityLabel="关闭">
             <Text style={styles.archCloseBtnText}>关闭</Text>
           </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// R15.82: R1 native 段 1:1 抄 — 3 AI Persona 列表 (1:1 抄 R1 S.native) + 冷启动 4 toggles + 2 强守门 rule
+const AI_PERSONAS: ReadonlyArray<{ name: string; role: string; state: string }> = [
+  { name: "Mia", role: "城市灵感 · AI Creator", state: "运行中" },
+  { name: "Nari", role: "咖啡 / 生活方式", state: "运行中" },
+  { name: "Leo", role: "活动发现", state: "暂停" }
+];
+
+const COLD_START_TOGGLES: ReadonlyArray<{ title: string; sub: string; defaultOn: boolean; disabled?: boolean; ai?: boolean }> = [
+  { title: "AI Feed 上限", sub: "For You 默认 ≤ 15%", defaultOn: true, ai: true },
+  { title: "允许 AI 公开评论", sub: "必须显示 AI 身份", defaultOn: true },
+  { title: "允许 AI 主动私信", sub: "默认关闭, 避免骚扰", defaultOn: false },
+  { title: "允许 AI Scene Check-in", sub: "永久禁止", defaultOn: false, disabled: true }
+];
+
+function ColdStartToggle({ t }: { t: typeof COLD_START_TOGGLES[number] }): React.JSX.Element {
+  const [on, setOn] = useState(t.defaultOn);
+  return (
+    <View style={[styles.coldRow, t.disabled ? styles.coldRowBlocked : undefined]}>
+      <View style={styles.coldRowCopy}>
+        <Text style={styles.coldRowTitle}>{t.title}</Text>
+        <Text style={styles.coldRowSub}>{t.sub}</Text>
+      </View>
+      {t.disabled ? (
+        <View style={[styles.toggle, t.disabled ? styles.toggleDisabled : undefined]}>
+          <View style={styles.toggleKnob} />
+        </View>
+      ) : (
+        <Pressable
+          onPress={() => setOn(!on)}
+          style={[styles.toggle, on ? styles.toggleOn : undefined, t.ai ? styles.toggleAi : undefined]}
+          accessibilityLabel={`${t.title} 开关`}
+        >
+          <View style={[styles.toggleKnob, on ? styles.toggleKnobOn : undefined]} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function NativeSection(): React.JSX.Element {
+  const [personas, setPersonas] = useState(AI_PERSONAS);
+  return (
+    <View style={{ marginTop: 18 }}>
+      <Text style={styles.sectionTitle}>平台 AI Persona</Text>
+      <Text style={styles.sectionSub}>纯虚拟 · 不对应真人。</Text>
+      <View style={styles.nativeGrid}>
+        <View>
+          {personas.map((p, i) => (
+            <View key={p.name} style={styles.personaRow}>
+              <View style={[styles.personaAvatar, styles.personaAvatarAi]}>
+                <Text style={styles.personaAvatarText}>{p.name.charAt(0)}</Text>
+              </View>
+              <View style={styles.personaCopy}>
+                <View style={styles.personaNameRow}>
+                  <Text style={styles.personaName}>{p.name}</Text>
+                  <View style={[styles.personaBadge, styles.personaBadgeAi]}><Text style={styles.personaBadgeText}>AI</Text></View>
+                </View>
+                <Text style={styles.personaRole}>{p.role}</Text>
+                <Text style={styles.personaOwner}>Owner · Proxy Platform</Text>
+              </View>
+              <View style={styles.personaActions}>
+                <Text style={styles.personaState}>{p.state}</Text>
+                <Pressable
+                  onPress={() => { /* R15.82: 静态展示 (R1 模拟) */ }}
+                  style={styles.personaPolicyBtn}
+                  accessibilityLabel={`${p.name} 策略`}
+                >
+                  <Text style={styles.personaPolicyBtnText}>策略</Text>
+                </Pressable>
+              </View>
+            </View>
+          ))}
+          <Pressable
+            onPress={() => { /* R15.82: 静态展示 (R1 模拟 openNativeModal) */ }}
+            style={[styles.personaCreateBtn, styles.personaCreateBtnAi]}
+            accessibilityLabel="创建新的 AI Persona"
+          >
+            <Text style={styles.personaCreateBtnText}>＋ 创建新的 AI Persona</Text>
+          </Pressable>
+        </View>
+        <View style={styles.coldCard}>
+          <Text style={styles.coldCardTitle}>冷启动控制</Text>
+          <Text style={styles.coldCardSub}>AI 可以增加内容密度, 但必须避免制造 \"已经有很多真人\" 的虚假社会证明。</Text>
+          <View style={{ marginTop: 10 }}>
+            {COLD_START_TOGGLES.map((t) => <ColdStartToggle key={t.title} t={t} />)}
+          </View>
+          <View style={styles.ruleCard}>
+            <View style={styles.ruleTop}>
+              <Text style={styles.ruleTitle}>Human MAU / GMV 隔离</Text>
+              <View style={[styles.ruleActionPill, { backgroundColor: "#dcfce7" }]}>
+                <Text style={[styles.ruleActionText, { color: "#15803d" }]}>强制</Text>
+              </View>
+            </View>
+            <Text style={styles.ruleReason}>AI Native、AI Twin 的自动行为独立统计, 不计入 Human MAU、真实成交、真实到店、Creator 履约率。</Text>
+          </View>
+          <View style={styles.ruleCard}>
+            <View style={styles.ruleTop}>
+              <Text style={styles.ruleTitle}>AI ↔ AI 放大阻断</Text>
+              <View style={[styles.ruleActionPill, { backgroundColor: "#dcfce7" }]}>
+                <Text style={[styles.ruleActionText, { color: "#15803d" }]}>强制</Text>
+              </View>
+            </View>
+            <Text style={styles.ruleReason}>AI 账号之间的 Like / Reply / Follow 不形成趋势信号, 不参与自然推荐权重。</Text>
+          </View>
         </View>
       </View>
     </View>
