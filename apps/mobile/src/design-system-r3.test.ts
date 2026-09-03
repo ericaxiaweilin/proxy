@@ -60,7 +60,14 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "personaBadgeText",
   "coldCardTitle", "coldCardSub", "coldRowTitle", "coldRowSub",
   // R15.83: R1 twin 段 (2 Twin + 8 授权 toggles + Human Confirm 3 flow).
-  "confirmBoxTitle", "confirmBoxSub"
+  "confirmBoxTitle", "confirmBoxSub",
+  // R15.84: R1 overview 段 (hero + 4 KPI + 3 identity cards + 3 flow).
+  "heroKickerText", "heroTitle", "heroSub", "heroRulePillText",
+  "heroSideLabel", "heroSideTitle", "heroBoundaryText",
+  "kpiValue", "kpiLabel",
+  "identityBigPillText", "identityBigTitle", "identityBigDesc",
+  "identityBigRowLabel", "identityBigRowValue",
+  "coreFlowTitle", "coreFlowSub"
 ];
 
 describe("Proxy Design System R3 typography", () => {

@@ -7,6 +7,7 @@
 // R15.81: + R1 identity 段 (Account≠ContentProvenance + 权限矩阵 8 行 + 注册链路 + 数据模型 modal)
 // R15.82: + R1 native 段 (3 AI Persona 列表 + 冷启动 4 toggles + 2 强守门 rule)
 // R15.83: + R1 twin 段 (2 Twin + 8 授权 toggles + Human Confirm Gate 3 flow)
+// R15.84: + R1 overview 段 (hero + 3 边界 + 4 KPI + 3 identity cards + 3 flow)
 //
 // 设计: 1:1 抄 R1 HTML 视觉, 不自创.
 //
@@ -178,6 +179,9 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
           </Pressable>
         </View>
         <Text style={styles.subtitle}>R1 透明度义务 · Vietnam AI Law 134/2025</Text>
+
+        {/* R15.84: R1 overview 段 — hero + 3 边界 + 4 KPI + 3 identity cards + 3 flow */}
+        <OverviewHero />
 
         {/* R15.81: R1 identity 段 — Account≠ContentProvenance (2 cards + 4 content badges) */}
         <Text style={styles.sectionTitle}>Account Identity ≠ Content Provenance</Text>
@@ -485,7 +489,55 @@ const styles = StyleSheet.create({
   confirmBoxOn: { backgroundColor: "#dcfce7", borderColor: "#15803d" },
   confirmBoxTitle: { fontSize: 9, fontWeight: "800", color: color.ink, marginBottom: 2, textAlign: "center" },
   confirmBoxSub: { fontSize: 8, color: color.muted, textAlign: "center", lineHeight: 11 },
-  confirmArrow: { fontSize: 14, color: color.muted, alignSelf: "center" }
+  confirmArrow: { fontSize: 14, color: color.muted, alignSelf: "center" },
+
+  // R15.84: R1 overview 段
+  overviewHero: { flexDirection: "row", gap: 10, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 14, padding: 12 },
+  heroMain: { flex: 1.4 },
+  heroKicker: { alignSelf: "flex-start", backgroundColor: color.appBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, marginBottom: 6 },
+  heroKickerText: { fontSize: 8, fontWeight: "800", color: color.muted, letterSpacing: 0.4 },
+  heroTitle: { fontSize: 20, fontWeight: "800", color: color.ink, letterSpacing: -0.5, marginBottom: 6, lineHeight: 26 },
+  heroSub: { fontSize: 10, color: color.muted, lineHeight: 14, marginBottom: 8 },
+  heroRules: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  heroRulePill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: color.appBg, borderWidth: 1, borderColor: color.cardBorder },
+  heroRulePillText: { fontSize: 8, fontWeight: "800", color: color.ink },
+
+  heroSide: { flex: 1, backgroundColor: color.appBg, borderRadius: 10, padding: 8 },
+  heroSideLabel: { fontSize: 8, fontWeight: "800", color: color.muted, letterSpacing: 0.4, marginBottom: 4 },
+  heroSideTitle: { fontSize: 12, fontWeight: "800", color: color.ink, marginBottom: 6 },
+  heroBoundary: { flexDirection: "row", gap: 4, marginBottom: 4 },
+  heroBoundaryBullet: { fontSize: 10, color: color.ink, fontWeight: "800" },
+  heroBoundaryText: { flex: 1, fontSize: 9, color: color.ink, lineHeight: 13 },
+
+  kpiGrid: { flexDirection: "row", gap: 6 },
+  kpiCard: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 10, padding: 8, alignItems: "center" },
+  kpiCardAi: { borderColor: "#6d28d9" },
+  kpiCardRisk: { borderColor: "#b45309" },
+  kpiValue: { fontSize: 18, fontWeight: "800", color: color.ink, marginBottom: 2 },
+  kpiValueAi: { color: "#6d28d9" },
+  kpiValueRisk: { color: "#b45309" },
+  kpiLabel: { fontSize: 8, color: color.muted, textAlign: "center" },
+
+  identityCardsRow: { flexDirection: "row", gap: 6 },
+  identityBigCard: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, padding: 8 },
+  identityBigPill: { alignSelf: "flex-start", paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, marginBottom: 5 },
+  identityBigPillText: { fontSize: 8, fontWeight: "800", letterSpacing: 0.4 },
+  identityBigTitle: { fontSize: 11, fontWeight: "800", color: color.ink, marginBottom: 3 },
+  identityBigDesc: { fontSize: 8, color: color.muted, lineHeight: 11 },
+  identityBigRow: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 3, borderTopWidth: 1, borderTopColor: color.cardBorder },
+  identityBigRowLabel: { fontSize: 9, color: color.muted, fontWeight: "700", flex: 1 },
+  identityBigRowValueWrap: { flexDirection: "row", alignItems: "center", gap: 4 },
+  identityBigRowValue: { fontSize: 9, fontWeight: "800", color: color.ink },
+  dotSafe: { width: 8, height: 8, borderRadius: 999, backgroundColor: "#15803d" },
+  dotBlock: { width: 8, height: 8, borderRadius: 999, backgroundColor: "#b91c1c" },
+  dotReview: { width: 8, height: 8, borderRadius: 999, backgroundColor: "#b45309" },
+
+  coreFlow: { gap: 4 },
+  coreFlowRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  coreFlowBox: { flex: 1, backgroundColor: color.white, borderWidth: 1, borderColor: color.cardBorder, borderRadius: 10, padding: 8, alignItems: "center" },
+  coreFlowTitle: { fontSize: 10, fontWeight: "800", color: color.ink, marginBottom: 2, textAlign: "center" },
+  coreFlowSub: { fontSize: 8, color: color.muted, textAlign: "center", lineHeight: 11 },
+  coreFlowArrow: { fontSize: 16, color: color.muted, paddingHorizontal: 2 }
 });
 
 // R15.78: R1 HTML audit mock data (5 笔) — 1:1 抄 R1 audits[] 数组.
@@ -1270,6 +1322,147 @@ function TwinSection(): React.JSX.Element {
           <Text style={[styles.coldRowTitle, { marginTop: 10, marginBottom: 4 }]}>授权范围</Text>
           {TWIN_CONSENT_TOGGLES.map((t) => <TwinConsentToggle key={t.title} t={t} />)}
         </View>
+      </View>
+    </View>
+  );
+}
+
+// R15.84: R1 overview 段 1:1 抄 — hero + 3 边界 + 4 KPI + 3 identity cards + 3 flow
+const OVERVIEW_HERO_RULES = ["透明 AI 标识", "真人授权", "Human Confirm", "Content Provenance", "AI 不进入真人指标"] as const;
+const OVERVIEW_BOUNDARIES = [
+  "平台 AI 不创建虚假手机号、邮箱或真人 KYC。",
+  "AI Twin 可以收集和整理邀约, 但不能替真人接受现实承诺。",
+  "AI 不能伪造到店、位置、评价、成交、Scene 足迹或社会证明。"
+] as const;
+const OVERVIEW_KPIS: ReadonlyArray<{ value: string; label: string; ai?: boolean; risk?: boolean }> = [
+  { value: "12,480", label: "Human MAU" },
+  { value: "36", label: "Proxy AI Personas", ai: true },
+  { value: "184", label: "Active AI Twins", ai: true },
+  { value: "7", label: "待人工复核内容", risk: true }
+];
+const OVERVIEW_IDENTITY_CARDS: ReadonlyArray<{
+  kind: "HUMAN" | "AI_NATIVE" | "AI_TWIN";
+  title: string; desc: string;
+  rows: ReadonlyArray<{ label: string; value: string; dot?: "safe" | "block" | "review" }>;
+}> = [
+  {
+    kind: "HUMAN", title: "真人账户",
+    desc: "真实用户 / Creator。手机号或邮箱注册, 必要时完成身份验证; 拥有现实世界最终决策权。",
+    rows: [
+      { label: "登录", value: "本人登录", dot: "safe" },
+      { label: "现实位置", value: "本人主动公开" },
+      { label: "接受邀约", value: "允许" },
+      { label: "收款 / 评价", value: "允许" }
+    ]
+  },
+  {
+    kind: "AI_NATIVE", title: "平台原生 AI",
+    desc: "Proxy 创建的纯虚拟数字人, 不对应现实中的任何个人, 用于冷启动、推荐和公开内容。",
+    rows: [
+      { label: "注册", value: "平台后台创建" },
+      { label: "电话 / 邮箱", value: "不伪造", dot: "block" },
+      { label: "Scene / 到店", value: "禁止声明亲历" },
+      { label: "成交 / 评价", value: "禁止" }
+    ]
+  },
+  {
+    kind: "AI_TWIN", title: "Creator AI 分身",
+    desc: "绑定一个已验证真人, 由本人按用途授权。外貌、内容风格和 Facet 是数字人格资产。",
+    rows: [
+      { label: "Owner", value: "唯一真人 Creator" },
+      { label: "独立登录", value: "禁止", dot: "block" },
+      { label: "回复 / 筛选", value: "按授权允许" },
+      { label: "接受邀约", value: "必须真人确认", dot: "review" }
+    ]
+  }
+];
+const OVERVIEW_FLOWS = [
+  { title: "Content / Conversation", sub: "AI Persona 或 AI Twin 生产内容、回复问题、理解用户意图。" },
+  { title: "Policy Gate", sub: "根据 Identity、授权范围、Content Provenance 与风险等级限权。" },
+  { title: "Human Reality", sub: "真实邀约、位置、签到、支付、履约、评价由真人或真实商家完成。" }
+] as const;
+
+function OverviewHero(): React.JSX.Element {
+  return (
+    <View style={{ marginTop: 12 }}>
+      <View style={styles.overviewHero}>
+        <View style={styles.heroMain}>
+          <View style={styles.heroKicker}><Text style={styles.heroKickerText}>Proxy · Human + AI Network</Text></View>
+          <Text style={styles.heroTitle}>让 AI 帮人扩张,{`\n`}但不伪装成人。</Text>
+          <Text style={styles.heroSub}>平台 AI 解决冷启动和内容密度; Creator AI Twin 解决时间上限; 真人保留真实位置、承诺、履约、支付与评价的最终权利。</Text>
+          <View style={styles.heroRules}>
+            {OVERVIEW_HERO_RULES.map((r) => (
+              <View key={r} style={styles.heroRulePill}>
+                <Text style={styles.heroRulePillText}>{r}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+        <View style={styles.heroSide}>
+          <Text style={styles.heroSideLabel}>R1 POLICY</Text>
+          <Text style={styles.heroSideTitle}>三条不可跨越的边界</Text>
+          {OVERVIEW_BOUNDARIES.map((b) => (
+            <View key={b} style={styles.heroBoundary}>
+              <Text style={styles.heroBoundaryBullet}>•</Text>
+              <Text style={styles.heroBoundaryText}>{b}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <Text style={[styles.sectionSub, { marginTop: 14, marginBottom: 6 }]}>系统状态</Text>
+      <Text style={[styles.sectionSub, { marginBottom: 8 }]}>示例数据 · AI 活动不计入 Human MAU。</Text>
+      <View style={styles.kpiGrid}>
+        {OVERVIEW_KPIS.map((k) => (
+          <View key={k.label} style={[styles.kpiCard, k.ai ? styles.kpiCardAi : undefined, k.risk ? styles.kpiCardRisk : undefined]}>
+            <Text style={[styles.kpiValue, k.ai ? styles.kpiValueAi : undefined, k.risk ? styles.kpiValueRisk : undefined]}>{k.value}</Text>
+            <Text style={styles.kpiLabel}>{k.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Text style={[styles.sectionSub, { marginTop: 14, marginBottom: 6 }]}>身份模型</Text>
+      <Text style={[styles.sectionSub, { marginBottom: 8 }]}>同一 User Graph, 三种完全不同的责任与权限。</Text>
+      <View style={styles.identityCardsRow}>
+        {OVERVIEW_IDENTITY_CARDS.map((c) => {
+          const meta = KIND_META[c.kind];
+          return (
+            <View key={c.kind} style={styles.identityBigCard}>
+              <View style={[styles.identityBigPill, { backgroundColor: meta.soft }]}>
+                <Text style={[styles.identityBigPillText, { color: meta.pillText }]}>{c.kind}</Text>
+              </View>
+              <Text style={styles.identityBigTitle}>{c.title}</Text>
+              <Text style={styles.identityBigDesc}>{c.desc}</Text>
+              <View style={{ marginTop: 8 }}>
+                {c.rows.map((r) => (
+                  <View key={r.label} style={styles.identityBigRow}>
+                    <Text style={styles.identityBigRowLabel}>{r.label}</Text>
+                    <View style={styles.identityBigRowValueWrap}>
+                      {r.dot === "safe" ? <View style={styles.dotSafe} /> : null}
+                      {r.dot === "block" ? <View style={styles.dotBlock} /> : null}
+                      {r.dot === "review" ? <View style={styles.dotReview} /> : null}
+                      <Text style={styles.identityBigRowValue}>{r.value}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+
+      <Text style={[styles.sectionSub, { marginTop: 14, marginBottom: 6 }]}>核心运行链路</Text>
+      <Text style={[styles.sectionSub, { marginBottom: 8 }]}>AI 扩张能力, 真人负责现实。</Text>
+      <View style={styles.coreFlow}>
+        {OVERVIEW_FLOWS.map((f, i) => (
+          <View key={f.title} style={styles.coreFlowRow}>
+            <View style={styles.coreFlowBox}>
+              <Text style={styles.coreFlowTitle}>{f.title}</Text>
+              <Text style={styles.coreFlowSub}>{f.sub}</Text>
+            </View>
+            {i < OVERVIEW_FLOWS.length - 1 ? <Text style={styles.coreFlowArrow}>→</Text> : null}
+          </View>
+        ))}
       </View>
     </View>
   );
