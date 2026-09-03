@@ -78,6 +78,20 @@ describe("mobile session auth client", () => {
     expect(await store.read()).toBeUndefined();
   });
 
+  it("clears credentials when the server rejects the installation device proof", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
+    await store.write(initialSession);
+    const client = new SessionAuthClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      deviceProofProvider: async () => ({ deviceId: "device_other", deviceCredential: "b".repeat(64) }),
+      transport: async () => response(409, { outcome: "REJECTED", error: { errorCode: "DEVICE_PROOF_INVALID" } })
+    });
+    await expect(client.refresh()).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(await store.read()).toBeUndefined();
+  });
+
   it("preserves secure credentials when refresh service is temporarily unavailable", async () => {
     const driver = new InMemorySecureStorageDriver();
     const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
@@ -106,7 +120,7 @@ describe("mobile session auth client", () => {
     expect(requests).toBe(0);
   });
 
-  it("soft sign out locks locally without revoking the refresh token needed by Continue", async () => {
+  it("sign out revokes the server session and clears local bearer credentials", async () => {
     const driver = new InMemorySecureStorageDriver();
     const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
     await store.write(initialSession);
@@ -118,23 +132,12 @@ describe("mobile session auth client", () => {
       transport: async () => { requests += 1; throw new Error("unexpected network request"); }
     });
     await client.signOut();
-    // R15.39: signOut 不再 clear keychain — 改为设 signedOut=true,
-    //   保留 refreshToken 以供后续 silent re-auth (点 “继续” 按钮) 使用。
-    //   写路径 (requireSession) 仍会拒 (signedOut gate), 跟 “未登录”
-    //   一样表现。
     const after = await store.read();
-    expect(after).toBeDefined();
-    expect(after?.signedOut).toBe(true);
-    expect(after?.signedOutAt).toBe("2026-08-14T00:00:00.000Z");
-    // accessToken 被置为 "revoked" — 避免起动时 getAccessToken 走
-    //   “老 accessToken 有效” 路径
-    expect(after?.auth.accessToken).toBe("revoked");
-    // refreshToken 保留 — silent re-auth 要用
-    expect(after?.auth.refreshToken).toBe(initialSession.auth.refreshToken);
-    expect(requests).toBe(0);
+    expect(after).toBeUndefined();
+    expect(requests).toBe(1);
   });
 
-  it("refresh after soft sign out restores the remembered account in one tap", async () => {
+  it("cannot restore a revoked session by refreshing after sign out", async () => {
     const driver = new InMemorySecureStorageDriver();
     const store = new SecureSessionStore(driver, () => new Date("2026-08-14T00:00:00.000Z"));
     await store.write(initialSession);
@@ -148,8 +151,6 @@ describe("mobile session auth client", () => {
       }
     });
     await client.signOut();
-    const tokens = await client.refresh();
-    expect(tokens.accessToken).toBe("access_2");
-    expect((await store.read())?.signedOut).toBeUndefined();
+    await expect(client.refresh()).rejects.toBeInstanceOf(SessionExpiredError);
   });
 });

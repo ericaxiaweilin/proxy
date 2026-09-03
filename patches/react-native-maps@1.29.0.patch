@@ -1,0 +1,13 @@
+diff --git a/ios/AirMaps/RNMapsAirModule.mm b/ios/AirMaps/RNMapsAirModule.mm
+index f238f635d88a5414a6c82117e800d8b341d09f3c..836f32272b61d3b00302f5709d6a05f87c980c5f 100644
+--- a/ios/AirMaps/RNMapsAirModule.mm
++++ b/ios/AirMaps/RNMapsAirModule.mm
+@@ -153,7 +153,7 @@
+ }
+ 
+ + (NSString *)moduleName { 
+-    return nil;
++    return @"RNMapsAirModule";
+ }
+ 
+ 

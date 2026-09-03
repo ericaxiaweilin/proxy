@@ -43,6 +43,7 @@ import type { CreatePostPayload, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type MediaClient } from "../media-client";
 import { type SecureSessionStore } from "../secure-session";
+import { SessionExpiredError } from "../auth-client";
 import {
   createDraftMedia,
   draftMediaDragTarget,
@@ -501,30 +502,7 @@ export function ComposerV2Screen({
         }
       );
       idempotencyRef.current ??= newPublishIdempotencyKey();
-      // R15.64: 如果 server 返 POST_MEDIA_NOT_PUBLISHABLE (media 还在 PROCESSING/READY 之中),
-      // 3 次重试, 退避 1s/2s/4s. 原因: server worker 处理 5MB JPEG ffmpeg 要 1-2s, client
-      // uploadMedia 内部 waitUntilReady 60s 不一定准, 拍个 snapshot 可能还没 READY.
-      // 重试用同 idempotencyKey, server 端去重, 不会发重复 post.
-      const POST_MEDIA_NOT_PUBLISHABLE = "POST_MEDIA_NOT_PUBLISHABLE";
-      const maxAttempts = 3;
-      let postErr: Error | undefined;
-      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        try {
-          await localNet.createPost(payload, idempotencyRef.current);
-          postErr = undefined;
-          break;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          const isMediaNotReady = err instanceof Error
-            ? err.message.includes(POST_MEDIA_NOT_PUBLISHABLE) || err.message.includes("media_not_publishable")
-            : false;
-          if (!isMediaNotReady || attempt === maxAttempts) { postErr = err instanceof Error ? err : new Error(message); break; }
-          const backoffMs = 1000 * Math.pow(2, attempt - 1);
-          console.log(`[proxy.R15.64.DEBUG.composer] CreatePost attempt ${attempt} got POST_MEDIA_NOT_PUBLISHABLE, retrying in ${backoffMs}ms`);
-          await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        }
-      }
-      if (postErr) throw postErr;
+      await localNet.createPost(payload, idempotencyRef.current);
       // 重置
       setBody("");
       setMedia([]);
@@ -541,20 +519,12 @@ export function ComposerV2Screen({
       showToast(isGhost24h ? "24h 动态已发布" : "已发布");
       await onPublished();
     } catch (err) {
-      // R15.64: 友好化错误信息
-      let userMessage = err instanceof Error ? err.message : "发布失败，请稍后重试。";
-      if (userMessage.includes("POST_MEDIA_NOT_PUBLISHABLE") || userMessage.includes("media_not_publishable")) {
-        userMessage = "照片还在服务器处理中，请稍后重试发布。";
-      } else if (userMessage.includes("INVALID_ACCESS_TOKEN") || userMessage.includes("invalid_create_session") || userMessage.includes("SESSION_EXPIRED")) {
-        userMessage = "会话已过期，请重新登录后重试。";
-      } else if (userMessage.includes("POST_BODY_TOO_LONG")) {
-        userMessage = "帖子内容太长，请删减后重试。";
-      } else if (userMessage.includes("POST_MEDIA_LIMIT_EXCEEDED")) {
-        userMessage = "照片超过 6 张上限，请删除后再发布。";
-      } else if (userMessage.includes("VALIDATION") || userMessage.includes("invalid")) {
-        userMessage = `内容校验失败：${userMessage}`;
+      if (err instanceof SessionExpiredError) {
+        setIsAuthenticatedForWrite(false);
+        setError("登录状态已失效，请重新验证账户后发布；草稿和媒体均已保留。");
+      } else {
+        setError(err instanceof Error ? err.message : "发布失败，请稍后重试。");
       }
-      setError(userMessage);
     } finally {
       publishingRef.current = false;
       setPublishing(false);

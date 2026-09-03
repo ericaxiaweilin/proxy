@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"time"
@@ -17,6 +18,7 @@ var (
 	ErrTokenExpired           = errors.New("session token expired")
 	ErrTokenRotationConflict  = errors.New("session token rotation conflict")
 	ErrTokenStorageNotEnabled = errors.New("session token storage is not enabled")
+	ErrDeviceProofInvalid     = errors.New("device proof is invalid")
 )
 
 const (
@@ -25,12 +27,13 @@ const (
 )
 
 type SessionToken struct {
-	SessionID        string
-	AccessTokenHash  string
-	RefreshTokenHash string
-	AccessExpiresAt  time.Time
-	RefreshExpiresAt time.Time
-	Rotation         int
+	SessionID            string
+	AccessTokenHash      string
+	RefreshTokenHash     string
+	AccessExpiresAt      time.Time
+	RefreshExpiresAt     time.Time
+	Rotation             int
+	DeviceCredentialHash string
 }
 
 type TokenPair struct {
@@ -66,9 +69,12 @@ func NewTokenManager(repository TokenRepository, sessions Repository, domainCloc
 	return &TokenManager{repository: repository, sessions: sessions, clock: domainClock}
 }
 
-func (m *TokenManager) Prepare(session Session) (TokenPair, SessionToken, error) {
+func (m *TokenManager) Prepare(session Session, rawDeviceCredential string) (TokenPair, SessionToken, error) {
 	if m == nil || m.repository == nil {
 		return TokenPair{}, SessionToken{}, ErrTokenStorageNotEnabled
+	}
+	if len(rawDeviceCredential) < 32 {
+		return TokenPair{}, SessionToken{}, ErrDeviceProofInvalid
 	}
 	now := m.clock.Now().UTC()
 	accessToken, err := newSecret("pxa_")
@@ -80,12 +86,13 @@ func (m *TokenManager) Prepare(session Session) (TokenPair, SessionToken, error)
 		return TokenPair{}, SessionToken{}, err
 	}
 	record := SessionToken{
-		SessionID:        session.ID,
-		AccessTokenHash:  hashToken(accessToken),
-		RefreshTokenHash: hashToken(refreshToken),
-		AccessExpiresAt:  now.Add(AccessTokenLifetime),
-		RefreshExpiresAt: now.Add(RefreshTokenLifetime),
-		Rotation:         1,
+		SessionID:            session.ID,
+		AccessTokenHash:      hashToken(accessToken),
+		RefreshTokenHash:     hashToken(refreshToken),
+		AccessExpiresAt:      now.Add(AccessTokenLifetime),
+		RefreshExpiresAt:     now.Add(RefreshTokenLifetime),
+		Rotation:             1,
+		DeviceCredentialHash: hashToken(rawDeviceCredential),
 	}
 	return TokenPair{
 		SessionID:        session.ID,
@@ -104,7 +111,7 @@ func (m *TokenManager) Commit(ctx context.Context, record SessionToken) error {
 	return m.repository.SaveSessionTokens(ctx, record)
 }
 
-func (m *TokenManager) Rotate(ctx context.Context, rawRefreshToken string) (TokenPair, Session, error) {
+func (m *TokenManager) Rotate(ctx context.Context, rawRefreshToken, deviceID, rawDeviceCredential string) (TokenPair, Session, error) {
 	if m == nil || m.repository == nil || m.sessions == nil {
 		return TokenPair{}, Session{}, ErrTokenStorageNotEnabled
 	}
@@ -114,6 +121,10 @@ func (m *TokenManager) Rotate(ctx context.Context, rawRefreshToken string) (Toke
 	record, err := m.repository.GetByRefreshTokenHash(ctx, hashToken(rawRefreshToken))
 	if err != nil {
 		return TokenPair{}, Session{}, err
+	}
+	providedDeviceHash := hashToken(rawDeviceCredential)
+	if len(rawDeviceCredential) < 32 || subtle.ConstantTimeCompare([]byte(record.DeviceCredentialHash), []byte(providedDeviceHash)) != 1 {
+		return TokenPair{}, Session{}, ErrDeviceProofInvalid
 	}
 	now := m.clock.Now().UTC()
 	if !now.Before(record.RefreshExpiresAt) {
@@ -126,7 +137,10 @@ func (m *TokenManager) Rotate(ctx context.Context, rawRefreshToken string) (Toke
 	if !m.sessionUsable(ctx, session) {
 		return TokenPair{}, Session{}, ErrTokenExpired
 	}
-	pair, replacement, err := m.Prepare(session)
+	if deviceID == "" || session.DeviceID != deviceID {
+		return TokenPair{}, Session{}, ErrDeviceProofInvalid
+	}
+	pair, replacement, err := m.Prepare(session, rawDeviceCredential)
 	if err != nil {
 		return TokenPair{}, Session{}, err
 	}

@@ -16,7 +16,7 @@ import { Platform } from "react-native";
 import { SessionAuthClient, type Transport } from "./auth-client";
 import { SecureSessionStore } from "./secure-session";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
-import { EngagementClient } from "./engagement-client";
+import { getOrCreateDeviceIdentity } from "./device-credential";
 
 const APP_VERSION = "1.0.0";
 
@@ -56,8 +56,6 @@ export const nativeSecureSessionStore = new SecureSessionStore(nativeSecureStora
 export const sessionAuthClient = new SessionAuthClient({
   baseUrl: localApiBaseUrl,
   secureSessionStore: nativeSecureSessionStore,
-  transport: nativeTransport
+  transport: nativeTransport,
+  deviceProofProvider: () => getOrCreateDeviceIdentity(nativeSecureStorageDriver)
 });
-
-// R15.59: 关注/置顶/点赞/举报 client. 跨 surface 共享 (me, profile, feed, ...).
-export const nativeEngagementClient = new EngagementClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });

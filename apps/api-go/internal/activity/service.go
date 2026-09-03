@@ -26,6 +26,7 @@ type Activity struct {
 	Consumption    string `json:"consumption"`
 	VenueIcon      string `json:"venueIcon"`
 	VenueName      string `json:"venueName"`
+	RealitySceneID string `json:"realitySceneId,omitempty"`
 	VenueSpend     string `json:"venueSpend"`
 	VenueType      string `json:"venueType"` // CAFE | RESTAURANT
 	VenueTypeLabel string `json:"venueTypeLabel"`
@@ -292,7 +293,7 @@ func defaultCatalog() []*Activity {
 		{
 			ID: "proxy_coffee_weekend", Origin: "PLATFORM", Title: "Proxy 周末咖啡企划",
 			Time: "本周六至周日", People: "特别企划", Price: "0₫", Consumption: "按门店场次",
-			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", VenueSpend: "90,000–140,000₫ / 人",
+			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
 			Desc:    "周末限定主题场次，联合合作咖啡店开放。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
@@ -301,7 +302,7 @@ func defaultCatalog() []*Activity {
 		{
 			ID: "merchant_photo_day", Origin: "MERCHANT", Title: "木光咖啡 · 周日下午拍照季",
 			Time: "周日 15:00–17:00", People: "6 / 10 人", Price: "0₫", Consumption: "各自消费",
-			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", VenueSpend: "90,000–140,000₫ / 人",
+			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
 			Desc:    "自然光座位已预留，适合互相拍照和慢慢喝咖啡。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
@@ -311,7 +312,7 @@ func defaultCatalog() []*Activity {
 		{
 			ID: "user_photo_buddy", Origin: "USER", Title: "周六 咖啡拍照搭子",
 			Time: "周六 15:00–17:00", People: "找 1 位", Price: "0₫", Consumption: "各自消费",
-			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", VenueSpend: "90,000–140,000₫ / 人",
+			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
 			Desc:    "互相帮对方拍照，一起喝咖啡；到店消费各自承担。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
@@ -320,7 +321,7 @@ func defaultCatalog() []*Activity {
 		{
 			ID: "merchant_tasting", Origin: "MERCHANT", Title: "岚庭餐厅 · 新菜尝鲜晚餐",
 			Time: "周五 18:30–20:30", People: "4 / 6 人", Price: "0₫", Consumption: "活动套餐 399k / 人",
-			VenueIcon: "🍽️", VenueName: "岚庭餐厅 · 西湖", VenueSpend: "380,000–650,000₫ / 人",
+			VenueIcon: "🍽️", VenueName: "岚庭餐厅 · 西湖", RealitySceneID: "westlake", VenueSpend: "380,000–650,000₫ / 人",
 			VenueType: "RESTAURANT", VenueTypeLabel: "餐厅",
 			Desc:    "餐厅开放新品尝鲜场次，按活动套餐到店消费。",
 			Benefit: "Proxy 活动预订赠餐后甜点",
@@ -329,7 +330,7 @@ func defaultCatalog() []*Activity {
 		{
 			ID: "user_dinner_group", Origin: "USER", Title: "周五一起吃新菜",
 			Time: "周五 18:30–20:30", People: "2 / 4 人", Price: "0₫", Consumption: "各自消费",
-			VenueIcon: "🍽️", VenueName: "岚庭餐厅 · 西湖", VenueSpend: "380,000–650,000₫ / 人",
+			VenueIcon: "🍽️", VenueName: "岚庭餐厅 · 西湖", RealitySceneID: "westlake", VenueSpend: "380,000–650,000₫ / 人",
 			VenueType: "RESTAURANT", VenueTypeLabel: "餐厅",
 			Desc:    "围绕岚庭餐厅的新品场次组一个小饭局，一起尝鲜。",
 			Benefit: "Proxy 活动预订赠餐后甜点",

@@ -364,6 +364,7 @@ export function ActivityDetail({
   busy,
   onToggleInterested,
   onJoin,
+  onOpenRealityScene,
   onBack
 }: {
   item: Activity;
@@ -372,6 +373,7 @@ export function ActivityDetail({
   busy: boolean;
   onToggleInterested: () => void;
   onJoin: () => void;
+  onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onBack: () => void;
 }): React.JSX.Element {
   const origin = ORIGIN_META[item.origin];
@@ -513,6 +515,11 @@ export function ActivityDetail({
       {item.origin !== "USER" ? (
         <Pressable style={styles.ctaLight}>
           <Text style={styles.ctaLightText}>找人一起参加</Text>
+        </Pressable>
+      ) : null}
+      {item.realitySceneId && onOpenRealityScene ? (
+        <Pressable onPress={() => onOpenRealityScene(item.realitySceneId!)} style={styles.ctaLight}>
+          <Text style={styles.ctaLightText}>查看场景地图</Text>
         </Pressable>
       ) : null}
       <Pressable onPress={onBack} style={styles.ctaLight}>

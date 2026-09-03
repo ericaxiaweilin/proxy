@@ -9,7 +9,7 @@ export type MarketApplication = { applicationId: string; opportunityId: string; 
 
 export class MarketplaceClient {
   private sequence = 0;
-  public constructor(private readonly input: { authClient: { request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse> }; secureSessionStore: SecureSessionStore; now?: () => Date }) {}
+  public constructor(private readonly input: { authClient: { request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>; requestPublic?(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse> }; secureSessionStore: SecureSessionStore; now?: () => Date }) {}
 
   public async list(): Promise<MarketOpportunity[]> {
     // R15.22 fix: 匿名 iPhone 端也要看到机会计数 (Home tab "机会 / 活动"硬编码
@@ -35,7 +35,10 @@ export class MarketplaceClient {
   // R15.22 fix: optionalSession param — list() 匿名可调, 写操作 (publish/apply/
   // dismiss) 仍需 requireSession 保持现状. 同 LocalNetClient.sendCommand.
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>, allowAnonymous: boolean): Promise<CommandResult> {
-    const session = allowAnonymous ? await this.optionalSession() : await this.requireSession();
+    // Public discovery must never be poisoned by an expired/stale account
+    // session. It deliberately omits bearer credentials even when Keychain
+    // still contains an old login.
+    const session = allowAnonymous ? undefined : await this.requireSession();
     const next = (prefix: string) => `mobile_market_${prefix}_${Date.now().toString(36)}_${(++this.sequence).toString(36)}`;
     // R15.22 fix: 匿名走 PUBLIC actor (server 端 requiresAuthentication 不拒
     // ListMarketOpportunities), 读 session 本身抛错 (keychain entitlement
@@ -54,7 +57,10 @@ export class MarketplaceClient {
       requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),
       payload
     };
-    const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
+    const request = allowAnonymous && this.input.authClient.requestPublic
+      ? this.input.authClient.requestPublic.bind(this.input.authClient)
+      : this.input.authClient.request.bind(this.input.authClient);
+    const response = await request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new Error("market command response was malformed");
     if (result.outcome === "REJECTED") throw new Error(result.error?.messageKey ?? "market command rejected");

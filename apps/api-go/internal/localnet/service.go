@@ -305,7 +305,7 @@ func (s *Service) SeedDemoPosts(ctx context.Context) error {
 			CityScope:   "", // 无 cityScope 走全 city filter
 			SceneType:   "PHOTO",
 			Status:      "PUBLISHED",
-			ContextRefs: []ContextRef{{ContextType: "SERVICE", ContextID: "城市同行"}, {ContextType: "ROUTE", ContextID: "轻松拍照路线"}, {ContextType: "VENUE", ContextID: "木光咖啡"}},
+			ContextRefs: []ContextRef{{ContextType: "REALITY_SCENE", ContextID: "westlake", RelationType: "FEATURED_AT"}, {ContextType: "SERVICE", ContextID: "城市同行"}, {ContextType: "ROUTE", ContextID: "轻松拍照路线"}, {ContextType: "VENUE", ContextID: "木光咖啡"}},
 			CreatedAt:   now.Add(-2 * time.Hour),
 		},
 		{
@@ -319,7 +319,7 @@ func (s *Service) SeedDemoPosts(ctx context.Context) error {
 			CityScope:         "",
 			SceneType:         "COFFEE",
 			Status:            "PUBLISHED",
-			ContextRefs:       []ContextRef{{ContextType: "SERVICE", ContextID: "城市同行"}, {ContextType: "AVAILABILITY", ContextID: "明天下午可接"}},
+			ContextRefs:       []ContextRef{{ContextType: "REALITY_SCENE", ContextID: "westlake", RelationType: "FEATURED_AT"}, {ContextType: "SERVICE", ContextID: "城市同行"}, {ContextType: "AVAILABILITY", ContextID: "明天下午可接"}},
 			CreatedAt:         now.Add(-90 * time.Minute),
 		},
 		{
@@ -332,7 +332,7 @@ func (s *Service) SeedDemoPosts(ctx context.Context) error {
 			CityScope:         "",
 			SceneType:         "COFFEE",
 			Status:            "PUBLISHED",
-			ContextRefs:       []ContextRef{{ContextType: "ACTIVITY", ContextID: "用户活动"}, {ContextType: "QUOTE_POST", ContextID: "post_seed_linh_01"}},
+			ContextRefs:       []ContextRef{{ContextType: "REALITY_SCENE", ContextID: "bonsaidon", RelationType: "FEATURED_AT"}, {ContextType: "ACTIVITY", ContextID: "用户活动"}, {ContextType: "QUOTE_POST", ContextID: "post_seed_linh_01"}},
 			CreatedAt:         now.Add(-60 * time.Minute),
 		},
 		{
@@ -346,7 +346,7 @@ func (s *Service) SeedDemoPosts(ctx context.Context) error {
 			CityScope:         "",
 			SceneType:         "COFFEE",
 			Status:            "PUBLISHED",
-			ContextRefs:       []ContextRef{{ContextType: "VENUE", ContextID: "门店场景"}, {ContextType: "ACTIVITY", ContextID: "周六新店开业"}},
+			ContextRefs:       []ContextRef{{ContextType: "REALITY_SCENE", ContextID: "bonsaidon", RelationType: "FEATURED_AT"}, {ContextType: "VENUE", ContextID: "门店场景"}, {ContextType: "ACTIVITY", ContextID: "周六新店开业"}},
 			CreatedAt:         now.Add(-30 * time.Minute),
 		},
 		// R15.22 增量 seed — 未登录访客应能看到丰富 feed. 增补 18 帖覆盖

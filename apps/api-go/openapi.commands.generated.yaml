@@ -251,6 +251,8 @@ commands:
     domain: Conversation
   - command: RefreshSession
     domain: Identity
+  - command: ResumeTrustedDeviceSession
+    domain: Identity
   - command: RefundPaymentIntent
     domain: Payment
   - command: RegisterDevice

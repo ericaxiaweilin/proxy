@@ -39,6 +39,11 @@ type Repository interface {
 	Snapshot(ctx context.Context) (sessions []Session, devices []DeviceRegistration, err error)
 }
 
+type TrustedDeviceRepository interface {
+	BindDeviceCredential(ctx context.Context, deviceID, userAccountID, credentialHash string) error
+	GetTrustedDevice(ctx context.Context, deviceID, credentialHash string) (DeviceRegistration, error)
+}
+
 // TransactionalRepository commits identity state changes together with their
 // outbox events. The callback for revoke-all runs while the session rows are
 // locked and before the transaction commits.
@@ -206,6 +211,28 @@ func (r *MemoryRepository) GetDevice(_ context.Context, id string) (DeviceRegist
 	defer r.mu.Unlock()
 	device, exists := r.devices[id]
 	if !exists {
+		return DeviceRegistration{}, ErrDeviceNotFound
+	}
+	return device, nil
+}
+
+func (r *MemoryRepository) BindDeviceCredential(_ context.Context, deviceID, userAccountID, credentialHash string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	device, exists := r.devices[deviceID]
+	if !exists || device.UserAccountID != userAccountID || device.Status != "ACTIVE" {
+		return ErrDeviceNotFound
+	}
+	device.CredentialHash = credentialHash
+	r.devices[deviceID] = device
+	return nil
+}
+
+func (r *MemoryRepository) GetTrustedDevice(_ context.Context, deviceID, credentialHash string) (DeviceRegistration, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	device, exists := r.devices[deviceID]
+	if !exists || device.Status != "ACTIVE" || device.CredentialHash == "" || device.CredentialHash != credentialHash {
 		return DeviceRegistration{}, ErrDeviceNotFound
 	}
 	return device, nil

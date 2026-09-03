@@ -8,6 +8,7 @@ import type { SecureSessionStore, StoredSession } from "./secure-session";
 
 export type ActivityCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
+  requestPublic?(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
 };
 
 export type ActivityClientOptions = {
@@ -39,8 +40,7 @@ export class ActivityClient {
     // R15.22 fix: 匿名 iPhone 端也要看到活动计数 (Home tab "机会 / 活动"硬编码
     // 24/46/18 随 R15.22 WIP 被改为 API 加载 — server 端 ListActivities 不限
     // actor type, 仅需 optional session, 不再要 requireSession.
-    const session = await this.optionalSession();
-    const result = await this.sendCommand(session, "ListActivities", { type: "Activity", id: "local" }, {});
+    const result = await this.sendCommand(undefined, "ListActivities", { type: "Activity", id: "local" }, {});
     return ListActivitiesPayloadSchema.parse(this.decodeOperationRef(result)).activities;
   }
 
@@ -100,7 +100,10 @@ export class ActivityClient {
       requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),
       payload
     };
-    const response = await this.input.authClient.request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
+    const request = commandType === "ListActivities" && this.input.authClient.requestPublic
+      ? this.input.authClient.requestPublic.bind(this.input.authClient)
+      : this.input.authClient.request.bind(this.input.authClient);
+    const response = await request(`/v1/commands/${commandType}`, { method: "POST", body: envelope });
     const result = parseCommandResult(await response.json());
     if (!result) throw new ActivityProtocolError("activity command response was malformed");
     if (result.outcome === "REJECTED") throw new ActivityCommandRejectedError(result);

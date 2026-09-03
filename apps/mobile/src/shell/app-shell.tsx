@@ -19,6 +19,8 @@ import { ContextSwitcherSheet } from "../components/context-switcher";
 import {
   DEFAULT_LOCATION,
   LocationPickerSheet,
+  formatRadius,
+  gridToLatLng,
   type AnyLocation,
   type CustomLocation,
   type PresetLocation
@@ -56,7 +58,6 @@ import { MeSurface } from "../surfaces/me";
 import { MessagesSurface } from "../surfaces/messages";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
-import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
 import { VoucherSurface } from "../surfaces/voucher";
 import { color, shadows } from "../theme";
 import { type ActiveContext } from "../uiplan/types";
@@ -165,19 +166,6 @@ export function AppShell({
   // R15.23: feedSection 是 FEED tab 内部的 section 状态 (动态/状态/社区)。
   // 跨 page 切到 FEED_* 时同步设过来；swipe 切到 next/prev page 时也同步更新。
   const [feedSection, setFeedSection] = useState<"POSTS" | "STATUS" | "COMMUNITY">("POSTS");
-  // R15.59: viewerAccountId 是当前 session 的用户 ID (用于区分 self / other profile).
-  // 启动时从 keychain 拿 — 现在是 async + 启动后不变 (登录一次后到登出前保持).
-  const [viewerAccountId, setViewerAccountId] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!secureSessionStore) return;
-      const session = await secureSessionStore.read().catch(() => undefined);
-      if (cancelled) return;
-      if (session?.userAccountId) setViewerAccountId(session.userAccountId);
-    })();
-    return () => { cancelled = true; };
-  }, [secureSessionStore]);
   const currentPage: PageId = pageOverride ?? ((): PageId => {
     if (tab === "HOME") return "HOME";
     if (tab === "MARKET") return marketEntry.tab === "ACTIVITY" ? "MARKET_ACT" : "MARKET_OPP";
@@ -226,7 +214,7 @@ export function AppShell({
         const absDy = Math.abs(dy);
         const swipeThreshold = 56;
         const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
-        const canSwipeRoot = !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen && !openExperience && !otherProfile && !realitySceneOpen;
+        const canSwipeRoot = !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen && !openExperience;
         if (isHorizontalSwipe && canSwipeRoot) {
           const idx = PAGE_SEQUENCE.indexOf(currentPage);
           if (idx < 0) return;
@@ -253,9 +241,7 @@ export function AppShell({
   const [currentLocation, setCurrentLocation] = useState<AnyLocation>(DEFAULT_LOCATION);
   const [locationSheetOpen, setLocationSheetOpen] = useState(false);
   const [realitySceneOpen, setRealitySceneOpen] = useState(false);
-  // R15.93: global search query — 主页 search sheet 提交时 set, 传 FeedSurface 拉过滤后 feed.
-  const [globalSearchQuery, setGlobalSearchQuery] = useState<string | undefined>(undefined);
-  const [otherProfile, setOtherProfile] = useState<OtherProfileTarget>();
+  const [realitySceneSelection, setRealitySceneSelection] = useState<string>();
 
   // R15.13 P6：mount 时拉一次"上次激活的自定义坐标" — 跨会话保留
   // 用户放置的 pin / 半径。如果从未放过，sheet 也仍能从 history
@@ -278,7 +264,6 @@ export function AppShell({
     if (Platform.OS !== "android") return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (handleModuleBack()) return true;
-      if (otherProfile) { setOtherProfile(undefined); return true; }
       if (realitySceneOpen) { setRealitySceneOpen(false); return true; }
       if (voucherOpen) { setVoucherOpen(false); return true; }
       if (tab === "ME" && messageChatAuthor) { setMessageChat(undefined); return true; }
@@ -394,7 +379,7 @@ export function AppShell({
   // Only the primary Feed stream owns scroll-driven shell chrome. Chat,
   // Home/Market/Me forms and Feed's nested chat/preferences keep navigation
   // stable so moving through messages cannot unexpectedly summon/hide it.
-  const isNavVisible = !realitySceneOpen && !otherProfile && selectShellChromeVisible({
+  const isNavVisible = !realitySceneOpen && selectShellChromeVisible({
     tab,
     feedChromeVisible,
     feedChatOpen: Boolean(feedChatAuthor),
@@ -408,6 +393,14 @@ export function AppShell({
       <View style={[styles.root, width >= 768 && styles.rootWide]}>
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
         {isNavVisible ? <Header compact={compactWidth} /> : null}
+        {/* 首页的本地范围说明属于 root Chrome；“我的”根页由 Me Surface 自己渲染，避免泄漏到其详情页。 */}
+        {isNavVisible && (tab === "HOME" || tab === "MESSAGES") ? (
+          <LocationContext
+            location={currentLocation}
+            onOpenSceneMap={() => setRealitySceneOpen(true)}
+            onSwitchLocation={() => setLocationSheetOpen(true)}
+          />
+        ) : null}
         {/*
           ============================================================
           R15.34.3 — Body 横滑切页: 改用 PanResponder
@@ -433,10 +426,8 @@ export function AppShell({
           {...bodySwipePanResponder.panHandlers}
           style={styles.body}
         >
-        {otherProfile ? (
-          <OtherProfileSurface target={otherProfile} engagement={engagement} localNet={localNet} secureSessionStore={secureSessionStore} onBack={() => setOtherProfile(undefined)} onMessage={(name) => { setOtherProfile(undefined); setMessageChat({ author: name }); setTab("MESSAGES"); }} />
-        ) : realitySceneOpen ? (
-          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} secureSessionStore={secureSessionStore} onBack={() => setRealitySceneOpen(false)} />
+        {realitySceneOpen ? (
+          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} initialSceneId={realitySceneSelection} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} />
         ) : tab === "HOME" ? (
           sceneComposerTool ? (
             <SceneComposerSurface tool={sceneComposerTool} scene={scene} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
@@ -512,8 +503,6 @@ export function AppShell({
               experiences={experience}
               onCreateScene={setSceneComposerTool}
               onOpenSceneMap={() => setRealitySceneOpen(true)}
-              locationLabel={`${currentLocation.city} · ${currentLocation.area}`}
-              onSwitchLocation={() => setLocationSheetOpen(true)}
               bottomNavVisible={isNavVisible}
             />
           )
@@ -531,6 +520,7 @@ export function AppShell({
               initialTab={marketEntry.tab}
               onOpenExperience={setOpenExperience}
               onOpenActivity={() => undefined}
+              onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               bottomNavVisible={isNavVisible}
             />
           )
@@ -550,13 +540,10 @@ export function AppShell({
               mediaClient={media}
               socialSpace={socialSpace}
               secureSessionStore={secureSessionStore}
-              externalSearchQuery={globalSearchQuery}
-              // R15.63: pin 菜单 — 需 viewerAccountId 区分自己/他人
-              viewerAccountId={viewerAccountId}
               onChromeVisibilityChange={setFeedChromeVisible}
               onOpenChat={setFeedChatAuthor}
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
-              onOpenProfile={setOtherProfile}
+              onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               refreshTrigger={feedRefreshTrigger}
               bottomNavVisible={isNavVisible}
               // R15.23: sub-tab 推荐/关注 保留（initialTab）；section 动态/状态/社区 由 app-shell 控
@@ -592,8 +579,6 @@ export function AppShell({
               fulfillment={fulfillment}
               business={business}
               supply={supply}
-              engagement={engagement}
-              viewerAccountId={viewerAccountId}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,
@@ -603,13 +588,7 @@ export function AppShell({
               onOpenSwitcher={openContextSwitcher}
               onOpenFeed={() => selectTab("FEED")}
               onOpenVouchers={() => setVoucherOpen(true)}
-              onOpenRealitySceneMap={() => setRealitySceneOpen(true)}
-              onOpenSearch={(q) => {
-                // R15.93: 主页 search sheet 提交 — 跳 FEED + set globalSearchQuery,
-                //   FeedSurface useEffect 接住 + 调 localNet.listFeedPosts(q) 拉过滤后 feed.
-                selectTab("FEED");
-                setGlobalSearchQuery(q);
-              }}
+              onOpenRealitySceneMap={() => { setRealitySceneSelection(undefined); setRealitySceneOpen(true); }}
               onExperienceAction={executeExperienceAction}
               onOpenConversation={(author) => {
                 setMessageChat({ author });
@@ -691,6 +670,47 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
       <View style={styles.invitePreview}><Text style={styles.invitePreviewTitle}>对方将看到</Text><Text style={styles.invitePreviewBody}>West Lake Rooftop · 周六 16:00 · 3人已确认 · 饮品 included · 交通支持 — 你也会参加</Text><Text style={styles.invitePreviewHint}>独立同意 · 可婉拒</Text></View>
       {error ? <Text style={styles.guardWarnText}>{error}</Text> : null}
       <Pressable onPress={handleCreate} style={[styles.composerCTA, busy && {opacity:0.6}]} disabled={busy}><Text style={styles.composerCTAText}>{busy ? "创建中…" : "创建 Scene 草稿"}</Text></Pressable>
+    </View>
+  );
+}
+
+// 基线 .locationcontext：⌖ 图标块 + 城市 / 本地范围说明 + 切换⌄。
+// R15.13 P6：如果 location 是 CUSTOM (用户自定义坐标)，在副标题
+// 显示 "lat, lng · 半径 X km" — 让用户记住自己放的位置。
+function LocationContext({
+  location,
+  onOpenSceneMap,
+  onSwitchLocation
+}: {
+  location: AnyLocation;
+  onOpenSceneMap: () => void;
+  onSwitchLocation: () => void;
+}): React.JSX.Element {
+  const sub = location.kind === "CUSTOM"
+    ? (() => {
+        const { lat, lng } = gridToLatLng(location.city, location.custom.gridX, location.custom.gridY);
+        return `自定义 · ${lat.toFixed(4)}, ${lng.toFixed(4)} · 半径 ${formatRadius(location.custom.radiusMeters)}`;
+      })()
+    : "你正在看的本地范围 · 仅城市 / 区域";
+  return (
+    <View style={styles.locationRow}>
+    <Pressable
+      accessibilityLabel="打开场景地图"
+      accessibilityRole="button"
+      onPress={onOpenSceneMap}
+      style={({ pressed }) => [styles.locationMain, pressed && styles.locationRowPressed]}
+    >
+      <View style={styles.locationPin}>
+        <ProxyIcon color={color.ink} name="route" size={17} />
+      </View>
+      <View style={styles.locationCopy}>
+        <Text style={styles.locationCity}>{location.city} · {location.area}</Text>
+        <Text numberOfLines={1} style={styles.locationSub}>
+          {sub}
+        </Text>
+      </View>
+    </Pressable>
+      <Pressable accessibilityLabel="切换本地范围" accessibilityRole="button" onPress={onSwitchLocation} style={styles.locationSwitchButton}><Text style={styles.locationSwitch}>切换⌄</Text></Pressable>
     </View>
   );
 }
@@ -1058,6 +1078,31 @@ const styles = StyleSheet.create({
   headerLogoCompact: { borderRadius: 10, height: 36, width: 36 },
   headerName: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 34 },
   headerNameCompact: { fontSize: 26, lineHeight: 32 },
+  locationRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    paddingBottom: 8,
+    paddingHorizontal: 15,
+    paddingTop: 3
+  },
+  locationMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 8 },
+  locationSwitchButton: { alignItems: "center", alignSelf: "stretch", justifyContent: "center", paddingLeft: 8 },
+  // R15.13 P5：LocationContext 变成真可按 — “切换⌄” 现在真的会跳出 picker。
+  // pressed 状态给个轻微背景色，用户能看到交互发生。
+  locationRowPressed: { backgroundColor: "#F1EAF7" },
+  locationPin: {
+    alignItems: "center",
+    backgroundColor: "#F1EAF7",
+    borderRadius: 10,
+    height: 27,
+    justifyContent: "center",
+    width: 27
+  },
+  locationCopy: { flex: 1 },
+  locationCity: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
+  locationSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  locationSwitch: { color: "#6E6575", fontSize: 12, fontWeight: "800" },
   body: { flex: 1 },
   dockWrap: {
     position: "absolute",

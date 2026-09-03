@@ -93,6 +93,7 @@ export function MarketSurface({
   initialTab = "OPPORTUNITY",
   onOpenExperience,
   onOpenActivity,
+  onOpenRealityScene,
   onChromeVisibilityChange,
   bottomNavVisible
 }: {
@@ -105,6 +106,7 @@ export function MarketSurface({
   initialTab?: MarketTab;
   onOpenExperience: (experienceId: string) => void;
   onOpenActivity: (activity: Activity) => void;
+  onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
@@ -573,6 +575,7 @@ export function MarketSurface({
               busy={busy}
               onToggleInterested={() => void toggleInterest(activityDetail.activityId)}
               onJoin={() => void joinActivity(activityDetail.activityId)}
+              onOpenRealityScene={onOpenRealityScene}
               onBack={() => setActivityDetail(null)}
             />
           ) : (

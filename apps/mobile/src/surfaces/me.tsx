@@ -1319,6 +1319,7 @@ export function MeSurface({
   onOpenSwitcher: () => void;
   onOpenFeed: () => void;
   onOpenVouchers: () => void;
+  onOpenRealitySceneMap?: (() => void) | undefined;
   onExperienceAction: (action: ExperienceAction) => void;
   onOpenConversation?: (author: string) => void;
   onSignOut: () => void;
@@ -1334,7 +1335,6 @@ export function MeSurface({
   engagement?: EngagementClient; // R15.59: 关注/置顶/赞 client
   viewerAccountId?: string | undefined; // R15.59: 当前 session user ID
   onOpenSearch?: ((query: string) => void) | undefined; // R15.75: 主页搜索 sheet submit → app-shell 走 search 路径
-  onOpenRealitySceneMap?: (() => void) | undefined;
   // R15.77: AI 身份中心全屏 (R1 HTML frontstage 1:1 抄) — 独立子屏.
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
@@ -2493,6 +2493,16 @@ export function MeSurface({
                   <ProxyIcon name="plus" color="#333" size={15} />
                 </Pressable>
               </View>
+              {onOpenRealitySceneMap ? (
+                <Pressable onPress={onOpenRealitySceneMap} style={styles.personalSceneEntry}>
+                  <ProxyIcon color={color.violet} name="route" size={20} />
+                  <View style={styles.personalSceneCopy}>
+                    <Text style={styles.personalSceneTitle}>场景足迹</Text>
+                    <Text style={styles.personalSceneSub}>历史公开记录与私人计划 · 非实时位置</Text>
+                  </View>
+                  <Text style={styles.personalSceneChevron}>›</Text>
+                </Pressable>
+              ) : null}
             </View>
 
             {/* R15.66 Threads R2: bio 11px (line-height 1.48) + 链接一行 + topics pill + 12.8K 浏览 + 关注者头像堆叠 */}
@@ -3205,6 +3215,11 @@ export function MeSurface({
 }
 
 const styles = StyleSheet.create({
+  personalSceneEntry: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 16, flexDirection: "row", gap: 10, marginTop: 10, paddingHorizontal: 13, paddingVertical: 12 },
+  personalSceneCopy: { flex: 1 },
+  personalSceneTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  personalSceneSub: { color: color.muted, fontSize: 11, marginTop: 2 },
+  personalSceneChevron: { color: color.muted, fontSize: 23 },
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 18, paddingHorizontal: 15, paddingTop: 11 },
   orderPageHead: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 12 },

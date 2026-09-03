@@ -706,8 +706,8 @@ function DetectionTable(): React.JSX.Element {
             );
           })}
         </View>
-        <Pressable onPress={() => setRan(true)} style={[styles.sheetWideBtnDark, { marginTop: 9 }]} accessibilityLabel="运行检测">
-          <Text style={styles.sheetWideBtnTextDark}>运行检测</Text>
+        <Pressable onPress={() => setRan(true)} style={[styles.pActionDark, { marginTop: 9, paddingVertical: 9, borderRadius: 10 }]} accessibilityLabel="运行检测">
+          <Text style={[styles.pActionDarkText, { fontSize: 13 }]}>运行检测</Text>
         </Pressable>
       </View>
       <View style={styles.detectResult}>
@@ -961,7 +961,7 @@ const CELL_TINT: Record<CellKind, { bg: string; fg: string }> = {
   limit: { bg: "#fde68a", fg: "#b45309" }
 };
 
-function PermissionCell({ kind, suffix }: { kind: CellKind; suffix?: string }): React.JSX.Element {
+function PermissionCell({ kind, suffix }: { kind: CellKind; suffix?: string | undefined }): React.JSX.Element {
   const tint = CELL_TINT[kind];
   return (
     <View style={[styles.permCell, { backgroundColor: tint.bg }]}>

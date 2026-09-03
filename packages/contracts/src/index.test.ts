@@ -121,7 +121,7 @@ describe("AUDIO media (voice posts, ≤30s)", () => {
       }],
       media: {}
     });
-    expect(parsed.posts[0].sceneType).toBe("ROOFTOP");
+    expect(parsed.posts[0]?.sceneType).toBe("ROOFTOP");
   });
 
   it("FeedPostSchema rejects unknown sceneType (fail-closed on contract drift)", () => {

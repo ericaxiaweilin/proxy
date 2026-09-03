@@ -5,7 +5,8 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
@@ -127,10 +128,14 @@ export function FeedSurface({
   secureSessionStore,
   onOpenChat,
   onOpenFeedPrefs,
-  onOpenRealityScene,
+  onOpenProfile,
   onChromeVisibilityChange,
+  // R15.93: 外部传入 search query (主页 sheet 提交时 app-shell set 进 feed)
+  externalSearchQuery,
   refreshTrigger,
   bottomNavVisible,
+  // R15.63: 当前 session userAccountId, 用来在 feed post menu 区分自己/他人 (pin 项只对自己)
+  viewerAccountId,
   initialTab,
   currentSection,
   onSectionChange
@@ -143,8 +148,11 @@ export function FeedSurface({
   secureSessionStore?: SecureSessionStore | undefined;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
-  onOpenRealityScene?: ((sceneId: string) => void) | undefined;
+  onOpenProfile?: ((target: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]> }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
+  // R15.93: 外部传入 search query (主页 sheet 提交时 app-shell set 进 feed)
+  externalSearchQuery?: string | undefined;
+  viewerAccountId?: string | undefined;
   refreshTrigger?: number;
   bottomNavVisible?: boolean;
   // R15.22 sub-page sync (initialTab from RootNav 8-page sequence)
@@ -172,9 +180,13 @@ export function FeedSurface({
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
   const [following, setFollowing] = useState<ReadonlySet<string>>(new Set());
+  const { width: viewportWidth } = useWindowDimensions();
   const [postMenuPostId, setPostMenuPostId] = useState<string | undefined>();
   const [mutedAuthors, setMutedAuthors] = useState<ReadonlySet<string>>(new Set());
   const [postMenuError, setPostMenuError] = useState<string | undefined>();
+  // R15.63: viewer 点开自己 post 的 menu 时, 可调 engagement.pinPost
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [liked, setLiked] = useState<ReadonlySet<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
@@ -188,9 +200,34 @@ export function FeedSurface({
   const [composerQuoteId, setComposerQuoteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // R15.93: externalSearchQuery 同步 (主页 search sheet 提交时 app-shell 传).
+  //   接受后同时拉一次 listFeedPosts(q) — 刷新过滤后的 feed.
+  //   跟 local searchQuery (line 793 TextInput) 互不干扰.
+  // R15.97: externalQuery 存最近一次外部 query, 给 user 显示 '搜索: 关键字' 提示.
+  const [externalQuery, setExternalQuery] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (externalSearchQuery !== undefined && externalSearchQuery.length > 0) {
+      setExternalQuery(externalSearchQuery);
+      setSearchQuery(externalSearchQuery);
+      // R15.98: 打开 search 栏 (TextInput) — 用户能看到 search bar 已经有 query, 可编辑.
+      setSearchOpen(true);
+      // R15.93: 触发 listFeedPosts(q) 重拉
+      void localNet.listFeedPosts(undefined, 25, externalSearchQuery).then((read) => {
+        setPosts(read.posts);
+        setMedia(read.media);
+        setNextCursor(read.nextCursor);
+        setHasMore(read.hasMore === true);
+        setPhase("READY");
+      }).catch(() => undefined);
+    }
+  }, [externalSearchQuery, localNet]);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
   const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
+  // R15.69: 点头像弹 关注/访问个人主页 菜单 (R15.45 旧实现, 重启)
+  const [profileActions, setProfileActions] = useState<{ userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]>; anchor: { x: number; y: number } }>();
+  const [profileFollowing, setProfileFollowing] = useState(false);
+  const [profileFollowBusy, setProfileFollowBusy] = useState(false);
   const [selectedCustomFeed, setSelectedCustomFeed] = useState<string | null>(null);
   // X 式内联视频自动播放：滑近视口中心自动播（默认静音）、滑出即停，同一时刻仅一条在播。
   const [cardYs, setCardYs] = useState<Record<string, number>>({});
@@ -334,10 +371,9 @@ export function FeedSurface({
     } catch (error) {
       console.error("[proxy.feed] public feed load failed", error, (error as Error)?.message, (error as Error)?.stack);
       feedRetryAttemptRef.current += 1;
-      setLastFeedError(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
-      (global as any).__lastFeedError = error;
       // A transient API restart must not blank an already hydrated timeline.
       setPhase(cachedPosts.length > 0 ? "READY" : "ERROR");
+      (global as any).__lastFeedError = error;
     }
   }, [localNet]);
 
@@ -547,6 +583,29 @@ export function FeedSurface({
 
   const postMenuPost = postMenuPostId ? posts.find((p) => p.postId === postMenuPostId) : undefined;
 
+  // R15.69: 点头像弹 关注/访问个人主页 菜单 — 头像 onPress 触发, 名字 onPress 走 onOpenProfile 直接访问
+  async function openProfileActions(target: NonNullable<typeof profileActions>): Promise<void> {
+    setProfileActions(target);
+    setProfileFollowing(following.has(target.userId));
+  }
+  async function toggleProfileFollow(): Promise<void> {
+    if (!profileActions || profileFollowBusy) return;
+    setProfileFollowBusy(true);
+    try {
+      if (profileFollowing) await engagement.unfollowProfile(profileActions.userId);
+      else await engagement.followProfile(profileActions.userId);
+      const next = new Set(following);
+      if (profileFollowing) next.delete(profileActions.userId);
+      else next.add(profileActions.userId);
+      setFollowing(next);
+      setProfileFollowing(!profileFollowing);
+    } catch (error) {
+      setEngagementError(mapEngagementError(error, "关注没有提交成功, 请检查连接后重试。"));
+    } finally {
+      setProfileFollowBusy(false);
+    }
+  }
+
   async function handleReportPost(reason: PostReportReason): Promise<void> {
     if (!postMenuPost) return;
     setPostMenuError(undefined);
@@ -583,6 +642,45 @@ export function FeedSurface({
       closePostMenu();
     } catch (err) {
       setPostMenuError(err instanceof Error ? err.message : "屏蔽失败");
+    }
+  }
+
+  // R15.63: post menu 的 "置顶/取消置顶" — R15.56 PinPost endpoint 接线
+  async function handlePinPost(): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    setPinBusy(true);
+    try {
+      const result = await engagement.pinPost(postMenuPost.postId);
+      if (result === "PINNED" || result === "ALREADY_PINNED") {
+        setPinnedIds((prev) => new Set(prev).add(postMenuPost.postId));
+      }
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "置顶失败");
+    } finally {
+      setPinBusy(false);
+    }
+  }
+
+  async function handleUnpinPost(): Promise<void> {
+    if (!postMenuPost) return;
+    setPostMenuError(undefined);
+    setPinBusy(true);
+    try {
+      const result = await engagement.unpinPost(postMenuPost.postId);
+      if (result === "UNPINNED" || result === "NOT_PINNED") {
+        setPinnedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(postMenuPost.postId);
+          return next;
+        });
+      }
+      closePostMenu();
+    } catch (err) {
+      setPostMenuError(err instanceof Error ? err.message : "取消置顶失败");
+    } finally {
+      setPinBusy(false);
     }
   }
 
@@ -703,6 +801,31 @@ export function FeedSurface({
           <Text style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? selectedCustomFeed}</Text>
           <Pressable onPress={() => setSelectedCustomFeed(null)}>
             <Text style={styles.customFeedBannerAction}>退出频道</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {/* R15.97: 搜索 query banner — 主页 search sheet 提交后显示 '搜索: 关键字' 跟 '清空' 按钮.
+           跟 customFeedBanner 同视觉一致. */}
+      {externalQuery ? (
+        <View style={styles.customFeedBanner}>
+          <Text style={styles.customFeedBannerText}>搜索 · {externalQuery}</Text>
+          <Pressable
+            onPress={() => {
+              setExternalQuery(undefined);
+              setSearchQuery("");
+              // R15.98: 退出搜索时同时关 search bar (跟 setSearchOpen(true) 同步).
+              setSearchOpen(false);
+              // 重拉全 feed (无 search 过滤).
+              void localNet.listFeedPosts().then((read) => {
+                setPosts(read.posts);
+                setMedia(read.media);
+                setNextCursor(read.nextCursor);
+                setHasMore(read.hasMore === true);
+                setPhase("READY");
+              }).catch(() => undefined);
+            }}
+          >
+            <Text style={styles.customFeedBannerAction}>退出搜索</Text>
           </Pressable>
         </View>
       ) : null}
@@ -829,8 +952,16 @@ export function FeedSurface({
               style={styles.postCard}
               onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); }}
             >
-              {/* posthead — larger avatar on the compact 14pt feed edge */}
+              {/* posthead — R15.69 拆头像/名字为 2 个 Pressable:
+                  点头像 弹 关注/访问个人主页 菜单 (openProfileActions),
+                  点名字 直接访问个人主页 (onOpenProfile).
+                  之前 1 个 Pressable 包整段, 点头部任何位置都直接去主页. */}
               <View style={styles.postHead}>
+                <Pressable
+                  accessibilityLabel={`${name} 的操作`}
+                  onPress={(event) => void openProfileActions({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, anchor: { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } })}
+                  style={styles.postAvatarPressable}
+                >
                 <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatar}>
                     <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
@@ -838,7 +969,18 @@ export function FeedSurface({
                   <View style={styles.scenarioBadge}>
                     <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
                   </View>
+                  {meta.aiBadge ? (
+                    <View style={styles.aiAuthorBadge} accessibilityLabel="AI 生成">
+                      <Text style={styles.aiAuthorBadgeText}>AI</Text>
+                    </View>
+                  ) : null}
                 </View>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={`查看 ${name} 的主页`}
+                  onPress={() => onOpenProfile?.({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media })}
+                  style={styles.postIdentityPressable}
+                >
                 <View style={styles.postIdentity}>
                   <View style={styles.postNameLine}>
                     <Text style={styles.postName}>{name}</Text>
@@ -846,6 +988,7 @@ export function FeedSurface({
                   </View>
                   {meta.label ? <Text style={styles.postMeta}>{meta.label}</Text> : null}
                 </View>
+                </Pressable>
                 <Pressable
                   accessibilityLabel="更多"
                   onPress={() => openPostMenu(post.postId)}
@@ -894,9 +1037,9 @@ export function FeedSurface({
               {chips.length > 0 ? (
                 <View style={styles.contextRefs}>
                   {chips.map((entry, index) => (
-                    <Pressable disabled={entry.contextType !== "REALITY_SCENE" || !onOpenRealityScene} onPress={() => onOpenRealityScene?.(entry.contextId)} key={`${entry.contextType}_${entry.contextId}`} style={[styles.contextRef, index === 0 && styles.contextRefStrong]}>
-                      <Text style={[styles.contextRefText, index === 0 && styles.contextRefTextStrong]}>{entry.contextType === "REALITY_SCENE" ? "查看场景 ›" : entry.contextId}</Text>
-                    </Pressable>
+                    <View key={`${entry.contextType}_${entry.contextId}`} style={[styles.contextRef, index === 0 && styles.contextRefStrong]}>
+                      <Text style={[styles.contextRefText, index === 0 && styles.contextRefTextStrong]}>{entry.contextId}</Text>
+                    </View>
                   ))}
                 </View>
               ) : null}
@@ -1060,7 +1203,7 @@ export function FeedSurface({
         <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
       </Pressable>
     ) : null}
-    {/* R15.45: post menu modal (举报 / 不感兴趣 / 屏蔽作者) */}
+    {/* R15.45 + R15.63: post menu modal (举报 / 不感兴趣 / 屏蔽作者 / 置顶(仅自己)) */}
     <PostMenuModal
       open={postMenuPostId !== undefined}
       post={postMenuPost}
@@ -1069,7 +1212,25 @@ export function FeedSurface({
       onReport={handleReportPost}
       onNotInterested={handleNotInterested}
       onMuteAuthor={handleMuteAuthor}
+      isOwn={!!viewerAccountId && !!postMenuPost && postMenuPost.authorId === viewerAccountId}
+      isPinned={postMenuPost ? pinnedIds.has(postMenuPost.postId) : false}
+      pinBusy={pinBusy}
+      onPin={handlePinPost}
+      onUnpin={handleUnpinPost}
     />
+    {/* R15.69: 点头像弹 关注/访问个人主页 菜单 (双行上下排) */}
+    <Modal transparent animationType="fade" visible={profileActions !== undefined} onRequestClose={() => setProfileActions(undefined)}>
+      <Pressable onPress={() => setProfileActions(undefined)} style={styles.profileActionOverlay}>
+        <GlassContainer spacing={8} style={[styles.profileGlassContainer, { left: Math.max(12, Math.min(viewportWidth - 200, (profileActions?.anchor.x ?? 24) - 28)), top: (profileActions?.anchor.y ?? 80) + 20 }]}>
+          <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
+            <Pressable disabled={profileFollowBusy} onPress={(event) => { event.stopPropagation(); void toggleProfileFollow(); }} style={styles.profileDropPress}><Text style={styles.profileDropText}>{profileFollowBusy ? "处理中…" : profileFollowing ? "✓ 已关注" : "+ 关注"}</Text></Pressable>
+          </GlassView>
+          <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
+            <Pressable onPress={(event) => { event.stopPropagation(); const target = profileActions; setProfileActions(undefined); if (target) { const { anchor: _anchor, ...profileTarget } = target; onOpenProfile?.(profileTarget); } }} style={styles.profileDropPress}><Text style={styles.profileDropText}>访问个人主页</Text></Pressable>
+          </GlassView>
+        </GlassContainer>
+      </Pressable>
+    </Modal>
     </View>
   );
 }
@@ -1310,6 +1471,17 @@ const styles = StyleSheet.create({
   },
   // 44pt avatar + flexible identity + 32pt menu, gap 10.
   postHead: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  // R15.69: 拆头像/名字 2 个 Pressable, 头像 = 弹 关注菜单, 名字 = 直接访个人主页
+  postAvatarPressable: { alignItems: "center" },
+  postIdentityPressable: { alignItems: "flex-start", flex: 1, flexDirection: "row", gap: 10, minWidth: 0 },
+  postProfileTrigger: { alignItems: "flex-start", flex: 1, flexDirection: "row", gap: 10, minWidth: 0 },
+
+  // R15.69: 关注/访问主页 菜单 (双行上下排) — 200 宽 + 44 行高 + 24 圆角
+  profileActionOverlay: { backgroundColor: "rgba(20,18,31,0.32)", flex: 1 },
+  profileGlassContainer: { flexDirection: "column", gap: 8, position: "absolute", width: 200 },
+  profileGlassDropFull: { borderRadius: 14, height: 44, overflow: "hidden", width: 200 },
+  profileDropPress: { alignItems: "center", height: "100%", justifyContent: "center", paddingHorizontal: 12, width: "100%" },
+  profileDropText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   postAvatarWrap: { height: 44, position: "relative", width: 44 },
   postAvatar: {
     alignItems: "center",
@@ -1321,6 +1493,10 @@ const styles = StyleSheet.create({
   },
   postAvatarText: { color: color.white, fontSize: 16, fontWeight: "700" },
   scenarioBadge: { alignItems: "center", backgroundColor: color.white, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: -2, height: 20, justifyContent: "center", position: "absolute", right: -3, width: 20 },
+  // R15.76: AI 徽章 — 在头像左下角贴贴 (跟 scenarioBadge 不撞位置). 设计上 8pt
+  //   装饰文字 (R2/R3 守门免白名单: AI 徽章装饰跟 personalAvaLetter 同).
+  aiAuthorBadge: { alignItems: "center", backgroundColor: color.violet, borderColor: color.white, borderRadius: 999, borderWidth: 2, bottom: -2, height: 16, justifyContent: "center", left: -3, position: "absolute", width: 22 },
+  aiAuthorBadgeText: { color: color.white, fontSize: 9, fontWeight: "800", lineHeight: 11 },
   engagementError: { color: color.magenta, fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   engagementNotice: { color: "#53651A", fontSize: 11, marginBottom: 8, paddingHorizontal: 2 },
   postIdentity: { flex: 1, minWidth: 0 },
@@ -1566,9 +1742,15 @@ type PostMenuModalProps = {
   onReport: (reason: PostReportReason) => Promise<void> | void;
   onNotInterested: () => Promise<void> | void;
   onMuteAuthor: () => Promise<void> | void;
+  // R15.63: viewer 是 post 作者本人时显示置顶项 (R15.56 endpoint 接线)
+  isOwn?: boolean | undefined;
+  isPinned?: boolean | undefined;
+  pinBusy?: boolean | undefined;
+  onPin?: (() => Promise<void> | void) | undefined;
+  onUnpin?: (() => Promise<void> | void) | undefined;
 };
 
-function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, onMuteAuthor }: PostMenuModalProps): React.JSX.Element {
+function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, onMuteAuthor, isOwn, isPinned, pinBusy, onPin, onUnpin }: PostMenuModalProps): React.JSX.Element {
   const [showReportReasons, setShowReportReasons] = useState(false);
   if (!open) return <View />;
   return (
@@ -1601,6 +1783,19 @@ function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, 
                   <Text style={postMenuStyles.rowHint}>不再看 Ta 的任何内容</Text>
                 </View>
               </Pressable>
+              {isOwn ? (
+                <Pressable
+                  disabled={pinBusy}
+                  onPress={() => { if (isPinned) { void onUnpin?.(); } else { void onPin?.(); } }}
+                  style={postMenuStyles.row}
+                >
+                  <Text style={postMenuStyles.rowIcon}>{isPinned ? "📍" : "📌"}</Text>
+                  <View style={postMenuStyles.rowCopy}>
+                    <Text style={postMenuStyles.rowTitle}>{isPinned ? "取消置顶" : "置顶到个人主页"}</Text>
+                    <Text style={postMenuStyles.rowHint}>{isPinned ? "在个人主页不再置顶显示" : "在个人主页顶部显示（最多 3 篇）"}</Text>
+                  </View>
+                </Pressable>
+              ) : null}
               <Pressable onPress={onClose} style={postMenuStyles.cancel}>
                 <Text style={postMenuStyles.cancelText}>取消</Text>
               </Pressable>

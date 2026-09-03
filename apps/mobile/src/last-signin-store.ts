@@ -27,6 +27,7 @@ export type LastSignIn = {
   channel: LastSignInChannel;
   identifier: string;
   signedInAt: string;
+  userAccountId?: string;
 };
 
 export type LastSignInStore = {
@@ -42,7 +43,8 @@ function isLastSignIn(value: unknown): value is LastSignIn {
     (v.channel === "EMAIL" || v.channel === "SMS") &&
     typeof v.identifier === "string" &&
     v.identifier.length > 0 &&
-    typeof v.signedInAt === "string"
+    typeof v.signedInAt === "string" &&
+    (v.userAccountId === undefined || (typeof v.userAccountId === "string" && v.userAccountId.length > 0))
   );
 }
 

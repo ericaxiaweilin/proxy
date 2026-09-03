@@ -111,58 +111,27 @@ export class SessionAuthClient {
     let current: StoredSession | undefined;
     try {
       current = await this.input.secureSessionStore.read();
-    } catch {
-      current = undefined;
-    }
-    // R15.38.6 DEBUG
-    if (typeof __DEV__ !== "undefined" && __DEV__) {
-      // eslint-disable-next-line no-console
-      console.log(`[proxy.R15.38.6.DEBUG.signOut] enter current=${current ? "present" : "absent"} current.signedOut=${current?.signedOut ?? "absent"}`);
-    }
-    // R15.39: signOut 改为 "soft sign out" — 留 session 在 keychain 里
-    //   (refreshToken 还在), 加 signedOut=true + signedOutAt 锁定状态。
-    //   这样下次用户点 “继续” 可以走 silent re-auth (用 refreshToken
-    //   拿新 accessToken, 不用走 OTP)。
-    //   普通退出只锁定本机，不撤销服务端 refresh token。否则历史账户
-    //   的“继续”按钮不可能静默恢复。彻底撤销会话应由独立的
-    //   “移除此账户 / 退出所有设备”动作执行。
-    if (current) {
-      // 本地清 accessToken + 锁定状态, 写回 keychain。
-      // 不调用 clear() — refreshToken 要保留, silent re-auth 要用。
-      const nowIso = new Date((this.input.now ?? (() => new Date()))()).toISOString();
-      const signedOutSession: StoredSession = {
-        ...current,
-        auth: {
-          ...current.auth,
-          // accessToken 置为 “revoked” — 不能用 valid 格式绕过 isSessionAuthTokens
-          //   (accessToken 要求非空)。这个 placeholder 不会走任何 server 命令
-          //   — 任何走 authClient 的调用都会因为 isValidAccessToken 失败而转去
-          //   refreshToken 路径, 而 refreshToken 路径才能被 silent re-auth 复用。
-          // refreshToken 不动, 留给 silent re-auth。
-          accessToken: "revoked"
-        },
-        signedOut: true,
-        signedOutAt: nowIso
-      };
-      try {
-        await this.input.secureSessionStore.write(signedOutSession);
-        if (typeof __DEV__ !== "undefined" && __DEV__) {
-          // eslint-disable-next-line no-console
-          console.log(`[proxy.R15.38.6.DEBUG.signOut] write signedOut=true succeeded, refreshExpiresAt=${signedOutSession.auth.refreshExpiresAt}`);
-        }
-      } catch (writeErr) {
-        // 如果 keychain 写入失败 (e.g. refreshToken 过期), 最后手段是
-        // 真正清掉, 避免后面 restoreNativeShell 又拿这个失效的 session 走
-        // restore 逻辑。
-        if (typeof __DEV__ !== "undefined" && __DEV__) {
-          // eslint-disable-next-line no-console
-          console.log(`[proxy.R15.38.6.DEBUG.signOut] write FAILED err=${writeErr instanceof Error ? writeErr.message : String(writeErr)}, falling back to clear()`);
-        }
-        await this.input.secureSessionStore.clear().catch(() => undefined);
+      if (current && current.serverSession !== false) {
+        await this.send("/v1/commands/RevokeSession", {
+          method: "POST",
+          body: {
+            commandId: this.nextCommandId("signout"),
+            commandType: "RevokeSession",
+            commandVersion: 1,
+            actor: { type: "USER", id: current.userAccountId },
+            principal: current.principal ?? current.auth.principal,
+            target: { type: "Session", id: current.auth.sessionId },
+            idempotencyKey: this.nextCommandId("idem"),
+            authContext: { sessionId: current.auth.sessionId },
+            purpose: "user_sign_out",
+            correlationId: this.nextCommandId("corr"),
+            requestedAt: (this.input.now ?? (() => new Date()))().toISOString(),
+            payload: { reason: "USER_LOGOUT" }
+          }
+        }, current.auth.accessToken).catch(() => undefined);
       }
-    } else {
-      // 本来就没有 session (双重 signOut / 升级迁移), 确保 keychain 干净。
-      await this.input.secureSessionStore.clear().catch(() => undefined);
+    } finally {
+      await this.input.secureSessionStore.clear();
     }
   }
 
@@ -216,7 +185,17 @@ export class SessionAuthClient {
       throw new SessionRefreshUnavailableError(response.status);
     }
     const auth = parseSessionAuthTokens(isRecord(body) ? body.auth : undefined);
-    if (response.status === 401 || response.status === 403) {
+    const errorCode = isRecord(body) && isRecord(body.error) && typeof body.error.errorCode === "string"
+      ? body.error.errorCode
+      : undefined;
+    if (
+      response.status === 401 ||
+      response.status === 403 ||
+      errorCode === "REFRESH_TOKEN_INVALID" ||
+      errorCode === "REFRESH_TOKEN_ALREADY_USED" ||
+      errorCode === "DEVICE_PROOF_INVALID" ||
+      errorCode === "SESSION_NOT_USABLE"
+    ) {
       await this.input.secureSessionStore.clear();
       throw new SessionExpiredError();
     }
