@@ -703,6 +703,8 @@ func (s *Service) switchPrincipalContext(ctx context.Context, e command.Envelope
 	if err != nil {
 		return command.Rejected(e, "IDENTITY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.read_failed", nil)
 	}
+	// Save original version before sessionUsable may mutate it
+	originalVersion := session.Version
 	if session.UserAccountID != e.Actor.ID || !s.sessionUsable(ctx, &session) {
 		return command.Rejected(e, "SESSION_NOT_USABLE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.session_not_usable", nil)
 	}
@@ -713,7 +715,7 @@ func (s *Service) switchPrincipalContext(ctx context.Context, e command.Envelope
 	if !allowed {
 		return command.Rejected(e, "PRINCIPAL_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.principal_not_allowed", nil)
 	}
-	if *e.ExpectedAggregateVersion != session.Version {
+	if *e.ExpectedAggregateVersion != originalVersion {
 		return command.Rejected(e, "SESSION_VERSION_CONFLICT", "CONCURRENCY", "SAFE_RETRY", "identity.session_version_conflict", map[string]any{"expectedVersion": *e.ExpectedAggregateVersion, "actualVersion": session.Version})
 	}
 	previousVersion := session.Version
