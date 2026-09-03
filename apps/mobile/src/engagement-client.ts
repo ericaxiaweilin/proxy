@@ -121,29 +121,56 @@ export class EngagementClient {
 
   // R15.56 — ListPinnedPosts: 返 { ownerId, postIds, count }
   public async listPinnedPosts(ownerId: string): Promise<PinnedPostsList> {
-    const result = await this.command("ListPinnedPosts", { type: "Profile", id: ownerId }, { ownerId });
-    if (!result.operationRef) {
-      throw new EngagementProtocolError("listPinnedPosts response missing operationRef");
+    // R16.0: server 5xx fallback 返空 list (engagement.post_pins 表未建, commander 域).
+    try {
+      const result = await this.command("ListPinnedPosts", { type: "Profile", id: ownerId }, { ownerId });
+      if (!result.operationRef) {
+        throw new EngagementProtocolError("listPinnedPosts response missing operationRef");
+      }
+      return parsePinnedPostsList(JSON.parse(result.operationRef));
+    } catch (err) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.log(`[proxy.R16.0.fallback.engagement] listPinnedPosts fallback []: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return { ownerId, postIds: [], count: 0 };
     }
-    return parsePinnedPostsList(JSON.parse(result.operationRef));
   }
 
   // R15.61 — ListUserReplies: 返 user 全部 reply 帖 (含父 post 上下文)
   public async listUserReplies(userId: string, limit?: number): Promise<UserRepliesList> {
-    const result = await this.command("ListUserReplies", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
-    if (!result.operationRef) {
-      throw new EngagementProtocolError("listUserReplies response missing operationRef");
+    // R16.0: server 5xx fallback 返空 list.
+    try {
+      const result = await this.command("ListUserReplies", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
+      if (!result.operationRef) {
+        throw new EngagementProtocolError("listUserReplies response missing operationRef");
+      }
+      return parseUserRepliesList(JSON.parse(result.operationRef));
+    } catch (err) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.log(`[proxy.R16.0.fallback.engagement] listUserReplies fallback []: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return { userId, replies: [], count: 0 };
     }
-    return parseUserRepliesList(JSON.parse(result.operationRef));
   }
 
   // R15.62 — ListUserBookmarks: 返 user 全部 bookmark post IDs
   public async listUserBookmarks(userId: string, limit?: number): Promise<UserBookmarksList> {
-    const result = await this.command("ListUserBookmarks", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
-    if (!result.operationRef) {
-      throw new EngagementProtocolError("listUserBookmarks response missing operationRef");
+    // R16.0: server 5xx fallback 返空 list.
+    try {
+      const result = await this.command("ListUserBookmarks", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
+      if (!result.operationRef) {
+        throw new EngagementProtocolError("listUserBookmarks response missing operationRef");
+      }
+      return parseUserBookmarksList(JSON.parse(result.operationRef));
+    } catch (err) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.log(`[proxy.R16.0.fallback.engagement] listUserBookmarks fallback []: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return { userId, bookmarks: [], count: 0 };
     }
-    return parseUserBookmarksList(JSON.parse(result.operationRef));
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {
