@@ -1,54 +1,46 @@
 import { describe, expect, it } from "vitest";
+import type { Transport, TransportRequest, TransportResponse } from "./auth-client";
 import {
   ALLOWED_DURATION_SECONDS,
   type LocationConsent,
   LocationConsentClient,
   LocationConsentError,
-  fetchTransport,
   formatRemaining,
   isActiveConsent,
+  resolveLocationConsentClient,
 } from "./location-consent-client";
 
-// The transport is a function pair. We hand-roll a stub here
-// rather than pulling in msw because the client only needs to
-// observe path / method / body.
-function makeStubTransport(responses: Array<{
-  match: (path: string, method: string, body: any) => boolean;
+interface StubResponse extends TransportResponse {
   status: number;
   body: any;
-}>) {
-  return {
-    async get<T>(path: string, token: string): Promise<T> {
-      for (const r of responses) {
-        if (r.match(path, "GET", undefined)) {
-          return finalize<T>(r, token);
-        }
-      }
-      throw new Error(`no stub for GET ${path}`);
-    },
-    async post<T>(path: string, token: string, body: any): Promise<T> {
-      for (const r of responses) {
-        if (r.match(path, "POST", body)) {
-          return finalize<T>(r, token);
-        }
-      }
-      throw new Error(`no stub for POST ${path}`);
-    },
+}
+
+function makeStub(responses: Array<{
+  match: (req: TransportRequest) => boolean;
+  response: StubResponse;
+}>): Transport {
+  return async (req: TransportRequest): Promise<TransportResponse> => {
+    for (const r of responses) {
+      if (r.match(req)) return r.response;
+    }
+    throw new Error(`no stub for ${req.method} ${req.url}`);
   };
 }
 
-async function finalize<T>(r: { status: number; body: any }, token: string): Promise<T> {
-  if (r.status >= 400) {
-    throw new LocationConsentError(
-      (r.body && r.body.errorCode) || "stub_error",
-      `stub ${r.status}`,
-      r.status,
-    );
-  }
-  if (!token) {
-    throw new Error("token required");
-  }
-  return r.body as T;
+function okResponse(body: any, status = 200): StubResponse {
+  return {
+    status,
+    body,
+    json: async () => body,
+  };
+}
+
+function errorResponse(body: any, status: number): StubResponse {
+  return {
+    status,
+    body,
+    json: async () => body,
+  };
 }
 
 describe("LocationConsentClient", () => {
@@ -59,12 +51,10 @@ describe("LocationConsentClient", () => {
   it("rejects grant() with a duration outside the allowed set", async () => {
     const client = new LocationConsentClient({
       baseUrl: "https://api.example/v1",
-      transport: makeStubTransport([]),
+      transport: makeStub([]),
     });
-    await expect(client.grant("token-1", 60)).rejects.toBeInstanceOf(
-      LocationConsentError,
-    );
-    await expect(client.grant("token-1", 99999)).rejects.toMatchObject({
+    await expect(client.grant(60)).rejects.toBeInstanceOf(LocationConsentError);
+    await expect(client.grant(99999)).rejects.toMatchObject({
       code: "INVALID_DURATION",
     });
   });
@@ -78,23 +68,24 @@ describe("LocationConsentClient", () => {
       remainingSeconds: 28790,
       durationSeconds: 28800,
     };
+    const transport = makeStub([
+      {
+        match: (req) =>
+          req.method === "GET" &&
+          req.url === "https://api.example/v1/location/consent",
+        response: okResponse(consent),
+      },
+    ]);
     const client = new LocationConsentClient({
       baseUrl: "https://api.example/v1",
-      transport: makeStubTransport([
-        {
-          match: (path, method) =>
-            method === "GET" && path === "https://api.example/v1/location/consent",
-          status: 200,
-          body: consent,
-        },
-      ]),
+      transport,
     });
-    const got = await client.getStatus("token-1");
+    const got = await client.getStatus();
     expect(got).toEqual(consent);
   });
 
   it("grant() POSTs to /grant with the duration in the body", async () => {
-    const captured: Array<{ path: string; body: any }> = [];
+    const captured: TransportRequest[] = [];
     const consent: LocationConsent = {
       kind: "PRECISE_GPS",
       status: "GRANTED",
@@ -103,60 +94,53 @@ describe("LocationConsentClient", () => {
       remainingSeconds: 1800,
       durationSeconds: 1800,
     };
-    const transport = {
-      async get<T>(): Promise<T> {
-        throw new Error("not used");
-      },
-      async post<T>(path: string, _token: string, body: any): Promise<T> {
-        captured.push({ path, body });
-        return consent as T;
-      },
+    const transport: Transport = async (req) => {
+      captured.push(req);
+      return okResponse(consent);
     };
     const client = new LocationConsentClient({
       baseUrl: "https://api.example/v1",
       transport,
     });
-    const got = await client.grant("token-1", 1800);
+    const got = await client.grant(1800);
     expect(captured).toEqual([
       {
-        path: "https://api.example/v1/location/consent/grant",
-        body: { durationSeconds: 1800 },
+        method: "POST",
+        url: "https://api.example/v1/location/consent/grant",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ durationSeconds: 1800 }),
       },
     ]);
     expect(got.durationSeconds).toBe(1800);
   });
 
-  it("revoke() POSTs to /revoke with an empty body", async () => {
-    let called = false;
-    const transport = {
-      async get<T>(): Promise<T> {
-        throw new Error("not used");
-      },
-      async post<T>(path: string, _token: string, body: any): Promise<T> {
-        expect(path).toBe("https://api.example/v1/location/consent/revoke");
-        // The client passes null when the caller does not provide
-        // a body, which is what fetch wants for a body-less POST.
-        expect(body).toBeNull();
-        called = true;
-        return { kind: "PRECISE_GPS", status: "REVOKED", wasActive: true } as T;
-      },
+  it("revoke() POSTs to /revoke with no body", async () => {
+    let captured: TransportRequest | undefined;
+    const transport: Transport = async (req) => {
+      captured = req;
+      return okResponse({ kind: "PRECISE_GPS", status: "REVOKED", wasActive: true });
     };
     const client = new LocationConsentClient({
       baseUrl: "https://api.example/v1",
       transport,
     });
-    const result = await client.revoke("token-1");
-    expect(called).toBe(true);
+    const result = await client.revoke();
+    expect(captured?.url).toBe("https://api.example/v1/location/consent/revoke");
+    expect(captured?.method).toBe("POST");
+    expect(captured?.body).toBeUndefined();
     expect(result.wasActive).toBe(true);
   });
 
   it("history() GETs /consent/history and returns the rows array", async () => {
-    const transport = makeStubTransport([
+    const transport = makeStub([
       {
-        match: (path, method) =>
-          method === "GET" && path === "https://api.example/v1/location/consent/history",
-        status: 200,
-        body: {
+        match: (req) =>
+          req.method === "GET" &&
+          req.url === "https://api.example/v1/location/consent/history",
+        response: okResponse({
           rows: [
             {
               kind: "PRECISE_GPS",
@@ -167,28 +151,63 @@ describe("LocationConsentClient", () => {
               durationSeconds: 28800,
             },
           ],
-        },
+        }),
       },
     ]);
     const client = new LocationConsentClient({
       baseUrl: "https://api.example/v1",
       transport,
     });
-    const got = await client.history("token-1");
-    expect(got.rows!.length).toBe(1);
-    expect(got.rows![0]!.durationSeconds).toBe(28800);
+    const got = await client.history();
+    expect(got.rows).toHaveLength(1);
+    expect(got.rows[0]?.durationSeconds).toBe(28800);
   });
 
   it("trims trailing slashes from baseUrl", async () => {
+    const transport = makeStub([
+      {
+        match: (req) =>
+          req.method === "GET" &&
+          req.url === "https://api.example/v1/location/consent",
+        response: okResponse({ kind: "PRECISE_GPS", status: "NONE", remainingSeconds: 0, durationSeconds: 0 }),
+      },
+    ]);
     const client = new LocationConsentClient({
       baseUrl: "https://api.example/v1////",
-      transport: fetchTransport,
+      transport,
     });
-    // No public way to read baseUrl, but we can assert the
-    // grant() validation surfaces a 400 (not a fetch error) by
-    // sending a bad duration. This proves the client constructed
-    // without throwing on the weird baseUrl.
-    await expect(client.grant("t", 60)).rejects.toBeInstanceOf(LocationConsentError);
+    const got = await client.getStatus();
+    expect(got.status).toBe("NONE");
+  });
+
+  it("wraps a 4xx response in LocationConsentError with the server code", async () => {
+    const transport = makeStub([
+      {
+        match: () => true,
+        response: errorResponse(
+          { errorCode: "INVALID_LOCATION_CONSENT_DURATION", message: "bad duration" },
+          400,
+        ),
+      },
+    ]);
+    const client = new LocationConsentClient({
+      baseUrl: "https://api.example/v1",
+      transport,
+    });
+    await expect(client.grant(1800)).rejects.toMatchObject({
+      code: "INVALID_LOCATION_CONSENT_DURATION",
+      httpStatus: 400,
+    });
+  });
+
+  it("resolveLocationConsentClient builds a usable client", async () => {
+    const transport: Transport = async (req) => {
+      expect(req.url).toBe("https://api.example/v1/location/consent");
+      return okResponse({ kind: "PRECISE_GPS", status: "NONE", remainingSeconds: 0, durationSeconds: 0 });
+    };
+    const client = resolveLocationConsentClient({ baseUrl: "https://api.example/v1", transport });
+    const got = await client.getStatus();
+    expect(got.status).toBe("NONE");
   });
 });
 

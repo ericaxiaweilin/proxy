@@ -8,8 +8,13 @@
 //   - components/precise-location-toggle.tsx (a switch in me.tsx)
 //   - hooks/useLocationConsent.ts (when one is introduced)
 //
-// The transport is an injectable function. The default uses the
-// global fetch; tests pass a stub that returns canned responses.
+// The transport is the same shape used by auth-client /
+// privacy-client: a function that takes a TransportRequest and
+// returns a TransportResponse. The caller wires the auth-aware
+// native transport (native-clients.ts) so the client never has
+// to know about access tokens.
+
+import type { Transport, TransportRequest, TransportResponse } from "./auth-client";
 
 export type LocationConsentKind = "PRECISE_GPS";
 
@@ -56,85 +61,26 @@ export class LocationConsentError extends Error {
   }
 }
 
-export interface LocationConsentTransport {
-  get<T>(path: string, accessToken: string): Promise<T>;
-  post<T>(path: string, accessToken: string, body?: unknown): Promise<T>;
-}
-
-// fetchTransport is the default transport. It uses the global
-// fetch and the standard Authorization header. Tests can replace
-// it via the LocationConsentClient constructor.
-export const fetchTransport: LocationConsentTransport = {
-  async get(path, accessToken) {
-    const res = await fetch(path, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
-    });
-    return parseResponse(res);
-  },
-  async post(path, accessToken, body) {
-    const res = await fetch(path, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: body == null ? null : JSON.stringify(body),
-    });
-    return parseResponse(res);
-  },
-};
-
-async function parseResponse(res: Response): Promise<any> {
-  const text = await res.text();
-  let json: any = null;
-  if (text.length > 0) {
-    try {
-      json = JSON.parse(text);
-    } catch {
-      // Non-JSON error bodies are still surfaced as errors below.
-    }
-  }
-  if (!res.ok) {
-    const code =
-      (json && (json.errorCode || json.error || json.code)) || "unknown_error";
-    throw new LocationConsentError(
-      String(code),
-      `HTTP ${res.status}: ${text.slice(0, 200)}`,
-      res.status,
-    );
-  }
-  return json;
-}
-
 export interface LocationConsentClientOptions {
   baseUrl: string;
-  transport?: LocationConsentTransport;
+  transport: Transport;
 }
 
-// LocationConsentClient is the mobile-side wrapper for the
-// server's precise-location consent endpoints. The baseUrl is
-// typically the same as the rest of the API (e.g.
-// https://api.proxy.example/v1).
 export class LocationConsentClient {
   private readonly baseUrl: string;
-  private readonly transport: LocationConsentTransport;
+  private readonly transport: Transport;
 
   constructor(opts: LocationConsentClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
-    this.transport = opts.transport ?? fetchTransport;
+    this.transport = opts.transport;
   }
 
   // getStatus fetches the current consent for the authenticated
   // user. When the user has never granted consent, the server
   // returns status=NONE with empty timestamps.
-  async getStatus(accessToken: string): Promise<LocationConsent> {
+  async getStatus(): Promise<LocationConsent> {
     const path = `${this.baseUrl}/location/consent`;
-    return await this.transport.get<LocationConsent>(path, accessToken);
+    return await this.request<LocationConsent>("GET", path);
   }
 
   // grant opts the user in. The durationSeconds must be one of
@@ -143,10 +89,7 @@ export class LocationConsentClient {
   // not allowed at the API surface (the server uses 0 to mean
   // "use the default" internally, but the mobile client must
   // pick explicitly).
-  async grant(
-    accessToken: string,
-    durationSeconds: number,
-  ): Promise<LocationConsent> {
+  async grant(durationSeconds: number): Promise<LocationConsent> {
     if (!ALLOWED_DURATION_SECONDS.includes(durationSeconds)) {
       throw new LocationConsentError(
         "INVALID_DURATION",
@@ -155,7 +98,7 @@ export class LocationConsentClient {
       );
     }
     const path = `${this.baseUrl}/location/consent/grant`;
-    return await this.transport.post<LocationConsent>(path, accessToken, {
+    return await this.request<LocationConsent>("POST", path, {
       durationSeconds,
     });
   }
@@ -163,26 +106,62 @@ export class LocationConsentClient {
   // revoke immediately flips the active grant to REVOKED. If no
   // grant is active, the response still succeeds with
   // wasActive=false — the operation is idempotent.
-  async revoke(accessToken: string): Promise<LocationConsentRevokeResult> {
+  async revoke(): Promise<LocationConsentRevokeResult> {
     const path = `${this.baseUrl}/location/consent/revoke`;
-    return await this.transport.post<LocationConsentRevokeResult>(
-      path,
-      accessToken,
-      null,
-    );
+    return await this.request<LocationConsentRevokeResult>("POST", path);
   }
 
   // history returns the full audit trail for the user, newest
   // first. Used by the privacy center card.
-  async history(
-    accessToken: string,
-  ): Promise<{ rows: LocationConsentHistoryRow[] }> {
+  async history(): Promise<{ rows: LocationConsentHistoryRow[] }> {
     const path = `${this.baseUrl}/location/consent/history`;
-    return await this.transport.get<{ rows: LocationConsentHistoryRow[] }>(
-      path,
-      accessToken,
+    return await this.request<{ rows: LocationConsentHistoryRow[] }>("GET", path);
+  }
+
+  private async request<T>(
+    method: "GET" | "POST" | "PUT" | "DELETE",
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+    const req: TransportRequest = body === undefined
+      ? { method, url: path, headers }
+      : { method, url: path, headers, body: JSON.stringify(body) };
+    const res: TransportResponse = await this.transport(req);
+    return parseResponse<T>(res);
+  }
+}
+
+async function parseResponse<T>(res: TransportResponse): Promise<T> {
+  const raw = await res.json().catch(() => null);
+  if (res.status >= 400) {
+    const code =
+      (raw && typeof raw === "object" && (raw as any).errorCode) ||
+      (raw && typeof raw === "object" && (raw as any).error) ||
+      "unknown_error";
+    throw new LocationConsentError(
+      String(code),
+      `HTTP ${res.status}`,
+      res.status,
     );
   }
+  return raw as T;
+}
+
+// resolveLocationConsentClient builds a LocationConsentClient
+// from the same inputs the rest of the app uses (auth-aware
+// transport, baseUrl). Mirrors resolvePrivacyRequestClient.
+export function resolveLocationConsentClient(input: {
+  baseUrl: string;
+  transport: Transport;
+}): LocationConsentClient {
+  return new LocationConsentClient({
+    baseUrl: input.baseUrl,
+    transport: input.transport,
+  });
 }
 
 // isActiveConsent returns true when the consent object represents

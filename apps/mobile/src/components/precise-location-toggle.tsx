@@ -15,10 +15,12 @@ import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "re
 import { color } from "../theme";
 import {
   ALLOWED_DURATION_SECONDS,
-  formatRemaining,
   isActiveConsent,
+  labelForDuration,
+  summariseConsent,
   type LocationConsent,
-} from "../location-consent-client";
+  type ToggleLocale,
+} from "./precise-location-toggle-helpers";
 
 export type PreciseLocationToggleProps = {
   // The current consent state. null = loading or unknown.
@@ -33,7 +35,7 @@ export type PreciseLocationToggleProps = {
   // The most recent error, if any. Cleared on the next render.
   errorMessage?: string;
   // Locale for the remaining-time string. Defaults to "vi".
-  locale?: "vi" | "zh";
+  locale?: ToggleLocale;
 };
 
 export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.JSX.Element {
@@ -52,6 +54,11 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
     }
     return 0;
   }, [consent, active]);
+
+  const summary = useMemo(
+    () => summariseConsent(consent, Date.now(), locale),
+    [consent, locale],
+  );
 
   const handleToggle = (next: boolean) => {
     if (busy) return;
@@ -102,11 +109,7 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
       <View style={styles.headerRow}>
         <View style={styles.headerText}>
           <Text style={styles.title}>Vị trí chính xác</Text>
-          <Text style={styles.subtitle}>
-            {active
-              ? `Đang bật · ${formatRemaining(remaining, locale)}`
-              : "Đang tắt"}
-          </Text>
+          <Text style={styles.subtitle}>{summary}</Text>
         </View>
         {busy ? (
           <ActivityIndicator color={color.ink} />
@@ -128,17 +131,7 @@ export function PreciseLocationToggle(props: PreciseLocationToggleProps): React.
   );
 }
 
-function labelForDuration(seconds: number, locale: "vi" | "zh"): string {
-  if (seconds === 30 * 60) {
-    return locale === "vi" ? "30 phút" : "30 分钟";
-  }
-  if (seconds === 8 * 60 * 60) {
-    return locale === "vi" ? "8 giờ" : "8 小时";
-  }
-  // Fallback for unexpected values; should never fire because
-  // the client validates against ALLOWED_DURATION_SECONDS.
-  return `${Math.round(seconds / 60)}m`;
-}
+function _unusedLocaleRef(locale: ToggleLocale): ToggleLocale { return locale; }
 
 const styles = StyleSheet.create({
   card: {

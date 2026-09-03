@@ -25,6 +25,8 @@ import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
 import { ThreadsPostMedia } from "../components/threads-post-media";
 import { SecuritySettings } from "../components/security-settings";
 import { PrivacySettings } from "../components/privacy-settings";
+import { PreciseLocationCard } from "../components/precise-location-card";
+import { resolveLocationConsentClient } from "../location-consent-client";
 import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
@@ -784,6 +786,9 @@ export function MeSurface({
             </Text>
             <PrivacySettings
               client={resolvePrivacyRequestClient({ baseUrl: localApiBaseUrl, transport: nativeTransport })}
+            />
+            <PreciseLocationCard
+              client={resolveLocationConsentClient({ baseUrl: localApiBaseUrl, transport: nativeTransport })}
             />
           </ScrollView>
         </View>
