@@ -1,0 +1,19 @@
+#!/bin/bash
+# R16.11: pre-commit hook. Runs the fast subset of the gate matrix:
+# G1 (build) and G2 (tests). G3 (live e2e) and G4 (drift) are
+# slower and are deferred to pre-push, where the operator has more
+# context to react to a failure.
+#
+# This script is installed automatically by scripts/install-hooks.sh
+# via `git config core.hooksPath .githooks`. If you want to bypass
+# the hook temporarily (e.g. to commit a work-in-progress that you
+# know does not yet pass the gates), use `git commit --no-verify`.
+
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+echo "[pre-commit] running gate g1 (build)"
+bash scripts/gate.sh g1
+
+echo "[pre-commit] running gate g2 (tests)"
+bash scripts/gate.sh g2
