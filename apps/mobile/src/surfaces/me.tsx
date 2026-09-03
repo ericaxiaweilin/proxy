@@ -444,11 +444,14 @@ const REQUESTER_ME: PersonaConfig = {
   contextLineAction: "切换为商家",
   sections: [
     {
+      // R16.7: 个人总管理 = 1 个 subPage 含 3 段 (基本信息 / 二维码 / 状态管理).
+      // 个人主页 (personalhub) 是对外展示页, 走 Threads R2 R1:1 抄, 不放二维码/状态管理.
       id: "personal_profile",
-      title: "个人主页",
-      hint: "你掌控展示方式",
+      title: "个人总管理",
+      hint: "基本信息、二维码、状态管理在一个页里",
       rows: [
-        { icon: "profile-ring", label: "个人主页", desc: "名片、关于我、能力、可用时间与对外展示", grad: true, route: "personalhub" },
+        { icon: "profile-ring", label: "个人总管理", desc: "基本信息 · 二维码 · 状态管理 (可接单)", grad: true, route: "personalmanage" },
+        { icon: "profile-ring", label: "个人主页", desc: "对外展示 · Threads R2 · 名片、动态、能力、可用时间", route: "personalhub" },
         { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
         { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" }
       ]
@@ -962,6 +965,28 @@ const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; icon: stri
     icon: "✓"
   },
   // R15.12.7 最终 Me：个人主页（R15.9 Personal Social OS）+ 关系（R15.10 Messaging）。
+  personalmanage: {
+    title: "个人总管理",
+    desc: "基本信息、二维码、状态管理。个人主页走 Threads R2 对外展示。",
+    icon: "profile-ring",
+    sections: [
+      { title: "段 1 基本信息", rows: [
+        { label: "头像", value: "点换头像" },
+        { label: "名字", value: "Proxy 主页顶部" },
+        { label: "handle", value: "Proxy 主页 / 消息来源" },
+        { label: "城市", value: "决定发现与机会分发" }
+      ]},
+      { title: "段 2 二维码", rows: [
+        { label: "Proxy QR", value: "扫码先看 Proxy 主页" },
+        { label: "可见范围", value: "TikTok 公开 · Zalo 合作后 · Instagram 公开" }
+      ]},
+      { title: "段 3 状态管理", rows: [
+        { label: "可接单", value: "进入人物发现与合适机会分发" },
+        { label: "繁忙", value: "暂不接收新机会, 已谈可继续" },
+        { label: "暂离", value: "不出现在人物发现, 已谈暂停" }
+      ]}
+    ]
+  },
   personalhub: {
     title: "个人主页",
     desc: "把个人状态、Proxy 信誉、外部社媒和二维码放进一个用户可控的个人中枢。",
@@ -2305,6 +2330,78 @@ export function MeSurface({
       );
     }
 
+    // R16.7: 个人总管理 = 1 个 subPage 含 3 段 (基本信息 / 二维码 / 状态管理).
+    // 个人主页 (personalhub) 是对外 Threads R2 抄, 不放二维码/状态管理 — user 反馈.
+    if (subPage.route === "personalmanage") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>个人总管理</Text>
+            <Text style={styles.subPageSub}>基本信息、二维码、状态管理都集中在这里。</Text>
+
+            {/* 段 1: 基本信息 — 头像 / 名字 / handle / 城市 / 简介 */}
+            <Text style={styles.customSectionTitle}>基本信息</Text>
+            <Text style={styles.customSectionHint}>公开主页展示</Text>
+            <View style={styles.profileManageRow}>
+              <View style={styles.profileManageAva}>
+                {profileAvatarUri ? <Image source={{ uri: profileAvatarUri }} style={styles.profileManageAvaImg} /> : <Text style={styles.profileManageAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
+              </View>
+              <View style={styles.profileManageCopy}>
+                <Text style={styles.profileManageName}>{profileDraft.name}</Text>
+                <Text style={styles.profileManageHandle}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
+                <Text style={styles.profileManageCity}>已验证 · 准时 98%</Text>
+              </View>
+              <Pressable accessibilityLabel="编辑头像" onPress={() => void chooseProfileAvatar()} style={styles.profileManageEdit}>
+                <Text style={styles.profileManageEditText}>换头像</Text>
+              </Pressable>
+            </View>
+
+            {/* 段 2: 二维码 — QrCard 复用 R15 personalqr */}
+            <Text style={styles.customSectionTitle}>二维码</Text>
+            <Text style={styles.customSectionHint}>扫码进入 Proxy 主页</Text>
+            <QrCard
+              title={`${profileDraft.name} · Proxy`}
+              desc="扫码先进入 Proxy 主页。TikTok / Zalo 是否展示，继续遵循你的可见范围。"
+              actionLabel="分享二维码"
+              alignCenter
+            />
+
+            {/* 段 3: 状态管理 — 可接单 / 繁忙 / 暂离. onPress 弹 availability sheet */}
+            <Text style={styles.customSectionTitle}>状态管理</Text>
+            <Text style={styles.customSectionHint}>决定你出现在人物发现、机会分发的方式</Text>
+            <Pressable
+              accessibilityLabel="选择状态"
+              onPress={() => setAvRuleSheetOpen(true)}
+              style={styles.profileManageStatusRow}
+            >
+              <View style={styles.profileManageStatusDot} />
+              <View style={styles.profileManageStatusCopy}>
+                <Text style={styles.profileManageStatusLabel}>当前状态</Text>
+                <Text style={styles.profileManageStatusValue}>● {availabilityLabel(availability)}</Text>
+              </View>
+              <Text style={styles.profileManageStatusChev}>›</Text>
+            </Pressable>
+            <View style={styles.profileManageStatusList}>
+              {AVAILABILITY_OPTIONS.map((option) => (
+                <Pressable
+                  key={option.id}
+                  accessibilityLabel={`选择${option.title}`}
+                  onPress={() => { setAvailability(option.id); setAvRuleSheetOpen(false); }}
+                  style={[styles.profileManageStatusItem, availability === option.id && styles.profileManageStatusItemOn]}
+                >
+                  <Text style={[styles.profileManageStatusItemText, availability === option.id && styles.profileManageStatusItemTextOn]}>{option.title}</Text>
+                  <Text style={styles.profileManageStatusItemDesc}>{option.desc}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      );
+    }
+
     // 原型 .r159Hero + .r159TrustStrip + .r159QRWrap：个人主页 / 个人二维码 / 商家店铺。
     // 个人主页 v5：轻量名片 + 动态/照片/记录入口；能力、可用时间和合作是可选的产品行为。
     if (subPage.route === "personalhub") {
@@ -3319,7 +3416,31 @@ const styles = StyleSheet.create({
   },
   subPageIconText: { color: color.ink, fontSize: 28 },
   subPageTitle: { color: color.ink, fontSize: 18, fontWeight: "800", marginBottom: 6 },
+  subPageSub: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 16 },
   subPageDesc: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 16 },
+  // R16.7: 个人总管理 subPage 样式
+  profileManageRow: { flexDirection: "row", alignItems: "center", padding: 12, backgroundColor: color.white, borderRadius: 10, borderWidth: 1, borderColor: color.line, marginBottom: 12 },
+  profileManageAva: { width: 56, height: 56, borderRadius: 28, backgroundColor: color.magenta, alignItems: "center", justifyContent: "center", marginRight: 12, overflow: "hidden" },
+  profileManageAvaImg: { width: 56, height: 56, borderRadius: 28 },
+  profileManageAvaLetter: { color: color.ink, fontSize: 22, fontWeight: "800" },
+  profileManageCopy: { flex: 1 },
+  profileManageName: { color: color.ink, fontSize: 15, fontWeight: "700" },
+  profileManageHandle: { color: color.muted, fontSize: 11, marginTop: 1 },
+  profileManageCity: { color: color.muted, fontSize: 11, marginTop: 1 },
+  profileManageEdit: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: color.line },
+  profileManageEditText: { color: color.ink, fontSize: 11, fontWeight: "600" },
+  profileManageStatusRow: { flexDirection: "row", alignItems: "center", padding: 12, backgroundColor: color.white, borderRadius: 10, borderWidth: 1, borderColor: color.line, marginBottom: 8 },
+  profileManageStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#10b981", marginRight: 10 },
+  profileManageStatusCopy: { flex: 1 },
+  profileManageStatusLabel: { color: color.muted, fontSize: 11, fontWeight: "600" },
+  profileManageStatusValue: { color: color.ink, fontSize: 14, fontWeight: "700", marginTop: 2 },
+  profileManageStatusChev: { color: color.muted, fontSize: 18 },
+  profileManageStatusList: { marginTop: 4 },
+  profileManageStatusItem: { padding: 12, backgroundColor: color.white, borderRadius: 8, borderWidth: 1, borderColor: color.line, marginBottom: 6 },
+  profileManageStatusItemOn: { backgroundColor: color.violet, borderColor: color.magenta },
+  profileManageStatusItemText: { color: color.ink, fontSize: 14, fontWeight: "600" },
+  profileManageStatusItemTextOn: { color: color.magenta, fontWeight: "700" },
+  profileManageStatusItemDesc: { color: color.muted, fontSize: 11, marginTop: 2 },
   subPagePlaceholder: {
     backgroundColor: color.white,
     borderColor: color.line,
