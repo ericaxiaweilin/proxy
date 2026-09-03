@@ -79,13 +79,15 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
 
   // R15.73: 置顶帖 = server 返的 pinnedIds 中第一个, 不在 profilePosts 时走 fallback.
   // 之前 (Phase 1) 取 posts[0] mock — 跟 post 列表重复, 只是占位.
+  // R15.89 fix: 没真 pinnedIds 时 不渲染 置顶卡片 (PinnedCard 误写 '置顶' 标签).
+  const hasRealPin = !!(props.pinnedIds && props.pinnedIds.length > 0);
   const pinnedPost = useMemo(() => {
-    if (props.pinnedIds && props.pinnedIds.length > 0) {
+    if (hasRealPin) {
       const hit = props.posts.find((p) => p.postId === props.pinnedIds?.[0]);
       if (hit) return hit;
     }
     return props.posts[0];
-  }, [props.posts, props.pinnedIds]);
+  }, [props.posts, props.pinnedIds, hasRealPin]);
 
   return (
     <View>
@@ -291,8 +293,9 @@ function PostsTab(props: {
         </View>
       </View>
 
-      {/* 置顶帖 (IG/Threads 风格 pin badge) */}
-      {props.pinnedPost ? (
+      {/* 置顶帖 (IG/Threads 风格 pin badge) — R15.89: 需 hasRealPin 才显示,
+           避免 fallback posts[0] 被误标 '置顶' */}
+      {hasRealPin && props.pinnedPost ? (
         <View style={styles.pinnedCard}>
           <View style={styles.pinnedHeader}>
             <Text style={styles.pinnedBadge}>📌 置顶</Text>
