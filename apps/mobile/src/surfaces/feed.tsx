@@ -10,7 +10,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
-import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
+import { type SecureSessionStore } from "../secure-session";
 import { mapEngagementError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
@@ -456,15 +456,6 @@ export function FeedSurface({
       await command();
       apply(new Set(current).add(stateKey));
     } catch (error) {
-      // R15.38 DEBUG: 临时诊断, 看新逻辑是否走对路径
-      if (typeof __DEV__ !== "undefined" && __DEV__) {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[proxy.R15.38.DEBUG] engagement error type=${error instanceof Error ? error.name : typeof error} ` +
-          `msg=${error instanceof Error ? error.message : String(error)} ` +
-          `isOffline=${error instanceof OfflineFallbackSessionError || (error instanceof Error && (error.message.includes("require a real sign-in") || error.message.includes("offline session cannot")))}`
-        );
-      }
       setEngagementError(mapEngagementError(error, "互动没有提交成功，请检查连接后重试。"));
     } finally {
       setEngagementBusy((value) => {
