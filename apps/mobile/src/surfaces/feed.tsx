@@ -207,6 +207,8 @@ export function FeedSurface({
     if (externalSearchQuery !== undefined && externalSearchQuery.length > 0) {
       setExternalQuery(externalSearchQuery);
       setSearchQuery(externalSearchQuery);
+      // R15.98: 打开 search 栏 (TextInput) — 用户能看到 search bar 已经有 query, 可编辑.
+      setSearchOpen(true);
       // R15.93: 触发 listFeedPosts(q) 重拉
       void localNet.listFeedPosts(undefined, 25, externalSearchQuery).then((read) => {
         setPosts(read.posts);
@@ -809,6 +811,8 @@ export function FeedSurface({
             onPress={() => {
               setExternalQuery(undefined);
               setSearchQuery("");
+              // R15.98: 退出搜索时同时关 search bar (跟 setSearchOpen(true) 同步).
+              setSearchOpen(false);
               // 重拉全 feed (无 search 过滤).
               void localNet.listFeedPosts().then((read) => {
                 setPosts(read.posts);
