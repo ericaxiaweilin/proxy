@@ -1,13 +1,15 @@
 // AIIdentityShowcaseSurface — R1 AI Identity System (R1 HTML frontstage) 1:1 抄
 //
-// 3 个 phone preview (Human / AI Native / Twin) + 顶部 5 个 mini identity cards
-// (R1 identity 段: HUMAN / AI_NATIVE / AI_TWIN 三类).
+// R15.77: 3 个 phone preview (Human / AI Native / Twin) + 顶部 mini identity cards
+// R15.78: + R1 audit 段 (审计日志) 5 列 table + 5 过滤
+//
 // 设计: 1:1 抄 R1 HTML 视觉, 不自创.
 //
 // 这是静态 design showcase (我域), 不接 server. commander 域 R1 full wiring
 // (R1 reality gate + Twin consent + audit log) 是 Phase 2.
 
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
 
 type IdentityKind = "HUMAN" | "AI_NATIVE" | "AI_TWIN";
@@ -174,6 +176,10 @@ export function AIIdentityShowcaseSurface({ onBack }: { onBack: () => void }): R
           <ProfilePreview kind="native" />
           <ProfilePreview kind="twin" />
         </View>
+
+        <Text style={styles.sectionTitle}>审计日志</Text>
+        <Text style={styles.sectionSub}>所有 AI 生成、授权、策略拦截都可追溯。</Text>
+        <AuditTable />
       </ScrollView>
     </View>
   );
@@ -249,5 +255,100 @@ const styles = StyleSheet.create({
   postText: { fontSize: 10, color: color.ink, lineHeight: 13, marginTop: 1 },
   pOrigin: { fontSize: 8, color: color.muted, marginTop: 2 },
   pOriginAi: { color: "#6d28d9", fontWeight: "700" },
-  postActions: { fontSize: 9, color: color.muted, marginTop: 3 }
+  postActions: { fontSize: 9, color: color.muted, marginTop: 3 },
+
+  // R15.78: R1 审计日志 (5 列 table + 5 过滤). 1:1 抄 R1 HTML 视觉.
+  auditFilters: { flexDirection: "row", gap: 6, marginBottom: 10, flexWrap: "wrap" },
+  auditFilterBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: color.cardBorder, backgroundColor: color.white },
+  auditFilterBtnOn: { backgroundColor: color.ink, borderColor: color.ink },
+  auditFilterText: { fontSize: 10, fontWeight: "700", color: color.ink },
+  auditFilterTextOn: { color: color.white },
+  tableWrap: { borderWidth: 1, borderColor: color.cardBorder, borderRadius: 12, backgroundColor: color.white, overflow: "hidden" },
+  auditTable: { width: "100%" },
+  auditHeaderRow: { flexDirection: "row", backgroundColor: color.appBg, paddingVertical: 6, paddingHorizontal: 8 },
+  auditHeaderCell: { flex: 1, fontSize: 9, fontWeight: "800", color: color.ink },
+  auditRow: { flexDirection: "row", paddingVertical: 6, paddingHorizontal: 8, borderTopWidth: 1, borderTopColor: color.cardBorder },
+  auditCell: { flex: 1, fontSize: 9, color: color.ink, paddingRight: 4 },
+  auditCellActor: { fontWeight: "800" },
+  auditCellIdentityNative: { color: "#6d28d9", fontWeight: "700" },
+  auditCellIdentityTwin: { color: "#6d28d9", fontWeight: "700" },
+  auditCellIdentityHuman: { color: color.ink, fontWeight: "700" },
+  auditCellPolicy: { color: color.muted, fontStyle: "italic" },
+  auditCellResultReview: { color: "#b45309", fontWeight: "700" }
 });
+
+// R15.78: R1 HTML audit mock data (5 笔) — 1:1 抄 R1 audits[] 数组.
+const AUDIT_ROWS: ReadonlyArray<{
+  time: string; actor: string; identity: "HUMAN" | "AI_NATIVE" | "AI_TWIN" | "PLATFORM";
+  event: string; policy: string; result: string;
+}> = [
+  { time: "23:41", actor: "Mia", identity: "AI_NATIVE", event: "POST_CREATED", policy: "AI_DISCLOSURE_REQUIRED", result: "Allowed + labeled" },
+  { time: "23:38", actor: "Linh AI", identity: "AI_TWIN", event: "INVITE_DRAFTED", policy: "HUMAN_CONFIRM_REQUIRED", result: "Owner notified" },
+  { time: "23:30", actor: "user_4281", identity: "HUMAN", event: "CONTENT_UPLOAD", policy: "PROVENANCE_CONFLICT", result: "Manual review" },
+  { time: "23:18", actor: "Proxy", identity: "PLATFORM", event: "TWIN_CONSENT_UPDATED", policy: "CONSENT_SCOPE", result: "Video revoked" },
+  { time: "22:59", actor: "Nari → Mia", identity: "AI_NATIVE", event: "LIKE_EVENT", policy: "SYNTHETIC_SIGNAL_DROP", result: "Excluded" }
+];
+
+const AUDIT_FILTERS = ["ALL", "HUMAN", "AI_NATIVE", "AI_TWIN", "REVIEW"] as const;
+type AuditFilter = typeof AUDIT_FILTERS[number];
+
+function matchesFilter(row: typeof AUDIT_ROWS[number], filter: AuditFilter): boolean {
+  if (filter === "ALL") return true;
+  if (filter === "REVIEW") return /review/i.test(row.result);
+  return row.identity === filter;
+}
+
+function identityTint(identity: typeof AUDIT_ROWS[number]["identity"]): string {
+  if (identity === "AI_NATIVE") return styles.auditCellIdentityNative.color ?? "#6d28d9";
+  if (identity === "AI_TWIN") return styles.auditCellIdentityTwin.color ?? "#6d28d9";
+  if (identity === "HUMAN") return styles.auditCellIdentityHuman.color ?? color.ink;
+  return color.muted;
+}
+
+function AuditTable(): React.JSX.Element {
+  const [filter, setFilter] = useState<AuditFilter>("ALL");
+  const visible = AUDIT_ROWS.filter((row) => matchesFilter(row, filter));
+  return (
+    <View>
+      <View style={styles.auditFilters}>
+        {AUDIT_FILTERS.map((f) => (
+          <Pressable
+            key={f}
+            onPress={() => setFilter(f)}
+            style={[styles.auditFilterBtn, filter === f ? styles.auditFilterBtnOn : undefined]}
+            accessibilityLabel={`过滤 ${f}`}
+          >
+            <Text style={[styles.auditFilterText, filter === f ? styles.auditFilterTextOn : undefined]}>{f}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={styles.tableWrap}>
+        <View style={styles.auditTable}>
+          <View style={styles.auditHeaderRow}>
+            <Text style={[styles.auditHeaderCell, { flex: 0.7 }]}>时间</Text>
+            <Text style={styles.auditHeaderCell}>Actor</Text>
+            <Text style={styles.auditHeaderCell}>Identity</Text>
+            <Text style={styles.auditHeaderCell}>Event</Text>
+            <Text style={styles.auditHeaderCell}>Policy</Text>
+            <Text style={styles.auditHeaderCell}>Result</Text>
+          </View>
+          {visible.length === 0 ? (
+            <View style={styles.auditRow}>
+              <Text style={[styles.auditCell, { flex: 6, textAlign: "center", paddingVertical: 8 }]}>该过滤下没有记录</Text>
+            </View>
+          ) : null}
+          {visible.map((row) => (
+            <View key={`${row.time}-${row.actor}-${row.event}`} style={styles.auditRow}>
+              <Text style={[styles.auditCell, { flex: 0.7 }]}>{row.time}</Text>
+              <Text style={[styles.auditCell, styles.auditCellActor]}>{row.actor}</Text>
+              <Text style={[styles.auditCell, { color: identityTint(row.identity), fontWeight: "700" }]}>{row.identity}</Text>
+              <Text style={styles.auditCell}>{row.event}</Text>
+              <Text style={[styles.auditCell, styles.auditCellPolicy]}>{row.policy}</Text>
+              <Text style={[styles.auditCell, /review/i.test(row.result) ? styles.auditCellResultReview : undefined]}>{row.result}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}

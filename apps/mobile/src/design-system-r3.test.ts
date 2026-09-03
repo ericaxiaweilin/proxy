@@ -36,7 +36,9 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   "miniPillText", "pTopHandle", "pBadgeText", "pNoticeTitle", "pNoticeBody",
   "pActionText", "pActionDarkText", "pTabText", "pTabOnText",
   "pAvatarText", "pAvatarTextAi", "postAvaText", "postAvaTextAi",
-  "postName", "postTime", "postText", "pOrigin", "postActions"
+  "postName", "postTime", "postText", "pOrigin", "postActions",
+  // R15.78: R1 audit 段 (table + filter) — 装饰 8-10pt (R1 1:1 抄原版).
+  "auditFilterText", "auditHeaderCell", "auditCell"
 ];
 
 describe("Proxy Design System R3 typography", () => {
