@@ -1305,6 +1305,7 @@ export function MeSurface({
   supply?: SupplyClient;
   engagement?: EngagementClient; // R15.59: 关注/置顶/赞 client
   viewerAccountId?: string | undefined; // R15.59: 当前 session user ID
+  onOpenSearch?: ((query: string) => void) | undefined; // R15.75: 主页搜索 sheet submit → app-shell 走 search 路径
   onOpenRealitySceneMap?: (() => void) | undefined;
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
@@ -1375,6 +1376,9 @@ export function MeSurface({
   // R15.68: R2 设计的 3 个 sheet (分析 / 搜索 / 主页设置) 真接线
   const [insightsSheetOpen, setInsightsSheetOpen] = useState(false);
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
+  // R15.75: 搜索 sheet 内的 query state (之前 onChangeText={setSearchSheetOpen(true)} 是 bug
+  //   — 用户输入文字时调 setSearchSheetOpen, 状态不变, 但跟提交按钮脱钩)
+  const [searchQuery, setSearchQuery] = useState("");
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   // R15.53: ProfileTabs 新组件使用 (IG/Threads 5 tabs)
   //   REPLIES / SAVED / TAGGED — Phase 1.5 mock 空数组 (后端未提供)
@@ -2441,11 +2445,33 @@ export function MeSurface({
                     autoFocus
                     placeholder="搜索用户名或关键词"
                     placeholderTextColor="#999"
-                    onChangeText={(value) => setSearchSheetOpen(true)}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    onSubmitEditing={() => {
+                      // R15.75: 提交时跳到 feed 全局 search (server ListFeedPosts 用 searchQuery).
+                      //   没设这个 onSubmit 之前, onChangeText 错调 setSearchSheetOpen (误),
+                      //   提交后无任何操作.
+                      const q = searchQuery.trim();
+                      if (q.length > 0) {
+                        setSearchSheetOpen(false);
+                        onOpenSearch?.(q);
+                      }
+                    }}
+                    returnKeyType="search"
                     style={styles.sheetFieldInput}
                   />
                 </View>
-                <Pressable onPress={() => setSearchSheetOpen(false)} style={[styles.sheetWideBtn, styles.sheetWideBtnDark]}>
+                <Pressable
+                  onPress={() => {
+                    const q = searchQuery.trim();
+                    if (q.length > 0) {
+                      setSearchSheetOpen(false);
+                      onOpenSearch?.(q);
+                    }
+                  }}
+                  disabled={searchQuery.trim().length === 0}
+                  style={[styles.sheetWideBtn, styles.sheetWideBtnDark, searchQuery.trim().length === 0 ? { opacity: 0.5 } : undefined]}
+                >
                   <Text style={styles.sheetWideBtnTextDark}>搜索</Text>
                 </Pressable>
               </View>
