@@ -200,7 +200,12 @@ export function MarketSurface({
       const read = await activities.listActivities();
       setActivityItems(read);
       setActivityPhase("READY");
-    } catch {
+    } catch (e) {
+      // 不要静默吞错 — surface 到 console + state, 排查
+      // “活动数据空” / “schema 不接受” / “server down” 三类问题。
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[market] listActivities failed", msg);
+      setActivityItems([]);
       setActivityPhase("ERROR");
     }
   }, [activities]);

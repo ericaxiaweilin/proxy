@@ -490,7 +490,7 @@ export const ActivitySchema = z.object({
   venueName: z.string(),
   realitySceneId: z.string().min(1).optional(),
   venueSpend: z.string(),
-  venueType: z.enum(["CAFE", "RESTAURANT"]),
+  venueType: z.enum(["CAFE", "RESTAURANT", ""]),
   venueTypeLabel: z.string(),
   desc: z.string(),
   benefit: z.string(),
