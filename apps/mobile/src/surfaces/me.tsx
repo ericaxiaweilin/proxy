@@ -24,6 +24,8 @@ import { FriendCrmSurface } from "./friend-crm";
 import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
 import { ThreadsPostMedia } from "../components/threads-post-media";
 import { SecuritySettings } from "../components/security-settings";
+import { PrivacySettings } from "../components/privacy-settings";
+import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
 import { type LocalNetClient } from "../localnet-client";
@@ -35,7 +37,7 @@ import type { BusinessClient } from "../business-client";
 import type { SupplyClient } from "../supply-client";
 import { FacetHomeSurface } from "../facet/FacetHomeSurface";
 import { FacetClient } from "../facet-client";
-import { sessionAuthClient, localApiBaseUrl } from "../native-clients";
+import { sessionAuthClient, localApiBaseUrl, nativeTransport } from "../native-clients";
 
 // Extracted modules
 import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
@@ -124,6 +126,7 @@ const REQUESTER_ME: PersonaConfig = {
       rows: [
         { icon: "coin", label: "钱包与结算", desc: "付款、收入、退款与记录", route: "wallet" },
         { icon: "gear", label: "设置与隐私", desc: "推荐、通知、权限与隐私", route: "appbehavior" },
+        { icon: "shield", label: "我的隐私", desc: "依据《个人数据保护法》下载我的数据或请求删除账号", route: "privacy" },
         { icon: "store-lines", label: "我的企业 / 店铺", desc: "有经营权限时进入 Business Workspace", route: "bdash" }
       ]
     },
@@ -758,6 +761,30 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
               <Text style={styles.appBehaviorReturnText}>返回我的</Text>
             </Pressable>
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // R16.10-P1-F: privacy request center subpage. Mounts the
+    // PrivacySettings component against the active session's
+    // PrivacyClient. The subpage stays inside the standard me.tsx
+    // navigation stack so the user can back out with the same swipe
+    // gesture they use for the other subpages.
+    if (subPage.route === "privacy") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.appBehaviorTitle}>我的隐私</Text>
+            <Text style={styles.appBehaviorCardDesc}>
+              依据《个人数据保护法》91/2025/QH15 第 31 条 (访问权) 与第 32 条 (删除权), 你可以随时下载或删除 Proxy 保存的个人数据。
+            </Text>
+            <PrivacySettings
+              client={resolvePrivacyRequestClient({ baseUrl: localApiBaseUrl, transport: nativeTransport })}
+            />
           </ScrollView>
         </View>
       );
