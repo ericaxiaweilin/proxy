@@ -160,6 +160,8 @@ gate_g3_e2e() {
   echo "  lc28-policy-decision-e2e: OK"
   bash scripts/lc06-ai-media-e2e.sh || return $?
   echo "  lc06-ai-media-e2e: OK"
+  bash scripts/p1e-jurisdiction-e2e.sh || return $?
+  echo "  p1e-jurisdiction-e2e: OK"
   bash scripts/legal-e2e.sh || return $?
   echo "  legal-e2e: OK"
 }

@@ -104,6 +104,11 @@ type Decision struct {
 	CategoryCode   CategoryCode    `json:"categoryCode"`
 	TermsVersion   string          `json:"termsVersion"`
 	PrivacyVersion string          `json:"privacyVersion"`
+	// R16.7-P1-E: jurisdiction of the user at evaluation
+	// time. Stored on the decision so the audit log is
+	// recoverable without a cross-table join. The wire
+	// form is "VN-79" (country + "-" + region).
+	Jurisdiction   string          `json:"jurisdiction"`
 	KillSwitch     KillSwitchState `json:"killSwitch"`
 	EvaluatedAt    time.Time       `json:"evaluatedAt"`
 	ExpiresAt      *time.Time      `json:"expiresAt,omitempty"`
@@ -118,9 +123,13 @@ var ErrNotFound = errors.New("no policy decision for this tuple")
 // apps/api-go/internal/platform/postgres/policy_decisions.go.
 type Repository interface {
 	// GetByTuple returns the existing decision for the
-	// (user, category, terms, privacy) tuple, or ErrNotFound.
-	// It does NOT create a new row — that is Evaluate's job.
-	GetByTuple(ctx context.Context, userID string, category CategoryCode, termsVersion, privacyVersion string) (*Decision, error)
+	// (user, category, terms, privacy, jurisdiction) tuple,
+	// or ErrNotFound. It does NOT create a new row — that is
+	// Evaluate's job. R16.7-P1-E adds the jurisdiction
+	// dimension so the same (user, category, terms, privacy)
+	// evaluated under two different jurisdictions produces
+	// two distinct decisions (LC-30 mechanism).
+	GetByTuple(ctx context.Context, userID string, category CategoryCode, termsVersion, privacyVersion, jurisdiction string) (*Decision, error)
 
 	// Insert writes a new decision row. The caller must have
 	// already checked GetByTuple; UNIQUE constraints back this
@@ -172,17 +181,27 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-// Evaluate returns the existing decision for the (user, category,
-// current-terms, current-privacy) tuple, creating a new one if
-// none exists yet. The decision id is the audit-log pointer that
-// the Order is stamped with.
+// Evaluate returns the existing decision for the
+// (user, category, current-terms, current-privacy,
+// jurisdiction) tuple, creating a new one if none exists
+// yet. The decision id is the audit-log pointer that the
+// Order is stamped with.
 //
-// Fail-closed: if the repository errors on Insert (e.g. a DB
-// blip) the error is returned to the caller so the Order is
-// rejected at create time. The alternative — silently writing
-// the Order without a decision — would break LC-28 and the
-// audit log.
-func (s *Service) Evaluate(ctx context.Context, userID string, category CategoryCode) (*Decision, error) {
+// R16.7-P1-E: the jurisdiction argument is the
+// canonical "VN-79" form (country + "-" + region). The
+// caller is the policy gate in the Order confirm path,
+// which resolves the user's jurisdiction via
+// jurisdiction.Service.Resolve before calling Evaluate.
+// When the empty string is passed, Evaluate defaults to
+// the platform's launch jurisdiction (VN-79) so the
+// legacy test surface continues to work.
+//
+// Fail-closed: if the repository errors on Insert (e.g. a
+// DB blip) the error is returned to the caller so the
+// Order is rejected at create time. The alternative —
+// silently writing the Order without a decision — would
+// break LC-28 and the audit log.
+func (s *Service) Evaluate(ctx context.Context, userID string, category CategoryCode, jurisdiction string) (*Decision, error) {
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("policydecisions: userID is required")
 	}
@@ -195,8 +214,11 @@ func (s *Service) Evaluate(ctx context.Context, userID string, category Category
 	if s.privacyVersion == "" {
 		return nil, errors.New("policydecisions: privacy version is unconfigured")
 	}
+	if strings.TrimSpace(jurisdiction) == "" {
+		jurisdiction = "VN-79"
+	}
 	// Fast path: existing decision under the same conditions.
-	if existing, err := s.repo.GetByTuple(ctx, userID, category, s.termsVersion, s.privacyVersion); err == nil {
+	if existing, err := s.repo.GetByTuple(ctx, userID, category, s.termsVersion, s.privacyVersion, jurisdiction); err == nil {
 		return existing, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, err
@@ -215,6 +237,7 @@ func (s *Service) Evaluate(ctx context.Context, userID string, category Category
 		CategoryCode:   category,
 		TermsVersion:   s.termsVersion,
 		PrivacyVersion: s.privacyVersion,
+		Jurisdiction:   jurisdiction,
 		KillSwitch:     ks,
 		EvaluatedAt:    s.now().UTC(),
 	}

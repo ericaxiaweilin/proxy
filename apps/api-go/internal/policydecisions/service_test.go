@@ -21,7 +21,7 @@ func TestEvaluateCreatesAndReusesDecision(t *testing.T) {
 	svc.SetNowFunc(func() time.Time { return now })
 
 	// First call: a new decision is written.
-	d1, err := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService)
+	d1, err := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService, "VN-79")
 	if err != nil {
 		t.Fatalf("first evaluate: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestEvaluateCreatesAndReusesDecision(t *testing.T) {
 	}
 
 	// Second call: same tuple, must return the same id.
-	d2, err := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService)
+	d2, err := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService, "VN-79")
 	if err != nil {
 		t.Fatalf("second evaluate: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestEvaluateNewDecisionWhenTermsBump(t *testing.T) {
 	svc := NewService(repo, "terms-1.0.0", "privacy-1.0.0", nil)
 	svc.SetNowFunc(func() time.Time { return now })
 
-	d1, err := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService)
+	d1, err := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService, "VN-79")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestEvaluateNewDecisionWhenTermsBump(t *testing.T) {
 	// later". LC-30 hinges on this.
 	svc2 := NewService(repo, "terms-1.1.0", "privacy-1.0.0", nil)
 	svc2.SetNowFunc(func() time.Time { return now.Add(time.Minute) })
-	d2, err := svc2.Evaluate(context.Background(), "user-alice", CategoryUserPaidService)
+	d2, err := svc2.Evaluate(context.Background(), "user-alice", CategoryUserPaidService, "VN-79")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,8 +86,8 @@ func TestEvaluatePerUserIsolation(t *testing.T) {
 	svc := NewService(repo, "terms-1.0.0", "privacy-1.0.0", nil)
 	svc.SetNowFunc(func() time.Time { return now })
 
-	alice, _ := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService)
-	bob, _ := svc.Evaluate(context.Background(), "user-bob", CategoryUserPaidService)
+	alice, _ := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService, "VN-79")
+	bob, _ := svc.Evaluate(context.Background(), "user-bob", CategoryUserPaidService, "VN-79")
 	if alice.ID == bob.ID {
 		t.Fatalf("decisions for different users must differ, both got %q", alice.ID)
 	}
@@ -96,20 +96,20 @@ func TestEvaluatePerUserIsolation(t *testing.T) {
 func TestEvaluateRejectsUnknownCategory(t *testing.T) {
 	repo := NewMemoryRepository()
 	svc := NewService(repo, "terms-1.0.0", "privacy-1.0.0", nil)
-	if _, err := svc.Evaluate(context.Background(), "user-x", CategoryCode("NOPE_NOT_A_REAL_CATEGORY")); err == nil {
+	if _, err := svc.Evaluate(context.Background(), "user-x", CategoryCode("NOPE_NOT_A_REAL_CATEGORY"), "VN-79"); err == nil {
 		t.Fatal("expected error for unknown category")
 	}
 }
 
 func TestEvaluateRejectsEmptyVersions(t *testing.T) {
 	repo := NewMemoryRepository()
-	if _, err := NewService(repo, "", "privacy-1.0.0", nil).Evaluate(context.Background(), "user-x", CategoryUserPaidService); err == nil {
+	if _, err := NewService(repo, "", "privacy-1.0.0", nil).Evaluate(context.Background(), "user-x", CategoryUserPaidService, "VN-79"); err == nil {
 		t.Fatal("expected error for empty terms version")
 	}
-	if _, err := NewService(repo, "terms-1.0.0", "", nil).Evaluate(context.Background(), "user-x", CategoryUserPaidService); err == nil {
+	if _, err := NewService(repo, "terms-1.0.0", "", nil).Evaluate(context.Background(), "user-x", CategoryUserPaidService, "VN-79"); err == nil {
 		t.Fatal("expected error for empty privacy version")
 	}
-	if _, err := NewService(repo, "terms-1.0.0", "privacy-1.0.0", nil).Evaluate(context.Background(), "", CategoryUserPaidService); err == nil {
+	if _, err := NewService(repo, "terms-1.0.0", "privacy-1.0.0", nil).Evaluate(context.Background(), "", CategoryUserPaidService, "VN-79"); err == nil {
 		t.Fatal("expected error for empty user id")
 	}
 }
@@ -119,7 +119,7 @@ func TestStampRecordsLifecycleStage(t *testing.T) {
 	now := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
 	svc := NewService(repo, "terms-1.0.0", "privacy-1.0.0", nil)
 	svc.SetNowFunc(func() time.Time { return now })
-	d, err := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService)
+	d, err := svc.Evaluate(context.Background(), "user-alice", CategoryUserPaidService, "VN-79")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestRepositoryConcurrentInsert(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			d, err := svc.Evaluate(context.Background(), "user-race", CategoryUserPaidService)
+			d, err := svc.Evaluate(context.Background(), "user-race", CategoryUserPaidService, "VN-79")
 			if err != nil {
 				t.Errorf("evaluate: %v", err)
 				return

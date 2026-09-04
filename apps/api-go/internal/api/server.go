@@ -30,6 +30,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/aipersona"
+	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
@@ -89,6 +90,12 @@ type Server struct {
 	// persona asset lacks a live consent. Wired from
 	// cmd/api/main.go.
 	AIPersona *aipersona.Service
+	// Jurisdiction is the R16.7-P1-E lookup. The
+	// fulfillment service consumes it through a bridge to
+	// pick the right policy decision (LC-28 / LC-30). The
+	// HTTP API surface for self-service jurisdiction
+	// changes is mounted separately in handlers.
+	Jurisdiction *jurisdiction.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -214,6 +221,12 @@ func (s *Server) Handler() http.Handler {
 	// lookups.
 	mux.HandleFunc("/v1/ai/personas", s.routePersonaCollection)
 	mux.HandleFunc("/v1/ai/personas/", s.routePersonaItem)
+	// R16.7-P1-E: Jurisdiction Policy Engine self-service.
+	// GET reads the caller's current jurisdiction (default
+	// VN-79 when no row exists); PATCH updates it. Operator
+	// updates go through a separate operator-only endpoint
+	// (TODO: when ops tooling lands).
+	mux.HandleFunc("/v1/identity/jurisdiction", s.routeJurisdiction)
 	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.

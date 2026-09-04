@@ -40,6 +40,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/aipersona"
+	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/safety"
@@ -343,6 +344,22 @@ func main() {
 	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
 	mediaService.WithAIPersonaService(personaSvc)
 	server.AIPersona = personaSvc
+	// R16.7-P1-E: Jurisdiction Policy Engine. The
+	// jurisdiction service looks up the requester's
+	// (country, region) for the policy decision; the
+	// fulfillment service consumes it via a forward-
+	// declared interface. We wire the in-memory repo
+	// here; the Postgres implementation is a follow-up
+	// once the rest of the policy stack moves into the
+	// transactional outbox.
+	jurisdictionRepo := jurisdiction.NewMemoryRepository()
+	jurisdictionSvc := jurisdiction.NewService(jurisdictionRepo)
+	// Fulfillment consumes the resolver through a
+	// one-method bridge so the fulfillment package does
+	// not import the jurisdiction package directly
+	// (one-way dependency: api -> both).
+	fulfillmentService.WithJurisdictionResolver(jurisdictionAdapter{svc: jurisdictionSvc})
+	server.Jurisdiction = jurisdictionSvc
 	// R0 / R16.7-P1-H prep: Benefit Routing Network. No Postgres
 	// repo is shipped yet (memory_repo.go is the only implementation);
 	// we use the memory repo in both pool and no-pool paths so
@@ -1014,4 +1031,24 @@ func buildSMSProvider(vendor string, cfg identity.SMSConfig) *identity.SMSHTTPLo
 		log.Printf("SMS provider: generic bearer-token webhook")
 		return identity.NewSMSHTTPLoginChallengeProvider(cfg)
 	}
+}
+
+// jurisdictionAdapter bridges the wire layer's
+// *jurisdiction.Service to the fulfillment package's
+// one-method jurisdictionResolver interface. The
+// fulfillment package does not import the jurisdiction
+// package directly (one-way dependency).
+type jurisdictionAdapter struct {
+	svc *jurisdiction.Service
+}
+
+func (a jurisdictionAdapter) Resolve(ctx context.Context, userID string) (fulfillment.JurisdictionResolution, error) {
+	row, err := a.svc.Resolve(ctx, userID)
+	if err != nil {
+		return fulfillment.JurisdictionResolution{}, err
+	}
+	return fulfillment.JurisdictionResolution{
+		Wire:   row.Jurisdiction.String(),
+		Source: row.Source,
+	}, nil
 }

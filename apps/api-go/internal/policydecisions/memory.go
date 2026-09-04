@@ -23,11 +23,11 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{rows: map[string]Decision{}}
 }
 
-func (r *MemoryRepository) GetByTuple(_ context.Context, userID string, category CategoryCode, termsVersion, privacyVersion string) (*Decision, error) {
+func (r *MemoryRepository) GetByTuple(_ context.Context, userID string, category CategoryCode, termsVersion, privacyVersion, jurisdiction string) (*Decision, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, d := range r.rows {
-		if d.UserID == userID && d.CategoryCode == category && d.TermsVersion == termsVersion && d.PrivacyVersion == privacyVersion {
+		if d.UserID == userID && d.CategoryCode == category && d.TermsVersion == termsVersion && d.PrivacyVersion == privacyVersion && d.Jurisdiction == jurisdiction {
 			cp := d
 			return &cp, nil
 		}

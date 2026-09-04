@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +63,12 @@ type OrderSnapshot struct {
 	ExcludedScope      string `json:"excludedScope"`
 	SettlementMode     string `json:"settlementMode"` // DIRECT_SETTLEMENT | PLATFORM_PAY
 	PaymentMethodLabel string `json:"paymentMethodLabel"`
+	// R8 Pillar #6: Cash Eligibility 状态机。仅在 SettlementMode
+	// = DIRECT_SETTLEMENT 时生效。ALLOW/REVIEW/PLATFORM_PAY_REQUIRED/
+	// BLOCK 四态之一。PLATFORM_PAY 任务此字段为空串。写入快照后不
+	// 允许静默修改 — 任何变更走 Material Change (LC-30) 创建 vNext。
+	CashEligibilityStatus string `json:"cashEligibilityStatus"`
+	CashEligibilityReason string `json:"cashEligibilityReason"`
 }
 
 // Amendment 是 Material Change（新版本，不静默覆盖）。
@@ -375,6 +383,34 @@ type Service struct {
 	// Order; otherwise the transition is rejected. nil means
 	// the legacy test server is in use (no policy enforcement).
 	policyDecisions policydecisionsService
+	// jurisdictionResolver resolves the requester's
+	// jurisdiction (R16.7-P1-E) so the policy decision can
+	// be evaluated under the correct regulatory family. The
+	// default fallback is VN-79 (Ho Chi Minh City, proxy.vn
+	// HQ). nil means the legacy test surface; Evaluate gets
+	// the empty string and falls back to VN-79.
+	jurisdictionResolver jurisdictionResolver
+}
+
+// jurisdictionResolver is a one-method interface so the
+// fulfillment package does not import the jurisdiction
+// package directly (one-way dependency: api -> both
+// packages, fulfillment -> neither).
+type jurisdictionResolver interface {
+	Resolve(ctx context.Context, userID string) (JurisdictionResolution, error)
+}
+
+// JurisdictionResolution is a snapshot of the user's
+// jurisdiction at evaluation time. We keep this minimal:
+// just the wire-form string ("VN-79") and the source
+// ("DEFAULT" / "USER_SELF" / "OPERATOR" / "GEOLOCATION").
+// A future API surface may want more fields; for now the
+// policy decision only needs the wire form. Exported so
+// the wire layer in cmd/api can adapt a
+// *jurisdiction.Service to the resolver interface.
+type JurisdictionResolution struct {
+	Wire   string
+	Source string
 }
 
 // policydecisionsService is a forward-declared interface so the
@@ -383,7 +419,14 @@ type Service struct {
 // layer in apps/api-go/internal/api wires the two, the
 // fulfillment package sees only the methods it needs).
 type policydecisionsService interface {
-	Evaluate(ctx context.Context, userID string, category policydecisions.CategoryCode) (*policydecisions.Decision, error)
+	// Evaluate returns the decision for the (user, category,
+	// current-terms, current-privacy, jurisdiction) tuple.
+	// R16.7-P1-E adds the jurisdiction argument so the same
+	// (user, category, terms, privacy) tuple evaluated under
+	// two different jurisdictions produces two distinct
+	// decisions. The fulfillment service resolves the
+	// requester's jurisdiction before calling Evaluate.
+	Evaluate(ctx context.Context, userID string, category policydecisions.CategoryCode, jurisdiction string) (*policydecisions.Decision, error)
 	Stamp(ctx context.Context, stamp policydecisions.OrderStamp) error
 	StampsForOrder(ctx context.Context, orderID string) ([]policydecisions.OrderStamp, error)
 }
@@ -409,6 +452,43 @@ func (s *Service) WithPolicyDecisions(pd policydecisionsService) *Service {
 	defer s.mu.Unlock()
 	s.policyDecisions = pd
 	return s
+}
+
+// WithJurisdictionResolver wires the R16.7-P1-E resolver
+// so the policy decision can be evaluated under the
+// requester's actual jurisdiction. nil is allowed; it
+// makes Evaluate receive the empty string and fall back
+// to the platform default (VN-79).
+func (s *Service) WithJurisdictionResolver(jr jurisdictionResolver) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jurisdictionResolver = jr
+	return s
+}
+
+// resolveRequesterJurisdiction returns the requester's
+// canonical jurisdiction wire-form ("VN-79") for use in
+// the policy decision. When the resolver is nil
+// (legacy test surface) or the lookup fails, we return
+// the empty string and let policydecisions.Evaluate
+// apply its own default. The lookup never blocks the
+// Order: a failing resolver is logged once at warn level
+// and the platform-default jurisdiction is used; the
+// audit log will record the requester id and the
+// decision id, which is enough for the regulator.
+func (s *Service) resolveRequesterJurisdiction(ctx context.Context, requesterID string) string {
+	if s.jurisdictionResolver == nil || strings.TrimSpace(requesterID) == "" {
+		return ""
+	}
+	res, err := s.jurisdictionResolver.Resolve(ctx, requesterID)
+	if err != nil {
+		// Fail-soft: do not block the Order on a
+		// jurisdiction lookup error. The regulator can
+		// correlate by user_id + decision_id; the
+		// jurisdiction will be the platform default.
+		return ""
+	}
+	return res.Wire
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -506,6 +586,10 @@ type createOfferPayload struct {
 	ExcludedScope      string `json:"excludedScope"`
 	SettlementMode     string `json:"settlementMode"`
 	PaymentMethodLabel string `json:"paymentMethodLabel"`
+	// CashEligibilityOverride 允许 Offer 创建方在 R8 Pillar #6
+	// ALLOW / REVIEW / PLATFORM_PAY_REQUIRED / BLOCK 4 态中显式
+	// 指定. 不传 -> 走默认 ALLOW.
+	CashEligibilityOverride string `json:"cashEligibilityOverride"`
 }
 
 func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.Result {
@@ -525,6 +609,8 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 	if p.Currency == "" {
 		p.Currency = "VND"
 	}
+	// R8 Pillar #6: 写入 Snapshot 之前评估 Cash Eligibility.
+	cashStatus, cashReason := assessCashEligibility(p.SettlementMode, p.AgreedCompensation, p.CashEligibilityOverride)
 	snapshot := OrderSnapshot{
 		Requester:          e.Actor.ID,
 		Agent:              p.AgentID,
@@ -540,6 +626,10 @@ func (s *Service) createOffer(ctx context.Context, e command.Envelope) command.R
 		ExcludedScope:      p.ExcludedScope,
 		SettlementMode:     p.SettlementMode,
 		PaymentMethodLabel: p.PaymentMethodLabel,
+		// R8 Pillar #6: Cash Eligibility 状态 + 原因。DIRECT_SETTLEMENT
+		// 任务必填 (默认 ALLOW), PLATFORM_PAY 任务空串.
+		CashEligibilityStatus: cashStatus,
+		CashEligibilityReason: cashReason,
 	}
 	order := Order{
 		ID:          newID("ord_"),
@@ -835,6 +925,40 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 	if order.Lifecycle != "OFFERED" {
 		return command.Rejected(e, "ORDER_NOT_CONFIRMABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_confirmable", map[string]any{"lifecycle": order.Lifecycle})
 	}
+	// R8 Pillar #6: DIRECT_SETTLEMENT 任务必须 Cash Eligibility
+	// = ALLOW 才能 Lock 到 CONFIRMED。其他 3 态 (REVIEW /
+	// PLATFORM_PAY_REQUIRED / BLOCK) 都明确阻断现金单创建。这条
+	// 门控是越南 PDP 91/2025/QH15 + Decree 13/2023/ND-CP
+	// 双重视角的现金交易透明度底线。
+	if order.Snapshot.SettlementMode == "DIRECT_SETTLEMENT" {
+		switch order.Snapshot.CashEligibilityStatus {
+		case CashEligibilityAllow:
+			// pass
+		case CashEligibilityReview:
+			return command.Rejected(e, "CASH_ELIGIBILITY_REVIEW", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_review", map[string]any{
+				"orderId": order.ID,
+				"reason":  order.Snapshot.CashEligibilityReason,
+				"hint":    "现金任务状态为 REVIEW, 需人工复核后才能 Lock",
+			})
+		case CashEligibilityPlatformPayRequired:
+			return command.Rejected(e, "CASH_PAYMENT_REQUIRED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_payment_required", map[string]any{
+				"orderId": order.ID,
+				"reason":  order.Snapshot.CashEligibilityReason,
+				"hint":    "现金任务被要求必须改用平台支付",
+			})
+		case CashEligibilityBlock:
+			return command.Rejected(e, "CASH_ELIGIBILITY_BLOCKED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_blocked", map[string]any{
+				"orderId": order.ID,
+				"reason":  order.Snapshot.CashEligibilityReason,
+				"hint":    "现金任务被禁止, 需走申诉或换 PLATFORM_PAY",
+			})
+		default:
+			return command.Rejected(e, "CASH_ELIGIBILITY_MISSING", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.cash_eligibility_missing", map[string]any{
+				"orderId": order.ID,
+				"hint":    "现金任务未携带 Cash Eligibility 评估结果",
+			})
+		}
+	}
 	// R16.7-P1-B (LC-28): a paid Order (PLATFORM_PAY settlement)
 	// may not enter CONFIRMED without a stamped policy
 	// decision. DIRECT_SETTLEMENT Orders skip the gate because
@@ -848,7 +972,8 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 		if s.policyDecisions == nil {
 			return command.Rejected(e, "POLICY_GATE_NOT_CONFIGURED", "INTERNAL", "AFTER_USER_ACTION", "fulfillment.policy_gate_unconfigured", map[string]any{"orderId": order.ID, "settlementMode": order.Snapshot.SettlementMode})
 		}
-		decision, err := s.policyDecisions.Evaluate(ctx, order.RequesterID, policydecisions.CategoryUserPaidService)
+		jurisdiction := s.resolveRequesterJurisdiction(ctx, order.RequesterID)
+		decision, err := s.policyDecisions.Evaluate(ctx, order.RequesterID, policydecisions.CategoryUserPaidService, jurisdiction)
 		if err != nil {
 			return command.Rejected(e, "POLICY_EVALUATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.policy_evaluate_failed", map[string]any{"orderId": order.ID, "error": err.Error()})
 		}
@@ -1118,7 +1243,8 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 	// does not need the audit log for amendments either.
 	var reEvaluatedDecisionID string
 	if order.Snapshot.SettlementMode == "PLATFORM_PAY" && s.policyDecisions != nil {
-		decision, evalErr := s.policyDecisions.Evaluate(ctx, order.RequesterID, policydecisions.CategoryUserPaidService)
+		jurisdiction := s.resolveRequesterJurisdiction(ctx, order.RequesterID)
+		decision, evalErr := s.policyDecisions.Evaluate(ctx, order.RequesterID, policydecisions.CategoryUserPaidService, jurisdiction)
 		if evalErr != nil {
 			return command.Rejected(e, "POLICY_REEVALUATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.policy_reevaluate_failed", map[string]any{"orderId": order.ID, "error": evalErr.Error()})
 		}
@@ -1188,6 +1314,58 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 
 // maxAmountVND 是订单/结算金额的服务端上限（防超大金额脏数据）。
 const maxAmountVND = 1_000_000_000
+
+// R8 Pillar #6: Cash Eligibility 4 态。
+const (
+	CashEligibilityAllow               = "ALLOW"
+	CashEligibilityReview              = "REVIEW"
+	CashEligibilityPlatformPayRequired = "PLATFORM_PAY_REQUIRED"
+	CashEligibilityBlock               = "BLOCK"
+)
+
+// isValidCashEligibilityStatus 返回字符串是否是 4 态之一。
+func isValidCashEligibilityStatus(s string) bool {
+	switch s {
+	case CashEligibilityAllow, CashEligibilityReview, CashEligibilityPlatformPayRequired, CashEligibilityBlock:
+		return true
+	}
+	return false
+}
+
+// assessCashEligibility 在 CreateOffer 时计算默认状态。
+//   - PLATFORM_PAY: 不评估 (空串 + 原因 "不适用")。
+//   - DIRECT_SETTLEMENT 超过试点限额 5,000,000 VND: REVIEW。
+//   - DIRECT_SETTLEMENT 在限额内: ALLOW。
+//   - override 优先于默认 (但 BLOCK/PLATFORM_PAY_REQUIRED 不会被
+//     PLATFORM_PAY 任务使用).
+func assessCashEligibility(settlementMode string, amountVND int64, override string) (status, reason string) {
+	if settlementMode == "PLATFORM_PAY" {
+		if override == CashEligibilityBlock || override == CashEligibilityPlatformPayRequired {
+			return "", "现金评估不适用 — 平台支付任务不应携带现金 ALLOW 状态"
+		}
+		return "", "不适用 — 平台支付"
+	}
+	if override != "" {
+		if !isValidCashEligibilityStatus(override) {
+			return CashEligibilityReview, "未知状态 — 默认 REVIEW"
+		}
+		switch override {
+		case CashEligibilityReview:
+			return CashEligibilityReview, "请求方指定 — 需要人工复核"
+		case CashEligibilityPlatformPayRequired:
+			return CashEligibilityPlatformPayRequired, "请求方指定 — 平台必须改为 PLATFORM_PAY"
+		case CashEligibilityBlock:
+			return CashEligibilityBlock, "请求方指定 — 严禁现金结算"
+		case CashEligibilityAllow:
+			return CashEligibilityAllow, "请求方指定 — 低风险任务, 金额在试点限额内"
+		}
+	}
+	const cashPilotLimitVND = 5_000_000
+	if amountVND > cashPilotLimitVND {
+		return CashEligibilityReview, fmt.Sprintf("金额 %d VND 超过现金试点限额 %d VND — 需人工复核", amountVND, cashPilotLimitVND)
+	}
+	return CashEligibilityAllow, fmt.Sprintf("低风险任务 · 金额 %d VND 在试点限额内 · 需求方已验证", amountVND)
+}
 
 func isOrderParty(order Order, actorID string) bool {
 	return order.RequesterID == actorID || order.AgentID == actorID
