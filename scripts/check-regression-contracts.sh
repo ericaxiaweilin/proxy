@@ -144,6 +144,17 @@ require_test "AIBOUND-001" "./internal/marketplace" \
 require_test "AI-ACTOR-001" "./internal/aiboundary" \
   "TestAIEconomicAndParticipationBoundary" \
   "apps/api-go/internal/aiboundary/policy_test.go" || exit $?
+
+# ACT-PUBLISH-001: 原型中的发起活动必须落真实仓储，并保持活动免费、
+# 到店消费分离；AI 不得成为发布主体。
+require_test "ACT-PUBLISH-001" "./internal/activity" \
+  "TestPublishActivityCreatesFreeUserActivity" \
+  "apps/api-go/internal/activity/service_test.go" || exit $?
+require_test "ACT-PUBLISH-001" "./internal/activity" \
+  "TestPublishActivityRejectsAIAndInvalidVenueBoundary" \
+  "apps/api-go/internal/activity/service_test.go" || exit $?
+pnpm --dir apps/mobile test -- --run src/activity-client.test.ts
+echo "    ACT-PUBLISH-001: PASS (mobile publish + offline write guard)"
 require_test "AI-ACTOR-001" "./internal/aiboundary" \
   "TestHumanActionsAreOpen" \
   "apps/api-go/internal/aiboundary/policy_test.go" || exit $?

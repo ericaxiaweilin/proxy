@@ -51,6 +51,51 @@ func TestActivityInterestAndJoinAreRepositoryFacts(t *testing.T) {
 	}
 }
 
+// ACT-PUBLISH-001: user activities are persisted shared participation, with
+// the activity price separated from venue consumption.
+func TestPublishActivityCreatesFreeUserActivity(t *testing.T) {
+	s := New()
+	e := activityEnvelope("PublishActivity", "owner_1", "new")
+	e.Payload = map[string]any{"title": "周六咖啡拍照局", "time": "周六 15:00–17:00", "capacity": 6, "venueName": "木光咖啡", "venueIcon": "☕", "venueType": "CAFE", "realitySceneId": "scene_muguang", "desc": "一起拍照聊天", "consumptionTerm": "SPLIT"}
+	out := s.HandleContext(t.Context(), e)
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", out)
+	}
+	var body struct {
+		Activity Activity `json:"activity"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	a := body.Activity
+	if a.OwnerID != "owner_1" || a.Origin != "USER" || a.Status != "PUBLISHED" {
+		t.Fatalf("publisher identity/status lost: %+v", a)
+	}
+	if a.MoneyFlow != "FREE" || a.Price != "0₫" || a.PriceLabel != "免费参加" {
+		t.Fatalf("activity money boundary lost: %+v", a)
+	}
+	if a.ConsumptionTerm != "SPLIT" || a.Consumption == "" {
+		t.Fatalf("venue consumption missing: %+v", a)
+	}
+}
+
+func TestPublishActivityRejectsAIAndInvalidVenueBoundary(t *testing.T) {
+	base := map[string]any{"title": "活动", "time": "周六", "capacity": 4, "venueName": "地点", "venueIcon": "☕", "venueType": "CAFE", "realitySceneId": "scene_1", "desc": "共同参与", "consumptionTerm": "SPLIT"}
+	s := New()
+	ai := activityEnvelope("PublishActivity", "ai_1", "new")
+	ai.Actor = command.Actor{Type: "USER_ASSISTANT", ID: "ai_1"}
+	ai.Principal = command.Principal{Type: "USER_ASSISTANT", ID: "ai_1"}
+	ai.Payload = base
+	if out := s.HandleContext(t.Context(), ai); out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "AI_ACTION_FORBIDDEN" {
+		t.Fatalf("AI publish boundary missing: %+v", out)
+	}
+	invalid := activityEnvelope("PublishActivity", "owner", "new")
+	invalid.Payload = map[string]any{"title": "付费能力活动", "time": "周六", "capacity": 4, "venueName": "任意地点", "venueType": "HOTEL", "realitySceneId": "scene_2", "consumptionTerm": "SPLIT"}
+	if out := s.HandleContext(t.Context(), invalid); out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "ACTIVITY_VENUE_UNSUPPORTED" {
+		t.Fatalf("unsupported venue must route away from activity: %+v", out)
+	}
+}
+
 // R16.x: AI-ACTOR-002 — 任何 AI 主体 (PLATFORM_AI / USER_TWIN /
 // USER_ASSISTANT) 都不能报名 / 标记感兴趣 / checkin / 取消 / 标 no-show。
 // 服务端 aiboundary 必须拒绝，错误码 AI_ACTION_FORBIDDEN。这是

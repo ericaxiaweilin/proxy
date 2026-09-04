@@ -32,6 +32,15 @@ func (r *ActivityRepository) Seed(ctx context.Context, activities []activity.Act
 	return nil
 }
 
+func (r *ActivityRepository) Create(ctx context.Context, item activity.Activity) error {
+	payload, err := json.Marshal(item)
+	if err != nil {
+		return fmt.Errorf("encode activity: %w", err)
+	}
+	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO activity.activities (id,payload,interested_count,joined_count,capacity) VALUES ($1,$2,$3,$4,$5)`, item.ID, payload, item.Interested, item.Joined, item.Capacity)
+	return err
+}
+
 func (r *ActivityRepository) List(ctx context.Context) ([]activity.Activity, error) {
 	// R15.x+: 过滤 origin='TEST'。TEST 用途是测试 fixture 写入
 	// (如 activity_facet_integration_test.go 的 act_pg_* 'Lifecycle Pin')。

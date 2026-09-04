@@ -1,10 +1,10 @@
 // Activity 客户端：活动读模型（ListActivities）+ 感兴趣/参加命令。
 // 计数服务端权威；operationRef 承载 payload（zod 校验，fail-closed）。
 import type { Activity, CommandResult } from "@proxy/contracts";
-import { JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
+import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
-import type { SecureSessionStore, StoredSession } from "./secure-session";
+import { requireAuthenticatedServerSession, type SecureSessionStore, type StoredSession } from "./secure-session";
 
 export type ActivityCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
@@ -15,6 +15,18 @@ export type ActivityClientOptions = {
   authClient: ActivityCommandTransport;
   secureSessionStore: SecureSessionStore;
   now?: () => Date;
+};
+
+export type PublishActivityInput = {
+  title: string;
+  time: string;
+  capacity: number;
+  venueName: string;
+  venueIcon: string;
+  venueType: "CAFE" | "RESTAURANT";
+  realitySceneId: string;
+  desc: string;
+  consumptionTerm: "SPLIT" | "HOST_COVERS";
 };
 
 export class ActivityProtocolError extends Error {
@@ -56,10 +68,19 @@ export class ActivityClient {
     return JoinActivityPayloadSchema.parse(this.decodeOperationRef(result));
   }
 
+  public async publish(input: PublishActivityInput): Promise<Activity> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "PublishActivity", { type: "Activity", id: "new" }, { ...input });
+    const body = this.decodeOperationRef(result) as { activity?: unknown };
+    return ActivitySchema.parse(body.activity);
+  }
+
   private async requireSession(): Promise<StoredSession & { principal: NonNullable<StoredSession["principal"]> }> {
-    const session = await this.input.secureSessionStore.read();
-    if (!session?.principal) throw new ActivityProtocolError("an authenticated principal is required");
-    return session as StoredSession & { principal: NonNullable<StoredSession["principal"]> };
+    try {
+      return await requireAuthenticatedServerSession({ store: this.input.secureSessionStore });
+    } catch (error) {
+      throw new ActivityProtocolError(error instanceof Error ? error.message : "an authenticated principal is required");
+    }
   }
 
   // R15.22 fix: 同 LocalNetClient.optionalSession — server 端 ListActivities

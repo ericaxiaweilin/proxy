@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 12 — 2026-09-04
+
+- Promoted the prototype activity creation path into the active implementation
+  baseline: a signed-in human can publish a shared-participation activity at a
+  real CAFE/RESTAURANT scene and immediately open its server-backed detail.
+- Enforced the prototype boundary in the service: user activities are free;
+  venue consumption is separately declared as SPLIT or HOST_COVERS; paid
+  capability requests stay in the demand/opportunity pipeline.
+- Added `ACT-PUBLISH-001` backend, PostgreSQL, mobile command, and offline-write
+  guards. Participant invitation and activity chat remain explicit next gaps.
+
 ## Revision 11 — 2026-09-04
 
 - Added `docs/spec/Proxy_PRD_v1.7_R16_AI_Three_Actors_MoneyFlow_Direction.md`:

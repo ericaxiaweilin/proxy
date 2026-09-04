@@ -10,37 +10,41 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strconv"
 	"sync"
 
-	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
+	"github.com/proxy-app/proxy-api/internal/command"
 )
 
 // Activity 是本地活动（对齐基线 activityCatalog 字段）。
 type Activity struct {
-	ID             string `json:"activityId"`
-	Origin         string `json:"origin"` // PLATFORM | MERCHANT | USER | TEST (AI 不可作 origin — 平台发布主体)
-	Title          string `json:"title"`
-	Time           string `json:"time"`
-	People         string `json:"people"`
-	Price          string `json:"price"`
-	MoneyFlow      string `json:"moneyFlow"` // FREE | PAY_TO_JOIN | PAID_TO_ATTEND
-	PriceLabel     string `json:"priceLabel"`
-	Consumption    string `json:"consumption"`
-	VenueIcon      string `json:"venueIcon"`
-	VenueName      string `json:"venueName"`
-	RealitySceneID string `json:"realitySceneId,omitempty"`
-	VenueSpend     string `json:"venueSpend"`
-	VenueType      string `json:"venueType"` // CAFE | RESTAURANT
-	VenueTypeLabel string `json:"venueTypeLabel"`
-	Desc           string `json:"desc"`
-	Benefit        string `json:"benefit"`
-	QACount        int    `json:"qaCount"`
-	Interested     int    `json:"interested"`
-	Joined         int    `json:"joined"`
-	Capacity       int    `json:"capacity,omitempty"`
-	Shares         int    `json:"shares"`
-	ParentTitle    string `json:"parentTitle,omitempty"`
+	ID              string `json:"activityId"`
+	Origin          string `json:"origin"` // PLATFORM | MERCHANT | USER | TEST (AI 不可作 origin — 平台发布主体)
+	Title           string `json:"title"`
+	Time            string `json:"time"`
+	People          string `json:"people"`
+	Price           string `json:"price"`
+	MoneyFlow       string `json:"moneyFlow"` // FREE | PAY_TO_JOIN | PAID_TO_ATTEND
+	PriceLabel      string `json:"priceLabel"`
+	Consumption     string `json:"consumption"`
+	VenueIcon       string `json:"venueIcon"`
+	VenueName       string `json:"venueName"`
+	RealitySceneID  string `json:"realitySceneId,omitempty"`
+	VenueSpend      string `json:"venueSpend"`
+	VenueType       string `json:"venueType"` // CAFE | RESTAURANT
+	VenueTypeLabel  string `json:"venueTypeLabel"`
+	Desc            string `json:"desc"`
+	Benefit         string `json:"benefit"`
+	QACount         int    `json:"qaCount"`
+	Interested      int    `json:"interested"`
+	Joined          int    `json:"joined"`
+	Capacity        int    `json:"capacity,omitempty"`
+	Shares          int    `json:"shares"`
+	ParentTitle     string `json:"parentTitle,omitempty"`
+	OwnerID         string `json:"ownerId,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ConsumptionTerm string `json:"consumptionTerm,omitempty"`
 
 	// AI 状态字段。AIStatus != NONE 时客户端必须显示 AI 标注 +
 	// persona 头像 + 名字 (跟 X / Threads / 抖音 / 小红书的 "AI 生成"
@@ -60,7 +64,7 @@ type Activity struct {
 
 // Service 处理活动命令。生产使用 PostgreSQL；New() 保留内存仓储供隔离测试使用。
 type Service struct {
-	repository Repository
+	repository     Repository
 	participations *ParticipationStore
 }
 
@@ -72,6 +76,7 @@ var (
 
 type Repository interface {
 	Seed(ctx context.Context, activities []Activity) error
+	Create(ctx context.Context, activity Activity) error
 	List(ctx context.Context) ([]Activity, error)
 	ToggleInterest(ctx context.Context, activityID, actorID string) (Activity, bool, error)
 	Join(ctx context.Context, activityID, actorID string) (Activity, error)
@@ -86,9 +91,13 @@ type MemoryRepository struct {
 func New() *Service {
 	return NewWithRepository(&MemoryRepository{activities: make(map[string]*Activity)})
 }
-func NewWithParticipations(repo Repository, ps *ParticipationStore) *Service { return &Service{repository: repo, participations: ps} }
+func NewWithParticipations(repo Repository, ps *ParticipationStore) *Service {
+	return &Service{repository: repo, participations: ps}
+}
 
-func NewWithRepository(repository Repository) *Service { return &Service{repository: repository, participations: NewParticipationStore()} }
+func NewWithRepository(repository Repository) *Service {
+	return &Service{repository: repository, participations: NewParticipationStore()}
+}
 
 // SeedDefaults 幂等写入基线 5 条活动（平台/商家数据，启动时 seed）。
 func (s *Service) SeedDefaults() {
@@ -102,7 +111,7 @@ func (s *Service) SeedDefaults() {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "ListActivities", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
+	case "ListActivities", "PublishActivity", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
 		return true
 	default:
 		return false
@@ -117,6 +126,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	switch e.CommandType {
 	case "ListActivities":
 		return s.listActivities(ctx, e)
+	case "PublishActivity":
+		return s.publishActivity(ctx, e)
 	case "ToggleActivityInterest":
 		return s.toggleInterest(ctx, e)
 	case "JoinActivity":
@@ -132,6 +143,46 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	}
 }
 
+type publishActivityPayload struct {
+	Title           string `json:"title"`
+	Time            string `json:"time"`
+	Capacity        int    `json:"capacity"`
+	VenueName       string `json:"venueName"`
+	VenueIcon       string `json:"venueIcon"`
+	VenueType       string `json:"venueType"`
+	RealitySceneID  string `json:"realitySceneId"`
+	Description     string `json:"desc"`
+	ConsumptionTerm string `json:"consumptionTerm"`
+}
+
+func (s *Service) publishActivity(ctx context.Context, e command.Envelope) command.Result {
+	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.PublishActivity) {
+		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
+	}
+	var p publishActivityPayload
+	if !decode(e.Payload, &p) || p.Title == "" || p.Time == "" || p.VenueName == "" || p.RealitySceneID == "" || p.Capacity < 2 || p.Capacity > 50 {
+		return command.Rejected(e, "ACTIVITY_PUBLISH_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.publish_invalid", nil)
+	}
+	if p.VenueType != "CAFE" && p.VenueType != "RESTAURANT" {
+		return command.Rejected(e, "ACTIVITY_VENUE_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "activity.venue_unsupported", nil)
+	}
+	if p.ConsumptionTerm != "SPLIT" && p.ConsumptionTerm != "HOST_COVERS" {
+		return command.Rejected(e, "ACTIVITY_CONSUMPTION_TERM_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.consumption_term_invalid", nil)
+	}
+	consumption := "各自承担到店消费"
+	if p.ConsumptionTerm == "HOST_COVERS" {
+		consumption = "发起人承担约定的到店消费"
+	}
+	a := Activity{ID: "activity_" + e.CommandID, Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: map[string]string{"CAFE": "咖啡店", "RESTAURANT": "餐厅"}[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE"}
+	if err := s.repository.Create(ctx, a); err != nil {
+		return command.Rejected(e, "ACTIVITY_PUBLISH_FAILED", "INTERNAL", "SAFE_RETRY", "activity.publish_failed", nil)
+	}
+	return acceptedWithPayload(e, "Activity", a.ID, 1, "PUBLISHED", map[string]any{"activity": a}, nil)
+}
+
 // ---------- ListActivities ----------
 
 func (s *Service) listActivities(ctx context.Context, e command.Envelope) command.Result {
@@ -139,7 +190,9 @@ func (s *Service) listActivities(ctx context.Context, e command.Envelope) comman
 	if err != nil {
 		return command.Rejected(e, "ACTIVITY_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "activity.list_failed", nil)
 	}
-	for i := range list { normalizeActivityMoneyAndAI(&list[i]) }
+	for i := range list {
+		normalizeActivityMoneyAndAI(&list[i])
+	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Interested > list[j].Interested })
 	return acceptedWithPayload(e, "Activity", "", 0, "LISTED", map[string]any{
 		"activities": list,
@@ -148,9 +201,26 @@ func (s *Service) listActivities(ctx context.Context, e command.Envelope) comman
 }
 
 func normalizeActivityMoneyAndAI(a *Activity) {
-	if a.MoneyFlow == "" { if a.Price == "" || a.Price == "0₫" { a.MoneyFlow="FREE" } else { a.MoneyFlow="PAY_TO_JOIN" } }
-	if a.PriceLabel == "" { switch a.MoneyFlow { case "FREE": a.PriceLabel="免费参加"; case "PAID_TO_ATTEND": a.PriceLabel="参加后你可获得"; default: a.PriceLabel="你需支付" } }
-	if a.AIStatus == "" { a.AIStatus="NONE" }
+	if a.MoneyFlow == "" {
+		if a.Price == "" || a.Price == "0₫" {
+			a.MoneyFlow = "FREE"
+		} else {
+			a.MoneyFlow = "PAY_TO_JOIN"
+		}
+	}
+	if a.PriceLabel == "" {
+		switch a.MoneyFlow {
+		case "FREE":
+			a.PriceLabel = "免费参加"
+		case "PAID_TO_ATTEND":
+			a.PriceLabel = "参加后你可获得"
+		default:
+			a.PriceLabel = "你需支付"
+		}
+	}
+	if a.AIStatus == "" {
+		a.AIStatus = "NONE"
+	}
 }
 
 // ---------- ToggleActivityInterest ----------
@@ -160,7 +230,9 @@ type activityRefPayload struct {
 }
 
 func (s *Service) toggleInterest(ctx context.Context, e command.Envelope) command.Result {
-	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type,e.Principal.Type),aiboundary.InterestActivity) { return command.Rejected(e,"AI_ACTION_FORBIDDEN","AUTHORIZATION","AFTER_USER_ACTION","ai.action_forbidden",nil) }
+	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.InterestActivity) {
+		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
+	}
 	var p activityRefPayload
 	if !decode(e.Payload, &p) || p.ActivityID == "" {
 		return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)
@@ -186,7 +258,9 @@ func (s *Service) toggleInterest(ctx context.Context, e command.Envelope) comman
 // ---------- JoinActivity ----------
 
 func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.Result {
-	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type,e.Principal.Type),aiboundary.JoinActivity) { return command.Rejected(e,"AI_ACTION_FORBIDDEN","AUTHORIZATION","AFTER_USER_ACTION","ai.action_forbidden",nil) }
+	if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.JoinActivity) {
+		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
+	}
 	var p activityRefPayload
 	if !decode(e.Payload, &p) || p.ActivityID == "" {
 		return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)
@@ -227,7 +301,9 @@ func (s *Service) cancelActivity(ctx context.Context, e command.Envelope) comman
 		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
 	}
 	var p activityRefPayload
-	if !decode(e.Payload, &p) || p.ActivityID == "" { return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)}
+	if !decode(e.Payload, &p) || p.ActivityID == "" {
+		return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)
+	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
@@ -249,7 +325,9 @@ func (s *Service) checkinActivity(ctx context.Context, e command.Envelope) comma
 		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
 	}
 	var p activityRefPayload
-	if !decode(e.Payload, &p) || p.ActivityID == "" { return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)}
+	if !decode(e.Payload, &p) || p.ActivityID == "" {
+		return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)
+	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
@@ -274,7 +352,9 @@ func (s *Service) markNoShow(ctx context.Context, e command.Envelope) command.Re
 		return command.Rejected(e, "AI_ACTION_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "ai.action_forbidden", nil)
 	}
 	var p activityRefPayload
-	if !decode(e.Payload, &p) || p.ActivityID == "" { return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)}
+	if !decode(e.Payload, &p) || p.ActivityID == "" {
+		return command.Rejected(e, "INVALID_ACTIVITY_REF", "VALIDATION", "AFTER_USER_ACTION", "activity.invalid_ref", nil)
+	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
@@ -308,6 +388,16 @@ func (r *MemoryRepository) Seed(_ context.Context, activities []Activity) error 
 			r.order = append(r.order, item.ID)
 		}
 	}
+	return nil
+}
+func (r *MemoryRepository) Create(_ context.Context, activity Activity) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.activities[activity.ID]; exists {
+		return errors.New("activity already exists")
+	}
+	r.activities[activity.ID] = &activity
+	r.order = append(r.order, activity.ID)
 	return nil
 }
 func (r *MemoryRepository) List(_ context.Context) ([]Activity, error) {
@@ -387,9 +477,9 @@ func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, 
 // 内容责任 — 而不是把 AI 数字人伪装成"活动主办方"。
 //
 // UI 端三件套：
-//   * ORIGIN 徽标 (PLATFORM/MERCHANT/USER/TEST) — 永远指 *人*
-//   * aiStatus 副标识 (NONE/AI_ASSISTED/AI_GENERATED) — 指内容生成方式
-//   * aiActorKind + aiPersona* — 平台 AI 小美的辅助信息
+//   - ORIGIN 徽标 (PLATFORM/MERCHANT/USER/TEST) — 永远指 *人*
+//   - aiStatus 副标识 (NONE/AI_ASSISTED/AI_GENERATED) — 指内容生成方式
+//   - aiActorKind + aiPersona* — 平台 AI 小美的辅助信息
 //
 // 新增字段 MoneyFlow / PriceLabel 把"客户预算"和"到店消费"分开：
 // MoneyFlow ∈ { FREE, PAY_TO_JOIN, PAID_TO_ATTEND }。基线 5 条全是
@@ -404,7 +494,7 @@ func defaultCatalog() []*Activity {
 			Desc:    "周末限定主题场次，联合合作咖啡店开放。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 4, Interested: 36, Joined: 18, Capacity: 24, Shares: 12,
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_001", AIPersonaName: "平台 AI 小美 · 周末企划", AIPersonaAvatar: "☕", MoneyFlow:"FREE", PriceLabel:"免费参加",
+			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_001", AIPersonaName: "平台 AI 小美 · 周末企划", AIPersonaAvatar: "☕", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
 			ID: "merchant_photo_day", Origin: "PLATFORM", Title: "木光咖啡 · 周日下午拍照季",
@@ -415,7 +505,7 @@ func defaultCatalog() []*Activity {
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 3, Interested: 18, Joined: 6, Capacity: 10, Shares: 7,
 			ParentTitle: "Proxy 周末咖啡企划",
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_002", AIPersonaName: "平台 AI 小美 · 拍照季", AIPersonaAvatar: "📸", MoneyFlow:"FREE", PriceLabel:"免费参加",
+			AIStatus:    "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_002", AIPersonaName: "平台 AI 小美 · 拍照季", AIPersonaAvatar: "📸", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
 			ID: "user_photo_buddy", Origin: "PLATFORM", Title: "周六 咖啡拍照搭子",
@@ -425,7 +515,7 @@ func defaultCatalog() []*Activity {
 			Desc:    "互相帮对方拍照，一起喝咖啡；到店消费各自承担。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 1, Interested: 5, Joined: 1, Capacity: 2, Shares: 2,
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_003", AIPersonaName: "平台 AI 小美 · 拍照搭子", AIPersonaAvatar: "🤝", MoneyFlow:"FREE", PriceLabel:"免费参加",
+			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_003", AIPersonaName: "平台 AI 小美 · 拍照搭子", AIPersonaAvatar: "🤝", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
 			ID: "merchant_tasting", Origin: "PLATFORM", Title: "岚庭餐厅 · 新菜尝鲜晚餐",
@@ -435,7 +525,7 @@ func defaultCatalog() []*Activity {
 			Desc:    "餐厅开放新品尝鲜场次，按活动套餐到店消费。",
 			Benefit: "Proxy 活动预订赠餐后甜点",
 			QACount: 2, Interested: 24, Joined: 4, Capacity: 6, Shares: 9,
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_004", AIPersonaName: "平台 AI 小美 · 餐厅尝鲜", AIPersonaAvatar: "🍽️", MoneyFlow:"FREE", PriceLabel:"免费参加",
+			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_004", AIPersonaName: "平台 AI 小美 · 餐厅尝鲜", AIPersonaAvatar: "🍽️", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
 			ID: "user_dinner_group", Origin: "PLATFORM", Title: "周五一起吃新菜",
@@ -446,7 +536,7 @@ func defaultCatalog() []*Activity {
 			Benefit: "Proxy 活动预订赠餐后甜点",
 			QACount: 1, Interested: 8, Joined: 2, Capacity: 4, Shares: 3,
 			ParentTitle: "岚庭餐厅 · 新菜尝鲜晚餐",
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_005", AIPersonaName: "平台 AI 小美 · 饭局推荐", AIPersonaAvatar: "🍜", MoneyFlow:"FREE", PriceLabel:"免费参加",
+			AIStatus:    "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_005", AIPersonaName: "平台 AI 小美 · 饭局推荐", AIPersonaAvatar: "🍜", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 	}
 }

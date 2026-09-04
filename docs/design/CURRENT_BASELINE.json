@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 11,
+  "baselineRevision": 12,
   "updatedAt": "2026-09-04",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -66,11 +66,11 @@
     },
     {
       "scope": "activity",
-      "version": "MARKET_OPPORTUNITY_FILTER_R7_ACTIVITY",
-      "file": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
+      "version": "ACTIVITY_PUBLISH_FLOW_R1",
+      "file": "apps/mobile/assets/proxy-prototype.html",
       "status": "ACTIVE_SCREEN_REFERENCE",
       "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
-      "implementationStatus": "ATTENDANCE_AUTH_WIRED_ORGANIZER_DELEGATION_PENDING"
+      "implementationStatus": "USER_PUBLISH_AND_ATTENDANCE_WIRED_INVITATION_AND_CHAT_PENDING"
     },
     {
       "scope": "my-tasks",

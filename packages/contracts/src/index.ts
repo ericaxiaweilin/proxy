@@ -517,6 +517,9 @@ export const ActivitySchema = z.object({
   capacity: z.number().int().positive().optional(),
   shares: z.number().int().nonnegative(),
   parentTitle: z.string().optional(),
+  ownerId: z.string().optional(),
+  status: z.enum(["PUBLISHED", "CANCELLED"]).optional(),
+  consumptionTerm: z.enum(["SPLIT", "HOST_COVERS"]).optional(),
   // AI 助理信息。aiStatus != NONE 时客户端必显示 AI 标注 + persona
   // 头像 + 名字 (跟 X / Threads / 抖音 / 小红书的 "AI 生成" 标注
   // 一致)。aiPersona* 三件只当 aiStatus 表明是 AI 生成/辅助时才下发，

@@ -6,7 +6,7 @@
 // 需求/活动 切换为屏内视图（活动页 = 基线 activityhub：intro + filters + activityfeedcard）。
 // 新架构（服务端驱动）：活动读模型来自 ListActivities，感兴趣/参加走命令，计数服务端权威。
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Activity, TasksExperienceParams } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { color, Gradient, shadows } from "../theme";
@@ -76,7 +76,7 @@ export function TasksSurface({
   onEnterWorkspace: (target: WorkspaceTarget) => void;
   onPublishNeed: () => void;
 }): React.JSX.Element {
-  const [view, setView] = useState<"NEED" | "ACTIVITY" | "DETAIL">(
+  const [view, setView] = useState<"NEED" | "ACTIVITY" | "DETAIL" | "CREATE">(
     entry.view === "ACTIVITY" ? "ACTIVITY" : "NEED"
   );
   const [filter, setFilter] = useState<ActivityFilter>(
@@ -88,6 +88,12 @@ export function TasksSurface({
   const [interestedIn, setInterestedIn] = useState<ReadonlySet<string>>(new Set());
   const [joinedIds, setJoinedIds] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [createTitle, setCreateTitle] = useState("周六咖啡拍照局");
+  const [createTime, setCreateTime] = useState("周六 15:00–17:00");
+  const [createCapacity, setCreateCapacity] = useState("6");
+  const [createTerm, setCreateTerm] = useState<"SPLIT" | "HOST_COVERS">("SPLIT");
+  const [createVenueId, setCreateVenueId] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // 挂载时拉取服务端活动读模型（ListActivities）；失败不回落本地内容。
   const loadActivities = useCallback(async (): Promise<void> => {
@@ -159,6 +165,33 @@ export function TasksSurface({
     }
   }
 
+  async function publishActivity(): Promise<void> {
+    if (busy) return;
+    const venue = items.find((item) => item.activityId === createVenueId)
+      ?? items.find((item) => item.realitySceneId && (item.venueType === "CAFE" || item.venueType === "RESTAURANT"));
+    if (!venue?.realitySceneId || (venue.venueType !== "CAFE" && venue.venueType !== "RESTAURANT")) {
+      setCreateError("当前城市还没有可用于活动的平台商家，请先切换地点。");
+      return;
+    }
+    setBusy(true);
+    setCreateError(null);
+    try {
+      const created = await activities.publish({
+        title: createTitle.trim(), time: createTime.trim(), capacity: Number(createCapacity),
+        venueName: venue.venueName, venueIcon: venue.venueIcon, venueType: venue.venueType,
+        realitySceneId: venue.realitySceneId, desc: "共同参与真实场景；活动本身免费，到店消费按约定承担。",
+        consumptionTerm: createTerm
+      });
+      setItems((current) => [created, ...current]);
+      setDetailId(created.activityId);
+      setView("DETAIL");
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "活动发布失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const detailItem = detailId ? items.find((entry) => entry.activityId === detailId) ?? null : null;
 
   const visible = items.filter((item) => {
@@ -180,7 +213,30 @@ export function TasksSurface({
         </Pressable>
       </View>
 
-      {view === "DETAIL" && detailItem ? (
+      {view === "CREATE" ? (
+        <View style={styles.createCard}>
+          <Text style={styles.sectionTitle}>发起共同参与活动</Text>
+          <Text style={styles.activityIntroBody}>活动本身免费。若需要购买摄影、陪同、翻译等能力，请切回“需求”。</Text>
+          <TextInput value={createTitle} onChangeText={setCreateTitle} placeholder="活动名称" style={styles.createInput} />
+          <TextInput value={createTime} onChangeText={setCreateTime} placeholder="时间" style={styles.createInput} />
+          <TextInput value={createCapacity} onChangeText={setCreateCapacity} keyboardType="number-pad" placeholder="人数（2–50）" style={styles.createInput} />
+          <Text style={styles.createLabel}>选择平台商家</Text>
+          {items.filter((item) => item.realitySceneId && (item.venueType === "CAFE" || item.venueType === "RESTAURANT")).filter((item, index, all) => all.findIndex((x) => x.realitySceneId === item.realitySceneId) === index).map((venue) => (
+            <Pressable key={venue.realitySceneId} onPress={() => setCreateVenueId(venue.activityId)} style={[styles.createChoice, (createVenueId === venue.activityId || (!createVenueId && items.find((x) => x.realitySceneId)?.activityId === venue.activityId)) && styles.createChoiceOn]}>
+              <Text style={styles.createChoiceText}>{venue.venueIcon} {venue.venueName} · {venue.venueTypeLabel}</Text>
+            </Pressable>
+          ))}
+          <Text style={styles.createLabel}>到店消费（与活动价格分开）</Text>
+          <View style={styles.createChoiceRow}>
+            <Pressable onPress={() => setCreateTerm("SPLIT")} style={[styles.createChoice, createTerm === "SPLIT" && styles.createChoiceOn]}><Text style={styles.createChoiceText}>各自承担</Text></Pressable>
+            <Pressable onPress={() => setCreateTerm("HOST_COVERS")} style={[styles.createChoice, createTerm === "HOST_COVERS" && styles.createChoiceOn]}><Text style={styles.createChoiceText}>发起人请客</Text></Pressable>
+          </View>
+          <Text style={styles.createMoney}>活动价格：0₫ · 免费参加</Text>
+          {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
+          <Pressable disabled={busy} onPress={() => void publishActivity()} style={[styles.ctaPrimary, styles.createPublish]}><Text style={styles.ctaPrimaryText}>{busy ? "发布中…" : "确认并发布"}</Text></Pressable>
+          <Pressable onPress={() => setView("ACTIVITY")} style={styles.ctaLight}><Text style={styles.ctaLightText}>取消</Text></Pressable>
+        </View>
+      ) : view === "DETAIL" && detailItem ? (
         <ActivityDetail
           item={detailItem}
           interested={interestedIn.has(detailItem.activityId)}
@@ -198,7 +254,7 @@ export function TasksSurface({
               <Text style={styles.activityIntroTitle}>一起做点什么</Text>
               <Text style={styles.activityIntroBody}>选一个活动，再去真实的咖啡店或餐厅见面。</Text>
             </View>
-            <Pressable style={styles.activityIntroCta}>
+            <Pressable onPress={() => setView("CREATE")} style={styles.activityIntroCta}>
               <Text style={styles.activityIntroCtaText}>发起活动</Text>
             </Pressable>
           </View>
@@ -643,6 +699,16 @@ const styles = StyleSheet.create({
   activityEmptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   activityRetry: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   activityRetryText: { color: color.white, fontSize: 11, fontWeight: "700" },
+  createCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 10, marginVertical: 8, padding: 14, ...shadows.card },
+  createInput: { backgroundColor: "#F8F5FA", borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 13, paddingHorizontal: 12, paddingVertical: 10 },
+  createLabel: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 3 },
+  createChoiceRow: { flexDirection: "row", gap: 8 },
+  createChoice: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, padding: 10 },
+  createChoiceOn: { backgroundColor: "#F4FFD5", borderColor: "#C6DF63" },
+  createChoiceText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  createMoney: { color: "#3F4C0F", fontSize: 13, fontWeight: "900", marginTop: 4 },
+  createPublish: { alignItems: "center", backgroundColor: color.magenta, padding: 12 },
+  errorText: { color: "#B00020", fontSize: 11, lineHeight: 15 },
 
   // 基线 .activitysignals：border-top #F1EDF3 margin-top 8 padding-top 7 font 7.5。
   activitySignals: {
