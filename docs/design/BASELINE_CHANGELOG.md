@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 16 — 2026-09-04
+
+- 个人总管理页可编辑基本信息：新增“编辑资料”入口，复用个人主页编辑器
+  （Modal 移到根，各页可开）。无视觉新增，只是把已有编辑器挂到总管理页。
+- 二维码分享接通：两处 QrCard 的分享按钮调起系统分享（真实主页链接）；
+  文案诚实化（二维码图形升级中，先分享链接）。无新增图形资源。
+- 总管理注册文案与 AVAILABILITY_OPTIONS 对齐（忙碌/暂不接单/隐身）。
+- 我的活动页接真实活动服务（可参加/报名），去掉写死假数据。列表卡片沿用
+  现有 savedCard/orderTab 样式，无新视觉规范。
+
 ## Revision 15 — 2026-09-04
 
 - Closed the client side of R16.x single-source-of-truth: the

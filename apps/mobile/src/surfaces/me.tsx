@@ -1287,13 +1287,17 @@ export function MeSurface({
                 <Text style={styles.profileManageEditText}>换头像</Text>
               </Pressable>
             </View>
+            <Pressable accessibilityLabel="编辑资料" onPress={() => setProfileEditorOpen(true)} style={styles.profileManageEdit}>
+              <Text style={styles.profileManageEditText}>编辑资料</Text>
+            </Pressable>
 
             <Text style={styles.customSectionTitle}>二维码</Text>
-            <Text style={styles.customSectionHint}>扫码进入 Proxy 主页</Text>
+            <Text style={styles.customSectionHint}>分享主页链接</Text>
             <QrCard
               title={`${profileDraft.name} · Proxy`}
-              desc="扫码先进入 Proxy 主页。TikTok / Zalo 是否展示，继续遵循你的可见范围。"
-              actionLabel="分享二维码"
+              desc="分享你的 Proxy 主页链接（二维码图形升级中，先分享链接）。"
+              actionLabel="分享主页链接"
+              onAction={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
               alignCenter
             />
 
@@ -1430,21 +1434,6 @@ export function MeSurface({
             />
 
           </ScrollView>
-          <Modal animationType="slide" onRequestClose={() => setProfileEditorOpen(false)} transparent visible={profileEditorOpen}>
-            <View style={styles.profileEditorOverlay}>
-              <View style={styles.profileEditorSheet}>
-                <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => void saveProfile()}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
-                <Pressable onPress={() => void chooseProfileAvatar()} style={styles.profileEditorAvatarRow}>
-                  <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.profileEditorAvatar} />
-                  <View><Text style={styles.profileEditorAvatarTitle}>更换头像</Text><Text style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
-                </Pressable>
-                {([['name', '显示名称'], ['handle', '用户名'], ['bio', '一句话介绍'], ['city', '城市']] as const).map(([key, label]) => (
-                  <View key={key} style={styles.profileEditorField}><Text style={styles.profileEditorLabel}>{label}</Text><TextInput onChangeText={(value) => setProfileDraft((current) => ({ ...current, [key]: value }))} style={styles.profileEditorInput} value={profileDraft[key]} /></View>
-                ))}
-              </View>
-            </View>
-          </Modal>
-
           <Modal animationType="slide" onRequestClose={() => setInsightsSheetOpen(false)} transparent visible={insightsSheetOpen}>
             <View style={styles.sheetOverlay}>
               <View style={styles.sheetCard}>
@@ -1540,9 +1529,10 @@ export function MeSurface({
             <Text style={styles.subPageTitle}>我的二维码</Text>
 
             <QrCard
-              title="Huyen · Proxy"
-              desc="扫码先进入 Proxy 主页。TikTok / Zalo 是否展示，继续遵循你的可见范围。"
-              actionLabel="分享二维码"
+              title={`${profileDraft.name} · Proxy`}
+              desc="分享你的 Proxy 主页链接（二维码图形升级中，先分享链接）。TikTok / Zalo 是否展示，继续遵循你的可见范围。"
+              actionLabel="分享主页链接"
+              onAction={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
               alignCenter
             />
 
@@ -2047,6 +2037,21 @@ export function MeSurface({
           <Text style={styles.signOutText}>退出登录</Text>
         </Pressable>
       </ScrollView>
+      {/* 个人资料编辑器放根：个人总管理 / 个人主页都能开（原来只在个人主页分支里，总管理页打不开）。 */}
+      <Modal animationType="slide" onRequestClose={() => setProfileEditorOpen(false)} transparent visible={profileEditorOpen}>
+        <View style={styles.profileEditorOverlay}>
+          <View style={styles.profileEditorSheet}>
+            <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => void saveProfile()}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
+            <Pressable onPress={() => void chooseProfileAvatar()} style={styles.profileEditorAvatarRow}>
+              <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.profileEditorAvatar} />
+              <View><Text style={styles.profileEditorAvatarTitle}>更换头像</Text><Text style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
+            </Pressable>
+            {([['name', '显示名称'], ['handle', '用户名'], ['bio', '一句话介绍'], ['city', '城市']] as const).map(([key, label]) => (
+              <View key={key} style={styles.profileEditorField}><Text style={styles.profileEditorLabel}>{label}</Text><TextInput onChangeText={(value) => setProfileDraft((current) => ({ ...current, [key]: value }))} style={styles.profileEditorInput} value={profileDraft[key]} /></View>
+            ))}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

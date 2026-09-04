@@ -10,10 +10,10 @@
 //    （fail-closed），UI 必须 catch。
 //  - Phase 1 NOT-IN-SCOPE：LIBRARY / OBJECTS list / OBJECT DETAIL /
 //    OBJECT PREVIEW / 关系规则引擎 / 真实持久化。
-//  - R15.43：副空间 CRUD（add/remove/list/catalog）也走匿名 transport。
-//    限制：add/remove 仅对 CREATOR_COLLAB 关系有效（server 端校验）。
-//    设计目的：副空间是"用户主动运营"，不是"用户之间互动"，所以
-//    走匿名没问题；Phase 2 加 auth 也只是补 server header。
+//  - R15.43：副空间 CRUD。读（list/catalog）走匿名 transport；
+//    写（add/remove/updateConfig）FACET-AUTH-001 起必须走 authedRequester
+//    （带 session token），server 无 token 拒 401 + IP/principal 双限流。
+//    副空间是"用户主动运营"，写必须归属到人；匿名写已关闭。
 
 import type {
   ListFacetObjectsPayload,
@@ -38,14 +38,33 @@ import type { TransportResponse, TransportRequest } from "./auth-client";
  * PublicRequester 是匿名 transport 的最小接口。
  * 跟 SessionAuthClient.requestPublic 形状完全一致，支持 GET / POST /
  * DELETE / body JSON。
+ * 可选的 request 是认证通道（SessionAuthClient.request 形状）：当传入的
+ * requester 自带它（如 sessionAuthClient），写操作自动走它，不用改调用方。
  */
 export type PublicRequester = {
   requestPublic(path: string, init: { method: TransportRequest["method"]; body?: unknown }): Promise<TransportResponse>;
+  request?(path: string, init: { method: TransportRequest["method"]; body?: unknown }): Promise<TransportResponse>;
+};
+
+/**
+ * AuthedRequester 是认证 transport 的最小接口。
+ * 跟 SessionAuthClient.request 形状一致：自动带 bearer token，
+ * 401 时尝试 refresh，refresh 失败抛 SessionExpiredError。
+ * FACET-AUTH-001 起：所有 facet 写操作必须走这个通道，匿名写 server 拒 401。
+ */
+export type AuthedRequester = {
+  request(path: string, init: { method: TransportRequest["method"]; body?: unknown }): Promise<TransportResponse>;
 };
 
 export type FacetClientOptions = {
   requester: PublicRequester;
   baseUrl: string;
+  /**
+   * 写操作（add/remove/updateConfig）用的认证通道。不传则回退到
+   * requester（旧行为，仅测试/过渡用）——生产调用方必须传
+   * sessionAuthClient，否则 server 返 401。
+   */
+  authedRequester?: AuthedRequester;
 };
 
 export class FacetProtocolError extends Error {
@@ -58,6 +77,30 @@ export class FacetProtocolError extends Error {
 export class FacetClient {
   public constructor(private readonly input: FacetClientOptions) {}
 
+  /**
+   * 写通道：显式 authedRequester 优先；其次用 requester 自带的 request
+   *（sessionAuthClient 同时实现 requestPublic + request，调用方如 me.tsx
+   * 无需改动即自动带 token）；最后回退匿名 requestPublic（旧行为，仅测
+   * 试/过渡用——生产无 token 写 server 返 401）。
+   * Server 对写路径无 token 返 401，这里把 401 翻译成明确错误，
+   * 不让 UI 误报成"网络问题"。
+   */
+  private write(path: string, init: { method: TransportRequest["method"]; body?: unknown }): Promise<TransportResponse> {
+    const explicit = this.input.authedRequester;
+    if (explicit) return explicit.request(path, init);
+    const embedded = this.input.requester.request;
+    if (typeof embedded === "function") return embedded.call(this.input.requester, path, init);
+    return this.input.requester.requestPublic(path, init);
+  }
+
+  private static throwIfWriteRejected(response: TransportResponse, op: string): void {
+    if (response.status === 401) {
+      throw new FacetProtocolError(`facet ${op} requires sign-in (401): 请登录后重试`);
+    }
+    if (response.status === 429) {
+      throw new FacetProtocolError(`facet ${op} rate limited (429): 操作太频繁，请稍后重试`);
+    }
+  }
   /**
    * 列出当前用户的所有 FACET 对象（R15.25 Phase 1）。
    * 后端 hardcode 返回 3 个 mock 对象 (Ken / Linh / ABC Spa)；
@@ -100,7 +143,10 @@ export class FacetClient {
   /**
    * 把全局 catalog 里的某个 post 加入到某个对象的副空间。
    * 仅对 CREATOR_COLLAB 关系有效。
+   * FACET-AUTH-001: 必须经 authedRequester（带 token），匿名调 server 拒 401。
    * 失败：
+   *   - 401: 未登录（请登录后重试）
+   *   - 429: 操作太频繁
    *   - 400 object_not_creator_collab: 对象不是合作方
    *   - 404 post_not_in_catalog: postId 不在 catalog
    *   - 404 object_not_found: 对象不存在
@@ -109,10 +155,11 @@ export class FacetClient {
    */
   public async addSideSpacePost(objectId: string, postId: string): Promise<FacetSideSpacePost> {
     const path = `/v1/facet/objects/${encodeURIComponent(objectId)}/side-space/posts`;
-    const response = await this.input.requester.requestPublic(path, {
+    const response = await this.write(path, {
       method: "POST",
       body: { postId }
     });
+    FacetClient.throwIfWriteRejected(response, "addSideSpacePost");
     if (response.status < 200 || response.status >= 300) {
       throw new FacetProtocolError(`facet addSideSpacePost unexpected status: ${response.status} body=${JSON.stringify(response).slice(0, 200)}`);
     }
@@ -122,11 +169,12 @@ export class FacetClient {
 
   /**
    * 从某个对象的副空间移除一条 post。
-   * 失败：404 not_in_sidespace
+   * FACET-AUTH-001: 必须经 authedRequester。失败：401 未登录 / 429 限流 / 404 not_in_sidespace
    */
   public async removeSideSpacePost(objectId: string, postId: string): Promise<void> {
     const path = `/v1/facet/objects/${encodeURIComponent(objectId)}/side-space/posts/${encodeURIComponent(postId)}`;
-    const response = await this.input.requester.requestPublic(path, { method: "DELETE" });
+    const response = await this.write(path, { method: "DELETE" });
+    FacetClient.throwIfWriteRejected(response, "removeSideSpacePost");
     if (response.status < 200 || response.status >= 300) {
       throw new FacetProtocolError(`facet removeSideSpacePost unexpected status: ${response.status}`);
     }
@@ -162,14 +210,17 @@ export class FacetClient {
 
   /**
    * R15.51 — 提交阈值更新 (乐观锁 expectedVersion).
+   * FACET-AUTH-001: 必须经 authedRequester；updatedBy 由 server 按 principal
+   * 回填，客户端传什么都会被覆盖（填占位即可）。
    * 成功 → 新 config (Version+1); version mismatch → 409 (throw FacetProtocolError).
    */
   public async updateFacetConfig(payload: UpdateFacetConfigPayload): Promise<FacetConfig> {
     const path = "/v1/facet/config";
-    const response = await this.input.requester.requestPublic(path, {
+    const response = await this.write(path, {
       method: "POST",
       body: payload
     });
+    FacetClient.throwIfWriteRejected(response, "updateFacetConfig");
     if (response.status === 409) {
       throw new FacetProtocolError("facet config version mismatch (refresh and retry)");
     }

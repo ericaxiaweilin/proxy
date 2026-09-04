@@ -38,6 +38,14 @@ func TestActivityPostgresLifecycle(t *testing.T) {
 	id := "act_pg_" + itoa(run)
 	actor := "user_act_a_" + itoa(run)
 	actor2 := "user_act_b_" + itoa(run)
+	// TEST-HYGIENE-001: 同 marketplace——连共享库时清掉自己造的行
+	// （activities + interests + participants），别污染真机活动列表。
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM activity.interests WHERE activity_id=$1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM activity.participants WHERE activity_id=$1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM activity.activities WHERE id=$1`, id)
+	})
 
 	// 1. List round-trips the seeded payload + counters.
 	items, err := repo.List(ctx)
@@ -127,6 +135,12 @@ func TestFacetPostgresLifecycle(t *testing.T) {
 	repo := NewFacetRepository(pool)
 	id := "fct_a_" + itoa(run)
 	id2 := "fct_b_" + itoa(run)
+	// TEST-HYGIENE-001：“Proxy Buddy/Mentor” 测试对象曾残留在共享库，
+	// 直接出现在真机 FACET 列表。跑完必须删。
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM facet.objects WHERE id IN ($1,$2)`, id, id2)
+	})
 	seed := []facet.Object{{
 		ID:           id,
 		DisplayName:  "Proxy Buddy",
@@ -230,6 +244,11 @@ func TestActivityPostgresJSONBRoundTripPreservesMoneyFlowAndAI(t *testing.T) {
 
 	id := "act_pg_r16x_" + itoa(run)
 	repo := NewActivityRepository(pool)
+	// TEST-HYGIENE-001：同上，跑完删自己造的两行（round-trip 行 + TEST 过滤行）。
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM activity.activities WHERE id IN ($1,$2)`, id, "act_pg_r16x_test_"+itoa(run))
+	})
 	if err := repo.Seed(ctx, []activity.Activity{{
 		ID:             id,
 		Origin:         "PLATFORM",

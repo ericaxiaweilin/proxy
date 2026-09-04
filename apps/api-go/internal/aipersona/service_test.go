@@ -212,3 +212,30 @@ func TestRevokeUnknownConsentErrors(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
+
+// FLAKE-CONSENT-001: same-tick grants share GrantedAt; LatestConsent must
+// still return the later insert (insertion order), not a random map pick.
+// Without the tie-break, TestReconsentAfterRevoke flakes under full-suite
+// load when revoke + re-grant land in one clock tick.
+func TestLatestConsentTieBreaksByInsertionOrder(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	fixed := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	first := LikenessConsent{ID: "lic_first", PersonaID: "p", SubjectID: "u", ConsentKind: ConsentVisual, TermsVersion: "terms-1.1", GrantedAt: fixed}
+	second := LikenessConsent{ID: "lic_second", PersonaID: "p", SubjectID: "u", ConsentKind: ConsentVisual, TermsVersion: "terms-1.1", GrantedAt: fixed}
+	if err := repo.GrantConsent(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.GrantConsent(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		latest, err := repo.LatestConsent(ctx, "p", "u", "terms-1.1", fixed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if latest == nil || latest.ID != "lic_second" {
+			t.Fatalf("tie must resolve to later insert, got %+v", latest)
+		}
+	}
+}

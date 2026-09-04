@@ -10,6 +10,24 @@ import (
 	"github.com/proxy-app/proxy-api/internal/facet"
 )
 
+// requireFacetWrite 守卫所有 facet 写路径 (side-space POST/DELETE、config POST)。
+//
+// FACET-AUTH-001: 写操作必须带有效 session (401 无 token/坏 token)，
+// 且受 IP + principal 双限流 (429)。读路径保持匿名 (public feed 免登可读)。
+// 成功返回 authenticated principal ID；失败已写响应，调用方直接 return。
+func requireFacetWrite(s *Server, w http.ResponseWriter, r *http.Request) (string, bool) {
+	principalID, ok := authenticatePrincipal(s, w, r)
+	if !ok {
+		return "", false
+	}
+	if !s.rateAllow("ip:"+clientIP(r, s.TrustCloudflareIP)+":facet_write") ||
+		!s.rateAllow("principal:"+principalID+":facet_write") {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate_limited"})
+		return "", false
+	}
+	return principalID, true
+}
+
 // facetObjects 列出当前用户的所有 FACET 对象（R15.25 Phase 1）。
 //
 // Phase 1 = 静态 mock 三条数据（与 Proxy_COMPLETE_FiveRoot_FACET_v11.html
@@ -86,6 +104,10 @@ func (s *Server) facetSideSpace(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"posts": posts})
 	case http.MethodPost:
+		// FACET-AUTH-001: 写必须鉴权 + 限流 (GET 保持匿名)。
+		if _, ok := requireFacetWrite(s, w, r); !ok {
+			return
+		}
 		// POST: postID 来自 request body { postId }, pathPostID 不需要
 		var body struct {
 			PostID string `json:"postId"`
@@ -120,6 +142,10 @@ func (s *Server) facetSideSpace(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, post)
 	case http.MethodDelete:
+		// FACET-AUTH-001: 写必须鉴权 + 限流。
+		if _, ok := requireFacetWrite(s, w, r); !ok {
+			return
+		}
 		if pathPostID == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "post_id_required"})
 			return
@@ -162,9 +188,9 @@ func (s *Server) facetSideSpaceCatalog(w http.ResponseWriter, r *http.Request) {
 //	GET   /v1/facet/config     → 返当前 FacetConfig
 //	POST  /v1/facet/config     body: { expectedVersion, patch } → 更新 + 返新 config
 //
-// 设计: GET 匿名可读 (跟 ListFacetObjects 一致); POST 需要更新人
-// (UpdatedBy 必填) — 匿名返回 401。 Phase 1.5 匿名能 POST, 不出生产。
-// 乐观锁 expectedVersion 跟 repo.Update 一致, 不匹配返 409.
+// 设计: GET 匿名可读 (跟 ListFacetObjects 一致); POST 必须带有效 session
+// (FACET-AUTH-001: 匿名 401)，UpdatedBy 由 server 按 principal 回填，
+// 客户端自填值被覆盖。乐观锁 expectedVersion 跟 repo.Update 一致, 不匹配返 409.
 func (s *Server) facetConfig(w http.ResponseWriter, r *http.Request) {
 	if s.Facet == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "facet_not_configured"})
@@ -179,6 +205,12 @@ func (s *Server) facetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, cfg)
 	case http.MethodPost:
+		// FACET-AUTH-001: config 写必须鉴权 + 限流；UpdatedBy 以 server 端
+		// authenticated principal 为准，客户端自填值直接覆盖（防伪造运营人）。
+		principalID, ok := requireFacetWrite(s, w, r)
+		if !ok {
+			return
+		}
 		var req struct {
 			ExpectedVersion int                    `json:"expectedVersion"`
 			Patch           facet.FacetConfigPatch `json:"patch"`
@@ -187,10 +219,7 @@ func (s *Server) facetConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 			return
 		}
-		if req.Patch.UpdatedBy == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "updated_by_required"})
-			return
-		}
+		req.Patch.UpdatedBy = principalID
 		updated, err := s.Facet.UpdateFacetConfig(r.Context(), req.ExpectedVersion, req.Patch)
 		if err != nil {
 			if errors.Is(err, facet.ErrConfigVersionMismatch) {

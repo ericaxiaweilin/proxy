@@ -25,6 +25,16 @@ func TestMarketplacePostgresLifecycle(t *testing.T) {
 	viewer := "user_mkt_viewer_" + itoa(run)
 	applicant := "user_mkt_app_" + itoa(run)
 	applicant2 := "user_mkt_app2_" + itoa(run)
+	id2 := "mkt_op_pg2_" + itoa(run)
+	// TEST-HYGIENE-001: 集成测试连的是共享库（DATABASE_URL 优先）时，
+	// 必须清掉自己造的行。之前没清，每跑一次就在真机市场多两条
+	// “周五城市摄影局/周六徒步”垃圾，把真实种子淹了。
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM marketplace.dismissals WHERE opportunity_id IN ($1,$2)`, id, id2)
+		_, _ = pool.Exec(ctx, `DELETE FROM marketplace.applications WHERE opportunity_id IN ($1,$2)`, id, id2)
+		_, _ = pool.Exec(ctx, `DELETE FROM marketplace.opportunities WHERE id IN ($1,$2)`, id, id2)
+	})
 
 	op := marketplace.Opportunity{
 		ID: id, OwnerID: owner, Title: "周五城市摄影局", ShortTitle: "摄影局",
@@ -175,13 +185,13 @@ func TestMarketplacePostgresLifecycle(t *testing.T) {
 
 	// 6. Create (distinct from Seed) lands and is visible.
 	nextOp := op
-	nextOp.ID = "mkt_op_pg2_" + itoa(run)
+	nextOp.ID = id2
 	nextOp.OwnerID = stranger
 	nextOp.Title = "周六徒步"
 	if err := repo.Create(ctx, nextOp); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := repo.Get(ctx, "mkt_op_pg2_"+itoa(run)); err != nil {
+	if _, err := repo.Get(ctx, id2); err != nil {
 		t.Fatalf("Create did not persist: %v", err)
 	}
 
@@ -216,6 +226,11 @@ func TestMarketplacePostgresJSONBRoundTripPreservesMoneyFlow(t *testing.T) {
 
 	id := "mkt_op_pg_r16x_" + itoa(run)
 	repo := NewMarketplaceRepository(pool)
+	// TEST-HYGIENE-001：同上，跑完删自己造的行。
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM marketplace.opportunities WHERE id=$1`, id)
+	})
 
 	if err := repo.Seed(ctx, []marketplace.Opportunity{{
 		ID:         id,

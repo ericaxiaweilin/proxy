@@ -6,8 +6,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
+	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
@@ -37,6 +39,39 @@ func newFacetTestServer() *Server {
 		media.New(),
 		contribution.New(),
 	)
+}
+
+// newAuthedFacetTestServer: FACET-AUTH-001 写路径回归用的带鉴权 server。
+// 复用 server_test.go 的 strictAuthenticator；有效 token 唯一映射
+// principal user_real_001。
+func newAuthedFacetTestServer() *Server {
+	srv := newFacetTestServer()
+	srv.Authenticator = strictAuthenticator{
+		validTokens: map[string]identity.AuthenticatedSession{
+			"valid_access_001": {
+				Actor:       command.Actor{Type: "USER", ID: "user_real_001"},
+				Principal:   command.Principal{Type: "INDIVIDUAL", ID: "user_real_001"},
+				SessionID:   "session_real_001",
+				AuthContext: map[string]any{"sessionId": "session_real_001"},
+			},
+		},
+	}
+	return srv
+}
+
+func authedFacetRequest(method, path, body string) *http.Request {
+	var reader *strings.Reader
+	if body == "" {
+		reader = strings.NewReader("")
+	} else {
+		reader = strings.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", "Bearer valid_access_001")
+	return req
 }
 
 // TestFacetObjects_GET_OK 验证 R15.25 Phase 1 wire 形状:
@@ -170,13 +205,13 @@ func TestFacetSideSpace_NonCollabIsEmpty(t *testing.T) {
 }
 
 // TestFacetSideSpace_AddRemove —— R15.43 端到端 add / remove
+// FACET-AUTH-001: 写请求必须带有效 Authorization，否则 401。
 func TestFacetSideSpace_AddRemove(t *testing.T) {
-	srv := newFacetTestServer()
+	srv := newAuthedFacetTestServer()
 
 	// add ss-capability-compare to spa
 	addBody := `{"postId":"ss-capability-compare"}`
-	addReq := httptest.NewRequest(http.MethodPost, "/v1/facet/objects/spa/side-space/posts", strings.NewReader(addBody))
-	addReq.Header.Set("Content-Type", "application/json")
+	addReq := authedFacetRequest(http.MethodPost, "/v1/facet/objects/spa/side-space/posts", addBody)
 	addRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(addRec, addReq)
 	if addRec.Code != http.StatusOK {
@@ -196,7 +231,7 @@ func TestFacetSideSpace_AddRemove(t *testing.T) {
 	}
 
 	// remove
-	delReq := httptest.NewRequest(http.MethodDelete, "/v1/facet/objects/spa/side-space/posts/ss-capability-compare", nil)
+	delReq := authedFacetRequest(http.MethodDelete, "/v1/facet/objects/spa/side-space/posts/ss-capability-compare", "")
 	delRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(delRec, delReq)
 	if delRec.Code != http.StatusOK {
@@ -214,11 +249,11 @@ func TestFacetSideSpace_AddRemove(t *testing.T) {
 }
 
 // TestFacetSideSpace_AddToNonCollabRejected —— R15.43 给 Ken 加副空间 → 400
+// （先过鉴权，再被 domain 规则拒绝；无 token 的是 401，见 FACET-AUTH-001。）
 func TestFacetSideSpace_AddToNonCollabRejected(t *testing.T) {
-	srv := newFacetTestServer()
+	srv := newAuthedFacetTestServer()
 	addBody := `{"postId":"ss-store-env"}`
-	addReq := httptest.NewRequest(http.MethodPost, "/v1/facet/objects/ken/side-space/posts", strings.NewReader(addBody))
-	addReq.Header.Set("Content-Type", "application/json")
+	addReq := authedFacetRequest(http.MethodPost, "/v1/facet/objects/ken/side-space/posts", addBody)
 	addRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(addRec, addReq)
 	if addRec.Code != http.StatusBadRequest {
@@ -228,12 +263,11 @@ func TestFacetSideSpace_AddToNonCollabRejected(t *testing.T) {
 
 // TestFacetSideSpace_AddAlreadyAddedConflict —— R15.43 重复 add → 409
 func TestFacetSideSpace_AddAlreadyAddedConflict(t *testing.T) {
-	srv := newFacetTestServer()
+	srv := newAuthedFacetTestServer()
 	// 用一个没被 seed 的 catalog post
 	addBody := `{"postId":"ss-collab-1"}`
 	for i := 0; i < 2; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/v1/facet/objects/spa/side-space/posts", strings.NewReader(addBody))
-		req.Header.Set("Content-Type", "application/json")
+		req := authedFacetRequest(http.MethodPost, "/v1/facet/objects/spa/side-space/posts", addBody)
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
 		if i == 0 && rec.Code != http.StatusOK {
@@ -260,5 +294,93 @@ func TestFacetSideSpace_Catalog(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &raw)
 	if len(raw.Posts) != 5 {
 		t.Errorf("catalog should have 5 posts, got %d", len(raw.Posts))
+	}
+}
+
+// FACET-AUTH-001: facet 写路径匿名必须 401（side-space POST/DELETE、config POST）。
+// 匿名可读（GET）不受影响 —— public feed 免登可读不变量。
+func TestFacetSideSpace_WriteRequiresAuth(t *testing.T) {
+	srv := newAuthedFacetTestServer()
+
+	anon := func(method, path, body string) *httptest.ResponseRecorder {
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, path, nil)
+		} else {
+			req = httptest.NewRequest(method, path, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := anon(http.MethodPost, "/v1/facet/objects/spa/side-space/posts", `{"postId":"ss-collab-1"}`); rec.Code != http.StatusUnauthorized {
+		t.Errorf("anon POST side-space: expected 401, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := anon(http.MethodDelete, "/v1/facet/objects/spa/side-space/posts/ss-collab-1", ""); rec.Code != http.StatusUnauthorized {
+		t.Errorf("anon DELETE side-space: expected 401, got %d", rec.Code)
+	}
+	if rec := anon(http.MethodPost, "/v1/facet/config", `{"expectedVersion":1,"patch":{"updatedBy":"spoofed"}}`); rec.Code != http.StatusUnauthorized {
+		t.Errorf("anon POST config: expected 401, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// 坏 token 同样 401。
+	badReq := httptest.NewRequest(http.MethodPost, "/v1/facet/objects/spa/side-space/posts", strings.NewReader(`{"postId":"ss-collab-1"}`))
+	badReq.Header.Set("Content-Type", "application/json")
+	badReq.Header.Set("Authorization", "Bearer forged_token")
+	badRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusUnauthorized {
+		t.Errorf("forged token: expected 401, got %d", badRec.Code)
+	}
+
+	// 匿名 GET 仍然 200（读路径不变量）。
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/facet/objects/spa/side-space/posts", nil)
+	getRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Errorf("anon GET side-space: expected 200, got %d", getRec.Code)
+	}
+}
+
+// FACET-AUTH-001: config POST 的 UpdatedBy 必须由 server 按 principal 回填，
+// 客户端自填 "ops_panel" 之类必须被覆盖（防伪造运营人）。
+func TestFacetConfig_PostStampsPrincipal(t *testing.T) {
+	srv := newAuthedFacetTestServer()
+	req := authedFacetRequest(http.MethodPost, "/v1/facet/config", `{"expectedVersion":1,"patch":{"sideSpaceHighThreshold":9,"updatedBy":"ops_panel"}}`)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authed config POST: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var cfg struct {
+		UpdatedBy string `json:"updatedBy"`
+		Version   int    `json:"version"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("config response not JSON: %v", err)
+	}
+	if cfg.UpdatedBy != "user_real_001" {
+		t.Errorf("updatedBy must be server-stamped principal, got %q", cfg.UpdatedBy)
+	}
+}
+
+// FACET-AUTH-001: facet 写路径高频刷必须 429（IP + principal 双限流）。
+func TestFacetWrite_RateLimited(t *testing.T) {
+	srv := newAuthedFacetTestServer()
+	srv.RateLimit = NewRateLimiter(time.Minute, 1)
+
+	first := authedFacetRequest(http.MethodPost, "/v1/facet/objects/spa/side-space/posts", `{"postId":"ss-collab-1"}`)
+	firstRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first write: expected 200, got %d body=%s", firstRec.Code, firstRec.Body.String())
+	}
+	second := authedFacetRequest(http.MethodPost, "/v1/facet/objects/spa/side-space/posts", `{"postId":"ss-store-env"}`)
+	secondRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusTooManyRequests {
+		t.Errorf("second rapid write: expected 429, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
 }
