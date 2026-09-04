@@ -37,12 +37,14 @@ func (s *Service) getAccountPreferences(ctx context.Context, e command.Envelope)
 		return command.Rejected(e, "ACCOUNT_PREFERENCES_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.account_preferences_forbidden", nil)
 	}
 	prefs, err := s.preferencesRepo().GetAccountPreferences(ctx, e.Actor.ID)
+	exists := true
 	if errors.Is(err, ErrAccountPreferencesNotFound) {
+		exists = false
 		prefs = AccountPreferences{UserAccountID: e.Actor.ID, SocialAccounts: []any{}, CollaborationTypes: []string{}, Version: 0}
 	} else if err != nil {
 		return command.Rejected(e, "ACCOUNT_PREFERENCES_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.account_preferences_read_failed", nil)
 	}
-	payload, _ := json.Marshal(map[string]any{"preferences": prefs})
+	payload, _ := json.Marshal(map[string]any{"exists": exists, "preferences": prefs})
 	result := command.Accepted(e, "AccountPreferences", e.Actor.ID, prefs.Version, "READ", nil)
 	result.OperationRef = string(payload)
 	return result

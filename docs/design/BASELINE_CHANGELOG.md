@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 7 — 2026-09-04
+
+- Preserved device-only settings during the first account-sync upgrade instead
+  of treating an absent server record as authoritative empty data.
+- Serialized preference writes to prevent slow, older requests from restoring
+  stale settings; added the `UI-SOCIAL-003` regression contract.
+
 ## Revision 6 — 2026-09-04
 
 - Upgraded social and collaboration settings from device-only persistence to

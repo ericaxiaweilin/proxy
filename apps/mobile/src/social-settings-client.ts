@@ -6,13 +6,22 @@ import type { SocialSettingsRecord } from "./social-settings-store";
 
 export class SocialSettingsClient {
   private sequence = 0;
+  private writeChain: Promise<void> = Promise.resolve();
   public constructor(private readonly input: { authClient: { request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse> }; secureSessionStore: SecureSessionStore; now?: () => Date }) {}
 
-  public async read(): Promise<SocialSettingsRecord> {
-    return this.toRecord(this.body(await this.command("GetAccountPreferences", {})).preferences);
+  public async read(): Promise<SocialSettingsRecord | undefined> {
+    const body = this.body(await this.command("GetAccountPreferences", {}));
+    if (body.exists === false) return undefined;
+    return this.toRecord(body.preferences);
   }
 
-  public async write(value: SocialSettingsRecord): Promise<SocialSettingsRecord> {
+  public write(value: SocialSettingsRecord): Promise<SocialSettingsRecord> {
+    const operation = this.writeChain.then(() => this.performWrite(value));
+    this.writeChain = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private async performWrite(value: SocialSettingsRecord): Promise<SocialSettingsRecord> {
     const preferences = {
       socialAccounts: value.accounts,
       showOnMerchant: value.merchant,

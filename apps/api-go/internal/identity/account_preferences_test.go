@@ -46,3 +46,15 @@ func TestAccountPreferencesRejectsAnonymousActorAndOversizedContact(t *testing.T
 		t.Fatalf("unexpected validation result: %#v", got)
 	}
 }
+
+// UI-SOCIAL-003: a missing server row must not masquerade as authoritative defaults.
+func TestAccountPreferencesReportsMissingRecordWithoutInventingServerTruth(t *testing.T) {
+	result := New(nil).Handle(preferencesEnvelope("GetAccountPreferences", "user_new", nil))
+	var body map[string]any
+	if err := json.Unmarshal([]byte(result.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["exists"] != false {
+		t.Fatalf("missing record must report exists=false, got %#v", body)
+	}
+}
