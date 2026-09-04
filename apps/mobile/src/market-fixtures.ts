@@ -58,6 +58,13 @@ export interface MarketOpportunity {
   coord?: [number, number];
   ownedByViewer?: boolean;
   appliedByViewer?: boolean;
+  // R15.x (P1 market 附近): server (apps/api-go/internal/marketplace/
+  // service.go) 在 ListMarketOpportunities 返回 lat/lng/travelSource.
+  // 客户端不传 userLat/userLng 时, lat/lng 走 seeded, travelSource=
+  // "seeded"; 传了就走 haversine 路径, travelSource="user_distance".
+  lat?: number;
+  lng?: number;
+  travelSource?: "seeded" | "user_distance" | "unknown";
 }
 
 export const MARKET_EXPERIENCES: MarketExperience[] = [

@@ -23,9 +23,16 @@ func (r *MarketplaceRepository) Seed(ctx context.Context, opportunities []market
 		if err != nil {
 			return fmt.Errorf("encode market opportunity: %w", err)
 		}
+		// R15.x (P1 market 附近): payload 包含 lat/lng/travelSource,
+		// 必须 ON CONFLICT DO UPDATE 才能让老 seed 拿到新坐标. ON
+		// CONFLICT DO NOTHING (之前) 会让老行 payload 永远停在种子首次
+		// 插入时的版本, haversine 路径会落到 Lat==nil 分支返回
+		// "seeded" — 也就是说"市场附近"特性 在现有 PG 上只是空操作。
+		// owner_id / responses 不动, 只刷 payload (lat/lng/travelSource
+		// 都在 payload 里)。
 		if _, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 			INSERT INTO marketplace.opportunities (id, owner_id, payload, responses)
-			VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING`,
+			VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload`,
 			opportunity.ID, opportunity.OwnerID, payload, opportunity.Responses); err != nil {
 			return err
 		}

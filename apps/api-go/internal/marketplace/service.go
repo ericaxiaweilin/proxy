@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -70,6 +71,15 @@ type Opportunity struct {
 	Countdown   string   `json:"countdown"`
 	Owned       bool     `json:"ownedByViewer"`
 	Applied     bool     `json:"appliedByViewer"`
+	// R15.x: Optional geo coordinates for the opportunity. When
+	// ListMarketOpportunities is called with userLat/userLng in
+	// the payload, the server recomputes Travel via haversine
+	// distance. Lat/Lng stay optional because some opportunities
+	// are remote (online) or the publisher didn't disclose a
+	// precise venue.
+	Lat         *float64 `json:"lat,omitempty"`
+	Lng         *float64 `json:"lng,omitempty"`
+	TravelSource string  `json:"travelSource,omitempty"` // "seeded" | "user_distance" | "unknown"
 }
 
 type Application struct {
@@ -90,11 +100,24 @@ func NewWithRepository(repository Repository) *Service { return &Service{reposit
 
 func (s *Service) SeedDefaults() {
 	travel18, travel24, travel52, travel20 := 18, 24, 52, 20
+	// R15.x: real-world lat/lng for the seeded venues. Hanoi
+	// (Hoàn Kiếm ~21.0285,105.8542) is the default. Bắc Ninh
+	// Yên Phong is ~21.16,105.96 (a ~20 km ride from central
+	// Hanoi — the original 52 min "Travel" is consistent with
+	// that). When the mobile client passes userLat/userLng to
+	// ListMarketOpportunities, the server recomputes Travel via
+	// haversine + a 30 km/h city-ride heuristic. When the client
+	// has not (yet) granted foreground GPS, the seeded Travel
+	// stands in and the row is tagged travelSource="seeded".
+	hkLat, hkLng := 21.0285, 105.8542
+	westLakeLat, westLakeLng := 21.0500, 105.8197
+	bacNinhLat, bacNinhLng := 21.1600, 105.9600
+	hkOldQuartersLat, hkOldQuartersLng := 21.0338, 105.8500
 	_ = s.repository.Seed(context.Background(), []Opportunity{
-		{ID: "biz_negotiation", Title: "商务谈判陪同 · 中英越沟通", ShortTitle: "谈判", Theme: "商务谈判", Date: "今天", Time: "14:00–18:00", Location: "河内 · Hoàn Kiếm", Price: "1,200,000₫", Owner: "Nova Trading", OwnerID: "seed_nova", OwnerType: "BUSINESS", Match: "94%", Responses: 6, Posted: "12 分钟前", Skills: "中文 · 英语 · 商务沟通", Verified: true, Lens: []string{"NOW", "NEARBY"}, Travel: &travel18, Signal: "急需", SignalClass: "hot", Countdown: "42m"},
-		{ID: "event_photo", Title: "品牌活动摄影 / 短视频", ShortTitle: "摄影", Theme: "摄影", Date: "周六", Time: "15:00–20:00", Location: "河内 · 西湖", Price: "1,500,000₫", Owner: "Bonsaidon", OwnerID: "seed_bonsaidon", OwnerType: "BUSINESS", Match: "91%", Responses: 9, Posted: "25 分钟前", Skills: "摄影 · 基础剪辑 · 活动经验", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel24, Signal: "热门", Countdown: "3天"},
-		{ID: "supplier_visit", Title: "供应商拜访 · 中文陪同", ShortTitle: "陪同", Theme: "商务陪同", Date: "明天", Time: "09:00–15:00", Location: "北宁 · Yên Phong", Price: "1,100,000₫", Owner: "Acme VN", OwnerID: "seed_acme", OwnerType: "BUSINESS", Match: "89%", Responses: 3, Posted: "42 分钟前", Skills: "中文 · 制造业 · 会议记录", Verified: true, Lens: []string{"BOOKED"}, Travel: &travel52, Signal: "新发布", Countdown: "明天"},
-		{ID: "city_companion", Title: "河内半日城市同行 / 拍照", ShortTitle: "同行", Theme: "城市同行", Date: "周日", Time: "13:30–18:00", Location: "河内 · 西湖 → 老城区", Price: "950,000₫", Owner: "Chen", OwnerID: "seed_chen", OwnerType: "PERSON", Match: "87%", Responses: 11, Posted: "1 小时前", Skills: "中文 · 路线 · 轻摄影", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel20, Signal: "高响应", Countdown: "周日"},
+		{ID: "biz_negotiation", Title: "商务谈判陪同 · 中英越沟通", ShortTitle: "谈判", Theme: "商务谈判", Date: "今天", Time: "14:00–18:00", Location: "河内 · Hoàn Kiếm", Price: "1,200,000₫", Owner: "Nova Trading", OwnerID: "seed_nova", OwnerType: "BUSINESS", Match: "94%", Responses: 6, Posted: "12 分钟前", Skills: "中文 · 英语 · 商务沟通", Verified: true, Lens: []string{"NOW", "NEARBY"}, Travel: &travel18, Lat: &hkLat, Lng: &hkLng, TravelSource: "seeded", Signal: "急需", SignalClass: "hot", Countdown: "42m"},
+		{ID: "event_photo", Title: "品牌活动摄影 / 短视频", ShortTitle: "摄影", Theme: "摄影", Date: "周六", Time: "15:00–20:00", Location: "河内 · 西湖", Price: "1,500,000₫", Owner: "Bonsaidon", OwnerID: "seed_bonsaidon", OwnerType: "BUSINESS", Match: "91%", Responses: 9, Posted: "25 分钟前", Skills: "摄影 · 基础剪辑 · 活动经验", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel24, Lat: &westLakeLat, Lng: &westLakeLng, TravelSource: "seeded", Signal: "热门", Countdown: "3天"},
+		{ID: "supplier_visit", Title: "供应商拜访 · 中文陪同", ShortTitle: "陪同", Theme: "商务陪同", Date: "明天", Time: "09:00–15:00", Location: "北宁 · Yên Phong", Price: "1,100,000₫", Owner: "Acme VN", OwnerID: "seed_acme", OwnerType: "BUSINESS", Match: "89%", Responses: 3, Posted: "42 分钟前", Skills: "中文 · 制造业 · 会议记录", Verified: true, Lens: []string{"BOOKED"}, Travel: &travel52, Lat: &bacNinhLat, Lng: &bacNinhLng, TravelSource: "seeded", Signal: "新发布", Countdown: "明天"},
+		{ID: "city_companion", Title: "河内半日城市同行 / 拍照", ShortTitle: "同行", Theme: "城市同行", Date: "周日", Time: "13:30–18:00", Location: "河内 · 西湖 → 老城区", Price: "950,000₫", Owner: "Chen", OwnerID: "seed_chen", OwnerType: "PERSON", Match: "87%", Responses: 11, Posted: "1 小时前", Skills: "中文 · 路线 · 轻摄影", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel20, Lat: &hkOldQuartersLat, Lng: &hkOldQuartersLng, TravelSource: "seeded", Signal: "高响应", Countdown: "周日"},
 	})
 }
 
@@ -112,6 +135,31 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		items, err := s.repository.List(ctx, e.Actor.ID)
 		if err != nil {
 			return command.Rejected(e, "MARKET_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "market.list_failed", nil)
+		}
+		// R15.x: when the client passes a foreground-location
+		// fix (userLat + userLng), the server recomputes Travel
+		// via haversine. The mobile MarketExperience / list view
+		// sorts NEARBY / RECOMMEND by this value, so it must
+		// reflect the viewer's actual position rather than the
+		// editor's "河内 18 min" placeholder. If the publisher
+		// did not provide Lat/Lng, the row is left as-seeded
+		// and tagged travelSource="seeded" so the UI can show
+		// a "（未提供位置）" hint if it wants to.
+		userLat, userLng, hasUserFix := readUserFix(e.Payload)
+		if hasUserFix {
+			for i := range items {
+				if items[i].Lat == nil || items[i].Lng == nil {
+					items[i].TravelSource = "seeded"
+					continue
+				}
+				km := haversineKm(userLat, userLng, *items[i].Lat, *items[i].Lng)
+				minutes := int(km / 30.0 * 60.0) // 30 km/h city average
+				if minutes < 1 {
+					minutes = 1
+				}
+				items[i].Travel = &minutes
+				items[i].TravelSource = "user_distance"
+			}
 		}
 		return payload(e, "Market", "local", "READY", map[string]any{"opportunities": items})
 	case "PublishMarketOpportunity":
@@ -269,4 +317,47 @@ func newID(prefix string) string {
 		return prefix + hex.EncodeToString(b[:])
 	}
 	return prefix + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// readUserFix extracts an optional foreground-location fix from
+// the ListMarketOpportunities payload. The mobile MarketExperience
+// passes (userLat, userLng) once it has obtained consent via
+// expo-location. Both fields must be present and finite, otherwise
+// the caller falls back to the seeded Travel.
+func readUserFix(payload map[string]any) (lat float64, lng float64, ok bool) {
+	if payload == nil {
+		return 0, 0, false
+	}
+	rawLat, latOk := payload["userLat"].(float64)
+	rawLng, lngOk := payload["userLng"].(float64)
+	if !latOk || !lngOk {
+		return 0, 0, false
+	}
+	// Reject obvious garbage. Latitude is bounded by ±90, longitude
+	// by ±180. (0,0) is in the Atlantic Ocean off the African
+	// coast — not a valid Vietnamese city fix.
+	if rawLat < -90 || rawLat > 90 || rawLng < -180 || rawLng > 180 {
+		return 0, 0, false
+	}
+	if rawLat == 0 && rawLng == 0 {
+		return 0, 0, false
+	}
+	return rawLat, rawLng, true
+}
+
+// haversineKm returns the great-circle distance between two
+// (lat, lng) points in kilometres. We use the standard
+// spherical-earth formula with R = 6371 km. The result is
+// accurate to within ~0.5 % over the distances a city
+// rider actually covers (0–50 km).
+func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
+	const earthRadiusKm = 6371.0
+	rad := func(deg float64) float64 { return deg * math.Pi / 180 }
+	dLat := rad(lat2 - lat1)
+	dLng := rad(lng2 - lng1)
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(rad(lat1))*math.Cos(rad(lat2))*
+			math.Sin(dLng/2)*math.Sin(dLng/2)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	return earthRadiusKm * c
 }

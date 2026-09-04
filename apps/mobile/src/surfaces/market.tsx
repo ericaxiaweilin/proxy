@@ -17,6 +17,7 @@ import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { type FulfillmentClient } from "../fulfillment-client";
 import { type MarketplaceClient } from "../marketplace-client";
+import { nearestCityLabel } from "../market-city-label";
 import { type MediaClient } from "../media-client";
 import { type SupplyClient } from "../supply-client";
 import {
@@ -140,6 +141,22 @@ export function MarketSurface({
   const [opportunityPhase, setOpportunityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [opportunityItems, setOpportunityItems] = useState<MarketOpportunity[]>([]);
   const [opportunityError, setOpportunityError] = useState<string>();
+  // R15.x: a foreground-location fix shared between the LIST
+  // and MAP views. The map's "用我的位置" button sets it; the
+  // LIST view's NEARBY/RECOMMEND sort uses it to ask the server
+  // to recompute Travel via haversine. We never persist this
+  // across app launches — foreground GPS only.
+  const [userFix, setUserFix] = useState<{ lat: number; lng: number } | undefined>(undefined);
+  // R15.x (P1 market 附近): when the viewer has shared a fix,
+  // surface a real-world city label rather than the editor's
+  // hard-coded "河内". Falls back to the prop (which is also
+  // "河内" by default) until then. The label is used in the
+  // header sub-line and the pin tooltip; it is *not* a privacy
+  // surface — we only show the city name, never the exact fix.
+  const effectiveMarketLabel = useMemo(() => {
+    if (!userFix) return marketLabel;
+    return nearestCityLabel(userFix.lat, userFix.lng, marketLabel);
+  }, [userFix, marketLabel]);
   // M4: 真实供给匹配（QuerySuppliers）— 按市场/能力过滤，展示给“适合你”筛选
   const [supplierMatches, setSupplierMatches] = useState<unknown[] | undefined>(undefined);
   const [supplierError, setSupplierError] = useState<string | undefined>(undefined);
@@ -217,7 +234,13 @@ export function MarketSurface({
   const loadOpportunities = useCallback(async (): Promise<void> => {
     setOpportunityPhase("LOADING");
     try {
-      setOpportunityItems(await marketplace.list());
+      // R15.x (P1 market 附近): Map view 的 "用我当前位置" 拿到
+      // foreground-location fix 后, setUserFix 会被调用. 这里读
+      // userFix 传 marketplace.list(), server (service.go haversine
+      // path) 用它重算 Travel minutes + 标 travelSource="user_
+      // distance". 不传时 server 走 seeded Travel + "seeded".
+      // userFix 在 useEffect 依赖里 — 授权后列表会自动重排。
+      setOpportunityItems(await marketplace.list(userFix));
       setOpportunityError(undefined);
       setOpportunityPhase("READY");
     } catch {
@@ -225,7 +248,7 @@ export function MarketSurface({
       setOpportunityError("机会服务暂时不可用，请检查连接后重试。");
       setOpportunityPhase("ERROR");
     }
-  }, [marketplace]);
+  }, [marketplace, userFix]);
 
   useEffect(() => {
     if (tab === "OPPORTUNITY") void loadOpportunities();
@@ -421,7 +444,7 @@ export function MarketSurface({
       <View style={styles.marketHead}>
         <View>
           <Text style={styles.marketTitle}>市场</Text>
-          <Text style={styles.marketSub}>{marketLabel} · 机会 · 活动</Text>
+          <Text style={styles.marketSub}>{effectiveMarketLabel} · 机会 · 活动</Text>
         </View>
         <View style={styles.headActions}>
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
@@ -524,13 +547,14 @@ export function MarketSurface({
           opportunities={opportunityItems}
           lens={lens}
           remoteLens={remoteLens}
-          marketLabel={marketLabel}
+          marketLabel={effectiveMarketLabel}
           onOpenExperience={onOpenExperience}
           onOpenOpportunity={(id) => {
             const found = opportunityItems.find((x) => x.id === id);
             if (found) setOppDetail(found);
           }}
           onOpenActivity={(a) => setActivityDetail(a)}
+          onUserFix={setUserFix}
         />
       ) : pageTab === "OPPORTUNITY" ? (
         oppDetail ? (
@@ -551,7 +575,7 @@ export function MarketSurface({
           <>
             {opportunityError ? <Text style={styles.marketError}>{opportunityError}</Text> : null}
             {opportunityPhase === "LOADING" ? <ActivityIndicator color={color.magenta} style={{ marginVertical: 8 }} /> : null}
-            <OpportunityTab items={opportunityItems} lens={lens} setLens={setLens} oppFilter={oppFilter} setOppFilter={setOppFilter} marketLabel={marketLabel} onOpen={(o) => setOppDetail(o)} onDismiss={(id) => void dismissOpportunity(id)} />
+            <OpportunityTab items={opportunityItems} lens={lens} setLens={setLens} oppFilter={oppFilter} setOppFilter={setOppFilter} marketLabel={effectiveMarketLabel} onOpen={(o) => setOppDetail(o)} onDismiss={(id) => void dismissOpportunity(id)} />
           </>
         )
       ) : (
@@ -1191,7 +1215,8 @@ function MarketMap({
   marketLabel,
   onOpenExperience,
   onOpenOpportunity,
-  onOpenActivity
+  onOpenActivity,
+  onUserFix
 }: {
   tab: "OPPORTUNITY" | "ACTIVITY";
   opportunities: MarketOpportunity[];
@@ -1201,6 +1226,12 @@ function MarketMap({
   onOpenExperience: (experienceId: string) => void;
   onOpenOpportunity: (id: string) => void;
   onOpenActivity: (activity: Activity) => void;
+  // R15.x (P1 market 附近): parent passes a callback that the
+  // map invokes whenever a foreground-location fix is obtained
+  // (or refreshed). Parent uses this to (a) re-sort the LIST view
+  // by haversine distance via server, and (b) re-render the map's
+  // blue dot.
+  onUserFix: (fix: { lat: number; lng: number } | undefined) => void;
 }): React.JSX.Element {
   // 机会的本地集：跳过“远程”不显示；用 MARKET_OPPORTUNITIES fixture
   // 里机会的 coord 走 gridToLatLng 投影到真实经纬度。
@@ -1252,6 +1283,9 @@ function MarketMap({
       const region: Region = { latitude, longitude, ...userRegionDelta };
       setUserRegion(region);
       setLocGranted(true);
+      // R15.x (P1 market 附近): also propagate up so LIST view can
+      // re-sort via server haversine.
+      onUserFix({ lat: latitude, lng: longitude });
       if (mapRef.current) {
         mapRef.current.animateToRegion(region, 350);
       }

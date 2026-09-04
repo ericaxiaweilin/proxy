@@ -11,12 +11,27 @@ export class MarketplaceClient {
   private sequence = 0;
   public constructor(private readonly input: { authClient: { request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>; requestPublic?(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse> }; secureSessionStore: SecureSessionStore; now?: () => Date }) {}
 
-  public async list(): Promise<MarketOpportunity[]> {
+  public async list(userFix?: { lat: number; lng: number } | undefined): Promise<MarketOpportunity[]> {
     // R15.22 fix: 匿名 iPhone 端也要看到机会计数 (Home tab "机会 / 活动"硬编码
     // 24/46/18 随 R15.22 WIP 被改为 API 加载 — server 端 ListMarketOpportunities
     // (apps/api-go/internal/marketplace/service.go:81) 不限 actor, 仅需
     // optional session, 不再要 requireSession.
-    const body = this.body(await this.command("ListMarketOpportunities", { type: "Market", id: "local" }, {}, true));
+    //
+    // R15.x: if a foreground-location fix is available (the user
+    // granted GPS in the Map view and we cached it), pass it
+    // through so the server can recompute Travel via haversine.
+    // Without this, NEARBY/RECOMMEND sort order is the editor's
+    // "河内 18 min" placeholder for every viewer.
+    const payload: Record<string, unknown> = {};
+    if (userFix
+        && Number.isFinite(userFix.lat) && Number.isFinite(userFix.lng)
+        && userFix.lat >= -90 && userFix.lat <= 90
+        && userFix.lng >= -180 && userFix.lng <= 180
+        && !(userFix.lat === 0 && userFix.lng === 0)) {
+      payload.userLat = userFix.lat;
+      payload.userLng = userFix.lng;
+    }
+    const body = this.body(await this.command("ListMarketOpportunities", { type: "Market", id: "local" }, payload, true));
     if (!Array.isArray(body.opportunities)) throw new Error("market opportunity list was malformed");
     return body.opportunities as MarketOpportunity[];
   }
