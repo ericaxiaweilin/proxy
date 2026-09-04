@@ -7,6 +7,26 @@ package api
 // The current version is the Vietnam v1.1 (2026-08-31) draft supplied by
 // counsel; the version string is also returned in the JSON envelope so
 // the mobile client can show the user which revision they accepted.
+//
+// Vietnam legal reference set (v1.1 covers all of these):
+//   - PDP 91/2025/QH15 (个人数据保护法) - core data-protection
+//     obligations, user rights, DPO designation
+//   - 13/2023/NĐ-CP - PDP implementation decree (Art. 11/12/18/22
+//     cover response windows, deletion grace, DPIAs, cross-border
+//     paperwork)
+//   - Cybersecurity Law 116/2025/QH15 (网络安全法) - digital
+//     identity verification + data localisation
+//   - Decree 147/2024/NĐ-CP - fake-news / misleading-info handling
+//   - E-Commerce Law 122/2025/QH15 - platform operator obligations,
+//     "AI-generated" labelling (X/Threads/抖音/小红书-style
+//     requirements appear in v1.4 PRD §4, not in law itself)
+//   - 248/2026/NĐ-CP §11.2 - paid order audit-log policy decisions
+//     (implemented as policy_decision_id in apps/api-go/internal/
+//     fulfillment/service.go, see LC-28)
+//   - 356/2025/NĐ-CP Art. 12 - kill switch (see
+//     apps/api-go/internal/compliance/killswitch.go)
+// Placeholders still open for the legal team: 法人全称, Enterprise
+// Code, Address, Legal Representative, 生效日期, dpo@..., legal-lead@...
 
 import (
 	"crypto/sha256"

@@ -45,13 +45,16 @@ const DONE: TaskRow[] = [
 type ActivityFilter = "RECOMMENDED" | "CAFE" | "RESTAURANT" | "MINE";
 
 const ORIGIN_META: Record<Activity["origin"], { label: string; bg: string; fg: string }> = {
-  PLATFORM: { label: "Proxy 特别活动", bg: "#EEE6FF", fg: "#5D32A4" },
-  MERCHANT: { label: "商家活动", bg: "#F1FFD1", fg: "#445C00" },
-  USER: { label: "用户发起", bg: "#EAF8F4", fg: "#176F60" },
+  PLATFORM: { label: "Proxy 特别活动", bg: color.activityOriginPlatformBg, fg: color.activityOriginPlatformFg },
+  MERCHANT: { label: "商家活动", bg: color.activityOriginMerchantBg, fg: color.activityOriginMerchantFg },
+  // USER 是真人发起 — 走主题外的薄荷绿调 (同 AI 之前的设计)。
+  USER: { label: "用户发起", bg: color.activityOriginUserBg, fg: color.activityOriginUserFg },
   // R15.x+: AI 数字人发起的活动。蓝紫调 + "AI 数字人" 文案 (跟 X /
   // Threads / 抖音 / 小红书的 "AI 生成" 标注一致)。同时 aiPersona 字段
-  // 会被单独的 AIBadge 子组件渲染 (头像 + 名字)。
-  AI_PERSONA: { label: "AI 数字人", bg: "#EEF0FF", fg: "#3949AB" },
+  // 会被单独的 AIBadge 子组件渲染 (头像 + 名字)。走主题 token
+  // activityOriginAIPersona/Bg+Fg 而非硬编码 — 以后换调不用跳进 1500 行
+  // 的 tasks.tsx 改样式。
+  AI_PERSONA: { label: "AI 数字人", bg: color.activityOriginAIPersonaBg, fg: color.activityOriginAIPersonaFg },
   // TEST 不会被发送到客户端 (server 端 List 过滤)，保留以防万一。
   TEST: { label: "测试", bg: "#F5F5F5", fg: "#9E9E9E" }
 };

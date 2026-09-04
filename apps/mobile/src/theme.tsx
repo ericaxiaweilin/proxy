@@ -74,12 +74,18 @@ export const color = {
   homeIntentBorder: "#DDD6E3",
   homeIntentInputBg: "#FCFBFD",
   marketModeBg: "#F5F1F8",
-  activityOriginAgent: "#EAF5FF",
-  activityOriginAgentFg: "#1B5B8A",
-  activityOriginBusiness: "#F1FFD1",
-  activityOriginBusinessFg: "#455900",
-  activityOriginPlatform: "#17131F",
-  activityOriginPlatformFg: "#FFFFFF"
+  // R15.x+ Activity 域 origin 调色板. tasks.tsx 的 ORIGIN_META
+  // 走这些 token, 不再硬编码 hex. 改色就改 theme, 不用进 1500
+  // 行的 tasks.tsx 找. 名字按 *origin enum 值* 命 (PLATFORM/
+  // MERCHANT/USER/AI_PERSONA) 而非角色名, 跟后端 schema 一致.
+  activityOriginPlatformBg: "#EEE6FF",
+  activityOriginPlatformFg: "#5D32A4",
+  activityOriginMerchantBg: "#F1FFD1",
+  activityOriginMerchantFg: "#445C00",
+  activityOriginUserBg: "#EAF8F4",
+  activityOriginUserFg: "#176F60",
+  activityOriginAIPersonaBg: "#EEF0FF",
+  activityOriginAIPersonaFg: "#3949AB"
 };
 
 export const gradient = {

@@ -564,6 +564,8 @@ Proxy 可能使用全球技术和云服务，因此越南用户个人数据可�
 
 如果发生跨境个人数据传输，Proxy 将按照越南适用法律建立、维护和提交必要的跨境数据处理文件和影响评估。
 
+跨境传输适用《个人数据保护法》91/2025/QH15 Art. 20-22 与《个人数据保护法》实施令 13/2023/NĐ-CP 相关条款；并配合《网络安全法》116/2025/QH15 数据本地化与监管要求。
+
 
 31. 数据保存
 
@@ -808,7 +810,10 @@ Proxy 可以更新本政策。
 个人数据控制主体：[Proxy Vietnam 法人全称]
 企业代码：[Enterprise Code]
 注册地址：[Address]
+法定代表人：[Legal Representative]
+生效日期：[YYYY-MM-DD]
 Privacy Email：[privacy@...]
+Data Protection Officer (PDP 91/2025/QH15 Art. 13)：[dpo@...]
 Data Protection Officer / Department：[DPO 信息]
 客服电话：[Phone]
 

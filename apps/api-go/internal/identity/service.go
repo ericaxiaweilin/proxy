@@ -1254,12 +1254,26 @@ func firstString(payload map[string]any, key string) string {
 }
 
 // --- R16.10-P1-F: privacy request center (Vietnam PDP 91/2025/QH15 Art. 31/32) ---
+//
+// Vietnam legal basis for the privacy request center:
+//   - PDP 91/2025/QH15 Art. 31 (data access + portability right)
+//   - PDP 91/2025/QH15 Art. 32 (erasure right, "right to be forgotten")
+//   - 13/2023/NĐ-CP (PDP 实施令) — Art. 11 (访问响应时限 72h),
+//     Art. 12 (删除响应时限 30d), Art. 18 (影响评估), Art. 22
+//     (跨境数据处理文件要求). These ministerial-level rules
+//     operationalise PDP 91 and are the reason we use 30 days
+//     for deletion and 72h for access responses.
+//   - Cybersecurity Law 116/2025/QH15 (网络安全法) Art. 17
+//     (digital identity verification for in-Vietnam users).
+//   - Decree 147/2024/NĐ-CP — fake-news / misleading-info handling
+//     (relevant to the ContentReview pipeline, not this file).
 
 // PrivacyDeleteGracePeriod is the number of days between a delete
 // request and the actual hard-wipe of personal data. Vietnam PDP
-// Art. 32 gives the controller up to 30 days to action erasure; the
-// R16.7 plan §6 P1-F chose 30 days to match the law. Within this
-// window the user can cancel the request.
+// Art. 32 + 13/2023/NĐ-CP Art. 12 give the controller up to 30
+// days to action erasure; the R16.7 plan §6 P1-F chose 30 days to
+// match the law. Within this window the user can cancel the
+// request.
 const PrivacyDeleteGracePeriod = 30 * 24 * time.Hour
 
 // PrivacyExportRetention is how long the export snapshot URL stays

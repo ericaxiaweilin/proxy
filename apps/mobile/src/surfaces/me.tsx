@@ -784,6 +784,9 @@ export function MeSurface({
             <Text style={styles.appBehaviorCardDesc}>
               依据《个人数据保护法》91/2025/QH15 第 31 条 (访问权) 与第 32 条 (删除权), 你可以随时下载或删除 Proxy 保存的个人数据。
             </Text>
+            <Text style={styles.appBehaviorCardDesc}>
+              如需联系 DPO (数据保护官) 或申诉数据处理问题, 请发邮件至 privacy@proxy.vn (最终地址以《服务协议》§53 为准)。依据 PDP 91/2025/QH15 Art. 13, Proxy 已指定 DPO 负责监管个人数据处理活动及处理用户申诉。
+            </Text>
             <PrivacySettings
               client={resolvePrivacyRequestClient({ baseUrl: localApiBaseUrl, transport: nativeTransport })}
             />
