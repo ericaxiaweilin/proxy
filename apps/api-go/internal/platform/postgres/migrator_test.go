@@ -39,6 +39,22 @@ func setupMigratorTest(t *testing.T) (*Migrator, *pgxpool.Pool, string) {
 	return m, pool, tmpDir
 }
 
+// clearSchemaMigrations removes only the rows that the migrator tests
+// themselves created, leaving the production migration rows
+// (059_location_consents, 060_privacy_requests, 061_..., 062_...,
+// 063_benefit_routing_network, 064_legal_kill_switches) intact.
+//
+// Why the previous WHERE clause was broken:
+// It deleted rows where version LIKE '001_%' OR '002_%' OR '003_%' OR
+// 'migrator-test-%'. Production rows (059, 060, ...) survived. The
+// tests then asserted an absolute count (e.g. "want 3 in
+// schema_migrations") which passed only when the table was empty
+// before. Once a real migration shipped, the count drifted and the
+// next gate run failed with "want 3, got 75".
+//
+// We now delete only test-owned rows (test fixture versions) by
+// matching the prefix the test fixtures use. Production rows are
+// preserved so the live server's migrator state stays consistent.
 func clearSchemaMigrations(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
@@ -49,7 +65,10 @@ func clearSchemaMigrations(t *testing.T, pool *pgxpool.Pool) {
 	if !exists {
 		return
 	}
-	if _, err := pool.Exec(ctx, "DELETE FROM public.schema_migrations WHERE version LIKE '001_%' OR version LIKE '002_%' OR version LIKE '003_%' OR version LIKE 'migrator-test-%'"); err != nil {
+	// Delete only test-fixture rows. The migrator test writes
+	// 001_*, 002_*, 003_* filenames; we use the LIKE clause
+	// anchored at '_' so '059_' is NOT matched.
+	if _, err := pool.Exec(ctx, "DELETE FROM public.schema_migrations WHERE version LIKE '00_%\\_%' ESCAPE '\\' OR version LIKE 'migrator-test-%'"); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 }
@@ -83,13 +102,19 @@ func TestMigrator_ApplyRecordsAndIdempotent(t *testing.T) {
 		t.Fatalf("want 0 pending, got %d", len(pending))
 	}
 
-	// Verify in DB
+	// Verify in DB: the 3 fake migrations should be the only
+	// rows in schema_migrations whose version starts with 001_,
+	// 002_, or 003_ (the production rows 059, 060, ..., 064_ are
+	// preserved by clearSchemaMigrations and do not match the
+	// LIKE pattern). The absolute count is unreliable because
+	// other gate runs may have left production migration rows
+	// in the shared cluster; we filter to test-fixture rows only.
 	var n int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM public.schema_migrations").Scan(&n); err != nil {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM public.schema_migrations WHERE version LIKE '00_%\\_%' ESCAPE '\\' OR version LIKE 'migrator-test-%'").Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if n != 3 {
-		t.Fatalf("want 3 in schema_migrations, got %d", n)
+		t.Fatalf("want 3 test-fixture rows in schema_migrations, got %d", n)
 	}
 
 	// Re-apply (idempotent)
@@ -112,7 +137,9 @@ func TestMigrator_StatusAndCounts(t *testing.T) {
 	writeMigration(t, dir, "001_init.sql", "SELECT 1;\n")
 	writeMigration(t, dir, "002_more.sql", "SELECT 2;\n")
 
-	// Before apply
+	// Before apply: pending = 2 (our two new files), applied counts
+	// rows the migrator knows about for this dir. Status methods
+	// enumerate files in m.dir and check schema_migrations for each.
 	pending, _ := m.PendingCount(ctx)
 	if pending != 2 {
 		t.Fatalf("want 2 pending, got %d", pending)
@@ -152,11 +179,15 @@ func TestMigrator_DryRunDoesNotApply(t *testing.T) {
 		t.Fatalf("want 2 pending, got %d", len(pending))
 	}
 
-	// Verify schema_migrations is empty
+	// Verify schema_migrations has no rows for our 001/002 files.
+	// (Other production rows from prior gate runs are preserved
+	// by clearSchemaMigrations; we filter to test-fixture rows
+	// only because the test cares about side effects of THIS
+	// test, not absolute table count.)
 	var n int
-	pool.QueryRow(ctx, "SELECT count(*) FROM public.schema_migrations").Scan(&n)
+	pool.QueryRow(ctx, "SELECT count(*) FROM public.schema_migrations WHERE version LIKE '001_%' OR version LIKE '002_%' OR version LIKE 'migrator-test-%'").Scan(&n)
 	if n != 0 {
-		t.Fatalf("dry-run should not record, got %d rows in schema_migrations", n)
+		t.Fatalf("dry-run should not record, got %d test-fixture rows in schema_migrations", n)
 	}
 }
 
@@ -222,15 +253,32 @@ func TestMigrator_OrphanFromMissingFile(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "001_init.sql")); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
+	// ListMigrations returns rows from the SHARED schema_migrations
+	// table that match this migrator's dir. With the production
+	// migrations also in the table (e.g. 059, 060, ..., 064), the
+	// call returns all of them as "orphan" (Applied=true, OnDisk=false)
+	// because the test migrator's dir has none of them on disk.
+	// The test originally expected 1 status; we now expect
+	// "at least 1" with the 001_init row being the one we just
+	// orphaned. The production rows are an unrelated, expected
+	// leak that we filter out in the assertion.
 	statuses, err := m.ListMigrations(ctx)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(statuses) != 1 {
-		t.Fatalf("want 1 status, got %d", len(statuses))
+	var ourOrphan *MigrationStatus
+	for i := range statuses {
+		if statuses[i].Version == "001_init" {
+			ourOrban := statuses[i]
+			ourOrphan = &ourOrban
+			break
+		}
 	}
-	if statuses[0].Applied != true || statuses[0].OnDisk != false {
-		t.Fatalf("orphan expected: applied=%v onDisk=%v", statuses[0].Applied, statuses[0].OnDisk)
+	if ourOrphan == nil {
+		t.Fatalf("001_init not in statuses (got %d total)", len(statuses))
+	}
+	if !ourOrphan.Applied || ourOrphan.OnDisk {
+		t.Fatalf("001_init orphan expected: applied=%v onDisk=%v", ourOrphan.Applied, ourOrphan.OnDisk)
 	}
 }
 

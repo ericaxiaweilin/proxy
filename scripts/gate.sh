@@ -82,13 +82,21 @@ gate_g2_tests() {
     if [ -f ./.env ]; then
       set -a; . ./.env; set +a
     fi
-    (cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && nohup go -C apps/api-go run ./cmd/api > /tmp/api-go-gate.log 2>&1 &) >/dev/null 2>&1
-    for _ in $(seq 1 20); do
+    # Spawn detached from the gate's process group so the gate
+    # can exit and the server keeps running. The nohup + & is
+    # inside the subshell; the subshell exits, but the go-run
+    # child is reparented to init and survives.
+    nohup go -C apps/api-go run ./cmd/api > /tmp/api-go-gate.log 2>&1 &
+    disown || true
+    for _ in $(seq 1 30); do
       if curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4100/health/live 2>/dev/null | grep -q "200"; then
         break
       fi
       sleep 1
     done
+    if ! curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4100/health/live 2>/dev/null | grep -q "200"; then
+      echo "  api-go test: WARN server did not come up in 30s after respawn (g3 may fail)"
+    fi
   fi
   pnpm --filter @proxy/mobile test --run || return $?
   echo "  mobile test: OK"
