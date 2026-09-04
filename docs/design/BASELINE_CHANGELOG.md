@@ -4,6 +4,21 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 10 — 2026-09-04
+
+- `market` scope (PublishDemand): split the price label helper into
+  `priceLabelForFlow` (wire-bound, applicant-side) and
+  `priceLabelForPublisher` (view-only, publisher-side). The previous
+  version used the applicant-side copy in the publisher UI which read
+  as "completed you receive" — wrong perspective. Both helpers keep
+  the same Chinese wording intent as before but address the right
+  reader; the wire contract still flows through `priceLabelForFlow`
+  and server `normalizeOpportunityMoney`. `IMPLEMENTATION_CONTRACTS.json`
+  updated to describe the dual-perspective design and to list
+  `apps/api-go/internal/marketplace/service_test.go` as additional
+  evidence for both `market` and `activity` scopes (AI-ACTOR-002 /
+  MONEYFLOW-001 tripwires that pin the wire contract).
+
 ## Revision 9 — 2026-09-04
 
 - Anchored the market/tasks/activity UI work that was previously scopeless:

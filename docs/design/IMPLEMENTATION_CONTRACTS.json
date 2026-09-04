@@ -79,10 +79,11 @@
       ],
       "evidenceFiles": [
         "apps/mobile/src/market-city-label.test.ts",
-        "packages/contracts/src/market-opportunity.test.ts"
+        "packages/contracts/src/market-opportunity.test.ts",
+        "apps/api-go/internal/marketplace/service_test.go"
       ],
       "status": "PARTIAL",
-      "knownGap": "MoneyFlow 4-state + priceLabel render is wired; EARN button copy vs priceLabelForFlow wording still needs unification (audit MEDIUM)."
+      "knownGap": "MoneyFlow 4-state + priceLabel render is wired. PublishDemand chip (publisherer view) and opportunity card priceLabel (applicant view) deliberately use first-person perspectives — priceLabelForFlow wires to MarketOpportunitySchema.PriceLabel (matches server normalizeOpportunityMoney); priceLabelForPublisher is a view-only helper. R15.x design contract updated to track the dual-perspective wording."
     },
     {
       "scope": "activity",
@@ -92,7 +93,9 @@
         "apps/mobile/src/activity-client.ts"
       ],
       "evidenceFiles": [
-        "packages/contracts/src/activity.test.ts"
+        "packages/contracts/src/activity.test.ts",
+        "apps/api-go/internal/aiboundary/policy_test.go",
+        "apps/api-go/internal/activity/service_test.go"
       ],
       "status": "PARTIAL",
       "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); organizer marking others needs a targetUserId wire change, pending."

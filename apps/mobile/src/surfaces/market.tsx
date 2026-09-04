@@ -919,9 +919,9 @@ function OpportunityDetail({
 // 框联动（FREE 可为 0， TBD 必须为空）。
 type PublishMoneyFlow = "EARN" | "PAY" | "FREE" | "TBD";
 
-// priceLabelForFlow 是 client 侧的语义映射 — 走 wire 上 MarketOpportunitySchema
-// 的 PriceLabel 字段。与 server 端 opportunityPriceLabel() 一致；任何漂移都会
-// 在 contracts test 被捕获。
+// priceLabelForFlow 是接单者看卡片时的语义描述 — 与 server 端
+// opportunityPriceLabel() 一致。wire 上 MarketOpportunitySchema.PriceLabel
+// 字段取自这个映射；任何漂移都会被 server normalize 覆盖。
 function priceLabelForFlow(flow: PublishMoneyFlow): string {
   switch (flow) {
     case "FREE":
@@ -935,8 +935,28 @@ function priceLabelForFlow(flow: PublishMoneyFlow): string {
   }
 }
 
+// priceLabelForPublisher 是发布者 PublishDemand 页面上的语义描述。
+// 与 priceLabelForFlow 同样走 server 端 normalize，但措辞以“你”
+// 为发布者视角，“他” 为接单者。比如 EARN：发布者看到 "你付金额"，
+// 接单者看到 "完成后你可获得"。同一事实、两个视角。
+function priceLabelForPublisher(flow: PublishMoneyFlow): string {
+  switch (flow) {
+    case "FREE":
+      return "免费发布";
+    case "PAY":
+      return "你须先支付";
+    case "TBD":
+      return "费用待你与接单者面谈";
+    default:
+      return "你付金额，接单者完成后获得";
+  }
+}
+
+// PUBLISH_FLOW_OPTIONS 是发布者 (requester) 看到的 chip 列表。chip
+// 描述的语义是发布者视角 ("你付")，与卡片上对接单者展示的 PriceLabel
+// ("完成后你可获得") 是不同视角的同一个事实。故意保留。
 const PUBLISH_FLOW_OPTIONS: ReadonlyArray<{ id: PublishMoneyFlow; label: string; sub: string }> = [
-  { id: "EARN", label: "你付给接单者", sub: "完成后你付 · 接单者可获得" },
+  { id: "EARN", label: "你付给接单者", sub: "你付金额，接单者完成后获得" },
   { id: "PAY", label: "接单者预付", sub: "受托代购/订位等委托场景" },
   { id: "FREE", label: "免费任务", sub: "0₫ · 同好/社区" },
   { id: "TBD", label: "费用待确认", sub: "双方面谈 · 不显示金额" }
@@ -1016,7 +1036,7 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
               </Pressable>
             ))}
           </View>
-          <Text style={styles.r4PriceLabel}>{priceLabelForFlow(moneyFlow)} · {moneyFlow === "TBD" ? "金额由双方面谈确定" : moneyFlow === "FREE" ? "0₫ 免费" : "公开在卡片上"}</Text>
+          <Text style={styles.r4PriceLabel}>{priceLabelForPublisher(moneyFlow)} · {moneyFlow === "TBD" ? "金额由双方面谈确定" : moneyFlow === "FREE" ? "0₫ 免费" : "公开在卡片上"}</Text>
           {priceRequired ? (
             <TextInput onChangeText={setPrice} style={styles.publishPriceInput} value={price} placeholder={moneyFlow === "EARN" ? "例如 1,500,000₫" : "例如 500,000₫"} />
           ) : (
