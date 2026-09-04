@@ -37,13 +37,19 @@ export function labelForDuration(
 // summariseConsent produces a one-line status string for the
 // toggle header. The caller passes the locale so the same
 // helper works for vi and zh builds.
+//
+// `now` is threaded through to isActiveConsent() so a test that
+// fixes `now` (e.g. NOW = Date.parse("2026-09-04T10:00:00Z"))
+// sees a single coherent "GRANTED + remaining" view, instead of
+// isActive using Date.now() and the remaining math using the
+// caller's `now` and disagreeing at the boundary.
 export function summariseConsent(
   consent: LocationConsent | null | undefined,
   now: number = Date.now(),
   locale: ToggleLocale = "vi",
 ): string {
   if (!consent) return locale === "vi" ? "Đang tải..." : "加载中…";
-  if (!isActiveConsent(consent)) {
+  if (!isActiveConsent(consent, now)) {
     return locale === "vi" ? "Đang tắt" : "已关闭";
   }
   let remaining = consent.remainingSeconds;

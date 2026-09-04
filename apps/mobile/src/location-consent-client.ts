@@ -170,13 +170,23 @@ export function resolveLocationConsentClient(input: {
 // expiresAt to the wall clock; we still double-check here so a
 // stale client doesn't show "GRANTED" when the row is actually
 // about to flip.
-export function isActiveConsent(c: LocationConsent | null | undefined): boolean {
+//
+// `now` is a millisecond timestamp (defaults to Date.now()) so the
+// helper is testable with a fixed clock; otherwise a hardcoded
+// test expiresAt can drift past Date.now() and flip a passing
+// case to failing on the wall clock alone. summariseConsent()
+// threads its own `now` argument through here so a single
+// NOW constant covers the whole "GRANTED + remaining" path.
+export function isActiveConsent(
+  c: LocationConsent | null | undefined,
+  now: number = Date.now(),
+): boolean {
   if (!c) return false;
   if (c.status !== "GRANTED") return false;
   if (!c.expiresAt) return false;
   const ms = Date.parse(c.expiresAt);
   if (Number.isNaN(ms)) return false;
-  return ms > Date.now();
+  return ms > now;
 }
 
 // formatRemaining returns a human-readable string for the
