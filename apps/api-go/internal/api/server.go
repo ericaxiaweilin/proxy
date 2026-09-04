@@ -29,6 +29,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
+	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
@@ -83,6 +84,11 @@ type Server struct {
 	// CONFIRMED transition for PLATFORM_PAY orders. Wired
 	// from cmd/api/main.go so the dependency flows one way.
 	PolicyDecisions *policydecisions.Service
+	// AIPersona is the LC-07 likeness-consent reader. The
+	// media service uses it to fail closed when an AI
+	// persona asset lacks a live consent. Wired from
+	// cmd/api/main.go.
+	AIPersona *aipersona.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -202,6 +208,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/legal/kill-switch", s.operatorKillSwitchKill)
 	mux.HandleFunc("/v1/operator/legal/kill-switch/", s.operatorKillSwitchRearm)
 	mux.HandleFunc("/v1/operator/legal/kill-switches", s.operatorKillSwitchList)
+	// R16.7-P1-K (LC-06) + R16.7-P1-I (LC-07): AI persona
+	// catalog + likeness consent. The /v1/ai/personas prefix
+	// is shared; sub-paths split between create/get/consent
+	// lookups.
+	mux.HandleFunc("/v1/ai/personas", s.routePersonaCollection)
+	mux.HandleFunc("/v1/ai/personas/", s.routePersonaItem)
 	// R15.25 FACET — object-oriented content operation (Phase 1 = list only).
 	// 匿名 GET endpoint, 返回 mock 3 个对象 (Ken / Linh / ABC Spa) 跟 prototype
 	// 一致. Phase 1 没有持久化, 也不需要 auth — 跟 prototype HTML demo 同形.

@@ -39,6 +39,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
+	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/safety"
@@ -330,6 +331,18 @@ func main() {
 		})
 	fulfillmentService.WithPolicyDecisions(policySvc)
 	server.PolicyDecisions = policySvc
+	// R16.7-P1-K (LC-06) + R16.7-P1-I (LC-07): wire the AI
+	// persona service so the media service can fail closed
+	// when AI media carries no provenance (LC-06) and so a
+	// USER_TWIN persona cannot publish likeness-bearing
+	// media without a live consent (LC-07). Memory repo
+	// again — the Postgres implementation is a follow-up
+	// once the rest of the media data path moves into the
+	// transactional outbox.
+	personaRepo := aipersona.NewMemoryRepository()
+	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
+	mediaService.WithAIPersonaService(personaSvc)
+	server.AIPersona = personaSvc
 	// R0 / R16.7-P1-H prep: Benefit Routing Network. No Postgres
 	// repo is shipped yet (memory_repo.go is the only implementation);
 	// we use the memory repo in both pool and no-pool paths so
