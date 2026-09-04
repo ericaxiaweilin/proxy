@@ -14,16 +14,12 @@ import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import type { LocalNetClient } from "../localnet-client";
+import { selectPinnedPostAndRest, selectPostMedia, type ProfileMediaEntry } from "./profile-tabs-model";
+export type { ProfileMediaEntry } from "./profile-tabs-model";
 
 // ---------- 类型 ----------
 
 export type ProfileTabKey = "POSTS" | "REPLIES" | "SAVED" | "TAGGED" | "ABOUT";
-
-export interface ProfileMediaEntry {
-  item: FeedMediaItem;
-  index: number;
-  postId: string;
-}
 
 export interface ProfileTabsProps {
   profileDraft: {
@@ -80,14 +76,10 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
   // R15.73: 置顶帖 = server 返的 pinnedIds 中第一个, 不在 profilePosts 时走 fallback.
   // 之前 (Phase 1) 取 posts[0] mock — 跟 post 列表重复, 只是占位.
   // R15.89 fix: 没真 pinnedIds 时 不渲染 置顶卡片 (PinnedCard 误写 '置顶' 标签).
-  const hasRealPin = !!(props.pinnedIds && props.pinnedIds.length > 0);
-  const pinnedPost = useMemo(() => {
-    if (hasRealPin) {
-      const hit = props.posts.find((p) => p.postId === props.pinnedIds?.[0]);
-      if (hit) return hit;
-    }
-    return props.posts[0];
-  }, [props.posts, props.pinnedIds, hasRealPin]);
+  const { pinned: pinnedPost, rest: unpinnedPosts } = useMemo(
+    () => selectPinnedPostAndRest(props.posts, props.pinnedIds),
+    [props.posts, props.pinnedIds]
+  );
 
   return (
     <View>
@@ -169,7 +161,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
       {tab === "POSTS" ? (
         <PostsTab
           pinnedPost={pinnedPost}
-          posts={props.posts.slice(1)} // 排除置顶
+          posts={unpinnedPosts}
           mediaByPost={props.mediaByPost}
           pinnedIds={props.pinnedIds}
           avatarUri={props.profileAvatarUri}
@@ -192,7 +184,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
       {tab === "SAVED" ? (
         <SavedTab
           saved={props.savedPosts}
-          photos={props.photos}
+          mediaByPost={props.mediaByPost}
           onOpenMedia={props.onOpenMedia}
           resolveMediaUrl={props.resolveMediaUrl}
           color={props.color}
@@ -201,7 +193,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
       {tab === "TAGGED" ? (
         <TaggedTab
           tagged={props.taggedPosts}
-          photos={props.photos}
+          mediaByPost={props.mediaByPost}
           onOpenMedia={props.onOpenMedia}
           resolveMediaUrl={props.resolveMediaUrl}
           color={props.color}
@@ -440,18 +432,16 @@ function RepliesTab(props: {
 
 function SavedTab(props: {
   saved: FeedPost[];
-  photos: ProfileMediaEntry[];
+  mediaByPost: Record<string, FeedMediaItem[]>;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   resolveMediaUrl: (path: string) => string;
   color: ProfileTabsProps["color"];
 }): React.JSX.Element {
-  if (props.saved.length === 0 && props.photos.length === 0) {
+  if (props.saved.length === 0) {
     return <EmptyState title="还没有收藏" sub="点击帖子右下角的 🔖 可以加入收藏" />;
   }
   // 3-列网格 — 复用 IG 收藏页布局
-  const all = props.photos.length > 0
-    ? props.photos
-    : props.saved.flatMap((post): ProfileMediaEntry[] => []);
+  const all = selectPostMedia(props.saved, props.mediaByPost);
   return (
     <View>
       <View style={styles.savedHint}>
@@ -480,17 +470,15 @@ function SavedTab(props: {
 
 function TaggedTab(props: {
   tagged: FeedPost[];
-  photos: ProfileMediaEntry[];
+  mediaByPost: Record<string, FeedMediaItem[]>;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   resolveMediaUrl: (path: string) => string;
   color: ProfileTabsProps["color"];
 }): React.JSX.Element {
-  if (props.tagged.length === 0 && props.photos.length === 0) {
+  if (props.tagged.length === 0) {
     return <EmptyState title="还没有被标记" sub="其他人在帖子里 @ 你时会出现在这里" />;
   }
-  const all = props.photos.length > 0
-    ? props.photos
-    : props.tagged.flatMap((post): ProfileMediaEntry[] => []);
+  const all = selectPostMedia(props.tagged, props.mediaByPost);
   return (
     <View style={styles.photoGrid}>
       {all.map((entry) => (

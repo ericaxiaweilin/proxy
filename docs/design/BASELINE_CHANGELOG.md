@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 3 — 2026-09-04
+
+- Corrected Personal Profile from `IMPLEMENTED` to `PARTIAL`; its five-tab
+  implementation does not match the active three-tab prototype.
+- Corrected Social Contact ownership from Friend CRM to the `me.tsx`
+  `socialidentity` route and documented missing persisted collaboration settings.
+- Corrected Creator Center to `SCAFFOLD_ONLY`.
+- Closed `UI-PROFILE-001` (first post hidden without a real pin) and
+  `UI-PROFILE-002` (unrelated photos presented as saved/tagged content).
+
 ## Revision 2 — 2026-09-04
 
 - Added monotonic baseline protection: active scopes cannot disappear, point

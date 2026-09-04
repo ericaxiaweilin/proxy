@@ -35,4 +35,12 @@ require_test "AUTH-SESSION-001" "./internal/identity" \
   "TestRevokeSessionDeletesTokens" \
   "apps/api-go/internal/identity/service_test.go" || exit $?
 
+if ! grep -q 'UI-PROFILE-001' apps/mobile/src/surfaces/profile-tabs-model.test.ts ||
+   ! grep -q 'UI-PROFILE-002' apps/mobile/src/surfaces/profile-tabs-model.test.ts; then
+  echo "  FAIL: profile regression IDs or their focused test file are missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/surfaces/profile-tabs-model.test.ts || exit $?
+echo "    UI-PROFILE-001/UI-PROFILE-002: PASS"
+
 echo "  regression contracts: OK"

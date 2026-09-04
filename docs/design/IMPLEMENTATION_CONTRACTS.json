@@ -25,8 +25,8 @@
         "apps/mobile/src/design-system-r3.test.ts",
         "apps/mobile/src/surfaces/ProfileTabs.test.ts"
       ],
-      "status": "IMPLEMENTED",
-      "knownGap": ""
+      "status": "PARTIAL",
+      "knownGap": "The implementation uses a newer five-tab information architecture while the active reference still specifies Dynamic/Photos/Records and composer ownership controls."
     },
     {
       "scope": "merchant-me",
@@ -44,13 +44,13 @@
       "scope": "social-contact-collaboration",
       "reference": "docs/design/references/proxy_social_contact_collaboration_v2.html",
       "implementationFiles": [
-        "apps/mobile/src/surfaces/friend-crm.tsx"
+        "apps/mobile/src/surfaces/me.tsx"
       ],
       "evidenceFiles": [
         "apps/mobile/src/design-system-r3.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "The collaboration reference has no dedicated parity test yet."
+      "knownGap": "Social account visibility exists, but collaboration types, rate and contact settings lack a complete persisted flow and dedicated parity test."
     },
     {
       "scope": "merchant-creator-center",
@@ -61,8 +61,8 @@
       "evidenceFiles": [
         "apps/mobile/src/design-system-r3.test.ts"
       ],
-      "status": "PARTIAL",
-      "knownGap": "Reference is functional-only; visual parity is not approved."
+      "status": "SCAFFOLD_ONLY",
+      "knownGap": "The Match, Browse, My Creators, Collaborations and Results navigation model is not implemented; the current Me route only exposes adjacent creator-management cards."
     }
   ]
 }
