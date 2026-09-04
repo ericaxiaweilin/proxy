@@ -25,7 +25,7 @@ git hooks that invoke the script on every commit and push.
 | **G1 build** | `go -C apps/api-go build ./...` + `pnpm --filter @proxy/mobile typecheck` + `pnpm --filter @proxy/contracts build` | pre-commit, pre-push |
 | **G2 tests** | `go -C apps/api-go test -count=1 ./...` (no cache) + `pnpm --filter @proxy/mobile test --run` | pre-commit, pre-push |
 | **G3 e2e** | Live HTTP probes against `PROXY_API_BASE_URL` (default `http://127.0.0.1:4100`): `/health/live` then `scripts/privacy-e2e.sh` then `scripts/legal-e2e.sh` | pre-push only |
-| **G4 drift** | OpenAPI spec matches generated commands; canonical handler files (`apps/api-go/internal/api/{facet,feed,geocode,media,command_dispatch,middleware,legal}.go`) are not untracked; migrations directory is non-empty | pre-push only |
+| **G4 drift** | OpenAPI and semantic invariants; no untracked source/misplaced binaries; escaped-bug regression contracts execute | pre-commit, pre-push |
 
 Each gate's function is written so that a failed command immediately
 returns the failing exit code via `cmd || return $?`. We do not rely
@@ -85,3 +85,8 @@ there to make you fix the build first.
   verify the endpoint serves bytes; it does not parse the
   document for "Vietnam PDP Art. 31" mentions. That is a
   compliance review, not a CI gate.
+
+It also does not claim that an external email or SMS provider delivered a
+message. `AUTH-OTP-001` protects recipient propagation with controlled sinks;
+release evidence must additionally exercise the configured provider without
+printing credentials or OTP values.

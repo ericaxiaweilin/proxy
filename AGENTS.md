@@ -30,6 +30,14 @@ interactive terminal agents.
 ## Required checks
 
 - Start from a clean worktree and record the starting commit.
+- If the assigned starting commit no longer equals the integration HEAD at
+  handoff time, stop and report baseline drift. Do not merge, rebase, or copy
+  the patch forward autonomously.
+- Never weaken, skip, exclude packages from, or append ad-hoc code to a gate in
+  order to make a task pass. Gate changes are commander-owned infrastructure
+  changes and require their own focused verification.
+- A bug that escaped once must receive a stable regression ID, a named test,
+  and an entry in `scripts/check-regression-contracts.sh`.
 - Mobile changes: run `pnpm --filter @proxy/mobile typecheck` and the relevant
   focused tests.
 - Go changes: run focused Go tests and build the affected command/package.
@@ -37,6 +45,16 @@ interactive terminal agents.
   are references only and cannot replace the active baseline.
 - Device behavior is accepted only after the commander reviews the diff and
   verifies the current bundle on the target device.
+
+## Handoff evidence
+
+- Report starting commit, ending commit, exact changed files, and commands run.
+- State the regression ID and the test that failed before and passed after.
+- A green unit test is not evidence for an external provider. Email, SMS,
+  payment, maps, and other provider work also needs a controlled integration
+  smoke result; production credentials and raw OTP values must never be logged.
+- The commander rejects handoffs containing untracked source, build binaries,
+  unrelated cleanup, duplicated commits, or claims unsupported by output.
 
 ## Data and architecture invariants
 

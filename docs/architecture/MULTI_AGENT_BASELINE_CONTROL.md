@@ -43,6 +43,20 @@ there was no single writer, ownership boundary, or integration gate.
 - Reload the current true-device bundle and inspect the requested flow.
 - Commit one coherent change and create/update the approved baseline tag.
 
+## Regression closure protocol
+
+Every production regression gets a stable ID and moves through four states:
+
+1. `REPRODUCED`: a focused test fails for the reported behavior.
+2. `FIXED`: the smallest production patch makes that same test pass.
+3. `INTEGRATED`: the named test is registered in
+   `scripts/check-regression-contracts.sh` and all gates pass from a clean tree.
+4. `VERIFIED`: external-provider or device behavior has controlled smoke
+   evidence when the bug crosses a process or network boundary.
+
+Agents may not call a regression closed at `FIXED`. If the same symptom returns,
+reopen the existing ID first; do not create another anonymous `fix(...)` patch.
+
 ## Current recovery scope
 
 The recovery baseline keeps the global chronological public Feed, guest media

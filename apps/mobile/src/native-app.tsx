@@ -343,6 +343,22 @@ function LegalDocViewer({ kind, onClose }: { kind: LegalDocKind; onClose: () => 
   );
 }
 
+function loginChallengeErrorMessage(error: unknown, channel: "SMS" | "EMAIL"): string {
+  const code = error instanceof LoginCommandRejectedError ? error.result.error?.errorCode : undefined;
+  if (code === "LOGIN_PROVIDER_NOT_CONFIGURED") {
+    return "验证码服务尚未配置，请联系管理员（错误码：LOGIN_PROVIDER_NOT_CONFIGURED）。";
+  }
+  if (code === "PASSWORDLESS_IDENTITY_UNAVAILABLE") {
+    return "当前账号或设备绑定不可用，请重试（错误码：PASSWORDLESS_IDENTITY_UNAVAILABLE）。";
+  }
+  if (code === "LOGIN_CHALLENGE_REQUEST_FAILED") {
+    return "验证码发送服务拒绝了请求，请稍后重试（错误码：LOGIN_CHALLENGE_REQUEST_FAILED）。";
+  }
+  return channel === "EMAIL"
+    ? "暂时无法发送邮箱验证码，请稍后重试或改用手机号。"
+    : "暂时无法发送验证码，请检查手机号后重试。";
+}
+
 function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticated: () => void; onGuest: () => void }): React.JSX.Element {
   const [challengeId, setChallengeId] = useState<string>();
   const [authMode, setAuthMode] = useState<"login" | "register" | "guest">("login");
@@ -537,15 +553,9 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             // eslint-disable-next-line no-console
             console.log("[proxy.login] retry after rotate FAILED:", retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : String(retryErr));
           }
-          if (!retrySucceeded) {
-            setError(authChannel === "EMAIL"
-              ? "暂时无法发送 Gmail 验证码，请稍后重试或改用手机号。"
-              : "暂时无法发送验证码，请检查手机号后重试。");
-          }
+          if (!retrySucceeded) setError(loginChallengeErrorMessage(err, authChannel));
         } else {
-          setError(authChannel === "EMAIL"
-            ? "暂时无法发送 Gmail 验证码，请稍后重试或改用手机号。"
-            : "暂时无法发送验证码，请检查手机号后重试。");
+          setError(loginChallengeErrorMessage(err, authChannel));
         }
       } finally {
         setBusy(false);
@@ -694,7 +704,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
               </Pressable>
             </View>
             <View style={styles.inlineActions}>
-              <Pressable disabled={busy} onPress={() => { setChallengeId(undefined); setCode(""); }}><Text style={styles.linkText}>更换手机号</Text></Pressable>
+              <Pressable disabled={busy} onPress={() => { setChallengeId(undefined); setCode(""); }}><Text style={styles.linkText}>{authChannel === "EMAIL" ? "更换邮箱" : "更换手机号"}</Text></Pressable>
               <Pressable disabled={busy} onPress={() => void requestChallenge()}><Text style={styles.linkText}>重新发送</Text></Pressable>
             </View>
           </>

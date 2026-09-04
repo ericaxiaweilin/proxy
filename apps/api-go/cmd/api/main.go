@@ -460,6 +460,10 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 				TLSMode:  os.Getenv("PROXY_SMTP_TLS"),
 				Logger:   slog.Default(),
 			})
+			if !smtpProvider.Configured() {
+				log.Printf("SMTP provider disabled: PROXY_SMTP_HOST, PROXY_SMTP_PORT and PROXY_SMTP_FROM must all be valid")
+				smtpProvider = nil
+			}
 		}
 	}
 
@@ -516,6 +520,10 @@ func configuredProductionLoginChallengeProvider(mode string) (identity.LoginChal
 			}
 			if len(routes) > 0 {
 				smtpMultiProvider = identity.NewSMTPMultiProvider(defaultCfg, routes, slog.Default())
+				if !smtpMultiProvider.Configured() {
+					log.Printf("SMTP route provider disabled: no route has HOST, PORT and FROM configured")
+					smtpMultiProvider = nil
+				}
 			}
 		}
 	}
