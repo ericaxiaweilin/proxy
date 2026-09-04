@@ -5,6 +5,7 @@ import { ActivityClient, ActivityCommandRejectedError } from "../activity-client
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { color } from "../theme";
+import { ActivityDetailSurface } from "./activity-detail";
 import { styles } from "./me-styles";
 
 type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
@@ -25,25 +26,49 @@ export function MyOrdersSurface({ client, onBack }: { client: FulfillmentClient;
 }
 
 export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
-  // R15.15 对齐：可参加（server 开放活动，真数据 + 报名）/ 已参加（本机已报名）/
-  // 我发起的（server 暂无 owner 概念，诚实空态，不造假数据）。
-  // client 在页内自建（sessionAuthClient + SecureStore），me.tsx 无需改动。
+  // R17.x: 我的活动物化路径。listMyActivities 取代
+  // hardcoded mock (会报 "本周暂无开放活动") — 服务端
+  // 返 actor-scoped created + joined, 客户端按 tab 分类.
+  // "可参加" tab 仍用 ListActivities (server 端返全表),
+  // 让用户能继续报新活动; "已参加" / "我发起的" 走
+  // ListMyActivities (actor-scoped).
   const [client] = useState(() => new ActivityClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
   const [tab, setTab] = useState<"open" | "joined" | "created">("open");
-  const [items, setItems] = useState<Activity[]>([]);
+  const [openItems, setOpenItems] = useState<Activity[]>([]);
+  const [created, setCreated] = useState<Activity[]>([]);
+  const [joined, setJoined] = useState<Activity[]>([]);
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
-  const [joinedIds, setJoinedIds] = useState<ReadonlyArray<string>>([]);
   const [joiningId, setJoiningId] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  const [detailId, setDetailId] = useState<string | undefined>(undefined);
+  const [authed, setAuthed] = useState<boolean>(true);
 
   const reload = useCallback(() => {
     let active = true;
     setPhase("LOADING");
     setNotice(undefined);
     void client.listActivities().then((rows) => {
-      if (active) { setItems(rows); setPhase("READY"); }
+      if (active) setOpenItems(rows);
     }).catch(() => { if (active) setPhase("ERROR"); });
-    return () => { active = false; };
+    void client.listMyActivities().then((payload) => {
+      if (!active) return;
+      setCreated(payload.created);
+      setJoined(payload.joined);
+      setAuthed(true);
+      setPhase("READY");
+    }).catch((error: unknown) => {
+      if (!active) return;
+      // ListMyActivities 需要 authenticated principal。匿名
+      // 访问时 server 会拒, 这里以同个 ListActivities
+      // (anonymous 可读) 完成刷新, 且在 UI 告知"登录后
+      // 才能看到 "我的" 活动"".
+      if (error instanceof Error && /authenticated principal|session expired/i.test(error.message)) {
+        setAuthed(false);
+        setPhase("READY");
+      } else {
+        setPhase("ERROR");
+      }
+    });
   }, [client]);
   useEffect(() => reload(), [reload]);
 
@@ -52,15 +77,15 @@ export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.J
     setNotice(undefined);
     try {
       await client.join(activityId);
-      setJoinedIds((current) => current.includes(activityId) ? current : [...current, activityId]);
       setNotice("报名成功");
+      reload();
     } catch (error) {
       if (error instanceof ActivityCommandRejectedError) {
         const code = error.result.error?.errorCode ?? "";
         if (code === "ACTIVITY_FULL") setNotice("名额已满");
         else if (code === "ACTIVITY_ALREADY_JOINED") {
-          setJoinedIds((current) => current.includes(activityId) ? current : [...current, activityId]);
           setNotice("你已报过名");
+          reload();
         } else if (code === "AI_ACTION_FORBIDDEN") setNotice("该操作不支持");
         else setNotice("报名失败，请稍后重试");
       } else if (error instanceof Error && /authenticated principal|SessionExpired|session expired/i.test(error.message)) {
@@ -73,7 +98,18 @@ export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.J
     }
   }
 
-  const visible = tab === "open" ? items : tab === "joined" ? items.filter((item) => joinedIds.includes(item.activityId)) : [];
+  const items = tab === "open" ? openItems : tab === "joined" ? joined : created;
+  // 已参加 / 我发起的本地状态 (未登录 = server 不返, 不在本地
+  // 跟踪, 避免 "我报过 5 个" 货不对版).
+  // 明细：复用 ActivityDetailSurface（同一 client），返回键回到列表。
+  // 列表→明细→报名就此打通；明细内的报名成功后，回列表刷新已参加。
+  if (detailId) {
+    return (
+      <View style={styles.root}>
+        <ActivityDetailSurface client={client} initialActivityId={detailId} onBack={() => { setDetailId(undefined); reload(); }} />
+      </View>
+    );
+  }
   return (
     <View style={styles.root}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -89,6 +125,7 @@ export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.J
           ))}
         </View>
         {notice ? <Text style={styles.savedMeta}>{notice}</Text> : null}
+        {!authed ? <Text style={styles.savedMeta}>登录后才能查看 “已参加” / “我发起的”。</Text> : null}
         {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
         {phase === "ERROR" ? (
           <View>
@@ -96,31 +133,33 @@ export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.J
             <Pressable onPress={() => reload()} style={[styles.orderTab, styles.orderTabOn]}><Text style={[styles.orderTabText, styles.orderTabTextOn]}>重试</Text></Pressable>
           </View>
         ) : null}
-        {phase === "READY" && tab === "created" ? <Text style={styles.personalEmpty}>发起活动入口准备中，敬请期待。</Text> : null}
-        {phase === "READY" && tab === "joined" && visible.length === 0 ? <Text style={styles.personalEmpty}>还没有报名，去可参加看看。</Text> : null}
-        {phase === "READY" && tab === "open" && visible.length === 0 ? <Text style={styles.personalEmpty}>本周暂无开放活动。</Text> : null}
-        {phase === "READY" && tab !== "created" ? visible.map((item) => {
-          const joined = joinedIds.includes(item.activityId);
+        {phase === "READY" && tab === "created" && authed && items.length === 0 ? <Text style={styles.personalEmpty}>还没有发起过活动。</Text> : null}
+        {phase === "READY" && tab === "joined" && authed && items.length === 0 ? <Text style={styles.personalEmpty}>还没有报名，去可参加看看。</Text> : null}
+        {phase === "READY" && tab === "open" && items.length === 0 ? <Text style={styles.personalEmpty}>本周暂无开放活动。</Text> : null}
+        {phase === "READY" ? items.map((item) => {
+          const joinedSet = new Set(joined.map((a) => a.activityId));
+          const isJoined = joinedSet.has(item.activityId);
           const capacity = item.capacity ?? 0;
           const full = capacity > 0 && item.joined >= capacity;
           return (
-            <View key={item.activityId} style={styles.savedCard}>
+            <Pressable key={item.activityId} onPress={() => setDetailId(item.activityId)} style={styles.savedCard}>
               <Text style={styles.orderTitle}>{item.title}</Text>
               <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
               <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 感兴趣 {item.interested} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
               {item.aiStatus !== "NONE" ? <Text style={styles.savedMeta}>AI 生成 · {item.aiPersonaName ?? "平台 AI"}</Text> : null}
+              <Text style={styles.savedMeta}>查看明细 ›</Text>
               {tab === "open" ? (
                 <Pressable
-                  disabled={joined || full || joiningId === item.activityId}
+                  disabled={isJoined || full || joiningId === item.activityId}
                   onPress={() => void join(item.activityId)}
-                  style={[styles.orderTab, (joined || full) && styles.orderTabOn]}
+                  style={[styles.orderTab, (isJoined || full) && styles.orderTabOn]}
                 >
-                  <Text style={[styles.orderTabText, (joined || full) && styles.orderTabTextOn]}>
-                    {joiningId === item.activityId ? "报名中…" : joined ? "已报名" : full ? "已满员" : "报名"}
+                  <Text style={[styles.orderTabText, (isJoined || full) && styles.orderTabTextOn]}>
+                    {joiningId === item.activityId ? "报名中…" : isJoined ? "已报名" : full ? "已满员" : "报名"}
                   </Text>
                 </Pressable>
               ) : null}
-            </View>
+            </Pressable>
           );
         }) : null}
       </ScrollView>

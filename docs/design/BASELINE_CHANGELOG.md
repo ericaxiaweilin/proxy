@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 18 — 2026-09-04
+
+- “我的活动” surface (me.tsx > myactivities) 接进 server
+  真实 activity 仓储。MyActivitiesSurface 不再用 hardcoded
+  mock; ActivityClient.listMyActivities() 取代“本周暂无
+  开放活动” fallback。匿名访问下“已参加 / 我发起的”诚
+  实提示登录。detail 页面 复用 ActivityDetailSurface 加
+  initialActivityId / onBack props (与别人 cherry-pick 一致)，
+  修一个别人留下的 detailId 状态未声明 的 TS bug.
+
 ## Revision 17 — 2026-09-04
 
 - “我的活动” 物化路径 (R17.x): server 端 ListMyActivities 返

@@ -103,7 +103,7 @@
         "scripts/check-regression-contracts.sh"
       ],
       "status": "PARTIAL",
-      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); R17.x “我的活动” 物化路径 (ListMyActivities) server+PG+contracts 已走, 写死假数据 surface 还未替换 (ACT-MY-ACTIVITIES-001 mobile wire pending). Chat-derivation (R17.x 后绕 chat 中 “下单/提单/活动” 表述到 server 真实 Order/Activity) 仍 pending."
+      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); R17.x '我的活动' 物化路径已走 server+PG+mobile surface (ListMyActivities wire end-to-end; hardcoded mock removed). Chat-derivation (R17.x 后绕 chat 中 '下单/提单/活动' 表述到 server 真实 Order/Activity) 仍 pending."
     }
   ]
 }

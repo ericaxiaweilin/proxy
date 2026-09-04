@@ -1,7 +1,7 @@
 // Activity 客户端：活动读模型（ListActivities）+ 感兴趣/参加命令。
 // 计数服务端权威；operationRef 承载 payload（zod 校验，fail-closed）。
-import type { Activity, CommandResult } from "@proxy/contracts";
-import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
+import type { Activity, CommandResult, ListMyActivitiesPayload } from "@proxy/contracts";
+import { ActivitySchema, JoinActivityPayloadSchema, ListActivitiesPayloadSchema, ListMyActivitiesPayloadSchema, ToggleActivityInterestPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import { requireAuthenticatedServerSession, type SecureSessionStore, type StoredSession } from "./secure-session";
@@ -54,6 +54,16 @@ export class ActivityClient {
     // actor type, 仅需 optional session, 不再要 requireSession.
     const result = await this.sendCommand(undefined, "ListActivities", { type: "Activity", id: "local" }, {});
     return ListActivitiesPayloadSchema.parse(this.decodeOperationRef(result)).activities;
+  }
+
+  // R17.x: 我的活动物化路径。返回 actor-scoped created + joined
+  // 两个数组. server 侧 必须authenticated, 所以
+  // requireSession 不是 optional (否则 server 会拒绝).
+  // 返回 ListMyActivitiesPayload shape.
+  public async listMyActivities(): Promise<ListMyActivitiesPayload> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "ListMyActivities", { type: "Activity", id: "mine" }, {});
+    return ListMyActivitiesPayloadSchema.parse(this.decodeOperationRef(result));
   }
 
   public async toggleInterest(activityId: string): Promise<{ activity: Activity; interested: boolean }> {

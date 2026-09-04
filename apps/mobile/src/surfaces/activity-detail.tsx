@@ -7,17 +7,27 @@ import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
 import { activityAIDisclosure, activityMoneySummary } from "./activity-detail-model";
 
-export function ActivityDetailSurface({ client }: { client: ActivityClient }): React.JSX.Element {
+export function ActivityDetailSurface({ client, initialActivityId, onBack }: { client: ActivityClient; initialActivityId?: string; onBack?: () => void }): React.JSX.Element {
   const [items, setItems] = useState<Activity[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [selected, setSelected] = useState<Activity | undefined>(undefined);
   useEffect(() => {
     let c = false;
     (async () => {
-      try { const list = await client.listActivities(); if (!c) setItems(list); } catch (e) { if (!c) setError(e instanceof Error ? e.message : String(e)); }
+      try {
+        const list = await client.listActivities();
+        if (c) return;
+        setItems(list);
+        // R17.x: 从 “我的活动” 进明细时, server-side 已取的该
+        // 活动能立刻选中 (避免 “列表选了但明细走了不同活动”)。
+        if (initialActivityId) {
+          const preset = list.find((entry) => entry.activityId === initialActivityId);
+          if (preset) setSelected(preset);
+        }
+      } catch (e) { if (!c) setError(e instanceof Error ? e.message : String(e)); }
     })();
     return () => { c = true; };
-  }, [client]);
+  }, [client, initialActivityId]);
   if (selected) {
     const aiDisclosure = activityAIDisclosure(selected);
     return (

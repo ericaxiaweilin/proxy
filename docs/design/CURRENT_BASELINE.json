@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 17,
+  "baselineRevision": 18,
   "updatedAt": "2026-09-04",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -70,7 +70,7 @@
       "file": "apps/mobile/assets/proxy-prototype.html",
       "status": "ACTIVE_SCREEN_REFERENCE",
       "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
-      "implementationStatus": "USER_PUBLISH_AND_ATTENDANCE_AND_MYACTIVITIES_WIRED_CHAT_DERIVATION_PENDING"
+      "implementationStatus": "USER_PUBLISH_AND_ATTENDANCE_AND_MYACTIVITIES_AND_LISTMYACTIVITIES_WIRED_CHAT_DERIVATION_PENDING"
     },
     {
       "scope": "my-tasks",
