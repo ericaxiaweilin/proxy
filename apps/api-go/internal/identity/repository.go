@@ -46,11 +46,11 @@ const (
 type PrivacyRequestStatus string
 
 const (
-	PrivacyRequestStatusReceived    PrivacyRequestStatus = "received"
-	PrivacyRequestStatusInProgress  PrivacyRequestStatus = "in_progress"
-	PrivacyRequestStatusCompleted   PrivacyRequestStatus = "completed"
-	PrivacyRequestStatusRejected    PrivacyRequestStatus = "rejected"
-	PrivacyRequestStatusCancelled   PrivacyRequestStatus = "cancelled"
+	PrivacyRequestStatusReceived   PrivacyRequestStatus = "received"
+	PrivacyRequestStatusInProgress PrivacyRequestStatus = "in_progress"
+	PrivacyRequestStatusCompleted  PrivacyRequestStatus = "completed"
+	PrivacyRequestStatusRejected   PrivacyRequestStatus = "rejected"
+	PrivacyRequestStatusCancelled  PrivacyRequestStatus = "cancelled"
 )
 
 // PrivacyRequest is the on-the-wire record of a single user-driven
@@ -59,34 +59,34 @@ const (
 // ExportSnapshotURL. Keep the public surface area here aligned with
 // migrations/060_privacy_requests.sql.
 type PrivacyRequest struct {
-	ID                    string                `json:"id"`
-	UserID                string                `json:"userId"`
-	Kind                  PrivacyRequestKind    `json:"kind"`
-	Status                PrivacyRequestStatus  `json:"status"`
-	RequestedAt           time.Time             `json:"requestedAt"`
-	CompletedAt           *time.Time            `json:"completedAt,omitempty"`
-	ErasedAt              *time.Time            `json:"erasedAt,omitempty"`
-	ExportSnapshotURL     string                `json:"exportSnapshotUrl,omitempty"`
-	ExportSHA256          string                `json:"exportSha256,omitempty"`
-	ExportRetentionUntil  *time.Time            `json:"exportRetentionUntil,omitempty"`
-	LegalBasis            string                `json:"legalBasis"`
-	ClientIP              string                `json:"clientIp,omitempty"`
-	UserAgent             string                `json:"userAgent,omitempty"`
-	RejectionReason       string                `json:"rejectionReason,omitempty"`
-	Version               int                   `json:"version"`
+	ID                   string               `json:"id"`
+	UserID               string               `json:"userId"`
+	Kind                 PrivacyRequestKind   `json:"kind"`
+	Status               PrivacyRequestStatus `json:"status"`
+	RequestedAt          time.Time            `json:"requestedAt"`
+	CompletedAt          *time.Time           `json:"completedAt,omitempty"`
+	ErasedAt             *time.Time           `json:"erasedAt,omitempty"`
+	ExportSnapshotURL    string               `json:"exportSnapshotUrl,omitempty"`
+	ExportSHA256         string               `json:"exportSha256,omitempty"`
+	ExportRetentionUntil *time.Time           `json:"exportRetentionUntil,omitempty"`
+	LegalBasis           string               `json:"legalBasis"`
+	ClientIP             string               `json:"clientIp,omitempty"`
+	UserAgent            string               `json:"userAgent,omitempty"`
+	RejectionReason      string               `json:"rejectionReason,omitempty"`
+	Version              int                  `json:"version"`
 }
 
 // PrivacyRequestEvent is an append-only audit log entry. The privacy
 // request center writes one row per status transition so that auditors
 // can reconstruct the timeline without trusting the parent row.
 type PrivacyRequestEvent struct {
-	ID          int64     `json:"id"`
-	RequestID   string    `json:"requestId"`
-	FromStatus  string    `json:"fromStatus,omitempty"`
-	ToStatus    string    `json:"toStatus"`
-	OccurredAt  time.Time `json:"occuredAt"`
-	Actor       string    `json:"actor"`
-	Notes       string    `json:"notes,omitempty"`
+	ID         int64     `json:"id"`
+	RequestID  string    `json:"requestId"`
+	FromStatus string    `json:"fromStatus,omitempty"`
+	ToStatus   string    `json:"toStatus"`
+	OccurredAt time.Time `json:"occuredAt"`
+	Actor      string    `json:"actor"`
+	Notes      string    `json:"notes,omitempty"`
 }
 
 // PrivacyRequestRepository is the persistence boundary for privacy
@@ -144,30 +144,32 @@ type TransactionalRepository interface {
 }
 
 type MemoryRepository struct {
-	mu                sync.Mutex
-	users             map[string]UserAccount
-	loginIdentities   map[string]LoginIdentity
-	devices           map[string]DeviceRegistration
-	memberships       []Membership
-	sessions          map[string]Session
-	events            []event.DomainEvent
-	tokens            map[string]SessionToken
-	challenges        map[string]LoginChallenge
-	privacyRequests   map[string]PrivacyRequest
-	privacyEvents     []PrivacyRequestEvent
-	privacyEventSeq   int64
+	mu                 sync.Mutex
+	users              map[string]UserAccount
+	loginIdentities    map[string]LoginIdentity
+	devices            map[string]DeviceRegistration
+	memberships        []Membership
+	sessions           map[string]Session
+	events             []event.DomainEvent
+	tokens             map[string]SessionToken
+	challenges         map[string]LoginChallenge
+	privacyRequests    map[string]PrivacyRequest
+	privacyEvents      []PrivacyRequestEvent
+	privacyEventSeq    int64
+	accountPreferences map[string]AccountPreferences
 }
 
 func NewMemoryRepository(seed *Seed) *MemoryRepository {
 	repository := &MemoryRepository{
-		users:           make(map[string]UserAccount),
-		loginIdentities: make(map[string]LoginIdentity),
-		devices:         make(map[string]DeviceRegistration),
-		memberships:     []Membership{},
-		sessions:        make(map[string]Session),
-		tokens:          make(map[string]SessionToken),
-		challenges:      make(map[string]LoginChallenge),
-		privacyRequests: make(map[string]PrivacyRequest),
+		users:              make(map[string]UserAccount),
+		loginIdentities:    make(map[string]LoginIdentity),
+		devices:            make(map[string]DeviceRegistration),
+		memberships:        []Membership{},
+		sessions:           make(map[string]Session),
+		tokens:             make(map[string]SessionToken),
+		challenges:         make(map[string]LoginChallenge),
+		privacyRequests:    make(map[string]PrivacyRequest),
+		accountPreferences: make(map[string]AccountPreferences),
 	}
 	if seed != nil {
 		repository.users[seed.User.ID] = seed.User
@@ -183,6 +185,24 @@ func NewMemoryRepository(seed *Seed) *MemoryRepository {
 		}
 	}
 	return repository
+}
+
+func (r *MemoryRepository) GetAccountPreferences(_ context.Context, userID string) (AccountPreferences, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.accountPreferences[userID]
+	if !ok {
+		return AccountPreferences{}, ErrAccountPreferencesNotFound
+	}
+	return p, nil
+}
+
+func (r *MemoryRepository) UpsertAccountPreferences(_ context.Context, p AccountPreferences) (AccountPreferences, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p.Version = r.accountPreferences[p.UserAccountID].Version + 1
+	r.accountPreferences[p.UserAccountID] = p
+	return p, nil
 }
 
 func (r *MemoryRepository) GetUser(_ context.Context, id string) (UserAccount, error) {

@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 6 — 2026-09-04
+
+- Upgraded social and collaboration settings from device-only persistence to
+  authenticated account persistence with local offline cache fallback.
+- Added `UI-SOCIAL-002` client/server ownership and round-trip regression coverage.
+
 ## Revision 5 — 2026-09-04
 
 - Added persisted collaboration opt-in, types, optional rate and contact fields.

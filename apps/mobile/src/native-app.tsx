@@ -26,6 +26,7 @@ import { NotificationClient } from "./notification-client";
 import { BusinessClient } from "./business-client";
 import { SceneClient } from "./scene-client";
 import { SupplyClient } from "./supply-client";
+import { SocialSettingsClient } from "./social-settings-client";
 import { nativeSecureStorageDriver } from "./native-secure-storage";
 import { createLastSignInStore, maskIdentifier, avatarLetterFor, type LastSignIn } from "./last-signin-store";
 import { AppShell } from "./shell/app-shell";
@@ -150,6 +151,7 @@ const notificationClient = new NotificationClient({ authClient: sessionAuthClien
 const businessClient = new BusinessClient({ authClient: sessionAuthClient, secureSessionStore });
 const sceneClient = new SceneClient({ authClient: sessionAuthClient, secureSessionStore });
 const supplyClient = new SupplyClient({ authClient: sessionAuthClient, secureSessionStore });
+const socialSettingsClient = new SocialSettingsClient({ authClient: sessionAuthClient, secureSessionStore });
 type BootPhase = "BOOTSTRAPPING" | "PUBLIC" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {
@@ -247,6 +249,7 @@ export function ProxyApp(): React.JSX.Element {
         notification={notificationClient}
         business={businessClient}
         supply={supplyClient}
+        socialSettings={socialSettingsClient}
         scene={sceneClient}
         isGuest={phase === "PUBLIC"}
         ensureConversationSession={phase === "PUBLIC" ? ensureNativeGuestSession : undefined}

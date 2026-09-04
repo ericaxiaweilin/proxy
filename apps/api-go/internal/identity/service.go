@@ -118,6 +118,7 @@ func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
+		"GetAccountPreferences", "UpdateAccountPreferences",
 		"RequestPrivacyExport", "RequestPrivacyDelete", "CancelPrivacyRequest", "GetPrivacyRequestStatus", "ListPrivacyRequests":
 		return true
 	default:
@@ -166,6 +167,10 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.listDisplayIdentities(ctx, envelope)
 	case "BurnDisplayIdentity":
 		return s.burnDisplayIdentity(ctx, envelope)
+	case "GetAccountPreferences":
+		return s.getAccountPreferences(ctx, envelope)
+	case "UpdateAccountPreferences":
+		return s.updateAccountPreferences(ctx, envelope)
 	case "RequestPrivacyExport":
 		return s.requestPrivacyExport(ctx, envelope)
 	case "RequestPrivacyDelete":
@@ -223,9 +228,9 @@ type createAnonymousSessionPayload struct {
 	// string of the Terms / Privacy doc the user accepted (e.g. "1.1");
 	// empty string falls back to "1.1" so the server never silently
 	// accepts an unsigned-by-version consent.
-	DateOfBirth      string                  `json:"dateOfBirth"`
-	Consents         *createAnonConsentBlock `json:"consents"`
-	LegalDocVersion  string                  `json:"legalDocVersion"`
+	DateOfBirth     string                  `json:"dateOfBirth"`
+	Consents        *createAnonConsentBlock `json:"consents"`
+	LegalDocVersion string                  `json:"legalDocVersion"`
 }
 
 type createAnonConsentBlock struct {
@@ -1289,14 +1294,14 @@ const PrivacyExportRetention = 7 * 24 * time.Hour
 // they live behind their own services and will be added as a follow-up
 // (P1-F follow-up per R16.7 plan §6).
 type PrivacyDataExport struct {
-	Account       UserAccount                     `json:"account"`
-	Consents      []LegalConsentSnapshot          `json:"consents"`
-	Devices       []DeviceRegistration            `json:"devices"`
-	Sessions      []Session                       `json:"sessions"`
-	PrivacyRequests []PrivacyRequest              `json:"privacyRequests"`
-	GeneratedAt   time.Time                       `json:"generatedAt"`
-	LegalBasis    string                          `json:"legalBasis"`
-	FormatVersion string                          `json:"formatVersion"`
+	Account         UserAccount            `json:"account"`
+	Consents        []LegalConsentSnapshot `json:"consents"`
+	Devices         []DeviceRegistration   `json:"devices"`
+	Sessions        []Session              `json:"sessions"`
+	PrivacyRequests []PrivacyRequest       `json:"privacyRequests"`
+	GeneratedAt     time.Time              `json:"generatedAt"`
+	LegalBasis      string                 `json:"legalBasis"`
+	FormatVersion   string                 `json:"formatVersion"`
 }
 
 // LegalConsentSnapshot is a trimmed view of the legal_consent_records
@@ -1453,10 +1458,10 @@ func (s *Service) requestPrivacyDelete(ctx context.Context, e command.Envelope) 
 	erasedAt := completedAt
 	result := command.Accepted(e, "PrivacyRequest", req.ID, req.Version, string(req.Status), nil)
 	result.Body = map[string]any{
-		"privacyRequest": req,
-		"status":         string(req.Status),
+		"privacyRequest":  req,
+		"status":          string(req.Status),
 		"gracePeriodDays": int(PrivacyDeleteGracePeriod / (24 * time.Hour)),
-		"erasedAt":       erasedAt,
+		"erasedAt":        erasedAt,
 		"cancelableUntil": completedAt,
 	}
 	return result
@@ -1576,14 +1581,14 @@ func (s *Service) GeneratePrivacyExportData(ctx context.Context, userID string) 
 	}
 	now := s.clock.Now().UTC()
 	export := PrivacyDataExport{
-		Account:       user,
-		Consents:      []LegalConsentSnapshot{},
-		Devices:       []DeviceRegistration{},
-		Sessions:      []Session{},
+		Account:         user,
+		Consents:        []LegalConsentSnapshot{},
+		Devices:         []DeviceRegistration{},
+		Sessions:        []Session{},
 		PrivacyRequests: []PrivacyRequest{},
-		GeneratedAt:   now,
-		LegalBasis:    "PDP-91/2025/QH15-Art31",
-		FormatVersion: "1.0",
+		GeneratedAt:     now,
+		LegalBasis:      "PDP-91/2025/QH15-Art31",
+		FormatVersion:   "1.0",
 	}
 	// Walk the same repository surface that /v1/identity/me uses so the
 	// export stays in sync with what the user sees in-app. We deliberately

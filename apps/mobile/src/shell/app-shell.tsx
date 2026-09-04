@@ -46,6 +46,7 @@ import { type PaymentClient } from "../payment-client";
 import { type NotificationClient } from "../notification-client";
 import { type BusinessClient } from "../business-client";
 import { type SupplyClient } from "../supply-client";
+import { type SocialSettingsClient } from "../social-settings-client";
 import { BusinessHome } from "../surfaces/business-home";
 import { ConversationSurface } from "../surfaces/conversation";
 import { FeedSurface } from "../surfaces/feed";
@@ -117,6 +118,7 @@ export function AppShell({
   notification,
   business,
   supply,
+  socialSettings,
   scene,
   isGuest,
   ensureConversationSession,
@@ -141,6 +143,7 @@ export function AppShell({
   notification: NotificationClient;
   business: BusinessClient;
   supply: SupplyClient;
+  socialSettings: SocialSettingsClient;
   scene?: import("../scene-client").SceneClient | undefined;
   isGuest?: boolean;
   ensureConversationSession?: (() => Promise<void>) | undefined;
@@ -579,6 +582,7 @@ export function AppShell({
               fulfillment={fulfillment}
               business={business}
               supply={supply}
+              socialSettingsClient={socialSettings}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,

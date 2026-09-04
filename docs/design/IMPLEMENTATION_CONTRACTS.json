@@ -44,13 +44,18 @@
       "scope": "social-contact-collaboration",
       "reference": "docs/design/references/proxy_social_contact_collaboration_v2.html",
       "implementationFiles": [
-        "apps/mobile/src/surfaces/me.tsx"
+        "apps/mobile/src/surfaces/me.tsx",
+        "apps/mobile/src/social-settings-client.ts",
+        "apps/api-go/internal/identity/account_preferences.go"
       ],
       "evidenceFiles": [
-        "apps/mobile/src/design-system-r3.test.ts"
+        "apps/mobile/src/design-system-r3.test.ts",
+        "apps/mobile/src/social-settings-store.test.ts",
+        "apps/mobile/src/social-settings-client.test.ts",
+        "apps/api-go/internal/identity/account_preferences_test.go"
       ],
       "status": "PARTIAL",
-      "knownGap": "Social account visibility exists, but collaboration types, rate and contact settings lack a complete persisted flow and dedicated parity test."
+      "knownGap": "Account-backed social visibility and collaboration preferences are implemented; full visual parity and server-authoritative social-provider verification remain incomplete."
     },
     {
       "scope": "merchant-creator-center",

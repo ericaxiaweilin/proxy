@@ -36,6 +36,7 @@ import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 import type { SceneClient } from "../scene-client";
 import type { BusinessClient } from "../business-client";
+import type { SocialSettingsClient } from "../social-settings-client";
 import type { SupplyClient } from "../supply-client";
 import { FacetHomeSurface } from "../facet/FacetHomeSurface";
 import { FacetClient } from "../facet-client";
@@ -229,6 +230,7 @@ export function MeSurface({
   supply,
   engagement,
   viewerAccountId,
+  socialSettingsClient,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -249,6 +251,7 @@ export function MeSurface({
   supply?: SupplyClient;
   engagement?: EngagementClient;
   viewerAccountId?: string | undefined;
+  socialSettingsClient?: SocialSettingsClient | undefined;
   onOpenSearch?: ((query: string) => void) | undefined;
 }): React.JSX.Element {
   const [subPage, setSubPage] = useState<MeSubPage>();
@@ -337,8 +340,8 @@ export function MeSurface({
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
   const [collaboration, setCollaboration] = useState({ enabled: false, types: ["探店", "UGC"], rate: "", contact: "" });
   const socialSettingsHydrated = useRef(false);
-  useEffect(() => { void socialSettingsStore.read().then((value) => { if (value) { setSocialAccounts(value.accounts); setSocialSettings({ merchant: value.merchant, profile: value.profile, influence: value.influence }); setCollaboration({ enabled: value.collaborationEnabled ?? false, types: value.collaborationTypes ?? ["探店", "UGC"], rate: value.collaborationRate ?? "", contact: value.collaborationContact ?? "" }); } socialSettingsHydrated.current = true; }); }, []);
-  useEffect(() => { if (socialSettingsHydrated.current) void socialSettingsStore.write({ accounts: socialAccounts, ...socialSettings, collaborationEnabled: collaboration.enabled, collaborationTypes: collaboration.types, collaborationRate: collaboration.rate, collaborationContact: collaboration.contact }); }, [socialAccounts, socialSettings, collaboration]);
+  useEffect(() => { let cancelled = false; void (async () => { const local = await socialSettingsStore.read(); const value = await socialSettingsClient?.read().catch(() => undefined) ?? local; if (!cancelled && value) { setSocialAccounts(value.accounts); setSocialSettings({ merchant: value.merchant, profile: value.profile, influence: value.influence }); setCollaboration({ enabled: value.collaborationEnabled ?? false, types: value.collaborationTypes ?? ["探店", "UGC"], rate: value.collaborationRate ?? "", contact: value.collaborationContact ?? "" }); await socialSettingsStore.write(value); } if (!cancelled) socialSettingsHydrated.current = true; })(); return () => { cancelled = true; }; }, [socialSettingsClient]);
+  useEffect(() => { if (!socialSettingsHydrated.current) return; const value = { accounts: socialAccounts, ...socialSettings, collaborationEnabled: collaboration.enabled, collaborationTypes: collaboration.types, collaborationRate: collaboration.rate, collaborationContact: collaboration.contact }; void socialSettingsStore.write(value); void socialSettingsClient?.write(value).catch(() => undefined); }, [socialAccounts, socialSettings, collaboration, socialSettingsClient]);
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
   const [profileDraft, setProfileDraft] = useState({
