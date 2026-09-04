@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -334,5 +335,78 @@ func TestActivityPostgresJSONBRoundTripPreservesMoneyFlowAndAI(t *testing.T) {
 		if item.ID == testID {
 			t.Fatalf("TEST-origin row leaked through List (R16.x filter regression)")
 		}
+	}
+}
+
+// ACT-MY-ACTIVITIES-002: R17.x “我的活动” 物化路径在真 PG 上。
+func TestActivityPostgresListByOwnerAndParticipant(t *testing.T) {
+	pool := requireTestPool(t)
+	run := time.Now().UnixNano()
+
+	ctx := t.Context()
+	repo := NewActivityRepository(pool)
+	id := fmt.Sprintf("act_pg_r17_owner_a_%d", run)
+	id2 := fmt.Sprintf("act_pg_r17_owner_b_%d", run)
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = pool.Exec(c, `DELETE FROM activity.participants WHERE activity_id IN ($1,$2)`, id, id2)
+		_, _ = pool.Exec(c, `DELETE FROM activity.activities WHERE id IN ($1,$2)`, id, id2)
+	})
+
+	// ListByOwner 按 payload->>'ownerId' 过滤; ListByParticipant
+	// 走 activity.participants JOIN. 两个路径都是 actor-scoped:
+	// owner_a 看不到 owner_b 发的活动, participant_x 看不到
+	// participant_y 报名的活动.
+	if _, err := pool.Exec(ctx, `DELETE FROM activity.participants WHERE activity_id IN ($1,$2)`, id, id2); err != nil {
+		t.Fatalf("cleanup participants: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM activity.activities WHERE id IN ($1,$2)`, id, id2); err != nil {
+		t.Fatalf("cleanup activities: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO activity.activities (id, payload, interested_count, joined_count, capacity) VALUES ($1, jsonb_build_object('activityId',$1::text,'title','R17 my activities owner_a','time','Sat','origin','USER','ownerId',$2::text,'aiStatus','NONE'), 0, 0, 4)`, id, "owner_a"); err != nil {
+		t.Fatalf("seed owner_a activity: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO activity.activities (id, payload, interested_count, joined_count, capacity) VALUES ($1, jsonb_build_object('activityId',$1::text,'title','R17 my activities owner_b','time','Sat','origin','USER','ownerId',$2::text,'aiStatus','NONE'), 0, 0, 4)`, id2, "owner_b"); err != nil {
+		t.Fatalf("seed owner_b activity: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO activity.participants (activity_id, actor_id) VALUES ($1, $2)`, id, "participant_x"); err != nil {
+		t.Fatalf("seed participant_x: %v", err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = pool.Exec(c, `DELETE FROM activity.participants WHERE activity_id IN ($1,$2)`, id, id2)
+		_, _ = pool.Exec(c, `DELETE FROM activity.activities WHERE id IN ($1,$2)`, id, id2)
+	})
+
+	ownerA, err := repo.ListByOwner(ctx, "owner_a")
+	if err != nil {
+		t.Fatalf("ListByOwner(owner_a): %v", err)
+	}
+	if len(ownerA) != 1 || ownerA[0].ID != id {
+		t.Fatalf("ListByOwner(owner_a) must return [%s], got %+v", id, ownerA)
+	}
+	ownerB, err := repo.ListByOwner(ctx, "owner_b")
+	if err != nil {
+		t.Fatalf("ListByOwner(owner_b): %v", err)
+	}
+	if len(ownerB) != 1 || ownerB[0].ID != id2 {
+		t.Fatalf("ListByOwner(owner_b) must return [%s], got %+v", id2, ownerB)
+	}
+
+	joinedX, err := repo.ListByParticipant(ctx, "participant_x")
+	if err != nil {
+		t.Fatalf("ListByParticipant(participant_x): %v", err)
+	}
+	if len(joinedX) != 1 || joinedX[0].ID != id {
+		t.Fatalf("ListByParticipant(participant_x) must return [%s], got %+v", id, joinedX)
+	}
+	// participant_y 还没报任何名, 应当返回空 — 不能看到 participant_x
+	// 报名的活动.
+	joinedY, err := repo.ListByParticipant(ctx, "participant_y")
+	if err != nil {
+		t.Fatalf("ListByParticipant(participant_y): %v", err)
+	}
+	if len(joinedY) != 0 {
+		t.Fatalf("ListByParticipant(participant_y) must be empty (no leak), got %+v", joinedY)
 	}
 }

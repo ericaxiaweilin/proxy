@@ -90,15 +90,20 @@
       "reference": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
       "implementationFiles": [
         "apps/mobile/src/surfaces/tasks.tsx",
+        "apps/mobile/src/surfaces/me-orders.tsx",
+        "apps/api-go/internal/activity/service.go",
+        "apps/api-go/internal/platform/postgres/activity.go",
         "apps/mobile/src/activity-client.ts"
       ],
       "evidenceFiles": [
         "packages/contracts/src/activity.test.ts",
         "apps/api-go/internal/aiboundary/policy_test.go",
-        "apps/api-go/internal/activity/service_test.go"
+        "apps/api-go/internal/activity/service_test.go",
+        "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go",
+        "scripts/check-regression-contracts.sh"
       ],
       "status": "PARTIAL",
-      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); organizer marking others needs a targetUserId wire change, pending."
+      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); R17.x “我的活动” 物化路径 (ListMyActivities) server+PG+contracts 已走, 写死假数据 surface 还未替换 (ACT-MY-ACTIVITIES-001 mobile wire pending). Chat-derivation (R17.x 后绕 chat 中 “下单/提单/活动” 表述到 server 真实 Order/Activity) 仍 pending."
     }
   ]
 }

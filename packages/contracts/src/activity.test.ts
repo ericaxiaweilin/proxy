@@ -216,3 +216,120 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
     expect(result.success).toBe(false);
   });
 });
+
+// ACT-MY-ACTIVITIES-001: R17.x “我的活动” 物化路径 wire
+// schema。ListMyActivitiesPayloadSchema 必须要
+// (1) created + joined 两个 array 均可为空 (匿名路径在
+//     server 侧拒接), 但 schema 本身不限制 size;
+// (2) 接受与 ListActivities 一样的 ActivitySchema, 所以
+//     aiStatus / aiActorKind / ownerId / moneyFlow /
+//     priceLabel 都要在 schema 上透传;
+// (3) 拒接 origin='TEST' 的活动出现在“我的活动”里 (server
+//     端 ListByOwner/ListByParticipant 已经过滤了)。
+import { ListMyActivitiesPayloadSchema } from "./index";
+describe("ListMyActivitiesPayloadSchema (R17.x my-activities wire)", () => {
+  it("accepts created + joined populated (USER origin)", () => {
+    const payload = {
+      created: [
+        {
+          activityId: "act_mine_1",
+          origin: "USER" as const,
+          title: "我发起的咖啡局",
+          time: "周六",
+          people: "0 / 4 人",
+          price: "0₫",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费参加",
+          consumption: "各自承担到店消费",
+          venueIcon: "☕",
+          venueName: "木光",
+          venueSpend: "",
+          venueType: "CAFE" as const,
+          venueTypeLabel: "咖啡店",
+          desc: "我发起的",
+          benefit: "",
+          qaCount: 0,
+          interested: 2,
+          joined: 1,
+          capacity: 4,
+          shares: 0,
+          ownerId: "me"
+        }
+      ],
+      joined: [
+        {
+          activityId: "act_joined_1",
+          origin: "MERCHANT" as const,
+          title: "东交伴手手作课",
+          time: "周日",
+          people: "3 / 8 人",
+          price: "60,000₫",
+          moneyFlow: "PAY_TO_JOIN" as const,
+          priceLabel: "60,000₫ / 人",
+          consumption: "60,000₫ 纯手作费",
+          venueIcon: "✶",
+          venueName: "东交手作",
+          venueSpend: "0₫",
+          venueType: "RESTAURANT" as const,
+          venueTypeLabel: "餐厅",
+          desc: "手作课",
+          benefit: "香片一份",
+          qaCount: 1,
+          interested: 5,
+          joined: 3,
+          capacity: 8,
+          shares: 2
+        }
+      ],
+      note: "我的活动: created = 我发起的, joined = 我参加的"
+    };
+    const result = ListMyActivitiesPayloadSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.created).toHaveLength(1);
+      expect(result.data.joined).toHaveLength(1);
+      expect(result.data.created[0].ownerId).toBe("me");
+      expect(result.data.joined[0].moneyFlow).toBe("PAY_TO_JOIN");
+    }
+  });
+  it("accepts empty created + joined (actor 没记录)", () => {
+    const result = ListMyActivitiesPayloadSchema.safeParse({ created: [], joined: [] });
+    expect(result.success).toBe(true);
+  });
+  it("rejects activities whose origin is TEST (not supposed to surface in 'my')", () => {
+    // server 侧 ListByOwner/ListByParticipant 都会加 "origin<>'TEST'",
+    // 所以 TEST 不会出现在响应里。如果 schema 接受 TEST 但 server
+    // 返回了 TEST, 是 server 侧过滤漏了。这里 schema 同样拒绝
+    // TEST 以作为 “server 也不应准它进入我的活动” 的 双重保险。
+    const payload = {
+      created: [
+        {
+          activityId: "act_test_leak",
+          origin: "TEST" as any,
+          title: "leak",
+          time: "",
+          people: "",
+          price: "",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费",
+          consumption: "",
+          venueIcon: "",
+          venueName: "",
+          venueSpend: "",
+          venueType: "" as const,
+          venueTypeLabel: "",
+          desc: "",
+          benefit: "",
+          qaCount: 0,
+          interested: 0,
+          joined: 0,
+          capacity: 0,
+          shares: 0
+        }
+      ],
+      joined: []
+    };
+    const result = ListMyActivitiesPayloadSchema.safeParse(payload);
+    expect(result.success).toBe(false);
+  });
+});

@@ -129,6 +129,55 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 	return result, err
 }
 
+// R17.x: 我的活动物化路径。ListByOwner 按 payload->>'ownerId' 过滤
+// 并附加 origin='TEST' 过滤 (与 List() 一致) ;
+// ListByParticipant 走 activity.participants
+// JOIN activity.activities。后者需要真实 participants
+// 行来表达“在 ”状态 — 仅靠 payload->>'joinedBy' 不够 (memory only)。
+func (r *ActivityRepository) ListByOwner(ctx context.Context, ownerID string) ([]activity.Activity, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT payload, interested_count, joined_count, capacity
+		FROM activity.activities
+		WHERE COALESCE(payload->>'ownerId', '') = $1
+		  AND COALESCE(payload->>'origin', '') <> 'TEST'
+		ORDER BY created_at DESC`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []activity.Activity{}
+	for rows.Next() {
+		item, err := scanActivityRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+func (r *ActivityRepository) ListByParticipant(ctx context.Context, actorID string) ([]activity.Activity, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT a.payload, a.interested_count, a.joined_count, a.capacity
+		FROM activity.activities a
+		JOIN activity.participants p ON p.activity_id = a.id
+		WHERE p.actor_id = $1
+		  AND COALESCE(a.payload->>'origin', '') <> 'TEST'
+		ORDER BY a.created_at DESC`, actorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []activity.Activity{}
+	for rows.Next() {
+		item, err := scanActivityRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 type activityScanner interface{ Scan(dest ...any) error }
 
 func scanActivityRow(row activityScanner) (activity.Activity, error) {

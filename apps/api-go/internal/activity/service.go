@@ -34,6 +34,9 @@ type Activity struct {
 	VenueSpend      string `json:"venueSpend"`
 	VenueType       string `json:"venueType"` // CAFE | RESTAURANT
 	VenueTypeLabel  string `json:"venueTypeLabel"`
+	// CoverImageURL 活动封面图（R17.x 预留，omitempty：上传管线接好之前
+	// 不下发，客户端见契约注释）。
+	CoverImageURL   string `json:"coverImageUrl,omitempty"`
 	Desc            string `json:"desc"`
 	Benefit         string `json:"benefit"`
 	QACount         int    `json:"qaCount"`
@@ -80,6 +83,13 @@ type Repository interface {
 	List(ctx context.Context) ([]Activity, error)
 	ToggleInterest(ctx context.Context, activityID, actorID string) (Activity, bool, error)
 	Join(ctx context.Context, activityID, actorID string) (Activity, error)
+
+	// R17.x: “我的活动” 物化路径。
+	// ListByOwner 返回该 actor 作为 owner (Origin=USER 且 ownerId=actor) 创建的活动。
+	// ListByParticipant 返回该 actor 参加了的活动 (activity.participants 表)。
+	// 两个方法必须都是 actor-scoped：不能“错”返回为“”"（否则看到“别人的”"）。
+	ListByOwner(ctx context.Context, ownerID string) ([]Activity, error)
+	ListByParticipant(ctx context.Context, actorID string) ([]Activity, error)
 }
 
 type MemoryRepository struct {
@@ -111,7 +121,7 @@ func (s *Service) SeedDefaults() {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "ListActivities", "PublishActivity", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
+	case "ListActivities", "ListMyActivities", "PublishActivity", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
 		return true
 	default:
 		return false
@@ -126,6 +136,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	switch e.CommandType {
 	case "ListActivities":
 		return s.listActivities(ctx, e)
+	case "ListMyActivities":
+		return s.listMyActivities(ctx, e)
 	case "PublishActivity":
 		return s.publishActivity(ctx, e)
 	case "ToggleActivityInterest":
@@ -197,6 +209,42 @@ func (s *Service) listActivities(ctx context.Context, e command.Envelope) comman
 	return acceptedWithPayload(e, "Activity", "", 0, "LISTED", map[string]any{
 		"activities": list,
 		"note":       "活动读模型：计数服务端权威；参加后才开放群聊",
+	}, nil)
+}
+
+// ---------- ListMyActivities ----------
+//
+// R17.x: 补上“我的活动”这条物化路径。客户端在 me.tsx
+// myactivities subpage 之前用 hardcoded mock,
+// 走这条路径后“我的活动” 页面才能看到 server 真实
+// owner / participant 记录。
+//
+// 返回 payload 包含两个数组 — joined + created
+// — 让 client 能在一个回合里刷新两个 tab。
+// 二个查询都是 actor-scoped：不会泄露其他 actor 的活动。
+// actor ID 必填（匿名不应能看到“任何”我的活动"）。
+func (s *Service) listMyActivities(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
+	}
+	created, err := s.repository.ListByOwner(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "ACTIVITY_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "activity.list_failed", nil)
+	}
+	joined, err := s.repository.ListByParticipant(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "ACTIVITY_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "activity.list_failed", nil)
+	}
+	for i := range created {
+		normalizeActivityMoneyAndAI(&created[i])
+	}
+	for i := range joined {
+		normalizeActivityMoneyAndAI(&joined[i])
+	}
+	return acceptedWithPayload(e, "Activity", e.Actor.ID, 1, "LISTED", map[string]any{
+		"created": created,
+		"joined":  joined,
+		"note":    "我的活动: created = 我发起的, joined = 我参加的. 都按 created_at 逆序.",
 	}, nil)
 }
 
@@ -450,6 +498,47 @@ func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string) (
 	item.joinedBy[actorID] = true
 	item.Joined++
 	return *item, nil
+}
+
+// R17.x: 我的活动物化路径。ListByOwner 返回该 actor 作为 owner
+// (Activity.OwnerID == ownerID) 创建的活动，按 created_at 逆序。
+// ListByParticipant 返回该 actor 参加了的活动 (joinedBy 包含 actorID)。
+// 两个方法都是 actor-scoped：不会泄露其他 actor 的活动。
+func (r *MemoryRepository) ListByOwner(_ context.Context, ownerID string) ([]Activity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := make([]Activity, 0)
+	for _, id := range r.order {
+		item := r.activities[id]
+		if item == nil || item.OwnerID != ownerID {
+			continue
+		}
+		items = append(items, *item)
+	}
+	reverseActivityOrder(items)
+	return items, nil
+}
+func (r *MemoryRepository) ListByParticipant(_ context.Context, actorID string) ([]Activity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := make([]Activity, 0)
+	for _, id := range r.order {
+		item := r.activities[id]
+		if item == nil {
+			continue
+		}
+		if item.joinedBy == nil || !item.joinedBy[actorID] {
+			continue
+		}
+		items = append(items, *item)
+	}
+	reverseActivityOrder(items)
+	return items, nil
+}
+func reverseActivityOrder(items []Activity) {
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
 }
 
 // ---------- helpers ----------

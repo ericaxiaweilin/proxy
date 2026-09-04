@@ -156,6 +156,20 @@ require_test "ACT-PUBLISH-001" "./internal/activity" \
 pnpm --dir apps/mobile test -- --run src/activity-client.test.ts
 echo "    ACT-PUBLISH-001: PASS (mobile publish + offline write guard)"
 
+# ACT-MY-ACTIVITIES-001: “我的活动” 物化路径。ListMyActivities
+# 返回 actor-scoped created + joined 两个数组; 匿名 / 空 actor
+# 必须被 server 拒绝 (R17.x). 防“我的活动”页面重新退回 hardcoded mock.
+require_test "ACT-MY-ACTIVITIES-001" "./internal/activity" \
+  "TestListMyActivitiesByActor" \
+  "apps/api-go/internal/activity/service_test.go" || exit $?
+# ACT-MY-ACTIVITIES-002: PG ListByOwner / ListByParticipant
+# 在真 PG 上跳. 防 “仅以内存仓储跳” 在生产出现 “我的活动” 空表.
+require_test "ACT-MY-ACTIVITIES-002" "./internal/platform/postgres" \
+  "TestActivityPostgresListByOwnerAndParticipant" \
+  "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go" || exit $?
+pnpm --dir packages/contracts test -- --run src/activity.test.ts
+echo "    ACT-MY-ACTIVITIES-001: PASS (mobile wire schema round-trip)"
+
 # OPPORTUNITY-DEAL-001: 真人申请 -> 发布者选择 -> 被选真人确认；候选列表
 # 来自仓储，不允许把平台 AI 或硬编码人物当作可直接购买的库存。
 require_test "OPPORTUNITY-DEAL-001" "./internal/marketplace" \

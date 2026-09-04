@@ -509,6 +509,9 @@ export const ActivitySchema = z.object({
   venueSpend: z.string(),
   venueType: z.enum(["CAFE", "RESTAURANT", ""]),
   venueTypeLabel: z.string(),
+  // 活动封面图（R17.x 预留）：HTTPS URL，上传管线接好之前 server 不下发，
+  // 客户端无此字段时必须显示诚实占位（不得用假图冒充实拍）。
+  coverImageUrl: z.string().min(1).optional(),
   desc: z.string(),
   benefit: z.string(),
   qaCount: z.number().int().nonnegative(),
@@ -537,6 +540,17 @@ export const ListActivitiesPayloadSchema = z.object({
   note: z.string().optional()
 });
 export type ListActivitiesPayload = z.infer<typeof ListActivitiesPayloadSchema>;
+
+// ListMyActivitiesPayloadSchema：R17.x "我的活动" 物化路径。返回
+// actor-scoped 两个数组 — created (我发起的) + joined (我参加的)。
+// 两个数组都是 activityId 唯一排序 (服务侧 created_at DESC);
+// 客户端可以一次走完两个 tab，不需要走两次 server。
+export const ListMyActivitiesPayloadSchema = z.object({
+  created: z.array(ActivitySchema),
+  joined: z.array(ActivitySchema),
+  note: z.string().optional()
+});
+export type ListMyActivitiesPayload = z.infer<typeof ListMyActivitiesPayloadSchema>;
 
 // MarketOpportunitySchema：机会读模型 wire 契约。
 //

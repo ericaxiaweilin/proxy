@@ -2,7 +2,9 @@ package activity
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
@@ -94,6 +96,123 @@ func TestPublishActivityRejectsAIAndInvalidVenueBoundary(t *testing.T) {
 	if out := s.HandleContext(t.Context(), invalid); out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "ACTIVITY_VENUE_UNSUPPORTED" {
 		t.Fatalf("unsupported venue must route away from activity: %+v", out)
 	}
+}
+
+// R17.x: ACT-MY-ACTIVITIES-001 — “我的活动” 物化路径: listMyActivities
+// 返回这个 actor 发起的 + 这个 actor 参加的 两组活动。其他 actor 的
+// 活动不能泄露。匿名 / 空 actor 必须被拒 (不能看到任何“任意”我的活动"")。
+// 这条 tripwire 防“我的活动”页面重新退回 hardcoded mock。
+func TestListMyActivitiesByActor(t *testing.T) {
+	s := New()
+	// 准备数据: owner_1 发 1 个；viewer 参加 1 个；其他 actor 的活动 1 个。
+	// 三个活动 id 唯一。
+	idCreated := "act_my_created_" + itoaUnique()
+	idJoined := "act_my_joined_" + itoaUnique()
+	idOther := "act_other_" + itoaUnique()
+
+	for _, c := range []struct {
+		kind, id, actor string
+	}{
+		{"PublishActivity", idCreated, "owner_1"},
+		{"PublishActivity", idJoined, "other_owner"},
+		{"PublishActivity", idOther, "other_owner"},
+	} {
+		// PublishActivity 以 "activity_" + CommandID 为 ID，这里提前拼出。
+		cmdID := c.id
+		realID := "activity_" + cmdID
+		e := activityEnvelope(c.kind, c.actor, realID)
+		e.CommandID = cmdID
+		e.Payload = map[string]any{
+			"title": "R17.x my activities tripwire", "time": "周六", "capacity": 4,
+			"venueName": "lab", "venueIcon": "○", "venueType": "CAFE", "realitySceneId": "scene_lab",
+			"desc": "tripwire", "consumptionTerm": "SPLIT",
+		}
+		if out := s.HandleContext(t.Context(), e); out.Outcome != "ACCEPTED" {
+			t.Fatalf("seed %s: %+v", c.id, out)
+		}
+	}
+	// viewer 报名 idJoined (JoinActivity 用 Target.ID 查)。
+	joinEnv := activityEnvelope("JoinActivity", "viewer", "activity_"+idJoined)
+	if out := s.HandleContext(t.Context(), joinEnv); out.Outcome != "ACCEPTED" {
+		t.Fatalf("join: %+v", out)
+	}
+
+	// 匿名 / 空 actor 必须被拒。
+	e := activityEnvelope("ListMyActivities", "", "mine")
+	if out := s.HandleContext(t.Context(), e); out.Outcome != "REJECTED" {
+		t.Fatalf("empty-actor ListMyActivities must reject, got %+v", out)
+	}
+
+	// viewer: joined 只能是 idJoined；不能看到 idCreated (那是 owner_1 的)。
+	e = activityEnvelope("ListMyActivities", "viewer", "mine")
+	out := s.HandleContext(t.Context(), e)
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("viewer ListMyActivities: %+v", out)
+	}
+	var payload struct {
+		Created []Activity `json:"created"`
+		Joined  []Activity `json:"joined"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Created) != 0 {
+		t.Fatalf("viewer.created must be empty, got %d", len(payload.Created))
+	}
+	if len(payload.Joined) != 1 || payload.Joined[0].ID != "activity_"+idJoined {
+		t.Fatalf("viewer.joined must be [%s], got %+v", "activity_"+idJoined, payload.Joined)
+	}
+
+	// owner_1: created 只能是 idCreated。
+	e = activityEnvelope("ListMyActivities", "owner_1", "mine")
+	out = s.HandleContext(t.Context(), e)
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("owner ListMyActivities: %+v", out)
+	}
+	payload = struct {
+		Created []Activity `json:"created"`
+		Joined  []Activity `json:"joined"`
+	}{}
+	if err := json.Unmarshal([]byte(out.OperationRef), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Created) != 1 || payload.Created[0].ID != "activity_"+idCreated {
+		t.Fatalf("owner.created must be [%s], got %+v", "activity_"+idCreated, payload.Created)
+	}
+	if len(payload.Joined) != 0 {
+		t.Fatalf("owner.joined must be empty, got %d", len(payload.Joined))
+	}
+
+	// other_owner: created 是 idJoined + idOther。不能看到 idCreated。
+	e = activityEnvelope("ListMyActivities", "other_owner", "mine")
+	out = s.HandleContext(t.Context(), e)
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("other_owner ListMyActivities: %+v", out)
+	}
+	payload = struct {
+		Created []Activity `json:"created"`
+		Joined  []Activity `json:"joined"`
+	}{}
+	if err := json.Unmarshal([]byte(out.OperationRef), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Created) != 2 {
+		t.Fatalf("other_owner.created must be 2, got %d", len(payload.Created))
+	}
+}
+
+// itoa 是 microsecond timestamp string。复用 platform/postgres
+// 里的同款。
+func itoa(v int64) string { return fmt.Sprintf("%d", v) }
+
+// itoaUnique 给本 test 用的不同 ID 种子。TestListMyActivitiesByActor
+// 需要在同 个 service 状态里 “造”多个不重名的活动 ID，同时避
+// 平台 SeedDefaults 里的已有 ID。
+var itoaCounter int64
+
+func itoaUnique() string {
+	itoaCounter++
+	return fmt.Sprintf("%d_%d", time.Now().UTC().UnixNano(), itoaCounter)
 }
 
 // R16.x: AI-ACTOR-002 — 任何 AI 主体 (PLATFORM_AI / USER_TWIN /

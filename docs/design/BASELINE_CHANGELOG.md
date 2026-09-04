@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 17 — 2026-09-04
+
+- “我的活动” 物化路径 (R17.x): server 端 ListMyActivities 返
+  actor-scoped created + joined 两个数组; PG 以 payload->>'ownerId'
+  和 activity.participants JOIN 提供仓库事实; contracts 增
+  ListMyActivitiesPayloadSchema schema + 3 个 tripwire。Anonymous
+  / 空 actor 被 server 拒绝 (不能“看到任何我的活动"")。下一个
+  commit 将进 mobile surface 替换 hardcoded mock  (MyActivitiesSurface)。
+
 ## Revision 16 — 2026-09-04
 
 - 个人总管理页可编辑基本信息：新增“编辑资料”入口，复用个人主页编辑器
