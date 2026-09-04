@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { color, shadows } from "../theme";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
+import { activityAIDisclosure, activityMoneySummary } from "./activity-detail-model";
 
 export function ActivityDetailSurface({ client }: { client: ActivityClient }): React.JSX.Element {
   const [items, setItems] = useState<Activity[] | undefined>(undefined);
@@ -18,12 +19,19 @@ export function ActivityDetailSurface({ client }: { client: ActivityClient }): R
     return () => { c = true; };
   }, [client]);
   if (selected) {
+    const aiDisclosure = activityAIDisclosure(selected);
     return (
       <ScrollView style={styles.root} contentContainerStyle={styles.container}>
         <Pressable onPress={() => setSelected(undefined)}><Text style={styles.back}>‹ 返回</Text></Pressable>
         <Text style={styles.title}>{selected.title}</Text>
         <Text style={styles.meta}>{selected.venueName} · {selected.time}</Text>
-        <View style={styles.card}><Text style={styles.body}>{selected.desc}</Text><Text style={styles.meta}>感兴趣 {selected.interested} · 参加 {selected.joined} · 提问 {selected.qaCount}</Text><Text style={styles.meta}>{selected.price} · {selected.people} · {selected.consumption}</Text></View>
+        <View style={styles.card}>
+          <Text style={styles.body}>{selected.desc}</Text>
+          <Text style={styles.meta}>感兴趣 {selected.interested} · 参加 {selected.joined} · 提问 {selected.qaCount}</Text>
+          <Text style={styles.money}>{activityMoneySummary(selected)}</Text>
+          <Text style={styles.meta}>{selected.people} · {selected.consumption}</Text>
+          {aiDisclosure ? <Text style={styles.aiDisclosure}>🤖 {aiDisclosure}</Text> : null}
+        </View>
         <Pressable onPress={async () => { try { await client.toggleInterest(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.cta}><Text style={styles.ctaText}>感兴趣 / 取消</Text></Pressable>
         <Pressable onPress={async () => { try { await client.join(selected.activityId); const list = await client.listActivities(); setItems(list); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.ctaSecondary}><Text style={styles.ctaSecondaryText}>报名参加</Text></Pressable>
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -55,6 +63,8 @@ const styles = StyleSheet.create({
   name: { color: color.ink, fontSize: 14, fontWeight: "800" },
   body: { color: color.ink, fontSize: 13, lineHeight: 18 },
   meta: { color: color.muted, fontSize: 12, marginTop: 4 },
+  money: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 10 },
+  aiDisclosure: { backgroundColor: "#F4F0FF", borderRadius: 8, color: "#5B3FA3", fontSize: 12, lineHeight: 17, marginTop: 10, padding: 9 },
   empty: { color: color.muted, fontSize: 12 },
   back: { color: color.ink, fontSize: 14, fontWeight: "700" },
   cta: { backgroundColor: color.ink, borderRadius: 999, paddingVertical: 12, alignItems: "center" },
