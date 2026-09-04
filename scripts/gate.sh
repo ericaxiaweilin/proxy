@@ -107,6 +107,8 @@ gate_g4_drift() {
   set -e
   set -o pipefail
   echo "=== G4: drift (migrations, openapi, untracked handlers) ==="
+  node scripts/check-design-baseline.mjs || return $?
+  node scripts/check-liquid-dock-baseline.mjs || return $?
   if [ -d "apps/api-go/migrations" ]; then
     local count
     count=$(ls apps/api-go/migrations/*.sql | wc -l | tr -d ' ')

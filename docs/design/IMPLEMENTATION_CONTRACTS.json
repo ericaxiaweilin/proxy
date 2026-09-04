@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "contracts": [
+    {
+      "scope": "root-dock",
+      "reference": "docs/design/references/proxy_dock_liquid_glass_v6.html",
+      "implementationFiles": [
+        "apps/mobile/src/shell/app-shell.tsx"
+      ],
+      "evidenceFiles": [
+        "scripts/check-liquid-dock-baseline.mjs",
+        "apps/mobile/src/shell/app-shell.test.ts"
+      ],
+      "status": "PARTIAL",
+      "knownGap": "Static UI is approved; motion remains incomplete."
+    },
+    {
+      "scope": "personal-profile",
+      "reference": "docs/design/references/proxy_personal_profile_architecture_v5_threads.html",
+      "implementationFiles": [
+        "apps/mobile/src/surfaces/me.tsx",
+        "apps/mobile/src/surfaces/ProfileTabs.tsx"
+      ],
+      "evidenceFiles": [
+        "apps/mobile/src/design-system-r3.test.ts",
+        "apps/mobile/src/surfaces/ProfileTabs.test.ts"
+      ],
+      "status": "IMPLEMENTED",
+      "knownGap": ""
+    },
+    {
+      "scope": "merchant-me",
+      "reference": "docs/design/references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html",
+      "implementationFiles": [
+        "apps/mobile/src/surfaces/me.tsx"
+      ],
+      "evidenceFiles": [
+        "apps/mobile/src/design-system-r3.test.ts"
+      ],
+      "status": "PARTIAL",
+      "knownGap": "The active reference is newer than the automated coverage; icon and activity/voucher parity still require device review."
+    },
+    {
+      "scope": "social-contact-collaboration",
+      "reference": "docs/design/references/proxy_social_contact_collaboration_v2.html",
+      "implementationFiles": [
+        "apps/mobile/src/surfaces/friend-crm.tsx"
+      ],
+      "evidenceFiles": [
+        "apps/mobile/src/design-system-r3.test.ts"
+      ],
+      "status": "PARTIAL",
+      "knownGap": "The collaboration reference has no dedicated parity test yet."
+    },
+    {
+      "scope": "merchant-creator-center",
+      "reference": "docs/design/references/proxy_creator_center_match_v3.html",
+      "implementationFiles": [
+        "apps/mobile/src/surfaces/me.tsx"
+      ],
+      "evidenceFiles": [
+        "apps/mobile/src/design-system-r3.test.ts"
+      ],
+      "status": "PARTIAL",
+      "knownGap": "Reference is functional-only; visual parity is not approved."
+    }
+  ]
+}
