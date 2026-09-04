@@ -13,6 +13,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
+	"github.com/proxy-app/proxy-api/internal/policydecisions"
 )
 
 // 履约全链（R14 Chapter21I §8/§12/§13 + R9 Gate G/H/N）。
@@ -32,6 +33,14 @@ type Order struct {
 	Amendments  []Amendment       `json:"amendments"`
 	Settlement  *SettlementRecord `json:"settlement,omitempty"`
 	Outcome     *OutcomeRecord    `json:"outcome,omitempty"`
+	// PolicyDecisionID is the audit-log pointer for LC-28.
+	// Set by ConfirmCooperation when the Order has a
+	// PLATFORM_PAY settlement mode. DIRECT_SETTLEMENT Orders
+	// do not require a policy decision (the platform never
+	// touches the funds). nil/empty is allowed for legacy
+	// Orders created before the LC-28 gate rolled out; the
+	// migration 065 backfill is a separate task.
+	PolicyDecisionID string `json:"policyDecisionId,omitempty"`
 	CreatedAt   time.Time         `json:"createdAt"`
 	UpdatedAt   time.Time         `json:"updatedAt"`
 }
@@ -360,6 +369,23 @@ type Service struct {
 	mu         sync.Mutex
 	repository TransactionalRepository
 	clock      clock.Clock
+	// policyDecisions is the LC-28 audit-log writer. When the
+	// Order transitions OFFERED → CONFIRMED with a PLATFORM_PAY
+	// settlement, the policy decision must be stamped on the
+	// Order; otherwise the transition is rejected. nil means
+	// the legacy test server is in use (no policy enforcement).
+	policyDecisions policydecisionsService
+}
+
+// policydecisionsService is a forward-declared interface so the
+// fulfillment package does not import the policydecisions package
+// directly (we want the dependency to flow one way: the wire
+// layer in apps/api-go/internal/api wires the two, the
+// fulfillment package sees only the methods it needs).
+type policydecisionsService interface {
+	Evaluate(ctx context.Context, userID string, category policydecisions.CategoryCode) (*policydecisions.Decision, error)
+	Stamp(ctx context.Context, stamp policydecisions.OrderStamp) error
+	StampsForOrder(ctx context.Context, orderID string) ([]policydecisions.OrderStamp, error)
 }
 
 func New() *Service {
@@ -371,6 +397,18 @@ func NewWithRepository(repository TransactionalRepository) *Service {
 		repository = NewMemoryRepository()
 	}
 	return &Service{repository: repository, clock: clock.System{}}
+}
+
+// WithPolicyDecisions wires the LC-28 audit-log writer. The
+// returned Service shares state with the receiver; it is the
+// caller's job not to share it across goroutines without the
+// usual care. The setter returns the receiver so it composes
+// with constructor chains.
+func (s *Service) WithPolicyDecisions(pd policydecisionsService) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.policyDecisions = pd
+	return s
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -797,6 +835,25 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 	if order.Lifecycle != "OFFERED" {
 		return command.Rejected(e, "ORDER_NOT_CONFIRMABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_confirmable", map[string]any{"lifecycle": order.Lifecycle})
 	}
+	// R16.7-P1-B (LC-28): a paid Order (PLATFORM_PAY settlement)
+	// may not enter CONFIRMED without a stamped policy
+	// decision. DIRECT_SETTLEMENT Orders skip the gate because
+	// the platform never touches the funds, so the regulator
+	// does not need the audit log. If policyDecisions is
+	// nil (legacy test server), the gate is permissive — a
+	// log warning, not a hard fail, so the existing test
+	// suite continues to pass while production deployments
+	// must wire it.
+	if order.Snapshot.SettlementMode == "PLATFORM_PAY" {
+		if s.policyDecisions == nil {
+			return command.Rejected(e, "POLICY_GATE_NOT_CONFIGURED", "INTERNAL", "AFTER_USER_ACTION", "fulfillment.policy_gate_unconfigured", map[string]any{"orderId": order.ID, "settlementMode": order.Snapshot.SettlementMode})
+		}
+		decision, err := s.policyDecisions.Evaluate(ctx, order.RequesterID, policydecisions.CategoryUserPaidService)
+		if err != nil {
+			return command.Rejected(e, "POLICY_EVALUATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.policy_evaluate_failed", map[string]any{"orderId": order.ID, "error": err.Error()})
+		}
+		order.PolicyDecisionID = decision.ID
+	}
 	order.Lifecycle = "CONFIRMED"
 	order.Version++
 	order.UpdatedAt = s.clock.Now().UTC()
@@ -806,7 +863,33 @@ func (s *Service) confirmCooperation(ctx context.Context, e command.Envelope) co
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
 		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
 	}
-	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
+	// R16.7-P1-B (LC-28): record the (order, decision,
+	// lifecycle) tuple. The Order now carries the decision id
+	// in the JSON response; the (order, decision) link in
+	// `policy.order_decisions` is the system of record.
+	if s.policyDecisions != nil && order.PolicyDecisionID != "" {
+		_ = s.policyDecisions.Stamp(ctx, policydecisions.OrderStamp{
+			OrderID:          order.ID,
+			DecisionID:       order.PolicyDecisionID,
+			StampedAt:        order.UpdatedAt,
+			StampedLifecycle: order.Lifecycle,
+		})
+	}
+	// R16.7-P1-B (LC-28): include the stamped decision id in
+	// the response so the mobile client can show "this order
+	// was placed under terms-X privacy-Y" without an extra
+	// round trip. OperationRef is the standard place to
+	// surface command-specific body data.
+	r := command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
+	if order.PolicyDecisionID != "" {
+		raw, _ := json.Marshal(map[string]any{
+			"orderId":          order.ID,
+			"lifecycle":        order.Lifecycle,
+			"policyDecisionId": order.PolicyDecisionID,
+		})
+		r.OperationRef = string(raw)
+	}
+	return r
 }
 
 // ---------- StartExecution ----------

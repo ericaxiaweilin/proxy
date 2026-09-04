@@ -39,6 +39,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
+	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
@@ -298,6 +299,37 @@ func main() {
 		complianceService := compliance.NewService(complianceRepo)
 		server.Compliance = complianceService
 	}
+	// R16.7-P1-B (LC-28): wire the policydecisions service so
+	// PLATFORM_PAY Orders cannot reach CONFIRMED without a
+	// stamped policy decision. The (user, category, terms,
+	// privacy) tuple is unique inside one process; cross-
+	// process uniqueness is enforced by the UNIQUE constraint
+	// in migration 065 once the PG repository is wired. We
+	// use the in-memory repository for now; the Postgres
+	// implementation is a follow-up so this commit does not
+	// blow up boot ordering. The kill-switch provider is a
+	// thin bridge to server.Compliance so the snapshot on
+	// each decision reflects the live state at decision time.
+	policyRepo := policydecisions.NewMemoryRepository()
+	policySvc := policydecisions.NewService(policyRepo,
+		"terms-1.1",
+		"privacy-1.1",
+		func() policydecisions.KillSwitchState {
+			if server.Compliance == nil {
+				return policydecisions.KillSwitchState{Categories: map[string]policydecisions.KillSwitchEntry{}}
+			}
+			st, err := server.Compliance.GlobalStatus(ctx)
+			if err != nil {
+				return policydecisions.KillSwitchState{Categories: map[string]policydecisions.KillSwitchEntry{}}
+			}
+			out := policydecisions.KillSwitchState{Categories: map[string]policydecisions.KillSwitchEntry{}}
+			for k, v := range st {
+				out.Categories[k] = policydecisions.KillSwitchEntry{Reason: v.Reason, SetBy: v.SetBy, SetAt: v.SetAt}
+			}
+			return out
+		})
+	fulfillmentService.WithPolicyDecisions(policySvc)
+	server.PolicyDecisions = policySvc
 	// R0 / R16.7-P1-H prep: Benefit Routing Network. No Postgres
 	// repo is shipped yet (memory_repo.go is the only implementation);
 	// we use the memory repo in both pool and no-pool paths so

@@ -28,6 +28,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
+	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
@@ -77,6 +78,11 @@ type Server struct {
 	// Compliance.GlobalStatus to expose the active switches to
 	// the mobile client at boot.
 	Compliance    *compliance.Service
+	// PolicyDecisions is the LC-28 audit-log writer. The
+	// fulfillment service uses it to gate the OFFERED →
+	// CONFIRMED transition for PLATFORM_PAY orders. Wired
+	// from cmd/api/main.go so the dependency flows one way.
+	PolicyDecisions *policydecisions.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error

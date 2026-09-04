@@ -1,11 +1,15 @@
 package fulfillment
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/policydecisions"
 )
 
 func envelopeFor(commandType string, payload map[string]any, targetID string) command.Envelope {
@@ -376,5 +380,178 @@ func TestCheckInAndEvidence(t *testing.T) {
 	r4 := s.Handle(envelopeFor("RecordOutcome", map[string]any{"onTime": true, "scopeCompleted": true, "materialChanges": 0}, orderID))
 	if r4.Outcome != "ACCEPTED" {
 		t.Fatalf("outcome after evidence: %s %+v", r4.Outcome, r4.Error)
+	}
+}
+
+// R16.7-P1-B (LC-28) regression suite.
+// A paid Order (PLATFORM_PAY settlement) must have a
+// policy_decision_id stamped on it before it can transition
+// from OFFERED to CONFIRMED. DIRECT_SETTLEMENT Orders skip
+// the gate (the platform never touches the funds).
+// We use a stub policydecisionsService that records the
+// Evaluate / Stamp calls so the assertions do not depend on
+// the policydecisions package internals.
+
+type stubPolicyDecisions struct {
+	mu             sync.Mutex
+	decisions      map[string]stubDecision
+	evaluateCalls  int
+	stampCalls     int
+	stampsForOrder map[string][]policydecisions.OrderStamp
+}
+
+type stubDecision struct {
+	id            string
+	userID        string
+	category      policydecisions.CategoryCode
+	termsVersion  string
+	privacyVersion string
+}
+
+func newStubPolicyDecisions() *stubPolicyDecisions {
+	return &stubPolicyDecisions{
+		decisions:      map[string]stubDecision{},
+		stampsForOrder: map[string][]policydecisions.OrderStamp{},
+	}
+}
+
+func (s *stubPolicyDecisions) Evaluate(_ context.Context, userID string, category policydecisions.CategoryCode) (*policydecisions.Decision, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.evaluateCalls++
+	// Reuse-or-create on the (user, category) tuple, matching
+	// the real Service contract.
+	for _, d := range s.decisions {
+		if d.userID == userID && d.category == category {
+			return &policydecisions.Decision{ID: d.id, UserID: d.userID, CategoryCode: d.category, TermsVersion: d.termsVersion, PrivacyVersion: d.privacyVersion}, nil
+		}
+	}
+	id := fmt.Sprintf("pdec_test_%d", s.evaluateCalls)
+	s.decisions[id] = stubDecision{id: id, userID: userID, category: category, termsVersion: "terms-1.0.0", privacyVersion: "privacy-1.0.0"}
+	return &policydecisions.Decision{ID: id, UserID: userID, CategoryCode: category, TermsVersion: "terms-1.0.0", PrivacyVersion: "privacy-1.0.0"}, nil
+}
+
+func (s *stubPolicyDecisions) Stamp(_ context.Context, stamp policydecisions.OrderStamp) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stampCalls++
+	s.stampsForOrder[stamp.OrderID] = append(s.stampsForOrder[stamp.OrderID], stamp)
+	return nil
+}
+
+func (s *stubPolicyDecisions) StampsForOrder(_ context.Context, orderID string) ([]policydecisions.OrderStamp, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]policydecisions.OrderStamp(nil), s.stampsForOrder[orderID]...), nil
+}
+
+func TestLC28ConfirmRequiresPolicyDecisionForPlatformPay(t *testing.T) {
+	svc := New().WithPolicyDecisions(newStubPolicyDecisions())
+	// Build an Order with PLATFORM_PAY settlement.
+	payload := offerPayload()
+	payload["settlementMode"] = "PLATFORM_PAY"
+	payload["paymentMethodLabel"] = "Proxy 钱包"
+	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create offer: %s %+v", r.Outcome, r.Error)
+	}
+	var view struct{ OrderID string `json:"orderId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	orderID := view.OrderID
+	// Confirm — should succeed because the policy gate stamps a decision.
+	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, orderID))
+	if r2.Outcome != "ACCEPTED" || r2.Aggregate.State != "CONFIRMED" {
+		t.Fatalf("confirm: %s %+v", r.Outcome, r2.Error)
+	}
+	// Read back the Order and assert the decision id was stamped.
+	order, err := svc.repository.GetOrder(context.Background(), orderID)
+	if err != nil {
+		t.Fatalf("read order: %v", err)
+	}
+	if order.PolicyDecisionID == "" {
+		t.Fatal("PLATFORM_PAY Order must carry a PolicyDecisionID after Confirm")
+	}
+	// The (order, decision, lifecycle) stamp must be present.
+	stub := svc.policyDecisions.(*stubPolicyDecisions)
+	stamps, err := stub.StampsForOrder(context.Background(), orderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stamps) != 1 || stamps[0].StampedLifecycle != "CONFIRMED" || stamps[0].DecisionID != order.PolicyDecisionID {
+		t.Fatalf("stamps wrong: %+v", stamps)
+	}
+}
+
+func TestLC28ConfirmRejectsWhenPolicyGateUnconfigured(t *testing.T) {
+	// Service with no policyDecisions wired: PLATFORM_PAY must
+	// be rejected (fail-closed). DIRECT_SETTLEMENT still
+	// passes because the gate is settlement-mode scoped.
+	svc := New()
+	payload := offerPayload()
+	payload["settlementMode"] = "PLATFORM_PAY"
+	payload["paymentMethodLabel"] = "Proxy 钱包"
+	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create offer: %s %+v", r.Outcome, r.Error)
+	}
+	var view struct{ OrderID string `json:"orderId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
+	if r2.Outcome != "REJECTED" {
+		t.Fatalf("expected REJECTED for unconfigured gate, got %s", r2.Outcome)
+	}
+	if r2.Error == nil || r2.Error.ErrorCode != "POLICY_GATE_NOT_CONFIGURED" {
+		t.Fatalf("expected POLICY_GATE_NOT_CONFIGURED, got %+v", r2.Error)
+	}
+}
+
+func TestLC28ConfirmSkipsGateForDirectSettlement(t *testing.T) {
+	// DIRECT_SETTLEMENT Orders do not need a policy decision
+	// (the platform never touches the funds). Even with the
+	// gate unconfigured, the confirm must succeed.
+	svc := New()
+	r := svc.Handle(envelopeFor("CreateOffer", offerPayload(), ""))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create offer: %s %+v", r.Outcome, r.Error)
+	}
+	var view struct{ OrderID string `json:"orderId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("DIRECT_SETTLEMENT confirm should pass with unconfigured gate, got %s", r2.Outcome)
+	}
+}
+
+func TestLC28ReusePolicyDecisionAcrossOrders(t *testing.T) {
+	// Two Orders for the same requester should reuse the
+	// same decision id (no TermsVersion change in between).
+	// The stub returns the same id on repeated Evaluate.
+	svc := New().WithPolicyDecisions(newStubPolicyDecisions())
+	payload := offerPayload()
+	payload["settlementMode"] = "PLATFORM_PAY"
+	payload["paymentMethodLabel"] = "Proxy 钱包"
+	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
+	var view struct{ OrderID string `json:"orderId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("first confirm: %s", r2.Outcome)
+	}
+	order1, _ := svc.repository.GetOrder(context.Background(), view.OrderID)
+	decisionID1 := order1.PolicyDecisionID
+	if decisionID1 == "" {
+		t.Fatal("first order missing policy decision")
+	}
+	// Second Order, same requester.
+	r = svc.Handle(envelopeFor("CreateOffer", payload, ""))
+	var view2 struct{ OrderID string `json:"orderId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view2)
+	r2 = svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view2.OrderID))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("second confirm: %s", r2.Outcome)
+	}
+	order2, _ := svc.repository.GetOrder(context.Background(), view2.OrderID)
+	if order2.PolicyDecisionID != decisionID1 {
+		t.Fatalf("second order should reuse decision id %q, got %q", decisionID1, order2.PolicyDecisionID)
 	}
 }

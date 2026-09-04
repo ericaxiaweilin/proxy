@@ -93,6 +93,8 @@ gate_g3_e2e() {
   echo "  kill-switch-e2e: OK"
   bash scripts/benefit-eligibility-e2e.sh || return $?
   echo "  benefit-eligibility-e2e: OK"
+  bash scripts/lc28-policy-decision-e2e.sh || return $?
+  echo "  lc28-policy-decision-e2e: OK"
   bash scripts/legal-e2e.sh || return $?
   echo "  legal-e2e: OK"
 }
