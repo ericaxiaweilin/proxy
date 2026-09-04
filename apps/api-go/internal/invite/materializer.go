@@ -57,6 +57,21 @@ func Materialize(inv Invite) (MaterializedType, error) {
 	}
 }
 
+func MaterializeToFulfillment(inv Invite) (string, map[string]any, error) {
+	switch inv.SourceContextType {
+	case SourceProfile, SourceScene:
+		return "Plan", map[string]any{"inviteId": inv.ID, "contextId": inv.SourceContextID, "type": "Plan", "materializedFrom": "INVITE"}, nil
+	case SourceActivity:
+		return "Participation", map[string]any{"inviteId": inv.ID, "contextId": inv.SourceContextID, "type": "Participation", "materializedFrom": "INVITE"}, nil
+	case SourceOpportunity, SourceBusiness:
+		return "OrderDraft", map[string]any{"inviteId": inv.ID, "contextId": inv.SourceContextID, "type": "OrderDraft", "materializedFrom": "INVITE", "termsSnapshot": inv.TermsSnapshot}, nil
+	case SourceAITwin:
+		return "", nil, fmt.Errorf("AI_TWIN intake remains DRAFT awaiting human confirm — fulfillment chain blocked by design")
+	default:
+		return "", nil, fmt.Errorf("unknown source_context_type %s — fulfillment chain blocked", inv.SourceContextType)
+	}
+}
+
 func IsMaterialChange(oldTerms, newTerms map[string]any) bool {
 	for _, k := range []string{"price", "time", "exactLocation", "scope"} {
 		if oldTerms[k] != newTerms[k] {

@@ -9,6 +9,7 @@ import { ConversationClient } from "./conversation-client";
 import { DemandClient } from "./demand-client";
 import { LoginClient, LoginCommandRejectedError } from "./login-client";
 import { LegalDocClient, type LegalDoc, type LegalDocKind } from "./legal-doc";
+import { LegalDocRenderer } from "./legal-doc-render";
 import { formatVietnamesePhoneForDisplay, normalizeVietnamesePhone, vietnamesePhoneReady } from "./vn-phone";
 import { googleAuthConfigured, type GoogleClientConfig } from "./google-auth-config";
 import { LocalNetClient } from "./localnet-client";
@@ -331,7 +332,9 @@ function LegalDocViewer({ kind, onClose }: { kind: LegalDocKind; onClose: () => 
           <ScrollView contentContainerStyle={styles.legalScroll}>
             <Text style={styles.legalTitle}>{doc.title}</Text>
             <Text style={styles.legalMeta}>适用地区：{doc.locale} · 更新日期：{doc.updatedAt.slice(0, 10)}</Text>
-            <Text style={styles.legalBody}>{doc.content}</Text>
+            {/* R15.x+: 用 LegalDocRenderer 替换平铺 Text — 渲染 serif
+                + 15pt + 1.6 lineHeight + heading + 列表 + TOC。 */}
+            <LegalDocRenderer content={doc.content} />
             <Text style={styles.legalFooter}>本版本仍属于产品法律草案。正式发布前，应由当地执业律师依据实际法人、许可证/登记状态、技术架构、支付模式和数据流进行最终法律审阅。</Text>
           </ScrollView>
         ) : null}
@@ -1047,10 +1050,12 @@ const styles = StyleSheet.create({
   legalErrorBody: { color: color.muted, fontSize: 13, marginBottom: 12 },
   legalErrorHint: { color: color.ink, fontSize: 12, lineHeight: 18 },
   legalScroll: { padding: 20, paddingBottom: 60 },
-  legalTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 6 },
+  legalTitle: { color: color.ink, fontFamily: Platform.select({ ios: "New York", android: "serif", default: "serif" }), fontSize: 22, fontWeight: "900", marginBottom: 6 },
   legalMeta: { color: color.muted, fontSize: 12, marginBottom: 16 },
-  legalBody: { color: color.ink, fontSize: 13, lineHeight: 20 },
-  legalFooter: { color: color.muted, fontSize: 11, fontStyle: "italic", lineHeight: 18, marginTop: 24 },
+  // legalBody 由 LegalDocRenderer 负责 (serif + 15pt + 1.6)。本样式
+  // 保留以防其它代码路径 fallback。
+  legalBody: { color: color.ink, fontFamily: Platform.select({ ios: "New York", android: "serif", default: "serif" }), fontSize: 15, lineHeight: 24 },
+  legalFooter: { color: color.muted, fontFamily: Platform.select({ ios: "New York", android: "serif", default: "serif" }), fontSize: 12, fontStyle: "italic", lineHeight: 20, marginTop: 24 },
   guestTitle: { color: color.ink, fontSize: 22, fontWeight: "900", textAlign: "center" },
   guestDescription: { color: color.muted, fontSize: 14, lineHeight: 21, marginTop: 10, textAlign: "center" },
   inlineActions: { flexDirection: "row", gap: 28, justifyContent: "center", marginTop: 18 },
