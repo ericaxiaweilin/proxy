@@ -316,3 +316,83 @@ describe("FacetClient.sideSpaceSuggestions (R15.52)", () => {
     await expect(client.listSideSpaceSuggestions(3)).rejects.toThrow();
   });
 });
+
+// FACET-AUTH-001: 写操作必须走 authedRequester（带 token）；401/429 翻译成明确文案。
+describe("FacetClient writes use authed channel", () => {
+  function makeAuthed(handler: (path: string, init: { method: string; body?: unknown }) => TransportResponse) {
+    return {
+      request: async (path: string, init: { method: string; body?: unknown }) => handler(path, init)
+    };
+  }
+
+  const POST_OK = {
+    id: "ss-collab-1",
+    kind: "portfolio/capability",
+    title: "合作",
+    imageUrl: "",
+    addedAt: "2026-09-01T00:00:00Z"
+  };
+
+  it("addSideSpacePost goes through authedRequester, not requestPublic", async () => {
+    let publicHit = false;
+    let authedHit = false;
+    const client = new FacetClient({
+      requester: makeRequester(() => {
+        publicHit = true;
+        return errStatus(500);
+      }),
+      authedRequester: makeAuthed((path, init) => {
+        authedHit = true;
+        expect(path).toBe("/v1/facet/objects/spa/side-space/posts");
+        expect(init.method).toBe("POST");
+        return ok(POST_OK);
+      }),
+      baseUrl: "http://localhost:3000"
+    });
+    const out = await client.addSideSpacePost("spa", "ss-collab-1");
+    expect(out.id).toBe("ss-collab-1");
+    expect(authedHit).toBe(true);
+    expect(publicHit).toBe(false);
+  });
+
+  it("translates 401 into sign-in message (not network error)", async () => {
+    const client = new FacetClient({
+      requester: makeRequester(() => errStatus(500)),
+      authedRequester: makeAuthed(() => errStatus(401)),
+      baseUrl: "http://localhost:3000"
+    });
+    await expect(client.addSideSpacePost("spa", "ss-collab-1")).rejects.toThrow(/请登录后重试/);
+    await expect(client.removeSideSpacePost("spa", "ss-collab-1")).rejects.toThrow(/请登录后重试/);
+  });
+
+  it("translates 429 into rate-limit message", async () => {
+    const client = new FacetClient({
+      requester: makeRequester(() => errStatus(500)),
+      authedRequester: makeAuthed(() => errStatus(429)),
+      baseUrl: "http://localhost:3000"
+    });
+    await expect(client.addSideSpacePost("spa", "ss-collab-1")).rejects.toThrow(/稍后重试/);
+  });
+
+  it("uses requester.request when it carries an authed channel (sessionAuthClient shape, no me.tsx change needed)", async () => {
+    let publicHit = false;
+    let authedHit = false;
+    const sessionLike: PublicRequester = {
+      requestPublic: async () => {
+        publicHit = true;
+        return errStatus(500);
+      },
+      request: async (path, init) => {
+        authedHit = true;
+        expect(path).toBe("/v1/facet/objects/spa/side-space/posts");
+        expect(init.method).toBe("POST");
+        return ok(POST_OK);
+      }
+    };
+    const client = new FacetClient({ requester: sessionLike, baseUrl: "http://localhost:3000" });
+    const out = await client.addSideSpacePost("spa", "ss-collab-1");
+    expect(out.id).toBe("ss-collab-1");
+    expect(authedHit).toBe(true);
+    expect(publicHit).toBe(false);
+  });
+});

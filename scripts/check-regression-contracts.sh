@@ -74,20 +74,8 @@ require_test "UI-SOCIAL-002" "./internal/identity" \
 # 全匿名可写 + UpdatedBy 客户端自填 + 无限流。写必须鉴权（401）、
 # UpdatedBy 由 server 按 principal 回填、高频写 429。
 #
-# 状态（2026-09-04）：tripwire 本身与该 hardening 是 9d17c0a 一起上的
-# （'security hardening that touches baseline-sensitive surfaces:
-# FACET-AUTH-001'），但对应的服务侧测试 （TestFacetSideSpace_WriteRequiresAuth
-# / TestFacetConfig_PostStampsPrincipal / TestFacetWrite_RateLimited）以及
-# mobile facet-client authed-channel tests 都还没有在仓库中 提交。
-# 按 AGENTS.md 'bug that escaped once → stable regression ID + named
-# test' 原则，tripwire 在测试实际被合入前不能放行；现在暂时将
-# require_test 注释，等 facet-auth hardening commit 补上指定测试名后
-# 再解锁。
-#
-# 一旦 'apps/api-go/internal/api/facet_test.go' 中出现上述函数与
-# 'apps/mobile/src/facet-client.test.ts' 中出现 'FACET-AUTH-001'
-# 跨项引用，请将下面被跳过的 require_test 与 pnpm 行去掉注释。
-if false; then
+# 状态（2026-09-04）：hardening + 命名测试已随 fix/facet-auth-001-restore
+# 落地，tripwire 解锁（此前 44ebb66 因测试缺失暂时 if false 封存）。
 require_test "FACET-AUTH-001" "./internal/api" \
   "TestFacetSideSpace_WriteRequiresAuth" \
   "apps/api-go/internal/api/facet_test.go" || exit $?
@@ -103,7 +91,6 @@ if ! grep -q 'FACET-AUTH-001' apps/mobile/src/facet-client.test.ts; then
 fi
 pnpm --filter @proxy/mobile test --run src/facet-client.test.ts || exit $?
 echo "    FACET-AUTH-001: PASS"
-fi
 
 # ACT-ATTEND-001: 考勤 cancel/checkin/noShow 曾经不验归属 + UpdateState=false
 # 照样返成功（没报名也能自助 ATTENDED）。Join 必须落 participation 记录，
