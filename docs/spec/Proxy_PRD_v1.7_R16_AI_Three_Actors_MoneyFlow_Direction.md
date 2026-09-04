@@ -170,6 +170,7 @@ keys into a single user-facing toast.
 | `MONEYFLOW-002`  | Cold-start activities are FREE + PLATFORM_AI       | `TestColdStartActivitiesArePlatformAIGeneratedAndFree`, `TestNormalizeActivityMoneyAndAIDefaults`  |
 | `MONEYFLOW-003`  | PG JSONB round-trip preserves MoneyFlow + AI       | `TestActivityPostgresJSONBRoundTripPreservesMoneyFlowAndAI`, `TestMarketplacePostgresJSONBRoundTripPreservesMoneyFlow` |
 | `LIFECYCLE-PG-001` | PG lifecycle SQL (Join / Apply / Dismiss / Checkin / Outcome) | `TestActivityPostgresLifecycle`, `TestMarketplacePostgresLifecycle`, `TestScenePostgresLifecycle`, `TestOutcomePostgresLifecycle` |
+| `ACT-PUBLISH-001` | Real publish flow: human publishes a free shared-participation activity at a real CAFE/RESTAURANT scene; AI cannot publish; consumption term (SPLIT / HOST_COVERS) is declared separately from activity price; mobile command + offline-write guard | `TestPublishActivityCreatesFreeUserActivity`, `TestPublishActivityRejectsAIAndInvalidVenueBoundary`, `apps/mobile/src/activity-client.test.ts` (mobile publish + offline write guard) |
 
 `g4` is the gate that runs on every pre-commit. `g1` (build) and `g2`
 (tests) are unchanged.
@@ -216,6 +217,34 @@ Footer badges reflect `aiStatus + aiActorKind + persona`:
 - `AIStatus = AI_ASSISTED + AIActorKind = USER_ASSISTANT` → "助手代发 ·
   身份 = Ken" badge (principal attribution).
 
+## 5.4 Tasks in-place publish (`apps/mobile/src/surfaces/tasks.tsx`)
+
+R16.x closes the in-app "发起共同参与活动" path. The Tasks surface
+gains a `CREATE` view alongside `NEED` / `ACTIVITY` / `DETAIL`:
+
+- Required fields: title, time, capacity (2–50), venue (must be a real
+  CAFE / RESTAURANT scene from the catalog), consumption term
+  (`SPLIT` / `HOST_COVERS`).
+- Server-side normalization pins the activity to `Origin = USER`,
+  `MoneyFlow = FREE`, `PriceLabel = "免费参加"`, `AIStatus = NONE`.
+  The on-screen "活动价格：0₫ · 免费参加" line is server-derived, not
+  client-typed.
+- AI actors cannot reach this path: the `ActivityClient.publish`
+  command resolves the principal from the live session, and the
+  service-side `aiboundary.Allows(...)` check rejects any
+  `PLATFORM_AI` / `USER_TWIN` / `USER_ASSISTANT` envelope with
+  `AI_ACTION_FORBIDDEN`. The `ACT-PUBLISH-001` tripwire pins this
+  end-to-end.
+- Mobile command path: `ActivityClient.publish(input)` →
+  `sendCommand(session, "PublishActivity", { type: "Activity",
+  id: "new" }, { ...input })`. The response `operationRef.activity`
+  is parsed through `ActivitySchema`, so the UI's optimistic insert
+  inherits the same MoneyFlow / AIStatus / origin wire contract.
+
+Participant invitation and activity chat are explicit next gaps
+recorded under "Out of Scope" — the in-place publish opens a real
+activity but the post-publish social surface is still pending.
+
 ---
 
 # 6. Out of Scope
@@ -223,10 +252,14 @@ Footer badges reflect `aiStatus + aiActorKind + persona`:
 - **Native iPhone / iOS Simulator visual smoke**: R16.x visual smoke
   requires `@testing-library/react-native` + RN mock infra + Expo
   Simulator or a USB-paired device. This patch covers the wire contract
-  through vitest (577 mobile tests) and the server through vitest +
-  PG integration tests (15 tripwires in `g4`). Visual smoke is a
-  follow-up item; the mobile UI tests added in this commit do not
-  exercise the actual chip-switch / footer-render path on a real device.
+  through vitest (mobile tests) and the server through vitest +
+  PG integration tests (29 named tests across 16 tripwire IDs in
+  `g4`: ACT-ATTEND-001, ACT-CONTRACT-001, ACT-PUBLISH-001,
+  AI-ACTOR-001/002, AIBOUND-001, AUTH-OTP-001, AUTH-SESSION-001,
+  MONEYFLOW-001/002/003, UI-PROFILE-001/002, UI-SCENE-MAP-001,
+  UI-SOCIAL-002). Visual smoke is a follow-up item; the mobile UI
+  tests added in this commit do not exercise the actual
+  chip-switch / footer-render path on a real device.
 - **PRD canonical doc updates beyond this file**: this patch is the
   R16.x canonical entry. `Proxy_PRD_v1.4_Canonical_Registry.md` (if it
   exists at freeze time) and Chapter 02 Capability Graph should
