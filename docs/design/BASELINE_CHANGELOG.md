@@ -4,6 +4,23 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 11 — 2026-09-04
+
+- Added `docs/spec/Proxy_PRD_v1.7_R16_AI_Three_Actors_MoneyFlow_Direction.md`:
+  canonical entry for the R16.x AI-three-actors + MoneyFlow-direction
+  freeze. Records the AI boundary capability matrix (Human / PlatformAI /
+  UserTwin / UserAssistant), the four-way MoneyFlow wire contract
+  (EARN / PAY / FREE / TBD for Opportunity; FREE / PAY_TO_JOIN /
+  PAID_TO_ATTEND for Activity), the publisher / applicant dual-perspective
+  priceLabel wording, and the g4 tripwire registry (AI-ACTOR-001/002,
+  MONEYFLOW-001/002/003, LIFECYCLE-PG-001 — 13 named tests).
+- `scripts/check-regression-contracts.sh`: registered four pre-existing
+  PG lifecycle integration tests (TestActivityPostgresLifecycle /
+  TestMarketplacePostgresLifecycle / TestScenePostgresLifecycle /
+  TestOutcomePostgresLifecycle) under the new `LIFECYCLE-PG-001` tripwire.
+  Previously these tests existed but were not gated; a future refactor
+  that weakened their SQL semantics could land without g4 noticing.
+
 ## Revision 10 — 2026-09-04
 
 - `market` scope (PublishDemand): split the price label helper into
