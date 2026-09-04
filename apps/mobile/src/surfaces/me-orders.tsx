@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import type { Activity } from "@proxy/contracts";
+import { ActivityClient, ActivityCommandRejectedError } from "../activity-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
+import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { color } from "../theme";
 import { styles } from "./me-styles";
 
@@ -22,9 +25,107 @@ export function MyOrdersSurface({ client, onBack }: { client: FulfillmentClient;
 }
 
 export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
-  const [tab, setTab] = useState<"joined" | "created">("joined");
-  const items = tab === "joined" ? [["周末美甲体验", "8月30日 14:00 · Luna Spa"], ["河内 Creator Coffee", "9月6日 10:30 · Tây Hồ"]] : [["西湖摄影散步", "9月12日 15:30 · 已报名 8 人"]];
-  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>我的活动</Text></View><View style={styles.activityOwnedTabs}><Pressable onPress={() => setTab("joined")} style={[styles.activityOwnedTab, tab === "joined" && styles.activityOwnedTabOn]}><Text style={[styles.activityOwnedTabText, tab === "joined" && styles.activityOwnedTabTextOn]}>已参加</Text></Pressable><Pressable onPress={() => setTab("created")} style={[styles.activityOwnedTab, tab === "created" && styles.activityOwnedTabOn]}><Text style={[styles.activityOwnedTabText, tab === "created" && styles.activityOwnedTabTextOn]}>我发起的</Text></Pressable></View>{items.map(([title,meta]) => <View key={title} style={styles.savedCard}><Text style={styles.orderTitle}>{title}</Text><Text style={styles.savedMeta}>{meta}</Text></View>)}</ScrollView></View>;
+  // R15.15 对齐：可参加（server 开放活动，真数据 + 报名）/ 已参加（本机已报名）/
+  // 我发起的（server 暂无 owner 概念，诚实空态，不造假数据）。
+  // client 在页内自建（sessionAuthClient + SecureStore），me.tsx 无需改动。
+  const [client] = useState(() => new ActivityClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
+  const [tab, setTab] = useState<"open" | "joined" | "created">("open");
+  const [items, setItems] = useState<Activity[]>([]);
+  const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [joinedIds, setJoinedIds] = useState<ReadonlyArray<string>>([]);
+  const [joiningId, setJoiningId] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+
+  const reload = useCallback(() => {
+    let active = true;
+    setPhase("LOADING");
+    setNotice(undefined);
+    void client.listActivities().then((rows) => {
+      if (active) { setItems(rows); setPhase("READY"); }
+    }).catch(() => { if (active) setPhase("ERROR"); });
+    return () => { active = false; };
+  }, [client]);
+  useEffect(() => reload(), [reload]);
+
+  async function join(activityId: string): Promise<void> {
+    setJoiningId(activityId);
+    setNotice(undefined);
+    try {
+      await client.join(activityId);
+      setJoinedIds((current) => current.includes(activityId) ? current : [...current, activityId]);
+      setNotice("报名成功");
+    } catch (error) {
+      if (error instanceof ActivityCommandRejectedError) {
+        const code = error.result.error?.errorCode ?? "";
+        if (code === "ACTIVITY_FULL") setNotice("名额已满");
+        else if (code === "ACTIVITY_ALREADY_JOINED") {
+          setJoinedIds((current) => current.includes(activityId) ? current : [...current, activityId]);
+          setNotice("你已报过名");
+        } else if (code === "AI_ACTION_FORBIDDEN") setNotice("该操作不支持");
+        else setNotice("报名失败，请稍后重试");
+      } else if (error instanceof Error && /authenticated principal|SessionExpired|session expired/i.test(error.message)) {
+        setNotice("请登录后重试");
+      } else {
+        setNotice("报名失败，请稍后重试");
+      }
+    } finally {
+      setJoiningId(undefined);
+    }
+  }
+
+  const visible = tab === "open" ? items : tab === "joined" ? items.filter((item) => joinedIds.includes(item.activityId)) : [];
+  return (
+    <View style={styles.root}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.orderPageHead}>
+          <Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable>
+          <Text style={styles.detailTitle}>我的活动</Text>
+        </View>
+        <View style={styles.activityOwnedTabs}>
+          {([["open", "可参加"], ["joined", "已参加"], ["created", "我发起的"]] as const).map(([id, label]) => (
+            <Pressable key={id} onPress={() => setTab(id)} style={[styles.activityOwnedTab, tab === id && styles.activityOwnedTabOn]}>
+              <Text style={[styles.activityOwnedTabText, tab === id && styles.activityOwnedTabTextOn]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {notice ? <Text style={styles.savedMeta}>{notice}</Text> : null}
+        {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
+        {phase === "ERROR" ? (
+          <View>
+            <Text style={styles.personalEmpty}>活动加载失败，请检查连接后重试。</Text>
+            <Pressable onPress={() => reload()} style={[styles.orderTab, styles.orderTabOn]}><Text style={[styles.orderTabText, styles.orderTabTextOn]}>重试</Text></Pressable>
+          </View>
+        ) : null}
+        {phase === "READY" && tab === "created" ? <Text style={styles.personalEmpty}>发起活动入口准备中，敬请期待。</Text> : null}
+        {phase === "READY" && tab === "joined" && visible.length === 0 ? <Text style={styles.personalEmpty}>还没有报名，去可参加看看。</Text> : null}
+        {phase === "READY" && tab === "open" && visible.length === 0 ? <Text style={styles.personalEmpty}>本周暂无开放活动。</Text> : null}
+        {phase === "READY" && tab !== "created" ? visible.map((item) => {
+          const joined = joinedIds.includes(item.activityId);
+          const capacity = item.capacity ?? 0;
+          const full = capacity > 0 && item.joined >= capacity;
+          return (
+            <View key={item.activityId} style={styles.savedCard}>
+              <Text style={styles.orderTitle}>{item.title}</Text>
+              <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
+              <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 感兴趣 {item.interested} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
+              {item.aiStatus !== "NONE" ? <Text style={styles.savedMeta}>AI 生成 · {item.aiPersonaName ?? "平台 AI"}</Text> : null}
+              {tab === "open" ? (
+                <Pressable
+                  disabled={joined || full || joiningId === item.activityId}
+                  onPress={() => void join(item.activityId)}
+                  style={[styles.orderTab, (joined || full) && styles.orderTabOn]}
+                >
+                  <Text style={[styles.orderTabText, (joined || full) && styles.orderTabTextOn]}>
+                    {joiningId === item.activityId ? "报名中…" : joined ? "已报名" : full ? "已满员" : "报名"}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          );
+        }) : null}
+      </ScrollView>
+    </View>
+  );
 }
 
 type FavoriteTab = "all" | "merchant" | "creator" | "post" | "activity";

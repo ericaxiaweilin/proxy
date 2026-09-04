@@ -114,6 +114,19 @@ if ! grep -q 'ON CONFLICT (id) DO NOTHING' apps/api-go/internal/platform/postgre
   exit 1
 fi
 
+# TEST-HYGIENE-001: 集成测试连共享库时必须清掉自己造的行。
+# 之前 mkt_op_pg_*/act_pg_*/fct_* 残留直接出现在真机市场/活动/FACET
+# 列表，把真实种子淹了。测试自带 t.Cleanup；这里 pin 住它们存在且过。
+require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
+  "TestMarketplacePostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/marketplace_media_integration_test.go" || exit $?
+require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
+  "TestActivityPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go" || exit $?
+require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
+  "TestFacetPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go" || exit $?
+
 # AIBOUND-001: DismissMarketOpportunity 曾经无 aiboundary 落点（AI 可调），
 # market 写曾经无 USER 主体检查（与 activity 不对称）。现 Dismiss 进 gate，
 # Publish/Apply/Dismiss 必须 USER；PublishActivity 保留位仍 fail-closed。

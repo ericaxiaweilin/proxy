@@ -262,18 +262,21 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     sections: [
       { title: "段 1 基本信息", rows: [
         { label: "头像", value: "点换头像" },
-        { label: "名字", value: "Proxy 主页顶部" },
-        { label: "handle", value: "Proxy 主页 / 消息来源" },
-        { label: "城市", value: "决定发现与机会分发" }
+        { label: "名字", value: "点编辑资料修改" },
+        { label: "handle", value: "点编辑资料修改" },
+        { label: "城市", value: "点编辑资料修改" }
       ]},
       { title: "段 2 二维码", rows: [
-        { label: "Proxy QR", value: "扫码先看 Proxy 主页" },
-        { label: "可见范围", value: "TikTok 公开 · Zalo 合作后 · Instagram 公开" }
+        { label: "主页链接分享", value: "二维码图形升级中，先分享链接" },
+        { label: "可见范围", value: "TikTok / Zalo / Instagram 按设置展示" }
       ]},
+      // 与 AVAILABILITY_OPTIONS（me-types.ts 唯一源）逐字对齐，之前这里是
+      // 繁忙/暂离旧文案且缺隐身。
       { title: "段 3 状态管理", rows: [
         { label: "可接单", value: "进入人物发现与合适机会分发" },
-        { label: "繁忙", value: "暂不接收新机会, 已谈可继续" },
-        { label: "暂离", value: "不出现在人物发现, 已谈暂停" }
+        { label: "忙碌", value: "保留主页，降低即时机会" },
+        { label: "暂不接单", value: "暂停机会分发" },
+        { label: "隐身", value: "从公开人物发现中隐藏" }
       ]}
     ]
   },
