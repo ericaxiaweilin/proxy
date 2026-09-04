@@ -2,37 +2,39 @@
 //
 // 三种 AI 主体（与 PRD v1.4 LC-06/07 / aipersona catalog 一致）：
 //
-//   PLATFORM_AI     平台 AI 小美 — 平台自营，可写冷启动内容、辅助生成与
-//                   摘要，但**不能**以主体身份接单、报名、付款、收款、
-//                   发活动、报名活动。
+//	PLATFORM_AI     平台 AI 小美 — 平台自营，可写冷启动内容、辅助生成与
+//	                摘要，但**不能**以主体身份接单、报名、付款、收款、
+//	                发活动、报名活动。
 //
-//   USER_TWIN       用户 AI 分身 — 用户授权的真人 likeness 代理，受
-//                   LC-07 likeness consent 约束；可以代表真人发内容，
-//                   不能执行金钱动作。
+//	USER_TWIN       用户 AI 分身 — 用户授权的真人 likeness 代理，受
+//	                LC-07 likeness consent 约束；可以代表真人发内容，
+//	                不能执行金钱动作。
 //
-//   USER_ASSISTANT  用户 AI 助理 — 用户的工具型助手（例如起草报价）；
-//                   起草是允许的，最终提交必须是真人 actor。
+//	USER_ASSISTANT  用户 AI 助理 — 用户的工具型助手（例如起草报价）；
+//	                起草是允许的，最终提交必须是真人 actor。
 //
 // HUMAN            真人账号。所有经济动作与"参与/创建"动作的唯一主体。
 //
 // AI 主体仍然可以做（与 PRD 一致）：
-//   * AI 生成媒体（media.MarkMediaReady 走 aiStatus=AI_GENERATED
-//     + likeness consent gate）
-//   * 冷启动活动/机会的 AI 起草，但 draft 必须是 PLATFORM/MERCHANT/USER
+//   - AI 生成媒体（media.MarkMediaReady 走 aiStatus=AI_GENERATED
+//   - likeness consent gate）
+//   - 冷启动活动/机会的 AI 起草，但 draft 必须是 PLATFORM/MERCHANT/USER
 //     origin + aiStatus=AI_GENERATED + aiActorKind=PLATFORM_AI，
 //     由平台或商家作为发布主体（不写入 ai 主体作 origin）。
 //
 // AI 主体禁止做（这条规则拒绝"AI 假装是真人"或"AI 自己接单"）：
-//   * 接单 (ApplyOpportunity)
-//   * 报名 (JoinActivity / InterestActivity / CheckinActivity /
+//   - 接单 (ApplyOpportunity)
+//   - 报名 (JoinActivity / InterestActivity / CheckinActivity /
 //     CancelActivity / MarkNoShow)
-//   * 金钱动作 (PublishOpportunity + MoneyFlow=PAY/EARN 不能由 AI 触发)
-//   * 直接发布 (PublishOpportunity / PublishActivity)
+//   - 金钱动作 (PublishOpportunity + MoneyFlow=PAY/EARN 不能由 AI 触发)
+//   - 直接发布 (PublishOpportunity / PublishActivity)
 //
 // 调用方式：服务入口用 aiboundary.Allows(aiboundary.FromCommandIdentity(
-//   envelope.Actor.Type, envelope.Principal.Type),
-//   aiboundary.<Action>) 判断。失败必须返回 REJECTED + 错误码
-//   "AI_ACTION_FORBIDDEN"，UI 用 "ai.action_forbidden" messageKey 显式
+//
+//	envelope.Actor.Type, envelope.Principal.Type),
+//	aiboundary.<Action>) 判断。失败必须返回 REJECTED + 错误码
+//	"AI_ACTION_FORBIDDEN"，UI 用 "ai.action_forbidden" messageKey 显式
+//
 // 提示，而不是静默吃掉。
 package aiboundary
 
@@ -51,27 +53,29 @@ type ActorKind string
 type Action string
 
 const (
-	Human          ActorKind = "HUMAN"
-	PlatformAI      ActorKind = "PLATFORM_AI"
-	UserTwin        ActorKind = "USER_TWIN"
-	UserAssistant   ActorKind = "USER_ASSISTANT"
-	PublishOpportunity Action = "PUBLISH_OPPORTUNITY"
-	ApplyOpportunity   Action = "APPLY_OPPORTUNITY"
+	Human                         ActorKind = "HUMAN"
+	PlatformAI                    ActorKind = "PLATFORM_AI"
+	UserTwin                      ActorKind = "USER_TWIN"
+	UserAssistant                 ActorKind = "USER_ASSISTANT"
+	PublishOpportunity            Action    = "PUBLISH_OPPORTUNITY"
+	ApplyOpportunity              Action    = "APPLY_OPPORTUNITY"
+	SelectOpportunityApplication  Action    = "SELECT_OPPORTUNITY_APPLICATION"
+	ConfirmOpportunityApplication Action    = "CONFIRM_OPPORTUNITY_APPLICATION"
 	// AIBOUND-001: Dismiss（隐藏机会）也是副作用，必须进 gate。
 	// 之前只有 Publish/Apply 有落点，Dismiss 无 Action → AI 主体可调。
 	DismissOpportunity Action = "DISMISS_OPPORTUNITY"
 	PublishActivity    Action = "PUBLISH_ACTIVITY"
-	JoinActivity     Action = "JOIN_ACTIVITY"
-	InterestActivity Action = "INTEREST_ACTIVITY"
+	JoinActivity       Action = "JOIN_ACTIVITY"
+	InterestActivity   Action = "INTEREST_ACTIVITY"
 	// Lifecycle commands stay AI-forbidden too — a user-assistant
 	// that calls CheckinActivity on the user's behalf is the
 	// user giving consent; the right pattern is for the assistant
 	// to surface a confirmation UI and let the user re-fire the
 	// command as HUMAN. Treating lifecycle as human-only prevents
 	// the assistant from silently consuming a checkin window.
-	CheckinActivity    Action = "CHECKIN_ACTIVITY"
-	CancelActivity     Action = "CANCEL_ACTIVITY"
-	NoShowActivity     Action = "NO_SHOW_ACTIVITY"
+	CheckinActivity Action = "CHECKIN_ACTIVITY"
+	CancelActivity  Action = "CANCEL_ACTIVITY"
+	NoShowActivity  Action = "NO_SHOW_ACTIVITY"
 )
 
 // AllActions is the canonical list exported so tests / audits can
@@ -80,6 +84,8 @@ const (
 var AllActions = []Action{
 	PublishOpportunity,
 	ApplyOpportunity,
+	SelectOpportunityApplication,
+	ConfirmOpportunityApplication,
 	DismissOpportunity,
 	PublishActivity,
 	JoinActivity,
@@ -118,6 +124,8 @@ func Allows(kind ActorKind, action Action) bool {
 	switch action {
 	case PublishOpportunity,
 		ApplyOpportunity,
+		SelectOpportunityApplication,
+		ConfirmOpportunityApplication,
 		DismissOpportunity,
 		PublishActivity,
 		JoinActivity,

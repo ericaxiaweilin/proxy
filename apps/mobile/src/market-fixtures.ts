@@ -67,6 +67,9 @@ export interface MarketOpportunity {
   coord?: [number, number];
   ownedByViewer?: boolean;
   appliedByViewer?: boolean;
+  viewerApplicationId?: string;
+  viewerApplicationStatus?: "SUBMITTED" | "SELECTED" | "NOT_SELECTED" | "CONFIRMED";
+  viewerOrderRef?: string;
   // R15.x (P1 market 附近): server (apps/api-go/internal/marketplace/
   // service.go) 在 ListMarketOpportunities 返回 lat/lng/travelSource.
   // 客户端不传 userLat/userLng 时, lat/lng 走 seeded, travelSource=

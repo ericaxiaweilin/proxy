@@ -580,7 +580,10 @@ export const MarketOpportunitySchema = z.object({
   lng: z.number().optional(),
   travelSource: z.enum(["seeded", "user_distance", "unknown"]).optional(),
   ownedByViewer: z.boolean().optional(),
-  appliedByViewer: z.boolean().optional()
+  appliedByViewer: z.boolean().optional(),
+  viewerApplicationId: z.string().optional(),
+  viewerApplicationStatus: z.enum(["SUBMITTED", "SELECTED", "NOT_SELECTED", "CONFIRMED"]).optional(),
+  viewerOrderRef: z.string().optional()
 });
 export type MarketOpportunity = z.infer<typeof MarketOpportunitySchema>;
 
@@ -593,6 +596,23 @@ export const PublishMarketOpportunityPayloadSchema = z.object({
   opportunity: MarketOpportunitySchema
 });
 export type PublishMarketOpportunityPayload = z.infer<typeof PublishMarketOpportunityPayloadSchema>;
+
+export const MarketApplicationSchema = z.object({
+  applicationId: z.string().min(1),
+  opportunityId: z.string().min(1),
+  applicantId: z.string().min(1),
+  quote: z.string().min(1),
+  scope: z.string(),
+  status: z.enum(["SUBMITTED", "SELECTED", "NOT_SELECTED", "CONFIRMED"]),
+  createdAt: z.string().min(1),
+  selectedAt: z.string().optional(),
+  confirmedAt: z.string().optional(),
+  orderRef: z.string().optional()
+});
+export type MarketApplication = z.infer<typeof MarketApplicationSchema>;
+
+export const ListMarketApplicationsPayloadSchema = z.object({ applications: z.array(MarketApplicationSchema) });
+export const MarketApplicationPayloadSchema = z.object({ application: MarketApplicationSchema, orderRef: z.string().optional() });
 
 export const ActivityRefPayloadSchema = z.object({
   activityId: z.string().min(1)

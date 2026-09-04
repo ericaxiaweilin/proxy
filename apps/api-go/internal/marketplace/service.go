@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
+	"github.com/proxy-app/proxy-api/internal/command"
 )
 
 // Service owns the P0 opportunity read model and its user actions. Mobile may
@@ -26,11 +26,13 @@ type Service struct {
 // 防止多 Truth：同一响应不能同时生成多个不同类型业务对象。
 var materializationRule = map[string]string{
 	"opportunity": "invite",
-	"invite": "order",
-	"order": "activity_participation",
+	"invite":      "order",
+	"order":       "activity_participation",
 }
 
 var ErrOpportunityNotFound = errors.New("market opportunity not found")
+var ErrApplicationNotFound = errors.New("market application not found")
+var ErrApplicationStateConflict = errors.New("market application state conflict")
 
 type Repository interface {
 	Seed(ctx context.Context, opportunities []Opportunity) error
@@ -38,6 +40,9 @@ type Repository interface {
 	Get(ctx context.Context, id string) (Opportunity, error)
 	Create(ctx context.Context, opportunity Opportunity) error
 	Apply(ctx context.Context, application Application) (Application, bool, error)
+	ListApplications(ctx context.Context, opportunityID, ownerID string) ([]Application, error)
+	SelectApplication(ctx context.Context, opportunityID, applicationID, ownerID string) (Application, error)
+	ConfirmApplication(ctx context.Context, applicationID, applicantID, orderRef string) (Application, error)
 	Dismiss(ctx context.Context, viewerID, opportunityID string) error
 }
 
@@ -49,14 +54,14 @@ type MemoryRepository struct {
 }
 
 type Opportunity struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	ShortTitle  string   `json:"shortTitle"`
-	Theme       string   `json:"theme"`
-	Date        string   `json:"date"`
-	Time        string   `json:"time"`
-	Location    string   `json:"location"`
-	Price       string   `json:"price"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	ShortTitle string `json:"shortTitle"`
+	Theme      string `json:"theme"`
+	Date       string `json:"date"`
+	Time       string `json:"time"`
+	Location   string `json:"location"`
+	Price      string `json:"price"`
 	// MoneyFlow 是"看钱方向" — 报价这一栏究竟在表达什么：
 	//   EARN     — 接单者完成任务后可获得（默认，机会的主流形态）
 	//   PAY      — 接单者要预先支付（不常见；通常用于代购/订位等委托）
@@ -67,42 +72,48 @@ type Opportunity struct {
 	// MoneyFlow = "TBD" 的发布方。PriceLabel 是给移动端的"语义副本"
 	// （"完成后你可获得" / "你需支付" / "免费" / "费用待确认"），由
 	// server 强制派生，不允许客户端随意传入。
-	MoneyFlow   string   `json:"moneyFlow"`
-	PriceLabel  string   `json:"priceLabel"`
-	Owner       string   `json:"owner"`
-	OwnerID     string   `json:"-"`
-	OwnerType   string   `json:"ownerType"`
-	Match       string   `json:"match"`
-	Responses   int      `json:"responses"`
-	Posted      string   `json:"posted"`
-	Skills      string   `json:"skills"`
-	Verified    bool     `json:"verified"`
-	Lens        []string `json:"lens"`
-	Travel      *int     `json:"travel"`
-	Signal      string   `json:"signal"`
-	SignalClass string   `json:"signalClass"`
-	Countdown   string   `json:"countdown"`
-	Owned       bool     `json:"ownedByViewer"`
-	Applied     bool     `json:"appliedByViewer"`
+	MoneyFlow               string   `json:"moneyFlow"`
+	PriceLabel              string   `json:"priceLabel"`
+	Owner                   string   `json:"owner"`
+	OwnerID                 string   `json:"-"`
+	OwnerType               string   `json:"ownerType"`
+	Match                   string   `json:"match"`
+	Responses               int      `json:"responses"`
+	Posted                  string   `json:"posted"`
+	Skills                  string   `json:"skills"`
+	Verified                bool     `json:"verified"`
+	Lens                    []string `json:"lens"`
+	Travel                  *int     `json:"travel"`
+	Signal                  string   `json:"signal"`
+	SignalClass             string   `json:"signalClass"`
+	Countdown               string   `json:"countdown"`
+	Owned                   bool     `json:"ownedByViewer"`
+	Applied                 bool     `json:"appliedByViewer"`
+	ViewerApplicationID     string   `json:"viewerApplicationId,omitempty"`
+	ViewerApplicationStatus string   `json:"viewerApplicationStatus,omitempty"`
+	ViewerOrderRef          string   `json:"viewerOrderRef,omitempty"`
 	// R15.x: Optional geo coordinates for the opportunity. When
 	// ListMarketOpportunities is called with userLat/userLng in
 	// the payload, the server recomputes Travel via haversine
 	// distance. Lat/Lng stay optional because some opportunities
 	// are remote (online) or the publisher didn't disclose a
 	// precise venue.
-	Lat         *float64 `json:"lat,omitempty"`
-	Lng         *float64 `json:"lng,omitempty"`
-	TravelSource string  `json:"travelSource,omitempty"` // "seeded" | "user_distance" | "unknown"
+	Lat          *float64 `json:"lat,omitempty"`
+	Lng          *float64 `json:"lng,omitempty"`
+	TravelSource string   `json:"travelSource,omitempty"` // "seeded" | "user_distance" | "unknown"
 }
 
 type Application struct {
-	ID            string    `json:"applicationId"`
-	OpportunityID string    `json:"opportunityId"`
-	ApplicantID   string    `json:"applicantId"`
-	Quote         string    `json:"quote"`
-	Scope         string    `json:"scope"`
-	Status        string    `json:"status"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID            string     `json:"applicationId"`
+	OpportunityID string     `json:"opportunityId"`
+	ApplicantID   string     `json:"applicantId"`
+	Quote         string     `json:"quote"`
+	Scope         string     `json:"scope"`
+	Status        string     `json:"status"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	SelectedAt    *time.Time `json:"selectedAt,omitempty"`
+	ConfirmedAt   *time.Time `json:"confirmedAt,omitempty"`
+	OrderRef      string     `json:"orderRef,omitempty"`
 }
 
 func New() *Service {
@@ -136,7 +147,7 @@ func (s *Service) SeedDefaults() {
 
 func (s *Service) Supports(t string) bool {
 	switch t {
-	case "ListMarketOpportunities", "PublishMarketOpportunity", "ApplyToMarketOpportunity", "DismissMarketOpportunity":
+	case "ListMarketOpportunities", "PublishMarketOpportunity", "ApplyToMarketOpportunity", "ListMarketApplications", "SelectMarketApplication", "ConfirmMarketApplication", "DismissMarketOpportunity":
 		return true
 	}
 	return false
@@ -174,13 +185,19 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 				items[i].TravelSource = "user_distance"
 			}
 		}
-		for i := range items { normalizeOpportunityMoney(&items[i]) }
+		for i := range items {
+			normalizeOpportunityMoney(&items[i])
+		}
 		return payload(e, "Market", "local", "READY", map[string]any{"opportunities": items})
 	case "PublishMarketOpportunity":
-		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type,e.Principal.Type),aiboundary.PublishOpportunity) { return rejected(e,"AI_ACTION_FORBIDDEN","ai.action_forbidden") }
+		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.PublishOpportunity) {
+			return rejected(e, "AI_ACTION_FORBIDDEN", "ai.action_forbidden")
+		}
 		// AIBOUND-001: 与 activity 对齐，写必须 USER 主体（dispatch 层已按
 		// session 回填 Actor，这里是纵深，避免直接调 service 绕过）。
-		if e.Actor.Type != "USER" || e.Actor.ID == "" { return command.Rejected(e,"MARKET_ACTOR_REQUIRED","AUTHORIZATION","AFTER_USER_ACTION","market.actor_required",nil) }
+		if e.Actor.Type != "USER" || e.Actor.ID == "" {
+			return command.Rejected(e, "MARKET_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "market.actor_required", nil)
+		}
 		var p Opportunity
 		if !decode(e.Payload, &p) || p.Title == "" || p.Location == "" {
 			return rejected(e, "INVALID_OPPORTUNITY", "market.invalid_opportunity")
@@ -227,9 +244,13 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		return payload(e, "MarketOpportunity", p.ID, "PUBLISHED", map[string]any{"opportunity": p})
 	case "ApplyToMarketOpportunity":
-		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type,e.Principal.Type),aiboundary.ApplyOpportunity) { return rejected(e,"AI_ACTION_FORBIDDEN","ai.action_forbidden") }
+		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.ApplyOpportunity) {
+			return rejected(e, "AI_ACTION_FORBIDDEN", "ai.action_forbidden")
+		}
 		// AIBOUND-001: 同上，报名必须 USER 主体。
-		if e.Actor.Type != "USER" || e.Actor.ID == "" { return command.Rejected(e,"MARKET_ACTOR_REQUIRED","AUTHORIZATION","AFTER_USER_ACTION","market.actor_required",nil) }
+		if e.Actor.Type != "USER" || e.Actor.ID == "" {
+			return command.Rejected(e, "MARKET_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "market.actor_required", nil)
+		}
 		id, _ := e.Payload["opportunityId"].(string)
 		quote, _ := e.Payload["quote"].(string)
 		scope, _ := e.Payload["scope"].(string)
@@ -249,10 +270,66 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			return command.Rejected(e, "MARKET_APPLICATION_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_failed", nil)
 		}
 		return payload(e, "MarketApplication", a.ID, a.Status, map[string]any{"application": a})
+	case "ListMarketApplications":
+		if e.Actor.Type != "USER" || e.Actor.ID == "" {
+			return command.Rejected(e, "MARKET_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "market.actor_required", nil)
+		}
+		id, _ := e.Payload["opportunityId"].(string)
+		applications, err := s.repository.ListApplications(ctx, id, e.Actor.ID)
+		if errors.Is(err, ErrOpportunityNotFound) {
+			return rejected(e, "OPPORTUNITY_NOT_FOUND", "market.opportunity_not_found")
+		}
+		if err != nil {
+			return command.Rejected(e, "MARKET_APPLICATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_list_failed", nil)
+		}
+		return payload(e, "MarketOpportunity", id, "APPLICATIONS_READY", map[string]any{"applications": applications})
+	case "SelectMarketApplication":
+		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.SelectOpportunityApplication) {
+			return rejected(e, "AI_ACTION_FORBIDDEN", "ai.action_forbidden")
+		}
+		if e.Actor.Type != "USER" || e.Actor.ID == "" {
+			return command.Rejected(e, "MARKET_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "market.actor_required", nil)
+		}
+		id, _ := e.Payload["opportunityId"].(string)
+		applicationID, _ := e.Payload["applicationId"].(string)
+		selected, err := s.repository.SelectApplication(ctx, id, applicationID, e.Actor.ID)
+		if errors.Is(err, ErrOpportunityNotFound) || errors.Is(err, ErrApplicationNotFound) {
+			return rejected(e, "APPLICATION_NOT_FOUND", "market.application_not_found")
+		}
+		if errors.Is(err, ErrApplicationStateConflict) {
+			return rejected(e, "APPLICATION_STATE_CONFLICT", "market.application_state_conflict")
+		}
+		if err != nil {
+			return command.Rejected(e, "MARKET_APPLICATION_SELECT_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_select_failed", nil)
+		}
+		return payload(e, "MarketApplication", selected.ID, selected.Status, map[string]any{"application": selected})
+	case "ConfirmMarketApplication":
+		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.ConfirmOpportunityApplication) {
+			return rejected(e, "AI_ACTION_FORBIDDEN", "ai.action_forbidden")
+		}
+		if e.Actor.Type != "USER" || e.Actor.ID == "" {
+			return command.Rejected(e, "MARKET_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "market.actor_required", nil)
+		}
+		applicationID, _ := e.Payload["applicationId"].(string)
+		confirmed, err := s.repository.ConfirmApplication(ctx, applicationID, e.Actor.ID, "order_"+applicationID)
+		if errors.Is(err, ErrApplicationNotFound) {
+			return rejected(e, "APPLICATION_NOT_FOUND", "market.application_not_found")
+		}
+		if errors.Is(err, ErrApplicationStateConflict) {
+			return rejected(e, "APPLICATION_STATE_CONFLICT", "market.application_state_conflict")
+		}
+		if err != nil {
+			return command.Rejected(e, "MARKET_APPLICATION_CONFIRM_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_confirm_failed", nil)
+		}
+		return payload(e, "Order", confirmed.OrderRef, "CONFIRMED", map[string]any{"application": confirmed, "orderRef": confirmed.OrderRef})
 	case "DismissMarketOpportunity":
 		// AIBOUND-001: Dismiss 之前无 gate，AI 主体可调；现与 Publish/Apply 对齐。
-		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type,e.Principal.Type),aiboundary.DismissOpportunity) { return rejected(e,"AI_ACTION_FORBIDDEN","ai.action_forbidden") }
-		if e.Actor.Type != "USER" || e.Actor.ID == "" { return command.Rejected(e,"MARKET_ACTOR_REQUIRED","AUTHORIZATION","AFTER_USER_ACTION","market.actor_required",nil) }
+		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.DismissOpportunity) {
+			return rejected(e, "AI_ACTION_FORBIDDEN", "ai.action_forbidden")
+		}
+		if e.Actor.Type != "USER" || e.Actor.ID == "" {
+			return command.Rejected(e, "MARKET_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "market.actor_required", nil)
+		}
 		id, _ := e.Payload["opportunityId"].(string)
 		if err := s.repository.Dismiss(ctx, e.Actor.ID, id); errors.Is(err, ErrOpportunityNotFound) {
 			return rejected(e, "OPPORTUNITY_NOT_FOUND", "market.opportunity_not_found")
@@ -329,7 +406,12 @@ func (r *MemoryRepository) List(_ context.Context, viewerID string) ([]Opportuni
 		}
 		item := stored
 		item.Owned = stored.OwnerID == viewerID
-		_, item.Applied = r.applications[stored.ID][viewerID]
+		if application, ok := r.applications[stored.ID][viewerID]; ok {
+			item.Applied = true
+			item.ViewerApplicationID = application.ID
+			item.ViewerApplicationStatus = application.Status
+			item.ViewerOrderRef = application.OrderRef
+		}
 		items = append(items, item)
 	}
 	return items, nil
@@ -372,6 +454,94 @@ func (r *MemoryRepository) Apply(_ context.Context, application Application) (Ap
 	r.applications[application.OpportunityID][application.ApplicantID] = application
 	r.opportunities[index].Responses++
 	return application, true, nil
+}
+func (r *MemoryRepository) ListApplications(_ context.Context, opportunityID, ownerID string) ([]Application, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	found := false
+	for _, item := range r.opportunities {
+		if item.ID == opportunityID {
+			found = true
+			if item.OwnerID != ownerID {
+				return nil, ErrOpportunityNotFound
+			}
+			break
+		}
+	}
+	if !found {
+		return nil, ErrOpportunityNotFound
+	}
+	items := []Application{}
+	for _, item := range r.applications[opportunityID] {
+		items = append(items, item)
+	}
+	return items, nil
+}
+func (r *MemoryRepository) SelectApplication(_ context.Context, opportunityID, applicationID, ownerID string) (Application, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	owned := false
+	for _, item := range r.opportunities {
+		if item.ID == opportunityID && item.OwnerID == ownerID {
+			owned = true
+			break
+		}
+	}
+	if !owned {
+		return Application{}, ErrOpportunityNotFound
+	}
+	apps := r.applications[opportunityID]
+	var selected Application
+	found := false
+	for _, item := range apps {
+		if item.ID == applicationID {
+			selected, found = item, true
+			break
+		}
+	}
+	if !found {
+		return Application{}, ErrApplicationNotFound
+	}
+	if selected.Status != "SUBMITTED" && selected.Status != "SELECTED" {
+		return Application{}, ErrApplicationStateConflict
+	}
+	now := time.Now().UTC()
+	for applicantID, item := range apps {
+		if item.ID == applicationID {
+			item.Status = "SELECTED"
+			item.SelectedAt = &now
+			selected = item
+		} else if item.Status == "SUBMITTED" {
+			item.Status = "NOT_SELECTED"
+		}
+		apps[applicantID] = item
+	}
+	return selected, nil
+}
+func (r *MemoryRepository) ConfirmApplication(_ context.Context, applicationID, applicantID, orderRef string) (Application, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for opportunityID, apps := range r.applications {
+		for key, item := range apps {
+			if item.ID != applicationID {
+				continue
+			}
+			if item.ApplicantID != applicantID {
+				return Application{}, ErrApplicationNotFound
+			}
+			if item.Status != "SELECTED" && item.Status != "CONFIRMED" {
+				return Application{}, ErrApplicationStateConflict
+			}
+			now := time.Now().UTC()
+			item.Status = "CONFIRMED"
+			item.ConfirmedAt = &now
+			item.OrderRef = orderRef
+			apps[key] = item
+			r.applications[opportunityID] = apps
+			return item, nil
+		}
+	}
+	return Application{}, ErrApplicationNotFound
 }
 func (r *MemoryRepository) Dismiss(_ context.Context, viewerID, opportunityID string) error {
 	r.mu.Lock()

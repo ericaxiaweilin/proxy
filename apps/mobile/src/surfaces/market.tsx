@@ -16,7 +16,7 @@ import { useModuleBackHandler } from "../components/module-back";
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { type FulfillmentClient } from "../fulfillment-client";
-import { type MarketplaceClient } from "../marketplace-client";
+import { type MarketplaceClient, type MarketApplication } from "../marketplace-client";
 import { nearestCityLabel } from "../market-city-label";
 import { type MediaClient } from "../media-client";
 import { type SupplyClient } from "../supply-client";
@@ -299,6 +299,19 @@ export function MarketSurface({
     }
   }
 
+  async function confirmOpportunity(opportunity: MarketOpportunity): Promise<void> {
+    if (busy || !opportunity.viewerApplicationId) return;
+    setBusy(true);
+    try {
+      const confirmed = await marketplace.confirmApplication(opportunity.viewerApplicationId);
+      const next = { ...opportunity, viewerApplicationStatus: "CONFIRMED" as const, viewerOrderRef: confirmed.orderRef };
+      setOpportunityItems((items) => items.map((item) => item.id === next.id ? next : item));
+      setOppDetail(next);
+      setOpportunityError(undefined);
+    } catch { setOpportunityError("合作确认没有保存成功，请重试。"); }
+    finally { setBusy(false); }
+  }
+
   async function createOfferForLinh(opportunity: MarketOpportunity): Promise<void> {
     if (!fulfillment) { setOfferMsg("Offer 服务未就绪"); return; }
     if (offerBusy) return;
@@ -540,7 +553,7 @@ export function MarketSurface({
       ) : compareOpen ? (
         <CompareScene onBack={() => setCompareOpen(false)} onOpenApplicant={(n) => { setCompareOpen(false); setApplicantName(n); }} />
       ) : selectOpp ? (
-        <SelectWorkbench opportunity={selectOpp} onBack={() => setSelectOpp(null)} onOpenApplicant={setApplicantName} onOpenSubmission={setSubmissionName} onCompare={() => setCompareOpen(true)} />
+        <SelectWorkbench marketplace={marketplace} opportunity={selectOpp} onBack={() => setSelectOpp(null)} />
       ) : view === "MAP" ? (
         <MarketMap
           tab={pageTab}
@@ -565,6 +578,7 @@ export function MarketSurface({
             onBack={() => setOppDetail(null)}
             busy={busy}
             onApply={(quote) => void applyToOpportunity(oppDetail, quote)}
+            onConfirm={() => void confirmOpportunity(oppDetail)}
             onOpenSelect={() => {
               const cur = oppDetail;
               setOppDetail(null);
@@ -789,6 +803,7 @@ function OpportunityDetail({
   onBack,
   onOpenSelect,
   onApply,
+  onConfirm,
   busy
 }: {
   opportunity: MarketOpportunity;
@@ -797,6 +812,7 @@ function OpportunityDetail({
   onBack: () => void;
   onOpenSelect: () => void;
   onApply: (quote: string) => void;
+  onConfirm: () => void;
   busy: boolean;
 }): React.JSX.Element {
   const budget = opportunity.price;
@@ -907,6 +923,20 @@ function OpportunityDetail({
         <Pressable onPress={onOpenSelect} style={[styles.r4ActionGhost, { marginTop: 7 }]}>
           <Text style={styles.r4ActionGhostText}>查看客户选人视角 ›</Text>
         </Pressable>
+      ) : null}
+
+      {opportunity.viewerApplicationStatus === "SELECTED" ? (
+        <View style={[styles.aiBox, { marginTop: 8 }]}>
+          <Text style={styles.aiTitle}>发布者已选择你的申请</Text>
+          <Text style={styles.aiCheck}>再次核对本次报价与范围后，由你本人确认合作；AI 助理不能代确认。</Text>
+          <Pressable disabled={busy} onPress={onConfirm} style={[styles.r4ActionPrimary, { marginTop: 8 }]}>
+            <Text style={styles.r4ActionPrimaryText}>{busy ? "确认中…" : "本人确认合作"}</Text>
+          </Pressable>
+        </View>
+      ) : opportunity.viewerApplicationStatus === "CONFIRMED" ? (
+        <Text style={styles.detailHint}>双方已确认合作 · {opportunity.viewerOrderRef}</Text>
+      ) : opportunity.viewerApplicationStatus === "NOT_SELECTED" ? (
+        <Text style={styles.detailHint}>本次申请未被选择。</Text>
       ) : null}
 
       <Text style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
@@ -1065,24 +1095,31 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
   );
 }
 
-function SelectWorkbench({
-  opportunity,
-  onBack,
-  onOpenApplicant,
-  onOpenSubmission,
-  onCompare
-}: {
-  opportunity: MarketOpportunity;
-  onBack: () => void;
-  onOpenApplicant: (name: string) => void;
-  onOpenSubmission: (name: string) => void;
-  onCompare: () => void;
-}): React.JSX.Element {
-  const candidates: Array<{ name: string; meta: string; price: string; rank: string; hot?: boolean }> = [
-    { name: "小美", meta: "中文 / 摄影 / 河内", price: "2.2M₫", rank: "推荐 1", hot: true },
-    { name: "Linh", meta: "中文 / 本地同行", price: "2.0M₫", rank: "推荐 2" },
-    { name: "Minh", meta: "摄影 / 英文 / 河内", price: "1.8M₫", rank: "推荐 3" }
-  ];
+function SelectWorkbench({ marketplace, opportunity, onBack }: { marketplace: MarketplaceClient; opportunity: MarketOpportunity; onBack: () => void }): React.JSX.Element {
+  const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [candidates, setCandidates] = useState<MarketApplication[]>([]);
+  const [workingId, setWorkingId] = useState<string>();
+  const [error, setError] = useState<string>();
+  const load = useCallback(async (): Promise<void> => {
+    setPhase("LOADING");
+    try {
+      setCandidates(await marketplace.listApplications(opportunity.id));
+      setPhase("READY");
+      setError(undefined);
+    } catch {
+      setPhase("ERROR");
+      setError("报名名单加载失败，请检查登录状态或网络后重试。");
+    }
+  }, [marketplace, opportunity.id]);
+  useEffect(() => { void load(); }, [load]);
+  async function select(candidate: MarketApplication): Promise<void> {
+    if (workingId) return;
+    setWorkingId(candidate.applicationId);
+    try { await marketplace.selectApplication(opportunity.id, candidate.applicationId); await load(); }
+    catch { setError("选择没有保存成功，请重试。"); }
+    finally { setWorkingId(undefined); }
+  }
+  const selectedCount = candidates.filter((item) => item.status === "SELECTED" || item.status === "CONFIRMED").length;
   return (
     <View>
       <View style={styles.detailHead}>
@@ -1096,11 +1133,11 @@ function SelectWorkbench({
         <Text style={styles.detailHeroKicker}>报名明细 · 仅发布者可见</Text>
         <Text style={styles.detailHeroTitle}>{opportunity.title}</Text>
         <Text style={styles.detailHeroSub}>
-          {opportunity.date} {opportunity.time} · {opportunity.location} · {opportunity.responses} 人报名 · 先由 Proxy 排除不满足必要条件的人。
+          {opportunity.date} {opportunity.time} · {opportunity.location} · {candidates.length} 份真实报名
         </Text>
       </View>
       <View style={styles.r4PriceStrip}>
-        {[["12", "回应"], ["7", "合格"], ["3", "建议先看"], ["1", "确认"]].map(([n, l]) => (
+        {[[String(candidates.length), "报名"], [String(candidates.filter((x) => x.status === "SUBMITTED").length), "待选择"], [String(selectedCount), "已选择"], [String(candidates.filter((x) => x.status === "CONFIRMED").length), "已确认"]].map(([n, l]) => (
           <View key={l} style={styles.r4PriceCell}>
             <Text style={[styles.r4PriceValue, { textAlign: "center" }]}>{n}</Text>
             <Text style={[styles.r4PriceLabel, { textAlign: "center" }]}>{l}</Text>
@@ -1108,34 +1145,28 @@ function SelectWorkbench({
         ))}
       </View>
       <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>Proxy 推荐不是“最便宜”</Text>
-        <Text style={styles.aiCheck}>必要条件 40% · 类似结果 20% · 时间15% · 回应质量10% · 偏好10% · 价格5%。</Text>
+        <Text style={styles.aiTitle}>申请制，不把任何人直接上架</Text>
+        <Text style={styles.aiCheck}>这里只展示真人主动提交的本次报价与范围。没有可靠履约数据时，不伪造推荐排名。</Text>
       </View>
+      {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
+      {error ? <Text style={styles.marketError}>{error}</Text> : null}
+      {phase === "READY" && candidates.length === 0 ? <Text style={styles.detailHint}>还没有人报名。候选人不会由平台或 AI 自动补位。</Text> : null}
       {candidates.map((c) => (
-        <View key={c.name} style={[styles.r4Card, c.hot && { borderColor: color.magenta }]}>
+        <View key={c.applicationId} style={[styles.r4Card, (c.status === "SELECTED" || c.status === "CONFIRMED") && { borderColor: color.magenta }]}>
           <View style={styles.r4Top}>
-            <Text style={styles.r4Title}>{c.name} · {c.meta}</Text>
+            <Text style={styles.r4Title}>申请人 {c.applicantId.slice(0, 10)}</Text>
             <View style={styles.r4FitBadge}>
-              <Text style={styles.r4FitText}>{c.rank}</Text>
+              <Text style={styles.r4FitText}>{c.status === "SUBMITTED" ? "待选择" : c.status === "SELECTED" ? "等待对方确认" : c.status === "CONFIRMED" ? "双方已确认" : "未选择"}</Text>
             </View>
           </View>
-          <Text style={styles.r4Meta}>本次报价 {c.price} · 只属于本次需求，不会把她永久标成小时价</Text>
+          <Text style={styles.r4Meta}>本次报价 {c.quote} · {c.scope || "申请人未填写服务范围"}</Text>
           <View style={styles.r4Actions}>
-            <Pressable onPress={() => onOpenApplicant(c.name)} style={styles.r4ActionGhost}>
-              <Text style={styles.r4ActionGhostText}>看候选详情</Text>
-            </Pressable>
-            <Pressable onPress={() => onOpenSubmission(c.name)} style={styles.r4ActionGhost}>
-              <Text style={styles.r4ActionGhostText}>看本次投递</Text>
-            </Pressable>
-            <Pressable onPress={onCompare} style={styles.r4ActionPrimary}>
-              <Text style={styles.r4ActionPrimaryText}>比较</Text>
+            <Pressable disabled={c.status !== "SUBMITTED" || Boolean(workingId)} onPress={() => void select(c)} style={c.status === "SUBMITTED" ? styles.r4ActionPrimary : styles.r4ActionGhost}>
+              <Text style={c.status === "SUBMITTED" ? styles.r4ActionPrimaryText : styles.r4ActionGhostText}>{workingId === c.applicationId ? "保存中…" : c.status === "SUBMITTED" ? "选择并发出合作邀请" : "状态已记录"}</Text>
             </Pressable>
           </View>
         </View>
       ))}
-      <Pressable onPress={onCompare} style={[styles.r4ActionPrimary, { marginTop: 8 }]}>
-        <Text style={styles.r4ActionPrimaryText}>进入深度比较</Text>
-      </Pressable>
     </View>
   );
 }

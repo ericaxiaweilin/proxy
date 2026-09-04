@@ -24,6 +24,7 @@ func TestMarketplacePostgresLifecycle(t *testing.T) {
 	owner := "user_mkt_owner_" + itoa(run)
 	viewer := "user_mkt_viewer_" + itoa(run)
 	applicant := "user_mkt_app_" + itoa(run)
+	applicant2 := "user_mkt_app2_" + itoa(run)
 
 	op := marketplace.Opportunity{
 		ID: id, OwnerID: owner, Title: "周五城市摄影局", ShortTitle: "摄影局",
@@ -85,7 +86,7 @@ func TestMarketplacePostgresLifecycle(t *testing.T) {
 	// bumping responses.
 	app := marketplace.Application{
 		ID: "mkt_ap_" + itoa(run), OpportunityID: id, ApplicantID: applicant,
-		Quote: "¥110", Scope: "跟拍 2 小时", Status: "PENDING",
+		Quote: "¥110", Scope: "跟拍 2 小时", Status: "SUBMITTED",
 		CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
 	}
 	createdApp, created, err := repo.Apply(ctx, app)
@@ -102,6 +103,29 @@ func TestMarketplacePostgresLifecycle(t *testing.T) {
 	after, _ := repo.Get(ctx, id)
 	if after.Responses != 1 {
 		t.Fatalf("responses must be bumped exactly once, got %d", after.Responses)
+	}
+	app2 := app
+	app2.ID, app2.ApplicantID, app2.Quote = "mkt_ap2_"+itoa(run), applicant2, "¥100"
+	if _, created, err := repo.Apply(ctx, app2); err != nil || !created {
+		t.Fatalf("Apply second: created=%v err=%v", created, err)
+	}
+	apps, err := repo.ListApplications(ctx, id, owner)
+	if err != nil || len(apps) != 2 {
+		t.Fatalf("ListApplications: apps=%+v err=%v", apps, err)
+	}
+	if _, err := repo.ListApplications(ctx, id, viewer); err != marketplace.ErrOpportunityNotFound {
+		t.Fatalf("non-owner list must fail closed: %v", err)
+	}
+	chosen, err := repo.SelectApplication(ctx, id, app.ID, owner)
+	if err != nil || chosen.Status != "SELECTED" {
+		t.Fatalf("SelectApplication: chosen=%+v err=%v", chosen, err)
+	}
+	if _, err := repo.ConfirmApplication(ctx, app.ID, applicant2, "order_wrong"); err != marketplace.ErrApplicationNotFound {
+		t.Fatalf("wrong applicant confirmed: %v", err)
+	}
+	confirmed, err := repo.ConfirmApplication(ctx, app.ID, applicant, "order_"+app.ID)
+	if err != nil || confirmed.Status != "CONFIRMED" || confirmed.OrderRef == "" {
+		t.Fatalf("ConfirmApplication: app=%+v err=%v", confirmed, err)
 	}
 	// applied flag flips for the applicant.
 	appliedList, err := repo.List(ctx, applicant)
@@ -167,7 +191,7 @@ func TestMarketplacePostgresLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get after restart: %v", err)
 	}
-	if after2.Responses != 1 || after2.OwnerID != owner {
+	if after2.Responses != 2 || after2.OwnerID != owner {
 		t.Fatalf("restart lost state: %+v", after2)
 	}
 }

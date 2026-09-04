@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -43,9 +44,9 @@ func (r *MarketplaceRepository) Seed(ctx context.Context, opportunities []market
 func (r *MarketplaceRepository) List(ctx context.Context, viewerID string) ([]marketplace.Opportunity, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT o.payload, o.owner_id, o.responses,
-		       (o.owner_id = $1), EXISTS (
-		           SELECT 1 FROM marketplace.applications a
-		           WHERE a.opportunity_id = o.id AND a.applicant_id = $1)
+		       (o.owner_id = $1), (
+		           SELECT a.payload FROM marketplace.applications a
+		           WHERE a.opportunity_id = o.id AND a.applicant_id = $1 LIMIT 1)
 		FROM marketplace.opportunities o
 		WHERE NOT EXISTS (
 		    SELECT 1 FROM marketplace.dismissals d
@@ -58,15 +59,26 @@ func (r *MarketplaceRepository) List(ctx context.Context, viewerID string) ([]ma
 	items := []marketplace.Opportunity{}
 	for rows.Next() {
 		var payload []byte
+		var applicationPayload []byte
 		var item marketplace.Opportunity
-		if err := rows.Scan(&payload, &item.OwnerID, &item.Responses, &item.Owned, &item.Applied); err != nil {
+		if err := rows.Scan(&payload, &item.OwnerID, &item.Responses, &item.Owned, &applicationPayload); err != nil {
 			return nil, err
 		}
-		ownerID, responses, owned, applied := item.OwnerID, item.Responses, item.Owned, item.Applied
+		ownerID, responses, owned := item.OwnerID, item.Responses, item.Owned
 		if err := json.Unmarshal(payload, &item); err != nil {
 			return nil, fmt.Errorf("decode market opportunity: %w", err)
 		}
-		item.OwnerID, item.Responses, item.Owned, item.Applied = ownerID, responses, owned, applied
+		item.OwnerID, item.Responses, item.Owned = ownerID, responses, owned
+		if len(applicationPayload) > 0 {
+			var application marketplace.Application
+			if err := json.Unmarshal(applicationPayload, &application); err != nil {
+				return nil, fmt.Errorf("decode viewer market application: %w", err)
+			}
+			item.Applied = true
+			item.ViewerApplicationID = application.ID
+			item.ViewerApplicationStatus = application.Status
+			item.ViewerOrderRef = application.OrderRef
+		}
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -133,6 +145,130 @@ func (r *MarketplaceRepository) Apply(ctx context.Context, application marketpla
 		return json.Unmarshal(existing, &result)
 	})
 	return result, created, err
+}
+
+func (r *MarketplaceRepository) ListApplications(ctx context.Context, opportunityID, ownerID string) ([]marketplace.Application, error) {
+	var owned bool
+	if err := queryerForContext(ctx, r.pool).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM marketplace.opportunities WHERE id=$1 AND owner_id=$2)`, opportunityID, ownerID).Scan(&owned); err != nil {
+		return nil, err
+	}
+	if !owned {
+		return nil, marketplace.ErrOpportunityNotFound
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx,
+		`SELECT payload FROM marketplace.applications WHERE opportunity_id=$1 ORDER BY created_at ASC`, opportunityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []marketplace.Application{}
+	for rows.Next() {
+		var raw []byte
+		var item marketplace.Application
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return nil, fmt.Errorf("decode market application: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *MarketplaceRepository) SelectApplication(ctx context.Context, opportunityID, applicationID, ownerID string) (marketplace.Application, error) {
+	var selected marketplace.Application
+	err := runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
+		var actualOwner string
+		if err := tx.QueryRow(txCtx, `SELECT owner_id FROM marketplace.opportunities WHERE id=$1 FOR UPDATE`, opportunityID).Scan(&actualOwner); errors.Is(err, pgx.ErrNoRows) || (err == nil && actualOwner != ownerID) {
+			return marketplace.ErrOpportunityNotFound
+		} else if err != nil {
+			return err
+		}
+
+		rows, err := tx.Query(txCtx, `SELECT id, payload FROM marketplace.applications WHERE opportunity_id=$1 FOR UPDATE`, opportunityID)
+		if err != nil {
+			return err
+		}
+		type stored struct {
+			id  string
+			app marketplace.Application
+		}
+		var all []stored
+		for rows.Next() {
+			var item stored
+			var raw []byte
+			if err := rows.Scan(&item.id, &raw); err != nil {
+				rows.Close()
+				return err
+			}
+			if err := json.Unmarshal(raw, &item.app); err != nil {
+				rows.Close()
+				return err
+			}
+			all = append(all, item)
+		}
+		rows.Close()
+		found := false
+		now := time.Now().UTC()
+		for _, item := range all {
+			app := item.app
+			if item.id == applicationID {
+				found = true
+				if app.Status != "SUBMITTED" && app.Status != "SELECTED" {
+					return marketplace.ErrApplicationStateConflict
+				}
+				app.Status, app.SelectedAt = "SELECTED", &now
+				selected = app
+			} else if app.Status == "SUBMITTED" {
+				app.Status = "NOT_SELECTED"
+			}
+			raw, err := json.Marshal(app)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(txCtx, `UPDATE marketplace.applications SET payload=$2 WHERE id=$1`, item.id, raw); err != nil {
+				return err
+			}
+		}
+		if !found {
+			return marketplace.ErrApplicationNotFound
+		}
+		return nil
+	})
+	return selected, err
+}
+
+func (r *MarketplaceRepository) ConfirmApplication(ctx context.Context, applicationID, applicantID, orderRef string) (marketplace.Application, error) {
+	var confirmed marketplace.Application
+	err := runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
+		var raw []byte
+		var storedApplicant string
+		if err := tx.QueryRow(txCtx, `SELECT applicant_id, payload FROM marketplace.applications WHERE id=$1 FOR UPDATE`, applicationID).Scan(&storedApplicant, &raw); errors.Is(err, pgx.ErrNoRows) || (err == nil && storedApplicant != applicantID) {
+			return marketplace.ErrApplicationNotFound
+		} else if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(raw, &confirmed); err != nil {
+			return err
+		}
+		if confirmed.Status == "CONFIRMED" {
+			return nil
+		}
+		if confirmed.Status != "SELECTED" {
+			return marketplace.ErrApplicationStateConflict
+		}
+		now := time.Now().UTC()
+		confirmed.Status, confirmed.ConfirmedAt, confirmed.OrderRef = "CONFIRMED", &now, orderRef
+		raw, err := json.Marshal(confirmed)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(txCtx, `UPDATE marketplace.applications SET payload=$2 WHERE id=$1`, applicationID, raw)
+		return err
+	})
+	return confirmed, err
 }
 
 func (r *MarketplaceRepository) Dismiss(ctx context.Context, viewerID, opportunityID string) error {

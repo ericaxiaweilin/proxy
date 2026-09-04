@@ -155,6 +155,23 @@ require_test "ACT-PUBLISH-001" "./internal/activity" \
   "apps/api-go/internal/activity/service_test.go" || exit $?
 pnpm --dir apps/mobile test -- --run src/activity-client.test.ts
 echo "    ACT-PUBLISH-001: PASS (mobile publish + offline write guard)"
+
+# OPPORTUNITY-DEAL-001: 真人申请 -> 发布者选择 -> 被选真人确认；候选列表
+# 来自仓储，不允许把平台 AI 或硬编码人物当作可直接购买的库存。
+require_test "OPPORTUNITY-DEAL-001" "./internal/marketplace" \
+  "TestOpportunityApplicationSelectionAndBilateralConfirmation" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+require_test "OPPORTUNITY-DEAL-001" "./internal/marketplace" \
+  "TestOpportunitySelectionAndConfirmationAreForbiddenForAIActors" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+require_test "OPPORTUNITY-DEAL-001" "./internal/platform/postgres" \
+  "TestMarketplacePostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/marketplace_media_integration_test.go" || exit $?
+if ! grep -q 'marketplace.listApplications(opportunity.id)' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [OPPORTUNITY-DEAL-001]: owner candidate workbench is not repository-backed" >&2
+  exit 1
+fi
+echo "    OPPORTUNITY-DEAL-001: PASS (real applications + bilateral confirmation)"
 require_test "AI-ACTOR-001" "./internal/aiboundary" \
   "TestHumanActionsAreOpen" \
   "apps/api-go/internal/aiboundary/policy_test.go" || exit $?

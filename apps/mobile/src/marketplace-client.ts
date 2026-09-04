@@ -1,12 +1,13 @@
 import type { CommandResult } from "@proxy/contracts";
-import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema } from "@proxy/contracts";
+import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema } from "@proxy/contracts";
+import type { MarketApplication } from "@proxy/contracts";
 import type { MarketOpportunity } from "./market-fixtures";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
 
-export type MarketApplication = { applicationId: string; opportunityId: string; quote: string; scope: string; status: string };
+export type { MarketApplication } from "@proxy/contracts";
 
 export class MarketplaceClient {
   private sequence = 0;
@@ -51,8 +52,20 @@ export class MarketplaceClient {
   }
   public async apply(opportunityId: string, quote: string, scope: string): Promise<MarketApplication> {
     const body = this.body(await this.command("ApplyToMarketOpportunity", { type: "MarketOpportunity", id: opportunityId }, { opportunityId, quote, scope }, false));
-    if (!body.application || typeof body.application !== "object") throw new Error("market application was malformed");
-    return body.application as MarketApplication;
+    return MarketApplicationPayloadSchema.parse(body).application;
+  }
+  public async listApplications(opportunityId: string): Promise<MarketApplication[]> {
+    const body = this.body(await this.command("ListMarketApplications", { type: "MarketOpportunity", id: opportunityId }, { opportunityId }, false));
+    return ListMarketApplicationsPayloadSchema.parse(body).applications;
+  }
+  public async selectApplication(opportunityId: string, applicationId: string): Promise<MarketApplication> {
+    const body = this.body(await this.command("SelectMarketApplication", { type: "MarketOpportunity", id: opportunityId }, { opportunityId, applicationId }, false));
+    return MarketApplicationPayloadSchema.parse(body).application;
+  }
+  public async confirmApplication(applicationId: string): Promise<{ application: MarketApplication; orderRef: string }> {
+    const body = MarketApplicationPayloadSchema.parse(this.body(await this.command("ConfirmMarketApplication", { type: "MarketApplication", id: applicationId }, { applicationId }, false)));
+    if (!body.orderRef) throw new Error("confirmed application missing order reference");
+    return { application: body.application, orderRef: body.orderRef };
   }
   public async dismiss(opportunityId: string): Promise<void> { await this.command("DismissMarketOpportunity", { type: "MarketOpportunity", id: opportunityId }, { opportunityId }, false); }
 

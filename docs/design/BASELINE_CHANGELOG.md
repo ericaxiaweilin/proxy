@@ -4,6 +4,18 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 14 — 2026-09-04
+
+- Replaced the active opportunity candidate workbench's hard-coded Xiaomei,
+  Linh, and Minh inventory with owner-only, repository-backed applications.
+- Added the prototype lifecycle: human applies, owner selects one application,
+  the other submissions close, and the selected human confirms cooperation to
+  materialize a stable order reference. Platform AI, user twins, and AI
+  assistants cannot select or confirm.
+- Added `OPPORTUNITY-DEAL-001` across service, PostgreSQL lifecycle, mobile
+  wiring, and the regression gate. Reputation/profile enrichment remains a
+  named gap; the UI no longer invents rankings or fulfillment percentages.
+
 ## Revision 13 — 2026-09-04
 
 - Raised the conversation composer above the device bottom safe area and kept

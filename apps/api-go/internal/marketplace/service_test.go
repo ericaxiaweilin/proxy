@@ -58,6 +58,89 @@ func TestOpportunityPublishApplyAndDismiss(t *testing.T) {
 	}
 }
 
+// OPPORTUNITY-DEAL-001: 小美/任何 AI 都不是可直接上架的库存。真人报名后，
+// 发布者从真实投递中选择一人，只有被选中的真人能确认并物化订单。
+func TestOpportunityApplicationSelectionAndBilateralConfirmation(t *testing.T) {
+	s := New()
+	published := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", map[string]any{
+		"title": "河内城市同行", "date": "周六", "time": "13:30–17:30", "location": "还剑湖", "price": "1,400,000₫", "skills": "中文 · 本地同行",
+	}))
+	var pub struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if published.Outcome != "ACCEPTED" || json.Unmarshal([]byte(published.OperationRef), &pub) != nil {
+		t.Fatalf("publish: %+v", published)
+	}
+	applications := make([]Application, 0, 2)
+	for i, applicant := range []string{"linh", "minh"} {
+		out := s.HandleContext(t.Context(), marketEnvelope("ApplyToMarketOpportunity", applicant, map[string]any{"opportunityId": pub.Opportunity.ID, "quote": []string{"1,400,000₫", "1,200,000₫"}[i], "scope": "同行服务"}))
+		var body struct {
+			Application Application `json:"application"`
+		}
+		if out.Outcome != "ACCEPTED" || json.Unmarshal([]byte(out.OperationRef), &body) != nil {
+			t.Fatalf("apply %s: %+v", applicant, out)
+		}
+		applications = append(applications, body.Application)
+	}
+	denied := s.HandleContext(t.Context(), marketEnvelope("ListMarketApplications", "stranger", map[string]any{"opportunityId": pub.Opportunity.ID}))
+	if denied.Outcome != "REJECTED" {
+		t.Fatalf("non-owner listed candidates: %+v", denied)
+	}
+	listed := s.HandleContext(t.Context(), marketEnvelope("ListMarketApplications", "owner", map[string]any{"opportunityId": pub.Opportunity.ID}))
+	var listBody struct {
+		Applications []Application `json:"applications"`
+	}
+	if listed.Outcome != "ACCEPTED" || json.Unmarshal([]byte(listed.OperationRef), &listBody) != nil || len(listBody.Applications) != 2 {
+		t.Fatalf("owner list: %+v body=%+v", listed, listBody)
+	}
+	selected := s.HandleContext(t.Context(), marketEnvelope("SelectMarketApplication", "owner", map[string]any{"opportunityId": pub.Opportunity.ID, "applicationId": applications[0].ID}))
+	if selected.Outcome != "ACCEPTED" {
+		t.Fatalf("select: %+v", selected)
+	}
+	applicantView := s.HandleContext(t.Context(), marketEnvelope("ListMarketOpportunities", "linh", nil))
+	var applicantList struct {
+		Opportunities []Opportunity `json:"opportunities"`
+	}
+	_ = json.Unmarshal([]byte(applicantView.OperationRef), &applicantList)
+	if len(applicantList.Opportunities) == 0 || applicantList.Opportunities[0].ViewerApplicationID != applications[0].ID || applicantList.Opportunities[0].ViewerApplicationStatus != "SELECTED" {
+		t.Fatalf("selected applicant cannot see confirmation state: %+v", applicantList.Opportunities)
+	}
+	wrong := s.HandleContext(t.Context(), marketEnvelope("ConfirmMarketApplication", "minh", map[string]any{"applicationId": applications[0].ID}))
+	if wrong.Outcome != "REJECTED" {
+		t.Fatalf("unselected applicant confirmed: %+v", wrong)
+	}
+	confirmed := s.HandleContext(t.Context(), marketEnvelope("ConfirmMarketApplication", "linh", map[string]any{"applicationId": applications[0].ID}))
+	var confirmBody struct {
+		Application Application `json:"application"`
+		OrderRef    string      `json:"orderRef"`
+	}
+	if confirmed.Outcome != "ACCEPTED" || json.Unmarshal([]byte(confirmed.OperationRef), &confirmBody) != nil || confirmBody.Application.Status != "CONFIRMED" || confirmBody.OrderRef == "" {
+		t.Fatalf("confirm: %+v body=%+v", confirmed, confirmBody)
+	}
+	again := s.HandleContext(t.Context(), marketEnvelope("ConfirmMarketApplication", "linh", map[string]any{"applicationId": applications[0].ID}))
+	var againBody struct {
+		OrderRef string `json:"orderRef"`
+	}
+	_ = json.Unmarshal([]byte(again.OperationRef), &againBody)
+	if again.Outcome != "ACCEPTED" || againBody.OrderRef != confirmBody.OrderRef {
+		t.Fatalf("confirm must be idempotent: %+v", again)
+	}
+}
+
+func TestOpportunitySelectionAndConfirmationAreForbiddenForAIActors(t *testing.T) {
+	for _, commandType := range []string{"SelectMarketApplication", "ConfirmMarketApplication"} {
+		for _, kind := range []string{"PLATFORM_AI", "USER_TWIN", "USER_ASSISTANT"} {
+			s := New()
+			envelope := marketEnvelope(commandType, "ai", map[string]any{"opportunityId": "op", "applicationId": "app"})
+			envelope.Actor.Type, envelope.Principal.Type = kind, kind
+			out := s.HandleContext(t.Context(), envelope)
+			if out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "AI_ACTION_FORBIDDEN" {
+				t.Fatalf("%s %s: %+v", kind, commandType, out)
+			}
+		}
+	}
+}
+
 // R15.x: when the mobile client passes a foreground-location
 // fix to ListMarketOpportunities, the server must recompute
 // Travel from haversine distance, not echo the editor's seeded
@@ -143,14 +226,14 @@ func TestListMarketOpportunitiesPreservesSeededTravelWithoutUserFix(t *testing.T
 // the list and must not poison the seeded Travel.
 func TestReadUserFixRejectsGarbage(t *testing.T) {
 	cases := map[string]map[string]any{
-		"nil payload":        nil,
-		"empty payload":      {},
-		"only userLat":       {"userLat": 21.0},
-		"only userLng":       {"userLng": 105.0},
-		"lat out of range":   {"userLat": 999.0, "userLng": 105.0},
-		"lng out of range":   {"userLat": 21.0, "userLng": -999.0},
-		"sentinel (0,0)":     {"userLat": 0.0, "userLng": 0.0},
-		"lat as string":      {"userLat": "21.0", "userLng": 105.0},
+		"nil payload":      nil,
+		"empty payload":    {},
+		"only userLat":     {"userLat": 21.0},
+		"only userLng":     {"userLng": 105.0},
+		"lat out of range": {"userLat": 999.0, "userLng": 105.0},
+		"lng out of range": {"userLat": 21.0, "userLng": -999.0},
+		"sentinel (0,0)":   {"userLat": 0.0, "userLng": 0.0},
+		"lat as string":    {"userLat": "21.0", "userLng": 105.0},
 	}
 	for name, payload := range cases {
 		if _, _, ok := readUserFix(payload); ok {
