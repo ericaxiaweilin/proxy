@@ -335,9 +335,10 @@ export function MeSurface({
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
   const [socialEditor, setSocialEditor] = useState<SocialAccount>();
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
+  const [collaboration, setCollaboration] = useState({ enabled: false, types: ["探店", "UGC"], rate: "", contact: "" });
   const socialSettingsHydrated = useRef(false);
-  useEffect(() => { void socialSettingsStore.read().then((value) => { if (value) { setSocialAccounts(value.accounts); setSocialSettings({ merchant: value.merchant, profile: value.profile, influence: value.influence }); } socialSettingsHydrated.current = true; }); }, []);
-  useEffect(() => { if (socialSettingsHydrated.current) void socialSettingsStore.write({ accounts: socialAccounts, ...socialSettings }); }, [socialAccounts, socialSettings]);
+  useEffect(() => { void socialSettingsStore.read().then((value) => { if (value) { setSocialAccounts(value.accounts); setSocialSettings({ merchant: value.merchant, profile: value.profile, influence: value.influence }); setCollaboration({ enabled: value.collaborationEnabled ?? false, types: value.collaborationTypes ?? ["探店", "UGC"], rate: value.collaborationRate ?? "", contact: value.collaborationContact ?? "" }); } socialSettingsHydrated.current = true; }); }, []);
+  useEffect(() => { if (socialSettingsHydrated.current) void socialSettingsStore.write({ accounts: socialAccounts, ...socialSettings, collaborationEnabled: collaboration.enabled, collaborationTypes: collaboration.types, collaborationRate: collaboration.rate, collaborationContact: collaboration.contact }); }, [socialAccounts, socialSettings, collaboration]);
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
   const [profileDraft, setProfileDraft] = useState({
@@ -813,6 +814,14 @@ export function MeSurface({
             <Text style={styles.socialAccountsTitle}>社媒账户</Text>
             <Text style={styles.socialAccountsSub}>管理你的外部社交平台。账号、链接和公开范围都由你控制。</Text>
             <CreatorInvitationCard />
+            <View style={styles.socialShareBox}>
+              <View style={styles.socialSettingsHead}><Text style={styles.socialSettingsTitle}>合作</Text><Text style={styles.socialSettingsHint}>{collaboration.enabled ? "已开放" : "未开放"}</Text></View>
+              <View style={styles.socialSettingRow}><View style={styles.socialAccountCopy}><Text style={styles.socialSettingName}>接受合作邀请</Text><Text style={styles.socialSettingDesc}>关闭后不影响普通账号使用</Text></View><Pressable accessibilityRole="switch" accessibilityState={{ checked: collaboration.enabled }} onPress={() => setCollaboration((v) => ({ ...v, enabled: !v.enabled }))} style={[styles.socialSwitch, collaboration.enabled ? styles.socialSwitchOn : null]}><View style={[styles.socialSwitchDot, collaboration.enabled ? styles.socialSwitchDotOn : null]} /></Pressable></View>
+              <Text style={styles.socialEditorLabel}>合作类型</Text>
+              <View style={styles.socialVisibilityRow}>{["探店", "UGC", "拍摄", "同行", "其他"].map((type) => <Pressable key={type} onPress={() => setCollaboration((v) => ({ ...v, types: v.types.includes(type) ? v.types.filter((x) => x !== type) : [...v.types, type] }))} style={[styles.socialVisibilityButton, collaboration.types.includes(type) ? styles.socialVisibilityButtonOn : null]}><Text style={[styles.socialVisibilityText, collaboration.types.includes(type) ? styles.socialVisibilityTextOn : null]}>{type}</Text></Pressable>)}</View>
+              <Text style={styles.socialEditorLabel}>报价（可选）</Text><TextInput placeholder="例如：500,000 VND / 次" style={styles.socialEditorInput} value={collaboration.rate} onChangeText={(rate) => setCollaboration((v) => ({ ...v, rate }))} />
+              <Text style={styles.socialEditorLabel}>合作联系方式</Text><TextInput placeholder="合作建立后开放" style={styles.socialEditorInput} value={collaboration.contact} onChangeText={(contact) => setCollaboration((v) => ({ ...v, contact }))} />
+            </View>
             <View style={styles.socialAccountList}>
             {socialAccounts.map((account) => (
               <Pressable key={account.key} onPress={() => setSocialEditor({ ...account })} style={styles.socialAccountRow}>
@@ -1752,14 +1761,16 @@ export function MeSurface({
               ].map(([icon, label, desc, route]) => (
                 <Pressable
                   key={label}
+                  disabled={!route}
+                  accessibilityState={{ disabled: !route }}
                   onPress={route ? () => openSubPage(route) : undefined}
-                  style={styles.bizTile}
+                  style={[styles.bizTile, !route ? { opacity: 0.55 } : null]}
                 >
                   <View style={styles.bizTileIcon}>
                     <Text style={styles.bizTileIconText}>{icon}</Text>
                   </View>
                   <Text style={styles.bizTileLabel}>{label}</Text>
-                  <Text style={styles.bizTileDesc}>{desc}</Text>
+                  <Text style={styles.bizTileDesc}>{route ? desc : `${desc} · 待接入`}</Text>
                 </Pressable>
               ))}
             </View>

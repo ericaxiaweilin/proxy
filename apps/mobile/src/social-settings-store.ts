@@ -2,7 +2,7 @@ import type { SecureStorageDriver } from "./secure-session";
 import type { SocialAccount } from "./surfaces/me-types";
 
 const KEY = "proxy.social-settings.v1";
-export type SocialSettingsRecord = { accounts: SocialAccount[]; merchant: boolean; profile: boolean; influence: boolean };
+export type SocialSettingsRecord = { accounts: SocialAccount[]; merchant: boolean; profile: boolean; influence: boolean; collaborationEnabled?: boolean; collaborationTypes?: string[]; collaborationRate?: string; collaborationContact?: string };
 
 export function createSocialSettingsStore(driver: SecureStorageDriver) {
   return {
