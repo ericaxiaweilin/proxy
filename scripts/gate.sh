@@ -57,47 +57,16 @@ gate_g2_tests() {
   set -o pipefail
   echo "=== G2: tests (api-go -count=1, mobile --run) ==="
   # The integration tests share a Postgres cluster with the live
-  # server. When the live server is up, it mutates the same tables
-  # the migrator / contribution / inbox tests depend on, and the
-  # tests flake. Kill any live server first, then re-spawn after
-  # the suite is done.
-  local server_pid
-  server_pid=$(lsof -i :4100 -t 2>/dev/null | head -1 || true)
-  local killed_server=0
-  if [ -n "$server_pid" ]; then
-    echo "  api-go test: stopping live server (pid $server_pid) to avoid DB contention..."
-    kill "$server_pid" 2>/dev/null || true
-    for _ in $(seq 1 10); do
-      if ! lsof -i :4100 -t >/dev/null 2>&1; then break; fi
-      sleep 1
-    done
-    killed_server=1
-  fi
+  # server. After the migrator absolute-count fix in commit 3f12725
+  # the tests are robust against a running live server, so we no
+  # longer need to kill it. This avoids a fragile kill+respawn cycle
+  # that was producing broken respawned servers (the new server
+  # could not establish its pgxpool connections under contention).
+  # If a future test starts flaking on the live server, the right
+  # fix is to make the test isolated (per-test schema, transactions,
+  # or DB cleanup), not to kill the live server from the gate.
   go -C apps/api-go test -count=1 -p 1 ./... || return $?
   echo "  api-go test: OK"
-  # Re-spawn the live server if we killed one. Use the same
-  # env-loading shape as the install/run docs.
-  if [ "$killed_server" = "1" ]; then
-    echo "  api-go test: re-spawning live server for g3 e2e..."
-    if [ -f ./.env ]; then
-      set -a; . ./.env; set +a
-    fi
-    # Spawn detached from the gate's process group so the gate
-    # can exit and the server keeps running. The nohup + & is
-    # inside the subshell; the subshell exits, but the go-run
-    # child is reparented to init and survives.
-    nohup go -C apps/api-go run ./cmd/api > /tmp/api-go-gate.log 2>&1 &
-    disown || true
-    for _ in $(seq 1 30); do
-      if curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4100/health/live 2>/dev/null | grep -q "200"; then
-        break
-      fi
-      sleep 1
-    done
-    if ! curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:4100/health/live 2>/dev/null | grep -q "200"; then
-      echo "  api-go test: WARN server did not come up in 30s after respawn (g3 may fail)"
-    fi
-  fi
   pnpm --filter @proxy/mobile test --run || return $?
   echo "  mobile test: OK"
   pnpm --filter @proxy/contracts test --run || return $?
@@ -153,6 +122,33 @@ gate_g4_drift() {
     return 1
   fi
   echo "  handler files: OK (all canonical files tracked)"
+  # R16.7 audit followup: 'can't hold the line' (总守不住) pattern.
+  # The bot's 931a755 bot-commit left native-app.tsx importing
+  # legal-doc-render.tsx and legal-doc-render.tsx importing
+  # legal-doc-parser.ts — all three of which are UNTRACKED in
+  # git. The app typechecks and tests pass on the developer's
+  # machine (because the files exist on disk), but a fresh
+  # clone, a CI checkout, or another agent's `git reset --hard`
+  # will break the build. The gate must catch this:
+  # any source file imported from a tracked file must itself
+  # be tracked.
+  echo "  untracked imports: checking no tracked file imports an untracked file..."
+  # Use the dedicated Python helper. bash subshells + arrays were
+  # too slow (each import spawned a subshell; variable scoping
+  # meant we couldn't accumulate leaks outside the subshell).
+  local untracked_files
+  untracked_files=$(git status --porcelain 2>/dev/null | awk '/^\?\?/ {print $2}')
+  local untracked_imports_str
+  untracked_imports_str=$(git ls-files apps/mobile/src apps/api-go 2>/dev/null \
+    | grep -E '\.(ts|tsx|go)$' \
+    | UNTRACKED_FILES="$untracked_files" \
+      python3 "$(dirname "$0")/check-untracked-imports.py")
+  if [ -n "$untracked_imports_str" ]; then
+    echo "  FAIL: tracked file imports an untracked file (would break fresh clone / CI / reset --hard):" >&2
+    echo "$untracked_imports_str" >&2
+    return 1
+  fi
+  echo "  untracked imports: OK (no tracked file imports an untracked file)"
   echo "  semantic fixtures: checking known hard-coded placeholders..."
   local bad_fixtures=()
   # R15.x: market.tsx used to render a fake SVG map with hard-coded

@@ -55,6 +55,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Proxy 使用相机拍摄并添加到你主动发起的需求或对话。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Proxy 使用麦克风进行语音输入，将你的语音转换为文字。</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
