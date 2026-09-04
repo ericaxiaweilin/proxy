@@ -12,15 +12,23 @@ import (
 // implementation is a follow-up; the migration 066 schema
 // provides the SQL surface).
 type MemoryRepository struct {
-	mu        sync.Mutex
-	personas  map[string]Persona
-	consents  map[string]LikenessConsent
+	mu       sync.Mutex
+	personas map[string]Persona
+	consents map[string]LikenessConsent
+	// seq orders consent inserts. LatestConsent must break GrantedAt
+	// ties by insertion order: two grants in the same clock tick have
+	// equal GrantedAt, and Go map iteration is random, so "max
+	// GrantedAt" alone returns either row — TestReconsentAfterRevoke
+	// then flakes under full-suite load. (FLAKE-CONSENT-001)
+	seq          uint64
+	consentOrder map[string]uint64
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		personas: map[string]Persona{},
-		consents: map[string]LikenessConsent{},
+		personas:     map[string]Persona{},
+		consents:     map[string]LikenessConsent{},
+		consentOrder: map[string]uint64{},
 	}
 }
 
@@ -67,6 +75,8 @@ func (r *MemoryRepository) GrantConsent(_ context.Context, c LikenessConsent) er
 		return nil
 	}
 	r.consents[c.ID] = c
+	r.seq++
+	r.consentOrder[c.ID] = r.seq
 	return nil
 }
 
@@ -93,7 +103,8 @@ func (r *MemoryRepository) LatestConsent(_ context.Context, personaID, subjectID
 	for _, c := range r.consents {
 		if c.PersonaID == personaID && c.SubjectID == subjectID && c.TermsVersion == termsVersion {
 			cc := c
-			if latest == nil || cc.GrantedAt.After(latest.GrantedAt) {
+			if latest == nil || cc.GrantedAt.After(latest.GrantedAt) ||
+				(cc.GrantedAt.Equal(latest.GrantedAt) && r.consentOrder[cc.ID] > r.consentOrder[latest.ID]) {
 				latest = &cc
 			}
 		}
