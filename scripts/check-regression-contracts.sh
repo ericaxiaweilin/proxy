@@ -50,6 +50,19 @@ pnpm --filter @proxy/mobile test --run src/social-settings-store.test.ts src/soc
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRoundTripUsesActorAsOwner" \
   "apps/api-go/internal/identity/account_preferences_test.go" || exit $?
+
+# UI-SCENE-MAP-001: scene catalog, nearby recommendations and visit timeline
+# must remain one server-backed pipeline. Never restore the mobile launch list.
+if grep -q 'const SCENES' apps/mobile/src/surfaces/reality-scene-map.tsx || grep -q '47 - visited' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [UI-SCENE-MAP-001]: hard-coded scene catalog/count returned" >&2
+  exit 1
+fi
+require_test "UI-SCENE-MAP-001" "./internal/realityscene" \
+  "TestScenePipelineRanksNearbyAndRecordsVisitTime" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "UI-SCENE-MAP-001" "./internal/api" \
+  "TestNearbyRealityScenesRequiresConsentAndUsesLocationRanking" \
+  "apps/api-go/internal/api/reality_scene_test.go" || exit $?
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRejectsAnonymousActorAndOversizedContact" \
   "apps/api-go/internal/identity/account_preferences_test.go" || exit $?

@@ -179,6 +179,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/media/variant/", s.mediaVariantFile)
 	mux.HandleFunc("/v1/feed", s.publicFeed)
 	mux.HandleFunc("/v1/reality-scenes", s.publicRealityScenes)
+	mux.HandleFunc("/v1/reality-scenes/nearby", s.nearbyRealityScenes)
 	// R16.9: public legal docs (Terms / Privacy) used by the signup
 	// consent gate. The handler serves the v1.1 Vietnam 2026-08-31
 	// drafts embedded in the binary (see legal.go).

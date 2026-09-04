@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 8 — 2026-09-04
+
+- Replaced the mobile Reality Scene launch catalog and fixed `47` count with a
+  PostgreSQL-backed catalog projection.
+- Added consent-gated current-location recommendations ranked by distance and
+  popularity, plus timestamped private visit history (`UI-SCENE-MAP-001`).
+
 ## Revision 7 — 2026-09-04
 
 - Preserved device-only settings during the first account-sync upgrade instead

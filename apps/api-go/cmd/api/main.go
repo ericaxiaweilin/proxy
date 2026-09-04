@@ -15,13 +15,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/activity"
+	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/api"
+	"github.com/proxy-app/proxy-api/internal/benefit"
 	"github.com/proxy-app/proxy-api/internal/bootenv"
 	"github.com/proxy-app/proxy-api/internal/business"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/compliance"
-	"github.com/proxy-app/proxy-api/internal/benefit"
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
@@ -30,19 +31,19 @@ import (
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/identity"
+	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
-	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/localnet"
+	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
-	"github.com/proxy-app/proxy-api/internal/aipersona"
-	"github.com/proxy-app/proxy-api/internal/jurisdiction"
-	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
+	"github.com/proxy-app/proxy-api/internal/policydecisions"
+	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -107,6 +108,7 @@ func main() {
 	safetyService := safety.New()
 	outcomeService := outcome.New()
 	sceneService := scene.New()
+	realitySceneService := realityscene.New()
 	marketplaceService := marketplace.New()
 	activityService := activity.New()
 	facetService := facet.New()
@@ -225,6 +227,7 @@ func main() {
 		// repository continues to serve (the smoke scripts rely on
 		// it for hermetic, no-Docker runs).
 		sceneService = scene.NewWithRepository(postgres.NewSceneRepository(pool))
+		realitySceneService = realityscene.NewWithRepository(postgres.NewRealitySceneRepository(pool))
 		marketplaceService = marketplace.NewWithRepository(postgres.NewMarketplaceRepository(pool))
 		activityService = activity.NewWithRepository(postgres.NewActivityRepository(pool))
 		facetService = facet.NewWithRepository(postgres.NewFacetRepository(pool))
@@ -259,6 +262,7 @@ func main() {
 	server.Safety = safetyService
 	server.Outcome = outcomeService
 	server.Scene = sceneService
+	server.RealityScene = realitySceneService
 	// R15.32.1.3: /v1/geocode/reverse talks to Nominatim. Wire a
 	// 4s-timeout client so a slow upstream doesn't hang the picker.
 	server.HTTPClient = &http.Client{Timeout: 4 * time.Second}

@@ -1,11 +1,17 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/proxy-app/proxy-api/internal/location"
+	"github.com/proxy-app/proxy-api/internal/realityscene"
 )
 
 func TestPublicRealityScenesContract(t *testing.T) {
@@ -31,6 +37,38 @@ func TestPublicRealityScenesContract(t *testing.T) {
 	}
 	if body.Scenes[0].ID == "" || body.Scenes[0].Latitude == 0 || body.Scenes[0].Longitude == 0 {
 		t.Fatalf("scene identity or coordinates missing: %#v", body.Scenes[0])
+	}
+}
+
+func TestNearbyRealityScenesRequiresConsentAndUsesLocationRanking(t *testing.T) {
+	repo := location.NewMemoryRepository(time.Now)
+	server := &Server{Authenticator: stubAuthenticator{}, LocationRepo: repo, RealityScene: realityscene.New(), RateLimit: NewRateLimiter(0, 100)}
+	request := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/v1/reality-scenes/nearby", bytes.NewBufferString(`{"latitude":21.0454,"longitude":105.8361,"radiusKm":5}`))
+		r.Header.Set("Authorization", "Bearer test")
+		w := httptest.NewRecorder()
+		server.Handler().ServeHTTP(w, r)
+		return w
+	}
+	if got := request(); got.Code != http.StatusForbidden {
+		t.Fatalf("without consent status=%d body=%s", got.Code, got.Body.String())
+	}
+	if _, err := repo.Grant(context.Background(), "user_001", location.KindPreciseGPS, 30*time.Minute, "", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got := request()
+	if got.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", got.Code, got.Body.String())
+	}
+	var body struct {
+		Scenes []realitySceneRecord `json:"scenes"`
+		Origin string               `json:"origin"`
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Scenes) == 0 || body.Origin != "current_location" || body.Scenes[0].DistanceMeters < 0 {
+		t.Fatalf("unexpected nearby response: %#v", body)
 	}
 }
 
