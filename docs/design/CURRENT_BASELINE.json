@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 12,
+  "baselineRevision": 13,
   "updatedAt": "2026-09-04",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -52,9 +52,9 @@
     },
     {
       "scope": "chat-lotus-aligned",
-      "version": "CHAT_ALIGNED_WITH_LOTUS_V0_1_DRAFT",
+      "version": "CHAT_ALIGNED_WITH_LOTUS_V0_1_MEDIA_R1",
       "file": "docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md",
-      "status": "DRAFT_RFC_AWAITING_REVIEW"
+      "status": "ACTIVE_COMPOSER_MEDIA_IMPLEMENTED_ADVANCED_LOTUS_PENDING"
     },
     {
       "scope": "market",

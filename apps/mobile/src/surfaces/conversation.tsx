@@ -2,10 +2,13 @@
 // 基于 Feed 的"聊一下"入口进入的会话界面。
 // 接入模型底座：SendMessage 后服务端调用 modelStack.Complete() 生成 AI 回复。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Dimensions, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import type { ConversationClient, ProtectionOverride } from "../conversation-client";
+import type { MediaClient, UploadableImage } from "../media-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
 import { color } from "../theme";
@@ -17,17 +20,20 @@ interface Message {
   time: string;
   isOwn: boolean;
   isAI?: boolean;
+  imageUri?: string;
   v1?: MessageV1;
 }
 
 export function ConversationSurface({
   author,
   conversationClient,
+  mediaClient,
   conversationId: initialConvId,
   onBack
 }: {
   author: string;
   conversationClient: ConversationClient;
+  mediaClient: MediaClient;
   conversationId?: string;
   onBack: () => void;
 }): React.JSX.Element {
@@ -41,6 +47,10 @@ export function ConversationSurface({
   const [ephemeral, setEphemeral] = useState(false);
   const [noForward, setNoForward] = useState(true);
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const [selectedImage, setSelectedImage] = useState<UploadableImage>();
+  const [imageMenuOpen, setImageMenuOpen] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
 
   // This surface lives inside AppShell's fixed-height body, where nested
@@ -104,6 +114,9 @@ export function ConversationSurface({
         body: String(row.body ?? (row.messageType === "IMAGE" ? "[图片]" : row.messageType === "VIDEO" ? "[视频]" : "")),
         time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
         isOwn: row.senderId === actorId,
+        ...(row.messageType === "IMAGE" && typeof row.mediaRef === "string"
+          ? { imageUri: `${conversationClient.baseUrl}/v1/media/thumb/${encodeURIComponent(row.mediaRef)}` }
+          : {}),
       })));
       setError(undefined);
     }).catch(() => {
@@ -228,6 +241,43 @@ export function ConversationSurface({
     }
   }
 
+  async function chooseImage(source: "CAMERA" | "LIBRARY"): Promise<void> {
+    setImageMenuOpen(false);
+    setError(undefined);
+    const permission = source === "CAMERA"
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setError(source === "CAMERA" ? "请允许 Proxy 使用相机" : "请允许 Proxy 读取照片");
+      return;
+    }
+    const result = source === "CAMERA"
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.85 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85, selectionLimit: 1 });
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (!asset) return;
+    setSelectedImage({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) });
+  }
+
+  async function sendImage(): Promise<void> {
+    if (!selectedImage || !convId || sending) return;
+    setSending(true);
+    setError(undefined);
+    setUploadProgress(0);
+    try {
+      const uploaded = await mediaClient.uploadImage(selectedImage, { onProgress: setUploadProgress });
+      await conversationClient.sendImageMessage(convId, uploaded.storageKey, draft);
+      setMessages((current) => [...current, { id:`image_${Date.now()}`, sender:"你", body:draft.trim(), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, imageUri:selectedImage.uri }]);
+      setDraft("");
+      setSelectedImage(undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "图片发送失败，请重试");
+    } finally {
+      setUploadProgress(undefined);
+      setSending(false);
+    }
+  }
+
   return (
     <SwipeBackShell onExit={onBack}>
       <View style={[styles.root, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
@@ -270,7 +320,8 @@ export function ConversationSurface({
           ) : (
             <View key={msg.id} style={[styles.messageBubble, msg.isOwn ? styles.messageOwn : msg.isAI ? styles.messageAI : styles.messageOther]}>
               {!msg.isOwn && <Text style={styles.messageSender}>{msg.sender}</Text>}
-              <Text style={[styles.messageBody, msg.isOwn && styles.messageBodyOwn]}>{msg.body}</Text>
+              {msg.imageUri ? <Image accessibilityLabel="聊天图片" resizeMode="cover" source={{ uri:msg.imageUri }} style={styles.messageImage} /> : null}
+              {msg.body.trim() ? <Text style={[styles.messageBody, msg.isOwn && styles.messageBodyOwn]}>{msg.body}</Text> : null}
               <Text style={[styles.messageTime, msg.isOwn && styles.messageTimeOwn]}>{msg.time}</Text>
             </View>
           )
@@ -290,8 +341,12 @@ export function ConversationSurface({
           <Text style={styles.hint}>🔒 端到端加密</Text>
         </View>
 
-        {/* Composer — 业务卡片快捷入口 (v1 proxy_object) */}
+        <View style={[styles.composerShell, { paddingBottom: keyboardInset > 0 ? 10 : Math.max(insets.bottom, 16) }]}>
+          {selectedImage ? <View style={styles.imagePreviewRow}><Image source={{uri:selectedImage.uri}} style={styles.imagePreview} /><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedImage.fileName ?? "已选择图片") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除图片" onPress={() => setSelectedImage(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
+          {imageMenuOpen ? <View style={styles.imageMenu}><Pressable onPress={() => void chooseImage("CAMERA")} style={styles.imageMenuBtn}><Text>拍照</Text></Pressable><Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.imageMenuBtn}><Text>从相册选择</Text></Pressable></View> : null}
+        {/* Composer — 图片 / 业务卡片 / 文本 */}
         <View style={styles.composer}>
+          <Pressable accessibilityLabel="添加图片" onPress={() => setImageMenuOpen((open) => !open)} disabled={sending || !convId} style={styles.imageBtn}><Text style={styles.imageBtnText}>＋</Text></Pressable>
           <Pressable onPress={() => void sendProxyObject()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
             <Text style={styles.cardBtnText}>活动</Text>
           </Pressable>
@@ -305,12 +360,13 @@ export function ConversationSurface({
             editable={!!convId && !sending}
           />
           <Pressable
-            disabled={!draft.trim() || sending || !convId}
-            onPress={() => void send()}
-            style={[styles.sendBtn, (!draft.trim() || sending || !convId) && styles.sendBtnDisabled]}
+            disabled={(!draft.trim() && !selectedImage) || sending || !convId}
+            onPress={() => void (selectedImage ? sendImage() : send())}
+            style={[styles.sendBtn, ((!draft.trim() && !selectedImage) || sending || !convId) && styles.sendBtnDisabled]}
           >
             <Text style={styles.sendBtnText}>{sending ? "..." : "发送"}</Text>
           </Pressable>
+        </View>
         </View>
       </View>
     </SwipeBackShell>
@@ -365,6 +421,7 @@ const styles = StyleSheet.create({
   messageBodyOwn: { color: color.white },
   messageTime: { color: color.muted, fontSize: 11, marginTop: 4, textAlign: "right" },
   messageTimeOwn: { color: "rgba(255,255,255,0.6)" },
+  messageImage: { borderRadius: 11, height: 180, marginBottom: 6, width: 220 },
 
   systemMsg: {
     alignSelf: "center",
@@ -382,16 +439,22 @@ const styles = StyleSheet.create({
   chipTextActive: { color: "#5822A4" },
   hint: { color: color.muted, fontSize: 11, marginLeft: "auto" },
 
+  composerShell: { backgroundColor: color.white, borderTopColor: color.line, borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 8 },
   composer: {
     alignItems: "center",
     backgroundColor: color.white,
-    borderTopColor: color.line,
-    borderTopWidth: 1,
     flexDirection: "row",
     gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10
+    paddingVertical: 4
   },
+  imageBtn: { alignItems:"center", backgroundColor:"#F4F1F6", borderRadius:14, height:40, justifyContent:"center", width:40 },
+  imageBtnText: { color:color.ink, fontSize:24, lineHeight:26 },
+  imagePreviewRow: { alignItems:"center", backgroundColor:"#F8F5FA", borderRadius:12, flexDirection:"row", gap:9, marginBottom:7, padding:7 },
+  imagePreview: { borderRadius:8, height:52, width:52 },
+  imagePreviewText: { color:color.ink, flex:1, fontSize:11 },
+  imageRemove: { color:color.muted, fontSize:24, paddingHorizontal:8 },
+  imageMenu: { flexDirection:"row", gap:8, marginBottom:7 },
+  imageMenuBtn: { backgroundColor:"#F4F1F6", borderColor:color.line, borderRadius:10, borderWidth:1, flex:1, padding:10 },
   composerInput: {
     backgroundColor: color.surface,
     borderColor: color.line,

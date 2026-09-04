@@ -32,6 +32,8 @@ export class ConversationClient {
 
   public constructor(private readonly input: ConversationClientOptions) {}
 
+  public get baseUrl(): string { return this.input.baseUrl; }
+
   public async startConversation(params: {
     originType: string;
     originId: string;

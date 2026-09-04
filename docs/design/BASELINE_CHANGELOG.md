@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 13 — 2026-09-04
+
+- Raised the conversation composer above the device bottom safe area and kept
+  keyboard overlap handling inside the fixed AppShell body.
+- Added camera/library selection, local preview, the existing resumable media
+  upload pipeline, IMAGE message send, and historical thumbnail rendering.
+- Added `UI-CHAT-001` to prevent regression to text-only/local-only image UI.
+
 ## Revision 12 — 2026-09-04
 
 - Promoted the prototype activity creation path into the active implementation

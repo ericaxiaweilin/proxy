@@ -208,4 +208,13 @@ require_test "MONEYFLOW-003" "./internal/platform/postgres" \
   "TestMarketplacePostgresJSONBRoundTripPreservesMoneyFlow" \
   "apps/api-go/internal/platform/postgres/marketplace_media_integration_test.go" || exit $?
 
+# UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
+# 假预览；输入区必须保留安全区布局。
+pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts
+if ! grep -q 'Math.max(insets.bottom, 16)' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [UI-CHAT-001]: conversation composer lost bottom safe-area spacing" >&2
+  exit 1
+fi
+echo "    UI-CHAT-001: PASS (image wire + composer safe area)"
+
 echo "  regression contracts: OK"
