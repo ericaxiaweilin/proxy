@@ -25,9 +25,10 @@ export type SocialVisibility = "仅自己" | "商家可见" | "公开展示";
 export type SocialAccount = { key: string; mark: string; dark?: boolean; name: string; handle: string; url: string; visibility: SocialVisibility };
 
 export const INITIAL_SOCIAL_ACCOUNTS: SocialAccount[] = [
-  { key: "tiktok", mark: "TT", dark: true, name: "TikTok", handle: "@huyen.life", url: "https://www.tiktok.com/@huyen.life", visibility: "商家可见" },
-  { key: "threads", mark: "◎", name: "Threads", handle: "@huyen.daily", url: "https://www.threads.net/@huyen.daily", visibility: "仅自己" },
-  { key: "facebook", mark: "f", name: "Facebook", handle: "Huyen Nguyen", url: "https://www.facebook.com/huyen.nguyen", visibility: "公开展示" },
+  { key: "tiktok", mark: "TT", dark: true, name: "TikTok", handle: "", url: "", visibility: "仅自己" },
+  { key: "zalo", mark: "Z", name: "Zalo", handle: "", url: "", visibility: "仅自己" },
+  { key: "instagram", mark: "IG", name: "Instagram", handle: "", url: "", visibility: "仅自己" },
+  { key: "linkedin", mark: "in", name: "LinkedIn", handle: "", url: "", visibility: "仅自己" },
   { key: "x", mark: "X", dark: true, name: "X", handle: "", url: "", visibility: "仅自己" }
 ];
 

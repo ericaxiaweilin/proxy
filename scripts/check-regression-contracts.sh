@@ -42,5 +42,6 @@ if ! grep -q 'UI-PROFILE-001' apps/mobile/src/surfaces/profile-tabs-model.test.t
 fi
 pnpm --filter @proxy/mobile test --run src/surfaces/profile-tabs-model.test.ts || exit $?
 echo "    UI-PROFILE-001/UI-PROFILE-002: PASS"
+if ! grep -q 'UI-SOCIAL-001' apps/mobile/src/social-settings-store.test.ts; then echo "  FAIL: UI-SOCIAL-001 missing" >&2; exit 1; fi
 
 echo "  regression contracts: OK"

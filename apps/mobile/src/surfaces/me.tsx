@@ -40,6 +40,7 @@ import type { SupplyClient } from "../supply-client";
 import { FacetHomeSurface } from "../facet/FacetHomeSurface";
 import { FacetClient } from "../facet-client";
 import { sessionAuthClient, localApiBaseUrl, nativeTransport } from "../native-clients";
+import { createSocialSettingsStore } from "../social-settings-store";
 
 // Extracted modules
 import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
@@ -52,6 +53,7 @@ import { styles } from "./me-styles";
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
 const profileStore = createProfileStore(nativeSecureStorageDriver);
+const socialSettingsStore = createSocialSettingsStore(nativeSecureStorageDriver);
 
 const PROFILE_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
 function nextProfileAvatarFile(): File {
@@ -166,12 +168,12 @@ const BUSINESS_ME: PersonaConfig = {
       title: "商家 · 我的",
       hint: "业务资产",
       rows: [
-        { icon: "◎", label: "Creator 经营", desc: "24 人 · 5 核心", grad: true, route: "trustedteam" },
-        { icon: "券", label: "券", desc: "4 张进行中 · 1 张今天到期", route: "vouchers" },
-        { icon: "↗", label: "活动导流", desc: "3 个档期 · 缺 4 位小美", route: "merchantcampaign" },
-        { icon: "▤", label: "线上店铺", desc: "8,426 关注 · 今日 1,284 访问", grad: true, route: "merchantstorefront" },
-        { icon: "₫", label: "销售中心", desc: "今日 12.6M · 新客 18", route: "outcomehistory" },
-        { icon: "✦", label: "经营", desc: "3 待办 · 5 草稿", route: "enterpriseops" }
+        { icon: "◎", label: "Creator 经营", desc: "功能预览 · 实时数据待接入", grad: true, route: "trustedteam" },
+        { icon: "券", label: "券", desc: "查看真实券状态", route: "vouchers" },
+        { icon: "↗", label: "活动导流", desc: "功能预览 · 实时数据待接入", route: "merchantcampaign" },
+        { icon: "▤", label: "线上店铺", desc: "功能预览 · 实时数据待接入", grad: true, route: "merchantstorefront" },
+        { icon: "₫", label: "销售中心", desc: "功能预览 · 实时数据待接入", route: "outcomehistory" },
+        { icon: "✦", label: "经营", desc: "功能预览 · 实时数据待接入", route: "enterpriseops" }
       ]
     }
   ]
@@ -333,6 +335,9 @@ export function MeSurface({
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
   const [socialEditor, setSocialEditor] = useState<SocialAccount>();
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
+  const socialSettingsHydrated = useRef(false);
+  useEffect(() => { void socialSettingsStore.read().then((value) => { if (value) { setSocialAccounts(value.accounts); setSocialSettings({ merchant: value.merchant, profile: value.profile, influence: value.influence }); } socialSettingsHydrated.current = true; }); }, []);
+  useEffect(() => { if (socialSettingsHydrated.current) void socialSettingsStore.write({ accounts: socialAccounts, ...socialSettings }); }, [socialAccounts, socialSettings]);
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
   const [profileDraft, setProfileDraft] = useState({
@@ -1760,7 +1765,7 @@ export function MeSurface({
             </View>
 
             <Text style={styles.customSectionTitle}>今天的 Offer</Text>
-            <Text style={styles.customSectionHint}>Server Truth</Text>
+            <Text style={styles.customSectionHint}>设计预览 · 非实时数据</Text>
             <View style={styles.offerCard}>
               <Text style={styles.offerTitle}>海鲜自助 · 工作日下午场</Text>
               <Text style={styles.offerMeta}>14:00–17:00 · 399k → 329k · 余 24 份</Text>
