@@ -170,4 +170,15 @@ require_test "MONEYFLOW-002" "./internal/activity" \
   "TestNormalizeActivityMoneyAndAIDefaults" \
   "apps/api-go/internal/activity/service_test.go" || exit $?
 
+# MONEYFLOW-003: PG JSONB round-trip 不能丢 MoneyFlow / PriceLabel /
+# aiStatus / aiActorKind / origin='TEST' 过滤。这是真 PostgreSQL
+# 集成 tripwire (apps/api-go/internal/platform/postgres/...) — in-memory
+# mock 不复现 JSONB 列序列化边缘问题。
+require_test "MONEYFLOW-003" "./internal/platform/postgres" \
+  "TestActivityPostgresJSONBRoundTripPreservesMoneyFlowAndAI" \
+  "apps/api-go/internal/platform/postgres/activity_facet_integration_test.go" || exit $?
+require_test "MONEYFLOW-003" "./internal/platform/postgres" \
+  "TestMarketplacePostgresJSONBRoundTripPreservesMoneyFlow" \
+  "apps/api-go/internal/platform/postgres/marketplace_media_integration_test.go" || exit $?
+
 echo "  regression contracts: OK"

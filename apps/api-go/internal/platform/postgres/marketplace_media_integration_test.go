@@ -172,6 +172,79 @@ func TestMarketplacePostgresLifecycle(t *testing.T) {
 	}
 }
 
+// TestMarketplacePostgresJSONBRoundTripPreservesMoneyFlow is the
+// R16.x tripwire for opportunity MoneyFlow + PriceLabel persistence.
+//
+// R16.x mandates that every Opportunity on the wire carries
+// MoneyFlow ∈ {EARN, PAY, FREE, TBD} + PriceLabel. The marketplace
+// service's normalizeOpportunityMoney() populates these in List() if
+// the stored payload is missing them, but a regression that drops
+// JSONB serialization of either field would still pass the in-memory
+// tests (which start with normalized values). This PG test Seeds a row
+// whose payload explicitly carries MoneyFlow=PAY + PriceLabel="你需支付"
+// and verifies that List() — which goes through PG JSONB decode —
+// preserves both. The PG adapter must not silently strip these fields
+// during JSONB round-trip.
+func TestMarketplacePostgresJSONBRoundTripPreservesMoneyFlow(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	run := time.Now().UnixNano()
+
+	id := "mkt_op_pg_r16x_" + itoa(run)
+	repo := NewMarketplaceRepository(pool)
+
+	if err := repo.Seed(ctx, []marketplace.Opportunity{{
+		ID:         id,
+		Title:      "代订位 · 受托委托",
+		ShortTitle: "代订位",
+		Theme:      "委托",
+		Date:       "周六",
+		Time:       "18:30",
+		Location:   "河内 · 西湖",
+		Price:      "500,000₫",
+		MoneyFlow:  "PAY",
+		PriceLabel: "你需支付",
+		Owner:      "Ken",
+		OwnerID:    "user_seed_ken_" + itoa(run),
+		OwnerType:  "CREATOR",
+		Match:      "85%",
+		Posted:     "1h",
+		Skills:     "中文 · 代订位",
+		Verified:   true,
+	}}); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+
+	got, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.MoneyFlow != "PAY" {
+		t.Fatalf("MoneyFlow round-trip: got %q, want PAY", got.MoneyFlow)
+	}
+	if got.PriceLabel != "你需支付" {
+		t.Fatalf("PriceLabel round-trip: got %q, want 你需支付", got.PriceLabel)
+	}
+	if got.Price != "500,000₫" {
+		t.Fatalf("Price round-trip: got %q", got.Price)
+	}
+
+	// List must surface the same fields.
+	listed, err := repo.List(ctx, "viewer_"+itoa(run))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for _, o := range listed {
+		if o.ID == id {
+			if o.MoneyFlow != "PAY" || o.PriceLabel != "你需支付" {
+				t.Fatalf("List round-trip lost MoneyFlow/PriceLabel: %+v", o)
+			}
+			return
+		}
+	}
+	t.Fatalf("seeded opportunity not visible in List")
+}
+
 // TestMediaReviewDecisionPostgresLifecycle pins the append-only review
 // decision log: Append + server-clock default (ReviewedAt COALESCE),
 // duplicate decision_id rejection, List filter + DESC order + limit

@@ -203,3 +203,117 @@ func TestFacetPostgresLifecycle(t *testing.T) {
 		t.Fatalf("restart lost facet objects: found %d of 2", count)
 	}
 }
+
+// TestActivityPostgresJSONBRoundTripPreservesMoneyFlowAndAI is the
+// R16.x tripwire for the opportunity/activity MoneyFlow + PriceLabel +
+// aiStatus + aiActorKind JSONB round-trip.
+//
+// Before R16.x the activity payload did not carry MoneyFlow / PriceLabel /
+// aiStatus / aiActorKind, so a List() against a pre-migration row was free
+// to omit them. R16.x made them mandatory on the wire (ActivitySchema +
+// MarketOpportunitySchema); a future migration that drops these columns
+// or a code change that fails to include them in MarshalJSON would
+// silently regress to "裸金额 + 裸 origin" — the very gap this commit
+// closed.
+//
+// The test Seeds an activity with the full R16.x metadata, calls List()
+// (which goes through payload->>'origin' <> 'TEST' filter plus JSON
+// unmarshal), and asserts each new field round-trips. The PG side
+// store JSONB; if a future change replaces the adapter with a column
+// per field this tripwire stays green because List() still JSON-decode
+// from the payload column. If someone reverts the payload column to a
+// hand-rolled SELECT with omitted fields, the assertions here fail loud.
+func TestActivityPostgresJSONBRoundTripPreservesMoneyFlowAndAI(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	run := time.Now().UnixNano()
+
+	id := "act_pg_r16x_" + itoa(run)
+	repo := NewActivityRepository(pool)
+	if err := repo.Seed(ctx, []activity.Activity{{
+		ID:             id,
+		Origin:         "PLATFORM",
+		Title:          "R16.x MoneyFlow Round-Trip",
+		Time:           "Sat 19:00",
+		People:         "2-4",
+		Price:          "0₫",
+		MoneyFlow:      "FREE",
+		PriceLabel:     "免费参加",
+		Consumption:    "按门店场次",
+		VenueIcon:      "☕",
+		VenueName:      "Proxy Lab",
+		RealitySceneID: "bonsaidon",
+		VenueSpend:     "90,000–140,000₫ / 人",
+		VenueType:      "CAFE",
+		VenueTypeLabel: "咖啡店",
+		Desc:           "round-trip desc",
+		Benefit:        "round-trip benefit",
+		Capacity:       4,
+		AIStatus:       "AI_GENERATED",
+		AIActorKind:    "PLATFORM_AI",
+		AIPersonaID:    "ai_001",
+		AIPersonaName:  "平台 AI 小美 · Round-Trip",
+		AIPersonaAvatar:"☕",
+	}}); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+
+	items, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found *activity.Activity
+	for i := range items {
+		if items[i].ID == id {
+			found = &items[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("seeded row not visible in List")
+	}
+	if found.Origin != "PLATFORM" {
+		t.Fatalf("Origin round-trip: got %q, want PLATFORM", found.Origin)
+	}
+	if found.MoneyFlow != "FREE" {
+		t.Fatalf("MoneyFlow round-trip: got %q, want FREE", found.MoneyFlow)
+	}
+	if found.PriceLabel != "免费参加" {
+		t.Fatalf("PriceLabel round-trip: got %q, want 免费参加", found.PriceLabel)
+	}
+	if found.AIStatus != "AI_GENERATED" {
+		t.Fatalf("AIStatus round-trip: got %q, want AI_GENERATED", found.AIStatus)
+	}
+	if found.AIActorKind != "PLATFORM_AI" {
+		t.Fatalf("AIActorKind round-trip: got %q, want PLATFORM_AI", found.AIActorKind)
+	}
+	if found.AIPersonaName != "平台 AI 小美 · Round-Trip" {
+		t.Fatalf("AIPersonaName round-trip: got %q", found.AIPersonaName)
+	}
+
+	// 2. A pre-existing TEST-origin row must NOT leak through List.
+	testID := "act_pg_r16x_test_" + itoa(run)
+	if err := repo.Seed(ctx, []activity.Activity{{
+		ID:         testID,
+		Origin:     "TEST",
+		Title:      "Hidden by List filter",
+		Time:       "Sun",
+		People:     "1",
+		Price:      "0₫",
+		MoneyFlow:  "FREE",
+		PriceLabel: "免费",
+		VenueName:  "lab",
+		Capacity:   1,
+	}}); err != nil {
+		t.Fatalf("Seed TEST row: %v", err)
+	}
+	items, err = repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List after TEST seed: %v", err)
+	}
+	for _, item := range items {
+		if item.ID == testID {
+			t.Fatalf("TEST-origin row leaked through List (R16.x filter regression)")
+		}
+	}
+}
