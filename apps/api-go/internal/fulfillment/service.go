@@ -1080,6 +1080,8 @@ func (s *Service) recordSatisfaction(ctx context.Context, e command.Envelope) co
 
 // ---------- RecordMaterialOrderChange ----------
 // Gate G：Material Change 必须产生新版本/amendment，不得静默覆盖。
+// LC-30：Material Change 强制重新 EvaluateBoundary；旧 PolicyDecision
+// 留在审计里，Order.PolicyDecisionID 更新为新 decision 的 id。
 
 type materialChangePayload struct {
 	Description string `json:"description"`
@@ -1103,6 +1105,36 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 	if order.Lifecycle != "CONFIRMED" && order.Lifecycle != "EXECUTING" {
 		return command.Rejected(e, "ORDER_NOT_AMENDABLE", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.not_amendable", map[string]any{"lifecycle": order.Lifecycle})
 	}
+	// R16.7-P1-C (LC-30): for a PLATFORM_PAY Order that
+	// already carries a policy decision, a Material Change
+	// forces a fresh evaluation. The new decision may reuse
+	// the existing id (TermsVersion unchanged) or be a new
+	// row (TermsVersion bumped between amendments); in both
+	// cases we record a new (order, decision) stamp at the
+	// current lifecycle so the audit log shows 'this order
+	// was last re-evaluated at amendment T under decision X'.
+	// DIRECT_SETTLEMENT Orders skip the re-evaluation: the
+	// platform never touches the funds, so the regulator
+	// does not need the audit log for amendments either.
+	var reEvaluatedDecisionID string
+	if order.Snapshot.SettlementMode == "PLATFORM_PAY" && s.policyDecisions != nil {
+		decision, evalErr := s.policyDecisions.Evaluate(ctx, order.RequesterID, policydecisions.CategoryUserPaidService)
+		if evalErr != nil {
+			return command.Rejected(e, "POLICY_REEVALUATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.policy_reevaluate_failed", map[string]any{"orderId": order.ID, "error": evalErr.Error()})
+		}
+		previous := order.PolicyDecisionID
+		order.PolicyDecisionID = decision.ID
+		reEvaluatedDecisionID = decision.ID
+		_ = previous // old id stays in policy.order_decisions as a history row
+	}
+	// Note: when s.policyDecisions is nil we intentionally do
+	// NOT block the amendment. The Order has already been paid
+	// for; rolling back the user's payment because the policy
+	// service is degraded is worse than letting the amendment
+	// through with a stale decision id. Operators see the
+	// missing-stamp anomaly in their audit queries
+	// (TestLC30MaterialChangePermissiveWhenGateUnconfigured
+	// pins this trade-off).
 	now := s.clock.Now().UTC()
 	amendment := Amendment{
 		AmendmentID: newID("amd_"),
@@ -1113,15 +1145,43 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 	order.Amendments = append(order.Amendments, amendment)
 	order.Version++
 	order.UpdatedAt = now
-	domainEvents := []event.DomainEvent{event.New("MaterialOrderChangeRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+	eventPayload := map[string]any{
 		"amendmentId": amendment.AmendmentID,
 		"description": p.Description,
 		"note":        "Material Change 产生新版本/amendment，不得静默覆盖",
-	})}
+	}
+	if reEvaluatedDecisionID != "" {
+		eventPayload["policyDecisionId"] = reEvaluatedDecisionID
+		eventPayload["note"] = eventPayload["note"].(string) + "；LC-30 已重新 EvaluateBoundary"
+	}
+	domainEvents := []event.DomainEvent{event.New("MaterialOrderChangeRecorded", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, eventPayload)}
 	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
 		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
 	}
-	return command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
+	// LC-30 stamp: record the (order, decision) link at the
+	// current lifecycle so a regulator can recover 'this
+	// order was last re-evaluated at amendment T'. The
+	// existing stamps (OFFERED, CONFIRMED, EXECUTING-1) are
+	// kept untouched — they are history, not state.
+	if s.policyDecisions != nil && reEvaluatedDecisionID != "" {
+		_ = s.policyDecisions.Stamp(ctx, policydecisions.OrderStamp{
+			OrderID:          order.ID,
+			DecisionID:       reEvaluatedDecisionID,
+			StampedAt:        now,
+			StampedLifecycle: order.Lifecycle,
+		})
+	}
+	r := command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
+	if reEvaluatedDecisionID != "" {
+		raw, _ := json.Marshal(map[string]any{
+			"orderId":          order.ID,
+			"lifecycle":        order.Lifecycle,
+			"amendmentId":      amendment.AmendmentID,
+			"policyDecisionId": reEvaluatedDecisionID,
+		})
+		r.OperationRef = string(raw)
+	}
+	return r
 }
 
 // ---------- helpers ----------

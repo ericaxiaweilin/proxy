@@ -555,3 +555,137 @@ func TestLC28ReusePolicyDecisionAcrossOrders(t *testing.T) {
 		t.Fatalf("second order should reuse decision id %q, got %q", decisionID1, order2.PolicyDecisionID)
 	}
 }
+
+// R16.7-P1-C (LC-30) regression suite.
+// A Material Change (RecordMaterialOrderChange) on a PLATFORM_PAY
+// Order must re-run EvaluateBoundary and update the Order's
+// stamped policy decision. The old decision row stays in
+// policy.order_decisions as a history stamp; the Order's
+// PolicyDecisionID is overwritten with the new one (which is
+// the same id if TermsVersion is unchanged — the dev server
+// keeps one version, so the test asserts on Stamp calls rather
+// than a different id).
+
+func TestLC30MaterialChangeReevaluatesPolicyDecisionForPlatformPay(t *testing.T) {
+	stub := newStubPolicyDecisions()
+	svc := New().WithPolicyDecisions(stub)
+	payload := offerPayload()
+	payload["settlementMode"] = "PLATFORM_PAY"
+	payload["paymentMethodLabel"] = "Proxy 钱包"
+	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create offer: %s %+v", r.Outcome, r.Error)
+	}
+	var view struct{ OrderID string `json:"orderId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %s", r2.Outcome)
+	}
+	order, _ := svc.repository.GetOrder(context.Background(), view.OrderID)
+	originalDecision := order.PolicyDecisionID
+	if originalDecision == "" {
+		t.Fatal("expected stamped decision before amendment")
+	}
+	// Now record a Material Change.
+	r3 := svc.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{"description": "地点改为河内西湖"}, view.OrderID))
+	if r3.Outcome != "ACCEPTED" {
+		t.Fatalf("material change: %s %+v", r3.Outcome, r3.Error)
+	}
+	// Re-read the Order; the policy decision id must still
+	// be set (re-evaluation ran). With a constant
+	// TermsVersion the id is the same as before; we assert
+	// that the Stamp was called an additional time (initial
+	// CONFIRMED stamp + amendment stamp = 2).
+	order, _ = svc.repository.GetOrder(context.Background(), view.OrderID)
+	if order.PolicyDecisionID == "" {
+		t.Fatal("expected policy decision after amendment")
+	}
+	stamps, _ := stub.StampsForOrder(context.Background(), view.OrderID)
+	if len(stamps) < 2 {
+		t.Fatalf("expected at least 2 stamps (CONFIRMED + amendment), got %d: %+v", len(stamps), stamps)
+	}
+	// The most recent stamp must point at the current
+	// decision id, regardless of whether it changed.
+	last := stamps[len(stamps)-1]
+	if last.DecisionID != order.PolicyDecisionID {
+		t.Fatalf("last stamp decision %q does not match order policy decision %q", last.DecisionID, order.PolicyDecisionID)
+	}
+}
+
+func TestLC30MaterialChangeSkipsForDirectSettlement(t *testing.T) {
+	// DIRECT_SETTLEMENT Orders never carry a policy decision;
+	// the re-evaluation branch must not be entered.
+	stub := newStubPolicyDecisions()
+	svc := New().WithPolicyDecisions(stub)
+	r := svc.Handle(envelopeFor("CreateOffer", offerPayload(), ""))
+	var view struct{ OrderID string `json:"orderId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %s", r2.Outcome)
+	}
+	stub.mu.Lock()
+	callsBefore := stub.evaluateCalls
+	stub.mu.Unlock()
+	r3 := svc.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{"description": "DIRECT change"}, view.OrderID))
+	if r3.Outcome != "ACCEPTED" {
+		t.Fatalf("material change: %s", r3.Outcome)
+	}
+	stub.mu.Lock()
+	callsAfter := stub.evaluateCalls
+	stub.mu.Unlock()
+	if callsAfter != callsBefore {
+		t.Fatalf("DIRECT_SETTLEMENT should not re-evaluate; evaluate calls %d -> %d", callsBefore, callsAfter)
+	}
+}
+
+func TestLC30MaterialChangePermissiveWhenGateUnconfigured(t *testing.T) {
+	// PLATFORM_PAY Order + nil policy service + Material
+	// Change: the amendment must still go through (the Order
+	// is already paid for; we cannot roll back the user's
+	// payment just because the policy service died). The
+	// existing PolicyDecisionID on the Order is preserved,
+	// and the audit log gets no new stamp. The trade-off is
+	// deliberate: blocking every amendment on a degraded
+	// policy service is worse than letting the amendment
+	// through with a stale decision id. Operators see this
+	// via the missing-stamp anomaly in their audit queries.
+	svc := New()
+	payload := offerPayload()
+	payload["settlementMode"] = "PLATFORM_PAY"
+	payload["paymentMethodLabel"] = "Proxy 钱包"
+	stub := newStubPolicyDecisions()
+	svc.WithPolicyDecisions(stub)
+	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("create offer: %s", r.Outcome)
+	}
+	var view struct{ OrderID string `json:"orderId"` }
+	_ = json.Unmarshal([]byte(r.OperationRef), &view)
+	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
+	if r2.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %s", r2.Outcome)
+	}
+	order, _ := svc.repository.GetOrder(context.Background(), view.OrderID)
+	decisionBefore := order.PolicyDecisionID
+	// Simulate the gate being unconfigured for the next call.
+	svc.WithPolicyDecisions(nil)
+	r3 := svc.Handle(envelopeFor("RecordMaterialOrderChange", map[string]any{"description": "test"}, view.OrderID))
+	if r3.Outcome != "ACCEPTED" {
+		t.Fatalf("amendment must be permissive when gate is unconfigured, got %s %+v", r3.Outcome, r3.Error)
+	}
+	order, _ = svc.repository.GetOrder(context.Background(), view.OrderID)
+	if order.PolicyDecisionID != decisionBefore {
+		t.Fatalf("decision id must be preserved when re-evaluation is skipped")
+	}
+	// The stub's Stamp count must not have grown (no
+	// additional audit row written by this amendment).
+	stampCount := 0
+	for _, s := range stub.stampsForOrder {
+		stampCount += len(s)
+	}
+	if stampCount != 1 {
+		t.Fatalf("expected 1 stamp (from the original Confirm), got %d", stampCount)
+	}
+}

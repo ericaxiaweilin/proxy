@@ -238,3 +238,71 @@ echo "  OK: second PLATFORM_PAY Order reused decision id $decision_id_2"
 
 echo ""
 echo "=== lc28-policy-decision-e2e: ALL CASES PASSED ==="
+
+echo ""
+echo "=== 6. Material Change re-evaluates policy decision (LC-30) ==="
+# Create + confirm a fresh PLATFORM_PAY Order for this test.
+R7=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
+  -d "$(envelope_create_offer e2e-${TS}-lc30 e2e-${TS}-lc30-abcdef $user_id PLATFORM_PAY "Proxy 钱包")" \
+  "$BASE/v1/commands/CreateOffer")
+order_id_lc30=$(echo "$R7" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+if d.get('outcome') != 'ACCEPTED':
+  print('', end=''); sys.stderr.write('create offer rejected: '+str(d.get('error',{}))); sys.exit(1)
+body = json.loads(d.get('operationRef') or '{}')
+print(body.get('orderId',''))")
+[ -n "$order_id_lc30" ] || { echo "FAIL: no order id from CreateOffer: $R7"; exit 1; }
+
+R8=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
+  -d "$(envelope_confirm e2e-${TS}-lc30-conf e2e-${TS}-lc30-conf-abcdef $user_id $order_id_lc30)" \
+  "$BASE/v1/commands/ConfirmCooperation")
+decision_before=$(echo "$R8" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+body = json.loads(d.get('operationRef') or '{}')
+print(body.get('policyDecisionId',''))")
+[ -n "$decision_before" ] || { echo "FAIL: confirm should stamp a decision: $R8"; exit 1; }
+echo "  OK: pre-amendment policyDecisionId=$decision_before"
+
+# Record a Material Change.
+envelope_amend() {
+  local command_id="$1"
+  local idempotency_key="$2"
+  local actor_id="$3"
+  local order_id="$4"
+  local description="$5"
+  cat <<EOF
+{
+  "commandType":"RecordMaterialOrderChange",
+  "commandVersion":1,
+  "commandId":"${command_id}",
+  "idempotencyKey":"${idempotency_key}",
+  "actor":{"type":"USER","id":"${actor_id}"},
+  "principal":{"type":"INDIVIDUAL","id":"${actor_id}"},
+  "target":{"type":"Order","id":"${order_id}"},
+  "authContext":{},
+  "purpose":"e2e_lc30",
+  "correlationId":"${command_id}",
+  "requestedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "payload":{"description":"${description}"}
+}
+EOF
+}
+R9=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $access_token" \
+  -d "$(envelope_amend e2e-${TS}-lc30-amd e2e-${TS}-lc30-amd-abcdef $user_id $order_id_lc30 "河内西湖 → 老城区")" \
+  "$BASE/v1/commands/RecordMaterialOrderChange")
+if [ "$(echo "$R9" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("outcome",""))')" != "ACCEPTED" ]; then
+  echo "FAIL: amendment must be ACCEPTED: $R9"
+  exit 1
+fi
+decision_after=$(echo "$R9" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+body = json.loads(d.get('operationRef') or '{}')
+print(body.get('policyDecisionId',''))")
+if [ -z "$decision_after" ]; then
+  echo "FAIL: amendment response must include a policyDecisionId (LC-30 re-eval): $R9"
+  exit 1
+fi
+echo "  OK: post-amendment policyDecisionId=$decision_after (re-evaluated)"
