@@ -4,6 +4,26 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 15 — 2026-09-04
+
+- Closed the client side of R16.x single-source-of-truth: the
+  `PublishDemand` publish() path no longer constructs a PriceLabel
+  locally, and `apps/mobile/src/surfaces/market.tsx` no longer
+  carries the `priceLabelForFlow` helper that mirrored
+  `opportunityPriceLabel`. `apps/mobile/src/marketplace-client.ts`
+  publish() now takes the new
+  `PublishMarketOpportunityInputSchema` from packages/contracts
+  (with `priceLabel: z.string().optional()`), parses the response
+  through the strict `MarketOpportunitySchema` so the wire-down
+  invariant ("no naked amount") still holds.
+- Added `MONEYFLOW-005` regression tripwire: client publish may
+  omit, blank, or send a wrong-flow PriceLabel; the server's
+  `normalizeOpportunityMoney` always derives the wire-down
+  PriceLabel from MoneyFlow. Combined with the MONEYFLOW-004
+  server-side fix in bdb1857, the R16.x PriceLabel contract is
+  now end-to-end server-authoritative: mobile does not maintain a
+  parallel mapping.
+
 ## Revision 14 — 2026-09-04
 
 - Replaced the active opportunity candidate workbench's hard-coded Xiaomei,

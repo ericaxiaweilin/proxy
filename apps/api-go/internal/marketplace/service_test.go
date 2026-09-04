@@ -399,6 +399,62 @@ func TestMarketPublishRejectsFreeWithNonZeroPrice(t *testing.T) {
 	}
 }
 
+// MONEYFLOW-005: client publish 可以不传 PriceLabel，server 仍下发
+// 正确的中文文案。这是 MONEYFLOW-004 的 client-side 承诺：wire 路径
+// 从 client 到 server 都不强制携带 PriceLabel。client 未来的 SDK 走
+// PublishMarketOpportunityInputSchema，PriceLabel 设为 optional；即使
+// 有人偷偷携错位或调试文案，server normalize 仍会推。
+//
+// 这个 tripwire 从 server 侧验证：四种 MoneyFlow × 三种 PriceLabel
+// input 状态（缺省 / 空白 / 错位），server response operationRef 里
+// 的 PriceLabel 都是 opportunityPriceLabel(MoneyFlow)。
+func TestMarketPublishOmitsClientPriceLabel(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	cases := []struct {
+		name        string
+		flow        string
+		price       string
+		clientLabel any // string / nil (缺省)
+		wantLabel   string
+	}{
+		{"EARN + client 不传 PriceLabel", "EARN", "1,200,000₫", nil, "完成后你可获得"},
+		{"EARN + client 传空字符串", "EARN", "1,200,000₫", "", "完成后你可获得"},
+		{"EARN + client 传错位文案", "EARN", "1,200,000₫", "你需支付", "完成后你可获得"},
+		{"PAY + client 不传 PriceLabel", "PAY", "500,000₫", nil, "你需支付"},
+		{"PAY + client 传空白", "PAY", "500,000₫", "   ", "你需支付"},
+		{"FREE + client 不传 PriceLabel", "FREE", "0₫", nil, "免费"},
+		{"TBD + client 不传 PriceLabel", "TBD", "", nil, "费用待确认"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			payload := map[string]any{
+				"title": "R16.x MoneyFlow wire tripwire", "theme": "城市", "date": "周六", "time": "19:00", "location": "河内", "skills": "中文",
+				"moneyFlow": c.flow, "price": c.price, "lens": []string{"BOOKED"},
+			}
+			if c.clientLabel != nil {
+				payload["priceLabel"] = c.clientLabel
+			}
+			out := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", payload))
+			if out.Outcome != "ACCEPTED" {
+				t.Fatalf("publish must succeed, got %+v", out)
+			}
+			var body struct {
+				Opportunity Opportunity `json:"opportunity"`
+			}
+			if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Opportunity.MoneyFlow != c.flow {
+				t.Fatalf("MoneyFlow = %q, want %q", body.Opportunity.MoneyFlow, c.flow)
+			}
+			if body.Opportunity.PriceLabel != c.wantLabel {
+				t.Fatalf("PriceLabel = %q, want %q (server must derive from MoneyFlow)", body.Opportunity.PriceLabel, c.wantLabel)
+			}
+		})
+	}
+}
+
 // ACT-CONTRACT-001: 旧行（lens 缺失/为空，模拟旧 payload）走 List 必须
 // 被兜底成非空，否则 contracts lens.min(1) 让整列 zod 炸。money/price 同理。
 func TestStaleOpportunityLensDefaultedOnList(t *testing.T) {

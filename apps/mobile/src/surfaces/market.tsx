@@ -949,26 +949,12 @@ function OpportunityDetail({
 // 框联动（FREE 可为 0， TBD 必须为空）。
 type PublishMoneyFlow = "EARN" | "PAY" | "FREE" | "TBD";
 
-// priceLabelForFlow 是接单者看卡片时的语义描述 — 与 server 端
-// opportunityPriceLabel() 一致。wire 上 MarketOpportunitySchema.PriceLabel
-// 字段取自这个映射；任何漂移都会被 server normalize 覆盖。
-function priceLabelForFlow(flow: PublishMoneyFlow): string {
-  switch (flow) {
-    case "FREE":
-      return "免费";
-    case "PAY":
-      return "你需支付";
-    case "TBD":
-      return "费用待确认";
-    default:
-      return "完成后你可获得";
-  }
-}
-
 // priceLabelForPublisher 是发布者 PublishDemand 页面上的语义描述。
-// 与 priceLabelForFlow 同样走 server 端 normalize，但措辞以“你”
-// 为发布者视角，“他” 为接单者。比如 EARN：发布者看到 "你付金额"，
-// 接单者看到 "完成后你可获得"。同一事实、两个视角。
+// server 端是 PriceLabel 唯一权威（opportunityPriceLabel() 接单者视角
+// “完成后你可获得 / 你需支付 / 免费 / 费用待确认”），client SDK
+// 不再本地镜像那份中文。publisher 视角的文案是 UI-only，作用是让
+// publisher 在 PublishDemand 看到 “你付金额，接单者完成后获得”
+// 而不是接单者视角的 “完成后你可获得”。
 function priceLabelForPublisher(flow: PublishMoneyFlow): string {
   switch (flow) {
     case "FREE":
@@ -1016,13 +1002,16 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
     setPublishing(true);
     setError(undefined);
     try {
+      // R16.x (MONEYFLOW-005): PriceLabel 是 server-authoritative，
+      // client 不再携带 priceLabel 到 wire。server normalize 推
+      // opportunityPriceLabel(MoneyFlow)，wire 返回后由
+      // MarketOpportunitySchema.parse 严格验证。
       const opportunity = await marketplace.publish({
         title: title.trim(), shortTitle: "同行", theme: "城市同行", date: "周六", time: time.trim(),
         location: location.trim(), price: price.trim(), skills: "中文 · 摄影 · 本地路线",
         lens: ["BOOKED", "NEARBY"], travel: 20,
-        moneyFlow,
-        priceLabel: priceLabelForFlow(moneyFlow)
-      } as MarketOpportunity);
+        moneyFlow
+      });
       onPublished(opportunity);
     } catch {
       setError("发布没有写入服务器，请检查连接后重试。");

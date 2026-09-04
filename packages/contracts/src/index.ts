@@ -597,6 +597,32 @@ export const PublishMarketOpportunityPayloadSchema = z.object({
 });
 export type PublishMarketOpportunityPayload = z.infer<typeof PublishMarketOpportunityPayloadSchema>;
 
+// PublishMarketOpportunityInputSchema：机会发布路径（client → server）
+// 的 wire 契约。跟 MarketOpportunitySchema 读模型不同：读模型是
+// server-authoritative 完整 row（含 id/owner/responses/posted/verified
+// 等 server-only 字段），发布输入只包含 publisher 能填的字段。
+//
+// R16.x (MONEYFLOW-004) 明确 PriceLabel 是 server-authoritative：client
+// 可以不传 / 传空 / 传任何值，server normalizeOpportunityMoney() 都
+// 会推 opportunityPriceLabel(MoneyFlow)。这里把 priceLabel 设为
+// optional 是为“防误传”提供 schema 级保证，client SDK
+// 不会再“必须“带中文文案。
+export const PublishMarketOpportunityInputSchema = z.object({
+  title: z.string().min(1),
+  shortTitle: z.string(),
+  theme: z.string(),
+  date: z.string(),
+  time: z.string(),
+  location: z.string().min(1),
+  price: z.string(),
+  moneyFlow: MarketOpportunityMoneyFlowSchema,
+  priceLabel: z.string().optional(),
+  skills: z.string(),
+  lens: z.array(z.enum(["NOW", "NEARBY", "BOOKED", "REMOTE"])).min(1),
+  travel: z.number().int().nullable().optional()
+});
+export type PublishMarketOpportunityInput = z.infer<typeof PublishMarketOpportunityInputSchema>;
+
 export const MarketApplicationSchema = z.object({
   applicationId: z.string().min(1),
   opportunityId: z.string().min(1),

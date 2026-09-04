@@ -232,6 +232,15 @@ require_test "MONEYFLOW-004" "./internal/marketplace" \
   "TestOpportunityNormalizeAlwaysOverwritesClientPriceLabel" \
   "apps/api-go/internal/marketplace/service_test.go" || exit $?
 
+# MONEYFLOW-005: client publish 可以不传 PriceLabel，server 仍下发
+# 正确中文文案。这是 MONEYFLOW-004 的 client-side 承诺：wire
+# PublishMarketOpportunityInputSchema  PriceLabel 设为 optional。
+# 四种 MoneyFlow × 三种 client PriceLabel input 状态（缺省 / 空白 /
+# 错位），server response 必须都推成 opportunityPriceLabel(MoneyFlow)。
+require_test "MONEYFLOW-005" "./internal/marketplace" \
+  "TestMarketPublishOmitsClientPriceLabel" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
 pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts

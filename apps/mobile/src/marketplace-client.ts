@@ -1,5 +1,5 @@
 import type { CommandResult } from "@proxy/contracts";
-import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema } from "@proxy/contracts";
+import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema, PublishMarketOpportunityInputSchema, type PublishMarketOpportunityInput } from "@proxy/contracts";
 import type { MarketApplication } from "@proxy/contracts";
 import type { MarketOpportunity } from "./market-fixtures";
 import type { TransportResponse } from "./auth-client";
@@ -40,15 +40,23 @@ export class MarketplaceClient {
     if (!parsed.success) throw new Error(`market opportunity list was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
     return parsed.data.opportunities as MarketOpportunity[];
   }
-  public async publish(opportunity: Omit<MarketOpportunity, "id" | "owner" | "ownerType" | "match" | "responses" | "posted" | "verified" | "signal" | "signalClass" | "countdown">): Promise<MarketOpportunity> {
-    // R16.x: 资金方向必填。客户端必须传 MoneyFlow + PriceLabel。
-    // 客户端 SDK 服务于 wire schema，这里交 zod 路径闸一下。
-    const candidate = { ...opportunity, owner: "", ownerType: "PERSON" as const, match: "", responses: 0, posted: "", verified: false, signal: "", signalClass: "", countdown: "" };
-    const parsed = MarketOpportunitySchema.safeParse(candidate);
+  public async publish(input: PublishMarketOpportunityInput): Promise<MarketOpportunity> {
+    // R16.x: MoneyFlow 是 wire 必填（client SDK 必填），PriceLabel 是
+    // server-authoritative —— client 可以不传 / 传空 / 传任何
+    // 值，server normalizeOpportunityMoney() 会推
+    // opportunityPriceLabel(MoneyFlow)。本路径在 wire 出去之前
+    // 不再要求 client 携带中文文案，防止 client 本地文案与 server
+    // opportunityPriceLabel 漂移。
+    //
+    // input 走 PublishMarketOpportunityInputSchema，拒 publisher
+    // 不能填的字段（id/owner/responses/posted/verified/signal/...）以及
+    // 不允许 client 强制 type-assert PriceLabel。Read 路径仍走
+    // MarketOpportunitySchema 严格 zod parse。
+    const parsed = PublishMarketOpportunityInputSchema.safeParse(input);
     if (!parsed.success) throw new Error(`published opportunity shape invalid: ${parsed.error.issues[0]?.message ?? "unknown"}`);
-    const body = this.body(await this.command("PublishMarketOpportunity", { type: "MarketOpportunity", id: "new" }, opportunity, false));
+    const body = this.body(await this.command("PublishMarketOpportunity", { type: "MarketOpportunity", id: "new" }, input, false));
     if (!body.opportunity || typeof body.opportunity !== "object") throw new Error("published opportunity was malformed");
-    return body.opportunity as MarketOpportunity;
+    return MarketOpportunitySchema.parse(body.opportunity) as MarketOpportunity;
   }
   public async apply(opportunityId: string, quote: string, scope: string): Promise<MarketApplication> {
     const body = this.body(await this.command("ApplyToMarketOpportunity", { type: "MarketOpportunity", id: opportunityId }, { opportunityId, quote, scope }, false));

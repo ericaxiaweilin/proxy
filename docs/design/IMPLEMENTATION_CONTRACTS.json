@@ -83,7 +83,7 @@
         "apps/api-go/internal/marketplace/service_test.go"
       ],
       "status": "PARTIAL",
-      "knownGap": "MoneyFlow 4-state + priceLabel render is wired. PublishDemand chip (publisherer view) and opportunity card priceLabel (applicant view) deliberately use first-person perspectives — priceLabelForFlow wires to MarketOpportunitySchema.PriceLabel (matches server normalizeOpportunityMoney); priceLabelForPublisher is a view-only helper. R15.x design contract updated to track the dual-perspective wording."
+      "knownGap": "MoneyFlow 4-state + priceLabel render is wired. PublishDemand chip (publisher view) uses priceLabelForPublisher (UI-only first-person wording); opportunity card priceLabel (applicant view) is server-derived from opportunityPriceLabel(MoneyFlow) — the mobile client no longer maintains a parallel priceLabelForFlow mapping (MONEYFLOW-005). The wire contract is server-authoritative end-to-end: server normalizeOpportunityMoney always overwrites any client PriceLabel (MONEYFLOW-004)."
     },
     {
       "scope": "activity",
