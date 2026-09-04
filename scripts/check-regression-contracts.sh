@@ -208,6 +208,13 @@ require_test "MONEYFLOW-003" "./internal/platform/postgres" \
   "TestMarketplacePostgresJSONBRoundTripPreservesMoneyFlow" \
   "apps/api-go/internal/platform/postgres/marketplace_media_integration_test.go" || exit $?
 
+# MONEYFLOW-004: PriceLabel 是 server-authoritative。client 传任何
+# PriceLabel（空 / 错位 / 调试占位）都必须被 server normalize 推
+# opportunityPriceLabel(MoneyFlow) 覆盖，防止 mobile 本地文案 drift。
+require_test "MONEYFLOW-004" "./internal/marketplace" \
+  "TestOpportunityNormalizeAlwaysOverwritesClientPriceLabel" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
 pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts

@@ -288,6 +288,14 @@ func normalizeOpportunityMoney(o *Opportunity) {
 	if len(o.Lens) == 0 {
 		o.Lens = []string{"BOOKED", "NEARBY"}
 	}
+
+	// R16.x: PriceLabel 是 server-authoritative 文案。client 可能传旧
+	// 版本地文案（"你需支付"、"完成后你可获得"），或调试时填了错位
+	// 文本，甚至为“避文案审查”贴”其它内容。无论客户端传什么，server
+	// normalize 都必须推 opportunityPriceLabel(MoneyFlow)，令 wire
+	// 下发的 PriceLabel 与 MoneyFlow 语义严格一致。这是 MONEYFLOW-004
+	// tripwire。
+	o.PriceLabel = opportunityPriceLabel(o.MoneyFlow)
 }
 
 func opportunityPriceLabel(flow string) string {

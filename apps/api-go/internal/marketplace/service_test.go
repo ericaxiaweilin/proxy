@@ -255,6 +255,40 @@ func TestOpportunityMoneyFlowNormalize(t *testing.T) {
 	}
 }
 
+// MONEYFLOW-004: PriceLabel 是 server-authoritative 文案。任何 client
+// 传过来的非空 PriceLabel（即使拼写不同、即使是空字符串、即使与
+// MoneyFlow 语义不匹配）都必须被 server normalize 推
+// opportunityPriceLabel(MoneyFlow) 覆盖。client 不能“跳“文案，
+// 不能在 mobile 本地化文案后不推到 server。
+//
+// 这是 MONEYFLOW-001+002+003 之上的另一道闸，确切地封住 R16.x 主题
+// 里唯一还剩下的“client override server 文案”这条路径。
+func TestOpportunityNormalizeAlwaysOverwritesClientPriceLabel(t *testing.T) {
+	cases := []struct {
+		name       string
+		inputFlow  string
+		inputPrice string
+		inputLabel string
+		wantLabel  string
+	}{
+		{"EARN + 错位文案（client 填 PAY 文案）", "EARN", "1,200,000₫", "你需支付", "完成后你可获得"},
+		{`FREE + client 填了` + "完成后你可获得" + `错位文案`, "FREE", "0₫", "完成后你可获得", "免费"},
+		{"PAY + client 填了 EARN 文案", "PAY", "500,000₫", "完成后你可获得", "你需支付"},
+		{"TBD + client 填了不相关文案", "TBD", "", "台宝", "费用待确认"},
+		{"EARN + client 填空字符串", "EARN", "1,200,000₫", "", "完成后你可获得"},
+		{"EARN + client 填空白", "EARN", "1,200,000₫", "   ", "完成后你可获得"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o := Opportunity{MoneyFlow: c.inputFlow, Price: c.inputPrice, PriceLabel: c.inputLabel}
+			normalizeOpportunityMoney(&o)
+			if o.PriceLabel != c.wantLabel {
+				t.Fatalf("PriceLabel = %q, want %q (server must always overwrite)", o.PriceLabel, c.wantLabel)
+			}
+		})
+	}
+}
+
 // R16.x: MONEYFLOW-003 — 真人 publish 机会、MoneyFlow 选 FREE 但 Price
 // 被填成非零 → 必须拒绝 (“免费任务不能填 500,000₫”)。这是避免“裸金
 // 额”混淆的最后一道闸。
