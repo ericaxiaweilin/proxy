@@ -1,4 +1,5 @@
 import type { CommandResult } from "@proxy/contracts";
+import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema } from "@proxy/contracts";
 import type { MarketOpportunity } from "./market-fixtures";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -32,10 +33,18 @@ export class MarketplaceClient {
       payload.userLng = userFix.lng;
     }
     const body = this.body(await this.command("ListMarketOpportunities", { type: "Market", id: "local" }, payload, true));
-    if (!Array.isArray(body.opportunities)) throw new Error("market opportunity list was malformed");
-    return body.opportunities as MarketOpportunity[];
+    // R16.x: wire schema 是权威。MoneyFlow / PriceLabel 是 wire 必填，
+    // 服务端 normalize 后必下发。本地 zod parse 关闭“裸金额”这条路径。
+    const parsed = ListMarketOpportunitiesPayloadSchema.safeParse(body);
+    if (!parsed.success) throw new Error(`market opportunity list was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+    return parsed.data.opportunities as MarketOpportunity[];
   }
   public async publish(opportunity: Omit<MarketOpportunity, "id" | "owner" | "ownerType" | "match" | "responses" | "posted" | "verified" | "signal" | "signalClass" | "countdown">): Promise<MarketOpportunity> {
+    // R16.x: 资金方向必填。客户端必须传 MoneyFlow + PriceLabel。
+    // 客户端 SDK 服务于 wire schema，这里交 zod 路径闸一下。
+    const candidate = { ...opportunity, owner: "", ownerType: "PERSON" as const, match: "", responses: 0, posted: "", verified: false, signal: "", signalClass: "", countdown: "" };
+    const parsed = MarketOpportunitySchema.safeParse(candidate);
+    if (!parsed.success) throw new Error(`published opportunity shape invalid: ${parsed.error.issues[0]?.message ?? "unknown"}`);
     const body = this.body(await this.command("PublishMarketOpportunity", { type: "MarketOpportunity", id: "new" }, opportunity, false));
     if (!body.opportunity || typeof body.opportunity !== "object") throw new Error("published opportunity was malformed");
     return body.opportunity as MarketOpportunity;

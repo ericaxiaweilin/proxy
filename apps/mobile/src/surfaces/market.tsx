@@ -735,21 +735,23 @@ function R4OpportunityCard({ opportunity, onOpen, onDismiss }: { opportunity: Ma
           <ProxyIcon color={color.violet} name={scenarioIconForOpportunity(opportunity)} size={14} />
         </View>
         <Text style={styles.r4Title}>{opportunity.title}</Text>
-        <Text style={styles.r4Budget}>{budget}</Text>
+        <View><Text style={styles.r4Budget}>{budget}</Text><Text style={styles.r4PriceLabel}>{opportunity.priceLabel ?? "完成后你可获得"}</Text></View>
       </View>
       <Text style={styles.r4Meta}>{opportunity.date} {opportunity.time} · {opportunity.location} · {opportunity.owner} {opportunity.verified ? "✓已验证" : ""}</Text>
       <View style={styles.r4PriceStrip}>
         <View style={styles.r4PriceCell}>
-          <Text style={styles.r4PriceLabel}>客户预算</Text>
-          <Text style={styles.r4PriceValue}>{budget}</Text>
+          <Text style={styles.r4PriceLabel}>{opportunity.priceLabel ?? "完成后你可获得"}</Text>
+          <Text style={styles.r4PriceValue}>{budget || "费用待确认"}</Text>
         </View>
-        <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
-          <Text style={styles.r4PriceLabel}>Proxy 公平区间</Text>
-          <Text style={styles.r4PriceValue}>{fair}</Text>
-        </View>
+        {opportunity.moneyFlow !== "TBD" && opportunity.moneyFlow !== "FREE" ? (
+          <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
+            <Text style={styles.r4PriceLabel}>Proxy 公平区间</Text>
+            <Text style={styles.r4PriceValue}>{fair}</Text>
+          </View>
+        ) : null}
         <View style={styles.r4PriceCell}>
-          <Text style={styles.r4PriceLabel}>你的类似记录</Text>
-          <Text style={styles.r4PriceValue}>{mine}</Text>
+          <Text style={styles.r4PriceLabel}>{opportunity.moneyFlow === "TBD" ? "双方面谈" : opportunity.moneyFlow === "FREE" ? "同好/社区" : "你的类似记录"}</Text>
+          <Text style={styles.r4PriceValue}>{opportunity.moneyFlow === "FREE" ? "0₫" : opportunity.moneyFlow === "TBD" ? "—" : mine}</Text>
         </View>
       </View>
       <View style={styles.r4Tags}>
@@ -820,16 +822,18 @@ function OpportunityDetail({
 
       <View style={styles.r4PriceStrip}>
         <View style={styles.r4PriceCell}>
-          <Text style={styles.r4PriceLabel}>客户预算</Text>
-          <Text style={styles.r4PriceValue}>{budget}</Text>
+          <Text style={styles.r4PriceLabel}>{opportunity.priceLabel ?? "完成后你可获得"}</Text>
+          <Text style={styles.r4PriceValue}>{budget || "费用待确认"}</Text>
         </View>
-        <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
-          <Text style={styles.r4PriceLabel}>Proxy 建议</Text>
-          <Text style={styles.r4PriceValue}>{fair}</Text>
-        </View>
+        {opportunity.moneyFlow !== "TBD" && opportunity.moneyFlow !== "FREE" ? (
+          <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
+            <Text style={styles.r4PriceLabel}>Proxy 建议区间</Text>
+            <Text style={styles.r4PriceValue}>{fair}</Text>
+          </View>
+        ) : null}
         <View style={styles.r4PriceCell}>
-          <Text style={styles.r4PriceLabel}>你的历史</Text>
-          <Text style={styles.r4PriceValue}>约 {budget}</Text>
+          <Text style={styles.r4PriceLabel}>{opportunity.moneyFlow === "TBD" ? "双方面谈" : opportunity.moneyFlow === "FREE" ? "同好/社区" : "你的历史"}</Text>
+          <Text style={styles.r4PriceValue}>{opportunity.moneyFlow === "FREE" ? "0₫" : opportunity.moneyFlow === "TBD" ? "—" : `约 ${budget}`}</Text>
         </View>
       </View>
 
@@ -910,24 +914,65 @@ function OpportunityDetail({
   );
 }
 
+// R16.x: 资金方向必须在发布 UI 上明确选 — 不能只填一个裸金额。EARN 是默认
+// （接单者赚），FREE / TBD / PAY 各占一个按钮，选了哪个按钮后 Price 输入
+// 框联动（FREE 可为 0， TBD 必须为空）。
+type PublishMoneyFlow = "EARN" | "PAY" | "FREE" | "TBD";
+
+// priceLabelForFlow 是 client 侧的语义映射 — 走 wire 上 MarketOpportunitySchema
+// 的 PriceLabel 字段。与 server 端 opportunityPriceLabel() 一致；任何漂移都会
+// 在 contracts test 被捕获。
+function priceLabelForFlow(flow: PublishMoneyFlow): string {
+  switch (flow) {
+    case "FREE":
+      return "免费";
+    case "PAY":
+      return "你需支付";
+    case "TBD":
+      return "费用待确认";
+    default:
+      return "完成后你可获得";
+  }
+}
+
+const PUBLISH_FLOW_OPTIONS: ReadonlyArray<{ id: PublishMoneyFlow; label: string; sub: string }> = [
+  { id: "EARN", label: "你付给接单者", sub: "完成后你付 · 接单者可获得" },
+  { id: "PAY", label: "接单者预付", sub: "受托代购/订位等委托场景" },
+  { id: "FREE", label: "免费任务", sub: "0₫ · 同好/社区" },
+  { id: "TBD", label: "费用待确认", sub: "双方面谈 · 不显示金额" }
+];
+
 function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: MarketplaceClient; onBack: () => void; onPublished: (opportunity: MarketOpportunity) => void }): React.JSX.Element {
   const [title, setTitle] = useState("周六城市同行 + 拍照");
   const [time, setTime] = useState("10:00–18:00");
   const [location, setLocation] = useState("河内 · 西湖 / 老城区");
   const [price, setPrice] = useState("2,000,000₫");
+  const [moneyFlow, setMoneyFlow] = useState<PublishMoneyFlow>("EARN");
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string>();
 
+  // 资金方向联动：TBD 强制清空 Price，FREE 强制填 0。
+  function onPickFlow(next: PublishMoneyFlow): void {
+    setMoneyFlow(next);
+    if (next === "TBD") setPrice("");
+    else if (next === "FREE") setPrice("0₫");
+  }
+
+  const priceRequired = moneyFlow === "EARN" || moneyFlow === "PAY";
+
   async function publish(): Promise<void> {
-    if (publishing || !title.trim() || !location.trim() || !price.trim()) return;
+    if (publishing || !title.trim() || !location.trim()) return;
+    if (priceRequired && !price.trim()) return;
     setPublishing(true);
     setError(undefined);
     try {
       const opportunity = await marketplace.publish({
         title: title.trim(), shortTitle: "同行", theme: "城市同行", date: "周六", time: time.trim(),
         location: location.trim(), price: price.trim(), skills: "中文 · 摄影 · 本地路线",
-        lens: ["BOOKED", "NEARBY"], travel: 20
-      });
+        lens: ["BOOKED", "NEARBY"], travel: 20,
+        moneyFlow,
+        priceLabel: priceLabelForFlow(moneyFlow)
+      } as MarketOpportunity);
       onPublished(opportunity);
     } catch {
       setError("发布没有写入服务器，请检查连接后重试。");
@@ -962,8 +1007,21 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
           </View>
         </View>
         <View style={[styles.r4PriceCellHot, { borderRadius: 11, marginTop: 8, padding: 10 }]}>
-          <Text style={styles.r4PriceLabel}>Proxy 建议预算</Text>
-          <TextInput onChangeText={setPrice} style={styles.publishPriceInput} value={price} />
+          <Text style={styles.r4PriceLabel}>资金方向</Text>
+          <View style={styles.publishFlowRow}>
+            {PUBLISH_FLOW_OPTIONS.map((opt) => (
+              <Pressable key={opt.id} onPress={() => onPickFlow(opt.id)} style={[styles.publishFlowChip, moneyFlow === opt.id && styles.publishFlowChipOn]}>
+                <Text style={[styles.publishFlowLabel, moneyFlow === opt.id && styles.publishFlowLabelOn]}>{opt.label}</Text>
+                <Text style={styles.publishFlowSub}>{opt.sub}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.r4PriceLabel}>{priceLabelForFlow(moneyFlow)} · {moneyFlow === "TBD" ? "金额由双方面谈确定" : moneyFlow === "FREE" ? "0₫ 免费" : "公开在卡片上"}</Text>
+          {priceRequired ? (
+            <TextInput onChangeText={setPrice} style={styles.publishPriceInput} value={price} placeholder={moneyFlow === "EARN" ? "例如 1,500,000₫" : "例如 500,000₫"} />
+          ) : (
+            <Text style={[styles.publishPriceInput, styles.publishPricePlaceholder]}>{moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"}</Text>
+          )}
           <Text style={styles.r4PriceLabel}>公平参考：1.8 – 2.4M₫ · 8h + 中文 + 摄影 + 本地熟悉度</Text>
         </View>
         <View style={styles.r4Match}>
@@ -1483,6 +1541,13 @@ const styles = StyleSheet.create({
   publishInput: { borderBottomColor: "rgba(255,255,255,0.35)", borderBottomWidth: 1, color: color.white, paddingVertical: 5 },
   publishFactInput: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 3, paddingVertical: 2 },
   publishPriceInput: { color: color.ink, fontSize: 14, fontWeight: "900", paddingVertical: 3 },
+  publishPricePlaceholder: { color: color.muted, fontStyle: "italic" },
+  publishFlowRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6, marginBottom: 6 },
+  publishFlowChip: { backgroundColor: color.surface, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, minWidth: 120 },
+  publishFlowChipOn: { backgroundColor: color.magenta },
+  publishFlowLabel: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  publishFlowLabelOn: { color: "#fff" },
+  publishFlowSub: { color: color.muted, fontSize: 11, marginTop: 1 },
   r4Title: { color: color.ink, flex: 1, fontSize: 12, fontWeight: "800", lineHeight: 17 },
   r4Budget: { color: color.ink, fontSize: 13, fontWeight: "900" },
   r4Meta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },

@@ -201,17 +201,41 @@ gate_g4_drift() {
   if ! grep -q 'from "react-native-maps"' apps/mobile/src/surfaces/market.tsx 2>/dev/null; then
     bad_fixtures+=("apps/mobile/src/surfaces/market.tsx MarketMap lost the react-native-maps import")
   fi
-  # R15.x+: activity defaultCatalog 不该出现 PLATFORM / MERCHANT / USER
-  # origin (那是硬编码 "假人假活动" 伪装成平台/商家/用户发起)。R15.x
-  # 原则：平台没有 mock 数据，所有占位都明确标 AI_PERSONA (合规) 或
-  # TEST (server 端 filter 掉)。回归拦：defaultCatalog 块内出现
-  # Origin: "PLATFORM" / "MERCHANT" / "USER" 任意一个都拒绝 commit。
-  if awk '/defaultCatalog/,/^}/' apps/api-go/internal/activity/service.go 2>/dev/null | grep -E 'Origin:[[:space:]]*"(PLATFORM|MERCHANT|USER)"' >/dev/null 2>&1; then
-    bad_fixtures+=("apps/api-go/internal/activity/service.go defaultCatalog has non-AI origin (PLATFORM/MERCHANT/USER) — must be AI_PERSONA or TEST")
+  # R16.x: activity defaultCatalog 的 5 条冷启动活动必须用 PLATFORM
+  # origin + aiStatus=AI_GENERATED + aiActorKind=PLATFORM_AI（AI 不能
+  # 作为 origin 主体，AI 是 PLATFORM 在“起草”阶段的助理）。AI_PERSONA
+  # origin 是 R15.x 遗留老式写法（让平台 AI 看似“主办方”），今起拒绝。
+  if awk '/defaultCatalog/,/^}/' apps/api-go/internal/activity/service.go 2>/dev/null | grep -E 'Origin:[[:space:]]*"AI_PERSONA"' >/dev/null 2>&1; then
+    bad_fixtures+=("apps/api-go/internal/activity/service.go defaultCatalog still uses Origin='AI_PERSONA' — R16.x requires PLATFORM origin + aiStatus=AI_GENERATED")
+  fi
+  if ! awk '/defaultCatalog/,/^}/' apps/api-go/internal/activity/service.go 2>/dev/null | grep -E 'Origin:[[:space:]]*"PLATFORM"' >/dev/null 2>&1; then
+    bad_fixtures+=("apps/api-go/internal/activity/service.go defaultCatalog must mark cold-start activities as Origin='PLATFORM' + aiStatus='AI_GENERATED'")
   fi
   # R15.x+: List 端点必须在 SQL 过滤掉 origin='TEST' 的 fixture 残留
   if ! grep -q "origin'.*'TEST'\|origin.*=.*'TEST'" apps/api-go/internal/platform/postgres/activity.go 2>/dev/null; then
     bad_fixtures+=("apps/api-go/internal/platform/postgres/activity.go List() must filter out origin='TEST' rows so PG fixture residue does not leak to client")
+  fi
+  # R16.x: Opportunity publish 必须验资金方向 (MoneyFlow 4 选 1 + Price 一致)。
+  if ! grep -q "normalizeOpportunityMoney" apps/api-go/internal/marketplace/service.go 2>/dev/null; then
+    bad_fixtures+=("apps/api-go/internal/marketplace/service.go must enforce MoneyFlow + PriceLabel via normalizeOpportunityMoney — bare Price is forbidden")
+  fi
+  # R16.x: ai boundary 包不允许删除。所有经济/参与动作必须走 aiboundary 闸。
+  if [ ! -f apps/api-go/internal/aiboundary/policy.go ]; then
+    bad_fixtures+=("apps/api-go/internal/aiboundary/policy.go missing — AI actor boundary package must exist")
+  fi
+  # aiboundary 包内的 Action 常量必须在 service 里被调用. PublishActivity
+  # 例外: R15.x/R16.x 不开放“用户/AI 发布活动”命令 (目录由 server
+  # 启动 seed), 但 aiboundary 包内的常量声明仍需保留以便未来入口接入
+  # 是受闸的.
+  for cmd in "PublishOpportunity" "ApplyOpportunity" "JoinActivity" "InterestActivity" "CheckinActivity" "CancelActivity" "NoShowActivity"; do
+    if ! grep -q "aiboundary\\.${cmd}\\b" apps/api-go/internal/activity/service.go apps/api-go/internal/marketplace/service.go 2>/dev/null; then
+      bad_fixtures+=("aiboundary.${cmd} must be invoked from the activity / marketplace service entry")
+    fi
+  done
+  # PublishActivity 常量必须在 aiboundary 包内声明（即便服务入口目前未
+  # 调用，以便未来“商家/平台发活动”入口接入时受闸）
+  if ! grep -q "PublishActivity\\b" apps/api-go/internal/aiboundary/policy.go 2>/dev/null; then
+    bad_fixtures+=("apps/api-go/internal/aiboundary/policy.go must declare PublishActivity Action constant")
   fi
   if [ ${#bad_fixtures[@]} -gt 0 ]; then
     echo "  FAIL: hard-coded map fixture regression detected:" >&2

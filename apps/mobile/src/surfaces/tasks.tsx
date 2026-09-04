@@ -44,17 +44,16 @@ const DONE: TaskRow[] = [
 // 活动目录来自服务端读模型（ListActivities；内容数据不在前端内嵌）。
 type ActivityFilter = "RECOMMENDED" | "CAFE" | "RESTAURANT" | "MINE";
 
+// ORIGIN_META：origin 徽标永远指"人"（平台 / 商家 / 用户 / TEST）。
+// AI 状态由 aiStatus + aiActorKind + aiPersona* 表达，不混入 origin
+// 枚举。origin = "PLATFORM" + aiStatus = "AI_GENERATED" + aiActorKind =
+// "PLATFORM_AI" 是冷启动合规写法；origin = "USER" + aiStatus =
+// "AI_ASSISTED" + aiActorKind = "USER_TWIN" 是用户分身起草；等等。
 const ORIGIN_META: Record<Activity["origin"], { label: string; bg: string; fg: string }> = {
   PLATFORM: { label: "Proxy 特别活动", bg: color.activityOriginPlatformBg, fg: color.activityOriginPlatformFg },
   MERCHANT: { label: "商家活动", bg: color.activityOriginMerchantBg, fg: color.activityOriginMerchantFg },
   // USER 是真人发起 — 走主题外的薄荷绿调 (同 AI 之前的设计)。
   USER: { label: "用户发起", bg: color.activityOriginUserBg, fg: color.activityOriginUserFg },
-  // R15.x+: AI 数字人发起的活动。蓝紫调 + "AI 数字人" 文案 (跟 X /
-  // Threads / 抖音 / 小红书的 "AI 生成" 标注一致)。同时 aiPersona 字段
-  // 会被单独的 AIBadge 子组件渲染 (头像 + 名字)。走主题 token
-  // activityOriginAIPersona/Bg+Fg 而非硬编码 — 以后换调不用跳进 1500 行
-  // 的 tasks.tsx 改样式。
-  AI_PERSONA: { label: "AI 数字人", bg: color.activityOriginAIPersonaBg, fg: color.activityOriginAIPersonaFg },
   // TEST 不会被发送到客户端 (server 端 List 过滤)，保留以防万一。
   TEST: { label: "测试", bg: "#F5F5F5", fg: "#9E9E9E" }
 };
@@ -323,9 +322,9 @@ export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: (
           <View style={[styles.originBadge, { backgroundColor: origin.bg }]}>
             <Text style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
           </View>
-          {item.origin === "AI_PERSONA" && item.aiPersonaName ? (
+          {item.aiStatus !== "NONE" && item.aiPersonaName ? (
             <Text style={styles.exampleAIPersona}>
-              {item.aiPersonaAvatar ?? "🤖"} {item.aiPersonaName} 发起
+              {item.aiPersonaAvatar ?? "🤖"} {item.aiPersonaName} · {item.aiStatus === "AI_GENERATED" ? "AI 生成，平台审核发布" : "AI 辅助"}
             </Text>
           ) : null}
           <Text style={styles.exampleName}>{item.title}</Text>
@@ -335,7 +334,7 @@ export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: (
         </View>
         <View style={styles.examplePrice}>
           <Text style={styles.examplePriceStrong}>{item.price}</Text>
-          <Text style={styles.examplePriceSmall}>活动价格</Text>
+          <Text style={styles.examplePriceSmall}>{item.priceLabel}</Text>
         </View>
       </View>
       <View style={styles.venue}>
@@ -402,15 +401,15 @@ export function ActivityDetail({
           </View>
           <View style={styles.detailPrice}>
             <Text style={styles.detailPriceStrong}>{item.price}</Text>
-            <Text style={styles.detailPriceSmall}>活动价格</Text>
+            <Text style={styles.detailPriceSmall}>{item.priceLabel}</Text>
           </View>
         </View>
-        {item.origin === "AI_PERSONA" && item.aiPersonaName ? (
+        {item.aiStatus !== "NONE" && item.aiPersonaName ? (
           <View style={styles.detailAIPersonaRow}>
             <Text style={styles.detailAIPersonaAvatar}>{item.aiPersonaAvatar ?? "🤖"}</Text>
             <View style={styles.detailAIPersonaTextCol}>
               <Text style={styles.detailAIPersonaName}>{item.aiPersonaName}</Text>
-              <Text style={styles.detailAIPersonaDisclaimer}>AI 数字人发起的活动 · 平台代表</Text>
+              <Text style={styles.detailAIPersonaDisclaimer}>{item.aiStatus === "AI_GENERATED" ? "AI 生成冷启动内容 · 由 Proxy 审核并作为发布方 · AI 不能报名或收款" : "AI 辅助整理 · 发布方承担责任"}</Text>
             </View>
           </View>
         ) : null}
@@ -522,7 +521,7 @@ export function ActivityDetail({
             </Pressable>
           </Gradient>
         </>
-      ) : item.origin === "USER" ? (
+      ) : item.origin === "USER" || (item.aiStatus !== "NONE" && item.aiActorKind === "USER_TWIN") ? (
         <Gradient from={color.magenta} to={color.violet} style={styles.ctaPrimary}>
           <Pressable style={styles.ctaPrimaryInner}>
             <Text style={styles.ctaPrimaryText}>查看参与者匹配</Text>
@@ -540,10 +539,13 @@ export function ActivityDetail({
           <Text style={styles.ctaLightText}>找人一起参加</Text>
         </Pressable>
       ) : null}
-      {item.origin === "AI_PERSONA" ? (
+      {item.aiStatus === "AI_GENERATED" || item.aiStatus === "AI_ASSISTED" ? (
         <Text style={styles.aiPersonaDisclaimerFooter}>
-          本活动由 AI 数字人 "{item.aiPersonaName ?? "小美"}" 发起，平台代表
-          对内容负责。如有不适可在详情页点击「向平台反馈」。
+          {item.aiStatus === "AI_GENERATED" && item.aiActorKind === "PLATFORM_AI"
+            ? `本活动由平台 AI 小美生成 · 由 Proxy 审核并作为发布方。AI 不能报名、不能收款。如不适请在详情页点“向平台反馈”。`
+            : item.aiStatus === "AI_GENERATED" && item.aiActorKind === "USER_TWIN"
+              ? `本活动由“${item.aiPersonaName ?? "用户分身"}”数字分身起草 · 真人为本人发布。如不适请在详情页点“向平台反馈”。`
+              : `本活动由 AI 助理协助起草 · “${item.aiPersonaName ?? "AI 助理"}”不是活动主办方，发布方本人承担责任。`}
         </Text>
       ) : null}
       {item.realitySceneId && onOpenRealityScene ? (

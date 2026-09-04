@@ -74,18 +74,21 @@ export const color = {
   homeIntentBorder: "#DDD6E3",
   homeIntentInputBg: "#FCFBFD",
   marketModeBg: "#F5F1F8",
-  // R15.x+ Activity 域 origin 调色板. tasks.tsx 的 ORIGIN_META
+  // R16.x+ Activity 域 origin 调色板. tasks.tsx 的 ORIGIN_META
   // 走这些 token, 不再硬编码 hex. 改色就改 theme, 不用进 1500
   // 行的 tasks.tsx 找. 名字按 *origin enum 值* 命 (PLATFORM/
-  // MERCHANT/USER/AI_PERSONA) 而非角色名, 跟后端 schema 一致.
+  // MERCHANT/USER) 而非角色名, 跟后端 schema 一致. AI 不再是
+  // origin 主体 — AI 状态由 aiStatus / aiActorKind 表达, 另一个
+  // 调色板 (aiActivityBadgeBg/Fg) 负责 AI 标注 badge.
   activityOriginPlatformBg: "#EEE6FF",
   activityOriginPlatformFg: "#5D32A4",
   activityOriginMerchantBg: "#F1FFD1",
   activityOriginMerchantFg: "#445C00",
   activityOriginUserBg: "#EAF8F4",
   activityOriginUserFg: "#176F60",
-  activityOriginAIPersonaBg: "#EEF0FF",
-  activityOriginAIPersonaFg: "#3949AB"
+  // AI 标注徽标调色板 (与 origin 调色板并列; 在 UI 里独立渲染).
+  aiActivityBadgeBg: "#EEF0FF",
+  aiActivityBadgeFg: "#3949AB"
 };
 
 export const gradient = {

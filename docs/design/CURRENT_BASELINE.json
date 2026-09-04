@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 8,
-  "updatedAt": "2026-08-29",
+  "baselineRevision": 9,
+  "updatedAt": "2026-09-04",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -55,6 +55,28 @@
       "version": "CHAT_ALIGNED_WITH_LOTUS_V0_1_DRAFT",
       "file": "docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md",
       "status": "DRAFT_RFC_AWAITING_REVIEW"
+    },
+    {
+      "scope": "market",
+      "version": "MARKET_OPPORTUNITY_FILTER_R7",
+      "file": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
+      "status": "ACTIVE_SCREEN_REFERENCE",
+      "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
+      "implementationStatus": "MONEYFLOW_R7_APPROVED_COPY_POLISH_PENDING"
+    },
+    {
+      "scope": "activity",
+      "version": "MARKET_OPPORTUNITY_FILTER_R7_ACTIVITY",
+      "file": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
+      "status": "ACTIVE_SCREEN_REFERENCE",
+      "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
+      "implementationStatus": "ATTENDANCE_AUTH_WIRED_ORGANIZER_DELEGATION_PENDING"
+    },
+    {
+      "scope": "my-tasks",
+      "version": "MY_MARKET_MODULES_V5",
+      "file": "docs/design/references/proxy_my_market_modules_v5.html",
+      "status": "FUNCTIONAL_REFERENCE_ONLY"
     }
   ],
   "legacy": [

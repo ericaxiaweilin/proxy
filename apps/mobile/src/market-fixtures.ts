@@ -16,11 +16,18 @@ export interface MarketExperience {
   place: string;
   duration: string;
   price: string;
+  moneyFlow?: "EARN";
+  priceLabel?: string;
   next: string;
   hosts: string[];
   photo: string;
   coord: [number, number];
 }
+
+// R16.x: wire 上 MarketOpportunitySchema 强制 MoneyFlow 4 选 1 +
+// PriceLabel 必填。mobile 端本地 MarketOpportunity 必须把这两个
+// 字段补齐，否则 zod parse 在 client SDK 处会失败。
+export type MarketOpportunityMoneyFlow = "EARN" | "PAY" | "FREE" | "TBD";
 
 export interface MarketHost {
   id: string;
@@ -43,6 +50,8 @@ export interface MarketOpportunity {
   time: string;
   location: string;
   price: string;
+  moneyFlow: MarketOpportunityMoneyFlow;
+  priceLabel: string;
   owner: string;
   ownerType: "BUSINESS" | "PERSON";
   match: string;
@@ -157,6 +166,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "14:00–18:00",
     location: "河内 · Hoàn Kiếm",
     price: "1,200,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Nova Trading",
     ownerType: "BUSINESS",
     match: "94%",
@@ -180,6 +191,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "15:00–20:00",
     location: "河内 · 西湖",
     price: "1,500,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Bonsaidon",
     ownerType: "BUSINESS",
     match: "91%",
@@ -203,6 +216,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "09:00–15:00",
     location: "北宁 · Yên Phong",
     price: "1,100,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Acme VN",
     ownerType: "BUSINESS",
     match: "89%",
@@ -226,6 +241,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "13:30–18:00",
     location: "河内 · 西湖 → 老城区",
     price: "950,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Chen",
     ownerType: "PERSON",
     match: "87%",
@@ -249,6 +266,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "18:30–21:00",
     location: "河内 · 西湖",
     price: "800,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Lanting Restaurant",
     ownerType: "BUSINESS",
     match: "84%",
@@ -272,6 +291,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "16:00–18:00",
     location: "河内 · Cầu Giấy",
     price: "650,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Retail Ops",
     ownerType: "BUSINESS",
     match: "82%",
@@ -295,6 +316,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "17:30–20:30",
     location: "河内 · 还剑",
     price: "850,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Mellow House",
     ownerType: "BUSINESS",
     match: "92%",
@@ -318,6 +341,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "20:00 前",
     location: "远程",
     price: "700,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Atlas Studio",
     ownerType: "BUSINESS",
     match: "93%",
@@ -340,6 +365,8 @@ export const MARKET_OPPORTUNITIES: MarketOpportunity[] = [
     time: "09:00–12:00",
     location: "远程",
     price: "900,000₫",
+    moneyFlow: "EARN" as const,
+    priceLabel: "完成后你可获得",
     owner: "Mori Labs",
     ownerType: "BUSINESS",
     match: "90%",

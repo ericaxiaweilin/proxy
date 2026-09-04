@@ -35,8 +35,9 @@ func (r *ActivityRepository) Seed(ctx context.Context, activities []activity.Act
 func (r *ActivityRepository) List(ctx context.Context) ([]activity.Activity, error) {
 	// R15.x+: 过滤 origin='TEST'。TEST 用途是测试 fixture 写入
 	// (如 activity_facet_integration_test.go 的 act_pg_* 'Lifecycle Pin')。
-	// 这些不应该被 ListActivities 返回给客户端。AI_PERSONA / PLATFORM /
-	// MERCHANT / USER 都正常返回。
+	// 这些不应该被 ListActivities 返回给客户端。AI 状态 (aiStatus / aiActorKind)
+	// 是 Activity 内部的元信息，正常返回；AI 不能作为 origin 出现。
+	// PLATFORM / MERCHANT / USER / TEST 都按上面规则走。
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT payload, interested_count, joined_count, capacity FROM activity.activities WHERE COALESCE(payload->>'origin', '') <> 'TEST' ORDER BY created_at`)
 	if err != nil {
 		return nil, err

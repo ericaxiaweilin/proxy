@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 9 — 2026-09-04
+
+- Anchored the market/tasks/activity UI work that was previously scopeless:
+  `market` + `activity` are now ACTIVE_SCREEN_REFERENCE under
+  `Proxy_Market_Opportunity_Filter_R7.html` ("Opportunity / Activity R2"),
+  `my-tasks` is FUNCTIONAL_REFERENCE_ONLY under `proxy_my_market_modules_v5.html`.
+- Added `market` + `activity` implementation contracts (PARTIAL): moneyFlow
+  4-state + priceLabel rendering wired; known gaps are EARN copy unification
+  and organizer-delegated attendance marking.
+- Security hardening that touches baseline-sensitive surfaces: facet writes
+  require session + server-stamped UpdatedBy + rate limiting (FACET-AUTH-001),
+  attendance verifies participation (ACT-ATTEND-001), market dismiss enters the
+  AI boundary gate (AIBOUND-001). No visual contract changed by these.
+
 ## Revision 8 — 2026-09-04
 
 - Replaced the mobile Reality Scene launch catalog and fixed `47` count with a

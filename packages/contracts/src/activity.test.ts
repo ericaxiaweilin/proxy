@@ -19,6 +19,8 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
           time: "Sat 19:00",
           people: "2-4",
           price: "¥88",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费",
           consumption: "",
           venueIcon: "",
           venueName: "Proxy Lab",
@@ -50,6 +52,8 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
           time: "周日 15:00–17:00",
           people: "6 / 10 人",
           price: "0₫",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费参加",
           consumption: "各自消费",
           venueIcon: "☕",
           venueName: "木光咖啡 · 还剑郡",
@@ -80,6 +84,8 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
           time: "",
           people: "",
           price: "",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费",
           consumption: "",
           venueIcon: "",
           venueName: "",
@@ -99,19 +105,21 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts AI_PERSONA origin with aiPersona{Id,Name,Avatar} (R15.x compliance)", () => {
-    // R15.x+: AI 数字人发起的活动必须带 aiPersona 三个字段，客户端用
-    // 这三字段渲染 "AI 数字人" 徽标 + 头像 + 名字 (跟 X / Threads /
-    // 抖音 / 小红书的 "AI 生成" 标注一致)。
+  it("accepts PLATFORM origin with aiStatus=AI_GENERATED + aiActorKind=PLATFORM_AI (R16.x cold-start)", () => {
+    // R16.x: AI 不能作为 origin 主体。冷启动活动由 Proxy 平台发布，AI
+    // 助理在“起草”阶段是 PLATFORM_AI。UI 端同时读取 origin 徽标
+    // (PLATFORM) + aiStatus (AI_GENERATED) + aiActorKind + aiPersona*。
     const payload = {
       activities: [
         {
           activityId: "proxy_coffee_weekend",
-          origin: "AI_PERSONA" as const,
+          origin: "PLATFORM" as const,
           title: "Proxy 周末咖啡企划",
           time: "本周六至周日",
           people: "特别企划",
           price: "0₫",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费参加",
           consumption: "按门店场次",
           venueIcon: "☕",
           venueName: "木光咖啡 · 还剑郡",
@@ -125,8 +133,10 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
           joined: 18,
           capacity: 24,
           shares: 12,
+          aiStatus: "AI_GENERATED" as const,
+          aiActorKind: "PLATFORM_AI" as const,
           aiPersonaId: "ai_001",
-          aiPersonaName: "小美 · 周末企划",
+          aiPersonaName: "平台 AI 小美 · 周末企划",
           aiPersonaAvatar: "☕"
         }
       ]
@@ -134,8 +144,10 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
     const result = ListActivitiesPayloadSchema.safeParse(payload);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.activities[0].origin).toBe("AI_PERSONA");
-      expect(result.data.activities[0].aiPersonaName).toBe("小美 · 周末企划");
+      expect(result.data.activities[0].origin).toBe("PLATFORM");
+      expect(result.data.activities[0].aiStatus).toBe("AI_GENERATED");
+      expect(result.data.activities[0].aiActorKind).toBe("PLATFORM_AI");
+      expect(result.data.activities[0].aiPersonaName).toBe("平台 AI 小美 · 周末企划");
     }
   });
 
@@ -151,6 +163,8 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
           time: "Sat 19:00",
           people: "2-4",
           price: "¥88",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费",
           consumption: "",
           venueIcon: "",
           venueName: "Proxy Lab",
@@ -171,16 +185,18 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects an unknown origin (e.g. typo 'AI_PEROSNA')", () => {
+  it("rejects an unknown origin (e.g. typo 'PLATFROM' / 'AI_PEROSNA')", () => {
     const payload = {
       activities: [
         {
           activityId: "x",
-          origin: "AI_PEROSNA" as unknown as "PLATFORM", // intentional typo
+          origin: "AI_PEROSNA" as unknown as "PLATFORM", // R16.x 不再允许 AI_PERSONA；遗留 typo 同样拒绝
           title: "x",
           time: "",
           people: "",
           price: "",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费",
           consumption: "",
           venueIcon: "",
           venueName: "",

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/aiboundary"
 )
 
 // Service owns the P0 opportunity read model and its user actions. Mobile may
@@ -56,6 +57,18 @@ type Opportunity struct {
 	Time        string   `json:"time"`
 	Location    string   `json:"location"`
 	Price       string   `json:"price"`
+	// MoneyFlow 是"看钱方向" — 报价这一栏究竟在表达什么：
+	//   EARN     — 接单者完成任务后可获得（默认，机会的主流形态）
+	//   PAY      — 接单者要预先支付（不常见；通常用于代购/订位等委托）
+	//   FREE     — 0₫ 免费任务（社区/试玩/同好搭子）
+	//   TBD      — 费用待确认（双方面谈，公开不显示金额）
+	// Server 端 normalizeOpportunityMoney() 会根据 Price 是否为空 /
+	// 是否为 "0₫" 推断 MoneyFlow = FREE，并把 TBD 留给显式
+	// MoneyFlow = "TBD" 的发布方。PriceLabel 是给移动端的"语义副本"
+	// （"完成后你可获得" / "你需支付" / "免费" / "费用待确认"），由
+	// server 强制派生，不允许客户端随意传入。
+	MoneyFlow   string   `json:"moneyFlow"`
+	PriceLabel  string   `json:"priceLabel"`
 	Owner       string   `json:"owner"`
 	OwnerID     string   `json:"-"`
 	OwnerType   string   `json:"ownerType"`
@@ -114,10 +127,10 @@ func (s *Service) SeedDefaults() {
 	bacNinhLat, bacNinhLng := 21.1600, 105.9600
 	hkOldQuartersLat, hkOldQuartersLng := 21.0338, 105.8500
 	_ = s.repository.Seed(context.Background(), []Opportunity{
-		{ID: "biz_negotiation", Title: "商务谈判陪同 · 中英越沟通", ShortTitle: "谈判", Theme: "商务谈判", Date: "今天", Time: "14:00–18:00", Location: "河内 · Hoàn Kiếm", Price: "1,200,000₫", Owner: "Nova Trading", OwnerID: "seed_nova", OwnerType: "BUSINESS", Match: "94%", Responses: 6, Posted: "12 分钟前", Skills: "中文 · 英语 · 商务沟通", Verified: true, Lens: []string{"NOW", "NEARBY"}, Travel: &travel18, Lat: &hkLat, Lng: &hkLng, TravelSource: "seeded", Signal: "急需", SignalClass: "hot", Countdown: "42m"},
-		{ID: "event_photo", Title: "品牌活动摄影 / 短视频", ShortTitle: "摄影", Theme: "摄影", Date: "周六", Time: "15:00–20:00", Location: "河内 · 西湖", Price: "1,500,000₫", Owner: "Bonsaidon", OwnerID: "seed_bonsaidon", OwnerType: "BUSINESS", Match: "91%", Responses: 9, Posted: "25 分钟前", Skills: "摄影 · 基础剪辑 · 活动经验", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel24, Lat: &westLakeLat, Lng: &westLakeLng, TravelSource: "seeded", Signal: "热门", Countdown: "3天"},
-		{ID: "supplier_visit", Title: "供应商拜访 · 中文陪同", ShortTitle: "陪同", Theme: "商务陪同", Date: "明天", Time: "09:00–15:00", Location: "北宁 · Yên Phong", Price: "1,100,000₫", Owner: "Acme VN", OwnerID: "seed_acme", OwnerType: "BUSINESS", Match: "89%", Responses: 3, Posted: "42 分钟前", Skills: "中文 · 制造业 · 会议记录", Verified: true, Lens: []string{"BOOKED"}, Travel: &travel52, Lat: &bacNinhLat, Lng: &bacNinhLng, TravelSource: "seeded", Signal: "新发布", Countdown: "明天"},
-		{ID: "city_companion", Title: "河内半日城市同行 / 拍照", ShortTitle: "同行", Theme: "城市同行", Date: "周日", Time: "13:30–18:00", Location: "河内 · 西湖 → 老城区", Price: "950,000₫", Owner: "Chen", OwnerID: "seed_chen", OwnerType: "PERSON", Match: "87%", Responses: 11, Posted: "1 小时前", Skills: "中文 · 路线 · 轻摄影", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel20, Lat: &hkOldQuartersLat, Lng: &hkOldQuartersLng, TravelSource: "seeded", Signal: "高响应", Countdown: "周日"},
+		{ID: "biz_negotiation", Title: "商务谈判陪同 · 中英越沟通", ShortTitle: "谈判", Theme: "商务谈判", Date: "今天", Time: "14:00–18:00", Location: "河内 · Hoàn Kiếm", Price: "1,200,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Nova Trading", OwnerID: "seed_nova", OwnerType: "BUSINESS", Match: "94%", Responses: 6, Posted: "12 分钟前", Skills: "中文 · 英语 · 商务沟通", Verified: true, Lens: []string{"NOW", "NEARBY"}, Travel: &travel18, Lat: &hkLat, Lng: &hkLng, TravelSource: "seeded", Signal: "急需", SignalClass: "hot", Countdown: "42m"},
+		{ID: "event_photo", Title: "品牌活动摄影 / 短视频", ShortTitle: "摄影", Theme: "摄影", Date: "周六", Time: "15:00–20:00", Location: "河内 · 西湖", Price: "1,500,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Bonsaidon", OwnerID: "seed_bonsaidon", OwnerType: "BUSINESS", Match: "91%", Responses: 9, Posted: "25 分钟前", Skills: "摄影 · 基础剪辑 · 活动经验", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel24, Lat: &westLakeLat, Lng: &westLakeLng, TravelSource: "seeded", Signal: "热门", Countdown: "3天"},
+		{ID: "supplier_visit", Title: "供应商拜访 · 中文陪同", ShortTitle: "陪同", Theme: "商务陪同", Date: "明天", Time: "09:00–15:00", Location: "北宁 · Yên Phong", Price: "1,100,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Acme VN", OwnerID: "seed_acme", OwnerType: "BUSINESS", Match: "89%", Responses: 3, Posted: "42 分钟前", Skills: "中文 · 制造业 · 会议记录", Verified: true, Lens: []string{"BOOKED"}, Travel: &travel52, Lat: &bacNinhLat, Lng: &bacNinhLng, TravelSource: "seeded", Signal: "新发布", Countdown: "明天"},
+		{ID: "city_companion", Title: "河内半日城市同行 / 拍照", ShortTitle: "同行", Theme: "城市同行", Date: "周日", Time: "13:30–18:00", Location: "河内 · 西湖 → 老城区", Price: "950,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Chen", OwnerID: "seed_chen", OwnerType: "PERSON", Match: "87%", Responses: 11, Posted: "1 小时前", Skills: "中文 · 路线 · 轻摄影", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel20, Lat: &hkOldQuartersLat, Lng: &hkOldQuartersLng, TravelSource: "seeded", Signal: "高响应", Countdown: "周日"},
 	})
 }
 
@@ -161,11 +174,32 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 				items[i].TravelSource = "user_distance"
 			}
 		}
+		for i := range items { normalizeOpportunityMoney(&items[i]) }
 		return payload(e, "Market", "local", "READY", map[string]any{"opportunities": items})
 	case "PublishMarketOpportunity":
+		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type,e.Principal.Type),aiboundary.PublishOpportunity) { return rejected(e,"AI_ACTION_FORBIDDEN","ai.action_forbidden") }
+		// AIBOUND-001: 与 activity 对齐，写必须 USER 主体（dispatch 层已按
+		// session 回填 Actor，这里是纵深，避免直接调 service 绕过）。
+		if e.Actor.Type != "USER" || e.Actor.ID == "" { return command.Rejected(e,"MARKET_ACTOR_REQUIRED","AUTHORIZATION","AFTER_USER_ACTION","market.actor_required",nil) }
 		var p Opportunity
-		if !decode(e.Payload, &p) || p.Title == "" || p.Price == "" || p.Location == "" {
+		if !decode(e.Payload, &p) || p.Title == "" || p.Location == "" {
 			return rejected(e, "INVALID_OPPORTUNITY", "market.invalid_opportunity")
+		}
+		// MoneyFlow 必须是 4 选 1，且 Price 与 MoneyFlow 一致：
+		// FREE → Price 可以为空也可以是 "0₫"
+		// TBD  → Price 为空（表示"双方面谈"，金额不在公开卡片上）
+		// EARN/PAY → Price 必须填非 0₫ 的明确金额
+		normalizeOpportunityMoney(&p)
+		if p.MoneyFlow == "EARN" || p.MoneyFlow == "PAY" {
+			if p.Price == "" || p.Price == "0₫" || p.Price == "0" {
+				return rejected(e, "INVALID_OPPORTUNITY", "market.price_required_for_earn_or_pay")
+			}
+		}
+		if p.MoneyFlow == "FREE" && p.Price != "" && p.Price != "0₫" && p.Price != "0" {
+			return rejected(e, "INVALID_OPPORTUNITY", "market.free_opportunity_must_have_zero_price")
+		}
+		if p.MoneyFlow == "TBD" && p.Price != "" {
+			return rejected(e, "INVALID_OPPORTUNITY", "market.tbd_opportunity_must_have_no_price")
 		}
 		p.ID = newID("opp_")
 		p.OwnerID = e.Actor.ID
@@ -178,17 +212,24 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		p.Signal = "新发布"
 		p.Countdown = p.Date
 		p.Owned = true
+		// 资金方向由发布方在 payload 里显式选 — 客户端必须传 EARN /
+		// PAY / FREE / TBD 之一，不允许"裸金额"。上一步 normalize 已经
+		// 把未指定的值推断完成，PriceLabel 也已派生；这里再调一次只是兜底
+		//（normalize 内部对合法 MoneyFlow 是 no-op）。
+		normalizeOpportunityMoney(&p)
 		if p.ShortTitle == "" {
 			p.ShortTitle = p.Theme
 		}
-		if len(p.Lens) == 0 {
-			p.Lens = []string{"BOOKED", "NEARBY"}
-		}
+		// lens 默认已收敛到 normalizeOpportunityMoney（List/Publish 单一 choke
+		// 点），这里不再重复设，避免两处漂移。
 		if err := s.repository.Create(ctx, p); err != nil {
 			return command.Rejected(e, "MARKET_PUBLISH_FAILED", "INTERNAL", "SAFE_RETRY", "market.publish_failed", nil)
 		}
 		return payload(e, "MarketOpportunity", p.ID, "PUBLISHED", map[string]any{"opportunity": p})
 	case "ApplyToMarketOpportunity":
+		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type,e.Principal.Type),aiboundary.ApplyOpportunity) { return rejected(e,"AI_ACTION_FORBIDDEN","ai.action_forbidden") }
+		// AIBOUND-001: 同上，报名必须 USER 主体。
+		if e.Actor.Type != "USER" || e.Actor.ID == "" { return command.Rejected(e,"MARKET_ACTOR_REQUIRED","AUTHORIZATION","AFTER_USER_ACTION","market.actor_required",nil) }
 		id, _ := e.Payload["opportunityId"].(string)
 		quote, _ := e.Payload["quote"].(string)
 		scope, _ := e.Payload["scope"].(string)
@@ -209,6 +250,9 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		return payload(e, "MarketApplication", a.ID, a.Status, map[string]any{"application": a})
 	case "DismissMarketOpportunity":
+		// AIBOUND-001: Dismiss 之前无 gate，AI 主体可调；现与 Publish/Apply 对齐。
+		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type,e.Principal.Type),aiboundary.DismissOpportunity) { return rejected(e,"AI_ACTION_FORBIDDEN","ai.action_forbidden") }
+		if e.Actor.Type != "USER" || e.Actor.ID == "" { return command.Rejected(e,"MARKET_ACTOR_REQUIRED","AUTHORIZATION","AFTER_USER_ACTION","market.actor_required",nil) }
 		id, _ := e.Payload["opportunityId"].(string)
 		if err := s.repository.Dismiss(ctx, e.Actor.ID, id); errors.Is(err, ErrOpportunityNotFound) {
 			return rejected(e, "OPPORTUNITY_NOT_FOUND", "market.opportunity_not_found")
@@ -218,6 +262,45 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return payload(e, "MarketOpportunity", id, "DISMISSED", map[string]any{"opportunityId": id})
 	}
 	return rejected(e, "MARKET_COMMAND_UNSUPPORTED", "market.unsupported_command")
+}
+
+// normalizeOpportunityMoney 强制把 moneyFlow / priceLabel / lens 落到合法
+// 集合。读模型 (List) 写模型 (Publish) 都跑它，保证客户端无论怎么传，
+// 最终下发的 MoneyFlow 都是 4 选 1，PriceLabel 永远存在，Lens 永远非空
+// （contracts 要求 lens.min(1)；旧行 lens 为空必须兜底，否则整列 zod 炸）。
+func normalizeOpportunityMoney(o *Opportunity) {
+	switch o.MoneyFlow {
+	case "EARN", "PAY", "FREE", "TBD":
+		// legal
+	default:
+		// 未指定 / 拼错 / 客户端塞别的 — server 端推断。
+		// 0₫ 或空 Price → FREE；显式传 TBD 已是上面合法分支；
+		// 其他落到 EARN（最常见，机会主流是"客户预算 → 接单者赚到"）。
+		if o.Price == "" || o.Price == "0₫" || o.Price == "0" {
+			o.MoneyFlow = "FREE"
+		} else {
+			o.MoneyFlow = "EARN"
+		}
+	}
+	if o.PriceLabel == "" {
+		o.PriceLabel = opportunityPriceLabel(o.MoneyFlow)
+	}
+	if len(o.Lens) == 0 {
+		o.Lens = []string{"BOOKED", "NEARBY"}
+	}
+}
+
+func opportunityPriceLabel(flow string) string {
+	switch flow {
+	case "FREE":
+		return "免费"
+	case "PAY":
+		return "你需支付"
+	case "TBD":
+		return "费用待确认"
+	default:
+		return "完成后你可获得"
+	}
 }
 
 func (r *MemoryRepository) Seed(_ context.Context, opportunities []Opportunity) error {

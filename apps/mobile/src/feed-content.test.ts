@@ -16,7 +16,8 @@ const basePost: FeedPost = {
 
 const opportunity: MarketOpportunity = {
   id: "opp_1", title: "活动摄影", shortTitle: "摄影", theme: "摄影", date: "周六", time: "15:00", location: "河内 · 西湖",
-  price: "1,500,000₫", owner: "Bonsaidon", ownerType: "BUSINESS", match: "91%", responses: 2, posted: "刚刚", skills: "摄影",
+  price: "1,500,000₫", moneyFlow: "EARN", priceLabel: "完成后你可获得",
+  owner: "Bonsaidon", ownerType: "BUSINESS", match: "91%", responses: 2, posted: "刚刚", skills: "摄影",
   verified: true, lens: ["NEARBY"], travel: 20, signal: "新发布", signalClass: "hot", countdown: "3天"
 };
 

@@ -41,12 +41,16 @@ type PersonaType string
 const (
 	PersonaTypeUserTwin PersonaType = "USER_TWIN"
 	PersonaTypeCreative PersonaType = "CREATIVE"
+	PersonaTypePlatformAI PersonaType = "PLATFORM_AI"
+	PersonaTypeUserAssistant PersonaType = "USER_ASSISTANT"
 )
 
 // AllowedPersonaTypes is the closed set the wire layer accepts.
 var AllowedPersonaTypes = []PersonaType{
 	PersonaTypeUserTwin,
 	PersonaTypeCreative,
+	PersonaTypePlatformAI,
+	PersonaTypeUserAssistant,
 }
 
 // NormalizePersonaType guards against case / whitespace drift.

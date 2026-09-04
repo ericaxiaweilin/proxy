@@ -68,6 +68,34 @@
       ],
       "status": "SCAFFOLD_ONLY",
       "knownGap": "The Match, Browse, My Creators, Collaborations and Results navigation model is not implemented; the current Me route only exposes adjacent creator-management cards."
+    },
+    {
+      "scope": "market",
+      "reference": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
+      "implementationFiles": [
+        "apps/mobile/src/surfaces/market.tsx",
+        "apps/mobile/src/marketplace-client.ts",
+        "apps/mobile/src/market-fixtures.ts"
+      ],
+      "evidenceFiles": [
+        "apps/mobile/src/market-city-label.test.ts",
+        "packages/contracts/src/market-opportunity.test.ts"
+      ],
+      "status": "PARTIAL",
+      "knownGap": "MoneyFlow 4-state + priceLabel render is wired; EARN button copy vs priceLabelForFlow wording still needs unification (audit MEDIUM)."
+    },
+    {
+      "scope": "activity",
+      "reference": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
+      "implementationFiles": [
+        "apps/mobile/src/surfaces/tasks.tsx",
+        "apps/mobile/src/activity-client.ts"
+      ],
+      "evidenceFiles": [
+        "packages/contracts/src/activity.test.ts"
+      ],
+      "status": "PARTIAL",
+      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); organizer marking others needs a targetUserId wire change, pending."
     }
   ]
 }

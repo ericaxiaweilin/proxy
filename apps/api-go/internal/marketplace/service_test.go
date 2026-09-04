@@ -176,3 +176,177 @@ func TestHaversineKnownDistances(t *testing.T) {
 		t.Fatalf("self-distance should be 0, got %.3f", d2)
 	}
 }
+
+// R16.x: MONEYFLOW-001 — AI 主体不能在机会上发起“接单”动作。
+// 服务器应在 ApplyToMarketOpportunity 边界返回 AI_ACTION_FORBIDDEN。
+// 这条 tripwire 保证未来重构不会默默打开“AI 助手调用接单”的能力。
+func TestMarketApplyIsForbiddenForAIActor(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	for _, kind := range []string{"PLATFORM_AI", "USER_TWIN", "USER_ASSISTANT"} {
+		t.Run(kind, func(t *testing.T) {
+			envelope := marketEnvelope("ApplyToMarketOpportunity", "ai_subject", map[string]any{
+				"opportunityId": "biz_negotiation", "quote": "1,000,000₫", "scope": "中文",
+			})
+			envelope.Principal = command.Principal{Type: kind, ID: "ai_subject"}
+			envelope.Actor = command.Actor{Type: kind, ID: "ai_subject"}
+			out := s.HandleContext(t.Context(), envelope)
+			if out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "AI_ACTION_FORBIDDEN" {
+				t.Fatalf("%s apply must be rejected with AI_ACTION_FORBIDDEN, got %+v", kind, out)
+			}
+		})
+	}
+}
+
+// R16.x: MONEYFLOW-001 — AI 主体不能 Publish 机会 (不能代客户发需求)。
+func TestMarketPublishIsForbiddenForAIActor(t *testing.T) {
+	s := New()
+	for _, kind := range []string{"PLATFORM_AI", "USER_TWIN", "USER_ASSISTANT"} {
+		t.Run(kind, func(t *testing.T) {
+			envelope := marketEnvelope("PublishMarketOpportunity", "ai_subject", map[string]any{
+				"title": "AI 代发需求", "theme": "城市同行", "date": "周六", "time": "10:00–18:00", "location": "河内", "price": "2,000,000₫", "moneyFlow": "EARN", "priceLabel": "完成后你可获得",
+			})
+			envelope.Principal = command.Principal{Type: kind, ID: "ai_subject"}
+			envelope.Actor = command.Actor{Type: kind, ID: "ai_subject"}
+			out := s.HandleContext(t.Context(), envelope)
+			if out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "AI_ACTION_FORBIDDEN" {
+				t.Fatalf("%s publish must be rejected with AI_ACTION_FORBIDDEN, got %+v", kind, out)
+			}
+		})
+	}
+}
+
+// R16.x: MONEYFLOW-002 — 机会的“资金方向”必须在服务端 normalize 到
+// 4 选 1 (EARN / PAY / FREE / TBD)。EARN 是默认；Price = "0₫" / "" 推为
+// FREE；未指定 MoneyFlow + 非零 Price 推为 EARN；推出来的 PriceLabel 必
+// 不是空字符串 (UI 不能出现“裸金额”)。
+func TestOpportunityMoneyFlowNormalize(t *testing.T) {
+	cases := []struct {
+		name       string
+		inputFlow  string
+		inputPrice string
+		wantFlow   string
+		wantLabel  string
+		wantPrice  string // empty if Price is preserved as-is
+	}{
+		{"explicit EARN keeps", "EARN", "1,500,000₫", "EARN", "完成后你可获得", "1,500,000₫"},
+		{"explicit PAY keeps", "PAY", "500,000₫", "PAY", "你需支付", "500,000₫"},
+		{"explicit FREE keeps zero price", "FREE", "0₫", "FREE", "免费", "0₫"},
+		{"explicit TBD empties price", "TBD", "", "TBD", "费用待确认", ""},
+		{"blank flow + non-zero price → EARN", "", "900,000₫", "EARN", "完成后你可获得", "900,000₫"},
+		{"blank flow + 0₫ → FREE", "", "0₫", "FREE", "免费", "0₫"},
+		{"blank flow + blank price → FREE", "", "", "FREE", "免费", ""},
+		{"unknown flow falls back to EARN", "GARBAGE", "1,000,000₫", "EARN", "完成后你可获得", "1,000,000₫"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o := Opportunity{MoneyFlow: c.inputFlow, Price: c.inputPrice}
+			normalizeOpportunityMoney(&o)
+			if o.MoneyFlow != c.wantFlow {
+				t.Fatalf("MoneyFlow = %q, want %q", o.MoneyFlow, c.wantFlow)
+			}
+			if o.PriceLabel != c.wantLabel {
+				t.Fatalf("PriceLabel = %q, want %q", o.PriceLabel, c.wantLabel)
+			}
+			if c.wantPrice != "" && o.Price != c.wantPrice {
+				t.Fatalf("Price = %q, want %q", o.Price, c.wantPrice)
+			}
+		})
+	}
+}
+
+// R16.x: MONEYFLOW-003 — 真人 publish 机会、MoneyFlow 选 FREE 但 Price
+// 被填成非零 → 必须拒绝 (“免费任务不能填 500,000₫”)。这是避免“裸金
+// 额”混淆的最后一道闸。
+func TestMarketPublishRejectsFreeWithNonZeroPrice(t *testing.T) {
+	s := New()
+	cases := map[string]map[string]any{
+		"FREE with non-zero price": {"moneyFlow": "FREE", "price": "500,000₫"},
+		"TBD with price set":       {"moneyFlow": "TBD", "price": "500,000₫"},
+		"EARN with empty price":    {"moneyFlow": "EARN", "price": ""},
+		"PAY with 0₫ price":        {"moneyFlow": "PAY", "price": "0₫"},
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			payload["title"] = "test"
+			payload["theme"] = "city"
+			payload["date"] = "周六"
+			payload["time"] = "10:00–18:00"
+			payload["location"] = "河内"
+			payload["priceLabel"] = "免费"
+			out := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "human_publisher", payload))
+			if out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "INVALID_OPPORTUNITY" {
+				t.Fatalf("publish must reject with INVALID_OPPORTUNITY, got %+v", out)
+			}
+		})
+	}
+}
+
+// ACT-CONTRACT-001: 旧行（lens 缺失/为空，模拟旧 payload）走 List 必须
+// 被兜底成非空，否则 contracts lens.min(1) 让整列 zod 炸。money/price 同理。
+func TestStaleOpportunityLensDefaultedOnList(t *testing.T) {
+	s := New()
+	stale := Opportunity{ID: "stale_opp_001", Title: "旧机会", Theme: "陪同", Date: "周六", Time: "10:00", Location: "河内", Price: "900,000₫", Owner: "旧主", OwnerID: "seed_old", OwnerType: "PERSON"}
+	if err := s.repository.Seed(t.Context(), []Opportunity{stale}); err != nil {
+		t.Fatal(err)
+	}
+	listed := s.HandleContext(t.Context(), marketEnvelope("ListMarketOpportunities", "viewer", nil))
+	if listed.Outcome != "ACCEPTED" {
+		t.Fatalf("list: %+v", listed)
+	}
+	var body struct {
+		Opportunities []Opportunity `json:"opportunities"`
+	}
+	if err := json.Unmarshal([]byte(listed.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Opportunities) != 1 {
+		t.Fatalf("expected 1 opportunity, got %d", len(body.Opportunities))
+	}
+	got := body.Opportunities[0]
+	if got.MoneyFlow == "" || got.PriceLabel == "" {
+		t.Fatalf("list must normalize money fields: %+v", got)
+	}
+	if len(got.Lens) == 0 {
+		t.Fatalf("list must default empty lens (contracts min(1)): %+v", got)
+	}
+}
+
+// AIBOUND-001: Dismiss 之前无 gate；现 AI 主体必须 AI_ACTION_FORBIDDEN，
+// 非 USER 主体必须 MARKET_ACTOR_REQUIRED（与 Publish/Apply 对齐）。
+func TestMarketDismissIsForbiddenForAIActor(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	for _, kind := range []string{"PLATFORM_AI", "USER_TWIN", "USER_ASSISTANT"} {
+		t.Run(kind, func(t *testing.T) {
+			envelope := marketEnvelope("DismissMarketOpportunity", "ai_subject", map[string]any{
+				"opportunityId": "biz_negotiation",
+			})
+			envelope.Principal = command.Principal{Type: kind, ID: "ai_subject"}
+			envelope.Actor = command.Actor{Type: kind, ID: "ai_subject"}
+			out := s.HandleContext(t.Context(), envelope)
+			if out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "AI_ACTION_FORBIDDEN" {
+				t.Fatalf("%s dismiss must be rejected with AI_ACTION_FORBIDDEN, got %+v", kind, out)
+			}
+		})
+	}
+}
+
+func TestMarketWritesRequireUserActor(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	publish := marketEnvelope("PublishMarketOpportunity", "", map[string]any{
+		"title": "x", "theme": "y", "date": "周六", "time": "10:00", "location": "河内", "price": "100₫",
+	})
+	publish.Actor = command.Actor{Type: "PUBLIC", ID: "anon"}
+	publish.Principal = command.Principal{Type: "PUBLIC", ID: "anon"}
+	if out := s.HandleContext(t.Context(), publish); out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "MARKET_ACTOR_REQUIRED" {
+		t.Fatalf("PUBLIC publish: expected MARKET_ACTOR_REQUIRED, got %+v", out)
+	}
+	dismiss := marketEnvelope("DismissMarketOpportunity", "biz_negotiation", map[string]any{"opportunityId": "biz_negotiation"})
+	dismiss.Actor = command.Actor{Type: "PUBLIC", ID: "anon"}
+	dismiss.Principal = command.Principal{Type: "PUBLIC", ID: "anon"}
+	if out := s.HandleContext(t.Context(), dismiss); out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "MARKET_ACTOR_REQUIRED" {
+		t.Fatalf("PUBLIC dismiss: expected MARKET_ACTOR_REQUIRED, got %+v", out)
+	}
+}

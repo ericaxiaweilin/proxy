@@ -478,13 +478,30 @@ export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;
 
 // ---- Activity 读模型（活动页服务端驱动）----
 
+// ActivitySchema：本地活动读模型 wire 契约。
+//
+// 设计原则 (R16.x 能力边界冻结)：
+//   * origin ∈ { PLATFORM, MERCHANT, USER, TEST } — AI 永远不是 origin
+//     主体，AI 是 platform/merchant/user 在“起草”阶段的助理
+//     (aiStatus=AI_ASSISTED 或 AI_GENERATED)。
+//   * aiStatus 标识“内容生成方式”：NONE = 真人手写；AI_ASSISTED =
+//     AI 改写/提醒；AI_GENERATED = AI 生成 (平台或商家作为发布方)。
+//   * aiActorKind 标识“AI 是哪个助理”：PLATFORM_AI = 平台 AI 小美，
+//     USER_TWIN = 用户数字分身 (需 LC-07 consent)，USER_ASSISTANT =
+//     用户助理 (起草类)。
+//   * MoneyFlow / PriceLabel 把“金额”跟“资金方向”拆开：MoneyFlow ∈
+//     {FREE, PAY_TO_JOIN, PAID_TO_ATTEND}，PriceLabel 是中文语义副本
+//     (免费参加 / 你需支付 / 参加后你可获得)。server 端 normalize
+//     后下发，客户端不允许传空。
 export const ActivitySchema = z.object({
   activityId: z.string().min(1),
-  origin: z.enum(["PLATFORM", "MERCHANT", "USER", "AI_PERSONA", "TEST"]),
+  origin: z.enum(["PLATFORM", "MERCHANT", "USER", "TEST"]),
   title: z.string().min(1),
   time: z.string(),
   people: z.string(),
   price: z.string(),
+  moneyFlow: z.enum(["FREE", "PAY_TO_JOIN", "PAID_TO_ATTEND"]),
+  priceLabel: z.string().min(1),
   consumption: z.string(),
   venueIcon: z.string(),
   venueName: z.string(),
@@ -500,12 +517,15 @@ export const ActivitySchema = z.object({
   capacity: z.number().int().positive().optional(),
   shares: z.number().int().nonnegative(),
   parentTitle: z.string().optional(),
-  // R15.x+: AI_PERSONA origin 专有字段。origin = AI_PERSONA 时客户端
-  // 必显示 "AI 数字人" 徽标 + 头像 + 名字 (跟 X / Threads / 抖音 /
-  // 小红书的 "AI 生成" 标注一致)。其他 origin 这三个字段 omitempty。
+  // AI 助理信息。aiStatus != NONE 时客户端必显示 AI 标注 + persona
+  // 头像 + 名字 (跟 X / Threads / 抖音 / 小红书的 "AI 生成" 标注
+  // 一致)。aiPersona* 三件只当 aiStatus 表明是 AI 生成/辅助时才下发，
+  // 其他情况 omitempty。
   aiPersonaId: z.string().min(1).optional(),
   aiPersonaName: z.string().min(1).optional(),
-  aiPersonaAvatar: z.string().optional()
+  aiPersonaAvatar: z.string().optional(),
+  aiStatus: z.enum(["NONE", "AI_ASSISTED", "AI_GENERATED"]).default("NONE"),
+  aiActorKind: z.enum(["PLATFORM_AI", "USER_TWIN", "USER_ASSISTANT"]).optional()
 });
 export type Activity = z.infer<typeof ActivitySchema>;
 
@@ -514,6 +534,62 @@ export const ListActivitiesPayloadSchema = z.object({
   note: z.string().optional()
 });
 export type ListActivitiesPayload = z.infer<typeof ListActivitiesPayloadSchema>;
+
+// MarketOpportunitySchema：机会读模型 wire 契约。
+//
+// 设计原则 (R16.x 资金方向冻结)：
+//   * Price + MoneyFlow + PriceLabel 三件总是同步下发，缺一不可。
+//   * MoneyFlow ∈ { EARN, PAY, FREE, TBD } — 表达"价格栏究竟是什
+//     么"。EARN = 接单者赚；PAY = 接单者付；FREE = 0₫；TBD = 费用
+//     待确认（双方面谈，公开卡片不显示金额）。
+//   * server 端 normalizeOpportunityMoney() 强制 4 选 1，客户端禁止
+//     传空 MoneyFlow。PriceLabel 是中文语义副本（完成后你可获得 /
+//     你需支付 / 免费 / 费用待确认）。
+//   * 客户端不允许"裸金额"——任何一个 Opportunity 在 wire 上必须
+//     三件齐备，否则 zod parse 会拒绝。这与 Activity 规则保持一致。
+export const MarketOpportunityMoneyFlowSchema = z.enum(["EARN", "PAY", "FREE", "TBD"]);
+export type MarketOpportunityMoneyFlow = z.infer<typeof MarketOpportunityMoneyFlowSchema>;
+
+export const MarketOpportunitySchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  shortTitle: z.string(),
+  theme: z.string(),
+  date: z.string(),
+  time: z.string(),
+  location: z.string().min(1),
+  price: z.string(),
+  moneyFlow: MarketOpportunityMoneyFlowSchema,
+  priceLabel: z.string().min(1),
+  owner: z.string().min(1),
+  ownerType: z.enum(["BUSINESS", "PERSON"]),
+  match: z.string(),
+  responses: z.number().int().nonnegative(),
+  posted: z.string(),
+  skills: z.string(),
+  verified: z.boolean(),
+  lens: z.array(z.enum(["NOW", "NEARBY", "BOOKED", "REMOTE"])).min(1),
+  travel: z.number().int().nullable(),
+  signal: z.string(),
+  signalClass: z.string(),
+  countdown: z.string(),
+  lat: z.number().optional(),
+  lng: z.number().optional(),
+  travelSource: z.enum(["seeded", "user_distance", "unknown"]).optional(),
+  ownedByViewer: z.boolean().optional(),
+  appliedByViewer: z.boolean().optional()
+});
+export type MarketOpportunity = z.infer<typeof MarketOpportunitySchema>;
+
+export const ListMarketOpportunitiesPayloadSchema = z.object({
+  opportunities: z.array(MarketOpportunitySchema)
+});
+export type ListMarketOpportunitiesPayload = z.infer<typeof ListMarketOpportunitiesPayloadSchema>;
+
+export const PublishMarketOpportunityPayloadSchema = z.object({
+  opportunity: MarketOpportunitySchema
+});
+export type PublishMarketOpportunityPayload = z.infer<typeof PublishMarketOpportunityPayloadSchema>;
 
 export const ActivityRefPayloadSchema = z.object({
   activityId: z.string().min(1)
