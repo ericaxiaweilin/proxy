@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { AIAssistant } from "@proxy/contracts";
 import { parseListAIAssistantsPayload } from "@proxy/contracts";
 import type { TransportResponse, TransportRequest } from "./auth-client";
@@ -108,18 +108,31 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
   }
 
   const selected = items?.find((entry) => entry.id === selectedId);
+  // 图挂了的卡回退色块（真图走服务端原文件；加载失败不留白板）。
+  const [broken, setBroken] = useState<ReadonlySet<string>>(new Set());
+  const markBroken = useCallback((id: string): void => {
+    setBroken((current) => (current.has(id) ? current : new Set(current).add(id)));
+  }, []);
+  const photoUri = (id: string): string => `${baseUrl.replace(/\/$/, "")}/v1/ai/personas/photo/${encodeURIComponent(id)}?v=png1`;
 
   if (failed) return <View />;
   if (!items) return <View style={styles.rowSkeleton} />;
   return (
     <View>
-      <Text style={styles.rowTitle}>AI 助手 · 小美们</Text>
+      <View style={styles.rowHead}>
+        <Text style={styles.rowTitle}>小美们</Text>
+        <Text style={styles.rowGen}>AI生成</Text>
+      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         {items.map((item) => (
           <Pressable key={item.id} onPress={() => { setSelectedId(item.id); setNotice(undefined); }} style={styles.card}>
-            <View style={[styles.token, { backgroundColor: item.color }]}>
-              <Text style={styles.tokenText}>{item.avatar}</Text>
-            </View>
+            {broken.has(item.id) ? (
+              <View style={[styles.token, { backgroundColor: item.color }]}>
+                <Text style={styles.tokenText}>{item.avatar}</Text>
+              </View>
+            ) : (
+              <Image source={{ uri: photoUri(item.id) }} style={styles.portrait} onError={() => markBroken(item.id)} />
+            )}
             <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
             <Text style={styles.badge}>{item.aiBadge}</Text>
             {following.has(item.id) ? <Text style={styles.followed}>已关注</Text> : null}
@@ -128,15 +141,19 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
       </ScrollView>
       {selected ? (
         <View style={styles.sheet}>
-          <View style={[styles.sheetToken, { backgroundColor: selected.color }]}>
-            <Text style={styles.sheetTokenText}>{selected.avatar}</Text>
-          </View>
+          {broken.has(selected.id) ? (
+            <View style={[styles.sheetToken, { backgroundColor: selected.color }]}>
+              <Text style={styles.sheetTokenText}>{selected.avatar}</Text>
+            </View>
+          ) : (
+            <Image source={{ uri: photoUri(selected.id) }} style={styles.sheetPortrait} onError={() => markBroken(selected.id)} />
+          )}
           <Text style={styles.sheetName}>{selected.name}</Text>
-          <Text style={styles.sheetBadge}>{selected.aiBadge} · 不会伪装成真人好友</Text>
+          <Text style={styles.sheetBadge}>{selected.aiBadge} · 不是真人</Text>
           <Text style={styles.sheetTagline}>{selected.tagline}</Text>
           <View style={styles.sheetActions}>
             <Pressable disabled={acting} onPress={() => void toggleFollow(selected)} style={[styles.sheetBtn, styles.sheetBtnPrimary]}>
-              <Text style={styles.sheetBtnPrimaryText}>{acting ? "请稍候…" : following.has(selected.id) ? "取消关注" : "关注/添加助手"}</Text>
+              <Text style={styles.sheetBtnPrimaryText}>{acting ? "请稍候…" : following.has(selected.id) ? "取消关注" : "关注"}</Text>
             </Pressable>
             <Pressable onPress={() => void message(selected)} style={[styles.sheetBtn, styles.sheetBtnGhost]}>
               <Text style={styles.sheetBtnGhostText}>发消息</Text>
@@ -166,7 +183,11 @@ function useConversationClient(): ConversationClient {
 
 const styles = StyleSheet.create({
   rowSkeleton: { height: 120 },
-  rowTitle: { color: color.ink, fontSize: 16, fontWeight: "900", marginBottom: 8, marginHorizontal: 16 },
+  rowTitle: { color: color.ink, fontSize: 16, fontWeight: "900" },
+  rowHead: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 8, marginHorizontal: 16 },
+  rowGen: { backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2 },
+  portrait: { borderRadius: 38, height: 76, width: 76 },
+  sheetPortrait: { borderRadius: 14, height: 190, width: "100%" },
   row: { gap: 10, paddingHorizontal: 16 },
   card: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 4, padding: 12, width: 132 },
   token: { alignItems: "center", borderRadius: 28, height: 56, justifyContent: "center", width: 56 },

@@ -115,11 +115,16 @@ echo "    AVATAR-001: PASS"
 # AI-ASSIST-001: 首页 5 小美推荐目录（公开、匿名可读）+ AI 标签 + 关注/
 # 发消息。目录改名/换色必须服务端/种子/SVG 三处同步；AI 能力不得扩大
 # 到接单/报名/收付款（仍由服务端门禁禁止，此处只锁目录形状）。
+# 照片走服务端原文件直出（/v1/ai/personas/photo/{id}），客户端不复制
+# 第二份；对外只叫“AI生成”，小美≠助手。
 require_test "AI-ASSIST-001" "./internal/api" \
   "TestListAIAssistantsFiveWithPhotos" \
   "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
 require_test "AI-ASSIST-001" "./internal/api" \
   "TestListAIAssistantsMethodNotAllowed" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestPersonaPhotoServesRealPNG" \
   "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
 if ! grep -q 'ListAIAssistantsPayloadSchema' packages/contracts/src/ai-assistants.test.ts; then
   echo "  FAIL [AI-ASSIST-001]: assistants contract tests missing" >&2

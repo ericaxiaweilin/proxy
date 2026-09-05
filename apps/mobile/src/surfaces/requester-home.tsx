@@ -310,10 +310,6 @@ export function RequesterHome({
         />
       </View>
 
-      {/* AI-ASSIST-001: AI 助手行（5 小美推荐，服务端目录+关注/发消息）。
-          与下面真人“推荐人”分开渲染、不混排：AI 永不伪装成真人好友。 */}
-      <AIAssistantsRow />
-
       {/* R15.34: 推荐人 section — 标题 + stories 横滑 + cards 横滑。
           stories 是小圆形 avatar (首字母 + online 指示点 + 共同好友/场景
           tag)，cards 是 165×220 portrait card (大首字母 + 距离 + 2 tag)。 */}
@@ -393,6 +389,11 @@ export function RequesterHome({
           继续刷 · <Text style={styles.loadMoreCount}>{filteredPeople.length}</Text>/{recommendFeed.people.length}
         </Text>
       </View>
+
+      {/* AI-ASSIST-001: 5 小美行放真人推荐之后，不抢镜。
+          服务端目录 + 关注/发消息，与真人“推荐人”分开渲染不混排。 */}
+      <AIAssistantsRow />
+
       {/* 基线 .r1572HomeComposer('USER')：HomeChatBox（无示例 / 无提示） */}
       {conversationPanel ?? (onChat ? (
         <HomeChatBox

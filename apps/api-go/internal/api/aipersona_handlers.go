@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -182,14 +184,14 @@ type AIAssistant struct {
 }
 
 // platformAIAssistants 是 5 小美唯一展示真相源（与 activity 种子、
-// mobile SVG 资产 ai-personas/ai_00{1..5}.svg、tasks 色版同值）。
-// 改名/换色必须三处同步，见 AI-ASSIST-001 tripwire。
+// mobile 真人写真资产 ai-personas/photos/ai_00{1..5}.png、tasks 色版同值）。
+// 改名/换色/换图必须同步，见 AI-ASSIST-001 tripwire。
 var platformAIAssistants = []AIAssistant{
-	{ID: "ai_001", Name: "平台 AI 小美 · 周末企划", Role: "周末企划", Color: "#7C5CFF", Photo: "ai-personas/ai_001.svg", Avatar: "☕", Tagline: "周末去哪玩，我来组局", AIBadge: "AI 助手"},
-	{ID: "ai_002", Name: "平台 AI 小美 · 拍照季", Role: "拍照季", Color: "#FF7A8A", Photo: "ai-personas/ai_002.svg", Avatar: "📸", Tagline: "教你拍出大片感", AIBadge: "AI 助手"},
-	{ID: "ai_003", Name: "平台 AI 小美 · 拍照搭子", Role: "拍照搭子", Color: "#3FCBA8", Photo: "ai-personas/ai_003.svg", Avatar: "🤝", Tagline: "缺搭子？喊我就行", AIBadge: "AI 助手"},
-	{ID: "ai_004", Name: "平台 AI 小美 · 餐厅尝鲜", Role: "餐厅尝鲜", Color: "#FF9D44", Photo: "ai-personas/ai_004.svg", Avatar: "🍽️", Tagline: "新店首发，带你先吃", AIBadge: "AI 助手"},
-	{ID: "ai_005", Name: "平台 AI 小美 · 饭局推荐", Role: "饭局推荐", Color: "#FFB347", Photo: "ai-personas/ai_005.svg", Avatar: "🍜", Tagline: "组饭局不冷场", AIBadge: "AI 助手"},
+	{ID: "ai_001", Name: "平台 AI 小美 · 周末企划", Role: "周末企划", Color: "#7C5CFF", Photo: "ai-personas/photos/ai_001.png", Avatar: "☕", Tagline: "周末去哪玩，我来组局", AIBadge: "AI生成"},
+	{ID: "ai_002", Name: "平台 AI 小美 · 拍照季", Role: "拍照季", Color: "#FF7A8A", Photo: "ai-personas/photos/ai_002.png", Avatar: "📸", Tagline: "教你拍出大片感", AIBadge: "AI生成"},
+	{ID: "ai_003", Name: "平台 AI 小美 · 拍照搭子", Role: "拍照搭子", Color: "#3FCBA8", Photo: "ai-personas/photos/ai_003.png", Avatar: "🤝", Tagline: "缺搭子？喊我就行", AIBadge: "AI生成"},
+	{ID: "ai_004", Name: "平台 AI 小美 · 餐厅尝鲜", Role: "餐厅尝鲜", Color: "#FF9D44", Photo: "ai-personas/photos/ai_004.png", Avatar: "🍽️", Tagline: "新店首发，带你先吃", AIBadge: "AI生成"},
+	{ID: "ai_005", Name: "平台 AI 小美 · 饭局推荐", Role: "饭局推荐", Color: "#FFB347", Photo: "ai-personas/photos/ai_005.png", Avatar: "🍜", Tagline: "组饭局不冷场", AIBadge: "AI生成"},
 }
 
 // GET /v1/ai/assistants — 平台 AI 助手公开目录（5 小美），匿名可读。
@@ -198,4 +200,34 @@ func (s *Server) listAIAssistants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"assistants": platformAIAssistants})
+}
+
+// GET /v1/ai/personas/photo/{id} — 小美写真原文件（模型生成的真人写真
+// PNG），匿名可读。mobile 用 Image 直接渲染，不复制第二份。
+// 只认目录里的 5 个公开 id（与 platformAIAssistants.Photo 一一对应），
+// 不做目录 listing，无路径穿越面。
+// 目录由 PROXY_AI_PERSONA_ASSETS_DIR 指定，默认仓库相对路径
+// apps/mobile/assets/ai-personas（dev 二进制工作目录即仓库根）。
+func (s *Server) personaPhoto(w http.ResponseWriter, r *http.Request) {
+	if !methodGuard(w, r, http.MethodGet) {
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/ai/personas/photo/")
+	photo := ""
+	for _, a := range platformAIAssistants {
+		if a.ID == rest {
+			photo = a.Photo
+			break
+		}
+	}
+	const prefix = "ai-personas/"
+	if photo == "" || !strings.HasPrefix(photo, prefix) || strings.Contains(photo[len(prefix):], "/..") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	dir := os.Getenv("PROXY_AI_PERSONA_ASSETS_DIR")
+	if dir == "" {
+		dir = "apps/mobile/assets/ai-personas"
+	}
+	serveMediaPath(w, r, filepath.Join(dir, filepath.FromSlash(photo[len("ai-personas/"):])), "public, max-age=86400, stale-while-revalidate=604800")
 }
