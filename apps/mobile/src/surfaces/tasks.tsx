@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Activity, TasksExperienceParams } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
+import { useMerchantIdentity } from "../use-merchant-identity";
 import { color, Gradient, shadows } from "../theme";
 import type { WorkspaceTarget } from "./fulfillment-workspace";
 
@@ -94,6 +95,8 @@ export function TasksSurface({
   const [createTerm, setCreateTerm] = useState<"SPLIT" | "HOST_COVERS">("SPLIT");
   const [createVenueId, setCreateVenueId] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  // MERCHANT-PUBLISH-001: 有店才显示身份选择（个人/店铺），无店保持个人发布。
+  const merchant = useMerchantIdentity();
 
   // 挂载时拉取服务端活动读模型（ListActivities）；失败不回落本地内容。
   const loadActivities = useCallback(async (): Promise<void> => {
@@ -180,13 +183,16 @@ export function TasksSurface({
         title: createTitle.trim(), time: createTime.trim(), capacity: Number(createCapacity),
         venueName: venue.venueName, venueIcon: venue.venueIcon, venueType: venue.venueType,
         realitySceneId: venue.realitySceneId, desc: "共同参与真实场景；活动本身免费，到店消费按约定承担。",
-        consumptionTerm: createTerm
+        consumptionTerm: createTerm,
+        ...(merchant.merchantId ? { merchantId: merchant.merchantId } : {})
       });
       setItems((current) => [created, ...current]);
       setDetailId(created.activityId);
       setView("DETAIL");
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "活动发布失败");
+      const msg = error instanceof Error ? error.message : "活动发布失败";
+      // MERCHANT-PUBLISH-001: 无成员资格 publisher 会被 server 403。
+      setCreateError(/merchant_forbidden/i.test(msg) ? "该店铺无发布权限（仅店主/管理员可以以店铺名义发布）。" : msg);
     } finally {
       setBusy(false);
     }
@@ -227,6 +233,21 @@ export function TasksSurface({
             </Pressable>
           ))}
           <Text style={styles.createLabel}>到店消费（与活动价格分开）</Text>
+          {merchant.accounts.length > 0 ? (
+            <View>
+              <Text style={styles.createLabel}>发布身份</Text>
+              <View style={styles.createChoiceRow}>
+                <Pressable onPress={() => merchant.setMerchantId(undefined)} style={[styles.createChoice, !merchant.merchantId && styles.createChoiceOn]}>
+                  <Text style={styles.createChoiceText}>个人</Text>
+                </Pressable>
+                {merchant.accounts.map((shop) => (
+                  <Pressable key={shop.id} onPress={() => merchant.setMerchantId(shop.id)} style={[styles.createChoice, merchant.merchantId === shop.id && styles.createChoiceOn]}>
+                    <Text style={styles.createChoiceText}>{shop.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
           <View style={styles.createChoiceRow}>
             <Pressable onPress={() => setCreateTerm("SPLIT")} style={[styles.createChoice, createTerm === "SPLIT" && styles.createChoiceOn]}><Text style={styles.createChoiceText}>各自承担</Text></Pressable>
             <Pressable onPress={() => setCreateTerm("HOST_COVERS")} style={[styles.createChoice, createTerm === "HOST_COVERS" && styles.createChoiceOn]}><Text style={styles.createChoiceText}>发起人请客</Text></Pressable>

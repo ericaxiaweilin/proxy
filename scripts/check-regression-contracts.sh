@@ -163,6 +163,32 @@ require_test "AIBOUND-001" "./internal/marketplace" \
   "TestMarketWritesRequireUserActor" \
   "apps/api-go/internal/marketplace/service_test.go" || exit $?
 
+# MERCHANT-PUBLISH-001: 商家发布曾经只能以个人名义（订单 Owner/OwnerType、
+# 活动 Origin 硬编码 PERSON/USER）。现 client 传 merchantId → api 层验
+# business 成员（OWNER/ADMIN）→ 注记进 AuthContext → 服务端只认注记盖章；
+# 伪造/无成员 403，写不到 service。
+require_test "MERCHANT-PUBLISH-001" "./internal/business" \
+  "TestMerchantPublishIdentity" \
+  "apps/api-go/internal/business/service_test.go" || exit $?
+require_test "MERCHANT-PUBLISH-001" "./internal/api" \
+  "TestMerchantPublishOpportunityStampsShop" \
+  "apps/api-go/internal/api/merchant_identity_test.go" || exit $?
+require_test "MERCHANT-PUBLISH-001" "./internal/api" \
+  "TestMerchantPublishForgedMembershipForbidden" \
+  "apps/api-go/internal/api/merchant_identity_test.go" || exit $?
+require_test "MERCHANT-PUBLISH-001" "./internal/api" \
+  "TestMerchantPublishActivityStampsMerchant" \
+  "apps/api-go/internal/api/merchant_identity_test.go" || exit $?
+require_test "MERCHANT-PUBLISH-001" "./internal/api" \
+  "TestMerchantPublishWithoutMerchantStaysPersonal" \
+  "apps/api-go/internal/api/merchant_identity_test.go" || exit $?
+require_test "MERCHANT-PUBLISH-001" "./internal/marketplace" \
+  "TestMerchantStampRequiresAnnotation" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+require_test "MERCHANT-PUBLISH-001" "./internal/activity" \
+  "TestMerchantActivityStampRequiresAnnotation" \
+  "apps/api-go/internal/activity/service_test.go" || exit $?
+
 # AI-ACTOR-001: aiboundary — 三种 AI 主体 (PLATFORM_AI / USER_TWIN /
 # USER_ASSISTANT) 都不得执行任何 Action 表中的动作; HUMAN 不被误拦。
 # R16.x: 平台 "AI 不能成为活动主办方、不能接单、不能发布" 由这条闸

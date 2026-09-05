@@ -123,6 +123,17 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 		writeResult(w, blockedStatus, *blocked)
 		return
 	}
+	// MERCHANT-PUBLISH-001: publish-as-shop claims are verified here
+	// (api layer owns the business repo; services never touch it).
+	// The annotation is the only thing services trust.
+	if rejected := s.resolveMerchantPublish(r.Context(), &envelope); rejected != nil {
+		status := http.StatusForbidden
+		if rejected.Error != nil && rejected.Error.ErrorCode == "MERCHANT_UNAVAILABLE" {
+			status = http.StatusServiceUnavailable
+		}
+		writeResult(w, status, *rejected)
+		return
+	}
 	result, status, err := s.executeCommand(r.Context(), envelope)
 	if err != nil {
 		log.Printf("command transaction failed: command=%s key=%s err=%v", envelope.CommandType, envelope.IdempotencyKey, err)

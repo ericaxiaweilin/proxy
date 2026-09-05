@@ -257,6 +257,15 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		p.Owner = "你"
 		p.OwnerType = "PERSON"
 		p.Verified = true
+		// MERCHANT-PUBLISH-001: 商家注记（api 层 resolveMerchantPublish
+		// 已验成员，见 apps/api-go/internal/api/merchant_identity.go，
+		// 那里是 canonical）→ 以店名义发布。无注记保持个人路径不变。
+		// OwnerID 保留发布人，保证 Owned/接单/屏蔽逻辑不变；读模型按
+		// Owner/OwnerType 展示店名 + 商户标识。只认注记，不读 payload。
+		if _, merchantName, ok := merchantStamp(e); ok {
+			p.Owner = merchantName
+			p.OwnerType = "BUSINESS"
+		}
 		p.Posted = "刚刚"
 		p.Responses = 0
 		p.Match = "100%"
@@ -648,6 +657,23 @@ func decode(value any, target any) bool {
 }
 func rejected(e command.Envelope, code, key string) command.Result {
 	return command.Rejected(e, code, "VALIDATION", "AFTER_USER_ACTION", key, nil)
+}
+
+// merchantStamp reads the verified merchant annotation stamped by the api
+// layer (resolveMerchantPublish). Canonical keys live in
+// apps/api-go/internal/api/merchant_identity.go — this is a read-only
+// mirror (api cannot be imported here: import cycle). Never read
+// payload.merchantId here: it is client-controlled.
+func merchantStamp(e command.Envelope) (string, string, bool) {
+	if e.AuthContext == nil {
+		return "", "", false
+	}
+	id, _ := e.AuthContext["merchantID"].(string)
+	name, _ := e.AuthContext["merchantName"].(string)
+	if id == "" || name == "" {
+		return "", "", false
+	}
+	return id, name, true
 }
 
 func rejectedWith(e command.Envelope, code, key string, reason string, extras map[string]any) command.Result {

@@ -841,6 +841,29 @@ func (s *Service) hasRole(ctx context.Context, businessID, userID string, roles 
 	return false
 }
 
+// MerchantPublishIdentity verifies that userID may publish as businessID
+// and returns the merchant display name.
+//
+// MERCHANT-PUBLISH-001: the api layer calls this before routing publish
+// commands (PublishMarketOpportunity / PublishActivity). Only OWNER/ADMIN
+// members of an ACTIVE account qualify. Services trust ONLY the resulting
+// AuthContext annotation ("merchantID"/"merchantName"), never the client
+// payload — a forged payload merchantId without membership is rejected
+// upstream with MERCHANT_FORBIDDEN.
+func (s *Service) MerchantPublishIdentity(ctx context.Context, businessID, userID string) (string, bool) {
+	if businessID == "" || userID == "" {
+		return "", false
+	}
+	account, err := s.repo.GetAccount(ctx, businessID)
+	if err != nil || account.Status != "ACTIVE" || account.Name == "" {
+		return "", false
+	}
+	if !s.hasRole(ctx, businessID, userID, "OWNER", "ADMIN") {
+		return "", false
+	}
+	return account.Name, true
+}
+
 // R16.10-P1-F / Master PRD v1.4 §12: 合规场景分类强制（Category Policy 门禁）
 // 防止业务绕合规：付费一对一私人陪伴/喝酒/亲密陪伴等不能因为换文案进入 Opportunity/Invite。
 var forbiddenOpportunityCategories = map[string]bool{

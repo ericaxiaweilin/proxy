@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 29 — 2026-09-05
+
+- 商家身份发布 (MERCHANT-PUBLISH-001)：发布需求/活动表单新增“发布身份”
+  选择（个人/名下店铺，无店不显示）；以店名义发布时订单 Owner/OwnerType、
+  活动 Origin/merchantName 由服务端注记盖章。个人路径零变化，无视觉新增，
+  只是发布表单多一行选择器。
+
 ## Revision 28 — 2026-09-05
 
 - Wired the Profile service half that commit 6e68aaf

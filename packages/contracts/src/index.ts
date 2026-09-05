@@ -523,6 +523,9 @@ export const ActivitySchema = z.object({
   ownerId: z.string().optional(),
   status: z.enum(["PUBLISHED", "CANCELLED"]).optional(),
   consumptionTerm: z.enum(["SPLIT", "HOST_COVERS"]).optional(),
+  // MERCHANT-PUBLISH-001: 以商家名义发布时的店名（Origin=MERCHANT 时必有）。
+  // 只认服务端注记；个人发布为空。
+  merchantName: z.string().min(1).optional(),
   // AI 助理信息。aiStatus != NONE 时客户端必显示 AI 标注 + persona
   // 头像 + 名字 (跟 X / Threads / 抖音 / 小红书的 "AI 生成" 标注
   // 一致)。aiPersona* 三件只当 aiStatus 表明是 AI 生成/辅助时才下发，
@@ -640,7 +643,10 @@ export const PublishMarketOpportunityInputSchema = z.object({
   priceLabel: z.string().optional(),
   skills: z.string(),
   lens: z.array(z.enum(["NOW", "NEARBY", "BOOKED", "REMOTE"])).min(1),
-  travel: z.number().int().nullable().optional()
+  travel: z.number().int().nullable().optional(),
+  // MERCHANT-PUBLISH-001: 以商家名义发布时带店 id。server 在 api 层验
+  // business 成员（OWNER/ADMIN）后才认；伪造的直接 403。个人发布不传。
+  merchantId: z.string().min(1).optional()
 });
 export type PublishMarketOpportunityInput = z.infer<typeof PublishMarketOpportunityInputSchema>;
 
