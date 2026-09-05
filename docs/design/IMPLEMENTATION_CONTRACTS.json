@@ -133,14 +133,15 @@
         "apps/mobile/src/surfaces/merchant-storefront.tsx",
         "apps/mobile/src/business-client.ts",
         "apps/mobile/src/expo-composer-draft-store.ts",
-        "apps/mobile/src/shell/app-shell.tsx"
+        "apps/mobile/src/shell/app-shell.tsx",
+        "apps/mobile/src/surfaces/business-home.tsx"
       ],
       "evidenceFiles": [
         "apps/api-go/internal/business/service_test.go",
         "apps/mobile/src/business-client.test.ts"
       ],
-      "status": "PARTIAL",
-      "knownGap": "R18.x commit 1+2: 店铺相册 / 店铺信息 / 成员目录 / 销售日表 backend + mobile wire. commit 3 删 merchant-me-r21.tsx hardcoded mock."
+      "status": "IMPLEMENTED",
+      "knownGap": "R18.x 4 commits 完成. store_photo / store_lines / member_directory / spend_daily backend (PG+memory) + BusinessClient + photo picker + MerchantStorefrontSurface + MerchantMeR21Replacement + BusinessHome real wire. Hardcoded mocks (1250 + 242 + 134 行) 全部删除/替换."
     }
   ]
 }

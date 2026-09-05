@@ -462,6 +462,8 @@ export function AppShell({
               onOpenMe={() => setTab("ME")}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
               bottomNavVisible={isNavVisible}
+              business={business}
+              activities={activities}
             />
           ) : workspaceTarget ? (
             <FulfillmentWorkspace

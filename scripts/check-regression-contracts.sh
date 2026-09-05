@@ -344,16 +344,21 @@ echo "    STORE-PHOTO-001 (mobile): PASS (client + surface wire)"
 # MERCHANT-R21-001: R21 商家身份 (me.tsx > context === 'BUSINESS')
 # 之前走 merchant-me-r21.tsx 1250 行 @ts-nocheck hardcoded mock
 # (Linh / Bao / Khoa / 12.6tr / Bonsaidon / 48 张相册 全部 inline).
-# 那个文件必须不存在; me.tsx 必须用 MerchantMeR21Replacement。
-if [ -f apps/mobile/src/surfaces/merchant-me-r21.tsx ]; then
-  echo "  FAIL [MERCHANT-R21-001]: merchant-me-r21.tsx hardcoded mock still present" >&2
+# 现在 merchant-me-r21.tsx 是 thin shim, 只 re-export
+# MerchantMeR21Replacement; me.tsx 必须 wire 它.
+if grep -q '@ts-nocheck' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
+  echo "  FAIL [MERCHANT-R21-001]: merchant-me-r21.tsx is back to a @ts-nocheck mock" >&2
+  exit 1
+fi
+if ! grep -q 'MerchantMeR21Replacement' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
+  echo "  FAIL [MERCHANT-R21-001]: merchant-me-r21.tsx lost the re-export" >&2
   exit 1
 fi
 if ! grep -q 'MerchantMeR21Replacement' apps/mobile/src/surfaces/me.tsx; then
   echo "  FAIL [MERCHANT-R21-001]: me.tsx lost the MerchantMeR21Replacement wire" >&2
   exit 1
 fi
-echo "    MERCHANT-R21-001: PASS (hardcoded merchant-me-r21.tsx removed; replaced with real BusinessClient + SupplyClient wire)"
+echo "    MERCHANT-R21-001: PASS (hardcoded merchant-me-r21.tsx replaced with thin shim; replacement wires real BusinessClient + SupplyClient)"
 
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。

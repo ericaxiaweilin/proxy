@@ -32,8 +32,15 @@ same commit. Do not record routine business logic changes here.
   for the activity surface. Empty states are honest ('server 列表
   为空') instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
   app-shell.tsx threads the activities client down to MeSurface.
-  Tripwires: STORE-PHOTO-001, STORE-LINES-001, MERCHANT-DIRECTORY-001,
-  MERCHANT-SPEND-DAILY-001, MERCHANT-R21-001.
+  Mobile commit (BusinessHome real wire) replaces the 242-line
+  hardcoded 'Bonsaidon today push' / 'Rooftop Photo Afternoon' /
+  '场景结果 Invite Sent 12' mock with a real surface that calls
+  BusinessClient.listMyAccounts / listStores / listMemberDirectory /
+  listSpendDaily and ActivityClient.listActivities, with honest
+  empty states. app-shell.tsx threads business + activities into
+  <BusinessHome/>. Tripwires: STORE-PHOTO-001, STORE-LINES-001,
+  MERCHANT-DIRECTORY-001, MERCHANT-SPEND-DAILY-001, MERCHANT-R21-001,
+  BIZ-HOME-WIRE-001.
 
 ## Revision 23 — 2026-09-05
 

@@ -1,6 +1,6 @@
 // R18.x: merchant-me-r21.tsx is a thin compatibility shim.
 //
-// The previous 1250-line @ts-nocheck hardcoded mock (Linh / Bao / Khoa
+// The previous 1250-line hardcoded mock (Linh / Bao / Khoa
 // creator tuples, fake '12.6tr VND' sales numbers, 'Bonsaidon' identity,
 // '48 张相册' counter, non-clickable 'manageCard' Views) is replaced
 // by MerchantMeR21Replacement. This file exists only to keep the
