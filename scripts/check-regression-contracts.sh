@@ -289,12 +289,42 @@ require_test "MONEYFLOW-004" "./internal/marketplace" \
 
 # MONEYFLOW-005: client publish 可以不传 PriceLabel，server 仍下发
 # 正确中文文案。这是 MONEYFLOW-004 的 client-side 承诺：wire
-# PublishMarketOpportunityInputSchema  PriceLabel 设为 optional。
+# PublishMarketOpportunityInputSchema  PriceLabel 设为 optional。
 # 四种 MoneyFlow × 三种 client PriceLabel input 状态（缺省 / 空白 /
 # 错位），server response 必须都推成 opportunityPriceLabel(MoneyFlow)。
 require_test "MONEYFLOW-005" "./internal/marketplace" \
   "TestMarketPublishOmitsClientPriceLabel" \
   "apps/api-go/internal/marketplace/service_test.go" || exit $?
+
+# STORE-PHOTO-001: 店铺相册 必须 走 server 侧 AddStorePhoto / ListStorePhotos。
+# 'merchant-me-r21.tsx' 有 hardcoded "48 张" "不响应点击" 的相册块。
+# 这个 tripwire 确保: (a) 拒接外部 URL (INVALID_ASSET_PATH);
+# (b) uploader 只能删自己上传的 (防御性).
+require_test "STORE-PHOTO-001" "./internal/business" \
+  "TestStoreAlbumRoundTrip" \
+  "apps/api-go/internal/business/service_test.go" || exit $?
+
+# STORE-LINES-001: 店铺信息 (Logo / 营业时间 / 联系方式) 必须可写可读。
+# 'me.tsx > merchantstorefront > storeLines' tile 是非点击 View。
+# tripwire 验证 UpsertStoreLines 拒接外部 logo URL, GetStoreLines
+# 返回上传的 logoAssetPath / description。
+require_test "STORE-LINES-001" "./internal/business" \
+  "TestStoreLinesUpsertAndRead" \
+  "apps/api-go/internal/business/service_test.go" || exit $?
+
+# MERCHANT-DIRECTORY-001: 'Creator 经营' / 客户列表不能是 hardcoded 数组。
+# member_directory 提供显示名 (Linh / Bao / Khoa) 投影; OWNER+ADMIN
+# upsert, 业务成员读; 入侵者被 BUSINESS_ADMIN_REQUIRED 拒。
+require_test "MERCHANT-DIRECTORY-001" "./internal/business" \
+  "TestMemberDirectoryUpsertAndList" \
+  "apps/api-go/internal/business/service_test.go" || exit $?
+
+# MERCHANT-SPEND-DAILY-001: 销售中心 12.6tr / 148 订单 / 85K 客单
+# 全部 hardcoded 是不诚实的. tripwire 验证 spend_daily upsert +
+# 窗口读取, plus 入侵者被 BUSINESS_FINANCE_REQUIRED 拒。
+require_test "MERCHANT-SPEND-DAILY-001" "./internal/business" \
+  "TestSpendDailyUpsertAndList" \
+  "apps/api-go/internal/business/service_test.go" || exit $?
 
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。

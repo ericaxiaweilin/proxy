@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,60 @@ type Store struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
+// StorePhoto is one entry in a store's album. AssetPath is a Proxy-internal
+// reference, never a public URL; the wire contract enforces a non-empty
+// ai-personas/ / assets/ / store/ / photo_ prefix.
+type StorePhoto struct {
+	ID         string    `json:"id"`
+	StoreID    string    `json:"storeId"`
+	BusinessID string    `json:"businessId"`
+	UploadedBy string    `json:"uploadedBy"`
+	AssetPath  string    `json:"assetPath"`
+	Caption    string    `json:"caption"`
+	SortOrder  int       `json:"sortOrder"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// StoreLines is the editable storefront profile. LogoAssetPath follows the
+// same asset-path rule as StorePhoto. HoursJSON is a free-form encoded blob
+// (UI is the source of truth for the schedule widget).
+type StoreLines struct {
+	StoreID        string    `json:"storeId"`
+	BusinessID     string    `json:"businessId"`
+	LogoAssetPath  string    `json:"logoAssetPath"`
+	Description    string    `json:"description"`
+	HoursJSON      string    `json:"hoursJson"`
+	ContactPhone   string    `json:"contactPhone"`
+	ContactEmail   string    `json:"contactEmail"`
+	UpdatedBy      string    `json:"updatedBy"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+// MemberDirectory entry carries a display_name projection so the mobile
+// "Creator 经营" / "客户" surfaces can show "Linh / Bao / Khoa" without a
+// cross-surface user lookup. Directory is updated whenever membership
+// changes (Create / Update / Remove).
+type MemberDirectory struct {
+	BusinessID  string    `json:"businessId"`
+	UserID      string    `json:"userId"`
+	DisplayName string    `json:"displayName"`
+	Role        string    `json:"role"`
+	Status      string    `json:"status"`
+	JoinedAt    time.Time `json:"joinedAt"`
+}
+
+// SpendDaily is a per-bucket rollup used by the sales center dashboard.
+// Hardcoded "12.6tr" / "148 订单" will be replaced by reading from this
+// projection. The repository's AddSpend path projects a row here.
+type SpendDaily struct {
+	BusinessID           string    `json:"businessId"`
+	BucketDate           string    `json:"bucketDate"`
+	OrderCount           int       `json:"orderCount"`
+	GrossMinor           int64     `json:"grossMinor"`
+	NewCustomerCount     int       `json:"newCustomerCount"`
+	ReturningCustomerCount int     `json:"returningCustomerCount"`
+}
+
 type Repository interface {
 	CreateAccount(ctx context.Context, a Account) error
 	GetAccount(ctx context.Context, id string) (Account, error)
@@ -47,21 +102,53 @@ type Repository interface {
 	CreateMembership(ctx context.Context, m Membership) error
 	ListMembers(ctx context.Context, businessID string) ([]Membership, error)
 	CreateStore(ctx context.Context, s Store) error
+	GetStore(ctx context.Context, storeID string) (Store, error)
 	ListStores(ctx context.Context, businessID string) ([]Store, error)
 	AddSpend(ctx context.Context, businessID, orderID string, amount int64) error
 	SpendSummary(ctx context.Context, businessID string) (int64, error)
+
+	// Store photos
+	AddStorePhoto(ctx context.Context, p StorePhoto) error
+	ListStorePhotos(ctx context.Context, storeID string) ([]StorePhoto, error)
+	DeleteStorePhoto(ctx context.Context, storeID, photoID, requesterID string) error
+	GetStorePhoto(ctx context.Context, storeID, photoID string) (StorePhoto, error)
+
+	// Store lines (upsert)
+	UpsertStoreLines(ctx context.Context, l StoreLines) error
+	GetStoreLines(ctx context.Context, storeID string) (StoreLines, error)
+
+	// Member directory (upsert + read)
+	UpsertMemberDirectory(ctx context.Context, m MemberDirectory) error
+	ListMemberDirectory(ctx context.Context, businessID string) ([]MemberDirectory, error)
+
+	// Spend daily rollup (upsert)
+	UpsertSpendDaily(ctx context.Context, s SpendDaily) error
+	ListSpendDaily(ctx context.Context, businessID string, sinceDays int) ([]SpendDaily, error)
 }
 
 type MemoryRepository struct {
-	mu          sync.Mutex
-	accounts    map[string]Account
-	memberships map[string]map[string]Membership
-	stores      map[string]Store
-	spends      map[string][]int64
+	mu              sync.Mutex
+	accounts        map[string]Account
+	memberships     map[string]map[string]Membership
+	stores          map[string]Store
+	spends          map[string][]int64
+	storePhotos     map[string]map[string]StorePhoto
+	storeLines      map[string]StoreLines
+	memberDirectory map[string]map[string]MemberDirectory
+	spendDaily      map[string]map[string]SpendDaily
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{accounts: make(map[string]Account), memberships: make(map[string]map[string]Membership), stores: make(map[string]Store), spends: make(map[string][]int64)}
+	return &MemoryRepository{
+		accounts:        make(map[string]Account),
+		memberships:     make(map[string]map[string]Membership),
+		stores:          make(map[string]Store),
+		spends:          make(map[string][]int64),
+		storePhotos:     make(map[string]map[string]StorePhoto),
+		storeLines:      make(map[string]StoreLines),
+		memberDirectory: make(map[string]map[string]MemberDirectory),
+		spendDaily:      make(map[string]map[string]SpendDaily),
+	}
 }
 func (r *MemoryRepository) CreateAccount(_ context.Context, a Account) error {
 	r.mu.Lock()
@@ -71,6 +158,10 @@ func (r *MemoryRepository) CreateAccount(_ context.Context, a Account) error {
 		r.memberships[a.ID] = make(map[string]Membership)
 	}
 	r.memberships[a.ID][a.OwnerUserID] = Membership{BusinessID: a.ID, UserID: a.OwnerUserID, Role: "OWNER", Status: "ACTIVE", CreatedAt: a.CreatedAt}
+	if r.memberDirectory[a.ID] == nil {
+		r.memberDirectory[a.ID] = make(map[string]MemberDirectory)
+	}
+	r.memberDirectory[a.ID][a.OwnerUserID] = MemberDirectory{BusinessID: a.ID, UserID: a.OwnerUserID, DisplayName: a.Name, Role: "OWNER", Status: "ACTIVE", JoinedAt: a.CreatedAt}
 	return nil
 }
 func (r *MemoryRepository) GetAccount(_ context.Context, id string) (Account, error) {
@@ -111,6 +202,16 @@ func (r *MemoryRepository) CreateMembership(_ context.Context, m Membership) err
 		r.memberships[m.BusinessID] = make(map[string]Membership)
 	}
 	r.memberships[m.BusinessID][m.UserID] = m
+	if r.memberDirectory[m.BusinessID] == nil {
+		r.memberDirectory[m.BusinessID] = make(map[string]MemberDirectory)
+	}
+	// Preserve existing display_name if directory already has one.
+	existing := r.memberDirectory[m.BusinessID][m.UserID]
+	display := existing.DisplayName
+	if display == "" {
+		display = m.UserID
+	}
+	r.memberDirectory[m.BusinessID][m.UserID] = MemberDirectory{BusinessID: m.BusinessID, UserID: m.UserID, DisplayName: display, Role: m.Role, Status: m.Status, JoinedAt: m.CreatedAt}
 	return nil
 }
 func (r *MemoryRepository) ListMembers(_ context.Context, businessID string) ([]Membership, error) {
@@ -136,6 +237,135 @@ func (r *MemoryRepository) ListStores(_ context.Context, businessID string) ([]S
 		if s.BusinessID == businessID {
 			result = append(result, s)
 		}
+	}
+	return result, nil
+}
+
+func (r *MemoryRepository) GetStore(_ context.Context, storeID string) (Store, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.stores[storeID]
+	if !ok {
+		return Store{}, errors.New("store not found")
+	}
+	return s, nil
+}
+
+func (r *MemoryRepository) AddStorePhoto(_ context.Context, p StorePhoto) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.storePhotos[p.StoreID] == nil {
+		r.storePhotos[p.StoreID] = make(map[string]StorePhoto)
+	}
+	r.storePhotos[p.StoreID][p.ID] = p
+	return nil
+}
+
+func (r *MemoryRepository) ListStorePhotos(_ context.Context, storeID string) ([]StorePhoto, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []StorePhoto{}
+	for _, p := range r.storePhotos[storeID] {
+		result = append(result, p)
+	}
+	return result, nil
+}
+
+func (r *MemoryRepository) DeleteStorePhoto(_ context.Context, storeID, photoID, requesterID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	photos := r.storePhotos[storeID]
+	if photos == nil {
+		return errors.New("photo not found")
+	}
+	photo, ok := photos[photoID]
+	if !ok {
+		return errors.New("photo not found")
+	}
+	if photo.UploadedBy != requesterID {
+		return errors.New("only the uploader may delete this photo")
+	}
+	delete(photos, photoID)
+	return nil
+}
+
+func (r *MemoryRepository) GetStorePhoto(_ context.Context, storeID, photoID string) (StorePhoto, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	photos := r.storePhotos[storeID]
+	if photos == nil {
+		return StorePhoto{}, errors.New("photo not found")
+	}
+	photo, ok := photos[photoID]
+	if !ok {
+		return StorePhoto{}, errors.New("photo not found")
+	}
+	return photo, nil
+}
+
+func (r *MemoryRepository) UpsertStoreLines(_ context.Context, l StoreLines) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.storeLines[l.StoreID] = l
+	return nil
+}
+
+func (r *MemoryRepository) GetStoreLines(_ context.Context, storeID string) (StoreLines, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	l, ok := r.storeLines[storeID]
+	if !ok {
+		return StoreLines{StoreID: storeID}, nil
+	}
+	return l, nil
+}
+
+func (r *MemoryRepository) UpsertMemberDirectory(_ context.Context, m MemberDirectory) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.memberDirectory[m.BusinessID] == nil {
+		r.memberDirectory[m.BusinessID] = make(map[string]MemberDirectory)
+	}
+	r.memberDirectory[m.BusinessID][m.UserID] = m
+	return nil
+}
+
+func (r *MemoryRepository) ListMemberDirectory(_ context.Context, businessID string) ([]MemberDirectory, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []MemberDirectory{}
+	for _, m := range r.memberDirectory[businessID] {
+		result = append(result, m)
+	}
+	return result, nil
+}
+
+func (r *MemoryRepository) UpsertSpendDaily(_ context.Context, s SpendDaily) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.spendDaily[s.BusinessID] == nil {
+		r.spendDaily[s.BusinessID] = make(map[string]SpendDaily)
+	}
+	r.spendDaily[s.BusinessID][s.BucketDate] = s
+	return nil
+}
+
+func (r *MemoryRepository) ListSpendDaily(_ context.Context, businessID string, sinceDays int) ([]SpendDaily, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := []SpendDaily{}
+	for _, s := range r.spendDaily[businessID] {
+		if sinceDays > 0 {
+			t, err := time.Parse("2006-01-02", s.BucketDate)
+			if err == nil {
+				now := time.Now().UTC()
+				cutoff := now.AddDate(0, 0, -sinceDays)
+				if t.Before(cutoff) {
+					continue
+				}
+			}
+		}
+		result = append(result, s)
 	}
 	return result, nil
 }
@@ -171,7 +401,12 @@ func NewWithRepository(repo Repository) *Service {
 }
 func (s *Service) Supports(t string) bool {
 	switch t {
-	case "CreateBusinessAccount", "ListMyBusinessAccounts", "AddBusinessMember", "CreateBusinessStore", "ListBusinessStores", "SpendSummary":
+	case "CreateBusinessAccount", "ListMyBusinessAccounts", "AddBusinessMember",
+		"CreateBusinessStore", "ListBusinessStores", "GetBusinessStore", "SpendSummary",
+		"AddStorePhoto", "ListStorePhotos", "DeleteStorePhoto",
+		"UpsertStoreLines", "GetStoreLines",
+		"ListMemberDirectory", "UpsertMemberDirectory",
+		"ListSpendDaily", "UpsertSpendDaily":
 		return true
 	}
 	return false
@@ -193,8 +428,28 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.createStore(ctx, e)
 	case "ListBusinessStores":
 		return s.listStores(ctx, e)
+	case "GetBusinessStore":
+		return s.getStore(ctx, e)
 	case "SpendSummary":
 		return s.spendSummary(ctx, e)
+	case "AddStorePhoto":
+		return s.addStorePhoto(ctx, e)
+	case "ListStorePhotos":
+		return s.listStorePhotos(ctx, e)
+	case "DeleteStorePhoto":
+		return s.deleteStorePhoto(ctx, e)
+	case "UpsertStoreLines":
+		return s.upsertStoreLines(ctx, e)
+	case "GetStoreLines":
+		return s.getStoreLines(ctx, e)
+	case "ListMemberDirectory":
+		return s.listMemberDirectory(ctx, e)
+	case "UpsertMemberDirectory":
+		return s.upsertMemberDirectory(ctx, e)
+	case "ListSpendDaily":
+		return s.listSpendDaily(ctx, e)
+	case "UpsertSpendDaily":
+		return s.upsertSpendDaily(ctx, e)
 	default:
 		return command.Rejected(e, "BUSINESS_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "business.unsupported", nil)
 	}
@@ -312,6 +567,267 @@ func (s *Service) spendSummary(ctx context.Context, e command.Envelope) command.
 	return acceptedWithPayload(e, "SpendSummary", p.BusinessID, 1, "SUMMARIZED", map[string]any{"totalMinor": total}, nil)
 }
 
+func (s *Service) getStore(ctx context.Context, e command.Envelope) command.Result {
+	storeID := e.Target.ID
+	if storeID == "" {
+		var p struct {
+			StoreID string `json:"storeId"`
+		}
+		if !decode(e.Payload, &p) || p.StoreID == "" {
+			return command.Rejected(e, "INVALID_STORE_ID", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_id", nil)
+		}
+		storeID = p.StoreID
+	}
+	store, err := s.repo.GetStore(ctx, storeID)
+	if err != nil {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, store.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR", "VIEWER") {
+		return command.Rejected(e, "BUSINESS_MEMBER_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.member_required", nil)
+	}
+	return acceptedWithPayload(e, "Store", store.ID, 1, store.Status, map[string]any{"store": store}, nil)
+}
+
+func (s *Service) addStorePhoto(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		StoreID   string `json:"storeId"`
+		AssetPath string `json:"assetPath"`
+		Caption   string `json:"caption"`
+		SortOrder int    `json:"sortOrder"`
+	}
+	if !decode(e.Payload, &p) || p.StoreID == "" || p.AssetPath == "" {
+		return command.Rejected(e, "INVALID_STORE_PHOTO", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_photo", nil)
+	}
+	if !isValidAssetPath(p.AssetPath) {
+		return command.Rejected(e, "INVALID_ASSET_PATH", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_asset_path", nil)
+	}
+	store, err := s.repo.GetStore(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, store.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR") {
+		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
+	}
+	now := s.clock.Now().UTC()
+	photo := StorePhoto{ID: newID("photo_"), StoreID: p.StoreID, BusinessID: store.BusinessID, UploadedBy: e.Actor.ID, AssetPath: p.AssetPath, Caption: p.Caption, SortOrder: p.SortOrder, CreatedAt: now}
+	if err := s.repo.AddStorePhoto(ctx, photo); err != nil {
+		return command.Rejected(e, "STORE_PHOTO_ADD_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_photo_add_failed", nil)
+	}
+	ev := event.New("StorePhotoAdded", "StorePhoto", photo.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"storeId": p.StoreID, "assetPath": p.AssetPath})
+	return acceptedWithPayload(e, "StorePhoto", photo.ID, 1, "ADDED", map[string]any{"photo": photo}, []event.DomainEvent{ev})
+}
+
+func (s *Service) listStorePhotos(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		StoreID string `json:"storeId"`
+	}
+	if !decode(e.Payload, &p) || p.StoreID == "" {
+		p.StoreID = e.Target.ID
+		if p.StoreID == "" {
+			return command.Rejected(e, "INVALID_STORE_ID", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_id", nil)
+		}
+	}
+	store, err := s.repo.GetStore(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, store.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR", "VIEWER") {
+		return command.Rejected(e, "BUSINESS_MEMBER_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.member_required", nil)
+	}
+	photos, err := s.repo.ListStorePhotos(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_PHOTO_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_photo_list_failed", nil)
+	}
+	return acceptedWithPayload(e, "StorePhotoList", p.StoreID, 1, "LISTED", map[string]any{"photos": photos, "count": len(photos)}, nil)
+}
+
+func (s *Service) deleteStorePhoto(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		StoreID string `json:"storeId"`
+		PhotoID string `json:"photoId"`
+	}
+	if !decode(e.Payload, &p) || p.StoreID == "" || p.PhotoID == "" {
+		return command.Rejected(e, "INVALID_PHOTO_DELETE", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_photo_delete", nil)
+	}
+	store, err := s.repo.GetStore(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, store.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR") {
+		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
+	}
+	if err := s.repo.DeleteStorePhoto(ctx, p.StoreID, p.PhotoID, e.Actor.ID); err != nil {
+		return command.Rejected(e, "STORE_PHOTO_DELETE_DENIED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.store_photo_delete_denied", nil)
+	}
+	now := s.clock.Now().UTC()
+	ev := event.New("StorePhotoDeleted", "StorePhoto", p.PhotoID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"storeId": p.StoreID})
+	return command.Accepted(e, "StorePhoto", p.PhotoID, 1, "DELETED", []string{ev.EventID})
+}
+
+func (s *Service) upsertStoreLines(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		StoreID       string `json:"storeId"`
+		LogoAssetPath string `json:"logoAssetPath"`
+		Description   string `json:"description"`
+		HoursJSON     string `json:"hoursJson"`
+		ContactPhone  string `json:"contactPhone"`
+		ContactEmail  string `json:"contactEmail"`
+	}
+	if !decode(e.Payload, &p) || p.StoreID == "" {
+		return command.Rejected(e, "INVALID_STORE_LINES", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_lines", nil)
+	}
+	if p.LogoAssetPath != "" && !isValidAssetPath(p.LogoAssetPath) {
+		return command.Rejected(e, "INVALID_ASSET_PATH", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_asset_path", nil)
+	}
+	store, err := s.repo.GetStore(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, store.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR") {
+		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
+	}
+	now := s.clock.Now().UTC()
+	lines := StoreLines{StoreID: p.StoreID, BusinessID: store.BusinessID, LogoAssetPath: p.LogoAssetPath, Description: p.Description, HoursJSON: p.HoursJSON, ContactPhone: p.ContactPhone, ContactEmail: p.ContactEmail, UpdatedBy: e.Actor.ID, UpdatedAt: now}
+	if err := s.repo.UpsertStoreLines(ctx, lines); err != nil {
+		return command.Rejected(e, "STORE_LINES_UPSERT_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_lines_upsert_failed", nil)
+	}
+	ev := event.New("StoreLinesUpdated", "Store", p.StoreID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, nil)
+	return acceptedWithPayload(e, "StoreLines", p.StoreID, 1, "UPDATED", map[string]any{"lines": lines}, []event.DomainEvent{ev})
+}
+
+func (s *Service) getStoreLines(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		StoreID string `json:"storeId"`
+	}
+	if !decode(e.Payload, &p) || p.StoreID == "" {
+		p.StoreID = e.Target.ID
+		if p.StoreID == "" {
+			return command.Rejected(e, "INVALID_STORE_ID", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_id", nil)
+		}
+	}
+	store, err := s.repo.GetStore(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	if !s.hasRole(ctx, store.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR", "VIEWER") {
+		return command.Rejected(e, "BUSINESS_MEMBER_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.member_required", nil)
+	}
+	lines, err := s.repo.GetStoreLines(ctx, p.StoreID)
+	if err != nil {
+		return command.Rejected(e, "STORE_LINES_READ_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_lines_read_failed", nil)
+	}
+	return acceptedWithPayload(e, "StoreLines", p.StoreID, 1, "READ", map[string]any{"lines": lines}, nil)
+}
+
+func (s *Service) listMemberDirectory(ctx context.Context, e command.Envelope) command.Result {
+	businessID := e.Target.ID
+	if businessID == "" {
+		var p struct {
+			BusinessID string `json:"businessId"`
+		}
+		if !decode(e.Payload, &p) || p.BusinessID == "" {
+			return command.Rejected(e, "INVALID_LIST", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_list", nil)
+		}
+		businessID = p.BusinessID
+	}
+	if !s.hasRole(ctx, businessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR", "VIEWER") {
+		return command.Rejected(e, "BUSINESS_MEMBER_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.member_required", nil)
+	}
+	members, err := s.repo.ListMemberDirectory(ctx, businessID)
+	if err != nil {
+		return command.Rejected(e, "MEMBER_DIRECTORY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "business.member_directory_read_failed", nil)
+	}
+	return acceptedWithPayload(e, "MemberDirectoryList", businessID, 1, "LISTED", map[string]any{"members": members, "count": len(members)}, nil)
+}
+
+func (s *Service) upsertMemberDirectory(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		BusinessID  string `json:"businessId"`
+		UserID      string `json:"userId"`
+		DisplayName string `json:"displayName"`
+		Role        string `json:"role"`
+		Status      string `json:"status"`
+	}
+	if !decode(e.Payload, &p) || p.BusinessID == "" || p.UserID == "" {
+		return command.Rejected(e, "INVALID_MEMBER_DIRECTORY", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_member_directory", nil)
+	}
+	if !s.hasRole(ctx, p.BusinessID, e.Actor.ID, "OWNER", "ADMIN") {
+		return command.Rejected(e, "BUSINESS_ADMIN_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.admin_required", nil)
+	}
+	if p.Role == "" {
+		p.Role = "OPERATOR"
+	}
+	if p.Status == "" {
+		p.Status = "ACTIVE"
+	}
+	now := s.clock.Now().UTC()
+	entry := MemberDirectory{BusinessID: p.BusinessID, UserID: p.UserID, DisplayName: p.DisplayName, Role: p.Role, Status: p.Status, JoinedAt: now}
+	if err := s.repo.UpsertMemberDirectory(ctx, entry); err != nil {
+		return command.Rejected(e, "MEMBER_DIRECTORY_UPSERT_FAILED", "INTERNAL", "SAFE_RETRY", "business.member_directory_upsert_failed", nil)
+	}
+	ev := event.New("MemberDirectoryUpdated", "BusinessAccount", p.BusinessID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"userId": p.UserID})
+	return acceptedWithPayload(e, "MemberDirectory", p.BusinessID, 1, "UPDATED", map[string]any{"entry": entry}, []event.DomainEvent{ev})
+}
+
+func (s *Service) listSpendDaily(ctx context.Context, e command.Envelope) command.Result {
+	businessID := e.Target.ID
+	if businessID == "" {
+		var p struct {
+			BusinessID string `json:"businessId"`
+			SinceDays  int    `json:"sinceDays"`
+		}
+		if !decode(e.Payload, &p) || p.BusinessID == "" {
+			return command.Rejected(e, "INVALID_SUMMARY", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_summary", nil)
+		}
+		businessID = p.BusinessID
+	}
+	if !s.hasRole(ctx, businessID, e.Actor.ID, "OWNER", "ADMIN") {
+		return command.Rejected(e, "BUSINESS_FINANCE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.finance_required", nil)
+	}
+	var p struct {
+		SinceDays int `json:"sinceDays"`
+	}
+	_ = decode(e.Payload, &p)
+	if p.SinceDays <= 0 {
+		p.SinceDays = 30
+	}
+	rows, err := s.repo.ListSpendDaily(ctx, businessID, p.SinceDays)
+	if err != nil {
+		return command.Rejected(e, "SPEND_DAILY_READ_FAILED", "INTERNAL", "SAFE_RETRY", "business.spend_daily_read_failed", nil)
+	}
+	var totalGross int64
+	var totalOrders int
+	for _, r := range rows {
+		totalGross += r.GrossMinor
+		totalOrders += r.OrderCount
+	}
+	return acceptedWithPayload(e, "SpendDailyList", businessID, 1, "LISTED", map[string]any{"days": rows, "totalGrossMinor": totalGross, "totalOrders": totalOrders, "sinceDays": p.SinceDays}, nil)
+}
+
+func (s *Service) upsertSpendDaily(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		BusinessID             string `json:"businessId"`
+		BucketDate             string `json:"bucketDate"`
+		OrderCount             int    `json:"orderCount"`
+		GrossMinor             int64  `json:"grossMinor"`
+		NewCustomerCount       int    `json:"newCustomerCount"`
+		ReturningCustomerCount int    `json:"returningCustomerCount"`
+	}
+	if !decode(e.Payload, &p) || p.BusinessID == "" || p.BucketDate == "" {
+		return command.Rejected(e, "INVALID_SPEND_DAILY", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_spend_daily", nil)
+	}
+	if !s.hasRole(ctx, p.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR") {
+		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
+	}
+	row := SpendDaily{BusinessID: p.BusinessID, BucketDate: p.BucketDate, OrderCount: p.OrderCount, GrossMinor: p.GrossMinor, NewCustomerCount: p.NewCustomerCount, ReturningCustomerCount: p.ReturningCustomerCount}
+	if err := s.repo.UpsertSpendDaily(ctx, row); err != nil {
+		return command.Rejected(e, "SPEND_DAILY_UPSERT_FAILED", "INTERNAL", "SAFE_RETRY", "business.spend_daily_upsert_failed", nil)
+	}
+	now := s.clock.Now().UTC()
+	ev := event.New("SpendDailyUpserted", "BusinessAccount", p.BusinessID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"bucketDate": p.BucketDate})
+	return acceptedWithPayload(e, "SpendDaily", p.BusinessID, 1, "UPDATED", map[string]any{"row": row}, []event.DomainEvent{ev})
+}
+
 func (s *Service) hasRole(ctx context.Context, businessID, userID string, roles ...string) bool {
 	membership, err := s.repo.GetMembership(ctx, businessID, userID)
 	if err != nil || membership.Status != "ACTIVE" {
@@ -340,6 +856,24 @@ func (s *Service) enforceCategoryPolicy(category string) bool {
 func decode(payload map[string]any, target any) bool {
 	raw, err := json.Marshal(payload)
 	return err == nil && json.Unmarshal(raw, target) == nil
+}
+
+// isValidAssetPath enforces the wire contract for any user-supplied
+// asset reference: it must look like a Proxy-internal path, never a
+// full external URL or free-text. Guards against free-form input that
+// could later be used to render arbitrary content (XSS) or pull a
+// public URL that violates the AI-rendered-not-real-photo rule.
+func isValidAssetPath(p string) bool {
+	if len(p) == 0 || len(p) > 256 {
+		return false
+	}
+	prefixes := []string{"ai-personas/", "assets/", "store/", "photo_"}
+	for _, pre := range prefixes {
+		if strings.HasPrefix(p, pre) {
+			return true
+		}
+	}
+	return false
 }
 func newID(prefix string) string {
 	var b [8]byte

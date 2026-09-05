@@ -76,3 +76,216 @@ func TestListMyBusinessAccountsIsActorScoped(t *testing.T) {
 		t.Fatalf("actor-scoped account lists unexpectedly match: %s", ownerList.OperationRef)
 	}
 }
+
+// R18.x: STORE-PHOTO-001 tripwire
+// Merchant 'album' was hardcoded '48 张' in merchant-me-r21.tsx; closes
+// the gap by giving every store a real photo list backed by the
+// repository, with uploader-only delete and asset_path prefix guard.
+func TestStoreAlbumRoundTrip(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "Bonsaidon"}))
+	if created.Outcome != "ACCEPTED" {
+		t.Fatalf("create failed: %+v", created)
+	}
+	var body map[string]any
+	_ = json.Unmarshal([]byte(created.OperationRef), &body)
+	businessID := body["businessId"].(string)
+	store := service.Handle(businessEnvelope("owner", "CreateBusinessStore", "new", map[string]any{
+		"businessId": businessID, "name": "West Lake", "address": "Tay Ho",
+	}))
+	if store.Outcome != "ACCEPTED" {
+		t.Fatalf("store create failed: %+v", store)
+	}
+	var storeBody map[string]any
+	_ = json.Unmarshal([]byte(store.OperationRef), &storeBody)
+	storeID := storeBody["storeId"].(string)
+
+	rejected := service.Handle(businessEnvelope("owner", "AddStorePhoto", storeID, map[string]any{
+		"storeId": storeID, "assetPath": "https://attacker.example.com/x.jpg", "caption": "evil",
+	}))
+	if rejected.Outcome != "REJECTED" || rejected.Error == nil || rejected.Error.ErrorCode != "INVALID_ASSET_PATH" {
+		t.Fatalf("external URL was not rejected: %+v", rejected)
+	}
+
+	added := service.Handle(businessEnvelope("owner", "AddStorePhoto", storeID, map[string]any{
+		"storeId": storeID, "assetPath": "store/westlake-1.jpg", "caption": "front", "sortOrder": 1,
+	}))
+	if added.Outcome != "ACCEPTED" {
+		t.Fatalf("photo add failed: %+v", added)
+	}
+	var photoBody map[string]any
+	_ = json.Unmarshal([]byte(added.OperationRef), &photoBody)
+	photoID := photoBody["photo"].(map[string]any)["id"].(string)
+
+	listed := service.Handle(businessEnvelope("owner", "ListStorePhotos", storeID, map[string]any{"storeId": storeID}))
+	if listed.Outcome != "ACCEPTED" {
+		t.Fatalf("photo list failed: %+v", listed)
+	}
+	var listBody map[string]any
+	_ = json.Unmarshal([]byte(listed.OperationRef), &listBody)
+	count := int(listBody["count"].(float64))
+	if count != 1 {
+		t.Fatalf("expected 1 photo, got %d", count)
+	}
+
+	intruderDelete := service.Handle(businessEnvelope("intruder", "DeleteStorePhoto", storeID, map[string]any{
+		"storeId": storeID, "photoId": photoID,
+	}))
+	if intruderDelete.Outcome != "REJECTED" || intruderDelete.Error == nil {
+		t.Fatalf("non-member delete was not rejected: %+v", intruderDelete)
+	}
+	if intruderDelete.Error.ErrorCode != "BUSINESS_WRITE_REQUIRED" && intruderDelete.Error.ErrorCode != "BUSINESS_MEMBER_REQUIRED" && intruderDelete.Error.ErrorCode != "STORE_PHOTO_DELETE_DENIED" {
+		t.Fatalf("non-member delete code mismatch: got %s want BUSINESS_WRITE_REQUIRED or related", intruderDelete.Error.ErrorCode)
+	}
+	ownerDelete := service.Handle(businessEnvelope("owner", "DeleteStorePhoto", storeID, map[string]any{
+		"storeId": storeID, "photoId": photoID,
+	}))
+	if ownerDelete.Outcome != "ACCEPTED" {
+		t.Fatalf("owner delete failed: %+v", ownerDelete)
+	}
+	listed2 := service.Handle(businessEnvelope("owner", "ListStorePhotos", storeID, map[string]any{"storeId": storeID}))
+	_ = json.Unmarshal([]byte(listed2.OperationRef), &listBody)
+	if int(listBody["count"].(float64)) != 0 {
+		t.Fatalf("expected 0 photos after delete, got %v", listBody["count"])
+	}
+}
+
+// R18.x: STORE-LINES-001 tripwire
+// '店铺信息' tile in me.tsx > merchantstorefront was a non-clickable View.
+// The real flow is: owner uploads LogoAssetPath + description + hours
+// via UpsertStoreLines; everyone in the business reads via GetStoreLines.
+func TestStoreLinesUpsertAndRead(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "Bonsaidon"}))
+	var body map[string]any
+	_ = json.Unmarshal([]byte(created.OperationRef), &body)
+	businessID := body["businessId"].(string)
+	store := service.Handle(businessEnvelope("owner", "CreateBusinessStore", "new", map[string]any{
+		"businessId": businessID, "name": "West Lake", "address": "Tay Ho",
+	}))
+	var storeBody map[string]any
+	_ = json.Unmarshal([]byte(store.OperationRef), &storeBody)
+	storeID := storeBody["storeId"].(string)
+
+	upsert := service.Handle(businessEnvelope("owner", "UpsertStoreLines", storeID, map[string]any{
+		"storeId":       storeID,
+		"logoAssetPath": "assets/bonsaidon-logo.png",
+		"description":   "海鲜自助 · 河内",
+		"hoursJson":     "{\"mon\":\"10-22\"}",
+		"contactPhone":  "+84 24 0000 1111",
+		"contactEmail":  "hi@bonsaidon.vn",
+	}))
+	if upsert.Outcome != "ACCEPTED" {
+		t.Fatalf("lines upsert failed: %+v", upsert)
+	}
+	read := service.Handle(businessEnvelope("owner", "GetStoreLines", storeID, map[string]any{"storeId": storeID}))
+	if read.Outcome != "ACCEPTED" {
+		t.Fatalf("lines read failed: %+v", read)
+	}
+	var readBody map[string]any
+	_ = json.Unmarshal([]byte(read.OperationRef), &readBody)
+	lines := readBody["lines"].(map[string]any)
+	if lines["logoAssetPath"] != "assets/bonsaidon-logo.png" {
+		t.Fatalf("lines.logoAssetPath mismatch: %v", lines["logoAssetPath"])
+	}
+
+	badLogo := service.Handle(businessEnvelope("owner", "UpsertStoreLines", storeID, map[string]any{
+		"storeId":       storeID,
+		"logoAssetPath": "https://evil.example.com/logo.png",
+		"description":   "x",
+	}))
+	if badLogo.Outcome != "REJECTED" || badLogo.Error == nil || badLogo.Error.ErrorCode != "INVALID_ASSET_PATH" {
+		t.Fatalf("external logo URL was not rejected: %+v", badLogo)
+	}
+}
+
+// R18.x: MERCHANT-DIRECTORY-001 tripwire
+// 'Creator 经营' in merchant-me-r21.tsx was hardcoded Linh / Khoa / Bao.
+// The real flow is: admin upserts a member_directory row (with display
+// name); owner lists it; non-member is rejected.
+func TestMemberDirectoryUpsertAndList(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "Bonsaidon"}))
+	var body map[string]any
+	_ = json.Unmarshal([]byte(created.OperationRef), &body)
+	businessID := body["businessId"].(string)
+
+	added := service.Handle(businessEnvelope("owner", "AddBusinessMember", businessID, map[string]any{
+		"businessId": businessID, "userId": "creator-linh", "role": "OPERATOR",
+	}))
+	if added.Outcome != "ACCEPTED" {
+		t.Fatalf("add member failed: %+v", added)
+	}
+	upserted := service.Handle(businessEnvelope("owner", "UpsertMemberDirectory", businessID, map[string]any{
+		"businessId": businessID, "userId": "creator-linh", "displayName": "Linh", "role": "OPERATOR", "status": "ACTIVE",
+	}))
+	if upserted.Outcome != "ACCEPTED" {
+		t.Fatalf("directory upsert failed: %+v", upserted)
+	}
+	listed := service.Handle(businessEnvelope("owner", "ListMemberDirectory", businessID, map[string]any{"businessId": businessID}))
+	if listed.Outcome != "ACCEPTED" {
+		t.Fatalf("directory list failed: %+v", listed)
+	}
+	var listBody map[string]any
+	_ = json.Unmarshal([]byte(listed.OperationRef), &listBody)
+	members := listBody["members"].([]any)
+	if len(members) < 2 {
+		t.Fatalf("expected at least 2 members (owner + creator-linh), got %d", len(members))
+	}
+	foundLinh := false
+	for _, m := range members {
+		entry := m.(map[string]any)
+		if entry["userId"] == "creator-linh" && entry["displayName"] == "Linh" {
+			foundLinh = true
+		}
+	}
+	if !foundLinh {
+		t.Fatalf("expected displayName 'Linh' in directory, got %+v", listBody["members"])
+	}
+}
+
+// R18.x: MERCHANT-SPEND-DAILY-001 tripwire
+// 'sales' / 'ops' / 'proxy' pages in merchant-me-r21.tsx were 100%
+// hardcoded (12.6tr VND, 148 订单, 85K 客单, etc). The real flow is
+// any actor with write role upserts a spend_daily row, OWNER/ADMIN
+// lists the rolling window; without any data the page renders empty
+// rather than the bogus '12.6tr' fallback.
+func TestSpendDailyUpsertAndList(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "Bonsaidon"}))
+	var body map[string]any
+	_ = json.Unmarshal([]byte(created.OperationRef), &body)
+	businessID := body["businessId"].(string)
+
+	upsert := service.Handle(businessEnvelope("owner", "UpsertSpendDaily", businessID, map[string]any{
+		"businessId":             businessID,
+		"bucketDate":             "2026-09-05",
+		"orderCount":             18,
+		"grossMinor":             12_600_000_000,
+		"newCustomerCount":       4,
+		"returningCustomerCount": 14,
+	}))
+	if upsert.Outcome != "ACCEPTED" {
+		t.Fatalf("spend daily upsert failed: %+v", upsert)
+	}
+	listed := service.Handle(businessEnvelope("owner", "ListSpendDaily", businessID, map[string]any{
+		"businessId": businessID, "sinceDays": 7,
+	}))
+	if listed.Outcome != "ACCEPTED" {
+		t.Fatalf("spend daily list failed: %+v", listed)
+	}
+	var listBody map[string]any
+	_ = json.Unmarshal([]byte(listed.OperationRef), &listBody)
+	if int(listBody["totalOrders"].(float64)) != 18 {
+		t.Fatalf("totalOrders mismatch: %v", listBody["totalOrders"])
+	}
+	if int(listBody["totalGrossMinor"].(float64)) != 12_600_000_000 {
+		t.Fatalf("totalGrossMinor mismatch: %v", listBody["totalGrossMinor"])
+	}
+	empty := service.Handle(businessEnvelope("intruder", "ListSpendDaily", "biz_unknown", map[string]any{
+		"businessId": "biz_unknown", "sinceDays": 7,
+	}))
+	if empty.Outcome != "REJECTED" || empty.Error == nil || empty.Error.ErrorCode != "BUSINESS_FINANCE_REQUIRED" {
+		t.Fatalf("non-existent business should fail role check: %+v", empty)
+	}
+}

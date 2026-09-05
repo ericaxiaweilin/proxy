@@ -4,6 +4,22 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 24 — 2026-09-05
+
+- Closed the merchant surface gap. The previous '商家' tab in
+  business-home.tsx and merchant-me-r21.tsx was entirely hardcoded:
+  'Bonsaidon' identity, '48 张相册' counter, '8,426 关注' stats, and
+  every manage tile was a non-clickable View. This revision gives the
+  business domain four new server-side commands (AddStorePhoto /
+  ListStorePhotos / DeleteStorePhoto, UpsertStoreLines / GetStoreLines,
+  UpsertMemberDirectory / ListMemberDirectory, UpsertSpendDaily /
+  ListSpendDaily) backed by a real PostgreSQL schema (migrations
+  /038) and an in-memory repository. Asset paths are constrained to
+  Proxy-internal prefixes (ai-personas/, assets/, store/, photo_); an
+  external URL on the photo or logo path is rejected with
+  INVALID_ASSET_PATH. Tripwires: STORE-PHOTO-001, STORE-LINES-001,
+  MERCHANT-DIRECTORY-001, MERCHANT-SPEND-DAILY-001.
+
 ## Revision 23 — 2026-09-05
 
 - Hardened marketplace confirmation so application state and the derived

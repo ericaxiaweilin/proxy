@@ -138,6 +138,167 @@ func (r *BusinessRepository) ListStores(ctx context.Context, businessID string) 
 	return result, rows.Err()
 }
 
+func (r *BusinessRepository) GetStore(ctx context.Context, storeID string) (business.Store, error) {
+	var store business.Store
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, business_id, name, address, status, created_at
+		FROM business.stores WHERE id=$1`, storeID).Scan(
+		&store.ID, &store.BusinessID, &store.Name, &store.Address, &store.Status, &store.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return business.Store{}, errors.New("store not found")
+	}
+	return store, err
+}
+
+func (r *BusinessRepository) AddStorePhoto(ctx context.Context, p business.StorePhoto) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO business.store_photos (id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		p.ID, p.StoreID, p.BusinessID, p.UploadedBy, p.AssetPath, p.Caption, p.SortOrder, p.CreatedAt)
+	return err
+}
+
+func (r *BusinessRepository) ListStorePhotos(ctx context.Context, storeID string) ([]business.StorePhoto, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, created_at
+		FROM business.store_photos WHERE store_id=$1 ORDER BY sort_order, created_at DESC`, storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []business.StorePhoto{}
+	for rows.Next() {
+		var p business.StorePhoto
+		if err := rows.Scan(&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, p)
+	}
+	return result, rows.Err()
+}
+
+func (r *BusinessRepository) DeleteStorePhoto(ctx context.Context, storeID, photoID, requesterID string) error {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		DELETE FROM business.store_photos
+		WHERE store_id=$1 AND id=$2 AND uploaded_by=$3`, storeID, photoID, requesterID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("photo not found or not owned by requester")
+	}
+	return nil
+}
+
+func (r *BusinessRepository) GetStorePhoto(ctx context.Context, storeID, photoID string) (business.StorePhoto, error) {
+	var p business.StorePhoto
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, created_at
+		FROM business.store_photos WHERE store_id=$1 AND id=$2`, storeID, photoID).Scan(
+		&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return business.StorePhoto{}, errors.New("photo not found")
+	}
+	return p, err
+}
+
+func (r *BusinessRepository) UpsertStoreLines(ctx context.Context, l business.StoreLines) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO business.store_lines (store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, updated_by, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (store_id) DO UPDATE SET
+			logo_asset_path=EXCLUDED.logo_asset_path,
+			description=EXCLUDED.description,
+			hours_json=EXCLUDED.hours_json,
+			contact_phone=EXCLUDED.contact_phone,
+			contact_email=EXCLUDED.contact_email,
+			updated_by=EXCLUDED.updated_by,
+			updated_at=EXCLUDED.updated_at`,
+		l.StoreID, l.BusinessID, l.LogoAssetPath, l.Description, l.HoursJSON, l.ContactPhone, l.ContactEmail, l.UpdatedBy, l.UpdatedAt)
+	return err
+}
+
+func (r *BusinessRepository) GetStoreLines(ctx context.Context, storeID string) (business.StoreLines, error) {
+	var l business.StoreLines
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT store_id, business_id, logo_asset_path, description, hours_json, contact_phone, contact_email, updated_by, updated_at
+		FROM business.store_lines WHERE store_id=$1`, storeID).Scan(
+		&l.StoreID, &l.BusinessID, &l.LogoAssetPath, &l.Description, &l.HoursJSON, &l.ContactPhone, &l.ContactEmail, &l.UpdatedBy, &l.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return business.StoreLines{StoreID: storeID}, nil
+	}
+	return l, err
+}
+
+func (r *BusinessRepository) UpsertMemberDirectory(ctx context.Context, m business.MemberDirectory) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO business.member_directory (business_id, user_id, display_name, role, status, joined_at)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (business_id, user_id) DO UPDATE SET
+			display_name=EXCLUDED.display_name,
+			role=EXCLUDED.role,
+			status=EXCLUDED.status`,
+		m.BusinessID, m.UserID, m.DisplayName, m.Role, m.Status, m.JoinedAt)
+	return err
+}
+
+func (r *BusinessRepository) ListMemberDirectory(ctx context.Context, businessID string) ([]business.MemberDirectory, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT business_id, user_id, display_name, role, status, joined_at
+		FROM business.member_directory WHERE business_id=$1 ORDER BY joined_at`, businessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []business.MemberDirectory{}
+	for rows.Next() {
+		var m business.MemberDirectory
+		if err := rows.Scan(&m.BusinessID, &m.UserID, &m.DisplayName, &m.Role, &m.Status, &m.JoinedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, m)
+	}
+	return result, rows.Err()
+}
+
+func (r *BusinessRepository) UpsertSpendDaily(ctx context.Context, s business.SpendDaily) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO business.spend_daily (business_id, bucket_date, order_count, gross_minor, new_customer_count, returning_customer_count)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (business_id, bucket_date) DO UPDATE SET
+			order_count=EXCLUDED.order_count,
+			gross_minor=EXCLUDED.gross_minor,
+			new_customer_count=EXCLUDED.new_customer_count,
+			returning_customer_count=EXCLUDED.returning_customer_count`,
+		s.BusinessID, s.BucketDate, s.OrderCount, s.GrossMinor, s.NewCustomerCount, s.ReturningCustomerCount)
+	return err
+}
+
+func (r *BusinessRepository) ListSpendDaily(ctx context.Context, businessID string, sinceDays int) ([]business.SpendDaily, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT business_id, bucket_date::TEXT, order_count, gross_minor, new_customer_count, returning_customer_count
+		FROM business.spend_daily
+		WHERE business_id=$1
+		  AND bucket_date >= (CURRENT_DATE - $2::int)
+		ORDER BY bucket_date DESC`, businessID, sinceDays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []business.SpendDaily{}
+	for rows.Next() {
+		var s business.SpendDaily
+		if err := rows.Scan(&s.BusinessID, &s.BucketDate, &s.OrderCount, &s.GrossMinor, &s.NewCustomerCount, &s.ReturningCustomerCount); err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+	return result, rows.Err()
+}
+
 func (r *BusinessRepository) AddSpend(ctx context.Context, businessID, orderID string, amount int64) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO business.spend_records (id, business_id, order_id, amount_minor, currency, created_at)
