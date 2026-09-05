@@ -112,6 +112,11 @@ fi
 pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-001: PASS"
 
+# UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
+# 两区都要显式标识身份。AI 首页只展示纯圆头像，添加/消息动作只能进主页后做。
+pnpm --filter @proxy/mobile test --run src/requester-home-discovery-contract.test.ts || exit $?
+echo "    UI-HOME-DISCOVERY-001: PASS"
+
 # AI-ASSIST-001: 首页 5 小美推荐目录（公开、匿名可读）+ AI 标签 + 关注/
 # 发消息。目录改名/换色必须服务端/种子/SVG 三处同步；AI 能力不得扩大
 # 到接单/报名/收付款（仍由服务端门禁禁止，此处只锁目录形状）。

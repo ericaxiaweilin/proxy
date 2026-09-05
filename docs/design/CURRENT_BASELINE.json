@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 37,
+  "baselineRevision": 38,
   "updatedAt": "2026-09-05",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -18,6 +18,13 @@
     "recoveryBaselineTag": "baseline/r15.23-command-clean-20260830"
   },
   "screenReferences": [
+    {
+      "scope": "requester-home-discovery",
+      "version": "HUMAN_FIRST_AI_SECOND_R1",
+      "file": "apps/mobile/src/surfaces/requester-home.tsx",
+      "status": "ACTIVE_IMPLEMENTATION_REFERENCE",
+      "implementationStatus": "HUMAN_LABELED_FIRST_AI_LABELED_SECOND_PROFILE_GATED_ACTIONS"
+    },
     {
       "scope": "root-dock",
       "version": "R15_22_STATIC_FREEZE",
