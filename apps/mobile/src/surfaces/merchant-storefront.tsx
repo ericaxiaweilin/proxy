@@ -36,6 +36,19 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
   const [stores, setStores] = useState<Record<string, Store[]>>({});
   const [photos, setPhotos] = useState<Record<string, StorePhoto[]>>({});
   const [lines, setLines] = useState<Record<string, StoreLines | undefined>>({});
+  // R18.x LINES-EDITOR-001: the storefront now lets a
+  // BUSINESS_WRITE_REQUIRED viewer edit logo / description /
+  // hours / contact for each store. The form is inline
+  // (no modal): editing toggles a few TextInputs and a
+  // 保存 button, mirrors the photo uploader pattern.
+  const [editingLinesFor, setEditingLinesFor] = useState<string | undefined>(undefined);
+  const [editingDescription, setEditingDescription] = useState<string>("");
+  const [editingContactPhone, setEditingContactPhone] = useState<string>("");
+  const [editingContactEmail, setEditingContactEmail] = useState<string>("");
+  const [editingHoursJson, setEditingHoursJson] = useState<string>("");
+  const [editingLogoPath, setEditingLogoPath] = useState<string>("");
+  const [savingLinesFor, setSavingLinesFor] = useState<string | undefined>(undefined);
+  const [linesError, setLinesError] = useState<string | undefined>(undefined);
   const [members, setMembers] = useState<Record<string, MemberDirectory[]>>({});
   const [spend, setSpend] = useState<Record<string, { totalOrders: number; totalGrossMinor: number; days: SpendDaily[] } | undefined>>({});
   const [uploadingStoreId, setUploadingStoreId] = useState<string | undefined>(undefined);
@@ -188,6 +201,59 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
     }
   }
 
+  // R18.x LINES-EDITOR-001: open the inline edit form.
+  // Pre-fills from the current lines row; if the store
+  // has no row yet, all fields are blank. The user can
+  // also paste a JSON object for hours, with an inline
+  // error if the JSON is malformed (validated client-side
+  // before sending to the server).
+  function startEditLines(storeId: string, current: StoreLines | undefined): void {
+    setLinesError(undefined);
+    setEditingLinesFor(storeId);
+    setEditingDescription(current?.description ?? "");
+    setEditingContactPhone(current?.contactPhone ?? "");
+    setEditingContactEmail(current?.contactEmail ?? "");
+    setEditingHoursJson(current?.hoursJson ?? "{}");
+    setEditingLogoPath(current?.logoAssetPath ?? "");
+  }
+
+  async function saveLines(storeId: string): Promise<void> {
+    setLinesError(undefined);
+    // Validate hours JSON before sending: business server
+    // will reject empty / non-object hoursJson, but a
+    // local pre-check gives the user a clearer error.
+    let hoursJson = editingHoursJson.trim() || "{}";
+    if (hoursJson.length > 0) {
+      try {
+        const parsed: unknown = JSON.parse(hoursJson);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          setLinesError("营业时间必须是 JSON 对象，例如 {周一至周五:09:00-18:00}");
+          return;
+        }
+      } catch {
+        setLinesError("营业时间 JSON 格式不正确");
+        return;
+      }
+    }
+    setSavingLinesFor(storeId);
+    try {
+      const saved = await client.upsertStoreLines({
+        storeId,
+        logoAssetPath: editingLogoPath,
+        description: editingDescription,
+        hoursJson,
+        contactPhone: editingContactPhone,
+        contactEmail: editingContactEmail,
+      });
+      setLines((prev) => ({ ...prev, [storeId]: saved }));
+      setEditingLinesFor(undefined);
+    } catch (e) {
+      setLinesError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingLinesFor(undefined);
+    }
+  }
+
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       <Text style={styles.title}>商家店铺</Text>
@@ -250,6 +316,89 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
                       ) : null}
                     </View>
                   ) : null}
+
+                  {/* R18.x LINES-EDITOR-001: inline edit form. */}
+                  {editingLinesFor === s.id ? (
+                    <View style={styles.linesEditForm}>
+                      <Text style={styles.linesEditLabel}>店铺简介</Text>
+                      <TextInput
+                        value={editingDescription}
+                        onChangeText={setEditingDescription}
+                        placeholder="一句话讲清这家店是做什么的"
+                        placeholderTextColor={color.muted}
+                        multiline
+                        style={[styles.createInput, styles.linesEditTextarea]}
+                      />
+                      <Text style={styles.linesEditLabel}>联系手机</Text>
+                      <TextInput
+                        value={editingContactPhone}
+                        onChangeText={setEditingContactPhone}
+                        placeholder="可选"
+                        placeholderTextColor={color.muted}
+                        keyboardType="phone-pad"
+                        style={styles.createInput}
+                      />
+                      <Text style={styles.linesEditLabel}>联系邮箱</Text>
+                      <TextInput
+                        value={editingContactEmail}
+                        onChangeText={setEditingContactEmail}
+                        placeholder="可选"
+                        placeholderTextColor={color.muted}
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        style={styles.createInput}
+                      />
+                      <Text style={styles.linesEditLabel}>营业时间 (JSON 对象，如 {"{周一至周五 09:00-18:00}"}）</Text>
+                      <TextInput
+                        value={editingHoursJson}
+                        onChangeText={setEditingHoursJson}
+                        placeholder="{}"
+                        placeholderTextColor={color.muted}
+                        autoCapitalize="none"
+                        style={styles.createInput}
+                      />
+                      <Text style={styles.linesEditLabel}>Logo 资产路径 (assets/... 或 ai-personas/...)</Text>
+                      <TextInput
+                        value={editingLogoPath}
+                        onChangeText={setEditingLogoPath}
+                        placeholder="可选, 例如 assets/store-logo.jpg"
+                        placeholderTextColor={color.muted}
+                        autoCapitalize="none"
+                        style={styles.createInput}
+                      />
+                      {linesError ? <Text style={styles.errorText}>{linesError}</Text> : null}
+                      <View style={styles.linesEditActions}>
+                        <Pressable
+                          disabled={savingLinesFor === s.id}
+                          onPress={() => {
+                            setEditingLinesFor(undefined);
+                            setLinesError(undefined);
+                          }}
+                          style={[styles.createBtn, styles.linesEditCancel]}
+                        >
+                          <Text style={styles.createBtnText}>取消</Text>
+                        </Pressable>
+                        <Pressable
+                          disabled={savingLinesFor === s.id}
+                          onPress={() => void saveLines(s.id)}
+                          style={[styles.createBtn, savingLinesFor === s.id && styles.createBtnBusy]}
+                        >
+                          <Text style={styles.createBtnText}>
+                            {savingLinesFor === s.id ? "保存中…" : "保存"}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <Pressable
+                      onPress={() => startEditLines(s.id, sLines)}
+                      style={styles.linesEditToggle}
+                    >
+                      <Text style={styles.linesEditToggleText}>
+                        {sLines ? "编辑主页 / 联系方式 / 营业时间" : "填写主页 / 联系方式 / 营业时间"}
+                      </Text>
+                    </Pressable>
+                  )}
 
                   <View style={styles.photoHead}>
                     <Text style={styles.photoHeadTitle}>店铺相册</Text>
@@ -338,6 +487,14 @@ const styles = StyleSheet.create({
   linesDescription: { color: color.ink, fontSize: 12 },
   linesContact: { color: color.muted, fontSize: 11 },
   linesHours: { color: color.muted, fontSize: 11 },
+  // R18.x LINES-EDITOR-001
+  linesEditToggle: { paddingVertical: 6 },
+  linesEditToggleText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  linesEditForm: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 12, borderWidth: 1, gap: 6, padding: 10 },
+  linesEditLabel: { color: color.muted, fontSize: 11, fontWeight: "800", marginTop: 4 },
+  linesEditTextarea: { minHeight: 60, textAlignVertical: "top" },
+  linesEditActions: { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 6 },
+  linesEditCancel: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1 },
   photoHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   photoHeadTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   photoHeadMeta: { color: color.muted, fontSize: 11 },
@@ -365,5 +522,6 @@ const styles = StyleSheet.create({
   createTitle: { color: color.ink, fontSize: 15, fontWeight: "800", marginBottom: 4 },
   createInput: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
   createBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 10, paddingVertical: 12 },
+  createBtnBusy: { opacity: 0.6 },
   createBtnText: { color: color.white, fontSize: 13, fontWeight: "800" },
 });

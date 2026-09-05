@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 31 — 2026-09-05
+
+- Closed the storefront '编辑主页 / 联系方式 / 营业时间' gap.
+  The server has had UpsertStoreLines since R18.x b77187a,
+  but the mobile MerchantStorefrontSurface was read-only:
+  business owners saw their old lines but had no way to
+  edit description / contact / hours / logo. This revision
+  adds the inline edit form (5 TextInputs + a 保存
+  button + 取消) and the startEditLines / saveLines
+  handlers; saveLines calls client.upsertStoreLines, and
+  validates the hours JSON client-side before sending so
+  the user gets a clearer error than the server's reject.
+  LINES-EDITOR-001 tripwire.
+
 ## Revision 30 — 2026-09-05
 
 - Closed the '取消订单' gap. The Order lifecycle enum

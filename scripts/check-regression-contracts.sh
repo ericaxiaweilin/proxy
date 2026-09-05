@@ -457,6 +457,25 @@ if ! grep -q 'cancelOrder' apps/mobile/src/surfaces/me-orders.tsx; then
 fi
 echo "    CANCEL-001: PASS (server CancelOrder + mobile cancelOrder + UI button)"
 
+# LINES-EDITOR-001: the server has had UpsertStoreLines
+# since R18.x b77187a, but the storefront surface was
+# read-only: business owners saw their old lines but had
+# no way to edit description / contact / hours / logo.
+# This tripwire asserts the inline edit form is wired
+# (startEditLines + saveLines + client.upsertStoreLines)
+# and that the createBtnBusy style exists so the saving
+# state has a visible disabled cue.
+if ! grep -q 'startEditLines\|saveLines' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "  FAIL [LINES-EDITOR-001]: storefront has no inline edit form for store lines" >&2
+  exit 1
+fi
+if ! grep -q 'client.upsertStoreLines' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "  FAIL [LINES-EDITOR-001]: saveLines never calls client.upsertStoreLines" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts >/dev/null
+echo "    LINES-EDITOR-001: PASS (inline edit form wires to UpsertStoreLines)"
+
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
 pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts
