@@ -56,8 +56,8 @@ const AUTHOR_TYPE_META: Record<FeedPost["authorType"], { label: string; reason: 
   MERCHANT: { label: "商家 · 河内", reason: "为你推荐：附近商家的公开动态" },
   PLATFORM_SPECIAL: { label: "Proxy 特别企划", reason: "为你推荐：平台特别企划" },
   // R15.76: R1 AI Identity System PRD — AI Native (平台虚拟供给) 在 4 个
-  //   authorType 之外独立一档. 限 mock 帖表现 (server schema 暂不返, 前面是 PLATFORM_SPECIAL 视觉但加 aiBadge).
-  AI_NATIVE: { label: "AI 助手 · 河内", reason: "为你推荐：平台虚拟供给, 由 Proxy 透明生成", aiBadge: true }
+  //   authorType 之外独立一档. 小美帖走这档：对外只叫 AI生成（小美≠助手）。
+  AI_NATIVE: { label: "AI生成 · 小美", reason: "为你推荐：平台小美公开动态，由 Proxy 透明生成", aiBadge: true }
 };
 
 function scenarioIconForPost(post: FeedPost): ProxyIconName {
@@ -898,6 +898,7 @@ export function FeedSurface({
                     <Text style={styles.postMeta}>· {relativeTime(post.createdAt)}</Text>
                   </View>
                   {meta.label ? <Text style={styles.postMeta}>{meta.label}</Text> : null}
+                  {meta.aiBadge ? <Text style={styles.aiBadge}>AI生成</Text> : null}
                 </View>
                 <Pressable
                   accessibilityLabel="更多"
@@ -1385,6 +1386,7 @@ const styles = StyleSheet.create({
   postNameLine: { alignItems: "center", flexDirection: "row", gap: 6, minWidth: 0 },
   postName: { color: color.ink, fontSize: 13, fontWeight: "700" },
   postMeta: { color: color.muted, fontSize: 11 },
+  aiBadge: { alignSelf: "flex-start", backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 10, fontWeight: "700", marginTop: 2, paddingHorizontal: 6, paddingVertical: 2 },
   // R15.23: Threads UX 没有 follow 按钮, 改 ⋯ 菜单 (32pt 宽, 19px 文字 #555)
   postMenu: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
   postMenuText: { color: "#555", fontSize: 19, lineHeight: 22 },

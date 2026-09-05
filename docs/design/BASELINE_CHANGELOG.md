@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 33 — 2026-09-05
+
+- 小美发帖 (AI-POSTS-001)：5 条开屏帖（AI_NATIVE + 写真），写真资产挂
+  AI_PERSONA provenance，帖子 Upsert 幂等；动态卡 AI 生成徽。另清掉
+  43 条测试残留帖（post_eng_*，只删测试前后缀行，用户帖不动）。
+
 ## Revision 32 — 2026-09-05
 
 - 小美快捷入口改道：推荐页未落地前，“看小美机会”进真实 AI 活动流

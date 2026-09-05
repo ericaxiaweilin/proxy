@@ -921,3 +921,39 @@ func TestListFeedPosts_CursorIsSignedAndTamperIsRejected(t *testing.T) {
 		t.Fatalf("second page: %v", second.Error)
 	}
 }
+
+// AI-POSTS-001: 5 小美开屏帖种子。一人一条 AI_NATIVE + 写真 mediaRef；
+// Upsert 幂等，可重跑。
+func TestSeedXiaomeiPosts(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+	if err := s.SeedXiaomeiPosts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedXiaomeiPosts(ctx); err != nil {
+		t.Fatal("reseed must be idempotent")
+	}
+	items, err := s.repository.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		if len(item.ID) < 12 || item.ID[:12] != "post_xiaomei" {
+			continue
+		}
+		seen[item.ID] = true
+		if item.AuthorType != "AI_NATIVE" {
+			t.Fatalf("xiaomei post %s must be AI_NATIVE, got %q", item.ID, item.AuthorType)
+		}
+		if len(item.MediaRefs) != 1 || item.MediaRefs[0].MediaAssetID == "" {
+			t.Fatalf("xiaomei post %s must carry exactly one photo ref: %+v", item.ID, item)
+		}
+		if item.Visibility != "PUBLIC" || item.Status != "PUBLISHED" {
+			t.Fatalf("xiaomei post %s must be PUBLIC+PUBLISHED: %+v", item.ID, item)
+		}
+	}
+	if len(seen) != 5 {
+		t.Fatalf("expected 5 xiaomei posts, got %d", len(seen))
+	}
+}

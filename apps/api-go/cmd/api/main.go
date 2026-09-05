@@ -247,6 +247,14 @@ func main() {
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
+	// AI-POSTS-001: 5 小美写真资产 + 开屏帖（幂等，可重跑；只增不改，
+	// 绝不删行）。放 PG 替换之后，对 memory/PG 两种仓储都生效。
+	if seedErr := mediaService.SeedXiaomeiAssets(context.Background()); seedErr != nil {
+		log.Printf("seed xiaomei media: %v (continuing without seed)", seedErr)
+	}
+	if seedErr := localNetService.SeedXiaomeiPosts(context.Background()); seedErr != nil {
+		log.Printf("seed xiaomei posts: %v (continuing without seed)", seedErr)
+	}
 	// Wire after the optional PostgreSQL replacements. Wiring before this block
 	// leaves marketplace pointing at the discarded in-memory fulfillment repo.
 	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})

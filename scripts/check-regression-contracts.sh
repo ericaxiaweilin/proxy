@@ -133,6 +133,16 @@ fi
 pnpm --filter @proxy/contracts test --run src/ai-assistants.test.ts || exit $?
 echo "    AI-ASSIST-001: PASS"
 
+# AI-POSTS-001: 5 小美开屏帖（AI_NATIVE + 写真）。写真资产 APPROVED +
+# PUBLIC + READY + AI_PERSONA provenance，帖子 Upsert 幂等；feed 卡
+# AI 生成徽。测试垃圾（post_eng_*）曾淹过真机动态，测试自清理 + 门禁锁。
+require_test "AI-POSTS-001" "./internal/media" \
+  "TestSeedXiaomeiAssets" \
+  "apps/api-go/internal/media/lc06_lc07_test.go" || exit $?
+require_test "AI-POSTS-001" "./internal/localnet" \
+  "TestSeedXiaomeiPosts" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+
 # ACT-ATTEND-001: 考勤 cancel/checkin/noShow 曾经不验归属 + UpdateState=false
 # 照样返成功（没报名也能自助 ATTENDED）。Join 必须落 participation 记录，
 # 陌生人三件套一律 ACTIVITY_NOT_JOINED，已取消不能签到。
