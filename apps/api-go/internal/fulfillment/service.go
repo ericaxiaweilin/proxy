@@ -522,7 +522,8 @@ func (s *Service) Supports(commandType string) bool {
 		"ListMyOrders",
 		"CheckInOrder", "SubmitEvidence",
 		"ConfirmCooperation", "StartExecution", "RecordDirectSettlement",
-		"RecordOutcome", "RecordSatisfaction", "RecordMaterialOrderChange":
+		"RecordOutcome", "RecordSatisfaction", "RecordMaterialOrderChange",
+		"CancelOrder":
 		return true
 	default:
 		return false
@@ -565,6 +566,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordSatisfaction(ctx, e)
 	case "RecordMaterialOrderChange":
 		return s.recordMaterialChange(ctx, e)
+	case "CancelOrder":
+		return s.cancelOrder(ctx, e)
 	default:
 		return command.Rejected(e, "FULFILLMENT_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "fulfillment.unsupported_command", nil)
 	}
@@ -1333,6 +1336,76 @@ func (s *Service) recordMaterialChange(ctx context.Context, e command.Envelope) 
 		r.OperationRef = string(raw)
 	}
 	return r
+}
+
+// ---------- CancelOrder ----------
+// R18.x CANCEL-001: previously the Order lifecycle enum
+// included CANCELLED, but no command wrote it. Users saw
+// '我的订单' in the '已取消' tab never populate, and had no
+// UI affordance to abandon a CONFIRMED or EXECUTING order.
+// Either party (Requester or Agent) can cancel, in any
+// pre-terminal state. COMPLETED is terminal (the cooperation
+// already happened); CANCELLED is itself terminal. The reason
+// is recorded in the OrderCancelled event payload so the
+// audit log can answer 'why did this order die'.
+
+func (s *Service) cancelOrder(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		Reason string `json:"reason"`
+	}
+	_ = decode(e.Payload, &p)
+	order, err := s.repository.GetOrder(ctx, e.Target.ID)
+	if errors.Is(err, ErrOrderNotFound) {
+		return command.Rejected(e, "ORDER_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "ORDER_READ_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.order_read_failed", nil)
+	}
+	if !isOrderParty(order, e.Actor.ID) {
+		return command.Rejected(e, "NOT_ORDER_PARTY", "AUTHORIZATION", "AFTER_USER_ACTION", "fulfillment.not_order_party", nil)
+	}
+	if order.Lifecycle == "CANCELLED" {
+		return command.Rejected(e, "ORDER_ALREADY_CANCELLED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_already_cancelled", map[string]any{"lifecycle": order.Lifecycle})
+	}
+	if order.Lifecycle == "COMPLETED" {
+		return command.Rejected(e, "ORDER_ALREADY_COMPLETED", "BUSINESS_STATE", "AFTER_USER_ACTION", "fulfillment.order_already_completed", map[string]any{"lifecycle": order.Lifecycle})
+	}
+	now := s.clock.Now().UTC()
+	order.Lifecycle = "CANCELLED"
+	order.Version++
+	order.UpdatedAt = now
+	reason := strings.TrimSpace(p.Reason)
+	if reason == "" {
+		reason = "user-cancelled"
+	}
+	domainEvents := []event.DomainEvent{event.New("OrderCancelled", "Order", order.ID, order.Version, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"orderId": order.ID,
+		"reason":  reason,
+		"by":      e.Actor.ID,
+		"role":    viewerRole(order, e.Actor.ID),
+	})}
+	if err := s.repository.UpdateOrderAndPublish(ctx, order, order.Version-1, domainEvents); err != nil {
+		return command.Rejected(e, "ORDER_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "fulfillment.update_failed", nil)
+	}
+	r := command.Accepted(e, "Order", order.ID, order.Version, order.Lifecycle, eventRefs(domainEvents))
+	raw, _ := json.Marshal(map[string]any{
+		"orderId":   order.ID,
+		"lifecycle": order.Lifecycle,
+		"reason":    reason,
+		"version":   order.Version,
+	})
+	r.OperationRef = string(raw)
+	return r
+}
+
+func viewerRole(order Order, actorID string) string {
+	if order.RequesterID == actorID {
+		return "REQUESTER"
+	}
+	if order.AgentID == actorID {
+		return "AGENT"
+	}
+	return "OBSERVER"
 }
 
 // ---------- helpers ----------

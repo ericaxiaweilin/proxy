@@ -66,3 +66,13 @@ interactive terminal agents.
   bind a provider/model directly.
 - Empty wire collections are `[]`, never `null`, when the contract declares an
   array. One malformed media item must not erase an entire feed.
+- Data is never deleted by code. Production code must not hard-delete user
+  business data (posts, activities, opportunities, orders, profiles, media
+  records): user-side cancellations go through state machines (CANCELLED /
+  removed flags / visibility scopes) with audit trails kept. Allowed
+  exceptions: the actor's own reversals (unfollow, unlike, unpin, deleting
+  one's own upload, session logout/revoke) and infra GC (idempotency
+  records). Seed paths must be insert-if-absent, never blind overwrite.
+- Tests may only delete rows the same test run created (run-scoped IDs +
+  `t.Cleanup`). No test may bulk-delete, prefix-delete, or otherwise touch
+  production or other tests' rows; prefer isolated databases where available.

@@ -17,6 +17,12 @@ export const styles = StyleSheet.create({
   orderTabOn: { backgroundColor: color.ink, borderColor: color.ink },
   orderTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
   orderTabTextOn: { color: color.white },
+  // R18.x CANCEL-001: a small red outline button for the
+  // destructive action. Visually distinct from the
+  // neutral pill tabs above so a swipe doesn't accidentally
+  // cancel an order.
+  orderCancelBtn: { alignSelf: "flex-end", borderColor: "#D33D5B", marginRight: 0, marginTop: 6 },
+  orderCancelBtnText: { color: "#D33D5B" },
   orderCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginBottom: 11, padding: 14, ...shadows.card },
   orderHead: { alignItems: "flex-start", flexDirection: "row", gap: 8, justifyContent: "space-between" },
   orderCopy: { flex: 1 },

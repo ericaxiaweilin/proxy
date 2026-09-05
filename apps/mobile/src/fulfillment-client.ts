@@ -95,6 +95,12 @@ export class FulfillmentClient {
     await this.command("SubmitEvidence", { type: "Order", id: orderId }, input as unknown as Record<string, unknown>);
   }
 
+  public async cancelOrder(orderId: string, reason: string): Promise<{ lifecycle: string; version: number }> {
+    const body = this.body(await this.command("CancelOrder", { type: "Order", id: orderId }, { reason }));
+    if (typeof body.lifecycle !== "string" || typeof body.version !== "number") throw new Error("cancel payload malformed");
+    return { lifecycle: body.lifecycle as string, version: body.version as number };
+  }
+
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {
     const session = await this.requireSession();
     const next = (prefix: string) => `mobile_fulfill_${prefix}_${Date.now().toString(36)}_${(++this.sequence).toString(36)}`;

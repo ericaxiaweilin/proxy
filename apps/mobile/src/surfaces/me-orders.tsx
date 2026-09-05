@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import type { Activity } from "@proxy/contracts";
 import { ActivityClient, ActivityCommandRejectedError } from "../activity-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
@@ -12,17 +12,164 @@ type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
 
 function orderStatus(order: FulfillmentOrder): string { return ({ OFFERED: "待确认", CONFIRMED: "已确认", EXECUTING: "进行中", COMPLETED: "已完成", CANCELLED: "已取消" } as const)[order.lifecycle]; }
 function orderMoney(order: FulfillmentOrder): string { return `${order.snapshot.agreedCompensation.toLocaleString()} ${order.snapshot.currency || "VND"}`; }
+// R18.x CANCEL-001: only OFFERED / CONFIRMED / EXECUTING
+// can be cancelled by either party. COMPLETED is terminal
+// (the cooperation already happened); CANCELLED is itself
+// terminal. UI mirrors the server-side check.
+function canCancel(order: FulfillmentOrder): boolean {
+  return order.lifecycle === "OFFERED" || order.lifecycle === "CONFIRMED" || order.lifecycle === "EXECUTING";
+}
 
 export function MyOrdersSurface({ client, onBack }: { client: FulfillmentClient; onBack: () => void }): React.JSX.Element {
   const [filter, setFilter] = useState<OrderFilter>("all");
   const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [detail, setDetail] = useState<FulfillmentOrder>();
-  useEffect(() => { let active = true; setPhase("LOADING"); void client.listMyOrders().then((rows) => { if (active) { setOrders(rows); setPhase("READY"); } }).catch(() => { if (active) setPhase("ERROR"); }); return () => { active = false; }; }, [client]);
+  const [cancellingId, setCancellingId] = useState<string | undefined>(undefined);
+  const [cancelError, setCancelError] = useState<string | undefined>(undefined);
+  const reload = useCallback(() => {
+    let active = true;
+    setPhase("LOADING");
+    void client.listMyOrders().then((rows) => { if (active) { setOrders(rows); setPhase("READY"); } }).catch(() => { if (active) setPhase("ERROR"); });
+    return () => { active = false; };
+  }, [client]);
+  useEffect(() => { const cleanup = reload(); return cleanup; }, [reload]);
   const visible = orders.filter((order) => filter === "all" || filter === "published" && order.viewerRole === "REQUESTER" || filter === "joined" && order.viewerRole === "AGENT" || filter === "done" && order.lifecycle === "COMPLETED" || filter === "cancelled" && order.lifecycle === "CANCELLED");
   const fields = (order: FulfillmentOrder): Array<[string,string]> => [["服务", order.snapshot.serviceSku || order.needId], ["金额", orderMoney(order)], ["时间", order.snapshot.startTime || "待确认"], ["地点", order.snapshot.meetingContext || "待确认"], ["时长", order.snapshot.duration || "待确认"], ["结算", order.snapshot.settlementMode || "待确认"]];
-  if (detail) return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回订单</Text></Pressable><Text style={styles.detailTitle}>订单详情</Text><View style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{detail.snapshot.serviceSku || "Proxy 订单"}</Text><Text style={styles.orderId}>{detail.orderId}</Text></View><Text style={[styles.orderBadge, detail.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(detail)}</Text></View><Text style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text></View><View style={styles.orderCard}><Text style={styles.orderTitle}>服务信息</Text><View style={styles.orderGrid}>{fields(detail).map(([label, value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></View></ScrollView></View>;
-  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>我的订单</Text></View><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}><Text style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}{phase === "ERROR" ? <Text style={styles.personalEmpty}>订单服务暂时不可用，请稍后重试。</Text> : null}{phase === "READY" && visible.length === 0 ? <Text style={styles.personalEmpty}>当前分类还没有订单。</Text> : null}{visible.map((item) => <Pressable key={item.orderId} onPress={() => setDetail(item)} style={styles.orderCard}><View style={styles.orderHead}><View style={styles.orderCopy}><Text style={styles.orderTitle}>{item.snapshot.serviceSku || "Proxy 订单"}</Text><Text style={styles.orderId}>订单编号：{item.orderId}</Text></View><Text style={[styles.orderBadge, item.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(item)}</Text></View><View style={styles.orderGrid}>{fields(item).slice(0,4).map(([label,value]) => <View key={label} style={styles.orderField}><Text style={styles.orderFieldLabel}>{label}</Text><Text style={styles.orderFieldValue}>{value}</Text></View>)}</View></Pressable>)}</ScrollView></View>;
+
+  // R18.x CANCEL-001: confirmation prompt + non-fatal
+  // server error surfacing. The cancel command mutates the
+  // order lifecycle to CANCELLED on the server; the local
+  // row is updated optimistically after the server
+  // confirms so a re-render immediately moves the row
+  // into the '已取消' tab.
+  async function confirmAndCancel(order: FulfillmentOrder): Promise<void> {
+    setCancelError(undefined);
+    const confirm = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "取消订单？",
+        `${order.snapshot.serviceSku || "Proxy 订单"} · 订单编号 ${order.orderId}\n\n取消后不可恢复，双方结算状态以实际协商为准。`,
+        [
+          { text: "再想想", style: "cancel", onPress: () => resolve(false) },
+          { text: "确认取消", style: "destructive", onPress: () => resolve(true) },
+        ],
+      );
+    });
+    if (!confirm) return;
+    setCancellingId(order.orderId);
+    try {
+      await client.cancelOrder(order.orderId, "user-cancelled");
+      // Optimistic local update: reflect the new lifecycle
+      // without a full re-list. The next reload() will
+      // reconcile any drift.
+      setOrders((prev) => prev.map((o) => o.orderId === order.orderId ? { ...o, lifecycle: "CANCELLED" } : o));
+      if (detail?.orderId === order.orderId) {
+        setDetail({ ...detail, lifecycle: "CANCELLED" });
+      }
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "取消失败";
+      setCancelError(code);
+    } finally {
+      setCancellingId(undefined);
+    }
+  }
+
+  if (detail) {
+    return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          <Pressable onPress={() => setDetail(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回订单</Text></Pressable>
+          <Text style={styles.detailTitle}>订单详情</Text>
+          <View style={styles.orderCard}>
+            <View style={styles.orderHead}>
+              <View style={styles.orderCopy}>
+                <Text style={styles.orderTitle}>{detail.snapshot.serviceSku || "Proxy 订单"}</Text>
+                <Text style={styles.orderId}>{detail.orderId}</Text>
+              </View>
+              <Text style={[styles.orderBadge, detail.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(detail)}</Text>
+            </View>
+            <Text style={styles.orderNotice}>订单编号是订单全生命周期的唯一识别号，用于支付、退款、客服、争议、结算和记录查询。</Text>
+          </View>
+          <View style={styles.orderCard}>
+            <Text style={styles.orderTitle}>服务信息</Text>
+            <View style={styles.orderGrid}>
+              {fields(detail).map(([label, value]) => (
+                <View key={label} style={styles.orderField}>
+                  <Text style={styles.orderFieldLabel}>{label}</Text>
+                  <Text style={styles.orderFieldValue}>{value}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+          {canCancel(detail) ? (
+            <Pressable
+              disabled={cancellingId === detail.orderId}
+              onPress={() => void confirmAndCancel(detail)}
+              style={[styles.orderTab, styles.orderCancelBtn, cancellingId === detail.orderId && styles.orderTabOn]}
+            >
+              <Text style={[styles.orderTabText, styles.orderCancelBtnText, cancellingId === detail.orderId && styles.orderTabTextOn]}>
+                {cancellingId === detail.orderId ? "取消中…" : "取消订单"}
+              </Text>
+            </Pressable>
+          ) : null}
+          {cancelError ? <Text style={styles.orderNotice}>{cancelError}</Text> : null}
+        </ScrollView>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.root}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.orderPageHead}>
+          <Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable>
+          <Text style={styles.detailTitle}>我的订单</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>
+          {([['all','全部'],['published','我发布的'],['joined','我参与的'],['done','已完成'],['cancelled','已取消']] as const).map(([id,label]) => (
+            <Pressable key={id} onPress={() => setFilter(id)} style={[styles.orderTab, filter === id && styles.orderTabOn]}>
+              <Text style={[styles.orderTabText, filter === id && styles.orderTabTextOn]}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
+        {phase === "ERROR" ? <Text style={styles.personalEmpty}>订单服务暂时不可用，请稍后重试。</Text> : null}
+        {phase === "READY" && visible.length === 0 ? <Text style={styles.personalEmpty}>当前分类还没有订单。</Text> : null}
+        {cancelError ? <Text style={styles.orderNotice}>{cancelError}</Text> : null}
+        {visible.map((item) => (
+          <View key={item.orderId} style={styles.orderCard}>
+            <Pressable onPress={() => setDetail(item)}>
+              <View style={styles.orderHead}>
+                <View style={styles.orderCopy}>
+                  <Text style={styles.orderTitle}>{item.snapshot.serviceSku || "Proxy 订单"}</Text>
+                  <Text style={styles.orderId}>订单编号：{item.orderId}</Text>
+                </View>
+                <Text style={[styles.orderBadge, item.lifecycle === "EXECUTING" && styles.orderBadgeLive]}>{orderStatus(item)}</Text>
+              </View>
+              <View style={styles.orderGrid}>
+                {fields(item).slice(0, 4).map(([label, value]) => (
+                  <View key={label} style={styles.orderField}>
+                    <Text style={styles.orderFieldLabel}>{label}</Text>
+                    <Text style={styles.orderFieldValue}>{value}</Text>
+                  </View>
+                ))}
+              </View>
+            </Pressable>
+            {canCancel(item) ? (
+              <Pressable
+                disabled={cancellingId === item.orderId}
+                onPress={() => void confirmAndCancel(item)}
+                style={[styles.orderTab, styles.orderCancelBtn, cancellingId === item.orderId && styles.orderTabOn]}
+              >
+                <Text style={[styles.orderTabText, styles.orderCancelBtnText, cancellingId === item.orderId && styles.orderTabTextOn]}>
+                  {cancellingId === item.orderId ? "取消中…" : "取消订单"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
 }
 
 export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {

@@ -1025,3 +1025,103 @@ func TestP1EResolverErrorIsFailSoft(t *testing.T) {
 		t.Fatalf("confirm must succeed when resolver errors (fail-soft), got %s (%+v)", r.Outcome, r.Error)
 	}
 }
+
+// R18.x CANCEL-001: the Order lifecycle enum included
+// CANCELLED, but no command wrote it. These tests pin the
+// new CancelOrder command: any party can cancel an OFFERED /
+// CONFIRMED / EXECUTING order; COMPLETED is terminal;
+// CANCELLED is idempotent-rejected (NOT_FOUND doesn't apply
+// here, the order still exists but is already in the terminal
+// state); outsiders get NOT_ORDER_PARTY.
+func TestCancelOrderRequesterCanCancelOffered(t *testing.T) {
+	s := New()
+	orderID := createOffer(t, s)
+	r := s.Handle(envelopeFor("CancelOrder", map[string]any{"reason": "changed plans"}, orderID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("cancel: %s (%+v)", r.Outcome, r.Error)
+	}
+	if r.Aggregate == nil || r.Aggregate.State != "CANCELLED" {
+		t.Fatalf("aggregate state: %+v", r.Aggregate)
+	}
+	var view struct {
+		OrderID  string `json:"orderId"`
+		Reason   string `json:"reason"`
+		Version  int    `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(r.OperationRef), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Reason != "changed plans" || view.Version != 2 {
+		t.Fatalf("payload: %+v", view)
+	}
+}
+
+func TestCancelOrderAgentCanCancelExecuting(t *testing.T) {
+	s := New()
+	orderID := createOffer(t, s)
+	r := s.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, orderID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %s", r.Outcome)
+	}
+	r = s.Handle(envelopeFor("StartExecution", map[string]any{}, orderID))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("start: %s", r.Outcome)
+	}
+	agentCancel := envelopeFor("CancelOrder", map[string]any{"reason": "emergency"}, orderID)
+	agentCancel.Actor.ID = "agent_linh"
+	agentCancel.Principal.ID = "agent_linh"
+	r = s.Handle(agentCancel)
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "CANCELLED" {
+		t.Fatalf("agent cancel: %s / %s", r.Outcome, r.Aggregate.State)
+	}
+}
+
+func TestCancelOrderOutsiderForbidden(t *testing.T) {
+	s := New()
+	orderID := createOffer(t, s)
+	outsider := envelopeFor("CancelOrder", map[string]any{"reason": "i'm bored"}, orderID)
+	outsider.Actor.ID = "random_outsider"
+	outsider.Principal.ID = "random_outsider"
+	r := s.Handle(outsider)
+	if r.Outcome != "REJECTED" || r.Error == nil || r.Error.ErrorCode != "NOT_ORDER_PARTY" {
+		t.Fatalf("outsider must be rejected, got %s / %+v", r.Outcome, r.Error)
+	}
+}
+
+func TestCancelOrderTerminalStatesRejected(t *testing.T) {
+	s := New()
+	orderID := createOffer(t, s)
+	for _, cmd := range []string{"ConfirmCooperation", "StartExecution"} {
+		if r := s.Handle(envelopeFor(cmd, map[string]any{}, orderID)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("%s: %s", cmd, r.Outcome)
+		}
+	}
+	if r := s.Handle(envelopeFor("RecordDirectSettlement", map[string]any{
+		"agreedAmount": 1200000, "paymentMethodLabel": "线下现金",
+		"payerConfirmed": true, "payeeConfirmed": true,
+	}, orderID)); r.Outcome != "ACCEPTED" {
+		t.Fatalf("settle: %s", r.Outcome)
+	}
+	if r := s.Handle(envelopeFor("RecordOutcome", map[string]any{
+		"onTime": true, "actualStart": "09:00", "actualEnd": "17:00",
+		"materialChanges": 0, "scopeCompleted": true, "objectiveNote": "ok",
+	}, orderID)); r.Outcome != "ACCEPTED" {
+		t.Fatalf("outcome: %s", r.Outcome)
+	}
+	// COMPLETED is terminal.
+	if r := s.Handle(envelopeFor("CancelOrder", map[string]any{"reason": "too late"}, orderID)); r.Outcome != "REJECTED" || r.Error == nil || r.Error.ErrorCode != "ORDER_ALREADY_COMPLETED" {
+		t.Fatalf("cancel after COMPLETED must be rejected, got %s / %+v", r.Outcome, r.Error)
+	}
+	// Force into CANCELLED.
+	if r := s.Handle(envelopeFor("CancelOrder", map[string]any{"reason": "first cancel"}, orderID)); r.Outcome != "REJECTED" || r.Error == nil || r.Error.ErrorCode != "ORDER_ALREADY_COMPLETED" {
+		t.Fatalf("must stay rejected, got %s / %+v", r.Outcome, r.Error)
+	}
+}
+
+func TestCancelOrderNotFound(t *testing.T) {
+	s := New()
+	r := s.Handle(envelopeFor("CancelOrder", map[string]any{"reason": "ghost"}, "ord_does_not_exist"))
+	if r.Outcome != "REJECTED" || r.Error == nil || r.Error.ErrorCode != "ORDER_NOT_FOUND" {
+		t.Fatalf("missing order: %s / %+v", r.Outcome, r.Error)
+	}
+}

@@ -4,6 +4,22 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 30 — 2026-09-05
+
+- Closed the '取消订单' gap. The Order lifecycle enum
+  included CANCELLED, but no server command ever wrote it:
+  every '我的订单 → 已取消' tab was empty, and the surface
+  had no button. This revision adds the
+  fulfillment.CancelOrder command (actor must be either
+  party; OFFERED / CONFIRMED / EXECUTING are cancellable;
+  COMPLETED / CANCELLED are terminal; the reason lands in
+  the OrderCancelled event payload for audit) and the
+  me-orders surface's red outline '取消订单' button with
+  confirmation prompt + optimistic lifecycle update.
+  CANCEL-001 tripwire (5 server + 3 mobile tests).
+  Also enables the previously-disabled PROFILE-001 mobile
+  half of commit 946a710.
+
 ## Revision 29 — 2026-09-05
 
 - 商家身份发布 (MERCHANT-PUBLISH-001)：发布需求/活动表单新增“发布身份”

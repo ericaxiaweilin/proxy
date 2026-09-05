@@ -423,18 +423,39 @@ require_test "PROFILE-001" "./internal/identity" \
 require_test "PROFILE-001" "./internal/identity" \
   "TestUpdateProfileRejectsAnonymousActorAndBadAvatar" \
   "apps/api-go/internal/identity/profile_test.go" || exit $?
-# mobile half: enabled once the ProfileClient + me.tsx wire lands
-# (commit 2 of this set). The tripwire below is intentionally
-# disabled (if false) so the server half is independently gated.
-if false; then
-  if ! grep -q 'profileClient\.updateProfile\|profileClient\.getProfile' apps/mobile/src/surfaces/me.tsx; then
-    echo "  FAIL [PROFILE-001 mobile]: me.tsx saveProfile never calls profileClient.updateProfile" >&2
-    exit 1
-  fi
-  pnpm --dir apps/mobile exec vitest run src/profile-client.test.ts
-  echo "    PROFILE-001 (mobile): PASS (me.tsx saveProfile wired to UpdateProfile)"
+if ! grep -q 'profileClient\.updateProfile\|profileClient\.getProfile' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-001 mobile]: me.tsx saveProfile never calls profileClient.updateProfile" >&2
+  exit 1
 fi
-echo "    PROFILE-001: PASS (server half; mobile half pending commit 2)"
+pnpm --dir apps/mobile exec vitest run src/profile-client.test.ts
+echo "    PROFILE-001: PASS (server + mobile half wired to UpdateProfile / GetProfile)"
+
+# CANCEL-001: Order lifecycle enum included CANCELLED, but no
+# command ever wrote it. Either party (Requester or Agent) can
+# now cancel an OFFERED / CONFIRMED / EXECUTING order. The
+# me-orders surface shows a destructive outline button on every
+# pre-terminal row; COMPLETED / CANCELLED rows hide it.
+require_test "CANCEL-001" "./internal/fulfillment" \
+  "TestCancelOrderRequesterCanCancelOffered" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+require_test "CANCEL-001" "./internal/fulfillment" \
+  "TestCancelOrderAgentCanCancelExecuting" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+require_test "CANCEL-001" "./internal/fulfillment" \
+  "TestCancelOrderOutsiderForbidden" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+require_test "CANCEL-001" "./internal/fulfillment" \
+  "TestCancelOrderTerminalStatesRejected" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+require_test "CANCEL-001" "./internal/fulfillment" \
+  "TestCancelOrderNotFound" \
+  "apps/api-go/internal/fulfillment/service_test.go" || exit $?
+pnpm --dir apps/mobile exec vitest run src/fulfillment-client.test.ts >/dev/null
+if ! grep -q 'cancelOrder' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [CANCEL-001 mobile]: me-orders surface never calls client.cancelOrder" >&2
+  exit 1
+fi
+echo "    CANCEL-001: PASS (server CancelOrder + mobile cancelOrder + UI button)"
 
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
