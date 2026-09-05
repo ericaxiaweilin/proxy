@@ -1,14 +1,14 @@
 # Platform AI Persona 头像资产
 
-5 个 PLATFORM_AI 角色 (ai_001-ai_005) 的统一风格 SVG 头像。R17.x
-新增。
+5 个 PLATFORM_AI 角色 (ai_001-ai_005) 已接入此前生成的真人风格 PNG
+形象；旧 SVG 只作为设计留档，不再是前端默认头像。
 
 ## 约束
 
-- **不是真人**：每个 SVG 顶部 `<title>` + `<desc>` 标 "AI-generated
-  avatar. Not a real person. PLATFORM_AI persona. Clearly labeled as
-  AI."
-- **明确 AI 标识**：每张图右上角有 "AI 虚拟" 白色 pill badge。
+- **不是真人**：PNG 是平台生成的虚拟形象；推荐卡、主页和聊天头部都必须
+  独立显示“AI / AI 虚拟账户”，不能依赖图片本身表达身份。
+- **静态映射**：`src/ai-persona-presentation.ts` 用 personaId 静态 require，
+  确保 Expo 原生包会携带资产而不是依赖运行时文件 URL。
 - **不进入接单候选池**：这些是 PLATFORM_AI 主体，不属于真人候选
   (PRD LC-07 / R16.x AI-ACTOR-002 tripwire 维护)。
 - **不接订单 / 收款 / 替用户确认**：见 R16.x aiboundary policy。
@@ -17,13 +17,14 @@
 
 | 文件 | personaId | 角色 | 主题色 |
 |------|-----------|------|--------|
-| ai_001.svg | ai_001 | 平台 AI 周末企划 | 紫 (☕) |
-| ai_002.svg | ai_002 | 平台 AI 拍照季 | 粉 (📸) |
-| ai_003.svg | ai_003 | 平台 AI 拍照搭子 | 绿 (🤝) |
-| ai_004.svg | ai_004 | 平台 AI 餐厅尝鲜 | 橙 (🍽️) |
-| ai_005.svg | ai_005 | 平台 AI 饭局推荐 | 金 (🍜) |
+| photos/ai_001.png | ai_001 | 晴晴 · 元气陪伴 | 奶油白 |
+| photos/ai_002.png | ai_002 | 安安 · 温柔倾听 | 紫色 |
+| photos/ai_003.png | ai_003 | 米娅 · 时尚创作 | 洋红 |
+| photos/ai_004.png | ai_004 | 林夏 · 文艺共鸣 | 珊瑚橙 |
+| photos/ai_005.png | ai_005 | 七喜 · 幽默脑洞 | 青绿色 |
 
 ## 接入方式
 
-`Activity.AIPersonaPhoto` 字段（string，URL 或相对 assets 路径）。
-mobile 端用 `<Image>` 显示；fallback 到 emoji avatar。
+账户 API 返回 `avatarPath` 供其他客户端识别；mobile 使用 personaId 到打包
+资源的静态映射。这五个账户只参与社交、聊天和 AI 标识的 UGC；平台业务
+助手、活动、订单和地点推荐是独立能力，不得引用这些人格作为执行主体。

@@ -225,7 +225,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/ai/personas", s.routePersonaCollection)
 	mux.HandleFunc("/v1/ai/personas/", s.routePersonaItem)
 	// AI-ASSIST-001: 平台 AI 助手公开目录（首页推荐），匿名可读。
-	mux.HandleFunc("/v1/ai/assistants", s.listAIAssistants)
 	// R16.7-P1-E: Jurisdiction Policy Engine self-service.
 	// GET reads the caller's current jurisdiction (default
 	// VN-79 when no row exists); PATCH updates it. Operator

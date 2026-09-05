@@ -25,6 +25,7 @@ import { PaymentClient } from "./payment-client";
 import { NotificationClient } from "./notification-client";
 import { BusinessClient } from "./business-client";
 import { ProfileClient } from "./profile-client";
+import { AIAccountClient } from "./ai-account-client";
 import { RelationshipClient } from "./relationship-client";
 import { SceneClient } from "./scene-client";
 import { SupplyClient } from "./supply-client";
@@ -152,6 +153,7 @@ const paymentClient = new PaymentClient({ authClient: sessionAuthClient, secureS
 const notificationClient = new NotificationClient({ authClient: sessionAuthClient, secureSessionStore });
 const businessClient = new BusinessClient({ authClient: sessionAuthClient, secureSessionStore });
 const profileClient = new ProfileClient({ authClient: sessionAuthClient, secureSessionStore });
+const aiAccountClient = new AIAccountClient(sessionAuthClient);
 const relationshipClient = new RelationshipClient({ authClient: sessionAuthClient, secureSessionStore });
 const sceneClient = new SceneClient({ authClient: sessionAuthClient, secureSessionStore });
 const supplyClient = new SupplyClient({ authClient: sessionAuthClient, secureSessionStore });
@@ -253,6 +255,7 @@ export function ProxyApp(): React.JSX.Element {
         notification={notificationClient}
         business={businessClient}
         profile={profileClient}
+        aiAccounts={aiAccountClient}
         relationship={relationshipClient}
         supply={supplyClient}
         socialSettings={socialSettingsClient}

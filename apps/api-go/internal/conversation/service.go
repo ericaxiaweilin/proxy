@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
@@ -646,7 +647,20 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		"originId":       conv.OriginID,
 	}
 	hasInitialContent := strings.TrimSpace(p.FirstMessage) != "" || strings.TrimSpace(p.MediaRef) != ""
-	if hasInitialContent {
+	if persona, ok := platformAIPersonaForMode(p.AssistantMode); ok && !hasInitialContent {
+		intro := Message{
+			ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID,
+			SenderID: persona.AccountID, SenderSnapshot: aiIdentitySnapshot(persona),
+			MessageType: "TEXT", Kind: "text", Body: persona.WelcomeMessage,
+			CreatedAt: s.clock.Now().UTC(), Protection: DefaultProtectionFor("TEXT", conv.Type),
+			Delivery: &MessageDelivery{State: "sent"}, Seq: 1,
+		}
+		intro.SecurityV1 = protectionToSecurityV1(intro.Protection)
+		if err := s.repository.AppendMessage(ctx, intro); err == nil {
+			payload["aiMessage"] = intro
+			payload["assistantStatus"] = "RESPONDED"
+		}
+	} else if hasInitialContent {
 		temporaryUI := temporaryUIFor(p.FirstMessage)
 		if temporaryUI != nil {
 			payload["temporaryUI"] = temporaryUI
@@ -867,7 +881,11 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 		return nil
 	}
 	systemPrompt := "你是 Proxy，一个智能需求构建助手。用户会描述他们想在河内完成的事情，你帮助他们理清需求、补充细节（时间、地点、预算、人数等），并最终生成一个结构化的需求摘要。回复简洁、友好、像朋友聊天。如果用户已经提供了足够信息，给出一个简洁的需求摘要供确认。不要要求用户按 1、2、3、4 编号逐项回复；当服务器提供了临时表单时，用一句自然引导让用户点选或简短填写。对于恋爱或交友请求，可以协助推荐自愿开启介绍、且自行选择公开资料范围的成年用户；这只是社交介绍，不是人员交易、临时伴侣或任何有偿/性服务，也不能承诺匹配结果。"
-	if assistantMode != "" {
+	persona, isPlatformPersona := platformAIPersonaForMode(assistantMode)
+	if isPlatformPersona {
+		systemPrompt = "你是 AI 虚拟女孩「" + persona.DisplayName + "」，拥有独立公开账户。你的类型是「" + persona.Role + "」，性格是：「" + persona.Personality + "」。你只做自然聊天、情绪陪伴、兴趣交流，以及与用户共同创作健康的短帖、图片配文、段子或生活随笔。保持稳定人格和有来有往的聊天感，不要把每句话都变成建议清单。始终诚实说明自己是 AI，没有身体、真实所在地、现实经历或线下行动能力；不得声称自己是真人，不得诱导用户情感依赖。你不是 Proxy 平台业务助手，不处理需求、推荐地点、接单、报名或发布活动、订单、支付及交易确认。"
+	}
+	if assistantMode != "" && !isPlatformPersona {
 		systemPrompt += " 当前 Home 语义方向是「" + assistantMode + "」，它只是帮助你理解意图，不代表已经选择页面或创建业务事实。"
 	}
 	if temporaryUI != nil {
@@ -965,11 +983,32 @@ func (s *Service) generateAIReply(ctx context.Context, conv Conversation, e comm
 		Body:           completion.Content,
 		CreatedAt:      s.clock.Now().UTC(),
 	}
+	if isPlatformPersona {
+		aiMsg.SenderID = persona.AccountID
+		aiMsg.SenderSnapshot = aiIdentitySnapshot(persona)
+	}
 	if err := s.repository.AppendMessage(ctx, aiMsg); err != nil {
 		log.Printf("conversation ai: failed to store reply: %v", err)
 		return nil
 	}
 	return &aiMsg
+}
+
+func platformAIPersonaForMode(mode string) (aipersona.PlatformAccount, bool) {
+	const prefix = "AI_PERSONA:"
+	if !strings.HasPrefix(mode, prefix) {
+		return aipersona.PlatformAccount{}, false
+	}
+	account, err := aipersona.GetPlatformAccount(strings.TrimPrefix(mode, prefix))
+	if err != nil || account.PersonaType != aipersona.PersonaTypePlatformAI || account.Status != "ACTIVE" {
+		return aipersona.PlatformAccount{}, false
+	}
+	return account, true
+}
+
+func aiIdentitySnapshot(account aipersona.PlatformAccount) *IdentitySnapshot {
+	avatar := account.AvatarPath
+	return &IdentitySnapshot{DisplayName: account.DisplayName + " · AI", AvatarRef: &avatar, Username: &account.Handle}
 }
 
 // imageDataURI 尝试从本地 media_store 读取图片并转 data URI。

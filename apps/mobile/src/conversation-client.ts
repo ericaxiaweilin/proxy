@@ -79,8 +79,8 @@ export class ConversationClient {
     return this.sendMessage(conversationId, proxyObject.snapshot.title as string ?? "", undefined, undefined, undefined, undefined, "TEXT", proxyObject);
   }
 
-  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride): Promise<Record<string, unknown>> {
-    return this.sendMessage(conversationId, caption?.trim() || " ", undefined, undefined, mediaRef, protectionOverride, "IMAGE");
+  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride, assistantMode?: string): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, caption?.trim() || " ", assistantMode, undefined, mediaRef, protectionOverride, "IMAGE");
   }
 
   public async listMessages(conversationId: string): Promise<Record<string, unknown>> {

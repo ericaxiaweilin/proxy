@@ -80,6 +80,40 @@ func TestStartConversationKeepsOrigin(t *testing.T) {
 	}
 }
 
+// AI-PERSONA-CHAT-001: entering from a platform AI profile creates a durable
+// welcome message owned by that specific account, not the generic proxy_ai id.
+func TestPlatformAIPersonaConversationGetsAccountBoundWelcome(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"conversationType": "DM",
+		"originType":       "PROFILE",
+		"originId":         "ai_account_001",
+		"participantId":    "ai_account_001",
+		"firstMessage":     "",
+		"assistantMode":    "AI_PERSONA:ai_001",
+	}, "new"))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("start AI account conversation: got %s (%+v)", result.Outcome, result.Error)
+	}
+	var view struct {
+		ConversationID string  `json:"conversationId"`
+		AIMessage      Message `json:"aiMessage"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &view); err != nil {
+		t.Fatalf("decode operation ref: %v", err)
+	}
+	if view.AIMessage.SenderID != "ai_account_001" || strings.TrimSpace(view.AIMessage.Body) == "" {
+		t.Fatalf("welcome must belong to AI account: %+v", view.AIMessage)
+	}
+	if view.AIMessage.SenderSnapshot == nil || !strings.Contains(view.AIMessage.SenderSnapshot.DisplayName, "晴晴") {
+		t.Fatalf("welcome must expose the AI account identity: %+v", view.AIMessage.SenderSnapshot)
+	}
+	messages, err := s.repository.Messages(context.Background(), view.ConversationID)
+	if err != nil || len(messages) != 1 || messages[0].SenderID != "ai_account_001" {
+		t.Fatalf("welcome must be durable and account-bound: messages=%+v err=%v", messages, err)
+	}
+}
+
 func TestImageMessageNeverSendsEmptyContentToTextModel(t *testing.T) {
 	model := &capturingModelStack{}
 	s := NewWithModelStack(NewMemoryRepository(), model)

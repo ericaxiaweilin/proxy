@@ -4,7 +4,7 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（rhome，HTML 5197-5203）。
 // Experience Runtime 插槽：top_context banner 由 SurfacePlan 驱动（§10 Slots），本地态不被 Delta 覆盖（§15.1）。
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
@@ -14,6 +14,9 @@ import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
 import type { ExperienceClient } from "../experience-client";
+import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
+import type { EngagementClient } from "../engagement-client";
+import { aiPersonaPhoto } from "../ai-persona-presentation";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
@@ -85,6 +88,11 @@ export function RequesterHome({
   marketplace,
   activities,
   experiences,
+  aiAccounts,
+  engagement,
+  onMessageAI,
+  onOpenAIProfile,
+  viewerAccountId,
   onCreateScene,
   onOpenSceneMap,
   onChromeVisibilityChange,
@@ -103,6 +111,11 @@ export function RequesterHome({
   activities?: ActivityClient;
   // R15.49 — experience count 从 server 拉 (替换 hardcode 24).
   experiences?: ExperienceClient;
+  aiAccounts?: AIAccountClient;
+  engagement?: EngagementClient;
+  onMessageAI?: (account: PlatformAIAccount) => void;
+  onOpenAIProfile?: (account: PlatformAIAccount) => void;
+  viewerAccountId?: string;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
   onOpenSceneMap?: (() => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -117,6 +130,34 @@ export function RequesterHome({
   // R15.34: 筛选 sheet 开 / 关 + 已选 chip。空数组 = "全部"。
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
+  const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>([]);
+  const [followedAI, setFollowedAI] = useState<ReadonlySet<string>>(new Set());
+  const [followBusy, setFollowBusy] = useState<string>();
+
+  useEffect(() => {
+    let cancelled = false;
+    void aiAccounts?.listRecommended().then((accounts) => { if (!cancelled) setRecommendedAI(accounts); }).catch(() => { if (!cancelled) setRecommendedAI([]); });
+    return () => { cancelled = true; };
+  }, [aiAccounts]);
+
+  useEffect(() => {
+    if (!engagement || !viewerAccountId || recommendedAI.length === 0) return;
+    let cancelled = false;
+    void Promise.all(recommendedAI.map(async (account) => ({ id: account.accountId, followed: await engagement.isFollowing(viewerAccountId, account.accountId) }))).then((states) => {
+      if (!cancelled) setFollowedAI(new Set(states.filter((state) => state.followed).map((state) => state.id)));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [engagement, recommendedAI, viewerAccountId]);
+
+  async function toggleAIFollow(accountId: string): Promise<void> {
+    if (!engagement || followBusy) return;
+    const followed = followedAI.has(accountId);
+    setFollowBusy(accountId);
+    try {
+      if (followed) await engagement.unfollowProfile(accountId); else await engagement.followProfile(accountId);
+      setFollowedAI((current) => { const next = new Set(current); if (followed) next.delete(accountId); else next.add(accountId); return next; });
+    } finally { setFollowBusy(undefined); }
+  }
 
   // R15.34: 算当前 mode 的推荐 feed + 应用筛选过滤
   //   - filter: 多个 chip 可叠加 (附近 AND 最近活跃), 都需满足
@@ -321,6 +362,30 @@ export function RequesterHome({
           <Text style={styles.filterTriggerText}>筛选 〉</Text>
         </Pressable>
       </View>
+
+      {recommendedAI.length > 0 ? <View style={styles.aiSection}>
+        <View style={styles.aiSectionHead}>
+          <View><Text style={styles.aiTitle}>认识 AI 女孩</Text><Text style={styles.aiSub}>有性格、有动态，可以添加和聊天</Text></View>
+          <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
+        </View>
+        <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
+          {recommendedAI.map((account) => {
+            const followed = followedAI.has(account.accountId);
+            return <View key={account.accountId} style={styles.aiCard}>
+              <Pressable accessibilityLabel={`打开${account.displayName}的主页`} onPress={() => onOpenAIProfile?.(account)}><Image source={aiPersonaPhoto(account.personaId)} style={styles.aiAvatar} /></Pressable>
+              <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
+              <Text style={styles.aiHandle} numberOfLines={1}>@{account.handle} · AI</Text>
+              <Text style={styles.aiDescription} numberOfLines={2}>{account.description}</Text>
+              <View style={styles.aiActions}>
+                <Pressable accessibilityLabel={`${followed ? "移除" : "添加"}${account.displayName}`} onPress={() => void toggleAIFollow(account.accountId)} style={[styles.aiFollow, followed && styles.aiFollowed]}>
+                  <Text style={[styles.aiFollowText, followed && styles.aiFollowedText]}>{followBusy === account.accountId ? "处理中" : followed ? "✓ 已添加" : "+ 添加"}</Text>
+                </Pressable>
+                <Pressable accessibilityLabel={`给${account.displayName}发消息`} onPress={() => onMessageAI?.(account)} style={styles.aiMessage}><Text style={styles.aiMessageText}>消息</Text></Pressable>
+              </View>
+            </View>;
+          })}
+        </HorizontalSwipeRail>
+      </View> : null}
 
       {/* stories — 圆形 avatar 横滑 */}
       {/* R15.34.2: 包 HorizontalSwipeRail 隔离 iOS 系统 tab 切换手势 */}
@@ -571,6 +636,26 @@ export function RequesterHome({
 }
 
 const styles = StyleSheet.create({
+  aiSection: { marginTop: 8 },
+  aiSectionHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 10 },
+  aiTitle: { color: color.ink, fontSize: 17, fontWeight: "900" },
+  aiSub: { color: color.muted, fontSize: 11, marginTop: 3 },
+  aiBadge: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
+  aiBadgeText: { color: color.violet, fontSize: 11, fontWeight: "900" },
+  aiRail: { marginBottom: 10 },
+  aiRailContent: { gap: 10, paddingHorizontal: 16 },
+  aiCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, padding: 11, width: 176, ...shadows.card },
+  aiAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 14, height: 112, width: "100%" },
+  aiName: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 9 },
+  aiHandle: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  aiDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5, minHeight: 30 },
+  aiActions: { flexDirection: "row", gap: 6, marginTop: 9 },
+  aiFollow: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, flex: 1, paddingVertical: 8 },
+  aiFollowed: { backgroundColor: color.proxyPurpleSoft },
+  aiFollowText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  aiFollowedText: { color: color.violet },
+  aiMessage: { alignItems: "center", borderColor: color.line, borderRadius: 10, borderWidth: 1, flex: 1, paddingVertical: 8 },
+  aiMessageText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   sceneMapEntry: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 12, minHeight: 86, padding: 13 },
   sceneMapVisual: { backgroundColor: "#EEF2F5", borderColor: color.line, borderRadius: 15, borderWidth: 1, height: 58, overflow: "hidden", width: 72 },
   sceneMapCopy: { flex: 1 },

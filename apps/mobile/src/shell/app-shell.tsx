@@ -46,6 +46,7 @@ import { type PaymentClient } from "../payment-client";
 import { type NotificationClient } from "../notification-client";
 import { type BusinessClient } from "../business-client";
 import { type ProfileClient } from "../profile-client";
+import { type AIAccountClient, type PlatformAIAccount } from "../ai-account-client";
 import { type RelationshipClient } from "../relationship-client";
 import { type SupplyClient } from "../supply-client";
 import { type SocialSettingsClient } from "../social-settings-client";
@@ -60,6 +61,7 @@ import { MarketSurface, type MarketViewMode } from "../surfaces/market";
 import { MeSurface } from "../surfaces/me";
 import { MessagesSurface } from "../surfaces/messages";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
+import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
 import { VoucherSurface } from "../surfaces/voucher";
 import { color, shadows } from "../theme";
@@ -122,6 +124,7 @@ export function AppShell({
   supply,
   socialSettings,
   profile,
+  aiAccounts,
   relationship,
   scene,
   isGuest,
@@ -148,6 +151,7 @@ export function AppShell({
   business: BusinessClient;
   supply: SupplyClient;
   profile: ProfileClient;
+  aiAccounts: AIAccountClient;
   relationship: RelationshipClient;
   socialSettings: SocialSettingsClient;
   scene?: import("../scene-client").SceneClient | undefined;
@@ -164,7 +168,14 @@ export function AppShell({
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
-  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string }>();
+  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; initialDraft?: string }>();
+  const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
+  const [viewerAccountId, setViewerAccountId] = useState<string>();
+  useEffect(() => {
+    let cancelled = false;
+    void secureSessionStore?.read().then((session) => { if (!cancelled) setViewerAccountId(session?.userAccountId); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [secureSessionStore]);
   const messageChatAuthor = messageChat?.author;
   const [marketEntry, setMarketEntry] = useState<{
     tab: MarketTab;
@@ -388,7 +399,7 @@ export function AppShell({
   // Only the primary Feed stream owns scroll-driven shell chrome. Chat,
   // Home/Market/Me forms and Feed's nested chat/preferences keep navigation
   // stable so moving through messages cannot unexpectedly summon/hide it.
-  const isNavVisible = !realitySceneOpen && selectShellChromeVisible({
+  const isNavVisible = !realitySceneOpen && !openAIProfile && selectShellChromeVisible({
     tab,
     feedChromeVisible,
     feedChatOpen: Boolean(feedChatAuthor),
@@ -455,8 +466,6 @@ export function AppShell({
               }}
               onOpenXiaomei={() => {
                 setHomeAssistant(undefined);
-                // 临时：推荐页未落地前，进真实 AI 活动流（ACTIVITY），不跳机会页占位。
-                openMarket({ tab: "ACTIVITY" });
               }}
               onOpenFeed={() => {
                 setHomeAssistant(undefined);
@@ -471,6 +480,18 @@ export function AppShell({
               bottomNavVisible={isNavVisible}
               business={business}
               activities={activities}
+            />
+          ) : openAIProfile ? (
+            <AIAccountProfileSurface
+              account={openAIProfile}
+              engagement={engagement}
+              {...(secureSessionStore ? { secureSessionStore } : {})}
+              onBack={() => setOpenAIProfile(undefined)}
+              onMessage={(account, initialDraft) => {
+                setOpenAIProfile(undefined);
+                setTab("MESSAGES");
+                setMessageChat({ author: account.displayName, aiAccount: account, ...(initialDraft ? { initialDraft } : {}) });
+              }}
             />
           ) : workspaceTarget ? (
             <FulfillmentWorkspace
@@ -501,8 +522,6 @@ export function AppShell({
                   }}
                   onOpenXiaomei={() => {
                     setHomeAssistant(undefined);
-                    // 临时：推荐页未落地前，进真实 AI 活动流（ACTIVITY），不跳机会页占位。
-                    openMarket({ tab: "ACTIVITY" });
                   }}
                   onOpenFeed={() => {
                     setHomeAssistant(undefined);
@@ -514,6 +533,11 @@ export function AppShell({
               marketplace={marketplace}
               activities={activities}
               experiences={experience}
+              aiAccounts={aiAccounts}
+              engagement={engagement}
+              {...(viewerAccountId ? { viewerAccountId } : {})}
+              onOpenAIProfile={setOpenAIProfile}
+              onMessageAI={(account) => { setTab("MESSAGES"); setMessageChat({ author: account.displayName, aiAccount: account }); }}
               onCreateScene={setSceneComposerTool}
               onOpenSceneMap={() => setRealitySceneOpen(true)}
               bottomNavVisible={isNavVisible}
@@ -573,6 +597,8 @@ export function AppShell({
             <ConversationSurface
               author={messageChatAuthor}
               {...(messageChat?.conversationId ? { conversationId: messageChat.conversationId } : {})}
+              {...(messageChat?.aiAccount ? { aiAccount: messageChat.aiAccount } : {})}
+              {...(messageChat?.initialDraft ? { initialDraft: messageChat.initialDraft } : {})}
               conversationClient={conversation}
               activityClient={activities}
               mediaClient={media}

@@ -13,6 +13,8 @@ import type { MediaClient, UploadableImage } from "../media-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
 import { color } from "../theme";
+import type { PlatformAIAccount } from "../ai-account-client";
+import { aiPersonaPhoto } from "../ai-persona-presentation";
 
 interface Message {
   id: string;
@@ -31,6 +33,8 @@ export function ConversationSurface({
   activityClient,
   mediaClient,
   conversationId: initialConvId,
+  aiAccount,
+  initialDraft,
   onBack
 }: {
   author: string;
@@ -38,10 +42,12 @@ export function ConversationSurface({
   activityClient: ActivityClient;
   mediaClient: MediaClient;
   conversationId?: string;
+  aiAccount?: PlatformAIAccount;
+  initialDraft?: string;
   onBack: () => void;
 }): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft ?? "");
   const [sending, setSending] = useState(false);
   const [convId, setConvId] = useState<string | undefined>(initialConvId);
   const [loading, setLoading] = useState(!initialConvId);
@@ -120,10 +126,11 @@ export function ConversationSurface({
       const actorId = typeof payload?.actorId === "string" ? payload.actorId : undefined;
       setMessages(rows.map((row) => ({
         id: String(row.messageId ?? `message_${Date.now()}`),
-        sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? "对方"),
+        sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方"),
         body: String(row.body ?? (row.messageType === "IMAGE" ? "[图片]" : row.messageType === "VIDEO" ? "[视频]" : "")),
         time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
         isOwn: row.senderId === actorId,
+        isAI: Boolean(aiAccount && row.senderId !== actorId),
         ...(row.messageType === "IMAGE" && typeof row.mediaRef === "string"
           ? { imageUri: `${conversationClient.baseUrl}/v1/media/thumb/${encodeURIComponent(row.mediaRef)}` }
           : {}),
@@ -143,10 +150,11 @@ export function ConversationSurface({
     let cancelled = false;
     (async () => {
       try {
-        const result = await conversationClient.startConversation({
-          originType: "POST",
-          originId: "feed_post_001",
-          participantId: "user_proxy_ai",
+        const result = await conversationClient.startConversation(aiAccount ? {
+          originType: "PROFILE", originId: aiAccount.accountId, participantId: aiAccount.accountId,
+          firstMessage: "", assistantMode: `AI_PERSONA:${aiAccount.personaId}`
+        } : {
+          originType: "POST", originId: "feed_post_001", participantId: "user_proxy_ai",
           firstMessage: `你好！我想了解关于「${author}」的更多信息。`
         });
         if (cancelled) return;
@@ -162,7 +170,7 @@ export function ConversationSurface({
         if (aiMsg) {
           setMessages([{
             id: (aiMsg.messageId as string) || "ai_1",
-            sender: "Proxy AI",
+            sender: aiAccount?.displayName ?? "Proxy AI",
             body: (aiMsg.body as string) || "",
             time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
             isOwn: false,
@@ -176,7 +184,7 @@ export function ConversationSurface({
       }
     })();
     return () => { cancelled = true; };
-  }, [convId, author, conversationClient, parseOperationRef]);
+  }, [convId, author, aiAccount, conversationClient, parseOperationRef]);
 
   // R17.x: open activity picker. 拉 server 真实活动列表, 让
   // 用户选一个. (不完成这步, 发送活动 proxy 会被拒 — 硬
@@ -255,7 +263,7 @@ export function ConversationSurface({
         o.forwardable = noForward ? false : true;
         return o;
       })();
-      const result = await conversationClient.sendMessage(convId, userText, undefined, temporaryUIResponseId, undefined, protectionOverride);
+      const result = await conversationClient.sendMessage(convId, userText, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, temporaryUIResponseId, undefined, protectionOverride);
       // 解析 AI 回复
       const payload = parseOperationRef(result);
       setTemporaryUI(readServerTemporaryUI(payload?.temporaryUI));
@@ -263,7 +271,7 @@ export function ConversationSurface({
       if (aiMsg) {
         const reply: Message = {
           id: (aiMsg.messageId as string) || `ai_${Date.now()}`,
-          sender: "Proxy AI",
+          sender: aiAccount?.displayName ?? "Proxy AI",
           body: (aiMsg.body as string) || "",
           time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
           isOwn: false,
@@ -305,8 +313,11 @@ export function ConversationSurface({
     setUploadProgress(0);
     try {
       const uploaded = await mediaClient.uploadImage(selectedImage, { onProgress: setUploadProgress });
-      await conversationClient.sendImageMessage(convId, uploaded.storageKey, draft);
+      const result = await conversationClient.sendImageMessage(convId, uploaded.storageKey, draft, undefined, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined);
       setMessages((current) => [...current, { id:`image_${Date.now()}`, sender:"你", body:draft.trim(), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, imageUri:selectedImage.uri }]);
+      const payload = parseOperationRef(result);
+      const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
+      if (aiMsg) setMessages((current) => [...current, { id: String(aiMsg.messageId ?? `ai_${Date.now()}`), sender: aiAccount?.displayName ?? "Proxy AI", body: String(aiMsg.body ?? ""), time: new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
       setDraft("");
       setSelectedImage(undefined);
     } catch (cause) {
@@ -325,9 +336,10 @@ export function ConversationSurface({
         <Pressable onPress={onBack} style={styles.backBtn}>
           <Text style={styles.backText}>‹</Text>
         </Pressable>
+        {aiAccount ? <Image accessibilityLabel={`${aiAccount.displayName} AI 虚拟头像`} source={aiPersonaPhoto(aiAccount.personaId)} style={styles.aiHeaderAvatar} /> : null}
         <View style={styles.headerInfo}>
           <Text style={styles.headerName}>{author}</Text>
-          <Text style={styles.headerStatus}>{convId ? "已连接" : "连接中..."}</Text>
+          <Text style={styles.headerStatus}>{aiAccount ? `AI 虚拟 · ${aiAccount.role}` : convId ? "已连接" : "连接中..."}</Text>
         </View>
       </View>
 
@@ -344,6 +356,7 @@ export function ConversationSurface({
             <Text style={styles.systemMsgText}>正在创建会话...</Text>
           </View>
         )}
+        {aiAccount && !loading ? <View style={styles.aiIntro}><Text style={styles.aiIntroText}>AI 虚拟女孩 · 陪伴聊天与内容创作，不是平台业务助手，也没有现实身体。</Text></View> : null}
         {error && (
           <View style={styles.systemMsg}>
             <Text style={styles.systemMsgText}>{error}</Text>
@@ -386,13 +399,13 @@ export function ConversationSurface({
         {/* Composer — 图片 / 业务卡片 / 文本 */}
         <View style={styles.composer}>
           <Pressable accessibilityLabel="添加图片" onPress={() => setImageMenuOpen((open) => !open)} disabled={sending || !convId} style={styles.imageBtn}><Text style={styles.imageBtnText}>＋</Text></Pressable>
-          <Pressable onPress={() => void openActivityPicker()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
+          {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
             <Text style={styles.cardBtnText}>活动</Text>
-          </Pressable>
+          </Pressable> : null}
           <TextInput
             value={draft}
             onChangeText={setDraft}
-            placeholder={convId ? "输入消息..." : "连接中..."}
+            placeholder={convId ? (aiAccount ? `和${aiAccount.displayName}聊聊…` : "输入消息...") : "连接中..."}
             placeholderTextColor="#A9A2B0"
             style={styles.composerInput}
             multiline
@@ -453,6 +466,7 @@ const styles = StyleSheet.create({
   backBtn: { alignItems: "center", height: 30, justifyContent: "center", width: 30 },
   backText: { color: color.ink, fontSize: 24, lineHeight: 28 },
   headerInfo: { flex: 1 },
+  aiHeaderAvatar: { borderRadius: 17, height: 34, width: 34 },
   headerName: { color: color.ink, fontSize: 14, fontWeight: "700" },
   headerStatus: { color: "#4CAF50", fontSize: 11 },
 
@@ -495,6 +509,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6
   },
   systemMsgText: { color: color.muted, fontSize: 11 },
+  aiIntro: { alignSelf: "center", backgroundColor: "#F1EBFF", borderRadius: 11, marginBottom: 4, paddingHorizontal: 12, paddingVertical: 8 },
+  aiIntroText: { color: color.violet, fontSize: 11, lineHeight: 16, textAlign: "center" },
 
   protectionRow: { alignItems: "center", backgroundColor: color.white, borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
   chip: { backgroundColor: "#F4F1F6", borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },
