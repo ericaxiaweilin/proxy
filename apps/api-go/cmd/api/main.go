@@ -110,6 +110,11 @@ func main() {
 	sceneService := scene.New()
 	realitySceneService := realityscene.New()
 	marketplaceService := marketplace.New()
+	// R17.x: chat → order 派生. marketplace ConfirmMarketApplication
+	// 委托 fulfillment 创建真 Order, 让“我的订单”页能看见.
+	// 接口定义在 marketplace package (DIP: 消费者侧),
+	// fulfillment 包不需改 compile 依赖图.
+	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
 	activityService := activity.New()
 	facetService := facet.New()
 	facetService.SeedDefaults()
@@ -1052,6 +1057,37 @@ func buildSMSProvider(vendor string, cfg identity.SMSConfig) *identity.SMSHTTPLo
 // package directly (one-way dependency).
 type jurisdictionAdapter struct {
 	svc *jurisdiction.Service
+}
+
+// marketplaceFulfillmentAdapter bridges marketplace.OrderCreator to
+// fulfillment.TransactionalRepository. It composes a marketplace
+// OrderRecord into a fulfillment.Order snapshot before delegating to
+// CreateOrder. ServiceSKU defaults to CITY_COMPANION (matches
+// AcceptSlotOffer) until bilateral negotiation fields (duration,
+// startTime, meetingContext) are recorded via amendments.
+type marketplaceFulfillmentAdapter struct {
+	repo fulfillment.TransactionalRepository
+}
+
+func (a marketplaceFulfillmentAdapter) CreateOrder(ctx context.Context, record marketplace.OrderRecord) error {
+	snapshot := fulfillment.OrderSnapshot{
+		Requester:          record.RequesterID,
+		Agent:              record.AgentID,
+		ServiceSKU:         "CITY_COMPANION",
+		NeedVersion:        record.NeedID,
+		AgreedCompensation: 0, // TBD until CreateOffer replaces this
+		Currency:           "VND",
+		SettlementMode:     "DIRECT_SETTLEMENT",
+	}
+	return a.repo.CreateOrder(ctx, fulfillment.Order{
+		ID:          record.ID,
+		RequesterID: record.RequesterID,
+		AgentID:     record.AgentID,
+		NeedID:      record.NeedID,
+		Lifecycle:   "CONFIRMED",
+		Version:     1,
+		Snapshot:    snapshot,
+	})
 }
 
 func (a jurisdictionAdapter) Resolve(ctx context.Context, userID string) (fulfillment.JurisdictionResolution, error) {

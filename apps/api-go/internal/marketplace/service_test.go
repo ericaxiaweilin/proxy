@@ -1,7 +1,9 @@
 package marketplace
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -125,6 +127,98 @@ func TestOpportunityApplicationSelectionAndBilateralConfirmation(t *testing.T) {
 	if again.Outcome != "ACCEPTED" || againBody.OrderRef != confirmBody.OrderRef {
 		t.Fatalf("confirm must be idempotent: %+v", again)
 	}
+}
+
+// R17.x: CHAT-ORDER-MATERIALISATION-001 — chat→order 派生路径。
+// marketplace ConfirmMarketApplication 必须派生出真 Order
+// (通过注入的 OrderCreator), 让“我的订单”页能看见. 不再有
+// fake "order_" + applicationID 拼接 — 那是一个 fragment ID, 不会
+// 出现在 fulfillment.listMyOrders(). Idempotency: 重复 confirm
+// 不生成新 Order.
+func TestConfirmMarketApplicationMaterialisesRealOrder(t *testing.T) {
+	s := New()
+	publish := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner_1", map[string]any{
+		"title":     "R17.x order materialisation tripwire",
+		"location":  "河内西湖",
+		"moneyFlow": "FREE",
+	}))
+	if publish.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", publish)
+	}
+	var pub struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(publish.OperationRef), &pub); err != nil {
+		t.Fatal(err)
+	}
+	apply := s.HandleContext(t.Context(), marketEnvelope("ApplyToMarketOpportunity", "applicant_1", map[string]any{
+		"opportunityId": pub.Opportunity.ID, "quote": "1200000", "scope": "tripwire",
+	}))
+	if apply.Outcome != "ACCEPTED" {
+		t.Fatalf("apply: %+v", apply)
+	}
+	var appBody struct {
+		Application Application `json:"application"`
+	}
+	if err := json.Unmarshal([]byte(apply.OperationRef), &appBody); err != nil {
+		t.Fatal(err)
+	}
+	selectApp := s.HandleContext(t.Context(), marketEnvelope("SelectMarketApplication", "owner_1", map[string]any{
+		"opportunityId": pub.Opportunity.ID, "applicationId": appBody.Application.ID,
+	}))
+	if selectApp.Outcome != "ACCEPTED" {
+		t.Fatalf("select: %+v", selectApp)
+	}
+	fc := &fakeOrderCreator{}
+	s.SetOrderCreator(fc)
+	confirm := s.HandleContext(t.Context(), marketEnvelope("ConfirmMarketApplication", "applicant_1", map[string]any{
+		"applicationId": appBody.Application.ID,
+	}))
+	if confirm.Outcome != "ACCEPTED" {
+		t.Fatalf("confirm: %+v", confirm)
+	}
+	var confirmBody struct {
+		OrderRef string `json:"orderRef"`
+	}
+	if err := json.Unmarshal([]byte(confirm.OperationRef), &confirmBody); err != nil {
+		t.Fatal(err)
+	}
+	if confirmBody.OrderRef == "" {
+		t.Fatalf("orderRef must be set, got empty")
+	}
+	if !strings.HasPrefix(confirmBody.OrderRef, "ord_") {
+		t.Fatalf("orderRef %q must start with ord_ (server-unique ID, not 'order_' + applicationId fragment)", confirmBody.OrderRef)
+	}
+	if len(fc.records) != 1 {
+		t.Fatalf("orderCreator must be called exactly once, got %d", len(fc.records))
+	}
+	if fc.records[0].ID != confirmBody.OrderRef {
+		t.Fatalf("orderCreator ID=%q != orderRef=%q", fc.records[0].ID, confirmBody.OrderRef)
+	}
+	if fc.records[0].RequesterID != "owner_1" || fc.records[0].AgentID != "applicant_1" {
+		t.Fatalf("orderCreator RequesterID/AgentID: got %s/%s, want owner_1/applicant_1", fc.records[0].RequesterID, fc.records[0].AgentID)
+	}
+	if fc.records[0].NeedID != pub.Opportunity.ID {
+		t.Fatalf("orderCreator NeedID=%q != opportunityId=%q", fc.records[0].NeedID, pub.Opportunity.ID)
+	}
+	confirm2 := s.HandleContext(t.Context(), marketEnvelope("ConfirmMarketApplication", "applicant_1", map[string]any{
+		"applicationId": appBody.Application.ID,
+	}))
+	if confirm2.Outcome != "ACCEPTED" {
+		t.Fatalf("second confirm: %+v", confirm2)
+	}
+	if len(fc.records) != 1 {
+		t.Fatalf("idempotent confirm must not re-call orderCreator; got %d calls", len(fc.records))
+	}
+}
+
+type fakeOrderCreator struct {
+	records []OrderRecord
+}
+
+func (f *fakeOrderCreator) CreateOrder(_ context.Context, r OrderRecord) error {
+	f.records = append(f.records, r)
+	return nil
 }
 
 func TestOpportunitySelectionAndConfirmationAreForbiddenForAIActors(t *testing.T) {

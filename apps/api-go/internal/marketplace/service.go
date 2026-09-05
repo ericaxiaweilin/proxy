@@ -17,9 +17,42 @@ import (
 
 // Service owns the P0 opportunity read model and its user actions. Mobile may
 // render this payload, but publishing, applying and dismissing are server facts.
+//
+// R17.x: chat → order derivation. When a candidate accepts an offer
+// (ConfirmMarketApplication), we want the resulting order to surface in
+// '我的订单'. To avoid a second source of truth, marketplace Service
+// delegates order creation to an injected OrderCreator (production:
+// fulfillment.MemoryRepository or its PG twin). OrderCreator is a
+// thin interface so tests can run with an in-memory fake without
+// pulling the fulfillment package into the marketplace compile graph.
 type Service struct {
-	repository Repository
+	repository   Repository
+	orderCreator OrderCreator // nil = legacy behaviour (only stamp orderRef)
 }
+
+// OrderCreator is the narrow interface marketplace needs from
+// fulfillment to materialise a real Order when an application is
+// confirmed. The interface is defined here (consumer-side) so the
+// marketplace package does not import fulfillment.
+type OrderCreator interface {
+	CreateOrder(ctx context.Context, order OrderRecord) error
+}
+
+// OrderRecord is the wire-shape the OrderCreator accepts. It maps
+// 1:1 to fulfillment.Order except for the Snapshot fields that
+// marketplace does not author (duration / startTime / meetingContext
+// are negotiated bilaterally after confirmation, not at confirm time).
+type OrderRecord struct {
+	ID          string `json:"orderId"`
+	RequesterID string `json:"requesterId"`
+	AgentID     string `json:"agentId"`
+	NeedID      string `json:"needId"` // opportunity id; order sees it as needId for backward-compat with fulfillment listMyOrders
+}
+
+// SetOrderCreator wires the fulfillment-backed order creator.
+// Production code in cmd/api/main.go calls this once at boot; tests
+// can leave it nil to exercise the legacy path.
+func (s *Service) SetOrderCreator(c OrderCreator) { s.orderCreator = c }
 
 // R16.11 / Master PRD v1.4 §3: 统一物化规则（Materialization Rule）
 // Opportunity -> Invite -> Order -> Activity Participation 必须有唯一业务对象流向。
@@ -106,6 +139,7 @@ type Opportunity struct {
 type Application struct {
 	ID            string     `json:"applicationId"`
 	OpportunityID string     `json:"opportunityId"`
+	OwnerID       string     `json:"-"` // R17.x: opportunity owner, 在 apply 时快照, 用于派生 Order.RequesterID (fulfillment 侧不查 opportunity)
 	ApplicantID   string     `json:"applicantId"`
 	Quote         string     `json:"quote"`
 	Scope         string     `json:"scope"`
@@ -264,7 +298,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if stored.OwnerID == e.Actor.ID {
 			return rejected(e, "OWNER_CANNOT_APPLY", "market.owner_cannot_apply")
 		}
-		a := Application{ID: newID("app_"), OpportunityID: id, ApplicantID: e.Actor.ID, Quote: quote, Scope: scope, Status: "SUBMITTED", CreatedAt: time.Now().UTC()}
+		a := Application{ID: newID("app_"), OpportunityID: id, OwnerID: stored.OwnerID, ApplicantID: e.Actor.ID, Quote: quote, Scope: scope, Status: "SUBMITTED", CreatedAt: time.Now().UTC()}
 		a, _, err = s.repository.Apply(ctx, a)
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_failed", nil)
@@ -311,7 +345,12 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			return command.Rejected(e, "MARKET_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "market.actor_required", nil)
 		}
 		applicationID, _ := e.Payload["applicationId"].(string)
-		confirmed, err := s.repository.ConfirmApplication(ctx, applicationID, e.Actor.ID, "order_"+applicationID)
+		// R17.x: 派生真 orderId (server-unique, 不再是拼接
+		// "order_"+applicationID). 如果 orderCreator 接入了
+		// fulfillment, 同步创建真 Order 记录 — 这样
+		// my orders 页 (走 fulfillment.listMyOrders) 能看到。
+		orderID := newID("ord_")
+		confirmed, err := s.repository.ConfirmApplication(ctx, applicationID, e.Actor.ID, orderID)
 		if errors.Is(err, ErrApplicationNotFound) {
 			return rejected(e, "APPLICATION_NOT_FOUND", "market.application_not_found")
 		}
@@ -320,6 +359,27 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_CONFIRM_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_confirm_failed", nil)
+		}
+		// Materialise 真 Order. opportunity.id 作为 NeedID
+		// (fulfillment 侧 listMyOrders 用 NeedID 拼出标题);
+		//  requester = opportunity owner, agent = 申请者.
+		// R17.x idempotency: 如果 repository 已是 CONFIRMED
+		// (重复 confirm), 不会重新调用 orderCreator — 这是
+		// 防御性, 即使 server 不重复, client 的多次重试也不会
+		// 在 fulfillment 创建多份 Order. 检测: repository
+		// idempotency 返回原 item (OrderRef != 新 orderID).
+		if s.orderCreator != nil && confirmed.ConfirmedAt != nil && confirmed.OrderRef == orderID {
+			if err := s.orderCreator.CreateOrder(ctx, OrderRecord{
+				ID:          orderID,
+				RequesterID: confirmed.OwnerID,
+				AgentID:     confirmed.ApplicantID,
+				NeedID:      confirmed.OpportunityID,
+			}); err != nil {
+				// Order materialisation 失败必须以业务错误返回
+				// (不是 internal), 避免 “我的订单” 看不到而 “我的
+				// 机会” 还显示已确认 — 两路径不一致。
+				return rejectedWith(e, "ORDER_MATERIALISATION_FAILED", "market.order_materialisation_failed", err.Error(), map[string]any{"orderId": orderID})
+			}
 		}
 		return payload(e, "Order", confirmed.OrderRef, "CONFIRMED", map[string]any{"application": confirmed, "orderRef": confirmed.OrderRef})
 	case "DismissMarketOpportunity":
@@ -529,6 +589,15 @@ func (r *MemoryRepository) ConfirmApplication(_ context.Context, applicationID, 
 			if item.ApplicantID != applicantID {
 				return Application{}, ErrApplicationNotFound
 			}
+			// R17.x: idempotent — 如果已经 CONFIRMED 且 OrderRef
+			// 存在, 第二次调用不覆盖, 透传原 OrderRef. 这样
+			// 同一 application 重复 confirm 不会改 orderRef
+			// (避免 “我的订单” 看到两个 order). Server 侧
+			// 不会创建第二 Order — caller 必须 idempotency-key
+			// 控制自己的 orderCreator 调用.
+			if item.Status == "CONFIRMED" && item.OrderRef != "" {
+				return item, nil
+			}
 			if item.Status != "SELECTED" && item.Status != "CONFIRMED" {
 				return Application{}, ErrApplicationStateConflict
 			}
@@ -565,6 +634,17 @@ func decode(value any, target any) bool {
 }
 func rejected(e command.Envelope, code, key string) command.Result {
 	return command.Rejected(e, code, "VALIDATION", "AFTER_USER_ACTION", key, nil)
+}
+
+func rejectedWith(e command.Envelope, code, key string, reason string, extras map[string]any) command.Result {
+	merged := make(map[string]any, len(extras)+1)
+	for k, v := range extras {
+		merged[k] = v
+	}
+	if reason != "" {
+		merged["reason"] = reason
+	}
+	return command.Rejected(e, code, "INTERNAL", "SAFE_RETRY", key, merged)
 }
 func payload(e command.Envelope, typ, id, state string, body map[string]any) command.Result {
 	r := command.Accepted(e, typ, id, 1, state, nil)

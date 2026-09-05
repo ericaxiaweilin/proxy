@@ -75,15 +75,20 @@
       "implementationFiles": [
         "apps/mobile/src/surfaces/market.tsx",
         "apps/mobile/src/marketplace-client.ts",
-        "apps/mobile/src/market-fixtures.ts"
+        "apps/mobile/src/market-fixtures.ts",
+        "apps/api-go/internal/marketplace/service.go",
+        "apps/api-go/internal/fulfillment/service.go",
+        "apps/api-go/cmd/api/main.go"
       ],
       "evidenceFiles": [
         "apps/mobile/src/market-city-label.test.ts",
         "packages/contracts/src/market-opportunity.test.ts",
-        "apps/api-go/internal/marketplace/service_test.go"
+        "apps/api-go/internal/marketplace/service_test.go",
+        "apps/api-go/internal/fulfillment/service_test.go",
+        "scripts/check-regression-contracts.sh"
       ],
       "status": "PARTIAL",
-      "knownGap": "MoneyFlow 4-state + priceLabel render is wired. PublishDemand chip (publisher view) uses priceLabelForPublisher (UI-only first-person wording); opportunity card priceLabel (applicant view) is server-derived from opportunityPriceLabel(MoneyFlow) — the mobile client no longer maintains a parallel priceLabelForFlow mapping (MONEYFLOW-005). The wire contract is server-authoritative end-to-end: server normalizeOpportunityMoney always overwrites any client PriceLabel (MONEYFLOW-004)."
+      "knownGap": "MoneyFlow 4-state + priceLabel render is wired. PublishDemand chip (publisher view) uses priceLabelForPublisher (UI-only first-person wording); opportunity card priceLabel (applicant view) is server-derived from opportunityPriceLabel(MoneyFlow) — the mobile client no longer maintains a parallel priceLabelForFlow mapping (MONEYFLOW-005). The wire contract is server-authoritative end-to-end: server normalizeOpportunityMoney always overwrites any client PriceLabel (MONEYFLOW-004). R17.x chat→order materialisation: ConfirmMarketApplication 委托 fulfillment.CreateOrder 生成真 Order (server-unique ord_ 前缀), “我的订单” 页现在能看到 marketplace confirm 产生的 Order. tripwire CHAT-ORDER-MATERIALISATION-001."
     },
     {
       "scope": "activity",

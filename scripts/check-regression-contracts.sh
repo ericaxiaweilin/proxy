@@ -196,6 +196,15 @@ echo "    AI-PERSONA-PHOTO-001: PASS (mobile wire schema round-trip)"
 pnpm --dir apps/mobile test -- --run src/conversation-client.test.ts
 echo "    CHAT-PROXY-ACTIVITY-001: PASS (real activityId round-trip)"
 
+# CHAT-ORDER-MATERIALISATION-001: chat → order 派生. marketplace
+# ConfirmMarketApplication 必须派生真 Order (server-unique ord_
+# 前缀), 调用注入的 OrderCreator (production: fulfillment adapter)
+# 让“我的订单”页能看到. 不再有 fake "order_" + applicationID
+# 拼接. Idempotency: 重复 confirm 不创建第二 Order.
+require_test "CHAT-ORDER-MATERIALISATION-001" "./internal/marketplace" \
+  "TestConfirmMarketApplicationMaterialisesRealOrder" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+
 # OPPORTUNITY-DEAL-001: 真人申请 -> 发布者选择 -> 被选真人确认；候选列表
 # 来自仓储，不允许把平台 AI 或硬编码人物当作可直接购买的库存。
 require_test "OPPORTUNITY-DEAL-001" "./internal/marketplace" \

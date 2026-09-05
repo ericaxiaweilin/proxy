@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 22 — 2026-09-05
+
+- chat → order 派生路径 (R17.x): marketplace
+  ConfirmMarketApplication 不再用 fake "order_" +
+  applicationID 拼接 — server 生成真 ord_<hex>, 委托 fulfillment
+  MemoryRepository 创建真 Order (production 走 PG adapter)。“我
+  的订单”页 (走 fulfillment.listMyOrders) 现在能看到
+  marketplace confirm 产生的 Order。Application 加 OwnerID 字
+  段 (apply 时快照 opportunity owner 作为 Order.RequesterID) 。
+  Idempotency: 重复 confirm 不重复创建 Order。
+  tripwire CHAT-ORDER-MATERIALISATION-001 跳防 " 我的订单/我
+  的机会" 两路径不一。
+
 ## Revision 21 — 2026-09-05
 
 - Added a merchant-only `Creator 推荐` rail backed by `QuerySuppliers`, using

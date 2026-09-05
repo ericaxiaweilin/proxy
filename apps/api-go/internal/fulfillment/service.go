@@ -454,6 +454,13 @@ func (s *Service) WithPolicyDecisions(pd policydecisionsService) *Service {
 	return s
 }
 
+// Repository exposes the underlying fulfillment repository so
+// adjacent services (marketplace for chat→order materialisation)
+// can route through it without breaking the encapsulation of
+// transactional boundaries. Callers must not assume they can
+// observe in-flight transactions.
+func (s *Service) Repository() TransactionalRepository { return s.repository }
+
 // WithJurisdictionResolver wires the R16.7-P1-E resolver
 // so the policy decision can be evaluated under the
 // requester's actual jurisdiction. nil is allowed; it
