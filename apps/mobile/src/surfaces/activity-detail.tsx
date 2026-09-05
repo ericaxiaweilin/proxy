@@ -1,11 +1,25 @@
 // ACTIVITY_DETAIL — 活动详情去占位化
 // 接线：ActivityClient.listActivities 真实列表 + ToggleInterest / Join
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color, shadows } from "../theme";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
 import { activityAIDisclosure, activityMoneySummary } from "./activity-detail-model";
+
+// R17.x persona 色：与 tasks.tsx personaColorStyle 同源（ai_001=紫/002=粉/
+// 003=绿/004=橙/005=金）。tasks 侧为 canonical；这里仅为明细页封面
+// token 做最小映射，避免跨 surface import 具体样式。SVG 本体渲染等 expo-image 就绪。
+function personaColor(personaId: string | undefined): string {
+  switch (personaId) {
+    case "ai_001": return "#7C5CFF";
+    case "ai_002": return "#FF7A8A";
+    case "ai_003": return "#3FCBA8";
+    case "ai_004": return "#FF9D44";
+    case "ai_005": return "#FFB347";
+    default: return "#7C5CFF";
+  }
+}
 
 export function ActivityDetailSurface({ client, initialActivityId, onBack }: { client: ActivityClient; initialActivityId?: string; onBack?: () => void }): React.JSX.Element {
   const [items, setItems] = useState<Activity[] | undefined>(undefined);
@@ -30,9 +44,25 @@ export function ActivityDetailSurface({ client, initialActivityId, onBack }: { c
   }, [client, initialActivityId]);
   if (selected) {
     const aiDisclosure = activityAIDisclosure(selected);
+    const showPersona = selected.aiStatus !== "NONE" && selected.aiPersonaId;
     return (
       <ScrollView style={styles.root} contentContainerStyle={styles.container}>
-        <Pressable onPress={() => setSelected(undefined)}><Text style={styles.back}>‹ 返回</Text></Pressable>
+        <Pressable onPress={() => { if (onBack) onBack(); else setSelected(undefined); }}><Text style={styles.back}>‹ 返回</Text></Pressable>
+        {selected.coverImageUrl ? (
+          <Image source={{ uri: selected.coverImageUrl }} style={styles.cover} />
+        ) : showPersona ? (
+          <View style={styles.coverPlaceholder}>
+            <View style={[styles.personaToken, { backgroundColor: personaColor(selected.aiPersonaId) }]}>
+              <Text style={styles.personaTokenText}>{selected.aiPersonaAvatar ?? "🤖"}</Text>
+            </View>
+            <Text style={styles.coverNote}>{selected.aiPersonaName ?? "平台 AI"} · 真人照片待上传</Text>
+          </View>
+        ) : (
+          <View style={styles.coverPlaceholder}>
+            <Text style={styles.coverIcon}>{selected.venueIcon || "◎"}</Text>
+            <Text style={styles.coverNote}>活动照片待商家 / 发起人上传</Text>
+          </View>
+        )}
         <Text style={styles.title}>{selected.title}</Text>
         <Text style={styles.meta}>{selected.venueName} · {selected.time}</Text>
         <View style={styles.card}>
@@ -77,6 +107,12 @@ const styles = StyleSheet.create({
   aiDisclosure: { backgroundColor: "#F4F0FF", borderRadius: 8, color: "#5B3FA3", fontSize: 12, lineHeight: 17, marginTop: 10, padding: 9 },
   empty: { color: color.muted, fontSize: 12 },
   back: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  cover: { borderRadius: 14, height: 190, width: "100%" },
+  coverPlaceholder: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 6, paddingVertical: 26 },
+  coverIcon: { fontSize: 44 },
+  coverNote: { color: color.muted, fontSize: 12 },
+  personaToken: { alignItems: "center", borderRadius: 28, height: 56, justifyContent: "center", width: 56 },
+  personaTokenText: { fontSize: 28 },
   cta: { backgroundColor: color.ink, borderRadius: 999, paddingVertical: 12, alignItems: "center" },
   ctaText: { color: color.white, fontSize: 13, fontWeight: "800" },
   ctaSecondary: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingVertical: 12, alignItems: "center" },
