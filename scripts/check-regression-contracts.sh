@@ -617,6 +617,62 @@ if ! grep -q 'Math.max(insets.bottom, 16)' apps/mobile/src/surfaces/conversation
 fi
 echo "    UI-CHAT-001: PASS (image wire + composer safe area)"
 
+# DEAD-MARKET-001: 3 dead sub-views in market.tsx and
+# 2 dead top-level surfaces have been removed:
+#   * ApplicantDetail / SubmissionDetail / CompareScene
+#     were 3 hardcoded mock-data sub-views reachable only
+#     via setApplicantName / setSubmissionName /
+#     setCompareOpen, all of which were only set to
+#     null inside the corresponding onBack. No code path
+#     ever set the state to a non-null value, so the 3
+#     sub-views were unreachable. The 3 states, the 3
+#     back handlers, the 3 JSX usages, and the 3 function
+#     bodies are all gone.
+#   * MarketExperienceSurface (the 体验 tab) was wired in
+#     app-shell.tsx behind an `openExperience` state that
+#     was only ever set to undefined. The 体验 tab was
+#     removed at R15.13. The surface, the state, the
+#     conditional JSX, and the dead MarketSurface
+#     `onOpenExperience` prop are all gone. The
+#     MarketSurface `onOpenExperience` prop type is now
+#     optional, and the prop is no longer passed by
+#     app-shell.
+#   * TasksSurface (the workspace entry points with 2
+#     hardcoded "进行中 / 已完成" rows) was exported but
+#     never imported. tasks.tsx is now the
+#     ActivityFeedCard + ActivityDetail shared module.
+# Tripwire: any re-introduction of these symbols /
+# states / props is a regression.
+DEAD_MARKET_GUARDS=(
+  "apps/mobile/src/surfaces/market.tsx:ApplicantDetail"
+  "apps/mobile/src/surfaces/market.tsx:SubmissionDetail"
+  "apps/mobile/src/surfaces/market.tsx:CompareScene"
+  "apps/mobile/src/surfaces/market.tsx:setApplicantName"
+  "apps/mobile/src/surfaces/market.tsx:setSubmissionName"
+  "apps/mobile/src/surfaces/market.tsx:compareOpen"
+  "apps/mobile/src/shell/app-shell.tsx:MarketExperienceSurface"
+  "apps/mobile/src/shell/app-shell.tsx:openExperience"
+  "apps/mobile/src/shell/app-shell.tsx:setOpenExperience"
+  "apps/mobile/src/surfaces/tasks.tsx:TasksSurface"
+  "apps/mobile/src/surfaces/tasks.tsx:TaskServiceRow"
+  "apps/mobile/src/surfaces/tasks.tsx:IN_PROGRESS"
+  "apps/mobile/src/surfaces/tasks.tsx:TaskRow"
+  "apps/mobile/src/surfaces/tasks.tsx:useMerchantIdentity"
+)
+for guard in "${DEAD_MARKET_GUARDS[@]}"; do
+  file="${guard%%:*}"
+  sym="${guard##*:}"
+  if [ -f "$file" ] && grep -E "(\\b$sym\\b|\\b$sym\\(|\\b$sym:)" "$file" >/dev/null 2>&1; then
+    echo "  FAIL [DEAD-MARKET-001]: $file still references dead $sym" >&2
+    exit 1
+  fi
+done
+if [ -f "apps/mobile/src/surfaces/market-experience.tsx" ]; then
+  echo "  FAIL [DEAD-MARKET-001]: apps/mobile/src/surfaces/market-experience.tsx is still present" >&2
+  exit 1
+fi
+echo "    DEAD-MARKET-001: PASS (no dead sub-views in market.tsx, no MarketExperienceSurface, no TasksSurface)"
+
 require_test "POST-REACTION-TRUTH-001" "./internal/engagement" \
   "TestPostReactionTruthToggleAndRemountHydration" \
   "apps/api-go/internal/engagement/service_test.go" || exit $?

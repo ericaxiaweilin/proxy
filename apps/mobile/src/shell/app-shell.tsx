@@ -56,7 +56,6 @@ import { FeedSurface } from "../surfaces/feed";
 import { FeedPrefsSurface } from "../surfaces/feed-prefs";
 import { FulfillmentWorkspace, type WorkspaceTarget } from "../surfaces/fulfillment-workspace";
 import { HomeAssistantSurface } from "../surfaces/home-assistant";
-import { MarketExperienceSurface } from "../surfaces/market-experience";
 import { MarketSurface, type MarketViewMode } from "../surfaces/market";
 import { MeSurface } from "../surfaces/me";
 import { MessagesSurface } from "../surfaces/messages";
@@ -208,7 +207,6 @@ export function AppShell({
     const nextFeedSection = PAGE_TO_FEED_SECTION[page];
     if (nextFeedSection) setFeedSection(nextFeedSection);
   };
-  const [openExperience, setOpenExperience] = useState<string>();
   const [experienceManifest, setExperienceManifest] =
     useState<ExperienceManifest>();
   const [feedRefreshTrigger, setFeedRefreshTrigger] = useState(0);
@@ -234,7 +232,7 @@ export function AppShell({
         const absDy = Math.abs(dy);
         const swipeThreshold = 56;
         const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
-        const canSwipeRoot = !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen && !openExperience;
+        const canSwipeRoot = !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
         if (isHorizontalSwipe && canSwipeRoot) {
           const idx = PAGE_SEQUENCE.indexOf(currentPage);
           if (idx < 0) return;
@@ -290,7 +288,6 @@ export function AppShell({
       if (tab === "MESSAGES" && messageChatAuthor) { setMessageChat(undefined); return true; }
       if (tab === "FEED" && feedPrefsOpen) { setFeedPrefsOpen(false); return true; }
       if (tab === "FEED" && feedChatAuthor) { setFeedChatAuthor(undefined); return true; }
-      if (tab === "MARKET" && openExperience) { setOpenExperience(undefined); return true; }
       if (tab === "HOME" && homeAssistant) { setHomeAssistant(undefined); return true; }
       if (tab === "HOME" && workspaceTarget) { setWorkspaceTarget(undefined); return true; }
       if (tab === "HOME" && sceneComposerTool) { setSceneComposerTool(undefined); return true; }
@@ -341,7 +338,6 @@ export function AppShell({
     setFeedChromeVisible(true);
     if (next === "MARKET") {
       setMarketEntry({ tab: "OPPORTUNITY", viewMode: "LIST" });
-      setOpenExperience(undefined);
     }
     if (next === "FEED") {
       setFeedRefreshTrigger((prev) => prev + 1);
@@ -361,7 +357,6 @@ export function AppShell({
 
   function openMarket(entry: { tab: MarketTab; viewMode?: MarketViewMode }): void {
     setMarketEntry({ tab: entry.tab, viewMode: entry.viewMode ?? "LIST" });
-    setOpenExperience(undefined);
     setWorkspaceTarget(undefined);
     setHomeAssistant(undefined);
     setFeedChatAuthor(undefined);
@@ -544,10 +539,7 @@ export function AppShell({
             />
           )
         ) : tab === "MARKET" ? (
-          openExperience ? (
-            <MarketExperienceSurface experienceId={openExperience} onBack={() => setOpenExperience(undefined)} />
-          ) : (
-            <MarketSurface
+          <MarketSurface
               activities={activities}
               marketplace={marketplace}
               fulfillment={fulfillment}
@@ -555,12 +547,10 @@ export function AppShell({
               supply={supply}
               marketLabel="河内"
               initialTab={marketEntry.tab}
-              onOpenExperience={setOpenExperience}
               onOpenActivity={() => undefined}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               bottomNavVisible={isNavVisible}
             />
-          )
         ) : tab === "FEED" ? (
           feedChatAuthor ? (
             <ConversationSurface

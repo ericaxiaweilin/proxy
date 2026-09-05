@@ -4,6 +4,26 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 37 — 2026-09-05
+
+- R18.x DEAD-MARKET-001: removed 3 dead sub-views in
+  market.tsx (`ApplicantDetail` / `SubmissionDetail` /
+  `CompareScene`), the dead `MarketExperienceSurface`
+  surface + `openExperience` state in app-shell.tsx,
+  and the dead `TasksSurface` export + hardcoded
+  `IN_PROGRESS` / `DONE` rows in tasks.tsx. All of
+  these were unreachable from any production code
+  path, but each one shipped hardcoded mock data
+  (composite price text, "比较 3 位候选" 96/98/94%,
+  "Bonsaidon / 78 health / 248 到店 / 6.2M 成交额
+  ..."). tasks.tsx is now a shared
+  ActivityFeedCard + ActivityDetail module; the
+  workspace entry pattern it used to back is
+  driven by the live supply / fulfillment
+  surfaces. `MarketSurface.onOpenExperience` is
+  now an optional prop, and app-shell no longer
+  passes it.
+
 ## Revision 36 — 2026-09-05
 
 - Closed the 'me hub + bdash' remaining fabrication

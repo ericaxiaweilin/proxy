@@ -123,7 +123,7 @@ export function MarketSurface({
   supply?: SupplyClient;
   marketLabel: string;
   initialTab?: MarketTab;
-  onOpenExperience: (experienceId: string) => void;
+  onOpenExperience?: ((experienceId: string) => void) | undefined;
   onOpenActivity: (activity: Activity) => void;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -169,17 +169,11 @@ export function MarketSurface({
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
   const [publishOpen, setPublishOpen] = useState(false);
   const [selectOpp, setSelectOpp] = useState<MarketOpportunity | null>(null);
-  const [applicantName, setApplicantName] = useState<string | null>(null);
-  const [submissionName, setSubmissionName] = useState<string | null>(null);
-  const [compareOpen, setCompareOpen] = useState(false);
   const [offerBusy, setOfferBusy] = useState(false);
   const [lastOrderId, setLastOrderId] = useState<string>();
 
   // 规范 §4/§13：Android 硬件返回按真实嵌套深度逐层收起，最上层先消费；
-  // 全部收起后返回 false 交给 shell 关模块。叶子（submission/applicant）最深。
-  useModuleBackHandler(submissionName ? () => { setSubmissionName(null); return true; } : undefined);
-  useModuleBackHandler(applicantName ? () => { setApplicantName(null); return true; } : undefined);
-  useModuleBackHandler(compareOpen ? () => { setCompareOpen(false); return true; } : undefined);
+  // 全部收起后返回 false 交给 shell 关模块。
   useModuleBackHandler(selectOpp ? () => { setSelectOpp(null); return true; } : undefined);
   useModuleBackHandler(publishOpen ? () => { setPublishOpen(false); return true; } : undefined);
   useModuleBackHandler(activityDetail ? () => { setActivityDetail(null); return true; } : undefined);
@@ -547,12 +541,6 @@ export function MarketSurface({
             setPublishOpen(false);
           }}
         />
-      ) : applicantName ? (
-        <ApplicantDetail name={applicantName} onBack={() => setApplicantName(null)} onOpenSubmission={(n) => { setApplicantName(null); setSubmissionName(n); }} onCompare={() => { setApplicantName(null); setCompareOpen(true); }} />
-      ) : submissionName ? (
-        <SubmissionDetail name={submissionName} onBack={() => setSubmissionName(null)} onCompare={() => { setSubmissionName(null); setCompareOpen(true); }} onOpenApplicant={(n) => { setSubmissionName(null); setApplicantName(n); }} />
-      ) : compareOpen ? (
-        <CompareScene onBack={() => setCompareOpen(false)} onOpenApplicant={(n) => { setCompareOpen(false); setApplicantName(n); }} />
       ) : selectOpp ? (
         <SelectWorkbench marketplace={marketplace} opportunity={selectOpp} onBack={() => setSelectOpp(null)} />
       ) : view === "MAP" ? (
@@ -1186,151 +1174,6 @@ function SelectWorkbench({ marketplace, opportunity, onBack }: { marketplace: Ma
   );
 }
 
-function ApplicantDetail({
-  name,
-  onBack,
-  onOpenSubmission,
-  onCompare
-}: {
-  name: string;
-  onBack: () => void;
-  onOpenSubmission: (name: string) => void;
-  onCompare: () => void;
-}): React.JSX.Element {
-  return (
-    <View>
-      <View style={styles.detailHead}>
-        <Pressable onPress={onBack} style={styles.detailBack}>
-          <Text style={styles.detailBackText}>‹</Text>
-        </Pressable>
-        <Text style={styles.detailTitle}>{name} · 候选详情</Text>
-        <Text style={styles.detailMore}>•••</Text>
-      </View>
-      <View style={styles.r4Card}>
-        <View style={styles.r4Top}>
-          <Text style={styles.r4Title}>{name} Xiaomei · 河内 · 中文/越南语</Text>
-          <View style={styles.r4FitBadge}>
-            <Text style={styles.r4FitText}>已验证</Text>
-          </View>
-        </View>
-        <Text style={styles.r4Meta}>18 真实履约 · 96% 按约 · 7 复邀 · 摄影/本地同行/活动执行</Text>
-      </View>
-      <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>为什么适合你的这个需求 · 推荐 1</Text>
-        <Text style={styles.aiCheck}>✓ 中文已验证 · 摄影作品与 3 次类似履约相关 · 周六完全覆盖</Text>
-      </View>
-      <View style={[styles.r4PriceCellHot, { borderRadius: 12, padding: 11 }]}>
-        <Text style={styles.r4PriceLabel}>她对你这个需求的本次 Offer</Text>
-        <Text style={styles.r4PriceValue}>2.2M₫ · 8h + 中文 + 30 张调色 · 仅属于本次</Text>
-      </View>
-      <View style={styles.r4Actions}>
-        <Pressable onPress={() => onOpenSubmission(name)} style={styles.r4ActionGhost}>
-          <Text style={styles.r4ActionGhostText}>看本次完整投递</Text>
-        </Pressable>
-        <Pressable onPress={onCompare} style={styles.r4ActionPrimary}>
-          <Text style={styles.r4ActionPrimaryText}>和其他候选比较</Text>
-        </Pressable>
-      </View>
-      <View style={styles.r4Actions}>
-        <Pressable style={styles.r4ActionGhost}>
-          <Text style={styles.r4ActionGhostText}>问她一个问题</Text>
-        </Pressable>
-        <Pressable style={styles.r4ActionPrimary}>
-          <Text style={styles.r4ActionPrimaryText}>接受 {name} · 2.2M₫</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function SubmissionDetail({
-  name,
-  onBack,
-  onCompare,
-  onOpenApplicant
-}: {
-  name: string;
-  onBack: () => void;
-  onCompare: () => void;
-  onOpenApplicant: (name: string) => void;
-}): React.JSX.Element {
-  return (
-    <View>
-      <View style={styles.detailHead}>
-        <Pressable onPress={onBack} style={styles.detailBack}>
-          <Text style={styles.detailBackText}>‹</Text>
-        </Pressable>
-        <Text style={styles.detailTitle}>{name} · 本次投递详情</Text>
-        <Text style={styles.detailMore}>•••</Text>
-      </View>
-      <View style={[styles.r4PriceCellHot, { borderRadius: 12, padding: 11 }]}>
-        <Text style={styles.r4PriceLabel}>本次主动报价</Text>
-        <Text style={styles.r4PriceValue}>2.2M₫ · 不是主页固定价格</Text>
-      </View>
-      <View style={styles.r4Card}>
-        <Text style={styles.r4Title}>这次她具体提供什么</Text>
-        <Text style={styles.r4Meta}>周六 10:00–18:00 · 8h · 西湖+老城区 · 中文/越南语 · 30 张调色 · 交通已含 · 超时250k₫/h</Text>
-      </View>
-      <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>为什么排在前面 · 综合推荐 1</Text>
-        <Text style={styles.aiCheck}>5/5 硬条件 · 3 次同类履约 · 路线熟悉 · 2 次复邀 · 高于预算10%但处公平区间</Text>
-      </View>
-      <View style={styles.r4Actions}>
-        <Pressable onPress={() => onOpenApplicant(name)} style={styles.r4ActionGhost}>
-          <Text style={styles.r4ActionGhostText}>看候选详情</Text>
-        </Pressable>
-        <Pressable onPress={onCompare} style={styles.r4ActionPrimary}>
-          <Text style={styles.r4ActionPrimaryText}>比较候选</Text>
-        </Pressable>
-      </View>
-      <Pressable style={[styles.r4ActionPrimary, { marginTop: 8 }]}>
-        <Text style={styles.r4ActionPrimaryText}>接受 {name} · 2.2M₫</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-function CompareScene({ onBack, onOpenApplicant }: { onBack: () => void; onOpenApplicant: (name: string) => void }): React.JSX.Element {
-  return (
-    <View>
-      <View style={styles.detailHead}>
-        <Pressable onPress={onBack} style={styles.detailBack}>
-          <Text style={styles.detailBackText}>‹</Text>
-        </Pressable>
-        <Text style={styles.detailTitle}>比较 3 位候选</Text>
-        <Text style={styles.detailMore}>•••</Text>
-      </View>
-      <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>当前最关键：中文 + 摄影 + 路线</Text>
-        <Text style={styles.aiCheck}>只比较与这件事相关的字段，不以头像/价格作唯一排序。</Text>
-      </View>
-      {[
-        ["本次报价", "2.2M", "2.0M", "1.8M"],
-        ["中文", "强", "强", "基础"],
-        ["摄影", "强", "一般", "很强"],
-        ["熟悉路线", "强", "很强", "一般"],
-        ["类似履约", "3", "6", "8"],
-        ["按约", "96%", "98%", "94%"]
-      ].map(([dim, a, b, c]) => (
-        <View key={dim} style={[styles.r4Card, { flexDirection: "row", gap: 6 }]}>
-          <Text style={[styles.r4PriceLabel, { flex: 1 }]}>{dim}</Text>
-          <Text style={[styles.r4PriceValue, { flex: 1, textAlign: "center" }]}>{a}</Text>
-          <Text style={[styles.r4PriceValue, { flex: 1, textAlign: "center" }]}>{b}</Text>
-          <Text style={[styles.r4PriceValue, { flex: 1, textAlign: "center" }]}>{c}</Text>
-        </View>
-      ))}
-      <View style={styles.r4Actions}>
-        <Pressable onPress={() => onOpenApplicant("小美")} style={styles.r4ActionGhost}>
-          <Text style={styles.r4ActionGhostText}>看小美主页</Text>
-        </Pressable>
-        <Pressable style={styles.r4ActionPrimary}>
-          <Text style={styles.r4ActionPrimaryText}>接受 2.2M₫</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 function MarketMap({
   tab,
   opportunities,
@@ -1347,7 +1190,7 @@ function MarketMap({
   lens: OpportunityLens;
   remoteLens: boolean;
   marketLabel: string;
-  onOpenExperience: (experienceId: string) => void;
+  onOpenExperience?: ((experienceId: string) => void) | undefined;
   onOpenOpportunity: (id: string) => void;
   onOpenActivity: (activity: Activity) => void;
   // R15.x (P1 market 附近): parent passes a callback that the

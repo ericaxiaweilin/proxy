@@ -1,394 +1,28 @@
-// Tasks Surface（稳定 Surface：任务 tab）。
-// 视觉基线：Proxy_P0_Prototype_R15_11_0_Social_Baseline_Launch_Candidate.html
-// （taskmainnav 需求/活动 + taskaction 深色发布卡 + 进行中 service 行 + 收费需求示例
-// activityfeedcard + 已完成行），刻度按 R15.11 Social Baseline 对齐。
-// 功能接线：进行中任务 → FulfillmentWorkspace；发布需求 → 回 Home 打开创建链；
-// 需求/活动 切换为屏内视图（活动页 = 基线 activityhub：intro + filters + activityfeedcard）。
-// 新架构（服务端驱动）：活动读模型来自 ListActivities，感兴趣/参加走命令，计数服务端权威。
+// tasks.tsx — ActivityFeedCard + ActivityDetail exports
+// shared by the Market and Tasks surfaces. TasksSurface
+// itself (the workspace entry points) was removed in
+// R18.x: the workspace entry pattern is now driven by
+// the live supply / fulfillment surfaces, not by the
+// 2 hardcoded "进行中 / 已完成" rows this file used to
+// carry. Origin / AI persona colour / activity detail
+// remain canonical here so the Market activity cards
+// keep the R17.x visual baseline.
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Activity, TasksExperienceParams } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
-import { useMerchantIdentity } from "../use-merchant-identity";
 import { color, Gradient, shadows } from "../theme";
-import type { WorkspaceTarget } from "./fulfillment-workspace";
 
-interface TaskRow {
-  glyph: string;
-  grad: boolean;
-  label: string;
-  desc: string;
-  target?: WorkspaceTarget;
-}
-
-const IN_PROGRESS: TaskRow[] = [
-  {
-    glyph: "•",
-    grad: true,
-    label: "周六新店开业",
-    desc: "正在匹配 · 5 个名额已完成 4 个",
-    target: { category: "FNB_RETAIL", goal: "周六新店开业：现场接待与流程支持，复用上次开业团队。" }
-  },
-  {
-    glyph: "!",
-    grad: false,
-    label: "下周客户拜访",
-    desc: "地点变化 · 等你确认",
-    target: { category: "BUSINESS_PRO", goal: "下周客户拜访：地点发生变化，需要确认新的会面安排。" }
-  }
-];
-
-const DONE: TaskRow[] = [
-  { glyph: "✓", grad: false, label: "上次新店开业", desc: "结果已完成 · 可查看结果" }
-];
-
-// 活动目录来自服务端读模型（ListActivities；内容数据不在前端内嵌）。
-type ActivityFilter = "RECOMMENDED" | "CAFE" | "RESTAURANT" | "MINE";
-
-// ORIGIN_META：origin 徽标永远指"人"（平台 / 商家 / 用户 / TEST）。
-// AI 状态由 aiStatus + aiActorKind + aiPersona* 表达，不混入 origin
-// 枚举。origin = "PLATFORM" + aiStatus = "AI_GENERATED" + aiActorKind =
-// "PLATFORM_AI" 是冷启动合规写法；origin = "USER" + aiStatus =
-// "AI_ASSISTED" + aiActorKind = "USER_TWIN" 是用户分身起草；等等。
-const ORIGIN_META: Record<Activity["origin"], { label: string; bg: string; fg: string }> = {
-  PLATFORM: { label: "Proxy 特别活动", bg: color.activityOriginPlatformBg, fg: color.activityOriginPlatformFg },
-  MERCHANT: { label: "商家活动", bg: color.activityOriginMerchantBg, fg: color.activityOriginMerchantFg },
-  // USER 是真人发起 — 走主题外的薄荷绿调 (同 AI 之前的设计)。
-  USER: { label: "用户发起", bg: color.activityOriginUserBg, fg: color.activityOriginUserFg },
-  // TEST 不会被发送到客户端 (server 端 List 过滤)，保留以防万一。
-  TEST: { label: "测试", bg: "#F5F5F5", fg: "#9E9E9E" }
+// origin 徽标 — 指“发布人身份”（平台 / 商家 / 用户 / TEST）。
+// AI 状态在 aiStatus / aiActorKind / aiPersona* 表达，origin
+// 枚举不混入 AI。
+const ORIGIN_META: Record<string, { label: string; bg: string; fg: string }> = {
+  PLATFORM: { label: "平台", bg: "#EFE6FF", fg: "#5A37B8" },
+  BUSINESS: { label: "商家", bg: "#FFE9DD", fg: "#A6551F" },
+  USER: { label: "用户", bg: "#E5F1FF", fg: "#215AA8" },
+  TEST: { label: "测试", bg: "#E7E7EA", fg: "#56565C" }
 };
 
-const ACTIVITY_FILTERS: ReadonlyArray<{ id: ActivityFilter; label: string }> = [
-  { id: "RECOMMENDED", label: "推荐" },
-  { id: "CAFE", label: "咖啡" },
-  { id: "RESTAURANT", label: "餐厅" },
-  { id: "MINE", label: "我的活动" }
-];
-
-export function TasksSurface({
-  activities,
-  entry = { view: "NEED" },
-  onEnterWorkspace,
-  onPublishNeed
-}: {
-  activities: ActivityClient;
-  entry?: TasksExperienceParams;
-  onEnterWorkspace: (target: WorkspaceTarget) => void;
-  onPublishNeed: () => void;
-}): React.JSX.Element {
-  const [view, setView] = useState<"NEED" | "ACTIVITY" | "DETAIL" | "CREATE">(
-    entry.view === "ACTIVITY" ? "ACTIVITY" : "NEED"
-  );
-  const [filter, setFilter] = useState<ActivityFilter>(
-    entry.view === "ACTIVITY" ? entry.filter ?? "RECOMMENDED" : "RECOMMENDED"
-  );
-  const [detailId, setDetailId] = useState<string | null>(null);
-  const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
-  const [items, setItems] = useState<Activity[]>([]);
-  const [interestedIn, setInterestedIn] = useState<ReadonlySet<string>>(new Set());
-  const [joinedIds, setJoinedIds] = useState<ReadonlySet<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [createTitle, setCreateTitle] = useState("周六咖啡拍照局");
-  const [createTime, setCreateTime] = useState("周六 15:00–17:00");
-  const [createCapacity, setCreateCapacity] = useState("6");
-  const [createTerm, setCreateTerm] = useState<"SPLIT" | "HOST_COVERS">("SPLIT");
-  const [createVenueId, setCreateVenueId] = useState<string | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
-  // MERCHANT-PUBLISH-001: 有店才显示身份选择（个人/店铺），无店保持个人发布。
-  const merchant = useMerchantIdentity();
-
-  // 挂载时拉取服务端活动读模型（ListActivities）；失败不回落本地内容。
-  const loadActivities = useCallback(async (): Promise<void> => {
-    setPhase("LOADING");
-    try {
-      const read = await activities.listActivities();
-      setItems(read);
-      setPhase("READY");
-    } catch {
-      setPhase("ERROR");
-    }
-  }, [activities]);
-
-  useEffect(() => {
-    void loadActivities();
-  }, [loadActivities]);
-
-  useEffect(() => {
-    if (entry.view === "ACTIVITY") {
-      setView("ACTIVITY");
-      setFilter(entry.filter ?? "RECOMMENDED");
-      return;
-    }
-
-    setView("NEED");
-    setFilter("RECOMMENDED");
-  }, [entry]);
-
-  function openDetail(item: Activity): void {
-    setDetailId(item.activityId);
-    setView("DETAIL");
-  }
-
-  /** 用命令返回的服务端权威活动对象覆盖本地读模型。 */
-  function upsertActivity(next: Activity): void {
-    setItems((current) => current.map((entry) => (entry.activityId === next.activityId ? next : entry)));
-  }
-
-  async function toggleInterest(activityId: string): Promise<void> {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const { activity, interested } = await activities.toggleInterest(activityId);
-      upsertActivity(activity);
-      const next = new Set(interestedIn);
-      if (interested) next.add(activityId);
-      else next.delete(activityId);
-      setInterestedIn(next);
-    } catch {
-      // fail-closed：命令失败保持原状态
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function joinActivity(activityId: string): Promise<void> {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const { activity } = await activities.join(activityId);
-      upsertActivity(activity);
-      const next = new Set(joinedIds);
-      next.add(activityId);
-      setJoinedIds(next);
-    } catch {
-      // fail-closed：命令失败保持原状态
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function publishActivity(): Promise<void> {
-    if (busy) return;
-    const venue = items.find((item) => item.activityId === createVenueId)
-      ?? items.find((item) => item.realitySceneId && (item.venueType === "CAFE" || item.venueType === "RESTAURANT"));
-    if (!venue?.realitySceneId || (venue.venueType !== "CAFE" && venue.venueType !== "RESTAURANT")) {
-      setCreateError("当前城市还没有可用于活动的平台商家，请先切换地点。");
-      return;
-    }
-    setBusy(true);
-    setCreateError(null);
-    try {
-      const created = await activities.publish({
-        title: createTitle.trim(), time: createTime.trim(), capacity: Number(createCapacity),
-        venueName: venue.venueName, venueIcon: venue.venueIcon, venueType: venue.venueType,
-        realitySceneId: venue.realitySceneId, desc: "共同参与真实场景；活动本身免费，到店消费按约定承担。",
-        consumptionTerm: createTerm,
-        ...(merchant.merchantId ? { merchantId: merchant.merchantId } : {})
-      });
-      setItems((current) => [created, ...current]);
-      setDetailId(created.activityId);
-      setView("DETAIL");
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "活动发布失败";
-      // MERCHANT-PUBLISH-001: 无成员资格 publisher 会被 server 403。
-      setCreateError(/merchant_forbidden/i.test(msg) ? "该店铺无发布权限（仅店主/管理员可以以店铺名义发布）。" : msg);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const detailItem = detailId ? items.find((entry) => entry.activityId === detailId) ?? null : null;
-
-  const visible = items.filter((item) => {
-    if (filter === "CAFE") return item.venueType === "CAFE";
-    if (filter === "RESTAURANT") return item.venueType === "RESTAURANT";
-    if (filter === "MINE") return joinedIds.has(item.activityId) || interestedIn.has(item.activityId);
-    return true;
-  });
-
-  return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      {/* 基线 .taskmainnav：surface 底、radius 14、内白激活胶囊 */}
-      <View style={styles.mainNav}>
-        <Pressable onPress={() => setView("NEED")} style={[view === "NEED" ? styles.mainNavOn : styles.mainNavOff, view === "NEED" && styles.mainNavShadow]}>
-          <Text style={view === "NEED" ? styles.mainNavOnText : styles.mainNavOffText}>需求</Text>
-        </Pressable>
-        <Pressable onPress={() => setView("ACTIVITY")} style={[view !== "NEED" ? styles.mainNavOn : styles.mainNavOff, view !== "NEED" && styles.mainNavShadow]}>
-          <Text style={view !== "NEED" ? styles.mainNavOnText : styles.mainNavOffText}>活动</Text>
-        </Pressable>
-      </View>
-
-      {view === "CREATE" ? (
-        <View style={styles.createCard}>
-          <Text style={styles.sectionTitle}>发起共同参与活动</Text>
-          <Text style={styles.activityIntroBody}>活动本身免费。若需要购买摄影、陪同、翻译等能力，请切回“需求”。</Text>
-          <TextInput value={createTitle} onChangeText={setCreateTitle} placeholder="活动名称" style={styles.createInput} />
-          <TextInput value={createTime} onChangeText={setCreateTime} placeholder="时间" style={styles.createInput} />
-          <TextInput value={createCapacity} onChangeText={setCreateCapacity} keyboardType="number-pad" placeholder="人数（2–50）" style={styles.createInput} />
-          <Text style={styles.createLabel}>选择平台商家</Text>
-          {items.filter((item) => item.realitySceneId && (item.venueType === "CAFE" || item.venueType === "RESTAURANT")).filter((item, index, all) => all.findIndex((x) => x.realitySceneId === item.realitySceneId) === index).map((venue) => (
-            <Pressable key={venue.realitySceneId} onPress={() => setCreateVenueId(venue.activityId)} style={[styles.createChoice, (createVenueId === venue.activityId || (!createVenueId && items.find((x) => x.realitySceneId)?.activityId === venue.activityId)) && styles.createChoiceOn]}>
-              <Text style={styles.createChoiceText}>{venue.venueIcon} {venue.venueName} · {venue.venueTypeLabel}</Text>
-            </Pressable>
-          ))}
-          <Text style={styles.createLabel}>到店消费（与活动价格分开）</Text>
-          {merchant.accounts.length > 0 ? (
-            <View>
-              <Text style={styles.createLabel}>发布身份</Text>
-              <View style={styles.createChoiceRow}>
-                <Pressable onPress={() => merchant.setMerchantId(undefined)} style={[styles.createChoice, !merchant.merchantId && styles.createChoiceOn]}>
-                  <Text style={styles.createChoiceText}>个人</Text>
-                </Pressable>
-                {merchant.accounts.map((shop) => (
-                  <Pressable key={shop.id} onPress={() => merchant.setMerchantId(shop.id)} style={[styles.createChoice, merchant.merchantId === shop.id && styles.createChoiceOn]}>
-                    <Text style={styles.createChoiceText}>{shop.name}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          ) : null}
-          <View style={styles.createChoiceRow}>
-            <Pressable onPress={() => setCreateTerm("SPLIT")} style={[styles.createChoice, createTerm === "SPLIT" && styles.createChoiceOn]}><Text style={styles.createChoiceText}>各自承担</Text></Pressable>
-            <Pressable onPress={() => setCreateTerm("HOST_COVERS")} style={[styles.createChoice, createTerm === "HOST_COVERS" && styles.createChoiceOn]}><Text style={styles.createChoiceText}>发起人请客</Text></Pressable>
-          </View>
-          <Text style={styles.createMoney}>活动价格：0₫ · 免费参加</Text>
-          {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
-          <Pressable disabled={busy} onPress={() => void publishActivity()} style={[styles.ctaPrimary, styles.createPublish]}><Text style={styles.ctaPrimaryText}>{busy ? "发布中…" : "确认并发布"}</Text></Pressable>
-          <Pressable onPress={() => setView("ACTIVITY")} style={styles.ctaLight}><Text style={styles.ctaLightText}>取消</Text></Pressable>
-        </View>
-      ) : view === "DETAIL" && detailItem ? (
-        <ActivityDetail
-          item={detailItem}
-          interested={interestedIn.has(detailItem.activityId)}
-          joined={joinedIds.has(detailItem.activityId)}
-          busy={busy}
-          onToggleInterested={() => void toggleInterest(detailItem.activityId)}
-          onJoin={() => void joinActivity(detailItem.activityId)}
-          onBack={() => setView("ACTIVITY")}
-        />
-      ) : view === "ACTIVITY" ? (
-        <>
-          {/* 基线 .activityintro：h2 一起做点什么 + 发起活动 */}
-          <View style={styles.activityIntro}>
-            <View style={styles.activityIntroCopy}>
-              <Text style={styles.activityIntroTitle}>一起做点什么</Text>
-              <Text style={styles.activityIntroBody}>选一个活动，再去真实的咖啡店或餐厅见面。</Text>
-            </View>
-            <Pressable onPress={() => setView("CREATE")} style={styles.activityIntroCta}>
-              <Text style={styles.activityIntroCtaText}>发起活动</Text>
-            </Pressable>
-          </View>
-
-          {/* 基线 .activityfilters：推荐 / 咖啡 / 餐厅 / 我的活动 */}
-          <View style={styles.activityFilters}>
-            {ACTIVITY_FILTERS.map((entry) => {
-              const active = filter === entry.id;
-              return (
-                <Pressable key={entry.id} onPress={() => setFilter(entry.id)} style={[styles.activityFilter, active && styles.activityFilterOn]}>
-                  <Text style={[styles.activityFilterText, active && styles.activityFilterTextOn]}>{entry.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>{filter === "MINE" ? "我的活动" : "为你推荐"}</Text>
-            <Text style={styles.sectionHint}>{visible.length} 个</Text>
-          </View>
-          {phase === "LOADING" ? (
-            <View style={styles.activityEmpty}>
-              <ActivityIndicator color={color.magenta} />
-              <Text style={styles.activityEmptyText}>正在读取活动读模型（ListActivities）…</Text>
-            </View>
-          ) : phase === "ERROR" ? (
-            <View style={styles.activityEmpty}>
-              <Text style={styles.activityEmptyText}>活动读模型暂时不可用（本地 API 未连接？）。</Text>
-              <Pressable onPress={() => void loadActivities()} style={styles.activityRetry}>
-                <Text style={styles.activityRetryText}>重试</Text>
-              </Pressable>
-            </View>
-          ) : visible.length === 0 ? (
-            <View style={styles.activityEmpty}>
-              <Text style={styles.activityEmptyText}>
-                {filter === "MINE" ? "还没有参加或感兴趣的活动。" : "附近暂时没有符合的活动。"}
-              </Text>
-            </View>
-          ) : (
-            visible.map((item) => (
-              <ActivityFeedCard key={item.activityId} item={item} onPress={() => openDetail(item)} />
-            ))
-          )}
-        </>
-      ) : (
-        <>
-
-      {/* 基线 .taskaction：深色渐变发布卡 + lime CTA */}
-      <Gradient from="#17131F" to="#332642" style={styles.taskAction}>
-        <Text style={styles.taskActionTitle}>需要找人提供明确服务？</Text>
-        <Text style={styles.taskActionBody}>
-          付费购买时间、能力或结果，都从这里发布。Proxy 会按场景决定直接执行、辅助整理或继续澄清。
-        </Text>
-        <Pressable onPress={onPublishNeed} style={styles.taskActionCta}>
-          <Text style={styles.taskActionCtaText}>发布需求</Text>
-        </Pressable>
-      </Gradient>
-
-      {/* 进行中 */}
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>进行中</Text>
-        <Text style={styles.sectionHint}>{IN_PROGRESS.length} 项</Text>
-      </View>
-      {IN_PROGRESS.map((row) => (
-        <TaskServiceRow key={row.label} row={row} onPress={row.target ? () => onEnterWorkspace(row.target as WorkspaceTarget) : undefined} />
-      ))}
-
-      {/* 基线「收费需求示例」：.activityfeedcard + .venuecompact */}
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>收费需求示例</Text>
-        <Text style={styles.sectionHint}>属于需求，不属于活动</Text>
-      </View>
-      <Pressable onPress={onPublishNeed} style={styles.exampleCard}>
-        <View style={styles.exampleHead}>
-          <View style={styles.exampleTitle}>
-            <View style={styles.originBadge}>
-              <Text style={styles.originBadgeText}>付费需求</Text>
-            </View>
-            <Text style={styles.exampleName}>商务晚餐 · 需要中文陪同</Text>
-            <Text style={styles.exampleMeta}>周五 18:30–21:00 · 需要 1 位</Text>
-          </View>
-          <View style={styles.examplePrice}>
-            <Text style={styles.examplePriceStrong}>800,000₫</Text>
-            <Text style={styles.examplePriceSmall}>任务报酬</Text>
-          </View>
-        </View>
-        <View style={styles.venue}>
-          <View style={styles.venueIcon}>
-            <Text style={styles.venueIconText}>🍽️</Text>
-          </View>
-          <View style={styles.venueCopy}>
-            <Text style={styles.venueName}>岚庭餐厅 · 西湖</Text>
-            <Text style={styles.venueNote}>同样绑定真实商家场景，但走需求订单与履约链</Text>
-          </View>
-          <View style={styles.venueTag}>
-            <Text style={styles.venueTagText}>平台商家</Text>
-          </View>
-        </View>
-      </Pressable>
-
-      {/* 已完成 */}
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>已完成</Text>
-        <Text style={styles.sectionHint}>可复用</Text>
-      </View>
-      {DONE.map((row) => (
-        <TaskServiceRow key={row.label} row={row} />
-      ))}
-        </>
-      )}
-    </ScrollView>
-  );
-}
 
 // R17.x: persona 颜色色版. ai_001-ai_005 各自不同色背景, 同
 // SVG 文件主题色. surface 渲染需要快速到于 assets/ SVG, 这里
@@ -406,7 +40,7 @@ function personaColorStyle(personaId: string): { backgroundColor: string } {
 }
 
 export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: () => void }): React.JSX.Element {
-  const origin = ORIGIN_META[item.origin];
+  const origin = ORIGIN_META[item.origin] ?? ORIGIN_META.TEST!;
   return (
     <Pressable onPress={onPress} style={styles.exampleCard}>
       <View style={styles.exampleHead}>
@@ -497,7 +131,7 @@ export function ActivityDetail({
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onBack: () => void;
 }): React.JSX.Element {
-  const origin = ORIGIN_META[item.origin];
+  const origin = ORIGIN_META[item.origin] ?? ORIGIN_META.TEST!;
   const isCafe = item.venueType === "CAFE";
   return (
     <>
@@ -670,26 +304,6 @@ export function ActivityDetail({
   );
 }
 
-function TaskServiceRow({ row, onPress }: { row: TaskRow; onPress?: (() => void) | undefined }): React.JSX.Element {
-  return (
-    <Pressable onPress={onPress} style={styles.serviceRow}>
-      {row.grad ? (
-        <Gradient from={color.magenta} to={color.violet} style={styles.serviceIcon}>
-          <Text style={styles.serviceIconTextGrad}>{row.glyph}</Text>
-        </Gradient>
-      ) : (
-        <View style={styles.serviceIcon}>
-          <Text style={styles.serviceIconText}>{row.glyph}</Text>
-        </View>
-      )}
-      <View style={styles.serviceCopy}>
-        <Text style={styles.serviceLabel}>{row.label}</Text>
-        <Text style={styles.serviceDesc}>{row.desc}</Text>
-      </View>
-      <Text style={styles.chev}>›</Text>
-    </Pressable>
-  );
-}
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
@@ -930,34 +544,6 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: color.ink, fontSize: 12, fontWeight: "700" },
   sectionHint: { color: color.muted, fontSize: 11 },
-
-  // 基线 .card.service：radius 17 padding 12 margin 6 0 gap 8。
-  serviceRow: {
-    alignItems: "center",
-    backgroundColor: color.white,
-    borderColor: "rgba(20,18,31,0.04)",
-    borderRadius: 17,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 6,
-    padding: 12,
-    ...shadows.card
-  },
-  serviceIcon: {
-    alignItems: "center",
-    backgroundColor: color.lime,
-    borderRadius: 13,
-    height: 42,
-    justifyContent: "center",
-    width: 42
-  },
-  serviceIconText: { color: color.ink, fontSize: 16 },
-  serviceIconTextGrad: { color: color.white, fontSize: 16 },
-  serviceCopy: { flex: 1 },
-  serviceLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
-  serviceDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
-  chev: { color: "#A59CAB", fontSize: 22 },
 
   // 基线 .activityfeedcard：radius 18 padding 12 margin 8。
   exampleCard: {
