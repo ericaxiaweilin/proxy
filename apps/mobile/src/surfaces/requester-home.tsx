@@ -17,6 +17,7 @@ import type { ExperienceClient } from "../experience-client";
 import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
 import type { EngagementClient } from "../engagement-client";
 import { aiPersonaPhoto } from "../ai-persona-presentation";
+import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
@@ -130,13 +131,13 @@ export function RequesterHome({
   // R15.34: 筛选 sheet 开 / 关 + 已选 chip。空数组 = "全部"。
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
-  const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>([]);
+  const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
   const [followedAI, setFollowedAI] = useState<ReadonlySet<string>>(new Set());
   const [followBusy, setFollowBusy] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
-    void aiAccounts?.listRecommended().then((accounts) => { if (!cancelled) setRecommendedAI(accounts); }).catch(() => { if (!cancelled) setRecommendedAI([]); });
+    void aiAccounts?.listRecommended().then((accounts) => { if (!cancelled && accounts.length > 0) setRecommendedAI(accounts); }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [aiAccounts]);
 
@@ -372,10 +373,13 @@ export function RequesterHome({
           {recommendedAI.map((account) => {
             const followed = followedAI.has(account.accountId);
             return <View key={account.accountId} style={styles.aiCard}>
-              <Pressable accessibilityLabel={`打开${account.displayName}的主页`} onPress={() => onOpenAIProfile?.(account)}><Image source={aiPersonaPhoto(account.personaId)} style={styles.aiAvatar} /></Pressable>
-              <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
-              <Text style={styles.aiHandle} numberOfLines={1}>@{account.handle} · AI</Text>
-              <Text style={styles.aiDescription} numberOfLines={2}>{account.description}</Text>
+              <Pressable accessibilityLabel={`打开${account.displayName}的个人主页`} onPress={() => onOpenAIProfile?.(account)}>
+                <Image source={aiPersonaPhoto(account.personaId)} style={styles.aiAvatar} />
+                <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
+                <Text style={styles.aiHandle} numberOfLines={1}>@{account.handle} · AI</Text>
+                <Text style={styles.aiDescription} numberOfLines={2}>{account.description}</Text>
+                <Text style={styles.aiProfileLink}>查看个人主页 ›</Text>
+              </Pressable>
               <View style={styles.aiActions}>
                 <Pressable accessibilityLabel={`${followed ? "移除" : "添加"}${account.displayName}`} onPress={() => void toggleAIFollow(account.accountId)} style={[styles.aiFollow, followed && styles.aiFollowed]}>
                   <Text style={[styles.aiFollowText, followed && styles.aiFollowedText]}>{followBusy === account.accountId ? "处理中" : followed ? "✓ 已添加" : "+ 添加"}</Text>
@@ -649,6 +653,7 @@ const styles = StyleSheet.create({
   aiName: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 9 },
   aiHandle: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 2 },
   aiDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5, minHeight: 30 },
+  aiProfileLink: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 7 },
   aiActions: { flexDirection: "row", gap: 6, marginTop: 9 },
   aiFollow: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, flex: 1, paddingVertical: 8 },
   aiFollowed: { backgroundColor: color.proxyPurpleSoft },

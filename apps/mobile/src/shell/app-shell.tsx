@@ -599,6 +599,7 @@ export function AppShell({
               {...(messageChat?.conversationId ? { conversationId: messageChat.conversationId } : {})}
               {...(messageChat?.aiAccount ? { aiAccount: messageChat.aiAccount } : {})}
               {...(messageChat?.initialDraft ? { initialDraft: messageChat.initialDraft } : {})}
+              {...(ensureConversationSession ? { ensureSession: ensureConversationSession } : {})}
               conversationClient={conversation}
               activityClient={activities}
               mediaClient={media}

@@ -35,6 +35,7 @@ export function ConversationSurface({
   conversationId: initialConvId,
   aiAccount,
   initialDraft,
+  ensureSession,
   onBack
 }: {
   author: string;
@@ -44,12 +45,14 @@ export function ConversationSurface({
   conversationId?: string;
   aiAccount?: PlatformAIAccount;
   initialDraft?: string;
+  ensureSession?: () => Promise<void>;
   onBack: () => void;
 }): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState(initialDraft ?? "");
   const [sending, setSending] = useState(false);
   const [convId, setConvId] = useState<string | undefined>(initialConvId);
+  const [connectAttempt, setConnectAttempt] = useState(0);
   const [loading, setLoading] = useState(!initialConvId);
   const [error, setError] = useState<string | undefined>();
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
@@ -150,6 +153,7 @@ export function ConversationSurface({
     let cancelled = false;
     (async () => {
       try {
+        await ensureSession?.();
         const result = await conversationClient.startConversation(aiAccount ? {
           originType: "PROFILE", originId: aiAccount.accountId, participantId: aiAccount.accountId,
           firstMessage: "", assistantMode: `AI_PERSONA:${aiAccount.personaId}`
@@ -184,7 +188,7 @@ export function ConversationSurface({
       }
     })();
     return () => { cancelled = true; };
-  }, [convId, author, aiAccount, conversationClient, parseOperationRef]);
+  }, [convId, author, aiAccount, conversationClient, ensureSession, parseOperationRef, connectAttempt]);
 
   // R17.x: open activity picker. 拉 server 真实活动列表, 让
   // 用户选一个. (不完成这步, 发送活动 proxy 会被拒 — 硬
@@ -360,6 +364,7 @@ export function ConversationSurface({
         {error && (
           <View style={styles.systemMsg}>
             <Text style={styles.systemMsgText}>{error}</Text>
+            {!convId && !loading ? <Pressable onPress={() => { setError(undefined); setLoading(true); setConnectAttempt((value) => value + 1); }} style={styles.retryButton}><Text style={styles.retryButtonText}>重新连接</Text></Pressable> : null}
           </View>
         )}
         {messages.map((msg) =>
@@ -509,6 +514,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6
   },
   systemMsgText: { color: color.muted, fontSize: 11 },
+  retryButton: { alignSelf: "center", backgroundColor: color.ink, borderRadius: 10, marginTop: 8, paddingHorizontal: 14, paddingVertical: 8 },
+  retryButtonText: { color: color.white, fontSize: 11, fontWeight: "800" },
   aiIntro: { alignSelf: "center", backgroundColor: "#F1EBFF", borderRadius: 11, marginBottom: 4, paddingHorizontal: 12, paddingVertical: 8 },
   aiIntroText: { color: color.violet, fontSize: 11, lineHeight: 16, textAlign: "center" },
 
