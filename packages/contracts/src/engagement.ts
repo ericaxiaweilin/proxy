@@ -1,5 +1,22 @@
 import { z } from "zod";
 
+export const PostEngagementSchema = z.object({
+  postId: z.string().min(1), followed: z.boolean(),
+  reactions: z.number().int().min(0), replies: z.number().int().min(0),
+  reposts: z.number().int().min(0), bookmarked: z.boolean(), reacted: z.boolean()
+});
+export type PostEngagement = z.infer<typeof PostEngagementSchema>;
+
+export const PostReplySchema = z.object({
+  replyId: z.string().min(1), postId: z.string().min(1), actorId: z.string().min(1),
+  body: z.string(), createdAt: z.string()
+});
+export type PostReply = z.infer<typeof PostReplySchema>;
+export const PostRepliesListSchema = z.object({
+  postId: z.string().min(1), replies: z.array(PostReplySchema), count: z.number().int().min(0)
+});
+export type PostRepliesList = z.infer<typeof PostRepliesListSchema>;
+
 // ---------- R15.45 PostMenu / Report / MuteAuthor ----------
 
 // PostReportReason — 举报原因枚举 (mobile menu 4 选项)

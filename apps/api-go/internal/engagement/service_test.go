@@ -80,6 +80,78 @@ func TestInvalidReply(t *testing.T) {
 	}
 }
 
+func TestPostReactionTruthToggleAndRemountHydration(t *testing.T) {
+	s := New()
+	first := s.Handle(envelopeFor("ReactToPost", map[string]any{"postId": "post_truth"}, "post_truth"))
+	if first.Outcome != "ACCEPTED" || first.Aggregate.State != "REACTED" {
+		t.Fatalf("first toggle: %#v", first)
+	}
+	read := s.Handle(envelopeFor("GetPostEngagement", map[string]any{"postId": "post_truth"}, "post_truth"))
+	var body struct {
+		Engagement PostEngagement `json:"engagement"`
+	}
+	if err := json.Unmarshal([]byte(read.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Engagement.Reactions != 1 || !body.Engagement.Reacted {
+		t.Fatalf("hydrated truth: %+v", body.Engagement)
+	}
+	repeated := s.Handle(envelopeFor("ReactToPost", map[string]any{"postId": "post_truth", "active": true}, "post_truth"))
+	if err := json.Unmarshal([]byte(repeated.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Engagement.Reactions != 1 || !body.Engagement.Reacted {
+		t.Fatalf("repeated like must be idempotent: %+v", body.Engagement)
+	}
+	second := s.Handle(envelopeFor("ReactToPost", map[string]any{"postId": "post_truth", "active": false}, "post_truth"))
+	if second.Outcome != "ACCEPTED" || second.Aggregate.State != "UNREACTED" {
+		t.Fatalf("unlike: %#v", second)
+	}
+	if err := json.Unmarshal([]byte(second.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Engagement.Reactions != 0 || body.Engagement.Reacted {
+		t.Fatalf("unlike truth: %+v", body.Engagement)
+	}
+	repeated = s.Handle(envelopeFor("ReactToPost", map[string]any{"postId": "post_truth", "active": false}, "post_truth"))
+	if err := json.Unmarshal([]byte(repeated.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Engagement.Reactions != 0 || body.Engagement.Reacted {
+		t.Fatalf("repeated unlike must be idempotent: %+v", body.Engagement)
+	}
+}
+
+func TestPostCommentVisibilityRefreshesListAndCount(t *testing.T) {
+	s := New()
+	for _, text := range []string{"first", "second"} {
+		if result := s.Handle(envelopeFor("ReplyToPost", map[string]any{"postId": "post_comments", "body": text}, "post_comments")); result.Outcome != "ACCEPTED" {
+			t.Fatalf("reply: %#v", result)
+		}
+	}
+	listed := s.Handle(envelopeFor("ListPostReplies", map[string]any{"postId": "post_comments", "limit": 20}, "post_comments"))
+	var list struct {
+		Replies []Reply `json:"replies"`
+		Count   int     `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(listed.OperationRef), &list); err != nil {
+		t.Fatal(err)
+	}
+	if list.Count != 2 || len(list.Replies) != 2 || list.Replies[1].Body != "second" {
+		t.Fatalf("listed replies: %+v", list)
+	}
+	read := s.Handle(envelopeFor("GetPostEngagement", map[string]any{"postId": "post_comments"}, "post_comments"))
+	var body struct {
+		Engagement PostEngagement `json:"engagement"`
+	}
+	if err := json.Unmarshal([]byte(read.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Engagement.Replies != 2 {
+		t.Fatalf("reply count=%d", body.Engagement.Replies)
+	}
+}
+
 func TestFeedPreferenceAndReportAreDurableCommands(t *testing.T) {
 	s := New()
 	preference := s.Handle(envelopeFor("RecordFeedPreference", map[string]any{"postId": "post_1", "authorId": "author_1", "action": "REDUCE_AUTHOR"}, "post_1"))

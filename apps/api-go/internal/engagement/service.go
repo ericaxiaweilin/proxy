@@ -53,17 +53,17 @@ type Repost struct {
 
 // R15.61 — UserRepliesList (反查该 user 的全部 reply posts)
 type UserRepliesList struct {
-	UserID  string         `json:"userId"`
-	Replies []RepliedPost  `json:"replies"`
-	Count   int            `json:"count"`
+	UserID  string        `json:"userId"`
+	Replies []RepliedPost `json:"replies"`
+	Count   int           `json:"count"`
 }
 
 type RepliedPost struct {
-	ReplyID   string    `json:"replyId"`
-	PostID    string    `json:"postId"`
-	ParentPostID string `json:"parentPostId"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"createdAt"`
+	ReplyID      string    `json:"replyId"`
+	PostID       string    `json:"postId"`
+	ParentPostID string    `json:"parentPostId"`
+	Body         string    `json:"body"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 // R15.62 — UserBookmarksList (反查该 user 的全部 bookmark posts)
@@ -132,6 +132,7 @@ type PostEngagement struct {
 	Replies    int    `json:"replies"`
 	Reposts    int    `json:"reposts"`
 	Bookmarked bool   `json:"bookmarked"`
+	Reacted    bool   `json:"reacted"`
 }
 
 type Repository interface {
@@ -140,8 +141,9 @@ type Repository interface {
 	CountFollowers(ctx context.Context, userID string) (int, error)
 	CountFollowing(ctx context.Context, userID string) (int, error)
 	IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error)
-	AddReaction(ctx context.Context, r Reaction) error
+	SetReaction(ctx context.Context, r Reaction, active bool) (bool, error)
 	AddReply(ctx context.Context, r Reply) error
+	ListRepliesByPost(ctx context.Context, postID string, limit int) ([]Reply, error)
 	AddRepost(ctx context.Context, r Repost) error
 	AddBookmark(ctx context.Context, b Bookmark) error
 	// R15.61 / R15.62 — 反查 user 的 reply / bookmark 列表 (profile 5-tab)
@@ -157,7 +159,7 @@ type Repository interface {
 	// IsMuted 查 actor 是否屏蔽了 author（feed 过滤用）。
 	AddMutedAuthor(ctx context.Context, mute MutedAuthor) (MutedAuthor, bool, error)
 	IsMuted(ctx context.Context, actorID, authorID string) (bool, error)
-	Engagement(ctx context.Context, postID string) (PostEngagement, error)
+	Engagement(ctx context.Context, postID string, viewerID ...string) (PostEngagement, error)
 }
 
 var ErrPostNotTracked = errors.New("post not tracked")
@@ -179,8 +181,8 @@ type MemoryRepository struct {
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		pins:     make(map[string]PostPin),
-		pinOrder: make(map[string][]string),
+		pins:        make(map[string]PostPin),
+		pinOrder:    make(map[string][]string),
 		follows:     make(map[string]Follow),
 		reactions:   make(map[string]Reaction),
 		replies:     make(map[string]Reply),
@@ -334,11 +336,23 @@ func (r *MemoryRepository) ListBookmarksByActor(_ context.Context, actorID strin
 	return out, nil
 }
 
-func (r *MemoryRepository) AddReaction(_ context.Context, re Reaction) error {
+func (r *MemoryRepository) SetReaction(_ context.Context, re Reaction, active bool) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for id, existing := range r.reactions {
+		if existing.PostID == re.PostID && existing.ActorID == re.ActorID {
+			if !active {
+				delete(r.reactions, id)
+				return false, nil
+			}
+			return true, nil
+		}
+	}
+	if !active {
+		return false, nil
+	}
 	r.reactions[re.ID] = re
-	return nil
+	return true, nil
 }
 
 func (r *MemoryRepository) AddReply(_ context.Context, re Reply) error {
@@ -346,6 +360,22 @@ func (r *MemoryRepository) AddReply(_ context.Context, re Reply) error {
 	defer r.mu.Unlock()
 	r.replies[re.ID] = re
 	return nil
+}
+
+func (r *MemoryRepository) ListRepliesByPost(_ context.Context, postID string, limit int) ([]Reply, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Reply, 0)
+	for _, reply := range r.replies {
+		if reply.PostID == postID {
+			out = append(out, reply)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
 }
 
 func (r *MemoryRepository) AddRepost(_ context.Context, re Repost) error {
@@ -396,13 +426,16 @@ func (r *MemoryRepository) IsMuted(_ context.Context, actorID, authorID string) 
 	return ok, nil
 }
 
-func (r *MemoryRepository) Engagement(_ context.Context, postID string) (PostEngagement, error) {
+func (r *MemoryRepository) Engagement(_ context.Context, postID string, viewerIDs ...string) (PostEngagement, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e := PostEngagement{PostID: postID}
 	for _, re := range r.reactions {
 		if re.PostID == postID {
 			e.Reactions++
+			if len(viewerIDs) > 0 && re.ActorID == viewerIDs[0] {
+				e.Reacted = true
+			}
 		}
 	}
 	for _, re := range r.replies {
@@ -437,7 +470,7 @@ func NewWithRepository(repository Repository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor", "PinPost", "UnpinPost", "ListPinnedPosts", "ListUserReplies", "ListUserBookmarks":
+	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "ListPostReplies", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor", "PinPost", "UnpinPost", "ListPinnedPosts", "ListUserReplies", "ListUserBookmarks":
 		return true
 	default:
 		return false
@@ -464,6 +497,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.react(ctx, e)
 	case "ReplyToPost":
 		return s.reply(ctx, e)
+	case "ListPostReplies":
+		return s.listPostReplies(ctx, e)
 	case "RepostPost":
 		return s.repost(ctx, e)
 	case "BookmarkPost":
@@ -540,7 +575,7 @@ func (s *Service) unfollow(ctx context.Context, e command.Envelope) command.Resu
 	domainEvents := []event.DomainEvent{event.New("ProfileUnfollowed", "Follow", e.Actor.ID+"|"+p.FolloweeID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
 		"followerId": e.Actor.ID,
 		"followeeId": p.FolloweeID,
-		"removed":     removed,
+		"removed":    removed,
 	})}
 	return command.Accepted(e, "Follow", e.Actor.ID+"|"+p.FolloweeID, 1, state, eventRefs(domainEvents))
 }
@@ -552,9 +587,9 @@ type getFollowCountsPayload struct {
 }
 
 type followCounts struct {
-	UserID     string `json:"userId"`
-	Followers  int    `json:"followers"`
-	Following  int    `json:"following"`
+	UserID    string `json:"userId"`
+	Followers int    `json:"followers"`
+	Following int    `json:"following"`
 }
 
 func (s *Service) getFollowCounts(ctx context.Context, e command.Envelope) command.Result {
@@ -600,10 +635,10 @@ func (s *Service) isFollowing(ctx context.Context, e command.Envelope) command.R
 	if p.FollowerID == "" {
 		// 匿名查: 默认 false
 		return func() command.Result {
-		accepted := command.Accepted(e, "FollowingState", p.FollowerID+"|"+p.FolloweeID, 1, "OK", nil)
-		accepted.OperationRef = mustMarshal(followingState{IsFollowing: false})
-		return accepted
-	}()
+			accepted := command.Accepted(e, "FollowingState", p.FollowerID+"|"+p.FolloweeID, 1, "OK", nil)
+			accepted.OperationRef = mustMarshal(followingState{IsFollowing: false})
+			return accepted
+		}()
 	}
 	is, err := s.repository.IsFollowing(ctx, p.FollowerID, p.FolloweeID)
 	if err != nil {
@@ -621,6 +656,7 @@ func (s *Service) isFollowing(ctx context.Context, e command.Envelope) command.R
 type reactPayload struct {
 	PostID string `json:"postId"`
 	Kind   string `json:"kind"`
+	Active *bool  `json:"active"`
 }
 
 func (s *Service) react(ctx context.Context, e command.Envelope) command.Result {
@@ -631,16 +667,32 @@ func (s *Service) react(ctx context.Context, e command.Envelope) command.Result 
 	if p.Kind == "" {
 		p.Kind = "LIKE"
 	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "REACTION_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.reaction_not_allowed", nil)
+	}
 	reaction := Reaction{ID: newID("rxn_"), PostID: p.PostID, ActorID: e.Actor.ID, Kind: p.Kind, CreatedAt: s.clock.Now().UTC()}
 	domainEvents := []event.DomainEvent{event.New("PostReacted", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, reaction.CreatedAt, map[string]any{
 		"reactionId": reaction.ID,
 		"kind":       reaction.Kind,
 		"actorId":    reaction.ActorID,
 	})}
-	if err := s.repository.AddReaction(ctx, reaction); err != nil {
+	desired := true
+	if p.Active != nil {
+		desired = *p.Active
+	}
+	active, err := s.repository.SetReaction(ctx, reaction, desired)
+	if err != nil {
 		return command.Rejected(e, "REACTION_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.reaction_failed", nil)
 	}
-	return command.Accepted(e, "Post", p.PostID, 1, "REACTED", eventRefs(domainEvents))
+	state := "UNREACTED"
+	if active {
+		state = "REACTED"
+	}
+	view, err := s.repository.Engagement(ctx, p.PostID, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "ENGAGEMENT_READ_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.read_failed", nil)
+	}
+	return acceptedWithPayload(e, "Post", p.PostID, 1, state, map[string]any{"engagement": view}, domainEvents)
 }
 
 // ---------- ReplyToPost ----------
@@ -655,6 +707,9 @@ func (s *Service) reply(ctx context.Context, e command.Envelope) command.Result 
 	if !decode(e.Payload, &p) || p.PostID == "" || p.Body == "" {
 		return command.Rejected(e, "INVALID_REPLY", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_reply", nil)
 	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "REPLY_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.reply_not_allowed", nil)
+	}
 	reply := Reply{ID: newID("rep_"), PostID: p.PostID, ActorID: e.Actor.ID, Body: p.Body, CreatedAt: s.clock.Now().UTC()}
 	domainEvents := []event.DomainEvent{event.New("PostReplied", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, reply.CreatedAt, map[string]any{
 		"replyId": reply.ID,
@@ -664,6 +719,27 @@ func (s *Service) reply(ctx context.Context, e command.Envelope) command.Result 
 		return command.Rejected(e, "REPLY_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.reply_failed", nil)
 	}
 	return command.Accepted(e, "Post", p.PostID, 1, "REPLIED", eventRefs(domainEvents))
+}
+
+func (s *Service) listPostReplies(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		PostID string `json:"postId"`
+		Limit  int    `json:"limit"`
+	}
+	if !decode(e.Payload, &p) || p.PostID == "" {
+		return command.Rejected(e, "INVALID_LIST_POST_REPLIES", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_list_post_replies", nil)
+	}
+	if p.Limit <= 0 || p.Limit > 50 {
+		p.Limit = 20
+	}
+	replies, err := s.repository.ListRepliesByPost(ctx, p.PostID, p.Limit)
+	if err != nil {
+		return command.Rejected(e, "LIST_POST_REPLIES_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.list_post_replies_failed", nil)
+	}
+	if replies == nil {
+		replies = []Reply{}
+	}
+	return acceptedWithPayload(e, "Post", p.PostID, 1, "REPLIES_LISTED", map[string]any{"postId": p.PostID, "replies": replies, "count": len(replies)}, nil)
 }
 
 // ---------- RepostPost ----------
@@ -910,7 +986,7 @@ func (s *Service) engagement(ctx context.Context, e command.Envelope) command.Re
 		}
 		postID = p.PostID
 	}
-	eng, err := s.repository.Engagement(ctx, postID)
+	eng, err := s.repository.Engagement(ctx, postID, e.Actor.ID)
 	if err != nil {
 		return command.Rejected(e, "ENGAGEMENT_READ_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.read_failed", nil)
 	}

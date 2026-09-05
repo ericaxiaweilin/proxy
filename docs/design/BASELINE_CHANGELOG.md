@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 27 — 2026-09-05
+
+- Replaced feed-local fixed `0/1` reaction displays with authenticated server
+  counts and viewer state; like and unlike are idempotent across Memory and PG.
+- Added the minimal per-post reply list and refresh-after-send path so replies
+  and their counts remain visible (`POST-REACTION-TRUTH-001`,
+  `POST-COMMENT-VISIBILITY-001`).
+
 ## Revision 26 — 2026-09-05
 
 - 修头像 P0 丢失：hydration 用了不存在的 `file.exists`（恒 falsy，每次冷

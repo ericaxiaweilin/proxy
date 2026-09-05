@@ -1,10 +1,12 @@
-import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList } from "@proxy/contracts";
+import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList } from "@proxy/contracts";
 import {
   parseFollowCounts,
   parseFollowingState,
   parsePinnedPostsList,
   parseUserRepliesList,
-  parseUserBookmarksList
+  parseUserBookmarksList,
+  PostEngagementSchema,
+  PostRepliesListSchema
 } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -46,14 +48,31 @@ export class EngagementClient {
     await this.command("FollowProfile", { type: "Profile", id: followeeId }, { followeeId });
   }
 
-  public async reactToPost(postId: string, kind = "LIKE"): Promise<void> {
-    await this.command("ReactToPost", { type: "Post", id: postId }, { postId, kind });
+  public async reactToPost(postId: string, kind = "LIKE", active = true): Promise<PostEngagement> {
+	const result = await this.command("ReactToPost", { type: "Post", id: postId }, { postId, kind, active });
+	return this.parseEngagement(result);
   }
 
   public async replyToPost(postId: string, body: string): Promise<void> {
     const normalized = body.trim();
     if (!normalized) throw new EngagementProtocolError("reply body is required");
     await this.command("ReplyToPost", { type: "Post", id: postId }, { postId, body: normalized });
+  }
+
+  public async getPostEngagement(postId: string): Promise<PostEngagement> {
+	return this.parseEngagement(await this.command("GetPostEngagement", { type: "Post", id: postId }, { postId }));
+  }
+
+  public async listPostReplies(postId: string, limit = 20): Promise<PostRepliesList> {
+	const result = await this.command("ListPostReplies", { type: "Post", id: postId }, { postId, limit });
+	if (!result.operationRef) throw new EngagementProtocolError("listPostReplies response missing operationRef");
+	return PostRepliesListSchema.parse(JSON.parse(result.operationRef));
+  }
+
+  private parseEngagement(result: CommandResult): PostEngagement {
+	if (!result.operationRef) throw new EngagementProtocolError("engagement response missing operationRef");
+	const raw = JSON.parse(result.operationRef) as { engagement?: unknown };
+	return PostEngagementSchema.parse(raw.engagement);
   }
 
   public async bookmarkPost(postId: string): Promise<void> {

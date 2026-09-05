@@ -749,13 +749,13 @@ func (r *EngagementRepository) ListBookmarksByActor(ctx context.Context, actorID
 	return out, nil
 }
 
-func (r *EngagementRepository) AddReaction(ctx context.Context, re engagement.Reaction) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at)
-		VALUES ($1,$2,$3,$4,$5)`,
-		re.ID, re.PostID, re.ActorID, re.Kind, re.CreatedAt,
-	)
-	return err
+func (r *EngagementRepository) SetReaction(ctx context.Context, re engagement.Reaction, active bool) (bool, error) {
+	if !active {
+		_, err := queryerForContext(ctx, r.pool).Exec(ctx, `DELETE FROM engagement.reactions WHERE post_id=$1 AND actor_id=$2`, re.PostID, re.ActorID)
+		return false, err
+	}
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (post_id, actor_id) DO UPDATE SET kind=EXCLUDED.kind`, re.ID, re.PostID, re.ActorID, re.Kind, re.CreatedAt)
+	return true, err
 }
 
 func (r *EngagementRepository) AddReply(ctx context.Context, re engagement.Reply) error {
@@ -765,6 +765,29 @@ func (r *EngagementRepository) AddReply(ctx context.Context, re engagement.Reply
 		re.ID, re.PostID, re.ActorID, re.Body, re.CreatedAt,
 	)
 	return err
+}
+
+func (r *EngagementRepository) ListRepliesByPost(ctx context.Context, postID string, limit int) ([]engagement.Reply, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `SELECT reply_id, post_id, actor_id, body, created_at FROM engagement.replies WHERE post_id=$1 ORDER BY created_at DESC, reply_id DESC LIMIT $2`, postID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []engagement.Reply{}
+	for rows.Next() {
+		var reply engagement.Reply
+		if err := rows.Scan(&reply.ID, &reply.PostID, &reply.ActorID, &reply.Body, &reply.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, reply)
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, rows.Err()
 }
 
 func (r *EngagementRepository) AddRepost(ctx context.Context, re engagement.Repost) error {
@@ -831,7 +854,7 @@ func (r *EngagementRepository) IsMuted(ctx context.Context, actorID, authorID st
 	return count > 0, nil
 }
 
-func (r *EngagementRepository) Engagement(ctx context.Context, postID string) (engagement.PostEngagement, error) {
+func (r *EngagementRepository) Engagement(ctx context.Context, postID string, viewerIDs ...string) (engagement.PostEngagement, error) {
 	e := engagement.PostEngagement{PostID: postID}
 	var reactions, replies, reposts int
 	if err := queryerForContext(ctx, r.pool).QueryRow(ctx,
@@ -847,6 +870,11 @@ func (r *EngagementRepository) Engagement(ctx context.Context, postID string) (e
 		return e, err
 	}
 	e.Reactions, e.Replies, e.Reposts = reactions, replies, reposts
+	if len(viewerIDs) > 0 && viewerIDs[0] != "" {
+		if err := queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM engagement.reactions WHERE post_id=$1 AND actor_id=$2)`, postID, viewerIDs[0]).Scan(&e.Reacted); err != nil {
+			return e, err
+		}
+	}
 	return e, nil
 }
 

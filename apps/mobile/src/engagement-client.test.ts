@@ -322,3 +322,21 @@ describe("EngagementClient R15.61/R15.62 list user replies/bookmarks", () => {
     expect(capturedLimit).toBe(30);
   });
 });
+
+describe("POST-REACTION-TRUTH-001 / POST-COMMENT-VISIBILITY-001 wire", () => {
+  function clientWith(operationRef: Record<string, unknown>) {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({ userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 } });
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => ({ status: 200, json: async () => ({ commandId: (init.body as any).commandId, outcome: "ACCEPTED", eventRefs: [], aggregate: { type: "Post", id: "post_1", version: 1, state: "OK" }, operationRef: JSON.stringify(operationRef), correlationId: (init.body as any).correlationId }) }) } });
+  }
+
+  it("hydrates server reaction counts and viewer state", async () => {
+    const engagement = { postId: "post_1", followed: false, reactions: 8, replies: 2, reposts: 0, bookmarked: false, reacted: true };
+    await expect(clientWith({ engagement }).getPostEngagement("post_1")).resolves.toEqual(engagement);
+  });
+
+  it("returns the post comment list used after reply refresh", async () => {
+    const replies = [{ replyId: "rep_1", postId: "post_1", actorId: "user_001", body: "hello", createdAt: "2026-09-05T00:00:00Z" }];
+    await expect(clientWith({ postId: "post_1", replies, count: 1 }).listPostReplies("post_1")).resolves.toEqual({ postId: "post_1", replies, count: 1 });
+  });
+});

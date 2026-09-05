@@ -418,4 +418,13 @@ if ! grep -q 'Math.max(insets.bottom, 16)' apps/mobile/src/surfaces/conversation
 fi
 echo "    UI-CHAT-001: PASS (image wire + composer safe area)"
 
+require_test "POST-REACTION-TRUTH-001" "./internal/engagement" \
+  "TestPostReactionTruthToggleAndRemountHydration" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "POST-COMMENT-VISIBILITY-001" "./internal/engagement" \
+  "TestPostCommentVisibilityRefreshesListAndCount" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+pnpm --dir apps/mobile exec vitest run src/post-engagement-model.test.ts src/engagement-client.test.ts || exit $?
+echo "    POST-REACTION-TRUTH-001/POST-COMMENT-VISIBILITY-001: PASS"
+
 echo "  regression contracts: OK"

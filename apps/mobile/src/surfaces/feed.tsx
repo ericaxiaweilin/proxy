@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
-import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
+import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
 import { mapEngagementError } from "./feed-error-map";
@@ -23,6 +23,7 @@ import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, s
 // 已从本文件迁出 → apps/mobile/src/media/
 import { AdaptiveMediaCollection, SinglePostImage, MediaViewer } from "../media/AdaptiveMediaCollection";
 import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
+import { mergePostEngagement, mergeReactedPostIds } from "../post-engagement-model";
 
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
 export { AdaptiveMediaCollection, SinglePostImage, MediaViewer };
@@ -176,6 +177,9 @@ export function FeedSurface({
   const [mutedAuthors, setMutedAuthors] = useState<ReadonlySet<string>>(new Set());
   const [postMenuError, setPostMenuError] = useState<string | undefined>();
   const [liked, setLiked] = useState<ReadonlySet<string>>(new Set());
+	const [postEngagement, setPostEngagement] = useState<Record<string, PostEngagement>>({});
+	const [postReplies, setPostReplies] = useState<Record<string, PostReply[]>>({});
+	const [expandedReplies, setExpandedReplies] = useState<ReadonlySet<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
   const [engagementError, setEngagementError] = useState<string>();
@@ -330,7 +334,8 @@ export function FeedSurface({
       setHasMore(read.hasMore);
       writeFeedDiskCache(read.posts, read.media);
       feedRetryAttemptRef.current = 0;
-      setPhase("READY");
+	  setPhase("READY");
+	  void hydrateEngagement(read.posts);
     } catch (error) {
       console.error("[proxy.feed] public feed load failed", error, (error as Error)?.message, (error as Error)?.stack);
       feedRetryAttemptRef.current += 1;
@@ -357,7 +362,8 @@ export function FeedSurface({
       setMedia(cachedMedia);
       setNextCursor(read.nextCursor);
       setHasMore(read.hasMore);
-      writeFeedDiskCache(cachedPosts, cachedMedia);
+	  writeFeedDiskCache(cachedPosts, cachedMedia);
+	  void hydrateEngagement(appended);
     } catch (error) {
       console.error("[proxy.feed] next page load failed", error);
       // Keep the current timeline and cursor; the next near-end scroll retries.
@@ -475,12 +481,58 @@ export function FeedSurface({
     }
   }
 
+	async function hydrateEngagement(items: FeedPost[]): Promise<void> {
+	  const settled = await Promise.all(items.map(async (post) => {
+		try { return await engagement.getPostEngagement(post.postId); } catch { return undefined; }
+	  }));
+	  const available = settled.filter((item): item is PostEngagement => item !== undefined);
+	  if (available.length === 0) return;
+	  setPostEngagement((previous) => mergePostEngagement(previous, available));
+	  setLiked((previous) => mergeReactedPostIds(previous, available));
+	}
+
+	async function toggleLike(postId: string): Promise<void> {
+	  const busyKey = `like:${postId}`;
+	  if (engagementBusy.has(busyKey)) return;
+	  setEngagementBusy((value) => new Set(value).add(busyKey));
+	  setEngagementError(undefined);
+	  try {
+		const truth = await engagement.reactToPost(postId, "LIKE", !liked.has(postId));
+		setPostEngagement((previous) => mergePostEngagement(previous, [truth]));
+		setLiked((previous) => mergeReactedPostIds(previous, [truth]));
+	  } catch (error) {
+		setEngagementError(mapEngagementError(error, "点赞没有提交成功，请检查连接后重试。"));
+	  } finally {
+		setEngagementBusy((value) => { const next = new Set(value); next.delete(busyKey); return next; });
+	  }
+	}
+
+	async function openReplies(postId: string): Promise<void> {
+	  setReplyTargetId(postId);
+	  setReplyDraft("");
+	  setExpandedReplies((previous) => new Set(previous).add(postId));
+	  try {
+		const listed = await engagement.listPostReplies(postId);
+		setPostReplies((previous) => ({ ...previous, [postId]: listed.replies }));
+	  } catch (error) {
+		setEngagementError(mapEngagementError(error, "评论暂时无法读取，请稍后重试。"));
+	  }
+	}
+
   async function submitReply(): Promise<void> {
     if (!replyTargetId || !replyDraft.trim() || replying) return;
     setReplying(true);
     setEngagementError(undefined);
     try {
-      await engagement.replyToPost(replyTargetId, replyDraft);
+	  const postId = replyTargetId;
+	  await engagement.replyToPost(postId, replyDraft);
+	  const [truthResult, listResult] = await Promise.allSettled([engagement.getPostEngagement(postId), engagement.listPostReplies(postId)]);
+	  if (truthResult.status === "fulfilled") setPostEngagement((previous) => mergePostEngagement(previous, [truthResult.value]));
+	  if (listResult.status === "fulfilled") {
+		setPostReplies((previous) => ({ ...previous, [postId]: listResult.value.replies }));
+		setPostEngagement((previous) => previous[postId] ? ({ ...previous, [postId]: { ...previous[postId], replies: listResult.value.count } }) : previous);
+	  }
+	  setExpandedReplies((previous) => new Set(previous).add(postId));
       setReplyTargetId(null);
       setReplyDraft("");
     } catch (error) {
@@ -820,7 +872,8 @@ export function FeedSurface({
           const meta = AUTHOR_TYPE_META[post.authorType];
           const isFollow = following.has(post.authorId);
           const isLiked = liked.has(post.postId);
-          const isSaved = bookmarked.has(post.postId);
+		  const isSaved = bookmarked.has(post.postId);
+		  const truth = postEngagement[post.postId];
           const chips = post.contextRefs.filter((entry) => entry.contextType !== "QUOTE_POST");
           const isCityCompanion = post.authorType === "AGENT";
           return (
@@ -918,13 +971,13 @@ export function FeedSurface({
 
               {/* postactions：♡ / 回复 / 引用 / 收藏 / 分享 / ···(更多) */}
               <View style={styles.postActions}>
-                <Pressable disabled={isLiked || engagementBusy.has(`like:${post.postId}`)} onPress={() => void commitEngagement(`like:${post.postId}`, post.postId, () => engagement.reactToPost(post.postId), setLiked, liked)} style={styles.postAction}>
-                  <Text style={[styles.postActionText, isLiked && styles.postActionOn]}>
-                    {isLiked ? "♥" : "♡"} {isLiked ? 1 : 0}
-                  </Text>
-                </Pressable>
-                <Pressable onPress={() => { setReplyTargetId(post.postId); setReplyDraft(""); }} style={styles.postAction}>
-                  <Text style={styles.postActionText}>回复</Text>
+			<Pressable disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
+			  <Text style={[styles.postActionText, isLiked && styles.postActionOn]}>
+				{isLiked ? "♥" : "♡"} {truth?.reactions ?? 0}
+			  </Text>
+			</Pressable>
+			<Pressable onPress={() => void openReplies(post.postId)} style={styles.postAction}>
+			  <Text style={styles.postActionText}>回复 {truth?.replies ?? 0}</Text>
                 </Pressable>
                 <Pressable onPress={() => openComposerFor(post.postId)} style={styles.postAction}>
                   <Text style={styles.postActionText}>引用</Text>
@@ -942,7 +995,12 @@ export function FeedSurface({
                 >
                   <Text style={styles.postActionText}>···</Text>
                 </Pressable>
-              </View>
+		  </View>
+		  {expandedReplies.has(post.postId) && (postReplies[post.postId]?.length ?? 0) > 0 ? (
+			<View style={styles.postReplies}>
+			  {postReplies[post.postId]?.map((reply) => <View key={reply.replyId} style={styles.postReply}><Text style={styles.postReplyAuthor}>{reply.actorId}</Text><Text style={styles.postReplyBody}>{reply.body}</Text></View>)}
+			</View>
+		  ) : null}
 
               {/* postintent（基线文案）：城市同行动态 → 聊一下 / 按这个想法找同行 */}
               {isCityCompanion ? (
@@ -1464,6 +1522,10 @@ const styles = StyleSheet.create({
     marginTop: 12
   },
   postAction: { alignItems: "center", flex: 1, paddingVertical: 5 },
+	postReplies: { borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, gap: 8, paddingHorizontal: 4, paddingVertical: 10 },
+	postReply: { flexDirection: "row", gap: 8 },
+	postReplyAuthor: { color: color.ink, fontSize: 12, fontWeight: "800" },
+	postReplyBody: { color: color.ink, flex: 1, fontSize: 13, lineHeight: 18 },
   postActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   postActionOn: { color: "#6C36C8" },
 

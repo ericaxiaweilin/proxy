@@ -41,7 +41,7 @@ func TestEngagementPostgresRoundTrip(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("FollowProfile: outcome=%s err=%v", r.Outcome, r.Error)
 	}
-	r = svc.HandleContext(ctx, engagementEnvelope("ReactToPost", map[string]any{"postId": postID, "kind": "LIKE"}, "user_001"))
+	r = svc.HandleContext(ctx, engagementEnvelope("ReactToPost", map[string]any{"postId": postID, "kind": "LIKE", "active": true}, "user_001"))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("ReactToPost: outcome=%s err=%v", r.Outcome, r.Error)
 	}
@@ -66,6 +66,25 @@ func TestEngagementPostgresRoundTrip(t *testing.T) {
 	}
 	if eng.Reactions != 1 || eng.Replies != 1 || eng.Reposts != 1 {
 		t.Fatalf("Engagement counts wrong: %+v", eng)
+	}
+	// POST-REACTION-TRUTH-001: the same command toggles off and back on;
+	// PostgreSQL must match the memory repository instead of surfacing a
+	// unique-constraint 5xx on the second tap.
+	r = svc.HandleContext(ctx, engagementEnvelope("ReactToPost", map[string]any{"postId": postID, "kind": "LIKE", "active": false}, "user_001"))
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "UNREACTED" {
+		t.Fatalf("PG unlike: %#v", r)
+	}
+	eng, _ = repo.Engagement(ctx, postID, "user_001")
+	if eng.Reactions != 0 || eng.Reacted {
+		t.Fatalf("PG unlike truth: %+v", eng)
+	}
+	r = svc.HandleContext(ctx, engagementEnvelope("ReactToPost", map[string]any{"postId": postID, "kind": "LIKE"}, "user_001"))
+	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "REACTED" {
+		t.Fatalf("PG re-like: %#v", r)
+	}
+	replies, err := repo.ListRepliesByPost(ctx, postID, 20)
+	if err != nil || len(replies) != 1 || replies[0].Body != "ngon quá" {
+		t.Fatalf("PG post replies: %+v err=%v", replies, err)
 	}
 
 	// Negative path: a follow with a missing followeeId is a 4xx, must
