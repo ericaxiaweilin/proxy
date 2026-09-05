@@ -48,6 +48,9 @@ type Activity struct {
 	OwnerID         string `json:"ownerId,omitempty"`
 	Status          string `json:"status,omitempty"`
 	ConsumptionTerm string `json:"consumptionTerm,omitempty"`
+	// MerchantName 以商家名义发布时的店名（MERCHANT-PUBLISH-001，omitempty）。
+	// 只认 api 层注记；个人发布为空。
+	MerchantName    string `json:"merchantName,omitempty"`
 
 	// AI 状态字段。AIStatus != NONE 时客户端必须显示 AI 标注 +
 	// persona 头像 + 名字 (跟 X / Threads / 抖音 / 小红书的 "AI 生成"
@@ -197,6 +200,13 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 		consumption = "发起人承担约定的到店消费"
 	}
 	a := Activity{ID: "activity_" + e.CommandID, Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: map[string]string{"CAFE": "咖啡店", "RESTAURANT": "餐厅"}[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE"}
+	// MERCHANT-PUBLISH-001: 商家注记（api 层已验成员）→ Origin MERCHANT +
+	// 店名。OwnerID 保留发布人（ListByOwner 按 ownerId 照常找到自己的店单）。
+	// 只认注记，不读 payload。
+	if _, merchantName, ok := merchantStamp(e); ok {
+		a.Origin = "MERCHANT"
+		a.MerchantName = merchantName
+	}
 	if err := s.repository.Create(ctx, a); err != nil {
 		return command.Rejected(e, "ACTIVITY_PUBLISH_FAILED", "INTERNAL", "SAFE_RETRY", "activity.publish_failed", nil)
 	}
@@ -557,6 +567,23 @@ func decode(payload map[string]any, target any) bool {
 		return false
 	}
 	return json.Unmarshal(raw, target) == nil
+}
+
+// merchantStamp reads the verified merchant annotation stamped by the api
+// layer (resolveMerchantPublish). Canonical keys live in
+// apps/api-go/internal/api/merchant_identity.go — this is a read-only
+// mirror (api cannot be imported here: import cycle). Never read
+// payload.merchantId here: it is client-controlled.
+func merchantStamp(e command.Envelope) (string, string, bool) {
+	if e.AuthContext == nil {
+		return "", "", false
+	}
+	id, _ := e.AuthContext["merchantID"].(string)
+	name, _ := e.AuthContext["merchantName"].(string)
+	if id == "" || name == "" {
+		return "", "", false
+	}
+	return id, name, true
 }
 
 func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, version int, state string, payload map[string]any, _ []string) command.Result {

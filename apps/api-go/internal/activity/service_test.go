@@ -447,3 +447,56 @@ func TestStaleActivityNormalizedOnSingleResponses(t *testing.T) {
 		t.Fatalf("join must normalize stale row: %+v", joinBody.Activity)
 	}
 }
+
+// MERCHANT-PUBLISH-001: 同 marketplace——只认注记。无注记 payload 自带
+// merchantId 也只是 USER；有注记 → MERCHANT + 店名。
+func TestMerchantActivityStampRequiresAnnotation(t *testing.T) {
+	publish := func(actor string, auth map[string]any) command.Result {
+		s := New()
+		s.SeedDefaults()
+		return s.HandleContext(t.Context(), command.Envelope{
+			CommandID: "cmd_merchant_act", CommandType: "PublishActivity", CommandVersion: 1,
+			Actor:          command.Actor{Type: "USER", ID: actor},
+			Principal:      command.Principal{Type: "INDIVIDUAL", ID: actor},
+			Target:         command.Target{Type: "Activity", ID: "new"},
+			IdempotencyKey: "idem_merchant_act_" + actor,
+			AuthContext:    auth,
+			Purpose:        "merchant_test",
+			CorrelationID:  "corr",
+			RequestedAt:    "2026-09-05T00:00:00Z",
+			Payload: map[string]any{
+				"title": "店活动", "time": "周六", "capacity": 6,
+				"venueName": "店", "venueIcon": "☕", "venueType": "CAFE",
+				"realitySceneId": "scene_1", "desc": "d", "consumptionTerm": "SPLIT",
+				"merchantId": "biz_forged",
+			},
+		})
+	}
+	spoofed := publish("spoofer", map[string]any{})
+	if spoofed.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", spoofed)
+	}
+	var b1 struct {
+		Activity Activity `json:"activity"`
+	}
+	if err := json.Unmarshal([]byte(spoofed.OperationRef), &b1); err != nil {
+		t.Fatal(err)
+	}
+	if b1.Activity.Origin != "USER" || b1.Activity.MerchantName != "" {
+		t.Fatalf("payload merchantId without annotation must stay USER: %+v", b1.Activity)
+	}
+
+	stamped := publish("owner", map[string]any{"merchantID": "biz_real", "merchantName": "真店"})
+	if stamped.Outcome != "ACCEPTED" {
+		t.Fatalf("annotated publish: %+v", stamped)
+	}
+	var b2 struct {
+		Activity Activity `json:"activity"`
+	}
+	if err := json.Unmarshal([]byte(stamped.OperationRef), &b2); err != nil {
+		t.Fatal(err)
+	}
+	if b2.Activity.Origin != "MERCHANT" || b2.Activity.MerchantName != "真店" {
+		t.Fatalf("annotation must stamp merchant: %+v", b2.Activity)
+	}
+}

@@ -27,6 +27,9 @@ export type PublishActivityInput = {
   realitySceneId: string;
   desc: string;
   consumptionTerm: "SPLIT" | "HOST_COVERS";
+  // MERCHANT-PUBLISH-001: 以商家名义发布时带店 id（server 验成员后盖章）。
+  // 个人发布不传。
+  merchantId?: string;
 };
 
 export class ActivityProtocolError extends Error {

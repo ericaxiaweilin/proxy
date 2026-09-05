@@ -31,4 +31,12 @@ describe("ACT-PUBLISH-001 activity client", () => {
     await expect(client.publish({title:"x", time:"周六", capacity:4, venueName:"店", venueIcon:"☕", venueType:"CAFE", realitySceneId:"scene", desc:"x", consumptionTerm:"SPLIT"})).rejects.toThrow(/offline fallback/);
     expect(called).toBe(false);
   });
+
+  it("forwards merchantId for shop publishing (MERCHANT-PUBLISH-001)", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const activity = { activityId:"activity_1", origin:"USER", title:"t", time:"周六", people:"0 / 6 人", price:"0₫", moneyFlow:"FREE", priceLabel:"免费参加", consumption:"x", venueIcon:"☕", venueName:"店", venueSpend:"", venueType:"CAFE", venueTypeLabel:"咖啡店", desc:"x", benefit:"", qaCount:0, interested:0, joined:0, shares:0, aiStatus:"NONE" };
+    const client = new ActivityClient({ secureSessionStore: await authenticatedStore(), authClient:{ request:async (_path, init) => { sent.push(init.body as Record<string, unknown>); return response({commandId:"c", outcome:"ACCEPTED", aggregate:{type:"Activity", id:"activity_1", version:1, state:"PUBLISHED"}, eventRefs:[], correlationId:"x", operationRef:JSON.stringify({activity})}); } } });
+    await client.publish({title:"t", time:"周六", capacity:6, venueName:"店", venueIcon:"☕", venueType:"CAFE", realitySceneId:"scene_1", desc:"x", consumptionTerm:"SPLIT", merchantId:"biz_1"});
+    expect((sent[0]?.payload as { merchantId?: string }).merchantId).toBe("biz_1");
+  });
 });

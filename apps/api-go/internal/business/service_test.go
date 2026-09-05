@@ -1,6 +1,7 @@
 package business
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -287,5 +288,42 @@ func TestSpendDailyUpsertAndList(t *testing.T) {
 	}))
 	if empty.Outcome != "REJECTED" || empty.Error == nil || empty.Error.ErrorCode != "BUSINESS_FINANCE_REQUIRED" {
 		t.Fatalf("non-existent business should fail role check: %+v", empty)
+	}
+}
+
+// MERCHANT-PUBLISH-001: 只有 ACTIVE 账号的 OWNER/ADMIN 能以店名义发布。
+func TestMerchantPublishIdentity(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "木光咖啡"}))
+	var body map[string]any
+	if err := json.Unmarshal([]byte(created.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	bizID, _ := body["businessId"].(string)
+	if bizID == "" {
+		t.Fatal("no businessId")
+	}
+	ctx := context.Background()
+	if name, ok := service.MerchantPublishIdentity(ctx, bizID, "owner"); !ok || name != "木光咖啡" {
+		t.Fatalf("owner must publish as shop, got %q %v", name, ok)
+	}
+	if _, ok := service.MerchantPublishIdentity(ctx, bizID, "stranger"); ok {
+		t.Fatal("non-member must not publish as shop")
+	}
+	if _, ok := service.MerchantPublishIdentity(ctx, "biz_nope", "owner"); ok {
+		t.Fatal("unknown shop must not publish")
+	}
+	if _, ok := service.MerchantPublishIdentity(ctx, "", "owner"); ok {
+		t.Fatal("empty shop must not publish")
+	}
+	// OPERATOR 成员不能以店名义发布（仅 OWNER/ADMIN）。
+	added := service.Handle(businessEnvelope("owner", "AddBusinessMember", bizID, map[string]any{
+		"businessId": bizID, "userId": "operator", "role": "OPERATOR",
+	}))
+	if added.Outcome != "ACCEPTED" {
+		t.Fatalf("add member: %+v", added)
+	}
+	if _, ok := service.MerchantPublishIdentity(ctx, bizID, "operator"); ok {
+		t.Fatal("OPERATOR must not publish as shop")
 	}
 }

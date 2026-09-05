@@ -70,3 +70,21 @@ describe("MarketOpportunitySchema enforces MoneyFlow + PriceLabel", () => {
     expect(r.success).toBe(false);
   });
 });
+
+// MERCHANT-PUBLISH-001: 发布输入可带 merchantId（店 id），个人发布不带。
+// 输出读模型 owner/ownerType 由服务端注记盖章（见 api 层测试）。
+describe("PublishMarketOpportunityInputSchema merchant identity", () => {
+  it("accepts an optional merchantId", async () => {
+    const { PublishMarketOpportunityInputSchema } = await import("./index");
+    const base = {
+      title: "t", shortTitle: "t", theme: "t", date: "today", time: "10:00",
+      location: "x", price: "100₫", moneyFlow: "EARN" as const,
+      skills: "x", lens: ["NEARBY" as const]
+    };
+    expect(PublishMarketOpportunityInputSchema.safeParse(base).success).toBe(true);
+    const withShop = PublishMarketOpportunityInputSchema.safeParse({ ...base, merchantId: "biz_1" });
+    expect(withShop.success).toBe(true);
+    if (withShop.success) expect(withShop.data.merchantId).toBe("biz_1");
+    expect(PublishMarketOpportunityInputSchema.safeParse({ ...base, merchantId: "" }).success).toBe(false);
+  });
+});

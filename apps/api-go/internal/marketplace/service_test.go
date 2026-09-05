@@ -659,3 +659,46 @@ func TestMarketWritesRequireUserActor(t *testing.T) {
 		t.Fatalf("PUBLIC dismiss: expected MARKET_ACTOR_REQUIRED, got %+v", out)
 	}
 }
+
+// MERCHANT-PUBLISH-001: 服务端只认 AuthContext 注记。payload 自带
+// merchantId 但无注记 → 仍是 PERSON（伪造不提权）；有注记 → BUSINESS。
+func TestMerchantStampRequiresAnnotation(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	payload := map[string]any{
+		"title": "伪造店单", "theme": "咖啡", "date": "周六", "time": "10:00",
+		"location": "河内", "price": "100,000₫", "moneyFlow": "EARN",
+		"merchantId": "biz_forged",
+	}
+	out := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "spoofer", payload))
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", out)
+	}
+	var body struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Opportunity.OwnerType != "PERSON" || body.Opportunity.Owner != "你" {
+		t.Fatalf("payload merchantId without annotation must not escalate: %+v", body.Opportunity)
+	}
+
+	annotated := marketEnvelope("PublishMarketOpportunity", "owner", payload)
+	annotated.AuthContext = map[string]any{"merchantID": "biz_real", "merchantName": "真店"}
+	out2 := s.HandleContext(t.Context(), annotated)
+	if out2.Outcome != "ACCEPTED" {
+		t.Fatalf("annotated publish: %+v", out2)
+	}
+	var body2 struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(out2.OperationRef), &body2); err != nil {
+		t.Fatal(err)
+	}
+	if body2.Opportunity.OwnerType != "BUSINESS" || body2.Opportunity.Owner != "真店" {
+		t.Fatalf("annotation must stamp shop: %+v", body2.Opportunity)
+	}
+	// 注：OwnerID 是 json:"-" 内部字段（仍是发布人本人，保证 Owned/接单/
+	// 屏蔽逻辑不变），wire 上不可见，这里不 assert。
+}

@@ -20,6 +20,7 @@ import { type MarketplaceClient, type MarketApplication } from "../marketplace-c
 import { nearestCityLabel } from "../market-city-label";
 import { type MediaClient } from "../media-client";
 import { type SupplyClient } from "../supply-client";
+import { useMerchantIdentity } from "../use-merchant-identity";
 import {
   MARKET_EXPERIENCES,
   OPPORTUNITY_LENS_LABEL,
@@ -986,6 +987,8 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
   const [moneyFlow, setMoneyFlow] = useState<PublishMoneyFlow>("EARN");
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string>();
+  // MERCHANT-PUBLISH-001: 有店才显示身份选择；无店/未登录保持个人发布。
+  const merchant = useMerchantIdentity();
 
   // 资金方向联动：TBD 强制清空 Price，FREE 强制填 0。
   function onPickFlow(next: PublishMoneyFlow): void {
@@ -1010,11 +1013,17 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
         title: title.trim(), shortTitle: "同行", theme: "城市同行", date: "周六", time: time.trim(),
         location: location.trim(), price: price.trim(), skills: "中文 · 摄影 · 本地路线",
         lens: ["BOOKED", "NEARBY"], travel: 20,
-        moneyFlow
+        moneyFlow,
+        ...(merchant.merchantId ? { merchantId: merchant.merchantId } : {})
       });
       onPublished(opportunity);
-    } catch {
-      setError("发布没有写入服务器，请检查连接后重试。");
+    } catch (error) {
+      // MERCHANT-PUBLISH-001: 无成员资格 publisher 会被 server 403。
+      if (error instanceof Error && /merchant_forbidden/i.test(error.message)) {
+        setError("该店铺无发布权限（仅店主/管理员可以以店铺名义发布）。");
+      } else {
+        setError("发布没有写入服务器，请检查连接后重试。");
+      }
     } finally {
       setPublishing(false);
     }
@@ -1071,6 +1080,23 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
         <Text style={styles.aiTitle}>如果坚持 1.5–2.0M₫ 也可以发布</Text>
         <Text style={styles.aiCheck}>Proxy 不阻止低预算，但会原样告诉小美“客户预算”和“公平参考”，小美可按更高条件回应。</Text>
       </View>
+      {merchant.accounts.length > 0 ? (
+        <View style={styles.r4Card}>
+          <Text style={styles.r4Title}>发布身份</Text>
+          <View style={styles.publishFlowRow}>
+            <Pressable onPress={() => merchant.setMerchantId(undefined)} style={[styles.publishFlowChip, !merchant.merchantId && styles.publishFlowChipOn]}>
+              <Text style={[styles.publishFlowLabel, !merchant.merchantId && styles.publishFlowLabelOn]}>个人</Text>
+              <Text style={styles.publishFlowSub}>以自己名义</Text>
+            </Pressable>
+            {merchant.accounts.map((shop) => (
+              <Pressable key={shop.id} onPress={() => merchant.setMerchantId(shop.id)} style={[styles.publishFlowChip, merchant.merchantId === shop.id && styles.publishFlowChipOn]}>
+                <Text style={[styles.publishFlowLabel, merchant.merchantId === shop.id && styles.publishFlowLabelOn]}>{shop.name}</Text>
+                <Text style={styles.publishFlowSub}>以店铺名义</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
       <View style={styles.r4Actions}>
         <Pressable onPress={onBack} style={styles.r4ActionGhost}>
           <Text style={styles.r4ActionGhostText}>预览小美视角</Text>
