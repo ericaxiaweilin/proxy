@@ -373,12 +373,10 @@ export function RequesterHome({
           {recommendedAI.map((account) => {
             const followed = followedAI.has(account.accountId);
             return <View key={account.accountId} style={styles.aiCard}>
-              <Pressable accessibilityLabel={`打开${account.displayName}的个人主页`} onPress={() => onOpenAIProfile?.(account)}>
+              <Pressable accessibilityLabel={`打开${account.displayName}的个人主页`} onPress={() => onOpenAIProfile?.(account)} style={styles.aiProfile}>
                 <Image source={aiPersonaPhoto(account.personaId)} style={styles.aiAvatar} />
                 <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
-                <Text style={styles.aiHandle} numberOfLines={1}>@{account.handle} · AI</Text>
-                <Text style={styles.aiDescription} numberOfLines={2}>{account.description}</Text>
-                <Text style={styles.aiProfileLink}>查看个人主页 ›</Text>
+                <Text style={styles.aiHandle} numberOfLines={1}>AI 生成</Text>
               </Pressable>
               <View style={styles.aiActions}>
                 <Pressable accessibilityLabel={`${followed ? "移除" : "添加"}${account.displayName}`} onPress={() => void toggleAIFollow(account.accountId)} style={[styles.aiFollow, followed && styles.aiFollowed]}>
@@ -647,19 +645,20 @@ const styles = StyleSheet.create({
   aiBadge: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
   aiBadgeText: { color: color.violet, fontSize: 11, fontWeight: "900" },
   aiRail: { marginBottom: 10 },
-  aiRailContent: { gap: 10, paddingHorizontal: 16 },
-  aiCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, padding: 11, width: 176, ...shadows.card },
-  aiAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 14, height: 112, width: "100%" },
-  aiName: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 9 },
-  aiHandle: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  aiRailContent: { gap: 15, paddingHorizontal: 16 },
+  aiCard: { alignItems: "center", width: 104 },
+  aiProfile: { alignItems: "center" },
+  aiAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, height: 88, width: 88 },
+  aiName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, textAlign: "center" },
+  aiHandle: { color: color.violet, fontSize: 10, fontWeight: "700", marginTop: 2, textAlign: "center" },
   aiDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5, minHeight: 30 },
   aiProfileLink: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 7 },
-  aiActions: { flexDirection: "row", gap: 6, marginTop: 9 },
-  aiFollow: { alignItems: "center", backgroundColor: color.ink, borderRadius: 10, flex: 1, paddingVertical: 8 },
+  aiActions: { flexDirection: "row", gap: 4, marginTop: 7, width: "100%" },
+  aiFollow: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, flex: 1, paddingVertical: 6 },
   aiFollowed: { backgroundColor: color.proxyPurpleSoft },
   aiFollowText: { color: color.white, fontSize: 11, fontWeight: "800" },
   aiFollowedText: { color: color.violet },
-  aiMessage: { alignItems: "center", borderColor: color.line, borderRadius: 10, borderWidth: 1, flex: 1, paddingVertical: 8 },
+  aiMessage: { alignItems: "center", borderColor: color.line, borderRadius: 999, borderWidth: 1, flex: 1, paddingVertical: 6 },
   aiMessageText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   sceneMapEntry: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 12, minHeight: 86, padding: 13 },
   sceneMapVisual: { backgroundColor: "#EEF2F5", borderColor: color.line, borderRadius: 15, borderWidth: 1, height: 58, overflow: "hidden", width: 72 },
