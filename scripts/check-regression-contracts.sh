@@ -170,6 +170,16 @@ require_test "ACT-MY-ACTIVITIES-002" "./internal/platform/postgres" \
 pnpm --dir packages/contracts test -- --run src/activity.test.ts
 echo "    ACT-MY-ACTIVITIES-001: PASS (mobile wire schema round-trip)"
 
+# AI-PERSONA-PHOTO-001: 平台 AI 5 角色 (ai_001-ai_005) 冷启动
+# 活动必须携带 aiPersonaPhoto 资产引用 (ai-personas/ai_00X.svg)。
+# 防 “photo 字段从 seed 被丢掉” 造成 "看起来像真人" 的
+# avatar 退回. path 在 apps/mobile/assets/ai-personas/ 下.
+require_test "AI-PERSONA-PHOTO-001" "./internal/activity" \
+  "TestPlatformAIPersonaPhotoRequiredOnColdStart" \
+  "apps/api-go/internal/activity/service_test.go" || exit $?
+pnpm --dir packages/contracts test -- --run src/activity.test.ts
+echo "    AI-PERSONA-PHOTO-001: PASS (mobile wire schema round-trip)"
+
 # OPPORTUNITY-DEAL-001: 真人申请 -> 发布者选择 -> 被选真人确认；候选列表
 # 来自仓储，不允许把平台 AI 或硬编码人物当作可直接购买的库存。
 require_test "OPPORTUNITY-DEAL-001" "./internal/marketplace" \

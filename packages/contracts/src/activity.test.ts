@@ -333,3 +333,124 @@ describe("ListMyActivitiesPayloadSchema (R17.x my-activities wire)", () => {
     expect(result.success).toBe(false);
   });
 });
+
+// AI-PERSONA-PHOTO-001: R17.x 平台 AI 5 角色带照片资产。
+// Activity.aiPersonaPhoto (string, optional) 必发随 aiPersonaId
+// 一起。不能 "看起来像真人" — 这是 AI-rendered avatar, 不是真人
+// 拍摄。Schema 要 (1) 接受 photo 字段 (2) 不接受空 string
+// 充数 (3) 接受不填 (USER / MERCHANT 发起的非 AI 活动).
+describe("ActivitySchema.aiPersonaPhoto (R17.x platform AI 5 personas)", () => {
+  it("accepts aiPersonaPhoto on a PLATFORM_AI GENERATED activity", () => {
+    const payload = {
+      activities: [
+        {
+          activityId: "proxy_coffee_weekend",
+          origin: "PLATFORM" as const,
+          title: "Proxy 周末咖啡企划",
+          time: "本周六至周日",
+          people: "特别企划",
+          price: "0₫",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费参加",
+          consumption: "按门店场次",
+          venueIcon: "☕",
+          venueName: "木光咖啡 · 还剑郡",
+          venueSpend: "90,000–140,000₫ / 人",
+          venueType: "CAFE" as const,
+          venueTypeLabel: "咖啡店",
+          desc: "周末限定主题场次",
+          benefit: "双人到店各点一杯",
+          qaCount: 4,
+          interested: 36,
+          joined: 18,
+          capacity: 24,
+          shares: 12,
+          aiStatus: "AI_GENERATED" as const,
+          aiActorKind: "PLATFORM_AI" as const,
+          aiPersonaId: "ai_001",
+          aiPersonaName: "平台 AI 小美 · 周末企划",
+          aiPersonaAvatar: "☕",
+          aiPersonaPhoto: "ai-personas/ai_001.svg"
+        }
+      ]
+    };
+    const result = ListActivitiesPayloadSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.activities[0].aiPersonaPhoto).toBe("ai-personas/ai_001.svg");
+    }
+  });
+  it("accepts activities without aiPersonaPhoto (USER / MERCHANT origin)", () => {
+    // 不是所有活动都有 AI 角色。USER 发的活动不能“为了“资产
+    // 完整 “被要求附 aiPersonaPhoto”。
+    const payload = {
+      activities: [
+        {
+          activityId: "user_coffee_walk",
+          origin: "USER" as const,
+          title: "我发起的咖啡局",
+          time: "周六",
+          people: "0 / 4 人",
+          price: "0₫",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费参加",
+          consumption: "各自承担",
+          venueIcon: "☕",
+          venueName: "木光",
+          venueSpend: "",
+          venueType: "CAFE" as const,
+          venueTypeLabel: "咖啡店",
+          desc: "",
+          benefit: "",
+          qaCount: 0,
+          interested: 0,
+          joined: 0,
+          capacity: 4,
+          shares: 0,
+          aiStatus: "NONE" as const
+        }
+      ]
+    };
+    const result = ListActivitiesPayloadSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+  });
+  it("rejects an empty aiPersonaPhoto (no allow-list of '' allowed — photo is the wire contract)", () => {
+    // Empty string 是 “看起来像真人” 风险的路由 — server 不应
+    // 下发空 string 充数. zod 的 .min(1) 丢接.
+    const payload = {
+      activities: [
+        {
+          activityId: "ai_empty_photo",
+          origin: "PLATFORM" as const,
+          title: "x",
+          time: "",
+          people: "",
+          price: "",
+          moneyFlow: "FREE" as const,
+          priceLabel: "免费",
+          consumption: "",
+          venueIcon: "",
+          venueName: "",
+          venueSpend: "",
+          venueType: "" as const,
+          venueTypeLabel: "",
+          desc: "",
+          benefit: "",
+          qaCount: 0,
+          interested: 0,
+          joined: 0,
+          capacity: 0,
+          shares: 0,
+          aiStatus: "AI_GENERATED" as const,
+          aiActorKind: "PLATFORM_AI" as const,
+          aiPersonaId: "ai_001",
+          aiPersonaName: "平台 AI 小美",
+          aiPersonaAvatar: "☕",
+          aiPersonaPhoto: "" // 拒绝: 不能下发空 string
+        }
+      ]
+    };
+    const result = ListActivitiesPayloadSchema.safeParse(payload);
+    expect(result.success).toBe(false);
+  });
+});

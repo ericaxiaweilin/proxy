@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 19 — 2026-09-04
+
+- 平台 AI 5 角色 (ai_001-ai_005) 冷启动活动带 photo 资产。
+  apps/mobile/assets/ai-personas/ 下五个统一风格 SVG 头像
+  (紫/粉/绿/橙/金主题 + AI 虚拟 badge); ActivitySchema 增
+  aiPersonaPhoto 字段; tasks.tsx + me-orders.tsx 改用 persona
+  圆形 token 渲染 (SVG 上线后 Image 可换 require); 5 个
+  冷启动活动 seed 都 携带 ai-personas/ai_00X.svg 路径,
+  tripwire AI-PERSONA-PHOTO-001 跳防路径丢失。明确不
+  “看起来像真人": 是 AI-rendered 头像, 不是真人拍提。
+
 ## Revision 18 — 2026-09-04
 
 - “我的活动” surface (me.tsx > myactivities) 接进 server

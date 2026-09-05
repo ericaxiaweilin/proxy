@@ -146,7 +146,7 @@ export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.J
               <Text style={styles.orderTitle}>{item.title}</Text>
               <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
               <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 感兴趣 {item.interested} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
-              {item.aiStatus !== "NONE" ? <Text style={styles.savedMeta}>AI 生成 · {item.aiPersonaName ?? "平台 AI"}</Text> : null}
+              {item.aiStatus !== "NONE" && item.aiPersonaName ? <Text style={styles.savedMeta}>AI 虚拟 · {item.aiPersonaName}</Text> : null}
               <Text style={styles.savedMeta}>查看明细 ›</Text>
               {tab === "open" ? (
                 <Pressable

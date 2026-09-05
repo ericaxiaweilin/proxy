@@ -530,6 +530,13 @@ export const ActivitySchema = z.object({
   aiPersonaId: z.string().min(1).optional(),
   aiPersonaName: z.string().min(1).optional(),
   aiPersonaAvatar: z.string().optional(),
+  // R17.x: 平台 AI 角色 photo 资产引用。ai_001-ai_005 都有 SVG
+  // 头像 (apps/mobile/assets/ai-personas/) — 三件套 (id / name /
+  // photo) 一同下发, mobile 端 Image 组件优先 photo, fallback
+  // 到 avatar emoji. 不允许“看起来像真人": photo 是 AI-rendered
+  // 头像, 不是真人拍提. (PR LC-07 语义在 aipersona service.
+  // LikenessConsent 走 — ActivitySchema 只负责 wire contract.)
+  aiPersonaPhoto: z.string().min(1).optional(),
   aiStatus: z.enum(["NONE", "AI_ASSISTED", "AI_GENERATED"]).default("NONE"),
   aiActorKind: z.enum(["PLATFORM_AI", "USER_TWIN", "USER_ASSISTANT"]).optional()
 });

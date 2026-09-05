@@ -91,6 +91,11 @@
       "implementationFiles": [
         "apps/mobile/src/surfaces/tasks.tsx",
         "apps/mobile/src/surfaces/me-orders.tsx",
+        "apps/mobile/assets/ai-personas/ai_001.svg",
+        "apps/mobile/assets/ai-personas/ai_002.svg",
+        "apps/mobile/assets/ai-personas/ai_003.svg",
+        "apps/mobile/assets/ai-personas/ai_004.svg",
+        "apps/mobile/assets/ai-personas/ai_005.svg",
         "apps/api-go/internal/activity/service.go",
         "apps/api-go/internal/platform/postgres/activity.go",
         "apps/mobile/src/activity-client.ts"
@@ -103,7 +108,7 @@
         "scripts/check-regression-contracts.sh"
       ],
       "status": "PARTIAL",
-      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); R17.x '我的活动' 物化路径已走 server+PG+mobile surface (ListMyActivities wire end-to-end; hardcoded mock removed). Chat-derivation (R17.x 后绕 chat 中 '下单/提单/活动' 表述到 server 真实 Order/Activity) 仍 pending."
+      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); R17.x '我的活动' 物化路径已走 server+PG+mobile surface (ListMyActivities wire end-to-end; hardcoded mock removed); R17.x 平台 AI 5 角色 (ai_001-ai_005) 带 photo 资产 (SVG 在 apps/mobile/assets/ai-personas/) 接 server+contracts+surface. Chat-derivation (R17.x 后绕 chat 中 '下单/提单/活动' 表述到 server 真实 Order/Activity) 仍 pending."
     }
   ]
 }

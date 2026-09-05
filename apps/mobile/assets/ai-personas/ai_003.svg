@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Proxy AI Persona · Photo Buddy (ai_003)">
+  <title>Proxy Platform AI Persona — Photo Buddy (ai_003)</title>
+  <desc>AI-generated avatar. Not a real person. PLATFORM_AI persona. Clearly labeled as AI.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3FCBA8"/>
+      <stop offset="100%" stop-color="#0E6E55"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFE2C8"/>
+      <stop offset="100%" stop-color="#E8B98E"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="512" cy="512" r="380" fill="url(#face)"/>
+  <ellipse cx="512" cy="448" rx="170" ry="190" fill="#FFE2C8"/>
+  <ellipse cx="436" cy="448" rx="22" ry="28" fill="#2C2235"/>
+  <ellipse cx="588" cy="448" rx="22" ry="28" fill="#2C2235"/>
+  <circle cx="430" cy="438" r="6" fill="#FFFFFF"/>
+  <circle cx="582" cy="438" r="6" fill="#FFFFFF"/>
+  <path d="M 432 568 Q 512 612 592 568" stroke="#2C2235" stroke-width="14" fill="none" stroke-linecap="round"/>
+  <ellipse cx="386" cy="510" rx="22" ry="14" fill="#FFB3B3" opacity="0.55"/>
+  <ellipse cx="638" cy="510" rx="22" ry="14" fill="#FFB3B3" opacity="0.55"/>
+  <path d="M 280 760 Q 512 920 744 760 L 744 1024 L 280 1024 Z" fill="#0E6E55"/>
+  <rect x="700" y="100" width="220" height="68" rx="34" fill="#FFFFFF" opacity="0.95"/>
+  <text x="810" y="146" text-anchor="middle" font-family="-apple-system, Helvetica, sans-serif" font-size="40" font-weight="700" fill="#0E6E55">AI 虚拟</text>
+  <text x="512" y="980" text-anchor="middle" font-family="-apple-system, Helvetica, sans-serif" font-size="40" font-weight="500" fill="#FFFFFF" opacity="0.7">ai_003 · 平台 AI 拍照搭子</text>
+</svg>

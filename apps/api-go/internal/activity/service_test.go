@@ -278,6 +278,55 @@ func TestColdStartActivitiesArePlatformAIGeneratedAndFree(t *testing.T) {
 	}
 }
 
+// R17.x: AI-PERSONA-PHOTO-001 — 平台 AI 5 角色冷启动活动必须携带
+// photo 资产引用 (ai-personas/ai_00X.svg)。是活动
+// (aiPersonaId) + name + avatar) 三件以外三件: 资产 photo
+// 必须在。1) 3个 PERSONA 一起 (id + name + photo 都设了),
+// 2) photo 路径明确在 ai-personas/ 下, 不能是任意 URL (防
+// "看起来像真人" 接人真人拍提 URL), 3) 未设 aiStatus 的
+// 活动不能误下发 photo.
+func TestPlatformAIPersonaPhotoRequiredOnColdStart(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	list := s.HandleContext(t.Context(), activityEnvelope("ListActivities", "viewer", ""))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list: %+v", list)
+	}
+	var body struct {
+		Activities []Activity `json:"activities"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	platformAIPersonas := []string{"ai_001", "ai_002", "ai_003", "ai_004", "ai_005"}
+	seen := make(map[string]bool, len(platformAIPersonas))
+	for _, a := range body.Activities {
+		if a.AIStatus != "AI_GENERATED" || a.AIActorKind != "PLATFORM_AI" {
+			// 非 PLATFORM_AI 活动 不能被误下发 photo 资产
+			if a.AIPersonaPhoto != "" {
+				t.Fatalf("non PLATFORM_AI activity %s carries aiPersonaPhoto=%q", a.ID, a.AIPersonaPhoto)
+			}
+			continue
+		}
+		if a.AIPersonaID == "" || a.AIPersonaName == "" {
+			t.Fatalf("PLATFORM_AI activity %s missing persona id/name (id=%q name=%q)", a.ID, a.AIPersonaID, a.AIPersonaName)
+		}
+		if a.AIPersonaPhoto == "" {
+			t.Fatalf("PLATFORM_AI activity %s must carry aiPersonaPhoto (asset path under ai-personas/)", a.ID)
+		}
+		wantPrefix := "ai-personas/" + a.AIPersonaID
+		if len(a.AIPersonaPhoto) < len(wantPrefix) || a.AIPersonaPhoto[:len(wantPrefix)] != wantPrefix {
+			t.Fatalf("PLATFORM_AI activity %s aiPersonaPhoto=%q must start with %q (asset path under apps/mobile/assets/ai-personas/)", a.ID, a.AIPersonaPhoto, wantPrefix)
+		}
+		seen[a.AIPersonaID] = true
+	}
+	for _, want := range platformAIPersonas {
+		if !seen[want] {
+			t.Fatalf("cold-start catalog must include PLATFORM_AI persona %s, missing", want)
+		}
+	}
+}
+
 // R16.x: MONEYFLOW-005 — normalizeActivityMoneyAndAI 把不规范的旧数据
 // 落到合法集合。任何"裸金额" (MoneyFlow 空 + Price 非空) 都必须是 FREE
 // 或 PAY_TO_JOIN (活动只有这两种)，PriceLabel 永远不能空。

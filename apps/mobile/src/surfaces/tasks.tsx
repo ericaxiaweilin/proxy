@@ -369,6 +369,21 @@ export function TasksSurface({
   );
 }
 
+// R17.x: persona 颜色色版. ai_001-ai_005 各自不同色背景, 同
+// SVG 文件主题色. surface 渲染需要快速到于 assets/ SVG, 这里
+// 用 View 画一个 32x32 圆形 + 同色背景, 后续 SVG Image 准备好
+// 后再换成 require().
+function personaColorStyle(personaId: string): { backgroundColor: string } {
+  switch (personaId) {
+    case "ai_001": return { backgroundColor: "#7C5CFF" }; // 周末企划: 紫
+    case "ai_002": return { backgroundColor: "#FF7A8A" }; // 拍照季: 粉
+    case "ai_003": return { backgroundColor: "#3FCBA8" }; // 拍照搭子: 绿
+    case "ai_004": return { backgroundColor: "#FF9D44" }; // 餐厅尝鲜: 橙
+    case "ai_005": return { backgroundColor: "#FFB347" }; // 饭局推荐: 金
+    default: return { backgroundColor: "#7C5CFF" };
+  }
+}
+
 export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: () => void }): React.JSX.Element {
   const origin = ORIGIN_META[item.origin];
   return (
@@ -379,9 +394,25 @@ export function ActivityFeedCard({ item, onPress }: { item: Activity; onPress: (
             <Text style={[styles.originBadgeText, { color: origin.fg }]}>{origin.label}</Text>
           </View>
           {item.aiStatus !== "NONE" && item.aiPersonaName ? (
-            <Text style={styles.exampleAIPersona}>
-              {item.aiPersonaAvatar ?? "🤖"} {item.aiPersonaName} · {item.aiStatus === "AI_GENERATED" ? "AI 生成，平台审核发布" : "AI 辅助"}
-            </Text>
+            // R17.x: 平台 AI 角色 photo 资产。三件 (id / name / photo)
+            // 总是同时下发. mobile 优先用 personaPhotoColor (从
+            // persona id 推出: ai_001=紫/ai_002=粉/...) 在 32x32
+            // 圆环背景上渲染 "AI 虚拟" badge + 表情. 不能
+            // “看起来像真人”: 不使用真人指提, 全部由 SVG 或
+            // code-defined asset 拼出. SVG 文件位于
+            // apps/mobile/assets/ai-personas/ (R17.x INDEX.md)
+            // — 未来 expo-image SVG 支持上线后渲染。
+            <View style={styles.exampleAIPersonaRow}>
+              <View style={[styles.exampleAIPersonaCircle, personaColorStyle(item.aiPersonaId ?? "")]}>
+                <Text style={styles.exampleAIPersonaCircleText}>{item.aiPersonaAvatar ?? "🤖"}</Text>
+              </View>
+              <View>
+                <Text style={styles.exampleAIPersona}>
+                  {item.aiPersonaName} · {item.aiStatus === "AI_GENERATED" ? "AI 生成，平台审核发布" : "AI 辅助"}
+                </Text>
+                <Text style={styles.exampleAIPersonaBadge}>AI 虚拟形象</Text>
+              </View>
+            </View>
           ) : null}
           <Text style={styles.exampleName}>{item.title}</Text>
           <Text style={styles.exampleMeta}>
@@ -462,7 +493,9 @@ export function ActivityDetail({
         </View>
         {item.aiStatus !== "NONE" && item.aiPersonaName ? (
           <View style={styles.detailAIPersonaRow}>
-            <Text style={styles.detailAIPersonaAvatar}>{item.aiPersonaAvatar ?? "🤖"}</Text>
+            <View style={[styles.detailAIPersonaAvatarCircle, personaColorStyle(item.aiPersonaId ?? "")]}>
+              <Text style={styles.detailAIPersonaAvatarEmoji}>{item.aiPersonaAvatar ?? "🤖"}</Text>
+            </View>
             <View style={styles.detailAIPersonaTextCol}>
               <Text style={styles.detailAIPersonaName}>{item.aiPersonaName}</Text>
               <Text style={styles.detailAIPersonaDisclaimer}>{item.aiStatus === "AI_GENERATED" ? "AI 生成冷启动内容 · 由 Proxy 审核并作为发布方 · AI 不能报名或收款" : "AI 辅助整理 · 发布方承担责任"}</Text>
@@ -735,6 +768,10 @@ const styles = StyleSheet.create({
   // R15.x+: AI 数字人详情页 — 在 desc 上方加 persona 头像 + 名字 + 声明
   detailAIPersonaRow: { flexDirection: "row", alignItems: "center", marginTop: 12, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 10, padding: 8 },
   detailAIPersonaAvatar: { fontSize: 22, marginRight: 9 },
+  // R17.x: persona 圆形 token (SVG assets 上线后转 require 同样的
+  // 渲染路径。保持 44x44 圆形 + emoji + persona 色背景)
+  detailAIPersonaAvatarCircle: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", marginRight: 9 },
+  detailAIPersonaAvatarEmoji: { fontSize: 22 },
   detailAIPersonaTextCol: { flex: 1 },
   detailAIPersonaName: { color: color.white, fontSize: 13, fontWeight: "800" },
   detailAIPersonaDisclaimer: { color: "#D8D1DF", fontSize: 11, marginTop: 1 },
@@ -925,6 +962,14 @@ const styles = StyleSheet.create({
   exampleMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
   // R15.x+: AI 数字人发起的活动 — 列表卡上在 title 上方加一行 "X 发起" 标识
   exampleAIPersona: { color: "#3949AB", fontSize: 11, fontWeight: "700", marginTop: 5 },
+  // R17.x: AI persona 圆形 token. photo 资产是 SVG
+  // (apps/mobile/assets/ai-personas/), 这里 surface 仅画
+  // 圆形色 + emoji 表情 — 未来 expo-image SVG 支持 上线后
+  // 可以无缝衔接 (以 SVG 换 圆形 token).
+  exampleAIPersonaRow: { flexDirection: "row", alignItems: "center", marginTop: 5 },
+  exampleAIPersonaCircle: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", marginRight: 6 },
+  exampleAIPersonaCircleText: { fontSize: 18 },
+  exampleAIPersonaBadge: { color: "#7C5CFF", fontSize: 11, fontWeight: "600", marginTop: 1, letterSpacing: 0.4 },
   examplePrice: { alignItems: "flex-end" },
   examplePriceStrong: { color: color.ink, fontSize: 16, fontWeight: "700" },
   examplePriceSmall: { color: color.muted, fontSize: 11, marginTop: 1 },
