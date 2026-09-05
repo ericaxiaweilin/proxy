@@ -4,6 +4,24 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 35 — 2026-09-05
+
+- Closed the me-hub social badge gap. The hub top
+  card used to render the hardcoded
+  `persona.profileCard.social` (`["TT","Z","IG","in"]`)
+  no matter what the user actually configured in
+  the social accounts editor. Editing a handle +
+  flipping visibility to "公开展示" had no effect
+  on the hub. This revision adds `resolveHubSocials`
+  in `me-types.ts` and rewires the me.tsx render
+  path to project the live `socialAccounts` (already
+  wired to `socialSettingsClient` + 250ms debounced
+  write) onto the badges. Accounts with blank handles
+  or non-public visibility are hidden; when the list
+  is empty the card shows a "去 我的 → 社媒账户 设置"
+  hint. HUB-SOCIAL-001 tripwire (1 mobile vitest
+  + 2 grep guards).
+
 ## Revision 34 — 2026-09-05
 
 - Closed the '我的' hub card gap. The me-hub top

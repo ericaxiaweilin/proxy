@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveHubProfile } from "./me-types";
+import { resolveHubProfile, resolveHubSocials, INITIAL_SOCIAL_ACCOUNTS } from "./me-types";
 
 // R18.x HUB-PROFILE-001: the me-hub top card (the
 // profile card + identity card) used to render the
@@ -101,5 +101,49 @@ describe("resolveHubProfile", () => {
     });
     expect(hub.displayName).toBe("lina");
     expect(hub.initial).toBe("L");
+  });
+});
+
+// R18.x HUB-SOCIAL-001: the me-hub top card used to
+// render the hardcoded persona.profileCard.social
+// (["TT","Z","IG","in"]) no matter what the user
+// actually configured. resolveHubSocials projects
+// socialAccounts (handle set + visibility public).
+describe("resolveHubSocials", () => {
+  it("returns isEmpty when every handle is blank", () => {
+    const { visible, isEmpty } = resolveHubSocials(INITIAL_SOCIAL_ACCOUNTS);
+    expect(isEmpty).toBe(true);
+    expect(visible).toEqual([]);
+  });
+
+  it("hides accounts that are not set to public visibility", () => {
+    const accounts = [
+      { key: "tiktok", mark: "TT", dark: true, name: "TikTok", handle: "@mai.tt", url: "", visibility: "仅自己" as const },
+      { key: "instagram", mark: "IG", name: "Instagram", handle: "@mai.ig", url: "", visibility: "公开展示" as const }
+    ];
+    const { visible, isEmpty } = resolveHubSocials(accounts);
+    expect(isEmpty).toBe(false);
+    expect(visible).toEqual([{ key: "instagram", mark: "IG", dark: false }]);
+  });
+
+  it("hides accounts whose handle is only whitespace", () => {
+    const accounts = [
+      { key: "tiktok", mark: "TT", dark: true, name: "TikTok", handle: "   ", url: "", visibility: "公开展示" as const }
+    ];
+    const { visible, isEmpty } = resolveHubSocials(accounts);
+    expect(isEmpty).toBe(true);
+    expect(visible).toEqual([]);
+  });
+
+  it("preserves the dark flag for TT / X style accounts", () => {
+    const accounts = [
+      { key: "tiktok", mark: "TT", dark: true, name: "TikTok", handle: "@mai.tt", url: "", visibility: "公开展示" as const },
+      { key: "x", mark: "X", dark: true, name: "X", handle: "@mai.x", url: "", visibility: "公开展示" as const }
+    ];
+    const { visible } = resolveHubSocials(accounts);
+    expect(visible).toEqual([
+      { key: "tiktok", mark: "TT", dark: true },
+      { key: "x", mark: "X", dark: true }
+    ]);
   });
 });

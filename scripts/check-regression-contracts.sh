@@ -554,6 +554,25 @@ if grep -q 'profileMetaText}>已验证' apps/mobile/src/surfaces/me.tsx; then
 fi
 echo "    HUB-PROFILE-001: PASS (hub card + identity card both read live profile; no fake verify stat)"
 
+# HUB-SOCIAL-001: me-hub top card used to render the
+# hardcoded persona.profileCard.social (["TT","Z","IG","in"])
+# no matter what the user actually configured in the
+# social accounts editor. resolveHubSocials projects the
+# live socialAccounts (handle set + visibility public) and
+# the me.tsx render path uses it. Tripwire: the helper is
+# imported, the render path uses it, and the old hardcoded
+# "TT" "Z" "IG" "in" array literal is gone.
+pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null
+if ! grep -q 'resolveHubSocials' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [HUB-SOCIAL-001]: me.tsx never resolves the live social accounts for the hub card" >&2
+  exit 1
+fi
+if grep -q 'persona\.profileCard\.social\.map' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [HUB-SOCIAL-001]: me.tsx still renders persona.profileCard.social" >&2
+  exit 1
+fi
+echo "    HUB-SOCIAL-001: PASS (hub card shows only live socialAccounts with public visibility; no hardcoded persona.profileCard.social)"
+
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
 pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts

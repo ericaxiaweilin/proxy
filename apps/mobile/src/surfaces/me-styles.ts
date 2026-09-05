@@ -115,6 +115,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 6
   },
   profileSocialBadgeOn: { backgroundColor: "#FAF7FF", borderColor: "#D8C8F0" },
+  profileSocialBadgeDark: { backgroundColor: "#17131F" },
   profileSocialBadgeText: { color: "#564D5B", fontSize: 11, fontWeight: "900" },
   profileSocialMore: { color: "#8B8291", fontSize: 11, marginLeft: 6 },
 

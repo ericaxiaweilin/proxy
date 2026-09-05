@@ -49,7 +49,7 @@ import { createSocialSettingsStore } from "../social-settings-store";
 
 // Extracted modules
 import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
-import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile } from "./me-types";
+import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile, resolveHubSocials } from "./me-types";
 import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel } from "./me-profile-components";
 import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface } from "./me-orders";
 import { SUB_PAGE_CONTENT } from "./me-sub-pages";
@@ -1982,11 +1982,22 @@ export function MeSurface({
               </Pressable>
             </View>
             <View style={styles.profileSocial}>
-              {persona.profileCard.social.map((s) => (
-                <View key={s} style={[styles.profileSocialBadge, s === "TT" && styles.profileSocialBadgeOn]}>
-                  <Text style={styles.profileSocialBadgeText}>{s}</Text>
-                </View>
-              ))}
+              {(() => {
+                // R18.x HUB-SOCIAL-001: see resolveHubSocials
+                // in ./me-types for the precedence rules.
+                const hubSocials = resolveHubSocials(socialAccounts);
+                if (hubSocials.isEmpty) {
+                  return <Text style={styles.profileSocialMore}>去 “我的” → 社媒账户 设置 ›</Text>;
+                }
+                return hubSocials.visible.map((social) => (
+                  <View
+                    key={social.key}
+                    style={[styles.profileSocialBadge, social.mark === "TT" && styles.profileSocialBadgeOn, social.dark && styles.profileSocialBadgeDark]}
+                  >
+                    <Text style={styles.profileSocialBadgeText}>{social.mark}</Text>
+                  </View>
+                ));
+              })()}
               <Text style={styles.profileSocialMore}>社媒与二维码 ›</Text>
             </View>
           </Pressable>

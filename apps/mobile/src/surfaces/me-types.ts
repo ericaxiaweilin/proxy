@@ -203,3 +203,30 @@ export function nextDays(count: number): Array<{ key: string; date: Date; label:
     return { key, date, label };
   });
 }
+
+// R18.x HUB-SOCIAL-001: the me-hub top card used to
+// render the hardcoded persona.profileCard.social
+// (["TT","Z","IG","in"]) no matter what the user
+// actually configured in the social accounts editor.
+// resolveHubSocials() projects the live socialAccounts
+// list onto a small shape the render path can iterate:
+//   - empty handle → hide (the user has not set it up)
+//   - visibility != "公开展示" → hide (the user opted
+//     the row out of the public hub card)
+//   - otherwise expose {key, mark, dark} so the card
+//     can pick a style. When the list is empty after
+//     the filter, expose isEmpty so the card can swap
+//     to a "去 我的 → 社媒账户 设置" hint instead of
+//     showing a meaningless blank row.
+export interface HubSocial {
+  key: string;
+  mark: string;
+  dark: boolean;
+}
+
+export function resolveHubSocials(accounts: ReadonlyArray<SocialAccount>): { visible: HubSocial[]; isEmpty: boolean } {
+  const visible = accounts
+    .filter((account) => account.handle.trim().length > 0 && account.visibility === "公开展示")
+    .map((account) => ({ key: account.key, mark: account.mark, dark: Boolean(account.dark) }));
+  return { visible, isEmpty: visible.length === 0 };
+}
