@@ -176,6 +176,10 @@ func main() {
 		// Lotus §1: DisplayIdentity PG persistence (038) — wire PG repo so
 		// CreateDisplayIdentity/List/Burn survive restarts.
 		identityService.SetDisplayIdentityRepository(postgres.NewDisplayIdentityRepository(pool))
+		// R18.x PROFILE-001: Profile persistence (039) — wire PG repo
+		// so the mobile '编辑主页' modal's UpdateProfile call survives
+		// restarts. The IdentityRepository implements ProfileRepository.
+		identityService.SetProfileRepository(postgres.NewIdentityRepository(pool))
 		// R15.27 SMTP 真实发信：把 identity repo 注入 SMTP provider 的
 		// email resolver, 让它能用 LoginIdentityID 查到 identifier (email).
 		// 必须在 createdLoginProvider 之后、challenge 产生之前 wire.

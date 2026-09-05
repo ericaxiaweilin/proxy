@@ -1068,3 +1068,44 @@ var _ identity.Repository = (*IdentityRepository)(nil)
 var _ identity.PrivacyRequestRepository = (*IdentityRepository)(nil)
 var _ identity.TransactionalRepository = (*IdentityRepository)(nil)
 var _ identity.TokenRepository = (*IdentityRepository)(nil)
+var _ identity.ProfileRepository = (*IdentityRepository)(nil)
+
+// GetProfile fetches the row keyed by user_account_id. If no row
+// exists, returns identity.ErrProfileNotFound.
+func (r *IdentityRepository) GetProfile(ctx context.Context, userAccountID string) (identity.Profile, error) {
+	var p identity.Profile
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT user_account_id, name, handle, bio, city, avatar_path, version, updated_at
+		FROM identity.profiles WHERE user_account_id=$1`, userAccountID).Scan(
+		&p.UserAccountID, &p.Name, &p.Handle, &p.Bio, &p.City, &p.AvatarPath, &p.Version, &p.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return identity.Profile{}, identity.ErrProfileNotFound
+	}
+	return p, err
+}
+
+// UpsertProfile atomically increments the version and updates
+// updated_at on conflict, so concurrent updates from the same
+// actor (rare but possible on slow networks) see monotonically
+// increasing versions.
+func (r *IdentityRepository) UpsertProfile(ctx context.Context, p identity.Profile) (identity.Profile, error) {
+	row := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		INSERT INTO identity.profiles (user_account_id, name, handle, bio, city, avatar_path, version, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,1,$7)
+		ON CONFLICT (user_account_id) DO UPDATE SET
+			name=EXCLUDED.name,
+			handle=EXCLUDED.handle,
+			bio=EXCLUDED.bio,
+			city=EXCLUDED.city,
+			avatar_path=EXCLUDED.avatar_path,
+			version=identity.profiles.version + 1,
+			updated_at=EXCLUDED.updated_at
+		RETURNING user_account_id, name, handle, bio, city, avatar_path, version, updated_at`,
+		p.UserAccountID, p.Name, p.Handle, p.Bio, p.City, p.AvatarPath, p.UpdatedAt)
+	var out identity.Profile
+	if err := row.Scan(&out.UserAccountID, &out.Name, &out.Handle, &out.Bio, &out.City, &out.AvatarPath, &out.Version, &out.UpdatedAt); err != nil {
+		return identity.Profile{}, err
+	}
+	return out, nil
+}

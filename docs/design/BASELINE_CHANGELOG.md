@@ -4,6 +4,18 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 28 — 2026-09-05
+
+- Wired the Profile service half that commit 6e68aaf
+  accidentally missed: identity.Service.profileService
+  field, NewWithRepositoryAndClockAndChallengeProvider
+  initializes it to NewProfileService(nil, clock),
+  SetProfileRepository lets the transport layer swap in
+  the PG repo, and main.go's PG path now calls
+  identityService.SetProfileRepository(postgres.NewIdentityRepository(pool))
+  so UpdateProfile survives restarts. The PROFILE-001
+  server half is now actually exercised by identity_test.
+
 ## Revision 27 — 2026-09-05
 
 - Replaced feed-local fixed `0/1` reaction displays with authenticated server

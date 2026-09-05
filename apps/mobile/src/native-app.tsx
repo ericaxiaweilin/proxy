@@ -24,6 +24,7 @@ import { FulfillmentClient } from "./fulfillment-client";
 import { PaymentClient } from "./payment-client";
 import { NotificationClient } from "./notification-client";
 import { BusinessClient } from "./business-client";
+import { ProfileClient } from "./profile-client";
 import { SceneClient } from "./scene-client";
 import { SupplyClient } from "./supply-client";
 import { SocialSettingsClient } from "./social-settings-client";
@@ -149,6 +150,7 @@ const fulfillmentClient = new FulfillmentClient({ authClient: sessionAuthClient,
 const paymentClient = new PaymentClient({ authClient: sessionAuthClient, secureSessionStore });
 const notificationClient = new NotificationClient({ authClient: sessionAuthClient, secureSessionStore });
 const businessClient = new BusinessClient({ authClient: sessionAuthClient, secureSessionStore });
+const profileClient = new ProfileClient({ authClient: sessionAuthClient, secureSessionStore });
 const sceneClient = new SceneClient({ authClient: sessionAuthClient, secureSessionStore });
 const supplyClient = new SupplyClient({ authClient: sessionAuthClient, secureSessionStore });
 const socialSettingsClient = new SocialSettingsClient({ authClient: sessionAuthClient, secureSessionStore });
@@ -248,6 +250,7 @@ export function ProxyApp(): React.JSX.Element {
         secureSessionStore={secureSessionStore}
         notification={notificationClient}
         business={businessClient}
+        profile={profileClient}
         supply={supplyClient}
         socialSettings={socialSettingsClient}
         scene={sceneClient}

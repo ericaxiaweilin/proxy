@@ -401,10 +401,11 @@ require_test "PROFILE-001" "./internal/identity" \
 # (commit 2 of this set). The tripwire below is intentionally
 # disabled (if false) so the server half is independently gated.
 if false; then
-  if ! grep -q 'UpdateProfile\|GetProfile' apps/mobile/src/surfaces/me.tsx; then
-    echo "  FAIL [PROFILE-001 mobile]: me.tsx saveProfile never calls UpdateProfile on the server" >&2
+  if ! grep -q 'profileClient\.updateProfile\|profileClient\.getProfile' apps/mobile/src/surfaces/me.tsx; then
+    echo "  FAIL [PROFILE-001 mobile]: me.tsx saveProfile never calls profileClient.updateProfile" >&2
     exit 1
   fi
+  pnpm --dir apps/mobile exec vitest run src/profile-client.test.ts
   echo "    PROFILE-001 (mobile): PASS (me.tsx saveProfile wired to UpdateProfile)"
 fi
 echo "    PROFILE-001: PASS (server half; mobile half pending commit 2)"

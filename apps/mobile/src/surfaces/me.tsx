@@ -38,6 +38,7 @@ import type { ActiveContext } from "../uiplan/types";
 import type { SceneClient } from "../scene-client";
 import type { BusinessClient } from "../business-client";
 import type { ActivityClient } from "../activity-client";
+import type { ProfileClient } from "../profile-client";
 import type { SocialSettingsClient } from "../social-settings-client";
 import type { SupplyClient } from "../supply-client";
 import { FacetHomeSurface } from "../facet/FacetHomeSurface";
@@ -234,6 +235,7 @@ export function MeSurface({
   engagement,
   viewerAccountId,
   socialSettingsClient,
+  profileClient,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -252,6 +254,7 @@ export function MeSurface({
   scene?: SceneClient;
   business?: BusinessClient;
   supply?: SupplyClient;
+  profileClient?: ProfileClient | undefined;
   activities?: ActivityClient | undefined;
   engagement?: EngagementClient;
   viewerAccountId?: string | undefined;
@@ -640,36 +643,62 @@ export function MeSurface({
 
   async function saveProfile(): Promise<void> {
     let avatarPath: string | undefined;
+    let localAvatarFileName: string | undefined;
     if (profileAvatarUri?.startsWith(PROFILE_AVATAR_DIR.uri)) {
       // AVATAR-001: 同上，只存文件名。
-      avatarPath = avatarFileName(profileAvatarUri);
+      localAvatarFileName = avatarFileName(profileAvatarUri);
     } else if (profileAvatarUri) {
       try {
         PROFILE_AVATAR_DIR.create({ idempotent: true, intermediates: true });
         const avatarFile = nextProfileAvatarFile();
         await new File(profileAvatarUri).copy(avatarFile, { overwrite: true });
-        avatarPath = avatarFileName(avatarFile.uri);
+        localAvatarFileName = avatarFileName(avatarFile.uri);
         setProfileAvatarUri(avatarFile.uri);
       } catch {
-        avatarPath = undefined;
+        localAvatarFileName = undefined;
       }
     } else {
       const existing = await profileStore.read().catch(() => undefined);
       // AVATAR-001: 老记录可能是绝对路径，读出来即规范成文件名。
-      avatarPath = existing?.avatarPath ? avatarFileName(existing.avatarPath) : undefined;
+      localAvatarFileName = existing?.avatarPath ? avatarFileName(existing.avatarPath) : undefined;
     }
+    // R18.x PROFILE-001: the server's Profile avatarPath must use
+    // an 'assets/' or 'ai-personas/' prefix (isValidProfileAssetPath).
+    // Local SecureStore keeps the bare filename for the on-device
+    // read-back path; the wire path prepends the canonical prefix.
+    const wireAvatarPath = localAvatarFileName ? `assets/${localAvatarFileName}` : "";
     const record: ProfileRecord = {
       name: profileDraft.name,
       handle: profileDraft.handle,
       bio: profileDraft.bio,
       city: profileDraft.city,
-      avatarPath,
+      avatarPath: localAvatarFileName,
       updatedAt: new Date().toISOString()
     };
     try {
       await profileStore.write(record);
     } catch {
       return;
+    }
+    // R18.x PROFILE-001: send the edit to the server. Local
+    // SecureStore is now a write-through cache; the server is
+    // the source of truth that feeds / opportunity applicants /
+    // cross-device read models all see.
+    if (profileClient) {
+      try {
+        await profileClient.updateProfile({
+          name: profileDraft.name,
+          handle: profileDraft.handle,
+          bio: profileDraft.bio,
+          city: profileDraft.city,
+          avatarPath: wireAvatarPath,
+        });
+      } catch {
+        // Server write failure is non-fatal for the local edit
+        // (the user can retry). The local cache still has the
+        // new record; an outbox/queue handler can re-sync.
+        return;
+      }
     }
     profileHydratedRef.current = true;
     setProfileEditorOpen(false);

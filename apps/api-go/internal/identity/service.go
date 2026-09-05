@@ -65,6 +65,7 @@ type Service struct {
 	tokenManager           *TokenManager
 	challengeProvider      LoginChallengeProvider
 	displayIdentityService *DisplayIdentityService
+	profileService         *ProfileService
 }
 
 func New(seed *Seed) *Service {
@@ -93,7 +94,7 @@ func NewWithRepositoryAndClockAndChallengeProvider(repository Repository, domain
 	if provider == nil {
 		provider = UnconfiguredLoginChallengeProvider{}
 	}
-	service := &Service{repository: repository, clock: domainClock, challengeProvider: provider, displayIdentityService: NewDisplayIdentityService(nil, domainClock)}
+	service := &Service{repository: repository, clock: domainClock, challengeProvider: provider, displayIdentityService: NewDisplayIdentityService(nil, domainClock), profileService: NewProfileService(nil, domainClock)}
 	if tokenRepository, ok := repository.(TokenRepository); ok {
 		service.tokenManager = NewTokenManager(tokenRepository, repository, domainClock)
 	}
@@ -104,6 +105,12 @@ func (s *Service) SetDisplayIdentityRepository(repo DisplayIdentityRepository) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.displayIdentityService = NewDisplayIdentityService(repo, s.clock)
+}
+
+func (s *Service) SetProfileRepository(repo ProfileRepository) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profileService.SetRepository(repo)
 }
 
 // Repository exposes the identity repository so transport-layer code
@@ -118,6 +125,7 @@ func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
+		"UpdateProfile", "GetProfile",
 		"GetAccountPreferences", "UpdateAccountPreferences",
 		"RequestPrivacyExport", "RequestPrivacyDelete", "CancelPrivacyRequest", "GetPrivacyRequestStatus", "ListPrivacyRequests":
 		return true
@@ -167,6 +175,10 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.listDisplayIdentities(ctx, envelope)
 	case "BurnDisplayIdentity":
 		return s.burnDisplayIdentity(ctx, envelope)
+	case "UpdateProfile":
+		return s.updateProfile(ctx, envelope)
+	case "GetProfile":
+		return s.getProfile(ctx, envelope)
 	case "GetAccountPreferences":
 		return s.getAccountPreferences(ctx, envelope)
 	case "UpdateAccountPreferences":
@@ -1172,6 +1184,87 @@ func (s *Service) burnDisplayIdentity(ctx context.Context, e command.Envelope) c
 	}
 	ev := event.New("DisplayIdentityBurned", "DisplayIdentity", d.ID, d.Version, e.Actor.ID, e.CorrelationID, e.CommandID, now, map[string]any{"ownerId": d.OwnerID})
 	return command.Accepted(e, "DisplayIdentity", d.ID, d.Version, "BURNED", eventRefs([]event.DomainEvent{ev}))
+}
+
+// updateProfile / getProfile — R18.x PROFILE-001.
+//
+// The mobile '编辑主页' modal in me.tsx was a local-only write
+// (profileStore.write to iOS Keychain / Android Keystore). No
+// server command existed, so the new name / handle / bio / city
+// / avatar never reached feeds, opportunity applicants, or any
+// cross-device read model. This closes the loop: every save
+// goes through UpdateProfile so the home-page identity is
+// server-authoritative end-to-end.
+type updateProfilePayload struct {
+	Name       string `json:"name"`
+	Handle     string `json:"handle"`
+	Bio        string `json:"bio"`
+	City       string `json:"city"`
+	AvatarPath string `json:"avatarPath"`
+}
+
+func (s *Service) updateProfile(ctx context.Context, e command.Envelope) command.Result {
+	var p updateProfilePayload
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_PROFILE", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_profile", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PROFILE_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.profile_forbidden", nil)
+	}
+	candidate := Profile{
+		UserAccountID: e.Actor.ID,
+		Name:          strings.TrimSpace(p.Name),
+		Handle:        strings.TrimSpace(p.Handle),
+		Bio:           p.Bio,
+		City:          strings.TrimSpace(p.City),
+		AvatarPath:    p.AvatarPath,
+	}
+	saved, err := s.profileService.UpsertProfile(ctx, candidate)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "avatar"):
+			return command.Rejected(e, "PROFILE_INVALID_AVATAR", "VALIDATION", "AFTER_USER_ACTION", "identity.profile_invalid_avatar", nil)
+		default:
+			return command.Rejected(e, "INVALID_PROFILE", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_profile", nil)
+		}
+	}
+	now := s.clock.Now().UTC()
+	if !saved.UpdatedAt.IsZero() {
+		now = saved.UpdatedAt
+	}
+	ev := event.New("ProfileUpdated", "Profile", saved.UserAccountID, saved.Version, e.Actor.ID, e.CorrelationID, e.CommandID, now, map[string]any{"handle": saved.Handle, "name": saved.Name})
+	raw, _ := json.Marshal(map[string]any{"profile": saved})
+	r := command.Accepted(e, "Profile", saved.UserAccountID, saved.Version, "UPDATED", []string{ev.EventID})
+	r.OperationRef = string(raw)
+	return r
+}
+
+func (s *Service) getProfile(ctx context.Context, e command.Envelope) command.Result {
+	userID := e.Target.ID
+	if userID == "" {
+		var p struct {
+			UserAccountID string `json:"userAccountId"`
+		}
+		_ = decode(e.Payload, &p)
+		userID = p.UserAccountID
+	}
+	if userID == "" {
+		userID = e.Actor.ID
+	}
+	if userID == "" {
+		return command.Rejected(e, "INVALID_PROFILE_READ", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_profile_read", nil)
+	}
+	p, err := s.profileService.GetProfile(ctx, userID)
+	if errors.Is(err, ErrProfileNotFound) {
+		return command.Rejected(e, "PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.profile_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "PROFILE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.profile_read_failed", nil)
+	}
+	raw, _ := json.Marshal(map[string]any{"profile": p})
+	r := command.Accepted(e, "Profile", p.UserAccountID, p.Version, "READ", nil)
+	r.OperationRef = string(raw)
+	return r
 }
 
 // enforceMaxConcurrentSessions revokes the oldest ACTIVE sessions so a new
