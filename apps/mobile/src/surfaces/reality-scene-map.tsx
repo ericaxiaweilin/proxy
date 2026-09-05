@@ -120,11 +120,26 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
     if (nearbyBusy || !session) return;
     setNearbyBusy(true); setNearbyError(undefined);
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== "granted") throw new Error("请在系统设置中允许 Proxy 使用位置");
+      // LOC-FIX-001: 先看现状再申请。之前直接 request，拒绝过的用户每次
+      // 点都是系统静默拒绝 → 笼统报错；且 getCurrentPositionAsync 无超时，
+      // 室内无 fix 时按钮卡死“正在定位和计算…”（用户看到的“失败”）。
+      const existing = await Location.getForegroundPermissionsAsync();
+      let status = existing.status;
+      if (status !== "granted") {
+        const request = await Location.requestForegroundPermissionsAsync();
+        status = request.status;
+      }
+      if (status !== "granted") throw new Error("未授权定位 — 去 iOS 设置 → Proxy → 位置，允许“使用 App 期间”");
       const grant = await authClient.request("/v1/location/consent/grant", { method: "POST", body: { durationSeconds: 1800 } });
-      if (grant.status < 200 || grant.status >= 300) throw new Error("位置授权未生效");
-      const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      if (grant.status < 200 || grant.status >= 300) throw new Error("位置授权未生效（请检查登录状态后重试）");
+      // 有缓存 fix 直接用（秒回）；没有才开 GPS，且最多等 10 秒。
+      // expo-location v57 的 getCurrentPositionAsync 没有 timeout 参数，
+      // 不自己 race 就会在室内无 fix 时一直转（用户看到的“失败”就是卡死）。
+      const cached = await Location.getLastKnownPositionAsync().catch(() => null);
+      const fix = cached ?? await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("定位超时（10 秒无 GPS 信号）— 请到开阔处重试，或用搜场景切换地址")), 10_000)),
+      ]);
       const { latitude, longitude } = fix.coords;
       const response = await authClient.request("/v1/reality-scenes/nearby", { method: "POST", body: { latitude, longitude, radiusKm: 15 } });
       const body = await response.json() as { scenes?: unknown };
@@ -184,7 +199,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
         <View style={styles.topCopy}><Text style={styles.title}>场景地图</Text><Text style={styles.subtitle}>{origin ? `当前位置附近 · ${scenes.length} 个热门场景` : `场景目录 · ${scenes.length} 个 Scene`}</Text></View>
         <Pressable accessibilityLabel={view === "MAP" ? "切换列表" : "切换地图"} onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={styles.roundButton}><ProxyIcon color={color.ink} name={view === "MAP" ? "storeLines" : "crosshair"} size={21} /></Pressable>
       </View>
-      <Pressable disabled={nearbyBusy || !session} onPress={() => { void recommendNearby(); }} style={styles.nearbyButton}><ProxyIcon color={color.white} name="crosshair" size={18} /><Text style={styles.nearbyButtonText}>{nearbyBusy ? "正在定位和计算…" : "按当前位置推荐附近热门场景"}</Text></Pressable>
+      <Pressable disabled={nearbyBusy || !session} onPress={() => { void recommendNearby(); }} style={styles.nearbyButton}><ProxyIcon color={color.white} name="crosshair" size={18} /><Text style={styles.nearbyButtonText}>{nearbyBusy ? "正在定位和计算…" : !session ? "登录后可用当前位置推荐" : "按当前位置推荐附近热门场景"}</Text></Pressable>
       {nearbyError ? <Text style={styles.nearbyError}>{nearbyError}</Text> : null}
       <View style={styles.stats}>
         <Stat value={Math.max(0, scenes.filter((scene) => !visited.has(scene.id)).length)} label="未探索" onPress={() => setFilter("UNSEEN")} />
