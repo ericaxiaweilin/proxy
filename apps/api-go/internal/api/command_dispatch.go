@@ -276,6 +276,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Safety.HandleContext(ctx, envelope)
 	case s.Business != nil && s.Business.Supports(envelope.CommandType):
 		return s.Business.HandleContext(ctx, envelope)
+	case s.Relationship != nil && s.Relationship.Supports(envelope.CommandType):
+		return s.Relationship.HandleContext(ctx, envelope)
 	case s.Scene != nil && s.Scene.Supports(envelope.CommandType):
 		return s.Scene.HandleContext(ctx, envelope)
 	case s.RealityScene != nil && s.RealityScene.Supports(envelope.CommandType):

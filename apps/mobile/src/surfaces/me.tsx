@@ -39,6 +39,7 @@ import type { SceneClient } from "../scene-client";
 import type { BusinessClient } from "../business-client";
 import type { ActivityClient } from "../activity-client";
 import type { ProfileClient } from "../profile-client";
+import type { RelationshipClient } from "../relationship-client";
 import type { SocialSettingsClient } from "../social-settings-client";
 import type { SupplyClient } from "../supply-client";
 import { FacetHomeSurface } from "../facet/FacetHomeSurface";
@@ -236,6 +237,7 @@ export function MeSurface({
   viewerAccountId,
   socialSettingsClient,
   profileClient,
+  relationshipClient,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -255,6 +257,7 @@ export function MeSurface({
   business?: BusinessClient;
   supply?: SupplyClient;
   profileClient?: ProfileClient | undefined;
+  relationshipClient?: RelationshipClient | undefined;
   activities?: ActivityClient | undefined;
   engagement?: EngagementClient;
   viewerAccountId?: string | undefined;
@@ -530,7 +533,7 @@ export function MeSurface({
   }
 
   if (subPage?.route === "friendcrm") {
-    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
+    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
     return (
@@ -1016,7 +1019,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "addfriend") {
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="ADD_FRIEND" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="ADD_FRIEND" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
     }
 
     if (subPage.route === "friendcrm") {

@@ -41,6 +41,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
+	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
@@ -103,6 +104,7 @@ func main() {
 	contributionService := contribution.New()
 	socialSpaceService := socialspace.New()
 	businessService := business.New()
+	relationshipService := relationship.New()
 	paymentService := payment.New()
 	notificationService := notification.NewWithPushProvider(nil, configuredNotificationPush())
 	safetyService := safety.New()
@@ -224,6 +226,7 @@ func main() {
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
 		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))
+		relationshipService = relationship.NewWithRepository(postgres.NewRelationshipRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
 		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())
 		safetyService = safety.NewWithRepository(postgres.NewSafetyRepository(pool))
@@ -268,6 +271,7 @@ func main() {
 	server := api.NewServerWithRuntime(identityService, demandService, cityCompanionService, localNetService, localContextService, conversationService, engagementService, fulfillmentService, supplyService, mediaService, contributionService, idempotencyStore, readyCheck, authenticator, transactions)
 	server.SocialSpace = socialSpaceService
 	server.Business = businessService
+	server.Relationship = relationshipService
 	server.Payment = paymentService
 	server.Notification = notificationService
 	server.Safety = safetyService

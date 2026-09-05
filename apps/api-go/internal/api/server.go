@@ -28,6 +28,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
+	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
@@ -61,6 +62,7 @@ type Server struct {
 	Notification  *notification.Service
 	Safety        *safety.Service
 	Business      *business.Service
+	Relationship  *relationship.Service
 	Scene         *scene.Service
 	RealityScene  *realityscene.Service
 	Facet         *facet.Service
@@ -145,7 +147,7 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if readyCheck != nil {
 		readyMode = "configured"
 	}
-	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.NewWithRepository(experience.NewMemoryRepository()), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Scene: scene.New(), RealityScene: realityscene.New(), Facet: facet.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120), TrustCloudflareIP: envBool("PROXY_TRUST_CLOUDFLARE_IP"), ReadTimeout: 4 * time.Second}
+	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.NewWithRepository(experience.NewMemoryRepository()), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Relationship: relationship.New(), Scene: scene.New(), RealityScene: realityscene.New(), Facet: facet.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120), TrustCloudflareIP: envBool("PROXY_TRUST_CLOUDFLARE_IP"), ReadTimeout: 4 * time.Second}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -222,6 +224,8 @@ func (s *Server) Handler() http.Handler {
 	// lookups.
 	mux.HandleFunc("/v1/ai/personas", s.routePersonaCollection)
 	mux.HandleFunc("/v1/ai/personas/", s.routePersonaItem)
+	// AI-ASSIST-001: 平台 AI 助手公开目录（首页推荐），匿名可读。
+	mux.HandleFunc("/v1/ai/assistants", s.listAIAssistants)
 	// R16.7-P1-E: Jurisdiction Policy Engine self-service.
 	// GET reads the caller's current jurisdiction (default
 	// VN-79 when no row exists); PATCH updates it. Operator

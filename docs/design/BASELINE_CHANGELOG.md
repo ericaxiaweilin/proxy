@@ -4,6 +4,26 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 33 — 2026-09-05
+
+- Closed the '我的 → 好友与关系' gap. The mobile
+  FriendCrmSurface was entirely hardcoded mock: 4 fake
+  friends (Mai / An / Luna / Khoa), 2 fake pending
+  requests, fake contact / social matches; every
+  action (add / accept / ignore / block) mutated only
+  local React state. This revision adds the
+  relationship package end-to-end: server commands
+  ListMyFriendships / SendFriendRequest /
+  AcceptFriendRequest / IgnoreFriendRequest /
+  BlockFriend with USER-only auth + symmetric (a,b)
+  pair canonicalisation + IGNORED_TOMBSTONE row
+  semantics, PG persistence (migration 040), mobile
+  RelationshipClient with 4 cases, and the surface
+  rewire that projects server active + pending buckets
+  into the existing render path. The 4 mock constants
+  remain as offline fallback only. FRIEND-001 tripwire
+  (6 server + 4 mobile + grep guard).
+
 ## Revision 32 — 2026-09-05
 
 - 小美快捷入口改道：推荐页未落地前，“看小美机会”进真实 AI 活动流

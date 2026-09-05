@@ -1,8 +1,9 @@
 // 个人轻 CRM — 好友不是消息列表的子集，而是独立的个人关系资产。
 // 接线 /Users/thanhhuyennguyen/Downloads/proxy_add_friend_detail.html 的 5 种加好友 + 轻 CRM 详情
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ProxyIcon } from "../components/proxy-icon";
+import type { FriendView, RelationshipClient } from "../relationship-client";
 import { color, shadows } from "../theme";
 
 type FriendSource = "QR" | "INVITE" | "CONTACTS" | "SOCIAL" | "SEARCH";
@@ -64,7 +65,7 @@ const SOCIAL_MATCHES: Array<{ name: string; initial: string; sub: string }> = [
 type AddFriendSheet = "SCAN" | "INVITE" | "CONTACTS" | "SOCIAL" | "SEARCH" | "REQUESTS" | undefined;
 type CrmView = "LIST" | "ADD_FRIEND" | "DETAIL";
 
-export function FriendCrmSurface({ onOpenConversation, onBack, initialView = "LIST" }: { onOpenConversation: (author: string) => void; onBack: () => void; initialView?: CrmView }): React.JSX.Element {
+export function FriendCrmSurface({ relationship, onOpenConversation, onBack, initialView = "LIST" }: { relationship?: RelationshipClient | undefined; onOpenConversation: (author: string) => void; onBack: () => void; initialView?: CrmView }): React.JSX.Element {
   const [view, setView] = useState<CrmView>(initialView);
   const [sheet, setSheet] = useState<AddFriendSheet>();
   const [search, setSearch] = useState("");
@@ -73,15 +74,71 @@ export function FriendCrmSurface({ onOpenConversation, onBack, initialView = "LI
   const [proxySearch, setProxySearch] = useState("");
   const [proxySearchDone, setProxySearchDone] = useState(false);
   const [sentIds, setSentIds] = useState<Record<string, boolean>>({});
-  const [requests, setRequests] = useState(PENDING_REQUESTS);
+  // R18.x FRIEND-001: replace the hardcoded PENDING_REQUESTS
+  // and CRM_FRIENDS with server-fetched lists. The mock
+  // constants are kept as a fallback when the
+  // RelationshipClient is absent (offline / pre-auth).
+  const [requests, setRequests] = useState<Array<{ name: string; initial: string; source: string; time: string; userId?: string }>>(PENDING_REQUESTS);
+  const [serverFriends, setServerFriends] = useState<{ active: FriendView[]; pending: FriendView[] }>({ active: [], pending: [] });
+  const [friendsError, setFriendsError] = useState<string | undefined>(undefined);
   const [toast, setToast] = useState("");
   const [crmTab, setCrmTab] = useState<"ALL" | "WARM" | "FOLLOW" | "MET">("ALL");
 
+  const reload = useCallback(async () => {
+    if (!relationship) return;
+    setFriendsError(undefined);
+    try {
+      const payload = await relationship.listMyFriendships();
+      setServerFriends(payload);
+      // Project the server incoming pending list onto the
+      // requests array so the add-friend sheet's 接受/忽略
+      // actions line up with the server-side rows.
+      setRequests(
+        payload.pending
+          .filter((f) => f.direction === "INCOMING")
+          .map((f) => ({ name: f.displayName || f.userId, initial: (f.displayName || f.userId).slice(0, 1).toUpperCase(), source: "Proxy 好友请求", time: "刚刚", userId: f.userId })),
+      );
+    } catch (error) {
+      setFriendsError(error instanceof Error ? error.message : String(error));
+    }
+  }, [relationship]);
+  useEffect(() => { void reload(); }, [reload]);
+
+  // Project server `active` rows onto the CrmFriend shape
+  // so the existing list / detail rendering can stay
+  // identical. Each server friend becomes a CrmFriend
+  // with synthetic tags + note; the userId is the only
+  // field the new accept / ignore / block buttons need.
+  const projectedServerFriends: CrmFriend[] = useMemo(() => {
+    return serverFriends.active.map((f) => {
+      const name = f.displayName || f.userId;
+      return {
+        id: f.userId,
+        name,
+        initial: name.slice(0, 1).toUpperCase() || "?",
+        proxyId: f.userId,
+        city: f.city || "",
+        source: "QR" as FriendSource,
+        sourceLabel: f.city ? `好友 · ${f.city}` : "好友",
+        relation: `好友 · ${f.since.slice(0, 10)}`,
+        tags: [],
+        note: "",
+        commonFriends: 0,
+        lastInteraction: f.since.slice(0, 10),
+        status: "FRIEND" as FriendStatus,
+        createdAt: f.since.slice(0, 10),
+      };
+    });
+  }, [serverFriends]);
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return CRM_FRIENDS;
-    return CRM_FRIENDS.filter((f) => `${f.name}${f.proxyId}${f.city}${f.tags.join("")}${f.note}`.toLowerCase().includes(q));
-  }, [search]);
+    // Prefer server-fetched friends when the RelationshipClient
+    // is wired; fall back to the historical mock for offline.
+    const base = projectedServerFriends.length > 0 ? projectedServerFriends : CRM_FRIENDS;
+    if (!q) return base;
+    return base.filter((f) => `${f.name}${f.proxyId}${f.city}${f.tags.join("")}${f.note}`.toLowerCase().includes(q));
+  }, [search, projectedServerFriends]);
 
   const filteredAdv = useMemo(() => {
     if (crmTab === "ALL") return ADV_CRM_FRIENDS;
@@ -185,7 +242,7 @@ export function FriendCrmSurface({ onOpenConversation, onBack, initialView = "LI
 
         <CrmSheet open={sheet === "REQUESTS"} onClose={() => setSheet(undefined)} title="好友请求" sub="只有你接受后，双方才会成为 Proxy 好友。">
           {requests.map((r) => (
-            <View key={r.name} style={styles.requestRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{r.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{r.name}</Text><Text style={styles.personSub}>{r.source} · {r.time}</Text><View style={styles.requestActions}><Pressable onPress={() => { setRequests((prev) => prev.filter((x) => x.name !== r.name)); showToast("已成为好友"); }} style={[styles.btn, styles.btnPrimary, { flex: 1 }]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable onPress={() => { setRequests((prev) => prev.filter((x) => x.name !== r.name)); showToast("已忽略请求"); }} style={[styles.btn, { flex: 1 }]}><Text style={styles.btnText}>忽略</Text></Pressable></View></View></View>
+            <View key={`${r.userId ?? r.name}`} style={styles.requestRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{r.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{r.name}</Text><Text style={styles.personSub}>{r.source} · {r.time}</Text><View style={styles.requestActions}><Pressable disabled={!r.userId || !relationship} onPress={async () => { if (!r.userId || !relationship) return; try { await relationship.acceptFriendRequest(r.userId); showToast("已成为好友"); void reload(); } catch (error) { showToast(error instanceof Error ? error.message : "接受失败"); } }} style={[styles.btn, styles.btnPrimary, { flex: 1 }]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable disabled={!r.userId || !relationship} onPress={async () => { if (!r.userId || !relationship) return; try { await relationship.ignoreFriendRequest(r.userId); showToast("已忽略请求"); void reload(); } catch (error) { showToast(error instanceof Error ? error.message : "忽略失败"); } }} style={[styles.btn, { flex: 1 }]}><Text style={styles.btnText}>忽略</Text></Pressable></View></View></View>
           ))}
           {!requests.length ? <Text style={styles.resultEmptyText}>暂无待处理请求</Text> : null}
         </CrmSheet>

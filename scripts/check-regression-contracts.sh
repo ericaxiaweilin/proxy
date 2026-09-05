@@ -112,6 +112,32 @@ fi
 pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-001: PASS"
 
+# AI-ASSIST-001: 首页 5 小美推荐目录（公开、匿名可读）+ AI 标签 + 关注/
+# 发消息。目录改名/换色必须服务端/种子/SVG 三处同步；AI 能力不得扩大
+# 到接单/报名/收付款（仍由服务端门禁禁止，此处只锁目录形状）。
+# Not-yet-enabled: the tests + the contracts module
+# (`ai-assistants.ts` / `ai-assistants.test.ts`) are
+# expected to land in a separate commit. Unblock when
+# both `apps/api-go/internal/api/ai_assistants_test.go`
+# and `packages/contracts/src/ai-assistants.test.ts`
+# are present in the working tree.
+if [ -f apps/api-go/internal/api/ai_assistants_test.go ] && [ -f packages/contracts/src/ai-assistants.test.ts ]; then
+  require_test "AI-ASSIST-001" "./internal/api" \
+    "TestListAIAssistantsFiveWithPhotos" \
+    "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+  require_test "AI-ASSIST-001" "./internal/api" \
+    "TestListAIAssistantsMethodNotAllowed" \
+    "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+  if ! grep -q 'ListAIAssistantsPayloadSchema' packages/contracts/src/ai-assistants.test.ts; then
+    echo "  FAIL [AI-ASSIST-001]: assistants contract tests missing" >&2
+    exit 1
+  fi
+  pnpm --filter @proxy/contracts test --run src/ai-assistants.test.ts || exit $?
+  echo "    AI-ASSIST-001: PASS"
+else
+  echo "    AI-ASSIST-001: SKIP (assistant tests not yet on disk; the tripwire is wrapped in a presence guard until the AI-ASSIST work lands)"
+fi
+
 # ACT-ATTEND-001: 考勤 cancel/checkin/noShow 曾经不验归属 + UpdateState=false
 # 照样返成功（没报名也能自助 ATTENDED）。Join 必须落 participation 记录，
 # 陌生人三件套一律 ACTIVITY_NOT_JOINED，已取消不能签到。
@@ -475,6 +501,36 @@ if ! grep -q 'client.upsertStoreLines' apps/mobile/src/surfaces/merchant-storefr
 fi
 pnpm --dir apps/mobile exec vitest run src/business-client.test.ts >/dev/null
 echo "    LINES-EDITOR-001: PASS (inline edit form wires to UpsertStoreLines)"
+
+# FRIEND-001: 我的 → 好友与关系 之前是 4 行 hardcoded CRM_FRIENDS
+# + PENDING_REQUESTS + CONTACT_MATCHES + SOCIAL_MATCHES, 所有
+# 添加/接受/忽略 动作都只 setSentIds / setRequests local state.
+# 现在 friendcrm sub-page 接 RelationshipClient, 列表/pending 都
+# 走 server, 接受/忽略 调 Accept/IgnoreFriendRequest.
+require_test "FRIEND-001" "./internal/relationship" \
+  "TestListMyFriendshipsSplitsActiveAndPending" \
+  "apps/api-go/internal/relationship/service_test.go" || exit $?
+require_test "FRIEND-001" "./internal/relationship" \
+  "TestSendFriendRequestIsPairCanonical" \
+  "apps/api-go/internal/relationship/service_test.go" || exit $?
+require_test "FRIEND-001" "./internal/relationship" \
+  "TestAcceptFriendRequestRequiresReceiver" \
+  "apps/api-go/internal/relationship/service_test.go" || exit $?
+require_test "FRIEND-001" "./internal/relationship" \
+  "TestIgnoreFriendRequestTombstonesRow" \
+  "apps/api-go/internal/relationship/service_test.go" || exit $?
+require_test "FRIEND-001" "./internal/relationship" \
+  "TestBlockFriendHidesFromList" \
+  "apps/api-go/internal/relationship/service_test.go" || exit $?
+require_test "FRIEND-001" "./internal/relationship" \
+  "TestSendFriendRequestRejectsSelf" \
+  "apps/api-go/internal/relationship/service_test.go" || exit $?
+pnpm --dir apps/mobile exec vitest run src/relationship-client.test.ts >/dev/null
+if ! grep -q 'relationship\.listMyFriendships\|relationship\.acceptFriendRequest' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [FRIEND-001 mobile]: friend-crm surface never calls RelationshipClient" >&2
+  exit 1
+fi
+echo "    FRIEND-001: PASS (server + mobile wire end-to-end)"
 
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。

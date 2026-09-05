@@ -46,6 +46,7 @@ import { type PaymentClient } from "../payment-client";
 import { type NotificationClient } from "../notification-client";
 import { type BusinessClient } from "../business-client";
 import { type ProfileClient } from "../profile-client";
+import { type RelationshipClient } from "../relationship-client";
 import { type SupplyClient } from "../supply-client";
 import { type SocialSettingsClient } from "../social-settings-client";
 import { BusinessHome } from "../surfaces/business-home";
@@ -121,6 +122,7 @@ export function AppShell({
   supply,
   socialSettings,
   profile,
+  relationship,
   scene,
   isGuest,
   ensureConversationSession,
@@ -146,6 +148,7 @@ export function AppShell({
   business: BusinessClient;
   supply: SupplyClient;
   profile: ProfileClient;
+  relationship: RelationshipClient;
   socialSettings: SocialSettingsClient;
   scene?: import("../scene-client").SceneClient | undefined;
   isGuest?: boolean;
@@ -595,6 +598,7 @@ export function AppShell({
               supply={supply}
               activities={activities}
               profileClient={profile}
+              relationshipClient={relationship}
               socialSettingsClient={socialSettings}
               {...(experienceManifest?.context === context
                 ? {
