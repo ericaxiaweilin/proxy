@@ -532,6 +532,28 @@ if ! grep -q 'relationship\.listMyFriendships\|relationship\.acceptFriendRequest
 fi
 echo "    FRIEND-001: PASS (server + mobile wire end-to-end)"
 
+# HUB-PROFILE-001: '我的' top profile card + identity card used
+# to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
+# regardless of who was signed in, and a fake '已验证 · 准时 98%'
+# stat. resolveHubProfile now projects profileStore + the live
+# avatar onto both cards. The me.tsx render path is the
+# canonical consumer — confirm it uses hubProfile, not the
+# raw persona name.
+pnpm --dir apps/mobile exec vitest run src/surfaces/hub-profile.test.ts >/dev/null
+if ! grep -q 'resolveHubProfile' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [HUB-PROFILE-001]: me.tsx never resolves the live profile for the hub card" >&2
+  exit 1
+fi
+if grep -q 'profileAvatarText' apps/mobile/src/surfaces/me.tsx && grep -q '{persona.avatarText}' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [HUB-PROFILE-001]: me.tsx still renders {persona.avatarText} (should be hubProfile.initial)" >&2
+  exit 1
+fi
+if grep -q 'profileMetaText}>已验证' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [HUB-PROFILE-001]: me.tsx still hardcodes '已验证 · 准时 98%'" >&2
+  exit 1
+fi
+echo "    HUB-PROFILE-001: PASS (hub card + identity card both read live profile; no fake verify stat)"
+
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
 pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts

@@ -2,6 +2,64 @@ import type { ExperienceAction } from "@proxy/contracts";
 
 export type MeSubPage = { title: string; desc: string; icon: string; route: string } | undefined;
 export type AvailabilityState = "AVAILABLE" | "BUSY" | "PAUSED" | "HIDDEN";
+
+// R18.x HUB-PROFILE-001: the me-hub top card (profile
+// card + identity card) used to render the hardcoded
+// `persona.name` + `persona.avatarText` ("Huyen" / "H")
+// for the requester and "Bonsaidon" / "B" for the
+// business, regardless of who was actually signed in.
+// The user-profile name + handle + city + avatar are
+// already hydrated from profileStore (and post-save
+// from server via ProfileClient); the hub card just
+// never read them. resolveHubProfile() projects those
+// fields onto a tiny shape the render path uses:
+//
+//   - displayName: profileStore name if non-empty,
+//     else fall back to the persona hardcode so the
+//     card never renders blank for a freshly-installed
+//     user that has not yet edited their profile.
+//   - initial: first grapheme of the display name.
+//   - city: profileStore city, else the persona city.
+//   - handle: at-prefixed handle, or empty string if
+//     the user has not set one yet.
+//
+// Centralising the resolver here means the hub card,
+// the identity card, and the future 个人总管理 /
+// 个人主页 cards all use the same precedence and
+// we can tripwire the "real profile reaches the hub"
+// property with one small vitest.
+export interface HubProfile {
+  displayName: string;
+  initial: string;
+  city: string;
+  handle: string;
+  hasAvatar: boolean;
+}
+
+export interface HubProfileInput {
+  personaName: string;
+  personaAvatarText: string;
+  personaCity: string;
+  profileName?: string;
+  profileCity?: string;
+  profileHandle?: string;
+  hasAvatar: boolean;
+}
+
+export function resolveHubProfile(input: HubProfileInput): HubProfile {
+  const profileName = (input.profileName ?? "").trim();
+  const fallbackName = profileName.length > 0 ? profileName : input.personaName;
+  const initial = (fallbackName || input.personaAvatarText).slice(0, 1).toUpperCase();
+  const city = (input.profileCity ?? "").trim() || input.personaCity;
+  const handle = (input.profileHandle ?? "").trim();
+  return {
+    displayName: fallbackName,
+    initial,
+    city,
+    handle: handle.length > 0 ? (handle.startsWith("@") ? handle : `@${handle}`) : "",
+    hasAvatar: input.hasAvatar,
+  };
+}
 export type EnterpriseOpsStage = "READY" | "DRAFT_READY" | "CONFIRMED" | "PUBLISHED";
 
 export interface MenuRow {

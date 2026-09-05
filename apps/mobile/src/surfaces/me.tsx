@@ -49,7 +49,7 @@ import { createSocialSettingsStore } from "../social-settings-store";
 
 // Extracted modules
 import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
-import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS } from "./me-types";
+import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile } from "./me-types";
 import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel } from "./me-profile-components";
 import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface } from "./me-orders";
 import { SUB_PAGE_CONTENT } from "./me-sub-pages";
@@ -549,6 +549,20 @@ export function MeSurface({
   }
 
   const persona = PERSONA[context];
+
+  // R18.x HUB-PROFILE-001: hub top card + identity card
+  // read the live profile (profileDraft, profileAvatarUri)
+  // so editing 主页 actually reflects on the hub. See
+  // resolveHubProfile in ./me-types for precedence rules.
+  const hubProfile = resolveHubProfile({
+    personaName: persona.name,
+    personaAvatarText: persona.avatarText,
+    personaCity: "河内",
+    profileName: profileDraft.name,
+    profileCity: profileDraft.city,
+    profileHandle: profileDraft.handle,
+    hasAvatar: Boolean(profileAvatarUri),
+  });
 
   const managedSections =
     context === "REQUESTER" && experienceSections
@@ -1938,16 +1952,24 @@ export function MeSurface({
           <Pressable onPress={() => openSubPage(persona.profileCard!.route)} style={styles.profileCard}>
             <View style={styles.profileTop}>
               <Gradient from="#241246" to="#7A2CFF" style={styles.profileAvatar}>
-                <Text style={styles.profileAvatarText}>{persona.avatarText}</Text>
+                {hubProfile.hasAvatar ? (
+                  <Image source={{ uri: profileAvatarUri }} style={styles.profileAvatarImg} />
+                ) : (
+                  <Text style={styles.profileAvatarText}>{hubProfile.initial}</Text>
+                )}
               </Gradient>
               <View style={styles.profileCopy}>
-                <Text style={styles.profileName}>{persona.name}</Text>
+                <Text style={styles.profileName}>{hubProfile.displayName}</Text>
                 <View style={styles.profileMeta}>
-                  <Text style={styles.profileMetaText}>河内</Text>
-                  <View style={styles.profileVerifyDot}>
-                    <Text style={styles.profileVerifyText}>✓</Text>
-                  </View>
-                  <Text style={styles.profileMetaText}>已验证 · 准时 98%</Text>
+                  <Text style={styles.profileMetaText}>{hubProfile.city}</Text>
+                  {hubProfile.handle ? (
+                    <>
+                      <View style={styles.profileVerifyDot}>
+                        <Text style={styles.profileVerifyText}>@</Text>
+                      </View>
+                      <Text style={styles.profileMetaText}>{hubProfile.handle}</Text>
+                    </>
+                  ) : null}
                 </View>
               </View>
               <Pressable
@@ -1972,15 +1994,23 @@ export function MeSurface({
           <View style={styles.identityCard}>
             {persona.avatarGrad ? (
               <Gradient from={color.magenta} to={color.violet} style={styles.identityAvatar}>
-                <Text style={styles.identityAvatarText}>{persona.avatarText}</Text>
+                {hubProfile.hasAvatar ? (
+                  <Image source={{ uri: profileAvatarUri }} style={styles.identityAvatarImg} />
+                ) : (
+                  <Text style={styles.identityAvatarText}>{hubProfile.initial}</Text>
+                )}
               </Gradient>
             ) : (
               <View style={[styles.identityAvatar, styles.identityAvatarSolid]}>
-                <Text style={styles.identityAvatarText}>{persona.avatarText}</Text>
+                {hubProfile.hasAvatar ? (
+                  <Image source={{ uri: profileAvatarUri }} style={styles.identityAvatarImg} />
+                ) : (
+                  <Text style={styles.identityAvatarText}>{hubProfile.initial}</Text>
+                )}
               </View>
             )}
             <View style={styles.identityCopy}>
-              <Text style={styles.identityName}>{persona.name}</Text>
+              <Text style={styles.identityName}>{hubProfile.displayName}</Text>
               <Text style={styles.identityDesc}>{persona.desc}</Text>
             </View>
             <Pressable

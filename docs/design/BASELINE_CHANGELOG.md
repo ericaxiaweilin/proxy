@@ -4,6 +4,26 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 34 — 2026-09-05
+
+- Closed the '我的' hub card gap. The me-hub top
+  profile card + identity card used to render the
+  hardcoded `persona.name` ('Huyen' for requester,
+  'Bonsaidon' for business) and a fake
+  '已验证 · 准时 98%' verification stat, no matter
+  who was signed in. The profile editor (编辑主页)
+  wires profileStore + ProfileClient, but the hub
+  card never read those fields, so editing 主页 had
+  no visible effect on the hub. This revision adds
+  `resolveHubProfile` in `me-types.ts` (single source
+  of precedence for displayName / initial / city /
+  handle / hasAvatar) and rewires both the profile
+  card and the identity card to project the live
+  profile onto their renders. The fake verify badge
+  is gone; the handle now shows in its place when
+  the user has set one. HUB-PROFILE-001 tripwire
+  (6 mobile vitest + 3 grep guards).
+
 ## Revision 33 — 2026-09-05
 
 - Closed the '我的 → 好友与关系' gap. The mobile
