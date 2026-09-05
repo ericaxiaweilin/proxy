@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProfileStore, DEFAULT_PROFILE, isProfileRecord } from "./profile-store";
+import { avatarFileName, createProfileStore, DEFAULT_PROFILE, isProfileRecord } from "./profile-store";
 import { InMemorySecureStorageDriver } from "./secure-session";
 
 describe("isProfileRecord", () => {
@@ -75,5 +75,25 @@ describe("createProfileStore", () => {
     await store.write({ ...DEFAULT_PROFILE, name: "X" });
     await store.clear();
     expect(await store.read()).toBeUndefined();
+  });
+});
+
+// AVATAR-001: 头像只存文件名。iOS 重装 App 会换 container UUID，
+// 绝对 file:// URI 下次必死； hydration 用不存在的 file.exists 还恒
+// 为 falsy —— 之前每次冷启动都丢头像只剩字母头，名字简介却都在。
+describe("avatarFileName", () => {
+  it("strips a legacy absolute file URI down to the basename", () => {
+    expect(
+      avatarFileName("file:///var/mobile/Containers/Data/Application/UUID-OLD/Documents/proxy-profile/avatar-123.jpg")
+    ).toBe("avatar-123.jpg");
+  });
+
+  it("keeps an already-relative stored name as-is", () => {
+    expect(avatarFileName("avatar-456.jpg")).toBe("avatar-456.jpg");
+  });
+
+  it("falls back to the raw value when nothing parseable remains", () => {
+    expect(avatarFileName("")).toBe("");
+    expect(avatarFileName("///")).toBe("///");
   });
 });

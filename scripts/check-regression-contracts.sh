@@ -101,6 +101,17 @@ fi
 pnpm --filter @proxy/mobile test --run src/facet-client.test.ts || exit $?
 echo "    FACET-AUTH-001: PASS"
 
+# AVATAR-001: 头像 hydration 用了不存在的 file.exists（恒 falsy）＋存
+# 绝对 file:// URI（iOS 重装换 container UUID 即死），每次冷启动丢头像
+# 只剩字母头。现只存文件名、按当前沙盒重锚＋目录 listing 校验，老绝对
+# 路径后台回写自愈。
+if ! grep -q 'AVATAR-001' apps/mobile/src/profile-store.test.ts; then
+  echo "  FAIL [AVATAR-001]: avatar filename tests missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
+echo "    AVATAR-001: PASS"
+
 # ACT-ATTEND-001: 考勤 cancel/checkin/noShow 曾经不验归属 + UpdateState=false
 # 照样返成功（没报名也能自助 ATTENDED）。Join 必须落 participation 记录，
 # 陌生人三件套一律 ACTIVITY_NOT_JOINED，已取消不能签到。
@@ -377,6 +388,26 @@ if ! grep -q 'business: BusinessClient\|business?: BusinessClient' apps/mobile/s
   exit 1
 fi
 echo "    BIZ-HOME-WIRE-001: PASS (Home tab wired to real business + activities clients)"
+
+# PROFILE-001: 编辑主页 之前只写 local SecureStore, 不发 server.
+# UpdateProfile / GetProfile 必须存在 + actor-scoped + 拒外部 URL.
+require_test "PROFILE-001" "./internal/identity" \
+  "TestProfileRoundTripUsesActorAsOwner" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+require_test "PROFILE-001" "./internal/identity" \
+  "TestUpdateProfileRejectsAnonymousActorAndBadAvatar" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+# mobile half: enabled once the ProfileClient + me.tsx wire lands
+# (commit 2 of this set). The tripwire below is intentionally
+# disabled (if false) so the server half is independently gated.
+if false; then
+  if ! grep -q 'UpdateProfile\|GetProfile' apps/mobile/src/surfaces/me.tsx; then
+    echo "  FAIL [PROFILE-001 mobile]: me.tsx saveProfile never calls UpdateProfile on the server" >&2
+    exit 1
+  fi
+  echo "    PROFILE-001 (mobile): PASS (me.tsx saveProfile wired to UpdateProfile)"
+fi
+echo "    PROFILE-001: PASS (server half; mobile half pending commit 2)"
 
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。

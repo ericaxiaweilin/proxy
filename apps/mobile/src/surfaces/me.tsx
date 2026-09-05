@@ -14,7 +14,7 @@ import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import { Directory, File, Paths } from "expo-file-system";
-import { createProfileStore, DEFAULT_PROFILE, type ProfileRecord } from "../profile-store";
+import { createProfileStore, DEFAULT_PROFILE, avatarFileName, type ProfileRecord } from "../profile-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
@@ -363,9 +363,22 @@ export function MeSurface({
       if (cancelled || profileTouchedRef.current || !record) return;
       profileHydratedRef.current = true;
       setProfileDraft({ name: record.name, handle: record.handle, bio: record.bio, city: record.city });
+      // AVATAR-001: 文件名按当前沙盒重锚 + 存在性校验（v57 File 没有
+      // exists API，用目录 listing 判）。之前 `file.exists` 恒 falsy，
+      // 每次冷启动都丢头像只剩字母头。读到老绝对路径则后台回写规范化。
       if (record.avatarPath) {
-        const file = new File(record.avatarPath);
-        if (file.exists) setProfileAvatarUri(file.uri);
+        try {
+          const name = avatarFileName(record.avatarPath);
+          const names = new Set(PROFILE_AVATAR_DIR.list().map((entry) => entry.name));
+          if (names.has(name)) {
+            setProfileAvatarUri(new File(PROFILE_AVATAR_DIR, name).uri);
+            if (record.avatarPath !== name) {
+              void profileStore.write({ ...record, avatarPath: name }).catch(() => undefined);
+            }
+          }
+        } catch {
+          // 目录不可读：保持字母头，不崩。
+        }
       }
     }).catch(() => undefined);
     return () => { cancelled = true; };
@@ -615,7 +628,9 @@ export function MeSurface({
       setProfileAvatarUri(avatarFile.uri);
       await profileStore.write({
         ...profileDraft,
-        avatarPath: avatarFile.uri,
+        // AVATAR-001: 只存文件名。绝对 file:// URI 含沙盒 container UUID，
+        // 重装 App 后必死；读时按当前 documentDirectory 重锚。
+        avatarPath: avatarFileName(avatarFile.uri),
         updatedAt: new Date().toISOString()
       });
     } catch {
@@ -626,20 +641,22 @@ export function MeSurface({
   async function saveProfile(): Promise<void> {
     let avatarPath: string | undefined;
     if (profileAvatarUri?.startsWith(PROFILE_AVATAR_DIR.uri)) {
-      avatarPath = profileAvatarUri;
+      // AVATAR-001: 同上，只存文件名。
+      avatarPath = avatarFileName(profileAvatarUri);
     } else if (profileAvatarUri) {
       try {
         PROFILE_AVATAR_DIR.create({ idempotent: true, intermediates: true });
         const avatarFile = nextProfileAvatarFile();
         await new File(profileAvatarUri).copy(avatarFile, { overwrite: true });
-        avatarPath = avatarFile.uri;
+        avatarPath = avatarFileName(avatarFile.uri);
         setProfileAvatarUri(avatarFile.uri);
       } catch {
         avatarPath = undefined;
       }
     } else {
       const existing = await profileStore.read().catch(() => undefined);
-      avatarPath = existing?.avatarPath;
+      // AVATAR-001: 老记录可能是绝对路径，读出来即规范成文件名。
+      avatarPath = existing?.avatarPath ? avatarFileName(existing.avatarPath) : undefined;
     }
     const record: ProfileRecord = {
       name: profileDraft.name,

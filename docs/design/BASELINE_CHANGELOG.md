@@ -4,11 +4,31 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 26 — 2026-09-05
+
+- 修头像 P0 丢失：hydration 用了不存在的 `file.exists`（恒 falsy，每次冷
+  启动都丢头像只剩字母头）＋绝对路径存 container UUID（重装即死）。现只
+  存文件名、启动按当前沙盒重锚＋校验，老记录后台回写自愈。无视觉变更。
+
 ## Revision 25 — 2026-09-05
 
 - 商家店铺页补建店入口：无账号时可一次建账号+首店，有账号无店时可追加
   店铺。之前两处空态互相指“去别处建”但全仓无入口，商家链路（相册、
   以店名义发布）对新商家完全不可达。纯增量 UI，无视觉规范变更。
+
+## Revision 26 — 2026-09-05
+
+- Closed the '编辑主页' gap. The mobile profile editor in me.tsx
+  was a local-only write (profileStore.write to iOS Keychain /
+  Android Keystore). No server command existed, so the new
+  name / handle / bio / city / avatar never reached feeds,
+  opportunity applicants, or any cross-device read. This
+  revision adds the server half: identity.Profile aggregate
+  with ProfileRepository (memory + PG /039), two commands
+  (UpdateProfile / GetProfile) in the identity service, with
+  actor-scoped authorization (USER only) and the same asset
+  path rule as business.store_photos (rejects external URLs).
+  PROFILE-001 tripwire. (Mobile wire lands in the next commit.)
 
 ## Revision 24 — 2026-09-05
 

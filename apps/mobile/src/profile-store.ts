@@ -88,3 +88,16 @@ export const DEFAULT_PROFILE: ProfileRecord = {
   avatarPath: undefined,
   updatedAt: new Date(0).toISOString()
 };
+
+/**
+ * AVATAR-001: 头像在 profileStore 里只存文件名（相对名），读取时按当前
+ * 沙盒的 documentDirectory 重新锚定。iOS 每次重装 App container UUID 会变，
+ * 存绝对 file:// URI 下次必死；之前 hydration 还用了不存在的 file.exists
+ *（恒为 undefined），导致每次冷启动头像都丢、只剩字母头。
+ */
+export function avatarFileName(storedPath: string): string {
+  const cut = storedPath.split("?")[0] ?? storedPath;
+  const parts = cut.split("/").filter((part) => part.length > 0);
+  const last = parts[parts.length - 1];
+  return typeof last === "string" && last.length > 0 ? last : storedPath;
+}
