@@ -132,33 +132,12 @@ export function RequesterHome({
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
-  const [followedAI, setFollowedAI] = useState<ReadonlySet<string>>(new Set());
-  const [followBusy, setFollowBusy] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
     void aiAccounts?.listRecommended().then((accounts) => { if (!cancelled && accounts.length > 0) setRecommendedAI(accounts); }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [aiAccounts]);
-
-  useEffect(() => {
-    if (!engagement || !viewerAccountId || recommendedAI.length === 0) return;
-    let cancelled = false;
-    void Promise.all(recommendedAI.map(async (account) => ({ id: account.accountId, followed: await engagement.isFollowing(viewerAccountId, account.accountId) }))).then((states) => {
-      if (!cancelled) setFollowedAI(new Set(states.filter((state) => state.followed).map((state) => state.id)));
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [engagement, recommendedAI, viewerAccountId]);
-
-  async function toggleAIFollow(accountId: string): Promise<void> {
-    if (!engagement || followBusy) return;
-    const followed = followedAI.has(accountId);
-    setFollowBusy(accountId);
-    try {
-      if (followed) await engagement.unfollowProfile(accountId); else await engagement.followProfile(accountId);
-      setFollowedAI((current) => { const next = new Set(current); if (followed) next.delete(accountId); else next.add(accountId); return next; });
-    } finally { setFollowBusy(undefined); }
-  }
 
   // R15.34: 算当前 mode 的推荐 feed + 应用筛选过滤
   //   - filter: 多个 chip 可叠加 (附近 AND 最近活跃), 都需满足
@@ -356,38 +335,14 @@ export function RequesterHome({
           tag)，cards 是 165×220 portrait card (大首字母 + 距离 + 2 tag)。 */}
       <View style={styles.peopleHead}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.peopleTitle}>{recommendFeed.title}</Text>
+          <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>真人推荐</Text><View style={styles.humanBadge}><Text style={styles.humanBadgeText}>真人</Text></View></View>
+          <Text style={styles.peopleSceneTitle}>{recommendFeed.title}</Text>
           <Text style={styles.peopleSub}>{recommendFeed.subtitle}</Text>
         </View>
         <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger}>
           <Text style={styles.filterTriggerText}>筛选 〉</Text>
         </Pressable>
       </View>
-
-      {recommendedAI.length > 0 ? <View style={styles.aiSection}>
-        <View style={styles.aiSectionHead}>
-          <View><Text style={styles.aiTitle}>认识 AI 女孩</Text><Text style={styles.aiSub}>有性格、有动态，可以添加和聊天</Text></View>
-          <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI</Text></View>
-        </View>
-        <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
-          {recommendedAI.map((account) => {
-            const followed = followedAI.has(account.accountId);
-            return <View key={account.accountId} style={styles.aiCard}>
-              <Pressable accessibilityLabel={`打开${account.displayName}的个人主页`} onPress={() => onOpenAIProfile?.(account)} style={styles.aiProfile}>
-                <Image source={aiPersonaPhoto(account.personaId)} style={styles.aiAvatar} />
-                <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
-                <Text style={styles.aiHandle} numberOfLines={1}>AI 生成</Text>
-              </Pressable>
-              <View style={styles.aiActions}>
-                <Pressable accessibilityLabel={`${followed ? "移除" : "添加"}${account.displayName}`} onPress={() => void toggleAIFollow(account.accountId)} style={[styles.aiFollow, followed && styles.aiFollowed]}>
-                  <Text style={[styles.aiFollowText, followed && styles.aiFollowedText]}>{followBusy === account.accountId ? "处理中" : followed ? "✓ 已添加" : "+ 添加"}</Text>
-                </Pressable>
-                <Pressable accessibilityLabel={`给${account.displayName}发消息`} onPress={() => onMessageAI?.(account)} style={styles.aiMessage}><Text style={styles.aiMessageText}>消息</Text></Pressable>
-              </View>
-            </View>;
-          })}
-        </HorizontalSwipeRail>
-      </View> : null}
 
       {/* stories — 圆形 avatar 横滑 */}
       {/* R15.34.2: 包 HorizontalSwipeRail 隔离 iOS 系统 tab 切换手势 */}
@@ -455,6 +410,22 @@ export function RequesterHome({
           继续刷 · <Text style={styles.loadMoreCount}>{filteredPeople.length}</Text>/{recommendFeed.people.length}
         </Text>
       </View>
+
+      {recommendedAI.length > 0 ? <View style={styles.aiSection}>
+        <View style={styles.aiSectionHead}>
+          <View><Text style={styles.aiTitle}>AI 推荐</Text><Text style={styles.aiSub}>点击头像进入主页，再添加好友或发消息</Text></View>
+          <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI 生成</Text></View>
+        </View>
+        <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
+          {recommendedAI.map((account) => (
+            <Pressable key={account.accountId} accessibilityLabel={`打开${account.displayName}的个人主页`} onPress={() => onOpenAIProfile?.(account)} style={styles.aiCard}>
+              <Image source={aiPersonaPhoto(account.personaId)} style={styles.aiAvatar} />
+              <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
+              <Text style={styles.aiHandle} numberOfLines={1}>AI 生成</Text>
+            </Pressable>
+          ))}
+        </HorizontalSwipeRail>
+      </View> : null}
       {/* 基线 .r1572HomeComposer('USER')：HomeChatBox（无示例 / 无提示） */}
       {conversationPanel ?? (onChat ? (
         <HomeChatBox
@@ -647,19 +618,11 @@ const styles = StyleSheet.create({
   aiRail: { marginBottom: 10 },
   aiRailContent: { gap: 15, paddingHorizontal: 16 },
   aiCard: { alignItems: "center", width: 104 },
-  aiProfile: { alignItems: "center" },
   aiAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, height: 88, width: 88 },
   aiName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, textAlign: "center" },
   aiHandle: { color: color.violet, fontSize: 10, fontWeight: "700", marginTop: 2, textAlign: "center" },
   aiDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5, minHeight: 30 },
   aiProfileLink: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 7 },
-  aiActions: { flexDirection: "row", gap: 4, marginTop: 7, width: "100%" },
-  aiFollow: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, flex: 1, paddingVertical: 6 },
-  aiFollowed: { backgroundColor: color.proxyPurpleSoft },
-  aiFollowText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  aiFollowedText: { color: color.violet },
-  aiMessage: { alignItems: "center", borderColor: color.line, borderRadius: 999, borderWidth: 1, flex: 1, paddingVertical: 6 },
-  aiMessageText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   sceneMapEntry: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 12, minHeight: 86, padding: 13 },
   sceneMapVisual: { backgroundColor: "#EEF2F5", borderColor: color.line, borderRadius: 15, borderWidth: 1, height: 58, overflow: "hidden", width: 72 },
   sceneMapCopy: { flex: 1 },
@@ -748,7 +711,11 @@ const styles = StyleSheet.create({
 
   // R15.34: 推荐人 section 头
   peopleHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginTop: 18, marginBottom: 12 },
+  peopleTitleRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   peopleTitle: { color: color.ink, fontSize: 22, fontWeight: "800", lineHeight: 26 },
+  humanBadge: { backgroundColor: "#EAF7EE", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  humanBadgeText: { color: "#18733B", fontSize: 10, fontWeight: "900" },
+  peopleSceneTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 5 },
   peopleSub: { color: color.muted, fontSize: 12, lineHeight: 16, marginTop: 4 },
   filterTrigger: { paddingHorizontal: 4, paddingVertical: 4 },
   filterTriggerText: { color: color.muted, fontSize: 13, fontWeight: "600" },
