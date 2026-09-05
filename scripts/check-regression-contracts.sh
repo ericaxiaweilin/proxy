@@ -360,6 +360,24 @@ if ! grep -q 'MerchantMeR21Replacement' apps/mobile/src/surfaces/me.tsx; then
 fi
 echo "    MERCHANT-R21-001: PASS (hardcoded merchant-me-r21.tsx replaced with thin shim; replacement wires real BusinessClient + SupplyClient)"
 
+# BIZ-HOME-WIRE-001: 商家 Home tab 之前是 242 行 hardcoded mock
+# (Bonsaidon / 今天要推进什么? / Rooftop Photo Afternoon /
+# Aster Coffee Sunset / 场景结果 Invite Sent 12 全部 inline)。
+# 这个 tripwire 确保: (a) business-home.tsx 不再 hardcode 这些;
+# (b) 它消费 business / activities props (不是只接收 onOpenMarket 等)。
+# (Caveat: comment block in the file may mention these names
+# historically; we strip line-leading '//' before grepping.)
+BIZ_HOME_NON_COMMENT=$(grep -v '^[[:space:]]*//' apps/mobile/src/surfaces/business-home.tsx || true)
+if echo "$BIZ_HOME_NON_COMMENT" | grep -qE '"Bonsaidon"|Rooftop Photo Afternoon|Aster Coffee Sunset|Invite Sent 12'; then
+  echo "  FAIL [BIZ-HOME-WIRE-001]: BusinessHome still hardcodes mock identity or scene packages" >&2
+  exit 1
+fi
+if ! grep -q 'business: BusinessClient\|business?: BusinessClient' apps/mobile/src/surfaces/business-home.tsx; then
+  echo "  FAIL [BIZ-HOME-WIRE-001]: BusinessHome does not accept business prop" >&2
+  exit 1
+fi
+echo "    BIZ-HOME-WIRE-001: PASS (Home tab wired to real business + activities clients)"
+
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
 pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts
