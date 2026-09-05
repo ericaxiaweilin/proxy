@@ -17,6 +17,7 @@ import type { ExperienceClient } from "../experience-client";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
+import { AIAssistantsRow } from "../ai-assistants-row";
 import Svg, { Circle, Path } from "react-native-svg";
 import {
   CONTINUE_FIXTURES,
@@ -308,6 +309,10 @@ export function RequesterHome({
           testPrefix="推荐人模式"
         />
       </View>
+
+      {/* AI-ASSIST-001: AI 助手行（5 小美推荐，服务端目录+关注/发消息）。
+          与下面真人“推荐人”分开渲染、不混排：AI 永不伪装成真人好友。 */}
+      <AIAssistantsRow />
 
       {/* R15.34: 推荐人 section — 标题 + stories 横滑 + cards 横滑。
           stories 是小圆形 avatar (首字母 + online 指示点 + 共同好友/场景

@@ -112,6 +112,22 @@ fi
 pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-001: PASS"
 
+# AI-ASSIST-001: 首页 5 小美推荐目录（公开、匿名可读）+ AI 标签 + 关注/
+# 发消息。目录改名/换色必须服务端/种子/SVG 三处同步；AI 能力不得扩大
+# 到接单/报名/收付款（仍由服务端门禁禁止，此处只锁目录形状）。
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestListAIAssistantsFiveWithPhotos" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestListAIAssistantsMethodNotAllowed" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+if ! grep -q 'ListAIAssistantsPayloadSchema' packages/contracts/src/ai-assistants.test.ts; then
+  echo "  FAIL [AI-ASSIST-001]: assistants contract tests missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/contracts test --run src/ai-assistants.test.ts || exit $?
+echo "    AI-ASSIST-001: PASS"
+
 # ACT-ATTEND-001: 考勤 cancel/checkin/noShow 曾经不验归属 + UpdateState=false
 # 照样返成功（没报名也能自助 ATTENDED）。Join 必须落 participation 记录，
 # 陌生人三件套一律 ACTIVITY_NOT_JOINED，已取消不能签到。

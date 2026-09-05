@@ -165,3 +165,37 @@ func (s *Server) hasLiveConsent(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, c)
 }
+
+// AIAssistant 是首页推荐的平台 AI 助手读模型（AI-ASSIST-001）。
+// 平台自有公开数据：id/name/role/color/photo/avatar 全是展示字段，
+// 不含任何凭证或私人数据，匿名可读。接单/报名/收付款不在此面，
+// 仍由 aiboundary + 各服务门禁禁止（见回归测试）。
+type AIAssistant struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Role     string `json:"role"`
+	Color    string `json:"color"`
+	Photo    string `json:"photo"`
+	Avatar   string `json:"avatar"`
+	Tagline  string `json:"tagline"`
+	AIBadge  string `json:"aiBadge"`
+}
+
+// platformAIAssistants 是 5 小美唯一展示真相源（与 activity 种子、
+// mobile SVG 资产 ai-personas/ai_00{1..5}.svg、tasks 色版同值）。
+// 改名/换色必须三处同步，见 AI-ASSIST-001 tripwire。
+var platformAIAssistants = []AIAssistant{
+	{ID: "ai_001", Name: "平台 AI 小美 · 周末企划", Role: "周末企划", Color: "#7C5CFF", Photo: "ai-personas/ai_001.svg", Avatar: "☕", Tagline: "周末去哪玩，我来组局", AIBadge: "AI 助手"},
+	{ID: "ai_002", Name: "平台 AI 小美 · 拍照季", Role: "拍照季", Color: "#FF7A8A", Photo: "ai-personas/ai_002.svg", Avatar: "📸", Tagline: "教你拍出大片感", AIBadge: "AI 助手"},
+	{ID: "ai_003", Name: "平台 AI 小美 · 拍照搭子", Role: "拍照搭子", Color: "#3FCBA8", Photo: "ai-personas/ai_003.svg", Avatar: "🤝", Tagline: "缺搭子？喊我就行", AIBadge: "AI 助手"},
+	{ID: "ai_004", Name: "平台 AI 小美 · 餐厅尝鲜", Role: "餐厅尝鲜", Color: "#FF9D44", Photo: "ai-personas/ai_004.svg", Avatar: "🍽️", Tagline: "新店首发，带你先吃", AIBadge: "AI 助手"},
+	{ID: "ai_005", Name: "平台 AI 小美 · 饭局推荐", Role: "饭局推荐", Color: "#FFB347", Photo: "ai-personas/ai_005.svg", Avatar: "🍜", Tagline: "组饭局不冷场", AIBadge: "AI 助手"},
+}
+
+// GET /v1/ai/assistants — 平台 AI 助手公开目录（5 小美），匿名可读。
+func (s *Server) listAIAssistants(w http.ResponseWriter, r *http.Request) {
+	if !methodGuard(w, r, http.MethodGet) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"assistants": platformAIAssistants})
+}
