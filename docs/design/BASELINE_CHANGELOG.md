@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 25 — 2026-09-05
+
+- 商家店铺页补建店入口：无账号时可一次建账号+首店，有账号无店时可追加
+  店铺。之前两处空态互相指“去别处建”但全仓无入口，商家链路（相册、
+  以店名义发布）对新商家完全不可达。纯增量 UI，无视觉规范变更。
+
 ## Revision 24 — 2026-09-05
 
 - Closed the merchant surface gap. The previous '商家' tab in

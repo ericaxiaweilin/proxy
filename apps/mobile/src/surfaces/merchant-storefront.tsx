@@ -2,7 +2,7 @@
 // 之前 43 行只列账号；现在拉 account + store + photo album + lines +
 // spend_daily + member_directory, 全部 server-authoritative.
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { color, shadows } from "../theme";
 import { retainStorePhoto, type RetainedStorePhoto } from "../expo-composer-draft-store";
@@ -39,6 +39,48 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
   const [members, setMembers] = useState<Record<string, MemberDirectory[]>>({});
   const [spend, setSpend] = useState<Record<string, { totalOrders: number; totalGrossMinor: number; days: SpendDaily[] } | undefined>>({});
   const [uploadingStoreId, setUploadingStoreId] = useState<string | undefined>(undefined);
+  // 建店：账号+首店一次建完（之前两处空态互相指“去别处建”，实际无入口）。
+  const [newShopName, setNewShopName] = useState("");
+  const [newStoreName, setNewStoreName] = useState("");
+  const [newStoreAddr, setNewStoreAddr] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | undefined>(undefined);
+
+  async function createShop(): Promise<void> {
+    if (creating || !newShopName.trim() || !newStoreName.trim()) return;
+    setCreating(true);
+    setCreateError(undefined);
+    try {
+      const { businessId } = await client.createAccount(newShopName.trim());
+      await client.createStore(businessId, newStoreName.trim(), newStoreAddr.trim());
+      const a = await client.listMyAccounts();
+      setAccounts(a);
+      await refreshOne(businessId);
+      setNewShopName("");
+      setNewStoreName("");
+      setNewStoreAddr("");
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : "创建失败，请重试");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function addStore(businessId: string): Promise<void> {
+    if (creating || !newStoreName.trim()) return;
+    setCreating(true);
+    setCreateError(undefined);
+    try {
+      await client.createStore(businessId, newStoreName.trim(), newStoreAddr.trim());
+      await refreshOne(businessId);
+      setNewStoreName("");
+      setNewStoreAddr("");
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : "添加失败，请重试");
+    } finally {
+      setCreating(false);
+    }
+  }
 
   const refreshOne = useCallback(async (accountId: string) => {
     try {
@@ -153,7 +195,17 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
       {accounts === undefined && !error ? <ActivityIndicator /> : null}
       {error ? <View style={styles.card}><Text style={styles.errorText}>加载失败：{error}</Text></View> : null}
       {accounts !== undefined && accounts.length === 0 ? (
-        <View style={styles.card}><Text style={styles.empty}>暂无商家账号 — 在「商家」Tab 创建</Text></View>
+        <View style={styles.card}>
+          <Text style={styles.createTitle}>创建我的店铺</Text>
+          <Text style={styles.empty}>先有店，相册和“以店铺名义发布”才可用。</Text>
+          <TextInput value={newShopName} onChangeText={setNewShopName} placeholder="商家名称（对外展示）" placeholderTextColor={color.muted} style={styles.createInput} />
+          <TextInput value={newStoreName} onChangeText={setNewStoreName} placeholder="首店店名" placeholderTextColor={color.muted} style={styles.createInput} />
+          <TextInput value={newStoreAddr} onChangeText={setNewStoreAddr} placeholder="首店地址（可选）" placeholderTextColor={color.muted} style={styles.createInput} />
+          {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
+          <Pressable disabled={creating} onPress={() => void createShop()} style={styles.createBtn}>
+            <Text style={styles.createBtnText}>{creating ? "创建中…" : "创建店铺"}</Text>
+          </Pressable>
+        </View>
       ) : null}
       {accounts?.map((a) => {
         const aStores = stores[a.id] ?? [];
@@ -166,7 +218,14 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
               <Text style={styles.accountMeta}>{a.id.slice(0, 8)} · {a.status}</Text>
             </View>
             {aStores.length === 0 ? (
-              <Text style={styles.empty}>暂无店铺 — 在商家工作区创建</Text>
+              <View>
+                <Text style={styles.empty}>暂无店铺，在下面直接加一家。</Text>
+                <TextInput value={newStoreName} onChangeText={setNewStoreName} placeholder="店名" placeholderTextColor={color.muted} style={styles.createInput} />
+                <TextInput value={newStoreAddr} onChangeText={setNewStoreAddr} placeholder="地址（可选）" placeholderTextColor={color.muted} style={styles.createInput} />
+                <Pressable disabled={creating} onPress={() => void addStore(a.id)} style={styles.createBtn}>
+                  <Text style={styles.createBtnText}>{creating ? "添加中…" : "新增店铺"}</Text>
+                </Pressable>
+              </View>
             ) : null}
             {aStores.map((s) => {
               const sPhotos = photos[s.id] ?? [];
@@ -303,4 +362,8 @@ const styles = StyleSheet.create({
   spendLabel: { color: color.muted, fontSize: 11 },
   empty: { color: color.muted, fontSize: 12, paddingVertical: 4 },
   errorText: { color: "#a32020", fontSize: 12 },
+  createTitle: { color: color.ink, fontSize: 15, fontWeight: "800", marginBottom: 4 },
+  createInput: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
+  createBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 10, paddingVertical: 12 },
+  createBtnText: { color: color.white, fontSize: 13, fontWeight: "800" },
 });
