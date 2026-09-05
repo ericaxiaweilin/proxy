@@ -667,7 +667,7 @@ DEAD_MARKET_GUARDS=(
 for guard in "${DEAD_MARKET_GUARDS[@]}"; do
   file="${guard%%:*}"
   sym="${guard##*:}"
-  if [ -f "$file" ] && grep -E "(\\b$sym\\b|\\b$sym\\(|\\b$sym:)" "$file" >/dev/null 2>&1; then
+  if [ -f "$file" ] && grep -E "(\\b$sym\\b|\\b$sym\\(|\\b$sym:)" "$file" 2>/dev/null | grep -v "^\\s*//" >/dev/null; then
     echo "  FAIL [DEAD-MARKET-001]: $file still references dead $sym" >&2
     exit 1
   fi
