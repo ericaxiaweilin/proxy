@@ -245,10 +245,12 @@ function DetailHead({
 }
 
 export function MerchantMeR21({
+  marketId,
   onOpenSwitcher,
   onSignOut,
   supply,
 }: {
+  marketId: string;
   onOpenSwitcher: () => void;
   onSignOut: () => void;
   supply: SupplyClient | undefined;
@@ -673,6 +675,7 @@ export function MerchantMeR21({
           </View>
         </Pressable>
         <MerchantCreatorRecommendations
+          marketId={marketId}
           onOpenAll={() => setPage("creator")}
           supply={supply}
         />

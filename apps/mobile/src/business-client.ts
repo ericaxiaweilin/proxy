@@ -4,6 +4,19 @@ import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
 
+export type BusinessStoreSummary = { id?: string; storeId?: string; name?: string; address: string };
+
+export function merchantMarketIdFromStores(stores: readonly BusinessStoreSummary[]): string {
+  const address = stores.find((store) => store.address.trim())?.address.toLocaleLowerCase() ?? "";
+  if (/hồ chí minh|ho chi minh|saigon|sài gòn|hcm/.test(address)) return "hcm";
+  if (/đà nẵng|da nang|danang/.test(address)) return "dn";
+  if (/bắc ninh|bac ninh|北宁/.test(address)) return "bn";
+  if (/hà nội|ha noi|hanoi|河内|tay ho|tây hồ|hoàn kiếm/.test(address)) return "hn";
+  // The current merchant baseline is Bonsaidon Hanoi. Keep the fallback
+  // explicit until BusinessAccount owns a canonical marketId field.
+  return "hn";
+}
+
 export class BusinessClient {
   private sequence = 0;
   public constructor(
@@ -34,9 +47,15 @@ export class BusinessClient {
     return { storeId: requiredString(body, "storeId") };
   }
 
-  public async listStores(businessId: string): Promise<unknown[]> {
+  public async listStores(businessId: string): Promise<BusinessStoreSummary[]> {
     const body = this.body(await this.command("ListBusinessStores", { type: "BusinessAccount", id: businessId }, { businessId }));
-    return (body.stores as unknown[]) ?? [];
+    if (!Array.isArray(body.stores)) return [];
+    return body.stores.flatMap((value) => {
+      if (!value || typeof value !== "object") return [];
+      const row = value as Record<string, unknown>;
+      if (typeof row.address !== "string") return [];
+      return [{ ...(typeof row.id === "string" ? { id: row.id } : {}), ...(typeof row.storeId === "string" ? { storeId: row.storeId } : {}), ...(typeof row.name === "string" ? { name: row.name } : {}), address: row.address }];
+    });
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {

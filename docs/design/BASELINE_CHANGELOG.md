@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 24 — 2026-09-05
+
+- Made the merchant Creator recommendation rail live-ready: at least five
+  eligible Hanoi seed Creators carry photo URLs, availability rolls forward on
+  every boot, and the mobile query market follows the merchant store address.
+- Added `MERCHANT-CREATOR-LIVE-002` to prevent empty-photo, expired-window, and
+  hard-coded merchant-market regressions.
+
 ## Revision 23 — 2026-09-05
 
 - Hardened marketplace confirmation so application state and the derived

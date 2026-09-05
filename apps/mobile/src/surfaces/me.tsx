@@ -35,7 +35,7 @@ import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 import type { SceneClient } from "../scene-client";
-import type { BusinessClient } from "../business-client";
+import { merchantMarketIdFromStores, type BusinessClient } from "../business-client";
 import type { SocialSettingsClient } from "../social-settings-client";
 import type { SupplyClient } from "../supply-client";
 import { FacetHomeSurface } from "../facet/FacetHomeSurface";
@@ -257,7 +257,22 @@ export function MeSurface({
   const [subPage, setSubPage] = useState<MeSubPage>();
   useModuleBackHandler(subPage ? () => { setSubPage(undefined); return true; } : undefined);
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [merchantMarketId, setMerchantMarketId] = useState("hn");
   const [memoriesLoadState, setMemoriesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  useEffect(() => {
+    if (context !== "BUSINESS" || !business) return;
+    let cancelled = false;
+    void business.listMyAccounts().then(async (accounts) => {
+      const first = accounts.find((account) => account.status === "ACTIVE") ?? accounts[0];
+      if (!first) return [];
+      return business.listStores(first.id);
+    }).then((stores) => {
+      if (!cancelled) setMerchantMarketId(merchantMarketIdFromStores(stores));
+    }).catch(() => {
+      if (!cancelled) setMerchantMarketId("hn");
+    });
+    return () => { cancelled = true; };
+  }, [business, context]);
   useEffect(() => {
     if (subPage?.route !== "myscenes" || !scene) return;
     let cancelled = false;
@@ -513,7 +528,7 @@ export function MeSurface({
     return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
-    return <MerchantMeR21 onOpenSwitcher={onOpenSwitcher} onSignOut={onSignOut} supply={supply} />;
+    return <MerchantMeR21 marketId={merchantMarketId} onOpenSwitcher={onOpenSwitcher} onSignOut={onSignOut} supply={supply} />;
   }
 
   const persona = PERSONA[context];
