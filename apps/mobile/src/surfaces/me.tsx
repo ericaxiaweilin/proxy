@@ -18,7 +18,7 @@ import { createProfileStore, DEFAULT_PROFILE, type ProfileRecord } from "../prof
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
-import { MerchantMeR21 } from "./merchant-me-r21";
+import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
@@ -37,6 +37,7 @@ import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
 import type { SceneClient } from "../scene-client";
 import type { BusinessClient } from "../business-client";
+import type { ActivityClient } from "../activity-client";
 import type { SocialSettingsClient } from "../social-settings-client";
 import type { SupplyClient } from "../supply-client";
 import { FacetHomeSurface } from "../facet/FacetHomeSurface";
@@ -229,6 +230,7 @@ export function MeSurface({
   scene,
   business,
   supply,
+  activities,
   engagement,
   viewerAccountId,
   socialSettingsClient,
@@ -250,6 +252,7 @@ export function MeSurface({
   scene?: SceneClient;
   business?: BusinessClient;
   supply?: SupplyClient;
+  activities?: ActivityClient | undefined;
   engagement?: EngagementClient;
   viewerAccountId?: string | undefined;
   socialSettingsClient?: SocialSettingsClient | undefined;
@@ -514,7 +517,16 @@ export function MeSurface({
     return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
-    return <MerchantMeR21 onOpenSwitcher={onOpenSwitcher} onSignOut={onSignOut} supply={supply} />;
+    return (
+      <MerchantMeR21Replacement
+        business={business}
+        supply={supply}
+        activities={activities}
+        viewerAccountId={viewerAccountId}
+        onOpenSwitcher={onOpenSwitcher}
+        onSignOut={onSignOut}
+      />
+    );
   }
 
   const persona = PERSONA[context];

@@ -586,6 +586,7 @@ export function AppShell({
               fulfillment={fulfillment}
               business={business}
               supply={supply}
+              activities={activities}
               socialSettingsClient={socialSettings}
               {...(experienceManifest?.context === context
                 ? {

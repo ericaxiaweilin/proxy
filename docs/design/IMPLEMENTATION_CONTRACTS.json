@@ -36,14 +36,15 @@
         "apps/mobile/src/surfaces/merchant-storefront.tsx",
         "apps/mobile/src/business-client.ts",
         "apps/mobile/src/business-client.test.ts",
-        "apps/mobile/src/expo-composer-draft-store.ts"
+        "apps/mobile/src/expo-composer-draft-store.ts",
+        "apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx"
       ],
       "evidenceFiles": [
         "apps/mobile/src/design-system-r3.test.ts",
         "apps/mobile/src/business-client.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "R18.x commit 2: merchantstorefront route + photo picker 接通 server. 后续 commit 3 删除 merchant-me-r21.tsx hardcoded mock (1250 行 @ts-nocheck)."
+      "knownGap": "R18.x commit 3: merchant-me-r21.tsx (1250 行 hardcoded mock) + merchant-creator-center.tsx 全部删, 替换为 MerchantMeR21Replacement. 后续 commit 4 接 business-home.tsx + me.tsx > merchantstorefront 完整 wire."
     },
     {
       "scope": "social-contact-collaboration",
@@ -131,7 +132,8 @@
         "apps/api-go/migrations/038_business_store_assets.sql",
         "apps/mobile/src/surfaces/merchant-storefront.tsx",
         "apps/mobile/src/business-client.ts",
-        "apps/mobile/src/expo-composer-draft-store.ts"
+        "apps/mobile/src/expo-composer-draft-store.ts",
+        "apps/mobile/src/shell/app-shell.tsx"
       ],
       "evidenceFiles": [
         "apps/api-go/internal/business/service_test.go",

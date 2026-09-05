@@ -21,8 +21,19 @@ same commit. Do not record routine business logic changes here.
   BusinessClient methods, the photo picker
   (retainStorePhoto + ImagePicker.launchImageLibraryAsync) and the
   me.tsx > merchantstorefront route into MerchantStorefrontSurface
-  so the user can upload a real photo. Tripwires: STORE-PHOTO-001,
-  STORE-LINES-001, MERCHANT-DIRECTORY-001, MERCHANT-SPEND-DAILY-001.
+  so the user can upload a real photo. Mobile commit
+  (merchant-me-r21-replacement) removes merchant-me-r21.tsx
+  (1250-line @ts-nocheck hardcoded mock) and
+  merchant-creator-center.tsx, replacing them with
+  MerchantMeR21Replacement — a real surface that calls
+  BusinessClient.listMyAccounts / ListBusinessStores /
+  ListMemberDirectory / ListSpendDaily, SupplyClient.querySuppliers
+  for creator recommendations, and ActivityClient.listActivities
+  for the activity surface. Empty states are honest ('server 列表
+  为空') instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
+  app-shell.tsx threads the activities client down to MeSurface.
+  Tripwires: STORE-PHOTO-001, STORE-LINES-001, MERCHANT-DIRECTORY-001,
+  MERCHANT-SPEND-DAILY-001, MERCHANT-R21-001.
 
 ## Revision 23 — 2026-09-05
 
