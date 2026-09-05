@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 32 — 2026-09-05
+
+- 小美快捷入口改道：推荐页未落地前，“看小美机会”进真实 AI 活动流
+  （ACTIVITY tab），不再跳机会页占位。纯路由改道，无视觉新增。
+
 ## Revision 31 — 2026-09-05
 
 - Closed the storefront '编辑主页 / 联系方式 / 营业时间' gap.

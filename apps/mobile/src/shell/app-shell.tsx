@@ -452,7 +452,8 @@ export function AppShell({
               }}
               onOpenXiaomei={() => {
                 setHomeAssistant(undefined);
-                openMarket({ tab: "OPPORTUNITY" });
+                // 临时：推荐页未落地前，进真实 AI 活动流（ACTIVITY），不跳机会页占位。
+                openMarket({ tab: "ACTIVITY" });
               }}
               onOpenFeed={() => {
                 setHomeAssistant(undefined);
@@ -497,7 +498,8 @@ export function AppShell({
                   }}
                   onOpenXiaomei={() => {
                     setHomeAssistant(undefined);
-                    openMarket({ tab: "OPPORTUNITY" });
+                    // 临时：推荐页未落地前，进真实 AI 活动流（ACTIVITY），不跳机会页占位。
+                    openMarket({ tab: "ACTIVITY" });
                   }}
                   onOpenFeed={() => {
                     setHomeAssistant(undefined);
