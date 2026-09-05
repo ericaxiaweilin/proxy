@@ -96,14 +96,19 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
     setNotice(undefined);
     try {
       await conversation.startConversation({
-        originType: "AI_ASSISTANT",
+        originType: "PROFILE",
         originId: item.id,
         participantId: item.id,
         firstMessage: `你好${item.name}，我想聊聊${item.role}。`
       });
       setNotice("已发起会话，去消息页查看");
-    } catch {
-      setNotice("发起会话失败，请登录后重试");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "";
+      if (/authenticated principal|real sign-in|signed out|401/i.test(msg)) {
+        setNotice("发起会话失败，请登录后重试");
+      } else {
+        setNotice("发起会话失败，请稍后重试");
+      }
     }
   }
 

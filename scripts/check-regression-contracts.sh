@@ -133,6 +133,14 @@ fi
 pnpm --filter @proxy/contracts test --run src/ai-assistants.test.ts || exit $?
 echo "    AI-ASSIST-001: PASS"
 
+# AI-CONV-001: 小美主页发消息必须进消息模块。客户端曾传
+# originType=AI_ASSISTANT，被 validOrigins 拒（INVALID_ORIGIN_TYPE），
+# 用户点了等于没点。现在固定 PROFILE 来源；本测试锁死建会话成功 +
+# 发起人 inbox 可见 + 首条消息在。
+require_test "AI-CONV-001" "./internal/conversation" \
+  "TestXiaomeiDMProfileOriginAppearsInInbox" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+
 # AI-POSTS-001: 5 小美开屏帖（AI_NATIVE + 写真）。写真资产 APPROVED +
 # PUBLIC + READY + AI_PERSONA provenance，帖子 Upsert 幂等；feed 卡
 # AI 生成徽。测试垃圾（post_eng_*）曾淹过真机动态，测试自清理 + 门禁锁。
