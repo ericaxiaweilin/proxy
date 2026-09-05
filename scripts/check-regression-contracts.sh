@@ -678,6 +678,35 @@ if [ -f "apps/mobile/src/surfaces/market-experience.tsx" ]; then
 fi
 echo "    DEAD-MARKET-001: PASS (no dead sub-views in market.tsx, no MarketExperienceSurface, no TasksSurface)"
 
+# DEAD-FIXTURES-001: 3 hardcoded fixture arrays +
+# 2 lookup helpers in market-fixtures.ts have been
+# removed. Each one shipped mock data with
+# fabricated reputation strings (fulfill: 99% / 95% /
+# 98% / 99% for MARKET_HOSTS) or hardcoded "现
+# 在" / "附近" lens labels. None of the 3 arrays
+# (MARKET_EXPERIENCES, MARKET_HOSTS,
+# MARKET_OPPORTUNITIES) or the 2 helpers (marketHost,
+# marketExperience) was referenced by any production
+# code path. The 2 dead interfaces MarketHost and
+# MarketExperience are also gone. Tripwire: no
+# re-introduction of these symbols.
+DEAD_FIXTURES_GUARDS=(
+  "MARKET_EXPERIENCES"
+  "MARKET_HOSTS"
+  "MARKET_OPPORTUNITIES"
+  "marketHost"
+  "marketExperience"
+  "interface MarketHost"
+  "interface MarketExperience"
+)
+for sym in "${DEAD_FIXTURES_GUARDS[@]}"; do
+  if grep -rE "(\\b$sym\\b|\\b$sym\\(|\\b$sym:)" apps/mobile/src/ 2>/dev/null | grep -v "^\\s*//" | grep -v "apps/mobile/src/market-fixtures.ts:" >/dev/null; then
+    echo "  FAIL [DEAD-FIXTURES-001]: $sym still referenced outside market-fixtures.ts" >&2
+    exit 1
+  fi
+done
+echo "    DEAD-FIXTURES-001: PASS (no dead fixture arrays / lookup helpers / dead interfaces)"
+
 require_test "POST-REACTION-TRUTH-001" "./internal/engagement" \
   "TestPostReactionTruthToggleAndRemountHydration" \
   "apps/api-go/internal/engagement/service_test.go" || exit $?

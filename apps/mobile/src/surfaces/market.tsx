@@ -22,9 +22,7 @@ import { type MediaClient } from "../media-client";
 import { type SupplyClient } from "../supply-client";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import {
-  MARKET_EXPERIENCES,
   OPPORTUNITY_LENS_LABEL,
-  marketExperience,
   type MarketOpportunity,
   type MarketTab,
   type OpportunityLens
@@ -1200,7 +1198,7 @@ function MarketMap({
   // blue dot.
   onUserFix: (fix: { lat: number; lng: number } | undefined) => void;
 }): React.JSX.Element {
-  // 机会的本地集：跳过“远程”不显示；用 MARKET_OPPORTUNITIES fixture
+  // 机会的本地集：跳过“远程”不显示；用 opportunities prop
   // 里机会的 coord 走 gridToLatLng 投影到真实经纬度。
   const localOpportunities = useMemo(
     () => opportunities.filter((o) => o.location !== "远程"),

@@ -4,6 +4,26 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 39 — 2026-09-05
+
+- R18.x DEAD-FIXTURES-001: removed 3 hardcoded
+  fixture arrays (`MARKET_EXPERIENCES`,
+  `MARKET_HOSTS`, `MARKET_OPPORTUNITIES`) and 2
+  lookup helpers (`marketHost`, `marketExperience`)
+  from `market-fixtures.ts`. The `MARKET_HOSTS`
+  rows shipped fabricated reputation strings
+  ("fulfill: 99% / 95% / 98% / 99%" for Linh /
+  Mai / Thao / Anh) that no server side ever
+  recorded. The `MARKET_OPPORTUNITIES` rows were
+  superseded by the live `opportunities` prop
+  coming from the marketplace client's
+  `ListMarketOpportunities` server call. The 2
+  dead interfaces `MarketHost` and `MarketExperience`
+  are also gone (only the `MarketOpportunity` /
+  `MarketOpportunityMoneyFlow` / `OpportunityLens`
+  / `MarketTab` types remain, and they are all
+  referenced by the live market surfaces).
+
 ## Revision 38 — 2026-09-05
 
 - Froze requester-home discovery as `UI-HOME-DISCOVERY-001`: the visibly
