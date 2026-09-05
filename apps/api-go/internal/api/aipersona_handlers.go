@@ -9,6 +9,15 @@ import (
 	"github.com/proxy-app/proxy-api/internal/aipersona"
 )
 
+// GET /v1/ai/accounts returns the five addressable social companion accounts.
+// This catalog is deliberately separate from the platform business assistant.
+func (s *Server) listPlatformAIAccounts(w http.ResponseWriter, r *http.Request) {
+	if !methodGuard(w, r, http.MethodGet) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": aipersona.ListPlatformAccounts()})
+}
+
 // POST /v1/ai/personas
 // Body: { ownerId, displayName, personaType, description? }
 // Creates a persona row. The ownerId is a USER_TWIN subject
