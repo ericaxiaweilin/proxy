@@ -142,6 +142,12 @@ require_test "TEST-HYGIENE-001" "./internal/platform/postgres" \
 require_test "AIBOUND-001" "./internal/marketplace" \
   "TestMarketDismissIsForbiddenForAIActor" \
   "apps/api-go/internal/marketplace/service_test.go" || exit $?
+
+# CHAT-ORDER-ATOMIC-001: opportunity confirmation and fulfillment order
+# creation must not split, and owner identity must survive PostgreSQL JSON.
+require_test "CHAT-ORDER-ATOMIC-001" "./internal/marketplace" \
+  "TestConfirmMarketApplicationRollsBackWhenOrderMaterialisationFails" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
 require_test "AIBOUND-001" "./internal/marketplace" \
   "TestMarketWritesRequireUserActor" \
   "apps/api-go/internal/marketplace/service_test.go" || exit $?

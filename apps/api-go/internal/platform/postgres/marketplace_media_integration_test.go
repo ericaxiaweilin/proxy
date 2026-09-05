@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -133,9 +134,30 @@ func TestMarketplacePostgresLifecycle(t *testing.T) {
 	if _, err := repo.ConfirmApplication(ctx, app.ID, applicant2, "order_wrong"); err != marketplace.ErrApplicationNotFound {
 		t.Fatalf("wrong applicant confirmed: %v", err)
 	}
-	confirmed, err := repo.ConfirmApplication(ctx, app.ID, applicant, "order_"+app.ID)
+	rollbackErr := errors.New("forced fulfillment insert failure")
+	if _, err := repo.ConfirmApplication(ctx, app.ID, applicant, "order_"+app.ID, func(context.Context, marketplace.Application) error { return rollbackErr }); !errors.Is(err, rollbackErr) {
+		t.Fatalf("materializer failure=%v, want %v", err, rollbackErr)
+	}
+	afterRollback, err := repo.ListApplications(ctx, id, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRollback[0].Status != "SELECTED" || afterRollback[0].OrderRef != "" {
+		t.Fatalf("failed materializer committed half-state: %+v", afterRollback[0])
+	}
+	materialized := false
+	confirmed, err := repo.ConfirmApplication(ctx, app.ID, applicant, "order_"+app.ID, func(_ context.Context, hydrated marketplace.Application) error {
+		materialized = true
+		if hydrated.OwnerID != owner {
+			t.Fatalf("persisted application must hydrate owner from opportunity: got %q want %q", hydrated.OwnerID, owner)
+		}
+		return nil
+	})
 	if err != nil || confirmed.Status != "CONFIRMED" || confirmed.OrderRef == "" {
 		t.Fatalf("ConfirmApplication: app=%+v err=%v", confirmed, err)
+	}
+	if !materialized {
+		t.Fatal("confirmation did not run materializer")
 	}
 	// applied flag flips for the applicant.
 	appliedList, err := repo.List(ctx, applicant)

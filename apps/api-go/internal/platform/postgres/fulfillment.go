@@ -32,6 +32,32 @@ func (r *FulfillmentRepository) CreateOrder(ctx context.Context, order fulfillme
 	return insertOrder(ctx, execerForContext(ctx, r.pool), order)
 }
 
+func (r *FulfillmentRepository) EnsureOrder(ctx context.Context, order fulfillment.Order) error {
+	snapshot, amendments, settlement, outcome, err := encodeOrderJSON(order)
+	if err != nil {
+		return err
+	}
+	q := queryerForContext(ctx, r.pool)
+	if _, err = q.Exec(ctx, `
+		INSERT INTO fulfillment.orders (
+			id, requester_id, agent_id, need_id, lifecycle, version,
+			snapshot, amendments, settlement, outcome, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		ON CONFLICT (id) DO NOTHING`,
+		order.ID, order.RequesterID, order.AgentID, order.NeedID, order.Lifecycle, order.Version,
+		snapshot, amendments, settlement, outcome, order.CreatedAt, order.UpdatedAt); err != nil {
+		return err
+	}
+	var requesterID, agentID, needID string
+	if err := q.QueryRow(ctx, `SELECT requester_id, agent_id, need_id FROM fulfillment.orders WHERE id=$1`, order.ID).Scan(&requesterID, &agentID, &needID); err != nil {
+		return err
+	}
+	if requesterID != order.RequesterID || agentID != order.AgentID || needID != order.NeedID {
+		return errors.New("order id conflicts with another materialisation")
+	}
+	return nil
+}
+
 func insertOrder(ctx context.Context, execer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }, order fulfillment.Order) error {

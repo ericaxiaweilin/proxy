@@ -240,24 +240,38 @@ func (r *MarketplaceRepository) SelectApplication(ctx context.Context, opportuni
 	return selected, err
 }
 
-func (r *MarketplaceRepository) ConfirmApplication(ctx context.Context, applicationID, applicantID, orderRef string) (marketplace.Application, error) {
+func (r *MarketplaceRepository) ConfirmApplication(ctx context.Context, applicationID, applicantID, orderRef string, callbacks ...func(context.Context, marketplace.Application) error) (marketplace.Application, error) {
 	var confirmed marketplace.Application
+	var materialize func(context.Context, marketplace.Application) error
+	if len(callbacks) > 0 {
+		materialize = callbacks[0]
+	}
 	err := runInTransaction(ctx, r.pool, func(txCtx context.Context, tx pgx.Tx) error {
 		var raw []byte
 		var storedApplicant string
-		if err := tx.QueryRow(txCtx, `SELECT applicant_id, payload FROM marketplace.applications WHERE id=$1 FOR UPDATE`, applicationID).Scan(&storedApplicant, &raw); errors.Is(err, pgx.ErrNoRows) || (err == nil && storedApplicant != applicantID) {
+		if err := tx.QueryRow(txCtx, `SELECT a.applicant_id, a.payload, o.owner_id FROM marketplace.applications a JOIN marketplace.opportunities o ON o.id=a.opportunity_id WHERE a.id=$1 FOR UPDATE OF a`, applicationID).Scan(&storedApplicant, &raw, &confirmed.OwnerID); errors.Is(err, pgx.ErrNoRows) || (err == nil && storedApplicant != applicantID) {
 			return marketplace.ErrApplicationNotFound
 		} else if err != nil {
 			return err
 		}
+		ownerID := confirmed.OwnerID
 		if err := json.Unmarshal(raw, &confirmed); err != nil {
 			return err
 		}
+		confirmed.OwnerID = ownerID
 		if confirmed.Status == "CONFIRMED" {
+			if materialize != nil {
+				return materialize(txCtx, confirmed)
+			}
 			return nil
 		}
 		if confirmed.Status != "SELECTED" {
 			return marketplace.ErrApplicationStateConflict
+		}
+		if materialize != nil {
+			if err := materialize(txCtx, confirmed); err != nil {
+				return err
+			}
 		}
 		now := time.Now().UTC()
 		confirmed.Status, confirmed.ConfirmedAt, confirmed.OrderRef = "CONFIRMED", &now, orderRef

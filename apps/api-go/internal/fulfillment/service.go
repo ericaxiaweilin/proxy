@@ -42,9 +42,9 @@ type Order struct {
 	// touches the funds). nil/empty is allowed for legacy
 	// Orders created before the LC-28 gate rolled out; the
 	// migration 065 backfill is a separate task.
-	PolicyDecisionID string `json:"policyDecisionId,omitempty"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
+	PolicyDecisionID string    `json:"policyDecisionId,omitempty"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 // OrderSnapshot 是 Gate G 冻结的确认快照。
@@ -149,6 +149,7 @@ type Repository interface {
 // TransactionalRepository 由支持事务性 outbox 的存储实现（订单与事件原子提交）。
 type TransactionalRepository interface {
 	Repository
+	EnsureOrder(ctx context.Context, o Order) error
 	CreateOrderAndPublish(ctx context.Context, o Order, domainEvents []event.DomainEvent) error
 	UpdateOrderAndPublish(ctx context.Context, o Order, expectedVersion int, domainEvents []event.DomainEvent) error
 	CreateOfferAndPublish(ctx context.Context, o Offer, domainEvents []event.DomainEvent) error
@@ -179,6 +180,23 @@ func (r *MemoryRepository) CreateOrder(_ context.Context, o Order) error {
 	defer r.mu.Unlock()
 	if _, exists := r.orders[o.ID]; exists {
 		return errors.New("order already exists")
+	}
+	r.orders[o.ID] = cloneOrder(o)
+	return nil
+}
+
+// EnsureOrder is the idempotent creation primitive used by cross-aggregate
+// materialisation. An existing row is success only when it represents the
+// same immutable order identity; an ID collision with different parties or
+// need is rejected.
+func (r *MemoryRepository) EnsureOrder(_ context.Context, o Order) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.orders[o.ID]; ok {
+		if existing.RequesterID != o.RequesterID || existing.AgentID != o.AgentID || existing.NeedID != o.NeedID {
+			return errors.New("order id conflicts with another materialisation")
+		}
+		return nil
 	}
 	r.orders[o.ID] = cloneOrder(o)
 	return nil

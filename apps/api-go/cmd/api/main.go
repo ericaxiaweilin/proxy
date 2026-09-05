@@ -114,7 +114,6 @@ func main() {
 	// 委托 fulfillment 创建真 Order, 让“我的订单”页能看见.
 	// 接口定义在 marketplace package (DIP: 消费者侧),
 	// fulfillment 包不需改 compile 依赖图.
-	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
 	activityService := activity.New()
 	facetService := facet.New()
 	facetService.SeedDefaults()
@@ -244,6 +243,9 @@ func main() {
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
+	// Wire after the optional PostgreSQL replacements. Wiring before this block
+	// leaves marketplace pointing at the discarded in-memory fulfillment repo.
+	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
 	databaseReadyCheck := readyCheck
 	readyCheck = func(ctx context.Context) error {
 		if databaseReadyCheck != nil {
@@ -1069,7 +1071,8 @@ type marketplaceFulfillmentAdapter struct {
 	repo fulfillment.TransactionalRepository
 }
 
-func (a marketplaceFulfillmentAdapter) CreateOrder(ctx context.Context, record marketplace.OrderRecord) error {
+func (a marketplaceFulfillmentAdapter) EnsureOrder(ctx context.Context, record marketplace.OrderRecord) error {
+	now := time.Now().UTC()
 	snapshot := fulfillment.OrderSnapshot{
 		Requester:          record.RequesterID,
 		Agent:              record.AgentID,
@@ -1079,7 +1082,7 @@ func (a marketplaceFulfillmentAdapter) CreateOrder(ctx context.Context, record m
 		Currency:           "VND",
 		SettlementMode:     "DIRECT_SETTLEMENT",
 	}
-	return a.repo.CreateOrder(ctx, fulfillment.Order{
+	return a.repo.EnsureOrder(ctx, fulfillment.Order{
 		ID:          record.ID,
 		RequesterID: record.RequesterID,
 		AgentID:     record.AgentID,
@@ -1087,6 +1090,8 @@ func (a marketplaceFulfillmentAdapter) CreateOrder(ctx context.Context, record m
 		Lifecycle:   "CONFIRMED",
 		Version:     1,
 		Snapshot:    snapshot,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 }
 

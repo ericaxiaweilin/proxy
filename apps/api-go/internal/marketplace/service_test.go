@@ -3,8 +3,10 @@ package marketplace
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
@@ -212,11 +214,51 @@ func TestConfirmMarketApplicationMaterialisesRealOrder(t *testing.T) {
 	}
 }
 
+// CHAT-ORDER-ATOMIC-001: creating the fulfillment order and flipping the
+// application to CONFIRMED are one unit. A materializer failure must leave the
+// application SELECTED, so a safe retry can complete both writes.
+func TestConfirmMarketApplicationRollsBackWhenOrderMaterialisationFails(t *testing.T) {
+	r := &MemoryRepository{applications: make(map[string]map[string]Application), dismissed: make(map[string]bool)}
+	ctx := t.Context()
+	if err := r.Create(ctx, Opportunity{ID: "opp_atomic", OwnerID: "owner_atomic"}); err != nil {
+		t.Fatal(err)
+	}
+	app, _, err := r.Apply(ctx, Application{ID: "app_atomic", OpportunityID: "opp_atomic", ApplicantID: "creator_atomic", Status: "SUBMITTED", CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.SelectApplication(ctx, app.OpportunityID, app.ID, "owner_atomic"); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("fulfillment unavailable")
+	_, err = r.ConfirmApplication(ctx, app.ID, app.ApplicantID, "ord_"+app.ID, func(_ context.Context, hydrated Application) error {
+		if hydrated.OwnerID != "owner_atomic" {
+			t.Fatalf("owner must be hydrated from opportunity, got %q", hydrated.OwnerID)
+		}
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("confirm error=%v, want %v", err, wantErr)
+	}
+	apps, err := r.ListApplications(ctx, app.OpportunityID, "owner_atomic")
+	if err != nil || len(apps) != 1 {
+		t.Fatalf("list after rollback: %+v err=%v", apps, err)
+	}
+	if apps[0].Status != "SELECTED" || apps[0].OrderRef != "" || apps[0].ConfirmedAt != nil {
+		t.Fatalf("failed materialisation leaked confirmation state: %+v", apps[0])
+	}
+}
+
 type fakeOrderCreator struct {
 	records []OrderRecord
 }
 
-func (f *fakeOrderCreator) CreateOrder(_ context.Context, r OrderRecord) error {
+func (f *fakeOrderCreator) EnsureOrder(_ context.Context, r OrderRecord) error {
+	for _, existing := range f.records {
+		if existing.ID == r.ID {
+			return nil
+		}
+	}
 	f.records = append(f.records, r)
 	return nil
 }

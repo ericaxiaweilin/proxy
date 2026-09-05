@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 23 — 2026-09-05
+
+- Hardened marketplace confirmation so application state and the derived
+  fulfillment order commit atomically in PostgreSQL and fail together in memory.
+- Made order derivation deterministic and idempotent across retries, and hydrate
+  the requester from the authoritative opportunity owner (`CHAT-ORDER-ATOMIC-001`).
+
 ## Revision 22 — 2026-09-05
 
 - chat → order 派生路径 (R17.x): marketplace

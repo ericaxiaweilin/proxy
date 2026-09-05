@@ -35,7 +35,7 @@ type Service struct {
 // confirmed. The interface is defined here (consumer-side) so the
 // marketplace package does not import fulfillment.
 type OrderCreator interface {
-	CreateOrder(ctx context.Context, order OrderRecord) error
+	EnsureOrder(ctx context.Context, order OrderRecord) error
 }
 
 // OrderRecord is the wire-shape the OrderCreator accepts. It maps
@@ -75,7 +75,7 @@ type Repository interface {
 	Apply(ctx context.Context, application Application) (Application, bool, error)
 	ListApplications(ctx context.Context, opportunityID, ownerID string) ([]Application, error)
 	SelectApplication(ctx context.Context, opportunityID, applicationID, ownerID string) (Application, error)
-	ConfirmApplication(ctx context.Context, applicationID, applicantID, orderRef string) (Application, error)
+	ConfirmApplication(ctx context.Context, applicationID, applicantID, orderRef string, materialize ...func(context.Context, Application) error) (Application, error)
 	Dismiss(ctx context.Context, viewerID, opportunityID string) error
 }
 
@@ -298,7 +298,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if stored.OwnerID == e.Actor.ID {
 			return rejected(e, "OWNER_CANNOT_APPLY", "market.owner_cannot_apply")
 		}
-		a := Application{ID: newID("app_"), OpportunityID: id, OwnerID: stored.OwnerID, ApplicantID: e.Actor.ID, Quote: quote, Scope: scope, Status: "SUBMITTED", CreatedAt: time.Now().UTC()}
+		a := Application{ID: newID("app_"), OpportunityID: id, ApplicantID: e.Actor.ID, Quote: quote, Scope: scope, Status: "SUBMITTED", CreatedAt: time.Now().UTC()}
 		a, _, err = s.repository.Apply(ctx, a)
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_failed", nil)
@@ -349,8 +349,20 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		// "order_"+applicationID). 如果 orderCreator 接入了
 		// fulfillment, 同步创建真 Order 记录 — 这样
 		// my orders 页 (走 fulfillment.listMyOrders) 能看到。
-		orderID := newID("ord_")
-		confirmed, err := s.repository.ConfirmApplication(ctx, applicationID, e.Actor.ID, orderID)
+		// CHAT-ORDER-ATOMIC-001: the application id is already globally random,
+		// so deriving the order id from it gives every retry the same business
+		// object even when the HTTP idempotency key changes.
+		orderID := "ord_" + applicationID
+		var materialize []func(context.Context, Application) error
+		if s.orderCreator != nil {
+			materialize = append(materialize, func(txCtx context.Context, application Application) error {
+				return s.orderCreator.EnsureOrder(txCtx, OrderRecord{
+					ID: orderID, RequesterID: application.OwnerID,
+					AgentID: application.ApplicantID, NeedID: application.OpportunityID,
+				})
+			})
+		}
+		confirmed, err := s.repository.ConfirmApplication(ctx, applicationID, e.Actor.ID, orderID, materialize...)
 		if errors.Is(err, ErrApplicationNotFound) {
 			return rejected(e, "APPLICATION_NOT_FOUND", "market.application_not_found")
 		}
@@ -359,27 +371,6 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_CONFIRM_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_confirm_failed", nil)
-		}
-		// Materialise 真 Order. opportunity.id 作为 NeedID
-		// (fulfillment 侧 listMyOrders 用 NeedID 拼出标题);
-		//  requester = opportunity owner, agent = 申请者.
-		// R17.x idempotency: 如果 repository 已是 CONFIRMED
-		// (重复 confirm), 不会重新调用 orderCreator — 这是
-		// 防御性, 即使 server 不重复, client 的多次重试也不会
-		// 在 fulfillment 创建多份 Order. 检测: repository
-		// idempotency 返回原 item (OrderRef != 新 orderID).
-		if s.orderCreator != nil && confirmed.ConfirmedAt != nil && confirmed.OrderRef == orderID {
-			if err := s.orderCreator.CreateOrder(ctx, OrderRecord{
-				ID:          orderID,
-				RequesterID: confirmed.OwnerID,
-				AgentID:     confirmed.ApplicantID,
-				NeedID:      confirmed.OpportunityID,
-			}); err != nil {
-				// Order materialisation 失败必须以业务错误返回
-				// (不是 internal), 避免 “我的订单” 看不到而 “我的
-				// 机会” 还显示已确认 — 两路径不一致。
-				return rejectedWith(e, "ORDER_MATERIALISATION_FAILED", "market.order_materialisation_failed", err.Error(), map[string]any{"orderId": orderID})
-			}
 		}
 		return payload(e, "Order", confirmed.OrderRef, "CONFIRMED", map[string]any{"application": confirmed, "orderRef": confirmed.OrderRef})
 	case "DismissMarketOpportunity":
@@ -578,9 +569,13 @@ func (r *MemoryRepository) SelectApplication(_ context.Context, opportunityID, a
 	}
 	return selected, nil
 }
-func (r *MemoryRepository) ConfirmApplication(_ context.Context, applicationID, applicantID, orderRef string) (Application, error) {
+func (r *MemoryRepository) ConfirmApplication(ctx context.Context, applicationID, applicantID, orderRef string, callbacks ...func(context.Context, Application) error) (Application, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var materialize func(context.Context, Application) error
+	if len(callbacks) > 0 {
+		materialize = callbacks[0]
+	}
 	for opportunityID, apps := range r.applications {
 		for key, item := range apps {
 			if item.ID != applicationID {
@@ -593,15 +588,34 @@ func (r *MemoryRepository) ConfirmApplication(_ context.Context, applicationID, 
 			// 存在, 第二次调用不覆盖, 透传原 OrderRef. 这样
 			// 同一 application 重复 confirm 不会改 orderRef
 			// (避免 “我的订单” 看到两个 order). Server 侧
-			// 不会创建第二 Order — caller 必须 idempotency-key
-			// 控制自己的 orderCreator 调用.
+			// EnsureOrder 会校验并复用同一业务订单，修复旧版本可能遗留的
+			// CONFIRMED-but-missing-order 半状态。
+			for _, opportunity := range r.opportunities {
+				if opportunity.ID == item.OpportunityID {
+					item.OwnerID = opportunity.OwnerID
+					break
+				}
+			}
+			if item.OwnerID == "" {
+				return Application{}, ErrOpportunityNotFound
+			}
 			if item.Status == "CONFIRMED" && item.OrderRef != "" {
+				if materialize != nil {
+					if err := materialize(ctx, item); err != nil {
+						return Application{}, err
+					}
+				}
 				return item, nil
 			}
 			if item.Status != "SELECTED" && item.Status != "CONFIRMED" {
 				return Application{}, ErrApplicationStateConflict
 			}
 			now := time.Now().UTC()
+			if materialize != nil {
+				if err := materialize(ctx, item); err != nil {
+					return Application{}, err
+				}
+			}
 			item.Status = "CONFIRMED"
 			item.ConfirmedAt = &now
 			item.OrderRef = orderRef
