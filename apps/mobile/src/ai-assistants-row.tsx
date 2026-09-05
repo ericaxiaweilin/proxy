@@ -108,7 +108,7 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
   }
 
   const selected = items?.find((entry) => entry.id === selectedId);
-  // 图挂了的卡回退色块（真图走服务端原文件；加载失败不留白板）。
+  // 图挂了回退色块（真图走服务端原文件；加载失败不留白板）。
   const [broken, setBroken] = useState<ReadonlySet<string>>(new Set());
   const markBroken = useCallback((id: string): void => {
     setBroken((current) => (current.has(id) ? current : new Set(current).add(id)));
@@ -117,6 +117,35 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
 
   if (failed) return <View />;
   if (!items) return <View style={styles.rowSkeleton} />;
+  // 点进个人主页（整页替换行，不是底部弹卡）。
+  if (selected) {
+    return (
+      <View>
+        <Pressable onPress={() => { setSelectedId(undefined); setNotice(undefined); }} style={styles.backButton}>
+          <Text style={styles.backText}>‹ 小美们</Text>
+        </Pressable>
+        {broken.has(selected.id) ? (
+          <View style={[styles.homeToken, { backgroundColor: selected.color }]}>
+            <Text style={styles.homeTokenText}>{selected.avatar}</Text>
+          </View>
+        ) : (
+          <Image source={{ uri: photoUri(selected.id) }} style={styles.homePortrait} onError={() => markBroken(selected.id)} />
+        )}
+        <Text style={styles.homeName}>{selected.name}</Text>
+        <Text style={styles.homeBadge}>{selected.aiBadge}</Text>
+        <Text style={styles.homeTagline}>{selected.tagline}</Text>
+        <View style={styles.homeActions}>
+          <Pressable disabled={acting} onPress={() => void toggleFollow(selected)} style={[styles.homeBtn, styles.homeBtnPrimary]}>
+            <Text style={styles.homeBtnPrimaryText}>{acting ? "请稍候…" : following.has(selected.id) ? "取消关注" : "关注"}</Text>
+          </Pressable>
+          <Pressable onPress={() => void message(selected)} style={[styles.homeBtn, styles.homeBtnGhost]}>
+            <Text style={styles.homeBtnGhostText}>发消息</Text>
+          </Pressable>
+        </View>
+        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+      </View>
+    );
+  }
   return (
     <View>
       <View style={styles.rowHead}>
@@ -125,44 +154,19 @@ export function AIAssistantsRow({ baseUrl = localApiBaseUrl }: { baseUrl?: strin
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         {items.map((item) => (
-          <Pressable key={item.id} onPress={() => { setSelectedId(item.id); setNotice(undefined); }} style={styles.card}>
+          <Pressable key={item.id} onPress={() => { setSelectedId(item.id); setNotice(undefined); }} style={styles.story}>
             {broken.has(item.id) ? (
-              <View style={[styles.token, { backgroundColor: item.color }]}>
-                <Text style={styles.tokenText}>{item.avatar}</Text>
+              <View style={[styles.storyToken, { backgroundColor: item.color }]}>
+                <Text style={styles.storyTokenText}>{item.avatar}</Text>
               </View>
             ) : (
-              <Image source={{ uri: photoUri(item.id) }} style={styles.portrait} onError={() => markBroken(item.id)} />
+              <Image source={{ uri: photoUri(item.id) }} style={styles.storyPortrait} onError={() => markBroken(item.id)} />
             )}
-            <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-            <Text style={styles.badge}>{item.aiBadge}</Text>
+            <Text style={styles.storyName} numberOfLines={1}>{item.role}</Text>
             {following.has(item.id) ? <Text style={styles.followed}>已关注</Text> : null}
           </Pressable>
         ))}
       </ScrollView>
-      {selected ? (
-        <View style={styles.sheet}>
-          {broken.has(selected.id) ? (
-            <View style={[styles.sheetToken, { backgroundColor: selected.color }]}>
-              <Text style={styles.sheetTokenText}>{selected.avatar}</Text>
-            </View>
-          ) : (
-            <Image source={{ uri: photoUri(selected.id) }} style={styles.sheetPortrait} onError={() => markBroken(selected.id)} />
-          )}
-          <Text style={styles.sheetName}>{selected.name}</Text>
-          <Text style={styles.sheetBadge}>{selected.aiBadge} · 不是真人</Text>
-          <Text style={styles.sheetTagline}>{selected.tagline}</Text>
-          <View style={styles.sheetActions}>
-            <Pressable disabled={acting} onPress={() => void toggleFollow(selected)} style={[styles.sheetBtn, styles.sheetBtnPrimary]}>
-              <Text style={styles.sheetBtnPrimaryText}>{acting ? "请稍候…" : following.has(selected.id) ? "取消关注" : "关注"}</Text>
-            </Pressable>
-            <Pressable onPress={() => void message(selected)} style={[styles.sheetBtn, styles.sheetBtnGhost]}>
-              <Text style={styles.sheetBtnGhostText}>发消息</Text>
-            </Pressable>
-          </View>
-          {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-          <Pressable onPress={() => setSelectedId(undefined)}><Text style={styles.close}>收起</Text></Pressable>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -183,30 +187,31 @@ function useConversationClient(): ConversationClient {
 
 const styles = StyleSheet.create({
   rowSkeleton: { height: 120 },
-  rowTitle: { color: color.ink, fontSize: 16, fontWeight: "900" },
   rowHead: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 8, marginHorizontal: 16 },
+  rowTitle: { color: color.ink, fontSize: 16, fontWeight: "900" },
   rowGen: { backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2 },
-  portrait: { borderRadius: 38, height: 76, width: 76 },
-  sheetPortrait: { borderRadius: 14, height: 190, width: "100%" },
-  row: { gap: 10, paddingHorizontal: 16 },
-  card: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 4, padding: 12, width: 132 },
-  token: { alignItems: "center", borderRadius: 28, height: 56, justifyContent: "center", width: 56 },
-  tokenText: { fontSize: 28 },
-  name: { color: color.ink, fontSize: 12, fontWeight: "800", textAlign: "center" },
-  badge: { backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 10, fontWeight: "700", paddingHorizontal: 6, paddingVertical: 2 },
+  row: { gap: 12, paddingHorizontal: 16 },
+  // 常规圆头像（与真人 stories 同语言，无白卡）：头像 + 角色名。
+  story: { alignItems: "center", gap: 4, width: 72 },
+  storyPortrait: { borderRadius: 36, height: 72, width: 72 },
+  storyToken: { alignItems: "center", borderRadius: 36, height: 72, justifyContent: "center", width: 72 },
+  storyTokenText: { fontSize: 28 },
+  storyName: { color: color.ink, fontSize: 12, fontWeight: "700", textAlign: "center" },
   followed: { color: color.muted, fontSize: 10 },
-  sheet: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 6, margin: 16, marginTop: 10, padding: 16 },
-  sheetToken: { alignItems: "center", borderRadius: 32, height: 64, justifyContent: "center", width: 64 },
-  sheetTokenText: { fontSize: 32 },
-  sheetName: { color: color.ink, fontSize: 17, fontWeight: "900" },
-  sheetBadge: { color: "#5B3FA3", fontSize: 11, fontWeight: "700" },
-  sheetTagline: { color: color.muted, fontSize: 13 },
-  sheetActions: { flexDirection: "row", gap: 8, marginTop: 4 },
-  sheetBtn: { alignItems: "center", borderRadius: 999, flex: 1, paddingVertical: 11 },
-  sheetBtnPrimary: { backgroundColor: color.ink },
-  sheetBtnPrimaryText: { color: color.white, fontSize: 13, fontWeight: "800" },
-  sheetBtnGhost: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1 },
-  sheetBtnGhostText: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  notice: { color: color.muted, fontSize: 12 },
-  close: { color: color.muted, fontSize: 12, marginTop: 2, textAlign: "center" }
+  // 个人主页（整页替换行，非底部弹卡）。
+  backButton: { alignItems: "center", flexDirection: "row", paddingHorizontal: 16, paddingVertical: 8 },
+  backText: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  homePortrait: { aspectRatio: 1, borderRadius: 18, marginHorizontal: 16, width: "100%" },
+  homeToken: { alignItems: "center", borderRadius: 18, height: 240, justifyContent: "center", marginHorizontal: 16 },
+  homeTokenText: { fontSize: 64 },
+  homeName: { color: color.ink, fontSize: 22, fontWeight: "900", marginHorizontal: 16, marginTop: 12 },
+  homeBadge: { color: "#5B3FA3", fontSize: 12, fontWeight: "700", marginHorizontal: 16, marginTop: 2 },
+  homeTagline: { color: color.muted, fontSize: 14, marginHorizontal: 16, marginTop: 6 },
+  homeActions: { flexDirection: "row", gap: 8, marginHorizontal: 16, marginTop: 12 },
+  homeBtn: { alignItems: "center", borderRadius: 999, flex: 1, paddingVertical: 12 },
+  homeBtnPrimary: { backgroundColor: color.ink },
+  homeBtnPrimaryText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  homeBtnGhost: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1 },
+  homeBtnGhostText: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  notice: { color: color.muted, fontSize: 12, marginHorizontal: 16, marginTop: 8 },
 });
