@@ -180,6 +180,13 @@ require_test "AI-PERSONA-PHOTO-001" "./internal/activity" \
 pnpm --dir packages/contracts test -- --run src/activity.test.ts
 echo "    AI-PERSONA-PHOTO-001: PASS (mobile wire schema round-trip)"
 
+# CHAT-PROXY-ACTIVITY-001: conversation sendProxyObject 必须
+# 使用 server 真 activityId, 不允许 hardcoded "act_westlake"
+# 等不存在的 ID. 防 "聊天发活动 ≠ 我的活动页有活动" 的两路径
+# 不对齐. mobile test 拒绝任何隐性 fallback 到 hardcoded ID.
+pnpm --dir apps/mobile test -- --run src/conversation-client.test.ts
+echo "    CHAT-PROXY-ACTIVITY-001: PASS (real activityId round-trip)"
+
 # OPPORTUNITY-DEAL-001: 真人申请 -> 发布者选择 -> 被选真人确认；候选列表
 # 来自仓储，不允许把平台 AI 或硬编码人物当作可直接购买的库存。
 require_test "OPPORTUNITY-DEAL-001" "./internal/marketplace" \

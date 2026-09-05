@@ -2,12 +2,13 @@
 // 基于 Feed 的"聊一下"入口进入的会话界面。
 // 接入模型底座：SendMessage 后服务端调用 modelStack.Complete() 生成 AI 回复。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
 import type { ConversationClient, ProtectionOverride } from "../conversation-client";
+import type { ActivityClient } from "../activity-client";
 import type { MediaClient, UploadableImage } from "../media-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
@@ -27,12 +28,14 @@ interface Message {
 export function ConversationSurface({
   author,
   conversationClient,
+  activityClient,
   mediaClient,
   conversationId: initialConvId,
   onBack
 }: {
   author: string;
   conversationClient: ConversationClient;
+  activityClient: ActivityClient;
   mediaClient: MediaClient;
   conversationId?: string;
   onBack: () => void;
@@ -50,6 +53,13 @@ export function ConversationSurface({
   const [selectedImage, setSelectedImage] = useState<UploadableImage>();
   const [imageMenuOpen, setImageMenuOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>();
+  // R17.x: 活动 proxy 选中面板状态。点“活动”按钮不再
+  // 发 hardcoded "act_westlake" — 弹 picker, 让用户从 server
+  // 真实活动里选, 然后发真 ID。防“聊天发活动”不等同于
+  // “活动页有这个活动” 的两路径。
+  const [activityPickerOpen, setActivityPickerOpen] = useState(false);
+  const [activityOptions, setActivityOptions] = useState<{ id: string; title: string; subtitle: string }[] | undefined>(undefined);
+  const [activityPickerError, setActivityPickerError] = useState<string | undefined>(undefined);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
 
@@ -168,16 +178,45 @@ export function ConversationSurface({
     return () => { cancelled = true; };
   }, [convId, author, conversationClient, parseOperationRef]);
 
-  async function sendProxyObject(): Promise<void> {
+  // R17.x: open activity picker. 拉 server 真实活动列表, 让
+  // 用户选一个. (不完成这步, 发送活动 proxy 会被拒 — 硬
+  // 编码 "act_westlake" 是不存在的活动, “我的活动”页也不能
+  // 看到这个活动.)
+  async function openActivityPicker(): Promise<void> {
     if (sending || !convId) return;
+    setActivityPickerError(undefined);
+    setActivityPickerOpen(true);
+    setActivityOptions(undefined);
+    try {
+      const list = await activityClient.listActivities();
+      setActivityOptions(list.map((a) => ({
+        id: a.activityId,
+        title: a.title,
+        subtitle: `${a.time} · ${a.venueIcon} ${a.venueName}`
+      })));
+    } catch (e: unknown) {
+      setActivityPickerError(e instanceof Error ? e.message : "活动加载失败");
+    }
+  }
+
+  async function sendActivityProxy(activityId: string): Promise<void> {
+    if (sending || !convId) return;
+    const picked = activityOptions?.find((option) => option.id === activityId);
+    if (!picked) {
+      setError("选中的活动不可用");
+      setActivityPickerOpen(false);
+      return;
+    }
     setSending(true);
-    const proxyForService = { objectType: "activity" as const, objectId: "act_westlake", snapshot: { title: "Sunday Coffee Walk", state: "24 / 30 已参加", time: "今天 16:00" }, liveState: { state: "当前：已结束" } };
-    const proxyForV1 = { object_type: "activity" as const, object_id: "act_westlake", snapshot: { title: "Sunday Coffee Walk", state: "24 / 30 已参加", time: "今天 16:00" }, liveState: { state: "当前：已结束" } };
-    const v1: MessageV1 = { id: `msg_${Date.now()}`, kind: "proxy_object", proxy_object: proxyForV1, text: "活动卡片" };
+    setActivityPickerOpen(false);
+    const snapshot = { title: picked.title, time: picked.subtitle };
+    const proxyForService = { objectType: "activity" as const, objectId: picked.id, snapshot, liveState: { state: "选自开放活动" } };
+    const proxyForV1 = { object_type: "activity" as const, object_id: picked.id, snapshot, liveState: { state: "选自开放活动" } };
+    const v1: MessageV1 = { id: `msg_${Date.now()}`, kind: "proxy_object", proxy_object: proxyForV1, text: picked.title };
     const userMsg: Message = {
       id: v1.id,
       sender: "你",
-      body: "活动卡片",
+      body: picked.title,
       time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
       isOwn: true,
       v1,
@@ -347,7 +386,7 @@ export function ConversationSurface({
         {/* Composer — 图片 / 业务卡片 / 文本 */}
         <View style={styles.composer}>
           <Pressable accessibilityLabel="添加图片" onPress={() => setImageMenuOpen((open) => !open)} disabled={sending || !convId} style={styles.imageBtn}><Text style={styles.imageBtnText}>＋</Text></Pressable>
-          <Pressable onPress={() => void sendProxyObject()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
+          <Pressable onPress={() => void openActivityPicker()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
             <Text style={styles.cardBtnText}>活动</Text>
           </Pressable>
           <TextInput
@@ -369,6 +408,31 @@ export function ConversationSurface({
         </View>
         </View>
       </View>
+      {/* R17.x: activity picker sheet. 点击“活动”按钮后
+          弹出, 从 server listActivities() 选真活动, 作为
+          proxyObject 发出. 取消 / 点外部 = 取消. */}
+      {activityPickerOpen ? (
+        <Pressable accessibilityLabel="关闭活动选择" onPress={() => setActivityPickerOpen(false)} style={styles.pickerScrim}>
+          <Pressable onPress={() => undefined} style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>选一个活动</Text>
+            <Text style={styles.pickerSub}>选中的活动会作为代理卡片发到对话</Text>
+            {activityPickerError ? <Text style={styles.pickerError}>{activityPickerError}</Text> : null}
+            {activityOptions === undefined ? <ActivityIndicator color={color.magenta} /> : activityOptions.length === 0 ? <Text style={styles.pickerSub}>本周暂无开放活动。</Text> : (
+              <ScrollView style={styles.pickerList}>
+                {activityOptions.map((option) => (
+                  <Pressable key={option.id} onPress={() => void sendActivityProxy(option.id)} style={styles.pickerItem}>
+                    <Text style={styles.pickerItemTitle}>{option.title}</Text>
+                    <Text style={styles.pickerItemSub}>{option.subtitle}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+            <Pressable onPress={() => setActivityPickerOpen(false)} style={styles.pickerCancel}>
+              <Text style={styles.pickerCancelText}>取消</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      ) : null}
     </SwipeBackShell>
   );
 }
@@ -481,4 +545,16 @@ const styles = StyleSheet.create({
   v1Wrap: { maxWidth: "80%", marginVertical: 2 },
   v1Own: { alignSelf: "flex-end" },
   v1Other: { alignSelf: "flex-start" },
+  // R17.x: activity picker sheet. 贴底部弹出, scrim 点击关闭.
+  pickerScrim: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  pickerSheet: { backgroundColor: "#FFF8EC", borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, maxHeight: "70%" },
+  pickerTitle: { fontSize: 14, fontWeight: "800", color: "#2C2235", marginBottom: 4 },
+  pickerSub: { fontSize: 11, color: "#6E6478", marginBottom: 8 },
+  pickerError: { fontSize: 11, color: "#A11A4F", marginBottom: 8 },
+  pickerList: { maxHeight: 320 },
+  pickerItem: { paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: "rgba(60,40,90,0.08)" },
+  pickerItemTitle: { fontSize: 13, fontWeight: "700", color: "#2C2235" },
+  pickerItemSub: { fontSize: 11, color: "#6E6478", marginTop: 2 },
+  pickerCancel: { marginTop: 12, alignSelf: "center", paddingVertical: 8, paddingHorizontal: 24 },
+  pickerCancelText: { fontSize: 13, fontWeight: "600", color: "#795817" },
 });

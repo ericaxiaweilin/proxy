@@ -6,6 +6,15 @@ same commit. Do not record routine business logic changes here.
 
 ## Revision 19 — 2026-09-04
 
+- 对话中 "活动" 按钮发出的 proxyObject 不再 hardcoded
+  "act_westlake" (一个 server 不存在的 ID). 现在 conversation
+  sheet picker 从 server listActivities() 选真实活动, 发
+  真 ID. tripwire CHAT-PROXY-ACTIVITY-001 跳防 hardcoded
+  fallback 重现。“点聊天活动” 路径与“我的活动”页在 server
+  同一份仓储。
+
+## Revision 19 — 2026-09-04
+
 - 平台 AI 5 角色 (ai_001-ai_005) 冷启动活动带 photo 资产。
   apps/mobile/assets/ai-personas/ 下五个统一风格 SVG 头像
   (紫/粉/绿/橙/金主题 + AI 虚拟 badge); ActivitySchema 增

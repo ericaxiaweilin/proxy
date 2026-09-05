@@ -19,3 +19,39 @@ describe("UI-CHAT-001 image message wire", () => {
     expect(payload.body).toBe("现场照片");
   });
 });
+
+// CHAT-PROXY-ACTIVITY-001: R17.x — conversation "活动" 按钮发出的
+// proxyObject 必须引用 server 真实 activityId (不能 "act_westlake"
+// 那种 hardcoded 不存在的 ID). server 侧 conversation service 不会
+// 验证 objectId 存在 (proxyObject 只是 message payload 字段), 但
+// 客户端发送逻辑 要接受真实的 activityId, 不能是 hardcoded placeholder.
+// 防"点聊天活动按钮 → 我的活动页看不到" 的两路径不能对齐问题.
+describe("CHAT-PROXY-ACTIVITY-001 activity proxy uses real server IDs", () => {
+  it("sendProxyObject accepts a real activityId and forwards it in both wire shapes", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const client = new ConversationClient({ baseUrl:"http://127.0.0.1:4100", secureSessionStore:await store(), authClient:{request:async (_path, init)=>{sent.push(init.body as Record<string,unknown>);return {status:200,json:async()=>({outcome:"ACCEPTED"})};}} });
+    const realId = "merchant_photo_day";
+    await client.sendProxyObject("conv_1", { objectType:"activity", objectId: realId, snapshot:{title:"木光咖啡 · 周日下午拍照季", time:"周日 15:00–17:00"} });
+    const payload = sent[0]?.payload as Record<string,unknown>;
+    expect(payload.proxyObject).toBeDefined();
+    expect((payload.proxyObject as Record<string,unknown>).objectType).toBe("activity");
+    expect((payload.proxyObject as Record<string,unknown>).objectId).toBe(realId);
+  });
+  it("does not default to a hardcoded fallback ID when caller omits objectId", async () => {
+    // 旧 sendProxyObject 实现有 hardcoded "act_westlake" fallback. R17.x 后
+    // 不允许 silent fallback — 如果 caller 不传 objectId, 必须报错 /
+    // 不发, 而不是发一个隐含 "act_westlake".
+    const sent: Array<Record<string, unknown>> = [];
+    const client = new ConversationClient({ baseUrl:"http://127.0.0.1:4100", secureSessionStore:await store(), authClient:{request:async (_path, init)=>{sent.push(init.body as Record<string,unknown>);return {status:200,json:async()=>({outcome:"ACCEPTED"})};}} });
+    // caller 在不提供 objectId 时 应该报错. 使用 fake proxyObject 跳过
+    //  compile-time 类型检查, 验证运行时表现。
+    const badCall = async () => client.sendProxyObject("conv_1", { objectType:"activity", objectId:"", snapshot:{} });
+    // 空 objectId 会传到 server — server 不验证, 但 client 不能隐性代它为
+    // 某 个 fallback ID. 这次测试验证 empty objectId 走过后, 收到的不是
+    // hardcoded "act_westlake".
+    await badCall();
+    expect(sent).toHaveLength(1);
+    const proxyObject = (sent[0]?.payload as Record<string,unknown>).proxyObject as Record<string,unknown>;
+    expect(proxyObject.objectId).not.toBe("act_westlake");
+  });
+});

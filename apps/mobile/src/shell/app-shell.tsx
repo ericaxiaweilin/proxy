@@ -532,6 +532,7 @@ export function AppShell({
             <ConversationSurface
               author={feedChatAuthor}
               conversationClient={conversation}
+              activityClient={activities}
               mediaClient={media}
               onBack={() => setFeedChatAuthor(undefined)}
             />
@@ -563,6 +564,7 @@ export function AppShell({
               author={messageChatAuthor}
               {...(messageChat?.conversationId ? { conversationId: messageChat.conversationId } : {})}
               conversationClient={conversation}
+              activityClient={activities}
               mediaClient={media}
               onBack={() => setMessageChat(undefined)}
             />

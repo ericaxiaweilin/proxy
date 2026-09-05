@@ -91,6 +91,8 @@
       "implementationFiles": [
         "apps/mobile/src/surfaces/tasks.tsx",
         "apps/mobile/src/surfaces/me-orders.tsx",
+        "apps/mobile/src/surfaces/conversation.tsx",
+        "apps/mobile/src/shell/app-shell.tsx",
         "apps/mobile/assets/ai-personas/ai_001.svg",
         "apps/mobile/assets/ai-personas/ai_002.svg",
         "apps/mobile/assets/ai-personas/ai_003.svg",
@@ -108,7 +110,7 @@
         "scripts/check-regression-contracts.sh"
       ],
       "status": "PARTIAL",
-      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); R17.x '我的活动' 物化路径已走 server+PG+mobile surface (ListMyActivities wire end-to-end; hardcoded mock removed); R17.x 平台 AI 5 角色 (ai_001-ai_005) 带 photo 资产 (SVG 在 apps/mobile/assets/ai-personas/) 接 server+contracts+surface. Chat-derivation (R17.x 后绕 chat 中 '下单/提单/活动' 表述到 server 真实 Order/Activity) 仍 pending."
+      "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); R17.x '我的活动' 物化路径已走 server+PG+mobile surface (ListMyActivities wire end-to-end; hardcoded mock removed); R17.x 平台 AI 5 角色 (ai_001-ai_005) 带 photo 资产 (SVG 在 apps/mobile/assets/ai-personas/) 接 server+contracts+surface; R17.x 对话 '活动' 按钮 sheet picker 接 server listActivities() 选真活动发 proxyObject (CHAT-PROXY-ACTIVITY-001 tripwire). Chat-derivation (对话 → 订单) 仍 pending (commit 5 中 走: composer 加 '提单' 按钮 -> OpportunityPicker -> fulfillment.createOffer -> 真 Order ID 发 proxyObject)."
     }
   ]
 }
