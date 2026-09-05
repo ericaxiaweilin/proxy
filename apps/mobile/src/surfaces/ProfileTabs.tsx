@@ -520,12 +520,6 @@ function AboutTab(props: {
         <Text style={styles.aboutMetaValue}>@{props.profileDraft.handle}</Text>
       </View>
       <View style={styles.aboutDivider} />
-      <View style={styles.aboutStatsRow}>
-        <AboutStat label="已履约" value="42" hint="98% 准时" />
-        <AboutStat label="复购" value="7" hint="稳定" />
-        <AboutStat label="认证" value="✓" hint="真实性已校验" />
-      </View>
-      <View style={styles.aboutDivider} />
       <View style={styles.aboutStatBig}>
         <Text style={styles.aboutStatBigLabel}>粉丝 / 关注 / 帖子</Text>
         <Text style={styles.aboutStatBigValue}>

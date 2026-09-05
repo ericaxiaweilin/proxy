@@ -4,6 +4,53 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 36 — 2026-09-05
+
+- Closed the 'me hub + bdash' remaining fabrication
+  gaps and removed three dead subPages. The '个人总管理'
+  (personalmanage) subPage used to render
+  '已验证 · 准时 98%' as the city line; the personalhub
+  AboutTab used to render '已履约 42 · 98% 准时 · 复购 7
+  · ✓ 真实性已校验' as a fabricated stats row; the bdash
+  (企业 / 店铺资料) hero used to render the hardcoded
+  'Bonsaidon' + '海鲜自助 · 河内 · 主体已验证' regardless
+  of which business the user actually owns. The
+  REQUESTER_ME persona `desc` also carried the fake
+  '河内 ✓ 已验证 · 准时 98%' stat. This revision:
+  - personalmanage: city line now reads the live
+    profileDraft.city (server-backed via ProfileClient).
+  - personalhub AboutTab: the fake stats row is
+    removed; the about card now shows only the bio,
+    city, handle, and the real followers/following/posts
+    counts.
+  - bdash hero: pulls the live shop name via
+    useMerchantIdentity (the same hook tasks.tsx +
+    market.tsx use) and falls back to the persona name
+    when the user has no shop yet. The fake
+    '主体已验证' badge is gone.
+  - REQUESTER_ME persona `desc`: the fake '已验证 · 准时
+    98%' is replaced with '河内 · 个人身份', which is
+    descriptive context, not a reputation claim.
+  - me-sub-pages.ts: 'personalhub' / 'myscenes' fixture
+    sections lose the fake '准时 98%' / '已履约 42' /
+    '复购 7' rows.
+  - Dead subPages removed from me.tsx + me-sub-pages.ts:
+    'messages' (4 hardcoded threads Linh / Bonsaidon /
+    Mai / 西湖摄影散步), 'requestermemory' (5 hardcoded
+    confirmed + suggested memories), and
+    'businessdiagnostic' (Bonsaidon + 78 health / 248
+    到店 / 6.2M 成交额 / 172 新客户 / 38 复购 / 37% /
+    +22% — 8 fabricated business metrics in a single
+    render). All three were unreached from any menu row,
+    from meOwnedRouteForLabel, or from any setSubPage
+    call. memorySourceLabel helper, also only used by
+    requestermemory, is removed.
+  - FAKE-STATS-001 tripwire (grep guard on the live
+    surfaces).
+  - DEAD-SUBPAGE-001 tripwire (grep guard on the three
+    removed subPages; me-sub-pages.ts must not
+    re-introduce them).
+
 ## Revision 35 — 2026-09-05
 
 - Closed the me-hub social badge gap. The hub top

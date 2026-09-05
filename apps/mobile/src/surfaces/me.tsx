@@ -53,6 +53,7 @@ import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES,
 import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel } from "./me-profile-components";
 import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface } from "./me-orders";
 import { SUB_PAGE_CONTENT } from "./me-sub-pages";
+import { useMerchantIdentity } from "../use-merchant-identity";
 import { styles } from "./me-styles";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
@@ -86,7 +87,7 @@ const REQUESTER_ME: PersonaConfig = {
   avatarText: "H",
   avatarGrad: false,
   name: "Huyen",
-  desc: "河内 ✓ 已验证 · 准时 98%",
+  desc: "河内 · 个人身份",
   identityActionLabel: "切换身份",
   identityActionSwitch: true,
   profileCard: {
@@ -188,16 +189,6 @@ const PERSONA: Record<ActiveContext, PersonaConfig> = {
   REQUESTER: REQUESTER_ME,
   BUSINESS: BUSINESS_ME
 };
-
-function memorySourceLabel(source: string): string {
-  switch (source) {
-    case "EXPLICIT": return "用户设置";
-    case "EXPLICIT_ACCEPT": return "用户确认";
-    case "INFERRED": return "系统推断";
-    case "SUGGESTED": return "系统建议";
-    default: return source;
-  }
-}
 
 function toManagedMenuSections(sections: ExperienceMenuSection[]): MenuSection[] {
   return sections.map((section) => ({
@@ -306,6 +297,17 @@ export function MeSurface({
   const [availability, setAvailability] = useState<AvailabilityState>("AVAILABLE");
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [enterpriseOpsStage, setEnterpriseOpsStage] = useState<EnterpriseOpsStage>("READY");
+  // R18.x BDASH-SHOP-001: the bdash (企业 / 店铺资料) hero
+  // used to render the hardcoded "Bonsaidon" + "海鲜自助 ·
+  // 河内 · 主体已验证" stat. The verified stat is fabricated;
+  // the shop name is whatever the user actually owns on the
+  // server. Pull the live accounts via useMerchantIdentity
+  // (the same hook tasks.tsx / market.tsx use) and prefer
+  // the first ACTIVE account for the hero. If the user has
+  // no shop yet, fall back to the persona name + drop the
+  // fake verified badge entirely.
+  const merchantIdentity = useMerchantIdentity();
+  const liveShopName = merchantIdentity.accounts[0]?.name;
   const [enterpriseOpsAssets, setEnterpriseOpsAssets] = useState(3);
   const [abilities, setAbilities] = useState<AbilityInstance[]>(DEFAULT_ABILITIES);
   const [abilitySheet, setAbilitySheet] = useState<{ mode: "ADD" | "EDIT"; type: AbilityType; id?: string }>();
@@ -1176,124 +1178,6 @@ export function MeSurface({
       );
     }
 
-    if (subPage.route === "messages") {
-      const threads = [
-        ["L", "Linh", "人物", "周六下午有时间，可以聊一下。", "18:42", "2"],
-        ["B", "Bonsaidon", "订单", "地点改到西湖这边，可以吗？", "17:18", "1"],
-        ["M", "Mai", "好友", "好的，到时候联系你。", "昨天", ""],
-        ["○", "西湖摄影散步", "活动", "Luna：我也会带相机过去。", "昨天", "5"]
-      ];
-      return contentWrapper(
-        <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
-            </Pressable>
-            <View style={styles.messagesHead}>
-              <View><Text style={styles.detailTitle}>消息</Text><Text style={styles.detailSub}>聊天与真实关系</Text></View>
-              <View style={styles.messagesHeadActions}><View style={styles.messageIconButton}><Text style={styles.messageIconText}>♢</Text><View style={styles.messageNoticeDot} /></View><Pressable onPress={() => openSubPage("addfriend")} style={styles.messageIconButton}><Text style={styles.messageIconText}>＋</Text></Pressable></View>
-            </View>
-            <View style={styles.messageTabs}><View style={styles.messageTabActive}><Text style={styles.messageTabActiveText}>聊天</Text></View><View style={styles.messageTab}><Text style={styles.messageTabText}>好友</Text></View></View>
-            <Pressable onPress={() => openSubPage("addfriend")} style={styles.messageThread}>
-              <View style={[styles.messageAvatar, styles.messageAvatarSoft]}><Text style={styles.messageAvatarText}>＋</Text></View>
-              <View style={styles.messageThreadCopy}><Text style={styles.messageThreadName}>好友请求</Text><Text style={styles.messageThreadPreview}>2 个待处理</Text></View><Text style={styles.messageChev}>›</Text>
-            </Pressable>
-            {threads.map(([initial, name, contextLabel, preview, time, unread]) => (
-              <View key={name} style={styles.messageThread}>
-                <View style={[styles.messageAvatar, name === "Bonsaidon" && styles.messageAvatarDark]}><Text style={styles.messageAvatarText}>{initial}</Text></View>
-                <View style={styles.messageThreadCopy}><View style={styles.messageThreadTop}><Text style={styles.messageThreadName}>{name}</Text><Text style={styles.messageContext}>{contextLabel}</Text></View><Text numberOfLines={1} style={styles.messageThreadPreview}>{preview}</Text></View>
-                <View style={styles.messageThreadMeta}><Text style={styles.messageTime}>{time}</Text>{unread ? <View style={styles.messageUnread}><Text style={styles.messageUnreadText}>{unread}</Text></View> : null}</View>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      );
-    }
-
-    if (subPage.route === "requestermemory") {
-      const confirmedMemories = [
-        { key: "city", label: "常用城市", value: "河内 · 还剑湖附近", source: "EXPLICIT" },
-        { key: "strategy", label: "匹配策略", value: "优先本地同行 + 英语验证", source: "EXPLICIT_ACCEPT" },
-        { key: "budget", label: "预算偏好", value: "500k–1.2M ₫ / 半天", source: "INFERRED" }
-      ];
-      const suggestedMemories = [
-        { key: "style", label: "出行风格", value: "轻松拍照路线 · 少景点多咖啡", source: "SUGGESTED" },
-        { key: "language", label: "语言偏好", value: "中文为主 · 可英文", source: "SUGGESTED" }
-      ];
-
-      return contentWrapper(
-        <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
-            </Pressable>
-            <Text style={styles.subPageTitle}>{subPage.title}</Text>
-            <Text style={styles.subPageDesc}>{subPage.desc}</Text>
-
-            <View style={styles.memorySection}>
-              <View style={styles.memorySectionHead}>
-                <Text style={styles.memorySectionTitle}>已记住</Text>
-                <Text style={styles.memorySectionCount}>{confirmedMemories.length} 项</Text>
-              </View>
-              {confirmedMemories.map((m) => (
-                <View key={m.key} style={styles.memoryCard}>
-                  <View style={styles.memoryCardBody}>
-                    <View style={styles.memoryCardLeft}>
-                      <Text style={styles.memoryLabel}>{m.label}</Text>
-                      <Text style={styles.memoryValue}>{m.value}</Text>
-                      <Text style={styles.memorySource}>{memorySourceLabel(m.source)} · 点按可修改</Text>
-                    </View>
-                    <View style={styles.memoryCardRight}>
-                      <View style={styles.memoryStatusConfirmed}>
-                        <Text style={styles.memoryStatusText}>已记住</Text>
-                      </View>
-                      <Text style={styles.memoryChev}>›</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.memorySection}>
-              <View style={styles.memorySectionHead}>
-                <Text style={styles.memorySectionTitle}>建议你确认</Text>
-                <Text style={styles.memorySectionCount}>{suggestedMemories.length} 项 · 不会自动生效</Text>
-              </View>
-              {suggestedMemories.map((m) => (
-                <View key={m.key} style={styles.memoryCard}>
-                  <View style={styles.memoryCardBody}>
-                    <View style={styles.memoryCardLeft}>
-                      <Text style={styles.memoryLabel}>{m.label}</Text>
-                      <Text style={styles.memoryValue}>{m.value}</Text>
-                      <Text style={styles.memorySource}>{memorySourceLabel(m.source)} · 点按可修改</Text>
-                    </View>
-                    <View style={styles.memoryCardRight}>
-                      <View style={styles.memoryStatusSuggested}>
-                        <Text style={styles.memoryStatusTextSuggested}>建议确认</Text>
-                      </View>
-                      <Text style={styles.memoryChev}>›</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.memoryDarkCard}>
-              <Text style={styles.memoryDarkTitle}>已确认的复查重点</Text>
-              <Text style={styles.memoryDarkBody}>英文菜单 · 高峰接待 · 排队等待。你可以随时删除这条记忆。</Text>
-            </View>
-
-            <Pressable style={styles.memoryBtnLight}>
-              <Text style={styles.memoryBtnLightText}>查看这次结果变化</Text>
-            </Pressable>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.memoryBtnLight}>
-              <Text style={styles.memoryBtnLightText}>返回</Text>
-            </Pressable>
-          </ScrollView>
-        </View>
-      );
-    }
-
     if (subPage.route === "wallet") {
       return contentWrapper(
         <View style={styles.root}>
@@ -1357,7 +1241,7 @@ export function MeSurface({
               <View style={styles.profileManageCopy}>
                 <Text style={styles.profileManageName}>{profileDraft.name}</Text>
                 <Text style={styles.profileManageHandle}>{profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`}</Text>
-                <Text style={styles.profileManageCity}>已验证 · 准时 98%</Text>
+                <Text style={styles.profileManageCity}>{profileDraft.city || "河内"}</Text>
               </View>
               <Pressable accessibilityLabel="编辑头像" onPress={() => void chooseProfileAvatar()} style={styles.profileManageEdit}>
                 <Text style={styles.profileManageEditText}>换头像</Text>
@@ -1806,42 +1690,6 @@ export function MeSurface({
       );
     }
 
-    if (subPage.route === "businessdiagnostic") {
-      return contentWrapper(
-        <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
-            <View style={styles.diagnosticTitleRow}>
-              <Text style={styles.detailTitle}>经营诊断</Text>
-              <View style={styles.diagnosticTag}><Text style={styles.diagnosticTagText}>✦ 动态视图</Text></View>
-            </View>
-            <View style={styles.diagnosticHero}>
-              <View style={styles.diagnosticHeroTop}>
-                <View><Text style={styles.diagnosticHeroTitle}>Bonsaidon · 今天</Text><Text style={styles.diagnosticHeroText}>模型根据经营目标和实时 Read Model，组合今天最值得处理的信息。</Text></View>
-                <View><Text style={styles.diagnosticScore}>78</Text><Text style={styles.diagnosticScoreLabel}>经营健康度 / 100</Text></View>
-              </View>
-              <View style={styles.diagnosticMetrics}>{[["248", "到店"], ["6.2M", "成交额"], ["172", "新客户"], ["38", "复购客户"]].map(([value, label]) => <View key={label} style={styles.diagnosticMetric}><Text style={styles.diagnosticMetricValue}>{value}</Text><Text style={styles.diagnosticMetricLabel}>{label}</Text></View>)}</View>
-            </View>
-            <View style={styles.diagnosticInsightGrid}>
-              <View style={styles.diagnosticInsight}><Text style={styles.diagnosticInsightKicker}>需要关注</Text><Text style={styles.diagnosticInsightValue}>37%</Text><Text style={styles.diagnosticInsightText}>14:00–17:00 时段利用率低于近 4 周平均。</Text></View>
-              <View style={styles.diagnosticInsight}><Text style={styles.diagnosticInsightKicker}>表现较好</Text><Text style={styles.diagnosticInsightValue}>+22%</Text><Text style={styles.diagnosticInsightText}>本周新客户增长明显，可继续放大当前活动来源。</Text></View>
-            </View>
-            <View style={styles.diagnosticActions}>
-              <View style={styles.diagnosticActionsHead}><Text style={styles.diagnosticActionsTitle}>建议动作</Text><Text style={styles.diagnosticActionsHint}>模型提议 · 人确认</Text></View>
-              <View style={styles.diagnosticActionItem}><Text style={styles.diagnosticActionTitle}>创建下午低峰活动</Text><Text style={styles.diagnosticActionText}>30 份限时权益 · 14:00–17:00 · 只向相关 Intent 用户分发</Text></View>
-              <View style={styles.diagnosticActionItem}><Text style={styles.diagnosticActionTitle}>补 1 位活动执行者</Text><Text style={styles.diagnosticActionText}>从真实合作网络优先邀请，若不足再开放合格供给</Text></View>
-              <View style={styles.diagnosticActionButtons}>
-                <Pressable onPress={() => openSubPage("merchantcampaign")} style={styles.diagnosticCreate}><Text style={styles.diagnosticCreateText}>创建活动</Text></Pressable>
-                <Pressable onPress={() => openSubPage("trustedteam")} style={styles.diagnosticFind}><Text style={styles.diagnosticFindText}>找执行者</Text></Pressable>
-              </View>
-            </View>
-            <View style={styles.diagnosticRecipe}><Text style={styles.diagnosticRecipeTitle}>可复用 UI Recipe</Text><Text style={styles.diagnosticRecipeText}>BUSINESS_DIAG@monthly_DIAGNOSTIC · 结构复用；本次指标、异常、建议动作重新 Hydrate。模型不能把自己推断的数字写成经营真相。</Text></View>
-            <Pressable accessibilityLabel="返回我的企业" onPress={() => setSubPage(undefined)} style={styles.trustedReturn}><Text style={styles.trustedReturnText}>返回我的企业</Text></Pressable>
-          </ScrollView>
-        </View>
-      );
-    }
-
     if (subPage.route === "bdash") {
       return contentWrapper(
         <View style={styles.root}>
@@ -1857,8 +1705,8 @@ export function MeSurface({
                   <Text style={styles.storeAvatarText}>B</Text>
                 </Gradient>
                 <View style={styles.heroCopy}>
-                  <Text style={styles.heroName}>Bonsaidon</Text>
-                  <Text style={styles.heroMeta}>海鲜自助 · 河内 · 主体已验证</Text>
+                  <Text style={styles.heroName}>{liveShopName ?? persona.name}</Text>
+                  <Text style={styles.heroMeta}>{liveShopName ? "我的店铺" : (persona.contextLineLabel ?? "")}</Text>
                 </View>
               </View>
             </View>

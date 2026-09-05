@@ -573,6 +573,41 @@ if grep -q 'persona\.profileCard\.social\.map' apps/mobile/src/surfaces/me.tsx; 
 fi
 echo "    HUB-SOCIAL-001: PASS (hub card shows only live socialAccounts with public visibility; no hardcoded persona.profileCard.social)"
 
+# FAKE-STATS-001: the me hub used to hardcode fake
+# "已验证 · 准时 98%" / "主体已验证" / "真实性已校验" /
+# "已完成 42 / 复购 7 / 98% 准时" stats across the profile
+# card, identity card, bdash hero, personalhub about card,
+# and personalmanage subpage. None of these are computed;
+# they fabricated a reputation score the system has never
+# recorded. Tripwire: any live surface must not contain
+# these literal fake-stat strings.
+LIVE_SURFACES="apps/mobile/src/surfaces/me.tsx apps/mobile/src/surfaces/ProfileTabs.tsx"
+if echo "$LIVE_SURFACES" | xargs grep -E '已验证 · 准时 98|主体已验证|真实性已校验' 2>/dev/null | grep -v "// "; then
+  echo "  FAIL [FAKE-STATS-001]: live surface still renders a fabricated verification stat" >&2
+  exit 1
+fi
+echo "    FAKE-STATS-001: PASS (no fabricated '已验证 · 准时 98%' / '主体已验证' / '真实性已校验' in live surfaces)"
+
+# DEAD-SUBPAGE-001: 3 dead subPages that used to ship
+# hardcoded mock data have been removed from me.tsx +
+# me-sub-pages.ts. The dead routes were 'messages',
+# 'requestermemory', and 'businessdiagnostic'. None of
+# these are reachable from any menu row, from
+# meOwnedRouteForLabel, or from any setSubPage call in
+# the codebase, so deleting them is a pure cleanup.
+# Tripwire: no surface may set the subPage to one of
+# the deleted routes, and me-sub-pages.ts must not
+# re-introduce the entries.
+if grep -rn 'setSubPage.*"messages"\|setSubPage.*"requestermemory"\|setSubPage.*"businessdiagnostic"\|openSubPage.*"messages"\|openSubPage.*"requestermemory"\|openSubPage.*"businessdiagnostic"' apps/mobile/src/ 2>/dev/null | grep -v ".test."; then
+  echo "  FAIL [DEAD-SUBPAGE-001]: a deleted dead subPage is being routed to again" >&2
+  exit 1
+fi
+if grep -E '^  messages:|^  requestermemory:|^  businessdiagnostic:' apps/mobile/src/surfaces/me-sub-pages.ts 2>/dev/null; then
+  echo "  FAIL [DEAD-SUBPAGE-001]: me-sub-pages.ts re-introduced a dead entry" >&2
+  exit 1
+fi
+echo "    DEAD-SUBPAGE-001: PASS (messages / requestermemory / businessdiagnostic dead subPages are gone)"
+
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
 pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts

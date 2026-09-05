@@ -37,11 +37,6 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     icon: "✨",
     sections: []
   },
-  requestermemory: {
-    title: "Proxy 记住了什么？",
-    desc: "只保留能让下一次更省事的偏好。你可以随时改掉，也可以不接受任何建议。",
-    icon: "◎"
-  },
   participate: {
     title: "参与运营 · 网络贡献",
     desc: "推荐靠谱司机 / Agent、好商家或真实新用户。Proxy 自动做归因、审核、进度跟踪和奖励结算。",
@@ -285,12 +280,6 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     desc: "把个人状态、Proxy 信誉、外部社媒和二维码放进一个用户可控的个人中枢。",
     icon: "○",
     sections: [
-      { title: "Profile", rows: [
-        { label: "Huyen", value: "河内 · 已验证 · 个人主页公开" },
-        { label: "准时", value: "98%" },
-        { label: "已履约", value: "42" },
-        { label: "复购", value: "7" }
-      ]},
       { title: "Proxy Personal QR", rows: [
         { label: "二维码", value: "一个二维码承接你的 Proxy 主页，再由你决定 TikTok、Zalo、Instagram 等是否展示" }
       ]},
@@ -367,29 +356,6 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
       ]}
     ]
   },
-  messages: {
-    title: "消息 · Unified Inbox",
-    desc: "人与人的聊天、好友关系和系统通知各有明确边界。",
-    icon: "✉",
-    sections: [
-      { title: "好友请求", rows: [
-        { label: "Eric", value: "河内 · 2 个共同好友 · Proxy QR" },
-        { label: "Trang", value: "北宁 · 通讯录匹配" }
-      ]},
-      { title: "聊天", rows: [
-        { label: "Linh · 人物", value: "摄影 · 河内 · 周六下午有时间，可以聊一下。" },
-        { label: "Bonsaidon · 订单", value: "谈判 · 今天 18:00 · 已接单 · 距开始 01:21" },
-        { label: "Mai · 好友", value: "Mai · 城市同行 · TikTok 已关联" },
-        { label: "西湖摄影散步 · 活动", value: "周六 15:30 · 8 / 12 已参加" }
-      ]},
-      { title: "好友", rows: [
-        { label: "Mai", value: "河内 · 摄影 / 城市同行 · 共同好友 2" },
-        { label: "An", value: "河内 · 本地生活 · 合作过 1 次" },
-        { label: "Luna", value: "河内 · 活动 / 摄影 · 最近认识" },
-        { label: "Khoa", value: "河内 · 活动执行 · 共同活动 3" }
-      ]}
-    ]
-  },
   addfriend: {
     title: "添加好友",
     desc: "关系入口统一，但不同来源只产生 Relationship Signal；不会未经确认直接建立 Proxy 好友。",
@@ -430,29 +396,6 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
         { label: "Eric 想加你为好友", value: "来自 Proxy QR · 2 个共同好友 · 17:12" },
         { label: "活动有新消息", value: "西湖摄影散步 · 新增 2 位参加者 · 16:40" },
         { label: "TikTok 账号归属已确认", value: "@huyen.life · 公开范围仍由你决定 · 昨天" }
-      ]}
-    ]
-  },
-  businessdiagnostic: {
-    title: "经营诊断",
-    desc: "模型根据经营目标和实时 Read Model，组合今天最值得处理的信息。",
-    icon: "✦",
-    sections: [
-      { title: "Bonsaidon · 今天 · 经营健康度", rows: [
-        { label: "到店", value: "248" },
-        { label: "成交额", value: "6.2M" },
-        { label: "新客户", value: "172" },
-        { label: "复购客户", value: "38" }
-      ]},
-      { title: "需要关注", rows: [
-        { label: "14:00–17:00 时段利用率", value: "低于近 4 周平均 · 37%" }
-      ]},
-      { title: "表现较好", rows: [
-        { label: "本周新客户增长", value: "+22% · 可继续放大当前活动来源" }
-      ]},
-      { title: "建议动作 · 模型提议 · 人确认", rows: [
-        { label: "创建下午低峰活动", value: "30 份限时权益 · 14:00–17:00 · 只向相关 Intent 用户分发" },
-        { label: "补 1 位活动执行者", value: "从真实合作网络优先邀请，若不足再开放合格供给" }
       ]}
     ]
   },
