@@ -17,8 +17,12 @@ same commit. Do not record routine business logic changes here.
   /038) and an in-memory repository. Asset paths are constrained to
   Proxy-internal prefixes (ai-personas/, assets/, store/, photo_); an
   external URL on the photo or logo path is rejected with
-  INVALID_ASSET_PATH. Tripwires: STORE-PHOTO-001, STORE-LINES-001,
-  MERCHANT-DIRECTORY-001, MERCHANT-SPEND-DAILY-001.
+  INVALID_ASSET_PATH. Mobile commit (de2538e) wires the new
+  BusinessClient methods, the photo picker
+  (retainStorePhoto + ImagePicker.launchImageLibraryAsync) and the
+  me.tsx > merchantstorefront route into MerchantStorefrontSurface
+  so the user can upload a real photo. Tripwires: STORE-PHOTO-001,
+  STORE-LINES-001, MERCHANT-DIRECTORY-001, MERCHANT-SPEND-DAILY-001.
 
 ## Revision 23 — 2026-09-05
 

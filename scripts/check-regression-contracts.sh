@@ -326,6 +326,21 @@ require_test "MERCHANT-SPEND-DAILY-001" "./internal/business" \
   "TestSpendDailyUpsertAndList" \
   "apps/api-go/internal/business/service_test.go" || exit $?
 
+# STORE-PHOTO-001 mobile half: 店铺相册 + 上传 + 详情 + 删除 全部走
+# BusinessClient (不是 hardcoded '48 张')。'me.tsx > merchantstorefront'
+# route 之前是 Bonsaidon 假数据, 现在路由到 MerchantStorefrontSurface
+# + 真接 BusinessClient. tripwire 验证 client 能 round-trip photos。
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts
+if ! grep -q 'MerchantStorefrontSurface' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [STORE-PHOTO-001 mobile]: me.tsx lost the MerchantStorefrontSurface wire" >&2
+  exit 1
+fi
+if ! grep -q 'pickAndUploadPhoto\|addStorePhoto' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "  FAIL [STORE-PHOTO-001 mobile]: MerchantStorefrontSurface lost the photo upload flow" >&2
+  exit 1
+fi
+echo "    STORE-PHOTO-001 (mobile): PASS (client + surface wire)"
+
 # UI-CHAT-001: 会话图片必须走媒体上传后的 storageKey，不能只在本地显示
 # 假预览；输入区必须保留安全区布局。
 pnpm --dir apps/mobile exec vitest run src/conversation-client.test.ts

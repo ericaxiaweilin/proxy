@@ -14,6 +14,41 @@ export type ComposerDraftSnapshot = {
 
 const draftDirectory = new Directory(Paths.document, "proxy-composer-draft");
 const snapshotFile = new File(draftDirectory, "draft-v1.json");
+const storePhotoDirectory = new Directory(Paths.document, "proxy-store-photos");
+
+export type RetainedStorePhoto = {
+  /** Proxy-internal asset_path accepted by the server's isValidAssetPath
+   *  rule (must start with 'store/'). */
+  assetPath: string;
+  /** On-device file URI for the Image source. */
+  localUri: string;
+  /** Server-side assigned id (after addStorePhoto completes). */
+  photoId?: string | undefined;
+  caption: string;
+  sortOrder: number;
+  createdAt: string;
+};
+
+export async function retainStorePhoto(input: {
+  localId: string;
+  uri: string;
+  mimeType?: string;
+}): Promise<RetainedStorePhoto> {
+  storePhotoDirectory.create({ idempotent: true, intermediates: true });
+  const extension = input.mimeType === "image/png" ? ".png"
+    : input.mimeType === "image/webp" ? ".webp"
+    : input.mimeType === "image/heic" || input.mimeType === "image/heif" ? ".heic"
+      : ".jpg";
+  const retained = new File(storePhotoDirectory, `${input.localId}${extension}`);
+  await new File(input.uri).copy(retained, { overwrite: true });
+  return {
+    assetPath: `store/${input.localId}${extension}`,
+    localUri: retained.uri,
+    caption: "",
+    sortOrder: 0,
+    createdAt: new Date().toISOString(),
+  };
+}
 
 export async function retainComposerImage(item: DraftMediaItem): Promise<DraftMediaItem> {
   draftDirectory.create({ idempotent: true, intermediates: true });

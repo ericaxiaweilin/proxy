@@ -19,6 +19,7 @@ import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { MerchantMeR21 } from "./merchant-me-r21";
+import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
 import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
@@ -1708,77 +1709,24 @@ export function MeSurface({
     }
 
     if (subPage.route === "merchantstorefront") {
-      return contentWrapper(
-        <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
+      if (business) {
+        return contentWrapper(
+          <View style={styles.root}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text style={styles.subPageTitle}>线上店铺</Text>
-
-            <View style={styles.storeTop}>
-              <View style={styles.storeTopRow}>
-                <Gradient from={color.magenta} to={color.violet} style={styles.storeAvatar}>
-                  <Text style={styles.storeAvatarText}>B</Text>
-                </Gradient>
-                <View style={styles.heroCopy}>
-                  <Text style={styles.heroName}>Bonsaidon</Text>
-                  <Text style={styles.heroMeta}>海鲜自助 · 河内 · 3 个经营节点</Text>
-                </View>
-              </View>
-              <View style={styles.storeStats}>
-                {[["12", "在售 Offer"], ["148", "今日订单"], ["4.8", "门店评分"]].map(([v, l]) => (
-                  <View key={l} style={styles.storeStatItem}>
-                    <Text style={styles.storeStatValue}>{v}</Text>
-                    <Text style={styles.storeStatLabel}>{l}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            <QrCard
-              title="Bonsaidon · Proxy 店铺"
-              desc="扫码直接进入门店主页，看到在售 Offer 与真实到店核销。"
-              actionLabel="打开店铺二维码"
-              onAction={() => openSubPage("personalqr")}
-            />
-
-            <Text style={styles.customSectionTitle}>经营入口</Text>
-            <Text style={styles.customSectionHint}>Storefront</Text>
-            <View style={styles.bizGrid}>
-              {[
-                ["▤", "商品 / 服务", "套餐、预约、权益与库存"],
-                ["↗", "活动 Offer", "低峰、拉新与限时权益", "merchantcampaign"],
-                ["◇", "订单", "待确认、履约、退款、完成"],
-                ["◎", "客户", "新客、复购与来源"]
-              ].map(([icon, label, desc, route]) => (
-                <Pressable
-                  key={label}
-                  disabled={!route}
-                  accessibilityState={{ disabled: !route }}
-                  onPress={route ? () => openSubPage(route) : undefined}
-                  style={[styles.bizTile, !route ? { opacity: 0.55 } : null]}
-                >
-                  <View style={styles.bizTileIcon}>
-                    <Text style={styles.bizTileIconText}>{icon}</Text>
-                  </View>
-                  <Text style={styles.bizTileLabel}>{label}</Text>
-                  <Text style={styles.bizTileDesc}>{route ? desc : `${desc} · 待接入`}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={styles.customSectionTitle}>今天的 Offer</Text>
-            <Text style={styles.customSectionHint}>设计预览 · 非实时数据</Text>
-            <View style={styles.offerCard}>
-              <Text style={styles.offerTitle}>海鲜自助 · 工作日下午场</Text>
-              <Text style={styles.offerMeta}>14:00–17:00 · 399k → 329k · 余 24 份</Text>
-            </View>
-            <View style={styles.offerCard}>
-              <Text style={styles.offerTitle}>双人晚餐 · 预约套餐</Text>
-              <Text style={styles.offerMeta}>18:00–21:00 · 2 人 · 余 11 组</Text>
-            </View>
-          </ScrollView>
+            <MerchantStorefrontSurface client={business} viewerAccountId={viewerAccountId} />
+          </View>
+        );
+      }
+      return contentWrapper(
+        <View style={styles.root}>
+          <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+            <Text style={styles.subPageBackText}>‹ 返回</Text>
+          </Pressable>
+          <Text style={styles.subPageTitle}>线上店铺</Text>
+          <View style={styles.infoNote}><Text style={styles.infoNoteText}>请在 “商家” Tab 登录后查看</Text></View>
         </View>
       );
     }

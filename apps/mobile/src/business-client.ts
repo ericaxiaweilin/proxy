@@ -34,9 +34,128 @@ export class BusinessClient {
     return { storeId: requiredString(body, "storeId") };
   }
 
-  public async listStores(businessId: string): Promise<unknown[]> {
+  public async listStores(businessId: string): Promise<Array<{ id: string; businessId: string; name: string; address: string; status: string }>> {
     const body = this.body(await this.command("ListBusinessStores", { type: "BusinessAccount", id: businessId }, { businessId }));
-    return (body.stores as unknown[]) ?? [];
+    if (!Array.isArray(body.stores)) throw new Error("business stores malformed");
+    return body.stores as Array<{ id: string; businessId: string; name: string; address: string; status: string }>;
+  }
+
+  public async getStore(storeId: string): Promise<{ id: string; businessId: string; name: string; address: string; status: string }> {
+    const body = this.body(await this.command("GetBusinessStore", { type: "Store", id: storeId }, { storeId }));
+    const store = body.store as { id: string; businessId: string; name: string; address: string; status: string };
+    if (!store?.id) throw new Error("business store not found");
+    return store;
+  }
+
+  public async addStorePhoto(input: {
+    storeId: string;
+    assetPath: string;
+    caption?: string;
+    sortOrder?: number;
+  }): Promise<{ id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; createdAt: string }> {
+    const body = this.body(await this.command("AddStorePhoto", { type: "Store", id: input.storeId }, {
+      storeId: input.storeId,
+      assetPath: input.assetPath,
+      caption: input.caption ?? "",
+      sortOrder: input.sortOrder ?? 0,
+    }));
+    const photo = body.photo as { id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; createdAt: string };
+    if (!photo?.id) throw new Error("store photo create response malformed");
+    return photo;
+  }
+
+  public async listStorePhotos(storeId: string): Promise<Array<{ id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; createdAt: string }>> {
+    const body = this.body(await this.command("ListStorePhotos", { type: "Store", id: storeId }, { storeId }));
+    if (!Array.isArray(body.photos)) throw new Error("store photos malformed");
+    return body.photos as Array<{ id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; createdAt: string }>;
+  }
+
+  public async deleteStorePhoto(storeId: string, photoId: string): Promise<void> {
+    await this.command("DeleteStorePhoto", { type: "Store", id: storeId }, { storeId, photoId });
+  }
+
+  public async upsertStoreLines(input: {
+    storeId: string;
+    logoAssetPath?: string;
+    description?: string;
+    hoursJson?: string;
+    contactPhone?: string;
+    contactEmail?: string;
+  }): Promise<{ storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string }> {
+    const body = this.body(await this.command("UpsertStoreLines", { type: "Store", id: input.storeId }, {
+      storeId: input.storeId,
+      logoAssetPath: input.logoAssetPath ?? "",
+      description: input.description ?? "",
+      hoursJson: input.hoursJson ?? "{}",
+      contactPhone: input.contactPhone ?? "",
+      contactEmail: input.contactEmail ?? "",
+    }));
+    const lines = body.lines as { storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string };
+    if (!lines?.storeId) throw new Error("store lines upsert response malformed");
+    return lines;
+  }
+
+  public async getStoreLines(storeId: string): Promise<{ storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string }> {
+    const body = this.body(await this.command("GetStoreLines", { type: "Store", id: storeId }, { storeId }));
+    return body.lines as { storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string };
+  }
+
+  public async listMemberDirectory(businessId: string): Promise<Array<{ businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string }>> {
+    const body = this.body(await this.command("ListMemberDirectory", { type: "BusinessAccount", id: businessId }, { businessId }));
+    if (!Array.isArray(body.members)) throw new Error("member directory malformed");
+    return body.members as Array<{ businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string }>;
+  }
+
+  public async upsertMemberDirectory(input: {
+    businessId: string;
+    userId: string;
+    displayName: string;
+    role: string;
+    status?: string;
+  }): Promise<void> {
+    await this.command("UpsertMemberDirectory", { type: "BusinessAccount", id: input.businessId }, {
+      businessId: input.businessId,
+      userId: input.userId,
+      displayName: input.displayName,
+      role: input.role,
+      status: input.status ?? "ACTIVE",
+    });
+  }
+
+  public async listSpendDaily(input: { businessId: string; sinceDays?: number }): Promise<{
+    days: Array<{ businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number }>;
+    totalGrossMinor: number;
+    totalOrders: number;
+    sinceDays: number;
+  }> {
+    const body = this.body(await this.command("ListSpendDaily", { type: "BusinessAccount", id: input.businessId }, {
+      businessId: input.businessId,
+      sinceDays: input.sinceDays ?? 30,
+    }));
+    return {
+      days: (body.days as Array<{ businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number }>) ?? [],
+      totalGrossMinor: (body.totalGrossMinor as number) ?? 0,
+      totalOrders: (body.totalOrders as number) ?? 0,
+      sinceDays: (body.sinceDays as number) ?? 30,
+    };
+  }
+
+  public async upsertSpendDaily(input: {
+    businessId: string;
+    bucketDate: string;
+    orderCount: number;
+    grossMinor: number;
+    newCustomerCount: number;
+    returningCustomerCount: number;
+  }): Promise<void> {
+    await this.command("UpsertSpendDaily", { type: "BusinessAccount", id: input.businessId }, {
+      businessId: input.businessId,
+      bucketDate: input.bucketDate,
+      orderCount: input.orderCount,
+      grossMinor: input.grossMinor,
+      newCustomerCount: input.newCustomerCount,
+      returningCustomerCount: input.returningCustomerCount,
+    });
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {
