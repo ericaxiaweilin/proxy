@@ -1066,14 +1066,24 @@ func (s *Service) querySuppliers(ctx context.Context, e command.Envelope) comman
 			continue
 		}
 		svc, _ := s.repository.GetService(ctx, profile.AgentID, p.ServiceType)
+		windows, _ := s.repository.OverlappingWindows(ctx, profile.AgentID, start, start.Add(time.Duration(p.DurationH)*time.Hour))
+		var availability any
+		for _, window := range windows {
+			if window.Status == "AVAILABLE" && window.MarketID == p.MarketID {
+				availability = map[string]any{"startAt": window.StartAt, "endAt": window.EndAt, "marketId": window.MarketID}
+				break
+			}
+		}
 		results = append(results, map[string]any{
 			"agentId":        profile.AgentID,
 			"name":           profile.Name,
+			"photos":         profile.Photos,
 			"languages":      profile.Languages,
 			"serviceType":    p.ServiceType,
 			"referencePrice": svc.ReferencePrice,
 			"currency":       svc.Currency,
 			"eligibility":    snap,
+			"availability":   availability,
 		})
 		if len(results) >= maxSupplierResults {
 			break

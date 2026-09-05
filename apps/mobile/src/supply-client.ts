@@ -11,6 +11,39 @@ export type AgentPassport = {
   availability: Array<{ id: string; startAt: string; endAt: string; marketId: string; status: string }>;
 };
 
+export type SupplierCandidate = {
+  agentId: string;
+  name: string;
+  photos: string[];
+  languages: string[];
+  serviceType: string;
+  referencePrice: number;
+  currency: string;
+  availability?: { startAt: string; endAt: string; marketId: string };
+  eligibility: { eligible: boolean; capabilitiesOk: boolean; availabilityOk: boolean; marketOk: boolean };
+};
+
+export function parseSupplierCandidates(value: unknown): SupplierCandidate[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Record<string, unknown>;
+    if (typeof item.agentId !== "string" || typeof item.name !== "string") return [];
+    const eligibility = item.eligibility && typeof item.eligibility === "object" ? item.eligibility as Record<string, unknown> : {};
+    const availability = item.availability && typeof item.availability === "object" ? item.availability as Record<string, unknown> : undefined;
+    const parsedAvailability = availability && typeof availability.startAt === "string" && typeof availability.endAt === "string" && typeof availability.marketId === "string" ? { startAt: availability.startAt, endAt: availability.endAt, marketId: availability.marketId } : undefined;
+    return [{ agentId: item.agentId, name: item.name,
+      photos: Array.isArray(item.photos) ? item.photos.filter((photo): photo is string => typeof photo === "string" && photo.length > 0) : [],
+      languages: Array.isArray(item.languages) ? item.languages.filter((language): language is string => typeof language === "string") : [],
+      serviceType: typeof item.serviceType === "string" ? item.serviceType : "",
+      referencePrice: typeof item.referencePrice === "number" ? item.referencePrice : 0,
+      currency: typeof item.currency === "string" ? item.currency : "VND",
+      ...(parsedAvailability ? { availability: parsedAvailability } : {}),
+      eligibility: { eligible: eligibility.eligible === true, capabilitiesOk: eligibility.capabilitiesOk === true, availabilityOk: eligibility.availabilityOk === true, marketOk: eligibility.marketOk === true },
+    }];
+  });
+}
+
 export class SupplyClient {
   private seq = 0;
   public constructor(
@@ -41,7 +74,7 @@ export class SupplyClient {
     return { windowId: (body.windowId as string) ?? (body.id as string) ?? "" };
   }
 
-  public async querySuppliers(input: { marketId?: string; capability?: string; limit?: number }): Promise<unknown[]> {
+  public async querySuppliers(input: { marketId?: string; capability?: string; limit?: number }): Promise<SupplierCandidate[]> {
     // 后端 QuerySuppliers 要求 marketId + startAt + durationH，capability 映射到 Capabilities/Languages
     const startAt = new Date(Date.now() + 24 * 3600_000).toISOString();
     const payload: Record<string, unknown> = {
@@ -55,7 +88,7 @@ export class SupplyClient {
     // 清理 undefined
     for (const k of Object.keys(payload)) if (payload[k] === undefined) delete payload[k];
     const body = this.body(await this.command("QuerySuppliers", { type: "AgentProfile", id: "query" }, payload));
-    return (body.suppliers as unknown[]) ?? (body.candidates as unknown[]) ?? [];
+    return parseSupplierCandidates(body.suppliers ?? body.candidates).slice(0, input.limit ?? 20);
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {

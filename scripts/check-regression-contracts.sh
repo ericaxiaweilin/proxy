@@ -42,6 +42,15 @@ if ! grep -q 'UI-PROFILE-001' apps/mobile/src/surfaces/profile-tabs-model.test.t
 fi
 pnpm --filter @proxy/mobile test --run src/surfaces/profile-tabs-model.test.ts || exit $?
 echo "    UI-PROFILE-001/UI-PROFILE-002: PASS"
+if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
+   ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
+  echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/supply-client.test.ts || exit $?
+require_test "MERCHANT-CREATOR-001" "./internal/supply" \
+  "TestSupplyQueryReturnsOnlyEligible" \
+  "apps/api-go/internal/supply/service_test.go" || exit $?
 if ! grep -q 'UI-SOCIAL-001' apps/mobile/src/social-settings-store.test.ts; then echo "  FAIL: UI-SOCIAL-001 missing" >&2; exit 1; fi
 if ! grep -q 'UI-SOCIAL-002' apps/mobile/src/social-settings-client.test.ts; then echo "  FAIL: UI-SOCIAL-002 missing" >&2; exit 1; fi
 if ! grep -q 'UI-SOCIAL-003' apps/mobile/src/social-settings-client.test.ts ||

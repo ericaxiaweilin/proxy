@@ -513,7 +513,7 @@ export function MeSurface({
     return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
-    return <MerchantMeR21 onOpenSwitcher={onOpenSwitcher} onSignOut={onSignOut} />;
+    return <MerchantMeR21 onOpenSwitcher={onOpenSwitcher} onSignOut={onSignOut} supply={supply} />;
   }
 
   const persona = PERSONA[context];

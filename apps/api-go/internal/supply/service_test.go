@@ -36,7 +36,7 @@ func envelopeForPrincipal(commandType string, payload map[string]any, targetID, 
 func setupAgent(t *testing.T, s *Service, agentID, name string, languages []string, market string, price int64) {
 	t.Helper()
 	r := s.Handle(envelopeForPrincipal("CreateAgentProfile", map[string]any{
-		"agentId": agentID, "name": name, "languages": languages, "serviceAreas": []string{market},
+		"agentId": agentID, "name": name, "photos": []string{"https://cdn.proxy.test/creators/" + agentID + ".jpg"}, "languages": languages, "serviceAreas": []string{market},
 	}, "", agentID))
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create profile %s: %s", agentID, r.Outcome)
@@ -104,6 +104,13 @@ func TestSupplyQueryReturnsOnlyEligible(t *testing.T) {
 	}
 	if view.Suppliers[0]["agentId"] != "agent_linh" {
 		t.Fatalf("want agent_linh, got %v", view.Suppliers[0]["agentId"])
+	}
+	photos, ok := view.Suppliers[0]["photos"].([]any)
+	if !ok || len(photos) != 1 {
+		t.Fatalf("MERCHANT-CREATOR-001: recommendation must carry the creator's real profile photo, got %v", view.Suppliers[0]["photos"])
+	}
+	if _, ok := view.Suppliers[0]["availability"].(map[string]any); !ok {
+		t.Fatalf("MERCHANT-CREATOR-001: recommendation must explain current availability, got %v", view.Suppliers[0]["availability"])
 	}
 }
 

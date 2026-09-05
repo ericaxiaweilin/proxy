@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 21 — 2026-09-05
+
+- Added a merchant-only `Creator 推荐` rail backed by `QuerySuppliers`, using
+  real active profiles, verified eligibility, market availability, profile
+  photos and reference pricing. Missing/error states remain explicit instead
+  of falling back to hard-coded people. Added the durable
+  `MERCHANT-CREATOR-001` client/server regression tripwire.
+
 ## Revision 19 — 2026-09-04
 
 - 对话中 "活动" 按钮发出的 proxyObject 不再 hardcoded
