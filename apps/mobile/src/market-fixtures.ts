@@ -48,6 +48,10 @@ export interface MarketOpportunity {
   // "seeded"; 传了就走 haversine 路径, travelSource="user_distance".
   lat?: number;
   lng?: number;
+  // R37.4 redesign: standard order type (one of 5 approved logos).
+  // Optional — fixtures without this fall back to heuristic inference
+  // from theme/skills/title in R37OpportunityCard.inferType().
+  opportunityType?: "coffee_photo" | "walk_photo" | "coffee_chinese" | "bilingual_store" | "event_photo";
   travelSource?: "seeded" | "user_distance" | "unknown";
 }
 

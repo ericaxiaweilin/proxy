@@ -33,6 +33,25 @@ const R2_DECORATION_WHITELIST: ReadonlyArray<string> = [
   // R15.76: R1 AI Identity System PRD — 头像下 AI 徽章 (frontstage 透明度义务).
   //   9pt "AI" 字符跟 personalAvaLetter 同类装饰.
   "aiAuthorBadgeText",
+  // R37 market redesign (Proxy_Market_R37_4_Exact_Approved_Order_Logos.html):
+  //   high-density opportunity card and type palette. The 6.5-10.5pt scale
+  //   is matched to the approved visual (390px phone frame), not the
+  //   R2 personal-profile readable-text scale. Same exclusion pattern
+  //   as sceneMapEyebrow.
+  "thumbInitial",
+  "typeMetaLabel",
+  "typeMetaTitle",
+  "fitTagText",
+  "oppTitle",
+  "metaText",
+  "why",
+  "priceLabel",
+  "priceValue",
+  "priceNegotiable",
+  "takeBtnText",
+  "pillLabel",
+  "pillLabelActive",
+  "pillSub",
   // R15.77: R1 HTML 1:1 抄 — AIIdentityShowcaseSurface 是静态 design showcase (3 phone preview,
   //   mini identity cards), 小屏 8-10pt 是 R1 原版. 跟 personalAvaLetter 同类装饰.
   "miniPillText", "pTopHandle", "pBadgeText", "pNoticeTitle", "pNoticeBody",
