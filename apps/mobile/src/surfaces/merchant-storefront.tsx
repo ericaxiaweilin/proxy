@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { color, shadows } from "../theme";
+import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { retainStorePhoto, type RetainedStorePhoto } from "../expo-composer-draft-store";
 import type { BusinessClient } from "../business-client";
 
@@ -256,8 +257,6 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>商家店铺</Text>
-      <Text style={styles.sub}>来自 Business Workspace 真实数据 · server-authoritative.</Text>
       {accounts === undefined && !error ? <ActivityIndicator /> : null}
       {error ? <View style={styles.card}><Text style={styles.errorText}>加载失败：{error}</Text></View> : null}
       {accounts !== undefined && accounts.length === 0 ? (
@@ -277,12 +276,22 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
         const aStores = stores[a.id] ?? [];
         const aMembers = members[a.id] ?? [];
         const aSpend = spend[a.id];
+        const newCustomers = aSpend?.days.reduce((sum, day) => sum + day.newCustomerCount, 0) ?? 0;
+        const returningCustomers = aSpend?.days.reduce((sum, day) => sum + day.returningCustomerCount, 0) ?? 0;
         return (
           <View key={a.id} style={styles.accountCard}>
             <View style={styles.accountHead}>
               <Text style={styles.accountName}>{a.name}</Text>
               <Text style={styles.accountMeta}>{a.id.slice(0, 8)} · {a.status}</Text>
             </View>
+            <View style={styles.summary}>
+              <Text style={styles.summaryTitle}>{a.name}</Text>
+              <Text style={styles.summaryMeta}>线上店铺 · 近 7 天真实数据</Text>
+              <View style={styles.summaryStats}>{[[aStores.length.toString(), "门店"], [(aSpend?.totalOrders ?? 0).toString(), "订单"], [newCustomers.toString(), "新客"], [returningCustomers.toString(), "复购"]].map(([value, label]) => <View key={label} style={styles.summaryStat}><Text style={styles.summaryValue}>{value}</Text><Text style={styles.summaryLabel}>{label}</Text></View>)}</View>
+            </View>
+            <Text style={styles.blockTitle}>访问 → 行动</Text>
+            <View style={styles.funnel}>{[[(aSpend?.totalOrders ?? 0).toString(), "订单"], [newCustomers.toString(), "新客"], [returningCustomers.toString(), "复购"], [aSpend ? formatVnd(aSpend.totalGrossMinor) : "—", "成交额"]].map(([value, label]) => <View key={label} style={styles.funnelItem}><Text numberOfLines={1} style={styles.funnelValue}>{value}</Text><Text style={styles.funnelLabel}>{label}</Text></View>)}</View>
+            <View style={styles.sourceBox}><Text style={styles.blockTitleInside}>流量来源</Text><Text style={styles.empty}>归因接口尚未提供来源拆分；不使用历史假百分比。</Text></View>
             {aStores.length === 0 ? (
               <View>
                 <Text style={styles.empty}>暂无店铺，在下面直接加一家。</Text>
@@ -301,6 +310,16 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
                   <View style={styles.storeHead}>
                     <Text style={styles.storeName}>{s.name}</Text>
                     <Text style={styles.storeMeta}>{s.address || "—"} · {s.status}</Text>
+                  </View>
+
+                  <Text style={styles.blockTitleInside}>店铺管理</Text>
+                  <View style={styles.manageGrid}>
+                    {([
+                      ["storeLines", "店铺信息", sLines ? "资料已建立" : "待完善", () => startEditLines(s.id, sLines)],
+                      ["storefront", "菜单与价格", "等待商品接口", undefined],
+                      ["target", "相册", `${sPhotos.length} 张`, () => void pickAndUploadPhoto(s.id)],
+                      ["spark", "当前展示", "活动 · 券 · 推荐内容", undefined],
+                    ] as const).map(([icon, title, meta, action]) => <Pressable disabled={!action} key={title} onPress={action} style={styles.manageCard}><View style={styles.manageIcon}><ProxyIcon color={color.ink} name={icon as ProxyIconName} size={23} /></View><Text style={styles.manageTitle}>{title}</Text><Text style={styles.manageMeta}>{meta}</Text></Pressable>)}
                   </View>
 
                   {sLines ? (
@@ -475,11 +494,30 @@ const styles = StyleSheet.create({
   title: { color: color.ink, fontSize: 18, fontWeight: "900" },
   sub: { color: color.muted, fontSize: 12 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 14, ...shadows.card },
-  accountCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 14, gap: 12, ...shadows.card },
+  accountCard: { gap: 12 },
   accountHead: { gap: 2 },
   accountName: { color: color.ink, fontSize: 16, fontWeight: "900" },
   accountMeta: { color: color.muted, fontSize: 11 },
-  storeCard: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 12, borderWidth: 1, padding: 12, gap: 8 },
+  storeCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, padding: 14, gap: 8, ...shadows.card },
+  summary: { backgroundColor: color.deep, borderRadius: 24, padding: 15 },
+  summaryTitle: { color: color.white, fontSize: 15, fontWeight: "800", lineHeight: 21 },
+  summaryMeta: { color: "#D7D0DD", fontSize: 12, lineHeight: 17, marginTop: 4 },
+  summaryStats: { flexDirection: "row", gap: 8, marginTop: 12 },
+  summaryStat: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.12)", borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 9 },
+  summaryValue: { color: color.white, fontSize: 15, fontWeight: "900" },
+  summaryLabel: { color: "#D8D1DD", fontSize: 10, fontWeight: "600", marginTop: 3 },
+  blockTitle: { color: color.ink, fontSize: 17, fontWeight: "800", marginTop: 4 },
+  blockTitleInside: { color: color.ink, fontSize: 15, fontWeight: "800", marginBottom: 2 },
+  funnel: { flexDirection: "row", gap: 8 },
+  funnelItem: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, paddingHorizontal: 3, paddingVertical: 10 },
+  funnelValue: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  funnelLabel: { color: color.muted, fontSize: 10, fontWeight: "600", marginTop: 3 },
+  sourceBox: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, padding: 14 },
+  manageGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  manageCard: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 20, borderWidth: 1, minHeight: 132, padding: 14, width: "48.4%" },
+  manageIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 14, height: 44, justifyContent: "center", marginBottom: 9, width: 44 },
+  manageTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  manageMeta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
   storeHead: { gap: 2 },
   storeName: { color: color.ink, fontSize: 14, fontWeight: "800" },
   storeMeta: { color: color.muted, fontSize: 11 },

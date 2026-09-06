@@ -409,6 +409,17 @@ if ! grep -q 'pickAndUploadPhoto\|addStorePhoto' apps/mobile/src/surfaces/mercha
 fi
 echo "    STORE-PHOTO-001 (mobile): PASS (client + surface wire)"
 
+# MERCHANT-STOREFRONT-R21-001: real Business Workspace wiring must stay inside
+# the established R21 operating-store shell, not replace it with a raw admin list.
+if ! grep -q '访问 → 行动' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '流量来源' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '店铺管理' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q 'manageGrid' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "  FAIL [MERCHANT-STOREFRONT-R21-001]: storefront lost the stable R21 operating shell" >&2
+  exit 1
+fi
+echo "    MERCHANT-STOREFRONT-R21-001: PASS (R21 operating shell + real store data/actions)"
+
 # MERCHANT-R21-001: R21 商家身份 (me.tsx > context === 'BUSINESS')
 # 之前走 merchant-me-r21.tsx 1250 行 @ts-nocheck hardcoded mock
 # (Linh / Bao / Khoa / 12.6tr / Bonsaidon / 48 张相册 全部 inline).
