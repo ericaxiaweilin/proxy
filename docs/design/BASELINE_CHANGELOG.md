@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 50 — 2026-09-06
+
+- 店铺菜单与价格模块恢复（R36.x MENU-001）：store 维度商品真 CRUD
+  （Create/Update/List/SetAvailability，VND 分，无硬删除），菜单管理页
+  接 BusinessClient；当前展示页接关联活动。空菜单/无关联时显示诚实空态。
+
 ## Revision 49 — 2026-09-06
 
 - 线上店铺空态引导：无店铺时 hub 显示"还没有店铺"+创建 CTA，创建表单下预告

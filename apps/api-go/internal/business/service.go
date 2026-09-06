@@ -166,6 +166,12 @@ type Repository interface {
 	UpsertStoreLines(ctx context.Context, l StoreLines) error
 	GetStoreLines(ctx context.Context, storeID string) (StoreLines, error)
 
+	// Store products / menu items (R36.x MENU-001)
+	CreateProduct(ctx context.Context, p StoreProduct) error
+	GetProduct(ctx context.Context, productID string) (StoreProduct, error)
+	UpdateProduct(ctx context.Context, p StoreProduct) error
+	ListProducts(ctx context.Context, storeID string) ([]StoreProduct, error)
+
 	// Member directory (upsert + read)
 	UpsertMemberDirectory(ctx context.Context, m MemberDirectory) error
 	ListMemberDirectory(ctx context.Context, businessID string) ([]MemberDirectory, error)
@@ -187,6 +193,7 @@ type MemoryRepository struct {
 	spends          map[string][]int64
 	storePhotos     map[string]map[string]StorePhoto
 	storeLines      map[string]StoreLines
+	products        map[string]StoreProduct
 	memberDirectory map[string]map[string]MemberDirectory
 	spendDaily      map[string]map[string]SpendDaily
 	demandSignals   map[string]AggregatedDemandSignal
@@ -201,6 +208,7 @@ func NewMemoryRepository() *MemoryRepository {
 		spends:          make(map[string][]int64),
 		storePhotos:     make(map[string]map[string]StorePhoto),
 		storeLines:      make(map[string]StoreLines),
+		products:        make(map[string]StoreProduct),
 		memberDirectory: make(map[string]map[string]MemberDirectory),
 		spendDaily:      make(map[string]map[string]SpendDaily),
 		demandSignals:   make(map[string]AggregatedDemandSignal),
@@ -493,6 +501,7 @@ func (s *Service) Supports(t string) bool {
 		"CreateBusinessStore", "ListBusinessStores", "GetBusinessStore", "SpendSummary",
 		"AddStorePhoto", "ListStorePhotos", "DeleteStorePhoto",
 		"UpsertStoreLines", "GetStoreLines",
+		"CreateStoreProduct", "UpdateStoreProduct", "ListStoreProducts", "SetProductAvailability",
 		"ListMemberDirectory", "UpsertMemberDirectory",
 		"ListSpendDaily", "UpsertSpendDaily", "GetMerchantOperatingHome", "RecordAggregatedDemandSignal", "UpsertSceneSupplySnapshot":
 		return true
@@ -530,6 +539,14 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.upsertStoreLines(ctx, e)
 	case "GetStoreLines":
 		return s.getStoreLines(ctx, e)
+	case "CreateStoreProduct":
+		return s.createProduct(ctx, e)
+	case "UpdateStoreProduct":
+		return s.updateProduct(ctx, e)
+	case "ListStoreProducts":
+		return s.listProducts(ctx, e)
+	case "SetProductAvailability":
+		return s.setProductAvailability(ctx, e)
 	case "ListMemberDirectory":
 		return s.listMemberDirectory(ctx, e)
 	case "UpsertMemberDirectory":

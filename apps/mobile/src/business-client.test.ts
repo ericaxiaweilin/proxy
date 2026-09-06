@@ -184,4 +184,52 @@ describe("BusinessClient", () => {
     });
     await expect(client.listMyAccounts()).rejects.toThrow(/real sign-in/);
   });
+
+  // PRODUCT-001 mobile half: 店铺菜单 / 价格表经 BusinessClient 走真命令，
+  // 创建/列表/更新/上下架 round-trip，不走本地假菜单。
+  it("creates, lists, updates, and toggles store products", async () => {
+    const store = makeStore();
+    await writeSession(store);
+    const product = {
+      id: "prod_1", storeId: "store_1", businessId: "biz_1", name: "Ca Phe Sua",
+      description: "condensed milk", priceMinor: 29000, currency: "VND",
+      photoAssetPath: "", available: true, sortOrder: 0,
+      createdAt: "2026-09-06T00:00:00Z", updatedAt: "2026-09-06T00:00:00Z",
+    };
+    const client = new BusinessClient({
+      secureSessionStore: store,
+      authClient: { request: async (path) => {
+        if (path.endsWith("/CreateStoreProduct")) {
+          return { status: 200, json: async () => envelope("CreateStoreProduct", { type: "Store", id: "store_1" }, {
+            productId: "prod_1", product,
+          }) };
+        }
+        if (path.endsWith("/ListStoreProducts")) {
+          return { status: 200, json: async () => envelope("ListStoreProducts", { type: "Store", id: "store_1" }, {
+            products: [product],
+          }) };
+        }
+        if (path.endsWith("/UpdateStoreProduct")) {
+          return { status: 200, json: async () => envelope("UpdateStoreProduct", { type: "StoreProduct", id: "prod_1" }, {
+            product: { ...product, name: "Ca Phe Sua Da", priceMinor: 32000 },
+          }) };
+        }
+        if (path.endsWith("/SetProductAvailability")) {
+          return { status: 200, json: async () => envelope("SetProductAvailability", { type: "StoreProduct", id: "prod_1" }, {
+            product: { ...product, available: false },
+          }) };
+        }
+        return { status: 500, json: async () => ({ error: "unexpected" }) };
+      } },
+    });
+    const made = await client.createProduct({ storeId: "store_1", name: "Ca Phe Sua", priceMinor: 29000 });
+    expect(made.productId).toBe("prod_1");
+    const listed = await client.listProducts("store_1");
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.priceMinor).toBe(29000);
+    const renamed = await client.updateProduct({ productId: "prod_1", storeId: "store_1", name: "Ca Phe Sua Da", priceMinor: 32000 });
+    expect(renamed.product.name).toBe("Ca Phe Sua Da");
+    const hidden = await client.setProductAvailability("prod_1", "store_1", false);
+    expect(hidden.product.available).toBe(false);
+  });
 });

@@ -14,6 +14,21 @@ export interface MerchantOperatingHome {
   bestNextDecision: { kind: "NO_ACTION"; title: string; reason: string; requiresApproval: boolean };
 }
 
+export interface StoreProduct {
+  id: string;
+  storeId: string;
+  businessId: string;
+  name: string;
+  description: string;
+  priceMinor: number;
+  currency: string;
+  photoAssetPath: string;
+  available: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class BusinessClient {
   private sequence = 0;
   public constructor(
@@ -108,6 +123,67 @@ export class BusinessClient {
   public async getStoreLines(storeId: string): Promise<{ storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string }> {
     const body = this.body(await this.command("GetStoreLines", { type: "Store", id: storeId }, { storeId }));
     return body.lines as { storeId: string; logoAssetPath: string; description: string; hoursJson: string; contactPhone: string; contactEmail: string; updatedAt: string };
+  }
+
+  public async createProduct(input: {
+    storeId: string;
+    name: string;
+    priceMinor: number;
+    description?: string;
+    photoAssetPath?: string;
+    sortOrder?: number;
+  }): Promise<{ productId: string; product: StoreProduct }> {
+    const body = this.body(await this.command("CreateStoreProduct", { type: "Store", id: input.storeId }, {
+      storeId: input.storeId,
+      name: input.name,
+      priceMinor: input.priceMinor,
+      description: input.description ?? "",
+      photoAssetPath: input.photoAssetPath ?? "",
+      sortOrder: input.sortOrder ?? 0,
+    }));
+    const product = body.product as StoreProduct | undefined;
+    if (!product?.id) throw new Error("store product create response malformed");
+    return { productId: requiredString(body, "productId"), product };
+  }
+
+  public async updateProduct(input: {
+    productId: string;
+    storeId: string;
+    name: string;
+    priceMinor: number;
+    description?: string;
+    photoAssetPath?: string;
+    sortOrder?: number;
+  }): Promise<{ product: StoreProduct }> {
+    const body = this.body(await this.command("UpdateStoreProduct", { type: "StoreProduct", id: input.productId }, {
+      productId: input.productId,
+      storeId: input.storeId,
+      name: input.name,
+      priceMinor: input.priceMinor,
+      description: input.description ?? "",
+      photoAssetPath: input.photoAssetPath ?? "",
+      sortOrder: input.sortOrder ?? 0,
+    }));
+    const product = body.product as StoreProduct | undefined;
+    if (!product?.id) throw new Error("store product update response malformed");
+    return { product };
+  }
+
+  public async listProducts(storeId: string): Promise<StoreProduct[]> {
+    const body = this.body(await this.command("ListStoreProducts", { type: "Store", id: storeId }, { storeId }));
+    if (!Array.isArray(body.products)) throw new Error("store products malformed");
+    return body.products as StoreProduct[];
+  }
+
+  public async setProductAvailability(productId: string, storeId: string, available: boolean): Promise<{ product: StoreProduct }> {
+    const body = this.body(await this.command("SetProductAvailability", { type: "StoreProduct", id: productId }, {
+      productId,
+      storeId,
+      available,
+    }));
+    const product = body.product as StoreProduct | undefined;
+    if (!product?.id) throw new Error("store product availability response malformed");
+    return { product };
   }
 
   public async listMemberDirectory(businessId: string): Promise<Array<{ businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string }>> {

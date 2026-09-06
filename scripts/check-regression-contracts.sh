@@ -394,6 +394,19 @@ require_test "MERCHANT-SPEND-DAILY-001" "./internal/business" \
   "TestSpendDailyUpsertAndList" \
   "apps/api-go/internal/business/service_test.go" || exit $?
 
+# PRODUCT-001: 店铺菜单 / 价格表是 store 维度的真 CRUD (R36.x MENU-001)。
+# 创建/列表/更新/上下架 round-trip, 入侵者被 BUSINESS_WRITE_REQUIRED 拒,
+# 空列表下发 []。mobile 经 BusinessClient 走命令, 不走本地假菜单。
+require_test "PRODUCT-001" "./internal/business" \
+  "TestStoreProductCrudRoundTrip" \
+  "apps/api-go/internal/business/product_test.go" || exit $?
+require_test "PRODUCT-001" "./internal/business" \
+  "TestStoreProductListEmptyIsArray" \
+  "apps/api-go/internal/business/product_test.go" || exit $?
+require_test "PRODUCT-001" "./internal/platform/postgres" \
+  "TestStoreProductPostgresRoundTrip" \
+  "apps/api-go/internal/platform/postgres/business_product_integration_test.go" || exit $?
+
 # STORE-PHOTO-001 mobile half: 店铺相册 + 上传 + 详情 + 删除 全部走
 # BusinessClient (不是 hardcoded '48 张')。'me.tsx > merchantstorefront'
 # route 之前是 Bonsaidon 假数据, 现在路由到 MerchantStorefrontSurface

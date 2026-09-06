@@ -15,6 +15,8 @@ commands:
     domain: Contribution
   - command: AddBusinessMember
     domain: Business
+  - command: AddStorePhoto
+    domain: Business
   - command: AmendMediaReviewDecision
     domain: Media
   - command: AuthenticateWithGoogle
@@ -27,12 +29,20 @@ commands:
     domain: Engagement
   - command: BurnDisplayIdentity
     domain: Identity
+  - command: CancelActivity
+    domain: Activity
+  - command: CancelOrder
+    domain: Fulfillment
+  - command: CancelPrivacyRequest
+    domain: Identity
   - command: CheckInOrder
     domain: Fulfillment
   - command: CheckJITAccess
     domain: Safety
   - command: CheckLegalHold
     domain: Safety
+  - command: CheckinActivity
+    domain: Activity
   - command: CompleteCityCompanion
     domain: CityCompanion
   - command: CompleteMediaUpload
@@ -105,12 +115,18 @@ commands:
     domain: Fulfillment
   - command: CreateStatus
     domain: SocialSpace
+  - command: CreateStoreProduct
+    domain: Business
   - command: CreateTaskDraft
     domain: Demand
   - command: CreateVoucher
     domain: Voucher
   - command: DeclareCapability
     domain: Supply
+  - command: DeleteMessage
+    domain: Conversation
+  - command: DeleteStorePhoto
+    domain: Business
   - command: DismissOutcomeLearning
     domain: Outcome
   - command: FinalizeObservationSet
@@ -121,24 +137,38 @@ commands:
     domain: Conversation
   - command: GenerateCityCompanionRoute
     domain: CityCompanion
+  - command: GetAccountPreferences
+    domain: Identity
   - command: GetAgentPassport
     domain: Supply
   - command: GetAgentProfile
     domain: Supply
+  - command: GetBusinessStore
+    domain: Business
   - command: GetCandidateBatch
     domain: Supply
+  - command: GetFollowCounts
+    domain: Engagement
   - command: GetLocalContext
     domain: LocalContext
   - command: GetMediaAsset
     domain: Media
   - command: GetMemory
     domain: Scene
+  - command: GetMerchantOperatingHome
+    domain: Business
   - command: GetObservationTemplate
     domain: Outcome
   - command: GetOffer
     domain: Fulfillment
   - command: GetPostEngagement
     domain: Engagement
+  - command: GetPrivacyRequestStatus
+    domain: Identity
+  - command: GetProfile
+    domain: Identity
+  - command: GetStoreLines
+    domain: Business
   - command: GetVoucher
     domain: Voucher
   - command: GetVoucherSettlement
@@ -149,6 +179,8 @@ commands:
     domain: LocalContext
   - command: GrantJITAccess
     domain: Safety
+  - command: IsFollowing
+    domain: Engagement
   - command: JoinActivity
     domain: Activity
   - command: ListActivities
@@ -179,6 +211,10 @@ commands:
     domain: Media
   - command: ListMediaReviewDecisions
     domain: Media
+  - command: ListMemberDirectory
+    domain: Business
+  - command: ListMyActivities
+    domain: Activity
   - command: ListMyBusinessAccounts
     domain: Business
   - command: ListMyInvitations
@@ -191,10 +227,26 @@ commands:
     domain: Scene
   - command: ListObservationTemplates
     domain: Outcome
+  - command: ListPinnedPosts
+    domain: Engagement
+  - command: ListPostReplies
+    domain: Engagement
+  - command: ListPrivacyRequests
+    domain: Identity
   - command: ListRequesterHomeItems
     domain: Demand
+  - command: ListSpendDaily
+    domain: Business
   - command: ListStatuses
     domain: SocialSpace
+  - command: ListStorePhotos
+    domain: Business
+  - command: ListStoreProducts
+    domain: Business
+  - command: ListUserBookmarks
+    domain: Engagement
+  - command: ListUserReplies
+    domain: Engagement
   - command: ListVouchers
     domain: Voucher
   - command: MarkInboxRead
@@ -203,12 +255,20 @@ commands:
     domain: Media
   - command: MarkMessageRead
     domain: Conversation
+  - command: MarkNoShow
+    domain: Activity
+  - command: MuteAuthor
+    domain: Engagement
   - command: OpenVoucherRedemption
     domain: Voucher
+  - command: PinPost
+    domain: Engagement
   - command: PreviewTaskDraft
     domain: Demand
   - command: ProcessMediaAsset
     domain: Media
+  - command: PublishActivity
+    domain: Activity
   - command: PublishScene
     domain: Scene
   - command: PublishTask
@@ -217,6 +277,8 @@ commands:
     domain: Supply
   - command: ReactToPost
     domain: Engagement
+  - command: RecordAggregatedDemandSignal
+    domain: Business
   - command: RecordAttendance
     domain: Scene
   - command: RecordAttribution
@@ -251,8 +313,6 @@ commands:
     domain: Conversation
   - command: RefreshSession
     domain: Identity
-  - command: ResumeTrustedDeviceSession
-    domain: Identity
   - command: RefundPaymentIntent
     domain: Payment
   - command: RegisterDevice
@@ -273,10 +333,16 @@ commands:
     domain: Identity
   - command: RequestLoginChallenge
     domain: Identity
+  - command: RequestPrivacyDelete
+    domain: Identity
+  - command: RequestPrivacyExport
+    domain: Identity
   - command: ResolveDeepLink
     domain: Notification
   - command: RespondInvitation
     domain: Scene
+  - command: ResumeTrustedDeviceSession
+    domain: Identity
   - command: ReviewAccess
     domain: Contribution
   - command: ReviewContributionAccess
@@ -301,8 +367,12 @@ commands:
     domain: Supply
   - command: SetCommunityMembership
     domain: SocialSpace
+  - command: SetConversationBlocked
+    domain: Conversation
   - command: SetLocalContext
     domain: LocalContext
+  - command: SetProductAvailability
+    domain: Business
   - command: SettleVoucher
     domain: Voucher
   - command: ShortlistAgent
@@ -321,14 +391,32 @@ commands:
     domain: Identity
   - command: ToggleActivityInterest
     domain: Activity
+  - command: UnfollowProfile
+    domain: Engagement
+  - command: UnpinPost
+    domain: Engagement
+  - command: UpdateAccountPreferences
+    domain: Identity
   - command: UpdateAgentProfile
     domain: Supply
   - command: UpdateAgentService
     domain: Supply
+  - command: UpdateProfile
+    domain: Identity
   - command: UpdateScene
     domain: Scene
+  - command: UpdateStoreProduct
+    domain: Business
   - command: UpdateTaskDraft
     domain: Demand
+  - command: UpsertMemberDirectory
+    domain: Business
+  - command: UpsertSceneSupplySnapshot
+    domain: Business
+  - command: UpsertSpendDaily
+    domain: Business
+  - command: UpsertStoreLines
+    domain: Business
   - command: VerifyCapability
     domain: Supply
   - command: VerifyLoginChallenge

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
+	"path/filepath"
 )
 
 func main() {
@@ -79,24 +79,17 @@ func main() {
 				os.Exit(2)
 			}
 		}
-		// Also validate that the generated commands fragment is in
-		// sync with HEAD. This catches the case where a new command
-		// was added to a service but the spec wasn't updated.
-		genPath := strings.TrimSuffix(openAPIPath, "openapi.yaml") + "openapi.commands.generated.yaml"
-		genDisk, err := os.ReadFile(genPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "openapi drift check: generated commands fragment missing at %s: %v\n", genPath, err)
-			os.Exit(2)
-		}
-		genHead, err := exec.Command("git", "show", "HEAD:apps/api-go/openapi.commands.generated.yaml").Output()
-		if err != nil {
-			// First commit of the fragment: skip drift vs HEAD, but
-			// the file must be present on disk to pass.
-			fmt.Println("openapi: drift check passed (commands fragment has no HEAD yet)")
-			return
-		}
-		if !bytes.Equal(bytes.TrimSpace(genHead), bytes.TrimSpace(genDisk)) {
-			fmt.Fprintln(os.Stderr, "openapi commands drift detected: re-run `go run ./cmd/openapi-commands` and commit the regenerated openapi.commands.generated.yaml.")
+		// Also validate that the generated commands fragment matches a
+		// fresh scan of the domain service switches. NOTE: this must
+		// compare against a fresh scan, NOT against HEAD. Comparing
+		// disk-vs-HEAD punishes committing an up-to-date fragment and
+		// rewards leaving it stale — that inverted logic froze the
+		// fragment while dozens of commands landed unrecorded. The
+		// canonical scanner lives in cmd/openapi-commands -check.
+		genCheck := exec.Command("go", "run", "./cmd/openapi-commands", "-check")
+		genCheck.Dir = filepath.Dir(openAPIPath)
+		if out, err := genCheck.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "openapi commands drift detected: %s\nre-run `go run ./cmd/openapi-commands` and commit the regenerated openapi.commands.generated.yaml.\n", out)
 			os.Exit(2)
 		}
 		// Same staged-vs-working-tree check for the commands
