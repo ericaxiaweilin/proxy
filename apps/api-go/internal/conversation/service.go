@@ -113,6 +113,7 @@ type NeedDraft struct {
 
 type Repository interface {
 	CreateConversation(ctx context.Context, c Conversation) error
+	UpdateConversation(ctx context.Context, c Conversation) error
 	GetConversation(ctx context.Context, id string) (Conversation, error)
 	AppendMessage(ctx context.Context, m Message) error
 	// UpdateMessage replaces a message in place. Used for read-counting
@@ -160,6 +161,16 @@ func (r *MemoryRepository) CreateConversation(_ context.Context, c Conversation)
 	defer r.mu.Unlock()
 	if _, exists := r.conversations[c.ID]; exists {
 		return errors.New("conversation already exists")
+	}
+	r.conversations[c.ID] = cloneConversation(c)
+	return nil
+}
+
+func (r *MemoryRepository) UpdateConversation(_ context.Context, c Conversation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.conversations[c.ID]; !exists {
+		return ErrConversationNotFound
 	}
 	r.conversations[c.ID] = cloneConversation(c)
 	return nil
@@ -474,7 +485,7 @@ func (s *Service) SetMediaStoreDir(dir string) {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "DeleteMessage", "RecordScreenshot", "ForwardMessage",
+	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "DeleteMessage", "SetConversationBlocked", "RecordScreenshot", "ForwardMessage",
 		"CreateNeedDraft", "ConfirmNeedDraft":
 		return true
 	default:
@@ -502,6 +513,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.markMessageRead(ctx, e)
 	case "DeleteMessage":
 		return s.deleteMessage(ctx, e)
+	case "SetConversationBlocked":
+		return s.setConversationBlocked(ctx, e)
 	case "RecordScreenshot":
 		return s.recordScreenshot(ctx, e)
 	case "ForwardMessage":
@@ -744,6 +757,9 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	}
 	if !isParticipant(conv, e.Actor.ID) {
 		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
+	if conv.State == "BLOCKED" {
+		return command.Rejected(e, "CONVERSATION_BLOCKED", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.blocked", nil)
 	}
 
 	// Apply per-type protection defaults, then the user override.
@@ -1161,6 +1177,28 @@ func (s *Service) deleteMessage(ctx context.Context, e command.Envelope) command
 		return command.Rejected(e, "MESSAGE_DELETE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.delete_failed", nil)
 	}
 	return acceptedWithPayload(e, "Message", msg.ID, 1, "DELETED", map[string]any{"messageId": msg.ID}, nil)
+}
+
+func (s *Service) setConversationBlocked(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		Blocked bool `json:"blocked"`
+	}
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_BLOCK_STATE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_block", nil)
+	}
+	conv, err := s.repository.GetConversation(ctx, e.Target.ID)
+	if err != nil || !isParticipant(conv, e.Actor.ID) {
+		return command.Rejected(e, "CONVERSATION_BLOCK_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.block_not_allowed", nil)
+	}
+	if p.Blocked {
+		conv.State = "BLOCKED"
+	} else {
+		conv.State = "ACTIVE"
+	}
+	if err := s.repository.UpdateConversation(ctx, conv); err != nil {
+		return command.Rejected(e, "CONVERSATION_BLOCK_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.block_failed", nil)
+	}
+	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, map[string]any{"blocked": p.Blocked}, nil)
 }
 
 // ---------- MarkMessageRead ----------

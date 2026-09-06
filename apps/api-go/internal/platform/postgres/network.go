@@ -383,6 +383,16 @@ func (r *ConversationRepository) GetConversation(ctx context.Context, id string)
 	}
 	return c, nil
 }
+func (r *ConversationRepository) UpdateConversation(ctx context.Context, c conversation.Conversation) error {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `UPDATE conversation.conversations SET state=$1,last_message_at=$2 WHERE id=$3`, c.State, c.LastMessageAt, c.ID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return conversation.ErrConversationNotFound
+	}
+	return nil
+}
 
 // AppendMessage persists a message plus its MessageProtection envelope
 // (Lotus Chat RFC v0.1 §3). The protection column is JSONB so future

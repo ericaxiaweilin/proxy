@@ -341,8 +341,13 @@ export function ConversationSurface({
     }
   }
   async function deleteOwnMessage(messageId: string): Promise<void> {
-    try { await conversationClient.deleteMessage(messageId); setMessages((current) => current.filter((message) => message.id !== messageId)); }
-    catch { setError("删除失败，请重试"); }
+    setError(undefined);
+    try {
+      await conversationClient.deleteMessage(messageId);
+      setMessages((current) => current.filter((message) => message.id !== messageId));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "删除失败，请重试");
+    }
   }
 
   return (
@@ -365,8 +370,8 @@ export function ConversationSurface({
       {searchOpen ? <View style={styles.chatSearch}><TextInput autoFocus onChangeText={setSearchQuery} placeholder="搜索此对话" placeholderTextColor={color.muted} style={styles.chatSearchInput} value={searchQuery} /><Text style={styles.searchCount}>{visibleMessages.length} 条</Text><Pressable onPress={() => { setSearchOpen(false); setSearchQuery(""); }}><Text style={styles.searchClose}>取消</Text></Pressable></View> : null}
       {conversationMenuOpen ? <View style={styles.conversationMenu}>
         <Pressable onPress={() => { setMessages([]); setConversationMenuOpen(false); }} style={styles.menuItem}><Text style={styles.menuItemText}>清空本机显示</Text></Pressable>
-        <Pressable onPress={() => { setBlocked((value) => !value); setConversationMenuOpen(false); }} style={styles.menuItem}><Text style={[styles.menuItemText, styles.menuDanger]}>{blocked ? "解除本机屏蔽" : "屏蔽此会话"}</Text></Pressable>
-        <Text style={styles.menuHint}>跨设备删除与拉黑将在服务端确认后生效；这里不会伪报成功。</Text>
+        <Pressable onPress={() => void (async () => { if (!convId) return; try { await conversationClient.setConversationBlocked(convId, !blocked); setBlocked((value) => !value); } catch { setError("屏蔽状态更新失败"); } finally { setConversationMenuOpen(false); } })()} style={styles.menuItem}><Text style={[styles.menuItemText, styles.menuDanger]}>{blocked ? "解除屏蔽" : "屏蔽此会话"}</Text></Pressable>
+        <Text style={styles.menuHint}>屏蔽状态会保存到服务端；屏蔽后不可继续发送消息。</Text>
       </View> : null}
 
       {/* Messages */}
@@ -498,7 +503,7 @@ const styles = StyleSheet.create({
   chatSearchInput: { backgroundColor: color.surface, borderRadius: 12, color: color.ink, flex: 1, fontSize: 13, height: 36, paddingHorizontal: 11 },
   searchCount: { color: color.muted, fontSize: 11 }, searchClose: { color: color.violet, fontSize: 12, fontWeight: "800" },
   conversationMenu: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, paddingHorizontal: 16, paddingVertical: 8 },
-  menuItem: { borderBottomColor: color.line, borderBottomWidth: 1, paddingVertical: 11 }, menuItemText: { color: color.ink, fontSize: 13, fontWeight: "800" }, menuDanger: { color: color.error }, menuHint: { color: color.muted, fontSize: 10, lineHeight: 15, paddingVertical: 8 },
+  menuItem: { borderBottomColor: color.line, borderBottomWidth: 1, paddingVertical: 11 }, menuItemText: { color: color.ink, fontSize: 13, fontWeight: "800" }, menuDanger: { color: color.error }, menuHint: { color: color.muted, fontSize: 11, lineHeight: 15, paddingVertical: 8 },
   backBtn: { alignItems: "center", height: 30, justifyContent: "center", width: 30 },
   backText: { color: color.ink, fontSize: 24, lineHeight: 28 },
   headerInfo: { flex: 1 },

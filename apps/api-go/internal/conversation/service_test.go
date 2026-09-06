@@ -357,3 +357,45 @@ func TestNonParticipantCannotSend(t *testing.T) {
 		t.Fatalf("want NOT_PARTICIPANT, got %s/%+v", r2.Outcome, r2.Error)
 	}
 }
+
+func TestConversationBlockPersistsAndGuardsSending(t *testing.T) {
+	s := New()
+	started := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"conversationType": "DM",
+		"originType":       "PROFILE",
+		"originId":         "user_002",
+		"participantId":    "user_002",
+	}, ""))
+	if started.Outcome != "ACCEPTED" {
+		t.Fatalf("start conversation: %+v", started)
+	}
+	var view struct {
+		ConversationID string `json:"conversationId"`
+	}
+	if err := json.Unmarshal([]byte(started.OperationRef), &view); err != nil {
+		t.Fatal(err)
+	}
+
+	blocked := s.Handle(envelopeFor("SetConversationBlocked", map[string]any{"blocked": true}, view.ConversationID))
+	if blocked.Outcome != "ACCEPTED" {
+		t.Fatalf("block conversation: %+v", blocked)
+	}
+	conv, err := s.repository.GetConversation(context.Background(), view.ConversationID)
+	if err != nil || conv.State != "BLOCKED" {
+		t.Fatalf("blocked state was not persisted: state=%q err=%v", conv.State, err)
+	}
+
+	sent := s.Handle(envelopeFor("SendMessage", map[string]any{"messageType": "TEXT", "body": "不应发出"}, view.ConversationID))
+	if sent.Outcome != "REJECTED" || sent.Error == nil || sent.Error.ErrorCode != "CONVERSATION_BLOCKED" {
+		t.Fatalf("blocked conversation must reject sends: %+v", sent)
+	}
+
+	unblocked := s.Handle(envelopeFor("SetConversationBlocked", map[string]any{"blocked": false}, view.ConversationID))
+	if unblocked.Outcome != "ACCEPTED" {
+		t.Fatalf("unblock conversation: %+v", unblocked)
+	}
+	sent = s.Handle(envelopeFor("SendMessage", map[string]any{"messageType": "TEXT", "body": "恢复发送"}, view.ConversationID))
+	if sent.Outcome != "ACCEPTED" {
+		t.Fatalf("unblocked conversation should allow sends: %+v", sent)
+	}
+}

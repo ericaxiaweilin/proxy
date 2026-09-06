@@ -108,6 +108,11 @@ export class ConversationClient {
     return this.sendCommand(session, "DeleteMessage", { type: "Message", id: messageId }, { messageId });
   }
 
+  public async setConversationBlocked(conversationId: string, blocked: boolean): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "SetConversationBlocked", { type: "Conversation", id: conversationId }, { blocked });
+  }
+
   public async recordScreenshot(messageId: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     return this.sendCommand(session, "RecordScreenshot", { type: "Message", id: messageId }, { messageId });

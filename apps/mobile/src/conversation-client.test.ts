@@ -20,6 +20,17 @@ describe("UI-CHAT-001 image message wire", () => {
   });
 });
 
+describe("UI-CHAT-BLOCK-001 persistent conversation blocking", () => {
+  it("sends the conversation id and desired blocked state", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const client = new ConversationClient({ baseUrl:"http://127.0.0.1:4100", secureSessionStore:await store(), authClient:{request:async (_path, init)=>{sent.push(init.body as Record<string,unknown>);return {status:200,json:async()=>({outcome:"ACCEPTED"})};}} });
+    await client.setConversationBlocked("conv_1", true);
+    expect(sent[0]?.commandType).toBe("SetConversationBlocked");
+    expect(sent[0]?.target).toEqual({ type:"Conversation", id:"conv_1" });
+    expect(sent[0]?.payload).toEqual({ blocked:true });
+  });
+});
+
 // CHAT-PROXY-ACTIVITY-001: R17.x — conversation "活动" 按钮发出的
 // proxyObject 必须引用 server 真实 activityId (不能 "act_westlake"
 // 那种 hardcoded 不存在的 ID). server 侧 conversation service 不会
