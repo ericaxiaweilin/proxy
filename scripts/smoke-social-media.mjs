@@ -23,12 +23,13 @@ async function command(type, target, payload, auth) {
   return result;
 }
 
-const anonymous = await command("CreateAnonymousSession", { type: "Session", id: "new" }, { deviceId: id("device"), platform: "IOS" });
+const deviceCredential = createHash("sha256").update(id("credential")).digest("hex");
+const anonymous = await command("CreateAnonymousSession", { type: "Session", id: "new" }, { deviceId: id("device"), platform: "IOS", deviceCredential, dateOfBirth: "1990-01-01", consents: { terms: true, privacy: true }, legalDocVersion: "1.1" });
 const auth = anonymous.auth;
 if (!auth?.accessToken) throw new Error("anonymous auth token missing");
-const image = await readFile("apps/api-go/media_store/mobile_media_image_mt7b7xwf_1.jpg");
+const image = await readFile("architecture/fixtures/social-media/matrix/single-portrait-full-9x16.jpg");
 const storageKey = `${id("image")}.jpg`;
-const created = await command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, { mediaType: "IMAGE", originalStorageKey: storageKey, mimeType: "image/jpeg", width: 1170, height: 1560 }, auth);
+const created = await command("CreateMediaAsset", { type: "MediaAsset", id: "new" }, { mediaType: "IMAGE", originalStorageKey: storageKey, mimeType: "image/jpeg", width: 900, height: 1600 }, auth);
 const mediaOperation = JSON.parse(created.operationRef);
 const mediaAssetId = mediaOperation.mediaAssetId;
 const upload = await fetch(`${base}${mediaOperation.uploadUrl}`, {
@@ -40,13 +41,15 @@ if (!upload.ok) throw new Error(`upload ${upload.status}: ${await upload.text()}
 await command("CompleteMediaUpload", { type: "MediaAsset", id: mediaAssetId }, { originalStorageKey: storageKey }, auth);
 await command("ProcessMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { originalPath: "" }, auth);
 let ready = false;
+let lastStatus = "unknown";
 for (let attempt = 0; attempt < 60; attempt += 1) {
   const result = await command("GetMediaAsset", { type: "MediaAsset", id: mediaAssetId }, { mediaAssetId }, auth);
   const operation = JSON.parse(result.operationRef);
+  lastStatus = operation.asset?.processingStatus ?? lastStatus;
   if (operation.asset?.processingStatus === "READY") { ready = true; break; }
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
-if (!ready) throw new Error("media did not become READY");
+if (!ready) throw new Error(`media did not become READY (stuck at ${lastStatus}; worker must drain the processing queue — with MemoryRepository the worker has to share the API process)`);
 const post = await command("CreatePost", { type: "Post", id: "new" }, { authorType: "USER", authorDisplayName: "你", body: "图文发布端到端验证", mediaRefs: [{ mediaAssetId, sortOrder: 0 }], visibility: "PUBLIC", cityScope: "hn" }, auth);
 const postId = post.aggregate?.id;
 const feed = await command("ListFeedPosts", { type: "Feed", id: "local" }, {}, auth);
