@@ -58,15 +58,15 @@ type StorePhoto struct {
 // same asset-path rule as StorePhoto. HoursJSON is a free-form encoded blob
 // (UI is the source of truth for the schedule widget).
 type StoreLines struct {
-	StoreID        string    `json:"storeId"`
-	BusinessID     string    `json:"businessId"`
-	LogoAssetPath  string    `json:"logoAssetPath"`
-	Description    string    `json:"description"`
-	HoursJSON      string    `json:"hoursJson"`
-	ContactPhone   string    `json:"contactPhone"`
-	ContactEmail   string    `json:"contactEmail"`
-	UpdatedBy      string    `json:"updatedBy"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	StoreID       string    `json:"storeId"`
+	BusinessID    string    `json:"businessId"`
+	LogoAssetPath string    `json:"logoAssetPath"`
+	Description   string    `json:"description"`
+	HoursJSON     string    `json:"hoursJson"`
+	ContactPhone  string    `json:"contactPhone"`
+	ContactEmail  string    `json:"contactEmail"`
+	UpdatedBy     string    `json:"updatedBy"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // MemberDirectory entry carries a display_name projection so the mobile
@@ -86,12 +86,61 @@ type MemberDirectory struct {
 // Hardcoded "12.6tr" / "148 订单" will be replaced by reading from this
 // projection. The repository's AddSpend path projects a row here.
 type SpendDaily struct {
-	BusinessID           string    `json:"businessId"`
-	BucketDate           string    `json:"bucketDate"`
-	OrderCount           int       `json:"orderCount"`
-	GrossMinor           int64     `json:"grossMinor"`
-	NewCustomerCount     int       `json:"newCustomerCount"`
-	ReturningCustomerCount int     `json:"returningCustomerCount"`
+	BusinessID             string `json:"businessId"`
+	BucketDate             string `json:"bucketDate"`
+	OrderCount             int    `json:"orderCount"`
+	GrossMinor             int64  `json:"grossMinor"`
+	NewCustomerCount       int    `json:"newCustomerCount"`
+	ReturningCustomerCount int    `json:"returningCustomerCount"`
+}
+
+// OperatingHome is the conservative R35 merchant read model. Demand and
+// capacity signals are deliberately explicit about being unavailable: the
+// service must never turn sales history into invented nearby demand.
+type OperatingHome struct {
+	BusinessID  string              `json:"businessId"`
+	GeneratedAt time.Time           `json:"generatedAt"`
+	Outcome     OperatingOutcome    `json:"outcome"`
+	Pulse       OperatingPulse      `json:"operatingPulse"`
+	Balance     DemandSupplyBalance `json:"demandSupply"`
+	Forecast    OperatingForecast   `json:"forecast"`
+	Decision    OperatingDecision   `json:"bestNextDecision"`
+}
+
+type OperatingOutcome struct {
+	WindowDays         int   `json:"windowDays"`
+	OrderCount         int   `json:"orderCount"`
+	GrossMinor         int64 `json:"grossMinor"`
+	NewCustomers       int   `json:"newCustomers"`
+	ReturningCustomers int   `json:"returningCustomers"`
+}
+
+type OperatingPulse struct {
+	State       string `json:"state"`
+	StoreCount  int    `json:"storeCount"`
+	MemberCount int    `json:"memberCount"`
+	Freshness   string `json:"freshness"`
+}
+
+type DemandSupplyBalance struct {
+	State                  string  `json:"state"`
+	Confidence             float64 `json:"confidence"`
+	PrivacyThresholdPassed bool    `json:"privacyThresholdPassed"`
+	Reason                 string  `json:"reason"`
+}
+
+type OperatingForecast struct {
+	Status      string   `json:"status"`
+	Confidence  float64  `json:"confidence"`
+	Version     int      `json:"version"`
+	Assumptions []string `json:"assumptions"`
+}
+
+type OperatingDecision struct {
+	Kind             string `json:"kind"`
+	Title            string `json:"title"`
+	Reason           string `json:"reason"`
+	RequiresApproval bool   `json:"requiresApproval"`
 }
 
 type Repository interface {
@@ -406,7 +455,7 @@ func (s *Service) Supports(t string) bool {
 		"AddStorePhoto", "ListStorePhotos", "DeleteStorePhoto",
 		"UpsertStoreLines", "GetStoreLines",
 		"ListMemberDirectory", "UpsertMemberDirectory",
-		"ListSpendDaily", "UpsertSpendDaily":
+		"ListSpendDaily", "UpsertSpendDaily", "GetMerchantOperatingHome":
 		return true
 	}
 	return false
@@ -450,9 +499,58 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listSpendDaily(ctx, e)
 	case "UpsertSpendDaily":
 		return s.upsertSpendDaily(ctx, e)
+	case "GetMerchantOperatingHome":
+		return s.getMerchantOperatingHome(ctx, e)
 	default:
 		return command.Rejected(e, "BUSINESS_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "business.unsupported", nil)
 	}
+}
+
+func (s *Service) getMerchantOperatingHome(ctx context.Context, e command.Envelope) command.Result {
+	businessID := e.Target.ID
+	if businessID == "" {
+		var p struct {
+			BusinessID string `json:"businessId"`
+		}
+		if !decode(e.Payload, &p) {
+			return command.Rejected(e, "INVALID_OPERATING_HOME", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_operating_home", nil)
+		}
+		businessID = p.BusinessID
+	}
+	if businessID == "" {
+		return command.Rejected(e, "INVALID_OPERATING_HOME", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_operating_home", nil)
+	}
+	if !s.hasRole(ctx, businessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR", "VIEWER") {
+		return command.Rejected(e, "BUSINESS_MEMBER_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.member_required", nil)
+	}
+	stores, err := s.repo.ListStores(ctx, businessID)
+	if err != nil {
+		return command.Rejected(e, "OPERATING_HOME_READ_FAILED", "INTERNAL", "SAFE_RETRY", "business.operating_home_read_failed", nil)
+	}
+	members, err := s.repo.ListMemberDirectory(ctx, businessID)
+	if err != nil {
+		return command.Rejected(e, "OPERATING_HOME_READ_FAILED", "INTERNAL", "SAFE_RETRY", "business.operating_home_read_failed", nil)
+	}
+	rows, err := s.repo.ListSpendDaily(ctx, businessID, 7)
+	if err != nil {
+		return command.Rejected(e, "OPERATING_HOME_READ_FAILED", "INTERNAL", "SAFE_RETRY", "business.operating_home_read_failed", nil)
+	}
+	home := OperatingHome{BusinessID: businessID, GeneratedAt: s.clock.Now().UTC()}
+	home.Outcome.WindowDays = 7
+	for _, row := range rows {
+		home.Outcome.OrderCount += row.OrderCount
+		home.Outcome.GrossMinor += row.GrossMinor
+		home.Outcome.NewCustomers += row.NewCustomerCount
+		home.Outcome.ReturningCustomers += row.ReturningCustomerCount
+	}
+	home.Pulse = OperatingPulse{State: "EMPTY", StoreCount: len(stores), MemberCount: len(members), Freshness: "NO_RECORDED_ACTIVITY"}
+	if len(rows) > 0 {
+		home.Pulse.State, home.Pulse.Freshness = "ACTIVE", "ROLLING_7_DAYS"
+	}
+	home.Balance = DemandSupplyBalance{State: "INSUFFICIENT_SIGNAL", Confidence: 0, PrivacyThresholdPassed: false, Reason: "aggregated demand and scene capacity signals are unavailable"}
+	home.Forecast = OperatingForecast{Status: "UNAVAILABLE", Confidence: 0, Version: 0, Assumptions: []string{}}
+	home.Decision = OperatingDecision{Kind: "NO_ACTION", Title: "暂不主动加流量", Reason: "缺少通过隐私阈值的聚合需求和未来容量信号", RequiresApproval: false}
+	return acceptedWithPayload(e, "MerchantOperatingHome", businessID, 1, "READ", map[string]any{"home": home}, nil)
 }
 
 func (s *Service) createAccount(ctx context.Context, e command.Envelope) command.Result {
@@ -867,9 +965,9 @@ func (s *Service) MerchantPublishIdentity(ctx context.Context, businessID, userI
 // R16.10-P1-F / Master PRD v1.4 §12: 合规场景分类强制（Category Policy 门禁）
 // 防止业务绕合规：付费一对一私人陪伴/喝酒/亲密陪伴等不能因为换文案进入 Opportunity/Invite。
 var forbiddenOpportunityCategories = map[string]bool{
-	"private_intimate": true,
+	"private_intimate":       true,
 	"paid_companion_alcohol": true,
-	"paid_private_drink": true,
+	"paid_private_drink":     true,
 }
 
 func (s *Service) enforceCategoryPolicy(category string) bool {

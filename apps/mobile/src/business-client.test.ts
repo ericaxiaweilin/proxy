@@ -152,6 +152,29 @@ describe("BusinessClient", () => {
     await expect(client.listMyAccounts()).rejects.toBeInstanceOf(OfflineFallbackSessionError);
   });
 
+  it("reads a conservative merchant operating-home decision", async () => {
+    const store = makeStore();
+    await writeSession(store);
+    const client = new BusinessClient({
+      secureSessionStore: store,
+      authClient: { request: async () => ({ status: 200, json: async () => envelope("GetMerchantOperatingHome", { type: "BusinessAccount", id: "biz_1" }, {
+        home: {
+          businessId: "biz_1", generatedAt: "2026-09-06T00:00:00Z",
+          outcome: { windowDays: 7, orderCount: 3, grossMinor: 450000000, newCustomers: 1, returningCustomers: 2 },
+          operatingPulse: { state: "ACTIVE", storeCount: 1, memberCount: 1, freshness: "ROLLING_7_DAYS" },
+          demandSupply: { state: "INSUFFICIENT_SIGNAL", confidence: 0, privacyThresholdPassed: false, reason: "signals unavailable" },
+          forecast: { status: "UNAVAILABLE", confidence: 0, version: 0, assumptions: [] },
+          bestNextDecision: { kind: "NO_ACTION", title: "暂不主动加流量", reason: "信号不足", requiresApproval: false },
+        },
+      }) }) },
+    });
+    const home = await client.getMerchantOperatingHome("biz_1");
+    expect(home.outcome.orderCount).toBe(3);
+    expect(home.demandSupply.confidence).toBe(0);
+    expect(home.forecast.status).toBe("UNAVAILABLE");
+    expect(home.bestNextDecision.kind).toBe("NO_ACTION");
+  });
+
   it("rejects session with serverSession: false", async () => {
     const store = makeStore();
     await writeSession(store, { serverSession: false });

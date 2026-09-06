@@ -291,6 +291,42 @@ func TestSpendDailyUpsertAndList(t *testing.T) {
 	}
 }
 
+func TestMerchantOperatingHomeDoesNotInventDemandOrForecast(t *testing.T) {
+	service := New()
+	created := service.Handle(businessEnvelope("owner", "CreateBusinessAccount", "new", map[string]any{"name": "木光咖啡"}))
+	var createdBody map[string]any
+	_ = json.Unmarshal([]byte(created.OperationRef), &createdBody)
+	businessID := createdBody["businessId"].(string)
+	service.Handle(businessEnvelope("owner", "CreateBusinessStore", "new", map[string]any{"businessId": businessID, "name": "西湖店", "address": "Tây Hồ"}))
+	service.Handle(businessEnvelope("owner", "UpsertSpendDaily", businessID, map[string]any{
+		"businessId": businessID, "bucketDate": "2026-09-06", "orderCount": 3,
+		"grossMinor": 450000000, "newCustomerCount": 1, "returningCustomerCount": 2,
+	}))
+
+	result := service.Handle(businessEnvelope("owner", "GetMerchantOperatingHome", businessID, map[string]any{"businessId": businessID}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("operating home failed: %+v", result)
+	}
+	var body struct {
+		Home OperatingHome `json:"home"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Home.Outcome.OrderCount != 3 || body.Home.Outcome.GrossMinor != 450000000 {
+		t.Fatalf("real outcome not projected: %+v", body.Home.Outcome)
+	}
+	if body.Home.Balance.State != "INSUFFICIENT_SIGNAL" || body.Home.Balance.Confidence != 0 {
+		t.Fatalf("demand must remain unknown: %+v", body.Home.Balance)
+	}
+	if body.Home.Forecast.Status != "UNAVAILABLE" || body.Home.Forecast.Version != 0 {
+		t.Fatalf("forecast must not be invented: %+v", body.Home.Forecast)
+	}
+	if body.Home.Decision.Kind != "NO_ACTION" {
+		t.Fatalf("low-confidence decision must be NO_ACTION: %+v", body.Home.Decision)
+	}
+}
+
 // MERCHANT-PUBLISH-001: 只有 ACTIVE 账号的 OWNER/ADMIN 能以店名义发布。
 func TestMerchantPublishIdentity(t *testing.T) {
 	service := New()

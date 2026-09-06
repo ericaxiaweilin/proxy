@@ -475,6 +475,7 @@ export function AppShell({
               bottomNavVisible={isNavVisible}
               business={business}
               activities={activities}
+              supply={supply}
             />
           ) : openAIProfile ? (
             <AIAccountProfileSurface

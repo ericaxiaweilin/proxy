@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 43 — 2026-09-06
+
+- R35 merchant Operating Home now starts from real seven-day outcome and
+  repository-backed operating state. Demand × Supply and forecast explicitly
+  remain unavailable until privacy-thresholded demand and Scene-capacity
+  signals exist; the server returns `NO_ACTION` instead of fabricating nearby
+  traffic or future occupancy. The Home exposes this truth state and restores
+  eligible Creator recommendations.
+
 ## Revision 42 — 2026-09-06
 
 - R36.1 messaging supersedes the earlier chat visual reference. Conversation

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 42,
+  "baselineRevision": 43,
   "updatedAt": "2026-09-06",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -18,6 +18,14 @@
     "recoveryBaselineTag": "baseline/r15.23-command-clean-20260830"
   },
   "screenReferences": [
+    {
+      "scope": "merchant-operating-home-r35",
+      "version": "R35_CONSERVATIVE_SIGNAL_SLICE",
+      "file": "docs/spec/Proxy_Merchant_R35_Operating_Home.md",
+      "status": "ACTIVE_SCREEN_REFERENCE",
+      "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
+      "implementationStatus": "OUTCOME_PULSE_UNKNOWN_BALANCE_NO_ACTION_FORECAST_EMPTY_CREATOR_RECOMMENDATIONS_WIRED"
+    },
     {
       "scope": "requester-home-discovery",
       "version": "HUMAN_FIRST_AI_SECOND_R1",

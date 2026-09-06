@@ -15,8 +15,10 @@ import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../compon
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
 import { color, shadows } from "../theme";
-import type { BusinessClient } from "../business-client";
+import type { BusinessClient, MerchantOperatingHome } from "../business-client";
 import type { ActivityClient } from "../activity-client";
+import type { SupplyClient } from "../supply-client";
+import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
 
 function formatVnd(minor: number): string {
   const vnd = Math.round(minor / 1000);
@@ -33,6 +35,7 @@ export function BusinessHome({
   bottomNavVisible,
   business,
   activities,
+  supply,
 }: {
   onOpenMarket: (tab: MarketTab) => void;
   onOpenMe: () => void;
@@ -41,6 +44,7 @@ export function BusinessHome({
   bottomNavVisible?: boolean;
   business?: BusinessClient | undefined;
   activities?: ActivityClient | undefined;
+  supply?: SupplyClient | undefined;
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode>();
   const [accountName, setAccountName] = useState<string | undefined>(undefined);
@@ -48,6 +52,7 @@ export function BusinessHome({
   const [pendingItems, setPendingItems] = useState<Array<{ icon: ProxyIconName; title: string; meta?: string }>>([]);
   const [spendSummary, setSpendSummary] = useState<{ totalOrders: number; totalGrossMinor: number }>({ totalOrders: 0, totalGrossMinor: 0 });
   const [scenePackages, setScenePackages] = useState<Array<{ title: string; sub: string; tag: string }>>([]);
+  const [operatingHome, setOperatingHome] = useState<MerchantOperatingHome | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
@@ -67,14 +72,16 @@ export function BusinessHome({
           setScenePackages([]);
           return;
         }
-        const [stores, memberDir, spend] = await Promise.all([
+        const [stores, memberDir, spend, home] = await Promise.all([
           business.listStores(first.id).catch(() => []),
           business.listMemberDirectory(first.id).catch(() => []),
           business.listSpendDaily({ businessId: first.id, sinceDays: 7 }).catch(() => ({ totalOrders: 0, totalGrossMinor: 0, days: [], sinceDays: 7 })),
+          business.getMerchantOperatingHome(first.id),
         ]);
         if (cancelled) return;
         setStoreCount(stores.length);
         setSpendSummary({ totalOrders: spend.totalOrders, totalGrossMinor: spend.totalGrossMinor });
+        setOperatingHome(home);
         const items: Array<{ icon: ProxyIconName; title: string; meta?: string }> = [];
         if (stores.length === 0) {
           items.push({ icon: "storefront", title: "暂无门店 — 创建一个开始营业" });
@@ -153,7 +160,46 @@ export function BusinessHome({
       ) : null}
 
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>可供给场景</Text>
+        <Text style={styles.sectionTitle}>经营结果</Text>
+        <Text style={styles.sectionHint}>{operatingHome ? `近 ${operatingHome.outcome.windowDays} 天` : "加载中"}</Text>
+      </View>
+      <View style={styles.outcomeGrid} testID="merchant-business-outcome">
+        <View style={styles.metric}><Text style={styles.metricValue}>{operatingHome?.outcome.orderCount ?? "—"}</Text><Text style={styles.metricLabel}>订单</Text></View>
+        <View style={styles.metric}><Text style={styles.metricValue}>{operatingHome ? formatVnd(operatingHome.outcome.grossMinor) : "—"}</Text><Text style={styles.metricLabel}>成交</Text></View>
+        <View style={styles.metric}><Text style={styles.metricValue}>{operatingHome?.outcome.returningCustomers ?? "—"}</Text><Text style={styles.metricLabel}>复访客户</Text></View>
+      </View>
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>经营脉搏</Text>
+        <Text style={styles.sectionHint}>实时状态 → 未来状态</Text>
+      </View>
+      <View style={styles.balanceCard} testID="merchant-demand-supply">
+        <View style={styles.balanceHead}><Text style={styles.balanceTitle}>需求 × 供给</Text><Text style={styles.unknownPill}>信号不足</Text></View>
+        <Text style={styles.balanceBody}>尚未获得通过隐私阈值的聚合需求与 Scene 容量数据。</Text>
+        <Text style={styles.balanceMeta}>不会用历史销售冒充附近客流，也不会生成虚假精确预测。</Text>
+      </View>
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>最佳下一步</Text>
+        <Text style={styles.sectionHint}>低置信策略</Text>
+      </View>
+      <View style={styles.decisionCard} testID="merchant-best-next-decision">
+        <View style={styles.decisionKind}><Text style={styles.decisionKindText}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
+        <Text style={styles.decisionTitle}>{operatingHome?.bestNextDecision.title ?? "等待经营信号"}</Text>
+        <Text style={styles.decisionBody}>{operatingHome?.bestNextDecision.reason ?? "数据加载完成前不建议执行动作"}</Text>
+      </View>
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>未来需求</Text>
+        <Text style={styles.sectionHint}>Forecast</Text>
+      </View>
+      <View style={styles.forecastEmpty} testID="merchant-future-demand">
+        <Text style={styles.forecastTitle}>预测暂不可用</Text>
+        <Text style={styles.forecastBody}>接入聚合需求、预计到店、离店速度和活动占用后，才会显示未来容量。</Text>
+      </View>
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>高价值场景</Text>
         <Text style={styles.sectionHint}>Scene Package</Text>
       </View>
       {showLoading ? <ActivityIndicator /> : null}
@@ -170,6 +216,8 @@ export function BusinessHome({
           <View style={styles.actionMetricTag}><Text style={styles.actionMetricTagText}>{pkg.tag}</Text></View>
         </Pressable>
       ))}
+
+      <MerchantCreatorRecommendations supply={supply} onOpenAll={() => onOpenMarket("OPPORTUNITY")} />
 
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>待处理</Text>
@@ -243,6 +291,24 @@ const styles = StyleSheet.create({
   subtle: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   actionMetricTag: { backgroundColor: color.lime, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 6 },
   actionMetricTagText: { color: color.ink, fontSize: 11, fontWeight: "800", lineHeight: 15 },
+  outcomeGrid: { flexDirection: "row", gap: 8 },
+  metric: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, paddingHorizontal: 8, paddingVertical: 13 },
+  metricValue: { color: color.ink, fontSize: 16, fontWeight: "900", textAlign: "center" },
+  metricLabel: { color: color.muted, fontSize: 11, marginTop: 4 },
+  balanceCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, padding: 14, ...shadows.card },
+  balanceHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  balanceTitle: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  unknownPill: { backgroundColor: "#F3F0EA", borderRadius: 999, color: color.muted, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5 },
+  balanceBody: { color: color.ink, fontSize: 12, lineHeight: 18, marginTop: 9 },
+  balanceMeta: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 5 },
+  decisionCard: { backgroundColor: "#14131A", borderRadius: 18, padding: 15 },
+  decisionKind: { alignSelf: "flex-start", backgroundColor: "#F1FFD0", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
+  decisionKindText: { color: "#4D6200", fontSize: 11, fontWeight: "900" },
+  decisionTitle: { color: color.white, fontSize: 17, fontWeight: "900", marginTop: 10 },
+  decisionBody: { color: "#D8D3DD", fontSize: 12, lineHeight: 18, marginTop: 5 },
+  forecastEmpty: { backgroundColor: "#F6F3ED", borderColor: color.line, borderRadius: 16, borderStyle: "dashed", borderWidth: 1, padding: 14 },
+  forecastTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  forecastBody: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
   resume: { alignItems: "center", backgroundColor: color.resumebarBg, borderColor: color.resumebarBorder, borderRadius: 17, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginVertical: 9, padding: 12 },
   resumeTitle: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   resumeHint: { color: "#6A7A2C", fontSize: 11, fontWeight: "600", lineHeight: 21 },

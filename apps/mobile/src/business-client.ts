@@ -4,6 +4,16 @@ import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
 
+export interface MerchantOperatingHome {
+  businessId: string;
+  generatedAt: string;
+  outcome: { windowDays: number; orderCount: number; grossMinor: number; newCustomers: number; returningCustomers: number };
+  operatingPulse: { state: "EMPTY" | "ACTIVE"; storeCount: number; memberCount: number; freshness: string };
+  demandSupply: { state: "INSUFFICIENT_SIGNAL"; confidence: number; privacyThresholdPassed: boolean; reason: string };
+  forecast: { status: "UNAVAILABLE"; confidence: number; version: number; assumptions: string[] };
+  bestNextDecision: { kind: "NO_ACTION"; title: string; reason: string; requiresApproval: boolean };
+}
+
 export class BusinessClient {
   private sequence = 0;
   public constructor(
@@ -138,6 +148,15 @@ export class BusinessClient {
       totalOrders: (body.totalOrders as number) ?? 0,
       sinceDays: (body.sinceDays as number) ?? 30,
     };
+  }
+
+  public async getMerchantOperatingHome(businessId: string): Promise<MerchantOperatingHome> {
+    const body = this.body(await this.command("GetMerchantOperatingHome", { type: "BusinessAccount", id: businessId }, { businessId }));
+    const home = body.home as MerchantOperatingHome | undefined;
+    if (!home?.businessId || !home.outcome || !home.operatingPulse || !home.demandSupply || !home.forecast || !home.bestNextDecision) {
+      throw new Error("merchant operating home malformed");
+    }
+    return home;
   }
 
   public async upsertSpendDaily(input: {

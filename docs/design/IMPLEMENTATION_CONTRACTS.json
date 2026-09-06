@@ -137,6 +137,23 @@
       "knownGap": "R36.1 cluster 气泡/安全条+sheet(阅后即焚viewLimit+ttl/禁止转发forwardable)/贴纸Drawer/长按菜单/回复预览/置顶条已落地, 复用既有 SendMessage protectionOverride 与 ephemeral 后端. 差异: 贴纸用 emoji 字形大字渲染(RN 不支持远端 SVG, OpenMoji code 已保留); 通话按钮未加(无后端); 转发目标选择器暂为 toast; proxy_object 对象卡片仍走 MessageRenderer 未重做; thread/convo 创建为 toast 占位."
     },
     {
+      "scope": "merchant-operating-home-r35",
+      "reference": "docs/spec/Proxy_Merchant_R35_Operating_Home.md",
+      "implementationFiles": [
+        "apps/api-go/internal/business/service.go",
+        "apps/mobile/src/business-client.ts",
+        "apps/mobile/src/surfaces/business-home.tsx",
+        "apps/mobile/src/shell/app-shell.tsx"
+      ],
+      "evidenceFiles": [
+        "apps/api-go/internal/business/service_test.go",
+        "apps/mobile/src/business-client.test.ts",
+        "scripts/check-regression-contracts.sh"
+      ],
+      "status": "PARTIAL",
+      "knownGap": "R35 conservative first slice is server-authoritative for outcome and operating state. Privacy-safe demand aggregation, Scene supply snapshots, versioned forecasts and expectation history remain pending; until then the only permitted recommendation is NO_ACTION with zero confidence."
+    },
+    {
       "scope": "business",
       "reference": "docs/design/references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html",
       "implementationFiles": [
