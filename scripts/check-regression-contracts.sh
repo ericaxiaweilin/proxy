@@ -428,6 +428,8 @@ if ! grep -q '访问 → 行动' apps/mobile/src/surfaces/merchant-storefront.ts
    ! grep -q '菜单 / 服务' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '照片与视频' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '活动 / Offer' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '店铺二维码' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q 'creationOpen ?' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '线上店铺只负责对外展示' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q 'header={detailHead' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
   echo "  FAIL [MERCHANT-STOREFRONT-R21-001]: storefront lost the stable R21 operating shell" >&2

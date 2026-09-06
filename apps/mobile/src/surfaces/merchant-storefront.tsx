@@ -2,11 +2,12 @@
 // 之前 43 行只列账号；现在拉 account + store + photo album + lines +
 // spend_daily + member_directory, 全部 server-authoritative.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { color, shadows } from "../theme";
 import { retainStorePhoto, type RetainedStorePhoto } from "../expo-composer-draft-store";
 import type { BusinessClient, StoreProduct } from "../business-client";
+import { ProxyIcon } from "../components/proxy-icon";
 
 type Account = { id: string; name: string; status: string };
 type Store = { id: string; businessId: string; name: string; address: string; status: string };
@@ -68,6 +69,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [newStoreAddr, setNewStoreAddr] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>(undefined);
+  const [creationOpen, setCreationOpen] = useState(false);
 
   async function createShop(): Promise<void> {
     if (creating || !newShopName.trim() || !newStoreName.trim()) return;
@@ -340,17 +342,11 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
       {error ? <View style={styles.card}><Text style={styles.errorText}>加载失败：{error}</Text></View> : null}
       {accounts !== undefined && accounts.length === 0 ? (
         <View style={styles.card}>
-          <Text style={styles.createTitle}>创建我的店铺</Text>
-          <Text style={styles.empty}>先有店，相册和“以店铺名义发布”才可用。</Text>
-          <TextInput value={newShopName} onChangeText={setNewShopName} placeholder="商家名称（对外展示）" placeholderTextColor={color.muted} style={styles.createInput} />
-          <TextInput value={newStoreName} onChangeText={setNewStoreName} placeholder="首店店名" placeholderTextColor={color.muted} style={styles.createInput} />
-          <TextInput value={newStoreAddr} onChangeText={setNewStoreAddr} placeholder="首店地址（可选）" placeholderTextColor={color.muted} style={styles.createInput} />
-          {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
-          <Pressable disabled={creating} onPress={() => void createShop()} style={styles.createBtn}>
-            <Text style={styles.createBtnText}>{creating ? "创建中…" : "创建店铺"}</Text>
-          </Pressable>
-          <Text style={styles.blockTitleInside}>创建后可用</Text>
-          <Text style={styles.empty}>店铺相册 · 店铺信息与营业时间 · 成员目录 · 经营数据</Text>
+          <View style={styles.emptyIcon}><ProxyIcon color={color.ink} name="storefront" size={30} /></View>
+          <Text style={styles.createTitle}>还没有线上店铺</Text>
+          <Text style={styles.empty}>创建后可维护菜单 / 服务、照片视频、活动 Offer 与公开营业资料。</Text>
+          <Pressable onPress={() => setCreationOpen((open) => !open)} style={styles.createBtn}><Text style={styles.createBtnText}>{creationOpen ? "收起" : "创建线上店铺"}</Text></Pressable>
+          {creationOpen ? <View style={styles.creationSheet}><TextInput value={newShopName} onChangeText={setNewShopName} placeholder="商家名称" placeholderTextColor={color.muted} style={styles.createInput} /><TextInput value={newStoreName} onChangeText={setNewStoreName} placeholder="首店店名" placeholderTextColor={color.muted} style={styles.createInput} /><TextInput value={newStoreAddr} onChangeText={setNewStoreAddr} placeholder="首店地址（可选）" placeholderTextColor={color.muted} style={styles.createInput} />{createError ? <Text style={styles.errorText}>{createError}</Text> : null}<Pressable disabled={creating} onPress={() => void createShop()} style={styles.createBtn}><Text style={styles.createBtnText}>{creating ? "创建中…" : "确认创建"}</Text></Pressable></View> : null}
         </View>
       ) : null}
       {accounts?.map((a) => {
@@ -373,13 +369,10 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
             <View style={styles.funnel}>{[[(aSpend?.totalOrders ?? 0).toString(), "订单"], [newCustomers.toString(), "新客"], [returningCustomers.toString(), "复购"], [aSpend ? formatVnd(aSpend.totalGrossMinor) : "—", "成交额"]].map(([value, label]) => <View key={label} style={styles.funnelItem}><Text numberOfLines={1} style={styles.funnelValue}>{value}</Text><Text style={styles.funnelLabel}>{label}</Text></View>)}</View>
             <View style={styles.sourceBox}><Text style={styles.blockTitleInside}>流量来源</Text><Text style={styles.empty}>归因接口尚未提供来源拆分；不使用历史假百分比。</Text></View>
             {aStores.length === 0 ? (
-              <View>
-                <Text style={styles.empty}>暂无店铺，在下面直接加一家。</Text>
-                <TextInput value={newStoreName} onChangeText={setNewStoreName} placeholder="店名" placeholderTextColor={color.muted} style={styles.createInput} />
-                <TextInput value={newStoreAddr} onChangeText={setNewStoreAddr} placeholder="地址（可选）" placeholderTextColor={color.muted} style={styles.createInput} />
-                <Pressable disabled={creating} onPress={() => void addStore(a.id)} style={styles.createBtn}>
-                  <Text style={styles.createBtnText}>{creating ? "添加中…" : "新增店铺"}</Text>
-                </Pressable>
+              <View style={styles.card}>
+                <Text style={styles.createTitle}>尚未建立经营门店</Text><Text style={styles.empty}>建立门店后才能发布菜单、照片和活动 Offer。</Text>
+                <Pressable onPress={() => setCreationOpen((open) => !open)} style={styles.createBtn}><Text style={styles.createBtnText}>{creationOpen ? "收起" : "新增门店"}</Text></Pressable>
+                {creationOpen ? <View style={styles.creationSheet}><TextInput value={newStoreName} onChangeText={setNewStoreName} placeholder="店名" placeholderTextColor={color.muted} style={styles.createInput} /><TextInput value={newStoreAddr} onChangeText={setNewStoreAddr} placeholder="地址（可选）" placeholderTextColor={color.muted} style={styles.createInput} /><Pressable disabled={creating} onPress={() => void addStore(a.id)} style={styles.createBtn}><Text style={styles.createBtnText}>{creating ? "添加中…" : "确认新增"}</Text></Pressable></View> : null}
               </View>
             ) : null}
             {aStores.map((s) => {
@@ -389,10 +382,12 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
               const sAvailable = sProducts.filter((p) => p.available);
               return (
                 <View key={s.id} style={styles.storeCard}>
-                  <View style={styles.storeHead}>
-                    <Text style={styles.storeName}>{s.name}</Text>
-                    <Text style={styles.storeMeta}>{s.address || "—"} · {s.status}</Text>
+                  <View style={styles.storeHero}>
+                    <View style={styles.storeLogo}><Text style={styles.storeLogoText}>{s.name.slice(0, 1).toUpperCase()}</Text></View>
+                    <View style={styles.storeHeroCopy}><Text style={styles.storeName}>{s.name} · Proxy 店铺</Text><Text style={styles.storeMeta}>{s.address || "地址待完善"} · {s.status} · 公开店铺页</Text></View>
                   </View>
+                  <View style={styles.heroActions}><View style={styles.previewButton}><Text style={styles.previewButtonText}>公开主页</Text></View><Pressable onPress={() => void Share.share({ message: `${s.name} · Proxy 店铺` })} style={styles.shareButton}><Text style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
+                  <View style={styles.qrCard}><View style={styles.qrIcon}><ProxyIcon color={color.ink} name="qrGrid" size={38} /></View><View style={styles.storeHeroCopy}><Text style={styles.photoHeadTitle}>店铺二维码</Text><Text style={styles.storeMeta}>扫码进入 {s.name} 的 Proxy 公开店铺页，可用于店内桌牌、海报和 Creator 分享。</Text></View></View>
 
                   {sLines ? (
                     <View style={styles.linesBlock}>
@@ -702,6 +697,19 @@ const styles = StyleSheet.create({
   empty: { color: color.muted, fontSize: 12, paddingVertical: 4 },
   errorText: { color: "#a32020", fontSize: 12 },
   createTitle: { color: color.ink, fontSize: 15, fontWeight: "800", marginBottom: 4 },
+  emptyIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 18, height: 58, justifyContent: "center", marginBottom: 8, width: 58 },
+  creationSheet: { borderTopColor: color.line, borderTopWidth: 1, marginTop: 12, paddingTop: 4 },
+  storeHero: { alignItems: "center", flexDirection: "row", gap: 11 },
+  storeLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 18, height: 58, justifyContent: "center", width: 58 },
+  storeLogoText: { color: color.white, fontSize: 22, fontWeight: "900" },
+  storeHeroCopy: { flex: 1, minWidth: 0 },
+  heroActions: { flexDirection: "row", gap: 8 },
+  previewButton: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, flex: 1, paddingVertical: 11 },
+  previewButtonText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  shareButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flex: 1, paddingVertical: 11 },
+  shareButtonText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  qrCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, padding: 12 },
+  qrIcon: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 14, height: 58, justifyContent: "center", width: 58 },
   createInput: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
   createBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 10, paddingVertical: 12 },
   createBtnBusy: { opacity: 0.6 },
