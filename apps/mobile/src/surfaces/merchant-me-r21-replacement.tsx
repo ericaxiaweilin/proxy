@@ -12,7 +12,7 @@
 // instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
 
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { color, Gradient, shadows } from "../theme";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import type { BusinessClient } from "../business-client";
@@ -59,9 +59,12 @@ function formatVnd(minor: number): string {
 
 function detailHead({ onBack, title }: { onBack: () => void; title: string }): React.JSX.Element {
   return (
-    <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.subPageBack}>
-      <Text style={styles.subPageBackText}>‹ 返回</Text>
-    </Pressable>
+    <View style={styles.detailHead}>
+      <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.subPageBack}>
+        <Text style={styles.subPageBackText}>‹ 返回</Text>
+      </Pressable>
+      <Text style={styles.detailTitle}>{title}</Text>
+    </View>
   );
 }
 
@@ -91,6 +94,10 @@ function summary({ title, meta, stats }: { title: string; meta: string; stats: A
   );
 }
 
+function SimpleRows({ rows, onPress }: { rows: Array<[string, string, MerchantPage?]>; onPress?: (page: MerchantPage) => void }): React.JSX.Element {
+  return <View style={styles.rowList}>{rows.map(([title, meta, destination]) => <Pressable key={title} disabled={!destination} onPress={() => destination && onPress?.(destination)} style={styles.row}><View style={styles.rowCopy}><Text style={styles.objectTitle}>{title}</Text><Text style={styles.meta}>{meta}</Text></View>{destination ? <Text style={styles.chev}>›</Text> : null}</Pressable>)}</View>;
+}
+
 export function MerchantMeR21Replacement({
   business,
   supply,
@@ -117,6 +124,8 @@ export function MerchantMeR21Replacement({
   const [selectedCreator, setSelectedCreator] = useState<SupplierCandidate | undefined>(undefined);
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<ActivityItem | undefined>(undefined);
+  const [creatorView, setCreatorView] = useState<"MATCH" | "CREATORS" | "COLLABS" | "RESULTS">("MATCH");
+  const [creatorQuery, setCreatorQuery] = useState("");
 
   const refresh = useCallback(async (accountId: string) => {
     if (!business) return;
@@ -186,15 +195,21 @@ export function MerchantMeR21Replacement({
   }, [activities]);
 
   if (page === "creator") {
+    const visibleCreators = creators.filter((creator) => `${creator.name} ${creator.serviceType} ${creator.languages.join(" ")}`.toLowerCase().includes(creatorQuery.trim().toLowerCase()));
     return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "Creator 经营" })}
-          {sectionHead("Creator 名单", `${creators.length} 位匹配`) }
-          {creators.length === 0 ? (
+          <Text style={styles.pageSub}>围绕真实经营目标匹配、邀请，并追踪到店与消费结果。</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>{([['MATCH','智能匹配'],['CREATORS','Creator'],['COLLABS','合作'],['RESULTS','结果']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setCreatorView(id)} style={[styles.tab, creatorView === id && styles.tabOn]}><Text style={[styles.tabText, creatorView === id && styles.tabTextOn]}>{label}</Text></Pressable>)}</ScrollView>
+          {creatorView === "MATCH" ? <><View style={styles.goalGrid}>{([['storefront','带来到店新客','到店、带客、核销'],['target','生产内容','探店、短视频、UGC'],['arrowUpRight','扩大本地曝光','覆盖与互动'],['ticket','推广券与活动','领取、预约、核销']] as const).map(([icon,title,hint]) => <View key={title} style={styles.goalCard}><View style={styles.goalIcon}><ProxyIcon color={color.ink} name={icon} size={23} /></View><Text style={styles.cardTitle}>{title}</Text><Text style={styles.caption}>{hint}</Text></View>)}</View>{sectionHead("最佳匹配", `${creators.length} 位符合条件`)}</> : null}
+          {creatorView === "CREATORS" ? <><View style={styles.search}><ProxyIcon color={color.muted} name="search" size={18} /><TextInput onChangeText={setCreatorQuery} placeholder="搜索 Creator、能力或语言" placeholderTextColor={color.muted} style={styles.searchInput} value={creatorQuery} /></View>{sectionHead("Creator 人才库", `${visibleCreators.length} 位`)}</> : null}
+          {creatorView === "COLLABS" ? <>{sectionHead("合作状态", "来自真实邀请与合作记录")}<SimpleRows rows={[["待回复", "等待合作邀请数据"], ["进行中", "等待履约数据"], ["已完成", "等待完成记录"]]} /></> : null}
+          {creatorView === "RESULTS" ? <>{summary({ title: "Creator 贡献", meta: "近 30 天 · 真实归因", stats: [["—","归因收入"],["—","券核销"],["—","新客"],["—","完成合作"]] })}</> : null}
+          {(creatorView === "MATCH" || creatorView === "CREATORS") && visibleCreators.length === 0 ? (
             <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂时没有匹配的 Creator</Text><Text style={styles.empty}>工作台仍可使用；待供给数据进入后，候选会显示在这里。</Text></View>
           ) : null}
-          {creators.map((creator) => (
+          {(creatorView === "MATCH" || creatorView === "CREATORS") ? visibleCreators.map((creator) => (
             <Pressable
               key={creator.agentId}
               onPress={() => { setSelectedCreator(creator); setPage("creatorDetail"); }}
@@ -209,7 +224,7 @@ export function MerchantMeR21Replacement({
                 {creator.referencePrice} {creator.currency} · 到店 {creator.photos.length} 媒体
               </Text>
             </Pressable>
-          ))}
+          )) : null}
         </ScrollView>
       </View>
     );
@@ -245,6 +260,8 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "券 / 客户" })}
+          {summary({ title: `${accounts?.[0]?.name ?? "商家"} · 权益`, meta: "可核验、可追溯", stats: [["—", "进行中"], ["—", "已领取"], ["—", "已核销"], ["—", "到店"]] })}
+          <SimpleRows onPress={setPage} rows={[["券管理", "创建、上下架与有效期"], ["核销记录", "扫码核销 · 订单留痕"], ["客户归因", "领取、到店与复购"], ["活动关联", `${activityItems.length} 个开放活动`, "activity"]]} />
           {sectionHead("经营人员", `${members.length} 人`)}
           {members.length === 0 ? (
             <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂无经营人员</Text><Text style={styles.empty}>添加成员后会显示角色、状态与加入时间。</Text></View>
@@ -266,6 +283,7 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "活动" })}
+          {summary({ title: "活动导流", meta: `${activityItems.length} 个开放活动`, stats: [[activityItems.length.toString(), "档期"], ["—", "已报名"], ["—", "缺口"], ["—", "到店"]] })}
           {sectionHead("活动列表", `${activityItems.length} 个开放活动`) }
           {activityItems.length === 0 ? (
             <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂无开放活动</Text><Text style={styles.empty}>创建的活动会在这里进入报名、执行与复盘流程。</Text></View>
@@ -274,10 +292,10 @@ export function MerchantMeR21Replacement({
             <Pressable
               key={a.activityId}
               onPress={() => { setSelectedActivity(a); setPage("activityDetail"); }}
-              style={styles.card}
+              style={styles.activityCard}
             >
-              <Text style={styles.cardTitle}>{a.title}</Text>
-              <Text style={styles.meta}>{a.activityId}</Text>
+              <View style={styles.activityTop}><View style={styles.rowCopy}><Text style={styles.objectTitle}>{a.title}</Text><Text style={styles.meta}>{a.activityId}</Text></View><IconBox icon="spark" /></View>
+              <View style={styles.chips}><View style={styles.chip}><Text style={styles.chipText}>查看报名与执行</Text></View></View>
             </Pressable>
           ))}
         </ScrollView>
@@ -300,6 +318,7 @@ export function MerchantMeR21Replacement({
             ],
             title: selectedActivity.title,
           })}
+          <SimpleRows onPress={setPage} rows={[["已锁定 Creator", `${creators.length} 位当前可匹配`, "creator"], ["定向券", "查看活动关联权益", "voucher"], ["结果", "等待真实归因数据", "sales"]]} />
           <View style={styles.actions}>
             <Pressable style={styles.secondary}><Text style={styles.secondaryText}>查看详情</Text></Pressable>
           </View>
@@ -343,6 +362,7 @@ export function MerchantMeR21Replacement({
             ],
             title: formatVnd(spendTotal.totalGrossMinor),
           })}
+          <SimpleRows onPress={setPage} rows={[["Creator", `${creators.length} 位当前可匹配`, "creator"], ["券", "查看权益与核销", "voucher"], ["活动导流", `${activityItems.length} 个开放活动`, "activity"], ["自然到店", "等待真实归因数据"]]} />
           {spendDays.length === 0 ? (
             <View style={styles.card}><Text style={styles.empty}>暂无销售数据 — server 列表为空</Text></View>
           ) : null}
@@ -356,6 +376,7 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "运营中心" })}
+          <SimpleRows onPress={setPage} rows={[["Creator 待跟进", `${creators.length} 位当前可匹配`, "creator"], ["活动待处理", `${activityItems.length} 个开放活动`, "activity"], ["券与核销", "查看权益与核销状态", "voucher"], ["销售结果", `${spendTotal.totalOrders} 个订单`, "sales"]]} />
           {sectionHead("经营人员", `member_directory · ${members.length}`)}
           {members.length === 0 ? (
             <View style={styles.card}><Text style={styles.empty}>暂无成员</Text></View>
@@ -376,6 +397,8 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "Proxy 数据" })}
+          {summary({ title: `${accounts?.[0]?.name ?? "商家"} · Proxy`, meta: "平台关系", stats: [["—", "未读通知"], ["—", "开放能力"], [accounts?.[0]?.status ?? "—", "接入"], [members.length.toString(), "成员"]] })}
+          <SimpleRows onPress={setPage} rows={[["平台通知", "订单、活动与系统消息"], ["政策与规则", "Creator · 券 · 活动 · 内容"], ["认证与资格", accounts?.[0]?.status ?? "待获取"], ["成员与权限", `${members.length} 位成员`, "ops"], ["平台结算", "合作、券成本与活动支出", "sales"], ["接入与连接", "店铺 · QR · 核销 · 数据同步", "store"], ["支持与申诉", "查看处理中问题"]]} />
           {sectionHead("业务健康度", "spend_daily · server 实际")}
           {spendDays.length === 0 ? (
             <View style={styles.card}><Text style={styles.empty}>暂无数据 — server 列表为空</Text></View>
@@ -519,6 +542,9 @@ const styles = StyleSheet.create({
   emptyTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   subPageBack: { paddingHorizontal: 8, paddingVertical: 6 },
   subPageBackText: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  detailHead: { marginBottom: 12 },
+  detailTitle: { color: color.ink, fontSize: 24, fontWeight: "900", letterSpacing: -0.7, lineHeight: 30 },
+  objectTitle: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },
   summary: { backgroundColor: "#1F1B33", borderRadius: 16, gap: 4, marginTop: 8, padding: 14 },
   summaryMeta: { color: "#BFB5DA", fontSize: 12 },
   summaryStats: { flexDirection: "row", gap: 14, marginTop: 8 },
@@ -526,6 +552,13 @@ const styles = StyleSheet.create({
   summaryStatValue: { color: color.white, fontSize: 16, fontWeight: "900" },
   summaryStatLabel: { color: "#BFB5DA", fontSize: 11 },
   actions: { flexDirection: "row", gap: 8, marginTop: 12 },
+  rowList: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginTop: 10, paddingHorizontal: 14 },
+  row: { alignItems: "center", borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 10, minHeight: 66 },
+  activityCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginTop: 10, padding: 14 },
+  activityTop: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 },
+  chip: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 5 },
+  chipText: { color: "#62596B", fontSize: 11, fontWeight: "700" },
   primary: { backgroundColor: color.lime, borderRadius: 12, flex: 1, paddingVertical: 12 },
   primaryText: { color: color.ink, fontSize: 14, fontWeight: "900", textAlign: "center" },
   secondary: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: 12 },
@@ -555,6 +588,17 @@ const styles = StyleSheet.create({
   kpi: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flex: 1, height: 68, justifyContent: "center", paddingHorizontal: 3 },
   kpiValue: { color: color.ink, fontSize: 14, fontWeight: "900", lineHeight: 20 },
   caption: { color: color.muted, fontSize: 10, fontWeight: "600", lineHeight: 15 },
+  pageSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  tabs: { gap: 7, paddingVertical: 14 },
+  tab: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 36, justifyContent: "center", paddingHorizontal: 13 },
+  tabOn: { backgroundColor: color.ink, borderColor: color.ink },
+  tabText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  tabTextOn: { color: color.white },
+  goalGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  goalCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, minHeight: 142, padding: 13, width: "48.5%" },
+  goalIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 14, height: 44, justifyContent: "center", marginBottom: 10, width: 44 },
+  search: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 8, minHeight: 48, paddingHorizontal: 12 },
+  searchInput: { color: color.ink, flex: 1, fontSize: 14, paddingVertical: 0 },
   subtleButton: { marginTop: 16, paddingVertical: 10 },
   subtleButtonText: { color: color.muted, fontSize: 12, textAlign: "center" },
   subtleButtonDanger: { marginTop: 4, paddingVertical: 10 },
