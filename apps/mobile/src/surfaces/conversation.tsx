@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
@@ -24,6 +25,7 @@ interface Message {
   isOwn: boolean;
   isAI?: boolean;
   imageUri?: string;
+  videoUri?: string;
   v1?: MessageV1;
 }
 
@@ -60,6 +62,7 @@ export function ConversationSurface({
   const [noForward, setNoForward] = useState(true);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [selectedImage, setSelectedImage] = useState<UploadableImage>();
+  const [selectedVideo, setSelectedVideo] = useState<UploadableImage & { durationMs?: number }>();
   const [imageMenuOpen, setImageMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -145,6 +148,9 @@ export function ConversationSurface({
         isAI: Boolean(aiAccount && row.senderId !== actorId),
         ...(row.messageType === "IMAGE" && typeof row.mediaRef === "string"
           ? { imageUri: `${conversationClient.baseUrl}/v1/media/thumb/${encodeURIComponent(row.mediaRef)}` }
+          : {}),
+        ...(row.messageType === "VIDEO" && typeof row.mediaRef === "string"
+          ? { videoUri: `${conversationClient.baseUrl}/v1/media/play/${encodeURIComponent(row.mediaRef)}` }
           : {}),
       })));
       setError(undefined);
@@ -317,6 +323,22 @@ export function ConversationSurface({
     const asset = result.canceled ? undefined : result.assets[0];
     if (!asset) return;
     setSelectedImage({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) });
+    setSelectedVideo(undefined);
+  }
+
+  async function chooseVideo(): Promise<void> {
+    setImageMenuOpen(false);
+    setError(undefined);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setError("请允许 Proxy 读取视频");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], quality: 0.8, selectionLimit: 1 });
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (!asset) return;
+    setSelectedVideo({ uri: asset.uri, width: asset.width, height: asset.height, durationMs: asset.duration ?? undefined, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) });
+    setSelectedImage(undefined);
   }
 
   async function sendImage(): Promise<void> {
@@ -326,7 +348,7 @@ export function ConversationSurface({
     setUploadProgress(0);
     try {
       const uploaded = await mediaClient.uploadImage(selectedImage, { onProgress: setUploadProgress });
-      const result = await conversationClient.sendImageMessage(convId, uploaded.storageKey, draft, undefined, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined);
+      const result = await conversationClient.sendImageMessage(convId, uploaded.mediaAssetId, draft, undefined, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined);
       setMessages((current) => [...current, { id:`image_${Date.now()}`, sender:"你", body:draft.trim(), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, imageUri:selectedImage.uri }]);
       const payload = parseOperationRef(result);
       const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
@@ -335,6 +357,28 @@ export function ConversationSurface({
       setSelectedImage(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "图片发送失败，请重试");
+    } finally {
+      setUploadProgress(undefined);
+      setSending(false);
+    }
+  }
+
+  async function sendVideo(): Promise<void> {
+    if (!selectedVideo || !convId || sending) return;
+    setSending(true);
+    setError(undefined);
+    setUploadProgress(0);
+    try {
+      const uploaded = await mediaClient.uploadMedia({ ...selectedVideo, mediaType:"VIDEO", defaultMime:"video/mp4" }, { onProgress:setUploadProgress });
+      const result = await conversationClient.sendVideoMessage(convId, uploaded.mediaAssetId, draft, undefined, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined);
+      setMessages((current) => [...current, { id:`video_${Date.now()}`, sender:"你", body:draft.trim(), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, videoUri:selectedVideo.uri }]);
+      const payload = parseOperationRef(result);
+      const aiMsg = payload?.aiMessage as Record<string, unknown> | undefined;
+      if (aiMsg) setMessages((current) => [...current, { id:String(aiMsg.messageId ?? `ai_${Date.now()}`), sender:aiAccount?.displayName ?? "Proxy AI", body:String(aiMsg.body ?? ""), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:false, isAI:true }]);
+      setDraft("");
+      setSelectedVideo(undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "视频发送失败，请重试");
     } finally {
       setUploadProgress(undefined);
       setSending(false);
@@ -405,6 +449,7 @@ export function ConversationSurface({
             <Pressable accessibilityHint={msg.isOwn ? "长按删除消息" : undefined} disabled={!msg.isOwn} key={msg.id} onLongPress={() => void deleteOwnMessage(msg.id)} style={[styles.messageBubble, msg.isOwn ? styles.messageOwn : msg.isAI ? styles.messageAI : styles.messageOther]}>
               {!msg.isOwn && <Text style={styles.messageSender}>{msg.sender}</Text>}
               {msg.imageUri ? <Image accessibilityLabel="聊天图片" resizeMode="cover" source={{ uri:msg.imageUri }} style={styles.messageImage} /> : null}
+              {msg.videoUri ? <ChatVideo uri={msg.videoUri} /> : null}
               {msg.body.trim() ? <Text style={[styles.messageBody, msg.isOwn && styles.messageBodyOwn]}>{msg.body}</Text> : null}
               <Text style={[styles.messageTime, msg.isOwn && styles.messageTimeOwn]}>{msg.time}</Text>
             </Pressable>
@@ -427,7 +472,8 @@ export function ConversationSurface({
 
         <View style={[styles.composerShell, { paddingBottom: keyboardInset > 0 ? 10 : Math.max(insets.bottom, 16) }]}>
           {selectedImage ? <View style={styles.imagePreviewRow}><Image source={{uri:selectedImage.uri}} style={styles.imagePreview} /><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedImage.fileName ?? "已选择图片") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除图片" onPress={() => setSelectedImage(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
-          {imageMenuOpen ? <View style={styles.imageMenu}><Pressable onPress={() => void chooseImage("CAMERA")} style={styles.imageMenuBtn}><Text>拍照</Text></Pressable><Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.imageMenuBtn}><Text>从相册选择</Text></Pressable></View> : null}
+          {selectedVideo ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>▶</Text><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedVideo.fileName ?? "已选择视频") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除视频" onPress={() => setSelectedVideo(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
+          {imageMenuOpen ? <View style={styles.imageMenu}><Pressable onPress={() => void chooseImage("CAMERA")} style={styles.imageMenuBtn}><Text>拍照</Text></Pressable><Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.imageMenuBtn}><Text>照片</Text></Pressable><Pressable onPress={() => void chooseVideo()} style={styles.imageMenuBtn}><Text>视频</Text></Pressable></View> : null}
           {emojiOpen ? <View style={styles.emojiRail}>{["😀", "😂", "🥰", "👍", "🙏", "🎉", "❤️", "👀"].map((emoji) => <Pressable key={emoji} onPress={() => { setDraft((value) => `${value}${emoji}`); setEmojiOpen(false); }} style={styles.emojiButton}><Text style={styles.emojiText}>{emoji}</Text></Pressable>)}</View> : null}
         {/* Composer — 图片 / 业务卡片 / 文本 */}
         <View style={styles.composer}>
@@ -446,9 +492,9 @@ export function ConversationSurface({
             editable={!!convId && !sending}
           />
           <Pressable
-            disabled={(!draft.trim() && !selectedImage) || sending || !convId}
-            onPress={() => void (selectedImage ? sendImage() : send())}
-            style={[styles.sendBtn, ((!draft.trim() && !selectedImage) || sending || !convId) && styles.sendBtnDisabled]}
+            disabled={(!draft.trim() && !selectedImage && !selectedVideo) || sending || !convId || blocked}
+            onPress={() => void (selectedVideo ? sendVideo() : selectedImage ? sendImage() : send())}
+            style={[styles.sendBtn, ((!draft.trim() && !selectedImage && !selectedVideo) || sending || !convId || blocked) && styles.sendBtnDisabled]}
           >
             <Text style={styles.sendBtnText}>{sending ? "..." : "发送"}</Text>
           </Pressable>
@@ -482,6 +528,14 @@ export function ConversationSurface({
       ) : null}
     </SwipeBackShell>
   );
+}
+
+function ChatVideo({ uri }: { uri: string }): React.JSX.Element {
+  const player = useVideoPlayer(uri, (instance) => {
+    instance.loop = false;
+    instance.muted = false;
+  });
+  return <VideoView accessibilityLabel="聊天视频" contentFit="cover" fullscreenOptions={{ enable:true }} nativeControls player={player} style={styles.messageVideo} />;
 }
 
 const styles = StyleSheet.create({
@@ -541,6 +595,7 @@ const styles = StyleSheet.create({
   messageTime: { color: color.muted, fontSize: 11, marginTop: 4, textAlign: "right" },
   messageTimeOwn: { color: "rgba(255,255,255,0.6)" },
   messageImage: { borderRadius: 11, height: 180, marginBottom: 6, width: 220 },
+  messageVideo: { borderRadius: 11, height: 180, marginBottom: 6, width: 220 },
 
   systemMsg: {
     alignSelf: "center",
@@ -574,6 +629,7 @@ const styles = StyleSheet.create({
   imageBtnText: { color:color.ink, fontSize:24, lineHeight:26 },
   imagePreviewRow: { alignItems:"center", backgroundColor:"#F8F5FA", borderRadius:12, flexDirection:"row", gap:9, marginBottom:7, padding:7 },
   imagePreview: { borderRadius:8, height:52, width:52 },
+  videoPreviewIcon: { backgroundColor:color.ink, borderRadius:8, color:color.white, fontSize:18, overflow:"hidden", paddingHorizontal:18, paddingVertical:15 },
   imagePreviewText: { color:color.ink, flex:1, fontSize:11 },
   imageRemove: { color:color.muted, fontSize:24, paddingHorizontal:8 },
   imageMenu: { flexDirection:"row", gap:8, marginBottom:7 },

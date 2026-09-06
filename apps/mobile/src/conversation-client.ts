@@ -83,6 +83,10 @@ export class ConversationClient {
     return this.sendMessage(conversationId, caption?.trim() || " ", assistantMode, undefined, mediaRef, protectionOverride, "IMAGE");
   }
 
+  public async sendVideoMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride, assistantMode?: string): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, caption?.trim() || " ", assistantMode, undefined, mediaRef, protectionOverride, "VIDEO");
+  }
+
   public async listMessages(conversationId: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "ListConversationMessages", { type: "Conversation", id: conversationId }, {});
