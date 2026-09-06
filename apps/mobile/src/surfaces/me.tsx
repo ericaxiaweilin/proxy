@@ -177,7 +177,7 @@ const BUSINESS_ME: PersonaConfig = {
         { icon: "◎", label: "Creator 经营", desc: "功能预览 · 实时数据待接入", grad: true, route: "trustedteam" },
         { icon: "券", label: "券", desc: "查看真实券状态", route: "vouchers" },
         { icon: "↗", label: "活动导流", desc: "商家活动 · 可报名", route: "merchantcampaign" },
-        { icon: "▤", label: "线上店铺", desc: "功能预览 · 实时数据待接入", grad: true, route: "merchantstorefront" },
+        { icon: "▤", label: "线上店铺", desc: "实时数据已接入", grad: true, route: "merchantstorefront" },
         { icon: "₫", label: "销售中心", desc: "功能预览 · 实时数据待接入", route: "outcomehistory" },
         { icon: "✦", label: "经营", desc: "功能预览 · 实时数据待接入", route: "enterpriseops" }
       ]

@@ -434,11 +434,11 @@ export function MerchantMeR21Replacement({
             <Text style={styles.bizAvatarText}>B</Text>
           </Gradient>
           <View style={styles.rowCopy}>
-            <Text style={styles.cardTitle}>{accounts?.[0]?.name ?? "（未登录）"}</Text>
-            <Text style={styles.meta}>{accounts?.[0]?.status ?? "—"} · {members.length} 经营人员</Text>
+            <Text style={styles.cardTitle}>{accounts?.[0]?.name ?? "还没有店铺"}</Text>
+            <Text style={styles.meta}>{accounts?.[0] ? `${accounts?.[0]?.status ?? ""} · ${members.length} 经营人员` : "创建后解锁相册 · 信息 · 成员 · 数据"}</Text>
           </View>
           <View style={styles.storeButton}>
-            <Text style={styles.storeButtonText}>查看店铺</Text>
+            <Text style={styles.storeButtonText}>{accounts?.[0] ? "查看店铺" : "创建店铺"}</Text>
           </View>
         </Pressable>
 

@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 49 — 2026-09-06
+
+- 线上店铺空态引导：无店铺时 hub 显示"还没有店铺"+创建 CTA，创建表单下预告
+  相册/信息/成员/数据四个模块（静态 IA 名称，无假数字）；我的入口文案去掉
+  过时的"实时数据待接入"。
+
 ## Revision 48 — 2026-09-06
 
 - Removed the legacy R7 opportunity quick filters (recommend/value/time/nearby/

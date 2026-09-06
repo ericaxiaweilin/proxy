@@ -272,6 +272,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
           <Pressable disabled={creating} onPress={() => void createShop()} style={styles.createBtn}>
             <Text style={styles.createBtnText}>{creating ? "创建中…" : "创建店铺"}</Text>
           </Pressable>
+          <Text style={styles.blockTitleInside}>创建后可用</Text>
+          <Text style={styles.empty}>店铺相册 · 店铺信息与营业时间 · 成员目录 · 经营数据</Text>
         </View>
       ) : null}
       {accounts?.map((a) => {
