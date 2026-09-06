@@ -345,10 +345,7 @@ export function MerchantMeR21Replacement({
     }
     return (
       <View style={styles.root}>
-        <ScrollView contentContainerStyle={styles.content}>
-          {detailHead({ onBack: () => setPage("root"), title: "线上店铺" })}
-          <MerchantStorefrontSurface client={business} viewerAccountId={viewerAccountId} />
-        </ScrollView>
+        <MerchantStorefrontSurface client={business} header={detailHead({ onBack: () => setPage("root"), title: "线上店铺" })} viewerAccountId={viewerAccountId} />
       </View>
     );
   }

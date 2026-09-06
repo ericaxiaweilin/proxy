@@ -414,7 +414,8 @@ echo "    STORE-PHOTO-001 (mobile): PASS (client + surface wire)"
 if ! grep -q '访问 → 行动' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '流量来源' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '店铺管理' apps/mobile/src/surfaces/merchant-storefront.tsx || \
-   ! grep -q 'manageGrid' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+   ! grep -q 'manageGrid' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q 'header={detailHead' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
   echo "  FAIL [MERCHANT-STOREFRONT-R21-001]: storefront lost the stable R21 operating shell" >&2
   exit 1
 fi

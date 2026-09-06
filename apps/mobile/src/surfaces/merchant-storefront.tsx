@@ -1,7 +1,7 @@
 // MERCHANT_STOREFRONT — R18.x 真接商家店铺
 // 之前 43 行只列账号；现在拉 account + store + photo album + lines +
 // spend_daily + member_directory, 全部 server-authoritative.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { color, shadows } from "../theme";
@@ -31,7 +31,7 @@ function linesAsHoursObject(hoursJson: string): Record<string, string> {
   return {};
 }
 
-export function MerchantStorefrontSurface({ client, viewerAccountId }: { client: BusinessClient; viewerAccountId?: string | undefined }): React.JSX.Element {
+export function MerchantStorefrontSurface({ client, viewerAccountId, header }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode }): React.JSX.Element {
   const [accounts, setAccounts] = useState<Account[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [stores, setStores] = useState<Record<string, Store[]>>({});
@@ -53,6 +53,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
   const [members, setMembers] = useState<Record<string, MemberDirectory[]>>({});
   const [spend, setSpend] = useState<Record<string, { totalOrders: number; totalGrossMinor: number; days: SpendDaily[] } | undefined>>({});
   const [uploadingStoreId, setUploadingStoreId] = useState<string | undefined>(undefined);
+  const [activeManager, setActiveManager] = useState<{ storeId: string; section: "INFO" | "PHOTOS" } | undefined>(undefined);
   // 建店：账号+首店一次建完（之前两处空态互相指“去别处建”，实际无入口）。
   const [newShopName, setNewShopName] = useState("");
   const [newStoreName, setNewStoreName] = useState("");
@@ -257,6 +258,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
+      {header}
       {accounts === undefined && !error ? <ActivityIndicator /> : null}
       {error ? <View style={styles.card}><Text style={styles.errorText}>加载失败：{error}</Text></View> : null}
       {accounts !== undefined && accounts.length === 0 ? (
@@ -274,7 +276,6 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
       ) : null}
       {accounts?.map((a) => {
         const aStores = stores[a.id] ?? [];
-        const aMembers = members[a.id] ?? [];
         const aSpend = spend[a.id];
         const newCustomers = aSpend?.days.reduce((sum, day) => sum + day.newCustomerCount, 0) ?? 0;
         const returningCustomers = aSpend?.days.reduce((sum, day) => sum + day.returningCustomerCount, 0) ?? 0;
@@ -282,7 +283,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
           <View key={a.id} style={styles.accountCard}>
             <View style={styles.accountHead}>
               <Text style={styles.accountName}>{a.name}</Text>
-              <Text style={styles.accountMeta}>{a.id.slice(0, 8)} · {a.status}</Text>
+              <Text style={styles.accountMeta}>{a.status} · {aStores.length} 家门店</Text>
             </View>
             <View style={styles.summary}>
               <Text style={styles.summaryTitle}>{a.name}</Text>
@@ -315,14 +316,14 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
                   <Text style={styles.blockTitleInside}>店铺管理</Text>
                   <View style={styles.manageGrid}>
                     {([
-                      ["storeLines", "店铺信息", sLines ? "资料已建立" : "待完善", () => startEditLines(s.id, sLines)],
+                      ["storeLines", "店铺信息", sLines ? "名称 · Logo · 地址 · 营业时间" : "待完善", () => { setActiveManager({ storeId: s.id, section: "INFO" }); setEditingLinesFor(undefined); }],
                       ["storefront", "菜单与价格", "等待商品接口", undefined],
-                      ["target", "相册", `${sPhotos.length} 张`, () => void pickAndUploadPhoto(s.id)],
+                      ["target", "相册", `${sPhotos.length} 张`, () => setActiveManager({ storeId: s.id, section: "PHOTOS" })],
                       ["spark", "当前展示", "活动 · 券 · 推荐内容", undefined],
                     ] as const).map(([icon, title, meta, action]) => <Pressable disabled={!action} key={title} onPress={action} style={styles.manageCard}><View style={styles.manageIcon}><ProxyIcon color={color.ink} name={icon as ProxyIconName} size={23} /></View><Text style={styles.manageTitle}>{title}</Text><Text style={styles.manageMeta}>{meta}</Text></Pressable>)}
                   </View>
 
-                  {sLines ? (
+                  {activeManager?.storeId === s.id && activeManager.section === "INFO" && sLines ? (
                     <View style={styles.linesBlock}>
                       <Text style={styles.linesDescription}>{sLines.description || "（暂无简介）"}</Text>
                       <Text style={styles.linesContact}>
@@ -337,7 +338,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
                   ) : null}
 
                   {/* R18.x LINES-EDITOR-001: inline edit form. */}
-                  {editingLinesFor === s.id ? (
+                  {activeManager?.storeId === s.id && activeManager.section === "INFO" && editingLinesFor === s.id ? (
                     <View style={styles.linesEditForm}>
                       <Text style={styles.linesEditLabel}>店铺简介</Text>
                       <TextInput
@@ -408,7 +409,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
                         </Pressable>
                       </View>
                     </View>
-                  ) : (
+                  ) : activeManager?.storeId === s.id && activeManager.section === "INFO" ? (
                     <Pressable
                       onPress={() => startEditLines(s.id, sLines)}
                       style={styles.linesEditToggle}
@@ -417,9 +418,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
                         {sLines ? "编辑主页 / 联系方式 / 营业时间" : "填写主页 / 联系方式 / 营业时间"}
                       </Text>
                     </Pressable>
-                  )}
+                  ) : null}
 
-                  <View style={styles.photoHead}>
+                  {activeManager?.storeId === s.id && activeManager.section === "PHOTOS" ? <View style={styles.managerPanel}><View style={styles.photoHead}>
                     <Text style={styles.photoHeadTitle}>店铺相册</Text>
                     <Text style={styles.photoHeadMeta}>{sPhotos.length} 张</Text>
                   </View>
@@ -449,38 +450,10 @@ export function MerchantStorefrontSurface({ client, viewerAccountId }: { client:
                         </Pressable>
                       ) : null}
                     </View>
-                  ))}
+                  ))}</View> : null}
                 </View>
               );
             })}
-
-            {aMembers.length > 0 ? (
-              <View style={styles.membersBlock}>
-                <Text style={styles.sectionTitle}>成员目录</Text>
-                {aMembers.map((m) => (
-                  <View key={m.userId} style={styles.memberRow}>
-                    <Text style={styles.memberName}>{m.displayName || m.userId}</Text>
-                    <Text style={styles.memberMeta}>{m.role} · {m.status}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-
-            {aSpend && aSpend.totalOrders > 0 ? (
-              <View style={styles.spendBlock}>
-                <Text style={styles.sectionTitle}>近 7 天销售</Text>
-                <View style={styles.spendRow}>
-                  <View style={styles.spendItem}>
-                    <Text style={styles.spendValue}>{aSpend.totalOrders}</Text>
-                    <Text style={styles.spendLabel}>订单</Text>
-                  </View>
-                  <View style={styles.spendItem}>
-                    <Text style={styles.spendValue}>{formatVnd(aSpend.totalGrossMinor)}</Text>
-                    <Text style={styles.spendLabel}>成交额</Text>
-                  </View>
-                </View>
-              </View>
-            ) : null}
           </View>
         );
       })}
@@ -525,6 +498,7 @@ const styles = StyleSheet.create({
   linesDescription: { color: color.ink, fontSize: 12 },
   linesContact: { color: color.muted, fontSize: 11 },
   linesHours: { color: color.muted, fontSize: 11 },
+  managerPanel: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 8, marginTop: 4, padding: 12 },
   // R18.x LINES-EDITOR-001
   linesEditToggle: { paddingVertical: 6 },
   linesEditToggleText: { color: color.ink, fontSize: 12, fontWeight: "800" },
