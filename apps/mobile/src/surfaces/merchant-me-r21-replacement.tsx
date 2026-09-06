@@ -245,9 +245,10 @@ export function MerchantMeR21Replacement({
             ],
             title: `${selectedCreator.name} · ${selectedCreator.serviceType}`,
           })}
+          <SimpleRows onPress={setPage} rows={[["最近到店", "等待真实履约记录"], ["当前权益", "查看关联券", "voucher"], ["当前邀请", "查看活动与邀请", "activity"], ["合作结果", "查看销售归因", "sales"]]} />
           <View style={styles.actions}>
-            <Pressable style={styles.primary}><Text style={styles.primaryText}>发起定向邀请</Text></Pressable>
-            <Pressable style={styles.secondary}><Text style={styles.secondaryText}>查看记录</Text></Pressable>
+            <Pressable onPress={() => setPage("activity")} style={styles.primary}><Text style={styles.primaryText}>发起定向邀请</Text></Pressable>
+            <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.secondary}><Text style={styles.secondaryText}>查看记录</Text></Pressable>
           </View>
         </ScrollView>
       </View>
@@ -320,7 +321,8 @@ export function MerchantMeR21Replacement({
           })}
           <SimpleRows onPress={setPage} rows={[["已锁定 Creator", `${creators.length} 位当前可匹配`, "creator"], ["定向券", "查看活动关联权益", "voucher"], ["结果", "等待真实归因数据", "sales"]]} />
           <View style={styles.actions}>
-            <Pressable style={styles.secondary}><Text style={styles.secondaryText}>查看详情</Text></Pressable>
+            <Pressable onPress={() => setPage("creator")} style={styles.primary}><Text style={styles.primaryText}>继续补位</Text></Pressable>
+            <Pressable onPress={() => setPage("sales")} style={styles.secondary}><Text style={styles.secondaryText}>查看结果</Text></Pressable>
           </View>
         </ScrollView>
       </View>
@@ -519,38 +521,38 @@ export function MerchantMeR21Replacement({
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
-  content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 13 },
-  topline: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  h1: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 34 },
-  merchantTag: { backgroundColor: "#EFE5FF", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
-  merchantTagText: { color: color.proxyPurple, fontSize: 11, fontWeight: "800" },
-  identity: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, padding: 12, ...shadows.card },
-  bizAvatar: { alignItems: "center", borderRadius: 14, height: 44, justifyContent: "center", width: 44 },
-  bizAvatarText: { color: color.white, fontSize: 18, fontWeight: "900" },
-  rowCopy: { flex: 1 },
-  storeButton: { backgroundColor: color.lime, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  content: { padding: 16, paddingBottom: 104 },
+  topline: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  h1: { color: color.ink, fontSize: 28, fontWeight: "900", letterSpacing: -1, lineHeight: 34 },
+  merchantTag: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 32, justifyContent: "center", paddingHorizontal: 12 },
+  merchantTagText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  identity: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 14 },
+  bizAvatar: { alignItems: "center", borderRadius: 16, height: 52, justifyContent: "center", width: 52 },
+  bizAvatarText: { color: color.white, fontSize: 24, fontWeight: "900" },
+  rowCopy: { flex: 1, minWidth: 0 },
+  storeButton: { alignItems: "center", borderColor: color.line, borderRadius: 12, borderWidth: 1, height: 36, justifyContent: "center", paddingHorizontal: 11 },
   storeButtonText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 6, marginTop: 14 },
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   sectionHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 12, marginVertical: 4, ...shadows.card, gap: 2 },
-  cardTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  cardTitleWhite: { color: color.white, fontSize: 22, fontWeight: "900" },
-  meta: { color: color.muted, fontSize: 12 },
+  cardTitle: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
+  cardTitleWhite: { color: color.white, fontSize: 15, fontWeight: "800", lineHeight: 21 },
+  meta: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17, marginTop: 3 },
   empty: { color: color.muted, fontSize: 12 },
   emptyCard: { backgroundColor: "#F6F2F9", borderRadius: 16, gap: 4, marginVertical: 6, padding: 16 },
   emptyTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  subPageBack: { paddingHorizontal: 8, paddingVertical: 6 },
-  subPageBackText: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  subPageBack: { marginBottom: 10, paddingVertical: 4 },
+  subPageBackText: { color: color.magenta, fontSize: 12, fontWeight: "700" },
   detailHead: { marginBottom: 12 },
   detailTitle: { color: color.ink, fontSize: 24, fontWeight: "900", letterSpacing: -0.7, lineHeight: 30 },
   objectTitle: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },
-  summary: { backgroundColor: "#1F1B33", borderRadius: 16, gap: 4, marginTop: 8, padding: 14 },
-  summaryMeta: { color: "#BFB5DA", fontSize: 12 },
-  summaryStats: { flexDirection: "row", gap: 14, marginTop: 8 },
-  summaryStatItem: { gap: 2 },
-  summaryStatValue: { color: color.white, fontSize: 16, fontWeight: "900" },
-  summaryStatLabel: { color: "#BFB5DA", fontSize: 11 },
+  summary: { backgroundColor: color.deep, borderRadius: 24, padding: 15 },
+  summaryMeta: { color: "#D7D0DD", fontSize: 12, lineHeight: 17, marginTop: 4 },
+  summaryStats: { flexDirection: "row", gap: 8, marginTop: 12 },
+  summaryStatItem: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.12)", borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 9 },
+  summaryStatValue: { color: color.white, fontSize: 17, fontWeight: "900", lineHeight: 20 },
+  summaryStatLabel: { color: "#D8D1DD", fontSize: 11, fontWeight: "600", lineHeight: 15, marginTop: 3 },
   actions: { flexDirection: "row", gap: 8, marginTop: 12 },
   rowList: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginTop: 10, paddingHorizontal: 14 },
   row: { alignItems: "center", borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 10, minHeight: 66 },
