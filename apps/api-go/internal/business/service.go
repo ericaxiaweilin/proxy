@@ -547,9 +547,8 @@ func (s *Service) getMerchantOperatingHome(ctx context.Context, e command.Envelo
 	if len(rows) > 0 {
 		home.Pulse.State, home.Pulse.Freshness = "ACTIVE", "ROLLING_7_DAYS"
 	}
-	home.Balance = DemandSupplyBalance{State: "INSUFFICIENT_SIGNAL", Confidence: 0, PrivacyThresholdPassed: false, Reason: "aggregated demand and scene capacity signals are unavailable"}
-	home.Forecast = OperatingForecast{Status: "UNAVAILABLE", Confidence: 0, Version: 0, Assumptions: []string{}}
-	home.Decision = OperatingDecision{Kind: "NO_ACTION", Title: "暂不主动加流量", Reason: "缺少通过隐私阈值的聚合需求和未来容量信号", RequiresApproval: false}
+	resolved := ResolveOperatingState(nil, nil)
+	home.Balance, home.Forecast, home.Decision = resolved.Balance, resolved.Forecast, resolved.Decision
 	return acceptedWithPayload(e, "MerchantOperatingHome", businessID, 1, "READ", map[string]any{"home": home}, nil)
 }
 

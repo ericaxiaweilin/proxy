@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 44 — 2026-09-06
+
+- R35 server decision resolver now enforces the privacy threshold and uses
+  supplied future capacity rather than current occupancy alone. It fails
+  closed to `NO_ACTION`, can issue `STOP_TRAFFIC` for future over-capacity,
+  and keeps balanced `NO_ACTION` distinct from missing data.
+
 ## Revision 43 — 2026-09-06
 
 - R35 merchant Operating Home now starts from real seven-day outcome and

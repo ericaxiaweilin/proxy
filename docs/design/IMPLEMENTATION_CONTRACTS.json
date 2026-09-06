@@ -141,12 +141,14 @@
       "reference": "docs/spec/Proxy_Merchant_R35_Operating_Home.md",
       "implementationFiles": [
         "apps/api-go/internal/business/service.go",
+        "apps/api-go/internal/business/operating_resolver.go",
         "apps/mobile/src/business-client.ts",
         "apps/mobile/src/surfaces/business-home.tsx",
         "apps/mobile/src/shell/app-shell.tsx"
       ],
       "evidenceFiles": [
         "apps/api-go/internal/business/service_test.go",
+        "apps/api-go/internal/business/operating_resolver_test.go",
         "apps/mobile/src/business-client.test.ts",
         "scripts/check-regression-contracts.sh"
       ],

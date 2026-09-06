@@ -449,6 +449,12 @@ echo "    BIZ-HOME-WIRE-001: PASS (Home tab wired to real business + activities 
 require_test "R35-OPERATING-HOME-001" "./internal/business" \
   "TestMerchantOperatingHomeDoesNotInventDemandOrForecast" \
   "apps/api-go/internal/business/service_test.go" || exit $?
+require_test "R35-OPERATING-HOME-001" "./internal/business" \
+  "TestR35ResolverFailsClosedBelowPrivacyThreshold" \
+  "apps/api-go/internal/business/operating_resolver_test.go" || exit $?
+require_test "R35-OPERATING-HOME-001" "./internal/business" \
+  "TestR35ResolverStopsTrafficFromFutureCapacity" \
+  "apps/api-go/internal/business/operating_resolver_test.go" || exit $?
 if ! grep -q 'getMerchantOperatingHome' apps/mobile/src/surfaces/business-home.tsx || \
    ! grep -q 'merchant-demand-supply' apps/mobile/src/surfaces/business-home.tsx || \
    ! grep -q 'merchant-best-next-decision' apps/mobile/src/surfaces/business-home.tsx; then
