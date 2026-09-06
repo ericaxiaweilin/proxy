@@ -7,7 +7,7 @@ import * as ImagePicker from "expo-image-picker";
 import { color, shadows } from "../theme";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { retainStorePhoto, type RetainedStorePhoto } from "../expo-composer-draft-store";
-import type { BusinessClient } from "../business-client";
+import type { BusinessClient, StoreProduct } from "../business-client";
 
 type Account = { id: string; name: string; status: string };
 type Store = { id: string; businessId: string; name: string; address: string; status: string };
@@ -31,7 +31,7 @@ function linesAsHoursObject(hoursJson: string): Record<string, string> {
   return {};
 }
 
-export function MerchantStorefrontSurface({ client, viewerAccountId, header }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode }): React.JSX.Element {
+export function MerchantStorefrontSurface({ client, viewerAccountId, header, showcaseActivities }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode; showcaseActivities?: Array<{ id: string; title: string }> }): React.JSX.Element {
   const [accounts, setAccounts] = useState<Account[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [stores, setStores] = useState<Record<string, Store[]>>({});
@@ -53,7 +53,17 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
   const [members, setMembers] = useState<Record<string, MemberDirectory[]>>({});
   const [spend, setSpend] = useState<Record<string, { totalOrders: number; totalGrossMinor: number; days: SpendDaily[] } | undefined>>({});
   const [uploadingStoreId, setUploadingStoreId] = useState<string | undefined>(undefined);
-  const [activeManager, setActiveManager] = useState<{ storeId: string; section: "INFO" | "PHOTOS" } | undefined>(undefined);
+  const [activeManager, setActiveManager] = useState<{ storeId: string; section: "INFO" | "PHOTOS" | "MENU" | "SHOWCASE" } | undefined>(undefined);
+  const [products, setProducts] = useState<Record<string, StoreProduct[]>>({});
+  // R36.x MENU-001: 菜单新增/编辑表单状态。"new" 表示新增，否则为被编辑商品 id。
+  const [editingProductFor, setEditingProductFor] = useState<string | undefined>(undefined);
+  const [editingProductId, setEditingProductId] = useState<string | "new" | undefined>(undefined);
+  const [editingProductName, setEditingProductName] = useState("");
+  const [editingProductPrice, setEditingProductPrice] = useState("");
+  const [editingProductDesc, setEditingProductDesc] = useState("");
+  const [editingProductPhoto, setEditingProductPhoto] = useState("");
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [productError, setProductError] = useState<string | undefined>(undefined);
   // 建店：账号+首店一次建完（之前两处空态互相指“去别处建”，实际无入口）。
   const [newShopName, setNewShopName] = useState("");
   const [newStoreName, setNewStoreName] = useState("");
@@ -103,6 +113,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
       setStores((prev) => ({ ...prev, [accountId]: s }));
       const photoMap: Record<string, StorePhoto[]> = {};
       const linesMap: Record<string, StoreLines> = {};
+      const productMap: Record<string, StoreProduct[]> = {};
       await Promise.all(s.map(async (store) => {
         try {
           photoMap[store.id] = await client.listStorePhotos(store.id);
@@ -110,10 +121,16 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
           photoMap[store.id] = [];
         }
         try {
+          productMap[store.id] = await client.listProducts(store.id);
+        } catch {
+          productMap[store.id] = [];
+        }
+        try {
           linesMap[store.id] = await client.getStoreLines(store.id);
         } catch { /* missing store_lines is not a failure */ }
       }));
       setPhotos((prev) => ({ ...prev, ...photoMap }));
+      setProducts((prev) => ({ ...prev, ...productMap }));
       setLines((prev) => ({ ...prev, ...linesMap }));
       try {
         const dir = await client.listMemberDirectory(accountId);
@@ -219,8 +236,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
     setEditingLogoPath(current?.logoAssetPath ?? "");
   }
 
-  async function saveLines(storeId: string): Promise<void> {
-    setLinesError(undefined);
+  async function saveLines(storeId: string): Promise<void> {    setLinesError(undefined);
     // Validate hours JSON before sending: business server
     // will reject empty / non-object hoursJson, but a
     // local pre-check gives the user a clearer error.
@@ -253,6 +269,69 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
       setLinesError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingLinesFor(undefined);
+    }
+  }
+
+  // R36.x MENU-001: 菜单新增/编辑。价格为 VND 分（整数，必须 >= 0）。
+  function startEditProduct(storeId: string, current: StoreProduct | undefined): void {
+    setProductError(undefined);
+    setEditingProductFor(storeId);
+    setEditingProductId(current ? current.id : "new");
+    setEditingProductName(current?.name ?? "");
+    setEditingProductPrice(current ? String(current.priceMinor) : "");
+    setEditingProductDesc(current?.description ?? "");
+    setEditingProductPhoto(current?.photoAssetPath ?? "");
+  }
+
+  async function saveProduct(storeId: string): Promise<void> {
+    setProductError(undefined);
+    const name = editingProductName.trim();
+    const price = Number.parseInt(editingProductPrice.trim(), 10);
+    if (!name) {
+      setProductError("菜名不能为空");
+      return;
+    }
+    if (!Number.isInteger(price) || price < 0) {
+      setProductError("价格必须是大于等于 0 的整数（VND 分）");
+      return;
+    }
+    setSavingProduct(true);
+    try {
+      if (editingProductId === "new" || !editingProductId) {
+        const made = await client.createProduct({
+          storeId, name, priceMinor: price,
+          description: editingProductDesc, photoAssetPath: editingProductPhoto,
+        });
+        setProducts((prev) => ({ ...prev, [storeId]: [...(prev[storeId] ?? []), made.product] }));
+      } else {
+        const saved = await client.updateProduct({
+          productId: editingProductId, storeId, name, priceMinor: price,
+          description: editingProductDesc, photoAssetPath: editingProductPhoto,
+        });
+        setProducts((prev) => ({
+          ...prev,
+          [storeId]: (prev[storeId] ?? []).map((p) => (p.id === saved.product.id ? saved.product : p)),
+        }));
+      }
+      setEditingProductFor(undefined);
+      setEditingProductId(undefined);
+    } catch (e) {
+      setProductError(e instanceof Error ? e.message : "保存失败，请重试");
+    } finally {
+      setSavingProduct(false);
+    }
+  }
+
+  async function toggleProduct(storeId: string, product: StoreProduct): Promise<void> {
+    setProductError(undefined);
+    try {
+      const saved = await client.setProductAvailability(product.id, storeId, !product.available);
+      setProducts((prev) => ({
+        ...prev,
+        [storeId]: (prev[storeId] ?? []).map((p) => (p.id === saved.product.id ? saved.product : p)),
+      }));
+    } catch (e) {
+      setProductError(e instanceof Error ? e.message : "上下架失败，请重试");
     }
   }
 
@@ -308,6 +387,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
             {aStores.map((s) => {
               const sPhotos = photos[s.id] ?? [];
               const sLines = lines[s.id];
+              const sProducts = products[s.id] ?? [];
+              const sAvailable = sProducts.filter((p) => p.available);
               return (
                 <View key={s.id} style={styles.storeCard}>
                   <View style={styles.storeHead}>
@@ -319,9 +400,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
                   <View style={styles.manageGrid}>
                     {([
                       ["storeLines", "店铺信息", sLines ? "名称 · Logo · 地址 · 营业时间" : "待完善", () => { setActiveManager({ storeId: s.id, section: "INFO" }); setEditingLinesFor(undefined); }],
-                      ["storefront", "菜单与价格", "等待商品接口", undefined],
+                      ["storefront", "菜单与价格", sProducts.length === 0 ? "空菜单 · 点此加菜" : `${sProducts.length} 道菜 · 在售 ${sAvailable.length}`, () => { setActiveManager({ storeId: s.id, section: "MENU" }); setEditingProductFor(undefined); setEditingProductId(undefined); setProductError(undefined); }],
                       ["target", "相册", `${sPhotos.length} 张`, () => setActiveManager({ storeId: s.id, section: "PHOTOS" })],
-                      ["spark", "当前展示", "活动 · 券 · 推荐内容", undefined],
+                      ["spark", "当前展示", showcaseActivities && showcaseActivities.length > 0 ? `${showcaseActivities.length} 个关联活动` : "暂无关联活动", () => setActiveManager({ storeId: s.id, section: "SHOWCASE" })],
                     ] as const).map(([icon, title, meta, action]) => <Pressable disabled={!action} key={title} onPress={action} style={styles.manageCard}><View style={styles.manageIcon}><ProxyIcon color={color.ink} name={icon as ProxyIconName} size={23} /></View><Text style={styles.manageTitle}>{title}</Text><Text style={styles.manageMeta}>{meta}</Text></Pressable>)}
                   </View>
 
@@ -451,6 +532,109 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header }: {
                           <Text style={styles.deleteButtonText}>删除</Text>
                         </Pressable>
                       ) : null}
+                    </View>
+                  ))}</View> : null}
+
+                  {activeManager?.storeId === s.id && activeManager.section === "MENU" ? <View style={styles.managerPanel}><View style={styles.photoHead}>
+                    <Text style={styles.photoHeadTitle}>菜单与价格</Text>
+                    <Text style={styles.photoHeadMeta}>{sProducts.length} 道菜 · 在售 {sAvailable.length}</Text>
+                  </View>
+                  <Pressable
+                    onPress={() => startEditProduct(s.id, undefined)}
+                    style={[styles.uploadButton, savingProduct ? styles.uploadButtonBusy : null]}
+                  >
+                    <Text style={styles.uploadButtonText}>+ 加菜</Text>
+                  </Pressable>
+                  {productError && editingProductFor === s.id ? <Text style={styles.errorText}>{productError}</Text> : null}
+                  {sProducts.length === 0 && editingProductId === undefined ? (
+                    <Text style={styles.empty}>空菜单 — 点上面按钮加第一道菜</Text>
+                  ) : null}
+                  {sProducts.map((p) => (
+                    <View key={p.id} style={styles.photoRow}>
+                      <View style={styles.photoRowMain}>
+                        <Text style={styles.photoAssetPath} numberOfLines={1}>{p.name}{p.available ? "" : "（已下架）"}</Text>
+                        <Text style={styles.photoMeta}>
+                          {formatVnd(p.priceMinor)}{p.description ? ` · ${p.description}` : ""}
+                        </Text>
+                      </View>
+                      <Pressable onPress={() => startEditProduct(s.id, p)} style={styles.deleteButton}>
+                        <Text style={styles.deleteButtonText}>编辑</Text>
+                      </Pressable>
+                      <Pressable onPress={() => void toggleProduct(s.id, p)} style={styles.deleteButton}>
+                        <Text style={styles.deleteButtonText}>{p.available ? "下架" : "上架"}</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                  {editingProductFor === s.id && editingProductId !== undefined ? (
+                    <View style={styles.linesEditForm}>
+                      <Text style={styles.linesEditLabel}>菜名</Text>
+                      <TextInput
+                        value={editingProductName}
+                        onChangeText={setEditingProductName}
+                        placeholder="例如 白切鸡"
+                        placeholderTextColor={color.muted}
+                        style={styles.createInput}
+                      />
+                      <Text style={styles.linesEditLabel}>价格（VND 分，整数）</Text>
+                      <TextInput
+                        value={editingProductPrice}
+                        onChangeText={setEditingProductPrice}
+                        placeholder="例如 129000"
+                        placeholderTextColor={color.muted}
+                        keyboardType="number-pad"
+                        style={styles.createInput}
+                      />
+                      <Text style={styles.linesEditLabel}>描述（可选）</Text>
+                      <TextInput
+                        value={editingProductDesc}
+                        onChangeText={setEditingProductDesc}
+                        placeholder="一句话介绍"
+                        placeholderTextColor={color.muted}
+                        style={styles.createInput}
+                      />
+                      <Text style={styles.linesEditLabel}>照片资产路径（可选）</Text>
+                      <TextInput
+                        value={editingProductPhoto}
+                        onChangeText={setEditingProductPhoto}
+                        placeholder="例如 assets/dish.jpg"
+                        placeholderTextColor={color.muted}
+                        autoCapitalize="none"
+                        style={styles.createInput}
+                      />
+                      {productError ? <Text style={styles.errorText}>{productError}</Text> : null}
+                      <View style={styles.linesEditActions}>
+                        <Pressable
+                          disabled={savingProduct}
+                          onPress={() => { setEditingProductFor(undefined); setEditingProductId(undefined); setProductError(undefined); }}
+                          style={[styles.createBtn, styles.linesEditCancel]}
+                        >
+                          <Text style={styles.createBtnText}>取消</Text>
+                        </Pressable>
+                        <Pressable
+                          disabled={savingProduct}
+                          onPress={() => void saveProduct(s.id)}
+                          style={[styles.createBtn, savingProduct && styles.createBtnBusy]}
+                        >
+                          <Text style={styles.createBtnText}>
+                            {savingProduct ? "保存中…" : "保存"}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : null}
+                  </View> : null}
+
+                  {activeManager?.storeId === s.id && activeManager.section === "SHOWCASE" ? <View style={styles.managerPanel}><View style={styles.photoHead}>
+                    <Text style={styles.photoHeadTitle}>当前展示</Text>
+                    <Text style={styles.photoHeadMeta}>{showcaseActivities?.length ?? 0} 个关联活动</Text>
+                  </View>
+                  {!showcaseActivities || showcaseActivities.length === 0 ? (
+                    <Text style={styles.empty}>暂无关联活动 — 在活动页创建后会自动出现在这里</Text>
+                  ) : showcaseActivities.map((a) => (
+                    <View key={a.id} style={styles.photoRow}>
+                      <View style={styles.photoRowMain}>
+                        <Text style={styles.photoAssetPath} numberOfLines={1}>{a.title}</Text>
+                      </View>
                     </View>
                   ))}</View> : null}
                 </View>
