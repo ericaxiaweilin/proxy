@@ -1,7 +1,7 @@
 // Conversation Surface：会话页面（PRD v1.2 §14 通知 · 消息 · 任务沟通中心）。
 // 基于 Feed 的"聊一下"入口进入的会话界面。
 // 接入模型底座：SendMessage 后服务端调用 modelStack.Complete() 生成 AI 回复。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -61,6 +61,11 @@ export function ConversationSurface({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [selectedImage, setSelectedImage] = useState<UploadableImage>();
   const [imageMenuOpen, setImageMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>();
   // R17.x: 活动 proxy 选中面板状态。点“活动”按钮不再
   // 发 hardcoded "act_westlake" — 弹 picker, 让用户从 server
@@ -71,6 +76,10 @@ export function ConversationSurface({
   const [activityPickerError, setActivityPickerError] = useState<string | undefined>(undefined);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const visibleMessages = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase();
+    return query ? messages.filter((message) => `${message.sender} ${message.body}`.toLocaleLowerCase().includes(query)) : messages;
+  }, [messages, searchQuery]);
 
   // This surface lives inside AppShell's fixed-height body, where nested
   // KeyboardAvoidingView layouts are unreliable on iOS. Track the keyboard's
@@ -345,7 +354,16 @@ export function ConversationSurface({
           <Text style={styles.headerName}>{author}</Text>
           <Text style={styles.headerStatus}>{aiAccount ? `AI 虚拟 · ${aiAccount.role}` : convId ? "已连接" : "连接中..."}</Text>
         </View>
+        <Pressable accessibilityLabel="搜索当前对话" onPress={() => { setSearchOpen((value) => !value); setConversationMenuOpen(false); }} style={styles.headerAction}><Text style={styles.headerActionText}>⌕</Text></Pressable>
+        <Pressable accessibilityLabel="会话设置" onPress={() => setConversationMenuOpen((value) => !value)} style={styles.headerAction}><Text style={styles.headerActionText}>•••</Text></Pressable>
       </View>
+
+      {searchOpen ? <View style={styles.chatSearch}><TextInput autoFocus onChangeText={setSearchQuery} placeholder="搜索此对话" placeholderTextColor={color.muted} style={styles.chatSearchInput} value={searchQuery} /><Text style={styles.searchCount}>{visibleMessages.length} 条</Text><Pressable onPress={() => { setSearchOpen(false); setSearchQuery(""); }}><Text style={styles.searchClose}>取消</Text></Pressable></View> : null}
+      {conversationMenuOpen ? <View style={styles.conversationMenu}>
+        <Pressable onPress={() => { setMessages([]); setConversationMenuOpen(false); }} style={styles.menuItem}><Text style={styles.menuItemText}>清空本机显示</Text></Pressable>
+        <Pressable onPress={() => { setBlocked((value) => !value); setConversationMenuOpen(false); }} style={styles.menuItem}><Text style={[styles.menuItemText, styles.menuDanger]}>{blocked ? "解除本机屏蔽" : "屏蔽此会话"}</Text></Pressable>
+        <Text style={styles.menuHint}>跨设备删除与拉黑将在服务端确认后生效；这里不会伪报成功。</Text>
+      </View> : null}
 
       {/* Messages */}
       <ScrollView
@@ -367,7 +385,7 @@ export function ConversationSurface({
             {!convId && !loading ? <Pressable onPress={() => { setError(undefined); setLoading(true); setConnectAttempt((value) => value + 1); }} style={styles.retryButton}><Text style={styles.retryButtonText}>重新连接</Text></Pressable> : null}
           </View>
         )}
-        {messages.map((msg) =>
+        {blocked ? <View style={styles.systemMsg}><Text style={styles.systemMsgText}>此会话已在本机屏蔽，可从右上角解除。</Text></View> : visibleMessages.map((msg) =>
           msg.v1 ? (
             <View key={msg.id} style={[styles.v1Wrap, msg.isOwn ? styles.v1Own : styles.v1Other]}>
               {!msg.isOwn && <Text style={styles.messageSender}>{msg.sender}</Text>}
@@ -395,15 +413,17 @@ export function ConversationSurface({
           <Pressable onPress={() => setNoForward((v) => !v)} style={[styles.chip, noForward && styles.chipActive]}>
             <Text style={[styles.chipText, noForward && styles.chipTextActive]}>{noForward ? "禁止转发 ✓" : "允许转发"}</Text>
           </Pressable>
-          <Text style={styles.hint}>🔒 端到端加密</Text>
+          <Text style={styles.hint}>🔒 传输与存储保护</Text>
         </View>
 
         <View style={[styles.composerShell, { paddingBottom: keyboardInset > 0 ? 10 : Math.max(insets.bottom, 16) }]}>
           {selectedImage ? <View style={styles.imagePreviewRow}><Image source={{uri:selectedImage.uri}} style={styles.imagePreview} /><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedImage.fileName ?? "已选择图片") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除图片" onPress={() => setSelectedImage(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
           {imageMenuOpen ? <View style={styles.imageMenu}><Pressable onPress={() => void chooseImage("CAMERA")} style={styles.imageMenuBtn}><Text>拍照</Text></Pressable><Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.imageMenuBtn}><Text>从相册选择</Text></Pressable></View> : null}
+          {emojiOpen ? <View style={styles.emojiRail}>{["😀", "😂", "🥰", "👍", "🙏", "🎉", "❤️", "👀"].map((emoji) => <Pressable key={emoji} onPress={() => { setDraft((value) => `${value}${emoji}`); setEmojiOpen(false); }} style={styles.emojiButton}><Text style={styles.emojiText}>{emoji}</Text></Pressable>)}</View> : null}
         {/* Composer — 图片 / 业务卡片 / 文本 */}
         <View style={styles.composer}>
           <Pressable accessibilityLabel="添加图片" onPress={() => setImageMenuOpen((open) => !open)} disabled={sending || !convId} style={styles.imageBtn}><Text style={styles.imageBtnText}>＋</Text></Pressable>
+          <Pressable accessibilityLabel="添加表情" onPress={() => setEmojiOpen((open) => !open)} disabled={sending || !convId} style={styles.imageBtn}><Text style={styles.emojiComposerText}>☺</Text></Pressable>
           {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
             <Text style={styles.cardBtnText}>活动</Text>
           </Pressable> : null}
@@ -468,6 +488,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10
   },
+  headerAction: { alignItems: "center", height: 34, justifyContent: "center", minWidth: 34 },
+  headerActionText: { color: color.ink, fontSize: 18, fontWeight: "800" },
+  chatSearch: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  chatSearchInput: { backgroundColor: color.surface, borderRadius: 12, color: color.ink, flex: 1, fontSize: 13, height: 36, paddingHorizontal: 11 },
+  searchCount: { color: color.muted, fontSize: 11 }, searchClose: { color: color.violet, fontSize: 12, fontWeight: "800" },
+  conversationMenu: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, paddingHorizontal: 16, paddingVertical: 8 },
+  menuItem: { borderBottomColor: color.line, borderBottomWidth: 1, paddingVertical: 11 }, menuItemText: { color: color.ink, fontSize: 13, fontWeight: "800" }, menuDanger: { color: color.error }, menuHint: { color: color.muted, fontSize: 10, lineHeight: 15, paddingVertical: 8 },
   backBtn: { alignItems: "center", height: 30, justifyContent: "center", width: 30 },
   backText: { color: color.ink, fontSize: 24, lineHeight: 28 },
   headerInfo: { flex: 1 },
@@ -542,6 +569,10 @@ const styles = StyleSheet.create({
   imageRemove: { color:color.muted, fontSize:24, paddingHorizontal:8 },
   imageMenu: { flexDirection:"row", gap:8, marginBottom:7 },
   imageMenuBtn: { backgroundColor:"#F4F1F6", borderColor:color.line, borderRadius:10, borderWidth:1, flex:1, padding:10 },
+  emojiRail: { backgroundColor: "#F8F5FA", borderRadius: 14, flexDirection: "row", justifyContent: "space-between", marginBottom: 7, padding: 8 },
+  emojiButton: { alignItems: "center", height: 34, justifyContent: "center", width: 34 },
+  emojiText: { fontSize: 22 },
+  emojiComposerText: { color: color.ink, fontSize: 22 },
   composerInput: {
     backgroundColor: color.surface,
     borderColor: color.line,
