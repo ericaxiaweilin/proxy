@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useVideoPlayer, VideoView } from "expo-video";
+import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
@@ -16,6 +17,7 @@ import { MessageRenderer, type MessageV1 } from "../components/message-renderer"
 import { color } from "../theme";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiPersonaPhoto } from "../ai-persona-presentation";
+import { VoiceToolButton } from "../components/VoiceToolButton";
 
 interface Message {
   id: string;
@@ -26,6 +28,7 @@ interface Message {
   isAI?: boolean;
   imageUri?: string;
   videoUri?: string;
+  audioUri?: string;
   v1?: MessageV1;
 }
 
@@ -63,6 +66,7 @@ export function ConversationSurface({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [selectedImage, setSelectedImage] = useState<UploadableImage>();
   const [selectedVideo, setSelectedVideo] = useState<UploadableImage & { durationMs?: number }>();
+  const [selectedAudio, setSelectedAudio] = useState<{ uri:string; durationMs:number }>();
   const [imageMenuOpen, setImageMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -151,6 +155,9 @@ export function ConversationSurface({
           : {}),
         ...(row.messageType === "VIDEO" && typeof row.mediaRef === "string"
           ? { videoUri: `${conversationClient.baseUrl}/v1/media/play/${encodeURIComponent(row.mediaRef)}` }
+          : {}),
+        ...(row.messageType === "AUDIO" && typeof row.mediaRef === "string"
+          ? { audioUri: `${conversationClient.baseUrl}/v1/media/play/${encodeURIComponent(row.mediaRef)}` }
           : {}),
       })));
       setError(undefined);
@@ -337,7 +344,7 @@ export function ConversationSurface({
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"], quality: 0.8, selectionLimit: 1 });
     const asset = result.canceled ? undefined : result.assets[0];
     if (!asset) return;
-    setSelectedVideo({ uri: asset.uri, width: asset.width, height: asset.height, durationMs: asset.duration ?? undefined, ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) });
+    setSelectedVideo({ uri: asset.uri, width: asset.width, height: asset.height, ...(asset.duration != null ? { durationMs: asset.duration } : {}), ...(asset.fileName ? { fileName: asset.fileName } : {}), ...(asset.mimeType ? { mimeType: asset.mimeType } : {}) });
     setSelectedImage(undefined);
   }
 
@@ -379,6 +386,24 @@ export function ConversationSurface({
       setSelectedVideo(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "视频发送失败，请重试");
+    } finally {
+      setUploadProgress(undefined);
+      setSending(false);
+    }
+  }
+
+  async function sendAudio(): Promise<void> {
+    if (!selectedAudio || !convId || sending) return;
+    setSending(true);
+    setError(undefined);
+    setUploadProgress(0);
+    try {
+      const uploaded = await mediaClient.uploadMedia({ uri:selectedAudio.uri, width:0, height:0, durationMs:selectedAudio.durationMs, mediaType:"AUDIO", defaultMime:"audio/m4a" }, { onProgress:setUploadProgress });
+      await conversationClient.sendAudioMessage(convId, uploaded.mediaAssetId, undefined, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined);
+      setMessages((current) => [...current, { id:`audio_${Date.now()}`, sender:"你", body:"", time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, audioUri:selectedAudio.uri }]);
+      setSelectedAudio(undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "语音发送失败，请重试");
     } finally {
       setUploadProgress(undefined);
       setSending(false);
@@ -450,6 +475,7 @@ export function ConversationSurface({
               {!msg.isOwn && <Text style={styles.messageSender}>{msg.sender}</Text>}
               {msg.imageUri ? <Image accessibilityLabel="聊天图片" resizeMode="cover" source={{ uri:msg.imageUri }} style={styles.messageImage} /> : null}
               {msg.videoUri ? <ChatVideo uri={msg.videoUri} /> : null}
+              {msg.audioUri ? <ChatAudio uri={msg.audioUri} /> : null}
               {msg.body.trim() ? <Text style={[styles.messageBody, msg.isOwn && styles.messageBodyOwn]}>{msg.body}</Text> : null}
               <Text style={[styles.messageTime, msg.isOwn && styles.messageTimeOwn]}>{msg.time}</Text>
             </Pressable>
@@ -473,12 +499,14 @@ export function ConversationSurface({
         <View style={[styles.composerShell, { paddingBottom: keyboardInset > 0 ? 10 : Math.max(insets.bottom, 16) }]}>
           {selectedImage ? <View style={styles.imagePreviewRow}><Image source={{uri:selectedImage.uri}} style={styles.imagePreview} /><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedImage.fileName ?? "已选择图片") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除图片" onPress={() => setSelectedImage(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
           {selectedVideo ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>▶</Text><Text numberOfLines={1} style={styles.imagePreviewText}>{uploadProgress === undefined ? (selectedVideo.fileName ?? "已选择视频") : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除视频" onPress={() => setSelectedVideo(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
+          {selectedAudio ? <View style={styles.imagePreviewRow}><Text style={styles.videoPreviewIcon}>♪</Text><Text style={styles.imagePreviewText}>{uploadProgress === undefined ? `语音 ${Math.max(1, Math.round(selectedAudio.durationMs / 1000))} 秒` : `上传 ${Math.round(uploadProgress * 100)}%`}</Text><Pressable accessibilityLabel="移除语音" onPress={() => setSelectedAudio(undefined)}><Text style={styles.imageRemove}>×</Text></Pressable></View> : null}
           {imageMenuOpen ? <View style={styles.imageMenu}><Pressable onPress={() => void chooseImage("CAMERA")} style={styles.imageMenuBtn}><Text>拍照</Text></Pressable><Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.imageMenuBtn}><Text>照片</Text></Pressable><Pressable onPress={() => void chooseVideo()} style={styles.imageMenuBtn}><Text>视频</Text></Pressable></View> : null}
           {emojiOpen ? <View style={styles.emojiRail}>{["😀", "😂", "🥰", "👍", "🙏", "🎉", "❤️", "👀"].map((emoji) => <Pressable key={emoji} onPress={() => { setDraft((value) => `${value}${emoji}`); setEmojiOpen(false); }} style={styles.emojiButton}><Text style={styles.emojiText}>{emoji}</Text></Pressable>)}</View> : null}
         {/* Composer — 图片 / 业务卡片 / 文本 */}
         <View style={styles.composer}>
           <Pressable accessibilityLabel="添加图片" onPress={() => setImageMenuOpen((open) => !open)} disabled={sending || !convId} style={styles.imageBtn}><Text style={styles.imageBtnText}>＋</Text></Pressable>
           <Pressable accessibilityLabel="添加表情" onPress={() => setEmojiOpen((open) => !open)} disabled={sending || !convId} style={styles.imageBtn}><Text style={styles.emojiComposerText}>☺</Text></Pressable>
+          <VoiceToolButton disabled={sending || !convId || blocked} onDone={(recording) => { setSelectedAudio(recording); setSelectedImage(undefined); setSelectedVideo(undefined); }} />
           {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} disabled={sending || !convId} style={[styles.cardBtn, (!convId || sending) && styles.cardBtnDisabled]}>
             <Text style={styles.cardBtnText}>活动</Text>
           </Pressable> : null}
@@ -492,9 +520,9 @@ export function ConversationSurface({
             editable={!!convId && !sending}
           />
           <Pressable
-            disabled={(!draft.trim() && !selectedImage && !selectedVideo) || sending || !convId || blocked}
-            onPress={() => void (selectedVideo ? sendVideo() : selectedImage ? sendImage() : send())}
-            style={[styles.sendBtn, ((!draft.trim() && !selectedImage && !selectedVideo) || sending || !convId || blocked) && styles.sendBtnDisabled]}
+            disabled={(!draft.trim() && !selectedImage && !selectedVideo && !selectedAudio) || sending || !convId || blocked}
+            onPress={() => void (selectedAudio ? sendAudio() : selectedVideo ? sendVideo() : selectedImage ? sendImage() : send())}
+            style={[styles.sendBtn, ((!draft.trim() && !selectedImage && !selectedVideo && !selectedAudio) || sending || !convId || blocked) && styles.sendBtnDisabled]}
           >
             <Text style={styles.sendBtnText}>{sending ? "..." : "发送"}</Text>
           </Pressable>
@@ -536,6 +564,20 @@ function ChatVideo({ uri }: { uri: string }): React.JSX.Element {
     instance.muted = false;
   });
   return <VideoView accessibilityLabel="聊天视频" contentFit="cover" fullscreenOptions={{ enable:true }} nativeControls player={player} style={styles.messageVideo} />;
+}
+
+function ChatAudio({ uri }: { uri: string }): React.JSX.Element {
+  const playerRef = useRef<AudioPlayer | null>(null);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    const player = createAudioPlayer({ uri });
+    playerRef.current = player;
+    const subscription = player.addListener("playbackStatusUpdate", (status) => {
+      if (status.didJustFinish) setPlaying(false);
+    });
+    return () => { subscription.remove(); player.remove(); playerRef.current = null; };
+  }, [uri]);
+  return <Pressable accessibilityLabel={playing ? "暂停语音" : "播放语音"} onPress={() => { const player = playerRef.current; if (!player) return; if (playing) player.pause(); else player.play(); setPlaying(!playing); }} style={styles.audioMessage}><Text style={styles.audioPlay}>{playing ? "❚❚" : "▶"}</Text><Text style={styles.audioWave}>▂▅▃▇▄▆▂▅</Text><Text style={styles.audioLabel}>语音</Text></Pressable>;
 }
 
 const styles = StyleSheet.create({
@@ -596,6 +638,10 @@ const styles = StyleSheet.create({
   messageTimeOwn: { color: "rgba(255,255,255,0.6)" },
   messageImage: { borderRadius: 11, height: 180, marginBottom: 6, width: 220 },
   messageVideo: { borderRadius: 11, height: 180, marginBottom: 6, width: 220 },
+  audioMessage: { alignItems:"center", flexDirection:"row", gap:8, minWidth:180, paddingVertical:8 },
+  audioPlay: { color:color.magenta, fontSize:16 },
+  audioWave: { color:color.violet, flex:1, fontSize:18, letterSpacing:2 },
+  audioLabel: { color:color.muted, fontSize:11 },
 
   systemMsg: {
     alignSelf: "center",

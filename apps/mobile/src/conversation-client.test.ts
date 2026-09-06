@@ -28,6 +28,15 @@ describe("UI-CHAT-001 image message wire", () => {
     expect(payload.mediaRef).toBe("media_asset_video_1");
     expect(payload.body).toBe("现场视频");
   });
+
+  it("sends AUDIO with the persisted media asset reference", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const client = new ConversationClient({ baseUrl:"http://127.0.0.1:4100", secureSessionStore:await store(), authClient:{request:async (_path, init)=>{sent.push(init.body as Record<string,unknown>);return {status:200,json:async()=>({outcome:"ACCEPTED"})};}} });
+    await client.sendAudioMessage("conv_1", "media_asset_audio_1");
+    const payload = sent[0]?.payload as Record<string,unknown>;
+    expect(payload.messageType).toBe("AUDIO");
+    expect(payload.mediaRef).toBe("media_asset_audio_1");
+  });
 });
 
 describe("UI-CHAT-BLOCK-001 persistent conversation blocking", () => {

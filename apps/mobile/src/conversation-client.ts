@@ -57,7 +57,7 @@ export class ConversationClient {
     temporaryUIResponseId?: string,
     mediaRef?: string,
     protectionOverride?: ProtectionOverride,
-    messageType?: "TEXT" | "IMAGE" | "VIDEO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION",
+    messageType?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION",
     proxyObject?: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> }
   ): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
@@ -85,6 +85,10 @@ export class ConversationClient {
 
   public async sendVideoMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride, assistantMode?: string): Promise<Record<string, unknown>> {
     return this.sendMessage(conversationId, caption?.trim() || " ", assistantMode, undefined, mediaRef, protectionOverride, "VIDEO");
+  }
+
+  public async sendAudioMessage(conversationId: string, mediaRef: string, protectionOverride?: ProtectionOverride, assistantMode?: string): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, "语音消息", assistantMode, undefined, mediaRef, protectionOverride, "AUDIO");
   }
 
   public async listMessages(conversationId: string): Promise<Record<string, unknown>> {

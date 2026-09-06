@@ -1,25 +1,27 @@
 // Package: conversation — Message.Protection sub-aggregate.
 //
 // WHAT THIS IS
-//   Per-message anti-leak controls aligned with the Proxy chat RFC v0.1
-//   (docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md §3).
-//   The lotus pattern is per-conversation toggles; we do per-message so a
-//   pimp can lock down a single sensitive image while keeping the rest of
-//   the chat scannable.
+//
+//	Per-message anti-leak controls aligned with the Proxy chat RFC v0.1
+//	(docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md §3).
+//	The lotus pattern is per-conversation toggles; we do per-message so a
+//	pimp can lock down a single sensitive image while keeping the rest of
+//	the chat scannable.
 //
 // THE FOUR KNOBS
-//   1. Forwardable:    if false, server refuses forward attempts with
-//                      PROTECTION_VIOLATION
-//   2. ScreenshotWarn: if true, server records ScreenshotDetected events
-//                      and emits a SECURITY_ALERT to the sender
-//   3. ViewLimit + ViewCount: ephemeral — server returns
-//                      VIEW_LIMIT_EXCEEDED after N reads by the recipient
-//   4. TTLDuration + ExpiresAt: server returns MESSAGE_EXPIRED after the
-//                      wall-clock cutoff
+//  1. Forwardable:    if false, server refuses forward attempts with
+//     PROTECTION_VIOLATION
+//  2. ScreenshotWarn: if true, server records ScreenshotDetected events
+//     and emits a SECURITY_ALERT to the sender
+//  3. ViewLimit + ViewCount: ephemeral — server returns
+//     VIEW_LIMIT_EXCEEDED after N reads by the recipient
+//  4. TTLDuration + ExpiresAt: server returns MESSAGE_EXPIRED after the
+//     wall-clock cutoff
 //
 // DEFAULTS (RFC §3.3)
-//   Per-message defaults are computed by DefaultProtectionFor. The values
-//   are deliberately conservative for DM, permissive for GROUP.
+//
+//	Per-message defaults are computed by DefaultProtectionFor. The values
+//	are deliberately conservative for DM, permissive for GROUP.
 //
 // NOT IN THIS FILE
 //   - The TTL sweeper (worker, separate concern)
@@ -92,12 +94,12 @@ func (p MessageProtection) ViewLimitExceeded() bool {
 // DefaultProtectionFor returns the per-type defaults from RFC §3.3.
 // The caller (SendMessage command) layers the user's overrides on top.
 //
-//   TEXT (DM)        : no forward, screenshot warn, unlimited views, 30d TTL
-//   IMAGE (DM)       : no forward, screenshot warn, 3 views, 30d TTL
-//   VIDEO (DM)       : no forward, screenshot warn, 1 view, 30d TTL
-//   LOCATION (DM)    : no forward, screenshot warn, 1 view, 1h TTL
-//   TEXT (GROUP)     : forwardable, no screenshot warn, unlimited views, 30d TTL
-//   IMAGE (GROUP)    : forwardable, screenshot warn, unlimited views, 30d TTL
+//	TEXT (DM)        : no forward, screenshot warn, unlimited views, 30d TTL
+//	IMAGE (DM)       : no forward, screenshot warn, 3 views, 30d TTL
+//	VIDEO (DM)       : no forward, screenshot warn, 1 view, 30d TTL
+//	LOCATION (DM)    : no forward, screenshot warn, 1 view, 1h TTL
+//	TEXT (GROUP)     : forwardable, no screenshot warn, unlimited views, 30d TTL
+//	IMAGE (GROUP)    : forwardable, screenshot warn, unlimited views, 30d TTL
 //
 // SYSTEM_CONTEXT and STRUCTURED_SUGGESTION are server-generated, so their
 // protection is a no-op (forwardable, no warn, no view limit, no TTL).
@@ -109,75 +111,75 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 	case "TEXT":
 		if conversationType == "GROUP" {
 			return MessageProtection{
-				Forwardable:        true,
-				Copyable:           true,
-				ScreenshotWarn:     false,
-				ExpiresAt:          &in30d,
-				EndToEndEncrypted:  true,
+				Forwardable:       true,
+				Copyable:          true,
+				ScreenshotWarn:    false,
+				ExpiresAt:         &in30d,
+				EndToEndEncrypted: true,
 			}
 		}
 		return MessageProtection{
-			Forwardable:        false,
-			Copyable:           false,
-			ScreenshotWarn:     true,
-			ExpiresAt:          &in30d,
-			EndToEndEncrypted:  true,
+			Forwardable:       false,
+			Copyable:          false,
+			ScreenshotWarn:    true,
+			ExpiresAt:         &in30d,
+			EndToEndEncrypted: true,
 		}
 	case "IMAGE":
 		if conversationType == "GROUP" {
 			return MessageProtection{
-				Forwardable:        true,
-				Copyable:           false,
-				ScreenshotWarn:     true,
-				ExpiresAt:          &in30d,
-				EndToEndEncrypted:  true,
+				Forwardable:       true,
+				Copyable:          false,
+				ScreenshotWarn:    true,
+				ExpiresAt:         &in30d,
+				EndToEndEncrypted: true,
 			}
 		}
 		return MessageProtection{
-			Forwardable:        false,
-			Copyable:           false,
+			Forwardable:         false,
+			Copyable:            false,
 			ScreenshotProtected: true,
-			ScreenshotWarn:     true,
-			ViewLimit:          3,
-			ExpiresAt:          &in30d,
-			EndToEndEncrypted:  true,
+			ScreenshotWarn:      true,
+			ViewLimit:           3,
+			ExpiresAt:           &in30d,
+			EndToEndEncrypted:   true,
 		}
-	case "VIDEO":
+	case "VIDEO", "AUDIO":
 		// RFC defines VIDEO for DM. Group video uses IMAGE protection.
 		return MessageProtection{
-			Forwardable:        false,
-			Copyable:           false,
+			Forwardable:         false,
+			Copyable:            false,
 			ScreenshotProtected: true,
-			ScreenshotWarn:     true,
-			ViewLimit:          1,
-			ExpiresAt:          &in30d,
-			EndToEndEncrypted:  true,
+			ScreenshotWarn:      true,
+			ViewLimit:           1,
+			ExpiresAt:           &in30d,
+			EndToEndEncrypted:   true,
 		}
 	case "LOCATION":
 		return MessageProtection{
-			Forwardable:        false,
-			Copyable:           false,
+			Forwardable:         false,
+			Copyable:            false,
 			ScreenshotProtected: true,
-			ScreenshotWarn:     true,
-			ViewLimit:          1,
-			ExpiresAt:          &in1h,
-			EndToEndEncrypted:  true,
+			ScreenshotWarn:      true,
+			ViewLimit:           1,
+			ExpiresAt:           &in1h,
+			EndToEndEncrypted:   true,
 		}
 	case "SYSTEM_CONTEXT", "STRUCTURED_SUGGESTION":
 		// Server-generated. Always forwardable, never expires.
 		return MessageProtection{
-			Forwardable:        true,
-			Copyable:           true,
-			ScreenshotWarn:     false,
-			EndToEndEncrypted:  false,
+			Forwardable:       true,
+			Copyable:          true,
+			ScreenshotWarn:    false,
+			EndToEndEncrypted: false,
 		}
 	}
 	// Unknown — fail closed: no forward, warn, 30d.
 	return MessageProtection{
-		Forwardable:        false,
-		ScreenshotWarn:     true,
-		ExpiresAt:          &in30d,
-		EndToEndEncrypted:  true,
+		Forwardable:       false,
+		ScreenshotWarn:    true,
+		ExpiresAt:         &in30d,
+		EndToEndEncrypted: true,
 	}
 }
 

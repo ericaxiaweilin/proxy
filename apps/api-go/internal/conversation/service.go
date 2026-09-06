@@ -401,6 +401,8 @@ func messageTypeToKind(t string) string {
 		return "image"
 	case "VIDEO":
 		return "video"
+	case "AUDIO":
+		return "audio"
 	case "LOCATION":
 		return "location"
 	default:
@@ -727,7 +729,7 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if p.MessageType == "" {
 		p.MessageType = "TEXT"
 	}
-	validTypes := map[string]bool{"TEXT": true, "IMAGE": true, "VIDEO": true, "LOCATION": true, "SYSTEM_CONTEXT": true, "STRUCTURED_SUGGESTION": true}
+	validTypes := map[string]bool{"TEXT": true, "IMAGE": true, "VIDEO": true, "AUDIO": true, "LOCATION": true, "SYSTEM_CONTEXT": true, "STRUCTURED_SUGGESTION": true}
 	if !validTypes[p.MessageType] {
 		return command.Rejected(e, "INVALID_MESSAGE_TYPE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_message_type", map[string]any{"messageType": p.MessageType})
 	}
@@ -739,6 +741,9 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", nil)
 	}
 	if p.MessageType == "VIDEO" && strings.TrimSpace(p.MediaRef) == "" {
+		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", map[string]any{"messageType": p.MessageType})
+	}
+	if p.MessageType == "AUDIO" && strings.TrimSpace(p.MediaRef) == "" {
 		return command.Rejected(e, "EMPTY_MESSAGE", "VALIDATION", "AFTER_USER_ACTION", "conversation.empty_message", map[string]any{"messageType": p.MessageType})
 	}
 	if p.MessageType == "LOCATION" && strings.TrimSpace(p.Body) == "" {

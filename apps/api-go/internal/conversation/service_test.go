@@ -399,3 +399,30 @@ func TestConversationBlockPersistsAndGuardsSending(t *testing.T) {
 		t.Fatalf("unblocked conversation should allow sends: %+v", sent)
 	}
 }
+
+func TestAudioMessageRequiresMediaAndPersists(t *testing.T) {
+	s := New()
+	started := s.Handle(envelopeFor("StartConversation", map[string]any{"conversationType": "DM", "originType": "PROFILE", "originId": "user_002", "participantId": "user_002"}, ""))
+	var view struct {
+		ConversationID string `json:"conversationId"`
+	}
+	if err := json.Unmarshal([]byte(started.OperationRef), &view); err != nil {
+		t.Fatal(err)
+	}
+	missing := s.Handle(envelopeFor("SendMessage", map[string]any{"messageType": "AUDIO", "body": "语音消息"}, view.ConversationID))
+	if missing.Outcome != "REJECTED" {
+		t.Fatalf("audio without media must fail: %+v", missing)
+	}
+	sent := s.Handle(envelopeFor("SendMessage", map[string]any{"messageType": "AUDIO", "body": "语音消息", "mediaRef": "media_audio_1"}, view.ConversationID))
+	if sent.Outcome != "ACCEPTED" {
+		t.Fatalf("audio send: %+v", sent)
+	}
+	rows, err := s.repository.Messages(context.Background(), view.ConversationID)
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("audio history missing: %v", err)
+	}
+	last := rows[len(rows)-1]
+	if last.MessageType != "AUDIO" || last.MediaRef != "media_audio_1" || last.Kind != "audio" {
+		t.Fatalf("wrong audio record: %+v", last)
+	}
+}
