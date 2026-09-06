@@ -103,6 +103,7 @@ export function MerchantMeR21Replacement({
   supply,
   activities,
   viewerAccountId,
+  onOpenVouchers,
   onOpenSwitcher,
   onSignOut,
 }: {
@@ -110,6 +111,7 @@ export function MerchantMeR21Replacement({
   supply?: SupplyClient | undefined;
   activities?: ActivityClient | undefined;
   viewerAccountId?: string | undefined;
+  onOpenVouchers: () => void;
   onOpenSwitcher: () => void;
   onSignOut: () => void;
 }): React.JSX.Element {
@@ -262,6 +264,7 @@ export function MerchantMeR21Replacement({
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "券 / 客户" })}
           {summary({ title: `${accounts?.[0]?.name ?? "商家"} · 权益`, meta: "可核验、可追溯", stats: [["—", "进行中"], ["—", "已领取"], ["—", "已核销"], ["—", "到店"]] })}
+          <View style={styles.actions}><Pressable onPress={onOpenVouchers} style={styles.primary}><Text style={styles.primaryText}>打开券中心</Text></Pressable><Pressable onPress={() => setPage("activity")} style={styles.secondary}><Text style={styles.secondaryText}>查看关联活动</Text></Pressable></View>
           <SimpleRows onPress={setPage} rows={[["券管理", "创建、上下架与有效期"], ["核销记录", "扫码核销 · 订单留痕"], ["客户归因", "领取、到店与复购"], ["活动关联", `${activityItems.length} 个开放活动`, "activity"]]} />
           {sectionHead("经营人员", `${members.length} 人`)}
           {members.length === 0 ? (

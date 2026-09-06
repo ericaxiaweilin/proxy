@@ -544,6 +544,7 @@ export function MeSurface({
         supply={supply}
         activities={activities}
         viewerAccountId={viewerAccountId}
+        onOpenVouchers={onOpenVouchers}
         onOpenSwitcher={onOpenSwitcher}
         onSignOut={onSignOut}
       />
