@@ -12,8 +12,9 @@
 // instead of the bogus '12.6tr VND' / '148 订单' fallbacks.
 
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { color, Gradient, shadows } from "../theme";
+import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import type { BusinessClient } from "../business-client";
 import type { SupplyClient, SupplierCandidate } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
@@ -36,6 +37,17 @@ type Account = { id: string; name: string; status: string };
 type MemberDirectory = { businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string };
 type SpendDaily = { businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number };
 type ActivityItem = { activityId: string; title: string };
+
+const OTTER_LOGO = require("../../assets/otter-logo.png");
+
+function IconBox({ icon, brand = false }: { icon: ProxyIconName; brand?: boolean }): React.JSX.Element {
+  const glyph = <ProxyIcon color={brand ? color.white : color.ink} name={icon} size={25} />;
+  return brand ? (
+    <Gradient from={color.magenta} to={color.violet} style={styles.iconBox}>{glyph}</Gradient>
+  ) : (
+    <View style={[styles.iconBox, styles.iconBoxLime]}>{glyph}</View>
+  );
+}
 
 function formatVnd(minor: number): string {
   const vnd = Math.round(minor / 1000);
@@ -402,35 +414,43 @@ export function MerchantMeR21Replacement({
           </View>
         </Pressable>
 
-        {sectionHead("Creator 经营", `Supply · ${creators.length} 可邀请`)}
-        <Pressable onPress={() => setPage("creator")} style={styles.tile}>
-          <Text style={styles.tileTitle}>Creator 经营</Text>
-          <Text style={styles.tileMeta}>{creators.length} 个 Creator · 走 SupplyClient.querySuppliers</Text>
-        </Pressable>
-
-        {sectionHead("活动 / 券 / 销售", "server-authoritative")}
-        <View style={styles.tileGrid}>
-          <Pressable onPress={() => setPage("activity")} style={styles.tileSmall}>
-            <Text style={styles.tileTitle}>活动</Text>
-            <Text style={styles.tileMeta}>{activityItems.length} 个开放活动</Text>
-          </Pressable>
-          <Pressable onPress={() => setPage("voucher")} style={styles.tileSmall}>
-            <Text style={styles.tileTitle}>客户 / 券</Text>
-            <Text style={styles.tileMeta}>{members.length} 个经营人员</Text>
-          </Pressable>
-          <Pressable onPress={() => setPage("sales")} style={styles.tileSmall}>
-            <Text style={styles.tileTitle}>销售</Text>
-            <Text style={styles.tileMeta}>{spendTotal.totalOrders} 单 / {formatVnd(spendTotal.totalGrossMinor)}</Text>
-          </Pressable>
-          <Pressable onPress={() => setPage("ops")} style={styles.tileSmall}>
-            <Text style={styles.tileTitle}>运营</Text>
-            <Text style={styles.tileMeta}>{members.length} 人员 · {spendDays.length} 日</Text>
-          </Pressable>
+        {sectionHead("经营")}
+        <View style={styles.moduleGrid}>
+          {([
+            ["target", "Creator 经营", `${creators.length} 位可邀请 Creator`, true, "creator"],
+            ["ticket", "客户 / 券", `${members.length} 位经营人员`, false, "voucher"],
+            ["arrowUpRight", "活动导流", `${activityItems.length} 个开放活动`, false, "activity"],
+            ["storeLines", "线上店铺", accounts?.[0]?.status ?? "查看店铺", true, "store"],
+          ] as const).map(([icon, title, meta, brand, destination]) => (
+            <Pressable key={title} onPress={() => setPage(destination)} style={styles.module}>
+              <IconBox brand={brand} icon={icon} />
+              <Text style={styles.cardTitle}>{title}</Text>
+              <Text numberOfLines={1} style={styles.moduleMeta}>{meta}</Text>
+            </Pressable>
+          ))}
         </View>
 
-        <Pressable onPress={() => setPage("proxy")} style={styles.tile}>
-          <Text style={styles.tileTitle}>Proxy 数据</Text>
-          <Text style={styles.tileMeta}>{spendDays.length} 日 rollup · server 实际</Text>
+        {sectionHead("管理")}
+        <View style={styles.moduleGrid}>
+          {([
+            ["coin", "销售中心", `${spendTotal.totalOrders} 单 · ${formatVnd(spendTotal.totalGrossMinor)}`, "sales"],
+            ["spark", "运营中心", `${members.length} 人员 · ${spendDays.length} 日数据`, "ops"],
+          ] as const).map(([icon, title, meta, destination]) => (
+            <Pressable key={title} onPress={() => setPage(destination)} style={styles.module}>
+              <IconBox icon={icon} />
+              <Text style={styles.cardTitle}>{title}</Text>
+              <Text numberOfLines={1} style={styles.moduleMeta}>{meta}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Pressable onPress={() => setPage("proxy")} style={styles.proxyWide}>
+          <Image source={OTTER_LOGO} style={styles.proxyLogo} />
+          <View style={styles.rowCopy}>
+            <Text style={styles.cardTitle}>Proxy 中心</Text>
+            <Text style={styles.meta}>{spendDays.length} 日真实经营数据 · 权限与工作区</Text>
+          </View>
+          <Text style={styles.chev}>›</Text>
         </Pressable>
 
         <Pressable onPress={onOpenSwitcher} style={styles.subtleButton}><Text style={styles.subtleButtonText}>切换身份</Text></Pressable>
@@ -479,6 +499,14 @@ const styles = StyleSheet.create({
   tileMeta: { color: color.muted, fontSize: 11 },
   tileGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   tileSmall: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexBasis: "48%", padding: 12, ...shadows.card, gap: 2 },
+  moduleGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  module: { alignItems: "center", aspectRatio: 1, backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, justifyContent: "center", padding: 14, width: "48.5%", ...shadows.card },
+  iconBox: { alignItems: "center", borderRadius: 16, height: 56, justifyContent: "center", marginBottom: 9, width: 56 },
+  iconBoxLime: { backgroundColor: color.lime },
+  moduleMeta: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15, marginTop: 6, textAlign: "center", width: "100%" },
+  proxyWide: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 10, minHeight: 78, padding: 11, ...shadows.card },
+  proxyLogo: { borderRadius: 16, height: 56, width: 56 },
+  chev: { color: "#756B80", fontSize: 24 },
   subtleButton: { marginTop: 16, paddingVertical: 10 },
   subtleButtonText: { color: color.muted, fontSize: 12, textAlign: "center" },
   subtleButtonDanger: { marginTop: 4, paddingVertical: 10 },

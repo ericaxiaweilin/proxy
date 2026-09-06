@@ -428,6 +428,18 @@ if ! grep -q 'MerchantMeR21Replacement' apps/mobile/src/surfaces/me.tsx; then
 fi
 echo "    MERCHANT-R21-001: PASS (hardcoded merchant-me-r21.tsx replaced with thin shim; replacement wires real BusinessClient + SupplyClient)"
 
+# MERCHANT-ME-VISUAL-001: replacing the old hardcoded R21 surface must not
+# flatten the merchant module architecture into anonymous text-only cards.
+# Keep the established icon/logo affordances while all counts remain server-backed.
+if ! grep -q 'OTTER_LOGO' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q 'function IconBox' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q '<ProxyIcon' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q 'style={styles.moduleGrid}' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [MERCHANT-ME-VISUAL-001]: merchant Me lost its branded logo/icon module shell" >&2
+  exit 1
+fi
+echo "    MERCHANT-ME-VISUAL-001: PASS (merchant Me keeps branded logo/icon modules over server-backed data)"
+
 # BIZ-HOME-WIRE-001: 商家 Home tab 之前是 242 行 hardcoded mock
 # (Bonsaidon / 今天要推进什么? / Rooftop Photo Afternoon /
 # Aster Coffee Sunset / 场景结果 Invite Sent 12 全部 inline)。
