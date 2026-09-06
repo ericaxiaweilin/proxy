@@ -9,6 +9,25 @@ import (
 	"github.com/proxy-app/proxy-api/internal/business"
 )
 
+func (r *BusinessRepository) UpsertAggregatedDemandSignal(ctx context.Context, s business.AggregatedDemandSignal) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO business.aggregated_demand_signals (business_id,total_matching_demand,confirmed_arrivals,high_probability_arrivals,confidence,recorded_at) VALUES ($1,$2,$3,$4,$5,$6)`, s.BusinessID, s.TotalMatchingDemand, s.ConfirmedArrivals, s.HighProbabilityArrivals, s.Confidence, s.RecordedAt)
+	return err
+}
+func (r *BusinessRepository) LatestAggregatedDemandSignal(ctx context.Context, id string) (business.AggregatedDemandSignal, error) {
+	var s business.AggregatedDemandSignal
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT business_id,total_matching_demand,confirmed_arrivals,high_probability_arrivals,confidence,recorded_at FROM business.aggregated_demand_signals WHERE business_id=$1 ORDER BY recorded_at DESC LIMIT 1`, id).Scan(&s.BusinessID, &s.TotalMatchingDemand, &s.ConfirmedArrivals, &s.HighProbabilityArrivals, &s.Confidence, &s.RecordedAt)
+	return s, err
+}
+func (r *BusinessRepository) UpsertSceneSupplySnapshot(ctx context.Context, s business.SceneSupplySnapshot) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO business.scene_supply_snapshots (business_id,store_id,scene_id,current_capacity_pct,forecast_capacity_pct,accepting_traffic,confidence,recorded_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, s.BusinessID, s.StoreID, s.SceneID, s.CurrentCapacityPct, s.ForecastCapacityPct, s.AcceptingTraffic, s.Confidence, s.RecordedAt)
+	return err
+}
+func (r *BusinessRepository) LatestSceneSupplySnapshot(ctx context.Context, id string) (business.SceneSupplySnapshot, error) {
+	var s business.SceneSupplySnapshot
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `SELECT business_id,store_id,scene_id,current_capacity_pct,forecast_capacity_pct,accepting_traffic,confidence,recorded_at FROM business.scene_supply_snapshots WHERE business_id=$1 ORDER BY recorded_at DESC LIMIT 1`, id).Scan(&s.BusinessID, &s.StoreID, &s.SceneID, &s.CurrentCapacityPct, &s.ForecastCapacityPct, &s.AcceptingTraffic, &s.Confidence, &s.RecordedAt)
+	return s, err
+}
+
 // BusinessRepository persists merchant accounts, memberships, stores and spend
 // projections. Authorization remains in the domain service; repository queries
 // are deliberately scoped by business/user identifiers supplied by that layer.

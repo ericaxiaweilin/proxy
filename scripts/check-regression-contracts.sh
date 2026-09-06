@@ -455,6 +455,9 @@ require_test "R35-OPERATING-HOME-001" "./internal/business" \
 require_test "R35-OPERATING-HOME-001" "./internal/business" \
   "TestR35ResolverStopsTrafficFromFutureCapacity" \
   "apps/api-go/internal/business/operating_resolver_test.go" || exit $?
+require_test "R35-OPERATING-HOME-001" "./internal/business" \
+  "TestR35OperatingHomeUsesPersistedSignals" \
+  "apps/api-go/internal/business/operating_resolver_test.go" || exit $?
 if ! grep -q 'getMerchantOperatingHome' apps/mobile/src/surfaces/business-home.tsx || \
    ! grep -q 'merchant-demand-supply' apps/mobile/src/surfaces/business-home.tsx || \
    ! grep -q 'merchant-best-next-decision' apps/mobile/src/surfaces/business-home.tsx; then

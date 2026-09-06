@@ -142,6 +142,8 @@
       "implementationFiles": [
         "apps/api-go/internal/business/service.go",
         "apps/api-go/internal/business/operating_resolver.go",
+        "apps/api-go/internal/platform/postgres/business.go",
+        "apps/api-go/migrations/072_merchant_demand_supply_signals.sql",
         "apps/mobile/src/business-client.ts",
         "apps/mobile/src/surfaces/business-home.tsx",
         "apps/mobile/src/shell/app-shell.tsx"
@@ -153,7 +155,7 @@
         "scripts/check-regression-contracts.sh"
       ],
       "status": "PARTIAL",
-      "knownGap": "R35 conservative first slice is server-authoritative for outcome and operating state. Privacy-safe demand aggregation, Scene supply snapshots, versioned forecasts and expectation history remain pending; until then the only permitted recommendation is NO_ACTION with zero confidence."
+      "knownGap": "R35 accepts and persists system-only privacy-safe demand plus merchant-authorized Scene supply snapshots and resolves them server-side. Upstream demand aggregation, automatic capacity collectors, versioned expectation history and action orchestration remain pending."
     },
     {
       "scope": "business",

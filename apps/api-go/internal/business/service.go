@@ -173,6 +173,10 @@ type Repository interface {
 	// Spend daily rollup (upsert)
 	UpsertSpendDaily(ctx context.Context, s SpendDaily) error
 	ListSpendDaily(ctx context.Context, businessID string, sinceDays int) ([]SpendDaily, error)
+	UpsertAggregatedDemandSignal(ctx context.Context, signal AggregatedDemandSignal) error
+	LatestAggregatedDemandSignal(ctx context.Context, businessID string) (AggregatedDemandSignal, error)
+	UpsertSceneSupplySnapshot(ctx context.Context, snapshot SceneSupplySnapshot) error
+	LatestSceneSupplySnapshot(ctx context.Context, businessID string) (SceneSupplySnapshot, error)
 }
 
 type MemoryRepository struct {
@@ -185,6 +189,8 @@ type MemoryRepository struct {
 	storeLines      map[string]StoreLines
 	memberDirectory map[string]map[string]MemberDirectory
 	spendDaily      map[string]map[string]SpendDaily
+	demandSignals   map[string]AggregatedDemandSignal
+	supplySnapshots map[string]SceneSupplySnapshot
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -197,6 +203,8 @@ func NewMemoryRepository() *MemoryRepository {
 		storeLines:      make(map[string]StoreLines),
 		memberDirectory: make(map[string]map[string]MemberDirectory),
 		spendDaily:      make(map[string]map[string]SpendDaily),
+		demandSignals:   make(map[string]AggregatedDemandSignal),
+		supplySnapshots: make(map[string]SceneSupplySnapshot),
 	}
 }
 func (r *MemoryRepository) CreateAccount(_ context.Context, a Account) error {
@@ -441,6 +449,37 @@ type Service struct {
 	clock clock.Clock
 }
 
+func (r *MemoryRepository) UpsertAggregatedDemandSignal(_ context.Context, signal AggregatedDemandSignal) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.demandSignals[signal.BusinessID] = signal
+	return nil
+}
+func (r *MemoryRepository) LatestAggregatedDemandSignal(_ context.Context, businessID string) (AggregatedDemandSignal, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	v, ok := r.demandSignals[businessID]
+	if !ok {
+		return AggregatedDemandSignal{}, errors.New("demand signal not found")
+	}
+	return v, nil
+}
+func (r *MemoryRepository) UpsertSceneSupplySnapshot(_ context.Context, snapshot SceneSupplySnapshot) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.supplySnapshots[snapshot.BusinessID] = snapshot
+	return nil
+}
+func (r *MemoryRepository) LatestSceneSupplySnapshot(_ context.Context, businessID string) (SceneSupplySnapshot, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	v, ok := r.supplySnapshots[businessID]
+	if !ok {
+		return SceneSupplySnapshot{}, errors.New("supply snapshot not found")
+	}
+	return v, nil
+}
+
 func New() *Service { return NewWithRepository(NewMemoryRepository()) }
 func NewWithRepository(repo Repository) *Service {
 	if repo == nil {
@@ -455,7 +494,7 @@ func (s *Service) Supports(t string) bool {
 		"AddStorePhoto", "ListStorePhotos", "DeleteStorePhoto",
 		"UpsertStoreLines", "GetStoreLines",
 		"ListMemberDirectory", "UpsertMemberDirectory",
-		"ListSpendDaily", "UpsertSpendDaily", "GetMerchantOperatingHome":
+		"ListSpendDaily", "UpsertSpendDaily", "GetMerchantOperatingHome", "RecordAggregatedDemandSignal", "UpsertSceneSupplySnapshot":
 		return true
 	}
 	return false
@@ -501,6 +540,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.upsertSpendDaily(ctx, e)
 	case "GetMerchantOperatingHome":
 		return s.getMerchantOperatingHome(ctx, e)
+	case "RecordAggregatedDemandSignal":
+		return s.recordAggregatedDemandSignal(ctx, e)
+	case "UpsertSceneSupplySnapshot":
+		return s.upsertSceneSupplySnapshot(ctx, e)
 	default:
 		return command.Rejected(e, "BUSINESS_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "business.unsupported", nil)
 	}
@@ -547,9 +590,51 @@ func (s *Service) getMerchantOperatingHome(ctx context.Context, e command.Envelo
 	if len(rows) > 0 {
 		home.Pulse.State, home.Pulse.Freshness = "ACTIVE", "ROLLING_7_DAYS"
 	}
-	resolved := ResolveOperatingState(nil, nil)
+	var demandPtr *AggregatedDemandSignal
+	if demand, err := s.repo.LatestAggregatedDemandSignal(ctx, businessID); err == nil {
+		demandPtr = &demand
+	}
+	var supplyPtr *SceneSupplySnapshot
+	if supply, err := s.repo.LatestSceneSupplySnapshot(ctx, businessID); err == nil {
+		supplyPtr = &supply
+	}
+	resolved := ResolveOperatingState(demandPtr, supplyPtr)
 	home.Balance, home.Forecast, home.Decision = resolved.Balance, resolved.Forecast, resolved.Decision
 	return acceptedWithPayload(e, "MerchantOperatingHome", businessID, 1, "READ", map[string]any{"home": home}, nil)
+}
+
+func (s *Service) recordAggregatedDemandSignal(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "SYSTEM" {
+		return command.Rejected(e, "SYSTEM_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.system_actor_required", nil)
+	}
+	var p AggregatedDemandSignal
+	if !decode(e.Payload, &p) || p.BusinessID == "" || p.TotalMatchingDemand < 0 || p.ConfirmedArrivals < 0 || p.HighProbabilityArrivals < 0 || p.ConfirmedArrivals+p.HighProbabilityArrivals > p.TotalMatchingDemand || p.Confidence <= 0 || p.Confidence > 1 {
+		return command.Rejected(e, "INVALID_DEMAND_SIGNAL", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_demand_signal", nil)
+	}
+	p.RecordedAt = s.clock.Now().UTC()
+	if err := s.repo.UpsertAggregatedDemandSignal(ctx, p); err != nil {
+		return command.Rejected(e, "DEMAND_SIGNAL_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "business.demand_signal_write_failed", nil)
+	}
+	return acceptedWithPayload(e, "AggregatedDemandSignal", p.BusinessID, 1, "RECORDED", map[string]any{"signal": p}, nil)
+}
+
+func (s *Service) upsertSceneSupplySnapshot(ctx context.Context, e command.Envelope) command.Result {
+	var p SceneSupplySnapshot
+	if !decode(e.Payload, &p) || p.BusinessID == "" || p.StoreID == "" || p.SceneID == "" || p.CurrentCapacityPct < 0 || p.CurrentCapacityPct > 100 || p.ForecastCapacityPct < 0 || p.ForecastCapacityPct > 100 || p.Confidence <= 0 || p.Confidence > 1 {
+		return command.Rejected(e, "INVALID_SUPPLY_SNAPSHOT", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_supply_snapshot", nil)
+	}
+	if !s.hasRole(ctx, p.BusinessID, e.Actor.ID, "OWNER", "ADMIN", "OPERATOR") {
+		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
+	}
+	store, err := s.repo.GetStore(ctx, p.StoreID)
+	if err != nil || store.BusinessID != p.BusinessID {
+		return command.Rejected(e, "STORE_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "business.store_not_found", nil)
+	}
+	p.RecordedAt = s.clock.Now().UTC()
+	if err := s.repo.UpsertSceneSupplySnapshot(ctx, p); err != nil {
+		return command.Rejected(e, "SUPPLY_SNAPSHOT_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "business.supply_snapshot_write_failed", nil)
+	}
+	return acceptedWithPayload(e, "SceneSupplySnapshot", p.BusinessID, 1, "RECORDED", map[string]any{"snapshot": p}, nil)
 }
 
 func (s *Service) createAccount(ctx context.Context, e command.Envelope) command.Result {

@@ -1,21 +1,29 @@
 package business
 
+import "time"
+
 const merchantDemandPrivacyThreshold = 10
 
 // AggregatedDemandSignal contains no user IDs or individual traces. Counts
 // below the privacy threshold are treated as unavailable, never rounded up.
 type AggregatedDemandSignal struct {
-	TotalMatchingDemand     int
-	ConfirmedArrivals       int
-	HighProbabilityArrivals int
-	Confidence              float64
+	BusinessID              string    `json:"businessId"`
+	TotalMatchingDemand     int       `json:"totalMatchingDemand"`
+	ConfirmedArrivals       int       `json:"confirmedArrivals"`
+	HighProbabilityArrivals int       `json:"highProbabilityArrivals"`
+	Confidence              float64   `json:"confidence"`
+	RecordedAt              time.Time `json:"recordedAt"`
 }
 
 type SceneSupplySnapshot struct {
-	CurrentCapacityPct  int
-	ForecastCapacityPct int
-	AcceptingTraffic    bool
-	Confidence          float64
+	BusinessID          string    `json:"businessId"`
+	StoreID             string    `json:"storeId"`
+	SceneID             string    `json:"sceneId"`
+	CurrentCapacityPct  int       `json:"currentCapacityPct"`
+	ForecastCapacityPct int       `json:"forecastCapacityPct"`
+	AcceptingTraffic    bool      `json:"acceptingTraffic"`
+	Confidence          float64   `json:"confidence"`
+	RecordedAt          time.Time `json:"recordedAt"`
 }
 
 type ResolvedOperatingState struct {
