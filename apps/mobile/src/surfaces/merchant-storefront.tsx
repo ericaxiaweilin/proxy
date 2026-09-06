@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { color, shadows } from "../theme";
-import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { retainStorePhoto, type RetainedStorePhoto } from "../expo-composer-draft-store";
 import type { BusinessClient, StoreProduct } from "../business-client";
 
@@ -53,7 +52,6 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [members, setMembers] = useState<Record<string, MemberDirectory[]>>({});
   const [spend, setSpend] = useState<Record<string, { totalOrders: number; totalGrossMinor: number; days: SpendDaily[] } | undefined>>({});
   const [uploadingStoreId, setUploadingStoreId] = useState<string | undefined>(undefined);
-  const [activeManager, setActiveManager] = useState<{ storeId: string; section: "INFO" | "PHOTOS" | "MENU" | "SHOWCASE" } | undefined>(undefined);
   const [products, setProducts] = useState<Record<string, StoreProduct[]>>({});
   // R36.x MENU-001: 菜单新增/编辑表单状态。"new" 表示新增，否则为被编辑商品 id。
   const [editingProductFor, setEditingProductFor] = useState<string | undefined>(undefined);
@@ -396,17 +394,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     <Text style={styles.storeMeta}>{s.address || "—"} · {s.status}</Text>
                   </View>
 
-                  <Text style={styles.blockTitleInside}>店铺管理</Text>
-                  <View style={styles.manageGrid}>
-                    {([
-                      ["storeLines", "店铺信息", sLines ? "名称 · Logo · 地址 · 营业时间" : "待完善", () => { setActiveManager({ storeId: s.id, section: "INFO" }); setEditingLinesFor(undefined); }],
-                      ["storefront", "菜单与价格", sProducts.length === 0 ? "空菜单 · 点此加菜" : `${sProducts.length} 道菜 · 在售 ${sAvailable.length}`, () => { setActiveManager({ storeId: s.id, section: "MENU" }); setEditingProductFor(undefined); setEditingProductId(undefined); setProductError(undefined); }],
-                      ["target", "相册", `${sPhotos.length} 张`, () => setActiveManager({ storeId: s.id, section: "PHOTOS" })],
-                      ["spark", "当前展示", showcaseActivities && showcaseActivities.length > 0 ? `${showcaseActivities.length} 个关联活动` : "暂无关联活动", () => setActiveManager({ storeId: s.id, section: "SHOWCASE" })],
-                    ] as const).map(([icon, title, meta, action]) => <Pressable disabled={!action} key={title} onPress={action} style={styles.manageCard}><View style={styles.manageIcon}><ProxyIcon color={color.ink} name={icon as ProxyIconName} size={23} /></View><Text style={styles.manageTitle}>{title}</Text><Text style={styles.manageMeta}>{meta}</Text></Pressable>)}
-                  </View>
-
-                  {activeManager?.storeId === s.id && activeManager.section === "INFO" && sLines ? (
+                  {sLines ? (
                     <View style={styles.linesBlock}>
                       <Text style={styles.linesDescription}>{sLines.description || "（暂无简介）"}</Text>
                       <Text style={styles.linesContact}>
@@ -421,7 +409,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                   ) : null}
 
                   {/* R18.x LINES-EDITOR-001: inline edit form. */}
-                  {activeManager?.storeId === s.id && activeManager.section === "INFO" && editingLinesFor === s.id ? (
+                  {editingLinesFor === s.id ? (
                     <View style={styles.linesEditForm}>
                       <Text style={styles.linesEditLabel}>店铺简介</Text>
                       <TextInput
@@ -492,7 +480,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         </Pressable>
                       </View>
                     </View>
-                  ) : activeManager?.storeId === s.id && activeManager.section === "INFO" ? (
+                  ) : (
                     <Pressable
                       onPress={() => startEditLines(s.id, sLines)}
                       style={styles.linesEditToggle}
@@ -501,11 +489,11 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         {sLines ? "编辑主页 / 联系方式 / 营业时间" : "填写主页 / 联系方式 / 营业时间"}
                       </Text>
                     </Pressable>
-                  ) : null}
+                  )}
 
-                  {activeManager?.storeId === s.id && activeManager.section === "PHOTOS" ? <View style={styles.managerPanel}><View style={styles.photoHead}>
-                    <Text style={styles.photoHeadTitle}>店铺相册</Text>
-                    <Text style={styles.photoHeadMeta}>{sPhotos.length} 张</Text>
+                  <View style={styles.managerPanel}><View style={styles.photoHead}>
+                    <Text style={styles.photoHeadTitle}>照片与视频</Text>
+                    <Text style={styles.photoHeadMeta}>环境 · 菜品 · 活动 · {sPhotos.length} 张</Text>
                   </View>
                   <Pressable
                     onPress={() => pickAndUploadPhoto(s.id)}
@@ -533,10 +521,10 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         </Pressable>
                       ) : null}
                     </View>
-                  ))}</View> : null}
+                  ))}</View>
 
-                  {activeManager?.storeId === s.id && activeManager.section === "MENU" ? <View style={styles.managerPanel}><View style={styles.photoHead}>
-                    <Text style={styles.photoHeadTitle}>菜单与价格</Text>
+                  <View style={styles.managerPanel}><View style={styles.photoHead}>
+                    <Text style={styles.photoHeadTitle}>菜单 / 服务</Text>
                     <Text style={styles.photoHeadMeta}>{sProducts.length} 道菜 · 在售 {sAvailable.length}</Text>
                   </View>
                   <Pressable
@@ -622,10 +610,10 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       </View>
                     </View>
                   ) : null}
-                  </View> : null}
+                  </View>
 
-                  {activeManager?.storeId === s.id && activeManager.section === "SHOWCASE" ? <View style={styles.managerPanel}><View style={styles.photoHead}>
-                    <Text style={styles.photoHeadTitle}>当前展示</Text>
+                  <View style={styles.managerPanel}><View style={styles.photoHead}>
+                    <Text style={styles.photoHeadTitle}>活动 / Offer</Text>
                     <Text style={styles.photoHeadMeta}>{showcaseActivities?.length ?? 0} 个关联活动</Text>
                   </View>
                   {!showcaseActivities || showcaseActivities.length === 0 ? (
@@ -636,7 +624,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         <Text style={styles.photoAssetPath} numberOfLines={1}>{a.title}</Text>
                       </View>
                     </View>
-                  ))}</View> : null}
+                  ))}</View>
+                  <View style={styles.scopeNote}><Text style={styles.scopeNoteText}>线上店铺只负责对外展示。订单、客户、退款和经营分析分别进入对应经营模块，不在这里重复做后台。</Text></View>
                 </View>
               );
             })}
@@ -672,11 +661,6 @@ const styles = StyleSheet.create({
   funnelValue: { color: color.ink, fontSize: 13, fontWeight: "900" },
   funnelLabel: { color: color.muted, fontSize: 11, fontWeight: "600", marginTop: 3 },
   sourceBox: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, padding: 14 },
-  manageGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  manageCard: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 20, borderWidth: 1, minHeight: 132, padding: 14, width: "48.4%" },
-  manageIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 14, height: 44, justifyContent: "center", marginBottom: 9, width: 44 },
-  manageTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  manageMeta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },
   storeHead: { gap: 2 },
   storeName: { color: color.ink, fontSize: 14, fontWeight: "800" },
   storeMeta: { color: color.muted, fontSize: 11 },
@@ -722,4 +706,6 @@ const styles = StyleSheet.create({
   createBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 10, paddingVertical: 12 },
   createBtnBusy: { opacity: 0.6 },
   createBtnText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  scopeNote: { backgroundColor: "#F7F4F8", borderRadius: 13, marginTop: 8, padding: 11 },
+  scopeNoteText: { color: color.muted, fontSize: 11, lineHeight: 17 },
 });

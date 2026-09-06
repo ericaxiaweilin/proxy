@@ -425,9 +425,10 @@ echo "    STORE-PHOTO-001 (mobile): PASS (client + surface wire)"
 # MERCHANT-STOREFRONT-R21-001: real Business Workspace wiring must stay inside
 # the established R21 operating-store shell, not replace it with a raw admin list.
 if ! grep -q '访问 → 行动' apps/mobile/src/surfaces/merchant-storefront.tsx || \
-   ! grep -q '流量来源' apps/mobile/src/surfaces/merchant-storefront.tsx || \
-   ! grep -q '店铺管理' apps/mobile/src/surfaces/merchant-storefront.tsx || \
-   ! grep -q 'manageGrid' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '菜单 / 服务' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '照片与视频' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '活动 / Offer' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '线上店铺只负责对外展示' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q 'header={detailHead' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
   echo "  FAIL [MERCHANT-STOREFRONT-R21-001]: storefront lost the stable R21 operating shell" >&2
   exit 1
