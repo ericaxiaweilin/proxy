@@ -73,6 +73,23 @@ function sectionHead(title: string, hint?: string): React.JSX.Element {
   );
 }
 
+function Workbench({ items }: { items: ReadonlyArray<{ icon: ProxyIconName; title: string; description: string; onPress?: () => void }> }): React.JSX.Element {
+  return (
+    <View style={styles.workbench}>
+      {items.map((item) => (
+        <Pressable key={item.title} onPress={item.onPress} style={styles.workbenchItem}>
+          <View style={styles.workbenchIcon}><ProxyIcon color={color.ink} name={item.icon} size={20} /></View>
+          <View style={styles.rowCopy}>
+            <Text style={styles.workbenchTitle}>{item.title}</Text>
+            <Text style={styles.workbenchDescription}>{item.description}</Text>
+          </View>
+          {item.onPress ? <Text style={styles.chev}>›</Text> : null}
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 function summary({ title, meta, stats }: { title: string; meta: string; stats: Array<[string, string]> }): React.JSX.Element {
   return (
     <View style={styles.summary}>
@@ -189,9 +206,16 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "Creator 经营" })}
-          {sectionHead("Creator 经营", "SupplyClient.querySuppliers")}
+          {sectionHead("Creator 工作台", "功能不会因名单为空而消失")}
+          <Workbench items={[
+            { icon: "search", title: "发现 Creator", description: "按城市、能力、时间和合作类型筛选" },
+            { icon: "mail", title: "定向邀请", description: "从候选名单选择 Creator 后发起合作" },
+            { icon: "clock", title: "邀请与合作记录", description: "查看待回应、进行中和已完成合作", onPress: () => setPage("activity") },
+            { icon: "arrowUpRight", title: "Creator 成效", description: "查看订单与真实经营结果", onPress: () => setPage("sales") },
+          ]} />
+          {sectionHead("Creator 名单", `${creators.length} 位匹配`) }
           {creators.length === 0 ? (
-            <View style={styles.card}><Text style={styles.empty}>暂无 Creator — Supply 列表为空</Text></View>
+            <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂时没有匹配的 Creator</Text><Text style={styles.empty}>工作台仍可使用；待供给数据进入后，候选会显示在这里。</Text></View>
           ) : null}
           {creators.map((creator) => (
             <Pressable
@@ -244,9 +268,16 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "券 / 客户" })}
-          {sectionHead("经营人员", `member_directory · ${members.length} 人`)}
+          {sectionHead("客户与券工作台", "发放、核销、客户运营")}
+          <Workbench items={[
+            { icon: "plus", title: "创建券", description: "设置券类型、适用范围与有效期" },
+            { icon: "qrGrid", title: "扫码核销", description: "核验券状态并记录到店结果" },
+            { icon: "ticket", title: "券管理", description: "查看进行中、已领取、已核销和已过期" },
+            { icon: "user", title: "客户与经营人员", description: "查看成员、客户归因与权限", onPress: () => setPage("ops") },
+          ]} />
+          {sectionHead("经营人员", `${members.length} 人`)}
           {members.length === 0 ? (
-            <View style={styles.card}><Text style={styles.empty}>暂无成员 — 添加经营人员后这里显示</Text></View>
+            <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂无经营人员</Text><Text style={styles.empty}>添加成员后会显示角色、状态与加入时间。</Text></View>
           ) : null}
           {members.map((m) => (
             <View key={m.userId} style={styles.card}>
@@ -265,9 +296,16 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "活动" })}
-          {sectionHead("活动", "ActivityClient.listActivities")}
+          {sectionHead("活动工作台", "创建、招募、报名与复盘")}
+          <Workbench items={[
+            { icon: "plus", title: "创建活动", description: "配置时间、地点、名额、费用方向和报名条件" },
+            { icon: "target", title: "Creator 招募", description: "发布招募或从 Creator 名单定向邀请", onPress: () => setPage("creator") },
+            { icon: "user", title: "报名管理", description: "审核报名、候补与到场状态" },
+            { icon: "arrowUpRight", title: "活动复盘", description: "查看到店、内容和订单结果", onPress: () => setPage("sales") },
+          ]} />
+          {sectionHead("活动列表", `${activityItems.length} 个开放活动`) }
           {activityItems.length === 0 ? (
-            <View style={styles.card}><Text style={styles.empty}>暂无开放活动 — server 列表为空</Text></View>
+            <View style={styles.emptyCard}><Text style={styles.emptyTitle}>暂无开放活动</Text><Text style={styles.empty}>创建的活动会在这里进入报名、执行与复盘流程。</Text></View>
           ) : null}
           {activityItems.map((a) => (
             <Pressable
@@ -332,6 +370,13 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "销售中心" })}
+          {sectionHead("销售工作台", "订单、成交、客户与结算")}
+          <Workbench items={[
+            { icon: "storefront", title: "订单管理", description: "查看待处理、进行中、已完成与退款订单" },
+            { icon: "coin", title: "成交与结算", description: "按真实订单汇总成交额和应收应付" },
+            { icon: "user", title: "新客与复购", description: "查看客户来源和复购表现" },
+            { icon: "arrowUpRight", title: "经营报表", description: "按日查看经营趋势", onPress: () => setPage("proxy") },
+          ]} />
           {summary({
             meta: "近 30 天 · server 实际",
             stats: [
@@ -355,6 +400,13 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "运营中心" })}
+          {sectionHead("运营工作台", "成员、权限和日常任务")}
+          <Workbench items={[
+            { icon: "plus", title: "添加经营人员", description: "邀请成员并配置角色" },
+            { icon: "settings", title: "角色与权限", description: "管理 OWNER、管理员和运营权限" },
+            { icon: "clock", title: "运营任务", description: "跟进活动、订单与客户待办" },
+            { icon: "storefront", title: "店铺设置", description: "维护门店资料、图片和营业信息", onPress: () => setPage("store") },
+          ]} />
           {sectionHead("经营人员", `member_directory · ${members.length}`)}
           {members.length === 0 ? (
             <View style={styles.card}><Text style={styles.empty}>暂无成员</Text></View>
@@ -375,6 +427,13 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "Proxy 数据" })}
+          {sectionHead("Proxy 中心", "业务工作区与主体管理")}
+          <Workbench items={[
+            { icon: "infoCircle", title: "通知中心", description: "集中查看订单、活动和系统通知" },
+            { icon: "settings", title: "主体与权限", description: "管理商家主体、成员和访问权限", onPress: () => setPage("ops") },
+            { icon: "storeLines", title: "店铺工作区", description: "进入线上店铺管理", onPress: () => setPage("store") },
+            { icon: "arrowUpRight", title: "经营数据", description: "基于真实订单和客户数据汇总", onPress: () => setPage("sales") },
+          ]} />
           {sectionHead("业务健康度", "spend_daily · server 实际")}
           {spendDays.length === 0 ? (
             <View style={styles.card}><Text style={styles.empty}>暂无数据 — server 列表为空</Text></View>
@@ -481,6 +540,8 @@ const styles = StyleSheet.create({
   cardTitleWhite: { color: color.white, fontSize: 22, fontWeight: "900" },
   meta: { color: color.muted, fontSize: 12 },
   empty: { color: color.muted, fontSize: 12 },
+  emptyCard: { backgroundColor: "#F6F2F9", borderRadius: 16, gap: 4, marginVertical: 6, padding: 16 },
+  emptyTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   subPageBack: { paddingHorizontal: 8, paddingVertical: 6 },
   subPageBackText: { color: color.ink, fontSize: 14, fontWeight: "800" },
   summary: { backgroundColor: "#1F1B33", borderRadius: 16, gap: 4, marginTop: 8, padding: 14 },
@@ -507,6 +568,11 @@ const styles = StyleSheet.create({
   proxyWide: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 10, minHeight: 78, padding: 11, ...shadows.card },
   proxyLogo: { borderRadius: 16, height: 56, width: 56 },
   chev: { color: "#756B80", fontSize: 24 },
+  workbench: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, overflow: "hidden", ...shadows.card },
+  workbenchItem: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 10, minHeight: 68, paddingHorizontal: 12, paddingVertical: 10 },
+  workbenchIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 12, height: 42, justifyContent: "center", width: 42 },
+  workbenchTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  workbenchDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   subtleButton: { marginTop: 16, paddingVertical: 10 },
   subtleButtonText: { color: color.muted, fontSize: 12, textAlign: "center" },
   subtleButtonDanger: { marginTop: 4, paddingVertical: 10 },

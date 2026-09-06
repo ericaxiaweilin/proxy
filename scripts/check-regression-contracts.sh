@@ -434,11 +434,17 @@ echo "    MERCHANT-R21-001: PASS (hardcoded merchant-me-r21.tsx replaced with th
 if ! grep -q 'OTTER_LOGO' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q 'function IconBox' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
    ! grep -q '<ProxyIcon' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
-   ! grep -q 'style={styles.moduleGrid}' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+   ! grep -q 'style={styles.moduleGrid}' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q 'function Workbench' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q 'Creator 工作台' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q '客户与券工作台' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q '活动工作台' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q '销售工作台' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx || \
+   ! grep -q '运营工作台' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
   echo "  FAIL [MERCHANT-ME-VISUAL-001]: merchant Me lost its branded logo/icon module shell" >&2
   exit 1
 fi
-echo "    MERCHANT-ME-VISUAL-001: PASS (merchant Me keeps branded logo/icon modules over server-backed data)"
+echo "    MERCHANT-ME-VISUAL-001: PASS (merchant Me keeps branded functional workbenches over server-backed data)"
 
 # BIZ-HOME-WIRE-001: 商家 Home tab 之前是 242 行 hardcoded mock
 # (Bonsaidon / 今天要推进什么? / Rooftop Photo Afternoon /
