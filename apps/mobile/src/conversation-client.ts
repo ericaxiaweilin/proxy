@@ -103,6 +103,10 @@ export class ConversationClient {
     const session = await this.requireSession();
     return this.sendCommand(session, "MarkMessageRead", { type: "Message", id: messageId }, { messageId });
   }
+  public async deleteMessage(messageId: string): Promise<Record<string, unknown>> {
+    const session = await this.requireSession();
+    return this.sendCommand(session, "DeleteMessage", { type: "Message", id: messageId }, { messageId });
+  }
 
   public async recordScreenshot(messageId: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();

@@ -474,7 +474,7 @@ func (s *Service) SetMediaStoreDir(dir string) {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "RecordScreenshot", "ForwardMessage",
+	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "DeleteMessage", "RecordScreenshot", "ForwardMessage",
 		"CreateNeedDraft", "ConfirmNeedDraft":
 		return true
 	default:
@@ -500,6 +500,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listMessages(ctx, e)
 	case "MarkMessageRead":
 		return s.markMessageRead(ctx, e)
+	case "DeleteMessage":
+		return s.deleteMessage(ctx, e)
 	case "RecordScreenshot":
 		return s.recordScreenshot(ctx, e)
 	case "ForwardMessage":
@@ -1116,6 +1118,9 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 	now := s.clock.Now().UTC()
 	visible := make([]Message, 0, len(messages))
 	for _, m := range messages {
+		if m.DeletedAt != nil {
+			continue
+		}
 		if m.SenderID == e.Actor.ID {
 			visible = append(visible, m)
 			continue
@@ -1132,6 +1137,30 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 		"messages": visible,
 		"actorId":  e.Actor.ID,
 	}, nil)
+}
+
+func (s *Service) deleteMessage(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		MessageID string `json:"messageId"`
+	}
+	if !decode(e.Payload, &p) || p.MessageID == "" {
+		return command.Rejected(e, "INVALID_MESSAGE_DELETE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_delete", nil)
+	}
+	msg, err := s.repository.GetMessage(ctx, p.MessageID)
+	if err != nil {
+		return command.Rejected(e, "MESSAGE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.message_not_found", nil)
+	}
+	if msg.SenderID != e.Actor.ID {
+		return command.Rejected(e, "MESSAGE_DELETE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.delete_not_allowed", nil)
+	}
+	now := s.clock.Now().UTC()
+	msg.DeletedAt = &now
+	msg.Body = ""
+	msg.MediaRef = ""
+	if err := s.repository.UpdateMessage(ctx, msg); err != nil {
+		return command.Rejected(e, "MESSAGE_DELETE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.delete_failed", nil)
+	}
+	return acceptedWithPayload(e, "Message", msg.ID, 1, "DELETED", map[string]any{"messageId": msg.ID}, nil)
 }
 
 // ---------- MarkMessageRead ----------

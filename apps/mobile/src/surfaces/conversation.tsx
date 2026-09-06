@@ -340,6 +340,10 @@ export function ConversationSurface({
       setSending(false);
     }
   }
+  async function deleteOwnMessage(messageId: string): Promise<void> {
+    try { await conversationClient.deleteMessage(messageId); setMessages((current) => current.filter((message) => message.id !== messageId)); }
+    catch { setError("删除失败，请重试"); }
+  }
 
   return (
     <SwipeBackShell onExit={onBack}>
@@ -393,12 +397,12 @@ export function ConversationSurface({
               <Text style={[styles.messageTime, msg.isOwn && styles.messageTimeOwn]}>{msg.time}</Text>
             </View>
           ) : (
-            <View key={msg.id} style={[styles.messageBubble, msg.isOwn ? styles.messageOwn : msg.isAI ? styles.messageAI : styles.messageOther]}>
+            <Pressable accessibilityHint={msg.isOwn ? "长按删除消息" : undefined} disabled={!msg.isOwn} key={msg.id} onLongPress={() => void deleteOwnMessage(msg.id)} style={[styles.messageBubble, msg.isOwn ? styles.messageOwn : msg.isAI ? styles.messageAI : styles.messageOther]}>
               {!msg.isOwn && <Text style={styles.messageSender}>{msg.sender}</Text>}
               {msg.imageUri ? <Image accessibilityLabel="聊天图片" resizeMode="cover" source={{ uri:msg.imageUri }} style={styles.messageImage} /> : null}
               {msg.body.trim() ? <Text style={[styles.messageBody, msg.isOwn && styles.messageBodyOwn]}>{msg.body}</Text> : null}
               <Text style={[styles.messageTime, msg.isOwn && styles.messageTimeOwn]}>{msg.time}</Text>
-            </View>
+            </Pressable>
           )
         )}
         {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
