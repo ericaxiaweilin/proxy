@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(fileURLToPath(new URL("./surfaces/requester-home.tsx", import.meta.url)), "utf8");
+const profile = readFileSync(fileURLToPath(new URL("./surfaces/ai-account-profile.tsx", import.meta.url)), "utf8");
+const shell = readFileSync(fileURLToPath(new URL("./shell/app-shell.tsx", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("keeps the labeled human section before the labeled AI section", () => {
@@ -21,5 +23,11 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("onPress={() => onOpenAIProfile?.(account)}");
     expect(source).not.toContain("toggleAIFollow(account.accountId)");
     expect(source).not.toContain("onMessageAI?.(account)");
+  });
+
+  it("keeps relationship and messaging actions inside the profile", () => {
+    expect(profile).toContain("toggleFollow()");
+    expect(profile).toContain("onMessage(account)");
+    expect(shell).toContain('setPageOverride("MSG_CHAT")');
   });
 });

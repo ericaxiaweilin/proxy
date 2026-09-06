@@ -484,8 +484,9 @@ export function AppShell({
               onBack={() => setOpenAIProfile(undefined)}
               onMessage={(account, initialDraft) => {
                 setOpenAIProfile(undefined);
-                setTab("MESSAGES");
                 setMessageChat({ author: account.displayName, aiAccount: account, ...(initialDraft ? { initialDraft } : {}) });
+                setPageOverride("MSG_CHAT");
+                setTab("MESSAGES");
               }}
             />
           ) : workspaceTarget ? (
@@ -532,7 +533,11 @@ export function AppShell({
               engagement={engagement}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               onOpenAIProfile={setOpenAIProfile}
-              onMessageAI={(account) => { setTab("MESSAGES"); setMessageChat({ author: account.displayName, aiAccount: account }); }}
+              onMessageAI={(account) => {
+                setMessageChat({ author: account.displayName, aiAccount: account });
+                setPageOverride("MSG_CHAT");
+                setTab("MESSAGES");
+              }}
               onCreateScene={setSceneComposerTool}
               onOpenSceneMap={() => setRealitySceneOpen(true)}
               bottomNavVisible={isNavVisible}
