@@ -20,6 +20,7 @@ import type { SupplyClient, SupplierCandidate } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
 import type { ActivityClient } from "../activity-client";
+import type { Activity } from "@proxy/contracts";
 
 type MerchantPage =
   | "root"
@@ -37,7 +38,7 @@ type MerchantPage =
 type Account = { id: string; name: string; status: string };
 type MemberDirectory = { businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string };
 type SpendDaily = { businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number };
-type ActivityItem = { activityId: string; title: string };
+type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | "priceLabel" | "venueName" | "joined" | "capacity" | "status">;
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -183,9 +184,9 @@ export function MerchantMeR21Replacement({
     (async () => {
       if (!activities) return;
       try {
-        const list = await activities.listActivities();
+        const { created: list } = await activities.listMyActivities();
         if (!cancelled) {
-          const items = list.map((entry) => ({ activityId: entry.activityId, title: entry.title })).slice(0, 25);
+          const items = list.map((entry) => ({ activityId: entry.activityId, title: entry.title, time: entry.time, people: entry.people, priceLabel: entry.priceLabel, venueName: entry.venueName, joined: entry.joined, capacity: entry.capacity, status: entry.status })).slice(0, 25);
           setActivityItems(items);
           if (items[0]) setSelectedActivity(items[0]);
         }
@@ -298,8 +299,9 @@ export function MerchantMeR21Replacement({
               onPress={() => { setSelectedActivity(a); setPage("activityDetail"); }}
               style={styles.activityCard}
             >
-              <View style={styles.activityTop}><View style={styles.rowCopy}><Text style={styles.objectTitle}>{a.title}</Text><Text style={styles.meta}>{a.activityId}</Text></View><IconBox icon="spark" /></View>
-              <View style={styles.chips}><View style={styles.chip}><Text style={styles.chipText}>查看报名与执行</Text></View></View>
+              <View style={styles.activityTop}><View style={styles.rowCopy}><Text style={styles.objectTitle}>{a.title}</Text><Text style={styles.meta}>{a.time} · {a.venueName}</Text></View><IconBox icon="spark" /></View>
+              {a.capacity ? <View style={styles.progress}><View style={[styles.progressFill, { width: `${Math.min(100, (a.joined / a.capacity) * 100)}%` }]} /></View> : null}
+              <View style={styles.chips}><View style={styles.chip}><Text style={styles.chipText}>报名 {a.joined}{a.capacity ? `/${a.capacity}` : ""}</Text></View><View style={styles.chip}><Text style={styles.chipText}>{a.priceLabel}</Text></View><View style={styles.chip}><Text style={styles.chipText}>{a.status ?? "已发布"}</Text></View></View>
             </Pressable>
           ))}
         </ScrollView>
@@ -313,12 +315,12 @@ export function MerchantMeR21Replacement({
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("activity"), title: selectedActivity.title })}
           {summary({
-            meta: `活动 ${selectedActivity.activityId}`,
+            meta: `${selectedActivity.time} · ${selectedActivity.venueName}`,
             stats: [
-              ["—", "发起人"],
-              ["—", "开始"],
-              ["—", "结束"],
-              ["—", "参与"],
+              [selectedActivity.people || "—", "人数"],
+              [selectedActivity.joined.toString(), "已报名"],
+              [selectedActivity.capacity?.toString() ?? "—", "容量"],
+              [selectedActivity.priceLabel, "费用"],
             ],
             title: selectedActivity.title,
           })}
@@ -561,6 +563,8 @@ const styles = StyleSheet.create({
   row: { alignItems: "center", borderTopColor: color.line, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 10, minHeight: 66 },
   activityCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginTop: 10, padding: 14 },
   activityTop: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  progress: { backgroundColor: "#F2EDF5", borderColor: color.line, borderRadius: 99, borderWidth: 1, height: 9, marginTop: 10, overflow: "hidden" },
+  progressFill: { backgroundColor: color.magenta, borderRadius: 99, height: 9 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 },
   chip: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 5 },
   chipText: { color: "#62596B", fontSize: 11, fontWeight: "700" },
