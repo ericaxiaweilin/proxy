@@ -16,6 +16,16 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain(">AI 生成<");
   });
 
+  it("keeps human discovery as circle-and-name nodes with details revealed only after selection", () => {
+    expect(source).toContain('setSelectedPersonId((current) => current === p.id ? undefined : p.id)');
+    expect(source).toContain('testID="human-node-reveal"');
+    expect(source).toContain("可用状态");
+    expect(source).toContain("Scene Fit");
+    expect(source).toContain("匹配理由");
+    expect(source).not.toContain("styles.recCard");
+    expect(source).not.toContain("styles.storyHint");
+  });
+
   it("keeps AI discovery as plain circular profile links", () => {
     expect(source).toMatch(/aiCard:\s*\{\s*alignItems:\s*"center",\s*width:\s*104\s*\}/);
     expect(source).toMatch(/aiAvatar:\s*\{[^}]*borderRadius:\s*999[^}]*height:\s*88[^}]*width:\s*88/);

@@ -131,6 +131,7 @@ export function RequesterHome({
   // R15.34: 筛选 sheet 开 / 关 + 已选 chip。空数组 = "全部"。
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | undefined>(undefined);
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
 
   useEffect(() => {
@@ -156,6 +157,7 @@ export function RequesterHome({
     if (activeFilters.includes("near") && p.distanceM >= 1000) return false;
     return true;
   });
+  const selectedPerson = filteredPeople.find((person) => person.id === selectedPersonId);
   // R15.22 fix: 市场脉动计数状态.
   //   - opportunityCount: server 端 ListMarketOpportunities 返的 list 长度
   //   - activityCount:    server 端 ListActivities 返的 list 长度
@@ -324,6 +326,7 @@ export function RequesterHome({
           onChange={(id) => {
             setRecommendMode(id);
             setActiveFilters([]);
+            setSelectedPersonId(undefined);
           }}
           marginBottom={4}
           testPrefix="推荐人模式"
@@ -344,7 +347,7 @@ export function RequesterHome({
         </Pressable>
       </View>
 
-      {/* stories — 圆形 avatar 横滑 */}
+      {/* R34.5 frozen rule: the discovery node itself is only circle avatar + name. */}
       {/* R15.34.2: 包 HorizontalSwipeRail 隔离 iOS 系统 tab 切换手势 */}
       <HorizontalSwipeRail
         style={styles.stories}
@@ -353,7 +356,7 @@ export function RequesterHome({
         {filteredPeople.map((p) => (
           <Pressable
             key={`story:${p.id}`}
-            onPress={() => onChat?.(`找 ${p.name} 同 ${recommendFeed.sceneTag}`, undefined, undefined)}
+            onPress={() => setSelectedPersonId((current) => current === p.id ? undefined : p.id)}
             style={styles.story}
             accessibilityLabel={`推荐人 ${p.name}，${p.online ? "在线" : "离线"}`}
           >
@@ -364,46 +367,22 @@ export function RequesterHome({
               {p.online ? <View style={styles.onlineDot} /> : null}
             </View>
             <Text style={styles.storyName} numberOfLines={1}>{p.name}</Text>
-            <Text style={styles.storyHint} numberOfLines={1}>
-              {p.mutualFriends > 0 ? `${p.mutualFriends} 位共同好友` : recommendFeed.sceneTag}
-            </Text>
           </Pressable>
         ))}
       </HorizontalSwipeRail>
 
-      {/* cards — portrait card 横滑 */}
-      {/* R15.34.2: 包 HorizontalSwipeRail 隔离 iOS 系统 tab 切换手势 */}
-      <HorizontalSwipeRail
-        style={styles.cards}
-        contentContainerStyle={styles.cardsContent}
-      >
-        {filteredPeople.map((p, i) => (
-          <Pressable
-            key={`card:${p.id}`}
-            onPress={() => onChat?.(`想和 ${p.name} 聊聊 ${recommendFeed.sceneTag}`, undefined, undefined)}
-            style={[styles.recCard, i % 3 === 1 ? styles.recCardAlt1 : i % 3 === 2 ? styles.recCardAlt2 : null]}
-            accessibilityLabel={`推荐人名片 ${p.name}，距离 ${p.distanceM} 米`}
-          >
-            <View style={styles.recCardPortrait}>
-              <Text style={styles.recCardInitials}>{p.initials}</Text>
-            </View>
-            <View style={styles.recCardDist}>
-              <Text style={styles.recCardDistText}>⌖ {p.distanceM} m</Text>
-            </View>
-            <View style={styles.recCardInfo}>
-              <Text style={styles.recCardName} numberOfLines={1}>{p.name}</Text>
-              <View style={styles.recCardTags}>
-                <View style={styles.recCardTag}>
-                  <Text style={styles.recCardTagText}>{recommendFeed.sceneTag}</Text>
-                </View>
-                <View style={styles.recCardTag}>
-                  <Text style={styles.recCardTagText}>{p.online ? "附近" : "最近活跃"}</Text>
-                </View>
-              </View>
-            </View>
-          </Pressable>
-        ))}
-      </HorizontalSwipeRail>
+      {selectedPerson ? (
+        <View style={styles.personReveal} testID="human-node-reveal">
+          <View style={styles.personRevealHead}>
+            <Text style={styles.personRevealName}>{selectedPerson.name}</Text>
+            <Text style={styles.personRevealDistance}>{selectedPerson.distanceM} m</Text>
+          </View>
+          <Text style={styles.personRevealLine}><Text style={styles.personRevealLabel}>可用状态  </Text>{selectedPerson.online ? "当前可接受邀约" : "当前不在线·可留言"}</Text>
+          <Text style={styles.personRevealLine}><Text style={styles.personRevealLabel}>意图  </Text>{selectedPerson.bio}</Text>
+          <Text style={styles.personRevealLine}><Text style={styles.personRevealLabel}>Scene Fit  </Text>{recommendFeed.sceneTag}</Text>
+          <Text style={styles.personRevealReason}>匹配理由·{selectedPerson.distanceM < 1000 ? "现实距离可达" : "在当前城市范围"}{selectedPerson.mutualFriends > 0 ? `·${selectedPerson.mutualFriends} 位共同好友` : ""}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.loadMoreRow}>
         <Text style={styles.loadMoreText}>
@@ -745,30 +724,13 @@ const styles = StyleSheet.create({
   avatarInitials: { color: color.ink, fontSize: 18, fontWeight: "800" },
   onlineDot: { backgroundColor: color.lime, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: 2, height: 11, position: "absolute", right: 2, width: 11 },
   storyName: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 5, textAlign: "center" },
-  storyHint: { color: color.muted, fontSize: 11, marginTop: 1, textAlign: "center" },
-
-  // R15.34: cards 横滑
-  cards: { marginHorizontal: -16, marginTop: 8 },
-  cardsContent: { gap: 10, paddingHorizontal: 16, paddingBottom: 6 },
-  recCard: {
-    backgroundColor: "#E4DED7",
-    borderRadius: 20,
-    height: 220,
-    minWidth: 165,
-    overflow: "hidden",
-    position: "relative"
-  },
-  recCardAlt1: { backgroundColor: "#9DA9AF" },
-  recCardAlt2: { backgroundColor: "#B99D88" },
-  recCardPortrait: { alignItems: "center", flex: 1, justifyContent: "center" },
-  recCardInitials: { color: "rgba(255,255,255,0.92)", fontSize: 44, fontWeight: "900", textShadowColor: "rgba(0,0,0,0.12)", textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 20 },
-  recCardDist: { backgroundColor: "rgba(255,255,255,0.88)", borderRadius: 11, left: 10, paddingHorizontal: 8, paddingVertical: 6, position: "absolute", top: 10 },
-  recCardDistText: { color: color.ink, fontSize: 11, fontWeight: "600" },
-  recCardInfo: { bottom: 12, left: 12, paddingTop: 24, position: "absolute", right: 10 },
-  recCardName: { color: color.white, fontSize: 17, fontWeight: "800" },
-  recCardTags: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 6 },
-  recCardTag: { backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 8, paddingHorizontal: 6, paddingVertical: 4 },
-  recCardTagText: { color: color.white, fontSize: 11, fontWeight: "600" },
+  personReveal: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 7, marginTop: 8, padding: 13, ...shadows.card },
+  personRevealHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  personRevealName: { color: color.ink, fontSize: 16, fontWeight: "900" },
+  personRevealDistance: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  personRevealLine: { color: color.ink, fontSize: 12, lineHeight: 18 },
+  personRevealLabel: { color: color.muted, fontWeight: "700" },
+  personRevealReason: { backgroundColor: "#F1FFD0", borderRadius: 10, color: "#4D6200", fontSize: 11, fontWeight: "700", lineHeight: 16, marginTop: 2, paddingHorizontal: 9, paddingVertical: 7 },
 
   loadMoreRow: { alignItems: "center", marginTop: 4 },
   loadMoreText: { color: color.ink, fontSize: 12, fontWeight: "600" },
