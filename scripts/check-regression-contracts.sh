@@ -446,6 +446,22 @@ if ! grep -q 'business: BusinessClient\|business?: BusinessClient' apps/mobile/s
 fi
 echo "    BIZ-HOME-WIRE-001: PASS (Home tab wired to real business + activities clients)"
 
+require_test "R35-OPERATING-HOME-001" "./internal/business" \
+  "TestMerchantOperatingHomeDoesNotInventDemandOrForecast" \
+  "apps/api-go/internal/business/service_test.go" || exit $?
+if ! grep -q 'getMerchantOperatingHome' apps/mobile/src/surfaces/business-home.tsx || \
+   ! grep -q 'merchant-demand-supply' apps/mobile/src/surfaces/business-home.tsx || \
+   ! grep -q 'merchant-best-next-decision' apps/mobile/src/surfaces/business-home.tsx; then
+  echo "  FAIL [R35-OPERATING-HOME-001]: merchant Home lost server truth projection" >&2
+  exit 1
+fi
+if ! grep -q 'supply={supply}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [R35-OPERATING-HOME-001]: merchant Home lost eligible Creator supply" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/business-client.test.ts
+echo "    R35-OPERATING-HOME-001: PASS (real outcome; unknown demand/forecast; conservative NO_ACTION)"
+
 # PROFILE-001: 编辑主页 之前只写 local SecureStore, 不发 server.
 # UpdateProfile / GetProfile 必须存在 + actor-scoped + 拒外部 URL.
 require_test "PROFILE-001" "./internal/identity" \

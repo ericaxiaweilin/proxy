@@ -6,7 +6,7 @@ interactive terminal agents.
 
 ## Integration workspace
 
-- `/Users/thanhhuyennguyen/Desktop/kake` is the integration workspace.
+- `/Users/thanhhuyennguyen/work/kake` is the integration workspace.
 - Only the designated commander may edit or commit in this workspace.
 - All other agents are read-only here. Do not run formatters, generators,
   package installers, commits, rebases, or file edits in this workspace.
