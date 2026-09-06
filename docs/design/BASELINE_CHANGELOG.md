@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 46 — 2026-09-06
+
+- Froze the R35 surface boundary: demand/supply, forecast and Best Next
+  Decision belong only to the BUSINESS Home tab. Merchant Me retains its
+  established account, store and operating-management information architecture.
+  `R35-HOME-BOUNDARY-001` prevents future cross-surface leakage.
+
 ## Revision 45 — 2026-09-06
 
 - R35 signal ingestion now persists privacy-safe aggregate demand and merchant

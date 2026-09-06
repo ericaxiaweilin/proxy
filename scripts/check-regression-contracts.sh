@@ -471,6 +471,21 @@ fi
 pnpm --dir apps/mobile exec vitest run src/business-client.test.ts
 echo "    R35-OPERATING-HOME-001: PASS (real outcome; unknown demand/forecast; conservative NO_ACTION)"
 
+# R35-HOME-BOUNDARY-001: Operating Home belongs only to the BUSINESS Home tab.
+# Merchant "我的" keeps its established account/store/operations module.
+if grep -qE 'merchant-demand-supply|merchant-best-next-decision|merchant-future-demand|GetMerchantOperatingHome' \
+  apps/mobile/src/surfaces/me.tsx apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [R35-HOME-BOUNDARY-001]: R35 Operating Home leaked into merchant Me" >&2
+  exit 1
+fi
+if ! grep -q 'tab === "HOME"' apps/mobile/src/shell/app-shell.tsx || \
+   ! grep -q '<BusinessHome' apps/mobile/src/shell/app-shell.tsx || \
+   ! grep -q '<MeSurface' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [R35-HOME-BOUNDARY-001]: Home/Me routing boundary is missing" >&2
+  exit 1
+fi
+echo "    R35-HOME-BOUNDARY-001: PASS (Operating Home stays out of merchant Me)"
+
 # PROFILE-001: 编辑主页 之前只写 local SecureStore, 不发 server.
 # UpdateProfile / GetProfile 必须存在 + actor-scoped + 拒外部 URL.
 require_test "PROFILE-001" "./internal/identity" \

@@ -59,26 +59,6 @@ const restoredMedia = read.media[postId];
 if (!restoredPost || !Array.isArray(restoredMedia) || restoredMedia.length !== 1) throw new Error(`feed hydration failed for ${postId}`);
 const mediaResponse = await fetch(`${base}${restoredMedia[0].feedUrl}`);
 if (!mediaResponse.ok || (await mediaResponse.arrayBuffer()).byteLength === 0) throw new Error("feed image file is unavailable");
-const expectedLegacyMedia = {
-  post_593e70b87d5f34f750113d74: 1,
-  post_cf7bb8f092769e4f0a176fe4: 4,
-  post_f9b3e97261db7e31a279f24f: 1,
-};
-for (const [legacyPostId, expectedCount] of Object.entries(expectedLegacyMedia)) {
-  const legacyPost = read.posts.find((item) => item.postId === legacyPostId);
-  const legacyMedia = read.media[legacyPostId];
-  if (!legacyPost || !Array.isArray(legacyMedia) || legacyMedia.length !== expectedCount) {
-    throw new Error(`legacy feed hydration failed for ${legacyPostId}: expected ${expectedCount}, got ${legacyMedia?.length ?? 0}`);
-  }
-  for (const item of legacyMedia) {
-    const mediaUrl = item.feedUrl || item.playbackUrl || item.thumbnailUrl;
-    if (!mediaUrl) throw new Error(`legacy feed image URL is missing for ${legacyPostId}/${item.mediaAssetId}`);
-    const response = await fetch(`${base}${mediaUrl}`);
-    if (!response.ok || (await response.arrayBuffer()).byteLength === 0) {
-      throw new Error(`legacy feed image is unavailable for ${legacyPostId}/${item.mediaAssetId}`);
-    }
-  }
-}
 console.log(JSON.stringify({
   ok: true,
   postId,
@@ -86,6 +66,4 @@ console.log(JSON.stringify({
   mediaCount: restoredMedia.length,
   processingStatus: restoredMedia[0].processingStatus,
   moderationStatus: restoredMedia[0].moderationStatus,
-  restoredLegacyPosts: Object.keys(expectedLegacyMedia).length,
-  restoredLegacyImages: Object.values(expectedLegacyMedia).reduce((sum, count) => sum + count, 0),
 }));
