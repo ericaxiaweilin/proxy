@@ -723,5 +723,7 @@ require_test "SCENE-DYNAMIC-CONTEXT-001" "./internal/api" \
   "TestR27SceneReadSurface" \
   "apps/api-go/internal/api/reality_scene_test.go" || exit $?
 echo "    SCENE-DYNAMIC-CONTEXT-001: PASS (variant switches human/menu/live context; action truth boundaries pinned)"
+pnpm --dir apps/mobile exec vitest run src/surfaces/dynamic-scene-actions.test.ts || exit $?
+echo "    SCENE-ACTION-MATERIALIZATION-001: PASS (invite/opportunity/activity use independent domain commands)"
 
 echo "  regression contracts: OK"

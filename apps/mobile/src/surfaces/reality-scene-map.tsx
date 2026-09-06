@@ -31,6 +31,7 @@ type RealityScene = {
   recommendationScore?: number;
 };
 
+type DynamicSceneAction = { type: "DIRECT_INVITE" | "OPEN_TASK" | "PUBLIC_ACTIVITY"; label: string; state: string; moneyMeaning: string };
 type SceneDetail = {
   sceneId: string;
   venueId: string;
@@ -40,7 +41,7 @@ type SceneDetail = {
   liveState: { state: string; label: string; bestWindow: string; capacityPct: number; freshUntil: string };
   menu: Array<{ id: string; name: string; priceLabel: string; sceneFit: string; available: boolean }>;
   humans: Array<{ id: string; name: string; role: string; availability: string; fitReason: string; sceneFit: number; isAI: boolean }>;
-  actions: Array<{ type: "DIRECT_INVITE" | "OPEN_TASK" | "PUBLIC_ACTIVITY"; label: string; state: string; moneyMeaning: string }>;
+  actions: DynamicSceneAction[];
   truthBoundary: string;
 };
 
@@ -61,6 +62,10 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
   const [detail, setDetail] = useState<SceneDetail>();
   const [detailError, setDetailError] = useState<string>();
   const [actionExplanation, setActionExplanation] = useState<string>();
+  const [selectedAction, setSelectedAction] = useState<DynamicSceneAction>();
+  const [selectedHumanId, setSelectedHumanId] = useState<string>();
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionResult, setActionResult] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
@@ -102,10 +107,10 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
   useEffect(() => {
     let cancelled = false;
     if (!selectedId) { setDetail(undefined); setDetailError(undefined); return; }
-    setDetail(undefined); setDetailError(undefined); setActionExplanation(undefined);
+    setDetail(undefined); setDetailError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined);
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}`, { headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
-      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); if (!cancelled) setDetail(value); })
+      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); if (!cancelled) { setDetail(value); setSelectedHumanId(value.humans[0]?.id); } })
       .catch(() => { if (!cancelled) setDetailError("动态场景暂时不可用，请稍后重试"); });
     return () => { cancelled = true; };
   }, [apiBaseUrl, selectedId]);
@@ -115,8 +120,34 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
     setDetailError(undefined); setActionExplanation(undefined);
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}?variant=${encodeURIComponent(variantId)}`, { headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
-      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); })
+      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); setSelectedHumanId(value.humans[0]?.id); })
       .catch(() => setDetailError("场景切换失败，请重试"));
+  };
+
+  const commitSceneAction = async (): Promise<void> => {
+    if (!detail || !selected || !selectedAction || actionBusy) return;
+    if (!secureSessionStore || !session) { setActionResult("请先登录，再确认现实行动"); return; }
+    setActionBusy(true); setActionResult(undefined);
+    try {
+      const variant = detail.variants.find((item) => item.id === detail.selectedVariant) ?? detail.variants[0]!;
+      if (selectedAction.type === "DIRECT_INVITE") {
+        const human = detail.humans.find((item) => item.id === selectedHumanId);
+        if (!human) throw new Error("请先选择要邀请的真人");
+        const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        const created = await sendSceneCommand(authClient, session, "CreateScene", "new", { tool: "DIRECT_INVITE", intent: `${variant.name} · ${variant.bestFor}`, participation: "双人见面 · 需双方确认", cost: "各自消费", startsAt });
+        const sceneId = typeof created.aggregateId === "string" ? created.aggregateId : undefined;
+        if (!sceneId) throw new Error("场景创建失败");
+        const invitation = await sendSceneCommand(authClient, session, "CreateInvitation", sceneId, { sceneId, inviteeUserId: human.id, card: { what: variant.bestFor, where: detail.venueName, when: `${variant.window}（双方可在聊天中修改）`, who: human.name, hostLabel: "你" } });
+        setActionResult(`邀请已发送给 ${human.name} · 状态 ${String(invitation.aggregateState ?? "PENDING")} · 尚未生成订单`);
+      } else if (selectedAction.type === "OPEN_TASK") {
+        const result = await sendSceneCommand(authClient, session, "PublishMarketOpportunity", "new", { title: `${variant.name} · ${variant.bestFor}`, shortTitle: variant.name, theme: variant.facets.join(" / "), date: "近期", time: variant.window, location: detail.venueName, price: "150K", moneyFlow: "EARN", skills: "Scene fit / UGC", lens: ["NOW", "NEARBY"] });
+        setActionResult(`机会 ${String(result.aggregateId ?? "")} 已发布 · 150K 是完成者可获得的报酬 · 等待候选申请`);
+      } else {
+        const result = await sendSceneCommand(authClient, session, "PublishActivity", "new", { title: `${variant.name} · ${variant.bestFor}`, time: variant.window, capacity: 8, venueName: detail.venueName, venueIcon: "coffee", venueType: "CAFE", realitySceneId: detail.sceneId, desc: `${variant.facets.join(" · ")}。报名不等于到场。`, consumptionTerm: "SPLIT" });
+        setActionResult(`活动 ${String(result.aggregateId ?? "")} 已发布 · 免费报名、到店消费各自承担 · 已进入“我的活动”`);
+      }
+    } catch (error) { setActionResult(error instanceof Error ? error.message : "操作失败，请重试"); }
+    finally { setActionBusy(false); }
   };
 
   const selected = scenes.find((scene) => scene.id === selectedId);
@@ -229,15 +260,15 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
             </ScrollView>
             <Text style={styles.sectionTitle}>适合的真人 Creator</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
-              {detail.humans.map((human) => <View key={human.id} style={styles.humanCard}><View style={styles.humanAvatar}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1)}</Text></View><Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{human.availability}</Text></View>)}
+              {detail.humans.map((human) => <Pressable key={human.id} onPress={() => setSelectedHumanId(human.id)} style={[styles.humanCard, selectedHumanId === human.id && styles.humanCardSelected]}><View style={styles.humanAvatar}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1)}</Text></View><Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
             </ScrollView>
             <Text style={styles.sectionTitle}>Scene Menu</Text>
             <View style={styles.dataCard}>{detail.menu.map((item, index) => <DataRow key={item.id} label={item.name} value={`${item.priceLabel} · ${item.sceneFit}`} last={index === detail.menu.length - 1} />)}</View>
             <Text style={styles.sectionTitle}>怎么组织这次现实行动</Text>
             <View style={styles.executionCard}>
-              {detail.actions.map((action) => <Pressable key={action.type} onPress={() => setActionExplanation(`${action.label}：${action.moneyMeaning}`)} style={styles.executionAction}><Text style={styles.executionLabel}>{action.label}</Text><Text style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
+              {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.executionAction, selectedAction?.type === action.type && styles.executionActionSelected]}><Text style={styles.executionLabel}>{action.label}</Text><Text style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
             </View>
-            {actionExplanation ? <View style={styles.boundaryCard}><Text style={styles.boundaryStrong}>{actionExplanation}</Text><Text style={styles.boundaryText}>{detail.truthBoundary}</Text></View> : null}
+            {actionExplanation ? <View style={styles.boundaryCard}><Text style={styles.boundaryStrong}>{actionExplanation}</Text><Text style={styles.boundaryText}>{detail.truthBoundary}</Text>{selectedAction ? <Pressable disabled={actionBusy} onPress={() => { void commitSceneAction(); }} style={styles.confirmAction}><Text style={styles.confirmActionText}>{actionBusy ? "处理中…" : `确认${selectedAction.label}`}</Text></Pressable> : null}{actionResult ? <Text style={styles.actionResult}>{actionResult}</Text> : null}</View> : null}
           </>
         ) : detailError ? <Text style={styles.nearbyError}>{detailError}</Text> : <Text style={styles.loadingDetail}>正在加载当前时段的人、菜单与活动方式…</Text>}
         <Text style={styles.sectionTitle}>场景数据</Text>
@@ -316,10 +347,14 @@ async function sendSceneCommand(authClient: SessionAuthClient, session: Authenti
     correlationId: `scene_corr_${nonce}`, requestedAt: new Date().toISOString(), payload
   }});
   const result = parseCommandResult(await response.json());
-  if (!result || response.status < 200 || response.status >= 300 || result.outcome === "REJECTED" || !result.operationRef) throw new Error("reality scene command failed");
-  const decoded = JSON.parse(result.operationRef) as unknown;
-  if (!decoded || typeof decoded !== "object") throw new Error("reality scene response malformed");
-  return decoded as Record<string, unknown>;
+  if (!result || response.status < 200 || response.status >= 300 || result.outcome === "REJECTED") throw new Error(result?.error?.messageKey ?? "reality scene command failed");
+  let decoded: Record<string, unknown> = {};
+  if (result.operationRef) {
+    const value = JSON.parse(result.operationRef) as unknown;
+    if (!value || typeof value !== "object") throw new Error("reality scene response malformed");
+    decoded = value as Record<string, unknown>;
+  }
+  return { ...decoded, aggregateId: result.aggregate?.id, aggregateState: result.aggregate?.state };
 }
 
 function Stat({ value, label, onPress }: { value: number; label: string; onPress: () => void }): React.JSX.Element {
@@ -352,7 +387,7 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", gap: 8, marginTop: 10 }, action: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, paddingVertical: 13 }, actionSelected: { backgroundColor: color.proxyPurpleSoft }, actionText: { color: color.ink, fontSize: 13, fontWeight: "800" }, primaryAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, flex: 1, paddingVertical: 13 }, primaryActionText: { color: color.white, fontSize: 13, fontWeight: "800" },
   liveCard: { alignItems: "center", backgroundColor: color.attentionBg, borderRadius: 18, flexDirection: "row", justifyContent: "space-between", marginTop: 12, padding: 15 }, liveLabel: { color: color.error, fontSize: 13, fontWeight: "900" }, liveWindow: { color: color.ink, fontSize: 17, fontWeight: "900", marginTop: 3 }, capacity: { color: color.ink, fontSize: 13, fontWeight: "800" },
   variantRail: { gap: 9, paddingRight: 16 }, variantCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, minHeight: 116, padding: 13, width: 178 }, variantCardSelected: { backgroundColor: color.ink, borderColor: color.ink }, variantName: { color: color.ink, fontSize: 15, fontWeight: "900" }, variantNameSelected: { color: color.white }, variantWindow: { color: color.violet, fontSize: 12, fontWeight: "800", marginTop: 5 }, variantBest: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
-  humanRail: { gap: 9, paddingRight: 16 }, humanCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, padding: 13, width: 150 }, humanAvatar: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 22, height: 44, justifyContent: "center", width: 44 }, humanAvatarText: { color: color.violet, fontSize: 19, fontWeight: "900" }, humanName: { color: color.ink, fontSize: 16, fontWeight: "900", marginTop: 9 }, humanRole: { color: color.muted, fontSize: 11, marginTop: 3 }, humanFit: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 8 }, humanAvailability: { color: color.ink, fontSize: 11, marginTop: 3 },
-  executionCard: { flexDirection: "row", gap: 7 }, executionAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, flex: 1, minHeight: 68, justifyContent: "center", paddingHorizontal: 5 }, executionLabel: { color: color.white, fontSize: 12, fontWeight: "900", textAlign: "center" }, executionState: { color: color.muted, fontSize: 11, marginTop: 5 }, boundaryCard: { backgroundColor: color.proxyPurpleSoft, borderRadius: 16, marginTop: 9, padding: 13 }, boundaryStrong: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 18 }, boundaryText: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 6 }, loadingDetail: { color: color.muted, fontSize: 12, paddingVertical: 22, textAlign: "center" },
+  humanRail: { gap: 9, paddingRight: 16 }, humanCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, padding: 13, width: 150 }, humanCardSelected: { borderColor: color.violet, borderWidth: 2 }, humanAvatar: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 22, height: 44, justifyContent: "center", width: 44 }, humanAvatarText: { color: color.violet, fontSize: 19, fontWeight: "900" }, humanName: { color: color.ink, fontSize: 16, fontWeight: "900", marginTop: 9 }, humanRole: { color: color.muted, fontSize: 11, marginTop: 3 }, humanFit: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 8 }, humanAvailability: { color: color.ink, fontSize: 11, marginTop: 3 },
+  executionCard: { flexDirection: "row", gap: 7 }, executionAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, flex: 1, minHeight: 68, justifyContent: "center", paddingHorizontal: 5 }, executionActionSelected: { backgroundColor: color.violet }, executionLabel: { color: color.white, fontSize: 12, fontWeight: "900", textAlign: "center" }, executionState: { color: color.muted, fontSize: 11, marginTop: 5 }, boundaryCard: { backgroundColor: color.proxyPurpleSoft, borderRadius: 16, marginTop: 9, padding: 13 }, boundaryStrong: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 18 }, boundaryText: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 6 }, confirmAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, marginTop: 12, paddingVertical: 11 }, confirmActionText: { color: color.white, fontSize: 13, fontWeight: "900" }, actionResult: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 10 }, loadingDetail: { color: color.muted, fontSize: 12, paddingVertical: 22, textAlign: "center" },
   sectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 8, marginTop: 20 }, dataCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14 }, dataRow: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 14 }, dataRowLast: { borderBottomWidth: 0 }, dataLabel: { color: color.ink, fontSize: 13, fontWeight: "700" }, dataValue: { color: color.muted, fontSize: 13 }
 });
