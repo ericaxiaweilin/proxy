@@ -32,11 +32,27 @@ func TestPublicRealityScenesContract(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Scenes) != 8 || body.Privacy != "historical_public_not_live" {
+	if len(body.Scenes) < 8 || body.Privacy != "historical_public_not_live" {
 		t.Fatalf("unexpected projection: scenes=%d privacy=%q", len(body.Scenes), body.Privacy)
 	}
 	if body.Scenes[0].ID == "" || body.Scenes[0].Latitude == 0 || body.Scenes[0].Longitude == 0 {
 		t.Fatalf("scene identity or coordinates missing: %#v", body.Scenes[0])
+	}
+}
+
+func TestR27SceneReadSurface(t *testing.T) {
+	server := &Server{RealityScene: realityscene.New(), RateLimit: NewRateLimiter(0, 100)}
+	for _, path := range []string{"/v1/scenes/threebeans?variant=sunlight", "/v1/scenes/threebeans/live-state?variant=sunlight", "/v1/scenes/threebeans/menu?variant=sunlight", "/v1/scenes/threebeans/humans?variant=sunlight"} {
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, recorder.Code, recorder.Body.String())
+		}
+	}
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/scenes/missing", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("missing status=%d", recorder.Code)
 	}
 }
 

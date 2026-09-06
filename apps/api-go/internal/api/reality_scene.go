@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/location"
@@ -55,6 +56,48 @@ func (s *Server) publicRealityScenes(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(payload)
+}
+
+// dynamicSceneRead exposes the R27 canonical read projection. Public reads are
+// intentional: authentication gates commitments, not scene discovery.
+func (s *Server) dynamicSceneRead(w http.ResponseWriter, r *http.Request) {
+	if !methodGuard(w, r, http.MethodGet) {
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/v1/scenes/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" || len(parts) > 2 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "scene_not_found"})
+		return
+	}
+	svc := s.RealityScene
+	if svc == nil {
+		svc = realityscene.New()
+	}
+	detail, found, err := svc.GetDetail(r.Context(), parts[0], r.URL.Query().Get("variant"), time.Now())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scene_projection_unavailable"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "scene_not_found"})
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=30, stale-while-revalidate=120")
+	if len(parts) == 1 {
+		writeJSON(w, http.StatusOK, detail)
+		return
+	}
+	switch parts[1] {
+	case "live-state":
+		writeJSON(w, http.StatusOK, detail.LiveState)
+	case "menu":
+		writeJSON(w, http.StatusOK, map[string]any{"sceneId": detail.SceneID, "variant": detail.SelectedVariant, "items": detail.Menu})
+	case "humans":
+		writeJSON(w, http.StatusOK, map[string]any{"sceneId": detail.SceneID, "variant": detail.SelectedVariant, "humans": detail.Humans, "reservation": false})
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "scene_projection_not_found"})
+	}
 }
 
 func (s *Server) nearbyRealityScenes(w http.ResponseWriter, r *http.Request) {

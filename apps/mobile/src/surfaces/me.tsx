@@ -51,7 +51,7 @@ import { createSocialSettingsStore } from "../social-settings-store";
 import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSection, PersonalHubTab, SocialVisibility, SocialAccount, AbilityType, AbilityInstance, AvailabilityRule, AvOverride } from "./me-types";
 import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile, resolveHubSocials } from "./me-types";
 import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel } from "./me-profile-components";
-import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface } from "./me-orders";
+import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface, MerchantCampaignSurface } from "./me-orders";
 import { SUB_PAGE_CONTENT } from "./me-sub-pages";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import { styles } from "./me-styles";
@@ -176,7 +176,7 @@ const BUSINESS_ME: PersonaConfig = {
       rows: [
         { icon: "◎", label: "Creator 经营", desc: "功能预览 · 实时数据待接入", grad: true, route: "trustedteam" },
         { icon: "券", label: "券", desc: "查看真实券状态", route: "vouchers" },
-        { icon: "↗", label: "活动导流", desc: "功能预览 · 实时数据待接入", route: "merchantcampaign" },
+        { icon: "↗", label: "活动导流", desc: "商家活动 · 可报名", route: "merchantcampaign" },
         { icon: "▤", label: "线上店铺", desc: "功能预览 · 实时数据待接入", grad: true, route: "merchantstorefront" },
         { icon: "₫", label: "销售中心", desc: "功能预览 · 实时数据待接入", route: "outcomehistory" },
         { icon: "✦", label: "经营", desc: "功能预览 · 实时数据待接入", route: "enterpriseops" }
@@ -729,6 +729,7 @@ export function MeSurface({
 
     if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "merchantcampaign") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MerchantCampaignSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "facet") {
       const facetClient = new FacetClient({ requester: sessionAuthClient, baseUrl: localApiBaseUrl });

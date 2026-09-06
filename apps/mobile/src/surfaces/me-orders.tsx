@@ -322,3 +322,95 @@ export function FavoritesSurface({ onBack }: { onBack: () => void }): React.JSX.
   const visible = tab === "all" ? entries : entries.filter((item) => item.type === tab);
   return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>收藏</Text></View><Text style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{visible.length ? visible.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text style={styles.savedThumbText}>☆</Text></View><View><Text style={styles.orderTitle}>{item.title}</Text><Text style={styles.savedMeta}>{item.meta}</Text></View></View>) : <View style={styles.savedCard}><Text style={styles.savedMeta}>这里还没有收藏。</Text></View>}</ScrollView></View>;
 }
+
+// 商家活动导流：只列 Origin=MERCHANT 的开放活动（种子 + 商家实发），匿名
+// 可读；报名走认证通道，未登录提示登录。之前是有 tile 无页面的死入口。
+export function MerchantCampaignSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+  const [client] = useState(() => new ActivityClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
+  const [items, setItems] = useState<Activity[]>([]);
+  const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [detailId, setDetailId] = useState<string | undefined>(undefined);
+  const [joiningId, setJoiningId] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+
+  const reload = useCallback(() => {
+    let active = true;
+    setPhase("LOADING");
+    void client.listActivities().then((rows) => {
+      if (active) { setItems(rows.filter((item) => item.origin === "MERCHANT")); setPhase("READY"); }
+    }).catch(() => { if (active) setPhase("ERROR"); });
+    return () => { active = false; };
+  }, [client]);
+  useEffect(() => reload(), [reload]);
+
+  async function join(activityId: string): Promise<void> {
+    setJoiningId(activityId);
+    setNotice(undefined);
+    try {
+      await client.join(activityId);
+      setNotice("报名成功");
+      reload();
+    } catch (error) {
+      if (error instanceof ActivityCommandRejectedError) {
+        const code = error.result.error?.errorCode ?? "";
+        if (code === "ACTIVITY_FULL") setNotice("名额已满");
+        else if (code === "ACTIVITY_ALREADY_JOINED") setNotice("你已报过名");
+        else setNotice("报名失败，请稍后重试");
+      } else if (error instanceof Error && /authenticated principal|SessionExpired|session expired/i.test(error.message)) {
+        setNotice("请登录后重试");
+      } else {
+        setNotice("报名失败，请稍后重试");
+      }
+    } finally {
+      setJoiningId(undefined);
+    }
+  }
+
+  if (detailId) {
+    return (
+      <View style={styles.root}>
+        <ActivityDetailSurface client={client} initialActivityId={detailId} onBack={() => { setDetailId(undefined); reload(); }} />
+      </View>
+    );
+  }
+  return (
+    <View style={styles.root}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.orderPageHead}>
+          <Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable>
+          <Text style={styles.detailTitle}>活动导流</Text>
+        </View>
+        {notice ? <Text style={styles.savedMeta}>{notice}</Text> : null}
+        {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
+        {phase === "ERROR" ? (
+          <View>
+            <Text style={styles.personalEmpty}>活动加载失败，请检查连接后重试。</Text>
+            <Pressable onPress={() => reload()} style={[styles.orderTab, styles.orderTabOn]}><Text style={[styles.orderTabText, styles.orderTabTextOn]}>重试</Text></Pressable>
+          </View>
+        ) : null}
+        {phase === "READY" && items.length === 0 ? <Text style={styles.personalEmpty}>暂无商家活动。</Text> : null}
+        {phase === "READY" ? items.map((item) => {
+          const capacity = item.capacity ?? 0;
+          const full = capacity > 0 && item.joined >= capacity;
+          return (
+            <Pressable key={item.activityId} onPress={() => setDetailId(item.activityId)} style={styles.savedCard}>
+              <Text style={styles.orderTitle}>{item.title}</Text>
+              <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
+              <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
+              <Text style={styles.savedMeta}>查看明细 ›</Text>
+              <Pressable
+                disabled={full || joiningId === item.activityId}
+                onPress={() => void join(item.activityId)}
+                style={[styles.orderTab, full && styles.orderTabOn]}
+              >
+                <Text style={[styles.orderTabText, full && styles.orderTabTextOn]}>
+                  {joiningId === item.activityId ? "报名中…" : full ? "已满员" : "报名"}
+                </Text>
+              </Pressable>
+            </Pressable>
+          );
+        }) : null}
+      </ScrollView>
+    </View>
+  );
+}

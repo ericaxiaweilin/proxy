@@ -3,12 +3,39 @@ package realityscene
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
 
 func envelope(commandType string, payload map[string]any) command.Envelope {
 	return command.Envelope{CommandID: "c1", CommandType: commandType, Actor: command.Actor{Type: "USER", ID: "u1"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "p1"}, Target: command.Target{Type: "RealityScene", ID: "westlake"}, Payload: payload}
+}
+
+func TestR27DynamicSceneSwitchesWholeContext(t *testing.T) {
+	s := New()
+	morning, found, err := s.GetDetail(t.Context(), "threebeans", "morning", time.Date(2026, 9, 6, 8, 0, 0, 0, time.UTC))
+	if err != nil || !found {
+		t.Fatalf("morning detail found=%v err=%v", found, err)
+	}
+	sunlight, found, err := s.GetDetail(t.Context(), "threebeans", "sunlight", time.Date(2026, 9, 6, 15, 0, 0, 0, time.UTC))
+	if err != nil || !found {
+		t.Fatalf("sunlight detail found=%v err=%v", found, err)
+	}
+	if len(morning.Variants) != 4 || morning.SelectedVariant == sunlight.SelectedVariant {
+		t.Fatalf("variant switch failed: morning=%#v sunlight=%#v", morning, sunlight)
+	}
+	if morning.Humans[0].Role == sunlight.Humans[0].Role || morning.Menu[0].ID == "" || sunlight.LiveState.State != "AVAILABLE_NOW" {
+		t.Fatalf("scene context did not switch together: morning=%#v sunlight=%#v", morning, sunlight)
+	}
+	for _, human := range sunlight.Humans {
+		if human.IsAI {
+			t.Fatalf("AI account leaked into human recommendation: %#v", human)
+		}
+	}
+	if sunlight.Actions[0].State != "REQUIRES_HUMAN_ACCEPTANCE" || sunlight.Actions[1].MoneyMeaning == sunlight.Actions[2].MoneyMeaning {
+		t.Fatalf("action boundaries unclear: %#v", sunlight.Actions)
+	}
 }
 
 func TestUserSceneStateRoundTrip(t *testing.T) {

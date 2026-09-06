@@ -716,4 +716,12 @@ require_test "POST-COMMENT-VISIBILITY-001" "./internal/engagement" \
 pnpm --dir apps/mobile exec vitest run src/post-engagement-model.test.ts src/engagement-client.test.ts || exit $?
 echo "    POST-REACTION-TRUTH-001/POST-COMMENT-VISIBILITY-001: PASS"
 
+require_test "SCENE-DYNAMIC-CONTEXT-001" "./internal/realityscene" \
+  "TestR27DynamicSceneSwitchesWholeContext" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-DYNAMIC-CONTEXT-001" "./internal/api" \
+  "TestR27SceneReadSurface" \
+  "apps/api-go/internal/api/reality_scene_test.go" || exit $?
+echo "    SCENE-DYNAMIC-CONTEXT-001: PASS (variant switches human/menu/live context; action truth boundaries pinned)"
+
 echo "  regression contracts: OK"

@@ -4,6 +4,29 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 41 — 2026-09-05
+
+- 活动导流页去占位化：有 tile 无页面的死入口改走真实商家活动
+  （Origin=MERCHANT 过滤＋明细＋报名），从我的活动页模式复用。
+
+## Revision 40 — 2026-09-05
+
+- R18.x R3 typography guard (design-system-r3.test.ts)
+  requires all readable UI text at 11pt or larger.
+  Two pre-existing 10pt violations in HEAD were
+  fixed: `aiPillText` (AI 生成 pill in
+  ai-account-profile.tsx, 10→11) and `menuHint`
+  (search-safety menu hint in conversation.tsx,
+  10→11). The guard had been silently failing on
+  HEAD since those files landed; fixing the
+  fontSize keeps the gate green.
+- R18.x ProfileTabs AboutTab dead helper
+  removal: the `AboutStat` component (3-prop
+  hardcoded-stat-row renderer) was deleted in
+  commit c03097a but the function definition
+  and the 4 `aboutStat*` style entries were
+  left behind. Both are gone now.
+
 ## Revision 39 — 2026-09-05
 
 - R18.x DEAD-FIXTURES-001: removed 3 hardcoded

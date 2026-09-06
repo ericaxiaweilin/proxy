@@ -26,6 +26,66 @@ type Scene struct {
 	Active                                                   bool
 }
 
+// Detail is the R27 scene read model. A Scene is a time-bound behavior context,
+// not another name for a venue. Catalog truth remains in Repository; the
+// projections below are replaceable derived data and never create attendance,
+// visit, or order evidence.
+type Detail struct {
+	SceneID         string        `json:"sceneId"`
+	VenueID         string        `json:"venueId"`
+	VenueName       string        `json:"venueName"`
+	SelectedVariant string        `json:"selectedVariant"`
+	Variants        []Variant     `json:"variants"`
+	LiveState       LiveState     `json:"liveState"`
+	Menu            []MenuItem    `json:"menu"`
+	Humans          []Human       `json:"humans"`
+	Actions         []SceneAction `json:"actions"`
+	TruthBoundary   string        `json:"truthBoundary"`
+}
+
+type Variant struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Window      string   `json:"window"`
+	StartMinute int      `json:"-"`
+	EndMinute   int      `json:"-"`
+	Facets      []string `json:"facets"`
+	BestFor     string   `json:"bestFor"`
+}
+
+type LiveState struct {
+	State       string    `json:"state"`
+	Label       string    `json:"label"`
+	BestWindow  string    `json:"bestWindow"`
+	CapacityPct int       `json:"capacityPct"`
+	FreshUntil  time.Time `json:"freshUntil"`
+}
+
+type MenuItem struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	PriceLabel string `json:"priceLabel"`
+	SceneFit   string `json:"sceneFit"`
+	Available  bool   `json:"available"`
+}
+
+type Human struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Role         string `json:"role"`
+	Availability string `json:"availability"`
+	FitReason    string `json:"fitReason"`
+	SceneFit     int    `json:"sceneFit"`
+	IsAI         bool   `json:"isAI"`
+}
+
+type SceneAction struct {
+	Type         string `json:"type"`
+	Label        string `json:"label"`
+	State        string `json:"state"`
+	MoneyMeaning string `json:"moneyMeaning"`
+}
+
 func (s Scene) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		ID                  string  `json:"id"`
@@ -144,6 +204,7 @@ func launchScenes() []Scene {
 		{ID: "manzi", Name: "Manzi Art Space", Area: "Ba Đình", Type: "艺术 · 展览", Latitude: 21.0395, Longitude: 105.846, Quality: 89, Best: "10:00–18:00", Posts: 43, Creators: 22, Activities: 5, Invites: 9, Description: "内容质量高的展览空间。"},
 		{ID: "banana", Name: "Red River Banana Island", Area: "Long Biên", Type: "自然 · 骑行", Latitude: 21.054, Longitude: 105.868, Quality: 87, Best: "06:30–09:00", Posts: 58, Creators: 26, Activities: 7, Invites: 17, Description: "适合骑行和自然内容。"},
 		{ID: "bonsaidon", Name: "Bonsaidon · Tây Hồ", Area: "Tây Hồ", Type: "商家 · 社交", Latitude: 21.0621, Longitude: 105.8256, Quality: 90, Best: "14:00–20:30", Posts: 119, Creators: 41, Activities: 17, Invites: 32, Active: true, Description: "公开活动与 Creator 联动节点。"},
+		{ID: "threebeans", Name: "Three Beans · Cầu Giấy", Area: "Cầu Giấy", Type: "咖啡 · 动态场景", Latitude: 21.0359, Longitude: 105.7906, Quality: 94, Best: "07:30–20:30", Posts: 128, Creators: 36, Activities: 12, Invites: 27, Active: true, Description: "同一门店按时间切换咖啡、出片、下班社交与周末活动场景。"},
 	}
 }
 
@@ -159,6 +220,102 @@ func NewWithRepository(repo Repository) *Service {
 func (s *Service) ListScenes(ctx context.Context) ([]Scene, error) { return s.repo.ListScenes(ctx) }
 func (s *Service) ListNearbyScenes(ctx context.Context, lat, lng, radiusKM float64, limit int) ([]Scene, error) {
 	return s.repo.ListNearbyScenes(ctx, lat, lng, radiusKM, limit)
+}
+
+func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant string, now time.Time) (Detail, bool, error) {
+	scenes, err := s.repo.ListScenes(ctx)
+	if err != nil {
+		return Detail{}, false, err
+	}
+	var scene Scene
+	found := false
+	for _, candidate := range scenes {
+		if candidate.ID == sceneID {
+			scene, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		return Detail{}, false, nil
+	}
+	variants := variantsFor(scene)
+	selected := variants[0]
+	minute := now.Hour()*60 + now.Minute()
+	for _, candidate := range variants {
+		if requestedVariant == candidate.ID || (requestedVariant == "" && minute >= candidate.StartMinute && minute < candidate.EndMinute) {
+			selected = candidate
+			break
+		}
+	}
+	state := "GOOD_SOON"
+	label := "近期适合"
+	if minute >= selected.StartMinute && minute < selected.EndMinute {
+		state, label = "AVAILABLE_NOW", "现在适合"
+	}
+	if !scene.Active && state == "AVAILABLE_NOW" {
+		state, label = "GOOD_SOON", "近期适合"
+	}
+	return Detail{
+		SceneID: scene.ID, VenueID: venueIDFor(scene), VenueName: scene.Name,
+		SelectedVariant: selected.ID, Variants: variants,
+		LiveState: LiveState{State: state, Label: label, BestWindow: selected.Window, CapacityPct: capacityFor(selected.ID, minute), FreshUntil: now.UTC().Add(5 * time.Minute)},
+		Menu:      menuFor(selected.ID), Humans: humansFor(selected.ID),
+		Actions: []SceneAction{
+			{Type: "DIRECT_INVITE", Label: "邀请真人", State: "REQUIRES_HUMAN_ACCEPTANCE", MoneyMeaning: "费用约定，不代表已付款或收入"},
+			{Type: "OPEN_TASK", Label: "发布机会", State: "ACCEPTS_APPLICATIONS", MoneyMeaning: "标价是完成任务可获得的报酬"},
+			{Type: "PUBLIC_ACTIVITY", Label: "报名活动", State: "REGISTRATION_ONLY", MoneyMeaning: "价格是参与者需支付的报名或消费费用"},
+		},
+		TruthBoundary: "推荐不预订真人；报名不等于到场；AI 预览不产生到访、出席或订单证据。",
+	}, true, nil
+}
+
+func venueIDFor(scene Scene) string {
+	if scene.ID == "threebeans" {
+		return "venue_threebeans_caugiay"
+	}
+	return "venue_" + scene.ID
+}
+func variantsFor(scene Scene) []Variant {
+	if scene.ID == "threebeans" {
+		return []Variant{
+			{ID: "morning", Name: "Morning Coffee", Window: "07:30–10:30", StartMinute: 450, EndMinute: 630, Facets: []string{"安静", "快速", "一起办公"}, BestFor: "快速咖啡、独处办公、通勤前碰面"},
+			{ID: "sunlight", Name: "Sunlight Coffee", Window: "14:00–17:00", StartMinute: 840, EndMinute: 1020, Facets: []string{"自然光", "出片", "轻社交"}, BestFor: "喝咖啡、拍照、第一次见面"},
+			{ID: "afterwork", Name: "Afterwork Coffee", Window: "17:30–20:30", StartMinute: 1050, EndMinute: 1230, Facets: []string{"下班后", "聊天", "轻约会"}, BestFor: "双人到四人的轻社交"},
+			{ID: "weekend", Name: "Weekend Social", Window: "周末 14:00–19:00", StartMinute: 840, EndMinute: 1140, Facets: []string{"多人局", "活动", "Creator"}, BestFor: "公开活动和认识新朋友"},
+		}
+	}
+	return []Variant{{ID: "best-time", Name: scene.Type, Window: scene.Best, StartMinute: 0, EndMinute: 1440, Facets: []string{scene.Type}, BestFor: scene.Description}}
+}
+func capacityFor(variant string, minute int) int {
+	base := map[string]int{"morning": 61, "sunlight": 39, "afterwork": 74, "weekend": 81}[variant]
+	if base == 0 {
+		base = 52
+	}
+	if minute%60 > 45 {
+		base += 4
+	}
+	return base
+}
+func menuFor(variant string) []MenuItem {
+	items := []MenuItem{{ID: "sku_corn_coffee", Name: "Cafe Kem Bắp", PriceLabel: "45K+", SceneFit: "高 UGC Fit", Available: true}, {ID: "sku_matcha", Name: "Matcha Latte", PriceLabel: "50K", SceneFit: "高出片 Fit", Available: true}}
+	if variant == "afterwork" {
+		items = []MenuItem{{ID: "sku_passion", Name: "Passion Guava", PriceLabel: "45K", SceneFit: "Afterwork Fit", Available: true}, items[1]}
+	}
+	if variant == "weekend" {
+		items = append(items, MenuItem{ID: "sku_popcorn", Name: "Bắp Rang Bơ", PriceLabel: "55K", SceneFit: "多人分享", Available: true})
+	}
+	return items
+}
+func humansFor(variant string) []Human {
+	role := "Cafe / Lifestyle"
+	availability := "本周可约"
+	if variant == "morning" {
+		role, availability = "Coffee / Work", "上午可约"
+	}
+	if variant == "weekend" {
+		role, availability = "Host / Lifestyle", "周末可约"
+	}
+	return []Human{{ID: "creator_mai", Name: "Mai", Role: role, Availability: availability, FitReason: "同类 Scene 有真实完成记录", SceneFit: 96, IsAI: false}, {ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: "近期可约", FitReason: "出片与到访转化稳定", SceneFit: 92, IsAI: false}, {ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: "周末可约", FitReason: "相关 SKU 内容经验", SceneFit: 88, IsAI: false}}
 }
 func (s *Service) Supports(t string) bool {
 	return t == "ListMyRealitySceneState" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited"

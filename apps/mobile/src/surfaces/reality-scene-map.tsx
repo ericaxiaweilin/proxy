@@ -31,6 +31,19 @@ type RealityScene = {
   recommendationScore?: number;
 };
 
+type SceneDetail = {
+  sceneId: string;
+  venueId: string;
+  venueName: string;
+  selectedVariant: string;
+  variants: Array<{ id: string; name: string; window: string; facets: string[]; bestFor: string }>;
+  liveState: { state: string; label: string; bestWindow: string; capacityPct: number; freshUntil: string };
+  menu: Array<{ id: string; name: string; priceLabel: string; sceneFit: string; available: boolean }>;
+  humans: Array<{ id: string; name: string; role: string; availability: string; fitReason: string; sceneFit: number; isAI: boolean }>;
+  actions: Array<{ type: "DIRECT_INVITE" | "OPEN_TASK" | "PUBLIC_ACTIVITY"; label: string; state: string; moneyMeaning: string }>;
+  truthBoundary: string;
+};
+
 export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId, secureSessionStore, onBack }: { apiBaseUrl: string; authClient: SessionAuthClient; initialSceneId?: string | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void }): React.JSX.Element {
   const [view, setView] = useState<SceneView>("MAP");
   const [filter, setFilter] = useState<SceneFilter>("ALL");
@@ -45,6 +58,9 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
   const [origin, setOrigin] = useState<{ latitude: number; longitude: number }>();
   const [nearbyBusy, setNearbyBusy] = useState(false);
   const [nearbyError, setNearbyError] = useState<string>();
+  const [detail, setDetail] = useState<SceneDetail>();
+  const [detailError, setDetailError] = useState<string>();
+  const [actionExplanation, setActionExplanation] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +98,26 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [authClient, secureSessionStore]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedId) { setDetail(undefined); setDetailError(undefined); return; }
+    setDetail(undefined); setDetailError(undefined); setActionExplanation(undefined);
+    void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}`, { headers: { Accept: "application/json" } })
+      .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
+      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); if (!cancelled) setDetail(value); })
+      .catch(() => { if (!cancelled) setDetailError("动态场景暂时不可用，请稍后重试"); });
+    return () => { cancelled = true; };
+  }, [apiBaseUrl, selectedId]);
+
+  const selectVariant = (variantId: string): void => {
+    if (!selectedId) return;
+    setDetailError(undefined); setActionExplanation(undefined);
+    void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}?variant=${encodeURIComponent(variantId)}`, { headers: { Accept: "application/json" } })
+      .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
+      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); })
+      .catch(() => setDetailError("场景切换失败，请重试"));
+  };
 
   const selected = scenes.find((scene) => scene.id === selectedId);
   const filtered = useMemo(() => {
@@ -181,6 +217,29 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
           <Pressable onPress={() => persistVisited(selected.id)} style={styles.action}><Text style={styles.actionText}>{visited.has(selected.id) ? "✓ 已去过" : "标记去过"}</Text></Pressable>
           <Pressable onPress={() => persistToggle(planned, selected.id, setPlanned, "SetRealityScenePlanned")} style={styles.primaryAction}><Text style={styles.primaryActionText}>{planned.has(selected.id) ? "✓ 已计划" : "去这里"}</Text></Pressable>
         </View>
+        {detail ? (
+          <>
+            <View style={styles.liveCard}>
+              <View><Text style={styles.liveLabel}>{detail.liveState.label}</Text><Text style={styles.liveWindow}>{detail.liveState.bestWindow}</Text></View>
+              <Text style={styles.capacity}>容量 {detail.liveState.capacityPct}%</Text>
+            </View>
+            <Text style={styles.sectionTitle}>选择这个地点的场景</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variantRail}>
+              {detail.variants.map((variant) => <Pressable key={variant.id} onPress={() => selectVariant(variant.id)} style={[styles.variantCard, detail.selectedVariant === variant.id && styles.variantCardSelected]}><Text style={[styles.variantName, detail.selectedVariant === variant.id && styles.variantNameSelected]}>{variant.name}</Text><Text style={styles.variantWindow}>{variant.window}</Text><Text numberOfLines={2} style={styles.variantBest}>{variant.bestFor}</Text></Pressable>)}
+            </ScrollView>
+            <Text style={styles.sectionTitle}>适合的真人 Creator</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
+              {detail.humans.map((human) => <View key={human.id} style={styles.humanCard}><View style={styles.humanAvatar}><Text style={styles.humanAvatarText}>{human.name.slice(0, 1)}</Text></View><Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{human.availability}</Text></View>)}
+            </ScrollView>
+            <Text style={styles.sectionTitle}>Scene Menu</Text>
+            <View style={styles.dataCard}>{detail.menu.map((item, index) => <DataRow key={item.id} label={item.name} value={`${item.priceLabel} · ${item.sceneFit}`} last={index === detail.menu.length - 1} />)}</View>
+            <Text style={styles.sectionTitle}>怎么组织这次现实行动</Text>
+            <View style={styles.executionCard}>
+              {detail.actions.map((action) => <Pressable key={action.type} onPress={() => setActionExplanation(`${action.label}：${action.moneyMeaning}`)} style={styles.executionAction}><Text style={styles.executionLabel}>{action.label}</Text><Text style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
+            </View>
+            {actionExplanation ? <View style={styles.boundaryCard}><Text style={styles.boundaryStrong}>{actionExplanation}</Text><Text style={styles.boundaryText}>{detail.truthBoundary}</Text></View> : null}
+          </>
+        ) : detailError ? <Text style={styles.nearbyError}>{detailError}</Text> : <Text style={styles.loadingDetail}>正在加载当前时段的人、菜单与活动方式…</Text>}
         <Text style={styles.sectionTitle}>场景数据</Text>
         <View style={styles.dataCard}>
           <DataRow label="Scene Quality" value={String(selected.quality)} />
@@ -227,6 +286,12 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
       )}
     </View>
   );
+}
+
+function isSceneDetail(value: unknown): value is SceneDetail {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<SceneDetail>;
+  return typeof item.sceneId === "string" && typeof item.selectedVariant === "string" && Array.isArray(item.variants) && item.variants.length > 0 && !!item.liveState && Array.isArray(item.menu) && Array.isArray(item.humans) && item.humans.every((human) => human.isAI === false) && Array.isArray(item.actions) && item.actions.length === 3 && typeof item.truthBoundary === "string";
 }
 
 function isRealityScene(value: unknown): value is RealityScene {
@@ -285,5 +350,9 @@ const styles = StyleSheet.create({
   detailContent: { paddingBottom: 36, paddingHorizontal: 16 }, backButton: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 2, paddingVertical: 9 }, backText: { color: color.ink, fontSize: 14, fontWeight: "800" }, hero: { backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, overflow: "hidden", padding: 16, paddingTop: 158 }, heroMap: { height: 142, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, eyebrow: { color: color.muted, fontSize: 12, marginTop: 12 }, detailTitle: { color: color.ink, fontSize: 25, fontWeight: "900", marginTop: 3 }, detailDescription: { color: color.muted, fontSize: 14, lineHeight: 21, marginTop: 8 },
   metrics: { flexDirection: "row", gap: 7, marginTop: 10 }, metric: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 11 }, metricValue: { color: color.ink, fontSize: 17, fontWeight: "900" }, metricLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
   actions: { flexDirection: "row", gap: 8, marginTop: 10 }, action: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, paddingVertical: 13 }, actionSelected: { backgroundColor: color.proxyPurpleSoft }, actionText: { color: color.ink, fontSize: 13, fontWeight: "800" }, primaryAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, flex: 1, paddingVertical: 13 }, primaryActionText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  liveCard: { alignItems: "center", backgroundColor: color.attentionBg, borderRadius: 18, flexDirection: "row", justifyContent: "space-between", marginTop: 12, padding: 15 }, liveLabel: { color: color.error, fontSize: 13, fontWeight: "900" }, liveWindow: { color: color.ink, fontSize: 17, fontWeight: "900", marginTop: 3 }, capacity: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  variantRail: { gap: 9, paddingRight: 16 }, variantCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, minHeight: 116, padding: 13, width: 178 }, variantCardSelected: { backgroundColor: color.ink, borderColor: color.ink }, variantName: { color: color.ink, fontSize: 15, fontWeight: "900" }, variantNameSelected: { color: color.white }, variantWindow: { color: color.violet, fontSize: 12, fontWeight: "800", marginTop: 5 }, variantBest: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
+  humanRail: { gap: 9, paddingRight: 16 }, humanCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, padding: 13, width: 150 }, humanAvatar: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 22, height: 44, justifyContent: "center", width: 44 }, humanAvatarText: { color: color.violet, fontSize: 19, fontWeight: "900" }, humanName: { color: color.ink, fontSize: 16, fontWeight: "900", marginTop: 9 }, humanRole: { color: color.muted, fontSize: 11, marginTop: 3 }, humanFit: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 8 }, humanAvailability: { color: color.ink, fontSize: 11, marginTop: 3 },
+  executionCard: { flexDirection: "row", gap: 7 }, executionAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, flex: 1, minHeight: 68, justifyContent: "center", paddingHorizontal: 5 }, executionLabel: { color: color.white, fontSize: 12, fontWeight: "900", textAlign: "center" }, executionState: { color: color.muted, fontSize: 11, marginTop: 5 }, boundaryCard: { backgroundColor: color.proxyPurpleSoft, borderRadius: 16, marginTop: 9, padding: 13 }, boundaryStrong: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 18 }, boundaryText: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 6 }, loadingDetail: { color: color.muted, fontSize: 12, paddingVertical: 22, textAlign: "center" },
   sectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 8, marginTop: 20 }, dataCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14 }, dataRow: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 14 }, dataRowLast: { borderBottomWidth: 0 }, dataLabel: { color: color.ink, fontSize: 13, fontWeight: "700" }, dataValue: { color: color.muted, fontSize: 13 }
 });
