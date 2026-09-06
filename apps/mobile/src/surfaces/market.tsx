@@ -31,6 +31,8 @@ import { gridToLatLng } from "../components/location-options";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
+import { R37OpportunityCard, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
+import { R37TypePalette } from "./r37-type-palette";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
 
 // “热门探索点” = 可以是河内市中心的著名地点 (西湖、还剑湖)，
@@ -82,15 +84,9 @@ const R7_FILTER_META: Record<R7Filter, { title: string; sub: string }> = {
   FILTER: { title: "完整筛选", sub: "价格、时长、类型、付款、客户质量等高级条件" }
 };
 
-function scenarioIconForOpportunity(opportunity: MarketOpportunity): ProxyIconName {
-  const t = opportunity.theme + opportunity.title;
-  if (t.includes("摄影")) return "camera";
-  if (t.includes("翻译") || t.includes("口译") || t.includes("接待") || t.includes("谈判") || t.includes("中文")) return "chat";
-  if (t.includes("同行") || t.includes("陪同") || t.includes("巡店") || t.includes("路线")) return "route";
-  if (t.includes("美食") || t.includes("门店") || t.includes("咖啡") || t.includes("餐饮")) return "cup";
-  if (t.includes("助理") || t.includes("商务") || t.includes("晚餐")) return "storeLines";
-  return "diamond";
-}
+// scenarioIconForOpportunity was removed with R4OpportunityCard.
+// Type-driven icons now live in r37-opportunity-card.tsx using
+// approved order-type logo PNGs (assets/order-type-logos/*.png).
 
 // OPPORTUNITY_COORDS removed: pin locations now derive from
 // MarketOpportunity.coord via gridToLatLng (see MarketMap).
@@ -681,6 +677,7 @@ function OpportunityTab({
   onOpen: (o: MarketOpportunity) => void;
   onDismiss: (id: string) => void;
 }): React.JSX.Element {
+  const [typeFilter, setTypeFilter] = useState<OpportunityType | "all">("all");
   const base = sourceItems;
   let items = [...base];
   if (oppFilter === "NEARBY") items = items.filter((o) => o.travel != null).sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
@@ -688,6 +685,7 @@ function OpportunityTab({
   if (oppFilter === "VALUE") items = [...items].sort((a, b) => parseInt(a.price.replace(/\D/g, "")) - parseInt(b.price.replace(/\D/g, "")));
   if (oppFilter === "RECOMMEND") items = [...items].sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
   if (oppFilter === "INVITE") items = items.slice(0, 1);
+  if (typeFilter !== "all") items = items.filter((o) => inferOpportunityTypeForFilter(o) === typeFilter);
   return (
     <>
       <View style={styles.searchRow}>
@@ -696,6 +694,8 @@ function OpportunityTab({
           <Text style={styles.searchIcon}>⌕</Text>
         </View>
       </View>
+
+      <R37TypePalette active={typeFilter} onChange={setTypeFilter} />
 
       <View style={styles.oppQuickNav}>
         {R7_FILTERS.slice(0,5).map((f) => (
@@ -714,74 +714,14 @@ function OpportunityTab({
 
       <View style={styles.oppStack}>
         {items.map((opportunity) => (
-          <R4OpportunityCard key={opportunity.id} opportunity={opportunity} onDismiss={() => onDismiss(opportunity.id)} onOpen={() => onOpen(opportunity)} />
+          <R37OpportunityCard key={opportunity.id} opportunity={opportunity} onDismiss={() => onDismiss(opportunity.id)} onOpen={() => onOpen(opportunity)} />
         ))}
       </View>
     </>
   );
 }
 
-// R4 卡：机会用通栏（无两侧空白），活动用卡片
-function R4OpportunityCard({ opportunity, onOpen, onDismiss }: { opportunity: MarketOpportunity; onOpen: () => void; onDismiss: () => void }): React.JSX.Element {
-  const budget = opportunity.price;
-  const fairLow = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()}₫`;
-  const fairHigh = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
-  const fair = `${fairLow} – ${fairHigh}`;
-  const mine = `约 ${budget}`;
-  const reason = opportunity.skills ? `${opportunity.skills} · ${opportunity.match} 匹配` : `${opportunity.match} 匹配`;
-  return (
-    <View style={styles.r4CardFlat}>
-      <View style={styles.r4Top}>
-        <View style={styles.scenarioIcon}>
-          <ProxyIcon color={color.violet} name={scenarioIconForOpportunity(opportunity)} size={14} />
-        </View>
-        <Text style={styles.r4Title}>{opportunity.title}</Text>
-        <View><Text style={styles.r4Budget}>{budget}</Text><Text style={styles.r4PriceLabel}>{opportunity.priceLabel ?? "完成后你可获得"}</Text></View>
-      </View>
-      <Text style={styles.r4Meta}>{opportunity.date} {opportunity.time} · {opportunity.location} · {opportunity.owner} {opportunity.verified ? "✓已验证" : ""}</Text>
-      <View style={styles.r4PriceStrip}>
-        <View style={styles.r4PriceCell}>
-          <Text style={styles.r4PriceLabel}>{opportunity.priceLabel ?? "完成后你可获得"}</Text>
-          <Text style={styles.r4PriceValue}>{budget || "费用待确认"}</Text>
-        </View>
-        {opportunity.moneyFlow !== "TBD" && opportunity.moneyFlow !== "FREE" ? (
-          <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
-            <Text style={styles.r4PriceLabel}>Proxy 公平区间</Text>
-            <Text style={styles.r4PriceValue}>{fair}</Text>
-          </View>
-        ) : null}
-        <View style={styles.r4PriceCell}>
-          <Text style={styles.r4PriceLabel}>{opportunity.moneyFlow === "TBD" ? "双方面谈" : opportunity.moneyFlow === "FREE" ? "同好/社区" : "你的类似记录"}</Text>
-          <Text style={styles.r4PriceValue}>{opportunity.moneyFlow === "FREE" ? "0₫" : opportunity.moneyFlow === "TBD" ? "—" : mine}</Text>
-        </View>
-      </View>
-      <View style={styles.r4Tags}>
-        {opportunity.skills.split("·").slice(0, 3).map((t) => (
-          <View key={t} style={styles.r4Tag}>
-            <Text style={styles.r4TagText}>{t.trim()}</Text>
-          </View>
-        ))}
-        <View style={[styles.r4Tag, opportunity.signalClass === "hot" && styles.r4TagHot]}>
-          <Text style={[styles.r4TagText, opportunity.signalClass === "hot" && styles.r4TagTextHot]}>{opportunity.signal}</Text>
-        </View>
-      </View>
-      <View style={styles.r4Match}>
-        <Text style={styles.r4MatchText}>{reason}</Text>
-        <View style={styles.r4FitBadge}>
-          <Text style={styles.r4FitText}>{opportunity.match} 匹配</Text>
-        </View>
-      </View>
-      <View style={styles.r4Actions}>
-        <Pressable onPress={onDismiss} style={styles.r4ActionGhost}>
-          <Text style={styles.r4ActionGhostText}>不感兴趣</Text>
-        </Pressable>
-        <Pressable onPress={onOpen} style={styles.r4ActionPrimary}>
-          <Text style={styles.r4ActionPrimaryText}>查看 & 报价 ›</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
+// R4OpportunityCard was replaced by R37OpportunityCard (see ./r37-opportunity-card.tsx).
 
 function OpportunityDetail({
   opportunity,
