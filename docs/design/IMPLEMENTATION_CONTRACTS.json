@@ -44,7 +44,7 @@
         "apps/mobile/src/business-client.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "R18.x commit 3: merchant-me-r21.tsx (1250 行 hardcoded mock) + merchant-creator-center.tsx 全部删, 替换为 MerchantMeR21Replacement. 后续 commit 4 接 business-home.tsx + me.tsx > merchantstorefront 完整 wire."
+      "knownGap": "R18.x commit 3: merchant-me-r21.tsx (1250 行 hardcoded mock) + merchant-creator-center.tsx 全部删, 替换为 MerchantMeR21Replacement. 后续 commit 4 接 business-home.tsx + me.tsx > merchantstorefront 完整 wire. R36.x: merchant-storefront summary/funnel labels 提到 R3 11pt 可读字号底线 (Revision 47, 纯排印合规, 无布局变更)."
     },
     {
       "scope": "social-contact-collaboration",

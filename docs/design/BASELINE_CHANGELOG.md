@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 47 — 2026-09-06
+
+- Applied the R3 11pt readable-text floor to merchant-storefront summary and
+  funnel labels (10pt to 11pt). Typography compliance only; no layout or
+  information-architecture change.
+
 ## Revision 46 — 2026-09-06
 
 - Froze the R35 surface boundary: demand/supply, forecast and Best Next
