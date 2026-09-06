@@ -28,7 +28,7 @@ import {
   type OpportunityLens
 } from "../market-fixtures";
 import { gridToLatLng } from "../components/location-options";
-import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
+import { ProxyIcon } from "../components/proxy-icon";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
 import { R37OpportunityCard, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
@@ -48,7 +48,6 @@ const EXPLORER_SPOTS: ReadonlyArray<{ id: string; name: string; lat: number; lng
 export type MarketViewMode = "LIST" | "MAP";
 
 type ActivityFilter = "RECOMMENDED" | "CAFE" | "RESTAURANT" | "MINE";
-type OpportunityFilter = "MATCH" | "FAIR" | "COUNTER" | "NEARBY" | "TODAY" | "INVITED";
 
 const ACTIVITY_FILTERS: ReadonlyArray<{ id: ActivityFilter; label: string }> = [
   { id: "RECOMMENDED", label: "趋势" },
@@ -56,33 +55,6 @@ const ACTIVITY_FILTERS: ReadonlyArray<{ id: ActivityFilter; label: string }> = [
   { id: "RESTAURANT", label: "本周" },
   { id: "MINE", label: "我的活动" }
 ];
-
-const OPP_FILTERS: ReadonlyArray<{ id: OpportunityFilter; label: string }> = [
-  { id: "MATCH", label: "适合你" },
-  { id: "FAIR", label: "价格合理" },
-  { id: "COUNTER", label: "可反报价" },
-  { id: "NEARBY", label: "附近" },
-  { id: "TODAY", label: "今天" },
-  { id: "INVITED", label: "邀请我的" }
-];
-
-type R7Filter = "RECOMMEND" | "VALUE" | "TIME" | "NEARBY" | "INVITE" | "FILTER";
-const R7_FILTERS: ReadonlyArray<{ id: R7Filter; label: string; icon: ProxyIconName }> = [
-  { id: "RECOMMEND", label: "推荐", icon: "star" },
-  { id: "VALUE", label: "收益", icon: "coin" },
-  { id: "TIME", label: "时间", icon: "clock" },
-  { id: "NEARBY", label: "附近", icon: "route" },
-  { id: "INVITE", label: "邀请", icon: "mail" },
-  { id: "FILTER", label: "筛选", icon: "settings" }
-];
-const R7_FILTER_META: Record<R7Filter, { title: string; sub: string }> = {
-  RECOMMEND: { title: "最适合你的机会", sub: "综合能力、价格、时间、区域与客户质量" },
-  VALUE: { title: "更值得接的机会", sub: "不是价格最高，而是综合净收益与长期价值" },
-  TIME: { title: "与你时间最合的机会", sub: "优先完整覆盖当前可用时间，不制造冲突" },
-  NEARBY: { title: "通勤更轻的机会", sub: "优先现实可达、低通勤成本的需求" },
-  INVITE: { title: "客户直接邀请你的机会", sub: "对方已经主动表达希望你参与" },
-  FILTER: { title: "完整筛选", sub: "价格、时长、类型、付款、客户质量等高级条件" }
-};
 
 // scenarioIconForOpportunity was removed with R4OpportunityCard.
 // Type-driven icons now live in r37-opportunity-card.tsx using
@@ -128,7 +100,6 @@ export function MarketSurface({
   const [pagerPage, setPagerPage] = useState<number | undefined>(undefined);
   const [view, setView] = useState<MarketViewMode>("LIST");
   const [lens, setLens] = useState<OpportunityLens>("NOW");
-  const [oppFilter, setOppFilter] = useState<R7Filter>("RECOMMEND");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("RECOMMENDED");
   const [search, setSearch] = useState("");
   const [activityPhase, setActivityPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
@@ -243,9 +214,9 @@ export function MarketSurface({
     if (tab === "OPPORTUNITY") void loadOpportunities();
   }, [tab, loadOpportunities]);
 
-  // M4: 当“推荐”筛选激活时，拉取真实供给（QuerySuppliers market=hn capability=ZH），用于“适合你”排序依据
+  // M4: 机会页拉取真实供给（QuerySuppliers market=hn capability=ZH），用于“供给匹配”状态行
   useEffect(() => {
-    if (!supply || tab !== "OPPORTUNITY" || oppFilter !== "RECOMMEND") {
+    if (!supply || tab !== "OPPORTUNITY") {
       setSupplierMatches(undefined);
       setSupplierError(undefined);
       return;
@@ -256,7 +227,7 @@ export function MarketSurface({
       .then((list) => { if (!cancelled) { setSupplierMatches(list); setSupplierError(undefined); } })
       .catch((e) => { if (!cancelled) setSupplierError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
-  }, [supply, tab, oppFilter]);
+  }, [supply, tab]);
 
   async function dismissOpportunity(id: string): Promise<void> {
     if (busy) return;
@@ -501,7 +472,7 @@ export function MarketSurface({
         </Pressable>
       </View>
       {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}
-      {supply && oppFilter === "RECOMMEND" ? (
+      {supply ? (
         <Text style={styles.offerMsg}>
           {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
         </Text>
@@ -572,7 +543,7 @@ export function MarketSurface({
           <>
             {opportunityError ? <Text style={styles.marketError}>{opportunityError}</Text> : null}
             {opportunityPhase === "LOADING" ? <ActivityIndicator color={color.magenta} style={{ marginVertical: 8 }} /> : null}
-            <OpportunityTab items={opportunityItems} lens={lens} setLens={setLens} oppFilter={oppFilter} setOppFilter={setOppFilter} marketLabel={effectiveMarketLabel} onOpen={(o) => setOppDetail(o)} onDismiss={(id) => void dismissOpportunity(id)} />
+            <OpportunityTab items={opportunityItems} marketLabel={effectiveMarketLabel} onOpen={(o) => setOppDetail(o)} onDismiss={(id) => void dismissOpportunity(id)} />
           </>
         )
       ) : (
@@ -660,19 +631,11 @@ export function MarketSurface({
 
 function OpportunityTab({
   items: sourceItems,
-  lens,
-  setLens,
-  oppFilter,
-  setOppFilter,
   marketLabel,
   onOpen,
   onDismiss
 }: {
   items: MarketOpportunity[];
-  lens: OpportunityLens;
-  setLens: (lens: OpportunityLens) => void;
-  oppFilter: R7Filter;
-  setOppFilter: (f: R7Filter) => void;
   marketLabel: string;
   onOpen: (o: MarketOpportunity) => void;
   onDismiss: (id: string) => void;
@@ -680,11 +643,6 @@ function OpportunityTab({
   const [typeFilter, setTypeFilter] = useState<OpportunityType | "all">("all");
   const base = sourceItems;
   let items = [...base];
-  if (oppFilter === "NEARBY") items = items.filter((o) => o.travel != null).sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
-  if (oppFilter === "TIME") items = [...items].sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
-  if (oppFilter === "VALUE") items = [...items].sort((a, b) => parseInt(a.price.replace(/\D/g, "")) - parseInt(b.price.replace(/\D/g, "")));
-  if (oppFilter === "RECOMMEND") items = [...items].sort((a, b) => (a.travel ?? 999) - (b.travel ?? 999));
-  if (oppFilter === "INVITE") items = items.slice(0, 1);
   if (typeFilter !== "all") items = items.filter((o) => inferOpportunityTypeForFilter(o) === typeFilter);
   return (
     <>
@@ -696,21 +654,6 @@ function OpportunityTab({
       </View>
 
       <R37TypePalette active={typeFilter} onChange={setTypeFilter} />
-
-      <View style={styles.oppQuickNav}>
-        {R7_FILTERS.slice(0,5).map((f) => (
-          <Pressable
-            key={f.id}
-            onPress={() => setOppFilter(f.id)}
-            style={[styles.oppQuickBtn, oppFilter === f.id && styles.oppQuickBtnOn]}
-          >
-            <View style={styles.oppIcon}>
-              <ProxyIcon color={oppFilter === f.id ? color.ink : color.muted} name={f.icon} size={20} />
-            </View>
-            <Text style={[styles.oppQuickLabel, oppFilter === f.id && styles.oppQuickLabelOn]}>{f.label}</Text>
-          </Pressable>
-        ))}
-      </View>
 
       <View style={styles.oppStack}>
         {items.map((opportunity) => (
@@ -1352,21 +1295,8 @@ const styles = StyleSheet.create({
   lensSmOn: { backgroundColor: color.ink, borderColor: color.ink },
   lensSmText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   lensSmTextOn: { color: color.white },
-  // R7 筛选宫格 5 列
-  oppQuickNav: { flexDirection: "row", gap: 5, marginVertical: 8, paddingHorizontal: 12 },
-  oppQuickBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, gap: 4, justifyContent: "center", minHeight: 58, paddingHorizontal: 2, paddingVertical: 7, position: "relative" },
-  oppQuickBtnOn: { backgroundColor: "#FFF0F6", borderColor: color.magenta },
-  oppIcon: { alignItems: "center", height: 24, justifyContent: "center", width: 24 },
-  oppQuickLabel: { color: color.muted, fontSize: 11, fontWeight: "700", textAlign: "center" },
-  oppQuickLabelOn: { color: color.ink },
   badge: { alignItems: "center", backgroundColor: color.magenta, borderColor: color.white, borderRadius: 999, borderWidth: 2, height: 15, justifyContent: "center", minWidth: 15, paddingHorizontal: 4, position: "absolute", right: 5, top: 4 },
   badgeText: { color: color.white, fontSize: 11, fontWeight: "900" },
-  oppQuickHint: { alignItems: "center", flexDirection: "row", gap: 9, justifyContent: "space-between", marginHorizontal: 2, marginBottom: 7 },
-  oppQuickHintCopy: { flex: 1 },
-  oppQuickHintTitle: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  oppQuickHintSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
-  oppQuickHintPill: { backgroundColor: "#FFF0F6", borderRadius: 999, paddingHorizontal: 7, paddingVertical: 5 },
-  oppQuickHintPillText: { color: "#7A0033", fontSize: 11, fontWeight: "800" },
   localScope: { alignItems: "center", flexDirection: "row", gap: 5, marginVertical: 2, paddingHorizontal: 1 },
   localScopeGlyph: { color: color.violet, fontSize: 11 },
   localScopeText: { color: color.muted, fontSize: 11 },

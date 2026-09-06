@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 48 — 2026-09-06
+
+- Removed the legacy R7 opportunity quick filters (recommend/value/time/nearby/
+  invite) and dead OPP_FILTERS from market.tsx. Opportunity filtering is now
+  solely the R37 scenario type palette; search, supply status line and R37
+  cards unchanged.
+
 ## Revision 47 — 2026-09-06
 
 - Applied the R3 11pt readable-text floor to merchant-storefront summary and
