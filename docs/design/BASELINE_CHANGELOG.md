@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 42 — 2026-09-06
+
+- R36.1 messaging supersedes the earlier chat visual reference. Conversation
+  now uses Lotus-style clustered bubbles, a secure-message control sheet,
+  sticker drawer, reply preview, message reactions and a pinned-message strip.
+  Existing server-backed image, video, audio and proxy-object lanes remain in
+  place. All readable labels comply with the R3 11pt minimum; unsupported
+  call/thread/forward flows remain explicitly partial rather than simulated as
+  completed operations.
+
 ## Revision 41 — 2026-09-05
 
 - 活动导流页去占位化：有 tile 无页面的死入口改走真实商家活动

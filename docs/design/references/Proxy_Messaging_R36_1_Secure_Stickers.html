@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1,maximum-scale=1" name="viewport"/>
+<title>Proxy · Messaging R36 · Lotus Conversation Aligned</title>
+<style>
+:root{
+  --bg:#f4f2ed;
+  --paper:#fffdf8;
+  --ink:#11110f;
+  --muted:#8d8880;
+  --line:#e5e0d7;
+  --soft:#f3f0ea;
+  --accent:#f2ad29;
+  --out:#f0f5f5;
+  --out-line:#dce8e8;
+  --green:#2d725d;
+  --danger:#a94b41;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif;color:var(--ink);background:#d6d2cb}
+button,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+.stage{min-height:100vh;display:flex;gap:18px;justify-content:center;padding:18px}
+.note{
+  width:270px;background:#fff;border:1px solid #cbc6bd;padding:15px;height:max-content
+}
+.note h1{font-size:17px;margin:0 0 7px}
+.note p,.note li{font-size:10px;line-height:1.65;color:#68645e}
+.note ul{padding-left:16px;margin:9px 0}
+.note .rule{border-top:1px solid #eee8df;padding-top:10px;margin-top:10px}
+.phone{
+  width:390px;height:844px;background:var(--paper);border:1px solid #aaa59c;position:relative;overflow:hidden;
+}
+.status{
+  height:22px;display:flex;align-items:center;justify-content:space-between;padding:0 13px;font-size:9px;background:var(--paper)
+}
+.topbar{
+  height:54px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:42px 1fr 84px;align-items:center;padding:0 7px;background:var(--paper)
+}
+.iconbtn{width:36px;height:36px;border:0;background:transparent;border-radius:50%;display:grid;place-items:center}
+.iconbtn:active{background:var(--soft)}
+.iconbtn svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.peer{text-align:center;min-width:0}
+.peer b{display:block;font-size:13px;line-height:1.1}
+.peer span{display:block;font-size:8px;color:var(--muted);margin-top:3px}
+.peer span i{font-style:normal;color:#8b681c;font-weight:760}
+.topActions{display:flex;justify-content:flex-end;align-items:center}
+.topAvatar{width:29px;height:29px;border-radius:50%;object-fit:cover;border:1px solid var(--line)}
+.pin{
+  height:32px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:7px;padding:0 11px;background:#fffefa;font-size:8px;color:#777
+}
+.pin b{color:#333;font-size:8px}
+.pin .copy{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat{
+  position:absolute;left:0;right:0;top:108px;bottom:66px;overflow:auto;padding:12px 10px 20px;background:var(--paper)
+}
+.day{text-align:center;color:#aaa59d;font-size:8px;margin:4px 0 15px}
+.cluster{margin:0 0 11px}
+.msgrow{display:flex;align-items:flex-end;gap:6px;margin:2px 0}
+.msgrow.me{justify-content:flex-end}
+.msgrow.peerRow{padding-right:52px}
+.msgrow.me{padding-left:52px}
+.avatarSlot{width:24px;flex:0 0 24px}
+.avatarMini{width:24px;height:24px;border-radius:50%;object-fit:cover;display:block}
+.stack{min-width:0;max-width:100%;display:flex;flex-direction:column;align-items:flex-start}
+.me .stack{align-items:flex-end}
+.bubble{
+  max-width:274px;padding:7px 10px 6px;border:1px solid var(--line);background:#fff;
+  border-radius:14px 14px 14px 5px;font-size:12.5px;line-height:1.42;position:relative;
+}
+.me .bubble{background:var(--out);border-color:var(--out-line);border-radius:14px 14px 5px 14px}
+.bubble.firstPeer{border-radius:14px 14px 14px 8px}
+.bubble.lastPeer{border-radius:14px 14px 14px 5px}
+.bubble.firstMe{border-radius:14px 14px 8px 14px}
+.bubble.lastMe{border-radius:14px 14px 5px 14px}
+.timeInline{
+  display:inline-flex;gap:3px;align-items:center;float:right;margin-left:8px;margin-top:6px;font-size:7.5px;line-height:1;color:#aaa59d
+}
+.check{color:#6f9fa1;font-weight:800}
+.replyInside{
+  border-left:2px solid var(--accent);padding:2px 0 2px 7px;margin:0 0 6px;font-size:9px;line-height:1.35;color:#777
+}
+.replyInside b{display:block;font-size:8px;color:#8a651b;margin-bottom:1px}
+.reactionChip{
+  border:1px solid var(--line);background:#fff;border-radius:10px;padding:2px 5px;font-size:8px;margin-top:2px
+}
+.me .reactionChip{margin-right:4px}
+.peerRow .reactionChip{margin-left:4px}
+
+/* unified Lotus object lane */
+.objectLane{
+  width:250px;border:1px solid var(--line);background:#fff;border-radius:13px;overflow:hidden
+}
+.me .objectLane{border-color:var(--out-line)}
+.objectTop{display:flex;gap:8px;align-items:center;padding:9px 10px 7px}
+.objectIcon{width:28px;height:28px;border-radius:9px;background:#111;color:#fff;display:grid;place-items:center;flex:0 0 auto}
+.objectIcon svg{width:14px;height:14px;fill:none;stroke:#fff;stroke-width:1.8}
+.objectType{font-size:7.5px;font-weight:850;color:#8a651b;letter-spacing:.2px}
+.objectTitle{font-size:11px;font-weight:800;margin-top:2px}
+.objectBody{padding:0 10px 8px;font-size:9px;line-height:1.45;color:#68645e}
+.objectStatus{display:flex;align-items:center;gap:5px;margin-top:4px}
+.statusDot{width:6px;height:6px;border-radius:50%;background:var(--green)}
+.objectFoot{
+  height:31px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 10px;font-size:8px
+}
+.objectFoot b{font-size:9px}
+.objectTime{font-size:7.5px;color:#aaa59d;margin-top:3px;text-align:right;width:100%}
+
+/* recording obeys same width/baseline */
+.recording{
+  width:250px;border:1px solid var(--line);background:#fff;border-radius:13px;overflow:hidden
+}
+.recMain{display:flex;gap:8px;align-items:center;padding:9px 10px}
+.play{width:28px;height:28px;border:0;border-radius:50%;background:#111;color:#fff;display:grid;place-items:center}
+.play svg{width:11px;height:11px;fill:currentColor}
+.recCopy{flex:1;min-width:0}
+.recCopy b{font-size:10px;display:block}
+.recCopy span{font-size:7.5px;color:#888;display:block;margin-top:2px}
+.wave{display:flex;align-items:center;gap:2px;height:12px;margin-top:4px}
+.wave i{display:block;width:2px;background:#bbb6ae;border-radius:1px}
+.wave i:nth-child(1){height:4px}.wave i:nth-child(2){height:8px}.wave i:nth-child(3){height:11px}.wave i:nth-child(4){height:5px}.wave i:nth-child(5){height:9px}.wave i:nth-child(6){height:6px}.wave i:nth-child(7){height:12px}.wave i:nth-child(8){height:7px}.wave i:nth-child(9){height:5px}.wave i:nth-child(10){height:9px}
+.systemEvent{
+  max-width:260px;margin:12px auto;text-align:center;font-size:8px;line-height:1.45;color:#9a958d
+}
+.systemEvent b{color:#66615a;font-weight:750}
+.unreadSep{
+  display:flex;align-items:center;gap:7px;margin:13px 0;color:#926b1d;font-size:7.5px;font-weight:760
+}
+.unreadSep:before,.unreadSep:after{content:"";height:1px;background:#ecd59d;flex:1}
+
+/* composer */
+.replyPreview{
+  display:none;position:absolute;left:0;right:0;bottom:66px;min-height:40px;border-top:1px solid var(--line);background:var(--paper);
+  padding:6px 11px 6px 14px;align-items:center;gap:8px
+}
+.replyPreview.show{display:flex}
+.replyLine{width:2px;height:27px;background:var(--accent)}
+.replyCopy{flex:1;min-width:0}
+.replyCopy b{display:block;font-size:8px;color:#8a651b}
+.replyCopy span{display:block;font-size:8px;color:#777;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.replyClose{width:24px;height:24px;border:0;background:transparent;color:#999}
+.composer{
+  position:absolute;left:0;right:0;bottom:0;height:66px;border-top:1px solid var(--line);background:var(--paper);padding:7px 7px 9px;
+  display:flex;align-items:flex-end;gap:4px
+}
+.composeIcon{width:34px;height:36px;border:0;background:transparent;display:grid;place-items:center}
+.composeIcon svg{width:19px;height:19px;fill:none;stroke:#87827a;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.inputWrap{
+  flex:1;min-height:38px;border:1px solid var(--line);border-radius:19px;background:#fff;display:flex;align-items:flex-end;padding-left:10px
+}
+.inputWrap textarea{flex:1;min-height:36px;max-height:78px;border:0;outline:0;resize:none;background:transparent;padding:8px 2px 7px;font-size:12px;line-height:1.35}
+.inlineTool{width:30px;height:36px;border:0;background:transparent;display:grid;place-items:center;color:#8d8880}
+.sendBtn{width:34px;height:34px;border:0;border-radius:50%;background:#111;color:#fff;display:none;place-items:center;margin-bottom:1px}
+.sendBtn svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:2}
+
+/* long press menu */
+.overlay{position:absolute;inset:0;background:rgba(17,17,15,.16);display:none;z-index:20}
+.overlay.show{display:block}
+.menuSheet{
+  position:absolute;left:10px;right:10px;bottom:10px;background:var(--paper);border:1px solid var(--line);display:none;z-index:30;padding:8px 10px 12px
+}
+.menuSheet.show{display:block}
+.reactions{display:flex;justify-content:space-between;padding:4px 3px 9px}
+.reactions button{border:0;background:transparent;font-size:20px}
+.menuItem{height:40px;border:0;border-top:1px solid var(--line);background:transparent;width:100%;display:flex;align-items:center;justify-content:space-between;font-size:11px}
+.menuItem span{color:#888;font-size:8px}
+.toast{
+  position:absolute;left:50%;bottom:78px;transform:translateX(-50%);background:#111;color:#fff;padding:7px 10px;font-size:8px;display:none;z-index:50;white-space:nowrap
+}
+.toast.show{display:block}
+@media(max-width:720px){.note{display:none}.stage{padding:0}.phone{width:100vw;height:100vh;border:0}.chat{bottom:66px}}
+
+/* R36.1 · Secure Chat + OpenMoji Sticker Drawer */
+.topbar{
+  grid-template-columns:42px 1fr 118px;
+}
+.topActions{
+  gap:0;
+}
+.secureBtn.active{
+  background:#111;
+  color:#fff;
+}
+.secureBtn.active svg{stroke:#fff}
+
+.secureStrip{
+  position:absolute;
+  left:0;right:0;
+  bottom:66px;
+  height:0;
+  overflow:hidden;
+  background:#fff8e8;
+  border-top:0 solid #ead39a;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  font-size:7.5px;
+  color:#795814;
+  z-index:6;
+  transition:.18s ease;
+}
+.secureStrip.show{
+  height:26px;
+  border-top-width:1px;
+}
+.secureStrip b{font-size:7.5px}
+.secureMeta{
+  display:inline-flex;
+  align-items:center;
+  gap:2px;
+  font-size:7px;
+  color:#966a19;
+  margin-left:4px;
+  white-space:nowrap;
+}
+.secureBadge{
+  display:inline-flex;
+  align-items:center;
+  gap:3px;
+  margin-top:3px;
+  padding:2px 5px;
+  border:1px solid #ead39a;
+  background:#fff9eb;
+  font-size:7px;
+  color:#795814;
+  border-radius:8px;
+}
+.burnedBubble{
+  color:#aaa59d!important;
+  border-style:dashed!important;
+  background:#faf8f3!important;
+  font-size:9px!important;
+}
+
+/* bottom sheets */
+.bottomSheet{
+  position:absolute;
+  left:8px;right:8px;bottom:8px;
+  background:var(--paper);
+  border:1px solid var(--line);
+  z-index:35;
+  display:none;
+  padding:10px 11px 12px;
+}
+.bottomSheet.show{display:block}
+.sheetGrab{
+  width:32px;height:3px;border-radius:2px;background:#d5d0c8;margin:0 auto 9px
+}
+.sheetHead{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:8px
+}
+.sheetHead b{font-size:12px}
+.sheetHead span{font-size:7px;color:#999}
+.sheetClose{
+  width:28px;height:28px;border:0;background:transparent;font-size:18px;color:#8c877f
+}
+.settingRow{
+  min-height:46px;
+  border-top:1px solid var(--line);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.settingCopy b{display:block;font-size:10px}
+.settingCopy span{display:block;font-size:7.5px;color:#8a857d;margin-top:2px;line-height:1.35}
+.switch{
+  width:38px;height:22px;border:0;border-radius:12px;background:#d9d5ce;padding:2px;position:relative;flex:0 0 auto
+}
+.switch i{
+  display:block;width:18px;height:18px;border-radius:50%;background:#fff;transition:.18s
+}
+.switch.on{background:#111}
+.switch.on i{transform:translateX(16px)}
+.timerGrid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:5px;
+  padding:7px 0 11px;
+}
+.timerOpt{
+  height:31px;border:1px solid var(--line);background:#fff;font-size:8px
+}
+.timerOpt.active{
+  background:#111;color:#fff;border-color:#111
+}
+.secureNote{
+  border-top:1px solid var(--line);
+  padding-top:8px;
+  font-size:7px;
+  line-height:1.5;
+  color:#8a857d
+}
+
+/* disabled forward */
+.menuItem.disabled{
+  color:#b8b3ab;
+  cursor:not-allowed;
+}
+.menuItem.disabled span{color:#c9c4bc}
+
+/* Sticker button in composer */
+.stickerTool{
+  width:30px;height:36px;border:0;background:transparent;display:grid;place-items:center;color:#8d8880
+}
+.stickerTool svg{
+  width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round
+}
+.stickerDrawer{
+  position:absolute;
+  left:0;right:0;
+  bottom:66px;
+  height:0;
+  overflow:hidden;
+  background:var(--paper);
+  border-top:0 solid var(--line);
+  z-index:8;
+  transition:.18s ease;
+}
+.stickerDrawer.show{
+  height:220px;
+  border-top-width:1px;
+}
+.stickerHead{
+  height:35px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 11px;
+  border-bottom:1px solid var(--line);
+}
+.stickerHead b{font-size:9px}
+.stickerHead span{font-size:7px;color:#999}
+.stickerGrid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:4px;
+  padding:9px 9px 5px;
+}
+.stickerItem{
+  height:66px;border:0;background:transparent;display:grid;place-items:center;position:relative
+}
+.stickerItem:active{background:var(--soft)}
+.stickerItem img{
+  width:48px;height:48px;object-fit:contain
+}
+.stickerFallback{
+  display:none;
+  font-size:34px;
+}
+.stickerCredit{
+  padding:2px 11px 8px;
+  text-align:right;
+  font-size:6.5px;
+  color:#aaa59d
+}
+.stickerMessage{
+  width:112px;
+  min-height:112px;
+  border:0;
+  background:transparent;
+  display:grid;
+  place-items:center;
+  padding:2px;
+}
+.stickerMessage img{
+  width:102px;height:102px;object-fit:contain
+}
+.stickerMsgMeta{
+  font-size:7px;
+  color:#aaa59d;
+  text-align:right;
+  width:112px;
+  margin-top:1px;
+}
+</style>
+</head>
+<body>
+<div class="stage">
+<aside class="note">
+<h1>R36.1 · Secure + Stickers</h1>
+<p>保留 R36 对话基线，补回阅后即焚 / 禁止转发，并加入开源表情包 Drawer。</p>
+<ul>
+<li>同一发送者连续消息组成 <b>cluster</b>。</li>
+<li>头像只在 cluster 最后一条出现。</li>
+<li>文本、回复、邀约对象、录音对象共用一条左右基线。</li>
+<li>Proxy 对象仍然只是 Message Object，不做独立业务面板。</li>
+<li>系统事件居中，不和真人消息竞争视觉。</li>
+<li>Secure Chat 是会话能力，不把每条消息做成复杂安全卡。</li><li>OpenMoji 表情包只在 Composer Drawer 出现。</li></ul>
+<div class="rule"><b>核心：</b>先像一个成熟聊天工具，再像 Proxy。业务对象进入聊天，但不能撕裂聊天 IA。</div>
+</aside>
+<main class="phone">
+<div class="status"><span>9:41</span><span>●●● 5G ▰</span></div>
+<header class="topbar">
+<button class="iconbtn" id="back">
+<svg viewbox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg>
+</button>
+<div class="peer" id="peerInfo">
+<b>Mai</b>
+<span>在线 · <i>今天 14:00–17:30 可接受邀约</i></span>
+</div>
+<div class="topActions">
+<button aria-label="安全对话" class="iconbtn secureBtn" id="secureBtn">
+<svg viewbox="0 0 24 24">
+<path d="M12 3 19 6v5c0 4.4-2.7 7.7-7 10-4.3-2.3-7-5.6-7-10V6z"></path>
+<path d="M9.5 12 11 13.5 14.5 10"></path>
+</svg>
+</button><button class="iconbtn" id="call">
+<svg viewbox="0 0 24 24"><path d="M7 4h3l2 5-2 1.5a15 15 0 0 0 3.5 3.5L15 12l5 2v3c0 1.1-.9 2-2 2C10.3 19 5 13.7 5 6c0-1.1.9-2 2-2z"></path></svg>
+</button>
+<img class="topAvatar" id="avatar" src="https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&amp;fit=crop&amp;w=160&amp;q=80"/>
+</div>
+</header>
+<div class="pin" id="pin">
+<span>⌁</span>
+<div class="copy"><b>置顶：</b>周六 15:00 · Sunlight Coffee</div>
+<span>1/1</span>
+</div>
+<section class="chat" id="chat">
+<div class="day">今天</div>
+<div class="cluster">
+<div class="msgrow peerRow">
+<div class="avatarSlot"></div>
+<div class="stack">
+<div class="bubble firstPeer actionable" data-msg="下午可以，我大概 3 点以后有空。">
+              下午可以，我大概 3 点以后有空。
+              <span class="timeInline">14:08</span>
+</div>
+</div>
+</div>
+<div class="msgrow peerRow">
+<div class="avatarSlot"><img class="avatarMini" src="https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&amp;fit=crop&amp;w=120&amp;q=80"/></div>
+<div class="stack">
+<div class="bubble lastPeer actionable" data-msg="Coffee 或者先走一会儿都可以。">
+              Coffee 或者先走一会儿都可以。
+              <span class="timeInline">14:08</span>
+</div>
+</div>
+</div>
+</div>
+<div class="cluster">
+<div class="msgrow me">
+<div class="stack">
+<div class="bubble firstMe actionable" data-msg="那 3 点到 5 点？">
+              那 3 点到 5 点？
+              <span class="timeInline">14:09 <span class="check">✓✓</span></span>
+</div>
+</div>
+</div>
+<div class="msgrow me">
+<div class="stack">
+<div class="bubble lastMe actionable" data-msg="我比较想找个安静一点、能坐着聊的地方。">
+              我比较想找个安静一点、能坐着聊的地方。
+              <span class="timeInline">14:09 <span class="check">✓✓</span></span>
+</div>
+</div>
+</div>
+</div>
+<div class="systemEvent"><b>Proxy</b> 根据你们已确认的时间，准备了 1 个低摩擦 Scene。</div>
+<div class="cluster">
+<div class="msgrow me">
+<div class="stack">
+<div class="objectLane actionable" data-msg="Sunlight Coffee · 周六 15:00–17:00 · Three Beans">
+<div class="objectTop">
+<div class="objectIcon">
+<svg viewbox="0 0 24 24"><path d="M5 7h14v10H5z"></path><path d="M8 10h8M8 13h5"></path></svg>
+</div>
+<div>
+<div class="objectType">PROXY · SCENE 邀约</div>
+<div class="objectTitle">周六 15:00–17:00</div>
+</div>
+</div>
+<div class="objectBody">
+                Three Beans · Sunlight Coffee<br/>
+                Coffee / Talk · Cầu Giấy
+                <div class="objectStatus"><span class="statusDot"></span> Mai 已接受</div>
+</div>
+<div class="objectFoot"><span>Scene</span><b>查看 ›</b></div>
+</div>
+<div class="objectTime">14:11 <span class="check">✓✓</span></div>
+</div>
+</div>
+</div>
+<div class="cluster">
+<div class="msgrow peerRow">
+<div class="avatarSlot"><img class="avatarMini" src="https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&amp;fit=crop&amp;w=120&amp;q=80"/></div>
+<div class="stack">
+<div class="bubble lastPeer actionable" data-msg="可以，这个地方我知道。">
+<div class="replyInside"><b>回复 Scene 邀约</b>Three Beans · 周六 15:00</div>
+              可以，这个地方我知道。
+              <span class="timeInline">14:12</span>
+</div>
+<div class="reactionChip">👍 1</div>
+</div>
+</div>
+</div>
+<div class="unreadSep">1 条未读</div>
+<div class="cluster">
+<div class="msgrow peerRow">
+<div class="avatarSlot"></div>
+<div class="stack">
+<div class="recording actionable" data-msg="通话录音 · 00:31">
+<div class="recMain">
+<button class="play" id="play">
+<svg viewbox="0 0 24 24"><path d="m8 5 11 7-11 7z"></path></svg>
+</button>
+<div class="recCopy">
+<b>通话录音 · 00:31</b>
+<span>你和 Mai · 14:18</span>
+<div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+</div>
+</div>
+<div class="objectFoot"><span>Call recording</span><b>打开 ›</b></div>
+</div>
+</div>
+</div>
+<div class="msgrow peerRow">
+<div class="avatarSlot"><img class="avatarMini" src="https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&amp;fit=crop&amp;w=120&amp;q=80"/></div>
+<div class="stack">
+<div class="bubble lastPeer actionable" data-msg="那周六见，我到之前再给你发消息。">
+              那周六见，我到之前再给你发消息。
+              <span class="timeInline">14:19</span>
+</div>
+</div>
+</div>
+</div>
+<div class="cluster" id="secureDemoCluster">
+<div class="msgrow me">
+<div class="stack">
+<div class="bubble lastMe actionable" data-msg="我到之前发你位置，这条看完会自动消失。">
+        我到之前发你位置，这条看完会自动消失。
+        <span class="secureMeta">🔥 1m · 禁转发</span>
+<span class="timeInline">14:20 <span class="check">✓✓</span></span>
+</div>
+</div>
+</div>
+</div><div class="systemEvent">Scene Care 将在出发前检查排队 / 座位；正常时不会打扰你们。</div>
+</section>
+<div class="replyPreview" id="replyPreview">
+<div class="replyLine"></div>
+<div class="replyCopy"><b>回复 Mai</b><span id="replyText">下午可以，我大概 3 点以后有空。</span></div>
+<button class="replyClose" id="replyClose">×</button>
+</div>
+<div class="stickerDrawer" id="stickerDrawer">
+<div class="stickerHead">
+<b>表情包</b>
+<span>OpenMoji</span>
+</div>
+<div class="stickerGrid">
+<button class="stickerItem" data-code="1F602" data-emoji="😂" data-name="笑哭">
+<img alt="😂" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" src="https://openmoji.org/data/color/svg/1F602.svg"/>
+<span class="stickerFallback">😂</span>
+</button>
+<button class="stickerItem" data-code="1F970" data-emoji="🥰" data-name="开心">
+<img alt="🥰" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" src="https://openmoji.org/data/color/svg/1F970.svg"/>
+<span class="stickerFallback">🥰</span>
+</button>
+<button class="stickerItem" data-code="1F60E" data-emoji="😎" data-name="酷">
+<img alt="😎" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" src="https://openmoji.org/data/color/svg/1F60E.svg"/>
+<span class="stickerFallback">😎</span>
+</button>
+<button class="stickerItem" data-code="1F44D" data-emoji="👍" data-name="赞">
+<img alt="👍" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" src="https://openmoji.org/data/color/svg/1F44D.svg"/>
+<span class="stickerFallback">👍</span>
+</button>
+<button class="stickerItem" data-code="1F525" data-emoji="🔥" data-name="火">
+<img alt="🔥" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" src="https://openmoji.org/data/color/svg/1F525.svg"/>
+<span class="stickerFallback">🔥</span>
+</button>
+<button class="stickerItem" data-code="1F389" data-emoji="🎉" data-name="庆祝">
+<img alt="🎉" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" src="https://openmoji.org/data/color/svg/1F389.svg"/>
+<span class="stickerFallback">🎉</span>
+</button>
+<button class="stickerItem" data-code="1F914" data-emoji="🤔" data-name="想想">
+<img alt="🤔" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" src="https://openmoji.org/data/color/svg/1F914.svg"/>
+<span class="stickerFallback">🤔</span>
+</button>
+<button class="stickerItem" data-code="1F64C" data-emoji="🙌" data-name="开心">
+<img alt="🙌" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" src="https://openmoji.org/data/color/svg/1F64C.svg"/>
+<span class="stickerFallback">🙌</span>
+</button>
+</div>
+<div class="stickerCredit">OpenMoji · CC BY-SA 4.0</div>
+</div><div class="secureStrip" id="secureStrip">
+<span>🔥</span>
+<b id="secureStripText">阅后即焚</b>
+<span id="secureStripNoForward">· 禁止转发</span>
+</div><footer class="composer">
+<button class="composeIcon" id="attach">
+<svg viewbox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>
+</button>
+<div class="inputWrap">
+<textarea id="input" placeholder="消息" rows="1"></textarea>
+<button aria-label="表情包" class="stickerTool" id="stickerBtn">
+<svg viewbox="0 0 24 24">
+<circle cx="12" cy="12" r="8"></circle>
+<path d="M8.5 10h.01M15.5 10h.01"></path>
+<path d="M8.5 14c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8"></path>
+</svg>
+</button><button class="inlineTool" id="camera">
+<svg viewbox="0 0 24 24"><path d="M5 8h3l1.5-2h5L16 8h3v10H5z"></path><circle cx="12" cy="13" r="3"></circle></svg>
+</button>
+</div>
+<button class="composeIcon" id="mic">
+<svg viewbox="0 0 24 24"><rect height="10" rx="3" width="6" x="9" y="4"></rect><path d="M6 11a6 6 0 0 0 12 0M12 17v3"></path></svg>
+</button>
+<button class="sendBtn" id="send">
+<svg viewbox="0 0 24 24"><path d="m5 12 14-7-5 14-2-6z"></path></svg>
+</button>
+</footer>
+<div class="overlay" id="overlay"></div>
+<section class="menuSheet" id="menuSheet">
+<div class="reactions">
+<button>👍</button><button>❤️</button><button>😂</button><button>😮</button><button>😢</button><button>🔥</button>
+</div>
+<button class="menuItem" id="replyAction">回复 <span>↩</span></button>
+<button class="menuItem" id="convoAction">创建 Convo <span>›</span></button>
+<button class="menuItem" data-disabled="false" id="forwardAction">转发 <span>›</span></button>
+<button class="menuItem" id="pinAction">置顶 <span>›</span></button>
+</section>
+<section class="bottomSheet" id="secureSheet">
+<div class="sheetGrab"></div>
+<div class="sheetHead">
+<div>
+<b>安全对话</b><br/>
+<span>只影响这个 Dialog</span>
+</div>
+<button class="sheetClose" id="secureClose">×</button>
+</div>
+<div class="settingCopy">
+<b>阅后即焚</b>
+<span>对方阅读后开始计时；历史普通消息不受影响</span>
+</div>
+<div class="timerGrid" id="timerGrid">
+<button class="timerOpt active" data-burn="off">关闭</button>
+<button class="timerOpt" data-burn="10s">10 秒</button>
+<button class="timerOpt" data-burn="1m">1 分钟</button>
+<button class="timerOpt" data-burn="1h">1 小时</button>
+<button class="timerOpt" data-burn="24h">24 小时</button>
+<button class="timerOpt" data-burn="7d">7 天</button>
+</div>
+<div class="settingRow">
+<div class="settingCopy">
+<b>禁止转发</b>
+<span>开启后，这个安全会话里的消息不能通过 Proxy 转发</span>
+</div>
+<button aria-label="禁止转发" class="switch" id="noForwardSwitch"><i></i></button>
+</div>
+<div class="secureNote">
+    Secure Chat 与普通聊天共用 renderer，但安全消息使用独立 Secure Session / encrypted payload。
+    “禁止转发”限制 Proxy 内的转发能力；不把它表述成无法被外部设备截屏或复制。
+  </div>
+</section><div class="toast" id="toast">完成</div>
+</main>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const chat=$('chat'),input=$('input'),send=$('send'),mic=$('mic');
+const overlay=$('overlay'),sheet=$('menuSheet'),toast=$('toast');
+let selected='';
+let pressTimer=null;
+
+function showToast(t){
+  toast.textContent=t;toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'),1200);
+}
+function closeMenu(){overlay.classList.remove('show');sheet.classList.remove('show')}
+function openMenu(el){
+  selected=el.dataset.msg||el.textContent.trim();
+  overlay.classList.add('show');sheet.classList.add('show');
+}
+overlay.onclick=closeMenu;
+
+document.querySelectorAll('.actionable').forEach(el=>{
+  el.addEventListener('pointerdown',()=>pressTimer=setTimeout(()=>openMenu(el),420));
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>el.addEventListener(ev,()=>clearTimeout(pressTimer)));
+  el.addEventListener('contextmenu',e=>{e.preventDefault();openMenu(el)});
+});
+
+document.querySelectorAll('.reactions button').forEach(b=>b.onclick=()=>{closeMenu();showToast('已回应 '+b.textContent)});
+$('replyAction').onclick=()=>{
+  closeMenu();
+  $('replyText').textContent=selected;
+  $('replyPreview').classList.add('show');
+  document.querySelector('.chat').style.bottom='106px';
+  input.focus();
+};
+$('replyClose').onclick=()=>{
+  $('replyPreview').classList.remove('show');
+  document.querySelector('.chat').style.bottom='66px';
+};
+$('convoAction').onclick=()=>{closeMenu();showToast('从这条消息创建 Convo')};
+
+$('pinAction').onclick=()=>{closeMenu();showToast('已置顶')};
+
+function updateComposer(){
+  const has=input.value.trim().length>0;
+  send.style.display=has?'grid':'none';
+  mic.style.display=has?'none':'grid';
+  input.style.height='auto';
+  input.style.height=Math.min(input.scrollHeight,78)+'px';
+}
+input.addEventListener('input',updateComposer);
+
+send.onclick=()=>{
+  const v=input.value.trim();
+  if(!v)return;
+  const cluster=document.createElement('div');
+  cluster.className='cluster';
+  const row=document.createElement('div');
+  row.className='msgrow me';
+  const stack=document.createElement('div');
+  stack.className='stack';
+  const bubble=document.createElement('div');
+  bubble.className='bubble lastMe actionable';
+  bubble.dataset.msg=v;
+  bubble.innerHTML=v.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'<span class="timeInline">刚刚 <span class="check">✓</span></span>';
+  stack.appendChild(bubble);row.appendChild(stack);cluster.appendChild(row);chat.appendChild(cluster);
+  input.value='';updateComposer();
+  $('replyPreview').classList.remove('show');
+  chat.style.bottom='66px';
+  setTimeout(()=>chat.scrollTop=chat.scrollHeight,10);
+};
+$('attach').onclick=()=>showToast('照片 / 视频 / 文件 / Proxy 对象');
+$('camera').onclick=()=>showToast('相机');
+$('mic').onclick=()=>showToast('按住录音');
+$('call').onclick=()=>showToast('语音 / 视频通话');
+$('avatar').onclick=$('peerInfo').onclick=()=>showToast('打开 Mai Profile');
+$('pin').onclick=()=>showToast('打开置顶消息');
+$('back').onclick=()=>showToast('返回 信息');
+$('play').onclick=()=>showToast('播放录音');
+
+/* R36.1 Secure Chat + Sticker Drawer */
+let secureState={
+  burn:'off',
+  noForward:false
+};
+
+const secureBtn=$('secureBtn');
+const secureSheet=$('secureSheet');
+const secureStrip=$('secureStrip');
+const secureStripText=$('secureStripText');
+const secureStripNoForward=$('secureStripNoForward');
+const noForwardSwitch=$('noForwardSwitch');
+const stickerBtn=$('stickerBtn');
+const stickerDrawer=$('stickerDrawer');
+
+function burnLabel(v){
+  return ({off:'关闭', '10s':'10 秒', '1m':'1 分钟', '1h':'1 小时', '24h':'24 小时', '7d':'7 天'})[v]||v;
+}
+
+function anySecureEnabled(){
+  return secureState.burn!=='off' || secureState.noForward;
+}
+
+function updateSecureUI(){
+  const enabled=anySecureEnabled();
+
+  secureBtn.classList.toggle('active',enabled);
+  noForwardSwitch.classList.toggle('on',secureState.noForward);
+
+  document.querySelectorAll('.timerOpt').forEach(b=>{
+    b.classList.toggle('active',b.dataset.burn===secureState.burn);
+  });
+
+  if(enabled){
+    secureStrip.classList.add('show');
+    chat.style.bottom = stickerDrawer.classList.contains('show') ? '286px' :
+      ($('replyPreview').classList.contains('show') ? '132px' : '92px');
+
+    const parts=[];
+    if(secureState.burn!=='off') parts.push('阅后 '+burnLabel(secureState.burn)+' 消失');
+    secureStripText.textContent=parts.length?parts.join(' · '):'安全对话';
+    secureStripNoForward.style.display=secureState.noForward?'inline':'none';
+  }else{
+    secureStrip.classList.remove('show');
+    if(!stickerDrawer.classList.contains('show')){
+      chat.style.bottom=$('replyPreview').classList.contains('show')?'106px':'66px';
+    }
+  }
+
+  $('forwardAction').classList.toggle('disabled',secureState.noForward);
+  $('forwardAction').dataset.disabled=secureState.noForward?'true':'false';
+}
+
+function closeSecureSheet(){
+  secureSheet.classList.remove('show');
+  if(!sheet.classList.contains('show') && !stickerDrawer.classList.contains('show')){
+    overlay.classList.remove('show');
+  }
+}
+
+secureBtn.onclick=()=>{
+  stickerDrawer.classList.remove('show');
+  secureSheet.classList.add('show');
+  overlay.classList.add('show');
+};
+
+$('secureClose').onclick=closeSecureSheet;
+
+document.querySelectorAll('.timerOpt').forEach(b=>b.onclick=()=>{
+  secureState.burn=b.dataset.burn;
+  updateSecureUI();
+});
+
+noForwardSwitch.onclick=()=>{
+  secureState.noForward=!secureState.noForward;
+  updateSecureUI();
+};
+
+const oldOverlayClick=overlay.onclick;
+overlay.onclick=()=>{
+  closeMenu();
+  closeSecureSheet();
+  stickerDrawer.classList.remove('show');
+  updateSecureUI();
+};
+
+stickerBtn.onclick=()=>{
+  closeSecureSheet();
+  closeMenu();
+  const willOpen=!stickerDrawer.classList.contains('show');
+  stickerDrawer.classList.toggle('show',willOpen);
+
+  if(willOpen){
+    chat.style.bottom=anySecureEnabled()?'286px':'260px';
+  }else{
+    updateSecureUI();
+  }
+};
+
+function secureMetaHTML(){
+  const parts=[];
+  if(secureState.burn!=='off') parts.push('🔥 '+burnLabel(secureState.burn));
+  if(secureState.noForward) parts.push('禁转发');
+  return parts.length?'<span class="secureMeta">'+parts.join(' · ')+'</span>':'';
+}
+
+function attachActionableHandlers(el){
+  el.addEventListener('pointerdown',()=>pressTimer=setTimeout(()=>openMenu(el),420));
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>el.addEventListener(ev,()=>clearTimeout(pressTimer)));
+  el.addEventListener('contextmenu',e=>{e.preventDefault();openMenu(el)});
+}
+
+function sendSticker(code,emoji,name){
+  const cluster=document.createElement('div');
+  cluster.className='cluster';
+
+  const row=document.createElement('div');
+  row.className='msgrow me';
+
+  const stack=document.createElement('div');
+  stack.className='stack';
+
+  const box=document.createElement('div');
+  box.className='stickerMessage actionable';
+  box.dataset.msg='表情包 · '+name;
+
+  const img=document.createElement('img');
+  img.src='https://openmoji.org/data/color/svg/'+code+'.svg';
+  img.alt=emoji;
+  img.onerror=()=>{
+    img.style.display='none';
+    const fb=document.createElement('span');
+    fb.style.fontSize='72px';
+    fb.textContent=emoji;
+    box.appendChild(fb);
+  };
+  box.appendChild(img);
+
+  const meta=document.createElement('div');
+  meta.className='stickerMsgMeta';
+  meta.innerHTML='刚刚 <span class="check">✓</span> '+secureMetaHTML();
+
+  stack.appendChild(box);
+  stack.appendChild(meta);
+  row.appendChild(stack);
+  cluster.appendChild(row);
+  chat.appendChild(cluster);
+
+  attachActionableHandlers(box);
+
+  stickerDrawer.classList.remove('show');
+  updateSecureUI();
+  setTimeout(()=>chat.scrollTop=chat.scrollHeight,10);
+}
+
+document.querySelectorAll('.stickerItem').forEach(b=>b.onclick=()=>{
+  sendSticker(b.dataset.code,b.dataset.emoji,b.dataset.name);
+});
+
+$('forwardAction').onclick=()=>{
+  if(secureState.noForward){
+    closeMenu();
+    showToast('此安全对话禁止转发');
+    return;
+  }
+  closeMenu();
+  showToast('选择转发对象');
+};
+
+// Replace send behavior so secure metadata is attached to newly sent messages.
+send.onclick=()=>{
+  const v=input.value.trim();
+  if(!v)return;
+
+  const cluster=document.createElement('div');
+  cluster.className='cluster';
+
+  const row=document.createElement('div');
+  row.className='msgrow me';
+
+  const stack=document.createElement('div');
+  stack.className='stack';
+
+  const bubble=document.createElement('div');
+  bubble.className='bubble lastMe actionable';
+  bubble.dataset.msg=v;
+
+  const safe=v.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  bubble.innerHTML=safe+
+    secureMetaHTML()+
+    '<span class="timeInline">刚刚 <span class="check">✓</span></span>';
+
+  stack.appendChild(bubble);
+  row.appendChild(stack);
+  cluster.appendChild(row);
+  chat.appendChild(cluster);
+
+  attachActionableHandlers(bubble);
+
+  input.value='';
+  updateComposer();
+  $('replyPreview').classList.remove('show');
+  updateSecureUI();
+  setTimeout(()=>chat.scrollTop=chat.scrollHeight,10);
+};
+
+// Demo: tap the secure example to simulate burn-after-read completion.
+const secureDemo=$('secureDemoCluster');
+if(secureDemo){
+  secureDemo.addEventListener('dblclick',()=>{
+    const b=secureDemo.querySelector('.bubble');
+    b.className='bubble lastMe burnedBubble';
+    b.innerHTML='这条安全消息已在阅读后销毁 · <span class="secureMeta">🔥 已销毁</span>';
+  });
+}
+
+updateSecureUI();
+
+updateComposer();
+setTimeout(()=>chat.scrollTop=chat.scrollHeight,50);
+</script>
+</body>
+</html>

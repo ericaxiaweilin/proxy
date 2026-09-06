@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 41,
-  "updatedAt": "2026-09-05",
+  "baselineRevision": 42,
+  "updatedAt": "2026-09-06",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -61,7 +61,15 @@
       "scope": "chat-lotus-aligned",
       "version": "CHAT_ALIGNED_WITH_LOTUS_V0_1_MEDIA_R1",
       "file": "docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md",
-      "status": "ACTIVE_COMPOSER_MEDIA_IMPLEMENTED_ADVANCED_LOTUS_PENDING"
+      "status": "SUPERSEDED_BY_R36_1_MESSAGING"
+    },
+    {
+      "scope": "conversation-r36-secure-stickers",
+      "version": "MESSAGING_R36_1_SECURE_STICKERS",
+      "file": "docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html",
+      "status": "ACTIVE_SCREEN_REFERENCE",
+      "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
+      "implementationStatus": "CLUSTER_BUBBLES_SECURE_STRIP_SHEET_STICKER_DRAWER_WIRED_OBJECT_LANE_VIA_MESSAGE_RENDERER_UNCHANGED"
     },
     {
       "scope": "market",

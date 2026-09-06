@@ -124,6 +124,19 @@
       "knownGap": "Self-service attendance auth is wired (ACT-ATTEND-001); R17.x '我的活动' 物化路径已走 server+PG+mobile surface (ListMyActivities wire end-to-end; hardcoded mock removed); R17.x 平台 AI 5 角色 (ai_001-ai_005) 带 photo 资产 (SVG 在 apps/mobile/assets/ai-personas/) 接 server+contracts+surface; R17.x 对话 '活动' 按钮 sheet picker 接 server listActivities() 选真活动发 proxyObject (CHAT-PROXY-ACTIVITY-001 tripwire). Chat-derivation (对话 → 订单) 仍 pending (commit 5 中 走: composer 加 '提单' 按钮 -> OpportunityPicker -> fulfillment.createOffer -> 真 Order ID 发 proxyObject)."
     },
     {
+      "scope": "conversation-r36-secure-stickers",
+      "reference": "docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html",
+      "implementationFiles": [
+        "apps/mobile/src/surfaces/conversation.tsx",
+        "apps/mobile/src/conversation-client.ts"
+      ],
+      "evidenceFiles": [
+        "apps/mobile/src/conversation-client.test.ts"
+      ],
+      "status": "PARTIAL",
+      "knownGap": "R36.1 cluster 气泡/安全条+sheet(阅后即焚viewLimit+ttl/禁止转发forwardable)/贴纸Drawer/长按菜单/回复预览/置顶条已落地, 复用既有 SendMessage protectionOverride 与 ephemeral 后端. 差异: 贴纸用 emoji 字形大字渲染(RN 不支持远端 SVG, OpenMoji code 已保留); 通话按钮未加(无后端); 转发目标选择器暂为 toast; proxy_object 对象卡片仍走 MessageRenderer 未重做; thread/convo 创建为 toast 占位."
+    },
+    {
       "scope": "business",
       "reference": "docs/design/references/Proxy_Merchant_Me_Standalone_R21_ActivityVoucherIcon_Fix.html",
       "implementationFiles": [
