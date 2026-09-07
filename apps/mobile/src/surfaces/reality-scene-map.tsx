@@ -43,6 +43,7 @@ type SceneDetail = {
   variants: Array<{ id: string; name: string; window: string; facets: string[]; bestFor: string }>;
   liveState: { state: string; label: string; bestWindow: string; capacityPct: number; freshUntil: string };
   menu: Array<{ id: string; name: string; priceLabel: string; sceneFit: string; available: boolean; imageUrl: string }>;
+  fullMenu: Array<{ id: string; name: string; priceLabel: string; sceneFit: string; available: boolean; imageUrl: string }>;
   humans: Array<{ id: string; name: string; role: string; availability: string; fitReason: string; sceneFit: number; isAI: boolean; avatarUrl: string }>;
   actions: DynamicSceneAction[];
   truthBoundary: string;
@@ -68,6 +69,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
   const [selectedAction, setSelectedAction] = useState<DynamicSceneAction>();
   const [selectedHumanId, setSelectedHumanId] = useState<string>();
   const [selectedMenuId, setSelectedMenuId] = useState<string>();
+  const [fullMenuOpen, setFullMenuOpen] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionResult, setActionResult] = useState<string>();
 
@@ -111,7 +113,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
   useEffect(() => {
     let cancelled = false;
     if (!selectedId) { setDetail(undefined); setDetailError(undefined); return; }
-    setDetail(undefined); setDetailError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined);
+    setDetail(undefined); setDetailError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined); setFullMenuOpen(false);
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}`, { headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
       .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); if (!cancelled) { setDetail(value); setSelectedHumanId(value.humans[0]?.id); setSelectedMenuId(value.menu[0]?.id); } })
@@ -124,7 +126,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
     setDetailError(undefined); setActionExplanation(undefined);
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}?variant=${encodeURIComponent(variantId)}`, { headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
-      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); setSelectedHumanId(value.humans[0]?.id); setSelectedMenuId(value.menu[0]?.id); })
+      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); setSelectedHumanId(value.humans[0]?.id); setSelectedMenuId(value.menu[0]?.id); setFullMenuOpen(false); })
       .catch(() => setDetailError("场景切换失败，请重试"));
   };
 
@@ -247,8 +249,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
               {detail.humans.map((human) => <Pressable key={human.id} onPress={() => setSelectedHumanId(human.id)} style={[styles.humanCard, selectedHumanId === human.id && styles.humanCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-human:${human.id}`} source={{ uri: human.avatarUrl }} style={styles.humanAvatar} transition={0} /><Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
             </ScrollView>
-            <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>这个 Scene 喝什么</Text><Text style={styles.sectionLink}>完整菜单</Text></View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{detail.menu.map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
+            <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
             <View style={styles.actions}>
               <Pressable onPress={() => persistToggle(saved, selected.id, setSaved, "SetRealitySceneSaved")} style={[styles.action, saved.has(selected.id) && styles.actionSelected]}><Text style={styles.actionText}>{saved.has(selected.id) ? "★ 已收藏" : "☆ 收藏"}</Text></Pressable>
               <Pressable onPress={() => persistVisited(selected.id)} style={styles.action}><Text style={styles.actionText}>{visited.has(selected.id) ? "✓ 已去过" : "标记去过"}</Text></Pressable>
@@ -312,7 +314,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
 function isSceneDetail(value: unknown): value is SceneDetail {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<SceneDetail>;
-  return typeof item.sceneId === "string" && typeof item.heroImageUrl === "string" && item.heroImageUrl.length > 0 && typeof item.mediaVersion === "number" && typeof item.selectedVariant === "string" && Array.isArray(item.variants) && item.variants.length > 0 && !!item.liveState && Array.isArray(item.menu) && item.menu.every((menu) => typeof menu.imageUrl === "string" && menu.imageUrl.length > 0) && Array.isArray(item.humans) && item.humans.every((human) => human.isAI === false && typeof human.avatarUrl === "string" && human.avatarUrl.length > 0) && Array.isArray(item.actions) && item.actions.length === 3 && typeof item.truthBoundary === "string";
+  return typeof item.sceneId === "string" && typeof item.heroImageUrl === "string" && item.heroImageUrl.length > 0 && typeof item.mediaVersion === "number" && typeof item.selectedVariant === "string" && Array.isArray(item.variants) && item.variants.length > 0 && !!item.liveState && Array.isArray(item.menu) && item.menu.every((menu) => typeof menu.imageUrl === "string" && menu.imageUrl.length > 0) && Array.isArray(item.fullMenu) && item.fullMenu.length >= item.menu.length && item.fullMenu.every((menu) => typeof menu.imageUrl === "string" && menu.imageUrl.length > 0) && Array.isArray(item.humans) && item.humans.every((human) => human.isAI === false && typeof human.avatarUrl === "string" && human.avatarUrl.length > 0) && Array.isArray(item.actions) && item.actions.length === 3 && typeof item.truthBoundary === "string";
 }
 
 function isRealityScene(value: unknown): value is RealityScene {

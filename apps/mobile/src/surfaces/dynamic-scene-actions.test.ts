@@ -19,7 +19,8 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain("human.avatarUrl");
     expect(source).toContain("item.imageUrl");
     expect(source).toContain('cachePolicy="memory-disk"');
-    expect(source).toContain(">这个 Scene 喝什么<");
+    expect(source).toContain('"这个 Scene 喝什么"');
+    expect(source).toContain("detail.fullMenu");
   });
 
   it("carries the selected scene SKU into every real-world action", () => {

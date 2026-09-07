@@ -24,6 +24,9 @@ type Scene struct {
 	Latitude, Longitude, DistanceMeters, RecommendationScore float64
 	Quality, Posts, Creators, Activities, Invites            int
 	Active                                                   bool
+	// ImageURL mirrors heroImageFor so list consumers (home rail) render
+	// the same photo as the detail hero without a second fetch (R36.x).
+	ImageURL string `json:"imageUrl"`
 }
 
 // Detail is the R27 scene read model. A Scene is a time-bound behavior context,
@@ -40,6 +43,7 @@ type Detail struct {
 	Variants        []Variant     `json:"variants"`
 	LiveState       LiveState     `json:"liveState"`
 	Menu            []MenuItem    `json:"menu"`
+	FullMenu        []MenuItem    `json:"fullMenu"`
 	Humans          []Human       `json:"humans"`
 	Actions         []SceneAction `json:"actions"`
 	TruthBoundary   string        `json:"truthBoundary"`
@@ -108,7 +112,8 @@ func (s Scene) MarshalJSON() ([]byte, error) {
 		Description         string  `json:"description"`
 		DistanceMeters      float64 `json:"distanceMeters,omitempty"`
 		RecommendationScore float64 `json:"recommendationScore,omitempty"`
-	}{s.ID, s.Name, s.Area, s.Type, s.Latitude, s.Longitude, s.Quality, s.Best, s.Posts, s.Creators, s.Activities, s.Invites, s.Active, s.Description, s.DistanceMeters, s.RecommendationScore})
+		ImageURL            string  `json:"imageUrl,omitempty"`
+	}{s.ID, s.Name, s.Area, s.Type, s.Latitude, s.Longitude, s.Quality, s.Best, s.Posts, s.Creators, s.Activities, s.Invites, s.Active, s.Description, s.DistanceMeters, s.RecommendationScore, s.ImageURL})
 }
 
 type Repository interface {
@@ -221,9 +226,28 @@ func NewWithRepository(repo Repository) *Service {
 	}
 	return &Service{repo: repo}
 }
-func (s *Service) ListScenes(ctx context.Context) ([]Scene, error) { return s.repo.ListScenes(ctx) }
+func (s *Service) ListScenes(ctx context.Context) ([]Scene, error) {
+	scenes, err := s.repo.ListScenes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return withSceneImages(scenes), nil
+}
 func (s *Service) ListNearbyScenes(ctx context.Context, lat, lng, radiusKM float64, limit int) ([]Scene, error) {
-	return s.repo.ListNearbyScenes(ctx, lat, lng, radiusKM, limit)
+	scenes, err := s.repo.ListNearbyScenes(ctx, lat, lng, radiusKM, limit)
+	if err != nil {
+		return nil, err
+	}
+	return withSceneImages(scenes), nil
+}
+
+func withSceneImages(scenes []Scene) []Scene {
+	for i := range scenes {
+		if scenes[i].ImageURL == "" {
+			scenes[i].ImageURL = heroImageFor(scenes[i].ID)
+		}
+	}
+	return scenes
 }
 
 func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant string, now time.Time) (Detail, bool, error) {
@@ -264,7 +288,7 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 		HeroImageURL: heroImageFor(scene.ID), MediaVersion: 1,
 		SelectedVariant: selected.ID, Variants: variants,
 		LiveState: LiveState{State: state, Label: label, BestWindow: selected.Window, CapacityPct: capacityFor(selected.ID, minute), FreshUntil: now.UTC().Add(5 * time.Minute)},
-		Menu:      menuFor(selected.ID), Humans: humansFor(selected.ID),
+		Menu:      menuFor(selected.ID), FullMenu: fullMenu(), Humans: humansFor(selected.ID),
 		Actions: []SceneAction{
 			{Type: "DIRECT_INVITE", Label: "邀请真人", State: "REQUIRES_HUMAN_ACCEPTANCE", MoneyMeaning: "费用约定，不代表已付款或收入"},
 			{Type: "OPEN_TASK", Label: "发布机会", State: "ACCEPTS_APPLICATIONS", MoneyMeaning: "标价是完成任务可获得的报酬"},
@@ -309,14 +333,24 @@ func capacityFor(variant string, minute int) int {
 	return base
 }
 func menuFor(variant string) []MenuItem {
-	items := []MenuItem{{ID: "sku_corn_coffee", Name: "Cafe Kem Bắp", PriceLabel: "45K+", SceneFit: "高 UGC Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=520&q=84"}, {ID: "sku_matcha", Name: "Matcha Latte", PriceLabel: "50K", SceneFit: "高出片 Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=520&q=84"}}
+	all := fullMenu()
+	items := []MenuItem{all[0], all[1]}
 	if variant == "afterwork" {
-		items = []MenuItem{{ID: "sku_passion", Name: "Passion Guava", PriceLabel: "45K", SceneFit: "Afterwork Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1505236858219-8359eb29e329?auto=format&fit=crop&w=520&q=84"}, items[1]}
+		items = []MenuItem{all[2], all[1]}
 	}
 	if variant == "weekend" {
-		items = append(items, MenuItem{ID: "sku_popcorn", Name: "Bắp Rang Bơ", PriceLabel: "55K", SceneFit: "多人分享", Available: true, ImageURL: "https://images.unsplash.com/photo-1527529482837-4698179dc6ce?auto=format&fit=crop&w=520&q=84"})
+		items = append(items, all[3])
 	}
 	return items
+}
+
+func fullMenu() []MenuItem {
+	return []MenuItem{
+		{ID: "sku_corn_coffee", Name: "Cafe Kem Bắp", PriceLabel: "45K+", SceneFit: "高 UGC Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=520&q=84"},
+		{ID: "sku_matcha", Name: "Matcha Latte", PriceLabel: "50K", SceneFit: "高出片 Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=520&q=84"},
+		{ID: "sku_passion", Name: "Passion Guava", PriceLabel: "45K", SceneFit: "Afterwork Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1505236858219-8359eb29e329?auto=format&fit=crop&w=520&q=84"},
+		{ID: "sku_popcorn", Name: "Bắp Rang Bơ", PriceLabel: "55K", SceneFit: "多人分享", Available: true, ImageURL: "https://images.unsplash.com/photo-1527529482837-4698179dc6ce?auto=format&fit=crop&w=520&q=84"},
+	}
 }
 func humansFor(variant string) []Human {
 	role := "Cafe / Lifestyle"
