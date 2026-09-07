@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 68,
+  "baselineRevision": 69,
   "updatedAt": "2026-09-07",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -85,7 +85,7 @@
       "file": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
       "status": "ACTIVE_SCREEN_REFERENCE",
       "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
-      "implementationStatus": "REAL_APPLICATION_SELECTION_AND_CONFIRMATION_WIRED_PROFILE_ENRICHMENT_PENDING"
+      "implementationStatus": "REAL_APPLICATION_SELECTION_AND_CONFIRMATION_WIRED_REAL_APPLICANT_OFFERS_PROFILE_ENRICHMENT_PENDING"
     },
     {
       "scope": "activity",

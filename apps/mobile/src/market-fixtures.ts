@@ -6,6 +6,36 @@
 
 export type MarketTab = "EXPERIENCE" | "OPPORTUNITY" | "ACTIVITY";
 
+// 快速 Offer 输入组装（纯函数）：发布者给真实报名人发 5 分钟 Offer。
+// 金额文本转服务端要的 agreedCompensation（VND 最小单位整数）；目标
+// 必须是报名名单里的 applicantId，不再允许写死演示 agent。
+// slot 暂沿用 {taskId}_slot_1 约定（slot 读模型未暴露前）。
+export interface SlotOfferInput {
+  taskId: string;
+  slotId: string;
+  agentId: string;
+  agreedCompensation: number;
+}
+
+export function buildSlotOfferInput(
+  taskId: string,
+  applicantId: string,
+  amountText: string
+): { ok: true; input: SlotOfferInput } | { ok: false; error: string } {
+  if (!taskId.trim() || !applicantId.trim()) return { ok: false, error: "缺少任务或报名人" };
+  const amount = Number(amountText.replace(/[^\d]/g, ""));
+  if (!Number.isInteger(amount) || amount <= 0) return { ok: false, error: "请输入有效金额（VND）" };
+  return {
+    ok: true,
+    input: {
+      taskId: taskId.trim(),
+      slotId: `${taskId.trim()}_slot_1`,
+      agentId: applicantId.trim(),
+      agreedCompensation: amount
+    }
+  };
+}
+
 // R16.x: wire 上 MarketOpportunitySchema 强制 MoneyFlow 4 选 1 +
 // PriceLabel 必填。mobile 端本地 MarketOpportunity 必须把这两个
 // 字段补齐，否则 zod parse 在 client SDK 处会失败。

@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 69 — 2026-09-07
+
+- 快速 Offer 改走选人工作台：目标固定为报名名单里的真实 applicantId，
+  金额发布者现填（VND），对方接单后直接生成订单。写死 agent_linh 的
+  演示位已删除，没有报名人不发 Offer。
+
 ## Revision 68 — 2026-09-07
 
 - Custom locations now render their reverse-geocoded address directly instead
