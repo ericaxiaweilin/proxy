@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 60,
+  "baselineRevision": 61,
   "updatedAt": "2026-09-07",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
@@ -31,7 +31,7 @@
       "version": "HUMAN_FIRST_AI_SECOND_R1",
       "file": "apps/mobile/src/surfaces/requester-home.tsx",
       "status": "ACTIVE_IMPLEMENTATION_REFERENCE",
-      "implementationStatus": "R34_CIRCULAR_HUMAN_PORTRAITS_HUMAN_FIRST_AI_SECOND_BOUND_SCENE_THEN_PROFILE"
+      "implementationStatus": "R34_HUMAN_FIRST_AI_SECOND_HUMAN_BOUND_SCENE_THEN_PROFILE_AI_DIRECT_PROFILE"
     },
     {
       "scope": "root-dock",

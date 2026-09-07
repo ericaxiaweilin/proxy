@@ -53,6 +53,7 @@ function withR34Portraits(people: RecommendPerson[], offset: number): RecommendP
 export interface RecommendFeed {
   title: string;
   subtitle: string;
+  boundSceneId: string;
   // 卡片右上 tag（场景特化，比如"摄影爱好者" / "会中文"）
   sceneTag: string;
   people: RecommendPerson[];
@@ -387,49 +388,49 @@ const MEDICAL_PEOPLE: RecommendPerson[] = [
 export const SCENE_RECOMMEND: Record<string, RecommendFeed> = {
   PHOTO: {
     title: "身边的摄影好搭子",
-    subtitle: "根据你的位置和偏好，为你推荐合适的人",
+    subtitle: "根据你的位置和偏好，为你推荐合适的人", boundSceneId: "phunghung",
     sceneTag: "摄影爱好者",
     people: withR34Portraits(PHOTO_PEOPLE, 0)
   },
   COMPANION: {
     title: "适合一起出发的人",
-    subtitle: "优先推荐兴趣和时间更匹配的人",
+    subtitle: "优先推荐兴趣和时间更匹配的人", boundSceneId: "banana",
     sceneTag: "同行中",
     people: withR34Portraits(COMPANION_PEOPLE, 1)
   },
   COFFEE_MEAL: {
     title: "附近吃饭 / 咖啡搭子",
-    subtitle: "探店和闲聊的人都在这",
+    subtitle: "探店和闲聊的人都在这", boundSceneId: "threebeans",
     sceneTag: "附近吃饭",
     people: withR34Portraits(COFFEE_MEAL_PEOPLE, 2)
   },
   ACTIVITY: {
     title: "本周活动搭子",
-    subtitle: "市集 / Live House / 展览",
+    subtitle: "市集 / Live House / 展览", boundSceneId: "complex01",
     sceneTag: "活动搭子",
     people: withR34Portraits(ACTIVITY_PEOPLE, 3)
   },
   TRIP: {
     title: "周边一日游",
-    subtitle: "下龙湾 / 沙坝 / 宁平",
+    subtitle: "下龙湾 / 沙坝 / 宁平", boundSceneId: "banana",
     sceneTag: "旅行搭子",
     people: withR34Portraits(TRIP_PEOPLE, 4)
   },
   CREATOR: {
     title: "创作搭子",
-    subtitle: "写稿 / 拍摄 / 录音 / 插画",
+    subtitle: "写稿 / 拍摄 / 录音 / 插画", boundSceneId: "manzi",
     sceneTag: "创作搭子",
     people: withR34Portraits(CREATOR_PEOPLE, 0)
   },
   TRANSLATE: {
     title: "翻译和语言帮手",
-    subtitle: "中越 / 英越 / 菜单 / 合同 / 医院",
+    subtitle: "中越 / 英越 / 菜单 / 合同 / 医院", boundSceneId: "phunghung",
     sceneTag: "会中文",
     people: withR34Portraits(TRANSLATE_PEOPLE, 1)
   },
   MEDICAL: {
     title: "陪诊帮手",
-    subtitle: "医院陪同 / 药店代购 / 翻译",
+    subtitle: "医院陪同 / 药店代购 / 翻译", boundSceneId: "trucbach",
     sceneTag: "陪诊",
     people: withR34Portraits(MEDICAL_PEOPLE, 2)
   }

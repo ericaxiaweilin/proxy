@@ -91,7 +91,7 @@ export function RequesterHome({
   engagement,
   onMessageAI,
   onOpenAIProfile,
-  onOpenAIScene,
+  onOpenHumanScene,
   onOpenHumanProfile,
   viewerAccountId,
   onCreateScene,
@@ -117,7 +117,7 @@ export function RequesterHome({
   engagement?: EngagementClient;
   onMessageAI?: (account: PlatformAIAccount) => void;
   onOpenAIProfile?: (account: PlatformAIAccount) => void;
-  onOpenAIScene?: (account: PlatformAIAccount) => void;
+  onOpenHumanScene?: (person: RecommendPerson, sceneId: string) => void;
   onOpenHumanProfile?: (person: RecommendPerson) => void;
   viewerAccountId?: string;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
@@ -343,7 +343,7 @@ export function RequesterHome({
         {filteredPeople.map((p) => (
           <Pressable
             key={`story:${p.id}`}
-            onPress={() => onOpenHumanProfile?.(p)}
+            onPress={() => onOpenHumanScene?.(p, recommendFeed.boundSceneId)}
             style={styles.story}
             accessibilityLabel={`推荐人 ${p.name}，${p.online ? "在线" : "离线"}`}
           >
@@ -371,7 +371,7 @@ export function RequesterHome({
         </View>
         <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
           {recommendedAI.map((account) => (
-            <Pressable key={account.accountId} accessibilityLabel={`打开${account.displayName}绑定的场景`} onPress={() => onOpenAIScene?.(account)} style={styles.aiCard}>
+            <Pressable key={account.accountId} accessibilityLabel={`查看${account.displayName}主页`} onPress={() => onOpenAIProfile?.(account)} style={styles.aiCard}>
               <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
               <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
               <Text style={styles.aiHandle} numberOfLines={1}>AI 生成</Text>

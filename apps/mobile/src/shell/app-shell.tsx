@@ -263,7 +263,9 @@ export function AppShell({
   const [realitySceneOpen, setRealitySceneOpen] = useState(false);
   const [realitySceneSelection, setRealitySceneSelection] = useState<string>();
   const [realitySceneAI, setRealitySceneAI] = useState<PlatformAIAccount>();
+  const [realitySceneHuman, setRealitySceneHuman] = useState<OtherProfileTarget>();
   const [aiProfileReturnToScene, setAIProfileReturnToScene] = useState(false);
+  const [humanProfileReturnToScene, setHumanProfileReturnToScene] = useState(false);
 
   // R15.13 P6：mount 时拉一次"上次激活的自定义坐标" — 跨会话保留
   // 用户放置的 pin / 半径。如果从未放过，sheet 也仍能从 history
@@ -286,7 +288,7 @@ export function AppShell({
     if (Platform.OS !== "android") return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (handleModuleBack()) return true;
-      if (realitySceneOpen) { setRealitySceneAI(undefined); setRealitySceneOpen(false); return true; }
+      if (realitySceneOpen) { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneOpen(false); return true; }
       if (voucherOpen) { setVoucherOpen(false); return true; }
       if (tab === "ME" && messageChatAuthor) { setMessageChat(undefined); return true; }
       if (tab === "MESSAGES" && messageChatAuthor) { setMessageChat(undefined); return true; }
@@ -446,7 +448,7 @@ export function AppShell({
           style={styles.body}
         >
         {realitySceneOpen ? (
-          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} initialSceneId={realitySceneSelection} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} />
+          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
         ) : tab === "HOME" ? (
           sceneComposerTool ? (
             <SceneComposerSurface tool={sceneComposerTool} scene={scene} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
@@ -500,7 +502,7 @@ export function AppShell({
               engagement={engagement}
               localNet={localNet}
               {...(secureSessionStore ? { secureSessionStore } : {})}
-              onBack={() => setOpenHumanProfile(undefined)}
+              onBack={() => { setOpenHumanProfile(undefined); if (humanProfileReturnToScene) { setHumanProfileReturnToScene(false); setRealitySceneOpen(true); } }}
               onMessage={(name) => {
                 setOpenHumanProfile(undefined);
                 setMessageChat({ author: name });
@@ -552,9 +554,10 @@ export function AppShell({
               engagement={engagement}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               onOpenAIProfile={setOpenAIProfile}
-              onOpenAIScene={(account) => {
-                setRealitySceneAI(account);
-                setRealitySceneSelection(account.boundSceneId);
+              onOpenHumanScene={(person, sceneId) => {
+                setRealitySceneAI(undefined);
+                setRealitySceneHuman({ userId: person.id, name: person.name, city: person.bio, avatarUri: person.photoUri, posts: [], mediaByPost: {} });
+                setRealitySceneSelection(sceneId);
                 setRealitySceneOpen(true);
               }}
               onOpenHumanProfile={(person) => setOpenHumanProfile({
@@ -575,6 +578,7 @@ export function AppShell({
                 // 带 sceneId（场景推荐卡）则直达该场景详情；无参数时保持
                 // 原行为：打开 R27 推荐的 threebeans 动态 venue/time 详情。
                 setRealitySceneAI(undefined);
+                setRealitySceneHuman(undefined);
                 if (sceneId) setRealitySceneSelection(sceneId);
                 else setRealitySceneSelection("threebeans");
                 setRealitySceneOpen(true);

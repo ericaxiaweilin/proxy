@@ -18,8 +18,8 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain(">AI 生成<");
   });
 
-  it("keeps human discovery as circle-and-name nodes that open the full profile", () => {
-    expect(source).toContain("onPress={() => onOpenHumanProfile?.(p)}");
+  it("keeps human discovery as circle-and-name nodes that preserve the real Scene context", () => {
+    expect(source).toContain("onPress={() => onOpenHumanScene?.(p, recommendFeed.boundSceneId)}");
     expect(source).not.toContain('testID="human-node-reveal"');
     expect(source).not.toContain("styles.recCard");
     expect(source).not.toContain("styles.storyHint");
@@ -29,20 +29,20 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(fixtures).toContain("withR34Portraits");
   });
 
-  it("keeps AI discovery circular but preserves Scene context before profile navigation", () => {
+  it("keeps AI discovery circular and opens the non-physical AI profile directly", () => {
     expect(source).toMatch(/aiCard:\s*\{\s*alignItems:\s*"center",\s*width:\s*104\s*\}/);
     expect(source).toMatch(/aiAvatar:\s*\{[^}]*borderRadius:\s*999[^}]*height:\s*88[^}]*width:\s*88/);
     expect(source).not.toMatch(/aiCard:\s*\{[^}]*(backgroundColor|borderRadius|borderWidth|shadow)/);
-    expect(source).toContain("onPress={() => onOpenAIScene?.(account)}");
+    expect(source).toContain("onPress={() => onOpenAIProfile?.(account)}");
     expect(source).not.toContain('testID="ai-scene-preview"');
     expect(source).not.toContain("setSelectedAIAccount");
-    expect(source).not.toContain("onPress={() => onOpenAIProfile?.(account)}");
+    expect(source).not.toContain("onPress={() => onOpenAIScene?.(account)}");
     expect(source).not.toContain("toggleAIFollow(account.accountId)");
     expect(source).not.toContain("onMessageAI?.(account)");
-    expect(scene).toContain('testID="ai-scene-binding"');
-    expect(scene).toContain("onOpenAIProfile?.(featuredAIAccount)");
-    expect(scene).toContain("不能到场、接单或报名活动");
-    expect(shell).toContain("setRealitySceneSelection(account.boundSceneId)");
+    expect(scene).toContain('testID="human-scene-binding"');
+    expect(scene).toContain("onOpenHumanProfile?.(featuredHuman)");
+    expect(scene).toContain("尚未代表本人到场或接受邀请");
+    expect(shell).toContain("setRealitySceneSelection(sceneId)");
   });
 
   it("keeps relationship and messaging actions inside the profile", () => {
