@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
   identityName: { color: color.ink, fontSize: 15, fontWeight: "900" },
   identityMeta: { color: color.muted, fontSize: 11, lineHeight: 15 },
   identityChev: { color: color.muted, fontSize: 18, fontWeight: "800" },
-  controlPlane: { backgroundColor: color.ink, borderRadius: 17, flexDirection: "row", gap: 1, marginTop: 10, padding: 5 }, controlCell: { flex: 1, minWidth: 0, paddingHorizontal: 6, paddingVertical: 8 }, controlLabel: { color: "#AAA4B2", fontSize: 9, fontWeight: "700" }, controlValue: { color: color.white, fontSize: 11, fontWeight: "900", marginTop: 4 },
+  controlPlane: { backgroundColor: color.ink, borderRadius: 17, flexDirection: "row", gap: 1, marginTop: 10, padding: 5 }, controlCell: { flex: 1, minWidth: 0, paddingHorizontal: 6, paddingVertical: 8 }, controlLabel: { color: "#AAA4B2", fontSize: 11, fontWeight: "700" }, controlValue: { color: color.white, fontSize: 11, fontWeight: "900", marginTop: 4 },
   menuRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
   menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 4, padding: 8, width: 132 },
   menuImage: { borderRadius: 10, height: 96, width: "100%" },

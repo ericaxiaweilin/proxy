@@ -462,16 +462,16 @@ export function RequesterHome({
             <Text style={styles.sectionTitle}>场景</Text>
             <Text style={styles.sectionHint}>{activeSceneCount > 0 ? `${activeSceneCount} 个正在发生` : `${sceneBriefs.length} 个待探索`}</Text>
           </View>
-            {sceneBriefs.slice(0, 5).map((s) => (
-              <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneRow} accessibilityLabel={`场景 ${s.name}`}>
-                {s.imageUrl ? <Image source={{ uri: s.imageUrl }} style={styles.sceneThumb} /> : null}
-                <View style={styles.sceneRowMain}>
-                  <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
-                  <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}{s.best ? ` · ${s.best}` : ""}</Text>
-                </View>
-                <Text style={styles.sceneRowChev}>›</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sceneWideRail}>
+            {sceneBriefs.slice(0, 6).map((s) => (
+              <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneWideCard} accessibilityLabel={`场景 ${s.name}`}>
+                {s.imageUrl ? <Image source={{ uri: s.imageUrl }} style={styles.sceneWideImage} /> : <View style={styles.sceneWideImageMissing} />}
+                <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
+                <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
+                {s.best ? <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.best}</Text> : null}
               </Pressable>
             ))}
+          </ScrollView>
         </View>
       ) : null}
 
@@ -636,10 +636,10 @@ const styles = StyleSheet.create({
   aiHandle: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 2, textAlign: "center" },
   aiDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5, minHeight: 30 },
   aiProfileLink: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 7 },
-  sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, padding: 12 },
-  sceneRowMain: { flex: 1, gap: 2 },
-  sceneRowChev: { color: color.muted, fontSize: 20, fontWeight: "800" },
-  sceneThumb: { borderRadius: 12, height: 56, width: 56 },
+  sceneWideRail: { gap: 12, paddingRight: 16, paddingVertical: 4 },
+  sceneWideCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 5, padding: 10, width: 220 },
+  sceneWideImage: { borderRadius: 12, height: 132, width: "100%" },
+  sceneWideImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 12, height: 132, justifyContent: "center", width: "100%" },
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 13 },
 

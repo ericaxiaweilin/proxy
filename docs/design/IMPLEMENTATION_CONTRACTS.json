@@ -175,7 +175,7 @@
         "apps/mobile/src/business-client.test.ts"
       ],
       "status": "IMPLEMENTED",
-      "knownGap": "R18.x 4 commits 完成. store_photo / store_lines / member_directory / spend_daily backend (PG+memory) + BusinessClient + photo picker + MerchantStorefrontSurface + MerchantMeR21Replacement + BusinessHome real wire. Hardcoded mocks 全部删除/替换. R36.x MENU-001: 店铺商品 CRUD (Revision 50). R36.x Revision 51: 后期公开店铺资产 IA、真实照片缩略图和优惠券入口已恢复；公开主页预览路由与 Creator 权益编辑仍待专用服务端能力。 R36.x PHOTO-001: 相册/菜单照片经媒体管线远端展示 (074 media_asset_id + PUBLIC 授权) (Revision 51). R25 MENU-002: 菜单页 hero+值得看SKU+分类目录+SKU详情, 商品分类/场景字段 (075) (Revision 54). R25 HOME-001: 商家 Home 身份卡+在售菜单快照+真脉搏数, 店铺 hero 相册封面 (Revision 55)."
+      "knownGap": "R18.x 4 commits 完成. store_photo / store_lines / member_directory / spend_daily backend (PG+memory) + BusinessClient + photo picker + MerchantStorefrontSurface + MerchantMeR21Replacement + BusinessHome real wire. Hardcoded mocks 全部删除/替换. R36.x MENU-001: 店铺商品 CRUD (Revision 50). R36.x Revision 51: 后期公开店铺资产 IA、真实照片缩略图和优惠券入口已恢复；公开主页预览路由与 Creator 权益编辑仍待专用服务端能力。 R36.x PHOTO-001: 相册/菜单照片经媒体管线远端展示 (074 media_asset_id + PUBLIC 授权) (Revision 51). R25 MENU-002: 菜单页 hero+值得看SKU+分类目录+SKU详情, 商品分类/场景字段 (075) (Revision 54). R25 HOME-001: 商家 Home 身份卡+在售菜单快照+真脉搏数, 店铺 hero 相册封面 (Revision 55). R3: business-home controlLabel 11pt (Revision 59)."
     }
   ]
 }
