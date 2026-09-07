@@ -34,4 +34,20 @@ describe("buildSlotOfferInput (real-applicant fast offer)", () => {
   it("rejects missing task id", () => {
     expect(buildSlotOfferInput("", "user_002", "1200000").ok).toBe(false);
   });
+  it("rejects dust amounts below the 100 VND floor (e.g. 50 VND)", () => {
+    expect(buildSlotOfferInput("opp_1", "user_002", "50").ok).toBe(false);
+    expect(buildSlotOfferInput("opp_1", "user_002", "50₫").ok).toBe(false);
+    expect(buildSlotOfferInput("opp_1", "user_002", "1").ok).toBe(false);
+    expect(buildSlotOfferInput("opp_1", "user_002", "99").ok).toBe(false);
+  });
+  it("accepts the 100 VND floor boundary", () => {
+    const r = buildSlotOfferInput("opp_1", "user_002", "100");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.input.agreedCompensation).toBe(100);
+  });
+  it("accepts the 1B VND ceiling boundary and rejects above it", () => {
+    expect(buildSlotOfferInput("opp_1", "user_002", "1000000000").ok).toBe(true);
+    expect(buildSlotOfferInput("opp_1", "user_002", "1000000001").ok).toBe(false);
+  });
 });

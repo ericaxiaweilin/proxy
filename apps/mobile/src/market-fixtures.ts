@@ -7,9 +7,19 @@
 export type MarketTab = "EXPERIENCE" | "OPPORTUNITY" | "ACTIVITY";
 
 // 快速 Offer 输入组装（纯函数）：发布者给真实报名人发 5 分钟 Offer。
-// 金额文本转服务端要的 agreedCompensation（VND 最小单位整数）；目标
-// 必须是报名名单里的 applicantId，不再允许写死演示 agent。
+// 金额文本转服务端要的 agreedCompensation（VND 最小单位整数，精度 1₫）；
+// 目标必须是报名名单里的 applicantId，不再允许写死演示 agent。
 // slot 暂沿用 {taskId}_slot_1 约定（slot 读模型未暴露前）。
+//
+// 金额边界：
+//   - 下限 MIN_OFFER_VND = 100 — 服务端只要求 >0，但商品价显著低于
+//     100₫ 基本是误填（50₫ 这类）；端上先拦，省一次服务端 roundtrip。
+//   - 上限 MAX_OFFER_VND = 1_000_000_000 — 镜像服务端 maxAmountVND
+//    （fulfillment/service.go 防超大金额脏数据），超了直接报，不等
+//     服务端 INVALID_SLOT_OFFER_AMOUNT。
+export const MIN_OFFER_VND = 100;
+export const MAX_OFFER_VND = 1_000_000_000;
+
 export interface SlotOfferInput {
   taskId: string;
   slotId: string;
@@ -25,6 +35,8 @@ export function buildSlotOfferInput(
   if (!taskId.trim() || !applicantId.trim()) return { ok: false, error: "缺少任务或报名人" };
   const amount = Number(amountText.replace(/[^\d]/g, ""));
   if (!Number.isInteger(amount) || amount <= 0) return { ok: false, error: "请输入有效金额（VND）" };
+  if (amount < MIN_OFFER_VND) return { ok: false, error: `金额过低，至少 ${MIN_OFFER_VND}₫` };
+  if (amount > MAX_OFFER_VND) return { ok: false, error: "金额超过上限" };
   return {
     ok: true,
     input: {

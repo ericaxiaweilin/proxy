@@ -1052,7 +1052,7 @@ function SelectWorkbench({ marketplace, fulfillment, opportunity, onBack }: { ma
         <View style={styles.r4Card}>
           <Text style={styles.r4Title}>快速 Offer 金额 · VND</Text>
           <TextInput keyboardType="number-pad" onChangeText={setOfferAmount} style={styles.publishPriceInput} value={offerAmount} placeholder="例如 1200000" />
-          <Text style={styles.detailHint}>给选中的报名人发 5 分钟 Offer，对方接单后直接生成订单。</Text>
+          <Text style={styles.detailHint}>给选中的报名人发 5 分钟 Offer，对方接单后直接生成订单。金额至少 100₫。</Text>
         </View>
       ) : null}
       {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}
