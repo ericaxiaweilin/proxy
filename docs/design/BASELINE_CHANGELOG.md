@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 65 — 2026-09-07
+
+- Home's embedded Proxy conversation now has a resumable single-line state.
+  Users can collapse explicitly; a settled, unfocused exchange collapses after
+  inactivity while loading, sending, focused input and temporary forms stay open.
+- Keyboard position/height is not a collapse trigger. Follow-up send dismisses
+  the keyboard, and the compact strip preserves the latest reply for continuity.
+
 ## Revision 64 — 2026-09-07
 
 - User jurisdiction now uses the existing PostgreSQL truth table whenever the

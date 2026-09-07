@@ -1,7 +1,7 @@
 // Home semantic runtime：Home 的三个快捷入口只给模型语义方向，发送后进入这里。
 // 这里不是 Market 页面跳转，也不直接创建 Need / Order / Activity；业务事实仍由后续确认动作产生。
 import { useEffect, useRef, useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { ConversationClient } from "../conversation-client";
 import type { HomeAttachment, HomeIntentMode } from "../components/home-chat-box";
 import type { MediaClient } from "../media-client";
@@ -59,6 +59,8 @@ export function HomeAssistantSurface({
   const [status, setStatus] = useState<string>();
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
   const [suggestedActions, setSuggestedActions] = useState<Array<{ label: string; tab?: MarketTab; isFeed?: boolean }>>([]);
+  const [collapsed, setCollapsed] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -106,6 +108,20 @@ export function HomeAssistantSurface({
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     return () => clearTimeout(timer);
   }, [messages, status]);
+
+  // Home is a discovery surface, not a permanently-open chat screen. Once an
+  // exchange settles and the user is no longer typing, retain the conversation
+  // as a single-line resumable strip instead of continuing to split the feed.
+  // This is deliberately time/intent based; keyboard geometry changes never
+  // drive collapse, which avoids the jumpy behaviour seen on real devices.
+  useEffect(() => {
+    if (!embedded || collapsed || inputFocused || loading || sending || temporaryUI) return;
+    const timer = setTimeout(() => {
+      Keyboard.dismiss();
+      setCollapsed(true);
+    }, 9000);
+    return () => clearTimeout(timer);
+  }, [collapsed, embedded, inputFocused, loading, messages, sending, temporaryUI]);
 
   function handleLocalIntent(text: string): void {
     const t = text.toLowerCase();
@@ -155,6 +171,8 @@ export function HomeAssistantSurface({
       setStatus(error instanceof Error ? error.message : "消息发送失败");
     } finally {
       setSending(false);
+      Keyboard.dismiss();
+      setInputFocused(false);
     }
   }
 
@@ -182,6 +200,20 @@ export function HomeAssistantSurface({
     }
   }
 
+  if (embedded && collapsed) {
+    const lastReply = [...messages].reverse().find((message) => !message.isOwn)?.body;
+    return (
+      <Pressable accessibilityLabel="继续和 Proxy 对话" onPress={() => setCollapsed(false)} style={styles.collapsedBar}>
+        <View style={styles.collapsedMark}><Text style={styles.collapsedMarkText}>P</Text></View>
+        <View style={styles.collapsedCopy}>
+          <Text style={styles.collapsedTitle}>Proxy</Text>
+          <Text numberOfLines={1} style={styles.collapsedPreview}>{lastReply || status || "继续刚才的对话"}</Text>
+        </View>
+        <Text style={styles.collapsedChevron}>›</Text>
+      </Pressable>
+    );
+  }
+
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.root, embedded && styles.embeddedRoot]}>
       {!embedded ? <View style={styles.header}>
@@ -197,9 +229,14 @@ export function HomeAssistantSurface({
           <View>
             <Text style={styles.embeddedTitle}>Proxy</Text>
           </View>
-          <Pressable accessibilityLabel="总结并结束 Home 会话" disabled={sending || !conversationId} onPress={() => void finishEvent()} style={[styles.embeddedClose, (sending || !conversationId) && styles.disabled]}>
-            <Text style={styles.embeddedCloseText}>{sending ? "总结中…" : "完成"}</Text>
-          </Pressable>
+          <View style={styles.embeddedActions}>
+            <Pressable accessibilityLabel="收起 Home 对话" onPress={() => { Keyboard.dismiss(); setInputFocused(false); setCollapsed(true); }} style={styles.embeddedClose}>
+              <Text style={styles.embeddedCloseText}>收起</Text>
+            </Pressable>
+            <Pressable accessibilityLabel="总结并结束 Home 会话" disabled={sending || !conversationId} onPress={() => void finishEvent()} style={[styles.embeddedClose, (sending || !conversationId) && styles.disabled]}>
+              <Text style={styles.embeddedCloseText}>{sending ? "总结中…" : "完成"}</Text>
+            </Pressable>
+          </View>
         </View>
       )}
 
@@ -207,7 +244,7 @@ export function HomeAssistantSurface({
         <ExperienceSurfaceBanner plan={experiencePlan} schema={experienceSchema} onAction={(id) => { if (id === "open_fastest_plan" && onOpenMarket) onOpenMarket("OPPORTUNITY"); }} />
       ) : null}
 
-      <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messageContent} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messageContent} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
         {messages.map((message) => (
           <View key={message.id} style={[styles.bubble, message.isOwn ? styles.userBubble : styles.aiBubble]}>
             {message.attachmentUri ? <Image accessibilityLabel="会话照片" source={{ uri: message.attachmentUri }} style={styles.messageImage} /> : null}
@@ -238,6 +275,8 @@ export function HomeAssistantSurface({
           editable={Boolean(conversationId) && !sending}
           multiline
           onChangeText={setDraft}
+          onBlur={() => setInputFocused(false)}
+          onFocus={() => { setInputFocused(true); setCollapsed(false); }}
           onSubmitEditing={() => void send()}
           placeholder={conversationId ? "输入 挑选小美 / 活动 / 机会 / 状态 试试…" : "连接中…"}
           placeholderTextColor="#A9A2B0"
@@ -293,8 +332,16 @@ const styles = StyleSheet.create({
   embeddedRoot: { borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 0, height: 520, overflow: "hidden", ...shadows.card },
   embeddedHeader: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 11 },
   embeddedTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  embeddedActions: { alignItems: "center", flexDirection: "row", gap: 7 },
   embeddedClose: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 6 },
   embeddedCloseText: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  collapsedBar: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 12, paddingHorizontal: 12, paddingVertical: 9, ...shadows.card },
+  collapsedMark: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, height: 30, justifyContent: "center", width: 30 },
+  collapsedMarkText: { color: color.white, fontSize: 12, fontWeight: "900" },
+  collapsedCopy: { flex: 1, minWidth: 0 },
+  collapsedTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  collapsedPreview: { color: color.muted, fontSize: 11, marginTop: 1 },
+  collapsedChevron: { color: color.muted, fontSize: 20, fontWeight: "800" },
   header: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
   backButton: { alignItems: "center", height: 32, justifyContent: "center", width: 30 },
   backText: { color: color.ink, fontSize: 26, lineHeight: 30 },

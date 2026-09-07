@@ -846,6 +846,12 @@ echo "    SCENE-DYNAMIC-CONTEXT-001: PASS (variant switches human/menu/live cont
 pnpm --dir apps/mobile exec vitest run src/surfaces/dynamic-scene-actions.test.ts || exit $?
 echo "    SCENE-ACTION-MATERIALIZATION-001: PASS (invite/opportunity/activity use independent domain commands)"
 
+# SCENE-MEDIA-001: 场景详情必须永远带图（hero/菜单/真人头像），否则
+# 移动端 validator 整页拒绝，用户看到空白场景。按 variant 全覆盖。
+require_test "SCENE-MEDIA-001" "./internal/realityscene" \
+  "TestSceneDetailAlwaysCarriesImagery" \
+  "apps/api-go/internal/realityscene/scene_media_test.go" || exit $?
+
 # WATERMARK-001: 店铺/菜单照片远端展示必须带保密暗水印（统一管线）。
 # 变体生成时烧录 Proxy 短 ID + 日期；无 ffmpeg 环境跳过 e2e。
 require_test "WATERMARK-001" "./internal/media" \
