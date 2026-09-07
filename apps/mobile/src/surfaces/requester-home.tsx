@@ -146,6 +146,38 @@ export function RequesterHome({
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
+  // 首页一键加好友：头像右下 + 徽标直接调 engagement.followProfile，
+  // 本次会话内记住已加状态。主页仍是关系的源头（profile 的
+  // toggleFollow / 发消息不变，进主页照样能做）。
+  const [followedIds, setFollowedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [followBusyId, setFollowBusyId] = useState<string | undefined>(undefined);
+  const [followMsg, setFollowMsg] = useState<string | undefined>(undefined);
+
+  async function toggleHomeFollow(id: string, name: string): Promise<void> {
+    if (!engagement || !viewerAccountId) {
+      setFollowMsg("登录后可加好友");
+      return;
+    }
+    if (followBusyId !== undefined) return;
+    const followed = followedIds.has(id);
+    setFollowBusyId(id);
+    setFollowMsg(undefined);
+    try {
+      if (followed) await engagement.unfollowProfile(id);
+      else await engagement.followProfile(id);
+      setFollowedIds((prev) => {
+        const next = new Set(prev);
+        if (followed) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      setFollowMsg(followed ? `已取消关注 ${name}` : `已加好友 · ${name}`);
+    } catch {
+      setFollowMsg("加好友失败，登录后重试");
+    } finally {
+      setFollowBusyId(undefined);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -409,17 +441,23 @@ export function RequesterHome({
                 {p.photoUri ? <Image source={{ uri: p.photoUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarInitials}>{p.initials}</Text>}
               </View>
               {p.online ? <View style={styles.onlineDot} /> : null}
+              <Pressable
+                onPress={() => void toggleHomeFollow(p.id, p.name)}
+                disabled={followBusyId === p.id}
+                style={[styles.addBadge, followedIds.has(p.id) && styles.addBadgeDone]}
+                accessibilityLabel={followedIds.has(p.id) ? `已加好友 ${p.name}` : `加好友 ${p.name}`}
+              >
+                <Text style={styles.addBadgeText}>{followBusyId === p.id ? "…" : followedIds.has(p.id) ? "✓" : "+"}</Text>
+              </Pressable>
             </View>
             <Text style={styles.storyName} numberOfLines={1}>{p.name}</Text>
           </Pressable>
         ))}
       </HorizontalSwipeRail>
 
-      <View style={styles.loadMoreRow}>
-        <Text style={styles.loadMoreText}>
-          继续刷 · <Text style={styles.loadMoreCount}>{filteredPeople.length}</Text>/{recommendFeed.people.length}
-        </Text>
-      </View>
+      {followMsg ? (
+        <Text style={styles.followMsg}>{followMsg}</Text>
+      ) : null}
 
       {recommendedAI.length > 0 ? <View style={styles.aiSection}>
         <View style={styles.aiSectionHead}>
@@ -429,7 +467,17 @@ export function RequesterHome({
         <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
           {recommendedAI.map((account) => (
             <Pressable key={account.accountId} accessibilityLabel={`查看${account.displayName}主页`} onPress={() => onOpenAIProfile?.(account)} style={styles.aiCard}>
-              <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
+              <View style={styles.aiAvatarWrap}>
+                <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
+                <Pressable
+                  onPress={() => void toggleHomeFollow(account.accountId, account.displayName)}
+                  disabled={followBusyId === account.accountId}
+                  style={[styles.addBadge, followedIds.has(account.accountId) && styles.addBadgeDone]}
+                  accessibilityLabel={followedIds.has(account.accountId) ? `已加好友 ${account.displayName}` : `加好友 ${account.displayName}`}
+                >
+                  <Text style={styles.addBadgeText}>{followBusyId === account.accountId ? "…" : followedIds.has(account.accountId) ? "✓" : "+"}</Text>
+                </Pressable>
+              </View>
               <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
               <Text style={styles.aiHandle} numberOfLines={1}>AI 生成</Text>
             </Pressable>
@@ -456,6 +504,12 @@ export function RequesterHome({
             ];
             return (
               <View>
+                <View style={styles.forYouHead}>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>为你组合</Text><View style={styles.forYouBadge}><Text style={styles.forYouBadgeText}>For You</Text></View></View>
+                    <Text style={styles.peopleSub}>选人 · 定时间 · 配活动场景，一键出图或邀约</Text>
+                  </View>
+                </View>
                 <View style={styles.grid4}>
                   {tiles.map((t) => t ? (
                     <Pressable key={t.key} onPress={() => { setComposerOpen(false); setChooser(t.slot); }} style={styles.gridTile}>
@@ -637,16 +691,17 @@ export function RequesterHome({
         <Text style={styles.emptyNote}>加载失败，下拉或稍后重试</Text>
       ) : null}
 
-      {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)。
-          打开时为模态，点击遮罩或"应用"按钮关闭。
-          隐藏在 screen 之外 (right: -1000)，状态控制位置/不透明。 */}
+      {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)，Modal 模态。
+          之前是 ScrollView 内的 absolute 定位，bottom 落在滚动内容最底下，
+          打开后 sheet 在屏外、筛选点不了。现在走 Modal，与选人/出图弹窗一致。 */}
       {filterSheetOpen ? (
+        <Modal transparent animationType="fade" visible={filterSheetOpen} onRequestClose={() => setFilterSheetOpen(false)}>
         <Pressable
           style={styles.sheetBackdrop}
           onPress={() => setFilterSheetOpen(false)}
           accessibilityLabel="关闭筛选"
         >
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
             <View style={styles.sheetGrab} />
             <Text style={styles.sheetTitle}>推荐筛选</Text>
             <View style={styles.filterChips}>
@@ -675,8 +730,9 @@ export function RequesterHome({
             >
               <Text style={styles.sheetApplyText}>应用</Text>
             </Pressable>
-          </Pressable>
+          </View>
         </Pressable>
+        </Modal>
       ) : null}
     </ScrollView>
   );
@@ -824,7 +880,18 @@ const styles = StyleSheet.create({
   },
   avatarInitials: { color: color.ink, fontSize: 24, fontWeight: "800" },
   avatarPhoto: { borderRadius: 999, height: "100%", width: "100%" },
-  onlineDot: { backgroundColor: color.lime, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: 3, height: 14, position: "absolute", right: 3, width: 14 },
+  // 在线点挪到右上，给右下的 + 好友徽标让位。
+  onlineDot: { backgroundColor: color.lime, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, height: 14, position: "absolute", right: 3, top: 3, width: 14 },
+  // + 好友徽标：右下黑圆白字，加完变绿勾。真人 stories 和 AI 头像共用。
+  addBadge: { alignItems: "center", backgroundColor: "#171715", borderColor: color.white, borderRadius: 999, borderWidth: 2, bottom: -2, height: 28, justifyContent: "center", position: "absolute", right: -2, width: 28 },
+  addBadgeDone: { backgroundColor: "#18733B" },
+  addBadgeText: { color: color.white, fontSize: 16, fontWeight: "900", lineHeight: 20 },
+  aiAvatarWrap: { position: "relative" },
+  followMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
+  // 为你组合 For You 独立主题头：4 宫格不再裸奔。
+  forYouHead: { marginTop: 18, marginBottom: 4 },
+  forYouBadge: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  forYouBadgeText: { color: color.violet, fontSize: 11, fontWeight: "900" },
   storyName: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 5, textAlign: "center" },
   personReveal: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 7, marginTop: 8, padding: 13, ...shadows.card },
   personRevealHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
@@ -833,10 +900,6 @@ const styles = StyleSheet.create({
   personRevealLine: { color: color.ink, fontSize: 12, lineHeight: 18 },
   personRevealLabel: { color: color.muted, fontWeight: "700" },
   personRevealReason: { backgroundColor: "#F1FFD0", borderRadius: 10, color: "#4D6200", fontSize: 11, fontWeight: "700", lineHeight: 16, marginTop: 2, paddingHorizontal: 9, paddingVertical: 7 },
-
-  loadMoreRow: { alignItems: "center", marginTop: 4 },
-  loadMoreText: { color: color.ink, fontSize: 12, fontWeight: "600" },
-  loadMoreCount: { color: color.ink, fontSize: 12, fontWeight: "800" },
 
   // R15.34: 继续进行卡片 (大 thumb + 标题 + 副标 + chevron)
   continueCard: {

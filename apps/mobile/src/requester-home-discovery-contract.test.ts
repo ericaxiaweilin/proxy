@@ -33,6 +33,9 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain("styles.storyHint");
     expect(source).toContain("p.photoUri ? <Image");
     expect(source).toContain("styles.avatarPhoto");
+    // 真人头像右下 + 徽标一键加好友，点头像本身仍走 Scene（下一条不断言的路由不变）。
+    expect(source).toContain("toggleHomeFollow(p.id, p.name)");
+    expect(source).toContain("styles.addBadge");
     expect(fixtures).toContain("R34_HUMAN_PORTRAITS");
     expect(fixtures).toContain("withR34Portraits");
   });
@@ -45,12 +48,30 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain('testID="ai-scene-preview"');
     expect(source).not.toContain("setSelectedAIAccount");
     expect(source).not.toContain("onPress={() => onOpenAIScene?.(account)}");
-    expect(source).not.toContain("toggleAIFollow(account.accountId)");
+    // Owner 决议：一键加好友可以在首页做（+ 徽标直调 follow），发消息仍只能进主页。
+    expect(source).toContain("toggleHomeFollow");
+    expect(source).toContain("engagement.followProfile");
+    expect(source).toContain("加好友 ${");
     expect(source).not.toContain("onMessageAI?.(account)");
     expect(scene).toContain('testID="human-scene-binding"');
     expect(scene).toContain("onOpenHumanProfile?.(featuredHuman)");
     expect(scene).toContain("尚未代表本人到场或接受邀请");
     expect(shell).toContain("setRealitySceneSelection(sceneId)");
+  });
+
+  it("lets the recommend filter sheet open as a real modal and drops the dead counter", () => {
+    // 筛选曾经是 ScrollView 内的 absolute 定位，打开后落在屏外点不了。
+    expect(source).toContain("visible={filterSheetOpen}");
+    expect(source).not.toContain("继续刷");
+    expect(source).not.toContain("styles.loadMoreRow");
+  });
+
+  it("gives the 4-grid composer its own For You theme header", () => {
+    const forYou = source.indexOf("为你组合");
+    expect(forYou).toBeGreaterThan(-1);
+    expect(source).toContain("For You");
+    // 主题头在 4 宫格之前，真人在 AI 之前的大顺序不变。
+    expect(forYou).toBeLessThan(source.indexOf("styles.grid4"));
   });
 
   it("keeps relationship and messaging actions inside the profile", () => {
