@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 62 — 2026-09-07
+
+- No visual or interaction change. Removed unreachable profile statistic code
+  and an unused task-surface type import after verifying the active personal
+  profile and activity references remain unchanged.
+- Retained the verified automatic iOS signing team used by the connected-device
+  development build; this changes delivery configuration, not screen design.
+
 ## Revision 61 — 2026-09-07
 
 - 修正 Home 真人与 AI 导航边界：真人推荐先进入明确绑定的现实 Scene，再

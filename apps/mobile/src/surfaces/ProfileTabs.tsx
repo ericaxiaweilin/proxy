@@ -530,16 +530,6 @@ function AboutTab(props: {
   );
 }
 
-function AboutStat(props: { label: string; value: string; hint: string }): React.JSX.Element {
-  return (
-    <View style={styles.aboutStat}>
-      <Text style={styles.aboutStatValue}>{props.value}</Text>
-      <Text style={styles.aboutStatLabel}>{props.label}</Text>
-      <Text style={styles.aboutStatHint}>{props.hint}</Text>
-    </View>
-  );
-}
-
 function EmptyState(props: { title: string; sub: string }): React.JSX.Element {
   return (
     <View style={styles.empty}>
@@ -638,11 +628,6 @@ const styles = StyleSheet.create({
   aboutMetaLabel: { fontSize: 12, marginRight: 6, width: 18 },
   aboutMetaValue: { fontSize: 13, color: "#0f172a" },
   aboutDivider: { height: 1, backgroundColor: "#e2e8f0", marginVertical: 12 },
-  aboutStatsRow: { flexDirection: "row", gap: 12 },
-  aboutStat: { flex: 1, alignItems: "center" },
-  aboutStatValue: { fontSize: 18, fontWeight: "800", color: "#0f172a" },
-  aboutStatLabel: { fontSize: 11, color: "#64748b", marginTop: 2 },
-  aboutStatHint: { fontSize: 11, color: "#94a3b8" },
   aboutStatBig: { alignItems: "center" },
   aboutStatBigLabel: { fontSize: 11, color: "#64748b" },
   aboutStatBigValue: { fontSize: 18, fontWeight: "800", color: "#0f172a", marginTop: 4 },

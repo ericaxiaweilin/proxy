@@ -9,7 +9,7 @@
 // keep the R17.x visual baseline.
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import type { Activity, TasksExperienceParams } from "@proxy/contracts";
+import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { color, Gradient, shadows } from "../theme";
 
