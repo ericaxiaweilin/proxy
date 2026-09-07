@@ -2,7 +2,7 @@ import type { TransportResponse } from "./auth-client";
 
 export type PlatformAIAccount = {
   accountId: string; personaId: string; handle: string; displayName: string;
-  avatarPath: string; description: string; role: string; personality: string;
+  avatarPath: string; avatarMediaAssetId?: string; avatarVersion?: number; description: string; role: string; personality: string;
   welcomeMessage: string; suggestedPrompts: string[]; ugcSamples: string[];
   personaType: "PLATFORM_AI"; status: "ACTIVE"; aiStatus: "AI";
 };

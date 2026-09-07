@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image } from "expo-image";
 import type { PlatformAIAccount } from "../ai-account-client";
-import { aiPersonaPhoto } from "../ai-persona-presentation";
+import { aiAccountPhoto } from "../ai-persona-presentation";
 import type { EngagementClient } from "../engagement-client";
 import type { SecureSessionStore } from "../secure-session";
 import { color, shadows } from "../theme";
@@ -45,7 +46,7 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.hero}>
         <View style={styles.avatarRing}>
-          <Image accessibilityLabel={`${account.displayName}的 AI 虚拟头像`} source={aiPersonaPhoto(account.personaId)} style={styles.photo} />
+          <Image accessibilityLabel={`${account.displayName}的 AI 虚拟头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.photo} transition={0} />
         </View>
         <View style={styles.heroCopy}>
           <View style={styles.nameRow}><Text style={styles.name}>{account.displayName}</Text><View style={styles.aiPill}><Text style={styles.aiPillText}>AI 生成</Text></View></View>

@@ -4,7 +4,8 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（rhome，HTML 5197-5203）。
 // Experience Runtime 插槽：top_context banner 由 SurfacePlan 驱动（§10 Slots），本地态不被 Delta 覆盖（§15.1）。
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Image, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
@@ -16,7 +17,7 @@ import type { ActivityClient } from "../activity-client";
 import type { ExperienceClient } from "../experience-client";
 import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
 import type { EngagementClient } from "../engagement-client";
-import { aiPersonaPhoto } from "../ai-persona-presentation";
+import { aiAccountPhoto } from "../ai-persona-presentation";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
@@ -384,7 +385,7 @@ export function RequesterHome({
         <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
           {recommendedAI.map((account) => (
             <Pressable key={account.accountId} accessibilityLabel={`打开${account.displayName}的个人主页`} onPress={() => onOpenAIProfile?.(account)} style={styles.aiCard}>
-              <Image source={aiPersonaPhoto(account.personaId)} style={styles.aiAvatar} />
+              <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
               <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
               <Text style={styles.aiHandle} numberOfLines={1}>AI 生成</Text>
             </Pressable>

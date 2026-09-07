@@ -1,4 +1,6 @@
 import type { ImageSourcePropType } from "react-native";
+import type { PlatformAIAccount } from "./ai-account-client";
+import { localApiBaseUrl } from "./native-clients";
 
 // Project-bound assets generated for the five Proxy AI accounts. The visible
 // AI badge is rendered by surfaces rather than embedded into a photographic
@@ -13,4 +15,15 @@ const photos: Record<string, ImageSourcePropType> = {
 
 export function aiPersonaPhoto(personaId: string): ImageSourcePropType {
   return photos[personaId] ?? photos.ai_001!;
+}
+
+/** Account/media data is authoritative. Bundled portraits are offline-only fallbacks. */
+export function aiAccountPhoto(account: PlatformAIAccount): number | { uri: string } {
+  if (account.avatarMediaAssetId) {
+    const version = account.avatarVersion ?? 1;
+    return { uri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(account.avatarMediaAssetId)}?v=${version}` };
+  }
+  if (/^https?:\/\//.test(account.avatarPath)) return { uri: account.avatarPath };
+  if (account.avatarPath.startsWith("/")) return { uri: `${localApiBaseUrl}${account.avatarPath}` };
+  return photos[account.personaId] as number ?? photos.ai_001 as number;
 }

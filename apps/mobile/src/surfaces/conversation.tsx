@@ -17,7 +17,7 @@ import type { MediaClient, UploadableImage } from "../media-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
 import type { PlatformAIAccount } from "../ai-account-client";
-import { aiPersonaPhoto } from "../ai-persona-presentation";
+import { aiAccountPhoto } from "../ai-persona-presentation";
 import { VoiceToolButton } from "../components/VoiceToolButton";
 
 // Lotus 纸面 palette（R36.1 设计稿 :root）。不碰共享 theme，只在本页使用。
@@ -564,7 +564,7 @@ export function ConversationSurface({
   function peerAvatar(message: Message): React.JSX.Element | null {
     if (message.isOwn) return null;
     if (aiAccount) {
-      return <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiPersonaPhoto(aiAccount.personaId)} style={styles.avatarMini} />;
+      return <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiAccountPhoto(aiAccount)} style={styles.avatarMini} />;
     }
     return (
       <View style={styles.avatarFallback}>
@@ -626,7 +626,7 @@ export function ConversationSurface({
             <Text style={[styles.secureBtnText, secureOn && styles.secureBtnTextActive]}>🛡</Text>
           </Pressable>
           {aiAccount ? (
-            <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiPersonaPhoto(aiAccount.personaId)} style={styles.topAvatar} />
+            <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiAccountPhoto(aiAccount)} style={styles.topAvatar} />
           ) : (
             <View style={styles.topAvatarFallback}>
               <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
