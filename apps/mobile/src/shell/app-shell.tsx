@@ -564,7 +564,12 @@ export function AppShell({
                 setTab("MESSAGES");
               }}
               onCreateScene={setSceneComposerTool}
-              onOpenSceneMap={() => setRealitySceneOpen(true)}
+              onOpenSceneMap={() => {
+                // The home Scene card is a concrete R27 recommendation, not a
+                // generic map shortcut. Open its dynamic venue/time detail.
+                setRealitySceneSelection("threebeans");
+                setRealitySceneOpen(true);
+              }}
               bottomNavVisible={isNavVisible}
             />
           )
