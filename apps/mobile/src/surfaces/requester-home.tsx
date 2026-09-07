@@ -683,14 +683,14 @@ const styles = StyleSheet.create({
   // R15.34: stories 横滑
   stories: { marginHorizontal: -16 },
   storiesContent: { paddingHorizontal: 16, gap: 12, paddingBottom: 8 },
-  story: { alignItems: "center", minWidth: 64, maxWidth: 80 },
+  story: { alignItems: "center", minWidth: 92, maxWidth: 104 },
   avatar: {
     backgroundColor: color.lime,
     borderRadius: 999,
-    height: 62,
+    height: 88,
     padding: 2,
     position: "relative",
-    width: 62
+    width: 88
   },
   avatarInner: {
     alignItems: "center",
@@ -702,9 +702,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: "100%"
   },
-  avatarInitials: { color: color.ink, fontSize: 18, fontWeight: "800" },
+  avatarInitials: { color: color.ink, fontSize: 24, fontWeight: "800" },
   avatarPhoto: { borderRadius: 999, height: "100%", width: "100%" },
-  onlineDot: { backgroundColor: color.lime, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: 2, height: 11, position: "absolute", right: 2, width: 11 },
+  onlineDot: { backgroundColor: color.lime, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: 3, height: 14, position: "absolute", right: 3, width: 14 },
   storyName: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 5, textAlign: "center" },
   personReveal: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 7, marginTop: 8, padding: 13, ...shadows.card },
   personRevealHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
