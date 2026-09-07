@@ -13,4 +13,12 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain("等待候选申请");
     expect(source).toContain("已进入“我的活动”");
   });
+
+  it("renders R27 scene media from the read model instead of placeholders", () => {
+    expect(source).toContain("detail.heroImageUrl");
+    expect(source).toContain("human.avatarUrl");
+    expect(source).toContain("item.imageUrl");
+    expect(source).toContain('cachePolicy="memory-disk"');
+    expect(source).toContain(">这个 Scene 喝什么<");
+  });
 });

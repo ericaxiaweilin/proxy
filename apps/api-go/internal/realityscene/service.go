@@ -34,6 +34,8 @@ type Detail struct {
 	SceneID         string        `json:"sceneId"`
 	VenueID         string        `json:"venueId"`
 	VenueName       string        `json:"venueName"`
+	HeroImageURL    string        `json:"heroImageUrl"`
+	MediaVersion    int           `json:"mediaVersion"`
 	SelectedVariant string        `json:"selectedVariant"`
 	Variants        []Variant     `json:"variants"`
 	LiveState       LiveState     `json:"liveState"`
@@ -67,6 +69,7 @@ type MenuItem struct {
 	PriceLabel string `json:"priceLabel"`
 	SceneFit   string `json:"sceneFit"`
 	Available  bool   `json:"available"`
+	ImageURL   string `json:"imageUrl"`
 }
 
 type Human struct {
@@ -77,6 +80,7 @@ type Human struct {
 	FitReason    string `json:"fitReason"`
 	SceneFit     int    `json:"sceneFit"`
 	IsAI         bool   `json:"isAI"`
+	AvatarURL    string `json:"avatarUrl"`
 }
 
 type SceneAction struct {
@@ -257,6 +261,7 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 	}
 	return Detail{
 		SceneID: scene.ID, VenueID: venueIDFor(scene), VenueName: scene.Name,
+		HeroImageURL: heroImageFor(scene.ID), MediaVersion: 1,
 		SelectedVariant: selected.ID, Variants: variants,
 		LiveState: LiveState{State: state, Label: label, BestWindow: selected.Window, CapacityPct: capacityFor(selected.ID, minute), FreshUntil: now.UTC().Add(5 * time.Minute)},
 		Menu:      menuFor(selected.ID), Humans: humansFor(selected.ID),
@@ -267,6 +272,13 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 		},
 		TruthBoundary: "推荐不预订真人；报名不等于到场；AI 预览不产生到访、出席或订单证据。",
 	}, true, nil
+}
+
+func heroImageFor(sceneID string) string {
+	if sceneID == "threebeans" {
+		return "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1200&q=86"
+	}
+	return "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=86"
 }
 
 func venueIDFor(scene Scene) string {
@@ -297,12 +309,12 @@ func capacityFor(variant string, minute int) int {
 	return base
 }
 func menuFor(variant string) []MenuItem {
-	items := []MenuItem{{ID: "sku_corn_coffee", Name: "Cafe Kem Bắp", PriceLabel: "45K+", SceneFit: "高 UGC Fit", Available: true}, {ID: "sku_matcha", Name: "Matcha Latte", PriceLabel: "50K", SceneFit: "高出片 Fit", Available: true}}
+	items := []MenuItem{{ID: "sku_corn_coffee", Name: "Cafe Kem Bắp", PriceLabel: "45K+", SceneFit: "高 UGC Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=520&q=84"}, {ID: "sku_matcha", Name: "Matcha Latte", PriceLabel: "50K", SceneFit: "高出片 Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=520&q=84"}}
 	if variant == "afterwork" {
-		items = []MenuItem{{ID: "sku_passion", Name: "Passion Guava", PriceLabel: "45K", SceneFit: "Afterwork Fit", Available: true}, items[1]}
+		items = []MenuItem{{ID: "sku_passion", Name: "Passion Guava", PriceLabel: "45K", SceneFit: "Afterwork Fit", Available: true, ImageURL: "https://images.unsplash.com/photo-1505236858219-8359eb29e329?auto=format&fit=crop&w=520&q=84"}, items[1]}
 	}
 	if variant == "weekend" {
-		items = append(items, MenuItem{ID: "sku_popcorn", Name: "Bắp Rang Bơ", PriceLabel: "55K", SceneFit: "多人分享", Available: true})
+		items = append(items, MenuItem{ID: "sku_popcorn", Name: "Bắp Rang Bơ", PriceLabel: "55K", SceneFit: "多人分享", Available: true, ImageURL: "https://images.unsplash.com/photo-1527529482837-4698179dc6ce?auto=format&fit=crop&w=520&q=84"})
 	}
 	return items
 }
@@ -315,7 +327,7 @@ func humansFor(variant string) []Human {
 	if variant == "weekend" {
 		role, availability = "Host / Lifestyle", "周末可约"
 	}
-	return []Human{{ID: "creator_mai", Name: "Mai", Role: role, Availability: availability, FitReason: "同类 Scene 有真实完成记录", SceneFit: 96, IsAI: false}, {ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: "近期可约", FitReason: "出片与到访转化稳定", SceneFit: 92, IsAI: false}, {ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: "周末可约", FitReason: "相关 SKU 内容经验", SceneFit: 88, IsAI: false}}
+	return []Human{{ID: "creator_mai", Name: "Mai", Role: role, Availability: availability, FitReason: "同类 Scene 有真实完成记录", SceneFit: 96, IsAI: false, AvatarURL: "https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&fit=crop&w=240&q=84"}, {ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: "近期可约", FitReason: "出片与到访转化稳定", SceneFit: 92, IsAI: false, AvatarURL: "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=240&q=84"}, {ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: "周末可约", FitReason: "相关 SKU 内容经验", SceneFit: 88, IsAI: false, AvatarURL: "https://images.unsplash.com/photo-1511081692775-05d0f180a065?auto=format&fit=crop&w=240&q=84"}}
 }
 func (s *Service) Supports(t string) bool {
 	return t == "ListMyRealitySceneState" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited"
