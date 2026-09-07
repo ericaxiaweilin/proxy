@@ -19,6 +19,7 @@ import type { BusinessClient } from "../business-client";
 import type { SupplyClient, SupplierCandidate } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
+import { localApiBaseUrl } from "../native-clients";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
 
@@ -33,12 +34,27 @@ type MerchantPage =
   | "store"
   | "sales"
   | "ops"
-  | "proxy";
+  | "proxy"
+  | "scene";
 
 type Account = { id: string; name: string; status: string };
 type MemberDirectory = { businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string };
 type SpendDaily = { businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number };
-type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | "priceLabel" | "venueName" | "joined" | "capacity" | "status">;
+type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | "priceLabel" | "venueName" | "joined" | "capacity" | "status" | "realitySceneId">;
+
+// R27 merchant scene ops (r27-preview): the flagship scene's live state,
+// menu and humans come from the public scene projection; own activities
+// and menu counts come from already-loaded business data.
+type SceneBrief = {
+  sceneId: string;
+  name: string;
+  window: string;
+  liveState: string;
+  liveLabel: string;
+  heroImageUrl: string;
+  menu: Array<{ id: string; name: string; priceLabel: string; available: boolean; imageUrl: string }>;
+  humans: Array<{ id: string; name: string; role: string; availability: string }>;
+};
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -127,6 +143,8 @@ export function MerchantMeR21Replacement({
   const [selectedCreator, setSelectedCreator] = useState<SupplierCandidate | undefined>(undefined);
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<ActivityItem | undefined>(undefined);
+  const [sceneDetail, setSceneDetail] = useState<SceneBrief | undefined>(undefined);
+  const [sceneActivities, setSceneActivities] = useState<ActivityItem[]>([]);
   const [creatorView, setCreatorView] = useState<"MATCH" | "CREATORS" | "COLLABS" | "RESULTS">("MATCH");
   const [creatorQuery, setCreatorQuery] = useState("");
 
@@ -186,7 +204,7 @@ export function MerchantMeR21Replacement({
       try {
         const { created: list } = await activities.listMyActivities();
         if (!cancelled) {
-          const items = list.map((entry) => ({ activityId: entry.activityId, title: entry.title, time: entry.time, people: entry.people, priceLabel: entry.priceLabel, venueName: entry.venueName, joined: entry.joined, capacity: entry.capacity, status: entry.status })).slice(0, 25);
+          const items = list.map((entry) => ({ activityId: entry.activityId, title: entry.title, time: entry.time, people: entry.people, priceLabel: entry.priceLabel, venueName: entry.venueName, joined: entry.joined, capacity: entry.capacity, status: entry.status, realitySceneId: entry.realitySceneId })).slice(0, 25);
           setActivityItems(items);
           if (items[0]) setSelectedActivity(items[0]);
         }
@@ -194,6 +212,56 @@ export function MerchantMeR21Replacement({
         if (!cancelled) setError((prev) => prev ?? (e instanceof Error ? e.message : String(e)));
       }
     })();
+    return () => { cancelled = true; };
+  }, [activities]);
+
+  // R27 merchant scene ops: flagship scene projection (public) + scene
+  // activities (public list, filtered by realitySceneId). No mock KPIs.
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`${localApiBaseUrl.replace(/\/$/, "")}/v1/scenes/threebeans`, { headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : undefined))
+      .then((body) => {
+        if (cancelled || !body || typeof body !== "object") return;
+        const d = body as Record<string, unknown>;
+        const live = d.liveState as { label?: unknown; state?: unknown; bestWindow?: unknown } | undefined;
+        const menu = Array.isArray(d.menu) ? (d.menu as Array<Record<string, unknown>>) : [];
+        const humans = Array.isArray(d.humans) ? (d.humans as Array<Record<string, unknown>>) : [];
+        setSceneDetail({
+          sceneId: String(d.sceneId ?? "threebeans"),
+          name: String(d.venueName ?? "Three Beans · Cầu Giấy"),
+          window: typeof live?.bestWindow === "string" ? live.bestWindow : "",
+          liveState: typeof live?.state === "string" ? live.state : "",
+          liveLabel: typeof live?.label === "string" ? live.label : "",
+          heroImageUrl: typeof d.heroImageUrl === "string" ? d.heroImageUrl : "",
+          menu: menu.map((m) => ({
+            id: String(m.id ?? ""),
+            name: String(m.name ?? ""),
+            priceLabel: String(m.priceLabel ?? ""),
+            available: m.available === true,
+            imageUrl: typeof m.imageUrl === "string" ? m.imageUrl : "",
+          })),
+          humans: humans.map((h) => ({
+            id: String(h.id ?? ""),
+            name: String(h.name ?? ""),
+            role: String(h.role ?? ""),
+            availability: String(h.availability ?? ""),
+          })),
+        });
+      })
+      .catch(() => undefined);
+    if (!activities) return () => { cancelled = true; };
+    void activities.listActivities()
+      .then((list) => {
+        if (cancelled) return;
+        setSceneActivities(list.map((entry) => ({
+          activityId: entry.activityId, title: entry.title, time: entry.time,
+          people: entry.people, priceLabel: entry.priceLabel, venueName: entry.venueName,
+          joined: entry.joined, capacity: entry.capacity, status: entry.status,
+          realitySceneId: entry.realitySceneId,
+        })));
+      })
+      .catch(() => undefined);
     return () => { cancelled = true; };
   }, [activities]);
 
@@ -396,8 +464,50 @@ export function MerchantMeR21Replacement({
     );
   }
 
-  if (page === "proxy") {
+  if (page === "scene") {
+    const sceneActs = sceneActivities.filter((a) => a.realitySceneId === "threebeans");
+    const joinedTotal = sceneActs.reduce((sum, a) => sum + a.joined, 0);
     return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {detailHead({ onBack: () => setPage("root"), title: "场景运营" })}
+          {sceneDetail?.heroImageUrl ? <Image source={{ uri: sceneDetail.heroImageUrl }} style={styles.sceneHero} /> : null}
+          {summary({
+            meta: sceneDetail ? `${sceneDetail.window} · ${sceneDetail.liveLabel}` : "公开场景投影",
+            stats: [
+              [sceneActs.length.toString(), "本场景活动"],
+              [joinedTotal.toString(), "已参加"],
+              [spendTotal.totalOrders.toString(), "近单"],
+            ],
+            title: sceneDetail?.name ?? "Three Beans · Cầu Giấy",
+          })}
+          <SimpleRows onPress={setPage} rows={[["活动导流", `${sceneActs.length} 个本场景活动`, "activity"], ["菜单与价格", "进线上店铺管理", "store"], ["销售结果", `${spendTotal.totalOrders} 个订单`, "sales"]]} />
+          {sectionHead("本场景活动", "realitySceneId = threebeans")}
+          {sceneActs.length === 0 ? (
+            <View style={styles.card}><Text style={styles.empty}>本场景暂无活动 — 去活动页创建一个</Text></View>
+          ) : null}
+          {sceneActs.map((a) => (
+            <View key={a.activityId} style={styles.card}>
+              <Text style={styles.cardTitle}>{a.title}</Text>
+              <Text style={styles.meta}>{a.time} · {a.joined} 人已参加{(a.capacity ?? 0) > 0 ? ` / 限 ${a.capacity} 人` : ""}</Text>
+            </View>
+          ))}
+          {sectionHead("场景真人", "scene projection")}
+          {(sceneDetail?.humans ?? []).length === 0 ? (
+            <View style={styles.card}><Text style={styles.empty}>暂无关联真人</Text></View>
+          ) : null}
+          {(sceneDetail?.humans ?? []).map((h) => (
+            <View key={h.id} style={styles.card}>
+              <Text style={styles.cardTitle}>{h.name}</Text>
+              <Text style={styles.meta}>{h.role} · {h.availability}</Text>
+            </View>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (page === "proxy") {    return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "Proxy 数据" })}
@@ -482,6 +592,7 @@ export function MerchantMeR21Replacement({
             ["ticket", "客户 / 券", `${members.length} 位经营人员`, false, "voucher"],
             ["arrowUpRight", "活动导流", `${activityItems.length} 个开放活动`, false, "activity"],
             ["storeLines", "线上店铺", accounts?.[0]?.status ?? "查看店铺", true, "store"],
+            ["cup", "场景运营", "Three Beans · 实况", true, "scene"],
           ] as const).map(([icon, title, meta, brand, destination]) => (
             <Pressable key={title} onPress={() => setPage(destination)} style={styles.module}>
               <IconBox brand={brand} icon={icon} />
@@ -538,6 +649,7 @@ const styles = StyleSheet.create({
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   sectionHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, padding: 12, marginVertical: 4, ...shadows.card, gap: 2 },
+  sceneHero: { borderRadius: 14, height: 168, marginTop: 4, width: "100%" },
   cardTitle: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   cardTitleWhite: { color: color.white, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   meta: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17, marginTop: 3 },
