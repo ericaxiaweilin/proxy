@@ -18,5 +18,7 @@ describe("MERCHANT-R35-OPERATING-FLOW-001", () => {
   it("preserves attendance truth after publishing", () => {
     expect(source).toContain("报名不等于到场");
     expect(source).toContain("只有核验后才计入经营结果");
+    expect(source).toContain("只显示本商家动作");
+    expect(source).toContain('entry.origin === "MERCHANT"');
   });
 });

@@ -22,6 +22,8 @@ import type { SupplyClient } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
 import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
 
+type OperatingSceneCard = { id: string; title: string; sub: string; tag: string; coverImageUrl?: string };
+
 function formatVnd(minor: number): string {
   const vnd = Math.round(minor / 1000);
   if (vnd >= 1_000_000) return `${(vnd / 1_000_000).toFixed(1)}tr VND`;
@@ -56,7 +58,8 @@ export function BusinessHome({
   const [menuItems, setMenuItems] = useState<StoreProduct[]>([]);
   const [pendingItems, setPendingItems] = useState<Array<{ icon: ProxyIconName; title: string; meta?: string }>>([]);
   const [spendSummary, setSpendSummary] = useState<{ totalOrders: number; totalGrossMinor: number }>({ totalOrders: 0, totalGrossMinor: 0 });
-  const [scenePackages, setScenePackages] = useState<Array<{ id: string; title: string; sub: string; tag: string; coverImageUrl?: string }>>([]);
+  const [scenePackages, setScenePackages] = useState<OperatingSceneCard[]>([]);
+  const [inProgress, setInProgress] = useState<OperatingSceneCard[]>([]);
   const [operatingHome, setOperatingHome] = useState<MerchantOperatingHome | undefined>(undefined);
   const [planOpen, setPlanOpen] = useState(false);
   const [planBusy, setPlanBusy] = useState(false);
@@ -118,13 +121,15 @@ export function BusinessHome({
           try {
             const list = await activities.listActivities();
             if (!cancelled) {
-              setScenePackages(list.slice(0, 2).map((entry) => ({
+              const toCard = (entry: (typeof list)[number]): OperatingSceneCard => ({
                 id: entry.activityId,
                 title: entry.title,
                 sub: entry.time,
                 tag: entry.moneyFlow === "FREE" ? "可参与" : "可报名",
                 ...(entry.coverImageUrl ? { coverImageUrl: entry.coverImageUrl } : {}),
-              })));
+              });
+              setScenePackages(list.slice(0, 2).map(toCard));
+              setInProgress(list.filter((entry) => entry.origin === "MERCHANT" && entry.status !== "CANCELLED" && (!head || !entry.merchantName || entry.merchantName === head.name)).slice(0, 3).map((entry) => ({ ...toCard(entry), tag: "进行中" })));
             }
           } catch { /* activities optional */ }
         }
@@ -178,6 +183,7 @@ export function BusinessHome({
         merchantId: firstStore.id,
       });
       setScenePackages((current) => [{ id: created.activityId, title: created.title, sub: created.time, tag: "准备中", ...(created.coverImageUrl ? { coverImageUrl: created.coverImageUrl } : {}) }, ...current.filter((item) => item.id !== created.activityId)]);
+      setInProgress((current) => [{ id: created.activityId, title: created.title, sub: created.time, tag: "准备中", ...(created.coverImageUrl ? { coverImageUrl: created.coverImageUrl } : {}) }, ...current.filter((item) => item.id !== created.activityId)]);
       setPlanResult(`已创建「${created.title}」并进入准备；报名不等于到场，只有核验后才计入经营结果。`);
     } catch (error) {
       setPlanResult(error instanceof Error ? error.message : "准备失败，请重试");
@@ -332,6 +338,11 @@ export function BusinessHome({
         </ScrollView>
       )}
 
+      {inProgress.length ? <>
+        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>正在进行</Text><Text style={styles.sectionHint}>只显示本商家动作</Text></View>
+        {inProgress.map((item) => <Pressable key={item.id} onPress={() => onOpenMarket("ACTIVITY")} style={styles.progressCard}><View style={styles.progressDot} /><View style={styles.actionCopy}><Text style={styles.actionTitle}>{item.title}</Text><Text style={styles.subtle}>{item.sub} · 报名不等于到场</Text></View><Text style={styles.progressState}>{item.tag}</Text></Pressable>)}
+      </> : null}
+
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>待处理</Text>
         <Text style={styles.sectionHint}>今天</Text>
@@ -424,6 +435,7 @@ const styles = StyleSheet.create({
   actionMetricTag: { backgroundColor: color.lime, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 6 },
   actionMetricTagText: { color: color.ink, fontSize: 11, fontWeight: "800", lineHeight: 15 },
   scenePackageCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginVertical: 5, overflow: "hidden", ...shadows.card }, scenePackageImage: { height: 144, width: "100%" }, scenePackageFallback: { alignItems: "center", backgroundColor: color.offWhite, height: 112, justifyContent: "center" }, scenePackageBody: { alignItems: "center", flexDirection: "row", gap: 10, padding: 12 },
+  progressCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 7, padding: 12 }, progressDot: { backgroundColor: "#72A000", borderRadius: 5, height: 10, width: 10 }, progressState: { color: "#4D6200", fontSize: 11, fontWeight: "900" },
   outcomeGrid: { flexDirection: "row", gap: 8 },
   metric: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, paddingHorizontal: 8, paddingVertical: 13 },
   metricValue: { color: color.ink, fontSize: 16, fontWeight: "900", textAlign: "center" },
