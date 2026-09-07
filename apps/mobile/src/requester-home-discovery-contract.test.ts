@@ -61,6 +61,18 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(shell).toContain("avatarUri: person.photoUri");
   });
 
+  it("names the two order chains honestly: join is join, publish-demand is the other chain", () => {
+    // 4 宫格按钮曾经挂"邀请 →"实际调 join（自己报名）。名实不符已修正：
+    // 报名就是报名，发布需求是另一条链路（进市场机会 Tab）。
+    expect(source).toContain("报名 →");
+    expect(source).toContain("joinSelected(gridActivity?.activityId)");
+    expect(source).toContain("发布需求");
+    expect(source).toContain('onOpenMarket?.("OPPORTUNITY")');
+    expect(source).toContain("直接约她");
+    expect(source).not.toContain('"邀请 →"');
+    expect(source).not.toContain("inviteSelected");
+  });
+
   it("keeps coordinates in the location data layer, not beside the address UI", () => {
     expect(locationPicker).toContain('label="地图选点"');
     expect(locationPicker).not.toMatch(/坐标 \$\{lat\.toFixed/);
