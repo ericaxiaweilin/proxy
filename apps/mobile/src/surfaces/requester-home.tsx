@@ -199,6 +199,30 @@ export function RequesterHome({
   }, [sceneApiBaseUrl]);
   const activeSceneCount = sceneBriefs.filter((s) => s.active).length;
 
+  // R36.x STORE-ACTIVITY-001: 店铺场景活动推荐（公开 listActivities，
+  // 免登录）。本店（Three Beans）优先排前，其次按时间。
+  type StoreActivityBrief = { activityId: string; title: string; venueName: string; time: string; joined: number; capacity: number };
+  const [storeActivities, setStoreActivities] = useState<StoreActivityBrief[]>([]);
+  useEffect(() => {
+    if (!activities) return;
+    let cancelled = false;
+    void activities.listActivities()
+      .then((list) => {
+        if (cancelled) return;
+        const briefs = list.map((a) => ({
+          activityId: a.activityId,
+          title: a.title,
+          venueName: a.venueName,
+          time: a.time,
+          joined: a.joined,
+          capacity: a.capacity ?? 0,
+        }));
+        setStoreActivities(briefs);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activities]);
+
   useEffect(() => {
     if (!demandClient) {
       // Anonymous: keep placeholder so the layout is non-empty.
@@ -446,19 +470,18 @@ export function RequesterHome({
         </Pressable>
       ) : null}
 
-      {sceneBriefs.length > 0 ? (
+      {storeActivities.length > 0 ? (
         <View>
           <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>场景推荐</Text>
-            <Text style={styles.sectionHint}>真实场景 · 点进地图看详情</Text>
+            <Text style={styles.sectionTitle}>店铺场景活动</Text>
+            <Text style={styles.sectionHint}>报名 · 到店 · 复盘</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sceneRail}>
-            {sceneBriefs.slice(0, 8).map((s) => (
-              <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneCard} accessibilityLabel={`场景 ${s.name}`}>
-                <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
-                <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
-                {s.best ? <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.best}</Text> : null}
-                {s.description ? <Text style={styles.sceneCardDesc} numberOfLines={2}>{s.description}</Text> : null}
+            {storeActivities.slice(0, 8).map((a) => (
+              <Pressable key={a.activityId} onPress={() => onOpenMarket?.("ACTIVITY")} style={styles.sceneCard} accessibilityLabel={`活动 ${a.title}`}>
+                <Text style={styles.sceneCardName} numberOfLines={1}>{a.title}</Text>
+                <Text style={styles.sceneCardMeta} numberOfLines={1}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
+                <Text style={styles.sceneCardDesc} numberOfLines={2}>{a.joined > 0 ? `${a.joined} 人已参加` : "等你来开场"}{a.capacity > 0 ? ` · 限 ${a.capacity} 人` : ""}</Text>
               </Pressable>
             ))}
           </ScrollView>
