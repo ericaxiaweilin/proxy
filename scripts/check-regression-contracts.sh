@@ -827,4 +827,13 @@ echo "    SCENE-DYNAMIC-CONTEXT-001: PASS (variant switches human/menu/live cont
 pnpm --dir apps/mobile exec vitest run src/surfaces/dynamic-scene-actions.test.ts || exit $?
 echo "    SCENE-ACTION-MATERIALIZATION-001: PASS (invite/opportunity/activity use independent domain commands)"
 
+# WATERMARK-001: 店铺/菜单照片远端展示必须带保密暗水印（统一管线）。
+# 变体生成时烧录 Proxy 短 ID + 日期；无 ffmpeg 环境跳过 e2e。
+require_test "WATERMARK-001" "./internal/media" \
+  "TestWatermarkRenderDeterministic" \
+  "apps/api-go/internal/media/watermark_test.go" || exit $?
+require_test "WATERMARK-001" "./internal/media" \
+  "TestWatermarkBurnedIntoVariant" \
+  "apps/api-go/internal/media/watermark_test.go" || exit $?
+
 echo "  regression contracts: OK"

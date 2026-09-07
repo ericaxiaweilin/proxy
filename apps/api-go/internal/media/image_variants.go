@@ -62,6 +62,14 @@ func generateImageVariants(ctx context.Context, originalPath, storeDir string, a
 			if out, runErr := exec.CommandContext(ctx, "ffmpeg", args...).CombinedOutput(); runErr != nil {
 				return nil, fmt.Errorf("%s variant failed: %w: %s", recipe.purpose, runErr, clippedOutput(out))
 			}
+			// R36.x WATERMARK-001: burn the confidentiality mark into
+			// every content-bearing variant (PLACEHOLDER excluded).
+			if recipe.purpose != "PLACEHOLDER" {
+				if wmErr := applyConfidentialWatermark(ctx, storeDir, temporaryPath, asset.MediaAssetID, now); wmErr != nil {
+					_ = os.Remove(temporaryPath)
+					return nil, wmErr
+				}
+			}
 			if renameErr := os.Rename(temporaryPath, outputPath); renameErr != nil {
 				return nil, renameErr
 			}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -29,6 +30,9 @@ func (s *Server) mediaVariantFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_variant_not_available"})
 		return
 	}
+	// R36.x WATERMARK-001 viewer-side tracing: asset id + client IP.
+	// Media GETs are anonymous by design, so the trail carries no identity.
+	log.Printf("media access variant=%s ip=%s", id, clientIP(r, s.TrustCloudflareIP))
 	serveMediaPath(w, r, path, "public, max-age=31536000, immutable")
 }
 
@@ -182,6 +186,8 @@ func (s *Server) mediaFile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_not_available"})
 		return
 	}
+	// R36.x WATERMARK-001 viewer-side tracing (see mediaVariantFile).
+	log.Printf("media access asset=%s kind=%s ip=%s", id, kind, clientIP(r, s.TrustCloudflareIP))
 	// Asset routes are stable identifiers. They may point at a newer recipe after
 	// an explicit re-derivation, so keep the browser cache bounded and validate by
 	// ETag. Variant routes above are recipe-versioned and fully immutable.
