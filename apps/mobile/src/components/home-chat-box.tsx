@@ -237,23 +237,8 @@ export function HomeChatBox({
         </View>
       ) : null}
 
-      {/* 基线 .r157Quick：体验 / 机会 / 活动（active = ink 底白字） */}
-      {onSelectMode ? (
-        <View style={styles.quick}>
-          {SEMANTIC_MODES.map((entry) => (
-            <Pressable
-              key={entry.id}
-              onPress={() => onSelectMode(entry.id)}
-              style={[styles.quickBtn, mode === entry.id && styles.quickBtnActive]}
-            >
-              <View style={styles.quickIcon}>
-                <ProxyIcon color={mode === entry.id ? color.white : color.ink} name={entry.icon} size={24} />
-              </View>
-              <Text style={[styles.quickLabel, mode === entry.id && styles.quickLabelActive]}>{entry.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
+      {/* 体验 / 机会 / 活动快捷路由已移除（产品转向直接下单/接单/参加活动，
+          路由识别后续优化）。mode 透传保留，UI 不再展示。 */}
     </View>
   );
 }

@@ -309,6 +309,8 @@ export function RequesterHome({
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
     const y = Math.max(0, e.nativeEvent.contentOffset.y);
     const delta = y - lastYRef.current;
+    // 滑动即把展开的模型对话收回单行。
+    if (Math.abs(delta) >= 4) setComposerOpen(false);
     if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
     else if (Math.abs(delta) >= 1) {
       const prevDir = Math.sign(dirRef.current);
@@ -415,11 +417,7 @@ export function RequesterHome({
         <>
           <Pressable onPress={() => setComposerOpen(true)} style={styles.composerSingle} accessibilityLabel="告诉 Proxy 你想做什么">
             <Text style={styles.composerSingleText}>Proxy 想要怎样的时光？</Text>
-            <View style={styles.composerSingleIcons}>
-              <ProxyIcon color={color.muted} name="camera" size={18} />
-              <ProxyIcon color={color.muted} name="microphone" size={18} />
-              <ProxyIcon color={color.muted} name="plus" size={18} />
-            </View>
+            <Text style={styles.composerSingleChev}>›</Text>
           </Pressable>
           {composerOpen ? (
             <View>
@@ -455,7 +453,7 @@ export function RequesterHome({
               <View>
                 <View style={styles.grid4}>
                   {tiles.map((t) => t ? (
-                    <Pressable key={t.key} onPress={() => setChooser(t.slot)} style={styles.gridTile}>
+                    <Pressable key={t.key} onPress={() => { setComposerOpen(false); setChooser(t.slot); }} style={styles.gridTile}>
                       {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
                       <View style={styles.gridOverlay}>
                         <Text style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
@@ -467,10 +465,10 @@ export function RequesterHome({
                 {composed ? (
                   <View style={styles.gridCtaRow}>
                     <Pressable onPress={() => setMomentOpen(true)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="出图">
-                      <Text style={styles.gridCtaText}>✦ 出图</Text>
+                      <Text style={styles.gridCtaTextSmall}>✦ 出图</Text>
                     </Pressable>
                     <Pressable disabled={inviteBusy} onPress={() => void inviteSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="邀请">
-                      <Text style={styles.gridCtaText}>{inviteBusy ? "报名中…" : "邀请 →"}</Text>
+                      <Text style={styles.gridCtaTextSmall}>{inviteBusy ? "报名中…" : "邀请 →"}</Text>
                     </Pressable>
                   </View>
                 ) : null}
@@ -718,6 +716,7 @@ const styles = StyleSheet.create({
   composerSingle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 8, paddingHorizontal: 14, paddingVertical: 12 },
   composerSingleText: { color: color.muted, fontSize: 13 },
   composerSingleIcons: { alignItems: "center", flexDirection: "row", gap: 10 },
+  composerSingleChev: { color: color.muted, fontSize: 18, fontWeight: "800" },
   composerCollapse: { alignItems: "center", paddingVertical: 6 },
   composerCollapseText: { color: color.muted, fontSize: 11, fontWeight: "700" },
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
@@ -730,10 +729,11 @@ const styles = StyleSheet.create({
   gridLabelDark: { color: color.ink, textShadowColor: "transparent" },
   gridSub: { color: "rgba(255,255,255,0.85)", fontSize: 11, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
   gridSubDark: { color: color.muted, textShadowColor: "transparent" },
-  gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 26, flexDirection: "row", justifyContent: "center", marginTop: 10, paddingVertical: 14 },
-  gridCtaHalf: { flex: 1 },
+  gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 22, flexDirection: "row", justifyContent: "center", marginTop: 10, paddingVertical: 14 },
+  gridCtaHalf: { flex: 1, marginTop: 0, paddingVertical: 9 },
   gridCtaRow: { flexDirection: "row", gap: 8 },
   gridCtaText: { color: color.white, fontSize: 15, fontWeight: "800" },
+  gridCtaTextSmall: { color: color.white, fontSize: 13, fontWeight: "800" },
   inviteMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
   chooserList: { maxHeight: 320 },
   chooserItem: { borderBottomColor: color.line, borderBottomWidth: 1, paddingVertical: 11 },
