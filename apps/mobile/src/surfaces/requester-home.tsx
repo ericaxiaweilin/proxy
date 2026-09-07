@@ -426,8 +426,10 @@ export function RequesterHome({
                   {tiles.map((t) => t ? (
                     <Pressable key={t.key} onPress={t.onPress} style={styles.gridTile}>
                       {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
-                      <Text style={styles.gridLabel} numberOfLines={1}>{t.label}</Text>
-                      <Text style={styles.gridSub} numberOfLines={1}>{t.sub}</Text>
+                      <View style={styles.gridOverlay}>
+                        <Text style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
+                        <Text style={[styles.gridSub, !t.imageUri && styles.gridSubDark]} numberOfLines={1}>{t.sub}</Text>
+                      </View>
                     </Pressable>
                   ) : null)}
                 </View>
@@ -622,12 +624,15 @@ const styles = StyleSheet.create({
   composerCollapse: { alignItems: "center", paddingVertical: 6 },
   composerCollapseText: { color: color.muted, fontSize: 11, fontWeight: "700" },
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  gridTile: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 3, padding: 9, width: "48.4%" },
-  gridImage: { borderRadius: 12, height: 120, width: "100%" },
-  gridImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 12, height: 120, justifyContent: "center", width: "100%" },
+  gridTile: { borderRadius: 18, height: 172, overflow: "hidden", width: "48.4%" },
+  gridImage: { borderRadius: 18, height: "100%", width: "100%" },
+  gridImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 18, height: "100%", justifyContent: "center", width: "100%" },
   gridGlyph: { color: color.muted, fontSize: 30 },
-  gridLabel: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  gridSub: { color: color.muted, fontSize: 11 },
+  gridOverlay: { bottom: 0, gap: 1, left: 0, padding: 10, position: "absolute", right: 0 },
+  gridLabel: { color: "#ffffff", fontSize: 13, fontWeight: "800", textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
+  gridLabelDark: { color: color.ink, textShadowColor: "transparent" },
+  gridSub: { color: "rgba(255,255,255,0.85)", fontSize: 11, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
+  gridSubDark: { color: color.muted, textShadowColor: "transparent" },
   gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 26, flexDirection: "row", justifyContent: "center", marginTop: 10, paddingVertical: 14 },
   gridCtaText: { color: color.white, fontSize: 15, fontWeight: "800" },
   sceneRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
