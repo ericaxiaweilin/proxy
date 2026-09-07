@@ -11,32 +11,12 @@
 //                              + why line
 //                              + price (label + range) | takeBtn
 
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { type MarketOpportunity, type MarketOpportunityMoneyFlow } from "../market-fixtures";
 import { color } from "../theme";
+import { MarketTypeLogo, type MarketOpportunityType } from "../components/market-type-logo";
 
-export type OpportunityType =
-  | "coffee_photo"
-  | "walk_photo"
-  | "coffee_chinese"
-  | "bilingual_store"
-  | "event_photo";
-
-const TYPE_LOGO: Record<OpportunityType, any> = {
-  coffee_photo: require("../assets/order-type-logos/coffee_photo.png"),
-  walk_photo: require("../assets/order-type-logos/walk_photo.png"),
-  coffee_chinese: require("../assets/order-type-logos/coffee_photo.png"),
-  bilingual_store: require("../assets/order-type-logos/bilingual_store.png"),
-  event_photo: require("../assets/order-type-logos/event_photo.png"),
-};
-
-const TYPE_LOGO_OFFSET: Record<OpportunityType, { x: number; y: number }> = {
-  coffee_photo: { x: -1, y: -3 },
-  coffee_chinese: { x: -1, y: -3 },
-  walk_photo: { x: -3, y: -1 },
-  bilingual_store: { x: -3, y: -5 },
-  event_photo: { x: -5, y: -4 },
-};
+export type OpportunityType = MarketOpportunityType;
 
 const TYPE_LABEL: Record<OpportunityType, { label: string; sub: string }> = {
   coffee_photo: { label: "咖啡 + 拍照", sub: "Coffee" },
@@ -82,8 +62,6 @@ function buildWhy(opportunity: MarketOpportunity): string {
 
 // The 68px approved asset contains the complete rounded logo tile; filling the
 // slot avoids nesting it inside a second beige tile and shrinking the glyph.
-const typeLogoImgStyle = { height: 30, width: 30 } as const;
-
 export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportunity: MarketOpportunity; onOpen: () => void; onDismiss: () => void }): React.JSX.Element {
   const type = inferType(opportunity);
   const typeLabel = TYPE_LABEL[type];
@@ -102,9 +80,7 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
       </Pressable>
       <View style={styles.body}>
         <View style={styles.typeRow}>
-          <View style={styles.typeLogo}>
-            <Image source={TYPE_LOGO[type]} style={[typeLogoImgStyle, { transform: [{ translateX: TYPE_LOGO_OFFSET[type].x }, { translateY: TYPE_LOGO_OFFSET[type].y }] }]} resizeMode="contain" />
-          </View>
+          <MarketTypeLogo type={type} size="CARD" />
           <View style={styles.typeMeta}>
             <Text style={styles.typeMetaLabel}>标准订单类型</Text>
             <Text style={styles.typeMetaTitle} numberOfLines={1}>{typeLabel.label}</Text>
@@ -145,7 +121,6 @@ const styles = StyleSheet.create({
   thumbInitial: { color: color.muted, fontSize: 22, fontWeight: "800" },
   body: { flex: 1, minWidth: 0 },
   typeRow: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 5 },
-  typeLogo: { alignItems: "center", backgroundColor: "#F7EFE1", borderRadius: 8, height: 30, justifyContent: "center", overflow: "hidden", width: 30 },
   typeMeta: { flex: 1, minWidth: 0 },
   typeMetaLabel: { color: "#AAA49C", fontSize: 6.4, letterSpacing: 0.15, lineHeight: 9 },
   typeMetaTitle: { color: color.ink, fontSize: 10.5, fontWeight: "800", lineHeight: 13, marginTop: 1 },

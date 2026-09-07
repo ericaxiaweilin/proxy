@@ -2,27 +2,17 @@
 // + sub). Tap to filter opportunity list. Lives above the opportunity
 // list; ScrollView so it works on narrow screens.
 
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { type OpportunityType } from "./r37-opportunity-card";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { MarketTypeLogo, type MarketOpportunityType as OpportunityType } from "../components/market-type-logo";
 import { color } from "../theme";
 
-const TYPES: { key: OpportunityType; label: string; sub: string; logo: any }[] = [
-  { key: "coffee_photo", label: "咖啡 + 拍照", sub: "Coffee", logo: require("../assets/order-type-logos/coffee_photo.png") },
-  { key: "walk_photo", label: "City Walk + 拍照", sub: "Walk", logo: require("../assets/order-type-logos/walk_photo.png") },
-  { key: "coffee_chinese", label: "咖啡 + 中文", sub: "Talk", logo: require("../assets/order-type-logos/coffee_photo.png") },
-  { key: "bilingual_store", label: "看店 + 双语", sub: "Language", logo: require("../assets/order-type-logos/bilingual_store.png") },
-  { key: "event_photo", label: "活动 + 拍照", sub: "Event", logo: require("../assets/order-type-logos/event_photo.png") },
+const TYPES: { key: OpportunityType; label: string; sub: string }[] = [
+  { key: "coffee_photo", label: "咖啡 + 拍照", sub: "Coffee" },
+  { key: "walk_photo", label: "City Walk + 拍照", sub: "Walk" },
+  { key: "coffee_chinese", label: "咖啡 + 中文", sub: "Talk" },
+  { key: "bilingual_store", label: "看店 + 双语", sub: "Language" },
+  { key: "event_photo", label: "活动 + 拍照", sub: "Event" },
 ];
-
-// The approved tiles have centered 68px canvases but their dark glyphs do not
-// share a visual center. These offsets align the glyphs, not merely the PNG box.
-const LOGO_OFFSET: Record<OpportunityType, { x: number; y: number }> = {
-  coffee_photo: { x: -2, y: -4 },
-  coffee_chinese: { x: -2, y: -4 },
-  walk_photo: { x: -4, y: -2 },
-  bilingual_store: { x: -4, y: -7 },
-  event_photo: { x: -7, y: -5 },
-};
 
 export function R37TypePalette({ active, onChange }: { active: OpportunityType | "all"; onChange: (next: OpportunityType | "all") => void }): React.JSX.Element {
   return (
@@ -49,7 +39,7 @@ export function R37TypePalette({ active, onChange }: { active: OpportunityType |
           sub={t.sub}
           onPress={() => onChange(active === t.key ? "all" : t.key)}
           active={active === t.key}
-          renderLogo={() => <Image source={t.logo} style={[imgStyle, { transform: [{ translateX: LOGO_OFFSET[t.key].x }, { translateY: LOGO_OFFSET[t.key].y }] }]} resizeMode="contain" />}
+          renderLogo={() => <MarketTypeLogo type={t.key} size="FILTER" selected={active === t.key} />}
         />
       ))}
     </ScrollView>
@@ -58,12 +48,10 @@ export function R37TypePalette({ active, onChange }: { active: OpportunityType |
 
 // Approved PNGs already include their own rounded tile. Render edge-to-edge;
 // another colored box around them creates the “logo inside a logo” effect.
-const imgStyle = { height: 42, width: 42 } as const;
-
 function Pill({ label, sub, onPress, active, renderLogo, logoBoxStyle }: { label: string; sub: string; onPress: () => void; active: boolean; renderLogo: () => React.JSX.Element; logoBoxStyle?: any }): React.JSX.Element {
   return (
     <Pressable onPress={onPress} style={styles.pill}>
-      <View style={[styles.logoBox, active && styles.logoBoxActive, logoBoxStyle]}>{renderLogo()}</View>
+      <View style={[styles.logoBox, logoBoxStyle]}>{renderLogo()}</View>
       <Text style={[styles.pillLabel, active && styles.pillLabelActive]} numberOfLines={2}>{label}</Text>
       <Text style={styles.pillSub}>{sub}</Text>
     </Pressable>
@@ -73,8 +61,7 @@ function Pill({ label, sub, onPress, active, renderLogo, logoBoxStyle }: { label
 const styles = StyleSheet.create({
   scroll: { gap: 7, paddingHorizontal: 14, paddingVertical: 6 },
   pill: { alignItems: "center", minWidth: 74, paddingHorizontal: 0, paddingVertical: 0 },
-  logoBox: { alignItems: "center", backgroundColor: "#F7EFE1", borderColor: "transparent", borderRadius: 12, borderWidth: 2, height: 46, justifyContent: "center", marginBottom: 3, overflow: "hidden", width: 46 },
-  logoBoxActive: { borderColor: color.ink },
+  logoBox: { alignItems: "center", height: 46, justifyContent: "center", marginBottom: 3, width: 46 },
   pillLabel: { color: color.ink, fontSize: 7.2, fontWeight: "500", lineHeight: 9, textAlign: "center" },
   pillLabelActive: { fontWeight: "800" },
   pillSub: { color: "#AAA49C", fontSize: 6.2, marginTop: 2 },
