@@ -58,6 +58,9 @@ export function BusinessHome({
   const [spendSummary, setSpendSummary] = useState<{ totalOrders: number; totalGrossMinor: number }>({ totalOrders: 0, totalGrossMinor: 0 });
   const [scenePackages, setScenePackages] = useState<Array<{ id: string; title: string; sub: string; tag: string; coverImageUrl?: string }>>([]);
   const [operatingHome, setOperatingHome] = useState<MerchantOperatingHome | undefined>(undefined);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planResult, setPlanResult] = useState<string>();
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
@@ -152,6 +155,37 @@ export function BusinessHome({
     return accountName ?? "商家";
   }, [accountName, loadError]);
 
+  async function prepareOperatingAction(): Promise<void> {
+    if (!activities || !firstStore || !operatingHome || planBusy) return;
+    if (operatingHome.bestNextDecision.kind === "STOP_TRAFFIC") {
+      setPlanResult("已记录停止引流建议；该动作不会创建活动或新增预算。现场承接状态需要由门店经营权限确认。");
+      return;
+    }
+    setPlanBusy(true);
+    setPlanResult(undefined);
+    try {
+      const selectedSku = menuItems.find((item) => item.available);
+      const created = await activities.publish({
+        title: operatingHome.bestNextDecision.title,
+        time: "待商家确认具体时段",
+        capacity: 12,
+        venueName: firstStore.name,
+        venueIcon: "☕️",
+        venueType: "CAFE",
+        realitySceneId: operatingHome.sceneSupply?.sceneId ?? firstStore.id,
+        desc: `${operatingHome.bestNextDecision.reason}${selectedSku ? ` · 主推 ${selectedSku.name}` : ""}`,
+        consumptionTerm: "SPLIT",
+        merchantId: firstStore.id,
+      });
+      setScenePackages((current) => [{ id: created.activityId, title: created.title, sub: created.time, tag: "准备中", ...(created.coverImageUrl ? { coverImageUrl: created.coverImageUrl } : {}) }, ...current.filter((item) => item.id !== created.activityId)]);
+      setPlanResult(`已创建「${created.title}」并进入准备；报名不等于到场，只有核验后才计入经营结果。`);
+    } catch (error) {
+      setPlanResult(error instanceof Error ? error.message : "准备失败，请重试");
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       <View style={styles.homeTop}>
@@ -233,8 +267,20 @@ export function BusinessHome({
         <View style={styles.decisionKind}><Text style={styles.decisionKindText}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
         <Text style={styles.decisionTitle}>{operatingHome?.bestNextDecision.title ?? "等待经营信号"}</Text>
         <Text style={styles.decisionBody}>{operatingHome?.bestNextDecision.reason ?? "数据加载完成前不建议执行动作"}</Text>
-        {operatingHome?.bestNextDecision.requiresApproval ? <Pressable onPress={() => onChat?.(`按当前经营建议准备方案：${operatingHome.bestNextDecision.title}`)} style={styles.decisionAction}><Text style={styles.decisionActionText}>看方案并确认商业条件</Text></Pressable> : <Text style={styles.noActionNote}>无需老板处理 · 信号变化时再提醒</Text>}
+        {operatingHome?.bestNextDecision.requiresApproval ? <Pressable onPress={() => { setPlanOpen((open) => !open); setPlanResult(undefined); }} style={styles.decisionAction}><Text style={styles.decisionActionText}>{planOpen ? "收起方案" : "看方案并确认商业条件"}</Text></Pressable> : <Text style={styles.noActionNote}>无需老板处理 · 信号变化时再提醒</Text>}
       </View>
+      {planOpen && operatingHome ? <View style={styles.inlinePlan} testID="merchant-inline-operating-plan">
+        <Text style={styles.inlinePlanEyebrow}>OPERATING PLAN · 发布前确认</Text>
+        <Text style={styles.inlinePlanTitle}>{operatingHome.bestNextDecision.title}</Text>
+        <PlanRow label="目标" value={operatingHome.bestNextDecision.kind === "LOW_PEAK_FILL" ? "填补低峰" : operatingHome.bestNextDecision.kind === "STOP_TRAFFIC" ? "保护现场体验" : "经营调整"} />
+        <PlanRow label="Scene" value={operatingHome.sceneSupply?.sceneId ?? "待选择"} />
+        <PlanRow label="SKU" value={menuItems.find((item) => item.available)?.name ?? "不指定"} />
+        <PlanRow label="参与方" value="本店执行 · Creator / Partner 按需补位" />
+        <PlanRow label="商业条件" value={operatingHome.bestNextDecision.kind === "STOP_TRAFFIC" ? "不加预算 · 停止新增流量" : "顾客各自消费 · 容量上限 12"} />
+        <Text style={styles.inlinePlanBoundary}>确认只授权当前商业条件。预算增加、合作条件变化或对外重大邀请仍需再次确认。</Text>
+        <Pressable disabled={planBusy || !activities || !firstStore} onPress={() => { void prepareOperatingAction(); }} style={[styles.prepareButton, (planBusy || !activities || !firstStore) && styles.prepareButtonDisabled]}><Text style={styles.prepareButtonText}>{planBusy ? "正在准备…" : operatingHome.bestNextDecision.kind === "STOP_TRAFFIC" ? "确认处置边界" : "确认并开始准备"}</Text></Pressable>
+        {planResult ? <Text style={styles.planResult}>{planResult}</Text> : null}
+      </View> : null}
 
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>未来需求</Text>
@@ -341,6 +387,10 @@ export function BusinessHome({
   );
 }
 
+function PlanRow({ label, value }: { label: string; value: string }): React.JSX.Element {
+  return <View style={styles.planRow}><Text style={styles.planLabel}>{label}</Text><Text style={styles.planValue}>{value}</Text></View>;
+}
+
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 13 },
@@ -391,6 +441,7 @@ const styles = StyleSheet.create({
   decisionTitle: { color: color.white, fontSize: 17, fontWeight: "900", marginTop: 10 },
   decisionBody: { color: "#D8D3DD", fontSize: 12, lineHeight: 18, marginTop: 5 },
   decisionAction: { alignItems: "center", backgroundColor: "#FFAB17", borderRadius: 13, marginTop: 12, paddingVertical: 11 }, decisionActionText: { color: color.ink, fontSize: 12, fontWeight: "900" }, noActionNote: { color: "#AAA4B2", fontSize: 11, marginTop: 10 },
+  inlinePlan: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, marginTop: 8, padding: 14 }, inlinePlanEyebrow: { color: "#735700", fontSize: 10, fontWeight: "900", letterSpacing: 0.6 }, inlinePlanTitle: { color: color.ink, fontSize: 17, fontWeight: "900", marginBottom: 10, marginTop: 6 }, planRow: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 12, paddingVertical: 10 }, planLabel: { color: color.muted, fontSize: 11, width: 66 }, planValue: { color: color.ink, flex: 1, fontSize: 12, fontWeight: "700", lineHeight: 17 }, inlinePlanBoundary: { backgroundColor: color.proxyPurpleSoft, borderRadius: 12, color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 4, padding: 10 }, prepareButton: { alignItems: "center", backgroundColor: "#FFAB17", borderRadius: 14, marginTop: 12, paddingVertical: 12 }, prepareButtonDisabled: { opacity: 0.45 }, prepareButtonText: { color: color.ink, fontSize: 13, fontWeight: "900" }, planResult: { color: color.ink, fontSize: 11, fontWeight: "700", lineHeight: 17, marginTop: 9 },
   forecastEmpty: { backgroundColor: "#F6F3ED", borderColor: color.line, borderRadius: 16, borderStyle: "dashed", borderWidth: 1, padding: 14 },
   forecastTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   forecastBody: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
