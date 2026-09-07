@@ -10,14 +10,15 @@
 // 取待处理 / 经营数字.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
 import { color, shadows } from "../theme";
-import type { BusinessClient, MerchantOperatingHome } from "../business-client";
+import type { BusinessClient, MerchantOperatingHome, StoreProduct } from "../business-client";
 import type { ActivityClient } from "../activity-client";
 import type { SupplyClient } from "../supply-client";
+import { localApiBaseUrl } from "../native-clients";
 import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
 
 function formatVnd(minor: number): string {
@@ -49,6 +50,9 @@ export function BusinessHome({
   const [intentMode, setIntentMode] = useState<HomeIntentMode>();
   const [accountName, setAccountName] = useState<string | undefined>(undefined);
   const [storeCount, setStoreCount] = useState<number>(0);
+  const [firstStore, setFirstStore] = useState<{ id: string; name: string; address: string; status: string } | undefined>(undefined);
+  const [memberCount, setMemberCount] = useState<number>(0);
+  const [menuItems, setMenuItems] = useState<StoreProduct[]>([]);
   const [pendingItems, setPendingItems] = useState<Array<{ icon: ProxyIconName; title: string; meta?: string }>>([]);
   const [spendSummary, setSpendSummary] = useState<{ totalOrders: number; totalGrossMinor: number }>({ totalOrders: 0, totalGrossMinor: 0 });
   const [scenePackages, setScenePackages] = useState<Array<{ title: string; sub: string; tag: string }>>([]);
@@ -80,8 +84,17 @@ export function BusinessHome({
         ]);
         if (cancelled) return;
         setStoreCount(stores.length);
+        const head = stores[0];
+        setFirstStore(head ? { id: head.id, name: head.name, address: head.address, status: head.status } : undefined);
         setSpendSummary({ totalOrders: spend.totalOrders, totalGrossMinor: spend.totalGrossMinor });
         setOperatingHome(home);
+        setMemberCount(memberDir.length);
+        if (head) {
+          try {
+            const menu = await business.listProducts(head.id);
+            if (!cancelled) setMenuItems(menu);
+          } catch { /* menu optional */ }
+        }
         const items: Array<{ icon: ProxyIconName; title: string; meta?: string }> = [];
         if (stores.length === 0) {
           items.push({ icon: "storefront", title: "暂无门店 — 创建一个开始营业" });
@@ -147,6 +160,25 @@ export function BusinessHome({
         </View>
       </View>
 
+      {firstStore ? (
+        <Pressable onPress={() => onOpenMe()} style={styles.identityCard}>
+          {(() => {
+            const dish = menuItems.find((m) => m.available && m.mediaAssetId);
+            const dishUri = dish ? `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(dish.mediaAssetId)}` : undefined;
+            return dishUri
+              ? <Image source={{ uri: dishUri }} style={styles.identityPhoto} />
+              : <View style={styles.identityAvatar}>
+                <Text style={styles.identityAvatarText}>{firstStore.name.slice(0, 1).toUpperCase()}</Text>
+              </View>;
+          })()}
+          <View style={styles.identityCopy}>
+            <Text style={styles.identityName}>{firstStore.name}</Text>
+            <Text style={styles.identityMeta}>{firstStore.address || "地址待完善"} · {firstStore.status} · {memberCount} 经营人员</Text>
+          </View>
+          <Text style={styles.identityChev}>›</Text>
+        </Pressable>
+      ) : null}
+
       {onChat ? (
         <HomeChatBox
           contextLabel="商家"
@@ -177,6 +209,7 @@ export function BusinessHome({
         <View style={styles.balanceHead}><Text style={styles.balanceTitle}>需求 × 供给</Text><Text style={styles.unknownPill}>信号不足</Text></View>
         <Text style={styles.balanceBody}>尚未获得通过隐私阈值的聚合需求与 Scene 容量数据。</Text>
         <Text style={styles.balanceMeta}>不会用历史销售冒充附近客流，也不会生成虚假精确预测。</Text>
+        {operatingHome ? <Text style={styles.balanceMeta}>门店 {operatingHome.operatingPulse.storeCount} · 成员 {operatingHome.operatingPulse.memberCount} · {operatingHome.operatingPulse.freshness}</Text> : null}
       </View>
 
       <View style={styles.sectionHead}>
@@ -218,6 +251,27 @@ export function BusinessHome({
       ))}
 
       <MerchantCreatorRecommendations supply={supply} onOpenAll={() => onOpenMarket("OPPORTUNITY")} />
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>招牌与在售</Text>
+        <Text style={styles.sectionHint}>HOT / COOL menu</Text>
+      </View>
+      {menuItems.length === 0 ? (
+        <Pressable onPress={() => onOpenMe()} style={styles.actionCard}>
+          <View style={styles.actionIcon}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>
+          <View style={styles.actionCopy}><Text style={styles.actionTitle}>还没有菜单</Text><Text style={styles.subtle}>去线上店铺加第一道菜</Text></View>
+        </Pressable>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>
+          {menuItems.filter((m) => m.available).slice(0, 6).map((m) => (
+            <Pressable key={m.id} onPress={() => onOpenMe()} style={styles.menuCard}>
+              {m.mediaAssetId ? <Image source={{ uri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(m.mediaAssetId)}` }} style={styles.menuImage} /> : <View style={styles.menuImageMissing}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>}
+              <Text style={styles.menuName} numberOfLines={1}>{m.name}</Text>
+              <Text style={styles.menuPrice}>{formatVnd(m.priceMinor)}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
 
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>待处理</Text>
@@ -281,6 +335,20 @@ const styles = StyleSheet.create({
   homeTopCopy: { flex: 1 },
   homeTopTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 34 },
   homeTopLoc: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  identityCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 11, marginTop: 8, padding: 12, ...shadows.card },
+  identityAvatar: { alignItems: "center", backgroundColor: "#45208A", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  identityAvatarText: { color: color.white, fontSize: 18, fontWeight: "900" },
+  identityPhoto: { borderRadius: 22, height: 44, width: 44 },
+  identityCopy: { flex: 1, gap: 2 },
+  identityName: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  identityMeta: { color: color.muted, fontSize: 11, lineHeight: 15 },
+  identityChev: { color: color.muted, fontSize: 18, fontWeight: "800" },
+  menuRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
+  menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 4, padding: 8, width: 132 },
+  menuImage: { borderRadius: 10, height: 96, width: "100%" },
+  menuImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 10, height: 96, justifyContent: "center", width: "100%" },
+  menuName: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  menuPrice: { color: "#a9231f", fontSize: 12, fontWeight: "900" },
   sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 6, marginTop: 10 },
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   sectionHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },

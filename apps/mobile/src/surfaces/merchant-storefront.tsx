@@ -431,7 +431,13 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
               return (
                 <View key={s.id} style={styles.storeCard}>
                   <View style={styles.storeHero}>
-                    <View style={styles.storeLogo}><Text style={styles.storeLogoText}>{s.name.slice(0, 1).toUpperCase()}</Text></View>
+                    {(() => {
+                      const cover = sPhotos.find((p) => p.mediaAssetId);
+                      const coverUri = cover ? thumbUrlFor(cover.mediaAssetId) : undefined;
+                      return coverUri
+                        ? <Image source={{ uri: coverUri }} style={styles.storeCover} />
+                        : <View style={styles.storeLogo}><Text style={styles.storeLogoText}>{s.name.slice(0, 1).toUpperCase()}</Text></View>;
+                    })()}
                     <View style={styles.storeHeroCopy}><Text style={styles.storeName}>{s.name} · Proxy 店铺</Text><Text style={styles.storeMeta}>{s.address || "地址待完善"} · {s.status} · 公开店铺页</Text></View>
                   </View>
                   <View style={styles.heroActions}><View style={styles.previewButton}><Text style={styles.previewButtonText}>公开主页</Text></View><Pressable onPress={() => void Share.share({ message: `${s.name} · Proxy 店铺` })} style={styles.shareButton}><Text style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
@@ -790,6 +796,7 @@ const styles = StyleSheet.create({
   storeHero: { alignItems: "center", flexDirection: "row", gap: 11 },
   storeLogo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 18, height: 58, justifyContent: "center", width: 58 },
   storeLogoText: { color: color.white, fontSize: 22, fontWeight: "900" },
+  storeCover: { borderRadius: 18, height: 58, width: 58 },
   storeHeroCopy: { flex: 1, minWidth: 0 },
   heroActions: { flexDirection: "row", gap: 8 },
   previewButton: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, flex: 1, paddingVertical: 11 },

@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 55 — 2026-09-07
+
+- 商家 Home 补身份卡（门店名/地址/状态/人数，点进我的）与在售菜单快照
+  （HOT/COOL 位，横滑 dish 图+红价），经营脉搏卡接真实 store/member 数；
+  店铺 hero 优先用相册封面图，无图回退字母标。
+
 ## Revision 54 — 2026-09-07
 
 - 店铺菜单对齐 R25（MENU-002）：商品加分类/场景字段（075），菜单页改
