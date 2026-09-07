@@ -835,20 +835,6 @@ export function MeSurface({
                 <Text style={[styles.appBehaviorCardDesc, index === checks.length - 1 && styles.appBehaviorCardDescDark]}>{desc}</Text>
               </View>
             ))}
-            <View style={styles.appBehaviorActions}>
-              <Pressable style={[styles.appBehaviorAction, styles.appBehaviorActionPrimary]}>
-                <Text style={styles.appBehaviorActionPrimaryText}>模拟后台恢复</Text>
-              </Pressable>
-              <Pressable style={styles.appBehaviorAction}>
-                <Text style={styles.appBehaviorActionText}>模拟深链</Text>
-              </Pressable>
-              <Pressable style={[styles.appBehaviorAction, styles.appBehaviorActionDanger]}>
-                <Text style={styles.appBehaviorActionDangerText}>模拟离线</Text>
-              </Pressable>
-              <Pressable style={styles.appBehaviorAction}>
-                <Text style={styles.appBehaviorActionText}>重置原型</Text>
-              </Pressable>
-            </View>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
               <Text style={styles.appBehaviorReturnText}>返回我的</Text>
             </Pressable>

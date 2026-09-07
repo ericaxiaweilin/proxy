@@ -87,10 +87,6 @@ export function MessagesSurface({
     if (onOpenRequests) onOpenRequests();
     else setSubView("requests");
   };
-  const openContacts = () => {
-    if (onOpenContacts) onOpenContacts();
-    else setSubView("contacts");
-  };
   const openPerson = (name: string) => {
     setPersonName(name);
     setSubView("person");
@@ -202,9 +198,7 @@ export function MessagesSurface({
               <Pressable accessibilityLabel="消息请求" onPress={openRequests} style={styles.iconBell}>
                 <ProxyIcon color={color.ink} name="mail" size={20} />
               </Pressable>
-            <Pressable accessibilityLabel="新聊天" onPress={openContacts} style={styles.icon}>
-              <ProxyIcon color={color.ink} name="plus" size={18} />
-            </Pressable>
+            <View style={styles.icon} />
           </View>
         </View>
 
