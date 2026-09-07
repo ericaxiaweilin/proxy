@@ -17,6 +17,48 @@ export function composePriceRange(min: string, max: string): string {
   return `${lo} – ${hi}`;
 }
 
+// 快速 Offer 输入组装（纯函数）：发布者给真实报名人发 5 分钟 Offer。
+// 金额文本转服务端要的 agreedCompensation（VND 最小单位整数，精度 1₫）；
+// 目标必须是报名名单里的 applicantId，不再允许写死演示 agent。
+// slot 暂沿用 {taskId}_slot_1 约定（slot 读模型未暴露前）。
+//
+// 金额边界：
+//   - 下限 MIN_OFFER_VND = 100 — 服务端只要求 >0，但商品价显著低于
+//     100₫ 基本是误填（50₫ 这类）；端上先拦，省一次服务端 roundtrip。
+//   - 上限 MAX_OFFER_VND = 1_000_000_000 — 镜像服务端 maxAmountVND
+//    （fulfillment/service.go 防超大金额脏数据），超了直接报，不等
+//     服务端 INVALID_SLOT_OFFER_AMOUNT。
+export const MIN_OFFER_VND = 100;
+export const MAX_OFFER_VND = 1_000_000_000;
+
+export interface SlotOfferInput {
+  taskId: string;
+  slotId: string;
+  agentId: string;
+  agreedCompensation: number;
+}
+
+export function buildSlotOfferInput(
+  taskId: string,
+  applicantId: string,
+  amountText: string
+): { ok: true; input: SlotOfferInput } | { ok: false; error: string } {
+  if (!taskId.trim() || !applicantId.trim()) return { ok: false, error: "缺少任务或报名人" };
+  const amount = Number(amountText.replace(/[^\d]/g, ""));
+  if (!Number.isInteger(amount) || amount <= 0) return { ok: false, error: "请输入有效金额（VND）" };
+  if (amount < MIN_OFFER_VND) return { ok: false, error: `金额过低，至少 ${MIN_OFFER_VND}₫` };
+  if (amount > MAX_OFFER_VND) return { ok: false, error: "金额超过上限" };
+  return {
+    ok: true,
+    input: {
+      taskId: taskId.trim(),
+      slotId: `${taskId.trim()}_slot_1`,
+      agentId: applicantId.trim(),
+      agreedCompensation: amount
+    }
+  };
+}
+
 // R16.x: wire 上 MarketOpportunitySchema 强制 MoneyFlow 4 选 1 +
 // PriceLabel 必填。mobile 端本地 MarketOpportunity 必须把这两个
 // 字段补齐，否则 zod parse 在 client SDK 处会失败。

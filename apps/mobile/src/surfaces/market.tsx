@@ -23,6 +23,7 @@ import { type SupplyClient } from "../supply-client";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import {
   OPPORTUNITY_LENS_LABEL,
+  buildSlotOfferInput,
   composePriceRange,
   type MarketOpportunity,
   type MarketTab,
@@ -273,19 +274,11 @@ export function MarketSurface({
     finally { setBusy(false); }
   }
 
-  async function createOfferForLinh(opportunity: MarketOpportunity): Promise<void> {
-    if (!fulfillment) { setOfferMsg("Offer 服务未就绪"); return; }
-    if (offerBusy) return;
-    setOfferBusy(true);
-    setOfferMsg(undefined);
-    try {
-      const offer = await fulfillment.createSlotOffer({ taskId: opportunity.id, slotId: `${opportunity.id}_slot_1`, agentId: "agent_linh" });
-      setOfferMsg(`已发 Offer 给 Linh · ${offer.offerId.slice(0, 8)} · 5分钟内有效`);
-    } catch (e) {
-      setOfferMsg(e instanceof Error ? e.message : "发 Offer 失败");
-    } finally {
-      setOfferBusy(false);
-    }
+  // 快速 Offer 改走选人工作台：目标必须是报名名单里的真实 applicantId，
+  // 金额发布者现填。写死 agent_linh 的演示位已删除，没有报名人不发 Offer。
+  function openOfferWorkbench(opportunity: MarketOpportunity): void {
+    setOppDetail(null);
+    setSelectOpp(opportunity);
   }
 
   async function loadMyOffers(): Promise<void> {
@@ -457,9 +450,9 @@ export function MarketSurface({
         <Pressable disabled={offerBusy} onPress={() => void loadMyOffers()} style={[styles.offerBtn, offerBusy && styles.offerBtnDisabled]}>
           <Text style={styles.offerBtnText}>{offerBusy ? "加载中…" : "我的 Offer"}</Text>
         </Pressable>
-        {oppDetail ? (
-          <Pressable disabled={offerBusy} onPress={() => void createOfferForLinh(oppDetail)} style={[styles.offerBtnPrimary, offerBusy && styles.offerBtnDisabled]}>
-            <Text style={styles.offerBtnPrimaryText}>发 Offer 给 Linh</Text>
+        {oppDetail && oppDetail.ownedByViewer ? (
+          <Pressable disabled={offerBusy} onPress={() => openOfferWorkbench(oppDetail)} style={[styles.offerBtnPrimary, offerBusy && styles.offerBtnDisabled]} accessibilityLabel="去选人工作台发 Offer">
+            <Text style={styles.offerBtnPrimaryText}>选人发 Offer →</Text>
           </Pressable>
         ) : null}
         <Pressable disabled={offerBusy || myOffers.length === 0} onPress={() => setShowOffers((v) => !v)} style={[styles.offerBtn, (offerBusy || myOffers.length === 0) && styles.offerBtnDisabled]}>
@@ -508,7 +501,7 @@ export function MarketSurface({
           }}
         />
       ) : selectOpp ? (
-        <SelectWorkbench marketplace={marketplace} opportunity={selectOpp} onBack={() => setSelectOpp(null)} />
+        <SelectWorkbench marketplace={marketplace} fulfillment={fulfillment} opportunity={selectOpp} onBack={() => setSelectOpp(null)} />
       ) : view === "MAP" ? (
         <MarketMap
           tab={pageTab}
@@ -993,11 +986,15 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
   );
 }
 
-function SelectWorkbench({ marketplace, opportunity, onBack }: { marketplace: MarketplaceClient; opportunity: MarketOpportunity; onBack: () => void }): React.JSX.Element {
+function SelectWorkbench({ marketplace, fulfillment, opportunity, onBack }: { marketplace: MarketplaceClient; fulfillment?: FulfillmentClient | undefined; opportunity: MarketOpportunity; onBack: () => void }): React.JSX.Element {
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [candidates, setCandidates] = useState<MarketApplication[]>([]);
   const [workingId, setWorkingId] = useState<string>();
   const [error, setError] = useState<string>();
+  // 快速 Offer：目标固定为报名名单里的真实 applicantId，金额发布者现填（VND）。
+  const [offerAmount, setOfferAmount] = useState("1200000");
+  const [offerWorkingId, setOfferWorkingId] = useState<string>();
+  const [offerMsg, setOfferMsg] = useState<string>();
   const load = useCallback(async (): Promise<void> => {
     setPhase("LOADING");
     try {
@@ -1016,6 +1013,22 @@ function SelectWorkbench({ marketplace, opportunity, onBack }: { marketplace: Ma
     try { await marketplace.selectApplication(opportunity.id, candidate.applicationId); await load(); }
     catch { setError("选择没有保存成功，请重试。"); }
     finally { setWorkingId(undefined); }
+  }
+  async function offer(candidate: MarketApplication): Promise<void> {
+    if (!fulfillment) { setOfferMsg("Offer 服务未就绪"); return; }
+    if (offerWorkingId) return;
+    const built = buildSlotOfferInput(opportunity.id, candidate.applicantId, offerAmount);
+    if (!built.ok) { setOfferMsg(built.error); return; }
+    setOfferWorkingId(candidate.applicationId);
+    setOfferMsg(undefined);
+    try {
+      const created = await fulfillment.createSlotOffer(built.input);
+      setOfferMsg(`已发 Offer · ${created.offerId.slice(0, 8)} · 5分钟内有效，对方接单后生成订单`);
+    } catch (e) {
+      setOfferMsg(e instanceof Error ? e.message : "发 Offer 失败");
+    } finally {
+      setOfferWorkingId(undefined);
+    }
   }
   const selectedCount = candidates.filter((item) => item.status === "SELECTED" || item.status === "CONFIRMED").length;
   return (
@@ -1049,6 +1062,14 @@ function SelectWorkbench({ marketplace, opportunity, onBack }: { marketplace: Ma
       {phase === "LOADING" ? <ActivityIndicator color={color.magenta} /> : null}
       {error ? <Text style={styles.marketError}>{error}</Text> : null}
       {phase === "READY" && candidates.length === 0 ? <Text style={styles.detailHint}>还没有人报名。候选人不会由平台或 AI 自动补位。</Text> : null}
+      {phase === "READY" && candidates.length > 0 ? (
+        <View style={styles.r4Card}>
+          <Text style={styles.r4Title}>快速 Offer 金额 · VND</Text>
+          <TextInput keyboardType="number-pad" onChangeText={setOfferAmount} style={styles.publishPriceInput} value={offerAmount} placeholder="例如 1200000" />
+          <Text style={styles.detailHint}>给选中的报名人发 5 分钟 Offer，对方接单后直接生成订单。金额至少 100₫。</Text>
+        </View>
+      ) : null}
+      {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}
       {candidates.map((c) => (
         <View key={c.applicationId} style={[styles.r4Card, (c.status === "SELECTED" || c.status === "CONFIRMED") && { borderColor: color.magenta }]}>
           <View style={styles.r4Top}>
@@ -1062,6 +1083,11 @@ function SelectWorkbench({ marketplace, opportunity, onBack }: { marketplace: Ma
             <Pressable disabled={c.status !== "SUBMITTED" || Boolean(workingId)} onPress={() => void select(c)} style={c.status === "SUBMITTED" ? styles.r4ActionPrimary : styles.r4ActionGhost}>
               <Text style={c.status === "SUBMITTED" ? styles.r4ActionPrimaryText : styles.r4ActionGhostText}>{workingId === c.applicationId ? "保存中…" : c.status === "SUBMITTED" ? "选择并发出合作邀请" : "状态已记录"}</Text>
             </Pressable>
+            {c.status === "SUBMITTED" && fulfillment ? (
+              <Pressable disabled={Boolean(offerWorkingId)} onPress={() => void offer(c)} style={styles.r4ActionGhost} accessibilityLabel={`给申请人发 Offer`}>
+                <Text style={styles.r4ActionGhostText}>{offerWorkingId === c.applicationId ? "发 Offer 中…" : "发 Offer →"}</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
       ))}
