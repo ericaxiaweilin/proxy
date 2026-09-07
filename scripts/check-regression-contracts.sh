@@ -854,5 +854,8 @@ require_test "WATERMARK-001" "./internal/media" \
 require_test "WATERMARK-001" "./internal/media" \
   "TestWatermarkBurnedIntoVariant" \
   "apps/api-go/internal/media/watermark_test.go" || exit $?
+require_test "WATERMARK-001" "./internal/media" \
+  "TestWatermarkBurnedIntoVariantV2" \
+  "apps/api-go/internal/media/watermark_test.go" || exit $?
 
 echo "  regression contracts: OK"

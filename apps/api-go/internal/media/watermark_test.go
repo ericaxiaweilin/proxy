@@ -53,6 +53,16 @@ func decodeVariantJPEG(path string) (image.Image, error) {
 // corner). Skipped where ffmpeg is unavailable. Runs against the v1
 // pipeline (the serving path for thumb/play URLs).
 func TestWatermarkBurnedIntoVariant(t *testing.T) {
+	testWatermarkBurnedIntoVariant(t, false)
+}
+
+// The composition-aware v2 path is also a serving path. Pin it separately so
+// adding or changing a variant recipe cannot silently bypass WATERMARK-001.
+func TestWatermarkBurnedIntoVariantV2(t *testing.T) {
+	testWatermarkBurnedIntoVariant(t, true)
+}
+
+func testWatermarkBurnedIntoVariant(t *testing.T, useV2 bool) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg unavailable")
 	}
@@ -74,13 +84,19 @@ func TestWatermarkBurnedIntoVariant(t *testing.T) {
 	}
 	_ = f.Close()
 	asset := MediaAsset{MediaAssetID: "ma_wm_test_001", MediaType: "IMAGE"}
-	variants, err := generateImageVariants(t.Context(), src, dir, asset, time.Now())
+	now := time.Now()
+	var variants []MediaVariant
+	if useV2 {
+		variants, err = generateImageVariantsV2(t.Context(), src, dir, asset, nil, now)
+	} else {
+		variants, err = generateImageVariants(t.Context(), src, dir, asset, now)
+	}
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	var feedPath string
 	for _, v := range variants {
-		if v.Purpose == "FEED_1X" {
+		if v.Purpose == "FEED_1X" || v.Purpose == "FEED_1X_NATURAL" {
 			feedPath = filepath.Join(dir, v.StorageKey)
 		}
 	}
@@ -95,8 +111,8 @@ func TestWatermarkBurnedIntoVariant(t *testing.T) {
 	// Sample bottom-right corner where the mark lands; solid gray
 	// source must differ there after burn-in.
 	changed := false
-	for y := b.Max.Y - 34; y < b.Max.Y - 2; y += 2 {
-		for x := b.Max.X - 170; x < b.Max.X - 2; x += 2 {
+	for y := b.Max.Y - 34; y < b.Max.Y-2; y += 2 {
+		for x := b.Max.X - 170; x < b.Max.X-2; x += 2 {
 			r, g, bl, _ := marked.At(x, y).RGBA()
 			if r>>8 != 128 || g>>8 != 128 || bl>>8 != 128 {
 				changed = true

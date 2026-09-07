@@ -1,15 +1,15 @@
 // Package media — image_recipe_v2 派生（§4.2 + §5.2.2）。
 //
 // 升级点（相对 v1）：
-//   1. 显式 sRGB 色彩空间：消除宽色域照片在普通屏发灰
-//   2. setsar=1：归一化像素宽高比，消除 Android 偶发变形
-//   3. strip metadata + strip EXIF GPS：派生图彻底不带敏感信息
-//   4. 五档输出保持原比例（force_original_aspect_ratio=decrease）
-//   5. SHARE_OG：取消硬补 color=0x17131F，改为 cover + crop 自适应
-//   6. 引入 compositionHint：worker 计算主体类型 + safeCropRect，输出额外 variant
-//      - FEED_1X_HINT: 有 safeCropRect 时按其 cover
-//      - FEED_1X_NATURAL: 无人脸/低置信度时按原比例 + 深紫黑补边 contain
-//   7. recipe version 升 v2，CDN cache key 区分 v1/v2（v1 旧对象保留）
+//  1. 显式 sRGB 色彩空间：消除宽色域照片在普通屏发灰
+//  2. setsar=1：归一化像素宽高比，消除 Android 偶发变形
+//  3. strip metadata + strip EXIF GPS：派生图彻底不带敏感信息
+//  4. 五档输出保持原比例（force_original_aspect_ratio=decrease）
+//  5. SHARE_OG：取消硬补 color=0x17131F，改为 cover + crop 自适应
+//  6. 引入 compositionHint：worker 计算主体类型 + safeCropRect，输出额外 variant
+//     - FEED_1X_HINT: 有 safeCropRect 时按其 cover
+//     - FEED_1X_NATURAL: 无人脸/低置信度时按原比例 + 深紫黑补边 contain
+//  7. recipe version 升 v2，CDN cache key 区分 v1/v2（v1 旧对象保留）
 //
 // 验收 Gate 2：跑 §11 样本集 → SSIM + 视觉回归
 package media
@@ -28,15 +28,15 @@ import (
 )
 
 const (
-	imageRecipeVersionV2   = "image_recipe_v2"
-	feedBackdropColorV2    = "0x0E0A14" // 与客户端 SocialMediaFrame 深紫黑底一致
+	imageRecipeVersionV2 = "image_recipe_v2"
+	feedBackdropColorV2  = "0x0E0A14" // 与客户端 SocialMediaFrame 深紫黑底一致
 )
 
 type imageVariantRecipeV2 struct {
-	purpose     string
-	filter      string
-	extraArgs   []string
-	dependsOn   string // "HINT" 时先要 compositionHint
+	purpose   string
+	filter    string
+	extraArgs []string
+	dependsOn string // "HINT" 时先要 compositionHint
 }
 
 var imageVariantRecipesV2 = []imageVariantRecipeV2{
@@ -75,7 +75,7 @@ var imageVariantRecipesV2 = []imageVariantRecipeV2{
 	},
 	{
 		purpose: "PLACEHOLDER",
-		filter: "scale=64:64:force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p",
+		filter:  "scale=64:64:force_original_aspect_ratio=decrease,setsar=1,format=yuvj420p",
 	},
 	{
 		// v2 新增：原比例 + 深紫黑补边 → 全身人像 / 风景 contain 时无白边。
@@ -139,10 +139,10 @@ func probeImageDimensions(ctx context.Context, path string) (imageMetadataProbe,
 // 入参：原图真实宽高 + 归一化 [0,1] 的 rect。
 // 输出：scale → crop（按 rect 切到合适尺寸），最后再压到 1080。
 // 【裁剪不变量】不裁出主体、主体中心、安全 [0,1] 边界
-//   1. rect.x ∈ [0, 1-rect.width] — 不能越界左侧/右侧
-//   2. rect.y ∈ [0, 1-rect.height] — 不能越界顶部/底部
-//   3. pxW, pxH ≥ 4  — 太小的 box 会出现起块/采样失真
-//   4. 裁切后的 aspect 需在 4:5 ~ 16:9 之间 — 避免裁出超长条
+//  1. rect.x ∈ [0, 1-rect.width] — 不能越界左侧/右侧
+//  2. rect.y ∈ [0, 1-rect.height] — 不能越界顶部/底部
+//  3. pxW, pxH ≥ 4  — 太小的 box 会出现起块/采样失真
+//  4. 裁切后的 aspect 需在 4:5 ~ 16:9 之间 — 避免裁出超长条
 func hintFilterForSafeCropRect(probe imageMetadataProbe, rect *MediaBox, assetID string) (string, error) {
 	if rect == nil {
 		return "", errors.New("nil safeCropRect")
@@ -202,6 +202,13 @@ func generateImageVariantsV2(ctx context.Context, originalPath, storeDir string,
 				continue
 			}
 		}
+		// SHARE_OG only exists when a trusted crop hint exists. Without one,
+		// SHARE_OG_FALLBACK below preserves the source aspect and pads safely.
+		if recipe.dependsOn == "HINT_OR_FALLBACK" {
+			if hint == nil || hint.SafeCropRect == nil || hint.Confidence < LowConfidenceThreshold {
+				continue
+			}
+		}
 
 		variantID := "mv_" + asset.MediaAssetID + "_" + strings.ToLower(recipe.purpose) + "_v2"
 		storageKey := variantID + ".jpg"
@@ -221,7 +228,7 @@ func generateImageVariantsV2(ctx context.Context, originalPath, storeDir string,
 			}()
 
 			filter := recipe.filter
-			if recipe.purpose == "FEED_1X_HINT" {
+			if recipe.purpose == "FEED_1X_HINT" || recipe.purpose == "SHARE_OG" {
 				p, err := probeOnce()
 				if err != nil {
 					return nil, fmt.Errorf("FEED_1X_HINT probe failed: %w", err)
@@ -239,6 +246,13 @@ func generateImageVariantsV2(ctx context.Context, originalPath, storeDir string,
 			args = append(args, "-q:v", "2", temporaryPath)
 			if out, runErr := exec.CommandContext(ctx, "ffmpeg", args...).CombinedOutput(); runErr != nil {
 				return nil, fmt.Errorf("%s variant v2 failed: %w: %s", recipe.purpose, runErr, clippedOutput(out))
+			}
+			// R36.x WATERMARK-001: same burn-in as the v1 path.
+			if recipe.purpose != "PLACEHOLDER" {
+				if wmErr := applyConfidentialWatermark(ctx, storeDir, temporaryPath, asset.MediaAssetID, now); wmErr != nil {
+					_ = os.Remove(temporaryPath)
+					return nil, wmErr
+				}
 			}
 			if renameErr := os.Rename(temporaryPath, outputPath); renameErr != nil {
 				return nil, renameErr

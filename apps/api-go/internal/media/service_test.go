@@ -432,10 +432,12 @@ func TestImageGoesReadyDirectly(t *testing.T) {
 		t.Fatalf("image worker: processed=%d err=%v", processed, err)
 	}
 	variants, err := s.ListReadyVariants(t.Context(), id)
-	if err != nil || len(variants) != 6 {
-		t.Fatalf("want ORIGINAL + 5 derivatives, got %d: %v", len(variants), err)
+	if err != nil {
+		t.Fatalf("list image variants: %v", err)
 	}
+	recipeCounts := map[string]int{}
 	for _, variant := range variants {
+		recipeCounts[variant.RecipeVersion]++
 		if _, err := os.Stat(filepath.Join(dir, variant.StorageKey)); err != nil {
 			t.Fatalf("variant %s missing: %v", variant.Purpose, err)
 		}
@@ -450,6 +452,9 @@ func TestImageGoesReadyDirectly(t *testing.T) {
 				t.Fatal("ORIGINAL must not be exposed by the public variant route")
 			}
 		}
+	}
+	if recipeCounts["original_v1"] != 1 || recipeCounts[imageRecipeVersion] != len(imageVariantRecipes) || recipeCounts[imageRecipeVersionV2] == 0 {
+		t.Fatalf("want ORIGINAL + complete v1 fallback + v2 derivatives, got recipes=%v total=%d", recipeCounts, len(variants))
 	}
 	lookup := NewPostMediaLookup(s)
 	read, err := lookup.LookupMediaAssets(t.Context(), []string{id})
