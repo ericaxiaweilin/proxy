@@ -10,7 +10,8 @@
 // 取待处理 / 经营数字.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
@@ -55,7 +56,7 @@ export function BusinessHome({
   const [menuItems, setMenuItems] = useState<StoreProduct[]>([]);
   const [pendingItems, setPendingItems] = useState<Array<{ icon: ProxyIconName; title: string; meta?: string }>>([]);
   const [spendSummary, setSpendSummary] = useState<{ totalOrders: number; totalGrossMinor: number }>({ totalOrders: 0, totalGrossMinor: 0 });
-  const [scenePackages, setScenePackages] = useState<Array<{ title: string; sub: string; tag: string }>>([]);
+  const [scenePackages, setScenePackages] = useState<Array<{ id: string; title: string; sub: string; tag: string; coverImageUrl?: string }>>([]);
   const [operatingHome, setOperatingHome] = useState<MerchantOperatingHome | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const lastYRef = useRef(0);
@@ -115,9 +116,11 @@ export function BusinessHome({
             const list = await activities.listActivities();
             if (!cancelled) {
               setScenePackages(list.slice(0, 2).map((entry) => ({
+                id: entry.activityId,
                 title: entry.title,
                 sub: entry.time,
                 tag: entry.moneyFlow === "FREE" ? "可参与" : "可报名",
+                ...(entry.coverImageUrl ? { coverImageUrl: entry.coverImageUrl } : {}),
               })));
             }
           } catch { /* activities optional */ }
@@ -166,7 +169,7 @@ export function BusinessHome({
             const dish = menuItems.find((m) => m.available && m.mediaAssetId);
             const dishUri = dish ? `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(dish.mediaAssetId)}` : undefined;
             return dishUri
-              ? <Image source={{ uri: dishUri }} style={styles.identityPhoto} />
+              ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: dishUri }} style={styles.identityPhoto} transition={0} />
               : <View style={styles.identityAvatar}>
                 <Text style={styles.identityAvatarText}>{firstStore.name.slice(0, 1).toUpperCase()}</Text>
               </View>;
@@ -254,10 +257,9 @@ export function BusinessHome({
         </Pressable>
       ) : null}
       {scenePackages.map((pkg) => (
-        <Pressable key={pkg.title} onPress={() => onOpenMarket("OPPORTUNITY")} style={styles.actionCard}>
-          <View style={styles.actionIcon}><ProxyIcon color={color.ink} name="cup" size={20} /></View>
-          <View style={styles.actionCopy}><Text style={styles.actionTitle}>{pkg.title}</Text><Text style={styles.subtle}>{pkg.sub}</Text></View>
-          <View style={styles.actionMetricTag}><Text style={styles.actionMetricTagText}>{pkg.tag}</Text></View>
+        <Pressable key={pkg.id} onPress={() => onOpenMarket("OPPORTUNITY")} style={styles.scenePackageCard}>
+          {pkg.coverImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-scene:${pkg.id}`} source={{ uri: pkg.coverImageUrl }} style={styles.scenePackageImage} transition={0} /> : <View style={styles.scenePackageFallback}><ProxyIcon color={color.muted} name="cup" size={24} /></View>}
+          <View style={styles.scenePackageBody}><View style={styles.actionCopy}><Text style={styles.actionTitle}>{pkg.title}</Text><Text style={styles.subtle}>{pkg.sub}</Text></View><View style={styles.actionMetricTag}><Text style={styles.actionMetricTagText}>{pkg.tag}</Text></View></View>
         </Pressable>
       ))}
 
@@ -276,7 +278,7 @@ export function BusinessHome({
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>
           {menuItems.filter((m) => m.available).slice(0, 6).map((m) => (
             <Pressable key={m.id} onPress={() => onOpenMe()} style={styles.menuCard}>
-              {m.mediaAssetId ? <Image source={{ uri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(m.mediaAssetId)}` }} style={styles.menuImage} /> : <View style={styles.menuImageMissing}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>}
+              {m.mediaAssetId ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`merchant-sku:${m.id}`} source={{ uri: `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(m.mediaAssetId)}` }} style={styles.menuImage} transition={0} /> : <View style={styles.menuImageMissing}><ProxyIcon color={color.muted} name="storefront" size={22} /></View>}
               <Text style={styles.menuName} numberOfLines={1}>{m.name}</Text>
               <Text style={styles.menuPrice}>{formatVnd(m.priceMinor)}</Text>
             </Pressable>
@@ -371,6 +373,7 @@ const styles = StyleSheet.create({
   subtle: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   actionMetricTag: { backgroundColor: color.lime, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 6 },
   actionMetricTagText: { color: color.ink, fontSize: 11, fontWeight: "800", lineHeight: 15 },
+  scenePackageCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, marginVertical: 5, overflow: "hidden", ...shadows.card }, scenePackageImage: { height: 144, width: "100%" }, scenePackageFallback: { alignItems: "center", backgroundColor: color.offWhite, height: 112, justifyContent: "center" }, scenePackageBody: { alignItems: "center", flexDirection: "row", gap: 10, padding: 12 },
   outcomeGrid: { flexDirection: "row", gap: 8 },
   metric: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, paddingHorizontal: 8, paddingVertical: 13 },
   metricValue: { color: color.ink, fontSize: 16, fontWeight: "900", textAlign: "center" },
