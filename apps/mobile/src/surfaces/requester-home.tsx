@@ -22,7 +22,6 @@ import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
-import Svg, { Circle, Path } from "react-native-svg";
 import {
   RECOMMEND_FILTER_CHIPS,
   RECOMMEND_MODE_ORDER,
@@ -448,26 +447,22 @@ export function RequesterHome({
         />
       ) : null)}
 
-      {onOpenSceneMap ? (
-        <Pressable accessibilityLabel="打开河内场景地图" onPress={() => onOpenSceneMap?.()} style={styles.sceneMapEntry}>
-          <View style={styles.sceneMapVisual}>
-            <Svg height="100%" viewBox="0 0 72 58" width="100%">
-              <Path d="M-5 18 C12 8 17 28 31 20 S50 5 78 14" fill="none" stroke="#C8DDE8" strokeLinecap="round" strokeWidth="7" />
-              <Path d="M8 62 C18 43 29 48 38 34 S55 25 69 -4" fill="none" stroke="#D8D1DF" strokeLinecap="round" strokeWidth="2.4" />
-              <Path d="M-4 42 C17 36 28 40 43 31 S62 22 77 27" fill="none" stroke="#E3DDE7" strokeLinecap="round" strokeWidth="2" />
-              <Circle cx="15" cy="17" fill={color.violet} r="5.5" />
-              <Circle cx="52" cy="22" fill={color.magenta} r="5.5" />
-              <Circle cx="34" cy="46" fill={color.muted} r="5" />
-              <Circle cx="15" cy="17" fill="none" r="8" stroke="rgba(255,255,255,0.9)" strokeWidth="2" />
-            </Svg>
+      {sceneBriefs.length > 0 ? (
+        <View>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>场景</Text>
+            <Text style={styles.sectionHint}>{activeSceneCount > 0 ? `${activeSceneCount} 个正在发生` : `${sceneBriefs.length} 个待探索`}</Text>
           </View>
-          <View style={styles.sceneMapCopy}>
-            <Text style={styles.sceneMapEyebrow}>SCENE MAP · 河内</Text>
-            <Text style={styles.sceneMapTitle}>{sceneBriefs.length > 0 ? `${sceneBriefs.length} 个场景` : "场景地图"}</Text>
-            <Text style={styles.sceneMapSub}>{sceneBriefs.length > 0 ? (activeSceneCount > 0 ? `${activeSceneCount} 个正在发生` : "看看都在哪") : "打开看看附近"}</Text>
-          </View>
-          <Text style={styles.sceneMapChevron}>›</Text>
-        </Pressable>
+          {sceneBriefs.slice(0, 5).map((s) => (
+            <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneRow} accessibilityLabel={`场景 ${s.name}`}>
+              <View style={styles.sceneRowMain}>
+                <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
+                <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}{s.best ? ` · ${s.best}` : ""}</Text>
+              </View>
+              <Text style={styles.sceneRowChev}>›</Text>
+            </Pressable>
+          ))}
+        </View>
       ) : null}
 
       {storeActivities.length > 0 ? (
@@ -631,13 +626,9 @@ const styles = StyleSheet.create({
   aiHandle: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 2, textAlign: "center" },
   aiDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5, minHeight: 30 },
   aiProfileLink: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 7 },
-  sceneMapEntry: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 12, minHeight: 86, padding: 13 },
-  sceneMapVisual: { backgroundColor: "#EEF2F5", borderColor: color.line, borderRadius: 15, borderWidth: 1, height: 58, overflow: "hidden", width: 72 },
-  sceneMapCopy: { flex: 1 },
-  sceneMapEyebrow: { color: color.violet, fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
-  sceneMapTitle: { color: color.ink, fontSize: 17, fontWeight: "900", marginTop: 3 },
-  sceneMapSub: { color: color.muted, fontSize: 11, marginTop: 3 },
-  sceneMapChevron: { color: color.muted, fontSize: 27 },
+  sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, padding: 12 },
+  sceneRowMain: { flex: 1, gap: 2 },
+  sceneRowChev: { color: color.muted, fontSize: 20, fontWeight: "800" },
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 13 },
 
