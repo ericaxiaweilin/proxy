@@ -452,7 +452,11 @@ export function RequesterHome({
         <>
           <Pressable onPress={() => setComposerOpen(true)} style={styles.composerSingle} accessibilityLabel="告诉 Proxy 你想做什么">
             <Text style={styles.composerSingleText}>Proxy 想要怎样的时光？</Text>
-            <Text style={styles.composerSingleIcons}>📷 🎤 ＋</Text>
+            <View style={styles.composerSingleIcons}>
+              <ProxyIcon color={color.muted} name="camera" size={18} />
+              <ProxyIcon color={color.muted} name="microphone" size={18} />
+              <ProxyIcon color={color.muted} name="plus" size={18} />
+            </View>
           </Pressable>
           {composerOpen ? (
             <View>
@@ -708,7 +712,7 @@ const styles = StyleSheet.create({
   emptyNote: { color: color.muted, fontSize: 12, paddingVertical: 8, textAlign: "center" },
   composerSingle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 8, paddingHorizontal: 14, paddingVertical: 12 },
   composerSingleText: { color: color.muted, fontSize: 13 },
-  composerSingleIcons: { color: color.muted, fontSize: 14 },
+  composerSingleIcons: { alignItems: "center", flexDirection: "row", gap: 10 },
   composerCollapse: { alignItems: "center", paddingVertical: 6 },
   composerCollapseText: { color: color.muted, fontSize: 11, fontWeight: "700" },
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
