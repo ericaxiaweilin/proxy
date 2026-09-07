@@ -41,10 +41,10 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
-	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
+	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -363,7 +363,10 @@ func main() {
 	// again — the Postgres implementation is a follow-up
 	// once the rest of the media data path moves into the
 	// transactional outbox.
-	personaRepo := aipersona.NewMemoryRepository()
+	var personaRepo aipersona.Repository = aipersona.NewMemoryRepository()
+	if pool != nil {
+		personaRepo = postgres.NewAIPersonaRepository(pool)
+	}
 	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
 	mediaService.WithAIPersonaService(personaSvc)
 	server.AIPersona = personaSvc

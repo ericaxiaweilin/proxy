@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 63 — 2026-09-07
+
+- AI persona accounts and likeness-consent history now use PostgreSQL whenever
+  `DATABASE_URL` is configured; process restart no longer erases the account or
+  consent truth. This is persistence only and does not grant AI personas any
+  activity, order, payment, or physical-presence capability.
+- Expanded the persisted persona enum to the existing runtime actor kinds and
+  fixed revoked consent so a later re-consent appends a new auditable row.
+
 ## Revision 62 — 2026-09-07
 
 - No visual or interaction change. Removed unreachable profile statistic code

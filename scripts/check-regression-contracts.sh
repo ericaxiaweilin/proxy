@@ -861,4 +861,10 @@ require_test "WATERMARK-001" "./internal/media" \
 # PREFS-001: 推荐偏好设置落本地，退出重进保留；损坏文件回退默认。
 pnpm --dir apps/mobile exec vitest run src/expo-feed-prefs-store.test.ts || exit $?
 
+# AI-PERSONA-PERSIST-001: AI 小美账户和肖像授权不能只活在 API 进程
+# 内存里；撤回后同条款重新授权必须追加新审计行，而不是撞唯一约束。
+require_test "AI-PERSONA-PERSIST-001" "./internal/platform/postgres" \
+  "TestAIPersonaPostgresPersistsPersonaAndReconsent" \
+  "apps/api-go/internal/platform/postgres/aipersona_test.go" || exit $?
+
 echo "  regression contracts: OK"
