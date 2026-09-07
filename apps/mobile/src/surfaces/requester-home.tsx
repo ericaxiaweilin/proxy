@@ -134,6 +134,7 @@ export function RequesterHome({
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
+  const [selectedAIAccount, setSelectedAIAccount] = useState<PlatformAIAccount>();
 
   useEffect(() => {
     let cancelled = false;
@@ -378,6 +379,7 @@ export function RequesterHome({
           onChange={(id) => {
             setRecommendMode(id);
             setActiveFilters([]);
+            setSelectedAIAccount(undefined);
           }}
           marginBottom={4}
           testPrefix="推荐人模式"
@@ -430,18 +432,27 @@ export function RequesterHome({
 
       {recommendedAI.length > 0 ? <View style={styles.aiSection}>
         <View style={styles.aiSectionHead}>
-          <View><Text style={styles.aiTitle}>AI 推荐</Text><Text style={styles.aiSub}>点击头像进入主页，再添加好友或发消息</Text></View>
+          <View><Text style={styles.aiTitle}>AI 推荐</Text><Text style={styles.aiSub}>先看她为什么适合当前场景</Text></View>
           <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI 生成</Text></View>
         </View>
         <HorizontalSwipeRail style={styles.aiRail} contentContainerStyle={styles.aiRailContent}>
           {recommendedAI.map((account) => (
-            <Pressable key={account.accountId} accessibilityLabel={`打开${account.displayName}的个人主页`} onPress={() => onOpenAIProfile?.(account)} style={styles.aiCard}>
+            <Pressable key={account.accountId} accessibilityLabel={`查看${account.displayName}的场景匹配`} onPress={() => setSelectedAIAccount((current) => current?.accountId === account.accountId ? undefined : account)} style={styles.aiCard}>
               <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
               <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
               <Text style={styles.aiHandle} numberOfLines={1}>AI 生成</Text>
             </Pressable>
           ))}
         </HorizontalSwipeRail>
+        {selectedAIAccount ? <View style={styles.aiScenePreview} testID="ai-scene-preview">
+          <View style={styles.aiScenePreviewHead}><View><Text style={styles.aiSceneEyebrow}>AI 小美 × 当前 Scene</Text><Text style={styles.aiSceneName}>{selectedAIAccount.displayName} · {selectedAIAccount.role}</Text></View><View style={styles.aiBadge}><Text style={styles.aiBadgeText}>AI 生成</Text></View></View>
+          <Text style={styles.aiSceneContext}>{recommendFeed.title}</Text>
+          <Text style={styles.aiSceneReason}>{selectedAIAccount.description}</Text>
+          <Text style={styles.aiSceneFit}>为什么推荐：{selectedAIAccount.personality}；适合围绕“{recommendFeed.subtitle}”聊天、陪伴或一起生成 UGC 灵感。</Text>
+          <Text style={styles.aiSceneBoundary}>她没有实体到场能力，不接单、不报名活动，也不产生到访或履约证明。</Text>
+          <Pressable onPress={() => onOpenAIProfile?.(selectedAIAccount)} style={styles.aiProfileButton}><Text style={styles.aiProfileButtonText}>查看完整主页</Text></Pressable>
+          <Text style={styles.aiProfileHint}>添加好友和发消息在个人主页继续</Text>
+        </View> : null}
       </View> : null}
       {/* 基线 .r1572HomeComposer('USER')：HomeChatBox（无示例 / 无提示） */}
       {conversationPanel ?? (onChat ? (
@@ -636,6 +647,7 @@ const styles = StyleSheet.create({
   aiHandle: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 2, textAlign: "center" },
   aiDescription: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5, minHeight: 30 },
   aiProfileLink: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 7 },
+  aiScenePreview: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, marginHorizontal: 16, marginTop: 4, padding: 14, ...shadows.card }, aiScenePreviewHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, aiSceneEyebrow: { color: color.violet, fontSize: 10, fontWeight: "900", letterSpacing: 0.4 }, aiSceneName: { color: color.ink, fontSize: 16, fontWeight: "900", marginTop: 4 }, aiSceneContext: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 12 }, aiSceneReason: { color: color.muted, fontSize: 12, lineHeight: 18, marginTop: 5 }, aiSceneFit: { backgroundColor: color.proxyPurpleSoft, borderRadius: 12, color: color.ink, fontSize: 11, lineHeight: 17, marginTop: 9, padding: 10 }, aiSceneBoundary: { color: color.muted, fontSize: 10, lineHeight: 15, marginTop: 8 }, aiProfileButton: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, marginTop: 12, paddingVertical: 11 }, aiProfileButtonText: { color: color.white, fontSize: 12, fontWeight: "900" }, aiProfileHint: { color: color.muted, fontSize: 10, marginTop: 7, textAlign: "center" },
   sceneWideRail: { gap: 12, paddingRight: 16, paddingVertical: 4 },
   sceneWideCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 5, padding: 10, width: 220 },
   sceneWideImage: { borderRadius: 12, height: 132, width: "100%" },

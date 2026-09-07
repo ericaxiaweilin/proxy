@@ -28,13 +28,17 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(fixtures).toContain("withR34Portraits");
   });
 
-  it("keeps AI discovery as plain circular profile links", () => {
+  it("keeps AI discovery circular but preserves Scene context before profile navigation", () => {
     expect(source).toMatch(/aiCard:\s*\{\s*alignItems:\s*"center",\s*width:\s*104\s*\}/);
     expect(source).toMatch(/aiAvatar:\s*\{[^}]*borderRadius:\s*999[^}]*height:\s*88[^}]*width:\s*88/);
     expect(source).not.toMatch(/aiCard:\s*\{[^}]*(backgroundColor|borderRadius|borderWidth|shadow)/);
-    expect(source).toContain("onPress={() => onOpenAIProfile?.(account)}");
+    expect(source).toContain('testID="ai-scene-preview"');
+    expect(source).toContain("setSelectedAIAccount");
+    expect(source).toContain("onOpenAIProfile?.(selectedAIAccount)");
+    expect(source).not.toContain("onPress={() => onOpenAIProfile?.(account)}");
     expect(source).not.toContain("toggleAIFollow(account.accountId)");
     expect(source).not.toContain("onMessageAI?.(account)");
+    expect(source).toContain("不接单、不报名活动");
   });
 
   it("keeps relationship and messaging actions inside the profile", () => {
