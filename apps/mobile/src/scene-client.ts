@@ -32,6 +32,19 @@ interface GetMemoryRef {
   createdAt: string;
 }
 
+export type MyScene = { sceneId: string; title: string; tool: string; status: string; startsAt: string };
+export type MySceneInvitation = {
+  invitationId: string;
+  sceneId: string;
+  status: "PENDING" | "ACCEPTED" | "DECLINED" | "ASK";
+  card: { what?: string; where?: string; when?: string; who?: string; hostLabel?: string };
+  fundingMode?: string;
+  plannedBudget?: number;
+  currency?: string;
+  sceneType?: string;
+  orderRef?: string;
+};
+
 export class SceneClient {
   private seq=0;
   constructor(private readonly input: { authClient: AuthenticatedCommandTransport; secureSessionStore: SecureSessionStore; now?: ()=>Date } ){}
@@ -96,6 +109,20 @@ export class SceneClient {
   async respondInvitation(invitationId:string, decision:"ACCEPTED"|"DECLINED"|"ASK"){
     const s=await this.requireSession();
     return this.send(s,"RespondInvitation",{type:"Invitation",id:invitationId},{decision});
+  }
+  async listMyScenes(limit = 20): Promise<MyScene[]> {
+    const s = await this.requireSession();
+    const result = await this.send(s, "ListMyScenes", { type: "Scene", id: "mine" }, { limit });
+    if (!result.operationRef) return [];
+    const ref = JSON.parse(result.operationRef) as { scenes?: MyScene[] };
+    return Array.isArray(ref.scenes) ? ref.scenes : [];
+  }
+  async listMyInvitations(limit = 20): Promise<MySceneInvitation[]> {
+    const s = await this.requireSession();
+    const result = await this.send(s, "ListMyInvitations", { type: "Invitation", id: "mine" }, { limit });
+    if (!result.operationRef) return [];
+    const ref = JSON.parse(result.operationRef) as { invitations?: MySceneInvitation[] };
+    return Array.isArray(ref.invitations) ? ref.invitations : [];
   }
 
   // ── R15.13 P2: Memory domain (post-outcome audit trail) ──────────

@@ -257,6 +257,7 @@ func main() {
 	// Wire after the optional PostgreSQL replacements. Wiring before this block
 	// leaves marketplace pointing at the discarded in-memory fulfillment repo.
 	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
+	sceneService.SetInvitationOrderCreator(sceneFulfillmentAdapter{repo: fulfillmentService.Repository()})
 	databaseReadyCheck := readyCheck
 	readyCheck = func(ctx context.Context) error {
 		if databaseReadyCheck != nil {
@@ -1087,6 +1088,15 @@ type jurisdictionAdapter struct {
 // startTime, meetingContext) are recorded via amendments.
 type marketplaceFulfillmentAdapter struct {
 	repo fulfillment.TransactionalRepository
+}
+
+type sceneFulfillmentAdapter struct {
+	repo fulfillment.TransactionalRepository
+}
+
+func (a sceneFulfillmentAdapter) EnsureInvitationOrder(ctx context.Context, record scene.InvitationOrderRecord) error {
+	now := time.Now().UTC()
+	return a.repo.EnsureOrder(ctx, fulfillment.Order{ID: record.ID, RequesterID: record.RequesterID, AgentID: record.AgentID, NeedID: record.SceneID, Lifecycle: "CONFIRMED", Version: 1, Snapshot: fulfillment.OrderSnapshot{Requester: record.RequesterID, Agent: record.AgentID, ServiceSKU: record.ServiceSKU, NeedVersion: record.SceneID, StartTime: record.StartTime, MeetingContext: record.MeetingContext, AgreedCompensation: record.AgreedCompensation, Currency: record.Currency, IncludedScope: record.IncludedScope, SettlementMode: "DIRECT_SETTLEMENT"}, CreatedAt: now, UpdatedAt: now})
 }
 
 func (a marketplaceFulfillmentAdapter) EnsureOrder(ctx context.Context, record marketplace.OrderRecord) error {

@@ -88,9 +88,18 @@ func aestheticScoreFor(sceneType string) float64 {
 }
 
 type Service struct {
-	mu    sync.Mutex
-	repo  Repository
-	clock clock.Clock
+	mu           sync.Mutex
+	repo         Repository
+	clock        clock.Clock
+	orderCreator InvitationOrderCreator
+}
+
+type InvitationOrderCreator interface {
+	EnsureInvitationOrder(context.Context, InvitationOrderRecord) error
+}
+type InvitationOrderRecord struct {
+	ID, SceneID, RequesterID, AgentID, ServiceSKU, StartTime, MeetingContext, IncludedScope, Currency string
+	AgreedCompensation                                                                                int64
 }
 
 func New() *Service { return NewWithRepository(NewMemoryRepository()) }
@@ -106,7 +115,8 @@ func NewWithClock(c clock.Clock) *Service { s := New(); s.clock = c; return s }
 // is exported only so the postgres integration test can route the
 // service through a real pgxpool-backed repository. Production code
 // uses NewWithRepository at construction time and never calls this.
-func (s *Service) SetRepositoryForTest(r Repository) { s.repo = r }
+func (s *Service) SetRepositoryForTest(r Repository)                  { s.repo = r }
+func (s *Service) SetInvitationOrderCreator(c InvitationOrderCreator) { s.orderCreator = c }
 
 func (s *Service) Supports(t string) bool {
 	switch t {
@@ -370,16 +380,61 @@ func (s *Service) respondInvitation(ctx context.Context, e command.Envelope) com
 	if inv.InviteeID != e.Actor.ID {
 		return command.Rejected(e, "INVITATION_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "scene.not_allowed", nil)
 	}
+	if inv.Status == "ACCEPTED" && p.Decision == "ACCEPTED" {
+		return s.acceptedInvitationResult(ctx, e, inv)
+	}
 	if inv.Status != "PENDING" {
 		return command.Rejected(e, "INVITATION_NOT_PENDING", "BUSINESS_STATE", "AFTER_USER_ACTION", "scene.invitation_not_pending", map[string]any{"status": inv.Status})
+	}
+	if p.Decision == "ACCEPTED" {
+		if result, ok := s.materializeInvitationOrder(ctx, e, inv); !ok {
+			return result
+		}
 	}
 	inv.Status = p.Decision
 	if err := s.repo.UpdateInvitation(ctx, inv); err != nil {
 		return command.Rejected(e, "INVITATION_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "scene.update_failed", nil)
 	}
 	ev := event.New("InvitationResponded", "Invitation", inv.ID, 2, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{"decision": p.Decision})
+	if p.Decision == "ACCEPTED" {
+		return invitationAcceptedResult(e, inv)
+	}
 	return command.Accepted(e, "Invitation", inv.ID, 2, p.Decision, eventRefs([]event.DomainEvent{ev}))
 }
+
+func (s *Service) materializeInvitationOrder(ctx context.Context, e command.Envelope, inv Invitation) (command.Result, bool) {
+	if s.orderCreator == nil {
+		return command.Result{}, true
+	}
+	scene, err := s.repo.Get(ctx, inv.SceneID)
+	if err != nil {
+		return command.Rejected(e, "SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "scene.read_failed", nil), false
+	}
+	record := InvitationOrderRecord{ID: "ord_" + inv.ID, SceneID: scene.ID, RequesterID: inv.HostID, AgentID: inv.InviteeID, ServiceSKU: scene.Tool, StartTime: scene.StartsAt.Format(time.RFC3339), MeetingContext: stringValue(inv.Card["where"]), IncludedScope: stringValue(inv.Card["what"]), AgreedCompensation: scene.BudgetMinor, Currency: scene.Currency}
+	if record.Currency == "" {
+		record.Currency = "VND"
+	}
+	if err := s.orderCreator.EnsureInvitationOrder(ctx, record); err != nil {
+		return command.Rejected(e, "INVITATION_ORDER_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "scene.invitation_order_failed", nil), false
+	}
+	return command.Result{}, true
+}
+
+func (s *Service) acceptedInvitationResult(ctx context.Context, e command.Envelope, inv Invitation) command.Result {
+	if result, ok := s.materializeInvitationOrder(ctx, e, inv); !ok {
+		return result
+	}
+	return invitationAcceptedResult(e, inv)
+}
+
+func invitationAcceptedResult(e command.Envelope, inv Invitation) command.Result {
+	payload, _ := json.Marshal(map[string]any{"invitationId": inv.ID, "sceneId": inv.SceneID, "orderRef": "ord_" + inv.ID})
+	result := command.Accepted(e, "Invitation", inv.ID, 2, "ACCEPTED", nil)
+	result.OperationRef = string(payload)
+	return result
+}
+
+func stringValue(v any) string { value, _ := v.(string); return value }
 func (s *Service) recordAttendance(ctx context.Context, e command.Envelope) command.Result {
 	scene, err := s.repo.Get(ctx, e.Target.ID)
 	if err != nil {
@@ -618,6 +673,9 @@ func (s *Service) listMyInvitations(ctx context.Context, e command.Envelope) com
 	items := []map[string]any{}
 	for _, inv := range invs {
 		item := map[string]any{"invitationId": inv.ID, "sceneId": inv.SceneID, "status": inv.Status, "card": inv.Card}
+		if inv.Status == "ACCEPTED" {
+			item["orderRef"] = "ord_" + inv.ID
+		}
 		if scene, sceneErr := s.repo.Get(ctx, inv.SceneID); sceneErr == nil {
 			item["fundingMode"] = scene.FundingMode
 			item["plannedBudget"] = scene.BudgetMinor

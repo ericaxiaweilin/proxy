@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 73 — 2026-09-07
+
+- Replaced the static My Scenes invitation examples with actor-scoped scene and
+  invitation reads plus real accept, ask and decline actions.
+- Direct human invitations now freeze scene, time, place, scope, `150,000 VND`
+  compensation and materialize an idempotent fulfillment order when accepted.
+
 ## Revision 72 — 2026-09-07
 
 - Scene-originated paid opportunities now carry an explicit VND amount

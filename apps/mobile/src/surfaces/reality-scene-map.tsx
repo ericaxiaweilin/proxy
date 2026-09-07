@@ -149,11 +149,11 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         if (!human) throw new Error("请先选择要邀请的真人");
         const menuItem = detail.menu.find((item) => item.id === selectedMenuId);
         const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-        const created = await sendSceneCommand(authClient, session, "CreateScene", "new", { tool: "DIRECT_INVITE", intent: `${variant.name} · ${variant.bestFor}`, participation: "双人见面 · 需双方确认", cost: "各自消费", startsAt });
+        const created = await sendSceneCommand(authClient, session, "CreateScene", "new", { tool: "DIRECT_INVITE", intent: `${variant.name} · ${variant.bestFor}`, anchor: { venueId: detail.sceneId, venueName: detail.venueName }, participation: "双人见面 · 需双方确认", cost: "HOST_PAY", fundingMode: "HOST", budgetMinor: 150000, currency: "VND", venueId: detail.sceneId, startsAt });
         const sceneId = typeof created.aggregateId === "string" ? created.aggregateId : undefined;
         if (!sceneId) throw new Error("场景创建失败");
-        const invitation = await sendSceneCommand(authClient, session, "CreateInvitation", sceneId, { sceneId, inviteeUserId: human.id, card: { what: variant.bestFor, where: detail.venueName, when: `${variant.window}（双方可在聊天中修改）`, who: human.name, hostLabel: "你", menuItemId: menuItem?.id, menuItemName: menuItem?.name } });
-        setActionResult(`邀请已发送给 ${human.name}${menuItem ? ` · ${menuItem.name}` : ""} · 状态 ${String(invitation.aggregateState ?? "PENDING")} · 尚未生成订单`);
+        const invitation = await sendSceneCommand(authClient, session, "CreateInvitation", sceneId, { sceneId, inviteeUserId: human.id, card: { what: variant.bestFor, where: detail.venueName, when: `${variant.window}（双方可在聊天中修改）`, who: human.name, hostLabel: "你", compensation: "150,000₫", menuItemId: menuItem?.id, menuItemName: menuItem?.name } });
+        setActionResult(`邀请已发送给 ${human.name}${menuItem ? ` · ${menuItem.name}` : ""} · 报酬 150,000₫ · 对方接受后生成订单`);
       } else if (selectedAction.type === "OPEN_TASK") {
         const result = await sendSceneCommand(authClient, session, "PublishMarketOpportunity", "new", { title: `${variant.name} · ${variant.bestFor}`, shortTitle: variant.name, theme: variant.facets.join(" / "), date: "近期", time: variant.window, location: detail.venueName, price: "150,000₫", moneyFlow: "EARN", skills: "Scene fit / UGC", lens: ["NOW", "NEARBY"], menuItemId: selectedMenuItem?.id, menuItemName: selectedMenuItem?.name });
         setActionResult(`机会 ${String(result.aggregateId ?? "")} 已发布 · 完成者可获得 150,000₫ · 等待真人候选报名`);

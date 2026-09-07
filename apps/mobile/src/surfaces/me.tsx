@@ -35,7 +35,7 @@ import { type LocalNetClient } from "../localnet-client";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
-import type { SceneClient } from "../scene-client";
+import type { MyScene, MySceneInvitation, SceneClient } from "../scene-client";
 import type { BusinessClient } from "../business-client";
 import type { ActivityClient } from "../activity-client";
 import type { ProfileClient } from "../profile-client";
@@ -258,14 +258,17 @@ export function MeSurface({
   const [subPage, setSubPage] = useState<MeSubPage>();
   useModuleBackHandler(subPage ? () => { setSubPage(undefined); return true; } : undefined);
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [myScenes, setMyScenes] = useState<MyScene[]>([]);
+  const [myInvitations, setMyInvitations] = useState<MySceneInvitation[]>([]);
+  const [invitationBusyId, setInvitationBusyId] = useState<string>();
   const [memoriesLoadState, setMemoriesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   useEffect(() => {
     if (subPage?.route !== "myscenes" || !scene) return;
     let cancelled = false;
     setMemoriesLoadState("loading");
-    scene.listMyMemories()
-      .then((rows) => { if (!cancelled) { setMemories(rows); setMemoriesLoadState("loaded"); } })
-      .catch(() => { if (!cancelled) { setMemories([]); setMemoriesLoadState("error"); } });
+    Promise.all([scene.listMyMemories(), scene.listMyScenes(), scene.listMyInvitations()])
+      .then(([memoryRows, sceneRows, invitationRows]) => { if (!cancelled) { setMemories(memoryRows); setMyScenes(sceneRows); setMyInvitations(invitationRows); setMemoriesLoadState("loaded"); } })
+      .catch(() => { if (!cancelled) { setMemories([]); setMyScenes([]); setMyInvitations([]); setMemoriesLoadState("error"); } });
     return () => { cancelled = true; };
   }, [subPage?.route, scene]);
   const [passportError, setPassportError] = useState<string | undefined>(undefined);
@@ -737,6 +740,17 @@ export function MeSurface({
       return <SwipeBackShell onExit={() => setSubPage(undefined)}><FacetHomeSurface client={facetClient} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     }
     if (subPage.route === "myscenes") {
+      async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {
+        if (!scene || invitationBusyId) return;
+        setInvitationBusyId(invitationId);
+        try {
+          const result = await scene.respondInvitation(invitationId, decision);
+          const status = (result.aggregate?.state ?? decision) as MySceneInvitation["status"];
+          let orderRef: string | undefined;
+          if (result.operationRef) { try { orderRef = (JSON.parse(result.operationRef) as { orderRef?: string }).orderRef; } catch { orderRef = undefined; } }
+          setMyInvitations((rows) => rows.map((row) => row.invitationId === invitationId ? { ...row, status, ...(orderRef ? { orderRef } : {}) } : row));
+        } finally { setInvitationBusyId(undefined); }
+      }
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
@@ -745,19 +759,12 @@ export function MeSurface({
             </Pressable>
             <Text style={styles.detailTitle}>{subPage.title}</Text>
             <Text style={styles.detailSub}>{subPage.desc}</Text>
-            {content?.sections?.map((section, sIdx) => (
-              <View key={sIdx} style={styles.fallbackSection}>
-                <View style={styles.detailSectionHead}>
-                  <Text style={styles.detailSectionTitle}>{section.title}</Text>
-                </View>
-                {section.rows.map((row, rIdx) => (
-                  <View key={rIdx} style={styles.prototypeCard}>
-                    <Text style={styles.prototypeCardTitle}>{row.label}</Text>
-                    {row.value ? <Text style={styles.prototypeCardDesc}>{row.value}</Text> : null}
-                  </View>
-                ))}
-              </View>
-            ))}
+            <View style={styles.fallbackSection}><View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>我发起的场景</Text></View>
+              {myScenes.length === 0 ? <View style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>还没有发起场景</Text></View> : myScenes.map((row) => <View key={row.sceneId} style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>{row.title}</Text><Text style={styles.prototypeCardDesc}>{row.status} · {new Date(row.startsAt).toLocaleString()}</Text></View>)}
+            </View>
+            <View style={styles.fallbackSection}><View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>收到的真人邀请</Text></View>
+              {myInvitations.length === 0 ? <View style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>还没有收到邀请</Text></View> : myInvitations.map((row) => <View key={row.invitationId} style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>{row.card.what ?? "场景邀请"}</Text><Text style={styles.prototypeCardDesc}>{row.card.where ?? "地点待确认"} · {row.card.when ?? "时间待确认"}</Text><Text style={styles.prototypeCardDesc}>{row.plannedBudget ? `${row.plannedBudget.toLocaleString()} ${row.currency || "VND"}` : "金额待双方确认"} · {row.status}</Text>{row.orderRef ? <Text style={styles.prototypeCardDesc}>已生成订单 · {row.orderRef}</Text> : null}{row.status === "PENDING" ? <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "ACCEPTED")} style={styles.lightCta}><Text style={styles.lightCtaText}>接受</Text></Pressable><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "ASK")} style={styles.lightCta}><Text style={styles.lightCtaText}>询问</Text></Pressable><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "DECLINED")} style={styles.lightCta}><Text style={styles.lightCtaText}>拒绝</Text></Pressable></View> : null}</View>)}
+            </View>
             <View style={styles.fallbackSection}>
               <View style={styles.detailSectionHead}>
                 <Text style={styles.detailSectionTitle}>场景记忆 (R15.13 P2 · 真实数据)</Text>

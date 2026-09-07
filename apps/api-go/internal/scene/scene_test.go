@@ -11,6 +11,13 @@ import (
 	"github.com/proxy-app/proxy-api/internal/command"
 )
 
+type captureInvitationOrderCreator struct{ records []InvitationOrderRecord }
+
+func (f *captureInvitationOrderCreator) EnsureInvitationOrder(_ context.Context, record InvitationOrderRecord) error {
+	f.records = append(f.records, record)
+	return nil
+}
+
 // ── Test helpers ──────────────────────────────────────────────
 
 func testEnvelope(commandType, targetID string, payload map[string]any) command.Envelope {
@@ -391,7 +398,12 @@ func TestCreateInvitation_RejectsMissingFields(t *testing.T) {
 
 func TestRespondInvitation_Accepted_UpdatesStatus(t *testing.T) {
 	svc := New()
-	created := svc.Handle(testEnvelope("CreateScene", "new", okCreatePayload()))
+	capture := &captureInvitationOrderCreator{}
+	svc.SetInvitationOrderCreator(capture)
+	payload := okCreatePayload()
+	payload["budgetMinor"] = int64(150000)
+	payload["currency"] = "VND"
+	created := svc.Handle(testEnvelope("CreateScene", "new", payload))
 	sceneID := resultAggregateID(t, created)
 	inv := svc.Handle(testEnvelope("CreateInvitation", "new", map[string]any{
 		"sceneId": sceneID, "inviteeUserId": "user_002", "card": okInviteCardPayload(),
@@ -401,6 +413,13 @@ func TestRespondInvitation_Accepted_UpdatesStatus(t *testing.T) {
 	r := svc.Handle(testEnvelopeAs("RespondInvitation", invID, "user_002", map[string]any{"decision": "ACCEPTED"}))
 	if r.Outcome != "ACCEPTED" || r.Aggregate.State != "ACCEPTED" {
 		t.Fatalf("expected ACCEPTED state=ACCEPTED, got %#v", r)
+	}
+	if len(capture.records) != 1 || capture.records[0].AgreedCompensation != 150000 || capture.records[0].Currency != "VND" {
+		t.Fatalf("expected one 150,000 VND order snapshot, got %#v", capture.records)
+	}
+	var operation map[string]any
+	if err := json.Unmarshal([]byte(r.OperationRef), &operation); err != nil || operation["orderRef"] != "ord_"+invID {
+		t.Fatalf("expected deterministic orderRef, got %q", r.OperationRef)
 	}
 }
 
@@ -505,7 +524,9 @@ func TestRecordOutcome_Accepted(t *testing.T) {
 	}
 	// Memory should be persisted.
 	mem, err := svc.repo.GetMemory(context.Background(), sceneID)
-	if err != nil { t.Fatalf("GetMemory: %v", err) }
+	if err != nil {
+		t.Fatalf("GetMemory: %v", err)
+	}
 	if mem.PlannedBudget != spend && mem.PlannedBudget != 0 {
 		// okCreatePayload doesn't set budgetMinor, so PlannedBudget=0
 		// is the expected base; ActualSpend=50000 is the only signal.
@@ -650,7 +671,9 @@ func TestCreateScene_FundingModeRespected(t *testing.T) {
 	p := okCreatePayload()
 	p["fundingMode"] = "SPLIT"
 	r := svc.Handle(testEnvelope("CreateScene", "new", p))
-	if r.Outcome != "ACCEPTED" { t.Fatalf("expected ACCEPTED, got %#v", r) }
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", r)
+	}
 	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
 	if stored.FundingMode != "SPLIT" {
 		t.Fatalf("expected fundingMode=SPLIT, got %q", stored.FundingMode)
@@ -662,7 +685,9 @@ func TestCreateScene_BudgetMinorCarriedThrough(t *testing.T) {
 	p := okCreatePayload()
 	p["budgetMinor"] = 80000
 	r := svc.Handle(testEnvelope("CreateScene", "new", p))
-	if r.Outcome != "ACCEPTED" { t.Fatalf("expected ACCEPTED, got %#v", r) }
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", r)
+	}
 	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
 	if stored.BudgetMinor != 80000 {
 		t.Fatalf("expected budgetMinor=80000, got %d", stored.BudgetMinor)
@@ -685,7 +710,9 @@ func TestCreateScene_PriceCorridorPopulatedByCityAndSceneType(t *testing.T) {
 	p["venueId"] = "aster_rooftop"
 	p["sceneType"] = "ROOFTOP_PHOTO"
 	r := svc.Handle(testEnvelope("CreateScene", "new", p))
-	if r.Outcome != "ACCEPTED" { t.Fatalf("expected ACCEPTED, got %#v", r) }
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", r)
+	}
 	stored, _ := svc.repo.Get(context.Background(), r.Aggregate.ID)
 	if stored.PriceCorridor == nil {
 		t.Fatal("expected priceCorridor to be populated, got nil")
@@ -733,7 +760,9 @@ func TestUpdateScene_AppliesFundingAndBudgetChange(t *testing.T) {
 			"budgetMinor": float64(150000), // JSON numbers decode as float64
 		},
 	}))
-	if r.Outcome != "ACCEPTED" { t.Fatalf("expected ACCEPTED, got %#v", r) }
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %#v", r)
+	}
 	stored, _ := svc.repo.Get(context.Background(), sceneID)
 	if stored.FundingMode != "GUEST_SPONSORED" {
 		t.Fatalf("expected fundingMode updated, got %q", stored.FundingMode)
