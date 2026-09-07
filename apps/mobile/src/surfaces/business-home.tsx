@@ -191,6 +191,13 @@ export function BusinessHome({
         />
       ) : null}
 
+      <View style={styles.controlPlane} testID="merchant-control-plane">
+        <View style={styles.controlCell}><Text style={styles.controlLabel}>现在</Text><Text style={styles.controlValue}>{operatingHome?.sceneSupply ? `${operatingHome.sceneSupply.currentCapacityPct}%` : operatingHome?.operatingPulse.state === "ACTIVE" ? "经营中" : "待接入"}</Text></View>
+        <View style={styles.controlCell}><Text style={styles.controlLabel}>预测</Text><Text style={styles.controlValue}>{operatingHome?.sceneSupply ? `${operatingHome.sceneSupply.forecastCapacityPct}%` : "不可用"}</Text></View>
+        <View style={styles.controlCell}><Text style={styles.controlLabel}>决策</Text><Text numberOfLines={1} style={styles.controlValue}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
+        <View style={styles.controlCell}><Text style={styles.controlLabel}>预期</Text><Text style={styles.controlValue}>{operatingHome?.forecast.status === "AVAILABLE" ? `V${operatingHome.forecast.version}` : "待建立"}</Text></View>
+      </View>
+
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>经营结果</Text>
         <Text style={styles.sectionHint}>{operatingHome ? `近 ${operatingHome.outcome.windowDays} 天` : "加载中"}</Text>
@@ -206,9 +213,12 @@ export function BusinessHome({
         <Text style={styles.sectionHint}>实时状态 → 未来状态</Text>
       </View>
       <View style={styles.balanceCard} testID="merchant-demand-supply">
-        <View style={styles.balanceHead}><Text style={styles.balanceTitle}>需求 × 供给</Text><Text style={styles.unknownPill}>信号不足</Text></View>
-        <Text style={styles.balanceBody}>尚未获得通过隐私阈值的聚合需求与 Scene 容量数据。</Text>
-        <Text style={styles.balanceMeta}>不会用历史销售冒充附近客流，也不会生成虚假精确预测。</Text>
+        <View style={styles.balanceHead}><Text style={styles.balanceTitle}>需求 × 供给</Text><Text style={styles.unknownPill}>{operatingHome?.demandSupply.state ?? "信号不足"}</Text></View>
+        {operatingHome?.aggregatedDemand && operatingHome.sceneSupply ? <>
+          <View style={styles.signalRow}><View style={styles.signalCell}><Text style={styles.signalLabel}>聚合需求</Text><Text style={styles.signalValue}>{operatingHome.aggregatedDemand.totalMatchingDemand}</Text><Text style={styles.signalSub}>确认 {operatingHome.aggregatedDemand.confirmedArrivals} · 高概率 {operatingHome.aggregatedDemand.highProbabilityArrivals}</Text></View><View style={styles.signalCell}><Text style={styles.signalLabel}>Scene Supply</Text><Text style={styles.signalValue}>{operatingHome.sceneSupply.forecastCapacityPct}%</Text><Text style={styles.signalSub}>当前 {operatingHome.sceneSupply.currentCapacityPct}% · {operatingHome.sceneSupply.acceptingTraffic ? "可承接" : "停止引流"}</Text></View></View>
+          <Text style={styles.balanceBody}>Proxy 判断：{operatingHome.demandSupply.reason}</Text>
+        </> : <Text style={styles.balanceBody}>尚未获得通过隐私阈值的聚合需求与 Scene 容量数据。</Text>}
+        <Text style={styles.balanceMeta}>{operatingHome?.demandSupply.privacyThresholdPassed ? `置信度 ${Math.round(operatingHome.demandSupply.confidence * 100)}% · 仅展示隐私聚合信号` : "不会用历史销售冒充附近客流，也不会生成虚假精确预测。"}</Text>
         {operatingHome ? <Text style={styles.balanceMeta}>门店 {operatingHome.operatingPulse.storeCount} · 成员 {operatingHome.operatingPulse.memberCount} · {operatingHome.operatingPulse.freshness}</Text> : null}
       </View>
 
@@ -220,6 +230,7 @@ export function BusinessHome({
         <View style={styles.decisionKind}><Text style={styles.decisionKindText}>{operatingHome?.bestNextDecision.kind ?? "NO_ACTION"}</Text></View>
         <Text style={styles.decisionTitle}>{operatingHome?.bestNextDecision.title ?? "等待经营信号"}</Text>
         <Text style={styles.decisionBody}>{operatingHome?.bestNextDecision.reason ?? "数据加载完成前不建议执行动作"}</Text>
+        {operatingHome?.bestNextDecision.requiresApproval ? <Pressable onPress={() => onChat?.(`按当前经营建议准备方案：${operatingHome.bestNextDecision.title}`)} style={styles.decisionAction}><Text style={styles.decisionActionText}>看方案并确认商业条件</Text></Pressable> : <Text style={styles.noActionNote}>无需老板处理 · 信号变化时再提醒</Text>}
       </View>
 
       <View style={styles.sectionHead}>
@@ -227,8 +238,8 @@ export function BusinessHome({
         <Text style={styles.sectionHint}>Forecast</Text>
       </View>
       <View style={styles.forecastEmpty} testID="merchant-future-demand">
-        <Text style={styles.forecastTitle}>预测暂不可用</Text>
-        <Text style={styles.forecastBody}>接入聚合需求、预计到店、离店速度和活动占用后，才会显示未来容量。</Text>
+        <Text style={styles.forecastTitle}>{operatingHome?.forecast.status === "AVAILABLE" ? `未来容量 ${operatingHome.sceneSupply?.forecastCapacityPct ?? "—"}%` : "预测暂不可用"}</Text>
+        <Text style={styles.forecastBody}>{operatingHome?.aggregatedDemand ? `未来到店：已确认 ${operatingHome.aggregatedDemand.confirmedArrivals} · 高概率 ${operatingHome.aggregatedDemand.highProbabilityArrivals}。预测 V${operatingHome.forecast.version}，历史预期不会被覆盖。` : "接入聚合需求、预计到店、离店速度和活动占用后，才会显示未来容量。"}</Text>
       </View>
 
       <View style={styles.sectionHead}>
@@ -343,6 +354,7 @@ const styles = StyleSheet.create({
   identityName: { color: color.ink, fontSize: 15, fontWeight: "900" },
   identityMeta: { color: color.muted, fontSize: 11, lineHeight: 15 },
   identityChev: { color: color.muted, fontSize: 18, fontWeight: "800" },
+  controlPlane: { backgroundColor: color.ink, borderRadius: 17, flexDirection: "row", gap: 1, marginTop: 10, padding: 5 }, controlCell: { flex: 1, minWidth: 0, paddingHorizontal: 6, paddingVertical: 8 }, controlLabel: { color: "#AAA4B2", fontSize: 9, fontWeight: "700" }, controlValue: { color: color.white, fontSize: 11, fontWeight: "900", marginTop: 4 },
   menuRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
   menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 4, padding: 8, width: 132 },
   menuImage: { borderRadius: 10, height: 96, width: "100%" },
@@ -369,11 +381,13 @@ const styles = StyleSheet.create({
   unknownPill: { backgroundColor: "#F3F0EA", borderRadius: 999, color: color.muted, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5 },
   balanceBody: { color: color.ink, fontSize: 12, lineHeight: 18, marginTop: 9 },
   balanceMeta: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 5 },
+  signalRow: { flexDirection: "row", gap: 8, marginTop: 10 }, signalCell: { backgroundColor: color.offWhite, borderRadius: 13, flex: 1, padding: 10 }, signalLabel: { color: color.muted, fontSize: 10, fontWeight: "700" }, signalValue: { color: color.ink, fontSize: 22, fontWeight: "900", marginTop: 4 }, signalSub: { color: color.muted, fontSize: 10, lineHeight: 14, marginTop: 3 },
   decisionCard: { backgroundColor: "#14131A", borderRadius: 18, padding: 15 },
   decisionKind: { alignSelf: "flex-start", backgroundColor: "#F1FFD0", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 },
   decisionKindText: { color: "#4D6200", fontSize: 11, fontWeight: "900" },
   decisionTitle: { color: color.white, fontSize: 17, fontWeight: "900", marginTop: 10 },
   decisionBody: { color: "#D8D3DD", fontSize: 12, lineHeight: 18, marginTop: 5 },
+  decisionAction: { alignItems: "center", backgroundColor: "#FFAB17", borderRadius: 13, marginTop: 12, paddingVertical: 11 }, decisionActionText: { color: color.ink, fontSize: 12, fontWeight: "900" }, noActionNote: { color: "#AAA4B2", fontSize: 11, marginTop: 10 },
   forecastEmpty: { backgroundColor: "#F6F3ED", borderColor: color.line, borderRadius: 16, borderStyle: "dashed", borderWidth: 1, padding: 14 },
   forecastTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
   forecastBody: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },

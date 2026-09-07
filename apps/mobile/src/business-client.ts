@@ -9,9 +9,11 @@ export interface MerchantOperatingHome {
   generatedAt: string;
   outcome: { windowDays: number; orderCount: number; grossMinor: number; newCustomers: number; returningCustomers: number };
   operatingPulse: { state: "EMPTY" | "ACTIVE"; storeCount: number; memberCount: number; freshness: string };
-  demandSupply: { state: "INSUFFICIENT_SIGNAL"; confidence: number; privacyThresholdPassed: boolean; reason: string };
-  forecast: { status: "UNAVAILABLE"; confidence: number; version: number; assumptions: string[] };
-  bestNextDecision: { kind: "NO_ACTION"; title: string; reason: string; requiresApproval: boolean };
+  demandSupply: { state: "INSUFFICIENT_SIGNAL" | "SUPPLY_EXCESS" | "BALANCED" | "DEMAND_RISING" | "CAPACITY_TIGHT" | "OVER_CAPACITY_RISK"; confidence: number; privacyThresholdPassed: boolean; reason: string };
+  forecast: { status: "UNAVAILABLE" | "AVAILABLE"; confidence: number; version: number; assumptions: string[] };
+  bestNextDecision: { kind: "NO_ACTION" | "LOW_PEAK_FILL" | "STOP_TRAFFIC" | "SCENE_ADJUSTMENT" | "MENU_ADJUSTMENT" | "BENEFIT" | "CREATOR" | "ACTIVITY" | "PARTNER_COLLAB" | "RECOVERY"; title: string; reason: string; requiresApproval: boolean };
+  aggregatedDemand?: { totalMatchingDemand: number; confirmedArrivals: number; highProbabilityArrivals: number; confidence: number; recordedAt: string };
+  sceneSupply?: { storeId: string; sceneId: string; currentCapacityPct: number; forecastCapacityPct: number; acceptingTraffic: boolean; confidence: number; recordedAt: string };
 }
 
 export interface StorePhoto {

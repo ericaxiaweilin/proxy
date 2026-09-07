@@ -57,4 +57,7 @@ func TestR35OperatingHomeUsesPersistedSignals(t *testing.T) {
 	if homeBody.Home.Decision.Kind != "STOP_TRAFFIC" {
 		t.Fatalf("expected persisted signal decision: %+v", homeBody.Home)
 	}
+	if homeBody.Home.Demand == nil || homeBody.Home.Demand.TotalMatchingDemand != 38 || homeBody.Home.Supply == nil || homeBody.Home.Supply.ForecastCapacityPct != 94 {
+		t.Fatalf("merchant home must carry privacy-safe demand and supply facts: %+v", homeBody.Home)
+	}
 }

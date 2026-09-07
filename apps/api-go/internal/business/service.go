@@ -99,13 +99,15 @@ type SpendDaily struct {
 // capacity signals are deliberately explicit about being unavailable: the
 // service must never turn sales history into invented nearby demand.
 type OperatingHome struct {
-	BusinessID  string              `json:"businessId"`
-	GeneratedAt time.Time           `json:"generatedAt"`
-	Outcome     OperatingOutcome    `json:"outcome"`
-	Pulse       OperatingPulse      `json:"operatingPulse"`
-	Balance     DemandSupplyBalance `json:"demandSupply"`
-	Forecast    OperatingForecast   `json:"forecast"`
-	Decision    OperatingDecision   `json:"bestNextDecision"`
+	BusinessID  string                  `json:"businessId"`
+	GeneratedAt time.Time               `json:"generatedAt"`
+	Outcome     OperatingOutcome        `json:"outcome"`
+	Pulse       OperatingPulse          `json:"operatingPulse"`
+	Balance     DemandSupplyBalance     `json:"demandSupply"`
+	Forecast    OperatingForecast       `json:"forecast"`
+	Decision    OperatingDecision       `json:"bestNextDecision"`
+	Demand      *AggregatedDemandSignal `json:"aggregatedDemand,omitempty"`
+	Supply      *SceneSupplySnapshot    `json:"sceneSupply,omitempty"`
 }
 
 type OperatingOutcome struct {
@@ -619,6 +621,7 @@ func (s *Service) getMerchantOperatingHome(ctx context.Context, e command.Envelo
 	}
 	resolved := ResolveOperatingState(demandPtr, supplyPtr)
 	home.Balance, home.Forecast, home.Decision = resolved.Balance, resolved.Forecast, resolved.Decision
+	home.Demand, home.Supply = demandPtr, supplyPtr
 	return acceptedWithPayload(e, "MerchantOperatingHome", businessID, 1, "READ", map[string]any{"home": home}, nil)
 }
 
