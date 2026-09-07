@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(fileURLToPath(new URL("./surfaces/requester-home.tsx", import.meta.url)), "utf8");
 const profile = readFileSync(fileURLToPath(new URL("./surfaces/ai-account-profile.tsx", import.meta.url)), "utf8");
 const shell = readFileSync(fileURLToPath(new URL("./shell/app-shell.tsx", import.meta.url)), "utf8");
+const scene = readFileSync(fileURLToPath(new URL("./surfaces/reality-scene-map.tsx", import.meta.url)), "utf8");
 const fixtures = readFileSync(fileURLToPath(new URL("./recommend-fixtures.ts", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
@@ -32,13 +33,16 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toMatch(/aiCard:\s*\{\s*alignItems:\s*"center",\s*width:\s*104\s*\}/);
     expect(source).toMatch(/aiAvatar:\s*\{[^}]*borderRadius:\s*999[^}]*height:\s*88[^}]*width:\s*88/);
     expect(source).not.toMatch(/aiCard:\s*\{[^}]*(backgroundColor|borderRadius|borderWidth|shadow)/);
-    expect(source).toContain('testID="ai-scene-preview"');
-    expect(source).toContain("setSelectedAIAccount");
-    expect(source).toContain("onOpenAIProfile?.(selectedAIAccount)");
+    expect(source).toContain("onPress={() => onOpenAIScene?.(account)}");
+    expect(source).not.toContain('testID="ai-scene-preview"');
+    expect(source).not.toContain("setSelectedAIAccount");
     expect(source).not.toContain("onPress={() => onOpenAIProfile?.(account)}");
     expect(source).not.toContain("toggleAIFollow(account.accountId)");
     expect(source).not.toContain("onMessageAI?.(account)");
-    expect(source).toContain("不接单、不报名活动");
+    expect(scene).toContain('testID="ai-scene-binding"');
+    expect(scene).toContain("onOpenAIProfile?.(featuredAIAccount)");
+    expect(scene).toContain("不能到场、接单或报名活动");
+    expect(shell).toContain("setRealitySceneSelection(account.boundSceneId)");
   });
 
   it("keeps relationship and messaging actions inside the profile", () => {

@@ -11,7 +11,7 @@ func TestPlatformAIAccountsAreAddressableAndComplete(t *testing.T) {
 	}
 	ids, personas, handles := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, account := range accounts {
-		if account.AccountID == "" || account.PersonaID == "" || account.Handle == "" || account.AvatarPath == "" || account.Role == "" || account.Personality == "" || account.WelcomeMessage == "" || len(account.SuggestedPrompts) < 2 || len(account.UGCSamples) < 2 {
+		if account.AccountID == "" || account.PersonaID == "" || account.Handle == "" || account.AvatarPath == "" || account.Role == "" || account.Personality == "" || account.WelcomeMessage == "" || len(account.SuggestedPrompts) < 2 || len(account.UGCSamples) < 2 || account.BoundSceneID == "" || account.BoundSceneVariant == "" || account.BoundActivityTitle == "" {
 			t.Fatalf("incomplete platform account: %+v", account)
 		}
 		if account.PersonaType != PersonaTypePlatformAI || account.Status != "ACTIVE" || account.AIStatus != "AI" {

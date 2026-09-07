@@ -8,6 +8,8 @@ import { color } from "../theme";
 import type { SessionAuthClient } from "../auth-client";
 import type { SecureSessionStore, StoredSession } from "../secure-session";
 import { parseCommandResult } from "../login-client";
+import type { PlatformAIAccount } from "../ai-account-client";
+import { aiAccountPhoto } from "../ai-persona-presentation";
 
 type SceneFilter = "ALL" | "UNSEEN" | "ACTIVE" | "SAVED" | "VISITED";
 type SceneView = "MAP" | "LIST";
@@ -49,7 +51,7 @@ type SceneDetail = {
   truthBoundary: string;
 };
 
-export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId, secureSessionStore, onBack }: { apiBaseUrl: string; authClient: SessionAuthClient; initialSceneId?: string | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void }): React.JSX.Element {
+export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, initialSceneId, secureSessionStore, onBack, onOpenAIProfile }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; initialSceneId?: string | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void }): React.JSX.Element {
   const [view, setView] = useState<SceneView>("MAP");
   const [filter, setFilter] = useState<SceneFilter>("ALL");
   const [query, setQuery] = useState("");
@@ -115,12 +117,14 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
     let cancelled = false;
     if (!selectedId) { setDetail(undefined); setDetailError(undefined); return; }
     setDetail(undefined); setDetailError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined); setFullMenuOpen(false); setWhyOpen(false);
-    void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}`, { headers: { Accept: "application/json" } })
+    const variant = featuredAIAccount?.boundSceneId === selectedId ? featuredAIAccount.boundSceneVariant : undefined;
+    const suffix = variant ? `?variant=${encodeURIComponent(variant)}` : "";
+    void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}${suffix}`, { headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
       .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); if (!cancelled) { setDetail(value); setSelectedHumanId(value.humans[0]?.id); setSelectedMenuId(value.menu[0]?.id); } })
       .catch(() => { if (!cancelled) setDetailError("动态场景暂时不可用，请稍后重试"); });
     return () => { cancelled = true; };
-  }, [apiBaseUrl, selectedId]);
+  }, [apiBaseUrl, featuredAIAccount, selectedId]);
 
   const selectVariant = (variantId: string): void => {
     if (!selectedId) return;
@@ -244,6 +248,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.variantRail}>
               {detail.variants.map((variant) => <Pressable key={variant.id} onPress={() => selectVariant(variant.id)} style={[styles.variantPill, detail.selectedVariant === variant.id && styles.variantPillSelected]}><Text style={[styles.variantPillText, detail.selectedVariant === variant.id && styles.variantPillTextSelected]}>{variant.name.replace(" Coffee", "").replace(" Social", "")}</Text></Pressable>)}
             </ScrollView>
+            {featuredAIAccount?.boundSceneId === detail.sceneId ? <View testID="ai-scene-binding" style={styles.aiBindingCard}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-ai:${featuredAIAccount.accountId}:${featuredAIAccount.avatarVersion ?? 1}`} source={aiAccountPhoto(featuredAIAccount)} style={styles.aiBindingAvatar} transition={0} /><View style={styles.aiBindingCopy}><Text style={styles.aiBindingEyebrow}>AI 小美 × 当前 Scene</Text><Text style={styles.aiBindingTitle}>{featuredAIAccount.displayName} · {featuredAIAccount.boundActivityTitle}</Text><Text style={styles.aiBindingText}>{featuredAIAccount.role}，可围绕这个场景聊天、陪伴和生成 UGC 灵感；不能到场、接单或报名活动。</Text><Pressable accessibilityLabel={`查看${featuredAIAccount.displayName}主页`} onPress={() => onOpenAIProfile?.(featuredAIAccount)} style={styles.aiProfileButton}><Text style={styles.aiProfileButtonText}>查看小美主页</Text></Pressable></View></View> : null}
             <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>现在最适合</Text><Pressable onPress={() => setWhyOpen((open) => !open)}><Text style={styles.sectionLink}>{whyOpen ? "收起依据" : "为什么"}</Text></Pressable></View>
             <View style={styles.bestGrid}><View style={styles.bestCard}><Text style={styles.bestTitle}>{activeVariant?.bestFor}</Text><Text style={styles.bestSub}>按当前时段、现场状态和可用资源推荐。</Text></View><View style={styles.bestCard}><Text style={styles.bestTitle}>{detail.liveState.state.replaceAll("_", " ")}</Text><Text style={styles.bestSub}>{detail.liveState.bestWindow} · 容量 {detail.liveState.capacityPct}%</Text></View></View>
             {whyOpen ? <View style={styles.whyCard}><Text style={styles.whyTitle}>推荐依据</Text><Text style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text><Text style={styles.whyText}>现场状态：{detail.liveState.label}，数据有效至 {new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text><Text style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
@@ -380,6 +385,7 @@ const styles = StyleSheet.create({
   list: { gap: 9, paddingBottom: 24, paddingHorizontal: 16 }, sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, padding: 14 }, sceneDot: { backgroundColor: color.violet, borderRadius: 9, height: 18, width: 18 }, sceneDotActive: { backgroundColor: color.magenta }, sceneDotVisited: { backgroundColor: color.muted }, sceneCopy: { flex: 1 }, sceneName: { color: color.ink, fontSize: 16, fontWeight: "800" }, sceneMeta: { color: color.muted, fontSize: 12, marginTop: 3 }, sceneSignal: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 5 }, empty: { color: color.muted, paddingTop: 40, textAlign: "center" },
   detailContent: { paddingBottom: 36, paddingHorizontal: 13 }, detailTop: { alignItems: "center", flexDirection: "row", minHeight: 56 }, backButton: { alignItems: "center", height: 38, justifyContent: "center", width: 38 }, detailTopCopy: { flex: 1 }, detailTopTitle: { color: color.ink, fontSize: 17, fontWeight: "900" }, detailTopSub: { color: color.muted, fontSize: 11, marginTop: 2 },   topSpacer: { width: 38 }, backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 }, hero: { backgroundColor: "#F6F2E9", borderColor: color.line, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15, paddingTop: 242 }, heroMap: { height: 226, left: 0, position: "absolute", right: 0, top: 0 }, statePill: { alignSelf: "flex-start", backgroundColor: color.surface, borderRadius: 14, marginTop: 4, paddingHorizontal: 10, paddingVertical: 6 }, statePillActive: { backgroundColor: color.attentionBg }, stateText: { color: color.muted, fontSize: 11, fontWeight: "800" }, stateTextActive: { color: color.error }, eyebrow: { color: "#8B6000", fontSize: 11, fontWeight: "900", letterSpacing: 0.8, marginTop: 12 }, detailTitle: { color: color.ink, fontSize: 28, fontWeight: "900", lineHeight: 31, marginTop: 5 }, detailDescription: { color: color.muted, fontSize: 13, lineHeight: 20, marginTop: 7 },
   heroFacets: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 12 }, heroFacet: { backgroundColor: "#FFF3CB", borderColor: "#E4C35B", borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 6 }, heroFacetText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  aiBindingCard: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderColor: color.violet, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 13 }, aiBindingAvatar: { borderRadius: 30, height: 60, width: 60 }, aiBindingCopy: { flex: 1 }, aiBindingEyebrow: { color: color.violet, fontSize: 11, fontWeight: "900", letterSpacing: 0.6 }, aiBindingTitle: { color: color.ink, fontSize: 14, fontWeight: "900", marginTop: 4 }, aiBindingText: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 5 }, aiProfileButton: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 12, marginTop: 9, paddingHorizontal: 12, paddingVertical: 8 }, aiProfileButtonText: { color: color.white, fontSize: 11, fontWeight: "900" },
   metrics: { flexDirection: "row", gap: 7, marginTop: 10 }, metric: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 11 }, metricValue: { color: color.ink, fontSize: 17, fontWeight: "900" }, metricLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
   actions: { flexDirection: "row", gap: 8, marginTop: 10 }, action: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, paddingVertical: 13 }, actionSelected: { backgroundColor: color.proxyPurpleSoft }, actionText: { color: color.ink, fontSize: 13, fontWeight: "800" }, primaryAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, flex: 1, paddingVertical: 13 }, primaryActionText: { color: color.white, fontSize: 13, fontWeight: "800" },
   liveCard: { alignItems: "center", backgroundColor: color.attentionBg, borderRadius: 18, flexDirection: "row", justifyContent: "space-between", marginTop: 12, padding: 15 }, liveLabel: { color: color.error, fontSize: 13, fontWeight: "900" }, liveWindow: { color: color.ink, fontSize: 17, fontWeight: "900", marginTop: 3 }, capacity: { color: color.ink, fontSize: 13, fontWeight: "800" },

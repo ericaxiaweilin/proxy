@@ -5,7 +5,8 @@
 // （r153search + networktabs + feedfilterrail + preferencehint + postcard + mediaRail +
 // postactions + postintent + feedfab），刻度按 R15.11 Social Baseline 对齐。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
@@ -129,6 +130,7 @@ export function FeedSurface({
   onOpenChat,
   onOpenFeedPrefs,
   onOpenRealityScene,
+  onOpenProfile,
   onChromeVisibilityChange,
   refreshTrigger,
   bottomNavVisible,
@@ -145,6 +147,7 @@ export function FeedSurface({
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
+  onOpenProfile?: ((profile: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]> }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   refreshTrigger?: number;
   bottomNavVisible?: boolean;
@@ -173,6 +176,11 @@ export function FeedSurface({
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
   const [following, setFollowing] = useState<ReadonlySet<string>>(new Set());
+  const { width: viewportWidth } = useWindowDimensions();
+  // R15.69 (restored): 点头像弹 关注/访问个人主页 菜单（液态玻璃，双行上下排）
+  const [profileActions, setProfileActions] = useState<{ userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]>; anchor: { x: number; y: number } }>();
+  const [profileFollowing, setProfileFollowing] = useState(false);
+  const [profileFollowBusy, setProfileFollowBusy] = useState(false);
   const [postMenuPostId, setPostMenuPostId] = useState<string | undefined>();
   const [mutedAuthors, setMutedAuthors] = useState<ReadonlySet<string>>(new Set());
   const [postMenuError, setPostMenuError] = useState<string | undefined>();
@@ -599,6 +607,30 @@ export function FeedSurface({
 
   const postMenuPost = postMenuPostId ? posts.find((p) => p.postId === postMenuPostId) : undefined;
 
+  // R15.69 (restored): 点头像弹 关注/访问个人主页 菜单 — 头像 onPress 触发,
+  // 名字 onPress 走 onOpenProfile 直接访问
+  async function openProfileActions(target: NonNullable<typeof profileActions>): Promise<void> {
+    setProfileActions(target);
+    setProfileFollowing(following.has(target.userId));
+  }
+  async function toggleProfileFollow(): Promise<void> {
+    if (!profileActions || profileFollowBusy) return;
+    setProfileFollowBusy(true);
+    try {
+      if (profileFollowing) await engagement.unfollowProfile(profileActions.userId);
+      else await engagement.followProfile(profileActions.userId);
+      const next = new Set(following);
+      if (profileFollowing) next.delete(profileActions.userId);
+      else next.add(profileActions.userId);
+      setFollowing(next);
+      setProfileFollowing(!profileFollowing);
+    } catch (error) {
+      setEngagementError(mapEngagementError(error, "关注没有提交成功, 请检查连接后重试。"));
+    } finally {
+      setProfileFollowBusy(false);
+    }
+  }
+
   async function handleReportPost(reason: PostReportReason): Promise<void> {
     if (!postMenuPost) return;
     setPostMenuError(undefined);
@@ -882,8 +914,15 @@ export function FeedSurface({
               style={styles.postCard}
               onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setCardYs((prev) => ({ ...prev, [post.postId]: ly.y })); }}
             >
-              {/* posthead — larger avatar on the compact 14pt feed edge */}
+              {/* posthead — R15.69 (restored) 拆头像/名字为 2 个 Pressable:
+                  点头像 弹 关注/访问个人主页 菜单 (openProfileActions),
+                  点名字 直接访问个人主页 (onOpenProfile). */}
               <View style={styles.postHead}>
+                <Pressable
+                  accessibilityLabel={`${name} 的操作`}
+                  onPress={(event) => void openProfileActions({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, anchor: { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } })}
+                  style={styles.postAvatarPressable}
+                >
                 <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatar}>
                     <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
@@ -892,6 +931,12 @@ export function FeedSurface({
                     <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
                   </View>
                 </View>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={`查看 ${name} 的主页`}
+                  onPress={() => onOpenProfile?.({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media })}
+                  style={styles.postIdentityPressable}
+                >
                 <View style={styles.postIdentity}>
                   <View style={styles.postNameLine}>
                     <Text style={styles.postName}>{name}</Text>
@@ -899,6 +944,7 @@ export function FeedSurface({
                   </View>
                   {meta.label ? <Text style={styles.postMeta}>{meta.label}</Text> : null}
                 </View>
+                </Pressable>
                 <Pressable
                   accessibilityLabel="更多"
                   onPress={() => openPostMenu(post.postId)}
@@ -1128,6 +1174,19 @@ export function FeedSurface({
       onNotInterested={handleNotInterested}
       onMuteAuthor={handleMuteAuthor}
     />
+    {/* R15.69 (restored): 点头像弹 关注/访问个人主页 菜单 (双行上下排) */}
+    <Modal transparent animationType="fade" visible={profileActions !== undefined} onRequestClose={() => setProfileActions(undefined)}>
+      <Pressable onPress={() => setProfileActions(undefined)} style={styles.profileActionOverlay}>
+        <GlassContainer spacing={8} style={[styles.profileGlassContainer, { left: Math.max(12, Math.min(viewportWidth - 200, (profileActions?.anchor.x ?? 24) - 28)), top: (profileActions?.anchor.y ?? 80) + 20 }]}>
+          <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
+            <Pressable disabled={profileFollowBusy} onPress={(event) => { event.stopPropagation(); void toggleProfileFollow(); }} style={styles.profileDropPress}><Text style={styles.profileDropText}>{profileFollowBusy ? "处理中…" : profileFollowing ? "✓ 已关注" : "+ 关注"}</Text></Pressable>
+          </GlassView>
+          <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
+            <Pressable onPress={(event) => { event.stopPropagation(); const target = profileActions; setProfileActions(undefined); if (target) { const { anchor: _anchor, ...profileTarget } = target; onOpenProfile?.(profileTarget); } }} style={styles.profileDropPress}><Text style={styles.profileDropText}>访问个人主页</Text></Pressable>
+          </GlassView>
+        </GlassContainer>
+      </Pressable>
+    </Modal>
     </View>
   );
 }
@@ -1368,6 +1427,15 @@ const styles = StyleSheet.create({
   },
   // 44pt avatar + flexible identity + 32pt menu, gap 10.
   postHead: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  // R15.69 (restored): 拆头像/名字 2 个 Pressable, 头像 = 弹 关注菜单, 名字 = 直接访个人主页
+  postAvatarPressable: { alignItems: "center" },
+  postIdentityPressable: { alignItems: "flex-start", flex: 1, flexDirection: "row", gap: 10, minWidth: 0 },
+  // R15.69 (restored): 关注/访问主页 菜单 (双行上下排) — 200 宽 + 44 行高 + 24 圆角
+  profileActionOverlay: { backgroundColor: "rgba(20,18,31,0.32)", flex: 1 },
+  profileGlassContainer: { flexDirection: "column", gap: 8, position: "absolute", width: 200 },
+  profileGlassDropFull: { borderRadius: 14, height: 44, overflow: "hidden", width: 200 },
+  profileDropPress: { alignItems: "center", height: "100%", justifyContent: "center", paddingHorizontal: 12, width: "100%" },
+  profileDropText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   postAvatarWrap: { height: 44, position: "relative", width: 44 },
   postAvatar: {
     alignItems: "center",

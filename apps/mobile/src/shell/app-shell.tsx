@@ -262,6 +262,8 @@ export function AppShell({
   const [locationSheetOpen, setLocationSheetOpen] = useState(false);
   const [realitySceneOpen, setRealitySceneOpen] = useState(false);
   const [realitySceneSelection, setRealitySceneSelection] = useState<string>();
+  const [realitySceneAI, setRealitySceneAI] = useState<PlatformAIAccount>();
+  const [aiProfileReturnToScene, setAIProfileReturnToScene] = useState(false);
 
   // R15.13 P6：mount 时拉一次"上次激活的自定义坐标" — 跨会话保留
   // 用户放置的 pin / 半径。如果从未放过，sheet 也仍能从 history
@@ -284,7 +286,7 @@ export function AppShell({
     if (Platform.OS !== "android") return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (handleModuleBack()) return true;
-      if (realitySceneOpen) { setRealitySceneOpen(false); return true; }
+      if (realitySceneOpen) { setRealitySceneAI(undefined); setRealitySceneOpen(false); return true; }
       if (voucherOpen) { setVoucherOpen(false); return true; }
       if (tab === "ME" && messageChatAuthor) { setMessageChat(undefined); return true; }
       if (tab === "MESSAGES" && messageChatAuthor) { setMessageChat(undefined); return true; }
@@ -444,7 +446,7 @@ export function AppShell({
           style={styles.body}
         >
         {realitySceneOpen ? (
-          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} initialSceneId={realitySceneSelection} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} />
+          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} initialSceneId={realitySceneSelection} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} />
         ) : tab === "HOME" ? (
           sceneComposerTool ? (
             <SceneComposerSurface tool={sceneComposerTool} scene={scene} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
@@ -484,7 +486,7 @@ export function AppShell({
               account={openAIProfile}
               engagement={engagement}
               {...(secureSessionStore ? { secureSessionStore } : {})}
-              onBack={() => setOpenAIProfile(undefined)}
+              onBack={() => { setOpenAIProfile(undefined); if (aiProfileReturnToScene) { setAIProfileReturnToScene(false); setRealitySceneOpen(true); } }}
               onMessage={(account, initialDraft) => {
                 setOpenAIProfile(undefined);
                 setMessageChat({ author: account.displayName, aiAccount: account, ...(initialDraft ? { initialDraft } : {}) });
@@ -550,6 +552,11 @@ export function AppShell({
               engagement={engagement}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               onOpenAIProfile={setOpenAIProfile}
+              onOpenAIScene={(account) => {
+                setRealitySceneAI(account);
+                setRealitySceneSelection(account.boundSceneId);
+                setRealitySceneOpen(true);
+              }}
               onOpenHumanProfile={(person) => setOpenHumanProfile({
                 userId: person.id,
                 name: person.name,
@@ -567,6 +574,7 @@ export function AppShell({
               onOpenSceneMap={(sceneId) => {
                 // 带 sceneId（场景推荐卡）则直达该场景详情；无参数时保持
                 // 原行为：打开 R27 推荐的 threebeans 动态 venue/time 详情。
+                setRealitySceneAI(undefined);
                 if (sceneId) setRealitySceneSelection(sceneId);
                 else setRealitySceneSelection("threebeans");
                 setRealitySceneOpen(true);
@@ -610,6 +618,7 @@ export function AppShell({
               onOpenChat={setFeedChatAuthor}
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
+              onOpenProfile={(profile) => setOpenHumanProfile(profile)}
               refreshTrigger={feedRefreshTrigger}
               bottomNavVisible={isNavVisible}
               // R15.23: sub-tab 推荐/关注 保留（initialTab）；section 动态/状态/社区 由 app-shell 控

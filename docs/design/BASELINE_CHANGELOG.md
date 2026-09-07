@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 60 — 2026-09-07
+
+- 冻结 Home 小美头像导航：头像先打开服务端绑定的 Scene/活动，而不是直接
+  进入个人主页或在 Home 展开预览；Scene 内再二次查看小美主页。
+- 五个 AI 账户增加权威场景、时段与活动标题绑定；Scene 明示 AI 仅提供聊天、
+  陪伴和 UGC 灵感，不能到场、接单或报名活动。
+
 ## Revision 59 — 2026-09-07
 
 - 首页场景改横滑大图；business-home controlLabel 提到 11pt（R3 门禁修复，
