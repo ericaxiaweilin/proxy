@@ -10,7 +10,9 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain('"PublishMarketOpportunity"');
     expect(source).toContain('"PublishActivity"');
     expect(source).toContain("尚未生成订单");
-    expect(source).toContain("等待候选申请");
+    expect(source).toContain("等待真人候选报名");
+    expect(source).toContain('price: "150,000₫"');
+    expect(source).not.toContain('price: "150K"');
     expect(source).toContain("已进入“我的活动”");
   });
 
