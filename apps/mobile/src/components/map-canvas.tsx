@@ -316,7 +316,7 @@ function FallbackNotice({
       <Text style={styles.androidTitle}>地图仅在 iOS 可用</Text>
       <Text style={styles.androidBody}>
         R15.29 已接 Apple Maps (MapKit)。Android 端需要 Google Maps key
-        (R15.30+)。当前 grid 坐标: ({pin.x}, {pin.y}) · 半径 {radiusMeters / 1000} km
+        (R15.30+)。当前覆盖范围：{radiusMeters / 1000} km
       </Text>
       <View style={{ display: "none" }} onTouchEnd={() => onChange(pin)} />
       <Text style={styles.androidHint}>{cityHint}</Text>

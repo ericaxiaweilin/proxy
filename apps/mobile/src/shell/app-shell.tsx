@@ -20,7 +20,6 @@ import {
   DEFAULT_LOCATION,
   LocationPickerSheet,
   formatRadius,
-  gridToLatLng,
   type AnyLocation,
   type CustomLocation,
   type PresetLocation
@@ -763,8 +762,7 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
 }
 
 // 基线 .locationcontext：⌖ 图标块 + 城市 / 本地范围说明 + 切换⌄。
-// R15.13 P6：如果 location 是 CUSTOM (用户自定义坐标)，在副标题
-// 显示 "lat, lng · 半径 X km" — 让用户记住自己放的位置。
+// 自定义位置的坐标只用于数据层和地图定位；摘要层只呈现用户可理解的覆盖范围。
 function LocationContext({
   location,
   onOpenSceneMap,
@@ -775,10 +773,7 @@ function LocationContext({
   onSwitchLocation: () => void;
 }): React.JSX.Element {
   const sub = location.kind === "CUSTOM"
-    ? (() => {
-        const { lat, lng } = gridToLatLng(location.city, location.custom.gridX, location.custom.gridY);
-        return `自定义 · ${lat.toFixed(4)}, ${lng.toFixed(4)} · 半径 ${formatRadius(location.custom.radiusMeters)}`;
-      })()
+    ? `地图选点 · 覆盖范围 ${formatRadius(location.custom.radiusMeters)}`
     : "你正在看的本地范围 · 仅城市 / 区域";
   return (
     <View style={styles.locationRow}>

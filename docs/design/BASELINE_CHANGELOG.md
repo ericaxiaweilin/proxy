@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 67 — 2026-09-07
+
+- Removed the remaining coordinate duplication from Home's location summary and
+  the Android map fallback. Coordinates remain available to the map and ranking
+  pipeline, while user-facing summaries show only the place and coverage range.
+
 ## Revision 66 — 2026-09-07
 
 - Moved the single-line Home intent entry above discovery and unified its copy

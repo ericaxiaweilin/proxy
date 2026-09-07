@@ -8,6 +8,7 @@ const shell = readFileSync(fileURLToPath(new URL("./shell/app-shell.tsx", import
 const scene = readFileSync(fileURLToPath(new URL("./surfaces/reality-scene-map.tsx", import.meta.url)), "utf8");
 const fixtures = readFileSync(fileURLToPath(new URL("./recommend-fixtures.ts", import.meta.url)), "utf8");
 const locationPicker = readFileSync(fileURLToPath(new URL("./components/location-picker-sheet.tsx", import.meta.url)), "utf8");
+const mapCanvas = readFileSync(fileURLToPath(new URL("./components/map-canvas.tsx", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("puts the unified search and model conversation before discovery sections", () => {
@@ -65,5 +66,8 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(locationPicker).not.toMatch(/坐标 \$\{lat\.toFixed/);
     expect(locationPicker).not.toMatch(/\(\{eLat\.toFixed/);
     expect(locationPicker).not.toContain("自定义坐标</Text>");
+    expect(shell).toContain("地图选点 · 覆盖范围");
+    expect(shell).not.toMatch(/lat\.toFixed\(4\).*lng\.toFixed\(4\)/);
+    expect(mapCanvas).not.toContain("当前 grid 坐标");
   });
 });
