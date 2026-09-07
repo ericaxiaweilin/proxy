@@ -38,16 +38,20 @@ export interface MapCanvasProps {
   initialPin: GridCoord;
   // 半径（米）。
   radiusMeters: 1000 | 3000 | 5000;
-  // 城市名（显示在角标）
+  // 城市名（显示在角标）。"" 表示未知 — 不再默认任何城市。
   cityHint: string;
   // pin / 拖动 / 完成时回调 (新 grid coord)
   initialCoordinate?: { lat: number; lng: number } | undefined;
   onChange: (next: GridCoord, coordinate?: { lat: number; lng: number }) => void;
   // 可选：测试 ID
   testID?: string;
+  // 打开自动定位：无真实坐标时 mount 即请求一次 GPS（默认 true）。
+  // 关掉则保持手动（仅点按钮才定位）。
+  autoLocate?: boolean;
 }
 
-// City bounds key for the city hint. Falls back to 河内 if unknown.
+// City bounds key for the city hint. Falls back to 河内 if unknown —
+// 仅用于 grid 换算兼容，地图初始视角不再用它做默认（见 VIETNAM_WIDE_REGION）。
 function resolveCityKey(hint: string): string {
   if (hint in CITY_BOUNDS) return hint;
   for (const key of Object.keys(CITY_BOUNDS)) {
@@ -55,6 +59,22 @@ function resolveCityKey(hint: string): string {
   }
   return "河内";
 }
+
+// hint 是否指向已知城市。"" / 未知 => 不固定任何城市。
+function isKnownCityHint(hint: string): boolean {
+  if (!hint) return false;
+  if (hint in CITY_BOUNDS) return true;
+  return Object.keys(CITY_BOUNDS).some((key) => key.includes(hint) || hint.includes(key));
+}
+
+// 无固定城市时的初始视角：全国视野，等 GPS 回来再 animate 到人。
+// 不是默认值 — 拿到真实坐标后立即离开这里。
+const VIETNAM_WIDE_REGION: Region = {
+  latitude: 15.8,
+  longitude: 107.5,
+  latitudeDelta: 12,
+  longitudeDelta: 12
+};
 
 // Inverse of gridToLatLng — project real (lat, lng) into the city's
 // 10×10 grid. Same math, just inverted.
@@ -94,10 +114,12 @@ export function MapCanvas({
   cityHint,
   initialCoordinate,
   onChange,
-  testID
+  testID,
+  autoLocate = true
 }: MapCanvasProps): React.JSX.Element {
   const cityKey = resolveCityKey(cityHint);
   const bounds = CITY_BOUNDS[cityKey] ?? CITY_BOUNDS["河内"]!;
+  const hasKnownCity = isKnownCityHint(cityHint);
 
   // 当前 pin (grid → lat/lng for the marker)
   const [pin, setPin] = useState<GridCoord>(initialPin);
@@ -108,15 +130,28 @@ export function MapCanvas({
     return { latitude: lat, longitude: lng };
   }, [cityKey, exactCoordinate, pin.x, pin.y]);
 
-  // Initial region = city center with the city span. We use a roughly
-  // square deltaLat / deltaLng from `spanKm` so the whole city fits.
-  const initialRegion: Region = useMemo(() => ({
-    latitude: bounds.centerLat,
-    longitude: bounds.centerLng,
-    // 0.7 * spanKm 留点内边距
-    latitudeDelta: (bounds.spanKm * 0.7) / 111,
-    longitudeDelta: (bounds.spanKm * 0.7) / 111
-  }), [bounds]);
+  // Initial region — 不再固定某个城市：
+  // 有真实坐标直接居中；有明确城市看该城市；否则全国视野等 GPS。
+  const initialRegion: Region = useMemo(() => {
+    if (initialCoordinate) {
+      return {
+        latitude: initialCoordinate.lat,
+        longitude: initialCoordinate.lng,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02
+      };
+    }
+    if (hasKnownCity) {
+      return {
+        latitude: bounds.centerLat,
+        longitude: bounds.centerLng,
+        // 0.7 * spanKm 留点内边距
+        latitudeDelta: (bounds.spanKm * 0.7) / 111,
+        longitudeDelta: (bounds.spanKm * 0.7) / 111
+      };
+    }
+    return { ...VIETNAM_WIDE_REGION };
+  }, [bounds, hasKnownCity, initialCoordinate]);
 
   // Region state — tracks user pan/zoom so the HUD shows the current view
   const [region, setRegion] = useState<Region>(initialRegion);
@@ -134,12 +169,6 @@ export function MapCanvas({
     setExactCoordinate(initialCoordinate ? { latitude: initialCoordinate.lat, longitude: initialCoordinate.lng } : undefined);
   }, [initialCoordinate?.lat, initialCoordinate?.lng, initialPin.x, initialPin.y]);
 
-  // Skip the map entirely on Android for now (no Google key yet).
-  // Render a simple fallback so the rest of the UI doesn't break.
-  if (Platform.OS !== "ios") {
-    return <FallbackNotice cityHint={cityHint} onChange={onChange} pin={pin} radiusMeters={radiusMeters} />;
-  }
-
   // Ref to throttle onChange — MapView fires onRegionChange at every
   // frame during a drag, but we only want to commit on idle so the
   // downstream state doesn't churn.
@@ -154,9 +183,8 @@ export function MapCanvas({
     onChange(g, { lat: coord.latitude, lng: coord.longitude });
   };
 
-  // "Use my location" — request foreground permission, then snap the
-  // map + pin to the user's coords. Errors fall through to inline
-  // `locError` so the user knows why nothing happened.
+  // GPS 定位并把地图 + pin 吸到真实坐标 — 手动按钮和打开自动定位共用。
+  // grid 只做存储兼容（按最近城市换算），真相以 exactCoordinate / onChange 为准。
   async function useMyLocation(): Promise<void> {
     if (locBusy) return;
     setLocError(null);
@@ -171,11 +199,6 @@ export function MapCanvas({
         accuracy: Location.Accuracy.Balanced
       });
       const { latitude, longitude } = pos.coords;
-      // Snap to nearest known city (河内/胡志明/岘港). The grid
-      // model only knows those three, so a user somewhere in
-      // Đà Lạt would get rounded to the closest city bounds —
-      // acceptable for P7 since we still show the real (lat,lng)
-      // in the picker.
       const targetCity = nearestCity(latitude, longitude);
       const g = latLngToGrid(targetCity, latitude, longitude);
       lastCommittedRef.current = g;
@@ -198,6 +221,29 @@ export function MapCanvas({
     } finally {
       setLocBusy(false);
     }
+  }
+
+  // 打开自动定位：无真实坐标时 mount 即请求一次 GPS，不再停在固定城市。
+  // 有坐标（回访/历史恢复）直接用，不重复打扰；失败就地提示，用户仍可手动。
+  const autoTriedRef = useRef(false);
+  useEffect(() => {
+    if (!autoLocate) return;
+    if (Platform.OS !== "ios") return;
+    if (initialCoordinate) return;
+    if (autoTriedRef.current) return;
+    autoTriedRef.current = true;
+    void useMyLocation();
+    // mount 跑一次即可，guard 靠 autoTriedRef
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLocate, initialCoordinate?.lat, initialCoordinate?.lng]);
+
+  // 角标：未知城市不写死，GPS 回来前诚实显示定位中。
+  const hudCityText = cityHint || (exactCoordinate ? "当前位置" : "正在定位…");
+
+  // Skip the map entirely on Android for now (no Google key yet).
+  // Render a simple fallback so the rest of the UI doesn't break.
+  if (Platform.OS !== "ios") {
+    return <FallbackNotice cityHint={hudCityText} onChange={onChange} pin={pin} radiusMeters={radiusMeters} />;
   }
 
   return (
@@ -238,7 +284,7 @@ export function MapCanvas({
           // Anchor defaults to (0.5, 1.0) — bottom-center, so the
           // teardrop tip sits exactly on the marker's coordinate.
           icon={require("../../assets/map-pin/pin-violet.png")}
-          title={cityHint}
+          title={hudCityText}
           description={`半径 ${radiusMeters / 1000} km`}
         />
         <Circle
@@ -285,9 +331,9 @@ export function MapCanvas({
         </View>
       ) : null}
 
-      {/* HUD 角标：城市 + 当前 grid + 半径 */}
+      {/* HUD 角标：城市（未知不写死） + 当前 grid + 半径 */}
       <View pointerEvents="none" style={styles.hud}>
-        <Text style={styles.hudCity}>{cityHint}</Text>
+        <Text style={styles.hudCity}>{hudCityText}</Text>
         <Text style={styles.hudCoord}>
           ({pin.x}, {pin.y}) · 半径 {radiusMeters / 1000} km
         </Text>
