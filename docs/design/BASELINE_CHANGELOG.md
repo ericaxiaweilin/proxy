@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 51 — 2026-09-06
+
+- 店铺/菜单照片走媒体管线远端展示（R36.x PHOTO-001）：store_photos 与
+  store_products 加 media_asset_id（074），挂载时授权 PUBLIC，相册与菜品
+  行显示 thumb 缩略图（远端优先，本地保留文件次之）。
+
+## Revision 51 — 2026-09-07
+
+- 线上店铺恢复后期公开资产基线：店铺头图与二维码之后依次呈现菜单 / 服务、
+  照片与视频、活动 / Offer、Creator 权益、优惠券和营业资料。
+- 移除误植的旧版访问漏斗及面向开发者的 JSON / 资产路径输入；编辑表单仅在
+  用户主动操作后展开，店铺照片以真实缩略图显示。
+- 新增结构守卫，禁止上述公开资产分区消失或开发字段再次回到用户界面。
+
 ## Revision 50 — 2026-09-06
 
 - 店铺菜单与价格模块恢复（R36.x MENU-001）：store 维度商品真 CRUD

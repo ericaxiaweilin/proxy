@@ -14,6 +14,18 @@ export interface MerchantOperatingHome {
   bestNextDecision: { kind: "NO_ACTION"; title: string; reason: string; requiresApproval: boolean };
 }
 
+export interface StorePhoto {
+  id: string;
+  storeId: string;
+  businessId: string;
+  uploadedBy: string;
+  assetPath: string;
+  caption: string;
+  sortOrder: number;
+  mediaAssetId: string;
+  createdAt: string;
+}
+
 export interface StoreProduct {
   id: string;
   storeId: string;
@@ -23,6 +35,7 @@ export interface StoreProduct {
   priceMinor: number;
   currency: string;
   photoAssetPath: string;
+  mediaAssetId: string;
   available: boolean;
   sortOrder: number;
   createdAt: string;
@@ -77,22 +90,24 @@ export class BusinessClient {
     assetPath: string;
     caption?: string;
     sortOrder?: number;
-  }): Promise<{ id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; createdAt: string }> {
+    mediaAssetId?: string;
+  }): Promise<StorePhoto> {
     const body = this.body(await this.command("AddStorePhoto", { type: "Store", id: input.storeId }, {
       storeId: input.storeId,
       assetPath: input.assetPath,
       caption: input.caption ?? "",
       sortOrder: input.sortOrder ?? 0,
+      mediaAssetId: input.mediaAssetId ?? "",
     }));
-    const photo = body.photo as { id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; createdAt: string };
+    const photo = body.photo as StorePhoto | undefined;
     if (!photo?.id) throw new Error("store photo create response malformed");
     return photo;
   }
 
-  public async listStorePhotos(storeId: string): Promise<Array<{ id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; createdAt: string }>> {
+  public async listStorePhotos(storeId: string): Promise<StorePhoto[]> {
     const body = this.body(await this.command("ListStorePhotos", { type: "Store", id: storeId }, { storeId }));
     if (!Array.isArray(body.photos)) throw new Error("store photos malformed");
-    return body.photos as Array<{ id: string; storeId: string; businessId: string; uploadedBy: string; assetPath: string; caption: string; sortOrder: number; createdAt: string }>;
+    return body.photos as StorePhoto[];
   }
 
   public async deleteStorePhoto(storeId: string, photoId: string): Promise<void> {
@@ -131,6 +146,7 @@ export class BusinessClient {
     priceMinor: number;
     description?: string;
     photoAssetPath?: string;
+    mediaAssetId?: string;
     sortOrder?: number;
   }): Promise<{ productId: string; product: StoreProduct }> {
     const body = this.body(await this.command("CreateStoreProduct", { type: "Store", id: input.storeId }, {
@@ -139,6 +155,7 @@ export class BusinessClient {
       priceMinor: input.priceMinor,
       description: input.description ?? "",
       photoAssetPath: input.photoAssetPath ?? "",
+      mediaAssetId: input.mediaAssetId ?? "",
       sortOrder: input.sortOrder ?? 0,
     }));
     const product = body.product as StoreProduct | undefined;
@@ -153,6 +170,7 @@ export class BusinessClient {
     priceMinor: number;
     description?: string;
     photoAssetPath?: string;
+    mediaAssetId?: string;
     sortOrder?: number;
   }): Promise<{ product: StoreProduct }> {
     const body = this.body(await this.command("UpdateStoreProduct", { type: "StoreProduct", id: input.productId }, {
@@ -162,6 +180,7 @@ export class BusinessClient {
       priceMinor: input.priceMinor,
       description: input.description ?? "",
       photoAssetPath: input.photoAssetPath ?? "",
+      mediaAssetId: input.mediaAssetId ?? "",
       sortOrder: input.sortOrder ?? 0,
     }));
     const product = body.product as StoreProduct | undefined;

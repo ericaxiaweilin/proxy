@@ -41,6 +41,7 @@ func TestStoreProductCrudRoundTrip(t *testing.T) {
 
 	made := service.Handle(businessEnvelope("owner", "CreateStoreProduct", "new", map[string]any{
 		"storeId": storeID, "name": "Ca Phe Sua", "description": "condensed milk", "priceMinor": 29000,
+		"mediaAssetId": "ma_menu_1",
 	}))
 	if made.Outcome != "ACCEPTED" || made.OperationRef == "" {
 		t.Fatalf("product create failed: %+v", made)
@@ -65,6 +66,9 @@ func TestStoreProductCrudRoundTrip(t *testing.T) {
 	items, ok := listBody["products"].([]any)
 	if !ok || len(items) != 1 {
 		t.Fatalf("expected 1 product, got: %v", listBody["products"])
+	}
+	if item, ok := items[0].(map[string]any); !ok || item["mediaAssetId"] != "ma_menu_1" {
+		t.Fatalf("mediaAssetId did not persist: %v", items[0])
 	}
 
 	renamed := service.Handle(businessEnvelope("owner", "UpdateStoreProduct", productID, map[string]any{

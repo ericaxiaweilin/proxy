@@ -345,7 +345,7 @@ export function MerchantMeR21Replacement({
     }
     return (
       <View style={styles.root}>
-        <MerchantStorefrontSurface client={business} header={detailHead({ onBack: () => setPage("root"), title: "线上店铺" })} viewerAccountId={viewerAccountId} showcaseActivities={activityItems.map((a) => ({ id: a.activityId, title: a.title }))} />
+        <MerchantStorefrontSurface client={business} header={detailHead({ onBack: () => setPage("root"), title: "线上店铺" })} viewerAccountId={viewerAccountId} showcaseActivities={activityItems.map((a) => ({ id: a.activityId, title: a.title }))} onOpenVouchers={onOpenVouchers} />
       </View>
     );
   }

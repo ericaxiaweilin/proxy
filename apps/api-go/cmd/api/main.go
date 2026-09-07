@@ -226,6 +226,10 @@ func main() {
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
 		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))
+		// R36.x MENU-001: storefront photo/menu uploads go through the
+		// media pipeline; attaching them to a store publishes the
+		// assets to PUBLIC so thumb/play URLs resolve.
+		businessService.SetMediaAuthorizer(mediaService)
 		relationshipService = relationship.NewWithRepository(postgres.NewRelationshipRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
 		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())

@@ -25,10 +25,32 @@ type StoreProduct struct {
 	PriceMinor     int64     `json:"priceMinor"`
 	Currency       string    `json:"currency"`
 	PhotoAssetPath string    `json:"photoAssetPath"`
+	MediaAssetID   string    `json:"mediaAssetId"`
 	Available      bool      `json:"available"`
 	SortOrder      int       `json:"sortOrder"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+// storeMediaAuthorizer promotes media-pipeline uploads to PUBLIC so
+// storefront photos and menu photos are remotely viewable (thumb/play
+// URLs). It is optional: memory-mode services without a media backend
+// skip authorization and keep OWNER_ONLY assets.
+type storeMediaAuthorizer interface {
+	AuthorizeForStorefront(ctx context.Context, mediaAssetIDs []string, ownerPrincipalID string) error
+}
+
+// SetMediaAuthorizer wires the media backend for storefront photo
+// publishing. Safe to omit in unit-test (memory) mode.
+func (s *Service) SetMediaAuthorizer(authorizer storeMediaAuthorizer) {
+	s.mediaAuthorizer = authorizer
+}
+
+func (s *Service) authorizeStoreMedia(ctx context.Context, mediaAssetIDs []string, ownerPrincipalID string) error {
+	if len(mediaAssetIDs) == 0 || s.mediaAuthorizer == nil {
+		return nil
+	}
+	return s.mediaAuthorizer.AuthorizeForStorefront(ctx, mediaAssetIDs, ownerPrincipalID)
 }
 
 func (s *Service) resolveProductBusiness(ctx context.Context, storeID string) (string, bool) {
@@ -46,6 +68,7 @@ func (s *Service) createProduct(ctx context.Context, e command.Envelope) command
 		Description    string `json:"description"`
 		PriceMinor     int64  `json:"priceMinor"`
 		PhotoAssetPath string `json:"photoAssetPath"`
+		MediaAssetID   string `json:"mediaAssetId"`
 		SortOrder      int    `json:"sortOrder"`
 	}
 	if !decode(e.Payload, &p) || p.StoreID == "" || strings.TrimSpace(p.Name) == "" || p.PriceMinor < 0 {
@@ -68,6 +91,7 @@ func (s *Service) createProduct(ctx context.Context, e command.Envelope) command
 		PriceMinor:     p.PriceMinor,
 		Currency:       "VND",
 		PhotoAssetPath: p.PhotoAssetPath,
+		MediaAssetID:   p.MediaAssetID,
 		Available:      true,
 		SortOrder:      p.SortOrder,
 		CreatedAt:      now,
@@ -75,6 +99,11 @@ func (s *Service) createProduct(ctx context.Context, e command.Envelope) command
 	}
 	if err := s.repo.CreateProduct(ctx, product); err != nil {
 		return command.Rejected(e, "PRODUCT_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "business.product_create_failed", nil)
+	}
+	if p.MediaAssetID != "" {
+		if err := s.authorizeStoreMedia(ctx, []string{p.MediaAssetID}, e.Principal.ID); err != nil {
+			return command.Rejected(e, "STORE_MEDIA_AUTHORIZE_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_media_authorize_failed", nil)
+		}
 	}
 	ev := event.New("StoreProductCreated", "StoreProduct", product.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, nil)
 	return acceptedWithPayload(e, "StoreProduct", product.ID, 1, "ACTIVE", map[string]any{"productId": product.ID, "product": product}, []event.DomainEvent{ev})
@@ -88,6 +117,7 @@ func (s *Service) updateProduct(ctx context.Context, e command.Envelope) command
 		Description    string `json:"description"`
 		PriceMinor     int64  `json:"priceMinor"`
 		PhotoAssetPath string `json:"photoAssetPath"`
+		MediaAssetID   string `json:"mediaAssetId"`
 		SortOrder      int    `json:"sortOrder"`
 	}
 	if !decode(e.Payload, &p) || p.ProductID == "" || p.StoreID == "" || strings.TrimSpace(p.Name) == "" || p.PriceMinor < 0 {
@@ -114,6 +144,7 @@ func (s *Service) updateProduct(ctx context.Context, e command.Envelope) command
 		PriceMinor:     p.PriceMinor,
 		Currency:       "VND",
 		PhotoAssetPath: p.PhotoAssetPath,
+		MediaAssetID:   p.MediaAssetID,
 		Available:      existing.Available,
 		SortOrder:      p.SortOrder,
 		CreatedAt:      existing.CreatedAt,
@@ -121,6 +152,11 @@ func (s *Service) updateProduct(ctx context.Context, e command.Envelope) command
 	}
 	if err := s.repo.UpdateProduct(ctx, updated); err != nil {
 		return command.Rejected(e, "PRODUCT_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "business.product_update_failed", nil)
+	}
+	if p.MediaAssetID != "" && p.MediaAssetID != existing.MediaAssetID {
+		if err := s.authorizeStoreMedia(ctx, []string{p.MediaAssetID}, e.Principal.ID); err != nil {
+			return command.Rejected(e, "STORE_MEDIA_AUTHORIZE_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_media_authorize_failed", nil)
+		}
 	}
 	ev := event.New("StoreProductUpdated", "StoreProduct", updated.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, nil)
 	return acceptedWithPayload(e, "StoreProduct", updated.ID, 1, "ACTIVE", map[string]any{"productId": updated.ID, "product": updated}, []event.DomainEvent{ev})

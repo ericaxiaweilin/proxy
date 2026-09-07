@@ -736,6 +736,13 @@ func (s *Service) ListReadyVariants(ctx context.Context, mediaAssetID string) ([
 	return ready, nil
 }
 
+// AuthorizeForStorefront promotes technically approved media uploads to
+// PUBLIC so store album and menu photos are remotely viewable (thumb/play
+// URLs). Storefronts are public surfaces; same trust shape as posts.
+func (s *Service) AuthorizeForStorefront(ctx context.Context, ids []string, ownerPrincipalID string) error {
+	return s.AuthorizeForPost(ctx, ids, ownerPrincipalID, "PUBLIC")
+}
+
 // AuthorizeForPost is the server-owned publication transition. READY alone is
 // never public: only the owner can attach technically approved media, and the
 // asset receives exactly the Post visibility class inside the command transaction.

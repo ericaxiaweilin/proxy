@@ -232,4 +232,32 @@ describe("BusinessClient", () => {
     const hidden = await client.setProductAvailability("prod_1", "store_1", false);
     expect(hidden.product.available).toBe(false);
   });
+
+  // PHOTO-001 mobile half: 相册/菜单照片带 mediaAssetId 走真命令，
+  // surface 才能拼出远端 thumb URL（不再只存本地路径）。
+  it("round-trips mediaAssetId on photos and products", async () => {
+    const store = makeStore();
+    await writeSession(store);
+    const client = new BusinessClient({
+      secureSessionStore: store,
+      authClient: { request: async (path) => {
+        if (path.endsWith("/AddStorePhoto")) {
+          return { status: 200, json: async () => envelope("AddStorePhoto", { type: "Store", id: "store_1" }, {
+            photo: { id: "photo_1", storeId: "store_1", businessId: "biz_1", uploadedBy: "user_owner", assetPath: "store/sp_1.jpg", caption: "", sortOrder: 0, mediaAssetId: "ma_photo_1", createdAt: "2026-09-06T00:00:00Z" },
+          }) };
+        }
+        if (path.endsWith("/CreateStoreProduct")) {
+          return { status: 200, json: async () => envelope("CreateStoreProduct", { type: "Store", id: "store_1" }, {
+            productId: "prod_9",
+            product: { id: "prod_9", storeId: "store_1", businessId: "biz_1", name: "Banh Mi", description: "", priceMinor: 25000, currency: "VND", photoAssetPath: "", mediaAssetId: "ma_dish_9", available: true, sortOrder: 0, createdAt: "2026-09-06T00:00:00Z", updatedAt: "2026-09-06T00:00:00Z" },
+          }) };
+        }
+        return { status: 500, json: async () => ({ error: "unexpected" }) };
+      } },
+    });
+    const photo = await client.addStorePhoto({ storeId: "store_1", assetPath: "store/sp_1.jpg", mediaAssetId: "ma_photo_1" });
+    expect(photo.mediaAssetId).toBe("ma_photo_1");
+    const made = await client.createProduct({ storeId: "store_1", name: "Banh Mi", priceMinor: 25000, mediaAssetId: "ma_dish_9" });
+    expect(made.product.mediaAssetId).toBe("ma_dish_9");
+  });
 });

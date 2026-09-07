@@ -172,15 +172,15 @@ func (r *BusinessRepository) GetStore(ctx context.Context, storeID string) (busi
 
 func (r *BusinessRepository) AddStorePhoto(ctx context.Context, p business.StorePhoto) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.store_photos (id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		p.ID, p.StoreID, p.BusinessID, p.UploadedBy, p.AssetPath, p.Caption, p.SortOrder, p.CreatedAt)
+		INSERT INTO business.store_photos (id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, media_asset_id, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		p.ID, p.StoreID, p.BusinessID, p.UploadedBy, p.AssetPath, p.Caption, p.SortOrder, p.MediaAssetID, p.CreatedAt)
 	return err
 }
 
 func (r *BusinessRepository) ListStorePhotos(ctx context.Context, storeID string) ([]business.StorePhoto, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, created_at
+		SELECT id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, media_asset_id, created_at
 		FROM business.store_photos WHERE store_id=$1 ORDER BY sort_order, created_at DESC`, storeID)
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func (r *BusinessRepository) ListStorePhotos(ctx context.Context, storeID string
 	result := []business.StorePhoto{}
 	for rows.Next() {
 		var p business.StorePhoto
-		if err := rows.Scan(&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.MediaAssetID, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, p)
@@ -213,9 +213,9 @@ func (r *BusinessRepository) DeleteStorePhoto(ctx context.Context, storeID, phot
 func (r *BusinessRepository) GetStorePhoto(ctx context.Context, storeID, photoID string) (business.StorePhoto, error) {
 	var p business.StorePhoto
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, created_at
+		SELECT id, store_id, business_id, uploaded_by, asset_path, caption, sort_order, media_asset_id, created_at
 		FROM business.store_photos WHERE store_id=$1 AND id=$2`, storeID, photoID).Scan(
-		&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.CreatedAt,
+		&p.ID, &p.StoreID, &p.BusinessID, &p.UploadedBy, &p.AssetPath, &p.Caption, &p.SortOrder, &p.MediaAssetID, &p.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.StorePhoto{}, errors.New("photo not found")
@@ -334,18 +334,18 @@ func (r *BusinessRepository) SpendSummary(ctx context.Context, businessID string
 
 func (r *BusinessRepository) CreateProduct(ctx context.Context, p business.StoreProduct) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.store_products (id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, available, sort_order, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		p.ID, p.StoreID, p.BusinessID, p.Name, p.Description, p.PriceMinor, p.Currency, p.PhotoAssetPath, p.Available, p.SortOrder, p.CreatedAt, p.UpdatedAt)
+		INSERT INTO business.store_products (id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		p.ID, p.StoreID, p.BusinessID, p.Name, p.Description, p.PriceMinor, p.Currency, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
 func (r *BusinessRepository) GetProduct(ctx context.Context, productID string) (business.StoreProduct, error) {
 	var p business.StoreProduct
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, available, sort_order, created_at, updated_at
+		SELECT id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at
 		FROM business.store_products WHERE id=$1`, productID).Scan(
-		&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.PhotoAssetPath, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
+		&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.StoreProduct{}, errors.New("product not found")
@@ -357,15 +357,15 @@ func (r *BusinessRepository) UpdateProduct(ctx context.Context, p business.Store
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE business.store_products SET
 			name=$2, description=$3, price_minor=$4, currency=$5, photo_asset_path=$6,
-			available=$7, sort_order=$8, updated_at=$9
+			media_asset_id=$7, available=$8, sort_order=$9, updated_at=$10
 		WHERE id=$1`,
-		p.ID, p.Name, p.Description, p.PriceMinor, p.Currency, p.PhotoAssetPath, p.Available, p.SortOrder, p.UpdatedAt)
+		p.ID, p.Name, p.Description, p.PriceMinor, p.Currency, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.UpdatedAt)
 	return err
 }
 
 func (r *BusinessRepository) ListProducts(ctx context.Context, storeID string) ([]business.StoreProduct, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, available, sort_order, created_at, updated_at
+		SELECT id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at
 		FROM business.store_products WHERE store_id=$1 ORDER BY sort_order, created_at`, storeID)
 	if err != nil {
 		return nil, err
@@ -375,7 +375,7 @@ func (r *BusinessRepository) ListProducts(ctx context.Context, storeID string) (
 	for rows.Next() {
 		var p business.StoreProduct
 		if err := rows.Scan(
-			&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.PhotoAssetPath, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
+			&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

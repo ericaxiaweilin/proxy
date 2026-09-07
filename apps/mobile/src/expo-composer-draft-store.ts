@@ -50,6 +50,14 @@ export async function retainStorePhoto(input: {
   };
 }
 
+/** Resolve the server-safe `store/...` key back to the retained on-device file. */
+export function storePhotoUri(assetPath: string): string | undefined {
+  if (!assetPath.startsWith("store/")) return undefined;
+  const filename = assetPath.slice("store/".length);
+  if (!filename || filename.includes("/") || filename.includes("..")) return undefined;
+  return new File(storePhotoDirectory, filename).uri;
+}
+
 export async function retainComposerImage(item: DraftMediaItem): Promise<DraftMediaItem> {
   draftDirectory.create({ idempotent: true, intermediates: true });
   const extension = item.image.mimeType === "image/gif" ? ".gif"

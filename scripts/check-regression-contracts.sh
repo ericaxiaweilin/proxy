@@ -424,15 +424,21 @@ echo "    STORE-PHOTO-001 (mobile): PASS (client + surface wire)"
 
 # MERCHANT-STOREFRONT-R21-001: real Business Workspace wiring must stay inside
 # the established R21 operating-store shell, not replace it with a raw admin list.
-if ! grep -q '访问 → 行动' apps/mobile/src/surfaces/merchant-storefront.tsx || \
-   ! grep -q '菜单 / 服务' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+if ! grep -q '菜单 / 服务' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '照片与视频' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '活动 / Offer' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q 'Creator 权益' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '优惠券 / Voucher' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '营业资料' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '店铺二维码' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q 'creationOpen ?' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '线上店铺只负责对外展示' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q 'header={detailHead' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
   echo "  FAIL [MERCHANT-STOREFRONT-R21-001]: storefront lost the stable R21 operating shell" >&2
+  exit 1
+fi
+if grep -q '营业时间 (JSON\|Logo 资产路径\|照片资产路径' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "FAIL: merchant storefront exposed developer-only storage fields"
   exit 1
 fi
 echo "    MERCHANT-STOREFRONT-R21-001: PASS (R21 operating shell + real store data/actions)"

@@ -44,14 +44,15 @@ type Store struct {
 // reference, never a public URL; the wire contract enforces a non-empty
 // ai-personas/ / assets/ / store/ / photo_ prefix.
 type StorePhoto struct {
-	ID         string    `json:"id"`
-	StoreID    string    `json:"storeId"`
-	BusinessID string    `json:"businessId"`
-	UploadedBy string    `json:"uploadedBy"`
-	AssetPath  string    `json:"assetPath"`
-	Caption    string    `json:"caption"`
-	SortOrder  int       `json:"sortOrder"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID           string    `json:"id"`
+	StoreID      string    `json:"storeId"`
+	BusinessID   string    `json:"businessId"`
+	UploadedBy   string    `json:"uploadedBy"`
+	AssetPath    string    `json:"assetPath"`
+	Caption      string    `json:"caption"`
+	SortOrder    int       `json:"sortOrder"`
+	MediaAssetID string    `json:"mediaAssetId"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 // StoreLines is the editable storefront profile. LogoAssetPath follows the
@@ -452,9 +453,10 @@ func (r *MemoryRepository) SpendSummary(_ context.Context, businessID string) (i
 }
 
 type Service struct {
-	mu    sync.Mutex
-	repo  Repository
-	clock clock.Clock
+	mu              sync.Mutex
+	repo            Repository
+	clock           clock.Clock
+	mediaAuthorizer storeMediaAuthorizer
 }
 
 func (r *MemoryRepository) UpsertAggregatedDemandSignal(_ context.Context, signal AggregatedDemandSignal) error {
@@ -789,10 +791,11 @@ func (s *Service) getStore(ctx context.Context, e command.Envelope) command.Resu
 
 func (s *Service) addStorePhoto(ctx context.Context, e command.Envelope) command.Result {
 	var p struct {
-		StoreID   string `json:"storeId"`
-		AssetPath string `json:"assetPath"`
-		Caption   string `json:"caption"`
-		SortOrder int    `json:"sortOrder"`
+		StoreID      string `json:"storeId"`
+		AssetPath    string `json:"assetPath"`
+		Caption      string `json:"caption"`
+		SortOrder    int    `json:"sortOrder"`
+		MediaAssetID string `json:"mediaAssetId"`
 	}
 	if !decode(e.Payload, &p) || p.StoreID == "" || p.AssetPath == "" {
 		return command.Rejected(e, "INVALID_STORE_PHOTO", "VALIDATION", "AFTER_USER_ACTION", "business.invalid_store_photo", nil)
@@ -808,9 +811,14 @@ func (s *Service) addStorePhoto(ctx context.Context, e command.Envelope) command
 		return command.Rejected(e, "BUSINESS_WRITE_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "business.write_required", nil)
 	}
 	now := s.clock.Now().UTC()
-	photo := StorePhoto{ID: newID("photo_"), StoreID: p.StoreID, BusinessID: store.BusinessID, UploadedBy: e.Actor.ID, AssetPath: p.AssetPath, Caption: p.Caption, SortOrder: p.SortOrder, CreatedAt: now}
+	photo := StorePhoto{ID: newID("photo_"), StoreID: p.StoreID, BusinessID: store.BusinessID, UploadedBy: e.Actor.ID, AssetPath: p.AssetPath, Caption: p.Caption, SortOrder: p.SortOrder, MediaAssetID: p.MediaAssetID, CreatedAt: now}
 	if err := s.repo.AddStorePhoto(ctx, photo); err != nil {
 		return command.Rejected(e, "STORE_PHOTO_ADD_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_photo_add_failed", nil)
+	}
+	if p.MediaAssetID != "" {
+		if err := s.authorizeStoreMedia(ctx, []string{p.MediaAssetID}, e.Principal.ID); err != nil {
+			return command.Rejected(e, "STORE_MEDIA_AUTHORIZE_FAILED", "INTERNAL", "SAFE_RETRY", "business.store_media_authorize_failed", nil)
+		}
 	}
 	ev := event.New("StorePhotoAdded", "StorePhoto", photo.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{"storeId": p.StoreID, "assetPath": p.AssetPath})
 	return acceptedWithPayload(e, "StorePhoto", photo.ID, 1, "ADDED", map[string]any{"photo": photo}, []event.DomainEvent{ev})
