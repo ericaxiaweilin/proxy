@@ -127,6 +127,7 @@ export function RequesterHome({
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
+  const [composerOpen, setComposerOpen] = useState(false);
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
   // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
   // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
@@ -446,16 +447,62 @@ export function RequesterHome({
         </HorizontalSwipeRail>
       </View> : null}
       {/* 基线 .r1572HomeComposer('USER')：HomeChatBox（无示例 / 无提示） */}
+      {/* R34_12_1 4-Grid Composer：大面积模型对话收成单行，点开展开完整输入 */}
       {conversationPanel ?? (onChat ? (
-        <HomeChatBox
-          contextLabel="用户"
-          placeholder="例如：周六下午想在西湖拍照"
-          mode={intentMode}
-          onSelectMode={(mode) => {
-            setIntentMode((current) => current === mode ? undefined : mode);
-          }}
-          onSend={(text, mode, attachment) => onChat(text, mode, attachment)}
-        />
+        <>
+          <Pressable onPress={() => setComposerOpen(true)} style={styles.composerSingle} accessibilityLabel="告诉 Proxy 你想做什么">
+            <Text style={styles.composerSingleText}>Proxy 想要怎样的时光？</Text>
+            <Text style={styles.composerSingleIcons}>📷 🎤 ＋</Text>
+          </Pressable>
+          {composerOpen ? (
+            <View>
+              <HomeChatBox
+                contextLabel="用户"
+                placeholder="例如：周六下午想在西湖拍照"
+                mode={intentMode}
+                onSelectMode={(mode) => {
+                  setIntentMode((current) => current === mode ? undefined : mode);
+                }}
+                onSend={(text, mode, attachment) => { setComposerOpen(false); onChat(text, mode, attachment); }}
+              />
+              <Pressable onPress={() => setComposerOpen(false)} style={styles.composerCollapse}>
+                <Text style={styles.composerCollapseText}>收起 ↑</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {(() => {
+            const gridPerson = filteredPeople[0];
+            const gridActivity = storeActivities[0];
+            const gridPlace = (gridActivity ? sceneBriefs.find((s) => s.name === gridActivity.venueName) : undefined) ?? sceneBriefs[0];
+            const gridTime = gridActivity?.time;
+            if (!gridPerson && !gridActivity && !gridPlace) return null;
+            const composed = [gridPerson ? `和${gridPerson.name}` : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
+            const tiles = [
+              gridPerson ? { key: `person:${gridPerson.id}`, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: "一起的人", onPress: () => onOpenHumanProfile?.(gridPerson) } : undefined,
+              gridTime ? { key: `time:${gridTime}`, imageUri: undefined, glyph: "◷", label: gridTime, sub: "时间", onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
+              gridActivity ? { key: `act:${gridActivity.activityId}`, imageUri: gridPlace?.imageUrl, glyph: "☕", label: gridActivity.title, sub: gridActivity.venueName, onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
+              gridPlace ? { key: `place:${gridPlace.id}`, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.name, sub: "地点", onPress: () => onOpenSceneMap?.(gridPlace.id) } : undefined,
+            ];
+            return (
+              <View>
+                <View style={styles.grid4}>
+                  {tiles.map((t) => t ? (
+                    <Pressable key={t.key} onPress={t.onPress} style={styles.gridTile}>
+                      {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
+                      <Text style={styles.gridLabel} numberOfLines={1}>{t.label}</Text>
+                      <Text style={styles.gridSub} numberOfLines={1}>{t.sub}</Text>
+                    </Pressable>
+                  ) : null)}
+                </View>
+                {composed ? (
+                  <Pressable onPress={() => onChat(composed)} style={styles.gridCta} accessibilityLabel="发出邀约">
+                    <Text style={styles.gridCtaText}>✦ 出图 / 发出 →</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            );
+          })()}
+        </>
       ) : null)}
 
       {sceneBriefs.length > 0 ? (
@@ -659,6 +706,20 @@ const styles = StyleSheet.create({
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   sectionHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
   emptyNote: { color: color.muted, fontSize: 12, paddingVertical: 8, textAlign: "center" },
+  composerSingle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 8, paddingHorizontal: 14, paddingVertical: 12 },
+  composerSingleText: { color: color.muted, fontSize: 13 },
+  composerSingleIcons: { color: color.muted, fontSize: 14 },
+  composerCollapse: { alignItems: "center", paddingVertical: 6 },
+  composerCollapseText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  gridTile: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 3, padding: 9, width: "48.4%" },
+  gridImage: { borderRadius: 12, height: 120, width: "100%" },
+  gridImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 12, height: 120, justifyContent: "center", width: "100%" },
+  gridGlyph: { color: color.muted, fontSize: 30 },
+  gridLabel: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  gridSub: { color: color.muted, fontSize: 11 },
+  gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 26, flexDirection: "row", justifyContent: "center", marginTop: 10, paddingVertical: 14 },
+  gridCtaText: { color: color.white, fontSize: 15, fontWeight: "800" },
   sceneRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
   sceneCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 3, padding: 11, width: 208 },
   sceneCardName: { color: color.ink, fontSize: 14, fontWeight: "900" },
