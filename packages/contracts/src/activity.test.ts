@@ -144,10 +144,10 @@ describe("ActivitySchema accepts server-side Lifecycle Pin shape", () => {
     const result = ListActivitiesPayloadSchema.safeParse(payload);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.activities[0].origin).toBe("PLATFORM");
-      expect(result.data.activities[0].aiStatus).toBe("AI_GENERATED");
-      expect(result.data.activities[0].aiActorKind).toBe("PLATFORM_AI");
-      expect(result.data.activities[0].aiPersonaName).toBe("平台 AI 小美 · 周末企划");
+      expect(result.data.activities[0]!.origin).toBe("PLATFORM");
+      expect(result.data.activities[0]!.aiStatus).toBe("AI_GENERATED");
+      expect(result.data.activities[0]!.aiActorKind).toBe("PLATFORM_AI");
+      expect(result.data.activities[0]!.aiPersonaName).toBe("平台 AI 小美 · 周末企划");
     }
   });
 
@@ -288,8 +288,8 @@ describe("ListMyActivitiesPayloadSchema (R17.x my-activities wire)", () => {
     if (result.success) {
       expect(result.data.created).toHaveLength(1);
       expect(result.data.joined).toHaveLength(1);
-      expect(result.data.created[0].ownerId).toBe("me");
-      expect(result.data.joined[0].moneyFlow).toBe("PAY_TO_JOIN");
+      expect(result.data.created[0]!.ownerId).toBe("me");
+      expect(result.data.joined[0]!.moneyFlow).toBe("PAY_TO_JOIN");
     }
   });
   it("accepts empty created + joined (actor 没记录)", () => {
@@ -377,7 +377,7 @@ describe("ActivitySchema.aiPersonaPhoto (R17.x platform AI 5 personas)", () => {
     const result = ListActivitiesPayloadSchema.safeParse(payload);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.activities[0].aiPersonaPhoto).toBe("ai-personas/ai_001.svg");
+      expect(result.data.activities[0]!.aiPersonaPhoto).toBe("ai-personas/ai_001.svg");
     }
   });
   it("accepts activities without aiPersonaPhoto (USER / MERCHANT origin)", () => {
