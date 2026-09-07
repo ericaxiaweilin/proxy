@@ -181,7 +181,7 @@ export function RequesterHome({
 
   // R36.x SCENE-RECOMMEND-001: 真实场景列表（公开接口，免登录），用于
   // 地图入口真计数 + 场景推荐横滑。失败/未配置时保持空，不展示假场景。
-  type SceneBrief = { id: string; name: string; area: string; type: string; description: string; best: string; active: boolean };
+  type SceneBrief = { id: string; name: string; area: string; type: string; description: string; best: string; active: boolean; imageUrl: string };
   const [sceneBriefs, setSceneBriefs] = useState<SceneBrief[]>([]);
   useEffect(() => {
     if (!sceneApiBaseUrl) return;
@@ -190,8 +190,17 @@ export function RequesterHome({
       .then((r) => (r.ok ? r.json() : undefined))
       .then((body) => {
         if (cancelled) return;
-        const list = Array.isArray((body as { scenes?: unknown }).scenes) ? (body as { scenes: SceneBrief[] }).scenes : [];
-        setSceneBriefs(list.filter((s) => s && typeof s.id === "string" && typeof s.name === "string"));
+        const list = Array.isArray((body as { scenes?: unknown }).scenes) ? (body as { scenes: Array<Record<string, unknown>> }).scenes : [];
+        setSceneBriefs(list.filter((s) => s && typeof s.id === "string" && typeof s.name === "string").map((s) => ({
+          id: String(s.id),
+          name: String(s.name ?? ""),
+          area: typeof s.area === "string" ? s.area : "",
+          type: typeof s.type === "string" ? s.type : "",
+          description: typeof s.description === "string" ? s.description : "",
+          best: typeof s.best === "string" ? s.best : "",
+          active: s.active === true,
+          imageUrl: typeof s.imageUrl === "string" ? s.imageUrl : "",
+        })));
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
@@ -453,15 +462,16 @@ export function RequesterHome({
             <Text style={styles.sectionTitle}>场景</Text>
             <Text style={styles.sectionHint}>{activeSceneCount > 0 ? `${activeSceneCount} 个正在发生` : `${sceneBriefs.length} 个待探索`}</Text>
           </View>
-          {sceneBriefs.slice(0, 5).map((s) => (
-            <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneRow} accessibilityLabel={`场景 ${s.name}`}>
-              <View style={styles.sceneRowMain}>
-                <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
-                <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}{s.best ? ` · ${s.best}` : ""}</Text>
-              </View>
-              <Text style={styles.sceneRowChev}>›</Text>
-            </Pressable>
-          ))}
+            {sceneBriefs.slice(0, 5).map((s) => (
+              <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneRow} accessibilityLabel={`场景 ${s.name}`}>
+                {s.imageUrl ? <Image source={{ uri: s.imageUrl }} style={styles.sceneThumb} /> : null}
+                <View style={styles.sceneRowMain}>
+                  <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
+                  <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}{s.best ? ` · ${s.best}` : ""}</Text>
+                </View>
+                <Text style={styles.sceneRowChev}>›</Text>
+              </Pressable>
+            ))}
         </View>
       ) : null}
 
@@ -629,6 +639,7 @@ const styles = StyleSheet.create({
   sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, padding: 12 },
   sceneRowMain: { flex: 1, gap: 2 },
   sceneRowChev: { color: color.muted, fontSize: 20, fontWeight: "800" },
+  sceneThumb: { borderRadius: 12, height: 56, width: 56 },
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 24, paddingHorizontal: 16, paddingTop: 13 },
 
