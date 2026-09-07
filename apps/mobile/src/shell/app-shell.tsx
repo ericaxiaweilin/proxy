@@ -564,12 +564,14 @@ export function AppShell({
                 setTab("MESSAGES");
               }}
               onCreateScene={setSceneComposerTool}
-              onOpenSceneMap={() => {
-                // The home Scene card is a concrete R27 recommendation, not a
-                // generic map shortcut. Open its dynamic venue/time detail.
-                setRealitySceneSelection("threebeans");
+              onOpenSceneMap={(sceneId) => {
+                // 带 sceneId（场景推荐卡）则直达该场景详情；无参数时保持
+                // 原行为：打开 R27 推荐的 threebeans 动态 venue/time 详情。
+                if (sceneId) setRealitySceneSelection(sceneId);
+                else setRealitySceneSelection("threebeans");
                 setRealitySceneOpen(true);
               }}
+              sceneApiBaseUrl={localApiBaseUrl}
               bottomNavVisible={isNavVisible}
             />
           )

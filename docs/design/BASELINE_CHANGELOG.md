@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 57 — 2026-09-07
+
+- 首页地图入口计数改为真实场景数/进行中数；地图下方加场景推荐横滑
+  （真场景列表，点进地图详情）；继续进行去掉假数据 fallback，未加载/
+  失败显示诚实状态。
+
 ## Revision 56 — 2026-09-07
 
 - 删掉设置里四个无响应的模拟按钮（后台恢复/深链/离线/重置原型）；

@@ -12,7 +12,7 @@
         "apps/mobile/src/shell/app-shell.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "Static UI is approved; motion remains incomplete."
+      "knownGap": "Static UI is approved; motion remains incomplete. R36.x SCENE-RECOMMEND-001: 首页场景推荐直达地图详情 (Revision 57)."
     },
     {
       "scope": "personal-profile",

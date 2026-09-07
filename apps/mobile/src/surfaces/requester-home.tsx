@@ -24,11 +24,9 @@ import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import Svg, { Circle, Path } from "react-native-svg";
 import {
-  CONTINUE_FIXTURES,
   RECOMMEND_FILTER_CHIPS,
   RECOMMEND_MODE_ORDER,
   SCENE_RECOMMEND,
-  type ContinueItem,
   type RecommendFeed,
   type RecommendFilter,
   type RecommendPerson
@@ -98,6 +96,7 @@ export function RequesterHome({
   viewerAccountId,
   onCreateScene,
   onOpenSceneMap,
+  sceneApiBaseUrl,
   onChromeVisibilityChange,
   bottomNavVisible,
 }: {
@@ -121,7 +120,8 @@ export function RequesterHome({
   onOpenHumanProfile?: (person: RecommendPerson) => void;
   viewerAccountId?: string;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
-  onOpenSceneMap?: (() => void) | undefined;
+  onOpenSceneMap?: ((sceneId?: string) => void) | undefined;
+  sceneApiBaseUrl?: string | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
@@ -179,6 +179,25 @@ export function RequesterHome({
   // Without this, a transient network blip is indistinguishable
   // from "user has no in-progress needs" or "user is anonymous".
   const [homeItemsState, setHomeItemsState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+
+  // R36.x SCENE-RECOMMEND-001: 真实场景列表（公开接口，免登录），用于
+  // 地图入口真计数 + 场景推荐横滑。失败/未配置时保持空，不展示假场景。
+  type SceneBrief = { id: string; name: string; area: string; type: string; description: string; best: string; active: boolean };
+  const [sceneBriefs, setSceneBriefs] = useState<SceneBrief[]>([]);
+  useEffect(() => {
+    if (!sceneApiBaseUrl) return;
+    let cancelled = false;
+    void fetch(`${sceneApiBaseUrl.replace(/\/$/, "")}/v1/reality-scenes`, { headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : undefined))
+      .then((body) => {
+        if (cancelled) return;
+        const list = Array.isArray((body as { scenes?: unknown }).scenes) ? (body as { scenes: SceneBrief[] }).scenes : [];
+        setSceneBriefs(list.filter((s) => s && typeof s.id === "string" && typeof s.name === "string"));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [sceneApiBaseUrl]);
+  const activeSceneCount = sceneBriefs.filter((s) => s.active).length;
 
   useEffect(() => {
     if (!demandClient) {
@@ -406,7 +425,7 @@ export function RequesterHome({
       ) : null)}
 
       {onOpenSceneMap ? (
-        <Pressable accessibilityLabel="打开河内场景地图" onPress={onOpenSceneMap} style={styles.sceneMapEntry}>
+        <Pressable accessibilityLabel="打开河内场景地图" onPress={() => onOpenSceneMap?.()} style={styles.sceneMapEntry}>
           <View style={styles.sceneMapVisual}>
             <Svg height="100%" viewBox="0 0 72 58" width="100%">
               <Path d="M-5 18 C12 8 17 28 31 20 S50 5 78 14" fill="none" stroke="#C8DDE8" strokeLinecap="round" strokeWidth="7" />
@@ -420,18 +439,34 @@ export function RequesterHome({
           </View>
           <View style={styles.sceneMapCopy}>
             <Text style={styles.sceneMapEyebrow}>SCENE MAP · 河内</Text>
-            <Text style={styles.sceneMapTitle}>30 个还没去过</Text>
-            <Text style={styles.sceneMapSub}>3 个正在发生 · 17 个已留下足迹</Text>
+            <Text style={styles.sceneMapTitle}>{sceneBriefs.length > 0 ? `${sceneBriefs.length} 个场景` : "场景地图"}</Text>
+            <Text style={styles.sceneMapSub}>{sceneBriefs.length > 0 ? (activeSceneCount > 0 ? `${activeSceneCount} 个正在发生` : "看看都在哪") : "打开看看附近"}</Text>
           </View>
           <Text style={styles.sceneMapChevron}>›</Text>
         </Pressable>
       ) : null}
 
-      {/* R15.34: 继续进行 — 大 thumb 卡片 list。
-          取代基线 "继续 / 2 项" list 样式，模仿 HTML prototype 里的
-          "继续进行" West Lake photography 卡片 (thumb + 标题 + 副标 + chevron)。
-          优先用 server 返回的 continueItems，匿名 / 加载中 / 失败时
-          fallback 到 CONTINUE_FIXTURES (mock)。 */}
+      {sceneBriefs.length > 0 ? (
+        <View>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>场景推荐</Text>
+            <Text style={styles.sectionHint}>真实场景 · 点进地图看详情</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sceneRail}>
+            {sceneBriefs.slice(0, 8).map((s) => (
+              <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneCard} accessibilityLabel={`场景 ${s.name}`}>
+                <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
+                <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
+                {s.best ? <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.best}</Text> : null}
+                {s.description ? <Text style={styles.sceneCardDesc} numberOfLines={2}>{s.description}</Text> : null}
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      {/* R15.34: 继续进行 — 大 thumb 卡片 list。只渲染 server 返回的
+          continueItems；未加载/失败时显示诚实状态，不展示假数据。 */}
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>继续进行</Text>
         <Text style={styles.sectionHint}>
@@ -441,7 +476,7 @@ export function RequesterHome({
             ? " · 加载失败"
             : homeItemsState === "loading"
             ? " · 加载中"
-            : " · 占位"}
+            : ""}
         </Text>
       </View>
       {continueItems.length === 0 ? (
@@ -480,26 +515,10 @@ export function RequesterHome({
           </Pressable>
         ))
       )}
-      {homeItemsState !== "loaded" ? (
-        <>
-          {CONTINUE_FIXTURES.map((item: ContinueItem) => (
-            <Pressable
-              key={item.key}
-              onPress={() => onOpenMarket?.("OPPORTUNITY")}
-              style={styles.continueCard}
-              accessibilityLabel={`继续进行 ${item.title}`}
-            >
-              <View style={[styles.continueThumb, { backgroundColor: item.thumbColor }]}>
-                <Text style={styles.continueThumbText}>{item.thumbLabel}</Text>
-              </View>
-              <View style={styles.continueCopy}>
-                <Text style={styles.continueTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.continueSub} numberOfLines={1}>{item.subtitle}</Text>
-              </View>
-              <Text style={styles.continueChevron}>›</Text>
-            </Pressable>
-          ))}
-        </>
+      {homeItemsState === "loading" ? (
+        <Text style={styles.emptyNote}>加载中…</Text>
+      ) : homeItemsState === "error" ? (
+        <Text style={styles.emptyNote}>加载失败，下拉或稍后重试</Text>
       ) : null}
 
       {/* R15.22 fix: 市场脉动计数 (机会 / 活动) 从 server 拉, 体验 仍使用 r157
@@ -612,6 +631,12 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
   sectionHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
+  emptyNote: { color: color.muted, fontSize: 12, paddingVertical: 8, textAlign: "center" },
+  sceneRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
+  sceneCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 3, padding: 11, width: 208 },
+  sceneCardName: { color: color.ink, fontSize: 14, fontWeight: "900" },
+  sceneCardMeta: { color: color.muted, fontSize: 11, lineHeight: 15 },
+  sceneCardDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
 
   // 基线 .r157Action：white card，icon 块 + 标题/副标题 + 右侧数值。
   actionCard: {
