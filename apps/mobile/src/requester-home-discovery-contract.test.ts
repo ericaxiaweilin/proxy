@@ -17,12 +17,9 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain(">AI 生成<");
   });
 
-  it("keeps human discovery as circle-and-name nodes with details revealed only after selection", () => {
-    expect(source).toContain('setSelectedPersonId((current) => current === p.id ? undefined : p.id)');
-    expect(source).toContain('testID="human-node-reveal"');
-    expect(source).toContain("可用状态");
-    expect(source).toContain("Scene Fit");
-    expect(source).toContain("匹配理由");
+  it("keeps human discovery as circle-and-name nodes that open the full profile", () => {
+    expect(source).toContain("onPress={() => onOpenHumanProfile?.(p)}");
+    expect(source).not.toContain('testID="human-node-reveal"');
     expect(source).not.toContain("styles.recCard");
     expect(source).not.toContain("styles.storyHint");
     expect(source).toContain("p.photoUri ? <Image");
@@ -44,5 +41,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(profile).toContain("toggleFollow()");
     expect(profile).toContain("onMessage(account)");
     expect(shell).toContain('setPageOverride("MSG_CHAT")');
+    expect(shell).toContain("<OtherProfileSurface");
+    expect(shell).toContain("avatarUri: person.photoUri");
   });
 });

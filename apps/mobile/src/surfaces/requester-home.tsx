@@ -93,6 +93,7 @@ export function RequesterHome({
   engagement,
   onMessageAI,
   onOpenAIProfile,
+  onOpenHumanProfile,
   viewerAccountId,
   onCreateScene,
   onOpenSceneMap,
@@ -116,6 +117,7 @@ export function RequesterHome({
   engagement?: EngagementClient;
   onMessageAI?: (account: PlatformAIAccount) => void;
   onOpenAIProfile?: (account: PlatformAIAccount) => void;
+  onOpenHumanProfile?: (person: RecommendPerson) => void;
   viewerAccountId?: string;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
   onOpenSceneMap?: (() => void) | undefined;
@@ -131,7 +133,6 @@ export function RequesterHome({
   // R15.34: 筛选 sheet 开 / 关 + 已选 chip。空数组 = "全部"。
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
-  const [selectedPersonId, setSelectedPersonId] = useState<string | undefined>(undefined);
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
 
   useEffect(() => {
@@ -157,7 +158,6 @@ export function RequesterHome({
     if (activeFilters.includes("near") && p.distanceM >= 1000) return false;
     return true;
   });
-  const selectedPerson = filteredPeople.find((person) => person.id === selectedPersonId);
   // R15.22 fix: 市场脉动计数状态.
   //   - opportunityCount: server 端 ListMarketOpportunities 返的 list 长度
   //   - activityCount:    server 端 ListActivities 返的 list 长度
@@ -326,7 +326,6 @@ export function RequesterHome({
           onChange={(id) => {
             setRecommendMode(id);
             setActiveFilters([]);
-            setSelectedPersonId(undefined);
           }}
           marginBottom={4}
           testPrefix="推荐人模式"
@@ -356,7 +355,7 @@ export function RequesterHome({
         {filteredPeople.map((p) => (
           <Pressable
             key={`story:${p.id}`}
-            onPress={() => setSelectedPersonId((current) => current === p.id ? undefined : p.id)}
+            onPress={() => onOpenHumanProfile?.(p)}
             style={styles.story}
             accessibilityLabel={`推荐人 ${p.name}，${p.online ? "在线" : "离线"}`}
           >
@@ -370,19 +369,6 @@ export function RequesterHome({
           </Pressable>
         ))}
       </HorizontalSwipeRail>
-
-      {selectedPerson ? (
-        <View style={styles.personReveal} testID="human-node-reveal">
-          <View style={styles.personRevealHead}>
-            <Text style={styles.personRevealName}>{selectedPerson.name}</Text>
-            <Text style={styles.personRevealDistance}>{selectedPerson.distanceM} m</Text>
-          </View>
-          <Text style={styles.personRevealLine}><Text style={styles.personRevealLabel}>可用状态  </Text>{selectedPerson.online ? "当前可接受邀约" : "当前不在线·可留言"}</Text>
-          <Text style={styles.personRevealLine}><Text style={styles.personRevealLabel}>意图  </Text>{selectedPerson.bio}</Text>
-          <Text style={styles.personRevealLine}><Text style={styles.personRevealLabel}>Scene Fit  </Text>{recommendFeed.sceneTag}</Text>
-          <Text style={styles.personRevealReason}>匹配理由·{selectedPerson.distanceM < 1000 ? "现实距离可达" : "在当前城市范围"}{selectedPerson.mutualFriends > 0 ? `·${selectedPerson.mutualFriends} 位共同好友` : ""}</Text>
-        </View>
-      ) : null}
 
       <View style={styles.loadMoreRow}>
         <Text style={styles.loadMoreText}>

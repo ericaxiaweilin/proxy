@@ -61,6 +61,7 @@ import { MeSurface } from "../surfaces/me";
 import { MessagesSurface } from "../surfaces/messages";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
 import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
+import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
 import { VoucherSurface } from "../surfaces/voucher";
 import { color, shadows } from "../theme";
@@ -169,6 +170,7 @@ export function AppShell({
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
   const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; initialDraft?: string }>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
+  const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
   const [viewerAccountId, setViewerAccountId] = useState<string>();
   useEffect(() => {
     let cancelled = false;
@@ -490,6 +492,20 @@ export function AppShell({
                 setTab("MESSAGES");
               }}
             />
+          ) : openHumanProfile ? (
+            <OtherProfileSurface
+              target={openHumanProfile}
+              engagement={engagement}
+              localNet={localNet}
+              {...(secureSessionStore ? { secureSessionStore } : {})}
+              onBack={() => setOpenHumanProfile(undefined)}
+              onMessage={(name) => {
+                setOpenHumanProfile(undefined);
+                setMessageChat({ author: name });
+                setPageOverride("MSG_CHAT");
+                setTab("MESSAGES");
+              }}
+            />
           ) : workspaceTarget ? (
             <FulfillmentWorkspace
               target={workspaceTarget}
@@ -534,6 +550,14 @@ export function AppShell({
               engagement={engagement}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               onOpenAIProfile={setOpenAIProfile}
+              onOpenHumanProfile={(person) => setOpenHumanProfile({
+                userId: person.id,
+                name: person.name,
+                city: person.bio,
+                avatarUri: person.photoUri,
+                posts: [],
+                mediaByPost: {},
+              })}
               onMessageAI={(account) => {
                 setMessageChat({ author: account.displayName, aiAccount: account });
                 setPageOverride("MSG_CHAT");

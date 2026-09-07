@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import type { EngagementClient } from "../engagement-client";
 import type { LocalNetClient } from "../localnet-client";
@@ -13,6 +13,7 @@ export type OtherProfileTarget = {
   userId: string;
   name: string;
   city?: string | undefined;
+  avatarUri?: string | undefined;
   posts: FeedPost[];
   mediaByPost: Record<string, FeedMediaItem[]>;
 };
@@ -103,11 +104,11 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
   return <View style={styles.root}>
     <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable><Text style={styles.headerTitle}>{target.name}</Text><View style={styles.headerSpacer} /></View>
     <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.identity}><View style={styles.avatar}><Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text></View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
+      <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts.followers, following: counts.following }} onOpenMedia={() => undefined} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name)} />
     </ScrollView>
   </View>;
 }
 
-const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},backText:{color:color.magenta,fontSize:15,fontWeight:"800"},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},content:{paddingBottom:30},identity:{alignItems:"center",flexDirection:"row",gap:14,padding:18},avatar:{alignItems:"center",backgroundColor:color.proxyPurpleSoft,borderRadius:38,height:76,justifyContent:"center",width:76},avatarText:{color:color.violet,fontSize:30,fontWeight:"900"},identityCopy:{flex:1},name:{color:color.ink,fontSize:24,fontWeight:"900"},handle:{color:color.muted,fontSize:13,marginTop:2},bio:{color:color.ink,fontSize:13,marginTop:7},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});
+const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},backText:{color:color.magenta,fontSize:15,fontWeight:"800"},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},content:{paddingBottom:30},identity:{alignItems:"center",flexDirection:"row",gap:14,padding:18},avatar:{alignItems:"center",backgroundColor:color.proxyPurpleSoft,borderRadius:38,height:76,justifyContent:"center",overflow:"hidden",width:76},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:color.violet,fontSize:30,fontWeight:"900"},identityCopy:{flex:1},name:{color:color.ink,fontSize:24,fontWeight:"900"},handle:{color:color.muted,fontSize:13,marginTop:2},bio:{color:color.ink,fontSize:13,marginTop:7},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});
