@@ -113,7 +113,8 @@ pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-001: PASS"
 
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
-# 两区都要显式标识身份。AI 首页只展示纯圆头像，添加/消息动作只能进主页后做。
+# 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
+# follow），发消息仍只能进主页后做。语义变更待 commander 确认。
 pnpm --filter @proxy/mobile test --run src/requester-home-discovery-contract.test.ts || exit $?
 echo "    UI-HOME-DISCOVERY-001: PASS"
 
