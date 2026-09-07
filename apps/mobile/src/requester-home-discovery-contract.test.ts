@@ -82,6 +82,28 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(shell).toContain("avatarUri: person.photoUri");
   });
 
+  it("names the two order chains honestly: join is join, publish-demand is the other chain", () => {
+    // 4 宫格按钮曾经挂"邀请 →"实际调 join（自己报名）。名实不符已修正：
+    // 报名就是报名，发布需求是另一条链路（进市场机会 Tab）。
+    expect(source).toContain("报名 →");
+    expect(source).toContain("joinSelected(gridActivity?.activityId)");
+    expect(source).toContain("发布需求");
+    expect(source).toContain('onOpenMarket?.("OPPORTUNITY")');
+    expect(source).toContain("直接约她");
+    expect(source).not.toContain('"邀请 →"');
+    expect(source).not.toContain("inviteSelected");
+  });
+
+  it("reports join failures by cause instead of blaming login", () => {
+    // 登录着点报名失败，曾一律报"登录后重试"。现在按服务端错误码说人话。
+    expect(source).toContain("joinErrorMessage");
+    expect(source).toContain("ACTIVITY_ALREADY_JOINED");
+    expect(source).toContain("你已报过名");
+    expect(source).toContain("ACTIVITY_FULL");
+    expect(source).toContain("ACTIVITY_NOT_FOUND");
+    expect(source).not.toContain("报名失败，登录后重试");
+  });
+
   it("keeps coordinates in the location data layer, not beside the address UI", () => {
     expect(locationPicker).toContain('label="地图选点"');
     expect(locationPicker).not.toMatch(/坐标 \$\{lat\.toFixed/);

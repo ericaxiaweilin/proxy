@@ -14,6 +14,7 @@ import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
+import { ActivityCommandRejectedError, ActivityProtocolError } from "../activity-client";
 import type { ExperienceClient } from "../experience-client";
 import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
 import type { EngagementClient } from "../engagement-client";
@@ -135,8 +136,8 @@ export function RequesterHome({
   const [placeIndex, setPlaceIndex] = useState(0);
   const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
   const [momentOpen, setMomentOpen] = useState(false);
-  const [inviteBusy, setInviteBusy] = useState(false);
-  const [inviteMsg, setInviteMsg] = useState<string | undefined>(undefined);
+  const [joinBusy, setJoinBusy] = useState(false);
+  const [joinMsg, setJoinMsg] = useState<string | undefined>(undefined);
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
   // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
   // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
@@ -263,26 +264,59 @@ export function RequesterHome({
     return () => { cancelled = true; };
   }, [activities]);
 
-  // 邀请：对当前活动格报名（真接口），顺手把 joined 刷进本地 rail。
-  async function inviteSelected(activityId: string | undefined): Promise<void> {
-    setInviteMsg(undefined);
+  // 报名：对当前活动格报名（真接口），顺手把 joined 刷进本地 rail。
+  // 注意：这是"我去参加活动"，不是"邀请小美来"。真邀请（createInvitation）
+  // 要求被邀人是服务端实名用户，推荐流还是 fixture、没有真实 userId，
+  // 接上之前按钮不挂邀请文案，免得链路名实不符。
+  // 报名失败说人话：以前所有失败都报"登录后重试"，登录着的用户被误导。
+  // 按错因分流——没登录/掉登录才提登录；报过名/满员/活动没了说具体事；
+  // 其他归网络或稍后重试。错误码口径见 activity/service.go joinActivity。
+  function joinErrorMessage(error: unknown): string {
+    if (error instanceof ActivityCommandRejectedError) {
+      switch (error.result.error?.errorCode) {
+        case "ACTIVITY_ALREADY_JOINED":
+          return "你已报过名，不用重复点";
+        case "ACTIVITY_FULL":
+          return "名额已满，下次早点来";
+        case "ACTIVITY_NOT_FOUND":
+          return "该活动不存在或已结束";
+        case "ACTIVITY_ACTOR_REQUIRED":
+        case "AI_ACTION_FORBIDDEN":
+          return "登录已过期，请重新登录";
+        default:
+          return "报名失败，请稍后重试";
+      }
+    }
+    if (error instanceof ActivityProtocolError) {
+      // 本地就没有可用登录（principal 缺失/离线 fallback/已登出）才提登录；
+      // 畸形响应走稍后重试。requireSession 把原错包了一层，只剩 message 可认。
+      if (/principal is required|offline fallback|signed out|re-authenticate|sign in/i.test(error.message)) {
+        return "登录后可报名";
+      }
+      return "报名失败，请稍后重试";
+    }
+    return "网络异常，请检查连接后重试";
+  }
+
+  async function joinSelected(activityId: string | undefined): Promise<void> {
+    setJoinMsg(undefined);
     if (!activityId) {
-      setInviteMsg("先选一个活动");
+      setJoinMsg("先选一个活动");
       return;
     }
     if (!activities) {
-      setInviteMsg("登录后可报名");
+      setJoinMsg("登录后可报名");
       return;
     }
-    setInviteBusy(true);
+    setJoinBusy(true);
     try {
       const result = await activities.join(activityId);
       setStoreActivities((prev) => prev.map((a) => (a.activityId === activityId ? { ...a, joined: result.activity.joined } : a)));
-      setInviteMsg(`已报名 · ${result.activity.joined} 人参加`);
-    } catch {
-      setInviteMsg("报名失败，登录后重试");
+      setJoinMsg(`已报名 · ${result.activity.joined} 人参加`);
+    } catch (e) {
+      setJoinMsg(joinErrorMessage(e));
     } finally {
-      setInviteBusy(false);
+      setJoinBusy(false);
     }
   }
 
@@ -522,16 +556,22 @@ export function RequesterHome({
                   ) : null)}
                 </View>
                 {composed ? (
-                  <View style={styles.gridCtaRow}>
+                  <View>
+                    <Text style={styles.chainHint}>直接约她：点头像进 Scene 主页聊 · 想等人来：发布需求等小美接单</Text>
+                    <View style={styles.gridCtaRow}>
                     <Pressable onPress={() => setMomentOpen(true)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="出图">
                       <Text style={styles.gridCtaTextSmall}>✦ 出图</Text>
                     </Pressable>
-                    <Pressable disabled={inviteBusy} onPress={() => void inviteSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="邀请">
-                      <Text style={styles.gridCtaTextSmall}>{inviteBusy ? "报名中…" : "邀请 →"}</Text>
+                    <Pressable disabled={joinBusy} onPress={() => void joinSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="报名参加活动">
+                      <Text style={styles.gridCtaTextSmall}>{joinBusy ? "报名中…" : "报名 →"}</Text>
                     </Pressable>
+                    <Pressable onPress={() => onOpenMarket?.("OPPORTUNITY")} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="发布需求等小美报名">
+                      <Text style={styles.gridCtaTextSmall}>发布需求</Text>
+                    </Pressable>
+                    </View>
                   </View>
                 ) : null}
-                {inviteMsg ? <Text style={styles.inviteMsg}>{inviteMsg}</Text> : null}
+                {joinMsg ? <Text style={styles.joinMsg}>{joinMsg}</Text> : null}
                 {chooser ? (
                   <Modal transparent animationType="fade" visible onRequestClose={() => setChooser(null)}>
                     <Pressable onPress={() => setChooser(null)} style={styles.sheetBackdrop}>
@@ -795,7 +835,9 @@ const styles = StyleSheet.create({
   gridCtaRow: { flexDirection: "row", gap: 8 },
   gridCtaText: { color: color.white, fontSize: 15, fontWeight: "800" },
   gridCtaTextSmall: { color: color.white, fontSize: 13, fontWeight: "800" },
-  inviteMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
+  // 双链路提示：链路 A（直接约她走头像→Scene→主页）vs 链路 B（发布需求等人来）。
+  chainHint: { color: color.muted, fontSize: 11, marginTop: 8, textAlign: "center" },
+  joinMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
   chooserList: { maxHeight: 320 },
   chooserItem: { borderBottomColor: color.line, borderBottomWidth: 1, paddingVertical: 11 },
   chooserItemText: { color: color.ink, fontSize: 14, fontWeight: "700" },
