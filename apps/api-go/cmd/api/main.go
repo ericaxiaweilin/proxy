@@ -378,7 +378,10 @@ func main() {
 	// here; the Postgres implementation is a follow-up
 	// once the rest of the policy stack moves into the
 	// transactional outbox.
-	jurisdictionRepo := jurisdiction.NewMemoryRepository()
+	var jurisdictionRepo jurisdiction.Repository = jurisdiction.NewMemoryRepository()
+	if pool != nil {
+		jurisdictionRepo = postgres.NewJurisdictionRepository(pool)
+	}
 	jurisdictionSvc := jurisdiction.NewService(jurisdictionRepo)
 	// Fulfillment consumes the resolver through a
 	// one-method bridge so the fulfillment package does

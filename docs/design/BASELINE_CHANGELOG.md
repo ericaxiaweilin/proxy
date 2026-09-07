@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 64 — 2026-09-07
+
+- User jurisdiction now uses the existing PostgreSQL truth table whenever the
+  database is configured. Order/policy evaluation no longer falls back to a
+  fresh in-memory default after an API restart.
+
 ## Revision 63 — 2026-09-07
 
 - AI persona accounts and likeness-consent history now use PostgreSQL whenever

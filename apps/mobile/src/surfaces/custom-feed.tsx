@@ -1,8 +1,9 @@
 // Custom Feed — 用户固定「朋友/河内/摄影/机会/商家/创业」；AI 也可自动生成频道。
 // Threads Custom Feeds / X Lists 的 Proxy 化：用户建 + AI 建 + 固定到首页。
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { color, shadows } from "../theme";
+import { readCustomFeeds, writeCustomFeeds } from "../expo-custom-feed-store";
 
 export interface CustomFeed {
   id: string;
@@ -23,9 +24,16 @@ const DEFAULT_FEEDS: CustomFeed[] = [
 ];
 
 export function CustomFeedHub({ onBack, onOpenFeed }: { onBack: () => void; onOpenFeed?: (feedId: string) => void }): React.JSX.Element {
-  const [feeds, setFeeds] = useState<CustomFeed[]>(DEFAULT_FEEDS);
+  const [feeds, setFeeds] = useState<CustomFeed[]>(() => readCustomFeeds(DEFAULT_FEEDS));
   const [draft, setDraft] = useState("");
-  const [generating, setGenerating] = useState(false);
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    writeCustomFeeds(feeds);
+  }, [feeds]);
 
   function togglePin(id: string): void {
     setFeeds((prev) => prev.map((f) => (f.id === id ? { ...f, pinned: !f.pinned } : f)));
@@ -34,30 +42,27 @@ export function CustomFeedHub({ onBack, onOpenFeed }: { onBack: () => void; onOp
   function generateAI(): void {
     const text = draft.trim();
     if (!text) return;
-    setGenerating(true);
-    setTimeout(() => {
-      const lower = text.toLowerCase();
-      let name = "AI 频道";
-      let desc = text.slice(0, 24);
-      let icon = "✦";
-      if (lower.includes("ai") || lower.includes("产品")) {
-        name = "AI / 产品";
-        desc = "河内做 AI/产品的人和活动";
-        icon = "✦";
-      } else if (lower.includes("摄影")) {
-        name = "摄影精选";
-        desc = "河内摄影 · 作品与活动";
-        icon = "◯";
-      } else if (lower.includes("创业")) {
-        name = "创业圈";
-        desc = "创业/融资/活动";
-        icon = "✦";
-      }
-      const next: CustomFeed = { id: `ai_${Date.now().toString(36)}`, name, desc, icon, pinned: true, aiGenerated: true };
-      setFeeds((prev) => [next, ...prev]);
-      setDraft("");
-      setGenerating(false);
-    }, 600);
+    // 按关键词快速创建（本地规则，非模型生成）。
+    const lower = text.toLowerCase();
+    let name = "自定频道";
+    let desc = text.slice(0, 24);
+    let icon = "✦";
+    if (lower.includes("ai") || lower.includes("产品")) {
+      name = "AI / 产品";
+      desc = "河内做 AI/产品的人和活动";
+      icon = "✦";
+    } else if (lower.includes("摄影")) {
+      name = "摄影精选";
+      desc = "河内摄影 · 作品与活动";
+      icon = "◯";
+    } else if (lower.includes("创业")) {
+      name = "创业圈";
+      desc = "创业/融资/活动";
+      icon = "✦";
+    }
+    const next: CustomFeed = { id: `ai_${Date.now().toString(36)}`, name, desc, icon, pinned: true, aiGenerated: true };
+    setFeeds((prev) => [next, ...prev]);
+    setDraft("");
   }
 
   const pinned = feeds.filter((f) => f.pinned);
@@ -69,10 +74,10 @@ export function CustomFeedHub({ onBack, onOpenFeed }: { onBack: () => void; onOp
       <Text style={styles.sub}>在动态左上角集中管理「朋友/河内/摄影/机会/商家/创业」；也可让 AI 按一句话生成频道。</Text>
 
       <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>让 AI 生成频道</Text>
+        <Text style={styles.aiTitle}>按关键词快速创建频道</Text>
         <TextInput value={draft} onChangeText={setDraft} placeholder="例：给我建一个只看河内做 AI/产品的人和活动的频道" placeholderTextColor={color.muted} style={styles.aiInput} multiline />
-        <Pressable onPress={generateAI} style={[styles.aiBtn, (!draft.trim() || generating) && styles.disabled]}>
-          <Text style={styles.aiBtnText}>{generating ? "生成中…" : "AI 生成 → 固定到首页"}</Text>
+        <Pressable onPress={generateAI} style={[styles.aiBtn, !draft.trim() && styles.disabled]}>
+          <Text style={styles.aiBtnText}>创建并固定到首页</Text>
         </Pressable>
       </View>
 

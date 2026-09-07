@@ -866,5 +866,8 @@ pnpm --dir apps/mobile exec vitest run src/expo-feed-prefs-store.test.ts || exit
 require_test "AI-PERSONA-PERSIST-001" "./internal/platform/postgres" \
   "TestAIPersonaPostgresPersistsPersonaAndReconsent" \
   "apps/api-go/internal/platform/postgres/aipersona_test.go" || exit $?
+require_test "JURISDICTION-PERSIST-001" "./internal/platform/postgres" \
+  "TestJurisdictionPostgresSurvivesServiceRestart" \
+  "apps/api-go/internal/platform/postgres/jurisdiction_test.go" || exit $?
 
 echo "  regression contracts: OK"
