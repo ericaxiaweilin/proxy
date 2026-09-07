@@ -52,6 +52,9 @@ export interface MarketOpportunity {
   // Optional — fixtures without this fall back to heuristic inference
   // from theme/skills/title in R37OpportunityCard.inferType().
   opportunityType?: "coffee_photo" | "walk_photo" | "coffee_chinese" | "bilingual_store" | "event_photo";
+  // Scene/operator media pipeline URL. Generated samples are a visual fallback
+  // only; server-provided real-scene media always wins when present.
+  sceneImageUrl?: string;
   travelSource?: "seeded" | "user_distance" | "unknown";
 }
 

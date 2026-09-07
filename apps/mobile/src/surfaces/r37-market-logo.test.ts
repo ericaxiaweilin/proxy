@@ -16,5 +16,13 @@ describe("MARKET-LOGO-SINGLE-TILE-001", () => {
     expect(card).not.toContain("order-type-logos/");
     expect(master).toContain("const SIZE = { FILTER: 42, CARD: 30 }");
     expect(master).toContain("const MASTER:");
+    expect(master).not.toContain("translateX");
+    expect(master).not.toContain("translateY");
+  });
+
+  it("uses real scene media first and labels generated fallbacks", () => {
+    expect(card).toContain("opportunity.sceneImageUrl ? { uri: opportunity.sceneImageUrl }");
+    expect(card).toContain("SAMPLE_SCENE_IMAGE[type]");
+    expect(card).toContain("AI 样张");
   });
 });

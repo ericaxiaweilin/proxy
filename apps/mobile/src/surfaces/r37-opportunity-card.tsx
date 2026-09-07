@@ -12,6 +12,7 @@
 //                              + price (label + range) | takeBtn
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { type MarketOpportunity, type MarketOpportunityMoneyFlow } from "../market-fixtures";
 import { color } from "../theme";
 import { MarketTypeLogo, type MarketOpportunityType } from "../components/market-type-logo";
@@ -24,6 +25,14 @@ const TYPE_LABEL: Record<OpportunityType, { label: string; sub: string }> = {
   coffee_chinese: { label: "咖啡 + 中文", sub: "Talk" },
   bilingual_store: { label: "看店 + 双语", sub: "Language" },
   event_photo: { label: "活动 + 拍照", sub: "Event" },
+};
+
+const SAMPLE_SCENE_IMAGE: Record<OpportunityType, number> = {
+  coffee_photo: require("../../assets/market-scene-samples/coffee-photo-v1.jpg"),
+  coffee_chinese: require("../../assets/market-scene-samples/coffee-photo-v1.jpg"),
+  walk_photo: require("../../assets/market-scene-samples/city-walk-photo-v1.jpg"),
+  bilingual_store: require("../../assets/market-scene-samples/bilingual-store-v1.jpg"),
+  event_photo: require("../../assets/market-scene-samples/event-photo-v1.jpg"),
 };
 
 export function inferOpportunityTypeForFilter(opportunity: MarketOpportunity): OpportunityType {
@@ -73,9 +82,9 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
   return (
     <View style={styles.card}>
       <Pressable onPress={onOpen} style={styles.thumbWrap}>
-        {/* sceneImg 64x88 — visual hook (small portrait, not full-bleed) */}
         <View style={styles.thumb}>
-          <Text style={styles.thumbInitial}>{opportunity.shortTitle?.[0] ?? opportunity.title?.[0] ?? "·"}</Text>
+          <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`market-scene:${opportunity.id}`} source={opportunity.sceneImageUrl ? { uri: opportunity.sceneImageUrl } : SAMPLE_SCENE_IMAGE[type]} style={StyleSheet.absoluteFill} transition={0} />
+          {!opportunity.sceneImageUrl ? <View style={styles.sampleTag}><Text style={styles.sampleTagText}>AI 样张</Text></View> : null}
         </View>
       </Pressable>
       <View style={styles.body}>
@@ -117,8 +126,8 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
 const styles = StyleSheet.create({
   card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
   thumbWrap: { paddingTop: 2 },
-  thumb: { alignItems: "center", backgroundColor: "#F1ECE3", borderRadius: 6, height: 88, justifyContent: "center", width: 64 },
-  thumbInitial: { color: color.muted, fontSize: 22, fontWeight: "800" },
+  thumb: { backgroundColor: "#F1ECE3", borderRadius: 8, height: 88, overflow: "hidden", width: 64 },
+  sampleTag: { backgroundColor: "rgba(20,19,26,.74)", borderRadius: 5, bottom: 4, left: 4, paddingHorizontal: 4, paddingVertical: 2, position: "absolute" }, sampleTagText: { color: color.white, fontSize: 6, fontWeight: "800" },
   body: { flex: 1, minWidth: 0 },
   typeRow: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 5 },
   typeMeta: { flex: 1, minWidth: 0 },
