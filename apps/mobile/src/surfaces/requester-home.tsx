@@ -4,7 +4,7 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html（rhome，HTML 5197-5203）。
 // Experience Runtime 插槽：top_context banner 由 SurfacePlan 驱动（§10 Slots），本地态不被 Delta 覆盖（§15.1）。
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
@@ -128,8 +128,15 @@ export function RequesterHome({
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
   const [composerOpen, setComposerOpen] = useState(false);
-  // 4 宫格人物：点按轮换下一位（主页入口走下方真人推荐 rail，那里点头像进主页）。
+  // 4 宫格：各槽位独立下标，点格子弹选择窗（弹窗控制格子），主页入口保留。
   const [personIndex, setPersonIndex] = useState(0);
+  const [timeIndex, setTimeIndex] = useState(0);
+  const [activityIndex, setActivityIndex] = useState(0);
+  const [placeIndex, setPlaceIndex] = useState(0);
+  const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
+  const [momentOpen, setMomentOpen] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState<string | undefined>(undefined);
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
   // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
   // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
@@ -223,6 +230,29 @@ export function RequesterHome({
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [activities]);
+
+  // 邀请：对当前活动格报名（真接口），顺手把 joined 刷进本地 rail。
+  async function inviteSelected(activityId: string | undefined): Promise<void> {
+    setInviteMsg(undefined);
+    if (!activityId) {
+      setInviteMsg("先选一个活动");
+      return;
+    }
+    if (!activities) {
+      setInviteMsg("登录后可报名");
+      return;
+    }
+    setInviteBusy(true);
+    try {
+      const result = await activities.join(activityId);
+      setStoreActivities((prev) => prev.map((a) => (a.activityId === activityId ? { ...a, joined: result.activity.joined } : a)));
+      setInviteMsg(`已报名 · ${result.activity.joined} 人参加`);
+    } catch {
+      setInviteMsg("报名失败，登录后重试");
+    } finally {
+      setInviteBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!demandClient) {
@@ -409,22 +439,23 @@ export function RequesterHome({
           ) : null}
           {(() => {
             const gridPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
-            const gridActivity = storeActivities[0];
-            const gridPlace = (gridActivity ? sceneBriefs.find((s) => s.name === gridActivity.venueName) : undefined) ?? sceneBriefs[0];
-            const gridTime = gridActivity?.time;
-            if (!gridPerson && !gridActivity && !gridPlace) return null;
+            const distinctTimes = [...new Set(storeActivities.map((a) => a.time).filter(Boolean))];
+            const gridTime = distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;
+            const gridActivity = storeActivities.length > 0 ? storeActivities[activityIndex % storeActivities.length] : undefined;
+            const gridPlace = sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
+            if (!gridPerson && !gridActivity && !gridPlace && !gridTime) return null;
             const composed = [gridPerson ? `和${gridPerson.name}` : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
             const tiles = [
-              gridPerson ? { key: `person:${gridPerson.id}`, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: "一起的人 · 轻点换人", onPress: () => setPersonIndex((i) => i + 1) } : undefined,
-              gridTime ? { key: `time:${gridTime}`, imageUri: gridPlace?.imageUrl, glyph: "◷", label: gridTime, sub: gridPlace ? gridPlace.name : "时间", onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
-              gridActivity ? { key: `act:${gridActivity.activityId}`, imageUri: gridPlace?.imageUrl, glyph: "☕", label: gridActivity.title, sub: gridActivity.venueName, onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
-              gridPlace ? { key: `place:${gridPlace.id}`, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.name, sub: "地点", onPress: () => onOpenSceneMap?.(gridPlace.id) } : undefined,
+              gridPerson ? { key: `person:${gridPerson.id}`, slot: "person" as const, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: "一起的人 · 点更换" } : undefined,
+              gridTime ? { key: `time:${gridTime}`, slot: "time" as const, imageUri: gridPlace?.imageUrl, glyph: "◷", label: gridTime, sub: gridPlace ? gridPlace.name : "时间" } : undefined,
+              gridActivity ? { key: `act:${gridActivity.activityId}`, slot: "activity" as const, imageUri: gridPlace?.imageUrl, glyph: "☕", label: gridActivity.title, sub: gridActivity.venueName } : undefined,
+              gridPlace ? { key: `place:${gridPlace.id}`, slot: "place" as const, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.name, sub: "地点" } : undefined,
             ];
             return (
               <View>
                 <View style={styles.grid4}>
                   {tiles.map((t) => t ? (
-                    <Pressable key={t.key} onPress={t.onPress} style={styles.gridTile}>
+                    <Pressable key={t.key} onPress={() => setChooser(t.slot)} style={styles.gridTile}>
                       {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
                       <View style={styles.gridOverlay}>
                         <Text style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
@@ -434,9 +465,75 @@ export function RequesterHome({
                   ) : null)}
                 </View>
                 {composed ? (
-                  <Pressable onPress={() => onChat(composed)} style={styles.gridCta} accessibilityLabel="发出邀约">
-                    <Text style={styles.gridCtaText}>✦ 出图 / 发出 →</Text>
-                  </Pressable>
+                  <View style={styles.gridCtaRow}>
+                    <Pressable onPress={() => setMomentOpen(true)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="出图">
+                      <Text style={styles.gridCtaText}>✦ 出图</Text>
+                    </Pressable>
+                    <Pressable disabled={inviteBusy} onPress={() => void inviteSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="邀请">
+                      <Text style={styles.gridCtaText}>{inviteBusy ? "报名中…" : "邀请 →"}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+                {inviteMsg ? <Text style={styles.inviteMsg}>{inviteMsg}</Text> : null}
+                {chooser ? (
+                  <Modal transparent animationType="fade" visible onRequestClose={() => setChooser(null)}>
+                    <Pressable onPress={() => setChooser(null)} style={styles.sheetBackdrop}>
+                      <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+                        <View style={styles.sheetGrab} />
+                        <Text style={styles.sheetTitle}>{chooser === "person" ? "选一起的人" : chooser === "time" ? "选时间" : chooser === "activity" ? "选活动" : "选地点"}</Text>
+                        <ScrollView style={styles.chooserList}>
+                          {chooser === "person" ? filteredPeople.map((p, i) => (
+                            <Pressable key={p.id} onPress={() => { setPersonIndex(i); setChooser(null); }} style={styles.chooserItem}>
+                              <Text style={styles.chooserItemText}>{p.name}</Text>
+                            </Pressable>
+                          )) : null}
+                          {chooser === "time" ? distinctTimes.map((t, i) => (
+                            <Pressable key={t} onPress={() => { setTimeIndex(i); setChooser(null); }} style={styles.chooserItem}>
+                              <Text style={styles.chooserItemText}>{t}</Text>
+                            </Pressable>
+                          )) : null}
+                          {chooser === "activity" ? storeActivities.map((a, i) => (
+                            <Pressable key={a.activityId} onPress={() => { setActivityIndex(i); setChooser(null); }} style={styles.chooserItem}>
+                              <Text style={styles.chooserItemText}>{a.title}</Text>
+                              <Text style={styles.chooserItemSub}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
+                            </Pressable>
+                          )) : null}
+                          {chooser === "place" ? sceneBriefs.map((s, i) => (
+                            <Pressable key={s.id} onPress={() => { setPlaceIndex(i); setChooser(null); }} style={styles.chooserItem}>
+                              <Text style={styles.chooserItemText}>{s.name}</Text>
+                              <Text style={styles.chooserItemSub}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
+                            </Pressable>
+                          )) : null}
+                        </ScrollView>
+                      </View>
+                    </Pressable>
+                  </Modal>
+                ) : null}
+                {momentOpen ? (
+                  <Modal transparent animationType="fade" visible onRequestClose={() => setMomentOpen(false)}>
+                    <Pressable onPress={() => setMomentOpen(false)} style={styles.sheetBackdrop}>
+                      <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+                        <View style={styles.sheetGrab} />
+                        <Text style={styles.sheetTitle}>邀约 Moment</Text>
+                        <View style={styles.momentGrid}>
+                          {tiles.map((t) => t ? (
+                            <View key={`m:${t.key}`} style={styles.momentCell}>
+                              {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.momentImage} /> : <View style={styles.momentImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
+                              <Text style={styles.momentLabel} numberOfLines={1}>{t.label}</Text>
+                            </View>
+                          ) : null)}
+                        </View>
+                        <Text style={styles.momentCopy} numberOfLines={2}>{composed}</Text>
+                        <Pressable
+                          onPress={() => { setMomentOpen(false); void Share.share({ message: composed }); }}
+                          style={[styles.gridCta, { marginTop: 10 }]}
+                          accessibilityLabel="分享邀约"
+                        >
+                          <Text style={styles.gridCtaText}>分享邀请 →</Text>
+                        </Pressable>
+                      </View>
+                    </Pressable>
+                  </Modal>
                 ) : null}
               </View>
             );
@@ -634,7 +731,20 @@ const styles = StyleSheet.create({
   gridSub: { color: "rgba(255,255,255,0.85)", fontSize: 11, textShadowColor: "rgba(0,0,0,0.45)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 5 },
   gridSubDark: { color: color.muted, textShadowColor: "transparent" },
   gridCta: { alignItems: "center", backgroundColor: "#171715", borderRadius: 26, flexDirection: "row", justifyContent: "center", marginTop: 10, paddingVertical: 14 },
+  gridCtaHalf: { flex: 1 },
+  gridCtaRow: { flexDirection: "row", gap: 8 },
   gridCtaText: { color: color.white, fontSize: 15, fontWeight: "800" },
+  inviteMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
+  chooserList: { maxHeight: 320 },
+  chooserItem: { borderBottomColor: color.line, borderBottomWidth: 1, paddingVertical: 11 },
+  chooserItemText: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  chooserItemSub: { color: color.muted, fontSize: 11, marginTop: 2 },
+  momentGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  momentCell: { gap: 3, width: "48%" },
+  momentImage: { borderRadius: 12, height: 120, width: "100%" },
+  momentImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 12, height: 120, justifyContent: "center", width: "100%" },
+  momentLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
+  momentCopy: { color: color.ink, fontSize: 14, fontWeight: "700", lineHeight: 20, marginTop: 10, textAlign: "center" },
   sceneRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
   sceneCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 3, padding: 11, width: 208 },
   sceneCardName: { color: color.ink, fontSize: 14, fontWeight: "900" },
