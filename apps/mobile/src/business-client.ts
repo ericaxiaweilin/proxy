@@ -34,6 +34,8 @@ export interface StoreProduct {
   description: string;
   priceMinor: number;
   currency: string;
+  category: string;
+  scene: string;
   photoAssetPath: string;
   mediaAssetId: string;
   available: boolean;
@@ -145,6 +147,8 @@ export class BusinessClient {
     name: string;
     priceMinor: number;
     description?: string;
+    category?: string;
+    scene?: string;
     photoAssetPath?: string;
     mediaAssetId?: string;
     sortOrder?: number;
@@ -154,6 +158,8 @@ export class BusinessClient {
       name: input.name,
       priceMinor: input.priceMinor,
       description: input.description ?? "",
+      category: input.category ?? "",
+      scene: input.scene ?? "",
       photoAssetPath: input.photoAssetPath ?? "",
       mediaAssetId: input.mediaAssetId ?? "",
       sortOrder: input.sortOrder ?? 0,
@@ -169,6 +175,8 @@ export class BusinessClient {
     name: string;
     priceMinor: number;
     description?: string;
+    category?: string;
+    scene?: string;
     photoAssetPath?: string;
     mediaAssetId?: string;
     sortOrder?: number;
@@ -179,6 +187,8 @@ export class BusinessClient {
       name: input.name,
       priceMinor: input.priceMinor,
       description: input.description ?? "",
+      category: input.category ?? "",
+      scene: input.scene ?? "",
       photoAssetPath: input.photoAssetPath ?? "",
       mediaAssetId: input.mediaAssetId ?? "",
       sortOrder: input.sortOrder ?? 0,

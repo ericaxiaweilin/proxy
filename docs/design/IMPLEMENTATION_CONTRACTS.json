@@ -44,7 +44,7 @@
         "apps/mobile/src/business-client.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "R18.x hardcoded merchant mocks 已替换为真实客户端。R36.x: 无店铺空态 (Revision 49); 菜单真 CRUD (Revision 50); 公开资产与媒体管线 (Revision 51); R20.1 店铺资产一级菜单及 Enterprise Ops 建店入口 (Revision 52)."
+      "knownGap": "R18.x hardcoded merchant mocks 已替换为真实客户端。R36.x: 无店铺空态 (Revision 49); 菜单真 CRUD (Revision 50); 公开资产与媒体管线 (Revision 51); R20.1 店铺资产一级菜单及 Enterprise Ops 建店入口 (Revision 52). R25 MENU-002: 菜单页 hero+值得看SKU+分类目录+SKU详情, 商品分类/场景字段 (075) (Revision 54)."
     },
     {
       "scope": "social-contact-collaboration",
@@ -175,7 +175,7 @@
         "apps/mobile/src/business-client.test.ts"
       ],
       "status": "IMPLEMENTED",
-      "knownGap": "R18.x 4 commits 完成. store_photo / store_lines / member_directory / spend_daily backend (PG+memory) + BusinessClient + photo picker + MerchantStorefrontSurface + MerchantMeR21Replacement + BusinessHome real wire. Hardcoded mocks 全部删除/替换. R36.x MENU-001: 店铺商品 CRUD (Revision 50). R36.x Revision 51: 后期公开店铺资产 IA、真实照片缩略图和优惠券入口已恢复；公开主页预览路由与 Creator 权益编辑仍待专用服务端能力。 R36.x PHOTO-001: 相册/菜单照片经媒体管线远端展示 (074 media_asset_id + PUBLIC 授权) (Revision 51)."
+      "knownGap": "R18.x 4 commits 完成. store_photo / store_lines / member_directory / spend_daily backend (PG+memory) + BusinessClient + photo picker + MerchantStorefrontSurface + MerchantMeR21Replacement + BusinessHome real wire. Hardcoded mocks 全部删除/替换. R36.x MENU-001: 店铺商品 CRUD (Revision 50). R36.x Revision 51: 后期公开店铺资产 IA、真实照片缩略图和优惠券入口已恢复；公开主页预览路由与 Creator 权益编辑仍待专用服务端能力。 R36.x PHOTO-001: 相册/菜单照片经媒体管线远端展示 (074 media_asset_id + PUBLIC 授权) (Revision 51). R25 MENU-002: 菜单页 hero+值得看SKU+分类目录+SKU详情, 商品分类/场景字段 (075) (Revision 54)."
     }
   ]
 }

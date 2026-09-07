@@ -46,6 +46,7 @@ func TestStoreProductPostgresRoundTrip(t *testing.T) {
 
 	made := svc.HandleContext(ctx, bizEnvelope("CreateStoreProduct", map[string]any{
 		"storeId": storeID, "name": "Pho Bo", "priceMinor": 65000,
+		"category": "Cà phê Việt", "scene": "日常咖啡 · 复购",
 	}, owner))
 	if made.Outcome != "ACCEPTED" {
 		t.Fatalf("CreateStoreProduct: %+v", made.Error)
@@ -80,5 +81,8 @@ func TestStoreProductPostgresRoundTrip(t *testing.T) {
 	got, err := repo.GetProduct(ctx, productID)
 	if err != nil || got.Available || got.PriceMinor != 65000 || got.Name != "Pho Bo" {
 		t.Fatalf("persisted product mismatch: %+v err=%v", got, err)
+	}
+	if got.Category != "Cà phê Việt" || got.Scene != "日常咖啡 · 复购" {
+		t.Fatalf("category/scene did not persist: %+v", got)
 	}
 }

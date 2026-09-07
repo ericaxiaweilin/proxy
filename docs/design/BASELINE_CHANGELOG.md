@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 54 — 2026-09-07
+
+- 店铺菜单对齐 R25（MENU-002）：商品加分类/场景字段（075），菜单页改
+  hero 卡片 + 值得先看 SKU 横滑 + 按分类结构化目录（可展开）+ SKU 详情
+ （大图/价格/场景 pills/编辑上下架），价格红色突出。
+
 ## Revision 53 — 2026-09-07
 
 - 恢复 R34.5 真人推荐的圆形照片资产；保留“真人推荐在上、AI 推荐在下”及

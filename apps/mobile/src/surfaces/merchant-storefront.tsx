@@ -77,7 +77,12 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [editingProductName, setEditingProductName] = useState("");
   const [editingProductPrice, setEditingProductPrice] = useState("");
   const [editingProductDesc, setEditingProductDesc] = useState("");
+  const [editingProductCategory, setEditingProductCategory] = useState("");
+  const [editingProductScene, setEditingProductScene] = useState("");
   const [editingProductPhoto, setEditingProductPhoto] = useState("");
+  // R25 对齐：SKU 详情当前选中 + 完整目录展开态（按店各自独立）。
+  const [selectedProductByStore, setSelectedProductByStore] = useState<Record<string, string | undefined>>({});
+  const [catalogOpenByStore, setCatalogOpenByStore] = useState<Record<string, boolean>>({});
   const [savingProduct, setSavingProduct] = useState(false);
   const [productError, setProductError] = useState<string | undefined>(undefined);
   // 建店：账号+首店一次建完（之前两处空态互相指“去别处建”，实际无入口）。
@@ -297,6 +302,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     setEditingProductName(current?.name ?? "");
     setEditingProductPrice(current ? String(current.priceMinor) : "");
     setEditingProductDesc(current?.description ?? "");
+    setEditingProductCategory(current?.category ?? "");
+    setEditingProductScene(current?.scene ?? "");
     setEditingProductPhoto(current?.mediaAssetId ?? "");
   }
 
@@ -351,13 +358,15 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
       if (editingProductId === "new" || !editingProductId) {
         const made = await client.createProduct({
           storeId, name, priceMinor: price,
-          description: editingProductDesc, mediaAssetId: editingProductPhoto,
+          description: editingProductDesc, category: editingProductCategory, scene: editingProductScene,
+          mediaAssetId: editingProductPhoto,
         });
         setProducts((prev) => ({ ...prev, [storeId]: [...(prev[storeId] ?? []), made.product] }));
       } else {
         const saved = await client.updateProduct({
           productId: editingProductId, storeId, name, priceMinor: price,
-          description: editingProductDesc, mediaAssetId: editingProductPhoto,
+          description: editingProductDesc, category: editingProductCategory, scene: editingProductScene,
+          mediaAssetId: editingProductPhoto,
         });
         setProducts((prev) => ({
           ...prev,
@@ -445,7 +454,82 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                   </View>
                   <Text style={styles.empty}>{sProducts.length ? "顾客在公开主页看到的菜单与服务" : "还没有菜单或服务"}</Text>
                   <Pressable onPress={() => startEditProduct(s.id, undefined)} style={styles.uploadButton}><Text style={styles.uploadButtonText}>+ 添加菜单 / 服务</Text></Pressable>
-                  {sProducts.map((p) => <View key={p.id} style={styles.photoRow}>{thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.productThumb} /> : <View style={styles.productThumb}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>}<View style={styles.photoRowMain}><Text style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text><Text style={styles.photoMeta}>{formatVnd(p.priceMinor)}{p.description ? ` · ${p.description}` : ""}</Text></View><Pressable onPress={() => startEditProduct(s.id, p)} style={styles.rowAction}><Text style={styles.rowActionText}>编辑</Text></Pressable></View>)}
+                  {sAvailable.length > 0 ? <>
+                    <Text style={styles.catalogTitle}>值得先看的 SKU</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.worthRow}>
+                      {sAvailable.slice(0, 6).map((p) => (
+                        <Pressable key={p.id} onPress={() => setSelectedProductByStore((prev) => ({ ...prev, [s.id]: p.id }))} style={styles.worthCard}>
+                          {thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.worthImage} /> : <View style={styles.worthImageMissing}><ProxyIcon color={color.muted} name="storefront" size={24} /></View>}
+                          <Text style={styles.worthName} numberOfLines={1}>{p.name}</Text>
+                          <Text style={styles.priceRed}>{formatVnd(p.priceMinor)}</Text>
+                          {p.scene ? <Text style={styles.scenePill} numberOfLines={1}>{p.scene}</Text> : null}
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </> : null}
+                  {(() => {
+                    const groups = new Map<string, typeof sProducts>();
+                    for (const p of sProducts) {
+                      const key = p.category || "未分类";
+                      const list = groups.get(key) ?? [];
+                      list.push(p);
+                      groups.set(key, list);
+                    }
+                    const open = catalogOpenByStore[s.id] ?? false;
+                    return (<>
+                      <Pressable onPress={() => setCatalogOpenByStore((prev) => ({ ...prev, [s.id]: !open }))} style={styles.catalogHead}>
+                        <Text style={styles.catalogTitle}>完整结构化菜单</Text>
+                        <Text style={styles.rowActionText}>{open ? "收起" : "展开"}</Text>
+                      </Pressable>
+                      {open ? [...groups.entries()].map(([cat, list]) => (
+                        <View key={cat}>
+                          <Text style={styles.catalogCat}>{cat}</Text>
+                          {list.map((p) => (
+                            <Pressable key={p.id} onPress={() => setSelectedProductByStore((prev) => ({ ...prev, [s.id]: p.id }))} style={styles.menuLine}>
+                              <View style={styles.photoRowMain}>
+                                <Text style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text>
+                                {p.scene ? <Text style={styles.photoMeta}>{p.scene}</Text> : null}
+                              </View>
+                              <Text style={styles.priceRed}>{formatVnd(p.priceMinor)}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      )) : sProducts.map((p) => <View key={p.id} style={styles.photoRow}>{thumbUrlFor(p.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(p.mediaAssetId) }} style={styles.productThumb} /> : <View style={styles.productThumb}><ProxyIcon color={color.ink} name="storefront" size={20} /></View>}<View style={styles.photoRowMain}><Text style={styles.productName}>{p.name}{p.available ? "" : " · 已下架"}</Text><Text style={styles.photoMeta}>{formatVnd(p.priceMinor)}{p.description ? ` · ${p.description}` : ""}</Text></View><Pressable onPress={() => startEditProduct(s.id, p)} style={styles.rowAction}><Text style={styles.rowActionText}>编辑</Text></Pressable></View>)}
+                    </>);
+                  })()}
+                  {(() => {
+                    const selected = sProducts.find((p) => p.id === selectedProductByStore[s.id]);
+                    if (!selected) return null;
+                    return (
+                      <View style={styles.managerPanel}>
+                        <View style={styles.photoHead}>
+                          <Text style={styles.photoHeadTitle}>SKU 详情</Text>
+                          <Pressable onPress={() => setSelectedProductByStore((prev) => ({ ...prev, [s.id]: undefined }))}><Text style={styles.rowActionText}>关闭</Text></Pressable>
+                        </View>
+                        {thumbUrlFor(selected.mediaAssetId) ? <Image source={{ uri: thumbUrlFor(selected.mediaAssetId) }} style={styles.skuHero} /> : null}
+                        <View style={styles.photoHead}>
+                          <View style={styles.photoRowMain}>
+                            <Text style={styles.productName}>{selected.name}</Text>
+                            {selected.description ? <Text style={styles.photoMeta}>{selected.description}</Text> : null}
+                          </View>
+                          <Text style={styles.skuPrice}>{formatVnd(selected.priceMinor)}</Text>
+                        </View>
+                        <View style={styles.pillRow}>
+                          {selected.scene ? <Text style={styles.scenePill}>{selected.scene}</Text> : null}
+                          {selected.category ? <Text style={styles.metaPill}>{selected.category}</Text> : null}
+                          <Text style={styles.metaPill}>{selected.available ? "在售" : "已下架"}</Text>
+                        </View>
+                        <View style={styles.linesEditActions}>
+                          <Pressable onPress={() => startEditProduct(s.id, selected)} style={[styles.createBtn, styles.linesEditCancel]}>
+                            <Text style={styles.createBtnText}>编辑</Text>
+                          </Pressable>
+                          <Pressable onPress={() => void toggleProduct(s.id, selected)} style={styles.createBtn}>
+                            <Text style={styles.createBtnText}>{selected.available ? "下架" : "上架"}</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    );
+                  })()}
 
                   {/* Product editor remains contextual, never the default storefront. */}
                   {editingProductFor === s.id && editingProductId !== undefined ? (
@@ -453,6 +537,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       <Text style={styles.linesEditLabel}>名称</Text><TextInput value={editingProductName} onChangeText={setEditingProductName} placeholder="菜品或服务名称" placeholderTextColor={color.muted} style={styles.createInput} />
                       <Text style={styles.linesEditLabel}>价格</Text><TextInput value={editingProductPrice} onChangeText={setEditingProductPrice} placeholder="价格" placeholderTextColor={color.muted} keyboardType="number-pad" style={styles.createInput} />
                       <Text style={styles.linesEditLabel}>介绍</Text><TextInput value={editingProductDesc} onChangeText={setEditingProductDesc} placeholder="一句话介绍" placeholderTextColor={color.muted} style={styles.createInput} />
+                      <Text style={styles.linesEditLabel}>分类</Text><TextInput value={editingProductCategory} onChangeText={setEditingProductCategory} placeholder="例如 Trà sữa đậm vị" placeholderTextColor={color.muted} style={styles.createInput} />
+                      <Text style={styles.linesEditLabel}>适合场景</Text><TextInput value={editingProductScene} onChangeText={setEditingProductScene} placeholder="例如 阳光桌面 · 出片" placeholderTextColor={color.muted} style={styles.createInput} />
                       <Text style={styles.linesEditLabel}>菜品照片</Text>
                       {editingProductPhoto && thumbUrlFor(editingProductPhoto) ? <Image source={{ uri: thumbUrlFor(editingProductPhoto) }} style={styles.productThumb} /> : null}
                       <Pressable onPress={() => void pickProductPhoto()} disabled={savingProduct} style={[styles.uploadButton, savingProduct ? styles.uploadButtonBusy : null]}>
@@ -663,6 +749,22 @@ const styles = StyleSheet.create({
   photoPlaceholder: { alignItems: "center", backgroundColor: color.line, borderRadius: 9, height: 54, justifyContent: "center", width: 54 },
   productThumb: { alignItems: "center", backgroundColor: color.lime, borderRadius: 9, height: 44, justifyContent: "center", width: 44 },
   productName: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  // R25 对齐：值得先看 SKU 横滑卡 + 结构化目录 + SKU 详情。
+  worthRow: { gap: 10, paddingRight: 12, paddingVertical: 4 },
+  worthCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 4, padding: 8, width: 148 },
+  worthImage: { borderRadius: 10, height: 112, width: "100%" },
+  worthImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 10, height: 112, justifyContent: "center", width: "100%" },
+  worthName: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  priceRed: { color: "#a9231f", fontSize: 13, fontWeight: "900" },
+  scenePill: { alignSelf: "flex-start", backgroundColor: "#FFF0F6", borderRadius: 999, color: "#7A0033", fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 3 },
+  metaPill: { alignSelf: "flex-start", backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 999, borderWidth: 1, color: color.muted, fontSize: 11, fontWeight: "700", overflow: "hidden", paddingHorizontal: 7, paddingVertical: 3 },
+  catalogHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingVertical: 8 },
+  catalogTitle: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 8 },
+  catalogCat: { color: color.muted, fontSize: 11, fontWeight: "800", letterSpacing: 1, marginTop: 8 },
+  menuLine: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingVertical: 9 },
+  skuHero: { borderRadius: 12, height: 200, marginTop: 4, width: "100%" },
+  skuPrice: { color: "#a9231f", fontSize: 16, fontWeight: "900" },
+  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 },
   rowAction: { paddingHorizontal: 5, paddingVertical: 7 },
   rowActionText: { color: color.violet, fontSize: 11, fontWeight: "800" },
   photoRowMain: { flex: 1, gap: 2 },

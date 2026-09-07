@@ -334,18 +334,18 @@ func (r *BusinessRepository) SpendSummary(ctx context.Context, businessID string
 
 func (r *BusinessRepository) CreateProduct(ctx context.Context, p business.StoreProduct) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO business.store_products (id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		p.ID, p.StoreID, p.BusinessID, p.Name, p.Description, p.PriceMinor, p.Currency, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.CreatedAt, p.UpdatedAt)
+		INSERT INTO business.store_products (id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		p.ID, p.StoreID, p.BusinessID, p.Name, p.Description, p.PriceMinor, p.Currency, p.Category, p.Scene, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.CreatedAt, p.UpdatedAt)
 	return err
 }
 
 func (r *BusinessRepository) GetProduct(ctx context.Context, productID string) (business.StoreProduct, error) {
 	var p business.StoreProduct
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at
+		SELECT id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at
 		FROM business.store_products WHERE id=$1`, productID).Scan(
-		&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
+		&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.Category, &p.Scene, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return business.StoreProduct{}, errors.New("product not found")
@@ -356,16 +356,16 @@ func (r *BusinessRepository) GetProduct(ctx context.Context, productID string) (
 func (r *BusinessRepository) UpdateProduct(ctx context.Context, p business.StoreProduct) error {
 	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
 		UPDATE business.store_products SET
-			name=$2, description=$3, price_minor=$4, currency=$5, photo_asset_path=$6,
-			media_asset_id=$7, available=$8, sort_order=$9, updated_at=$10
+			name=$2, description=$3, price_minor=$4, currency=$5, category=$6, scene=$7, photo_asset_path=$8,
+			media_asset_id=$9, available=$10, sort_order=$11, updated_at=$12
 		WHERE id=$1`,
-		p.ID, p.Name, p.Description, p.PriceMinor, p.Currency, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.UpdatedAt)
+		p.ID, p.Name, p.Description, p.PriceMinor, p.Currency, p.Category, p.Scene, p.PhotoAssetPath, p.MediaAssetID, p.Available, p.SortOrder, p.UpdatedAt)
 	return err
 }
 
 func (r *BusinessRepository) ListProducts(ctx context.Context, storeID string) ([]business.StoreProduct, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, store_id, business_id, name, description, price_minor, currency, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at
+		SELECT id, store_id, business_id, name, description, price_minor, currency, category, scene, photo_asset_path, media_asset_id, available, sort_order, created_at, updated_at
 		FROM business.store_products WHERE store_id=$1 ORDER BY sort_order, created_at`, storeID)
 	if err != nil {
 		return nil, err
@@ -375,7 +375,7 @@ func (r *BusinessRepository) ListProducts(ctx context.Context, storeID string) (
 	for rows.Next() {
 		var p business.StoreProduct
 		if err := rows.Scan(
-			&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
+			&p.ID, &p.StoreID, &p.BusinessID, &p.Name, &p.Description, &p.PriceMinor, &p.Currency, &p.Category, &p.Scene, &p.PhotoAssetPath, &p.MediaAssetID, &p.Available, &p.SortOrder, &p.CreatedAt, &p.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

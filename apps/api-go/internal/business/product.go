@@ -24,6 +24,8 @@ type StoreProduct struct {
 	Description    string    `json:"description"`
 	PriceMinor     int64     `json:"priceMinor"`
 	Currency       string    `json:"currency"`
+	Category       string    `json:"category"`
+	Scene          string    `json:"scene"`
 	PhotoAssetPath string    `json:"photoAssetPath"`
 	MediaAssetID   string    `json:"mediaAssetId"`
 	Available      bool      `json:"available"`
@@ -67,6 +69,8 @@ func (s *Service) createProduct(ctx context.Context, e command.Envelope) command
 		Name           string `json:"name"`
 		Description    string `json:"description"`
 		PriceMinor     int64  `json:"priceMinor"`
+		Category       string `json:"category"`
+		Scene          string `json:"scene"`
 		PhotoAssetPath string `json:"photoAssetPath"`
 		MediaAssetID   string `json:"mediaAssetId"`
 		SortOrder      int    `json:"sortOrder"`
@@ -90,6 +94,8 @@ func (s *Service) createProduct(ctx context.Context, e command.Envelope) command
 		Description:    p.Description,
 		PriceMinor:     p.PriceMinor,
 		Currency:       "VND",
+		Category:       p.Category,
+		Scene:          p.Scene,
 		PhotoAssetPath: p.PhotoAssetPath,
 		MediaAssetID:   p.MediaAssetID,
 		Available:      true,
@@ -116,6 +122,8 @@ func (s *Service) updateProduct(ctx context.Context, e command.Envelope) command
 		Name           string `json:"name"`
 		Description    string `json:"description"`
 		PriceMinor     int64  `json:"priceMinor"`
+		Category       string `json:"category"`
+		Scene          string `json:"scene"`
 		PhotoAssetPath string `json:"photoAssetPath"`
 		MediaAssetID   string `json:"mediaAssetId"`
 		SortOrder      int    `json:"sortOrder"`
@@ -143,6 +151,8 @@ func (s *Service) updateProduct(ctx context.Context, e command.Envelope) command
 		Description:    p.Description,
 		PriceMinor:     p.PriceMinor,
 		Currency:       "VND",
+		Category:       p.Category,
+		Scene:          p.Scene,
 		PhotoAssetPath: p.PhotoAssetPath,
 		MediaAssetID:   p.MediaAssetID,
 		Available:      existing.Available,
