@@ -13,7 +13,13 @@ package postgres
 //   - Use unique row IDs (e.g. include time.Now().UnixNano()) to avoid
 //     cross-test bleed; clean up what you create.
 //   - DATABASE_URL takes precedence, so the same tests run against a
-//     populated local DB during exploratory work.
+//     populated local DB during exploratory work — and that means rows
+//     you leave behind are visible to a RUNNING dev API. Every test
+//     MUST t.Cleanup its own rows (exact id / owner deletes, never
+//     broad prefixes that could hit another test's or prod-like data).
+//     2026-09-03 lesson: leftover facet fct_* rows made the live API
+//     serve recommendedKind:"" and the mobile FACET page failed its
+//     Zod contract for the whole list.
 
 import (
 	"context"

@@ -250,27 +250,30 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 			objects[i].SideSpaceKind = decision.SideSpaceKind
 			objects[i].SideSpaceFulfilled = decision.SideSpaceFulfilled
 		} else {
-			// fallback: DB 无 signals（PG 持久化未存 signals）时用 Phase1 hardcode，保证真链路不断
-			switch obj.ID {
-			case "ken":
-				objects[i].Goal = "加强熟悉感与信任，分享生活的真实侧面，创造更多自然互动。"
-				objects[i].CurrentState = "目标：建立更深信任 · 已展示 16 条 · 本周新增 3 个素材"
-				objects[i].Gap = Gap{Summary: "真人互动 / 新鲜旅行", NextShowAt: "今晚 20:00"}
-				objects[i].RecommendedKind = "personal/real-life"
-				objects[i].ReasoningConfidence = 70
-			case "linh":
-				objects[i].Goal = "围绕共同兴趣持续连接，优先展示城市、摄影、旅行和轻松日常。"
-				objects[i].CurrentState = "共同兴趣新增：城市 / 摄影 · 今天可自然更新"
-				objects[i].Gap = Gap{Summary: "新的城市经历 / 摄影内容", NextShowAt: "明天 18:30"}
-				objects[i].RecommendedKind = "city/travel"
-				objects[i].ReasoningConfidence = 70
-			case "spa":
-				objects[i].Goal = "展示真实体验、内容能力和可靠性，为 Creator 合作持续建立信任。"
-				objects[i].CurrentState = "本周环境内容过多，下一次应突出真人体验与拍摄能力"
-				objects[i].Gap = Gap{Summary: "真人体验 / 服务过程近景", NextShowAt: "周四 12:00"}
-				objects[i].RecommendedKind = "portfolio/capability"
-				objects[i].ReasoningConfidence = 70
-			}
+			// fallback: DB 无 signals（PG 持久化未存 signals）时，不再按
+			// ID 硬编码 ken/linh/spa —— 那会让任何 seed 进 PG 的新对象
+			// （集成测试 / 真实用户建的对象）拿到零值 RecommendedKind("")
+			// 直接违反 contracts 枚举，mobile Zod fail-closed 整页报错
+			// （2026-09-03 实证：fct_* 测试残留行导致 FACET 报错）。
+			//
+			// 确定性兜底：零值 signals 交给 reasoner 按 relation 路由。
+			// RuleReasoner 三条 relation 路径的零信号分支都返回合法
+			// RecommendedKind（BUILDING_TRUST→personal/real-life、
+			// SHARED_INTEREST→photo、CREATOR_COLLAB 低意向→
+			// personal/real-life），未知 relation 也有 30 置信度通用
+			// 决策。种子对象（ken/linh/spa）带真 signals 不走此分支，
+			// Phase 1 的 hardcode 文案随 seed 消失，换来的是「任何 PG 行
+			// 都能产出合法 wire payload」的结构保证。
+			config, _ := s.configRepo.Get(ctx)
+			decision := s.reasoner.Reason(obj.Signals, obj.Relation, sideSpaceStats, config)
+			objects[i].Goal = decision.Goal
+			objects[i].CurrentState = decision.CurrentState
+			objects[i].Gap = Gap{Summary: decision.GapSummary, NextShowAt: decision.NextShowAt}
+			objects[i].RecommendedKind = decision.RecommendedKind
+			objects[i].ReasoningConfidence = decision.Confidence
+			objects[i].SideSpaceGap = decision.SideSpaceGap
+			objects[i].SideSpaceKind = decision.SideSpaceKind
+			objects[i].SideSpaceFulfilled = decision.SideSpaceFulfilled
 		}
 		reasoned[i] = objects[i]
 	}

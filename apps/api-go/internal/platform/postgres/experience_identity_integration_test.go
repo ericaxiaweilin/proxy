@@ -18,6 +18,16 @@ func TestExperienceIntentPostgresLifecycle(t *testing.T) {
 	ctx := context.Background()
 	run := time.Now().UnixNano()
 
+	// t.Cleanup: 共享 dev 库模式自清行。surface_plan FK 引用 intent，
+	// 先删子表再删 intent。
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		runID := itoa(run)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM experience.surface_plan WHERE experience_intent_id = $1`, "exp_intent_pg_"+runID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM experience.experience_intent WHERE intent_id = $1`, "exp_intent_pg_"+runID)
+	})
+
 	repo := NewExperienceRepository(pool)
 	intentID := "exp_intent_pg_" + itoa(run)
 	intent := runtime.ExperienceIntent{
@@ -123,6 +133,14 @@ func TestDisplayIdentityPostgresLifecycle(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO identity.user_accounts (id, status) VALUES ($1, 'ACTIVE')`, owner); err != nil {
 		t.Fatalf("seed user account: %v", err)
 	}
+	// t.Cleanup: 共享 dev 库模式自清行（display_identities + 造的
+	// user_accounts 种子行）。display_identities 无子表 FK。
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM identity.display_identities WHERE owner_id = $1`, owner)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM identity.user_accounts WHERE id = $1`, owner)
+	})
 	repo := NewDisplayIdentityRepository(pool)
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
