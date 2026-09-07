@@ -7,7 +7,7 @@
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { ProfileTabs } from "./ProfileTabs";
@@ -933,7 +933,7 @@ export function MeSurface({
                 <Text style={styles.socialEditorLabel}>账号</Text><TextInput onChangeText={(handle) => setSocialEditor((current) => current ? { ...current, handle } : current)} style={styles.socialEditorInput} value={socialEditor.handle} />
                 <Text style={styles.socialEditorLabel}>主页链接</Text><TextInput autoCapitalize="none" keyboardType="url" onChangeText={(url) => setSocialEditor((current) => current ? { ...current, url } : current)} style={styles.socialEditorInput} value={socialEditor.url} />
                 <Text style={styles.socialEditorLabel}>谁可以看到</Text><View style={styles.socialVisibilityRow}>{(["仅自己", "商家可见", "公开展示"] as const).map((visibility) => <Pressable key={visibility} onPress={() => setSocialEditor((current) => current ? { ...current, visibility } : current)} style={[styles.socialVisibilityButton, socialEditor.visibility === visibility ? styles.socialVisibilityButtonOn : null]}><Text style={[styles.socialVisibilityText, socialEditor.visibility === visibility ? styles.socialVisibilityTextOn : null]}>{visibility}</Text></Pressable>)}</View>
-                <Pressable disabled={!socialEditor.url} style={styles.socialOpenLink}><Text style={styles.socialOpenLinkText}>打开外部主页</Text><Text style={styles.socialOpenLinkText}>↗</Text></Pressable>
+                <Pressable disabled={!socialEditor.url} onPress={() => { const url = socialEditor.url.trim(); if (url) void Linking.openURL(/^https?:\/\//i.test(url) ? url : `https://${url}`).catch(() => undefined); }} style={styles.socialOpenLink}><Text style={styles.socialOpenLinkText}>打开外部主页</Text><Text style={styles.socialOpenLinkText}>↗</Text></Pressable>
                 <Pressable onPress={() => { setSocialAccounts((current) => current.map((account) => account.key === socialEditor.key ? socialEditor : account)); setSocialEditor(undefined); }} style={styles.socialSave}><Text style={styles.socialSaveText}>保存</Text></Pressable>
               </Pressable> : null}
             </Pressable>

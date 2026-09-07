@@ -6,6 +6,11 @@ same commit. Do not record routine business logic changes here.
 
 ## Revision 60 — 2026-09-07
 
+- 删掉设置页无响应模拟按钮与收件箱无入口加号；会话历史读取封顶
+  200 条（PERF-001，尾部保留 + truncated 标志）。
+
+## Revision 60 — 2026-09-07
+
 - 冻结 Home 小美头像导航：头像先打开服务端绑定的 Scene/活动，而不是直接
   进入个人主页或在 Home 展开预览；Scene 内再二次查看小美主页。
 - 五个 AI 账户增加权威场景、时段与活动标题绑定；Scene 明示 AI 仅提供聊天、

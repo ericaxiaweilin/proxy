@@ -270,6 +270,12 @@ echo "    AI-PERSONA-PHOTO-001: PASS (mobile wire schema round-trip)"
 pnpm --dir apps/mobile test -- --run src/conversation-client.test.ts
 echo "    CHAT-PROXY-ACTIVITY-001: PASS (real activityId round-trip)"
 
+# PERF-001: ListConversationMessages 必须封顶（200 条，尾部保留，
+# truncated 置位），防止无界历史压垮序列化与设备内存。
+require_test "PERF-001" "./internal/conversation" \
+  "TestListMessagesCapsHistoryAt200" \
+  "apps/api-go/internal/conversation/history_cap_test.go" || exit $?
+
 # CHAT-ORDER-MATERIALISATION-001: chat → order 派生. marketplace
 # ConfirmMarketApplication 必须派生真 Order (server-unique ord_
 # 前缀), 调用注入的 OrderCreator (production: fulfillment adapter)

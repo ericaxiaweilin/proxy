@@ -1154,9 +1154,20 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 		}
 		visible = append(visible, m)
 	}
+	// Perf guard: cap history payloads. Clients render full lists into
+	// memory (ScrollView), so an unbounded conversation would degrade
+	// both serialization and the device. The flag lets future clients
+	// offer "view earlier messages" instead of silently showing all.
+	const maxHistoryMessages = 200
+	truncated := false
+	if len(visible) > maxHistoryMessages {
+		visible = visible[len(visible)-maxHistoryMessages:]
+		truncated = true
+	}
 	return acceptedWithPayload(e, "Conversation", e.Target.ID, 1, conv.State, map[string]any{
-		"messages": visible,
-		"actorId":  e.Actor.ID,
+		"messages":  visible,
+		"actorId":   e.Actor.ID,
+		"truncated": truncated,
 	}, nil)
 }
 

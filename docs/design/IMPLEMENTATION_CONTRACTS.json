@@ -26,7 +26,7 @@
         "apps/mobile/src/surfaces/ProfileTabs.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "The implementation uses a newer five-tab information architecture while the active reference still specifies Dynamic/Photos/Records and composer ownership controls. R36.x MOCK-002: 设置页无响应模拟按钮已删 (Revision 56)."
+      "knownGap": "The implementation uses a newer five-tab information architecture while the active reference still specifies Dynamic/Photos/Records and composer ownership controls. R36.x MOCK-002: 设置页无响应模拟按钮已删 (Revision 56). R36.x MOCK-002: 设置页无响应模拟按钮已删；会话历史 200 条封顶 (Revision 60)."
     },
     {
       "scope": "merchant-me",

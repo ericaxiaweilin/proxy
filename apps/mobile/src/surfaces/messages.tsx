@@ -125,7 +125,7 @@ export function MessagesSurface({
           <View style={styles.topbar}>
             <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
             <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 / Username</Text></View>
-            <Pressable style={styles.icon}><ProxyIcon color={color.ink} name="plus" size={18} /></Pressable>
+            <View style={styles.icon} />
           </View>
           <View style={styles.contactHeadSearch}>
             <ProxyIcon color="#97938b" name="search" size={17} />
