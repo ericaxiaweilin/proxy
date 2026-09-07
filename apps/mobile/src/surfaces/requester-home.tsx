@@ -14,6 +14,7 @@ import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
+import { ActivityCommandRejectedError, ActivityProtocolError } from "../activity-client";
 import type { ExperienceClient } from "../experience-client";
 import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
 import type { EngagementClient } from "../engagement-client";
@@ -235,6 +236,36 @@ export function RequesterHome({
   // 注意：这是"我去参加活动"，不是"邀请小美来"。真邀请（createInvitation）
   // 要求被邀人是服务端实名用户，推荐流还是 fixture、没有真实 userId，
   // 接上之前按钮不挂邀请文案，免得链路名实不符。
+  // 报名失败说人话：以前所有失败都报"登录后重试"，登录着的用户被误导。
+  // 按错因分流——没登录/掉登录才提登录；报过名/满员/活动没了说具体事；
+  // 其他归网络或稍后重试。错误码口径见 activity/service.go joinActivity。
+  function joinErrorMessage(error: unknown): string {
+    if (error instanceof ActivityCommandRejectedError) {
+      switch (error.result.error?.errorCode) {
+        case "ACTIVITY_ALREADY_JOINED":
+          return "你已报过名，不用重复点";
+        case "ACTIVITY_FULL":
+          return "名额已满，下次早点来";
+        case "ACTIVITY_NOT_FOUND":
+          return "该活动不存在或已结束";
+        case "ACTIVITY_ACTOR_REQUIRED":
+        case "AI_ACTION_FORBIDDEN":
+          return "登录已过期，请重新登录";
+        default:
+          return "报名失败，请稍后重试";
+      }
+    }
+    if (error instanceof ActivityProtocolError) {
+      // 本地就没有可用登录（principal 缺失/离线 fallback/已登出）才提登录；
+      // 畸形响应走稍后重试。requireSession 把原错包了一层，只剩 message 可认。
+      if (/principal is required|offline fallback|signed out|re-authenticate|sign in/i.test(error.message)) {
+        return "登录后可报名";
+      }
+      return "报名失败，请稍后重试";
+    }
+    return "网络异常，请检查连接后重试";
+  }
+
   async function joinSelected(activityId: string | undefined): Promise<void> {
     setJoinMsg(undefined);
     if (!activityId) {
@@ -250,8 +281,8 @@ export function RequesterHome({
       const result = await activities.join(activityId);
       setStoreActivities((prev) => prev.map((a) => (a.activityId === activityId ? { ...a, joined: result.activity.joined } : a)));
       setJoinMsg(`已报名 · ${result.activity.joined} 人参加`);
-    } catch {
-      setJoinMsg("报名失败，登录后重试");
+    } catch (e) {
+      setJoinMsg(joinErrorMessage(e));
     } finally {
       setJoinBusy(false);
     }

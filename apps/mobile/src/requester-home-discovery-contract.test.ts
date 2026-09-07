@@ -73,6 +73,16 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain("inviteSelected");
   });
 
+  it("reports join failures by cause instead of blaming login", () => {
+    // 登录着点报名失败，曾一律报"登录后重试"。现在按服务端错误码说人话。
+    expect(source).toContain("joinErrorMessage");
+    expect(source).toContain("ACTIVITY_ALREADY_JOINED");
+    expect(source).toContain("你已报过名");
+    expect(source).toContain("ACTIVITY_FULL");
+    expect(source).toContain("ACTIVITY_NOT_FOUND");
+    expect(source).not.toContain("报名失败，登录后重试");
+  });
+
   it("keeps coordinates in the location data layer, not beside the address UI", () => {
     expect(locationPicker).toContain('label="地图选点"');
     expect(locationPicker).not.toMatch(/坐标 \$\{lat\.toFixed/);
