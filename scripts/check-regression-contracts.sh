@@ -165,6 +165,19 @@ if ! grep -q 'ON CONFLICT (id) DO NOTHING' apps/api-go/internal/platform/postgre
   exit 1
 fi
 
+# FACET-KIND-ENUM-001: facet List fallback 曾经按 ID 硬编码 ken/linh/spa，
+# 任何其他 PG 行（测试 seed 的 fct_* / 未来真实用户对象）recommendedKind
+# 留零值 "" 违反 contracts 7 值枚举 → mobile Zod fail-closed 整页报错。
+# fallback 现在把零值 signals 交 reasoner 按 relation 路由，任何行都产出
+# 合法枚举值。TestList_FallbackKindAlwaysInEnum 逐 relation 钉死，
+# TestList_FallbackOnMixedRows 钉混合行场景（真实事故现场）。
+require_test "FACET-KIND-ENUM-001" "./internal/facet" \
+  "TestList_FallbackKindAlwaysInEnum" \
+  "apps/api-go/internal/facet/fallback_test.go" || exit $?
+require_test "FACET-KIND-ENUM-001" "./internal/facet" \
+  "TestList_FallbackOnMixedRows" \
+  "apps/api-go/internal/facet/fallback_test.go" || exit $?
+
 # TEST-HYGIENE-001: 集成测试连共享库时必须清掉自己造的行。
 # 之前 mkt_op_pg_*/act_pg_*/fct_* 残留直接出现在真机市场/活动/FACET
 # 列表，把真实种子淹了。测试自带 t.Cleanup；这里 pin 住它们存在且过。
