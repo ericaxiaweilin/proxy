@@ -21,6 +21,9 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain('cachePolicy="memory-disk"');
     expect(source).toContain('"这个 Scene 喝什么"');
     expect(source).toContain("detail.fullMenu");
+    expect(source).toContain('"为什么"');
+    expect(source).toContain("Reality Evidence · Scene Memory");
+    expect(source).toContain("不生成到访、订单或履约证明");
   });
 
   it("carries the selected scene SKU into every real-world action", () => {
