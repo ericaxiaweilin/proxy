@@ -428,10 +428,13 @@ if ! grep -q '菜单 / 服务' apps/mobile/src/surfaces/merchant-storefront.tsx 
    ! grep -q '照片与视频' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '活动 / Offer' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q 'Creator 权益' apps/mobile/src/surfaces/merchant-storefront.tsx || \
-   ! grep -q '优惠券 / Voucher' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '营业资料' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '店铺二维码' apps/mobile/src/surfaces/merchant-storefront.tsx || \
-   ! grep -q 'creationOpen ?' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '店铺资产' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '菜单与价格' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '照片与内容' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q '当前礼券' apps/mobile/src/surfaces/merchant-storefront.tsx || \
+   ! grep -q 'onStartStoreSetup' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q '线上店铺只负责对外展示' apps/mobile/src/surfaces/merchant-storefront.tsx || \
    ! grep -q 'header={detailHead' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
   echo "  FAIL [MERCHANT-STOREFRONT-R21-001]: storefront lost the stable R21 operating shell" >&2
@@ -439,6 +442,10 @@ if ! grep -q '菜单 / 服务' apps/mobile/src/surfaces/merchant-storefront.tsx 
 fi
 if grep -q '营业时间 (JSON\|Logo 资产路径\|照片资产路径' apps/mobile/src/surfaces/merchant-storefront.tsx; then
   echo "FAIL: merchant storefront exposed developer-only storage fields"
+  exit 1
+fi
+if grep -q 'creationOpen ?' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "FAIL: storefront setup regressed to an inline manual creation form"
   exit 1
 fi
 echo "    MERCHANT-STOREFRONT-R21-001: PASS (R21 operating shell + real store data/actions)"

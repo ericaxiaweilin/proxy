@@ -46,7 +46,9 @@ function linesAsHoursObject(hoursJson: string): Record<string, string> {
   return {};
 }
 
-export function MerchantStorefrontSurface({ client, viewerAccountId, header, showcaseActivities, onOpenVouchers }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode; showcaseActivities?: Array<{ id: string; title: string }>; onOpenVouchers?: () => void }): React.JSX.Element {
+type StoreAssetPage = "root" | "menu" | "photos" | "details";
+
+export function MerchantStorefrontSurface({ client, viewerAccountId, header, showcaseActivities, onOpenVouchers, onStartStoreSetup }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode; showcaseActivities?: Array<{ id: string; title: string }>; onOpenVouchers?: () => void; onStartStoreSetup?: () => void }): React.JSX.Element {
   const [accounts, setAccounts] = useState<Account[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [stores, setStores] = useState<Record<string, Store[]>>({});
@@ -85,6 +87,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>(undefined);
   const [creationOpen, setCreationOpen] = useState(false);
+  const [assetPage, setAssetPage] = useState<{ storeId: string; page: StoreAssetPage } | undefined>(undefined);
 
   async function createShop(): Promise<void> {
     if (creating || !newShopName.trim() || !newStoreName.trim()) return;
@@ -392,9 +395,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
         <View style={styles.card}>
           <View style={styles.emptyIcon}><ProxyIcon color={color.ink} name="storefront" size={30} /></View>
           <Text style={styles.createTitle}>还没有线上店铺</Text>
-          <Text style={styles.empty}>创建后可维护菜单 / 服务、照片视频、活动 Offer 与公开营业资料。</Text>
-          <Pressable onPress={() => setCreationOpen((open) => !open)} style={styles.createBtn}><Text style={styles.createBtnText}>{creationOpen ? "收起" : "创建线上店铺"}</Text></Pressable>
-          {creationOpen ? <View style={styles.creationSheet}><TextInput value={newShopName} onChangeText={setNewShopName} placeholder="商家名称" placeholderTextColor={color.muted} style={styles.createInput} /><TextInput value={newStoreName} onChangeText={setNewStoreName} placeholder="首店店名" placeholderTextColor={color.muted} style={styles.createInput} /><TextInput value={newStoreAddr} onChangeText={setNewStoreAddr} placeholder="首店地址（可选）" placeholderTextColor={color.muted} style={styles.createInput} />{createError ? <Text style={styles.errorText}>{createError}</Text> : null}<Pressable disabled={creating} onPress={() => void createShop()} style={styles.createBtn}><Text style={styles.createBtnText}>{creating ? "创建中…" : "确认创建"}</Text></Pressable></View> : null}
+          <Text style={styles.empty}>你不需要手工搭页面。把店门、菜单、产品照片或已有文件交给企业运营助手，它会先生成店铺草稿，再由你确认发布。</Text>
+          <Pressable disabled={!onStartStoreSetup} onPress={onStartStoreSetup} style={styles.createBtn}><Text style={styles.createBtnText}>让企业运营助手帮我创建</Text></Pressable>
         </View>
       ) : null}
       {accounts?.map((a) => {
@@ -407,9 +409,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
             <View style={styles.accountHead}><Text style={styles.accountName}>管理别人看到你的店</Text><Text style={styles.accountMeta}>{a.name} · {aStores.length} 家门店</Text></View>
             {aStores.length === 0 ? (
               <View style={styles.card}>
-                <Text style={styles.createTitle}>尚未建立经营门店</Text><Text style={styles.empty}>建立门店后才能发布菜单、照片和活动 Offer。</Text>
-                <Pressable onPress={() => setCreationOpen((open) => !open)} style={styles.createBtn}><Text style={styles.createBtnText}>{creationOpen ? "收起" : "新增门店"}</Text></Pressable>
-                {creationOpen ? <View style={styles.creationSheet}><TextInput value={newStoreName} onChangeText={setNewStoreName} placeholder="店名" placeholderTextColor={color.muted} style={styles.createInput} /><TextInput value={newStoreAddr} onChangeText={setNewStoreAddr} placeholder="地址（可选）" placeholderTextColor={color.muted} style={styles.createInput} /><Pressable disabled={creating} onPress={() => void addStore(a.id)} style={styles.createBtn}><Text style={styles.createBtnText}>{creating ? "添加中…" : "确认新增"}</Text></Pressable></View> : null}
+                <Text style={styles.createTitle}>尚未建立经营门店</Text><Text style={styles.empty}>把门店照片、菜单或文件交给企业运营助手，先生成草稿再确认，不需要从空白表单开始。</Text>
+                <Pressable disabled={!onStartStoreSetup} onPress={onStartStoreSetup} style={styles.createBtn}><Text style={styles.createBtnText}>交给企业运营助手</Text></Pressable>
               </View>
             ) : null}
             {aStores.map((s) => {
@@ -417,6 +418,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
               const sLines = lines[s.id];
               const sProducts = products[s.id] ?? [];
               const sAvailable = sProducts.filter((p) => p.available);
+              const currentPage = assetPage?.storeId === s.id ? assetPage.page : "root";
               return (
                 <View key={s.id} style={styles.storeCard}>
                   <View style={styles.storeHero}>
@@ -428,6 +430,15 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
 
                   <View style={styles.metricStrip}>{[[(aSpend?.totalOrders ?? 0).toString(), "近7天订单"], [aSpend ? formatVnd(aSpend.totalGrossMinor) : "—", "成交额"], [newCustomers.toString(), "新客"], [returningCustomers.toString(), "复购"]].map(([value, label]) => <View key={label} style={styles.metricItem}><Text numberOfLines={1} style={styles.metricValue}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>)}</View>
 
+                  {currentPage === "root" ? <View style={styles.assetSection}>
+                    <Text style={styles.assetSectionTitle}>店铺资产</Text>
+                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "menu" })} style={styles.assetRow}><View style={styles.assetIcon}><Text style={styles.assetIconText}>菜</Text></View><View style={styles.photoRowMain}><Text style={styles.assetTitle}>菜单与价格</Text><Text style={styles.assetMeta}>{sProducts.length} 个项目 · 在售 {sAvailable.length}</Text></View><Text style={styles.assetChevron}>›</Text></Pressable>
+                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "photos" })} style={styles.assetRow}><View style={styles.assetIcon}><Text style={styles.assetIconText}>图</Text></View><View style={styles.photoRowMain}><Text style={styles.assetTitle}>照片与内容</Text><Text style={styles.assetMeta}>{sPhotos.length} 张店铺照片</Text></View><Text style={styles.assetChevron}>›</Text></Pressable>
+                    <Pressable disabled={!onOpenVouchers} onPress={onOpenVouchers} style={styles.assetRow}><View style={styles.assetIcon}><Text style={styles.assetIconText}>券</Text></View><View style={styles.photoRowMain}><Text style={styles.assetTitle}>当前礼券</Text><Text style={styles.assetMeta}>查看发行、领取与核销状态</Text></View><Text style={styles.assetChevron}>›</Text></Pressable>
+                    <Pressable onPress={() => setAssetPage({ storeId: s.id, page: "details" })} style={styles.assetRow}><View style={styles.assetIcon}><Text style={styles.assetIconText}>店</Text></View><View style={styles.photoRowMain}><Text style={styles.assetTitle}>店铺照片与经营资料</Text><Text style={styles.assetMeta}>门店环境、营业时间、地址与联系方式</Text></View><Text style={styles.assetChevron}>›</Text></Pressable>
+                  </View> : <Pressable onPress={() => setAssetPage(undefined)} style={styles.assetBack}><Text style={styles.assetBackText}>‹ 返回店铺资产</Text></Pressable>}
+
+                  {currentPage === "menu" ? <>
                   <View style={styles.managerPanel}><View style={styles.photoHead}>
                     <Text style={styles.photoHeadTitle}>菜单 / 服务</Text>
                     <Text style={styles.photoHeadMeta}>{sProducts.length} 项 · 在售 {sAvailable.length}</Text>
@@ -450,10 +461,10 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       {productError ? <Text style={styles.errorText}>{productError}</Text> : null}
                       <View style={styles.linesEditActions}><Pressable onPress={() => { setEditingProductFor(undefined); setEditingProductId(undefined); }} style={[styles.createBtn, styles.linesEditCancel]}><Text style={styles.createBtnText}>取消</Text></Pressable><Pressable disabled={savingProduct} onPress={() => void saveProduct(s.id)} style={styles.createBtn}><Text style={styles.createBtnText}>{savingProduct ? "保存中…" : "保存"}</Text></Pressable></View>
                     </View>
-                  ) : null}</View>
+                  ) : null}</View></> : null}
 
                   {/* Store details editor is contextual, never the default storefront. */}
-                  {editingLinesFor === s.id ? (
+                  {currentPage === "details" && editingLinesFor === s.id ? (
                     <View style={styles.linesEditForm}>
                       <Text style={styles.linesEditLabel}>店铺简介</Text>
                       <TextInput
@@ -515,7 +526,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         </Pressable>
                       </View>
                     </View>
-                  ) : (
+                  ) : currentPage === "details" ? (
                     <Pressable
                       onPress={() => startEditLines(s.id, sLines)}
                       style={styles.linesEditToggle}
@@ -524,8 +535,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         {sLines ? "编辑主页 / 联系方式 / 营业时间" : "填写主页 / 联系方式 / 营业时间"}
                       </Text>
                     </Pressable>
-                  )}
+                  ) : null}
 
+                  {currentPage === "photos" ?
                   <View style={styles.managerPanel}><View style={styles.photoHead}>
                     <Text style={styles.photoHeadTitle}>照片与视频</Text>
                     <Text style={styles.photoHeadMeta}>环境 · 菜品 · 活动 · {sPhotos.length} 张</Text>
@@ -557,9 +569,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         </Pressable>
                       ) : null}
                     </View>
-                  ))}</View>
+                  ))}</View> : null}
 
-                  <View style={styles.managerPanel}><View style={styles.photoHead}>
+                  {currentPage === "root" ? <><View style={styles.managerPanel}><View style={styles.photoHead}>
                     <Text style={styles.photoHeadTitle}>活动 / Offer</Text>
                     <Text style={styles.photoHeadMeta}>{showcaseActivities?.length ?? 0} 个关联活动</Text>
                   </View>
@@ -572,9 +584,8 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       </View>
                     </View>
                   ))}</View>
-                  <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>Creator 权益</Text><Text style={styles.photoHeadMeta}>联营与内容合作</Text></View><Text style={styles.empty}>设置 Creator 到店体验、内容合作与专属权益；权益会展示在公开店铺页。</Text></View>
-                  <Pressable disabled={!onOpenVouchers} onPress={onOpenVouchers} style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>优惠券 / Voucher</Text><Text style={styles.rowActionText}>进入券中心 ›</Text></View><Text style={styles.empty}>管理顾客和 Creator 可领取、可核销的店铺权益。</Text></Pressable>
-                  <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>营业资料</Text><Text style={styles.photoHeadMeta}>公开展示</Text></View>{sLines ? <View style={styles.linesBlock}><Text style={styles.linesDescription}>{sLines.description || "店铺简介待完善"}</Text><Text style={styles.linesContact}>{[sLines.contactPhone, sLines.contactEmail].filter(Boolean).join(" · ") || "联系方式待完善"}</Text><Text style={styles.linesHours}>{Object.entries(linesAsHoursObject(sLines.hoursJson)).map(([k, v]) => k === "营业时间" ? v : `${k} ${v}`).join(" · ") || "营业时间待完善"}</Text></View> : <Text style={styles.empty}>店铺简介、联系方式和营业时间待完善</Text>}</View>
+                  <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>Creator 权益</Text><Text style={styles.photoHeadMeta}>联营与内容合作</Text></View><Text style={styles.empty}>设置 Creator 到店体验、内容合作与专属权益；权益会展示在公开店铺页。</Text></View></> : null}
+                  {currentPage === "details" ? <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>营业资料</Text><Text style={styles.photoHeadMeta}>公开展示</Text></View>{sLines ? <View style={styles.linesBlock}><Text style={styles.linesDescription}>{sLines.description || "店铺简介待完善"}</Text><Text style={styles.linesContact}>{[sLines.contactPhone, sLines.contactEmail].filter(Boolean).join(" · ") || "联系方式待完善"}</Text><Text style={styles.linesHours}>{Object.entries(linesAsHoursObject(sLines.hoursJson)).map(([k, v]) => k === "营业时间" ? v : `${k} ${v}`).join(" · ") || "营业时间待完善"}</Text></View> : <Text style={styles.empty}>店铺简介、联系方式和营业时间待完善</Text>}</View> : null}
                   <View style={styles.scopeNote}><Text style={styles.scopeNoteText}>线上店铺只负责对外展示。订单、客户、退款和经营分析分别进入对应经营模块，不在这里重复做后台。</Text></View>
                 </View>
               );
@@ -619,6 +630,16 @@ const styles = StyleSheet.create({
   linesContact: { color: color.muted, fontSize: 11 },
   linesHours: { color: color.muted, fontSize: 11 },
   managerPanel: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 8, marginTop: 4, padding: 12 },
+  assetSection: { gap: 0, marginTop: 8 },
+  assetSectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", paddingHorizontal: 4, paddingVertical: 12 },
+  assetRow: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, paddingHorizontal: 4, paddingVertical: 12 },
+  assetIcon: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 22, height: 58, justifyContent: "center", width: 58 },
+  assetIconText: { color: color.ink, fontSize: 18, fontWeight: "900" },
+  assetTitle: { color: color.ink, fontSize: 16, fontWeight: "900" },
+  assetMeta: { color: color.muted, fontSize: 12, marginTop: 4 },
+  assetChevron: { color: color.ink, fontSize: 25, fontWeight: "700" },
+  assetBack: { alignSelf: "flex-start", paddingHorizontal: 2, paddingVertical: 10 },
+  assetBackText: { color: color.violet, fontSize: 13, fontWeight: "800" },
   metricStrip: { backgroundColor: color.offWhite, borderRadius: 16, flexDirection: "row", gap: 4, padding: 8 },
   metricItem: { alignItems: "center", flex: 1, minWidth: 0, paddingVertical: 5 },
   metricValue: { color: color.ink, fontSize: 13, fontWeight: "900" },

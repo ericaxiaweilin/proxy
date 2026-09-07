@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 52 — 2026-09-07
+
+- 对齐 R20.1 线上店铺层级：默认页恢复“店铺资产”菜单，菜单与价格、照片与内容、
+  当前礼券和经营资料点击后分别进入对应页面，不在首页直接堆叠编辑器。
+- 未创建店铺的动作改为进入企业运营助手生成 Store Draft，取消内联手工建店表单。
+
 ## Revision 51 — 2026-09-06
 
 - 店铺/菜单照片走媒体管线远端展示（R36.x PHOTO-001）：store_photos 与

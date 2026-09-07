@@ -44,7 +44,7 @@
         "apps/mobile/src/business-client.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "R18.x commit 3: merchant-me-r21.tsx (1250 行 hardcoded mock) + merchant-creator-center.tsx 全部删, 替换为 MerchantMeR21Replacement. 后续 commit 4 接 business-home.tsx + me.tsx > merchantstorefront 完整 wire. R36.x: 无店铺空态显示创建 CTA 与模块预告 (Revision 49); 菜单真 CRUD (Revision 50); 公开资产顺序恢复为菜单、照片、活动、Creator 权益、优惠券、营业资料，移除访问漏斗与开发字段 (Revision 51). R36.x PHOTO-001: 相册/菜单照片经媒体管线远端展示 (074 media_asset_id + PUBLIC 授权) (Revision 51)."
+      "knownGap": "R18.x hardcoded merchant mocks 已替换为真实客户端。R36.x: 无店铺空态 (Revision 49); 菜单真 CRUD (Revision 50); 公开资产与媒体管线 (Revision 51); R20.1 店铺资产一级菜单及 Enterprise Ops 建店入口 (Revision 52)."
     },
     {
       "scope": "social-contact-collaboration",
