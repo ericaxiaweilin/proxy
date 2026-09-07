@@ -161,18 +161,6 @@ export function RequesterHome({
     if (activeFilters.includes("near") && p.distanceM >= 1000) return false;
     return true;
   });
-  // R15.22 fix: 市场脉动计数状态.
-  //   - opportunityCount: server 端 ListMarketOpportunities 返的 list 长度
-  //   - activityCount:    server 端 ListActivities 返的 list 长度
-  //   - experienceCount:  R15.49 接入 server ListExperiences 返 list 长度,
-  //     替换 r157 基线 24 hardcode.
-  //   - pulseState: "idle" | "loading" | "loaded" | "error"
-  //     初始 state="loading", 拉成功→loaded, 失败→error 但继续展示
-  //     最后已知计数 (或 fallback) — 与 homeItemsState 互不干扰.
-  const [opportunityCount, setOpportunityCount] = useState<number | null>(null);
-  const [activityCount, setActivityCount] = useState<number | null>(null);
-  const [experienceCount, setExperienceCount] = useState<number | null>(null);
-  const [pulseState, setPulseState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   // HomeItemsLoadState distinguishes the three post-auth states:
   //   "idle"    — no fetch attempted yet (initial render)
   //   "loading" — fetch in flight (placeholder still visible)
@@ -283,63 +271,6 @@ export function RequesterHome({
     };
   }, [demandClient]);
 
-  // R15.22 fix: 市场脉动计数 (机会/活动) 从 server 拉 — 替代 r157MarketPulse
-  // 硬编码 24/46/18. R15.49 把"体验 24"也接入 ListExperiences.
-  // marketplace / activities / experiences 跟 demandClient 同样为 undefined 表示匿名
-  // (R15.22 WIP 期间, 上层可能未传), 跟 homeItemsState 一样保持
-  // placeholder, 不报 "加载失败".
-  useEffect(() => {
-    if (!marketplace && !activities && !experiences) {
-      setPulseState("idle");
-      return;
-    }
-    let cancelled = false;
-    setPulseState("loading");
-    (async () => {
-      // 并行拉取, 各自包 try/catch — 某个失败不影响另一个.
-      const next: { opportunityCount: number | null; activityCount: number | null; experienceCount: number | null; anyError: boolean } = {
-        opportunityCount: null,
-        activityCount: null,
-        experienceCount: null,
-        anyError: false
-      };
-      if (marketplace) {
-        try {
-          const opportunities = await marketplace.list();
-          if (cancelled) return;
-          next.opportunityCount = opportunities.length;
-        } catch {
-          next.anyError = true;
-        }
-      }
-      if (activities) {
-        try {
-          const list = await activities.listActivities();
-          if (cancelled) return;
-          next.activityCount = list.length;
-        } catch {
-          next.anyError = true;
-        }
-      }
-      if (experiences) {
-        try {
-          const list = await experiences.listExperiences();
-          if (cancelled) return;
-          next.experienceCount = list.length;
-        } catch {
-          next.anyError = true;
-        }
-      }
-      if (cancelled) return;
-      if (next.opportunityCount !== null) setOpportunityCount(next.opportunityCount);
-      if (next.activityCount !== null) setActivityCount(next.activityCount);
-      if (next.experienceCount !== null) setExperienceCount(next.experienceCount);
-      setPulseState(next.anyError ? "error" : "loaded");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [marketplace, activities, experiences]);
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
   const visibleRef = useRef(true);
@@ -483,7 +414,7 @@ export function RequesterHome({
             const composed = [gridPerson ? `和${gridPerson.name}` : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
             const tiles = [
               gridPerson ? { key: `person:${gridPerson.id}`, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: "一起的人", onPress: () => onOpenHumanProfile?.(gridPerson) } : undefined,
-              gridTime ? { key: `time:${gridTime}`, imageUri: undefined, glyph: "◷", label: gridTime, sub: "时间", onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
+              gridTime ? { key: `time:${gridTime}`, imageUri: gridPlace?.imageUrl, glyph: "◷", label: gridTime, sub: gridPlace ? gridPlace.name : "时间", onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
               gridActivity ? { key: `act:${gridActivity.activityId}`, imageUri: gridPlace?.imageUrl, glyph: "☕", label: gridActivity.title, sub: gridActivity.venueName, onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
               gridPlace ? { key: `place:${gridPlace.id}`, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.name, sub: "地点", onPress: () => onOpenSceneMap?.(gridPlace.id) } : undefined,
             ];
@@ -601,33 +532,6 @@ export function RequesterHome({
       ) : homeItemsState === "error" ? (
         <Text style={styles.emptyNote}>加载失败，下拉或稍后重试</Text>
       ) : null}
-
-      {/* R15.22 fix: 市场脉动计数 (机会 / 活动) 从 server 拉, 体验 仍使用 r157
-          基线 24 作 fallback (ListExperiences 暂未联). 拉倒后空闲, onPress
-          仍走 "OPPORTUNITY" — R15.22 WIP 期间保持 visual baseline, 待
-          owner 补 ListExperiences 后再加 experience tab. */}
-      <Pressable onPress={() => onOpenMarket?.("OPPORTUNITY")} style={styles.marketPulse}>
-        <View style={styles.marketPulseGradient}>
-          <View style={styles.marketPulseCopy}>
-            <Text style={styles.marketPulseTitle}>市场正在发生</Text>
-            <Text style={styles.marketPulseDesc}>体验、机会、活动。</Text>
-          </View>
-          <View style={styles.marketPulseNums}>
-            {(
-              [
-                [experienceCount !== null ? String(experienceCount) : "—", "体验"],
-                [opportunityCount !== null ? String(opportunityCount) : "—", "机会"],
-                [activityCount !== null ? String(activityCount) : "—", "活动"]
-              ] as const
-            ).map(([value, label]) => (
-              <View key={label} style={styles.marketPulseNum}>
-                <Text style={styles.marketPulseValue}>{value}</Text>
-                <Text style={styles.marketPulseNumLabel}>{label}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      </Pressable>
 
       {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)。
           打开时为模态，点击遮罩或"应用"按钮关闭。
@@ -756,35 +660,6 @@ const styles = StyleSheet.create({
   actionSub: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
   actionTag: { backgroundColor: color.lime, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 6 },
   actionTagText: { color: color.ink, fontSize: 11, fontWeight: "800", lineHeight: 15 },
-
-  // 基线 .r157MarketPulse：dark 渐变底，radius 18，flex 左右；nums 3 格。
-  marketPulse: {
-    alignItems: "center",
-    backgroundColor: color.deep,
-    borderRadius: 24,
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 6,
-    marginTop: 12,
-    overflow: "hidden",
-    padding: 0,
-    ...shadows.card
-  },
-  marketPulseGradient: {
-    alignItems: "center",
-    flex: 1,
-    flexDirection: "row",
-    gap: 10,
-    padding: 14,
-    width: "100%"
-  },
-  marketPulseCopy: { flex: 1 },
-  marketPulseTitle: { color: color.white, fontSize: 15, fontWeight: "800", lineHeight: 21 },
-  marketPulseDesc: { color: "#D8CFDC", fontSize: 11, lineHeight: 15, marginTop: 3 },
-  marketPulseNums: { flexDirection: "row", gap: 5 },
-  marketPulseNum: { backgroundColor: "rgba(255,255,255,0.09)", borderRadius: 16, paddingHorizontal: 8, paddingVertical: 7 },
-  marketPulseValue: { color: color.white, fontSize: 20, fontWeight: "900", lineHeight: 24, textAlign: "center" },
-  marketPulseNumLabel: { color: "#D4CAD9", fontSize: 11, lineHeight: 15, textAlign: "center" },
 
   // R15.34.1: 推荐人 mode 切换单行路由 — 不够就左右滑动
   //   走共享 FilterChipRail (见 components/filter-chip-rail.tsx)。
