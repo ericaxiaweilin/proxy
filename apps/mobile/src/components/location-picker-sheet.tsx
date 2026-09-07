@@ -15,6 +15,7 @@ import {
   CITY_BOUNDS,
   DEFAULT_LOCATION,
   formatRadius,
+  formatLocationTitle,
   gridToLatLng,
   LOCATION_OPTIONS,
   reverseGeocode,
@@ -39,7 +40,7 @@ export type { Location, CustomLocation, PresetLocation, AnyLocation, CustomLocat
 // shell 要把 active location 显示成 "河内 · (5,5) · 3 km" 时
 // 不需要再 import location-options 两次。reverseGeocode 让 shell
 // 在自定义 tab 里把 lat/lng 走 Nominatim 反查"还剑湖附近"。
-export { gridToLatLng, formatRadius, reverseGeocode };
+export { gridToLatLng, formatLocationTitle, formatRadius, reverseGeocode };
 
 type Tab = "PRESET" | "CUSTOM" | "HISTORY";
 
@@ -374,7 +375,7 @@ export function LocationPickerSheet({
                         <ProxyIcon color={active ? color.white : color.ink} name="route" size={24} />
                       </View>
                       <View style={styles.optCopy}>
-                        <Text style={styles.optTitle}>{entry.city} · {entry.area.replace(/^自定义 · /, "")}</Text>
+                        <Text style={styles.optTitle}>{formatLocationTitle(entry)}</Text>
                         <Text style={styles.optDesc}>覆盖范围 {formatRadius(entry.custom.radiusMeters)}</Text>
                       </View>
                       <Text style={styles.optAction}>{active ? "当前" : "切换"}</Text>

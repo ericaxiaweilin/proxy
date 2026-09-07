@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 68 — 2026-09-07
+
+- Custom locations now render their reverse-geocoded address directly instead
+  of repeating city, custom-storage marker and address in the Home header and
+  saved-location history.
+- Reverse geocoding now preserves the available locality/district hierarchy,
+  falling back cleanly to city and country when Photon has no street detail.
+
 ## Revision 67 — 2026-09-07
 
 - Removed the remaining coordinate duplication from Home's location summary and

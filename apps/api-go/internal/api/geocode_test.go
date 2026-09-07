@@ -77,7 +77,7 @@ func TestReverseGeocode_OK(t *testing.T) {
 	if body.Source != "remote" {
 		t.Errorf("expected source=remote, got %q", body.Source)
 	}
-	if body.DisplayName != "Lê Thánh Tôn, Thành phố Hồ Chí Minh, Việt Nam" {
+	if body.DisplayName != "Lê Thánh Tôn, Quận 1, Thành phố Hồ Chí Minh, Việt Nam" {
 		t.Errorf("unexpected displayName: %q", body.DisplayName)
 	}
 	if body.City != "Thành phố Hồ Chí Minh" {
@@ -153,6 +153,9 @@ func TestReverseGeocode_NonSevenCity(t *testing.T) {
 	}
 	if body.DisplayName == "" {
 		t.Errorf("displayName must not be empty for non-7-city location")
+	}
+	if body.DisplayName != "Phố Nguyễn Huy Tưởng, Suối Hoa 2, Bắc Ninh, Việt Nam" {
+		t.Errorf("unexpected detailed displayName: %q", body.DisplayName)
 	}
 	if body.Source != "remote" {
 		t.Errorf("expected source=remote, got %q", body.Source)

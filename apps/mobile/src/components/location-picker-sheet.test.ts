@@ -24,12 +24,25 @@ import {
   makeCustomLocation,
   reverseGeocode,
   reverseGeocodeViaProxy,
+  formatLocationTitle,
   type AnyLocation,
   type CustomLocation,
   type PresetLocation
 } from "./location-options.js";
 
 describe("LocationPickerSheet (R15.13 P5)", () => {
+  it("renders a custom reverse-geocoded address once without storage markers", () => {
+    const location: CustomLocation = {
+      id: "custom_bac_ninh",
+      city: "Bắc Ninh",
+      area: "自定义 · Bắc Ninh, Việt Nam",
+      kind: "CUSTOM",
+      custom: { gridX: 5, gridY: 5, radiusMeters: 3000 }
+    };
+    expect(formatLocationTitle(location)).toBe("Bắc Ninh, Việt Nam");
+    expect(formatLocationTitle(DEFAULT_LOCATION)).toBe("河内 · 还剑湖附近");
+  });
+
   it("DEFAULT_LOCATION is one of LOCATION_OPTIONS (no orphan initial state)", () => {
     // The shell initialises currentLocation with DEFAULT_LOCATION and
     // then renders it in LocationContext. If the two ever drift, the

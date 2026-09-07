@@ -105,6 +105,7 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 				City        string `json:"city"`
 				State       string `json:"state"`
 				District    string `json:"district"`
+				Locality    string `json:"locality"`
 				Country     string `json:"country"`
 				CountryCode string `json:"countrycode"`
 				Type        string `json:"type"`
@@ -181,17 +182,30 @@ func buildPhotonDisplayName(p struct {
 	City        string `json:"city"`
 	State       string `json:"state"`
 	District    string `json:"district"`
+	Locality    string `json:"locality"`
 	Country     string `json:"country"`
 	CountryCode string `json:"countrycode"`
 	Type        string `json:"type"`
 }) string {
-	// "Lê Thánh Tôn, Thành phố Hồ Chí Minh, Việt Nam"
+	// Prefer the most useful available address depth, without repeating the
+	// province when Photon already returned a city. Example:
+	// "Lê Thánh Tôn, Quận 1, Thành phố Hồ Chí Minh, Việt Nam".
 	parts := []string{}
 	if p.Name != "" {
 		parts = append(parts, p.Name)
+	} else if p.Street != "" {
+		parts = append(parts, p.Street)
+	}
+	if p.Locality != "" && !containsString(parts, p.Locality) {
+		parts = append(parts, p.Locality)
+	}
+	if p.District != "" && !containsString(parts, p.District) {
+		parts = append(parts, p.District)
 	}
 	if p.City != "" && !containsString(parts, p.City) {
 		parts = append(parts, p.City)
+	} else if p.City == "" && p.State != "" && !containsString(parts, p.State) {
+		parts = append(parts, p.State)
 	}
 	if p.Country != "" && !containsString(parts, p.Country) {
 		parts = append(parts, p.Country)

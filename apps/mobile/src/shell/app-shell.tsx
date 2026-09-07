@@ -19,6 +19,7 @@ import { ContextSwitcherSheet } from "../components/context-switcher";
 import {
   DEFAULT_LOCATION,
   LocationPickerSheet,
+  formatLocationTitle,
   formatRadius,
   type AnyLocation,
   type CustomLocation,
@@ -787,7 +788,7 @@ function LocationContext({
         <ProxyIcon color={color.ink} name="route" size={17} />
       </View>
       <View style={styles.locationCopy}>
-        <Text style={styles.locationCity}>{location.city} · {location.area}</Text>
+        <Text numberOfLines={2} style={styles.locationCity}>{formatLocationTitle(location)}</Text>
         <Text numberOfLines={1} style={styles.locationSub}>
           {sub}
         </Text>

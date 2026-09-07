@@ -52,6 +52,17 @@ export interface PresetLocation extends Location {
 
 export type AnyLocation = PresetLocation | CustomLocation;
 
+// Custom locations already carry the reverse-geocoded address in `area`.
+// Do not prepend `city` again ("Bac Ninh · 自定义 · Bac Ninh, Vietnam").
+// Legacy records keep the `自定义 ·` storage marker, so presentation strips it.
+export function formatLocationTitle(location: AnyLocation): string {
+  if (location.kind === "CUSTOM") {
+    const address = location.area.replace(/^自定义\s*[·・]?\s*/u, "").trim();
+    return address || location.city;
+  }
+  return [location.city, location.area].filter(Boolean).join(" · ");
+}
+
 export const LOCATION_OPTIONS: ReadonlyArray<LocationOption> = [
   { id: "hn-swordlake", city: "河内", area: "还剑湖附近", desc: "老城、咖啡馆、湖边人像", icon: "route" },
   { id: "hn-westlake", city: "河内", area: "西湖周边", desc: "日落、咖啡、慢门", icon: "camera" },
