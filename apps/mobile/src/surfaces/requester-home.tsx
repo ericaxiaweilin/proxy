@@ -128,6 +128,8 @@ export function RequesterHome({
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
   const [composerOpen, setComposerOpen] = useState(false);
+  // 4 宫格人物：点按轮换下一位（主页入口走下方真人推荐 rail，那里点头像进主页）。
+  const [personIndex, setPersonIndex] = useState(0);
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
   // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
   // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
@@ -406,14 +408,14 @@ export function RequesterHome({
             </View>
           ) : null}
           {(() => {
-            const gridPerson = filteredPeople[0];
+            const gridPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
             const gridActivity = storeActivities[0];
             const gridPlace = (gridActivity ? sceneBriefs.find((s) => s.name === gridActivity.venueName) : undefined) ?? sceneBriefs[0];
             const gridTime = gridActivity?.time;
             if (!gridPerson && !gridActivity && !gridPlace) return null;
             const composed = [gridPerson ? `和${gridPerson.name}` : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
             const tiles = [
-              gridPerson ? { key: `person:${gridPerson.id}`, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: "一起的人", onPress: () => onOpenHumanProfile?.(gridPerson) } : undefined,
+              gridPerson ? { key: `person:${gridPerson.id}`, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: "一起的人 · 轻点换人", onPress: () => setPersonIndex((i) => i + 1) } : undefined,
               gridTime ? { key: `time:${gridTime}`, imageUri: gridPlace?.imageUrl, glyph: "◷", label: gridTime, sub: gridPlace ? gridPlace.name : "时间", onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
               gridActivity ? { key: `act:${gridActivity.activityId}`, imageUri: gridPlace?.imageUrl, glyph: "☕", label: gridActivity.title, sub: gridActivity.venueName, onPress: () => onOpenMarket?.("ACTIVITY") } : undefined,
               gridPlace ? { key: `place:${gridPlace.id}`, imageUri: gridPlace.imageUrl, glyph: "●", label: gridPlace.name, sub: "地点", onPress: () => onOpenSceneMap?.(gridPlace.id) } : undefined,
