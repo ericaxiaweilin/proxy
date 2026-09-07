@@ -7,8 +7,15 @@ const profile = readFileSync(fileURLToPath(new URL("./surfaces/ai-account-profil
 const shell = readFileSync(fileURLToPath(new URL("./shell/app-shell.tsx", import.meta.url)), "utf8");
 const scene = readFileSync(fileURLToPath(new URL("./surfaces/reality-scene-map.tsx", import.meta.url)), "utf8");
 const fixtures = readFileSync(fileURLToPath(new URL("./recommend-fixtures.ts", import.meta.url)), "utf8");
+const locationPicker = readFileSync(fileURLToPath(new URL("./components/location-picker-sheet.tsx", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
+  it("puts the unified search and model conversation before discovery sections", () => {
+    const intent = source.indexOf('accessibilityLabel="搜索或询问 Proxy"');
+    expect(intent).toBeGreaterThan(-1);
+    expect(intent).toBeLessThan(source.indexOf(">真人推荐<"));
+    expect(source).toContain("搜索场景、地点，或问 Proxy");
+  });
   it("keeps the labeled human section before the labeled AI section", () => {
     const human = source.indexOf(">真人推荐<");
     const ai = source.indexOf(">AI 推荐<");
@@ -51,5 +58,12 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(shell).toContain('setPageOverride("MSG_CHAT")');
     expect(shell).toContain("<OtherProfileSurface");
     expect(shell).toContain("avatarUri: person.photoUri");
+  });
+
+  it("keeps coordinates in the location data layer, not beside the address UI", () => {
+    expect(locationPicker).toContain('label="地图选点"');
+    expect(locationPicker).not.toMatch(/坐标 \$\{lat\.toFixed/);
+    expect(locationPicker).not.toMatch(/\(\{eLat\.toFixed/);
+    expect(locationPicker).not.toContain("自定义坐标</Text>");
   });
 });

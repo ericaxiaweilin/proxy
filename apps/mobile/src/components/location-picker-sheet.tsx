@@ -238,7 +238,7 @@ export function LocationPickerSheet({
           {/* Tab strip */}
           <View style={styles.tabs}>
             <TabButton active={tab === "PRESET"} label="推荐地点" onPress={() => setTab("PRESET")} />
-            <TabButton active={tab === "CUSTOM"} label="自定义坐标" onPress={() => setTab("CUSTOM")} />
+            <TabButton active={tab === "CUSTOM"} label="地图选点" onPress={() => setTab("CUSTOM")} />
             <TabButton active={tab === "HISTORY"} label={`历史${history.length > 0 ? ` · ${history.length}` : ""}`} onPress={() => void openHistory()} />
           </View>
 
@@ -281,7 +281,7 @@ export function LocationPickerSheet({
               <View style={styles.addressHeader}>
                 <Text style={styles.addressLabel}>当前位置</Text>
                 <Text style={styles.addressText} numberOfLines={2}>
-                  {reverse?.displayName || `定位中… · ${lat.toFixed(4)}, ${lng.toFixed(4)}`}
+                  {reverse?.source === "offline-grid" ? "已选择地图位置" : reverse?.displayName || "正在识别地址…"}
                 </Text>
                 {reverse?.source === "offline-grid" && (
                   <Text style={styles.addressHint}>
@@ -312,7 +312,6 @@ export function LocationPickerSheet({
               </View>
               <Text style={styles.mapHint}>
                 点地图或拖动 pin 重新定位
-                {lat !== undefined && lng !== undefined ? ` · 坐标 ${lat.toFixed(4)}, ${lng.toFixed(4)}` : ""}
               </Text>
 
               {/* Radius selector */}
@@ -354,15 +353,14 @@ export function LocationPickerSheet({
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
               {history.length === 0 ? (
                 <View style={styles.emptyHistory}>
-                  <Text style={styles.emptyTitle}>还没有保存过自定义坐标</Text>
+                  <Text style={styles.emptyTitle}>还没有保存过地图位置</Text>
                   <Text style={styles.emptySub}>
-                    切到"自定义坐标" tab 放置一个 pin，覆盖半径 1 / 3 / 5 km，命名后这里会留一份记录方便复用。
+                    切到“地图选点”放置一个 pin，选择覆盖范围并命名后，这里会保留记录方便复用。
                   </Text>
                 </View>
               ) : (
                 history.map((entry) => {
                   const active = current.kind === "CUSTOM" && current.id === entry.id;
-                  const { lat: eLat, lng: eLng } = gridToLatLng(entry.city, entry.custom.gridX, entry.custom.gridY);
                   return (
                     <Pressable
                       key={entry.id}
@@ -377,9 +375,7 @@ export function LocationPickerSheet({
                       </View>
                       <View style={styles.optCopy}>
                         <Text style={styles.optTitle}>{entry.city} · {entry.area.replace(/^自定义 · /, "")}</Text>
-                        <Text style={styles.optDesc}>
-                          ({eLat.toFixed(4)}, {eLng.toFixed(4)}) · 半径 {formatRadius(entry.custom.radiusMeters)}
-                        </Text>
+                        <Text style={styles.optDesc}>覆盖范围 {formatRadius(entry.custom.radiusMeters)}</Text>
                       </View>
                       <Text style={styles.optAction}>{active ? "当前" : "切换"}</Text>
                     </Pressable>
@@ -404,7 +400,7 @@ export function LocationPickerSheet({
                   ✓ {finalCommit.header} · {finalCommit.area} · {formatRadius(radius)}
                 </Text>
                 <Text style={styles.confirmSubText} numberOfLines={1}>
-                  {finalCommit.city} · {lat.toFixed(4)}, {lng.toFixed(4)}
+                  {finalCommit.city || "所选区域"}
                   {reverse?.source === "offline-grid" ? " · 离线估算" : ""}
                 </Text>
               </Pressable>

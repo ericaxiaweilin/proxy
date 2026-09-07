@@ -324,6 +324,31 @@ export function RequesterHome({
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
+      {/* Search and Proxy share one top-level intent entry. It stays one line
+          until the user explicitly starts/resumes a conversation. */}
+      {conversationPanel ?? (onChat ? (
+        <>
+          <Pressable onPress={() => setComposerOpen(true)} style={styles.composerSingle} accessibilityLabel="搜索或询问 Proxy">
+            <ProxyIcon color={color.muted} name="search" size={18} />
+            <Text style={styles.composerSingleText}>搜索场景、地点，或问 Proxy</Text>
+            <Text style={styles.composerSingleChev}>›</Text>
+          </Pressable>
+          {composerOpen ? (
+            <View>
+              <HomeChatBox
+                contextLabel="用户"
+                placeholder="搜索地点、活动，或直接说你想做什么"
+                mode={intentMode}
+                onSelectMode={(mode) => setIntentMode((current) => current === mode ? undefined : mode)}
+                onSend={(text, mode, attachment) => { setComposerOpen(false); onChat(text, mode, attachment); }}
+              />
+              <Pressable onPress={() => setComposerOpen(false)} style={styles.composerCollapse}>
+                <Text style={styles.composerCollapseText}>收起 ↑</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </>
+      ) : null)}
       {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
           用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
           不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
@@ -411,30 +436,10 @@ export function RequesterHome({
           ))}
         </HorizontalSwipeRail>
       </View> : null}
-      {/* 基线 .r1572HomeComposer('USER')：HomeChatBox（无示例 / 无提示） */}
-      {/* R34_12_1 4-Grid Composer：大面积模型对话收成单行，点开展开完整输入 */}
-      {conversationPanel ?? (onChat ? (
+      {/* R34_12_1 4-Grid: selection stays with discovery content; the unified
+          search/model entry itself lives at the top of Home. */}
+      {onChat ? (
         <>
-          <Pressable onPress={() => setComposerOpen(true)} style={styles.composerSingle} accessibilityLabel="告诉 Proxy 你想做什么">
-            <Text style={styles.composerSingleText}>Proxy 想要怎样的时光？</Text>
-            <Text style={styles.composerSingleChev}>›</Text>
-          </Pressable>
-          {composerOpen ? (
-            <View>
-              <HomeChatBox
-                contextLabel="用户"
-                placeholder="例如：周六下午想在西湖拍照"
-                mode={intentMode}
-                onSelectMode={(mode) => {
-                  setIntentMode((current) => current === mode ? undefined : mode);
-                }}
-                onSend={(text, mode, attachment) => { setComposerOpen(false); onChat(text, mode, attachment); }}
-              />
-              <Pressable onPress={() => setComposerOpen(false)} style={styles.composerCollapse}>
-                <Text style={styles.composerCollapseText}>收起 ↑</Text>
-              </Pressable>
-            </View>
-          ) : null}
           {(() => {
             const gridPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
             const distinctTimes = [...new Set(storeActivities.map((a) => a.time).filter(Boolean))];
@@ -537,7 +542,7 @@ export function RequesterHome({
             );
           })()}
         </>
-      ) : null)}
+      ) : null}
 
       {sceneBriefs.length > 0 ? (
         <View>
@@ -714,7 +719,7 @@ const styles = StyleSheet.create({
   sectionHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
   emptyNote: { color: color.muted, fontSize: 12, paddingVertical: 8, textAlign: "center" },
   composerSingle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 8, paddingHorizontal: 14, paddingVertical: 12 },
-  composerSingleText: { color: color.muted, fontSize: 13 },
+  composerSingleText: { color: color.muted, flex: 1, fontSize: 13 },
   composerSingleIcons: { alignItems: "center", flexDirection: "row", gap: 10 },
   composerSingleChev: { color: color.muted, fontSize: 18, fontWeight: "800" },
   composerCollapse: { alignItems: "center", paddingVertical: 6 },
