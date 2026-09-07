@@ -1,10 +1,11 @@
 // R15.3 我的推荐 — Feed 偏好设置屏幕
 // 对齐 Proxy_P0_Prototype_R15_3_SearchFirst_ModelUI_BusinessOS.html 的 feedprefs 页面
 // 每行 3 列 grid：标签(96px) + range slider(1fr) + 数值(34px)
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { GestureResponderEvent } from "react-native";
 import { color } from "../theme";
+import { readFeedPrefs, writeFeedPrefs } from "../expo-feed-prefs-store";
 
 const FEED_ROWS: ReadonlyArray<[string, string]> = [
   ["opportunity", "机会 / 需求"],
@@ -70,18 +71,21 @@ function Slider({
 }
 
 export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
-  const [weights, setWeights] = useState<Record<string, number>>({
-    opportunity: 70,
-    people: 60,
-    activity: 50,
-    intelligence: 40,
-    lifestyle: 30,
-    commercial: 20
-  });
-  const [scope, setScope] = useState<"7D" | "30D" | "PERSISTENT">("7D");
-  const [muted, setMuted] = useState<Set<string>>(new Set());
+  // R36.x PREFS-001: 设置落本地（expo-feed-prefs-store），退出重进保留。
+  const [initialPrefs] = useState(readFeedPrefs);
+  const [weights, setWeights] = useState<Record<string, number>>(initialPrefs.weights);
+  const [scope, setScope] = useState<"7D" | "30D" | "PERSISTENT">(initialPrefs.scope);
+  const [muted, setMuted] = useState<Set<string>>(() => new Set(initialPrefs.muted));
   const [algoInput, setAlgoInput] = useState("");
-  const [algoApplied, setAlgoApplied] = useState<string | null>(null);
+  const [algoApplied, setAlgoApplied] = useState<string | null>(initialPrefs.algoApplied);
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    writeFeedPrefs({ weights, scope, muted: [...muted], algoApplied });
+  }, [weights, scope, muted, algoApplied]);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>

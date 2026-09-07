@@ -858,4 +858,7 @@ require_test "WATERMARK-001" "./internal/media" \
   "TestWatermarkBurnedIntoVariantV2" \
   "apps/api-go/internal/media/watermark_test.go" || exit $?
 
+# PREFS-001: 推荐偏好设置落本地，退出重进保留；损坏文件回退默认。
+pnpm --dir apps/mobile exec vitest run src/expo-feed-prefs-store.test.ts || exit $?
+
 echo "  regression contracts: OK"
