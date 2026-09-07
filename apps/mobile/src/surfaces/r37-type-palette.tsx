@@ -14,6 +14,16 @@ const TYPES: { key: OpportunityType; label: string; sub: string; logo: any }[] =
   { key: "event_photo", label: "活动 + 拍照", sub: "Event", logo: require("../assets/order-type-logos/event_photo.png") },
 ];
 
+// The approved tiles have centered 68px canvases but their dark glyphs do not
+// share a visual center. These offsets align the glyphs, not merely the PNG box.
+const LOGO_OFFSET: Record<OpportunityType, { x: number; y: number }> = {
+  coffee_photo: { x: -2, y: -4 },
+  coffee_chinese: { x: -2, y: -4 },
+  walk_photo: { x: -4, y: -2 },
+  bilingual_store: { x: -4, y: -7 },
+  event_photo: { x: -7, y: -5 },
+};
+
 export function R37TypePalette({ active, onChange }: { active: OpportunityType | "all"; onChange: (next: OpportunityType | "all") => void }): React.JSX.Element {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -39,7 +49,7 @@ export function R37TypePalette({ active, onChange }: { active: OpportunityType |
           sub={t.sub}
           onPress={() => onChange(active === t.key ? "all" : t.key)}
           active={active === t.key}
-          renderLogo={() => <Image source={t.logo} style={imgStyle} resizeMode="contain" />}
+          renderLogo={() => <Image source={t.logo} style={[imgStyle, { transform: [{ translateX: LOGO_OFFSET[t.key].x }, { translateY: LOGO_OFFSET[t.key].y }] }]} resizeMode="contain" />}
         />
       ))}
     </ScrollView>
@@ -63,7 +73,7 @@ function Pill({ label, sub, onPress, active, renderLogo, logoBoxStyle }: { label
 const styles = StyleSheet.create({
   scroll: { gap: 7, paddingHorizontal: 14, paddingVertical: 6 },
   pill: { alignItems: "center", minWidth: 74, paddingHorizontal: 0, paddingVertical: 0 },
-  logoBox: { alignItems: "center", backgroundColor: "transparent", borderColor: "transparent", borderRadius: 12, borderWidth: 2, height: 46, justifyContent: "center", marginBottom: 3, width: 46 },
+  logoBox: { alignItems: "center", backgroundColor: "#F7EFE1", borderColor: "transparent", borderRadius: 12, borderWidth: 2, height: 46, justifyContent: "center", marginBottom: 3, overflow: "hidden", width: 46 },
   logoBoxActive: { borderColor: color.ink },
   pillLabel: { color: color.ink, fontSize: 7.2, fontWeight: "500", lineHeight: 9, textAlign: "center" },
   pillLabelActive: { fontWeight: "800" },

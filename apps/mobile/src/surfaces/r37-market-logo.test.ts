@@ -7,11 +7,13 @@ const card = readFileSync(new URL("./r37-opportunity-card.tsx", import.meta.url)
 describe("MARKET-LOGO-SINGLE-TILE-001", () => {
   it("renders approved palette logos at the full visual size", () => {
     expect(palette).toContain("height: 42, width: 42");
-    expect(palette).toContain('backgroundColor: "transparent"');
+    expect(palette).toContain("LOGO_OFFSET[t.key]");
+    expect(palette).toContain('overflow: "hidden"');
   });
 
   it("does not wrap opportunity logos in a second colored logo", () => {
     expect(card).toContain("height: 30, width: 30");
-    expect(card).toContain('backgroundColor: "transparent"');
+    expect(card).toContain("TYPE_LOGO_OFFSET[type]");
+    expect(card).toContain('overflow: "hidden"');
   });
 });

@@ -30,6 +30,14 @@ const TYPE_LOGO: Record<OpportunityType, any> = {
   event_photo: require("../assets/order-type-logos/event_photo.png"),
 };
 
+const TYPE_LOGO_OFFSET: Record<OpportunityType, { x: number; y: number }> = {
+  coffee_photo: { x: -1, y: -3 },
+  coffee_chinese: { x: -1, y: -3 },
+  walk_photo: { x: -3, y: -1 },
+  bilingual_store: { x: -3, y: -5 },
+  event_photo: { x: -5, y: -4 },
+};
+
 const TYPE_LABEL: Record<OpportunityType, { label: string; sub: string }> = {
   coffee_photo: { label: "咖啡 + 拍照", sub: "Coffee" },
   walk_photo: { label: "City Walk + 拍照", sub: "Walk" },
@@ -95,7 +103,7 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
       <View style={styles.body}>
         <View style={styles.typeRow}>
           <View style={styles.typeLogo}>
-            <Image source={TYPE_LOGO[type]} style={typeLogoImgStyle} resizeMode="contain" />
+            <Image source={TYPE_LOGO[type]} style={[typeLogoImgStyle, { transform: [{ translateX: TYPE_LOGO_OFFSET[type].x }, { translateY: TYPE_LOGO_OFFSET[type].y }] }]} resizeMode="contain" />
           </View>
           <View style={styles.typeMeta}>
             <Text style={styles.typeMetaLabel}>标准订单类型</Text>
@@ -137,7 +145,7 @@ const styles = StyleSheet.create({
   thumbInitial: { color: color.muted, fontSize: 22, fontWeight: "800" },
   body: { flex: 1, minWidth: 0 },
   typeRow: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 5 },
-  typeLogo: { alignItems: "center", backgroundColor: "transparent", borderRadius: 8, height: 30, justifyContent: "center", overflow: "hidden", width: 30 },
+  typeLogo: { alignItems: "center", backgroundColor: "#F7EFE1", borderRadius: 8, height: 30, justifyContent: "center", overflow: "hidden", width: 30 },
   typeMeta: { flex: 1, minWidth: 0 },
   typeMetaLabel: { color: "#AAA49C", fontSize: 6.4, letterSpacing: 0.15, lineHeight: 9 },
   typeMetaTitle: { color: color.ink, fontSize: 10.5, fontWeight: "800", lineHeight: 13, marginTop: 1 },
