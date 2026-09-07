@@ -46,7 +46,9 @@ export function R37TypePalette({ active, onChange }: { active: OpportunityType |
   );
 }
 
-const imgStyle = { height: 24, width: 24 } as const;
+// Approved PNGs already include their own rounded tile. Render edge-to-edge;
+// another colored box around them creates the “logo inside a logo” effect.
+const imgStyle = { height: 42, width: 42 } as const;
 
 function Pill({ label, sub, onPress, active, renderLogo, logoBoxStyle }: { label: string; sub: string; onPress: () => void; active: boolean; renderLogo: () => React.JSX.Element; logoBoxStyle?: any }): React.JSX.Element {
   return (
@@ -61,8 +63,8 @@ function Pill({ label, sub, onPress, active, renderLogo, logoBoxStyle }: { label
 const styles = StyleSheet.create({
   scroll: { gap: 7, paddingHorizontal: 14, paddingVertical: 6 },
   pill: { alignItems: "center", minWidth: 74, paddingHorizontal: 0, paddingVertical: 0 },
-  logoBox: { alignItems: "center", backgroundColor: "#F7EFE1", borderRadius: 11, height: 42, justifyContent: "center", marginBottom: 5, width: 42 },
-  logoBoxActive: { backgroundColor: color.ink },
+  logoBox: { alignItems: "center", backgroundColor: "transparent", borderColor: "transparent", borderRadius: 12, borderWidth: 2, height: 46, justifyContent: "center", marginBottom: 3, width: 46 },
+  logoBoxActive: { borderColor: color.ink },
   pillLabel: { color: color.ink, fontSize: 7.2, fontWeight: "500", lineHeight: 9, textAlign: "center" },
   pillLabelActive: { fontWeight: "800" },
   pillSub: { color: "#AAA49C", fontSize: 6.2, marginTop: 2 },

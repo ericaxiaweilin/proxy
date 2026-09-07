@@ -72,7 +72,9 @@ function buildWhy(opportunity: MarketOpportunity): string {
   return parts.filter(Boolean).join(" · ");
 }
 
-const typeLogoImgStyle = { height: 18, width: 18 } as const;
+// The 68px approved asset contains the complete rounded logo tile; filling the
+// slot avoids nesting it inside a second beige tile and shrinking the glyph.
+const typeLogoImgStyle = { height: 30, width: 30 } as const;
 
 export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportunity: MarketOpportunity; onOpen: () => void; onDismiss: () => void }): React.JSX.Element {
   const type = inferType(opportunity);
@@ -135,7 +137,7 @@ const styles = StyleSheet.create({
   thumbInitial: { color: color.muted, fontSize: 22, fontWeight: "800" },
   body: { flex: 1, minWidth: 0 },
   typeRow: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 5 },
-  typeLogo: { alignItems: "center", backgroundColor: "#F7EFE1", borderRadius: 8, height: 30, justifyContent: "center", width: 30 },
+  typeLogo: { alignItems: "center", backgroundColor: "transparent", borderRadius: 8, height: 30, justifyContent: "center", overflow: "hidden", width: 30 },
   typeMeta: { flex: 1, minWidth: 0 },
   typeMetaLabel: { color: "#AAA49C", fontSize: 6.4, letterSpacing: 0.15, lineHeight: 9 },
   typeMetaTitle: { color: color.ink, fontSize: 10.5, fontWeight: "800", lineHeight: 13, marginTop: 1 },
