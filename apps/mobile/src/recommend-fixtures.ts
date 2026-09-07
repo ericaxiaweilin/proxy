@@ -21,6 +21,8 @@ export interface RecommendPerson {
   id: string;
   name: string;
   initials: string;
+  /** R34.5 prototype portrait. Replace with the account avatar URL when the feed is server-backed. */
+  photoUri?: string;
   // 距离，单位米
   distanceM: number;
   // 一句话描述
@@ -31,6 +33,21 @@ export interface RecommendPerson {
   online: boolean;
   // 共同好友数（0 不显示）
   mutualFriends: number;
+}
+
+const R34_HUMAN_PORTRAITS = [
+  "https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&fit=crop&w=320&q=82",
+  "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=320&q=82",
+  "https://images.unsplash.com/photo-1511081692775-05d0f180a065?auto=format&fit=crop&w=320&q=82",
+  "https://images.unsplash.com/photo-1509030450996-dd1a26dda07a?auto=format&fit=crop&w=320&q=82",
+  "https://images.unsplash.com/photo-1559314809-0d155014e29e?auto=format&fit=crop&w=320&q=82",
+] as const;
+
+function withR34Portraits(people: RecommendPerson[], offset: number): RecommendPerson[] {
+  return people.map((person, index) => ({
+    ...person,
+    photoUri: R34_HUMAN_PORTRAITS[(index + offset) % R34_HUMAN_PORTRAITS.length]!,
+  }));
 }
 
 export interface RecommendFeed {
@@ -372,49 +389,49 @@ export const SCENE_RECOMMEND: Record<string, RecommendFeed> = {
     title: "身边的摄影好搭子",
     subtitle: "根据你的位置和偏好，为你推荐合适的人",
     sceneTag: "摄影爱好者",
-    people: PHOTO_PEOPLE
+    people: withR34Portraits(PHOTO_PEOPLE, 0)
   },
   COMPANION: {
     title: "适合一起出发的人",
     subtitle: "优先推荐兴趣和时间更匹配的人",
     sceneTag: "同行中",
-    people: COMPANION_PEOPLE
+    people: withR34Portraits(COMPANION_PEOPLE, 1)
   },
   COFFEE_MEAL: {
     title: "附近吃饭 / 咖啡搭子",
     subtitle: "探店和闲聊的人都在这",
     sceneTag: "附近吃饭",
-    people: COFFEE_MEAL_PEOPLE
+    people: withR34Portraits(COFFEE_MEAL_PEOPLE, 2)
   },
   ACTIVITY: {
     title: "本周活动搭子",
     subtitle: "市集 / Live House / 展览",
     sceneTag: "活动搭子",
-    people: ACTIVITY_PEOPLE
+    people: withR34Portraits(ACTIVITY_PEOPLE, 3)
   },
   TRIP: {
     title: "周边一日游",
     subtitle: "下龙湾 / 沙坝 / 宁平",
     sceneTag: "旅行搭子",
-    people: TRIP_PEOPLE
+    people: withR34Portraits(TRIP_PEOPLE, 4)
   },
   CREATOR: {
     title: "创作搭子",
     subtitle: "写稿 / 拍摄 / 录音 / 插画",
     sceneTag: "创作搭子",
-    people: CREATOR_PEOPLE
+    people: withR34Portraits(CREATOR_PEOPLE, 0)
   },
   TRANSLATE: {
     title: "翻译和语言帮手",
     subtitle: "中越 / 英越 / 菜单 / 合同 / 医院",
     sceneTag: "会中文",
-    people: TRANSLATE_PEOPLE
+    people: withR34Portraits(TRANSLATE_PEOPLE, 1)
   },
   MEDICAL: {
     title: "陪诊帮手",
     subtitle: "医院陪同 / 药店代购 / 翻译",
     sceneTag: "陪诊",
-    people: MEDICAL_PEOPLE
+    people: withR34Portraits(MEDICAL_PEOPLE, 2)
   }
 };
 

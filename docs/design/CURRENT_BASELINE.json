@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 46,
-  "updatedAt": "2026-09-06",
+  "baselineRevision": 53,
+  "updatedAt": "2026-09-07",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -31,7 +31,7 @@
       "version": "HUMAN_FIRST_AI_SECOND_R1",
       "file": "apps/mobile/src/surfaces/requester-home.tsx",
       "status": "ACTIVE_IMPLEMENTATION_REFERENCE",
-      "implementationStatus": "HUMAN_LABELED_FIRST_AI_LABELED_SECOND_PROFILE_GATED_ACTIONS"
+      "implementationStatus": "R34_CIRCULAR_HUMAN_PORTRAITS_HUMAN_FIRST_AI_SECOND_PROFILE_GATED_ACTIONS"
     },
     {
       "scope": "root-dock",

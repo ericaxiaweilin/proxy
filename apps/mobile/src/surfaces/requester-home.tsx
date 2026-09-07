@@ -362,7 +362,7 @@ export function RequesterHome({
           >
             <View style={styles.avatar}>
               <View style={styles.avatarInner}>
-                <Text style={styles.avatarInitials}>{p.initials}</Text>
+                {p.photoUri ? <Image source={{ uri: p.photoUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarInitials}>{p.initials}</Text>}
               </View>
               {p.online ? <View style={styles.onlineDot} /> : null}
             </View>
@@ -722,6 +722,7 @@ const styles = StyleSheet.create({
     width: "100%"
   },
   avatarInitials: { color: color.ink, fontSize: 18, fontWeight: "800" },
+  avatarPhoto: { borderRadius: 999, height: "100%", width: "100%" },
   onlineDot: { backgroundColor: color.lime, borderColor: color.offWhite, borderRadius: 999, borderWidth: 2, bottom: 2, height: 11, position: "absolute", right: 2, width: 11 },
   storyName: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 5, textAlign: "center" },
   personReveal: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 7, marginTop: 8, padding: 13, ...shadows.card },

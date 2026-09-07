@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(fileURLToPath(new URL("./surfaces/requester-home.tsx", import.meta.url)), "utf8");
 const profile = readFileSync(fileURLToPath(new URL("./surfaces/ai-account-profile.tsx", import.meta.url)), "utf8");
 const shell = readFileSync(fileURLToPath(new URL("./shell/app-shell.tsx", import.meta.url)), "utf8");
+const fixtures = readFileSync(fileURLToPath(new URL("./recommend-fixtures.ts", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("keeps the labeled human section before the labeled AI section", () => {
@@ -24,6 +25,10 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("匹配理由");
     expect(source).not.toContain("styles.recCard");
     expect(source).not.toContain("styles.storyHint");
+    expect(source).toContain("p.photoUri ? <Image");
+    expect(source).toContain("styles.avatarPhoto");
+    expect(fixtures).toContain("R34_HUMAN_PORTRAITS");
+    expect(fixtures).toContain("withR34Portraits");
   });
 
   it("keeps AI discovery as plain circular profile links", () => {

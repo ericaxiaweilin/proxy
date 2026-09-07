@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 53 — 2026-09-07
+
+- 恢复 R34.5 真人推荐的圆形照片资产；保留“真人推荐在上、AI 推荐在下”及
+  点击头像进入主页的冻结交互，不再用字母占位代替原型人物照片。
+- 新增照片资产回归断言，防止真人推荐再次退化为无图节点。
+
 ## Revision 52 — 2026-09-07
 
 - 对齐 R20.1 线上店铺层级：默认页恢复“店铺资产”菜单，菜单与价格、照片与内容、
