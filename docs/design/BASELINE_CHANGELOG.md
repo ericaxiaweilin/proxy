@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 69 — 2026-09-07
+
+- PublishDemand now takes a price range (最低 + 最高可选) instead of a
+  single price. The two boxes compose to the existing wire price string
+  (`min – max`, collapsing to a single price when equal or one-sided),
+  so server validation/normalize and card rendering are unchanged.
+
 ## Revision 68 — 2026-09-07
 
 - Custom locations now render their reverse-geocoded address directly instead

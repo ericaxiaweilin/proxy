@@ -6,6 +6,17 @@
 
 export type MarketTab = "EXPERIENCE" | "OPPORTUNITY" | "ACTIVITY";
 
+// 发布机会的价格区间合成：发布页填最低 / 最高两框，wire 上仍走
+// 机会 price 自由字符串（server 只要求 EARN/PAY 非空非零、FREE/TBD
+// 为空/零，不解析金额）。两框相等或只填一边时退化为单价。
+export function composePriceRange(min: string, max: string): string {
+  const lo = min.trim();
+  const hi = max.trim();
+  if (!lo) return hi;
+  if (!hi || hi === lo) return lo;
+  return `${lo} – ${hi}`;
+}
+
 // R16.x: wire 上 MarketOpportunitySchema 强制 MoneyFlow 4 选 1 +
 // PriceLabel 必填。mobile 端本地 MarketOpportunity 必须把这两个
 // 字段补齐，否则 zod parse 在 client SDK 处会失败。

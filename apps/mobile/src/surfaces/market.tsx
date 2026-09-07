@@ -23,6 +23,7 @@ import { type SupplyClient } from "../supply-client";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import {
   OPPORTUNITY_LENS_LABEL,
+  composePriceRange,
   type MarketOpportunity,
   type MarketTab,
   type OpportunityLens
@@ -852,7 +853,11 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
   const [title, setTitle] = useState("周六城市同行 + 拍照");
   const [time, setTime] = useState("10:00–18:00");
   const [location, setLocation] = useState("河内 · 西湖 / 老城区");
-  const [price, setPrice] = useState("2,000,000₫");
+  // 价格区间两框：最低必填（EARN/PAY），最高可选，只填一边即单价。
+  // wire 上仍走 price 自由字符串（composePriceRange 合成），server 侧
+  // 校验/normalize 不用改。
+  const [priceMin, setPriceMin] = useState("1,500,000₫");
+  const [priceMax, setPriceMax] = useState("2,000,000₫");
   const [moneyFlow, setMoneyFlow] = useState<PublishMoneyFlow>("EARN");
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string>();
@@ -862,15 +867,15 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
   // 资金方向联动：TBD 强制清空 Price，FREE 强制填 0。
   function onPickFlow(next: PublishMoneyFlow): void {
     setMoneyFlow(next);
-    if (next === "TBD") setPrice("");
-    else if (next === "FREE") setPrice("0₫");
+    if (next === "TBD") { setPriceMin(""); setPriceMax(""); }
+    else if (next === "FREE") { setPriceMin("0₫"); setPriceMax(""); }
   }
 
   const priceRequired = moneyFlow === "EARN" || moneyFlow === "PAY";
 
   async function publish(): Promise<void> {
     if (publishing || !title.trim() || !location.trim()) return;
-    if (priceRequired && !price.trim()) return;
+    if (priceRequired && !priceMin.trim()) return;
     setPublishing(true);
     setError(undefined);
     try {
@@ -880,7 +885,7 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
       // MarketOpportunitySchema.parse 严格验证。
       const opportunity = await marketplace.publish({
         title: title.trim(), shortTitle: "同行", theme: "城市同行", date: "周六", time: time.trim(),
-        location: location.trim(), price: price.trim(), skills: "中文 · 摄影 · 本地路线",
+        location: location.trim(), price: composePriceRange(priceMin, priceMax), skills: "中文 · 摄影 · 本地路线",
         lens: ["BOOKED", "NEARBY"], travel: 20,
         moneyFlow,
         ...(merchant.merchantId ? { merchantId: merchant.merchantId } : {})
@@ -935,7 +940,16 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
           </View>
           <Text style={styles.r4PriceLabel}>{priceLabelForPublisher(moneyFlow)} · {moneyFlow === "TBD" ? "金额由双方面谈确定" : moneyFlow === "FREE" ? "0₫ 免费" : "公开在卡片上"}</Text>
           {priceRequired ? (
-            <TextInput onChangeText={setPrice} style={styles.publishPriceInput} value={price} placeholder={moneyFlow === "EARN" ? "例如 1,500,000₫" : "例如 500,000₫"} />
+            <View style={styles.publishPriceRow}>
+              <View style={styles.publishPriceCell}>
+                <Text style={styles.factLabel}>最低</Text>
+                <TextInput onChangeText={setPriceMin} style={styles.publishPriceInput} value={priceMin} placeholder={moneyFlow === "EARN" ? "例如 1,500,000₫" : "例如 500,000₫"} />
+              </View>
+              <View style={styles.publishPriceCell}>
+                <Text style={styles.factLabel}>最高（可选）</Text>
+                <TextInput onChangeText={setPriceMax} style={styles.publishPriceInput} value={priceMax} placeholder="例如 2,000,000₫" />
+              </View>
+            </View>
           ) : (
             <Text style={[styles.publishPriceInput, styles.publishPricePlaceholder]}>{moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"}</Text>
           )}
@@ -1319,6 +1333,8 @@ const styles = StyleSheet.create({
   publishFactInput: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 3, paddingVertical: 2 },
   publishPriceInput: { color: color.ink, fontSize: 14, fontWeight: "900", paddingVertical: 3 },
   publishPricePlaceholder: { color: color.muted, fontStyle: "italic" },
+  publishPriceRow: { flexDirection: "row", gap: 10, marginTop: 2 },
+  publishPriceCell: { flex: 1 },
   publishFlowRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6, marginBottom: 6 },
   publishFlowChip: { backgroundColor: color.surface, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, minWidth: 120 },
   publishFlowChipOn: { backgroundColor: color.magenta },
