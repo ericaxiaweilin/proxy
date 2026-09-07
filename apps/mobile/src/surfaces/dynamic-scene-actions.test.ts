@@ -21,4 +21,11 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain('cachePolicy="memory-disk"');
     expect(source).toContain(">这个 Scene 喝什么<");
   });
+
+  it("carries the selected scene SKU into every real-world action", () => {
+    expect(source).toContain("setSelectedMenuId(value.menu[0]?.id)");
+    expect(source).toContain("menuItemId: menuItem?.id");
+    expect(source).toContain("menuItemId: selectedMenuItem?.id");
+    expect(source.match(/menuItemId: selectedMenuItem\?\.id/g)).toHaveLength(2);
+  });
 });

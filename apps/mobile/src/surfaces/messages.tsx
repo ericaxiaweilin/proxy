@@ -12,22 +12,10 @@ import type { ConversationClient, ConversationInboxItem } from "../conversation-
 type HomePanel = "dialogs" | "convos";
 type Folder = "all" | "friends" | "activity" | "invite";
 
-// v8 原型 mock — 与 HTML 1:1，去掉后端依赖先保证视觉对齐
+// v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
+// listConversations()，空收件箱显示诚实空态，不再展示假会话。
 type Dialog = { id: string; conversationId?: string; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
-const DIALOGS_PINNED: Dialog[] = [
-  { id: "linh", initial: "L", name: "Linh", badge: "同行 · 已接受", preview: "你：好，那我们 16:00 在西湖见。", time: "07:02", unread: "2", warm: true, online: true, folder: "friends" as Folder },
-  { id: "sunday", initial: "SC", name: "Sunday Coffee Walk", badge: "活动群", preview: "Minh：我把路线放到 Convo 里了。", time: "06:51", unread: "6", dark: true, folder: "activity" as Folder },
-] as const;
-
-const DIALOGS_RECENT: Dialog[] = [
-  { id: "maikhanh", initial: "MK", name: "Mai Khanh", preview: "[图片] 这家店就在你刚才发的位置旁边。", time: "周六", unread: "1", blue: true, folder: "friends" as Folder },
-  { id: "tuan", initial: "T", name: "Tuan", preview: "同行已完成 · 等待双方评价", time: "周五", unread: "", folder: "activity" as Folder },
-  { id: "proxy", initial: "P", name: "Proxy", preview: "你的礼品券已到账。", time: "周四", unread: "", dark: true, folder: "invite" as Folder },
-] as const;
-
-// R15.74: CONVOS 写死 mock 已删, 改走 server listConversations() 返的
-//   conversation.conversationType === "GROUP" | "SUPPORT" filter. (DM 在 dialogs tab).
-// 之前 mock: westlake / route. 现在 client-side filter (空集合时显示 "还没有群组对话").
+// R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
 
@@ -57,12 +45,9 @@ export function MessagesSurface({
   const [search, setSearch] = useState("");
   const searchInputRef = useRef<TextInput>(null);
   const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
-  const [personName, setPersonName] = useState("Linh");
+  const [personName, setPersonName] = useState("");
   const [contactSearch, setContactSearch] = useState("");
-  const [folders, setFolders] = useState<FolderV1[]>([
-    { id: "f1", name: "工作", dialogIds: ["linh"] },
-    { id: "f2", name: "生活", dialogIds: ["sunday"] },
-  ]);
+  const [folders, setFolders] = useState<FolderV1[]>([]);
 
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
@@ -81,9 +66,8 @@ export function MessagesSurface({
   }, [conversationClient]);
 
   const inboxLoaded = serverDialogs !== undefined || inboxError;
-  const usingServerData = Boolean(serverDialogs?.length);
-  const pinnedSource = usingServerData || !inboxLoaded ? [] : DIALOGS_PINNED;
-  const recentSource = usingServerData ? serverDialogs ?? [] : inboxLoaded ? DIALOGS_RECENT : [];
+  const pinnedSource: Dialog[] = [];
+  const recentSource = serverDialogs ?? [];
   // R15.74: Convo tab (panel="convos") — 从 serverDialogs 拿 GROUP/SUPPORT conversation
   //   之前 (Phase 1) 走写死 CONVOS mock — 跟 server listConversations 不接.
   const groupDialogs = useMemo(
@@ -128,16 +112,7 @@ export function MessagesSurface({
               <Text style={styles.mackeIcon}>💬</Text>
               <View style={{ flex: 1 }}><Text style={styles.mackeTitle}>默认静音</Text><Text style={styles.mackeMeta}>这里的消息不推送通知。你可以回复、移到关注，或把普通 Dialog 反向移进来。</Text></View>
             </View>
-            {[
-              { name: "Ngoc Ha", handle: "@ngocha · 通过你的动态找到你", msg: "你好，我看到你发的河内周末动态，想问一下那个活动还可以参加吗？" },
-              { name: "Quang Vu", handle: "没有共同联系人", msg: "你好，想问一下你发布的西湖路线。" },
-            ].map((r) => (
-              <View key={r.name} style={styles.requestCard}>
-                <View style={styles.requestTop}><View style={styles.avatar}><Text style={styles.avatarText}>{r.name.slice(0, 2)}</Text></View><View style={{ flex: 1 }}><Text style={styles.dialogName}>{r.name}</Text><Text style={styles.centerSub}>{r.handle}</Text></View></View>
-                <Text style={styles.requestMsg}>{r.msg}</Text>
-                <View style={styles.btnRow}><Pressable onPress={() => setSubView("home")} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable style={styles.btn}><Text style={styles.btnText}>忽略</Text></Pressable></View>
-              </View>
-            ))}
+            <Text style={styles.empty}>暂无陌生消息</Text>
           </ScrollView>
         </View>
       </SwipeBackShell>
@@ -145,11 +120,7 @@ export function MessagesSurface({
   }
 
   if (subView === "contacts") {
-    const CONTACTS = [
-      { name: "Linh", username: "@linh.ng", note: "备注：Linh · 西湖", meta: "通讯录：Nguyễn Linh · 08•• ••• 721", warm: true, online: true },
-      { name: "Mai Khanh", username: "@maikhanh", note: "备注：Khanh · Coffee", meta: "通讯录：Mai Khanh · 09•• ••• 188", blue: true },
-      { name: "Tuan", username: "联系人", note: "通讯录：Anh Tuấn · 03•• ••• 915" },
-    ];
+    const CONTACTS: Array<{ name: string; username: string; note: string; meta: string; warm?: boolean; blue?: boolean; online?: boolean }> = [];
     const filtered = CONTACTS.filter((c) => !contactSearch || `${c.name}${c.username}`.toLowerCase().includes(contactSearch.toLowerCase()));
     return (
       <SwipeBackShell onExit={() => setSubView("home")}>
@@ -166,6 +137,7 @@ export function MessagesSurface({
           </View>
           <ScrollView style={{ flex: 1 }}>
             <Text style={styles.contactSection}>已在 Proxy</Text>
+            {filtered.length === 0 ? <Text style={styles.empty}>暂无联系人</Text> : null}
             {filtered.map((c) => (
               <Pressable key={c.name} onPress={() => openPerson(c.name)} style={styles.contactRow}>
                 <View style={[styles.avatar, c.warm && styles.avatarWarm, c.blue && styles.avatarBlue]}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text>{c.online ? <View style={styles.online} /> : null}</View>
@@ -173,8 +145,6 @@ export function MessagesSurface({
                 <Text style={styles.contactAction}>聊天 ›</Text>
               </Pressable>
             ))}
-            <Text style={styles.contactSection}>邀请加入 Proxy</Text>
-            <Pressable style={styles.contactRow}><View style={styles.avatar}><Text style={styles.avatarText}>HA</Text></View><View style={{ flex: 1 }}><Text style={styles.contactName}>Hà Anh</Text><Text style={styles.contactMeta}>尚未使用 Proxy</Text></View><Text style={[styles.contactAction, { color: "#8d681b" }]}>邀请</Text></Pressable>
           </ScrollView>
         </View>
       </SwipeBackShell>
@@ -229,10 +199,9 @@ export function MessagesSurface({
             <Pressable accessibilityLabel="搜索" onPress={() => searchInputRef.current?.focus()} style={styles.icon}>
               <ProxyIcon color={color.ink} name="search" size={20} />
             </Pressable>
-            <Pressable accessibilityLabel="消息请求" onPress={openRequests} style={styles.iconBell}>
-              <ProxyIcon color={color.ink} name="mail" size={20} />
-              <View style={styles.bellDot} />
-            </Pressable>
+              <Pressable accessibilityLabel="消息请求" onPress={openRequests} style={styles.iconBell}>
+                <ProxyIcon color={color.ink} name="mail" size={20} />
+              </Pressable>
             <Pressable accessibilityLabel="新聊天" onPress={openContacts} style={styles.icon}>
               <ProxyIcon color={color.ink} name="plus" size={18} />
             </Pressable>
@@ -257,13 +226,13 @@ export function MessagesSurface({
           <Pressable onPress={() => setPanel("dialogs")} style={[styles.homeTab, panel === "dialogs" && styles.homeTabActive]}>
             <Text style={[styles.homeTabText, panel === "dialogs" && styles.homeTabTextActive]}>对话</Text>
             <View style={[styles.countBadge, panel !== "dialogs" && styles.countBadgeMuted]}>
-              <Text style={styles.countBadgeText}>3</Text>
+              <Text style={styles.countBadgeText}>{filteredRecent.length}</Text>
             </View>
           </Pressable>
           <Pressable onPress={() => setPanel("convos")} style={[styles.homeTab, panel === "convos" && styles.homeTabActive]}>
             <Text style={[styles.homeTabText, panel === "convos" && styles.homeTabTextActive]}>Convo</Text>
             <View style={[styles.countBadge, panel !== "convos" && styles.countBadgeMuted]}>
-              <Text style={styles.countBadgeText}>5</Text>
+              <Text style={styles.countBadgeText}>{groupDialogs.length}</Text>
             </View>
           </Pressable>
         </View>
@@ -318,8 +287,10 @@ export function MessagesSurface({
               </>
             ) : null}
 
-            <Text style={styles.sectionLabel}>最近{!usingServerData && inboxLoaded ? " · 演示数据" : ""}</Text>
-            {filteredRecent.length > 0 ? (
+            <Text style={styles.sectionLabel}>最近</Text>
+            {!inboxLoaded ? (
+              <Text style={styles.empty}>加载中…</Text>
+            ) : filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
                 <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId)} style={styles.dialog}>
                   <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
@@ -336,18 +307,8 @@ export function MessagesSurface({
                 </Pressable>
               ))
             ) : (
-              <Text style={styles.empty}>无匹配对话</Text>
+              <Text style={styles.empty}>还没有对话 — 从动态或市场开始聊一下</Text>
             )}
-
-            {/* 请求入口 — Mặc Kệ */}
-            <Pressable onPress={openRequests} style={styles.dialog}>
-              <View style={[styles.avatar]}><Text style={styles.avatarText}>?</Text></View>
-              <View style={styles.dialogMain}>
-                <View style={styles.dialogTop}><Text style={styles.dialogName}>消息请求</Text></View>
-                <Text style={styles.preview}>2 条陌生消息 · 默认静音</Text>
-              </View>
-              <View style={styles.dialogSide}><Text style={styles.time}>查看</Text></View>
-            </Pressable>
           </>
         ) : (
           <>

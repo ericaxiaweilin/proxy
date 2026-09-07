@@ -67,6 +67,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
   const [actionExplanation, setActionExplanation] = useState<string>();
   const [selectedAction, setSelectedAction] = useState<DynamicSceneAction>();
   const [selectedHumanId, setSelectedHumanId] = useState<string>();
+  const [selectedMenuId, setSelectedMenuId] = useState<string>();
   const [actionBusy, setActionBusy] = useState(false);
   const [actionResult, setActionResult] = useState<string>();
 
@@ -113,7 +114,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
     setDetail(undefined); setDetailError(undefined); setActionExplanation(undefined); setSelectedAction(undefined); setActionResult(undefined);
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}`, { headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
-      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); if (!cancelled) { setDetail(value); setSelectedHumanId(value.humans[0]?.id); } })
+      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); if (!cancelled) { setDetail(value); setSelectedHumanId(value.humans[0]?.id); setSelectedMenuId(value.menu[0]?.id); } })
       .catch(() => { if (!cancelled) setDetailError("动态场景暂时不可用，请稍后重试"); });
     return () => { cancelled = true; };
   }, [apiBaseUrl, selectedId]);
@@ -123,7 +124,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
     setDetailError(undefined); setActionExplanation(undefined);
     void fetch(`${apiBaseUrl.replace(/\/$/, "")}/v1/scenes/${encodeURIComponent(selectedId)}?variant=${encodeURIComponent(variantId)}`, { headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error(`status ${response.status}`); return response.json(); })
-      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); setSelectedHumanId(value.humans[0]?.id); })
+      .then((value: unknown) => { if (!isSceneDetail(value)) throw new Error("malformed"); setDetail(value); setSelectedHumanId(value.humans[0]?.id); setSelectedMenuId(value.menu[0]?.id); })
       .catch(() => setDetailError("场景切换失败，请重试"));
   };
 
@@ -133,20 +134,22 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
     setActionBusy(true); setActionResult(undefined);
     try {
       const variant = detail.variants.find((item) => item.id === detail.selectedVariant) ?? detail.variants[0]!;
+      const selectedMenuItem = detail.menu.find((item) => item.id === selectedMenuId);
       if (selectedAction.type === "DIRECT_INVITE") {
         const human = detail.humans.find((item) => item.id === selectedHumanId);
         if (!human) throw new Error("请先选择要邀请的真人");
+        const menuItem = detail.menu.find((item) => item.id === selectedMenuId);
         const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         const created = await sendSceneCommand(authClient, session, "CreateScene", "new", { tool: "DIRECT_INVITE", intent: `${variant.name} · ${variant.bestFor}`, participation: "双人见面 · 需双方确认", cost: "各自消费", startsAt });
         const sceneId = typeof created.aggregateId === "string" ? created.aggregateId : undefined;
         if (!sceneId) throw new Error("场景创建失败");
-        const invitation = await sendSceneCommand(authClient, session, "CreateInvitation", sceneId, { sceneId, inviteeUserId: human.id, card: { what: variant.bestFor, where: detail.venueName, when: `${variant.window}（双方可在聊天中修改）`, who: human.name, hostLabel: "你" } });
-        setActionResult(`邀请已发送给 ${human.name} · 状态 ${String(invitation.aggregateState ?? "PENDING")} · 尚未生成订单`);
+        const invitation = await sendSceneCommand(authClient, session, "CreateInvitation", sceneId, { sceneId, inviteeUserId: human.id, card: { what: variant.bestFor, where: detail.venueName, when: `${variant.window}（双方可在聊天中修改）`, who: human.name, hostLabel: "你", menuItemId: menuItem?.id, menuItemName: menuItem?.name } });
+        setActionResult(`邀请已发送给 ${human.name}${menuItem ? ` · ${menuItem.name}` : ""} · 状态 ${String(invitation.aggregateState ?? "PENDING")} · 尚未生成订单`);
       } else if (selectedAction.type === "OPEN_TASK") {
-        const result = await sendSceneCommand(authClient, session, "PublishMarketOpportunity", "new", { title: `${variant.name} · ${variant.bestFor}`, shortTitle: variant.name, theme: variant.facets.join(" / "), date: "近期", time: variant.window, location: detail.venueName, price: "150K", moneyFlow: "EARN", skills: "Scene fit / UGC", lens: ["NOW", "NEARBY"] });
+        const result = await sendSceneCommand(authClient, session, "PublishMarketOpportunity", "new", { title: `${variant.name} · ${variant.bestFor}`, shortTitle: variant.name, theme: variant.facets.join(" / "), date: "近期", time: variant.window, location: detail.venueName, price: "150K", moneyFlow: "EARN", skills: "Scene fit / UGC", lens: ["NOW", "NEARBY"], menuItemId: selectedMenuItem?.id, menuItemName: selectedMenuItem?.name });
         setActionResult(`机会 ${String(result.aggregateId ?? "")} 已发布 · 150K 是完成者可获得的报酬 · 等待候选申请`);
       } else {
-        const result = await sendSceneCommand(authClient, session, "PublishActivity", "new", { title: `${variant.name} · ${variant.bestFor}`, time: variant.window, capacity: 8, venueName: detail.venueName, venueIcon: "coffee", venueType: "CAFE", realitySceneId: detail.sceneId, desc: `${variant.facets.join(" · ")}。报名不等于到场。`, consumptionTerm: "SPLIT" });
+        const result = await sendSceneCommand(authClient, session, "PublishActivity", "new", { title: `${variant.name} · ${variant.bestFor}`, time: variant.window, capacity: 8, venueName: detail.venueName, venueIcon: "coffee", venueType: "CAFE", realitySceneId: detail.sceneId, desc: `${variant.facets.join(" · ")}。报名不等于到场。`, consumptionTerm: "SPLIT", menuItemId: selectedMenuItem?.id, menuItemName: selectedMenuItem?.name });
         setActionResult(`活动 ${String(result.aggregateId ?? "")} 已发布 · 免费报名、到店消费各自承担 · 已进入“我的活动”`);
       }
     } catch (error) { setActionResult(error instanceof Error ? error.message : "操作失败，请重试"); }
@@ -244,8 +247,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, initialSceneId,
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
               {detail.humans.map((human) => <Pressable key={human.id} onPress={() => setSelectedHumanId(human.id)} style={[styles.humanCard, selectedHumanId === human.id && styles.humanCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-human:${human.id}`} source={{ uri: human.avatarUrl }} style={styles.humanAvatar} transition={0} /><Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
             </ScrollView>
-            <Text style={styles.sectionTitle}>这个 Scene 喝什么</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{detail.menu.map((item) => <View key={item.id} style={styles.menuCard}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></View>)}</ScrollView>
+            <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>这个 Scene 喝什么</Text><Text style={styles.sectionLink}>完整菜单</Text></View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{detail.menu.map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
             <View style={styles.actions}>
               <Pressable onPress={() => persistToggle(saved, selected.id, setSaved, "SetRealitySceneSaved")} style={[styles.action, saved.has(selected.id) && styles.actionSelected]}><Text style={styles.actionText}>{saved.has(selected.id) ? "★ 已收藏" : "☆ 收藏"}</Text></Pressable>
               <Pressable onPress={() => persistVisited(selected.id)} style={styles.action}><Text style={styles.actionText}>{visited.has(selected.id) ? "✓ 已去过" : "标记去过"}</Text></Pressable>
@@ -377,7 +380,7 @@ const styles = StyleSheet.create({
   variantRail: { gap: 9, paddingRight: 16 }, variantCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, minHeight: 116, padding: 13, width: 178 }, variantCardSelected: { backgroundColor: color.ink, borderColor: color.ink }, variantName: { color: color.ink, fontSize: 15, fontWeight: "900" }, variantNameSelected: { color: color.white }, variantWindow: { color: color.violet, fontSize: 12, fontWeight: "800", marginTop: 5 }, variantBest: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 8 },
   variantPill: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 9 }, variantPillSelected: { backgroundColor: color.ink, borderColor: color.ink }, variantPillText: { color: color.ink, fontSize: 12, fontWeight: "700" }, variantPillTextSelected: { color: color.white }, bestGrid: { flexDirection: "row", gap: 9 }, bestCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flex: 1, minHeight: 105, padding: 13 }, bestTitle: { color: color.ink, fontSize: 14, fontWeight: "900", lineHeight: 19 }, bestSub: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 7 },
   humanRail: { gap: 9, paddingRight: 16 }, humanCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, padding: 13, width: 150 }, humanCardSelected: { borderColor: color.violet, borderWidth: 2 }, humanAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 22, height: 44, width: 44 }, humanAvatarText: { color: color.violet, fontSize: 19, fontWeight: "900" }, humanName: { color: color.ink, fontSize: 16, fontWeight: "900", marginTop: 9 }, humanRole: { color: color.muted, fontSize: 11, marginTop: 3 }, humanFit: { color: color.violet, fontSize: 11, fontWeight: "800", marginTop: 8 }, humanAvailability: { color: color.ink, fontSize: 11, marginTop: 3 },
-  menuRail: { gap: 10, paddingRight: 16 }, menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, overflow: "hidden", paddingBottom: 10, width: 154 }, menuImage: { height: 104, width: "100%" }, menuName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 9, paddingHorizontal: 10 }, menuFit: { color: color.muted, fontSize: 10, marginTop: 3, paddingHorizontal: 10 }, menuPrice: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, paddingHorizontal: 10 },
+  sectionTitleRow: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" }, sectionLink: { color: "#735700", fontSize: 11, fontWeight: "700", marginBottom: 9 }, menuRail: { gap: 10, paddingRight: 16 }, menuCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, overflow: "hidden", paddingBottom: 10, width: 154 }, menuCardSelected: { borderColor: "#D7A600", borderWidth: 2 }, menuImage: { height: 104, width: "100%" }, menuName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 9, paddingHorizontal: 10 }, menuFit: { color: color.muted, fontSize: 10, marginTop: 3, paddingHorizontal: 10 }, menuPrice: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, paddingHorizontal: 10 },
   executionCard: { flexDirection: "row", gap: 7 }, executionAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, flex: 1, minHeight: 68, justifyContent: "center", paddingHorizontal: 5 }, executionActionSelected: { backgroundColor: color.violet }, executionLabel: { color: color.white, fontSize: 12, fontWeight: "900", textAlign: "center" }, executionState: { color: color.muted, fontSize: 11, marginTop: 5 }, boundaryCard: { backgroundColor: color.proxyPurpleSoft, borderRadius: 16, marginTop: 9, padding: 13 }, boundaryStrong: { color: color.ink, fontSize: 12, fontWeight: "800", lineHeight: 18 }, boundaryText: { color: color.muted, fontSize: 11, lineHeight: 17, marginTop: 6 }, confirmAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, marginTop: 12, paddingVertical: 11 }, confirmActionText: { color: color.white, fontSize: 13, fontWeight: "900" }, actionResult: { color: color.ink, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 10 }, loadingDetail: { color: color.muted, fontSize: 12, paddingVertical: 22, textAlign: "center" },
   sectionTitle: { color: color.ink, fontSize: 18, fontWeight: "900", marginBottom: 8, marginTop: 20 }, dataCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14 }, dataRow: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingVertical: 14 }, dataRowLast: { borderBottomWidth: 0 }, dataLabel: { color: color.ink, fontSize: 13, fontWeight: "700" }, dataValue: { color: color.muted, fontSize: 13 }
 });
