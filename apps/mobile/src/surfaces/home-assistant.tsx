@@ -194,30 +194,6 @@ export function HomeAssistantSurface({
     }
   }
 
-  async function finishEvent(): Promise<void> {
-    if (!conversationId || sending) return;
-    setSending(true);
-    setStatus("正在整理本次事件总结…");
-    try {
-      const result = await conversationClient.sendMessage(
-        conversationId,
-        "请把本次 Home 事件整理成一段简洁总结，包含目标、已确认条件、待确认事项和下一步。",
-        mode
-      );
-      const payload = parseOperationRef(result);
-      if (!payload?.aiMessage) {
-        setStatus("总结暂未生成，请稍后重试完成。");
-        return;
-      }
-      appendAIReply(payload, setMessages);
-      onBack();
-    } catch (error: unknown) {
-      setStatus(chatErrorMessage(error, "事件总结生成失败，请重试。"));
-    } finally {
-      setSending(false);
-    }
-  }
-
   return (
     <View style={[styles.root, embedded && styles.embeddedRoot, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
       {!embedded ? <View style={styles.header}>
@@ -236,9 +212,6 @@ export function HomeAssistantSurface({
           <View style={styles.embeddedActions}>
             <Pressable accessibilityLabel="收起 Home 对话" onPress={() => { Keyboard.dismiss(); onBack(); }} style={styles.embeddedClose}>
               <Text style={styles.embeddedCloseText}>收起</Text>
-            </Pressable>
-            <Pressable accessibilityLabel="总结并结束 Home 会话" disabled={sending || !conversationId} onPress={() => void finishEvent()} style={[styles.embeddedClose, (sending || !conversationId) && styles.disabled]}>
-              <Text style={styles.embeddedCloseText}>{sending ? "总结中…" : "完成"}</Text>
             </Pressable>
           </View>
         </View>
@@ -368,7 +341,7 @@ function statusMessage(value: unknown): string | undefined {
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
-  embeddedRoot: { borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 0, height: 520, overflow: "hidden", ...shadows.card },
+  embeddedRoot: { borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 0, height: 350, overflow: "hidden", ...shadows.card },
   embeddedHeader: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 11 },
   timelineDivider: { alignItems: "center", flexDirection: "row", gap: 8, marginVertical: 7 },
   timelineLine: { backgroundColor: color.line, flex: 1, height: StyleSheet.hairlineWidth },

@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 107 — 2026-09-08
+
+### Compact, single-submit Home AI conversation
+
+- Sending a message is the only submit action and persists it immediately; closing the
+  Home panel no longer sends a second hidden summary prompt.
+- The embedded Home conversation defaults to 350 pt, approximately two thirds of its
+  previous height, preserving more of the discovery surface.
+
 ## Revision 106 — 2026-09-08
 
 - AI 横滑与真人横滑对齐：AI rail 出血到边（去左右空白），间距与真人一致。

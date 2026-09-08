@@ -7,8 +7,15 @@ const keyboardSafe = readFileSync(new URL("../components/use-keyboard-safe-inset
 describe("Home embedded assistant persistence contract", () => {
   it("closes explicitly without leaving a redundant received-message strip", () => {
     expect(source).toContain('accessibilityLabel="收起 Home 对话"');
+    expect(source).not.toContain('accessibilityLabel="总结并结束 Home 会话"');
+    expect(source).not.toContain("finishEvent");
     expect(source).not.toContain('accessibilityLabel="继续和 Proxy 对话"');
     expect(source).not.toContain("collapsedBar");
+  });
+
+  it("uses one send action and a compact default window", () => {
+    expect(source).toContain("height: 350");
+    expect(source).not.toContain("请把本次 Home 事件整理成一段简洁总结");
   });
 
   it("hydrates the same durable timeline including Home dividers", () => {
