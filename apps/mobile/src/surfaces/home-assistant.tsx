@@ -96,8 +96,8 @@ export function HomeAssistantSurface({
       appendAIReply(payload, setMessages);
       setTemporaryUI(readServerTemporaryUI(payload?.temporaryUI));
       setStatus(statusMessage(payload?.assistantStatus));
-    }).catch((error: unknown) => {
-      if (!cancelled) setStatus(error instanceof Error ? error.message : "无法连接 Proxy 对话");
+    }).catch(() => {
+      if (!cancelled) setStatus("无法连接 Proxy 对话，请检查连接后重试。");
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
@@ -127,7 +127,7 @@ export function HomeAssistantSurface({
     const t = text.toLowerCase();
     if (/(周六|周日|今晚|明天|拍照|咖啡|西湖|有空|状态|临时)/i.test(t) && /(小美|找|想|有空)/i.test(t)) {
       setSuggestedActions([{ label: "看临时状态 ›", isFeed: true }]);
-      setMessages((cur) => [...cur, makeMessage("临时状态里有小美「周六下午想去西湖拍照 ☕️」等 3 条 24h 动态，24h 后自动归档，不进永久主页。去动态的临时状态看看吧。", false)]);
+      setMessages((cur) => [...cur, makeMessage("小美们的 24h 临时状态在动态里，24h 后自动归档、不进永久主页。点下面去看看，有中意的再约。", false)]);
       return;
     }
     if (/(小美|xiaomei|陪同|找.*妹|挑.*人|找小美)/i.test(text)) {
@@ -152,13 +152,24 @@ export function HomeAssistantSurface({
     handleLocalIntent(initialText);
   }, [conversationId, loading]);
 
+  // 对话失败说人话：英文技术错不直接上屏；发送失败撤回乐观气泡、
+  // 恢复草稿，不让"发出去了"成假的。
+  function chatErrorMessage(error: unknown, fallback: string): string {
+    const msg = error instanceof Error ? error.message : "";
+    if (/principal|session|signed|sign in|auth|401|403/i.test(msg)) return "登录已过期，请重新登录后再聊。";
+    // 服务端 messageKey（xxx.yyy 形）和空消息不直接上屏。
+    if (!msg || /[a-z_]+\.[a-z_]+/i.test(msg)) return fallback;
+    return msg;
+  }
+
   async function send(preparedText?: string, temporaryUIResponseId?: string): Promise<void> {
     const text = (preparedText ?? draft).trim();
     if (!text || !conversationId || sending) return;
     setDraft("");
     setStatus(undefined);
     setTemporaryUI(undefined);
-    setMessages((current) => [...current, makeMessage(text, true)]);
+    const optimistic = makeMessage(text, true);
+    setMessages((current) => [...current, optimistic]);
     handleLocalIntent(text);
     setSending(true);
     try {
@@ -168,7 +179,9 @@ export function HomeAssistantSurface({
       setTemporaryUI(readServerTemporaryUI(payload?.temporaryUI));
       setStatus(statusMessage(payload?.assistantStatus));
     } catch (error: unknown) {
-      setStatus(error instanceof Error ? error.message : "消息发送失败");
+      setMessages((current) => current.filter((msg) => msg !== optimistic));
+      setDraft(text);
+      setStatus(chatErrorMessage(error, "消息发送失败，请检查连接后重试。"));
     } finally {
       setSending(false);
       Keyboard.dismiss();
@@ -194,7 +207,7 @@ export function HomeAssistantSurface({
       appendAIReply(payload, setMessages);
       onBack();
     } catch (error: unknown) {
-      setStatus(error instanceof Error ? error.message : "事件总结生成失败，请重试");
+      setStatus(chatErrorMessage(error, "事件总结生成失败，请重试。"));
     } finally {
       setSending(false);
     }
