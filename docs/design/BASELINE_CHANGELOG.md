@@ -4,6 +4,10 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 90 — 2026-09-08
+
+- 市场机会订单卡的场景图片由 64×88 放大为 104×136，提升手机端图片利用率；订单信息与接单操作保持不变。
+
 ## Revision 89 — 2026-09-08
 
 - 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。

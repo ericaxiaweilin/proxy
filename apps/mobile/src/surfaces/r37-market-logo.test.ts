@@ -25,4 +25,9 @@ describe("MARKET-LOGO-SINGLE-TILE-001", () => {
     expect(card).toContain("SAMPLE_SCENE_IMAGE[type]");
     expect(card).toContain("AI 样张");
   });
+
+  it("uses a scene photo as a substantial mobile card anchor", () => {
+    expect(card).toMatch(/thumb:\s*\{[^}]*height:\s*136[^}]*width:\s*104/);
+    expect(card).not.toMatch(/thumb:\s*\{[^}]*height:\s*88[^}]*width:\s*64/);
+  });
 });
