@@ -304,35 +304,53 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         <View style={styles.recommendActions}><Pressable onPress={() => { const first = ADV_CRM_FRIENDS[0]; if (first) openDetail(first); }} style={styles.recommendBtn} accessibilityLabel="查看推荐对象详情"><Text style={styles.recommendBtnText}>查看</Text></Pressable><Pressable onPress={sendVoucher} style={[styles.recommendBtn, styles.recommendBtnPrimary]} accessibilityLabel="发礼券"><Text style={styles.recommendBtnPrimaryText}>发礼券</Text></Pressable><Pressable onPress={() => onOpenConversation(ADV_CRM_FRIENDS[0]?.name ?? "Mai")} style={styles.recommendBtn}><Text style={styles.recommendBtnText}>发消息</Text></Pressable></View>
         <View style={styles.contextBuilder}><Text style={styles.contextTitle}>语境构建建议</Text><Text style={styles.contextSub}>用户可选，不自动替用户发送</Text><Text style={styles.contextTag}>可选 · 建议风格：自然、轻松、先场景后邀约</Text><Text style={styles.contextDesc}>从咖啡或摄影共同兴趣切入，再自然推进礼券或活动邀请。</Text><View style={styles.contextChips}><View style={styles.contextChipActive}><Text style={styles.contextChipActiveText}>轻松</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>朋友式</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>直接</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>商务</Text></View></View></View>
       </View>
+      )}
 
       <View style={styles.assistantCard}>
         <Text style={styles.assistantTitle}>智能关系助手</Text>
         <Text style={styles.assistantSub}>自动整理 Proxy 内部关系事件；消息内容理解独立授权</Text>
         <View style={styles.assistantRow}><View><Text style={styles.assistantLabel}>内部互动事件整理</Text><Text style={styles.assistantDesc}>基于 Proxy 内部事件</Text></View><View style={styles.toggleOn}><Text style={styles.toggleOnText}>开启</Text></View></View>
         <View style={styles.assistantRow}><View><Text style={styles.assistantLabel}>消息内容理解</Text><Text style={styles.assistantDesc}>需独立授权</Text></View><View style={styles.toggleOff}><Text style={styles.toggleOffText}>关闭</Text></View></View>
-        <View style={styles.assistantRow}><View><Text style={styles.assistantLabel}>主动分享的社媒账号自动保存</Text><Text style={styles.assistantDesc}>确认后保存</Text></View><Pressable onPress={() => showToast("已开启自动保存")} style={styles.toggleOn}><Text style={styles.toggleOnText}>开启</Text></Pressable></View>
+        <View style={styles.assistantRow}><View><Text style={styles.assistantLabel}>主动分享的社媒账号自动保存</Text><Text style={styles.assistantDesc}>确认后保存</Text></View><Pressable onPress={() => setAutoSaveSocial((v) => !v)} style={autoSaveSocial ? styles.toggleOn : styles.toggleOff} accessibilityLabel={`社媒账号自动保存${autoSaveSocial ? "开" : "关"}`}><Text style={autoSaveSocial ? styles.toggleOnText : styles.toggleOffText}>{autoSaveSocial ? "开启" : "关闭"}</Text></Pressable></View>
         <Text style={styles.assistantFoot}>数据来源仅限 Proxy 内部事件、用户授权绑定、双方主动分享的信息。</Text>
       </View>
 
       <View style={styles.searchRow}><TextInput value={search} onChangeText={setSearch} placeholder="搜索好友、备注、互动…" placeholderTextColor={color.muted} style={styles.searchInputFull} /><View style={styles.searchBtnIcon}><ProxyIcon color={color.white} name="search" size={18} /></View></View>
 
+      {serverMode ? null : (
       <View style={styles.filterTabs}>
         <Pressable onPress={() => setCrmTab("ALL")} style={[styles.filterTab, crmTab === "ALL" && styles.filterTabActive]}><Text style={[styles.filterTabText, crmTab === "ALL" && styles.filterTabTextActive]}>全部</Text></Pressable>
         <Pressable onPress={() => setCrmTab("WARM")} style={[styles.filterTab, crmTab === "WARM" && styles.filterTabActive]}><Text style={[styles.filterTabText, crmTab === "WARM" && styles.filterTabTextActive]}>暖关系</Text></Pressable>
         <Pressable onPress={() => setCrmTab("FOLLOW")} style={[styles.filterTab, crmTab === "FOLLOW" && styles.filterTabActive]}><Text style={[styles.filterTabText, crmTab === "FOLLOW" && styles.filterTabTextActive]}>待跟进</Text></Pressable>
         <Pressable onPress={() => setCrmTab("MET")} style={[styles.filterTab, crmTab === "MET" && styles.filterTabActive]}><Text style={[styles.filterTabText, crmTab === "MET" && styles.filterTabTextActive]}>已见面</Text></Pressable>
       </View>
+      )}
 
       <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>好友列表</Text><Text style={styles.sectionNote}>{visibleAdv.length} 人</Text></View>
-        {visibleAdv.map((friend, idx) => (
-          <Pressable key={friend.id} onPress={() => openDetail({ ...friend, relation: friend.actionSub } as CrmFriend)} style={[styles.friendRow, idx > 0 && styles.friendRowLine]}>
-            <View style={styles.avatar}><Text style={styles.avatarText}>{friend.initial}</Text></View>
-            <View style={styles.friendCopy}><Text style={styles.friendName}>{friend.name}</Text><Text style={styles.friendContext}>{friend.note}</Text><View style={styles.tagRow}><View style={styles.tag}><Text style={styles.tagText}>{friend.actionSub}</Text></View></View></View>
-            <Pressable onPress={() => { if (friend.actionLabel.includes("礼券") || friend.actionLabel.includes("咖啡")) showToast("咖啡券已发送"); else if (friend.actionLabel.includes("体验")) showToast("体验邀约已发送"); else onOpenConversation(friend.name); }} style={styles.listActionBtn}><Text style={styles.listActionBtnText}>{friend.actionLabel}</Text></Pressable>
-          </Pressable>
-        ))}
-        {!visibleAdv.length ? <Text style={styles.emptyResult}>没有匹配的好友</Text> : null}
+        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>好友列表</Text><Text style={styles.sectionNote}>{serverMode ? visible.length : visibleAdv.length} 人{serverMode ? " · 服务端" : " · 本地"}</Text></View>
+        {serverMode ? (
+          <>
+            {visible.map((friend, idx) => (
+              <Pressable key={friend.id} onPress={() => openDetail(friend)} style={[styles.friendRow, idx > 0 && styles.friendRowLine]}>
+                <View style={styles.avatar}><Text style={styles.avatarText}>{friend.initial}</Text></View>
+                <View style={styles.friendCopy}><Text style={styles.friendName}>{friend.name}</Text><Text style={styles.friendContext}>{friend.relation}</Text></View>
+                <Pressable onPress={() => onOpenConversation(friend.name)} style={styles.listActionBtn} accessibilityLabel={`给${friend.name}发消息`}><Text style={styles.listActionBtnText}>发消息</Text></Pressable>
+              </Pressable>
+            ))}
+            {!visible.length ? <Text style={styles.emptyResult}>没有匹配的好友</Text> : null}
+          </>
+        ) : (
+          <>
+            {visibleAdv.map((friend, idx) => (
+              <Pressable key={friend.id} onPress={() => openDetail({ ...friend, relation: friend.actionSub } as CrmFriend)} style={[styles.friendRow, idx > 0 && styles.friendRowLine]}>
+                <View style={styles.avatar}><Text style={styles.avatarText}>{friend.initial}</Text></View>
+                <View style={styles.friendCopy}><Text style={styles.friendName}>{friend.name}</Text><Text style={styles.friendContext}>{friend.note}</Text><View style={styles.tagRow}><View style={styles.tag}><Text style={styles.tagText}>{friend.actionSub}</Text></View></View></View>
+                <Pressable onPress={() => { if (friend.actionLabel.includes("礼券") || friend.actionLabel.includes("咖啡") || friend.actionLabel.includes("体验")) sendVoucher(); else onOpenConversation(friend.name); }} style={styles.listActionBtn}><Text style={styles.listActionBtnText}>{friend.actionLabel}</Text></Pressable>
+              </Pressable>
+            ))}
+            {!visibleAdv.length ? <Text style={styles.emptyResult}>没有匹配的好友</Text> : null}
+          </>
+        )}
       </View>
 
       <View style={styles.privacy}><View style={styles.privacyIcon}><Text style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text style={styles.privacyStrong}>数据边界</Text><Text style={styles.privacyP}>全部数据来自 Proxy 内部事件与你主动分享的信息，不会自动读取聊天内容或社媒私信。</Text></View></View>
@@ -342,16 +360,34 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   );
 }
 
-function FriendDetail({ friend, onBack, onOpenConversation, showToast, toast }: { friend: CrmFriend; onBack: () => void; onOpenConversation: (a: string) => void; showToast: (t: string) => void; toast: string }): React.JSX.Element {
+function FriendDetail({ friend, relationship, onBack, onOpenConversation, onOpenVouchers, showToast, toast }: { friend: CrmFriend; relationship?: RelationshipClient | undefined; onBack: () => void; onOpenConversation: (a: string) => void; onOpenVouchers?: (() => void) | undefined; showToast: (t: string) => void; toast: string }): React.JSX.Element {
   const [note, setNote] = useState(friend.note);
   const [tags, setTags] = useState<string[]>(friend.tags);
   const [newTag, setNewTag] = useState("");
+  const [blocking, setBlocking] = useState(false);
+  // 只有服务端好友（带 userId）且已接 RelationshipClient 才能真正拉黑；
+  // 演示数据没有服务端 id，按钮保持禁用并明说，不伪造“已拉黑”。
+  const blockable = Boolean(friend.userId && relationship && !blocking);
   function addTag(): void {
     const t = newTag.trim();
     if (!t || tags.includes(t)) return;
     setTags((prev) => [...prev, t]);
     setNewTag("");
-    showToast("标签已添加");
+    showToast("标签已添加（仅本机）");
+  }
+  async function block(): Promise<void> {
+    if (!friend.userId || !relationship || blocking) return;
+    setBlocking(true);
+    try {
+      await relationship.blockFriend(friend.userId);
+      showToast("已拉黑");
+      onBack();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "";
+      showToast(/principal|session|signed|sign in|auth|401|403/i.test(msg) ? "请先登录后再操作。" : "拉黑失败，请稍后重试。");
+    } finally {
+      setBlocking(false);
+    }
   }
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
@@ -359,7 +395,7 @@ function FriendDetail({ friend, onBack, onOpenConversation, showToast, toast }: 
 
       <View style={styles.detailHead}><View style={styles.avatarLarge}><Text style={styles.avatarLargeText}>{friend.initial}</Text></View><View style={styles.detailHeadCopy}><Text style={styles.detailName}>{friend.name}</Text><Text style={styles.detailProxyId}>{friend.proxyId} · {friend.city} · 已验证</Text><View style={styles.tagRow}>{tags.map((t) => <View key={t} style={styles.tag}><Text style={styles.tagText}>{t}</Text></View>)}</View></View></View>
 
-      <View style={styles.actionRow}><Pressable onPress={() => onOpenConversation(friend.name)} style={[styles.actionBtn, styles.actionBtnPrimary]}><Text style={styles.actionBtnPrimaryText}>发消息</Text></Pressable><Pressable onPress={() => showToast("主页已打开")} style={styles.actionBtn}><Text style={styles.actionBtnText}>查看主页</Text></Pressable></View>
+      <View style={styles.actionRow}><Pressable onPress={() => onOpenConversation(friend.name)} style={[styles.actionBtn, styles.actionBtnPrimary]}><Text style={styles.actionBtnPrimaryText}>发消息</Text></Pressable>{onOpenVouchers ? <Pressable onPress={onOpenVouchers} style={styles.actionBtn} accessibilityLabel="发礼券"><Text style={styles.actionBtnText}>发礼券</Text></Pressable> : null}</View>
 
       <View style={styles.sectionCard}>
         <View style={styles.sectionHead}><Text style={styles.sectionTitle}>关系信息</Text><Text style={styles.sectionNote}>轻 CRM</Text></View>
@@ -371,15 +407,15 @@ function FriendDetail({ friend, onBack, onOpenConversation, showToast, toast }: 
       </View>
 
       <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>标签</Text><Text style={styles.sectionNote}>用于筛选与回顾</Text></View>
+        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>标签</Text><Text style={styles.sectionNote}>用于筛选与回顾 · 仅本机</Text></View>
         <View style={styles.tagRow}>{tags.map((t) => <Pressable key={t} onPress={() => setTags((prev) => prev.filter((x) => x !== t))} style={styles.tagEditable}><Text style={styles.tagText}>{t} ×</Text></Pressable>)}{!tags.length ? <Text style={styles.emptyInline}>暂无标签</Text> : null}</View>
         <View style={styles.tagAddRow}><TextInput value={newTag} onChangeText={setNewTag} placeholder="新增标签，如：摄影" placeholderTextColor={color.muted} style={styles.tagInput} /><Pressable onPress={addTag} style={styles.tagAddBtn}><Text style={styles.tagAddBtnText}>添加</Text></Pressable></View>
       </View>
 
       <View style={styles.sectionCard}>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>备注</Text><Text style={styles.sectionNote}>仅自己可见</Text></View>
+        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>备注</Text><Text style={styles.sectionNote}>仅自己可见 · 仅本机</Text></View>
         <TextInput value={note} onChangeText={setNote} placeholder="写下你对这位好友的备注…" placeholderTextColor={color.muted} multiline style={styles.noteInput} />
-        <Pressable onPress={() => showToast("备注已保存")} style={[styles.btn, styles.btnPrimary, { marginTop: 10 }]}><Text style={styles.btnPrimaryText}>保存备注</Text></Pressable>
+        <Pressable onPress={() => showToast("备注已保存（仅本机）")} style={[styles.btn, styles.btnPrimary, { marginTop: 10 }]}><Text style={styles.btnPrimaryText}>保存备注</Text></Pressable>
       </View>
 
       <View style={styles.sectionCard}>
@@ -389,7 +425,8 @@ function FriendDetail({ friend, onBack, onOpenConversation, showToast, toast }: 
         <View style={styles.timelineRow}><View style={styles.timelineDot} /><View style={styles.timelineCopy}><Text style={styles.timelineTitle}>添加好友 · {friend.createdAt}</Text><Text style={styles.timelineSub}>{friend.sourceLabel}</Text></View></View>
       </View>
 
-      <View style={styles.dangerRow}><Pressable onPress={() => showToast("已移除好友（演示）")} style={styles.dangerBtn}><Text style={styles.dangerBtnText}>移除好友</Text></Pressable><Pressable onPress={() => showToast("已拉黑（演示）")} style={styles.dangerBtn}><Text style={styles.dangerBtnText}>拉黑</Text></Pressable></View>
+      <View style={styles.dangerRow}><Pressable disabled={!blockable} onPress={() => void block()} style={[styles.dangerBtn, !blockable && styles.dangerBtnDisabled]} accessibilityLabel={friend.userId ? "拉黑" : "拉黑（演示数据不可操作）"}><Text style={styles.dangerBtnText}>{blocking ? "处理中…" : "拉黑"}</Text></Pressable></View>
+      {!friend.userId ? <Text style={styles.dangerHint}>本地演示数据：拉黑只对服务端好友生效，不伪造结果。移除好友暂无服务端指令，不提供假按钮。</Text> : null}
 
       {toast ? <View style={styles.toast}><Text style={styles.toastText}>{toast}</Text></View> : null}
     </ScrollView>
@@ -491,7 +528,10 @@ const styles = StyleSheet.create({
   timelineSub: { color: color.muted, fontSize: 11, marginTop: 3 },
   dangerRow: { flexDirection: "row", gap: 8, marginTop: 16 },
   dangerBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, flex: 1, paddingVertical: 10 },
+  dangerBtnDisabled: { opacity: 0.45 },
   dangerBtnText: { color: color.error, fontSize: 12, fontWeight: "800" },
+  dangerHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 8 },
+  loadError: { color: color.error, fontSize: 11, lineHeight: 15, marginTop: 6 },
   sheetOverlay: { alignItems: "flex-end", backgroundColor: "rgba(17,13,21,0.38)", flex: 1, justifyContent: "flex-end" },
   sheet: { backgroundColor: color.white, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: "90%", padding: 16, width: "100%" },
   sheetGrab: { alignSelf: "center", backgroundColor: "#DDD6E3", borderRadius: 999, height: 4, width: 36 },
@@ -507,16 +547,11 @@ const styles = StyleSheet.create({
   btnPrimary: { backgroundColor: color.ink, borderColor: color.ink },
   btnText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   btnPrimaryText: { color: color.white, fontSize: 11, fontWeight: "900" },
-  qrbox: { alignItems: "center", marginTop: 12 },
-  fakeQr: { alignItems: "center", backgroundColor: "#EEEAF1", borderRadius: 12, height: 120, justifyContent: "center", width: 120 },
-  fakeQrP: { backgroundColor: color.white, borderRadius: 10, color: color.ink, fontSize: 18, fontWeight: "900", overflow: "hidden", paddingHorizontal: 12, paddingVertical: 8 },
   qrName: { alignItems: "center", marginTop: 10 },
   qrNameStrong: { color: color.ink, fontSize: 14, fontWeight: "900" },
   qrNameSub: { color: color.muted, fontSize: 11, marginTop: 3 },
   inviteLink: { alignItems: "center", backgroundColor: "#FAFAFA", borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 12, padding: 10 },
   inviteLinkText: { color: "#6D6672", flex: 1, fontSize: 11 },
-  copyBtn: { backgroundColor: color.ink, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
-  copyBtnText: { color: color.white, fontSize: 11, fontWeight: "900" },
   permission: { alignItems: "center", backgroundColor: "#FAF9FB", borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 12, padding: 14 },
   permissionIcon: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 14, height: 48, justifyContent: "center", width: 48 },
   permissionStrong: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 8 },
@@ -527,18 +562,6 @@ const styles = StyleSheet.create({
   personSub: { color: color.muted, fontSize: 11, marginTop: 3 },
   avatarSmall: { alignItems: "center", backgroundColor: "#F1E8FF", borderRadius: 11, height: 40, justifyContent: "center", width: 40 },
   avatarSmallText: { color: color.ink, fontSize: 11, fontWeight: "900" },
-  addBtn: { backgroundColor: color.ink, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  addBtnSent: { backgroundColor: "#F0EDF2" },
-  addBtnText: { color: color.white, fontSize: 11, fontWeight: "900" },
-  addBtnTextSent: { color: "#8C8592" },
-  socialOption: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 8, padding: 10 },
-  socialIcon: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 11, height: 38, justifyContent: "center", width: 38 },
-  socialIconText: { color: color.proxyPurple, fontSize: 11, fontWeight: "900" },
-  socialCopy: { flex: 1 },
-  socialName: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  socialSub: { color: color.muted, fontSize: 11, marginTop: 3 },
-  connectBtn: { backgroundColor: color.white, borderColor: color.line, borderRadius: 9, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
-  connectText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   searchLine: { flexDirection: "row", gap: 7, marginTop: 12 },
   searchInput: { backgroundColor: "#FAFAFA", borderColor: color.line, borderRadius: 11, borderWidth: 1, color: color.ink, flex: 1, fontSize: 11, paddingHorizontal: 10, paddingVertical: 10 },
   searchBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 11, justifyContent: "center", paddingHorizontal: 14 },
@@ -564,8 +587,6 @@ const styles = StyleSheet.create({
   insightRowLabel: { color: color.ink, fontSize: 11, fontWeight: "700" },
   insightRowDots: { color: color.muted, fontSize: 11, letterSpacing: 2 },
   insightFoot: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 8 },
-  insightBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, marginTop: 8, paddingVertical: 8 },
-  insightBtnText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   recommendCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginTop: 12, padding: 12, ...shadows.card },
   recommendHead: { flexDirection: "row", justifyContent: "space-between" },
   recommendTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },

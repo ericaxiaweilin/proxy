@@ -333,6 +333,7 @@ export function MeSurface({
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
   const [personalTaggedPosts, setPersonalTaggedPosts] = useState<FeedPost[]>([]);
   const [personalPinnedIds, setPersonalPinnedIds] = useState<ReadonlyArray<string>>([]);
+  const [likeError, setLikeError] = useState<string | undefined>(undefined);
   const [personalFollowCounts, setPersonalFollowCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
   const viewingProfileId = viewerAccountId;
   const isSelfProfile = true;
@@ -542,7 +543,7 @@ export function MeSurface({
   }
 
   if (subPage?.route === "friendcrm") {
-    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
+    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
     return (
@@ -1185,18 +1186,18 @@ export function MeSurface({
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text style={styles.subPageTitle}>钱包与结算</Text>
-            <Text style={styles.subPageDesc}>只展示 Proxy 真正经手或需要记录的资金状态。</Text>
+            <Text style={styles.subPageDesc}>只展示 Proxy 真正经手或需要记录的资金状态。账本接口未接入前不编造余额。</Text>
 
             <View style={styles.walletDarkCard}>
               <Text style={styles.walletDarkLabel}>可用余额</Text>
-              <Text style={styles.walletDarkAmount}>860,000₫</Text>
-              <Text style={styles.walletDarkHint}>平台账本展示值</Text>
+              <Text style={styles.walletDarkAmount}>—</Text>
+              <Text style={styles.walletDarkHint}>账本未接入，未知不画数</Text>
             </View>
 
             <View style={styles.walletCard}>
               <Text style={styles.walletCardLabel}>待结算收入</Text>
-              <Text style={styles.walletCardValue}>1,200,000₫</Text>
-              <Text style={styles.walletCardHint}>来自平台支付订单</Text>
+              <Text style={styles.walletCardValue}>—</Text>
+              <Text style={styles.walletCardHint}>来自平台支付订单（待账本接入）</Text>
             </View>
 
             <View style={styles.walletCard}>
@@ -1204,7 +1205,7 @@ export function MeSurface({
               <Text style={styles.walletCardHint}>个人时间 / 技能服务可由双方直接结算；这里只保留合作确认与双方状态。</Text>
             </View>
 
-            <Pressable style={styles.walletAction}>
+            <Pressable onPress={() => openSubPage("myorders")} style={styles.walletAction} accessibilityLabel="现场结算记录">
               <Text style={styles.walletActionIcon}>₫</Text>
               <View style={styles.walletActionBody}>
                 <Text style={styles.walletActionLabel}>现场结算记录</Text>
@@ -1213,7 +1214,7 @@ export function MeSurface({
               <Text style={styles.walletActionArrow}>›</Text>
             </Pressable>
 
-            <Pressable style={styles.walletBtnLight}>
+            <Pressable onPress={() => openSubPage("myorders")} style={styles.walletBtnLight} accessibilityLabel="退款记录">
               <Text style={styles.walletBtnLightText}>退款记录</Text>
             </Pressable>
           </ScrollView>
@@ -1381,6 +1382,7 @@ export function MeSurface({
               }}
               onEditProfile={() => setProfileEditorOpen(true)}
               onShareProfile={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
+              onLikePost={engagement ? (postId) => { void engagement.reactToPost(postId, "LIKE", true).then(() => setLikeError(undefined)).catch(() => setLikeError("点赞没有提交成功，请检查连接后重试。")); } : undefined}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
               isFollowing={false}
               followBusy={false}
@@ -1391,6 +1393,7 @@ export function MeSurface({
               fallbackLogo={OTTER_LOGO}
               color={color}
             />
+            {likeError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{likeError}</Text> : null}
 
           </ScrollView>
           <Modal animationType="slide" onRequestClose={() => setInsightsSheetOpen(false)} transparent visible={insightsSheetOpen}>

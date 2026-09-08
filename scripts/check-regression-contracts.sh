@@ -658,6 +658,19 @@ if ! grep -q 'relationship\.listMyFriendships\|relationship\.acceptFriendRequest
 fi
 echo "    FRIEND-001: PASS (server + mobile wire end-to-end)"
 
+# PLACEHOLDER-001: friend-crm / messages / tasks / ProfileTabs / me-wallet
+# 曾有 20+ 个占位按钮与编造字段（假扫码结果、假邀请身份、假匹配人、
+# 假发送 toast、假余额）。修复后：有后端能力的走真接线（Share /
+# BlockFriend / 接受忽略请求 / 点赞），无后端能力的删假按钮并诚实
+# 说明，未知金额画"—"不编数。 tripwire 见
+# apps/mobile/src/surfaces/placeholder-honest-actions.test.ts。
+if ! grep -q 'PLACEHOLDER-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-001]: placeholder tripwire test file is missing" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts >/dev/null
+echo "    PLACEHOLDER-001: PASS (no placeholder buttons / invented fields)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'

@@ -47,6 +47,10 @@ export interface ProfileTabsProps {
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenRealitySceneMap?: (() => void) | undefined;
   onOpenScene?: ((sceneId: string) => void) | undefined;
+  // 帖子互动：有 handler 才渲染对应按钮，没有不渲染假按钮。
+  // 分享走系统分享（无需后端），喜欢走 engagement.reactToPost。
+  onLikePost?: ((postId: string) => void) | undefined;
+  onReplyPost?: ((postId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;                      // OTTER_LOGO / ProxyIcon
   // 选项 (颜色)
@@ -169,6 +173,8 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           name={props.profileDraft.name}
           onOpenMedia={props.onOpenMedia}
           onOpenScene={props.onOpenScene}
+          onLikePost={props.onLikePost}
+          onReplyPost={props.onReplyPost}
           resolveMediaUrl={props.resolveMediaUrl}
           fallbackLogo={props.fallbackLogo}
           color={props.color}
@@ -221,6 +227,8 @@ function PostsTab(props: {
   name: string;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenScene?: ((sceneId: string) => void) | undefined;
+  onLikePost?: ((postId: string) => void) | undefined;
+  onReplyPost?: ((postId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;
   // R15.99: 接 pinnedIds 进来 — ProfileTabs 顶层 hasRealPin 闭包不传进 PostsTab,
@@ -307,6 +315,8 @@ function PostsTab(props: {
             name={props.name}
             onOpenMedia={props.onOpenMedia}
             onOpenScene={props.onOpenScene}
+            onLikePost={props.onLikePost}
+            onReplyPost={props.onReplyPost}
             resolveMediaUrl={props.resolveMediaUrl}
           />
         </View>
@@ -324,6 +334,8 @@ function PostsTab(props: {
             name={props.name}
             onOpenMedia={props.onOpenMedia}
             onOpenScene={props.onOpenScene}
+            onLikePost={props.onLikePost}
+            onReplyPost={props.onReplyPost}
             resolveMediaUrl={props.resolveMediaUrl}
           />
         ))
@@ -341,8 +353,13 @@ function PostCard(props: {
   name: string;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenScene?: ((sceneId: string) => void) | undefined;
+  onLikePost?: ((postId: string) => void) | undefined;
+  onReplyPost?: ((postId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
 }): React.JSX.Element {
+  const sharePost = (): void => {
+    void Share.share({ message: `${props.post.body}\n\nProxy · ${props.name}` });
+  };
   return (
     <View style={styles.postCard}>
       <View style={styles.postHead}>
@@ -357,7 +374,7 @@ function PostCard(props: {
           <Text style={styles.postName} numberOfLines={1}>{props.name}</Text>
           <Text style={styles.postTime} numberOfLines={1}>· {new Date(props.post.createdAt).toLocaleDateString()}</Text>
         </View>
-        <Pressable accessibilityLabel="更多" style={styles.postMore}>
+        <Pressable accessibilityLabel="更多" onPress={sharePost} style={styles.postMore}>
           <Text style={styles.postMoreText}>⋯</Text>
         </Pressable>
       </View>
@@ -384,13 +401,17 @@ function PostCard(props: {
           />
         ) : null}
         <View style={styles.postActions}>
-          <Pressable style={styles.postAction}>
-            <Text style={styles.postActionText}>♡ 喜欢</Text>
-          </Pressable>
-          <Pressable style={styles.postAction}>
-            <Text style={styles.postActionText}>💬 回复</Text>
-          </Pressable>
-          <Pressable style={styles.postAction}>
+          {props.onLikePost ? (
+            <Pressable onPress={() => props.onLikePost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="喜欢">
+              <Text style={styles.postActionText}>♡ 喜欢</Text>
+            </Pressable>
+          ) : null}
+          {props.onReplyPost ? (
+            <Pressable onPress={() => props.onReplyPost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="回复">
+              <Text style={styles.postActionText}>💬 回复</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={sharePost} style={styles.postAction} accessibilityLabel="分享帖子">
             <Text style={styles.postActionText}>↗ 分享</Text>
           </Pressable>
         </View>

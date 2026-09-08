@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 89 — 2026-09-08
+
+- 占位按钮/字段真接线（PLACEHOLDER-001）：好友 CRM 删假扫码/假身份/
+  假匹配/假发送，服务端列表真实渲染，拉黑接 BlockFriend；消息联系人
+  页、活动群聊/匹配死 CTA、帖子动作、钱包死按钮分别接真分享/真导航/
+  真点赞或移除；钱包与收入未知金额画“—”不编数。
+
 ## Revision 88 — 2026-09-08
 
 - 商家工作台诚实化：邀请按钮文案改为真实意图（不再冒充自动派发）；

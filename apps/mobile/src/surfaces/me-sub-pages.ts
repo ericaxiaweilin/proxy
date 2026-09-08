@@ -83,13 +83,13 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
   },
   repeatincome: {
     title: "我的收入",
-    desc: "30 天收入、复购收入与预计机会。",
+    desc: "30 天收入、复购收入与预计机会。收入口径未接入前不编造数字。",
     icon: "₫",
     sections: [
       { title: "收入概览", rows: [
-        { label: "30 天收入", value: "2,450,000₫" },
-        { label: "复购收入占比", value: "44%" },
-        { label: "可提现", value: "860,000₫" }
+        { label: "30 天收入", value: "—" },
+        { label: "复购收入占比", value: "—" },
+        { label: "可提现", value: "—" }
       ]}
     ]
   },
