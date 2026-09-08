@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 84 — 2026-09-08
+
+- 订单工作流报错说人话：工作区发消息失败不再静默吞掉（撤回乐观
+  气泡、恢复草稿并提示）；订单加载/取消失败不再展示英文技术错，
+  会话类问题提示重登。
+
 ## Revision 78 — 2026-09-08
 
 - Human accounts remain user-defined; registration and messaging do not infer
