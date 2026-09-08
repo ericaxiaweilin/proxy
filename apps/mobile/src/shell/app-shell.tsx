@@ -658,7 +658,7 @@ export function AppShell({
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId) => setMessageChat(conversationId ? { author, conversationId } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
+            <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId, aiAccount) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}) } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>

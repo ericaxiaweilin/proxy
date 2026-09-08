@@ -4,7 +4,7 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { ProxySwitch } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -21,6 +21,7 @@ import { MessageRenderer, type MessageV1 } from "../components/message-renderer"
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { VoiceToolButton } from "../components/VoiceToolButton";
+import { ProxyIcon } from "../components/proxy-icon";
 
 // Lotus 纸面 palette（R36.1 设计稿 :root）。不碰共享 theme，只在本页使用。
 const lotus = {
@@ -74,6 +75,7 @@ interface Message {
   isOwn: boolean;
   isAI?: boolean;
   imageUri?: string;
+  imageSource?: ImageSourcePropType;
   videoUri?: string;
   audioUri?: string;
   v1?: MessageV1;
@@ -440,6 +442,17 @@ export function ConversationSurface({
         };
         setMessages((prev) => [...prev, reply]);
       }
+      if (aiAccount && /(?:照片|自拍|相片|photo|selfie)/i.test(userText)) {
+        setMessages((prev) => [...prev, {
+          id: `ai_photo_${Date.now()}`,
+          sender: aiAccount.displayName,
+          body: "这是我现在的主页照片。",
+          time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+          isOwn: false,
+          isAI: true,
+          imageSource: aiAccountPhoto(aiAccount),
+        }]);
+      }
       if (payload?.assistantStatus === "FAILED") setError("模型服务暂时不可用，消息已保留");
       if (payload?.assistantStatus === "UNAVAILABLE") setError("模型服务未配置，消息已保留");
     } catch (e: unknown) {
@@ -647,7 +660,7 @@ export function ConversationSurface({
             <Text numberOfLines={2} style={styles.replyInsideBody}>{message.replyBody ?? ""}</Text>
           </View>
         ) : null}
-        {message.imageUri ? <Image accessibilityLabel="聊天图片" resizeMode="cover" source={{ uri:message.imageUri }} style={styles.messageImage} /> : null}
+        {message.imageUri || message.imageSource ? <Image accessibilityLabel="聊天图片" resizeMode="cover" source={message.imageSource ?? { uri:message.imageUri ?? "" }} style={styles.messageImage} /> : null}
         {message.videoUri ? <ChatVideo uri={message.videoUri} /> : null}
         {message.audioUri ? <ChatAudio uri={message.audioUri} /> : null}
         {message.body.trim() ? <Text style={styles.bubbleText}>{message.body}</Text> : null}
@@ -844,7 +857,7 @@ export function ConversationSurface({
                 <Text style={styles.inlineToolText}>☺</Text>
               </Pressable>
               <Pressable accessibilityLabel="相机" onPress={() => { setStickerOpen(false); setAttachOpen((open) => !open); }} disabled={sending || !convId} style={styles.inlineTool}>
-                <Text style={styles.inlineToolText}>📷</Text>
+                <ProxyIcon color={lotus.ink} name="camera" size={24} />
               </Pressable>
             </View>
             {canSend || sending ? (

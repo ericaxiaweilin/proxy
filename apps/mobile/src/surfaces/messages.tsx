@@ -8,13 +8,15 @@ import { IdentitySwitcher } from "../components/identity-switcher";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
+import type { PlatformAIAccount } from "../ai-account-client";
+import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 
 type HomePanel = "dialogs" | "convos";
 type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
 // R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
@@ -29,7 +31,7 @@ export function MessagesSurface({
   onSwitchIdentity,
   conversationClient,
 }: {
-  onOpenConversation: (author: string, conversationId?: string) => void;
+  onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount) => void;
   onOpenRequests?: () => void;
   onOpenContacts?: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -280,7 +282,7 @@ export function MessagesSurface({
               <>
                 <Text style={styles.sectionLabel}>置顶</Text>
                 {filteredPinned.map((d) => (
-                  <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId)} style={styles.dialog}>
+                  <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount)} style={styles.dialog}>
                     <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                       <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                       {(d as Dialog).online ? <View style={styles.online} /> : null}
@@ -306,7 +308,7 @@ export function MessagesSurface({
               <Text style={styles.empty}>加载中…</Text>
             ) : filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
-                <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId)} style={styles.dialog}>
+                <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount)} style={styles.dialog}>
                   <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                     <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                   </View>
@@ -363,7 +365,10 @@ function filterByFolder<T extends { folder: Folder; name: string; preview: strin
 function toDialog(item: ConversationInboxItem): Dialog {
   const latest = item.latestMessage;
   const snapshotName = item.counterpartySnapshot?.displayName?.trim();
-  const name = snapshotName || (item.counterpartyId === "proxy_ai" ? "Proxy AI" : item.counterpartyId) || "对话";
+  const aiAccountNumber = item.counterpartyId?.match(/^ai_account_0*(\d+)$/)?.[1];
+  const aiAccount = BUNDLED_AI_COMPANIONS.find((account) => account.accountId === item.counterpartyId
+    || (aiAccountNumber !== undefined && account.accountId.match(/^ai_account_0*(\d+)$/)?.[1] === aiAccountNumber));
+  const name = aiAccount?.displayName || snapshotName || (item.counterpartyId === "proxy_ai" ? "Proxy AI" : item.counterpartyId) || "对话";
   const preview = latest
     ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.body?.trim() || "新消息"
     : "暂无消息";
@@ -373,6 +378,7 @@ function toDialog(item: ConversationInboxItem): Dialog {
   return {
     id: item.conversation.conversationId,
     conversationId: item.conversation.conversationId,
+    ...(aiAccount ? { aiAccount } : {}),
     initial: name.slice(0, 2).toUpperCase(),
     name,
     preview,

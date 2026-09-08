@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 110 — 2026-09-08
+
+### Stable AI companion identity and photo replies
+
+- Inbox re-entry resolves legacy and current AI account IDs back to the bundled
+  persona, preserving her display name, portrait and personality in conversation.
+- Photo requests attach the companion's existing profile portrait; persona prompting
+  knows the account owns photo assets and avoids repetitive, customer-service AI tone.
+- Conversation camera and microphone controls reuse the same Proxy icon system as Home.
+
 ## Revision 108 — 2026-09-08
 
 ### Immediate AI companion send feedback
