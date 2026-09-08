@@ -280,4 +280,9 @@ describe("PLACEHOLDER-006 checklist walk gaps", () => {
     expect(orders).toContain("查看明细");
     expect(orders).not.toMatch(/<Pressable[^>]*>\s*<Text[^>]*>查看明细[\s\S]{0,2000}<Pressable/);
   });
+
+  it("AI rail bleeds to the edges exactly like the human rail", () => {
+    expect(home).toContain("aiRail: { marginBottom: 10, marginHorizontal: -16 }");
+    expect(home).toContain("aiRailContent: { gap: 12, paddingHorizontal: 16 }");
+  });
 });

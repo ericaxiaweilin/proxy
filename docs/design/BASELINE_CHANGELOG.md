@@ -67,6 +67,10 @@ same commit. Do not record routine business logic changes here.
 
 - 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。
 
+## Revision 104 — 2026-09-08
+
+- AI 横滑与真人横滑对齐：AI rail 出血到边（去左右空白），间距与真人一致。
+
 ## Revision 103 — 2026-09-08
 
 - Checklist 走查补漏（PLACEHOLDER-006）：进行中加载失败给重试按钮
