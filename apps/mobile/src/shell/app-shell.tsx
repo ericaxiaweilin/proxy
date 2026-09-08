@@ -254,49 +254,10 @@ export function AppShell({
   ).current;
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [homeAssistant, setHomeAssistant] = useState<{ text: string; mode?: HomeIntentMode; attachment?: HomeAttachment }>();
-  const openProxyAIConversation = useCallback(async (): Promise<void> => {
-    try {
-      await ensureConversationSession?.();
-      const conversations = await conversation.listConversations();
-      let target = conversations.find((item) =>
-        item.conversation.originType === "HOME"
-        && item.conversation.participants.includes("proxy_ai")
-        && item.conversation.state !== "DELETED"
-      );
-      if (!target) {
-        const created = await conversation.startConversation({
-          originType: "HOME",
-          originId: "proxy_ai_home",
-          participantId: "proxy_ai",
-          firstMessage: ""
-        });
-        if (typeof created.operationRef === "string") {
-          const payload = JSON.parse(created.operationRef) as { conversationId?: unknown };
-          if (typeof payload.conversationId === "string") {
-            target = {
-              conversation: {
-                conversationId: payload.conversationId,
-                conversationType: "DM",
-                originType: "HOME",
-                originId: "proxy_ai_home",
-                state: "ACTIVE",
-                participants: ["proxy_ai"],
-                lastMessageAt: new Date().toISOString()
-              }
-            };
-          }
-        }
-      }
-      if (!target) throw new Error("Proxy AI conversation unavailable");
-      setHomeAssistant(undefined);
-      setMessageChat({ author: "Proxy AI", conversationId: target.conversation.conversationId });
-      setPageOverride("MSG_CHAT");
-      setTab("MESSAGES");
-    } catch {
-      // Preserve a usable AI entry even if inbox creation is temporarily unavailable.
-      setHomeAssistant({ text: "" });
-    }
-  }, [conversation, ensureConversationSession]);
+  const openProxyAIConversation = useCallback((): void => {
+    setWorkspaceTarget(undefined);
+    setHomeAssistant({ text: "" });
+  }, []);
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [sceneComposerTool, setSceneComposerTool] = useState<SceneToolId | undefined>(undefined);
   // R15.13 P5：首页/动态顶部的本地范围（仅 city + area，不做 GPS 精确定位）。
@@ -573,11 +534,10 @@ export function AppShell({
               onOpenMarket={(tab) => openMarket({ tab })}
               localNet={localNet}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
-              onOpenAssistantConversation={() => void openProxyAIConversation()}
+              onOpenAssistantConversation={openProxyAIConversation}
               conversationPanel={homeAssistant ? (
                 <HomeAssistantSurface
                   embedded
-                  externalComposer
                   conversationClient={conversation}
                   mediaClient={media}
                   initialText={homeAssistant.text}

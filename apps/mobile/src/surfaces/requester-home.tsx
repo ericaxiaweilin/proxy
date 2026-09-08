@@ -615,7 +615,7 @@ export function RequesterHome({
           onOpenConversation={() => onOpenAssistantConversation?.()}
         />
       ) : null}
-      {/* 模型消息可在下方展开，但其 composer 已关闭；全页只有上方一个输入入口。 */}
+      {/* 点左侧 AI 标识后在 Home 内展开独立对话输入框；默认输入仍只搜索。 */}
       {conversationPanel ?? null}
       {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
           用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，

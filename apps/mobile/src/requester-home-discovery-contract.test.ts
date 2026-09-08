@@ -10,6 +10,7 @@ const fixtures = readFileSync(fileURLToPath(new URL("./recommend-fixtures.ts", i
 const locationPicker = readFileSync(fileURLToPath(new URL("./components/location-picker-sheet.tsx", import.meta.url)), "utf8");
 const mapCanvas = readFileSync(fileURLToPath(new URL("./components/map-canvas.tsx", import.meta.url)), "utf8");
 const searchDock = readFileSync(fileURLToPath(new URL("./components/home-search-dock.tsx", import.meta.url)), "utf8");
+const homeAssistant = readFileSync(fileURLToPath(new URL("./surfaces/home-assistant.tsx", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("puts the unified search and model conversation before discovery sections", () => {
@@ -29,13 +30,16 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(searchDock).toContain('name="camera" size={24}');
     expect(searchDock).toContain('name="microphone" size={24}');
     expect(searchDock).toContain('name="spark" size={25}');
-    expect(shell).toContain("externalComposer");
+    expect(shell).not.toContain("externalComposer");
+    expect(shell).toContain("onOpenAssistantConversation={openProxyAIConversation}");
+    expect(shell).toContain('setHomeAssistant({ text: "" })');
     expect(source).not.toContain("threadTurns");
     expect(source).toContain("模型对话只能由左侧 AI 标识显式进入");
     expect(source).not.toContain("自由自然语言 -> 走现有模型对话");
-    expect(shell).toContain('item.conversation.originType === "HOME"');
-    expect(shell).toContain('item.conversation.participants.includes("proxy_ai")');
-    expect(shell).toContain('originId: "proxy_ai_home"');
+    expect(homeAssistant).toContain('originType: "HOME"');
+    expect(homeAssistant).toContain('participantId: "proxy_ai"');
+    expect(homeAssistant).toContain('originId: "proxy_ai_home"');
+    expect(homeAssistant).toContain("!externalComposer ? <View style={styles.composer}>");
   });
   it("keeps the labeled human section before the labeled AI section", () => {
     const human = source.indexOf(">真人推荐<");

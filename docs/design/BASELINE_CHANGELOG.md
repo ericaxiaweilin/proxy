@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 104 — 2026-09-08
+
+### Dual-entry Proxy AI conversation
+
+- Home remains search-first, while tapping its AI mark expands the familiar embedded
+  Proxy conversation with its own composer instead of navigating away to Messages.
+- The embedded conversation and the Messages entry share the same durable HOME / Proxy AI
+  thread; Home can collapse after inactivity without losing history.
+- Opening a fresh embedded conversation no longer renders an empty user bubble.
+
 ## Revision 103 — 2026-09-08
 
 ### Home recommendations use durable friendship truth

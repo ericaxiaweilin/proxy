@@ -56,9 +56,9 @@ export function HomeAssistantSurface({
   // 现在记失败态并给重试按钮，重试计数进 effect 依赖重新建连。
   const [startFailed, setStartFailed] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
-  const [messages, setMessages] = useState<AssistantMessage[]>([
-    makeMessage(initialText, true, initialAttachment?.uri)
-  ]);
+  const [messages, setMessages] = useState<AssistantMessage[]>(() =>
+    initialText || initialAttachment ? [makeMessage(initialText, true, initialAttachment?.uri)] : []
+  );
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
