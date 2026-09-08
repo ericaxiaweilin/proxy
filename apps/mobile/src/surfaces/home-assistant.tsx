@@ -50,6 +50,10 @@ export function HomeAssistantSurface({
   embedded?: boolean;
 }): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string>();
+  // 首轮建会话失败：之前只留一条 status，输入框永久 disabled、无重试。
+  // 现在记失败态并给重试按钮，重试计数进 effect 依赖重新建连。
+  const [startFailed, setStartFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [messages, setMessages] = useState<AssistantMessage[]>([
     makeMessage(initialText, true, initialAttachment?.uri)
   ]);
@@ -96,13 +100,17 @@ export function HomeAssistantSurface({
       appendAIReply(payload, setMessages);
       setTemporaryUI(readServerTemporaryUI(payload?.temporaryUI));
       setStatus(statusMessage(payload?.assistantStatus));
+      setStartFailed(false);
     }).catch(() => {
-      if (!cancelled) setStatus("无法连接 Proxy 对话，请检查连接后重试。");
+      if (!cancelled) {
+        setStatus("无法连接 Proxy 对话，请检查连接后重试。");
+        setStartFailed(true);
+      }
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [conversationClient, ensureSession, initialAttachment, initialText, mediaClient, mode]);
+  }, [conversationClient, ensureSession, initialAttachment, initialText, mediaClient, mode, retryNonce]);
 
   useEffect(() => {
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
@@ -270,7 +278,11 @@ export function HomeAssistantSurface({
         {suggestedActions.length > 0 ? (
           <View style={styles.suggestedRow}>
             {suggestedActions.map((a) => (
-              <Pressable key={a.label} onPress={() => { if (a.isFeed && onOpenFeed) onOpenFeed(); else if (a.label.includes("小美") && onOpenXiaomei) onOpenXiaomei(); else if (a.tab) onOpenMarket?.(a.tab); }} style={styles.suggestedPill}>
+              // 优先级：显式目标（动态/市场 Tab）优先；小美回调只在没有
+              // 明确目标时兜底——之前“看小美机会”被 label 分支截胡，
+              // 只关窗口、进不了市场（调用方 onOpenXiaomei 仅关闭）。
+              // 都没有 handler 则收起建议条，不留死按钮。
+              <Pressable key={a.label} onPress={() => { if (a.isFeed && onOpenFeed) onOpenFeed(); else if (a.tab && onOpenMarket) onOpenMarket(a.tab); else if (a.label.includes("小美") && onOpenXiaomei) onOpenXiaomei(); else setSuggestedActions([]); }} style={styles.suggestedPill}>
                 <Text style={styles.suggestedText}>{a.label}</Text>
               </Pressable>
             ))}
@@ -281,6 +293,15 @@ export function HomeAssistantSurface({
         ) : null}
         {loading ? <View style={styles.systemPill}><Text style={styles.systemText}>正在理解你的意图…</Text></View> : null}
         {status ? <View style={styles.statusBox}><Text style={styles.statusText}>{status}</Text></View> : null}
+        {startFailed && !conversationId && !loading ? (
+          <Pressable
+            onPress={() => { setStartFailed(false); setLoading(true); setRetryNonce((n) => n + 1); }}
+            style={[styles.suggestedPill]}
+            accessibilityLabel="重试连接"
+          >
+            <Text style={styles.suggestedText}>↻ 重试连接</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <View style={styles.composer}>
