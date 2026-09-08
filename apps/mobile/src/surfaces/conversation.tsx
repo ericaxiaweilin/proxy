@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import { ProxySwitch } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -931,9 +932,7 @@ export function ConversationSurface({
                 <Text style={styles.secureCopyTitle}>禁止转发</Text>
                 <Text style={styles.secureCopySub}>开启后，这个会话里的消息不能通过 Proxy 转发</Text>
               </View>
-              <Pressable accessibilityLabel="禁止转发开关" onPress={() => setNoForward((value) => !value)} style={[styles.switch, noForward && styles.switchOn]}>
-                <View style={[styles.switchKnob, noForward && styles.switchKnobOn]} />
-              </Pressable>
+              <ProxySwitch accessibilityLabel="禁止转发开关" onChange={setNoForward} value={noForward} />
             </View>
             <Text style={styles.secureNote}>阅后即焚用阅读计数加过期时间执行；禁止转发由服务端拒绝转发请求。此会话已开启截屏上报。</Text>
           </Pressable>
@@ -1154,10 +1153,6 @@ const styles = StyleSheet.create({
   timerOptTextActive: { color: "#ffffff" },
   settingRow: { alignItems: "center", borderTopColor: lotus.line, borderTopWidth: 1, flexDirection: "row", gap: 12, justifyContent: "space-between", paddingVertical: 12 },
   settingCopy: { flex: 1 },
-  switch: { backgroundColor: "#d9d5ce", borderRadius: 12, height: 22, justifyContent: "center", padding: 2, width: 38 },
-  switchOn: { backgroundColor: lotus.ink },
-  switchKnob: { backgroundColor: "#ffffff", borderRadius: 9, height: 18, width: 18 },
-  switchKnobOn: { alignSelf: "flex-end" },
   secureNote: { borderTopColor: lotus.line, borderTopWidth: 1, color: lotus.muted, fontSize: 11, lineHeight: 15, paddingTop: 8 },
 
   // toast

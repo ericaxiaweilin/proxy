@@ -3,6 +3,7 @@
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
+import { ProxySwitch } from "./proxy-foundation";
 
 export function SecuritySettings({
   retentionDays,
@@ -30,14 +31,7 @@ export function SecuritySettings({
       <View style={styles.card}>
         <View style={styles.row}>
           <Text style={styles.cardTitle}>🛡️ 防截图提醒</Text>
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: screenshotWarnEnabled }}
-            onPress={() => onToggleScreenshotWarn(!screenshotWarnEnabled)}
-            style={[styles.switch, screenshotWarnEnabled && styles.switchOn]}
-          >
-            <View style={[styles.dot, screenshotWarnEnabled && styles.dotOn]} />
-          </Pressable>
+          <ProxySwitch accessibilityLabel="防截图提醒" onChange={onToggleScreenshotWarn} value={screenshotWarnEnabled} />
         </View>
         <Text style={styles.cardDesc}>您发送的图片和位置，对方截图时您将立即收到通知。</Text>
       </View>
@@ -80,10 +74,6 @@ const styles = StyleSheet.create({
   cardDesc: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 6 },
   badge: { alignSelf: "flex-start", backgroundColor: "#E8F5E9", borderRadius: 999, color: "#2E7D32", fontSize: 11, fontWeight: "800", marginTop: 8, overflow: "hidden", paddingHorizontal: 8, paddingVertical: 4 },
   row: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  switch: { backgroundColor: "#E9E5EC", borderRadius: 999, height: 28, justifyContent: "center", padding: 2, width: 48 },
-  switchOn: { backgroundColor: color.proxyPurple },
-  dot: { backgroundColor: color.white, borderRadius: 12, height: 24, width: 24 },
-  dotOn: { alignSelf: "flex-end" },
   chips: { flexDirection: "row", gap: 8, marginTop: 10 },
   chip: { backgroundColor: "#F4F1F6", borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
   chipActive: { backgroundColor: "#EEE3FF", borderColor: color.proxyPurple },

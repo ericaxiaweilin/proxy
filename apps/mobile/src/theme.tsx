@@ -91,6 +91,27 @@ export const color = {
   aiActivityBadgeFg: "#3949AB"
 };
 
+// Proxy UI Foundation v1. These aliases mirror the portable CSS token pack
+// while resolving to the active R3 identity. Product surfaces must consume
+// these semantic roles instead of copying BoardUI's visual language.
+export const foundation = {
+  background: color.offWhite,
+  surface: color.white,
+  surfaceSecondary: color.surface,
+  ink: color.ink,
+  muted: color.muted,
+  faint: "#A39E96",
+  line: color.line,
+  accent: "#F2B63F",
+  accentSoft: "#FFF2CC",
+  success: "#187653",
+  danger: "#BD3434",
+  radius: { xs: 8, sm: 11, md: 16, lg: 22, xl: 28, full: 999 },
+  space: { one: 4, two: 8, three: 12, four: 16, five: 20, six: 24, eight: 32 },
+  text: { xs: 11, sm: 13, md: 15, lg: 18, xl: 24 },
+  control: { sm: 32, md: 40, lg: 48 }
+} as const;
+
 export const gradient = {
   hero: [color.magenta, color.violet] as const,
   cta: [color.magenta, color.violet] as const

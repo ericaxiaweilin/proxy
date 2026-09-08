@@ -31,6 +31,7 @@ import {
 } from "../market-fixtures";
 import { gridToLatLng } from "../components/location-options";
 import { ProxyIcon } from "../components/proxy-icon";
+import { ProxyTabs } from "../components/proxy-foundation";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
 import { R37OpportunityCard, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
@@ -423,27 +424,17 @@ export function MarketSurface({
         </View>
       </View>
 
-      <View style={styles.tabs}>
-        {(
-          [
-            ["OPPORTUNITY", "机会"],
-            ["ACTIVITY", "活动"]
-          ] as const
-        ).map(([id, label]) => (
-          <Pressable
-            key={id}
-            onPress={() => {
-              setTab(id);
-              setPagerPage(id === "ACTIVITY" ? 1 : 0);
-              setActivityDetail(null);
-              setOppDetail(null);
-            }}
-            style={[styles.tab, pageTab === id && styles.tabOn]}
-          >
-            <Text style={[styles.tabText, pageTab === id && styles.tabTextOn]}>{label}</Text>
-          </Pressable>
-        ))}
-      </View>
+      <ProxyTabs
+        activeId={pageTab}
+        items={[{ id: "OPPORTUNITY", label: "机会" }, { id: "ACTIVITY", label: "活动" }]}
+        onChange={(id) => {
+          setTab(id);
+          setPagerPage(id === "ACTIVITY" ? 1 : 0);
+          setActivityDetail(null);
+          setOppDetail(null);
+        }}
+        style={styles.foundationTabs}
+      />
 
       {/* M4 Offer wave: requester 发 Offer (5m TTL) + agent 接单，idempotency + slot 唯一 + 过期校验 */}
       <View style={styles.offerBar}>
@@ -1313,11 +1304,7 @@ const styles = StyleSheet.create({
   offerAccept: { backgroundColor: color.ink, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   offerAcceptText: { color: color.white, fontSize: 11, fontWeight: "800" },
   offerEmpty: { color: color.muted, fontSize: 11, textAlign: "center" },
-  tabs: { backgroundColor: color.surface, borderRadius: 14, flexDirection: "row", gap: 5, marginVertical: 8, marginHorizontal: 12, padding: 4 },
-  tab: { borderRadius: 11, flex: 1, minHeight: 44, justifyContent: "center", paddingVertical: 9 },
-  tabOn: { backgroundColor: color.white, ...shadows.card },
-  tabText: { color: color.muted, fontSize: 14, fontWeight: "800", textAlign: "center" },
-  tabTextOn: { color: color.ink },
+  foundationTabs: { marginHorizontal: 12, marginVertical: 8 },
   oppStack: { marginTop: 4 },
   searchRow: { marginTop: 6, paddingHorizontal: 12 },
   searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flexDirection: "row", overflow: "hidden" },
