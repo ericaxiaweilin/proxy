@@ -81,6 +81,7 @@ interface Message {
   replySender?: string;
   replyBody?: string;
   secureMeta?: string;
+  isDivider?: boolean;
 }
 
 interface Cluster {
@@ -243,6 +244,7 @@ export function ConversationSurface({
         time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
         isOwn: row.senderId === actorId,
         isAI: Boolean(aiAccount && row.senderId !== actorId),
+        isDivider: row.messageType === "SYSTEM_CONTEXT" && row.senderId === "SYSTEM",
         ...(row.messageType === "IMAGE" && typeof row.mediaRef === "string"
           ? { imageUri: `${conversationClient.baseUrl}/v1/media/thumb/${encodeURIComponent(row.mediaRef)}` }
           : {}),
@@ -593,6 +595,9 @@ export function ConversationSurface({
   }
 
   function renderBubbleContent(message: Message): React.JSX.Element {
+    if (message.isDivider) {
+      return <View style={styles.homeDivider}><View style={styles.homeDividerLine} /><Text style={styles.homeDividerText}>{message.body}</Text><View style={styles.homeDividerLine} /></View>;
+    }
     // 贴纸：单 emoji 文本按大表情渲染（OpenMoji 字形直出，离线可用）。
     const stickerEmoji = message.stickerCode
       ? (STICKERS.find((s) => s.code === message.stickerCode)?.emoji ?? message.body)
@@ -695,6 +700,7 @@ export function ConversationSurface({
           {blocked ? null : clusters.map((cluster) => {
             const first = cluster.messages[0];
             if (!first) return null;
+            if (first.isDivider) return <View key={cluster.key}>{renderBubbleContent(first)}</View>;
             if (first.v1) {
               return (
                 <View key={cluster.key} style={[styles.v1Wrap, cluster.isOwn ? styles.v1Own : styles.v1Other]}>
@@ -1042,6 +1048,9 @@ const styles = StyleSheet.create({
   retryButtonText: { color: "#ffffff", fontSize: 11, fontWeight: "800" },
 
   cluster: { marginBottom: 11 },
+  homeDivider: { alignItems: "center", flexDirection: "row", gap: 8, marginVertical: 10, paddingHorizontal: 8 },
+  homeDividerLine: { backgroundColor: lotus.line, flex: 1, height: StyleSheet.hairlineWidth },
+  homeDividerText: { color: lotus.faint, fontSize: 11, fontWeight: "600" },
   msgRow: { alignItems: "flex-end", flexDirection: "row", gap: 6, marginVertical: 1 },
   msgRowMe: { justifyContent: "flex-end", paddingLeft: 52 },
   msgRowPeer: { paddingRight: 52 },

@@ -14,6 +14,36 @@ type capturingModelStack struct {
 	messages []modelstack.ChatMessage
 }
 
+func TestHomeProxyConversationIsReusedAndSeparated(t *testing.T) {
+	s := New()
+	start := func(originID, text string) string {
+		result := s.Handle(envelopeFor("StartConversation", map[string]any{
+			"conversationType": "DM", "originType": "HOME", "originId": originID,
+			"participantId": "proxy_ai", "firstMessage": text,
+		}, ""))
+		if result.Outcome != "ACCEPTED" {
+			t.Fatalf("start home conversation: %+v", result.Error)
+		}
+		var view struct {
+			ConversationID string `json:"conversationId"`
+		}
+		_ = json.Unmarshal([]byte(result.OperationRef), &view)
+		return view.ConversationID
+	}
+	firstID := start("home_old_client_1", "第一轮")
+	secondID := start("proxy_ai_home", "第二轮")
+	if firstID != secondID {
+		t.Fatalf("Home Proxy AI must reuse one durable conversation: %s != %s", firstID, secondID)
+	}
+	messages, err := s.repository.Messages(context.Background(), firstID)
+	if err != nil || len(messages) != 3 {
+		t.Fatalf("expected first message + separator + second message: %+v err=%v", messages, err)
+	}
+	if messages[1].SenderID != "SYSTEM" || messages[1].Kind != "system_event" || messages[1].Body != "新的 Home 对话" {
+		t.Fatalf("second Home exchange must have a durable divider: %+v", messages[1])
+	}
+}
+
 func (m *capturingModelStack) Available() bool { return true }
 
 func (m *capturingModelStack) Complete(_ context.Context, _ string, messages []modelstack.ChatMessage) (modelstack.Completion, error) {

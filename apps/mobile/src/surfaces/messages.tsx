@@ -353,7 +353,7 @@ function filterByFolder<T extends { folder: Folder; name: string; preview: strin
 function toDialog(item: ConversationInboxItem): Dialog {
   const latest = item.latestMessage;
   const snapshotName = item.counterpartySnapshot?.displayName?.trim();
-  const name = snapshotName || item.counterpartyId || "对话";
+  const name = snapshotName || (item.counterpartyId === "proxy_ai" ? "Proxy AI" : item.counterpartyId) || "对话";
   const preview = latest
     ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.body?.trim() || "新消息"
     : "暂无消息";

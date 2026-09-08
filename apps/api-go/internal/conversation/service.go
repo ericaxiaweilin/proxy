@@ -543,9 +543,18 @@ func (s *Service) listConversations(ctx context.Context, e command.Envelope) com
 		return command.Rejected(e, "CONVERSATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
 	}
 	summaries := make([]ConversationSummary, 0, len(conversations))
+	proxyHomeIncluded := false
 	for _, conv := range conversations {
 		if !isParticipant(conv, e.Actor.ID) || conv.State == "BLOCKED" {
 			continue
+		}
+		// Historical clients created one HOME conversation per query. Keep those
+		// rows for audit, but expose only the newest Proxy AI thread in the inbox.
+		if conv.OriginType == "HOME" && isParticipant(conv, "proxy_ai") {
+			if proxyHomeIncluded {
+				continue
+			}
+			proxyHomeIncluded = true
 		}
 		summary := ConversationSummary{Conversation: conv}
 		for _, participantID := range conv.Participants {
@@ -618,14 +627,30 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		CreatedAt:     s.clock.Now().UTC(),
 		LastMessageAt: s.clock.Now().UTC(),
 	}
-	domainEvents := []event.DomainEvent{event.New("ConversationStarted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, conv.CreatedAt, map[string]any{
-		"originType":   conv.OriginType,
-		"originId":     conv.OriginID,
-		"participants": conv.Participants,
-		"note":         "Conversation 必须保存来源；同一 Post 不同用户发起 DM 时 Conversation 独立",
-	})}
-	if err := s.repository.CreateConversation(ctx, conv); err != nil {
-		return command.Rejected(e, "CONVERSATION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.create_failed", nil)
+	reusedHome := false
+	if p.OriginType == "HOME" && p.ParticipantID == "proxy_ai" {
+		if existing, ok := s.latestProxyHomeConversation(ctx, e.Actor.ID); ok {
+			conv = existing
+			reusedHome = true
+		}
+	}
+	domainEvents := []event.DomainEvent{}
+	if !reusedHome {
+		domainEvents = append(domainEvents, event.New("ConversationStarted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, conv.CreatedAt, map[string]any{
+			"originType": conv.OriginType, "originId": conv.OriginID, "participants": conv.Participants,
+			"note": "Conversation 必须保存来源；同一 Post 不同用户发起 DM 时 Conversation 独立",
+		}))
+		if err := s.repository.CreateConversation(ctx, conv); err != nil {
+			return command.Rejected(e, "CONVERSATION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.create_failed", nil)
+		}
+	}
+	existingMessages, _ := s.repository.Messages(ctx, conv.ID)
+	nextSeq := int64(len(existingMessages) + 1)
+	if reusedHome && len(existingMessages) > 0 && strings.TrimSpace(p.FirstMessage) != "" {
+		separator := Message{ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID, SenderID: "SYSTEM", MessageType: "SYSTEM_CONTEXT", Kind: "system_event", Body: "新的 Home 对话", CreatedAt: s.clock.Now().UTC(), Protection: DefaultProtectionFor("SYSTEM_CONTEXT", conv.Type), Delivery: &MessageDelivery{State: "sent"}, Seq: nextSeq}
+		separator.SecurityV1 = protectionToSecurityV1(separator.Protection)
+		_ = s.repository.AppendMessage(ctx, separator)
+		nextSeq++
 	}
 	// 首条消息（如果有）— v1 双写 DialogID/Kind/Security/Delivery/Seq
 	if p.FirstMessage != "" {
@@ -642,15 +667,15 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 			Protection:     prot,
 			SecurityV1:     protectionToSecurityV1(prot),
 			Delivery:       &MessageDelivery{State: "sent"},
-			Seq:            1,
+			Seq:            nextSeq,
 		}
 		_ = s.repository.AppendMessage(ctx, msg)
 	}
 	if p.MediaRef != "" {
 		prot := DefaultProtectionFor("IMAGE", conv.Type)
-		seq := int64(1)
+		seq := nextSeq
 		if p.FirstMessage != "" {
-			seq = 2
+			seq++
 		}
 		_ = s.repository.AppendMessage(ctx, Message{
 			ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID, SenderID: e.Actor.ID,
@@ -703,6 +728,19 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		}
 	}
 	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, payload, domainEvents)
+}
+
+func (s *Service) latestProxyHomeConversation(ctx context.Context, actorID string) (Conversation, bool) {
+	conversations, err := s.repository.Snapshot(ctx)
+	if err != nil {
+		return Conversation{}, false
+	}
+	for _, conv := range conversations {
+		if conv.OriginType == "HOME" && conv.State == "ACTIVE" && isParticipant(conv, actorID) && isParticipant(conv, "proxy_ai") {
+			return conv, true
+		}
+	}
+	return Conversation{}, false
 }
 
 // ---------- SendMessage ----------

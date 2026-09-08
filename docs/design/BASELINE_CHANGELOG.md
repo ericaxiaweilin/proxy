@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 95 — 2026-09-08
+
+### One durable Proxy AI thread with ephemeral Home receipts
+
+- Home model replies remain visible briefly, then leave Home instead of becoming a
+  permanent second row. Their complete transcript remains in Messages.
+- Every user reuses one durable HOME / Proxy AI conversation. Older clients' duplicate
+  HOME conversations are collapsed to the newest inbox item without deleting audit data.
+- A durable system divider separates successive Home exchanges inside that conversation.
+
 ## Revision 94 — 2026-09-08
 
 ### Compact logo-only opportunity type rail

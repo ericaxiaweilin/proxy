@@ -84,7 +84,7 @@ export function HomeAssistantSurface({
       }
       return conversationClient.startConversation({
         originType: "HOME",
-        originId: `home_intent_${Date.now().toString(36)}`,
+        originId: "proxy_ai_home",
         participantId: "proxy_ai",
         firstMessage: initialText,
         ...(mode ? { assistantMode: mode } : {}),
@@ -117,13 +117,24 @@ export function HomeAssistantSurface({
   // This is deliberately time/intent based; keyboard geometry changes never
   // drive collapse, which avoids the jumpy behaviour seen on real devices.
   useEffect(() => {
-    if (!embedded || collapsed || inputFocused || loading || sending || temporaryUI) return;
+    if (!embedded || !externalComposer || loading || sending || temporaryUI) return;
+    // Home owns a short-lived acknowledgement only. The durable transcript is
+    // already stored in the single Proxy AI inbox conversation.
+    const timer = setTimeout(() => {
+      Keyboard.dismiss();
+      onBack();
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [embedded, externalComposer, loading, messages, onBack, sending, temporaryUI]);
+
+  useEffect(() => {
+    if (!embedded || externalComposer || collapsed || inputFocused || loading || sending || temporaryUI) return;
     const timer = setTimeout(() => {
       Keyboard.dismiss();
       setCollapsed(true);
     }, 9000);
     return () => clearTimeout(timer);
-  }, [collapsed, embedded, inputFocused, loading, messages, sending, temporaryUI]);
+  }, [collapsed, embedded, externalComposer, inputFocused, loading, messages, sending, temporaryUI]);
 
   function handleLocalIntent(text: string): void {
     const t = text.toLowerCase();

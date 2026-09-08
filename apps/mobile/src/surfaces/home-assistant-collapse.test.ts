@@ -11,12 +11,19 @@ describe("Home embedded assistant collapse contract", () => {
   });
 
   it("auto-collapses only after settled inactivity, never from keyboard position", () => {
-    expect(source).toMatch(/!embedded \|\| collapsed \|\| inputFocused \|\| loading \|\| sending \|\| temporaryUI/);
+    expect(source).toMatch(/!embedded \|\| externalComposer \|\| collapsed \|\| inputFocused \|\| loading \|\| sending \|\| temporaryUI/);
     expect(source).toContain("}, 9000)");
     expect(source).not.toMatch(/keyboard.*height|screenY|pageY/i);
   });
 
   it("dismisses the keyboard after a follow-up send settles", () => {
     expect(source).toMatch(/finally \{[\s\S]*?setSending\(false\);[\s\S]*?Keyboard\.dismiss\(\)/);
+  });
+
+  it("removes the read Home receipt while keeping one durable Proxy AI origin", () => {
+    expect(source).toContain('originId: "proxy_ai_home"');
+    expect(source).toContain("!externalComposer || loading");
+    expect(source).toContain("}, 6000)");
+    expect(source).toContain("onBack();");
   });
 });
