@@ -243,6 +243,7 @@ describe("PLACEHOLDER-004 moment publishes to feed", () => {
     expect(home).toContain("localNet.createPost");
     expect(home).toContain("发布到动态");
     expect(home).toContain("已发布到动态");
+    expect(home).toContain("请先登录后再发布");
     expect(shell).toContain("localNet={localNet}");
   });
 });
