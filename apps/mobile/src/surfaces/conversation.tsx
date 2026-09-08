@@ -156,6 +156,9 @@ export function ConversationSurface({
   const [activityPickerError, setActivityPickerError] = useState<string | undefined>(undefined);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  // Keep live-sync hydration from replacing an optimistic bubble while the
+  // command is waiting on an AI completion in the same HTTP response.
+  const sendingRef = useRef(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visibleMessages = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
@@ -258,7 +261,7 @@ export function ConversationSurface({
     let foreground = AppState.currentState === "active";
     let firstLoad = true;
     const refresh = async (): Promise<void> => {
-      if (!foreground) return;
+      if (!foreground || sendingRef.current) return;
       try {
         const result = await conversationClient.listMessages(convId);
         if (!cancelled) hydrateMessages(result);
@@ -397,6 +400,7 @@ export function ConversationSurface({
   async function send(preparedText?: string, temporaryUIResponseId?: string, sticker?: { code: string; emoji: string; name: string }): Promise<void> {
     const text = (preparedText ?? draft).trim();
     if (!text || sending || !convId) return;
+    sendingRef.current = true;
     setSending(true);
     const secureMeta = secureMetaForSend();
     const userMsg: Message = {
@@ -417,6 +421,9 @@ export function ConversationSurface({
     setTemporaryUI(undefined);
 
     try {
+      // Yield one frame before starting the potentially slow model request so
+      // the user's own message is painted immediately on the device.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const result = await conversationClient.sendMessage(convId, userText, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, temporaryUIResponseId, undefined, buildProtection());
       // 解析 AI 回复
       const payload = parseOperationRef(result);
@@ -441,6 +448,7 @@ export function ConversationSurface({
       setDraft(userText);
       setError(e instanceof Error ? e.message : "发送失败，请重试");
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }
@@ -769,6 +777,7 @@ export function ConversationSurface({
               </View>
             );
           })}
+          {sending && aiAccount ? <View style={styles.aiTypingRow}><ActivityIndicator color={lotus.goldtext} size="small" /><Text style={styles.aiTypingText}>{aiAccount.displayName} 正在回复…</Text></View> : null}
           {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
         </ScrollView>
 
@@ -1097,6 +1106,8 @@ const styles = StyleSheet.create({
   dayDivider: { color: lotus.faint, fontSize: 11, marginBottom: 15, marginTop: 4, textAlign: "center" },
   systemEvent: { color: "#9a958d", fontSize: 11, lineHeight: 15, marginVertical: 12, paddingHorizontal: 40, textAlign: "center" },
   systemEventWrap: { alignItems: "center", marginVertical: 12 },
+  aiTypingRow: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, marginBottom: 11, marginLeft: 30, marginTop: 2 },
+  aiTypingText: { color: lotus.muted, fontSize: 11 },
   retryButton: { backgroundColor: lotus.ink, borderRadius: 10, marginTop: 8, paddingHorizontal: 14, paddingVertical: 8 },
   retryButtonText: { color: "#ffffff", fontSize: 11, fontWeight: "800" },
 

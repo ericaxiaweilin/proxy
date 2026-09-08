@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 108 — 2026-09-08
+
+### Immediate AI companion send feedback
+
+- A user's outgoing bubble is painted before the AI completion request starts.
+- Live history refresh pauses while that completion is pending, so hydration cannot
+  erase the optimistic bubble; the companion shows an explicit replying state.
+
 ## Revision 107 — 2026-09-08
 
 ### Compact, single-submit Home AI conversation
