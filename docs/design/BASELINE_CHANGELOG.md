@@ -810,3 +810,8 @@ same commit. Do not record routine business logic changes here.
 
 - 地点和活动选择改为横向实景照片卡；活动优先使用活动封面，否则使用绑定 Reality Scene 的实景图。
 - 时间选择改为横向时段卡，保留清晰的当前选择状态，不再使用纵向文字列表。
+
+# Revision 83 — Four-grid chooser gesture isolation (2026-09-08)
+
+- 四宫格人物、时间、活动、地点横滑选择器统一接入共享手势隔离层，优先消费横滑，防止误触根页面翻页。
+- 视觉、数据选择和四宫格业务链路保持不变。

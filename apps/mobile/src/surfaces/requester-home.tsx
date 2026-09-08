@@ -600,7 +600,7 @@ export function RequesterHome({
                         <View style={styles.sheetGrab} />
                         <Text style={styles.sheetTitle}>{chooser === "person" ? "选一起的人" : chooser === "time" ? "选时间" : chooser === "activity" ? "选活动" : "选地点"}</Text>
                         {chooser === "person" ? (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.personChooserRail}>
+                          <HorizontalSwipeRail contentContainerStyle={styles.personChooserRail}>
                             {filteredPeople.map((p, i) => {
                               const selected = i === personIndex % filteredPeople.length;
                               return (
@@ -623,9 +623,9 @@ export function RequesterHome({
                                 </Pressable>
                               );
                             })}
-                          </ScrollView>
+                          </HorizontalSwipeRail>
                         ) : chooser === "time" ? (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeChooserRail}>
+                          <HorizontalSwipeRail contentContainerStyle={styles.timeChooserRail}>
                             {distinctTimes.map((t, i) => {
                               const selected = i === timeIndex % distinctTimes.length;
                               return (
@@ -636,9 +636,9 @@ export function RequesterHome({
                                 </Pressable>
                               );
                             })}
-                          </ScrollView>
+                          </HorizontalSwipeRail>
                         ) : chooser === "activity" ? (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoChooserRail}>
+                          <HorizontalSwipeRail contentContainerStyle={styles.photoChooserRail}>
                             {storeActivities.map((a, i) => {
                               const scene = sceneBriefs.find((s) => s.id === a.realitySceneId || s.name === a.venueName);
                               const photo = a.coverImageUrl || scene?.imageUrl;
@@ -654,9 +654,9 @@ export function RequesterHome({
                                 </Pressable>
                               );
                             })}
-                          </ScrollView>
+                          </HorizontalSwipeRail>
                         ) : (
-                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoChooserRail}>
+                          <HorizontalSwipeRail contentContainerStyle={styles.photoChooserRail}>
                             {sceneBriefs.map((s, i) => {
                               const selected = i === placeIndex % sceneBriefs.length;
                               return (
@@ -670,7 +670,7 @@ export function RequesterHome({
                                 </Pressable>
                               );
                             })}
-                          </ScrollView>
+                          </HorizontalSwipeRail>
                         )}
                       </View>
                     </Pressable>

@@ -87,7 +87,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("chooses people from a horizontal photo rail instead of a name-only list", () => {
     expect(source).toContain("styles.personChooserRail");
     expect(source).toContain("styles.personChooserPhoto");
-    expect(source).toContain('horizontal showsHorizontalScrollIndicator={false}');
+    expect(source).toContain("<HorizontalSwipeRail contentContainerStyle={styles.personChooserRail}>");
     expect(source).toContain("p.photoUri");
     expect(source).toContain("p.bio");
   });
@@ -99,6 +99,8 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("styles.timeChooserRail");
     expect(source).toContain("styles.timeChooserCard");
     expect(source).not.toContain("styles.chooserItem");
+    expect(source).toContain("<HorizontalSwipeRail contentContainerStyle={styles.photoChooserRail}>");
+    expect(source).toContain("<HorizontalSwipeRail contentContainerStyle={styles.timeChooserRail}>");
   });
 
   it("keeps relationship and messaging actions inside the profile", () => {
