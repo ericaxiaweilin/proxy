@@ -81,6 +81,7 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("(current + 1) % distinctTimes.length");
     expect(source).toContain("(current + 1) % storeActivities.length");
     expect(source).toContain("(current + 1) % sceneBriefs.length");
+    expect(source).toContain("borderWidth: 2");
   });
 
   it("keeps relationship and messaging actions inside the profile", () => {

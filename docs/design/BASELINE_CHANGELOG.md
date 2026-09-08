@@ -796,3 +796,7 @@ same commit. Do not record routine business logic changes here.
 
 - Requester Home 四宫格中心空位新增“整组换一组”按钮，一次轮换人物、时间、活动与地点。
 - 四张卡片、布局尺寸、下方操作链路均保持不变；中心按钮采用统一矢量图标，避免平台字体偏移。
+
+# Revision 80 — Four-grid remix separator refinement (2026-09-08)
+
+- 中心换组按钮的留白隔离圈由 5px 收窄至 2px，其他尺寸与布局不变。

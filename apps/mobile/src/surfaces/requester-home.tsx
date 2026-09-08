@@ -841,7 +841,7 @@ const styles = StyleSheet.create({
   composerCollapseText: { color: color.muted, fontSize: 11, fontWeight: "700" },
   gridStage: { position: "relative" },
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  gridRemixButton: { alignItems: "center", backgroundColor: "#171715", borderColor: color.offWhite, borderRadius: 29, borderWidth: 5, elevation: 7, height: 58, justifyContent: "center", left: "50%", marginLeft: -29, marginTop: -24, position: "absolute", top: "50%", width: 58, zIndex: 8 },
+  gridRemixButton: { alignItems: "center", backgroundColor: "#171715", borderColor: color.offWhite, borderRadius: 29, borderWidth: 2, elevation: 7, height: 58, justifyContent: "center", left: "50%", marginLeft: -29, marginTop: -24, position: "absolute", top: "50%", width: 58, zIndex: 8 },
   gridRemixButtonPressed: { opacity: 0.78, transform: [{ scale: 0.96 }] },
   gridTile: { borderRadius: 18, height: 172, overflow: "hidden", width: "48.4%" },
   gridImage: { borderRadius: 18, height: "100%", width: "100%" },
