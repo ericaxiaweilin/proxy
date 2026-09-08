@@ -529,6 +529,13 @@ export function RequesterHome({
             const gridActivity = storeActivities.length > 0 ? storeActivities[activityIndex % storeActivities.length] : undefined;
             const gridPlace = sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
             if (!gridPerson && !gridActivity && !gridPlace && !gridTime) return null;
+            const remixAll = (): void => {
+              setComposerOpen(false);
+              if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
+              if (distinctTimes.length > 1) setTimeIndex((current) => (current + 1) % distinctTimes.length);
+              if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
+              if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
+            };
             const composed = [gridPerson ? `和${gridPerson.name}` : "", gridTime ?? "", gridActivity ? gridActivity.title : "", gridPlace ? `@${gridPlace.name}` : ""].filter(Boolean).join(" ");
             const tiles = [
               gridPerson ? { key: `person:${gridPerson.id}`, slot: "person" as const, imageUri: gridPerson.photoUri, glyph: "●", label: gridPerson.name, sub: "一起的人 · 点更换" } : undefined,
@@ -544,16 +551,28 @@ export function RequesterHome({
                     <Text style={styles.peopleSub}>选人 · 定时间 · 配活动场景，一键出图或邀约</Text>
                   </View>
                 </View>
-                <View style={styles.grid4}>
-                  {tiles.map((t) => t ? (
-                    <Pressable key={t.key} onPress={() => { setComposerOpen(false); setChooser(t.slot); }} style={styles.gridTile}>
-                      {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
-                      <View style={styles.gridOverlay}>
-                        <Text style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
-                        <Text style={[styles.gridSub, !t.imageUri && styles.gridSubDark]} numberOfLines={1}>{t.sub}</Text>
-                      </View>
-                    </Pressable>
-                  ) : null)}
+                <View style={styles.gridStage}>
+                  <View style={styles.grid4}>
+                    {tiles.map((t) => t ? (
+                      <Pressable key={t.key} onPress={() => { setComposerOpen(false); setChooser(t.slot); }} style={styles.gridTile}>
+                        {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
+                        <View style={styles.gridOverlay}>
+                          <Text style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
+                          <Text style={[styles.gridSub, !t.imageUri && styles.gridSubDark]} numberOfLines={1}>{t.sub}</Text>
+                        </View>
+                      </Pressable>
+                    ) : null)}
+                  </View>
+                  <Pressable
+                    accessibilityHint="同时更换人物、时间、活动和地点"
+                    accessibilityLabel="整组换一组"
+                    accessibilityRole="button"
+                    hitSlop={8}
+                    onPress={remixAll}
+                    style={({ pressed }) => [styles.gridRemixButton, pressed && styles.gridRemixButtonPressed]}
+                  >
+                    <ProxyIcon color={color.white} name="remix" size={25} />
+                  </Pressable>
                 </View>
                 {composed ? (
                   <View>
@@ -820,7 +839,10 @@ const styles = StyleSheet.create({
   composerSingleChev: { color: color.muted, fontSize: 18, fontWeight: "800" },
   composerCollapse: { alignItems: "center", paddingVertical: 6 },
   composerCollapseText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  gridStage: { position: "relative" },
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  gridRemixButton: { alignItems: "center", backgroundColor: "#171715", borderColor: color.offWhite, borderRadius: 29, borderWidth: 5, elevation: 7, height: 58, justifyContent: "center", left: "50%", marginLeft: -29, marginTop: -24, position: "absolute", top: "50%", width: 58, zIndex: 8 },
+  gridRemixButtonPressed: { opacity: 0.78, transform: [{ scale: 0.96 }] },
   gridTile: { borderRadius: 18, height: 172, overflow: "hidden", width: "48.4%" },
   gridImage: { borderRadius: 18, height: "100%", width: "100%" },
   gridImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 18, height: "100%", justifyContent: "center", width: "100%" },

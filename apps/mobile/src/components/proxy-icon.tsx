@@ -40,7 +40,8 @@ export type ProxyIconName =
   | "infoCircle"
   | "qrGrid"
   | "ellipsis"
-  | "search";
+  | "search"
+  | "remix";
 
 const symbolMap: Partial<Record<string, ProxyIconName>> = {
   "home": "home",
@@ -113,6 +114,8 @@ function MasterModuleIcon({ name, size, color }: { name: ProxyIconName; size: nu
       return canvas(<><Path {...common} d="M7 17 17 7"/><Path {...common} d="M10 7h7v7"/></>);
     case "route":
       return canvas(<><Circle {...common} cx="5" cy="17" r="1.5"/><Circle {...common} cx="18" cy="8" r="1.5"/><Path {...common} d="M6.5 16c2.3-5.6 4.6-7.5 7.2-7.5 1.2 0 2.1.3 2.8.6"/></>);
+    case "remix":
+      return canvas(<><Path {...common} d="M5 7h3.2c2.2 0 3.4 1.2 4.5 3.2l1.1 2C14.9 14.2 16 17 19 17"/><Path {...common} d="m16 14 3 3-3 3"/><Path {...common} d="M5 17h3.2c1.8 0 2.9-.8 3.8-2.3l2-3.4C15.1 9.4 16.2 7 19 7"/><Path {...common} d="m16 4 3 3-3 3"/></>);
     case "plus":
       return canvas(<Path {...common} d="M12 5v14M5 12h14"/>);
     case "clock":

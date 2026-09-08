@@ -74,6 +74,15 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(forYou).toBeLessThan(source.indexOf("styles.grid4"));
   });
 
+  it("uses the four-grid center diamond to remix the whole selection", () => {
+    expect(source).toContain('accessibilityLabel="整组换一组"');
+    expect(source).toContain("onPress={remixAll}");
+    expect(source).toContain("(current + 1) % filteredPeople.length");
+    expect(source).toContain("(current + 1) % distinctTimes.length");
+    expect(source).toContain("(current + 1) % storeActivities.length");
+    expect(source).toContain("(current + 1) % sceneBriefs.length");
+  });
+
   it("keeps relationship and messaging actions inside the profile", () => {
     expect(profile).toContain("toggleFollow()");
     expect(profile).toContain("onMessage(account)");
