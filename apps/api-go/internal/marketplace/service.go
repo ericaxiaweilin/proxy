@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -245,6 +246,9 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			if p.Price == "" || p.Price == "0₫" || p.Price == "0" {
 				return rejected(e, "INVALID_OPPORTUNITY", "market.price_required_for_earn_or_pay")
 			}
+			if !priceWithinVNDLimit(p.Price) {
+				return rejected(e, "INVALID_OPPORTUNITY", "market.price_exceeds_vnd_limit")
+			}
 		}
 		if p.MoneyFlow == "FREE" && p.Price != "" && p.Price != "0₫" && p.Price != "0" {
 			return rejected(e, "INVALID_OPPORTUNITY", "market.free_opportunity_must_have_zero_price")
@@ -300,6 +304,9 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		stored, err := s.repository.Get(ctx, id)
 		if errors.Is(err, ErrOpportunityNotFound) || quote == "" {
 			return rejected(e, "INVALID_APPLICATION", "market.invalid_application")
+		}
+		if !priceWithinVNDLimit(quote) {
+			return rejected(e, "INVALID_APPLICATION", "market.quote_exceeds_vnd_limit")
 		}
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_failed", nil)
@@ -399,6 +406,34 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return payload(e, "MarketOpportunity", id, "DISMISSED", map[string]any{"opportunityId": id})
 	}
 	return rejected(e, "MARKET_COMMAND_UNSUPPORTED", "market.unsupported_command")
+}
+
+const maxMarketAmountVND = 10_000_000
+
+func priceWithinVNDLimit(label string) bool {
+	parts := strings.FieldsFunc(strings.TrimSpace(label), func(r rune) bool { return r == '–' || r == '—' || r == '-' })
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		clean := strings.ToUpper(strings.TrimSpace(part))
+		clean = strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(clean, "VND"), "₫"))
+		multiplier := float64(1)
+		if strings.HasSuffix(clean, "K") {
+			multiplier = 1_000
+			clean = strings.TrimSuffix(clean, "K")
+		}
+		if strings.HasSuffix(clean, "M") {
+			multiplier = 1_000_000
+			clean = strings.TrimSuffix(clean, "M")
+		}
+		clean = strings.ReplaceAll(clean, ",", "")
+		amount, err := strconv.ParseFloat(strings.TrimSpace(clean), 64)
+		if err != nil || amount <= 0 || amount*multiplier > maxMarketAmountVND {
+			return false
+		}
+	}
+	return true
 }
 
 // normalizeOpportunityMoney 强制把 moneyFlow / priceLabel / lens 落到合法

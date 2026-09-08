@@ -49,6 +49,16 @@ func offerPayload() map[string]any {
 	}
 }
 
+func TestCreateOfferRejectsAboveTenMillionVND(t *testing.T) {
+	s := New()
+	payload := offerPayload()
+	payload["agreedCompensation"] = 10_000_001
+	result := s.Handle(envelopeFor("CreateOffer", payload, ""))
+	if result.Outcome != "REJECTED" || result.Error == nil || result.Error.ErrorCode != "INVALID_OFFER_AMOUNT" {
+		t.Fatalf("expected INVALID_OFFER_AMOUNT above 10M VND, got %#v", result)
+	}
+}
+
 func createOffer(t *testing.T, s *Service) string {
 	t.Helper()
 	r := s.Handle(envelopeFor("CreateOffer", offerPayload(), ""))
@@ -403,12 +413,12 @@ type stubPolicyDecisions struct {
 }
 
 type stubDecision struct {
-	id            string
-	userID        string
-	category      policydecisions.CategoryCode
-	termsVersion  string
+	id             string
+	userID         string
+	category       policydecisions.CategoryCode
+	termsVersion   string
 	privacyVersion string
-	jurisdiction  string
+	jurisdiction   string
 }
 
 func newStubPolicyDecisions() *stubPolicyDecisions {
@@ -462,7 +472,9 @@ func TestLC28ConfirmRequiresPolicyDecisionForPlatformPay(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create offer: %s %+v", r.Outcome, r.Error)
 	}
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	orderID := view.OrderID
 	// Confirm — should succeed because the policy gate stamps a decision.
@@ -501,7 +513,9 @@ func TestLC28ConfirmRejectsWhenPolicyGateUnconfigured(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create offer: %s %+v", r.Outcome, r.Error)
 	}
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r2.Outcome != "REJECTED" {
@@ -521,7 +535,9 @@ func TestLC28ConfirmSkipsGateForDirectSettlement(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create offer: %s %+v", r.Outcome, r.Error)
 	}
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r2.Outcome != "ACCEPTED" {
@@ -538,7 +554,9 @@ func TestLC28ReusePolicyDecisionAcrossOrders(t *testing.T) {
 	payload["settlementMode"] = "PLATFORM_PAY"
 	payload["paymentMethodLabel"] = "Proxy 钱包"
 	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r2.Outcome != "ACCEPTED" {
@@ -551,7 +569,9 @@ func TestLC28ReusePolicyDecisionAcrossOrders(t *testing.T) {
 	}
 	// Second Order, same requester.
 	r = svc.Handle(envelopeFor("CreateOffer", payload, ""))
-	var view2 struct{ OrderID string `json:"orderId"` }
+	var view2 struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view2)
 	r2 = svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view2.OrderID))
 	if r2.Outcome != "ACCEPTED" {
@@ -583,7 +603,9 @@ func TestLC30MaterialChangeReevaluatesPolicyDecisionForPlatformPay(t *testing.T)
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create offer: %s %+v", r.Outcome, r.Error)
 	}
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r2.Outcome != "ACCEPTED" {
@@ -626,7 +648,9 @@ func TestLC30MaterialChangeSkipsForDirectSettlement(t *testing.T) {
 	stub := newStubPolicyDecisions()
 	svc := New().WithPolicyDecisions(stub)
 	r := svc.Handle(envelopeFor("CreateOffer", offerPayload(), ""))
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r2.Outcome != "ACCEPTED" {
@@ -668,7 +692,9 @@ func TestLC30MaterialChangePermissiveWhenGateUnconfigured(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create offer: %s", r.Outcome)
 	}
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r2 := svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r2.Outcome != "ACCEPTED" {
@@ -917,7 +943,9 @@ func TestP1EJurisdictionIsPassedToEvaluate(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("create offer: %s", r.Outcome)
 	}
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r = svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r.Outcome != "ACCEPTED" {
@@ -947,7 +975,9 @@ func TestP1EDifferentJurisdictionsProduceDistinctDecisions(t *testing.T) {
 
 	// First Order: jurisdiction = VN-HN.
 	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
-	var v1 struct{ OrderID string `json:"orderId"` }
+	var v1 struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &v1)
 	r = svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, v1.OrderID))
 	if r.Outcome != "ACCEPTED" {
@@ -964,7 +994,9 @@ func TestP1EDifferentJurisdictionsProduceDistinctDecisions(t *testing.T) {
 
 	// Second Order: jurisdiction = VN-DNG.
 	r = svc.Handle(envelopeFor("CreateOffer", payload, ""))
-	var v2 struct{ OrderID string `json:"orderId"` }
+	var v2 struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &v2)
 	r = svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, v2.OrderID))
 	if r.Outcome != "ACCEPTED" {
@@ -993,7 +1025,9 @@ func TestP1ENilResolverFallsBackToEmpty(t *testing.T) {
 	payload["settlementMode"] = "PLATFORM_PAY"
 	payload["paymentMethodLabel"] = "Proxy 钱包"
 	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r = svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r.Outcome != "ACCEPTED" {
@@ -1018,7 +1052,9 @@ func TestP1EResolverErrorIsFailSoft(t *testing.T) {
 	payload["settlementMode"] = "PLATFORM_PAY"
 	payload["paymentMethodLabel"] = "Proxy 钱包"
 	r := svc.Handle(envelopeFor("CreateOffer", payload, ""))
-	var view struct{ OrderID string `json:"orderId"` }
+	var view struct {
+		OrderID string `json:"orderId"`
+	}
 	_ = json.Unmarshal([]byte(r.OperationRef), &view)
 	r = svc.Handle(envelopeFor("ConfirmCooperation", map[string]any{}, view.OrderID))
 	if r.Outcome != "ACCEPTED" {
@@ -1044,9 +1080,9 @@ func TestCancelOrderRequesterCanCancelOffered(t *testing.T) {
 		t.Fatalf("aggregate state: %+v", r.Aggregate)
 	}
 	var view struct {
-		OrderID  string `json:"orderId"`
-		Reason   string `json:"reason"`
-		Version  int    `json:"version"`
+		OrderID string `json:"orderId"`
+		Reason  string `json:"reason"`
+		Version int    `json:"version"`
 	}
 	if err := json.Unmarshal([]byte(r.OperationRef), &view); err != nil {
 		t.Fatal(err)

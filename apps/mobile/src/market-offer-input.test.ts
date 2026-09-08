@@ -46,8 +46,8 @@ describe("buildSlotOfferInput (real-applicant fast offer)", () => {
     if (!r.ok) return;
     expect(r.input.agreedCompensation).toBe(100);
   });
-  it("accepts the 1B VND ceiling boundary and rejects above it", () => {
-    expect(buildSlotOfferInput("opp_1", "user_002", "1000000000").ok).toBe(true);
-    expect(buildSlotOfferInput("opp_1", "user_002", "1000000001").ok).toBe(false);
+  it("accepts the 10M VND ceiling boundary and rejects above it", () => {
+    expect(buildSlotOfferInput("opp_1", "user_002", "10000000").ok).toBe(true);
+    expect(buildSlotOfferInput("opp_1", "user_002", "10000001").ok).toBe(false);
   });
 });

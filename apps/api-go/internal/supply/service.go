@@ -179,7 +179,7 @@ var (
 
 const (
 	// maxAmountVND 是金额类字段的服务端上限（防 9.2e18 级脏数据）。
-	maxAmountVND = 1_000_000_000
+	maxAmountVND = 10_000_000
 	// maxSupplierResults 限制单次供给查询返回的 Agent 数（防全市场目录抓取）。
 	maxSupplierResults = 20
 	// maxBatchCandidates 限制有限候选集大小。
@@ -672,18 +672,18 @@ func (s *Service) getAgentPassport(ctx context.Context, e command.Envelope) comm
 		}
 	}
 	return acceptedWithPayload(e, "AgentPassport", agentID, 1, passportStatus, map[string]any{
-		"agentId": agentID,
-		"profile": profile,
-		"service": svc,
+		"agentId":      agentID,
+		"profile":      profile,
+		"service":      svc,
 		"capabilities": caps,
 		"verificationSummary": map[string]any{
 			"verified": verifiedCount,
 			"expired":  expiredCount,
 			"pending":  pendingCount,
 		},
-		"activeWindows": activeWindows,
+		"activeWindows":  activeWindows,
 		"passportStatus": passportStatus,
-		"redactions": []string{"profile.photos precise EXIF removed", "location precise coordinates redacted to marketId"},
+		"redactions":     []string{"profile.photos precise EXIF removed", "location precise coordinates redacted to marketId"},
 	}, nil)
 }
 

@@ -114,7 +114,7 @@ var (
 )
 
 // maxOfferVND 是本单报价上限（fail-closed 防异常金额进入成交事实）。
-const maxOfferVND = 1_000_000_000
+const maxOfferVND = 10_000_000
 
 type MemoryRepository struct {
 	mu     sync.Mutex

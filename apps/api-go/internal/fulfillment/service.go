@@ -1411,7 +1411,7 @@ func viewerRole(order Order, actorID string) string {
 // ---------- helpers ----------
 
 // maxAmountVND 是订单/结算金额的服务端上限（防超大金额脏数据）。
-const maxAmountVND = 1_000_000_000
+const maxAmountVND = 10_000_000
 
 // R8 Pillar #6: Cash Eligibility 4 态。
 const (

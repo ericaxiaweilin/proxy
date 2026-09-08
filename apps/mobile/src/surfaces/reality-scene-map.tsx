@@ -149,7 +149,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         const human = detail.humans.find((item) => item.id === selectedHumanId);
         if (!human) throw new Error("请先选择要邀请的真人");
         const inviteAmount = Number(inviteAmountText.replace(/[^\d]/g, ""));
-        if (!Number.isInteger(inviteAmount) || inviteAmount < 100 || inviteAmount > 1_000_000_000) throw new Error("请输入 100–1,000,000,000 VND 的有效报酬");
+        if (!Number.isInteger(inviteAmount) || inviteAmount < 100 || inviteAmount > 10_000_000) throw new Error("请输入 100–10,000,000 VND 的有效报酬");
         const inviteAmountLabel = `${inviteAmount.toLocaleString("en-US")}₫`;
         const menuItem = detail.menu.find((item) => item.id === selectedMenuId);
         const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();

@@ -62,6 +62,19 @@ func TestOpportunityPublishApplyAndDismiss(t *testing.T) {
 	}
 }
 
+func TestOpportunityVNDLimit(t *testing.T) {
+	for _, accepted := range []string{"10,000,000₫", "10M VND", "500,000₫ – 10,000,000₫"} {
+		if !priceWithinVNDLimit(accepted) {
+			t.Fatalf("expected %q within limit", accepted)
+		}
+	}
+	for _, rejected := range []string{"10,000,001₫", "10.1M VND", "500,000₫ – 12,000,000₫"} {
+		if priceWithinVNDLimit(rejected) {
+			t.Fatalf("expected %q above limit", rejected)
+		}
+	}
+}
+
 // OPPORTUNITY-DEAL-001: 小美/任何 AI 都不是可直接上架的库存。真人报名后，
 // 发布者从真实投递中选择一人，只有被选中的真人能确认并物化订单。
 func TestOpportunityApplicationSelectionAndBilateralConfirmation(t *testing.T) {

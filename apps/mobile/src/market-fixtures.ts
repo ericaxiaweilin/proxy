@@ -25,11 +25,11 @@ export function composePriceRange(min: string, max: string): string {
 // 金额边界：
 //   - 下限 MIN_OFFER_VND = 100 — 服务端只要求 >0，但商品价显著低于
 //     100₫ 基本是误填（50₫ 这类）；端上先拦，省一次服务端 roundtrip。
-//   - 上限 MAX_OFFER_VND = 1_000_000_000 — 镜像服务端 maxAmountVND
+//   - 上限 MAX_OFFER_VND = 10_000_000 — 镜像服务端 maxAmountVND
 //    （fulfillment/service.go 防超大金额脏数据），超了直接报，不等
 //     服务端 INVALID_SLOT_OFFER_AMOUNT。
 export const MIN_OFFER_VND = 100;
-export const MAX_OFFER_VND = 1_000_000_000;
+export const MAX_OFFER_VND = 10_000_000;
 
 export interface SlotOfferInput {
   taskId: string;

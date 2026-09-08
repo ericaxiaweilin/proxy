@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 75 — 2026-09-08
+
+- Unified the VND ceiling for direct invitations, candidate offers, orders,
+  settlements, supplier reference prices and city-companion offers at
+  `10,000,000 VND`. Both clients and domain services reject larger values.
+
 ## Revision 74 — 2026-09-08
 
 - Direct Scene invitations now require the requester to enter an explicit VND
