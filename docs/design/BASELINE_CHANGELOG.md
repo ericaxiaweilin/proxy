@@ -21,6 +21,11 @@ same commit. Do not record routine business logic changes here.
 - The embedded Home conversation defaults to 350 pt, approximately two thirds of its
   previous height, preserving more of the discovery surface.
 
+## Revision 109 — 2026-09-08
+
+- 横滑跟手 1:1（PLACEHOLDER-007）：隔离组件用 grant 时刻快照做滚动
+  基准，不再拿持续更新的偏移重复累加；轻滑不再飞出去，松手即停。
+
 ## Revision 106 — 2026-09-08
 
 - AI 横滑与真人横滑对齐：AI rail 出血到边（去左右空白），间距与真人一致。

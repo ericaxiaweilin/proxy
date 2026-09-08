@@ -286,3 +286,13 @@ describe("PLACEHOLDER-006 checklist walk gaps", () => {
     expect(home).toContain("aiRailContent: { gap: 12, paddingHorizontal: 16 }");
   });
 });
+
+describe("PLACEHOLDER-007 rail tracks finger 1:1", () => {
+  const rail = readFileSync(fileURLToPath(new URL("../components/horizontal-swipe-rail.tsx", import.meta.url)), "utf8");
+
+  it("uses the grant-time snapshot as the only scroll base", () => {
+    expect(rail).toContain("railGrantXRef");
+    expect(rail).toContain("railGrantXRef.current - gs.dx");
+    expect(rail).not.toContain("railScrollXRef.current - gs.dx");
+  });
+});
