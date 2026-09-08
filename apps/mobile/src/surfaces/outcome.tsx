@@ -7,9 +7,11 @@ import { color, shadows } from "../theme";
 import type { OutcomeClient } from "../outcome-client";
 
 export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX.Element {
-  const [targetId, setTargetId] = useState("target_demo");
-  const [templateId, setTemplateId] = useState("tpl_v1");
-  const [venueId, setVenueId] = useState("venue_001");
+  // 三个 ID 必须手填真实值：之前默认 target_demo / tpl_v1 / venue_001，
+  // 点一下就往服务端写假目标行。置空 + 必填校验，不再预填演示 ID。
+  const [targetId, setTargetId] = useState("");
+  const [templateId, setTemplateId] = useState("");
+  const [venueId, setVenueId] = useState("");
   const [baselineId, setBaselineId] = useState("");
   const [resultId, setResultId] = useState("");
   const [log, setLog] = useState<string[]>([]);
@@ -17,6 +19,10 @@ export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX
   const push = (s: string) => setLog((l) => [s, ...l].slice(0, 20));
 
   const runDemo = async () => {
+    if (!targetId.trim() || !templateId.trim() || !venueId.trim()) {
+      push("ERR 请先填写 target / template / venue（不预填演示 ID）");
+      return;
+    }
     setBusy(true);
     try {
       const b = await client.createSet({ targetId, templateId, venueId });
@@ -42,9 +48,9 @@ export function OutcomeSurface({ client }: { client: OutcomeClient }): React.JSX
       <Text style={styles.title}>结果 · Outcome Intelligence</Text>
       <Text style={styles.sub}>ObservationSet → Delta → Learning 真实链路（M6.5），已接 OutcomeClient，非占位。</Text>
       <View style={styles.card}>
-        <Text style={styles.label}>targetId</Text><TextInput value={targetId} onChangeText={setTargetId} style={styles.input} placeholderTextColor={color.muted} />
-        <Text style={styles.label}>templateId</Text><TextInput value={templateId} onChangeText={setTemplateId} style={styles.input} />
-        <Text style={styles.label}>venueId</Text><TextInput value={venueId} onChangeText={setVenueId} style={styles.input} />
+        <Text style={styles.label}>targetId</Text><TextInput value={targetId} onChangeText={setTargetId} style={styles.input} placeholder="真实目标 ID" placeholderTextColor={color.muted} />
+        <Text style={styles.label}>templateId</Text><TextInput value={templateId} onChangeText={setTemplateId} style={styles.input} placeholder="真实模板 ID" placeholderTextColor={color.muted} />
+        <Text style={styles.label}>venueId</Text><TextInput value={venueId} onChangeText={setVenueId} style={styles.input} placeholder="真实场地 ID" placeholderTextColor={color.muted} />
         <Pressable onPress={runDemo} disabled={busy} style={[styles.cta, busy && { opacity: 0.6 }]}><Text style={styles.ctaText}>{busy ? "执行中…" : "跑一次 Demo 链路"}</Text></Pressable>
         {baselineId ? <Text style={styles.mono}>baseline: {baselineId}</Text> : null}
         {resultId ? <Text style={styles.mono}>result: {resultId}</Text> : null}
