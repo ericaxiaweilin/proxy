@@ -18,6 +18,8 @@ describe("MARKET-LOGO-SINGLE-TILE-001", () => {
     expect(master).toContain("const MASTER:");
     expect(master).not.toContain("translateX");
     expect(master).not.toContain("translateY");
+    expect(master).toContain('position: "absolute"');
+    expect(master).not.toContain('frame: { alignItems: "center", backgroundColor:');
   });
 
   it("uses real scene media first and labels generated fallbacks", () => {

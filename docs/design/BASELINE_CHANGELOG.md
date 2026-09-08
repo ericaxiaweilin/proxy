@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 93 — 2026-09-08
+
+### Market opportunity logo canvas normalization
+
+- The four order-type PNG masters no longer carry different asymmetric white
+  canvases; their visible tile bounds are normalized to the full 68×68 source.
+- Selection uses an absolute border overlay, so selecting a type cannot shrink or
+  offset the logo. The renderer no longer adds a second beige background below it.
+
 ## Revision 92 — 2026-09-08
 
 ### Home unified search/conversation contract
