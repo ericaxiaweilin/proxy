@@ -216,7 +216,9 @@ export function ComposerV2Screen({
     place: place ? { area: place.area } : null,
     topic,
     isGhost24h,
-    quoteTarget
+    quoteTarget,
+    replyPerm,
+    quotePerm
   });
   const hasAnyContent = !!(
     body.trim() ||
@@ -252,6 +254,8 @@ export function ComposerV2Screen({
         if (parsed.gifWord) setGifWord(parsed.gifWord);
         if (parsed.poll) setPoll(parsed.poll);
         if (parsed.topic) setTopic(parsed.topic);
+        if (parsed.replyPerm && (parsed.replyPerm === "我关注的人" || parsed.replyPerm === "仅提及的人")) setReplyPerm(parsed.replyPerm);
+        if (parsed.quotePerm && (parsed.quotePerm === "我关注的人" || parsed.quotePerm === "不允许")) setQuotePerm(parsed.quotePerm);
         setMedia(normalizeRestoredDraftMedia(snapshot.media));
         setVisibility(snapshot.visibility);
         setIncludeCity(snapshot.includeCity);
@@ -490,7 +494,9 @@ export function ComposerV2Screen({
         place,
         topic,
         isGhost24h,
-        quoteTarget
+        quoteTarget,
+        replyPerm,
+        quotePerm
       });
       // 拼接 payload（交给 composer-publish 统一处理 ephemeralUntil / poll 字段映射）。
       // overrides：body / mediaRefs 由调用方指定（已 assemble 过 / 已上传完）。
