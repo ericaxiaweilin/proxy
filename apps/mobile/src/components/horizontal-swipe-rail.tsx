@@ -51,6 +51,11 @@ export function HorizontalSwipeRail({
 }: HorizontalSwipeRailProps): React.JSX.Element {
   const railRef = useRef<ScrollView>(null);
   const railScrollXRef = useRef(0);
+  // 手指 1:1 基准：grant 瞬间快照当前偏移，整个手势内都用
+  // “快照 - 手指累计位移”。之前误用持续更新的 railScrollXRef
+  // 做被减数——手动 scrollTo 触发的 onScroll 会回写它，导致位移
+  // 被重复累加，内容比手指跑得快（轻滑就飞出去）。
+  const railGrantXRef = useRef(0);
   // R15.34.3: 全面更激进的 PanResponder 隔离。
   //   onStartShouldSetPanResponder: () => true  — start 就抢手势
   //     (避免 iOS 26 系统 tab 切换手势在 start 阶段赢走事件)。
@@ -68,12 +73,13 @@ export function HorizontalSwipeRail({
       onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy),
       onMoveShouldSetPanResponderCapture: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > threshold,
       onPanResponderGrant: () => {
-        // scrollX 由 onScroll 持续更新, 不需要在 grant 时重置
+        // 快照 grant 时刻的偏移；move 全程只认它，保证严格 1:1。
+        railGrantXRef.current = railScrollXRef.current;
       },
       onPanResponderMove: (_, gs) => {
         // 横滑时由本组件消费, 不让外层 PAGE_SEQUENCE / iOS 系统
-        // tab 切换手势抢占
-        railRef.current?.scrollTo({ x: railScrollXRef.current - gs.dx, animated: false });
+        // tab 切换手势抢占。松手即停，不加额外惯性——手指多快内容多快。
+        railRef.current?.scrollTo({ x: railGrantXRef.current - gs.dx, animated: false });
       },
       onPanResponderTerminationRequest: () => false,
       onShouldBlockNativeResponder: () => true
