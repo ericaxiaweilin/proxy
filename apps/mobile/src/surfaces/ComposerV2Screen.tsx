@@ -77,6 +77,8 @@ const COMPOSER_MEDIA_ITEM_SPAN = 130;
 const MAX_BODY_LENGTH = 500;
 const MAX_MEDIA = 6;
 const MAX_POLL_OPTIONS = 4;
+// 串帖跟帖上限：主帖 + 8 条跟帖，发布时按 “2/ …”“3/ …” 拼进正文。
+const MAX_THREAD_ENTRIES = 8;
 
 const GIF_WORDS = ["YES!", "LOL", "WOW", "OK", "♥", "HEART", "HI", "?", "??", "👀", "👋", "👍"] as const;
 const POLL_DURATIONS = ["1 天", "3 天", "7 天", "1 小时", "30 分钟"] as const;
@@ -165,6 +167,8 @@ export function ComposerV2Screen({
   const [quotePerm, setQuotePerm] = useState<QuotePermission>("所有人");
   const [longTextOpen, setLongTextOpen] = useState(false);
   const [longTextDraft, setLongTextDraft] = useState("");
+  // 串帖跟帖：纯本地状态，发布时按编号拼进正文（见 threadedBody）。
+  const [threadEntries, setThreadEntries] = useState<string[]>([]);
 
   // —— Sheet 显隐 ——
   const [openSheet, setOpenSheet] = useState<null | "reply" | "quote" | "gif" | "topic" | "more" | "location" | "quotePicker" | "pollDuration">(null);
@@ -197,18 +201,28 @@ export function ComposerV2Screen({
     }
   }, [quoteId, quoteTarget]);
 
+  // 串帖正文：主帖 + 非空跟帖（2/ 3/ …编号），装饰计数与发布都以它为准。
+  const threadedBody = useMemo(() => {
+    const extras = threadEntries.map((t) => t.trim()).filter((t) => t.length > 0);
+    if (extras.length === 0) return body;
+    return [body.trim(), ...extras.map((t, i) => `${i + 2}/ ${t}`)].filter(Boolean).join("\n\n");
+  }, [body, threadEntries]);
+
   // 估计最终 body 文本长度（装饰前缀计入）。这样用户在字符超限前可以准备截断。
   const effectiveBodyLength = estimateAssembledBodyLength({
-    body,
+    body: threadedBody,
     gifWord,
     poll,
     place: place ? { area: place.area } : null,
     topic,
     isGhost24h,
-    quoteTarget
+    quoteTarget,
+    replyPerm,
+    quotePerm
   });
   const hasAnyContent = !!(
     body.trim() ||
+    threadEntries.some((t) => t.trim()) ||
     media.length > 0 ||
     gifWord ||
     shouldSerializePoll(poll) ||
@@ -240,6 +254,8 @@ export function ComposerV2Screen({
         if (parsed.gifWord) setGifWord(parsed.gifWord);
         if (parsed.poll) setPoll(parsed.poll);
         if (parsed.topic) setTopic(parsed.topic);
+        if (parsed.replyPerm && (parsed.replyPerm === "我关注的人" || parsed.replyPerm === "仅提及的人")) setReplyPerm(parsed.replyPerm);
+        if (parsed.quotePerm && (parsed.quotePerm === "我关注的人" || parsed.quotePerm === "不允许")) setQuotePerm(parsed.quotePerm);
         setMedia(normalizeRestoredDraftMedia(snapshot.media));
         setVisibility(snapshot.visibility);
         setIncludeCity(snapshot.includeCity);
@@ -472,19 +488,21 @@ export function ComposerV2Screen({
         return;
       }
       const finalBody = assembleComposerBody({
-        body,
+        body: threadedBody,
         gifWord,
         poll,
         place,
         topic,
         isGhost24h,
-        quoteTarget
+        quoteTarget,
+        replyPerm,
+        quotePerm
       });
       // 拼接 payload（交给 composer-publish 统一处理 ephemeralUntil / poll 字段映射）。
       // overrides：body / mediaRefs 由调用方指定（已 assemble 过 / 已上传完）。
       const payload = buildCreatePostPayload(
         {
-          body,
+          body: threadedBody,
           media,
           visibility,
           includeCity,
@@ -505,6 +523,7 @@ export function ComposerV2Screen({
       await localNet.createPost(payload, idempotencyRef.current);
       // 重置
       setBody("");
+      setThreadEntries([]);
       setMedia([]);
       setQuoteId(null);
       setPlace(null);
@@ -779,11 +798,47 @@ export function ComposerV2Screen({
             </View>
           </View>
 
-          <Pressable onPress={() => showToast("已添加下一条（原型功能）")} style={styles.threadNext}>
+          {threadEntries.map((entry, idx) => (
+            <View key={idx} style={styles.threadRow}>
+              <Text style={styles.threadIndex}>{idx + 2}/</Text>
+              <TextInput
+                maxLength={MAX_BODY_LENGTH}
+                onChangeText={(v) => {
+                  invalidatePublishAttempt();
+                  setThreadEntries((prev) => prev.map((t, i) => (i === idx ? v : t)));
+                }}
+                placeholder={`第 ${idx + 2} 条…`}
+                placeholderTextColor={color.muted}
+                style={styles.threadInput}
+                value={entry}
+                multiline
+              />
+              <Pressable
+                accessibilityLabel={`删除第 ${idx + 2} 条`}
+                onPress={() => { invalidatePublishAttempt(); setThreadEntries((prev) => prev.filter((_, i) => i !== idx)); }}
+                style={styles.threadX}
+              >
+                <Text style={styles.threadXText}>×</Text>
+              </Pressable>
+            </View>
+          ))}
+          <Pressable
+            disabled={threadEntries.length >= MAX_THREAD_ENTRIES}
+            onPress={() => {
+              if (threadEntries.length >= MAX_THREAD_ENTRIES) {
+                showToast(`最多 ${MAX_THREAD_ENTRIES} 条跟帖`);
+                return;
+              }
+              invalidatePublishAttempt();
+              setThreadEntries((prev) => [...prev, ""]);
+              showToast("已添加下一条");
+            }}
+            style={styles.threadNext}
+          >
             <View style={styles.threadPlus}>
               <ProxyIcon name="plus" size={13} color={color.muted} />
             </View>
-            <Text style={styles.threadNextText}>添加下一条</Text>
+            <Text style={styles.threadNextText}>添加下一条{threadEntries.length > 0 ? `（${threadEntries.length}/${MAX_THREAD_ENTRIES}）` : ""}</Text>
           </Pressable>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -1604,6 +1659,22 @@ const styles = StyleSheet.create({
     width: 26
   },
   threadNextText: { color: color.muted, fontSize: 13 },
+  threadRow: { alignItems: "flex-start", flexDirection: "row", gap: 8, marginLeft: 56, marginTop: 10 },
+  threadIndex: { color: color.muted, fontSize: 12, fontWeight: "800", marginTop: 12 },
+  threadInput: {
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: color.ink,
+    flex: 1,
+    fontSize: 14,
+    minHeight: 40,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  threadX: { paddingHorizontal: 6, paddingVertical: 10 },
+  threadXText: { color: color.muted, fontSize: 16, fontWeight: "700" },
   // 错误
   error: { color: color.error, fontSize: 12, marginTop: 8 },
   // 底部

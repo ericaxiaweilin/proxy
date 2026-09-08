@@ -1,5 +1,7 @@
 // Lotus RFC §8 — 设置页「安全」区块 (营销包装 + 真开关)
 // 包含：端到端加密徽标、防截图提醒、多身份入口、消息保留时间、设备管理 (2 设备踢旧)
+// 管理类按钮暂无后端与管理页面可接：只留信息卡，不渲染死按钮
+// （之前点按直接回“我的”，哪儿也没去）。
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
@@ -8,15 +10,11 @@ import { ProxySwitch } from "./proxy-foundation";
 export function SecuritySettings({
   retentionDays,
   onRetentionChange,
-  onManageIdentities,
-  onManageDevices,
   screenshotWarnEnabled,
   onToggleScreenshotWarn,
 }: {
   retentionDays: 7 | 30 | 90 | 365;
   onRetentionChange: (v: 7 | 30 | 90 | 365) => void;
-  onManageIdentities: () => void;
-  onManageDevices: () => void;
   screenshotWarnEnabled: boolean;
   onToggleScreenshotWarn: (v: boolean) => void;
 }): React.JSX.Element {
@@ -38,10 +36,7 @@ export function SecuritySettings({
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>👤 多身份模式</Text>
-        <Text style={styles.cardDesc}>工作号 / 私人号 / 备用号（7天后自动销毁）隔离会话与未读。</Text>
-        <Pressable onPress={onManageIdentities} style={styles.action}>
-          <Text style={styles.actionText}>管理身份</Text>
-        </Pressable>
+        <Text style={styles.cardDesc}>工作号 / 私人号 / 备用号（7天后自动销毁）隔离会话与未读。身份切换在消息页左上角。</Text>
       </View>
 
       <View style={styles.card}>
@@ -58,10 +53,7 @@ export function SecuritySettings({
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>📱 设备管理</Text>
-        <Text style={styles.cardDesc}>最多 2 台设备同时在线，新登录自动踢出最旧设备。</Text>
-        <Pressable onPress={onManageDevices} style={styles.action}>
-          <Text style={styles.actionText}>查看我的设备</Text>
-        </Pressable>
+        <Text style={styles.cardDesc}>最多 2 台设备同时在线，新登录自动踢出最旧设备。设备列表尚未接入。</Text>
       </View>
     </View>
   );
@@ -79,6 +71,4 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: "#EEE3FF", borderColor: color.proxyPurple },
   chipText: { color: color.muted, fontSize: 11, fontWeight: "700" },
   chipTextActive: { color: "#5822A4" },
-  action: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 10, marginTop: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  actionText: { color: color.white, fontSize: 11, fontWeight: "800" },
 });

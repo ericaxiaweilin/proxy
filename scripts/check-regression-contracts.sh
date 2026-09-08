@@ -658,6 +658,31 @@ if ! grep -q 'relationship\.listMyFriendships\|relationship\.acceptFriendRequest
 fi
 echo "    FRIEND-001: PASS (server + mobile wire end-to-end)"
 
+# PLACEHOLDER-001: friend-crm / messages / tasks / ProfileTabs / me-wallet
+# 曾有 20+ 个占位按钮与编造字段（假扫码结果、假邀请身份、假匹配人、
+# 假发送 toast、假余额）。修复后：有后端能力的走真接线（Share /
+# BlockFriend / 接受忽略请求 / 点赞），无后端能力的删假按钮并诚实
+# 说明，未知金额画"—"不编数。 tripwire 见
+# apps/mobile/src/surfaces/placeholder-honest-actions.test.ts。
+if ! grep -q 'PLACEHOLDER-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-001]: placeholder tripwire test file is missing" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts >/dev/null
+echo "    PLACEHOLDER-001: PASS (no placeholder buttons / invented fields)"
+
+# PLACEHOLDER-002: 每条交互链必须走完（出图分享之后不断线）。
+# 四路审计扫出的断链：市场搜索/自定义报价/活动图钉、场景三态静默、
+# 活动报名不刷新、会话发送假气泡/转发空壳、权限不进包、偏好存了不用、
+# 自定频道不过滤、助手 pill 导错航、建连失败无重试、资料/邀请/外链静默、
+# 主页搜索丢词、店铺素材假计数、状态点打不开、安全区死按钮、候选不落盘、
+# 权益目录空屏、Creator 输入不进 Review 且接受不持久、联系人空且不可达。
+if ! grep -q 'PLACEHOLDER-002' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-002]: exhaustive-chain tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-002: PASS (tripwire present; covered by the vitest run above)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'

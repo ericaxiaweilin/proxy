@@ -1,7 +1,7 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
@@ -97,8 +97,16 @@ export function MessagesSurface({
     if (onOpenRequests) onOpenRequests();
     else setSubView("requests");
   };
-  const openPerson = (name: string) => {
-    setPersonName(name);
+  const openContacts = () => {
+    if (onOpenContacts) onOpenContacts();
+    else setSubView("contacts");
+  };
+  // 联系人详情带上会话上下文：名字 + 最近消息 + 会话 id，
+  // “消息”按钮直达该会话，不断链；在线/username/手机号之前是现编的，已去掉。
+  const [personCtx, setPersonCtx] = useState<{ name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined }>({ name: "" });
+  const openPerson = (contact: { name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined }) => {
+    setPersonCtx(contact);
+    setPersonName(contact.name);
     setSubView("person");
   };
 
@@ -126,8 +134,15 @@ export function MessagesSurface({
   }
 
   if (subView === "contacts") {
-    const CONTACTS: Array<{ name: string; username: string; note: string; meta: string; warm?: boolean; blue?: boolean; online?: boolean }> = [];
-    const filtered = CONTACTS.filter((c) => !contactSearch || `${c.name}${c.username}`.toLowerCase().includes(contactSearch.toLowerCase()));
+    // 联系人 = 收件箱里真实聊过天的人（名字/最近消息/时间都来自服务端），
+    // 没有独立通讯录接口，不编造 username/在线状态/手机号。
+    const CONTACTS = (serverDialogs ?? []).map((d) => ({
+      name: d.name,
+      preview: d.preview,
+      time: d.time,
+      conversationId: d.conversationId,
+    }));
+    const filtered = CONTACTS.filter((c) => !contactSearch || `${c.name}${c.preview}`.toLowerCase().includes(contactSearch.toLowerCase()));
     return (
       <SwipeBackShell onExit={() => setSubView("home")}>
         <View style={styles.app}>
@@ -139,15 +154,15 @@ export function MessagesSurface({
           </View>
           <View style={styles.contactHeadSearch}>
             <ProxyIcon color="#97938b" name="search" size={17} />
-            <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名、手机号或 Username" placeholderTextColor="#9a968f" style={styles.contactInput} />
+            <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名或最近消息" placeholderTextColor="#9a968f" style={styles.contactInput} />
           </View>
           <ScrollView style={{ flex: 1 }}>
-            <Text style={styles.contactSection}>已在 Proxy</Text>
-            {filtered.length === 0 ? <Text style={styles.empty}>暂无联系人</Text> : null}
+            <Text style={styles.contactSection}>已在 Proxy · 来自你的收件箱</Text>
+            {filtered.length === 0 ? <Text style={styles.empty}>{serverDialogs === undefined ? "加载中…" : "暂无联系人"}</Text> : null}
             {filtered.map((c) => (
-              <Pressable key={c.name} onPress={() => openPerson(c.name)} style={styles.contactRow}>
-                <View style={[styles.avatar, c.warm && styles.avatarWarm, c.blue && styles.avatarBlue]}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text>{c.online ? <View style={styles.online} /> : null}</View>
-                <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name} <Text style={styles.usernameBadge}>{c.username}</Text></Text><Text style={styles.contactMeta}>{c.note}</Text><Text style={styles.contactMeta}>{c.meta}</Text></View>
+              <Pressable key={`${c.name}-${c.conversationId ?? ""}`} onPress={() => openPerson(c)} style={styles.contactRow}>
+                <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>
+                <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name}</Text><Text style={styles.contactMeta}>{c.preview}</Text><Text style={styles.contactMeta}>{c.time}</Text></View>
                 <Text style={styles.contactAction}>聊天 ›</Text>
               </Pressable>
             ))}
@@ -165,20 +180,16 @@ export function MessagesSurface({
           <View style={styles.topbar}>
             <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
             <View style={styles.centerTitle}><Text style={styles.centerMain}>联系人</Text></View>
-            <Pressable style={styles.icon}><Text style={styles.ellipsis}>⋯</Text></Pressable>
+            <View style={styles.icon} />
           </View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-          <View style={styles.personHero}><View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View><Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>@{personName.toLowerCase()}.ng · 在线</Text></View>
+          <View style={styles.personHero}><View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View><Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
           <View style={styles.personActions}>
-            <Pressable onPress={() => onOpenConversation(personName)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
-            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="infoCircle" size={18} /></View><Text style={styles.personActionText}>资料</Text></Pressable>
-            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
-            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>⋯</Text></View><Text style={styles.personActionText}>更多</Text></Pressable>
+            <Pressable onPress={() => onOpenConversation(personName, personCtx.conversationId)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
+            <Pressable onPress={() => void Share.share({ message: `Proxy 联系人：${personName}（本地通讯录）` })} style={styles.personAction} accessibilityLabel="分享联系人"><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
           </View>
           <View style={{ paddingHorizontal: 16, gap: 8 }}>
-            <View style={styles.aliasCard}><Text style={styles.aliasLabel}>别名</Text><Text style={styles.aliasValue}>{personName} · 西湖</Text></View>
-            <View style={styles.aliasCard}><Text style={styles.aliasLabel}>Username</Text><Text style={styles.aliasValue}>@{personName.toLowerCase()}.ng</Text></View>
-            <View style={styles.aliasCard}><Text style={styles.aliasLabel}>手机号</Text><Text style={styles.privateValue}>08•• ••• 721 · 仅你可见</Text></View>
+            {personCtx.preview ? <View style={styles.aliasCard}><Text style={styles.aliasLabel}>最近消息</Text><Text style={styles.aliasValue} numberOfLines={2}>{personCtx.preview}</Text></View> : null}
           </View>
         </ScrollView>
         </View>
@@ -208,7 +219,9 @@ export function MessagesSurface({
               <Pressable accessibilityLabel="消息请求" onPress={openRequests} style={styles.iconBell}>
                 <ProxyIcon color={color.ink} name="mail" size={20} />
               </Pressable>
-            <View style={styles.icon} />
+            <Pressable accessibilityLabel="新聊天" onPress={openContacts} style={styles.icon}>
+              <ProxyIcon color={color.ink} name="chat" size={20} />
+            </Pressable>
           </View>
         </View>
 
@@ -250,9 +263,6 @@ export function MessagesSurface({
               <Text style={[styles.folderChipText, folder === f && styles.folderChipTextActive]}>{FOLDER_LABEL[f]}</Text>
             </Pressable>
           ))}
-          <Pressable accessibilityLabel="添加文件夹" style={styles.folderAdd}>
-            <Text style={styles.folderAddText}>＋</Text>
-          </Pressable>
         </ScrollView>
       </View>
 
@@ -400,8 +410,6 @@ const styles = StyleSheet.create({
   folderChipActive: { backgroundColor: "#11110f", borderColor: "#11110f" },
   folderChipText: { fontSize: 11, fontWeight: "600", color: "#77736c" },
   folderChipTextActive: { color: "#fff" },
-  folderAdd: { width: 32, height: 29, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  folderAddText: { fontSize: 15, color: "#777" },
   inlineSearch: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: "#fffefa", borderBottomWidth: 1, borderBottomColor: "#e8e3da" },
   inlineSearchInput: { flex: 1, height: 34, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#fff", paddingHorizontal: 11, fontSize: 13 },
   inlineClear: { paddingHorizontal: 8, paddingVertical: 6 },
@@ -442,7 +450,6 @@ const styles = StyleSheet.create({
   centerMain: { fontSize: 14, fontWeight: "700", color: "#11110f" },
   centerSub: { fontSize: 11, color: "#8d8982", marginTop: 2 },
   backText: { fontSize: 22, color: "#11110f", textAlign: "center", width: 38 },
-  ellipsis: { fontSize: 18, color: "#88847c", width: 38, textAlign: "center" },
   requestIntro: { paddingHorizontal: 16, paddingTop: 15, paddingBottom: 8, fontSize: 11.5, lineHeight: 18, color: "#77736c" },
   mackeBanner: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 14, padding: 11, backgroundColor: "#fff9eb", flexDirection: "row", gap: 9, alignItems: "flex-start" },
   mackeIcon: { fontSize: 18 },
@@ -461,7 +468,6 @@ const styles = StyleSheet.create({
   contactSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, fontSize: 11, fontWeight: "700", color: "#9b978f", letterSpacing: 0.3 },
   contactRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
   contactName: { fontSize: 13, fontWeight: "700", color: "#11110f" },
-  usernameBadge: { fontSize: 11, fontWeight: "600", color: "#737068", backgroundColor: "#f6f3ee", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
   contactMeta: { fontSize: 11, color: "#aaa69e", marginTop: 2 },
   contactAction: { fontSize: 11, fontWeight: "700", color: "#6e6962" },
   personHero: { alignItems: "center", paddingTop: 18, paddingBottom: 12 },
@@ -474,5 +480,4 @@ const styles = StyleSheet.create({
   aliasCard: { borderWidth: 1, borderColor: "#e8e3da", borderRadius: 14, padding: 11, backgroundColor: "#fffefa" },
   aliasLabel: { fontSize: 11, color: "#9a968e", marginBottom: 4 },
   aliasValue: { fontSize: 11.5, fontWeight: "600", color: "#11110f" },
-  privateValue: { fontSize: 11, color: "#8d8981" },
 });

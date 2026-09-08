@@ -12,7 +12,7 @@ import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
-import type { ConversationClient, ProtectionOverride } from "../conversation-client";
+import type { ConversationClient, ConversationInboxItem, ProtectionOverride } from "../conversation-client";
 import type { ActivityClient } from "../activity-client";
 import type { MediaClient, UploadableImage } from "../media-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
@@ -128,6 +128,11 @@ export function ConversationSurface({
   const [stickerOpen, setStickerOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [menuMessage, setMenuMessage] = useState<Message | null>(null);
+  // 转发目标选择：拉收件箱、调 ForwardMessage，全程有加载/错误态。
+  const [forwardFor, setForwardFor] = useState<Message | null>(null);
+  const [forwardInbox, setForwardInbox] = useState<ConversationInboxItem[] | undefined>(undefined);
+  const [forwardBusy, setForwardBusy] = useState(false);
+  const [forwardError, setForwardError] = useState<string | undefined>(undefined);
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [replyTo, setReplyTo] = useState<{ id: string; sender: string; body: string } | null>(null);
   const [pinned, setPinned] = useState<{ id: string; body: string } | null>(null);
@@ -396,6 +401,8 @@ export function ConversationSurface({
     try {
       await conversationClient.sendProxyObject(convId, proxyForService);
     } catch (e: unknown) {
+      // 活动卡片发送失败同样撤回气泡，不留假成功。
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setError(e instanceof Error ? e.message : "发送活动卡片失败");
     } finally {
       setSending(false);
@@ -444,6 +451,9 @@ export function ConversationSurface({
       if (payload?.assistantStatus === "FAILED") setError("模型服务暂时不可用，消息已保留");
       if (payload?.assistantStatus === "UNAVAILABLE") setError("模型服务未配置，消息已保留");
     } catch (e: unknown) {
+      // 发送失败：撤回乐观气泡、恢复草稿并提示，不留假成功。
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      setDraft(userText);
       setError(e instanceof Error ? e.message : "发送失败，请重试");
     } finally {
       setSending(false);
@@ -564,8 +574,34 @@ export function ConversationSurface({
     }
   }
 
-  function toggleReaction(messageId: string, emoji: string): void {
-    setReactions((prev) => {
+  async function openForwardSheet(target: Message): Promise<void> {
+    setForwardFor(target);
+    setForwardInbox(undefined);
+    setForwardError(undefined);
+    try {
+      const items = await conversationClient.listConversations();
+      setForwardInbox(items.filter((item) => item.conversation.conversationId !== convId));
+    } catch (e: unknown) {
+      setForwardError(e instanceof Error ? e.message : "会话列表加载失败");
+    }
+  }
+
+  async function forwardTo(targetConversationId: string): Promise<void> {
+    if (!forwardFor || forwardBusy) return;
+    setForwardBusy(true);
+    setForwardError(undefined);
+    try {
+      await conversationClient.forwardMessage(forwardFor.id, targetConversationId);
+      setForwardFor(null);
+      showToast("已转发");
+    } catch (e: unknown) {
+      setForwardError(e instanceof Error ? e.message : "转发失败，请重试");
+    } finally {
+      setForwardBusy(false);
+    }
+  }
+
+  function toggleReaction(messageId: string, emoji: string): void {    setReactions((prev) => {
       const current = prev[messageId] ?? [];
       const next = current.includes(emoji) ? current.filter((e) => e !== emoji) : [...current, emoji];
       if (next.length === 0) {
@@ -896,14 +932,15 @@ export function ConversationSurface({
             >
               <Text style={styles.sheetItemText}>回复</Text><Text style={styles.sheetItemHint}>↩</Text>
             </Pressable>
-            <Pressable onPress={() => { setMenuMessage(null); showToast("从这条消息创建 Convo"); }} style={styles.sheetItem}>
-              <Text style={styles.sheetItemText}>创建 Convo</Text><Text style={styles.sheetItemHint}>›</Text>
-            </Pressable>
             <Pressable
               onPress={() => {
-                const blockedForward = noForward;
+                const target = menuMsg;
                 setMenuMessage(null);
-                showToast(blockedForward ? "此安全会话禁止转发" : "选择转发对象");
+                if (noForward) {
+                  showToast("此安全会话禁止转发");
+                  return;
+                }
+                openForwardSheet(target);
               }}
               style={styles.sheetItem}
             >
@@ -919,6 +956,37 @@ export function ConversationSurface({
               <Pressable onPress={() => { const target = menuMsg; setMenuMessage(null); void deleteOwnMessage(target.id); }} style={styles.sheetItem}>
                 <Text style={[styles.sheetItemText, styles.menuDanger]}>删除</Text>
               </Pressable>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      ) : null}
+
+      {/* 转发目标选择：真调 ForwardMessage，有加载/空态/错误态 */}
+      {forwardFor ? (
+        <Pressable accessibilityLabel="关闭转发选择" onPress={() => { if (!forwardBusy) setForwardFor(null); }} style={styles.scrim}>
+          <Pressable onPress={() => undefined} style={styles.bottomSheet}>
+            <View style={styles.sheetGrab} />
+            <Text style={styles.sheetItemText}>转发给…</Text>
+            <Text style={styles.sheetItemHint} numberOfLines={1}>{forwardFor.body.slice(0, 40)}</Text>
+            {forwardInbox === undefined && !forwardError ? <ActivityIndicator style={{ marginVertical: 12 }} /> : null}
+            {forwardError ? <Text style={styles.menuDanger}>{forwardError}</Text> : null}
+            {(forwardInbox ?? []).map((item) => {
+              const targetId = item.conversation.conversationId;
+              const name = item.counterpartySnapshot?.displayName ?? item.counterpartyId ?? targetId.slice(0, 8);
+              return (
+                <Pressable
+                  key={targetId}
+                  disabled={forwardBusy}
+                  onPress={() => void forwardTo(targetId)}
+                  style={styles.sheetItem}
+                >
+                  <Text style={styles.sheetItemText} numberOfLines={1}>{name}</Text>
+                  <Text style={styles.sheetItemHint}>{forwardBusy ? "…" : "›"}</Text>
+                </Pressable>
+              );
+            })}
+            {forwardInbox !== undefined && forwardInbox.length === 0 && !forwardError ? (
+              <Text style={styles.sheetItemHint}>没有可转发的会话</Text>
             ) : null}
           </Pressable>
         </Pressable>

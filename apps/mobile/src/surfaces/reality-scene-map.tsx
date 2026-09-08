@@ -62,6 +62,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [visited, setVisited] = useState<ReadonlySet<string>>(new Set());
   const [visitedAt, setVisitedAt] = useState<ReadonlyMap<string, string>>(new Map());
   const [planned, setPlanned] = useState<ReadonlySet<string>>(new Set());
+  // 收藏/去过/去这里三态的操作反馈：未登录提示、同步失败回滚+提示。
+  const [triStateMsg, setTriStateMsg] = useState<string | undefined>(undefined);
   const [scenes, setScenes] = useState<ReadonlyArray<RealityScene>>([]);
   const [session, setSession] = useState<AuthenticatedStoredSession>();
   const [origin, setOrigin] = useState<{ latitude: number; longitude: number }>();
@@ -211,17 +213,34 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     commit(next);
   };
   const persistToggle = (source: ReadonlySet<string>, id: string, commit: (next: ReadonlySet<string>) => void, commandType: string): void => {
-    if (!session?.principal) return;
+    // 未登录：之前直接 return，点的按钮毫无反馈；现在明说。
+    if (!session?.principal) {
+      setTriStateMsg("请先登录，收藏与计划才会同步。");
+      return;
+    }
+    setTriStateMsg(undefined);
     const enabled = !source.has(id);
     toggle(source, id, commit);
-    void sendSceneCommand(authClient, session, commandType, id, { sceneId: id, enabled }).catch(() => commit(source));
+    // 失败：之前静默回滚；现在回滚并展示原因，可重试。
+    void sendSceneCommand(authClient, session, commandType, id, { sceneId: id, enabled }).catch(() => {
+      commit(source);
+      setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
+    });
   };
   const persistVisited = (id: string): void => {
-    if (!session?.principal) return;
+    if (!session?.principal) {
+      setTriStateMsg("请先登录，足迹才会同步。");
+      return;
+    }
+    setTriStateMsg(undefined);
     const enabled = !visited.has(id); const previousVisited = visited; const previousTimes = visitedAt;
     toggle(visited, id, setVisited);
     const nextTimes = new Map(visitedAt); if (enabled) nextTimes.set(id, new Date().toISOString()); else nextTimes.delete(id); setVisitedAt(nextTimes);
-    void sendSceneCommand(authClient, session, "SetPrivateRealitySceneVisited", id, { sceneId: id, enabled }).catch(() => { setVisited(previousVisited); setVisitedAt(previousTimes); });
+    void sendSceneCommand(authClient, session, "SetPrivateRealitySceneVisited", id, { sceneId: id, enabled }).catch(() => {
+      setVisited(previousVisited);
+      setVisitedAt(previousTimes);
+      setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
+    });
   };
   const recommendNearby = async (): Promise<void> => {
     if (nearbyBusy || !session) return;
@@ -291,6 +310,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               <Pressable onPress={() => persistVisited(selected.id)} style={styles.action}><Text style={styles.actionText}>{visited.has(selected.id) ? "✓ 已去过" : "标记去过"}</Text></Pressable>
               <Pressable onPress={() => persistToggle(planned, selected.id, setPlanned, "SetRealityScenePlanned")} style={styles.primaryAction}><Text style={styles.primaryActionText}>{planned.has(selected.id) ? "✓ 已计划" : "去这里"}</Text></Pressable>
             </View>
+            {triStateMsg ? <Text style={styles.nearbyError}>{triStateMsg}</Text> : null}
             <Text style={styles.sectionTitle}>怎么组织这次现实行动</Text>
             <View style={styles.executionCard}>
               {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.executionAction, selectedAction?.type === action.type && styles.executionActionSelected]}><Text style={styles.executionLabel}>{action.label}</Text><Text style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}

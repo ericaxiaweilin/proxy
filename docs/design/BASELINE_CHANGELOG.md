@@ -67,6 +67,34 @@ same commit. Do not record routine business logic changes here.
 
 - 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。
 
+## Revision 99 — 2026-09-08
+
+- 全链路走完（PLACEHOLDER-002）：出图分享接忙态/确认/取消/失败重试；
+  市场双搜索生效、自定义报价独立输入校验、活动地图藏错钉；场景三态
+  未登录与失败都明说；活动报名刷新详情+确认；会话发送失败撤气泡回
+  草稿、转发接真接口（建 Convo 无后端移除）；权限序列化进正文；
+  动态找同行走搜索、自定 AI 频道按名描述过滤、偏好静音/时限/权重全
+  消费；助手 pill 进市场、建连失败可重试；资料/邀请/外链失败留屏显；
+  主页实搜、店铺素材真 picker、状态表全局挂载、安全区死按钮移除；
+  候选落草稿、权益拉领取记录、Creator 输入进 Review 且接受持久化；
+  联系人走收件箱真数据且可达，去编造字段。
+
+## Revision 98 — 2026-09-08
+
+- 店铺“公开主页”死按钮接真分享（公开店铺链接）；内容/社媒归因三组
+  无口径漏斗数字画“—”不编数（与 R87 分析区同口径）。
+
+## Revision 97 — 2026-09-08
+
+- 占位按钮/字段真接线（PLACEHOLDER-001 v2）：mock 数据全部保留作测试
+  替身，但每个按钮都走通——好友 CRM 添加变已发送、请求可接受/忽略、
+  拉黑即时移除（无后端走本地演示状态机，有后端调真实接口），服务端
+  与本地双列表并排渲染；消息/活动/帖子/钱包死按钮接真分享/真导航/
+  真点赞或移除；钱包与收入未知金额画“—”不编数。仅冒充本人的假身份
+  与假二维码彻底删除。
+- 发布器串帖“添加下一条”不再是空 toast：跟帖可增删改，发布时按编号
+  拼进正文并计入字数，发布成功后清空。
+
 ## Revision 88 — 2026-09-08
 
 - 商家工作台诚实化：邀请按钮文案改为真实意图（不再冒充自动派发）；
@@ -116,13 +144,9 @@ same commit. Do not record routine business logic changes here.
 - Market opportunity/activity tabs and conversation/settings secure switches
   now share accessible state implementations; added regression guards against
   local duplicate controls and documented the BoardUI adoption boundary.
-=======
-## Revision 76 — 2026-09-08
-
 - 商家 Creator 详情的“发起定向邀请”只是跳活动列表、并不创建邀请，
   改名“查看活动报名”。真定向邀请（指定 Creator 进指定场次）需房主
   场景 + 邀请命令，链路未接前不挂邀请字样。
->>>>>>> a0eafe7 (fix(merchant): honest invite label, drop dead create styles)
 
 ## Revision 75 — 2026-09-08
 
