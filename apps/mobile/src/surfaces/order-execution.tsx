@@ -27,8 +27,9 @@ export function OrderExecutionSurface({ client, onBack }: { client: FulfillmentC
       try {
         const list = await client.listMyOrders();
         if (!cancelled) setOrders(list);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } catch {
+        // 英文技术错不直接展示（未登录和断网都是这个口径）。
+        if (!cancelled) setError("订单加载失败，请检查连接后重试。");
       }
     })();
     return () => { cancelled = true; };

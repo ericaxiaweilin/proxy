@@ -86,10 +86,9 @@ export function FulfillmentWorkspace({
         setDraftId(result.aggregate.id);
         setDraftVersion(result.aggregate.version ?? 0);
       }
-    }).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[workspace] createDraft failed:", msg, err);
-      setActionNote(`服务端连接失败: ${msg}`);
+    }).catch(() => {
+      // 草稿建失败就直说，不把英文技术错抛给用户看。
+      setActionNote("工作区创建失败，请检查连接后重试。");
     });
   }, [demandClient, target.goal, draftId]);
 
@@ -152,7 +151,11 @@ export function FulfillmentWorkspace({
         }
       }
     } catch {
-      // 静默
+      // 发送失败不能静默：用户已经看到自己的气泡，必须撤回乐观消息、
+      // 恢复草稿并明说，否则"发出去了"全是假的。
+      setChatMessages((prev) => prev.filter((msg) => msg.id !== userMsg.id));
+      setDraft(userText);
+      setActionNote("消息发送失败，请检查连接后重试。");
     } finally {
       setSending(false);
     }

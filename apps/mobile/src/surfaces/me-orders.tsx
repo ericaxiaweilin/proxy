@@ -67,8 +67,13 @@ export function MyOrdersSurface({ client, onBack }: { client: FulfillmentClient;
         setDetail({ ...detail, lifecycle: "CANCELLED" });
       }
     } catch (error) {
-      const code = error instanceof Error ? error.message : "取消失败";
-      setCancelError(code);
+      // 服务端拒绝码不直接展示；会话类问题提示重登，其他归网络重试。
+      const msg = error instanceof Error ? error.message : "";
+      if (/principal|session|signed|sign in|re-authenticate|AUTH|auth/i.test(msg)) {
+        setCancelError("登录已过期，请重新登录后再取消。");
+      } else {
+        setCancelError("取消失败，请检查连接后重试。");
+      }
     } finally {
       setCancellingId(undefined);
     }
