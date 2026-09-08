@@ -134,3 +134,84 @@ describe("PLACEHOLDER-001 storefront public page shares, analytics without calib
     expect(meSub).toContain("口径未接入前不编数");
   });
 });
+
+describe("PLACEHOLDER-002 every chain runs to completion", () => {
+  const market = readFileSync(fileURLToPath(new URL("./market.tsx", import.meta.url)), "utf8");
+  const scene = readFileSync(fileURLToPath(new URL("./reality-scene-map.tsx", import.meta.url)), "utf8");
+  const activityDetail = readFileSync(fileURLToPath(new URL("./activity-detail.tsx", import.meta.url)), "utf8");
+  const home = readFileSync(fileURLToPath(new URL("./requester-home.tsx", import.meta.url)), "utf8");
+  const convo = readFileSync(fileURLToPath(new URL("./conversation.tsx", import.meta.url)), "utf8");
+  const feed = readFileSync(fileURLToPath(new URL("./feed.tsx", import.meta.url)), "utf8");
+  const assistant = readFileSync(fileURLToPath(new URL("./home-assistant.tsx", import.meta.url)), "utf8");
+  const fulfillment = readFileSync(fileURLToPath(new URL("./fulfillment-workspace.tsx", import.meta.url)), "utf8");
+  const benefitClaim = readFileSync(fileURLToPath(new URL("./BenefitClaimScreen.tsx", import.meta.url)), "utf8");
+  const creator = readFileSync(fileURLToPath(new URL("./creator-application.tsx", import.meta.url)), "utf8");
+  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+  const security = readFileSync(fileURLToPath(new URL("../components/security-settings.tsx", import.meta.url)), "utf8");
+
+  it("market search/quote/pins consume input and open real detail", () => {
+    expect(market).toContain("setQuery");
+    expect(market).toContain("customQuote");
+    expect(market).toContain("请先填写自定义报价金额");
+    expect(market).toContain("活动暂无位置坐标");
+    expect(market).not.toContain("as unknown as Activity");
+  });
+
+  it("scene tristate and activity join confirm instead of dropping", () => {
+    expect(scene).toContain("triStateMsg");
+    expect(scene).toContain("同步失败，已恢复");
+    expect(activityDetail).toContain("报名成功");
+  });
+
+  it("moment share handles shared/dismissed/error", () => {
+    expect(home).toContain("momentBusy");
+    expect(home).toContain("邀请已分享");
+    expect(home).toContain("分享没有调起");
+  });
+
+  it("conversation retracts failed bubbles and forwards for real", () => {
+    expect(convo).toContain("m.id !== userMsg.id");
+    expect(convo).toContain("forwardMessage");
+    expect(convo).toContain("已转发");
+    expect(convo).not.toContain("从这条消息创建 Convo");
+    expect(convo).not.toContain("选择转发对象");
+  });
+
+  it("composer permissions serialize and feed consumes prefs/channels", () => {
+    const composerBody = readFileSync(fileURLToPath(new URL("../composer-body.ts", import.meta.url)), "utf8");
+    expect(composerBody).toContain("回复权限");
+    expect(composerBody).toContain("引用权限");
+    expect(composer).toContain("replyPerm,");
+    expect(feed).toContain("customFeedTokens");
+    expect(feed).toContain("readFeedPrefs");
+    expect(feed).toContain("feedWeightFor");
+    expect(feed).toContain("setSearchOpen(true)");
+  });
+
+  it("assistant pills navigate and start failure retries", () => {
+    expect(assistant).toContain("onOpenMarket(a.tab)");
+    expect(assistant).toContain("重试连接");
+  });
+
+  it("me surfaces report failures and search/assets/status work", () => {
+    expect(me).toContain("profileSaveError");
+    expect(me).toContain("invitationError");
+    expect(me).toContain("socialOpenError");
+    expect(me).toContain("runProfileSearch");
+    expect(me).toContain("addEnterpriseAsset");
+    expect(me).not.toContain("onManageIdentities");
+    expect(security).not.toContain("管理身份");
+    expect(security).not.toContain("查看我的设备");
+  });
+
+  it("fulfillment/benefit/creator/messages chains complete", () => {
+    expect(fulfillment).toContain("selectedCandidate");
+    expect(benefitClaim).toContain("myClaims");
+    expect(benefitClaim).toContain("重新加载");
+    expect(creator).toContain("invitation-v1.json");
+    expect(creator).toContain("合作说明");
+    expect(messages).toContain("openContacts");
+    expect(messages).toContain("新聊天");
+    expect(messages).not.toContain("toLowerCase()}.ng");
+  });
+});

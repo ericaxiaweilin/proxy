@@ -229,6 +229,7 @@ export const styles = StyleSheet.create({
   enterpriseAssetTray: { flexDirection: "row", gap: 7, marginTop: 7 },
   enterpriseAsset: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, minHeight: 61, padding: 7 },
   enterpriseAssetThumb: { color: "#6F37B9", fontSize: 16 },
+  enterpriseAssetThumbImg: { borderRadius: 8, height: 40, width: "100%" },
   enterpriseAssetText: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 4 },
   enterpriseAssetActions: { flexDirection: "row", gap: 7 },
   enterpriseDraft: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginTop: 10, padding: 11, ...shadows.card },
