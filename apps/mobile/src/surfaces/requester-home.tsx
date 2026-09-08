@@ -14,6 +14,8 @@ import { type MarketTab } from "../market-fixtures";
 import { color, shadows } from "../theme";
 import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
+import type { LocalNetClient } from "../localnet-client";
+import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-publish";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
 import { ActivityCommandRejectedError, ActivityProtocolError } from "../activity-client";
@@ -88,6 +90,7 @@ export function RequesterHome({
   conversationPanel,
   topContext,
   demandClient,
+  localNet,
   marketplace,
   activities,
   experiences,
@@ -113,6 +116,8 @@ export function RequesterHome({
   conversationPanel?: ReactNode;
   topContext?: ReactNode;
   demandClient?: DemandClient;
+  // Moment 发布到动态：调用方传入 localNet（发帖写接口），没传则不渲染发布按钮。
+  localNet?: LocalNetClient;
   // R15.22 fix: 机会/活动计数从 API 拉, 替换 r157MarketPulse 硬编码 24/46/18.
   // server 端 ListMarketOpportunities / ListActivities 不限 actor, 匿名可读.
   marketplace?: MarketplaceClient;
@@ -850,6 +855,39 @@ export function RequesterHome({
                         </View>
                         <Text style={styles.momentCopy} numberOfLines={2}>{composed}</Text>
                         {momentMsg && momentOpen ? <Text style={styles.joinMsg}>{momentMsg}</Text> : null}
+                        {localNet ? (
+                          <Pressable
+                            disabled={momentBusy}
+                            onPress={() => {
+                              if (momentBusy) return;
+                              setMomentBusy(true);
+                              setMomentMsg(undefined);
+                              const payload = buildCreatePostPayload({
+                                body: composed,
+                                media: [],
+                                visibility: "PUBLIC",
+                                includeCity: true,
+                                quoteTargetId: null,
+                                place: null,
+                                topic: null,
+                                gifWord: null,
+                                poll: { open: false, options: ["", ""], durationLabel: "1 天" },
+                                isGhost24h: false,
+                              });
+                              void localNet.createPost(payload, newPublishIdempotencyKey()).then(() => {
+                                setMomentOpen(false);
+                                setMomentMsg("已发布到动态");
+                              }).catch((error: unknown) => {
+                                // 发布失败：sheet 留着，错误明说，可重试。
+                                setMomentMsg(error instanceof Error ? error.message : "发布失败，请重试。");
+                              }).finally(() => setMomentBusy(false));
+                            }}
+                            style={[styles.gridCta, { marginTop: 10 }]}
+                            accessibilityLabel="发布到动态"
+                          >
+                            <Text style={styles.gridCtaText}>{momentBusy ? "发布中…" : "发布到动态"}</Text>
+                          </Pressable>
+                        ) : null}
                         <Pressable
                           disabled={momentBusy}
                           onPress={() => {

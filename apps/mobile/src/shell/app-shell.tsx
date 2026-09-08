@@ -571,6 +571,7 @@ export function AppShell({
               onEnterWorkspace={enterWorkspace}
               onOpenFeed={() => selectTab("FEED")}
               onOpenMarket={(tab) => openMarket({ tab })}
+              localNet={localNet}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
               onOpenAssistantConversation={() => void openProxyAIConversation()}
               conversationPanel={homeAssistant ? (

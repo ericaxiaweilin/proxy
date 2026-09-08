@@ -233,3 +233,16 @@ describe("PLACEHOLDER-003 no dead props or viewers", () => {
     expect(other).toContain("reactToPost");
   });
 });
+
+describe("PLACEHOLDER-004 moment publishes to feed", () => {
+  const home = readFileSync(fileURLToPath(new URL("./requester-home.tsx", import.meta.url)), "utf8");
+  const shell = readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8");
+
+  it("wires publish-to-feed through the real post pipeline", () => {
+    expect(home).toContain("buildCreatePostPayload");
+    expect(home).toContain("localNet.createPost");
+    expect(home).toContain("发布到动态");
+    expect(home).toContain("已发布到动态");
+    expect(shell).toContain("localNet={localNet}");
+  });
+});

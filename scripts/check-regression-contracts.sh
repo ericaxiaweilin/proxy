@@ -691,6 +691,13 @@ if ! grep -q 'PLACEHOLDER-003' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-003: PASS (tripwire present; covered by the vitest run above)"
 
+# PLACEHOLDER-004: 邀约 Moment 发布到动态走真发帖管线。
+if ! grep -q 'PLACEHOLDER-004' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-004]: moment-publish tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-004: PASS (tripwire present; covered by the vitest run above)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'

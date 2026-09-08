@@ -67,6 +67,11 @@ same commit. Do not record routine business logic changes here.
 
 - 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。
 
+## Revision 101 — 2026-09-08
+
+- 邀约 Moment 可发布到动态（PLACEHOLDER-004）：复用发帖管线
+  buildCreatePostPayload + localNet.createPost，成功确认、失败留屏可重试。
+
 ## Revision 100 — 2026-09-08
 
 - 死链清理（PLACEHOLDER-003）：MarketSurface 未使用的 onOpenActivity
