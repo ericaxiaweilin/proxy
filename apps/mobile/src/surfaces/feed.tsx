@@ -37,6 +37,7 @@ import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
 import { CustomFeedHub } from "./custom-feed";
+import { readCustomFeeds } from "../expo-custom-feed-store";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
 
@@ -204,6 +205,19 @@ export function FeedSurface({
   const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
   const [selectedCustomFeed, setSelectedCustomFeed] = useState<string | null>(null);
+  // 自定频道定义（name/desc）：AI 生成的频道用它切词过滤 + 横幅显示真名，
+  // 而不是裸 id。读本地持久化，与 CustomFeedHub 同源。
+  const customFeedDef = useMemo(() => {
+    if (!selectedCustomFeed) return undefined;
+    return readCustomFeeds([]).find((f) => f.id === selectedCustomFeed);
+  }, [selectedCustomFeed, customFeedHubOpen]);
+  const customFeedTokens = useMemo(() => {
+    if (!customFeedDef) return [];
+    return `${customFeedDef.name} ${customFeedDef.desc}`
+      .split(/[\s\/·,，、。!！?？:：;；]+/)
+      .map((t) => t.trim().toLocaleLowerCase())
+      .filter((t) => t.length >= 2);
+  }, [customFeedDef]);
   // X 式内联视频自动播放：滑近视口中心自动播（默认静音）、滑出即停，同一时刻仅一条在播。
   const [cardYs, setCardYs] = useState<Record<string, number>>({});
   const [frames, setFrames] = useState<Record<string, { y: number; height: number }>>({});
@@ -716,7 +730,17 @@ export function FeedSurface({
         startup: (p) => p.contextRefs.some((r) => r.contextId.includes("创业") || r.contextId.includes("AI"))
       };
       const checker = feedMap[selectedCustomFeed];
-      if (checker && !checker(post)) return false;
+      if (checker) {
+        if (!checker(post)) return false;
+      } else if (customFeedTokens.length > 0) {
+        // AI 生成的自定频道（id=ai_…）：内置 feedMap 没有规则，
+        // 用频道名+描述切词做本地过滤；之前直接看全部。
+        const haystack = [authorName(post), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+          .filter((value): value is string => typeof value === "string")
+          .join(" ")
+          .toLocaleLowerCase();
+        if (!customFeedTokens.some((token) => haystack.includes(token))) return false;
+      }
     }
     const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
     if (normalizedQuery) {
@@ -784,7 +808,7 @@ export function FeedSurface({
       <>
       {selectedCustomFeed ? (
         <View style={styles.customFeedBanner}>
-          <Text style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? selectedCustomFeed}</Text>
+          <Text style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? customFeedDef?.name ?? selectedCustomFeed}</Text>
           <Pressable onPress={() => setSelectedCustomFeed(null)}>
             <Text style={styles.customFeedBannerAction}>退出频道</Text>
           </Pressable>
@@ -1054,7 +1078,17 @@ export function FeedSurface({
                   <Pressable onPress={() => onOpenChat(name)} style={styles.intentChat}>
                     <Text style={styles.intentChatText}>聊一下</Text>
                   </Pressable>
-                  <Pressable onPress={() => onOpenChat(name)} style={styles.intentNeed}>
+                  <Pressable
+                    onPress={() => {
+                      // 按这个想法找同行：用帖子的首个上下文主题（没有则取正文前 8 字）
+                      // 打开动态搜索并填入，列表即按该想法过滤——之前与“聊一下”完全同行为。
+                      const idea = post.contextRefs[0]?.contextId ?? post.body.slice(0, 8);
+                      setSearchOpen(true);
+                      setSearchQuery(idea);
+                    }}
+                    style={styles.intentNeed}
+                    accessibilityLabel="按这个想法找同行"
+                  >
                     <Text style={styles.intentNeedText}>按这个想法找同行</Text>
                   </Pressable>
                 </View>
