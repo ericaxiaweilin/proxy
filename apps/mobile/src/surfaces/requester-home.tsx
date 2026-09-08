@@ -100,6 +100,7 @@ export function RequesterHome({
   onOpenSceneMap,
   sceneApiBaseUrl,
   onChromeVisibilityChange,
+  onChooserVisibilityChange,
   bottomNavVisible,
 }: {
   onEnterWorkspace: (selection: RequesterGoal) => void;
@@ -126,6 +127,7 @@ export function RequesterHome({
   onOpenSceneMap?: ((sceneId?: string) => void) | undefined;
   sceneApiBaseUrl?: string | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
+  onChooserVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
   const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
@@ -154,6 +156,13 @@ export function RequesterHome({
   const [followedIds, setFollowedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [followBusyId, setFollowBusyId] = useState<string | undefined>(undefined);
   const [followMsg, setFollowMsg] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    onChooserVisibilityChange?.(chooser !== null);
+    return () => {
+      if (chooser !== null) onChooserVisibilityChange?.(false);
+    };
+  }, [chooser, onChooserVisibilityChange]);
 
   async function toggleHomeFollow(id: string, name: string): Promise<void> {
     if (!engagement || !viewerAccountId) {

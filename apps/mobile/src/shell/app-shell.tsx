@@ -214,6 +214,10 @@ export function AppShell({
   const [feedRefreshTrigger, setFeedRefreshTrigger] = useState(0);
   const [feedPrefsOpen, setFeedPrefsOpen] = useState(false);
   const [feedChromeVisible, setFeedChromeVisible] = useState(true);
+  const rootSwipeBlockedRef = useRef(false);
+  const setRootSwipeBlocked = useCallback((blocked: boolean): void => {
+    rootSwipeBlockedRef.current = blocked;
+  }, []);
   // R15.34.3: body 横滑切页 panResponder — 转换自 onTouchStart/Move/End,
   //   让 RN responder 谈判系统能识别 “子组件先抢” (FilterChipRail /
   //   multi-image ScrollView / stories), 避免原来的 plain touch
@@ -222,6 +226,7 @@ export function AppShell({
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gs) => {
+        if (rootSwipeBlockedRef.current) return false;
         const absDx = Math.abs(gs.dx);
         const absDy = Math.abs(gs.dy);
         const swipeThreshold = 56;
@@ -234,7 +239,7 @@ export function AppShell({
         const absDy = Math.abs(dy);
         const swipeThreshold = 56;
         const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
-        const canSwipeRoot = !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
+        const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
         if (isHorizontalSwipe && canSwipeRoot) {
           const idx = PAGE_SEQUENCE.indexOf(currentPage);
           if (idx < 0) return;
@@ -519,6 +524,7 @@ export function AppShell({
             />
           ) : (
             <RequesterHome
+              onChooserVisibilityChange={setRootSwipeBlocked}
               onEnterWorkspace={enterWorkspace}
               onOpenFeed={() => selectTab("FEED")}
               onOpenMarket={(tab) => openMarket({ tab })}

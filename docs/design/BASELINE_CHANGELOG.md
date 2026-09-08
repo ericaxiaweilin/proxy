@@ -4,6 +4,10 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 89 — 2026-09-08
+
+- 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。
+
 ## Revision 88 — 2026-09-08
 
 - 商家工作台诚实化：邀请按钮文案改为真实意图（不再冒充自动派发）；

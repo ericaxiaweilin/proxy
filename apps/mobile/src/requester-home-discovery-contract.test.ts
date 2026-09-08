@@ -103,6 +103,14 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("<HorizontalSwipeRail contentContainerStyle={styles.timeChooserRail}>");
   });
 
+  it("hard-disables root page swiping for the whole chooser lifetime", () => {
+    expect(source).toContain("onChooserVisibilityChange?.(chooser !== null)");
+    expect(source).toContain("onChooserVisibilityChange?.(false)");
+    expect(shell).toContain("if (rootSwipeBlockedRef.current) return false");
+    expect(shell).toContain("const canSwipeRoot = !rootSwipeBlockedRef.current");
+    expect(shell).toContain("onChooserVisibilityChange={setRootSwipeBlocked}");
+  });
+
   it("keeps relationship and messaging actions inside the profile", () => {
     expect(profile).toContain("toggleFollow()");
     expect(profile).toContain("onMessage(account)");
