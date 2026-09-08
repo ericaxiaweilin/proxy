@@ -67,6 +67,11 @@ same commit. Do not record routine business logic changes here.
 
 - 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。
 
+## Revision 100 — 2026-09-08
+
+- 死链清理（PLACEHOLDER-003）：MarketSurface 未使用的 onOpenActivity
+  prop 与 shell 空函数一并删除；他人主页图片接真查看器、点赞接真接口。
+
 ## Revision 99 — 2026-09-08
 
 - 全链路走完（PLACEHOLDER-002）：出图分享接忙态/确认/取消/失败重试；
