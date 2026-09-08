@@ -877,6 +877,9 @@ export function RequesterHome({
                               void localNet.createPost(payload, newPublishIdempotencyKey()).then(() => {
                                 setMomentOpen(false);
                                 setMomentMsg("已发布到动态");
+                                // 发完直达动态：Tab 切换重挂 FeedSurface 即重新拉取，
+                                // 新帖出现在最上面。之前停在首页，用户看不到结果。
+                                onOpenFeed?.();
                               }).catch((error: unknown) => {
                                 // 发布失败：sheet 留着，错误说明白，可重试。
                                 // 游客/掉登录直接报英文原错等于没说，映射成人话。
