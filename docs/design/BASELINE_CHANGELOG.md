@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 86 — 2026-09-08
+
+- 关注/取关报错按因说人话（个人主页、AI 主页、动态头像菜单共用
+  mapFollowError）：没登录才提登录，服务端拒绝码说具体事，不再
+  一律报访客。计数没拉到画“—”不回填 0。
+
 ## Revision 85 — 2026-09-08
 
 - 活动详情诚实化：分享按钮接线（之前是死按钮）；感兴趣/报名失败

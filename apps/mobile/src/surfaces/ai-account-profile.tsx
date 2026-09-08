@@ -5,6 +5,7 @@ import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import type { EngagementClient } from "../engagement-client";
 import type { SecureSessionStore } from "../secure-session";
+import { mapFollowError } from "./feed-error-map";
 import { color, shadows } from "../theme";
 
 // An AI profile is a real addressable account surface, but never masquerades
@@ -37,7 +38,10 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
       if (following) await engagement.unfollowProfile(account.accountId);
       else await engagement.followProfile(account.accountId);
       setFollowing((value) => !value);
-    } catch { setNotice("登录后可以把小美添加到你的关注"); }
+    } catch (e) {
+      // 同一个 catch 曾全报"登录后…"——登录着网络抖一下也被赶去登录。
+      setNotice(mapFollowError(e, following ? "unfollow" : "follow"));
+    }
     finally { setBusy(false); }
   }
 

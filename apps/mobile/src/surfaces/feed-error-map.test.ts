@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { mapEngagementError } from "./feed-error-map";
+import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { OfflineFallbackSessionError, SignedOutSessionError } from "../secure-session";
-import { EngagementProtocolError } from "../engagement-client";
+import { EngagementCommandRejectedError, EngagementProtocolError } from "../engagement-client";
 import { SessionExpiredError } from "../auth-client";
 
 describe("mapEngagementError", () => {
@@ -77,5 +77,44 @@ describe("mapEngagementError", () => {
   it("falls back for null/undefined", () => {
     expect(mapEngagementError(null, fallback)).toBe(fallback);
     expect(mapEngagementError(undefined, fallback)).toBe(fallback);
+  });
+});
+
+describe("mapFollowError", () => {
+  const rejected = (errorCode: string): EngagementCommandRejectedError =>
+    new EngagementCommandRejectedError({
+      commandId: "cmd_1",
+      outcome: "REJECTED",
+      eventRefs: [],
+      correlationId: "corr_1",
+      error: {
+        errorCode,
+        category: "BUSINESS_STATE",
+        retryability: "AFTER_USER_ACTION",
+        messageKey: "engagement.rejected",
+        safeDetails: {},
+        correlationId: "corr_1"
+      }
+    });
+
+  it("maps guest states to a sign-in hint, not a network error", () => {
+    expect(mapFollowError(new OfflineFallbackSessionError(), "follow")).toContain("请先登录");
+    expect(mapFollowError(new SignedOutSessionError(), "unfollow")).toContain("请先登录");
+    expect(mapFollowError(new SessionExpiredError(), "follow")).toContain("重新登录");
+  });
+
+  it("maps FOLLOW_NOT_ALLOWED to re-login instead of blaming the guest", () => {
+    expect(mapFollowError(rejected("FOLLOW_NOT_ALLOWED"), "follow")).toContain("重新登录");
+    expect(mapFollowError(rejected("FOLLOW_NOT_ALLOWED"), "follow")).not.toContain("访客");
+  });
+
+  it("names the failure for known reject codes", () => {
+    expect(mapFollowError(rejected("CANNOT_UNFOLLOW_SELF"), "unfollow")).toContain("不能取关自己");
+    expect(mapFollowError(rejected("FOLLOW_FAILED"), "follow")).toContain("关注失败");
+    expect(mapFollowError(rejected("UNFOLLOW_FAILED"), "unfollow")).toContain("取消关注失败");
+  });
+
+  it("maps network throws to a connectivity hint", () => {
+    expect(mapFollowError(new Error("network timeout"), "follow")).toContain("网络异常");
   });
 });

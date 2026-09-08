@@ -12,6 +12,7 @@
 
 import { OfflineFallbackSessionError, SignedOutSessionError } from "../secure-session";
 import { SessionExpiredError } from "../auth-client";
+import { EngagementCommandRejectedError } from "../engagement-client";
 
 export function mapEngagementError(error: unknown, fallback: string): string {
   if (error instanceof OfflineFallbackSessionError || error instanceof SignedOutSessionError) {
@@ -63,4 +64,59 @@ export function mapEngagementError(error: unknown, fallback: string): string {
     }
   }
   return fallback;
+}
+
+// 关注 / 取关报错文案护甲（个人主页、AI 主页、首页 badge 共用）。
+// 之前 catch 全报"访客不能关注"——登录着网络抖一下也被赶去登录。
+// 口径与 mapEngagementError 一致，动词换成关注，并展开服务端拒绝码：
+//
+//   - 没本地登录 (OfflineFallback/SignedOut/principal 文案) → 请先登录
+//   - 服务端鉴权失败 (401 走 SessionExpiredError；FOLLOW_NOT_ALLOWED
+//     这类 actor 非法) → 会话过期重登
+//   - 其他拒绝码 (CANNOT_UNFOLLOW_SELF / INVALID_* / FOLLOW_FAILED…)
+//     → 说具体事，不推给登录
+//   - 其他 → 网络异常
+export function mapFollowError(error: unknown, action: "follow" | "unfollow"): string {
+  const verb = action === "follow" ? "关注" : "取消关注";
+  if (error instanceof OfflineFallbackSessionError || error instanceof SignedOutSessionError) {
+    return "访客不能关注，请先登录。";
+  }
+  if (error instanceof SessionExpiredError) {
+    return "会话已过期，请重新登录后重试。";
+  }
+  if (error instanceof EngagementCommandRejectedError) {
+    switch (error.result.error?.errorCode) {
+      case "FOLLOW_NOT_ALLOWED":
+      case "UNFOLLOW_NOT_ALLOWED":
+        return "登录已过期，请重新登录。";
+      case "CANNOT_UNFOLLOW_SELF":
+        return "不能取关自己。";
+      case "INVALID_FOLLOW":
+      case "INVALID_UNFOLLOW":
+        return "请求无效，请重试。";
+      default:
+        return `${verb}失败，请稍后重试。`;
+    }
+  }
+  if (error instanceof Error) {
+    const msg = error.message;
+    if (
+      msg.includes("require a real sign-in") ||
+      msg.includes("offline session cannot") ||
+      msg.includes("principal required") ||
+      msg.includes("an authenticated principal") ||
+      msg.includes("authenticated principal") ||
+      msg.includes("signed out") ||
+      msg.includes("re-authenticate")
+    ) {
+      return "访客不能关注，请先登录。";
+    }
+    if (msg.includes("command_transaction_failed") || msg.includes("(status=5")) {
+      return "服务器处理出错，请稍后重试。如果还是不行，请退出后重新登录。";
+    }
+    if (msg.includes("malformed")) {
+      return "服务器响应异常，请稍后重试或重新登录。";
+    }
+  }
+  return "网络异常，请检查连接后重试。";
 }
