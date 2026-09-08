@@ -242,7 +242,7 @@ export function RequesterHome({
 
   // R36.x STORE-ACTIVITY-001: 店铺场景活动推荐（公开 listActivities，
   // 免登录）。本店（Three Beans）优先排前，其次按时间。
-  type StoreActivityBrief = { activityId: string; title: string; venueName: string; time: string; joined: number; capacity: number };
+  type StoreActivityBrief = { activityId: string; title: string; venueName: string; time: string; joined: number; capacity: number; coverImageUrl: string | undefined; realitySceneId: string | undefined };
   const [storeActivities, setStoreActivities] = useState<StoreActivityBrief[]>([]);
   useEffect(() => {
     if (!activities) return;
@@ -257,6 +257,8 @@ export function RequesterHome({
           time: a.time,
           joined: a.joined,
           capacity: a.capacity ?? 0,
+          coverImageUrl: a.coverImageUrl,
+          realitySceneId: a.realitySceneId,
         }));
         setStoreActivities(briefs);
       })
@@ -622,26 +624,53 @@ export function RequesterHome({
                               );
                             })}
                           </ScrollView>
+                        ) : chooser === "time" ? (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeChooserRail}>
+                            {distinctTimes.map((t, i) => {
+                              const selected = i === timeIndex % distinctTimes.length;
+                              return (
+                                <Pressable key={t} onPress={() => { setTimeIndex(i); setChooser(null); }} style={[styles.timeChooserCard, selected && styles.timeChooserCardSelected]}>
+                                  <ProxyIcon color={selected ? color.white : color.ink} name="clock" size={22} />
+                                  <Text numberOfLines={2} style={[styles.timeChooserValue, selected && styles.timeChooserValueSelected]}>{t}</Text>
+                                  <Text style={[styles.timeChooserHint, selected && styles.timeChooserHintSelected]}>{selected ? "当前选择" : "选择时段"}</Text>
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                        ) : chooser === "activity" ? (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoChooserRail}>
+                            {storeActivities.map((a, i) => {
+                              const scene = sceneBriefs.find((s) => s.id === a.realitySceneId || s.name === a.venueName);
+                              const photo = a.coverImageUrl || scene?.imageUrl;
+                              const selected = i === activityIndex % storeActivities.length;
+                              return (
+                                <Pressable key={a.activityId} onPress={() => { setActivityIndex(i); setChooser(null); }} style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected]}>
+                                  {photo ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: photo }} style={styles.photoChooserImage} transition={0} /> : <View style={[styles.photoChooserImage, styles.photoChooserFallback]}><ProxyIcon color={color.muted} name="cup" size={30} /></View>}
+                                  <View style={styles.photoChooserCopy}>
+                                    <Text numberOfLines={1} style={styles.photoChooserName}>{a.title}</Text>
+                                    <Text numberOfLines={1} style={styles.photoChooserMeta}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
+                                  </View>
+                                  {selected ? <View style={styles.photoChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
                         ) : (
-                        <ScrollView style={styles.chooserList}>
-                          {chooser === "time" ? distinctTimes.map((t, i) => (
-                            <Pressable key={t} onPress={() => { setTimeIndex(i); setChooser(null); }} style={styles.chooserItem}>
-                              <Text style={styles.chooserItemText}>{t}</Text>
-                            </Pressable>
-                          )) : null}
-                          {chooser === "activity" ? storeActivities.map((a, i) => (
-                            <Pressable key={a.activityId} onPress={() => { setActivityIndex(i); setChooser(null); }} style={styles.chooserItem}>
-                              <Text style={styles.chooserItemText}>{a.title}</Text>
-                              <Text style={styles.chooserItemSub}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
-                            </Pressable>
-                          )) : null}
-                          {chooser === "place" ? sceneBriefs.map((s, i) => (
-                            <Pressable key={s.id} onPress={() => { setPlaceIndex(i); setChooser(null); }} style={styles.chooserItem}>
-                              <Text style={styles.chooserItemText}>{s.name}</Text>
-                              <Text style={styles.chooserItemSub}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
-                            </Pressable>
-                          )) : null}
-                        </ScrollView>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoChooserRail}>
+                            {sceneBriefs.map((s, i) => {
+                              const selected = i === placeIndex % sceneBriefs.length;
+                              return (
+                                <Pressable key={s.id} onPress={() => { setPlaceIndex(i); setChooser(null); }} style={[styles.photoChooserCard, selected && styles.photoChooserCardSelected]}>
+                                  {s.imageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: s.imageUrl }} style={styles.photoChooserImage} transition={0} /> : <View style={[styles.photoChooserImage, styles.photoChooserFallback]}><ProxyIcon color={color.muted} name="storefront" size={30} /></View>}
+                                  <View style={styles.photoChooserCopy}>
+                                    <Text numberOfLines={1} style={styles.photoChooserName}>{s.name}</Text>
+                                    <Text numberOfLines={1} style={styles.photoChooserMeta}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
+                                  </View>
+                                  {selected ? <View style={styles.photoChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
                         )}
                       </View>
                     </Pressable>
@@ -882,10 +911,6 @@ const styles = StyleSheet.create({
   // 双链路提示：链路 A（直接约她走头像→Scene→主页）vs 链路 B（发布需求等人来）。
   chainHint: { color: color.muted, fontSize: 11, marginTop: 8, textAlign: "center" },
   joinMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
-  chooserList: { maxHeight: 320 },
-  chooserItem: { borderBottomColor: color.line, borderBottomWidth: 1, paddingVertical: 11 },
-  chooserItemText: { color: color.ink, fontSize: 14, fontWeight: "700" },
-  chooserItemSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   personChooserRail: { gap: 10, paddingBottom: 2, paddingRight: 8 },
   personChooserCard: { backgroundColor: color.offWhite, borderColor: "transparent", borderRadius: 18, borderWidth: 2, overflow: "hidden", position: "relative", width: 142 },
   personChooserCardSelected: { borderColor: color.ink },
@@ -896,6 +921,22 @@ const styles = StyleSheet.create({
   personChooserName: { color: color.ink, fontSize: 15, fontWeight: "900" },
   personChooserBio: { color: color.muted, fontSize: 11 },
   personChooserSelectedBadge: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 26, justifyContent: "center", position: "absolute", right: 7, top: 7, width: 26 },
+  photoChooserRail: { gap: 10, paddingBottom: 2, paddingRight: 8 },
+  photoChooserCard: { backgroundColor: color.offWhite, borderColor: "transparent", borderRadius: 18, borderWidth: 2, overflow: "hidden", position: "relative", width: 210 },
+  photoChooserCardSelected: { borderColor: color.ink },
+  photoChooserImage: { height: 138, width: "100%" },
+  photoChooserFallback: { alignItems: "center", backgroundColor: color.offWhite, justifyContent: "center" },
+  photoChooserCopy: { gap: 2, paddingHorizontal: 10, paddingVertical: 9 },
+  photoChooserName: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  photoChooserMeta: { color: color.muted, fontSize: 11 },
+  photoChooserSelectedBadge: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 26, justifyContent: "center", position: "absolute", right: 7, top: 7, width: 26 },
+  timeChooserRail: { gap: 10, paddingBottom: 2, paddingRight: 8 },
+  timeChooserCard: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 9, minHeight: 126, padding: 14, width: 142 },
+  timeChooserCardSelected: { backgroundColor: color.ink, borderColor: color.ink },
+  timeChooserValue: { color: color.ink, fontSize: 16, fontWeight: "900", lineHeight: 21 },
+  timeChooserValueSelected: { color: color.white },
+  timeChooserHint: { color: color.muted, fontSize: 11 },
+  timeChooserHintSelected: { color: "rgba(255,255,255,0.68)" },
   momentGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   momentCell: { gap: 3, width: "48%" },
   momentImage: { borderRadius: 12, height: 120, width: "100%" },

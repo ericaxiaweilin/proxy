@@ -805,3 +805,8 @@ same commit. Do not record routine business logic changes here.
 
 - “选一起的人”由姓名纵向列表改为可横向滑动的小美照片卡，显示照片、姓名和个性简介。
 - 时间、活动、地点选择器及四宫格主体保持不变。
+
+# Revision 82 — Four-grid visual choosers (2026-09-08)
+
+- 地点和活动选择改为横向实景照片卡；活动优先使用活动封面，否则使用绑定 Reality Scene 的实景图。
+- 时间选择改为横向时段卡，保留清晰的当前选择状态，不再使用纵向文字列表。

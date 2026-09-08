@@ -92,6 +92,15 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("p.bio");
   });
 
+  it("chooses activities and places from photo rails and time from horizontal cards", () => {
+    expect(source).toContain("styles.photoChooserRail");
+    expect(source).toContain("a.coverImageUrl || scene?.imageUrl");
+    expect(source).toContain("styles.photoChooserImage");
+    expect(source).toContain("styles.timeChooserRail");
+    expect(source).toContain("styles.timeChooserCard");
+    expect(source).not.toContain("styles.chooserItem");
+  });
+
   it("keeps relationship and messaging actions inside the profile", () => {
     expect(profile).toContain("toggleFollow()");
     expect(profile).toContain("onMessage(account)");
