@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 94 — 2026-09-08
+
+### Compact logo-only opportunity type rail
+
+- Opportunity type filters now show only their visual logos. Chinese and English
+  helper captions are removed from the visible rail while names remain exposed to
+  accessibility services.
+- Logo slots are reduced to 46px with a 3px rail gap so additional scene types can
+  fit without turning the filter into a text-heavy list.
+
 ## Revision 93 — 2026-09-08
 
 ### Market opportunity logo canvas normalization

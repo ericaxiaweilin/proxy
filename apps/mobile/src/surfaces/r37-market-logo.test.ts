@@ -9,6 +9,10 @@ describe("MARKET-LOGO-SINGLE-TILE-001", () => {
   it("renders approved palette logos at the full visual size", () => {
     expect(palette).toContain("<MarketTypeLogo");
     expect(palette).not.toContain("order-type-logos/");
+    expect(palette).not.toContain("pillLabel");
+    expect(palette).not.toContain("pillSub");
+    expect(palette).toContain('scroll: { gap: 3');
+    expect(palette).toContain('accessibilityState={{ selected: active }}');
   });
 
   it("does not wrap opportunity logos in a second colored logo", () => {
