@@ -82,7 +82,6 @@ export function MarketSurface({
   marketLabel,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
-  onOpenActivity,
   onOpenRealityScene,
   onChromeVisibilityChange,
   bottomNavVisible
@@ -95,7 +94,6 @@ export function MarketSurface({
   marketLabel: string;
   initialTab?: MarketTab;
   onOpenExperience?: ((experienceId: string) => void) | undefined;
-  onOpenActivity: (activity: Activity) => void;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;

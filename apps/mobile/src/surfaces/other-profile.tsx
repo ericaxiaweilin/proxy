@@ -6,6 +6,7 @@ import type { LocalNetClient } from "../localnet-client";
 import type { SecureSessionStore } from "../secure-session";
 import { color } from "../theme";
 import { ProfileTabs, type ProfileMediaEntry } from "./ProfileTabs";
+import { MediaViewer } from "../media/AdaptiveMediaCollection";
 import { mapFollowError } from "./feed-error-map";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
@@ -33,6 +34,10 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
   const [notice, setNotice] = useState<string>();
   const [resolvedPosts, setResolvedPosts] = useState<FeedPost[]>(target.posts);
   const [resolvedMedia, setResolvedMedia] = useState<Record<string, FeedMediaItem[]>>(target.mediaByPost);
+  // 图片查看器：之前 onOpenMedia 是空函数，他人照片点不开。
+  // 与我的主页同款 MediaViewer，可左右切、可关。
+  const [viewer, setViewer] = useState<{ postId: string; index: number } | undefined>(undefined);
+  const viewedItems = viewer ? resolvedMedia[viewer.postId] ?? [] : [];
   const photos = useMemo<ProfileMediaEntry[]>(() => resolvedPosts.flatMap((post) => (resolvedMedia[post.postId] ?? []).map((item, index) => ({ item, index, postId: post.postId }))), [resolvedPosts, resolvedMedia]);
   useEffect(() => {
     setResolvedPosts(target.posts);
@@ -90,8 +95,17 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
     return () => { cancelled = true; };
   }, [engagement, secureSessionStore, target.userId]);
 
-  async function toggleFollow(): Promise<void> {
-    if (busy) return;
+  async function likePost(postId: string): Promise<void> {
+    setNotice(undefined);
+    try {
+      await engagement.reactToPost(postId, "LIKE", true);
+      setNotice("已点赞");
+    } catch {
+      setNotice("点赞没有提交成功，请检查连接后重试。");
+    }
+  }
+
+  async function toggleFollow(): Promise<void> {    if (busy) return;
     setBusy(true); setNotice(undefined);
     try {
       if (following) await engagement.unfollowProfile(target.userId); else await engagement.followProfile(target.userId);
@@ -108,8 +122,9 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={() => undefined} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name)} />
+      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name)} />
     </ScrollView>
+    {viewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={viewer.index} author={target.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setViewer((current) => current ? { ...current, index } : current)} onClose={() => setViewer(undefined)} /> : null}
   </View>;
 }
 

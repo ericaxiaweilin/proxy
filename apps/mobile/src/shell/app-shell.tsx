@@ -647,7 +647,6 @@ export function AppShell({
               supply={supply}
               marketLabel="河内"
               initialTab={marketEntry.tab}
-              onOpenActivity={() => undefined}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               bottomNavVisible={isNavVisible}
             />

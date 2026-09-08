@@ -215,3 +215,21 @@ describe("PLACEHOLDER-002 every chain runs to completion", () => {
     expect(messages).not.toContain("toLowerCase()}.ng");
   });
 });
+
+describe("PLACEHOLDER-003 no dead props or viewers", () => {
+  const market = readFileSync(fileURLToPath(new URL("./market.tsx", import.meta.url)), "utf8");
+  const shell = readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8");
+  const other = readFileSync(fileURLToPath(new URL("./other-profile.tsx", import.meta.url)), "utf8");
+
+  it("MarketSurface has no unused activity opener", () => {
+    expect(market).not.toContain("onOpenActivity");
+    expect(shell).not.toContain("onOpenActivity={() => undefined}");
+  });
+
+  it("other profile opens photos and likes for real", () => {
+    expect(other).not.toContain("onOpenMedia={() => undefined}");
+    expect(other).toContain("MediaViewer");
+    expect(other).toContain("onLikePost");
+    expect(other).toContain("reactToPost");
+  });
+});
