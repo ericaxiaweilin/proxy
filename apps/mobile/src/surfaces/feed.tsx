@@ -38,6 +38,7 @@ import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
 import { CustomFeedHub } from "./custom-feed";
 import { readCustomFeeds } from "../expo-custom-feed-store";
+import { readFeedPrefs } from "../expo-feed-prefs-store";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
 
@@ -205,6 +206,9 @@ export function FeedSurface({
   const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
   const [selectedCustomFeed, setSelectedCustomFeed] = useState<string | null>(null);
+  // 推荐偏好（偏好页写入）：静音主题硬过滤、时间范围过滤、权重重排。
+  // 前台恢复时重读，偏好页改完回来即生效。
+  const [feedPrefs, setFeedPrefs] = useState(readFeedPrefs);
   // 自定频道定义（name/desc）：AI 生成的频道用它切词过滤 + 横幅显示真名，
   // 而不是裸 id。读本地持久化，与 CustomFeedHub 同源。
   const customFeedDef = useMemo(() => {
@@ -450,6 +454,7 @@ export function FeedSurface({
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active" && (phase === "ERROR" || cachedPosts.length === 0)) void loadFeed();
+      if (state === "active") setFeedPrefs(readFeedPrefs());
     });
     return () => subscription.remove();
   }, [phase, loadFeed]);
@@ -694,9 +699,41 @@ export function FeedSurface({
     return posts.find((candidate) => candidate.postId === ref.contextId);
   }
 
+  // 偏好权重归一：帖子→偏好类别→权重分（缺省 50）。只用于排序。
+  function feedWeightFor(post: FeedPost): number {
+    const ctxTypes = new Set(post.contextRefs.map((r) => r.contextType));
+    let category = "lifestyle";
+    if (isOpportunityPost(post)) category = "opportunity";
+    else if (ctxTypes.has("ACTIVITY")) category = "activity";
+    else if (post.authorType === "MERCHANT") category = "commercial";
+    else if (ctxTypes.has("INDUSTRY_INFO") || ctxTypes.has("VENUE")) category = "intelligence";
+    else if (post.authorType === "USER" || ctxTypes.has("PEOPLE_RELATIONSHIP")) category = "people";
+    return feedPrefs.weights[category] ?? 50;
+  }
+
   const getVisibleForTab = (forTab: FeedTab): FeedPost[] =>
     posts.filter((post) => {
       if (hiddenPosts.has(post.postId)) return false;
+      // 偏好-时间范围：7D/30D 按创建时间过滤，长期不过滤。
+      if (feedPrefs.scope !== "PERSISTENT") {
+        const created = Date.parse(post.createdAt);
+        if (Number.isFinite(created)) {
+          const ageMs = Date.now() - created;
+          const limitMs = feedPrefs.scope === "7D" ? 7 * 86_400_000 : 30 * 86_400_000;
+          if (ageMs > limitMs) return false;
+        }
+      }
+      // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
+      if (feedPrefs.muted.length > 0) {
+        const haystack = [authorName(post), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+          .filter((value): value is string => typeof value === "string")
+          .join(" ")
+          .toLocaleLowerCase();
+        const hit = feedPrefs.muted.some((topic) =>
+          topic.split(/[\s\/]+/).map((t) => t.trim().toLocaleLowerCase()).filter((t) => t.length >= 2)
+            .some((token) => haystack.includes(token)));
+        if (hit) return false;
+      }
       if (forTab === "FOLLOWING") {
       if (!(following.has(post.authorId) || authorName(post) === "你")) return false;
     }
@@ -752,7 +789,12 @@ export function FeedSurface({
     }
     return true;
   });
-  const visible = getVisibleForTab(tab);
+  // 偏好-权重：只重排不隐藏。类别按帖子属性归一后取权重分，
+  // V8 sort 稳定，同分保持服务端顺序。
+  const unranked = getVisibleForTab(tab);
+  const scored = unranked.map((post, index) => ({ post, index, score: feedWeightFor(post) }));
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+  const visible = scored.map((entry) => entry.post);
   const quoteTarget = composerQuoteId ? posts.find((post) => post.postId === composerQuoteId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
