@@ -4,7 +4,7 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
-## Revision 89 — 2026-09-08
+## Revision 90 — 2026-09-08
 
 - 占位按钮/字段真接线（PLACEHOLDER-001 v2）：mock 数据全部保留作测试
   替身，但每个按钮都走通——好友 CRM 添加变已发送、请求可接受/忽略、
@@ -12,6 +12,8 @@ same commit. Do not record routine business logic changes here.
   与本地双列表并排渲染；消息/活动/帖子/钱包死按钮接真分享/真导航/
   真点赞或移除；钱包与收入未知金额画“—”不编数。仅冒充本人的假身份
   与假二维码彻底删除。
+- 发布器串帖“添加下一条”不再是空 toast：跟帖可增删改，发布时按编号
+  拼进正文并计入字数，发布成功后清空。
 
 ## Revision 88 — 2026-09-08
 

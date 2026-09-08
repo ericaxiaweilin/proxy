@@ -14,6 +14,7 @@ const tasks = readFileSync(fileURLToPath(new URL("./tasks.tsx", import.meta.url)
 const tabs = readFileSync(fileURLToPath(new URL("./ProfileTabs.tsx", import.meta.url)), "utf8");
 const me = readFileSync(fileURLToPath(new URL("./me.tsx", import.meta.url)), "utf8");
 const meSub = readFileSync(fileURLToPath(new URL("./me-sub-pages.ts", import.meta.url)), "utf8");
+const composer = readFileSync(fileURLToPath(new URL("./ComposerV2Screen.tsx", import.meta.url)), "utf8");
 
 describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => {
   it("drops only the invented self identity and dead stubs", () => {
@@ -105,5 +106,16 @@ describe("PLACEHOLDER-001 wallet/income shows unknown instead of invented money"
   it("wires profile like to engagement with a visible failure", () => {
     expect(me).toContain("onLikePost={engagement");
     expect(me).toContain("点赞没有提交成功");
+  });
+});
+
+describe("PLACEHOLDER-001 composer thread is real local state, not a toast", () => {
+  it("adds/edits/removes entries and serializes them into the published body", () => {
+    expect(composer).not.toContain("原型功能");
+    expect(composer).toContain("threadEntries");
+    expect(composer).toContain("setThreadEntries");
+    expect(composer).toContain("MAX_THREAD_ENTRIES");
+    expect(composer).toContain("threadedBody");
+    expect(composer).toContain("threadInput");
   });
 });
