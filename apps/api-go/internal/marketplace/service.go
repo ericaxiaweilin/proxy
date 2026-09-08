@@ -247,7 +247,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 				return rejected(e, "INVALID_OPPORTUNITY", "market.price_required_for_earn_or_pay")
 			}
 			if !priceWithinVNDLimit(p.Price) {
-				return rejected(e, "INVALID_OPPORTUNITY", "market.price_exceeds_vnd_limit")
+				return rejected(e, "INVALID_OPPORTUNITY", "market.price_outside_vnd_limits")
 			}
 		}
 		if p.MoneyFlow == "FREE" && p.Price != "" && p.Price != "0₫" && p.Price != "0" {
@@ -306,7 +306,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			return rejected(e, "INVALID_APPLICATION", "market.invalid_application")
 		}
 		if !priceWithinVNDLimit(quote) {
-			return rejected(e, "INVALID_APPLICATION", "market.quote_exceeds_vnd_limit")
+			return rejected(e, "INVALID_APPLICATION", "market.quote_outside_vnd_limits")
 		}
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_failed", nil)
@@ -408,7 +408,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	return rejected(e, "MARKET_COMMAND_UNSUPPORTED", "market.unsupported_command")
 }
 
-const maxMarketAmountVND = 10_000_000
+const (
+	minMarketAmountVND = 100_000
+	maxMarketAmountVND = 10_000_000
+)
 
 func priceWithinVNDLimit(label string) bool {
 	parts := strings.FieldsFunc(strings.TrimSpace(label), func(r rune) bool { return r == '–' || r == '—' || r == '-' })
@@ -429,7 +432,7 @@ func priceWithinVNDLimit(label string) bool {
 		}
 		clean = strings.ReplaceAll(clean, ",", "")
 		amount, err := strconv.ParseFloat(strings.TrimSpace(clean), 64)
-		if err != nil || amount <= 0 || amount*multiplier > maxMarketAmountVND {
+		if err != nil || amount*multiplier < minMarketAmountVND || amount*multiplier > maxMarketAmountVND {
 			return false
 		}
 	}

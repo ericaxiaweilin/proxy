@@ -17,18 +17,42 @@ export function composePriceRange(min: string, max: string): string {
   return `${lo} – ${hi}`;
 }
 
+export const MIN_OPPORTUNITY_ORDER_VND = 100_000;
+export const MAX_OPPORTUNITY_ORDER_VND = 10_000_000;
+
+function parseVNDLabel(value: string): number | undefined {
+  let clean = value.trim().toUpperCase().replace(/VND|₫/g, "").trim();
+  let multiplier = 1;
+  if (clean.endsWith("K")) { multiplier = 1_000; clean = clean.slice(0, -1); }
+  else if (clean.endsWith("M")) { multiplier = 1_000_000; clean = clean.slice(0, -1); }
+  const amount = Number(clean.replace(/,/g, "").trim());
+  return Number.isFinite(amount) ? amount * multiplier : undefined;
+}
+
+export function validateOpportunityPriceRange(label: string): { ok: true } | { ok: false; error: string } {
+  const parts = label.split(/[–—-]/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length === 0) return { ok: false, error: "请输入订单金额" };
+  for (const part of parts) {
+    const amount = parseVNDLabel(part);
+    if (amount === undefined || !Number.isInteger(amount)) return { ok: false, error: "请输入有效的 VND 金额" };
+    if (amount < MIN_OPPORTUNITY_ORDER_VND) return { ok: false, error: "机会订单最低保底为 100,000 VND" };
+    if (amount > MAX_OPPORTUNITY_ORDER_VND) return { ok: false, error: "机会订单金额不能超过 10,000,000 VND" };
+  }
+  return { ok: true };
+}
+
 // 快速 Offer 输入组装（纯函数）：发布者给真实报名人发 5 分钟 Offer。
 // 金额文本转服务端要的 agreedCompensation（VND 最小单位整数，精度 1₫）；
 // 目标必须是报名名单里的 applicantId，不再允许写死演示 agent。
 // slot 暂沿用 {taskId}_slot_1 约定（slot 读模型未暴露前）。
 //
 // 金额边界：
-//   - 下限 MIN_OFFER_VND = 100 — 服务端只要求 >0，但商品价显著低于
-//     100₫ 基本是误填（50₫ 这类）；端上先拦，省一次服务端 roundtrip。
+//   - 下限 MIN_OFFER_VND = 100_000 — 机会订单统一最低保底；发布、
+//     报价、快速 Offer 三个入口必须一致，不能靠客户端提示代替服务端守门。
 //   - 上限 MAX_OFFER_VND = 10_000_000 — 镜像服务端 maxAmountVND
 //    （fulfillment/service.go 防超大金额脏数据），超了直接报，不等
 //     服务端 INVALID_SLOT_OFFER_AMOUNT。
-export const MIN_OFFER_VND = 100;
+export const MIN_OFFER_VND = MIN_OPPORTUNITY_ORDER_VND;
 export const MAX_OFFER_VND = 10_000_000;
 
 export interface SlotOfferInput {

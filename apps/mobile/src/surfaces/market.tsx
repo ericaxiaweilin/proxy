@@ -25,6 +25,7 @@ import {
   OPPORTUNITY_LENS_LABEL,
   buildSlotOfferInput,
   composePriceRange,
+  validateOpportunityPriceRange,
   type MarketOpportunity,
   type MarketTab,
   type OpportunityLens
@@ -859,7 +860,11 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
 
   async function publish(): Promise<void> {
     if (publishing || !title.trim() || !location.trim()) return;
-    if (priceRequired && !priceMin.trim()) return;
+    const composedPrice = composePriceRange(priceMin, priceMax);
+    if (priceRequired) {
+      const validation = validateOpportunityPriceRange(composedPrice);
+      if (!validation.ok) { setError(validation.error); return; }
+    }
     setPublishing(true);
     setError(undefined);
     try {
@@ -869,7 +874,7 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
       // MarketOpportunitySchema.parse 严格验证。
       const opportunity = await marketplace.publish({
         title: title.trim(), shortTitle: "同行", theme: "城市同行", date: "周六", time: time.trim(),
-        location: location.trim(), price: composePriceRange(priceMin, priceMax), skills: "中文 · 摄影 · 本地路线",
+        location: location.trim(), price: composedPrice, skills: "中文 · 摄影 · 本地路线",
         lens: ["BOOKED", "NEARBY"], travel: 20,
         moneyFlow,
         ...(merchant.merchantId ? { merchantId: merchant.merchantId } : {})
@@ -937,15 +942,15 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
           ) : (
             <Text style={[styles.publishPriceInput, styles.publishPricePlaceholder]}>{moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"}</Text>
           )}
-          <Text style={styles.r4PriceLabel}>公平参考：1.8 – 2.4M₫ · 8h + 中文 + 摄影 + 本地熟悉度</Text>
+          <Text style={styles.r4PriceLabel}>平台保底：100,000 VND · 上限 10,000,000 VND</Text>
         </View>
         <View style={styles.r4Match}>
           <Text style={styles.r4MatchText}>会完整展示给回应者 · 预计 6–10 位合格回应 · 竞争力：中等</Text>
         </View>
       </View>
       <View style={styles.aiBox}>
-        <Text style={styles.aiTitle}>如果坚持 1.5–2.0M₫ 也可以发布</Text>
-        <Text style={styles.aiCheck}>Proxy 不阻止低预算，但会原样告诉小美“客户预算”和“公平参考”，小美可按更高条件回应。</Text>
+        <Text style={styles.aiTitle}>低于 100,000 VND 不能发布</Text>
+        <Text style={styles.aiCheck}>Proxy 对付费机会执行最低保底；免费同行请明确选择“免费任务”。</Text>
       </View>
       {merchant.accounts.length > 0 ? (
         <View style={styles.r4Card}>
@@ -1057,7 +1062,7 @@ function SelectWorkbench({ marketplace, fulfillment, opportunity, onBack }: { ma
         <View style={styles.r4Card}>
           <Text style={styles.r4Title}>快速 Offer 金额 · VND</Text>
           <TextInput keyboardType="number-pad" onChangeText={setOfferAmount} style={styles.publishPriceInput} value={offerAmount} placeholder="例如 1200000" />
-          <Text style={styles.detailHint}>给选中的报名人发 5 分钟 Offer，对方接单后直接生成订单。金额至少 100₫。</Text>
+          <Text style={styles.detailHint}>给选中的报名人发 5 分钟 Offer，对方接单后直接生成订单。金额至少 100,000 VND。</Text>
         </View>
       ) : null}
       {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}

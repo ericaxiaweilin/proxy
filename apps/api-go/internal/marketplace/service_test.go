@@ -63,12 +63,12 @@ func TestOpportunityPublishApplyAndDismiss(t *testing.T) {
 }
 
 func TestOpportunityVNDLimit(t *testing.T) {
-	for _, accepted := range []string{"10,000,000₫", "10M VND", "500,000₫ – 10,000,000₫"} {
+	for _, accepted := range []string{"100,000₫", "100K VND", "10,000,000₫", "10M VND", "500,000₫ – 10,000,000₫"} {
 		if !priceWithinVNDLimit(accepted) {
 			t.Fatalf("expected %q within limit", accepted)
 		}
 	}
-	for _, rejected := range []string{"10,000,001₫", "10.1M VND", "500,000₫ – 12,000,000₫"} {
+	for _, rejected := range []string{"99,999₫", "99.9K VND", "10,000,001₫", "10.1M VND", "500,000₫ – 12,000,000₫"} {
 		if priceWithinVNDLimit(rejected) {
 			t.Fatalf("expected %q above limit", rejected)
 		}

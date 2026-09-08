@@ -34,17 +34,15 @@ describe("buildSlotOfferInput (real-applicant fast offer)", () => {
   it("rejects missing task id", () => {
     expect(buildSlotOfferInput("", "user_002", "1200000").ok).toBe(false);
   });
-  it("rejects dust amounts below the 100 VND floor (e.g. 50 VND)", () => {
-    expect(buildSlotOfferInput("opp_1", "user_002", "50").ok).toBe(false);
-    expect(buildSlotOfferInput("opp_1", "user_002", "50₫").ok).toBe(false);
-    expect(buildSlotOfferInput("opp_1", "user_002", "1").ok).toBe(false);
-    expect(buildSlotOfferInput("opp_1", "user_002", "99").ok).toBe(false);
+  it("rejects amounts below the 100,000 VND opportunity floor", () => {
+    expect(buildSlotOfferInput("opp_1", "user_002", "99,999").ok).toBe(false);
+    expect(buildSlotOfferInput("opp_1", "user_002", "50,000₫").ok).toBe(false);
   });
-  it("accepts the 100 VND floor boundary", () => {
-    const r = buildSlotOfferInput("opp_1", "user_002", "100");
+  it("accepts the 100,000 VND floor boundary", () => {
+    const r = buildSlotOfferInput("opp_1", "user_002", "100,000");
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.input.agreedCompensation).toBe(100);
+    expect(r.input.agreedCompensation).toBe(100_000);
   });
   it("accepts the 10M VND ceiling boundary and rejects above it", () => {
     expect(buildSlotOfferInput("opp_1", "user_002", "10000000").ok).toBe(true);
