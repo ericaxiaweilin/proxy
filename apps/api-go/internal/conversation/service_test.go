@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
@@ -41,6 +42,51 @@ func TestHomeProxyConversationIsReusedAndSeparated(t *testing.T) {
 	}
 	if messages[1].SenderID != "SYSTEM" || messages[1].Kind != "system_event" || messages[1].Body != "新的 Home 对话" {
 		t.Fatalf("second Home exchange must have a durable divider: %+v", messages[1])
+	}
+}
+
+func TestDirectMessageReusesLatestConversationForSameAccountPair(t *testing.T) {
+	s := New()
+	start := func(originType, originID string) string {
+		result := s.Handle(envelopeFor("StartConversation", map[string]any{
+			"conversationType": "DM", "originType": originType, "originId": originID,
+			"participantId": "user_002", "firstMessage": "你好",
+		}, ""))
+		if result.Outcome != "ACCEPTED" {
+			t.Fatalf("start DM: %+v", result.Error)
+		}
+		var view struct {
+			ConversationID string `json:"conversationId"`
+		}
+		_ = json.Unmarshal([]byte(result.OperationRef), &view)
+		return view.ConversationID
+	}
+	first := start("PROFILE", "user_002")
+	second := start("POST", "post_by_user_002")
+	if first != second {
+		t.Fatalf("same account pair must reuse one DM: %s != %s", first, second)
+	}
+}
+
+func TestInboxCollapsesHistoricalDuplicateDMsByCounterparty(t *testing.T) {
+	repo := NewMemoryRepository()
+	now := time.Now().UTC()
+	for index, at := range []time.Time{now.Add(-time.Hour), now} {
+		conv := Conversation{ID: "duplicate_" + string(rune('a'+index)), Type: "DM", OriginType: "PROFILE", OriginID: "user_002", State: "ACTIVE", Participants: []string{"user_001", "user_002"}, CreatedAt: at, LastMessageAt: at}
+		if err := repo.CreateConversation(context.Background(), conv); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewWithModelStack(repo, modelstack.Unconfigured{})
+	result := s.Handle(envelopeFor("ListConversations", map[string]any{}, "user_001"))
+	var view struct {
+		Conversations []ConversationSummary `json:"conversations"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &view); err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Conversations) != 1 || view.Conversations[0].Conversation.ID != "duplicate_b" {
+		t.Fatalf("want only newest DM for user_002, got %+v", view.Conversations)
 	}
 }
 

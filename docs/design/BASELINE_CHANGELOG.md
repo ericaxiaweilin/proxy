@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 111 — 2026-09-08
+
+### One direct-message thread per account pair
+
+- Starting a DM from profile, post, Home or another discovery entry reuses the latest
+  active conversation for the same two accounts instead of creating another inbox row.
+- Existing historical duplicate DMs remain auditable but both API and mobile inbox
+  collapse them to the latest thread; non-DM business and group threads stay separate.
+
 ## Revision 110 — 2026-09-08
 
 ### Stable AI companion identity and photo replies

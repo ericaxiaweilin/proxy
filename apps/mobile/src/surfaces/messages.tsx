@@ -10,6 +10,7 @@ import { color, shadows } from "../theme";
 import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
+import { dedupeInboxDialogs } from "../conversation-inbox-model";
 
 type HomePanel = "dialogs" | "convos";
 type Folder = "all" | "friends" | "activity" | "invite";
@@ -58,7 +59,7 @@ export function MessagesSurface({
     if (!conversationClient) return;
     try {
       const items = await conversationClient.listConversations();
-      setServerDialogs(items.map(toDialog));
+      setServerDialogs(dedupeInboxDialogs(items).map(toDialog));
       setInboxError(false);
     } catch {
       setInboxError(true);

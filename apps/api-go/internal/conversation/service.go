@@ -543,18 +543,9 @@ func (s *Service) listConversations(ctx context.Context, e command.Envelope) com
 		return command.Rejected(e, "CONVERSATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
 	}
 	summaries := make([]ConversationSummary, 0, len(conversations))
-	proxyHomeIncluded := false
 	for _, conv := range conversations {
 		if !isParticipant(conv, e.Actor.ID) || conv.State == "BLOCKED" {
 			continue
-		}
-		// Historical clients created one HOME conversation per query. Keep those
-		// rows for audit, but expose only the newest Proxy AI thread in the inbox.
-		if conv.OriginType == "HOME" && isParticipant(conv, "proxy_ai") {
-			if proxyHomeIncluded {
-				continue
-			}
-			proxyHomeIncluded = true
 		}
 		summary := ConversationSummary{Conversation: conv}
 		for _, participantID := range conv.Participants {
@@ -583,7 +574,20 @@ func (s *Service) listConversations(ctx context.Context, e command.Envelope) com
 	sort.SliceStable(summaries, func(i, j int) bool {
 		return summaries[i].Conversation.LastMessageAt.After(summaries[j].Conversation.LastMessageAt)
 	})
-	return acceptedWithPayload(e, "ConversationInbox", e.Actor.ID, 1, "READY", map[string]any{"conversations": summaries}, nil)
+	// One inbox row per DM counterparty. Historical duplicate conversations stay
+	// auditable, but only the newest thread is presented to the user.
+	deduped := make([]ConversationSummary, 0, len(summaries))
+	seenDM := map[string]bool{}
+	for _, summary := range summaries {
+		if summary.Conversation.Type == "DM" && summary.CounterpartyID != "" {
+			if seenDM[summary.CounterpartyID] {
+				continue
+			}
+			seenDM[summary.CounterpartyID] = true
+		}
+		deduped = append(deduped, summary)
+	}
+	return acceptedWithPayload(e, "ConversationInbox", e.Actor.ID, 1, "READY", map[string]any{"conversations": deduped}, nil)
 }
 
 // ---------- StartConversation ----------
@@ -627,15 +631,15 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		CreatedAt:     s.clock.Now().UTC(),
 		LastMessageAt: s.clock.Now().UTC(),
 	}
-	reusedHome := false
-	if p.OriginType == "HOME" && p.ParticipantID == "proxy_ai" {
-		if existing, ok := s.latestProxyHomeConversation(ctx, e.Actor.ID); ok {
+	reusedConversation := false
+	if p.ConversationType == "DM" {
+		if existing, ok := s.latestDirectConversation(ctx, e.Actor.ID, p.ParticipantID); ok {
 			conv = existing
-			reusedHome = true
+			reusedConversation = true
 		}
 	}
 	domainEvents := []event.DomainEvent{}
-	if !reusedHome {
+	if !reusedConversation {
 		domainEvents = append(domainEvents, event.New("ConversationStarted", "Conversation", conv.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, conv.CreatedAt, map[string]any{
 			"originType": conv.OriginType, "originId": conv.OriginID, "participants": conv.Participants,
 			"note": "Conversation 必须保存来源；同一 Post 不同用户发起 DM 时 Conversation 独立",
@@ -646,7 +650,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	}
 	existingMessages, _ := s.repository.Messages(ctx, conv.ID)
 	nextSeq := int64(len(existingMessages) + 1)
-	if reusedHome && len(existingMessages) > 0 && strings.TrimSpace(p.FirstMessage) != "" {
+	if reusedConversation && p.OriginType == "HOME" && len(existingMessages) > 0 && strings.TrimSpace(p.FirstMessage) != "" {
 		separator := Message{ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID, SenderID: "SYSTEM", MessageType: "SYSTEM_CONTEXT", Kind: "system_event", Body: "新的 Home 对话", CreatedAt: s.clock.Now().UTC(), Protection: DefaultProtectionFor("SYSTEM_CONTEXT", conv.Type), Delivery: &MessageDelivery{State: "sent"}, Seq: nextSeq}
 		separator.SecurityV1 = protectionToSecurityV1(separator.Protection)
 		_ = s.repository.AppendMessage(ctx, separator)
@@ -689,7 +693,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		"originId":       conv.OriginID,
 	}
 	hasInitialContent := strings.TrimSpace(p.FirstMessage) != "" || strings.TrimSpace(p.MediaRef) != ""
-	if persona, ok := platformAIPersonaForMode(p.AssistantMode); ok && !hasInitialContent {
+	if persona, ok := platformAIPersonaForMode(p.AssistantMode); ok && !hasInitialContent && !reusedConversation {
 		intro := Message{
 			ID: newID("msg_"), ConversationID: conv.ID, DialogID: conv.ID,
 			SenderID: persona.AccountID, SenderSnapshot: aiIdentitySnapshot(persona),
@@ -730,17 +734,22 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	return acceptedWithPayload(e, "Conversation", conv.ID, 1, conv.State, payload, domainEvents)
 }
 
-func (s *Service) latestProxyHomeConversation(ctx context.Context, actorID string) (Conversation, bool) {
+func (s *Service) latestDirectConversation(ctx context.Context, actorID, counterpartyID string) (Conversation, bool) {
 	conversations, err := s.repository.Snapshot(ctx)
 	if err != nil {
 		return Conversation{}, false
 	}
+	var latest Conversation
+	found := false
 	for _, conv := range conversations {
-		if conv.OriginType == "HOME" && conv.State == "ACTIVE" && isParticipant(conv, actorID) && isParticipant(conv, "proxy_ai") {
-			return conv, true
+		if conv.Type == "DM" && conv.State == "ACTIVE" && isParticipant(conv, actorID) && isParticipant(conv, counterpartyID) {
+			if !found || conv.LastMessageAt.After(latest.LastMessageAt) {
+				latest = conv
+				found = true
+			}
 		}
 	}
-	return Conversation{}, false
+	return latest, found
 }
 
 // ---------- SendMessage ----------
