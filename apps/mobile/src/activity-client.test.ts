@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ActivityClient } from "./activity-client";
+import { ActivityClient, ActivityCommandRejectedError, ActivityProtocolError, describeJoinError } from "./activity-client";
+import type { CommandResult } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-session";
 
@@ -38,5 +39,42 @@ describe("ACT-PUBLISH-001 activity client", () => {
     const client = new ActivityClient({ secureSessionStore: await authenticatedStore(), authClient:{ request:async (_path, init) => { sent.push(init.body as Record<string, unknown>); return response({commandId:"c", outcome:"ACCEPTED", aggregate:{type:"Activity", id:"activity_1", version:1, state:"PUBLISHED"}, eventRefs:[], correlationId:"x", operationRef:JSON.stringify({activity})}); } } });
     await client.publish({title:"t", time:"周六", capacity:6, venueName:"店", venueIcon:"☕", venueType:"CAFE", realitySceneId:"scene_1", desc:"x", consumptionTerm:"SPLIT", merchantId:"biz_1"});
     expect((sent[0]?.payload as { merchantId?: string }).merchantId).toBe("biz_1");
+  });
+});
+
+describe("describeJoinError", () => {
+  const rejected = (errorCode: string): ActivityCommandRejectedError =>
+    new ActivityCommandRejectedError({
+      commandId: "c",
+      outcome: "REJECTED",
+      eventRefs: [],
+      correlationId: "x",
+      error: {
+        errorCode,
+        category: "BUSINESS_STATE",
+        retryability: "AFTER_USER_ACTION",
+        messageKey: "activity.rejected",
+        safeDetails: {},
+        correlationId: "x"
+      }
+    } as CommandResult);
+
+  it("names repeat joins instead of blaming login", () => {
+    expect(describeJoinError(rejected("ACTIVITY_ALREADY_JOINED"))).toContain("已报过名");
+  });
+
+  it("names full and missing activities", () => {
+    expect(describeJoinError(rejected("ACTIVITY_FULL"))).toContain("名额已满");
+    expect(describeJoinError(rejected("ACTIVITY_NOT_FOUND"))).toContain("不存在或已结束");
+  });
+
+  it("asks for re-login only on auth failures", () => {
+    expect(describeJoinError(rejected("ACTIVITY_ACTOR_REQUIRED"))).toContain("重新登录");
+    expect(describeJoinError(new ActivityProtocolError("an authenticated principal is required"))).toBe("登录后可报名");
+  });
+
+  it("falls back to network hint for transport errors", () => {
+    expect(describeJoinError(new Error("fetch failed"))).toContain("网络异常");
+    expect(describeJoinError(rejected("ACTIVITY_JOIN_FAILED"))).toContain("稍后重试");
   });
 });

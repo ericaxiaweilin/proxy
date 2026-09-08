@@ -15,6 +15,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useModuleBackHandler } from "../components/module-back";
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
+import { describeJoinError } from "../activity-client";
 import { type FulfillmentClient } from "../fulfillment-client";
 import { type MarketplaceClient, type MarketApplication } from "../marketplace-client";
 import { nearestCityLabel } from "../market-city-label";
@@ -134,6 +135,7 @@ export function MarketSurface({
   const [interestedIn, setInterestedIn] = useState<ReadonlySet<string>>(new Set());
   const [joinedIds, setJoinedIds] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [activityNotice, setActivityNotice] = useState<string | undefined>(undefined);
   const [oppDetail, setOppDetail] = useState<MarketOpportunity | null>(null);
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
   const [publishOpen, setPublishOpen] = useState(false);
@@ -371,6 +373,7 @@ export function MarketSurface({
   async function toggleInterest(activityId: string): Promise<void> {
     if (busy) return;
     setBusy(true);
+    setActivityNotice(undefined);
     try {
       const { activity, interested } = await activities.toggleInterest(activityId);
       upsertActivity(activity);
@@ -378,6 +381,8 @@ export function MarketSurface({
       if (interested) next.add(activityId);
       else next.delete(activityId);
       setInterestedIn(next);
+    } catch {
+      setActivityNotice("操作失败，请稍后重试。");
     } finally {
       setBusy(false);
     }
@@ -386,12 +391,15 @@ export function MarketSurface({
   async function joinActivity(activityId: string): Promise<void> {
     if (busy) return;
     setBusy(true);
+    setActivityNotice(undefined);
     try {
       const { activity } = await activities.join(activityId);
       upsertActivity(activity);
       const next = new Set(joinedIds);
       next.add(activityId);
       setJoinedIds(next);
+    } catch (e) {
+      setActivityNotice(describeJoinError(e));
     } finally {
       setBusy(false);
     }
@@ -576,7 +584,8 @@ export function MarketSurface({
               onToggleInterested={() => void toggleInterest(activityDetail.activityId)}
               onJoin={() => void joinActivity(activityDetail.activityId)}
               onOpenRealityScene={onOpenRealityScene}
-              onBack={() => setActivityDetail(null)}
+              onBack={() => { setActivityNotice(undefined); setActivityDetail(null); }}
+              notice={activityNotice}
             />
           ) : (
             visibleActivities.map((item) => (
