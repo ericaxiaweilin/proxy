@@ -138,10 +138,26 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       .catch(() => setDetailError("场景切换失败，请重试"));
   };
 
+  // 现实行动失败说人话：sendSceneCommand 抛的是服务端 messageKey
+  //（scene.not_allowed 这类），直接展示用户看不懂。按码分流；自有中文
+  // 报错原样透出。DIRECT_INVITE 是两步（先建场景再发邀请），第二步挂了
+  // 场景已落库（无删场景命令），必须告诉用户场景已创建、只是邀请没发出去。
+  function sceneActionErrorMessage(error: unknown): string {
+    const msg = error instanceof Error ? error.message : "操作失败，请重试";
+    if (/scene\.not_found|SCENE_NOT_FOUND/.test(msg)) return "该场景不存在或已下架";
+    if (/scene\.not_allowed|INVITATION_NOT_ALLOWED|not allowed/i.test(msg)) return "只有场景房主可以发邀请";
+    if (/invalid_invite|INVALID_INVITATION/.test(msg)) return "邀请信息不完整，请重试";
+    if (/fetch failed|load failed|network|NETWORK|status \d+/.test(msg)) return "网络异常，请检查连接后重试";
+    if (/command failed|malformed/.test(msg)) return "服务暂时不可用，请稍后重试";
+    if (/^[a-z0-9_.:-]+$/i.test(msg) && /[._]/.test(msg)) return "操作失败，请稍后重试";
+    return msg;
+  }
+
   const commitSceneAction = async (): Promise<void> => {
     if (!detail || !selected || !selectedAction || actionBusy) return;
     if (!secureSessionStore || !session) { setActionResult("请先登录，再确认现实行动"); return; }
     setActionBusy(true); setActionResult(undefined);
+    let createdSceneId: string | undefined;
     try {
       const variant = detail.variants.find((item) => item.id === detail.selectedVariant) ?? detail.variants[0]!;
       const selectedMenuItem = detail.menu.find((item) => item.id === selectedMenuId);
@@ -156,7 +172,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         const created = await sendSceneCommand(authClient, session, "CreateScene", "new", { tool: "DIRECT_INVITE", intent: `${variant.name} · ${variant.bestFor}`, anchor: { venueId: detail.sceneId, venueName: detail.venueName }, participation: "双人见面 · 需双方确认", cost: "HOST_PAY", fundingMode: "HOST", budgetMinor: inviteAmount, currency: "VND", venueId: detail.sceneId, startsAt });
         const sceneId = typeof created.aggregateId === "string" ? created.aggregateId : undefined;
         if (!sceneId) throw new Error("场景创建失败");
-        const invitation = await sendSceneCommand(authClient, session, "CreateInvitation", sceneId, { sceneId, inviteeUserId: human.id, card: { what: variant.bestFor, where: detail.venueName, when: `${variant.window}（双方可在聊天中修改）`, who: human.name, hostLabel: "你", compensation: inviteAmountLabel, menuItemId: menuItem?.id, menuItemName: menuItem?.name } });
+        createdSceneId = sceneId;
+        await sendSceneCommand(authClient, session, "CreateInvitation", sceneId, { sceneId, inviteeUserId: human.id, card: { what: variant.bestFor, where: detail.venueName, when: `${variant.window}（双方可在聊天中修改）`, who: human.name, hostLabel: "你", compensation: inviteAmountLabel, menuItemId: menuItem?.id, menuItemName: menuItem?.name } });
         setActionResult(`邀请已发送给 ${human.name}${menuItem ? ` · ${menuItem.name}` : ""} · 报酬 ${inviteAmountLabel} · 对方接受后生成订单`);
       } else if (selectedAction.type === "OPEN_TASK") {
         const result = await sendSceneCommand(authClient, session, "PublishMarketOpportunity", "new", { title: `${variant.name} · ${variant.bestFor}`, shortTitle: variant.name, theme: variant.facets.join(" / "), date: "近期", time: variant.window, location: detail.venueName, price: "150,000₫", moneyFlow: "EARN", skills: "Scene fit / UGC", lens: ["NOW", "NEARBY"], menuItemId: selectedMenuItem?.id, menuItemName: selectedMenuItem?.name });
@@ -165,7 +182,11 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         const result = await sendSceneCommand(authClient, session, "PublishActivity", "new", { title: `${variant.name} · ${variant.bestFor}`, time: variant.window, capacity: 8, venueName: detail.venueName, venueIcon: "coffee", venueType: "CAFE", realitySceneId: detail.sceneId, desc: `${variant.facets.join(" · ")}。报名不等于到场。`, consumptionTerm: "SPLIT", menuItemId: selectedMenuItem?.id, menuItemName: selectedMenuItem?.name });
         setActionResult(`活动 ${String(result.aggregateId ?? "")} 已发布 · 免费报名、到店消费各自承担 · 已进入“我的活动”`);
       }
-    } catch (error) { setActionResult(error instanceof Error ? error.message : "操作失败，请重试"); }
+    } catch (error) {
+      const reason = sceneActionErrorMessage(error);
+      if (createdSceneId) setActionResult(`场景已创建但邀请未发出：${reason}。场景还在，可稍后重邀。`);
+      else setActionResult(reason);
+    }
     finally { setActionBusy(false); }
   };
 
