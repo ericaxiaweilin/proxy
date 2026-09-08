@@ -878,8 +878,14 @@ export function RequesterHome({
                                 setMomentOpen(false);
                                 setMomentMsg("已发布到动态");
                               }).catch((error: unknown) => {
-                                // 发布失败：sheet 留着，错误明说，可重试。
-                                setMomentMsg(error instanceof Error ? error.message : "发布失败，请重试。");
+                                // 发布失败：sheet 留着，错误说明白，可重试。
+                                // 游客/掉登录直接报英文原错等于没说，映射成人话。
+                                const raw = error instanceof Error ? error.message : "";
+                                if (/principal|signed|sign in|auth|session|401|403|INVALID_ACCESS_TOKEN|登录/i.test(raw)) {
+                                  setMomentMsg("请先登录后再发布（游客身份不能发动态）。");
+                                } else {
+                                  setMomentMsg(raw || "发布失败，请重试。");
+                                }
                               }).finally(() => setMomentBusy(false));
                             }}
                             style={[styles.gridCta, { marginTop: 10 }]}
