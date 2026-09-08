@@ -341,9 +341,13 @@ export function MeSurface({
     let cancelled = false;
     engagement.getFollowCounts(viewingProfileId)
       .then((c) => { if (!cancelled) setPersonalFollowCounts({ followers: c.followers, following: c.following }); })
-      .catch(() => { if (!cancelled) setPersonalFollowCounts({ followers: 0, following: 0 }); });
+      // 失败保持 unknown（渲染 "—"）：绝不能回填 0，那会把"没拉到"说成"没人关注"。
+      .catch(() => { if (!cancelled) setPersonalFollowCounts(undefined); });
     return () => { cancelled = true; };
   }, [engagement, isSelfProfile, viewingProfileId, viewerAccountId]);
+  // 未知画 "—" 不画 0：浏览/互动暂无服务端口径（绝不拿公式现编），
+  // 关注数没拉到之前也是未知不是零。
+  const dash = (n: number | undefined): string => (n === undefined ? "—" : String(n));
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
@@ -1343,7 +1347,7 @@ export function MeSurface({
               </View>
               <View style={styles.personalStat}>
                 <Text style={styles.personalStatText}>
-                  <Text style={styles.personalStatValue}>{(personalFollowCounts?.followers ?? 0) * 80 + 128}</Text> 次浏览 · 最近 30 天 ›
+                  <Text style={styles.personalStatValue}>—</Text> 次浏览 · 最近 30 天 ›
                 </Text>
               </View>
               <View style={styles.personalFollowersRow}>
@@ -1352,7 +1356,7 @@ export function MeSurface({
                   <View style={[styles.personalFace, { backgroundColor: "#bfdbfe" }]}><Text style={styles.personalFaceText}>A</Text></View>
                   <View style={[styles.personalFace, { backgroundColor: "#fbcfe8" }]}><Text style={styles.personalFaceText}>L</Text></View>
                 </View>
-                <Text style={styles.personalFollowersCount}><Text style={styles.personalFollowersValue}>{personalFollowCounts?.followers ?? 0}</Text> 位关注者</Text>
+                <Text style={styles.personalFollowersCount}><Text style={styles.personalFollowersValue}>{dash(personalFollowCounts?.followers)}</Text> 位关注者</Text>
               </View>
             </View>
 
@@ -1366,7 +1370,7 @@ export function MeSurface({
               replyPosts={personalReplyPosts}
               savedPosts={personalSavedPosts}
               taggedPosts={personalTaggedPosts}
-              stats={{ posts: profilePosts.length, followers: personalFollowCounts?.followers ?? 0, following: personalFollowCounts?.following ?? 0 }}
+              stats={{ posts: profilePosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
               onOpenMedia={(entry) => setProfileViewer(entry)}
               onOpenRealitySceneMap={onOpenRealitySceneMap}
               onOpenScene={(sceneId) => {
@@ -1394,9 +1398,9 @@ export function MeSurface({
               <View style={styles.sheetCard}>
                 <Text style={styles.sheetTitle}>分析</Text>
                 <Text style={styles.sheetSub}>最近 30 天</Text>
-                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>浏览</Text><Text style={styles.sheetFieldValue}>{(personalFollowCounts?.followers ?? 0) * 80 + 128}</Text></View>
-                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>互动</Text><Text style={styles.sheetFieldValue}>{profilePosts.length * 24 + 84}</Text></View>
-                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>新增关注</Text><Text style={styles.sheetFieldValue}>+{personalFollowCounts?.followers ?? 0}</Text></View>
+                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>浏览</Text><Text style={styles.sheetFieldValue}>—</Text></View>
+                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>互动</Text><Text style={styles.sheetFieldValue}>—</Text></View>
+                <View style={styles.sheetField}><Text style={styles.sheetFieldLabel}>关注者</Text><Text style={styles.sheetFieldValue}>{dash(personalFollowCounts?.followers)}</Text></View>
                 <Pressable onPress={() => setInsightsSheetOpen(false)} style={[styles.sheetWideBtn, styles.sheetWideBtnDark]}>
                   <Text style={styles.sheetWideBtnTextDark}>完成</Text>
                 </Pressable>
