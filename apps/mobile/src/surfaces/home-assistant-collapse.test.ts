@@ -2,28 +2,36 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("./home-assistant.tsx", import.meta.url), "utf8");
+const keyboardSafe = readFileSync(new URL("../components/use-keyboard-safe-inset.ts", import.meta.url), "utf8");
 
-describe("Home embedded assistant collapse contract", () => {
-  it("keeps a resumable one-line state and an explicit collapse action", () => {
+describe("Home embedded assistant persistence contract", () => {
+  it("closes explicitly without leaving a redundant received-message strip", () => {
     expect(source).toContain('accessibilityLabel="收起 Home 对话"');
-    expect(source).toContain('accessibilityLabel="继续和 Proxy 对话"');
-    expect(source).toContain("numberOfLines={1}");
+    expect(source).not.toContain('accessibilityLabel="继续和 Proxy 对话"');
+    expect(source).not.toContain("collapsedBar");
   });
 
-  it("auto-collapses only after settled inactivity, never from keyboard position", () => {
-    expect(source).toMatch(/!embedded \|\| externalComposer \|\| collapsed \|\| inputFocused \|\| loading \|\| sending \|\| temporaryUI/);
-    expect(source).toContain("}, 9000)");
-    expect(source).not.toMatch(/keyboard.*height|screenY|pageY/i);
+  it("hydrates the same durable timeline including Home dividers", () => {
+    expect(source).toContain("conversationClient.listMessages(payload.conversationId)");
+    expect(source).toContain("readAssistantHistory(historyResult)");
+    expect(source).toContain('messageType === "SYSTEM_CONTEXT"');
+    expect(source).toContain("styles.timelineDivider");
   });
 
   it("dismisses the keyboard after a follow-up send settles", () => {
     expect(source).toMatch(/finally \{[\s\S]*?setSending\(false\);[\s\S]*?Keyboard\.dismiss\(\)/);
   });
 
-  it("removes the read Home receipt while keeping one durable Proxy AI origin", () => {
+  it("keeps one durable Proxy AI origin without timed clearing", () => {
     expect(source).toContain('originId: "proxy_ai_home"');
-    expect(source).toContain("!externalComposer || loading");
-    expect(source).toContain("}, 6000)");
-    expect(source).toContain("onBack();");
+    expect(source).not.toContain("}, 6000)");
+    expect(source).not.toContain("}, 9000)");
+  });
+
+  it("uses the shared keyboard overlap source so the composer stays visible", () => {
+    expect(source).toContain("useKeyboardSafeInset()");
+    expect(source).toContain("keyboardInset > 0 && { paddingBottom: keyboardInset }");
+    expect(keyboardSafe).toContain('Keyboard.addListener("keyboardWillChangeFrame"');
+    expect(keyboardSafe).toContain("windowHeight - event.endCoordinates.screenY");
   });
 });

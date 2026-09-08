@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 105 — 2026-09-08
+
+### Persistent Home AI window and shared keyboard safety
+
+- Reopening Proxy AI from Home hydrates the same durable timeline and its Home event
+  dividers instead of presenting an empty temporary window.
+- Leaving Home closes the window without clearing history; no automatic expansion,
+  timed clearing, or redundant received-message strip remains.
+- A shared keyboard-overlap hook keeps composers above the keyboard across Home AI
+  and regular message conversations.
+
 ## Revision 104 — 2026-09-08
 
 ### Dual-entry Proxy AI conversation

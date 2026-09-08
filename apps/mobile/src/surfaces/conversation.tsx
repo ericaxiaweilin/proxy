@@ -4,7 +4,7 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { ProxySwitch } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -16,6 +16,7 @@ import type { ConversationClient, ConversationInboxItem, ProtectionOverride } fr
 import type { ActivityClient } from "../activity-client";
 import type { MediaClient, UploadableImage } from "../media-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
+import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
@@ -137,7 +138,7 @@ export function ConversationSurface({
   const [replyTo, setReplyTo] = useState<{ id: string; sender: string; body: string } | null>(null);
   const [pinned, setPinned] = useState<{ id: string; body: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [keyboardInset, setKeyboardInset] = useState(0);
+  const keyboardInset = useKeyboardSafeInset();
   const [selectedImage, setSelectedImage] = useState<UploadableImage>();
   const [selectedVideo, setSelectedVideo] = useState<UploadableImage & { durationMs?: number }>();
   const [selectedAudio, setSelectedAudio] = useState<{ uri:string; durationMs:number }>();
@@ -192,22 +193,6 @@ export function ConversationSurface({
     setAttachOpen(false);
     setActivityPickerOpen(false);
     setConversationMenuOpen(false);
-  }, []);
-
-  // This surface lives inside AppShell's fixed-height body, where nested
-  // KeyboardAvoidingView layouts are unreliable on iOS. Track the keyboard's
-  // actual screen frame and reserve exactly the overlapping height instead.
-  useEffect(() => {
-    if (Platform.OS !== "ios") return;
-    const frameSub = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
-      const windowHeight = Dimensions.get("window").height;
-      setKeyboardInset(Math.max(0, windowHeight - event.endCoordinates.screenY));
-    });
-    const hideSub = Keyboard.addListener("keyboardWillHide", () => setKeyboardInset(0));
-    return () => {
-      frameSub.remove();
-      hideSub.remove();
-    };
   }, []);
 
   // Lotus §4: 截屏上报 → RecordScreenshot → SECURITY_ALERT
