@@ -10,7 +10,8 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain('"PublishMarketOpportunity"');
     expect(source).toContain('"PublishActivity"');
     expect(source).toContain("对方接受后生成订单");
-    expect(source).toContain("budgetMinor: 150000");
+    expect(source).toContain("budgetMinor: inviteAmount");
+    expect(source).toContain("给真人小美的报酬（VND）");
     expect(source).toContain('currency: "VND"');
     expect(source).toContain("等待真人候选报名");
     expect(source).toContain('price: "150,000₫"');

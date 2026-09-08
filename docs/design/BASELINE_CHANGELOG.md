@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 74 — 2026-09-08
+
+- Direct Scene invitations now require the requester to enter an explicit VND
+  compensation before sending. The validated amount is shown to the invitee
+  and frozen into the fulfillment order on acceptance.
+
 ## Revision 73 — 2026-09-07
 
 - Replaced the static My Scenes invitation examples with actor-scoped scene and
