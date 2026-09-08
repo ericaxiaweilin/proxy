@@ -6,6 +6,7 @@ import type { LocalNetClient } from "../localnet-client";
 import type { SecureSessionStore } from "../secure-session";
 import { color } from "../theme";
 import { ProfileTabs, type ProfileMediaEntry } from "./ProfileTabs";
+import { mapFollowError } from "./feed-error-map";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -26,7 +27,7 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
   onBack: () => void;
   onMessage: (name: string) => void;
 }): React.JSX.Element {
-  const [counts, setCounts] = useState({ followers: 0, following: 0 });
+  const [counts, setCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
   const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
@@ -95,9 +96,10 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
     try {
       if (following) await engagement.unfollowProfile(target.userId); else await engagement.followProfile(target.userId);
       setFollowing(!following);
-      setCounts((current) => ({ ...current, followers: Math.max(0, current.followers + (following ? -1 : 1)) }));
-    } catch {
-      setNotice("访客不能关注，请先登录");
+      setCounts((current) => (current ? { ...current, followers: Math.max(0, current.followers + (following ? -1 : 1)) } : current));
+    } catch (e) {
+      // 同一个 catch 曾全报"访客不能关注"——登录着网络抖一下也被赶去登录。
+      setNotice(mapFollowError(e, following ? "unfollow" : "follow"));
     } finally { setBusy(false); }
   }
 
@@ -106,7 +108,7 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts.followers, following: counts.following }} onOpenMedia={() => undefined} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name)} />
+      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={() => undefined} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name)} />
     </ScrollView>
   </View>;
 }

@@ -37,11 +37,12 @@ export interface ProfileTabsProps {
   replyPosts: FeedPost[];                     // REPLIES tab (Phase 1 mock)
   savedPosts: FeedPost[];                     // SAVED tab (Phase 1 mock)
   taggedPosts: FeedPost[];                    // TAGGED tab (Phase 1 mock)
-  // 统计 (IG/Threads 风格 "粉丝 关注 帖子")
+  // 统计 (IG/Threads 风格 "粉丝 关注 帖子")。没拉到就是 undefined，
+  // 渲染 "—" 不回填 0。
   stats: {
     posts: number;
-    followers: number;
-    following: number;
+    followers: number | undefined;
+    following: number | undefined;
   };
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenRealitySceneMap?: (() => void) | undefined;
@@ -523,7 +524,7 @@ function AboutTab(props: {
       <View style={styles.aboutStatBig}>
         <Text style={styles.aboutStatBigLabel}>粉丝 / 关注 / 帖子</Text>
         <Text style={styles.aboutStatBigValue}>
-          {props.stats.followers} · {props.stats.following} · {props.stats.posts}
+          {props.stats.followers ?? "—"} · {props.stats.following ?? "—"} · {props.stats.posts}
         </Text>
       </View>
     </View>

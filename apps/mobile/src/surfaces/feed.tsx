@@ -12,7 +12,7 @@ import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
-import { mapEngagementError } from "./feed-error-map";
+import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
@@ -625,7 +625,7 @@ export function FeedSurface({
       setFollowing(next);
       setProfileFollowing(!profileFollowing);
     } catch (error) {
-      setEngagementError(mapEngagementError(error, "关注没有提交成功, 请检查连接后重试。"));
+      setEngagementError(mapFollowError(error, profileFollowing ? "unfollow" : "follow"));
     } finally {
       setProfileFollowBusy(false);
     }
