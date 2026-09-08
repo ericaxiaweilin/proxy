@@ -124,11 +124,11 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
-  thumbWrap: { alignSelf: "stretch", justifyContent: "center" },
-  thumb: { backgroundColor: "#F1ECE3", borderRadius: 14, height: 136, overflow: "hidden", width: 104 },
+  card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12 },
+  thumbWrap: { alignSelf: "stretch" },
+  thumb: { backgroundColor: "#F1ECE3", flex: 1, minHeight: 136, overflow: "hidden", width: 104 },
   sampleTag: { backgroundColor: "rgba(20,19,26,.74)", borderRadius: 6, bottom: 6, left: 6, paddingHorizontal: 6, paddingVertical: 3, position: "absolute" }, sampleTagText: { color: color.white, fontSize: 8, fontWeight: "800" },
-  body: { flex: 1, minWidth: 0 },
+  body: { flex: 1, minWidth: 0, paddingBottom: 12, paddingRight: 14, paddingTop: 12 },
   typeRow: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 5 },
   typeMeta: { flex: 1, minWidth: 0 },
   typeMetaLabel: { color: "#AAA49C", fontSize: 6.4, letterSpacing: 0.15, lineHeight: 9 },

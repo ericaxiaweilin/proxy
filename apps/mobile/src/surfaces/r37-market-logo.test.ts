@@ -27,7 +27,13 @@ describe("MARKET-LOGO-SINGLE-TILE-001", () => {
   });
 
   it("uses a scene photo as a substantial mobile card anchor", () => {
-    expect(card).toMatch(/thumb:\s*\{[^}]*height:\s*136[^}]*width:\s*104/);
+    expect(card).toMatch(/thumb:\s*\{[^}]*flex:\s*1[^}]*minHeight:\s*136[^}]*width:\s*104/);
     expect(card).not.toMatch(/thumb:\s*\{[^}]*height:\s*88[^}]*width:\s*64/);
+  });
+
+  it("keeps the square scene photo flush to the card's top, bottom, and left edges", () => {
+    expect(card).toContain('card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12 }');
+    expect(card).not.toMatch(/thumb:\s*\{[^}]*borderRadius/);
+    expect(card).toContain('body: { flex: 1, minWidth: 0, paddingBottom: 12, paddingRight: 14, paddingTop: 12 }');
   });
 });
