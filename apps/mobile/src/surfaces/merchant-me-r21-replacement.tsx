@@ -318,7 +318,9 @@ export function MerchantMeR21Replacement({
           })}
           <SimpleRows onPress={setPage} rows={[["最近到店", "等待真实履约记录"], ["当前权益", "查看关联券", "voucher"], ["当前邀请", "查看活动与邀请", "activity"], ["合作结果", "查看销售归因", "sales"]]} />
           <View style={styles.actions}>
-            <Pressable onPress={() => setPage("activity")} style={styles.primary}><Text style={styles.primaryText}>发起定向邀请</Text></Pressable>
+            {/* 诚实文案：这里只是进活动列表看报名，真定向邀请（指定 Creator
+                进指定场次）需要房主场景 + 邀请命令，链路未接前不挂邀请字样。 */}
+            <Pressable onPress={() => setPage("activity")} style={styles.primary} accessibilityLabel="查看活动报名"><Text style={styles.primaryText}>查看活动报名</Text></Pressable>
             <Pressable onPress={() => { setCreatorView("COLLABS"); setPage("creator"); }} style={styles.secondary}><Text style={styles.secondaryText}>查看记录</Text></Pressable>
           </View>
         </ScrollView>

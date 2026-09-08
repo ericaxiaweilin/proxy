@@ -371,15 +371,6 @@ const styles = StyleSheet.create({
   activityEmptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   activityRetry: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
   activityRetryText: { color: color.white, fontSize: 11, fontWeight: "700" },
-  createCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, gap: 10, marginVertical: 8, padding: 14, ...shadows.card },
-  createInput: { backgroundColor: "#F8F5FA", borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 13, paddingHorizontal: 12, paddingVertical: 10 },
-  createLabel: { color: color.ink, fontSize: 11, fontWeight: "800", marginTop: 3 },
-  createChoiceRow: { flexDirection: "row", gap: 8 },
-  createChoice: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, padding: 10 },
-  createChoiceOn: { backgroundColor: "#F4FFD5", borderColor: "#C6DF63" },
-  createChoiceText: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  createMoney: { color: "#3F4C0F", fontSize: 13, fontWeight: "900", marginTop: 4 },
-  createPublish: { alignItems: "center", backgroundColor: color.magenta, padding: 12 },
   errorText: { color: "#B00020", fontSize: 11, lineHeight: 15 },
 
   // 基线 .activitysignals：border-top #F1EDF3 margin-top 8 padding-top 7 font 7.5。

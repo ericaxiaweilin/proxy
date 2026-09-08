@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 88 — 2026-09-08
+
+- 商家工作台诚实化：邀请按钮文案改为真实意图（不再冒充自动派发）；
+  清理任务页死样式。
+
 ## Revision 87 — 2026-09-08
 
 - 我的分析区去假数：浏览/互动没有服务端口径，不再用公式现编，
@@ -48,6 +53,13 @@ same commit. Do not record routine business logic changes here.
 - Market opportunity/activity tabs and conversation/settings secure switches
   now share accessible state implementations; added regression guards against
   local duplicate controls and documented the BoardUI adoption boundary.
+=======
+## Revision 76 — 2026-09-08
+
+- 商家 Creator 详情的“发起定向邀请”只是跳活动列表、并不创建邀请，
+  改名“查看活动报名”。真定向邀请（指定 Creator 进指定场次）需房主
+  场景 + 邀请命令，链路未接前不挂邀请字样。
+>>>>>>> a0eafe7 (fix(merchant): honest invite label, drop dead create styles)
 
 ## Revision 75 — 2026-09-08
 
