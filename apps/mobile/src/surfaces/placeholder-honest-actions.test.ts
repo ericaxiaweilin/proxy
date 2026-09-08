@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 
 // PLACEHOLDER-001: 占位按钮/字段必须走真实逻辑，不能只弹演示 toast。
 // friend-crm / messages / tasks / ProfileTabs / me-wallet 曾有 20+ 个
-// 死按钮与编造字段（假扫码结果、假身份、假匹配人、假金额、假发送）。
+// 死按钮与编造字段。v2 方向：mock 数据全部保留作测试替身，但每个按钮
+// 都必须走通——有后端调后端（Share/BlockFriend/接受忽略/点赞），无后端
+// 走本地演示状态机（添加变已发送、请求可接受/忽略、拉黑即时移除）。
 // 本文件是源码级 tripwire：假字符串回来了就红；真接线关键字丢了也红。
 const crm = readFileSync(fileURLToPath(new URL("./friend-crm.tsx", import.meta.url)), "utf8");
 const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
@@ -13,12 +15,15 @@ const tabs = readFileSync(fileURLToPath(new URL("./ProfileTabs.tsx", import.meta
 const me = readFileSync(fileURLToPath(new URL("./me.tsx", import.meta.url)), "utf8");
 const meSub = readFileSync(fileURLToPath(new URL("./me-sub-pages.ts", import.meta.url)), "utf8");
 
-describe("PLACEHOLDER-001 friend-crm has no fake identity/match/send", () => {
-  it("drops fake scan results, fake invite identity and fake matches", () => {
-    // PX-937201 仅留在离线演示联系人常量里（CRM_FRIENDS），不再作为
-    // 扫码识别结果或可发送对象出现；PX-827491（假冒本人身份）必须彻底消失。
-    for (const dead of ["模拟识别", "PX-827491", "Huyen Nguyen", "fakeQr", "CONTACT_MATCHES", "SOCIAL_MATCHES", "sentIds", "原型查看", "主页已打开"]) {
+describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => {
+  it("drops only the invented self identity and dead stubs", () => {
+    // PX-827491/Huyen Nguyen 是冒充本人的假身份，必须彻底消失；
+    // 通讯录/社媒/搜索 mock 是测试替身，保留但必须可操作（见下）。
+    for (const dead of ["PX-827491", "Huyen Nguyen", "fakeQr", "原型查看", "主页已打开"]) {
       expect(crm).not.toContain(dead);
+    }
+    for (const mock of ["CONTACT_MATCHES", "SOCIAL_MATCHES", "SEARCH_RESULTS", "模拟识别"]) {
+      expect(crm).toContain(mock);
     }
   });
 
@@ -28,18 +33,30 @@ describe("PLACEHOLDER-001 friend-crm has no fake identity/match/send", () => {
     }
   });
 
-  it("wires invite/voucher/block to real surfaces and explains the rest", () => {
+  it("runs add/invite through a real local state machine", () => {
+    // 添加→已发送（setSentIds 真实翻转并禁用按钮），扫码模拟→预填并跳搜索。
+    expect(crm).toContain("setSentIds");
+    expect(crm).toContain("已发送");
+    expect(crm).toContain('setProxySearch("PX-937201")');
     expect(crm).toContain("Share.share");
     expect(crm).toContain("登录后显示你的邀请名片");
-    expect(crm).toContain("requestErrorMessage");
-    expect(crm).toContain("blockFriend");
-    expect(crm).toContain("拉黑只对服务端好友生效");
-    expect(crm).toContain("仅本机");
   });
 
-  it("renders the server friend list instead of only demo data", () => {
+  it("accepts/ignores/blocks with immediate effect in both modes", () => {
+    expect(crm).toContain("acceptDemoRequest");
+    expect(crm).toContain("ignoreDemoRequest");
+    expect(crm).toContain("removeDemoFriend");
+    expect(crm).toContain("acceptFriendRequest");
+    expect(crm).toContain("blockFriend");
+    expect(crm).toContain("requestErrorMessage");
+  });
+
+  it("renders the server friend list next to the demo list, no nested pressables", () => {
     expect(crm).toContain("serverMode");
     expect(crm).toContain("visible.length");
+    expect(crm).toContain("本地好友");
+    expect(crm).toContain("服务端好友");
+    expect(crm).toContain("friendMain");
     expect(crm).toContain("好友列表加载失败");
   });
 
