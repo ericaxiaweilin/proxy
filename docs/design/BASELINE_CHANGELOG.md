@@ -800,3 +800,8 @@ same commit. Do not record routine business logic changes here.
 # Revision 80 — Four-grid remix separator refinement (2026-09-08)
 
 - 中心换组按钮的留白隔离圈由 5px 收窄至 2px，其他尺寸与布局不变。
+
+# Revision 81 — Four-grid people photo chooser (2026-09-08)
+
+- “选一起的人”由姓名纵向列表改为可横向滑动的小美照片卡，显示照片、姓名和个性简介。
+- 时间、活动、地点选择器及四宫格主体保持不变。

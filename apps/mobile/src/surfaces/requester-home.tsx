@@ -597,12 +597,33 @@ export function RequesterHome({
                       <View style={styles.sheet} onStartShouldSetResponder={() => true}>
                         <View style={styles.sheetGrab} />
                         <Text style={styles.sheetTitle}>{chooser === "person" ? "选一起的人" : chooser === "time" ? "选时间" : chooser === "activity" ? "选活动" : "选地点"}</Text>
+                        {chooser === "person" ? (
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.personChooserRail}>
+                            {filteredPeople.map((p, i) => {
+                              const selected = i === personIndex % filteredPeople.length;
+                              return (
+                                <Pressable
+                                  accessibilityLabel={`选择 ${p.name}`}
+                                  key={p.id}
+                                  onPress={() => { setPersonIndex(i); setChooser(null); }}
+                                  style={[styles.personChooserCard, selected && styles.personChooserCardSelected]}
+                                >
+                                  {p.photoUri ? (
+                                    <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: p.photoUri }} style={styles.personChooserPhoto} transition={0} />
+                                  ) : (
+                                    <View style={[styles.personChooserPhoto, styles.personChooserFallback]}><Text style={styles.personChooserInitials}>{p.initials}</Text></View>
+                                  )}
+                                  <View style={styles.personChooserCopy}>
+                                    <Text numberOfLines={1} style={styles.personChooserName}>{p.name}</Text>
+                                    <Text numberOfLines={1} style={styles.personChooserBio}>{p.bio}</Text>
+                                  </View>
+                                  {selected ? <View style={styles.personChooserSelectedBadge}><ProxyIcon color={color.white} name="check" size={13} /></View> : null}
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                        ) : (
                         <ScrollView style={styles.chooserList}>
-                          {chooser === "person" ? filteredPeople.map((p, i) => (
-                            <Pressable key={p.id} onPress={() => { setPersonIndex(i); setChooser(null); }} style={styles.chooserItem}>
-                              <Text style={styles.chooserItemText}>{p.name}</Text>
-                            </Pressable>
-                          )) : null}
                           {chooser === "time" ? distinctTimes.map((t, i) => (
                             <Pressable key={t} onPress={() => { setTimeIndex(i); setChooser(null); }} style={styles.chooserItem}>
                               <Text style={styles.chooserItemText}>{t}</Text>
@@ -621,6 +642,7 @@ export function RequesterHome({
                             </Pressable>
                           )) : null}
                         </ScrollView>
+                        )}
                       </View>
                     </Pressable>
                   </Modal>
@@ -864,6 +886,16 @@ const styles = StyleSheet.create({
   chooserItem: { borderBottomColor: color.line, borderBottomWidth: 1, paddingVertical: 11 },
   chooserItemText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   chooserItemSub: { color: color.muted, fontSize: 11, marginTop: 2 },
+  personChooserRail: { gap: 10, paddingBottom: 2, paddingRight: 8 },
+  personChooserCard: { backgroundColor: color.offWhite, borderColor: "transparent", borderRadius: 18, borderWidth: 2, overflow: "hidden", position: "relative", width: 142 },
+  personChooserCardSelected: { borderColor: color.ink },
+  personChooserPhoto: { height: 164, width: "100%" },
+  personChooserFallback: { alignItems: "center", backgroundColor: color.lime, justifyContent: "center" },
+  personChooserInitials: { color: color.ink, fontSize: 28, fontWeight: "900" },
+  personChooserCopy: { gap: 2, paddingHorizontal: 10, paddingVertical: 9 },
+  personChooserName: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  personChooserBio: { color: color.muted, fontSize: 11 },
+  personChooserSelectedBadge: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 26, justifyContent: "center", position: "absolute", right: 7, top: 7, width: 26 },
   momentGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   momentCell: { gap: 3, width: "48%" },
   momentImage: { borderRadius: 12, height: 120, width: "100%" },

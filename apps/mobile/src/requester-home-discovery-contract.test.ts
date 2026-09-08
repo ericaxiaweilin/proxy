@@ -84,6 +84,14 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("borderWidth: 2");
   });
 
+  it("chooses people from a horizontal photo rail instead of a name-only list", () => {
+    expect(source).toContain("styles.personChooserRail");
+    expect(source).toContain("styles.personChooserPhoto");
+    expect(source).toContain('horizontal showsHorizontalScrollIndicator={false}');
+    expect(source).toContain("p.photoUri");
+    expect(source).toContain("p.bio");
+  });
+
   it("keeps relationship and messaging actions inside the profile", () => {
     expect(profile).toContain("toggleFollow()");
     expect(profile).toContain("onMessage(account)");
