@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 91 — 2026-09-08
+
+- 店铺“公开主页”死按钮接真分享（公开店铺链接）；内容/社媒归因三组
+  无口径漏斗数字画“—”不编数（与 R87 分析区同口径）。
+
 ## Revision 90 — 2026-09-08
 
 - 占位按钮/字段真接线（PLACEHOLDER-001 v2）：mock 数据全部保留作测试

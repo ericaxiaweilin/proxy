@@ -15,6 +15,7 @@ const tabs = readFileSync(fileURLToPath(new URL("./ProfileTabs.tsx", import.meta
 const me = readFileSync(fileURLToPath(new URL("./me.tsx", import.meta.url)), "utf8");
 const meSub = readFileSync(fileURLToPath(new URL("./me-sub-pages.ts", import.meta.url)), "utf8");
 const composer = readFileSync(fileURLToPath(new URL("./ComposerV2Screen.tsx", import.meta.url)), "utf8");
+const storefront = readFileSync(fileURLToPath(new URL("./merchant-storefront.tsx", import.meta.url)), "utf8");
 
 describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => {
   it("drops only the invented self identity and dead stubs", () => {
@@ -117,5 +118,19 @@ describe("PLACEHOLDER-001 composer thread is real local state, not a toast", () 
     expect(composer).toContain("MAX_THREAD_ENTRIES");
     expect(composer).toContain("threadedBody");
     expect(composer).toContain("threadInput");
+  });
+});
+
+describe("PLACEHOLDER-001 storefront public page shares, analytics without caliber stays unknown", () => {
+  it("wires the public-homepage affordance to a real share", () => {
+    expect(storefront).toContain("proxy.app/store/");
+    expect(storefront).toContain('accessibilityLabel="分享公开主页链接"');
+  });
+
+  it("has no invented funnel numbers", () => {
+    for (const fake of ["18.6k", "612 · 聊天", "338 · 聊天", "300,000"]) {
+      expect(meSub).not.toContain(fake);
+    }
+    expect(meSub).toContain("口径未接入前不编数");
   });
 });

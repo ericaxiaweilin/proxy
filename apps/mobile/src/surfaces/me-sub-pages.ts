@@ -100,21 +100,21 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
   },
   agentcontentanalytics: {
     title: "内容与带单数据",
-    desc: "被看见只是第一步。看清楚哪些照片、动态和服务展示真的帮你找到好客户。",
+    desc: "被看见只是第一步。看清楚哪些照片、动态和服务展示真的帮你找到好客户。口径未接入前不编数。",
     icon: "↗",
     sections: [
       { title: "数据概览", rows: [
-        { label: "人物 / 内容展示", value: "18.6k" },
-        { label: "主页打开", value: "1,284" },
-        { label: "合格聊天", value: "47" }
+        { label: "人物 / 内容展示", value: "—" },
+        { label: "主页打开", value: "—" },
+        { label: "合格聊天", value: "—" }
       ]},
       { title: "转化漏斗", rows: [
-        { label: "Discovery", value: "18.6k" },
-        { label: "Profile", value: "1,284" },
-        { label: "Chat", value: "47" },
-        { label: "Need", value: "11" },
-        { label: "Order", value: "7" },
-        { label: "Repeat", value: "3" }
+        { label: "Discovery", value: "—" },
+        { label: "Profile", value: "—" },
+        { label: "Chat", value: "—" },
+        { label: "Need", value: "—" },
+        { label: "Order", value: "—" },
+        { label: "Repeat", value: "—" }
       ]}
     ]
   },
@@ -125,7 +125,7 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     sections: [
       { title: "当前状态", rows: [
         { label: "推广状态", value: "未开启" },
-        { label: "每日预算", value: "300,000₫" }
+        { label: "每日预算", value: "—" }
       ]}
     ]
   },
@@ -338,21 +338,21 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
   },
   socialanalytics: {
     title: "访问与转化",
-    desc: "让用户知道外部社媒是否真正带来合作；平台使用同一归因链做分发学习，但不卖原始联系人数据。",
+    desc: "让用户知道外部社媒是否真正带来合作；平台使用同一归因链做分发学习，但不卖原始联系人数据。归因口径未接入前不编数。",
     icon: "⌁",
     sections: [
       { title: "过去 30 天漏斗", rows: [
-        { label: "主页访问", value: "1,284" },
-        { label: "合格聊天", value: "47" },
-        { label: "机会", value: "18" },
-        { label: "订单", value: "9" },
-        { label: "复购", value: "4" }
+        { label: "主页访问", value: "—" },
+        { label: "合格聊天", value: "—" },
+        { label: "机会", value: "—" },
+        { label: "订单", value: "—" },
+        { label: "复购", value: "—" }
       ]},
       { title: "来源", rows: [
-        { label: "Proxy 市场", value: "访问 612 · 聊天 26 · 订单 5" },
-        { label: "TikTok", value: "访问 338 · 聊天 11 · 订单 2" },
-        { label: "Zalo QR", value: "访问 214 · 聊天 8 · 订单 2" },
-        { label: "Instagram", value: "访问 120 · 聊天 2 · 订单 0" }
+        { label: "Proxy 市场", value: "—" },
+        { label: "TikTok", value: "—" },
+        { label: "Zalo QR", value: "—" },
+        { label: "Instagram", value: "—" }
       ]}
     ]
   },
