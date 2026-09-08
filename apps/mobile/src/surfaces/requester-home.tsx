@@ -136,6 +136,8 @@ export function RequesterHome({
   const [placeIndex, setPlaceIndex] = useState(0);
   const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
   const [momentOpen, setMomentOpen] = useState(false);
+  const [momentBusy, setMomentBusy] = useState(false);
+  const [momentMsg, setMomentMsg] = useState<string | undefined>(undefined);
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinMsg, setJoinMsg] = useState<string | undefined>(undefined);
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
@@ -580,7 +582,7 @@ export function RequesterHome({
                   <View>
                     <Text style={styles.chainHint}>直接约她：点头像进 Scene 主页聊 · 想等人来：发布需求等小美接单</Text>
                     <View style={styles.gridCtaRow}>
-                    <Pressable onPress={() => setMomentOpen(true)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="出图">
+                    <Pressable onPress={() => { setMomentMsg(undefined); setMomentOpen(true); }} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="出图">
                       <Text style={styles.gridCtaTextSmall}>✦ 出图</Text>
                     </Pressable>
                     <Pressable disabled={joinBusy} onPress={() => void joinSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="报名参加活动">
@@ -593,6 +595,7 @@ export function RequesterHome({
                   </View>
                 ) : null}
                 {joinMsg ? <Text style={styles.joinMsg}>{joinMsg}</Text> : null}
+                {momentMsg && !momentOpen ? <Text style={styles.joinMsg}>{momentMsg}</Text> : null}
                 {chooser ? (
                   <Modal transparent animationType="fade" visible onRequestClose={() => setChooser(null)}>
                     <Pressable onPress={() => setChooser(null)} style={styles.sheetBackdrop}>
@@ -691,12 +694,26 @@ export function RequesterHome({
                           ) : null)}
                         </View>
                         <Text style={styles.momentCopy} numberOfLines={2}>{composed}</Text>
+                        {momentMsg && momentOpen ? <Text style={styles.joinMsg}>{momentMsg}</Text> : null}
                         <Pressable
-                          onPress={() => { setMomentOpen(false); void Share.share({ message: composed }); }}
+                          disabled={momentBusy}
+                          onPress={() => {
+                            if (momentBusy) return;
+                            setMomentBusy(true);
+                            setMomentMsg(undefined);
+                            void Share.share({ message: composed }).then((result) => {
+                              // 用户取消分享：静默关 sheet，不报“已分享”。
+                              setMomentOpen(false);
+                              if (!result || result.action === Share.sharedAction) setMomentMsg("邀请已分享");
+                            }).catch(() => {
+                              // 调起失败：sheet 保持打开并给重试机会，不吞错。
+                              setMomentMsg("分享没有调起，请重试。");
+                            }).finally(() => setMomentBusy(false));
+                          }}
                           style={[styles.gridCta, { marginTop: 10 }]}
                           accessibilityLabel="分享邀约"
                         >
-                          <Text style={styles.gridCtaText}>分享邀请 →</Text>
+                          <Text style={styles.gridCtaText}>{momentBusy ? "分享中…" : "分享邀请 →"}</Text>
                         </Pressable>
                       </View>
                     </Pressable>

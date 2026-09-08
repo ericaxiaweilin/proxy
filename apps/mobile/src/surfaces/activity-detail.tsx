@@ -24,6 +24,7 @@ function personaColor(personaId: string | undefined): string {
 export function ActivityDetailSurface({ client, initialActivityId, onBack }: { client: ActivityClient; initialActivityId?: string; onBack?: () => void }): React.JSX.Element {
   const [items, setItems] = useState<Activity[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
   const [selected, setSelected] = useState<Activity | undefined>(undefined);
   useEffect(() => {
     let c = false;
@@ -73,7 +74,8 @@ export function ActivityDetailSurface({ client, initialActivityId, onBack }: { c
           {aiDisclosure ? <Text style={styles.aiDisclosure}>🤖 {aiDisclosure}</Text> : null}
         </View>
         <Pressable onPress={async () => { try { await client.toggleInterest(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.cta}><Text style={styles.ctaText}>感兴趣 / 取消</Text></Pressable>
-        <Pressable onPress={async () => { try { await client.join(selected.activityId); const list = await client.listActivities(); setItems(list); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.ctaSecondary}><Text style={styles.ctaSecondaryText}>报名参加</Text></Pressable>
+        <Pressable onPress={async () => { try { await client.join(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); setNotice("报名成功"); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.ctaSecondary}><Text style={styles.ctaSecondaryText}>报名参加</Text></Pressable>
+        {notice ? <Text style={styles.meta}>{notice}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
     );

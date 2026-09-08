@@ -406,9 +406,15 @@ export function MarketSurface({
   }
 
   const visibleActivities = activityItems.filter((item) => {
-    if (activityFilter === "CAFE") return item.venueType === "CAFE";
-    if (activityFilter === "RESTAURANT") return item.venueType === "RESTAURANT";
-    if (activityFilter === "MINE") return joinedIds.has(item.activityId) || interestedIn.has(item.activityId);
+    if (activityFilter === "CAFE") {
+      if (item.venueType !== "CAFE") return false;
+    } else if (activityFilter === "RESTAURANT") {
+      if (item.venueType !== "RESTAURANT") return false;
+    } else if (activityFilter === "MINE") {
+      if (!(joinedIds.has(item.activityId) || interestedIn.has(item.activityId))) return false;
+    }
+    const q = search.trim().toLowerCase();
+    if (q && !`${item.title}${item.venueName}${item.time}`.toLowerCase().includes(q)) return false;
     return true;
   });
 
@@ -514,7 +520,6 @@ export function MarketSurface({
             const found = opportunityItems.find((x) => x.id === id);
             if (found) setOppDetail(found);
           }}
-          onOpenActivity={(a) => setActivityDetail(a)}
           onUserFix={setUserFix}
         />
       ) : pageTab === "OPPORTUNITY" ? (
@@ -636,14 +641,17 @@ function OpportunityTab({
   onDismiss: (id: string) => void;
 }): React.JSX.Element {
   const [typeFilter, setTypeFilter] = useState<OpportunityType | "all">("all");
+  const [query, setQuery] = useState("");
   const base = sourceItems;
   let items = [...base];
   if (typeFilter !== "all") items = items.filter((o) => inferOpportunityTypeForFilter(o) === typeFilter);
+  const q = query.trim().toLowerCase();
+  if (q) items = items.filter((o) => `${o.title ?? ""}${o.location ?? ""}${o.id}`.toLowerCase().includes(q));
   return (
     <>
       <View style={styles.searchRow}>
         <View style={styles.searchBox}>
-          <TextInput placeholder="搜机会…" placeholderTextColor="#A9A2B0" style={styles.searchInput} />
+          <TextInput onChangeText={setQuery} placeholder="搜机会…" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={query} />
           <Text style={styles.searchIcon}>⌕</Text>
         </View>
       </View>
@@ -682,9 +690,17 @@ function OpportunityDetail({
 }): React.JSX.Element {
   const budget = opportunity.price;
   const fair = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()} – ${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
-  const quote = quoteMode === "premium"
-    ? `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.25).toLocaleString()}₫`
-    : quoteMode === "standard" ? (fair.split("–")[0]?.trim() ?? budget) : budget;
+  // 自定义报价：输入框的数字才是依据；为空/非数字时不许提交，
+  // 也不再静默回退到客户预算（之前选自定义照样按预算发出）。
+  const [customQuote, setCustomQuote] = useState("");
+  const [quoteError, setQuoteError] = useState<string | undefined>(undefined);
+  const customDigits = customQuote.replace(/[^0-9]/g, "");
+  const customValid = customDigits.length > 0;
+  const quote = quoteMode === "custom"
+    ? (customValid ? `${Number(customDigits).toLocaleString()}₫` : "")
+    : quoteMode === "premium"
+      ? `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.25).toLocaleString()}₫`
+      : quoteMode === "standard" ? (fair.split("–")[0]?.trim() ?? budget) : budget;
   return (
     <View>
       <View style={styles.detailHead}>
@@ -776,12 +792,30 @@ function OpportunityDetail({
         ))}
       </View>
 
+      {quoteMode === "custom" ? (
+        <View>
+          <TextInput keyboardType="number-pad" onChangeText={(v) => { setCustomQuote(v); setQuoteError(undefined); }} placeholder="输入你的报价金额（₫）" placeholderTextColor="#A9A2B0" style={styles.publishPriceInput} value={customQuote} />
+          {quoteError ? <Text style={styles.marketError}>{quoteError}</Text> : null}
+        </View>
+      ) : null}
+
       <View style={styles.r4Actions}>
         <Pressable onPress={onBack} style={styles.r4ActionGhost}>
           <Text style={styles.r4ActionGhostText}>返回</Text>
         </Pressable>
-        <Pressable disabled={busy || opportunity.appliedByViewer || opportunity.ownedByViewer} onPress={() => onApply(quote)} style={styles.r4ActionPrimary}>
-          <Text style={styles.r4ActionPrimaryText}>{opportunity.appliedByViewer ? "已回应" : opportunity.ownedByViewer ? "这是你发布的机会" : busy ? "提交中…" : "按我的条件回应"}</Text>
+        <Pressable
+          disabled={busy || opportunity.appliedByViewer || opportunity.ownedByViewer}
+          onPress={() => {
+            if (quoteMode === "custom" && !customValid) {
+              setQuoteError("请先填写自定义报价金额。");
+              return;
+            }
+            setQuoteError(undefined);
+            onApply(quote);
+          }}
+          style={styles.r4ActionPrimary}
+        >
+          <Text style={styles.r4ActionPrimaryText}>{opportunity.appliedByViewer ? "已回应" : opportunity.ownedByViewer ? "这是你发布的机会" : busy ? "提交中…" : quoteMode === "custom" && customValid ? `以 ${quote} 回应` : "按我的条件回应"}</Text>
         </Pressable>
       </View>
       {opportunity.ownedByViewer ? (
@@ -1108,7 +1142,6 @@ function MarketMap({
   marketLabel,
   onOpenExperience,
   onOpenOpportunity,
-  onOpenActivity,
   onUserFix
 }: {
   tab: "OPPORTUNITY" | "ACTIVITY";
@@ -1118,7 +1151,6 @@ function MarketMap({
   marketLabel: string;
   onOpenExperience?: ((experienceId: string) => void) | undefined;
   onOpenOpportunity: (id: string) => void;
-  onOpenActivity: (activity: Activity) => void;
   // R15.x (P1 market 附近): parent passes a callback that the
   // map invokes whenever a foreground-location fix is obtained
   // (or refreshed). Parent uses this to (a) re-sort the LIST view
@@ -1194,13 +1226,15 @@ function MarketMap({
   const subText =
     locGranted && userRegion
       ? "以您当前位置为中心 — 蓝点是您"
-      : "默认以机会分布为中心 — 需点击右下角“用我当前位置”";
+      : isOpportunity
+        ? "默认以机会分布为中心 — 需点击右下角“用我当前位置”"
+        : "活动暂无位置坐标 — 只显示探索点与你的位置";
   const privacyTitle = "地址粒度";
   const privacyText =
     "您看到的真实地址仅供探索；具体商户地址需由业务确实需要且您授权后才提升精度。热门推荐点是参考点，不代表您当前位置。";
-  const onPinPress = isOpportunity
-    ? (id: string) => onOpenOpportunity(id)
-    : (id: string) => onOpenActivity(id as unknown as Activity);
+  // 活动没有坐标（Activity 契约无 lat/lng），活动 Tab 不渲染机会图钉：
+  // 之前把机会 id 强转成 Activity 传进详情，点开是坏页面。
+  const onPinPress = (id: string): void => onOpenOpportunity(id);
   return (
     <View style={styles.mapWrap}>
       <View style={styles.mapLegend}>
@@ -1218,7 +1252,7 @@ function MarketMap({
           provider={Platform.OS === "ios" ? undefined : "google"}
           testID="market-map-view"
         >
-          {opportunityPins.map((pin) => (
+          {isOpportunity ? opportunityPins.map((pin) => (
             <Marker
               key={pin.id}
               coordinate={{ latitude: pin.lat, longitude: pin.lng }}
@@ -1227,7 +1261,7 @@ function MarketMap({
               onPress={() => onPinPress(pin.id)}
               pinColor="#0B7A73"
             />
-          ))}
+          )) : null}
           {/* 热门探索点：紫色 marker，仅作为“可以去看看” — 不走 onPinPress */}
           {EXPLORER_SPOTS.map((spot) => (
             <Marker
