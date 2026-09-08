@@ -265,3 +265,19 @@ describe("PLACEHOLDER-005 own avatar in feed, moment lands on feed", () => {
     expect(home).toContain("onOpenFeed?.()");
   });
 });
+
+describe("PLACEHOLDER-006 checklist walk gaps", () => {
+  const home = readFileSync(fileURLToPath(new URL("./requester-home.tsx", import.meta.url)), "utf8");
+  const orders = readFileSync(fileURLToPath(new URL("./me-orders.tsx", import.meta.url)), "utf8");
+
+  it("home continue failure retries instead of promising pull-to-refresh", () => {
+    expect(home).toContain("homeReloadNonce");
+    expect(home).toContain("重新加载进行中");
+    expect(home).not.toContain("下拉或稍后重试");
+  });
+
+  it("activity rows do not nest pressables", () => {
+    expect(orders).toContain("查看明细");
+    expect(orders).not.toMatch(/<Pressable[^>]*>\s*<Text[^>]*>查看明细[\s\S]{0,2000}<Pressable/);
+  });
+});

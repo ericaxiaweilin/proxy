@@ -67,6 +67,12 @@ same commit. Do not record routine business logic changes here.
 
 - 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。
 
+## Revision 103 — 2026-09-08
+
+- Checklist 走查补漏（PLACEHOLDER-006）：进行中加载失败给重试按钮
+  （不再写“下拉”）；我的活动/活动导流列表拆嵌套 Pressable，点报名
+  不再误开明细。
+
 ## Revision 102 — 2026-09-08
 
 - 动态本人头像与个人总管理同源（PLACEHOLDER-005）：之前写死黑底圆圈；
