@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 78 — 2026-09-08
+
+- Human accounts remain user-defined; registration and messaging do not infer
+  or classify users as “小美” or “小帅”.
+- Open conversations now refresh server truth every three seconds while the
+  app is active and immediately on foreground resume. The inbox refreshes every
+  five seconds, enabling two-device account testing without exit/re-entry.
+
 ## Revision 77 — 2026-09-08
 
 - Paid opportunity orders now have a `100,000 VND` minimum guarantee and a

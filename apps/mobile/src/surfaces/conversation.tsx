@@ -4,7 +4,7 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { ProxySwitch } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -232,18 +232,11 @@ export function ConversationSurface({
     }
   }, []);
 
-  // Existing conversations open their persisted server history. Creating a
-  // new conversation is reserved for entry points that do not provide an id.
-  useEffect(() => {
-    if (!initialConvId) return;
-    let cancelled = false;
-    setLoading(true);
-    conversationClient.listMessages(initialConvId).then((result) => {
-      if (cancelled) return;
-      const payload = parseOperationRef(result);
-      const rows = Array.isArray(payload?.messages) ? payload.messages as Array<Record<string, unknown>> : [];
-      const actorId = typeof payload?.actorId === "string" ? payload.actorId : undefined;
-      setMessages(rows.map((row) => ({
+  const hydrateMessages = useCallback((result: Record<string, unknown>): void => {
+    const payload = parseOperationRef(result);
+    const rows = Array.isArray(payload?.messages) ? payload.messages as Array<Record<string, unknown>> : [];
+    const actorId = typeof payload?.actorId === "string" ? payload.actorId : undefined;
+    setMessages(rows.map((row) => ({
         id: String(row.messageId ?? `message_${Date.now()}`),
         sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方"),
         body: String(row.body ?? (row.messageType === "IMAGE" ? "[图片]" : row.messageType === "VIDEO" ? "[视频]" : "")),
@@ -259,15 +252,40 @@ export function ConversationSurface({
         ...(row.messageType === "AUDIO" && typeof row.mediaRef === "string"
           ? { audioUri: `${conversationClient.baseUrl}/v1/media/play/${encodeURIComponent(row.mediaRef)}` }
           : {}),
-      })));
-      setError(undefined);
-    }).catch(() => {
-      if (!cancelled) setError("历史消息加载失败，请重试");
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
+    })));
+    setError(undefined);
+  }, [aiAccount, conversationClient.baseUrl, parseOperationRef]);
+
+  // Human-to-human DM live sync. The API remains the source of truth; while
+  // this screen is foregrounded we refresh every 3s, pause in background, and
+  // refresh immediately on resume. This gives two-device QA deterministic
+  // delivery without pretending the current HTTP command API is a WebSocket.
+  useEffect(() => {
+    if (!convId) return;
+    let cancelled = false;
+    let foreground = AppState.currentState === "active";
+    let firstLoad = true;
+    const refresh = async (): Promise<void> => {
+      if (!foreground) return;
+      try {
+        const result = await conversationClient.listMessages(convId);
+        if (!cancelled) hydrateMessages(result);
+      } catch {
+        if (!cancelled && firstLoad) setError("历史消息加载失败，请重试");
+      } finally {
+        if (!cancelled && firstLoad) setLoading(false);
+        firstLoad = false;
+      }
+    };
+    setLoading(true);
+    void refresh();
+    const timer = setInterval(() => void refresh(), 3_000);
+    const appState = AppState.addEventListener("change", (state) => {
+      foreground = state === "active";
+      if (foreground) void refresh();
     });
-    return () => { cancelled = true; };
-  }, [initialConvId, conversationClient, parseOperationRef, aiAccount]);
+    return () => { cancelled = true; clearInterval(timer); appState.remove(); };
+  }, [convId, conversationClient, hydrateMessages]);
 
   // 挂载时创建会话
   useEffect(() => {

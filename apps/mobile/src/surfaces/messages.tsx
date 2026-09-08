@@ -1,7 +1,7 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
@@ -52,18 +52,28 @@ export function MessagesSurface({
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
 
-  useEffect(() => {
+  const refreshInbox = useCallback(async (): Promise<void> => {
     if (!conversationClient) return;
-    let cancelled = false;
-    conversationClient.listConversations().then((items) => {
-      if (cancelled) return;
+    try {
+      const items = await conversationClient.listConversations();
       setServerDialogs(items.map(toDialog));
       setInboxError(false);
-    }).catch(() => {
-      if (!cancelled) setInboxError(true);
-    });
-    return () => { cancelled = true; };
+    } catch {
+      setInboxError(true);
+    }
   }, [conversationClient]);
+
+  useEffect(() => {
+    if (!conversationClient) return;
+    let foreground = AppState.currentState === "active";
+    void refreshInbox();
+    const timer = setInterval(() => { if (foreground) void refreshInbox(); }, 5_000);
+    const appState = AppState.addEventListener("change", (state) => {
+      foreground = state === "active";
+      if (foreground) void refreshInbox();
+    });
+    return () => { clearInterval(timer); appState.remove(); };
+  }, [conversationClient, refreshInbox]);
 
   const inboxLoaded = serverDialogs !== undefined || inboxError;
   const pinnedSource: Dialog[] = [];
