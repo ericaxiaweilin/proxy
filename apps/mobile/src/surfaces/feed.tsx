@@ -23,6 +23,9 @@ import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, s
 // 旧 AdaptiveMediaCollection / AdaptiveMediaRail / SocialMediaFrame / SinglePostImage
 // 已从本文件迁出 → apps/mobile/src/media/
 import { AdaptiveMediaCollection, SinglePostImage, MediaViewer } from "../media/AdaptiveMediaCollection";
+import { Directory, File, Paths } from "expo-file-system";
+import { avatarFileName, createProfileStore } from "../profile-store";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
 import { mergePostEngagement, mergeReactedPostIds } from "../post-engagement-model";
 
@@ -50,6 +53,12 @@ type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情
 let cachedPosts: FeedPost[] = [];
 let cachedMedia: Record<string, FeedMediaItem[]> = {};
 let cachedPostIds: Set<string> = new Set();
+
+// 本人头像：与“我的→个人总管理”同源（profileStore 本地记录 + document
+// 目录重锚 + 存在性校验，AVATAR-001 同款逻辑）。动态之前写死黑底圆圈，
+// 自己的帖子也显示黑头——现在本人帖子用真头像，他人暂无来源仍用首字 fallback。
+const feedProfileStore = createProfileStore(nativeSecureStorageDriver);
+const FEED_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
 
@@ -131,6 +140,7 @@ export function FeedSurface({
   secureSessionStore,
   onOpenChat,
   onOpenFeedPrefs,
+  viewerAccountId,
   onOpenRealityScene,
   onOpenProfile,
   onChromeVisibilityChange,
@@ -148,6 +158,8 @@ export function FeedSurface({
   secureSessionStore?: SecureSessionStore | undefined;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
+  // 本人账号 id：用于判定“自己的帖子”并显示真头像；没有则退回名字判断。
+  viewerAccountId?: string | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onOpenProfile?: ((profile: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]> }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -203,6 +215,29 @@ export function FeedSurface({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
+  // 本人头像 URI（与个人总管理同源）：mount 时读一次，换头像后切 Tab
+  // 重挂即刷新。读不到/文件不存在就保持 undefined，走首字 fallback。
+  const [viewerAvatarUri, setViewerAvatarUri] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let active = true;
+    void feedProfileStore.read().then((record) => {
+      if (!active || !record?.avatarPath) return;
+      const name = avatarFileName(record.avatarPath);
+      try {
+        const names = new Set(FEED_AVATAR_DIR.list().map((entry) => entry.name));
+        if (names.has(name)) {
+          if (active) setViewerAvatarUri(new File(FEED_AVATAR_DIR, name).uri);
+        }
+      } catch {
+        // 目录不可读则保持 fallback，不打断动态。
+      }
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+  function isOwnPost(post: FeedPost): boolean {
+    if (viewerAccountId) return post.authorId === viewerAccountId;
+    return authorName(post) === "你";
+  }
   const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
   const [selectedCustomFeed, setSelectedCustomFeed] = useState<string | null>(null);
@@ -990,9 +1025,13 @@ export function FeedSurface({
                   style={styles.postAvatarPressable}
                 >
                 <View style={styles.postAvatarWrap}>
-                  <View style={styles.postAvatar}>
-                    <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
-                  </View>
+                  {isOwnPost(post) && viewerAvatarUri ? (
+                    <Image source={{ uri: viewerAvatarUri }} style={styles.postAvatarImage} />
+                  ) : (
+                    <View style={styles.postAvatar}>
+                      <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
+                    </View>
+                  )}
                   <View style={styles.scenarioBadge}>
                     <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
                   </View>
@@ -1513,6 +1552,7 @@ const styles = StyleSheet.create({
   profileDropPress: { alignItems: "center", height: "100%", justifyContent: "center", paddingHorizontal: 12, width: "100%" },
   profileDropText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   postAvatarWrap: { height: 44, position: "relative", width: 44 },
+  postAvatarImage: { borderRadius: 999, height: 44, width: 44 },
   postAvatar: {
     alignItems: "center",
     backgroundColor: "#111",

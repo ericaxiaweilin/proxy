@@ -247,3 +247,21 @@ describe("PLACEHOLDER-004 moment publishes to feed", () => {
     expect(shell).toContain("localNet={localNet}");
   });
 });
+
+describe("PLACEHOLDER-005 own avatar in feed, moment lands on feed", () => {
+  const feed = readFileSync(fileURLToPath(new URL("./feed.tsx", import.meta.url)), "utf8");
+  const home = readFileSync(fileURLToPath(new URL("./requester-home.tsx", import.meta.url)), "utf8");
+  const shell = readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8");
+
+  it("resolves own avatar from the same store as profile management", () => {
+    expect(feed).toContain("viewerAvatarUri");
+    expect(feed).toContain("createProfileStore");
+    expect(feed).toContain("postAvatarImage");
+    expect(feed).toContain("isOwnPost");
+    expect(shell).toContain("viewerAccountId");
+  });
+
+  it("jumps to feed after a successful moment publish", () => {
+    expect(home).toContain("onOpenFeed?.()");
+  });
+});

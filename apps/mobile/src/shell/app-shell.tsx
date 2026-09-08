@@ -669,6 +669,7 @@ export function AppShell({
               mediaClient={media}
               socialSpace={socialSpace}
               secureSessionStore={secureSessionStore}
+              {...(viewerAccountId ? { viewerAccountId } : {})}
               onChromeVisibilityChange={setFeedChromeVisible}
               onOpenChat={setFeedChatAuthor}
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
