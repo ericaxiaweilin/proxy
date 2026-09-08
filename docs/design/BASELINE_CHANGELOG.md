@@ -4,6 +4,10 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 106 — 2026-09-08
+
+- AI 横滑与真人横滑对齐：AI rail 出血到边（去左右空白），间距与真人一致。
+
 ## Revision 105 — 2026-09-08
 
 ### Persistent Home AI window and shared keyboard safety
@@ -98,6 +102,12 @@ same commit. Do not record routine business logic changes here.
 ## Revision 89 — 2026-09-08
 
 - 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。
+
+## Revision 103 — 2026-09-08
+
+- Checklist 走查补漏（PLACEHOLDER-006）：进行中加载失败给重试按钮
+  （不再写“下拉”）；我的活动/活动导流列表拆嵌套 Pressable，点报名
+  不再误开明细。
 
 ## Revision 102 — 2026-09-08
 

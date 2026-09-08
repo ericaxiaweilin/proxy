@@ -272,6 +272,8 @@ export function RequesterHome({
   // Without this, a transient network blip is indistinguishable
   // from "user has no in-progress needs" or "user is anonymous".
   const [homeItemsState, setHomeItemsState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  // 进行中加载失败的重试计数：进下面 effect 依赖，点重试即重拉。
+  const [homeReloadNonce, setHomeReloadNonce] = useState(0);
 
   // R36.x SCENE-RECOMMEND-001: 真实场景列表（公开接口，免登录），用于
   // 地图入口真计数 + 场景推荐横滑。失败/未配置时保持空，不展示假场景。
@@ -570,7 +572,7 @@ export function RequesterHome({
     return () => {
       cancelled = true;
     };
-  }, [demandClient]);
+  }, [demandClient, homeReloadNonce]);
 
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
@@ -1053,7 +1055,12 @@ export function RequesterHome({
       {homeItemsState === "loading" ? (
         <Text style={styles.emptyNote}>加载中…</Text>
       ) : homeItemsState === "error" ? (
-        <Text style={styles.emptyNote}>加载失败，下拉或稍后重试</Text>
+        <View>
+          <Text style={styles.emptyNote}>加载失败，请检查连接后重试</Text>
+          <Pressable onPress={() => setHomeReloadNonce((n) => n + 1)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="重新加载进行中">
+            <Text style={styles.gridCtaTextSmall}>重试</Text>
+          </Pressable>
+        </View>
       ) : null}
 
       {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)，Modal 模态。
@@ -1110,8 +1117,8 @@ const styles = StyleSheet.create({
   aiSub: { color: color.muted, fontSize: 11, marginTop: 3 },
   aiBadge: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
   aiBadgeText: { color: color.violet, fontSize: 11, fontWeight: "900" },
-  aiRail: { marginBottom: 10 },
-  aiRailContent: { gap: 15, paddingHorizontal: 16 },
+  aiRail: { marginBottom: 10, marginHorizontal: -16 },
+  aiRailContent: { gap: 12, paddingHorizontal: 16 },
   aiCard: { alignItems: "center", width: 104 },
   aiAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, height: 88, width: 88 },
   aiName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, textAlign: "center" },
