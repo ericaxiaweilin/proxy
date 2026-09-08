@@ -21,7 +21,7 @@ import type { ActivityClient } from "../activity-client";
 import { ActivityCommandRejectedError, ActivityProtocolError } from "../activity-client";
 import type { ExperienceClient } from "../experience-client";
 import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
-import type { EngagementClient } from "../engagement-client";
+import type { RelationshipClient } from "../relationship-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
@@ -95,7 +95,7 @@ export function RequesterHome({
   activities,
   experiences,
   aiAccounts,
-  engagement,
+  relationship,
   onMessageAI,
   onOpenAIProfile,
   onOpenHumanScene,
@@ -125,7 +125,7 @@ export function RequesterHome({
   // R15.49 — experience count 从 server 拉 (替换 hardcode 24).
   experiences?: ExperienceClient;
   aiAccounts?: AIAccountClient;
-  engagement?: EngagementClient;
+  relationship?: RelationshipClient;
   onMessageAI?: (account: PlatformAIAccount) => void;
   onOpenAIProfile?: (account: PlatformAIAccount) => void;
   onOpenHumanScene?: (person: RecommendPerson, sceneId: string) => void;
@@ -165,12 +165,10 @@ export function RequesterHome({
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
-  // 首页一键加好友：头像右下 + 徽标直接调 engagement.followProfile，
-  // 本次会话内记住已加状态。主页仍是关系的源头（profile 的
-  // toggleFollow / 发消息不变，进主页照样能做）。
-  const [followedIds, setFollowedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [followBusyId, setFollowBusyId] = useState<string | undefined>(undefined);
-  const [followMsg, setFollowMsg] = useState<string | undefined>(undefined);
+  type HomeRelationshipState = "NONE" | "OUTGOING" | "INCOMING" | "FRIEND";
+  const [relationshipStates, setRelationshipStates] = useState<ReadonlyMap<string, HomeRelationshipState>>(() => new Map());
+  const [relationshipBusyId, setRelationshipBusyId] = useState<string | undefined>(undefined);
+  const [relationshipMsg, setRelationshipMsg] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     onChooserVisibilityChange?.(chooser !== null);
@@ -179,30 +177,68 @@ export function RequesterHome({
     };
   }, [chooser, onChooserVisibilityChange]);
 
-  async function toggleHomeFollow(id: string, name: string): Promise<void> {
-    if (!engagement || !viewerAccountId) {
-      setFollowMsg("登录后可加好友");
+  useEffect(() => {
+    if (!relationship || !viewerAccountId) return;
+    let cancelled = false;
+    void relationship.listMyFriendships().then((payload) => {
+      if (cancelled) return;
+      const next = new Map<string, HomeRelationshipState>();
+      payload.active.forEach((item) => next.set(item.userId, "FRIEND"));
+      payload.pending.forEach((item) => next.set(item.userId, item.direction === "INCOMING" ? "INCOMING" : "OUTGOING"));
+      setRelationshipStates(next);
+    }).catch(() => {
+      if (!cancelled) setRelationshipMsg("好友状态暂时无法加载");
+    });
+    return () => { cancelled = true; };
+  }, [relationship, viewerAccountId]);
+
+  async function handleHomeFriend(id: string, name: string): Promise<void> {
+    if (!relationship || !viewerAccountId) {
+      setRelationshipMsg("登录后可添加好友");
       return;
     }
-    if (followBusyId !== undefined) return;
-    const followed = followedIds.has(id);
-    setFollowBusyId(id);
-    setFollowMsg(undefined);
+    if (relationshipBusyId !== undefined) return;
+    const current = relationshipStates.get(id) ?? "NONE";
+    if (current === "OUTGOING" || current === "FRIEND") return;
+    setRelationshipBusyId(id);
+    setRelationshipMsg(undefined);
     try {
-      if (followed) await engagement.unfollowProfile(id);
-      else await engagement.followProfile(id);
-      setFollowedIds((prev) => {
-        const next = new Set(prev);
-        if (followed) next.delete(id);
-        else next.add(id);
+      const nextState: HomeRelationshipState = current === "INCOMING" ? "FRIEND" : "OUTGOING";
+      if (current === "INCOMING") await relationship.acceptFriendRequest(id);
+      else await relationship.sendFriendRequest(id);
+      setRelationshipStates((prev) => {
+        const next = new Map(prev);
+        next.set(id, nextState);
         return next;
       });
-      setFollowMsg(followed ? `已取消关注 ${name}` : `已加好友 · ${name}`);
-    } catch {
-      setFollowMsg("加好友失败，登录后重试");
+      setRelationshipMsg(current === "INCOMING" ? `已成为好友 · ${name}` : `好友申请已发送 · ${name}`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "";
+      setRelationshipMsg(
+        reason.includes("self_forbidden") ? "不能添加自己"
+          : reason.includes("authenticated") || reason.includes("sign-in") ? "登录后可添加好友"
+            : "好友操作失败，请稍后重试"
+      );
     } finally {
-      setFollowBusyId(undefined);
+      setRelationshipBusyId(undefined);
     }
+  }
+
+  function relationshipGlyph(id: string): string {
+    if (relationshipBusyId === id) return "…";
+    const state = relationshipStates.get(id) ?? "NONE";
+    if (state === "FRIEND") return "✓";
+    if (state === "OUTGOING") return "↗";
+    if (state === "INCOMING") return "!";
+    return "+";
+  }
+
+  function relationshipLabel(id: string, name: string): string {
+    const state = relationshipStates.get(id) ?? "NONE";
+    if (state === "FRIEND") return `已是好友 ${name}`;
+    if (state === "OUTGOING") return `已申请好友 ${name}`;
+    if (state === "INCOMING") return `接受 ${name} 的好友申请`;
+    return `添加好友 ${name}`;
   }
 
   useEffect(() => {
@@ -642,12 +678,12 @@ export function RequesterHome({
               </View>
               {p.online ? <View style={styles.onlineDot} /> : null}
               <Pressable
-                onPress={() => void toggleHomeFollow(p.id, p.name)}
-                disabled={followBusyId === p.id}
-                style={[styles.addBadge, followedIds.has(p.id) && styles.addBadgeDone]}
-                accessibilityLabel={followedIds.has(p.id) ? `已加好友 ${p.name}` : `加好友 ${p.name}`}
+                onPress={() => void handleHomeFriend(p.id, p.name)}
+                disabled={relationshipBusyId === p.id || relationshipStates.get(p.id) === "OUTGOING" || relationshipStates.get(p.id) === "FRIEND"}
+                style={[styles.addBadge, relationshipStates.get(p.id) === "FRIEND" && styles.addBadgeDone, relationshipStates.get(p.id) === "OUTGOING" && styles.addBadgePending]}
+                accessibilityLabel={relationshipLabel(p.id, p.name)}
               >
-                <Text style={styles.addBadgeText}>{followBusyId === p.id ? "…" : followedIds.has(p.id) ? "✓" : "+"}</Text>
+                <Text style={styles.addBadgeText}>{relationshipGlyph(p.id)}</Text>
               </Pressable>
             </View>
             <Text style={styles.storyName} numberOfLines={1}>{p.name}</Text>
@@ -655,8 +691,8 @@ export function RequesterHome({
         ))}
       </HorizontalSwipeRail>
 
-      {followMsg ? (
-        <Text style={styles.followMsg}>{followMsg}</Text>
+      {relationshipMsg ? (
+        <Text style={styles.followMsg}>{relationshipMsg}</Text>
       ) : null}
 
       {recommendedAI.length > 0 ? <View style={styles.aiSection}>
@@ -670,12 +706,12 @@ export function RequesterHome({
               <View style={styles.aiAvatarWrap}>
                 <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
                 <Pressable
-                  onPress={() => void toggleHomeFollow(account.accountId, account.displayName)}
-                  disabled={followBusyId === account.accountId}
-                  style={[styles.addBadge, followedIds.has(account.accountId) && styles.addBadgeDone]}
-                  accessibilityLabel={followedIds.has(account.accountId) ? `已加好友 ${account.displayName}` : `加好友 ${account.displayName}`}
+                  onPress={() => void handleHomeFriend(account.accountId, account.displayName)}
+                  disabled={relationshipBusyId === account.accountId || relationshipStates.get(account.accountId) === "OUTGOING" || relationshipStates.get(account.accountId) === "FRIEND"}
+                  style={[styles.addBadge, relationshipStates.get(account.accountId) === "FRIEND" && styles.addBadgeDone, relationshipStates.get(account.accountId) === "OUTGOING" && styles.addBadgePending]}
+                  accessibilityLabel={relationshipLabel(account.accountId, account.displayName)}
                 >
-                  <Text style={styles.addBadgeText}>{followBusyId === account.accountId ? "…" : followedIds.has(account.accountId) ? "✓" : "+"}</Text>
+                  <Text style={styles.addBadgeText}>{relationshipGlyph(account.accountId)}</Text>
                 </Pressable>
               </View>
               <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
@@ -1245,6 +1281,7 @@ const styles = StyleSheet.create({
   // + 好友徽标：右下黑圆白字，加完变绿勾。真人 stories 和 AI 头像共用。
   addBadge: { alignItems: "center", backgroundColor: "#171715", borderColor: color.white, borderRadius: 999, borderWidth: 2, bottom: -2, height: 28, justifyContent: "center", position: "absolute", right: -2, width: 28 },
   addBadgeDone: { backgroundColor: "#18733B" },
+  addBadgePending: { backgroundColor: "#66511F" },
   addBadgeText: { color: color.white, fontSize: 16, fontWeight: "900", lineHeight: 20 },
   aiAvatarWrap: { position: "relative" },
   followMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },

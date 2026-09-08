@@ -603,7 +603,7 @@ export function AppShell({
               activities={activities}
               experiences={experience}
               aiAccounts={aiAccounts}
-              engagement={engagement}
+              relationship={relationship}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               onOpenAIProfile={setOpenAIProfile}
               onOpenHumanScene={(person, sceneId) => {

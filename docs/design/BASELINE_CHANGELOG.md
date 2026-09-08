@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 103 — 2026-09-08
+
+### Home recommendations use durable friendship truth
+
+- Recommendation `+` actions send real friend requests instead of disguising a
+  profile follow as friendship.
+- Home hydrates outgoing, incoming, and accepted friendship states from the server;
+  the state survives navigation, reload, and another device.
+- Human and AI accounts share the same visible relationship state machine while
+  retaining their separate scene and profile navigation boundaries.
+
 ## Revision 96 — 2026-09-08
 
 ### Explicit search and Proxy AI conversation boundary
