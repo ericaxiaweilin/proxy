@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 85 — 2026-09-08
+
+- 活动详情诚实化：分享按钮接线（之前是死按钮）；感兴趣/报名失败
+  不再静默吞掉，透出错误行，报名按服务端错误码说人话（与首页同口径）。
+
 ## Revision 84 — 2026-09-08
 
 - 订单工作流报错说人话：工作区发消息失败不再静默吞掉（撤回乐观

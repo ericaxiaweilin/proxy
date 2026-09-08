@@ -46,6 +46,36 @@ export class ActivityCommandRejectedError extends Error {
   }
 }
 
+// 报名失败说人话（各 Surface 共用）：调用方曾经把所有失败都报成
+// "登录后重试"或直接吞掉。按错因分流——没登录/掉登录才提登录，
+// 报过名/满员/活动没了说具体事，其他归网络或稍后重试。
+// 文案与 requester-home 的 joinErrorMessage 对齐。
+export function describeJoinError(error: unknown): string {
+  if (error instanceof ActivityCommandRejectedError) {
+    switch (error.result.error?.errorCode) {
+      case "ACTIVITY_ALREADY_JOINED":
+        return "你已报过名，不用重复点";
+      case "ACTIVITY_FULL":
+        return "名额已满，下次早点来";
+      case "ACTIVITY_NOT_FOUND":
+        return "该活动不存在或已结束";
+      case "ACTIVITY_ACTOR_REQUIRED":
+      case "AI_ACTION_FORBIDDEN":
+        return "登录已过期，请重新登录";
+      default:
+        return "报名失败，请稍后重试";
+    }
+  }
+  if (error instanceof ActivityProtocolError) {
+    // requireSession 把原错包了一层，只剩 message 可认。
+    if (/principal is required|offline fallback|signed out|re-authenticate|sign in/i.test(error.message)) {
+      return "登录后可报名";
+    }
+    return "报名失败，请稍后重试";
+  }
+  return "网络异常，请检查连接后重试";
+}
+
 export class ActivityClient {
   private commandSequence = 0;
 

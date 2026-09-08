@@ -8,7 +8,7 @@
 // remain canonical here so the Market activity cards
 // keep the R17.x visual baseline.
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { color, Gradient, shadows } from "../theme";
@@ -120,7 +120,8 @@ export function ActivityDetail({
   onToggleInterested,
   onJoin,
   onOpenRealityScene,
-  onBack
+  onBack,
+  notice
 }: {
   item: Activity;
   interested: boolean;
@@ -130,6 +131,8 @@ export function ActivityDetail({
   onJoin: () => void;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onBack: () => void;
+  // 感兴趣/报名失败的诚实文案（调用方用 describeJoinError 组装）。
+  notice?: string | undefined;
 }): React.JSX.Element {
   const origin = ORIGIN_META[item.origin] ?? ORIGIN_META.TEST!;
   const isCafe = item.venueType === "CAFE";
@@ -200,10 +203,11 @@ export function ActivityDetail({
             {busy ? "…" : interested ? "✓ 已感兴趣" : "☆ 感兴趣"}
           </Text>
         </Pressable>
-        <Pressable style={styles.socialBtn}>
+        <Pressable onPress={() => void Share.share({ message: `${item.title} · ${item.time} · ${item.venueName} — Proxy` })} style={styles.socialBtn} accessibilityLabel="分享活动">
           <Text style={styles.socialBtnText}>↗ 分享活动</Text>
         </Pressable>
       </View>
+      {notice ? <Text style={styles.errorText}>{notice}</Text> : null}
 
       {item.parentTitle ? (
         <View style={styles.linkLine}>
