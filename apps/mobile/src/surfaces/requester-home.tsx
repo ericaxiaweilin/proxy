@@ -6,7 +6,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
-import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
+import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
+import { HomeSearchDock } from "../components/home-search-dock";
 import { buildHomeSearchIndex, matchHomeSearchIntent, type HomeSearchSuggestion } from "../home-search-intent";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
@@ -130,8 +131,15 @@ export function RequesterHome({
   onChooserVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
-  const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
-  const [composerOpen, setComposerOpen] = useState(false);
+    // Home Search/Conversation v3：常驻搜索对话 dock（原型 .searchDock）。
+  // searchQuery 驱动全站实体匹配；threadTurns 诚实记录本轮用户输入与
+  // 生效结果（不造 AI 回复）；threadOpen = ✦ 对话记录 sheet。
+  const [threadTurns, setThreadTurns] = useState<ReadonlyArray<{ user: string; assistant: string; effect?: string }>>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [responseText, setResponseText] = useState<string>();
+  const [responseWhy, setResponseWhy] = useState<string>();
+  const [clarifyQuestion, setClarifyQuestion] = useState<string>();
+  const [clarifyChoices, setClarifyChoices] = useState<ReadonlyArray<string>>();
   // 4 宫格：各槽位独立下标，点格子弹选择窗（弹窗控制格子），主页入口保留。
   const [personIndex, setPersonIndex] = useState(0);
   const [timeIndex, setTimeIndex] = useState(0);
@@ -252,7 +260,7 @@ export function RequesterHome({
 
   function applyHomeSearchSuggestion(s: HomeSearchSuggestion): void {
     setSearchQuery("");
-    setComposerOpen(false);
+    logTurn(s.label, `已套入${s.slot === "person" ? "人物" : s.slot === "time" ? "时间" : s.slot === "activity" ? "活动" : "地点"}格`, "单格更新");
     if (s.slot === "person") {
       const at = filteredPeople.findIndex((p) => p.id === s.id);
       if (at >= 0) setPersonIndex(at);
@@ -268,28 +276,127 @@ export function RequesterHome({
     }
   }
 
-  function handleHomeChatSend(text: string, mode?: HomeIntentMode, attachment?: HomeAttachment): void {
-    setSearchQuery("");
-    setComposerOpen(false);
-    if (!onChat) return;
-    onChat(text, mode, attachment);
+  function logTurn(user: string, assistant: string, effect: string = ""): void {
+    setThreadTurns((prev) => [...prev, { user, assistant, ...(effect ? { effect } : {}) }]);
   }
 
-  // 整组换（remix）— 与四宫格 remix 按钮同一套真实数据轮换逻辑。
+  function showResponse(text: string, why: string = ""): void {
+    setResponseText(text);
+    setResponseWhy(why || text);
+  }
+
+  // 整组换（remix）— 与原型及四宫格 remix 按钮完全对齐
   function remixForYou(): void {
-    setComposerOpen(false);
     if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
     if (distinctTimes.length > 1) setTimeIndex((current) => (current + 1) % distinctTimes.length);
     if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
     if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
+    showResponse("重新配了一套", "根据当前时间和附近可用 Scene 重新组合。");
+    logTurn(searchQuery || "配一套", "已重新组合 4 格", "整组重配");
+    setSearchQuery("");
+    setClarifyChoices(undefined);
   }
 
-  // “换人/改时间/换场景/换活动” — 关掉 composer 后弹对应槽位的真实候选
-  // chooser（clarify 流程复用四宫格弹窗，数据同源）。
   function refineHomeSearchSlot(slot: "person" | "time" | "activity" | "place"): void {
     setSearchQuery("");
-    setComposerOpen(false);
+    setClarifyChoices(undefined);
     setChooser(slot);
+    if (slot === "person") {
+      showResponse("换个人", "其他三格保持不动。");
+      logTurn("换人", "给出候选人选", "只改人物");
+    } else if (slot === "place") {
+      showResponse("换场景", "其他三格保持不动。");
+      logTurn("换场景", "给出候选场景", "只改场景");
+    } else if (slot === "time") {
+      showResponse("换时间", "其他三格保持不动。");
+      logTurn("换时间", "选择时段", "只改时间");
+    } else {
+      showResponse("换活动", "其他三格保持不动。");
+      logTurn("换活动", "选择活动", "只改活动");
+    }
+  }
+
+  // 对齐原型 execute(q) 核心自然语言与实体执行器：
+  function handleExecuteHomeQuery(raw: string, attachment?: HomeAttachment): void {
+    const q = (raw || "").trim();
+    if (!q) return;
+
+    // 1. 周末 -> 澄清问询
+    if (q === "周末" || q.includes("周末有空")) {
+      setClarifyQuestion("下午还是晚上？");
+      setClarifyChoices(["下午", "晚上"]);
+      showResponse("还差一个时间条件", "确认后我直接更新，不会进入聊天页。");
+      logTurn(q, "下午还是晚上？", "等待澄清");
+      return;
+    }
+
+    // 2. 找人 / 换人 / 会中文
+    if (q.includes("会中文") || q.includes("换个人") || q.includes("换人") || q.includes("找人")) {
+      setClarifyChoices(undefined);
+      refineHomeSearchSlot("person");
+      return;
+    }
+
+    // 3. 太远 / 找场景 / 拍照
+    if (q.includes("太远") || q.includes("近一点") || q.includes("找场景") || q.includes("拍照")) {
+      setClarifyChoices(undefined);
+      refineHomeSearchSlot("place");
+      return;
+    }
+
+    // 4. 晚上 / 今晚 -> 只改时间
+    if (q.includes("晚上") || q.includes("今晚")) {
+      setClarifyChoices(undefined);
+      const eveningIdx = distinctTimes.findIndex((t) => t.includes("晚"));
+      if (eveningIdx >= 0) setTimeIndex(eveningIdx);
+      showResponse("时间改成今晚", "其他 3 格保持不动。");
+      logTurn(q, "已改成今晚", "只改时间");
+      return;
+    }
+
+    // 5. 散步 / City Walk -> 改活动
+    if (q.includes("散步") || q.includes("City Walk") || q.includes("走走")) {
+      setClarifyChoices(undefined);
+      const walkIdx = storeActivities.findIndex((a) => a.title.includes("散步") || a.title.includes("Walk"));
+      if (walkIdx >= 0) setActivityIndex(walkIdx);
+      showResponse("活动改成散步 / City Walk", "其余 3 格保持不动。");
+      logTurn(q, "已改成散步", "只改活动");
+      return;
+    }
+
+    // 6. 咖啡 -> 整体配好 (人/时间/活动/场景联动)
+    if (q.includes("咖啡")) {
+      setClarifyChoices(undefined);
+      const linhIdx = filteredPeople.findIndex((p) => p.name.toLowerCase().includes("linh"));
+      if (linhIdx >= 0) setPersonIndex(linhIdx);
+      const coffeeActIdx = storeActivities.findIndex((a) => a.title.includes("咖啡"));
+      if (coffeeActIdx >= 0) setActivityIndex(coffeeActIdx);
+      const beanSceneIdx = sceneBriefs.findIndex((s) => s.name.toLowerCase().includes("bean"));
+      if (beanSceneIdx >= 0) setPlaceIndex(beanSceneIdx);
+      showResponse("已配好 · Three Beans 更适合聊天", "你提到咖啡和轻松聊天，所以优先选择更安静、有窗位的场景。");
+      logTurn(q, "Linh · 周六下午 · 喝咖啡 · Three Beans", "生成完整 Moment");
+      return;
+    }
+
+    // 7. 配一套 / 随便
+    if (q.includes("配一套") || q.includes("随便") || q.includes("换一套")) {
+      remixForYou();
+      return;
+    }
+
+    // 8. 搜索词直接匹配具体候选
+    if (searchSuggestions.length > 0) {
+      applyHomeSearchSuggestion(searchSuggestions[0]!);
+      return;
+    }
+
+    // 9. 自由自然语言 -> 走现有模型对话
+    setClarifyChoices(undefined);
+    showResponse("我会基于当前这一刻继续理解", "你可以直接说“换个会中文的”“时间改晚上”“这个场景太远”。");
+    logTurn(q, "正在深入理解需求", "进入会话");
+    if (onChat) {
+      onChat(q, undefined, attachment);
+    }
   }
 
   // R36.x STORE-ACTIVITY-001: 店铺场景活动推荐（公开 listActivities，
@@ -329,7 +436,6 @@ export function RequesterHome({
     scenes: sceneBriefs.map((s) => ({ id: s.id, name: s.name, area: s.area, type: s.type })),
     times: distinctTimes
   });
-  const [searchQuery, setSearchQuery] = useState("");
   const searchMatch = matchHomeSearchIntent(searchQuery, searchIndex);
   const searchSuggestions: ReadonlyArray<HomeSearchSuggestion> = searchMatch.kind === "lookup" ? searchMatch.suggestions : [];
 
@@ -444,8 +550,6 @@ export function RequesterHome({
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
     const y = Math.max(0, e.nativeEvent.contentOffset.y);
     const delta = y - lastYRef.current;
-    // 滑动即把展开的模型对话收回单行。
-    if (Math.abs(delta) >= 4) setComposerOpen(false);
     if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
     else if (Math.abs(delta) >= 1) {
       const prevDir = Math.sign(dirRef.current);
@@ -459,52 +563,39 @@ export function RequesterHome({
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
-      {/* Search and Proxy share one top-level intent entry. It stays one line
-          until the user explicitly starts/resumes a conversation. */}
-      {conversationPanel ?? (onChat ? (
-        <>
-          <Pressable onPress={() => setComposerOpen(true)} style={styles.composerSingle} accessibilityLabel="搜索或询问 Proxy">
-            <ProxyIcon color={color.muted} name="search" size={18} />
-            <Text style={styles.composerSingleText}>搜索场景、地点，或问 Proxy</Text>
-            <Text style={styles.composerSingleChev}>›</Text>
-          </Pressable>
-          {composerOpen ? (
-            <View>
-              <HomeChatBox
-                contextLabel="用户"
-                placeholder="搜索地点、活动，或直接说你想做什么"
-                mode={intentMode}
-                onSelectMode={(mode) => setIntentMode((current) => current === mode ? undefined : mode)}
-                onQueryChange={setSearchQuery}
-                searchSuggestions={searchSuggestions}
-                onApplySuggestion={applyHomeSearchSuggestion}
-                onSend={handleHomeChatSend}
-              />
-              {/* 原型 v3 的 clarify 流：命中换槽位/整组换意图时给一个明确的
-                  执行 chip，点选后复用四宫格的真实候选弹窗。 */}
-              {searchMatch.kind === "remix" ? (
-                <Pressable accessibilityLabel="整组换一套候选" onPress={() => remixForYou()} style={styles.searchActionChip}>
-                  <Text style={styles.searchActionText}>✦ 帮你整组换一套 →</Text>
-                </Pressable>
-              ) : null}
-              {searchMatch.kind === "exchange" ? (
-                <Pressable
-                  accessibilityLabel={`更换${searchMatch.slot === "person" ? "人" : searchMatch.slot === "time" ? "时间" : searchMatch.slot === "activity" ? "活动" : "场景"}候选`}
-                  onPress={() => refineHomeSearchSlot(searchMatch.slot)}
-                  style={styles.searchActionChip}
-                >
-                  <Text style={styles.searchActionText}>
-                    {searchMatch.slot === "person" ? "换个人，选一个 →" : searchMatch.slot === "time" ? "换时间，选一个 →" : searchMatch.slot === "activity" ? "换活动，选一个 →" : "换场景，选一个 →"}
-                  </Text>
-                </Pressable>
-              ) : null}
-              <Pressable onPress={() => { setSearchQuery(""); setComposerOpen(false); }} style={styles.composerCollapse}>
-                <Text style={styles.composerCollapseText}>收起 ↑</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </>
-      ) : null)}
+      {/* Home Search/Conversation v3（原型 .searchDock）：logo 品牌行下方
+          常驻一条搜索对话 dock —— ✦对话记录 + 单行输入 + 相机 + 语音 +
+          发送。同一条输入既做全站实体搜索（候选/意图 chips），无命中时
+          发送则进入模型对话。conversationPanel（HomeAssistantSurface）
+          挂在 dock 正下方，不再替换掉入口本身；dock 始终可见。 */}
+      {/* Home Search/Conversation v3（原型 .searchDock）：
+          顶部常驻 48px 胶囊搜索栏 (✦对话记录 + 直输/搜索框 + 📷 + 🎤 + →)
+          + AI 响应条 responseBar (Proxy 已更新这一刻 + 为什么)
+          支持全站即时实体搜索与模型对话无缝合一 */}
+      {onChat ? (
+        <HomeSearchDock
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          suggestions={searchSuggestions}
+          onApplySuggestion={applyHomeSearchSuggestion}
+          intentRemix={searchMatch.kind === "remix"}
+          intentSlot={searchMatch.kind === "exchange" ? searchMatch.slot : null}
+          onRemix={() => remixForYou()}
+          onExchange={refineHomeSearchSlot}
+          onExecute={handleExecuteHomeQuery}
+          responseText={responseText}
+          responseWhy={responseWhy}
+          clarifyQuestion={clarifyQuestion}
+          clarifyChoices={clarifyChoices}
+          onSelectClarify={(c) => {
+            setClarifyChoices(undefined);
+            handleExecuteHomeQuery(c);
+          }}
+          threadTurns={threadTurns}
+        />
+      ) : null}
+      {/* 模型消息可在下方展开，但其 composer 已关闭；全页只有上方一个输入入口。 */}
+      {conversationPanel ?? null}
       {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
           用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
           不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
@@ -619,8 +710,7 @@ export function RequesterHome({
             const gridPlace = sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
             if (!gridPerson && !gridActivity && !gridPlace && !gridTime) return null;
             const remixAll = (): void => {
-              setComposerOpen(false);
-              if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
+                        if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
               if (distinctTimes.length > 1) setTimeIndex((current) => (current + 1) % distinctTimes.length);
               if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
               if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
@@ -643,7 +733,7 @@ export function RequesterHome({
                 <View style={styles.gridStage}>
                   <View style={styles.grid4}>
                     {tiles.map((t) => t ? (
-                      <Pressable key={t.key} onPress={() => { setComposerOpen(false); setChooser(t.slot); }} style={styles.gridTile}>
+                      <Pressable key={t.key} onPress={() => setChooser(t.slot)} style={styles.gridTile}>
                         {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
                         <View style={styles.gridOverlay}>
                           <Text style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
@@ -981,6 +1071,11 @@ const styles = StyleSheet.create({
   // 明确执行入口，样式跟基线 CTA 一致（ink 底白字）。
   searchActionChip: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, marginTop: 7, paddingVertical: 13 },
   searchActionText: { color: color.white, fontSize: 13, fontWeight: "800" },
+  // 对话记录 sheet（原型 .turn/.you/.effect）：诚实日志 — 只记用户输入
+  // 与实际生效结果，不造 AI 回复。
+  threadTurn: { borderColor: color.line, borderRadius: 12, borderWidth: 1, gap: 4, marginTop: 8, padding: 10 },
+  threadUser: { color: color.ink, fontSize: 13, fontWeight: "700", lineHeight: 18 },
+  threadEffect: { color: color.muted, fontSize: 11, lineHeight: 15 },
   gridStage: { position: "relative" },
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   gridRemixButton: { alignItems: "center", backgroundColor: "#171715", borderColor: color.offWhite, borderRadius: 29, borderWidth: 2, elevation: 7, height: 58, justifyContent: "center", left: "50%", marginLeft: -29, marginTop: -24, position: "absolute", top: "50%", width: 58, zIndex: 8 },

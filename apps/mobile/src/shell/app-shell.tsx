@@ -532,6 +532,7 @@ export function AppShell({
               conversationPanel={homeAssistant ? (
                 <HomeAssistantSurface
                   embedded
+                  externalComposer
                   conversationClient={conversation}
                   mediaClient={media}
                   initialText={homeAssistant.text}

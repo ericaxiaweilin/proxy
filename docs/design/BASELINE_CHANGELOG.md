@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 92 — 2026-09-08
+
+### Home unified search/conversation contract
+
+- Home now has one composer for both entity search and Proxy model conversation. The
+  embedded model transcript is display-only and cannot introduce a second send box.
+- Model feedback stays inside the same bordered search shell instead of appearing as
+  a separate receive field. Empty state no longer fabricates response text or history.
+- AI history, camera and microphone controls use larger, unwrapped glyphs so their
+  visual size matches their touch target on a phone.
+
 ## Revision 91 — 2026-09-08
 
 - 市场机会订单图取消圆角并贴齐卡片上、下、左三边；图片宽度保持 104，不再向右扩张。

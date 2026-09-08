@@ -34,6 +34,7 @@ export function HomeAssistantSurface({
   experienceSchema,
   ensureSession,
   embedded = false,
+  externalComposer = false,
 }: {
   conversationClient: ConversationClient;
   mediaClient: MediaClient;
@@ -48,6 +49,7 @@ export function HomeAssistantSurface({
   experienceSchema?: UISchema | null;
   ensureSession?: () => Promise<void>;
   embedded?: boolean;
+  externalComposer?: boolean;
 }): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string>();
   const [messages, setMessages] = useState<AssistantMessage[]>([
@@ -283,7 +285,7 @@ export function HomeAssistantSurface({
         {status ? <View style={styles.statusBox}><Text style={styles.statusText}>{status}</Text></View> : null}
       </ScrollView>
 
-      <View style={styles.composer}>
+      {!externalComposer ? <View style={styles.composer}>
         <TextInput
           editable={Boolean(conversationId) && !sending}
           multiline
@@ -299,7 +301,7 @@ export function HomeAssistantSurface({
         <Pressable disabled={!draft.trim() || !conversationId || sending} onPress={() => void send()} style={[styles.sendButton, (!draft.trim() || !conversationId || sending) && styles.disabled]}>
           <Text style={styles.sendText}>{sending ? "…" : "↑"}</Text>
         </Pressable>
-      </View>
+      </View> : null}
     </KeyboardAvoidingView>
   );
 }

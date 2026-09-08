@@ -9,13 +9,27 @@ const scene = readFileSync(fileURLToPath(new URL("./surfaces/reality-scene-map.t
 const fixtures = readFileSync(fileURLToPath(new URL("./recommend-fixtures.ts", import.meta.url)), "utf8");
 const locationPicker = readFileSync(fileURLToPath(new URL("./components/location-picker-sheet.tsx", import.meta.url)), "utf8");
 const mapCanvas = readFileSync(fileURLToPath(new URL("./components/map-canvas.tsx", import.meta.url)), "utf8");
+const searchDock = readFileSync(fileURLToPath(new URL("./components/home-search-dock.tsx", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("puts the unified search and model conversation before discovery sections", () => {
-    const intent = source.indexOf('accessibilityLabel="搜索或询问 Proxy"');
-    expect(intent).toBeGreaterThan(-1);
-    expect(intent).toBeLessThan(source.indexOf(">真人推荐<"));
-    expect(source).toContain("搜索场景、地点，或问 Proxy");
+    // Home Search/Conversation v3：入口换为常驻搜索对话 dock（原型 .searchDock），
+    // dock（含 ✦记录/输入/相机/语音/发送）必须排在真人推荐 section 之前。
+    expect(searchDock).toContain('accessibilityLabel="搜索或和 Proxy 对话"');
+    expect(searchDock).toContain("想找谁、去哪、做什么？");
+    expect(searchDock).toContain('accessibilityLabel="添加照片"');
+    expect(searchDock).toContain('"语音输入"');
+    expect(searchDock).toContain('accessibilityLabel="发送"');
+    const dockUse = source.indexOf("<HomeSearchDock");
+    expect(dockUse).toBeGreaterThan(-1);
+    expect(dockUse).toBeLessThan(source.indexOf(">真人推荐<"));
+    expect((searchDock.match(/<TextInput\s/g) ?? [])).toHaveLength(1);
+    expect(searchDock).toContain("<View style={styles.searchShell}>");
+    expect(searchDock).toContain('name="camera" size={24}');
+    expect(searchDock).toContain('name="microphone" size={24}');
+    expect(searchDock).toContain('name="spark" size={25}');
+    expect(shell).toContain("externalComposer");
+    expect(source).toContain("useState<ReadonlyArray<{ user: string; assistant: string; effect?: string }>>([])");
   });
   it("keeps the labeled human section before the labeled AI section", () => {
     const human = source.indexOf(">真人推荐<");
