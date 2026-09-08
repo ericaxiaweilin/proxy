@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 87 — 2026-09-08
+
+- 我的分析区去假数：浏览/互动没有服务端口径，不再用公式现编，
+  没接入口径前画“—”；关注数拉失败保持未知不回填 0，标签 Tabs
+  同步支持未知态。
+
 ## Revision 86 — 2026-09-08
 
 - 关注/取关报错按因说人话（个人主页、AI 主页、动态头像菜单共用
