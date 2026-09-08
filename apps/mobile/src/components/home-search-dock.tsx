@@ -16,12 +16,6 @@ const SLOT_LABEL: Record<HomeSearchSuggestion["slot"], string> = {
   place: "地点"
 };
 
-export interface ThreadTurn {
-  user: string;
-  assistant: string;
-  effect?: string;
-}
-
 export interface HomeSearchDockProps {
   placeholder?: string | undefined;
   value: string;
@@ -43,8 +37,8 @@ export interface HomeSearchDockProps {
   clarifyQuestion?: string | undefined;
   clarifyChoices?: ReadonlyArray<string> | undefined;
   onSelectClarify?: ((choice: string) => void) | undefined;
-  // ✦ 对话记录
-  threadTurns: ReadonlyArray<ThreadTurn>;
+  // 左侧 AI 标识是显式的模型会话入口；普通输入保持搜索语义。
+  onOpenConversation: () => void;
 }
 
 export function HomeSearchDock({
@@ -64,7 +58,7 @@ export function HomeSearchDock({
   clarifyQuestion,
   clarifyChoices,
   onSelectClarify,
-  threadTurns
+  onOpenConversation
 }: HomeSearchDockProps): React.JSX.Element {
   const inputRef = useRef<TextInput>(null);
   const [voiceState, setVoiceState] = useState<"IDLE" | "LISTENING" | "DONE">("IDLE");
@@ -72,7 +66,6 @@ export function HomeSearchDock({
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
   const [toolError, setToolError] = useState<string>();
   const [draft, setDraft] = useState("");
-  const [threadOpen, setThreadOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string>();
 
   const showToast = (msg: string) => {
@@ -172,7 +165,6 @@ export function HomeSearchDock({
     }
   }
 
-  const hasHistory = threadTurns.length > 0;
   const canSend = Boolean((value || draft).trim() || photo);
 
   return (
@@ -181,17 +173,16 @@ export function HomeSearchDock({
       {/* 搜索与模型对话共用这一行；页面内不得再出现第二个 composer。 */}
       <View style={styles.searchRow}>
         <Pressable
-          accessibilityLabel={hasHistory ? `对话记录，${threadTurns.length} 条` : "对话记录"}
-          onPress={() => setThreadOpen(true)}
+          accessibilityLabel="打开 Proxy AI 对话"
+          onPress={onOpenConversation}
           style={styles.threadBtn}
         >
           <ProxyIcon color="#66511F" name="spark" size={25} />
-          {hasHistory ? <View style={styles.threadDot} /> : null}
         </Pressable>
 
         <TextInput
           ref={inputRef}
-          accessibilityLabel="搜索或和 Proxy 对话"
+          accessibilityLabel="搜索人、活动、地点或时间"
           maxLength={500}
           onChangeText={(next) => { setDraft(next); onChangeText(next); }}
           placeholder={placeholder}
@@ -342,42 +333,6 @@ export function HomeSearchDock({
         </Modal>
       ) : null}
 
-      {/* 对话记录 Bottom Sheet */}
-      {threadOpen ? (
-        <Modal transparent animationType="fade" visible onRequestClose={() => setThreadOpen(false)}>
-          <Pressable onPress={() => setThreadOpen(false)} style={styles.sheetBackdrop}>
-            <View style={styles.sheet} onStartShouldSetResponder={() => true}>
-              <View style={styles.grab} />
-              <View style={styles.sheetHead}>
-                <Text style={styles.sheetTitle}>对话记录</Text>
-                <Pressable onPress={() => setThreadOpen(false)} style={styles.closeBtn}>
-                  <Text style={styles.closeBtnText}>×</Text>
-                </Pressable>
-              </View>
-
-              {threadTurns.length === 0 ? (
-                <Text style={styles.emptyHistory}>还没有对话记录</Text>
-              ) : (
-                <ScrollView style={styles.historyList} contentContainerStyle={styles.historyContent}>
-                  {threadTurns.map((turn, i) => (
-                    <View key={`turn:${i}`} style={styles.turnBox}>
-                      <View style={styles.youBubble}>
-                        <Text style={styles.youText}>{turn.user}</Text>
-                      </View>
-                      <View style={styles.aiBubble}>
-                        <Text style={styles.aiText}>{turn.assistant}</Text>
-                      </View>
-                      {turn.effect ? (
-                        <Text style={styles.effectText}>{turn.effect}</Text>
-                      ) : null}
-                    </View>
-                  ))}
-                </ScrollView>
-              )}
-            </View>
-          </Pressable>
-        </Modal>
-      ) : null}
     </View>
   );
 }
@@ -409,15 +364,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     position: "relative",
     width: 38
-  },
-  threadDot: {
-    backgroundColor: "#F2B53D",
-    borderRadius: 3,
-    height: 6,
-    position: "absolute",
-    right: -1,
-    top: -1,
-    width: 6
   },
   input: {
     color: color.ink,
@@ -645,96 +591,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700"
   },
-
-  // 对话记录 Sheet
-  sheetBackdrop: {
-    backgroundColor: "rgba(0,0,0,0.20)",
-    flex: 1,
-    justifyContent: "flex-end",
-    padding: 8
-  },
-  sheet: {
-    backgroundColor: color.white,
-    borderColor: color.line,
-    borderRadius: 25,
-    borderWidth: 1,
-    maxHeight: "75%",
-    paddingBottom: 24,
-    paddingHorizontal: 14,
-    paddingTop: 10
-  },
-  grab: {
-    alignSelf: "center",
-    backgroundColor: "#DDD7CF",
-    borderRadius: 2,
-    height: 3,
-    marginBottom: 10,
-    width: 34
-  },
-  sheetHead: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12
-  },
-  sheetTitle: {
-    color: color.ink,
-    fontSize: 15,
-    fontWeight: "800"
-  },
-  closeBtn: {
-    padding: 4
-  },
-  closeBtnText: {
-    color: "#888888",
-    fontSize: 22,
-    lineHeight: 22
-  },
-  emptyHistory: {
-    color: "#8C867E",
-    fontSize: 12,
-    paddingVertical: 20,
-    textAlign: "center"
-  },
-  historyList: {
-    maxHeight: 400
-  },
-  historyContent: {
-    gap: 12,
-    paddingVertical: 6
-  },
-  turnBox: {
-    gap: 5
-  },
-  youBubble: {
-    alignSelf: "flex-end",
-    backgroundColor: "#141414",
-    borderRadius: 16,
-    maxWidth: "80%",
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  youText: {
-    color: color.white,
-    fontSize: 12,
-    lineHeight: 17
-  },
-  aiBubble: {
-    alignSelf: "flex-start",
-    backgroundColor: "#F5F2ED",
-    borderRadius: 16,
-    maxWidth: "88%",
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  aiText: {
-    color: color.ink,
-    fontSize: 12,
-    lineHeight: 17
-  },
-  effectText: {
-    color: "#8C867E",
-    fontSize: 11,
-    paddingLeft: 4
-  }
 });

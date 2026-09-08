@@ -13,9 +13,10 @@ const searchDock = readFileSync(fileURLToPath(new URL("./components/home-search-
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("puts the unified search and model conversation before discovery sections", () => {
-    // Home Search/Conversation v3：入口换为常驻搜索对话 dock（原型 .searchDock），
-    // dock（含 ✦记录/输入/相机/语音/发送）必须排在真人推荐 section 之前。
-    expect(searchDock).toContain('accessibilityLabel="搜索或和 Proxy 对话"');
+    // Home Search/Conversation v3：常驻搜索 dock，AI 标识另进持久会话。
+    expect(searchDock).toContain('accessibilityLabel="搜索人、活动、地点或时间"');
+    expect(searchDock).toContain('accessibilityLabel="打开 Proxy AI 对话"');
+    expect(searchDock).toContain("onPress={onOpenConversation}");
     expect(searchDock).toContain("想找谁、去哪、做什么？");
     expect(searchDock).toContain('accessibilityLabel="添加照片"');
     expect(searchDock).toContain('"语音输入"');
@@ -29,7 +30,12 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(searchDock).toContain('name="microphone" size={24}');
     expect(searchDock).toContain('name="spark" size={25}');
     expect(shell).toContain("externalComposer");
-    expect(source).toContain("useState<ReadonlyArray<{ user: string; assistant: string; effect?: string }>>([])");
+    expect(source).not.toContain("threadTurns");
+    expect(source).toContain("模型对话只能由左侧 AI 标识显式进入");
+    expect(source).not.toContain("自由自然语言 -> 走现有模型对话");
+    expect(shell).toContain('item.conversation.originType === "HOME"');
+    expect(shell).toContain('item.conversation.participants.includes("proxy_ai")');
+    expect(shell).toContain('originId: "proxy_ai_home"');
   });
   it("keeps the labeled human section before the labeled AI section", () => {
     const human = source.indexOf(">真人推荐<");

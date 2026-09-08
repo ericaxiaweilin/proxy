@@ -84,6 +84,7 @@ export function RequesterHome({
   onOpenMarket,
   onOpenFeed,
   onChat,
+  onOpenAssistantConversation,
   conversationPanel,
   topContext,
   demandClient,
@@ -108,6 +109,7 @@ export function RequesterHome({
   onOpenMarket?: ((tab: MarketTab) => void) | undefined;
   onOpenFeed?: (() => void) | undefined;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
+  onOpenAssistantConversation?: (() => void) | undefined;
   conversationPanel?: ReactNode;
   topContext?: ReactNode;
   demandClient?: DemandClient;
@@ -131,10 +133,8 @@ export function RequesterHome({
   onChooserVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
-    // Home Search/Conversation v3：常驻搜索对话 dock（原型 .searchDock）。
-  // searchQuery 驱动全站实体匹配；threadTurns 诚实记录本轮用户输入与
-  // 生效结果（不造 AI 回复）；threadOpen = ✦ 对话记录 sheet。
-  const [threadTurns, setThreadTurns] = useState<ReadonlyArray<{ user: string; assistant: string; effect?: string }>>([]);
+  // Home Search/Conversation v3：常驻搜索 dock（原型 .searchDock）。
+  // searchQuery 只驱动全站实体匹配；模型历史统一由消息模块持久化。
   const [searchQuery, setSearchQuery] = useState("");
   const [responseText, setResponseText] = useState<string>();
   const [responseWhy, setResponseWhy] = useState<string>();
@@ -260,7 +260,6 @@ export function RequesterHome({
 
   function applyHomeSearchSuggestion(s: HomeSearchSuggestion): void {
     setSearchQuery("");
-    logTurn(s.label, `已套入${s.slot === "person" ? "人物" : s.slot === "time" ? "时间" : s.slot === "activity" ? "活动" : "地点"}格`, "单格更新");
     if (s.slot === "person") {
       const at = filteredPeople.findIndex((p) => p.id === s.id);
       if (at >= 0) setPersonIndex(at);
@@ -276,10 +275,6 @@ export function RequesterHome({
     }
   }
 
-  function logTurn(user: string, assistant: string, effect: string = ""): void {
-    setThreadTurns((prev) => [...prev, { user, assistant, ...(effect ? { effect } : {}) }]);
-  }
-
   function showResponse(text: string, why: string = ""): void {
     setResponseText(text);
     setResponseWhy(why || text);
@@ -292,7 +287,6 @@ export function RequesterHome({
     if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
     if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
     showResponse("重新配了一套", "根据当前时间和附近可用 Scene 重新组合。");
-    logTurn(searchQuery || "配一套", "已重新组合 4 格", "整组重配");
     setSearchQuery("");
     setClarifyChoices(undefined);
   }
@@ -303,16 +297,12 @@ export function RequesterHome({
     setChooser(slot);
     if (slot === "person") {
       showResponse("换个人", "其他三格保持不动。");
-      logTurn("换人", "给出候选人选", "只改人物");
     } else if (slot === "place") {
       showResponse("换场景", "其他三格保持不动。");
-      logTurn("换场景", "给出候选场景", "只改场景");
     } else if (slot === "time") {
       showResponse("换时间", "其他三格保持不动。");
-      logTurn("换时间", "选择时段", "只改时间");
     } else {
       showResponse("换活动", "其他三格保持不动。");
-      logTurn("换活动", "选择活动", "只改活动");
     }
   }
 
@@ -326,7 +316,6 @@ export function RequesterHome({
       setClarifyQuestion("下午还是晚上？");
       setClarifyChoices(["下午", "晚上"]);
       showResponse("还差一个时间条件", "确认后我直接更新，不会进入聊天页。");
-      logTurn(q, "下午还是晚上？", "等待澄清");
       return;
     }
 
@@ -350,7 +339,6 @@ export function RequesterHome({
       const eveningIdx = distinctTimes.findIndex((t) => t.includes("晚"));
       if (eveningIdx >= 0) setTimeIndex(eveningIdx);
       showResponse("时间改成今晚", "其他 3 格保持不动。");
-      logTurn(q, "已改成今晚", "只改时间");
       return;
     }
 
@@ -360,7 +348,6 @@ export function RequesterHome({
       const walkIdx = storeActivities.findIndex((a) => a.title.includes("散步") || a.title.includes("Walk"));
       if (walkIdx >= 0) setActivityIndex(walkIdx);
       showResponse("活动改成散步 / City Walk", "其余 3 格保持不动。");
-      logTurn(q, "已改成散步", "只改活动");
       return;
     }
 
@@ -374,7 +361,6 @@ export function RequesterHome({
       const beanSceneIdx = sceneBriefs.findIndex((s) => s.name.toLowerCase().includes("bean"));
       if (beanSceneIdx >= 0) setPlaceIndex(beanSceneIdx);
       showResponse("已配好 · Three Beans 更适合聊天", "你提到咖啡和轻松聊天，所以优先选择更安静、有窗位的场景。");
-      logTurn(q, "Linh · 周六下午 · 喝咖啡 · Three Beans", "生成完整 Moment");
       return;
     }
 
@@ -390,13 +376,12 @@ export function RequesterHome({
       return;
     }
 
-    // 9. 自由自然语言 -> 走现有模型对话
+    // 9. 无命中仍保持搜索语义。模型对话只能由左侧 AI 标识显式进入。
     setClarifyChoices(undefined);
-    showResponse("我会基于当前这一刻继续理解", "你可以直接说“换个会中文的”“时间改晚上”“这个场景太远”。");
-    logTurn(q, "正在深入理解需求", "进入会话");
-    if (onChat) {
-      onChat(q, undefined, attachment);
-    }
+    showResponse(
+      attachment ? "图片需要在 Proxy AI 对话中发送" : `没有找到“${q}”`,
+      "换个关键词继续搜索，或点左侧 AI 标识进入模型对话。"
+    );
   }
 
   // R36.x STORE-ACTIVITY-001: 店铺场景活动推荐（公开 listActivities，
@@ -563,15 +548,8 @@ export function RequesterHome({
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
-      {/* Home Search/Conversation v3（原型 .searchDock）：logo 品牌行下方
-          常驻一条搜索对话 dock —— ✦对话记录 + 单行输入 + 相机 + 语音 +
-          发送。同一条输入既做全站实体搜索（候选/意图 chips），无命中时
-          发送则进入模型对话。conversationPanel（HomeAssistantSurface）
-          挂在 dock 正下方，不再替换掉入口本身；dock 始终可见。 */}
-      {/* Home Search/Conversation v3（原型 .searchDock）：
-          顶部常驻 48px 胶囊搜索栏 (✦对话记录 + 直输/搜索框 + 📷 + 🎤 + →)
-          + AI 响应条 responseBar (Proxy 已更新这一刻 + 为什么)
-          支持全站即时实体搜索与模型对话无缝合一 */}
+      {/* Home Search/Conversation v3（原型 .searchDock）：单行输入默认搜索；
+          左侧 AI 标识显式进入消息模块中的唯一 Proxy AI 会话。 */}
       {onChat ? (
         <HomeSearchDock
           value={searchQuery}
@@ -591,7 +569,7 @@ export function RequesterHome({
             setClarifyChoices(undefined);
             handleExecuteHomeQuery(c);
           }}
-          threadTurns={threadTurns}
+          onOpenConversation={() => onOpenAssistantConversation?.()}
         />
       ) : null}
       {/* 模型消息可在下方展开，但其 composer 已关闭；全页只有上方一个输入入口。 */}
@@ -1071,11 +1049,6 @@ const styles = StyleSheet.create({
   // 明确执行入口，样式跟基线 CTA 一致（ink 底白字）。
   searchActionChip: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, marginTop: 7, paddingVertical: 13 },
   searchActionText: { color: color.white, fontSize: 13, fontWeight: "800" },
-  // 对话记录 sheet（原型 .turn/.you/.effect）：诚实日志 — 只记用户输入
-  // 与实际生效结果，不造 AI 回复。
-  threadTurn: { borderColor: color.line, borderRadius: 12, borderWidth: 1, gap: 4, marginTop: 8, padding: 10 },
-  threadUser: { color: color.ink, fontSize: 13, fontWeight: "700", lineHeight: 18 },
-  threadEffect: { color: color.muted, fontSize: 11, lineHeight: 15 },
   gridStage: { position: "relative" },
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   gridRemixButton: { alignItems: "center", backgroundColor: "#171715", borderColor: color.offWhite, borderRadius: 29, borderWidth: 2, elevation: 7, height: 58, justifyContent: "center", left: "50%", marginLeft: -29, marginTop: -24, position: "absolute", top: "50%", width: 58, zIndex: 8 },

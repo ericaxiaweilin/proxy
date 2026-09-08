@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 96 — 2026-09-08
+
+### Explicit search and Proxy AI conversation boundary
+
+- The Home field is deterministic search by default and no longer silently sends
+  unmatched queries to the model gateway.
+- The left AI mark opens the user's single durable HOME / Proxy AI conversation in
+  Messages, reusing it when present and creating it only when absent.
+- The obsolete local conversation-history sheet is removed; durable history has one
+  source of truth in Messages.
+
 ## Revision 95 — 2026-09-08
 
 ### One durable Proxy AI thread with ephemeral Home receipts
