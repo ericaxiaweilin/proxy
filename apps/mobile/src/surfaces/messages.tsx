@@ -1,7 +1,7 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
@@ -165,15 +165,13 @@ export function MessagesSurface({
           <View style={styles.topbar}>
             <Pressable onPress={() => setSubView("contacts")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
             <View style={styles.centerTitle}><Text style={styles.centerMain}>联系人</Text></View>
-            <Pressable style={styles.icon}><Text style={styles.ellipsis}>⋯</Text></Pressable>
+            <View style={styles.icon} />
           </View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
           <View style={styles.personHero}><View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View><Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>@{personName.toLowerCase()}.ng · 在线</Text></View>
           <View style={styles.personActions}>
             <Pressable onPress={() => onOpenConversation(personName)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
-            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="infoCircle" size={18} /></View><Text style={styles.personActionText}>资料</Text></Pressable>
-            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
-            <Pressable style={styles.personAction}><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>⋯</Text></View><Text style={styles.personActionText}>更多</Text></Pressable>
+            <Pressable onPress={() => void Share.share({ message: `Proxy 联系人：${personName}（本地通讯录）` })} style={styles.personAction} accessibilityLabel="分享联系人"><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
           </View>
           <View style={{ paddingHorizontal: 16, gap: 8 }}>
             <View style={styles.aliasCard}><Text style={styles.aliasLabel}>别名</Text><Text style={styles.aliasValue}>{personName} · 西湖</Text></View>
@@ -250,9 +248,6 @@ export function MessagesSurface({
               <Text style={[styles.folderChipText, folder === f && styles.folderChipTextActive]}>{FOLDER_LABEL[f]}</Text>
             </Pressable>
           ))}
-          <Pressable accessibilityLabel="添加文件夹" style={styles.folderAdd}>
-            <Text style={styles.folderAddText}>＋</Text>
-          </Pressable>
         </ScrollView>
       </View>
 
@@ -400,8 +395,6 @@ const styles = StyleSheet.create({
   folderChipActive: { backgroundColor: "#11110f", borderColor: "#11110f" },
   folderChipText: { fontSize: 11, fontWeight: "600", color: "#77736c" },
   folderChipTextActive: { color: "#fff" },
-  folderAdd: { width: 32, height: 29, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  folderAddText: { fontSize: 15, color: "#777" },
   inlineSearch: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: "#fffefa", borderBottomWidth: 1, borderBottomColor: "#e8e3da" },
   inlineSearchInput: { flex: 1, height: 34, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#fff", paddingHorizontal: 11, fontSize: 13 },
   inlineClear: { paddingHorizontal: 8, paddingVertical: 6 },
@@ -442,7 +435,6 @@ const styles = StyleSheet.create({
   centerMain: { fontSize: 14, fontWeight: "700", color: "#11110f" },
   centerSub: { fontSize: 11, color: "#8d8982", marginTop: 2 },
   backText: { fontSize: 22, color: "#11110f", textAlign: "center", width: 38 },
-  ellipsis: { fontSize: 18, color: "#88847c", width: 38, textAlign: "center" },
   requestIntro: { paddingHorizontal: 16, paddingTop: 15, paddingBottom: 8, fontSize: 11.5, lineHeight: 18, color: "#77736c" },
   mackeBanner: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 14, padding: 11, backgroundColor: "#fff9eb", flexDirection: "row", gap: 9, alignItems: "flex-start" },
   mackeIcon: { fontSize: 18 },

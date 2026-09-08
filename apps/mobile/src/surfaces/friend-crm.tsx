@@ -1,7 +1,7 @@
 // 个人轻 CRM — 好友不是消息列表的子集，而是独立的个人关系资产。
 // 接线 /Users/thanhhuyennguyen/Downloads/proxy_add_friend_detail.html 的 5 种加好友 + 轻 CRM 详情
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { FriendView, RelationshipClient } from "../relationship-client";
 import { color, shadows } from "../theme";
@@ -24,6 +24,9 @@ interface CrmFriend {
   lastInteraction: string;
   status: FriendStatus;
   createdAt: string;
+  // 服务端好友才有：RelationshipClient.listMyFriendships 的 userId。
+  // 有它才能调 blockFriend；演示数据没有，危险操作保持禁用。
+  userId?: string | undefined;
 }
 
 const CRM_FRIENDS: CrmFriend[] = [
@@ -51,21 +54,19 @@ const PENDING_REQUESTS: Array<{ name: string; initial: string; source: string; t
   { name: "Duc Tran", initial: "DT", source: "共同好友 3 人 · 昨天", time: "昨天" },
 ];
 
-const CONTACT_MATCHES: Array<{ name: string; initial: string; sub: string }> = [
-  { name: "Minh Nguyen", initial: "MN", sub: "通讯录 · 共同好友 2 人" },
-  { name: "Lan Anh", initial: "LA", sub: "通讯录 · 同城" },
-  { name: "Hoang Tran", initial: "HT", sub: "通讯录 · 已使用 Proxy" },
-];
-
-const SOCIAL_MATCHES: Array<{ name: string; initial: string; sub: string }> = [
-  { name: "Quynh N.", initial: "QN", sub: "Instagram · @quynh.daily" },
-  { name: "An Tran", initial: "AT", sub: "Instagram · @an.tran" },
-];
-
 type AddFriendSheet = "SCAN" | "INVITE" | "CONTACTS" | "SOCIAL" | "SEARCH" | "REQUESTS" | undefined;
 type CrmView = "LIST" | "ADD_FRIEND" | "DETAIL";
 
-export function FriendCrmSurface({ relationship, onOpenConversation, onBack, initialView = "LIST" }: { relationship?: RelationshipClient | undefined; onOpenConversation: (author: string) => void; onBack: () => void; initialView?: CrmView }): React.JSX.Element {
+export function FriendCrmSurface({ relationship, onOpenConversation, onBack, initialView = "LIST", viewer, onOpenVouchers }: {
+  relationship?: RelationshipClient | undefined;
+  onOpenConversation: (author: string) => void;
+  onBack: () => void;
+  initialView?: CrmView;
+  // 本人身份（调用方传 profileDraft）：邀请名片不再编造他人的名字和 ID。
+  viewer?: { name: string; handle: string } | undefined;
+  // 跳券表面：推荐动作“发礼券”走真实券流程，不再弹演示 toast。
+  onOpenVouchers?: (() => void) | undefined;
+}): React.JSX.Element {
   const [view, setView] = useState<CrmView>(initialView);
   const [sheet, setSheet] = useState<AddFriendSheet>();
   const [search, setSearch] = useState("");
@@ -73,7 +74,8 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [contactsAllowed, setContactsAllowed] = useState(false);
   const [proxySearch, setProxySearch] = useState("");
   const [proxySearchDone, setProxySearchDone] = useState(false);
-  const [sentIds, setSentIds] = useState<Record<string, boolean>>({});
+  // 社媒账号自动保存开关：本地展示态，点按真实翻转（以前只弹 toast，开关不动）。
+  const [autoSaveSocial, setAutoSaveSocial] = useState(true);
   // R18.x FRIEND-001: replace the hardcoded PENDING_REQUESTS
   // and CRM_FRIENDS with server-fetched lists. The mock
   // constants are kept as a fallback when the
@@ -114,6 +116,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       const name = f.displayName || f.userId;
       return {
         id: f.userId,
+        userId: f.userId,
         name,
         initial: name.slice(0, 1).toUpperCase() || "?",
         proxyId: f.userId,
@@ -156,6 +159,20 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
     setTimeout(() => setToast(""), 1700);
   }
 
+  // 好友请求失败说人话：英文技术错不上屏，会话类问题提示登录。
+  function requestErrorMessage(error: unknown, fallback: string): string {
+    const msg = error instanceof Error ? error.message : "";
+    if (/principal|session|signed|sign in|auth|401|403/i.test(msg)) return "请先登录后再操作。";
+    if (!msg || /[a-z_]+\.[a-z_]+/i.test(msg)) return fallback;
+    return msg;
+  }
+
+  // 发礼券走真实券流程；调用方没接券表面时诚实说明，不伪造“已发送”。
+  function sendVoucher(): void {
+    if (onOpenVouchers) onOpenVouchers();
+    else showToast("礼券请到“券”页面创建，这里不代发。");
+  }
+
   function openDetail(friend: CrmFriend): void {
     setSelected(friend);
     setView("DETAIL");
@@ -163,7 +180,17 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
 
   // LIST => 轻 CRM 列表（不是消息列表）
   if (view === "DETAIL" && selected) {
-    return <FriendDetail friend={selected} onBack={() => setView("LIST")} onOpenConversation={onOpenConversation} showToast={showToast} toast={toast} />;
+    return (
+      <FriendDetail
+        friend={selected}
+        relationship={relationship}
+        onBack={() => { setSelected(undefined); setView("LIST"); void reload(); }}
+        onOpenConversation={onOpenConversation}
+        onOpenVouchers={onOpenVouchers}
+        showToast={showToast}
+        toast={toast}
+      />
+    );
   }
 
   if (view === "ADD_FRIEND") {
@@ -193,58 +220,46 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         <View style={styles.privacy}><View style={styles.privacyIcon}><Text style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text style={styles.privacyStrong}>关系不会自动导入</Text><Text style={styles.privacyP}>通讯录或外部社媒只用于发现“可能认识”的人。成为 Proxy 好友前，仍需要发送好友请求并由对方确认。</Text></View></View>
 
         {/* Sheets */}
-        <CrmSheet open={sheet === "SCAN"} onClose={() => setSheet(undefined)} title="扫码添加好友" sub="将对方的 Proxy Personal QR 放入框内。识别后仍需发送好友请求。">
-          <View style={styles.scanner}><View style={styles.scanFrame} /><Text style={styles.scannerNote}>对准二维码即可识别</Text></View>
-          <View style={styles.actions}><Pressable style={styles.btn}><Text style={styles.btnText}>从相册选择</Text></Pressable><Pressable onPress={() => { setSheet("SEARCH"); setProxySearch("PX-937201"); setProxySearchDone(true); }} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>模拟识别</Text></Pressable></View>
+        <CrmSheet open={sheet === "SCAN"} onClose={() => setSheet(undefined)} title="扫码添加好友" sub="扫码识别尚未接入。可以用搜索或邀请链接添加，不伪造识别结果。">
+          <View style={styles.scanner}><View style={styles.scanFrame} /><Text style={styles.scannerNote}>扫码暂不可用</Text></View>
+          <View style={styles.actions}><Pressable onPress={() => setSheet("SEARCH")} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>去搜索添加</Text></Pressable></View>
         </CrmSheet>
 
-        <CrmSheet open={sheet === "INVITE"} onClose={() => setSheet(undefined)} title="邀请好友" sub="分享你的邀请链接或个人二维码。对方注册/打开 Proxy 后可向你发送好友请求。">
-          <View style={styles.qrbox}><View style={styles.fakeQr}><Text style={styles.fakeQrP}>P</Text></View></View>
-          <View style={styles.qrName}><Text style={styles.qrNameStrong}>Huyen Nguyen</Text><Text style={styles.qrNameSub}>Proxy ID · PX-827491</Text></View>
-          <View style={styles.inviteLink}><Text style={styles.inviteLinkText}>proxy.app/invite/PX-827491</Text><Pressable onPress={() => showToast("邀请链接已复制")} style={styles.copyBtn}><Text style={styles.copyBtnText}>复制</Text></Pressable></View>
-          <View style={styles.actions}><Pressable style={styles.btn}><Text style={styles.btnText}>保存二维码</Text></Pressable><Pressable style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable></View>
+        <CrmSheet open={sheet === "INVITE"} onClose={() => setSheet(undefined)} title="邀请好友" sub="分享你的邀请链接。对方注册/打开 Proxy 后可向你发送好友请求。">
+          {viewer ? (
+            <>
+              <View style={styles.qrName}><Text style={styles.qrNameStrong}>{viewer.name}</Text><Text style={styles.qrNameSub}>Proxy ID · {viewer.handle}</Text></View>
+              <View style={styles.inviteLink}><Text style={styles.inviteLinkText}>proxy.app/invite/{viewer.handle}</Text></View>
+              <View style={styles.actions}><Pressable onPress={() => void Share.share({ message: `加我 Proxy 好友：proxy.app/invite/${viewer.handle}` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable></View>
+            </>
+          ) : (
+            <View style={styles.qrName}><Text style={styles.qrNameSub}>登录后显示你的邀请名片</Text></View>
+          )}
         </CrmSheet>
 
         <CrmSheet open={sheet === "CONTACTS"} onClose={() => setSheet(undefined)} title="通讯录匹配" sub="Proxy 不会自动添加你的通讯录联系人。授权后只显示可能已经使用 Proxy 的人。">
           {!contactsAllowed ? (
             <View style={styles.permission}><View style={styles.permissionIcon}><ProxyIcon color={color.proxyPurple} name="user" size={24} /></View><Text style={styles.permissionStrong}>允许访问通讯录</Text><Text style={styles.permissionP}>只用于匹配可能认识的人，不会将你的完整通讯录公开给其他用户。</Text><Pressable onPress={() => setContactsAllowed(true)} style={[styles.btn, styles.btnPrimary, { marginTop: 12 }]}><Text style={styles.btnPrimaryText}>允许并查找</Text></Pressable></View>
           ) : (
-            <View>
-              <View style={styles.sectionHead}><Text style={styles.sectionTitle}>可能认识的人</Text><Text style={styles.sectionNote}>{CONTACT_MATCHES.length} 人</Text></View>
-              {CONTACT_MATCHES.map((p) => (
-                <View key={p.name} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{p.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{p.name}</Text><Text style={styles.personSub}>{p.sub}</Text></View><Pressable onPress={() => { setSentIds((m) => ({ ...m, [p.name]: true })); showToast("好友请求已发送"); }} style={[styles.addBtn, sentIds[p.name] && styles.addBtnSent]}><Text style={[styles.addBtnText, sentIds[p.name] && styles.addBtnTextSent]}>{sentIds[p.name] ? "已发送" : "添加"}</Text></Pressable></View>
-              ))}
-            </View>
+            <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>通讯录匹配尚未接入服务端，暂无可添加的人，不展示演示账号。</Text></View>
           )}
         </CrmSheet>
 
-        <CrmSheet open={sheet === "SOCIAL"} onClose={() => setSheet(undefined)} title="从社媒发现好友" sub="选择你愿意授权的平台。Proxy 只返回可能认识的人，不会自动导入社交关系。">
-          {[
-            ["TK", "TikTok", "查找可能认识的 Proxy 用户"],
-            ["IG", "Instagram", "查找可能认识的 Proxy 用户"],
-            ["FB", "Facebook", "查找可能认识的 Proxy 用户"],
-            ["Z", "Zalo", "用于越南本地好友发现"],
-          ].map(([icon, name]) => (
-            <View key={name} style={styles.socialOption}><View style={styles.socialIcon}><Text style={styles.socialIconText}>{icon}</Text></View><View style={styles.socialCopy}><Text style={styles.socialName}>{name}</Text><Text style={styles.socialSub}>{(icon === "Z" ? "用于越南本地好友发现" : "查找可能认识的 Proxy 用户")}</Text></View><Pressable style={styles.connectBtn}><Text style={styles.connectText}>关联</Text></Pressable></View>
-          ))}
-          <View style={[styles.sectionHead, { marginTop: 16 }]}><Text style={styles.sectionTitle}>Instagram 匹配</Text><Text style={styles.sectionNote}>{SOCIAL_MATCHES.length} 人</Text></View>
-          {SOCIAL_MATCHES.map((p) => (
-            <View key={p.name} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{p.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{p.name}</Text><Text style={styles.personSub}>{p.sub}</Text></View><Pressable onPress={() => { setSentIds((m) => ({ ...m, [p.name]: true })); showToast("好友请求已发送"); }} style={[styles.addBtn, sentIds[p.name] && styles.addBtnSent]}><Text style={[styles.addBtnText, sentIds[p.name] && styles.addBtnTextSent]}>{sentIds[p.name] ? "已发送" : "添加"}</Text></Pressable></View>
-          ))}
+        <CrmSheet open={sheet === "SOCIAL"} onClose={() => setSheet(undefined)} title="从社媒发现好友" sub="社媒账号关联尚未接入。Proxy 不会自动导入社交关系，成为好友仍需对方确认。">
+          <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>TikTok / Instagram / Facebook / Zalo 关联尚未接入，暂无可匹配的人。</Text></View>
         </CrmSheet>
 
-        <CrmSheet open={sheet === "SEARCH"} onClose={() => setSheet(undefined)} title="搜索 Proxy" sub="支持昵称、Proxy ID 或手机号。手机号只在对方允许被手机号搜索时可找到。">
-          <View style={styles.searchLine}><TextInput value={proxySearch} onChangeText={setProxySearch} placeholder="昵称 / Proxy ID / 手机号" placeholderTextColor={color.muted} style={styles.searchInput} /><Pressable onPress={() => { if (!proxySearch.trim()) { showToast("请输入搜索信息"); return; } setProxySearchDone(true); }} style={styles.searchBtn}><Text style={styles.searchBtnText}>搜索</Text></Pressable></View>
-          {!proxySearchDone ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>输入信息开始搜索</Text></View> : <View>{[{ name: "Huyen Le", initial: "HL", sub: "Proxy ID · PX-482167 · Hanoi" }, { name: "Huy Nguyen", initial: "HN", sub: "共同好友 1 人 · Ho Chi Minh City" }].map((p) => (
-            <View key={p.name} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{p.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{p.name}</Text><Text style={styles.personSub}>{p.sub}</Text></View><Pressable onPress={() => { setSentIds((m) => ({ ...m, [p.name]: true })); showToast("好友请求已发送"); }} style={[styles.addBtn, sentIds[p.name] && styles.addBtnSent]}><Text style={[styles.addBtnText, sentIds[p.name] && styles.addBtnTextSent]}>{sentIds[p.name] ? "已发送" : "添加"}</Text></Pressable></View>
-          ))}</View>}
+        <CrmSheet open={sheet === "SEARCH"} onClose={() => setSheet(undefined)} title="搜索 Proxy" sub="按昵称、Proxy ID 搜索尚未接入服务端。不展示演示账号，请用邀请链接添加。">
+          <View style={styles.searchLine}><TextInput value={proxySearch} onChangeText={(v) => { setProxySearch(v); setProxySearchDone(false); }} placeholder="昵称 / Proxy ID / 手机号" placeholderTextColor={color.muted} style={styles.searchInput} /><Pressable onPress={() => { if (!proxySearch.trim()) { showToast("请输入搜索信息"); return; } setProxySearchDone(true); }} style={styles.searchBtn}><Text style={styles.searchBtnText}>搜索</Text></Pressable></View>
+          {!proxySearchDone ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>输入信息开始搜索</Text></View> : <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>搜索尚未接入服务端，没有返回结果。</Text></View>}
         </CrmSheet>
 
         <CrmSheet open={sheet === "REQUESTS"} onClose={() => setSheet(undefined)} title="好友请求" sub="只有你接受后，双方才会成为 Proxy 好友。">
           {requests.map((r) => (
-            <View key={`${r.userId ?? r.name}`} style={styles.requestRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{r.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{r.name}</Text><Text style={styles.personSub}>{r.source} · {r.time}</Text><View style={styles.requestActions}><Pressable disabled={!r.userId || !relationship} onPress={async () => { if (!r.userId || !relationship) return; try { await relationship.acceptFriendRequest(r.userId); showToast("已成为好友"); void reload(); } catch (error) { showToast(error instanceof Error ? error.message : "接受失败"); } }} style={[styles.btn, styles.btnPrimary, { flex: 1 }]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable disabled={!r.userId || !relationship} onPress={async () => { if (!r.userId || !relationship) return; try { await relationship.ignoreFriendRequest(r.userId); showToast("已忽略请求"); void reload(); } catch (error) { showToast(error instanceof Error ? error.message : "忽略失败"); } }} style={[styles.btn, { flex: 1 }]}><Text style={styles.btnText}>忽略</Text></Pressable></View></View></View>
+            <View key={`${r.userId ?? r.name}`} style={styles.requestRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{r.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{r.name}</Text><Text style={styles.personSub}>{r.source} · {r.time}</Text><View style={styles.requestActions}><Pressable disabled={!r.userId || !relationship} onPress={async () => { if (!r.userId || !relationship) return; try { await relationship.acceptFriendRequest(r.userId); showToast("已成为好友"); void reload(); } catch (error) { showToast(requestErrorMessage(error, "接受失败，请稍后重试。")); } }} style={[styles.btn, styles.btnPrimary, { flex: 1 }]}><Text style={styles.btnPrimaryText}>接受</Text></Pressable><Pressable disabled={!r.userId || !relationship} onPress={async () => { if (!r.userId || !relationship) return; try { await relationship.ignoreFriendRequest(r.userId); showToast("已忽略请求"); void reload(); } catch (error) { showToast(requestErrorMessage(error, "忽略失败，请稍后重试。")); } }} style={[styles.btn, { flex: 1 }]}><Text style={styles.btnText}>忽略</Text></Pressable></View></View></View>
           ))}
           {!requests.length ? <Text style={styles.resultEmptyText}>暂无待处理请求</Text> : null}
+          {requests.length > 0 && !requests.some((r) => r.userId) ? <Text style={styles.resultEmptyText}>离线演示数据：登录后显示真实请求，接受/忽略才会生效。</Text> : null}
         </CrmSheet>
 
         {toast ? <View style={styles.toast}><Text style={styles.toastText}>{toast}</Text></View> : null}
@@ -253,17 +268,20 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   }
 
   // 默认 LIST 视图：轻 CRM 关系图 — 参考原型“好友关系 关系状态、互动与下一步动作”
+  // 服务端好友拉到后，列表/计数走服务端真相，不再只展示演示数据。
+  const serverMode = projectedServerFriends.length > 0;
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <Pressable onPress={onBack} style={styles.backRow}><Text style={styles.backText}>‹ 返回我的</Text></Pressable>
       <Text style={styles.title}>好友关系</Text>
       <Text style={styles.sub}>关系状态、互动与下一步动作</Text>
+      {friendsError ? <Text style={styles.loadError}>好友列表加载失败（{friendsError}），当前显示本地数据。</Text> : null}
 
       <View style={styles.metricGrid}>
-        <View style={styles.metricCard}><Text style={styles.metricValue}>{ADV_CRM_FRIENDS.length}</Text><Text style={styles.metricLabel}>好友关系</Text></View>
-        <View style={[styles.metricCard, styles.metricCardActive]}><Text style={styles.metricValue}>{ADV_CRM_FRIENDS.filter((f) => f.crmStatus === "WARM").length}</Text><Text style={styles.metricLabel}>暖关系</Text></View>
-        <View style={styles.metricCard}><Text style={styles.metricValue}>{ADV_CRM_FRIENDS.filter((f) => f.crmStatus === "FOLLOW").length}</Text><Text style={styles.metricLabel}>待跟进</Text></View>
-        <View style={styles.metricCard}><Text style={styles.metricValue}>{ADV_CRM_FRIENDS.filter((f) => f.crmStatus === "MET").length}</Text><Text style={styles.metricLabel}>已见面</Text></View>
+        <View style={styles.metricCard}><Text style={styles.metricValue}>{serverMode ? visible.length : ADV_CRM_FRIENDS.length}</Text><Text style={styles.metricLabel}>好友关系</Text></View>
+        <View style={[styles.metricCard, styles.metricCardActive]}><Text style={styles.metricValue}>{serverMode ? "—" : ADV_CRM_FRIENDS.filter((f) => f.crmStatus === "WARM").length}</Text><Text style={styles.metricLabel}>暖关系</Text></View>
+        <View style={styles.metricCard}><Text style={styles.metricValue}>{serverMode ? "—" : ADV_CRM_FRIENDS.filter((f) => f.crmStatus === "FOLLOW").length}</Text><Text style={styles.metricLabel}>待跟进</Text></View>
+        <View style={styles.metricCard}><Text style={styles.metricValue}>{serverMode ? "—" : ADV_CRM_FRIENDS.filter((f) => f.crmStatus === "MET").length}</Text><Text style={styles.metricLabel}>已见面</Text></View>
       </View>
 
       <View style={styles.insightCard}>
@@ -276,14 +294,14 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
           <View style={styles.insightRow}><Text style={styles.insightRowLabel}>Relation → Voucher</Text><Text style={styles.insightRowDots}>•••</Text></View>
         </View>
         <Text style={styles.insightFoot}>Advanced insights by subscription / Creator status</Text>
-        <Pressable onPress={() => showToast("原型查看（演示）")} style={styles.insightBtn}><Text style={styles.insightBtnText}>View Prototype</Text></Pressable>
       </View>
 
+      {serverMode ? null : (
       <View style={styles.recommendCard}>
         <View style={styles.recommendHead}><Text style={styles.recommendTitle}>推荐动作</Text><Text style={styles.recommendSub}>今天最值得先处理的关系</Text></View>
         <View style={styles.recommendPriority}><View style={styles.priorityDot} /><Text style={styles.priorityText}>高优先级 · {ADV_CRM_FRIENDS[0]?.name ?? "Mai"} · 发咖啡券</Text></View>
         <Text style={styles.recommendDesc}>最近已回复，且过去7天有持续互动，适合低成本转线下。</Text>
-        <View style={styles.recommendActions}><Pressable onPress={() => showToast("查看详情")} style={styles.recommendBtn}><Text style={styles.recommendBtnText}>查看</Text></Pressable><Pressable onPress={() => showToast("咖啡券已发送（演示）")} style={[styles.recommendBtn, styles.recommendBtnPrimary]}><Text style={styles.recommendBtnPrimaryText}>发礼券</Text></Pressable><Pressable onPress={() => onOpenConversation(ADV_CRM_FRIENDS[0]?.name ?? "Mai")} style={styles.recommendBtn}><Text style={styles.recommendBtnText}>发消息</Text></Pressable></View>
+        <View style={styles.recommendActions}><Pressable onPress={() => { const first = ADV_CRM_FRIENDS[0]; if (first) openDetail(first); }} style={styles.recommendBtn} accessibilityLabel="查看推荐对象详情"><Text style={styles.recommendBtnText}>查看</Text></Pressable><Pressable onPress={sendVoucher} style={[styles.recommendBtn, styles.recommendBtnPrimary]} accessibilityLabel="发礼券"><Text style={styles.recommendBtnPrimaryText}>发礼券</Text></Pressable><Pressable onPress={() => onOpenConversation(ADV_CRM_FRIENDS[0]?.name ?? "Mai")} style={styles.recommendBtn}><Text style={styles.recommendBtnText}>发消息</Text></Pressable></View>
         <View style={styles.contextBuilder}><Text style={styles.contextTitle}>语境构建建议</Text><Text style={styles.contextSub}>用户可选，不自动替用户发送</Text><Text style={styles.contextTag}>可选 · 建议风格：自然、轻松、先场景后邀约</Text><Text style={styles.contextDesc}>从咖啡或摄影共同兴趣切入，再自然推进礼券或活动邀请。</Text><View style={styles.contextChips}><View style={styles.contextChipActive}><Text style={styles.contextChipActiveText}>轻松</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>朋友式</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>直接</Text></View><View style={styles.contextChip}><Text style={styles.contextChipText}>商务</Text></View></View></View>
       </View>
 
