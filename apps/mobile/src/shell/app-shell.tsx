@@ -168,7 +168,7 @@ export function AppShell({
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
-  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; initialDraft?: string }>();
+  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: import("react-native").ImageSourcePropType; initialDraft?: string }>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
   const [viewerAccountId, setViewerAccountId] = useState<string>();
@@ -512,9 +512,9 @@ export function AppShell({
               localNet={localNet}
               {...(secureSessionStore ? { secureSessionStore } : {})}
               onBack={() => { setOpenHumanProfile(undefined); if (humanProfileReturnToScene) { setHumanProfileReturnToScene(false); setRealitySceneOpen(true); } }}
-              onMessage={(name) => {
+              onMessage={(name, avatarUri) => {
                 setOpenHumanProfile(undefined);
-                setMessageChat({ author: name });
+                setMessageChat({ author: name, ...(avatarUri ? { avatarSource: { uri: avatarUri } } : {}) });
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
@@ -650,6 +650,7 @@ export function AppShell({
               author={messageChatAuthor}
               {...(messageChat?.conversationId ? { conversationId: messageChat.conversationId } : {})}
               {...(messageChat?.aiAccount ? { aiAccount: messageChat.aiAccount } : {})}
+              {...(messageChat?.avatarSource ? { peerAvatarSource: messageChat.avatarSource } : {})}
               {...(messageChat?.initialDraft ? { initialDraft: messageChat.initialDraft } : {})}
               {...(ensureConversationSession ? { ensureSession: ensureConversationSession } : {})}
               conversationClient={conversation}
@@ -658,7 +659,7 @@ export function AppShell({
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId, aiAccount) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}) } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>

@@ -1,7 +1,7 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppState, Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
@@ -11,13 +11,15 @@ import type { ConversationClient, ConversationInboxItem } from "../conversation-
 import type { PlatformAIAccount } from "../ai-account-client";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { dedupeInboxDialogs } from "../conversation-inbox-model";
+import type { ProfileClient } from "../profile-client";
+import { aiAccountPhoto } from "../ai-persona-presentation";
 
 type HomePanel = "dialogs" | "convos";
 type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: ImageSourcePropType; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
 // R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
@@ -31,8 +33,10 @@ export function MessagesSurface({
   activeIdentityId,
   onSwitchIdentity,
   conversationClient,
+  profileClient,
+  apiBaseUrl,
 }: {
-  onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount) => void;
+  onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: ImageSourcePropType) => void;
   onOpenRequests?: () => void;
   onOpenContacts?: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -42,6 +46,8 @@ export function MessagesSurface({
   activeIdentityId?: string;
   onSwitchIdentity?: (id: string) => void;
   conversationClient?: ConversationClient;
+  profileClient?: ProfileClient;
+  apiBaseUrl?: string;
 }): React.JSX.Element {
   const [panel, setPanel] = useState<HomePanel>("dialogs");
   const [folder, setFolder] = useState<Folder>("all");
@@ -58,13 +64,20 @@ export function MessagesSurface({
   const refreshInbox = useCallback(async (): Promise<void> => {
     if (!conversationClient) return;
     try {
-      const items = await conversationClient.listConversations();
-      setServerDialogs(dedupeInboxDialogs(items).map(toDialog));
+      const items = dedupeInboxDialogs(await conversationClient.listConversations());
+      const enriched = await Promise.all(items.map(async (item) => {
+        if (!profileClient || !item.counterpartyId || item.counterpartySnapshot?.avatarRef || /^ai_account_/.test(item.counterpartyId)) return item;
+        try {
+          const peer = await profileClient.getProfile(item.counterpartyId);
+          return { ...item, counterpartySnapshot: { displayName: peer.name, avatarRef: peer.avatarPath } };
+        } catch { return item; }
+      }));
+      setServerDialogs(enriched.map((item) => toDialog(item, apiBaseUrl)));
       setInboxError(false);
     } catch {
       setInboxError(true);
     }
-  }, [conversationClient]);
+  }, [apiBaseUrl, conversationClient, profileClient]);
 
   useEffect(() => {
     if (!conversationClient) return;
@@ -106,8 +119,8 @@ export function MessagesSurface({
   };
   // 联系人详情带上会话上下文：名字 + 最近消息 + 会话 id，
   // “消息”按钮直达该会话，不断链；在线/username/手机号之前是现编的，已去掉。
-  const [personCtx, setPersonCtx] = useState<{ name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined }>({ name: "" });
-  const openPerson = (contact: { name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined }) => {
+  const [personCtx, setPersonCtx] = useState<{ name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: ImageSourcePropType }>({ name: "" });
+  const openPerson = (contact: { name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: ImageSourcePropType }) => {
     setPersonCtx(contact);
     setPersonName(contact.name);
     setSubView("person");
@@ -144,6 +157,8 @@ export function MessagesSurface({
       preview: d.preview,
       time: d.time,
       conversationId: d.conversationId,
+      ...(d.aiAccount ? { aiAccount: d.aiAccount } : {}),
+      ...(d.avatarSource ? { avatarSource: d.avatarSource } : {}),
     }));
     const filtered = CONTACTS.filter((c) => !contactSearch || `${c.name}${c.preview}`.toLowerCase().includes(contactSearch.toLowerCase()));
     return (
@@ -164,7 +179,7 @@ export function MessagesSurface({
             {filtered.length === 0 ? <Text style={styles.empty}>{serverDialogs === undefined ? "加载中…" : "暂无联系人"}</Text> : null}
             {filtered.map((c) => (
               <Pressable key={`${c.name}-${c.conversationId ?? ""}`} onPress={() => openPerson(c)} style={styles.contactRow}>
-                <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>
+                {c.avatarSource ? <Image source={c.avatarSource} style={styles.avatar} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
                 <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name}</Text><Text style={styles.contactMeta}>{c.preview}</Text><Text style={styles.contactMeta}>{c.time}</Text></View>
                 <Text style={styles.contactAction}>聊天 ›</Text>
               </Pressable>
@@ -186,9 +201,9 @@ export function MessagesSurface({
             <View style={styles.icon} />
           </View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-          <View style={styles.personHero}><View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View><Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
+          <View style={styles.personHero}>{personCtx.avatarSource ? <Image source={personCtx.avatarSource} style={[styles.avatar, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]} /> : <View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View>}<Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
           <View style={styles.personActions}>
-            <Pressable onPress={() => onOpenConversation(personName, personCtx.conversationId)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
+            <Pressable onPress={() => onOpenConversation(personName, personCtx.conversationId, personCtx.aiAccount, personCtx.avatarSource)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
             <Pressable onPress={() => void Share.share({ message: `Proxy 联系人：${personName}（本地通讯录）` })} style={styles.personAction} accessibilityLabel="分享联系人"><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
           </View>
           <View style={{ paddingHorizontal: 16, gap: 8 }}>
@@ -283,11 +298,11 @@ export function MessagesSurface({
               <>
                 <Text style={styles.sectionLabel}>置顶</Text>
                 {filteredPinned.map((d) => (
-                  <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount)} style={styles.dialog}>
-                    <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
+                  <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
+                    {d.avatarSource ? <Image source={d.avatarSource} style={styles.avatar} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                       <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                       {(d as Dialog).online ? <View style={styles.online} /> : null}
-                    </View>
+                    </View>}
                     <View style={styles.dialogMain}>
                       <View style={styles.dialogTop}>
                         <Text style={styles.dialogName} numberOfLines={1}>{d.name}</Text>
@@ -309,10 +324,10 @@ export function MessagesSurface({
               <Text style={styles.empty}>加载中…</Text>
             ) : filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
-                <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount)} style={styles.dialog}>
-                  <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
+                <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
+                  {d.avatarSource ? <Image source={d.avatarSource} style={styles.avatar} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                     <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
-                  </View>
+                  </View>}
                   <View style={styles.dialogMain}>
                     <View style={styles.dialogTop}><Text style={styles.dialogName}>{d.name}</Text></View>
                     <Text style={styles.preview} numberOfLines={1}>{d.preview}</Text>
@@ -363,13 +378,15 @@ function filterByFolder<T extends { folder: Folder; name: string; preview: strin
   });
 }
 
-function toDialog(item: ConversationInboxItem): Dialog {
+function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   const latest = item.latestMessage;
   const snapshotName = item.counterpartySnapshot?.displayName?.trim();
   const aiAccountNumber = item.counterpartyId?.match(/^ai_account_0*(\d+)$/)?.[1];
   const aiAccount = BUNDLED_AI_COMPANIONS.find((account) => account.accountId === item.counterpartyId
     || (aiAccountNumber !== undefined && account.accountId.match(/^ai_account_0*(\d+)$/)?.[1] === aiAccountNumber));
   const name = aiAccount?.displayName || snapshotName || (item.counterpartyId === "proxy_ai" ? "Proxy AI" : item.counterpartyId) || "对话";
+  const avatarRef = item.counterpartySnapshot?.avatarRef?.trim();
+  const avatarSource = aiAccount ? aiAccountPhoto(aiAccount) : avatarRef ? resolveAvatarSource(avatarRef, apiBaseUrl) : undefined;
   const preview = latest
     ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.body?.trim() || "新消息"
     : "暂无消息";
@@ -380,6 +397,7 @@ function toDialog(item: ConversationInboxItem): Dialog {
     id: item.conversation.conversationId,
     conversationId: item.conversation.conversationId,
     ...(aiAccount ? { aiAccount } : {}),
+    ...(avatarSource ? { avatarSource } : {}),
     initial: name.slice(0, 2).toUpperCase(),
     name,
     preview,
@@ -389,6 +407,12 @@ function toDialog(item: ConversationInboxItem): Dialog {
     type: item.conversation.conversationType,
     folder: item.conversation.originType === "ACTIVITY" ? "activity" : item.conversation.originType === "PROFILE" ? "friends" : "all",
   };
+}
+
+function resolveAvatarSource(ref: string, apiBaseUrl?: string): ImageSourcePropType {
+  if (/^(?:https?:|file:)/.test(ref)) return { uri: ref };
+  if (ref.startsWith("/")) return { uri: `${apiBaseUrl ?? ""}${ref}` };
+  return { uri: `${apiBaseUrl ?? ""}/v1/media/thumb/${encodeURIComponent(ref)}` };
 }
 
 const styles = StyleSheet.create({

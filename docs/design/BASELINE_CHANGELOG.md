@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 112 — 2026-09-08
+
+### Conversation avatar identity pipeline
+
+- Inbox snapshots and profile reads now carry human portraits through contacts and
+  conversation navigation into the header and peer-message bubbles.
+- AI conversations keep using their persona portrait across inbox re-entry; gray
+  initials remain only as a fail-closed fallback when an account truly has no avatar.
+
 ## Revision 111 — 2026-09-08
 
 ### One direct-message thread per account pair

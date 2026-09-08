@@ -26,7 +26,7 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
   localNet: LocalNetClient;
   secureSessionStore?: SecureSessionStore | undefined;
   onBack: () => void;
-  onMessage: (name: string) => void;
+  onMessage: (name: string, avatarUri?: string) => void;
 }): React.JSX.Element {
   const [counts, setCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
   const [following, setFollowing] = useState(false);
@@ -122,7 +122,7 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name)} />
+      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
     </ScrollView>
     {viewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={viewer.index} author={target.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setViewer((current) => current ? { ...current, index } : current)} onClose={() => setViewer(undefined)} /> : null}
   </View>;

@@ -102,6 +102,7 @@ export function ConversationSurface({
   mediaClient,
   conversationId: initialConvId,
   aiAccount,
+  peerAvatarSource,
   initialDraft,
   ensureSession,
   onBack
@@ -112,6 +113,7 @@ export function ConversationSurface({
   mediaClient: MediaClient;
   conversationId?: string;
   aiAccount?: PlatformAIAccount;
+  peerAvatarSource?: ImageSourcePropType;
   initialDraft?: string;
   ensureSession?: () => Promise<void>;
   onBack: () => void;
@@ -629,6 +631,7 @@ export function ConversationSurface({
     if (aiAccount) {
       return <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiAccountPhoto(aiAccount)} style={styles.avatarMini} />;
     }
+    if (peerAvatarSource) return <Image accessibilityLabel={`${author}头像`} source={peerAvatarSource} style={styles.avatarMini} />;
     return (
       <View style={styles.avatarFallback}>
         <Text style={styles.avatarFallbackText}>{(message.sender || author || "对").slice(0, 1)}</Text>
@@ -691,8 +694,8 @@ export function ConversationSurface({
           >
             <Text style={[styles.secureBtnText, secureOn && styles.secureBtnTextActive]}>🛡</Text>
           </Pressable>
-          {aiAccount ? (
-            <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiAccountPhoto(aiAccount)} style={styles.topAvatar} />
+          {aiAccount || peerAvatarSource ? (
+            <Image accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} source={aiAccount ? aiAccountPhoto(aiAccount) : peerAvatarSource!} style={styles.topAvatar} />
           ) : (
             <View style={styles.topAvatarFallback}>
               <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
