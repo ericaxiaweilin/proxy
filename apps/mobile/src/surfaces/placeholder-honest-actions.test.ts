@@ -412,13 +412,18 @@ describe("PLACEHOLDER-015 no redundant recent header", () => {
   });
 });
 
-describe("PLACEHOLDER-016 tabs and folders share one row", () => {
+describe("PLACEHOLDER-016 folders live in convo and work", () => {
   const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+  const folders = readFileSync(fileURLToPath(new URL("../components/folder-manager.tsx", import.meta.url)), "utf8");
 
-  it("renders 对话/Convo/folders in a single rail", () => {
-    expect(messages).toContain("tabFolderRow");
-    expect(messages).toContain("tabFolderDivider");
-    expect(messages).not.toContain("styles.homeTabs");
-    expect(messages).not.toContain("styles.folderRowWrap");
+  it("keeps tabs and filter chips separate, folders filter convos", () => {
+    expect(messages).toContain("styles.homeTabs");
+    expect(messages).toContain("styles.folderRowWrap");
+    expect(messages).not.toContain("tabFolderRow");
+    expect(messages).toContain("selectedFolderId");
+    expect(messages).toContain("toggleFolderMember");
+    expect(messages).toContain("proxy-folders");
+    expect(folders).toContain("onSelect");
+    expect(folders).not.toContain("onMove");
   });
 });

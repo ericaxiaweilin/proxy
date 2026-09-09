@@ -8,11 +8,14 @@ export type FolderV1 = { id: string; name: string; dialogIds: string[] };
 export function FolderManager({
   folders,
   onCreate,
-  onMove,
+  selectedId,
+  onSelect,
 }: {
   folders: FolderV1[];
   onCreate: (name: string) => void;
-  onMove: (folderId: string, dialogId: string) => void;
+  // 选中过滤：点 chip 只看该文件夹的会话，再点取消选中回全部。
+  selectedId?: string | null | undefined;
+  onSelect?: ((folderId: string | null) => void) | undefined;
 }): React.JSX.Element {
   const [name, setName] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -20,11 +23,21 @@ export function FolderManager({
     <View style={styles.root}>
       <Text style={styles.title}>文件夹</Text>
       <View style={styles.chips}>
-        {folders.map((f) => (
-          <View key={f.id} style={styles.chip}>
-            <Text style={styles.chipText}>{f.name} · {f.dialogIds.length}</Text>
-          </View>
-        ))}
+        {folders.map((f) => {
+          const active = selectedId === f.id;
+          const selectable = Boolean(onSelect);
+          return (
+            <Pressable
+              key={f.id}
+              disabled={!selectable}
+              onPress={() => onSelect?.(active ? null : f.id)}
+              style={[styles.chip, active && styles.chipActive]}
+              accessibilityLabel={`文件夹${f.name}，${f.dialogIds.length} 个会话`}
+            >
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.name} · {f.dialogIds.length}</Text>
+            </Pressable>
+          );
+        })}
         <Pressable onPress={() => setShowCreate((v) => !v)} style={styles.addChip}>
           <Text style={styles.addText}>＋ 新建</Text>
         </Pressable>
@@ -47,7 +60,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 11, fontWeight: "700", color: "#9b978f" },
   chips: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   chip: { borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#f6f3ee" },
+  chipActive: { backgroundColor: "#11110f", borderColor: "#11110f" },
   chipText: { fontSize: 11, fontWeight: "600", color: "#77736c" },
+  chipTextActive: { color: "#fff" },
   addChip: { borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#fff" },
   addText: { fontSize: 11, fontWeight: "600", color: "#11110f" },
   createRow: { flexDirection: "row", gap: 8, marginTop: 8 },

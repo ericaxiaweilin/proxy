@@ -26,6 +26,36 @@ type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccou
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
 
+// 自建文件夹落盘（新建/移入移出），切模块重进不丢失。
+const foldersDir = new Directory(Paths.document, "proxy-folders");
+const foldersFile = new File(foldersDir, "folders-v1.json");
+function readFolders(): FolderV1[] {
+  try {
+    if (!foldersFile.exists) return [];
+    const raw: unknown = foldersFile.json();
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is FolderV1 =>
+      typeof x === "object" && x !== null &&
+      typeof (x as { id?: unknown }).id === "string" &&
+      typeof (x as { name?: unknown }).name === "string" &&
+      Array.isArray((x as { dialogIds?: unknown }).dialogIds)).map((x) => ({
+      id: x.id as string,
+      name: x.name as string,
+      dialogIds: (x.dialogIds as unknown[]).filter((d): d is string => typeof d === "string"),
+    }));
+  } catch {
+    return [];
+  }
+}
+function writeFolders(folders: FolderV1[]): void {
+  try {
+    foldersDir.create({ idempotent: true, intermediates: true });
+    foldersFile.write(JSON.stringify(folders));
+  } catch {
+    // 持久化失败不打断本次会话内的文件夹操作。
+  }
+}
+
 // 本机隐藏的会话（左滑删除）：服务端没有删会话接口，删除 = 本机可见性，
 // 服务端保留审计（与“清空本机显示”同口径）。落盘持久化，重进/重启不回来。
 const hiddenChatsDir = new Directory(Paths.document, "proxy-hidden-chats");
@@ -155,7 +185,25 @@ export function MessagesSurface({
   const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
   const [personName, setPersonName] = useState("");
   const [contactSearch, setContactSearch] = useState("");
-  const [folders, setFolders] = useState<FolderV1[]>([]);
+  const [folders, setFolders] = useState<FolderV1[]>(() => readFolders());
+  // Convo 文件夹选中：点 chip 只看该文件夹的会话，再点回全部。
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  function persistFolders(next: FolderV1[]): void {
+    setFolders(next);
+    writeFolders(next);
+    // 选中的文件夹被删（目前无删除入口，防御性）则回到全部。
+    if (selectedFolderId && !next.some((f) => f.id === selectedFolderId)) setSelectedFolderId(null);
+  }
+  function createFolder(name: string): void {
+    persistFolders([...folders, { id: `f_${Date.now()}`, name, dialogIds: [] }]);
+  }
+  function toggleFolderMember(folderId: string, dialogId: string): void {
+    persistFolders(folders.map((f) => {
+      if (f.id !== folderId) return f;
+      const has = f.dialogIds.includes(dialogId);
+      return { ...f, dialogIds: has ? f.dialogIds.filter((id) => id !== dialogId) : [...f.dialogIds, dialogId] };
+    }));
+  }
 
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
@@ -372,8 +420,8 @@ export function MessagesSurface({
           {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text style={styles.inlineClearText}>清除</Text></Pressable> : null}
         </View>
 
-        {/* 对话/Convo/文件夹同一横滑行：页签与筛选 chips 并排，免占两行 */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabFolderRow}>
+        {/* 对话/Convo 页签 */}
+        <View style={styles.homeTabs}>
           <Pressable onPress={() => setPanel("dialogs")} style={[styles.homeTab, panel === "dialogs" && styles.homeTabActive]}>
             <Text style={[styles.homeTabText, panel === "dialogs" && styles.homeTabTextActive]}>对话</Text>
             <View style={[styles.countBadge, panel !== "dialogs" && styles.countBadgeMuted]}>
@@ -386,7 +434,12 @@ export function MessagesSurface({
               <Text style={styles.countBadgeText}>{groupDialogs.length}</Text>
             </View>
           </Pressable>
-          <View style={styles.tabFolderDivider} />
+        </View>
+      </View>
+
+      {/* 系统筛选 chips（对话列表用） */}
+      <View style={styles.folderRowWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
           {(Object.keys(FOLDER_LABEL) as Folder[]).map((f) => (
             <Pressable key={f} onPress={() => setFolder(f)} style={[styles.folderChip, folder === f && styles.folderChipActive]}>
               <Text style={[styles.folderChipText, folder === f && styles.folderChipTextActive]}>{FOLDER_LABEL[f]}</Text>
@@ -394,12 +447,6 @@ export function MessagesSurface({
           ))}
         </ScrollView>
       </View>
-
-      <FolderManager
-        folders={folders}
-        onCreate={(name) => setFolders((prev) => [...prev, { id: `f_${Date.now()}`, name, dialogIds: [] }])}
-        onMove={(folderId, dialogId) => setFolders((prev) => prev.map((f) => (f.id === folderId ? { ...f, dialogIds: [...f.dialogIds, dialogId] } : f)))}
-      />
 
       {/* body */}
       <ScrollView style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }}>
@@ -459,25 +506,52 @@ export function MessagesSurface({
         ) : (
           <>
             <Text style={styles.sectionLabel}>关注的 Convo</Text>
-            {groupDialogs.length === 0 ? (
-              <Text style={styles.preview}>还没有群组对话</Text>
-            ) : null}
-            {groupDialogs.map((c) => (
-              <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
-              <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
-                <View style={styles.convoHead}>
-                  <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
-                  <View style={styles.convoCopy}>
-                    <Text style={styles.convoName}>{c.name}</Text>
-                    <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
-                  </View>
-                  {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
-                </View>
-                <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
-                <View style={styles.convoFoot}><Text style={styles.convoFootText}>{c.time}</Text></View>
-              </Pressable>
-              </SwipeableRow>
-            ))}
+            <FolderManager
+              folders={folders}
+              onCreate={createFolder}
+              selectedId={selectedFolderId}
+              onSelect={setSelectedFolderId}
+            />
+            {(() => {
+              const selected = folders.find((f) => f.id === selectedFolderId);
+              const shown = selected ? groupDialogs.filter((c) => selected.dialogIds.includes(c.id)) : groupDialogs;
+              return (
+                <>
+                  {selected && shown.length === 0 ? (
+                    <Text style={styles.preview}>“{selected.name}”还没有会话。在下面卡片点「＋ 文件夹」移入。</Text>
+                  ) : null}
+                  {!selected && groupDialogs.length === 0 ? (
+                    <Text style={styles.preview}>还没有群组对话</Text>
+                  ) : null}
+                  {shown.map((c) => {
+                    const inSelected = selected?.dialogIds.includes(c.id) ?? false;
+                    return (
+                      <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
+                      <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
+                        <View style={styles.convoHead}>
+                          <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
+                          <View style={styles.convoCopy}>
+                            <Text style={styles.convoName}>{c.name}</Text>
+                            <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
+                          </View>
+                          {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
+                        </View>
+                        <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
+                        <View style={styles.convoFoot}>
+                          <Text style={styles.convoFootText}>{c.time}</Text>
+                          {selected ? (
+                            <Pressable onPress={(event) => { event.stopPropagation(); toggleFolderMember(selected.id, c.id); }} accessibilityLabel={inSelected ? `把${c.name}移出${selected.name}` : `把${c.name}加入${selected.name}`}>
+                              <Text style={styles.convoFolderAction}>{inSelected ? "－ 移出" : "＋ 文件夹"}</Text>
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      </Pressable>
+                      </SwipeableRow>
+                    );
+                  })}
+                </>
+              );
+            })()}
           </>
         )}
       </ScrollView>
@@ -543,6 +617,7 @@ const styles = StyleSheet.create({
   bellDot: { position: "absolute", right: 6, top: 6, width: 7, height: 7, borderRadius: 3.5, backgroundColor: "#f2ad29", borderWidth: 1, borderColor: "#fffdf8" },
   searchBox: { height: 38, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#f6f3ee", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 11, marginTop: 5, marginBottom: 13 },
   searchInput: { flex: 1, fontSize: 13.5, color: "#11110f", paddingVertical: 0 },
+  homeTabs: { flexDirection: "row", gap: 25, borderBottomWidth: 1, borderBottomColor: "#e8e3da" },
   homeTab: { height: 42, flexDirection: "row", alignItems: "center", paddingHorizontal: 1, borderBottomWidth: 2, borderBottomColor: "transparent" },
   homeTabActive: { borderBottomColor: "#11110f" },
   homeTabText: { fontSize: 13, fontWeight: "600", color: "#8a867f" },
@@ -550,8 +625,8 @@ const styles = StyleSheet.create({
   countBadge: { minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center", marginLeft: 4 },
   countBadgeMuted: { backgroundColor: "#e8e3da" },
   countBadgeText: { fontSize: 11, fontWeight: "700", color: "#fff" },
-  tabFolderRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 8, alignItems: "center", borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "#fffefa" },
-  tabFolderDivider: { width: 1, height: 20, backgroundColor: "#e8e3da" },
+  folderRowWrap: { borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "#fffefa" },
+  folderRow: { flexDirection: "row", gap: 7, paddingHorizontal: 16, paddingVertical: 10, alignItems: "center" },
   folderChip: { height: 29, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, paddingHorizontal: 11, justifyContent: "center", backgroundColor: "transparent" },
   folderChipActive: { backgroundColor: "#11110f", borderColor: "#11110f" },
   folderChipText: { fontSize: 11, fontWeight: "600", color: "#77736c" },
@@ -590,6 +665,7 @@ const styles = StyleSheet.create({
   convoPreview: { marginTop: 9, fontSize: 12.5, lineHeight: 18, color: "#68645e" },
   convoFoot: { flexDirection: "row", alignItems: "center", marginTop: 9 },
   convoFootText: { flex: 1, fontSize: 11, color: "#99958d" },
+  convoFolderAction: { fontSize: 11, fontWeight: "800", color: "#5B2CB5" },
   convoFootTime: { fontSize: 11, fontWeight: "700", color: "#54514b" },
   topbar: { height: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "rgba(255,253,248,0.98)" },
   centerTitle: { flex: 1, alignItems: "center" },
