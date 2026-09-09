@@ -11,6 +11,7 @@ import { LoginClient, LoginCommandRejectedError } from "./login-client";
 import { LegalDocClient, type LegalDoc, type LegalDocKind } from "./legal-doc";
 import { LegalDocRenderer } from "./legal-doc-render";
 import { formatVietnamesePhoneForDisplay, normalizeVietnamesePhone, vietnamesePhoneReady } from "./vn-phone";
+import { MAX_LOGIN_EMAIL_LENGTH, normalizeLoginEmail } from "./email-identifier";
 import { googleAuthConfigured, type GoogleClientConfig } from "./google-auth-config";
 import { LocalNetClient } from "./localnet-client";
 import { MediaClient } from "./media-client";
@@ -459,13 +460,12 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     setBusy(true);
     setError(undefined);
     const isEmail = authChannel === "EMAIL";
-    let rawEmail = googleEmail.trim().toLowerCase();
-    // 自动补全 gmail.com 后缀（用户只输用户名时）
-    if (isEmail && rawEmail && !rawEmail.includes("@")) rawEmail = `${rawEmail}@gmail.com`;
+    const normalizedEmail = isEmail ? normalizeLoginEmail(googleEmail) : undefined;
+    const rawEmail = normalizedEmail ?? googleEmail.trim().toLowerCase();
     if (isEmail && rawEmail !== googleEmail.trim().toLowerCase()) setGoogleEmail(rawEmail);
     const identifier = isEmail ? rawEmail : normalizeVietnamesePhone(phone);
-    if (isEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
-      setError("请输入有效的 Google 邮箱地址（可只输用户名自动补全 @gmail.com）。");
+    if (isEmail && !normalizedEmail) {
+      setError(`请输入有效邮箱，完整邮箱不能超过 ${MAX_LOGIN_EMAIL_LENGTH} 个字符。`);
       setBusy(false);
     } else {
       if (!isEmail && identifier === "") {
@@ -762,7 +762,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             ) : null}
             {authChannel === "EMAIL" ? (
               <>
-                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整 Gmail（自动补全 @gmail.com）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
+                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" maxLength={MAX_LOGIN_EMAIL_LENGTH} onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整邮箱（最多 50 字符）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
                 <View style={[styles.button, busy || googleEmail.trim().length === 0 ? styles.disabled : null]}>
                   <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
                   <Pressable disabled={busy || googleEmail.trim().length === 0} onPress={() => void requestChallenge()} style={styles.buttonPressable}>

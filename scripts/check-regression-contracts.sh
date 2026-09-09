@@ -30,6 +30,10 @@ require_test "AUTH-OTP-001" "./internal/identity" \
   "TestRequestLoginChallengeDeliversSMSToUpstream" \
   "apps/api-go/internal/identity/otp_delivery_tripwire_test.go" || exit $?
 
+require_test "AUTH-EMAIL-LENGTH-001" "./internal/identity" \
+  "TestPasswordlessEmailLengthBoundaryIsSharedByRegisterAndLogin" \
+  "apps/api-go/internal/identity/service_test.go" || exit $?
+
 # AUTH-SESSION-001: revoked sessions must delete their refresh tokens.
 require_test "AUTH-SESSION-001" "./internal/identity" \
   "TestRevokeSessionDeletesTokens" \

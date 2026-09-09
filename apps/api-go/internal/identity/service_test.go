@@ -146,6 +146,24 @@ func TestPasswordlessEmailCreatesAccountThenSessionWithoutClientAccountIDs(t *te
 	}
 }
 
+func TestPasswordlessEmailLengthBoundaryIsSharedByRegisterAndLogin(t *testing.T) {
+	service := NewWithRepositoryAndClockAndChallengeProvider(NewMemoryRepository(nil), clock.NewFixed(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)), testLoginChallengeProvider{})
+	exactly50 := strings.Repeat("a", 38) + "@example.com"
+	accepted := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": exactly50, "deviceId": "device_50", "platform": "IOS",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if accepted.Outcome != "PENDING" {
+		t.Fatalf("expected 50-character email accepted, got %#v", accepted)
+	}
+	tooLong := strings.Repeat("a", 39) + "@example.com"
+	rejected := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": tooLong, "deviceId": "device_51", "platform": "IOS",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if rejected.Outcome != "REJECTED" || rejected.Error == nil || rejected.Error.ErrorCode != "INVALID_PASSWORDLESS_AUTHENTICATION" {
+		t.Fatalf("expected 51-character email rejected, got %#v", rejected)
+	}
+}
+
 func TestAnonymousSessionIsDurableAndReusesDeviceIdentity(t *testing.T) {
 	service := NewWithRepositoryAndClock(NewMemoryRepository(nil), clock.NewFixed(time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)))
 	anonPayload := map[string]any{"deviceId": "device_guest", "platform": "ANDROID", "dateOfBirth": "1990-01-01", "consents": map[string]any{"terms": true, "privacy": true}, "legalDocVersion": "1.1"}
@@ -384,15 +402,15 @@ func privacyTestService(t *testing.T) *Service {
 
 func privacyEnvelopeForUser(userID, commandType string, payload map[string]any) command.Envelope {
 	return command.Envelope{
-		CommandID:     "test_" + commandType,
-		CommandType:   commandType,
+		CommandID:      "test_" + commandType,
+		CommandType:    commandType,
 		CommandVersion: 1,
-		Actor:         command.Actor{Type: "USER", ID: userID},
-		Principal:     command.Principal{Type: "INDIVIDUAL", ID: userID},
-		Target:        command.Target{Type: "PrivacyRequest", ID: userID},
-		AuthContext:   map[string]any{"clientIp": "203.0.113.7", "userAgent": "vitest"},
-		Payload:       payload,
-		CorrelationID: "test-corr-" + commandType,
+		Actor:          command.Actor{Type: "USER", ID: userID},
+		Principal:      command.Principal{Type: "INDIVIDUAL", ID: userID},
+		Target:         command.Target{Type: "PrivacyRequest", ID: userID},
+		AuthContext:    map[string]any{"clientIp": "203.0.113.7", "userAgent": "vitest"},
+		Payload:        payload,
+		CorrelationID:  "test-corr-" + commandType,
 	}
 }
 

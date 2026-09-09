@@ -1322,7 +1322,11 @@ func newID(prefix string) string {
 func normalizeLoginIdentifier(channel, value string) string {
 	identifier := strings.TrimSpace(value)
 	if channel == "EMAIL" {
-		return strings.ToLower(identifier)
+		identifier = strings.ToLower(identifier)
+		if len(identifier) > 50 || !validEmail(identifier) {
+			return ""
+		}
+		return identifier
 	}
 	// Phone normalization deliberately accepts E.164 only; national-number
 	// parsing belongs to the phone provider / country selector, not the server.
