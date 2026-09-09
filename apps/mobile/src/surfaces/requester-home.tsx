@@ -411,8 +411,8 @@ export function RequesterHome({
     );
   }
 
-  // R36.x STORE-ACTIVITY-001: 店铺场景活动推荐（公开 listActivities，
-  // 免登录）。本店（Three Beans）优先排前，其次按时间。
+  // 活动数据只供四宫格“选活动”使用。完整活动发现和报名归市场活动模块，
+  // Home 不再复制一条活动列表。
   type StoreActivityBrief = { activityId: string; title: string; venueName: string; time: string; joined: number; capacity: number; coverImageUrl: string | undefined; realitySceneId: string | undefined };
   const [storeActivities, setStoreActivities] = useState<StoreActivityBrief[]>([]);
   useEffect(() => {
@@ -939,24 +939,6 @@ export function RequesterHome({
         </>
       ) : null}
 
-      {storeActivities.length > 0 ? (
-        <View>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>店铺场景活动</Text>
-            <Text style={styles.sectionHint}>报名 · 到店 · 复盘</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sceneRail}>
-            {storeActivities.slice(0, 8).map((a) => (
-              <Pressable key={a.activityId} onPress={() => onOpenMarket?.("ACTIVITY")} style={styles.sceneCard} accessibilityLabel={`活动 ${a.title}`}>
-                <Text style={styles.sceneCardName} numberOfLines={1}>{a.title}</Text>
-                <Text style={styles.sceneCardMeta} numberOfLines={1}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
-                <Text style={styles.sceneCardDesc} numberOfLines={2}>{a.joined > 0 ? `${a.joined} 人已参加` : "等你来开场"}{a.capacity > 0 ? ` · 限 ${a.capacity} 人` : ""}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
-
       {/* “继续进行”是状态机投影，不是常驻导航。只有服务端返回真实草稿/
           订单状态时才出现；0、匿名、初始加载和首次失败均不占首页空间。 */}
       {continueItems.length > 0 ? <View>
@@ -1152,11 +1134,6 @@ const styles = StyleSheet.create({
   momentImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 12, height: 120, justifyContent: "center", width: "100%" },
   momentLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
   momentCopy: { color: color.ink, fontSize: 14, fontWeight: "700", lineHeight: 20, marginTop: 10, textAlign: "center" },
-  sceneRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
-  sceneCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 3, padding: 11, width: 208 },
-  sceneCardName: { color: color.ink, fontSize: 14, fontWeight: "900" },
-  sceneCardMeta: { color: color.muted, fontSize: 11, lineHeight: 15 },
-  sceneCardDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
 
   // 基线 .r157Action：white card，icon 块 + 标题/副标题 + 右侧数值。
   actionCard: {

@@ -277,6 +277,13 @@ describe("PLACEHOLDER-006 checklist walk gaps", () => {
     expect(home).not.toContain("重新加载进行中");
   });
 
+  it("keeps activities in the four-grid chooser instead of duplicating a Home list", () => {
+    expect(home).not.toContain(">店铺场景活动<");
+    expect(home).not.toContain("报名 · 到店 · 复盘");
+    expect(home).toContain('chooser === "activity"');
+    expect(home).toContain("storeActivities.map");
+  });
+
   it("activity rows do not nest pressables", () => {
     expect(orders).toContain("查看明细");
     expect(orders).not.toMatch(/<Pressable[^>]*>\s*<Text[^>]*>查看明细[\s\S]{0,2000}<Pressable/);
