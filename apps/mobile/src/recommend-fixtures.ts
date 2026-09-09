@@ -33,6 +33,10 @@ export interface RecommendPerson {
   online: boolean;
   // 共同好友数（0 不显示）
   mutualFriends: number;
+  /** Recommendation read-model fields; move to the server person feed with the rest of this preview fixture. */
+  rating?: number;
+  completedActivities?: number;
+  availabilityText?: string;
 }
 
 const R34_HUMAN_PORTRAITS = [
@@ -47,6 +51,9 @@ function withR34Portraits(people: RecommendPerson[], offset: number): RecommendP
   return people.map((person, index) => ({
     ...person,
     photoUri: R34_HUMAN_PORTRAITS[(index + offset) % R34_HUMAN_PORTRAITS.length]!,
+    rating: Number((4.9 - ((index + offset) % 3) * 0.1).toFixed(1)),
+    completedActivities: 12 + ((index + offset) % 5) * 5,
+    availabilityText: person.online ? (index % 2 === 0 ? "今天 18:00 后可用" : "今天可约") : "查看近期可用时间",
   }));
 }
 

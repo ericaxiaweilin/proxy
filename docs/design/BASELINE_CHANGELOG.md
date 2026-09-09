@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 145 — 2026-09-09
+
+- 保留既有 Home 真人场景浮窗、透明度和好友/主页/消息操作，不重做视觉皮肤。
+- 补齐可用时间、距离、共同好友、评分与活动记录，以及动作 / Scene / 主题关联。
+- “当前可一起去”照片卡只消费服务端 Scene 图片，点击进入对应场景，不向 App 包写入业务照片。
+
 ## Revision 140 — 2026-09-09
 
 - 从新版生活方式资产中采用低风险“城市协助”家族：商务陪同、办事陪同、

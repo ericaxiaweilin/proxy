@@ -86,6 +86,13 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain('accessibilityLabel="发消息"');
     expect(source).toContain("onOpenHumanProfile?.(person)");
     expect(source).toContain("onMessageHuman?.(person)");
+    expect(source).toContain("person.availabilityText");
+    expect(source).toContain("person.rating");
+    expect(source).toContain("person.completedActivities");
+    expect(source).toContain(">当前主题<");
+    expect(source).toContain(">当前可一起去<");
+    expect(source).toContain("previewSceneOptions.map");
+    expect(fixtures).toContain("availabilityText");
   });
 
   it("reuses the approved Scene action logo registry in the compact Home action rail", () => {

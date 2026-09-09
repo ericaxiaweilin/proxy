@@ -292,6 +292,12 @@ export function RequesterHome({
   const previewSceneImage = previewScene?.imageUrl
     ? (/^https?:\/\//i.test(previewScene.imageUrl) ? previewScene.imageUrl : sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${previewScene.imageUrl.replace(/^\//, "")}` : undefined)
     : undefined;
+  const previewSceneOptions = humanScenePreview
+    ? [
+        ...(previewScene ? [previewScene] : []),
+        ...sceneBriefs.filter((scene) => scene.id !== previewScene?.id && scene.imageUrl),
+      ].slice(0, 2)
+    : [];
 
   function applyHomeSearchSuggestion(s: HomeSearchSuggestion): void {
     setSearchQuery("");
@@ -1001,7 +1007,7 @@ export function RequesterHome({
       {humanScenePreview ? <Modal animationType="fade" onRequestClose={() => setHumanScenePreview(undefined)} transparent visible>
         <Pressable accessibilityLabel="关闭人物场景预览" onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBackdrop}>
           <GlassView glassEffectStyle="clear" style={styles.humanSceneGlass}>
-            <View onStartShouldSetResponder={() => true} style={styles.humanSceneContent}>
+            <ScrollView contentContainerStyle={styles.humanSceneContent} onStartShouldSetResponder={() => true} showsVerticalScrollIndicator={false}>
               <View style={styles.humanSceneTop}>
                 <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? "附近 · 现在可见" : "附近推荐"}</Text>
                 <Pressable accessibilityLabel="关闭" onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneClose}><Text style={styles.humanSceneCloseText}>×</Text></Pressable>
@@ -1011,8 +1017,13 @@ export function RequesterHome({
                 <View style={styles.humanScenePersonCopy}>
                   <Text style={styles.humanSceneName}>{humanScenePreview.person.name}</Text>
                   <Text style={styles.humanSceneBio}>{humanScenePreview.person.bio}</Text>
-                  <Text style={styles.humanSceneMeta}>{humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`} · {humanScenePreview.person.mutualFriends > 0 ? `${humanScenePreview.person.mutualFriends} 位共同好友` : "暂无共同好友信息"}</Text>
+                  {humanScenePreview.person.rating !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneRating}>★ {humanScenePreview.person.rating.toFixed(1)} · {humanScenePreview.person.completedActivities} 次活动记录</Text> : null}
                 </View>
+              </View>
+              <View style={styles.humanSceneFacts}>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? "查看可用时间"}</Text></View>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="user" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.mutualFriends > 0 ? `${humanScenePreview.person.mutualFriends} 位共同好友` : "暂无共同好友"}</Text></View>
               </View>
               <Text style={styles.humanSceneSectionTitle}>与当前推荐的关联</Text>
               <View style={styles.humanSceneLinkRow}>
@@ -1022,8 +1033,18 @@ export function RequesterHome({
                   <View style={styles.humanSceneLinkShade} />
                   <Text style={styles.humanSceneLinkLabelLight}>当前 Scene</Text><Text style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? "查看场景"} ›</Text>
                 </Pressable>
+                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前主题</Text><Text style={styles.humanSceneLinkValue}>{recommendFeed.sceneTag}</Text></View>
               </View>
-              <Text style={styles.humanSceneReason}>距离近、当前动作匹配；是否参加或见面仍由双方确认。</Text>
+              {previewSceneOptions.length > 0 ? <>
+                <View style={styles.humanSceneSceneHead}><Text style={styles.humanSceneSectionTitle}>当前可一起去</Text><Text style={styles.humanSceneSceneHint}>场景建议</Text></View>
+                <View style={styles.humanSceneSceneRow}>{previewSceneOptions.map((scene) => {
+                  const uri = /^https?:\/\//i.test(scene.imageUrl) ? scene.imageUrl : sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${scene.imageUrl.replace(/^\//, "")}` : undefined;
+                  return <Pressable accessibilityLabel={`查看${scene.name}`} key={scene.id} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanScene?.(person, scene.id); }} style={styles.humanSceneSceneCard}>
+                    {uri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri }} style={StyleSheet.absoluteFill} transition={0} /> : null}<View style={styles.humanSceneSceneShade} /><Text numberOfLines={1} style={styles.humanSceneSceneName}>{scene.name}</Text><Text numberOfLines={1} style={styles.humanSceneSceneMeta}>{scene.area || scene.best || "附近场景"}</Text>
+                  </Pressable>;
+                })}</View>
+              </> : null}
+              <Text style={styles.humanSceneReason}>时间可配、距离较近，动作与主题匹配；场景只是见面建议，是否参加仍由双方确认。</Text>
               {relationshipMsg ? <Text style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
               <Pressable
                 accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)}
@@ -1035,7 +1056,7 @@ export function RequesterHome({
                 <Pressable accessibilityLabel="查看主页" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneAction}><ProxyIcon color={color.ink} name="storeLines" size={18} /><Text style={styles.humanSceneActionText}>查看主页</Text></Pressable>
                 <Pressable accessibilityLabel="发消息" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneAction}><ProxyIcon color={color.ink} name="chat" size={18} /><Text style={styles.humanSceneActionText}>发消息</Text></Pressable>
               </View>
-            </View>
+            </ScrollView>
           </GlassView>
         </Pressable>
       </Modal> : null}
@@ -1225,7 +1246,7 @@ const styles = StyleSheet.create({
   peopleTitleRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   peopleTitle: { color: color.ink, fontSize: 22, fontWeight: "800", lineHeight: 26 },
   humanSceneBackdrop: { alignItems: "center", backgroundColor: "rgba(8,13,24,0.58)", flex: 1, justifyContent: "center", paddingHorizontal: 18, paddingVertical: 32 },
-  humanSceneGlass: { borderColor: "rgba(255,255,255,0.42)", borderRadius: 30, borderWidth: 1, maxWidth: 520, overflow: "hidden", width: "100%" },
+  humanSceneGlass: { borderColor: "rgba(255,255,255,0.42)", borderRadius: 30, borderWidth: 1, maxHeight: "92%", maxWidth: 520, overflow: "hidden", width: "100%" },
   humanSceneContent: { backgroundColor: "rgba(22,32,48,0.72)", padding: 18 },
   humanSceneTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   humanSceneEyebrow: { color: "#DCE6F7", fontSize: 12, fontWeight: "700" },
@@ -1238,7 +1259,10 @@ const styles = StyleSheet.create({
   humanScenePersonCopy: { flex: 1, minWidth: 0 },
   humanSceneName: { color: color.white, fontSize: 28, fontWeight: "900" },
   humanSceneBio: { color: "#CFDAEA", fontSize: 13, lineHeight: 18, marginTop: 4 },
-  humanSceneMeta: { color: "#FFCE55", fontSize: 12, fontWeight: "800", marginTop: 6 },
+  humanSceneRating: { color: "#FFCE55", fontSize: 12, fontWeight: "800", marginTop: 6 },
+  humanSceneFacts: { flexDirection: "row", gap: 7, marginTop: 14 },
+  humanSceneFact: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 14, borderWidth: 1, flex: 1, gap: 5, justifyContent: "center", minHeight: 62, paddingHorizontal: 6 },
+  humanSceneFactValue: { color: "#DCE6F7", fontSize: 11, fontWeight: "700", textAlign: "center" },
   humanSceneSectionTitle: { color: color.white, fontSize: 14, fontWeight: "900", marginTop: 18 },
   humanSceneLinkRow: { flexDirection: "row", gap: 8, marginTop: 8 },
   humanSceneLinkChip: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.2)", borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 72, padding: 10 },
@@ -1248,6 +1272,13 @@ const styles = StyleSheet.create({
   humanSceneLinkValue: { color: color.white, fontSize: 12, fontWeight: "800", marginTop: 8 },
   humanSceneLinkLabelLight: { color: "#E0E8F4", fontSize: 11 },
   humanSceneLinkValueLight: { color: color.white, fontSize: 12, fontWeight: "900", marginTop: 8 },
+  humanSceneSceneHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 13 },
+  humanSceneSceneHint: { color: "#AAB9CE", fontSize: 11 },
+  humanSceneSceneRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  humanSceneSceneCard: { borderColor: "rgba(255,255,255,0.2)", borderRadius: 15, borderWidth: 1, flex: 1, height: 92, justifyContent: "flex-end", overflow: "hidden", padding: 10 },
+  humanSceneSceneShade: { backgroundColor: "rgba(8,13,24,0.35)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  humanSceneSceneName: { color: color.white, fontSize: 13, fontWeight: "900" },
+  humanSceneSceneMeta: { color: "#E0E8F4", fontSize: 11, marginTop: 2 },
   humanSceneReason: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 14, color: "#DCE6F7", fontSize: 12, lineHeight: 18, marginTop: 12, padding: 11 },
   humanSceneNotice: { color: "#FFCE55", fontSize: 11, marginTop: 8 },
   humanSceneAdd: { alignItems: "center", backgroundColor: "#586CFF", borderRadius: 999, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 12, minHeight: 48 },
