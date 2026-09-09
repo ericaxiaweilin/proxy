@@ -338,3 +338,12 @@ describe("PLACEHOLDER-010 ai add shows pending", () => {
     expect(shell).toContain("relationship={relationship}");
   });
 });
+
+describe("PLACEHOLDER-011 pending add is gray", () => {
+  const profile = readFileSync(fileURLToPath(new URL("./ai-account-profile.tsx", import.meta.url)), "utf8");
+
+  it("renders 添加中 in muted gray, distinct from added violet", () => {
+    expect(profile).toContain("pendingText");
+    expect(profile).toContain('friendState === "OUTGOING" && styles.pendingText');
+  });
+});
