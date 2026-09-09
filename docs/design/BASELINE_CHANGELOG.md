@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 135 — 2026-09-09
+
+- 文件夹改按类型+日期组织（PLACEHOLDER-016/017 修正二）：照片/视频
+  取最近一条消息种类，今天/昨天/更早分组；去掉归档概念与自建文件夹。
+
 ## Revision 134 — 2026-09-09
 
 - 系统筛选只在对话页出现（PLACEHOLDER-017）；文件夹页加归档统计与

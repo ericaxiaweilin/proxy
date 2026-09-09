@@ -422,28 +422,26 @@ describe("PLACEHOLDER-015 no redundant recent header", () => {
 
 describe("PLACEHOLDER-016 folders are a third tab beside dialogs and convos", () => {
   const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
-  const folders = readFileSync(fileURLToPath(new URL("../components/folder-manager.tsx", import.meta.url)), "utf8");
 
-  it("renders 对话/Convo/文件夹 side by side with working folders", () => {
+  it("renders 对话/Convo/文件夹 side by side with type and date organization", () => {
     expect(messages).toContain('setPanel("folders")');
     expect(messages).toContain(">文件夹</Text>");
     expect(messages).toContain("styles.homeTabs");
     expect(messages).toContain("styles.folderRowWrap");
     expect(messages).not.toContain("tabFolderRow");
-    expect(messages).toContain("selectedFolderId");
-    expect(messages).toContain("toggleFolderMember");
-    expect(messages).toContain("proxy-folders");
-    expect(folders).toContain("onSelect");
-    expect(folders).not.toContain("onMove");
+    expect(messages).toContain("FolderKind");
+    expect(messages).toContain("dayBucket");
+    expect(messages).toContain("mediaKind");
+    expect(messages).not.toContain("proxy-folders");
+    expect(messages).not.toContain("toggleFolderMember");
   });
 });
 
-describe("PLACEHOLDER-017 folder scope and summary", () => {
+describe("PLACEHOLDER-017 folder scope without archive talk", () => {
   const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
 
-  it("shows system filters only on dialogs and summarizes folders", () => {
+  it("shows system filters only on dialogs, no 归档 anywhere", () => {
     expect(messages).toContain('panel === "dialogs"');
-    expect(messages).toContain("已归档会话");
-    expect(messages).toContain("去 Convo 整理");
+    expect(messages).not.toContain("归档");
   });
 });

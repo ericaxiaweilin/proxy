@@ -5,7 +5,6 @@ import { Animated, AppState, PanResponder, Pressable, ScrollView, Share, StyleSh
 import { Image } from "expo-image";
 import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
-import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
@@ -21,39 +20,21 @@ type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; timestampMs: number; mediaKind: "IMAGE" | "VIDEO" | "TEXT"; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
 // R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
 
-// 自建文件夹落盘（新建/移入移出），切模块重进不丢失。
-const foldersDir = new Directory(Paths.document, "proxy-folders");
-const foldersFile = new File(foldersDir, "folders-v1.json");
-function readFolders(): FolderV1[] {
-  try {
-    if (!foldersFile.exists) return [];
-    const raw: unknown = foldersFile.json();
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((x): x is FolderV1 =>
-      typeof x === "object" && x !== null &&
-      typeof (x as { id?: unknown }).id === "string" &&
-      typeof (x as { name?: unknown }).name === "string" &&
-      Array.isArray((x as { dialogIds?: unknown }).dialogIds)).map((x) => ({
-      id: x.id as string,
-      name: x.name as string,
-      dialogIds: (x.dialogIds as unknown[]).filter((d): d is string => typeof d === "string"),
-    }));
-  } catch {
-    return [];
-  }
-}
-function writeFolders(folders: FolderV1[]): void {
-  try {
-    foldersDir.create({ idempotent: true, intermediates: true });
-    foldersFile.write(JSON.stringify(folders));
-  } catch {
-    // 持久化失败不打断本次会话内的文件夹操作。
-  }
+// 文件夹页按类型 + 日期组织（照片/视频/日期分组）。
+// 类型取最近一条消息的种类；日期取最后消息时间。
+type FolderKind = "all" | "IMAGE" | "VIDEO";
+function dayBucket(timestampMs: number): "今天" | "昨天" | "更早" {
+  if (!timestampMs) return "更早";
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (timestampMs >= startToday) return "今天";
+  if (timestampMs >= startToday - 86_400_000) return "昨天";
+  return "更早";
 }
 
 // 本机隐藏的会话（左滑删除）：服务端没有删会话接口，删除 = 本机可见性，
@@ -185,25 +166,8 @@ export function MessagesSurface({
   const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
   const [personName, setPersonName] = useState("");
   const [contactSearch, setContactSearch] = useState("");
-  const [folders, setFolders] = useState<FolderV1[]>(() => readFolders());
-  // Convo 文件夹选中：点 chip 只看该文件夹的会话，再点回全部。
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  function persistFolders(next: FolderV1[]): void {
-    setFolders(next);
-    writeFolders(next);
-    // 选中的文件夹被删（目前无删除入口，防御性）则回到全部。
-    if (selectedFolderId && !next.some((f) => f.id === selectedFolderId)) setSelectedFolderId(null);
-  }
-  function createFolder(name: string): void {
-    persistFolders([...folders, { id: `f_${Date.now()}`, name, dialogIds: [] }]);
-  }
-  function toggleFolderMember(folderId: string, dialogId: string): void {
-    persistFolders(folders.map((f) => {
-      if (f.id !== folderId) return f;
-      const has = f.dialogIds.includes(dialogId);
-      return { ...f, dialogIds: has ? f.dialogIds.filter((id) => id !== dialogId) : [...f.dialogIds, dialogId] };
-    }));
-  }
+  // 文件夹页类型筛选：全部/照片/视频（取最近一条消息的种类）。
+  const [folderKind, setFolderKind] = useState<FolderKind>("all");
 
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
@@ -437,7 +401,7 @@ export function MessagesSurface({
           <Pressable onPress={() => setPanel("folders")} style={[styles.homeTab, panel === "folders" && styles.homeTabActive]} accessibilityLabel="文件夹">
             <Text style={[styles.homeTabText, panel === "folders" && styles.homeTabTextActive]}>文件夹</Text>
             <View style={[styles.countBadge, panel !== "folders" && styles.countBadgeMuted]}>
-              <Text style={styles.countBadgeText}>{folders.length}</Text>
+              <Text style={styles.countBadgeText}>{visibleDialogs.length}</Text>
             </View>
           </Pressable>
         </View>
@@ -536,61 +500,46 @@ export function MessagesSurface({
           </>
         ) : (
           <>
-            <FolderManager
-              folders={folders}
-              onCreate={createFolder}
-              selectedId={selectedFolderId}
-              onSelect={setSelectedFolderId}
-            />
+            {/* 类型筛选：照片/视频取最近一条消息的种类；文件暂无协议类型，不设假入口 */}
+            <View style={styles.folderRowWrap}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
+                {([["all", "全部"], ["IMAGE", "照片"], ["VIDEO", "视频"]] as const).map(([id, label]) => (
+                  <Pressable key={id} onPress={() => setFolderKind(id)} style={[styles.folderChip, folderKind === id && styles.folderChipActive]} accessibilityLabel={`只看${label}`}>
+                    <Text style={[styles.folderChipText, folderKind === id && styles.folderChipTextActive]}>{label}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
             {(() => {
-              const filedIds = new Set(folders.flatMap((f) => f.dialogIds));
-              const filedCount = groupDialogs.filter((c) => filedIds.has(c.id)).length;
-              const unfiledCount = groupDialogs.length - filedCount;
-              const selected = folders.find((f) => f.id === selectedFolderId);
-              const shown = selected ? groupDialogs.filter((c) => selected.dialogIds.includes(c.id)) : groupDialogs;
+              const typed = folderKind === "all" ? visibleDialogs : visibleDialogs.filter((c) => c.mediaKind === folderKind);
+              if (typed.length === 0) {
+                return <Text style={styles.empty}>{folderKind === "all" ? "还没有对话" : `还没有${folderKind === "IMAGE" ? "照片" : "视频"}消息`}</Text>;
+              }
+              const buckets: Array<{ title: "今天" | "昨天" | "更早"; items: typeof typed }> = (["今天", "昨天", "更早"] as const)
+                .map((title) => ({ title, items: typed.filter((c) => dayBucket(c.timestampMs) === title) }))
+                .filter((g) => g.items.length > 0);
               return (
                 <>
-                  <Text style={styles.preview}>{folders.length} 个文件夹 · {filedCount} 个已归档会话{unfiledCount > 0 ? ` · ${unfiledCount} 个未归档` : ""}</Text>
-                  {unfiledCount > 0 ? (
-                    <Pressable onPress={() => setPanel("convos")} accessibilityLabel="去Convo整理">
-                      <Text style={styles.inlineClearText}>去 Convo 整理 ›</Text>
-                    </Pressable>
-                  ) : null}
-                  {selected && shown.length === 0 ? (
-                    <Text style={styles.preview}>“{selected.name}”还没有会话。在下面卡片点「＋ 文件夹」移入。</Text>
-                  ) : null}
-                  {!selected && groupDialogs.length === 0 ? (
-                    <Text style={styles.preview}>还没有群组对话</Text>
-                  ) : null}
-                  {!selected && groupDialogs.length > 0 ? (
-                    <Text style={styles.preview}>选一个文件夹，再点卡片把会话移入。</Text>
-                  ) : null}
-                  {shown.map((c) => {
-                    const inSelected = selected?.dialogIds.includes(c.id) ?? false;
-                    return (
-                      <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
-                      <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
-                        <View style={styles.convoHead}>
-                          <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
-                          <View style={styles.convoCopy}>
-                            <Text style={styles.convoName}>{c.name}</Text>
-                            <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
+                  {buckets.map((group) => (
+                    <View key={group.title}>
+                      <Text style={styles.sectionLabel}>{group.title}</Text>
+                      {group.items.map((c) => (
+                        <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
+                        <Pressable onPress={() => onOpenConversation(c.name, c.conversationId, c.aiAccount, c.avatarSource)} style={styles.dialog}>
+                          {c.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:folder:${c.conversationId ?? c.id}`} source={c.avatarSource} style={styles.avatar} transition={0} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.initial}</Text></View>}
+                          <View style={styles.dialogMain}>
+                            <View style={styles.dialogTop}><Text style={styles.dialogName} numberOfLines={1}>{c.name}</Text></View>
+                            <Text style={styles.preview} numberOfLines={1}>{c.preview}</Text>
                           </View>
-                          {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
-                        </View>
-                        <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
-                        <View style={styles.convoFoot}>
-                          <Text style={styles.convoFootText}>{c.time}</Text>
-                          {selected ? (
-                            <Pressable onPress={(event) => { event.stopPropagation(); toggleFolderMember(selected.id, c.id); }} accessibilityLabel={inSelected ? `把${c.name}移出${selected.name}` : `把${c.name}加入${selected.name}`}>
-                              <Text style={styles.convoFolderAction}>{inSelected ? "－ 移出" : "＋ 文件夹"}</Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
-                      </Pressable>
-                      </SwipeableRow>
-                    );
-                  })}
+                          <View style={styles.dialogSide}>
+                            <Text style={styles.time}>{c.time}</Text>
+                            {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
+                          </View>
+                        </Pressable>
+                        </SwipeableRow>
+                      ))}
+                    </View>
+                  ))}
                 </>
               );
             })()}
@@ -624,7 +573,9 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     : "暂无消息";
   const timestamp = latest?.createdAt || item.conversation.lastMessageAt;
   const parsed = new Date(timestamp);
-  const time = Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const timestampMs = parsed.getTime();
+  const time = Number.isNaN(timestampMs) ? "" : parsed.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const mediaKind = latest?.messageType === "IMAGE" ? "IMAGE" : latest?.messageType === "VIDEO" ? "VIDEO" : "TEXT";
   return {
     id: item.conversation.conversationId,
     conversationId: item.conversation.conversationId,
@@ -634,6 +585,8 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     name,
     preview,
     time,
+    timestampMs: Number.isFinite(timestampMs) ? timestampMs : 0,
+    mediaKind,
     badge: item.conversation.originType,
     // R15.74: 透出 conversationType 给 Convo tab filter (GROUP/SUPPORT)
     type: item.conversation.conversationType,
@@ -707,7 +660,6 @@ const styles = StyleSheet.create({
   convoPreview: { marginTop: 9, fontSize: 12.5, lineHeight: 18, color: "#68645e" },
   convoFoot: { flexDirection: "row", alignItems: "center", marginTop: 9 },
   convoFootText: { flex: 1, fontSize: 11, color: "#99958d" },
-  convoFolderAction: { fontSize: 11, fontWeight: "800", color: "#5B2CB5" },
   convoFootTime: { fontSize: 11, fontWeight: "700", color: "#54514b" },
   topbar: { height: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "rgba(255,253,248,0.98)" },
   centerTitle: { flex: 1, alignItems: "center" },
