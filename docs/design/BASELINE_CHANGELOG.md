@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 146 — 2026-09-09
+
+- Home 真人头像进入全屏能力页；添加、主页、发消息提升至人物信息顶部，沿用 AI 主页的操作顺序。
+- 页面核心改为可做事项、可邀请时间、历史活动、信誉评价、语言、主题和适合场景；Linh 补齐胶片 / 老城区 / 日落及河内场景关联。
+- 共同好友属于关系内部信息，不再公开显示，也从首页公开筛选项移除。
+
 ## Revision 145 — 2026-09-09
 
 - 保留既有 Home 真人场景浮窗、透明度和好友/主页/消息操作，不重做视觉皮肤。

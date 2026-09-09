@@ -37,6 +37,12 @@ export interface RecommendPerson {
   rating?: number;
   completedActivities?: number;
   availabilityText?: string;
+  positiveRate?: number;
+  reviewSummary?: string;
+  languages?: string[];
+  capabilities?: string[];
+  themes?: string[];
+  sceneNames?: string[];
 }
 
 const R34_HUMAN_PORTRAITS = [
@@ -54,6 +60,12 @@ function withR34Portraits(people: RecommendPerson[], offset: number): RecommendP
     rating: Number((4.9 - ((index + offset) % 3) * 0.1).toFixed(1)),
     completedActivities: 12 + ((index + offset) % 5) * 5,
     availabilityText: person.online ? (index % 2 === 0 ? "今天 18:00 后可用" : "今天可约") : "查看近期可用时间",
+    positiveRate: 96 - ((index + offset) % 3),
+    reviewSummary: index % 2 === 0 ? "沟通自然，守时，熟悉本地路线" : "响应清楚，场景准备充分",
+    languages: person.tags.some((tag) => tag.text === "会中文") || person.id === "u_linh" ? ["Tiếng Việt", "中文"] : ["Tiếng Việt", "English"],
+    capabilities: person.id === "u_linh" ? ["胶片街拍", "City Walk", "奥黛写真"] : [person.bio.split("/")[0]?.trim() || "城市同行", "本地陪伴"],
+    themes: person.id === "u_linh" ? ["胶片", "老城区", "日落"] : ["日常", "本地生活"],
+    sceneNames: person.id === "u_linh" ? ["河内老城区", "还剑湖", "西湖日落"] : [],
   }));
 }
 
@@ -468,7 +480,6 @@ export interface RecommendFilter {
 
 export const RECOMMEND_FILTER_CHIPS: ReadonlyArray<RecommendFilter> = [
   { id: "near", label: "附近" },
-  { id: "mutual", label: "共同好友" },
   { id: "active", label: "最近活跃" },
   { id: "lang_zh", label: "会中文" },
   { id: "online", label: "在线" }

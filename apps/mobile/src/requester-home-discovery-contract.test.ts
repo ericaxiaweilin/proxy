@@ -93,6 +93,13 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain(">当前可一起去<");
     expect(source).toContain("previewSceneOptions.map");
     expect(fixtures).toContain("availabilityText");
+    expect(source).toContain('style={styles.humanScenePage}');
+    expect(source).toContain('style={styles.humanSceneActionsTop}');
+    expect(source).toContain(">她可以做什么<");
+    expect(source).toContain(">历史信誉与评价<");
+    expect(source).not.toContain("位共同好友");
+    expect(fixtures).not.toContain('{ id: "mutual", label: "共同好友" }');
+    expect(fixtures).toContain('sceneNames: person.id === "u_linh"');
   });
 
   it("reuses the approved Scene action logo registry in the compact Home action rail", () => {

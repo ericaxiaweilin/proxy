@@ -6,7 +6,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
-import { GlassView } from "expo-glass-effect";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { HomeSearchDock } from "../components/home-search-dock";
 import { buildHomeSearchIndex, matchHomeSearchIntent, type HomeSearchSuggestion } from "../home-search-intent";
@@ -252,10 +251,10 @@ export function RequesterHome({
   //   - "附近" 过滤：要求 distanceM < 1000
   // server 端接上后，filter 逻辑移过去；这里只负责本地预览。
   const recommendFeed: RecommendFeed = SCENE_RECOMMEND[recommendMode] ?? SCENE_RECOMMEND[RECOMMEND_MODE_ORDER[0]!]!;
+  const recommendActionLabel = ({ PHOTO: "拍照", COMPANION: "同行", COFFEE_MEAL: "咖啡 / 用餐", ACTIVITY: "活动同行", TRIP: "周边出行", CREATOR: "内容创作", TRANSLATE: "翻译", MEDICAL: "陪诊" } as Record<string, string>)[recommendMode] ?? recommendFeed.title;
   const filteredPeople: ReadonlyArray<RecommendPerson> = recommendFeed.people.filter((p) => {
     if (activeFilters.includes("online") && !p.online) return false;
     if (activeFilters.includes("lang_zh") && !p.tags.some((t) => t.text === "会中文" && t.kind === "lang")) return false;
-    if (activeFilters.includes("mutual") && p.mutualFriends < 1) return false;
     if (activeFilters.includes("active") && !p.tags.some((t) => t.text === "最近活跃" && t.kind === "social")) return false;
     if (activeFilters.includes("near") && p.distanceM >= 1000) return false;
     return true;
@@ -1004,13 +1003,12 @@ export function RequesterHome({
         onCompose={(prompt) => handleExecuteHomeQuery(prompt)}
       />
 
-      {humanScenePreview ? <Modal animationType="fade" onRequestClose={() => setHumanScenePreview(undefined)} transparent visible>
-        <Pressable accessibilityLabel="关闭人物场景预览" onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBackdrop}>
-          <GlassView glassEffectStyle="clear" style={styles.humanSceneGlass}>
-            <ScrollView contentContainerStyle={styles.humanSceneContent} onStartShouldSetResponder={() => true} showsVerticalScrollIndicator={false}>
+      {humanScenePreview ? <Modal animationType="slide" onRequestClose={() => setHumanScenePreview(undefined)} visible>
+        <View style={styles.humanScenePage}>
+          <View style={styles.humanSceneHeader}><Pressable accessibilityLabel="关闭人物能力页" onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text style={styles.humanSceneBackText}>‹ 返回</Text></Pressable><Text style={styles.humanSceneHeaderTitle}>真人主页</Text><View style={styles.humanSceneHeaderSpacer} /></View>
+            <ScrollView contentContainerStyle={styles.humanSceneContent} showsVerticalScrollIndicator={false}>
               <View style={styles.humanSceneTop}>
                 <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? "附近 · 现在可见" : "附近推荐"}</Text>
-                <Pressable accessibilityLabel="关闭" onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneClose}><Text style={styles.humanSceneCloseText}>×</Text></Pressable>
               </View>
               <View style={styles.humanScenePerson}>
                 <View style={styles.humanSceneAvatarRing}>{humanScenePreview.person.photoUri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: humanScenePreview.person.photoUri }} style={styles.humanSceneAvatar} transition={0} /> : <Text style={styles.humanSceneInitials}>{humanScenePreview.person.initials}</Text>}</View>
@@ -1020,21 +1018,31 @@ export function RequesterHome({
                   {humanScenePreview.person.rating !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneRating}>★ {humanScenePreview.person.rating.toFixed(1)} · {humanScenePreview.person.completedActivities} 次活动记录</Text> : null}
                 </View>
               </View>
+              <View style={styles.humanSceneActionsTop}>
+                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyId === humanScenePreview.person.id || relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyId === humanScenePreview.person.id ? "添加中…" : relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" ? "添加中" : relationshipStates.get(humanScenePreview.person.id) === "FRIEND" ? "✓ 已添加" : relationshipStates.get(humanScenePreview.person.id) === "INCOMING" ? "接受添加" : "+ 添加"}</Text></Pressable>
+                <Pressable accessibilityLabel="查看主页" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>主页</Text></Pressable>
+                <Pressable accessibilityLabel="发消息" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>发消息</Text></Pressable>
+              </View>
+              {relationshipMsg ? <Text style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
               <View style={styles.humanSceneFacts}>
                 <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? "查看可用时间"}</Text></View>
                 <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="user" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.mutualFriends > 0 ? `${humanScenePreview.person.mutualFriends} 位共同好友` : "暂无共同好友"}</Text></View>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? `${humanScenePreview.person.completedActivities} 次历史活动` : "暂无公开记录"}</Text></View>
               </View>
+              <Text style={styles.humanSceneSectionTitle}>她可以做什么</Text>
+              <View style={styles.humanScenePills}>{humanScenePreview.person.capabilities?.map((item) => <View key={item} style={styles.humanScenePill}><Text style={styles.humanScenePillText}>{item}</Text></View>)}</View>
               <Text style={styles.humanSceneSectionTitle}>与当前推荐的关联</Text>
               <View style={styles.humanSceneLinkRow}>
-                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前动作</Text><Text style={styles.humanSceneLinkValue}>{recommendFeed.title}</Text></View>
+                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前动作</Text><Text style={styles.humanSceneLinkValue}>{recommendActionLabel}</Text></View>
                 <Pressable accessibilityLabel="查看完整场景" onPress={() => { const current = humanScenePreview; setHumanScenePreview(undefined); onOpenHumanScene?.(current.person, current.sceneId); }} style={styles.humanSceneLinkCard}>
                   {previewSceneImage ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: previewSceneImage }} style={StyleSheet.absoluteFill} transition={0} /> : null}
                   <View style={styles.humanSceneLinkShade} />
-                  <Text style={styles.humanSceneLinkLabelLight}>当前 Scene</Text><Text style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? "查看场景"} ›</Text>
+                  <Text style={styles.humanSceneLinkLabelLight}>当前 Scene</Text><Text style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? humanScenePreview.person.sceneNames?.[0] ?? "查看场景"} ›</Text>
                 </Pressable>
-                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前主题</Text><Text style={styles.humanSceneLinkValue}>{recommendFeed.sceneTag}</Text></View>
+                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前主题</Text><Text style={styles.humanSceneLinkValue}>{humanScenePreview.person.themes?.slice(0, 2).join(" · ") || recommendFeed.sceneTag}</Text></View>
               </View>
+              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>关联主题</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.themes?.join(" · ") || recommendFeed.sceneTag}</Text><Text style={styles.humanSceneDetailTitle}>适合场景</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.sceneNames?.join(" · ") || previewScene?.name || "附近都市场景"}</Text><Text style={styles.humanSceneDetailTitle}>语言</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.languages?.join(" · ") || "以主页资料为准"}</Text></View>
+              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>历史信誉与评价</Text>{humanScenePreview.person.rating !== undefined && humanScenePreview.person.positiveRate !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneTrust}>★ {humanScenePreview.person.rating.toFixed(1)} · 好评 {humanScenePreview.person.positiveRate}% · {humanScenePreview.person.completedActivities} 次活动</Text> : null}<Text style={styles.humanSceneDetailText}>{humanScenePreview.person.reviewSummary ?? "暂无公开评价摘要"}</Text></View>
               {previewSceneOptions.length > 0 ? <>
                 <View style={styles.humanSceneSceneHead}><Text style={styles.humanSceneSectionTitle}>当前可一起去</Text><Text style={styles.humanSceneSceneHint}>场景建议</Text></View>
                 <View style={styles.humanSceneSceneRow}>{previewSceneOptions.map((scene) => {
@@ -1045,20 +1053,8 @@ export function RequesterHome({
                 })}</View>
               </> : null}
               <Text style={styles.humanSceneReason}>时间可配、距离较近，动作与主题匹配；场景只是见面建议，是否参加仍由双方确认。</Text>
-              {relationshipMsg ? <Text style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
-              <Pressable
-                accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)}
-                disabled={relationshipBusyId === humanScenePreview.person.id || relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND"}
-                onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)}
-                style={[styles.humanSceneAdd, (relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}
-              ><ProxyIcon color={color.white} name="user" size={20} /><Text style={styles.humanSceneAddText}>{relationshipBusyId === humanScenePreview.person.id ? "添加中…" : relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" ? "添加中" : relationshipStates.get(humanScenePreview.person.id) === "FRIEND" ? "✓ 已添加" : relationshipStates.get(humanScenePreview.person.id) === "INCOMING" ? "接受添加" : "添加"}</Text></Pressable>
-              <View style={styles.humanSceneActions}>
-                <Pressable accessibilityLabel="查看主页" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneAction}><ProxyIcon color={color.ink} name="storeLines" size={18} /><Text style={styles.humanSceneActionText}>查看主页</Text></Pressable>
-                <Pressable accessibilityLabel="发消息" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneAction}><ProxyIcon color={color.ink} name="chat" size={18} /><Text style={styles.humanSceneActionText}>发消息</Text></Pressable>
-              </View>
             </ScrollView>
-          </GlassView>
-        </Pressable>
+        </View>
       </Modal> : null}
 
       {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)，Modal 模态。
@@ -1245,9 +1241,13 @@ const styles = StyleSheet.create({
   peopleHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginTop: 18, marginBottom: 12 },
   peopleTitleRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   peopleTitle: { color: color.ink, fontSize: 22, fontWeight: "800", lineHeight: 26 },
-  humanSceneBackdrop: { alignItems: "center", backgroundColor: "rgba(8,13,24,0.58)", flex: 1, justifyContent: "center", paddingHorizontal: 18, paddingVertical: 32 },
-  humanSceneGlass: { borderColor: "rgba(255,255,255,0.42)", borderRadius: 30, borderWidth: 1, maxHeight: "92%", maxWidth: 520, overflow: "hidden", width: "100%" },
-  humanSceneContent: { backgroundColor: "rgba(22,32,48,0.72)", padding: 18 },
+  humanScenePage: { backgroundColor: "#162030", flex: 1 },
+  humanSceneHeader: { alignItems: "center", backgroundColor: "#162030", borderBottomColor: "rgba(255,255,255,0.12)", borderBottomWidth: 1, flexDirection: "row", height: 54, paddingHorizontal: 16 },
+  humanSceneBack: { flex: 1 },
+  humanSceneBackText: { color: "#DCE6F7", fontSize: 14, fontWeight: "800" },
+  humanSceneHeaderTitle: { color: color.white, fontSize: 16, fontWeight: "900" },
+  humanSceneHeaderSpacer: { flex: 1 },
+  humanSceneContent: { padding: 18, paddingBottom: 40 },
   humanSceneTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   humanSceneEyebrow: { color: "#DCE6F7", fontSize: 12, fontWeight: "700" },
   humanSceneClose: { alignItems: "center", borderColor: "rgba(255,255,255,0.35)", borderRadius: 21, borderWidth: 1, height: 42, justifyContent: "center", width: 42 },
@@ -1260,9 +1260,17 @@ const styles = StyleSheet.create({
   humanSceneName: { color: color.white, fontSize: 28, fontWeight: "900" },
   humanSceneBio: { color: "#CFDAEA", fontSize: 13, lineHeight: 18, marginTop: 4 },
   humanSceneRating: { color: "#FFCE55", fontSize: 12, fontWeight: "800", marginTop: 6 },
+  humanSceneActionsTop: { flexDirection: "row", gap: 8, marginTop: 16 },
+  humanSceneTopAction: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.24)", borderRadius: 999, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 46 },
+  humanSceneTopActionPrimary: { backgroundColor: "#586CFF", borderColor: "#586CFF" },
+  humanSceneTopActionText: { color: color.white, fontSize: 13, fontWeight: "900" },
+  humanSceneTopActionPrimaryText: { color: color.white, fontSize: 13, fontWeight: "900" },
   humanSceneFacts: { flexDirection: "row", gap: 7, marginTop: 14 },
   humanSceneFact: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 14, borderWidth: 1, flex: 1, gap: 5, justifyContent: "center", minHeight: 62, paddingHorizontal: 6 },
   humanSceneFactValue: { color: "#DCE6F7", fontSize: 11, fontWeight: "700", textAlign: "center" },
+  humanScenePills: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 9 },
+  humanScenePill: { backgroundColor: "rgba(88,108,255,0.2)", borderColor: "rgba(150,203,255,0.45)", borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+  humanScenePillText: { color: color.white, fontSize: 12, fontWeight: "800" },
   humanSceneSectionTitle: { color: color.white, fontSize: 14, fontWeight: "900", marginTop: 18 },
   humanSceneLinkRow: { flexDirection: "row", gap: 8, marginTop: 8 },
   humanSceneLinkChip: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.2)", borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 72, padding: 10 },
@@ -1279,6 +1287,10 @@ const styles = StyleSheet.create({
   humanSceneSceneShade: { backgroundColor: "rgba(8,13,24,0.35)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   humanSceneSceneName: { color: color.white, fontSize: 13, fontWeight: "900" },
   humanSceneSceneMeta: { color: "#E0E8F4", fontSize: 11, marginTop: 2 },
+  humanSceneDetailCard: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 16, borderWidth: 1, marginTop: 12, padding: 13 },
+  humanSceneDetailTitle: { color: "#AAB9CE", fontSize: 11, fontWeight: "700", marginTop: 4 },
+  humanSceneDetailText: { color: color.white, fontSize: 13, lineHeight: 19, marginBottom: 7, marginTop: 4 },
+  humanSceneTrust: { color: "#FFCE55", fontSize: 13, fontWeight: "900", marginTop: 7 },
   humanSceneReason: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 14, color: "#DCE6F7", fontSize: 12, lineHeight: 18, marginTop: 12, padding: 11 },
   humanSceneNotice: { color: "#FFCE55", fontSize: 11, marginTop: 8 },
   humanSceneAdd: { alignItems: "center", backgroundColor: "#586CFF", borderRadius: 999, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 12, minHeight: 48 },
