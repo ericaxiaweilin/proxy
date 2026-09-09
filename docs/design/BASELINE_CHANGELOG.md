@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 136 — 2026-09-09
+
+- 文件夹改微信式媒体浏览器（PLACEHOLDER-016/017 修正三）：扫各会话
+  真实消息体，照片格子+发送人按日期排，可点开放大，视频进会话看。
+
 ## Revision 135 — 2026-09-09
 
 - 文件夹改按类型+日期组织（PLACEHOLDER-016/017 修正二）：照片/视频
