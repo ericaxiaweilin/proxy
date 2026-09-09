@@ -50,6 +50,20 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain(">AI 生成<");
   });
 
+  it("keeps matchmaking above Scene inspiration because Scene is a meeting tool, not inventory", () => {
+    const human = source.indexOf(">真人推荐<");
+    const ai = source.indexOf(">AI 推荐<");
+    const composition = source.indexOf(">为你组合<");
+    const activeWork = source.indexOf(">继续进行<");
+    const sceneInspiration = source.indexOf(">场景灵感<");
+    expect(sceneInspiration).toBeGreaterThan(activeWork);
+    expect(activeWork).toBeGreaterThan(composition);
+    expect(composition).toBeGreaterThan(ai);
+    expect(ai).toBeGreaterThan(human);
+    expect(source).toContain("为见面服务");
+    expect((source.match(/<SceneActivityDiscovery/g) ?? [])).toHaveLength(1);
+  });
+
   it("keeps human discovery as circle-and-name nodes that preserve the real Scene context", () => {
     expect(source).toContain("onPress={() => onOpenHumanScene?.(p, recommendFeed.boundSceneId)}");
     expect(source).not.toContain('testID="human-node-reveal"');

@@ -620,11 +620,6 @@ export function RequesterHome({
       ) : null}
       {/* 点左侧 AI 标识后在 Home 内展开独立对话输入框；默认输入仍只搜索。 */}
       {conversationPanel ?? null}
-      <SceneActivityDiscovery
-        scenes={sceneBriefs}
-        onOpenScene={(sceneId) => onOpenSceneMap?.(sceneId)}
-        onCompose={(prompt) => handleExecuteHomeQuery(prompt)}
-      />
       {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
           用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
           不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
@@ -971,25 +966,6 @@ export function RequesterHome({
         </>
       ) : null}
 
-      {sceneBriefs.length > 0 ? (
-        <View>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>场景</Text>
-            <Text style={styles.sectionHint}>{activeSceneCount > 0 ? `${activeSceneCount} 个正在发生` : `${sceneBriefs.length} 个待探索`}</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sceneWideRail}>
-            {sceneBriefs.slice(0, 6).map((s) => (
-              <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneWideCard} accessibilityLabel={`场景 ${s.name}`}>
-                {s.imageUrl ? <Image source={{ uri: s.imageUrl }} style={styles.sceneWideImage} /> : <View style={styles.sceneWideImageMissing} />}
-                <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
-                <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
-                {s.best ? <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.best}</Text> : null}
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
-
       {storeActivities.length > 0 ? (
         <View>
           <View style={styles.sectionHead}>
@@ -1068,6 +1044,18 @@ export function RequesterHome({
           </Pressable>
         </View>
       ) : null}
+
+      {/* Scene/Activity 是撮合完成后的见面道具，不抢人物发现首屏。
+          放在进行中链路之后，并替代旧的重复“场景”横栏。 */}
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>场景灵感</Text>
+        <Text style={styles.sectionHint}>{activeSceneCount > 0 ? `${activeSceneCount} 个真实场景 · 为见面服务` : "为见面服务"}</Text>
+      </View>
+      <SceneActivityDiscovery
+        scenes={sceneBriefs}
+        onOpenScene={(sceneId) => onOpenSceneMap?.(sceneId)}
+        onCompose={(prompt) => handleExecuteHomeQuery(prompt)}
+      />
 
       {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)，Modal 模态。
           之前是 ScrollView 内的 absolute 定位，bottom 落在滚动内容最底下，
