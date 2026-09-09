@@ -371,3 +371,15 @@ describe("PLACEHOLDER-012 ai three glass actions", () => {
     expect(shell).toContain("feedSearchSeed");
   });
 });
+
+describe("PLACEHOLDER-013 swipe to delete dialogs", () => {
+  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+
+  it("reveals a two-step delete that hides locally and persists", () => {
+    expect(messages).toContain("SwipeableRow");
+    expect(messages).toContain("确认删除");
+    expect(messages).toContain("hideDialog");
+    expect(messages).toContain("proxy-hidden-chats");
+    expect(messages).toContain("visibleDialogs");
+  });
+});

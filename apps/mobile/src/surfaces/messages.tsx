@@ -1,8 +1,9 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { Animated, AppState, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 import { Image } from "expo-image";
+import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
@@ -24,6 +25,97 @@ type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccou
 // R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
+
+// 本机隐藏的会话（左滑删除）：服务端没有删会话接口，删除 = 本机可见性，
+// 服务端保留审计（与“清空本机显示”同口径）。落盘持久化，重进/重启不回来。
+const hiddenChatsDir = new Directory(Paths.document, "proxy-hidden-chats");
+const hiddenChatsFile = new File(hiddenChatsDir, "hidden-v1.json");
+function readHiddenChatIds(): string[] {
+  try {
+    if (!hiddenChatsFile.exists) return [];
+    const raw: unknown = hiddenChatsFile.json();
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function writeHiddenChatIds(ids: ReadonlyArray<string>): void {
+  try {
+    hiddenChatsDir.create({ idempotent: true, intermediates: true });
+    hiddenChatsFile.write(JSON.stringify(ids));
+  } catch {
+    // 持久化失败不打断删除（本会话内照样隐藏）。
+  }
+}
+
+const SWIPE_DELETE_W = 84;
+const SWIPE_CONFIRM_W = 168;
+
+// 左滑删除行：无手势库，用 PanResponder 实现。横滑 dx 主导才接管，
+// 竖滑留给列表；点按（无位移）不受影响。删除两段确认，防误触。
+function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: React.ReactNode }): React.JSX.Element {
+  const tx = useRef(new Animated.Value(0)).current;
+  const startX = useRef(0);
+  const openW = useRef(0);
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const confirmingRef = useRef(false);
+  confirmingRef.current = confirming;
+  const snapTo = useCallback((w: number) => {
+    openW.current = w;
+    setOpen(w > 0);
+    Animated.spring(tx, { toValue: -w, useNativeDriver: true, tension: 320, friction: 32 }).start();
+  }, [tx]);
+  const close = useCallback(() => { setConfirming(false); snapTo(0); }, [snapTo]);
+  useEffect(() => {
+    // 确认态切换时按钮区变宽，已展开就跟到新宽度。
+    if (open) snapTo(confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W);
+  }, [confirming, open, snapTo]);
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 8,
+    onPanResponderGrant: () => { startX.current = -openW.current; },
+    onPanResponderMove: (_, gs) => {
+      const w = confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W;
+      tx.setValue(Math.min(0, Math.max(-w, startX.current + gs.dx)));
+    },
+    onPanResponderRelease: (_, gs) => {
+      const w = confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W;
+      const wasOpen = openW.current > 0;
+      let target = 0;
+      if (!wasOpen && (gs.dx < -w / 2 || gs.vx < -0.4)) target = w;
+      else if (wasOpen && (gs.dx > w / 2 || gs.vx > 0.4)) target = 0;
+      else if (wasOpen) target = w;
+      if (target === 0) setConfirming(false);
+      snapTo(target);
+    },
+    onPanResponderTerminate: () => snapTo(openW.current),
+  })).current;
+  return (
+    <View>
+      <View style={[styles.swipeBehind, { width: confirming ? SWIPE_CONFIRM_W : SWIPE_DELETE_W }]}>
+        {!confirming ? (
+          <Pressable onPress={() => setConfirming(true)} style={styles.swipeDelete} accessibilityLabel="删除对话">
+            <Text style={styles.swipeDeleteText}>删除</Text>
+          </Pressable>
+        ) : (
+          <>
+            <Pressable onPress={close} style={styles.swipeCancel} accessibilityLabel="取消删除">
+              <Text style={styles.swipeCancelText}>取消</Text>
+            </Pressable>
+            <Pressable onPress={onDelete} style={styles.swipeDelete} accessibilityLabel="确认删除对话">
+              <Text style={styles.swipeDeleteText}>确认删除</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
+      <Animated.View {...pan.panHandlers} style={{ transform: [{ translateX: tx }] }}>
+        {open ? <Pressable accessibilityLabel="收起删除" onPress={close} style={StyleSheet.absoluteFill} /> : null}
+        {children}
+      </Animated.View>
+    </View>
+  );
+}
 
 export function MessagesSurface({
   onOpenConversation,
@@ -61,6 +153,17 @@ export function MessagesSurface({
 
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
+  // 左滑删除的本机隐藏集：落盘，服务端刷新回来也照样过滤。
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set(readHiddenChatIds()));
+  const hideDialog = useCallback((id: string) => {
+    setHiddenIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      writeHiddenChatIds([...next]);
+      return next;
+    });
+  }, []);
 
   const refreshInbox = useCallback(async (): Promise<void> => {
     if (!conversationClient) return;
@@ -93,18 +196,22 @@ export function MessagesSurface({
   }, [conversationClient, refreshInbox]);
 
   const inboxLoaded = serverDialogs !== undefined || inboxError;
+  const visibleDialogs = useMemo(
+    () => (serverDialogs ?? []).filter((d) => !hiddenIds.has(d.id)),
+    [serverDialogs, hiddenIds]
+  );
   const pinnedSource: Dialog[] = [];
-  const recentSource = serverDialogs ?? [];
+  const recentSource = visibleDialogs;
   // R15.74: Convo tab (panel="convos") — 从 serverDialogs 拿 GROUP/SUPPORT conversation
   //   之前 (Phase 1) 走写死 CONVOS mock — 跟 server listConversations 不接.
   const groupDialogs = useMemo(
-    () => (serverDialogs ?? []).filter((d) => {
+    () => visibleDialogs.filter((d) => {
       // 上一行 toDialog 已把 conversation.conversationType 透出到 type 字段 (见下).
       // 没 type 字段时 fallback 视为 DM 不显示在 Convo 标签.
       const t = (d as unknown as { type?: string }).type;
       return t === "GROUP" || t === "SUPPORT";
     }),
-    [serverDialogs]
+    [visibleDialogs]
   );
 
   const filteredPinned = useMemo(() => filterByFolder(pinnedSource, folder, search), [pinnedSource, folder, search]);
@@ -153,7 +260,8 @@ export function MessagesSurface({
   if (subView === "contacts") {
     // 联系人 = 收件箱里真实聊过天的人（名字/最近消息/时间都来自服务端），
     // 没有独立通讯录接口，不编造 username/在线状态/手机号。
-    const CONTACTS = (serverDialogs ?? []).map((d) => ({
+    // 已左滑删除的会话不同步到联系人。
+    const CONTACTS = visibleDialogs.map((d) => ({
       name: d.name,
       preview: d.preview,
       time: d.time,
@@ -299,7 +407,8 @@ export function MessagesSurface({
               <>
                 <Text style={styles.sectionLabel}>置顶</Text>
                 {filteredPinned.map((d) => (
-                  <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
+                  <SwipeableRow key={d.id} onDelete={() => hideDialog(d.id)}>
+                  <Pressable onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
                     {d.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:dialog:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                       <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                       {(d as Dialog).online ? <View style={styles.online} /> : null}
@@ -316,6 +425,7 @@ export function MessagesSurface({
                       {d.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{d.unread}</Text></View> : null}
                     </View>
                   </Pressable>
+                  </SwipeableRow>
                 ))}
               </>
             ) : null}
@@ -325,7 +435,8 @@ export function MessagesSurface({
               <Text style={styles.empty}>加载中…</Text>
             ) : filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
-                <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
+                <SwipeableRow key={d.id} onDelete={() => hideDialog(d.id)}>
+                <Pressable onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
                   {d.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:recent:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                     <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                   </View>}
@@ -333,12 +444,13 @@ export function MessagesSurface({
                     <View style={styles.dialogTop}><Text style={styles.dialogName}>{d.name}</Text></View>
                     <Text style={styles.preview} numberOfLines={1}>{d.preview}</Text>
                   </View>
-                  <View style={styles.dialogSide}>
-                    <Text style={styles.time}>{d.time}</Text>
-                    {d.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{d.unread}</Text></View> : null}
-                  </View>
-                </Pressable>
-              ))
+                    <View style={styles.dialogSide}>
+                      <Text style={styles.time}>{d.time}</Text>
+                      {d.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{d.unread}</Text></View> : null}
+                    </View>
+                  </Pressable>
+                  </SwipeableRow>
+                ))
             ) : (
               <Text style={styles.empty}>还没有对话 — 从动态或市场开始聊一下</Text>
             )}
@@ -350,7 +462,8 @@ export function MessagesSurface({
               <Text style={styles.preview}>还没有群组对话</Text>
             ) : null}
             {groupDialogs.map((c) => (
-              <Pressable key={c.id} onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
+              <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
+              <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
                 <View style={styles.convoHead}>
                   <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
                   <View style={styles.convoCopy}>
@@ -362,6 +475,7 @@ export function MessagesSurface({
                 <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
                 <View style={styles.convoFoot}><Text style={styles.convoFootText}>{c.time}</Text></View>
               </Pressable>
+              </SwipeableRow>
             ))}
           </>
         )}
@@ -501,6 +615,12 @@ const styles = StyleSheet.create({
   contactRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
   contactName: { fontSize: 13, fontWeight: "700", color: "#11110f" },
   contactMeta: { fontSize: 11, color: "#aaa69e", marginTop: 2 },
+  // 左滑删除：behind 贴右全高，front 滑开露出；两段确认防误触。
+  swipeBehind: { alignItems: "stretch", bottom: 0, flexDirection: "row", justifyContent: "flex-end", position: "absolute", right: 0, top: 0 },
+  swipeDelete: { alignItems: "center", backgroundColor: "#D93B3B", justifyContent: "center", paddingHorizontal: 16 },
+  swipeDeleteText: { color: "#fff", fontSize: 13, fontWeight: "800" },
+  swipeCancel: { alignItems: "center", backgroundColor: "#8d8981", justifyContent: "center", paddingHorizontal: 14 },
+  swipeCancelText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   contactAction: { fontSize: 11, fontWeight: "700", color: "#6e6962" },
   personHero: { alignItems: "center", paddingTop: 18, paddingBottom: 12 },
   personName: { fontSize: 17, fontWeight: "700", color: "#11110f", marginTop: 9 },
