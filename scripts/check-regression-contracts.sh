@@ -789,6 +789,13 @@ if ! grep -q 'PLACEHOLDER-017' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-017: PASS (tripwire present; covered by the vitest run above)"
 
+# PLACEHOLDER-018: 新建按钮在类型行内。
+if ! grep -q 'PLACEHOLDER-018' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-018]: newbtn tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-018: PASS (tripwire present; covered by the vitest run above)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'

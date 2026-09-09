@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 138 — 2026-09-09
+
+- 新建按钮进类型行（PLACEHOLDER-018）：全部/照片/视频/＋新建同一排，
+  点开行内输入，创建后收起并选中。
+
 ## Revision 137 — 2026-09-09
 
 - 文件夹页媒体墙下加回自建文件夹（PLACEHOLDER-016 修正四）：新建/

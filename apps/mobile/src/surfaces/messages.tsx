@@ -211,6 +211,9 @@ export function MessagesSurface({
   const [contactSearch, setContactSearch] = useState("");
   // 文件夹页类型筛选：全部/照片/视频。
   const [folderKind, setFolderKind] = useState<"all" | FolderMediaKind>("all");
+  // chips 行内新建：展开输入行，创建后收起并选中新文件夹。
+  const [folderCreateOpen, setFolderCreateOpen] = useState(false);
+  const [folderCreateName, setFolderCreateName] = useState("");
   // 自建文件夹：选中过滤成员，移入移出落盘。
   const [folders, setFolders] = useState<FolderV1[]>(() => readFolders());
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -221,6 +224,16 @@ export function MessagesSurface({
   }
   function createFolder(name: string): void {
     persistFolders([...folders, { id: `f_${Date.now()}`, name, dialogIds: [] }]);
+  }
+  // chips 行内新建提交：创建后收起输入并选中新文件夹，直接可用。
+  function submitFolderCreate(): void {
+    const name = folderCreateName.trim();
+    if (!name) return;
+    const id = `f_${Date.now()}`;
+    persistFolders([...folders, { id, name, dialogIds: [] }]);
+    setFolderCreateName("");
+    setFolderCreateOpen(false);
+    setSelectedFolderId(id);
   }
   function toggleFolderMember(folderId: string, dialogId: string): void {
     persistFolders(folders.map((f) => {
@@ -626,7 +639,7 @@ export function MessagesSurface({
           </>
         ) : (
           <>
-            {/* 类型筛选：照片/视频取各会话真实消息体；文件暂无协议类型，不设假入口 */}
+            {/* 类型筛选 + 新建：全部/照片/视频/＋新建同一排 */}
             <View style={styles.folderRowWrap}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
                 {([["all", "全部"], ["IMAGE", "照片"], ["VIDEO", "视频"]] as const).map(([id, label]) => (
@@ -634,8 +647,19 @@ export function MessagesSurface({
                     <Text style={[styles.folderChipText, folderKind === id && styles.folderChipTextActive]}>{label}</Text>
                   </Pressable>
                 ))}
+                <Pressable onPress={() => setFolderCreateOpen((v) => !v)} style={styles.folderChip} accessibilityLabel="新建文件夹">
+                  <Text style={styles.folderChipText}>＋ 新建</Text>
+                </Pressable>
               </ScrollView>
             </View>
+            {folderCreateOpen ? (
+              <View style={styles.folderCreateRow}>
+                <TextInput value={folderCreateName} onChangeText={setFolderCreateName} placeholder="文件夹名称" placeholderTextColor="#9a968f" style={styles.folderCreateInput} returnKeyType="done" onSubmitEditing={() => submitFolderCreate()} />
+                <Pressable onPress={() => submitFolderCreate()} style={styles.folderCreateBtn} accessibilityLabel="创建文件夹">
+                  <Text style={styles.folderCreateBtnText}>创建</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {(() => {
               if (folderMedia === undefined && !folderMediaError) {
                 return <Text style={styles.empty}>正在整理照片和视频…</Text>;
@@ -840,6 +864,10 @@ const styles = StyleSheet.create({
   countBadgeText: { fontSize: 11, fontWeight: "700", color: "#fff" },
   folderRowWrap: { borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "#fffefa" },
   folderRow: { flexDirection: "row", gap: 7, paddingHorizontal: 16, paddingVertical: 10, alignItems: "center" },
+  folderCreateRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 10, alignItems: "center" },
+  folderCreateInput: { flex: 1, height: 36, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#fff", paddingHorizontal: 11, fontSize: 13, color: "#11110f" },
+  folderCreateBtn: { backgroundColor: "#11110f", borderRadius: 12, paddingHorizontal: 16, height: 36, justifyContent: "center" },
+  folderCreateBtnText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   folderChip: { height: 29, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, paddingHorizontal: 11, justifyContent: "center", backgroundColor: "transparent" },
   folderChipActive: { backgroundColor: "#11110f", borderColor: "#11110f" },
   folderChipText: { fontSize: 11, fontWeight: "600", color: "#77736c" },
