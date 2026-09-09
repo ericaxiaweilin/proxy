@@ -1025,6 +1025,14 @@ require_test "JURISDICTION-PERSIST-001" "./internal/platform/postgres" \
 require_test "MUTED-AUTHORS-001" "./internal/platform/postgres" \
   "TestMutedAuthorsPostgresLifecycle" \
   "apps/api-go/internal/platform/postgres/muted_authors_integration_test.go" || exit $?
+require_test "MUTED-AUTHORS-002" "./internal/platform/postgres" \
+  "TestMutedAuthorsFeedFilterLifecycle" \
+  "apps/api-go/internal/platform/postgres/muted_feed_filter_integration_test.go" || exit $?
+if ! grep -q 'NOT EXISTS' apps/api-go/internal/platform/postgres/network.go || \
+   ! grep -q 'engagement.muted_authors' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MUTED-AUTHORS-002]: feed mute filter must stay in ListFeedPage SQL" >&2
+  exit 1
+fi
 if ! grep -q 'engagement.muted_authors' apps/api-go/migrations/078_muted_authors.sql; then
   echo "  FAIL [MUTED-AUTHORS-001]: muted_authors migration must stay" >&2
   exit 1
