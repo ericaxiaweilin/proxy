@@ -18,5 +18,9 @@ describe("market workflow surface", () => {
     expect(source).toContain(">发布订单<");
     expect(source).toContain(">发布活动<");
     expect(source).toContain("await activities.publish({");
+    expect(source).toContain('visible={publishMenuOpen}');
+    expect(source).toContain('setTab("OPPORTUNITY")');
+    expect(source).toContain('setTab("ACTIVITY")');
+    expect(source).toContain('bottomNavVisible === false ? 28 : 116');
   });
 });

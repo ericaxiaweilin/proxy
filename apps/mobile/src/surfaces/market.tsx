@@ -8,7 +8,7 @@
 //   - “热门地点” = MARKER 显式声明的探索点 (VENDOR_SPOT) — 重要但仅是探索，不会被默认高亮
 //   - “快速真实地址” = showUserLocation 蓝点 + “用我当前位置”按钮
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
@@ -151,6 +151,7 @@ export function MarketSurface({
   // 规范 §4/§13：Android 硬件返回按真实嵌套深度逐层收起，最上层先消费；
   // 全部收起后返回 false 交给 shell 关模块。
   useModuleBackHandler(selectOpp ? () => { setSelectOpp(null); return true; } : undefined);
+  useModuleBackHandler(publishMenuOpen ? () => { setPublishMenuOpen(false); return true; } : undefined);
   useModuleBackHandler(activityPublishOpen ? () => { setActivityPublishOpen(false); return true; } : undefined);
   useModuleBackHandler(publishOpen ? () => { setPublishOpen(false); return true; } : undefined);
   useModuleBackHandler(activityDetail ? () => { setActivityDetail(null); return true; } : undefined);
@@ -342,18 +343,35 @@ export function MarketSurface({
 
   const remoteLens = lens === "REMOTE";
 
+  function openOrderPublisher(): void {
+    setPublishMenuOpen(false);
+    setActivityPublishOpen(false);
+    setPublishOpen(true);
+    setTab("OPPORTUNITY");
+    setPagerPage(0);
+  }
+
+  function openActivityPublisher(): void {
+    setPublishMenuOpen(false);
+    setPublishOpen(false);
+    setActivityPublishOpen(true);
+    setTab("ACTIVITY");
+    setPagerPage(1);
+    void loadActivities();
+  }
+
   function renderMarketPage(pageTab: "OPPORTUNITY" | "ACTIVITY"): React.JSX.Element {
     const bottomPad = bottomNavVisible === false ? 16 : 120;
     return (
     <View style={styles.marketPage}>
-    <ScrollView style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView key={`${pageTab}:${publishOpen ? "order" : activityPublishOpen ? "activity" : "list"}`} style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
         <Text style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
             <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "route"} size={18} />
           </Pressable>
-          <Pressable onPress={() => setPublishMenuOpen((open) => !open)} style={styles.plusBtn}>
+          <Pressable onPress={() => setPublishMenuOpen(true)} style={styles.plusBtn}>
             <ProxyIcon color={color.white} name="plus" size={18} />
           </Pressable>
         </View>
@@ -370,15 +388,6 @@ export function MarketSurface({
         }}
         style={styles.foundationTabs}
       />
-
-      {publishMenuOpen ? <View style={styles.publishMenu}>
-        <Pressable onPress={() => { setPublishMenuOpen(false); setPublishOpen(true); }} style={styles.publishMenuPrimary}>
-          <ProxyIcon color={color.white} name="plus" size={20} /><Text style={styles.publishMenuPrimaryText}>发布订单</Text>
-        </Pressable>
-        <Pressable onPress={() => { setPublishMenuOpen(false); setActivityPublishOpen(true); void loadActivities(); }} style={styles.publishMenuSecondary}>
-          <ProxyIcon color={color.ink} name="star" size={20} /><Text style={styles.publishMenuSecondaryText}>发布活动</Text>
-        </Pressable>
-      </View> : null}
 
       {supply ? (
         <Text style={styles.offerMsg}>
@@ -505,7 +514,7 @@ export function MarketSurface({
         </>
       )}
     </ScrollView>
-    {!publishOpen && !activityPublishOpen && !selectOpp && !oppDetail && !activityDetail ? <Pressable accessibilityLabel="发布订单或活动" onPress={() => setPublishMenuOpen((open) => !open)} style={[styles.floatingPublish, { bottom: bottomNavVisible === false ? 18 : 82 }]}>
+    {!publishOpen && !activityPublishOpen && !selectOpp && !oppDetail && !activityDetail ? <Pressable accessibilityLabel="发布订单或活动" onPress={() => setPublishMenuOpen(true)} style={[styles.floatingPublish, { bottom: bottomNavVisible === false ? 28 : 116 }]}>
       <ProxyIcon color={color.white} name="plus" size={24} />
     </Pressable> : null}
     </View>
@@ -519,7 +528,7 @@ export function MarketSurface({
     titleOf: (item) => item === "OPPORTUNITY" ? "机会" : "活动",
   });
 
-  return (
+  return (<>
     <PaginatedModuleShell
       definition={{ id: "market", pages: pagerPages, initialPage: normalized === "ACTIVITY" ? 1 : 0 }}
       page={pagerPage}
@@ -530,7 +539,24 @@ export function MarketSurface({
         setOppDetail(null);
       }}
     />
-  );
+    <Modal animationType="fade" onRequestClose={() => setPublishMenuOpen(false)} transparent visible={publishMenuOpen}>
+      <Pressable accessibilityLabel="关闭发布选择" onPress={() => setPublishMenuOpen(false)} style={styles.publishMenuBackdrop}>
+        <View onStartShouldSetResponder={() => true} style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
+          <View style={styles.publishMenuGrab} />
+          <Text style={styles.publishMenuTitle}>发布</Text>
+          <Text style={styles.publishMenuHint}>订单用于付费需求撮合；活动用于多人共同参与。</Text>
+          <View style={styles.publishMenu}>
+            <Pressable accessibilityLabel="发布订单" onPress={openOrderPublisher} style={styles.publishMenuPrimary}>
+              <ProxyIcon color={color.white} name="plus" size={20} /><Text style={styles.publishMenuPrimaryText}>发布订单</Text>
+            </Pressable>
+            <Pressable accessibilityLabel="发布活动" onPress={openActivityPublisher} style={styles.publishMenuSecondary}>
+              <ProxyIcon color={color.ink} name="star" size={20} /><Text style={styles.publishMenuSecondaryText}>发布活动</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Pressable>
+    </Modal>
+  </>);
 }
 
 function OpportunityTab({
@@ -1312,7 +1338,12 @@ const styles = StyleSheet.create({
   viewToggleTextOn: { color: color.white },
   plusBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 44, justifyContent: "center", width: 44 },
   plusBtnText: { color: color.white, fontSize: 22, fontWeight: "700" },
-  publishMenu: { flexDirection: "row", gap: 8, paddingBottom: 4, paddingHorizontal: 12 },
+  publishMenuBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(20,19,26,0.32)", paddingHorizontal: 14 },
+  publishMenuSheet: { backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, paddingBottom: 14, paddingHorizontal: 14, paddingTop: 8, ...shadows.card },
+  publishMenuGrab: { alignSelf: "center", backgroundColor: color.line, borderRadius: 99, height: 4, marginBottom: 8, width: 38 },
+  publishMenuTitle: { color: color.ink, fontSize: 20, fontWeight: "900" },
+  publishMenuHint: { color: color.muted, fontSize: 12, lineHeight: 17, marginBottom: 12, marginTop: 3 },
+  publishMenu: { flexDirection: "row", gap: 8 },
   publishMenuPrimary: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, flex: 1, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48 },
   publishMenuPrimaryText: { color: color.white, fontSize: 14, fontWeight: "800" },
   publishMenuSecondary: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48 },
