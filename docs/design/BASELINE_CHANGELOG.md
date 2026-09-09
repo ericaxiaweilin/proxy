@@ -1230,3 +1230,9 @@ same commit. Do not record routine business logic changes here.
 - Home 第一行拍照、同行、吃饭、活动等入口不再临时映射通用线性图标，直接复用附近场景动作栏的 `SCENE_ACTIONS` SVG 注册表。
 - 市场机会筛选与机会卡删除旧 `order-type-logos` PNG 视觉，按订单类型映射到同一套拍照、City Walk、咖啡、翻译和活动图标。
 - 新增源码契约守卫，禁止 Home 拍照/同行退回自建图标，也禁止市场重新引用旧订单 Logo 包。
+
+# Revision 143 — Human × Scene linked preview (2026-09-09)
+
+- Home 真人头像不再直接跳离发现页，先打开人物与当前 Scene 的玻璃关联层；场景卡仍可继续进入完整 Reality Scene。
+- 关联层只使用推荐账户与服务端场景已有字段，不展示原型中未落库的评分、履约次数或虚构活动数据。
+- 添加按钮复用好友关系状态机，明确展示添加、添加中、已添加与接受添加；查看主页和发消息分别接入既有真人主页与消息会话。

@@ -602,6 +602,11 @@ export function AppShell({
                 posts: [],
                 mediaByPost: {},
               })}
+              onMessageHuman={(person) => {
+                setMessageChat({ author: person.name, ...(person.photoUri ? { avatarSource: { uri: person.photoUri } } : {}) });
+                setPageOverride("MSG_CHAT");
+                setTab("MESSAGES");
+              }}
               onMessageAI={(account) => {
                 setMessageChat({ author: account.displayName, aiAccount: account });
                 setPageOverride("MSG_CHAT");

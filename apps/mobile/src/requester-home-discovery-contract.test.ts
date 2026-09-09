@@ -65,7 +65,8 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   });
 
   it("keeps human discovery as circle-and-name nodes that preserve the real Scene context", () => {
-    expect(source).toContain("onPress={() => onOpenHumanScene?.(p, recommendFeed.boundSceneId)}");
+    expect(source).toContain("setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId })");
+    expect(source).toContain('accessibilityLabel="查看完整场景"');
     expect(source).not.toContain('testID="human-node-reveal"');
     expect(source).not.toContain("styles.recCard");
     expect(source).not.toContain("styles.storyHint");
@@ -76,6 +77,15 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain("styles.addBadge");
     expect(fixtures).toContain("R34_HUMAN_PORTRAITS");
     expect(fixtures).toContain("withR34Portraits");
+  });
+
+  it("keeps the linked human Scene preview connected to friendship, profile and messaging workflows", () => {
+    expect(source).toContain("handleHomeFriend(humanScenePreview.person.id");
+    expect(source).toContain('"添加中"');
+    expect(source).toContain('accessibilityLabel="查看主页"');
+    expect(source).toContain('accessibilityLabel="发消息"');
+    expect(source).toContain("onOpenHumanProfile?.(person)");
+    expect(source).toContain("onMessageHuman?.(person)");
   });
 
   it("reuses the approved Scene action logo registry in the compact Home action rail", () => {

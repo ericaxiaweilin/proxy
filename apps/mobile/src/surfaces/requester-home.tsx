@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
+import { GlassView } from "expo-glass-effect";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { HomeSearchDock } from "../components/home-search-dock";
 import { buildHomeSearchIndex, matchHomeSearchIntent, type HomeSearchSuggestion } from "../home-search-intent";
@@ -92,6 +93,7 @@ export function RequesterHome({
   onOpenAIProfile,
   onOpenHumanScene,
   onOpenHumanProfile,
+  onMessageHuman,
   viewerAccountId,
   onCreateScene,
   onOpenSceneMap,
@@ -122,6 +124,7 @@ export function RequesterHome({
   onOpenAIProfile?: (account: PlatformAIAccount) => void;
   onOpenHumanScene?: (person: RecommendPerson, sceneId: string) => void;
   onOpenHumanProfile?: (person: RecommendPerson) => void;
+  onMessageHuman?: (person: RecommendPerson) => void;
   viewerAccountId?: string;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
   onOpenSceneMap?: ((sceneId?: string) => void) | undefined;
@@ -161,6 +164,7 @@ export function RequesterHome({
   const [relationshipStates, setRelationshipStates] = useState<ReadonlyMap<string, HomeRelationshipState>>(() => new Map());
   const [relationshipBusyId, setRelationshipBusyId] = useState<string | undefined>(undefined);
   const [relationshipMsg, setRelationshipMsg] = useState<string | undefined>(undefined);
+  const [humanScenePreview, setHumanScenePreview] = useState<{ person: RecommendPerson; sceneId: string } | undefined>(undefined);
 
   useEffect(() => {
     onChooserVisibilityChange?.(chooser !== null);
@@ -284,6 +288,10 @@ export function RequesterHome({
     return () => { cancelled = true; };
   }, [sceneApiBaseUrl]);
   const activeSceneCount = sceneBriefs.filter((s) => s.active).length;
+  const previewScene = humanScenePreview ? sceneBriefs.find((scene) => scene.id === humanScenePreview.sceneId) : undefined;
+  const previewSceneImage = previewScene?.imageUrl
+    ? (/^https?:\/\//i.test(previewScene.imageUrl) ? previewScene.imageUrl : sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${previewScene.imageUrl.replace(/^\//, "")}` : undefined)
+    : undefined;
 
   function applyHomeSearchSuggestion(s: HomeSearchSuggestion): void {
     setSearchQuery("");
@@ -644,7 +652,7 @@ export function RequesterHome({
         {filteredPeople.map((p) => (
           <Pressable
             key={`story:${p.id}`}
-            onPress={() => onOpenHumanScene?.(p, recommendFeed.boundSceneId)}
+            onPress={() => setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId })}
             style={styles.story}
             accessibilityLabel={`推荐人 ${p.name}，${p.online ? "在线" : "离线"}`}
           >
@@ -990,6 +998,48 @@ export function RequesterHome({
         onCompose={(prompt) => handleExecuteHomeQuery(prompt)}
       />
 
+      {humanScenePreview ? <Modal animationType="fade" onRequestClose={() => setHumanScenePreview(undefined)} transparent visible>
+        <Pressable accessibilityLabel="关闭人物场景预览" onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBackdrop}>
+          <GlassView glassEffectStyle="clear" style={styles.humanSceneGlass}>
+            <View onStartShouldSetResponder={() => true} style={styles.humanSceneContent}>
+              <View style={styles.humanSceneTop}>
+                <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? "附近 · 现在可见" : "附近推荐"}</Text>
+                <Pressable accessibilityLabel="关闭" onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneClose}><Text style={styles.humanSceneCloseText}>×</Text></Pressable>
+              </View>
+              <View style={styles.humanScenePerson}>
+                <View style={styles.humanSceneAvatarRing}>{humanScenePreview.person.photoUri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: humanScenePreview.person.photoUri }} style={styles.humanSceneAvatar} transition={0} /> : <Text style={styles.humanSceneInitials}>{humanScenePreview.person.initials}</Text>}</View>
+                <View style={styles.humanScenePersonCopy}>
+                  <Text style={styles.humanSceneName}>{humanScenePreview.person.name}</Text>
+                  <Text style={styles.humanSceneBio}>{humanScenePreview.person.bio}</Text>
+                  <Text style={styles.humanSceneMeta}>{humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`} · {humanScenePreview.person.mutualFriends > 0 ? `${humanScenePreview.person.mutualFriends} 位共同好友` : "暂无共同好友信息"}</Text>
+                </View>
+              </View>
+              <Text style={styles.humanSceneSectionTitle}>与当前推荐的关联</Text>
+              <View style={styles.humanSceneLinkRow}>
+                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前动作</Text><Text style={styles.humanSceneLinkValue}>{recommendFeed.title}</Text></View>
+                <Pressable accessibilityLabel="查看完整场景" onPress={() => { const current = humanScenePreview; setHumanScenePreview(undefined); onOpenHumanScene?.(current.person, current.sceneId); }} style={styles.humanSceneLinkCard}>
+                  {previewSceneImage ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: previewSceneImage }} style={StyleSheet.absoluteFill} transition={0} /> : null}
+                  <View style={styles.humanSceneLinkShade} />
+                  <Text style={styles.humanSceneLinkLabelLight}>当前 Scene</Text><Text style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? "查看场景"} ›</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.humanSceneReason}>距离近、当前动作匹配；是否参加或见面仍由双方确认。</Text>
+              {relationshipMsg ? <Text style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
+              <Pressable
+                accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)}
+                disabled={relationshipBusyId === humanScenePreview.person.id || relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND"}
+                onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)}
+                style={[styles.humanSceneAdd, (relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}
+              ><ProxyIcon color={color.white} name="user" size={20} /><Text style={styles.humanSceneAddText}>{relationshipBusyId === humanScenePreview.person.id ? "添加中…" : relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" ? "添加中" : relationshipStates.get(humanScenePreview.person.id) === "FRIEND" ? "✓ 已添加" : relationshipStates.get(humanScenePreview.person.id) === "INCOMING" ? "接受添加" : "添加"}</Text></Pressable>
+              <View style={styles.humanSceneActions}>
+                <Pressable accessibilityLabel="查看主页" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneAction}><ProxyIcon color={color.ink} name="storeLines" size={18} /><Text style={styles.humanSceneActionText}>查看主页</Text></Pressable>
+                <Pressable accessibilityLabel="发消息" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneAction}><ProxyIcon color={color.ink} name="chat" size={18} /><Text style={styles.humanSceneActionText}>发消息</Text></Pressable>
+              </View>
+            </View>
+          </GlassView>
+        </Pressable>
+      </Modal> : null}
+
       {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)，Modal 模态。
           之前是 ScrollView 内的 absolute 定位，bottom 落在滚动内容最底下，
           打开后 sheet 在屏外、筛选点不了。现在走 Modal，与选人/出图弹窗一致。 */}
@@ -1174,6 +1224,38 @@ const styles = StyleSheet.create({
   peopleHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginTop: 18, marginBottom: 12 },
   peopleTitleRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   peopleTitle: { color: color.ink, fontSize: 22, fontWeight: "800", lineHeight: 26 },
+  humanSceneBackdrop: { alignItems: "center", backgroundColor: "rgba(8,13,24,0.58)", flex: 1, justifyContent: "center", paddingHorizontal: 18, paddingVertical: 32 },
+  humanSceneGlass: { borderColor: "rgba(255,255,255,0.42)", borderRadius: 30, borderWidth: 1, maxWidth: 520, overflow: "hidden", width: "100%" },
+  humanSceneContent: { backgroundColor: "rgba(22,32,48,0.72)", padding: 18 },
+  humanSceneTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  humanSceneEyebrow: { color: "#DCE6F7", fontSize: 12, fontWeight: "700" },
+  humanSceneClose: { alignItems: "center", borderColor: "rgba(255,255,255,0.35)", borderRadius: 21, borderWidth: 1, height: 42, justifyContent: "center", width: 42 },
+  humanSceneCloseText: { color: color.white, fontSize: 27, fontWeight: "300", lineHeight: 30 },
+  humanScenePerson: { alignItems: "center", flexDirection: "row", gap: 14, marginTop: 10 },
+  humanSceneAvatarRing: { alignItems: "center", borderColor: "rgba(150,203,255,0.9)", borderRadius: 999, borderWidth: 2, height: 96, justifyContent: "center", padding: 3, width: 96 },
+  humanSceneAvatar: { borderRadius: 999, height: "100%", width: "100%" },
+  humanSceneInitials: { color: color.white, fontSize: 24, fontWeight: "900" },
+  humanScenePersonCopy: { flex: 1, minWidth: 0 },
+  humanSceneName: { color: color.white, fontSize: 28, fontWeight: "900" },
+  humanSceneBio: { color: "#CFDAEA", fontSize: 13, lineHeight: 18, marginTop: 4 },
+  humanSceneMeta: { color: "#FFCE55", fontSize: 12, fontWeight: "800", marginTop: 6 },
+  humanSceneSectionTitle: { color: color.white, fontSize: 14, fontWeight: "900", marginTop: 18 },
+  humanSceneLinkRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  humanSceneLinkChip: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.2)", borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 72, padding: 10 },
+  humanSceneLinkCard: { borderColor: "rgba(255,255,255,0.2)", borderRadius: 14, borderWidth: 1, flex: 1.2, minHeight: 72, overflow: "hidden", padding: 10 },
+  humanSceneLinkShade: { backgroundColor: "rgba(8,13,24,0.48)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  humanSceneLinkLabel: { color: "#AAB9CE", fontSize: 11 },
+  humanSceneLinkValue: { color: color.white, fontSize: 12, fontWeight: "800", marginTop: 8 },
+  humanSceneLinkLabelLight: { color: "#E0E8F4", fontSize: 11 },
+  humanSceneLinkValueLight: { color: color.white, fontSize: 12, fontWeight: "900", marginTop: 8 },
+  humanSceneReason: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 14, color: "#DCE6F7", fontSize: 12, lineHeight: 18, marginTop: 12, padding: 11 },
+  humanSceneNotice: { color: "#FFCE55", fontSize: 11, marginTop: 8 },
+  humanSceneAdd: { alignItems: "center", backgroundColor: "#586CFF", borderRadius: 999, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 12, minHeight: 48 },
+  humanSceneAddDone: { backgroundColor: "rgba(255,255,255,0.14)", borderColor: "rgba(255,255,255,0.3)", borderWidth: 1 },
+  humanSceneAddText: { color: color.white, fontSize: 14, fontWeight: "900" },
+  humanSceneActions: { flexDirection: "row", gap: 8, marginTop: 9 },
+  humanSceneAction: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.86)", borderRadius: 999, flex: 1, flexDirection: "row", gap: 7, justifyContent: "center", minHeight: 44 },
+  humanSceneActionText: { color: color.ink, fontSize: 13, fontWeight: "900" },
   humanBadge: { backgroundColor: "#EAF7EE", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   humanBadgeText: { color: "#18733B", fontSize: 11, fontWeight: "900" },
   peopleSceneTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 5 },
