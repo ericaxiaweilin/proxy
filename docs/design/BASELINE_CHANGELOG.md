@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 122 — 2026-09-09
+
+- 对话左滑两段删除（PLACEHOLDER-013）：无手势库，用 PanResponder 实现；
+  服务端无删接口，删除=本机可见性（落盘持久化，服务端保留审计）。
+
 ## Revision 121 — 2026-09-09
 
 - Home 进入 AI 小美主页后的添加、主页、发消息三按钮改为与底栏水滴
