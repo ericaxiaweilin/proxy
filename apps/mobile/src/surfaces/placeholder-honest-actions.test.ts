@@ -366,6 +366,8 @@ describe("PLACEHOLDER-012 ai three glass actions", () => {
     expect(profile).toContain("<LiquidGlassAction");
     expect(profile).toContain('height: 54');
     expect(profile).toContain('borderRadius: 28');
+    expect(profile).toContain('tintColor="rgba(122,44,255,0.10)"');
+    expect(profile).toContain("styles.glassStage");
     expect(profile).toContain('borderCurve: "continuous"');
     expect(profile).toContain("查看个人主页");
     expect(profile).toContain("onViewPosts");

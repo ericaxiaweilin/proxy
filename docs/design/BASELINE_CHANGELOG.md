@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 123 — 2026-09-09
+
+- AI 小美主页三枚水滴按钮增加身份色底层光场与轻量紫色玻璃 tint，
+  让 regular 液态玻璃在浅色页面上仍有可见折射，不再退化成白色胶囊。
+- 按钮结构、状态与添加/主页/发消息链路保持不变。
+
 ## Revision 122 — 2026-09-09
 
 - 对话左滑两段删除（PLACEHOLDER-013）：无手势库，用 PanResponder 实现；

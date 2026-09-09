@@ -30,6 +30,7 @@ function LiquidGlassAction({ accessibilityLabel, children, disabled = false, onP
       <GlassView
         glassEffectStyle={{ style: "regular", animate: true, animationDuration: 0.12 }}
         isInteractive={false}
+        tintColor="rgba(122,44,255,0.10)"
         style={styles.glassSurface}
       >
         <View pointerEvents="none" style={styles.glassSheen} />
@@ -131,17 +132,21 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
       </View>
       {/* 三连液态水滴：逐像素复刻底栏 lens（对象式 regular + 高光带 +
           描边 + 底色），dock 本体不动 */}
-      <GlassContainer spacing={12} style={styles.glassRow}>
-        <LiquidGlassAction accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"} disabled={useFriendFlow && (friendState !== "NONE" || friendBusy)} onPress={() => { if (useFriendFlow) void sendFriendAdd(); else void toggleFollow(); }}>
-          {useFriendFlow ? (
-            <Text style={[styles.glassText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加"}</Text>
-          ) : (
-            <Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加"}</Text>
-          )}
-        </LiquidGlassAction>
-        <LiquidGlassAction accessibilityLabel="查看个人主页" disabled={!onViewPosts} onPress={() => onViewPosts?.(account)}><Text style={styles.glassText}>主页</Text></LiquidGlassAction>
-        <LiquidGlassAction accessibilityLabel="发消息" onPress={() => onMessage(account)}><Text style={styles.glassText}>发消息</Text></LiquidGlassAction>
-      </GlassContainer>
+      <View style={styles.glassStage}>
+        <View pointerEvents="none" style={styles.glowViolet} />
+        <View pointerEvents="none" style={styles.glowGold} />
+        <GlassContainer spacing={12} style={styles.glassRow}>
+          <LiquidGlassAction accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"} disabled={useFriendFlow && (friendState !== "NONE" || friendBusy)} onPress={() => { if (useFriendFlow) void sendFriendAdd(); else void toggleFollow(); }}>
+            {useFriendFlow ? (
+              <Text style={[styles.glassText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加"}</Text>
+            ) : (
+              <Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加"}</Text>
+            )}
+          </LiquidGlassAction>
+          <LiquidGlassAction accessibilityLabel="查看个人主页" disabled={!onViewPosts} onPress={() => onViewPosts?.(account)}><Text style={styles.glassText}>主页</Text></LiquidGlassAction>
+          <LiquidGlassAction accessibilityLabel="发消息" onPress={() => onMessage(account)}><Text style={styles.glassText}>发消息</Text></LiquidGlassAction>
+        </GlassContainer>
+      </View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       <View style={styles.card}><Text style={styles.cardTitle}>关于她</Text><Text style={styles.body}>{account.description}</Text><Text style={styles.personality}>{account.personality}</Text></View>
       <View style={styles.card}><Text style={styles.cardTitle}>她的动态</Text>{account.ugcSamples.map((post) => <View key={post} style={styles.ugcPost}><Text style={styles.ugcText}>{post}</Text><Text style={styles.ugcMeta}>AI 生成内容 · 刚刚</Text></View>)}</View>
@@ -162,7 +167,10 @@ const styles = StyleSheet.create({
   heroCopy: { flex: 1 }, nameRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 7 },
   aiPill: { backgroundColor: color.proxyPurpleSoft, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 5 }, aiPillText: { color: color.violet, fontSize: 11, fontWeight: "900" },
   name: { color: color.ink, fontSize: 25, fontWeight: "900" }, handle: { color: color.violet, fontSize: 12, fontWeight: "700", marginTop: 5 }, role: { color: color.muted, fontSize: 13, marginTop: 7 },
-  glassRow: { flexDirection: "row", gap: 12, marginHorizontal: 18, marginTop: 16 },
+  glassStage: { height: 78, justifyContent: "center", marginTop: 8, overflow: "hidden", position: "relative" },
+  glowViolet: { backgroundColor: "rgba(122,44,255,0.22)", borderRadius: 999, height: 72, left: 30, position: "absolute", top: 4, width: 132 },
+  glowGold: { backgroundColor: "rgba(255,184,69,0.20)", borderRadius: 999, bottom: 2, position: "absolute", right: 32, height: 62, width: 126 },
+  glassRow: { flexDirection: "row", gap: 12, marginHorizontal: 18 },
   glassBtn: { backgroundColor: "rgba(255,255,255,0.035)", borderColor: "rgba(255,255,255,0.34)", borderCurve: "continuous", borderRadius: 28, borderWidth: StyleSheet.hairlineWidth, flex: 1, height: 54, overflow: "hidden", position: "relative" },
   glassBtnDisabled: { opacity: 0.55 },
   glassSurface: { borderCurve: "continuous", borderRadius: 28, bottom: 0, left: 0, overflow: "hidden", position: "absolute", right: 0, top: 0 },
