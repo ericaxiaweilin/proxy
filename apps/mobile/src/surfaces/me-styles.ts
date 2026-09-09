@@ -74,13 +74,14 @@ export const styles = StyleSheet.create({
   profileTop: { alignItems: "center", flexDirection: "row", gap: 10 },
   profileAvatar: {
     alignItems: "center",
-    borderRadius: 15,
+    borderRadius: 23,
     height: 46,
     justifyContent: "center",
+    overflow: "hidden",
     width: 46
   },
   profileAvatarText: { color: color.white, fontSize: 18, fontWeight: "900" },
-  profileAvatarImg: { width: 46, height: 46, borderRadius: 15 },
+  profileAvatarImg: { width: 46, height: 46, borderRadius: 23 },
   profileCopy: { flex: 1 },
   profileName: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   profileMeta: { alignItems: "center", flexDirection: "row", gap: 5, marginTop: 3 },
@@ -156,13 +157,14 @@ export const styles = StyleSheet.create({
   },
   identityAvatar: {
     alignItems: "center",
-    borderRadius: 13,
+    borderRadius: 20,
     height: 40,
     justifyContent: "center",
+    overflow: "hidden",
     width: 40
   },
   identityAvatarSolid: { backgroundColor: "#17131F" },
-  identityAvatarImg: { width: 40, height: 40, borderRadius: 13 },
+  identityAvatarImg: { width: 40, height: 40, borderRadius: 20 },
   identityAvatarText: { color: color.white, fontSize: 16, fontWeight: "900" },
   identityCopy: { flex: 1 },
   identityName: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },

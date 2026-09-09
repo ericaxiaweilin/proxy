@@ -719,6 +719,13 @@ if ! grep -q 'PLACEHOLDER-007' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-007: PASS (tripwire present; covered by the vitest run above)"
 
+# PLACEHOLDER-008: 头像统一正圆。
+if ! grep -q 'PLACEHOLDER-008' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-008]: avatar-circle tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-008: PASS (tripwire present; covered by the vitest run above)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'

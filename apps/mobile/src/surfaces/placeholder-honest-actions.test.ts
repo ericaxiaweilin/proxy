@@ -296,3 +296,13 @@ describe("PLACEHOLDER-007 rail tracks finger 1:1", () => {
     expect(rail).not.toContain("railScrollXRef.current - gs.dx");
   });
 });
+
+describe("PLACEHOLDER-008 avatars are circles", () => {
+  const styles = readFileSync(fileURLToPath(new URL("./me-styles.ts", import.meta.url)), "utf8");
+
+  it("hub and identity avatars use half-size radii plus clipping", () => {
+    expect(styles).toContain("profileAvatarImg: { width: 46, height: 46, borderRadius: 23 }");
+    expect(styles).toContain("identityAvatarImg: { width: 40, height: 40, borderRadius: 20 }");
+    expect(styles).toContain("overflow: \"hidden\"");
+  });
+});
