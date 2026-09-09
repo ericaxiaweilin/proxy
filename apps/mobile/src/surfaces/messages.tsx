@@ -372,7 +372,8 @@ export function MessagesSurface({
           {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text style={styles.inlineClearText}>清除</Text></Pressable> : null}
         </View>
 
-        <View style={styles.homeTabs}>
+        {/* 对话/Convo/文件夹同一横滑行：页签与筛选 chips 并排，免占两行 */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabFolderRow}>
           <Pressable onPress={() => setPanel("dialogs")} style={[styles.homeTab, panel === "dialogs" && styles.homeTabActive]}>
             <Text style={[styles.homeTabText, panel === "dialogs" && styles.homeTabTextActive]}>对话</Text>
             <View style={[styles.countBadge, panel !== "dialogs" && styles.countBadgeMuted]}>
@@ -385,12 +386,7 @@ export function MessagesSurface({
               <Text style={styles.countBadgeText}>{groupDialogs.length}</Text>
             </View>
           </Pressable>
-        </View>
-      </View>
-
-      {/* folderRow — v8 */}
-      <View style={styles.folderRowWrap}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
+          <View style={styles.tabFolderDivider} />
           {(Object.keys(FOLDER_LABEL) as Folder[]).map((f) => (
             <Pressable key={f} onPress={() => setFolder(f)} style={[styles.folderChip, folder === f && styles.folderChipActive]}>
               <Text style={[styles.folderChipText, folder === f && styles.folderChipTextActive]}>{FOLDER_LABEL[f]}</Text>
@@ -547,7 +543,6 @@ const styles = StyleSheet.create({
   bellDot: { position: "absolute", right: 6, top: 6, width: 7, height: 7, borderRadius: 3.5, backgroundColor: "#f2ad29", borderWidth: 1, borderColor: "#fffdf8" },
   searchBox: { height: 38, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#f6f3ee", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 11, marginTop: 5, marginBottom: 13 },
   searchInput: { flex: 1, fontSize: 13.5, color: "#11110f", paddingVertical: 0 },
-  homeTabs: { flexDirection: "row", gap: 25, borderBottomWidth: 1, borderBottomColor: "#e8e3da" },
   homeTab: { height: 42, flexDirection: "row", alignItems: "center", paddingHorizontal: 1, borderBottomWidth: 2, borderBottomColor: "transparent" },
   homeTabActive: { borderBottomColor: "#11110f" },
   homeTabText: { fontSize: 13, fontWeight: "600", color: "#8a867f" },
@@ -555,8 +550,8 @@ const styles = StyleSheet.create({
   countBadge: { minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center", marginLeft: 4 },
   countBadgeMuted: { backgroundColor: "#e8e3da" },
   countBadgeText: { fontSize: 11, fontWeight: "700", color: "#fff" },
-  folderRowWrap: { borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "#fffefa" },
-  folderRow: { flexDirection: "row", gap: 7, paddingHorizontal: 16, paddingVertical: 10, alignItems: "center" },
+  tabFolderRow: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 8, alignItems: "center", borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "#fffefa" },
+  tabFolderDivider: { width: 1, height: 20, backgroundColor: "#e8e3da" },
   folderChip: { height: 29, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, paddingHorizontal: 11, justifyContent: "center", backgroundColor: "transparent" },
   folderChipActive: { backgroundColor: "#11110f", borderColor: "#11110f" },
   folderChipText: { fontSize: 11, fontWeight: "600", color: "#77736c" },
