@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 126 — 2026-09-09
+
+- Home 场景发现区的横滑轨道新增子按钮轻点通道：轻点不再被
+  PanResponder 抢走，横移超过 3px 后才由轨道接管，兼顾点击与防翻页。
+- 动作、场景、主题的“全部”从无反馈的清空操作改为完整选择面板；
+  支持单选、主题多选、清除筛选和完成。
+
 ## Revision 125 — 2026-09-09
 
 - 左滑删除宽松结算：轻滑 24px 即展开，被列表抢走手势也按最后位移

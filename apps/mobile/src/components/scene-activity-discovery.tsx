@@ -13,6 +13,7 @@ export type SceneDiscoveryBrief = {
 };
 
 type Taxon = { id: string; label: string; icon: ImageSource };
+type PickerKind = "ACTION" | "SCENE" | "THEME";
 type MomentSeed = {
   id: string;
   title: string;
@@ -108,6 +109,7 @@ export function SceneActivityDiscovery({
   const [themeIds, setThemeIds] = useState<readonly string[]>([]);
   const [saved, setSaved] = useState<readonly string[]>([]);
   const [detail, setDetail] = useState<MomentSeed>();
+  const [pickerKind, setPickerKind] = useState<PickerKind>();
 
   const filtered = useMemo(() => MOMENTS.filter((moment) =>
     (!actionId || moment.action === actionId)
@@ -120,8 +122,8 @@ export function SceneActivityDiscovery({
 
   return (
     <View style={styles.root}>
-      <SectionHead label="动作" onReset={() => setActionId(undefined)} />
-      <HorizontalSwipeRail contentContainerStyle={styles.actionRail}>
+      <SectionHead label="动作" onAll={() => setPickerKind("ACTION")} />
+      <HorizontalSwipeRail contentContainerStyle={styles.actionRail} preserveChildPresses threshold={3}>
         {ACTIONS.map((action) => {
           const active = action.id === actionId;
           return <Pressable accessibilityLabel={`动作 ${action.label}`} key={action.id} onPress={() => setActionId(active ? undefined : action.id)} style={[styles.actionCard, active && styles.selected]}>
@@ -131,8 +133,8 @@ export function SceneActivityDiscovery({
         })}
       </HorizontalSwipeRail>
 
-      <SectionHead label="场景" onReset={() => setSceneId(undefined)} />
-      <HorizontalSwipeRail contentContainerStyle={styles.sceneRail}>
+      <SectionHead label="场景" onAll={() => setPickerKind("SCENE")} />
+      <HorizontalSwipeRail contentContainerStyle={styles.sceneRail} preserveChildPresses threshold={3}>
         {SCENES.map((scene) => {
           const active = scene.id === sceneId;
           const live = liveSceneFor(scene.id);
@@ -145,8 +147,8 @@ export function SceneActivityDiscovery({
         })}
       </HorizontalSwipeRail>
 
-      <SectionHead label="主题" onReset={() => setThemeIds([])} />
-      <HorizontalSwipeRail contentContainerStyle={styles.themeRail}>
+      <SectionHead label="主题" onAll={() => setPickerKind("THEME")} />
+      <HorizontalSwipeRail contentContainerStyle={styles.themeRail} preserveChildPresses threshold={3}>
         {THEMES.map((theme) => {
           const active = themeIds.includes(theme.id);
           return <Pressable accessibilityLabel={`主题 ${theme.label}`} key={theme.id} onPress={() => setThemeIds((current) => active ? current.filter((id) => id !== theme.id) : [...current, theme.id])} style={[styles.themeChip, active && styles.themeSelected]}>
@@ -173,6 +175,26 @@ export function SceneActivityDiscovery({
         </Pressable>;
       })}</View> : <View style={styles.empty}><Text style={styles.emptyTitle}>暂时没有完全匹配的 Moment</Text><Text style={styles.emptyText}>减少一个筛选条件，看看更多组合。</Text></View>}
 
+      <Modal animationType="slide" onRequestClose={() => setPickerKind(undefined)} transparent visible={pickerKind !== undefined}>
+        <Pressable onPress={() => setPickerKind(undefined)} style={styles.backdrop}>
+          <View onStartShouldSetResponder={() => true} style={styles.pickerSheet}>
+            <View style={styles.grab} />
+            <View style={styles.pickerHead}><Text style={styles.pickerTitle}>全部{pickerKind === "ACTION" ? "动作" : pickerKind === "SCENE" ? "场景" : "主题"}</Text><Pressable onPress={() => { if (pickerKind === "ACTION") setActionId(undefined); else if (pickerKind === "SCENE") setSceneId(undefined); else setThemeIds([]); }}><Text style={styles.clear}>清除筛选</Text></Pressable></View>
+            <ScrollView contentContainerStyle={styles.pickerGrid}>
+              {(pickerKind === "ACTION" ? ACTIONS : pickerKind === "SCENE" ? SCENES : THEMES).map((item) => {
+                const active = pickerKind === "ACTION" ? actionId === item.id : pickerKind === "SCENE" ? sceneId === item.id : themeIds.includes(item.id);
+                return <Pressable key={item.id} onPress={() => {
+                  if (pickerKind === "ACTION") { setActionId(active ? undefined : item.id); setPickerKind(undefined); }
+                  else if (pickerKind === "SCENE") { setSceneId(active ? undefined : item.id); setPickerKind(undefined); }
+                  else setThemeIds((current) => active ? current.filter((id) => id !== item.id) : [...current, item.id]);
+                }} style={[styles.pickerItem, active && styles.pickerItemActive]}><Image contentFit="contain" source={item.icon} style={styles.pickerIcon} /><Text style={styles.pickerLabel}>{item.label}</Text>{active ? <Text style={styles.pickerCheck}>✓</Text> : null}</Pressable>;
+              })}
+            </ScrollView>
+            {pickerKind === "THEME" ? <Pressable onPress={() => setPickerKind(undefined)} style={styles.pickerDone}><Text style={styles.pickerDoneText}>完成</Text></Pressable> : null}
+          </View>
+        </Pressable>
+      </Modal>
+
       <Modal animationType="slide" onRequestClose={() => setDetail(undefined)} transparent visible={detail !== undefined}>
         <Pressable onPress={() => setDetail(undefined)} style={styles.backdrop}>
           {detail ? <View onStartShouldSetResponder={() => true} style={styles.sheet}>
@@ -187,8 +209,8 @@ export function SceneActivityDiscovery({
   );
 }
 
-function SectionHead({ label, onReset }: { label: string; onReset: () => void }): React.JSX.Element {
-  return <View style={styles.sectionHead}><Text style={styles.sectionTitle}>{label}</Text><Pressable hitSlop={8} onPress={onReset}><Text style={styles.all}>全部 〉</Text></Pressable></View>;
+function SectionHead({ label, onAll }: { label: string; onAll: () => void }): React.JSX.Element {
+  return <View style={styles.sectionHead}><Text style={styles.sectionTitle}>{label}</Text><Pressable accessibilityLabel={`查看全部${label}`} hitSlop={8} onPress={onAll}><Text style={styles.all}>全部 〉</Text></Pressable></View>;
 }
 
 function Tag({ icon, label }: { icon: ImageSource; label: string }): React.JSX.Element {
@@ -209,5 +231,6 @@ const styles = StyleSheet.create({
   filterState: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 10 }, filterStateText: { color: "#8C867E", flex: 1, fontSize: 11 }, clear: { color: "#151515", fontSize: 11, fontWeight: "900" },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 13 }, momentCard: { borderRadius: 17, height: 194, overflow: "hidden", width: "48.8%" }, momentPhoto: { height: "100%", width: "100%" }, momentShade: { backgroundColor: "rgba(0,0,0,0.18)", bottom: 0, height: 90, left: 0, position: "absolute", right: 0 }, heart: { position: "absolute", right: 8, top: 8 }, momentCopy: { bottom: 9, left: 9, position: "absolute", right: 7 }, momentTitle: { color: "#FFFFFF", fontSize: 16, fontWeight: "900", marginBottom: 8 }, tagRow: { flexDirection: "row", gap: 3 }, tag: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.94)", borderRadius: 999, flexDirection: "row", gap: 2, height: 25, maxWidth: "34%", paddingHorizontal: 4 }, tagIcon: { height: 17, width: 17 }, tagText: { color: "#151515", fontSize: 11, fontWeight: "700" },
   empty: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#E8E1D8", borderRadius: 18, borderWidth: 1, marginTop: 13, padding: 22 }, emptyTitle: { color: "#151515", fontSize: 13, fontWeight: "800" }, emptyText: { color: "#8C867E", fontSize: 11, marginTop: 6 },
+  pickerSheet: { backgroundColor: "#F7F4EF", borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: "78%", padding: 18, paddingBottom: 34 }, pickerHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 14 }, pickerTitle: { color: "#151515", fontSize: 22, fontWeight: "900" }, pickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9, paddingBottom: 8 }, pickerItem: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#E8E1D8", borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 7, minHeight: 52, paddingHorizontal: 12, width: "48.5%" }, pickerItemActive: { backgroundColor: "#FFF6DF", borderColor: "#151515", borderWidth: 2 }, pickerIcon: { height: 27, width: 27 }, pickerLabel: { color: "#151515", flex: 1, fontSize: 12, fontWeight: "800" }, pickerCheck: { color: "#151515", fontSize: 13, fontWeight: "900" }, pickerDone: { alignItems: "center", backgroundColor: "#151515", borderRadius: 17, marginTop: 12, paddingVertical: 13 }, pickerDoneText: { color: "#FFFFFF", fontSize: 13, fontWeight: "900" },
   backdrop: { backgroundColor: "rgba(0,0,0,0.28)", flex: 1, justifyContent: "flex-end" }, sheet: { backgroundColor: "#F7F4EF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 18, paddingBottom: 34 }, grab: { alignSelf: "center", backgroundColor: "#CFC8BF", borderRadius: 3, height: 4, marginBottom: 14, width: 42 }, detailPhoto: { borderRadius: 18, height: 180, width: "100%" }, detailTitle: { color: "#151515", fontSize: 24, fontWeight: "900", marginTop: 15 }, detailLayers: { flexDirection: "row", gap: 8, marginTop: 13 }, detailLayer: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#E8E1D8", borderRadius: 15, borderWidth: 1, flex: 1, padding: 10 }, detailIcon: { height: 30, width: 30 }, detailLabel: { color: "#8C867E", fontSize: 11, marginTop: 4 }, detailValue: { color: "#151515", fontSize: 11, fontWeight: "800", marginTop: 2 }, detailActions: { flexDirection: "row", gap: 8, marginTop: 16 }, secondaryButton: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#151515", borderRadius: 18, borderWidth: 1, flex: 1, paddingVertical: 13 }, secondaryText: { color: "#151515", fontSize: 12, fontWeight: "800" }, primaryButton: { alignItems: "center", backgroundColor: "#151515", borderRadius: 18, flex: 1.2, paddingVertical: 13 }, primaryText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" }, disabled: { opacity: 0.45 },
 });

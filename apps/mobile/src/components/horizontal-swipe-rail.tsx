@@ -40,6 +40,8 @@ export interface HorizontalSwipeRailProps {
   showScrollIndicator?: boolean;
   // 触发"接管横滑"的 dx 阈值 — 默认 6
   threshold?: number;
+  // 轨道内有按钮时，轻点必须交给子项；只有真正横移后才接管。
+  preserveChildPresses?: boolean;
 }
 
 export function HorizontalSwipeRail({
@@ -47,7 +49,8 @@ export function HorizontalSwipeRail({
   style,
   contentContainerStyle,
   showScrollIndicator = false,
-  threshold = 6
+  threshold = 6,
+  preserveChildPresses = false
 }: HorizontalSwipeRailProps): React.JSX.Element {
   const railRef = useRef<ScrollView>(null);
   const railScrollXRef = useRef(0);
@@ -68,9 +71,9 @@ export function HorizontalSwipeRail({
   //   onPanResponderTerminationRequest: () => false  — 拒绝外部抢走。
   const railPanResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => !preserveChildPresses,
       onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy),
+      onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy) && (!preserveChildPresses || Math.abs(gs.dx) > threshold),
       onMoveShouldSetPanResponderCapture: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > threshold,
       onPanResponderGrant: () => {
         // 快照 grant 时刻的偏移；move 全程只认它，保证严格 1:1。
