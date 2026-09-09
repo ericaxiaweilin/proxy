@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 137 — 2026-09-09
+
+- 文件夹页媒体墙下加回自建文件夹（PLACEHOLDER-016 修正四）：新建/
+  选中/移入移出全落盘，成员可点开、可移出。
+
 ## Revision 136 — 2026-09-09
 
 - 文件夹改微信式媒体浏览器（PLACEHOLDER-016/017 修正三）：扫各会话

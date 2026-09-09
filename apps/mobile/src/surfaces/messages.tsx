@@ -6,6 +6,7 @@ import { Image } from "expo-image";
 import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { IdentitySwitcher } from "../components/identity-switcher";
+import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { parseCommandResult } from "../login-client";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
@@ -25,6 +26,36 @@ type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccou
 // R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
+
+// 自建文件夹落盘（新建/移入移出），切模块重进不丢失。
+const foldersDir = new Directory(Paths.document, "proxy-folders");
+const foldersFile = new File(foldersDir, "folders-v1.json");
+function readFolders(): FolderV1[] {
+  try {
+    if (!foldersFile.exists) return [];
+    const raw: unknown = foldersFile.json();
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is FolderV1 =>
+      typeof x === "object" && x !== null &&
+      typeof (x as { id?: unknown }).id === "string" &&
+      typeof (x as { name?: unknown }).name === "string" &&
+      Array.isArray((x as { dialogIds?: unknown }).dialogIds)).map((x) => ({
+      id: x.id as string,
+      name: x.name as string,
+      dialogIds: (x.dialogIds as unknown[]).filter((d): d is string => typeof d === "string"),
+    }));
+  } catch {
+    return [];
+  }
+}
+function writeFolders(folders: FolderV1[]): void {
+  try {
+    foldersDir.create({ idempotent: true, intermediates: true });
+    foldersFile.write(JSON.stringify(folders));
+  } catch {
+    // 持久化失败不打断本次会话内的文件夹操作。
+  }
+}
 
 // 文件夹媒体浏览器（微信式）：照片/视频格子 + 发送人，按日期分组。
 // 数据来自各会话真实消息体（IMAGE/VIDEO + mediaRef），不是会话列表。
@@ -180,6 +211,24 @@ export function MessagesSurface({
   const [contactSearch, setContactSearch] = useState("");
   // 文件夹页类型筛选：全部/照片/视频。
   const [folderKind, setFolderKind] = useState<"all" | FolderMediaKind>("all");
+  // 自建文件夹：选中过滤成员，移入移出落盘。
+  const [folders, setFolders] = useState<FolderV1[]>(() => readFolders());
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  function persistFolders(next: FolderV1[]): void {
+    setFolders(next);
+    writeFolders(next);
+    if (selectedFolderId && !next.some((f) => f.id === selectedFolderId)) setSelectedFolderId(null);
+  }
+  function createFolder(name: string): void {
+    persistFolders([...folders, { id: `f_${Date.now()}`, name, dialogIds: [] }]);
+  }
+  function toggleFolderMember(folderId: string, dialogId: string): void {
+    persistFolders(folders.map((f) => {
+      if (f.id !== folderId) return f;
+      const has = f.dialogIds.includes(dialogId);
+      return { ...f, dialogIds: has ? f.dialogIds.filter((id) => id !== dialogId) : [...f.dialogIds, dialogId] };
+    }));
+  }
   // 文件夹媒体：首次进文件夹页时扫描各会话消息体；失败整页重试。
   const [folderMedia, setFolderMedia] = useState<FolderMediaItem[] | undefined>(undefined);
   const [folderMediaError, setFolderMediaError] = useState(false);
@@ -547,22 +596,33 @@ export function MessagesSurface({
             {groupDialogs.length === 0 ? (
               <Text style={styles.preview}>还没有群组对话</Text>
             ) : null}
-            {groupDialogs.map((c) => (
-              <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
-              <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
-                <View style={styles.convoHead}>
-                  <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
-                  <View style={styles.convoCopy}>
-                    <Text style={styles.convoName}>{c.name}</Text>
-                    <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
+            {groupDialogs.map((c) => {
+              const selected = folders.find((f) => f.id === selectedFolderId);
+              const inSelected = selected?.dialogIds.includes(c.id) ?? false;
+              return (
+                <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
+                <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
+                  <View style={styles.convoHead}>
+                    <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
+                    <View style={styles.convoCopy}>
+                      <Text style={styles.convoName}>{c.name}</Text>
+                      <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
+                    </View>
+                    {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
                   </View>
-                  {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
-                </View>
-                <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
-                <View style={styles.convoFoot}><Text style={styles.convoFootText}>{c.time}</Text></View>
-              </Pressable>
-              </SwipeableRow>
-            ))}
+                  <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
+                  <View style={styles.convoFoot}>
+                    <Text style={styles.convoFootText}>{c.time}</Text>
+                    {selected ? (
+                      <Pressable onPress={(event) => { event.stopPropagation(); toggleFolderMember(selected.id, c.id); }} accessibilityLabel={inSelected ? `把${c.name}移出${selected.name}` : `把${c.name}加入${selected.name}`}>
+                        <Text style={styles.convoFolderAction}>{inSelected ? "－ 移出" : "＋ 文件夹"}</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </Pressable>
+                </SwipeableRow>
+              );
+            })}
           </>
         ) : (
           <>
@@ -667,6 +727,42 @@ export function MessagesSurface({
                     </Modal>
                   ) : null}
                 </>
+              );
+            })()}
+            <FolderManager
+              folders={folders}
+              onCreate={createFolder}
+              selectedId={selectedFolderId}
+              onSelect={setSelectedFolderId}
+            />
+            {(() => {
+              const selected = folders.find((f) => f.id === selectedFolderId);
+              if (!selected) return null;
+              const members = visibleDialogs.filter((c) => selected.dialogIds.includes(c.id));
+              return (
+                <View key={selected.id}>
+                  <Text style={styles.sectionLabel}>{selected.name} · {members.length} 个会话</Text>
+                  {members.length === 0 ? (
+                    <Text style={styles.preview}>还没有会话。去 Convo 卡片点「＋ 文件夹」移入。</Text>
+                  ) : null}
+                  {members.map((c) => (
+                    <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
+                    <Pressable onPress={() => onOpenConversation(c.name, c.conversationId, c.aiAccount, c.avatarSource)} style={styles.dialog}>
+                      {c.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:foldermember:${c.conversationId ?? c.id}`} source={c.avatarSource} style={styles.avatar} transition={0} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.initial}</Text></View>}
+                      <View style={styles.dialogMain}>
+                        <View style={styles.dialogTop}><Text style={styles.dialogName} numberOfLines={1}>{c.name}</Text></View>
+                        <Text style={styles.preview} numberOfLines={1}>{c.preview}</Text>
+                      </View>
+                      <View style={styles.dialogSide}>
+                        <Text style={styles.time}>{c.time}</Text>
+                        <Pressable onPress={(event) => { event.stopPropagation(); toggleFolderMember(selected.id, c.id); }} accessibilityLabel={`把${c.name}移出${selected.name}`}>
+                          <Text style={styles.convoFolderAction}>－ 移出</Text>
+                        </Pressable>
+                      </View>
+                    </Pressable>
+                    </SwipeableRow>
+                  ))}
+                </View>
               );
             })()}
           </>
@@ -795,6 +891,7 @@ const styles = StyleSheet.create({
   convoPreview: { marginTop: 9, fontSize: 12.5, lineHeight: 18, color: "#68645e" },
   convoFoot: { flexDirection: "row", alignItems: "center", marginTop: 9 },
   convoFootText: { flex: 1, fontSize: 11, color: "#99958d" },
+  convoFolderAction: { fontSize: 11, fontWeight: "800", color: "#5B2CB5" },
   convoFootTime: { fontSize: 11, fontWeight: "700", color: "#54514b" },
   topbar: { height: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: "#e8e3da", backgroundColor: "rgba(255,253,248,0.98)" },
   centerTitle: { flex: 1, alignItems: "center" },

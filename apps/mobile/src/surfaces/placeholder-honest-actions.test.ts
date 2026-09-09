@@ -420,10 +420,11 @@ describe("PLACEHOLDER-015 no redundant recent header", () => {
   });
 });
 
-describe("PLACEHOLDER-016 folders are a media browser beside dialogs and convos", () => {
+describe("PLACEHOLDER-016 folders are a media browser plus custom folders", () => {
   const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+  const folders = readFileSync(fileURLToPath(new URL("../components/folder-manager.tsx", import.meta.url)), "utf8");
 
-  it("renders 对话/Convo/文件夹 side by side with photo grid and senders", () => {
+  it("renders 对话/Convo/文件夹 side by side with media grid and custom folders", () => {
     expect(messages).toContain('setPanel("folders")');
     expect(messages).toContain(">文件夹</Text>");
     expect(messages).toContain("styles.homeTabs");
@@ -433,8 +434,11 @@ describe("PLACEHOLDER-016 folders are a media browser beside dialogs and convos"
     expect(messages).toContain("listMessages");
     expect(messages).toContain("mediaSender");
     expect(messages).toContain("mediaGrid");
-    expect(messages).not.toContain("proxy-folders");
-    expect(messages).not.toContain("toggleFolderMember");
+    expect(messages).toContain("proxy-folders");
+    expect(messages).toContain("toggleFolderMember");
+    expect(messages).toContain("自建文件夹");
+    expect(folders).toContain("onSelect");
+    expect(folders).not.toContain("onMove");
   });
 });
 
