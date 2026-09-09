@@ -225,11 +225,20 @@ export function AppShell({
   //   让 RN responder 谈判系统能识别 “子组件先抢” (FilterChipRail /
   //   multi-image ScrollView / stories), 避免原来的 plain touch
   //   handler 总是赢走横滑。
+  // 消息页左滑留给行内删除：用 ref 读当前页（闭包只建一次，直接读
+  // currentPage 会是首屏旧值），MSG_* 页禁止向左跳页，向右保留。
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+  function isMessagesPage(page: PageId): boolean {
+    return page === "MSG_CHAT" || page === "MSG_FRIENDS";
+  }
   const bodySwipePanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gs) => {
         if (rootSwipeBlockedRef.current) return false;
+        // 消息页左滑归行内删除，不参与整页抢夺。
+        if (isMessagesPage(currentPageRef.current) && gs.dx < 0) return false;
         const absDx = Math.abs(gs.dx);
         const absDy = Math.abs(gs.dy);
         const swipeThreshold = 56;
@@ -244,9 +253,10 @@ export function AppShell({
         const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
         const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
         if (isHorizontalSwipe && canSwipeRoot) {
-          const idx = PAGE_SEQUENCE.indexOf(currentPage);
+          const page = currentPageRef.current;
+          const idx = PAGE_SEQUENCE.indexOf(page);
           if (idx < 0) return;
-          if (dx < 0 && idx < PAGE_SEQUENCE.length - 1) goToPage(PAGE_SEQUENCE[idx + 1]!);
+          if (dx < 0 && !isMessagesPage(page) && idx < PAGE_SEQUENCE.length - 1) goToPage(PAGE_SEQUENCE[idx + 1]!);
           else if (dx > 0 && idx > 0) goToPage(PAGE_SEQUENCE[idx - 1]!);
         }
       },
