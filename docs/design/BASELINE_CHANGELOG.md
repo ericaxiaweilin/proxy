@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 147 — 2026-09-10
+
+- 真人能力页返回栏进入 iOS/Android 安全区，扩大点击热区，返回明确关闭全屏页并回到 Home。
+- 历史活动数字改为可点击的公开履历；只展示本人选择公开的摘要，明确标注非公开记录不展示。
+- Linh 样板补齐三条公开活动记录；该公开范围是产品隐私选择，不代表平台可公开全部履约明细。
+
 ## Revision 146 — 2026-09-09
 
 - Home 真人头像进入全屏能力页；添加、主页、发消息提升至人物信息顶部，沿用 AI 主页的操作顺序。

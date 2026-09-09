@@ -100,6 +100,11 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain("位共同好友");
     expect(fixtures).not.toContain('{ id: "mutual", label: "共同好友" }');
     expect(fixtures).toContain('sceneNames: person.id === "u_linh"');
+    expect(source).toContain('accessibilityLabel="返回Home"');
+    expect(source).toContain("safeArea.top");
+    expect(source).toContain('accessibilityLabel="查看公开历史活动"');
+    expect(source).toContain("publicActivityHistory?.length");
+    expect(source).toContain("非公开记录不展示");
   });
 
   it("reuses the approved Scene action logo registry in the compact Home action rail", () => {

@@ -43,6 +43,7 @@ export interface RecommendPerson {
   capabilities?: string[];
   themes?: string[];
   sceneNames?: string[];
+  publicActivityHistory?: Array<{ id: string; title: string; scene: string; dateLabel: string; rating: number }>;
 }
 
 const R34_HUMAN_PORTRAITS = [
@@ -66,6 +67,11 @@ function withR34Portraits(people: RecommendPerson[], offset: number): RecommendP
     capabilities: person.id === "u_linh" ? ["胶片街拍", "City Walk", "奥黛写真"] : [person.bio.split("/")[0]?.trim() || "城市同行", "本地陪伴"],
     themes: person.id === "u_linh" ? ["胶片", "老城区", "日落"] : ["日常", "本地生活"],
     sceneNames: person.id === "u_linh" ? ["河内老城区", "还剑湖", "西湖日落"] : [],
+    publicActivityHistory: person.id === "u_linh" ? [
+      { id: "linh_history_01", title: "胶片 City Walk", scene: "河内老城区", dateLabel: "2026年8月", rating: 5 },
+      { id: "linh_history_02", title: "西湖日落街拍", scene: "西湖", dateLabel: "2026年7月", rating: 4.9 },
+      { id: "linh_history_03", title: "奥黛写真同行", scene: "还剑湖", dateLabel: "2026年6月", rating: 4.9 },
+    ] : [],
   }));
 }
 

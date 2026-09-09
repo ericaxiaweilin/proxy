@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { HomeSearchDock } from "../components/home-search-dock";
 import { buildHomeSearchIndex, matchHomeSearchIntent, type HomeSearchSuggestion } from "../home-search-intent";
@@ -132,6 +133,7 @@ export function RequesterHome({
   onChooserVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
+  const safeArea = useSafeAreaInsets();
   // Home Search/Conversation v3：常驻搜索 dock（原型 .searchDock）。
   // searchQuery 只驱动全站实体匹配；模型历史统一由消息模块持久化。
   const [searchQuery, setSearchQuery] = useState("");
@@ -164,6 +166,7 @@ export function RequesterHome({
   const [relationshipBusyId, setRelationshipBusyId] = useState<string | undefined>(undefined);
   const [relationshipMsg, setRelationshipMsg] = useState<string | undefined>(undefined);
   const [humanScenePreview, setHumanScenePreview] = useState<{ person: RecommendPerson; sceneId: string } | undefined>(undefined);
+  const [publicHistoryOpen, setPublicHistoryOpen] = useState(false);
 
   useEffect(() => {
     onChooserVisibilityChange?.(chooser !== null);
@@ -657,7 +660,7 @@ export function RequesterHome({
         {filteredPeople.map((p) => (
           <Pressable
             key={`story:${p.id}`}
-            onPress={() => setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId })}
+            onPress={() => { setPublicHistoryOpen(false); setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId }); }}
             style={styles.story}
             accessibilityLabel={`推荐人 ${p.name}，${p.online ? "在线" : "离线"}`}
           >
@@ -1005,7 +1008,7 @@ export function RequesterHome({
 
       {humanScenePreview ? <Modal animationType="slide" onRequestClose={() => setHumanScenePreview(undefined)} visible>
         <View style={styles.humanScenePage}>
-          <View style={styles.humanSceneHeader}><Pressable accessibilityLabel="关闭人物能力页" onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text style={styles.humanSceneBackText}>‹ 返回</Text></Pressable><Text style={styles.humanSceneHeaderTitle}>真人主页</Text><View style={styles.humanSceneHeaderSpacer} /></View>
+          <View style={[styles.humanSceneHeader, { height: 54 + safeArea.top, paddingTop: safeArea.top }]}><Pressable accessibilityLabel="返回Home" hitSlop={12} onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text style={styles.humanSceneBackText}>‹ 返回</Text></Pressable><Text style={styles.humanSceneHeaderTitle}>真人主页</Text><View style={styles.humanSceneHeaderSpacer} /></View>
             <ScrollView contentContainerStyle={styles.humanSceneContent} showsVerticalScrollIndicator={false}>
               <View style={styles.humanSceneTop}>
                 <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? "附近 · 现在可见" : "附近推荐"}</Text>
@@ -1027,8 +1030,9 @@ export function RequesterHome({
               <View style={styles.humanSceneFacts}>
                 <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? "查看可用时间"}</Text></View>
                 <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? `${humanScenePreview.person.completedActivities} 次历史活动` : "暂无公开记录"}</Text></View>
+                <Pressable accessibilityLabel="查看公开历史活动" onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? `${humanScenePreview.person.completedActivities} 次历史活动 ›` : "暂无公开记录"}</Text></Pressable>
               </View>
+              {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text style={styles.humanSceneHistoryTitle}>本人公开的活动记录</Text><Text style={styles.humanSceneHistoryPrivacy}>非公开记录不展示</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text style={styles.humanSceneHistoryName}>{item.title}</Text><Text style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text style={styles.humanSceneHistoryEmpty}>她暂未公开活动明细。</Text>}</View> : null}
               <Text style={styles.humanSceneSectionTitle}>她可以做什么</Text>
               <View style={styles.humanScenePills}>{humanScenePreview.person.capabilities?.map((item) => <View key={item} style={styles.humanScenePill}><Text style={styles.humanScenePillText}>{item}</Text></View>)}</View>
               <Text style={styles.humanSceneSectionTitle}>与当前推荐的关联</Text>
@@ -1268,6 +1272,16 @@ const styles = StyleSheet.create({
   humanSceneFacts: { flexDirection: "row", gap: 7, marginTop: 14 },
   humanSceneFact: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 14, borderWidth: 1, flex: 1, gap: 5, justifyContent: "center", minHeight: 62, paddingHorizontal: 6 },
   humanSceneFactValue: { color: "#DCE6F7", fontSize: 11, fontWeight: "700", textAlign: "center" },
+  humanSceneHistory: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 16, borderWidth: 1, marginTop: 9, padding: 12 },
+  humanSceneHistoryHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+  humanSceneHistoryTitle: { color: color.white, fontSize: 13, fontWeight: "900" },
+  humanSceneHistoryPrivacy: { color: "#AAB9CE", fontSize: 11 },
+  humanSceneHistoryRow: { alignItems: "center", borderTopColor: "rgba(255,255,255,0.12)", borderTopWidth: 1, flexDirection: "row", paddingVertical: 10 },
+  humanSceneHistoryCopy: { flex: 1 },
+  humanSceneHistoryName: { color: color.white, fontSize: 13, fontWeight: "800" },
+  humanSceneHistoryMeta: { color: "#AAB9CE", fontSize: 11, marginTop: 3 },
+  humanSceneHistoryRating: { color: "#FFCE55", fontSize: 12, fontWeight: "900" },
+  humanSceneHistoryEmpty: { color: "#AAB9CE", fontSize: 12, paddingVertical: 12 },
   humanScenePills: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 9 },
   humanScenePill: { backgroundColor: "rgba(88,108,255,0.2)", borderColor: "rgba(150,203,255,0.45)", borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
   humanScenePillText: { color: color.white, fontSize: 12, fontWeight: "800" },
