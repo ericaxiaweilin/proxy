@@ -325,3 +325,16 @@ describe("PLACEHOLDER-009 avatars persist on disk", () => {
     expect(messages).toContain('import { Image } from "expo-image"');
   });
 });
+
+describe("PLACEHOLDER-010 ai add shows pending", () => {
+  const profile = readFileSync(fileURLToPath(new URL("./ai-account-profile.tsx", import.meta.url)), "utf8");
+  const shell = readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8");
+
+  it("reads friendship truth and locks pending as 添加中", () => {
+    expect(profile).toContain("listMyFriendships");
+    expect(profile).toContain("sendFriendRequest");
+    expect(profile).toContain("添加中");
+    expect(profile).toContain('disabled={friendState !== "NONE" || friendBusy}');
+    expect(shell).toContain("relationship={relationship}");
+  });
+});

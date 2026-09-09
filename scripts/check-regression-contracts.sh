@@ -733,6 +733,13 @@ if ! grep -q 'PLACEHOLDER-009' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-009: PASS (tripwire present; covered by the vitest run above)"
 
+# PLACEHOLDER-010: AI 添加待同意显示添加中。
+if ! grep -q 'PLACEHOLDER-010' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-010]: ai-pending tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-010: PASS (tripwire present; covered by the vitest run above)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'

@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 116 — 2026-09-08
+
+- AI 主页添加走好友关系真相（PLACEHOLDER-010）：已申请未同意显示
+  “添加中”并锁定，不再挂添加前文案；与首页 + 号同一条链。
+
 ## Revision 115 — 2026-09-08
 
 - 个人总管理头像与 Home 同尺寸正圆（88）。
