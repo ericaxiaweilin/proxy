@@ -18,6 +18,7 @@ import { createProfileStore, DEFAULT_PROFILE, avatarFileName, type ProfileRecord
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { CreatorInvitationCard } from "./creator-application";
@@ -1281,7 +1282,7 @@ export function MeSurface({
             <Text style={styles.customSectionHint}>公开主页展示</Text>
             <View style={styles.profileManageRow}>
               <View style={styles.profileManageAva}>
-                {profileAvatarUri ? <Image source={{ uri: profileAvatarUri }} style={styles.profileManageAvaImg} /> : <Text style={styles.profileManageAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
+                {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={88} uri={profileAvatarUri} /> : <Text style={styles.profileManageAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
               </View>
               <View style={styles.profileManageCopy}>
                 <Text style={styles.profileManageName}>{profileDraft.name}</Text>
@@ -1359,7 +1360,7 @@ export function MeSurface({
               </View>
               <View style={styles.personalAvaWrap}>
                 <View style={styles.personalAva}>
-                  {profileAvatarUri ? <Image source={{ uri: profileAvatarUri }} style={styles.personalAvaImg} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
+                  {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={82} uri={profileAvatarUri} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
                 </View>
                 <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAvaAdd}>
                   <ProxyIcon name="plus" color="#333" size={15} />
@@ -1856,7 +1857,7 @@ export function MeSurface({
             <View style={styles.profileTop}>
               <Gradient from="#241246" to="#7A2CFF" style={styles.profileAvatar}>
                 {hubProfile.hasAvatar ? (
-                  <Image source={{ uri: profileAvatarUri }} style={styles.profileAvatarImg} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={46} uri={profileAvatarUri!} />
                 ) : (
                   <Text style={styles.profileAvatarText}>{hubProfile.initial}</Text>
                 )}
@@ -1909,7 +1910,7 @@ export function MeSurface({
             {persona.avatarGrad ? (
               <Gradient from={color.magenta} to={color.violet} style={styles.identityAvatar}>
                 {hubProfile.hasAvatar ? (
-                  <Image source={{ uri: profileAvatarUri }} style={styles.identityAvatarImg} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={40} uri={profileAvatarUri!} />
                 ) : (
                   <Text style={styles.identityAvatarText}>{hubProfile.initial}</Text>
                 )}
@@ -1917,7 +1918,7 @@ export function MeSurface({
             ) : (
               <View style={[styles.identityAvatar, styles.identityAvatarSolid]}>
                 {hubProfile.hasAvatar ? (
-                  <Image source={{ uri: profileAvatarUri }} style={styles.identityAvatarImg} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={40} uri={profileAvatarUri!} />
                 ) : (
                   <Text style={styles.identityAvatarText}>{hubProfile.initial}</Text>
                 )}

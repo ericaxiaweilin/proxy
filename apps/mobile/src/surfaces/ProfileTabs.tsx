@@ -13,6 +13,7 @@ import { Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from "rea
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
 import type { LocalNetClient } from "../localnet-client";
 import { selectPinnedPostAndRest, selectPostMedia, type ProfileMediaEntry } from "./profile-tabs-model";
 export type { ProfileMediaEntry } from "./profile-tabs-model";
@@ -365,7 +366,7 @@ function PostCard(props: {
       <View style={styles.postHead}>
         <View style={styles.postAvatar}>
           {props.avatarUri ? (
-            <Image source={{ uri: props.avatarUri }} style={styles.postAvatarImage} />
+            <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={38} uri={props.avatarUri} />
           ) : (
             <Text style={styles.postAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
           )}
@@ -611,7 +612,6 @@ const styles = StyleSheet.create({
   postCard: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0", backgroundColor: "#fff" },
   postHead: { flexDirection: "row", alignItems: "center" },
   postAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#cbd5e1", alignItems: "center", justifyContent: "center", marginRight: 10, overflow: "hidden" },
-  postAvatarImage: { width: 38, height: 38, resizeMode: "cover" },
   postAvatarText: { fontSize: 16, color: "#0f172a", fontWeight: "700" },
   postHeadBody: { flex: 1 },
   postName: { fontSize: 13, fontWeight: "700", color: "#0f172a" },

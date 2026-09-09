@@ -256,7 +256,7 @@ describe("PLACEHOLDER-005 own avatar in feed, moment lands on feed", () => {
   it("resolves own avatar from the same store as profile management", () => {
     expect(feed).toContain("viewerAvatarUri");
     expect(feed).toContain("createProfileStore");
-    expect(feed).toContain("postAvatarImage");
+    expect(feed).toContain("CircularAvatarImage");
     expect(feed).toContain("isOwnPost");
     expect(shell).toContain("viewerAccountId");
   });
@@ -299,17 +299,24 @@ describe("PLACEHOLDER-007 rail tracks finger 1:1", () => {
 
 describe("PLACEHOLDER-008 avatars are circles", () => {
   const styles = readFileSync(fileURLToPath(new URL("./me-styles.ts", import.meta.url)), "utf8");
+  const me = readFileSync(fileURLToPath(new URL("./me.tsx", import.meta.url)), "utf8");
+  const feed = readFileSync(fileURLToPath(new URL("./feed.tsx", import.meta.url)), "utf8");
+  const profileTabs = readFileSync(fileURLToPath(new URL("./ProfileTabs.tsx", import.meta.url)), "utf8");
+  const circularAvatar = readFileSync(fileURLToPath(new URL("../components/circular-avatar-image.tsx", import.meta.url)), "utf8");
 
-  it("hub and identity avatars use half-size radii plus clipping", () => {
-    expect(styles).toContain('profileAvatarImg: { width: 46, height: 46, resizeMode: "cover" }');
-    expect(styles).toContain('identityAvatarImg: { width: 40, height: 40, resizeMode: "cover" }');
+  it("uses an actual SVG circle clip instead of relying on iOS rounded-view compositing", () => {
+    expect(circularAvatar).toContain("<ClipPath");
+    expect(circularAvatar).toContain("<Circle");
+    expect(circularAvatar).toContain('preserveAspectRatio="xMidYMid slice"');
     expect(styles).toContain("overflow: \"hidden\"");
   });
 
-  it("manage and profile avatars use their circular parent mask without cropping zoom", () => {
+  it("uses the circle clip on account, feed and profile-post portraits without zoom transforms", () => {
     expect(styles).toContain("profileManageAva: { width: 88, height: 88, borderRadius: 44");
-    expect(styles).toContain('profileManageAvaImg: { width: 88, height: 88, resizeMode: "cover" }');
-    expect(styles).toContain('personalAvaImg: { width: 82, height: 82, resizeMode: "cover" }');
+    expect(me).toContain("<CircularAvatarImage");
+    expect(feed).toContain("<CircularAvatarImage");
+    expect(profileTabs).toContain("<CircularAvatarImage");
+    expect(me).not.toContain("transform: [{ scale: 1.1 }]");
   });
 });
 

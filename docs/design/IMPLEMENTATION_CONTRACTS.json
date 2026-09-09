@@ -26,7 +26,7 @@
         "apps/mobile/src/surfaces/ProfileTabs.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "The implementation uses a newer five-tab information architecture while the active reference still specifies Dynamic/Photos/Records and composer ownership controls. R36.x MOCK-002: 设置页无响应模拟按钮已删 (Revision 56). R36.x MOCK-002: 设置页无响应模拟按钮已删；会话历史 200 条封顶 (Revision 60). Revision 117 unifies feed and profile-post portraits behind true circular clipping masks without zoom-cropping the source photo."
+      "knownGap": "The implementation uses a newer five-tab information architecture while the active reference still specifies Dynamic/Photos/Records and composer ownership controls. R36.x MOCK-002: 设置页无响应模拟按钮已删 (Revision 56). R36.x MOCK-002: 设置页无响应模拟按钮已删；会话历史 200 条封顶 (Revision 60). Revision 117 unifies feed and profile-post portrait layout without zoom-cropping. Revision 120 replaces iOS rounded-view compositing with an explicit SVG circular clip path for account and post portraits."
     },
     {
       "scope": "merchant-me",

@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 120 — 2026-09-09
+
+- 账户头像、动态帖文头像与个人主页帖文头像改用 SVG `Circle` 的真实
+  `clipPath`，不再依赖 iOS 小尺寸圆角图层合成，消除真机多边形边缘。
+- 图片仍按中心等比填充，不放大、不额外截断人物左右两侧。
+
 ## Revision 119 — 2026-09-09
 
 - AI 三按钮换真水滴配方（regular 材质 + continuous 曲线 + 高光线，

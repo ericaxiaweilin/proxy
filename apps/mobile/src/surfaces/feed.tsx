@@ -17,6 +17,7 @@ import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
 import { FilterChipRail } from "../components/filter-chip-rail";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { isOpportunityPost } from "../feed-content";
 import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
 // v2 重构：深紫黑底 + compositionHint 驱动 fill。Sprint C 替换完成。
@@ -1037,7 +1038,7 @@ export function FeedSurface({
                 <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatarClip}>
                     {isOwnPost(post) && viewerAvatarUri ? (
-                      <Image source={{ uri: viewerAvatarUri }} style={styles.postAvatarImage} />
+                      <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} uri={viewerAvatarUri} />
                     ) : (
                       <View style={styles.postAvatar}>
                         <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
@@ -1565,7 +1566,6 @@ const styles = StyleSheet.create({
   profileDropText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   postAvatarWrap: { height: 44, position: "relative", width: 44 },
   postAvatarClip: { borderRadius: 22, height: 44, overflow: "hidden", width: 44 },
-  postAvatarImage: { height: 44, resizeMode: "cover", width: 44 },
   postAvatar: {
     alignItems: "center",
     backgroundColor: "#111",
