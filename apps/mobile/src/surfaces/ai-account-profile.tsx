@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { GlassContainer, GlassView } from "expo-glass-effect";
@@ -18,6 +18,29 @@ import { color, shadows } from "../theme";
 // 只看 engagement 二进制会把“已申请”误判成“没添加”，这正是之前
 // 首页点了 +、主页还显示旧文案的原因。
 export type AiFriendState = "NONE" | "OUTGOING" | "FRIEND";
+
+function LiquidGlassAction({ accessibilityLabel, children, disabled = false, onPress }: {
+  accessibilityLabel: string;
+  children: ReactNode;
+  disabled?: boolean;
+  onPress: () => void;
+}): React.JSX.Element {
+  return (
+    <View style={[styles.glassBtn, disabled && styles.glassBtnDisabled]}>
+      <GlassView
+        glassEffectStyle={{ style: "regular", animate: true, animationDuration: 0.12 }}
+        isInteractive={false}
+        style={styles.glassSurface}
+      >
+        <View pointerEvents="none" style={styles.glassSheen} />
+      </GlassView>
+      <Pressable accessibilityLabel={accessibilityLabel} disabled={disabled} onPress={onPress} style={styles.glassPress}>
+        {children}
+      </Pressable>
+    </View>
+  );
+}
+
 export function AIAccountProfileSurface({ account, engagement, relationship, initialFriendState, secureSessionStore, onBack, onMessage, onViewPosts }: {
   account: PlatformAIAccount;
   engagement: EngagementClient;
@@ -108,20 +131,16 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
       </View>
       {/* 三连液态水滴：逐像素复刻底栏 lens（对象式 regular + 高光带 +
           描边 + 底色），dock 本体不动 */}
-      <GlassContainer spacing={8} style={styles.glassRow}>
-        <GlassView glassEffectStyle={{ style: "regular" }} isInteractive style={styles.glassBtn}>
+      <GlassContainer spacing={12} style={styles.glassRow}>
+        <LiquidGlassAction accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"} disabled={useFriendFlow && (friendState !== "NONE" || friendBusy)} onPress={() => { if (useFriendFlow) void sendFriendAdd(); else void toggleFollow(); }}>
           {useFriendFlow ? (
-            <Pressable disabled={friendState !== "NONE" || friendBusy} onPress={() => void sendFriendAdd()} style={styles.glassPress} accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"}><View pointerEvents="none" style={styles.glassSheen} /><Text style={[styles.glassText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加"}</Text></Pressable>
+            <Text style={[styles.glassText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加"}</Text>
           ) : (
-            <Pressable onPress={() => void toggleFollow()} style={styles.glassPress}><View pointerEvents="none" style={styles.glassSheen} /><Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加"}</Text></Pressable>
+            <Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加"}</Text>
           )}
-        </GlassView>
-        <GlassView glassEffectStyle={{ style: "regular" }} isInteractive style={styles.glassBtn}>
-          <Pressable onPress={() => onViewPosts?.(account)} disabled={!onViewPosts} style={styles.glassPress} accessibilityLabel="查看个人主页"><View pointerEvents="none" style={styles.glassSheen} /><Text style={styles.glassText}>主页</Text></Pressable>
-        </GlassView>
-        <GlassView glassEffectStyle={{ style: "regular" }} isInteractive style={styles.glassBtn}>
-          <Pressable onPress={() => onMessage(account)} style={styles.glassPress} accessibilityLabel="发消息"><View pointerEvents="none" style={styles.glassSheen} /><Text style={styles.glassText}>发消息</Text></Pressable>
-        </GlassView>
+        </LiquidGlassAction>
+        <LiquidGlassAction accessibilityLabel="查看个人主页" disabled={!onViewPosts} onPress={() => onViewPosts?.(account)}><Text style={styles.glassText}>主页</Text></LiquidGlassAction>
+        <LiquidGlassAction accessibilityLabel="发消息" onPress={() => onMessage(account)}><Text style={styles.glassText}>发消息</Text></LiquidGlassAction>
       </GlassContainer>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       <View style={styles.card}><Text style={styles.cardTitle}>关于她</Text><Text style={styles.body}>{account.description}</Text><Text style={styles.personality}>{account.personality}</Text></View>
@@ -143,9 +162,11 @@ const styles = StyleSheet.create({
   heroCopy: { flex: 1 }, nameRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 7 },
   aiPill: { backgroundColor: color.proxyPurpleSoft, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 5 }, aiPillText: { color: color.violet, fontSize: 11, fontWeight: "900" },
   name: { color: color.ink, fontSize: 25, fontWeight: "900" }, handle: { color: color.violet, fontSize: 12, fontWeight: "700", marginTop: 5 }, role: { color: color.muted, fontSize: 13, marginTop: 7 },
-  glassRow: { flexDirection: "row", gap: 8, marginHorizontal: 18, marginTop: 16 },
-  glassBtn: { backgroundColor: "rgba(255,255,255,0.035)", borderColor: "rgba(255,255,255,0.34)", borderCurve: "continuous", borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, flex: 1, overflow: "hidden" },
-  glassPress: { alignItems: "center", justifyContent: "center", minHeight: 46, paddingHorizontal: 6 },
+  glassRow: { flexDirection: "row", gap: 12, marginHorizontal: 18, marginTop: 16 },
+  glassBtn: { backgroundColor: "rgba(255,255,255,0.035)", borderColor: "rgba(255,255,255,0.34)", borderCurve: "continuous", borderRadius: 28, borderWidth: StyleSheet.hairlineWidth, flex: 1, height: 54, overflow: "hidden", position: "relative" },
+  glassBtnDisabled: { opacity: 0.55 },
+  glassSurface: { borderCurve: "continuous", borderRadius: 28, bottom: 0, left: 0, overflow: "hidden", position: "absolute", right: 0, top: 0 },
+  glassPress: { alignItems: "center", height: "100%", justifyContent: "center", paddingHorizontal: 6, width: "100%", zIndex: 2 },
   glassSheen: { backgroundColor: "rgba(255,255,255,0.7)", borderRadius: 999, height: 8, left: 8, opacity: 0.16, position: "absolute", right: 8, top: 4 },
   glassText: { color: color.ink, fontSize: 13, fontWeight: "900" },
   followedText: { color: color.violet }, pendingText: { color: color.muted }, notice: { color: color.error, fontSize: 12, marginHorizontal: 18, marginTop: 8 },

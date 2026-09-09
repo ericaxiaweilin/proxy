@@ -341,7 +341,7 @@ describe("PLACEHOLDER-010 ai add shows pending", () => {
     expect(profile).toContain("listMyFriendships");
     expect(profile).toContain("sendFriendRequest");
     expect(profile).toContain("添加中");
-    expect(profile).toContain('disabled={friendState !== "NONE" || friendBusy}');
+    expect(profile).toContain('disabled={useFriendFlow && (friendState !== "NONE" || friendBusy)}');
     expect(shell).toContain("relationship={relationship}");
   });
 });
@@ -362,7 +362,10 @@ describe("PLACEHOLDER-012 ai three glass actions", () => {
 
   it("renders three liquid-glass buttons with view-posts wired", () => {
     expect(profile).toContain("GlassContainer");
-    expect(profile).toContain('glassEffectStyle={{ style: "regular" }}');
+    expect(profile).toContain('glassEffectStyle={{ style: "regular", animate: true, animationDuration: 0.12 }}');
+    expect(profile).toContain("<LiquidGlassAction");
+    expect(profile).toContain('height: 54');
+    expect(profile).toContain('borderRadius: 28');
     expect(profile).toContain('borderCurve: "continuous"');
     expect(profile).toContain("查看个人主页");
     expect(profile).toContain("onViewPosts");

@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 121 — 2026-09-09
+
+- Home 进入 AI 小美主页后的添加、主页、发消息三按钮改为与底栏水滴
+  相同的分层结构：外层连续曲率壳、绝对铺满 regular GlassView、高光带
+  和独立点击层；不再由 GlassView 直接包裹按钮。
+- 三项业务状态和点击链路保持不变。
+
 ## Revision 120 — 2026-09-09
 
 - 账户头像、动态帖文头像与个人主页帖文头像改用 SVG `Circle` 的真实
