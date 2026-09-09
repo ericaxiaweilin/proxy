@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -661,6 +662,53 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 		{"seed_media_westlake", "IMAGE", "dkq8noieylig_thumb.jpg", "dkq8noieylig_thumb.jpg", "dkq8noieylig_thumb.jpg", "image/jpeg", "", 480, 360, 0},
 		{"seed_media_route_video", "VIDEO", "dkq8qwqitirc_playback.mp4", "dkq8qwqitirc_playback.mp4", "dkq8qwqitirc_thumb.jpg", "video/mp4", "h264", 1080, 1920, 9833},
 		{"seed_media_opening_video", "VIDEO", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_thumb.jpg", "video/mp4", "h264", 320, 240, 2020},
+	}
+	// R42 scene/action editorial samples live in the server media store, never
+	// in the mobile bundle. Stable IDs let the catalog change independently of
+	// an App Store build while the files can later move to object storage/CDN.
+	for row := 0; row < 3; row++ {
+		for col := 0; col < 6; col++ {
+			id := fmt.Sprintf("seed_scene_action_primary_%d_%d", row, col)
+			key := fmt.Sprintf("scene_action_primary_%d_%d.jpg", row, col)
+			assets = append(assets, struct {
+				id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+				width, height                                                  int
+				durationMs                                                     int64
+			}{id, "IMAGE", key, key, key, "image/jpeg", "", 250, 288, 0})
+		}
+	}
+	extendedHeights := []int{242, 232, 226, 235}
+	for row, height := range extendedHeights {
+		for col := 0; col < 6; col++ {
+			id := fmt.Sprintf("seed_scene_action_extended_%d_%d", row, col)
+			key := fmt.Sprintf("scene_action_extended_%d_%d.jpg", row, col)
+			assets = append(assets, struct {
+				id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+				width, height                                                  int
+				durationMs                                                     int64
+			}{id, "IMAGE", key, key, key, "image/jpeg", "", 250, height, 0})
+		}
+	}
+	for row := 0; row < 3; row++ {
+		for col := 0; col < 5; col++ {
+			id := fmt.Sprintf("seed_scene_theme_%d_%d", row, col)
+			key := fmt.Sprintf("scene_theme_%d_%d.jpg", row, col)
+			assets = append(assets, struct {
+				id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+				width, height                                                  int
+				durationMs                                                     int64
+			}{id, "IMAGE", key, key, key, "image/jpeg", "", 303, 336, 0})
+		}
+	}
+	for _, portrait := range []struct{ id, key string }{
+		{"seed_scene_aodai_rooftop", "scene_aodai_rooftop.jpg"},
+		{"seed_scene_aodai_oldtown", "scene_aodai_oldtown.jpg"},
+	} {
+		assets = append(assets, struct {
+			id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+			width, height                                                  int
+			durationMs                                                     int64
+		}{portrait.id, "IMAGE", portrait.key, portrait.key, portrait.key, "image/jpeg", "", 1122, 1402, 0})
 	}
 	for _, a := range assets {
 		// First-party editorial assets are owned by the PLATFORM principal.

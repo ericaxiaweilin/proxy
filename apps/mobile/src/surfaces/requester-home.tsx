@@ -1052,6 +1052,7 @@ export function RequesterHome({
         <Text style={styles.sectionHint}>{activeSceneCount > 0 ? `${activeSceneCount} 个真实场景 · 为见面服务` : "为见面服务"}</Text>
       </View>
       <SceneActivityDiscovery
+        apiBaseUrl={sceneApiBaseUrl}
         scenes={sceneBriefs}
         onOpenScene={(sceneId) => onOpenSceneMap?.(sceneId)}
         onCompose={(prompt) => handleExecuteHomeQuery(prompt)}

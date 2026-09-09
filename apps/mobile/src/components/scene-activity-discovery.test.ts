@@ -44,4 +44,11 @@ describe("scene activity discovery contract", () => {
     expect(source).toContain("全部{pickerKind");
     expect(source).toContain("清除筛选");
   });
+
+  it("loads editorial photos from the server catalog instead of the app bundle", () => {
+    expect(source).toContain("/v1/scene-assets");
+    expect(source).toContain('networkSource("moments"');
+    expect(source).not.toContain("assets/market-scene-samples");
+    expect(source).not.toMatch(/require\([^)]*\.jpg/);
+  });
 });

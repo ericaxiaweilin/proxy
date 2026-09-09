@@ -181,6 +181,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/media/variant/", s.mediaVariantFile)
 	mux.HandleFunc("/v1/feed", s.publicFeed)
 	mux.HandleFunc("/v1/reality-scenes", s.publicRealityScenes)
+	mux.HandleFunc("/v1/scene-assets", s.publicSceneAssets)
 	mux.HandleFunc("/v1/reality-scenes/nearby", s.nearbyRealityScenes)
 	mux.HandleFunc("/v1/scenes/", s.dynamicSceneRead)
 	// R16.9: public legal docs (Terms / Privacy) used by the signup
