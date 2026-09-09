@@ -166,6 +166,16 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 		FROM localnet.posts
 		WHERE status='PUBLISHED'
 		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1))
+		  -- MUTED-AUTHORS-002: feed must exclude posts from authors the
+		  -- viewer muted. Was missing entirely: AddMutedAuthor had no read
+		  -- side — IsMuted had zero callers, so mutes were decoration
+		  -- (next page / other device / re-login all re-showed the author;
+		  -- the mobile UI's local filter promised server sync that never
+		  -- existed). In-SQL so pagination LIMIT counting stays correct.
+		  AND NOT EXISTS (
+			SELECT 1 FROM engagement.muted_authors
+			WHERE actor_id=$1 AND author_id=localnet.posts.author_id
+		  )
 		  AND ($2::timestamptz IS NULL OR created_at < $2 OR (created_at = $2 AND id > $3))
 		ORDER BY created_at DESC, id ASC
 		LIMIT $4`, actorID, beforeValue, beforeID, limit)
