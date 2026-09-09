@@ -41,6 +41,7 @@ const ACTIONS: readonly Taxon[] = [
   { id: "explore-store", label: "探店", icon: require("../../assets/scene-activity/actions/explore-store.svg") },
   { id: "travel", label: "出游", icon: require("../../assets/scene-activity/actions/travel.svg") },
   { id: "sport", label: "运动", icon: require("../../assets/scene-activity/actions/sport.svg") },
+  { id: "translation", label: "翻译", icon: require("../../assets/scene-activity/actions/translation.svg") },
 ] as const;
 
 // Detail nodes extend a stable top-level taxonomy without making Home wider.
@@ -52,8 +53,12 @@ const ACTION_DETAILS: readonly ActionDetail[] = [
   { id: "badminton", label: "羽毛球", familyId: "sport", matchActionId: "sport", icon: require("../../assets/scene-activity/actions/sport.svg") },
   { id: "tennis", label: "网球", familyId: "sport", matchActionId: "sport", icon: require("../../assets/scene-activity/actions/sport.svg") },
   { id: "yoga", label: "瑜伽 / 普拉提", familyId: "sport", matchActionId: "sport", icon: require("../../assets/scene-activity/actions/sport.svg") },
-  { id: "hiking", label: "徒步 / 爬山", familyId: "sport", matchActionId: "sport", icon: require("../../assets/scene-activity/actions/travel.svg") },
-  { id: "water-sports", label: "水上运动", familyId: "sport", matchActionId: "sport", icon: require("../../assets/scene-activity/actions/sport.svg") },
+  { id: "registration-support", label: "挂号协助", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
+  { id: "doctor-translation", label: "问诊翻译", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
+  { id: "examination-companion", label: "检查陪同", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
+  { id: "pharmacy-support", label: "取药协助", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
+  { id: "hospital-stay-companion", label: "住院陪同", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
+  { id: "checkup-companion", label: "体检陪同", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
 ] as const;
 
 const SCENES: readonly Taxon[] = [
@@ -67,6 +72,7 @@ const SCENES: readonly Taxon[] = [
   { id: "mall", label: "商场", icon: require("../../assets/scene-activity/scenes/mall.svg") },
   { id: "restaurant", label: "餐厅", icon: require("../../assets/scene-activity/scenes/restaurant.svg") },
   { id: "event", label: "活动现场", icon: require("../../assets/scene-activity/scenes/event.svg") },
+  { id: "hospital", label: "医院", icon: require("../../assets/scene-activity/scenes/hospital.svg") },
 ] as const;
 
 const THEMES: readonly Taxon[] = [
@@ -80,6 +86,7 @@ const THEMES: readonly Taxon[] = [
   { id: "night", label: "夜晚", icon: require("../../assets/scene-activity/themes/night.svg") },
   { id: "retro", label: "复古", icon: require("../../assets/scene-activity/themes/retro.svg") },
   { id: "vietnam", label: "越南传统", icon: require("../../assets/scene-activity/themes/vietnam.svg") },
+  { id: "medical-companion", label: "陪诊", icon: require("../../assets/scene-activity/themes/medical-companion.svg") },
 ] as const;
 
 const MOMENTS: readonly MomentSeed[] = [
@@ -91,6 +98,7 @@ const MOMENTS: readonly MomentSeed[] = [
   { id: "beach-walk", title: "海边散步", action: "city-walk", scene: "beach", themes: ["sunset", "nature"] },
   { id: "local-store", title: "本地探店", action: "explore-store", scene: "cafe", themes: ["local"] },
   { id: "nature-ride", title: "自然骑行", action: "cycling", scene: "park", themes: ["nature"] },
+  { id: "hospital-translation", title: "医院翻译陪诊", action: "translation", scene: "hospital", themes: ["medical-companion"] },
 ] as const;
 
 function absoluteNetworkURL(apiBaseUrl: string, value?: string): string | undefined {
@@ -121,6 +129,7 @@ function sceneMatches(brief: SceneDiscoveryBrief, sceneId: string): boolean {
     "old-town": ["老城", "old town", "old quarter"], "night-market": ["夜市", "night market"],
     gallery: ["美术馆", "画廊", "gallery", "museum"], beach: ["海边", "沙滩", "beach", "coast"],
     park: ["公园", "park"], mall: ["商场", "mall"], restaurant: ["餐厅", "restaurant"], event: ["活动", "event"],
+    hospital: ["医院", "hospital", "clinic", "诊所"],
   };
   return (words[sceneId] ?? []).some((word) => haystack.includes(word));
 }
@@ -224,14 +233,15 @@ export function SceneActivityDiscovery({
                     else setThemeIds((current) => active ? current.filter((id) => id !== item.id) : [...current, item.id]);
                   }} style={[styles.pickerItem, active && styles.pickerItemActive]}>{photo ? <Image contentFit="cover" source={photo} style={styles.pickerPhoto} /> : <Image contentFit="contain" source={item.icon} style={styles.pickerIcon} />}<Text style={styles.pickerLabel}>{item.label}</Text>{active ? <Text style={styles.pickerCheck}>✓</Text> : null}</Pressable>;
                 })}</View>
-                {section.key === "actions" && (actionMatchId(actionId) === "sport" || actionMatchId(actionId) === "cycling") ? <View style={styles.detailGroup}>
-                  <Text style={styles.detailGroupTitle}>运动细分</Text>
-                  <View style={styles.detailChipGrid}>{ACTION_DETAILS.map((detailAction) => {
+                {section.key === "actions" && (["sport", "cycling", "translation"].includes(actionMatchId(actionId) ?? "")) ? <View style={styles.detailGroup}>
+                  <Text style={styles.detailGroupTitle}>{actionMatchId(actionId) === "translation" ? "陪诊服务（非医疗）" : "城市轻运动"}</Text>
+                  <View style={styles.detailChipGrid}>{ACTION_DETAILS.filter((detailAction) => detailAction.familyId === (actionMatchId(actionId) === "translation" ? "translation" : "sport")).map((detailAction) => {
                     const active = actionId === detailAction.id;
-                    return <Pressable accessibilityLabel={`运动细分 ${detailAction.label}`} key={detailAction.id} onPress={() => setActionId(active ? detailAction.familyId : detailAction.id)} style={[styles.detailChip, active && styles.detailChipActive]}>
+                    return <Pressable accessibilityLabel={`${detailAction.familyId === "translation" ? "陪诊服务" : "城市轻运动"} ${detailAction.label}`} key={detailAction.id} onPress={() => setActionId(active ? detailAction.familyId : detailAction.id)} style={[styles.detailChip, active && styles.detailChipActive]}>
                       <Text style={[styles.detailChipText, active && styles.detailChipTextActive]}>{detailAction.label}</Text>
                     </Pressable>;
                   })}</View>
+                  {actionMatchId(actionId) === "translation" ? <Text style={styles.medicalBoundary}>仅提供语言支持、流程协助与非医疗陪同；不提供诊断、治疗、护理或急救服务。</Text> : null}
                 </View> : null}
               </View>)}
             </ScrollView>
@@ -275,6 +285,6 @@ const styles = StyleSheet.create({
   filterState: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 10 }, filterStateText: { color: "#8C867E", flex: 1, fontSize: 11 }, clear: { color: "#151515", fontSize: 11, fontWeight: "900" },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 13 }, momentCard: { borderRadius: 17, height: 194, overflow: "hidden", width: "48.8%" }, momentPhoto: { height: "100%", width: "100%" }, momentShade: { backgroundColor: "rgba(0,0,0,0.18)", bottom: 0, height: 90, left: 0, position: "absolute", right: 0 }, heart: { position: "absolute", right: 8, top: 8 }, momentCopy: { bottom: 9, left: 9, position: "absolute", right: 7 }, momentTitle: { color: "#FFFFFF", fontSize: 16, fontWeight: "900", marginBottom: 8 }, tagRow: { flexDirection: "row", gap: 3 }, tag: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.94)", borderRadius: 999, flexDirection: "row", gap: 2, height: 25, maxWidth: "34%", paddingHorizontal: 4 }, tagIcon: { height: 17, width: 17 }, tagText: { color: "#151515", fontSize: 11, fontWeight: "700" },
   empty: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#E8E1D8", borderRadius: 18, borderWidth: 1, marginTop: 13, padding: 22 }, emptyTitle: { color: "#151515", fontSize: 13, fontWeight: "800" }, emptyText: { color: "#8C867E", fontSize: 11, marginTop: 6 },
-  pickerSheet: { backgroundColor: "#F7F4EF", borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: "84%", padding: 18, paddingBottom: 34 }, pickerHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }, pickerTitle: { color: "#151515", fontSize: 22, fontWeight: "900" }, pickerHint: { color: "#777169", fontSize: 11, fontWeight: "700" }, pickerContent: { paddingBottom: 8 }, pickerSection: { marginTop: 12 }, pickerSectionTitle: { color: "#151515", fontSize: 15, fontWeight: "900", marginBottom: 8 }, pickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9 }, pickerItem: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#E8E1D8", borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 7, minHeight: 58, overflow: "hidden", paddingHorizontal: 8, width: "48.5%" }, pickerItemActive: { backgroundColor: "#FFF6DF", borderColor: "#151515", borderWidth: 2 }, pickerIcon: { height: 34, width: 34 }, pickerPhoto: { borderRadius: 11, height: 44, width: 44 }, pickerLabel: { color: "#151515", flex: 1, fontSize: 12, fontWeight: "800" }, pickerCheck: { color: "#151515", fontSize: 13, fontWeight: "900" }, detailGroup: { backgroundColor: "#FFFFFF", borderRadius: 16, marginTop: 10, padding: 12 }, detailGroupTitle: { color: "#777169", fontSize: 11, fontWeight: "800", marginBottom: 8 }, detailChipGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, detailChip: { borderColor: "#DED7CE", borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 }, detailChipActive: { backgroundColor: "#151515", borderColor: "#151515" }, detailChipText: { color: "#151515", fontSize: 11, fontWeight: "700" }, detailChipTextActive: { color: "#FFFFFF" }, pickerActions: { flexDirection: "row", gap: 8, marginTop: 12 }, pickerReset: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#151515", borderRadius: 17, borderWidth: 1, flex: 0.7, paddingVertical: 13 }, pickerResetText: { color: "#151515", fontSize: 13, fontWeight: "900" }, pickerDone: { alignItems: "center", backgroundColor: "#151515", borderRadius: 17, flex: 1.3, paddingVertical: 13 }, pickerDoneText: { color: "#FFFFFF", fontSize: 13, fontWeight: "900" },
+  pickerSheet: { backgroundColor: "#F7F4EF", borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: "84%", padding: 18, paddingBottom: 34 }, pickerHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }, pickerTitle: { color: "#151515", fontSize: 22, fontWeight: "900" }, pickerHint: { color: "#777169", fontSize: 11, fontWeight: "700" }, pickerContent: { paddingBottom: 8 }, pickerSection: { marginTop: 12 }, pickerSectionTitle: { color: "#151515", fontSize: 15, fontWeight: "900", marginBottom: 8 }, pickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9 }, pickerItem: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#E8E1D8", borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 7, minHeight: 58, overflow: "hidden", paddingHorizontal: 8, width: "48.5%" }, pickerItemActive: { backgroundColor: "#FFF6DF", borderColor: "#151515", borderWidth: 2 }, pickerIcon: { height: 34, width: 34 }, pickerPhoto: { borderRadius: 11, height: 44, width: 44 }, pickerLabel: { color: "#151515", flex: 1, fontSize: 12, fontWeight: "800" }, pickerCheck: { color: "#151515", fontSize: 13, fontWeight: "900" }, detailGroup: { backgroundColor: "#FFFFFF", borderRadius: 16, marginTop: 10, padding: 12 }, detailGroupTitle: { color: "#777169", fontSize: 11, fontWeight: "800", marginBottom: 8 }, detailChipGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, detailChip: { borderColor: "#DED7CE", borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 8 }, detailChipActive: { backgroundColor: "#151515", borderColor: "#151515" }, detailChipText: { color: "#151515", fontSize: 11, fontWeight: "700" }, detailChipTextActive: { color: "#FFFFFF" }, medicalBoundary: { color: "#8C5B35", fontSize: 11, lineHeight: 16, marginTop: 9 }, pickerActions: { flexDirection: "row", gap: 8, marginTop: 12 }, pickerReset: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#151515", borderRadius: 17, borderWidth: 1, flex: 0.7, paddingVertical: 13 }, pickerResetText: { color: "#151515", fontSize: 13, fontWeight: "900" }, pickerDone: { alignItems: "center", backgroundColor: "#151515", borderRadius: 17, flex: 1.3, paddingVertical: 13 }, pickerDoneText: { color: "#FFFFFF", fontSize: 13, fontWeight: "900" },
   backdrop: { backgroundColor: "rgba(0,0,0,0.28)", flex: 1, justifyContent: "flex-end" }, sheet: { backgroundColor: "#F7F4EF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 18, paddingBottom: 34 }, grab: { alignSelf: "center", backgroundColor: "#CFC8BF", borderRadius: 3, height: 4, marginBottom: 14, width: 42 }, detailPhoto: { borderRadius: 18, height: 180, width: "100%" }, detailTitle: { color: "#151515", fontSize: 24, fontWeight: "900", marginTop: 15 }, detailLayers: { flexDirection: "row", gap: 8, marginTop: 13 }, detailLayer: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#E8E1D8", borderRadius: 15, borderWidth: 1, flex: 1, padding: 10 }, detailIcon: { height: 30, width: 30 }, detailLabel: { color: "#8C867E", fontSize: 11, marginTop: 4 }, detailValue: { color: "#151515", fontSize: 11, fontWeight: "800", marginTop: 2 }, detailActions: { flexDirection: "row", gap: 8, marginTop: 16 }, secondaryButton: { alignItems: "center", backgroundColor: "#FFFFFF", borderColor: "#151515", borderRadius: 18, borderWidth: 1, flex: 1, paddingVertical: 13 }, secondaryText: { color: "#151515", fontSize: 12, fontWeight: "800" }, primaryButton: { alignItems: "center", backgroundColor: "#151515", borderRadius: 18, flex: 1.2, paddingVertical: 13 }, primaryText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" }, disabled: { opacity: 0.45 },
 });

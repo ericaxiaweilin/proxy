@@ -16,9 +16,9 @@ describe("scene activity discovery contract", () => {
   });
 
   it("ships the complete R42 visual taxonomy", () => {
-    expect(source.match(/assets\/scene-activity\/actions\//g)).toHaveLength(19);
-    expect(source.match(/assets\/scene-activity\/scenes\//g)).toHaveLength(10);
-    expect(source.match(/assets\/scene-activity\/themes\//g)).toHaveLength(10);
+    expect(source.match(/assets\/scene-activity\/actions\//g)).toHaveLength(24);
+    expect(source.match(/assets\/scene-activity\/scenes\//g)).toHaveLength(11);
+    expect(source.match(/assets\/scene-activity\/themes\//g)).toHaveLength(11);
   });
 
   it("opens a real server scene rather than treating a semantic category as a venue", () => {
@@ -53,12 +53,16 @@ describe("scene activity discovery contract", () => {
   it("supports expandable action families and a persistent full reset", () => {
     expect(source).toContain("type ActionDetail");
     expect(source).toContain("actionMatchId(actionId)");
-    expect(source).toContain(">运动细分<");
+    expect(source).toContain("城市轻运动");
     expect(source).toContain('id: "badminton"');
     expect(source).toContain('id: "tennis"');
     expect(source).toContain('id: "yoga"');
-    expect(source).toContain('id: "hiking"');
-    expect(source).toContain('id: "water-sports"');
+    expect(source).not.toContain('id: "hiking"');
+    expect(source).not.toContain('id: "water-sports"');
+    expect(source).toContain('id: "translation"');
+    expect(source).toContain('id: "hospital"');
+    expect(source).toContain('id: "medical-companion"');
+    expect(source).toContain("不提供诊断、治疗、护理或急救服务");
     expect(source).toContain("styles.pickerReset");
     expect(source).toContain(">重置<");
   });

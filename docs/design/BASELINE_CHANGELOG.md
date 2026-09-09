@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 139 — 2026-09-09
+
+- 场景撮合收敛为都市低风险行为：移除徒步/爬山及水上运动入口；新增
+  医院场景、翻译动作、陪诊主题及挂号/问诊/检查/取药等非医疗细分。
+- 新版 R42 与医院拼图拆为服务端独立图片资产，客户端只消费语义目录；
+  陪诊入口明确禁止诊断、治疗、护理和急救服务。
+
 ## Revision 138 — 2026-09-09
 
 - 新建按钮进类型行（PLACEHOLDER-018）：全部/照片/视频/＋新建同一排，

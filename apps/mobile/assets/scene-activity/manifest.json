@@ -60,6 +60,11 @@
       "id": "sport",
       "label": "运动",
       "asset": "assets/actions/sport.svg"
+    },
+    {
+      "id": "translation",
+      "label": "翻译",
+      "asset": "assets/actions/translation.svg"
     }
   ],
   "scenes": [
@@ -112,6 +117,11 @@
       "id": "event",
       "label": "活动现场",
       "asset": "assets/scenes/event.svg"
+    },
+    {
+      "id": "hospital",
+      "label": "医院",
+      "asset": "assets/scenes/hospital.svg"
     }
   ],
   "themes": [
@@ -164,6 +174,11 @@
       "id": "vietnam",
       "label": "越南传统",
       "asset": "assets/themes/vietnam.svg"
+    },
+    {
+      "id": "medical-companion",
+      "label": "陪诊",
+      "asset": "assets/themes/medical-companion.svg"
     }
   ]
 }

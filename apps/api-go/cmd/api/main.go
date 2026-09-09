@@ -663,6 +663,27 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 		{"seed_media_route_video", "VIDEO", "dkq8qwqitirc_playback.mp4", "dkq8qwqitirc_playback.mp4", "dkq8qwqitirc_thumb.jpg", "video/mp4", "h264", 1080, 1920, 9833},
 		{"seed_media_opening_video", "VIDEO", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_thumb.jpg", "video/mp4", "h264", 320, 240, 2020},
 	}
+	appendImage := func(id, key string, width, height int) {
+		assets = append(assets, struct {
+			id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+			width, height                                                  int
+			durationMs                                                     int64
+		}{id, "IMAGE", key, key, key, "image/jpeg", "", width, height, 0})
+	}
+	for _, group := range []struct {
+		kind, prefix string
+		height       int
+		names        []string
+	}{
+		{"action", "scene_r42_action", 267, []string{"cycling", "shopping", "movie", "music", "food-hunting", "travel", "sport"}},
+		{"scene", "scene_r42_scene", 250, []string{"old-town", "beach", "park", "mall", "restaurant", "cafe", "night-market", "event"}},
+		{"theme", "scene_r42_theme", 247, []string{"night", "retro", "vietnam", "nature", "art", "daily", "festival", "local"}},
+		{"moment", "scene_r42_moment", 260, []string{"morning", "daytime", "sunset", "night", "friends", "solo", "couple", "family"}},
+	} {
+		for _, name := range group.names {
+			appendImage("seed_r42_v2_"+group.kind+"_"+name, group.prefix+"_"+name+"_v2.jpg", 168, group.height)
+		}
+	}
 	// R42 scene/action editorial samples live in the server media store, never
 	// in the mobile bundle. Stable IDs let the catalog change independently of
 	// an App Store build while the files can later move to object storage/CDN.
@@ -709,6 +730,32 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 			width, height                                                  int
 			durationMs                                                     int64
 		}{portrait.id, "IMAGE", portrait.key, portrait.key, portrait.key, "image/jpeg", "", 1122, 1402, 0})
+	}
+	// R135 hospital language/companion samples are deliberately separate
+	// network assets. The emergency reference crop is retained in storage for
+	// editorial use, but is not exposed by the matchmaking catalog.
+	for _, medical := range []struct {
+		id, key       string
+		width, height int
+	}{
+		{"seed_scene_medical_hero_v1", "scene_medical_hero_v1.jpg", 688, 422},
+		{"seed_scene_medical_registration_v1", "scene_medical_registration_v1.jpg", 224, 211},
+		{"seed_scene_medical_doctor_translation_v1", "scene_medical_doctor_translation_v1.jpg", 224, 211},
+		{"seed_scene_medical_examination_v1", "scene_medical_examination_v1.jpg", 202, 211},
+		{"seed_scene_medical_pharmacy_v1", "scene_medical_pharmacy_v1.jpg", 198, 211},
+		{"seed_scene_medical_communication_v1", "scene_medical_communication_v1.jpg", 224, 211},
+		{"seed_scene_medical_stay_v1", "scene_medical_stay_v1.jpg", 224, 211},
+		{"seed_scene_medical_checkup_v1", "scene_medical_checkup_v1.jpg", 202, 211},
+		{"seed_scene_medical_hospital_v1", "scene_medical_hospital_v1.jpg", 205, 235},
+		{"seed_scene_medical_information_v1", "scene_medical_information_v1.jpg", 205, 235},
+		{"seed_scene_medical_waiting_v1", "scene_medical_waiting_v1.jpg", 230, 235},
+		{"seed_scene_medical_companion_v1", "scene_medical_companion_v1.jpg", 222, 235},
+	} {
+		assets = append(assets, struct {
+			id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+			width, height                                                  int
+			durationMs                                                     int64
+		}{medical.id, "IMAGE", medical.key, medical.key, medical.key, "image/jpeg", "", medical.width, medical.height, 0})
 	}
 	for _, a := range assets {
 		// First-party editorial assets are owned by the PLATFORM principal.
