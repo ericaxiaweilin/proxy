@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
+import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import type { EngagementClient } from "../engagement-client";
@@ -17,7 +18,7 @@ import { color, shadows } from "../theme";
 // 只看 engagement 二进制会把“已申请”误判成“没添加”，这正是之前
 // 首页点了 +、主页还显示旧文案的原因。
 export type AiFriendState = "NONE" | "OUTGOING" | "FRIEND";
-export function AIAccountProfileSurface({ account, engagement, relationship, initialFriendState, secureSessionStore, onBack, onMessage }: {
+export function AIAccountProfileSurface({ account, engagement, relationship, initialFriendState, secureSessionStore, onBack, onMessage, onViewPosts }: {
   account: PlatformAIAccount;
   engagement: EngagementClient;
   relationship?: RelationshipClient | undefined;
@@ -25,6 +26,8 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
   secureSessionStore?: SecureSessionStore | undefined;
   onBack: () => void;
   onMessage: (account: PlatformAIAccount, initialDraft?: string) => void;
+  // 查看个人主页：跳到动态看她的全部内容（feed 搜索是现成真链路）。
+  onViewPosts?: ((account: PlatformAIAccount) => void) | undefined;
 }): React.JSX.Element {
   const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -103,14 +106,22 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
           <Text style={styles.role}>{account.role}</Text>
         </View>
       </View>
-      <View style={styles.actions}>
-        {useFriendFlow ? (
-          <Pressable disabled={friendState !== "NONE" || friendBusy} onPress={() => void sendFriendAdd()} style={[styles.follow, friendState !== "NONE" && styles.followed]} accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"}><Text style={[styles.followText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加到我的小美"}</Text></Pressable>
-        ) : (
-          <Pressable onPress={() => void toggleFollow()} style={[styles.follow, following && styles.followed]}><Text style={[styles.followText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加到我的小美"}</Text></Pressable>
-        )}
-        <Pressable onPress={() => onMessage(account)} style={styles.message}><Text style={styles.messageText}>发消息</Text></Pressable>
-      </View>
+      {/* 三连液态玻璃按钮（复用动态帖文菜单同款）：添加/发消息/看她的主页动态 */}
+      <GlassContainer spacing={8} style={styles.glassRow}>
+        <GlassView glassEffectStyle="clear" isInteractive style={styles.glassBtn}>
+          {useFriendFlow ? (
+            <Pressable disabled={friendState !== "NONE" || friendBusy} onPress={() => void sendFriendAdd()} style={styles.glassPress} accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"}><Text style={[styles.glassText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加"}</Text></Pressable>
+          ) : (
+            <Pressable onPress={() => void toggleFollow()} style={styles.glassPress}><Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加"}</Text></Pressable>
+          )}
+        </GlassView>
+        <GlassView glassEffectStyle="clear" isInteractive style={styles.glassBtn}>
+          <Pressable onPress={() => onViewPosts?.(account)} disabled={!onViewPosts} style={styles.glassPress} accessibilityLabel="查看个人主页"><Text style={styles.glassText}>主页</Text></Pressable>
+        </GlassView>
+        <GlassView glassEffectStyle="clear" isInteractive style={styles.glassBtn}>
+          <Pressable onPress={() => onMessage(account)} style={styles.glassPress} accessibilityLabel="发消息"><Text style={styles.glassText}>发消息</Text></Pressable>
+        </GlassView>
+      </GlassContainer>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       <View style={styles.card}><Text style={styles.cardTitle}>关于她</Text><Text style={styles.body}>{account.description}</Text><Text style={styles.personality}>{account.personality}</Text></View>
       <View style={styles.card}><Text style={styles.cardTitle}>她的动态</Text>{account.ugcSamples.map((post) => <View key={post} style={styles.ugcPost}><Text style={styles.ugcText}>{post}</Text><Text style={styles.ugcMeta}>AI 生成内容 · 刚刚</Text></View>)}</View>
@@ -131,7 +142,11 @@ const styles = StyleSheet.create({
   heroCopy: { flex: 1 }, nameRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 7 },
   aiPill: { backgroundColor: color.proxyPurpleSoft, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 5 }, aiPillText: { color: color.violet, fontSize: 11, fontWeight: "900" },
   name: { color: color.ink, fontSize: 25, fontWeight: "900" }, handle: { color: color.violet, fontSize: 12, fontWeight: "700", marginTop: 5 }, role: { color: color.muted, fontSize: 13, marginTop: 7 },
-  actions: { flexDirection: "row", gap: 8, marginHorizontal: 18, marginTop: 16 }, follow: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, flex: 1, paddingVertical: 12 }, followed: { backgroundColor: color.proxyPurpleSoft }, followText: { color: color.white, fontSize: 13, fontWeight: "900" }, followedText: { color: color.violet }, pendingText: { color: color.muted }, message: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, paddingHorizontal: 18, paddingVertical: 12 }, messageText: { color: color.ink, fontSize: 13, fontWeight: "900" }, notice: { color: color.error, fontSize: 12, marginHorizontal: 18, marginTop: 8 },
+  glassRow: { flexDirection: "row", gap: 8, marginHorizontal: 18, marginTop: 16 },
+  glassBtn: { borderRadius: 13, flex: 1, overflow: "hidden" },
+  glassPress: { alignItems: "center", justifyContent: "center", minHeight: 46, paddingHorizontal: 6 },
+  glassText: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  followedText: { color: color.violet }, pendingText: { color: color.muted }, notice: { color: color.error, fontSize: 12, marginHorizontal: 18, marginTop: 8 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, marginHorizontal: 18, marginTop: 14, padding: 15, ...shadows.card }, cardTitle: { color: color.ink, fontSize: 15, fontWeight: "900" }, body: { color: color.ink, fontSize: 13, lineHeight: 20, marginTop: 8 }, personality: { color: color.violet, fontSize: 12, lineHeight: 18, marginTop: 9 },
   prompt: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", marginTop: 10, paddingTop: 10 }, promptText: { color: color.ink, flex: 1, fontSize: 13, fontWeight: "700" }, promptArrow: { color: color.violet, fontSize: 23 },
   ugcPost: { borderTopColor: color.line, borderTopWidth: 1, marginTop: 10, paddingTop: 10 }, ugcText: { color: color.ink, fontSize: 13, lineHeight: 20 }, ugcMeta: { color: color.muted, fontSize: 11, marginTop: 6 },

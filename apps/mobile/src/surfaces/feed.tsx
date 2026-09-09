@@ -148,7 +148,9 @@ export function FeedSurface({
   bottomNavVisible,
   initialTab,
   currentSection,
-  onSectionChange
+  onSectionChange,
+  initialSearchQuery,
+  onSearchSeedConsumed
 }: {
   localNet: LocalNetClient;
   mediaClient: MediaClient;
@@ -170,6 +172,10 @@ export function FeedSurface({
   // R15.23: section (动态/状态/社区) 改 controlled — 由 AppShell 同步 swipe 跨 page 状态
   currentSection?: FeedSection;
   onSectionChange?: (section: FeedSection) => void;
+  // 外部带入的搜索种子（AI 主页“查看个人主页”）：mount 即生效并通知消费，
+  // 防止下次进动态复用旧词。
+  initialSearchQuery?: string | undefined;
+  onSearchSeedConsumed?: (() => void) | undefined;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>(initialTab ?? "RECOMMENDED");
   // R15.23: 优先用 controlled prop (currentSection)，fallback 到内部 state (用于独立 mount / 测试)
@@ -212,8 +218,12 @@ export function FeedSurface({
   // 发布器状态（v2 全面迁出到 ComposerV2Screen；这里只保留触发器）
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerQuoteId, setComposerQuoteId] = useState<string | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(Boolean(initialSearchQuery));
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery ?? "");
+  // 搜索种子只消费一次：mount 即通知调用方清除，下次进动态不再复用。
+  useEffect(() => {
+    if (initialSearchQuery) onSearchSeedConsumed?.();
+  }, []);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
   // 本人头像 URI（与个人总管理同源）：mount 时读一次，换头像后切 Tab
   // 重挂即刷新。读不到/文件不存在就保持 undefined，走首字 fallback。

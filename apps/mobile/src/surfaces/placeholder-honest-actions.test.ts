@@ -347,3 +347,19 @@ describe("PLACEHOLDER-011 pending add is gray", () => {
     expect(profile).toContain('friendState === "OUTGOING" && styles.pendingText');
   });
 });
+
+describe("PLACEHOLDER-012 ai three glass actions", () => {
+  const profile = readFileSync(fileURLToPath(new URL("./ai-account-profile.tsx", import.meta.url)), "utf8");
+  const feed = readFileSync(fileURLToPath(new URL("./feed.tsx", import.meta.url)), "utf8");
+  const shell = readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8");
+
+  it("renders three liquid-glass buttons with view-posts wired", () => {
+    expect(profile).toContain("GlassContainer");
+    expect(profile).toContain("glassEffectStyle=\"clear\"");
+    expect(profile).toContain("查看个人主页");
+    expect(profile).toContain("onViewPosts");
+    expect(feed).toContain("initialSearchQuery");
+    expect(feed).toContain("onSearchSeedConsumed");
+    expect(shell).toContain("feedSearchSeed");
+  });
+});
