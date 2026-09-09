@@ -174,7 +174,7 @@ fi
 require_test "FRIEND-UPSERT-001" "./internal/platform/postgres" \
   "TestRelationshipPostgresLifecycle" \
   "apps/api-go/internal/platform/postgres/relationship_integration_test.go" || exit $?
-if ! grep -q 'uq_friendships_user_pair' apps/api-go/migrations/076_relationship_pair_unique.sql; then
+if ! grep -q 'uq_friendships_user_pair' apps/api-go/migrations/077_relationship_pair_unique.sql; then
   echo "  FAIL [FRIEND-UPSERT-001]: unique pair index migration must stay" >&2
   exit 1
 fi
