@@ -306,3 +306,16 @@ describe("PLACEHOLDER-008 avatars are circles", () => {
     expect(styles).toContain("overflow: \"hidden\"");
   });
 });
+
+describe("PLACEHOLDER-009 avatars persist on disk", () => {
+  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+  const convo = readFileSync(fileURLToPath(new URL("./conversation.tsx", import.meta.url)), "utf8");
+
+  it("renders avatars with memory-disk cache instead of plain RN Image", () => {
+    for (const [file, source] of [["messages", messages], ["conversation", convo]] as const) {
+      expect(source).toContain('cachePolicy="memory-disk"');
+      expect(source).toContain("recyclingKey={`avatar:");
+    }
+    expect(messages).toContain('import { Image } from "expo-image"');
+  });
+});

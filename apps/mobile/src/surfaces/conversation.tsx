@@ -4,7 +4,8 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { ActivityIndicator, AppState, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image as ExpoImage } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { ProxySwitch } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -75,7 +76,7 @@ interface Message {
   isOwn: boolean;
   isAI?: boolean;
   imageUri?: string;
-  imageSource?: ImageSourcePropType;
+  imageSource?: number | { uri: string };
   videoUri?: string;
   audioUri?: string;
   v1?: MessageV1;
@@ -113,7 +114,7 @@ export function ConversationSurface({
   mediaClient: MediaClient;
   conversationId?: string;
   aiAccount?: PlatformAIAccount;
-  peerAvatarSource?: ImageSourcePropType;
+  peerAvatarSource?: number | { uri: string };
   initialDraft?: string;
   ensureSession?: () => Promise<void>;
   onBack: () => void;
@@ -629,9 +630,9 @@ export function ConversationSurface({
   function peerAvatar(message: Message): React.JSX.Element | null {
     if (message.isOwn) return null;
     if (aiAccount) {
-      return <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiAccountPhoto(aiAccount)} style={styles.avatarMini} />;
+      return <ExpoImage accessibilityLabel={`${aiAccount.displayName}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:ai:${aiAccount.accountId ?? aiAccount.displayName}`} source={aiAccountPhoto(aiAccount)} style={styles.avatarMini} transition={0} />;
     }
-    if (peerAvatarSource) return <Image accessibilityLabel={`${author}头像`} source={peerAvatarSource} style={styles.avatarMini} />;
+    if (peerAvatarSource) return <ExpoImage accessibilityLabel={`${author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:peer:${convId ?? author}`} source={peerAvatarSource} style={styles.avatarMini} transition={0} />;
     return (
       <View style={styles.avatarFallback}>
         <Text style={styles.avatarFallbackText}>{(message.sender || author || "对").slice(0, 1)}</Text>
@@ -663,7 +664,7 @@ export function ConversationSurface({
             <Text numberOfLines={2} style={styles.replyInsideBody}>{message.replyBody ?? ""}</Text>
           </View>
         ) : null}
-        {message.imageUri || message.imageSource ? <Image accessibilityLabel="聊天图片" resizeMode="cover" source={message.imageSource ?? { uri:message.imageUri ?? "" }} style={styles.messageImage} /> : null}
+        {message.imageUri || message.imageSource ? <ExpoImage accessibilityLabel="聊天图片" cachePolicy="memory-disk" contentFit="cover" recyclingKey={`chat:image:${message.id}`} source={message.imageSource ?? { uri:message.imageUri ?? "" }} style={styles.messageImage} transition={0} /> : null}
         {message.videoUri ? <ChatVideo uri={message.videoUri} /> : null}
         {message.audioUri ? <ChatAudio uri={message.audioUri} /> : null}
         {message.body.trim() ? <Text style={styles.bubbleText}>{message.body}</Text> : null}
@@ -695,7 +696,7 @@ export function ConversationSurface({
             <Text style={[styles.secureBtnText, secureOn && styles.secureBtnTextActive]}>🛡</Text>
           </Pressable>
           {aiAccount || peerAvatarSource ? (
-            <Image accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} source={aiAccount ? aiAccountPhoto(aiAccount) : peerAvatarSource!} style={styles.topAvatar} />
+            <ExpoImage accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:top:${aiAccount?.accountId ?? convId ?? author}`} source={aiAccount ? aiAccountPhoto(aiAccount) : peerAvatarSource!} style={styles.topAvatar} transition={0} />
           ) : (
             <View style={styles.topAvatarFallback}>
               <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>

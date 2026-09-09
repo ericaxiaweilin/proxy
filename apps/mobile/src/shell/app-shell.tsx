@@ -168,7 +168,7 @@ export function AppShell({
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
-  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: import("react-native").ImageSourcePropType; initialDraft?: string }>();
+  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string }>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
   const [viewerAccountId, setViewerAccountId] = useState<string>();
