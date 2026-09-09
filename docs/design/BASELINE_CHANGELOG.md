@@ -4,6 +4,10 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 115 — 2026-09-08
+
+- 个人总管理头像与 Home 同尺寸正圆（88）。
+
 ## Revision 114 — 2026-09-08
 
 - 对话头像落盘缓存（PLACEHOLDER-009）：列表/详情/会话内头像改
