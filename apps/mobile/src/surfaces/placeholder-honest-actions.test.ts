@@ -270,10 +270,11 @@ describe("PLACEHOLDER-006 checklist walk gaps", () => {
   const home = readFileSync(fileURLToPath(new URL("./requester-home.tsx", import.meta.url)), "utf8");
   const orders = readFileSync(fileURLToPath(new URL("./me-orders.tsx", import.meta.url)), "utf8");
 
-  it("home continue failure retries instead of promising pull-to-refresh", () => {
-    expect(home).toContain("homeReloadNonce");
-    expect(home).toContain("重新加载进行中");
-    expect(home).not.toContain("下拉或稍后重试");
+  it("home hides the state-machine surface until real active work exists", () => {
+    expect(home).toContain("continueItems.length > 0 ? <View>");
+    expect(home).not.toContain("没有进行中的需求");
+    expect(home).not.toContain('key: "ph:new"');
+    expect(home).not.toContain("重新加载进行中");
   });
 
   it("activity rows do not nest pressables", () => {

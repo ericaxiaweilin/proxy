@@ -73,15 +73,6 @@ function projectTask(t: RequesterHomeTaskItem): ContinueCard {
   };
 }
 
-// Empty-state fallback used when the user is not signed in yet
-// (demandClient not provided) or the read model returned no rows.
-// Preserves the original two placeholder cards so the visual baseline
-// doesn't shift when the user is anonymous.
-const PLACEHOLDER_ITEMS: ReadonlyArray<ContinueCard> = [
-  { key: "ph:new", icon: "diamond", title: "周六新店开业", sub: "正在匹配 · 还差 1 位", progress: "80%" },
-  { key: "ph:walk", icon: "circle", title: "周末摄影散步", sub: "你已感兴趣 · 周六 15:30", headcount: "8/12" }
-];
-
 export function RequesterHome({
   onEnterWorkspace,
   onOpenMarket,
@@ -157,7 +148,7 @@ export function RequesterHome({
   const [momentMsg, setMomentMsg] = useState<string | undefined>(undefined);
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinMsg, setJoinMsg] = useState<string | undefined>(undefined);
-  const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
+  const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>([]);
   // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
   // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
   // 看到摄影好搭子。
@@ -265,16 +256,6 @@ export function RequesterHome({
     if (activeFilters.includes("near") && p.distanceM >= 1000) return false;
     return true;
   });
-  // HomeItemsLoadState distinguishes the three post-auth states:
-  //   "idle"    — no fetch attempted yet (initial render)
-  //   "loading" — fetch in flight (placeholder still visible)
-  //   "loaded"  — fetch succeeded (real items, possibly empty)
-  //   "error"   — fetch failed (placeholder visible + error chip)
-  // Without this, a transient network blip is indistinguishable
-  // from "user has no in-progress needs" or "user is anonymous".
-  const [homeItemsState, setHomeItemsState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
-  // 进行中加载失败的重试计数：进下面 effect 依赖，点重试即重拉。
-  const [homeReloadNonce, setHomeReloadNonce] = useState(0);
 
   // R36.x SCENE-RECOMMEND-001: 真实场景列表（公开接口，免登录），用于
   // 地图入口真计数 + 场景推荐横滑。失败/未配置时保持空，不展示假场景。
@@ -528,17 +509,15 @@ export function RequesterHome({
 
   useEffect(() => {
     if (!demandClient) {
-      // Anonymous: keep placeholder so the layout is non-empty.
-      setContinueItems(PLACEHOLDER_ITEMS);
-      setHomeItemsState("idle");
+      // Anonymous and untouched state have no active-work surface.
+      setContinueItems([]);
       return;
     }
     let cancelled = false;
-    setHomeItemsState("loading");
     (async () => {
       // R15.22 fix: 匿名 session 没 principal, listHomeItems 调
       // requireSession() 立即抛 DemandProtocolError — 不应误报 "加载失败"
-      // 仍保持 placeholder + idle 状态, 由顶 chip 提示登入。
+      // 由登录入口表达身份状态，不伪造“进行中”事项。
       // hasAuthenticatedSession 内部已包 try/catch, 但这里仍 wrap 一层以防意外.
       let hasSession = false;
       try {
@@ -548,8 +527,7 @@ export function RequesterHome({
       }
       if (!hasSession) {
         if (cancelled) return;
-        setContinueItems(PLACEHOLDER_ITEMS);
-        setHomeItemsState("idle");
+        setContinueItems([]);
         return;
       }
       try {
@@ -559,21 +537,16 @@ export function RequesterHome({
         for (const d of home.drafts) cards.push(projectDraft(d));
         for (const t of home.tasks) cards.push(projectTask(t));
         setContinueItems(cards);
-        setHomeItemsState("loaded");
       } catch {
-        // Fail closed: keep the placeholder strip so a transient
-        // network blip doesn't wipe the surface, but flag the
-        // state so the section header can show an error chip.
-        if (!cancelled) {
-          setContinueItems(PLACEHOLDER_ITEMS);
-          setHomeItemsState("error");
-        }
+        // Fail closed. Retain a previously loaded projection if one exists,
+        // but never manufacture an active-work section from a read failure.
+        if (cancelled) return;
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [demandClient, homeReloadNonce]);
+  }, [demandClient]);
 
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
@@ -984,29 +957,14 @@ export function RequesterHome({
         </View>
       ) : null}
 
-      {/* R15.34: 继续进行 — 大 thumb 卡片 list。只渲染 server 返回的
-          continueItems；未加载/失败时显示诚实状态，不展示假数据。 */}
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>继续进行</Text>
-        <Text style={styles.sectionHint}>
-          {homeItemsState === "loaded"
-            ? `${continueItems.length} 项`
-            : homeItemsState === "error"
-            ? " · 加载失败"
-            : homeItemsState === "loading"
-            ? " · 加载中"
-            : ""}
-        </Text>
-      </View>
-      {continueItems.length === 0 ? (
-        <View style={styles.actionCard}>
-          <View style={styles.actionCopy}>
-            <Text style={styles.actionTitle}>没有进行中的需求</Text>
-            <Text style={styles.actionSub}>在上方输入开始一个新草稿。</Text>
-          </View>
+      {/* “继续进行”是状态机投影，不是常驻导航。只有服务端返回真实草稿/
+          订单状态时才出现；0、匿名、初始加载和首次失败均不占首页空间。 */}
+      {continueItems.length > 0 ? <View>
+        <View style={styles.sectionHead}>
+          <Text style={styles.sectionTitle}>继续进行</Text>
+          <Text style={styles.sectionHint}>{continueItems.length} 项</Text>
         </View>
-      ) : (
-        (homeItemsState === "loaded" ? continueItems : []).map((item) => (
+        {continueItems.map((item) => (
           <Pressable
             key={item.key}
             onPress={() => onOpenMarket?.("OPPORTUNITY")}
@@ -1032,18 +990,8 @@ export function RequesterHome({
               <Text style={styles.continueChevron}>›</Text>
             )}
           </Pressable>
-        ))
-      )}
-      {homeItemsState === "loading" ? (
-        <Text style={styles.emptyNote}>加载中…</Text>
-      ) : homeItemsState === "error" ? (
-        <View>
-          <Text style={styles.emptyNote}>加载失败，请检查连接后重试</Text>
-          <Pressable onPress={() => setHomeReloadNonce((n) => n + 1)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="重新加载进行中">
-            <Text style={styles.gridCtaTextSmall}>重试</Text>
-          </Pressable>
-        </View>
-      ) : null}
+        ))}
+      </View> : null}
 
       {/* Scene/Activity 是撮合完成后的见面道具，不抢人物发现首屏。
           放在进行中链路之后，并替代旧的重复“场景”横栏。 */}
