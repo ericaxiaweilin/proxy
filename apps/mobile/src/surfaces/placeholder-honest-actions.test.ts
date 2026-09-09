@@ -450,3 +450,13 @@ describe("PLACEHOLDER-017 folder scope without archive talk", () => {
     expect(messages).not.toContain("归档");
   });
 });
+
+describe("PLACEHOLDER-018 new folder chip in type row", () => {
+  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+
+  it("creates folders inline from the chips row", () => {
+    expect(messages).toContain("＋ 新建");
+    expect(messages).toContain("submitFolderCreate");
+    expect(messages).toContain("folderCreateInput");
+  });
+});
