@@ -1,7 +1,8 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { AppState, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image } from "expo-image";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { IdentitySwitcher } from "../components/identity-switcher";
@@ -19,7 +20,7 @@ type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: ImageSourcePropType; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
 // R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
@@ -36,7 +37,7 @@ export function MessagesSurface({
   profileClient,
   apiBaseUrl,
 }: {
-  onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: ImageSourcePropType) => void;
+  onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: number | { uri: string }) => void;
   onOpenRequests?: () => void;
   onOpenContacts?: () => void;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -119,8 +120,8 @@ export function MessagesSurface({
   };
   // 联系人详情带上会话上下文：名字 + 最近消息 + 会话 id，
   // “消息”按钮直达该会话，不断链；在线/username/手机号之前是现编的，已去掉。
-  const [personCtx, setPersonCtx] = useState<{ name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: ImageSourcePropType }>({ name: "" });
-  const openPerson = (contact: { name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: ImageSourcePropType }) => {
+  const [personCtx, setPersonCtx] = useState<{ name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string } }>({ name: "" });
+  const openPerson = (contact: { name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string } }) => {
     setPersonCtx(contact);
     setPersonName(contact.name);
     setSubView("person");
@@ -179,7 +180,7 @@ export function MessagesSurface({
             {filtered.length === 0 ? <Text style={styles.empty}>{serverDialogs === undefined ? "加载中…" : "暂无联系人"}</Text> : null}
             {filtered.map((c) => (
               <Pressable key={`${c.name}-${c.conversationId ?? ""}`} onPress={() => openPerson(c)} style={styles.contactRow}>
-                {c.avatarSource ? <Image source={c.avatarSource} style={styles.avatar} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
+                {c.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:contact:${c.conversationId ?? c.name}`} source={c.avatarSource} style={styles.avatar} transition={0} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.name.slice(0, 1)}</Text></View>}
                 <View style={{ flex: 1 }}><Text style={styles.contactName}>{c.name}</Text><Text style={styles.contactMeta}>{c.preview}</Text><Text style={styles.contactMeta}>{c.time}</Text></View>
                 <Text style={styles.contactAction}>聊天 ›</Text>
               </Pressable>
@@ -201,7 +202,7 @@ export function MessagesSurface({
             <View style={styles.icon} />
           </View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-          <View style={styles.personHero}>{personCtx.avatarSource ? <Image source={personCtx.avatarSource} style={[styles.avatar, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]} /> : <View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View>}<Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
+          <View style={styles.personHero}>{personCtx.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:person:${personCtx.conversationId ?? personName}`} source={personCtx.avatarSource} style={[styles.avatar, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]} transition={0} /> : <View style={[styles.avatar, styles.avatarWarm, { width: 70, height: 70, borderRadius: 35, alignSelf: "center" }]}><Text style={[styles.avatarText, { fontSize: 18 }]}>{personName.slice(0, 1)}</Text></View>}<Text style={styles.personName}>{personName}</Text><Text style={styles.personUser}>{personCtx.time ? `最近消息 · ${personCtx.time}` : "Proxy 联系人"}</Text></View>
           <View style={styles.personActions}>
             <Pressable onPress={() => onOpenConversation(personName, personCtx.conversationId, personCtx.aiAccount, personCtx.avatarSource)} style={styles.personAction}><View style={styles.personActionIcon}><ProxyIcon color={color.ink} name="chat" size={18} /></View><Text style={styles.personActionText}>消息</Text></Pressable>
             <Pressable onPress={() => void Share.share({ message: `Proxy 联系人：${personName}（本地通讯录）` })} style={styles.personAction} accessibilityLabel="分享联系人"><View style={styles.personActionIcon}><Text style={{ fontSize: 12 }}>🔗</Text></View><Text style={styles.personActionText}>分享</Text></Pressable>
@@ -299,7 +300,7 @@ export function MessagesSurface({
                 <Text style={styles.sectionLabel}>置顶</Text>
                 {filteredPinned.map((d) => (
                   <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
-                    {d.avatarSource ? <Image source={d.avatarSource} style={styles.avatar} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
+                    {d.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:dialog:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                       <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                       {(d as Dialog).online ? <View style={styles.online} /> : null}
                     </View>}
@@ -325,7 +326,7 @@ export function MessagesSurface({
             ) : filteredRecent.length > 0 ? (
               filteredRecent.map((d) => (
                 <Pressable key={d.id} onPress={() => onOpenConversation(d.name, d.conversationId, d.aiAccount, d.avatarSource)} style={styles.dialog}>
-                  {d.avatarSource ? <Image source={d.avatarSource} style={styles.avatar} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
+                  {d.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:recent:${d.conversationId ?? d.id}`} source={d.avatarSource} style={styles.avatar} transition={0} /> : <View style={[styles.avatar, (d as Dialog).warm && styles.avatarWarm, (d as Dialog).blue && styles.avatarBlue, (d as Dialog).dark && styles.avatarDark]}>
                     <Text style={[styles.avatarText, (d as Dialog).dark && styles.avatarTextDark]}>{d.initial}</Text>
                   </View>}
                   <View style={styles.dialogMain}>
@@ -409,7 +410,7 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   };
 }
 
-function resolveAvatarSource(ref: string, apiBaseUrl?: string): ImageSourcePropType {
+function resolveAvatarSource(ref: string, apiBaseUrl?: string): { uri: string } {
   if (/^(?:https?:|file:)/.test(ref)) return { uri: ref };
   if (ref.startsWith("/")) return { uri: `${apiBaseUrl ?? ""}${ref}` };
   return { uri: `${apiBaseUrl ?? ""}/v1/media/thumb/${encodeURIComponent(ref)}` };
