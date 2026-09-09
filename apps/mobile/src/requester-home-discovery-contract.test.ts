@@ -50,17 +50,17 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain(">AI 生成<");
   });
 
-  it("keeps matchmaking above Scene inspiration because Scene is a meeting tool, not inventory", () => {
+  it("keeps matchmaking above nearby scenes because Scene is a meeting tool, not inventory", () => {
     const human = source.indexOf(">真人推荐<");
     const ai = source.indexOf(">AI 推荐<");
     const composition = source.indexOf(">为你组合<");
     const activeWork = source.indexOf(">继续进行<");
-    const sceneInspiration = source.indexOf(">场景灵感<");
+    const sceneInspiration = source.indexOf(">附近场景<");
     expect(sceneInspiration).toBeGreaterThan(activeWork);
     expect(activeWork).toBeGreaterThan(composition);
     expect(composition).toBeGreaterThan(ai);
     expect(ai).toBeGreaterThan(human);
-    expect(source).toContain("为见面服务");
+    expect(source).toContain("打开附近场景地图");
     expect((source.match(/<SceneActivityDiscovery/g) ?? [])).toHaveLength(1);
   });
 

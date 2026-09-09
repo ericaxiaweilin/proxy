@@ -606,6 +606,7 @@ export function RequesterHome({
             const feed = SCENE_RECOMMEND[modeId];
             return {
               id: modeId,
+              icon: modeId === "PHOTO" ? "camera" : modeId === "COMPANION" ? "user" : modeId === "COFFEE_MEAL" ? "cup" : modeId === "ACTIVITY" ? "star" : modeId === "TRIP" ? "route" : modeId === "CREATOR" ? "image" : modeId === "TRANSLATE" ? "chat" : "plus",
               label: feed ? (
                 modeId === "PHOTO" ? "拍照" : modeId === "COMPANION" ? "同行" : modeId === "COFFEE_MEAL" ? "吃饭" : modeId === "ACTIVITY" ? "活动" : modeId === "TRIP" ? "出去玩" : modeId === "CREATOR" ? "创作" : modeId === "TRANSLATE" ? "翻译" : "陪诊"
               ) : modeId
@@ -627,8 +628,6 @@ export function RequesterHome({
       <View style={styles.peopleHead}>
         <View style={{ flex: 1 }}>
           <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>真人推荐</Text><View style={styles.humanBadge}><Text style={styles.humanBadgeText}>真人</Text></View></View>
-          <Text style={styles.peopleSceneTitle}>{recommendFeed.title}</Text>
-          <Text style={styles.peopleSub}>{recommendFeed.subtitle}</Text>
         </View>
         <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger}>
           <Text style={styles.filterTriggerText}>筛选 〉</Text>
@@ -978,8 +977,10 @@ export function RequesterHome({
       {/* Scene/Activity 是撮合完成后的见面道具，不抢人物发现首屏。
           放在进行中链路之后，并替代旧的重复“场景”横栏。 */}
       <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>场景灵感</Text>
-        <Text style={styles.sectionHint}>{activeSceneCount > 0 ? `${activeSceneCount} 个真实场景 · 为见面服务` : "为见面服务"}</Text>
+        <Text style={styles.peopleTitle}>附近场景</Text>
+        <Pressable accessibilityLabel="打开附近场景地图" onPress={() => onOpenSceneMap?.()}>
+          <Text style={styles.filterTriggerText}>地图 〉</Text>
+        </Pressable>
       </View>
       <SceneActivityDiscovery
         apiBaseUrl={sceneApiBaseUrl}

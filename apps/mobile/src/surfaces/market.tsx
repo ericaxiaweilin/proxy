@@ -11,7 +11,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
-import * as ImagePicker from "expo-image-picker";
 import { useModuleBackHandler } from "../components/module-back";
 import type { Activity } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
@@ -51,6 +50,14 @@ const EXPLORER_SPOTS: ReadonlyArray<{ id: string; name: string; lat: number; lng
 ];
 
 export type MarketViewMode = "LIST" | "MAP";
+type OpportunityStatusFilter = "ALL" | "APPLIED" | "CREATED" | "EXECUTING";
+
+const OPPORTUNITY_STATUS_FILTERS: ReadonlyArray<{ id: OpportunityStatusFilter; label: string; icon: "storeLines" | "check" | "plus" | "clock" }> = [
+  { id: "ALL", label: "全部", icon: "storeLines" },
+  { id: "APPLIED", label: "已申请", icon: "check" },
+  { id: "CREATED", label: "已创建", icon: "plus" },
+  { id: "EXECUTING", label: "执行中", icon: "clock" }
+];
 
 type ActivityFilter = "RECOMMENDED" | "CAFE" | "RESTAURANT" | "MINE";
 
@@ -137,19 +144,17 @@ export function MarketSurface({
   const [oppDetail, setOppDetail] = useState<MarketOpportunity | null>(null);
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
   const [publishOpen, setPublishOpen] = useState(false);
+  const [activityPublishOpen, setActivityPublishOpen] = useState(false);
+  const [publishMenuOpen, setPublishMenuOpen] = useState(false);
   const [selectOpp, setSelectOpp] = useState<MarketOpportunity | null>(null);
-  const [offerBusy, setOfferBusy] = useState(false);
-  const [lastOrderId, setLastOrderId] = useState<string>();
 
   // 规范 §4/§13：Android 硬件返回按真实嵌套深度逐层收起，最上层先消费；
   // 全部收起后返回 false 交给 shell 关模块。
   useModuleBackHandler(selectOpp ? () => { setSelectOpp(null); return true; } : undefined);
+  useModuleBackHandler(activityPublishOpen ? () => { setActivityPublishOpen(false); return true; } : undefined);
   useModuleBackHandler(publishOpen ? () => { setPublishOpen(false); return true; } : undefined);
   useModuleBackHandler(activityDetail ? () => { setActivityDetail(null); return true; } : undefined);
   useModuleBackHandler(oppDetail ? () => { setOppDetail(null); return true; } : undefined);
-  const [offerMsg, setOfferMsg] = useState<string>();
-  const [myOffers, setMyOffers] = useState<Array<{ offerId: string; status: string; expiresAt: string }>>([]);
-  const [showOffers, setShowOffers] = useState(false);
   const lastScrollYRef = useRef(0);
   const chromeVisibleRef = useRef(true);
   const scrollDirectionDistanceRef = useRef(0);
@@ -283,87 +288,6 @@ export function MarketSurface({
     setSelectOpp(opportunity);
   }
 
-  async function loadMyOffers(): Promise<void> {
-    if (!fulfillment) { setOfferMsg("Offer 服务未就绪"); return; }
-    setOfferBusy(true);
-    try {
-      const list = await fulfillment.listAgentOffers();
-      setMyOffers(list.map((offer) => ({ offerId: offer.offerId, status: offer.status, expiresAt: offer.expiresAt })));
-      setShowOffers(true);
-      setOfferMsg(list.length === 0 ? "暂无 Offer" : `已加载 ${list.length} 个 Offer`);
-    } catch (e) {
-      setOfferMsg(e instanceof Error ? e.message : "加载 Offer 失败");
-    } finally {
-      setOfferBusy(false);
-    }
-  }
-
-  async function acceptOffer(offerId: string): Promise<void> {
-    if (!fulfillment) return;
-    setOfferBusy(true);
-    try {
-      const res = await fulfillment.acceptSlotOffer(offerId);
-      setOfferMsg(`已接单 · Order ${res.orderId.slice(0, 8)} · 可打卡`);
-      void loadMyOffers();
-      // store last order for check-in demo
-      setLastOrderId(res.orderId);
-    } catch (e) {
-      setOfferMsg(e instanceof Error ? e.message : "接单失败");
-    } finally {
-      setOfferBusy(false);
-    }
-  }
-
-  async function checkInLastOrder(): Promise<void> {
-    const orderId = lastOrderId;
-    if (!fulfillment || !orderId) { setOfferMsg("请先接单"); return; }
-    setOfferBusy(true);
-    try {
-      await fulfillment.checkInOrder(orderId, { marketId: "hn", locationLabel: "河内·还剑湖" });
-      setOfferMsg(`已打卡 · Order ${orderId.slice(0, 8)}`);
-    } catch (e) {
-      setOfferMsg(e instanceof Error ? e.message : "打卡失败");
-    } finally {
-      setOfferBusy(false);
-    }
-  }
-
-  async function submitEvidenceLastOrder(): Promise<void> {
-    const orderId = lastOrderId;
-    if (!fulfillment || !media || !orderId) { setOfferMsg(!media ? "媒体服务未连接" : "请先接单/打卡"); return; }
-    setOfferBusy(true);
-    try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) {
-        setOfferMsg("需要相机权限才能提交履约凭证");
-        return;
-      }
-      const picked = await ImagePicker.launchCameraAsync({
-        mediaTypes: ["images"],
-        quality: 1,
-        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Current
-      });
-      if (picked.canceled || !picked.assets[0]) {
-        setOfferMsg("已取消凭证拍摄");
-        return;
-      }
-      const asset = picked.assets[0];
-      const uploaded = await media.uploadImage({
-        uri: asset.uri,
-        width: asset.width,
-        height: asset.height,
-        ...(asset.fileName ? { fileName: asset.fileName } : {}),
-        ...(asset.mimeType ? { mimeType: asset.mimeType } : {})
-      });
-      await fulfillment.submitEvidence(orderId, { mediaAssetId: uploaded.mediaAssetId, evidenceType: "PHOTO" });
-      setOfferMsg(`证据已提交 · Order ${orderId.slice(0, 8)}`);
-    } catch (e) {
-      setOfferMsg(e instanceof Error ? e.message : "提交证据失败");
-    } finally {
-      setOfferBusy(false);
-    }
-  }
-
   function upsertActivity(next: Activity): void {
     setActivityItems((current) => current.map((entry) => (entry.activityId === next.activityId ? next : entry)));
   }
@@ -421,17 +345,15 @@ export function MarketSurface({
   function renderMarketPage(pageTab: "OPPORTUNITY" | "ACTIVITY"): React.JSX.Element {
     const bottomPad = bottomNavVisible === false ? 16 : 120;
     return (
+    <View style={styles.marketPage}>
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
-        <View>
-          <Text style={styles.marketTitle}>市场</Text>
-          <Text style={styles.marketSub}>{effectiveMarketLabel} · 机会 · 活动</Text>
-        </View>
+        <Text style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
             <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "route"} size={18} />
           </Pressable>
-          <Pressable onPress={() => setPublishOpen(true)} style={styles.plusBtn}>
+          <Pressable onPress={() => setPublishMenuOpen((open) => !open)} style={styles.plusBtn}>
             <ProxyIcon color={color.white} name="plus" size={18} />
           </Pressable>
         </View>
@@ -449,53 +371,33 @@ export function MarketSurface({
         style={styles.foundationTabs}
       />
 
-      {/* M4 Offer wave: requester 发 Offer (5m TTL) + agent 接单，idempotency + slot 唯一 + 过期校验 */}
-      <View style={styles.offerBar}>
-        <Pressable disabled={offerBusy} onPress={() => void loadMyOffers()} style={[styles.offerBtn, offerBusy && styles.offerBtnDisabled]}>
-          <Text style={styles.offerBtnText}>{offerBusy ? "加载中…" : "我的 Offer"}</Text>
+      {publishMenuOpen ? <View style={styles.publishMenu}>
+        <Pressable onPress={() => { setPublishMenuOpen(false); setPublishOpen(true); }} style={styles.publishMenuPrimary}>
+          <ProxyIcon color={color.white} name="plus" size={20} /><Text style={styles.publishMenuPrimaryText}>发布订单</Text>
         </Pressable>
-        {oppDetail && oppDetail.ownedByViewer ? (
-          <Pressable disabled={offerBusy} onPress={() => openOfferWorkbench(oppDetail)} style={[styles.offerBtnPrimary, offerBusy && styles.offerBtnDisabled]} accessibilityLabel="去选人工作台发 Offer">
-            <Text style={styles.offerBtnPrimaryText}>选人发 Offer →</Text>
-          </Pressable>
-        ) : null}
-        <Pressable disabled={offerBusy || myOffers.length === 0} onPress={() => setShowOffers((v) => !v)} style={[styles.offerBtn, (offerBusy || myOffers.length === 0) && styles.offerBtnDisabled]}>
-          <Text style={styles.offerBtnText}>{showOffers ? "收起" : `列表(${myOffers.length})`}</Text>
+        <Pressable onPress={() => { setPublishMenuOpen(false); setActivityPublishOpen(true); void loadActivities(); }} style={styles.publishMenuSecondary}>
+          <ProxyIcon color={color.ink} name="star" size={20} /><Text style={styles.publishMenuSecondaryText}>发布活动</Text>
         </Pressable>
-        <Pressable disabled={offerBusy} onPress={() => void checkInLastOrder()} style={[styles.offerBtn, offerBusy && styles.offerBtnDisabled]}>
-          <Text style={styles.offerBtnText}>打卡</Text>
-        </Pressable>
-        <Pressable disabled={offerBusy} onPress={() => void submitEvidenceLastOrder()} style={[styles.offerBtn, offerBusy && styles.offerBtnDisabled]}>
-          <Text style={styles.offerBtnText}>证据</Text>
-        </Pressable>
-      </View>
-      {offerMsg ? <Text style={styles.offerMsg}>{offerMsg}</Text> : null}
+      </View> : null}
+
       {supply ? (
         <Text style={styles.offerMsg}>
           {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
         </Text>
       ) : null}
-      {showOffers ? (
-        <View style={styles.offerList}>
-          {myOffers.length === 0 ? (
-            <Text style={styles.offerEmpty}>暂无 Offer</Text>
-          ) : (
-            myOffers.map((o) => (
-              <View key={o.offerId} style={styles.offerCard}>
-                <View style={styles.offerCopy}>
-                  <Text style={styles.offerId}>{o.offerId.slice(0, 8)}</Text>
-                  <Text style={styles.offerMeta}>{o.status} · {new Date(o.expiresAt).toLocaleTimeString()}</Text>
-                </View>
-                <Pressable disabled={offerBusy || o.status !== "OFFERED"} onPress={() => void acceptOffer(o.offerId)} style={[styles.offerAccept, (offerBusy || o.status !== "OFFERED") && styles.offerBtnDisabled]}>
-                  <Text style={styles.offerAcceptText}>{o.status === "OFFERED" ? "接受" : o.status}</Text>
-                </Pressable>
-              </View>
-            ))
-          )}
-        </View>
-      ) : null}
-
-      {publishOpen ? (
+      {activityPublishOpen ? (
+        <PublishActivityForm
+          activities={activities}
+          venueOptions={activityItems}
+          onBack={() => setActivityPublishOpen(false)}
+          onPublished={(activity) => {
+            setActivityItems((items) => [activity, ...items]);
+            setActivityPublishOpen(false);
+            setTab("ACTIVITY");
+            setPagerPage(1);
+          }}
+        />
+      ) : publishOpen ? (
         <PublishDemand
           marketplace={marketplace}
           onBack={() => setPublishOpen(false)}
@@ -603,6 +505,10 @@ export function MarketSurface({
         </>
       )}
     </ScrollView>
+    {!publishOpen && !activityPublishOpen && !selectOpp && !oppDetail && !activityDetail ? <Pressable accessibilityLabel="发布订单或活动" onPress={() => setPublishMenuOpen((open) => !open)} style={[styles.floatingPublish, { bottom: bottomNavVisible === false ? 18 : 82 }]}>
+      <ProxyIcon color={color.white} name="plus" size={24} />
+    </Pressable> : null}
+    </View>
     );
   }
 
@@ -639,9 +545,13 @@ function OpportunityTab({
   onDismiss: (id: string) => void;
 }): React.JSX.Element {
   const [typeFilter, setTypeFilter] = useState<OpportunityType | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<OpportunityStatusFilter>("ALL");
   const [query, setQuery] = useState("");
   const base = sourceItems;
   let items = [...base];
+  if (statusFilter === "APPLIED") items = items.filter((o) => o.appliedByViewer);
+  if (statusFilter === "CREATED") items = items.filter((o) => o.ownedByViewer);
+  if (statusFilter === "EXECUTING") items = items.filter((o) => o.viewerApplicationStatus === "CONFIRMED" || Boolean(o.viewerOrderRef));
   if (typeFilter !== "all") items = items.filter((o) => inferOpportunityTypeForFilter(o) === typeFilter);
   const q = query.trim().toLowerCase();
   if (q) items = items.filter((o) => `${o.title ?? ""}${o.location ?? ""}${o.id}`.toLowerCase().includes(q));
@@ -653,6 +563,16 @@ function OpportunityTab({
           <Text style={styles.searchIcon}>⌕</Text>
         </View>
       </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
+        {OPPORTUNITY_STATUS_FILTERS.map((entry) => {
+          const active = statusFilter === entry.id;
+          return <Pressable key={entry.id} onPress={() => setStatusFilter(entry.id)} style={[styles.statusFilter, active && styles.statusFilterOn]}>
+            <ProxyIcon color={active ? color.white : color.ink} name={entry.icon} size={17} />
+            <Text style={[styles.statusFilterText, active && styles.statusFilterTextOn]}>{entry.label}</Text>
+          </Pressable>;
+        })}
+      </ScrollView>
 
       <R37TypePalette active={typeFilter} onChange={setTypeFilter} />
 
@@ -874,6 +794,62 @@ const PUBLISH_FLOW_OPTIONS: ReadonlyArray<{ id: PublishMoneyFlow; label: string;
   { id: "FREE", label: "免费任务", sub: "0₫ · 同好/社区" },
   { id: "TBD", label: "费用待确认", sub: "双方面谈 · 不显示金额" }
 ];
+
+function PublishActivityForm({ activities, venueOptions, onBack, onPublished }: { activities: ActivityClient; venueOptions: Activity[]; onBack: () => void; onPublished: (activity: Activity) => void }): React.JSX.Element {
+  const venues = useMemo(() => {
+    const unique = new Map<string, Activity>();
+    venueOptions.forEach((item) => { if (item.realitySceneId && !unique.has(item.realitySceneId)) unique.set(item.realitySceneId, item); });
+    return [...unique.values()];
+  }, [venueOptions]);
+  const [selectedSceneId, setSelectedSceneId] = useState(venues[0]?.realitySceneId ?? "");
+  const [title, setTitle] = useState("");
+  const [time, setTime] = useState("");
+  const [capacity, setCapacity] = useState("6");
+  const [desc, setDesc] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const venue = venues.find((item) => item.realitySceneId === selectedSceneId);
+  useEffect(() => {
+    if (!selectedSceneId && venues[0]?.realitySceneId) setSelectedSceneId(venues[0].realitySceneId);
+  }, [selectedSceneId, venues]);
+
+  async function submit(): Promise<void> {
+    const seats = Number.parseInt(capacity, 10);
+    if (!venue) { setError("请先选择一个真实场景"); return; }
+    if (!title.trim() || !time.trim()) { setError("请填写活动名称和时间"); return; }
+    if (!Number.isFinite(seats) || seats < 2 || seats > 50) { setError("人数须为 2–50 人"); return; }
+    setBusy(true); setError(undefined);
+    try {
+      const created = await activities.publish({
+        title: title.trim(), time: time.trim(), capacity: seats,
+        venueName: venue.venueName, venueIcon: venue.venueIcon ?? "☕",
+        venueType: venue.venueType === "RESTAURANT" ? "RESTAURANT" : "CAFE",
+        realitySceneId: venue.realitySceneId ?? "", desc: desc.trim() || "一起参加活动",
+        consumptionTerm: "SPLIT"
+      });
+      onPublished(created);
+    } catch (e) { setError(e instanceof Error ? e.message : "活动发布失败，请重试"); }
+    finally { setBusy(false); }
+  }
+
+  return <View style={styles.activityPublishPanel}>
+    <View style={styles.detailHead}><Pressable onPress={onBack}><Text style={styles.detailBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>发布活动</Text></View>
+    <Text style={styles.activityPublishTitle}>发起真实活动</Text>
+    <TextInput onChangeText={setTitle} placeholder="活动名称" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={title} />
+    <TextInput onChangeText={setTime} placeholder="时间，例如 周六 14:00" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={time} />
+    <TextInput keyboardType="number-pad" onChangeText={setCapacity} placeholder="人数" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={capacity} />
+    <TextInput multiline onChangeText={setDesc} placeholder="活动说明（可选）" placeholderTextColor="#A9A2B0" style={[styles.activityPublishInput, { minHeight: 72 }]} value={desc} />
+    <Text style={styles.activityPublishLabel}>选择真实场景</Text>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
+      {venues.map((item) => <Pressable key={item.realitySceneId} onPress={() => setSelectedSceneId(item.realitySceneId ?? "")} style={[styles.statusFilter, selectedSceneId === item.realitySceneId && styles.statusFilterOn]}>
+        <Text style={[styles.statusFilterText, selectedSceneId === item.realitySceneId && styles.statusFilterTextOn]}>{item.venueIcon} {item.venueName}</Text>
+      </Pressable>)}
+    </ScrollView>
+    {venues.length === 0 ? <Text style={styles.marketError}>当前没有可绑定的真实场景，请先刷新活动数据。</Text> : null}
+    {error ? <Text style={styles.marketError}>{error}</Text> : null}
+    <Pressable disabled={busy || venues.length === 0} onPress={() => void submit()} style={[styles.r4ActionPrimary, (busy || venues.length === 0) && styles.offerBtnDisabled]}><Text style={styles.r4ActionPrimaryText}>{busy ? "发布中…" : "确认发布活动"}</Text></Pressable>
+  </View>;
+}
 
 function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: MarketplaceClient; onBack: () => void; onPublished: (opportunity: MarketOpportunity) => void }): React.JSX.Element {
   const [title, setTitle] = useState("周六城市同行 + 拍照");
@@ -1322,6 +1298,7 @@ function mapConfig(): { _removed: true } {
 }
 
 const styles = StyleSheet.create({
+  marketPage: { backgroundColor: color.offWhite, flex: 1 },
   root: { backgroundColor: color.offWhite, flex: 1 },
   content: { paddingBottom: 120, paddingHorizontal: 18, paddingTop: 10 },
   contentFlat: { paddingHorizontal: 0 },
@@ -1335,6 +1312,21 @@ const styles = StyleSheet.create({
   viewToggleTextOn: { color: color.white },
   plusBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 44, justifyContent: "center", width: 44 },
   plusBtnText: { color: color.white, fontSize: 22, fontWeight: "700" },
+  publishMenu: { flexDirection: "row", gap: 8, paddingBottom: 4, paddingHorizontal: 12 },
+  publishMenuPrimary: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, flex: 1, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48 },
+  publishMenuPrimaryText: { color: color.white, fontSize: 14, fontWeight: "800" },
+  publishMenuSecondary: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48 },
+  publishMenuSecondaryText: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  floatingPublish: { alignItems: "center", backgroundColor: color.ink, borderRadius: 27, height: 54, justifyContent: "center", position: "absolute", right: 18, width: 54, ...shadows.card },
+  statusFilterRow: { gap: 7, paddingHorizontal: 12, paddingVertical: 5 },
+  statusFilter: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, flexDirection: "row", gap: 5, minHeight: 38, paddingHorizontal: 12 },
+  statusFilterOn: { backgroundColor: color.ink, borderColor: color.ink },
+  statusFilterText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  statusFilterTextOn: { color: color.white },
+  activityPublishPanel: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, margin: 12, padding: 14, ...shadows.card },
+  activityPublishTitle: { color: color.ink, fontSize: 22, fontWeight: "800", marginBottom: 10 },
+  activityPublishInput: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 14, marginBottom: 8, minHeight: 46, paddingHorizontal: 12, paddingVertical: 10 },
+  activityPublishLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginTop: 4 },
   offerBar: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8, paddingHorizontal: 12 },
   offerBtn: { backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7 },
   offerBtnDisabled: { opacity: 0.5 },

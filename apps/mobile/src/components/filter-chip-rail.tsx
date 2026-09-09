@@ -27,11 +27,13 @@
 
 import { Pressable, StyleSheet, Text } from "react-native";
 import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
+import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { color, shadows } from "../theme";
 
 export interface FilterChipRailItem {
   id: string;
   label: string;
+  icon?: ProxyIconName;
 }
 
 export interface FilterChipRailProps {
@@ -74,6 +76,7 @@ export function FilterChipRail({
             accessibilityState={{ selected: active }}
             accessibilityLabel={`${testPrefix} ${item.label}${active ? "，已选" : ""}`}
           >
+            {item.icon ? <ProxyIcon color={active ? color.white : color.ink} name={item.icon} size={18} /> : null}
             <Text style={[styles.chipText, active && styles.chipTextActive]}>{item.label}</Text>
           </Pressable>
         );
@@ -96,6 +99,8 @@ const styles = StyleSheet.create({
     borderColor: color.line,
     borderRadius: 999,
     borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
     justifyContent: "center",
     minHeight: 44,
     paddingHorizontal: 13,
