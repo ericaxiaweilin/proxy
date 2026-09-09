@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 128 — 2026-09-09
+
+- 对话列表去掉多余“最近”分区头（PLACEHOLDER-015）：服务端已按最后
+  消息倒序，最新自然在第一行。
+
 ## Revision 127 — 2026-09-09
 
 - 消息页禁左滑跳页（PLACEHOLDER-014）：左滑归行内删除，向右保留；
