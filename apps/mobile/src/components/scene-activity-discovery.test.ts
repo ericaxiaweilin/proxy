@@ -32,16 +32,21 @@ describe("scene activity discovery contract", () => {
   });
 
   it("keeps taxonomy cards tappable while still taking over real horizontal swipes", () => {
-    expect(source.match(/preserveChildPresses threshold=\{3\}/g)).toHaveLength(3);
+    expect(source.match(/preserveChildPresses threshold=\{3\}/g)).toHaveLength(1);
     expect(rail).toContain("onStartShouldSetPanResponder: () => !preserveChildPresses");
     expect(rail).toContain("!preserveChildPresses || Math.abs(gs.dx) > threshold");
   });
 
-  it("opens complete Action, Scene and Theme pickers from each 全部 button", () => {
-    expect(source).toContain('setPickerKind("ACTION")');
-    expect(source).toContain('setPickerKind("SCENE")');
-    expect(source).toContain('setPickerKind("THEME")');
-    expect(source).toContain("全部{pickerKind");
+  it("keeps one compact Action row and opens all three taxonomies from one 全部 button", () => {
+    expect(source).toContain("setPickerOpen(true)");
+    expect(source).toContain(">全部筛选<");
+    expect(source).toContain('{ key: "actions", label: "动作", items: ACTIONS }');
+    expect(source).toContain('{ key: "scenes", label: "场景", items: SCENES }');
+    expect(source).toContain('{ key: "themes", label: "主题", items: THEMES }');
+    expect(source).not.toContain('<SectionHead label="场景"');
+    expect(source).not.toContain('<SectionHead label="主题"');
+    expect(source).toContain("styles.actionGlyph");
+    expect(source).not.toContain("styles.actionCard");
     expect(source).toContain("清除筛选");
   });
 
