@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 125 — 2026-09-09
+
+- 左滑删除宽松结算：轻滑 24px 即展开，被列表抢走手势也按最后位移
+  结算，不再中途收回看不全。
+
 ## Revision 124 — 2026-09-09
 
 - AI 小美主页三按钮直接复用动态帖文头像菜单的单层玻璃口径：

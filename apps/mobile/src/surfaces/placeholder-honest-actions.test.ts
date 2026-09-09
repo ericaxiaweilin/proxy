@@ -387,4 +387,9 @@ describe("PLACEHOLDER-013 swipe to delete dialogs", () => {
     expect(messages).toContain("proxy-hidden-chats");
     expect(messages).toContain("visibleDialogs");
   });
+
+  it("settles forgivingly: light swipe opens, termination settles too", () => {
+    expect(messages).toContain("SWIPE_OPEN_DX");
+    expect(messages).toContain("onPanResponderTerminate: () => settle(");
+  });
 });

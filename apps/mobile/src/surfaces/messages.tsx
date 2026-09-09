@@ -50,12 +50,15 @@ function writeHiddenChatIds(ids: ReadonlyArray<string>): void {
 
 const SWIPE_DELETE_W = 84;
 const SWIPE_CONFIRM_W = 168;
+// 松手/被抢走时的结算阈值：轻滑 24px 即展开，不必过半，更不会中途收回。
+const SWIPE_OPEN_DX = 24;
 
 // 左滑删除行：无手势库，用 PanResponder 实现。横滑 dx 主导才接管，
 // 竖滑留给列表；点按（无位移）不受影响。删除两段确认，防误触。
 function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: React.ReactNode }): React.JSX.Element {
   const tx = useRef(new Animated.Value(0)).current;
   const startX = useRef(0);
+  const lastDx = useRef(0);
   const openW = useRef(0);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -71,25 +74,28 @@ function SwipeableRow({ onDelete, children }: { onDelete: () => void; children: 
     // 确认态切换时按钮区变宽，已展开就跟到新宽度。
     if (open) snapTo(confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W);
   }, [confirming, open, snapTo]);
+  function settle(dx: number, vx: number): void {
+    const w = confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W;
+    const wasOpen = openW.current > 0;
+    let target = 0;
+    if (!wasOpen && (dx < -SWIPE_OPEN_DX || vx < -0.4)) target = w;
+    else if (wasOpen && (dx > SWIPE_OPEN_DX || vx > 0.4)) target = 0;
+    else if (wasOpen) target = w;
+    if (target === 0) setConfirming(false);
+    snapTo(target);
+  }
   const pan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 8,
-    onPanResponderGrant: () => { startX.current = -openW.current; },
+    onPanResponderGrant: () => { startX.current = -openW.current; lastDx.current = 0; },
     onPanResponderMove: (_, gs) => {
+      lastDx.current = gs.dx;
       const w = confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W;
       tx.setValue(Math.min(0, Math.max(-w, startX.current + gs.dx)));
     },
-    onPanResponderRelease: (_, gs) => {
-      const w = confirmingRef.current ? SWIPE_CONFIRM_W : SWIPE_DELETE_W;
-      const wasOpen = openW.current > 0;
-      let target = 0;
-      if (!wasOpen && (gs.dx < -w / 2 || gs.vx < -0.4)) target = w;
-      else if (wasOpen && (gs.dx > w / 2 || gs.vx > 0.4)) target = 0;
-      else if (wasOpen) target = w;
-      if (target === 0) setConfirming(false);
-      snapTo(target);
-    },
-    onPanResponderTerminate: () => snapTo(openW.current),
+    onPanResponderRelease: (_, gs) => settle(gs.dx, gs.vx),
+    // 被父列表抢走手势（竖飘）也不中途收回：按最后位移同样结算。
+    onPanResponderTerminate: () => settle(lastDx.current, 0),
   })).current;
   return (
     <View>
