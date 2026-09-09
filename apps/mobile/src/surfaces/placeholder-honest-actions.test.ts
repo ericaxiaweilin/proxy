@@ -420,11 +420,13 @@ describe("PLACEHOLDER-015 no redundant recent header", () => {
   });
 });
 
-describe("PLACEHOLDER-016 folders live in convo and work", () => {
+describe("PLACEHOLDER-016 folders are a third tab beside dialogs and convos", () => {
   const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
   const folders = readFileSync(fileURLToPath(new URL("../components/folder-manager.tsx", import.meta.url)), "utf8");
 
-  it("keeps tabs and filter chips separate, folders filter convos", () => {
+  it("renders 对话/Convo/文件夹 side by side with working folders", () => {
+    expect(messages).toContain('setPanel("folders")');
+    expect(messages).toContain(">文件夹</Text>");
     expect(messages).toContain("styles.homeTabs");
     expect(messages).toContain("styles.folderRowWrap");
     expect(messages).not.toContain("tabFolderRow");

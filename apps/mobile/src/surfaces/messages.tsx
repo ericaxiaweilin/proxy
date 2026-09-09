@@ -16,7 +16,7 @@ import { dedupeInboxDialogs } from "../conversation-inbox-model";
 import type { ProfileClient } from "../profile-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 
-type HomePanel = "dialogs" | "convos";
+type HomePanel = "dialogs" | "convos" | "folders";
 type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
@@ -420,7 +420,7 @@ export function MessagesSurface({
           {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text style={styles.inlineClearText}>清除</Text></Pressable> : null}
         </View>
 
-        {/* 对话/Convo 页签 */}
+        {/* 对话/Convo/文件夹三页签并列 */}
         <View style={styles.homeTabs}>
           <Pressable onPress={() => setPanel("dialogs")} style={[styles.homeTab, panel === "dialogs" && styles.homeTabActive]}>
             <Text style={[styles.homeTabText, panel === "dialogs" && styles.homeTabTextActive]}>对话</Text>
@@ -432,6 +432,12 @@ export function MessagesSurface({
             <Text style={[styles.homeTabText, panel === "convos" && styles.homeTabTextActive]}>Convo</Text>
             <View style={[styles.countBadge, panel !== "convos" && styles.countBadgeMuted]}>
               <Text style={styles.countBadgeText}>{groupDialogs.length}</Text>
+            </View>
+          </Pressable>
+          <Pressable onPress={() => setPanel("folders")} style={[styles.homeTab, panel === "folders" && styles.homeTabActive]} accessibilityLabel="文件夹">
+            <Text style={[styles.homeTabText, panel === "folders" && styles.homeTabTextActive]}>文件夹</Text>
+            <View style={[styles.countBadge, panel !== "folders" && styles.countBadgeMuted]}>
+              <Text style={styles.countBadgeText}>{folders.length}</Text>
             </View>
           </Pressable>
         </View>
@@ -503,9 +509,31 @@ export function MessagesSurface({
               <Text style={styles.empty}>还没有对话 — 从动态或市场开始聊一下</Text>
             )}
           </>
-        ) : (
+        ) : panel === "convos" ? (
           <>
             <Text style={styles.sectionLabel}>关注的 Convo</Text>
+            {groupDialogs.length === 0 ? (
+              <Text style={styles.preview}>还没有群组对话</Text>
+            ) : null}
+            {groupDialogs.map((c) => (
+              <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
+              <Pressable onPress={() => onOpenConversation(c.name, c.conversationId)} style={styles.convoCard}>
+                <View style={styles.convoHead}>
+                  <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
+                  <View style={styles.convoCopy}>
+                    <Text style={styles.convoName}>{c.name}</Text>
+                    <Text style={styles.convoParent}>{c.badge ?? "群组"}</Text>
+                  </View>
+                  {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
+                </View>
+                <Text style={styles.convoPreview} numberOfLines={1}>{c.preview}</Text>
+                <View style={styles.convoFoot}><Text style={styles.convoFootText}>{c.time}</Text></View>
+              </Pressable>
+              </SwipeableRow>
+            ))}
+          </>
+        ) : (
+          <>
             <FolderManager
               folders={folders}
               onCreate={createFolder}
@@ -522,6 +550,9 @@ export function MessagesSurface({
                   ) : null}
                   {!selected && groupDialogs.length === 0 ? (
                     <Text style={styles.preview}>还没有群组对话</Text>
+                  ) : null}
+                  {!selected && groupDialogs.length > 0 ? (
+                    <Text style={styles.preview}>选一个文件夹，再点卡片把会话移入。</Text>
                   ) : null}
                   {shown.map((c) => {
                     const inSelected = selected?.dialogIds.includes(c.id) ?? false;
