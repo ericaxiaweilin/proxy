@@ -10,13 +10,13 @@ describe("scene activity discovery contract", () => {
     expect(source).toContain('id: "cycling"');
     expect(source).toContain('id: "old-town"');
     expect(source).toContain('id: "ao-dai"');
-    expect(source).toContain("moment.action === actionId");
+    expect(source).toContain("moment.action === actionMatchId(actionId)");
     expect(source).toContain("moment.scene === sceneId");
     expect(source).toContain("themeIds.every");
   });
 
   it("ships the complete R42 visual taxonomy", () => {
-    expect(source.match(/assets\/scene-activity\/actions\//g)).toHaveLength(12);
+    expect(source.match(/assets\/scene-activity\/actions\//g)).toHaveLength(19);
     expect(source.match(/assets\/scene-activity\/scenes\//g)).toHaveLength(10);
     expect(source.match(/assets\/scene-activity\/themes\//g)).toHaveLength(10);
   });
@@ -47,7 +47,20 @@ describe("scene activity discovery contract", () => {
     expect(source).not.toContain('<SectionHead label="主题"');
     expect(source).toContain("styles.actionGlyph");
     expect(source).not.toContain("styles.actionCard");
-    expect(source).toContain("清除筛选");
+    expect(source).toContain("可组合选择");
+  });
+
+  it("supports expandable action families and a persistent full reset", () => {
+    expect(source).toContain("type ActionDetail");
+    expect(source).toContain("actionMatchId(actionId)");
+    expect(source).toContain(">运动细分<");
+    expect(source).toContain('id: "badminton"');
+    expect(source).toContain('id: "tennis"');
+    expect(source).toContain('id: "yoga"');
+    expect(source).toContain('id: "hiking"');
+    expect(source).toContain('id: "water-sports"');
+    expect(source).toContain("styles.pickerReset");
+    expect(source).toContain(">重置<");
   });
 
   it("loads editorial photos from the server catalog instead of the app bundle", () => {

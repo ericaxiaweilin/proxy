@@ -23,7 +23,7 @@ func TestPublicSceneAssetsReturnsNetworkCatalog(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Version != 1 || len(body.Actions) != 12 || len(body.Scenes) != 10 || len(body.Themes) != 10 || len(body.Moments) != 8 {
+	if body.Version != 1 || len(body.Actions) != 19 || len(body.Scenes) != 10 || len(body.Themes) != 10 || len(body.Moments) != 8 {
 		t.Fatalf("unexpected catalog sizes: %+v", body)
 	}
 	if got := body.Actions["coffee"]; got != "/v1/media/thumb/seed_scene_action_extended_0_0" {

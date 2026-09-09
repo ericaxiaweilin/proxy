@@ -20,6 +20,10 @@ func (s *Server) publicSceneAssets(w http.ResponseWriter, r *http.Request) {
 			"shopping": media("seed_scene_action_extended_0_2"), "movie": media("seed_scene_action_primary_1_5"),
 			"music": media("seed_scene_action_extended_2_3"), "explore-store": media("seed_scene_action_extended_3_0"),
 			"travel": media("seed_scene_action_extended_3_5"), "sport": media("seed_scene_action_extended_1_0"),
+			"running": media("seed_scene_action_extended_1_1"), "sport-cycling": media("seed_scene_action_extended_1_2"),
+			"badminton": media("seed_scene_action_extended_1_3"), "tennis": media("seed_scene_action_extended_1_4"),
+			"yoga": media("seed_scene_action_extended_1_5"), "hiking": media("seed_scene_action_extended_2_0"),
+			"water-sports": media("seed_scene_action_extended_2_1"),
 		},
 		"scenes": map[string]string{
 			"cafe": media("seed_scene_action_primary_0_0"), "lake": media("seed_scene_theme_0_2"),
