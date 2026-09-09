@@ -611,7 +611,7 @@ const styles = StyleSheet.create({
   postCard: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0", backgroundColor: "#fff" },
   postHead: { flexDirection: "row", alignItems: "center" },
   postAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#cbd5e1", alignItems: "center", justifyContent: "center", marginRight: 10, overflow: "hidden" },
-  postAvatarImage: { width: 38, height: 38, borderRadius: 19 },
+  postAvatarImage: { width: 38, height: 38, resizeMode: "cover" },
   postAvatarText: { fontSize: 16, color: "#0f172a", fontWeight: "700" },
   postHeadBody: { flex: 1 },
   postName: { fontSize: 13, fontWeight: "700", color: "#0f172a" },

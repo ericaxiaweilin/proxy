@@ -1025,13 +1025,15 @@ export function FeedSurface({
                   style={styles.postAvatarPressable}
                 >
                 <View style={styles.postAvatarWrap}>
-                  {isOwnPost(post) && viewerAvatarUri ? (
-                    <Image source={{ uri: viewerAvatarUri }} style={styles.postAvatarImage} />
-                  ) : (
-                    <View style={styles.postAvatar}>
-                      <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
-                    </View>
-                  )}
+                  <View style={styles.postAvatarClip}>
+                    {isOwnPost(post) && viewerAvatarUri ? (
+                      <Image source={{ uri: viewerAvatarUri }} style={styles.postAvatarImage} />
+                    ) : (
+                      <View style={styles.postAvatar}>
+                        <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
+                      </View>
+                    )}
+                  </View>
                   <View style={styles.scenarioBadge}>
                     <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
                   </View>
@@ -1552,7 +1554,8 @@ const styles = StyleSheet.create({
   profileDropPress: { alignItems: "center", height: "100%", justifyContent: "center", paddingHorizontal: 12, width: "100%" },
   profileDropText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   postAvatarWrap: { height: 44, position: "relative", width: 44 },
-  postAvatarImage: { borderRadius: 999, height: 44, width: 44 },
+  postAvatarClip: { borderRadius: 22, height: 44, overflow: "hidden", width: 44 },
+  postAvatarImage: { height: 44, resizeMode: "cover", width: 44 },
   postAvatar: {
     alignItems: "center",
     backgroundColor: "#111",

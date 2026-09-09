@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 117 — 2026-09-09
+
+- 动态帖文与个人主页帖文头像统一使用独立正圆裁切层；场景角标留在
+  裁切层外，不再破坏头像轮廓。
+- 撤销头像照片 1.1 倍放大补丁，避免人物脸部左右被截断。
+
 ## Revision 116 — 2026-09-08
 
 - AI 主页添加走好友关系真相（PLACEHOLDER-010）：已申请未同意显示
