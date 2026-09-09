@@ -1,11 +1,12 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { Animated, AppState, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 import { Image } from "expo-image";
 import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { IdentitySwitcher } from "../components/identity-switcher";
+import { parseCommandResult } from "../login-client";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
@@ -20,14 +21,25 @@ type Folder = "all" | "friends" | "activity" | "invite";
 
 // v8 原型 mock 已删除（R36.x MOCK-001）：Dialog 只走 server
 // listConversations()，空收件箱显示诚实空态，不再展示假会话。
-type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; timestampMs: number; mediaKind: "IMAGE" | "VIDEO" | "TEXT"; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
+type Dialog = { id: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initial: string; name: string; badge?: string; preview: string; time: string; unread?: string; warm?: boolean; blue?: boolean; dark?: boolean; online?: boolean; folder: Folder; type?: string };
 // R15.74: CONVOS 走 server GROUP | SUPPORT filter（DM 在 dialogs tab）。
 
 const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友", activity: "活动", invite: "邀约" };
 
-// 文件夹页按类型 + 日期组织（照片/视频/日期分组）。
-// 类型取最近一条消息的种类；日期取最后消息时间。
-type FolderKind = "all" | "IMAGE" | "VIDEO";
+// 文件夹媒体浏览器（微信式）：照片/视频格子 + 发送人，按日期分组。
+// 数据来自各会话真实消息体（IMAGE/VIDEO + mediaRef），不是会话列表。
+// 文件暂无协议类型，不设假入口。
+export type FolderMediaKind = "IMAGE" | "VIDEO";
+export interface FolderMediaItem {
+  id: string;
+  kind: FolderMediaKind;
+  uri: string;
+  sender: string;
+  conversationId: string;
+  conversationName: string;
+  timestampMs: number;
+  timeText: string;
+}
 function dayBucket(timestampMs: number): "今天" | "昨天" | "更早" {
   if (!timestampMs) return "更早";
   const now = new Date();
@@ -166,8 +178,16 @@ export function MessagesSurface({
   const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
   const [personName, setPersonName] = useState("");
   const [contactSearch, setContactSearch] = useState("");
-  // 文件夹页类型筛选：全部/照片/视频（取最近一条消息的种类）。
-  const [folderKind, setFolderKind] = useState<FolderKind>("all");
+  // 文件夹页类型筛选：全部/照片/视频。
+  const [folderKind, setFolderKind] = useState<"all" | FolderMediaKind>("all");
+  // 文件夹媒体：首次进文件夹页时扫描各会话消息体；失败整页重试。
+  const [folderMedia, setFolderMedia] = useState<FolderMediaItem[] | undefined>(undefined);
+  const [folderMediaError, setFolderMediaError] = useState(false);
+  const [folderMediaNonce, setFolderMediaNonce] = useState(0);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const folderScannedRef = useRef(false);
+  const visibleDialogsRef = useRef<Dialog[]>([]);
+
 
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
@@ -218,6 +238,7 @@ export function MessagesSurface({
     () => (serverDialogs ?? []).filter((d) => !hiddenIds.has(d.id)),
     [serverDialogs, hiddenIds]
   );
+  visibleDialogsRef.current = visibleDialogs;
   const pinnedSource: Dialog[] = [];
   const recentSource = visibleDialogs;
   // R15.74: Convo tab (panel="convos") — 从 serverDialogs 拿 GROUP/SUPPORT conversation
@@ -231,6 +252,51 @@ export function MessagesSurface({
     }),
     [visibleDialogs]
   );
+  useEffect(() => {
+    if (panel !== "folders" || !conversationClient || folderScannedRef.current) return;
+    if (!inboxLoaded) return;
+    folderScannedRef.current = true;
+    let cancelled = false;
+    setFolderMedia(undefined);
+    setFolderMediaError(false);
+    void (async () => {
+      const settled = await Promise.allSettled(visibleDialogsRef.current.map(async (dialog) => {
+        if (!dialog.conversationId) return [];
+        const raw = await conversationClient.listMessages(dialog.conversationId);
+        const parsed = parseCommandResult(raw);
+        const body = parsed?.operationRef ? JSON.parse(parsed.operationRef) as { messages?: Array<Record<string, unknown>>; actorId?: string } : undefined;
+        const rows = Array.isArray(body?.messages) ? body.messages : [];
+        const out: FolderMediaItem[] = [];
+        for (const row of rows) {
+          const kind = row.messageType === "IMAGE" ? "IMAGE" : row.messageType === "VIDEO" ? "VIDEO" : undefined;
+          if (!kind || typeof row.mediaRef !== "string" || !row.mediaRef) continue;
+          const created = new Date(String(row.createdAt ?? Date.now())).getTime();
+          const timestampMs = Number.isFinite(created) ? created : 0;
+          const senderSnapshot = row.senderSnapshot as { displayName?: string } | undefined;
+          out.push({
+            id: String(row.messageId ?? `${dialog.id}-${out.length}`),
+            kind,
+            uri: `${conversationClient.baseUrl}/v1/media/${kind === "IMAGE" ? "thumb" : "play"}/${encodeURIComponent(row.mediaRef)}`,
+            sender: row.senderId === body?.actorId ? "你" : (senderSnapshot?.displayName || dialog.name),
+            conversationId: dialog.id,
+            conversationName: dialog.name,
+            timestampMs,
+            timeText: timestampMs ? new Date(timestampMs).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "",
+          });
+        }
+        return out;
+      }));
+      if (cancelled) return;
+      const failed = settled.filter((r) => r.status === "rejected").length;
+      const items = settled.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+      items.sort((a, b) => b.timestampMs - a.timestampMs);
+      // 全部会话都失败才算失败；部分失败只展示拉到的（图片墙不因个别会话空白）。
+      if (items.length === 0 && failed > 0) setFolderMediaError(true);
+      else setFolderMedia(items);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel, conversationClient, inboxLoaded, folderMediaNonce]);
 
   const filteredPinned = useMemo(() => filterByFolder(pinnedSource, folder, search), [pinnedSource, folder, search]);
   const filteredRecent = useMemo(() => filterByFolder(recentSource, folder, search), [recentSource, folder, search]);
@@ -500,46 +566,106 @@ export function MessagesSurface({
           </>
         ) : (
           <>
-            {/* 类型筛选：照片/视频取最近一条消息的种类；文件暂无协议类型，不设假入口 */}
+            {/* 类型筛选：照片/视频取各会话真实消息体；文件暂无协议类型，不设假入口 */}
             <View style={styles.folderRowWrap}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
                 {([["all", "全部"], ["IMAGE", "照片"], ["VIDEO", "视频"]] as const).map(([id, label]) => (
-                  <Pressable key={id} onPress={() => setFolderKind(id)} style={[styles.folderChip, folderKind === id && styles.folderChipActive]} accessibilityLabel={`只看${label}`}>
+                  <Pressable key={id} onPress={() => { setFolderKind(id); setViewerIndex(null); }} style={[styles.folderChip, folderKind === id && styles.folderChipActive]} accessibilityLabel={`只看${label}`}>
                     <Text style={[styles.folderChipText, folderKind === id && styles.folderChipTextActive]}>{label}</Text>
                   </Pressable>
                 ))}
               </ScrollView>
             </View>
             {(() => {
-              const typed = folderKind === "all" ? visibleDialogs : visibleDialogs.filter((c) => c.mediaKind === folderKind);
-              if (typed.length === 0) {
-                return <Text style={styles.empty}>{folderKind === "all" ? "还没有对话" : `还没有${folderKind === "IMAGE" ? "照片" : "视频"}消息`}</Text>;
+              if (folderMedia === undefined && !folderMediaError) {
+                return <Text style={styles.empty}>正在整理照片和视频…</Text>;
               }
-              const buckets: Array<{ title: "今天" | "昨天" | "更早"; items: typeof typed }> = (["今天", "昨天", "更早"] as const)
-                .map((title) => ({ title, items: typed.filter((c) => dayBucket(c.timestampMs) === title) }))
+              if (folderMediaError || folderMedia === undefined) {
+                return (
+                  <>
+                    <Text style={styles.empty}>媒体加载失败，请检查连接后重试</Text>
+                    <Pressable
+                      onPress={() => { folderScannedRef.current = false; setFolderMediaError(false); setFolderMediaNonce((n) => n + 1); }}
+                      style={[styles.folderChip, { alignSelf: "center", marginTop: 8 }]}
+                      accessibilityLabel="重新整理"
+                    >
+                      <Text style={styles.folderChipText}>重新整理</Text>
+                    </Pressable>
+                  </>
+                );
+              }
+              const typed = folderKind === "all" ? folderMedia : folderMedia.filter((m) => m.kind === folderKind);
+              const kindLabel = folderKind === "IMAGE" ? "照片" : folderKind === "VIDEO" ? "视频" : "照片和视频";
+              if (typed.length === 0) {
+                return <Text style={styles.empty}>{folderMedia.length === 0 ? "会话里还没有照片和视频" : `没有${kindLabel}，看看其他类型`}</Text>;
+              }
+              const buckets: Array<{ title: "今天" | "昨天" | "更早"; items: FolderMediaItem[] }> = (["今天", "昨天", "更早"] as const)
+                .map((title) => ({ title, items: typed.filter((m) => dayBucket(m.timestampMs) === title) }))
                 .filter((g) => g.items.length > 0);
+              const photos = typed.filter((m) => m.kind === "IMAGE");
+              const viewing = viewerIndex !== null ? photos[viewerIndex] : undefined;
               return (
                 <>
                   {buckets.map((group) => (
                     <View key={group.title}>
                       <Text style={styles.sectionLabel}>{group.title}</Text>
-                      {group.items.map((c) => (
-                        <SwipeableRow key={c.id} onDelete={() => hideDialog(c.id)}>
-                        <Pressable onPress={() => onOpenConversation(c.name, c.conversationId, c.aiAccount, c.avatarSource)} style={styles.dialog}>
-                          {c.avatarSource ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:folder:${c.conversationId ?? c.id}`} source={c.avatarSource} style={styles.avatar} transition={0} /> : <View style={styles.avatar}><Text style={styles.avatarText}>{c.initial}</Text></View>}
-                          <View style={styles.dialogMain}>
-                            <View style={styles.dialogTop}><Text style={styles.dialogName} numberOfLines={1}>{c.name}</Text></View>
-                            <Text style={styles.preview} numberOfLines={1}>{c.preview}</Text>
+                      <View style={styles.mediaGrid}>
+                        {group.items.map((m) => (
+                          <View key={m.id} style={styles.mediaCell}>
+                            {m.kind === "IMAGE" ? (
+                              <Pressable
+                                onPress={() => {
+                                  const at = photos.findIndex((p) => p.id === m.id);
+                                  if (at >= 0) setViewerIndex(at);
+                                }}
+                                accessibilityLabel={`查看${m.sender}的照片`}
+                              >
+                                <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`media:${m.id}`} source={{ uri: m.uri }} style={styles.mediaThumb} transition={0} />
+                              </Pressable>
+                            ) : (
+                              <Pressable
+                                onPress={() => onOpenConversation(m.conversationName, m.conversationId)}
+                                style={styles.mediaVideo}
+                                accessibilityLabel={`去看${m.sender}的视频`}
+                              >
+                                <Text style={styles.mediaPlay}>▶</Text>
+                              </Pressable>
+                            )}
+                            <Text style={styles.mediaSender} numberOfLines={1}>{m.sender}</Text>
                           </View>
-                          <View style={styles.dialogSide}>
-                            <Text style={styles.time}>{c.time}</Text>
-                            {c.unread ? <View style={styles.unread}><Text style={styles.unreadText}>{c.unread}</Text></View> : null}
-                          </View>
-                        </Pressable>
-                        </SwipeableRow>
-                      ))}
+                        ))}
+                      </View>
                     </View>
                   ))}
+                  {viewing ? (
+                    <Modal transparent animationType="fade" visible onRequestClose={() => setViewerIndex(null)}>
+                      <View style={styles.viewerRoot}>
+                        <Image cachePolicy="memory-disk" contentFit="contain" recyclingKey={`media:viewer:${viewing.id}`} source={{ uri: viewing.uri }} style={styles.viewerImage} transition={0} />
+                        <Text style={styles.viewerCaption} numberOfLines={1}>{viewing.sender} · {viewing.conversationName} · {viewing.timeText}</Text>
+                        <View style={styles.viewerBar}>
+                          <Pressable
+                            disabled={viewerIndex === 0}
+                            onPress={() => setViewerIndex((i) => (i !== null && i > 0 ? i - 1 : i))}
+                            style={styles.viewerNav}
+                            accessibilityLabel="上一张"
+                          >
+                            <Text style={styles.viewerNavText}>‹</Text>
+                          </Pressable>
+                          <Pressable onPress={() => setViewerIndex(null)} style={styles.viewerNav} accessibilityLabel="关闭查看">
+                            <Text style={styles.viewerNavText}>×</Text>
+                          </Pressable>
+                          <Pressable
+                            disabled={viewerIndex === null || viewerIndex >= photos.length - 1}
+                            onPress={() => setViewerIndex((i) => (i !== null && i < photos.length - 1 ? i + 1 : i))}
+                            style={styles.viewerNav}
+                            accessibilityLabel="下一张"
+                          >
+                            <Text style={styles.viewerNavText}>›</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </Modal>
+                  ) : null}
                 </>
               );
             })()}
@@ -573,9 +699,7 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     : "暂无消息";
   const timestamp = latest?.createdAt || item.conversation.lastMessageAt;
   const parsed = new Date(timestamp);
-  const timestampMs = parsed.getTime();
-  const time = Number.isNaN(timestampMs) ? "" : parsed.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  const mediaKind = latest?.messageType === "IMAGE" ? "IMAGE" : latest?.messageType === "VIDEO" ? "VIDEO" : "TEXT";
+  const time = Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   return {
     id: item.conversation.conversationId,
     conversationId: item.conversation.conversationId,
@@ -585,8 +709,6 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     name,
     preview,
     time,
-    timestampMs: Number.isFinite(timestampMs) ? timestampMs : 0,
-    mediaKind,
     badge: item.conversation.originType,
     // R15.74: 透出 conversationType 给 Convo tab filter (GROUP/SUPPORT)
     type: item.conversation.conversationType,
@@ -651,6 +773,19 @@ const styles = StyleSheet.create({
   unread: { marginTop: 7, minWidth: 19, height: 19, borderRadius: 10, paddingHorizontal: 5, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
   unreadText: { fontSize: 11, fontWeight: "700", color: "#fff" },
   empty: { textAlign: "center", paddingVertical: 24, fontSize: 12, color: "#aaa69e" },
+  // 文件夹媒体墙：3 列照片格 + 发送人 + 日期分组 + 全屏查看。
+  mediaGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 16, paddingBottom: 4 },
+  mediaCell: { width: "31%", marginBottom: 10 },
+  mediaThumb: { aspectRatio: 1, borderRadius: 12, width: "100%", backgroundColor: "#f1eee8" },
+  mediaVideo: { aspectRatio: 1, borderRadius: 12, width: "100%", backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
+  mediaPlay: { color: "#fff", fontSize: 22, fontWeight: "800" },
+  mediaSender: { fontSize: 11, color: "#77736c", marginTop: 4 },
+  viewerRoot: { flex: 1, backgroundColor: "rgba(10,9,12,0.96)", justifyContent: "center", paddingHorizontal: 12 },
+  viewerImage: { width: "100%", height: "70%" },
+  viewerCaption: { color: "#d8d4cf", fontSize: 12, marginTop: 10, textAlign: "center" },
+  viewerBar: { flexDirection: "row", justifyContent: "space-around", marginTop: 14 },
+  viewerNav: { paddingHorizontal: 22, paddingVertical: 10 },
+  viewerNavText: { color: "#fff", fontSize: 26, fontWeight: "800" },
   convoCard: { marginHorizontal: 14, marginTop: 10, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 15, padding: 12, backgroundColor: "#fffefa" },
   convoHead: { flexDirection: "row", alignItems: "center", gap: 9 },
   convoMark: { width: 36, height: 36, borderRadius: 11, backgroundColor: "#11110f", alignItems: "center", justifyContent: "center" },
