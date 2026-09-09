@@ -437,3 +437,13 @@ describe("PLACEHOLDER-016 folders are a third tab beside dialogs and convos", ()
     expect(folders).not.toContain("onMove");
   });
 });
+
+describe("PLACEHOLDER-017 folder scope and summary", () => {
+  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+
+  it("shows system filters only on dialogs and summarizes folders", () => {
+    expect(messages).toContain('panel === "dialogs"');
+    expect(messages).toContain("已归档会话");
+    expect(messages).toContain("去 Convo 整理");
+  });
+});

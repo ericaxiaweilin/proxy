@@ -443,7 +443,8 @@ export function MessagesSurface({
         </View>
       </View>
 
-      {/* 系统筛选 chips（对话列表用） */}
+      {/* 系统筛选 chips：只对对话列表有意义，Convo/文件夹页不展示 */}
+      {panel === "dialogs" ? (
       <View style={styles.folderRowWrap}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.folderRow}>
           {(Object.keys(FOLDER_LABEL) as Folder[]).map((f) => (
@@ -453,6 +454,7 @@ export function MessagesSurface({
           ))}
         </ScrollView>
       </View>
+      ) : null}
 
       {/* body */}
       <ScrollView style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }}>
@@ -541,10 +543,19 @@ export function MessagesSurface({
               onSelect={setSelectedFolderId}
             />
             {(() => {
+              const filedIds = new Set(folders.flatMap((f) => f.dialogIds));
+              const filedCount = groupDialogs.filter((c) => filedIds.has(c.id)).length;
+              const unfiledCount = groupDialogs.length - filedCount;
               const selected = folders.find((f) => f.id === selectedFolderId);
               const shown = selected ? groupDialogs.filter((c) => selected.dialogIds.includes(c.id)) : groupDialogs;
               return (
                 <>
+                  <Text style={styles.preview}>{folders.length} 个文件夹 · {filedCount} 个已归档会话{unfiledCount > 0 ? ` · ${unfiledCount} 个未归档` : ""}</Text>
+                  {unfiledCount > 0 ? (
+                    <Pressable onPress={() => setPanel("convos")} accessibilityLabel="去Convo整理">
+                      <Text style={styles.inlineClearText}>去 Convo 整理 ›</Text>
+                    </Pressable>
+                  ) : null}
                   {selected && shown.length === 0 ? (
                     <Text style={styles.preview}>“{selected.name}”还没有会话。在下面卡片点「＋ 文件夹」移入。</Text>
                   ) : null}
