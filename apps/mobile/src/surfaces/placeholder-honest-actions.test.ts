@@ -305,4 +305,9 @@ describe("PLACEHOLDER-008 avatars are circles", () => {
     expect(styles).toContain("identityAvatarImg: { width: 40, height: 40, borderRadius: 20 }");
     expect(styles).toContain("overflow: \"hidden\"");
   });
+
+  it("manage avatar matches home size as a circle", () => {
+    expect(styles).toContain("profileManageAva: { width: 88, height: 88, borderRadius: 44");
+    expect(styles).toContain("profileManageAvaImg: { width: 88, height: 88, borderRadius: 44 }");
+  });
 });
