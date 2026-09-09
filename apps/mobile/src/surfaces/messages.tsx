@@ -436,7 +436,6 @@ export function MessagesSurface({
               </>
             ) : null}
 
-            <Text style={styles.sectionLabel}>最近</Text>
             {!inboxLoaded ? (
               <Text style={styles.empty}>加载中…</Text>
             ) : filteredRecent.length > 0 ? (

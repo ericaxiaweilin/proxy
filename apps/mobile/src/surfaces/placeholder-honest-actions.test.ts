@@ -403,3 +403,11 @@ describe("PLACEHOLDER-014 messages keeps left swipe, shell keeps right", () => {
     expect(shell).toContain("MSG_FRIENDS");
   });
 });
+
+describe("PLACEHOLDER-015 no redundant recent header", () => {
+  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+
+  it("lists dialogs latest-first with no 最近 label", () => {
+    expect(messages).not.toContain(">最近</Text>");
+  });
+});
