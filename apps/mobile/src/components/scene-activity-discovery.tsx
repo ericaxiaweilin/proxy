@@ -28,7 +28,7 @@ type MomentSeed = {
   themes: readonly string[];
 };
 
-const ACTIONS: readonly Taxon[] = [
+export const SCENE_ACTIONS: readonly Taxon[] = [
   { id: "coffee", label: "咖啡", icon: require("../../assets/scene-activity/actions/coffee.svg") },
   { id: "dining", label: "用餐", icon: require("../../assets/scene-activity/actions/dining.svg") },
   { id: "city-walk", label: "City Walk", icon: require("../../assets/scene-activity/actions/city-walk.svg") },
@@ -44,6 +44,8 @@ const ACTIONS: readonly Taxon[] = [
   { id: "translation", label: "翻译", icon: require("../../assets/scene-activity/actions/translation.svg") },
   { id: "urban-support", label: "城市协助", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
 ] as const;
+
+const ACTIONS = SCENE_ACTIONS;
 
 // Detail nodes extend a stable top-level taxonomy without making Home wider.
 // matchActionId keeps today's Moment projection compatible until ranking moves

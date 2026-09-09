@@ -78,6 +78,13 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(fixtures).toContain("withR34Portraits");
   });
 
+  it("reuses the approved Scene action logo registry in the compact Home action rail", () => {
+    expect(source).toContain("SCENE_ACTIONS.find");
+    expect(source).toContain('modeId === "PHOTO" ? "photo"');
+    expect(source).toContain('modeId === "COMPANION" ? "city-walk"');
+    expect(source).not.toContain('modeId === "PHOTO" ? "camera"');
+  });
+
   it("keeps AI discovery circular and opens the non-physical AI profile directly", () => {
     expect(source).toMatch(/aiCard:\s*\{\s*alignItems:\s*"center",\s*width:\s*104\s*\}/);
     expect(source).toMatch(/aiAvatar:\s*\{[^}]*borderRadius:\s*999[^}]*height:\s*88[^}]*width:\s*88/);

@@ -27,7 +27,7 @@ import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
-import { SceneActivityDiscovery } from "../components/scene-activity-discovery";
+import { SCENE_ACTIONS, SceneActivityDiscovery } from "../components/scene-activity-discovery";
 import {
   RECOMMEND_FILTER_CHIPS,
   RECOMMEND_MODE_ORDER,
@@ -604,9 +604,10 @@ export function RequesterHome({
         <FilterChipRail
           items={RECOMMEND_MODE_ORDER.map((modeId) => {
             const feed = SCENE_RECOMMEND[modeId];
+            const actionIconId = modeId === "PHOTO" ? "photo" : modeId === "COMPANION" ? "city-walk" : modeId === "COFFEE_MEAL" ? "dining" : modeId === "ACTIVITY" ? "music" : modeId === "TRIP" ? "travel" : modeId === "CREATOR" ? "explore-store" : modeId === "TRANSLATE" || modeId === "HOSPITAL" ? "translation" : "city-walk";
             return {
               id: modeId,
-              icon: modeId === "PHOTO" ? "camera" : modeId === "COMPANION" ? "user" : modeId === "COFFEE_MEAL" ? "cup" : modeId === "ACTIVITY" ? "star" : modeId === "TRIP" ? "route" : modeId === "CREATOR" ? "image" : modeId === "TRANSLATE" ? "chat" : "plus",
+              assetIcon: SCENE_ACTIONS.find((action) => action.id === actionIconId)!.icon,
               label: feed ? (
                 modeId === "PHOTO" ? "拍照" : modeId === "COMPANION" ? "同行" : modeId === "COFFEE_MEAL" ? "吃饭" : modeId === "ACTIVITY" ? "活动" : modeId === "TRIP" ? "出去玩" : modeId === "CREATOR" ? "创作" : modeId === "TRANSLATE" ? "翻译" : "陪诊"
               ) : modeId

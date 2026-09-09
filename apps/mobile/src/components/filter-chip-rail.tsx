@@ -26,6 +26,7 @@
 // feedfilterrail 一致 (44 高 / 13×8 padding / ink 黑底高亮)。
 
 import { Pressable, StyleSheet, Text } from "react-native";
+import { Image, type ImageSource } from "expo-image";
 import { HorizontalSwipeRail } from "./horizontal-swipe-rail";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { color, shadows } from "../theme";
@@ -34,6 +35,7 @@ export interface FilterChipRailItem {
   id: string;
   label: string;
   icon?: ProxyIconName;
+  assetIcon?: ImageSource;
 }
 
 export interface FilterChipRailProps {
@@ -76,7 +78,7 @@ export function FilterChipRail({
             accessibilityState={{ selected: active }}
             accessibilityLabel={`${testPrefix} ${item.label}${active ? "，已选" : ""}`}
           >
-            {item.icon ? <ProxyIcon color={active ? color.white : color.ink} name={item.icon} size={18} /> : null}
+            {item.assetIcon ? <Image contentFit="contain" source={item.assetIcon} style={[styles.assetIcon, active && styles.assetIconActive]} /> : item.icon ? <ProxyIcon color={active ? color.white : color.ink} name={item.icon} size={18} /> : null}
             <Text style={[styles.chipText, active && styles.chipTextActive]}>{item.label}</Text>
           </Pressable>
         );
@@ -118,5 +120,7 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: color.white
-  }
+  },
+  assetIcon: { height: 24, tintColor: color.ink, width: 24 },
+  assetIconActive: { tintColor: color.white }
 });

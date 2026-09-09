@@ -6,7 +6,7 @@ const card = readFileSync(new URL("./r37-opportunity-card.tsx", import.meta.url)
 const master = readFileSync(new URL("../components/market-type-logo.tsx", import.meta.url), "utf8");
 
 describe("MARKET-LOGO-SINGLE-TILE-001", () => {
-  it("renders approved palette logos at the full visual size", () => {
+  it("renders the shared scene taxonomy logos at the full visual size", () => {
     expect(palette).toContain("<MarketTypeLogo");
     expect(palette).not.toContain("order-type-logos/");
     expect(palette).not.toContain("pillLabel");
@@ -22,8 +22,11 @@ describe("MARKET-LOGO-SINGLE-TILE-001", () => {
     expect(master).toContain("const MASTER:");
     expect(master).not.toContain("translateX");
     expect(master).not.toContain("translateY");
-    expect(master).toContain('position: "absolute"');
-    expect(master).not.toContain('frame: { alignItems: "center", backgroundColor:');
+    expect(master).toContain('import { SCENE_ACTIONS }');
+    expect(master).toContain('coffee_photo: actionIcon("photo")');
+    expect(master).toContain('walk_photo: actionIcon("city-walk")');
+    expect(master).toContain('bilingual_store: actionIcon("translation")');
+    expect(master).not.toContain("order-type-logos/");
   });
 
   it("uses real scene media first and labels generated fallbacks", () => {

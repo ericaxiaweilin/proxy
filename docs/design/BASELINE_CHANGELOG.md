@@ -1224,3 +1224,9 @@ same commit. Do not record routine business logic changes here.
 - “场景灵感”改为与“为你组合”同级字号的“附近场景”，新增直接地图入口，原有网络场景卡和数据管线不变。
 - 市场头部移除“城市 · 机会 · 活动”重复文案；机会状态改为全部、已申请、已创建、执行中，不再把 Offer、打卡和证据操作伪装成列表筛选。
 - 顶部和滑动页底部共用双发布入口；订单沿用价格守卫流程，活动绑定已有真实场景后走 PublishActivity 服务端命令。
+
+# Revision 142 — Shared action logo registry (2026-09-09)
+
+- Home 第一行拍照、同行、吃饭、活动等入口不再临时映射通用线性图标，直接复用附近场景动作栏的 `SCENE_ACTIONS` SVG 注册表。
+- 市场机会筛选与机会卡删除旧 `order-type-logos` PNG 视觉，按订单类型映射到同一套拍照、City Walk、咖啡、翻译和活动图标。
+- 新增源码契约守卫，禁止 Home 拍照/同行退回自建图标，也禁止市场重新引用旧订单 Logo 包。
