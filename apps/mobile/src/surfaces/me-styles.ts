@@ -81,7 +81,7 @@ export const styles = StyleSheet.create({
     width: 46
   },
   profileAvatarText: { color: color.white, fontSize: 18, fontWeight: "900" },
-  profileAvatarImg: { width: 46, height: 46, borderRadius: 23 },
+  profileAvatarImg: { width: 46, height: 46, borderRadius: 23, resizeMode: "cover", transform: [{ scale: 1.1 }] },
   profileCopy: { flex: 1 },
   profileName: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   profileMeta: { alignItems: "center", flexDirection: "row", gap: 5, marginTop: 3 },
@@ -164,7 +164,7 @@ export const styles = StyleSheet.create({
     width: 40
   },
   identityAvatarSolid: { backgroundColor: "#17131F" },
-  identityAvatarImg: { width: 40, height: 40, borderRadius: 20 },
+  identityAvatarImg: { width: 40, height: 40, borderRadius: 20, resizeMode: "cover", transform: [{ scale: 1.1 }] },
   identityAvatarText: { color: color.white, fontSize: 16, fontWeight: "900" },
   identityCopy: { flex: 1 },
   identityName: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
@@ -284,7 +284,7 @@ export const styles = StyleSheet.create({
   subPageDesc: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 16 },
   profileManageRow: { flexDirection: "row", alignItems: "center", padding: 12, backgroundColor: color.white, borderRadius: 10, borderWidth: 1, borderColor: color.line, marginBottom: 12 },
   profileManageAva: { width: 88, height: 88, borderRadius: 44, backgroundColor: color.magenta, alignItems: "center", justifyContent: "center", marginRight: 12, overflow: "hidden" },
-  profileManageAvaImg: { width: 88, height: 88, borderRadius: 44 },
+  profileManageAvaImg: { width: 88, height: 88, borderRadius: 44, resizeMode: "cover", transform: [{ scale: 1.1 }] },
   profileManageAvaLetter: { color: color.ink, fontSize: 30, fontWeight: "800" },
   profileManageCopy: { flex: 1 },
   profileManageName: { color: color.ink, fontSize: 15, fontWeight: "700" },
@@ -837,7 +837,7 @@ export const styles = StyleSheet.create({
   personalHandleSub: { color: "#444", fontSize: 11, marginTop: 4 },
   personalAvaWrap: { position: "relative", width: 82, height: 82, justifyContent: "flex-end" },
   personalAva: { width: 82, height: 82, borderRadius: 41, backgroundColor: "#111", alignItems: "center", justifyContent: "center", overflow: "hidden", borderWidth: 1, borderColor: "#ececec" },
-  personalAvaImg: { width: 82, height: 82, borderRadius: 41 },
+  personalAvaImg: { width: 82, height: 82, borderRadius: 41, resizeMode: "cover", transform: [{ scale: 1.1 }] },
   personalAvaLetter: { color: color.white, fontSize: 27, fontWeight: "800" },
   personalAvaAdd: {
     position: "absolute", left: -6, bottom: -2, width: 32, height: 32, borderRadius: 16,

@@ -301,14 +301,15 @@ describe("PLACEHOLDER-008 avatars are circles", () => {
   const styles = readFileSync(fileURLToPath(new URL("./me-styles.ts", import.meta.url)), "utf8");
 
   it("hub and identity avatars use half-size radii plus clipping", () => {
-    expect(styles).toContain("profileAvatarImg: { width: 46, height: 46, borderRadius: 23 }");
-    expect(styles).toContain("identityAvatarImg: { width: 40, height: 40, borderRadius: 20 }");
+    expect(styles).toContain('profileAvatarImg: { width: 46, height: 46, borderRadius: 23, resizeMode: "cover", transform: [{ scale: 1.1 }] }');
+    expect(styles).toContain('identityAvatarImg: { width: 40, height: 40, borderRadius: 20, resizeMode: "cover", transform: [{ scale: 1.1 }] }');
     expect(styles).toContain("overflow: \"hidden\"");
   });
 
-  it("manage avatar matches home size as a circle", () => {
+  it("manage and profile avatars fill the circle without exposing an octagonal source boundary", () => {
     expect(styles).toContain("profileManageAva: { width: 88, height: 88, borderRadius: 44");
-    expect(styles).toContain("profileManageAvaImg: { width: 88, height: 88, borderRadius: 44 }");
+    expect(styles).toContain('profileManageAvaImg: { width: 88, height: 88, borderRadius: 44, resizeMode: "cover", transform: [{ scale: 1.1 }] }');
+    expect(styles).toContain('personalAvaImg: { width: 82, height: 82, borderRadius: 41, resizeMode: "cover", transform: [{ scale: 1.1 }] }');
   });
 });
 
