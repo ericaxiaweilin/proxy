@@ -106,21 +106,21 @@ export function AIAccountProfileSurface({ account, engagement, relationship, ini
           <Text style={styles.role}>{account.role}</Text>
         </View>
       </View>
-      {/* 三连液态水滴按钮：配方对齐底栏 lens（regular 材质 + continuous
-          曲线 + 高光线），不是 feed 菜单那种近乎透明的 clear */}
+      {/* 三连液态水滴：逐像素复刻底栏 lens（对象式 regular + 高光带 +
+          描边 + 底色），dock 本体不动 */}
       <GlassContainer spacing={8} style={styles.glassRow}>
-        <GlassView glassEffectStyle="regular" isInteractive style={styles.glassBtn}>
+        <GlassView glassEffectStyle={{ style: "regular" }} isInteractive style={styles.glassBtn}>
           {useFriendFlow ? (
-            <Pressable disabled={friendState !== "NONE" || friendBusy} onPress={() => void sendFriendAdd()} style={styles.glassPress} accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"}><View pointerEvents="none" style={styles.glassGlint} /><Text style={[styles.glassText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加"}</Text></Pressable>
+            <Pressable disabled={friendState !== "NONE" || friendBusy} onPress={() => void sendFriendAdd()} style={styles.glassPress} accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"}><View pointerEvents="none" style={styles.glassSheen} /><Text style={[styles.glassText, friendState === "FRIEND" && styles.followedText, friendState === "OUTGOING" && styles.pendingText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加"}</Text></Pressable>
           ) : (
-            <Pressable onPress={() => void toggleFollow()} style={styles.glassPress}><View pointerEvents="none" style={styles.glassGlint} /><Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加"}</Text></Pressable>
+            <Pressable onPress={() => void toggleFollow()} style={styles.glassPress}><View pointerEvents="none" style={styles.glassSheen} /><Text style={[styles.glassText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加"}</Text></Pressable>
           )}
         </GlassView>
-        <GlassView glassEffectStyle="regular" isInteractive style={styles.glassBtn}>
-          <Pressable onPress={() => onViewPosts?.(account)} disabled={!onViewPosts} style={styles.glassPress} accessibilityLabel="查看个人主页"><View pointerEvents="none" style={styles.glassGlint} /><Text style={styles.glassText}>主页</Text></Pressable>
+        <GlassView glassEffectStyle={{ style: "regular" }} isInteractive style={styles.glassBtn}>
+          <Pressable onPress={() => onViewPosts?.(account)} disabled={!onViewPosts} style={styles.glassPress} accessibilityLabel="查看个人主页"><View pointerEvents="none" style={styles.glassSheen} /><Text style={styles.glassText}>主页</Text></Pressable>
         </GlassView>
-        <GlassView glassEffectStyle="regular" isInteractive style={styles.glassBtn}>
-          <Pressable onPress={() => onMessage(account)} style={styles.glassPress} accessibilityLabel="发消息"><View pointerEvents="none" style={styles.glassGlint} /><Text style={styles.glassText}>发消息</Text></Pressable>
+        <GlassView glassEffectStyle={{ style: "regular" }} isInteractive style={styles.glassBtn}>
+          <Pressable onPress={() => onMessage(account)} style={styles.glassPress} accessibilityLabel="发消息"><View pointerEvents="none" style={styles.glassSheen} /><Text style={styles.glassText}>发消息</Text></Pressable>
         </GlassView>
       </GlassContainer>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
@@ -144,9 +144,9 @@ const styles = StyleSheet.create({
   aiPill: { backgroundColor: color.proxyPurpleSoft, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 5 }, aiPillText: { color: color.violet, fontSize: 11, fontWeight: "900" },
   name: { color: color.ink, fontSize: 25, fontWeight: "900" }, handle: { color: color.violet, fontSize: 12, fontWeight: "700", marginTop: 5 }, role: { color: color.muted, fontSize: 13, marginTop: 7 },
   glassRow: { flexDirection: "row", gap: 8, marginHorizontal: 18, marginTop: 16 },
-  glassBtn: { borderColor: "rgba(255,255,255,0.34)", borderCurve: "continuous", borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, flex: 1, overflow: "hidden" },
+  glassBtn: { backgroundColor: "rgba(255,255,255,0.035)", borderColor: "rgba(255,255,255,0.34)", borderCurve: "continuous", borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, flex: 1, overflow: "hidden" },
   glassPress: { alignItems: "center", justifyContent: "center", minHeight: 46, paddingHorizontal: 6 },
-  glassGlint: { backgroundColor: "rgba(255,255,255,0.50)", borderRadius: 999, height: StyleSheet.hairlineWidth, left: 14, position: "absolute", right: 14, top: 1 },
+  glassSheen: { backgroundColor: "rgba(255,255,255,0.7)", borderRadius: 999, height: 8, left: 8, opacity: 0.16, position: "absolute", right: 8, top: 4 },
   glassText: { color: color.ink, fontSize: 13, fontWeight: "900" },
   followedText: { color: color.violet }, pendingText: { color: color.muted }, notice: { color: color.error, fontSize: 12, marginHorizontal: 18, marginTop: 8 },
   card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, marginHorizontal: 18, marginTop: 14, padding: 15, ...shadows.card }, cardTitle: { color: color.ink, fontSize: 15, fontWeight: "900" }, body: { color: color.ink, fontSize: 13, lineHeight: 20, marginTop: 8 }, personality: { color: color.violet, fontSize: 12, lineHeight: 18, marginTop: 9 },
