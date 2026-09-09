@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 124 — 2026-09-09
+
+- 左滑删除宽松结算：轻滑 24px 即展开，被列表抢走手势也按最后位移
+  结算，不再中途收回看不全。
+
 ## Revision 123 — 2026-09-09
 
 - AI 小美主页三枚水滴按钮增加身份色底层光场与轻量紫色玻璃 tint，
