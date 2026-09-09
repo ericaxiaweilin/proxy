@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 112 — 2026-09-08
+
+- 头像统一正圆（PLACEHOLDER-008）：hub/身份卡头像由圆角方形改半经圆，
+  渐变容器加裁剪，色带不再戳出方角。
+
 ## Revision 111 — 2026-09-08
 
 ### One direct-message thread per account pair
