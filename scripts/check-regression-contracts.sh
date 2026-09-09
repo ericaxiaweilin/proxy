@@ -775,6 +775,13 @@ if ! grep -q 'PLACEHOLDER-015' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-015: PASS (tripwire present; covered by the vitest run above)"
 
+# PLACEHOLDER-016: 页签与文件夹同一横滑行。
+if ! grep -q 'PLACEHOLDER-016' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-016]: tab-folder-row tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-016: PASS (tripwire present; covered by the vitest run above)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'

@@ -411,3 +411,14 @@ describe("PLACEHOLDER-015 no redundant recent header", () => {
     expect(messages).not.toContain(">最近</Text>");
   });
 });
+
+describe("PLACEHOLDER-016 tabs and folders share one row", () => {
+  const messages = readFileSync(fileURLToPath(new URL("./messages.tsx", import.meta.url)), "utf8");
+
+  it("renders 对话/Convo/folders in a single rail", () => {
+    expect(messages).toContain("tabFolderRow");
+    expect(messages).toContain("tabFolderDivider");
+    expect(messages).not.toContain("styles.homeTabs");
+    expect(messages).not.toContain("styles.folderRowWrap");
+  });
+});
