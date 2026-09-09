@@ -362,13 +362,13 @@ describe("PLACEHOLDER-012 ai three glass actions", () => {
 
   it("renders three liquid-glass buttons with view-posts wired", () => {
     expect(profile).toContain("GlassContainer");
-    expect(profile).toContain('glassEffectStyle={{ style: "regular", animate: true, animationDuration: 0.12 }}');
+    expect(profile).toContain('glassEffectStyle="clear" isInteractive');
     expect(profile).toContain("<LiquidGlassAction");
-    expect(profile).toContain('height: 54');
-    expect(profile).toContain('borderRadius: 28');
-    expect(profile).toContain('tintColor="rgba(122,44,255,0.10)"');
-    expect(profile).toContain("styles.glassStage");
-    expect(profile).toContain('borderCurve: "continuous"');
+    expect(profile).toContain('height: 44');
+    expect(profile).toContain('borderRadius: 14');
+    expect(profile).not.toContain("glassStage");
+    expect(profile).not.toContain("glowViolet");
+    expect(profile).not.toContain("tintColor=");
     expect(profile).toContain("查看个人主页");
     expect(profile).toContain("onViewPosts");
     expect(feed).toContain("initialSearchQuery");

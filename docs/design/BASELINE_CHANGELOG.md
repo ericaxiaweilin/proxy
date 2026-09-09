@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 124 — 2026-09-09
+
+- AI 小美主页三按钮直接复用动态帖文头像菜单的单层玻璃口径：
+  `GlassView clear + isInteractive`、44 高、14 圆角。
+- 删除 R123 增加的紫/金底层光场、tint、外层壳和高光层，消除白色实体
+  背景及双重背景；业务动作不变。
+
 ## Revision 123 — 2026-09-09
 
 - AI 小美主页三枚水滴按钮增加身份色底层光场与轻量紫色玻璃 tint，
