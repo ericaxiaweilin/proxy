@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 127 — 2026-09-09
+
+- 消息页禁左滑跳页（PLACEHOLDER-014）：左滑归行内删除，向右保留；
+  读页走 ref，不再拿首屏旧值。
+
 ## Revision 126 — 2026-09-09
 
 - Home 场景发现区的横滑轨道新增子按钮轻点通道：轻点不再被

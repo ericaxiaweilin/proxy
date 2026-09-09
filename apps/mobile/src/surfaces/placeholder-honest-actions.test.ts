@@ -393,3 +393,13 @@ describe("PLACEHOLDER-013 swipe to delete dialogs", () => {
     expect(messages).toContain("onPanResponderTerminate: () => settle(");
   });
 });
+
+describe("PLACEHOLDER-014 messages keeps left swipe, shell keeps right", () => {
+  const shell = readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8");
+
+  it("locks forward page jumps on message pages only", () => {
+    expect(shell).toContain("isMessagesPage");
+    expect(shell).toContain("MSG_CHAT");
+    expect(shell).toContain("MSG_FRIENDS");
+  });
+});
