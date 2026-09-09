@@ -166,6 +166,19 @@ if ! grep -q 'ON CONFLICT (id) DO NOTHING' apps/api-go/internal/platform/postgre
   exit 1
 fi
 
+# FRIEND-UPSERT-001: relationship.friendships（migration 040）曾缺
+# (user_a, user_b) UNIQUE 约束，而 UpsertFriendship 用 ON CONFLICT
+# (user_a, user_b)——PG 要求 arbiter 索引，缺失即 42P10：PG 模式下每次
+# 好友写（发送/接受/屏蔽请求）全挂，8 个内存 service 测试全绿掩盖。
+# Migration 076 补 UNIQUE 索引；lifecycle 测试钉死 upsert 全链路。
+require_test "FRIEND-UPSERT-001" "./internal/platform/postgres" \
+  "TestRelationshipPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/relationship_integration_test.go" || exit $?
+if ! grep -q 'uq_friendships_user_pair' apps/api-go/migrations/077_relationship_pair_unique.sql; then
+  echo "  FAIL [FRIEND-UPSERT-001]: unique pair index migration must stay" >&2
+  exit 1
+fi
+
 # FACET-KIND-ENUM-001: facet List fallback 曾经按 ID 硬编码 ken/linh/spa，
 # 任何其他 PG 行（测试 seed 的 fct_* / 未来真实用户对象）recommendedKind
 # 留零值 "" 违反 contracts 7 值枚举 → mobile Zod fail-closed 整页报错。
