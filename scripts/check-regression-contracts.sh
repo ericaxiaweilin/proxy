@@ -1028,4 +1028,27 @@ require_test "JURISDICTION-PERSIST-001" "./internal/platform/postgres" \
   "TestJurisdictionPostgresSurvivesServiceRestart" \
   "apps/api-go/internal/platform/postgres/jurisdiction_test.go" || exit $?
 
+# MUTED-AUTHORS-001: engagement.muted_authors 表从未被任何迁移建过，但
+# MuteAuthor 是完整功能链（service 命令 + Repository 接口 + network.go
+# SQL 实现 + main.go 生产接线）。PG 模式每次 mute 42P01（relation does
+# not exist），service 吞成 MUTE_AUTHOR_FAILED；IsMuted feed 过滤同样挂。
+# 内存 service 测试全绿掩盖——dialog/voucher 42601、friendship 42P10
+# 同 class。Migration 078 建表（UNIQUE pair 既是幂等键也是 arbiter）；
+# lifecycle 测试钉死插入 + 幂等重 mute + IsMuted 全链路。
+require_test "MUTED-AUTHORS-001" "./internal/platform/postgres" \
+  "TestMutedAuthorsPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/muted_authors_integration_test.go" || exit $?
+require_test "MUTED-AUTHORS-002" "./internal/platform/postgres" \
+  "TestMutedAuthorsFeedFilterLifecycle" \
+  "apps/api-go/internal/platform/postgres/muted_feed_filter_integration_test.go" || exit $?
+if ! grep -q 'NOT EXISTS' apps/api-go/internal/platform/postgres/network.go || \
+   ! grep -q 'engagement.muted_authors' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MUTED-AUTHORS-002]: feed mute filter must stay in ListFeedPage SQL" >&2
+  exit 1
+fi
+if ! grep -q 'engagement.muted_authors' apps/api-go/migrations/078_muted_authors.sql; then
+  echo "  FAIL [MUTED-AUTHORS-001]: muted_authors migration must stay" >&2
+  exit 1
+fi
+
 echo "  regression contracts: OK"
