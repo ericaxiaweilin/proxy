@@ -747,6 +747,13 @@ if ! grep -q 'PLACEHOLDER-011' apps/mobile/src/surfaces/placeholder-honest-actio
 fi
 echo "    PLACEHOLDER-011: PASS (tripwire present; covered by the vitest run above)"
 
+# PLACEHOLDER-012: AI 三液态玻璃按钮 + 查看主页进动态。
+if ! grep -q 'PLACEHOLDER-012' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-012]: ai-glass-actions tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-012: PASS (tripwire present; covered by the vitest run above)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'

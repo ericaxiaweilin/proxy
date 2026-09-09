@@ -213,6 +213,9 @@ export function AppShell({
     useState<ExperienceManifest>();
   const [feedRefreshTrigger, setFeedRefreshTrigger] = useState(0);
   const [feedPrefsOpen, setFeedPrefsOpen] = useState(false);
+  // AI 主页“查看个人主页”的搜索种子：进动态即消费（Feed 通知后清除），
+  // 离开动态也清除，下次正常进不带旧词。
+  const [feedSearchSeed, setFeedSearchSeed] = useState<string | undefined>(undefined);
   const [feedChromeVisible, setFeedChromeVisible] = useState(true);
   const rootSwipeBlockedRef = useRef(false);
   const setRootSwipeBlocked = useCallback((blocked: boolean): void => {
@@ -365,6 +368,7 @@ export function AppShell({
     if (next !== "FEED") {
       setFeedChatAuthor(undefined);
       setFeedPrefsOpen(false);
+      setFeedSearchSeed(undefined);
     }
     if (next !== "MESSAGES") setMessageChat(undefined);
     if (next !== "ME") setVoucherOpen(false);
@@ -499,6 +503,13 @@ export function AppShell({
               relationship={relationship}
               {...(secureSessionStore ? { secureSessionStore } : {})}
               onBack={() => { setOpenAIProfile(undefined); if (aiProfileReturnToScene) { setAIProfileReturnToScene(false); setRealitySceneOpen(true); } }}
+              onViewPosts={(account) => {
+                // 查看个人主页：关主页页，进动态看她的全部内容（搜索种子即消费）。
+                setOpenAIProfile(undefined);
+                setAIProfileReturnToScene(false);
+                setFeedSearchSeed(account.displayName);
+                setTab("FEED");
+              }}
               onMessage={(account, initialDraft) => {
                 setOpenAIProfile(undefined);
                 setMessageChat({ author: account.displayName, aiAccount: account, ...(initialDraft ? { initialDraft } : {}) });
@@ -625,12 +636,15 @@ export function AppShell({
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
             <FeedSurface
+              key={feedSearchSeed ?? "feed"}
               engagement={engagement}
               localNet={localNet}
               mediaClient={media}
               socialSpace={socialSpace}
               secureSessionStore={secureSessionStore}
               {...(viewerAccountId ? { viewerAccountId } : {})}
+              {...(feedSearchSeed ? { initialSearchQuery: feedSearchSeed } : {})}
+              onSearchSeedConsumed={() => setFeedSearchSeed(undefined)}
               onChromeVisibilityChange={setFeedChromeVisible}
               onOpenChat={setFeedChatAuthor}
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
