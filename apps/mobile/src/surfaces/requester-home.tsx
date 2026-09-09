@@ -27,6 +27,7 @@ import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
+import { SceneActivityDiscovery } from "../components/scene-activity-discovery";
 import {
   RECOMMEND_FILTER_CHIPS,
   RECOMMEND_MODE_ORDER,
@@ -619,6 +620,11 @@ export function RequesterHome({
       ) : null}
       {/* 点左侧 AI 标识后在 Home 内展开独立对话输入框；默认输入仍只搜索。 */}
       {conversationPanel ?? null}
+      <SceneActivityDiscovery
+        scenes={sceneBriefs}
+        onOpenScene={(sceneId) => onOpenSceneMap?.(sceneId)}
+        onCompose={(prompt) => handleExecuteHomeQuery(prompt)}
+      />
       {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
           用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
           不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}

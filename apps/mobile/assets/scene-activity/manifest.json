@@ -1,0 +1,169 @@
+{
+  "version": "R42",
+  "actions": [
+    {
+      "id": "coffee",
+      "label": "咖啡",
+      "asset": "assets/actions/coffee.svg"
+    },
+    {
+      "id": "dining",
+      "label": "用餐",
+      "asset": "assets/actions/dining.svg"
+    },
+    {
+      "id": "city-walk",
+      "label": "City Walk",
+      "asset": "assets/actions/city-walk.svg"
+    },
+    {
+      "id": "photo",
+      "label": "拍照",
+      "asset": "assets/actions/photo.svg"
+    },
+    {
+      "id": "cycling",
+      "label": "骑行",
+      "asset": "assets/actions/cycling.svg"
+    },
+    {
+      "id": "exhibition",
+      "label": "看展",
+      "asset": "assets/actions/exhibition.svg"
+    },
+    {
+      "id": "shopping",
+      "label": "逛街",
+      "asset": "assets/actions/shopping.svg"
+    },
+    {
+      "id": "movie",
+      "label": "观影",
+      "asset": "assets/actions/movie.svg"
+    },
+    {
+      "id": "music",
+      "label": "音乐",
+      "asset": "assets/actions/music.svg"
+    },
+    {
+      "id": "explore-store",
+      "label": "探店",
+      "asset": "assets/actions/explore-store.svg"
+    },
+    {
+      "id": "travel",
+      "label": "出游",
+      "asset": "assets/actions/travel.svg"
+    },
+    {
+      "id": "sport",
+      "label": "运动",
+      "asset": "assets/actions/sport.svg"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "cafe",
+      "label": "咖啡馆",
+      "asset": "assets/scenes/cafe.svg"
+    },
+    {
+      "id": "lake",
+      "label": "湖边",
+      "asset": "assets/scenes/lake.svg"
+    },
+    {
+      "id": "old-town",
+      "label": "老城区",
+      "asset": "assets/scenes/old-town.svg"
+    },
+    {
+      "id": "night-market",
+      "label": "夜市",
+      "asset": "assets/scenes/night-market.svg"
+    },
+    {
+      "id": "gallery",
+      "label": "美术馆",
+      "asset": "assets/scenes/gallery.svg"
+    },
+    {
+      "id": "beach",
+      "label": "海边",
+      "asset": "assets/scenes/beach.svg"
+    },
+    {
+      "id": "park",
+      "label": "公园",
+      "asset": "assets/scenes/park.svg"
+    },
+    {
+      "id": "mall",
+      "label": "商场",
+      "asset": "assets/scenes/mall.svg"
+    },
+    {
+      "id": "restaurant",
+      "label": "餐厅",
+      "asset": "assets/scenes/restaurant.svg"
+    },
+    {
+      "id": "event",
+      "label": "活动现场",
+      "asset": "assets/scenes/event.svg"
+    }
+  ],
+  "themes": [
+    {
+      "id": "ao-dai",
+      "label": "奥黛",
+      "asset": "assets/themes/ao-dai.svg"
+    },
+    {
+      "id": "sunset",
+      "label": "日落",
+      "asset": "assets/themes/sunset.svg"
+    },
+    {
+      "id": "film",
+      "label": "胶片",
+      "asset": "assets/themes/film.svg"
+    },
+    {
+      "id": "local",
+      "label": "本地人",
+      "asset": "assets/themes/local.svg"
+    },
+    {
+      "id": "food",
+      "label": "美食",
+      "asset": "assets/themes/food.svg"
+    },
+    {
+      "id": "art",
+      "label": "艺术",
+      "asset": "assets/themes/art.svg"
+    },
+    {
+      "id": "nature",
+      "label": "自然",
+      "asset": "assets/themes/nature.svg"
+    },
+    {
+      "id": "night",
+      "label": "夜晚",
+      "asset": "assets/themes/night.svg"
+    },
+    {
+      "id": "retro",
+      "label": "复古",
+      "asset": "assets/themes/retro.svg"
+    },
+    {
+      "id": "vietnam",
+      "label": "越南传统",
+      "asset": "assets/themes/vietnam.svg"
+    }
+  ]
+}
