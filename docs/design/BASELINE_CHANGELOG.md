@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 133 — 2026-09-09
+
+- 文件夹独立成第三页签（PLACEHOLDER-016 修正二）：对话/Convo/文件夹
+  并列；文件夹页可建可选可移入移出、落盘持久化。
+
 ## Revision 132 — 2026-09-09
 
 - 文件夹归位 Convo（PLACEHOLDER-016 修正）：页签与系统筛选恢复两行；
