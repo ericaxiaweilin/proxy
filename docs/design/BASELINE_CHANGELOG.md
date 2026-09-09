@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 119 — 2026-09-09
+
+- AI 三按钮换真水滴配方（regular 材质 + continuous 曲线 + 高光线，
+  对齐底栏 lens；之前抄成近乎透明的 clear）。
+
 ## Revision 118 — 2026-09-09
 
 - AI 主页三液态玻璃按钮（PLACEHOLDER-012）：添加/主页/发消息等三份，
