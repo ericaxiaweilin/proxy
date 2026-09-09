@@ -496,6 +496,7 @@ export function AppShell({
             <AIAccountProfileSurface
               account={openAIProfile}
               engagement={engagement}
+              relationship={relationship}
               {...(secureSessionStore ? { secureSessionStore } : {})}
               onBack={() => { setOpenAIProfile(undefined); if (aiProfileReturnToScene) { setAIProfileReturnToScene(false); setRealitySceneOpen(true); } }}
               onMessage={(account, initialDraft) => {

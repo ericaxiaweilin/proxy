@@ -4,24 +4,37 @@ import { Image } from "expo-image";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import type { EngagementClient } from "../engagement-client";
+import type { RelationshipClient } from "../relationship-client";
 import type { SecureSessionStore } from "../secure-session";
 import { mapFollowError } from "./feed-error-map";
 import { color, shadows } from "../theme";
 
 // An AI profile is a real addressable account surface, but never masquerades
 // as a person or claims the marketplace actions humans can take.
-export function AIAccountProfileSurface({ account, engagement, secureSessionStore, onBack, onMessage }: {
+//
+// 添加状态机（与首页 + 号同源）：好友关系是真相来源——NONE 可添加，
+// OUTGOING（已申请、等对方同意）显示“添加中”，FRIEND 显示已添加。
+// 只看 engagement 二进制会把“已申请”误判成“没添加”，这正是之前
+// 首页点了 +、主页还显示旧文案的原因。
+export type AiFriendState = "NONE" | "OUTGOING" | "FRIEND";
+export function AIAccountProfileSurface({ account, engagement, relationship, initialFriendState, secureSessionStore, onBack, onMessage }: {
   account: PlatformAIAccount;
   engagement: EngagementClient;
-  secureSessionStore?: SecureSessionStore;
+  relationship?: RelationshipClient | undefined;
+  initialFriendState?: AiFriendState | undefined;
+  secureSessionStore?: SecureSessionStore | undefined;
   onBack: () => void;
   onMessage: (account: PlatformAIAccount, initialDraft?: string) => void;
 }): React.JSX.Element {
   const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const useFriendFlow = Boolean(relationship);
+  const [friendState, setFriendState] = useState<AiFriendState>(initialFriendState ?? "NONE");
+  const [friendBusy, setFriendBusy] = useState(false);
 
   useEffect(() => {
+    if (useFriendFlow) return;
     let cancelled = false;
     void secureSessionStore?.read().then(async (session) => {
       if (!session?.userAccountId) return;
@@ -29,7 +42,21 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
       if (!cancelled) setFollowing(state);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [account.accountId, engagement, secureSessionStore]);
+  }, [account.accountId, engagement, secureSessionStore, useFriendFlow]);
+
+  // 好友关系真相：进主页即读一次，首页 + 过的账号直接显示“添加中”，
+  // 不再顶着旧文案等人点。
+  useEffect(() => {
+    if (!relationship) return;
+    let cancelled = false;
+    void relationship.listMyFriendships().then((payload) => {
+      if (cancelled) return;
+      if (payload.active.some((item) => item.userId === account.accountId)) setFriendState("FRIEND");
+      else if (payload.pending.some((item) => item.userId === account.accountId && item.direction !== "INCOMING")) setFriendState("OUTGOING");
+      else if (!initialFriendState) setFriendState("NONE");
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [account.accountId, relationship, initialFriendState]);
 
   async function toggleFollow(): Promise<void> {
     if (busy) return;
@@ -43,6 +70,24 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
       setNotice(mapFollowError(e, following ? "unfollow" : "follow"));
     }
     finally { setBusy(false); }
+  }
+
+  // 添加走好友申请（与首页 + 号同一条链）：发出后即 OUTGOING，
+  // 对方同意前按钮锁定为“添加中”，不再挂添加前的文案。
+  async function sendFriendAdd(): Promise<void> {
+    if (!relationship || friendBusy || friendState !== "NONE") return;
+    setFriendBusy(true); setNotice(undefined);
+    try {
+      await relationship.sendFriendRequest(account.accountId);
+      setFriendState("OUTGOING");
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : "";
+      setNotice(/principal|session|signed|sign in|auth|401|403/i.test(reason)
+        ? "请先登录后再添加。"
+        : mapFollowError(e, "follow"));
+    } finally {
+      setFriendBusy(false);
+    }
   }
 
   return <View style={styles.root}>
@@ -59,7 +104,11 @@ export function AIAccountProfileSurface({ account, engagement, secureSessionStor
         </View>
       </View>
       <View style={styles.actions}>
-        <Pressable onPress={() => void toggleFollow()} style={[styles.follow, following && styles.followed]}><Text style={[styles.followText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加到我的小美"}</Text></Pressable>
+        {useFriendFlow ? (
+          <Pressable disabled={friendState !== "NONE" || friendBusy} onPress={() => void sendFriendAdd()} style={[styles.follow, friendState !== "NONE" && styles.followed]} accessibilityLabel={friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "已添加" : "添加到我的小美"}><Text style={[styles.followText, friendState !== "NONE" && styles.followedText]}>{friendBusy ? "处理中…" : friendState === "OUTGOING" ? "添加中" : friendState === "FRIEND" ? "✓ 已添加" : "+ 添加到我的小美"}</Text></Pressable>
+        ) : (
+          <Pressable onPress={() => void toggleFollow()} style={[styles.follow, following && styles.followed]}><Text style={[styles.followText, following && styles.followedText]}>{busy ? "处理中…" : following ? "✓ 已添加" : "+ 添加到我的小美"}</Text></Pressable>
+        )}
         <Pressable onPress={() => onMessage(account)} style={styles.message}><Text style={styles.messageText}>发消息</Text></Pressable>
       </View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
