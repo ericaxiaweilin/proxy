@@ -65,6 +65,11 @@
       "id": "translation",
       "label": "翻译",
       "asset": "assets/actions/translation.svg"
+    },
+    {
+      "id": "urban-support",
+      "label": "城市协助",
+      "asset": "assets/actions/urban-support.svg"
     }
   ],
   "scenes": [

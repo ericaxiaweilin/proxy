@@ -42,6 +42,7 @@ const ACTIONS: readonly Taxon[] = [
   { id: "travel", label: "出游", icon: require("../../assets/scene-activity/actions/travel.svg") },
   { id: "sport", label: "运动", icon: require("../../assets/scene-activity/actions/sport.svg") },
   { id: "translation", label: "翻译", icon: require("../../assets/scene-activity/actions/translation.svg") },
+  { id: "urban-support", label: "城市协助", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
 ] as const;
 
 // Detail nodes extend a stable top-level taxonomy without making Home wider.
@@ -59,6 +60,13 @@ const ACTION_DETAILS: readonly ActionDetail[] = [
   { id: "pharmacy-support", label: "取药协助", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
   { id: "hospital-stay-companion", label: "住院陪同", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
   { id: "checkup-companion", label: "体检陪同", familyId: "translation", matchActionId: "translation", icon: require("../../assets/scene-activity/actions/translation.svg") },
+  { id: "business-companion", label: "商务陪同", familyId: "urban-support", matchActionId: "urban-support", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
+  { id: "administrative-companion", label: "办事陪同", familyId: "urban-support", matchActionId: "urban-support", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
+  { id: "housing-viewing", label: "租房看房", familyId: "urban-support", matchActionId: "urban-support", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
+  { id: "sim-setup", label: "SIM 办理陪同", familyId: "urban-support", matchActionId: "urban-support", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
+  { id: "local-guide", label: "本地向导", familyId: "urban-support", matchActionId: "urban-support", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
+  { id: "study-exchange", label: "学习交流", familyId: "urban-support", matchActionId: "urban-support", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
+  { id: "content-creation", label: "内容拍摄", familyId: "urban-support", matchActionId: "urban-support", icon: require("../../assets/scene-activity/actions/urban-support.svg") },
 ] as const;
 
 const SCENES: readonly Taxon[] = [
@@ -99,6 +107,7 @@ const MOMENTS: readonly MomentSeed[] = [
   { id: "local-store", title: "本地探店", action: "explore-store", scene: "cafe", themes: ["local"] },
   { id: "nature-ride", title: "自然骑行", action: "cycling", scene: "park", themes: ["nature"] },
   { id: "hospital-translation", title: "医院翻译陪诊", action: "translation", scene: "hospital", themes: ["medical-companion"] },
+  { id: "local-city-support", title: "本地城市协助", action: "urban-support", scene: "old-town", themes: ["local"] },
 ] as const;
 
 function absoluteNetworkURL(apiBaseUrl: string, value?: string): string | undefined {
@@ -121,6 +130,20 @@ function actionMatchId(id?: string): string | undefined {
   if (!id) return undefined;
   return ACTION_DETAILS.find((item) => item.id === id)?.matchActionId ?? id;
 }
+
+function actionFamily(id?: string): string | undefined {
+  const matched = actionMatchId(id);
+  if (matched === "sport" || matched === "cycling") return "sport";
+  if (matched === "translation") return "translation";
+  if (matched === "urban-support") return "urban-support";
+  return undefined;
+}
+
+const ACTION_FAMILY_LABELS: Record<string, string> = {
+  sport: "城市轻运动",
+  translation: "陪诊服务（非医疗）",
+  "urban-support": "城市协助细分",
+};
 
 function sceneMatches(brief: SceneDiscoveryBrief, sceneId: string): boolean {
   const haystack = `${brief.name} ${brief.area} ${brief.type}`.toLowerCase();
@@ -233,15 +256,16 @@ export function SceneActivityDiscovery({
                     else setThemeIds((current) => active ? current.filter((id) => id !== item.id) : [...current, item.id]);
                   }} style={[styles.pickerItem, active && styles.pickerItemActive]}>{photo ? <Image contentFit="cover" source={photo} style={styles.pickerPhoto} /> : <Image contentFit="contain" source={item.icon} style={styles.pickerIcon} />}<Text style={styles.pickerLabel}>{item.label}</Text>{active ? <Text style={styles.pickerCheck}>✓</Text> : null}</Pressable>;
                 })}</View>
-                {section.key === "actions" && (["sport", "cycling", "translation"].includes(actionMatchId(actionId) ?? "")) ? <View style={styles.detailGroup}>
-                  <Text style={styles.detailGroupTitle}>{actionMatchId(actionId) === "translation" ? "陪诊服务（非医疗）" : "城市轻运动"}</Text>
-                  <View style={styles.detailChipGrid}>{ACTION_DETAILS.filter((detailAction) => detailAction.familyId === (actionMatchId(actionId) === "translation" ? "translation" : "sport")).map((detailAction) => {
+                {section.key === "actions" && actionFamily(actionId) ? <View style={styles.detailGroup}>
+                  <Text style={styles.detailGroupTitle}>{ACTION_FAMILY_LABELS[actionFamily(actionId)!]}</Text>
+                  <View style={styles.detailChipGrid}>{ACTION_DETAILS.filter((detailAction) => detailAction.familyId === actionFamily(actionId)).map((detailAction) => {
                     const active = actionId === detailAction.id;
-                    return <Pressable accessibilityLabel={`${detailAction.familyId === "translation" ? "陪诊服务" : "城市轻运动"} ${detailAction.label}`} key={detailAction.id} onPress={() => setActionId(active ? detailAction.familyId : detailAction.id)} style={[styles.detailChip, active && styles.detailChipActive]}>
+                    return <Pressable accessibilityLabel={`${ACTION_FAMILY_LABELS[detailAction.familyId]} ${detailAction.label}`} key={detailAction.id} onPress={() => setActionId(active ? detailAction.familyId : detailAction.id)} style={[styles.detailChip, active && styles.detailChipActive]}>
                       <Text style={[styles.detailChipText, active && styles.detailChipTextActive]}>{detailAction.label}</Text>
                     </Pressable>;
                   })}</View>
                   {actionMatchId(actionId) === "translation" ? <Text style={styles.medicalBoundary}>仅提供语言支持、流程协助与非医疗陪同；不提供诊断、治疗、护理或急救服务。</Text> : null}
+                  {actionMatchId(actionId) === "urban-support" ? <Text style={styles.medicalBoundary}>仅提供陪同、翻译和流程协助；不代办资质，不提供法律、金融或政府审批承诺。</Text> : null}
                 </View> : null}
               </View>)}
             </ScrollView>

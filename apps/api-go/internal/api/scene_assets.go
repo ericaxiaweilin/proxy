@@ -12,7 +12,7 @@ func (s *Server) publicSceneAssets(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=300, stale-while-revalidate=86400")
 	media := func(id string) string { return "/v1/media/thumb/" + id }
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version": 2,
+		"version": 3,
 		"actions": map[string]string{
 			"coffee": media("seed_scene_action_extended_0_0"), "dining": media("seed_r42_v2_action_food-hunting"),
 			"city-walk": media("seed_scene_action_extended_3_4"), "photo": media("seed_scene_action_extended_0_4"),
@@ -22,14 +22,22 @@ func (s *Server) publicSceneAssets(w http.ResponseWriter, r *http.Request) {
 			"travel": media("seed_r42_v2_action_travel"), "sport": media("seed_r42_v2_action_sport"),
 			"running": media("seed_scene_action_extended_1_1"), "sport-cycling": media("seed_scene_action_extended_1_2"),
 			"badminton": media("seed_scene_action_extended_1_3"), "tennis": media("seed_scene_action_extended_1_4"),
-			"yoga":                    media("seed_scene_action_extended_1_5"),
-			"translation":             media("seed_scene_medical_hero_v1"),
-			"registration-support":    media("seed_scene_medical_registration_v1"),
-			"doctor-translation":      media("seed_scene_medical_doctor_translation_v1"),
-			"examination-companion":   media("seed_scene_medical_examination_v1"),
-			"pharmacy-support":        media("seed_scene_medical_pharmacy_v1"),
-			"hospital-stay-companion": media("seed_scene_medical_stay_v1"),
-			"checkup-companion":       media("seed_scene_medical_checkup_v1"),
+			"yoga":                     media("seed_scene_action_extended_1_5"),
+			"translation":              media("seed_scene_medical_hero_v1"),
+			"registration-support":     media("seed_scene_medical_registration_v1"),
+			"doctor-translation":       media("seed_scene_medical_doctor_translation_v1"),
+			"examination-companion":    media("seed_scene_medical_examination_v1"),
+			"pharmacy-support":         media("seed_scene_medical_pharmacy_v1"),
+			"hospital-stay-companion":  media("seed_scene_medical_stay_v1"),
+			"checkup-companion":        media("seed_scene_medical_checkup_v1"),
+			"urban-support":            media("seed_scene_service_business-companion_v1"),
+			"business-companion":       media("seed_scene_service_business-companion_v1"),
+			"administrative-companion": media("seed_scene_service_administrative-companion_v1"),
+			"housing-viewing":          media("seed_scene_service_housing-viewing_v1"),
+			"sim-setup":                media("seed_scene_service_sim-setup_v1"),
+			"local-guide":              media("seed_scene_service_local-guide_v1"),
+			"study-exchange":           media("seed_scene_service_study-exchange_v1"),
+			"content-creation":         media("seed_scene_service_content-creation_v1"),
 		},
 		"scenes": map[string]string{
 			"cafe": media("seed_r42_v2_scene_cafe"), "lake": media("seed_scene_theme_0_2"),
@@ -53,6 +61,7 @@ func (s *Server) publicSceneAssets(w http.ResponseWriter, r *http.Request) {
 			"gallery-coffee": media("seed_scene_action_extended_2_2"), "beach-walk": media("seed_scene_theme_1_2"),
 			"local-store": media("seed_scene_action_extended_3_0"), "nature-ride": media("seed_scene_theme_1_3"),
 			"hospital-translation": media("seed_scene_medical_hero_v1"),
+			"local-city-support":   media("seed_scene_service_local-guide_v1"),
 		},
 	})
 }

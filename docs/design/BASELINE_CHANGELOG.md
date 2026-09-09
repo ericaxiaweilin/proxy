@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 140 — 2026-09-09
+
+- 从新版生活方式资产中采用低风险“城市协助”家族：商务陪同、办事陪同、
+  看房、SIM、本地向导、学习交流和内容拍摄；保持单一顶层入口。
+- 银行金融、移民法律、警务和驾驶资质代办不进入撮合分类；新增图片继续
+  走服务端语义目录，现有 Proxy Logo 基线不变。
+
 ## Revision 139 — 2026-09-09
 
 - 场景撮合收敛为都市低风险行为：移除徒步/爬山及水上运动入口；新增

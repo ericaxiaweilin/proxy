@@ -16,7 +16,7 @@ describe("scene activity discovery contract", () => {
   });
 
   it("ships the complete R42 visual taxonomy", () => {
-    expect(source.match(/assets\/scene-activity\/actions\//g)).toHaveLength(24);
+    expect(source.match(/assets\/scene-activity\/actions\//g)).toHaveLength(32);
     expect(source.match(/assets\/scene-activity\/scenes\//g)).toHaveLength(11);
     expect(source.match(/assets\/scene-activity\/themes\//g)).toHaveLength(11);
   });
@@ -62,6 +62,11 @@ describe("scene activity discovery contract", () => {
     expect(source).toContain('id: "translation"');
     expect(source).toContain('id: "hospital"');
     expect(source).toContain('id: "medical-companion"');
+    expect(source).toContain('id: "urban-support"');
+    expect(source).toContain('id: "business-companion"');
+    expect(source).toContain('id: "local-guide"');
+    expect(source).not.toContain('id: "bank-support"');
+    expect(source).not.toContain('id: "immigration-companion"');
     expect(source).toContain("不提供诊断、治疗、护理或急救服务");
     expect(source).toContain("styles.pickerReset");
     expect(source).toContain(">重置<");

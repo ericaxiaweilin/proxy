@@ -684,6 +684,16 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 			appendImage("seed_r42_v2_"+group.kind+"_"+name, group.prefix+"_"+name+"_v2.jpg", 168, group.height)
 		}
 	}
+	for _, service := range []struct {
+		name   string
+		height int
+	}{
+		{"business-companion", 225}, {"administrative-companion", 225},
+		{"housing-viewing", 227}, {"sim-setup", 227}, {"study-exchange", 227},
+		{"content-creation", 227}, {"local-guide", 227},
+	} {
+		appendImage("seed_scene_service_"+service.name+"_v1", "scene_service_"+service.name+"_v1.jpg", 248, service.height)
+	}
 	// R42 scene/action editorial samples live in the server media store, never
 	// in the mobile bundle. Stable IDs let the catalog change independently of
 	// an App Store build while the files can later move to object storage/CDN.
