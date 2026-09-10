@@ -600,6 +600,23 @@ type Service struct {
 	sceneAesthetic SceneAestheticProvider
 	modelStack     modelstack.Port
 	clock          clock.Clock
+	// authorNames resolves USER post display names from the verified
+	// account profile (PROFILE-READ-001). Nil = legacy unwired behaviour
+	// (client-supplied echo); production wiring always sets it.
+	authorNames authorNameResolver
+}
+
+// authorNameResolver is the narrow consumer-side contract so localnet does
+// not import the identity package.
+type authorNameResolver interface {
+	ResolveAuthorDisplayName(ctx context.Context, userAccountID string) (string, bool)
+}
+
+// SetAuthorNameResolver wires profile-backed author resolution.
+func (s *Service) SetAuthorNameResolver(resolver authorNameResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authorNames = resolver
 }
 
 func New() *Service {
@@ -705,6 +722,25 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	}
 }
 
+// resolvePostAuthorName implements PROFILE-READ-001 for USER posts: the
+// display name always comes from the verified account profile, never from
+// the client payload (which used to carry a hardcoded viewer-relative
+// label). Other author types keep their caller-supplied names (agents,
+// merchants and platform specials are server-driven). Without a wired
+// resolver the legacy payload echo applies.
+func resolvePostAuthorName(resolver authorNameResolver, ctx context.Context, authorType, actorID, payloadName string) string {
+	if authorType != "USER" {
+		return payloadName
+	}
+	if resolver == nil {
+		return payloadName
+	}
+	if name, ok := resolver.ResolveAuthorDisplayName(ctx, actorID); ok {
+		return name
+	}
+	return ""
+}
+
 // ---------- CreatePost ----------
 // PRD §4/§11：Post = durable content；发布永不自动创建 Task。
 
@@ -798,7 +834,7 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		ID:                newID("post_"),
 		AuthorType:        p.AuthorType,
 		AuthorID:          e.Actor.ID,
-		AuthorDisplayName: p.AuthorDisplayName,
+		AuthorDisplayName: resolvePostAuthorName(s.authorNames, ctx, p.AuthorType, e.Actor.ID, p.AuthorDisplayName),
 		Body:              p.Body,
 		MediaRefs:         append([]PostMediaRef(nil), p.MediaRefs...),
 		Visibility:        p.Visibility,

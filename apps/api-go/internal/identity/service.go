@@ -113,6 +113,13 @@ func (s *Service) SetProfileRepository(repo ProfileRepository) {
 	s.profileService.SetRepository(repo)
 }
 
+// AuthorNameResolver exposes the profile-backed display-name resolver so
+// content publishers (localnet, socialspace, marketplace) resolve the
+// author's name server-side instead of trusting client-supplied strings.
+func (s *Service) AuthorNameResolver() AuthorNameResolver {
+	return NewAuthorNameResolver(s.profileService)
+}
+
 // Repository exposes the identity repository so transport-layer code
 // (e.g. wiring the SMTP LoginChallengeProvider email resolver) can look
 // up LoginIdentity rows by id without re-creating one. Returned interface

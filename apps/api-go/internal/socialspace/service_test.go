@@ -1,6 +1,8 @@
 package socialspace
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -41,5 +43,34 @@ func TestCommunityMembershipIsActorScoped(t *testing.T) {
 	read := service.HandleContext(t.Context(), envelope("ListCommunities", map[string]any{}))
 	if read.Outcome != "ACCEPTED" || read.OperationRef == "" {
 		t.Fatalf("read = %#v", read)
+	}
+}
+
+type stubAuthorNames struct{ names map[string]string }
+
+func (s stubAuthorNames) ResolveAuthorDisplayName(_ context.Context, userID string) (string, bool) {
+	name, ok := s.names[userID]
+	return name, ok
+}
+
+// PROFILE-READ-001: status display names come from the verified account
+// profile, never from the client payload.
+func TestCreateStatusResolvesDisplayNameFromProfile(t *testing.T) {
+	service := New()
+	service.SetAuthorNameResolver(stubAuthorNames{names: map[string]string{"user_1": "NguyenThanhHuyen"}})
+	created := service.HandleContext(t.Context(), envelope("CreateStatus", map[string]any{
+		"body": "下午有空", "expiryHours": 24, "authorDisplayName": "你",
+	}))
+	if created.Outcome != "ACCEPTED" {
+		t.Fatalf("create outcome = %s", created.Outcome)
+	}
+	var body struct {
+		Status Status `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(created.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status.AuthorDisplayName != "NguyenThanhHuyen" {
+		t.Fatalf("display name must come from profile, got %q", body.Status.AuthorDisplayName)
 	}
 }

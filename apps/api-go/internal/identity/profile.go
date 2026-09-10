@@ -143,6 +143,40 @@ func (r *MemoryProfileRepository) UpsertProfile(_ context.Context, p Profile) (P
 // ErrProfileNotFound is returned when no profile exists for a user.
 var ErrProfileNotFound = errors.New("profile not found")
 
+// AuthorNameResolver adapts the profile store to content publishers
+// (localnet posts, socialspace statuses, marketplace opportunities).
+// PROFILE-READ-001: publishers must never trust the client-supplied display
+// name — the verified account's profile is the single source of truth.
+// The boolean reports whether a profile with a non-blank name exists;
+// publishers fall back to an empty display (readers show a neutral label)
+// when it does not.
+type AuthorNameResolver struct {
+	service *ProfileService
+}
+
+// NewAuthorNameResolver builds the adapter over a ProfileService. A nil
+// service yields a resolver that never resolves (legacy unwired callers
+// keep their previous behaviour until production wiring sets this).
+func NewAuthorNameResolver(service *ProfileService) AuthorNameResolver {
+	return AuthorNameResolver{service: service}
+}
+
+// ResolveAuthorDisplayName returns the profile name for a user account.
+func (r AuthorNameResolver) ResolveAuthorDisplayName(ctx context.Context, userAccountID string) (string, bool) {
+	if r.service == nil || strings.TrimSpace(userAccountID) == "" {
+		return "", false
+	}
+	profile, err := r.service.GetProfile(ctx, userAccountID)
+	if err != nil {
+		return "", false
+	}
+	name := strings.TrimSpace(profile.Name)
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
 // initialProfileFor derives a fresh account's home-page identity from the
 // verified login identifier that owns it (PROFILE-READ-001). Registration
 // binds email / phone but previously created no Profile row, so every new

@@ -71,6 +71,15 @@ echo "    PROFILE-READ-001: PASS (fresh accounts derive identity, profiles isola
 require_test "PROFILE-READ-001" "./internal/identity" \
   "TestVerifyChallengeProvisionsInitialProfile" \
   "apps/api-go/internal/identity/service_test.go" || exit $?
+require_test "PROFILE-READ-001" "./internal/localnet" \
+  "TestCreatePostResolvesUserDisplayNameFromProfile" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "PROFILE-READ-001" "./internal/socialspace" \
+  "TestCreateStatusResolvesDisplayNameFromProfile" \
+  "apps/api-go/internal/socialspace/service_test.go" || exit $?
+require_test "PROFILE-READ-001" "./internal/marketplace" \
+  "TestPublishOpportunityResolvesOwnerFromProfile" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
    ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
   echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2

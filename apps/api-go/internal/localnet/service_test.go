@@ -921,3 +921,58 @@ func TestListFeedPosts_CursorIsSignedAndTamperIsRejected(t *testing.T) {
 		t.Fatalf("second page: %v", second.Error)
 	}
 }
+
+type stubAuthorNames struct{ names map[string]string }
+
+func (s stubAuthorNames) ResolveAuthorDisplayName(_ context.Context, userID string) (string, bool) {
+	name, ok := s.names[userID]
+	return name, ok
+}
+
+// PROFILE-READ-001: USER posts resolve the display name from the verified
+// account profile; the client-supplied value (historically a hardcoded
+// viewer-relative label) is never stored.
+func TestCreatePostResolvesUserDisplayNameFromProfile(t *testing.T) {
+	s := New()
+	s.SetAuthorNameResolver(stubAuthorNames{names: map[string]string{"user_001": "NguyenThanhHuyen"}})
+	result := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "USER", "authorDisplayName": "你", "body": "hello", "visibility": "PUBLIC",
+	}))
+	if result.Outcome != "ACCEPTED" || result.Aggregate == nil {
+		t.Fatalf("create post: got %s (%+v)", result.Outcome, result.Error)
+	}
+	post, err := s.repository.GetPost(context.Background(), result.Aggregate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if post.AuthorDisplayName != "NguyenThanhHuyen" {
+		t.Fatalf("display name must come from profile, got %q", post.AuthorDisplayName)
+	}
+}
+
+// PROFILE-READ-001: unresolved authors store an empty display (readers show
+// a neutral label); non-USER author types keep caller-supplied names.
+func TestCreatePostDisplayNameFallbacks(t *testing.T) {
+	s := New()
+	s.SetAuthorNameResolver(stubAuthorNames{names: map[string]string{}})
+	unresolved := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "USER", "authorDisplayName": "你", "body": "hello", "visibility": "PUBLIC",
+	}))
+	post, err := s.repository.GetPost(context.Background(), unresolved.Aggregate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if post.AuthorDisplayName != "" {
+		t.Fatalf("unresolved author must store empty display, got %q", post.AuthorDisplayName)
+	}
+	agent := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"authorType": "AGENT", "authorDisplayName": "Linh", "body": "tour", "visibility": "PUBLIC",
+	}))
+	agentPost, err := s.repository.GetPost(context.Background(), agent.Aggregate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agentPost.AuthorDisplayName != "Linh" {
+		t.Fatalf("non-USER names stay caller-supplied, got %q", agentPost.AuthorDisplayName)
+	}
+}

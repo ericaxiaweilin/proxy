@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 149 — 2026-09-10
+
+- 服务端发布时不再信任客户端展示名：动态、状态、个人机会的作者名一律按已验证账户 profile 解析；无 profile 存空，读端中性兜底。
+- 卡片布局无变化；未接线调用方（单测）保持旧回显行为，生产双路径均已接线。
+
 ## Revision 148 — 2026-09-10
 
 - me 页 hydration 按账户隔离：服务端 profile → 本账户本地记录 → 同号旧记录继承 → 按登录标识派生 → 中性兜底；新账号不再显示写死的演示身份。
