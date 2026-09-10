@@ -708,8 +708,10 @@ export function AppShell({
               supply={supply}
               activities={activities}
               profileClient={profile}
+              mediaClient={media}
               relationshipClient={relationship}
               socialSettingsClient={socialSettings}
+              {...(viewerAccountId ? { viewerAccountId } : {})}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,

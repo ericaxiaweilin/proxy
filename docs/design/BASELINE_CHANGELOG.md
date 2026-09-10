@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 151 — 2026-09-10
+
+- “我的”资料读取正式绑定当前 `userAccountId`，账户切换先清空上一账户视觉状态；禁止把无法确认归属的旧设备全局资料迁入新人账户。
+- 更换头像接入媒体上传与服务端 Profile，其他设备通过媒体缩略图读取；选择头像本身即完成同步，不再隐藏依赖第二次“完成”。
+- 新账户中性兜底不再包含 Huyen 演示身份；增加 Shell 接线与默认身份回归守卫，页面布局不变。
+
 ## Revision 150 — 2026-09-10
 
 - 存量 "你" 展示名回填（079）：动态 / 状态 / 个人机会的脏展示字段清成空串，归属列不动；幂等可重放。

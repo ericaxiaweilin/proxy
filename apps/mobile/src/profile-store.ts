@@ -93,9 +93,9 @@ export function createProfileStore(driver: SecureStorageDriver, accountId?: stri
 
 /** 默认 profile — me tab 初次进入、未登录态 / 未编辑过时使用。 */
 export const DEFAULT_PROFILE: ProfileRecord = {
-  name: "Huyen",
-  handle: "huyen.hanoi",
-  bio: "喜欢旅行、拍照和城市里的新鲜体验。",
+  name: "用户",
+  handle: "@user",
+  bio: "",
   city: "河内",
   avatarPath: undefined,
   updatedAt: new Date(0).toISOString()

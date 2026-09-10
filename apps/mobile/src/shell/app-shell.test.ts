@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { selectMeTabView, selectShellChromeVisible, selectMotionProfile } from "./app-shell-selectors";
 
 describe("app shell guest path", () => {
+  it("PROFILE-READ-001: wires account identity and avatar upload into MeSurface", () => {
+    const source = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+    const start = source.indexOf("<MeSurface");
+    const meCall = source.slice(start, source.indexOf("/>", start));
+    expect(meCall).toContain("viewerAccountId");
+    expect(meCall).toContain("mediaClient={media}");
+  });
   it("anonymous browser sees the 'need to sign in' view, not MeSurface", () => {
     expect(selectMeTabView({ isGuest: true, voucherOpen: false })).toBe("guest");
   });

@@ -42,6 +42,7 @@ import type { MyScene, MySceneInvitation, SceneClient } from "../scene-client";
 import type { BusinessClient } from "../business-client";
 import type { ActivityClient } from "../activity-client";
 import type { ProfileClient } from "../profile-client";
+import type { MediaClient } from "../media-client";
 import type { RelationshipClient } from "../relationship-client";
 import type { SocialSettingsClient } from "../social-settings-client";
 import type { SupplyClient } from "../supply-client";
@@ -231,6 +232,7 @@ export function MeSurface({
   viewerAccountId,
   socialSettingsClient,
   profileClient,
+  mediaClient,
   relationshipClient,
 }: {
   context: ActiveContext;
@@ -251,6 +253,7 @@ export function MeSurface({
   business?: BusinessClient;
   supply?: SupplyClient;
   profileClient?: ProfileClient | undefined;
+  mediaClient?: MediaClient | undefined;
   relationshipClient?: RelationshipClient | undefined;
   activities?: ActivityClient | undefined;
   engagement?: EngagementClient;
@@ -393,6 +396,7 @@ export function MeSurface({
   // 资料保存失败必须留编辑器内提示，不静默吞掉（本地写失败/服务端同步失败都一样）。
   const [profileSaveError, setProfileSaveError] = useState<string | undefined>(undefined);
   const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
+  const [profileRemoteAvatarPath, setProfileRemoteAvatarPath] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
   const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
   const [profileMediaPositions, setProfileMediaPositions] = useState<Record<string, number>>({});
@@ -420,11 +424,17 @@ export function MeSurface({
     // PROFILE-READ-001 hydration order (first writer wins per account):
     // 1. server profile (source of truth once the user has saved);
     // 2. this account's local record;
-    // 3. legacy device-global record, adopted only when the remembered
-    //    login belongs to this same account (no cross-account inheritance);
-    // 4. derived from this account's own login identifier;
-    // 5. neutral label (never the hardcoded demo identity).
+    // 3. derived from this account's own login identifier;
+    // 4. neutral label (never the hardcoded demo identity).
     if (profileHydratedRef.current && profileHydratedForRef.current === viewerAccountId) return;
+    // A session/account transition is a hard identity boundary. Clear the
+    // previous account's visual state before any async source resolves.
+    profileTouchedRef.current = false;
+    profileHydratedRef.current = false;
+    profileHydratedForRef.current = viewerAccountId;
+    setProfileDraft({ ...NEUTRAL_PROFILE });
+    setProfileAvatarUri(undefined);
+    setProfileRemoteAvatarPath(undefined);
     let cancelled = false;
     void (async () => {
       const applyRecord = (record: { name: string; handle: string; bio: string; city: string; avatarPath?: string | undefined }): void => {
@@ -432,6 +442,14 @@ export function MeSurface({
         profileHydratedRef.current = true;
         profileHydratedForRef.current = viewerAccountId;
         setProfileDraft({ name: record.name, handle: record.handle, bio: record.bio, city: record.city });
+      };
+      const hydrateRemoteAvatar = (avatarPath?: string | undefined): boolean => {
+        if (cancelled || !avatarPath?.startsWith("assets/")) return false;
+        const mediaAssetId = avatarPath.slice("assets/".length).trim();
+        if (mediaAssetId === "" || mediaAssetId.startsWith("avatar-")) return false;
+        setProfileRemoteAvatarPath(avatarPath);
+        setProfileAvatarUri(`${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(mediaAssetId)}`);
+        return true;
       };
       const hydrateAvatar = (avatarPath?: string | undefined, record?: ProfileRecord): void => {
         if (cancelled || !avatarPath) return;
@@ -463,7 +481,7 @@ export function MeSurface({
           };
           await profileStore.write(record).catch(() => undefined);
           applyRecord(record);
-          hydrateAvatar(record.avatarPath);
+          if (!hydrateRemoteAvatar(remote.avatarPath)) hydrateAvatar(record.avatarPath);
           return;
         } catch {
           // No server profile yet (fresh account) or offline: fall through
@@ -475,26 +493,17 @@ export function MeSurface({
         const record = await profileStore.read();
         if (record) {
           applyRecord(record);
+          setProfileRemoteAvatarPath(undefined);
           hydrateAvatar(record.avatarPath, record);
           return;
         }
       } catch {
         // fall through
       }
-      // 3. legacy device-global record: adopt only on same-account continuity.
-      try {
-        const legacy = await createProfileStore(nativeSecureStorageDriver).read();
-        const remembered = await lastSignInStore.read().catch(() => undefined);
-        if (legacy && remembered?.userAccountId && remembered.userAccountId === viewerAccountId) {
-          await profileStore.write(legacy).catch(() => undefined);
-          applyRecord(legacy);
-          hydrateAvatar(legacy.avatarPath, legacy);
-          return;
-        }
-      } catch {
-        // fall through
-      }
-      // 4. derive from this account's own login identifier.
+      // Never adopt the old device-global profile here. lastSignIn already
+      // points at the newly authenticated account, so it cannot prove who
+      // owned that legacy record and previously leaked Huyen into newcomers.
+      // 3. derive from this account's own login identifier.
       try {
         const remembered = await lastSignInStore.read().catch(() => undefined);
         const owned = remembered && (!viewerAccountId || remembered.userAccountId === viewerAccountId)
@@ -772,14 +781,35 @@ export function MeSurface({
       await new File(selected.uri).copy(avatarFile, { overwrite: true });
       profileTouchedRef.current = true;
       profileHydratedRef.current = true;
+      setProfileRemoteAvatarPath(undefined);
       setProfileAvatarUri(avatarFile.uri);
-      await profileStore.write({
+      const localRecord: ProfileRecord = {
         ...profileDraft,
         // AVATAR-001: 只存文件名。绝对 file:// URI 含沙盒 container UUID，
         // 重装 App 后必死；读时按当前 documentDirectory 重锚。
         avatarPath: avatarFileName(avatarFile.uri),
         updatedAt: new Date().toISOString()
-      });
+      };
+      await profileStore.write(localRecord);
+      // Avatar controls also exist outside the profile editor. Selecting a
+      // photo is therefore a complete action: upload and sync immediately,
+      // rather than requiring a hidden second "完成" step.
+      if (mediaClient && profileClient) {
+        try {
+          const uploaded = await mediaClient.uploadImage({
+            uri: avatarFile.uri,
+            mimeType: selected.mimeType ?? "image/jpeg",
+            width: selected.width,
+            height: selected.height
+          });
+          const remotePath = `assets/${uploaded.mediaAssetId}`;
+          await profileClient.updateProfile({ ...profileDraft, avatarPath: remotePath });
+          setProfileRemoteAvatarPath(remotePath);
+          setProfileSaveError(undefined);
+        } catch {
+          setProfileSaveError("头像已保存在本机，但同步失败，请检查网络后重试。");
+        }
+      }
     } catch {
       setProfileAvatarUri(selected.uri);
     }
@@ -810,7 +840,21 @@ export function MeSurface({
     // an 'assets/' or 'ai-personas/' prefix (isValidProfileAssetPath).
     // Local SecureStore keeps the bare filename for the on-device
     // read-back path; the wire path prepends the canonical prefix.
-    const wireAvatarPath = localAvatarFileName ? `assets/${localAvatarFileName}` : "";
+    let wireAvatarPath = profileRemoteAvatarPath ?? "";
+    if (localAvatarFileName && profileAvatarUri?.startsWith("file:") && !wireAvatarPath) {
+      if (!mediaClient) {
+        setProfileSaveError("头像上传服务暂不可用，请稍后重试。");
+        return;
+      }
+      try {
+        const uploaded = await mediaClient.uploadImage({ uri: profileAvatarUri, mimeType: "image/jpeg", width: 0, height: 0 });
+        wireAvatarPath = `assets/${uploaded.mediaAssetId}`;
+        setProfileRemoteAvatarPath(wireAvatarPath);
+      } catch {
+        setProfileSaveError("头像上传失败，请检查网络后重试。");
+        return;
+      }
+    }
     const record: ProfileRecord = {
       name: profileDraft.name,
       handle: profileDraft.handle,

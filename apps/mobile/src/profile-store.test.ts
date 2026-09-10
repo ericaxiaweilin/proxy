@@ -3,6 +3,10 @@ import { avatarFileName, createProfileStore, DEFAULT_PROFILE, isProfileRecord, p
 import { InMemorySecureStorageDriver } from "./secure-session";
 
 describe("isProfileRecord", () => {
+  it("PROFILE-READ-001: fresh accounts never inherit the demo Huyen identity", () => {
+    expect(DEFAULT_PROFILE.name.toLowerCase()).not.toBe("huyen");
+    expect(DEFAULT_PROFILE.handle.toLowerCase()).not.toContain("huyen");
+  });
   it("accepts a valid record", () => {
     const ok = {
       name: "Huyen",
