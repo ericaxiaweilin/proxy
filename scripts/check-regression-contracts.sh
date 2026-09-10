@@ -1142,4 +1142,46 @@ if ! grep -q 'listTemplates' apps/mobile/src/marketplace-client.ts; then
   exit 1
 fi
 
+# OPP-TARGETED-001/002: 定向邀约（选人 → 向 TA 发出邀约）。R49 原型
+# 的"邀约给 TA"：发布 payload 带 targetUserId 时 server 把机会快照为
+# targetAccountId 非空 — List 只对目标人和 owner 可见，Apply 只收
+# 目标人（旁路拿 id 打命令也拒）；禁止定向给自己。缺省 = 公开卡，
+# 老行为零变化（Go 守护测试 + Zod 老 payload 向后兼容测试钉死）。
+# PG 无迁移：Opportunity 走 payload JSONB，targetAccountId 落在快照里。
+require_test "OPP-TARGETED-001" "./internal/marketplace" \
+  "TestTargetedOpportunityVisibilityAndApply" \
+  "apps/api-go/internal/marketplace/targeted_test.go" || exit $?
+require_test "OPP-TARGETED-002" "./internal/marketplace" \
+  "TestPublicOpportunityUnchangedBesideTargeted" \
+  "apps/api-go/internal/marketplace/targeted_test.go" || exit $?
+if ! grep -q 'targetAccountId' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-TARGETED-001]: contracts wire field must stay" >&2
+  exit 1
+fi
+if ! grep -q 'targetUserId' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [OPP-TARGETED-001]: mobile publish wiring must stay" >&2
+  exit 1
+fi
+
+# OPP-SUGGEST-001: 发布搜索"生成" — 语义层把自由文本映射到目录卡。
+# SuggestOpportunityTemplate 走 modelstack.Port（与 conversation 同一
+# 适配器），fail-closed：未配置 AI_NOT_CONFIGURED、LLM 幻觉 id 服务端
+# 白名单拒（SUGGESTION_MALFORMED）、无匹配 SUGGESTION_NO_MATCH —
+# 不许正则硬解。命中返回目录卡原文（零编造字段）。
+require_test "OPP-SUGGEST-001" "./internal/marketplace" \
+  "TestSuggestOpportunityTemplate" \
+  "apps/api-go/internal/marketplace/suggest_test.go" || exit $?
+if ! grep -q 'SuggestOpportunityTemplate' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [OPP-SUGGEST-001]: anonymous dispatch registration must stay" >&2
+  exit 1
+fi
+if ! grep -q 'SuggestOpportunityTemplatePayloadSchema' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-SUGGEST-001]: contracts wire schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'suggestTemplate' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-SUGGEST-001]: mobile client method must stay" >&2
+  exit 1
+fi
+
 echo "  regression contracts: OK"

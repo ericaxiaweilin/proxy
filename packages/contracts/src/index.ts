@@ -611,7 +611,10 @@ export const MarketOpportunitySchema = z.object({
   appliedByViewer: z.boolean().optional(),
   viewerApplicationId: z.string().optional(),
   viewerApplicationStatus: z.enum(["SUBMITTED", "SELECTED", "NOT_SELECTED", "CONFIRMED"]).optional(),
-  viewerOrderRef: z.string().optional()
+  viewerOrderRef: z.string().optional(),
+  // OPP-TARGETED-001: 定向邀约时非空 — 只对目标人和 owner 可见、
+  // 只收目标人报名。空/缺省 = 经典公开卡（向后兼容）。
+  targetAccountId: z.string().min(1).optional()
 });
 export type MarketOpportunity = z.infer<typeof MarketOpportunitySchema>;
 
@@ -647,6 +650,16 @@ export const ListOpportunityTemplatesPayloadSchema = z.object({
 });
 export type ListOpportunityTemplatesPayload = z.infer<typeof ListOpportunityTemplatesPayloadSchema>;
 
+// OPP-SUGGEST-001: 发布搜索"生成"wire 契约（SuggestOpportunityTemplate）。
+// server 语义层把自由文本映射到目录卡：template 必是目录内真实卡
+// （server 白名单校验，LLM 幻觉 id 被拒），reason 是一句人类可读的
+// 匹配理由。query 为输入；匿名可调（不含用户数据）。
+export const SuggestOpportunityTemplatePayloadSchema = z.object({
+  template: OpportunityTemplateSchema,
+  reason: z.string()
+});
+export type SuggestOpportunityTemplatePayload = z.infer<typeof SuggestOpportunityTemplatePayloadSchema>;
+
 export const PublishMarketOpportunityPayloadSchema = z.object({
   opportunity: MarketOpportunitySchema
 });
@@ -677,7 +690,11 @@ export const PublishMarketOpportunityInputSchema = z.object({
   travel: z.number().int().nullable().optional(),
   // MERCHANT-PUBLISH-001: 以商家名义发布时带店 id。server 在 api 层验
   // business 成员（OWNER/ADMIN）后才认；伪造的直接 403。个人发布不传。
-  merchantId: z.string().min(1).optional()
+  merchantId: z.string().min(1).optional(),
+  // OPP-TARGETED-001: 定向邀约（选人 → 向 TA 发出邀约）。带上后 server
+  // 把机会快照为 targetAccountId 非空：List 只对目标人和 owner 可见，
+  // Apply 只收目标人。不传 = 公开发布，行为与之前完全一致。
+  targetUserId: z.string().min(1).optional()
 });
 export type PublishMarketOpportunityInput = z.infer<typeof PublishMarketOpportunityInputSchema>;
 
