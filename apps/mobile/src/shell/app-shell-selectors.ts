@@ -23,8 +23,9 @@ export function selectShellChromeVisible(input: {
 }): boolean {
   // 1:1 conversation overlay is a fullscreen takeover — hide chrome.
   if (input.messageChatOpen) return false;
-  // R15.33: MAP tab 撤了；底栏一直可见。
-  if (input.tab !== "FEED") return true;
+  // R15.33: MAP tab 撤了；不可滚动的 tab 底栏一直可见。
+  // Feed + Market 列表滚动驱动显隐（下滑隐藏、上滑恢复），与其余 tab 无关。
+  if (input.tab !== "FEED" && input.tab !== "MARKET") return true;
   if (input.feedChatOpen || input.feedPrefsOpen) return true;
   return input.feedChromeVisible;
 }

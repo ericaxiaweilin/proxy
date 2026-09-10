@@ -181,6 +181,8 @@ export function MarketSurface({
     }
     lastScrollYRef.current = y;
   }
+  // 与动态一致：卸载（切 tab）时恢复顶栏+底栏，避免隐藏态带到别的页。
+  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
 
   const loadActivities = useCallback(async (): Promise<void> => {
     setActivityPhase("LOADING");

@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 152 — 2026-09-10
+
+- 市场列表滚动显隐与动态一致：下滑隐藏顶栏+底栏，上滑恢复；切 tab 与卸载时复位可见。
+- 阈值与动态同源（下滑 28pt 隐藏、上滑 18pt 恢复，顶部 48pt 内强制可见）；其余 tab 行为不变。
+
 ## Revision 151 — 2026-09-10
 
 - “我的”资料读取正式绑定当前 `userAccountId`，账户切换先清空上一账户视觉状态；禁止把无法确认归属的旧设备全局资料迁入新人账户。

@@ -36,11 +36,16 @@ describe("app shell guest path", () => {
 });
 
 describe("app shell scroll chrome ownership", () => {
-  it.each(["HOME", "MARKET", "MESSAGES", "ME"] as const)("keeps chrome visible on %s", (tab) => {
+  it.each(["HOME", "MESSAGES", "ME"] as const)("keeps chrome visible on %s", (tab) => {
     expect(selectShellChromeVisible({ tab, feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
   });
 
-  it("lets only the primary Feed stream hide chrome", () => {
+  it.each(["FEED", "MARKET"] as const)("lets the %s stream hide chrome on scroll", (tab) => {
+    expect(selectShellChromeVisible({ tab, feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(false);
+    expect(selectShellChromeVisible({ tab, feedChromeVisible: true, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
+  });
+
+  it("feed nested chat/preferences force chrome visible", () => {
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(false);
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: true, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: true, messageChatOpen: false })).toBe(true);
