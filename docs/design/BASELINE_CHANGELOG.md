@@ -4,6 +4,10 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 153 — 2026-09-10
+
+- 市场滑到底部不再自动回弹：距列表底部不足 140pt 时抑制隐藏（隐藏会瞬间减 104pt 内容高度，底部 offset 被钳制回弹），底栏在底部保持可见。
+
 ## Revision 152 — 2026-09-10
 
 - 市场列表滚动显隐与动态一致：下滑隐藏顶栏+底栏，上滑恢复；切 tab 与卸载时复位可见。
