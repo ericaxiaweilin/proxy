@@ -420,8 +420,9 @@ export function AppShell({
     setSwitcherOpen(true);
   }, []);
   const insets = useSafeAreaInsets();
-  // Only the primary Feed stream owns scroll-driven shell chrome. Chat,
-  // Home/Market/Me forms and Feed's nested chat/preferences keep navigation
+  // Feed and Market streams own scroll-driven shell chrome (top header +
+  // bottom dock hide on scroll down, restore on scroll up). Chat,
+  // Home/Me forms and Feed's nested chat/preferences keep navigation
   // stable so moving through messages cannot unexpectedly summon/hide it.
   const isNavVisible = !realitySceneOpen && !openAIProfile && selectShellChromeVisible({
     tab,
@@ -636,6 +637,7 @@ export function AppShell({
               marketLabel="河内"
               initialTab={marketEntry.tab}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
+              onChromeVisibilityChange={setFeedChromeVisible}
               bottomNavVisible={isNavVisible}
             />
         ) : tab === "FEED" ? (

@@ -12,7 +12,7 @@
         "apps/mobile/src/shell/app-shell.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "Static UI is approved; motion remains incomplete. R36.x SCENE-RECOMMEND-001: 首页场景推荐直达地图详情 (Revision 57)."
+      "knownGap": "Static UI is approved; motion remains incomplete. R36.x SCENE-RECOMMEND-001: 首页场景推荐直达地图详情 (Revision 57). Revision 152: Market joins Feed in scroll-driven chrome (top header + bottom dock hide on scroll down, restore on scroll up); other tabs keep chrome stable."
     },
     {
       "scope": "personal-profile",
@@ -94,7 +94,7 @@
         "scripts/check-regression-contracts.sh"
       ],
       "status": "PARTIAL",
-      "knownGap": "MoneyFlow 4-state + priceLabel render is wired. PublishDemand chip (publisher view) uses priceLabelForPublisher (UI-only first-person wording); opportunity card priceLabel (applicant view) is server-derived from opportunityPriceLabel(MoneyFlow) — the mobile client no longer maintains a parallel priceLabelForFlow mapping (MONEYFLOW-005). The wire contract is server-authoritative end-to-end: server normalizeOpportunityMoney always overwrites any client PriceLabel (MONEYFLOW-004). R17.x chat→order materialisation: ConfirmMarketApplication derives a deterministic fulfillment Order in the same repository transaction, hydrates requester ownership from the authoritative opportunity row, and retries repair a missing order without duplicating it (CHAT-ORDER-MATERIALISATION-001, CHAT-ORDER-ATOMIC-001). R37: legacy R7 quick filters removed; opportunity filtering is the R37 scenario type palette only (Revision 48). Revision 149: PERSON opportunity owners resolve from the verified account profile at publish time instead of the hardcoded label; unresolved authors store an empty owner (readers show a neutral label). No card layout change. Revision 150: opportunity publisher cards resolve the owner through the viewer-relative author label (legacy hardcoded owner falls back to neutral); card layout unchanged."
+      "knownGap": "MoneyFlow 4-state + priceLabel render is wired. PublishDemand chip (publisher view) uses priceLabelForPublisher (UI-only first-person wording); opportunity card priceLabel (applicant view) is server-derived from opportunityPriceLabel(MoneyFlow) — the mobile client no longer maintains a parallel priceLabelForFlow mapping (MONEYFLOW-005). The wire contract is server-authoritative end-to-end: server normalizeOpportunityMoney always overwrites any client PriceLabel (MONEYFLOW-004). R17.x chat→order materialisation: ConfirmMarketApplication derives a deterministic fulfillment Order in the same repository transaction, hydrates requester ownership from the authoritative opportunity row, and retries repair a missing order without duplicating it (CHAT-ORDER-MATERIALISATION-001, CHAT-ORDER-ATOMIC-001). R37: legacy R7 quick filters removed; opportunity filtering is the R37 scenario type palette only (Revision 48). Revision 149: PERSON opportunity owners resolve from the verified account profile at publish time instead of the hardcoded label; unresolved authors store an empty owner (readers show a neutral label). No card layout change. Revision 150: opportunity publisher cards resolve the owner through the viewer-relative author label (legacy hardcoded owner falls back to neutral); card layout unchanged. Revision 152: opportunity/activity lists drive shell chrome exactly like the feed stream; unmount restores chrome."
     },
     {
       "scope": "activity",
