@@ -1117,3 +1117,16 @@ if ! grep -q 'engagement.muted_authors' apps/api-go/migrations/078_muted_authors
 fi
 
 echo "  regression contracts: OK"
+
+# ACCOUNT-SWITCH-001: same-phone account switch (logout A -> login B) was
+# REJECTED forever: revokeSession never released the device row and
+# upsertDevice's owner guard was absolute ("device belongs to another user").
+# The memory repo had NO guard on the fresh-identity path, so in-memory
+# service tests stayed green while PG mode rejected every switch — the same
+# class as friendship 42P10 / muted_authors 42P01. Fix: takeover device
+# binding — a different account may claim the device only when it has no
+# ACTIVE session; one-active-account-per-device stays intact (pinned by
+# the same test, step 2). Full 8-step chain incl. switch-back round-trip.
+require_test "ACCOUNT-SWITCH-001" "./internal/platform/postgres" \
+  "TestAccountSwitchSameDeviceLifecycle" \
+  "apps/api-go/internal/platform/postgres/account_switch_integration_test.go" || exit $?

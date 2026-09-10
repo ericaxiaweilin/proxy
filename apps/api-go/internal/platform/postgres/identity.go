@@ -101,6 +101,18 @@ func (r *IdentityRepository) EnsurePasswordlessIdentity(ctx context.Context, cha
 		err = reassignDevice(ctx, transaction, device)
 	} else {
 		err = upsertDevice(ctx, transaction, device)
+		if err != nil {
+			// ACCOUNT-SWITCH-001 takeover: a fresh login of a different
+			// account may claim the device when the device currently has
+			// NO ACTIVE session on it (previous owner logged out or the
+			// session expired/revoked). One-active-account-per-device
+			// stays intact: upsertDevice keeps rejecting while the owner
+			// still holds a live session on this device.
+			takeover, takeoverErr := deviceHasNoActiveSession(ctx, transaction, deviceID)
+			if takeoverErr == nil && takeover {
+				err = reassignDevice(ctx, transaction, device)
+			}
+		}
 	}
 	if err != nil {
 		return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
@@ -304,6 +316,21 @@ func upsertDevice(ctx context.Context, execer sqlExecer, device identity.DeviceR
 		return errors.New("device belongs to another user")
 	}
 	return err
+}
+
+// deviceHasNoActiveSession reports whether the device's owning account
+// currently has no ACTIVE session bound to this device. It gates the
+// ACCOUNT-SWITCH-001 takeover: once the previous owner logged out (or
+// their session expired / was revoked), the phone is free for a new
+// account; while a live session exists the device stays exclusive.
+func deviceHasNoActiveSession(ctx context.Context, queryer sqlQueryer, deviceID string) (bool, error) {
+	var n int
+	if err := queryer.QueryRow(ctx, `
+		SELECT count(*) FROM identity.sessions
+		WHERE device_id = $1 AND status = 'ACTIVE'`, deviceID).Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 0, nil
 }
 
 func (r *IdentityRepository) UpsertDeviceAndPublish(ctx context.Context, device identity.DeviceRegistration, domainEvents []event.DomainEvent) error {

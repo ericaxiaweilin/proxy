@@ -268,10 +268,30 @@ func (r *MemoryRepository) EnsurePasswordlessIdentity(_ context.Context, channel
 	if upgradingUserAccountID == "" {
 		r.users[user.ID] = user
 	}
+	// ACCOUNT-SWITCH-001: same takeover semantics as the PostgreSQL
+	// repository — a fresh different-account login may claim the device
+	// only when the device has no ACTIVE session left; while the owner
+	// holds a live session the device stays exclusive.
+	if existing, exists := r.devices[deviceID]; exists && existing.UserAccountID != user.ID && !r.deviceHasNoActiveSessionLocked(deviceID) {
+		return LoginIdentity{}, DeviceRegistration{}, false, errors.New("device belongs to another user")
+	}
 	r.loginIdentities[identity.ID] = identity
 	r.devices[device.ID] = device
 	r.memberships = append(r.memberships, Membership{Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, UserAccountID: user.ID, Status: "ACTIVE"})
 	return identity, device, true, nil
+}
+
+// deviceHasNoActiveSessionLocked reports whether this device currently
+// has no ACTIVE session. Caller must hold r.mu. It gates the
+// ACCOUNT-SWITCH-001 takeover in the memory repository (same semantics
+// as the PostgreSQL deviceHasNoActiveSession).
+func (r *MemoryRepository) deviceHasNoActiveSessionLocked(deviceID string) bool {
+	for _, session := range r.sessions {
+		if session.DeviceID == deviceID && session.Status == "ACTIVE" {
+			return false
+		}
+	}
+	return true
 }
 
 // EnsureAnonymousIdentity gives a device a durable, server-owned ANONYMOUS
