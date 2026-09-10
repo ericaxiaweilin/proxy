@@ -475,6 +475,23 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
         setBusy(false);
         return;
       }
+      // AUTH-LOGIN-HINT-001: login must not silently start a registration
+      // OTP flow for unknown identifiers. Probe first; unregistered accounts
+      // get an explicit prompt instead of a verification code.
+      if (authMode === "login") {
+        try {
+          const lookupClient = await getNativeLoginClient();
+          const lookup = await lookupClient.lookupPasswordlessIdentity({ channel, identifier });
+          if (!lookup.registered) {
+            setError(isEmail ? "该邮箱尚未注册，请先去注册。" : "该手机号尚未注册，请先去注册。");
+            setBusy(false);
+            return;
+          }
+        } catch {
+          // Lookup outage: fall through to the challenge request (legacy
+          // behaviour) rather than blocking login entirely.
+        }
+      }
       // R16.7-P0-A/B: register requires Terms + Privacy consent and 18+ DOB
       // before requesting a verification challenge. Server will
       // re-validate (fail-closed defense in depth). The DOB check shares

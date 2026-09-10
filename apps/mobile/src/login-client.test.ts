@@ -201,3 +201,45 @@ describe("mobile login client signup consent + age gate (R16.7-P0-A/B)", () => {
     });
   });
 });
+
+describe("AUTH-LOGIN-HINT-001 login existence probe", () => {
+  function lookupClient(reply: unknown): { client: LoginClient; sent: () => TransportRequest | undefined } {
+    let sent: TransportRequest | undefined;
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date("2026-09-10T00:00:00.000Z"));
+    const client = new LoginClient({
+      baseUrl: "https://api.proxy.test",
+      deviceId: "device_lookup",
+      deviceCredential: "a".repeat(64),
+      secureSessionStore: store,
+      now: () => new Date("2026-09-10T00:00:00.000Z"),
+      transport: async (request) => {
+        sent = request;
+        return response(200, reply);
+      }
+    });
+    return { client, sent: () => sent };
+  }
+
+  it("maps ACCEPTED to registered without sending credentials", async () => {
+    const { client, sent } = lookupClient({ commandId: "cmd_lookup", outcome: "ACCEPTED", aggregate: { type: "LoginIdentity", id: "login_1", version: 1, state: "ACTIVE" }, eventRefs: [], correlationId: "corr_lookup" });
+    await expect(client.lookupPasswordlessIdentity({ channel: "EMAIL", identifier: "a@example.com" })).resolves.toEqual({ registered: true });
+    const envelope = JSON.parse(sent()?.body ?? "{}");
+    expect(envelope.payload).toEqual({ channel: "EMAIL", identifier: "a@example.com" });
+  });
+
+  it("maps LOGIN_IDENTITY_NOT_FOUND to unregistered", async () => {
+    const { client } = lookupClient({
+      commandId: "cmd_lookup", outcome: "REJECTED", eventRefs: [], correlationId: "corr_lookup",
+      error: { errorCode: "LOGIN_IDENTITY_NOT_FOUND", category: "AUTHENTICATION", retryability: "AFTER_USER_ACTION", messageKey: "identity.login_identity_not_found", safeDetails: {}, correlationId: "corr_lookup" }
+    });
+    await expect(client.lookupPasswordlessIdentity({ channel: "EMAIL", identifier: "nobody@example.com" })).resolves.toEqual({ registered: false });
+  });
+
+  it("rethrows unexpected failures so the caller can fall back to the challenge path", async () => {
+    const { client } = lookupClient({
+      commandId: "cmd_lookup", outcome: "REJECTED", eventRefs: [], correlationId: "corr_lookup",
+      error: { errorCode: "RATE_LIMITED", category: "RESOURCE", retryability: "SAFE_RETRY", messageKey: "command.rate_limited", safeDetails: {}, correlationId: "corr_lookup" }
+    });
+    await expect(client.lookupPasswordlessIdentity({ channel: "EMAIL", identifier: "a@example.com" })).rejects.toBeInstanceOf(LoginCommandRejectedError);
+  });
+});

@@ -107,6 +107,10 @@ type PrivacyRequestRepository interface {
 type Repository interface {
 	GetUser(ctx context.Context, id string) (UserAccount, error)
 	GetLoginIdentity(ctx context.Context, id string) (LoginIdentity, error)
+	// FindLoginIdentity is a read-only existence lookup by verified
+	// channel + identifier (AUTH-LOGIN-HINT-001). It must never create
+	// rows — unlike EnsurePasswordlessIdentity.
+	FindLoginIdentity(ctx context.Context, channel, identifier string) (LoginIdentity, error)
 	EnsurePasswordlessIdentity(ctx context.Context, channel, identifier, deviceID, platform, upgradingUserAccountID string) (LoginIdentity, DeviceRegistration, bool, error)
 	EnsureAnonymousIdentity(ctx context.Context, deviceID, platform string) (UserAccount, DeviceRegistration, bool, error)
 	CreateLoginChallenge(ctx context.Context, challenge LoginChallenge) error
@@ -223,6 +227,17 @@ func (r *MemoryRepository) GetLoginIdentity(_ context.Context, id string) (Login
 		return LoginIdentity{}, ErrLoginIdentityNotFound
 	}
 	return identity, nil
+}
+
+func (r *MemoryRepository) FindLoginIdentity(_ context.Context, channel, identifier string) (LoginIdentity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, identity := range r.loginIdentities {
+		if identity.Channel == channel && identity.Identifier == identifier {
+			return identity, nil
+		}
+	}
+	return LoginIdentity{}, ErrLoginIdentityNotFound
 }
 
 func (r *MemoryRepository) EnsurePasswordlessIdentity(_ context.Context, channel, identifier, deviceID, platform, upgradingUserAccountID string) (LoginIdentity, DeviceRegistration, bool, error) {

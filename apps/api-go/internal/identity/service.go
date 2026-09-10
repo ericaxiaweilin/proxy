@@ -130,7 +130,7 @@ func (s *Service) Repository() Repository {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "LookupPasswordlessIdentity", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
 		"UpdateProfile", "GetProfile",
 		"GetAccountPreferences", "UpdateAccountPreferences",
@@ -152,6 +152,8 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 	switch envelope.CommandType {
 	case "BeginPasswordlessAuthentication":
 		return s.beginPasswordlessAuthentication(ctx, envelope)
+	case "LookupPasswordlessIdentity":
+		return s.lookupPasswordlessIdentity(ctx, envelope)
 	case "RequestLoginChallenge":
 		return s.requestLoginChallenge(ctx, envelope)
 	case "VerifyLoginChallenge":
@@ -372,6 +374,30 @@ func clientFingerprint(e command.Envelope) (string, string) {
 	ip, _ := e.AuthContext["clientIp"].(string)
 	ua, _ := e.AuthContext["userAgent"].(string)
 	return ip, ua
+}
+
+// lookupPasswordlessIdentity is the login-tab pre-check (AUTH-LOGIN-HINT-001):
+// read-only existence probe so the UI can tell "not registered, go sign up"
+// instead of silently starting a registration OTP flow. It never creates
+// rows. The boolean-oracle shape is intentional and minimal; abuse is
+// bounded by the existing per-IP + per-actor command rate limits.
+func (s *Service) lookupPasswordlessIdentity(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		Channel    string `json:"channel"`
+		Identifier string `json:"identifier"`
+	}
+	if !decode(e.Payload, &p) {
+		return command.Rejected(e, "INVALID_PASSWORDLESS_LOOKUP", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_passwordless_lookup", nil)
+	}
+	identifier := normalizeLoginIdentifier(p.Channel, p.Identifier)
+	if (p.Channel != "EMAIL" && p.Channel != "SMS") || identifier == "" {
+		return command.Rejected(e, "INVALID_PASSWORDLESS_LOOKUP", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_passwordless_lookup", nil)
+	}
+	identity, err := s.repository.FindLoginIdentity(ctx, p.Channel, identifier)
+	if err != nil || identity.ID == "" {
+		return command.Rejected(e, "LOGIN_IDENTITY_NOT_FOUND", "AUTHENTICATION", "AFTER_USER_ACTION", "identity.login_identity_not_found", nil)
+	}
+	return command.Accepted(e, "LoginIdentity", identity.ID, 1, "ACTIVE", nil)
 }
 
 // beginPasswordlessAuthentication is the public entry point for sign-up and

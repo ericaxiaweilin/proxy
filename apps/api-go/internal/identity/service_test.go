@@ -662,3 +662,34 @@ func TestVerifyChallengeProvisionsInitialProfile(t *testing.T) {
 		t.Fatalf("explicit profile must survive re-verification: %#v", rebody.Profile)
 	}
 }
+
+// AUTH-LOGIN-HINT-001: the login tab probes existence before sending a
+// code. Unknown identifiers must NOT silently start a registration flow.
+func TestLookupPasswordlessIdentityHintsUnregistered(t *testing.T) {
+	service := NewWithRepositoryAndClockAndChallengeProvider(NewMemoryRepository(nil), clock.NewFixed(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)), testLoginChallengeProvider{})
+	lookup := func(channel, identifier string) command.Result {
+		return service.Handle(testEnvelope("LookupPasswordlessIdentity", map[string]any{
+			"channel": channel, "identifier": identifier,
+		}, command.Target{Type: "LoginIdentity", ID: "lookup"}))
+	}
+	missing := lookup("EMAIL", "nobody@example.com")
+	if missing.Outcome != "REJECTED" || missing.Error == nil || missing.Error.ErrorCode != "LOGIN_IDENTITY_NOT_FOUND" {
+		t.Fatalf("unknown email must hint unregistered, got %#v", missing)
+	}
+	begin := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": "Somebody@Example.com", "deviceId": "device_lookup", "platform": "ANDROID",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if begin.Outcome != "PENDING" {
+		t.Fatalf("begin failed: %#v", begin)
+	}
+	// Lookup is case-insensitive like registration and finds the row the
+	// begin call just created — without creating anything itself.
+	found := lookup("EMAIL", "somebody@example.com")
+	if found.Outcome != "ACCEPTED" {
+		t.Fatalf("registered email must look up ACCEPTED, got %#v", found)
+	}
+	bad := lookup("EMAIL", "not-an-email")
+	if bad.Outcome != "REJECTED" || bad.Error == nil || bad.Error.ErrorCode != "INVALID_PASSWORDLESS_LOOKUP" {
+		t.Fatalf("malformed identifier must reject INVALID, got %#v", bad)
+	}
+}
