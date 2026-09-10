@@ -103,6 +103,28 @@ export class LoginClient {
     return { challengeId: result.operationRef, result };
   }
 
+  /**
+   * AUTH-LOGIN-HINT-001: login-tab pre-check. Read-only existence probe so
+   * the UI can prompt "not registered, go sign up" instead of silently
+   * starting a registration OTP flow. Maps LOGIN_IDENTITY_NOT_FOUND to
+   * { registered: false }; any other failure throws so the caller can fall
+   * back to the legacy challenge path.
+   */
+  public async lookupPasswordlessIdentity(input: { channel: LoginChallengeChannel; identifier: string }): Promise<{ registered: boolean }> {
+    try {
+      const result = await this.sendCommand("LookupPasswordlessIdentity", { type: "LoginIdentity", id: "lookup" }, {
+        channel: input.channel,
+        identifier: input.identifier
+      });
+      return { registered: result.outcome === "ACCEPTED" };
+    } catch (err) {
+      if (err instanceof LoginCommandRejectedError && err.result.error?.errorCode === "LOGIN_IDENTITY_NOT_FOUND") {
+        return { registered: false };
+      }
+      throw err;
+    }
+  }
+
   public async createAnonymousSession(platform: "ANDROID" | "IOS", signup?: AnonymousSessionSignup): Promise<StoredSession> {
     // R16.7-P0-A/B: Terms + Privacy consent and 18+ age gate (PRD v1.4
     // LC-04, LC-12, LC-15; Vietnam PDP 91/2025/QH15). Fail-closed at the

@@ -83,6 +83,16 @@ require_test "PROFILE-READ-001" "./internal/marketplace" \
 require_test "PROFILE-READ-001" "./internal/platform/postgres" \
   "TestProfileDisplayBackfillClearsLegacyLabels" \
   "apps/api-go/internal/platform/postgres/profile_display_backfill_test.go" || exit $?
+require_test "AUTH-LOGIN-HINT-001" "./internal/identity" \
+  "TestLookupPasswordlessIdentityHintsUnregistered" \
+  "apps/api-go/internal/identity/service_test.go" || exit $?
+if ! grep -q 'AUTH-LOGIN-HINT-001' apps/mobile/src/login-client.test.ts ||
+   ! grep -q 'lookupPasswordlessIdentity' apps/mobile/src/native-app.tsx; then
+  echo "  FAIL [AUTH-LOGIN-HINT-001]: login existence probe or its wiring is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/login-client.test.ts || exit $?
+echo "    AUTH-LOGIN-HINT-001: PASS (login hints unregistered instead of silent registration)"
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
    ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
   echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2

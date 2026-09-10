@@ -249,6 +249,8 @@ commands:
     domain: Engagement
   - command: ListVouchers
     domain: Voucher
+  - command: LookupPasswordlessIdentity
+    domain: Identity
   - command: MarkInboxRead
     domain: Notification
   - command: MarkMediaReady

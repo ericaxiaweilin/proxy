@@ -49,6 +49,18 @@ func (r *IdentityRepository) GetLoginIdentity(ctx context.Context, id string) (i
 	return loginIdentity, err
 }
 
+func (r *IdentityRepository) FindLoginIdentity(ctx context.Context, channel, identifier string) (identity.LoginIdentity, error) {
+	var loginIdentity identity.LoginIdentity
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, user_account_id, verified, status, COALESCE(channel, ''), COALESCE(identifier, '')
+		FROM identity.login_identities
+		WHERE channel = $1 AND identifier = $2`, channel, identifier).Scan(&loginIdentity.ID, &loginIdentity.UserAccountID, &loginIdentity.Verified, &loginIdentity.Status, &loginIdentity.Channel, &loginIdentity.Identifier)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return identity.LoginIdentity{}, identity.ErrLoginIdentityNotFound
+	}
+	return loginIdentity, err
+}
+
 func (r *IdentityRepository) EnsurePasswordlessIdentity(ctx context.Context, channel, identifier, deviceID, platform, upgradingUserAccountID string) (identity.LoginIdentity, identity.DeviceRegistration, bool, error) {
 	transaction, err := r.pool.Begin(ctx)
 	if err != nil {
