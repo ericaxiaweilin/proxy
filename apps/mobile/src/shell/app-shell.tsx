@@ -665,6 +665,8 @@ export function AppShell({
               onChromeVisibilityChange={setFeedChromeVisible}
               onOpenChat={setFeedChatAuthor}
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
+              // MEDIA-PIPELINE-001: AI 账号目录透传，动态解析 AGENT 帖头像。
+              aiAccountsClient={aiAccounts}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               onOpenProfile={(profile) => setOpenHumanProfile(profile)}
               refreshTrigger={feedRefreshTrigger}

@@ -99,6 +99,14 @@ if ! grep -q 'AUTH-LOGIN-HINT-001' apps/mobile/src/login-client.test.ts ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/login-client.test.ts || exit $?
 echo "    AUTH-LOGIN-HINT-001: PASS (login hints unregistered instead of silent registration)"
+node scripts/check-media-pipeline.mjs || exit $?
+if ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/asset-sources.test.ts ||
+   ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/author-avatar.test.ts; then
+  echo "  FAIL [MEDIA-PIPELINE-001]: unified media pipeline tests are missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/media/asset-sources.test.ts src/media/author-avatar.test.ts || exit $?
+echo "    MEDIA-PIPELINE-001: PASS (unified asset resolution + author avatars, feed on pipeline)"
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
    ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
   echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2
