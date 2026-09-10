@@ -12,7 +12,7 @@
         "apps/mobile/src/shell/app-shell.test.ts"
       ],
       "status": "PARTIAL",
-      "knownGap": "Static UI is approved; motion remains incomplete. R36.x SCENE-RECOMMEND-001: 首页场景推荐直达地图详情 (Revision 57). Revision 152: Market joins Feed in scroll-driven chrome (top header + bottom dock hide on scroll down, restore on scroll up); other tabs keep chrome stable. Revision 154: FeedSurface takes an optional AI account catalog for AGENT post avatars; no chrome/layout change. Revision 155: shell Header reserves the status-bar inset (same formula as scene map); logo no longer underlaps the clock."
+      "knownGap": "Static UI is approved; motion remains incomplete. R36.x SCENE-RECOMMEND-001: 首页场景推荐直达地图详情 (Revision 57). Revision 152: Market joins Feed in scroll-driven chrome (top header + bottom dock hide on scroll down, restore on scroll up); other tabs keep chrome stable. Revision 154: FeedSurface takes an optional AI account catalog for AGENT post avatars; no chrome/layout change. Revision 155: shell Header reserves the status-bar inset (same formula as scene map); logo no longer underlaps the clock. Revision 156: header inset takes the full safe area after device feedback of slight overlap."
     },
     {
       "scope": "personal-profile",
