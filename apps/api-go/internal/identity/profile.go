@@ -143,6 +143,68 @@ func (r *MemoryProfileRepository) UpsertProfile(_ context.Context, p Profile) (P
 // ErrProfileNotFound is returned when no profile exists for a user.
 var ErrProfileNotFound = errors.New("profile not found")
 
+// initialProfileFor derives a fresh account's home-page identity from the
+// verified login identifier that owns it (PROFILE-READ-001). Registration
+// binds email / phone but previously created no Profile row, so every new
+// account rendered a hardcoded demo identity on the client. Rules mirror
+// the mobile deriveProfileFromIdentifier fallback: email local-part becomes
+// name/handle, phone identifiers never become a public name (privacy).
+func initialProfileFor(userAccountID, channel, identifier string) Profile {
+	name := "用户"
+	handle := "@user"
+	city := "河内"
+	identifier = strings.TrimSpace(identifier)
+	if identifier != "" {
+		if channel == "SMS" || !strings.Contains(identifier, "@") {
+			digits := onlyDigits(identifier)
+			if len(digits) >= 4 {
+				handle = "@user" + digits[len(digits)-4:]
+			}
+		} else {
+			local := strings.TrimSpace(strings.SplitN(identifier, "@", 2)[0])
+			if local != "" {
+				name = local
+			}
+			handle = "@" + sanitizeHandle(local)
+		}
+	}
+	return Profile{
+		UserAccountID: userAccountID,
+		Name:          name,
+		Handle:        handle,
+		Bio:           "",
+		City:          city,
+		AvatarPath:    "",
+	}
+}
+
+func onlyDigits(value string) string {
+	var out strings.Builder
+	for _, r := range value {
+		if r >= '0' && r <= '9' {
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+func sanitizeHandle(local string) string {
+	var out strings.Builder
+	for _, r := range strings.ToLower(local) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' {
+			out.WriteRune(r)
+		}
+	}
+	cleaned := strings.TrimLeft(out.String(), ".")
+	if len(cleaned) > 30 {
+		cleaned = cleaned[:30]
+	}
+	if cleaned == "" {
+		return "user"
+	}
+	return cleaned
+}
+
 // ProfileService is the domain layer that command handlers call.
 type ProfileService struct {
 	mu     sync.Mutex

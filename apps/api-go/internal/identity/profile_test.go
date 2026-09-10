@@ -101,3 +101,21 @@ func TestUpdateProfileRejectsAnonymousActorAndBadAvatar(t *testing.T) {
 		t.Fatalf("empty name should be rejected, got %#v", emptyName)
 	}
 }
+
+func TestInitialProfileDerivesFromVerifiedIdentifier(t *testing.T) {
+	email := initialProfileFor("user_1", "EMAIL", "NguyenThanhHuyen@Example.com")
+	if email.Name != "NguyenThanhHuyen" || email.Handle != "@nguyenthanhhuyen" {
+		t.Fatalf("email profile wrong: %#v", email)
+	}
+	phone := initialProfileFor("user_2", "SMS", "+84912345678")
+	if phone.Name != "用户" || phone.Handle != "@user5678" {
+		t.Fatalf("phone identifier must stay out of the public name: %#v", phone)
+	}
+	if len(phone.Handle) >= len("+84912345678") {
+		t.Fatalf("full phone number leaked into handle: %#v", phone)
+	}
+	empty := initialProfileFor("user_3", "EMAIL", "")
+	if empty.Name != "用户" || empty.Handle != "@user" {
+		t.Fatalf("empty identifier must fall back to neutral: %#v", empty)
+	}
+}

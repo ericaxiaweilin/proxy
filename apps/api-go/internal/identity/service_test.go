@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -596,5 +597,68 @@ func TestPrivacyDataExport(t *testing.T) {
 	}
 	if export.LegalBasis != "PDP-91/2025/QH15-Art31" {
 		t.Fatalf("export legalBasis wrong: %s", export.LegalBasis)
+	}
+}
+
+// PROFILE-READ-001: the verified login identifier provisions the home-page
+// identity. Registration binds email / phone but created no Profile row, so
+// fresh accounts rendered a hardcoded demo identity on the client.
+func TestVerifyChallengeProvisionsInitialProfile(t *testing.T) {
+	fixed := clock.NewFixed(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+	service := NewWithRepositoryAndClockAndChallengeProvider(NewMemoryRepository(nil), fixed, testLoginChallengeProvider{})
+	begin := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": "NguyenThanhHuyen@Example.com", "deviceId": "device_profile", "platform": "ANDROID",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if begin.Outcome != "PENDING" || begin.OperationRef == "" {
+		t.Fatalf("expected pending passwordless challenge, got %#v", begin)
+	}
+	challenge, err := service.repository.GetLoginChallenge(context.Background(), begin.OperationRef)
+	if err != nil || challenge.UserAccountID == "" {
+		t.Fatalf("expected stored challenge with account, got %#v %v", challenge, err)
+	}
+	verified := service.Handle(testEnvelope("VerifyLoginChallenge", map[string]any{
+		"challengeId": begin.OperationRef, "code": "123456",
+	}, command.Target{Type: "LoginChallenge", ID: begin.OperationRef}))
+	if verified.Outcome != "ACCEPTED" {
+		t.Fatalf("expected verified challenge, got %#v", verified)
+	}
+	read := service.Handle(profileEnvelope("GetProfile", challenge.UserAccountID, nil))
+	if read.Outcome != "ACCEPTED" {
+		t.Fatalf("expected provisioned profile, got %#v", read)
+	}
+	var body struct {
+		Profile Profile `json:"profile"`
+	}
+	if err := json.Unmarshal([]byte(read.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Profile.Name != "nguyenthanhhuyen" || body.Profile.Handle != "@nguyenthanhhuyen" {
+		t.Fatalf("profile not derived from verified identifier: %#v", body.Profile)
+	}
+	// An explicit UpdateProfile always wins over later verifications.
+	edited := service.Handle(profileEnvelope("UpdateProfile", challenge.UserAccountID, map[string]any{
+		"name": "My Name", "handle": "@myname", "bio": "", "city": "河内", "avatarPath": "",
+	}))
+	if edited.Outcome != "ACCEPTED" {
+		t.Fatalf("explicit edit failed: %#v", edited)
+	}
+	second := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": "nguyenthanhhuyen@example.com", "deviceId": "device_profile", "platform": "ANDROID",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	reverified := service.Handle(testEnvelope("VerifyLoginChallenge", map[string]any{
+		"challengeId": second.OperationRef, "code": "123456",
+	}, command.Target{Type: "LoginChallenge", ID: second.OperationRef}))
+	if reverified.Outcome != "ACCEPTED" {
+		t.Fatalf("expected second verification, got %#v", reverified)
+	}
+	reread := service.Handle(profileEnvelope("GetProfile", challenge.UserAccountID, nil))
+	var rebody struct {
+		Profile Profile `json:"profile"`
+	}
+	if err := json.Unmarshal([]byte(reread.OperationRef), &rebody); err != nil {
+		t.Fatal(err)
+	}
+	if rebody.Profile.Name != "My Name" || rebody.Profile.Handle != "@myname" {
+		t.Fatalf("explicit profile must survive re-verification: %#v", rebody.Profile)
 	}
 }
