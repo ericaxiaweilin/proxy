@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { ProxyIcon } from "../components/proxy-icon";
+import { useModuleBackHandler } from "../components/module-back";
 import { color } from "../theme";
 import type { SessionAuthClient } from "../auth-client";
 import type { SecureSessionStore, StoredSession } from "../secure-session";
@@ -80,6 +82,14 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [actionBusy, setActionBusy] = useState(false);
   const [actionResult, setActionResult] = useState<string>();
   const [inviteAmountText, setInviteAmountText] = useState("150,000");
+
+  // 全页无 shell chrome，必须自己留安全区，否则顶栏顶进状态栏
+  // （标题被时间盖住、返回键落进系统手势区点不了）。
+  const insets = useSafeAreaInsets();
+  const rootPad = { paddingTop: Math.max(insets.top, 12), paddingBottom: Math.max(insets.bottom, 0) };
+  // §4/§13：系统返回逐层收起——详情→列表→关闭（与屏上 ‹ 同序，后注册先消费，详情优先）。
+  useModuleBackHandler(() => { onBack(); return true; });
+  useModuleBackHandler(selectedId && selectedId !== initialSceneId ? () => { setSelectedId(undefined); return true; } : undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -280,7 +290,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   if (selected) {
     const activeVariant = detail?.variants.find((item) => item.id === detail.selectedVariant);
     return (
-      <ScrollView style={styles.root} contentContainerStyle={styles.detailContent}>
+      <ScrollView style={[styles.root, rootPad]} contentContainerStyle={styles.detailContent}>
         <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}><Text style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text style={styles.detailTopSub}>{activeVariant?.name ?? selected.area} · {selected.area}</Text></View><View style={styles.topSpacer} /></View>
         <View style={styles.hero}>
           {detail?.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : <MapView initialRegion={{ latitude: selected.latitude, longitude: selected.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 }} pointerEvents="none" style={styles.heroMap}><Marker coordinate={{ latitude: selected.latitude, longitude: selected.longitude }} pinColor={selected.active ? color.magenta : color.violet} /></MapView>}
@@ -332,7 +342,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   }
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, rootPad]}>
       <View style={styles.topBar}>
         <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><Text style={styles.backText}>‹</Text></Pressable>
         <View style={styles.topCopy}><Text style={styles.title}>场景地图</Text><Text style={styles.subtitle}>{origin ? `当前位置附近 · ${scenes.length} 个热门场景` : `场景目录 · ${scenes.length} 个 Scene`}</Text></View>
