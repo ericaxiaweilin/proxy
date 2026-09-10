@@ -1,6 +1,6 @@
 # PR: ACCOUNT-SWITCH-001 — 同设备账户切换（登出→换账户登录）修复
 
-**分支**: `hermes/account-switch-test`（起点 `50d5cd8`，集成 HEAD）
+**分支**: `hermes/account-switch-test`（rebase 后起点 `dff1abe`，集成 HEAD 2026-09-11；原基线 `50d5cd8` + 47 笔 commander 提交后重放，备份分支 `backup/acct-switch-50d5cd8`）
 **回归 ID**: `ACCOUNT-SWITCH-001`
 **钉死测试**: `TestAccountSwitchSameDeviceLifecycle`（`apps/api-go/internal/platform/postgres/account_switch_integration_test.go`）
 

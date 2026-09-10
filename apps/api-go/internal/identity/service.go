@@ -66,6 +66,9 @@ type Service struct {
 	challengeProvider      LoginChallengeProvider
 	displayIdentityService *DisplayIdentityService
 	profileService         *ProfileService
+	// otpRequests bounds code delivery per login identifier
+	// (OTP-THROTTLE-001: 1/min, 10/hour — Twilio Verify ladder).
+	otpRequests *otpThrottler
 }
 
 func New(seed *Seed) *Service {
@@ -94,7 +97,7 @@ func NewWithRepositoryAndClockAndChallengeProvider(repository Repository, domain
 	if provider == nil {
 		provider = UnconfiguredLoginChallengeProvider{}
 	}
-	service := &Service{repository: repository, clock: domainClock, challengeProvider: provider, displayIdentityService: NewDisplayIdentityService(nil, domainClock), profileService: NewProfileService(nil, domainClock)}
+	service := &Service{repository: repository, clock: domainClock, challengeProvider: provider, otpRequests: newOtpThrottler(), displayIdentityService: NewDisplayIdentityService(nil, domainClock), profileService: NewProfileService(nil, domainClock)}
 	if tokenRepository, ok := repository.(TokenRepository); ok {
 		service.tokenManager = NewTokenManager(tokenRepository, repository, domainClock)
 	}
@@ -400,6 +403,68 @@ func (s *Service) lookupPasswordlessIdentity(ctx context.Context, e command.Enve
 	return command.Accepted(e, "LoginIdentity", identity.ID, 1, "ACTIVE", nil)
 }
 
+// OTP delivery policy (industry standard ladder, Twilio Verify style):
+// codes live 5 minutes; at most 1 code per identifier per minute and
+// 10 per identifier per hour. Bounded attempts per code (MaxAttempts=5)
+// alone are not enough — without request throttling a caller can mint
+// unlimited fresh codes, each with its own 5 attempts.
+const (
+	otpThrottlePerMinute = 1
+	otpThrottlePerHour  = 10
+	otpThrottleWindow    = time.Minute
+	otpThrottleHourly    = time.Hour
+)
+
+// otpThrottler is a sliding-window request counter per identifier.
+// The API layer already rate-limits per IP / per actor at the command
+// boundary; this counter bounds CODE DELIVERY per login identifier
+// (the resource that actually costs money and attack surface).
+type otpThrottler struct {
+	mu       sync.Mutex
+	minute   map[string][]time.Time
+	hourly   map[string][]time.Time
+}
+
+func newOtpThrottler() *otpThrottler {
+	return &otpThrottler{minute: make(map[string][]time.Time), hourly: make(map[string][]time.Time)}
+}
+
+// wouldAllow reports whether one more code request fits the ladder
+// (1/min, 10/hour per identifier) WITHOUT recording it. The check is a
+// peek: rejected attempts (device guard etc.) never deliver a code, so
+// they must not consume the user's resend allowance.
+func (t *otpThrottler) wouldAllow(identifier string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pruneLocked(identifier, now)
+	return len(t.minute[identifier]) < otpThrottlePerMinute && len(t.hourly[identifier]) < otpThrottlePerHour
+}
+
+// record commits one delivered code request. Called only after the
+// provider accepted the request (the chargeable event).
+func (t *otpThrottler) record(identifier string, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pruneLocked(identifier, now)
+	t.minute[identifier] = append(t.minute[identifier], now)
+	t.hourly[identifier] = append(t.hourly[identifier], now)
+}
+
+func (t *otpThrottler) pruneLocked(identifier string, now time.Time) {
+	t.minute[identifier] = pruneStamps(t.minute[identifier], now.Add(-otpThrottleWindow))
+	t.hourly[identifier] = pruneStamps(t.hourly[identifier], now.Add(-otpThrottleHourly))
+}
+
+func pruneStamps(stamps []time.Time, cutoff time.Time) []time.Time {
+	kept := stamps[:0]
+	for _, stamp := range stamps {
+		if stamp.After(cutoff) {
+			kept = append(kept, stamp)
+		}
+	}
+	return kept
+}
+
 // beginPasswordlessAuthentication is the public entry point for sign-up and
 // sign-in. The client supplies only the verified address/number and device;
 // it never chooses or learns a pre-seeded account identity.
@@ -407,6 +472,14 @@ func (s *Service) beginPasswordlessAuthentication(ctx context.Context, e command
 	var p beginPasswordlessAuthenticationPayload
 	if !decode(e.Payload, &p) || (p.Channel != "EMAIL" && p.Channel != "SMS") || normalizeLoginIdentifier(p.Channel, p.Identifier) == "" || p.DeviceID == "" || (p.Platform != "IOS" && p.Platform != "ANDROID") {
 		return command.Rejected(e, "INVALID_PASSWORDLESS_AUTHENTICATION", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_passwordless_authentication", nil)
+	}
+	// OTP-THROTTLE-001: bound code delivery per identifier. PEEK before
+	// the provider is charged (real SMS/email costs money and each fresh
+	// code widens the brute-force surface); RECORD only after the provider
+	// accepted the request, so rejected attempts never burn the user's
+	// resend allowance.
+	if !s.otpRequests.wouldAllow(normalizeLoginIdentifier(p.Channel, p.Identifier), s.clock.Now().UTC()) {
+		return command.Rejected(e, "OTP_THROTTLED", "RESOURCE", "SAFE_RETRY", "identity.otp_throttled", map[string]any{"retryAfterSeconds": 60})
 	}
 	upgradingUserAccountID := ""
 	if _, authenticated := e.AuthContext["sessionId"]; authenticated && e.Actor.Type == "USER" && e.Actor.ID != "" && e.Actor.ID != p.DeviceID {
@@ -423,17 +496,47 @@ func (s *Service) beginPasswordlessAuthentication(ctx context.Context, e command
 	if err != nil || providerChallenge.ProviderRef == "" {
 		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "PROVIDER", "SAFE_RETRY", "identity.login_challenge_request_failed", nil)
 	}
+	// The provider accepted and a code is in flight — only NOW does the
+	// request consume the identifier's resend allowance.
 	now := s.clock.Now().UTC()
+	s.otpRequests.record(identity.Identifier, now)
 	expiresAt := providerChallenge.ExpiresAt
 	if expiresAt.IsZero() {
 		expiresAt = now.Add(5 * time.Minute)
 	}
 	challenge := LoginChallenge{ID: newID("challenge_"), UserAccountID: identity.UserAccountID, LoginIdentityID: identity.ID, DeviceID: device.ID, Channel: p.Channel, ProviderRef: providerChallenge.ProviderRef, Status: "PENDING", MaxAttempts: 5, Version: 1, RequestedAt: now, ExpiresAt: expiresAt.UTC()}
-	events := []event.DomainEvent{event.New("LoginChallengeRequested", "LoginChallenge", challenge.ID, challenge.Version, identity.UserAccountID, e.CorrelationID, e.CommandID, now, map[string]any{"channel": p.Channel, "accountCreated": created})}
-	if err := s.persistCreateLoginChallenge(ctx, challenge, events); err != nil {
+	requestedEvent := event.New("LoginChallengeRequested", "LoginChallenge", challenge.ID, challenge.Version, identity.UserAccountID, e.CorrelationID, e.CommandID, now, map[string]any{"channel": p.Channel, "accountCreated": created})
+	// OTP-SINGLE-CODE-001: the fresh code supersedes every PENDING one —
+	// only the most recent code is verifiable (WhatsApp / Telegram /
+	// Twilio Verify). Supersede + insert + events happen in ONE
+	// transaction so a failed resend never leaves the user codeless.
+	if err := s.persistCreateLoginChallengeSuperseding(ctx, challenge, requestedEvent); err != nil {
 		return command.Rejected(e, "LOGIN_CHALLENGE_REQUEST_FAILED", "INTERNAL", "SAFE_RETRY", "identity.login_challenge_request_failed", nil)
 	}
 	return command.Pending(e, challenge.ID, "LOGIN_CHALLENGE_PENDING", "AUTHENTICATION", "identity.login_challenge_pending", map[string]any{"channel": challenge.Channel, "accountCreated": created})
+}
+
+// persistCreateLoginChallengeSuperseding routes through the transactional
+// repository when available (supersede + insert + events atomically) and
+// falls back to plain CreateLoginChallenge for non-transactional repos.
+func (s *Service) persistCreateLoginChallengeSuperseding(ctx context.Context, challenge LoginChallenge, requestedEvent event.DomainEvent) error {
+	superseder, ok := s.repository.(LoginChallengeSuperseder)
+	if !ok {
+		return s.repository.CreateLoginChallenge(ctx, challenge)
+	}
+	return superseder.CreateLoginChallengeSupersedingPending(ctx, challenge, func(superseded []LoginChallenge) []event.DomainEvent {
+		events := make([]event.DomainEvent, 0, len(superseded)+1)
+		for _, c := range superseded {
+			events = append(events, event.New("LoginChallengeSuperseded", "LoginChallenge", c.ID, c.Version, c.UserAccountID, requestedEvent.CorrelationID, requestedEvent.CausationID, c.RequestedAt, map[string]any{"supersededBy": challenge.ID}))
+		}
+		return append(events, requestedEvent)
+	})
+}
+
+// LoginChallengeSuperseder is implemented by repositories supporting the
+// atomic supersede-insert operation (both Memory and PostgreSQL do).
+type LoginChallengeSuperseder interface {
+	CreateLoginChallengeSupersedingPending(ctx context.Context, challenge LoginChallenge, buildEvents func(superseded []LoginChallenge) []event.DomainEvent) error
 }
 
 func (s *Service) requestLoginChallenge(ctx context.Context, e command.Envelope) command.Result {

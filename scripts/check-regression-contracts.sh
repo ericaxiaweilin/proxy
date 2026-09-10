@@ -1130,3 +1130,42 @@ echo "  regression contracts: OK"
 require_test "ACCOUNT-SWITCH-001" "./internal/platform/postgres" \
   "TestAccountSwitchSameDeviceLifecycle" \
   "apps/api-go/internal/platform/postgres/account_switch_integration_test.go" || exit $?
+
+# ACCOUNT-MULTIDEVICE-001: same account on multiple real phones — pinned
+# end-to-end (Begin -> Verify -> CreateSession): two devices coexist ACTIVE
+# (MaxConcurrentSessions=2), tokens are per-device distinct, and the THIRD
+# login FIFO-evicts the OLDEST session (AUTO_EVICT_NEW_LOGIN, the
+# WhatsApp "logged in on another device" behavior). The evicted token must
+# be dead; the surviving device's token keeps resolving to the account.
+require_test "ACCOUNT-MULTIDEVICE-001" "./internal/platform/postgres" \
+  "TestAccountMultiDeviceSameAccount" \
+  "apps/api-go/internal/platform/postgres/account_multidevice_integration_test.go" || exit $?
+
+# OTP-BRUTEFORCE-001: a single challenge locks after MaxAttempts=5 wrong
+# codes (5th wrong -> LOCKED, correct code then REJECTED) and an expired
+# challenge (5-minute TTL) rejects even the correct code — both verifications
+# and CreateSession check status/attempt count and expiry. Industry-standard
+# bounded-attempt defense, pinned so nobody lifts the caps.
+require_test "OTP-BRUTEFORCE-001" "./internal/platform/postgres" \
+  "TestLoginChallengeBruteForceLockout" \
+  "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?
+
+# OTP-SINGLE-CODE-001: a fresh code supersedes every PENDING one — only the
+# MOST RECENT code per identifier is verifiable (WhatsApp / Telegram /
+# Twilio Verify). Previously an identity could hold unlimited concurrent
+# PENDING codes, each with its own 5 attempts. Supersede + insert + events
+# happen in one transaction (CreateLoginChallengeSupersedingPending), and
+# the superseded code rejects even the CORRECT code afterwards.
+require_test "OTP-SINGLE-CODE-001" "./internal/platform/postgres" \
+  "TestLoginChallengeSingleActiveCode" \
+  "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?
+
+# OTP-THROTTLE-001: code DELIVERY is throttled per identifier (Twilio
+# Verify ladder: 1/min, 10/hour) — peek before the provider is charged,
+# record only after the provider accepted, so a rejected begin (device
+# guard) never burns the user's resend allowance. Without this a caller
+# could mint unlimited fresh codes, each with 5 attempts, resetting the
+# brute-force cap forever.
+require_test "OTP-THROTTLE-001" "./internal/platform/postgres" \
+  "TestLoginChallengeRequestThrottle" \
+  "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?

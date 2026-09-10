@@ -182,6 +182,34 @@ func (r *IdentityRepository) CreateLoginChallenge(ctx context.Context, challenge
 	return insertLoginChallenge(ctx, execerForContext(ctx, r.pool), challenge)
 }
 
+// RevokePendingChallengesForIdentity supersedes every PENDING challenge
+// of a login identity (OTP-SINGLE-CODE-001). One atomic UPDATE flips
+// status to LOCKED and stamps consumed_at; RETURNING hands back the
+// affected rows (id + prior version) so the service can emit a
+// LoginChallengeSuperseded domain event per revoked code.
+func (r *IdentityRepository) RevokePendingChallengesForIdentity(ctx context.Context, loginIdentityID string) ([]identity.LoginChallenge, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		UPDATE identity.login_challenges
+		SET status = 'LOCKED', version = version + 1, updated_at = now()
+		WHERE login_identity_id = $1 AND status = 'PENDING'
+		RETURNING id, user_account_id, login_identity_id, device_id, channel, provider_ref,
+		         status, attempts, max_attempts, version, requested_at, expires_at, verified_at, consumed_at`,
+		loginIdentityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	revoked := make([]identity.LoginChallenge, 0, 2)
+	for rows.Next() {
+		c, err := scanLoginChallenge(rows)
+		if err != nil {
+			return nil, err
+		}
+		revoked = append(revoked, c)
+	}
+	return revoked, rows.Err()
+}
+
 func insertLoginChallenge(ctx context.Context, execer sqlExecer, challenge identity.LoginChallenge) error {
 	_, err := execer.Exec(ctx, `
 		INSERT INTO identity.login_challenges (
@@ -446,6 +474,51 @@ func (r *IdentityRepository) CreateLoginChallengeAndPublish(ctx context.Context,
 			return err
 		}
 		for _, domainEvent := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// CreateLoginChallengeSupersedingPending atomically (1) flips every PENDING
+// challenge of the identity to LOCKED, (2) inserts the fresh challenge,
+// (3) publishes the superseded + requested events — one transaction.
+// OTP-SINGLE-CODE-001.
+func (r *IdentityRepository) CreateLoginChallengeSupersedingPending(ctx context.Context, challenge identity.LoginChallenge, buildEvents func(superseded []identity.LoginChallenge) []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("identity transactional outbox is not configured")
+	}
+	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		rows, err := transaction.Query(transactionContext, `
+			UPDATE identity.login_challenges
+			SET status = 'LOCKED', version = version + 1, updated_at = now()
+			WHERE login_identity_id = $1 AND status = 'PENDING'
+			RETURNING id, user_account_id, login_identity_id, device_id, channel, provider_ref,
+			         status, attempts, max_attempts, version, requested_at, expires_at, verified_at, consumed_at`,
+			challenge.LoginIdentityID)
+		if err != nil {
+			return err
+		}
+		superseded := make([]identity.LoginChallenge, 0, 2)
+		for rows.Next() {
+			c, err := scanLoginChallenge(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			superseded = append(superseded, c)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if err := insertLoginChallenge(transactionContext, transaction, challenge); err != nil {
+			return err
+		}
+		for _, domainEvent := range buildEvents(superseded) {
 			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
 				return err
 			}

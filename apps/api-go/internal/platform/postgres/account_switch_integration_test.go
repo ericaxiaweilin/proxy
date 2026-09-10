@@ -42,7 +42,12 @@ func TestAccountSwitchSameDeviceLifecycle(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	repo := NewIdentityRepositoryWithOutbox(pool, NewOutboxRepository(pool))
-	svc := identity.NewWithRepositoryAndClockAndChallengeProvider(repo, nil, switchTestChallengeProvider{})
+	// Controlled clock: OTP-THROTTLE-001 (1 code/min per identifier) is
+	// real behavior — the login chain below begins multiple challenges
+	// within one test run, so the clock must advance past the resend
+	// window between logins, exactly like a human typing the code.
+	fc := &otpClock{now: time.Now().UTC()}
+	svc := identity.NewWithRepositoryAndClockAndChallengeProvider(repo, fc, switchTestChallengeProvider{})
 
 	run := time.Now().UnixNano()
 	runID := itoa(run)
@@ -57,6 +62,10 @@ func TestAccountSwitchSameDeviceLifecycle(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		// Outbox rows FIRST (see cleanupOtpRows): leftover PENDING outbox
+		// events crowd the Claim(limit) window and break the outbox
+		// lifecycle test on the shared dev DB — TEST-HYGIENE-001.
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM integration.outbox_messages WHERE principal_id IN (SELECT user_account_id FROM identity.login_identities WHERE identifier IN ($1, $2))`, emailA, emailB)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM identity.session_tokens WHERE session_id IN (SELECT id FROM identity.sessions WHERE device_id = $1)`, deviceID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM identity.sessions WHERE device_id = $1`, deviceID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM identity.login_challenges WHERE device_id = $1`, deviceID)
@@ -68,7 +77,11 @@ func TestAccountSwitchSameDeviceLifecycle(t *testing.T) {
 	})
 
 	// login drives the full passwordless chain through the service layer.
+	// fc.advance first: each login mints a fresh code for its identifier,
+	// and the throttle ladder (1/min per identifier) must see the
+	// previous code's minute window elapsed.
 	login := func(email, deviceCredential string) (command.Result, string) {
+		fc.advance(61 * time.Second)
 		r := svc.HandleContext(ctx, idEnvelope("BeginPasswordlessAuthentication", map[string]any{
 			"channel": "EMAIL", "identifier": email, "deviceId": deviceID, "platform": "IOS",
 		}, "ignored"))
