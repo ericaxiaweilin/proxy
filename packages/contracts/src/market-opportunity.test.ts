@@ -69,6 +69,19 @@ describe("MarketOpportunitySchema enforces MoneyFlow + PriceLabel", () => {
     });
     expect(r.success).toBe(false);
   });
+
+  it("PROFILE-READ-001: accepts an empty PERSON owner without failing the whole list", () => {
+    const rows = [
+      { ...base, moneyFlow: "EARN" as const, priceLabel: "完成后你可获得", owner: "", ownerType: "PERSON" as const },
+      { ...base, moneyFlow: "EARN" as const, priceLabel: "完成后你可获得", owner: "Bonsaidon", ownerType: "BUSINESS" as const }
+    ];
+    const r = ListMarketOpportunitiesPayloadSchema.safeParse({ opportunities: rows });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.opportunities).toHaveLength(2);
+      expect(r.data.opportunities[0]?.owner).toBe("");
+    }
+  });
 });
 
 // MERCHANT-PUBLISH-001: 发布输入可带 merchantId（店 id），个人发布不带。
