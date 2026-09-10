@@ -715,3 +715,45 @@ func TestMerchantStampRequiresAnnotation(t *testing.T) {
 	// 注：OwnerID 是 json:"-" 内部字段（仍是发布人本人，保证 Owned/接单/
 	// 屏蔽逻辑不变），wire 上不可见，这里不 assert。
 }
+
+type stubAuthorNames struct{ names map[string]string }
+
+func (s stubAuthorNames) ResolveAuthorDisplayName(_ context.Context, userID string) (string, bool) {
+	name, ok := s.names[userID]
+	return name, ok
+}
+
+// PROFILE-READ-001: PERSON opportunity owners resolve from the verified
+// account profile; unresolved authors store an empty owner (never hardcoded).
+func TestPublishOpportunityResolvesOwnerFromProfile(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	s.SetAuthorNameResolver(stubAuthorNames{names: map[string]string{"owner": "NguyenThanhHuyen"}})
+	payload := map[string]any{
+		"title": "周六城市同行", "theme": "城市同行", "date": "周六", "time": "10:00",
+		"location": "河内", "price": "2,000,000₫", "moneyFlow": "EARN",
+	}
+	out := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", payload))
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", out)
+	}
+	var body struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Opportunity.OwnerType != "PERSON" || body.Opportunity.Owner != "NguyenThanhHuyen" {
+		t.Fatalf("owner must resolve from profile: %+v", body.Opportunity)
+	}
+	unknown := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "stranger", payload))
+	var unknownBody struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(unknown.OperationRef), &unknownBody); err != nil {
+		t.Fatal(err)
+	}
+	if unknownBody.Opportunity.Owner != "" {
+		t.Fatalf("unresolved owner must store empty, got %q", unknownBody.Opportunity.Owner)
+	}
+}

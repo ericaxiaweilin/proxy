@@ -29,6 +29,20 @@ import (
 type Service struct {
 	repository   Repository
 	orderCreator OrderCreator // nil = legacy behaviour (only stamp orderRef)
+	// authorNames resolves PERSON opportunity owner names from the verified
+	// account profile (PROFILE-READ-001). Nil = legacy unwired behaviour.
+	authorNames authorNameResolver
+}
+
+// authorNameResolver is the narrow consumer-side contract so marketplace
+// does not import the identity package.
+type authorNameResolver interface {
+	ResolveAuthorDisplayName(ctx context.Context, userAccountID string) (string, bool)
+}
+
+// SetAuthorNameResolver wires profile-backed owner resolution.
+func (s *Service) SetAuthorNameResolver(resolver authorNameResolver) {
+	s.authorNames = resolver
 }
 
 // OrderCreator is the narrow interface marketplace needs from
@@ -258,7 +272,17 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		p.ID = newID("opp_")
 		p.OwnerID = e.Actor.ID
+		// PROFILE-READ-001: PERSON owner names come from the verified
+		// account profile, never hardcoded. Unresolved authors store an
+		// empty owner; readers show a neutral label. Without a wired
+		// resolver the legacy hardcoded label applies.
 		p.Owner = "你"
+		if s.authorNames != nil {
+			p.Owner = ""
+			if name, ok := s.authorNames.ResolveAuthorDisplayName(ctx, e.Actor.ID); ok {
+				p.Owner = name
+			}
+		}
 		p.OwnerType = "PERSON"
 		p.Verified = true
 		// MERCHANT-PUBLISH-001: 商家注记（api 层 resolveMerchantPublish

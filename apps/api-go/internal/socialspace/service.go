@@ -113,6 +113,22 @@ type Service struct {
 	mu         sync.Mutex
 	repository Repository
 	clock      clock.Clock
+	// authorNames resolves status display names from the verified account
+	// profile (PROFILE-READ-001). Nil = legacy unwired behaviour.
+	authorNames authorNameResolver
+}
+
+// authorNameResolver is the narrow consumer-side contract so socialspace
+// does not import the identity package.
+type authorNameResolver interface {
+	ResolveAuthorDisplayName(ctx context.Context, userAccountID string) (string, bool)
+}
+
+// SetAuthorNameResolver wires profile-backed author resolution.
+func (s *Service) SetAuthorNameResolver(resolver authorNameResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authorNames = resolver
 }
 
 func New() *Service { return NewWithRepository(NewMemoryRepository()) }
@@ -176,10 +192,22 @@ func (s *Service) createStatus(ctx context.Context, envelope command.Envelope) c
 		return command.Rejected(envelope, "STATUS_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "socialspace.status_not_allowed", nil)
 	}
 	now := s.clock.Now().UTC()
-	status := Status{ID: newID("status_"), AuthorID: envelope.Actor.ID, AuthorDisplayName: strings.TrimSpace(payload.AuthorDisplayName), Body: payload.Body, Location: strings.TrimSpace(payload.Location), CreatedAt: now, ExpiresAt: now.Add(time.Duration(payload.ExpiryHours) * time.Hour)}
-	if status.AuthorDisplayName == "" {
-		status.AuthorDisplayName = "你"
+	// PROFILE-READ-001: the display name comes from the verified account
+	// profile, never from the client payload (which used to carry a
+	// hardcoded viewer-relative label). Unresolved authors store an empty
+	// display; readers show a neutral label.
+	displayName := ""
+	if s.authorNames != nil {
+		if name, ok := s.authorNames.ResolveAuthorDisplayName(ctx, envelope.Actor.ID); ok {
+			displayName = name
+		}
+	} else {
+		displayName = strings.TrimSpace(payload.AuthorDisplayName)
+		if displayName == "" {
+			displayName = "你"
+		}
 	}
+	status := Status{ID: newID("status_"), AuthorID: envelope.Actor.ID, AuthorDisplayName: displayName, Body: payload.Body, Location: strings.TrimSpace(payload.Location), CreatedAt: now, ExpiresAt: now.Add(time.Duration(payload.ExpiryHours) * time.Hour)}
 	if err := s.repository.CreateStatus(ctx, status); err != nil {
 		return command.Rejected(envelope, "STATUS_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "socialspace.status_create_failed", nil)
 	}

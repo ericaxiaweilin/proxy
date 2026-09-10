@@ -258,6 +258,14 @@ func main() {
 	// Wire after the optional PostgreSQL replacements. Wiring before this block
 	// leaves marketplace pointing at the discarded in-memory fulfillment repo.
 	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
+	// PROFILE-READ-001: content publishers resolve USER display names from
+	// the verified account profile instead of trusting client-supplied
+	// strings. Wired here so both the memory and PostgreSQL instances are
+	// covered.
+	authorNames := identityService.AuthorNameResolver()
+	localNetService.SetAuthorNameResolver(authorNames)
+	socialSpaceService.SetAuthorNameResolver(authorNames)
+	marketplaceService.SetAuthorNameResolver(authorNames)
 	sceneService.SetInvitationOrderCreator(sceneFulfillmentAdapter{repo: fulfillmentService.Repository()})
 	databaseReadyCheck := readyCheck
 	readyCheck = func(ctx context.Context) error {
