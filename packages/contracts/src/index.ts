@@ -588,7 +588,11 @@ export const MarketOpportunitySchema = z.object({
   price: z.string(),
   moneyFlow: MarketOpportunityMoneyFlowSchema,
   priceLabel: z.string().min(1),
-  owner: z.string().min(1),
+  // PROFILE-READ-001: PERSON owner may be empty when the author has no
+  // resolvable profile (legacy backfilled rows, unresolved publishers).
+  // Readers show a neutral label; one unresolvable row must never fail
+  // the whole list parse.
+  owner: z.string(),
   ownerType: z.enum(["BUSINESS", "PERSON"]),
   match: z.string(),
   responses: z.number().int().nonnegative(),

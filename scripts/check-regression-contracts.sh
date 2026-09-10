@@ -83,6 +83,12 @@ require_test "PROFILE-READ-001" "./internal/marketplace" \
 require_test "PROFILE-READ-001" "./internal/platform/postgres" \
   "TestProfileDisplayBackfillClearsLegacyLabels" \
   "apps/api-go/internal/platform/postgres/profile_display_backfill_test.go" || exit $?
+if ! grep -q 'PROFILE-READ-001' packages/contracts/src/market-opportunity.test.ts; then
+  echo "  FAIL [PROFILE-READ-001]: empty-owner contract test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/contracts test --run src/market-opportunity.test.ts || exit $?
+echo "    PROFILE-READ-001: PASS (empty PERSON owner parses, list stays intact)"
 require_test "AUTH-LOGIN-HINT-001" "./internal/identity" \
   "TestLookupPasswordlessIdentityHintsUnregistered" \
   "apps/api-go/internal/identity/service_test.go" || exit $?
