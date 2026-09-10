@@ -38,6 +38,7 @@ import { color, shadows } from "../theme";
 import { R37OpportunityCard, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
 import { R37TypePalette } from "./r37-type-palette";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
+import { resolveAuthorDisplayName } from "../feed-author";
 
 // “热门探索点” = 可以是河内市中心的著名地点 (西湖、还剑湖)，
 // 不过是真实经纬度，作为"探索"显示的独立 marker (PURPLE_HOT)。
@@ -700,7 +701,10 @@ function OpportunityDetail({
         </View>
         <View style={styles.fact}>
           <Text style={styles.factLabel}>发布方</Text>
-          <Text style={styles.factValue}>{opportunity.owner} {opportunity.verified ? "✓" : ""}</Text>
+          {/* PROFILE-READ-001: 服务端曾把个人机会 Owner 写死成 "你"；
+              存量行经 079 回填清成空，此处对残留脏串同样中性兜底，
+              永不把 "你" 展示给非作者。wire 暂无 ownerId，不做归属判定。 */}
+          <Text style={styles.factValue}>{resolveAuthorDisplayName({ authorId: `market_owner:${opportunity.owner}`, authorType: opportunity.ownerType === "BUSINESS" ? "MERCHANT" : "USER", authorDisplayName: opportunity.owner })} {opportunity.verified ? "✓" : ""}</Text>
         </View>
         <View style={styles.fact}>
           <Text style={styles.factLabel}>当前回应</Text>

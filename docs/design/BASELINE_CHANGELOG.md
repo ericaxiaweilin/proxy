@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 150 — 2026-09-10
+
+- 存量 "你" 展示名回填（079）：动态 / 状态 / 个人机会的脏展示字段清成空串，归属列不动；幂等可重放。
+- 市场机会卡发布方走 viewer 相对作者标签，残留脏串中性兜底；卡片布局无变化。
+
 ## Revision 149 — 2026-09-10
 
 - 服务端发布时不再信任客户端展示名：动态、状态、个人机会的作者名一律按已验证账户 profile 解析；无 profile 存空，读端中性兜底。

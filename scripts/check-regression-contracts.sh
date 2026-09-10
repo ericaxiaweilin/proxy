@@ -80,6 +80,9 @@ require_test "PROFILE-READ-001" "./internal/socialspace" \
 require_test "PROFILE-READ-001" "./internal/marketplace" \
   "TestPublishOpportunityResolvesOwnerFromProfile" \
   "apps/api-go/internal/marketplace/service_test.go" || exit $?
+require_test "PROFILE-READ-001" "./internal/platform/postgres" \
+  "TestProfileDisplayBackfillClearsLegacyLabels" \
+  "apps/api-go/internal/platform/postgres/profile_display_backfill_test.go" || exit $?
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
    ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
   echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2
