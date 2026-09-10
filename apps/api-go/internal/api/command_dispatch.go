@@ -298,7 +298,7 @@ func idempotencyScope(envelope command.Envelope) string {
 func requiresAuthentication(commandType string) bool {
 	switch commandType {
 	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "LookupPasswordlessIdentity", "CreateSession", "CreateAnonymousSession", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession",
-		"ListFeedPosts", "ListMarketOpportunities", "ListActivities", "ListStatuses", "ListCommunities":
+		"ListFeedPosts", "ListMarketOpportunities", "ListOpportunityTemplates", "ListActivities", "ListStatuses", "ListCommunities":
 		return false
 	default:
 		return true

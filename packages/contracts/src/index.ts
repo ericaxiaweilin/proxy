@@ -620,6 +620,33 @@ export const ListMarketOpportunitiesPayloadSchema = z.object({
 });
 export type ListMarketOpportunitiesPayload = z.infer<typeof ListMarketOpportunitiesPayloadSchema>;
 
+// OPP-TEMPLATE-001: 发布流程目录契约（ListOpportunityTemplates）。
+// HOT = 一步热门卡；THEME = 完整组合；MORE = 长尾（搜索可达）。
+// 每张卡带发布表单需要的全部默认值：tags、参考价 price、参考区间
+// range、合规服务标准 standard（公共场所 · 现场消费自结口径）。
+// 该目录是 server 内置的静态读模型 — 不含任何用户数据，匿名可读。
+export const OpportunityTemplateGroupSchema = z.enum(["HOT", "THEME", "MORE"]);
+export type OpportunityTemplateGroup = z.infer<typeof OpportunityTemplateGroupSchema>;
+
+export const OpportunityTemplateSchema = z.object({
+  id: z.string().min(1),
+  group: OpportunityTemplateGroupSchema,
+  title: z.string().min(1),
+  sub: z.string(),
+  icon: z.string(),
+  mark: z.string(),
+  tags: z.array(z.string().min(1)).min(1),
+  price: z.string().min(1),
+  range: z.string().min(1),
+  standard: z.string().min(1)
+});
+export type OpportunityTemplate = z.infer<typeof OpportunityTemplateSchema>;
+
+export const ListOpportunityTemplatesPayloadSchema = z.object({
+  templates: z.array(OpportunityTemplateSchema).min(1)
+});
+export type ListOpportunityTemplatesPayload = z.infer<typeof ListOpportunityTemplatesPayloadSchema>;
+
 export const PublishMarketOpportunityPayloadSchema = z.object({
   opportunity: MarketOpportunitySchema
 });

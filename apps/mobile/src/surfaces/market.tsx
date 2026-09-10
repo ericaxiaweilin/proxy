@@ -12,7 +12,7 @@ import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEven
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
-import type { Activity } from "@proxy/contracts";
+import type { Activity, OpportunityTemplate } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { describeJoinError } from "../activity-client";
 import { type FulfillmentClient } from "../fulfillment-client";
@@ -890,7 +890,109 @@ function PublishActivityForm({ activities, venueOptions, onBack, onPublished }: 
   </View>;
 }
 
+// CUSTOM_TEMPLATE is the "skip the catalog" sentinel: it routes the
+// flow straight to the free-form editor with the editor's own legacy
+// defaults (no prefill). A real template card prefills title + price.
+const CUSTOM_TEMPLATE: OpportunityTemplate = {
+  id: "", group: "HOT", title: "", sub: "", icon: "", mark: "", tags: [],
+  price: "", range: "", standard: ""
+};
+
+// K → VND conversion lives in ../market-template-price (unit-tested
+// there); re-exported here for the PublishDemand prefill below.
+import { templatePriceToVND } from "../market-template-price";
+
+// OPP-TEMPLATE-001: step 1 of the publish flow — pick a scene card from
+// the server catalog (HOT one-tap grid + THEME / MORE rails) instead of
+// facing a blank free-form editor. Selection prefills step 2; "自定义"
+// jumps straight to the editor with the previous defaults.
+function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { marketplace: MarketplaceClient; onBack: () => void; onPicked: (template: OpportunityTemplate) => void; onCustom: () => void }): React.JSX.Element {
+  const [templates, setTemplates] = useState<OpportunityTemplate[]>([]);
+  const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [pickedId, setPickedId] = useState<string>();
+
+  useEffect(() => {
+    let alive = true;
+    marketplace.listTemplates()
+      .then((items) => { if (alive) { setTemplates(items); setPhase("READY"); } })
+      .catch(() => { if (alive) setPhase("ERROR"); });
+    return () => { alive = false; };
+  }, [marketplace]);
+
+  const hot = templates.filter((t) => t.group === "HOT");
+  const themes = templates.filter((t) => t.group === "THEME");
+  const more = templates.filter((t) => t.group === "MORE");
+
+  return <View>
+    <View style={styles.detailHead}>
+      <Pressable onPress={onBack} style={styles.detailBack}><Text style={styles.detailBackText}>‹</Text></Pressable>
+      <Text style={styles.detailTitle}>发布需求</Text>
+      <Text style={styles.detailMore}>•••</Text>
+    </View>
+    <View style={styles.detailHero}>
+      <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
+      <Text style={styles.detailHeroTitle}>想约什么？</Text>
+      <Text style={styles.detailHeroSub}>热门直接点；更特别的玩法从主题里选。</Text>
+    </View>
+    {phase === "LOADING" ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
+    {phase === "ERROR" ? <View style={styles.r4Card}>
+      <Text style={styles.marketError}>场景目录加载失败，可直接自定义发布。</Text>
+      <Pressable onPress={onCustom} style={[styles.r4ActionPrimary, { marginTop: 12 }]}><Text style={styles.r4ActionPrimaryText}>自定义发布</Text></Pressable>
+    </View> : null}
+    {phase === "READY" ? <>
+      <View style={styles.r4Card}>
+        <Text style={styles.r4Title}>热门 · 一步选择</Text>
+        <View style={styles.publishTemplateGrid}>
+          {hot.map((t) => (
+            <Pressable key={t.id} onPress={() => setPickedId(t.id)} style={[styles.publishTemplateCard, pickedId === t.id && styles.publishTemplateCardOn]}>
+              <Text style={styles.publishTemplateMark}>{t.title.slice(0, 1)}</Text>
+              <Text style={styles.publishTemplateTitle}>{t.title}</Text>
+              <Text style={styles.publishTemplateSub}>{t.sub}</Text>
+              <Text style={styles.publishTemplateRange}>参考 {t.range}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={styles.r4Card}>
+        <Text style={styles.r4Title}>主题 · 完整组合</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
+          {themes.map((t) => (
+            <Pressable key={t.id} onPress={() => setPickedId(t.id)} style={[styles.publishThemeCard, pickedId === t.id && styles.publishThemeCardOn]}>
+              <Text style={styles.publishTemplateMark}>{t.mark}</Text>
+              <Text style={styles.publishTemplateTitle}>{t.title}</Text>
+              <Text style={styles.publishTemplateRange}>参考 {t.range}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+      <View style={styles.r4Card}>
+        <Text style={styles.r4Title}>更多</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
+          {more.map((t) => (
+            <Pressable key={t.id} onPress={() => setPickedId(t.id)} style={[styles.publishThemeCard, pickedId === t.id && styles.publishThemeCardOn]}>
+              <Text style={styles.publishTemplateMark}>{t.mark}</Text>
+              <Text style={styles.publishTemplateTitle}>{t.title}</Text>
+              <Text style={styles.publishTemplateSub}>{t.sub}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <Pressable onPress={onCustom} style={[styles.r4ActionGhost, { marginTop: 12 }]}><Text style={styles.r4ActionGhostText}>找不到？自定义发布 ›</Text></Pressable>
+      </View>
+      <View style={styles.r4Actions}>
+        <Pressable onPress={onCustom} style={styles.r4ActionGhost}><Text style={styles.r4ActionGhostText}>自定义</Text></Pressable>
+        <Pressable disabled={!pickedId} onPress={() => { const t = templates.find((x) => x.id === pickedId); if (t) onPicked(t); }} style={[styles.r4ActionPrimary, !pickedId && styles.offerBtnDisabled]}>
+          <Text style={styles.r4ActionPrimaryText}>下一步 · 服务与价格</Text>
+        </Pressable>
+      </View>
+    </> : null}
+  </View>;
+}
+
 function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: MarketplaceClient; onBack: () => void; onPublished: (opportunity: MarketOpportunity) => void }): React.JSX.Element {
+  // OPP-TEMPLATE-001: two-step flow. Step 1 = server catalog picker
+  // (HOT / THEME / MORE); step 2 = the free-form editor, prefilled from
+  // the picked card. "自定义" keeps the editor's own defaults.
+  const [pickedTemplate, setPickedTemplate] = useState<OpportunityTemplate>();
   const [title, setTitle] = useState("周六城市同行 + 拍照");
   const [time, setTime] = useState("10:00–18:00");
   const [location, setLocation] = useState("河内 · 西湖 / 老城区");
@@ -914,6 +1016,26 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
 
   const priceRequired = moneyFlow === "EARN" || moneyFlow === "PAY";
 
+  // OPP-TEMPLATE-001: picking a card prefills the editor — title/theme
+  // from the card, price from its suggested quote (K → VND), skills
+  // from its tags. The user still reviews and edits; the wire payload
+  // is unchanged (same fields the free-form path sends).
+  function pickTemplate(template: OpportunityTemplate): void {
+    setPickedTemplate(template);
+    setTitle(`${template.title} · ${template.tags.join(" / ")}`);
+    setPriceMin(templatePriceToVND(template.price));
+    setPriceMax("");
+  }
+
+  if (!pickedTemplate) {
+    return <PublishTemplatePicker
+      marketplace={marketplace}
+      onBack={onBack}
+      onPicked={pickTemplate}
+      onCustom={() => setPickedTemplate(CUSTOM_TEMPLATE)}
+    />;
+  }
+
   async function publish(): Promise<void> {
     if (publishing || !title.trim() || !location.trim()) return;
     const composedPrice = composePriceRange(priceMin, priceMax);
@@ -929,8 +1051,10 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
       // opportunityPriceLabel(MoneyFlow)，wire 返回后由
       // MarketOpportunitySchema.parse 严格验证。
       const opportunity = await marketplace.publish({
-        title: title.trim(), shortTitle: "同行", theme: "城市同行", date: "周六", time: time.trim(),
-        location: location.trim(), price: composedPrice, skills: "中文 · 摄影 · 本地路线",
+        title: title.trim(), shortTitle: pickedTemplate && pickedTemplate.id ? pickedTemplate.title : "同行",
+        theme: pickedTemplate && pickedTemplate.id ? pickedTemplate.title : "城市同行", date: "周六", time: time.trim(),
+        location: location.trim(), price: composedPrice,
+        skills: pickedTemplate && pickedTemplate.id ? pickedTemplate.tags.join(" · ") : "中文 · 摄影 · 本地路线",
         lens: ["BOOKED", "NEARBY"], travel: 20,
         moneyFlow,
         ...(merchant.merchantId ? { merchantId: merchant.merchantId } : {})
@@ -950,12 +1074,22 @@ function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: Mark
   return (
     <View>
       <View style={styles.detailHead}>
-        <Pressable onPress={onBack} style={styles.detailBack}>
+        <Pressable onPress={() => { if (pickedTemplate && pickedTemplate.id) setPickedTemplate(undefined); else onBack(); }} style={styles.detailBack}>
           <Text style={styles.detailBackText}>‹</Text>
         </Pressable>
         <Text style={styles.detailTitle}>发布需求</Text>
         <Text style={styles.detailMore}>•••</Text>
       </View>
+      {pickedTemplate && pickedTemplate.id ? (
+        <View style={styles.publishTemplateSummary}>
+          <Text style={styles.publishTemplateSub}>你要发布</Text>
+          <Text style={styles.publishTemplateSummaryTitle}>{pickedTemplate.title}</Text>
+          <Text style={styles.publishTemplateSummaryStandard}>{pickedTemplate.standard}</Text>
+          <Pressable onPress={() => setPickedTemplate(undefined)} style={styles.publishTemplateChange}>
+            <Text style={styles.publishTemplateChangeText}>更换需求 ›</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <View style={styles.detailHero}>
         <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
         <TextInput onChangeText={setTitle} style={[styles.detailHeroTitle, styles.publishInput]} value={title} />
@@ -1436,6 +1570,21 @@ const styles = StyleSheet.create({
   publishFlowLabel: { color: color.ink, fontSize: 11, fontWeight: "800" },
   publishFlowLabelOn: { color: "#fff" },
   publishFlowSub: { color: color.muted, fontSize: 11, marginTop: 1 },
+  // OPP-TEMPLATE-001: catalog picker cards + step-2 summary.
+  publishTemplateGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  publishTemplateCard: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 12, width: "31%" },
+  publishTemplateCardOn: { borderColor: color.ink, borderWidth: 2 },
+  publishThemeCard: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginBottom: 6, minHeight: 88, minWidth: 128, paddingHorizontal: 12, paddingVertical: 10 },
+  publishThemeCardOn: { borderColor: color.ink, borderWidth: 2 },
+  publishTemplateMark: { color: color.ink, fontSize: 17, fontWeight: "900", marginBottom: 6 },
+  publishTemplateTitle: { color: color.ink, fontSize: 12, fontWeight: "800", textAlign: "center" },
+  publishTemplateSub: { color: color.muted, fontSize: 11, marginTop: 2, textAlign: "center" },
+  publishTemplateRange: { color: color.muted, fontSize: 11, marginTop: 4 },
+  publishTemplateSummary: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  publishTemplateSummaryTitle: { color: color.ink, fontSize: 15, fontWeight: "900", marginTop: 2 },
+  publishTemplateSummaryStandard: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 6 },
+  publishTemplateChange: { alignSelf: "flex-end", marginTop: 8 },
+  publishTemplateChangeText: { color: color.magenta, fontSize: 11, fontWeight: "800" },
   r4Title: { color: color.ink, flex: 1, fontSize: 12, fontWeight: "800", lineHeight: 17 },
   r4Budget: { color: color.ink, fontSize: 13, fontWeight: "900" },
   r4Meta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },

@@ -1116,4 +1116,30 @@ if ! grep -q 'engagement.muted_authors' apps/api-go/migrations/078_muted_authors
   exit 1
 fi
 
+# OPP-TEMPLATE-001: 发布需求目录（热门/主题/更多）。PublishDemand 原是
+# 自由文本编辑器；R49 原型要求"选场景卡 → 确认服务"三段式。目录是
+# server 内置静态读模型（16 卡：HOT=6 THEME=4 MORE=6），每卡带发布
+# 表单默认值（tags/参考价/参考区间/合规服务标准——公共场所+现场消费
+# 自结口径）。ListOpportunityTemplates 只读匿名可调（与
+# ListMarketOpportunities 同层）；PublishMarketOpportunity wire 契约
+# 零改动——卡片只做 prefill，写路径单一 choke point 不变。
+require_test "OPP-TEMPLATE-001" "./internal/marketplace" \
+  "TestListOpportunityTemplates" \
+  "apps/api-go/internal/marketplace/templates_test.go" || exit $?
+require_test "OPP-TEMPLATE-002" "./internal/marketplace" \
+  "TestOpportunityTemplatesArePublishableAsIs" \
+  "apps/api-go/internal/marketplace/templates_test.go" || exit $?
+if ! grep -q 'ListOpportunityTemplates' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [OPP-TEMPLATE-001]: anonymous dispatch registration must stay" >&2
+  exit 1
+fi
+if ! grep -q 'ListOpportunityTemplatesPayloadSchema' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-TEMPLATE-001]: contracts wire schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'listTemplates' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-TEMPLATE-001]: mobile client method must stay" >&2
+  exit 1
+fi
+
 echo "  regression contracts: OK"

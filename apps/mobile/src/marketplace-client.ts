@@ -1,5 +1,5 @@
 import type { CommandResult } from "@proxy/contracts";
-import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema, PublishMarketOpportunityInputSchema, type PublishMarketOpportunityInput } from "@proxy/contracts";
+import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema, PublishMarketOpportunityInputSchema, ListOpportunityTemplatesPayloadSchema, type PublishMarketOpportunityInput, type OpportunityTemplate } from "@proxy/contracts";
 import type { MarketApplication } from "@proxy/contracts";
 import type { MarketOpportunity } from "./market-fixtures";
 import type { TransportResponse } from "./auth-client";
@@ -39,6 +39,18 @@ export class MarketplaceClient {
     const parsed = ListMarketOpportunitiesPayloadSchema.safeParse(body);
     if (!parsed.success) throw new Error(`market opportunity list was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
     return parsed.data.opportunities as MarketOpportunity[];
+  }
+  public async listTemplates(): Promise<OpportunityTemplate[]> {
+    // OPP-TEMPLATE-001: the publish catalog (HOT / THEME / MORE).
+    // Read-only, anonymous-safe — the same optional-session tier as
+    // list(), so the publish sheet can render scene cards before the
+    // user has signed in. Wire shape is validated by the same zod
+    // schema the server Go test pins (templates[].id/group/tags/price/
+    // range/standard all required — an incomplete card is a dead card).
+    const body = this.body(await this.command("ListOpportunityTemplates", { type: "Market", id: "templates" }, {}, true));
+    const parsed = ListOpportunityTemplatesPayloadSchema.safeParse(body);
+    if (!parsed.success) throw new Error(`opportunity template list was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+    return parsed.data.templates;
   }
   public async publish(input: PublishMarketOpportunityInput): Promise<MarketOpportunity> {
     // R16.x: MoneyFlow 是 wire 必填（client SDK 必填），PriceLabel 是

@@ -196,7 +196,7 @@ func (s *Service) SeedDefaults() {
 
 func (s *Service) Supports(t string) bool {
 	switch t {
-	case "ListMarketOpportunities", "PublishMarketOpportunity", "ApplyToMarketOpportunity", "ListMarketApplications", "SelectMarketApplication", "ConfirmMarketApplication", "DismissMarketOpportunity":
+	case "ListOpportunityTemplates", "ListMarketOpportunities", "PublishMarketOpportunity", "ApplyToMarketOpportunity", "ListMarketApplications", "SelectMarketApplication", "ConfirmMarketApplication", "DismissMarketOpportunity":
 		return true
 	}
 	return false
@@ -204,6 +204,12 @@ func (s *Service) Supports(t string) bool {
 
 func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	switch e.CommandType {
+	case "ListOpportunityTemplates":
+		// OPP-TEMPLATE-001: static publish catalog (HOT / THEME / MORE).
+		// Read-only, no repository involved, anonymous-safe — same tier
+		// as ListMarketOpportunities, so it needs no auth and no
+		// aiboundary gate (it discloses nothing about any user).
+		return payload(e, "Market", "templates", "READY", map[string]any{"templates": opportunityTemplates})
 	case "ListMarketOpportunities":
 		items, err := s.repository.List(ctx, e.Actor.ID)
 		if err != nil {
