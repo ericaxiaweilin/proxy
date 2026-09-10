@@ -507,6 +507,17 @@ func (s *Service) verifyLoginChallenge(ctx context.Context, e command.Envelope) 
 	if err := s.persistUpdateLoginChallenge(ctx, challenge, previousVersion, domainEvents); err != nil {
 		return command.Rejected(e, "LOGIN_CHALLENGE_VERIFICATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.login_challenge_verification_failed", nil)
 	}
+	// PROFILE-READ-001: provision the home-page identity the moment the
+	// login identifier is verified. Registration binds email / phone but
+	// created no Profile row, so fresh accounts rendered a hardcoded demo
+	// identity. Provision-if-absent only: an explicit UpdateProfile always
+	// wins, and provisioning never fails verification (best-effort).
+	if loginIdentity, err := s.repository.GetLoginIdentity(ctx, challenge.LoginIdentityID); err == nil && loginIdentity.Verified && loginIdentity.UserAccountID != "" {
+		if _, err := s.profileService.GetProfile(ctx, loginIdentity.UserAccountID); errors.Is(err, ErrProfileNotFound) {
+			initial := initialProfileFor(loginIdentity.UserAccountID, challenge.Channel, loginIdentity.Identifier)
+			_, _ = s.profileService.UpsertProfile(ctx, initial)
+		}
+	}
 	return command.Accepted(e, "LoginChallenge", challenge.ID, challenge.Version, challenge.Status, eventRefs(domainEvents))
 }
 

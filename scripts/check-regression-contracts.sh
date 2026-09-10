@@ -68,6 +68,9 @@ if ! grep -q 'PROFILE-READ-001' apps/mobile/src/profile-identity.test.ts ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/profile-identity.test.ts src/profile-store.test.ts || exit $?
 echo "    PROFILE-READ-001: PASS (fresh accounts derive identity, profiles isolated per account)"
+require_test "PROFILE-READ-001" "./internal/identity" \
+  "TestVerifyChallengeProvisionsInitialProfile" \
+  "apps/api-go/internal/identity/service_test.go" || exit $?
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
    ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
   echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2
