@@ -8,14 +8,16 @@
 
 export type AuthoredItem = {
   authorId: string;
+  authorType?: string | undefined;
   authorDisplayName?: string | undefined;
 };
 
 /**
  * Resolve the author label for one viewer. Own posts render as "你";
  * everyone else sees the stored name — except legacy poisoned rows whose
- * stored name is literally "你", which fall back to the author id so one
- * user's posts are never labeled as another viewer's own.
+ * stored name is literally "你", which fall back to a neutral label so one
+ * user's posts are never labeled as another viewer's own. Raw ids (and
+ * synthetic ones like market_owner:…) are never shown.
  */
 export function resolveAuthorDisplayName(
   post: AuthoredItem,
@@ -24,7 +26,7 @@ export function resolveAuthorDisplayName(
   if (viewerAccountId && post.authorId === viewerAccountId) return "你";
   const stored = (post.authorDisplayName ?? "").trim();
   if (stored !== "" && stored !== "你") return stored;
-  return post.authorId;
+  return post.authorType === "MERCHANT" ? "商家" : "用户";
 }
 
 /**

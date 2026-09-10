@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FeedPost } from "@proxy/contracts";
 import type { MarketOpportunity } from "./market-fixtures";
-import { isOpportunityPost, mergeFeedContent } from "./feed-content";
+import { isOpportunityPost, mergeFeedContent, opportunityAsPost } from "./feed-content";
 
 const basePost: FeedPost = {
   postId: "post_1",
@@ -26,5 +26,16 @@ describe("unified feed content", () => {
     const merged = mergeFeedContent([basePost], [opportunity], Date.parse("2026-08-24T01:00:00.000Z"));
     expect(merged.map((post) => post.postId)).toContain("market_opportunity:opp_1");
     expect(merged.filter(isOpportunityPost).map((post) => post.postId)).toEqual(["market_opportunity:opp_1"]);
+  });
+
+  it("FEED-OWN-001: 服务端写死的个人 Owner 你不进合成帖（读端中性兜底）", () => {
+    const personal = opportunityAsPost(
+      { ...opportunity, id: "opp_2", owner: "你", ownerType: "PERSON" },
+      0,
+      Date.parse("2026-08-24T01:00:00.000Z")
+    );
+    expect(personal.authorDisplayName).toBeUndefined();
+    const business = opportunityAsPost(opportunity, 0, Date.parse("2026-08-24T01:00:00.000Z"));
+    expect(business.authorDisplayName).toBe("Bonsaidon");
   });
 });
