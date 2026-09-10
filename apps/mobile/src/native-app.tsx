@@ -12,7 +12,7 @@ import { LegalDocClient, type LegalDoc, type LegalDocKind } from "./legal-doc";
 import { LegalDocRenderer } from "./legal-doc-render";
 import { formatVietnamesePhoneForDisplay, normalizeVietnamesePhone, vietnamesePhoneReady } from "./vn-phone";
 import { MAX_LOGIN_EMAIL_LENGTH, normalizeLoginEmail } from "./email-identifier";
-import { formatDateOfBirthInput } from "./date-of-birth-input";
+import { formatDateOfBirthInput, getDateOfBirthError } from "./date-of-birth-input";
 import { googleAuthConfigured, type GoogleClientConfig } from "./google-auth-config";
 import { LocalNetClient } from "./localnet-client";
 import { MediaClient } from "./media-client";
@@ -457,10 +457,11 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
     }
   }
 
-  async function requestChallenge(): Promise<void> {
+  async function requestChallenge(channelOverride?: "SMS" | "EMAIL"): Promise<void> {
     setBusy(true);
     setError(undefined);
-    const isEmail = authChannel === "EMAIL";
+    const channel = channelOverride ?? authChannel;
+    const isEmail = channel === "EMAIL";
     const normalizedEmail = isEmail ? normalizeLoginEmail(googleEmail) : undefined;
     const rawEmail = normalizedEmail ?? googleEmail.trim().toLowerCase();
     if (isEmail && rawEmail !== googleEmail.trim().toLowerCase()) setGoogleEmail(rawEmail);
@@ -476,23 +477,13 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
       }
       // R16.7-P0-A/B: register requires Terms + Privacy consent and 18+ DOB
       // before requesting a verification challenge. Server will
-      // re-validate (fail-closed defense in depth).
+      // re-validate (fail-closed defense in depth). The DOB check shares
+      // getDateOfBirthError with the inline hint so submit-time and
+      // typing-time messages always agree.
       if (authMode === "register") {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
-          setError("请输入有效的出生日期 (YYYY-MM-DD)。");
-          setBusy(false);
-          return;
-        }
-        const dob = new Date(`${dateOfBirth}T00:00:00.000Z`);
-        if (Number.isNaN(dob.getTime())) {
-          setError("出生日期不是合法日期。");
-          setBusy(false);
-          return;
-        }
-        const now = new Date();
-        const ageYears = (now.getTime() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
-        if (ageYears < 18) {
-          setError("需年满 18 岁才能注册。");
+        const dobError = getDateOfBirthError(dateOfBirth);
+        if (dobError) {
+          setError(dobError);
           setBusy(false);
           return;
         }
@@ -505,7 +496,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
       try {
         const loginClient = await getNativeLoginClient();
         const result = await loginClient.beginPasswordlessAuthentication({
-          channel: isEmail ? "EMAIL" : "SMS",
+          channel,
           identifier,
           platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
         });
@@ -524,6 +515,10 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
           }));
         }
         setChallengeId(result.challengeId);
+        // Register may request a channel different from the toggle state
+        // (email + phone are both shown); sync it so the OTP screen and the
+        // remembered-account write below report the right destination.
+        setAuthChannel(channel);
         // NOTE: We deliberately do NOT auto-open Gmail / mail.google.com
         // here. Doing so yanks the user out of the App and makes the OTP
         // input screen invisible — they come back to a "stuck" feeling
@@ -556,19 +551,20 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             }
             const rotated = await rotateGuestDeviceIdentity();
             const result = await rotated.beginPasswordlessAuthentication({
-              channel: isEmail ? "EMAIL" : "SMS",
+              channel,
               identifier,
               platform: Platform.OS === "ios" ? "IOS" : "ANDROID"
             });
             setChallengeId(result.challengeId);
+            setAuthChannel(channel);
             retrySucceeded = true;
           } catch (retryErr) {
             // eslint-disable-next-line no-console
             console.log("[proxy.login] retry after rotate FAILED:", retryErr instanceof Error ? `${retryErr.name}: ${retryErr.message}` : String(retryErr));
           }
-          if (!retrySucceeded) setError(loginChallengeErrorMessage(err, authChannel));
+          if (!retrySucceeded) setError(loginChallengeErrorMessage(err, channel));
         } else {
-          setError(loginChallengeErrorMessage(err, authChannel));
+          setError(loginChallengeErrorMessage(err, channel));
         }
       } finally {
         setBusy(false);
@@ -633,6 +629,14 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
       setBusy(false);
     }
   }
+
+  // Register: surface the 18+ gate the moment the birth date entry is
+  // complete, instead of waiting until the challenge submit after the
+  // phone/email step. Only a complete YYYY-MM-DD value is judged so
+  // partial typing does not flash errors.
+  const dobInlineError = authMode === "register" && dateOfBirth.length === 10
+    ? getDateOfBirthError(dateOfBirth)
+    : undefined;
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.screenAvoid}>
@@ -732,9 +736,13 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                 setBusy={setBusy}
                 setError={setError}
               />
+              {/* Register shows both email + phone identifier sections below,
+                  so the SMS/EMAIL toggle is login-only. */}
+              {authMode === "register" ? null : (
               <Pressable onPress={() => { setAuthChannel("SMS"); setError(undefined); }} style={[styles.googleButton, authChannel === "SMS" && styles.googleButtonActive, styles.googleButtonSmall]}>
                 <Text style={styles.googleLabel}>手机</Text>
               </Pressable>
+              )}
             </View>
             {authMode === "register" ? (
               <View style={styles.dobBlock}>
@@ -743,7 +751,7 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                   blurOnSubmit
                   keyboardType="number-pad"
                   maxLength={10}
-                  onChangeText={(value) => setDateOfBirth(formatDateOfBirthInput(value))}
+                  onChangeText={(value) => { setDateOfBirth(formatDateOfBirthInput(value)); setError(undefined); }}
                   onSubmitEditing={() => Keyboard.dismiss()}
                   placeholder="YYYY-MM-DD"
                   placeholderTextColor="#A9A2B0"
@@ -751,17 +759,38 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
                   style={styles.dobInput}
                   value={dateOfBirth}
                 />
-                <Pressable onPress={() => setTermsAccepted((v) => !v)} style={styles.consentRow}>
-                  <View style={[styles.consentBox, termsAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{termsAccepted ? "✓" : ""}</Text></View>
-                  <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("terms")}>《服务使用协议》</Text> (v1.1, 越南)</Text>
-                </Pressable>
-                <Pressable onPress={() => setPrivacyAccepted((v) => !v)} style={styles.consentRow}>
-                  <View style={[styles.consentBox, privacyAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{privacyAccepted ? "✓" : ""}</Text></View>
-                  <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("privacy")}>《隐私政策》</Text> (v1.1, 越南)</Text>
-                </Pressable>
+                {dobInlineError ? <Text style={styles.dobError}>{dobInlineError}</Text> : null}
               </View>
             ) : null}
-            {authChannel === "EMAIL" ? (
+            {authMode === "register" ? (
+              <>
+                <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" maxLength={MAX_LOGIN_EMAIL_LENGTH} onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整邮箱（最多 50 字符）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
+                <View style={[styles.button, busy || googleEmail.trim().length === 0 || dobInlineError ? styles.disabled : null]}>
+                  <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
+                  <Pressable disabled={busy || googleEmail.trim().length === 0 || !!dobInlineError} onPress={() => void requestChallenge("EMAIL")} style={styles.buttonPressable}>
+                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取邮箱验证码"}</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.divider}>或使用越南手机号（可输 09… / +84… / 0084…）</Text>
+                <View style={styles.phoneRow}><Text style={styles.countryCode}>+84</Text><TextInput blurOnSubmit keyboardType="phone-pad" onChangeText={setPhone} onSubmitEditing={() => Keyboard.dismiss()} placeholder="0912345678 或粘贴 +84 号码" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={phone} /></View>
+                <View style={[styles.button, busy || !vietnamesePhoneReady(phone) || dobInlineError ? styles.disabled : null]}>
+                  <Gradient from={color.magenta} to={color.violet} style={absoluteFillStyle} />
+                  <Pressable disabled={busy || !vietnamesePhoneReady(phone) || !!dobInlineError} onPress={() => void requestChallenge("SMS")} style={styles.buttonPressable}>
+                    <Text style={styles.buttonText}>{busy ? "发送中…" : "获取手机验证码"}</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.consentBlock}>
+                  <Pressable onPress={() => setTermsAccepted((v) => !v)} style={styles.consentRow}>
+                    <View style={[styles.consentBox, termsAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{termsAccepted ? "✓" : ""}</Text></View>
+                    <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("terms")}>《服务使用协议》</Text> (v1.1, 越南)</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setPrivacyAccepted((v) => !v)} style={styles.consentRow}>
+                    <View style={[styles.consentBox, privacyAccepted && styles.consentBoxOn]}><Text style={styles.consentBoxMark}>{privacyAccepted ? "✓" : ""}</Text></View>
+                    <Text style={styles.consentText}>我已阅读并同意{"\n"}<Text style={styles.consentLink} onPress={() => openLegalDoc("privacy")}>《隐私政策》</Text> (v1.1, 越南)</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : authChannel === "EMAIL" ? (
               <>
                 <View style={styles.phoneRow}><Text style={styles.countryCode}>@</Text><TextInput autoCapitalize="none" blurOnSubmit keyboardType="email-address" maxLength={MAX_LOGIN_EMAIL_LENGTH} onChangeText={setGoogleEmail} onSubmitEditing={() => Keyboard.dismiss()} placeholder="用户名或完整邮箱（最多 50 字符）" placeholderTextColor="#A9A2B0" returnKeyType="done" style={styles.phoneInput} value={googleEmail} /></View>
                 <View style={[styles.button, busy || googleEmail.trim().length === 0 ? styles.disabled : null]}>
@@ -1043,6 +1072,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     textAlign: "left"
   },
+  // Register inline 18+ hint: shown as soon as the birth date is complete.
+  dobError: {
+    color: color.error,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
+    textAlign: "left"
+  },
+  // Register consents sit below both identifier sections.
+  consentBlock: { alignSelf: "stretch", marginTop: 4 },
   consentRow: { alignItems: "flex-start", flexDirection: "row", marginTop: 12, paddingVertical: 4 },
   consentBox: {
     alignItems: "center",
