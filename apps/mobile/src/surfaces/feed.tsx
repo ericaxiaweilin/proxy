@@ -12,6 +12,9 @@ import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
+import { type AIAccountClient } from "../ai-account-client";
+import { localApiBaseUrl } from "../native-clients";
+import { resolveAuthorAvatar, type AvatarAccount } from "../media/author-avatar";
 import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
@@ -142,6 +145,7 @@ export function FeedSurface({
   onOpenChat,
   onOpenFeedPrefs,
   viewerAccountId,
+  aiAccountsClient,
   onOpenRealityScene,
   onOpenProfile,
   onChromeVisibilityChange,
@@ -163,6 +167,8 @@ export function FeedSurface({
   onOpenFeedPrefs: () => void;
   // 本人账号 id：用于判定“自己的帖子”并显示真头像；没有则退回名字判断。
   viewerAccountId?: string | undefined;
+  // MEDIA-PIPELINE-001: AI 账号目录，用于解析 AGENT 帖头像；缺省则 AI 帖走首字。
+  aiAccountsClient?: AIAccountClient | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onOpenProfile?: ((profile: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]> }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -249,6 +255,24 @@ export function FeedSurface({
     }).catch(() => undefined);
     return () => { active = false; };
   }, [feedProfileStore]);
+  // MEDIA-PIPELINE-001: AI 账号目录（accountId → 账号），用于解析 AGENT
+  // 帖头像。mount 拉一次；失败/缺 client 则 AI 帖走首字，不打断列表。
+  const [aiAccountsById, setAiAccountsById] = useState<ReadonlyMap<string, AvatarAccount>>(new Map());
+  useEffect(() => {
+    if (!aiAccountsClient) return;
+    let active = true;
+    void aiAccountsClient.listRecommended().then((accounts) => {
+      if (!active) return;
+      setAiAccountsById(new Map(accounts.map((account) => [account.accountId, {
+        accountId: account.accountId,
+        personaId: account.personaId,
+        avatarPath: account.avatarPath,
+        avatarMediaAssetId: account.avatarMediaAssetId,
+        avatarVersion: account.avatarVersion
+      }])));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [aiAccountsClient]);
   function isOwnPost(post: FeedPost): boolean {
     // FEED-OWN-001: strict author-id check only. Unknown viewer is
     // fail-closed (never own); display-name matching is forbidden.
@@ -1019,6 +1043,11 @@ export function FeedSurface({
           const quoted = findQuote(post);
           const items = mediaFor(post.postId);
           const name = resolveAuthorDisplayName(post, viewerAccountId);
+          // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
+          const avatar = resolveAuthorAvatar(
+            { authorType: post.authorType, authorId: post.authorId },
+            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri, aiAccountsById, displayName: name }
+          );
           const meta = AUTHOR_TYPE_META[post.authorType];
           const isFollow = following.has(post.authorId);
           const isLiked = liked.has(post.postId);
@@ -1043,11 +1072,11 @@ export function FeedSurface({
                 >
                 <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatarClip}>
-                    {isOwnPost(post) && viewerAvatarUri ? (
-                      <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} uri={viewerAvatarUri} />
+                    {avatar.kind === "image" ? (
+                      <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} source={avatar.source} />
                     ) : (
                       <View style={styles.postAvatar}>
-                        <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
+                        <Text style={styles.postAvatarText}>{avatar.letter}</Text>
                       </View>
                     )}
                   </View>

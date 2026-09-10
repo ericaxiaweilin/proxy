@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 154 — 2026-09-10
+
+- 统一媒体资产管线：media/asset-sources 唯一解析入口（服务端媒体/绝对 URL/服务端路径/打包注册表/本地文件），作者头像映射收归 media/author-avatar；AI 人像注册表迁入管线，旧模块转调。
+- 动态帖头首个接入：本人/AI 账号/AI 人像/首字统一判定；门禁 check-media-pipeline.mjs 拦新增散装实现。布局无变化。
+
 ## Revision 153 — 2026-09-10
 
 - 市场滑到底部不再自动回弹：距列表底部不足 140pt 时抑制隐藏（隐藏会瞬间减 104pt 内容高度，底部 offset 被钳制回弹），底栏在底部保持可见。
