@@ -45,6 +45,7 @@ import { readCustomFeeds } from "../expo-custom-feed-store";
 import { readFeedPrefs } from "../expo-feed-prefs-store";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
+import { isOwnPost as isOwnPostById, resolveAuthorDisplayName } from "../feed-author";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
@@ -58,7 +59,7 @@ let cachedPostIds: Set<string> = new Set();
 // 本人头像：与“我的→个人总管理”同源（profileStore 本地记录 + document
 // 目录重锚 + 存在性校验，AVATAR-001 同款逻辑）。动态之前写死黑底圆圈，
 // 自己的帖子也显示黑头——现在本人帖子用真头像，他人暂无来源仍用首字 fallback。
-const feedProfileStore = createProfileStore(nativeSecureStorageDriver);
+// PROFILE-READ-001: 按账户隔离，和 me 页同一 key 规则（组件内 useMemo 实例）。
 const FEED_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
@@ -83,9 +84,8 @@ function scenarioIconForPost(post: FeedPost): ProxyIconName {
   return "diamond";
 }
 
-function authorName(post: FeedPost): string {
-  return post.authorDisplayName !== undefined && post.authorDisplayName !== "" ? post.authorDisplayName : post.authorId;
-}
+// FEED-OWN-001: "你" is viewer-relative and resolved per call site via
+// resolveAuthorDisplayName(post, viewerAccountId) — never a stored name.
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - Date.parse(iso);
@@ -229,6 +229,10 @@ export function FeedSurface({
   // 本人头像 URI（与个人总管理同源）：mount 时读一次，换头像后切 Tab
   // 重挂即刷新。读不到/文件不存在就保持 undefined，走首字 fallback。
   const [viewerAvatarUri, setViewerAvatarUri] = useState<string | undefined>(undefined);
+  const feedProfileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
   useEffect(() => {
     let active = true;
     void feedProfileStore.read().then((record) => {
@@ -244,10 +248,11 @@ export function FeedSurface({
       }
     }).catch(() => undefined);
     return () => { active = false; };
-  }, []);
+  }, [feedProfileStore]);
   function isOwnPost(post: FeedPost): boolean {
-    if (viewerAccountId) return post.authorId === viewerAccountId;
-    return authorName(post) === "你";
+    // FEED-OWN-001: strict author-id check only. Unknown viewer is
+    // fail-closed (never own); display-name matching is forbidden.
+    return isOwnPostById(post, viewerAccountId);
   }
   const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
@@ -771,7 +776,7 @@ export function FeedSurface({
       }
       // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
       if (feedPrefs.muted.length > 0) {
-        const haystack = [authorName(post), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
           .filter((value): value is string => typeof value === "string")
           .join(" ")
           .toLocaleLowerCase();
@@ -781,7 +786,7 @@ export function FeedSurface({
         if (hit) return false;
       }
       if (forTab === "FOLLOWING") {
-      if (!(following.has(post.authorId) || authorName(post) === "你")) return false;
+      if (!(following.has(post.authorId) || isOwnPost(post))) return false;
     }
     if (feedFilter !== "ALL") {
       const ctxTypes = new Set(post.contextRefs.map((r) => r.contextType));
@@ -805,7 +810,7 @@ export function FeedSurface({
     }
     if (selectedCustomFeed) {
       const feedMap: Record<string, (post: FeedPost) => boolean> = {
-        friends: (p) => following.has(p.authorId) || authorName(p) === "你",
+        friends: (p) => following.has(p.authorId) || isOwnPost(p),
         hanoi: (p) => p.cityScope === "hn",
         photo: (p) => p.contextRefs.some((r) => r.contextId.includes("摄影") || r.contextId.includes("拍照")),
         opportunity: isOpportunityPost,
@@ -818,16 +823,16 @@ export function FeedSurface({
       } else if (customFeedTokens.length > 0) {
         // AI 生成的自定频道（id=ai_…）：内置 feedMap 没有规则，
         // 用频道名+描述切词做本地过滤；之前直接看全部。
-        const haystack = [authorName(post), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
           .filter((value): value is string => typeof value === "string")
           .join(" ")
           .toLocaleLowerCase();
         if (!customFeedTokens.some((token) => haystack.includes(token))) return false;
       }
     }
-    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
-    if (normalizedQuery) {
-      const searchable = [authorName(post), post.body, post.cityScope, ...post.contextRefs.map((entry) => entry.contextId)]
+      const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+      if (normalizedQuery) {
+        const searchable = [resolveAuthorDisplayName(post, viewerAccountId), post.body, post.cityScope, ...post.contextRefs.map((entry) => entry.contextId)]
         .filter((value): value is string => typeof value === "string")
         .join(" ")
         .toLocaleLowerCase();
@@ -889,7 +894,7 @@ export function FeedSurface({
       </View>
 
       {section === "STATUS" ? (
-        <StatusFeed client={socialSpace} onReply={onOpenChat} />
+        <StatusFeed client={socialSpace} onReply={onOpenChat} viewerAccountId={viewerAccountId} />
       ) : section === "COMMUNITY" ? (
         <CommunityHub client={socialSpace} />
       ) : (
@@ -978,6 +983,7 @@ export function FeedSurface({
         localNet={localNet}
         mediaClient={mediaClient}
         secureSessionStore={secureSessionStore}
+        viewerAccountId={viewerAccountId}
         onClose={() => { setComposerOpen(false); setComposerQuoteId(null); }}
         onPublished={async () => { setComposerOpen(false); setComposerQuoteId(null); await loadFeed(); }}
         posts={posts}
@@ -1012,7 +1018,7 @@ export function FeedSurface({
           {visible.map((post) => {
           const quoted = findQuote(post);
           const items = mediaFor(post.postId);
-          const name = authorName(post);
+          const name = resolveAuthorDisplayName(post, viewerAccountId);
           const meta = AUTHOR_TYPE_META[post.authorType];
           const isFollow = following.has(post.authorId);
           const isLiked = liked.has(post.postId);
@@ -1123,9 +1129,9 @@ export function FeedSurface({
                 <View style={styles.quoteCard}>
                   <View style={styles.quoteHead}>
                     <View style={styles.quoteAvatar}>
-                      <Text style={styles.quoteAvatarText}>{authorName(quoted).charAt(0)}</Text>
+                      <Text style={styles.quoteAvatarText}>{resolveAuthorDisplayName(quoted, viewerAccountId).charAt(0)}</Text>
                     </View>
-                    <Text style={styles.quoteAuthor}>{authorName(quoted)}</Text>
+                    <Text style={styles.quoteAuthor}>{resolveAuthorDisplayName(quoted, viewerAccountId)}</Text>
                     <Text style={styles.quoteMeta}>引用帖文</Text>
                   </View>
                   <Text numberOfLines={2} style={styles.quoteBody}>{quoted.body}</Text>
@@ -1205,7 +1211,7 @@ export function FeedSurface({
           key={viewer.postId}
           items={viewerItems}
           index={viewer.index}
-          author={authorName(viewerPost)}
+          author={resolveAuthorDisplayName(viewerPost, viewerAccountId)}
           resolveUrl={(path) => localNet.resolveMediaUrl(path)}
           onNavigate={(next) => {
             setMediaPositions((current) => ({ ...current, [viewer.postId]: next }));

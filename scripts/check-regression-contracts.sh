@@ -54,6 +54,20 @@ if ! grep -q 'AUTH-DOB-FORMAT-001' apps/mobile/src/date-of-birth-input.test.ts |
 fi
 pnpm --filter @proxy/mobile exec vitest run src/date-of-birth-input.test.ts || exit $?
 echo "    AUTH-DOB-FORMAT-001: PASS (year/month/day separators + deletion)"
+if ! grep -q 'FEED-OWN-001' apps/mobile/src/feed-author.test.ts ||
+   ! grep -q 'resolveAuthorDisplayName' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-OWN-001]: viewer-relative author label or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/feed-author.test.ts src/composer-publish.test.ts || exit $?
+echo "    FEED-OWN-001: PASS (own posts labeled per viewer, no stored 你)"
+if ! grep -q 'PROFILE-READ-001' apps/mobile/src/profile-identity.test.ts ||
+   ! grep -q 'profileKeyFor' apps/mobile/src/profile-store.ts; then
+  echo "  FAIL [PROFILE-READ-001]: per-account profile hydration or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/profile-identity.test.ts src/profile-store.test.ts || exit $?
+echo "    PROFILE-READ-001: PASS (fresh accounts derive identity, profiles isolated per account)"
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
    ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
   echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2

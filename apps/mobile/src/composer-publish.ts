@@ -96,7 +96,11 @@ export function buildCreatePostPayload(
   });
   const payload: CreatePostPayload = {
     authorType: "USER",
-    authorDisplayName: "你",
+    // FEED-OWN-001: never store the viewer-relative label "你" on the wire.
+    // A truthful display name arrives via overrides (profile name); when the
+    // caller has none, the field is omitted and readers fall back to the
+    // server-authoritative author id. Own posts still render as "你" per
+    // viewer at read time (resolveAuthorDisplayName).
     body: finalBody,
     visibility: draft.visibility
   };
@@ -179,6 +183,8 @@ export async function performPublish(
   options: {
     idempotencyKey: string;
     onUploadProgress?: (localId: string, progress: number) => void;
+    /** Truthful profile name for the wire; omitted when unknown (FEED-OWN-001). */
+    authorDisplayName?: string | undefined;
   }
 ): Promise<{ ok: true; payload: CreatePostPayload } | { ok: false; reason: "no-media-ready" | "upload-failed" }> {
   const outcomes = await uploadPendingMedia(draft.media, deps.mediaClient, options.onUploadProgress);
@@ -189,7 +195,10 @@ export async function performPublish(
   if (completed.length > 0 && completed.some((it) => it.status !== "READY" || !it.mediaAssetId)) {
     return { ok: false, reason: "no-media-ready" };
   }
-  const payload = buildCreatePostPayload(draft, quotePost);
+  const displayName = options.authorDisplayName?.trim();
+  const payload = buildCreatePostPayload(draft, quotePost, {
+    ...(displayName ? { authorDisplayName: displayName } : {})
+  });
   const mediaRefs = completed
     .filter((it) => it.mediaAssetId)
     .map((it, sortOrder) => ({

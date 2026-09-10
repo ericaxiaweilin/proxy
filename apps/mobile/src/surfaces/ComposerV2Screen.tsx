@@ -69,6 +69,8 @@ import { VoiceToolButton } from "../components/VoiceToolButton";
 import { TooltipOnLongPress } from "../components/TooltipOnLongPress";
 import { assembleComposerBody, parseComposerBody, formatRelativeTime, describePollDuration, appendLongText, estimateAssembledBodyLength, insertAtCaret, shouldSerializePoll } from "../composer-body";
 import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-publish";
+import { createProfileStore } from "../profile-store";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 
 // 在 composer 未选地点时给 location-picker-sheet 一个 fallback
 const DEFAULT_LOCATION_FALLBACK: AnyLocation = DEFAULT_LOCATION as AnyLocation;
@@ -111,6 +113,8 @@ type Props = {
   // R15.37: composet 需要知道当前 session 以供
   //   “未登录不发” + “未登录不点发布” 这两个 UI gate 用。
   secureSessionStore?: SecureSessionStore | undefined;
+  // PROFILE-READ-001: 发布者展示名必须读本账户的 profile，不能串号。
+  viewerAccountId?: string | undefined;
   // 从父组件传入的初始值（quote: 由 feed.tsx 的 openComposer(quoteId?) 透传）
   initialQuoteId?: string | null;
   posts: FeedPost[];
@@ -123,10 +127,17 @@ export function ComposerV2Screen({
   localNet,
   mediaClient,
   secureSessionStore,
+  viewerAccountId,
   initialQuoteId,
   posts
 }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  // PROFILE-READ-001: 发布者展示名必须读本账户的 profile（与 me 页同一
+  // key 规则），不能读到别的账号在本机留下的名字。
+  const composerProfileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
   // R15.37: P0 “未登录不发布” 强 gate — 准仅发布按钮状态。
   //   未设置 store (开发环境 / 离线 unit test) 默认为 “可发” 以免
   //   拑入别的 race; 运行时总是传入 store。
@@ -500,6 +511,8 @@ export function ComposerV2Screen({
       });
       // 拼接 payload（交给 composer-publish 统一处理 ephemeralUntil / poll 字段映射）。
       // overrides：body / mediaRefs 由调用方指定（已 assemble 过 / 已上传完）。
+      // FEED-OWN-001: 只传用户自己设过的真名；没设过就省略，绝不写死 "你"。
+      const profileName = (await composerProfileStore.read().catch(() => undefined))?.name?.trim();
       const payload = buildCreatePostPayload(
         {
           body: threadedBody,
@@ -516,7 +529,8 @@ export function ComposerV2Screen({
         quoteTarget,
         {
           body: finalBody,
-          ...(mediaRefs && mediaRefs.length > 0 ? { mediaRefs } : {})
+          ...(mediaRefs && mediaRefs.length > 0 ? { mediaRefs } : {}),
+          ...(profileName ? { authorDisplayName: profileName } : {})
         }
       );
       idempotencyRef.current ??= newPublishIdempotencyKey();
