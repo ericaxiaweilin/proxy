@@ -46,6 +46,14 @@ if ! grep -q 'UI-PROFILE-001' apps/mobile/src/surfaces/profile-tabs-model.test.t
 fi
 pnpm --filter @proxy/mobile test --run src/surfaces/profile-tabs-model.test.ts || exit $?
 echo "    UI-PROFILE-001/UI-PROFILE-002: PASS"
+
+if ! grep -q 'AUTH-DOB-FORMAT-001' apps/mobile/src/date-of-birth-input.test.ts ||
+   ! grep -q 'formatDateOfBirthInput(value)' apps/mobile/src/native-app.tsx; then
+  echo "  FAIL [AUTH-DOB-FORMAT-001]: registration date auto-formatting or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/date-of-birth-input.test.ts || exit $?
+echo "    AUTH-DOB-FORMAT-001: PASS (year/month/day separators + deletion)"
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
    ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
   echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2

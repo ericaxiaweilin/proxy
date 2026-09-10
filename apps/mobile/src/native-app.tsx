@@ -12,6 +12,7 @@ import { LegalDocClient, type LegalDoc, type LegalDocKind } from "./legal-doc";
 import { LegalDocRenderer } from "./legal-doc-render";
 import { formatVietnamesePhoneForDisplay, normalizeVietnamesePhone, vietnamesePhoneReady } from "./vn-phone";
 import { MAX_LOGIN_EMAIL_LENGTH, normalizeLoginEmail } from "./email-identifier";
+import { formatDateOfBirthInput } from "./date-of-birth-input";
 import { googleAuthConfigured, type GoogleClientConfig } from "./google-auth-config";
 import { LocalNetClient } from "./localnet-client";
 import { MediaClient } from "./media-client";
@@ -737,14 +738,14 @@ function AuthenticationEntryScreen({ onAuthenticated, onGuest }: { onAuthenticat
             </View>
             {authMode === "register" ? (
               <View style={styles.dobBlock}>
-                <Text style={styles.dobLabel}>出生日期 (YYYY-MM-DD) · 需年满 18 岁</Text>
+                <Text style={styles.dobLabel}>出生日期（年 / 月 / 日）· 需年满 18 岁</Text>
                 <TextInput
                   blurOnSubmit
-                  keyboardType="numbers-and-punctuation"
+                  keyboardType="number-pad"
                   maxLength={10}
-                  onChangeText={setDateOfBirth}
+                  onChangeText={(value) => setDateOfBirth(formatDateOfBirthInput(value))}
                   onSubmitEditing={() => Keyboard.dismiss()}
-                  placeholder="1990-01-01"
+                  placeholder="YYYY-MM-DD"
                   placeholderTextColor="#A9A2B0"
                   returnKeyType="done"
                   style={styles.dobInput}
