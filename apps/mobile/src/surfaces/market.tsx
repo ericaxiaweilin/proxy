@@ -163,6 +163,13 @@ export function MarketSurface({
   function onMarketScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
     const y = Math.max(0, e.nativeEvent.contentOffset.y);
     const delta = y - lastScrollYRef.current;
+    // 底部防回弹：隐藏底栏会把内容区 paddingBottom 从 120 切到 16，
+    // 内容总高度瞬间 -104；若此时已在底部，offset 会被钳制回弹，
+    // 回弹的上位移又会触发恢复，形成来回弹。距底部不足一个隐藏
+    // 高度时直接保持可见（Safari 到底保留工具栏同款行为）。
+    const viewportH = e.nativeEvent.layoutMeasurement.height;
+    const contentH = e.nativeEvent.contentSize.height;
+    const nearBottom = contentH - (y + viewportH) < 140;
     if (y <= 48) {
       chromeVisibleRef.current = true;
       onChromeVisibilityChange?.(true);
@@ -174,7 +181,7 @@ export function MarketSurface({
       if (scrollDirectionDistanceRef.current <= -18) {
         if (!chromeVisibleRef.current) { chromeVisibleRef.current = true; onChromeVisibilityChange?.(true); }
         scrollDirectionDistanceRef.current = 0;
-      } else if (scrollDirectionDistanceRef.current >= 28) {
+      } else if (scrollDirectionDistanceRef.current >= 28 && !nearBottom) {
         if (chromeVisibleRef.current) { chromeVisibleRef.current = false; onChromeVisibilityChange?.(false); }
         scrollDirectionDistanceRef.current = 0;
       }
