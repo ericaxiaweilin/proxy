@@ -4,9 +4,13 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { type SocialSpaceClient, type SocialStatus } from "../socialspace-client";
 import { color, shadows } from "../theme";
+import { resolveAuthorDisplayName } from "../feed-author";
+import { createProfileStore } from "../profile-store";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 
 export interface Status {
   id: string;
+  authorId: string;
   author: string;
   body: string;
   createdAt: number;
@@ -21,6 +25,7 @@ function lifespanHours(status: Status): number {
 function toStatus(status: SocialStatus): Status {
   return {
     id: status.id,
+    authorId: status.authorId,
     author: status.author,
     body: status.body,
     createdAt: Date.parse(status.createdAt),
@@ -36,7 +41,10 @@ function hoursLeft(expiresAt: number): string {
   return `${h}h 后归档`;
 }
 
-export function StatusFeed({ client, onReply }: { client: SocialSpaceClient; onReply?: (author: string) => void }): React.JSX.Element {
+// FEED-OWN-001: 与 me 页同源的 profile 记录，发布状态时带真名。
+const statusProfileStore = createProfileStore(nativeSecureStorageDriver);
+
+export function StatusFeed({ client, onReply, viewerAccountId }: { client: SocialSpaceClient; onReply?: (author: string) => void; viewerAccountId?: string | undefined }): React.JSX.Element {
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [draft, setDraft] = useState("");
   const [location, setLocation] = useState("");
@@ -60,13 +68,28 @@ export function StatusFeed({ client, onReply }: { client: SocialSpaceClient; onR
 
   const visible = statuses.filter((s) => Date.now() < s.expiresAt);
 
+  // FEED-OWN-001: "你" 只在读端按 viewer 判定；写端只发真名或省略，
+  // 绝不写死 "你"（存量脏数据由展示层 authorId 兜底）。
+  function displayAuthor(status: Status): string {
+    return resolveAuthorDisplayName(
+      { authorId: status.authorId, authorDisplayName: status.author },
+      viewerAccountId
+    );
+  }
+
   async function publish(): Promise<void> {
     const body = draft.trim();
     if (!body || publishing) return;
     setPublishing(true);
     setError(undefined);
     try {
-      const created = await client.createStatus({ body, expiryHours: expiry, authorDisplayName: "你", ...(location.trim() ? { location: location.trim() } : {}) });
+      const profileName = (await statusProfileStore.read().catch(() => undefined))?.name?.trim();
+      const created = await client.createStatus({
+        body,
+        expiryHours: expiry,
+        ...(profileName ? { authorDisplayName: profileName } : {}),
+        ...(location.trim() ? { location: location.trim() } : {})
+      });
       setStatuses((prev) => [toStatus(created), ...prev.filter((item) => item.id !== created.id)]);
       setDraft("");
       setLocation("");
@@ -110,10 +133,10 @@ export function StatusFeed({ client, onReply }: { client: SocialSpaceClient; onR
         <View key={s.id} style={styles.card}>
           <View style={styles.cardHead}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{s.author.charAt(0)}</Text>
+              <Text style={styles.avatarText}>{displayAuthor(s).charAt(0)}</Text>
             </View>
             <View style={styles.cardIdentity}>
-              <Text style={styles.author}>{s.author}</Text>
+              <Text style={styles.author}>{displayAuthor(s)}</Text>
               <Text style={styles.meta}>
                 {s.location ? `${s.location} · ` : ""}
                 {hoursLeft(s.expiresAt)}
@@ -125,7 +148,7 @@ export function StatusFeed({ client, onReply }: { client: SocialSpaceClient; onR
           </View>
           <Text style={styles.body}>{s.body}</Text>
           <View style={styles.actions}>
-            <Pressable onPress={() => onReply?.(s.author)} style={styles.actionBtn}>
+            <Pressable onPress={() => onReply?.(displayAuthor(s))} style={styles.actionBtn}>
               <Text style={styles.actionText}>回复 → 私信</Text>
             </Pressable>
             <Text style={styles.actionHint}>回复不留痕，仅私信可见</Text>

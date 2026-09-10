@@ -69,9 +69,15 @@ import { VoiceToolButton } from "../components/VoiceToolButton";
 import { TooltipOnLongPress } from "../components/TooltipOnLongPress";
 import { assembleComposerBody, parseComposerBody, formatRelativeTime, describePollDuration, appendLongText, estimateAssembledBodyLength, insertAtCaret, shouldSerializePoll } from "../composer-body";
 import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-publish";
+import { createProfileStore } from "../profile-store";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 
 // 在 composer 未选地点时给 location-picker-sheet 一个 fallback
 const DEFAULT_LOCATION_FALLBACK: AnyLocation = DEFAULT_LOCATION as AnyLocation;
+
+// FEED-OWN-001: 发布时读取与 me 页同源的 profile 记录，拿到用户自己设
+// 过的真名；没设过则不传展示名（读端按 author id 兜底）。
+const composerProfileStore = createProfileStore(nativeSecureStorageDriver);
 
 const COMPOSER_MEDIA_ITEM_SPAN = 130;
 const MAX_BODY_LENGTH = 500;
@@ -500,6 +506,8 @@ export function ComposerV2Screen({
       });
       // 拼接 payload（交给 composer-publish 统一处理 ephemeralUntil / poll 字段映射）。
       // overrides：body / mediaRefs 由调用方指定（已 assemble 过 / 已上传完）。
+      // FEED-OWN-001: 只传用户自己设过的真名；没设过就省略，绝不写死 "你"。
+      const profileName = (await composerProfileStore.read().catch(() => undefined))?.name?.trim();
       const payload = buildCreatePostPayload(
         {
           body: threadedBody,
@@ -516,7 +524,8 @@ export function ComposerV2Screen({
         quoteTarget,
         {
           body: finalBody,
-          ...(mediaRefs && mediaRefs.length > 0 ? { mediaRefs } : {})
+          ...(mediaRefs && mediaRefs.length > 0 ? { mediaRefs } : {}),
+          ...(profileName ? { authorDisplayName: profileName } : {})
         }
       );
       idempotencyRef.current ??= newPublishIdempotencyKey();

@@ -177,6 +177,20 @@ describe("buildCreatePostPayload", () => {
       quoteTarget: undefined
     })).not.toContain("📊");
   });
+
+  it("FEED-OWN-001: 默认不再写死 authorDisplayName=你（读端按 author id 判定归属）", () => {
+    const payload = buildCreatePostPayload({ ...baseDraft, body: "今天下午" });
+    expect(payload.authorDisplayName).toBeUndefined();
+  });
+
+  it("FEED-OWN-001: 调用方传入的真名通过 overrides 上线", () => {
+    const payload = buildCreatePostPayload(
+      { ...baseDraft, body: "今天下午" },
+      undefined,
+      { authorDisplayName: "Huyen" }
+    );
+    expect(payload.authorDisplayName).toBe("Huyen");
+  });
 });
 
 describe("applyUploadOutcomes", () => {
@@ -294,6 +308,37 @@ describe("performPublish", () => {
       expect(result.payload.body).toBe("纯文字");
       expect(result.payload.mediaRefs).toBeUndefined();
     }
+  });
+
+  it("FEED-OWN-001: performPublish 默认不带展示名，真名经 options 上线", async () => {
+    const mediaClient = {
+      uploadMedia: async () => ({ mediaAssetId: "x" })
+    } as unknown as Parameters<typeof performPublish>[2]["mediaClient"];
+    const seen: CreatePostPayload[] = [];
+    const localNet = {
+      createPost: async (payload: CreatePostPayload) => {
+        seen.push(payload);
+        return quotePost;
+      }
+    } as unknown as Parameters<typeof performPublish>[2]["localNet"];
+
+    const anonymous = await performPublish(
+      { ...baseDraft, body: "a", media: [] },
+      undefined,
+      { localNet, mediaClient },
+      { idempotencyKey: "k-anon" }
+    );
+    expect(anonymous.ok).toBe(true);
+    expect(seen[0]?.authorDisplayName).toBeUndefined();
+
+    const named = await performPublish(
+      { ...baseDraft, body: "b", media: [] },
+      undefined,
+      { localNet, mediaClient },
+      { idempotencyKey: "k-named", authorDisplayName: "Huyen" }
+    );
+    expect(named.ok).toBe(true);
+    expect(seen[1]?.authorDisplayName).toBe("Huyen");
   });
 });
 
