@@ -59,7 +59,7 @@ let cachedPostIds: Set<string> = new Set();
 // 本人头像：与“我的→个人总管理”同源（profileStore 本地记录 + document
 // 目录重锚 + 存在性校验，AVATAR-001 同款逻辑）。动态之前写死黑底圆圈，
 // 自己的帖子也显示黑头——现在本人帖子用真头像，他人暂无来源仍用首字 fallback。
-const feedProfileStore = createProfileStore(nativeSecureStorageDriver);
+// PROFILE-READ-001: 按账户隔离，和 me 页同一 key 规则（组件内 useMemo 实例）。
 const FEED_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
@@ -229,6 +229,10 @@ export function FeedSurface({
   // 本人头像 URI（与个人总管理同源）：mount 时读一次，换头像后切 Tab
   // 重挂即刷新。读不到/文件不存在就保持 undefined，走首字 fallback。
   const [viewerAvatarUri, setViewerAvatarUri] = useState<string | undefined>(undefined);
+  const feedProfileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
   useEffect(() => {
     let active = true;
     void feedProfileStore.read().then((record) => {
@@ -244,7 +248,7 @@ export function FeedSurface({
       }
     }).catch(() => undefined);
     return () => { active = false; };
-  }, []);
+  }, [feedProfileStore]);
   function isOwnPost(post: FeedPost): boolean {
     // FEED-OWN-001: strict author-id check only. Unknown viewer is
     // fail-closed (never own); display-name matching is forbidden.
@@ -979,6 +983,7 @@ export function FeedSurface({
         localNet={localNet}
         mediaClient={mediaClient}
         secureSessionStore={secureSessionStore}
+        viewerAccountId={viewerAccountId}
         onClose={() => { setComposerOpen(false); setComposerQuoteId(null); }}
         onPublished={async () => { setComposerOpen(false); setComposerQuoteId(null); await loadFeed(); }}
         posts={posts}

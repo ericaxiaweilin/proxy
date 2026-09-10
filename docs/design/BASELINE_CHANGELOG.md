@@ -4,6 +4,11 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 148 — 2026-09-10
+
+- me 页 hydration 按账户隔离：服务端 profile → 本账户本地记录 → 同号旧记录继承 → 按登录标识派生 → 中性兜底；新账号不再显示写死的演示身份。
+- 视觉无变化；profile 写盘 key 按账户隔离，同机多账号不再串名；发布器与状态流读同一账户的 profile。
+
 ## Revision 147 — 2026-09-10
 
 - 真人能力页返回栏进入 iOS/Android 安全区，扩大点击热区，返回明确关闭全屏页并回到 Home。

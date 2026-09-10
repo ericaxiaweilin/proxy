@@ -1,6 +1,6 @@
 // Status 24h — Ghost Posts 轻量化：发布后 24/48h 自动归档，不进永久主页/市场。
 // 小美发「周六下午想去西湖拍照 ☕️」产生机会但不挂牌；回复走私信，Agent 可召回。
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { type SocialSpaceClient, type SocialStatus } from "../socialspace-client";
 import { color, shadows } from "../theme";
@@ -41,10 +41,12 @@ function hoursLeft(expiresAt: number): string {
   return `${h}h 后归档`;
 }
 
-// FEED-OWN-001: 与 me 页同源的 profile 记录，发布状态时带真名。
-const statusProfileStore = createProfileStore(nativeSecureStorageDriver);
-
 export function StatusFeed({ client, onReply, viewerAccountId }: { client: SocialSpaceClient; onReply?: (author: string) => void; viewerAccountId?: string | undefined }): React.JSX.Element {
+  // PROFILE-READ-001: 发布状态时读本账户的 profile（与 me 页同一 key 规则）。
+  const statusProfileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
   const [statuses, setStatuses] = useState<Status[]>([]);
   const [draft, setDraft] = useState("");
   const [location, setLocation] = useState("");

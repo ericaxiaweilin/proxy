@@ -6,7 +6,7 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
@@ -14,7 +14,9 @@ import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import { Directory, File, Paths } from "expo-file-system";
-import { createProfileStore, DEFAULT_PROFILE, avatarFileName, type ProfileRecord } from "../profile-store";
+import { createProfileStore, avatarFileName, type ProfileRecord } from "../profile-store";
+import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
+import { createLastSignInStore } from "../last-signin-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
@@ -59,7 +61,7 @@ import { styles } from "./me-styles";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
-const profileStore = createProfileStore(nativeSecureStorageDriver);
+const lastSignInStore = createLastSignInStore(nativeSecureStorageDriver);
 const socialSettingsStore = createSocialSettingsStore(nativeSecureStorageDriver);
 
 const PROFILE_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
@@ -256,6 +258,13 @@ export function MeSurface({
   socialSettingsClient?: SocialSettingsClient | undefined;
   onOpenSearch?: ((query: string) => void) | undefined;
 }): React.JSX.Element {
+  // PROFILE-READ-001: profile storage is scoped per account. The module
+  // singleton cannot be used: two accounts on one device must never share
+  // a name/handle.
+  const profileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
   const [subPage, setSubPage] = useState<MeSubPage>();
   useModuleBackHandler(subPage ? () => { setSubPage(undefined); return true; } : undefined);
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -399,40 +408,109 @@ export function MeSurface({
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
   const [profileDraft, setProfileDraft] = useState({
-    name: DEFAULT_PROFILE.name,
-    handle: DEFAULT_PROFILE.handle,
-    bio: DEFAULT_PROFILE.bio,
-    city: DEFAULT_PROFILE.city
+    name: NEUTRAL_PROFILE.name,
+    handle: NEUTRAL_PROFILE.handle,
+    bio: NEUTRAL_PROFILE.bio,
+    city: NEUTRAL_PROFILE.city
   });
   const profileHydratedRef = useRef(false);
+  const profileHydratedForRef = useRef<string | undefined>(undefined);
   const profileTouchedRef = useRef(false);
   useEffect(() => {
-    if (profileHydratedRef.current) return;
+    // PROFILE-READ-001 hydration order (first writer wins per account):
+    // 1. server profile (source of truth once the user has saved);
+    // 2. this account's local record;
+    // 3. legacy device-global record, adopted only when the remembered
+    //    login belongs to this same account (no cross-account inheritance);
+    // 4. derived from this account's own login identifier;
+    // 5. neutral label (never the hardcoded demo identity).
+    if (profileHydratedRef.current && profileHydratedForRef.current === viewerAccountId) return;
     let cancelled = false;
-    void profileStore.read().then((record) => {
-      if (cancelled || profileTouchedRef.current || !record) return;
-      profileHydratedRef.current = true;
-      setProfileDraft({ name: record.name, handle: record.handle, bio: record.bio, city: record.city });
-      // AVATAR-001: 文件名按当前沙盒重锚 + 存在性校验（v57 File 没有
-      // exists API，用目录 listing 判）。之前 `file.exists` 恒 falsy，
-      // 每次冷启动都丢头像只剩字母头。读到老绝对路径则后台回写规范化。
-      if (record.avatarPath) {
+    void (async () => {
+      const applyRecord = (record: { name: string; handle: string; bio: string; city: string; avatarPath?: string | undefined }): void => {
+        if (cancelled || profileTouchedRef.current) return;
+        profileHydratedRef.current = true;
+        profileHydratedForRef.current = viewerAccountId;
+        setProfileDraft({ name: record.name, handle: record.handle, bio: record.bio, city: record.city });
+      };
+      const hydrateAvatar = (avatarPath?: string | undefined, record?: ProfileRecord): void => {
+        if (cancelled || !avatarPath) return;
         try {
-          const name = avatarFileName(record.avatarPath);
+          const name = avatarFileName(avatarPath);
           const names = new Set(PROFILE_AVATAR_DIR.list().map((entry) => entry.name));
           if (names.has(name)) {
             setProfileAvatarUri(new File(PROFILE_AVATAR_DIR, name).uri);
-            if (record.avatarPath !== name) {
+            if (record && record.avatarPath !== name) {
               void profileStore.write({ ...record, avatarPath: name }).catch(() => undefined);
             }
           }
         } catch {
           // 目录不可读：保持字母头，不崩。
         }
+      };
+      // 1. server (PROFILE-001 source of truth).
+      if (profileClient && viewerAccountId) {
+        try {
+          const remote = await profileClient.getProfile(viewerAccountId);
+          if (cancelled || profileTouchedRef.current) return;
+          const record: ProfileRecord = {
+            name: remote.name,
+            handle: remote.handle,
+            bio: remote.bio,
+            city: remote.city,
+            avatarPath: remote.avatarPath ? avatarFileName(remote.avatarPath) : undefined,
+            updatedAt: remote.updatedAt
+          };
+          await profileStore.write(record).catch(() => undefined);
+          applyRecord(record);
+          hydrateAvatar(record.avatarPath);
+          return;
+        } catch {
+          // No server profile yet (fresh account) or offline: fall through
+          // to local sources instead of blocking the page.
+        }
       }
-    }).catch(() => undefined);
+      // 2. this account's local record.
+      try {
+        const record = await profileStore.read();
+        if (record) {
+          applyRecord(record);
+          hydrateAvatar(record.avatarPath, record);
+          return;
+        }
+      } catch {
+        // fall through
+      }
+      // 3. legacy device-global record: adopt only on same-account continuity.
+      try {
+        const legacy = await createProfileStore(nativeSecureStorageDriver).read();
+        const remembered = await lastSignInStore.read().catch(() => undefined);
+        if (legacy && remembered?.userAccountId && remembered.userAccountId === viewerAccountId) {
+          await profileStore.write(legacy).catch(() => undefined);
+          applyRecord(legacy);
+          hydrateAvatar(legacy.avatarPath, legacy);
+          return;
+        }
+      } catch {
+        // fall through
+      }
+      // 4. derive from this account's own login identifier.
+      try {
+        const remembered = await lastSignInStore.read().catch(() => undefined);
+        const owned = remembered && (!viewerAccountId || remembered.userAccountId === viewerAccountId)
+          ? remembered
+          : undefined;
+        const derived = deriveProfileFromIdentifier(owned?.identifier, owned?.channel);
+        const record: ProfileRecord = { ...derived, avatarPath: undefined, updatedAt: new Date().toISOString() };
+        // Cache per account so composer/status publish the same truthful name.
+        if (viewerAccountId) await profileStore.write(record).catch(() => undefined);
+        applyRecord(record);
+      } catch {
+        applyRecord(NEUTRAL_PROFILE);
+      }
+    })();
     return () => { cancelled = true; };
-  }, []);
+  }, [profileClient, viewerAccountId, profileStore]);
 
   useEffect(() => {
     let cancelled = false;

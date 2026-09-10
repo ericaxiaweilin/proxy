@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { avatarFileName, createProfileStore, DEFAULT_PROFILE, isProfileRecord } from "./profile-store";
+import { avatarFileName, createProfileStore, DEFAULT_PROFILE, isProfileRecord, profileKeyFor } from "./profile-store";
 import { InMemorySecureStorageDriver } from "./secure-session";
 
 describe("isProfileRecord", () => {
@@ -75,6 +75,17 @@ describe("createProfileStore", () => {
     await store.write({ ...DEFAULT_PROFILE, name: "X" });
     await store.clear();
     expect(await store.read()).toBeUndefined();
+  });
+
+  it("PROFILE-READ-001: scoped stores isolate accounts on one device", async () => {
+    const driver = new InMemorySecureStorageDriver();
+    const storeA = createProfileStore(driver, "user_a");
+    const storeB = createProfileStore(driver, "user_b");
+    await storeA.write({ ...DEFAULT_PROFILE, name: "A" });
+    expect(await storeB.read()).toBeUndefined();
+    expect((await storeA.read())?.name).toBe("A");
+    expect(profileKeyFor("user_a")).toBe("proxy.profile.v1.user_a");
+    expect(profileKeyFor(undefined)).toBe("proxy.profile.v1");
   });
 });
 

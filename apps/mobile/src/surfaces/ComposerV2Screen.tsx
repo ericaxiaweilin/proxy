@@ -75,10 +75,6 @@ import { nativeSecureStorageDriver } from "../native-secure-storage";
 // 在 composer 未选地点时给 location-picker-sheet 一个 fallback
 const DEFAULT_LOCATION_FALLBACK: AnyLocation = DEFAULT_LOCATION as AnyLocation;
 
-// FEED-OWN-001: 发布时读取与 me 页同源的 profile 记录，拿到用户自己设
-// 过的真名；没设过则不传展示名（读端按 author id 兜底）。
-const composerProfileStore = createProfileStore(nativeSecureStorageDriver);
-
 const COMPOSER_MEDIA_ITEM_SPAN = 130;
 const MAX_BODY_LENGTH = 500;
 const MAX_MEDIA = 6;
@@ -117,6 +113,8 @@ type Props = {
   // R15.37: composet 需要知道当前 session 以供
   //   “未登录不发” + “未登录不点发布” 这两个 UI gate 用。
   secureSessionStore?: SecureSessionStore | undefined;
+  // PROFILE-READ-001: 发布者展示名必须读本账户的 profile，不能串号。
+  viewerAccountId?: string | undefined;
   // 从父组件传入的初始值（quote: 由 feed.tsx 的 openComposer(quoteId?) 透传）
   initialQuoteId?: string | null;
   posts: FeedPost[];
@@ -129,10 +127,17 @@ export function ComposerV2Screen({
   localNet,
   mediaClient,
   secureSessionStore,
+  viewerAccountId,
   initialQuoteId,
   posts
 }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  // PROFILE-READ-001: 发布者展示名必须读本账户的 profile（与 me 页同一
+  // key 规则），不能读到别的账号在本机留下的名字。
+  const composerProfileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
   // R15.37: P0 “未登录不发布” 强 gate — 准仅发布按钮状态。
   //   未设置 store (开发环境 / 离线 unit test) 默认为 “可发” 以免
   //   拑入别的 race; 运行时总是传入 store。

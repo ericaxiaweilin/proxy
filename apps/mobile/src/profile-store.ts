@@ -18,6 +18,17 @@ import type { SecureStorageDriver } from "./secure-session";
 
 const PROFILE_KEY = "proxy.profile.v1";
 
+/**
+ * PROFILE-READ-001: profile storage is scoped per account so two accounts
+ * sharing one device never see each other's name/handle. The unscoped key
+ * is the pre-pipeline legacy slot and must only be read for one-time
+ * same-account adoption (see me.tsx hydration), never as a live source.
+ */
+export function profileKeyFor(accountId?: string | undefined): string {
+  const scope = (accountId ?? "").trim();
+  return scope === "" ? PROFILE_KEY : `${PROFILE_KEY}.${scope}`;
+}
+
 export type ProfileRecord = {
   name: string;
   handle: string;
@@ -53,15 +64,16 @@ export function isProfileRecord(value: unknown): value is ProfileRecord {
   );
 }
 
-export function createProfileStore(driver: SecureStorageDriver): ProfileStore {
+export function createProfileStore(driver: SecureStorageDriver, accountId?: string | undefined): ProfileStore {
+  const key = profileKeyFor(accountId);
   return {
     async read() {
       try {
-        const raw = await driver.getItem(PROFILE_KEY);
+        const raw = await driver.getItem(key);
         if (!raw) return undefined;
         const parsed = JSON.parse(raw) as unknown;
         if (!isProfileRecord(parsed)) {
-          await driver.deleteItem(PROFILE_KEY).catch(() => undefined);
+          await driver.deleteItem(key).catch(() => undefined);
           return undefined;
         }
         return parsed;
@@ -71,10 +83,10 @@ export function createProfileStore(driver: SecureStorageDriver): ProfileStore {
     },
     async write(value) {
       if (!isProfileRecord(value)) throw new Error("invalid ProfileRecord value");
-      await driver.setItem(PROFILE_KEY, JSON.stringify(value));
+      await driver.setItem(key, JSON.stringify(value));
     },
     async clear() {
-      await driver.deleteItem(PROFILE_KEY).catch(() => undefined);
+      await driver.deleteItem(key).catch(() => undefined);
     }
   };
 }
