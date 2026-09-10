@@ -4,6 +4,10 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 155 — 2026-09-10
+
+- 顶栏 logo 让出状态栏时间（与场景地图同式）；此前整页 Header 无安全区，属历史遗留。
+
 ## Revision 154 — 2026-09-10
 
 - 统一媒体资产管线：media/asset-sources 唯一解析入口（服务端媒体/绝对 URL/服务端路径/打包注册表/本地文件），作者头像映射收归 media/author-avatar；AI 人像注册表迁入管线，旧模块转调。

@@ -769,8 +769,10 @@ export function AppShell({
 
 // 基线 .header.root：只有 Otter logo + Proxy 字标（上下文徽章不在此层，见 Me 的 contextline）。
 function Header({ compact }: { compact: boolean }): React.JSX.Element {
+  // 顶栏必须让出状态栏时间（与场景地图同式：安全区取到时间行下方）。
+  const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.header, compact && styles.headerCompact]}>
+    <View style={[styles.header, compact && styles.headerCompact, { paddingTop: Math.max(insets.top - 10, 0) }]}>
       <View style={styles.headerBrand}>
         <Image resizeMode="contain" source={OTTER_LOGO} style={[styles.headerLogo, compact && styles.headerLogoCompact]} />
         <Text style={[styles.headerName, compact && styles.headerNameCompact]}>Proxy</Text>
