@@ -86,7 +86,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   // 全页无 shell chrome，必须自己留安全区，否则顶栏顶进状态栏
   // （标题被时间盖住、返回键落进系统手势区点不了）。
   const insets = useSafeAreaInsets();
-  const rootPad = { paddingTop: Math.max(insets.top, 12), paddingBottom: Math.max(insets.bottom, 0) };
+  // 顶栏刚好让出状态栏时间即可，多了显空：安全区只取到时间行下方。
+  const rootPad = { paddingTop: Math.max(insets.top - 10, 8), paddingBottom: Math.max(insets.bottom, 0) };
   // §4/§13：系统返回逐层收起——详情→列表→关闭（与屏上 ‹ 同序，后注册先消费，详情优先）。
   useModuleBackHandler(() => { onBack(); return true; });
   useModuleBackHandler(selectedId && selectedId !== initialSceneId ? () => { setSelectedId(undefined); return true; } : undefined);
@@ -431,7 +432,7 @@ function DataRow({ label, value, last = false }: { label: string; value: string;
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
-  topBar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 10 },
+  topBar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 6 },
   topCopy: { flex: 1 }, title: { color: color.ink, fontSize: 27, fontWeight: "900", lineHeight: 34 }, subtitle: { color: color.muted, fontSize: 12, marginTop: 1 },
   roundButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, height: 44, justifyContent: "center", width: 44 },
   stats: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 10 }, stat: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 9 }, statValue: { color: color.ink, fontSize: 19, fontWeight: "900" }, statLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
