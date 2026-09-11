@@ -38,6 +38,7 @@ import { color, shadows } from "../theme";
 import { R37OpportunityCard, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
 import { R37TypePalette } from "./r37-type-palette";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
+import { DemandWizard } from "./demand-wizard";
 import { resolveAuthorDisplayName } from "../feed-author";
 
 // “热门探索点” = 可以是河内市中心的著名地点 (西湖、还剑湖)，
@@ -146,6 +147,8 @@ export function MarketSurface({
   const [oppQuoteMode, setOppQuoteMode] = useState<"budget" | "standard" | "premium" | "custom">("standard");
   const [publishOpen, setPublishOpen] = useState(false);
   const [activityPublishOpen, setActivityPublishOpen] = useState(false);
+  // R58 一期：发布需求向导（Moment 模板 → 规格确认 → 成功）。
+  const [demandWizardOpen, setDemandWizardOpen] = useState(false);
   const [publishMenuOpen, setPublishMenuOpen] = useState(false);
   const [selectOpp, setSelectOpp] = useState<MarketOpportunity | null>(null);
 
@@ -155,6 +158,7 @@ export function MarketSurface({
   useModuleBackHandler(publishMenuOpen ? () => { setPublishMenuOpen(false); return true; } : undefined);
   useModuleBackHandler(activityPublishOpen ? () => { setActivityPublishOpen(false); return true; } : undefined);
   useModuleBackHandler(publishOpen ? () => { setPublishOpen(false); return true; } : undefined);
+  useModuleBackHandler(demandWizardOpen ? () => { setDemandWizardOpen(false); return true; } : undefined);
   useModuleBackHandler(activityDetail ? () => { setActivityDetail(null); return true; } : undefined);
   useModuleBackHandler(oppDetail ? () => { setOppDetail(null); return true; } : undefined);
   const lastScrollYRef = useRef(0);
@@ -356,7 +360,17 @@ export function MarketSurface({
   function openOrderPublisher(): void {
     setPublishMenuOpen(false);
     setActivityPublishOpen(false);
+    setDemandWizardOpen(false);
     setPublishOpen(true);
+    setTab("OPPORTUNITY");
+    setPagerPage(0);
+  }
+
+  function openDemandWizard(): void {
+    setPublishMenuOpen(false);
+    setActivityPublishOpen(false);
+    setPublishOpen(false);
+    setDemandWizardOpen(true);
     setTab("OPPORTUNITY");
     setPagerPage(0);
   }
@@ -364,6 +378,7 @@ export function MarketSurface({
   function openActivityPublisher(): void {
     setPublishMenuOpen(false);
     setPublishOpen(false);
+    setDemandWizardOpen(false);
     setActivityPublishOpen(true);
     setTab("ACTIVITY");
     setPagerPage(1);
@@ -374,7 +389,7 @@ export function MarketSurface({
     const bottomPad = bottomNavVisible === false ? 16 : 120;
     return (
     <View style={styles.marketPage}>
-    <ScrollView key={`${pageTab}:${publishOpen ? "order" : activityPublishOpen ? "activity" : "list"}`} style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView key={`${pageTab}:${demandWizardOpen ? "demand" : publishOpen ? "order" : activityPublishOpen ? "activity" : "list"}`} style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
         <Text style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
@@ -404,7 +419,16 @@ export function MarketSurface({
           {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
         </Text>
       ) : null}
-      {activityPublishOpen ? (
+      {demandWizardOpen ? (
+        <DemandWizard
+          marketplace={marketplace}
+          onBack={() => setDemandWizardOpen(false)}
+          onPublished={(opportunity) => {
+            setOpportunityItems((items) => [opportunity, ...items]);
+          }}
+          onViewMarket={() => setDemandWizardOpen(false)}
+        />
+      ) : activityPublishOpen ? (
         <PublishActivityForm
           activities={activities}
           venueOptions={activityItems}
@@ -524,7 +548,7 @@ export function MarketSurface({
         </>
       )}
     </ScrollView>
-    {!publishOpen && !activityPublishOpen && !selectOpp && !oppDetail && !activityDetail ? <Pressable accessibilityLabel="发布订单或活动" onPress={() => setPublishMenuOpen(true)} style={[styles.floatingPublish, { bottom: bottomNavVisible === false ? 28 : 116 }]}>
+    {!publishOpen && !activityPublishOpen && !demandWizardOpen && !selectOpp && !oppDetail && !activityDetail ? <Pressable accessibilityLabel="发布订单或活动" onPress={() => setPublishMenuOpen(true)} style={[styles.floatingPublish, { bottom: bottomNavVisible === false ? 28 : 116 }]}>
       <ProxyIcon color={color.white} name="plus" size={24} />
     </Pressable> : null}
     </View>
@@ -554,10 +578,13 @@ export function MarketSurface({
         <View onStartShouldSetResponder={() => true} style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
           <View style={styles.publishMenuGrab} />
           <Text style={styles.publishMenuTitle}>发布</Text>
-          <Text style={styles.publishMenuHint}>订单用于付费需求撮合；活动用于多人共同参与。</Text>
+          <Text style={styles.publishMenuHint}>需求按 Moment 向导发布；订单用于付费需求撮合；活动用于多人共同参与。</Text>
           <View style={styles.publishMenu}>
-            <Pressable accessibilityLabel="发布订单" onPress={openOrderPublisher} style={styles.publishMenuPrimary}>
-              <ProxyIcon color={color.white} name="plus" size={20} /><Text style={styles.publishMenuPrimaryText}>发布订单</Text>
+            <Pressable accessibilityLabel="发布需求" onPress={openDemandWizard} style={styles.publishMenuPrimary}>
+              <ProxyIcon color={color.white} name="plus" size={20} /><Text style={styles.publishMenuPrimaryText}>发布需求</Text>
+            </Pressable>
+            <Pressable accessibilityLabel="发布订单" onPress={openOrderPublisher} style={styles.publishMenuSecondary}>
+              <ProxyIcon color={color.ink} name="plus" size={20} /><Text style={styles.publishMenuSecondaryText}>发布订单</Text>
             </Pressable>
             <Pressable accessibilityLabel="发布活动" onPress={openActivityPublisher} style={styles.publishMenuSecondary}>
               <ProxyIcon color={color.ink} name="star" size={20} /><Text style={styles.publishMenuSecondaryText}>发布活动</Text>
@@ -1356,7 +1383,7 @@ const styles = StyleSheet.create({
   publishMenuGrab: { alignSelf: "center", backgroundColor: color.line, borderRadius: 99, height: 4, marginBottom: 8, width: 38 },
   publishMenuTitle: { color: color.ink, fontSize: 20, fontWeight: "900" },
   publishMenuHint: { color: color.muted, fontSize: 12, lineHeight: 17, marginBottom: 12, marginTop: 3 },
-  publishMenu: { flexDirection: "row", gap: 8 },
+  publishMenu: { flexDirection: "column", gap: 8 },
   publishMenuPrimary: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, flex: 1, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48 },
   publishMenuPrimaryText: { color: color.white, fontSize: 14, fontWeight: "800" },
   publishMenuSecondary: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48 },
