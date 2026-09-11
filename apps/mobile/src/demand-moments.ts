@@ -5,6 +5,7 @@
 // 二期草稿流，一期发布即公开市场。
 
 import type { PublishMarketOpportunityInput } from "@proxy/contracts";
+import type { SupplierCandidate } from "./supply-client";
 
 export type MomentTemplate = {
   id: string;
@@ -62,8 +63,7 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
 /**
  * 向导规格映射为发布输入。时间/时长/人数并入 time 展示；
  * 场景偏好并入 skills；一期 moneyFlow 固定 EARN（Moment 服务皆为获酬）。
- */
-export function buildDemandPublishInput(
+ */export function buildDemandPublishInput(
   template: MomentTemplate,
   specs: DemandSpecs
 ): PublishMarketOpportunityInput {
@@ -84,4 +84,71 @@ export function buildDemandPublishInput(
     lens: ["NOW", "NEARBY"],
     ...(notes === "" ? {} : { desc: notes.slice(0, 500) })
   };
+}
+
+export type PeopleSheetFilters = {
+  language: string;
+  certifiedOnly: boolean;
+  maxBudget: number;
+  day: string;
+};
+
+export const DEFAULT_PEOPLE_FILTERS: PeopleSheetFilters = {
+  language: "不限",
+  certifiedOnly: false,
+  maxBudget: 0,
+  day: "不限"
+};
+
+/** 当地日边界（毫秒）。day: 今晚/明天/周末/不限。 */
+export function dayWindow(day: string, now: number): { start: number; end: number } | undefined {
+  const base = new Date(now);
+  base.setHours(0, 0, 0, 0);
+  const dayMs = 24 * 3600 * 1000;
+  if (day === "今晚") {
+    const start = base.getTime() + 18 * 3600 * 1000;
+    return { start, end: base.getTime() + dayMs };
+  }
+  if (day === "明天") {
+    return { start: base.getTime() + dayMs, end: base.getTime() + 2 * dayMs };
+  }
+  if (day === "周末") {
+    const dow = base.getDay();
+    const toSat = (6 - dow + 7) % 7;
+    const sat = base.getTime() + toSat * dayMs;
+    return { start: sat, end: sat + 2 * dayMs };
+  }
+  return undefined;
+}
+
+/**
+ * 选人筛选（纯函数）：快捷 chips + 面板筛选项同时生效（AND）。
+ * 无档期数据的人在指定日期时被滤掉；预算只看参考价。
+ */
+export function filterSuppliers(
+  people: SupplierCandidate[],
+  quick: string[],
+  sheet: PeopleSheetFilters,
+  now: number = Date.now()
+): SupplierCandidate[] {
+  const window = dayWindow(sheet.day, now);
+  return people.filter((person) => {
+    for (const filter of quick) {
+      if (filter === "推荐" && !person.eligibility.eligible) return false;
+      if (filter === "附近" && !person.eligibility.marketOk) return false;
+      if (filter === "现在可用" && !person.eligibility.availabilityOk) return false;
+      if (filter === "已认证" && !person.eligibility.capabilitiesOk) return false;
+    }
+    if (sheet.language !== "不限" && !person.languages.includes(sheet.language)) return false;
+    if (sheet.certifiedOnly && !person.eligibility.capabilitiesOk) return false;
+    if (sheet.maxBudget > 0 && !(person.referencePrice > 0 && person.referencePrice <= sheet.maxBudget)) return false;
+    if (window) {
+      if (!person.availability) return false;
+      const start = Date.parse(person.availability.startAt);
+      const end = Date.parse(person.availability.endAt);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+      if (end < window.start || start > window.end) return false;
+    }
+    return true;
+  });
 }
