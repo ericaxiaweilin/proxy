@@ -1,7 +1,7 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, AppState, Modal, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
+import { Animated, AppState, Modal, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 import { Image } from "expo-image";
 import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
@@ -179,6 +179,7 @@ export function MessagesSurface({
   onOpenConversation,
   onOpenRequests,
   onOpenContacts,
+  onChromeVisibilityChange,
   bottomNavVisible,
   displayIdentityClient,
   activeIdentityId,
@@ -264,6 +265,25 @@ export function MessagesSurface({
 
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
+
+  // 与动态 / 首页 / 市场同一套滑动显隐（上滑藏、下滑/回顶显，阈值 -18/+28）。
+  const lastYRef = useRef(0);
+  const dirRef = useRef(0);
+  const visibleRef = useRef(true);
+  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
+  function onInboxScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
+    const y = Math.max(0, e.nativeEvent.contentOffset.y);
+    const delta = y - lastYRef.current;
+    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+    else if (Math.abs(delta) >= 1) {
+      const prevDir = Math.sign(dirRef.current);
+      const nextDir = Math.sign(delta);
+      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
+      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
+      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
+    }
+    lastYRef.current = y;
+  }
   // 左滑删除的本机隐藏集：落盘，服务端刷新回来也照样过滤。
   // SYNC-FS-001: 读盘异步，mount 时 hydration 并与会话内状态合并。
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());
@@ -572,7 +592,7 @@ export function MessagesSurface({
       ) : null}
 
       {/* body */}
-      <ScrollView style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }}>
+      <ScrollView style={styles.homeBody} contentContainerStyle={{ paddingBottom: bottomNavVisible === false ? 16 : 96 }} onScroll={onInboxScroll} scrollEventThrottle={16}>
         {panel === "dialogs" ? (
           <>
             {filteredPinned.length > 0 ? (
