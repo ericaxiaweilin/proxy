@@ -20,7 +20,8 @@ vi.mock("expo-file-system", () => ({
     get exists(): boolean {
       return exists;
     }
-    json(): unknown {
+    // SYNC-FS-001: the real File.json() is async — mocks must match.
+    async json(): Promise<unknown> {
       return JSON.parse(files["prefs"] ?? "null");
     }
     write(content: string): void {
@@ -30,7 +31,7 @@ vi.mock("expo-file-system", () => ({
   },
 }));
 
-import { DEFAULT_FEED_PREFS, readFeedPrefs, writeFeedPrefs } from "./expo-feed-prefs-store";
+import { DEFAULT_FEED_PREFS, parseFeedPrefsSnapshot, readFeedPrefsAsync, writeFeedPrefs } from "./expo-feed-prefs-store";
 
 describe("expo-feed-prefs-store", () => {
   beforeEach(() => {
@@ -38,22 +39,22 @@ describe("expo-feed-prefs-store", () => {
     exists = false;
   });
 
-  it("returns defaults when nothing is stored", () => {
-    const prefs = readFeedPrefs();
+  it("returns defaults when nothing is stored", async () => {
+    const prefs = await readFeedPrefsAsync();
     expect(prefs.weights).toEqual(DEFAULT_FEED_PREFS.weights);
     expect(prefs.scope).toBe("7D");
     expect(prefs.muted).toEqual([]);
     expect(prefs.algoApplied).toBeNull();
   });
 
-  it("round-trips weights, scope, muted, and algo text", () => {
+  it("round-trips weights, scope, muted, and algo text", async () => {
     writeFeedPrefs({
       weights: { opportunity: 90, people: 10 },
       scope: "30D",
       muted: ["商业内容"],
       algoApplied: "多看摄影",
     });
-    const prefs = readFeedPrefs();
+    const prefs = await readFeedPrefsAsync();
     expect(prefs.weights.opportunity).toBe(90);
     expect(prefs.weights.people).toBe(10);
     expect(prefs.weights.commercial).toBe(DEFAULT_FEED_PREFS.weights.commercial);
@@ -62,7 +63,7 @@ describe("expo-feed-prefs-store", () => {
     expect(prefs.algoApplied).toBe("多看摄影");
   });
 
-  it("clamps out-of-range weights and drops malformed rows", () => {
+  it("clamps out-of-range weights and drops malformed rows", async () => {
     files["prefs"] = JSON.stringify({
       version: 1,
       weights: { opportunity: 500, people: -20, commercial: "high" },
@@ -71,12 +72,17 @@ describe("expo-feed-prefs-store", () => {
       algoApplied: 7,
     });
     exists = true;
-    const prefs = readFeedPrefs();
+    const prefs = await readFeedPrefsAsync();
     expect(prefs.weights.opportunity).toBe(100);
     expect(prefs.weights.people).toBe(0);
     expect(prefs.weights.commercial).toBe(DEFAULT_FEED_PREFS.weights.commercial);
     expect(prefs.scope).toBe("7D");
     expect(prefs.muted).toEqual(["a"]);
     expect(prefs.algoApplied).toBeNull();
+  });
+
+  it("SYNC-FS-001: an un-awaited json Promise parses to defaults", () => {
+    expect(parseFeedPrefsSnapshot(Promise.resolve({ version: 1 })).weights)
+      .toEqual(DEFAULT_FEED_PREFS.weights);
   });
 });

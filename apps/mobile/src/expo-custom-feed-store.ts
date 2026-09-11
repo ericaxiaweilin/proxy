@@ -31,12 +31,21 @@ function sanitizeFeeds(raw: unknown): CustomFeed[] | undefined {
   return out;
 }
 
-export function readCustomFeeds(fallback: CustomFeed[]): CustomFeed[] {
+/** 纯解析（SYNC-FS-001 单测入口）：坏数据回 fallback。 */
+export function parseCustomFeedsSnapshot(raw: unknown, fallback: CustomFeed[]): CustomFeed[] {
+  const snapshot = raw as Partial<CustomFeedSnapshot> | null;
+  if (!snapshot || typeof snapshot !== "object" || snapshot.version !== 1) return fallback;
+  return sanitizeFeeds(snapshot.feeds) ?? fallback;
+}
+
+/**
+ * SYNC-FS-001: File.json() 是异步的，同步读永远拿到 Promise。
+ * 本函数为唯一读入口（await）。
+ */
+export async function readCustomFeedsAsync(fallback: CustomFeed[]): Promise<CustomFeed[]> {
   try {
     if (!snapshotFile.exists) return fallback;
-    const snapshot = snapshotFile.json() as Partial<CustomFeedSnapshot>;
-    if (!snapshot || snapshot.version !== 1) return fallback;
-    return sanitizeFeeds(snapshot.feeds) ?? fallback;
+    return parseCustomFeedsSnapshot(await snapshotFile.json(), fallback);
   } catch {
     return fallback;
   }

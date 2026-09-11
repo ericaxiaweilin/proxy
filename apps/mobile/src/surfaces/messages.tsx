@@ -16,6 +16,7 @@ import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { dedupeInboxDialogs } from "../conversation-inbox-model";
 import type { ProfileClient } from "../profile-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
+import { parseFolders, parseHiddenChatIds } from "../local-snapshot";
 
 type HomePanel = "dialogs" | "convos" | "folders";
 type Folder = "all" | "friends" | "activity" | "invite";
@@ -30,20 +31,14 @@ const FOLDER_LABEL: Record<Folder, string> = { all: "全部", friends: "朋友",
 // 自建文件夹落盘（新建/移入移出），切模块重进不丢失。
 const foldersDir = new Directory(Paths.document, "proxy-folders");
 const foldersFile = new File(foldersDir, "folders-v1.json");
-function readFolders(): FolderV1[] {
+/**
+ * SYNC-FS-001: File.json() 是异步的，同步读永远拿到 Promise。
+ * 本函数为唯一读入口（await）。解析见 local-snapshot（单测覆盖）。
+ */
+export async function readFoldersAsync(): Promise<FolderV1[]> {
   try {
     if (!foldersFile.exists) return [];
-    const raw: unknown = foldersFile.json();
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((x): x is FolderV1 =>
-      typeof x === "object" && x !== null &&
-      typeof (x as { id?: unknown }).id === "string" &&
-      typeof (x as { name?: unknown }).name === "string" &&
-      Array.isArray((x as { dialogIds?: unknown }).dialogIds)).map((x) => ({
-      id: x.id as string,
-      name: x.name as string,
-      dialogIds: (x.dialogIds as unknown[]).filter((d): d is string => typeof d === "string"),
-    }));
+    return parseFolders(await foldersFile.json());
   } catch {
     return [];
   }
@@ -84,11 +79,14 @@ function dayBucket(timestampMs: number): "今天" | "昨天" | "更早" {
 // 服务端保留审计（与“清空本机显示”同口径）。落盘持久化，重进/重启不回来。
 const hiddenChatsDir = new Directory(Paths.document, "proxy-hidden-chats");
 const hiddenChatsFile = new File(hiddenChatsDir, "hidden-v1.json");
-function readHiddenChatIds(): string[] {
+/**
+ * SYNC-FS-001: File.json() 是异步的，同步读永远拿到 Promise。
+ * 本函数为唯一读入口（await）。解析见 local-snapshot（单测覆盖）。
+ */
+export async function readHiddenChatIdsAsync(): Promise<string[]> {
   try {
     if (!hiddenChatsFile.exists) return [];
-    const raw: unknown = hiddenChatsFile.json();
-    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+    return parseHiddenChatIds(await hiddenChatsFile.json());
   } catch {
     return [];
   }
@@ -215,7 +213,20 @@ export function MessagesSurface({
   const [folderCreateOpen, setFolderCreateOpen] = useState(false);
   const [folderCreateName, setFolderCreateName] = useState("");
   // 自建文件夹：选中过滤成员，移入移出落盘。
-  const [folders, setFolders] = useState<FolderV1[]>(() => readFolders());
+  const [folders, setFolders] = useState<FolderV1[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void readFoldersAsync().then((stored) => {
+      if (cancelled || stored.length === 0) return;
+      setFolders((prev) => {
+        if (prev.length === 0) return stored;
+        const ids = new Set(prev.map((f) => f.id));
+        const missing = stored.filter((f) => !ids.has(f.id));
+        return missing.length === 0 ? prev : [...prev, ...missing];
+      });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   function persistFolders(next: FolderV1[]): void {
     setFolders(next);
@@ -254,7 +265,19 @@ export function MessagesSurface({
   const [serverDialogs, setServerDialogs] = useState<Dialog[]>();
   const [inboxError, setInboxError] = useState(false);
   // 左滑删除的本机隐藏集：落盘，服务端刷新回来也照样过滤。
-  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set(readHiddenChatIds()));
+  // SYNC-FS-001: 读盘异步，mount 时 hydration 并与会话内状态合并。
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    void readHiddenChatIdsAsync().then((ids) => {
+      if (cancelled || ids.length === 0) return;
+      setHiddenIds((prev) => {
+        if (ids.every((id) => prev.has(id))) return prev;
+        return new Set([...prev, ...ids]);
+      });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   const hideDialog = useCallback((id: string) => {
     setHiddenIds((prev) => {
       if (prev.has(id)) return prev;

@@ -1116,4 +1116,38 @@ if ! grep -q 'engagement.muted_authors' apps/api-go/migrations/078_muted_authors
   exit 1
 fi
 
+# SYNC-FS-001: File.json() 在 Expo 57 返回 Promise——同步消费拿到 Promise
+# 对象，Array.isArray 恒 false，五个本地持久化读路径全部静默回退默认
+# （左滑删掉的会话重进复活、偏好/自定频道/创作者草稿永不恢复）。
+# 修复 = 全部读入口 await 化 + 纯解析层 local-snapshot.ts（单测覆盖）+
+# mock 如实模拟 async 形态。supersedes HIDDEN-CHATS-001（同一 bug 的
+# 全类收网版；hidden-chats 分支只修了 hidden 一点且已被本修复覆盖）。
+pnpm --dir apps/mobile exec vitest run src/local-snapshot.test.ts \
+  src/sync-fs-persist.test.ts || exit $?
+if ! grep -q 'await hiddenChatsFile.json()' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [SYNC-FS-001]: hidden chats read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'await foldersFile.json()' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [SYNC-FS-001]: folders read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'await creatorFile.json()' apps/mobile/src/surfaces/creator-application.tsx; then
+  echo "  FAIL [SYNC-FS-001]: creator draft read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'await snapshotFile.json()' apps/mobile/src/expo-feed-prefs-store.ts; then
+  echo "  FAIL [SYNC-FS-001]: feed prefs read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'await snapshotFile.json()' apps/mobile/src/expo-custom-feed-store.ts; then
+  echo "  FAIL [SYNC-FS-001]: custom feeds read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'async json(): Promise<unknown>' apps/mobile/src/expo-feed-prefs-store.test.ts; then
+  echo "  FAIL [SYNC-FS-001]: mocks must model the real async File.json()" >&2
+  exit 1
+fi
+echo "    SYNC-FS-001: PASS (5 read paths await json() + pure parse layer + honest mocks)"
+
 echo "  regression contracts: OK"
