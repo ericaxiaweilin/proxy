@@ -23,13 +23,14 @@ import {
 
 type Step = "template" | "settings" | "preview" | "done";
 
-export function ActivityWizard({ activities, scenes, onBack, onPublished, onViewActivities, onOpenDemand }: {
+export function ActivityWizard({ activities, scenes, onBack, onPublished, onViewActivities, onOpenDemand, onReloadScenes }: {
   activities: ActivityClient;
   scenes: Activity[];
   onBack: () => void;
   onPublished: (activity: Activity) => void;
   onViewActivities: () => void;
   onOpenDemand: () => void;
+  onReloadScenes: () => void;
 }): React.JSX.Element {
   const [step, setStep] = useState<Step>("template");
   const [template, setTemplate] = useState<ActivityTemplate>(ACTIVITY_TEMPLATES[0]!);
@@ -155,7 +156,14 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onView
           <TextInput onChangeText={(time) => setSpecs((prev) => ({ ...prev, time }))} placeholder="自定义时间" placeholderTextColor={color.muted} style={[styles.input, styles.gapTop]} value={specs.time} />
 
           <Text style={styles.fieldLabel}>地点 / Scene</Text>
-          {sceneOptions.length === 0 ? <Text style={styles.hint}>暂无可选场景，请稍后重试。</Text> : (
+          {sceneOptions.length === 0 ? (
+            <View style={styles.emptyRow}>
+              <Text style={styles.hint}>暂无可选场景，可能是列表尚未加载成功。</Text>
+              <Pressable accessibilityLabel="重新加载场景" onPress={onReloadScenes} style={styles.retryBtn}>
+                <Text style={styles.retryText}>重新加载</Text>
+              </Pressable>
+            </View>
+          ) : (
             <View style={styles.chipRow}>
               {sceneOptions.map((scene) => (
                 <Pressable key={scene.realitySceneId} onPress={() => { setSceneId(scene.realitySceneId ?? ""); setSpecs((prev) => ({ ...prev, venueName: scene.venueName })); }} style={[styles.chip, sceneId === scene.realitySceneId && styles.chipOn]}>
@@ -286,6 +294,9 @@ const styles = StyleSheet.create({
   chipTextOn: { color: color.white },
   input: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, paddingHorizontal: 14, paddingVertical: 10 },
   hint: { color: color.muted, fontSize: 11, marginTop: 6 },
+  emptyRow: { alignItems: "center", flexDirection: "row", gap: 10, marginVertical: 6 },
+  retryBtn: { borderColor: color.violet, borderRadius: 999, borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 7 },
+  retryText: { color: color.violet, fontSize: 12, fontWeight: "800" },
   gapTop: { marginTop: 8 },
   notesInput: { minHeight: 64, textAlignVertical: "top" },
   error: { color: color.error, fontSize: 12, marginTop: 12, textAlign: "center" },

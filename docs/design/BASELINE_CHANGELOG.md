@@ -32,6 +32,10 @@ same commit. Do not record routine business logic changes here.
 
 - 市场机会改称订单；发布菜单改为创建订单（R58 向导：tabs/搜索筛选/选人/规格/成功）与创建活动；旧订单表单删除。
 
+## Revision 162 — 2026-09-11
+
+- 活动向导无场景时给显式重新加载入口；此前拉取失败即永久空列表。
+
 ## Revision 154 — 2026-09-10
 
 - 统一媒体资产管线：media/asset-sources 唯一解析入口（服务端媒体/绝对 URL/服务端路径/打包注册表/本地文件），作者头像映射收归 media/author-avatar；AI 人像注册表迁入管线，旧模块转调。
