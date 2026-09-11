@@ -1200,8 +1200,15 @@ require_test "OPP-CATALOG-001" "./internal/marketplace" \
 require_test "OPP-CATALOG-002" "./internal/marketplace" \
   "TestCatalogSnapshotSerializesWholeEngine" \
   "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-002" "./internal/marketplace" \
+  "TestListOpportunityTemplatesShipsWholeEngine" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
 if ! grep -q 'buildCatalogSnapshot' apps/api-go/internal/marketplace/service.go; then
   echo "  FAIL [OPP-CATALOG-001]: service dispatch must serve the engine snapshot" >&2
+  exit 1
+fi
+if ! grep -q 'activityPresets' apps/api-go/internal/marketplace/service.go; then
+  echo "  FAIL [OPP-CATALOG-002]: wire payload must forward activity presets (R58 activity line)" >&2
   exit 1
 fi
 if ! grep -q 'activityPresets' packages/contracts/src/index.ts; then

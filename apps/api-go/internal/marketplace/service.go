@@ -232,6 +232,9 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			"specs":       snap.Specs,
 			"policies":    snap.Policies,
 			"pricing":     snap.Pricing,
+			// OPP-CATALOG-002 (R58 activity line): creation-flow presets
+			// ride the same anonymous snapshot read.
+			"activityPresets": snap.ActivityPresets,
 		})
 	case "SuggestOpportunityTemplate":
 		// OPP-SUGGEST-001: semantic mapping of free text to a catalog

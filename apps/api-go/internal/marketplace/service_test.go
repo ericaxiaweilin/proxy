@@ -757,3 +757,40 @@ func TestPublishOpportunityResolvesOwnerFromProfile(t *testing.T) {
 		t.Fatalf("unresolved owner must store empty, got %q", unknownBody.Opportunity.Owner)
 	}
 }
+
+// TestListOpportunityTemplatesShipsWholeEngine pins the WIRE payload of
+// the anonymous catalog read: every engine field the mobile spec sheet
+// consumes must survive the service dispatch layer. The engine struct
+// test alone cannot catch a dropped key in the map[string]any assembly
+// (that exact bug shipped activityPresets as an empty list once).
+func TestListOpportunityTemplatesShipsWholeEngine(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	resp := s.HandleContext(t.Context(), marketEnvelope("ListOpportunityTemplates", "anon", map[string]any{}))
+	if resp.Outcome != "ACCEPTED" {
+		t.Fatalf("list templates: %+v", resp)
+	}
+	var body struct {
+		Templates        []OpportunityTemplate `json:"templates"`
+		Categories       []TemplateCategory    `json:"categories"`
+		Specs            []MomentSpecs         `json:"specs"`
+		Policies         []MomentPolicy        `json:"policies"`
+		Pricing          []PricingRule         `json:"pricing"`
+		ActivityPresets  []ActivityPreset      `json:"activityPresets"`
+	}
+	if err := json.Unmarshal([]byte(resp.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Templates) != 16 {
+		t.Fatalf("wire templates: got %d", len(body.Templates))
+	}
+	if len(body.Categories) != 5 {
+		t.Fatalf("wire categories: got %d", len(body.Categories))
+	}
+	if len(body.Specs) != 16 || len(body.Policies) != 16 || len(body.Pricing) == 0 {
+		t.Fatalf("wire engine incomplete: specs=%d policies=%d pricing=%d", len(body.Specs), len(body.Policies), len(body.Pricing))
+	}
+	if len(body.ActivityPresets) != 6 {
+		t.Fatalf("wire activityPresets: got %d (dispatch layer must forward every engine field)", len(body.ActivityPresets))
+	}
+}
