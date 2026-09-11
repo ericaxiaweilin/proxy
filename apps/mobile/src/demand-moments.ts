@@ -17,6 +17,8 @@ export type MomentTemplate = {
   defaultTime: string;
   defaultDuration: string;
   theme: string;
+  /** 时间筛选标签（晚间/下午/周末）。 */
+  timeTags: string[];
   skills: string;
   /** 参考价区间展示文案（如 "150–300K"）。 */
   priceRef: string;
@@ -25,12 +27,13 @@ export type MomentTemplate = {
 };
 
 export const MOMENT_TEMPLATES: MomentTemplate[] = [
-  { id: "coffee", emoji: "☕", title: "喝咖啡", venue: "咖啡馆", venueLabel: "咖啡馆 · 轻松见面", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "今晚 19:00", defaultDuration: "2 小时", theme: "咖啡", skills: "中文 · 轻松见面", priceRef: "150–300K", defaultPrice: "200,000₫" },
-  { id: "meal", emoji: "餐", title: "吃饭", venue: "餐厅", venueLabel: "餐厅 · 默认 1:1", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "今晚 18:30", defaultDuration: "2 小时", theme: "用餐", skills: "中文 · 本地餐厅", priceRef: "200–400K", defaultPrice: "300,000₫" },
-  { id: "ktv", emoji: "♪", title: "唱歌", venue: "KTV", venueLabel: "KTV · 夜间 Moment", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "20:00–22:00", defaultDuration: "2 小时", theme: "唱歌", skills: "中文 · 夜间", priceRef: "300–500K", defaultPrice: "400,000₫" },
-  { id: "photo", emoji: "相", title: "拍照", venue: "街区", venueLabel: "街拍 / 旅行照", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "2 小时", theme: "拍照", skills: "中文 · 街拍", priceRef: "300–600K", defaultPrice: "400,000₫" },
-  { id: "citywalk", emoji: "走", title: "City Walk", venue: "街区", venueLabel: "街区漫游 · 本地路线", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "City Walk", skills: "中文 · 本地路线", priceRef: "150–300K", defaultPrice: "200,000₫" },
-  { id: "exhibition", emoji: "展", title: "看展", venue: "美术馆", venueLabel: "美术馆 · 一起看", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "看展", skills: "中文 · 艺术", priceRef: "150–300K", defaultPrice: "200,000₫" }
+  { id: "coffee", emoji: "☕", title: "喝咖啡", venue: "咖啡馆", venueLabel: "咖啡馆 · 轻松见面", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "今晚 19:00", defaultDuration: "2 小时", theme: "咖啡", timeTags: ["晚间"], skills: "中文 · 轻松见面", priceRef: "150–300K", defaultPrice: "200,000₫" },
+  { id: "meal", emoji: "餐", title: "吃饭", venue: "餐厅", venueLabel: "餐厅 · 默认 1:1", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "今晚 18:30", defaultDuration: "2 小时", theme: "用餐", timeTags: ["晚间"], skills: "中文 · 本地餐厅", priceRef: "200–400K", defaultPrice: "300,000₫" },
+  { id: "ktv", emoji: "♪", title: "唱歌", venue: "KTV", venueLabel: "KTV · 夜间 Moment", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "20:00–22:00", defaultDuration: "2 小时", theme: "唱歌", timeTags: ["晚间"], skills: "中文 · 夜间", priceRef: "300–500K", defaultPrice: "400,000₫" },
+  { id: "photo", emoji: "相", title: "拍照", venue: "街区", venueLabel: "街拍 / 旅行照", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "2 小时", theme: "拍照", timeTags: ["下午"], skills: "中文 · 街拍", priceRef: "300–600K", defaultPrice: "400,000₫" },
+  { id: "citywalk", emoji: "走", title: "City Walk", venue: "街区", venueLabel: "街区漫游 · 本地路线", ratios: ["1:1", "≤ 4:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "City Walk", timeTags: ["下午", "周末"], skills: "中文 · 本地路线", priceRef: "150–300K", defaultPrice: "200,000₫" },
+  { id: "exhibition", emoji: "展", title: "看展", venue: "美术馆", venueLabel: "美术馆 · 一起看", ratios: ["1:1", "≤ 3:1"], defaultRatio: "1:1", defaultTime: "下午", defaultDuration: "半天", theme: "看展", timeTags: ["下午", "周末"], skills: "中文 · 艺术", priceRef: "150–300K", defaultPrice: "200,000₫" },
+  { id: "pro", emoji: "证", title: "城市协助", venue: "按需", venueLabel: "翻译 / 签证 / 法律 / 商务 · 专业认证优先", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "", defaultDuration: "2 小时", theme: "服务协助", timeTags: [], skills: "中文 · 专业协助", priceRef: "面议", defaultPrice: "" }
 ];
 
 export type DemandSpecs = {

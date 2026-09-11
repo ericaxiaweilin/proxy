@@ -3,14 +3,14 @@ import { PublishMarketOpportunityInputSchema } from "@proxy/contracts";
 import { buildDemandPublishInput, defaultSpecsFor, MOMENT_TEMPLATES } from "./demand-moments";
 
 describe("R58 demand wizard mapping", () => {
-  it("ships six moment templates with defaults", () => {
+  it("ships moment templates with defaults", () => {
     expect(MOMENT_TEMPLATES.map((template) => template.id)).toEqual(
-      ["coffee", "meal", "ktv", "photo", "citywalk", "exhibition"]
+      ["coffee", "meal", "ktv", "photo", "citywalk", "exhibition", "pro"]
     );
     for (const template of MOMENT_TEMPLATES) {
       expect(template.title.trim()).not.toBe("");
       expect(template.ratios).toContain(template.defaultRatio);
-      expect(template.defaultPrice.trim()).not.toBe("");
+      expect(template.priceRef.trim()).not.toBe("");
     }
   });
 
