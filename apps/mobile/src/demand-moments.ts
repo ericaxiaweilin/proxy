@@ -41,6 +41,43 @@ export const MOMENT_TEMPLATES: MomentTemplate[] = [
   { id: "pro", emoji: "证", title: "城市协助", venue: "按需", venueLabel: "翻译 / 签证 / 法律 / 商务 · 专业认证优先", ratios: ["1:1"], defaultRatio: "1:1", defaultTime: "", defaultDuration: "2 小时", theme: "服务协助", timeTags: [], skills: "中文 · 专业协助", priceRef: "面议", defaultPrice: "", category: "theme", tags: ["专业", "认证"] }
 ];
 
+// UI-ORDER-LOGO-001: 发布向导的 Moment 图标必须复用场景动作既有 logo（首页「动作」行
+// 与市场订单类型 logo 用的就是它），不再自己画一套 emoji（此前是 ☕/餐/♪/相/走/展/证）。
+// 图标资产见 assets/scene-activity/actions/*.svg，规范清单见
+// components/scene-activity-discovery.tsx 的 SCENE_ACTIONS。
+export const MOMENT_ACTION_ID: Record<string, string> = {
+  coffee: "coffee",
+  meal: "dining",
+  ktv: "music",
+  photo: "photo",
+  citywalk: "city-walk",
+  exhibition: "exhibition",
+  pro: "urban-support"
+};
+
+/**
+ * R58 城市协助 · Professional 服务目录（对齐原型 pro-card 四类）：
+ * 现场翻译 / 签证协助 / 法律咨询 / 商务协助。价格与备注取自原型服务条目。
+ */
+export type ProService = {
+  id: string;
+  title: string;
+  sub: string;
+  mark: string;
+  tags: string[];
+  price: string;
+  range: string;
+  note: string;
+  cert: string;
+};
+
+export const PRO_SERVICES: readonly ProService[] = [
+  { id: "translate", title: "现场翻译", sub: "商务 / 生活", mark: "文", tags: ["翻译", "现场"], price: "500K", range: "400–800K", note: "按明确场景提供翻译协助 · 默认 2 小时。", cert: "语言 / 时长 / 场景" },
+  { id: "visa", title: "签证协助", sub: "材料 / 流程 / 预约", mark: "签", tags: ["签证", "预约"], price: "面议", range: "按材料与周期", note: "材料清单、流程陪同与预约协助。", cert: "材料 / 流程 / 预约" },
+  { id: "legal", title: "法律咨询", sub: "按执业资格与领域匹配", mark: "法", tags: ["法律", "咨询"], price: "面议", range: "按领域与时长", note: "按执业资格与领域匹配专业人士。", cert: "按执业资格与领域匹配" },
+  { id: "business", title: "商务协助", sub: "会议 / 本地协调 / 陪同", mark: "商", tags: ["商务", "陪同"], price: "面议", range: "按会议与陪同", note: "会议支持、本地协调与现场陪同。", cert: "会议 / 本地协调 / 陪同" }
+];
+
 export type DemandSpecs = {
   ratio: string;
   time: string;
