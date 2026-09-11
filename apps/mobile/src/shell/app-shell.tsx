@@ -217,6 +217,10 @@ export function AppShell({
   // 离开动态也清除，下次正常进不带旧词。
   const [feedSearchSeed, setFeedSearchSeed] = useState<string | undefined>(undefined);
   const [feedChromeVisible, setFeedChromeVisible] = useState(true);
+  // chrome-parity: HOME / MESSAGES 主信息流的滑动显隐信号（与 FEED/MARKET
+  // 同一套上滑藏、下滑/回顶显逻辑；信号由各自 Surface 上报）。
+  const [homeChromeVisible, setHomeChromeVisible] = useState(true);
+  const [messageChromeVisible, setMessageChromeVisible] = useState(true);
   const rootSwipeBlockedRef = useRef(false);
   const setRootSwipeBlocked = useCallback((blocked: boolean): void => {
     rootSwipeBlockedRef.current = blocked;
@@ -364,6 +368,8 @@ export function AppShell({
 
   function selectTab(next: RootTab): void {
     setFeedChromeVisible(true);
+    setHomeChromeVisible(true);
+    setMessageChromeVisible(true);
     if (next === "MARKET") {
       setMarketEntry({ tab: "OPPORTUNITY", viewMode: "LIST" });
     }
@@ -427,6 +433,8 @@ export function AppShell({
   const isNavVisible = !realitySceneOpen && !openAIProfile && selectShellChromeVisible({
     tab,
     feedChromeVisible,
+    homeChromeVisible,
+    messageChromeVisible,
     feedChatOpen: Boolean(feedChatAuthor),
     feedPrefsOpen,
     messageChatOpen: Boolean(messageChatAuthor)
@@ -555,6 +563,7 @@ export function AppShell({
               onEnterWorkspace={enterWorkspace}
               onOpenFeed={() => selectTab("FEED")}
               onOpenMarket={(tab) => openMarket({ tab })}
+              onChromeVisibilityChange={setHomeChromeVisible}
               localNet={localNet}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
               onOpenAssistantConversation={openProxyAIConversation}
@@ -693,7 +702,7 @@ export function AppShell({
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>

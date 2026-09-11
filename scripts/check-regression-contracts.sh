@@ -1272,6 +1272,32 @@ if ! grep -q 'formatTraceId' apps/mobile/src/surfaces/market.tsx; then
   exit 1
 fi
 
+# CHROME-PARITY-001: HOME / MESSAGES 主信息流的滑动显隐从未接线——
+# RequesterHome 内部 handler 代码就绪但壳没传 onChromeVisibilityChange
+# （死代码），MessagesSurface prop 声明在类型里但收不到信号。四主信息流
+# （FEED/MARKET/HOME/MESSAGES）统一上滑藏、下滑/回顶显（阈值 -18/+28，
+# 回顶 48px 强制显）。selectors 的 home/message 信号是 optional——未接线
+# 的调用方保持常显（向后兼容）。MARKET 走共享 feedChromeVisible 是
+# commander 09-10 的简化设计，保留不动。
+if ! grep -q 'lets the %s stream hide chrome like Feed (chrome-parity)' apps/mobile/src/shell/app-shell.test.ts; then
+  echo "  FAIL [CHROME-PARITY-001]: selector parity test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/shell/app-shell.test.ts || exit $?
+if ! grep -q 'onChromeVisibilityChange={setHomeChromeVisible}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [CHROME-PARITY-001]: HOME chrome signal wiring must stay" >&2
+  exit 1
+fi
+if ! grep -q 'onChromeVisibilityChange={setMessageChromeVisible}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [CHROME-PARITY-001]: MESSAGES chrome signal wiring must stay" >&2
+  exit 1
+fi
+if ! grep -q 'onScroll={onInboxScroll}' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CHROME-PARITY-001]: messages inbox scroll handler must stay" >&2
+  exit 1
+fi
+echo "  CHROME-PARITY-001: PASS (HOME/MESSAGES scroll chrome parity + optional legacy fallback)"
+
 echo "  regression contracts: OK"
 
 # ACCOUNT-SWITCH-001: same-phone account switch (logout A -> login B) was

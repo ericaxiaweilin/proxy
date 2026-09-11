@@ -567,6 +567,9 @@ export function RequesterHome({
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
   const visibleRef = useRef(true);
+  // 卸载回显 chrome（与动态一致）：切走时壳会重置，内部替换（如进 Scene
+  // Composer）时靠这里复位，避免停在隐藏态。
+  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
     const y = Math.max(0, e.nativeEvent.contentOffset.y);
     const delta = y - lastYRef.current;
