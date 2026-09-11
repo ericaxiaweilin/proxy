@@ -39,6 +39,7 @@ import { R37OpportunityCard, type OpportunityType, inferOpportunityTypeForFilter
 import { R37TypePalette } from "./r37-type-palette";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
 import { DemandWizard } from "./demand-wizard";
+import { ActivityWizard } from "./activity-wizard";
 import { resolveAuthorDisplayName } from "../feed-author";
 
 // “热门探索点” = 可以是河内市中心的著名地点 (西湖、还剑湖)，
@@ -429,12 +430,17 @@ export function MarketSurface({
           onViewMarket={() => setDemandWizardOpen(false)}
         />
       ) : activityPublishOpen ? (
-        <PublishActivityForm
+        <ActivityWizard
           activities={activities}
-          venueOptions={activityItems}
+          scenes={activityItems}
           onBack={() => setActivityPublishOpen(false)}
           onPublished={(activity) => {
             setActivityItems((items) => [activity, ...items]);
+            setActivityPublishOpen(false);
+            setTab("ACTIVITY");
+            setPagerPage(1);
+          }}
+          onViewActivities={() => {
             setActivityPublishOpen(false);
             setTab("ACTIVITY");
             setPagerPage(1);
@@ -866,62 +872,6 @@ const PUBLISH_FLOW_OPTIONS: ReadonlyArray<{ id: PublishMoneyFlow; label: string;
   { id: "FREE", label: "免费任务", sub: "0₫ · 同好/社区" },
   { id: "TBD", label: "费用待确认", sub: "双方面谈 · 不显示金额" }
 ];
-
-function PublishActivityForm({ activities, venueOptions, onBack, onPublished }: { activities: ActivityClient; venueOptions: Activity[]; onBack: () => void; onPublished: (activity: Activity) => void }): React.JSX.Element {
-  const venues = useMemo(() => {
-    const unique = new Map<string, Activity>();
-    venueOptions.forEach((item) => { if (item.realitySceneId && !unique.has(item.realitySceneId)) unique.set(item.realitySceneId, item); });
-    return [...unique.values()];
-  }, [venueOptions]);
-  const [selectedSceneId, setSelectedSceneId] = useState(venues[0]?.realitySceneId ?? "");
-  const [title, setTitle] = useState("");
-  const [time, setTime] = useState("");
-  const [capacity, setCapacity] = useState("6");
-  const [desc, setDesc] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const venue = venues.find((item) => item.realitySceneId === selectedSceneId);
-  useEffect(() => {
-    if (!selectedSceneId && venues[0]?.realitySceneId) setSelectedSceneId(venues[0].realitySceneId);
-  }, [selectedSceneId, venues]);
-
-  async function submit(): Promise<void> {
-    const seats = Number.parseInt(capacity, 10);
-    if (!venue) { setError("请先选择一个真实场景"); return; }
-    if (!title.trim() || !time.trim()) { setError("请填写活动名称和时间"); return; }
-    if (!Number.isFinite(seats) || seats < 2 || seats > 50) { setError("人数须为 2–50 人"); return; }
-    setBusy(true); setError(undefined);
-    try {
-      const created = await activities.publish({
-        title: title.trim(), time: time.trim(), capacity: seats,
-        venueName: venue.venueName, venueIcon: venue.venueIcon ?? "☕",
-        venueType: venue.venueType === "RESTAURANT" ? "RESTAURANT" : "CAFE",
-        realitySceneId: venue.realitySceneId ?? "", desc: desc.trim() || "一起参加活动",
-        consumptionTerm: "SPLIT"
-      });
-      onPublished(created);
-    } catch (e) { setError(e instanceof Error ? e.message : "活动发布失败，请重试"); }
-    finally { setBusy(false); }
-  }
-
-  return <View style={styles.activityPublishPanel}>
-    <View style={styles.detailHead}><Pressable onPress={onBack}><Text style={styles.detailBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>发布活动</Text></View>
-    <Text style={styles.activityPublishTitle}>发起真实活动</Text>
-    <TextInput onChangeText={setTitle} placeholder="活动名称" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={title} />
-    <TextInput onChangeText={setTime} placeholder="时间，例如 周六 14:00" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={time} />
-    <TextInput keyboardType="number-pad" onChangeText={setCapacity} placeholder="人数" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={capacity} />
-    <TextInput multiline onChangeText={setDesc} placeholder="活动说明（可选）" placeholderTextColor="#A9A2B0" style={[styles.activityPublishInput, { minHeight: 72 }]} value={desc} />
-    <Text style={styles.activityPublishLabel}>选择真实场景</Text>
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
-      {venues.map((item) => <Pressable key={item.realitySceneId} onPress={() => setSelectedSceneId(item.realitySceneId ?? "")} style={[styles.statusFilter, selectedSceneId === item.realitySceneId && styles.statusFilterOn]}>
-        <Text style={[styles.statusFilterText, selectedSceneId === item.realitySceneId && styles.statusFilterTextOn]}>{item.venueIcon} {item.venueName}</Text>
-      </Pressable>)}
-    </ScrollView>
-    {venues.length === 0 ? <Text style={styles.marketError}>当前没有可绑定的真实场景，请先刷新活动数据。</Text> : null}
-    {error ? <Text style={styles.marketError}>{error}</Text> : null}
-    <Pressable disabled={busy || venues.length === 0} onPress={() => void submit()} style={[styles.r4ActionPrimary, (busy || venues.length === 0) && styles.offerBtnDisabled]}><Text style={styles.r4ActionPrimaryText}>{busy ? "发布中…" : "确认发布活动"}</Text></Pressable>
-  </View>;
-}
 
 function PublishDemand({ marketplace, onBack, onPublished }: { marketplace: MarketplaceClient; onBack: () => void; onPublished: (opportunity: MarketOpportunity) => void }): React.JSX.Element {
   const [title, setTitle] = useState("周六城市同行 + 拍照");

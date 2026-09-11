@@ -23,10 +23,13 @@ export type PublishActivityInput = {
   capacity: number;
   venueName: string;
   venueIcon: string;
-  venueType: "CAFE" | "RESTAURANT";
+  venueType: "CAFE" | "RESTAURANT" | "PARK" | "LAKE" | "STREET" | "OTHER";
   realitySceneId: string;
   desc: string;
   consumptionTerm: "SPLIT" | "HOST_COVERS";
+  // R58: 报名方式 + 主题（可选，不传按 OPEN / 无主题）。
+  signupMode?: "OPEN" | "REVIEW" | "INVITE_ONLY";
+  theme?: string;
   // MERCHANT-PUBLISH-001: 以商家名义发布时带店 id（server 验成员后盖章）。
   // 个人发布不传。
   merchantId?: string;

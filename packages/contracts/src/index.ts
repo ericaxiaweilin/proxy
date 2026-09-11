@@ -495,6 +495,8 @@ export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;
 //     后下发，客户端不允许传空。
 export const ActivitySchema = z.object({
   activityId: z.string().min(1),
+  // R58 展示编号（PX-A-yymmdd-####，展示用；权威主键仍是 activityId）。
+  code: z.string().min(1).optional(),
   origin: z.enum(["PLATFORM", "MERCHANT", "USER", "TEST"]),
   title: z.string().min(1),
   time: z.string(),
@@ -507,7 +509,7 @@ export const ActivitySchema = z.object({
   venueName: z.string(),
   realitySceneId: z.string().min(1).optional(),
   venueSpend: z.string(),
-  venueType: z.enum(["CAFE", "RESTAURANT", ""]),
+  venueType: z.enum(["CAFE", "RESTAURANT", "PARK", "LAKE", "STREET", "OTHER", ""]),
   venueTypeLabel: z.string(),
   // 活动封面图（R17.x 预留）：HTTPS URL，上传管线接好之前 server 不下发，
   // 客户端无此字段时必须显示诚实占位（不得用假图冒充实拍）。
@@ -523,6 +525,9 @@ export const ActivitySchema = z.object({
   ownerId: z.string().optional(),
   status: z.enum(["PUBLISHED", "CANCELLED"]).optional(),
   consumptionTerm: z.enum(["SPLIT", "HOST_COVERS"]).optional(),
+  // R58: 报名方式 + 主题。
+  signupMode: z.enum(["OPEN", "REVIEW", "INVITE_ONLY"]).optional(),
+  theme: z.string().max(30).optional(),
   // MERCHANT-PUBLISH-001: 以商家名义发布时的店名（Origin=MERCHANT 时必有）。
   // 只认服务端注记；个人发布为空。
   merchantName: z.string().min(1).optional(),
