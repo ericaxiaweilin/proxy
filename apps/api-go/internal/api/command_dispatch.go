@@ -169,7 +169,7 @@ func (s *Server) enforceKillSwitch(envelope command.Envelope) (*command.Result, 
 		return nil, 0
 	}
 	result := command.Rejected(envelope, "SERVICE_DISABLED", "BUSINESS_STATE", "AFTER_OPERATOR_ACTION", "compliance.service_disabled", map[string]any{
-		"category":   category,
+		"category":    category,
 		"commandType": envelope.CommandType,
 	})
 	return &result, http.StatusServiceUnavailable
@@ -286,6 +286,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Location.HandleContext(ctx, envelope)
 	case s.Benefit != nil && s.Benefit.Supports(envelope.CommandType):
 		return s.Benefit.HandleContext(ctx, envelope)
+	case s.Profile != nil && s.Profile.Supports(envelope.CommandType):
+		return s.Profile.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}

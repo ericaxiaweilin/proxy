@@ -164,6 +164,16 @@ type Repository interface {
 
 var ErrPostNotTracked = errors.New("post not tracked")
 
+// R16.12 — engagement 写路径约束映射哨兵。
+// PG 仓层把唯一/外键约束违例翻译成这些域错误, service 层据此返回业务拒绝码,
+// 而不是让原始 23505/23503 毒死 dispatch 事务 (25P02 → 500 command_transaction_failed)。
+var (
+	ErrReactionAlreadyExists = errors.New("reaction already exists")
+	ErrRepostAlreadyExists   = errors.New("repost already exists")
+	ErrBookmarkAlreadyExists = errors.New("bookmark already exists")
+	ErrPostNotFound          = errors.New("post not found")
+)
+
 type MemoryRepository struct {
 	mu          sync.Mutex
 	follows     map[string]Follow
@@ -381,6 +391,11 @@ func (r *MemoryRepository) ListRepliesByPost(_ context.Context, postID string, l
 func (r *MemoryRepository) AddRepost(_ context.Context, re Repost) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, existing := range r.reposts {
+		if existing.PostID == re.PostID && existing.ActorID == re.ActorID {
+			return ErrRepostAlreadyExists
+		}
+	}
 	r.reposts[re.ID] = re
 	return nil
 }
@@ -388,6 +403,11 @@ func (r *MemoryRepository) AddRepost(_ context.Context, re Repost) error {
 func (r *MemoryRepository) AddBookmark(_ context.Context, b Bookmark) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, existing := range r.bookmarks {
+		if existing.PostID == b.PostID && existing.ActorID == b.ActorID {
+			return ErrBookmarkAlreadyExists
+		}
+	}
 	r.bookmarks[b.ID] = b
 	return nil
 }
@@ -682,6 +702,11 @@ func (s *Service) react(ctx context.Context, e command.Envelope) command.Result 
 	}
 	active, err := s.repository.SetReaction(ctx, reaction, desired)
 	if err != nil {
+		// R16.12: PG 约束违例已翻译成域哨兵（FK 23503 → ErrPostNotFound），
+		// 这里映射成业务码；点赞不存在的帖不允许泄成 500。
+		if errors.Is(err, ErrPostNotFound) {
+			return command.Rejected(e, "POST_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "engagement.post_not_found", map[string]any{"postId": p.PostID})
+		}
 		return command.Rejected(e, "REACTION_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.reaction_failed", nil)
 	}
 	state := "UNREACTED"
@@ -716,6 +741,10 @@ func (s *Service) reply(ctx context.Context, e command.Envelope) command.Result 
 		"body":    reply.Body,
 	})}
 	if err := s.repository.AddReply(ctx, reply); err != nil {
+		// R16.12 — FK(post_id) 违例 → 帖子不存在, 返业务码而非 500
+		if errors.Is(err, ErrPostNotFound) {
+			return command.Rejected(e, "POST_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "engagement.post_not_found", map[string]any{"postId": p.PostID})
+		}
 		return command.Rejected(e, "REPLY_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.reply_failed", nil)
 	}
 	return command.Accepted(e, "Post", p.PostID, 1, "REPLIED", eventRefs(domainEvents))
@@ -758,6 +787,13 @@ func (s *Service) repost(ctx context.Context, e command.Envelope) command.Result
 		"repostId": r.ID,
 	})}
 	if err := s.repository.AddRepost(ctx, r); err != nil {
+		// R16.12 — UNIQUE(post_id, actor_id) / FK(post_id) → 业务码
+		switch {
+		case errors.Is(err, ErrRepostAlreadyExists):
+			return command.Rejected(e, "ALREADY_REPOSTED", "BUSINESS_STATE", "AFTER_USER_ACTION", "engagement.already_reposted", map[string]any{"postId": p.PostID})
+		case errors.Is(err, ErrPostNotFound):
+			return command.Rejected(e, "POST_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "engagement.post_not_found", map[string]any{"postId": p.PostID})
+		}
 		return command.Rejected(e, "REPOST_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.repost_failed", nil)
 	}
 	return command.Accepted(e, "Post", p.PostID, 1, "REPOSTED", eventRefs(domainEvents))
@@ -968,6 +1004,13 @@ func (s *Service) bookmark(ctx context.Context, e command.Envelope) command.Resu
 		"bookmarkId": b.ID,
 	})}
 	if err := s.repository.AddBookmark(ctx, b); err != nil {
+		// R16.12 — UNIQUE(post_id, actor_id) / FK(post_id) → 业务码
+		switch {
+		case errors.Is(err, ErrBookmarkAlreadyExists):
+			return command.Rejected(e, "ALREADY_BOOKMARKED", "BUSINESS_STATE", "AFTER_USER_ACTION", "engagement.already_bookmarked", map[string]any{"postId": p.PostID})
+		case errors.Is(err, ErrPostNotFound):
+			return command.Rejected(e, "POST_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "engagement.post_not_found", map[string]any{"postId": p.PostID})
+		}
 		return command.Rejected(e, "BOOKMARK_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.bookmark_failed", nil)
 	}
 	return command.Accepted(e, "Post", p.PostID, 1, "BOOKMARKED", eventRefs(domainEvents))
