@@ -646,9 +646,67 @@ export const OpportunityTemplateSchema = z.object({
 export type OpportunityTemplate = z.infer<typeof OpportunityTemplateSchema>;
 
 export const ListOpportunityTemplatesPayloadSchema = z.object({
-  templates: z.array(OpportunityTemplateSchema).min(1)
+  templates: z.array(OpportunityTemplateSchema).min(1),
+  // OPP-CATALOG-001 (R58): the delivery-style category rail + Moment
+  // spec sheet + ratio policy + dynamic pricing — one payload serves
+  // the whole publish flow. All optional for backward compatibility
+  // with older payloads that only carried the card list.
+  categories: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    hint: z.string(),
+    items: z.array(z.string().min(1)).min(1)
+  })).optional(),
+  specs: z.array(z.object({
+    templateId: z.string().min(1),
+    groups: z.array(z.string().min(1)).min(1),
+    times: z.array(z.string().min(1)).min(1),
+    durations: z.array(z.string().min(1)).min(1),
+    places: z.array(z.string().min(1)).min(1)
+  })).optional(),
+  policies: z.array(z.object({
+    templateId: z.string().min(1),
+    mode: z.enum(["Moment", "Professional"]),
+    ratio: z.string().min(1),
+    ratioText: z.string().min(1),
+    fixed: z.boolean(),
+    groups: z.array(z.string().min(1)).min(1),
+    prefs: z.array(z.object({
+      key: z.string().min(1),
+      label: z.string().min(1),
+      options: z.array(z.object({
+        value: z.string().min(1),
+        add: z.number().int()
+      })).min(1)
+    })).optional()
+  })).optional(),
+  pricing: z.array(z.object({
+    templateId: z.string().min(1),
+    duration: z.record(z.string(), z.number().int()).optional(),
+    time: z.record(z.string(), z.number().int()).optional(),
+    group: z.record(z.string(), z.number().int()).optional(),
+    perPair: z.boolean().optional()
+  })).optional(),
+  // OPP-CATALOG-002 (R58 activity line): creation-flow presets.
+  activityPresets: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    mark: z.string(),
+    theme: z.boolean(),
+    tags: z.array(z.string().min(1)).min(1),
+    sub: z.string(),
+    capacity: z.string().min(1),
+    time: z.string().min(1)
+  })).optional()
 });
 export type ListOpportunityTemplatesPayload = z.infer<typeof ListOpportunityTemplatesPayloadSchema>;
+
+// Client-facing types for the R58 catalog engine.
+export type OpportunityCatalogCategory = NonNullable<ListOpportunityTemplatesPayload["categories"]>[number];
+export type MomentSpec = NonNullable<ListOpportunityTemplatesPayload["specs"]>[number];
+export type MomentPolicyInfo = NonNullable<ListOpportunityTemplatesPayload["policies"]>[number];
+export type MomentPricingRule = NonNullable<ListOpportunityTemplatesPayload["pricing"]>[number];
+export type ActivityPresetInfo = NonNullable<ListOpportunityTemplatesPayload["activityPresets"]>[number];
 
 // OPP-SUGGEST-001: 发布搜索"生成"wire 契约（SuggestOpportunityTemplate）。
 // server 语义层把自由文本映射到目录卡：template 必是目录内真实卡

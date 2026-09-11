@@ -42,6 +42,72 @@ describe("OpportunityTemplateSchema", () => {
   });
 });
 
+// OPP-CATALOG-001 (R58): 目录引擎 wire 契约 — 分类轨道 + Moment 规格
+// + 比例政策 + 动态定价。旧载荷（仅卡列表）必须继续过（向后兼容），
+// 新字段必须全量可表达（发布流一屏数据源）。
+describe("ListOpportunityTemplatesPayloadSchema — catalog engine (R58)", () => {
+  const card = OpportunityTemplateSchema.parse(baseTemplate);
+  const fullPayload = {
+    templates: [card],
+    categories: [{
+      id: "hot", label: "热门", hint: "高频 Moment",
+      items: ["coffee", "dining"]
+    }],
+    specs: [{
+      templateId: "coffee",
+      groups: ["1 人", "2 人"],
+      times: ["今晚 19:00", "明天 15:00"],
+      durations: ["1 小时", "2 小时"],
+      places: ["附近", "西湖"]
+    }],
+    policies: [{
+      templateId: "coffee",
+      mode: "Moment" as const,
+      ratio: "1:1",
+      ratioText: "固定 1:1",
+      fixed: true,
+      groups: ["1 人"],
+      prefs: [{
+        key: "chat", label: "聊天",
+        options: [{ value: "轻松聊天", add: 0 }, { value: "工作交流", add: 30 }]
+      }]
+    }],
+    pricing: [{
+      templateId: "coffee",
+      duration: { "2 小时": 0, "3 小时": 90 },
+      time: { "今晚 19:00": 20 },
+      group: { "1 人": 0 },
+      perPair: false
+    }]
+  };
+
+  it("accepts the full R58 engine payload", () => {
+    expect(ListOpportunityTemplatesPayloadSchema.safeParse(fullPayload).success).toBe(true);
+  });
+
+  it("rejects malformed engine dimensions", () => {
+    // 空规格维度 = 表单渲染死项
+    expect(ListOpportunityTemplatesPayloadSchema.safeParse({
+      ...fullPayload,
+      specs: [{ templateId: "coffee", groups: [], times: [], durations: [], places: [] }]
+    }).success).toBe(false);
+    // 比例政策缺 ratioText = 表单徽章缺文案
+    expect(ListOpportunityTemplatesPayloadSchema.safeParse({
+      ...fullPayload,
+      policies: [{ ...fullPayload.policies[0], ratioText: "" }]
+    }).success).toBe(false);
+    // 未知 mode
+    expect(ListOpportunityTemplatesPayloadSchema.safeParse({
+      ...fullPayload,
+      policies: [{ ...fullPayload.policies[0], mode: "SPONSORED" }]
+    }).success).toBe(false);
+  });
+
+  it("keeps the plain card-list payload valid (backward compat)", () => {
+    expect(ListOpportunityTemplatesPayloadSchema.safeParse({ templates: [card] }).success).toBe(true);
+  });
+});
+
 // OPP-SUGGEST-001: 搜索"生成"的 wire 返回 — template 必是完整目录卡，
 // reason 是匹配理由。
 describe("SuggestOpportunityTemplatePayloadSchema", () => {

@@ -1184,4 +1184,41 @@ if ! grep -q 'suggestTemplate' apps/mobile/src/marketplace-client.ts; then
   exit 1
 fi
 
+# OPP-CATALOG-001/002 (R58): 目录引擎 — 分类轨道 + Moment 规格/比例
+# 政策/动态定价 + 活动预设，全部服务端数据源（客户端不硬编码词表）。
+# 一次匿名读命令 ListOpportunityTemplates 全量下发；跨引用坏链 =
+# 目录 bug，Go 守护测试钉死。
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogCategoriesResolveToRealTemplates" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogSpecsAndPoliciesCoverEveryTemplate" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogPricingRulesMatchSpecDimensions" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-002" "./internal/marketplace" \
+  "TestCatalogSnapshotSerializesWholeEngine" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+if ! grep -q 'buildCatalogSnapshot' apps/api-go/internal/marketplace/service.go; then
+  echo "  FAIL [OPP-CATALOG-001]: service dispatch must serve the engine snapshot" >&2
+  exit 1
+fi
+if ! grep -q 'activityPresets' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-CATALOG-002]: contracts activity presets schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'listCatalog' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-CATALOG-001]: mobile catalog client must stay" >&2
+  exit 1
+fi
+if ! grep -q 'momentPriceQuote' apps/mobile/src/market-template-price.ts; then
+  echo "  FAIL [OPP-CATALOG-001]: dynamic pricing math must stay unit-tested" >&2
+  exit 1
+fi
+if ! grep -q 'formatTraceId' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [R58-TRACE]: success-screen trace id must stay" >&2
+  exit 1
+fi
+
 echo "  regression contracts: OK"

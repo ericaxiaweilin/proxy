@@ -1,5 +1,5 @@
 import type { CommandResult } from "@proxy/contracts";
-import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema, PublishMarketOpportunityInputSchema, ListOpportunityTemplatesPayloadSchema, SuggestOpportunityTemplatePayloadSchema, type PublishMarketOpportunityInput, type OpportunityTemplate } from "@proxy/contracts";
+import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema, PublishMarketOpportunityInputSchema, ListOpportunityTemplatesPayloadSchema, SuggestOpportunityTemplatePayloadSchema, type PublishMarketOpportunityInput, type OpportunityTemplate, type ListOpportunityTemplatesPayload } from "@proxy/contracts";
 import type { MarketApplication } from "@proxy/contracts";
 import type { MarketOpportunity } from "./market-fixtures";
 import type { TransportResponse } from "./auth-client";
@@ -51,6 +51,17 @@ export class MarketplaceClient {
     const parsed = ListOpportunityTemplatesPayloadSchema.safeParse(body);
     if (!parsed.success) throw new Error(`opportunity template list was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
     return parsed.data.templates;
+  }
+  // OPP-CATALOG-001 (R58): full catalog engine — cards + category rail
+  // + per-card Moment specs / ratio policy / dynamic pricing in one
+  // anonymous read. The publish flow renders the two-pane picker and
+  // the Moment spec sheet from this payload; nothing scene-related is
+  // hardcoded client-side (词表/价格一律来自服务端目录).
+  public async listCatalog(): Promise<ListOpportunityTemplatesPayload> {
+    const body = this.body(await this.command("ListOpportunityTemplates", { type: "Market", id: "templates" }, {}, true));
+    const parsed = ListOpportunityTemplatesPayloadSchema.safeParse(body);
+    if (!parsed.success) throw new Error(`opportunity catalog was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+    return parsed.data;
   }
   // OPP-SUGGEST-001: 发布搜索"生成" — 语义层把自由文本映射到目录卡。
   // AI_NOT_CONFIGURED / SUGGESTION_NO_MATCH 等以 Error 冒出，调用方

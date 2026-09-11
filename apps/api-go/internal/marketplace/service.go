@@ -218,11 +218,21 @@ func (s *Service) Supports(t string) bool {
 func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	switch e.CommandType {
 	case "ListOpportunityTemplates":
-		// OPP-TEMPLATE-001: static publish catalog (HOT / THEME / MORE).
+		// OPP-TEMPLATE-001 + OPP-CATALOG-001 (R58): the publish-flow
+		// catalog. Cards + categories + per-card specs/policy/pricing
+		// in one anonymous read — the client renders the two-pane
+		// picker AND the Moment spec sheet from this payload.
 		// Read-only, no repository involved, anonymous-safe — same tier
 		// as ListMarketOpportunities, so it needs no auth and no
 		// aiboundary gate (it discloses nothing about any user).
-		return payload(e, "Market", "templates", "READY", map[string]any{"templates": opportunityTemplates})
+		snap := buildCatalogSnapshot()
+		return payload(e, "Market", "templates", "READY", map[string]any{
+			"templates":   snap.Templates,
+			"categories":  snap.Categories,
+			"specs":       snap.Specs,
+			"policies":    snap.Policies,
+			"pricing":     snap.Pricing,
+		})
 	case "SuggestOpportunityTemplate":
 		// OPP-SUGGEST-001: semantic mapping of free text to a catalog
 		// card (publish search box). Read-only, anonymous-safe; the
