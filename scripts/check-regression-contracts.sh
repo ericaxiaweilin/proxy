@@ -1149,6 +1149,117 @@ if ! grep -q 'async json(): Promise<unknown>' apps/mobile/src/expo-feed-prefs-st
   exit 1
 fi
 echo "    SYNC-FS-001: PASS (5 read paths await json() + pure parse layer + honest mocks)"
+# OPP-TEMPLATE-001: 发布需求目录（热门/主题/更多）。PublishDemand 原是
+# 自由文本编辑器；R49 原型要求"选场景卡 → 确认服务"三段式。目录是
+# server 内置静态读模型（16 卡：HOT=6 THEME=4 MORE=6），每卡带发布
+# 表单默认值（tags/参考价/参考区间/合规服务标准——公共场所+现场消费
+# 自结口径）。ListOpportunityTemplates 只读匿名可调（与
+# ListMarketOpportunities 同层）；PublishMarketOpportunity wire 契约
+# 零改动——卡片只做 prefill，写路径单一 choke point 不变。
+require_test "OPP-TEMPLATE-001" "./internal/marketplace" \
+  "TestListOpportunityTemplates" \
+  "apps/api-go/internal/marketplace/templates_test.go" || exit $?
+require_test "OPP-TEMPLATE-002" "./internal/marketplace" \
+  "TestOpportunityTemplatesArePublishableAsIs" \
+  "apps/api-go/internal/marketplace/templates_test.go" || exit $?
+if ! grep -q 'ListOpportunityTemplates' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [OPP-TEMPLATE-001]: anonymous dispatch registration must stay" >&2
+  exit 1
+fi
+if ! grep -q 'ListOpportunityTemplatesPayloadSchema' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-TEMPLATE-001]: contracts wire schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'listTemplates' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-TEMPLATE-001]: mobile client method must stay" >&2
+  exit 1
+fi
+
+# OPP-TARGETED-001/002: 定向邀约（选人 → 向 TA 发出邀约）。R49 原型
+# 的"邀约给 TA"：发布 payload 带 targetUserId 时 server 把机会快照为
+# targetAccountId 非空 — List 只对目标人和 owner 可见，Apply 只收
+# 目标人（旁路拿 id 打命令也拒）；禁止定向给自己。缺省 = 公开卡，
+# 老行为零变化（Go 守护测试 + Zod 老 payload 向后兼容测试钉死）。
+# PG 无迁移：Opportunity 走 payload JSONB，targetAccountId 落在快照里。
+require_test "OPP-TARGETED-001" "./internal/marketplace" \
+  "TestTargetedOpportunityVisibilityAndApply" \
+  "apps/api-go/internal/marketplace/targeted_test.go" || exit $?
+require_test "OPP-TARGETED-002" "./internal/marketplace" \
+  "TestPublicOpportunityUnchangedBesideTargeted" \
+  "apps/api-go/internal/marketplace/targeted_test.go" || exit $?
+if ! grep -q 'targetAccountId' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-TARGETED-001]: contracts wire field must stay" >&2
+  exit 1
+fi
+if ! grep -q 'targetUserId' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [OPP-TARGETED-001]: mobile publish wiring must stay" >&2
+  exit 1
+fi
+
+# OPP-SUGGEST-001: 发布搜索"生成" — 语义层把自由文本映射到目录卡。
+# SuggestOpportunityTemplate 走 modelstack.Port（与 conversation 同一
+# 适配器），fail-closed：未配置 AI_NOT_CONFIGURED、LLM 幻觉 id 服务端
+# 白名单拒（SUGGESTION_MALFORMED）、无匹配 SUGGESTION_NO_MATCH —
+# 不许正则硬解。命中返回目录卡原文（零编造字段）。
+require_test "OPP-SUGGEST-001" "./internal/marketplace" \
+  "TestSuggestOpportunityTemplate" \
+  "apps/api-go/internal/marketplace/suggest_test.go" || exit $?
+if ! grep -q 'SuggestOpportunityTemplate' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [OPP-SUGGEST-001]: anonymous dispatch registration must stay" >&2
+  exit 1
+fi
+if ! grep -q 'SuggestOpportunityTemplatePayloadSchema' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-SUGGEST-001]: contracts wire schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'suggestTemplate' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-SUGGEST-001]: mobile client method must stay" >&2
+  exit 1
+fi
+
+# OPP-CATALOG-001/002 (R58): 目录引擎 — 分类轨道 + Moment 规格/比例
+# 政策/动态定价 + 活动预设，全部服务端数据源（客户端不硬编码词表）。
+# 一次匿名读命令 ListOpportunityTemplates 全量下发；跨引用坏链 =
+# 目录 bug，Go 守护测试钉死。
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogCategoriesResolveToRealTemplates" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogSpecsAndPoliciesCoverEveryTemplate" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogPricingRulesMatchSpecDimensions" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-002" "./internal/marketplace" \
+  "TestCatalogSnapshotSerializesWholeEngine" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-002" "./internal/marketplace" \
+  "TestListOpportunityTemplatesShipsWholeEngine" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+if ! grep -q 'buildCatalogSnapshot' apps/api-go/internal/marketplace/service.go; then
+  echo "  FAIL [OPP-CATALOG-001]: service dispatch must serve the engine snapshot" >&2
+  exit 1
+fi
+if ! grep -q 'activityPresets' apps/api-go/internal/marketplace/service.go; then
+  echo "  FAIL [OPP-CATALOG-002]: wire payload must forward activity presets (R58 activity line)" >&2
+  exit 1
+fi
+if ! grep -q 'activityPresets' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-CATALOG-002]: contracts activity presets schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'listCatalog' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-CATALOG-001]: mobile catalog client must stay" >&2
+  exit 1
+fi
+if ! grep -q 'momentPriceQuote' apps/mobile/src/market-template-price.ts; then
+  echo "  FAIL [OPP-CATALOG-001]: dynamic pricing math must stay unit-tested" >&2
+  exit 1
+fi
+if ! grep -q 'formatTraceId' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [R58-TRACE]: success-screen trace id must stay" >&2
+  exit 1
+fi
 
 echo "  regression contracts: OK"
 

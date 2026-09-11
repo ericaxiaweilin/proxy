@@ -48,7 +48,12 @@ func (r *MarketplaceRepository) List(ctx context.Context, viewerID string) ([]ma
 		           SELECT a.payload FROM marketplace.applications a
 		           WHERE a.opportunity_id = o.id AND a.applicant_id = $1 LIMIT 1)
 		FROM marketplace.opportunities o
-		WHERE NOT EXISTS (
+		WHERE (
+		    o.payload->>'targetAccountId' IS NULL
+		    OR o.payload->>'targetAccountId' = ''
+		    OR o.payload->>'targetAccountId' = $1
+		    OR o.owner_id = $1)
+		AND NOT EXISTS (
 		    SELECT 1 FROM marketplace.dismissals d
 		    WHERE d.opportunity_id = o.id AND d.viewer_id = $1)
 		ORDER BY o.created_at DESC`, viewerID)

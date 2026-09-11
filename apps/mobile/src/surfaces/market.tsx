@@ -12,16 +12,19 @@ import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEven
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
-import type { Activity } from "@proxy/contracts";
+import type { Activity, OpportunityTemplate, ListOpportunityTemplatesPayload, ActivityPresetInfo } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { describeJoinError } from "../activity-client";
 import { type FulfillmentClient } from "../fulfillment-client";
 import { type MarketplaceClient, type MarketApplication } from "../marketplace-client";
 import { nearestCityLabel } from "../market-city-label";
 import { type MediaClient } from "../media-client";
-import { type SupplyClient } from "../supply-client";import {
-  OPPORTUNITY_LENS_LABEL,
+import { type SupplyClient, type SupplierCandidate } from "../supply-client";
+import { useMerchantIdentity } from "../use-merchant-identity";
+import {  OPPORTUNITY_LENS_LABEL,
   buildSlotOfferInput,
+  composePriceRange,
+  validateOpportunityPriceRange,
   type MarketOpportunity,
   type MarketTab,
   type OpportunityLens
@@ -417,8 +420,7 @@ export function MarketSurface({
       ) : activityPublishOpen ? (
         <ActivityWizard
           activities={activities}
-          scenes={activityItems}
-          onBack={() => setActivityPublishOpen(false)}
+          scenes={activityItems}          onBack={() => setActivityPublishOpen(false)}
           onOpenDemand={() => { setActivityPublishOpen(false); openDemandWizard(); }}
           onReloadScenes={() => void loadActivities()}
           onPublished={(activity) => {
@@ -430,8 +432,7 @@ export function MarketSurface({
           onViewActivities={() => {
             setActivityPublishOpen(false);
             setTab("ACTIVITY");
-            setPagerPage(1);
-          }}
+            setPagerPage(1);          }}
         />
       ) : selectOpp ? (
         <SelectWorkbench marketplace={marketplace} fulfillment={fulfillment} opportunity={selectOpp} onBack={() => setSelectOpp(null)} />
@@ -814,7 +815,743 @@ function OpportunityDetail({
   );
 }
 
+// R16.x: 资金方向必须在发布 UI 上明确选 — 不能只填一个裸金额。EARN 是默认
+// （接单者赚），FREE / TBD / PAY 各占一个按钮，选了哪个按钮后 Price 输入
+// 框联动（FREE 可为 0， TBD 必须为空）。
+type PublishMoneyFlow = "EARN" | "PAY" | "FREE" | "TBD";
 
+// priceLabelForPublisher 是发布者 PublishDemand 页面上的语义描述。
+// server 端是 PriceLabel 唯一权威（opportunityPriceLabel() 接单者视角
+// “完成后你可获得 / 你需支付 / 免费 / 费用待确认”），client SDK
+// 不再本地镜像那份中文。publisher 视角的文案是 UI-only，作用是让
+// publisher 在 PublishDemand 看到 “你付金额，接单者完成后获得”
+// 而不是接单者视角的 “完成后你可获得”。
+function priceLabelForPublisher(flow: PublishMoneyFlow): string {
+  switch (flow) {
+    case "FREE":
+      return "免费发布";
+    case "PAY":
+      return "你须先支付";
+    case "TBD":
+      return "费用待你与接单者面谈";
+    default:
+      return "你付金额，接单者完成后获得";
+  }
+}
+
+// PUBLISH_FLOW_OPTIONS 是发布者 (requester) 看到的 chip 列表。chip
+// 描述的语义是发布者视角 ("你付")，与卡片上对接单者展示的 PriceLabel
+// ("完成后你可获得") 是不同视角的同一个事实。故意保留。
+const PUBLISH_FLOW_OPTIONS: ReadonlyArray<{ id: PublishMoneyFlow; label: string; sub: string }> = [
+  { id: "EARN", label: "你付给接单者", sub: "你付金额，接单者完成后获得" },
+  { id: "PAY", label: "接单者预付", sub: "受托代购/订位等委托场景" },
+  { id: "FREE", label: "免费任务", sub: "0₫ · 同好/社区" },
+  { id: "TBD", label: "费用待确认", sub: "双方面谈 · 不显示金额" }
+];
+
+// FREEFORM_PRESET is the activity line's "skip the catalog" sentinel —
+// same pattern as CUSTOM_TEMPLATE on the opportunity line.
+const FREEFORM_PRESET: ActivityPresetInfo = {
+  id: "", title: "", mark: "", theme: false, tags: [], sub: "", capacity: "", time: ""
+};
+
+// OPP-CATALOG-002 (R58 activity line): two-step creation. Step 1 =
+// preset cards from the server catalog (搜索"生成"语义匹配走机会线
+// 同款 Suggest 不适用 — 活动预设量小，直接渲染全量卡)；step 2 = the
+// one-screen spec sheet (人数/时间/地点/主题/报名/费用) prefilled from
+// the preset. Wire payload is the existing PublishActivity shape.
+function PublishActivityForm({ activities, marketplace, venueOptions, onBack, onPublished }: { activities: ActivityClient; marketplace: MarketplaceClient; venueOptions: Activity[]; onBack: () => void; onPublished: (activity: Activity) => void }): React.JSX.Element {
+  const venues = useMemo(() => {
+    const unique = new Map<string, Activity>();
+    venueOptions.forEach((item) => { if (item.realitySceneId && !unique.has(item.realitySceneId)) unique.set(item.realitySceneId, item); });
+    return [...unique.values()];
+  }, [venueOptions]);
+  const [selectedSceneId, setSelectedSceneId] = useState(venues[0]?.realitySceneId ?? "");
+  const [title, setTitle] = useState("");
+  const [time, setTime] = useState("");
+  const [capacity, setCapacity] = useState("6");
+  const [desc, setDesc] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [activityTraceId, setActivityTraceId] = useState<string>();
+  // R58 成功卡：已发布的活动暂存，等用户点“查看活动”再交回父组件。
+  const [createdActivity, setCreatedActivity] = useState<Activity | undefined>(undefined);
+  // R58 step 1: server-catalog presets (falls back to free-form when
+  // the catalog is unavailable — the legacy path stays reachable).
+  const [presets, setPresets] = useState<ActivityPresetInfo[]>([]);
+  const [presetPhase, setPresetPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [pickedPreset, setPickedPreset] = useState<ActivityPresetInfo>();
+  const venue = venues.find((item) => item.realitySceneId === selectedSceneId);
+  useEffect(() => {
+    if (!selectedSceneId && venues[0]?.realitySceneId) setSelectedSceneId(venues[0].realitySceneId);
+  }, [selectedSceneId, venues]);
+
+  useEffect(() => {
+    let alive = true;
+    marketplace.listCatalog()
+      .then((snap) => { if (alive) { setPresets(snap.activityPresets ?? []); setPresetPhase("READY"); } })
+      .catch(() => { if (alive) setPresetPhase("ERROR"); });
+    return () => { alive = false; };
+  }, [marketplace]);
+
+  function pickPreset(preset: ActivityPresetInfo): void {
+    setPickedPreset(preset);
+    setTitle(preset.title);
+    setTime(preset.time);
+    const seats = /^(\d+)/.exec(preset.capacity)?.[1];
+    if (seats) setCapacity(seats);
+  }
+
+  async function submit(): Promise<void> {
+    const seats = Number.parseInt(capacity, 10);
+    if (!venue) { setError("请先选择一个真实场景"); return; }
+    if (!title.trim() || !time.trim()) { setError("请填写活动名称和时间"); return; }
+    if (!Number.isFinite(seats) || seats < 2 || seats > 50) { setError("人数须为 2–50 人"); return; }
+    setBusy(true); setError(undefined);
+    try {
+      const created = await activities.publish({
+        title: title.trim(), time: time.trim(), capacity: seats,
+        venueName: venue.venueName, venueIcon: venue.venueIcon ?? "☕",
+        venueType: venue.venueType === "RESTAURANT" ? "RESTAURANT" : "CAFE",
+        realitySceneId: venue.realitySceneId ?? "", desc: desc.trim() || "一起参加活动",
+        consumptionTerm: "SPLIT"
+      });
+      // R58 TraceID — 活动编号 PX-A：发布成功先留在表单展示成功卡，
+      // “查看活动”才把控制权交回父组件（刷新列表+切tab）。
+      setActivityTraceId(formatTraceId("A"));
+      setCreatedActivity(created);
+    } catch (e) { setError(e instanceof Error ? e.message : "活动发布失败，请重试"); }
+    finally { setBusy(false); }
+  }
+
+  // R58 活动线三屏：成功卡 → 预设选卡 → 一屏规格表单。
+  if (createdActivity && activityTraceId) {
+    return <View style={styles.activityPublishPanel}>
+      <View style={styles.publishSuccessCard}>
+        <Text style={styles.publishSuccessCheck}>✓</Text>
+        <Text style={styles.publishSuccessTitle}>活动已创建</Text>
+        <Text style={styles.publishFlowSub}>活动已经进入市场 · 活动，其他用户可以查看并报名。</Text>
+        <View style={styles.publishTraceBox}>
+          <Text style={styles.publishFlowSub}>活动编号</Text>
+          <Text style={styles.publishTraceId}>{activityTraceId}</Text>
+        </View>
+        <View style={styles.publishFlowRow}>
+          <Pressable onPress={() => { setCreatedActivity(undefined); setActivityTraceId(undefined); setPickedPreset(undefined); setTitle(""); setTime(""); setDesc(""); }} style={styles.r4ActionGhost}>
+            <Text style={styles.r4ActionGhostText}>再建一个</Text>
+          </Pressable>
+          <Pressable onPress={() => onPublished(createdActivity)} style={styles.r4ActionGhost}>
+            <Text style={styles.r4ActionGhostText}>查看活动 ›</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>;
+  }
+
+  if (!pickedPreset) {
+    // step 1 — preset cards from the server catalog (R58 activity1).
+    return <View style={styles.activityPublishPanel}>
+      <View style={styles.detailHead}><Pressable onPress={onBack}><Text style={styles.detailBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>创建活动</Text></View>
+      <Text style={styles.activityPublishTitle}>想组织什么？</Text>
+      <Text style={styles.publishFlowSub}>活动强调多人参与；先选一个完整玩法，也可以直接自定义。</Text>
+      {presetPhase === "LOADING" ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
+      {presetPhase === "ERROR" ? <Text style={styles.marketError}>活动目录加载失败，可直接自定义填写。</Text> : null}
+      {presetPhase === "READY" ? <View style={styles.publishTemplateGrid}>
+        {presets.map((p) => (
+          <Pressable key={p.id} onPress={() => pickPreset(p)} style={[styles.publishTemplateCard, p.theme && { borderColor: "#B79BD1", borderWidth: 1.5 }]}>
+            <Text style={styles.publishTemplateMark}>{p.mark}</Text>
+            <Text style={styles.publishTemplateTitle}>{p.title}</Text>
+            <Text style={styles.publishTemplateSub}>{p.sub}</Text>
+          </Pressable>
+        ))}
+      </View> : null}
+      {presetPhase === "READY" ? <Pressable onPress={() => setPickedPreset(FREEFORM_PRESET)} style={[styles.r4ActionGhost, { marginTop: 12 }]}>
+        <Text style={styles.r4ActionGhostText}>找不到？自定义活动 ›</Text>
+      </Pressable> : null}
+    </View>;
+  }
+
+  return <View style={styles.activityPublishPanel}>
+    <View style={styles.detailHead}>
+      <Pressable onPress={() => { if (pickedPreset.id) setPickedPreset(undefined); else onBack(); }}><Text style={styles.detailBackText}>‹</Text></Pressable>
+      <Text style={styles.detailTitle}>活动设置</Text>
+    </View>
+    {pickedPreset.id ? (
+      <View style={styles.publishTemplateSummary}>
+        <Text style={styles.publishTemplateSub}>Activity</Text>
+        <Text style={styles.publishTemplateSummaryTitle}>{pickedPreset.title}</Text>
+        <Pressable onPress={() => setPickedPreset(undefined)} style={styles.publishTemplateChange}>
+          <Text style={styles.publishTemplateChangeText}>更换活动 ›</Text>
+        </Pressable>
+      </View>
+    ) : null}
+    <Text style={styles.activityPublishTitle}>{pickedPreset.id ? "完善活动" : "发起真实活动"}</Text>
+    <TextInput onChangeText={setTitle} placeholder="活动名称" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={title} />
+    <TextInput onChangeText={setTime} placeholder="时间，例如 周六 14:00" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={time} />
+    <TextInput keyboardType="number-pad" onChangeText={setCapacity} placeholder="人数" placeholderTextColor="#A9A2B0" style={styles.activityPublishInput} value={capacity} />
+    <TextInput multiline onChangeText={setDesc} placeholder="活动说明（可选）" placeholderTextColor="#A9A2B0" style={[styles.activityPublishInput, { minHeight: 72 }]} value={desc} />
+    <Text style={styles.activityPublishLabel}>选择真实场景</Text>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
+      {venues.map((item) => <Pressable key={item.realitySceneId} onPress={() => setSelectedSceneId(item.realitySceneId ?? "")} style={[styles.statusFilter, selectedSceneId === item.realitySceneId && styles.statusFilterOn]}>
+        <Text style={[styles.statusFilterText, selectedSceneId === item.realitySceneId && styles.statusFilterTextOn]}>{item.venueIcon} {item.venueName}</Text>
+      </Pressable>)}
+    </ScrollView>
+    {venues.length === 0 ? <Text style={styles.marketError}>当前没有可绑定的真实场景，请先刷新活动数据。</Text> : null}
+    {error ? <Text style={styles.marketError}>{error}</Text> : null}
+    <Pressable disabled={busy || venues.length === 0} onPress={() => void submit()} style={[styles.r4ActionPrimary, (busy || venues.length === 0) && styles.offerBtnDisabled]}><Text style={styles.r4ActionPrimaryText}>{busy ? "发布中…" : "确认发布活动"}</Text></Pressable>
+  </View>;
+}
+
+// CUSTOM_TEMPLATE is the "skip the catalog" sentinel: it routes the
+// flow straight to the free-form editor with the editor's own legacy
+// defaults (no prefill). A real template card prefills title + price.
+const CUSTOM_TEMPLATE: OpportunityTemplate = {
+  id: "", group: "HOT", title: "", sub: "", icon: "", mark: "", tags: [],
+  price: "", range: "", standard: ""
+};
+
+// K → VND conversion + suggest error hints live in
+// ../market-template-price (unit-tested there).
+import { templatePriceToVND, describeSuggestError, requiredProviderCount, momentPriceQuote, quoteToVND, formatTraceId } from "../market-template-price";
+
+// OPP-CATALOG-001 (R58): step-1 picker renders the delivery-style two
+// pane — a category rail (热门/见面/娱乐/出行/主题, server-owned) over
+// the same 16 cards. The engine data (categories/specs/policies/pricing)
+// comes from listCatalog(); when the server predates the engine the
+// payload falls back to card-only and the rail degrades to the HOT /
+// THEME / MORE groups (graceful, never a blank screen).
+function PublishTemplatePicker({ marketplace, onBack, onPicked, onCustom }: { marketplace: MarketplaceClient; onBack: () => void; onPicked: (template: OpportunityTemplate) => void; onCustom: () => void }): React.JSX.Element {
+  const [catalog, setCatalog] = useState<ListOpportunityTemplatesPayload>();
+  const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
+  const [pickedId, setPickedId] = useState<string>();
+  // OPP-SUGGEST-001: 搜索"生成" — 语义层映射到目录卡；AI 未配置或无
+  // 匹配时降级提示，手选卡片不受影响。
+  const [searchQuery, setSearchQuery] = useState("");
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string>();
+  const [activeCategory, setActiveCategory] = useState<string>("hot");
+
+  async function runSuggest(): Promise<void> {
+    if (suggesting || !searchQuery.trim()) return;
+    setSuggesting(true);
+    setSuggestError(undefined);
+    try {
+      const { template } = await marketplace.suggestTemplate(searchQuery.trim());
+      setPickedId(template.id);
+      // jump the rail to the category that actually contains the hit
+      const cat = catalog?.categories?.find((c) => c.items.includes(template.id));
+      if (cat) setActiveCategory(cat.id);
+    } catch (e) {
+      // AI_NOT_CONFIGURED / SUGGESTION_NO_MATCH / 网络 — 都只降级提示。
+      setSuggestError(e instanceof Error ? describeSuggestError(e.message) : "生成失败，请手选卡片。");
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  useEffect(() => {
+    let alive = true;
+    marketplace.listCatalog()
+      .then((snap) => { if (alive) { setCatalog(snap); setPhase("READY"); } })
+      .catch(() => { if (alive) setPhase("ERROR"); });
+    return () => { alive = false; };
+  }, [marketplace]);
+
+  const templates = catalog?.templates ?? [];
+  const categories = catalog?.categories;
+  const rail: { id: string; label: string; hint: string; items: OpportunityTemplate[] }[] =
+    categories && categories.length > 0
+      ? categories.map((c) => ({
+          id: c.id, label: c.label, hint: c.hint,
+          items: c.items.map((id) => templates.find((t) => t.id === id)).filter((t): t is OpportunityTemplate => Boolean(t))
+        }))
+      : [{ id: "hot", label: "热门", hint: "高频 Moment", items: templates.filter((t) => t.group === "HOT") },
+         { id: "theme", label: "主题", hint: "完整组合玩法", items: templates.filter((t) => t.group === "THEME") },
+         { id: "more", label: "更多", hint: "长尾场景", items: templates.filter((t) => t.group === "MORE") }];
+  const active = rail.find((c) => c.id === activeCategory) ?? rail[0];
+  const pickedTemplate = templates.find((t) => t.id === pickedId);
+  if (!active) return <ActivityIndicator style={{ marginTop: 24 }} />; // rail is never empty: engine payload or fallback
+
+  return <View>
+    <View style={styles.detailHead}>
+      <Pressable onPress={onBack} style={styles.detailBack}><Text style={styles.detailBackText}>‹</Text></Pressable>
+      <Text style={styles.detailTitle}>发布需求</Text>
+      <Text style={styles.detailMore}>•••</Text>
+    </View>
+    <View style={styles.detailHero}>
+      <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
+      <Text style={styles.detailHeroTitle}>想约什么？</Text>
+      <Text style={styles.detailHeroSub}>热门直接点；更特别的玩法从主题里选。</Text>
+    </View>
+    <View style={styles.publishSearchRow}>
+      <TextInput
+        onChangeText={setSearchQuery}
+        placeholder="直接说：今晚想找人喝咖啡"
+        placeholderTextColor="#A9A2B0"
+        style={styles.publishSearchInput}
+        value={searchQuery}
+      />
+      <Pressable disabled={suggesting || !searchQuery.trim()} onPress={() => void runSuggest()} style={[styles.publishSearchGo, (suggesting || !searchQuery.trim()) && styles.offerBtnDisabled]}>
+        <Text style={styles.publishSearchGoText}>{suggesting ? "…" : "生成"}</Text>
+      </Pressable>
+    </View>
+    {suggestError ? <Text style={styles.marketError}>{suggestError}</Text> : null}
+    {phase === "LOADING" ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
+    {phase === "ERROR" ? <View style={styles.r4Card}>
+      <Text style={styles.marketError}>场景目录加载失败，可直接自定义发布。</Text>
+      <Pressable onPress={onCustom} style={[styles.r4ActionPrimary, { marginTop: 12 }]}><Text style={styles.r4ActionPrimaryText}>自定义发布</Text></Pressable>
+    </View> : null}
+    {phase === "READY" ? <>
+      {rail.length > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow} style={{ marginTop: 10 }}>
+          {rail.map((c) => (
+            <Pressable key={c.id} onPress={() => setActiveCategory(c.id)} style={[styles.statusFilter, active.id === c.id && styles.statusFilterOn]}>
+              <Text style={[styles.statusFilterText, active.id === c.id && styles.statusFilterTextOn]}>{c.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
+      <View style={styles.r4Card}>
+        <Text style={styles.r4Title}>{active.label} · {active.hint}</Text>
+        <View style={styles.publishTemplateGrid}>
+          {active.items.map((t) => (
+            <Pressable key={t.id} onPress={() => setPickedId(t.id)} style={[styles.publishTemplateCard, pickedId === t.id && styles.publishTemplateCardOn]}>
+              <Text style={styles.publishTemplateMark}>{t.mark || t.title.slice(0, 1)}</Text>
+              <Text style={styles.publishTemplateTitle}>{t.title}</Text>
+              <Text style={styles.publishTemplateSub}>{t.sub || t.tags.slice(0, 2).join(" · ")}</Text>
+              <Text style={styles.publishTemplateRange}>参考 {t.range}</Text>
+            </Pressable>
+          ))}
+          {active.items.length === 0 ? <Text style={styles.marketError}>这个分类下暂没有场景卡。</Text> : null}
+        </View>
+        <Pressable onPress={onCustom} style={[styles.r4ActionGhost, { marginTop: 12 }]}><Text style={styles.r4ActionGhostText}>找不到？自定义发布 ›</Text></Pressable>
+      </View>
+      <View style={styles.r4Actions}>
+        <Pressable onPress={onCustom} style={styles.r4ActionGhost}><Text style={styles.r4ActionGhostText}>自定义</Text></Pressable>
+        <Pressable disabled={!pickedId} onPress={() => { if (pickedTemplate) onPicked(pickedTemplate); }} style={[styles.r4ActionPrimary, !pickedId && styles.offerBtnDisabled]}>
+          <Text style={styles.r4ActionPrimaryText}>下一步 · 服务与价格</Text>
+        </Pressable>
+      </View>
+    </> : null}
+  </View>;
+}
+
+function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketplace: MarketplaceClient; supply?: SupplyClient; onBack: () => void; onPublished: (opportunity: MarketOpportunity) => void }): React.JSX.Element {
+  // OPP-TEMPLATE-001: two-step flow. Step 1 = server catalog picker
+  // (HOT / THEME / MORE); step 2 = the free-form editor, prefilled from
+  // the picked card. "自定义" keeps the editor's own defaults.
+  const [pickedTemplate, setPickedTemplate] = useState<OpportunityTemplate>();
+  // OPP-CATALOG-001 (R58): the Moment engine payload — fetched with the
+  // picker, consumed in step 2 (specs / ratio policy / dynamic pricing).
+  const [catalog, setCatalog] = useState<ListOpportunityTemplatesPayload>();
+  // R58 spec sheet selections: chips rendered from the engine, not
+  // hardcoded lists (人数/时间/时长/地点一律来自服务端目录).
+  const [momentGroup, setMomentGroup] = useState<string>();
+  const [momentTime, setMomentTime] = useState<string>();
+  const [momentDuration, setMomentDuration] = useState<string>();
+  const [momentPlace, setMomentPlace] = useState<string>();
+  const [prefValues, setPrefValues] = useState<Record<string, { value: string; add: number }>>({});
+  const [traceId, setTraceId] = useState<string>();
+  // OPP-TARGETED-001: 定向邀约 — 选人后发布只对 TA 可见（公开市场 = 不选）。
+  const [candidates, setCandidates] = useState<SupplierCandidate[]>([]);
+  const [candidatesPhase, setCandidatesPhase] = useState<"HIDDEN" | "LOADING" | "READY" | "ERROR">("HIDDEN");
+  const [targetAgent, setTargetAgent] = useState<SupplierCandidate>();
+  const [title, setTitle] = useState("周六城市同行 + 拍照");
+  const [time, setTime] = useState("10:00–18:00");
+  const [location, setLocation] = useState("河内 · 西湖 / 老城区");
+  // 价格区间两框：最低必填（EARN/PAY），最高可选，只填一边即单价。
+  // wire 上仍走 price 自由字符串（composePriceRange 合成），server 侧
+  // 校验/normalize 不用改。
+  const [priceMin, setPriceMin] = useState("1,500,000₫");
+  const [priceMax, setPriceMax] = useState("");
+  const [moneyFlow, setMoneyFlow] = useState<PublishMoneyFlow>("EARN");
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState<string>();
+  // MERCHANT-PUBLISH-001: 有店才显示身份选择；无店/未登录保持个人发布。
+  const merchant = useMerchantIdentity();
+
+  // Fetch the catalog engine once per mount — the spec sheet in step 2
+  // reads specs/policies/pricing from it (R58: 服务器目录是唯一词表源).
+  useEffect(() => {
+    let alive = true;
+    marketplace.listCatalog()
+      .then((snap) => { if (alive) setCatalog(snap); })
+      .catch(() => { if (alive) { setCatalog(undefined); } });
+    return () => { alive = false; };
+  }, [marketplace]);
+
+  const engineSpec = catalog?.specs?.find((s) => s.templateId === pickedTemplate?.id);
+  const enginePolicy = catalog?.policies?.find((p) => p.templateId === pickedTemplate?.id);
+  const enginePricing = catalog?.pricing?.find((r) => r.templateId === pickedTemplate?.id);
+
+  // OPP-TARGETED-001: 展开选人节才拉候选（QuerySuppliers 与机会页供给
+  // 匹配同源同参 hn·ZH）；收起即清空，不残留上一次的选择。
+  useEffect(() => {
+    if (candidatesPhase === "HIDDEN" || !supply) { setCandidates([]); setTargetAgent(undefined); return; }
+    let alive = true;
+    setCandidatesPhase("LOADING");
+    supply.querySuppliers({ marketId: "hn", capability: "ZH", limit: 12 })
+      .then((list) => { if (alive) { setCandidates(list); setCandidatesPhase("READY"); } })
+      .catch(() => { if (alive) setCandidatesPhase("ERROR"); });
+    return () => { alive = false; };
+  }, [candidatesPhase === "HIDDEN", supply]);
+
+  // 资金方向联动：TBD 强制清空 Price，FREE 强制填 0。
+  function onPickFlow(next: PublishMoneyFlow): void {
+    setMoneyFlow(next);
+    if (next === "TBD") { setPriceMin(""); setPriceMax(""); }
+    else if (next === "FREE") { setPriceMin("0₫"); setPriceMax(""); }
+  }
+
+  const priceRequired = moneyFlow === "EARN" || moneyFlow === "PAY";
+
+  // OPP-TEMPLATE-001: picking a card prefills the editor — title/theme
+  // from the card, price from its suggested quote (K → VND), skills
+  // from its tags. The user still reviews and edits; the wire payload
+  // is unchanged (same fields the free-form path sends).
+  function pickTemplate(template: OpportunityTemplate): void {
+    setPickedTemplate(template);
+    setTitle(`${template.title} · ${template.tags.join(" / ")}`);
+    setPriceMin(templatePriceToVND(template.price));
+    setPriceMax("");
+    setTraceId(undefined);
+    // R58: reset the Moment spec sheet for the new card (engine chips
+    // arrive with the catalog fetch; defaults land when it resolves).
+    setMomentGroup(undefined);
+    setMomentTime(undefined);
+    setMomentDuration(undefined);
+    setMomentPlace(undefined);
+    setPrefValues({});
+  }
+
+  // R58: engine chip defaults — first option of every dimension, first
+  // option of every preference row (matches the prototype's presets).
+  useEffect(() => {
+    if (!engineSpec) return;
+    setMomentGroup((prev) => prev ?? engineSpec.groups[0]);
+    setMomentTime((prev) => prev ?? engineSpec.times[0]);
+    setMomentDuration((prev) => prev ?? engineSpec.durations[0]);
+    setMomentPlace((prev) => prev ?? engineSpec.places[0]);
+    if (momentPlace === "地图选点" && engineSpec.places[0] !== "地图选点") {
+      // keep whatever the user typed; only seed on first arrival
+    }
+  }, [engineSpec, momentPlace]);
+
+  useEffect(() => {
+    if (!enginePolicy?.prefs) { setPrefValues({}); return; }
+    setPrefValues((prev) => {
+      const next: Record<string, { value: string; add: number }> = { ...prev };
+      for (const pref of enginePolicy.prefs ?? []) {
+        const first = pref.options[0];
+        if (first && next[pref.key] === undefined) next[pref.key] = { value: first.value, add: first.add };
+      }
+      return next;
+    });
+  }, [enginePolicy]);
+
+  if (!pickedTemplate) {
+    return <PublishTemplatePicker
+      marketplace={marketplace}
+      onBack={onBack}
+      onPicked={pickTemplate}
+      onCustom={() => setPickedTemplate(CUSTOM_TEMPLATE)}
+    />;
+  }
+
+  // R58 dynamic quote — recomputed from the engine whenever a chip or a
+  // preference changes; drives both the breakdown lines and the price
+  // prefill (K totals via quoteToVND keep the wire format identical).
+  const baseK = pickedTemplate && pickedTemplate.id ? Number.parseInt((/^(\d+(?:\.\d+)?)K$/.exec(pickedTemplate.price.trim())?.[1] ?? "0"), 10) : 0;
+  const providers = requiredProviderCount(momentGroup ?? "1 人", enginePolicy);
+  // wire type (duration?: ...|undefined) → structural engine type; the
+  // exactOptionalPropertyTypes flag forbids passing optional-undefined
+  // straight through, so project into a clean object per property.
+  const pricingLite = enginePricing
+    ? {
+        ...(enginePricing.duration ? { duration: enginePricing.duration } : {}),
+        ...(enginePricing.time ? { time: enginePricing.time } : {}),
+        ...(enginePricing.group ? { group: enginePricing.group } : {}),
+        ...(enginePricing.perPair ? { perPair: enginePricing.perPair } : {})
+      }
+    : undefined;
+  const quote = momentPriceQuote(
+    baseK,
+    { group: momentGroup ?? "1 人", time: momentTime ?? "", duration: momentDuration ?? "" },
+    pricingLite,
+    Object.values(prefValues).map((p) => p.add),
+    providers
+  );
+  const prefAddTotal = Object.values(prefValues).reduce((sum, p) => sum + p.add, 0);
+  const engineActive = Boolean(pickedTemplate?.id) && Boolean(engineSpec) && Boolean(momentGroup && momentTime && momentDuration);
+
+  async function publish(): Promise<void> {
+    if (publishing || !title.trim() || !location.trim()) return;
+    const composedPrice = composePriceRange(priceMin, priceMax);
+    if (priceRequired) {
+      const validation = validateOpportunityPriceRange(composedPrice);
+      if (!validation.ok) { setError(validation.error); return; }
+    }
+    setPublishing(true);
+    setError(undefined);
+    try {
+      // R16.x (MONEYFLOW-005): PriceLabel 是 server-authoritative，
+      // client 不再携带 priceLabel 到 wire。server normalize 推
+      // opportunityPriceLabel(MoneyFlow)，wire 返回后由
+      // MarketOpportunitySchema.parse 严格验证。
+      const opportunity = await marketplace.publish({
+        title: title.trim(), shortTitle: pickedTemplate && pickedTemplate.id ? pickedTemplate.title : "同行",
+        theme: pickedTemplate && pickedTemplate.id ? pickedTemplate.title : "城市同行", date: "周六", time: time.trim(),
+        location: location.trim(), price: composedPrice,
+        skills: pickedTemplate && pickedTemplate.id ? pickedTemplate.tags.join(" · ") : "中文 · 摄影 · 本地路线",
+        lens: ["BOOKED", "NEARBY"], travel: 20,
+        moneyFlow,
+        // OPP-TARGETED-001: 选中了人就发定向邀约（只对 TA 可见、只收
+        // TA 报名）；没选 = 公开市场，wire 不带 targetUserId。
+        ...(targetAgent ? { targetUserId: targetAgent.agentId } : {}),
+        ...(merchant.merchantId ? { merchantId: merchant.merchantId } : {})
+      });
+      // R58 TraceID — 需求编号（PX-N）/邀约编号（PX-O），成功页展示+复制。
+      // onPublished 刷新市场列表但不再立即关闭表单：R58 成功页留在
+      // 原地展示编号与概要，“查看市场”退出、“再发一个”重置回选卡。
+      setTraceId(formatTraceId(targetAgent ? "O" : "N"));
+      onPublished(opportunity);
+    } catch (error) {
+      // MERCHANT-PUBLISH-001: 无成员资格 publisher 会被 server 403。
+      if (error instanceof Error && /merchant_forbidden/i.test(error.message)) {
+        setError("该店铺无发布权限（仅店主/管理员可以以店铺名义发布）。");
+      } else {
+        setError("发布没有写入服务器，请检查连接后重试。");
+      }
+    } finally {
+      setPublishing(false);
+    }
+  }
+  return (
+    <View>
+      <View style={styles.detailHead}>
+        <Pressable onPress={() => { if (pickedTemplate && pickedTemplate.id) setPickedTemplate(undefined); else onBack(); }} style={styles.detailBack}>
+          <Text style={styles.detailBackText}>‹</Text>
+        </Pressable>
+        <Text style={styles.detailTitle}>发布需求</Text>
+        <Text style={styles.detailMore}>•••</Text>
+      </View>
+      {pickedTemplate && pickedTemplate.id ? (
+        <View style={styles.publishTemplateSummary}>
+          <Text style={styles.publishTemplateSub}>你要发布</Text>
+          <Text style={styles.publishTemplateSummaryTitle}>{pickedTemplate.title}</Text>
+          <Text style={styles.publishTemplateSummaryStandard}>{pickedTemplate.standard}</Text>
+          <Pressable onPress={() => setPickedTemplate(undefined)} style={styles.publishTemplateChange}>
+            <Text style={styles.publishTemplateChangeText}>更换需求 ›</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {engineActive && enginePolicy ? (
+        <View style={styles.r4Card}>
+          <View style={styles.publishSpecHead}>
+            <Text style={styles.r4Title}>Moment 规格</Text>
+            <Text style={styles.publishRatioBadge}>{enginePolicy.mode} · {enginePolicy.ratio}</Text>
+          </View>
+          <Text style={styles.publishFlowSub}>{enginePolicy.ratioText}</Text>
+          {providers > 1 ? (
+            <Text style={styles.publishProviderNeed}>保持 {enginePolicy.ratio}：{momentGroup ?? ""} 位客户 · 需匹配 {providers} 位搭档，多组自动合并同一个需求。</Text>
+          ) : null}
+          {[
+            { label: "人数", values: engineSpec?.groups ?? [], current: momentGroup, onPick: setMomentGroup },
+            { label: "时间", values: engineSpec?.times ?? [], current: momentTime, onPick: setMomentTime },
+            { label: "时长", values: engineSpec?.durations ?? [], current: momentDuration, onPick: setMomentDuration },
+            { label: "地点", values: engineSpec?.places ?? [], current: momentPlace, onPick: setMomentPlace }
+          ].map((dim) => (
+            <View key={dim.label} style={styles.publishSpecRow}>
+              <Text style={styles.factLabel}>{dim.label}</Text>
+              <View style={styles.publishFlowRow}>
+                {dim.values.map((v) => (
+                  <Pressable key={v} onPress={() => { dim.onPick(v); if (dim.label === "时间") setTime(v); if (dim.label === "地点" && v !== "地图选点") setLocation(v); }} style={[styles.publishFlowChip, dim.current === v && styles.publishFlowChipOn]}>
+                    <Text style={[styles.publishFlowLabel, dim.current === v && styles.publishFlowLabelOn]}>{v}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ))}
+          {enginePolicy.prefs && enginePolicy.prefs.length > 0 ? (
+            <View style={[styles.publishSpecRow, { borderTopWidth: 1, borderTopColor: "#E7E2EA" }]}>
+              <Text style={styles.factLabel}>偏好</Text>
+              {enginePolicy.prefs.map((pref) => (
+                <View key={pref.key} style={{ marginTop: 6 }}>
+                  <Text style={styles.publishFlowSub}>{pref.label}</Text>
+                  <View style={styles.publishFlowRow}>
+                    {pref.options.map((opt) => (
+                      <Pressable
+                        key={opt.value}
+                        onPress={() => setPrefValues((prev) => ({ ...prev, [pref.key]: { value: opt.value, add: opt.add } }))}
+                        style={[styles.publishFlowChip, prefValues[pref.key]?.value === opt.value && styles.publishFlowChipOn]}
+                      >
+                        <Text style={[styles.publishFlowLabel, prefValues[pref.key]?.value === opt.value && styles.publishFlowLabelOn]}>{opt.value}{opt.add > 0 ? ` · +${opt.add}K` : ""}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <View style={styles.publishPriceBreakdown}>
+            <Text style={styles.r4PriceLabel}>动态报价</Text>
+            <Text style={styles.publishQuoteTotal}>{quoteToVND(quote.total)}{enginePricing?.perPair && providers > 1 ? ` · ${providers} 组 × ${quoteToVND(quote.perUnit)}` : ""}</Text>
+            <Text style={styles.publishFlowSub}>
+              基础 {baseK}K{quote.addOns.length > 0 ? quote.addOns.map((a) => ` · ${a.label} ${a.amount > 0 ? "+" : ""}${a.amount}K`).join("") : ""} · 偏好环境仅用于匹配，不按行为收费
+            </Text>
+            <Pressable onPress={() => setPriceMin(quoteToVND(quote.total))} style={[styles.r4ActionGhost, { marginTop: 8, alignSelf: "flex-start" }]}>
+              <Text style={styles.r4ActionGhostText}>按此报价填入价格框 ›</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      <View style={styles.detailHero}>
+        <Text style={styles.detailHeroKicker}>CREATE DEMAND</Text>
+        <TextInput onChangeText={setTitle} style={[styles.detailHeroTitle, styles.publishInput]} value={title} />
+        <Text style={styles.detailHeroSub}>Proxy 在发布前就告诉客户合理价格，避免把需求故意压成低价再让真人竞价。</Text>
+      </View>
+      <View style={styles.r4Card}>
+        <Text style={styles.r4Title}>你想完成什么</Text>
+        <View style={styles.factGrid}>
+          <View style={styles.fact}>
+            <Text style={styles.factLabel}>时间</Text>
+            <TextInput onChangeText={setTime} style={styles.publishFactInput} value={time} />
+          </View>
+          <View style={styles.fact}>
+            <Text style={styles.factLabel}>地点</Text>
+            <TextInput onChangeText={setLocation} style={styles.publishFactInput} value={location} />
+          </View>
+        </View>
+        <View style={[styles.r4PriceCellHot, { borderRadius: 11, marginTop: 8, padding: 10 }]}>
+          <Text style={styles.r4PriceLabel}>资金方向</Text>
+          <View style={styles.publishFlowRow}>
+            {PUBLISH_FLOW_OPTIONS.map((opt) => (
+              <Pressable key={opt.id} onPress={() => onPickFlow(opt.id)} style={[styles.publishFlowChip, moneyFlow === opt.id && styles.publishFlowChipOn]}>
+                <Text style={[styles.publishFlowLabel, moneyFlow === opt.id && styles.publishFlowLabelOn]}>{opt.label}</Text>
+                <Text style={styles.publishFlowSub}>{opt.sub}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.r4PriceLabel}>{priceLabelForPublisher(moneyFlow)} · {moneyFlow === "TBD" ? "金额由双方面谈确定" : moneyFlow === "FREE" ? "0₫ 免费" : "公开在卡片上"}</Text>
+          {priceRequired ? (
+            <View style={styles.publishPriceRow}>
+              <View style={styles.publishPriceCell}>
+                <Text style={styles.factLabel}>最低</Text>
+                <TextInput onChangeText={setPriceMin} style={styles.publishPriceInput} value={priceMin} placeholder={moneyFlow === "EARN" ? "例如 1,500,000₫" : "例如 500,000₫"} />
+              </View>
+              <View style={styles.publishPriceCell}>
+                <Text style={styles.factLabel}>最高（可选）</Text>
+                <TextInput onChangeText={setPriceMax} style={styles.publishPriceInput} value={priceMax} placeholder="例如 2,000,000₫" />
+              </View>
+            </View>
+          ) : (
+            <Text style={[styles.publishPriceInput, styles.publishPricePlaceholder]}>{moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"}</Text>
+          )}
+          <Text style={styles.r4PriceLabel}>平台保底：100,000 VND · 上限 10,000,000 VND</Text>
+        </View>
+        <View style={styles.r4Match}>
+          <Text style={styles.r4MatchText}>会完整展示给回应者 · 预计 6–10 位合格回应 · 竞争力：中等</Text>
+        </View>
+      </View>
+      <View style={styles.aiBox}>
+        <Text style={styles.aiTitle}>低于 100,000 VND 不能发布</Text>
+        <Text style={styles.aiCheck}>Proxy 对付费机会执行最低保底；免费同行请明确选择“免费任务”。</Text>
+      </View>
+      <View style={styles.r4Card}>
+        <Text style={styles.r4Title}>选人 · 可选</Text>
+        <Text style={styles.publishFlowSub}>不选 = 发布到公开市场；选 TA = 定向邀约，只有 TA 能看到并回应。</Text>
+        {targetAgent ? (
+          <View style={[styles.publishFlowChip, styles.publishFlowChipOn, { marginTop: 8 }]}>
+            <Text style={[styles.publishFlowLabel, styles.publishFlowLabelOn]}>{targetAgent.name}</Text>
+            <Text style={styles.publishFlowSub}>已选定 · 发布后仅 TA 可见</Text>
+          </View>
+        ) : null}
+        <View style={styles.publishFlowRow}>
+          {candidatesPhase === "HIDDEN" ? (
+            supply ? (
+              <Pressable onPress={() => setCandidatesPhase("LOADING")} style={styles.publishFlowChip}>
+                <Text style={styles.publishFlowLabel}>＋ 选个人邀约</Text>
+              </Pressable>
+            ) : null
+          ) : null}
+          {candidatesPhase === "LOADING" ? <ActivityIndicator style={{ marginTop: 8 }} /> : null}
+          {candidatesPhase === "ERROR" ? (
+            <View style={styles.publishFlowRow}>
+              <Text style={styles.marketError}>候选加载失败。</Text>
+              <Pressable onPress={() => setCandidatesPhase("LOADING")} style={styles.publishFlowChip}><Text style={styles.publishFlowLabel}>重试</Text></Pressable>
+              <Pressable onPress={() => setCandidatesPhase("HIDDEN")} style={styles.publishFlowChip}><Text style={styles.publishFlowLabel}>不选了</Text></Pressable>
+            </View>
+          ) : null}
+          {candidatesPhase === "READY" ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusFilterRow}>
+              {candidates.map((candidate) => (
+                <Pressable key={candidate.agentId} onPress={() => setTargetAgent(targetAgent?.agentId === candidate.agentId ? undefined : candidate)} style={[styles.publishThemeCard, targetAgent?.agentId === candidate.agentId && styles.publishThemeCardOn]}>
+                  <Text style={styles.publishTemplateMark}>{candidate.name.slice(0, 1)}</Text>
+                  <Text style={styles.publishTemplateTitle}>{candidate.name}</Text>
+                  <Text style={styles.publishTemplateRange}>{candidate.languages.join(" · ") || "CITY_COMPANION"}</Text>
+                </Pressable>
+              ))}
+              <Pressable onPress={() => { setCandidatesPhase("HIDDEN"); setTargetAgent(undefined); }} style={styles.publishThemeCard}>
+                <Text style={styles.publishTemplateTitle}>不选 · 公开市场</Text>
+              </Pressable>
+            </ScrollView>
+          ) : null}
+        </View>
+      </View>
+      {merchant.accounts.length > 0 ? (
+        <View style={styles.r4Card}>
+          <Text style={styles.r4Title}>发布身份</Text>
+          <View style={styles.publishFlowRow}>
+            <Pressable onPress={() => merchant.setMerchantId(undefined)} style={[styles.publishFlowChip, !merchant.merchantId && styles.publishFlowChipOn]}>
+              <Text style={[styles.publishFlowLabel, !merchant.merchantId && styles.publishFlowLabelOn]}>个人</Text>
+              <Text style={styles.publishFlowSub}>以自己名义</Text>
+            </Pressable>
+            {merchant.accounts.map((shop) => (
+              <Pressable key={shop.id} onPress={() => merchant.setMerchantId(shop.id)} style={[styles.publishFlowChip, merchant.merchantId === shop.id && styles.publishFlowChipOn]}>
+                <Text style={[styles.publishFlowLabel, merchant.merchantId === shop.id && styles.publishFlowLabelOn]}>{shop.name}</Text>
+                <Text style={styles.publishFlowSub}>以店铺名义</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
+      <View style={styles.r4Actions}>
+        {traceId ? null : (
+          <>
+            <Pressable onPress={onBack} style={styles.r4ActionGhost}>
+              <Text style={styles.r4ActionGhostText}>预览小美视角</Text>
+            </Pressable>
+            <Pressable disabled={publishing} onPress={() => void publish()} style={styles.r4ActionPrimary}>
+              <Text style={styles.r4ActionPrimaryText}>{publishing ? "发布中…" : targetAgent ? `向 ${targetAgent.name} 发出邀约` : "发布到市场"}</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
+      {error ? <Text style={styles.marketError}>{error}</Text> : null}
+      {/* R58 TraceID 成功页 — 编号 + 概要 + 复制 + 去市场/再发一个 */}
+      {traceId ? (
+        <View style={styles.publishSuccessCard}>
+          <Text style={styles.publishSuccessCheck}>✓</Text>
+          <Text style={styles.publishSuccessTitle}>{targetAgent ? "邀约已发出" : "需求已发布"}</Text>
+          <Text style={styles.publishFlowSub}>
+            {targetAgent ? `已经向 ${targetAgent.name} 发出需求，等待确认。` : "你的需求已经进入市场，符合条件的人可以报名或报价。"}
+          </Text>
+          <View style={styles.publishTraceBox}>
+            <Text style={styles.publishFlowSub}>{targetAgent ? "订单编号" : "需求编号"}</Text>
+            <Text style={styles.publishTraceId}>{traceId}</Text>
+          </View>
+          <View style={styles.publishFlowRow}>
+            <Pressable onPress={() => { setTraceId(undefined); setPickedTemplate(undefined); setTargetAgent(undefined); }} style={styles.r4ActionGhost}>
+              <Text style={styles.r4ActionGhostText}>再发一个</Text>
+            </Pressable>
+            <Pressable onPress={() => { setTraceId(undefined); onBack(); }} style={styles.r4ActionGhost}>
+              <Text style={styles.r4ActionGhostText}>查看市场 ›</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 function SelectWorkbench({ marketplace, fulfillment, opportunity, onBack }: { marketplace: MarketplaceClient; fulfillment?: FulfillmentClient | undefined; opportunity: MarketOpportunity; onBack: () => void }): React.JSX.Element {
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [candidates, setCandidates] = useState<MarketApplication[]>([]);
@@ -1213,6 +1950,40 @@ const styles = StyleSheet.create({
   publishFlowLabel: { color: color.ink, fontSize: 11, fontWeight: "800" },
   publishFlowLabelOn: { color: "#fff" },
   publishFlowSub: { color: color.muted, fontSize: 11, marginTop: 1 },
+  // OPP-TEMPLATE-001: catalog picker cards + step-2 summary.
+  publishTemplateGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  publishTemplateCard: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 12, width: "31%" },
+  publishTemplateCardOn: { borderColor: color.ink, borderWidth: 2 },
+  publishThemeCard: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginBottom: 6, minHeight: 88, minWidth: 128, paddingHorizontal: 12, paddingVertical: 10 },
+  publishThemeCardOn: { borderColor: color.ink, borderWidth: 2 },
+  publishTemplateMark: { color: color.ink, fontSize: 17, fontWeight: "900", marginBottom: 6 },
+  publishTemplateTitle: { color: color.ink, fontSize: 12, fontWeight: "800", textAlign: "center" },
+  publishTemplateSub: { color: color.muted, fontSize: 11, marginTop: 2, textAlign: "center" },
+  publishTemplateRange: { color: color.muted, fontSize: 11, marginTop: 4 },
+  publishTemplateSummary: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  // OPP-CATALOG-001 (R58): Moment 规格节样式 — chips 复用 publishFlowChip，
+  // 比例徽章/多搭档提示/动态报价分解是新增。
+  publishSpecHead: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "space-between" },
+  publishRatioBadge: { backgroundColor: "#F1EDF5", borderRadius: 8, color: "#6B5E7E", fontSize: 11, overflow: "hidden", paddingHorizontal: 8, paddingVertical: 3 },
+  publishProviderNeed: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 4 },
+  publishSpecRow: { marginTop: 10 },
+  publishPriceBreakdown: { backgroundColor: "#F7F5FA", borderRadius: 11, marginTop: 12, padding: 10 },
+  publishQuoteTotal: { color: color.ink, fontSize: 17, fontWeight: "700", marginTop: 2 },
+  // R58 成功页（TraceID）：编号框 + 概要。
+  publishSuccessCard: { alignItems: "center", backgroundColor: color.surface, borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 14, paddingHorizontal: 14, paddingVertical: 16 },
+  publishSuccessCheck: { color: "#3D8B5F", fontSize: 22, fontWeight: "900" },
+  publishSuccessTitle: { color: color.ink, fontSize: 15, fontWeight: "900", marginTop: 4 },
+  publishTraceBox: { alignSelf: "stretch", backgroundColor: "#F7F5FA", borderRadius: 11, marginTop: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  publishTraceId: { color: color.ink, fontSize: 14, fontWeight: "700", letterSpacing: 0.5, marginTop: 2 },
+  publishTemplateSummaryTitle: { color: color.ink, fontSize: 15, fontWeight: "900", marginTop: 2 },
+  publishTemplateSummaryStandard: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 6 },
+  publishTemplateChange: { alignSelf: "flex-end", marginTop: 8 },
+  publishTemplateChangeText: { color: color.magenta, fontSize: 11, fontWeight: "800" },
+  // OPP-SUGGEST-001: publish search box (生成 → catalog card).
+  publishSearchRow: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 10 },
+  publishSearchInput: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, fontSize: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  publishSearchGo: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, justifyContent: "center", minHeight: 38, paddingHorizontal: 14 },
+  publishSearchGoText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   r4Title: { color: color.ink, flex: 1, fontSize: 12, fontWeight: "800", lineHeight: 17 },
   r4Budget: { color: color.ink, fontSize: 13, fontWeight: "900" },
   r4Meta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 4 },

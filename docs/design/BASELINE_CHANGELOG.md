@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 157 — R58 publish-flow catalog engine (2026-09-10)
+
+- 发布流数据源升级为服务端目录引擎：`ListOpportunityTemplates` 一次匿名读全量下发分类轨道（热门/见面/娱乐/出行/主题，同 16 卡五视图）+ Moment 规格（人数/时间/时长/地点）+ 比例政策（固定 1:1 vs 小组容量合并）+ 动态定价（时长/时段/人数 delta、perPair × 搭档数）+ 活动创建预设（6 个多人完整玩法）。
+- 客户端词表零硬编码：发布需求 Step1 改两栏分类目录（生成命中自动跳到所属分类），Step2 新增 Moment 规格节（chips 全部来自引擎数据 + 偏好加价 + 动态报价分解 + 比例徽章/多搭档提示）；发布活动改两步（预设选卡 → 一屏规格），发布 wire 载荷不变。
+- R58 成功页 TraceID：需求 PX-N / 定向邀约 PX-O / 活动 PX-A + 编号卡；发布成功留在表单内展示，「查看市场/再发一个」显式交还控制权（列表仍即时刷新）。
+- 守护：Go 交叉引用完整性（分类→卡、规格/政策/定价全覆盖、perPair 须固定 1:1）+ JSON 往返 + 预设完整性；wire 层守护测试钉死 dispatch map 逐字段下发（engine struct 测试抓不到 service 组装层丢 activityPresets 的实发 bug）；contracts schema 向后兼容（旧卡列表载荷仍过）；回归契约 152→162。
+
 ## Revision 155 — 2026-09-10
 
 - 顶栏 logo 让出状态栏时间（与场景地图同式）；此前整页 Header 无安全区，属历史遗留。

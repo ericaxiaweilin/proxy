@@ -113,6 +113,10 @@ func main() {
 	sceneService := scene.New()
 	realitySceneService := realityscene.New()
 	marketplaceService := marketplace.New()
+	// OPP-SUGGEST-001: 发布搜索"生成"走语义层（modelstack），与
+	// conversation 同一适配器；未配置时 SuggestOpportunityTemplate
+	// fail-closed 明确拒绝（AI_NOT_CONFIGURED），前端隐藏生成入口。
+	marketplaceService.SetModelStack(modelStack)
 	// R17.x: chat → order 派生. marketplace ConfirmMarketApplication
 	// 委托 fulfillment 创建真 Order, 让“我的订单”页能看见.
 	// 接口定义在 marketplace package (DIP: 消费者侧),

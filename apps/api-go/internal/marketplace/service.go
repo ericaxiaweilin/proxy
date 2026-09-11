@@ -14,6 +14,7 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/modelstack"
 )
 
 // Service owns the P0 opportunity read model and its user actions. Mobile may
@@ -32,6 +33,11 @@ type Service struct {
 	// authorNames resolves PERSON opportunity owner names from the verified
 	// account profile (PROFILE-READ-001). Nil = legacy unwired behaviour.
 	authorNames authorNameResolver
+	// OPP-SUGGEST-001: semantic-layer adapter for the publish search
+	// box (SuggestOpportunityTemplate). Unconfigured{} fail-closed;
+	// production wires the real adapter via SetModelStack.
+	mu         sync.Mutex
+	modelStack modelstack.Port
 }
 
 // authorNameResolver is the narrow consumer-side contract so marketplace
@@ -152,6 +158,13 @@ type Opportunity struct {
 	Lat          *float64 `json:"lat,omitempty"`
 	Lng          *float64 `json:"lng,omitempty"`
 	TravelSource string   `json:"travelSource,omitempty"` // "seeded" | "user_distance" | "unknown"
+	// OPP-TARGETED-001: optional directed invitation. When set, the
+	// opportunity is a private ask to one specific account (选人 → 向
+	// TA 发出邀约): List only shows it to the target and the owner;
+	// only the target may apply. Empty = the classic public card.
+	// OwnerID keeps pointing at the publisher so Owned/接单/屏蔽 stay
+	// intact; this field only narrows VISIBILITY + eligibility.
+	TargetAccountID string `json:"targetAccountId,omitempty"`
 }
 
 type Application struct {
@@ -199,7 +212,7 @@ func (s *Service) SeedDefaults() {
 
 func (s *Service) Supports(t string) bool {
 	switch t {
-	case "ListMarketOpportunities", "PublishMarketOpportunity", "ApplyToMarketOpportunity", "ListMarketApplications", "SelectMarketApplication", "ConfirmMarketApplication", "DismissMarketOpportunity":
+	case "ListOpportunityTemplates", "SuggestOpportunityTemplate", "ListMarketOpportunities", "PublishMarketOpportunity", "ApplyToMarketOpportunity", "ListMarketApplications", "SelectMarketApplication", "ConfirmMarketApplication", "DismissMarketOpportunity":
 		return true
 	}
 	return false
@@ -207,6 +220,30 @@ func (s *Service) Supports(t string) bool {
 
 func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	switch e.CommandType {
+	case "ListOpportunityTemplates":
+		// OPP-TEMPLATE-001 + OPP-CATALOG-001 (R58): the publish-flow
+		// catalog. Cards + categories + per-card specs/policy/pricing
+		// in one anonymous read — the client renders the two-pane
+		// picker AND the Moment spec sheet from this payload.
+		// Read-only, no repository involved, anonymous-safe — same tier
+		// as ListMarketOpportunities, so it needs no auth and no
+		// aiboundary gate (it discloses nothing about any user).
+		snap := buildCatalogSnapshot()
+		return payload(e, "Market", "templates", "READY", map[string]any{
+			"templates":   snap.Templates,
+			"categories":  snap.Categories,
+			"specs":       snap.Specs,
+			"policies":    snap.Policies,
+			"pricing":     snap.Pricing,
+			// OPP-CATALOG-002 (R58 activity line): creation-flow presets
+			// ride the same anonymous snapshot read.
+			"activityPresets": snap.ActivityPresets,
+		})
+	case "SuggestOpportunityTemplate":
+		// OPP-SUGGEST-001: semantic mapping of free text to a catalog
+		// card (publish search box). Read-only, anonymous-safe; the
+		// model stack gates itself (fail-closed when unwired).
+		return s.suggestOpportunityTemplate(ctx, e)
 	case "ListMarketOpportunities":
 		items, err := s.repository.List(ctx, e.Actor.ID)
 		if err != nil {
@@ -280,6 +317,16 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		p.ID = newID("opp_")
 		p.OwnerID = e.Actor.ID
+		// OPP-TARGETED-001: 定向邀约。payload 带 targetUserId = 只发给一个
+		// 人（选人 → 向 TA 发出邀约）。快照进 Opportunity.TargetAccountID
+		// （PG 走 payload JSONB，无迁移）；List 只对目标人和 owner 可见，
+		// Apply 只收目标人。空 = 公开卡，行为不变。
+		if target, _ := e.Payload["targetUserId"].(string); strings.TrimSpace(target) != "" {
+			if target == e.Actor.ID {
+				return rejected(e, "INVALID_OPPORTUNITY", "market.targeted_self_forbidden")
+			}
+			p.TargetAccountID = strings.TrimSpace(target)
+		}
 		// PROFILE-READ-001: PERSON owner names come from the verified
 		// account profile, never hardcoded. Unresolved authors store an
 		// empty owner; readers show a neutral label. Without a wired
@@ -342,6 +389,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_failed", nil)
+		}
+		// OPP-TARGETED-001: 定向邀约只有目标人能报名——其他人连卡片都
+		// 看不到，这里防的是直接拿 opportunityId 打命令的旁路。
+		if stored.TargetAccountID != "" && stored.TargetAccountID != e.Actor.ID {
+			return rejected(e, "APPLICATION_NOT_INVITED", "market.application_not_invited")
 		}
 		if stored.OwnerID == e.Actor.ID {
 			return rejected(e, "OWNER_CANNOT_APPLY", "market.owner_cannot_apply")
@@ -531,6 +583,11 @@ func (r *MemoryRepository) List(_ context.Context, viewerID string) ([]Opportuni
 	defer r.mu.Unlock()
 	items := make([]Opportunity, 0, len(r.opportunities))
 	for _, stored := range r.opportunities {
+		// OPP-TARGETED-001: a directed invitation is visible ONLY to
+		// its target and its owner — never in the public feed.
+		if stored.TargetAccountID != "" && stored.TargetAccountID != viewerID && stored.OwnerID != viewerID {
+			continue
+		}
 		if r.dismissed[viewerID+"|"+stored.ID] {
 			continue
 		}
