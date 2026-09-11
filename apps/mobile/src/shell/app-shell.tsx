@@ -768,13 +768,15 @@ export function AppShell({
 
 
 // 基线 .header.root：只有 Otter logo + Proxy 字标（上下文徽章不在此层，见 Me 的 contextline）。
+//
+// UI-SAFEAREA-001: 顶栏不再自己加安全区。外层 app-shell 已经用
+// <SafeAreaView edges={["top"]}> 整体让出状态栏，顶栏若再叠一次 insets.top 就是
+// 双计（实测品牌行 y=127 = 59 状态栏 + 59 重复）。此前几次「顶栏让出状态栏时间 /
+// 高度随安全区长」的改动都发生在 insets 恒为 0 的环境里，等于没生效，只在真值到位后
+// 变成双计。安全区只在 SafeAreaView 一处生效，顶栏保持基线 52/46 高。
 function Header({ compact }: { compact: boolean }): React.JSX.Element {
-  // 顶栏必须让出状态栏时间：高度 = 内容高 + 安全区（padding 挤进固定高度
-  // 会把 logo 挤出下边盖住地址行——上一次的 bug 就是这个）。
-  const insets = useSafeAreaInsets();
-  const topPad = Math.max(insets.top, 8);
   return (
-    <View style={[styles.header, compact && styles.headerCompact, { height: (compact ? 46 : 52) + topPad, paddingTop: topPad }]}>
+    <View style={[styles.header, compact && styles.headerCompact]}>
       <View style={styles.headerBrand}>
         <Image resizeMode="contain" source={OTTER_LOGO} style={[styles.headerLogo, compact && styles.headerLogoCompact]} />
         <Text style={[styles.headerName, compact && styles.headerNameCompact]}>Proxy</Text>
