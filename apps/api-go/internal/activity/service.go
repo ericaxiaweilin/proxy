@@ -9,9 +9,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"hash/fnv"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -20,6 +23,8 @@ import (
 // Activity 是本地活动（对齐基线 activityCatalog 字段）。
 type Activity struct {
 	ID              string `json:"activityId"`
+	// Code 是 R58 成功页展示编号（PX-A-yymmdd-####，展示用；权威主键仍是 ID）。
+	Code            string `json:"code,omitempty"`
 	Origin          string `json:"origin"` // PLATFORM | MERCHANT | USER | TEST (AI 不可作 origin — 平台发布主体)
 	Title           string `json:"title"`
 	Time            string `json:"time"`
@@ -48,6 +53,10 @@ type Activity struct {
 	OwnerID         string `json:"ownerId,omitempty"`
 	Status          string `json:"status,omitempty"`
 	ConsumptionTerm string `json:"consumptionTerm,omitempty"`
+	// R58: 报名方式 OPEN(自由报名)/REVIEW(审核后加入)/INVITE_ONLY(仅邀请)。
+	SignupMode string `json:"signupMode,omitempty"`
+	// R58: 主题（日落/奥黛/胶片/本地人…），可选。
+	Theme string `json:"theme,omitempty"`
 	// MerchantName 以商家名义发布时的店名（MERCHANT-PUBLISH-001，omitempty）。
 	// 只认 api 层注记；个人发布为空。
 	MerchantName    string `json:"merchantName,omitempty"`
@@ -176,6 +185,25 @@ type publishActivityPayload struct {
 	RealitySceneID  string `json:"realitySceneId"`
 	Description     string `json:"desc"`
 	ConsumptionTerm string `json:"consumptionTerm"`
+	// R58: 报名方式 OPEN(自由报名)/REVIEW(审核后加入)/INVITE_ONLY(仅邀请)。
+	SignupMode string `json:"signupMode"`
+	// R58: 主题（日落/奥黛/胶片/本地人…），可选。
+	Theme string `json:"theme"`
+}
+
+// venueTypeLabels 扩展 R58 户外场地；未知类型不进白名单（publish 拒绝）。
+var venueTypeLabels = map[string]string{
+	"CAFE": "咖啡店", "RESTAURANT": "餐厅",
+	"PARK": "公园", "LAKE": "湖边", "STREET": "街区", "OTHER": "通用",
+}
+
+// activityDisplayCode 生成 R58 成功页展示编号 PX-A-yymmdd-####。
+// 展示用（复制/报单号），权威主键仍是 Activity.ID；由活动 ID 稳定派生
+// （FNV-1a），同活动多次读取不变，无需序列设施。
+func activityDisplayCode(activityID string, now time.Time) string {
+	sum := fnv.New32a()
+	_, _ = sum.Write([]byte(activityID))
+	return "PX-A-" + now.UTC().Format("060102") + "-" + strconv.Itoa(int(sum.Sum32()%9000)+1000)
 }
 
 func (s *Service) publishActivity(ctx context.Context, e command.Envelope) command.Result {
@@ -189,8 +217,18 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 	if !decode(e.Payload, &p) || p.Title == "" || p.Time == "" || p.VenueName == "" || p.RealitySceneID == "" || p.Capacity < 2 || p.Capacity > 50 {
 		return command.Rejected(e, "ACTIVITY_PUBLISH_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.publish_invalid", nil)
 	}
-	if p.VenueType != "CAFE" && p.VenueType != "RESTAURANT" {
+	if _, ok := venueTypeLabels[p.VenueType]; !ok {
 		return command.Rejected(e, "ACTIVITY_VENUE_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "activity.venue_unsupported", nil)
+	}
+	if p.SignupMode == "" {
+		p.SignupMode = "OPEN"
+	}
+	if p.SignupMode != "OPEN" && p.SignupMode != "REVIEW" && p.SignupMode != "INVITE_ONLY" {
+		return command.Rejected(e, "ACTIVITY_SIGNUP_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.signup_invalid", nil)
+	}
+	p.Theme = strings.TrimSpace(p.Theme)
+	if len([]rune(p.Theme)) > 30 {
+		return command.Rejected(e, "ACTIVITY_THEME_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.theme_invalid", nil)
 	}
 	if p.ConsumptionTerm != "SPLIT" && p.ConsumptionTerm != "HOST_COVERS" {
 		return command.Rejected(e, "ACTIVITY_CONSUMPTION_TERM_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.consumption_term_invalid", nil)
@@ -199,7 +237,8 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 	if p.ConsumptionTerm == "HOST_COVERS" {
 		consumption = "发起人承担约定的到店消费"
 	}
-	a := Activity{ID: "activity_" + e.CommandID, Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: map[string]string{"CAFE": "咖啡店", "RESTAURANT": "餐厅"}[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE"}
+	activityID := "activity_" + e.CommandID
+	a := Activity{ID: activityID, Code: activityDisplayCode(activityID, time.Now().UTC()), Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, SignupMode: p.SignupMode, Theme: p.Theme, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: venueTypeLabels[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE"}
 	// MERCHANT-PUBLISH-001: 商家注记（api 层已验成员）→ Origin MERCHANT +
 	// 店名。OwnerID 保留发布人（ListByOwner 按 ownerId 照常找到自己的店单）。
 	// 只认注记，不读 payload。
