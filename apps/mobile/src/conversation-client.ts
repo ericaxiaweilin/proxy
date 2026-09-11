@@ -27,6 +27,21 @@ export type ConversationInboxItem = {
   counterpartySnapshot?: { displayName?: string; avatarRef?: string };
 };
 
+export type ConvoSummary = {
+  convo: {
+    id: string;
+    parentDialogId: string;
+    seedMessageId: string;
+    title: string;
+    participantIds: string[];
+    createdAt: string;
+  };
+  seedPreview: string;
+  latestBody: string;
+  latestAt: string;
+  messageCount: number;
+};
+
 export class ConversationClient {
   private commandSequence = 0;
 
@@ -58,7 +73,8 @@ export class ConversationClient {
     mediaRef?: string,
     protectionOverride?: ProtectionOverride,
     messageType?: "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "LOCATION" | "SYSTEM_CONTEXT" | "STRUCTURED_SUGGESTION",
-    proxyObject?: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> }
+    proxyObject?: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> },
+    convoId?: string
   ): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
     const isImage = Boolean(mediaRef);
@@ -70,31 +86,54 @@ export class ConversationClient {
       ...(assistantMode ? { assistantMode } : {}),
       ...(temporaryUIResponseId ? { temporaryUIResponseId } : {}),
       ...(protectionOverride ? { protectionOverride } : {}),
-      ...(proxyObject ? { proxyObject } : {})
+      ...(proxyObject ? { proxyObject } : {}),
+      ...(convoId ? { convoId } : {})
     });
     return result;
   }
 
-  public async sendProxyObject(conversationId: string, proxyObject: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> }): Promise<Record<string, unknown>> {
-    return this.sendMessage(conversationId, proxyObject.snapshot.title as string ?? "", undefined, undefined, undefined, undefined, "TEXT", proxyObject);
+  public async sendProxyObject(conversationId: string, proxyObject: { objectType: "invitation" | "activity" | "opportunity" | "voucher" | "post" | "order"; objectId: string; snapshot: Record<string, unknown>; liveState?: Record<string, unknown> }, convoId?: string): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, proxyObject.snapshot.title as string ?? "", undefined, undefined, undefined, undefined, "TEXT", proxyObject, convoId);
   }
 
-  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride, assistantMode?: string): Promise<Record<string, unknown>> {
-    return this.sendMessage(conversationId, caption?.trim() || " ", assistantMode, undefined, mediaRef, protectionOverride, "IMAGE");
+  public async sendImageMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride, assistantMode?: string, convoId?: string): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, caption?.trim() || " ", assistantMode, undefined, mediaRef, protectionOverride, "IMAGE", undefined, convoId);
   }
 
-  public async sendVideoMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride, assistantMode?: string): Promise<Record<string, unknown>> {
-    return this.sendMessage(conversationId, caption?.trim() || " ", assistantMode, undefined, mediaRef, protectionOverride, "VIDEO");
+  public async sendVideoMessage(conversationId: string, mediaRef: string, caption?: string, protectionOverride?: ProtectionOverride, assistantMode?: string, convoId?: string): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, caption?.trim() || " ", assistantMode, undefined, mediaRef, protectionOverride, "VIDEO", undefined, convoId);
   }
 
-  public async sendAudioMessage(conversationId: string, mediaRef: string, protectionOverride?: ProtectionOverride, assistantMode?: string): Promise<Record<string, unknown>> {
-    return this.sendMessage(conversationId, "语音消息", assistantMode, undefined, mediaRef, protectionOverride, "AUDIO");
+  public async sendAudioMessage(conversationId: string, mediaRef: string, protectionOverride?: ProtectionOverride, assistantMode?: string, convoId?: string): Promise<Record<string, unknown>> {
+    return this.sendMessage(conversationId, "语音消息", assistantMode, undefined, mediaRef, protectionOverride, "AUDIO", undefined, convoId);
   }
 
-  public async listMessages(conversationId: string): Promise<Record<string, unknown>> {
+  public async listMessages(conversationId: string, convoId?: string): Promise<Record<string, unknown>> {
     const session = await this.requireSession();
-    const result = await this.sendCommand(session, "ListConversationMessages", { type: "Conversation", id: conversationId }, {});
+    const result = await this.sendCommand(session, "ListConversationMessages", { type: "Conversation", id: conversationId }, {
+      ...(convoId ? { convoId } : {}),
+    });
     return result;
+  }
+
+  // Lotus v1 Convo (Message Branch)：从一条消息分叉出支线讨论。
+  public async createConvo(messageId: string, title?: string): Promise<ConvoSummary["convo"]> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "CreateConvo", { type: "Message", id: messageId }, {
+      messageId,
+      ...(title?.trim() ? { title: title.trim() } : {}),
+    });
+    const convo = (typeof result.operationRef === "string" ? JSON.parse(result.operationRef) as { convo?: ConvoSummary["convo"] } : {}).convo;
+    if (!convo?.id) throw new Error("create convo response malformed");
+    return convo;
+  }
+
+  public async listMyConvos(): Promise<ConvoSummary[]> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(session, "ListMyConvos", { type: "ConvoCollection", id: "mine" }, {});
+    const convos = (typeof result.operationRef === "string" ? JSON.parse(result.operationRef) as { convos?: ConvoSummary[] } : {}).convos;
+    if (!Array.isArray(convos)) throw new Error("list convos response malformed");
+    return convos;
   }
 
   public async listConversations(): Promise<ConversationInboxItem[]> {

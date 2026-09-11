@@ -85,3 +85,34 @@ describe("CHAT-PROXY-ACTIVITY-001 activity proxy uses real server IDs", () => {
     expect(proxyObject.objectId).not.toBe("act_westlake");
   });
 });
+
+describe("CONVO-001 message branch commands", () => {
+  async function authedStore() { return store(); }
+
+  it("creates a convo from a seed message", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const client = new ConversationClient({ baseUrl:"http://127.0.0.1:4100", secureSessionStore:await authedStore(), authClient:{request:async (_path, init)=>{sent.push(init.body as Record<string,unknown>);return {status:200,json:async()=>({outcome:"ACCEPTED",operationRef:JSON.stringify({convo:{id:"convo_1",parentDialogId:"conv_1",seedMessageId:"msg_1",title:"周六"}})})};}} });
+    const convo = await client.createConvo("msg_1");
+    expect(sent[0]?.commandType).toBe("CreateConvo");
+    expect(sent[0]?.target).toEqual({ type:"Message", id:"msg_1" });
+    expect(convo.id).toBe("convo_1");
+  });
+
+  it("lists my convos", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const client = new ConversationClient({ baseUrl:"http://127.0.0.1:4100", secureSessionStore:await authedStore(), authClient:{request:async (_path, init)=>{sent.push(init.body as Record<string,unknown>);return {status:200,json:async()=>({outcome:"ACCEPTED",operationRef:JSON.stringify({convos:[{convo:{id:"convo_1"},seedPreview:"hi",latestBody:"yo",latestAt:"2026-09-09",messageCount:2}]})})};}} });
+    const convos = await client.listMyConvos();
+    expect(sent[0]?.commandType).toBe("ListMyConvos");
+    expect(convos).toHaveLength(1);
+    expect(convos[0]?.latestBody).toBe("yo");
+  });
+
+  it("passes convoId through send and list", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const client = new ConversationClient({ baseUrl:"http://127.0.0.1:4100", secureSessionStore:await authedStore(), authClient:{request:async (_path, init)=>{sent.push(init.body as Record<string,unknown>);return {status:200,json:async()=>({outcome:"ACCEPTED"})};}} });
+    await client.sendMessage("conv_1", "branch reply", undefined, undefined, undefined, undefined, undefined, undefined, "convo_9");
+    expect((sent[0]?.payload as Record<string,unknown>).convoId).toBe("convo_9");
+    await client.listMessages("conv_1", "convo_9");
+    expect((sent[1]?.payload as Record<string,unknown>).convoId).toBe("convo_9");
+  });
+});

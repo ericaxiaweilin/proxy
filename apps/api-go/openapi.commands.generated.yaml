@@ -73,6 +73,8 @@ commands:
     domain: Supply
   - command: CreateCityCompanionNeed
     domain: CityCompanion
+  - command: CreateConvo
+    domain: Conversation
   - command: CreateDisplayIdentity
     domain: Identity
   - command: CreateIncident
@@ -217,6 +219,8 @@ commands:
     domain: Activity
   - command: ListMyBusinessAccounts
     domain: Business
+  - command: ListMyConvos
+    domain: Conversation
   - command: ListMyInvitations
     domain: Scene
   - command: ListMyMemories

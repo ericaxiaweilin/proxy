@@ -132,6 +132,13 @@ type Repository interface {
 	// Lotus RFC §5 (30-day default TTL). PG impl uses index on
 	// protection->>'expiresAt'; Memory impl scans. Returns deleted count.
 	PurgeExpiredMessages(ctx context.Context, now time.Time) (int64, error)
+	// --- Lotus v1 Convo (Message Branch) ---
+	// Convo 挂在 Conversation 下，用 Message.ConvoID 归属消息。
+	// 复用 dialog.go 的 Convo 类型（ParentDialogID 即 Conversation ID）。
+	CreateConvo(ctx context.Context, c Convo) error
+	GetConvo(ctx context.Context, id string) (Convo, error)
+	ListConvosByConversation(ctx context.Context, conversationID string) ([]Convo, error)
+	ListConvosByUser(ctx context.Context, userID string) ([]Convo, error)
 }
 
 var (
@@ -145,6 +152,7 @@ type MemoryRepository struct {
 	conversations map[string]Conversation
 	messages      map[string][]Message
 	drafts        map[string]NeedDraft
+	convos        map[string]Convo
 	events        []event.DomainEvent
 }
 
@@ -153,6 +161,7 @@ func NewMemoryRepository() *MemoryRepository {
 		conversations: make(map[string]Conversation),
 		messages:      make(map[string][]Message),
 		drafts:        make(map[string]NeedDraft),
+		convos:        make(map[string]Convo),
 	}
 }
 
@@ -281,6 +290,63 @@ func (r *MemoryRepository) Snapshot(_ context.Context) ([]Conversation, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
 	return result, nil
+}
+
+// --- Lotus v1 Convo (Message Branch) memory 实现 ---
+
+func (r *MemoryRepository) CreateConvo(_ context.Context, c Convo) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.convos[c.ID]; exists {
+		return errors.New("convo already exists")
+	}
+	r.convos[c.ID] = cloneConvo(c)
+	return nil
+}
+
+func (r *MemoryRepository) GetConvo(_ context.Context, id string) (Convo, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.convos[id]
+	if !ok {
+		return Convo{}, ErrConvoNotFound
+	}
+	return cloneConvo(c), nil
+}
+
+func (r *MemoryRepository) ListConvosByConversation(_ context.Context, conversationID string) ([]Convo, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]Convo, 0)
+	for _, c := range r.convos {
+		if c.ParentDialogID == conversationID {
+			result = append(result, cloneConvo(c))
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (r *MemoryRepository) ListConvosByUser(_ context.Context, userID string) ([]Convo, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]Convo, 0)
+	for _, c := range r.convos {
+		for _, p := range c.ParticipantIDs {
+			if p == userID {
+				result = append(result, cloneConvo(c))
+				break
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func cloneConvo(c Convo) Convo {
+	c.ParticipantIDs = append([]string(nil), c.ParticipantIDs...)
+	c.ExternalParticipantIDs = append([]string(nil), c.ExternalParticipantIDs...)
+	return c
 }
 
 // PurgeExpiredMessages hard-deletes messages whose protection.ExpiresAt <= now.
@@ -488,7 +554,8 @@ func (s *Service) SetMediaStoreDir(dir string) {
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "StartConversation", "SendMessage", "ListConversations", "ListConversationMessages", "MarkMessageRead", "DeleteMessage", "SetConversationBlocked", "RecordScreenshot", "ForwardMessage",
-		"CreateNeedDraft", "ConfirmNeedDraft":
+		"CreateNeedDraft", "ConfirmNeedDraft",
+		"CreateConvo", "ListMyConvos":
 		return true
 	default:
 		return false
@@ -525,9 +592,142 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.createNeedDraft(ctx, e)
 	case "ConfirmNeedDraft":
 		return s.confirmNeedDraft(ctx, e)
+	case "CreateConvo":
+		return s.createConvo(ctx, e)
+	case "ListMyConvos":
+		return s.listMyConvos(ctx, e)
 	default:
 		return command.Rejected(e, "CONVERSATION_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "conversation.unsupported_command", nil)
 	}
+}
+
+// --- Lotus v1 Convo (Message Branch) 命令 ---
+//
+// Convo 从一条已存在的消息分叉：seed 必须能找到，seed 所在会话即父会话，
+// 调用者必须是父会话成员。外部成员不自动加入父会话（v1 只继承父会话成员）。
+
+func (s *Service) createConvo(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		MessageID string `json:"messageId"`
+		Title     string `json:"title"`
+	}
+	if !decode(e.Payload, &p) || strings.TrimSpace(p.MessageID) == "" {
+		return command.Rejected(e, "CONVO_SEED_REQUIRED", "VALIDATION", "AFTER_USER_ACTION", "conversation.convo_seed_required", nil)
+	}
+	seed, err := s.repository.GetMessage(ctx, p.MessageID)
+	if errors.Is(err, ErrMessageNotFound) {
+		return command.Rejected(e, "CONVO_SEED_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.convo_seed_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "CONVO_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.convo_read_failed", nil)
+	}
+	conv, err := s.repository.GetConversation(ctx, seed.ConversationID)
+	if errors.Is(err, ErrConversationNotFound) {
+		return command.Rejected(e, "CONVERSATION_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "CONVERSATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.read_failed", nil)
+	}
+	if !isParticipant(conv, e.Actor.ID) {
+		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
+	}
+	title := strings.TrimSpace(p.Title)
+	if title == "" {
+		title = seedTitle(seed)
+	}
+	now := s.clock.Now().UTC()
+	convo := Convo{
+		ID:             newID("convo_"),
+		ParentDialogID: conv.ID,
+		SeedMessageID:  seed.ID,
+		Title:          title,
+		ParticipantIDs: append([]string(nil), conv.Participants...),
+		CreatedAt:      now,
+	}
+	if err := s.repository.CreateConvo(ctx, convo); err != nil {
+		return command.Rejected(e, "CONVO_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.convo_create_failed", nil)
+	}
+	domainEvents := []event.DomainEvent{event.New("ConvoCreated", "Convo", convo.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"parentConversationId": conv.ID,
+		"seedMessageId":        seed.ID,
+	})}
+	return acceptedWithPayload(e, "Convo", convo.ID, 1, "CREATED", map[string]any{"convo": convo}, domainEvents)
+}
+
+// seedTitle 取 seed 正文前 12 个 rune 做默认分支标题。
+func seedTitle(seed Message) string {
+	body := strings.TrimSpace(seed.Body)
+	if body == "" {
+		body = "图片"
+		if seed.MessageType == "VIDEO" {
+			body = "视频"
+		}
+	}
+	runes := []rune(body)
+	if len(runes) > 12 {
+		return string(runes[:12]) + "…"
+	}
+	return body
+}
+
+type convoSummary struct {
+	Convo        Convo  `json:"convo"`
+	SeedPreview  string `json:"seedPreview"`
+	LatestBody   string `json:"latestBody"`
+	LatestAt     string `json:"latestAt"`
+	MessageCount int    `json:"messageCount"`
+}
+
+func (s *Service) listMyConvos(ctx context.Context, e command.Envelope) command.Result {
+	convos, err := s.repository.ListConvosByUser(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "CONVO_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.convo_list_failed", nil)
+	}
+	summaries := make([]convoSummary, 0, len(convos))
+	for _, convo := range convos {
+		summary := convoSummary{Convo: convo}
+		if seed, err := s.repository.GetMessage(ctx, convo.SeedMessageID); err == nil {
+			summary.SeedPreview = seedPreviewText(seed)
+		}
+		messages, err := s.repository.Messages(ctx, convo.ParentDialogID)
+		if err != nil {
+			return command.Rejected(e, "MESSAGE_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
+		}
+		for _, m := range messages {
+			if m.ConvoID == nil || *m.ConvoID != convo.ID {
+				continue
+			}
+			summary.MessageCount++
+			summary.LatestBody = branchPreviewText(m)
+			summary.LatestAt = m.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		summaries = append(summaries, summary)
+	}
+	return acceptedWithPayload(e, "ConvoCollection", "mine", 1, "LISTED", map[string]any{"convos": summaries}, nil)
+}
+
+func seedPreviewText(m Message) string {
+	return branchPreviewText(m)
+}
+
+func branchPreviewText(m Message) string {
+	switch m.MessageType {
+	case "IMAGE":
+		return "[图片]"
+	case "VIDEO":
+		return "[视频]"
+	case "AUDIO":
+		return "[语音]"
+	}
+	body := strings.TrimSpace(m.Body)
+	if body == "" {
+		return "新消息"
+	}
+	runes := []rune(body)
+	if len(runes) > 24 {
+		return string(runes[:24]) + "…"
+	}
+	return body
 }
 
 type ConversationSummary struct {
@@ -761,6 +961,9 @@ type sendMessagePayload struct {
 	MediaRef              string `json:"mediaRef"`
 	AssistantMode         string `json:"assistantMode"`
 	TemporaryUIResponseID string `json:"temporaryUIResponseId"`
+	// ConvoID 可选：发到某条分支里。分支必须存在且属于目标会话，
+	// 调用者已是会话成员（上面已校验）。分支内不触发 AI 回复。
+	ConvoID string `json:"convoId"`
 	// ProtectionOverride is the user-controlled layer on top of the
 	// per-type default (see message_protection.go). All fields are
 	// optional; only set fields override.
@@ -831,10 +1034,28 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if p.ProxyObject != nil {
 		kind = "proxy_object"
 	}
+	// 分支归属：convoId 有值时校验归属（必须存在且挂在目标会话下），
+	// 否则拒绝——不能把消息发到别的会话的分支里。
+	var convoID *string
+	if strings.TrimSpace(p.ConvoID) != "" {
+		convo, err := s.repository.GetConvo(ctx, strings.TrimSpace(p.ConvoID))
+		if errors.Is(err, ErrConvoNotFound) {
+			return command.Rejected(e, "CONVO_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.convo_not_found", nil)
+		}
+		if err != nil {
+			return command.Rejected(e, "CONVO_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.convo_read_failed", nil)
+		}
+		if convo.ParentDialogID != conv.ID {
+			return command.Rejected(e, "CONVO_PARENT_MISMATCH", "VALIDATION", "AFTER_USER_ACTION", "conversation.convo_parent_mismatch", nil)
+		}
+		id := convo.ID
+		convoID = &id
+	}
 	msg := Message{
 		ID:             newID("msg_"),
 		ConversationID: conv.ID,
 		DialogID:       conv.ID,
+		ConvoID:        convoID,
 		SenderID:       e.Actor.ID,
 		MessageType:    p.MessageType,
 		Kind:           kind,
@@ -858,17 +1079,18 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	}
 
 	// --- AI 回复：模型底座对话式需求构建助手 ---
+	// 分支内发言不触发 AI（支线讨论不召唤助手，避免主线 AI 回复串进分支）。
 	var temporaryUI *TemporaryUI
-	if p.TemporaryUIResponseID == "" {
+	if p.TemporaryUIResponseID == "" && convoID == nil {
 		temporaryUI = temporaryUIFor(p.Body)
 	}
 	var aiReply *Message
 	hasContent := strings.TrimSpace(p.Body) != "" || strings.TrimSpace(p.MediaRef) != ""
 	if p.TemporaryUIResponseID == "" && temporaryUI != nil && hasContent {
 		aiReply = s.serverGuidedReply(ctx, conv, temporaryUI)
-	} else if p.TemporaryUIResponseID != "" {
+	} else if p.TemporaryUIResponseID != "" && convoID == nil {
 		aiReply = s.serverFormResponseReply(ctx, conv)
-	} else if s.modelStack != nil && s.modelStack.Available() && hasContent {
+	} else if s.modelStack != nil && s.modelStack.Available() && hasContent && convoID == nil {
 		aiReply = s.generateAIReply(ctx, conv, e, p.Body, p.AssistantMode, nil)
 		if aiReply != nil {
 			domainEvents = append(domainEvents, event.New("AIReplySent", "Conversation", conv.ID, 1, "SYSTEM", e.CorrelationID, e.CommandID, aiReply.CreatedAt, map[string]any{
@@ -889,7 +1111,7 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	if aiReply != nil {
 		payload["aiMessage"] = aiReply
 		payload["assistantStatus"] = "RESPONDED"
-	} else if hasContent {
+	} else if hasContent && convoID == nil {
 		if s.modelStack != nil && s.modelStack.Available() {
 			payload["assistantStatus"] = "FAILED"
 		} else {
@@ -1176,6 +1398,27 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 	if !isParticipant(conv, e.Actor.ID) {
 		return command.Rejected(e, "NOT_CONVERSATION_PARTICIPANT", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.not_participant", nil)
 	}
+	// 分支阅读：payload.convoId 有值时只返该分支消息，并附 seed 供客户端
+	// 展示分支上下文。分支必须挂在目标会话下，否则拒绝。
+	var filterConvoID string
+	var seedMessage *Message
+	if rawConvoID, ok := e.Payload["convoId"].(string); ok && strings.TrimSpace(rawConvoID) != "" {
+		convo, err := s.repository.GetConvo(ctx, strings.TrimSpace(rawConvoID))
+		if errors.Is(err, ErrConvoNotFound) {
+			return command.Rejected(e, "CONVO_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "conversation.convo_not_found", nil)
+		}
+		if err != nil {
+			return command.Rejected(e, "CONVO_READ_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.convo_read_failed", nil)
+		}
+		if convo.ParentDialogID != conv.ID {
+			return command.Rejected(e, "CONVO_PARENT_MISMATCH", "VALIDATION", "AFTER_USER_ACTION", "conversation.convo_parent_mismatch", nil)
+		}
+		filterConvoID = convo.ID
+		if seed, err := s.repository.GetMessage(ctx, convo.SeedMessageID); err == nil {
+			seedCopy := seed
+			seedMessage = &seedCopy
+		}
+	}
 	messages, err := s.repository.Messages(ctx, e.Target.ID)
 	if err != nil {
 		return command.Rejected(e, "MESSAGE_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "conversation.list_failed", nil)
@@ -1187,6 +1430,10 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 	visible := make([]Message, 0, len(messages))
 	for _, m := range messages {
 		if m.DeletedAt != nil {
+			continue
+		}
+		// 分支过滤：只留归属该分支的消息（seed 由 seed 字段单独下发，不混入）。
+		if filterConvoID != "" && (m.ConvoID == nil || *m.ConvoID != filterConvoID) {
 			continue
 		}
 		if m.SenderID == e.Actor.ID {
@@ -1215,6 +1462,8 @@ func (s *Service) listMessages(ctx context.Context, e command.Envelope) command.
 		"messages":  visible,
 		"actorId":   e.Actor.ID,
 		"truncated": truncated,
+		"seed":      seedMessage,
+		"convoId":   filterConvoID,
 	}, nil)
 }
 
