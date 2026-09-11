@@ -35,9 +35,18 @@ describe("R58 demand wizard mapping", () => {
   it("falls back without ever emitting empty required fields", () => {
     const template = MOMENT_TEMPLATES[3]!;
     const input = buildDemandPublishInput(template, {
-      ratio: "", time: "", duration: "", place: "", prefs: [], price: "0₫"
+      ratio: "", time: "", duration: "", place: "", prefs: [], price: "0₫", notes: ""
     });
     expect(PublishMarketOpportunityInputSchema.safeParse(input).success).toBe(true);
     expect(input.location).toBe(template.venue);
+  });
+
+  it("carries notes to desc only when present", () => {
+    const template = MOMENT_TEMPLATES[0]!;
+    const withNotes = buildDemandPublishInput(template, { ...defaultSpecsFor(template), notes: "需要会说中文" });
+    expect(withNotes.desc).toBe("需要会说中文");
+    const withoutNotes = buildDemandPublishInput(template, { ...defaultSpecsFor(template), notes: "   " });
+    expect(withoutNotes.desc).toBeUndefined();
+    expect(PublishMarketOpportunityInputSchema.safeParse(withNotes).success).toBe(true);
   });
 });

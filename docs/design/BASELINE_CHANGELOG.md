@@ -20,6 +20,10 @@ same commit. Do not record routine business logic changes here.
 
 - 发布菜单新增 R58 发布需求向导（Moment 模板 → 规格确认 → 成功进市场）；订单/活动旧表单不动，菜单改纵排三项。
 
+## Revision 159 — 2026-09-11
+
+- 机会新增备注字段（可选，500 字内落库，详情页展示）；向导同步收集备注。
+
 ## Revision 154 — 2026-09-10
 
 - 统一媒体资产管线：media/asset-sources 唯一解析入口（服务端媒体/绝对 URL/服务端路径/打包注册表/本地文件），作者头像映射收归 media/author-avatar；AI 人像注册表迁入管线，旧模块转调。

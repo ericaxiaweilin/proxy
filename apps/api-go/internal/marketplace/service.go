@@ -122,6 +122,9 @@ type Opportunity struct {
 	// server 强制派生，不允许客户端随意传入。
 	MoneyFlow               string   `json:"moneyFlow"`
 	PriceLabel              string   `json:"priceLabel"`
+	// R58 demand notes (optional free text). Stored verbatim in the JSONB
+	// payload; no migration needed for the additive field.
+	Desc                    string   `json:"desc,omitempty"`
 	Owner                   string   `json:"owner"`
 	OwnerID                 string   `json:"-"`
 	OwnerType               string   `json:"ownerType"`
@@ -250,6 +253,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		var p Opportunity
 		if !decode(e.Payload, &p) || p.Title == "" || p.Location == "" {
 			return rejected(e, "INVALID_OPPORTUNITY", "market.invalid_opportunity")
+		}
+		// R58 demand notes: trim, cap at 500 runes.
+		p.Desc = strings.TrimSpace(p.Desc)
+		if len([]rune(p.Desc)) > 500 {
+			return rejected(e, "INVALID_OPPORTUNITY", "market.invalid_opportunity_desc")
 		}
 		// MoneyFlow 必须是 4 选 1，且 Price 与 MoneyFlow 一致：
 		// FREE → Price 可以为空也可以是 "0₫"

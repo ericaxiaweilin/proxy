@@ -747,6 +747,12 @@ function OpportunityDetail({
           <Text style={styles.factValue}>{opportunity.responses} 人</Text>
         </View>
       </View>
+      {opportunity.desc ? (
+        <View style={styles.noteBox}>
+          <Text style={styles.noteLabel}>备注</Text>
+          <Text style={styles.noteText}>{opportunity.desc}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.aiBox}>
         <View style={styles.aiHead}>
@@ -1503,6 +1509,9 @@ const styles = StyleSheet.create({
   valueFill: { backgroundColor: color.magenta, borderRadius: 999, height: "100%" },
   valueText: { color: color.muted, fontSize: 11, lineHeight: 15 },
   factGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  noteBox: { backgroundColor: color.surface, borderRadius: 10, marginTop: 6, padding: 8 },
+  noteLabel: { color: color.muted, fontSize: 11 },
+  noteText: { color: color.ink, fontSize: 12, lineHeight: 18, marginTop: 2 },
   fact: { backgroundColor: color.surface, borderRadius: 10, flexBasis: "48%", flexGrow: 1, padding: 8 },
   factLabel: { color: color.muted, fontSize: 11 },
   factValue: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 2 },
