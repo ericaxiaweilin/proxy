@@ -37,6 +37,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
+	"github.com/proxy-app/proxy-api/internal/profile"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -94,6 +95,9 @@ func main() {
 	mediaService := media.New()
 	mediaService.SetStoreDir(mediaStoreDir)
 	contributionService := contribution.New()
+	// Profile 域（P1，audit 2026-09-04）：默认内存仓；DATABASE_URL 存在时
+	// 在 DB 分支换成 postgres.NewProfileRepository（服务端持久化名片）。
+	profileService := profile.New()
 	socialSpaceService := socialspace.New()
 	businessService := business.New()
 	paymentService := payment.New()
@@ -171,19 +175,16 @@ func main() {
 			if err := seedPostgresIdentity(pool); err != nil {
 				log.Fatalf("seed postgres identity: %v", err)
 			}
-			// R15.32: Supply seed (3 demo agents) used to also run
-			// only in simulated mode, but the MapExploreSurface needs
-			// at least these 3 agents to show a populated agent pin
-			// layer. We re-enabled it on every boot in R15.32.2, but
-			// supply.agent_profiles currently has FORCE ROW LEVEL
-			// SECURITY with no write policy for the `proxy` role, so
-			// the seed fails on SMTP mode. Leaving it gated to
-			// simulatedLogin for now — the agents get inserted the
-			// first time someone logs in with simulated mode, and
-			// subsequent restarts see them in the DB already.
-			if err := seedPostgresSupply(pool); err != nil {
-				log.Fatalf("seed postgres supply: %v", err)
-			}
+		}
+		// R15.32: Supply seed (3 demo agents) used to run only in
+		// simulated mode because supply.agent_profiles had FORCE ROW
+		// LEVEL SECURITY with no write policy for the `proxy` role
+		// (migration 065 turned that off; see the audit note there).
+		// MapExploreSurface needs these 3 agents for the pin layer,
+		// so the seed now runs on every boot regardless of login
+		// provider — same rule as seedPostgresMedia above.
+		if err := seedPostgresSupply(pool); err != nil {
+			log.Fatalf("seed postgres supply: %v", err)
 		}
 		// 公开种子帖长期引用这些固定媒体 ID。媒体读模型不能跟登录
 		// Provider（simulated / SMTP / SMS）耦合，否则切换认证方式后会出现
@@ -205,6 +206,7 @@ func main() {
 		)
 		mediaService.SetStoreDir(mediaStoreDir)
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
+		profileService = profile.NewWithRepository(postgres.NewProfileRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
 		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
@@ -252,6 +254,7 @@ func main() {
 	server.Safety = safetyService
 	server.Outcome = outcomeService
 	server.Scene = sceneService
+	server.Profile = profileService
 	// R15.32.1.3: /v1/geocode/reverse talks to Nominatim. Wire a
 	// 4s-timeout client so a slow upstream doesn't hang the picker.
 	server.HTTPClient = &http.Client{Timeout: 4 * time.Second}
