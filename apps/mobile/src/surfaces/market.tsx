@@ -420,6 +420,7 @@ export function MarketSurface({
           scenes={activityItems}
           onBack={() => setActivityPublishOpen(false)}
           onOpenDemand={() => { setActivityPublishOpen(false); openDemandWizard(); }}
+          onReloadScenes={() => void loadActivities()}
           onPublished={(activity) => {
             setActivityItems((items) => [activity, ...items]);
             setActivityPublishOpen(false);
