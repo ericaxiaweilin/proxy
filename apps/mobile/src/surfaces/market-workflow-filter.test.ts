@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const source = readFileSync(fileURLToPath(new URL("./market.tsx", import.meta.url)), "utf8");
-const wizard = readFileSync(fileURLToPath(new URL("./activity-wizard.tsx", import.meta.url)), "utf8");
+const demandWizard = readFileSync(fileURLToPath(new URL("./demand-wizard.tsx", import.meta.url)), "utf8");
+const activityWizard = readFileSync(fileURLToPath(new URL("./activity-wizard.tsx", import.meta.url)), "utf8");
 
 describe("market workflow surface", () => {
   it("uses order lifecycle filters instead of fulfillment action buttons", () => {
@@ -16,13 +17,16 @@ describe("market workflow surface", () => {
   });
 
   it("offers real order and activity publishing entries", () => {
-    expect(source).toContain(">发布订单<");
-    expect(source).toContain(">发布活动<");
-    // R58: 活动发布走向导（同文件 ActivityWizard 经 activities.publish 真发）。
-    expect(wizard).toContain("await activities.publish(");
+    expect(source).toContain(">创建订单<");
+    expect(source).toContain(">创建活动<");
+    expect(source).toContain("openDemandWizard");
+    expect(source).toContain("openActivityPublisher");
     expect(source).toContain('visible={publishMenuOpen}');
     expect(source).toContain('setTab("OPPORTUNITY")');
     expect(source).toContain('setTab("ACTIVITY")');
     expect(source).toContain('bottomNavVisible === false ? 28 : 116');
+    // 两向导都经真实 publish 通道发布（非 mock）。
+    expect(demandWizard).toContain("await marketplace.publish(");
+    expect(activityWizard).toContain("await activities.publish(");
   });
 });

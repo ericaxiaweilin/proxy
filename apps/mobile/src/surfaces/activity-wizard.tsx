@@ -23,12 +23,13 @@ import {
 
 type Step = "template" | "settings" | "preview" | "done";
 
-export function ActivityWizard({ activities, scenes, onBack, onPublished, onViewActivities }: {
+export function ActivityWizard({ activities, scenes, onBack, onPublished, onViewActivities, onOpenDemand }: {
   activities: ActivityClient;
   scenes: Activity[];
   onBack: () => void;
   onPublished: (activity: Activity) => void;
   onViewActivities: () => void;
+  onOpenDemand: () => void;
 }): React.JSX.Element {
   const [step, setStep] = useState<Step>("template");
   const [template, setTemplate] = useState<ActivityTemplate>(ACTIVITY_TEMPLATES[0]!);
@@ -102,6 +103,14 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onView
         <Text style={styles.title}>{step === "done" ? "✓ 活动已创建" : "创建活动"}</Text>
         <View style={styles.headSpacer} />
       </View>
+      {step === "done" ? null : (
+        <View style={styles.tabs}>
+          <Pressable accessibilityLabel="去发布需求" onPress={onOpenDemand} style={styles.tab}>
+            <Text style={styles.tabText}>发布需求</Text>
+          </Pressable>
+          <View style={[styles.tab, styles.tabActive]}><Text style={[styles.tabText, styles.tabTextActive]}>创建活动</Text></View>
+        </View>
+      )}
 
       {step === "template" ? (
         <>
@@ -252,6 +261,11 @@ const styles = StyleSheet.create({
   backText: { color: color.ink, fontSize: 24, fontWeight: "800", lineHeight: 28 },
   title: { color: color.ink, flex: 1, fontSize: 20, fontWeight: "900", textAlign: "center" },
   headSpacer: { width: 38 },
+  tabs: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  tab: { alignItems: "center", borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: 10 },
+  tabActive: { backgroundColor: color.ink, borderColor: color.ink },
+  tabText: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  tabTextActive: { color: color.white },
   sectionTitle: { color: color.ink, fontSize: 16, fontWeight: "800", marginBottom: 12 },
   momentCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 10, padding: 14 },
   momentEmoji: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
