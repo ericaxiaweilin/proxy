@@ -43,9 +43,9 @@ export type PostReportReason = (typeof POST_REPORT_REASONS)[number];
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
-import { CustomFeedHub } from "./custom-feed";
-import { readCustomFeeds } from "../expo-custom-feed-store";
-import { readFeedPrefs } from "../expo-feed-prefs-store";
+import { CustomFeedHub, type CustomFeed } from "./custom-feed";
+import { readCustomFeedsAsync } from "../expo-custom-feed-store";
+import { defaultFeedPrefs, readFeedPrefsAsync } from "../expo-feed-prefs-store";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { isOwnPost as isOwnPostById, resolveAuthorDisplayName } from "../feed-author";
@@ -283,13 +283,25 @@ export function FeedSurface({
   const [selectedCustomFeed, setSelectedCustomFeed] = useState<string | null>(null);
   // 推荐偏好（偏好页写入）：静音主题硬过滤、时间范围过滤、权重重排。
   // 前台恢复时重读，偏好页改完回来即生效。
-  const [feedPrefs, setFeedPrefs] = useState(readFeedPrefs);
+  // SYNC-FS-001: File.json() 异步，mount/前台时异步 hydration，首屏先用默认。
+  const [feedPrefs, setFeedPrefs] = useState(defaultFeedPrefs);
+  useEffect(() => {
+    let cancelled = false;
+    void readFeedPrefsAsync().then((prefs) => { if (!cancelled) setFeedPrefs(prefs); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   // 自定频道定义（name/desc）：AI 生成的频道用它切词过滤 + 横幅显示真名，
   // 而不是裸 id。读本地持久化，与 CustomFeedHub 同源。
+  const [storedCustomFeeds, setStoredCustomFeeds] = useState<CustomFeed[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void readCustomFeedsAsync([]).then((feeds) => { if (!cancelled) setStoredCustomFeeds(feeds); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [customFeedHubOpen]);
   const customFeedDef = useMemo(() => {
     if (!selectedCustomFeed) return undefined;
-    return readCustomFeeds([]).find((f) => f.id === selectedCustomFeed);
-  }, [selectedCustomFeed, customFeedHubOpen]);
+    return storedCustomFeeds.find((f) => f.id === selectedCustomFeed);
+  }, [selectedCustomFeed, storedCustomFeeds]);
   const customFeedTokens = useMemo(() => {
     if (!customFeedDef) return [];
     return `${customFeedDef.name} ${customFeedDef.desc}`
@@ -529,7 +541,7 @@ export function FeedSurface({
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active" && (phase === "ERROR" || cachedPosts.length === 0)) void loadFeed();
-      if (state === "active") setFeedPrefs(readFeedPrefs());
+      if (state === "active") void readFeedPrefsAsync().then(setFeedPrefs).catch(() => undefined);
     });
     return () => subscription.remove();
   }, [phase, loadFeed]);

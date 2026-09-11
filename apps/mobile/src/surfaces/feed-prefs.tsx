@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { GestureResponderEvent } from "react-native";
 import { color } from "../theme";
-import { readFeedPrefs, writeFeedPrefs } from "../expo-feed-prefs-store";
+import { readFeedPrefsAsync, writeFeedPrefs, defaultFeedPrefs } from "../expo-feed-prefs-store";
 
 const FEED_ROWS: ReadonlyArray<[string, string]> = [
   ["opportunity", "机会 / 需求"],
@@ -72,13 +72,24 @@ function Slider({
 
 export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
   // R36.x PREFS-001: 设置落本地（expo-feed-prefs-store），退出重进保留。
-  const [initialPrefs] = useState(readFeedPrefs);
-  const [weights, setWeights] = useState<Record<string, number>>(initialPrefs.weights);
-  const [scope, setScope] = useState<"7D" | "30D" | "PERSISTENT">(initialPrefs.scope);
-  const [muted, setMuted] = useState<Set<string>>(() => new Set(initialPrefs.muted));
+  // SYNC-FS-001: 读盘异步，mount 时 hydration（此时用户尚未编辑，直接应用）。
+  const [weights, setWeights] = useState<Record<string, number>>(defaultFeedPrefs().weights);
+  const [scope, setScope] = useState<"7D" | "30D" | "PERSISTENT">(defaultFeedPrefs().scope);
+  const [muted, setMuted] = useState<Set<string>>(() => new Set(defaultFeedPrefs().muted));
   const [algoInput, setAlgoInput] = useState("");
-  const [algoApplied, setAlgoApplied] = useState<string | null>(initialPrefs.algoApplied);
+  const [algoApplied, setAlgoApplied] = useState<string | null>(defaultFeedPrefs().algoApplied);
   const firstRender = useRef(true);
+  useEffect(() => {
+    let cancelled = false;
+    void readFeedPrefsAsync().then((initialPrefs) => {
+      if (cancelled) return;
+      setWeights(initialPrefs.weights);
+      setScope(initialPrefs.scope);
+      setMuted(new Set(initialPrefs.muted));
+      setAlgoApplied(initialPrefs.algoApplied);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;

@@ -20,7 +20,8 @@ vi.mock("expo-file-system", () => ({
     get exists(): boolean {
       return exists;
     }
-    json(): unknown {
+    // SYNC-FS-001: the real File.json() is async — mocks must match.
+    async json(): Promise<unknown> {
       return JSON.parse(files["feeds"] ?? "null");
     }
     write(content: string): void {
@@ -30,7 +31,7 @@ vi.mock("expo-file-system", () => ({
   },
 }));
 
-import { readCustomFeeds, writeCustomFeeds } from "./expo-custom-feed-store";
+import { readCustomFeedsAsync, parseCustomFeedsSnapshot, writeCustomFeeds } from "./expo-custom-feed-store";
 import type { CustomFeed } from "./surfaces/custom-feed";
 
 const FALLBACK: CustomFeed[] = [{ id: "friends", name: "朋友", desc: "关注的人", icon: "♥", pinned: true }];
@@ -41,26 +42,30 @@ describe("expo-custom-feed-store", () => {
     exists = false;
   });
 
-  it("returns fallback when nothing is stored", () => {
-    expect(readCustomFeeds(FALLBACK)).toEqual(FALLBACK);
+  it("returns fallback when nothing is stored", async () => {
+    expect(await readCustomFeedsAsync(FALLBACK)).toEqual(FALLBACK);
   });
 
-  it("round-trips pins and custom channels", () => {
+  it("round-trips pins and custom channels", async () => {
     writeCustomFeeds([
       { id: "friends", name: "朋友", desc: "关注的人", icon: "♥", pinned: false },
       { id: "ai_x", name: "摄影精选", desc: "河内摄影", icon: "◯", pinned: true, aiGenerated: true },
     ]);
-    const restored = readCustomFeeds(FALLBACK);
+    const restored = await readCustomFeedsAsync(FALLBACK);
     expect(restored).toHaveLength(2);
     expect(restored[0]?.pinned).toBe(false);
     expect(restored[1]?.aiGenerated).toBe(true);
   });
 
-  it("drops malformed rows and falls back on corrupt files", () => {
+  it("drops malformed rows and falls back on corrupt files", async () => {
     files["feeds"] = JSON.stringify({ version: 1, feeds: [{ id: "", name: "" }, { id: "ok", name: "好" }, 42] });
     exists = true;
-    expect(readCustomFeeds(FALLBACK)).toEqual([{ id: "ok", name: "好", desc: "", icon: "▣", pinned: false }]);
+    expect(await readCustomFeedsAsync(FALLBACK)).toEqual([{ id: "ok", name: "好", desc: "", icon: "▣", pinned: false }]);
     files["feeds"] = "not-json{{{";
-    expect(readCustomFeeds(FALLBACK)).toEqual(FALLBACK);
+    expect(await readCustomFeedsAsync(FALLBACK)).toEqual(FALLBACK);
+  });
+
+  it("SYNC-FS-001: an un-awaited json Promise parses to fallback", () => {
+    expect(parseCustomFeedsSnapshot(Promise.resolve({ version: 1 }), FALLBACK)).toEqual(FALLBACK);
   });
 });

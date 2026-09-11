@@ -41,25 +41,36 @@ function sanitizeWeights(raw: unknown): Record<string, number> {
   return out;
 }
 
-export function readFeedPrefs(): FeedPrefsSnapshot {
+export function defaultFeedPrefs(): FeedPrefsSnapshot {
+  return { ...DEFAULT_FEED_PREFS, updatedAt: new Date().toISOString() };
+}
+
+/** 纯解析（SYNC-FS-001 单测入口）：坏数据一律回默认。 */
+export function parseFeedPrefsSnapshot(raw: unknown): FeedPrefsSnapshot {
+  const snapshot = raw as Partial<FeedPrefsSnapshot> | null;
+  if (!snapshot || typeof snapshot !== "object" || snapshot.version !== 1) {
+    return defaultFeedPrefs();
+  }
+  return {
+    version: 1,
+    weights: sanitizeWeights(snapshot.weights),
+    scope: snapshot.scope === "30D" || snapshot.scope === "PERSISTENT" ? snapshot.scope : "7D",
+    muted: Array.isArray(snapshot.muted) ? snapshot.muted.filter((m): m is string => typeof m === "string") : [],
+    algoApplied: typeof snapshot.algoApplied === "string" ? snapshot.algoApplied : null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * SYNC-FS-001: File.json() 是异步的，同步读永远拿到 Promise。
+ * 本函数为唯一读入口（await）。
+ */
+export async function readFeedPrefsAsync(): Promise<FeedPrefsSnapshot> {
   try {
-    if (!snapshotFile.exists) {
-      return { ...DEFAULT_FEED_PREFS, updatedAt: new Date().toISOString() };
-    }
-    const snapshot = snapshotFile.json() as Partial<FeedPrefsSnapshot>;
-    if (!snapshot || snapshot.version !== 1) {
-      return { ...DEFAULT_FEED_PREFS, updatedAt: new Date().toISOString() };
-    }
-    return {
-      version: 1,
-      weights: sanitizeWeights(snapshot.weights),
-      scope: snapshot.scope === "30D" || snapshot.scope === "PERSISTENT" ? snapshot.scope : "7D",
-      muted: Array.isArray(snapshot.muted) ? snapshot.muted.filter((m): m is string => typeof m === "string") : [],
-      algoApplied: typeof snapshot.algoApplied === "string" ? snapshot.algoApplied : null,
-      updatedAt: new Date().toISOString(),
-    };
+    if (!snapshotFile.exists) return defaultFeedPrefs();
+    return parseFeedPrefsSnapshot(await snapshotFile.json());
   } catch {
-    return { ...DEFAULT_FEED_PREFS, updatedAt: new Date().toISOString() };
+    return defaultFeedPrefs();
   }
 }
 

@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { Directory, File, Paths } from "expo-file-system";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, Gradient } from "../theme";
+import { parseCreatorSnapshot, type CreatorSnapshot } from "../local-snapshot";
 
 const CATEGORIES = ["Beauty", "Lifestyle", "Wellness", "Travel", "Food", "Fashion", "Fitness", "Tech"];
 const CHANNELS = ["TikTok", "Instagram", "Facebook", "YouTube"] as const;
@@ -13,33 +14,14 @@ const RATE_ITEMS = ["TikTok 短视频", "Instagram Reel", "Story", "UGC", "到�
 // “待接受”再问一遍。现在落盘，重进恢复已接受与填过的内容。
 const creatorDirectory = new Directory(Paths.document, "proxy-creator");
 const creatorFile = new File(creatorDirectory, "invitation-v1.json");
-type CreatorSnapshot = {
-  accepted: boolean;
-  categories: string[];
-  primaryCategory: string;
-  city: string;
-  channels: Record<string, string>;
-  collaborations: string[];
-  collabNote: string;
-  rates: Record<string, string>;
-  rateVisibility: "公开起步价" | "价格区间" | "询价";
-};
-function readCreatorSnapshot(): CreatorSnapshot | undefined {
+/**
+ * SYNC-FS-001: File.json() 是异步的，同步读永远拿到 Promise。
+ * 本函数为唯一读入口（await）。解析见 local-snapshot（单测覆盖）。
+ */
+export async function readCreatorSnapshotAsync(): Promise<CreatorSnapshot | undefined> {
   try {
     if (!creatorFile.exists) return undefined;
-    const raw = creatorFile.json() as Partial<CreatorSnapshot>;
-    if (!raw || typeof raw !== "object") return undefined;
-    return {
-      accepted: raw.accepted === true,
-      categories: Array.isArray(raw.categories) ? raw.categories.filter((c): c is string => typeof c === "string") : ["Beauty", "Lifestyle"],
-      primaryCategory: typeof raw.primaryCategory === "string" ? raw.primaryCategory : "Beauty",
-      city: typeof raw.city === "string" ? raw.city : "Ho Chi Minh City",
-      channels: raw.channels && typeof raw.channels === "object" ? raw.channels as Record<string, string> : { TikTok: "@huyen.life", Instagram: "@huyen.frames" },
-      collaborations: Array.isArray(raw.collaborations) ? raw.collaborations.filter((c): c is string => typeof c === "string") : [],
-      collabNote: typeof raw.collabNote === "string" ? raw.collabNote : "",
-      rates: raw.rates && typeof raw.rates === "object" ? raw.rates as Record<string, string> : {},
-      rateVisibility: raw.rateVisibility === "价格区间" || raw.rateVisibility === "询价" ? raw.rateVisibility : "公开起步价",
-    };
+    return parseCreatorSnapshot(await creatorFile.json());
   } catch {
     return undefined;
   }
@@ -60,19 +42,25 @@ export function CreatorInvitationCard(): React.JSX.Element {
   const [rateVisibility, setRateVisibility] = useState<"公开起步价" | "价格区间" | "询价">("公开起步价");
   const [restored, setRestored] = useState(false);
   useEffect(() => {
-    const snapshot = readCreatorSnapshot();
-    if (snapshot) {
-      setAccepted(snapshot.accepted);
-      setCategories(snapshot.categories.length > 0 ? snapshot.categories : ["Beauty"]);
-      setPrimaryCategory(snapshot.primaryCategory);
-      setCity(snapshot.city);
-      setChannels(snapshot.channels);
-      setCollaborations(snapshot.collaborations);
-      setCollabNote(snapshot.collabNote);
-      setRates((prev) => ({ ...prev, ...snapshot.rates }));
-      setRateVisibility(snapshot.rateVisibility);
-    }
-    setRestored(true);
+    let cancelled = false;
+    void readCreatorSnapshotAsync().then((snapshot) => {
+      if (cancelled) return;
+      if (snapshot) {
+        setAccepted(snapshot.accepted);
+        setCategories(snapshot.categories.length > 0 ? snapshot.categories : ["Beauty"]);
+        setPrimaryCategory(snapshot.primaryCategory);
+        setCity(snapshot.city);
+        setChannels(snapshot.channels);
+        setCollaborations(snapshot.collaborations);
+        setCollabNote(snapshot.collabNote);
+        setRates((prev) => ({ ...prev, ...snapshot.rates }));
+        setRateVisibility(snapshot.rateVisibility);
+      }
+      setRestored(true);
+    }).catch(() => {
+      if (!cancelled) setRestored(true);
+    });
+    return () => { cancelled = true; };
   }, []);
   useEffect(() => {
     // 输入变化即落盘（300ms 防抖）：关掉重进不丢草稿；接受后快照 accepted=true。
