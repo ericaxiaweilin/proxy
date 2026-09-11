@@ -593,6 +593,8 @@ export const MarketOpportunitySchema = z.object({
   // Readers show a neutral label; one unresolvable row must never fail
   // the whole list parse.
   owner: z.string(),
+  // R58 demand notes (optional free text, max 500 runes enforced server-side).
+  desc: z.string().max(500).optional(),
   ownerType: z.enum(["BUSINESS", "PERSON"]),
   match: z.string(),
   responses: z.number().int().nonnegative(),
@@ -648,6 +650,8 @@ export const PublishMarketOpportunityInputSchema = z.object({
   skills: z.string(),
   lens: z.array(z.enum(["NOW", "NEARBY", "BOOKED", "REMOTE"])).min(1),
   travel: z.number().int().nullable().optional(),
+  // R58 demand notes.
+  desc: z.string().max(500).optional(),
   // MERCHANT-PUBLISH-001: 以商家名义发布时带店 id。server 在 api 层验
   // business 成员（OWNER/ADMIN）后才认；伪造的直接 403。个人发布不传。
   merchantId: z.string().min(1).optional()

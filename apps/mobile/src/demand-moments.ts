@@ -1,9 +1,8 @@
 // demand-moments.ts — R58 发布需求一期的 Moment 模板 + 发布映射。
 //
 // 模板内容（6 个 Moment + 参考价）来自 R58 原型；一期为前端常量，
-// 后续可转服务端配置。映射只产生 wire 真实发送的字段：备注等多余
-// 输入一期不收（服务端 Opportunity 无对应字段，不静默吞输入），
-// 选人匹配走二期草稿流（demand-client），一期发布即公开市场。
+// 后续可转服务端配置。备注随机会落库展示（500 字内）；选人匹配走
+// 二期草稿流，一期发布即公开市场。
 
 import type { PublishMarketOpportunityInput } from "@proxy/contracts";
 
@@ -41,6 +40,8 @@ export type DemandSpecs = {
   place: string;
   prefs: string[];
   price: string;
+  /** R58 备注（可选，500 字内，落库随机会展示）。 */
+  notes: string;
 };
 
 export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
@@ -50,7 +51,8 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     duration: template.defaultDuration,
     place: template.venue,
     prefs: ["公共场所见面"],
-    price: template.defaultPrice
+    price: template.defaultPrice,
+    notes: ""
   };
 }
 
@@ -65,6 +67,7 @@ export function buildDemandPublishInput(
   const time = [specs.time, specs.duration, specs.ratio].filter((part) => part.trim() !== "").join(" · ");
   const skills = [template.skills, ...specs.prefs.map((pref) => pref.trim()).filter((pref) => pref !== "")]
     .join(" · ");
+  const notes = specs.notes.trim();
   return {
     title: template.title,
     shortTitle: template.title,
@@ -75,6 +78,7 @@ export function buildDemandPublishInput(
     price: specs.price.trim(),
     moneyFlow: "EARN",
     skills,
-    lens: ["NOW", "NEARBY"]
+    lens: ["NOW", "NEARBY"],
+    ...(notes === "" ? {} : { desc: notes.slice(0, 500) })
   };
 }

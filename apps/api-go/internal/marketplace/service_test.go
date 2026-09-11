@@ -757,3 +757,44 @@ func TestPublishOpportunityResolvesOwnerFromProfile(t *testing.T) {
 		t.Fatalf("unresolved owner must store empty, got %q", unknownBody.Opportunity.Owner)
 	}
 }
+
+// R58 demand notes round-trip through publish; over-500 runes rejected.
+func TestPublishOpportunityNotesRoundTrip(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	base := map[string]any{
+		"title": "周六城市同行", "theme": "城市同行", "date": "周六", "time": "10:00",
+		"location": "河内", "price": "2,000,000₫", "moneyFlow": "EARN",
+	}
+	withNotes := map[string]any{}
+	for key, value := range base {
+		withNotes[key] = value
+	}
+	withNotes["desc"] = "需要会说中文"
+	out := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", withNotes))
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("publish with notes: %+v", out)
+	}
+	var body struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Opportunity.Desc != "需要会说中文" {
+		t.Fatalf("notes not stored: %+v", body.Opportunity)
+	}
+	tooLong := map[string]any{}
+	for key, value := range base {
+		tooLong[key] = value
+	}
+	long := ""
+	for range 501 {
+		long += "x"
+	}
+	tooLong["desc"] = long
+	rejected := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", tooLong))
+	if rejected.Outcome != "REJECTED" || rejected.Error == nil || rejected.Error.ErrorCode != "INVALID_OPPORTUNITY" {
+		t.Fatalf("over-long notes must reject INVALID_OPPORTUNITY, got %+v", rejected)
+	}
+}

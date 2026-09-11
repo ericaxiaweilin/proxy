@@ -1,8 +1,8 @@
 // DemandWizard — R58 发布需求一期向导（Moment 模板 → 规格确认 → 成功）。
 //
 // 一期范围：模板与参考价为前端常量；发布走 marketplace.publish
-// （与现有“发布订单”同通道，成功即进市场）；选人匹配与备注走二期
-// 草稿流，一期不收不做，成功页对象恒为公开市场。
+// （与现有“发布订单”同通道，成功即进市场）；备注随机会落库展示；
+// 选人匹配走二期草稿流，一期发布即公开市场。
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { MarketplaceClient } from "../marketplace-client";
@@ -143,6 +143,9 @@ export function DemandWizard({ marketplace, onBack, onPublished, onViewMarket }:
           <TextInput keyboardType="numbers-and-punctuation" onChangeText={(price) => setSpecs((prev) => ({ ...prev, price }))} placeholder={template.defaultPrice} placeholderTextColor={color.muted} style={styles.input} value={specs.price} />
           <Text style={styles.hint}>参考 {template.priceRef} · 可协商；现场消费不包含在内。</Text>
 
+          <Text style={styles.fieldLabel}>备注 · 可选</Text>
+          <TextInput maxLength={500} multiline onChangeText={(notes) => setSpecs((prev) => ({ ...prev, notes }))} placeholder="补充说明（随机会展示）" placeholderTextColor={color.muted} style={[styles.input, styles.notesInput]} value={specs.notes} />
+
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Pressable disabled={publishing} onPress={() => void publish()} style={[styles.primaryBtn, publishing && styles.disabled]}>
             <Text style={styles.primaryBtnText}>{publishing ? "发布中…" : "发布到市场"}</Text>
@@ -158,7 +161,8 @@ export function DemandWizard({ marketplace, onBack, onPublished, onViewMarket }:
             <SummaryRow label="人数" value={specs.ratio} />
             <SummaryRow label="时间" value={`${specs.time} · ${specs.duration}`} />
             <SummaryRow label="地点" value={specs.place} />
-            <SummaryRow label="价格" value={`${specs.price} · 可协商`} last />
+            <SummaryRow label="价格" value={`${specs.price} · 可协商`} last={specs.notes.trim() === ""} />
+            {specs.notes.trim() !== "" ? <SummaryRow label="备注" value={specs.notes.trim()} last /> : null}
           </View>
           <View style={styles.doneRow}>
             <Pressable onPress={restart} style={styles.secondaryBtn}><Text style={styles.secondaryBtnText}>再发一个</Text></Pressable>
@@ -207,6 +211,7 @@ const styles = StyleSheet.create({
   chipText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   chipTextOn: { color: color.white },
   input: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, paddingHorizontal: 14, paddingVertical: 10 },
+  notesInput: { minHeight: 64, textAlignVertical: "top" },
   hint: { color: color.muted, fontSize: 11, marginTop: 6 },
   error: { color: color.error, fontSize: 12, marginTop: 12, textAlign: "center" },
   primaryBtn: { alignItems: "center", backgroundColor: color.magenta, borderRadius: 14, marginTop: 18, minHeight: 50, justifyContent: "center" },
