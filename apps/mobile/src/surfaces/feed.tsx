@@ -1323,7 +1323,7 @@ export function FeedSurface({
       </View>
     ) : null}
     {section === "POSTS" ? (
-      <Pressable accessibilityLabel={composerOpen ? "关闭发布器" : "发布帖文"} onPress={toggleEmbeddedComposer} style={styles.feedFab}>
+      <Pressable accessibilityLabel={composerOpen ? "关闭发布器" : "发布帖文"} onPress={toggleEmbeddedComposer} style={[styles.feedFab, { bottom: bottomNavVisible === false ? 28 : 116 }]}>
         <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
       </Pressable>
     ) : null}
@@ -1405,22 +1405,17 @@ const styles = StyleSheet.create({
   sectionTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
   sectionTabTextOn: { color: color.white },
   feedNote: { color: color.muted, fontSize: 12, lineHeight: 17, marginBottom: 8, marginTop: 0 },
-  // 基线 .feedfab：violet bg radius 999 48×48。
+  // 与市场 + 号同式：ink 底 54×54，底栏显隐跟随（116/28）。
   feedFab: {
     alignItems: "center",
-    backgroundColor: color.violet,
-    borderRadius: 999,
-    bottom: 16,
-    height: 48,
+    backgroundColor: color.ink,
+    borderRadius: 27,
+    height: 54,
     justifyContent: "center",
     position: "absolute",
     right: 18,
-    shadowColor: "#7C2AFF",
-    shadowOffset: { height: 12, width: 0 },
-    shadowOpacity: 0.27,
-    shadowRadius: 26,
-    width: 48,
-    zIndex: 30
+    width: 54,
+    ...shadows.card
   },
   feedFabText: { color: color.white, fontSize: 24 },
 
