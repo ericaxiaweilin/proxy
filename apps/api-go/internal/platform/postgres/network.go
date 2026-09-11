@@ -405,9 +405,9 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 		return fmt.Errorf("encode protection: %w", err)
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount,
+		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount, m.ConvoID,
 	)
 	if err != nil {
 		return err
@@ -421,7 +421,7 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 
 func (r *ConversationRepository) Messages(ctx context.Context, conversationID string) ([]conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id
 		FROM conversation.messages WHERE conversation_id = $1 ORDER BY created_at`, conversationID)
 	if err != nil {
 		return nil, err
@@ -452,7 +452,7 @@ func (r *ConversationRepository) Messages(ctx context.Context, conversationID st
 // would mask the fact that the seed path skipped protection.
 func (r *ConversationRepository) GetMessage(ctx context.Context, id string) (conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id
 		FROM conversation.messages WHERE id = $1`, id)
 	if err != nil {
 		return conversation.Message{}, err
@@ -506,11 +506,16 @@ func (r *ConversationRepository) UpdateMessage(ctx context.Context, m conversati
 func scanConversationMessage(rows pgx.Rows) (conversation.Message, error) {
 	var m conversation.Message
 	var protection []byte
+	var convoID *string
 	if err := rows.Scan(
 		&m.ID, &m.ConversationID, &m.SenderID, &m.MessageType,
 		&m.Body, &m.MediaRef, &m.CreatedAt, &protection, &m.Protection.ViewCount,
+		&convoID,
 	); err != nil {
 		return conversation.Message{}, err
+	}
+	if convoID != nil && *convoID != "" {
+		m.ConvoID = convoID
 	}
 	if len(protection) > 0 {
 		if err := json.Unmarshal(protection, &m.Protection); err != nil {
@@ -586,6 +591,89 @@ func (r *ConversationRepository) PurgeExpiredMessages(ctx context.Context, now t
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// --- Lotus v1 Convo (Message Branch) PG 实现 ---
+// convos 表结构见 040 迁移（conversation.convos），与 DialogRepository
+// 共用同一张表；这里只做 Conversation 世界的读写面。
+
+func (r *ConversationRepository) CreateConvo(ctx context.Context, c conversation.Convo) error {
+	pIDs, _ := json.Marshal(c.ParticipantIDs)
+	ePIDs, _ := json.Marshal(c.ExternalParticipantIDs)
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.convos (id, parent_dialog_id, seed_message_id, title, participant_ids, external_participant_ids, latest_seq, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		c.ID, c.ParentDialogID, c.SeedMessageID, c.Title, pIDs, ePIDs, c.LatestSeq, c.CreatedAt,
+	)
+	return err
+}
+
+func scanConvoRow(rows pgx.Rows) (conversation.Convo, error) {
+	var c conversation.Convo
+	var pIDs, ePIDs []byte
+	if err := rows.Scan(&c.ID, &c.ParentDialogID, &c.SeedMessageID, &c.Title, &pIDs, &ePIDs, &c.LatestSeq, &c.CreatedAt); err != nil {
+		return conversation.Convo{}, err
+	}
+	_ = json.Unmarshal(pIDs, &c.ParticipantIDs)
+	_ = json.Unmarshal(ePIDs, &c.ExternalParticipantIDs)
+	return c, nil
+}
+
+func (r *ConversationRepository) GetConvo(ctx context.Context, id string) (conversation.Convo, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, parent_dialog_id, seed_message_id, title, participant_ids, external_participant_ids, latest_seq, created_at
+		FROM conversation.convos WHERE id = $1`, id)
+	if err != nil {
+		return conversation.Convo{}, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return conversation.Convo{}, conversation.ErrConvoNotFound
+	}
+	c, err := scanConvoRow(rows)
+	if err != nil {
+		return conversation.Convo{}, err
+	}
+	return c, rows.Err()
+}
+
+func (r *ConversationRepository) ListConvosByConversation(ctx context.Context, conversationID string) ([]conversation.Convo, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, parent_dialog_id, seed_message_id, title, participant_ids, external_participant_ids, latest_seq, created_at
+		FROM conversation.convos WHERE parent_dialog_id = $1 ORDER BY created_at`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []conversation.Convo{}
+	for rows.Next() {
+		c, err := scanConvoRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, c)
+	}
+	return result, rows.Err()
+}
+
+func (r *ConversationRepository) ListConvosByUser(ctx context.Context, userID string) ([]conversation.Convo, error) {
+	needle, _ := json.Marshal([]string{userID})
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, parent_dialog_id, seed_message_id, title, participant_ids, external_participant_ids, latest_seq, created_at
+		FROM conversation.convos WHERE participant_ids @> $1 ORDER BY created_at DESC`, needle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []conversation.Convo{}
+	for rows.Next() {
+		c, err := scanConvoRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, c)
+	}
+	return result, rows.Err()
 }
 
 var _ conversation.Repository = (*ConversationRepository)(nil)

@@ -303,17 +303,28 @@ export function MessagesSurface({
   visibleDialogsRef.current = visibleDialogs;
   const pinnedSource: Dialog[] = [];
   const recentSource = visibleDialogs;
-  // R15.74: Convo tab (panel="convos") — 从 serverDialogs 拿 GROUP/SUPPORT conversation
-  //   之前 (Phase 1) 走写死 CONVOS mock — 跟 server listConversations 不接.
-  const groupDialogs = useMemo(
-    () => visibleDialogs.filter((d) => {
-      // 上一行 toDialog 已把 conversation.conversationType 透出到 type 字段 (见下).
-      // 没 type 字段时 fallback 视为 DM 不显示在 Convo 标签.
-      const t = (d as unknown as { type?: string }).type;
-      return t === "GROUP" || t === "SUPPORT";
-    }),
-    [visibleDialogs]
-  );
+  // Lotus v1 Convo 页：真分支列表（ListMyConvos），不再拿 GROUP/SUPPORT
+  // 会话冒充。按父会话名 + 分支标题展示，点进分支内会话。
+  const [convos, setConvos] = useState<ConvoSummary[]>([]);
+  const [convosPhase, setConvosPhase] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [convosNonce, setConvosNonce] = useState(0);
+  const loadConvos = useCallback(async (): Promise<void> => {
+    if (!conversationClient) return;
+    setConvosPhase("loading");
+    try {
+      setConvos(await conversationClient.listMyConvos());
+      setConvosPhase("ready");
+    } catch {
+      setConvosPhase("error");
+    }
+  }, [conversationClient]);
+  useEffect(() => {
+    if (panel !== "convos") return;
+    void loadConvos();
+  }, [panel, loadConvos, convosNonce]);
+  const parentNameOf = useCallback((parentDialogId: string): string => {
+    return visibleDialogs.find((d) => d.id === parentDialogId || d.conversationId === parentDialogId)?.name ?? "对话";
+  }, [visibleDialogs]);
   useEffect(() => {
     if (panel !== "folders" || !conversationClient || folderScannedRef.current) return;
     if (!inboxLoaded) return;
