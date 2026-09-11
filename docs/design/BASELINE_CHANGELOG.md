@@ -12,6 +12,10 @@ same commit. Do not record routine business logic changes here.
 
 - 顶栏改取满安全区：真机仍有轻微压字，按设备反馈补足。
 
+## Revision 157 — 2026-09-10
+
+- 顶栏高度随安全区一起长：固定 52 高里加 padding 会把 logo 挤出下边盖住地址行；地址行边距不动。
+
 ## Revision 154 — 2026-09-10
 
 - 统一媒体资产管线：media/asset-sources 唯一解析入口（服务端媒体/绝对 URL/服务端路径/打包注册表/本地文件），作者头像映射收归 media/author-avatar；AI 人像注册表迁入管线，旧模块转调。

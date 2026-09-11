@@ -769,10 +769,12 @@ export function AppShell({
 
 // 基线 .header.root：只有 Otter logo + Proxy 字标（上下文徽章不在此层，见 Me 的 contextline）。
 function Header({ compact }: { compact: boolean }): React.JSX.Element {
-  // 顶栏必须让出状态栏时间：取满安全区（场景地图页可紧凑，壳顶栏取满）。
+  // 顶栏必须让出状态栏时间：高度 = 内容高 + 安全区（padding 挤进固定高度
+  // 会把 logo 挤出下边盖住地址行——上一次的 bug 就是这个）。
   const insets = useSafeAreaInsets();
+  const topPad = Math.max(insets.top, 8);
   return (
-    <View style={[styles.header, compact && styles.headerCompact, { paddingTop: Math.max(insets.top, 8) }]}>
+    <View style={[styles.header, compact && styles.headerCompact, { height: (compact ? 46 : 52) + topPad, paddingTop: topPad }]}>
       <View style={styles.headerBrand}>
         <Image resizeMode="contain" source={OTTER_LOGO} style={[styles.headerLogo, compact && styles.headerLogoCompact]} />
         <Text style={[styles.headerName, compact && styles.headerNameCompact]}>Proxy</Text>
