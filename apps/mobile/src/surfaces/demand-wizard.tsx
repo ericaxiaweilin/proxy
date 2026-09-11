@@ -13,11 +13,17 @@ import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { color } from "../theme";
 import {
   buildDemandPublishInput,
+  DEFAULT_PEOPLE_FILTERS,
   defaultSpecsFor,
+  filterSuppliers,
   MOMENT_TEMPLATES,
   type DemandSpecs,
-  type MomentTemplate
+  type MomentTemplate,
+  type PeopleSheetFilters
 } from "../demand-moments";
+import { resolveAssetSource } from "../media/asset-sources";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
+import { localApiBaseUrl } from "../native-clients";
 
 type Step = "moment" | "people" | "specs" | "done";
 
@@ -46,6 +52,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [ratioFilter, setRatioFilter] = useState("全部");
   const [timeFilter, setTimeFilter] = useState("全部");
   const [peopleFilters, setPeopleFilters] = useState<string[]>([]);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetFilters, setSheetFilters] = useState<PeopleSheetFilters>(DEFAULT_PEOPLE_FILTERS);
   const [people, setPeople] = useState<SupplierCandidate[]>([]);
   const [peopleLoaded, setPeopleLoaded] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<SupplierCandidate>();
@@ -147,15 +155,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     setPeopleFilters((prev) => prev.includes(filter) ? prev.filter((item) => item !== filter) : [...prev, filter]);
   }
 
-  const visiblePeople = people.filter((person) => {
-    for (const filter of peopleFilters) {
-      if (filter === "推荐" && !person.eligibility.eligible) return false;
-      if (filter === "附近" && !person.eligibility.marketOk) return false;
-      if (filter === "现在可用" && !person.eligibility.availabilityOk) return false;
-      if (filter === "已认证" && !person.eligibility.capabilitiesOk) return false;
-    }
-    return true;
-  });
+  const sheetActiveCount =
+    (sheetFilters.language !== "不限" ? 1 : 0) +
+    (sheetFilters.certifiedOnly ? 1 : 0) +
+    (sheetFilters.maxBudget > 0 ? 1 : 0) +
+    (sheetFilters.day !== "不限" ? 1 : 0);
+  const visiblePeople = filterSuppliers(people, peopleFilters, sheetFilters);
 
   function togglePref(pref: string): void {
     setSpecs((prev) => ({
@@ -286,7 +291,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           </View>
           <View style={styles.filterHeadRow}>
             <Text style={styles.sectionTitle}>匹配条件</Text>
-            <Text style={styles.filterCount}>筛选{peopleFilters.length > 0 ? ` · ${peopleFilters.length}` : ""}</Text>
+            <Pressable accessibilityLabel="打开筛选" onPress={() => setSheetOpen((open) => !open)} style={styles.sheetToggle}>
+              <Text style={styles.sheetToggleText}>筛选{sheetActiveCount > 0 ? ` · ${sheetActiveCount}` : ""}</Text>
+            </Pressable>
           </View>
           <View style={styles.filterRow}>
             {PEOPLE_FILTERS.map((filter) => (
@@ -295,18 +302,78 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               </Pressable>
             ))}
           </View>
+          {sheetOpen ? (
+            <View style={styles.sheet}>
+              <Text style={styles.sheetLabel}>可用时间</Text>
+              <View style={styles.filterRow}>
+                {["不限", "今晚", "明天", "周末"].map((day) => (
+                  <Pressable key={day} onPress={() => setSheetFilters((prev) => ({ ...prev, day }))} style={[styles.filterChip, sheetFilters.day === day && styles.filterChipOn]}>
+                    <Text style={[styles.filterText, sheetFilters.day === day && styles.filterTextOn]}>{day}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.sheetLabel}>语言</Text>
+              <View style={styles.filterRow}>
+                {["不限", "中文", "English", "越南语"].map((language) => (
+                  <Pressable key={language} onPress={() => setSheetFilters((prev) => ({ ...prev, language }))} style={[styles.filterChip, sheetFilters.language === language && styles.filterChipOn]}>
+                    <Text style={[styles.filterText, sheetFilters.language === language && styles.filterTextOn]}>{language}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.sheetLabel}>认证</Text>
+              <View style={styles.filterRow}>
+                {[false, true].map((only) => (
+                  <Pressable key={only ? "cert" : "all"} onPress={() => setSheetFilters((prev) => ({ ...prev, certifiedOnly: only }))} style={[styles.filterChip, sheetFilters.certifiedOnly === only && styles.filterChipOn]}>
+                    <Text style={[styles.filterText, sheetFilters.certifiedOnly === only && styles.filterTextOn]}>{only ? "已认证" : "不限"}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.sheetLabel}>预算</Text>
+              <View style={styles.filterRow}>
+                {[{ label: "不限", value: 0 }, { label: "≤ 200K", value: 200000 }, { label: "≤ 300K", value: 300000 }, { label: "≤ 500K", value: 500000 }].map((budget) => (
+                  <Pressable key={budget.label} onPress={() => setSheetFilters((prev) => ({ ...prev, maxBudget: budget.value }))} style={[styles.filterChip, sheetFilters.maxBudget === budget.value && styles.filterChipOn]}>
+                    <Text style={[styles.filterText, sheetFilters.maxBudget === budget.value && styles.filterTextOn]}>{budget.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <View style={styles.sheetActions}>
+                <Pressable onPress={() => setSheetFilters(DEFAULT_PEOPLE_FILTERS)} style={styles.sheetReset}>
+                  <Text style={styles.sheetResetText}>重置</Text>
+                </Pressable>
+                <Pressable onPress={() => setSheetOpen(false)} style={styles.sheetApply}>
+                  <Text style={styles.sheetApplyText}>应用筛选</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
           <Text style={styles.sectionSub}>选人 · 可选，不选默认发布到市场</Text>
           {!supply ? <Text style={styles.empty}>供给目录不可用，直接发布到市场。</Text>
             : !peopleLoaded ? <Text style={styles.empty}>正在匹配…</Text>
             : visiblePeople.length === 0 ? <Text style={styles.empty}>当前筛选没有匹配的人，放宽条件或直接发布到市场。</Text>
             : visiblePeople.map((person) => {
               const active = selectedPerson?.agentId === person.agentId;
+              const photo = person.photos.length > 0
+                ? resolveAssetSource(
+                    person.photos[0]!.startsWith("/") ? { kind: "serverPath", path: person.photos[0]! } : { kind: "remote", url: person.photos[0]! },
+                    { baseUrl: localApiBaseUrl }
+                  )
+                : undefined;
               return (
                 <View key={person.agentId} style={[styles.personCard, active && styles.momentCardOn]}>
+                  {typeof photo === "object" ? (
+                    <CircularAvatarImage accessibilityLabel={`${person.name}头像`} size={44} source={photo} />
+                  ) : (
+                    <View style={styles.personAvatar}><Text style={styles.personAvatarText}>{person.name.trim().charAt(0) || "?"}</Text></View>
+                  )}
                   <View style={styles.personCopy}>
-                    <Text style={styles.personName}>{person.name}</Text>
+                    <View style={styles.personNameRow}>
+                      <Text style={styles.personName}>{person.name}</Text>
+                      {person.eligibility.capabilitiesOk ? <Text style={styles.certBadge}>已认证</Text> : null}
+                    </View>
                     <Text style={styles.personMeta}>{person.languages.length > 0 ? person.languages.join(" · ") : person.serviceType}</Text>
-                    <Text style={styles.personMeta}>{person.referencePrice > 0 ? `参考 ${Math.round(person.referencePrice / 1000)}K ${person.currency}` : "价格面议"}</Text>
+                    <Text style={styles.personMeta}>
+                      {person.availability ? "有档期" : "档期待确认"} · {person.referencePrice > 0 ? `参考 ${Math.round(person.referencePrice / 1000)}K ${person.currency}` : "价格面议"}
+                    </Text>
                   </View>
                   <Pressable accessibilityLabel={`选择${person.name}`} onPress={() => setSelectedPerson(active ? undefined : person)} style={[styles.selectBtn, active && styles.selectBtnOn]}>
                     <Text style={[styles.selectText, active && styles.selectTextOn]}>{active ? "已选择" : "选择 TA"}</Text>
@@ -331,6 +398,11 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Pressable onPress={() => setStep("moment")}><Text style={styles.linkText}>更换</Text></Pressable>
           </View>
           <Text style={styles.sectionSub}>Moment 规格 · 默认已帮你填好</Text>
+          <View style={styles.specSummary}>
+            <Text style={styles.specSummaryText}>
+              {specs.prefs.includes("公共场所见面") ? "公共场所见面" : "见面方式自定"} · {specs.duration || "时长自定"} · 现场消费双方自结
+            </Text>
+          </View>
 
           <Text style={styles.fieldLabel}>你们几人</Text>
           <View style={styles.chipRow}>
@@ -365,7 +437,10 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             ))}
           </View>
 
-          <Text style={styles.fieldLabel}>预计服务价</Text>
+          <View style={styles.fieldLabelRow}>
+            <Text style={styles.fieldLabelNoGap}>预计服务价</Text>
+            <Text style={styles.dynamicBadge}>动态</Text>
+          </View>
           <TextInput keyboardType="numbers-and-punctuation" onChangeText={(price) => setSpecs((prev) => ({ ...prev, price }))} placeholder={template?.defaultPrice} placeholderTextColor={color.muted} style={styles.input} value={specs.price} />
           <Text style={styles.hint}>参考 {template?.priceRef} · 可协商；现场消费不包含在内。</Text>
           <Text style={styles.hint}>ⓘ 价格由场景基础价、时间、人数和额外偏好组成；偏好只用于匹配，不按行为收费。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
@@ -388,7 +463,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Text style={styles.summaryEyebrow}>Opportunity</Text>
             <Text style={styles.summaryTitle}>{result?.title ?? template?.title}</Text>
             <SummaryRow label="对象" value="公开市场" />
-            <SummaryRow label="客户方" value={specs.ratio || (template?.defaultRatio ?? "")} />
+            <SummaryRow label="客户方" value={specs.ratio === "1:1" ? "1 人 · 1:1" : (specs.ratio || (template?.defaultRatio ?? ""))} />
             <SummaryRow label="标准" value={`${specs.time} · ${specs.duration}`} />
             <SummaryRow label="价格" value={`${specs.price} · 可协商`} last={!showNotes && !showPerson} />
             {showNotes ? <SummaryRow label="备注" value={specs.notes.trim()} last={!showPerson} /> : null}
@@ -441,7 +516,15 @@ const styles = StyleSheet.create({
   filterText: { color: color.muted, fontSize: 12, fontWeight: "700" },
   filterTextOn: { color: color.white },
   filterHeadRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  filterCount: { color: color.muted, fontSize: 12 },
+  sheetToggle: { paddingHorizontal: 6, paddingVertical: 4 },
+  sheetToggleText: { color: color.violet, fontSize: 12, fontWeight: "800" },
+  sheet: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginBottom: 8, padding: 12 },
+  sheetLabel: { color: color.ink, fontSize: 12, fontWeight: "800", marginBottom: 6, marginTop: 8 },
+  sheetActions: { flexDirection: "row", gap: 8, marginTop: 10 },
+  sheetReset: { alignItems: "center", borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: 10 },
+  sheetResetText: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  sheetApply: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, flex: 1, paddingVertical: 10 },
+  sheetApplyText: { color: color.white, fontSize: 13, fontWeight: "800" },
   momentCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 10, padding: 14 },
   momentCardOn: { borderColor: color.violet, borderWidth: 2 },
   momentEmoji: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
@@ -455,8 +538,12 @@ const styles = StyleSheet.create({
   currentLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
   currentValue: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 2 },
   personCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 8, padding: 12 },
+  personAvatar: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  personAvatarText: { color: color.ink, fontSize: 17, fontWeight: "800" },
   personCopy: { flex: 1 },
+  personNameRow: { alignItems: "center", flexDirection: "row", gap: 6 },
   personName: { color: color.ink, fontSize: 15, fontWeight: "800" },
+  certBadge: { backgroundColor: "#E9F9EF", borderRadius: 8, color: "#1C7A3D", fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 2 },
   personMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
   selectBtn: { borderColor: color.violet, borderRadius: 999, borderWidth: 1.5, paddingHorizontal: 12, paddingVertical: 7 },
   selectBtnOn: { backgroundColor: color.violet, borderColor: color.violet },
@@ -469,6 +556,11 @@ const styles = StyleSheet.create({
   confirmSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   linkText: { color: color.violet, fontSize: 13, fontWeight: "700" },
   fieldLabel: { color: color.ink, fontSize: 13, fontWeight: "800", marginBottom: 6, marginTop: 14 },
+  fieldLabelRow: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 6, marginTop: 14 },
+  fieldLabelNoGap: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  dynamicBadge: { backgroundColor: color.surface, borderRadius: 8, color: color.violet, fontSize: 11, fontWeight: "800", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 2 },
+  specSummary: { backgroundColor: color.surface, borderRadius: 12, marginBottom: 4, padding: 10 },
+  specSummaryText: { color: color.ink, fontSize: 12, lineHeight: 18 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
   chipOn: { backgroundColor: color.ink, borderColor: color.ink },
