@@ -642,6 +642,10 @@ func TestVerifyChallengeProvisionsInitialProfile(t *testing.T) {
 	if edited.Outcome != "ACCEPTED" {
 		t.Fatalf("explicit edit failed: %#v", edited)
 	}
+	// OTP-THROTTLE-001: a second code for the same identifier within one
+	// minute is throttled; advance the clock so this profile-provision
+	// re-verification exercises the user path, not the throttle.
+	fixed.Advance(time.Minute)
 	second := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
 		"channel": "EMAIL", "identifier": "nguyenthanhhuyen@example.com", "deviceId": "device_profile", "platform": "ANDROID",
 	}, command.Target{Type: "LoginChallenge", ID: "new"}))

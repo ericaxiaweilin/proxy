@@ -116,6 +116,12 @@ type Repository interface {
 	CreateLoginChallenge(ctx context.Context, challenge LoginChallenge) error
 	GetLoginChallenge(ctx context.Context, id string) (LoginChallenge, error)
 	UpdateLoginChallenge(ctx context.Context, challenge LoginChallenge, expectedVersion int) error
+	// RevokePendingChallengesForIdentity supersedes every PENDING
+	// challenge of a login identity (OTP-SINGLE-CODE-001: only the most
+	// recent code may verify — WhatsApp / Telegram / Twilio Verify
+	// semantics). Returns the revoked challenges so the caller can emit
+	// domain events for each.
+	RevokePendingChallengesForIdentity(ctx context.Context, loginIdentityID string) ([]LoginChallenge, error)
 	GetDevice(ctx context.Context, id string) (DeviceRegistration, error)
 	UpsertDevice(ctx context.Context, device DeviceRegistration) error
 	HasActiveMembership(ctx context.Context, userID string, principal command.Principal) (bool, error)
@@ -140,6 +146,13 @@ type TransactionalRepository interface {
 	CreateSessionAndPublish(ctx context.Context, session Session, domainEvents []event.DomainEvent) error
 	CreateSessionWithTokensAndPublish(ctx context.Context, session Session, tokens SessionToken, domainEvents []event.DomainEvent) error
 	CreateLoginChallengeAndPublish(ctx context.Context, challenge LoginChallenge, domainEvents []event.DomainEvent) error
+	// CreateLoginChallengeSupersedingPending atomically revokes every
+	// PENDING challenge of the identity and inserts the fresh one —
+	// OTP-SINGLE-CODE-001 (only the most recent code is verifiable).
+	// buildEvents receives the superseded challenges so the caller can
+	// emit a LoginChallengeSuperseded event per revoked code; events for
+	// the new challenge are appended after.
+	CreateLoginChallengeSupersedingPending(ctx context.Context, challenge LoginChallenge, buildEvents func(superseded []LoginChallenge) []event.DomainEvent) error
 	UpdateLoginChallengeAndPublish(ctx context.Context, challenge LoginChallenge, expectedVersion int, domainEvents []event.DomainEvent) error
 	CreateSessionWithTokensAndChallengeAndPublish(ctx context.Context, session Session, tokens SessionToken, challenge LoginChallenge, domainEvents []event.DomainEvent) error
 	UpsertDeviceAndPublish(ctx context.Context, device DeviceRegistration, domainEvents []event.DomainEvent) error
@@ -268,10 +281,30 @@ func (r *MemoryRepository) EnsurePasswordlessIdentity(_ context.Context, channel
 	if upgradingUserAccountID == "" {
 		r.users[user.ID] = user
 	}
+	// ACCOUNT-SWITCH-001: same takeover semantics as the PostgreSQL
+	// repository — a fresh different-account login may claim the device
+	// only when the device has no ACTIVE session left; while the owner
+	// holds a live session the device stays exclusive.
+	if existing, exists := r.devices[deviceID]; exists && existing.UserAccountID != user.ID && !r.deviceHasNoActiveSessionLocked(deviceID) {
+		return LoginIdentity{}, DeviceRegistration{}, false, errors.New("device belongs to another user")
+	}
 	r.loginIdentities[identity.ID] = identity
 	r.devices[device.ID] = device
 	r.memberships = append(r.memberships, Membership{Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, UserAccountID: user.ID, Status: "ACTIVE"})
 	return identity, device, true, nil
+}
+
+// deviceHasNoActiveSessionLocked reports whether this device currently
+// has no ACTIVE session. Caller must hold r.mu. It gates the
+// ACCOUNT-SWITCH-001 takeover in the memory repository (same semantics
+// as the PostgreSQL deviceHasNoActiveSession).
+func (r *MemoryRepository) deviceHasNoActiveSessionLocked(deviceID string) bool {
+	for _, session := range r.sessions {
+		if session.DeviceID == deviceID && session.Status == "ACTIVE" {
+			return false
+		}
+	}
+	return true
 }
 
 // EnsureAnonymousIdentity gives a device a durable, server-owned ANONYMOUS
@@ -313,6 +346,24 @@ func (r *MemoryRepository) GetLoginChallenge(_ context.Context, id string) (Logi
 		return LoginChallenge{}, ErrLoginChallengeNotFound
 	}
 	return challenge, nil
+}
+
+// RevokePendingChallengesForIdentity mirrors the PostgreSQL repository:
+// every PENDING challenge of the identity flips to LOCKED (version
+// bumped) and is returned for domain-event emission. OTP-SINGLE-CODE-001.
+func (r *MemoryRepository) RevokePendingChallengesForIdentity(_ context.Context, loginIdentityID string) ([]LoginChallenge, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	revoked := make([]LoginChallenge, 0, 2)
+	for id, challenge := range r.challenges {
+		if challenge.LoginIdentityID == loginIdentityID && challenge.Status == "PENDING" {
+			challenge.Status = "LOCKED"
+			challenge.Version++
+			r.challenges[id] = challenge
+			revoked = append(revoked, challenge)
+		}
+	}
+	return revoked, nil
 }
 
 func (r *MemoryRepository) UpdateLoginChallenge(_ context.Context, challenge LoginChallenge, expectedVersion int) error {
@@ -437,6 +488,30 @@ func (r *MemoryRepository) CreateLoginChallengeAndPublish(_ context.Context, cha
 	}
 	r.challenges[challenge.ID] = challenge
 	r.events = append(r.events, domainEvents...)
+	return nil
+}
+
+// CreateLoginChallengeSupersedingPending mirrors the PostgreSQL
+// repository: lock every PENDING challenge of the identity, insert the
+// fresh one, publish the caller's events — atomically under r.mu.
+// OTP-SINGLE-CODE-001.
+func (r *MemoryRepository) CreateLoginChallengeSupersedingPending(_ context.Context, challenge LoginChallenge, buildEvents func(superseded []LoginChallenge) []event.DomainEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.challenges[challenge.ID]; exists {
+		return errors.New("login challenge already exists")
+	}
+	superseded := make([]LoginChallenge, 0, 2)
+	for id, pending := range r.challenges {
+		if pending.LoginIdentityID == challenge.LoginIdentityID && pending.Status == "PENDING" {
+			pending.Status = "LOCKED"
+			pending.Version++
+			r.challenges[id] = pending
+			superseded = append(superseded, pending)
+		}
+	}
+	r.challenges[challenge.ID] = challenge
+	r.events = append(r.events, buildEvents(superseded)...)
 	return nil
 }
 
