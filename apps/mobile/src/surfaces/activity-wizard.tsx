@@ -115,16 +115,27 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onView
 
       {step === "template" ? (
         <>
-          <Text style={styles.sectionTitle}>想组织什么？活动强调多人参与；先选一个完整玩法。</Text>
-          {ACTIVITY_TEMPLATES.map((item) => (
-            <Pressable key={item.id} accessibilityLabel={`选择${item.title}`} onPress={() => pickTemplate(item)} style={styles.momentCard}>
-              <View style={styles.momentEmoji}><Text style={styles.momentEmojiText}>{item.emoji}</Text></View>
-              <View style={styles.momentCopy}>
-                <Text style={styles.momentTitle}>{item.title}</Text>
-                <Text style={styles.momentMeta}>{item.meta}</Text>
-              </View>
-            </Pressable>
-          ))}
+          <View style={styles.hero}>
+            <Text style={styles.heroTitle}>想组织什么？</Text>
+            <Text style={styles.heroSub}>活动强调多人参与；先选一个完整玩法。</Text>
+          </View>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>热门活动</Text>
+            <Text style={styles.sectionHint}>直接选</Text>
+          </View>
+          <View style={styles.activityGrid}>
+            {ACTIVITY_TEMPLATES.map((item) => (
+              <Pressable key={item.id} accessibilityLabel={`选择${item.title}`} onPress={() => pickTemplate(item)} style={styles.activityPreset}>
+                <Text style={styles.activityMark}>{item.emoji}</Text>
+                <Text style={styles.activityPresetTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.activityPresetMeta} numberOfLines={1}>{item.meta}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.currentCard}>
+            <Text style={styles.currentLabel}>当前活动</Text>
+            <Text style={styles.currentValue}>{template.title}</Text>
+          </View>
         </>
       ) : step === "settings" ? (
         <>
@@ -275,6 +286,20 @@ const styles = StyleSheet.create({
   tabText: { color: color.ink, fontSize: 14, fontWeight: "800" },
   tabTextActive: { color: color.white },
   sectionTitle: { color: color.ink, fontSize: 16, fontWeight: "800", marginBottom: 12 },
+  sectionHead: { alignItems: "baseline", flexDirection: "row", gap: 7, marginBottom: 4, marginTop: 10 },
+  sectionHint: { color: color.muted, fontSize: 11 },
+  // R58 热门活动 grid preset 卡。
+  hero: { paddingTop: 2 },
+  heroTitle: { color: color.ink, fontSize: 24, fontWeight: "900" },
+  heroSub: { color: color.muted, fontSize: 13, marginTop: 3 },
+  activityGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  activityPreset: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, padding: 11, width: "48%" },
+  activityMark: { color: color.ink, fontSize: 16, fontWeight: "800" },
+  activityPresetTitle: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 6 },
+  activityPresetMeta: { color: color.muted, fontSize: 11, marginTop: 3 },
+  currentCard: { backgroundColor: color.surface, borderRadius: 14, marginTop: 12, padding: 12 },
+  currentLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  currentValue: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 2 },
   momentCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 10, padding: 14 },
   momentEmoji: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
   momentEmojiText: { color: color.ink, fontSize: 20, fontWeight: "800" },

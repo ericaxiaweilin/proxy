@@ -27,7 +27,27 @@ import { localApiBaseUrl } from "../native-clients";
 
 type Step = "moment" | "people" | "specs" | "done";
 
-const RATIO_FILTERS = ["全部", "1:1", "≤ 3:1", "≤ 4:1"];
+// R58 原型单行 quick-filter：全部 / 1:1 / 3–4 人 / 晚间 / 周末 / 主题玩法。
+const QUICK_FILTERS = [
+  { id: "all", label: "全部" },
+  { id: "one", label: "1:1" },
+  { id: "small", label: "3–4 人" },
+  { id: "evening", label: "晚间" },
+  { id: "weekend", label: "周末" },
+  { id: "theme", label: "主题玩法" }
+] as const;
+type QuickFilterId = typeof QUICK_FILTERS[number]["id"];
+
+// R58 原型左侧分类 rail：热门 / 见面 / 娱乐 / 出行 / 主题。
+const CATEGORIES = [
+  { id: "all", label: "热门" },
+  { id: "meet", label: "见面" },
+  { id: "fun", label: "娱乐" },
+  { id: "outdoor", label: "出行" },
+  { id: "theme", label: "主题" }
+] as const;
+type CategoryId = typeof CATEGORIES[number]["id"];
+
 const TIME_FILTERS = ["全部", "晚间", "下午", "周末"];
 const DURATIONS = ["2 小时", "半天", "全天"];
 const PREF_OPTIONS = ["公共场所见面", "中文", "附近"];
@@ -49,8 +69,8 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [template, setTemplate] = useState<MomentTemplate | undefined>(undefined);
   const [specs, setSpecs] = useState<DemandSpecs>(() => defaultSpecsFor(MOMENT_TEMPLATES[0]!));
   const [query, setQuery] = useState("");
-  const [ratioFilter, setRatioFilter] = useState("全部");
-  const [timeFilter, setTimeFilter] = useState("全部");
+  const [quickFilter, setQuickFilter] = useState<QuickFilterId>("all");
+  const [category, setCategory] = useState<CategoryId>("all");
   const [peopleFilters, setPeopleFilters] = useState<string[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetFilters, setSheetFilters] = useState<PeopleSheetFilters>(DEFAULT_PEOPLE_FILTERS);
@@ -58,6 +78,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const [peopleLoaded, setPeopleLoaded] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<SupplierCandidate>();
   const [publishing, setPublishing] = useState(false);
+  const [negotiable, setNegotiable] = useState(false);
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<MarketOpportunity>();
   const [draftRestored, setDraftRestored] = useState(false);
@@ -100,8 +121,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const moments = MOMENT_TEMPLATES.filter((item) => {
     const q = query.trim().toLowerCase();
     if (q !== "" && !`${item.title}${item.venue}${item.theme}`.toLowerCase().includes(q)) return false;
-    if (ratioFilter !== "全部" && !item.ratios.includes(ratioFilter)) return false;
-    if (timeFilter !== "全部" && !item.timeTags.includes(timeFilter)) return false;
+    if (category !== "all" && item.category !== category) return false;
+    if (quickFilter === "one" && !item.ratios.includes("1:1")) return false;
+    if (quickFilter === "small" && !(item.ratios.includes("≤ 3:1") || item.ratios.includes("≤ 4:1"))) return false;
+    if (quickFilter === "evening" && !item.timeTags.includes("晚间")) return false;
+    if (quickFilter === "weekend" && !item.timeTags.includes("周末")) return false;
+    if (quickFilter === "theme" && item.category !== "theme") return false;
     return true;
   });
 
@@ -122,7 +147,9 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
       timeTags: [],
       skills: "中文",
       priceRef: "面议",
-      defaultPrice: ""
+      defaultPrice: "",
+      category: "theme" as const,
+      tags: ["自定义"]
     };
     setTemplate(custom);
     setSpecs(defaultSpecsFor(custom));
@@ -232,50 +259,77 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
 
       {step === "moment" ? (
         <>
-          <Text style={styles.sectionTitle}>想约什么？左边找方向，右边直接选一个 Moment。</Text>
-          <Text style={styles.sectionSub}>Moment · 人与场景优先</Text>
+          <View style={styles.hero}>
+            <Text style={styles.heroTitle}>想约什么？</Text>
+            <Text style={styles.heroSub}>左边找方向，右边直接选一个 Moment。</Text>
+            <View style={styles.momentBadge}><Text style={styles.momentBadgeText}>Moment · 人与场景优先</Text></View>
+          </View>
           <View style={styles.searchRow}>
             <View style={styles.searchBox}>
               <Text style={styles.searchIcon}>⌕</Text>
-              <TextInput onChangeText={setQuery} placeholder="搜 Moment…" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={query} />
+              <TextInput onChangeText={setQuery} placeholder="例如：4个人，周六晚上唱歌" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={query} />
             </View>
             <Pressable accessibilityLabel="按输入生成需求" disabled={query.trim() === ""} onPress={createCustom} style={[styles.generateBtn, query.trim() === "" && styles.disabled]}>
               <Text style={styles.generateText}>生成</Text>
             </Pressable>
           </View>
-          <View style={styles.filterRow}>
-            {RATIO_FILTERS.map((ratio) => (
-              <Pressable key={ratio} onPress={() => setRatioFilter(ratio)} style={[styles.filterChip, ratioFilter === ratio && styles.filterChipOn]}>
-                <Text style={[styles.filterText, ratioFilter === ratio && styles.filterTextOn]}>{ratio}</Text>
+          {/* R58 单行 quick-filter */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickFilterRow}>
+            {QUICK_FILTERS.map((filter) => (
+              <Pressable key={filter.id} onPress={() => setQuickFilter(filter.id)} style={[styles.filterChip, quickFilter === filter.id && styles.filterChipOn]}>
+                <Text style={[styles.filterText, quickFilter === filter.id && styles.filterTextOn]}>{filter.label}</Text>
               </Pressable>
             ))}
+          </ScrollView>
+          {/* R58 双栏：左分类 rail + 右 Moment 卡片列表 */}
+          <View style={styles.deliveryLayout}>
+            <View style={styles.categoryRail}>
+              {CATEGORIES.map((cat) => (
+                <Pressable key={cat.id} onPress={() => setCategory(cat.id)} style={[styles.categoryBtn, category === cat.id && styles.categoryBtnOn]}>
+                  <Text style={[styles.categoryBtnText, category === cat.id && styles.categoryBtnTextOn]}>{cat.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.catalogPane}>
+              <View style={styles.catalogHead}>
+                <Text style={styles.catalogTitle}>{CATEGORIES.find((cat) => cat.id === category)?.label ?? "热门"}</Text>
+                <Text style={styles.catalogHint}>高频 Moment</Text>
+              </View>
+              {moments.map((item) => {
+                const active = template?.id === item.id;
+                return (
+                  <Pressable key={item.id} accessibilityLabel={`选择${item.title}`} onPress={() => pickTemplate(item)} style={[styles.catalogItem, active && styles.momentCardOn]}>
+                    <View style={styles.momentEmoji}><Text style={styles.momentEmojiText}>{item.emoji}</Text></View>
+                    <View style={styles.momentCopy}>
+                      <Text style={styles.momentTitle}>{item.title}</Text>
+                      <Text style={styles.momentDesc}>{item.venueLabel}</Text>
+                      <View style={styles.catalogTags}>
+                        {item.tags.map((tag) => <View key={tag} style={styles.catalogTag}><Text style={styles.catalogTagText}>{tag}</Text></View>)}
+                      </View>
+                    </View>
+                    <View style={styles.catalogSide}>
+                      <Text style={styles.catalogSideRatio}>{item.defaultRatio}</Text>
+                      <Text style={styles.catalogSideTime}>{item.defaultTime || "时间自定"}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+              {moments.length === 0 ? <Text style={styles.empty}>没有匹配的 Moment，换个条件或点生成。</Text> : null}
+            </View>
           </View>
-          <View style={styles.filterRow}>
-            {TIME_FILTERS.map((time) => (
-              <Pressable key={time} onPress={() => setTimeFilter(time)} style={[styles.filterChip, timeFilter === time && styles.filterChipOn]}>
-                <Text style={[styles.filterText, timeFilter === time && styles.filterTextOn]}>{time}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Text style={styles.sectionSub}>高频 Moment</Text>
-          {moments.map((item) => {
-            const active = template?.id === item.id;
-            return (
-              <Pressable key={item.id} accessibilityLabel={`选择${item.title}`} onPress={() => pickTemplate(item)} style={[styles.momentCard, active && styles.momentCardOn]}>
-                <View style={styles.momentEmoji}><Text style={styles.momentEmojiText}>{item.emoji}</Text></View>
-                <View style={styles.momentCopy}>
-                  <Text style={styles.momentTitle}>{item.title}</Text>
-                  <Text style={styles.momentDesc}>{item.venueLabel}</Text>
-                  <Text style={styles.momentMeta}>{item.defaultRatio} · {item.defaultTime || "时间自定"} · 参考 {item.priceRef}</Text>
-                </View>
-              </Pressable>
-            );
-          })}
-          {moments.length === 0 ? <Text style={styles.empty}>没有匹配的 Moment，换个条件或点生成。</Text> : null}
           <View style={styles.currentCard}>
             <Text style={styles.currentLabel}>当前需求</Text>
             <Text style={styles.currentValue}>{template ? `${template.title} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
           </View>
+          {/* R58 城市协助 · Professional 次入口 */}
+          <Pressable accessibilityLabel="选择城市协助专业服务" onPress={() => { const pro = MOMENT_TEMPLATES.find((item) => item.id === "pro"); if (pro) { pickTemplate(pro); setStep("people"); } }} style={styles.professionalEntry}>
+            <View style={styles.proIcon}><Text style={styles.proIconText}>证</Text></View>
+            <View style={styles.proCopy}>
+              <Text style={styles.proTitle}>城市协助 · Professional</Text>
+              <Text style={styles.proDesc}>翻译 / 签证 / 法律 / 商务 · 专业认证优先</Text>
+            </View>
+            <Text style={styles.proLink}>次入口 ›</Text>
+          </Pressable>
           <Pressable disabled={!template} onPress={() => setStep("people")} style={[styles.primaryBtn, !template && styles.disabled]}>
             <Text style={styles.primaryBtnText}>下一步 · 选人 / 服务 / 价格</Text>
           </Pressable>
@@ -441,7 +495,12 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Text style={styles.fieldLabelNoGap}>预计服务价</Text>
             <Text style={styles.dynamicBadge}>动态</Text>
           </View>
-          <TextInput keyboardType="numbers-and-punctuation" onChangeText={(price) => setSpecs((prev) => ({ ...prev, price }))} placeholder={template?.defaultPrice} placeholderTextColor={color.muted} style={styles.input} value={specs.price} />
+          <View style={styles.priceMain}>
+            <TextInput keyboardType="numbers-and-punctuation" onChangeText={(price) => setSpecs((prev) => ({ ...prev, price }))} placeholder={template?.defaultPrice} placeholderTextColor={color.muted} style={[styles.input, styles.priceInput]} value={specs.price} />
+            <Pressable accessibilityLabel={negotiable ? "取消可协商" : "标记可协商"} onPress={() => setNegotiable((current) => !current)} style={[styles.negoBtn, negotiable && styles.negoBtnOn]}>
+              <Text style={[styles.negoBtnText, negotiable && styles.negoBtnTextOn]}>{negotiable ? "✓ 可协商" : "可协商"}</Text>
+            </Pressable>
+          </View>
           <Text style={styles.hint}>参考 {template?.priceRef} · 可协商；现场消费不包含在内。</Text>
           <Text style={styles.hint}>ⓘ 价格由场景基础价、时间、人数和额外偏好组成；偏好只用于匹配，不按行为收费。服务参考价；餐饮、咖啡、KTV、门票等现场消费不包含在内。</Text>
 
@@ -465,7 +524,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <SummaryRow label="对象" value="公开市场" />
             <SummaryRow label="客户方" value={specs.ratio === "1:1" ? "1 人 · 1:1" : (specs.ratio || (template?.defaultRatio ?? ""))} />
             <SummaryRow label="标准" value={`${specs.time} · ${specs.duration}`} />
-            <SummaryRow label="价格" value={`${specs.price} · 可协商`} last={!showNotes && !showPerson} />
+            <SummaryRow label="价格" value={negotiable ? `${specs.price} · 可协商` : specs.price} last={!showNotes && !showPerson} />
             {showNotes ? <SummaryRow label="备注" value={specs.notes.trim()} last={!showPerson} /> : null}
             {showPerson ? <SummaryRow label="意向人选" value={selectedPerson.name} last /> : null}
           </View>
@@ -502,19 +561,62 @@ const styles = StyleSheet.create({
   tabText: { color: color.ink, fontSize: 14, fontWeight: "800" },
   tabTextActive: { color: color.white },
   restoredHint: { color: color.violet, fontSize: 11, marginBottom: 8 },
-  sectionTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
-  sectionSub: { color: color.muted, fontSize: 12, marginBottom: 10, marginTop: 4 },
-  searchRow: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 8 },
-  searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", flex: 1, gap: 6, paddingHorizontal: 12 },
+  // R58 hero：标题 + 副标题 + Moment badge。
+  hero: { paddingBottom: 4, paddingTop: 2 },
+  heroTitle: { color: color.ink, fontSize: 24, fontWeight: "900" },
+  heroSub: { color: color.muted, fontSize: 13, marginTop: 3 },
+  momentBadge: { alignSelf: "flex-start", backgroundColor: "#F3EEE7", borderRadius: 999, marginTop: 7, paddingHorizontal: 10, paddingVertical: 4 },
+  momentBadgeText: { color: "#6E6458", fontSize: 11, fontWeight: "800" },
+  searchRow: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 10, marginTop: 10 },
+  searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 19, borderWidth: 1, flexDirection: "row", flex: 1, gap: 6, height: 50, paddingHorizontal: 13 },
   searchIcon: { color: color.muted, fontSize: 15 },
   searchInput: { color: color.ink, flex: 1, fontSize: 14, paddingVertical: 10 },
-  generateBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 10 },
+  generateBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 12 },
   generateText: { color: color.white, fontSize: 13, fontWeight: "800" },
-  filterRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
+  quickFilterRow: { flexDirection: "row", gap: 6, paddingVertical: 2 },
   filterChip: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
   filterChipOn: { backgroundColor: color.ink, borderColor: color.ink },
   filterText: { color: color.muted, fontSize: 12, fontWeight: "700" },
   filterTextOn: { color: color.white },
+  filterRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
+  // R58 双栏 delivery-layout：左分类 rail + 右卡片列表。
+  deliveryLayout: { backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, flexDirection: "row", marginTop: 14, minHeight: 320, overflow: "hidden" },
+  categoryRail: { backgroundColor: "#F4F1EC", borderRightColor: color.line, borderRightWidth: 1, width: 66 },
+  categoryBtn: { alignItems: "center", justifyContent: "center", minHeight: 56, paddingHorizontal: 4 },
+  categoryBtnOn: { backgroundColor: color.white },
+  categoryBtnText: { color: "#8A837B", fontSize: 12, fontWeight: "700", textAlign: "center" },
+  categoryBtnTextOn: { color: color.ink, fontWeight: "900" },
+  catalogPane: { flex: 1, paddingHorizontal: 12, paddingTop: 10 },
+  catalogHead: { flexDirection: "row", alignItems: "baseline", gap: 7, marginBottom: 2 },
+  catalogTitle: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  catalogHint: { color: color.muted, fontSize: 11 },
+  catalogItem: { alignItems: "center", borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 11, paddingVertical: 11 },
+  catalogTags: { flexDirection: "row", gap: 5, marginTop: 4, flexWrap: "wrap" },
+  catalogTag: { backgroundColor: "#F5F2EE", borderRadius: 7, paddingHorizontal: 6, paddingVertical: 2 },
+  catalogTagText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  catalogSide: { alignItems: "flex-end", gap: 3 },
+  catalogSideRatio: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  catalogSideTime: { color: color.muted, fontSize: 11 },
+  momentEmoji: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  momentEmojiText: { color: color.ink, fontSize: 20, fontWeight: "800" },
+  momentCopy: { flex: 1 },
+  momentTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
+  momentDesc: { color: color.muted, fontSize: 11, marginTop: 2 },
+  momentCardOn: { borderColor: color.violet, borderWidth: 2 },
+  empty: { color: color.muted, fontSize: 12, marginVertical: 12, textAlign: "center" },
+  // R58 城市协助 · Professional 次入口。
+  professionalEntry: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 17, borderWidth: 1, flexDirection: "row", gap: 9, marginTop: 11, padding: 11 },
+  proIcon: { alignItems: "center", backgroundColor: "#F3EEE7", borderRadius: 10, height: 35, justifyContent: "center", width: 35 },
+  proIconText: { color: "#8A6D2F", fontSize: 17, fontWeight: "900" },
+  proCopy: { flex: 1 },
+  proTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  proDesc: { color: color.muted, fontSize: 11, marginTop: 2 },
+  proLink: { color: color.violet, fontSize: 12, fontWeight: "800" },
+  currentCard: { backgroundColor: color.surface, borderRadius: 14, marginTop: 12, padding: 12 },
+  currentLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  currentValue: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 2 },
+  sectionTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
+  sectionSub: { color: color.muted, fontSize: 12, marginBottom: 10, marginTop: 4 },
   filterHeadRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   sheetToggle: { paddingHorizontal: 6, paddingVertical: 4 },
   sheetToggleText: { color: color.violet, fontSize: 12, fontWeight: "800" },
@@ -526,17 +628,6 @@ const styles = StyleSheet.create({
   sheetApply: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, flex: 1, paddingVertical: 10 },
   sheetApplyText: { color: color.white, fontSize: 13, fontWeight: "800" },
   momentCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 10, padding: 14 },
-  momentCardOn: { borderColor: color.violet, borderWidth: 2 },
-  momentEmoji: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
-  momentEmojiText: { color: color.ink, fontSize: 20, fontWeight: "800" },
-  momentCopy: { flex: 1 },
-  momentTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
-  momentDesc: { color: color.muted, fontSize: 12, marginTop: 2 },
-  momentMeta: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 4 },
-  empty: { color: color.muted, fontSize: 12, marginVertical: 12, textAlign: "center" },
-  currentCard: { backgroundColor: color.surface, borderRadius: 14, marginTop: 4, padding: 12 },
-  currentLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  currentValue: { color: color.ink, fontSize: 14, fontWeight: "800", marginTop: 2 },
   personCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 8, padding: 12 },
   personAvatar: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
   personAvatarText: { color: color.ink, fontSize: 17, fontWeight: "800" },
@@ -567,6 +658,12 @@ const styles = StyleSheet.create({
   chipText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   chipTextOn: { color: color.white },
   input: { backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, paddingHorizontal: 14, paddingVertical: 10 },
+  priceMain: { alignItems: "center", flexDirection: "row", gap: 8 },
+  priceInput: { flex: 1 },
+  negoBtn: { alignItems: "center", borderColor: color.line, borderRadius: 12, borderWidth: 1, justifyContent: "center", paddingHorizontal: 14, paddingVertical: 10 },
+  negoBtnOn: { backgroundColor: color.ink, borderColor: color.ink },
+  negoBtnText: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  negoBtnTextOn: { color: color.white },
   notesInput: { minHeight: 64, textAlignVertical: "top" },
   hint: { color: color.muted, fontSize: 11, marginTop: 6 },
   error: { color: color.error, fontSize: 12, marginTop: 12, textAlign: "center" },
