@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 163 — 2026-09-11
+
+- 商家 Creator 推荐轨的服务端 seed 升级：boot seed 从 3 个 photos='[]' 的 agent 扩到 6 个带真实头像 URL 的 Creator（Linh/Mai/An/Thao/Yen/Minh，覆盖 hn/hcm）+ 档期窗口随 boot 滚动（now+1h..now+72h），使 `MerchantCreatorRecommendations`（supply.querySuppliers({marketId,limit:6})）不再空轨。
+- 守护：`MERCHANT-CREATOR-LIVE-002` 两个 Go 用例（≥5 个 hn 头像可用 Creator；可用窗口覆盖客户端查询区间且随 boot 前滚）。
+- 注：分支 fix/merchant-creator-live 的移动端部分（门店地址推导 marketId + 旧 merchant-me-r21 结构）未合——HEAD 已把该面换成 merchant-me-r21-replacement → MerchantCreatorRecommendations（marketId 参数默认 "hn"）。门店→marketId 的来源仍待接（HEAD 无 marketId 传参点）。
+
+
+
 ## Revision 157 — R58 publish-flow catalog engine (2026-09-10)
 
 - 发布流数据源升级为服务端目录引擎：`ListOpportunityTemplates` 一次匿名读全量下发分类轨道（热门/见面/娱乐/出行/主题，同 16 卡五视图）+ Moment 规格（人数/时间/时长/地点）+ 比例政策（固定 1:1 vs 小组容量合并）+ 动态定价（时长/时段/人数 delta、perPair × 搭档数）+ 活动创建预设（6 个多人完整玩法）。

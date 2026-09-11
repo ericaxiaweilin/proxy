@@ -200,13 +200,14 @@ func main() {
 				log.Fatalf("seed postgres identity: %v", err)
 			}
 		}
-		// R15.32: Supply seed (3 demo agents) used to run only in
-		// simulated mode because supply.agent_profiles had FORCE ROW
-		// LEVEL SECURITY with no write policy for the `proxy` role
+		// R15.32 / MERCHANT-CREATOR-LIVE-002: Supply seed (6 photo-ready
+		// Creator profiles with a rolling availability window) used to run
+		// only in simulated mode because supply.agent_profiles had FORCE
+		// ROW LEVEL SECURITY with no write policy for the `proxy` role
 		// (migration 065 turned that off; see the audit note there).
-		// MapExploreSurface needs these 3 agents for the pin layer,
-		// so the seed now runs on every boot regardless of login
-		// provider — same rule as seedPostgresMedia above.
+		// MapExploreSurface needs the agent pin layer and the merchant
+		// Creator rail reads the same rows, so the seed runs on every boot
+		// regardless of login provider — same rule as seedPostgresMedia.
 		if err := seedPostgresSupply(pool); err != nil {
 			log.Fatalf("seed postgres supply: %v", err)
 		}
@@ -850,7 +851,27 @@ func seedPostgresIdentity(pool *pgxpool.Pool) error {
 	return nil
 }
 
-// seedPostgresSupply 写入 3 个真实测试 Agent（B 完成标准）。
+type creatorSeedProfile struct {
+	agentID, name, bio, photo string
+	languages, areas          []string
+}
+
+func merchantCreatorSeedProfiles() []creatorSeedProfile {
+	return []creatorSeedProfile{
+		{"agent_linh", "Linh", "河内本地向导，中文流利，擅长摄影", "https://randomuser.me/api/portraits/women/44.jpg", []string{"ZH", "VI"}, []string{"hn"}},
+		{"agent_mai", "Mai", "河内本地人，越南语向导", "https://randomuser.me/api/portraits/women/32.jpg", []string{"VI"}, []string{"hn"}},
+		{"agent_an", "An", "河内活动接待，熟悉咖啡与餐厅场景", "https://randomuser.me/api/portraits/women/65.jpg", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_thao", "Thao", "河内中越口译与活动协作 Creator", "https://randomuser.me/api/portraits/women/68.jpg", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_yen", "Yen", "河内生活方式 Creator，擅长到店内容", "https://randomuser.me/api/portraits/women/50.jpg", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_minh", "Minh", "胡志明市中文向导", "https://randomuser.me/api/portraits/men/32.jpg", []string{"ZH"}, []string{"hcm"}},
+	}
+}
+
+func merchantCreatorAvailability(now time.Time) (time.Time, time.Time) {
+	return now.Add(time.Hour), now.Add(72 * time.Hour)
+}
+
+// seedPostgresSupply 写入可用于商家 Creator 推荐的真实测试 Agent。
 // Linh：河内，中文+越南语 VERIFIED+摄影，120 万
 // Mai：河内，仅越南语 VERIFIED，100 万（中文查询应被过滤）
 // Minh：胡志明市，中文 VERIFIED，110 万（河内查询应被过滤）
@@ -858,27 +879,18 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	now := time.Now().UTC()
-	// 明天 9:00 UTC 起 10 小时（与 e2e 查询一致）
-	tomorrow9 := time.Now().UTC().Truncate(24 * time.Hour).Add(24*time.Hour + 9*time.Hour)
-	tomorrow19 := tomorrow9.Add(10 * time.Hour)
 	// Agent Profile
-	profiles := []struct {
-		agentID, name, bio string
-		languages, areas   []string
-	}{
-		{"agent_linh", "Linh", "河内本地向导，中文流利，擅长摄影", []string{"ZH", "VI"}, []string{"hn"}},
-		{"agent_mai", "Mai", "河内本地人，越南语向导", []string{"VI"}, []string{"hn"}},
-		{"agent_minh", "Minh", "胡志明市中文向导", []string{"ZH"}, []string{"hcm"}},
-	}
+	profiles := merchantCreatorSeedProfiles()
 	for _, p := range profiles {
+		photos, _ := json.Marshal([]string{p.photo})
 		languages, _ := json.Marshal(p.languages)
 		areas, _ := json.Marshal(p.areas)
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO supply.agent_profiles (agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at)
-			VALUES ($1,$2,$3,'[]',$4,$5,'ACTIVE',$6,$6)
+			VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',$7,$7)
 			ON CONFLICT (agent_id) DO UPDATE SET name=EXCLUDED.name, bio=EXCLUDED.bio,
-				languages=EXCLUDED.languages, service_areas=EXCLUDED.service_areas, status='ACTIVE', updated_at=EXCLUDED.updated_at`,
-			p.agentID, p.name, p.bio, languages, areas, now); err != nil {
+				photos=EXCLUDED.photos, languages=EXCLUDED.languages, service_areas=EXCLUDED.service_areas, status='ACTIVE', updated_at=EXCLUDED.updated_at`,
+			p.agentID, p.name, p.bio, photos, languages, areas, now); err != nil {
 			return err
 		}
 	}
@@ -890,6 +902,9 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	}{
 		{"agent_linh", 1200000, []string{"hn"}},
 		{"agent_mai", 1000000, []string{"hn"}},
+		{"agent_an", 900000, []string{"hn"}},
+		{"agent_thao", 1300000, []string{"hn"}},
+		{"agent_yen", 1050000, []string{"hn"}},
 		{"agent_minh", 1100000, []string{"hcm"}},
 	}
 	for _, svc := range services {
@@ -910,6 +925,9 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	}{
 		{"agent_linh", "ZH", true}, {"agent_linh", "VI", true}, {"agent_linh", "PHOTOGRAPHY", true},
 		{"agent_mai", "VI", true}, {"agent_mai", "ZH", false},
+		{"agent_an", "VI", true}, {"agent_an", "ZH", true},
+		{"agent_thao", "VI", true}, {"agent_thao", "ZH", true},
+		{"agent_yen", "VI", true}, {"agent_yen", "ZH", true},
 		{"agent_minh", "ZH", true},
 	}
 	for _, c := range caps {
@@ -927,6 +945,9 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	}{
 		{"cv_linh_zh", "agent_linh", "ZH"}, {"cv_linh_vi", "agent_linh", "VI"}, {"cv_linh_photo", "agent_linh", "PHOTOGRAPHY"},
 		{"cv_mai_vi", "agent_mai", "VI"},
+		{"cv_an_vi", "agent_an", "VI"}, {"cv_an_zh", "agent_an", "ZH"},
+		{"cv_thao_vi", "agent_thao", "VI"}, {"cv_thao_zh", "agent_thao", "ZH"},
+		{"cv_yen_vi", "agent_yen", "VI"}, {"cv_yen_zh", "agent_yen", "ZH"},
 		{"cv_minh_zh", "agent_minh", "ZH"},
 	}
 	for _, v := range verifications {
@@ -938,23 +959,22 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 			return err
 		}
 	}
-	// AvailabilityWindow（明天 9:00-19:00，幂等按固定 id 查重，跨天重启不冲突）
-	agents := []string{"agent_linh", "agent_mai", "agent_minh"}
+	// AvailabilityWindow is a rolling projection refreshed at every boot. A
+	// fixed one-day seed becomes permanently stale after its first launch.
+	windowStart, windowEnd := merchantCreatorAvailability(now)
+	agents := []string{"agent_linh", "agent_mai", "agent_an", "agent_thao", "agent_yen", "agent_minh"}
 	for _, agentID := range agents {
-		var exists int
-		if err := pool.QueryRow(ctx, `
-			SELECT count(*) FROM supply.availability_windows WHERE id=$1`,
-			"aw_"+agentID).Scan(&exists); err != nil {
-			return err
+		marketID := "hn"
+		if agentID == "agent_minh" {
+			marketID = "hcm"
 		}
-		if exists == 0 {
-			if _, err := pool.Exec(ctx, `
+		if _, err := pool.Exec(ctx, `
 				INSERT INTO supply.availability_windows (id, agent_id, start_at, end_at, market_id, status, created_at, updated_at)
 				VALUES ($1,$2,$3,$4,$5,'AVAILABLE',$6,$6)
-				ON CONFLICT (id) DO NOTHING`,
-				"aw_"+agentID, agentID, tomorrow9, tomorrow19, "hn", now); err != nil {
-				return err
-			}
+				ON CONFLICT (id) DO UPDATE SET start_at=EXCLUDED.start_at, end_at=EXCLUDED.end_at,
+					market_id=EXCLUDED.market_id, status='AVAILABLE', updated_at=EXCLUDED.updated_at`,
+			"aw_"+agentID, agentID, windowStart, windowEnd, marketID, now); err != nil {
+			return err
 		}
 	}
 	return nil

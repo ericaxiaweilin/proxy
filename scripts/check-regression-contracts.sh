@@ -116,6 +116,17 @@ pnpm --filter @proxy/mobile test --run src/supply-client.test.ts || exit $?
 require_test "MERCHANT-CREATOR-001" "./internal/supply" \
   "TestSupplyQueryReturnsOnlyEligible" \
   "apps/api-go/internal/supply/service_test.go" || exit $?
+
+# MERCHANT-CREATOR-LIVE-002: boot seed must keep a live, photo-ready
+# Creator pool so the merchant Creator rail (server-side
+# MerchantCreatorRecommendations → supply.querySuppliers) is never empty.
+require_test "MERCHANT-CREATOR-LIVE-002" "./cmd/api" \
+  "TestMerchantCreatorLiveSeedHasFivePhotoReadyHanoiCreators" \
+  "apps/api-go/cmd/api/merchant_creator_seed_test.go" || exit $?
+require_test "MERCHANT-CREATOR-LIVE-002" "./cmd/api" \
+  "TestMerchantCreatorAvailabilityRollsAcrossClientQuery" \
+  "apps/api-go/cmd/api/merchant_creator_seed_test.go" || exit $?
+echo "    MERCHANT-CREATOR-LIVE-002: PASS (live photo-ready seed + rolling availability window)"
 if ! grep -q 'UI-SOCIAL-001' apps/mobile/src/social-settings-store.test.ts; then echo "  FAIL: UI-SOCIAL-001 missing" >&2; exit 1; fi
 if ! grep -q 'UI-SOCIAL-002' apps/mobile/src/social-settings-client.test.ts; then echo "  FAIL: UI-SOCIAL-002 missing" >&2; exit 1; fi
 if ! grep -q 'UI-SOCIAL-003' apps/mobile/src/social-settings-client.test.ts ||
