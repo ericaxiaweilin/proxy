@@ -325,6 +325,13 @@ xcrun devicectl device process launch --device <uuid> --terminate-existing \
 实测：**卸载重装后普通启动 96s 无反应，带 deep link 后 24s 正常加载**（API 15 条连接）。
 `dev-ios-device.sh` 已内置这条 URL，所以**重跑脚本即可**，不必手工敲。
 
+> **补充（2026-09-12 19:12 实测）**：deep link **只在「dev client 还没有可用地址」时需要**，
+> 也就是（重）装后第一次。一旦它记住过地址，**直接点图标启动也能正常加载** ——
+> 实测普通 `devicectl launch`（不带 `--payload-url`、不带 `METRO_HOST`）后
+> Metro 正常收到请求（`metro:bundling:done total=1`，缓存命中）并打出 `[proxy.smoke]`。
+> 所以日常开发**不需要每次跑脚本**；只有重装 / 清历史 / 换网络导致地址失效时才需要。
+> 注意 `total=1` 是缓存命中，别拿它当「拉到了全量 bundle」的证据（全量是几百到上千）。
+
 同时脚本加了 `--terminate-existing`：安装完新构建必须替换正在跑的旧实例，
 否则重跑只会把旧 App 拉到前台 —— 你看到的是**上一次**的 bundle，
 表现为「改了没生效」（正是 §4 三层交付模型里最容易踩的那条）。
