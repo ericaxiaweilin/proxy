@@ -1018,10 +1018,16 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	}
 
 	// Apply per-type protection defaults, then the user override.
+	// COMP-CHAT-001: a paid engagement keeps an auditable thread — no
+	// burn-after-read, no view cap, no screenshot blocking, and the client
+	// cannot switch them back on via protectionOverride.
 	base := DefaultProtectionFor(p.MessageType, conv.Type)
+	if IsTransactionLinkedOrigin(conv.OriginType) {
+		base = TransactionLinkedProtection()
+	}
 	var protection MessageProtection
 	if p.ProtectionOverride != nil {
-		protection, err = Apply(base, *p.ProtectionOverride, s.clock.Now().UTC())
+		protection, err = ApplyWithPolicy(base, *p.ProtectionOverride, s.clock.Now().UTC(), PolicyForOrigin(conv.OriginType))
 		if err != nil {
 			return command.Rejected(e, "INVALID_PROTECTION", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_protection", map[string]any{"reason": err.Error()})
 		}

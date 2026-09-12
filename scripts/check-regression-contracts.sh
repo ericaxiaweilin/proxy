@@ -1633,3 +1633,45 @@ if grep -q '<AIAssistantsRow' apps/mobile/src/surfaces/requester-home.tsx; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/requester-home-discovery-contract.test.ts || exit $?
 echo "    AI-ROW-DUPE-001: PASS (home renders exactly one AI row)"
+
+# COMP-CHAT-001: a paid engagement must keep an auditable thread. The chat was
+# modelled on a privacy messenger, so every DM defaults to burn-after-read,
+# view caps and screenshot blocking. On a marketplace where users pay each
+# other to meet, that combination is the fact pattern used to argue the
+# platform knowingly facilitated brokering — a criminal exposure for the
+# operators, not a fine. Anti-leak stays for social conversations and is
+# locked off wherever money moves (OriginType TASK/SERVICE/ACTIVITY/NEED/
+# OFFER/ORDER), with the server — not the client — doing the refusing.
+require_test "COMP-CHAT-001" "./internal/conversation" \
+  "TestTransactionLinkedProtectionIsAuditable" \
+  "apps/api-go/internal/conversation/message_protection_compliance_test.go" || exit $?
+require_test "COMP-CHAT-001" "./internal/conversation" \
+  "TestApplyWithPolicyRefusesEphemeralOverridesOnTransaction" \
+  "apps/api-go/internal/conversation/message_protection_compliance_test.go" || exit $?
+require_test "COMP-CHAT-001" "./internal/conversation" \
+  "TestPolicyForOriginLocksEveryPaidOrigin" \
+  "apps/api-go/internal/conversation/message_protection_compliance_test.go" || exit $?
+# Enforcement has to live in the send path. A client-side check can be
+# patched out of an installed build in minutes.
+if ! grep -q 'ApplyWithPolicy' apps/api-go/internal/conversation/service.go ||
+   ! grep -q 'IsTransactionLinkedOrigin' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [COMP-CHAT-001]: the send path no longer routes protection through the compliance policy." >&2
+  echo "        Only a server-side refusal holds; a client-side check can be patched out." >&2
+  exit 1
+fi
+# Wording matters as much as code. The original spec named its acceptance
+# scenarios after pimps, sex workers and "running away"; a document that
+# describes a criminal trade as the target reads as a statement of intent
+# and is more damaging than any single code path. Removed on purpose.
+# Extension allowlist, not a directory scan: design HTML embeds base64
+# blobs that randomly contain these byte sequences and would fail the
+# build on a false positive.
+if git grep -niI -e 'pimp' -e '鸡头' -e '跑路' -e '小妹' -- \
+     '*.go' '*.ts' '*.tsx' '*.md' '*.sql' | grep -q .; then
+  echo "  FAIL [COMP-CHAT-001]: the repository names a criminal trade as a target scenario." >&2
+  echo "        In an investigation this reads as a statement of intent, not an accident." >&2
+  git grep -niI -e 'pimp' -e '鸡头' -e '跑路' -e '小妹' -- \
+    '*.go' '*.ts' '*.tsx' '*.md' '*.sql' >&2
+  exit 1
+fi
+echo "    COMP-CHAT-001: PASS (paid threads stay auditable; social privacy untouched)"

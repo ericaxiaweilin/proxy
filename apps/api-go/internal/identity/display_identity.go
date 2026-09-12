@@ -4,9 +4,15 @@
 //   DisplayIdentity is a "persona" that a real Person (UserAccount) can switch
 //   into. The motivation comes from the Proxy chat RFC v0.1
 //   (docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md):
-//   a pimp / host can use a "work" identity when talking to clients, a
-//   "private" identity when talking to friends, and a "burner" identity
-//   that self-destructs. The real UserAccount is the same.
+//   a service provider can use a "work" identity with customers and a
+//   "private" identity with friends, while the underlying UserAccount — the
+//   one that is verified and accountable — stays the same.
+//
+// COMPLIANCE (COMP-ID-001): personas are a presentation layer, never an
+// anonymity layer. Identity verification attaches to the real UserAccount,
+// which is the accountable party. A persona must not be usable to erase the
+// record of a paid engagement; the self-destruct variant described in the
+// RFC is not available to accounts that earn money here.
 //
 // SCOPE (this file)
 //   - Domain types: DisplayIdentity, DisplayIdentityType, VisibilityKind
