@@ -246,6 +246,28 @@ if ! grep -q 'AuthorizeForPost(ctx, \[\]string{mediaAssetID}' apps/api-go/intern
 fi
 echo "    AVATAR-DELIVER-001: PASS"
 
+# IDENTITY-ID-001: mock 人物身份只允许有一处事实源（internal/mockidentity）。
+# 症状回归：同一个显示名在首页/发布订单各显示一张头像、且无从判断是否同一个人 ——
+# 根因就是姓名+头像被各 surface 反复硬编码（含 randomuser/unsplash 外链）。
+# 守门三条：
+#   1) Go 源码里除 mockidentity 外不得再出现账号/资产 id 前缀（防止再造一份映射）；
+#   2) 服务端不得再出现 randomuser 外链头像；
+#   3) 客户端首页 fixtures 不得再自带 unsplash 原型肖像。
+if [ "$(grep -rl 'user_mockcreator_\|ma_creator_' apps/api-go --include='*.go' | grep -v 'internal/mockidentity/' | wc -l | tr -d ' ')" != "0" ]; then
+  echo "  FAIL [IDENTITY-ID-001]: account/asset id literals must live only in internal/mockidentity" >&2
+  grep -rl 'user_mockcreator_\|ma_creator_' apps/api-go --include='*.go' | grep -v 'internal/mockidentity/' >&2
+  exit 1
+fi
+if grep -rq 'randomuser.me' apps/api-go --include='*.go'; then
+  echo "  FAIL [IDENTITY-ID-001]: external avatar URL literal found in server source" >&2
+  exit 1
+fi
+if grep -q 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts; then
+  echo "  FAIL [IDENTITY-ID-001]: home fixtures must not ship their own portraits" >&2
+  exit 1
+fi
+echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
+
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
 # 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
 # follow），发消息仍只能进主页后做。语义变更待 commander 确认。
