@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/mockidentity"
 )
 
 type UserState struct {
@@ -361,7 +362,7 @@ func humansFor(variant string) []Human {
 	if variant == "weekend" {
 		role, availability = "Host / Lifestyle", "周末可约"
 	}
-	return []Human{{ID: "creator_mai", Name: "Mai", Role: role, Availability: availability, FitReason: "同类 Scene 有真实完成记录", SceneFit: 96, IsAI: false, AvatarURL: "https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&fit=crop&w=240&q=84"}, {ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: "近期可约", FitReason: "出片与到访转化稳定", SceneFit: 92, IsAI: false, AvatarURL: "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=240&q=84"}, {ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: "周末可约", FitReason: "相关 SKU 内容经验", SceneFit: 88, IsAI: false, AvatarURL: "https://images.unsplash.com/photo-1511081692775-05d0f180a065?auto=format&fit=crop&w=240&q=84"}}
+	return []Human{{ID: "creator_mai", Name: "Mai", Role: role, Availability: availability, FitReason: "同类 Scene 有真实完成记录", SceneFit: 96, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("mai")}, {ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: "近期可约", FitReason: "出片与到访转化稳定", SceneFit: 92, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("linh")}, {ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: "周末可约", FitReason: "相关 SKU 内容经验", SceneFit: 88, IsAI: false, AvatarURL: ""}}
 }
 func (s *Service) Supports(t string) bool {
 	return t == "ListMyRealitySceneState" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited"

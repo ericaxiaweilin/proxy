@@ -4,6 +4,44 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 164 — 2026-09-12
+
+- 修「个人主页头像保存不上」：`me.tsx` 的 chooseProfileAvatar 最外层 `catch` 此前是
+  静默 `catch { setProfileAvatarUri(selected.uri) }` —— 相册原 URI 只在本进程有效，
+  本地落盘（documentDirectory 副本 + SecureStore 记录）一旦失败，头像看着变了、
+  离开页面或重启即回字母头，且**不报错**，用户和测试都看不见。现在显式报出真实
+  原因（`[proxy.AVATAR-SAVE-001] local avatar persist FAIL` + 错误提示），不再假装
+  保存成功。
+- 门禁补强 AVATAR-SAVE-001：`scripts/check-regression-contracts.sh` 新增守门 ——
+  me.tsx 必须保留该显式报错路径、profile-store 必须有头像往返断言（写入→读回、
+  绝对沙盒 URI 归一成文件名、clear 后不留陈旧头像）。此前只有 AVATAR-001 守
+  profile-store 的文件名规范化（单元级），守不住整条保存链路。
+- 修「换完头像被默认重置」（AVATAR-002）：服务端 hydration 把
+  `remote.avatarPath`（形如 `assets/<mediaAssetId>`，是媒体 id 不是本机文件名）
+  直接 `avatarFileName()` 后写进本地记录，覆盖掉 documentDirectory 里
+  `avatar-<ts>.jpg` 的指针 → 重启/离线回字母头。现改为经
+  `mergeRemoteProfile()` 合并：本地副本文件名优先，仅在本地无头像时才用服务端
+  派生名。AVATAR-001 修的是本地规范化，这条是等价问题从**服务端回灌路径**复发，
+  新增 AVATAR-SAVE-002 守门（profile-store.ts / me.tsx / 测试三处 grep + 实跑）。
+- 发布需求向导（非基线敏感）：城市协助 · Professional 服务卡在选 Moment 那一步
+  默认展开，且支持再点一次取消选择（取消时一并清掉城市协助模板，避免悬空态）。
+- 头像再次「被重置」的真因（AVATAR-DELIVER-001）：服务端对上传媒体一律
+  `OWNER_ONLY`，而 `/v1/media/thumb|play/{id}` 要求 `APPROVED && PUBLIC` 才服务
+  （fail-closed），只有发帖/上架店铺会在事务里提权到 PUBLIC —— 更新个人资料这条
+  链路没做，于是头像 URL 恒 404，界面回字母头。客户端先落兜底：hydration 改为
+  **本地副本优先**（离线可用、不受可见性约束），远端仅作后备；服务端同步补齐：
+  `UpdateProfile` 落库前调 `AuthorizeForPost(ctx,[mediaAssetId],actor,"PUBLIC")`，
+  提权失败即拒绝整条命令（不写「存了但显示不出来」的半成品），`cmd/api/main.go`
+  装配 `SetProfileMediaAuthorizer(mediaService)`。
+- 头像「切页回来先闪旧头再刷成新头」（AVATAR-FLASH-001）：hydration 异步返回前首帧
+  `profileAvatarUri` 为 undefined，于是先渲染字母头/占位再被异步结果覆盖。改为
+  useState 初值直接同步读本机最新副本（expo-file-system list()/File 是同步 API），
+  首帧即为新头像，不再有这一跳。
+- 头像副本只增不删（AVATAR-GC-001）：每次选图新建 `avatar-<ts>.jpg`，真机实测堆到
+  23 份。现在换头像后只保留本次那一份，其余 `avatar-*` 删除；单文件删除失败不影响
+  换头像主链。
+
+
 ## Revision 163 — 2026-09-11
 
 - 商家 Creator 推荐轨的服务端 seed 升级：boot seed 从 3 个 photos='[]' 的 agent 扩到 6 个带真实头像 URL 的 Creator（Linh/Mai/An/Thao/Yen/Minh，覆盖 hn/hcm）+ 档期窗口随 boot 滚动（now+1h..now+72h），使 `MerchantCreatorRecommendations`（supply.querySuppliers({marketId,limit:6})）不再空轨。

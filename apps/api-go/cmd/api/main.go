@@ -38,6 +38,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
+	"github.com/proxy-app/proxy-api/internal/mockidentity"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
@@ -238,6 +239,9 @@ func main() {
 		// media pipeline; attaching them to a store publishes the
 		// assets to PUBLIC so thumb/play URLs resolve.
 		businessService.SetMediaAuthorizer(mediaService)
+		// AVATAR-DELIVER-001: 头像同样要提权——上传默认 OWNER_ONLY，
+		// 公开 thumb/play 路由要求 APPROVED && PUBLIC，不提权头像恒 404。
+		identityService.SetProfileMediaAuthorizer(mediaService)
 		relationshipService = relationship.NewWithRepository(postgres.NewRelationshipRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
 		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())
@@ -852,23 +856,47 @@ func seedPostgresIdentity(pool *pgxpool.Pool) error {
 }
 
 type creatorSeedProfile struct {
-	agentID, name, bio, photo string
-	languages, areas          []string
+	agentID, name, bio string
+	languages, areas   []string
 }
 
 func merchantCreatorSeedProfiles() []creatorSeedProfile {
+	// IDENTITY-ID-001: 头像不再写死外链。候选头像由账号 id 派生（见
+	// creatorAvatarPath），与 identity.profiles.avatar_path 指向同一媒体资产——
+	// 同一个人的头像只有一处事实源，谁也不会「首页一个新、发布订单一个旧」。
 	return []creatorSeedProfile{
-		{"agent_linh", "Linh", "河内本地向导，中文流利，擅长摄影", "https://randomuser.me/api/portraits/women/44.jpg", []string{"ZH", "VI"}, []string{"hn"}},
-		{"agent_mai", "Mai", "河内本地人，越南语向导", "https://randomuser.me/api/portraits/women/32.jpg", []string{"VI"}, []string{"hn"}},
-		{"agent_an", "An", "河内活动接待，熟悉咖啡与餐厅场景", "https://randomuser.me/api/portraits/women/65.jpg", []string{"VI", "ZH"}, []string{"hn"}},
-		{"agent_thao", "Thao", "河内中越口译与活动协作 Creator", "https://randomuser.me/api/portraits/women/68.jpg", []string{"VI", "ZH"}, []string{"hn"}},
-		{"agent_yen", "Yen", "河内生活方式 Creator，擅长到店内容", "https://randomuser.me/api/portraits/women/50.jpg", []string{"VI", "ZH"}, []string{"hn"}},
-		{"agent_minh", "Minh", "胡志明市中文向导", "https://randomuser.me/api/portraits/men/32.jpg", []string{"ZH"}, []string{"hcm"}},
+		{"agent_linh", "Linh", "河内本地向导，中文流利，擅长摄影", []string{"ZH", "VI"}, []string{"hn"}},
+		{"agent_mai", "Mai", "河内本地人，越南语向导", []string{"VI"}, []string{"hn"}},
+		{"agent_an", "An", "河内活动接待，熟悉咖啡与餐厅场景", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_thao", "Thao", "河内中越口译与活动协作 Creator", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_yen", "Yen", "河内生活方式 Creator，擅长到店内容", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_minh", "Minh", "胡志明市中文向导", []string{"ZH"}, []string{"hcm"}},
 	}
+}
+
+// creatorAccountID / creatorAvatarPath 委托给 mockidentity（唯一事实源）：
+// 身份映射只允许有一处实现，避免各 surface 再各自硬编码姓名/头像。
+func creatorAccountID(agentID string) string {
+	return mockidentity.AccountIDForFacetKey(strings.TrimPrefix(agentID, "agent_"))
+}
+
+func creatorAvatarPath(agentID string) string {
+	return mockidentity.AvatarPathForFacetKey(strings.TrimPrefix(agentID, "agent_"))
 }
 
 func merchantCreatorAvailability(now time.Time) (time.Time, time.Time) {
 	return now.Add(time.Hour), now.Add(72 * time.Hour)
+}
+
+// creatorAccountID 由固定 facet 键（agent_id）确定性派生出系统账号 id。
+// 与可编辑的显示名解耦：改名字不动 id，同名不同人也能区分。
+
+// creatorCity 把服务区映射为账号 profile 的城市（profile 要求 1..60 字符）。
+func creatorCity(areas []string) string {
+	if len(areas) > 0 && areas[0] == "hcm" {
+		return "Ho Chi Minh City"
+	}
+	return "Hanoi"
 }
 
 // seedPostgresSupply 写入可用于商家 Creator 推荐的真实测试 Agent。
@@ -882,7 +910,7 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	// Agent Profile
 	profiles := merchantCreatorSeedProfiles()
 	for _, p := range profiles {
-		photos, _ := json.Marshal([]string{p.photo})
+		photos, _ := json.Marshal([]string{creatorAvatarPath(p.agentID)})
 		languages, _ := json.Marshal(p.languages)
 		areas, _ := json.Marshal(p.areas)
 		if _, err := pool.Exec(ctx, `
@@ -891,6 +919,28 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 			ON CONFLICT (agent_id) DO UPDATE SET name=EXCLUDED.name, bio=EXCLUDED.bio,
 				photos=EXCLUDED.photos, languages=EXCLUDED.languages, service_areas=EXCLUDED.service_areas, status='ACTIVE', updated_at=EXCLUDED.updated_at`,
 			p.agentID, p.name, p.bio, photos, languages, areas, now); err != nil {
+			return err
+		}
+		// IDENTITY-ID-001: mock Creator 同样必须是「有系统 id 的账号」，不能只有手写
+		// agent_id + 显示名 —— 否则同一显示名在不同页面各持一份头像，无法判断是否同一个人。
+		// 账号 id 由 agent_id（固定 facet 键）确定性派生，与可编辑的显示名无关，保证幂等；
+		// 名字改了不影响身份，同名也不会互相串头像。
+		accountID := creatorAccountID(p.agentID)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO identity.user_accounts (id, status, created_at, updated_at)
+			VALUES ($1,'REGISTERED',$2,$2)
+			ON CONFLICT (id) DO NOTHING`, accountID, now); err != nil {
+			return err
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO identity.profiles (user_account_id, name, handle, bio, city, avatar_path, version, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'',1,$6)
+			ON CONFLICT (user_account_id) DO UPDATE SET name=EXCLUDED.name, bio=EXCLUDED.bio,
+				city=EXCLUDED.city, updated_at=EXCLUDED.updated_at`,
+			accountID, p.name, "creator_"+strings.TrimPrefix(p.agentID, "agent_"), p.bio, creatorCity(p.areas), now); err != nil {
+			return err
+		}
+		if _, err := pool.Exec(ctx, `UPDATE supply.agent_profiles SET user_account_id=$1 WHERE agent_id=$2`, accountID, p.agentID); err != nil {
 			return err
 		}
 	}

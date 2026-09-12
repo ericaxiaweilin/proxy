@@ -10,6 +10,16 @@ import { color } from "../theme";
 import type { SessionAuthClient } from "../auth-client";
 import type { SecureSessionStore, StoredSession } from "../secure-session";
 import { parseCommandResult } from "../login-client";
+import { localApiBaseUrl } from "../native-clients";
+
+// IDENTITY-ID-001: 真人头像与账号同源。服务端可能返回以 "/" 开头的媒体路径（账号头像
+// 资产，见 internal/mockidentity），这里统一拼 API base；空串表示该人暂无头像，卡片
+// 回落首字母（不再对外链/空串渲染破图）。
+function humanAvatarUri(url: string): string | undefined {
+  const trimmed = url.trim();
+  if (trimmed === "") return undefined;
+  return trimmed.startsWith("/") ? `${localApiBaseUrl}${trimmed}` : trimmed;
+}
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 
@@ -312,7 +322,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             {whyOpen ? <View style={styles.whyCard}><Text style={styles.whyTitle}>推荐依据</Text><Text style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text><Text style={styles.whyText}>现场状态：{detail.liveState.label}，数据有效至 {new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text><Text style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
             <Text style={styles.sectionTitle}>适合一起的人</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
-              {detail.humans.map((human) => <Pressable key={human.id} onPress={() => setSelectedHumanId(human.id)} style={[styles.humanCard, selectedHumanId === human.id && styles.humanCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-human:${human.id}`} source={{ uri: human.avatarUrl }} style={styles.humanAvatar} transition={0} /><Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
+              {detail.humans.map((human) => <Pressable key={human.id} onPress={() => setSelectedHumanId(human.id)} style={[styles.humanCard, selectedHumanId === human.id && styles.humanCardSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-human:${human.id}`} source={{ uri: humanAvatarUri(human.avatarUrl)! }} style={styles.humanAvatar} transition={0} /> : <Text style={[styles.humanAvatar, styles.humanName]}>{human.name.slice(0, 1).toUpperCase()}</Text>}<Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
             </ScrollView>
             <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>

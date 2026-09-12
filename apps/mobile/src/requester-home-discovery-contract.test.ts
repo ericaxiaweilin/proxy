@@ -75,7 +75,12 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 真人头像右下 + 徽标走真实好友申请，点头像本身仍走 Scene。
     expect(source).toContain("handleHomeFriend(p.id, p.name)");
     expect(source).toContain("styles.addBadge");
-    expect(fixtures).toContain("R34_HUMAN_PORTRAITS");
+    // IDENTITY-ID-001: 头像不再是客户端自带的原型肖像（按下标轮转，与身份无关），
+    // 而是按 id 取账号的媒体资产 —— 同一个人在任何页面都是同一张图。
+    expect(fixtures).not.toContain("R34_HUMAN_PORTRAITS");
+    expect(fixtures).not.toContain("images.unsplash.com");
+    expect(fixtures).toContain("ACCOUNT_AVATAR_ASSET");
+    expect(fixtures).toContain("/v1/media/thumb/");
     expect(fixtures).toContain("withR34Portraits");
   });
 

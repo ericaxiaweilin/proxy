@@ -46,18 +46,24 @@ export interface RecommendPerson {
   publicActivityHistory?: Array<{ id: string; title: string; scene: string; dateLabel: string; rating: number }>;
 }
 
-const R34_HUMAN_PORTRAITS = [
-  "https://images.unsplash.com/photo-1616325629936-99a9013c29c6?auto=format&fit=crop&w=320&q=82",
-  "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=320&q=82",
-  "https://images.unsplash.com/photo-1511081692775-05d0f180a065?auto=format&fit=crop&w=320&q=82",
-  "https://images.unsplash.com/photo-1509030450996-dd1a26dda07a?auto=format&fit=crop&w=320&q=82",
-  "https://images.unsplash.com/photo-1559314809-0d155014e29e?auto=format&fit=crop&w=320&q=82",
-] as const;
+import { localApiBaseUrl } from "./native-clients";
+
+// IDENTITY-ID-001: 头像必须来自「该人的账号资产」，不能再按列表下标轮转原型图。
+// 此前 5 张 unsplash 原型肖像按 index+offset 分配，与身份无关，于是同一个人
+// （如 Linh）在首页与发布订单会显示成两张不同的图。现在只有真实存在账号的人才有
+// 头像，且指向账号的媒体资产（与 identity.profiles.avatar_path 同一张）；其余人
+// 回落首字母（卡片本就支持），不再伪造照片。
+const ACCOUNT_AVATAR_ASSET: Record<string, string> = {
+  u_linh: "ma_creator_linh_portrait_v1",
+};
 
 function withR34Portraits(people: RecommendPerson[], offset: number): RecommendPerson[] {
   return people.map((person, index) => ({
     ...person,
-    photoUri: R34_HUMAN_PORTRAITS[(index + offset) % R34_HUMAN_PORTRAITS.length]!,
+    // 有账号才有头像（见 ACCOUNT_AVATAR_ASSET）；没有就不设该字段，卡片回落首字母。
+    ...(ACCOUNT_AVATAR_ASSET[person.id] !== undefined
+      ? { photoUri: `${localApiBaseUrl}/v1/media/thumb/${ACCOUNT_AVATAR_ASSET[person.id]}` }
+      : {}),
     rating: Number((4.9 - ((index + offset) % 3) * 0.1).toFixed(1)),
     completedActivities: 12 + ((index + offset) % 5) * 5,
     availabilityText: person.online ? (index % 2 === 0 ? "今天 18:00 后可用" : "今天可约") : "查看近期可用时间",

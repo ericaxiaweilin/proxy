@@ -560,7 +560,11 @@ export function MarketSurface({
     />
     <Modal animationType="fade" onRequestClose={() => setPublishMenuOpen(false)} transparent visible={publishMenuOpen}>
       <Pressable accessibilityLabel="关闭发布选择" onPress={() => setPublishMenuOpen(false)} style={styles.publishMenuBackdrop}>
-        <View onStartShouldSetResponder={() => true} style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
+        {/* UI-PUBLISH-ENTRY-001: 面板必须用 Pressable 吞点击，不能再用
+            <View onStartShouldSetResponder>。后者在触摸开始时抢走 responder，
+            使面板内的「创建订单 / 创建活动」永远收不到点击，反而被外层 backdrop
+            当成点击关闭——表现为「+ → 创建订单」点了只关弹层、进不去向导。 */}
+        <Pressable accessibilityLabel="发布选择面板" onPress={() => undefined} testID="publish-menu-sheet-v1" style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
           <View style={styles.publishMenuGrab} />
           <Text style={styles.publishMenuTitle}>创建</Text>
           <Text style={styles.publishMenuHint}>订单按 Moment 向导发布；活动用于多人共同参与。</Text>
@@ -572,7 +576,7 @@ export function MarketSurface({
               <ProxyIcon color={color.ink} name="star" size={20} /><Text style={styles.publishMenuSecondaryText}>创建活动</Text>
             </Pressable>
           </View>
-        </View>
+        </Pressable>
       </Pressable>
     </Modal>
   </>);

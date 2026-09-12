@@ -188,6 +188,94 @@ fi
 pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-001: PASS"
 
+# AVATAR-SAVE-001: 「个人主页头像保存不上」的守门。此前 AVATAR-001 只守
+# profile-store 的文件名规范化（单元级），守不住 me.tsx 的整条保存链路——
+# 而且最外层 catch 是静默 `catch { setProfileAvatarUri(selected.uri) }`：
+# 相册原 URI 只在本进程有效，落盘失败时头像看着变了、离开页面即回字母头，
+# 且没有任何报错，用户和测试都看不见。现在要求：
+#   1) 落盘失败必须显式报出（不许静默吞错）；
+#   2) 本地落盘仍是先于网络同步的一等公民（网络失败只提示同步失败，不回滚本地）。
+if ! grep -q 'AVATAR-SAVE-001' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar local-persist failure is not surfaced in me.tsx" >&2
+  exit 1
+fi
+if ! grep -q 'AVATAR-SAVE-001' apps/mobile/src/profile-store.test.ts; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar persist round-trip test missing" >&2
+  exit 1
+fi
+if ! grep -q 'setProfileSaveError' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar save error must reach the user" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
+echo "    AVATAR-SAVE-001: PASS"
+
+# AVATAR-SAVE-002: 「换完头像被默认重置」——AVATAR-001 修的是本地文件名规范化
+# （绝对沙盒 URI→文件名），但后来新增的服务端 hydration 路径又用等价方式把它抹了：
+# remote.avatarPath 形如 assets/<mediaAssetId>，被直接 avatarFileName() 后写进本地
+# 记录，覆盖掉 documentDirectory 里那份 avatar-<ts>.jpg 的指针 → 重启/离线回字母头。
+# 守门：服务端合并必须走 mergeRemoteProfile（本地副本文件名优先），且必须有断言。
+if ! grep -q 'AVATAR-SAVE-002' apps/mobile/src/profile-store.ts; then
+  echo "  FAIL [AVATAR-SAVE-002]: remote profile merge must preserve the local avatar" >&2
+  exit 1
+fi
+if ! grep -q 'mergeRemoteProfile' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-002]: me.tsx must hydrate through mergeRemoteProfile" >&2
+  exit 1
+fi
+if ! grep -q 'AVATAR-SAVE-002' apps/mobile/src/profile-store.test.ts; then
+  echo "  FAIL [AVATAR-SAVE-002]: server round-trip avatar tests missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
+echo "    AVATAR-SAVE-002: PASS"
+
+# AVATAR-DELIVER-001: 头像「存了但显示不出来/被重置」的服务端半边。
+# 上传媒体默认 OWNER_ONLY，公开路由 /v1/media/thumb|play/{id} 要求
+# APPROVED && PUBLIC（fail-closed），发帖/上架店铺会在命令事务内提权到 PUBLIC，
+# 而 UpdateProfile 这条链路此前没做 → 头像 URL 恒 404，跨设备/新装直接丢头像。
+# 守门：UpdateProfile 必须在落库前提权（owner=actor, PUBLIC），失败即拒绝命令；
+# 且装配（SetProfileMediaAuthorizer）必须存在，否则能力被静默摘掉。
+require_test "AVATAR-DELIVER-001" "./internal/identity" \
+  "TestUpdateProfileAuthorizesAvatarForPublicDelivery" \
+  "apps/api-go/internal/identity/profile_avatar_delivery_test.go" || exit $?
+if ! grep -q 'AuthorizeForPost(ctx, \[\]string{mediaAssetID}' apps/api-go/internal/identity/service.go || \
+   ! grep -q 'SetProfileMediaAuthorizer' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [AVATAR-DELIVER-001]: avatar media authorization is not wired" >&2
+  exit 1
+fi
+echo "    AVATAR-DELIVER-001: PASS"
+
+# IDENTITY-ID-001: mock 人物身份只允许有一处事实源（internal/mockidentity）。
+# 症状回归：同一个显示名在首页/发布订单各显示一张头像、且无从判断是否同一个人 ——
+# 根因就是姓名+头像被各 surface 反复硬编码（含 randomuser/unsplash 外链）。
+# 守门三条：
+#   1) Go 源码里除 mockidentity 外不得再出现账号/资产 id 前缀（防止再造一份映射）；
+#   2) 服务端不得再出现 randomuser 外链头像；
+#   3) 客户端首页 fixtures 不得再自带 unsplash 原型肖像。
+if [ "$(grep -rl 'user_mockcreator_\|ma_creator_' apps/api-go --include='*.go' | grep -v 'internal/mockidentity/' | wc -l | tr -d ' ')" != "0" ]; then
+  echo "  FAIL [IDENTITY-ID-001]: account/asset id literals must live only in internal/mockidentity" >&2
+  grep -rl 'user_mockcreator_\|ma_creator_' apps/api-go --include='*.go' | grep -v 'internal/mockidentity/' >&2
+  exit 1
+fi
+if grep -rq 'randomuser.me' apps/api-go --include='*.go'; then
+  echo "  FAIL [IDENTITY-ID-001]: external avatar URL literal found in server source" >&2
+  exit 1
+fi
+if grep -q 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts; then
+  echo "  FAIL [IDENTITY-ID-001]: home fixtures must not ship their own portraits" >&2
+  exit 1
+fi
+echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
+
+# IDENTITY-ID-001 附加：不得再按「显示名」匹配人。用户名可编辑、可重复，按名字找人在
+# 改名或同名用户存在时会串人（requester-home 曾用 p.name.includes("linh") 选人）。
+if grep -n 'name.toLowerCase().includes(' apps/mobile/src/surfaces/requester-home.tsx >/dev/null 2>&1; then
+  echo "  FAIL [IDENTITY-ID-001]: match people by identity id, never by display name" >&2
+  grep -n 'name.toLowerCase().includes(' apps/mobile/src/surfaces/requester-home.tsx >&2
+  exit 1
+fi
+
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
 # 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
 # follow），发消息仍只能进主页后做。语义变更待 commander 确认。

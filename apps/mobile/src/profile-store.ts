@@ -64,6 +64,32 @@ export function isProfileRecord(value: unknown): value is ProfileRecord {
   );
 }
 
+/**
+ * AVATAR-SAVE-002: 服务端 profile 合并回本地记录时的规则。
+ *
+ * remote.avatarPath 形如 `assets/<mediaAssetId>` —— 那是服务端媒体 id，不是本机
+ * 文件名。旧实现直接 `avatarFileName(remote.avatarPath)` 覆盖本地记录，把
+ * documentDirectory 里那份 `avatar-<ts>.jpg` 的指针抹掉：重启/离线时本地头像再也
+ * 指不回去，表现为「换完头像被默认重置成字母头」。
+ *
+ * 规则：本地已有副本文件名时永远保留（它是唯一的离线可读来源）；只有本地没有头像
+ * 时才退回服务端派生的名字。
+ */
+export function mergeRemoteProfile(
+  remote: { name: string; handle: string; bio: string; city: string; avatarPath?: string | undefined; updatedAt: string },
+  existing?: ProfileRecord | undefined
+): ProfileRecord {
+  const remoteDerived = remote.avatarPath ? avatarFileName(remote.avatarPath) : undefined;
+  return {
+    name: remote.name,
+    handle: remote.handle,
+    bio: remote.bio,
+    city: remote.city,
+    avatarPath: existing?.avatarPath ?? remoteDerived,
+    updatedAt: remote.updatedAt
+  };
+}
+
 export function createProfileStore(driver: SecureStorageDriver, accountId?: string | undefined): ProfileStore {
   const key = profileKeyFor(accountId);
   return {

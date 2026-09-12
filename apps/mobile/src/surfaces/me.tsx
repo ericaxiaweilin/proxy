@@ -14,7 +14,7 @@ import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import { Directory, File, Paths } from "expo-file-system";
-import { createProfileStore, avatarFileName, type ProfileRecord } from "../profile-store";
+import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
 import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
 import { createLastSignInStore } from "../last-signin-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
@@ -68,6 +68,44 @@ const socialSettingsStore = createSocialSettingsStore(nativeSecureStorageDriver)
 const PROFILE_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
 function nextProfileAvatarFile(): File {
   return new File(PROFILE_AVATAR_DIR, `avatar-${Date.now()}.jpg`);
+}
+
+// AVATAR-FLASH-001: 首帧就给出本机最新头像。hydration 是异步的，若首帧
+// profileAvatarUri 为 undefined，会先渲染字母头/占位再被异步结果刷掉——用户看到的
+// 就是「切页回来先闪旧头再变新头」。expo-file-system 的 list()/File 是同步 API，
+// 因此可以在 useState 初值里直接取到最新副本，消除这一跳。
+function initialProfileAvatarUri(): string | undefined {
+  try {
+    // 注意：不要用 `instanceof File` 过滤 list() 元素（真机上类身份可能对不上，
+    // 一旦滤空就回落字母头，等于没修）。与 hydration 同款：只信 name。
+    const names = PROFILE_AVATAR_DIR.list()
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith("avatar-"))
+      .sort();
+    const newest = names.at(-1);
+    return newest ? new File(PROFILE_AVATAR_DIR, newest).uri : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// AVATAR-GC-001: 换头像只留最新一份副本。此前每次选图都新建 avatar-<ts>.jpg，
+// 只增不删（真机实测堆到 23 份）。prune 只删 avatar-* 且不是本次保留的那份，
+// 单个删除失败不影响主链。
+function pruneProfileAvatars(keepName: string): void {
+  try {
+    for (const name of PROFILE_AVATAR_DIR.list().map((entry) => entry.name)) {
+      if (name.startsWith("avatar-") && name !== keepName) {
+        try {
+          new File(PROFILE_AVATAR_DIR, name).delete();
+        } catch {
+          // 单个文件删除失败（被占用等）不阻塞换头像。
+        }
+      }
+    }
+  } catch {
+    // 目录不可读：跳过清理，不影响本次换头像。
+  }
 }
 
 interface PersonaConfig {
@@ -395,7 +433,8 @@ export function MeSurface({
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   // 资料保存失败必须留编辑器内提示，不静默吞掉（本地写失败/服务端同步失败都一样）。
   const [profileSaveError, setProfileSaveError] = useState<string | undefined>(undefined);
-  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
+  // AVATAR-FLASH-001: 初值直接取本机最新头像（同步），避免首帧闪旧头再刷成新头。
+  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(() => initialProfileAvatarUri());
   const [profileRemoteAvatarPath, setProfileRemoteAvatarPath] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
   const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
@@ -451,8 +490,11 @@ export function MeSurface({
         setProfileAvatarUri(`${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(mediaAssetId)}`);
         return true;
       };
-      const hydrateAvatar = (avatarPath?: string | undefined, record?: ProfileRecord): void => {
-        if (cancelled || !avatarPath) return;
+      // AVATAR-DELIVER-001: 返回是否命中本地副本。本机有副本时**优先**用它——
+      // 服务端副本受可见性约束（上传默认 OWNER_ONLY，公开 thumb 路由要求 PUBLIC，
+      // 命中不了就 404），远端取不到时头像绝不能被表现成「被重置」。
+      const hydrateAvatar = (avatarPath?: string | undefined, record?: ProfileRecord): boolean => {
+        if (cancelled || !avatarPath) return false;
         try {
           const name = avatarFileName(avatarPath);
           const names = new Set(PROFILE_AVATAR_DIR.list().map((entry) => entry.name));
@@ -461,27 +503,26 @@ export function MeSurface({
             if (record && record.avatarPath !== name) {
               void profileStore.write({ ...record, avatarPath: name }).catch(() => undefined);
             }
+            return true;
           }
         } catch {
           // 目录不可读：保持字母头，不崩。
         }
+        return false;
       };
       // 1. server (PROFILE-001 source of truth).
       if (profileClient && viewerAccountId) {
         try {
           const remote = await profileClient.getProfile(viewerAccountId);
           if (cancelled || profileTouchedRef.current) return;
-          const record: ProfileRecord = {
-            name: remote.name,
-            handle: remote.handle,
-            bio: remote.bio,
-            city: remote.city,
-            avatarPath: remote.avatarPath ? avatarFileName(remote.avatarPath) : undefined,
-            updatedAt: remote.updatedAt
-          };
+          // AVATAR-SAVE-002: 本地副本文件名优先保留（见 mergeRemoteProfile）——
+          // 服务端 avatarPath 是 assets/<mediaAssetId>，直接当本机文件名写会把
+          // documentDirectory 里的头像指针抹掉，表现为「换完头像被默认重置」。
+          const existingRecord = await profileStore.read().catch(() => undefined);
+          const record: ProfileRecord = mergeRemoteProfile(remote, existingRecord);
           await profileStore.write(record).catch(() => undefined);
           applyRecord(record);
-          if (!hydrateRemoteAvatar(remote.avatarPath)) hydrateAvatar(record.avatarPath);
+          if (!hydrateAvatar(record.avatarPath)) hydrateRemoteAvatar(remote.avatarPath);
           return;
         } catch {
           // No server profile yet (fresh account) or offline: fall through
@@ -791,6 +832,8 @@ export function MeSurface({
         updatedAt: new Date().toISOString()
       };
       await profileStore.write(localRecord);
+      // AVATAR-GC-001: 只保留本次这份副本，避免旧头像文件无限堆积。
+      pruneProfileAvatars(avatarFileName(avatarFile.uri));
       // Avatar controls also exist outside the profile editor. Selecting a
       // photo is therefore a complete action: upload and sync immediately,
       // rather than requiring a hidden second "完成" step.
@@ -810,8 +853,16 @@ export function MeSurface({
           setProfileSaveError("头像已保存在本机，但同步失败，请检查网络后重试。");
         }
       }
-    } catch {
+    } catch (err) {
+      // AVATAR-SAVE-001: 这里以前是静默 `catch { setProfileAvatarUri(selected.uri) }`
+      // —— 相册原 URI 只在本进程有效（且 iOS 会清 tmp），一旦落盘失败：头像看着
+      // 变了、其实没写进 documentDirectory / SecureStore，离开页面或重启就回到
+      // 字母头，而且**没有任何报错**，用户和测试都看不见。现在：保留预览，同时
+      // 把真实原因报出来，并且不再假装保存成功。
+      const detail = err instanceof Error ? err.message : String(err);
+      console.log(`[proxy.AVATAR-SAVE-001] local avatar persist FAIL: ${detail}`);
       setProfileAvatarUri(selected.uri);
+      setProfileSaveError(`头像没能保存到本机（${detail}）。请重试，或检查存储权限。`);
     }
   }
 

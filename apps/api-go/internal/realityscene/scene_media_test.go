@@ -1,6 +1,7 @@
 package realityscene
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,8 +36,16 @@ func TestSceneDetailAlwaysCarriesImagery(t *testing.T) {
 			t.Fatalf("%s: humans empty", variant)
 		}
 		for _, human := range detail.Humans {
-			if human.AvatarURL == "" {
-				t.Fatalf("%s: human %s missing avatarUrl", variant, human.ID)
+			// IDENTITY-ID-001: 头像必须来自账号（"/" 开头的媒体路径），或为空表示该人
+			// 暂无账号头像——客户端用首字母回落渲染。禁止外部 URL 字面量。
+			if strings.HasPrefix(human.AvatarURL, "http") {
+				t.Fatalf("%s: human %s must not carry an external avatar URL: %q", variant, human.ID, human.AvatarURL)
+			}
+			if human.AvatarURL != "" && !strings.HasPrefix(human.AvatarURL, "/") {
+				t.Fatalf("%s: human %s avatar must be a server media path, got %q", variant, human.ID, human.AvatarURL)
+			}
+			if human.Name == "" {
+				t.Fatalf("%s: human %s needs a name for the initial fallback", variant, human.ID)
 			}
 			if human.IsAI {
 				t.Fatalf("%s: AI account leaked into humans: %s", variant, human.ID)

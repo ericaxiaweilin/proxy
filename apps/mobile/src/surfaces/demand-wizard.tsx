@@ -16,12 +16,17 @@ import {
   DEFAULT_PEOPLE_FILTERS,
   defaultSpecsFor,
   filterSuppliers,
+  MOMENT_ACTION_ID,
   MOMENT_TEMPLATES,
+  PRO_SERVICES,
   type DemandSpecs,
   type MomentTemplate,
-  type PeopleSheetFilters
+  type PeopleSheetFilters,
+  type ProService
 } from "../demand-moments";
 import { resolveAssetSource } from "../media/asset-sources";
+import { SCENE_ACTIONS } from "../components/scene-activity-discovery";
+import { Image } from "expo-image";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { localApiBaseUrl } from "../native-clients";
 
@@ -66,6 +71,26 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   onCreateActivity: () => void;
 }): React.JSX.Element {
   const [step, setStep] = useState<Step>("moment");
+  // UI-ORDER-LOGO-001: Moment 图标复用场景动作既有 logo（不是另做一套）
+  const actionIconFor = (momentId: string): number | undefined => SCENE_ACTIONS.find((item) => item.id === MOMENT_ACTION_ID[momentId])?.icon as number | undefined;
+  const proIcon = actionIconFor("pro");
+  // R58 城市协助 · Professional：当前选中的服务（现场翻译 / 签证协助 / 法律咨询 / 商务协助）
+  const [proService, setProService] = useState<string | undefined>(undefined);
+  // 服务卡默认折叠：不占用 Moment 列表与「下一步」之间的空间，避免误触/遮挡
+  // 只记录选择：再点同一张卡＝取消选择（并把模板一并清掉，避免留下「城市协助但没选服务」的悬空态）
+  const selectProService = (service: ProService): void => {
+    const pro = MOMENT_TEMPLATES.find((item) => item.id === "pro");
+    if (!pro) return;
+    if (proService === service.id) {
+      setProService(undefined);
+      setTemplate((current) => (current?.id === "pro" ? undefined : current));
+      setError(undefined);
+      return;
+    }
+    setProService(service.id);
+    setSpecs({ ...defaultSpecsFor(pro), price: service.price === "面议" ? "" : service.price });
+    setTemplate(pro);
+  };
   const [template, setTemplate] = useState<MomentTemplate | undefined>(undefined);
   const [specs, setSpecs] = useState<DemandSpecs>(() => defaultSpecsFor(MOMENT_TEMPLATES[0]!));
   const [query, setQuery] = useState("");
@@ -297,9 +322,14 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               </View>
               {moments.map((item) => {
                 const active = template?.id === item.id;
+                const icon = actionIconFor(item.id);
                 return (
                   <Pressable key={item.id} accessibilityLabel={`选择${item.title}`} onPress={() => pickTemplate(item)} style={[styles.catalogItem, active && styles.momentCardOn]}>
-                    <View style={styles.momentEmoji}><Text style={styles.momentEmojiText}>{item.emoji}</Text></View>
+                    <View style={styles.momentEmoji}>
+                      {icon !== undefined
+                        ? <Image contentFit="contain" source={icon} style={styles.momentIcon} />
+                        : <Text style={styles.momentEmojiText}>{item.emoji}</Text>}
+                    </View>
                     <View style={styles.momentCopy}>
                       <Text style={styles.momentTitle}>{item.title}</Text>
                       <Text style={styles.momentDesc}>{item.venueLabel}</Text>
@@ -319,20 +349,52 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
           </View>
           <View style={styles.currentCard}>
             <Text style={styles.currentLabel}>当前需求</Text>
-            <Text style={styles.currentValue}>{template ? `${template.title} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
+            <Text style={styles.currentValue}>{template ? `${template.title}${proService ? ` · ${PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}` : ""} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
           </View>
-          {/* R58 城市协助 · Professional 次入口 */}
-          <Pressable accessibilityLabel="选择城市协助专业服务" onPress={() => { const pro = MOMENT_TEMPLATES.find((item) => item.id === "pro"); if (pro) { pickTemplate(pro); setStep("people"); } }} style={styles.professionalEntry}>
-            <View style={styles.proIcon}><Text style={styles.proIconText}>证</Text></View>
+          <Pressable disabled={!template} onPress={() => setStep("people")} style={[styles.primaryBtn, !template && styles.disabled]}>
+            <Text style={styles.primaryBtnText}>下一步 · 选人 / 服务 / 价格</Text>
+          </Pressable>
+          {/* R58 城市协助 · Professional：服务目录默认展开（原型 pro-card 四类：
+              现场翻译 / 签证协助 / 法律咨询 / 商务协助）。放在主 CTA 之下——
+              既不遮「下一步」，也不用再点一次才看到 item（此前只在「规格」步
+              按模板才出现，导致点了「城市协助」看不到任何条目）。 */}
+          <View style={styles.professionalEntry}>
+            <View style={styles.proIcon}>
+              {proIcon !== undefined
+                ? <Image contentFit="contain" source={proIcon} style={styles.proIconArt} />
+                : <Text style={styles.proIconText}>证</Text>}
+            </View>
             <View style={styles.proCopy}>
               <Text style={styles.proTitle}>城市协助 · Professional</Text>
               <Text style={styles.proDesc}>翻译 / 签证 / 法律 / 商务 · 专业认证优先</Text>
             </View>
-            <Text style={styles.proLink}>次入口 ›</Text>
-          </Pressable>
-          <Pressable disabled={!template} onPress={() => setStep("people")} style={[styles.primaryBtn, !template && styles.disabled]}>
-            <Text style={styles.primaryBtnText}>下一步 · 选人 / 服务 / 价格</Text>
-          </Pressable>
+            <Text style={styles.proLink}>专业认证 ›</Text>
+          </View>
+          <View style={styles.proGrid}>
+            {PRO_SERVICES.map((service) => {
+              const active = proService === service.id;
+              return (
+                <Pressable
+                  accessibilityLabel={`选择${service.title}`}
+                  key={service.id}
+                  onPress={() => selectProService(service)}
+                  style={[styles.proCard, active && styles.proCardOn]}
+                >
+                  <View style={styles.proCardHead}>
+                    <Text style={styles.proCardTitle}>{service.title}</Text>
+                    <View style={[styles.proCardCert, active && styles.proCardCertOn]}>
+                      <Text style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.proCardSub}>{service.sub}</Text>
+                  <View style={styles.proCardFoot}>
+                    <Text style={styles.proCardPrice}>{service.price}</Text>
+                    <Text style={styles.proCardRange}>{service.range}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
         </>
       ) : step === "people" ? (
         <>
@@ -491,6 +553,41 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             ))}
           </View>
 
+          {template?.id === "pro" ? (
+            <>
+              {/* R58 城市协助服务目录（原型 pro-card 四类：现场翻译 / 签证协助 /
+                  法律咨询 / 商务协助）。放在「规格」步按模板展开，不再挤在
+                  选 Moment 那一步挡「下一步」。 */}
+              <Text style={styles.fieldLabel}>专业服务 · 城市协助</Text>
+              <View style={styles.proGrid}>
+                {PRO_SERVICES.map((service) => {
+                  const active = proService === service.id;
+                  return (
+                    <Pressable
+                      accessibilityLabel={`选择${service.title}`}
+                      key={service.id}
+                      onPress={() => selectProService(service)}
+                      style={[styles.proCard, active && styles.proCardOn]}
+                    >
+                      <View style={styles.proCardHead}>
+                        <Text style={styles.proCardTitle}>{service.title}</Text>
+                        <View style={[styles.proCardCert, active && styles.proCardCertOn]}>
+                          <Text style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.proCardSub}>{service.sub}</Text>
+                      <View style={styles.proCardFoot}>
+                        <Text style={styles.proCardPrice}>{service.price}</Text>
+                        <Text style={styles.proCardRange}>{service.range}</Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {proService ? <Text style={styles.hint}>{PRO_SERVICES.find((item) => item.id === proService)?.note ?? ""}</Text> : null}
+            </>
+          ) : null}
+
           <View style={styles.fieldLabelRow}>
             <Text style={styles.fieldLabelNoGap}>预计服务价</Text>
             <Text style={styles.dynamicBadge}>动态</Text>
@@ -598,6 +695,22 @@ const styles = StyleSheet.create({
   catalogSideRatio: { color: color.ink, fontSize: 13, fontWeight: "900" },
   catalogSideTime: { color: color.muted, fontSize: 11 },
   momentEmoji: { alignItems: "center", backgroundColor: color.surface, borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  momentIcon: { height: 26, tintColor: color.ink, width: 26 },
+  // R58 城市协助 · Professional 服务卡（对齐原型 pro-card）
+  proIconArt: { height: 22, tintColor: color.ink, width: 22 },
+  proGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
+  proCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexBasis: "47%", flexGrow: 1, gap: 5, padding: 12 },
+  proCardOn: { borderColor: color.ink, borderWidth: 2 },
+  proCardHead: { alignItems: "center", flexDirection: "row", gap: 6, justifyContent: "space-between" },
+  proCardTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  proCardCert: { backgroundColor: color.surface, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3 },
+  proCardCertOn: { backgroundColor: color.ink },
+  proCardCertText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  proCardCertTextOn: { color: color.white },
+  proCardSub: { color: color.muted, fontSize: 11 },
+  proCardFoot: { alignItems: "baseline", flexDirection: "row", gap: 6 },
+  proCardPrice: { color: color.ink, fontSize: 15, fontWeight: "900" },
+  proCardRange: { color: color.muted, fontSize: 11 },
   momentEmojiText: { color: color.ink, fontSize: 20, fontWeight: "800" },
   momentCopy: { flex: 1 },
   momentTitle: { color: color.ink, fontSize: 16, fontWeight: "800" },
