@@ -1574,6 +1574,13 @@ require_test "MEDIA-FILE-001" "./internal/media" \
 require_test "MEDIA-FILE-001" "./internal/media" \
   "TestMediaFilePresenceRejectsMissingAndTraversalKeys" \
   "apps/api-go/internal/media/media_file_gating_test.go" || exit $?
+# MEDIA-FILE-001 (second instance): static repo assets resolved from a bare
+# relative path. The AI persona photos are not media_variants rows, so the DB
+# sweep cannot see them — they 404'd from the API's real working directory
+# (apps/api-go) and the home screen rendered five empty frames.
+require_test "MEDIA-FILE-001" "./internal/api" \
+  "TestResolveRepoDirFindsAssetsFromNestedWorkingDir" \
+  "apps/api-go/internal/api/aipersona_assets_test.go" || exit $?
 for client_file in media-fallback.tsx AdaptiveMediaCollection.tsx SocialMediaFrame.tsx; do
   if ! grep -q 'media-unavailable-v1\|isMediaUnavailable\|UnavailableMedia' "apps/mobile/src/media/${client_file}"; then
     echo "  FAIL [MEDIA-FILE-001]: apps/mobile/src/media/${client_file} lost the labelled media placeholder." >&2

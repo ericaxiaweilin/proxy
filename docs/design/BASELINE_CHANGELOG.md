@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 168 — 2026-09-12
+
+- AI-ASSIST-001 相关：**5 张 AI 小美写真此前在常规开发启动方式下全部 404**
+  （`personaPhoto` 用仓库根相对路径，而 `scripts/dev-api.sh` 从 `apps/api-go`
+  启动）。首页 AI 助手行因此渲染 5 个空框。改为从工作目录向上定位仓库资源目录，
+  环境变量 `PROXY_AI_PERSONA_ASSETS_DIR` 仍优先。**这是把本该显示的图片显示出来，
+  不是视觉改动。**
+- 启动种子 `seedPostgresMedia()` 不再无条件把资产写成 `READY`：文件不在
+  media_store 里就写 `FAILED` 并打日志。此前手工修好的状态会在下次 API 启动时
+  被重新覆盖成「有字节」的谎言，导致图片重新变成黑块。**无视觉改动。**
+
 ## Revision 167 — 2026-09-12
 
 - SCROLL-CHROME-001：六个信息流页面（messages / feed / market / me /

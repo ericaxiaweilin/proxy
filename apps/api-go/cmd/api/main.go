@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -795,7 +796,21 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 			durationMs                                                     int64
 		}{medical.id, "IMAGE", medical.key, medical.key, medical.key, "image/jpeg", "", medical.width, medical.height, 0})
 	}
+	// MEDIA-FILE-001: a seed row claiming READY for bytes that are not on disk
+	// is the same lie the read model used to tell — a URL that 404s, which the
+	// client renders as a black frame. It also re-asserts itself on every boot,
+	// so quarantining the row by hand never sticks. Derive the status from the
+	// filesystem instead.
+	storeDir, err := media.ResolveLocalStoreDir(os.Getenv("PROXY_MEDIA_STORE_DIR"))
+	if err != nil {
+		return err
+	}
 	for _, a := range assets {
+		status := "READY"
+		if _, statErr := os.Stat(filepath.Join(storeDir, a.playbackKey)); statErr != nil {
+			status = "FAILED"
+			log.Printf("seed media %s has no bytes at %s; marking FAILED instead of READY", a.id, a.playbackKey)
+		}
 		// First-party editorial assets are owned by the PLATFORM principal.
 		// Never attribute system content to a synthetic individual account.
 		if _, err := pool.Exec(ctx, `
@@ -804,15 +819,15 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 				original_storage_key, playback_storage_key, thumbnail_storage_key,
 				mime_type, width, height, duration_ms, codec,
 				processing_status, playback_url, thumbnail_url, moderation_status, visibility_class, created_at, updated_at
-			) VALUES ($1,'PLATFORM','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY',$11,$12,'APPROVED','PUBLIC',$13,$13)
+			) VALUES ($1,'PLATFORM','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'APPROVED','PUBLIC',$14,$14)
 			ON CONFLICT (media_asset_id) DO UPDATE SET
 				owner_principal_type=EXCLUDED.owner_principal_type,
 				owner_principal_id=EXCLUDED.owner_principal_id,
 				playback_storage_key=EXCLUDED.playback_storage_key,
 				thumbnail_storage_key=EXCLUDED.thumbnail_storage_key,
-				processing_status='READY', moderation_status='APPROVED', visibility_class='PUBLIC', updated_at=EXCLUDED.updated_at`,
+				processing_status=EXCLUDED.processing_status, moderation_status='APPROVED', visibility_class='PUBLIC', updated_at=EXCLUDED.updated_at`,
 			a.id, a.mediaType, a.originalKey, a.playbackKey, a.thumbKey, a.mime,
-			a.width, a.height, a.durationMs, a.codec,
+			a.width, a.height, a.durationMs, a.codec, status,
 			"/v1/media/play/"+a.id, "/v1/media/thumb/"+a.id, now); err != nil {
 			return err
 		}

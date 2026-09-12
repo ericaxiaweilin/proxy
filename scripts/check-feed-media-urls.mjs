@@ -37,12 +37,27 @@ async function main() {
     return 0;
   }
 
+  // The AI persona photos are NOT in media.media_variants — they are static
+  // files served from a repo path — so the DB sweep cannot see them. They were
+  // 404ing in the normal dev loop because the API resolves them relative to
+  // the repo root while it is launched from apps/api-go. Probe them too.
+  let assistants = [];
+  try {
+    const response = await fetch(`${base}/v1/ai/assistants`);
+    if (response.ok) assistants = (await response.json()).assistants ?? [];
+  } catch {
+    assistants = [];
+  }
+  for (const assistant of assistants) {
+    if (typeof assistant?.id === "string") urls.push(`/v1/ai/personas/photo/${assistant.id}`);
+  }
+
   const failed = [];
   for (const url of urls) {
     const response = await fetch(base + url);
     if (!response.ok) failed.push(`${response.status} ${url}`);
   }
-  console.log(`feed media URLs: posts=${posts.length} urls=${urls.length} failed=${failed.length}`);
+  console.log(`feed media URLs: posts=${posts.length} assistants=${assistants.length} urls=${urls.length} failed=${failed.length}`);
   if (failed.length > 0) {
     console.error("FAIL: feed advertises media URLs that do not resolve:");
     for (const line of failed.slice(0, 20)) console.error(`  ${line}`);
