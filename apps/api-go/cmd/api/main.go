@@ -855,19 +855,28 @@ func seedPostgresIdentity(pool *pgxpool.Pool) error {
 }
 
 type creatorSeedProfile struct {
-	agentID, name, bio, photo string
-	languages, areas          []string
+	agentID, name, bio string
+	languages, areas   []string
 }
 
 func merchantCreatorSeedProfiles() []creatorSeedProfile {
+	// IDENTITY-ID-001: 头像不再写死外链。候选头像由账号 id 派生（见
+	// creatorAvatarPath），与 identity.profiles.avatar_path 指向同一媒体资产——
+	// 同一个人的头像只有一处事实源，谁也不会「首页一个新、发布订单一个旧」。
 	return []creatorSeedProfile{
-		{"agent_linh", "Linh", "河内本地向导，中文流利，擅长摄影", "https://randomuser.me/api/portraits/women/44.jpg", []string{"ZH", "VI"}, []string{"hn"}},
-		{"agent_mai", "Mai", "河内本地人，越南语向导", "https://randomuser.me/api/portraits/women/32.jpg", []string{"VI"}, []string{"hn"}},
-		{"agent_an", "An", "河内活动接待，熟悉咖啡与餐厅场景", "https://randomuser.me/api/portraits/women/65.jpg", []string{"VI", "ZH"}, []string{"hn"}},
-		{"agent_thao", "Thao", "河内中越口译与活动协作 Creator", "https://randomuser.me/api/portraits/women/68.jpg", []string{"VI", "ZH"}, []string{"hn"}},
-		{"agent_yen", "Yen", "河内生活方式 Creator，擅长到店内容", "https://randomuser.me/api/portraits/women/50.jpg", []string{"VI", "ZH"}, []string{"hn"}},
-		{"agent_minh", "Minh", "胡志明市中文向导", "https://randomuser.me/api/portraits/men/32.jpg", []string{"ZH"}, []string{"hcm"}},
+		{"agent_linh", "Linh", "河内本地向导，中文流利，擅长摄影", []string{"ZH", "VI"}, []string{"hn"}},
+		{"agent_mai", "Mai", "河内本地人，越南语向导", []string{"VI"}, []string{"hn"}},
+		{"agent_an", "An", "河内活动接待，熟悉咖啡与餐厅场景", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_thao", "Thao", "河内中越口译与活动协作 Creator", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_yen", "Yen", "河内生活方式 Creator，擅长到店内容", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_minh", "Minh", "胡志明市中文向导", []string{"ZH"}, []string{"hcm"}},
 	}
+}
+
+// creatorAvatarPath 由固定 facet 键派生候选头像的服务端路径（客户端把以 "/" 开头的
+// photos 项当服务端路径渲染）。图片本体与账号 profile.avatar_path 是同一媒体资产。
+func creatorAvatarPath(agentID string) string {
+	return "/v1/media/thumb/ma_creator_" + strings.TrimPrefix(agentID, "agent_") + "_portrait_v1"
 }
 
 func merchantCreatorAvailability(now time.Time) (time.Time, time.Time) {
@@ -899,7 +908,7 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	// Agent Profile
 	profiles := merchantCreatorSeedProfiles()
 	for _, p := range profiles {
-		photos, _ := json.Marshal([]string{p.photo})
+		photos, _ := json.Marshal([]string{creatorAvatarPath(p.agentID)})
 		languages, _ := json.Marshal(p.languages)
 		areas, _ := json.Marshal(p.areas)
 		if _, err := pool.Exec(ctx, `
