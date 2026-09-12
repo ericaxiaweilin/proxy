@@ -714,6 +714,7 @@ export function AppShell({
             <VoucherSurface client={vouchers} context={context} onBack={() => setVoucherOpen(false)} />
           ) : (
             <MeSurface
+              key={viewerAccountId ?? "pending-account"}
               context={context}
               localNet={localNet}
               fulfillment={fulfillment}

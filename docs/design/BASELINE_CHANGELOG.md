@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 166 — 2026-09-12
+
+- 修市场订单 / 活动双页 Pager 的发布向导双实例：订单向导只驻留订单页，活动向导只驻留活动页；移除状态切换时强制重建 ScrollView，已加载活动刷新保持原卡片，避免上下切换闪屏。
+- 头像本机副本按 `userAccountId` 分区命名、首帧只读当前账户目录；账户 id 到达后重新挂载资料页，禁止同机账号先闪出另一人的头像。
+- 页面视觉样式不变；补充 UI 回归守卫，固定单实例发布和账户头像边界。
+
 ## Revision 165 — 2026-09-12
 
 - AI-ASSIST-001：首页 AI 助手推荐目录（AI-ASSIST-001）—— 5 小美公开目录

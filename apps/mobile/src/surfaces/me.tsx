@@ -66,21 +66,26 @@ const lastSignInStore = createLastSignInStore(nativeSecureStorageDriver);
 const socialSettingsStore = createSocialSettingsStore(nativeSecureStorageDriver);
 
 const PROFILE_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
-function nextProfileAvatarFile(): File {
-  return new File(PROFILE_AVATAR_DIR, `avatar-${Date.now()}.jpg`);
+function avatarScope(accountId?: string): string {
+  const normalized = (accountId ?? "").replace(/[^a-zA-Z0-9_-]/g, "").slice(-48);
+  return normalized || "anonymous";
+}
+
+function nextProfileAvatarFile(accountId?: string): File {
+  return new File(PROFILE_AVATAR_DIR, `avatar-${avatarScope(accountId)}-${Date.now()}.jpg`);
 }
 
 // AVATAR-FLASH-001: 首帧就给出本机最新头像。hydration 是异步的，若首帧
 // profileAvatarUri 为 undefined，会先渲染字母头/占位再被异步结果刷掉——用户看到的
 // 就是「切页回来先闪旧头再变新头」。expo-file-system 的 list()/File 是同步 API，
 // 因此可以在 useState 初值里直接取到最新副本，消除这一跳。
-function initialProfileAvatarUri(): string | undefined {
+function initialProfileAvatarUri(accountId?: string): string | undefined {
   try {
     // 注意：不要用 `instanceof File` 过滤 list() 元素（真机上类身份可能对不上，
     // 一旦滤空就回落字母头，等于没修）。与 hydration 同款：只信 name。
     const names = PROFILE_AVATAR_DIR.list()
       .map((entry) => entry.name)
-      .filter((name) => name.startsWith("avatar-"))
+      .filter((name) => name.startsWith(`avatar-${avatarScope(accountId)}-`))
       .sort();
     const newest = names.at(-1);
     return newest ? new File(PROFILE_AVATAR_DIR, newest).uri : undefined;
@@ -92,10 +97,10 @@ function initialProfileAvatarUri(): string | undefined {
 // AVATAR-GC-001: 换头像只留最新一份副本。此前每次选图都新建 avatar-<ts>.jpg，
 // 只增不删（真机实测堆到 23 份）。prune 只删 avatar-* 且不是本次保留的那份，
 // 单个删除失败不影响主链。
-function pruneProfileAvatars(keepName: string): void {
+function pruneProfileAvatars(keepName: string, accountId?: string): void {
   try {
     for (const name of PROFILE_AVATAR_DIR.list().map((entry) => entry.name)) {
-      if (name.startsWith("avatar-") && name !== keepName) {
+      if (name.startsWith(`avatar-${avatarScope(accountId)}-`) && name !== keepName) {
         try {
           new File(PROFILE_AVATAR_DIR, name).delete();
         } catch {
@@ -433,8 +438,9 @@ export function MeSurface({
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   // 资料保存失败必须留编辑器内提示，不静默吞掉（本地写失败/服务端同步失败都一样）。
   const [profileSaveError, setProfileSaveError] = useState<string | undefined>(undefined);
-  // AVATAR-FLASH-001: 初值直接取本机最新头像（同步），避免首帧闪旧头再刷成新头。
-  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(() => initialProfileAvatarUri());
+  // AVATAR-ACCOUNT-001: 首帧仅允许当前账户自己的本机副本。之前直接取目录
+  // 中“最新一张”，同机多账号会先闪出别人的头像，随后 hydration 再换回来。
+  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(() => initialProfileAvatarUri(viewerAccountId));
   const [profileRemoteAvatarPath, setProfileRemoteAvatarPath] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
   const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
@@ -818,7 +824,7 @@ export function MeSurface({
     if (result.canceled || !selected?.uri) return;
     try {
       PROFILE_AVATAR_DIR.create({ idempotent: true, intermediates: true });
-      const avatarFile = nextProfileAvatarFile();
+      const avatarFile = nextProfileAvatarFile(viewerAccountId);
       await new File(selected.uri).copy(avatarFile, { overwrite: true });
       profileTouchedRef.current = true;
       profileHydratedRef.current = true;
@@ -833,7 +839,7 @@ export function MeSurface({
       };
       await profileStore.write(localRecord);
       // AVATAR-GC-001: 只保留本次这份副本，避免旧头像文件无限堆积。
-      pruneProfileAvatars(avatarFileName(avatarFile.uri));
+      pruneProfileAvatars(avatarFileName(avatarFile.uri), viewerAccountId);
       // Avatar controls also exist outside the profile editor. Selecting a
       // photo is therefore a complete action: upload and sync immediately,
       // rather than requiring a hidden second "完成" step.
@@ -875,7 +881,7 @@ export function MeSurface({
     } else if (profileAvatarUri) {
       try {
         PROFILE_AVATAR_DIR.create({ idempotent: true, intermediates: true });
-        const avatarFile = nextProfileAvatarFile();
+        const avatarFile = nextProfileAvatarFile(viewerAccountId);
         await new File(profileAvatarUri).copy(avatarFile, { overwrite: true });
         localAvatarFileName = avatarFileName(avatarFile.uri);
         setProfileAvatarUri(avatarFile.uri);

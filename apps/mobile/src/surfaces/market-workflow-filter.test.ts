@@ -29,4 +29,13 @@ describe("market workflow surface", () => {
     expect(demandWizard).toContain("await marketplace.publish(");
     expect(activityWizard).toContain("await activities.publish(");
   });
+
+  it("keeps one publisher instance and retains loaded activities while refreshing", () => {
+    // Pager mounts both tabs. A global wizard condition rendered a hidden
+    // second copy, which duplicated draft hydration and made the tab flash.
+    expect(source).toContain('demandWizardOpen && pageTab === "OPPORTUNITY"');
+    expect(source).toContain('activityPublishOpen && pageTab === "ACTIVITY"');
+    expect(source).not.toContain('key={`${pageTab}:${demandWizardOpen');
+    expect(source).toContain('activityPhase === "LOADING" && activityItems.length === 0');
+  });
 });

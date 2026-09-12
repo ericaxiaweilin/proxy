@@ -376,7 +376,7 @@ export function MarketSurface({
     const bottomPad = bottomNavVisible === false ? 16 : 120;
     return (
     <View style={styles.marketPage}>
-    <ScrollView key={`${pageTab}:${demandWizardOpen ? "demand" : activityPublishOpen ? "activity" : "list"}`} style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
         <Text style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
@@ -406,7 +406,7 @@ export function MarketSurface({
           {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
         </Text>
       ) : null}
-      {demandWizardOpen ? (
+      {demandWizardOpen && pageTab === "OPPORTUNITY" ? (
         <DemandWizard
           marketplace={marketplace}
           supply={supply}
@@ -417,7 +417,7 @@ export function MarketSurface({
           onViewMarket={() => setDemandWizardOpen(false)}
           onCreateActivity={() => { setDemandWizardOpen(false); openActivityPublisher(); }}
         />
-      ) : activityPublishOpen ? (
+      ) : activityPublishOpen && pageTab === "ACTIVITY" ? (
         <ActivityWizard
           activities={activities}
           scenes={activityItems}          onBack={() => setActivityPublishOpen(false)}
@@ -492,7 +492,7 @@ export function MarketSurface({
             <Text style={styles.sectionTitle}>趋势活动</Text>
             <Text style={styles.sectionHint}>多人 / 兴趣 / 品牌场景</Text>
           </View>
-          {activityPhase === "LOADING" ? (
+          {activityPhase === "LOADING" && activityItems.length === 0 ? (
             <View style={styles.emptyBox}>
               <ActivityIndicator color={color.magenta} />
               <Text style={styles.emptyText}>正在读取活动读模型（ListActivities）…</Text>
