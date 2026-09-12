@@ -112,6 +112,13 @@ A 杀掉 B ……**永久抖动**。现在包装脚本开头先探健康：
 **实测**：并发起第二个实例 → 打印 `already served by a healthy instance; standing by`
 且原 Metro PID **不变**；`kill -9` 属主 → **16s 内收敛为恰好一个属主**，之后 56s 稳定不动。
 
+**冷启动（开机/登录路径）实测**：把两个监听者和 supervisor 全部清掉（健康检查 `000`）后，
+按上面的干净环境命令冷启动 —— **API 6s ready、Metro 12s ready，各恰好一个属主，无抖动**。
+冷启动完成后真机无需任何手工动作即可恢复：App 自动重连已建立的 dev-server，
+再跑一次 `apps/mobile/scripts/dev-ios-device.sh install weilin` 也会走完整链路
+（Bonjour 主机 + deep link）拿到**全新 1307 模块**的 bundle 并打出 `[proxy.smoke]`。
+即：登录后「服务自己起来 → 真机自己连上」是成立的，不需要人介入。
+
 ```bash
 launchctl list | grep kake                                    # 是否被 launchd 托管
 launchctl kickstart -k gui/$(id -u)/com.user.kake-dev-api     # 重启 API
