@@ -47,6 +47,8 @@ import { CommunityHub } from "./community";
 import { CustomFeedHub, type CustomFeed } from "./custom-feed";
 import { readCustomFeedsAsync } from "../expo-custom-feed-store";
 import { defaultFeedPrefs, readFeedPrefsAsync, writeFeedPrefs } from "../expo-feed-prefs-store";
+import { feedScopeLabel, isFeedScopeActive, isPostWithinScope } from "../feed-scope-filter";
+import type { FeedScope } from "../feed-scope-filter";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { isOwnPost as isOwnPostById, resolveAuthorDisplayName } from "../feed-author";
@@ -763,18 +765,14 @@ export function FeedSurface({
     return feedPrefs.weights[category] ?? 50;
   }
 
-  const getVisibleForTab = (forTab: FeedTab): FeedPost[] =>
+  // `scope` is a parameter (not feedPrefs.scope) so the banner can ask "how many
+  // posts would I see without the time filter?" using the exact same predicate —
+  // the count and the filter can never drift apart again.
+  const getVisibleForTab = (forTab: FeedTab, scope: FeedScope = feedPrefs.scope): FeedPost[] =>
     posts.filter((post) => {
       if (hiddenPosts.has(post.postId)) return false;
-      // 偏好-时间范围：7D/30D 按创建时间过滤，长期不过滤。
-      if (feedPrefs.scope !== "PERSISTENT") {
-        const created = Date.parse(post.createdAt);
-        if (Number.isFinite(created)) {
-          const ageMs = Date.now() - created;
-          const limitMs = feedPrefs.scope === "7D" ? 7 * 86_400_000 : 30 * 86_400_000;
-          if (ageMs > limitMs) return false;
-        }
-      }
+      // 偏好-时间范围：7D/30D 按创建时间过滤，长期不过滤（FEED-SCOPE-001）。
+      if (!isPostWithinScope(post.createdAt, scope)) return false;
       // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
       if (feedPrefs.muted.length > 0) {
         const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
@@ -850,12 +848,9 @@ export function FeedSurface({
   // FEED-SCOPE-001: 时间范围是相对 Date.now() 滚动的，帖文会一天天无声消失 ——
   // 实测默认 7D 隐藏了 62% 的帖文，而时间线上没有任何提示，看起来就是「数据丢了」。
   // 生效时把「正在筛选」和「藏了多少」摆出来，并给一个一键看全部的出口。
-  const scopeHiddenCount = feedPrefs.scope === "PERSISTENT" ? 0 : posts.filter((post) => {
-    const created = Date.parse(post.createdAt);
-    if (!Number.isFinite(created)) return false;
-    const limitMs = feedPrefs.scope === "7D" ? 7 * 86_400_000 : 30 * 86_400_000;
-    return Date.now() - created > limitMs;
-  }).length;
+  const scopeHiddenCount = isFeedScopeActive(feedPrefs.scope)
+    ? getVisibleForTab(tab, "PERSISTENT").length - unranked.length
+    : 0;
   const clearScopeFilter = useCallback(() => {
     const next = { ...feedPrefs, scope: "PERSISTENT" as const };
     setFeedPrefs(next);
@@ -911,7 +906,7 @@ export function FeedSurface({
       {scopeHiddenCount > 0 ? (
         <View style={styles.scopeBanner} testID="feed-scope-banner-v1">
           <Text style={styles.scopeBannerText}>
-            正在按「{feedPrefs.scope === "7D" ? "近 7 天" : "近 30 天"}」筛选 · 已隐藏 {scopeHiddenCount} 篇更早的
+            正在按「{feedScopeLabel(feedPrefs.scope)}」筛选 · 已隐藏 {scopeHiddenCount} 篇更早的
           </Text>
           <Pressable accessibilityLabel="显示全部帖文" onPress={clearScopeFilter}>
             <Text style={styles.scopeBannerAction}>显示全部</Text>

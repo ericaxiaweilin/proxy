@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 169 — 2026-09-12
+
+- FEED-SCOPE-001：时间范围判定从 `feed.tsx` 的两份内联拷贝抽成共用的
+  `src/feed-scope-filter.ts`（`isPostWithinScope`）。两份拷贝此前已经漂移 ——
+  横幅那个「已隐藏 N 篇」把 hidden/muted 的帖子也算进去，会多报。
+  现在横幅的计数 = 「不筛选时可见数 − 当前可见数」，与过滤用同一个谓词。
+  **无视觉改动**；未标注日期的帖子改为保留而非丢弃（此前会被静默过滤掉）。
+
 ## Revision 168 — 2026-09-12
 
 - AI-ASSIST-001 相关：**5 张 AI 小美写真此前在常规开发启动方式下全部 404**

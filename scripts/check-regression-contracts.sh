@@ -1555,13 +1555,21 @@ if ! grep -q 'FEED-SCOPE-001' apps/mobile/src/expo-feed-prefs-store.test.ts ||
   echo "        A rolling default hides posts silently; time range is a user choice, not a default." >&2
   exit 1
 fi
+# The filter itself must be the shared, tested predicate — not a second inline
+# copy in the surface. Two copies had already drifted (the banner over-counted).
+if ! grep -q 'isPostWithinScope' apps/mobile/src/surfaces/feed.tsx ||
+   ! grep -q 'FEED-SCOPE-001' apps/mobile/src/feed-scope-filter.test.ts; then
+  echo "  FAIL [FEED-SCOPE-001]: feed.tsx no longer uses the shared, tested scope predicate." >&2
+  echo "        Inline copies of this filter drift apart and silently hide content." >&2
+  exit 1
+fi
 if ! grep -q 'feed-scope-banner-v1' apps/mobile/src/surfaces/feed.tsx; then
   echo "  FAIL [FEED-SCOPE-001]: the feed no longer tells the user that a time filter is active." >&2
   echo "        Silent filtering is what made this look like data loss." >&2
   exit 1
 fi
-pnpm --filter @proxy/mobile exec vitest run src/expo-feed-prefs-store.test.ts || exit $?
-echo "    FEED-SCOPE-001: PASS (default is long-lived; explicit 7D/30D still honoured; filter is visible)"
+pnpm --filter @proxy/mobile exec vitest run src/expo-feed-prefs-store.test.ts src/feed-scope-filter.test.ts || exit $?
+echo "    FEED-SCOPE-001: PASS (default is long-lived; explicit 7D/30D still honoured; shared predicate; filter is visible)"
 
 # MEDIA-FILE-001: the read model advertised URLs for media whose bytes were
 # gone. 104 of 528 READY variants (19.7%, across 27 assets) had no file behind
