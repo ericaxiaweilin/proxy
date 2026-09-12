@@ -76,12 +76,14 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   const proIcon = actionIconFor("pro");
   // R58 城市协助 · Professional：当前选中的服务（现场翻译 / 签证协助 / 法律咨询 / 商务协助）
   const [proService, setProService] = useState<string | undefined>(undefined);
+  // 服务卡默认折叠：不占用 Moment 列表与「下一步」之间的空间，避免误触/遮挡
+  // 只记录选择 + 应用城市协助模板，不自动跳步（用户自己点「下一步」）
   const selectProService = (service: ProService): void => {
     const pro = MOMENT_TEMPLATES.find((item) => item.id === "pro");
     if (!pro) return;
     setProService(service.id);
-    pickTemplate(pro);
-    setStep("people");
+    setSpecs({ ...defaultSpecsFor(pro), price: service.price === "面议" ? "" : service.price });
+    setTemplate(pro);
   };
   const [template, setTemplate] = useState<MomentTemplate | undefined>(undefined);
   const [specs, setSpecs] = useState<DemandSpecs>(() => defaultSpecsFor(MOMENT_TEMPLATES[0]!));
@@ -343,11 +345,13 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
             <Text style={styles.currentLabel}>当前需求</Text>
             <Text style={styles.currentValue}>{template ? `${template.title}${proService ? ` · ${PRO_SERVICES.find((item) => item.id === proService)?.title ?? ""}` : ""} · ${specs.ratio || template.defaultRatio}` : "先选一个"}</Text>
           </View>
-          {/* R58 城市协助 · Professional 次入口。UI-ORDER-LOGO-001：图标复用
-              urban-support 既有 logo；服务目录对齐原型 pro-card 四类
-              （现场翻译 / 签证协助 / 法律咨询 / 商务协助），此前只有一行文字、
-              没有现场翻译可选。 */}
-          <View style={styles.professionalEntry}>
+          {/* R58 城市协助 · Professional 次入口（与基线同序同位置：Moment 步最后、
+              主 CTA 之上）。服务目录（含现场翻译）改在「规格」步按模板展开。 */}
+          <Pressable
+            accessibilityLabel="选择城市协助专业服务"
+            onPress={() => { const pro = MOMENT_TEMPLATES.find((item) => item.id === "pro"); if (pro) { pickTemplate(pro); setStep("people"); } }}
+            style={styles.professionalEntry}
+          >
             <View style={styles.proIcon}>
               {proIcon !== undefined
                 ? <Image contentFit="contain" source={proIcon} style={styles.proIconArt} />
@@ -358,32 +362,7 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               <Text style={styles.proDesc}>翻译 / 签证 / 法律 / 商务 · 专业认证优先</Text>
             </View>
             <Text style={styles.proLink}>次入口 ›</Text>
-          </View>
-          <View style={styles.proGrid}>
-            {PRO_SERVICES.map((service) => {
-              const active = proService === service.id;
-              return (
-                <Pressable
-                  accessibilityLabel={`选择${service.title}`}
-                  key={service.id}
-                  onPress={() => selectProService(service)}
-                  style={[styles.proCard, active && styles.proCardOn]}
-                >
-                  <View style={styles.proCardHead}>
-                    <Text style={styles.proCardTitle}>{service.title}</Text>
-                    <View style={[styles.proCardCert, active && styles.proCardCertOn]}>
-                      <Text style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.proCardSub}>{service.sub}</Text>
-                  <View style={styles.proCardFoot}>
-                    <Text style={styles.proCardPrice}>{service.price}</Text>
-                    <Text style={styles.proCardRange}>{service.range}</Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
+          </Pressable>
           <Pressable disabled={!template} onPress={() => setStep("people")} style={[styles.primaryBtn, !template && styles.disabled]}>
             <Text style={styles.primaryBtnText}>下一步 · 选人 / 服务 / 价格</Text>
           </Pressable>
@@ -544,6 +523,41 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               </Pressable>
             ))}
           </View>
+
+          {template?.id === "pro" ? (
+            <>
+              {/* R58 城市协助服务目录（原型 pro-card 四类：现场翻译 / 签证协助 /
+                  法律咨询 / 商务协助）。放在「规格」步按模板展开，不再挤在
+                  选 Moment 那一步挡「下一步」。 */}
+              <Text style={styles.fieldLabel}>专业服务 · 城市协助</Text>
+              <View style={styles.proGrid}>
+                {PRO_SERVICES.map((service) => {
+                  const active = proService === service.id;
+                  return (
+                    <Pressable
+                      accessibilityLabel={`选择${service.title}`}
+                      key={service.id}
+                      onPress={() => selectProService(service)}
+                      style={[styles.proCard, active && styles.proCardOn]}
+                    >
+                      <View style={styles.proCardHead}>
+                        <Text style={styles.proCardTitle}>{service.title}</Text>
+                        <View style={[styles.proCardCert, active && styles.proCardCertOn]}>
+                          <Text style={[styles.proCardCertText, active && styles.proCardCertTextOn]}>{service.cert}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.proCardSub}>{service.sub}</Text>
+                      <View style={styles.proCardFoot}>
+                        <Text style={styles.proCardPrice}>{service.price}</Text>
+                        <Text style={styles.proCardRange}>{service.range}</Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {proService ? <Text style={styles.hint}>{PRO_SERVICES.find((item) => item.id === proService)?.note ?? ""}</Text> : null}
+            </>
+          ) : null}
 
           <View style={styles.fieldLabelRow}>
             <Text style={styles.fieldLabelNoGap}>预计服务价</Text>
