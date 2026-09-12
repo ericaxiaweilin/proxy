@@ -31,6 +31,10 @@ same commit. Do not record routine business logic changes here.
   链路没做，于是头像 URL 恒 404，界面回字母头。客户端先落兜底：hydration 改为
   **本地副本优先**（离线可用、不受可见性约束），远端仅作后备。服务端提权（
   UpdateProfile 内 `AuthorizeForPost(...,"PUBLIC")`）为下一步修复。
+- 头像「切页回来先闪旧头再刷成新头」（AVATAR-FLASH-001）：hydration 异步返回前首帧
+  `profileAvatarUri` 为 undefined，于是先渲染字母头/占位再被异步结果覆盖。改为
+  useState 初值直接同步读本机最新副本（expo-file-system list()/File 是同步 API），
+  首帧即为新头像，不再有这一跳。
 
 
 ## Revision 163 — 2026-09-11

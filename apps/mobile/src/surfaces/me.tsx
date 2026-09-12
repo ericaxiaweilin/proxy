@@ -70,6 +70,22 @@ function nextProfileAvatarFile(): File {
   return new File(PROFILE_AVATAR_DIR, `avatar-${Date.now()}.jpg`);
 }
 
+// AVATAR-FLASH-001: 首帧就给出本机最新头像。hydration 是异步的，若首帧
+// profileAvatarUri 为 undefined，会先渲染字母头/占位再被异步结果刷掉——用户看到的
+// 就是「切页回来先闪旧头再变新头」。expo-file-system 的 list()/File 是同步 API，
+// 因此可以在 useState 初值里直接取到最新副本，消除这一跳。
+function initialProfileAvatarUri(): string | undefined {
+  try {
+    const newest = PROFILE_AVATAR_DIR.list()
+      .filter((entry): entry is File => entry instanceof File && entry.name.startsWith("avatar-"))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .at(-1);
+    return newest?.uri;
+  } catch {
+    return undefined;
+  }
+}
+
 interface PersonaConfig {
   pageTitle: string;
   avatarText: string;
@@ -395,7 +411,8 @@ export function MeSurface({
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   // 资料保存失败必须留编辑器内提示，不静默吞掉（本地写失败/服务端同步失败都一样）。
   const [profileSaveError, setProfileSaveError] = useState<string | undefined>(undefined);
-  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
+  // AVATAR-FLASH-001: 初值直接取本机最新头像（同步），避免首帧闪旧头再刷成新头。
+  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(() => initialProfileAvatarUri());
   const [profileRemoteAvatarPath, setProfileRemoteAvatarPath] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
   const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
