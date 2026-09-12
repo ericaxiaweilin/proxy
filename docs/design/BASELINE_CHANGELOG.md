@@ -4,6 +4,21 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 167 — 2026-09-12
+
+- SCROLL-CHROME-001：六个信息流页面（messages / feed / market / me /
+  requester-home / business-home）原先各抄一份「上滑隐藏 chrome」的逻辑，
+  现统一到 `apps/mobile/src/shell/scroll-chrome.ts`。**页面视觉样式不变**；
+  变的是交互行为：隐藏 chrome 之后 150ms 内忽略 scroll 事件，避免
+  「内容高度骤减 → offset 被 clamp → 负 delta 被当成用户上滑 → 又显示」
+  的无限振荡（表现为消息列表滑到底部自动弹回中部、顶部 logo 黑屏/显示闪）。
+  market 原有的 nearBottom 否决（到底部保留工具栏）通过 canHide 保留。
+- FEED-SCOPE-001：动态时间范围不再默认「近 7 天」（改为长期），
+  正在按时间筛选时显示可关闭的横幅。**这是信息架构改动，不是视觉改动**：
+  原先 62% 的帖文被静默隐藏且无任何提示。
+- MEDIA-FILE-001：图片加载失败不再渲染成黑块，改为带文案的占位
+  （`media-unavailable-v1`）。**这是新的可见状态**，此前该状态被黑块掩盖。
+
 ## Revision 166 — 2026-09-12
 
 - 修市场订单 / 活动双页 Pager 的发布向导双实例：订单向导只驻留订单页，活动向导只驻留活动页；移除状态切换时强制重建 ScrollView，已加载活动刷新保持原卡片，避免上下切换闪屏。

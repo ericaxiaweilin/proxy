@@ -1513,3 +1513,90 @@ if ! grep -qE '"[A-Za-z0-9._-]+\.local"' apps/mobile/ios/Proxy/AppDelegate.swift
   exit 1
 fi
 echo "    DEVICE-METROHOST-001: PASS (no committed MetroHost; env override + Bonjour fallback intact)"
+
+# ---------------------------------------------------------------------------
+# Escaped 2026-09-12 — three P0s that no gate covered. They are recorded here
+# in the order they were reported: the messages-list oscillation, the missing
+# feed posts, and the black images.
+# ---------------------------------------------------------------------------
+
+# SCROLL-CHROME-001: hiding the shell chrome while scrolling used to feed back
+# into the scroll itself. Hiding unmounts the shell Header (the Otter logo
+# lives there) and shrinks several surfaces' bottom padding, so the scroll
+# container's content height drops; the current offset is then past the end, RN
+# clamps it, and the clamp arrives as a NEGATIVE-delta scroll event — which the
+# same controller reads as "user scrolling up" and shows the chrome again.
+# Infinite oscillation: the messages list snapped back to the middle and the
+# logo blinked on and off. Six surfaces each carried their own copy of the
+# rule, so the fix is a shared controller that ignores scroll events until the
+# layout has settled.
+for surface in messages feed market me requester-home business-home; do
+  if ! grep -q 'useScrollChrome' "apps/mobile/src/surfaces/${surface}.tsx"; then
+    echo "  FAIL [SCROLL-CHROME-001]: apps/mobile/src/surfaces/${surface}.tsx does not use the shared scroll-chrome controller." >&2
+    echo "        A hand-rolled copy re-introduces the hide/show feedback loop." >&2
+    echo "        Use useScrollChrome() from apps/mobile/src/shell/scroll-chrome.ts." >&2
+    exit 1
+  fi
+done
+if ! grep -q 'SCROLL-CHROME-001' apps/mobile/src/shell/scroll-chrome.test.ts; then
+  echo "  FAIL [SCROLL-CHROME-001]: the scroll-chrome regression test is missing." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/shell/scroll-chrome.test.ts || exit $?
+echo "    SCROLL-CHROME-001: PASS (settle guard kills the clamp echo; all 6 surfaces on the shared controller)"
+
+# FEED-SCOPE-001: the feed's default time scope was "7D", a window that rolls
+# against Date.now(). Posts silently aged out of the timeline — measured at
+# 24 of 39 posts (62%) hidden — with no indicator anywhere that a filter was
+# active, so it read as "the data is gone". The API was never at fault.
+if ! grep -q 'FEED-SCOPE-001' apps/mobile/src/expo-feed-prefs-store.test.ts ||
+   ! grep -q 'scope: "PERSISTENT"' apps/mobile/src/expo-feed-prefs-store.ts; then
+  echo "  FAIL [FEED-SCOPE-001]: the feed default scope regressed to a rolling window." >&2
+  echo "        A rolling default hides posts silently; time range is a user choice, not a default." >&2
+  exit 1
+fi
+if ! grep -q 'feed-scope-banner-v1' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-SCOPE-001]: the feed no longer tells the user that a time filter is active." >&2
+  echo "        Silent filtering is what made this look like data loss." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/expo-feed-prefs-store.test.ts || exit $?
+echo "    FEED-SCOPE-001: PASS (default is long-lived; explicit 7D/30D still honoured; filter is visible)"
+
+# MEDIA-FILE-001: the read model advertised URLs for media whose bytes were
+# gone. 104 of 528 READY variants (19.7%, across 27 assets) had no file behind
+# them; expo-image renders a failed request as nothing, so the parent's dark
+# background showed through as a black rectangle — indistinguishable from "this
+# post has no image".
+require_test "MEDIA-FILE-001" "./internal/media" \
+  "TestPostMediaLookupDoesNotAdvertiseMissingFiles" \
+  "apps/api-go/internal/media/media_file_gating_test.go" || exit $?
+require_test "MEDIA-FILE-001" "./internal/media" \
+  "TestMediaFilePresenceRejectsMissingAndTraversalKeys" \
+  "apps/api-go/internal/media/media_file_gating_test.go" || exit $?
+for client_file in media-fallback.tsx AdaptiveMediaCollection.tsx SocialMediaFrame.tsx; do
+  if ! grep -q 'media-unavailable-v1\|isMediaUnavailable\|UnavailableMedia' "apps/mobile/src/media/${client_file}"; then
+    echo "  FAIL [MEDIA-FILE-001]: apps/mobile/src/media/${client_file} lost the labelled media placeholder." >&2
+    echo "        Without it a failed image renders as a black frame again." >&2
+    exit 1
+  fi
+done
+if ! grep -q 'media object MISSING' apps/api-go/internal/api/media_handlers.go; then
+  echo "  FAIL [MEDIA-FILE-001]: serving a missing media object no longer logs distinctly." >&2
+  echo "        Success and failure used to log the identical line, which is why 104 dead URLs went unnoticed." >&2
+  exit 1
+fi
+# Live DB <-> disk sweep. The unit test pins the code contract; this pins the
+# data. It needs the dev postgres, so it skips loudly rather than lie.
+if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/ready >/dev/null 2>&1; then
+  (cd apps/api-go && PROXY_MEDIA_STORE_DIR="${PROXY_MEDIA_STORE_DIR:-$HOME/Developer/kake-data/media_store}" \
+    go run ./cmd/media-audit --check-files) || exit $?
+  echo "    MEDIA-FILE-001: PASS (live store sweep: no READY object without bytes)"
+  # And the end-to-end view: every media URL the feed actually hands out must
+  # resolve. A 404 here is precisely the black frame the user reported.
+  # NO_PROXY: some dev shells export an HTTP_PROXY that blackholes 127.0.0.1.
+  NO_PROXY='*' no_proxy='*' node scripts/check-feed-media-urls.mjs || exit $?
+  echo "    MEDIA-FILE-001: PASS (feed media URLs all resolve)"
+else
+  echo "    MEDIA-FILE-001: SKIP (dev API is down — live checks need postgres; run go -C apps/api-go run ./cmd/media-audit --check-files and node scripts/check-feed-media-urls.mjs)"
+fi

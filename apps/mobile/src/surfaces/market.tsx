@@ -12,6 +12,7 @@ import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEven
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
+import { useScrollChrome } from "../shell/scroll-chrome";
 import type { Activity, OpportunityTemplate, ListOpportunityTemplatesPayload, ActivityPresetInfo } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { describeJoinError } from "../activity-client";
@@ -159,39 +160,19 @@ export function MarketSurface({
   useModuleBackHandler(demandWizardOpen ? () => { setDemandWizardOpen(false); return true; } : undefined);
   useModuleBackHandler(activityDetail ? () => { setActivityDetail(null); return true; } : undefined);
   useModuleBackHandler(oppDetail ? () => { setOppDetail(null); return true; } : undefined);
-  const lastScrollYRef = useRef(0);
-  const chromeVisibleRef = useRef(true);
-  const scrollDirectionDistanceRef = useRef(0);
-  function onMarketScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const y = Math.max(0, e.nativeEvent.contentOffset.y);
-    const delta = y - lastScrollYRef.current;
-    // 底部防回弹：隐藏底栏会把内容区 paddingBottom 从 120 切到 16，
-    // 内容总高度瞬间 -104；若此时已在底部，offset 会被钳制回弹，
-    // 回弹的上位移又会触发恢复，形成来回弹。距底部不足一个隐藏
-    // 高度时直接保持可见（Safari 到底保留工具栏同款行为）。
-    const viewportH = e.nativeEvent.layoutMeasurement.height;
-    const contentH = e.nativeEvent.contentSize.height;
-    const nearBottom = contentH - (y + viewportH) < 140;
-    if (y <= 48) {
-      chromeVisibleRef.current = true;
-      onChromeVisibilityChange?.(true);
-      scrollDirectionDistanceRef.current = 0;
-    } else if (Math.abs(delta) >= 1) {
-      const prevDir = Math.sign(scrollDirectionDistanceRef.current);
-      const nextDir = Math.sign(delta);
-      scrollDirectionDistanceRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : scrollDirectionDistanceRef.current + delta;
-      if (scrollDirectionDistanceRef.current <= -18) {
-        if (!chromeVisibleRef.current) { chromeVisibleRef.current = true; onChromeVisibilityChange?.(true); }
-        scrollDirectionDistanceRef.current = 0;
-      } else if (scrollDirectionDistanceRef.current >= 28 && !nearBottom) {
-        if (chromeVisibleRef.current) { chromeVisibleRef.current = false; onChromeVisibilityChange?.(false); }
-        scrollDirectionDistanceRef.current = 0;
-      }
+  // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
+  // 底部防回弹保留为 canHide 否决：隐藏底栏会把内容区 paddingBottom 从 120 切到 16，
+  // 内容总高度瞬间 -104；若此时已在底部，offset 会被钳制回弹，回弹的上位移又会触发
+  // 恢复，形成来回弹。距底部不足一个隐藏高度时直接保持可见（Safari 到底保留工具栏
+  // 同款行为）。现在控制器另外还会忽略状态切换后那一瞬的布局回弹事件。
+  const onMarketScroll = useScrollChrome(onChromeVisibilityChange, {
+    canHide: (e) => {
+      const y = Math.max(0, e.nativeEvent.contentOffset.y);
+      const viewportH = e.nativeEvent.layoutMeasurement.height;
+      const contentH = e.nativeEvent.contentSize.height;
+      return contentH - (y + viewportH) >= 140;
     }
-    lastScrollYRef.current = y;
-  }
-  // 与动态一致：卸载（切 tab）时恢复顶栏+底栏，避免隐藏态带到别的页。
-  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
+  });
 
   const loadActivities = useCallback(async (): Promise<void> => {
     setActivityPhase("LOADING");

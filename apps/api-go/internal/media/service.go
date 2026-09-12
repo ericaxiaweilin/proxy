@@ -698,6 +698,44 @@ func (s *Service) ResolveServingPath(ctx context.Context, id string, kind string
 	return filepath.Join(s.storeDir, key), nil
 }
 
+// storeFilePresent reports whether a storage key maps to a real regular file.
+//
+// MEDIA-FILE-001: the database records an object as READY when its bytes are
+// written, but nothing keeps that flag in sync afterwards. A file can disappear
+// (manual cleanup, a partial restore, a moved data directory) while the row stays
+// READY. Any code that turns a storage key into a URL the client will fetch must
+// consult this — otherwise the read model advertises media the server cannot
+// serve, and the client renders the failure as a black frame, which is
+// indistinguishable from "this post has no image".
+func (s *Service) storeFilePresent(key string) bool {
+	if s == nil || key == "" {
+		return false
+	}
+	if strings.ContainsAny(key, "/\\") || strings.Contains(key, "..") {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(s.storeDir, key))
+	return err == nil && info.Mode().IsRegular()
+}
+
+// VariantFilePresent reports whether a variant's bytes are actually on disk.
+func (s *Service) VariantFilePresent(variant MediaVariant) bool {
+	return s.storeFilePresent(variant.StorageKey)
+}
+
+// AssetThumbnailPresent / AssetPlaybackPresent gate the asset-level thumb and
+// play routes the same way. Both are derived from a storage key on the asset row.
+func (s *Service) AssetThumbnailPresent(asset MediaAsset) bool {
+	if asset.ThumbnailStorageKey != "" {
+		return s.storeFilePresent(asset.ThumbnailStorageKey)
+	}
+	return s.storeFilePresent(asset.PlaybackStorageKey)
+}
+
+func (s *Service) AssetPlaybackPresent(asset MediaAsset) bool {
+	return s.storeFilePresent(asset.PlaybackStorageKey)
+}
+
 func (s *Service) ResolveVariantPath(ctx context.Context, variantID string) (string, error) {
 	variant, err := s.repository.GetVariant(ctx, variantID)
 	if err != nil {

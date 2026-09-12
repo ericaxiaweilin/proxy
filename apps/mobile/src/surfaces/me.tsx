@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
+import { useScrollChrome } from "../shell/scroll-chrome";
 import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
@@ -693,22 +694,8 @@ export function MeSurface({
     return () => { cancelled = true; };
   }, [engagement, viewerAccountId, localNet, profileDraft.name]);
 
-  const lastYRef = useRef(0);
-  const dirRef = useRef(0);
-  const visibleRef = useRef(true);
-  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const y = Math.max(0, e.nativeEvent.contentOffset.y);
-    const delta = y - lastYRef.current;
-    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-    else if (Math.abs(delta) >= 1) {
-      const prevDir = Math.sign(dirRef.current);
-      const nextDir = Math.sign(delta);
-      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
-      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
-    }
-    lastYRef.current = y;
-  }
+  // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
+  const onScroll = useScrollChrome(onChromeVisibilityChange);
 
   if (subPage?.route === "friendcrm") {
     return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;

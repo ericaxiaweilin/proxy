@@ -41,6 +41,7 @@ import {
 } from "../media-presentation";
 import { SocialMediaFrame } from "./SocialMediaFrame";
 import { AudioStage } from "./audio-stage";
+import { isMediaUnavailable, UnavailableMedia, useMediaLoadState } from "./media-fallback";
 import {
   SOCIAL_MEDIA_BADGE_INSET,
   SOCIAL_MEDIA_GRID_GAP,
@@ -312,6 +313,10 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
   // variants are intentionally static first-frame thumbnails.
   const uri = resolveUrl(item.animated && item.playbackUrl ? item.playbackUrl : selection.url ?? "");
   const frameBackground = resolveFrameBackground(item.dominantColorHex);
+  // MEDIA-FILE-001: without this the failed load fell through to frameBackground
+  // (a near-black tone) and read as a real photo. See media-fallback.tsx.
+  const { failed, onError } = useMediaLoadState(uri);
+  const unavailable = isMediaUnavailable(uri, failed);
   // 【fix 2026-08-26】SinglePostImage 走 contain（expo-image contentFit="contain" 写死），
   // contain 模式下图片已完整居中显示，不传 contentPosition。
   // 历史：v2 focalPoint 透传 → 9:16 portrait 头像图被贴顶 → 看起来"被切了"。
@@ -320,22 +325,28 @@ export function SinglePostImage({ item, aspect, resolveUrl, onPress }: {
       {displayWidth > 0 ? (
         <Pressable
           accessibilityLabel="查看原图"
+          disabled={unavailable}
           onPress={onPress}
-          style={[styles.singleStage, { aspectRatio: shapeAspect, backgroundColor: frameBackground, width: displayWidth }]}
+          style={[styles.singleStage, { aspectRatio: shapeAspect, backgroundColor: unavailable ? color.surface : frameBackground, width: displayWidth }]}
         >
-          <View style={styles.singleFill}>
-            <ExpoImage
-              source={{ uri }}
-              style={styles.singleAsset}
-              contentFit="contain"
-              contentPosition="center"
-              transition={200}
-              cachePolicy="memory-disk"
-              priority="normal"
-              recyclingKey={item.mediaAssetId}
-              onLoad={(event) => onImageLoad(event, declaredAspect, setLoadedAspect)}
-            />
-          </View>
+          {unavailable ? (
+            <UnavailableMedia />
+          ) : (
+            <View style={styles.singleFill}>
+              <ExpoImage
+                source={{ uri }}
+                style={styles.singleAsset}
+                contentFit="contain"
+                contentPosition="center"
+                transition={200}
+                cachePolicy="memory-disk"
+                priority="normal"
+                recyclingKey={item.mediaAssetId}
+                onLoad={(event) => onImageLoad(event, declaredAspect, setLoadedAspect)}
+                onError={onError}
+              />
+            </View>
+          )}
         </Pressable>
       ) : null}
     </View>
@@ -403,6 +414,9 @@ function VideoStage({
   const frameBackground = resolveFrameBackground(item.dominantColorHex);
   const showExtendedBackdrop = shouldUseExtendedBackdrop({ strategy: "contain", sourceAspect, frameAspect: displayAspect });
   const posterUri = resolveUrl(item.thumbnailUrl ?? item.feedUrl ?? "");
+  // MEDIA-FILE-001: a video whose poster 404s used to render as a black rectangle.
+  const { failed: posterFailed, onError: onPosterError } = useMediaLoadState(posterUri);
+  const posterUnavailable = isMediaUnavailable(posterUri, posterFailed);
   // 【fix 2026-08-26 异音】isActive=false 时走 thumbnail 占位，但仍上报帧供 feed.tsx 选 active。
   // 否则 inactive 永远不上报 frames → activeVideoId 恒 null → 死锁（真机不播、点也不播）。
   if (isActive === false) {
@@ -421,14 +435,19 @@ function VideoStage({
         style={[styles.videoStage, { aspectRatio: displayAspect, backgroundColor: frameBackground }]}
       >
         {showExtendedBackdrop && posterUri ? <MediaBackdrop item={item} uri={posterUri} /> : null}
-        <ExpoImage
-          source={{ uri: posterUri }}
-          style={styles.videoView}
-          contentFit="contain"
-          transition={150}
-          cachePolicy="memory-disk"
-          recyclingKey={item.mediaAssetId}
-        />
+        {posterUnavailable ? (
+          <UnavailableMedia label="视频封面暂时无法显示" />
+        ) : (
+          <ExpoImage
+            source={{ uri: posterUri }}
+            style={styles.videoView}
+            contentFit="contain"
+            transition={150}
+            cachePolicy="memory-disk"
+            recyclingKey={item.mediaAssetId}
+            onError={onPosterError}
+          />
+        )}
         <View pointerEvents="none" style={styles.videoBadge}>
           <Text style={styles.videoBadgeText}>视频</Text>
           {item.durationMs ? <Text style={styles.videoBadgeText}>· {Math.round(item.durationMs / 1000)}s</Text> : null}
@@ -495,6 +514,9 @@ function ActiveVideoStage({
   const videoViewRef = useRef<VideoView>(null);
   const [isMuted, setIsMuted] = useState(true);
   const [hasRenderedFrame, setHasRenderedFrame] = useState(false);
+  // MEDIA-FILE-001: a poster that 404s must not sit over the native surface as a
+  // black rectangle — drop the overlay and let the video show instead.
+  const { failed: posterFailed, onError: onPosterError } = useMediaLoadState(posterUri);
   // Disk/network cache only avoids downloading again; AVPlayer still needs a short
   // decode window after this stage becomes active. Keep the cached poster above the
   // native surface until playback advances, so scrolling never exposes its black
@@ -561,7 +583,7 @@ function ActiveVideoStage({
         fullscreenOptions={{ enable: true, orientation: "portrait" }}
         useExoShutter={false}
       />
-      {!hasRenderedFrame && posterUri ? (
+      {!hasRenderedFrame && posterUri && !posterFailed ? (
         <ExpoImage
           accessible={false}
           cachePolicy="memory-disk"
@@ -570,6 +592,7 @@ function ActiveVideoStage({
           source={{ uri: posterUri }}
           style={styles.videoPosterOverlay}
           transition={0}
+          onError={onPosterError}
         />
       ) : null}
       <View pointerEvents="none" style={styles.videoBadge}>

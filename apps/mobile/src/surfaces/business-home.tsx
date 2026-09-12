@@ -15,6 +15,7 @@ import { Image } from "expo-image";
 import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
+import { useScrollChrome } from "../shell/scroll-chrome";
 import { color, shadows } from "../theme";
 import type { BusinessClient, MerchantOperatingHome, StoreProduct } from "../business-client";
 import type { ActivityClient } from "../activity-client";
@@ -65,9 +66,6 @@ export function BusinessHome({
   const [planBusy, setPlanBusy] = useState(false);
   const [planResult, setPlanResult] = useState<string>();
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
-  const lastYRef = useRef(0);
-  const dirRef = useRef(0);
-  const visibleRef = useRef(true);
 
   useEffect(() => {
     if (!business) return;
@@ -140,19 +138,8 @@ export function BusinessHome({
     return () => { cancelled = true; };
   }, [business, activities]);
 
-  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const y = Math.max(0, e.nativeEvent.contentOffset.y);
-    const delta = y - lastYRef.current;
-    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-    else if (Math.abs(delta) >= 1) {
-      const prevDir = Math.sign(dirRef.current);
-      const nextDir = Math.sign(delta);
-      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
-      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
-    }
-    lastYRef.current = y;
-  }
+  // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
+  const onScroll = useScrollChrome(onChromeVisibilityChange);
 
   const showLoading = business !== undefined && accountName === undefined && !loadError;
   const homeTitle = useMemo(() => {
