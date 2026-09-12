@@ -810,8 +810,16 @@ export function MeSurface({
           setProfileSaveError("头像已保存在本机，但同步失败，请检查网络后重试。");
         }
       }
-    } catch {
+    } catch (err) {
+      // AVATAR-SAVE-001: 这里以前是静默 `catch { setProfileAvatarUri(selected.uri) }`
+      // —— 相册原 URI 只在本进程有效（且 iOS 会清 tmp），一旦落盘失败：头像看着
+      // 变了、其实没写进 documentDirectory / SecureStore，离开页面或重启就回到
+      // 字母头，而且**没有任何报错**，用户和测试都看不见。现在：保留预览，同时
+      // 把真实原因报出来，并且不再假装保存成功。
+      const detail = err instanceof Error ? err.message : String(err);
+      console.log(`[proxy.AVATAR-SAVE-001] local avatar persist FAIL: ${detail}`);
       setProfileAvatarUri(selected.uri);
+      setProfileSaveError(`头像没能保存到本机（${detail}）。请重试，或检查存储权限。`);
     }
   }
 

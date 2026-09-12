@@ -4,6 +4,22 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 164 — 2026-09-12
+
+- 修「个人主页头像保存不上」：`me.tsx` 的 chooseProfileAvatar 最外层 `catch` 此前是
+  静默 `catch { setProfileAvatarUri(selected.uri) }` —— 相册原 URI 只在本进程有效，
+  本地落盘（documentDirectory 副本 + SecureStore 记录）一旦失败，头像看着变了、
+  离开页面或重启即回字母头，且**不报错**，用户和测试都看不见。现在显式报出真实
+  原因（`[proxy.AVATAR-SAVE-001] local avatar persist FAIL` + 错误提示），不再假装
+  保存成功。
+- 门禁补强 AVATAR-SAVE-001：`scripts/check-regression-contracts.sh` 新增守门 ——
+  me.tsx 必须保留该显式报错路径、profile-store 必须有头像往返断言（写入→读回、
+  绝对沙盒 URI 归一成文件名、clear 后不留陈旧头像）。此前只有 AVATAR-001 守
+  profile-store 的文件名规范化（单元级），守不住整条保存链路。
+- 发布需求向导（非基线敏感）：城市协助 · Professional 服务卡在选 Moment 那一步
+  默认展开，且支持再点一次取消选择（取消时一并清掉城市协助模板，避免悬空态）。
+
+
 ## Revision 163 — 2026-09-11
 
 - 商家 Creator 推荐轨的服务端 seed 升级：boot seed 从 3 个 photos='[]' 的 agent 扩到 6 个带真实头像 URL 的 Creator（Linh/Mai/An/Thao/Yen/Minh，覆盖 hn/hcm）+ 档期窗口随 boot 滚动（now+1h..now+72h），使 `MerchantCreatorRecommendations`（supply.querySuppliers({marketId,limit:6})）不再空轨。

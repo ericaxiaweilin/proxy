@@ -77,10 +77,16 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
   // R58 城市协助 · Professional：当前选中的服务（现场翻译 / 签证协助 / 法律咨询 / 商务协助）
   const [proService, setProService] = useState<string | undefined>(undefined);
   // 服务卡默认折叠：不占用 Moment 列表与「下一步」之间的空间，避免误触/遮挡
-  // 只记录选择 + 应用城市协助模板，不自动跳步（用户自己点「下一步」）
+  // 只记录选择：再点同一张卡＝取消选择（并把模板一并清掉，避免留下「城市协助但没选服务」的悬空态）
   const selectProService = (service: ProService): void => {
     const pro = MOMENT_TEMPLATES.find((item) => item.id === "pro");
     if (!pro) return;
+    if (proService === service.id) {
+      setProService(undefined);
+      setTemplate((current) => (current?.id === "pro" ? undefined : current));
+      setError(undefined);
+      return;
+    }
     setProService(service.id);
     setSpecs({ ...defaultSpecsFor(pro), price: service.price === "面议" ? "" : service.price });
     setTemplate(pro);

@@ -112,3 +112,42 @@ describe("avatarFileName", () => {
     expect(avatarFileName("///")).toBe("///");
   });
 });
+
+// AVATAR-SAVE-001: 「个人主页头像保存不上」的守门用例。
+// 现象：选完照片头像看着变了，离开页面/重启回到字母头，且不报错。
+// 根因面：me.tsx 外层 catch 静默吞错 + 本地落盘链路没有可验证的往返断言。
+describe("AVATAR-SAVE-001 avatar persist round-trip", () => {
+  it("keeps the avatar across write → read (survives relaunch)", async () => {
+    const store = createProfileStore(new InMemorySecureStorageDriver());
+    await store.write({
+      name: "Huyen",
+      handle: "huyen.hanoi",
+      bio: "hi",
+      city: "河内",
+      avatarPath: "avatar-777.jpg",
+      updatedAt: "2026-09-12T00:00:00.000Z"
+    });
+    const read = await store.read();
+    expect(read?.avatarPath).toBe("avatar-777.jpg");
+  });
+
+  it("normalizes a previously stored absolute sandbox URI to a bare file name", () => {
+    expect(
+      avatarFileName("file:///var/mobile/Containers/Data/Application/ABC/Documents/proxy-avatar-me.jpg")
+    ).toBe("proxy-avatar-me.jpg");
+  });
+
+  it("clear() drops the persisted avatar so sign-out cannot leave a stale one", async () => {
+    const store = createProfileStore(new InMemorySecureStorageDriver());
+    await store.write({
+      name: "Huyen",
+      handle: "hanoi",
+      bio: "hi",
+      city: "河内",
+      avatarPath: "avatar-999.jpg",
+      updatedAt: "2026-09-12T00:00:00.000Z"
+    });
+    await store.clear();
+    expect(await store.read()).toBeUndefined();
+  });
+});

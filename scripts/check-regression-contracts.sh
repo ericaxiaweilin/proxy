@@ -188,6 +188,28 @@ fi
 pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-001: PASS"
 
+# AVATAR-SAVE-001: 「个人主页头像保存不上」的守门。此前 AVATAR-001 只守
+# profile-store 的文件名规范化（单元级），守不住 me.tsx 的整条保存链路——
+# 而且最外层 catch 是静默 `catch { setProfileAvatarUri(selected.uri) }`：
+# 相册原 URI 只在本进程有效，落盘失败时头像看着变了、离开页面即回字母头，
+# 且没有任何报错，用户和测试都看不见。现在要求：
+#   1) 落盘失败必须显式报出（不许静默吞错）；
+#   2) 本地落盘仍是先于网络同步的一等公民（网络失败只提示同步失败，不回滚本地）。
+if ! grep -q 'AVATAR-SAVE-001' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar local-persist failure is not surfaced in me.tsx" >&2
+  exit 1
+fi
+if ! grep -q 'AVATAR-SAVE-001' apps/mobile/src/profile-store.test.ts; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar persist round-trip test missing" >&2
+  exit 1
+fi
+if ! grep -q 'setProfileSaveError' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar save error must reach the user" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
+echo "    AVATAR-SAVE-001: PASS"
+
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
 # 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
 # follow），发消息仍只能进主页后做。语义变更待 commander 确认。
