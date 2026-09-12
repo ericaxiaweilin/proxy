@@ -16,6 +16,13 @@ same commit. Do not record routine business logic changes here.
   me.tsx 必须保留该显式报错路径、profile-store 必须有头像往返断言（写入→读回、
   绝对沙盒 URI 归一成文件名、clear 后不留陈旧头像）。此前只有 AVATAR-001 守
   profile-store 的文件名规范化（单元级），守不住整条保存链路。
+- 修「换完头像被默认重置」（AVATAR-002）：服务端 hydration 把
+  `remote.avatarPath`（形如 `assets/<mediaAssetId>`，是媒体 id 不是本机文件名）
+  直接 `avatarFileName()` 后写进本地记录，覆盖掉 documentDirectory 里
+  `avatar-<ts>.jpg` 的指针 → 重启/离线回字母头。现改为经
+  `mergeRemoteProfile()` 合并：本地副本文件名优先，仅在本地无头像时才用服务端
+  派生名。AVATAR-001 修的是本地规范化，这条是等价问题从**服务端回灌路径**复发，
+  新增 AVATAR-SAVE-002 守门（profile-store.ts / me.tsx / 测试三处 grep + 实跑）。
 - 发布需求向导（非基线敏感）：城市协助 · Professional 服务卡在选 Moment 那一步
   默认展开，且支持再点一次取消选择（取消时一并清掉城市协助模板，避免悬空态）。
 

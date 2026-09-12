@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { avatarFileName, createProfileStore, DEFAULT_PROFILE, isProfileRecord, profileKeyFor } from "./profile-store";
+import { avatarFileName, createProfileStore, DEFAULT_PROFILE, isProfileRecord, mergeRemoteProfile, profileKeyFor } from "./profile-store";
 import { InMemorySecureStorageDriver } from "./secure-session";
 
 describe("isProfileRecord", () => {
@@ -149,5 +149,55 @@ describe("AVATAR-SAVE-001 avatar persist round-trip", () => {
     });
     await store.clear();
     expect(await store.read()).toBeUndefined();
+  });
+});
+
+// AVATAR-SAVE-002: 「换完头像被默认重置」的守门用例。
+// 服务端 profile.avatarPath 形如 assets/<mediaAssetId>，是本机文件名之外的东西；
+// 直接落进本地记录会抹掉 documentDirectory 里那份副本的指针，重启/离线即回字母头。
+describe("AVATAR-SAVE-002 server round-trip keeps the local avatar", () => {
+  it("keeps the local copy file name when the server returns assets/<mediaId>", () => {
+    const merged = mergeRemoteProfile(
+      {
+        name: "Huyen",
+        handle: "huyen.hanoi",
+        bio: "hi",
+        city: "河内",
+        avatarPath: "assets/ma_2434ef27e71ed3f003df1320",
+        updatedAt: "2026-09-12T00:00:00.000Z"
+      },
+      {
+        name: "Huyen",
+        handle: "huyen.hanoi",
+        bio: "hi",
+        city: "河内",
+        avatarPath: "avatar-1757660000000.jpg",
+        updatedAt: "2026-09-11T00:00:00.000Z"
+      }
+    );
+    expect(merged.avatarPath).toBe("avatar-1757660000000.jpg");
+  });
+
+  it("falls back to the server-derived name only when no local avatar exists", () => {
+    const merged = mergeRemoteProfile(
+      { name: "Huyen", handle: "hanoi", bio: "", city: "河内", avatarPath: "assets/ma_999", updatedAt: "2026-09-12T00:00:00.000Z" },
+      undefined
+    );
+    expect(merged.avatarPath).toBe("ma_999");
+  });
+
+  it("keeps the local avatar even when the server profile has none", () => {
+    const merged = mergeRemoteProfile(
+      { name: "Huyen", handle: "hanoi", bio: "", city: "河内", avatarPath: undefined, updatedAt: "2026-09-12T00:00:00.000Z" },
+      {
+        name: "Huyen",
+        handle: "hanoi",
+        bio: "",
+        city: "河内",
+        avatarPath: "avatar-777.jpg",
+        updatedAt: "2026-09-11T00:00:00.000Z"
+      }
+    );
+    expect(merged.avatarPath).toBe("avatar-777.jpg");
   });
 });

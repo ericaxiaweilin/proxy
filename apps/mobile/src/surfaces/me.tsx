@@ -14,7 +14,7 @@ import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import { Directory, File, Paths } from "expo-file-system";
-import { createProfileStore, avatarFileName, type ProfileRecord } from "../profile-store";
+import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
 import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
 import { createLastSignInStore } from "../last-signin-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
@@ -471,14 +471,11 @@ export function MeSurface({
         try {
           const remote = await profileClient.getProfile(viewerAccountId);
           if (cancelled || profileTouchedRef.current) return;
-          const record: ProfileRecord = {
-            name: remote.name,
-            handle: remote.handle,
-            bio: remote.bio,
-            city: remote.city,
-            avatarPath: remote.avatarPath ? avatarFileName(remote.avatarPath) : undefined,
-            updatedAt: remote.updatedAt
-          };
+          // AVATAR-SAVE-002: 本地副本文件名优先保留（见 mergeRemoteProfile）——
+          // 服务端 avatarPath 是 assets/<mediaAssetId>，直接当本机文件名写会把
+          // documentDirectory 里的头像指针抹掉，表现为「换完头像被默认重置」。
+          const existingRecord = await profileStore.read().catch(() => undefined);
+          const record: ProfileRecord = mergeRemoteProfile(remote, existingRecord);
           await profileStore.write(record).catch(() => undefined);
           applyRecord(record);
           if (!hydrateRemoteAvatar(remote.avatarPath)) hydrateAvatar(record.avatarPath);

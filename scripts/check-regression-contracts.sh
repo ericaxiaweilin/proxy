@@ -210,6 +210,26 @@ fi
 pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-SAVE-001: PASS"
 
+# AVATAR-SAVE-002: 「换完头像被默认重置」——AVATAR-001 修的是本地文件名规范化
+# （绝对沙盒 URI→文件名），但后来新增的服务端 hydration 路径又用等价方式把它抹了：
+# remote.avatarPath 形如 assets/<mediaAssetId>，被直接 avatarFileName() 后写进本地
+# 记录，覆盖掉 documentDirectory 里那份 avatar-<ts>.jpg 的指针 → 重启/离线回字母头。
+# 守门：服务端合并必须走 mergeRemoteProfile（本地副本文件名优先），且必须有断言。
+if ! grep -q 'AVATAR-SAVE-002' apps/mobile/src/profile-store.ts; then
+  echo "  FAIL [AVATAR-SAVE-002]: remote profile merge must preserve the local avatar" >&2
+  exit 1
+fi
+if ! grep -q 'mergeRemoteProfile' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-002]: me.tsx must hydrate through mergeRemoteProfile" >&2
+  exit 1
+fi
+if ! grep -q 'AVATAR-SAVE-002' apps/mobile/src/profile-store.test.ts; then
+  echo "  FAIL [AVATAR-SAVE-002]: server round-trip avatar tests missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
+echo "    AVATAR-SAVE-002: PASS"
+
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
 # 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
 # follow），发消息仍只能进主页后做。语义变更待 commander 确认。
