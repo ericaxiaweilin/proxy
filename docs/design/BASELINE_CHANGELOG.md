@@ -25,6 +25,12 @@ same commit. Do not record routine business logic changes here.
   新增 AVATAR-SAVE-002 守门（profile-store.ts / me.tsx / 测试三处 grep + 实跑）。
 - 发布需求向导（非基线敏感）：城市协助 · Professional 服务卡在选 Moment 那一步
   默认展开，且支持再点一次取消选择（取消时一并清掉城市协助模板，避免悬空态）。
+- 头像再次「被重置」的真因（AVATAR-DELIVER-001）：服务端对上传媒体一律
+  `OWNER_ONLY`，而 `/v1/media/thumb|play/{id}` 要求 `APPROVED && PUBLIC` 才服务
+  （fail-closed），只有发帖/上架店铺会在事务里提权到 PUBLIC —— 更新个人资料这条
+  链路没做，于是头像 URL 恒 404，界面回字母头。客户端先落兜底：hydration 改为
+  **本地副本优先**（离线可用、不受可见性约束），远端仅作后备。服务端提权（
+  UpdateProfile 内 `AuthorizeForPost(...,"PUBLIC")`）为下一步修复。
 
 
 ## Revision 163 — 2026-09-11

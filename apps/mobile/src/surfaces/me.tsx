@@ -451,8 +451,11 @@ export function MeSurface({
         setProfileAvatarUri(`${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(mediaAssetId)}`);
         return true;
       };
-      const hydrateAvatar = (avatarPath?: string | undefined, record?: ProfileRecord): void => {
-        if (cancelled || !avatarPath) return;
+      // AVATAR-DELIVER-001: 返回是否命中本地副本。本机有副本时**优先**用它——
+      // 服务端副本受可见性约束（上传默认 OWNER_ONLY，公开 thumb 路由要求 PUBLIC，
+      // 命中不了就 404），远端取不到时头像绝不能被表现成「被重置」。
+      const hydrateAvatar = (avatarPath?: string | undefined, record?: ProfileRecord): boolean => {
+        if (cancelled || !avatarPath) return false;
         try {
           const name = avatarFileName(avatarPath);
           const names = new Set(PROFILE_AVATAR_DIR.list().map((entry) => entry.name));
@@ -461,10 +464,12 @@ export function MeSurface({
             if (record && record.avatarPath !== name) {
               void profileStore.write({ ...record, avatarPath: name }).catch(() => undefined);
             }
+            return true;
           }
         } catch {
           // 目录不可读：保持字母头，不崩。
         }
+        return false;
       };
       // 1. server (PROFILE-001 source of truth).
       if (profileClient && viewerAccountId) {
@@ -478,7 +483,7 @@ export function MeSurface({
           const record: ProfileRecord = mergeRemoteProfile(remote, existingRecord);
           await profileStore.write(record).catch(() => undefined);
           applyRecord(record);
-          if (!hydrateRemoteAvatar(remote.avatarPath)) hydrateAvatar(record.avatarPath);
+          if (!hydrateAvatar(record.avatarPath)) hydrateRemoteAvatar(remote.avatarPath);
           return;
         } catch {
           // No server profile yet (fresh account) or offline: fall through
