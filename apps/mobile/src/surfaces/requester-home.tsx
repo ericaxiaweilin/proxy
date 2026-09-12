@@ -397,7 +397,9 @@ export function RequesterHome({
     // 6. 咖啡 -> 整体配好 (人/时间/活动/场景联动)
     if (q.includes("咖啡")) {
       setClarifyChoices(undefined);
-      const linhIdx = filteredPeople.findIndex((p) => p.name.toLowerCase().includes("linh"));
+      // IDENTITY-ID-001: 按身份 id 匹配，不再用显示名子串 —— 用户名可编辑、可重复，
+      // 按名字找人在改名或存在同名用户时会串到别人身上。
+      const linhIdx = filteredPeople.findIndex((p) => p.id === "u_linh");
       if (linhIdx >= 0) setPersonIndex(linhIdx);
       const coffeeActIdx = storeActivities.findIndex((a) => a.title.includes("咖啡"));
       if (coffeeActIdx >= 0) setActivityIndex(coffeeActIdx);

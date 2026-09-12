@@ -268,6 +268,14 @@ if grep -q 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts; then
 fi
 echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
 
+# IDENTITY-ID-001 附加：不得再按「显示名」匹配人。用户名可编辑、可重复，按名字找人在
+# 改名或同名用户存在时会串人（requester-home 曾用 p.name.includes("linh") 选人）。
+if grep -n 'name.toLowerCase().includes(' apps/mobile/src/surfaces/requester-home.tsx >/dev/null 2>&1; then
+  echo "  FAIL [IDENTITY-ID-001]: match people by identity id, never by display name" >&2
+  grep -n 'name.toLowerCase().includes(' apps/mobile/src/surfaces/requester-home.tsx >&2
+  exit 1
+fi
+
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
 # 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
 # follow），发消息仍只能进主页后做。语义变更待 commander 确认。
