@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
@@ -12,6 +13,81 @@ import (
 
 type capturingModelStack struct {
 	messages []modelstack.ChatMessage
+}
+
+func TestHomeProxyConversationIsReusedAndSeparated(t *testing.T) {
+	s := New()
+	start := func(originID, text string) string {
+		result := s.Handle(envelopeFor("StartConversation", map[string]any{
+			"conversationType": "DM", "originType": "HOME", "originId": originID,
+			"participantId": "proxy_ai", "firstMessage": text,
+		}, ""))
+		if result.Outcome != "ACCEPTED" {
+			t.Fatalf("start home conversation: %+v", result.Error)
+		}
+		var view struct {
+			ConversationID string `json:"conversationId"`
+		}
+		_ = json.Unmarshal([]byte(result.OperationRef), &view)
+		return view.ConversationID
+	}
+	firstID := start("home_old_client_1", "第一轮")
+	secondID := start("proxy_ai_home", "第二轮")
+	if firstID != secondID {
+		t.Fatalf("Home Proxy AI must reuse one durable conversation: %s != %s", firstID, secondID)
+	}
+	messages, err := s.repository.Messages(context.Background(), firstID)
+	if err != nil || len(messages) != 3 {
+		t.Fatalf("expected first message + separator + second message: %+v err=%v", messages, err)
+	}
+	if messages[1].SenderID != "SYSTEM" || messages[1].Kind != "system_event" || messages[1].Body != "新的 Home 对话" {
+		t.Fatalf("second Home exchange must have a durable divider: %+v", messages[1])
+	}
+}
+
+func TestDirectMessageReusesLatestConversationForSameAccountPair(t *testing.T) {
+	s := New()
+	start := func(originType, originID string) string {
+		result := s.Handle(envelopeFor("StartConversation", map[string]any{
+			"conversationType": "DM", "originType": originType, "originId": originID,
+			"participantId": "user_002", "firstMessage": "你好",
+		}, ""))
+		if result.Outcome != "ACCEPTED" {
+			t.Fatalf("start DM: %+v", result.Error)
+		}
+		var view struct {
+			ConversationID string `json:"conversationId"`
+		}
+		_ = json.Unmarshal([]byte(result.OperationRef), &view)
+		return view.ConversationID
+	}
+	first := start("PROFILE", "user_002")
+	second := start("POST", "post_by_user_002")
+	if first != second {
+		t.Fatalf("same account pair must reuse one DM: %s != %s", first, second)
+	}
+}
+
+func TestInboxCollapsesHistoricalDuplicateDMsByCounterparty(t *testing.T) {
+	repo := NewMemoryRepository()
+	now := time.Now().UTC()
+	for index, at := range []time.Time{now.Add(-time.Hour), now} {
+		conv := Conversation{ID: "duplicate_" + string(rune('a'+index)), Type: "DM", OriginType: "PROFILE", OriginID: "user_002", State: "ACTIVE", Participants: []string{"user_001", "user_002"}, CreatedAt: at, LastMessageAt: at}
+		if err := repo.CreateConversation(context.Background(), conv); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewWithModelStack(repo, modelstack.Unconfigured{})
+	result := s.Handle(envelopeFor("ListConversations", map[string]any{}, "user_001"))
+	var view struct {
+		Conversations []ConversationSummary `json:"conversations"`
+	}
+	if err := json.Unmarshal([]byte(result.OperationRef), &view); err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Conversations) != 1 || view.Conversations[0].Conversation.ID != "duplicate_b" {
+		t.Fatalf("want only newest DM for user_002, got %+v", view.Conversations)
+	}
 }
 
 func (m *capturingModelStack) Available() bool { return true }
@@ -424,5 +500,42 @@ func TestAudioMessageRequiresMediaAndPersists(t *testing.T) {
 	last := rows[len(rows)-1]
 	if last.MessageType != "AUDIO" || last.MediaRef != "media_audio_1" || last.Kind != "audio" {
 		t.Fatalf("wrong audio record: %+v", last)
+	}
+}
+// AI-CONV-001: 小美主页发消息必须端到端进消息模块。客户端曾传
+// originType=AI_ASSISTANT，被服务端 validOrigins 拒（INVALID_ORIGIN_TYPE），
+// 用户看到“已发起”了吗？没有——直接失败。现在固定用 PROFILE 来源。
+// 本测试锁死：PROFILE + AI participant 建会话成功，且出现在发起人 inbox。
+func TestXiaomeiDMProfileOriginAppearsInInbox(t *testing.T) {
+	s := New()
+	start := envelopeFor("StartConversation", map[string]any{
+		"originType": "PROFILE", "originId": "ai_001", "participantId": "ai_001",
+		"firstMessage": "你好小美，我想聊聊周末企划。",
+	}, "")
+	r := s.Handle(start)
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("xiaomei DM start: got %s (%+v)", r.Outcome, r.Error)
+	}
+	list := s.Handle(envelopeFor("ListConversations", map[string]any{}, "user_001"))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list: %s (%+v)", list.Outcome, list.Error)
+	}
+	var view struct {
+		Conversations []ConversationSummary `json:"conversations"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range view.Conversations {
+		if c.CounterpartyID == "ai_001" {
+			found = true
+			if c.LatestMessage == nil || c.LatestMessage.Body == "" {
+				t.Fatalf("xiaomei DM must carry the first message: %+v", c.LatestMessage)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("xiaomei DM missing from inbox: %+v", view.Conversations)
 	}
 }

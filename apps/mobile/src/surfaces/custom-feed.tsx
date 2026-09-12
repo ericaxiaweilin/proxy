@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { color, shadows } from "../theme";
-import { readCustomFeeds, writeCustomFeeds } from "../expo-custom-feed-store";
+import { readCustomFeedsAsync, writeCustomFeeds } from "../expo-custom-feed-store";
 
 export interface CustomFeed {
   id: string;
@@ -24,9 +24,17 @@ const DEFAULT_FEEDS: CustomFeed[] = [
 ];
 
 export function CustomFeedHub({ onBack, onOpenFeed }: { onBack: () => void; onOpenFeed?: (feedId: string) => void }): React.JSX.Element {
-  const [feeds, setFeeds] = useState<CustomFeed[]>(() => readCustomFeeds(DEFAULT_FEEDS));
+  // SYNC-FS-001: 读盘异步，mount 时 hydration（此时用户尚未编辑）。
+  const [feeds, setFeeds] = useState<CustomFeed[]>(DEFAULT_FEEDS);
   const [draft, setDraft] = useState("");
   const firstRender = useRef(true);
+  useEffect(() => {
+    let cancelled = false;
+    void readCustomFeedsAsync(DEFAULT_FEEDS).then((stored) => {
+      if (!cancelled) setFeeds(stored);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;

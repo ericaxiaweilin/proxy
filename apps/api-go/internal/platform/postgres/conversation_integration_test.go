@@ -149,9 +149,9 @@ func TestConversationPostgresLifecycle(t *testing.T) {
 		t.Fatalf("expected INVALID_CONVERSATION_START, got %+v", r.Error)
 	}
 
-	// 9. Two conversations on the same origin (different actors):
-	// must each get their own conversationId (Conversation 必须保存
-	// 来源；同一 Post 不同用户发起 DM 时 Conversation 独立).
+	// 9. A direct-message account pair is canonical in both directions.
+	// Starting again from the reverse actor may carry another origin, but it
+	// must update/reuse the same inbox conversation instead of duplicating it.
 	r = svc.HandleContext(ctx, convEnvelope("StartConversation", map[string]any{
 		"originType":    "POST",
 		"originId":      "post_pg_" + itoa(run),
@@ -160,11 +160,11 @@ func TestConversationPostgresLifecycle(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("reverse StartConversation: %+v", r.Error)
 	}
-	if r.Aggregate.ID == convID {
-		t.Fatalf("reverse conversation must have a different id, got the same one")
+	if r.Aggregate.ID != convID {
+		t.Fatalf("reverse conversation must reuse %s, got %s", convID, r.Aggregate.ID)
 	}
 
-	cleanupConversationPG(t, pool, []string{convID, r.Aggregate.ID})
+	cleanupConversationPG(t, pool, []string{convID})
 }
 
 func listConvHasMessagePG(t *testing.T, op, body string) bool {

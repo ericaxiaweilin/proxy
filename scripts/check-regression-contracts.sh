@@ -30,6 +30,10 @@ require_test "AUTH-OTP-001" "./internal/identity" \
   "TestRequestLoginChallengeDeliversSMSToUpstream" \
   "apps/api-go/internal/identity/otp_delivery_tripwire_test.go" || exit $?
 
+require_test "AUTH-EMAIL-LENGTH-001" "./internal/identity" \
+  "TestPasswordlessEmailLengthBoundaryIsSharedByRegisterAndLogin" \
+  "apps/api-go/internal/identity/service_test.go" || exit $?
+
 # AUTH-SESSION-001: revoked sessions must delete their refresh tokens.
 require_test "AUTH-SESSION-001" "./internal/identity" \
   "TestRevokeSessionDeletesTokens" \
@@ -42,6 +46,67 @@ if ! grep -q 'UI-PROFILE-001' apps/mobile/src/surfaces/profile-tabs-model.test.t
 fi
 pnpm --filter @proxy/mobile test --run src/surfaces/profile-tabs-model.test.ts || exit $?
 echo "    UI-PROFILE-001/UI-PROFILE-002: PASS"
+
+if ! grep -q 'AUTH-DOB-FORMAT-001' apps/mobile/src/date-of-birth-input.test.ts ||
+   ! grep -q 'formatDateOfBirthInput(value)' apps/mobile/src/native-app.tsx; then
+  echo "  FAIL [AUTH-DOB-FORMAT-001]: registration date auto-formatting or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/date-of-birth-input.test.ts || exit $?
+echo "    AUTH-DOB-FORMAT-001: PASS (year/month/day separators + deletion)"
+if ! grep -q 'FEED-OWN-001' apps/mobile/src/feed-author.test.ts ||
+   ! grep -q 'resolveAuthorDisplayName' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-OWN-001]: viewer-relative author label or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/feed-author.test.ts src/composer-publish.test.ts || exit $?
+echo "    FEED-OWN-001: PASS (own posts labeled per viewer, no stored 你)"
+if ! grep -q 'PROFILE-READ-001' apps/mobile/src/profile-identity.test.ts ||
+   ! grep -q 'profileKeyFor' apps/mobile/src/profile-store.ts; then
+  echo "  FAIL [PROFILE-READ-001]: per-account profile hydration or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/profile-identity.test.ts src/profile-store.test.ts || exit $?
+echo "    PROFILE-READ-001: PASS (fresh accounts derive identity, profiles isolated per account)"
+require_test "PROFILE-READ-001" "./internal/identity" \
+  "TestVerifyChallengeProvisionsInitialProfile" \
+  "apps/api-go/internal/identity/service_test.go" || exit $?
+require_test "PROFILE-READ-001" "./internal/localnet" \
+  "TestCreatePostResolvesUserDisplayNameFromProfile" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "PROFILE-READ-001" "./internal/socialspace" \
+  "TestCreateStatusResolvesDisplayNameFromProfile" \
+  "apps/api-go/internal/socialspace/service_test.go" || exit $?
+require_test "PROFILE-READ-001" "./internal/marketplace" \
+  "TestPublishOpportunityResolvesOwnerFromProfile" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+require_test "PROFILE-READ-001" "./internal/platform/postgres" \
+  "TestProfileDisplayBackfillClearsLegacyLabels" \
+  "apps/api-go/internal/platform/postgres/profile_display_backfill_test.go" || exit $?
+if ! grep -q 'PROFILE-READ-001' packages/contracts/src/market-opportunity.test.ts; then
+  echo "  FAIL [PROFILE-READ-001]: empty-owner contract test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/contracts test --run src/market-opportunity.test.ts || exit $?
+echo "    PROFILE-READ-001: PASS (empty PERSON owner parses, list stays intact)"
+require_test "AUTH-LOGIN-HINT-001" "./internal/identity" \
+  "TestLookupPasswordlessIdentityHintsUnregistered" \
+  "apps/api-go/internal/identity/service_test.go" || exit $?
+if ! grep -q 'AUTH-LOGIN-HINT-001' apps/mobile/src/login-client.test.ts ||
+   ! grep -q 'lookupPasswordlessIdentity' apps/mobile/src/native-app.tsx; then
+  echo "  FAIL [AUTH-LOGIN-HINT-001]: login existence probe or its wiring is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/login-client.test.ts || exit $?
+echo "    AUTH-LOGIN-HINT-001: PASS (login hints unregistered instead of silent registration)"
+node scripts/check-media-pipeline.mjs || exit $?
+if ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/asset-sources.test.ts ||
+   ! grep -q 'MEDIA-PIPELINE-001' apps/mobile/src/media/author-avatar.test.ts; then
+  echo "  FAIL [MEDIA-PIPELINE-001]: unified media pipeline tests are missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/media/asset-sources.test.ts src/media/author-avatar.test.ts || exit $?
+echo "    MEDIA-PIPELINE-001: PASS (unified asset resolution + author avatars, feed on pipeline)"
 if ! grep -q 'MERCHANT-CREATOR-001' apps/mobile/src/supply-client.test.ts ||
    ! grep -q 'MerchantCreatorRecommendations' apps/mobile/src/surfaces/merchant-me-r21.tsx; then
   echo "  FAIL [MERCHANT-CREATOR-001]: merchant Creator recommendation pipeline or tripwire is missing" >&2
@@ -51,6 +116,17 @@ pnpm --filter @proxy/mobile test --run src/supply-client.test.ts || exit $?
 require_test "MERCHANT-CREATOR-001" "./internal/supply" \
   "TestSupplyQueryReturnsOnlyEligible" \
   "apps/api-go/internal/supply/service_test.go" || exit $?
+
+# MERCHANT-CREATOR-LIVE-002: boot seed must keep a live, photo-ready
+# Creator pool so the merchant Creator rail (server-side
+# MerchantCreatorRecommendations → supply.querySuppliers) is never empty.
+require_test "MERCHANT-CREATOR-LIVE-002" "./cmd/api" \
+  "TestMerchantCreatorLiveSeedHasFivePhotoReadyHanoiCreators" \
+  "apps/api-go/cmd/api/merchant_creator_seed_test.go" || exit $?
+require_test "MERCHANT-CREATOR-LIVE-002" "./cmd/api" \
+  "TestMerchantCreatorAvailabilityRollsAcrossClientQuery" \
+  "apps/api-go/cmd/api/merchant_creator_seed_test.go" || exit $?
+echo "    MERCHANT-CREATOR-LIVE-002: PASS (live photo-ready seed + rolling availability window)"
 if ! grep -q 'UI-SOCIAL-001' apps/mobile/src/social-settings-store.test.ts; then echo "  FAIL: UI-SOCIAL-001 missing" >&2; exit 1; fi
 if ! grep -q 'UI-SOCIAL-002' apps/mobile/src/social-settings-client.test.ts; then echo "  FAIL: UI-SOCIAL-002 missing" >&2; exit 1; fi
 if ! grep -q 'UI-SOCIAL-003' apps/mobile/src/social-settings-client.test.ts ||
@@ -112,6 +188,94 @@ fi
 pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-001: PASS"
 
+# AVATAR-SAVE-001: 「个人主页头像保存不上」的守门。此前 AVATAR-001 只守
+# profile-store 的文件名规范化（单元级），守不住 me.tsx 的整条保存链路——
+# 而且最外层 catch 是静默 `catch { setProfileAvatarUri(selected.uri) }`：
+# 相册原 URI 只在本进程有效，落盘失败时头像看着变了、离开页面即回字母头，
+# 且没有任何报错，用户和测试都看不见。现在要求：
+#   1) 落盘失败必须显式报出（不许静默吞错）；
+#   2) 本地落盘仍是先于网络同步的一等公民（网络失败只提示同步失败，不回滚本地）。
+if ! grep -q 'AVATAR-SAVE-001' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar local-persist failure is not surfaced in me.tsx" >&2
+  exit 1
+fi
+if ! grep -q 'AVATAR-SAVE-001' apps/mobile/src/profile-store.test.ts; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar persist round-trip test missing" >&2
+  exit 1
+fi
+if ! grep -q 'setProfileSaveError' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-001]: avatar save error must reach the user" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
+echo "    AVATAR-SAVE-001: PASS"
+
+# AVATAR-SAVE-002: 「换完头像被默认重置」——AVATAR-001 修的是本地文件名规范化
+# （绝对沙盒 URI→文件名），但后来新增的服务端 hydration 路径又用等价方式把它抹了：
+# remote.avatarPath 形如 assets/<mediaAssetId>，被直接 avatarFileName() 后写进本地
+# 记录，覆盖掉 documentDirectory 里那份 avatar-<ts>.jpg 的指针 → 重启/离线回字母头。
+# 守门：服务端合并必须走 mergeRemoteProfile（本地副本文件名优先），且必须有断言。
+if ! grep -q 'AVATAR-SAVE-002' apps/mobile/src/profile-store.ts; then
+  echo "  FAIL [AVATAR-SAVE-002]: remote profile merge must preserve the local avatar" >&2
+  exit 1
+fi
+if ! grep -q 'mergeRemoteProfile' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AVATAR-SAVE-002]: me.tsx must hydrate through mergeRemoteProfile" >&2
+  exit 1
+fi
+if ! grep -q 'AVATAR-SAVE-002' apps/mobile/src/profile-store.test.ts; then
+  echo "  FAIL [AVATAR-SAVE-002]: server round-trip avatar tests missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
+echo "    AVATAR-SAVE-002: PASS"
+
+# AVATAR-DELIVER-001: 头像「存了但显示不出来/被重置」的服务端半边。
+# 上传媒体默认 OWNER_ONLY，公开路由 /v1/media/thumb|play/{id} 要求
+# APPROVED && PUBLIC（fail-closed），发帖/上架店铺会在命令事务内提权到 PUBLIC，
+# 而 UpdateProfile 这条链路此前没做 → 头像 URL 恒 404，跨设备/新装直接丢头像。
+# 守门：UpdateProfile 必须在落库前提权（owner=actor, PUBLIC），失败即拒绝命令；
+# 且装配（SetProfileMediaAuthorizer）必须存在，否则能力被静默摘掉。
+require_test "AVATAR-DELIVER-001" "./internal/identity" \
+  "TestUpdateProfileAuthorizesAvatarForPublicDelivery" \
+  "apps/api-go/internal/identity/profile_avatar_delivery_test.go" || exit $?
+if ! grep -q 'AuthorizeForPost(ctx, \[\]string{mediaAssetID}' apps/api-go/internal/identity/service.go || \
+   ! grep -q 'SetProfileMediaAuthorizer' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [AVATAR-DELIVER-001]: avatar media authorization is not wired" >&2
+  exit 1
+fi
+echo "    AVATAR-DELIVER-001: PASS"
+
+# IDENTITY-ID-001: mock 人物身份只允许有一处事实源（internal/mockidentity）。
+# 症状回归：同一个显示名在首页/发布订单各显示一张头像、且无从判断是否同一个人 ——
+# 根因就是姓名+头像被各 surface 反复硬编码（含 randomuser/unsplash 外链）。
+# 守门三条：
+#   1) Go 源码里除 mockidentity 外不得再出现账号/资产 id 前缀（防止再造一份映射）；
+#   2) 服务端不得再出现 randomuser 外链头像；
+#   3) 客户端首页 fixtures 不得再自带 unsplash 原型肖像。
+if [ "$(grep -rl 'user_mockcreator_\|ma_creator_' apps/api-go --include='*.go' | grep -v 'internal/mockidentity/' | wc -l | tr -d ' ')" != "0" ]; then
+  echo "  FAIL [IDENTITY-ID-001]: account/asset id literals must live only in internal/mockidentity" >&2
+  grep -rl 'user_mockcreator_\|ma_creator_' apps/api-go --include='*.go' | grep -v 'internal/mockidentity/' >&2
+  exit 1
+fi
+if grep -rq 'randomuser.me' apps/api-go --include='*.go'; then
+  echo "  FAIL [IDENTITY-ID-001]: external avatar URL literal found in server source" >&2
+  exit 1
+fi
+if grep -q 'images.unsplash.com' apps/mobile/src/recommend-fixtures.ts; then
+  echo "  FAIL [IDENTITY-ID-001]: home fixtures must not ship their own portraits" >&2
+  exit 1
+fi
+echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
+
+# IDENTITY-ID-001 附加：不得再按「显示名」匹配人。用户名可编辑、可重复，按名字找人在
+# 改名或同名用户存在时会串人（requester-home 曾用 p.name.includes("linh") 选人）。
+if grep -nE 'filteredPeople\.findIndex\(\(p\) => p\.name' apps/mobile/src/surfaces/requester-home.tsx >/dev/null 2>&1; then
+  echo "  FAIL [IDENTITY-ID-001]: match people by identity id, never by display name" >&2
+  grep -nE 'filteredPeople\.findIndex\(\(p\) => p\.name' apps/mobile/src/surfaces/requester-home.tsx >&2
+  exit 1
+fi
+
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
 # 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
 # follow），发消息仍只能进主页后做。语义变更待 commander 确认。
@@ -143,6 +307,44 @@ if [ -f apps/api-go/internal/api/ai_assistants_test.go ] && [ -f packages/contra
 else
   echo "    AI-ASSIST-001: SKIP (assistant tests not yet on disk; the tripwire is wrapped in a presence guard until the AI-ASSIST work lands)"
 fi
+# AI-ASSIST-001: 首页 5 小美推荐目录（公开、匿名可读）+ AI 标签 + 关注/
+# 发消息。目录改名/换色必须服务端/种子/SVG 三处同步；AI 能力不得扩大
+# 到接单/报名/收付款（仍由服务端门禁禁止，此处只锁目录形状）。
+# 照片走服务端原文件直出（/v1/ai/personas/photo/{id}），客户端不复制
+# 第二份；对外只叫“AI生成”，小美≠助手。
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestListAIAssistantsFiveWithPhotos" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestListAIAssistantsMethodNotAllowed" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestPersonaPhotoServesRealPNG" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+if ! grep -q 'ListAIAssistantsPayloadSchema' packages/contracts/src/ai-assistants.test.ts; then
+  echo "  FAIL [AI-ASSIST-001]: assistants contract tests missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/contracts test --run src/ai-assistants.test.ts || exit $?
+echo "    AI-ASSIST-001: PASS"
+
+# AI-CONV-001: 小美主页发消息必须进消息模块。客户端曾传
+# originType=AI_ASSISTANT，被 validOrigins 拒（INVALID_ORIGIN_TYPE），
+# 用户点了等于没点。现在固定 PROFILE 来源；本测试锁死建会话成功 +
+# 发起人 inbox 可见 + 首条消息在。
+require_test "AI-CONV-001" "./internal/conversation" \
+  "TestXiaomeiDMProfileOriginAppearsInInbox" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+
+# AI-POSTS-001: 5 小美开屏帖（AI_NATIVE + 写真）。写真资产 APPROVED +
+# PUBLIC + READY + AI_PERSONA provenance，帖子 Upsert 幂等；feed 卡
+# AI 生成徽。测试垃圾（post_eng_*）曾淹过真机动态，测试自清理 + 门禁锁。
+require_test "AI-POSTS-001" "./internal/media" \
+  "TestSeedXiaomeiAssets" \
+  "apps/api-go/internal/media/lc06_lc07_test.go" || exit $?
+require_test "AI-POSTS-001" "./internal/localnet" \
+  "TestSeedXiaomeiPosts" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
 
 # ACT-ATTEND-001: 考勤 cancel/checkin/noShow 曾经不验归属 + UpdateState=false
 # 照样返成功（没报名也能自助 ATTENDED）。Join 必须落 participation 记录，
@@ -163,6 +365,19 @@ require_test "ACT-CONTRACT-001" "./internal/marketplace" \
   "apps/api-go/internal/marketplace/service_test.go" || exit $?
 if ! grep -q 'ON CONFLICT (id) DO NOTHING' apps/api-go/internal/platform/postgres/activity.go; then
   echo "  FAIL [ACT-CONTRACT-001]: activity Seed must stay DO NOTHING (no blind overwrite)" >&2
+  exit 1
+fi
+
+# FRIEND-UPSERT-001: relationship.friendships（migration 040）曾缺
+# (user_a, user_b) UNIQUE 约束，而 UpsertFriendship 用 ON CONFLICT
+# (user_a, user_b)——PG 要求 arbiter 索引，缺失即 42P10：PG 模式下每次
+# 好友写（发送/接受/屏蔽请求）全挂，8 个内存 service 测试全绿掩盖。
+# Migration 076 补 UNIQUE 索引；lifecycle 测试钉死 upsert 全链路。
+require_test "FRIEND-UPSERT-001" "./internal/platform/postgres" \
+  "TestRelationshipPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/relationship_integration_test.go" || exit $?
+if ! grep -q 'uq_friendships_user_pair' apps/api-go/migrations/077_relationship_pair_unique.sql; then
+  echo "  FAIL [FRIEND-UPSERT-001]: unique pair index migration must stay" >&2
   exit 1
 fi
 
@@ -658,6 +873,144 @@ if ! grep -q 'relationship\.listMyFriendships\|relationship\.acceptFriendRequest
 fi
 echo "    FRIEND-001: PASS (server + mobile wire end-to-end)"
 
+# PLACEHOLDER-001: friend-crm / messages / tasks / ProfileTabs / me-wallet
+# 曾有 20+ 个占位按钮与编造字段（假扫码结果、假邀请身份、假匹配人、
+# 假发送 toast、假余额）。修复后：有后端能力的走真接线（Share /
+# BlockFriend / 接受忽略请求 / 点赞），无后端能力的删假按钮并诚实
+# 说明，未知金额画"—"不编数。 tripwire 见
+# apps/mobile/src/surfaces/placeholder-honest-actions.test.ts。
+if ! grep -q 'PLACEHOLDER-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-001]: placeholder tripwire test file is missing" >&2
+  exit 1
+fi
+pnpm --dir apps/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts >/dev/null
+echo "    PLACEHOLDER-001: PASS (no placeholder buttons / invented fields)"
+
+# PLACEHOLDER-002: 每条交互链必须走完（出图分享之后不断线）。
+# 四路审计扫出的断链：市场搜索/自定义报价/活动图钉、场景三态静默、
+# 活动报名不刷新、会话发送假气泡/转发空壳、权限不进包、偏好存了不用、
+# 自定频道不过滤、助手 pill 导错航、建连失败无重试、资料/邀请/外链静默、
+# 主页搜索丢词、店铺素材假计数、状态点打不开、安全区死按钮、候选不落盘、
+# 权益目录空屏、Creator 输入不进 Review 且接受不持久、联系人空且不可达。
+if ! grep -q 'PLACEHOLDER-002' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-002]: exhaustive-chain tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-002: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-003: 死 prop 与死查看器（MarketSurface.onOpenActivity 全链
+# 无人调用、shell 传空函数；他人主页 onOpenMedia 空函数致图片点不开）。
+if ! grep -q 'PLACEHOLDER-003' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-003]: dead-prop tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-003: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-004: 邀约 Moment 发布到动态走真发帖管线。
+if ! grep -q 'PLACEHOLDER-004' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-004]: moment-publish tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-004: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-005: 动态本人头像与个人总管理同源；Moment 发布成功直达动态。
+if ! grep -q 'PLACEHOLDER-005' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-005]: avatar/jump tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-005: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-006: checklist 走查补漏（进行中重试、活动列表拆嵌套）。
+if ! grep -q 'PLACEHOLDER-006' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-006]: checklist-walk tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-006: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-007: 横滑 rail 必须手指 1:1（grant 快照基准）。
+if ! grep -q 'PLACEHOLDER-007' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-007]: rail-tracking tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-007: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-008: 头像统一正圆。
+if ! grep -q 'PLACEHOLDER-008' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-008]: avatar-circle tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-008: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-009: 对话头像落盘缓存。
+if ! grep -q 'PLACEHOLDER-009' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-009]: avatar-cache tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-009: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-010: AI 添加待同意显示添加中。
+if ! grep -q 'PLACEHOLDER-010' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-010]: ai-pending tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-010: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-011: 待定添加灰字。
+if ! grep -q 'PLACEHOLDER-011' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-011]: pending-gray tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-011: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-012: AI 三液态玻璃按钮 + 查看主页进动态。
+if ! grep -q 'PLACEHOLDER-012' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-012]: ai-glass-actions tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-012: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-013: 对话左滑两段删除。
+if ! grep -q 'PLACEHOLDER-013' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-013]: swipe-delete tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-013: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-014: 消息页禁左滑跳页（留给行内删除），右滑保留。
+if ! grep -q 'PLACEHOLDER-014' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-014]: swipe-direction tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-014: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-015: 对话列表无多余“最近”分区头。
+if ! grep -q 'PLACEHOLDER-015' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-015]: no-recent-header tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-015: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-016: 页签与文件夹同一横滑行。
+if ! grep -q 'PLACEHOLDER-016' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-016]: tab-folder-row tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-016: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-017: 筛选只在对话页，文件夹页有归档统计。
+if ! grep -q 'PLACEHOLDER-017' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-017]: folder-scope tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-017: PASS (tripwire present; covered by the vitest run above)"
+
+# PLACEHOLDER-018: 新建按钮在类型行内。
+if ! grep -q 'PLACEHOLDER-018' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PLACEHOLDER-018]: newbtn tripwire is missing" >&2
+  exit 1
+fi
+echo "    PLACEHOLDER-018: PASS (tripwire present; covered by the vitest run above)"
+
 # HUB-PROFILE-001: '我的' top profile card + identity card used
 # to render the hardcoded persona.name ('Huyen' / 'Bonsaidon')
 # regardless of who was signed in, and a fake '已验证 · 准时 98%'
@@ -877,4 +1230,250 @@ require_test "JURISDICTION-PERSIST-001" "./internal/platform/postgres" \
   "TestJurisdictionPostgresSurvivesServiceRestart" \
   "apps/api-go/internal/platform/postgres/jurisdiction_test.go" || exit $?
 
+# MUTED-AUTHORS-001: engagement.muted_authors 表从未被任何迁移建过，但
+# MuteAuthor 是完整功能链（service 命令 + Repository 接口 + network.go
+# SQL 实现 + main.go 生产接线）。PG 模式每次 mute 42P01（relation does
+# not exist），service 吞成 MUTE_AUTHOR_FAILED；IsMuted feed 过滤同样挂。
+# 内存 service 测试全绿掩盖——dialog/voucher 42601、friendship 42P10
+# 同 class。Migration 078 建表（UNIQUE pair 既是幂等键也是 arbiter）；
+# lifecycle 测试钉死插入 + 幂等重 mute + IsMuted 全链路。
+require_test "MUTED-AUTHORS-001" "./internal/platform/postgres" \
+  "TestMutedAuthorsPostgresLifecycle" \
+  "apps/api-go/internal/platform/postgres/muted_authors_integration_test.go" || exit $?
+require_test "MUTED-AUTHORS-002" "./internal/platform/postgres" \
+  "TestMutedAuthorsFeedFilterLifecycle" \
+  "apps/api-go/internal/platform/postgres/muted_feed_filter_integration_test.go" || exit $?
+if ! grep -q 'NOT EXISTS' apps/api-go/internal/platform/postgres/network.go || \
+   ! grep -q 'engagement.muted_authors' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MUTED-AUTHORS-002]: feed mute filter must stay in ListFeedPage SQL" >&2
+  exit 1
+fi
+if ! grep -q 'engagement.muted_authors' apps/api-go/migrations/078_muted_authors.sql; then
+  echo "  FAIL [MUTED-AUTHORS-001]: muted_authors migration must stay" >&2
+  exit 1
+fi
+
+# SYNC-FS-001: File.json() 在 Expo 57 返回 Promise——同步消费拿到 Promise
+# 对象，Array.isArray 恒 false，五个本地持久化读路径全部静默回退默认
+# （左滑删掉的会话重进复活、偏好/自定频道/创作者草稿永不恢复）。
+# 修复 = 全部读入口 await 化 + 纯解析层 local-snapshot.ts（单测覆盖）+
+# mock 如实模拟 async 形态。supersedes HIDDEN-CHATS-001（同一 bug 的
+# 全类收网版；hidden-chats 分支只修了 hidden 一点且已被本修复覆盖）。
+pnpm --dir apps/mobile exec vitest run src/local-snapshot.test.ts \
+  src/sync-fs-persist.test.ts || exit $?
+if ! grep -q 'await hiddenChatsFile.json()' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [SYNC-FS-001]: hidden chats read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'await foldersFile.json()' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [SYNC-FS-001]: folders read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'await creatorFile.json()' apps/mobile/src/surfaces/creator-application.tsx; then
+  echo "  FAIL [SYNC-FS-001]: creator draft read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'await snapshotFile.json()' apps/mobile/src/expo-feed-prefs-store.ts; then
+  echo "  FAIL [SYNC-FS-001]: feed prefs read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'await snapshotFile.json()' apps/mobile/src/expo-custom-feed-store.ts; then
+  echo "  FAIL [SYNC-FS-001]: custom feeds read must await json()" >&2
+  exit 1
+fi
+if ! grep -q 'async json(): Promise<unknown>' apps/mobile/src/expo-feed-prefs-store.test.ts; then
+  echo "  FAIL [SYNC-FS-001]: mocks must model the real async File.json()" >&2
+  exit 1
+fi
+echo "    SYNC-FS-001: PASS (5 read paths await json() + pure parse layer + honest mocks)"
+# OPP-TEMPLATE-001: 发布需求目录（热门/主题/更多）。PublishDemand 原是
+# 自由文本编辑器；R49 原型要求"选场景卡 → 确认服务"三段式。目录是
+# server 内置静态读模型（16 卡：HOT=6 THEME=4 MORE=6），每卡带发布
+# 表单默认值（tags/参考价/参考区间/合规服务标准——公共场所+现场消费
+# 自结口径）。ListOpportunityTemplates 只读匿名可调（与
+# ListMarketOpportunities 同层）；PublishMarketOpportunity wire 契约
+# 零改动——卡片只做 prefill，写路径单一 choke point 不变。
+require_test "OPP-TEMPLATE-001" "./internal/marketplace" \
+  "TestListOpportunityTemplates" \
+  "apps/api-go/internal/marketplace/templates_test.go" || exit $?
+require_test "OPP-TEMPLATE-002" "./internal/marketplace" \
+  "TestOpportunityTemplatesArePublishableAsIs" \
+  "apps/api-go/internal/marketplace/templates_test.go" || exit $?
+if ! grep -q 'ListOpportunityTemplates' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [OPP-TEMPLATE-001]: anonymous dispatch registration must stay" >&2
+  exit 1
+fi
+if ! grep -q 'ListOpportunityTemplatesPayloadSchema' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-TEMPLATE-001]: contracts wire schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'listTemplates' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-TEMPLATE-001]: mobile client method must stay" >&2
+  exit 1
+fi
+
+# OPP-TARGETED-001/002: 定向邀约（选人 → 向 TA 发出邀约）。R49 原型
+# 的"邀约给 TA"：发布 payload 带 targetUserId 时 server 把机会快照为
+# targetAccountId 非空 — List 只对目标人和 owner 可见，Apply 只收
+# 目标人（旁路拿 id 打命令也拒）；禁止定向给自己。缺省 = 公开卡，
+# 老行为零变化（Go 守护测试 + Zod 老 payload 向后兼容测试钉死）。
+# PG 无迁移：Opportunity 走 payload JSONB，targetAccountId 落在快照里。
+require_test "OPP-TARGETED-001" "./internal/marketplace" \
+  "TestTargetedOpportunityVisibilityAndApply" \
+  "apps/api-go/internal/marketplace/targeted_test.go" || exit $?
+require_test "OPP-TARGETED-002" "./internal/marketplace" \
+  "TestPublicOpportunityUnchangedBesideTargeted" \
+  "apps/api-go/internal/marketplace/targeted_test.go" || exit $?
+if ! grep -q 'targetAccountId' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-TARGETED-001]: contracts wire field must stay" >&2
+  exit 1
+fi
+if ! grep -q 'targetUserId' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [OPP-TARGETED-001]: mobile publish wiring must stay" >&2
+  exit 1
+fi
+
+# OPP-SUGGEST-001: 发布搜索"生成" — 语义层把自由文本映射到目录卡。
+# SuggestOpportunityTemplate 走 modelstack.Port（与 conversation 同一
+# 适配器），fail-closed：未配置 AI_NOT_CONFIGURED、LLM 幻觉 id 服务端
+# 白名单拒（SUGGESTION_MALFORMED）、无匹配 SUGGESTION_NO_MATCH —
+# 不许正则硬解。命中返回目录卡原文（零编造字段）。
+require_test "OPP-SUGGEST-001" "./internal/marketplace" \
+  "TestSuggestOpportunityTemplate" \
+  "apps/api-go/internal/marketplace/suggest_test.go" || exit $?
+if ! grep -q 'SuggestOpportunityTemplate' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [OPP-SUGGEST-001]: anonymous dispatch registration must stay" >&2
+  exit 1
+fi
+if ! grep -q 'SuggestOpportunityTemplatePayloadSchema' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-SUGGEST-001]: contracts wire schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'suggestTemplate' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-SUGGEST-001]: mobile client method must stay" >&2
+  exit 1
+fi
+
+# OPP-CATALOG-001/002 (R58): 目录引擎 — 分类轨道 + Moment 规格/比例
+# 政策/动态定价 + 活动预设，全部服务端数据源（客户端不硬编码词表）。
+# 一次匿名读命令 ListOpportunityTemplates 全量下发；跨引用坏链 =
+# 目录 bug，Go 守护测试钉死。
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogCategoriesResolveToRealTemplates" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogSpecsAndPoliciesCoverEveryTemplate" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-001" "./internal/marketplace" \
+  "TestCatalogPricingRulesMatchSpecDimensions" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-002" "./internal/marketplace" \
+  "TestCatalogSnapshotSerializesWholeEngine" \
+  "apps/api-go/internal/marketplace/catalog_engine_test.go" || exit $?
+require_test "OPP-CATALOG-002" "./internal/marketplace" \
+  "TestListOpportunityTemplatesShipsWholeEngine" \
+  "apps/api-go/internal/marketplace/service_test.go" || exit $?
+if ! grep -q 'buildCatalogSnapshot' apps/api-go/internal/marketplace/service.go; then
+  echo "  FAIL [OPP-CATALOG-001]: service dispatch must serve the engine snapshot" >&2
+  exit 1
+fi
+if ! grep -q 'activityPresets' apps/api-go/internal/marketplace/service.go; then
+  echo "  FAIL [OPP-CATALOG-002]: wire payload must forward activity presets (R58 activity line)" >&2
+  exit 1
+fi
+if ! grep -q 'activityPresets' packages/contracts/src/index.ts; then
+  echo "  FAIL [OPP-CATALOG-002]: contracts activity presets schema must stay" >&2
+  exit 1
+fi
+if ! grep -q 'listCatalog' apps/mobile/src/marketplace-client.ts; then
+  echo "  FAIL [OPP-CATALOG-001]: mobile catalog client must stay" >&2
+  exit 1
+fi
+if ! grep -q 'momentPriceQuote' apps/mobile/src/market-template-price.ts; then
+  echo "  FAIL [OPP-CATALOG-001]: dynamic pricing math must stay unit-tested" >&2
+  exit 1
+fi
+if ! grep -q 'formatTraceId' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [R58-TRACE]: success-screen trace id must stay" >&2
+  exit 1
+fi
+
+# CHROME-PARITY-001: HOME / MESSAGES 主信息流的滑动显隐从未接线——
+# RequesterHome 内部 handler 代码就绪但壳没传 onChromeVisibilityChange
+# （死代码），MessagesSurface prop 声明在类型里但收不到信号。四主信息流
+# （FEED/MARKET/HOME/MESSAGES）统一上滑藏、下滑/回顶显（阈值 -18/+28，
+# 回顶 48px 强制显）。selectors 的 home/message 信号是 optional——未接线
+# 的调用方保持常显（向后兼容）。MARKET 走共享 feedChromeVisible 是
+# commander 09-10 的简化设计，保留不动。
+if ! grep -q 'lets the %s stream hide chrome like Feed (chrome-parity)' apps/mobile/src/shell/app-shell.test.ts; then
+  echo "  FAIL [CHROME-PARITY-001]: selector parity test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/shell/app-shell.test.ts || exit $?
+if ! grep -q 'onChromeVisibilityChange={setHomeChromeVisible}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [CHROME-PARITY-001]: HOME chrome signal wiring must stay" >&2
+  exit 1
+fi
+if ! grep -q 'onChromeVisibilityChange={setMessageChromeVisible}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [CHROME-PARITY-001]: MESSAGES chrome signal wiring must stay" >&2
+  exit 1
+fi
+if ! grep -q 'onScroll={onInboxScroll}' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CHROME-PARITY-001]: messages inbox scroll handler must stay" >&2
+  exit 1
+fi
+echo "  CHROME-PARITY-001: PASS (HOME/MESSAGES scroll chrome parity + optional legacy fallback)"
+
 echo "  regression contracts: OK"
+
+# ACCOUNT-SWITCH-001: same-phone account switch (logout A -> login B) was
+# REJECTED forever: revokeSession never released the device row and
+# upsertDevice's owner guard was absolute ("device belongs to another user").
+# The memory repo had NO guard on the fresh-identity path, so in-memory
+# service tests stayed green while PG mode rejected every switch — the same
+# class as friendship 42P10 / muted_authors 42P01. Fix: takeover device
+# binding — a different account may claim the device only when it has no
+# ACTIVE session; one-active-account-per-device stays intact (pinned by
+# the same test, step 2). Full 8-step chain incl. switch-back round-trip.
+require_test "ACCOUNT-SWITCH-001" "./internal/platform/postgres" \
+  "TestAccountSwitchSameDeviceLifecycle" \
+  "apps/api-go/internal/platform/postgres/account_switch_integration_test.go" || exit $?
+
+# ACCOUNT-MULTIDEVICE-001: same account on multiple real phones — pinned
+# end-to-end (Begin -> Verify -> CreateSession): two devices coexist ACTIVE
+# (MaxConcurrentSessions=2), tokens are per-device distinct, and the THIRD
+# login FIFO-evicts the OLDEST session (AUTO_EVICT_NEW_LOGIN, the
+# WhatsApp "logged in on another device" behavior). The evicted token must
+# be dead; the surviving device's token keeps resolving to the account.
+require_test "ACCOUNT-MULTIDEVICE-001" "./internal/platform/postgres" \
+  "TestAccountMultiDeviceSameAccount" \
+  "apps/api-go/internal/platform/postgres/account_multidevice_integration_test.go" || exit $?
+
+# OTP-BRUTEFORCE-001: a single challenge locks after MaxAttempts=5 wrong
+# codes (5th wrong -> LOCKED, correct code then REJECTED) and an expired
+# challenge (5-minute TTL) rejects even the correct code — both verifications
+# and CreateSession check status/attempt count and expiry. Industry-standard
+# bounded-attempt defense, pinned so nobody lifts the caps.
+require_test "OTP-BRUTEFORCE-001" "./internal/platform/postgres" \
+  "TestLoginChallengeBruteForceLockout" \
+  "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?
+
+# OTP-SINGLE-CODE-001: a fresh code supersedes every PENDING one — only the
+# MOST RECENT code per identifier is verifiable (WhatsApp / Telegram /
+# Twilio Verify). Previously an identity could hold unlimited concurrent
+# PENDING codes, each with its own 5 attempts. Supersede + insert + events
+# happen in one transaction (CreateLoginChallengeSupersedingPending), and
+# the superseded code rejects even the CORRECT code afterwards.
+require_test "OTP-SINGLE-CODE-001" "./internal/platform/postgres" \
+  "TestLoginChallengeSingleActiveCode" \
+  "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?
+
+# OTP-THROTTLE-001: code DELIVERY is throttled per identifier (Twilio
+# Verify ladder: 1/min, 10/hour) — peek before the provider is charged,
+# record only after the provider accepted, so a rejected begin (device
+# guard) never burns the user's resend allowance. Without this a caller
+# could mint unlimited fresh codes, each with 5 attempts, resetting the
+# brute-force cap forever.
+require_test "OTP-THROTTLE-001" "./internal/platform/postgres" \
+  "TestLoginChallengeRequestThrottle" \
+  "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?

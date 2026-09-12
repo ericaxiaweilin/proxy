@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -37,12 +38,14 @@ import (
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
+	"github.com/proxy-app/proxy-api/internal/mockidentity"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
+	"github.com/proxy-app/proxy-api/internal/profile"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
 	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/safety"
@@ -102,6 +105,9 @@ func main() {
 	mediaService := media.New()
 	mediaService.SetStoreDir(mediaStoreDir)
 	contributionService := contribution.New()
+	// Profile 域（P1，audit 2026-09-04）：默认内存仓；DATABASE_URL 存在时
+	// 在 DB 分支换成 postgres.NewProfileRepository（服务端持久化名片）。
+	profileService := profile.New()
 	socialSpaceService := socialspace.New()
 	businessService := business.New()
 	relationshipService := relationship.New()
@@ -112,6 +118,10 @@ func main() {
 	sceneService := scene.New()
 	realitySceneService := realityscene.New()
 	marketplaceService := marketplace.New()
+	// OPP-SUGGEST-001: 发布搜索"生成"走语义层（modelstack），与
+	// conversation 同一适配器；未配置时 SuggestOpportunityTemplate
+	// fail-closed 明确拒绝（AI_NOT_CONFIGURED），前端隐藏生成入口。
+	marketplaceService.SetModelStack(modelStack)
 	// R17.x: chat → order 派生. marketplace ConfirmMarketApplication
 	// 委托 fulfillment 创建真 Order, 让“我的订单”页能看见.
 	// 接口定义在 marketplace package (DIP: 消费者侧),
@@ -190,19 +200,17 @@ func main() {
 			if err := seedPostgresIdentity(pool); err != nil {
 				log.Fatalf("seed postgres identity: %v", err)
 			}
-			// R15.32: Supply seed (3 demo agents) used to also run
-			// only in simulated mode, but the MapExploreSurface needs
-			// at least these 3 agents to show a populated agent pin
-			// layer. We re-enabled it on every boot in R15.32.2, but
-			// supply.agent_profiles currently has FORCE ROW LEVEL
-			// SECURITY with no write policy for the `proxy` role, so
-			// the seed fails on SMTP mode. Leaving it gated to
-			// simulatedLogin for now — the agents get inserted the
-			// first time someone logs in with simulated mode, and
-			// subsequent restarts see them in the DB already.
-			if err := seedPostgresSupply(pool); err != nil {
-				log.Fatalf("seed postgres supply: %v", err)
-			}
+		}
+		// R15.32 / MERCHANT-CREATOR-LIVE-002: Supply seed (6 photo-ready
+		// Creator profiles with a rolling availability window) used to run
+		// only in simulated mode because supply.agent_profiles had FORCE
+		// ROW LEVEL SECURITY with no write policy for the `proxy` role
+		// (migration 065 turned that off; see the audit note there).
+		// MapExploreSurface needs the agent pin layer and the merchant
+		// Creator rail reads the same rows, so the seed runs on every boot
+		// regardless of login provider — same rule as seedPostgresMedia.
+		if err := seedPostgresSupply(pool); err != nil {
+			log.Fatalf("seed postgres supply: %v", err)
 		}
 		// 公开种子帖长期引用这些固定媒体 ID。媒体读模型不能跟登录
 		// Provider（simulated / SMTP / SMS）耦合，否则切换认证方式后会出现
@@ -224,12 +232,16 @@ func main() {
 		)
 		mediaService.SetStoreDir(mediaStoreDir)
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
+		profileService = profile.NewWithRepository(postgres.NewProfileRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))
 		businessService = business.NewWithRepository(postgres.NewBusinessRepository(pool))
 		// R36.x MENU-001: storefront photo/menu uploads go through the
 		// media pipeline; attaching them to a store publishes the
 		// assets to PUBLIC so thumb/play URLs resolve.
 		businessService.SetMediaAuthorizer(mediaService)
+		// AVATAR-DELIVER-001: 头像同样要提权——上传默认 OWNER_ONLY，
+		// 公开 thumb/play 路由要求 APPROVED && PUBLIC，不提权头像恒 404。
+		identityService.SetProfileMediaAuthorizer(mediaService)
 		relationshipService = relationship.NewWithRepository(postgres.NewRelationshipRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
 		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())
@@ -254,9 +266,25 @@ func main() {
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
+	// AI-POSTS-001: 5 小美写真资产 + 开屏帖（幂等，可重跑；只增不改，
+	// 绝不删行）。放 PG 替换之后，对 memory/PG 两种仓储都生效。
+	if seedErr := mediaService.SeedXiaomeiAssets(context.Background()); seedErr != nil {
+		log.Printf("seed xiaomei media: %v (continuing without seed)", seedErr)
+	}
+	if seedErr := localNetService.SeedXiaomeiPosts(context.Background()); seedErr != nil {
+		log.Printf("seed xiaomei posts: %v (continuing without seed)", seedErr)
+	}
 	// Wire after the optional PostgreSQL replacements. Wiring before this block
 	// leaves marketplace pointing at the discarded in-memory fulfillment repo.
 	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
+	// PROFILE-READ-001: content publishers resolve USER display names from
+	// the verified account profile instead of trusting client-supplied
+	// strings. Wired here so both the memory and PostgreSQL instances are
+	// covered.
+	authorNames := identityService.AuthorNameResolver()
+	localNetService.SetAuthorNameResolver(authorNames)
+	socialSpaceService.SetAuthorNameResolver(authorNames)
+	marketplaceService.SetAuthorNameResolver(authorNames)
 	sceneService.SetInvitationOrderCreator(sceneFulfillmentAdapter{repo: fulfillmentService.Repository()})
 	databaseReadyCheck := readyCheck
 	readyCheck = func(ctx context.Context) error {
@@ -283,6 +311,7 @@ func main() {
 	server.Outcome = outcomeService
 	server.Scene = sceneService
 	server.RealityScene = realitySceneService
+	server.Profile = profileService
 	// R15.32.1.3: /v1/geocode/reverse talks to Nominatim. Wire a
 	// 4s-timeout client so a slow upstream doesn't hang the picker.
 	server.HTTPClient = &http.Client{Timeout: 4 * time.Second}
@@ -662,6 +691,110 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 		{"seed_media_route_video", "VIDEO", "dkq8qwqitirc_playback.mp4", "dkq8qwqitirc_playback.mp4", "dkq8qwqitirc_thumb.jpg", "video/mp4", "h264", 1080, 1920, 9833},
 		{"seed_media_opening_video", "VIDEO", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_playback.mp4", "dkq8mi3yf254_thumb.jpg", "video/mp4", "h264", 320, 240, 2020},
 	}
+	appendImage := func(id, key string, width, height int) {
+		assets = append(assets, struct {
+			id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+			width, height                                                  int
+			durationMs                                                     int64
+		}{id, "IMAGE", key, key, key, "image/jpeg", "", width, height, 0})
+	}
+	for _, group := range []struct {
+		kind, prefix string
+		height       int
+		names        []string
+	}{
+		{"action", "scene_r42_action", 267, []string{"cycling", "shopping", "movie", "music", "food-hunting", "travel", "sport"}},
+		{"scene", "scene_r42_scene", 250, []string{"old-town", "beach", "park", "mall", "restaurant", "cafe", "night-market", "event"}},
+		{"theme", "scene_r42_theme", 247, []string{"night", "retro", "vietnam", "nature", "art", "daily", "festival", "local"}},
+		{"moment", "scene_r42_moment", 260, []string{"morning", "daytime", "sunset", "night", "friends", "solo", "couple", "family"}},
+	} {
+		for _, name := range group.names {
+			appendImage("seed_r42_v2_"+group.kind+"_"+name, group.prefix+"_"+name+"_v2.jpg", 168, group.height)
+		}
+	}
+	for _, service := range []struct {
+		name   string
+		height int
+	}{
+		{"business-companion", 225}, {"administrative-companion", 225},
+		{"housing-viewing", 227}, {"sim-setup", 227}, {"study-exchange", 227},
+		{"content-creation", 227}, {"local-guide", 227},
+	} {
+		appendImage("seed_scene_service_"+service.name+"_v1", "scene_service_"+service.name+"_v1.jpg", 248, service.height)
+	}
+	// R42 scene/action editorial samples live in the server media store, never
+	// in the mobile bundle. Stable IDs let the catalog change independently of
+	// an App Store build while the files can later move to object storage/CDN.
+	for row := 0; row < 3; row++ {
+		for col := 0; col < 6; col++ {
+			id := fmt.Sprintf("seed_scene_action_primary_%d_%d", row, col)
+			key := fmt.Sprintf("scene_action_primary_%d_%d.jpg", row, col)
+			assets = append(assets, struct {
+				id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+				width, height                                                  int
+				durationMs                                                     int64
+			}{id, "IMAGE", key, key, key, "image/jpeg", "", 250, 288, 0})
+		}
+	}
+	extendedHeights := []int{242, 232, 226, 235}
+	for row, height := range extendedHeights {
+		for col := 0; col < 6; col++ {
+			id := fmt.Sprintf("seed_scene_action_extended_%d_%d", row, col)
+			key := fmt.Sprintf("scene_action_extended_%d_%d.jpg", row, col)
+			assets = append(assets, struct {
+				id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+				width, height                                                  int
+				durationMs                                                     int64
+			}{id, "IMAGE", key, key, key, "image/jpeg", "", 250, height, 0})
+		}
+	}
+	for row := 0; row < 3; row++ {
+		for col := 0; col < 5; col++ {
+			id := fmt.Sprintf("seed_scene_theme_%d_%d", row, col)
+			key := fmt.Sprintf("scene_theme_%d_%d.jpg", row, col)
+			assets = append(assets, struct {
+				id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+				width, height                                                  int
+				durationMs                                                     int64
+			}{id, "IMAGE", key, key, key, "image/jpeg", "", 303, 336, 0})
+		}
+	}
+	for _, portrait := range []struct{ id, key string }{
+		{"seed_scene_aodai_rooftop", "scene_aodai_rooftop.jpg"},
+		{"seed_scene_aodai_oldtown", "scene_aodai_oldtown.jpg"},
+	} {
+		assets = append(assets, struct {
+			id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+			width, height                                                  int
+			durationMs                                                     int64
+		}{portrait.id, "IMAGE", portrait.key, portrait.key, portrait.key, "image/jpeg", "", 1122, 1402, 0})
+	}
+	// R135 hospital language/companion samples are deliberately separate
+	// network assets. The emergency reference crop is retained in storage for
+	// editorial use, but is not exposed by the matchmaking catalog.
+	for _, medical := range []struct {
+		id, key       string
+		width, height int
+	}{
+		{"seed_scene_medical_hero_v1", "scene_medical_hero_v1.jpg", 688, 422},
+		{"seed_scene_medical_registration_v1", "scene_medical_registration_v1.jpg", 224, 211},
+		{"seed_scene_medical_doctor_translation_v1", "scene_medical_doctor_translation_v1.jpg", 224, 211},
+		{"seed_scene_medical_examination_v1", "scene_medical_examination_v1.jpg", 202, 211},
+		{"seed_scene_medical_pharmacy_v1", "scene_medical_pharmacy_v1.jpg", 198, 211},
+		{"seed_scene_medical_communication_v1", "scene_medical_communication_v1.jpg", 224, 211},
+		{"seed_scene_medical_stay_v1", "scene_medical_stay_v1.jpg", 224, 211},
+		{"seed_scene_medical_checkup_v1", "scene_medical_checkup_v1.jpg", 202, 211},
+		{"seed_scene_medical_hospital_v1", "scene_medical_hospital_v1.jpg", 205, 235},
+		{"seed_scene_medical_information_v1", "scene_medical_information_v1.jpg", 205, 235},
+		{"seed_scene_medical_waiting_v1", "scene_medical_waiting_v1.jpg", 230, 235},
+		{"seed_scene_medical_companion_v1", "scene_medical_companion_v1.jpg", 222, 235},
+	} {
+		assets = append(assets, struct {
+			id, mediaType, originalKey, playbackKey, thumbKey, mime, codec string
+			width, height                                                  int
+			durationMs                                                     int64
+		}{medical.id, "IMAGE", medical.key, medical.key, medical.key, "image/jpeg", "", medical.width, medical.height, 0})
+	}
 	for _, a := range assets {
 		// First-party editorial assets are owned by the PLATFORM principal.
 		// Never attribute system content to a synthetic individual account.
@@ -730,7 +863,51 @@ func seedPostgresIdentity(pool *pgxpool.Pool) error {
 	return nil
 }
 
-// seedPostgresSupply 写入 3 个真实测试 Agent（B 完成标准）。
+type creatorSeedProfile struct {
+	agentID, name, bio string
+	languages, areas   []string
+}
+
+func merchantCreatorSeedProfiles() []creatorSeedProfile {
+	// IDENTITY-ID-001: 头像不再写死外链。候选头像由账号 id 派生（见
+	// creatorAvatarPath），与 identity.profiles.avatar_path 指向同一媒体资产——
+	// 同一个人的头像只有一处事实源，谁也不会「首页一个新、发布订单一个旧」。
+	return []creatorSeedProfile{
+		{"agent_linh", "Linh", "河内本地向导，中文流利，擅长摄影", []string{"ZH", "VI"}, []string{"hn"}},
+		{"agent_mai", "Mai", "河内本地人，越南语向导", []string{"VI"}, []string{"hn"}},
+		{"agent_an", "An", "河内活动接待，熟悉咖啡与餐厅场景", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_thao", "Thao", "河内中越口译与活动协作 Creator", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_yen", "Yen", "河内生活方式 Creator，擅长到店内容", []string{"VI", "ZH"}, []string{"hn"}},
+		{"agent_minh", "Minh", "胡志明市中文向导", []string{"ZH"}, []string{"hcm"}},
+	}
+}
+
+// creatorAccountID / creatorAvatarPath 委托给 mockidentity（唯一事实源）：
+// 身份映射只允许有一处实现，避免各 surface 再各自硬编码姓名/头像。
+func creatorAccountID(agentID string) string {
+	return mockidentity.AccountIDForFacetKey(strings.TrimPrefix(agentID, "agent_"))
+}
+
+func creatorAvatarPath(agentID string) string {
+	return mockidentity.AvatarPathForFacetKey(strings.TrimPrefix(agentID, "agent_"))
+}
+
+func merchantCreatorAvailability(now time.Time) (time.Time, time.Time) {
+	return now.Add(time.Hour), now.Add(72 * time.Hour)
+}
+
+// creatorAccountID 由固定 facet 键（agent_id）确定性派生出系统账号 id。
+// 与可编辑的显示名解耦：改名字不动 id，同名不同人也能区分。
+
+// creatorCity 把服务区映射为账号 profile 的城市（profile 要求 1..60 字符）。
+func creatorCity(areas []string) string {
+	if len(areas) > 0 && areas[0] == "hcm" {
+		return "Ho Chi Minh City"
+	}
+	return "Hanoi"
+}
+
+// seedPostgresSupply 写入可用于商家 Creator 推荐的真实测试 Agent。
 // Linh：河内，中文+越南语 VERIFIED+摄影，120 万
 // Mai：河内，仅越南语 VERIFIED，100 万（中文查询应被过滤）
 // Minh：胡志明市，中文 VERIFIED，110 万（河内查询应被过滤）
@@ -738,27 +915,40 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	now := time.Now().UTC()
-	// 明天 9:00 UTC 起 10 小时（与 e2e 查询一致）
-	tomorrow9 := time.Now().UTC().Truncate(24 * time.Hour).Add(24*time.Hour + 9*time.Hour)
-	tomorrow19 := tomorrow9.Add(10 * time.Hour)
 	// Agent Profile
-	profiles := []struct {
-		agentID, name, bio string
-		languages, areas   []string
-	}{
-		{"agent_linh", "Linh", "河内本地向导，中文流利，擅长摄影", []string{"ZH", "VI"}, []string{"hn"}},
-		{"agent_mai", "Mai", "河内本地人，越南语向导", []string{"VI"}, []string{"hn"}},
-		{"agent_minh", "Minh", "胡志明市中文向导", []string{"ZH"}, []string{"hcm"}},
-	}
+	profiles := merchantCreatorSeedProfiles()
 	for _, p := range profiles {
+		photos, _ := json.Marshal([]string{creatorAvatarPath(p.agentID)})
 		languages, _ := json.Marshal(p.languages)
 		areas, _ := json.Marshal(p.areas)
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO supply.agent_profiles (agent_id, name, bio, photos, languages, service_areas, status, created_at, updated_at)
-			VALUES ($1,$2,$3,'[]',$4,$5,'ACTIVE',$6,$6)
+			VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',$7,$7)
 			ON CONFLICT (agent_id) DO UPDATE SET name=EXCLUDED.name, bio=EXCLUDED.bio,
-				languages=EXCLUDED.languages, service_areas=EXCLUDED.service_areas, status='ACTIVE', updated_at=EXCLUDED.updated_at`,
-			p.agentID, p.name, p.bio, languages, areas, now); err != nil {
+				photos=EXCLUDED.photos, languages=EXCLUDED.languages, service_areas=EXCLUDED.service_areas, status='ACTIVE', updated_at=EXCLUDED.updated_at`,
+			p.agentID, p.name, p.bio, photos, languages, areas, now); err != nil {
+			return err
+		}
+		// IDENTITY-ID-001: mock Creator 同样必须是「有系统 id 的账号」，不能只有手写
+		// agent_id + 显示名 —— 否则同一显示名在不同页面各持一份头像，无法判断是否同一个人。
+		// 账号 id 由 agent_id（固定 facet 键）确定性派生，与可编辑的显示名无关，保证幂等；
+		// 名字改了不影响身份，同名也不会互相串头像。
+		accountID := creatorAccountID(p.agentID)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO identity.user_accounts (id, status, created_at, updated_at)
+			VALUES ($1,'REGISTERED',$2,$2)
+			ON CONFLICT (id) DO NOTHING`, accountID, now); err != nil {
+			return err
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO identity.profiles (user_account_id, name, handle, bio, city, avatar_path, version, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'',1,$6)
+			ON CONFLICT (user_account_id) DO UPDATE SET name=EXCLUDED.name, bio=EXCLUDED.bio,
+				city=EXCLUDED.city, updated_at=EXCLUDED.updated_at`,
+			accountID, p.name, "creator_"+strings.TrimPrefix(p.agentID, "agent_"), p.bio, creatorCity(p.areas), now); err != nil {
+			return err
+		}
+		if _, err := pool.Exec(ctx, `UPDATE supply.agent_profiles SET user_account_id=$1 WHERE agent_id=$2`, accountID, p.agentID); err != nil {
 			return err
 		}
 	}
@@ -770,6 +960,9 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	}{
 		{"agent_linh", 1200000, []string{"hn"}},
 		{"agent_mai", 1000000, []string{"hn"}},
+		{"agent_an", 900000, []string{"hn"}},
+		{"agent_thao", 1300000, []string{"hn"}},
+		{"agent_yen", 1050000, []string{"hn"}},
 		{"agent_minh", 1100000, []string{"hcm"}},
 	}
 	for _, svc := range services {
@@ -790,6 +983,9 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	}{
 		{"agent_linh", "ZH", true}, {"agent_linh", "VI", true}, {"agent_linh", "PHOTOGRAPHY", true},
 		{"agent_mai", "VI", true}, {"agent_mai", "ZH", false},
+		{"agent_an", "VI", true}, {"agent_an", "ZH", true},
+		{"agent_thao", "VI", true}, {"agent_thao", "ZH", true},
+		{"agent_yen", "VI", true}, {"agent_yen", "ZH", true},
 		{"agent_minh", "ZH", true},
 	}
 	for _, c := range caps {
@@ -807,6 +1003,9 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 	}{
 		{"cv_linh_zh", "agent_linh", "ZH"}, {"cv_linh_vi", "agent_linh", "VI"}, {"cv_linh_photo", "agent_linh", "PHOTOGRAPHY"},
 		{"cv_mai_vi", "agent_mai", "VI"},
+		{"cv_an_vi", "agent_an", "VI"}, {"cv_an_zh", "agent_an", "ZH"},
+		{"cv_thao_vi", "agent_thao", "VI"}, {"cv_thao_zh", "agent_thao", "ZH"},
+		{"cv_yen_vi", "agent_yen", "VI"}, {"cv_yen_zh", "agent_yen", "ZH"},
 		{"cv_minh_zh", "agent_minh", "ZH"},
 	}
 	for _, v := range verifications {
@@ -818,23 +1017,22 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 			return err
 		}
 	}
-	// AvailabilityWindow（明天 9:00-19:00，幂等按固定 id 查重，跨天重启不冲突）
-	agents := []string{"agent_linh", "agent_mai", "agent_minh"}
+	// AvailabilityWindow is a rolling projection refreshed at every boot. A
+	// fixed one-day seed becomes permanently stale after its first launch.
+	windowStart, windowEnd := merchantCreatorAvailability(now)
+	agents := []string{"agent_linh", "agent_mai", "agent_an", "agent_thao", "agent_yen", "agent_minh"}
 	for _, agentID := range agents {
-		var exists int
-		if err := pool.QueryRow(ctx, `
-			SELECT count(*) FROM supply.availability_windows WHERE id=$1`,
-			"aw_"+agentID).Scan(&exists); err != nil {
-			return err
+		marketID := "hn"
+		if agentID == "agent_minh" {
+			marketID = "hcm"
 		}
-		if exists == 0 {
-			if _, err := pool.Exec(ctx, `
+		if _, err := pool.Exec(ctx, `
 				INSERT INTO supply.availability_windows (id, agent_id, start_at, end_at, market_id, status, created_at, updated_at)
 				VALUES ($1,$2,$3,$4,$5,'AVAILABLE',$6,$6)
-				ON CONFLICT (id) DO NOTHING`,
-				"aw_"+agentID, agentID, tomorrow9, tomorrow19, "hn", now); err != nil {
-				return err
-			}
+				ON CONFLICT (id) DO UPDATE SET start_at=EXCLUDED.start_at, end_at=EXCLUDED.end_at,
+					market_id=EXCLUDED.market_id, status='AVAILABLE', updated_at=EXCLUDED.updated_at`,
+			"aw_"+agentID, agentID, windowStart, windowEnd, marketID, now); err != nil {
+			return err
 		}
 	}
 	return nil

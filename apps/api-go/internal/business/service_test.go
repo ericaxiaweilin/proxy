@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
@@ -258,9 +259,13 @@ func TestSpendDailyUpsertAndList(t *testing.T) {
 	_ = json.Unmarshal([]byte(created.OperationRef), &body)
 	businessID := body["businessId"].(string)
 
+	// 日期必须相对「现在」取：ListSpendDaily 是 sinceDays 滚动窗口，
+	// 写死 bucketDate 会在过几天后被滚出窗口，导致这条 tripwire 变成定时炸弹
+	// （2026-09-12 起 totalOrders 恒为 0，全仓库 g2 红）。
+	bucketDate := time.Now().UTC().Format("2006-01-02")
 	upsert := service.Handle(businessEnvelope("owner", "UpsertSpendDaily", businessID, map[string]any{
 		"businessId":             businessID,
-		"bucketDate":             "2026-09-05",
+		"bucketDate":             bucketDate,
 		"orderCount":             18,
 		"grossMinor":             12_600_000_000,
 		"newCustomerCount":       4,

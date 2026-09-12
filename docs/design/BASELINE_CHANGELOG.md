@@ -4,6 +4,500 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 165 — 2026-09-12
+
+- AI-ASSIST-001：首页 AI 助手推荐目录（AI-ASSIST-001）—— 5 小美公开目录
+  （/v1/ai/assistants，匿名可读）+ AI 标签 + 关注/发消息。目录改名/换色必须
+  服务端/种子/SVG 三处同步；AI 能力不扩大到接单/报名/收付款（服务端门禁）。
+  照片走服务端原文件直出（/v1/ai/personas/photo/{id}），客户端不复制第二份。
+  首页「真人推荐」之后渲染 AIAssistantsRow，与真人推荐分开不混排。
+- AI-CONV-001：小美主页发消息固定 PROFILE origin，进消息模块 inbox。
+- AI-POSTS-001：5 小美开屏帖（AI_NATIVE + 写真，AI_PERSONA provenance），
+  帖子 Upsert 幂等，动态卡 AI 生成徽。
+
+## Revision 164 — 2026-09-12
+
+- 修「个人主页头像保存不上」：`me.tsx` 的 chooseProfileAvatar 最外层 `catch` 此前是
+  静默 `catch { setProfileAvatarUri(selected.uri) }` —— 相册原 URI 只在本进程有效，
+  本地落盘（documentDirectory 副本 + SecureStore 记录）一旦失败，头像看着变了、
+  离开页面或重启即回字母头，且**不报错**，用户和测试都看不见。现在显式报出真实
+  原因（`[proxy.AVATAR-SAVE-001] local avatar persist FAIL` + 错误提示），不再假装
+  保存成功。
+- 门禁补强 AVATAR-SAVE-001：`scripts/check-regression-contracts.sh` 新增守门 ——
+  me.tsx 必须保留该显式报错路径、profile-store 必须有头像往返断言（写入→读回、
+  绝对沙盒 URI 归一成文件名、clear 后不留陈旧头像）。此前只有 AVATAR-001 守
+  profile-store 的文件名规范化（单元级），守不住整条保存链路。
+- 修「换完头像被默认重置」（AVATAR-002）：服务端 hydration 把
+  `remote.avatarPath`（形如 `assets/<mediaAssetId>`，是媒体 id 不是本机文件名）
+  直接 `avatarFileName()` 后写进本地记录，覆盖掉 documentDirectory 里
+  `avatar-<ts>.jpg` 的指针 → 重启/离线回字母头。现改为经
+  `mergeRemoteProfile()` 合并：本地副本文件名优先，仅在本地无头像时才用服务端
+  派生名。AVATAR-001 修的是本地规范化，这条是等价问题从**服务端回灌路径**复发，
+  新增 AVATAR-SAVE-002 守门（profile-store.ts / me.tsx / 测试三处 grep + 实跑）。
+- 发布需求向导（非基线敏感）：城市协助 · Professional 服务卡在选 Moment 那一步
+  默认展开，且支持再点一次取消选择（取消时一并清掉城市协助模板，避免悬空态）。
+- 头像再次「被重置」的真因（AVATAR-DELIVER-001）：服务端对上传媒体一律
+  `OWNER_ONLY`，而 `/v1/media/thumb|play/{id}` 要求 `APPROVED && PUBLIC` 才服务
+  （fail-closed），只有发帖/上架店铺会在事务里提权到 PUBLIC —— 更新个人资料这条
+  链路没做，于是头像 URL 恒 404，界面回字母头。客户端先落兜底：hydration 改为
+  **本地副本优先**（离线可用、不受可见性约束），远端仅作后备；服务端同步补齐：
+  `UpdateProfile` 落库前调 `AuthorizeForPost(ctx,[mediaAssetId],actor,"PUBLIC")`，
+  提权失败即拒绝整条命令（不写「存了但显示不出来」的半成品），`cmd/api/main.go`
+  装配 `SetProfileMediaAuthorizer(mediaService)`。
+- 头像「切页回来先闪旧头再刷成新头」（AVATAR-FLASH-001）：hydration 异步返回前首帧
+  `profileAvatarUri` 为 undefined，于是先渲染字母头/占位再被异步结果覆盖。改为
+  useState 初值直接同步读本机最新副本（expo-file-system list()/File 是同步 API），
+  首帧即为新头像，不再有这一跳。
+- 头像副本只增不删（AVATAR-GC-001）：每次选图新建 `avatar-<ts>.jpg`，真机实测堆到
+  23 份。现在换头像后只保留本次那一份，其余 `avatar-*` 删除；单文件删除失败不影响
+  换头像主链。
+
+
+## Revision 163 — 2026-09-11
+
+- 商家 Creator 推荐轨的服务端 seed 升级：boot seed 从 3 个 photos='[]' 的 agent 扩到 6 个带真实头像 URL 的 Creator（Linh/Mai/An/Thao/Yen/Minh，覆盖 hn/hcm）+ 档期窗口随 boot 滚动（now+1h..now+72h），使 `MerchantCreatorRecommendations`（supply.querySuppliers({marketId,limit:6})）不再空轨。
+- 守护：`MERCHANT-CREATOR-LIVE-002` 两个 Go 用例（≥5 个 hn 头像可用 Creator；可用窗口覆盖客户端查询区间且随 boot 前滚）。
+- 注：分支 fix/merchant-creator-live 的移动端部分（门店地址推导 marketId + 旧 merchant-me-r21 结构）未合——HEAD 已把该面换成 merchant-me-r21-replacement → MerchantCreatorRecommendations（marketId 参数默认 "hn"）。门店→marketId 的来源仍待接（HEAD 无 marketId 传参点）。
+
+
+
+## Revision 157 — R58 publish-flow catalog engine (2026-09-10)
+
+- 发布流数据源升级为服务端目录引擎：`ListOpportunityTemplates` 一次匿名读全量下发分类轨道（热门/见面/娱乐/出行/主题，同 16 卡五视图）+ Moment 规格（人数/时间/时长/地点）+ 比例政策（固定 1:1 vs 小组容量合并）+ 动态定价（时长/时段/人数 delta、perPair × 搭档数）+ 活动创建预设（6 个多人完整玩法）。
+- 客户端词表零硬编码：发布需求 Step1 改两栏分类目录（生成命中自动跳到所属分类），Step2 新增 Moment 规格节（chips 全部来自引擎数据 + 偏好加价 + 动态报价分解 + 比例徽章/多搭档提示）；发布活动改两步（预设选卡 → 一屏规格），发布 wire 载荷不变。
+- R58 成功页 TraceID：需求 PX-N / 定向邀约 PX-O / 活动 PX-A + 编号卡；发布成功留在表单内展示，「查看市场/再发一个」显式交还控制权（列表仍即时刷新）。
+- 守护：Go 交叉引用完整性（分类→卡、规格/政策/定价全覆盖、perPair 须固定 1:1）+ JSON 往返 + 预设完整性；wire 层守护测试钉死 dispatch map 逐字段下发（engine struct 测试抓不到 service 组装层丢 activityPresets 的实发 bug）；contracts schema 向后兼容（旧卡列表载荷仍过）；回归契约 152→162。
+
+## Revision 155 — 2026-09-10
+
+- 顶栏 logo 让出状态栏时间（与场景地图同式）；此前整页 Header 无安全区，属历史遗留。
+
+## Revision 156 — 2026-09-10
+
+- 顶栏改取满安全区：真机仍有轻微压字，按设备反馈补足。
+
+## Revision 157 — 2026-09-10
+
+- 顶栏高度随安全区一起长：固定 52 高里加 padding 会把 logo 挤出下边盖住地址行；地址行边距不动。
+
+## Revision 158 — 2026-09-11
+
+- 发布菜单新增 R58 发布需求向导（Moment 模板 → 规格确认 → 成功进市场）；订单/活动旧表单不动，菜单改纵排三项。
+
+## Revision 159 — 2026-09-11
+
+- 机会新增备注字段（可选，500 字内落库，详情页展示）；向导同步收集备注。
+
+## Revision 160 — 2026-09-11
+
+- 创建活动改走 R58 向导（模板 → 设置 → 预览 → 成功，编号展示）；旧单表单删除；服务端支持户外场地/报名方式/主题/展示编号。
+
+## Revision 161 — 2026-09-11
+
+- 市场机会改称订单；发布菜单改为创建订单（R58 向导：tabs/搜索筛选/选人/规格/成功）与创建活动；旧订单表单删除。
+
+## Revision 162 — 2026-09-11
+
+- 活动向导无场景时给显式重新加载入口；此前拉取失败即永久空列表。
+
+## Revision 164 — 2026-09-11
+
+- HOME / MESSAGES 主信息流补齐滑动显隐 chrome（CHROME-PARITY-001）：消息收件箱与首页接入与动态同款上滑藏、下滑/回顶显（阈值 -18/+28，回顶 48px 强制显），切 Tab 与卸载回显。修复 09-08 chrome-parity 分支只落地 FEED/MARKET 的遗留缺口——首页滚动 handler 曾是死代码、消息 prop 声明从未触发。
+
+## Revision 154 — 2026-09-10
+
+- 统一媒体资产管线：media/asset-sources 唯一解析入口（服务端媒体/绝对 URL/服务端路径/打包注册表/本地文件），作者头像映射收归 media/author-avatar；AI 人像注册表迁入管线，旧模块转调。
+- 动态帖头首个接入：本人/AI 账号/AI 人像/首字统一判定；门禁 check-media-pipeline.mjs 拦新增散装实现。布局无变化。
+
+## Revision 153 — 2026-09-10
+
+- 市场滑到底部不再自动回弹：距列表底部不足 140pt 时抑制隐藏（隐藏会瞬间减 104pt 内容高度，底部 offset 被钳制回弹），底栏在底部保持可见。
+
+## Revision 152 — 2026-09-10
+
+- 市场列表滚动显隐与动态一致：下滑隐藏顶栏+底栏，上滑恢复；切 tab 与卸载时复位可见。
+- 阈值与动态同源（下滑 28pt 隐藏、上滑 18pt 恢复，顶部 48pt 内强制可见）；其余 tab 行为不变。
+
+## Revision 151 — 2026-09-10
+
+- “我的”资料读取正式绑定当前 `userAccountId`，账户切换先清空上一账户视觉状态；禁止把无法确认归属的旧设备全局资料迁入新人账户。
+- 更换头像接入媒体上传与服务端 Profile，其他设备通过媒体缩略图读取；选择头像本身即完成同步，不再隐藏依赖第二次“完成”。
+- 新账户中性兜底不再包含 Huyen 演示身份；增加 Shell 接线与默认身份回归守卫，页面布局不变。
+
+## Revision 150 — 2026-09-10
+
+- 存量 "你" 展示名回填（079）：动态 / 状态 / 个人机会的脏展示字段清成空串，归属列不动；幂等可重放。
+- 市场机会卡发布方走 viewer 相对作者标签，残留脏串中性兜底；卡片布局无变化。
+
+## Revision 149 — 2026-09-10
+
+- 服务端发布时不再信任客户端展示名：动态、状态、个人机会的作者名一律按已验证账户 profile 解析；无 profile 存空，读端中性兜底。
+- 卡片布局无变化；未接线调用方（单测）保持旧回显行为，生产双路径均已接线。
+
+## Revision 148 — 2026-09-10
+
+- me 页 hydration 按账户隔离：服务端 profile → 本账户本地记录 → 同号旧记录继承 → 按登录标识派生 → 中性兜底；新账号不再显示写死的演示身份。
+- 视觉无变化；profile 写盘 key 按账户隔离，同机多账号不再串名；发布器与状态流读同一账户的 profile。
+
+## Revision 147 — 2026-09-10
+
+- 真人能力页返回栏进入 iOS/Android 安全区，扩大点击热区，返回明确关闭全屏页并回到 Home。
+- 历史活动数字改为可点击的公开履历；只展示本人选择公开的摘要，明确标注非公开记录不展示。
+- Linh 样板补齐三条公开活动记录；该公开范围是产品隐私选择，不代表平台可公开全部履约明细。
+
+## Revision 146 — 2026-09-09
+
+- Home 真人头像进入全屏能力页；添加、主页、发消息提升至人物信息顶部，沿用 AI 主页的操作顺序。
+- 页面核心改为可做事项、可邀请时间、历史活动、信誉评价、语言、主题和适合场景；Linh 补齐胶片 / 老城区 / 日落及河内场景关联。
+- 共同好友属于关系内部信息，不再公开显示，也从首页公开筛选项移除。
+
+## Revision 145 — 2026-09-09
+
+- 保留既有 Home 真人场景浮窗、透明度和好友/主页/消息操作，不重做视觉皮肤。
+- 补齐可用时间、距离、共同好友、评分与活动记录，以及动作 / Scene / 主题关联。
+- “当前可一起去”照片卡只消费服务端 Scene 图片，点击进入对应场景，不向 App 包写入业务照片。
+
+## Revision 140 — 2026-09-09
+
+- 从新版生活方式资产中采用低风险“城市协助”家族：商务陪同、办事陪同、
+  看房、SIM、本地向导、学习交流和内容拍摄；保持单一顶层入口。
+- 银行金融、移民法律、警务和驾驶资质代办不进入撮合分类；新增图片继续
+  走服务端语义目录，现有 Proxy Logo 基线不变。
+
+## Revision 139 — 2026-09-09
+
+- 场景撮合收敛为都市低风险行为：移除徒步/爬山及水上运动入口；新增
+  医院场景、翻译动作、陪诊主题及挂号/问诊/检查/取药等非医疗细分。
+- 新版 R42 与医院拼图拆为服务端独立图片资产，客户端只消费语义目录；
+  陪诊入口明确禁止诊断、治疗、护理和急救服务。
+
+## Revision 138 — 2026-09-09
+
+- 新建按钮进类型行（PLACEHOLDER-018）：全部/照片/视频/＋新建同一排，
+  点开行内输入，创建后收起并选中。
+
+## Revision 137 — 2026-09-09
+
+- 文件夹页媒体墙下加回自建文件夹（PLACEHOLDER-016 修正四）：新建/
+  选中/移入移出全落盘，成员可点开、可移出。
+
+## Revision 136 — 2026-09-09
+
+- 文件夹改微信式媒体浏览器（PLACEHOLDER-016/017 修正三）：扫各会话
+  真实消息体，照片格子+发送人按日期排，可点开放大，视频进会话看。
+
+## Revision 135 — 2026-09-09
+
+- 文件夹改按类型+日期组织（PLACEHOLDER-016/017 修正二）：照片/视频
+  取最近一条消息种类，今天/昨天/更早分组；去掉归档概念与自建文件夹。
+
+## Revision 134 — 2026-09-09
+
+- 系统筛选只在对话页出现（PLACEHOLDER-017）；文件夹页加归档统计与
+  未归档一键回 Convo 整理。
+
+## Revision 133 — 2026-09-09
+
+- 文件夹独立成第三页签（PLACEHOLDER-016 修正二）：对话/Convo/文件夹
+  并列；文件夹页可建可选可移入移出、落盘持久化。
+
+## Revision 132 — 2026-09-09
+
+- 文件夹归位 Convo（PLACEHOLDER-016 修正）：页签与系统筛选恢复两行；
+  自建文件夹可建可选可移入移出、落盘持久化，只过滤 Convo 列表。
+
+## Revision 129 — 2026-09-09
+
+- 对话/Convo/文件夹并入同一横滑行（PLACEHOLDER-016），免占两行；
+  筛选逻辑不变。
+
+## Revision 128 — 2026-09-09
+
+- 对话列表去掉多余“最近”分区头（PLACEHOLDER-015）：服务端已按最后
+  消息倒序，最新自然在第一行。
+
+## Revision 127 — 2026-09-09
+
+- 消息页禁左滑跳页（PLACEHOLDER-014）：左滑归行内删除，向右保留；
+  读页走 ref，不再拿首屏旧值。
+
+## Revision 126 — 2026-09-09
+
+- Home 场景发现区的横滑轨道新增子按钮轻点通道：轻点不再被
+  PanResponder 抢走，横移超过 3px 后才由轨道接管，兼顾点击与防翻页。
+- 动作、场景、主题的“全部”从无反馈的清空操作改为完整选择面板；
+  支持单选、主题多选、清除筛选和完成。
+
+## Revision 125 — 2026-09-09
+
+- 左滑删除宽松结算：轻滑 24px 即展开，被列表抢走手势也按最后位移
+  结算，不再中途收回看不全。
+
+## Revision 124 — 2026-09-09
+
+- AI 小美主页三按钮直接复用动态帖文头像菜单的单层玻璃口径：
+  `GlassView clear + isInteractive`、44 高、14 圆角。
+- 删除 R123 增加的紫/金底层光场、tint、外层壳和高光层，消除白色实体
+  背景及双重背景；业务动作不变。
+
+## Revision 123 — 2026-09-09
+
+- AI 小美主页三枚水滴按钮增加身份色底层光场与轻量紫色玻璃 tint，
+  让 regular 液态玻璃在浅色页面上仍有可见折射，不再退化成白色胶囊。
+- 按钮结构、状态与添加/主页/发消息链路保持不变。
+
+## Revision 122 — 2026-09-09
+
+- 对话左滑两段删除（PLACEHOLDER-013）：无手势库，用 PanResponder 实现；
+  服务端无删接口，删除=本机可见性（落盘持久化，服务端保留审计）。
+
+## Revision 121 — 2026-09-09
+
+- Home 进入 AI 小美主页后的添加、主页、发消息三按钮改为与底栏水滴
+  相同的分层结构：外层连续曲率壳、绝对铺满 regular GlassView、高光带
+  和独立点击层；不再由 GlassView 直接包裹按钮。
+- 三项业务状态和点击链路保持不变。
+
+## Revision 120 — 2026-09-09
+
+- 账户头像、动态帖文头像与个人主页帖文头像改用 SVG `Circle` 的真实
+  `clipPath`，不再依赖 iOS 小尺寸圆角图层合成，消除真机多边形边缘。
+- 图片仍按中心等比填充，不放大、不额外截断人物左右两侧。
+
+## Revision 119 — 2026-09-09
+
+- AI 三按钮换真水滴配方（regular 材质 + continuous 曲线 + 高光线，
+  对齐底栏 lens；之前抄成近乎透明的 clear）。
+
+## Revision 118 — 2026-09-09
+
+- AI 主页三液态玻璃按钮（PLACEHOLDER-012）：添加/主页/发消息等三份，
+  待定态收窄；查看个人主页进动态看她的全部内容（搜索种子即消费）。
+
+## Revision 117 — 2026-09-09
+
+- 动态帖文与个人主页帖文头像统一使用独立正圆裁切层；场景角标留在
+  裁切层外，不再破坏头像轮廓。
+- 撤销头像照片 1.1 倍放大补丁，避免人物脸部左右被截断。
+
+## Revision 116 — 2026-09-08
+
+- AI 主页添加走好友关系真相（PLACEHOLDER-010）：已申请未同意显示
+  “添加中”并锁定，不再挂添加前文案；与首页 + 号同一条链。
+
+## Revision 115 — 2026-09-08
+
+- 个人总管理头像与 Home 同尺寸正圆（88）。
+
+## Revision 114 — 2026-09-08
+
+- 对话头像落盘缓存（PLACEHOLDER-009）：列表/详情/会话内头像改
+  expo-image memory-disk，切模块回来秒出；avatar 类型收窄，
+  去 RN 宽类型。
+
+## Revision 113 — 2026-09-08
+
+- 头像统一正圆（PLACEHOLDER-008）：hub/身份卡头像由圆角方形改半经圆，
+  渐变容器加裁剪，色带不再戳出方角。
+
+## Revision 112 — 2026-09-08
+
+### Conversation avatar identity pipeline
+
+- Inbox snapshots and profile reads now carry human portraits through contacts and
+  conversation navigation into the header and peer-message bubbles.
+- AI conversations keep using their persona portrait across inbox re-entry; gray
+  initials remain only as a fail-closed fallback when an account truly has no avatar.
+
+## Revision 111 — 2026-09-08
+
+### One direct-message thread per account pair
+
+- Starting a DM from profile, post, Home or another discovery entry reuses the latest
+  active conversation for the same two accounts instead of creating another inbox row.
+- Existing historical duplicate DMs remain auditable but both API and mobile inbox
+  collapse them to the latest thread; non-DM business and group threads stay separate.
+
+## Revision 110 — 2026-09-08
+
+### Stable AI companion identity and photo replies
+
+- Inbox re-entry resolves legacy and current AI account IDs back to the bundled
+  persona, preserving her display name, portrait and personality in conversation.
+- Photo requests attach the companion's existing profile portrait; persona prompting
+  knows the account owns photo assets and avoids repetitive, customer-service AI tone.
+- Conversation camera and microphone controls reuse the same Proxy icon system as Home.
+
+## Revision 108 — 2026-09-08
+
+### Immediate AI companion send feedback
+
+- A user's outgoing bubble is painted before the AI completion request starts.
+- Live history refresh pauses while that completion is pending, so hydration cannot
+  erase the optimistic bubble; the companion shows an explicit replying state.
+
+## Revision 107 — 2026-09-08
+
+### Compact, single-submit Home AI conversation
+
+- Sending a message is the only submit action and persists it immediately; closing the
+  Home panel no longer sends a second hidden summary prompt.
+- The embedded Home conversation defaults to 350 pt, approximately two thirds of its
+  previous height, preserving more of the discovery surface.
+
+## Revision 109 — 2026-09-08
+
+- 横滑跟手 1:1（PLACEHOLDER-007）：隔离组件用 grant 时刻快照做滚动
+  基准，不再拿持续更新的偏移重复累加；轻滑不再飞出去，松手即停。
+
+## Revision 106 — 2026-09-08
+
+- AI 横滑与真人横滑对齐：AI rail 出血到边（去左右空白），间距与真人一致。
+
+## Revision 105 — 2026-09-08
+
+### Persistent Home AI window and shared keyboard safety
+
+- Reopening Proxy AI from Home hydrates the same durable timeline and its Home event
+  dividers instead of presenting an empty temporary window.
+- Leaving Home closes the window without clearing history; no automatic expansion,
+  timed clearing, or redundant received-message strip remains.
+- A shared keyboard-overlap hook keeps composers above the keyboard across Home AI
+  and regular message conversations.
+
+## Revision 104 — 2026-09-08
+
+### Dual-entry Proxy AI conversation
+
+- Home remains search-first, while tapping its AI mark expands the familiar embedded
+  Proxy conversation with its own composer instead of navigating away to Messages.
+- The embedded conversation and the Messages entry share the same durable HOME / Proxy AI
+  thread; Home can collapse after inactivity without losing history.
+- Opening a fresh embedded conversation no longer renders an empty user bubble.
+
+## Revision 103 — 2026-09-08
+
+### Home recommendations use durable friendship truth
+
+- Recommendation `+` actions send real friend requests instead of disguising a
+  profile follow as friendship.
+- Home hydrates outgoing, incoming, and accepted friendship states from the server;
+  the state survives navigation, reload, and another device.
+- Human and AI accounts share the same visible relationship state machine while
+  retaining their separate scene and profile navigation boundaries.
+
+## Revision 96 — 2026-09-08
+
+### Explicit search and Proxy AI conversation boundary
+
+- The Home field is deterministic search by default and no longer silently sends
+  unmatched queries to the model gateway.
+- The left AI mark opens the user's single durable HOME / Proxy AI conversation in
+  Messages, reusing it when present and creating it only when absent.
+- The obsolete local conversation-history sheet is removed; durable history has one
+  source of truth in Messages.
+
+## Revision 95 — 2026-09-08
+
+### One durable Proxy AI thread with ephemeral Home receipts
+
+- Home model replies remain visible briefly, then leave Home instead of becoming a
+  permanent second row. Their complete transcript remains in Messages.
+- Every user reuses one durable HOME / Proxy AI conversation. Older clients' duplicate
+  HOME conversations are collapsed to the newest inbox item without deleting audit data.
+- A durable system divider separates successive Home exchanges inside that conversation.
+
+## Revision 94 — 2026-09-08
+
+### Compact logo-only opportunity type rail
+
+- Opportunity type filters now show only their visual logos. Chinese and English
+  helper captions are removed from the visible rail while names remain exposed to
+  accessibility services.
+- Logo slots are reduced to 46px with a 3px rail gap so additional scene types can
+  fit without turning the filter into a text-heavy list.
+
+## Revision 93 — 2026-09-08
+
+### Market opportunity logo canvas normalization
+
+- The four order-type PNG masters no longer carry different asymmetric white
+  canvases; their visible tile bounds are normalized to the full 68×68 source.
+- Selection uses an absolute border overlay, so selecting a type cannot shrink or
+  offset the logo. The renderer no longer adds a second beige background below it.
+
+## Revision 92 — 2026-09-08
+
+### Home unified search/conversation contract
+
+- Home now has one composer for both entity search and Proxy model conversation. The
+  embedded model transcript is display-only and cannot introduce a second send box.
+- Model feedback stays inside the same bordered search shell instead of appearing as
+  a separate receive field. Empty state no longer fabricates response text or history.
+- AI history, camera and microphone controls use larger, unwrapped glyphs so their
+  visual size matches their touch target on a phone.
+
+## Revision 91 — 2026-09-08
+
+- 市场机会订单图取消圆角并贴齐卡片上、下、左三边；图片宽度保持 104，不再向右扩张。
+
+## Revision 90 — 2026-09-08
+
+- 市场机会订单卡的场景图片由 64×88 放大为 104×136，提升手机端图片利用率；订单信息与接单操作保持不变。
+
+## Revision 89 — 2026-09-08
+
+- 四宫格任一选择弹层打开期间硬关闭 App Shell 根页面翻页手势，关闭或卸载时恢复；子层横滑不再依赖 responder 竞争结果。
+
+## Revision 103 — 2026-09-08
+
+- Checklist 走查补漏（PLACEHOLDER-006）：进行中加载失败给重试按钮
+  （不再写“下拉”）；我的活动/活动导流列表拆嵌套 Pressable，点报名
+  不再误开明细。
+
+## Revision 102 — 2026-09-08
+
+- 动态本人头像与个人总管理同源（PLACEHOLDER-005）：之前写死黑底圆圈；
+  发 Moment 成功后直达动态，看得见新帖。
+
+## Revision 101 — 2026-09-08
+
+- 邀约 Moment 可发布到动态（PLACEHOLDER-004）：复用发帖管线
+  buildCreatePostPayload + localNet.createPost，成功确认、失败留屏可重试。
+
+## Revision 100 — 2026-09-08
+
+- 死链清理（PLACEHOLDER-003）：MarketSurface 未使用的 onOpenActivity
+  prop 与 shell 空函数一并删除；他人主页图片接真查看器、点赞接真接口。
+
+## Revision 99 — 2026-09-08
+
+- 全链路走完（PLACEHOLDER-002）：出图分享接忙态/确认/取消/失败重试；
+  市场双搜索生效、自定义报价独立输入校验、活动地图藏错钉；场景三态
+  未登录与失败都明说；活动报名刷新详情+确认；会话发送失败撤气泡回
+  草稿、转发接真接口（建 Convo 无后端移除）；权限序列化进正文；
+  动态找同行走搜索、自定 AI 频道按名描述过滤、偏好静音/时限/权重全
+  消费；助手 pill 进市场、建连失败可重试；资料/邀请/外链失败留屏显；
+  主页实搜、店铺素材真 picker、状态表全局挂载、安全区死按钮移除；
+  候选落草稿、权益拉领取记录、Creator 输入进 Review 且接受持久化；
+  联系人走收件箱真数据且可达，去编造字段。
+
+## Revision 98 — 2026-09-08
+
+- 店铺“公开主页”死按钮接真分享（公开店铺链接）；内容/社媒归因三组
+  无口径漏斗数字画“—”不编数（与 R87 分析区同口径）。
+
+## Revision 97 — 2026-09-08
+
+- 占位按钮/字段真接线（PLACEHOLDER-001 v2）：mock 数据全部保留作测试
+  替身，但每个按钮都走通——好友 CRM 添加变已发送、请求可接受/忽略、
+  拉黑即时移除（无后端走本地演示状态机，有后端调真实接口），服务端
+  与本地双列表并排渲染；消息/活动/帖子/钱包死按钮接真分享/真导航/
+  真点赞或移除；钱包与收入未知金额画“—”不编数。仅冒充本人的假身份
+  与假二维码彻底删除。
+- 发布器串帖“添加下一条”不再是空 toast：跟帖可增删改，发布时按编号
+  拼进正文并计入字数，发布成功后清空。
+
 ## Revision 88 — 2026-09-08
 
 - 商家工作台诚实化：邀请按钮文案改为真实意图（不再冒充自动派发）；
@@ -53,13 +547,9 @@ same commit. Do not record routine business logic changes here.
 - Market opportunity/activity tabs and conversation/settings secure switches
   now share accessible state implementations; added regression guards against
   local duplicate controls and documented the BoardUI adoption boundary.
-=======
-## Revision 76 — 2026-09-08
-
 - 商家 Creator 详情的“发起定向邀请”只是跳活动列表、并不创建邀请，
   改名“查看活动报名”。真定向邀请（指定 Creator 进指定场次）需房主
   场景 + 邀请命令，链路未接前不挂邀请字样。
->>>>>>> a0eafe7 (fix(merchant): honest invite label, drop dead create styles)
 
 ## Revision 75 — 2026-09-08
 
@@ -850,3 +1340,58 @@ same commit. Do not record routine business logic changes here.
 
 - 四宫格人物、时间、活动、地点横滑选择器统一接入共享手势隔离层，优先消费横滑，防止误触根页面翻页。
 - 视觉、数据选择和四宫格业务链路保持不变。
+
+# Revision 129 — Scene editorial media pipeline (2026-09-09)
+
+- 将用户提供的动作与越南场景拼图拆为 59 张独立服务端媒体资产；照片不进入移动端安装包。
+- 新增公开、可缓存的 `/v1/scene-assets` 语义素材目录，动作、场景、主题和 Moment 通过稳定媒体 ID 加载，可在不发版 App 的情况下换图。
+- 场景横栏、Moment、详情及完整选择器只接受网络照片；断网时诚实显示中性占位，不回退到打包示例图。
+- 保持首页“真人撮合优先、场景只是见面道具”的既定信息层级，顶部动作图标结构不变。
+
+# Revision 130 — Conditional active-work surface (2026-09-09)
+
+- “继续进行”改为由真实草稿或已发布需求触发的状态机界面；服务端返回 0 项时整块隐藏。
+- 删除匿名、未下单和读取失败时伪造的两张进行中卡片，以及无意义的“0 项”和空态说明。
+- 刷新失败时保留上一次已成功加载的真实投影，不用错误状态制造首页模块。
+
+# Revision 131 — Remove duplicate Home activity list (2026-09-09)
+
+- 删除 Home 中重复的“店铺场景活动”横向列表；活动发现、报名、到店与复盘继续由市场活动模块负责。
+- Home 仍读取活动数据供四宫格“选活动”使用，保留“人物 × 时间 × 活动 × 地点”的撮合组合链路。
+
+# Revision 133 — Progressive scene taxonomy picker (2026-09-09)
+
+- Home 默认只显示一行紧凑动作入口；场景和主题筛选默认隐藏，避免三行分类同时造成认知负担。
+- 动作入口取消包住图标与文字的大卡片，改为独立图标、下方短标签，整体宽高收紧。
+- 三个“全部”合并为一个入口，在同一底部面板按动作、场景、主题分区选择，并统一完成或清除。
+
+# Revision 134 — Expandable matchmaking action taxonomy (2026-09-09)
+
+- “全部筛选”底部固定提供“重置 / 完成”，重置一次清空动作、场景与主题。
+- 动作从固定平铺升级为稳定一级动作加可扩展细分节点；选择“运动”后按需展开跑步、骑行、羽毛球、网球、瑜伽/普拉提、徒步/爬山及水上运动。
+- 细分动作保留对一级撮合标签的兼容映射，并分别接入服务端网络照片，后续可以继续扩充动作族而不增加 Home 默认信息密度。
+
+# Revision 141 — Compact Home discovery and market workflow filters (2026-09-09)
+
+- Home 动作入口统一补齐共享 Proxy 图标；真人推荐移除重复场景标题与解释行，保留真人标识和筛选入口。
+- “场景灵感”改为与“为你组合”同级字号的“附近场景”，新增直接地图入口，原有网络场景卡和数据管线不变。
+- 市场头部移除“城市 · 机会 · 活动”重复文案；机会状态改为全部、已申请、已创建、执行中，不再把 Offer、打卡和证据操作伪装成列表筛选。
+- 顶部和滑动页底部共用双发布入口；订单沿用价格守卫流程，活动绑定已有真实场景后走 PublishActivity 服务端命令。
+
+# Revision 142 — Shared action logo registry (2026-09-09)
+
+- Home 第一行拍照、同行、吃饭、活动等入口不再临时映射通用线性图标，直接复用附近场景动作栏的 `SCENE_ACTIONS` SVG 注册表。
+- 市场机会筛选与机会卡删除旧 `order-type-logos` PNG 视觉，按订单类型映射到同一套拍照、City Walk、咖啡、翻译和活动图标。
+- 新增源码契约守卫，禁止 Home 拍照/同行退回自建图标，也禁止市场重新引用旧订单 Logo 包。
+
+# Revision 143 — Human × Scene linked preview (2026-09-09)
+
+- Home 真人头像不再直接跳离发现页，先打开人物与当前 Scene 的玻璃关联层；场景卡仍可继续进入完整 Reality Scene。
+- 关联层只使用推荐账户与服务端场景已有字段，不展示原型中未落库的评分、履约次数或虚构活动数据。
+- 添加按钮复用好友关系状态机，明确展示添加、添加中、已添加与接受添加；查看主页和发消息分别接入既有真人主页与消息会话。
+
+# Revision 144 — Market publish launcher safe position and routing (2026-09-09)
+
+- 市场机会与活动页的悬浮发布按钮上移至底栏安全区之上，避免被原生导航栏覆盖。
+- 双发布选择从滚动内容顶部移到独立底部弹层；无论列表滚到哪里，点击 `+` 都能立即看到发布订单和发布活动。
+- 发布订单强制切到机会编辑态，发布活动强制切到活动编辑态并加载真实场景；编辑态重新挂载在滚动顶部，消除点击后仍停留在旧滚动位置的问题。

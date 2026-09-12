@@ -69,6 +69,8 @@ import { VoiceToolButton } from "../components/VoiceToolButton";
 import { TooltipOnLongPress } from "../components/TooltipOnLongPress";
 import { assembleComposerBody, parseComposerBody, formatRelativeTime, describePollDuration, appendLongText, estimateAssembledBodyLength, insertAtCaret, shouldSerializePoll } from "../composer-body";
 import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-publish";
+import { createProfileStore } from "../profile-store";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 
 // 在 composer 未选地点时给 location-picker-sheet 一个 fallback
 const DEFAULT_LOCATION_FALLBACK: AnyLocation = DEFAULT_LOCATION as AnyLocation;
@@ -77,6 +79,8 @@ const COMPOSER_MEDIA_ITEM_SPAN = 130;
 const MAX_BODY_LENGTH = 500;
 const MAX_MEDIA = 6;
 const MAX_POLL_OPTIONS = 4;
+// 串帖跟帖上限：主帖 + 8 条跟帖，发布时按 “2/ …”“3/ …” 拼进正文。
+const MAX_THREAD_ENTRIES = 8;
 
 const GIF_WORDS = ["YES!", "LOL", "WOW", "OK", "♥", "HEART", "HI", "?", "??", "👀", "👋", "👍"] as const;
 const POLL_DURATIONS = ["1 天", "3 天", "7 天", "1 小时", "30 分钟"] as const;
@@ -109,6 +113,8 @@ type Props = {
   // R15.37: composet 需要知道当前 session 以供
   //   “未登录不发” + “未登录不点发布” 这两个 UI gate 用。
   secureSessionStore?: SecureSessionStore | undefined;
+  // PROFILE-READ-001: 发布者展示名必须读本账户的 profile，不能串号。
+  viewerAccountId?: string | undefined;
   // 从父组件传入的初始值（quote: 由 feed.tsx 的 openComposer(quoteId?) 透传）
   initialQuoteId?: string | null;
   posts: FeedPost[];
@@ -121,10 +127,17 @@ export function ComposerV2Screen({
   localNet,
   mediaClient,
   secureSessionStore,
+  viewerAccountId,
   initialQuoteId,
   posts
 }: Props): React.JSX.Element {
   const insets = useSafeAreaInsets();
+  // PROFILE-READ-001: 发布者展示名必须读本账户的 profile（与 me 页同一
+  // key 规则），不能读到别的账号在本机留下的名字。
+  const composerProfileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
   // R15.37: P0 “未登录不发布” 强 gate — 准仅发布按钮状态。
   //   未设置 store (开发环境 / 离线 unit test) 默认为 “可发” 以免
   //   拑入别的 race; 运行时总是传入 store。
@@ -165,6 +178,8 @@ export function ComposerV2Screen({
   const [quotePerm, setQuotePerm] = useState<QuotePermission>("所有人");
   const [longTextOpen, setLongTextOpen] = useState(false);
   const [longTextDraft, setLongTextDraft] = useState("");
+  // 串帖跟帖：纯本地状态，发布时按编号拼进正文（见 threadedBody）。
+  const [threadEntries, setThreadEntries] = useState<string[]>([]);
 
   // —— Sheet 显隐 ——
   const [openSheet, setOpenSheet] = useState<null | "reply" | "quote" | "gif" | "topic" | "more" | "location" | "quotePicker" | "pollDuration">(null);
@@ -197,18 +212,28 @@ export function ComposerV2Screen({
     }
   }, [quoteId, quoteTarget]);
 
+  // 串帖正文：主帖 + 非空跟帖（2/ 3/ …编号），装饰计数与发布都以它为准。
+  const threadedBody = useMemo(() => {
+    const extras = threadEntries.map((t) => t.trim()).filter((t) => t.length > 0);
+    if (extras.length === 0) return body;
+    return [body.trim(), ...extras.map((t, i) => `${i + 2}/ ${t}`)].filter(Boolean).join("\n\n");
+  }, [body, threadEntries]);
+
   // 估计最终 body 文本长度（装饰前缀计入）。这样用户在字符超限前可以准备截断。
   const effectiveBodyLength = estimateAssembledBodyLength({
-    body,
+    body: threadedBody,
     gifWord,
     poll,
     place: place ? { area: place.area } : null,
     topic,
     isGhost24h,
-    quoteTarget
+    quoteTarget,
+    replyPerm,
+    quotePerm
   });
   const hasAnyContent = !!(
     body.trim() ||
+    threadEntries.some((t) => t.trim()) ||
     media.length > 0 ||
     gifWord ||
     shouldSerializePoll(poll) ||
@@ -240,6 +265,8 @@ export function ComposerV2Screen({
         if (parsed.gifWord) setGifWord(parsed.gifWord);
         if (parsed.poll) setPoll(parsed.poll);
         if (parsed.topic) setTopic(parsed.topic);
+        if (parsed.replyPerm && (parsed.replyPerm === "我关注的人" || parsed.replyPerm === "仅提及的人")) setReplyPerm(parsed.replyPerm);
+        if (parsed.quotePerm && (parsed.quotePerm === "我关注的人" || parsed.quotePerm === "不允许")) setQuotePerm(parsed.quotePerm);
         setMedia(normalizeRestoredDraftMedia(snapshot.media));
         setVisibility(snapshot.visibility);
         setIncludeCity(snapshot.includeCity);
@@ -472,19 +499,23 @@ export function ComposerV2Screen({
         return;
       }
       const finalBody = assembleComposerBody({
-        body,
+        body: threadedBody,
         gifWord,
         poll,
         place,
         topic,
         isGhost24h,
-        quoteTarget
+        quoteTarget,
+        replyPerm,
+        quotePerm
       });
       // 拼接 payload（交给 composer-publish 统一处理 ephemeralUntil / poll 字段映射）。
       // overrides：body / mediaRefs 由调用方指定（已 assemble 过 / 已上传完）。
+      // FEED-OWN-001: 只传用户自己设过的真名；没设过就省略，绝不写死 "你"。
+      const profileName = (await composerProfileStore.read().catch(() => undefined))?.name?.trim();
       const payload = buildCreatePostPayload(
         {
-          body,
+          body: threadedBody,
           media,
           visibility,
           includeCity,
@@ -498,13 +529,15 @@ export function ComposerV2Screen({
         quoteTarget,
         {
           body: finalBody,
-          ...(mediaRefs && mediaRefs.length > 0 ? { mediaRefs } : {})
+          ...(mediaRefs && mediaRefs.length > 0 ? { mediaRefs } : {}),
+          ...(profileName ? { authorDisplayName: profileName } : {})
         }
       );
       idempotencyRef.current ??= newPublishIdempotencyKey();
       await localNet.createPost(payload, idempotencyRef.current);
       // 重置
       setBody("");
+      setThreadEntries([]);
       setMedia([]);
       setQuoteId(null);
       setPlace(null);
@@ -779,11 +812,47 @@ export function ComposerV2Screen({
             </View>
           </View>
 
-          <Pressable onPress={() => showToast("已添加下一条（原型功能）")} style={styles.threadNext}>
+          {threadEntries.map((entry, idx) => (
+            <View key={idx} style={styles.threadRow}>
+              <Text style={styles.threadIndex}>{idx + 2}/</Text>
+              <TextInput
+                maxLength={MAX_BODY_LENGTH}
+                onChangeText={(v) => {
+                  invalidatePublishAttempt();
+                  setThreadEntries((prev) => prev.map((t, i) => (i === idx ? v : t)));
+                }}
+                placeholder={`第 ${idx + 2} 条…`}
+                placeholderTextColor={color.muted}
+                style={styles.threadInput}
+                value={entry}
+                multiline
+              />
+              <Pressable
+                accessibilityLabel={`删除第 ${idx + 2} 条`}
+                onPress={() => { invalidatePublishAttempt(); setThreadEntries((prev) => prev.filter((_, i) => i !== idx)); }}
+                style={styles.threadX}
+              >
+                <Text style={styles.threadXText}>×</Text>
+              </Pressable>
+            </View>
+          ))}
+          <Pressable
+            disabled={threadEntries.length >= MAX_THREAD_ENTRIES}
+            onPress={() => {
+              if (threadEntries.length >= MAX_THREAD_ENTRIES) {
+                showToast(`最多 ${MAX_THREAD_ENTRIES} 条跟帖`);
+                return;
+              }
+              invalidatePublishAttempt();
+              setThreadEntries((prev) => [...prev, ""]);
+              showToast("已添加下一条");
+            }}
+            style={styles.threadNext}
+          >
             <View style={styles.threadPlus}>
               <ProxyIcon name="plus" size={13} color={color.muted} />
             </View>
-            <Text style={styles.threadNextText}>添加下一条</Text>
+            <Text style={styles.threadNextText}>添加下一条{threadEntries.length > 0 ? `（${threadEntries.length}/${MAX_THREAD_ENTRIES}）` : ""}</Text>
           </Pressable>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -1604,6 +1673,22 @@ const styles = StyleSheet.create({
     width: 26
   },
   threadNextText: { color: color.muted, fontSize: 13 },
+  threadRow: { alignItems: "flex-start", flexDirection: "row", gap: 8, marginLeft: 56, marginTop: 10 },
+  threadIndex: { color: color.muted, fontSize: 12, fontWeight: "800", marginTop: 12 },
+  threadInput: {
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: color.ink,
+    flex: 1,
+    fontSize: 14,
+    minHeight: 40,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  threadX: { paddingHorizontal: 6, paddingVertical: 10 },
+  threadXText: { color: color.muted, fontSize: 16, fontWeight: "700" },
   // 错误
   error: { color: color.error, fontSize: 12, marginTop: 8 },
   // 底部

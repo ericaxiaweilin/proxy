@@ -12,17 +12,24 @@ import ImageViewing from "react-native-image-viewing";
 import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
+import { type AIAccountClient } from "../ai-account-client";
+import { localApiBaseUrl } from "../native-clients";
+import { resolveAuthorAvatar, type AvatarAccount } from "../media/author-avatar";
 import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
 import { FilterChipRail } from "../components/filter-chip-rail";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { isOpportunityPost } from "../feed-content";
 import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
 // v2 重构：深紫黑底 + compositionHint 驱动 fill。Sprint C 替换完成。
 // 旧 AdaptiveMediaCollection / AdaptiveMediaRail / SocialMediaFrame / SinglePostImage
 // 已从本文件迁出 → apps/mobile/src/media/
 import { AdaptiveMediaCollection, SinglePostImage, MediaViewer } from "../media/AdaptiveMediaCollection";
+import { Directory, File, Paths } from "expo-file-system";
+import { avatarFileName, createProfileStore } from "../profile-store";
+import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
 import { mergePostEngagement, mergeReactedPostIds } from "../post-engagement-model";
 
@@ -36,9 +43,12 @@ export type PostReportReason = (typeof POST_REPORT_REASONS)[number];
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
-import { CustomFeedHub } from "./custom-feed";
+import { CustomFeedHub, type CustomFeed } from "./custom-feed";
+import { readCustomFeedsAsync } from "../expo-custom-feed-store";
+import { defaultFeedPrefs, readFeedPrefsAsync } from "../expo-feed-prefs-store";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
+import { isOwnPost as isOwnPostById, resolveAuthorDisplayName } from "../feed-author";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
@@ -49,6 +59,12 @@ let cachedPosts: FeedPost[] = [];
 let cachedMedia: Record<string, FeedMediaItem[]> = {};
 let cachedPostIds: Set<string> = new Set();
 
+// 本人头像：与“我的→个人总管理”同源（profileStore 本地记录 + document
+// 目录重锚 + 存在性校验，AVATAR-001 同款逻辑）。动态之前写死黑底圆圈，
+// 自己的帖子也显示黑头——现在本人帖子用真头像，他人暂无来源仍用首字 fallback。
+// PROFILE-READ-001: 按账户隔离，和 me 页同一 key 规则（组件内 useMemo 实例）。
+const FEED_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
+
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
 
 const AUTHOR_TYPE_META: Record<FeedPost["authorType"], { label: string; reason: string; aiBadge?: boolean }> = {
@@ -57,8 +73,8 @@ const AUTHOR_TYPE_META: Record<FeedPost["authorType"], { label: string; reason: 
   MERCHANT: { label: "商家 · 河内", reason: "为你推荐：附近商家的公开动态" },
   PLATFORM_SPECIAL: { label: "Proxy 特别企划", reason: "为你推荐：平台特别企划" },
   // R15.76: R1 AI Identity System PRD — AI Native (平台虚拟供给) 在 4 个
-  //   authorType 之外独立一档. 限 mock 帖表现 (server schema 暂不返, 前面是 PLATFORM_SPECIAL 视觉但加 aiBadge).
-  AI_NATIVE: { label: "AI 助手 · 河内", reason: "为你推荐：平台虚拟供给, 由 Proxy 透明生成", aiBadge: true }
+  //   authorType 之外独立一档. 小美帖走这档：对外只叫 AI生成（小美≠助手）。
+  AI_NATIVE: { label: "AI生成 · 小美", reason: "为你推荐：平台小美公开动态，由 Proxy 透明生成", aiBadge: true }
 };
 
 function scenarioIconForPost(post: FeedPost): ProxyIconName {
@@ -71,9 +87,8 @@ function scenarioIconForPost(post: FeedPost): ProxyIconName {
   return "diamond";
 }
 
-function authorName(post: FeedPost): string {
-  return post.authorDisplayName !== undefined && post.authorDisplayName !== "" ? post.authorDisplayName : post.authorId;
-}
+// FEED-OWN-001: "你" is viewer-relative and resolved per call site via
+// resolveAuthorDisplayName(post, viewerAccountId) — never a stored name.
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - Date.parse(iso);
@@ -129,6 +144,8 @@ export function FeedSurface({
   secureSessionStore,
   onOpenChat,
   onOpenFeedPrefs,
+  viewerAccountId,
+  aiAccountsClient,
   onOpenRealityScene,
   onOpenProfile,
   onChromeVisibilityChange,
@@ -136,7 +153,9 @@ export function FeedSurface({
   bottomNavVisible,
   initialTab,
   currentSection,
-  onSectionChange
+  onSectionChange,
+  initialSearchQuery,
+  onSearchSeedConsumed
 }: {
   localNet: LocalNetClient;
   mediaClient: MediaClient;
@@ -146,6 +165,10 @@ export function FeedSurface({
   secureSessionStore?: SecureSessionStore | undefined;
   onOpenChat: (author: string) => void;
   onOpenFeedPrefs: () => void;
+  // 本人账号 id：用于判定“自己的帖子”并显示真头像；没有则退回名字判断。
+  viewerAccountId?: string | undefined;
+  // MEDIA-PIPELINE-001: AI 账号目录，用于解析 AGENT 帖头像；缺省则 AI 帖走首字。
+  aiAccountsClient?: AIAccountClient | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onOpenProfile?: ((profile: { userId: string; name: string; city?: string | undefined; posts: FeedPost[]; mediaByPost: Record<string, FeedMediaItem[]> }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
@@ -156,6 +179,10 @@ export function FeedSurface({
   // R15.23: section (动态/状态/社区) 改 controlled — 由 AppShell 同步 swipe 跨 page 状态
   currentSection?: FeedSection;
   onSectionChange?: (section: FeedSection) => void;
+  // 外部带入的搜索种子（AI 主页“查看个人主页”）：mount 即生效并通知消费，
+  // 防止下次进动态复用旧词。
+  initialSearchQuery?: string | undefined;
+  onSearchSeedConsumed?: (() => void) | undefined;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>(initialTab ?? "RECOMMENDED");
   // R15.23: 优先用 controlled prop (currentSection)，fallback 到内部 state (用于独立 mount / 测试)
@@ -198,12 +225,90 @@ export function FeedSurface({
   // 发布器状态（v2 全面迁出到 ComposerV2Screen；这里只保留触发器）
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerQuoteId, setComposerQuoteId] = useState<string | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(Boolean(initialSearchQuery));
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery ?? "");
+  // 搜索种子只消费一次：mount 即通知调用方清除，下次进动态不再复用。
+  useEffect(() => {
+    if (initialSearchQuery) onSearchSeedConsumed?.();
+  }, []);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
+  // 本人头像 URI（与个人总管理同源）：mount 时读一次，换头像后切 Tab
+  // 重挂即刷新。读不到/文件不存在就保持 undefined，走首字 fallback。
+  const [viewerAvatarUri, setViewerAvatarUri] = useState<string | undefined>(undefined);
+  const feedProfileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
+  useEffect(() => {
+    let active = true;
+    void feedProfileStore.read().then((record) => {
+      if (!active || !record?.avatarPath) return;
+      const name = avatarFileName(record.avatarPath);
+      try {
+        const names = new Set(FEED_AVATAR_DIR.list().map((entry) => entry.name));
+        if (names.has(name)) {
+          if (active) setViewerAvatarUri(new File(FEED_AVATAR_DIR, name).uri);
+        }
+      } catch {
+        // 目录不可读则保持 fallback，不打断动态。
+      }
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [feedProfileStore]);
+  // MEDIA-PIPELINE-001: AI 账号目录（accountId → 账号），用于解析 AGENT
+  // 帖头像。mount 拉一次；失败/缺 client 则 AI 帖走首字，不打断列表。
+  const [aiAccountsById, setAiAccountsById] = useState<ReadonlyMap<string, AvatarAccount>>(new Map());
+  useEffect(() => {
+    if (!aiAccountsClient) return;
+    let active = true;
+    void aiAccountsClient.listRecommended().then((accounts) => {
+      if (!active) return;
+      setAiAccountsById(new Map(accounts.map((account) => [account.accountId, {
+        accountId: account.accountId,
+        personaId: account.personaId,
+        avatarPath: account.avatarPath,
+        avatarMediaAssetId: account.avatarMediaAssetId,
+        avatarVersion: account.avatarVersion
+      }])));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [aiAccountsClient]);
+  function isOwnPost(post: FeedPost): boolean {
+    // FEED-OWN-001: strict author-id check only. Unknown viewer is
+    // fail-closed (never own); display-name matching is forbidden.
+    return isOwnPostById(post, viewerAccountId);
+  }
   const [mediaPositions, setMediaPositions] = useState<Record<string, number>>({});
   const [customFeedHubOpen, setCustomFeedHubOpen] = useState(false);
   const [selectedCustomFeed, setSelectedCustomFeed] = useState<string | null>(null);
+  // 推荐偏好（偏好页写入）：静音主题硬过滤、时间范围过滤、权重重排。
+  // 前台恢复时重读，偏好页改完回来即生效。
+  // SYNC-FS-001: File.json() 异步，mount/前台时异步 hydration，首屏先用默认。
+  const [feedPrefs, setFeedPrefs] = useState(defaultFeedPrefs);
+  useEffect(() => {
+    let cancelled = false;
+    void readFeedPrefsAsync().then((prefs) => { if (!cancelled) setFeedPrefs(prefs); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+  // 自定频道定义（name/desc）：AI 生成的频道用它切词过滤 + 横幅显示真名，
+  // 而不是裸 id。读本地持久化，与 CustomFeedHub 同源。
+  const [storedCustomFeeds, setStoredCustomFeeds] = useState<CustomFeed[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void readCustomFeedsAsync([]).then((feeds) => { if (!cancelled) setStoredCustomFeeds(feeds); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [customFeedHubOpen]);
+  const customFeedDef = useMemo(() => {
+    if (!selectedCustomFeed) return undefined;
+    return storedCustomFeeds.find((f) => f.id === selectedCustomFeed);
+  }, [selectedCustomFeed, storedCustomFeeds]);
+  const customFeedTokens = useMemo(() => {
+    if (!customFeedDef) return [];
+    return `${customFeedDef.name} ${customFeedDef.desc}`
+      .split(/[\s\/·,，、。!！?？:：;；]+/)
+      .map((t) => t.trim().toLocaleLowerCase())
+      .filter((t) => t.length >= 2);
+  }, [customFeedDef]);
   // X 式内联视频自动播放：滑近视口中心自动播（默认静音）、滑出即停，同一时刻仅一条在播。
   const [cardYs, setCardYs] = useState<Record<string, number>>({});
   const [frames, setFrames] = useState<Record<string, { y: number; height: number }>>({});
@@ -436,6 +541,7 @@ export function FeedSurface({
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active" && (phase === "ERROR" || cachedPosts.length === 0)) void loadFeed();
+      if (state === "active") void readFeedPrefsAsync().then(setFeedPrefs).catch(() => undefined);
     });
     return () => subscription.remove();
   }, [phase, loadFeed]);
@@ -470,15 +576,6 @@ export function FeedSurface({
       await command();
       apply(new Set(current).add(stateKey));
     } catch (error) {
-      // R15.38 DEBUG: 临时诊断, 看新逻辑是否走对路径
-      if (typeof __DEV__ !== "undefined" && __DEV__) {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[proxy.R15.38.DEBUG] engagement error type=${error instanceof Error ? error.name : typeof error} ` +
-          `msg=${error instanceof Error ? error.message : String(error)} ` +
-          `isOffline=${error instanceof OfflineFallbackSessionError || (error instanceof Error && (error.message.includes("require a real sign-in") || error.message.includes("offline session cannot")))}`
-        );
-      }
       setEngagementError(mapEngagementError(error, "互动没有提交成功，请检查连接后重试。"));
     } finally {
       setEngagementBusy((value) => {
@@ -680,11 +777,43 @@ export function FeedSurface({
     return posts.find((candidate) => candidate.postId === ref.contextId);
   }
 
+  // 偏好权重归一：帖子→偏好类别→权重分（缺省 50）。只用于排序。
+  function feedWeightFor(post: FeedPost): number {
+    const ctxTypes = new Set(post.contextRefs.map((r) => r.contextType));
+    let category = "lifestyle";
+    if (isOpportunityPost(post)) category = "opportunity";
+    else if (ctxTypes.has("ACTIVITY")) category = "activity";
+    else if (post.authorType === "MERCHANT") category = "commercial";
+    else if (ctxTypes.has("INDUSTRY_INFO") || ctxTypes.has("VENUE")) category = "intelligence";
+    else if (post.authorType === "USER" || ctxTypes.has("PEOPLE_RELATIONSHIP")) category = "people";
+    return feedPrefs.weights[category] ?? 50;
+  }
+
   const getVisibleForTab = (forTab: FeedTab): FeedPost[] =>
     posts.filter((post) => {
       if (hiddenPosts.has(post.postId)) return false;
+      // 偏好-时间范围：7D/30D 按创建时间过滤，长期不过滤。
+      if (feedPrefs.scope !== "PERSISTENT") {
+        const created = Date.parse(post.createdAt);
+        if (Number.isFinite(created)) {
+          const ageMs = Date.now() - created;
+          const limitMs = feedPrefs.scope === "7D" ? 7 * 86_400_000 : 30 * 86_400_000;
+          if (ageMs > limitMs) return false;
+        }
+      }
+      // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
+      if (feedPrefs.muted.length > 0) {
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+          .filter((value): value is string => typeof value === "string")
+          .join(" ")
+          .toLocaleLowerCase();
+        const hit = feedPrefs.muted.some((topic) =>
+          topic.split(/[\s\/]+/).map((t) => t.trim().toLocaleLowerCase()).filter((t) => t.length >= 2)
+            .some((token) => haystack.includes(token)));
+        if (hit) return false;
+      }
       if (forTab === "FOLLOWING") {
-      if (!(following.has(post.authorId) || authorName(post) === "你")) return false;
+      if (!(following.has(post.authorId) || isOwnPost(post))) return false;
     }
     if (feedFilter !== "ALL") {
       const ctxTypes = new Set(post.contextRefs.map((r) => r.contextType));
@@ -708,7 +837,7 @@ export function FeedSurface({
     }
     if (selectedCustomFeed) {
       const feedMap: Record<string, (post: FeedPost) => boolean> = {
-        friends: (p) => following.has(p.authorId) || authorName(p) === "你",
+        friends: (p) => following.has(p.authorId) || isOwnPost(p),
         hanoi: (p) => p.cityScope === "hn",
         photo: (p) => p.contextRefs.some((r) => r.contextId.includes("摄影") || r.contextId.includes("拍照")),
         opportunity: isOpportunityPost,
@@ -716,11 +845,21 @@ export function FeedSurface({
         startup: (p) => p.contextRefs.some((r) => r.contextId.includes("创业") || r.contextId.includes("AI"))
       };
       const checker = feedMap[selectedCustomFeed];
-      if (checker && !checker(post)) return false;
+      if (checker) {
+        if (!checker(post)) return false;
+      } else if (customFeedTokens.length > 0) {
+        // AI 生成的自定频道（id=ai_…）：内置 feedMap 没有规则，
+        // 用频道名+描述切词做本地过滤；之前直接看全部。
+        const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
+          .filter((value): value is string => typeof value === "string")
+          .join(" ")
+          .toLocaleLowerCase();
+        if (!customFeedTokens.some((token) => haystack.includes(token))) return false;
+      }
     }
-    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
-    if (normalizedQuery) {
-      const searchable = [authorName(post), post.body, post.cityScope, ...post.contextRefs.map((entry) => entry.contextId)]
+      const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+      if (normalizedQuery) {
+        const searchable = [resolveAuthorDisplayName(post, viewerAccountId), post.body, post.cityScope, ...post.contextRefs.map((entry) => entry.contextId)]
         .filter((value): value is string => typeof value === "string")
         .join(" ")
         .toLocaleLowerCase();
@@ -728,7 +867,12 @@ export function FeedSurface({
     }
     return true;
   });
-  const visible = getVisibleForTab(tab);
+  // 偏好-权重：只重排不隐藏。类别按帖子属性归一后取权重分，
+  // V8 sort 稳定，同分保持服务端顺序。
+  const unranked = getVisibleForTab(tab);
+  const scored = unranked.map((post, index) => ({ post, index, score: feedWeightFor(post) }));
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+  const visible = scored.map((entry) => entry.post);
   const quoteTarget = composerQuoteId ? posts.find((post) => post.postId === composerQuoteId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
@@ -777,14 +921,14 @@ export function FeedSurface({
       </View>
 
       {section === "STATUS" ? (
-        <StatusFeed client={socialSpace} onReply={onOpenChat} />
+        <StatusFeed client={socialSpace} onReply={onOpenChat} viewerAccountId={viewerAccountId} />
       ) : section === "COMMUNITY" ? (
         <CommunityHub client={socialSpace} />
       ) : (
       <>
       {selectedCustomFeed ? (
         <View style={styles.customFeedBanner}>
-          <Text style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? selectedCustomFeed}</Text>
+          <Text style={styles.customFeedBannerText}>定制频道 · {CUSTOM_FEED_LABELS[selectedCustomFeed] ?? customFeedDef?.name ?? selectedCustomFeed}</Text>
           <Pressable onPress={() => setSelectedCustomFeed(null)}>
             <Text style={styles.customFeedBannerAction}>退出频道</Text>
           </Pressable>
@@ -866,6 +1010,7 @@ export function FeedSurface({
         localNet={localNet}
         mediaClient={mediaClient}
         secureSessionStore={secureSessionStore}
+        viewerAccountId={viewerAccountId}
         onClose={() => { setComposerOpen(false); setComposerQuoteId(null); }}
         onPublished={async () => { setComposerOpen(false); setComposerQuoteId(null); await loadFeed(); }}
         posts={posts}
@@ -900,7 +1045,12 @@ export function FeedSurface({
           {visible.map((post) => {
           const quoted = findQuote(post);
           const items = mediaFor(post.postId);
-          const name = authorName(post);
+          const name = resolveAuthorDisplayName(post, viewerAccountId);
+          // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
+          const avatar = resolveAuthorAvatar(
+            { authorType: post.authorType, authorId: post.authorId },
+            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri, aiAccountsById, displayName: name }
+          );
           const meta = AUTHOR_TYPE_META[post.authorType];
           const isFollow = following.has(post.authorId);
           const isLiked = liked.has(post.postId);
@@ -924,8 +1074,14 @@ export function FeedSurface({
                   style={styles.postAvatarPressable}
                 >
                 <View style={styles.postAvatarWrap}>
-                  <View style={styles.postAvatar}>
-                    <Text style={styles.postAvatarText}>{name.charAt(0)}</Text>
+                  <View style={styles.postAvatarClip}>
+                    {avatar.kind === "image" ? (
+                      <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} source={avatar.source} />
+                    ) : (
+                      <View style={styles.postAvatar}>
+                        <Text style={styles.postAvatarText}>{avatar.letter}</Text>
+                      </View>
+                    )}
                   </View>
                   <View style={styles.scenarioBadge}>
                     <ProxyIcon color={color.violet} name={scenarioIconForPost(post)} size={10} />
@@ -943,6 +1099,7 @@ export function FeedSurface({
                     <Text style={styles.postMeta}>· {relativeTime(post.createdAt)}</Text>
                   </View>
                   {meta.label ? <Text style={styles.postMeta}>{meta.label}</Text> : null}
+                  {meta.aiBadge ? <Text style={styles.aiBadge}>AI生成</Text> : null}
                 </View>
                 </Pressable>
                 <Pressable
@@ -1005,9 +1162,9 @@ export function FeedSurface({
                 <View style={styles.quoteCard}>
                   <View style={styles.quoteHead}>
                     <View style={styles.quoteAvatar}>
-                      <Text style={styles.quoteAvatarText}>{authorName(quoted).charAt(0)}</Text>
+                      <Text style={styles.quoteAvatarText}>{resolveAuthorDisplayName(quoted, viewerAccountId).charAt(0)}</Text>
                     </View>
-                    <Text style={styles.quoteAuthor}>{authorName(quoted)}</Text>
+                    <Text style={styles.quoteAuthor}>{resolveAuthorDisplayName(quoted, viewerAccountId)}</Text>
                     <Text style={styles.quoteMeta}>引用帖文</Text>
                   </View>
                   <Text numberOfLines={2} style={styles.quoteBody}>{quoted.body}</Text>
@@ -1054,7 +1211,17 @@ export function FeedSurface({
                   <Pressable onPress={() => onOpenChat(name)} style={styles.intentChat}>
                     <Text style={styles.intentChatText}>聊一下</Text>
                   </Pressable>
-                  <Pressable onPress={() => onOpenChat(name)} style={styles.intentNeed}>
+                  <Pressable
+                    onPress={() => {
+                      // 按这个想法找同行：用帖子的首个上下文主题（没有则取正文前 8 字）
+                      // 打开动态搜索并填入，列表即按该想法过滤——之前与“聊一下”完全同行为。
+                      const idea = post.contextRefs[0]?.contextId ?? post.body.slice(0, 8);
+                      setSearchOpen(true);
+                      setSearchQuery(idea);
+                    }}
+                    style={styles.intentNeed}
+                    accessibilityLabel="按这个想法找同行"
+                  >
                     <Text style={styles.intentNeedText}>按这个想法找同行</Text>
                   </Pressable>
                 </View>
@@ -1077,7 +1244,7 @@ export function FeedSurface({
           key={viewer.postId}
           items={viewerItems}
           index={viewer.index}
-          author={authorName(viewerPost)}
+          author={resolveAuthorDisplayName(viewerPost, viewerAccountId)}
           resolveUrl={(path) => localNet.resolveMediaUrl(path)}
           onNavigate={(next) => {
             setMediaPositions((current) => ({ ...current, [viewer.postId]: next }));
@@ -1160,7 +1327,7 @@ export function FeedSurface({
       </View>
     ) : null}
     {section === "POSTS" ? (
-      <Pressable accessibilityLabel={composerOpen ? "关闭发布器" : "发布帖文"} onPress={toggleEmbeddedComposer} style={styles.feedFab}>
+      <Pressable accessibilityLabel={composerOpen ? "关闭发布器" : "发布帖文"} onPress={toggleEmbeddedComposer} style={[styles.feedFab, { bottom: bottomNavVisible === false ? 28 : 116 }]}>
         <Text style={styles.feedFabText}>{composerOpen ? "×" : "＋"}</Text>
       </Pressable>
     ) : null}
@@ -1242,22 +1409,17 @@ const styles = StyleSheet.create({
   sectionTabText: { color: color.muted, fontSize: 12, fontWeight: "800" },
   sectionTabTextOn: { color: color.white },
   feedNote: { color: color.muted, fontSize: 12, lineHeight: 17, marginBottom: 8, marginTop: 0 },
-  // 基线 .feedfab：violet bg radius 999 48×48。
+  // 与市场 + 号同式：ink 底 54×54，底栏显隐跟随（116/28）。
   feedFab: {
     alignItems: "center",
-    backgroundColor: color.violet,
-    borderRadius: 999,
-    bottom: 16,
-    height: 48,
+    backgroundColor: color.ink,
+    borderRadius: 27,
+    height: 54,
     justifyContent: "center",
     position: "absolute",
     right: 18,
-    shadowColor: "#7C2AFF",
-    shadowOffset: { height: 12, width: 0 },
-    shadowOpacity: 0.27,
-    shadowRadius: 26,
-    width: 48,
-    zIndex: 30
+    width: 54,
+    ...shadows.card
   },
   feedFabText: { color: color.white, fontSize: 24 },
 
@@ -1437,6 +1599,7 @@ const styles = StyleSheet.create({
   profileDropPress: { alignItems: "center", height: "100%", justifyContent: "center", paddingHorizontal: 12, width: "100%" },
   profileDropText: { color: color.ink, fontSize: 14, fontWeight: "700" },
   postAvatarWrap: { height: 44, position: "relative", width: 44 },
+  postAvatarClip: { borderRadius: 22, height: 44, overflow: "hidden", width: 44 },
   postAvatar: {
     alignItems: "center",
     backgroundColor: "#111",
@@ -1453,6 +1616,7 @@ const styles = StyleSheet.create({
   postNameLine: { alignItems: "center", flexDirection: "row", gap: 6, minWidth: 0 },
   postName: { color: color.ink, fontSize: 13, fontWeight: "700" },
   postMeta: { color: color.muted, fontSize: 11 },
+  aiBadge: { alignSelf: "flex-start", backgroundColor: "#F4F0FF", borderRadius: 6, color: "#5B3FA3", fontSize: 10, fontWeight: "700", marginTop: 2, paddingHorizontal: 6, paddingVertical: 2 },
   // R15.23: Threads UX 没有 follow 按钮, 改 ⋯ 菜单 (32pt 宽, 19px 文字 #555)
   postMenu: { alignItems: "center", height: 28, justifyContent: "center", width: 32 },
   postMenuText: { color: "#555", fontSize: 19, lineHeight: 22 },

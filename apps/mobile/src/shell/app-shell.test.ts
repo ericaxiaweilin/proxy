@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { selectMeTabView, selectShellChromeVisible, selectMotionProfile } from "./app-shell-selectors";
 
 describe("app shell guest path", () => {
+  it("PROFILE-READ-001: wires account identity and avatar upload into MeSurface", () => {
+    const source = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+    const start = source.indexOf("<MeSurface");
+    const meCall = source.slice(start, source.indexOf("/>", start));
+    expect(meCall).toContain("viewerAccountId");
+    expect(meCall).toContain("mediaClient={media}");
+  });
   it("anonymous browser sees the 'need to sign in' view, not MeSurface", () => {
     expect(selectMeTabView({ isGuest: true, voucherOpen: false })).toBe("guest");
   });
@@ -28,11 +36,32 @@ describe("app shell guest path", () => {
 });
 
 describe("app shell scroll chrome ownership", () => {
-  it.each(["HOME", "MARKET", "MESSAGES", "ME"] as const)("keeps chrome visible on %s", (tab) => {
-    expect(selectShellChromeVisible({ tab, feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
+  it("keeps chrome visible on ME", () => {
+    expect(selectShellChromeVisible({ tab: "ME", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
   });
 
-  it("lets only the primary Feed stream hide chrome", () => {
+  it.each([
+    ["HOME", "homeChromeVisible"],
+    ["MESSAGES", "messageChromeVisible"],
+  ] as const)("lets the %s stream hide chrome like Feed (chrome-parity)", (tab, key) => {
+    // 信号隐藏 chrome（上滑藏）
+    expect(selectShellChromeVisible({ tab, feedChromeVisible: true, [key]: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false } as Parameters<typeof selectShellChromeVisible>[0])).toBe(false);
+    // 信号恢复（下滑/回顶显）
+    expect(selectShellChromeVisible({ tab, feedChromeVisible: true, [key]: true, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false } as Parameters<typeof selectShellChromeVisible>[0])).toBe(true);
+  });
+
+  it("keeps HOME/MESSAGES chrome visible when the signal is not wired (legacy callers)", () => {
+    // optional 未传时保持常显：旧调用（测试/未来 surface）不受影响。
+    expect(selectShellChromeVisible({ tab: "HOME", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
+    expect(selectShellChromeVisible({ tab: "MESSAGES", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
+  });
+
+  it.each(["FEED", "MARKET"] as const)("lets the %s stream hide chrome on scroll", (tab) => {
+    expect(selectShellChromeVisible({ tab, feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(false);
+    expect(selectShellChromeVisible({ tab, feedChromeVisible: true, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
+  });
+
+  it("feed nested chat/preferences force chrome visible", () => {
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: false, messageChatOpen: false })).toBe(false);
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: true, feedPrefsOpen: false, messageChatOpen: false })).toBe(true);
     expect(selectShellChromeVisible({ tab: "FEED", feedChromeVisible: false, feedChatOpen: false, feedPrefsOpen: true, messageChatOpen: false })).toBe(true);

@@ -14,6 +14,7 @@ import {
 import { color } from "../theme";
 import { useVoiceRecorder } from "../voice-recorder";
 import { formatVoiceElapsed } from "../voice-recorder";
+import { ProxyIcon } from "./proxy-icon";
 
 type Props = {
   disabled?: boolean;
@@ -54,7 +55,7 @@ export function VoiceToolButton({ disabled, onDone }: Props): React.JSX.Element 
         onPress={() => void voice.start()}
         style={[styles.tool, disabled ? styles.toolDisabled : null]}
       >
-        <MicGlyph color={color.ink} />
+        <ProxyIcon color={color.ink} name="microphone" size={24} />
       </Pressable>
     );
   }
@@ -115,17 +116,6 @@ export function VoiceToolButton({ disabled, onDone }: Props): React.JSX.Element 
   );
 }
 
-function MicGlyph({ color: c }: { color: string }): React.JSX.Element {
-  // 简化麦克风图标（横杠 + 圆 + U 形支座）
-  return (
-    <View style={styles.mic}>
-      <View style={[styles.micBody, { backgroundColor: c }]} />
-      <View style={[styles.micBase, { borderColor: c }]} />
-      <View style={[styles.micStand, { backgroundColor: c }]} />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   // 工具按钮（折叠态）
   tool: {
@@ -135,20 +125,6 @@ const styles = StyleSheet.create({
     width: 40
   },
   toolDisabled: { opacity: 0.35 },
-  mic: { alignItems: "center", height: 20, justifyContent: "center", width: 20 },
-  micBody: { borderRadius: 5, height: 11, width: 9 },
-  micBase: {
-    borderBottomWidth: 0,
-    borderColor: "transparent",
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderTopWidth: 1,
-    height: 5,
-    marginTop: -1,
-    width: 11
-  },
-  micStand: { height: 2, marginTop: 1, width: 2 },
-
   // Popover（展开态：覆盖在工具栏上方一行）
   popover: {
     backgroundColor: color.white,

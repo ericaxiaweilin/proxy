@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -143,6 +144,24 @@ func TestPasswordlessEmailCreatesAccountThenSessionWithoutClientAccountIDs(t *te
 	session := service.Handle(testEnvelope("CreateSession", map[string]any{"challengeId": begin.OperationRef, "deviceId": "device_new"}, command.Target{Type: "Session", ID: "new"}))
 	if session.Outcome != "ACCEPTED" || session.Auth == nil || session.Auth.AccessToken == "" {
 		t.Fatalf("expected session without client-supplied account IDs, got %#v", session)
+	}
+}
+
+func TestPasswordlessEmailLengthBoundaryIsSharedByRegisterAndLogin(t *testing.T) {
+	service := NewWithRepositoryAndClockAndChallengeProvider(NewMemoryRepository(nil), clock.NewFixed(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)), testLoginChallengeProvider{})
+	exactly50 := strings.Repeat("a", 38) + "@example.com"
+	accepted := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": exactly50, "deviceId": "device_50", "platform": "IOS",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if accepted.Outcome != "PENDING" {
+		t.Fatalf("expected 50-character email accepted, got %#v", accepted)
+	}
+	tooLong := strings.Repeat("a", 39) + "@example.com"
+	rejected := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": tooLong, "deviceId": "device_51", "platform": "IOS",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if rejected.Outcome != "REJECTED" || rejected.Error == nil || rejected.Error.ErrorCode != "INVALID_PASSWORDLESS_AUTHENTICATION" {
+		t.Fatalf("expected 51-character email rejected, got %#v", rejected)
 	}
 }
 
@@ -384,15 +403,15 @@ func privacyTestService(t *testing.T) *Service {
 
 func privacyEnvelopeForUser(userID, commandType string, payload map[string]any) command.Envelope {
 	return command.Envelope{
-		CommandID:     "test_" + commandType,
-		CommandType:   commandType,
+		CommandID:      "test_" + commandType,
+		CommandType:    commandType,
 		CommandVersion: 1,
-		Actor:         command.Actor{Type: "USER", ID: userID},
-		Principal:     command.Principal{Type: "INDIVIDUAL", ID: userID},
-		Target:        command.Target{Type: "PrivacyRequest", ID: userID},
-		AuthContext:   map[string]any{"clientIp": "203.0.113.7", "userAgent": "vitest"},
-		Payload:       payload,
-		CorrelationID: "test-corr-" + commandType,
+		Actor:          command.Actor{Type: "USER", ID: userID},
+		Principal:      command.Principal{Type: "INDIVIDUAL", ID: userID},
+		Target:         command.Target{Type: "PrivacyRequest", ID: userID},
+		AuthContext:    map[string]any{"clientIp": "203.0.113.7", "userAgent": "vitest"},
+		Payload:        payload,
+		CorrelationID:  "test-corr-" + commandType,
 	}
 }
 
@@ -578,5 +597,103 @@ func TestPrivacyDataExport(t *testing.T) {
 	}
 	if export.LegalBasis != "PDP-91/2025/QH15-Art31" {
 		t.Fatalf("export legalBasis wrong: %s", export.LegalBasis)
+	}
+}
+
+// PROFILE-READ-001: the verified login identifier provisions the home-page
+// identity. Registration binds email / phone but created no Profile row, so
+// fresh accounts rendered a hardcoded demo identity on the client.
+func TestVerifyChallengeProvisionsInitialProfile(t *testing.T) {
+	fixed := clock.NewFixed(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+	service := NewWithRepositoryAndClockAndChallengeProvider(NewMemoryRepository(nil), fixed, testLoginChallengeProvider{})
+	begin := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": "NguyenThanhHuyen@Example.com", "deviceId": "device_profile", "platform": "ANDROID",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if begin.Outcome != "PENDING" || begin.OperationRef == "" {
+		t.Fatalf("expected pending passwordless challenge, got %#v", begin)
+	}
+	challenge, err := service.repository.GetLoginChallenge(context.Background(), begin.OperationRef)
+	if err != nil || challenge.UserAccountID == "" {
+		t.Fatalf("expected stored challenge with account, got %#v %v", challenge, err)
+	}
+	verified := service.Handle(testEnvelope("VerifyLoginChallenge", map[string]any{
+		"challengeId": begin.OperationRef, "code": "123456",
+	}, command.Target{Type: "LoginChallenge", ID: begin.OperationRef}))
+	if verified.Outcome != "ACCEPTED" {
+		t.Fatalf("expected verified challenge, got %#v", verified)
+	}
+	read := service.Handle(profileEnvelope("GetProfile", challenge.UserAccountID, nil))
+	if read.Outcome != "ACCEPTED" {
+		t.Fatalf("expected provisioned profile, got %#v", read)
+	}
+	var body struct {
+		Profile Profile `json:"profile"`
+	}
+	if err := json.Unmarshal([]byte(read.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Profile.Name != "nguyenthanhhuyen" || body.Profile.Handle != "@nguyenthanhhuyen" {
+		t.Fatalf("profile not derived from verified identifier: %#v", body.Profile)
+	}
+	// An explicit UpdateProfile always wins over later verifications.
+	edited := service.Handle(profileEnvelope("UpdateProfile", challenge.UserAccountID, map[string]any{
+		"name": "My Name", "handle": "@myname", "bio": "", "city": "河内", "avatarPath": "",
+	}))
+	if edited.Outcome != "ACCEPTED" {
+		t.Fatalf("explicit edit failed: %#v", edited)
+	}
+	// OTP-THROTTLE-001: a second code for the same identifier within one
+	// minute is throttled; advance the clock so this profile-provision
+	// re-verification exercises the user path, not the throttle.
+	fixed.Advance(time.Minute)
+	second := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": "nguyenthanhhuyen@example.com", "deviceId": "device_profile", "platform": "ANDROID",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	reverified := service.Handle(testEnvelope("VerifyLoginChallenge", map[string]any{
+		"challengeId": second.OperationRef, "code": "123456",
+	}, command.Target{Type: "LoginChallenge", ID: second.OperationRef}))
+	if reverified.Outcome != "ACCEPTED" {
+		t.Fatalf("expected second verification, got %#v", reverified)
+	}
+	reread := service.Handle(profileEnvelope("GetProfile", challenge.UserAccountID, nil))
+	var rebody struct {
+		Profile Profile `json:"profile"`
+	}
+	if err := json.Unmarshal([]byte(reread.OperationRef), &rebody); err != nil {
+		t.Fatal(err)
+	}
+	if rebody.Profile.Name != "My Name" || rebody.Profile.Handle != "@myname" {
+		t.Fatalf("explicit profile must survive re-verification: %#v", rebody.Profile)
+	}
+}
+
+// AUTH-LOGIN-HINT-001: the login tab probes existence before sending a
+// code. Unknown identifiers must NOT silently start a registration flow.
+func TestLookupPasswordlessIdentityHintsUnregistered(t *testing.T) {
+	service := NewWithRepositoryAndClockAndChallengeProvider(NewMemoryRepository(nil), clock.NewFixed(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)), testLoginChallengeProvider{})
+	lookup := func(channel, identifier string) command.Result {
+		return service.Handle(testEnvelope("LookupPasswordlessIdentity", map[string]any{
+			"channel": channel, "identifier": identifier,
+		}, command.Target{Type: "LoginIdentity", ID: "lookup"}))
+	}
+	missing := lookup("EMAIL", "nobody@example.com")
+	if missing.Outcome != "REJECTED" || missing.Error == nil || missing.Error.ErrorCode != "LOGIN_IDENTITY_NOT_FOUND" {
+		t.Fatalf("unknown email must hint unregistered, got %#v", missing)
+	}
+	begin := service.Handle(testEnvelope("BeginPasswordlessAuthentication", map[string]any{
+		"channel": "EMAIL", "identifier": "Somebody@Example.com", "deviceId": "device_lookup", "platform": "ANDROID",
+	}, command.Target{Type: "LoginChallenge", ID: "new"}))
+	if begin.Outcome != "PENDING" {
+		t.Fatalf("begin failed: %#v", begin)
+	}
+	// Lookup is case-insensitive like registration and finds the row the
+	// begin call just created — without creating anything itself.
+	found := lookup("EMAIL", "somebody@example.com")
+	if found.Outcome != "ACCEPTED" {
+		t.Fatalf("registered email must look up ACCEPTED, got %#v", found)
+	}
+	bad := lookup("EMAIL", "not-an-email")
+	if bad.Outcome != "REJECTED" || bad.Error == nil || bad.Error.ErrorCode != "INVALID_PASSWORDLESS_LOOKUP" {
+		t.Fatalf("malformed identifier must reject INVALID, got %#v", bad)
 	}
 }

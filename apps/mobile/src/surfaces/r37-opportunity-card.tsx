@@ -7,7 +7,7 @@
 // 68x68 PNGs from /Users/thanhhuyennguyen/Downloads/Proxy_Market_R37_4
 // _Exact_Approved_Order_Logos.html) live at src/assets/order-type-logos.
 //
-// Layout: 64x88 scene thumb | type logo (top-left) + title + meta line
+// Layout: 104x136 scene photo | type logo (top-left) + title + meta line
 //                              + why line
 //                              + price (label + range) | takeBtn
 
@@ -124,11 +124,11 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
-  thumbWrap: { paddingTop: 2 },
-  thumb: { backgroundColor: "#F1ECE3", borderRadius: 8, height: 88, overflow: "hidden", width: 64 },
-  sampleTag: { backgroundColor: "rgba(20,19,26,.74)", borderRadius: 5, bottom: 4, left: 4, paddingHorizontal: 4, paddingVertical: 2, position: "absolute" }, sampleTagText: { color: color.white, fontSize: 6, fontWeight: "800" },
-  body: { flex: 1, minWidth: 0 },
+  card: { backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 12 },
+  thumbWrap: { alignSelf: "stretch" },
+  thumb: { backgroundColor: "#F1ECE3", flex: 1, minHeight: 136, overflow: "hidden", width: 104 },
+  sampleTag: { backgroundColor: "rgba(20,19,26,.74)", borderRadius: 6, bottom: 6, left: 6, paddingHorizontal: 6, paddingVertical: 3, position: "absolute" }, sampleTagText: { color: color.white, fontSize: 8, fontWeight: "800" },
+  body: { flex: 1, minWidth: 0, paddingBottom: 12, paddingRight: 14, paddingTop: 12 },
   typeRow: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 5 },
   typeMeta: { flex: 1, minWidth: 0 },
   typeMetaLabel: { color: "#AAA49C", fontSize: 6.4, letterSpacing: 0.15, lineHeight: 9 },

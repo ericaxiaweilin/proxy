@@ -3,14 +3,18 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import type { SupplierCandidate, SupplyClient } from "../supply-client";
 import { localApiBaseUrl } from "../native-clients";
+import { resolveAssetSource } from "../media/asset-sources";
 import { color } from "../theme";
 
 // 供给照片可能是相对路径（/v1/media/...，LAN 安全）或绝对 URL。
-// 相对路径按当前 API base 解析， historically 的绝对 URL 原样使用。
+// 经统一资产层解析；拼不出的进缺图占位，不渲染坏图。
 function resolveCreatorPhoto(photo: string | undefined): string | undefined {
   if (!photo) return undefined;
-  if (photo.startsWith("/")) return `${localApiBaseUrl}${photo}`;
-  return photo;
+  const source = resolveAssetSource(
+    photo.startsWith("/") ? { kind: "serverPath", path: photo } : { kind: "remote", url: photo },
+    { baseUrl: localApiBaseUrl }
+  );
+  return typeof source === "object" ? source.uri : undefined;
 }
 
 export function MerchantCreatorRecommendations({ supply, marketId = "hn", onOpenAll }: { supply: SupplyClient | undefined; marketId?: string; onOpenAll: () => void }): React.JSX.Element {

@@ -18,6 +18,17 @@ import type { SecureStorageDriver } from "./secure-session";
 
 const PROFILE_KEY = "proxy.profile.v1";
 
+/**
+ * PROFILE-READ-001: profile storage is scoped per account so two accounts
+ * sharing one device never see each other's name/handle. The unscoped key
+ * is the pre-pipeline legacy slot and must only be read for one-time
+ * same-account adoption (see me.tsx hydration), never as a live source.
+ */
+export function profileKeyFor(accountId?: string | undefined): string {
+  const scope = (accountId ?? "").trim();
+  return scope === "" ? PROFILE_KEY : `${PROFILE_KEY}.${scope}`;
+}
+
 export type ProfileRecord = {
   name: string;
   handle: string;
@@ -53,15 +64,42 @@ export function isProfileRecord(value: unknown): value is ProfileRecord {
   );
 }
 
-export function createProfileStore(driver: SecureStorageDriver): ProfileStore {
+/**
+ * AVATAR-SAVE-002: 服务端 profile 合并回本地记录时的规则。
+ *
+ * remote.avatarPath 形如 `assets/<mediaAssetId>` —— 那是服务端媒体 id，不是本机
+ * 文件名。旧实现直接 `avatarFileName(remote.avatarPath)` 覆盖本地记录，把
+ * documentDirectory 里那份 `avatar-<ts>.jpg` 的指针抹掉：重启/离线时本地头像再也
+ * 指不回去，表现为「换完头像被默认重置成字母头」。
+ *
+ * 规则：本地已有副本文件名时永远保留（它是唯一的离线可读来源）；只有本地没有头像
+ * 时才退回服务端派生的名字。
+ */
+export function mergeRemoteProfile(
+  remote: { name: string; handle: string; bio: string; city: string; avatarPath?: string | undefined; updatedAt: string },
+  existing?: ProfileRecord | undefined
+): ProfileRecord {
+  const remoteDerived = remote.avatarPath ? avatarFileName(remote.avatarPath) : undefined;
+  return {
+    name: remote.name,
+    handle: remote.handle,
+    bio: remote.bio,
+    city: remote.city,
+    avatarPath: existing?.avatarPath ?? remoteDerived,
+    updatedAt: remote.updatedAt
+  };
+}
+
+export function createProfileStore(driver: SecureStorageDriver, accountId?: string | undefined): ProfileStore {
+  const key = profileKeyFor(accountId);
   return {
     async read() {
       try {
-        const raw = await driver.getItem(PROFILE_KEY);
+        const raw = await driver.getItem(key);
         if (!raw) return undefined;
         const parsed = JSON.parse(raw) as unknown;
         if (!isProfileRecord(parsed)) {
-          await driver.deleteItem(PROFILE_KEY).catch(() => undefined);
+          await driver.deleteItem(key).catch(() => undefined);
           return undefined;
         }
         return parsed;
@@ -71,19 +109,19 @@ export function createProfileStore(driver: SecureStorageDriver): ProfileStore {
     },
     async write(value) {
       if (!isProfileRecord(value)) throw new Error("invalid ProfileRecord value");
-      await driver.setItem(PROFILE_KEY, JSON.stringify(value));
+      await driver.setItem(key, JSON.stringify(value));
     },
     async clear() {
-      await driver.deleteItem(PROFILE_KEY).catch(() => undefined);
+      await driver.deleteItem(key).catch(() => undefined);
     }
   };
 }
 
 /** 默认 profile — me tab 初次进入、未登录态 / 未编辑过时使用。 */
 export const DEFAULT_PROFILE: ProfileRecord = {
-  name: "Huyen",
-  handle: "huyen.hanoi",
-  bio: "喜欢旅行、拍照和城市里的新鲜体验。",
+  name: "用户",
+  handle: "@user",
+  bio: "",
   city: "河内",
   avatarPath: undefined,
   updatedAt: new Date(0).toISOString()

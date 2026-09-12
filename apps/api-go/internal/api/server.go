@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/activity"
+	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/benefit"
 	"github.com/proxy-app/proxy-api/internal/business"
 	"github.com/proxy-app/proxy-api/internal/citycompanion"
@@ -20,19 +21,19 @@ import (
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/identity"
-	"github.com/proxy-app/proxy-api/internal/location"
+	"github.com/proxy-app/proxy-api/internal/jurisdiction"
 	"github.com/proxy-app/proxy-api/internal/localcontext"
 	"github.com/proxy-app/proxy-api/internal/localnet"
+	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
-	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
-	"github.com/proxy-app/proxy-api/internal/aipersona"
-	"github.com/proxy-app/proxy-api/internal/jurisdiction"
+	"github.com/proxy-app/proxy-api/internal/profile"
 	"github.com/proxy-app/proxy-api/internal/realityscene"
+	"github.com/proxy-app/proxy-api/internal/relationship"
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
@@ -69,19 +70,19 @@ type Server struct {
 	// Location owns the precise-location consent ledger (R16.7-P1-J).
 	// It is a separate service so the consent reads / writes do not
 	// pay the load cost of the full identity service.
-	Location      *location.Service
+	Location *location.Service
 	// Benefit owns the benefit routing network (R16.11 / Master PRD v1.4 §12 §3).
-	Benefit       *benefit.Service
+	Benefit *benefit.Service
 	// LocationRepo is the storage handle the history endpoint reads
 	// from. Kept separate from the Service so tests can inject an
 	// in-memory repository without standing up a service.
-	LocationRepo  location.Repository
+	LocationRepo location.Repository
 	// Compliance owns the remote legal kill switch (R16.7-P1-G).
 	// The HTTP layer uses Compliance.IsEnabled to gate regulated
 	// endpoints; the public /v1/legal/status route reads
 	// Compliance.GlobalStatus to expose the active switches to
 	// the mobile client at boot.
-	Compliance    *compliance.Service
+	Compliance *compliance.Service
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
 	// CONFIRMED transition for PLATFORM_PAY orders. Wired
@@ -98,6 +99,10 @@ type Server struct {
 	// HTTP API surface for self-service jurisdiction
 	// changes is mounted separately in handlers.
 	Jurisdiction *jurisdiction.Service
+	// Profile owns the server-side user profile card (P1, audit 2026-09-04):
+	// UpsertUserProfile / GetUserProfile. Kept separate from identity so the
+	// profile write path does not touch the login/device ledger.
+	Profile       *profile.Service
 	Idempotency   command.IdempotencyStore
 	Authenticator Authenticator
 	ReadyCheck    func(context.Context) error
@@ -147,7 +152,7 @@ func NewServerWithRuntime(identityService *identity.Service, demandService *dema
 	if readyCheck != nil {
 		readyMode = "configured"
 	}
-	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.NewWithRepository(experience.NewMemoryRepository()), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Relationship: relationship.New(), Scene: scene.New(), RealityScene: realityscene.New(), Facet: facet.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120), TrustCloudflareIP: envBool("PROXY_TRUST_CLOUDFLARE_IP"), ReadTimeout: 4 * time.Second}
+	return &Server{Identity: identityService, Demand: demandService, CityCompanion: cityCompanionService, LocalNet: localNetService, LocalContext: localContextService, Conversation: conversationService, Engagement: engagementService, Fulfillment: fulfillmentService, Supply: supplyService, Media: mediaService, Contribution: contributionService, Experience: experience.NewWithRepository(experience.NewMemoryRepository()), Voucher: voucher.New(), SocialSpace: socialspace.New(), Payment: payment.New(), Outcome: outcome.New(), Notification: notification.New(), Safety: safety.New(), Business: business.New(), Relationship: relationship.New(), Scene: scene.New(), RealityScene: realityscene.New(), Facet: facet.New(), Profile: profile.New(), Idempotency: idempotencyStore, Authenticator: authenticator, ReadyCheck: readyCheck, ReadyMode: readyMode, Transactions: transactions, RateLimit: NewRateLimiter(time.Minute, 120), TrustCloudflareIP: envBool("PROXY_TRUST_CLOUDFLARE_IP"), ReadTimeout: 4 * time.Second}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -181,6 +186,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/media/variant/", s.mediaVariantFile)
 	mux.HandleFunc("/v1/feed", s.publicFeed)
 	mux.HandleFunc("/v1/reality-scenes", s.publicRealityScenes)
+	mux.HandleFunc("/v1/scene-assets", s.publicSceneAssets)
 	mux.HandleFunc("/v1/reality-scenes/nearby", s.nearbyRealityScenes)
 	mux.HandleFunc("/v1/scenes/", s.dynamicSceneRead)
 	// R16.9: public legal docs (Terms / Privacy) used by the signup
@@ -226,6 +232,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/ai/personas", s.routePersonaCollection)
 	mux.HandleFunc("/v1/ai/personas/", s.routePersonaItem)
 	mux.HandleFunc("/v1/ai/accounts", s.listPlatformAIAccounts)
+	// AI-ASSIST-001: 平台 AI 助手公开目录（首页推荐），匿名可读。
+	mux.HandleFunc("/v1/ai/assistants", s.listAIAssistants)
+	// 小美头像原文件（GPT 交付 SVG）：更长 prefix，优先于 personas/ 通配。
+	mux.HandleFunc("/v1/ai/personas/photo/", s.personaPhoto)
 	// R16.7-P1-E: Jurisdiction Policy Engine self-service.
 	// GET reads the caller's current jurisdiction (default
 	// VN-79 when no row exists); PATCH updates it. Operator

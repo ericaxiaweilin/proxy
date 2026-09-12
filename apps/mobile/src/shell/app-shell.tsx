@@ -168,7 +168,7 @@ export function AppShell({
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
-  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; initialDraft?: string }>();
+  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string }>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
   const [viewerAccountId, setViewerAccountId] = useState<string>();
@@ -213,15 +213,36 @@ export function AppShell({
     useState<ExperienceManifest>();
   const [feedRefreshTrigger, setFeedRefreshTrigger] = useState(0);
   const [feedPrefsOpen, setFeedPrefsOpen] = useState(false);
+  // AI 主页“查看个人主页”的搜索种子：进动态即消费（Feed 通知后清除），
+  // 离开动态也清除，下次正常进不带旧词。
+  const [feedSearchSeed, setFeedSearchSeed] = useState<string | undefined>(undefined);
   const [feedChromeVisible, setFeedChromeVisible] = useState(true);
+  // chrome-parity: HOME / MESSAGES 主信息流的滑动显隐信号（与 FEED/MARKET
+  // 同一套上滑藏、下滑/回顶显逻辑；信号由各自 Surface 上报）。
+  const [homeChromeVisible, setHomeChromeVisible] = useState(true);
+  const [messageChromeVisible, setMessageChromeVisible] = useState(true);
+  const rootSwipeBlockedRef = useRef(false);
+  const setRootSwipeBlocked = useCallback((blocked: boolean): void => {
+    rootSwipeBlockedRef.current = blocked;
+  }, []);
   // R15.34.3: body 横滑切页 panResponder — 转换自 onTouchStart/Move/End,
   //   让 RN responder 谈判系统能识别 “子组件先抢” (FilterChipRail /
   //   multi-image ScrollView / stories), 避免原来的 plain touch
   //   handler 总是赢走横滑。
+  // 消息页左滑留给行内删除：用 ref 读当前页（闭包只建一次，直接读
+  // currentPage 会是首屏旧值），MSG_* 页禁止向左跳页，向右保留。
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+  function isMessagesPage(page: PageId): boolean {
+    return page === "MSG_CHAT" || page === "MSG_FRIENDS";
+  }
   const bodySwipePanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gs) => {
+        if (rootSwipeBlockedRef.current) return false;
+        // 消息页左滑归行内删除，不参与整页抢夺。
+        if (isMessagesPage(currentPageRef.current) && gs.dx < 0) return false;
         const absDx = Math.abs(gs.dx);
         const absDy = Math.abs(gs.dy);
         const swipeThreshold = 56;
@@ -234,11 +255,12 @@ export function AppShell({
         const absDy = Math.abs(dy);
         const swipeThreshold = 56;
         const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
-        const canSwipeRoot = !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
+        const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
         if (isHorizontalSwipe && canSwipeRoot) {
-          const idx = PAGE_SEQUENCE.indexOf(currentPage);
+          const page = currentPageRef.current;
+          const idx = PAGE_SEQUENCE.indexOf(page);
           if (idx < 0) return;
-          if (dx < 0 && idx < PAGE_SEQUENCE.length - 1) goToPage(PAGE_SEQUENCE[idx + 1]!);
+          if (dx < 0 && !isMessagesPage(page) && idx < PAGE_SEQUENCE.length - 1) goToPage(PAGE_SEQUENCE[idx + 1]!);
           else if (dx > 0 && idx > 0) goToPage(PAGE_SEQUENCE[idx - 1]!);
         }
       },
@@ -249,6 +271,10 @@ export function AppShell({
   ).current;
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [homeAssistant, setHomeAssistant] = useState<{ text: string; mode?: HomeIntentMode; attachment?: HomeAttachment }>();
+  const openProxyAIConversation = useCallback((): void => {
+    setWorkspaceTarget(undefined);
+    setHomeAssistant({ text: "" });
+  }, []);
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [sceneComposerTool, setSceneComposerTool] = useState<SceneToolId | undefined>(undefined);
   // R15.13 P5：首页/动态顶部的本地范围（仅 city + area，不做 GPS 精确定位）。
@@ -342,6 +368,8 @@ export function AppShell({
 
   function selectTab(next: RootTab): void {
     setFeedChromeVisible(true);
+    setHomeChromeVisible(true);
+    setMessageChromeVisible(true);
     if (next === "MARKET") {
       setMarketEntry({ tab: "OPPORTUNITY", viewMode: "LIST" });
     }
@@ -356,6 +384,7 @@ export function AppShell({
     if (next !== "FEED") {
       setFeedChatAuthor(undefined);
       setFeedPrefsOpen(false);
+      setFeedSearchSeed(undefined);
     }
     if (next !== "MESSAGES") setMessageChat(undefined);
     if (next !== "ME") setVoucherOpen(false);
@@ -397,12 +426,15 @@ export function AppShell({
     setSwitcherOpen(true);
   }, []);
   const insets = useSafeAreaInsets();
-  // Only the primary Feed stream owns scroll-driven shell chrome. Chat,
-  // Home/Market/Me forms and Feed's nested chat/preferences keep navigation
+  // Feed and Market streams own scroll-driven shell chrome (top header +
+  // bottom dock hide on scroll down, restore on scroll up). Chat,
+  // Home/Me forms and Feed's nested chat/preferences keep navigation
   // stable so moving through messages cannot unexpectedly summon/hide it.
   const isNavVisible = !realitySceneOpen && !openAIProfile && selectShellChromeVisible({
     tab,
     feedChromeVisible,
+    homeChromeVisible,
+    messageChromeVisible,
     feedChatOpen: Boolean(feedChatAuthor),
     feedPrefsOpen,
     messageChatOpen: Boolean(messageChatAuthor)
@@ -487,8 +519,16 @@ export function AppShell({
             <AIAccountProfileSurface
               account={openAIProfile}
               engagement={engagement}
+              relationship={relationship}
               {...(secureSessionStore ? { secureSessionStore } : {})}
               onBack={() => { setOpenAIProfile(undefined); if (aiProfileReturnToScene) { setAIProfileReturnToScene(false); setRealitySceneOpen(true); } }}
+              onViewPosts={(account) => {
+                // 查看个人主页：关主页页，进动态看她的全部内容（搜索种子即消费）。
+                setOpenAIProfile(undefined);
+                setAIProfileReturnToScene(false);
+                setFeedSearchSeed(account.displayName);
+                setTab("FEED");
+              }}
               onMessage={(account, initialDraft) => {
                 setOpenAIProfile(undefined);
                 setMessageChat({ author: account.displayName, aiAccount: account, ...(initialDraft ? { initialDraft } : {}) });
@@ -503,9 +543,9 @@ export function AppShell({
               localNet={localNet}
               {...(secureSessionStore ? { secureSessionStore } : {})}
               onBack={() => { setOpenHumanProfile(undefined); if (humanProfileReturnToScene) { setHumanProfileReturnToScene(false); setRealitySceneOpen(true); } }}
-              onMessage={(name) => {
+              onMessage={(name, avatarUri) => {
                 setOpenHumanProfile(undefined);
-                setMessageChat({ author: name });
+                setMessageChat({ author: name, ...(avatarUri ? { avatarSource: { uri: avatarUri } } : {}) });
                 setPageOverride("MSG_CHAT");
                 setTab("MESSAGES");
               }}
@@ -519,10 +559,14 @@ export function AppShell({
             />
           ) : (
             <RequesterHome
+              onChooserVisibilityChange={setRootSwipeBlocked}
               onEnterWorkspace={enterWorkspace}
               onOpenFeed={() => selectTab("FEED")}
               onOpenMarket={(tab) => openMarket({ tab })}
+              onChromeVisibilityChange={setHomeChromeVisible}
+              localNet={localNet}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
+              onOpenAssistantConversation={openProxyAIConversation}
               conversationPanel={homeAssistant ? (
                 <HomeAssistantSurface
                   embedded
@@ -551,7 +595,7 @@ export function AppShell({
               activities={activities}
               experiences={experience}
               aiAccounts={aiAccounts}
-              engagement={engagement}
+              relationship={relationship}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               onOpenAIProfile={setOpenAIProfile}
               onOpenHumanScene={(person, sceneId) => {
@@ -568,6 +612,11 @@ export function AppShell({
                 posts: [],
                 mediaByPost: {},
               })}
+              onMessageHuman={(person) => {
+                setMessageChat({ author: person.name, ...(person.photoUri ? { avatarSource: { uri: person.photoUri } } : {}) });
+                setPageOverride("MSG_CHAT");
+                setTab("MESSAGES");
+              }}
               onMessageAI={(account) => {
                 setMessageChat({ author: account.displayName, aiAccount: account });
                 setPageOverride("MSG_CHAT");
@@ -596,8 +645,8 @@ export function AppShell({
               supply={supply}
               marketLabel="河内"
               initialTab={marketEntry.tab}
-              onOpenActivity={() => undefined}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
+              onChromeVisibilityChange={setFeedChromeVisible}
               bottomNavVisible={isNavVisible}
             />
         ) : tab === "FEED" ? (
@@ -613,14 +662,20 @@ export function AppShell({
             <FeedPrefsSurface onBack={() => setFeedPrefsOpen(false)} />
           ) : (
             <FeedSurface
+              key={feedSearchSeed ?? "feed"}
               engagement={engagement}
               localNet={localNet}
               mediaClient={media}
               socialSpace={socialSpace}
               secureSessionStore={secureSessionStore}
+              {...(viewerAccountId ? { viewerAccountId } : {})}
+              {...(feedSearchSeed ? { initialSearchQuery: feedSearchSeed } : {})}
+              onSearchSeedConsumed={() => setFeedSearchSeed(undefined)}
               onChromeVisibilityChange={setFeedChromeVisible}
               onOpenChat={setFeedChatAuthor}
               onOpenFeedPrefs={() => setFeedPrefsOpen(true)}
+              // MEDIA-PIPELINE-001: AI 账号目录透传，动态解析 AGENT 帖头像。
+              aiAccountsClient={aiAccounts}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               onOpenProfile={(profile) => setOpenHumanProfile(profile)}
               refreshTrigger={feedRefreshTrigger}
@@ -638,6 +693,7 @@ export function AppShell({
               author={messageChatAuthor}
               {...(messageChat?.conversationId ? { conversationId: messageChat.conversationId } : {})}
               {...(messageChat?.aiAccount ? { aiAccount: messageChat.aiAccount } : {})}
+              {...(messageChat?.avatarSource ? { peerAvatarSource: messageChat.avatarSource } : {})}
               {...(messageChat?.initialDraft ? { initialDraft: messageChat.initialDraft } : {})}
               {...(ensureConversationSession ? { ensureSession: ensureConversationSession } : {})}
               conversationClient={conversation}
@@ -646,7 +702,7 @@ export function AppShell({
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} onOpenConversation={(author, conversationId) => setMessageChat(conversationId ? { author, conversationId } : { author })} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -665,8 +721,10 @@ export function AppShell({
               supply={supply}
               activities={activities}
               profileClient={profile}
+              mediaClient={media}
               relationshipClient={relationship}
               socialSettingsClient={socialSettings}
+              {...(viewerAccountId ? { viewerAccountId } : {})}
               {...(experienceManifest?.context === context
                 ? {
                     experienceSections: experienceManifest.me.sections,
@@ -719,6 +777,12 @@ export function AppShell({
 
 
 // 基线 .header.root：只有 Otter logo + Proxy 字标（上下文徽章不在此层，见 Me 的 contextline）。
+//
+// UI-SAFEAREA-001: 顶栏不再自己加安全区。外层 app-shell 已经用
+// <SafeAreaView edges={["top"]}> 整体让出状态栏，顶栏若再叠一次 insets.top 就是
+// 双计（实测品牌行 y=127 = 59 状态栏 + 59 重复）。此前几次「顶栏让出状态栏时间 /
+// 高度随安全区长」的改动都发生在 insets 恒为 0 的环境里，等于没生效，只在真值到位后
+// 变成双计。安全区只在 SafeAreaView 一处生效，顶栏保持基线 52/46 高。
 function Header({ compact }: { compact: boolean }): React.JSX.Element {
   return (
     <View style={[styles.header, compact && styles.headerCompact]}>

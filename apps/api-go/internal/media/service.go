@@ -1601,3 +1601,52 @@ func (s *Service) amendMediaReviewDecision(ctx context.Context, e command.Envelo
 		"prevDecisionId": prev.DecisionID,
 	}, domainEvents)
 }
+
+// xiaomeiPersonaPhotos 是 5 小美写真在媒体仓储里的资产定义。
+// URL 用相对路径（/v1/ai/personas/photo/…），客户端按当前 baseUrl
+// 拼接，换网不断。APPROVED + PUBLIC + READY 才能进 Feed 读模型。
+var xiaomeiPersonaPhotos = []struct {
+	AssetID   string
+	PersonaID string
+	Path      string
+}{
+	{"seed_media_xiaomei_001", "ai_001", "/v1/ai/personas/photo/ai_001"},
+	{"seed_media_xiaomei_002", "ai_002", "/v1/ai/personas/photo/ai_002"},
+	{"seed_media_xiaomei_003", "ai_003", "/v1/ai/personas/photo/ai_003"},
+	{"seed_media_xiaomei_004", "ai_004", "/v1/ai/personas/photo/ai_004"},
+	{"seed_media_xiaomei_005", "ai_005", "/v1/ai/personas/photo/ai_005"},
+}
+
+// SeedXiaomeiAssets 幂等写入 5 小美写真资产（AI-POSTS-001）。
+// 已存在跳过（查得到就不写），绝不覆写线上行。
+func (s *Service) SeedXiaomeiAssets(ctx context.Context) error {
+	now := time.Now().UTC()
+	for _, p := range xiaomeiPersonaPhotos {
+		if _, err := s.repository.GetAsset(ctx, p.AssetID); err == nil {
+			continue
+		}
+		asset := MediaAsset{
+			MediaAssetID:       p.AssetID,
+			OwnerPrincipalType: "PLATFORM",
+			OwnerPrincipalID:   "platform",
+			MediaType:          "IMAGE",
+			MimeType:           "image/png",
+			Width:              720,
+			Height:             720,
+			ThumbnailURL:       p.Path,
+			PlaybackURL:        p.Path,
+			ModerationStatus:   "APPROVED",
+			VisibilityClass:    "PUBLIC",
+			ProcessingStatus:   "READY",
+			AIGenerationSource: "AI_PERSONA",
+			AIGenerated:        true,
+			PersonaID:          p.PersonaID,
+			CreatedAt:          now,
+			UpdatedAt:          now,
+		}
+		if err := s.repository.CreateAsset(ctx, asset); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -1,12 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Directory, File, Paths } from "expo-file-system";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, Gradient } from "../theme";
+import { parseCreatorSnapshot, type CreatorSnapshot } from "../local-snapshot";
 
 const CATEGORIES = ["Beauty", "Lifestyle", "Wellness", "Travel", "Food", "Fashion", "Fitness", "Tech"];
 const CHANNELS = ["TikTok", "Instagram", "Facebook", "YouTube"] as const;
 const COLLABORATIONS = ["到店体验 + 内容", "商业内容 / Sponsored", "UGC", "优惠券推广", "活动出席", "产品赠送"];
 const RATE_ITEMS = ["TikTok 短视频", "Instagram Reel", "Story", "UGC", "到店 + 内容"];
+
+// 邀请接受态 + 全部输入的本机快照：之前接受只记内存，重进卡片就回到
+// “待接受”再问一遍。现在落盘，重进恢复已接受与填过的内容。
+const creatorDirectory = new Directory(Paths.document, "proxy-creator");
+const creatorFile = new File(creatorDirectory, "invitation-v1.json");
+/**
+ * SYNC-FS-001: File.json() 是异步的，同步读永远拿到 Promise。
+ * 本函数为唯一读入口（await）。解析见 local-snapshot（单测覆盖）。
+ */
+export async function readCreatorSnapshotAsync(): Promise<CreatorSnapshot | undefined> {
+  try {
+    if (!creatorFile.exists) return undefined;
+    return parseCreatorSnapshot(await creatorFile.json());
+  } catch {
+    return undefined;
+  }
+}
 
 export function CreatorInvitationCard(): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -21,6 +40,44 @@ export function CreatorInvitationCard(): React.JSX.Element {
   const [collabNote, setCollabNote] = useState("");
   const [rates, setRates] = useState<Record<string, string>>({ "TikTok 短视频": "3500000", "Instagram Reel": "2800000", Story: "800000", UGC: "2000000", "到店 + 内容": "4500000" });
   const [rateVisibility, setRateVisibility] = useState<"公开起步价" | "价格区间" | "询价">("公开起步价");
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void readCreatorSnapshotAsync().then((snapshot) => {
+      if (cancelled) return;
+      if (snapshot) {
+        setAccepted(snapshot.accepted);
+        setCategories(snapshot.categories.length > 0 ? snapshot.categories : ["Beauty"]);
+        setPrimaryCategory(snapshot.primaryCategory);
+        setCity(snapshot.city);
+        setChannels(snapshot.channels);
+        setCollaborations(snapshot.collaborations);
+        setCollabNote(snapshot.collabNote);
+        setRates((prev) => ({ ...prev, ...snapshot.rates }));
+        setRateVisibility(snapshot.rateVisibility);
+      }
+      setRestored(true);
+    }).catch(() => {
+      if (!cancelled) setRestored(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    // 输入变化即落盘（300ms 防抖）：关掉重进不丢草稿；接受后快照 accepted=true。
+    if (!restored) return;
+    const timer = setTimeout(() => {
+      try {
+        creatorDirectory.create({ idempotent: true, intermediates: true });
+        creatorFile.write(JSON.stringify({
+          accepted, categories, primaryCategory, city, channels,
+          collaborations, collabNote, rates, rateVisibility,
+        } satisfies CreatorSnapshot));
+      } catch {
+        // 本机持久化失败不打断流程。
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [restored, accepted, categories, primaryCategory, city, channels, collaborations, collabNote, rates, rateVisibility]);
 
   function start(stepIndex = 0): void { if (accepted) return; setStep(stepIndex); setOpen(true); }
   function toggleCategory(item: string): void {
@@ -54,7 +111,7 @@ export function CreatorInvitationCard(): React.JSX.Element {
           {step === 1 ? <><StepHead title="关联你的创作渠道" sub="渠道可以多选。商家按各平台实际数据判断，不使用一个虚假的总粉丝数。" />{CHANNELS.map((item) => { const active = item in channels; return <View key={item} style={[styles.channel, active && styles.channelOn]}><Pressable onPress={() => toggleChannel(item)} style={styles.channelHead}><View style={styles.channelMark}><Text style={styles.channelMarkText}>{item.slice(0, 2).toUpperCase()}</Text></View><View style={styles.flex}><Text style={styles.channelName}>{item}</Text><Text style={styles.meta}>{active ? "已选择" : "点击关联"}</Text></View><View style={[styles.toggle, active && styles.toggleOn]}><View style={[styles.toggleDot, active && styles.toggleDotOn]} /></View></Pressable>{active ? <TextInput autoCapitalize="none" onChangeText={(value) => setChannels((current) => ({ ...current, [item]: value }))} placeholder={`${item} 账号或主页`} placeholderTextColor={color.muted} style={styles.input} value={channels[item]} /> : null}</View>; })}<Text style={styles.help}>Zalo 是合作联系方式，不作为内容渠道参与匹配。</Text></> : null}
           {step === 2 ? <><StepHead title="你愿意怎么合作？" sub="合作方式会直接影响商家的匹配结果。" /><View style={styles.chips}>{COLLABORATIONS.map((item) => <Chip active={collaborations.includes(item)} key={item} label={item} onPress={() => toggleCollaboration(item)} />)}</View><Text style={styles.fieldLabel}>合作说明（可选）</Text><TextInput maxLength={200} multiline onChangeText={setCollabNote} placeholder="例如：不接直播，只接短视频 / 到店体验" placeholderTextColor={color.muted} style={[styles.input, styles.noteInput]} value={collabNote} /></> : null}
           {step === 3 ? <><StepHead title="设置你的公开报价" sub="由 Creator 自己设置，可随时修改；具体合作时双方仍可重新议价。" />{RATE_ITEMS.map((item) => <View key={item} style={styles.rateRow}><Text style={styles.rateLabel}>{item}</Text><TextInput keyboardType="number-pad" onChangeText={(value) => setRates((current) => ({ ...current, [item]: value }))} style={styles.rateInput} value={rates[item]} /></View>)}<Text style={styles.fieldLabel}>报价公开方式</Text><View style={styles.chips}>{(["公开起步价", "价格区间", "询价"] as const).map((item) => <Chip active={rateVisibility === item} key={item} label={item} onPress={() => setRateVisibility(item)} />)}</View></> : null}
-          {step === 4 ? <><StepHead title="确认 Creator 资料" sub="确认后接受邀请并开放 Creator Profile；Proxy 不干预商业报价。" /><Review label="分类" value={`${primaryCategory}（主要） · ${categories.filter((item) => item !== primaryCategory).join(" · ")}`} /><Review label="城市" value={city} /><Review label="渠道" value={Object.entries(channels).map(([name, handle]) => `${name}${handle ? ` · ${handle}` : ""}`).join(" / ")} /><Review label="合作类型" value={collaborations.join(" · ")} /><Review label="报价" value={`${rateVisibility} · 由 Creator 自己维护`} /><View style={styles.reviewNotice}><Text style={styles.reviewNoticeText}>接受邀请后直接建立 Creator Profile。资料真实性仍需符合平台规则，价格由 Creator 与商家决定。</Text></View></> : null}
+          {step === 4 ? <><StepHead title="确认 Creator 资料" sub="确认后接受邀请并开放 Creator Profile；Proxy 不干预商业报价。" /><Review label="分类" value={`${primaryCategory}（主要） · ${categories.filter((item) => item !== primaryCategory).join(" · ")}`} /><Review label="城市" value={city} /><Review label="渠道" value={Object.entries(channels).map(([name, handle]) => `${name}${handle ? ` · ${handle}` : ""}`).join(" / ")} /><Review label="合作类型" value={collaborations.join(" · ")} />{collabNote.trim() ? <Review label="合作说明" value={collabNote.trim()} /> : null}<Review label="报价" value={`${rateVisibility} · ${RATE_ITEMS.map((item) => `${item}${rates[item]?.trim() ? ` ${Number(rates[item].replace(/[^0-9]/g, "") || 0).toLocaleString()}₫` : " 未报价"}`).join(" · ")}`} /><View style={styles.reviewNotice}><Text style={styles.reviewNoticeText}>接受邀请后直接建立 Creator Profile。资料真实性仍需符合平台规则，价格由 Creator 与商家决定。</Text></View></> : null}
         </ScrollView><View style={styles.footer}>{step > 0 ? <Pressable onPress={() => setStep((current) => current - 1)} style={styles.previous}><Text style={styles.previousText}>上一步</Text></Pressable> : <View />}<Pressable disabled={(step === 1 && Object.keys(channels).length === 0) || (step === 2 && collaborations.length === 0)} onPress={() => step === 4 ? acceptInvitation() : setStep((current) => current + 1)} style={styles.next}><Text style={styles.nextText}>{step === 4 ? "接受邀请" : "下一步"}</Text></Pressable></View></View>
     </Modal>
 

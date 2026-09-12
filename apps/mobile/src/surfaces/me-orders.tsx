@@ -294,12 +294,14 @@ export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.J
           const capacity = item.capacity ?? 0;
           const full = capacity > 0 && item.joined >= capacity;
           return (
-            <Pressable key={item.activityId} onPress={() => setDetailId(item.activityId)} style={styles.savedCard}>
+            <View key={item.activityId} style={styles.savedCard}>
+              <Pressable onPress={() => setDetailId(item.activityId)} accessibilityLabel={`查看${item.title}明细`}>
               <Text style={styles.orderTitle}>{item.title}</Text>
               <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
               <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 感兴趣 {item.interested} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
               {item.aiStatus !== "NONE" && item.aiPersonaName ? <Text style={styles.savedMeta}>AI 虚拟 · {item.aiPersonaName}</Text> : null}
               <Text style={styles.savedMeta}>查看明细 ›</Text>
+              </Pressable>
               {tab === "open" ? (
                 <Pressable
                   disabled={isJoined || full || joiningId === item.activityId}
@@ -311,7 +313,7 @@ export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.J
                   </Text>
                 </Pressable>
               ) : null}
-            </Pressable>
+            </View>
           );
         }) : null}
       </ScrollView>
@@ -398,11 +400,13 @@ export function MerchantCampaignSurface({ onBack }: { onBack: () => void }): Rea
           const capacity = item.capacity ?? 0;
           const full = capacity > 0 && item.joined >= capacity;
           return (
-            <Pressable key={item.activityId} onPress={() => setDetailId(item.activityId)} style={styles.savedCard}>
+            <View key={item.activityId} style={styles.savedCard}>
+              <Pressable onPress={() => setDetailId(item.activityId)} accessibilityLabel={`查看${item.title}明细`}>
               <Text style={styles.orderTitle}>{item.title}</Text>
               <Text style={styles.savedMeta}>{item.time} · {item.venueIcon} {item.venueName}</Text>
               <Text style={styles.savedMeta}>{item.priceLabel}{item.price ? ` · ${item.price}` : ""} · 已报名 {item.joined}{capacity > 0 ? `/${capacity}` : ""}</Text>
               <Text style={styles.savedMeta}>查看明细 ›</Text>
+              </Pressable>
               <Pressable
                 disabled={full || joiningId === item.activityId}
                 onPress={() => void join(item.activityId)}
@@ -412,7 +416,7 @@ export function MerchantCampaignSurface({ onBack }: { onBack: () => void }): Rea
                   {joiningId === item.activityId ? "报名中…" : full ? "已满员" : "报名"}
                 </Text>
               </Pressable>
-            </Pressable>
+            </View>
           );
         }) : null}
       </ScrollView>

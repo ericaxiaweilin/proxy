@@ -49,6 +49,18 @@ func (r *IdentityRepository) GetLoginIdentity(ctx context.Context, id string) (i
 	return loginIdentity, err
 }
 
+func (r *IdentityRepository) FindLoginIdentity(ctx context.Context, channel, identifier string) (identity.LoginIdentity, error) {
+	var loginIdentity identity.LoginIdentity
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT id, user_account_id, verified, status, COALESCE(channel, ''), COALESCE(identifier, '')
+		FROM identity.login_identities
+		WHERE channel = $1 AND identifier = $2`, channel, identifier).Scan(&loginIdentity.ID, &loginIdentity.UserAccountID, &loginIdentity.Verified, &loginIdentity.Status, &loginIdentity.Channel, &loginIdentity.Identifier)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return identity.LoginIdentity{}, identity.ErrLoginIdentityNotFound
+	}
+	return loginIdentity, err
+}
+
 func (r *IdentityRepository) EnsurePasswordlessIdentity(ctx context.Context, channel, identifier, deviceID, platform, upgradingUserAccountID string) (identity.LoginIdentity, identity.DeviceRegistration, bool, error) {
 	transaction, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -89,6 +101,18 @@ func (r *IdentityRepository) EnsurePasswordlessIdentity(ctx context.Context, cha
 		err = reassignDevice(ctx, transaction, device)
 	} else {
 		err = upsertDevice(ctx, transaction, device)
+		if err != nil {
+			// ACCOUNT-SWITCH-001 takeover: a fresh login of a different
+			// account may claim the device when the device currently has
+			// NO ACTIVE session on it (previous owner logged out or the
+			// session expired/revoked). One-active-account-per-device
+			// stays intact: upsertDevice keeps rejecting while the owner
+			// still holds a live session on this device.
+			takeover, takeoverErr := deviceHasNoActiveSession(ctx, transaction, deviceID)
+			if takeoverErr == nil && takeover {
+				err = reassignDevice(ctx, transaction, device)
+			}
+		}
 	}
 	if err != nil {
 		return identity.LoginIdentity{}, identity.DeviceRegistration{}, false, err
@@ -156,6 +180,34 @@ func postgresIdentityID(prefix string) string {
 
 func (r *IdentityRepository) CreateLoginChallenge(ctx context.Context, challenge identity.LoginChallenge) error {
 	return insertLoginChallenge(ctx, execerForContext(ctx, r.pool), challenge)
+}
+
+// RevokePendingChallengesForIdentity supersedes every PENDING challenge
+// of a login identity (OTP-SINGLE-CODE-001). One atomic UPDATE flips
+// status to LOCKED and stamps consumed_at; RETURNING hands back the
+// affected rows (id + prior version) so the service can emit a
+// LoginChallengeSuperseded domain event per revoked code.
+func (r *IdentityRepository) RevokePendingChallengesForIdentity(ctx context.Context, loginIdentityID string) ([]identity.LoginChallenge, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		UPDATE identity.login_challenges
+		SET status = 'LOCKED', version = version + 1, updated_at = now()
+		WHERE login_identity_id = $1 AND status = 'PENDING'
+		RETURNING id, user_account_id, login_identity_id, device_id, channel, provider_ref,
+		         status, attempts, max_attempts, version, requested_at, expires_at, verified_at, consumed_at`,
+		loginIdentityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	revoked := make([]identity.LoginChallenge, 0, 2)
+	for rows.Next() {
+		c, err := scanLoginChallenge(rows)
+		if err != nil {
+			return nil, err
+		}
+		revoked = append(revoked, c)
+	}
+	return revoked, rows.Err()
 }
 
 func insertLoginChallenge(ctx context.Context, execer sqlExecer, challenge identity.LoginChallenge) error {
@@ -294,6 +346,21 @@ func upsertDevice(ctx context.Context, execer sqlExecer, device identity.DeviceR
 	return err
 }
 
+// deviceHasNoActiveSession reports whether the device's owning account
+// currently has no ACTIVE session bound to this device. It gates the
+// ACCOUNT-SWITCH-001 takeover: once the previous owner logged out (or
+// their session expired / was revoked), the phone is free for a new
+// account; while a live session exists the device stays exclusive.
+func deviceHasNoActiveSession(ctx context.Context, queryer sqlQueryer, deviceID string) (bool, error) {
+	var n int
+	if err := queryer.QueryRow(ctx, `
+		SELECT count(*) FROM identity.sessions
+		WHERE device_id = $1 AND status = 'ACTIVE'`, deviceID).Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}
+
 func (r *IdentityRepository) UpsertDeviceAndPublish(ctx context.Context, device identity.DeviceRegistration, domainEvents []event.DomainEvent) error {
 	if r.outbox == nil {
 		return errors.New("identity transactional outbox is not configured")
@@ -407,6 +474,51 @@ func (r *IdentityRepository) CreateLoginChallengeAndPublish(ctx context.Context,
 			return err
 		}
 		for _, domainEvent := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// CreateLoginChallengeSupersedingPending atomically (1) flips every PENDING
+// challenge of the identity to LOCKED, (2) inserts the fresh challenge,
+// (3) publishes the superseded + requested events — one transaction.
+// OTP-SINGLE-CODE-001.
+func (r *IdentityRepository) CreateLoginChallengeSupersedingPending(ctx context.Context, challenge identity.LoginChallenge, buildEvents func(superseded []identity.LoginChallenge) []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("identity transactional outbox is not configured")
+	}
+	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		rows, err := transaction.Query(transactionContext, `
+			UPDATE identity.login_challenges
+			SET status = 'LOCKED', version = version + 1, updated_at = now()
+			WHERE login_identity_id = $1 AND status = 'PENDING'
+			RETURNING id, user_account_id, login_identity_id, device_id, channel, provider_ref,
+			         status, attempts, max_attempts, version, requested_at, expires_at, verified_at, consumed_at`,
+			challenge.LoginIdentityID)
+		if err != nil {
+			return err
+		}
+		superseded := make([]identity.LoginChallenge, 0, 2)
+		for rows.Next() {
+			c, err := scanLoginChallenge(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			superseded = append(superseded, c)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if err := insertLoginChallenge(transactionContext, transaction, challenge); err != nil {
+			return err
+		}
+		for _, domainEvent := range buildEvents(superseded) {
 			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
 				return err
 			}

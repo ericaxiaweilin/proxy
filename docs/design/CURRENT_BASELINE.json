@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "baselineRevision": 88,
-  "updatedAt": "2026-09-07",
+  "baselineRevision": 165,
+  "updatedAt": "2026-09-12",
   "global": {
     "designSystem": "Proxy_App_Design_System_R3.md",
     "visualReference": "Proxy_App_Design_System_R3_Visual.html",
@@ -30,10 +30,10 @@
     },
     {
       "scope": "requester-home-discovery",
-      "version": "HUMAN_FIRST_AI_SECOND_R1",
+      "version": "HUMAN_FIRST_AI_SECOND_DUAL_ENTRY_AI_SCENE_MEDIA_STATEFUL_R17",
       "file": "apps/mobile/src/surfaces/requester-home.tsx",
       "status": "ACTIVE_IMPLEMENTATION_REFERENCE",
-      "implementationStatus": "R34_HUMAN_FIRST_AI_SECOND_HUMAN_BOUND_SCENE_THEN_PROFILE_AI_DIRECT_PROFILE"
+      "implementationStatus": "R34_HUMAN_FIRST_AI_SECOND_HUMAN_FULL_CAPABILITY_PAGE_WITH_SAFE_AREA_HOME_RETURN_TOP_RELATIONSHIP_PROFILE_MESSAGE_ACTIONS_AVAILABILITY_RATING_OPT_IN_PUBLIC_ACTIVITY_HISTORY_ACTION_SCENE_THEME_LANGUAGE_AND_SERVER_SCENE_PHOTO_OPTIONS_NO_PUBLIC_MUTUAL_RELATION_DATA_AI_DIRECT_PROFILE_DEFAULT_SEARCH_HOME_EMBEDDED_PROXY_AI_AND_MESSAGES_DUAL_ENTRY_SCENE_ACTION_THEME_PHOTOS_SERVER_CATALOG_ONLY_CONTINUE_SURFACE_ONLY_WHEN_ACTIVE_ACTIVITY_LIST_MARKET_OWNED_ICON_ACTION_RAIL_NEARBY_SCENE_MAP_COMPACT_HUMAN_HEADER"
     },
     {
       "scope": "root-dock",
@@ -83,11 +83,11 @@
     },
     {
       "scope": "market",
-      "version": "MARKET_OPPORTUNITY_APPLICATION_FLOW_R8",
+      "version": "MARKET_OPPORTUNITY_APPLICATION_FLOW_R11",
       "file": "docs/design/references/Proxy_Market_Opportunity_Filter_R7.html",
       "status": "ACTIVE_SCREEN_REFERENCE",
       "implementationBaseline": "docs/design/CURRENT_BASELINE.json",
-      "implementationStatus": "REAL_APPLICATION_SELECTION_AND_CONFIRMATION_WIRED_PUBLISH_PRICE_RANGE_MIN_MAX_REAL_APPLICANT_OFFERS_PROFILE_ENRICHMENT_PENDING"
+      "implementationStatus": "REAL_APPLICATION_SELECTION_AND_CONFIRMATION_WIRED_LIFECYCLE_FILTERS_DUAL_PUBLISH_ENTRY_ACTIVITY_SCENE_BOUND_PRICE_RANGE_MIN_MAX_REAL_APPLICANT_OFFERS_PROFILE_ENRICHMENT_PENDING"
     },
     {
       "scope": "activity",

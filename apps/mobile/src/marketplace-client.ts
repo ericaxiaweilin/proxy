@@ -1,5 +1,5 @@
 import type { CommandResult } from "@proxy/contracts";
-import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema, PublishMarketOpportunityInputSchema, type PublishMarketOpportunityInput } from "@proxy/contracts";
+import { MarketOpportunitySchema, ListMarketOpportunitiesPayloadSchema, ListMarketApplicationsPayloadSchema, MarketApplicationPayloadSchema, PublishMarketOpportunityInputSchema, ListOpportunityTemplatesPayloadSchema, SuggestOpportunityTemplatePayloadSchema, type PublishMarketOpportunityInput, type OpportunityTemplate, type ListOpportunityTemplatesPayload } from "@proxy/contracts";
 import type { MarketApplication } from "@proxy/contracts";
 import type { MarketOpportunity } from "./market-fixtures";
 import type { TransportResponse } from "./auth-client";
@@ -39,6 +39,38 @@ export class MarketplaceClient {
     const parsed = ListMarketOpportunitiesPayloadSchema.safeParse(body);
     if (!parsed.success) throw new Error(`market opportunity list was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
     return parsed.data.opportunities as MarketOpportunity[];
+  }
+  public async listTemplates(): Promise<OpportunityTemplate[]> {
+    // OPP-TEMPLATE-001: the publish catalog (HOT / THEME / MORE).
+    // Read-only, anonymous-safe — the same optional-session tier as
+    // list(), so the publish sheet can render scene cards before the
+    // user has signed in. Wire shape is validated by the same zod
+    // schema the server Go test pins (templates[].id/group/tags/price/
+    // range/standard all required — an incomplete card is a dead card).
+    const body = this.body(await this.command("ListOpportunityTemplates", { type: "Market", id: "templates" }, {}, true));
+    const parsed = ListOpportunityTemplatesPayloadSchema.safeParse(body);
+    if (!parsed.success) throw new Error(`opportunity template list was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+    return parsed.data.templates;
+  }
+  // OPP-CATALOG-001 (R58): full catalog engine — cards + category rail
+  // + per-card Moment specs / ratio policy / dynamic pricing in one
+  // anonymous read. The publish flow renders the two-pane picker and
+  // the Moment spec sheet from this payload; nothing scene-related is
+  // hardcoded client-side (词表/价格一律来自服务端目录).
+  public async listCatalog(): Promise<ListOpportunityTemplatesPayload> {
+    const body = this.body(await this.command("ListOpportunityTemplates", { type: "Market", id: "templates" }, {}, true));
+    const parsed = ListOpportunityTemplatesPayloadSchema.safeParse(body);
+    if (!parsed.success) throw new Error(`opportunity catalog was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+    return parsed.data;
+  }
+  // OPP-SUGGEST-001: 发布搜索"生成" — 语义层把自由文本映射到目录卡。
+  // AI_NOT_CONFIGURED / SUGGESTION_NO_MATCH 等以 Error 冒出，调用方
+  // （发布页搜索框）按错误类型降级提示，不影响手选卡片。
+  public async suggestTemplate(query: string): Promise<{ template: OpportunityTemplate; reason: string }> {
+    const body = this.body(await this.command("SuggestOpportunityTemplate", { type: "Market", id: "suggest" }, { query }, true));
+    const parsed = SuggestOpportunityTemplatePayloadSchema.safeParse(body);
+    if (!parsed.success) throw new Error(`opportunity suggestion was malformed: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+    return { template: parsed.data.template, reason: parsed.data.reason };
   }
   public async publish(input: PublishMarketOpportunityInput): Promise<MarketOpportunity> {
     // R16.x: MoneyFlow 是 wire 必填（client SDK 必填），PriceLabel 是

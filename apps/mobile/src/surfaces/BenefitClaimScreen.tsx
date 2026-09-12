@@ -77,6 +77,9 @@ export function BenefitClaimScreen({
   const [screen, setScreen] = useState<Screen>("LIST");
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [benefits, setBenefits] = useState<BenefitDefinition[]>([]);
+  // 我已领取的（listClaims 真实数据）：目录接口 R1 才有，目录为空时
+  // 这里至少展示领取记录 + 重试入口，不留死屏。
+  const [myClaims, setMyClaims] = useState<Claim[]>([]);
   const [selectedBenefit, setSelectedBenefit] = useState<BenefitDefinition | null>(null);
   const [claimToken, setClaimToken] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -95,6 +98,13 @@ export function BenefitClaimScreen({
       // For R0, benefits are loaded from the campaign
       // In R1, this would be a separate listBenefitsByCampaign call
       setBenefits([]);
+      // 目录没有，领取记录有：拉我在这场活动下的 claims，空也不吞错。
+      try {
+        const claims = await client.listClaims();
+        setMyClaims(claims.filter((c) => c.campaignId === campaignId));
+      } catch {
+        setMyClaims([]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load campaign");
     } finally {
@@ -190,7 +200,26 @@ export function BenefitClaimScreen({
       {!busy && benefits.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>暂无可用权益</Text>
-          <Text style={styles.emptyText}>该活动暂无面向您的权益</Text>
+          <Text style={styles.emptyText}>该活动暂无面向您的权益（权益目录 R1 接入）</Text>
+          <Pressable onPress={() => void loadCampaign()} style={styles.retryButton}>
+            <Text style={styles.retryText}>重新加载</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {myClaims.length > 0 ? (
+        <View>
+          <Text style={styles.sectionTitle}>我已领取 · {myClaims.length}</Text>
+          {myClaims.map((claim) => (
+            <Pressable
+              key={claim.claimId}
+              onPress={() => onClaimed(claim, claim.claimToken)}
+              style={styles.claimRow}
+            >
+              <Text style={styles.claimRowTitle}>{claim.benefitId}</Text>
+              <Text style={styles.claimRowMeta}>{claim.status} · {new Date(claim.createdAt).toLocaleString()} ›</Text>
+            </Pressable>
+          ))}
         </View>
       ) : null}
     </ScrollView>
@@ -246,4 +275,10 @@ const styles = StyleSheet.create({
   empty: { alignItems: "center", paddingVertical: 48 },
   emptyTitle: { fontSize: 16, fontWeight: "600", color: color.ink, marginBottom: 8 },
   emptyText: { fontSize: 13, color: "#9CA3AF" },
+  retryButton: { backgroundColor: color.magenta, borderRadius: 8, marginTop: 12, paddingHorizontal: 20, paddingVertical: 10 },
+  retryText: { color: "#FFF", fontSize: 14, fontWeight: "600" },
+  sectionTitle: { fontSize: 14, fontWeight: "700", color: color.ink, marginBottom: 8, marginTop: 8 },
+  claimRow: { backgroundColor: "#FFF", borderRadius: 10, marginBottom: 8, padding: 12 },
+  claimRowTitle: { fontSize: 13, fontWeight: "700", color: color.ink },
+  claimRowMeta: { fontSize: 11, color: "#6B7280", marginTop: 4 },
 });

@@ -13,6 +13,7 @@ import { Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from "rea
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
 import type { LocalNetClient } from "../localnet-client";
 import { selectPinnedPostAndRest, selectPostMedia, type ProfileMediaEntry } from "./profile-tabs-model";
 export type { ProfileMediaEntry } from "./profile-tabs-model";
@@ -47,6 +48,10 @@ export interface ProfileTabsProps {
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenRealitySceneMap?: (() => void) | undefined;
   onOpenScene?: ((sceneId: string) => void) | undefined;
+  // 帖子互动：有 handler 才渲染对应按钮，没有不渲染假按钮。
+  // 分享走系统分享（无需后端），喜欢走 engagement.reactToPost。
+  onLikePost?: ((postId: string) => void) | undefined;
+  onReplyPost?: ((postId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;                      // OTTER_LOGO / ProxyIcon
   // 选项 (颜色)
@@ -169,6 +174,8 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           name={props.profileDraft.name}
           onOpenMedia={props.onOpenMedia}
           onOpenScene={props.onOpenScene}
+          onLikePost={props.onLikePost}
+          onReplyPost={props.onReplyPost}
           resolveMediaUrl={props.resolveMediaUrl}
           fallbackLogo={props.fallbackLogo}
           color={props.color}
@@ -221,6 +228,8 @@ function PostsTab(props: {
   name: string;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenScene?: ((sceneId: string) => void) | undefined;
+  onLikePost?: ((postId: string) => void) | undefined;
+  onReplyPost?: ((postId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
   fallbackLogo: unknown;
   // R15.99: 接 pinnedIds 进来 — ProfileTabs 顶层 hasRealPin 闭包不传进 PostsTab,
@@ -307,6 +316,8 @@ function PostsTab(props: {
             name={props.name}
             onOpenMedia={props.onOpenMedia}
             onOpenScene={props.onOpenScene}
+            onLikePost={props.onLikePost}
+            onReplyPost={props.onReplyPost}
             resolveMediaUrl={props.resolveMediaUrl}
           />
         </View>
@@ -324,6 +335,8 @@ function PostsTab(props: {
             name={props.name}
             onOpenMedia={props.onOpenMedia}
             onOpenScene={props.onOpenScene}
+            onLikePost={props.onLikePost}
+            onReplyPost={props.onReplyPost}
             resolveMediaUrl={props.resolveMediaUrl}
           />
         ))
@@ -341,14 +354,19 @@ function PostCard(props: {
   name: string;
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   onOpenScene?: ((sceneId: string) => void) | undefined;
+  onLikePost?: ((postId: string) => void) | undefined;
+  onReplyPost?: ((postId: string) => void) | undefined;
   resolveMediaUrl: (path: string) => string;
 }): React.JSX.Element {
+  const sharePost = (): void => {
+    void Share.share({ message: `${props.post.body}\n\nProxy · ${props.name}` });
+  };
   return (
     <View style={styles.postCard}>
       <View style={styles.postHead}>
         <View style={styles.postAvatar}>
           {props.avatarUri ? (
-            <Image source={{ uri: props.avatarUri }} style={styles.postAvatarImage} />
+            <CircularAvatarImage accessibilityLabel={`${props.name}头像`} size={38} uri={props.avatarUri} />
           ) : (
             <Text style={styles.postAvatarText}>{(props.name || "?").charAt(0).toUpperCase()}</Text>
           )}
@@ -357,7 +375,7 @@ function PostCard(props: {
           <Text style={styles.postName} numberOfLines={1}>{props.name}</Text>
           <Text style={styles.postTime} numberOfLines={1}>· {new Date(props.post.createdAt).toLocaleDateString()}</Text>
         </View>
-        <Pressable accessibilityLabel="更多" style={styles.postMore}>
+        <Pressable accessibilityLabel="更多" onPress={sharePost} style={styles.postMore}>
           <Text style={styles.postMoreText}>⋯</Text>
         </Pressable>
       </View>
@@ -384,13 +402,17 @@ function PostCard(props: {
           />
         ) : null}
         <View style={styles.postActions}>
-          <Pressable style={styles.postAction}>
-            <Text style={styles.postActionText}>♡ 喜欢</Text>
-          </Pressable>
-          <Pressable style={styles.postAction}>
-            <Text style={styles.postActionText}>💬 回复</Text>
-          </Pressable>
-          <Pressable style={styles.postAction}>
+          {props.onLikePost ? (
+            <Pressable onPress={() => props.onLikePost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="喜欢">
+              <Text style={styles.postActionText}>♡ 喜欢</Text>
+            </Pressable>
+          ) : null}
+          {props.onReplyPost ? (
+            <Pressable onPress={() => props.onReplyPost?.(props.post.postId)} style={styles.postAction} accessibilityLabel="回复">
+              <Text style={styles.postActionText}>💬 回复</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={sharePost} style={styles.postAction} accessibilityLabel="分享帖子">
             <Text style={styles.postActionText}>↗ 分享</Text>
           </Pressable>
         </View>
@@ -590,7 +612,6 @@ const styles = StyleSheet.create({
   postCard: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e2e8f0", backgroundColor: "#fff" },
   postHead: { flexDirection: "row", alignItems: "center" },
   postAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#cbd5e1", alignItems: "center", justifyContent: "center", marginRight: 10, overflow: "hidden" },
-  postAvatarImage: { width: 38, height: 38, borderRadius: 19 },
   postAvatarText: { fontSize: 16, color: "#0f172a", fontWeight: "700" },
   postHeadBody: { flex: 1 },
   postName: { fontSize: 13, fontWeight: "700", color: "#0f172a" },

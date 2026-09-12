@@ -175,7 +175,9 @@ describe("parseComposerBody", () => {
       isGhost24h: false,
       gifWord: null,
       poll: null,
-      topic: null
+      topic: null,
+      replyPerm: null,
+      quotePerm: null
     });
   });
 
@@ -185,7 +187,9 @@ describe("parseComposerBody", () => {
       isGhost24h: false,
       gifWord: null,
       poll: null,
-      topic: null
+      topic: null,
+      replyPerm: null,
+      quotePerm: null
     });
   });
 
@@ -537,5 +541,36 @@ describe("estimateAssembledBodyLength", () => {
       }
     });
     expect(len).toBeGreaterThan(50);
+  });
+});
+
+describe("reply/quote permission markers", () => {
+  const base = {
+    body: "今晚西湖见",
+    gifWord: null,
+    poll: { open: false, options: ["", ""], durationLabel: "1 天" },
+    place: null,
+    topic: null,
+    isGhost24h: false,
+    quoteTarget: undefined
+  };
+  it("所有人时不产生标记行", () => {
+    const out = assembleComposerBody({ ...base, replyPerm: "所有人", quotePerm: "所有人" });
+    expect(out).not.toContain("回复权限");
+    expect(out).not.toContain("引用权限");
+  });
+  it("非所有人时序列化进正文并可反向解析", () => {
+    const assembled = assembleComposerBody({ ...base, replyPerm: "我关注的人", quotePerm: "不允许" });
+    expect(assembled).toContain("💬 回复权限：我关注的人");
+    expect(assembled).toContain("🔁 引用权限：不允许");
+    const parsed = parseComposerBody(assembled);
+    expect(parsed.replyPerm).toBe("我关注的人");
+    expect(parsed.quotePerm).toBe("不允许");
+    expect(parsed.cleanBody).toBe("今晚西湖见");
+  });
+  it("字数估计包含权限标记", () => {
+    const plain = estimateAssembledBodyLength({ ...base });
+    const withPerms = estimateAssembledBodyLength({ ...base, replyPerm: "仅提及的人", quotePerm: "不允许" });
+    expect(withPerms).toBeGreaterThan(plain);
   });
 });

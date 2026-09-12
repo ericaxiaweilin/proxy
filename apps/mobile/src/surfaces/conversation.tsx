@@ -4,7 +4,8 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Dimensions, Image, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image as ExpoImage } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { ProxySwitch } from "../components/proxy-foundation";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -12,14 +13,16 @@ import { createAudioPlayer, type AudioPlayer } from "expo-audio";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SwipeBackShell } from "../architecture/swipe-back";
 import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } from "../components/server-temporary-form";
-import type { ConversationClient, ProtectionOverride } from "../conversation-client";
+import type { ConversationClient, ConversationInboxItem, ProtectionOverride } from "../conversation-client";
 import type { ActivityClient } from "../activity-client";
 import type { MediaClient, UploadableImage } from "../media-client";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
+import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { VoiceToolButton } from "../components/VoiceToolButton";
+import { ProxyIcon } from "../components/proxy-icon";
 
 // Lotus 纸面 palette（R36.1 设计稿 :root）。不碰共享 theme，只在本页使用。
 const lotus = {
@@ -73,6 +76,7 @@ interface Message {
   isOwn: boolean;
   isAI?: boolean;
   imageUri?: string;
+  imageSource?: number | { uri: string };
   videoUri?: string;
   audioUri?: string;
   v1?: MessageV1;
@@ -81,6 +85,7 @@ interface Message {
   replySender?: string;
   replyBody?: string;
   secureMeta?: string;
+  isDivider?: boolean;
 }
 
 interface Cluster {
@@ -98,9 +103,12 @@ export function ConversationSurface({
   mediaClient,
   conversationId: initialConvId,
   aiAccount,
+  peerAvatarSource,
   initialDraft,
   ensureSession,
-  onBack
+  onBack,
+  convoId: initialConvoId,
+  convoTitle,
 }: {
   author: string;
   conversationClient: ConversationClient;
@@ -108,9 +116,13 @@ export function ConversationSurface({
   mediaClient: MediaClient;
   conversationId?: string;
   aiAccount?: PlatformAIAccount;
+  peerAvatarSource?: number | { uri: string };
   initialDraft?: string;
   ensureSession?: () => Promise<void>;
   onBack: () => void;
+  // Lotus v1 Convo 分支模式：只读/只写该分支，seed 置顶展示。
+  convoId?: string | undefined;
+  convoTitle?: string | undefined;
 }): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState(initialDraft ?? "");
@@ -127,11 +139,23 @@ export function ConversationSurface({
   const [stickerOpen, setStickerOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [menuMessage, setMenuMessage] = useState<Message | null>(null);
+  // 当前分支：props 带进来（从 Convo 页打开）或屏内创建。null = 主线。
+  const [activeConvo, setActiveConvo] = useState<{ id: string; title: string } | null>(
+    initialConvoId ? { id: initialConvoId, title: convoTitle ?? "支线" } : null
+  );
+  // 分支 seed 上下文卡（服务端随分支列表下发，不混入气泡流）。
+  const [seedMsg, setSeedMsg] = useState<{ sender: string; body: string } | null>(null);
+  const [creatingConvo, setCreatingConvo] = useState(false);
+  // 转发目标选择：拉收件箱、调 ForwardMessage，全程有加载/错误态。
+  const [forwardFor, setForwardFor] = useState<Message | null>(null);
+  const [forwardInbox, setForwardInbox] = useState<ConversationInboxItem[] | undefined>(undefined);
+  const [forwardBusy, setForwardBusy] = useState(false);
+  const [forwardError, setForwardError] = useState<string | undefined>(undefined);
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [replyTo, setReplyTo] = useState<{ id: string; sender: string; body: string } | null>(null);
   const [pinned, setPinned] = useState<{ id: string; body: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [keyboardInset, setKeyboardInset] = useState(0);
+  const keyboardInset = useKeyboardSafeInset();
   const [selectedImage, setSelectedImage] = useState<UploadableImage>();
   const [selectedVideo, setSelectedVideo] = useState<UploadableImage & { durationMs?: number }>();
   const [selectedAudio, setSelectedAudio] = useState<{ uri:string; durationMs:number }>();
@@ -149,6 +173,9 @@ export function ConversationSurface({
   const [activityPickerError, setActivityPickerError] = useState<string | undefined>(undefined);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  // Keep live-sync hydration from replacing an optimistic bubble while the
+  // command is waiting on an AI completion in the same HTTP response.
+  const sendingRef = useRef(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visibleMessages = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
@@ -188,22 +215,6 @@ export function ConversationSurface({
     setConversationMenuOpen(false);
   }, []);
 
-  // This surface lives inside AppShell's fixed-height body, where nested
-  // KeyboardAvoidingView layouts are unreliable on iOS. Track the keyboard's
-  // actual screen frame and reserve exactly the overlapping height instead.
-  useEffect(() => {
-    if (Platform.OS !== "ios") return;
-    const frameSub = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
-      const windowHeight = Dimensions.get("window").height;
-      setKeyboardInset(Math.max(0, windowHeight - event.endCoordinates.screenY));
-    });
-    const hideSub = Keyboard.addListener("keyboardWillHide", () => setKeyboardInset(0));
-    return () => {
-      frameSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
   // Lotus §4: 截屏上报 → RecordScreenshot → SECURITY_ALERT
   useEffect(() => {
     const sub = attachScreenshotReporter(conversationClient, () => messages.filter((m) => !m.isOwn).map((m) => m.id));
@@ -236,6 +247,14 @@ export function ConversationSurface({
     const payload = parseOperationRef(result);
     const rows = Array.isArray(payload?.messages) ? payload.messages as Array<Record<string, unknown>> : [];
     const actorId = typeof payload?.actorId === "string" ? payload.actorId : undefined;
+    const seed = payload?.seed as Record<string, unknown> | undefined;
+    if (seed && typeof seed === "object") {
+      const seedBody = String(seed.body ?? (seed.messageType === "IMAGE" ? "[图片]" : seed.messageType === "VIDEO" ? "[视频]" : ""));
+      const seedSender = seed.senderId === actorId ? "你" : String((seed.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方");
+      setSeedMsg(seedBody ? { sender: seedSender, body: seedBody } : null);
+    } else {
+      setSeedMsg(null);
+    }
     setMessages(rows.map((row) => ({
         id: String(row.messageId ?? `message_${Date.now()}`),
         sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方"),
@@ -243,6 +262,7 @@ export function ConversationSurface({
         time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
         isOwn: row.senderId === actorId,
         isAI: Boolean(aiAccount && row.senderId !== actorId),
+        isDivider: row.messageType === "SYSTEM_CONTEXT" && row.senderId === "SYSTEM",
         ...(row.messageType === "IMAGE" && typeof row.mediaRef === "string"
           ? { imageUri: `${conversationClient.baseUrl}/v1/media/thumb/${encodeURIComponent(row.mediaRef)}` }
           : {}),
@@ -266,9 +286,9 @@ export function ConversationSurface({
     let foreground = AppState.currentState === "active";
     let firstLoad = true;
     const refresh = async (): Promise<void> => {
-      if (!foreground) return;
+      if (!foreground || sendingRef.current) return;
       try {
-        const result = await conversationClient.listMessages(convId);
+        const result = await conversationClient.listMessages(convId, activeConvo?.id);
         if (!cancelled) hydrateMessages(result);
       } catch {
         if (!cancelled && firstLoad) setError("历史消息加载失败，请重试");
@@ -285,7 +305,7 @@ export function ConversationSurface({
       if (foreground) void refresh();
     });
     return () => { cancelled = true; clearInterval(timer); appState.remove(); };
-  }, [convId, conversationClient, hydrateMessages]);
+  }, [convId, activeConvo, conversationClient, hydrateMessages]);
 
   // 挂载时创建会话
   useEffect(() => {
@@ -392,8 +412,10 @@ export function ConversationSurface({
     };
     setMessages((prev) => [...prev, userMsg]);
     try {
-      await conversationClient.sendProxyObject(convId, proxyForService);
+      await conversationClient.sendProxyObject(convId, proxyForService, activeConvo?.id);
     } catch (e: unknown) {
+      // 活动卡片发送失败同样撤回气泡，不留假成功。
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setError(e instanceof Error ? e.message : "发送活动卡片失败");
     } finally {
       setSending(false);
@@ -403,6 +425,7 @@ export function ConversationSurface({
   async function send(preparedText?: string, temporaryUIResponseId?: string, sticker?: { code: string; emoji: string; name: string }): Promise<void> {
     const text = (preparedText ?? draft).trim();
     if (!text || sending || !convId) return;
+    sendingRef.current = true;
     setSending(true);
     const secureMeta = secureMetaForSend();
     const userMsg: Message = {
@@ -423,7 +446,10 @@ export function ConversationSurface({
     setTemporaryUI(undefined);
 
     try {
-      const result = await conversationClient.sendMessage(convId, userText, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, temporaryUIResponseId, undefined, buildProtection());
+      // Yield one frame before starting the potentially slow model request so
+      // the user's own message is painted immediately on the device.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const result = await conversationClient.sendMessage(convId, userText, aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, temporaryUIResponseId, undefined, buildProtection(), undefined, undefined, activeConvo?.id);
       // 解析 AI 回复
       const payload = parseOperationRef(result);
       setTemporaryUI(readServerTemporaryUI(payload?.temporaryUI));
@@ -439,11 +465,26 @@ export function ConversationSurface({
         };
         setMessages((prev) => [...prev, reply]);
       }
+      if (aiAccount && /(?:照片|自拍|相片|photo|selfie)/i.test(userText)) {
+        setMessages((prev) => [...prev, {
+          id: `ai_photo_${Date.now()}`,
+          sender: aiAccount.displayName,
+          body: "这是我现在的主页照片。",
+          time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+          isOwn: false,
+          isAI: true,
+          imageSource: aiAccountPhoto(aiAccount),
+        }]);
+      }
       if (payload?.assistantStatus === "FAILED") setError("模型服务暂时不可用，消息已保留");
       if (payload?.assistantStatus === "UNAVAILABLE") setError("模型服务未配置，消息已保留");
     } catch (e: unknown) {
+      // 发送失败：撤回乐观气泡、恢复草稿并提示，不留假成功。
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      setDraft(userText);
       setError(e instanceof Error ? e.message : "发送失败，请重试");
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }
@@ -494,7 +535,7 @@ export function ConversationSurface({
     setUploadProgress(0);
     try {
       const uploaded = await mediaClient.uploadImage(selectedImage, { onProgress: setUploadProgress });
-      const result = await conversationClient.sendImageMessage(convId, uploaded.mediaAssetId, draft, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined);
+      const result = await conversationClient.sendImageMessage(convId, uploaded.mediaAssetId, draft, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const secureMeta = secureMetaForSend();
       setMessages((current) => [...current, { id:`image_${Date.now()}`, sender:"你", body:draft.trim(), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, imageUri:selectedImage.uri, ...(secureMeta ? { secureMeta } : {}) }]);
       const payload = parseOperationRef(result);
@@ -517,7 +558,7 @@ export function ConversationSurface({
     setUploadProgress(0);
     try {
       const uploaded = await mediaClient.uploadMedia({ ...selectedVideo, mediaType:"VIDEO", defaultMime:"video/mp4" }, { onProgress:setUploadProgress });
-      const result = await conversationClient.sendVideoMessage(convId, uploaded.mediaAssetId, draft, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined);
+      const result = await conversationClient.sendVideoMessage(convId, uploaded.mediaAssetId, draft, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const secureMeta = secureMetaForSend();
       setMessages((current) => [...current, { id:`video_${Date.now()}`, sender:"你", body:draft.trim(), time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, videoUri:selectedVideo.uri, ...(secureMeta ? { secureMeta } : {}) }]);
       const payload = parseOperationRef(result);
@@ -540,7 +581,7 @@ export function ConversationSurface({
     setUploadProgress(0);
     try {
       const uploaded = await mediaClient.uploadMedia({ uri:selectedAudio.uri, width:0, height:0, durationMs:selectedAudio.durationMs, mediaType:"AUDIO", defaultMime:"audio/m4a" }, { onProgress:setUploadProgress });
-      await conversationClient.sendAudioMessage(convId, uploaded.mediaAssetId, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined);
+      await conversationClient.sendAudioMessage(convId, uploaded.mediaAssetId, buildProtection(), aiAccount ? `AI_PERSONA:${aiAccount.personaId}` : undefined, activeConvo?.id);
       const secureMeta = secureMetaForSend();
       setMessages((current) => [...current, { id:`audio_${Date.now()}`, sender:"你", body:"", time:new Date().toLocaleTimeString("zh-CN", {hour:"2-digit", minute:"2-digit"}), isOwn:true, audioUri:selectedAudio.uri, ...(secureMeta ? { secureMeta } : {}) }]);
       setSelectedAudio(undefined);
@@ -562,8 +603,34 @@ export function ConversationSurface({
     }
   }
 
-  function toggleReaction(messageId: string, emoji: string): void {
-    setReactions((prev) => {
+  async function openForwardSheet(target: Message): Promise<void> {
+    setForwardFor(target);
+    setForwardInbox(undefined);
+    setForwardError(undefined);
+    try {
+      const items = await conversationClient.listConversations();
+      setForwardInbox(items.filter((item) => item.conversation.conversationId !== convId));
+    } catch (e: unknown) {
+      setForwardError(e instanceof Error ? e.message : "会话列表加载失败");
+    }
+  }
+
+  async function forwardTo(targetConversationId: string): Promise<void> {
+    if (!forwardFor || forwardBusy) return;
+    setForwardBusy(true);
+    setForwardError(undefined);
+    try {
+      await conversationClient.forwardMessage(forwardFor.id, targetConversationId);
+      setForwardFor(null);
+      showToast("已转发");
+    } catch (e: unknown) {
+      setForwardError(e instanceof Error ? e.message : "转发失败，请重试");
+    } finally {
+      setForwardBusy(false);
+    }
+  }
+
+  function toggleReaction(messageId: string, emoji: string): void {    setReactions((prev) => {
       const current = prev[messageId] ?? [];
       const next = current.includes(emoji) ? current.filter((e) => e !== emoji) : [...current, emoji];
       if (next.length === 0) {
@@ -583,8 +650,9 @@ export function ConversationSurface({
   function peerAvatar(message: Message): React.JSX.Element | null {
     if (message.isOwn) return null;
     if (aiAccount) {
-      return <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiAccountPhoto(aiAccount)} style={styles.avatarMini} />;
+      return <ExpoImage accessibilityLabel={`${aiAccount.displayName}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:ai:${aiAccount.accountId ?? aiAccount.displayName}`} source={aiAccountPhoto(aiAccount)} style={styles.avatarMini} transition={0} />;
     }
+    if (peerAvatarSource) return <ExpoImage accessibilityLabel={`${author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:peer:${convId ?? author}`} source={peerAvatarSource} style={styles.avatarMini} transition={0} />;
     return (
       <View style={styles.avatarFallback}>
         <Text style={styles.avatarFallbackText}>{(message.sender || author || "对").slice(0, 1)}</Text>
@@ -593,6 +661,9 @@ export function ConversationSurface({
   }
 
   function renderBubbleContent(message: Message): React.JSX.Element {
+    if (message.isDivider) {
+      return <View style={styles.homeDivider}><View style={styles.homeDividerLine} /><Text style={styles.homeDividerText}>{message.body}</Text><View style={styles.homeDividerLine} /></View>;
+    }
     // 贴纸：单 emoji 文本按大表情渲染（OpenMoji 字形直出，离线可用）。
     const stickerEmoji = message.stickerCode
       ? (STICKERS.find((s) => s.code === message.stickerCode)?.emoji ?? message.body)
@@ -613,7 +684,7 @@ export function ConversationSurface({
             <Text numberOfLines={2} style={styles.replyInsideBody}>{message.replyBody ?? ""}</Text>
           </View>
         ) : null}
-        {message.imageUri ? <Image accessibilityLabel="聊天图片" resizeMode="cover" source={{ uri:message.imageUri }} style={styles.messageImage} /> : null}
+        {message.imageUri || message.imageSource ? <ExpoImage accessibilityLabel="聊天图片" cachePolicy="memory-disk" contentFit="cover" recyclingKey={`chat:image:${message.id}`} source={message.imageSource ?? { uri:message.imageUri ?? "" }} style={styles.messageImage} transition={0} /> : null}
         {message.videoUri ? <ChatVideo uri={message.videoUri} /> : null}
         {message.audioUri ? <ChatAudio uri={message.audioUri} /> : null}
         {message.body.trim() ? <Text style={styles.bubbleText}>{message.body}</Text> : null}
@@ -626,15 +697,19 @@ export function ConversationSurface({
   }
 
   return (
-    <SwipeBackShell onExit={onBack}>
+    <SwipeBackShell onExit={activeConvo ? () => setActiveConvo(null) : onBack}>
       <View style={[styles.root, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
-        {/* R36.1 顶栏：返回 / 对方 / 安全盾 / 头像 */}
+        {/* R36.1 顶栏：返回 / 对方 / 安全盾 / 头像；分支内返回先回主线 */}
         <View style={styles.header}>
-          <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.backBtn}>
+          <Pressable
+            accessibilityLabel={activeConvo ? "返回主线" : "返回"}
+            onPress={() => { if (activeConvo) setActiveConvo(null); else onBack(); }}
+            style={styles.backBtn}
+          >
             <Text style={styles.backText}>‹</Text>
           </Pressable>
           <View style={styles.headerInfo}>
-            <Text style={styles.headerName}>{author}</Text>
+            <Text style={styles.headerName}>{activeConvo ? `支线 · ${activeConvo.title}` : author}</Text>
             <Text style={styles.headerStatus}>{aiAccount ? `AI 虚拟 · ${aiAccount.role}` : convId ? "已连接" : "连接中..."}</Text>
           </View>
           <Pressable
@@ -644,8 +719,8 @@ export function ConversationSurface({
           >
             <Text style={[styles.secureBtnText, secureOn && styles.secureBtnTextActive]}>🛡</Text>
           </Pressable>
-          {aiAccount ? (
-            <Image accessibilityLabel={`${aiAccount.displayName}头像`} source={aiAccountPhoto(aiAccount)} style={styles.topAvatar} />
+          {aiAccount || peerAvatarSource ? (
+            <ExpoImage accessibilityLabel={`${aiAccount?.displayName ?? author}头像`} cachePolicy="memory-disk" contentFit="cover" recyclingKey={`avatar:top:${aiAccount?.accountId ?? convId ?? author}`} source={aiAccount ? aiAccountPhoto(aiAccount) : peerAvatarSource!} style={styles.topAvatar} transition={0} />
           ) : (
             <View style={styles.topAvatarFallback}>
               <Text style={styles.topAvatarFallbackText}>{(author || "对").slice(0, 1)}</Text>
@@ -674,6 +749,13 @@ export function ConversationSurface({
           <Text style={styles.menuHint}>屏蔽状态会保存到服务端；屏蔽后不可继续发送消息。</Text>
         </View> : null}
 
+        {activeConvo && seedMsg ? (
+          <View style={styles.seedCard} accessibilityLabel="支线来源消息">
+            <Text style={styles.seedLabel}>支线源自 · {seedMsg.sender}</Text>
+            <Text style={styles.seedBody} numberOfLines={2}>{seedMsg.body}</Text>
+          </View>
+        ) : null}
+
         {/* Messages */}
         <ScrollView
           ref={scrollRef}
@@ -695,6 +777,7 @@ export function ConversationSurface({
           {blocked ? null : clusters.map((cluster) => {
             const first = cluster.messages[0];
             if (!first) return null;
+            if (first.isDivider) return <View key={cluster.key}>{renderBubbleContent(first)}</View>;
             if (first.v1) {
               return (
                 <View key={cluster.key} style={[styles.v1Wrap, cluster.isOwn ? styles.v1Own : styles.v1Other]}>
@@ -742,6 +825,7 @@ export function ConversationSurface({
               </View>
             );
           })}
+          {sending && aiAccount ? <View style={styles.aiTypingRow}><ActivityIndicator color={lotus.goldtext} size="small" /><Text style={styles.aiTypingText}>{aiAccount.displayName} 正在回复…</Text></View> : null}
           {temporaryUI ? <ServerTemporaryForm disabled={sending} onSubmit={(summary) => void send(`我的补充信息：${summary}`, temporaryUI.id)} spec={temporaryUI} /> : null}
         </ScrollView>
 
@@ -808,7 +892,7 @@ export function ConversationSurface({
                 <Text style={styles.inlineToolText}>☺</Text>
               </Pressable>
               <Pressable accessibilityLabel="相机" onPress={() => { setStickerOpen(false); setAttachOpen((open) => !open); }} disabled={sending || !convId} style={styles.inlineTool}>
-                <Text style={styles.inlineToolText}>📷</Text>
+                <ProxyIcon color={lotus.ink} name="camera" size={24} />
               </Pressable>
             </View>
             {canSend || sending ? (
@@ -890,14 +974,35 @@ export function ConversationSurface({
             >
               <Text style={styles.sheetItemText}>回复</Text><Text style={styles.sheetItemHint}>↩</Text>
             </Pressable>
-            <Pressable onPress={() => { setMenuMessage(null); showToast("从这条消息创建 Convo"); }} style={styles.sheetItem}>
-              <Text style={styles.sheetItemText}>创建 Convo</Text><Text style={styles.sheetItemHint}>›</Text>
+            <Pressable
+              disabled={creatingConvo}
+              onPress={() => {
+                const target = menuMsg;
+                if (!target || creatingConvo) return;
+                setMenuMessage(null);
+                setCreatingConvo(true);
+                void conversationClient.createConvo(target.id).then((convo) => {
+                  setActiveConvo({ id: convo.id, title: convo.title });
+                  showToast("已创建支线");
+                }).catch((error: unknown) => {
+                  const reason = error instanceof Error ? error.message : "";
+                  showToast(/principal|session|signed|sign in|auth|401|403/i.test(reason) ? "请先登录后再操作。" : "创建支线失败，请重试。");
+                }).finally(() => setCreatingConvo(false));
+              }}
+              style={styles.sheetItem}
+              accessibilityLabel="从这条消息创建支线讨论"
+            >
+              <Text style={styles.sheetItemText}>{creatingConvo ? "创建中…" : "创建 Convo"}</Text><Text style={styles.sheetItemHint}>›</Text>
             </Pressable>
             <Pressable
               onPress={() => {
-                const blockedForward = noForward;
+                const target = menuMsg;
                 setMenuMessage(null);
-                showToast(blockedForward ? "此安全会话禁止转发" : "选择转发对象");
+                if (noForward) {
+                  showToast("此安全会话禁止转发");
+                  return;
+                }
+                openForwardSheet(target);
               }}
               style={styles.sheetItem}
             >
@@ -913,6 +1018,37 @@ export function ConversationSurface({
               <Pressable onPress={() => { const target = menuMsg; setMenuMessage(null); void deleteOwnMessage(target.id); }} style={styles.sheetItem}>
                 <Text style={[styles.sheetItemText, styles.menuDanger]}>删除</Text>
               </Pressable>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      ) : null}
+
+      {/* 转发目标选择：真调 ForwardMessage，有加载/空态/错误态 */}
+      {forwardFor ? (
+        <Pressable accessibilityLabel="关闭转发选择" onPress={() => { if (!forwardBusy) setForwardFor(null); }} style={styles.scrim}>
+          <Pressable onPress={() => undefined} style={styles.bottomSheet}>
+            <View style={styles.sheetGrab} />
+            <Text style={styles.sheetItemText}>转发给…</Text>
+            <Text style={styles.sheetItemHint} numberOfLines={1}>{forwardFor.body.slice(0, 40)}</Text>
+            {forwardInbox === undefined && !forwardError ? <ActivityIndicator style={{ marginVertical: 12 }} /> : null}
+            {forwardError ? <Text style={styles.menuDanger}>{forwardError}</Text> : null}
+            {(forwardInbox ?? []).map((item) => {
+              const targetId = item.conversation.conversationId;
+              const name = item.counterpartySnapshot?.displayName ?? item.counterpartyId ?? targetId.slice(0, 8);
+              return (
+                <Pressable
+                  key={targetId}
+                  disabled={forwardBusy}
+                  onPress={() => void forwardTo(targetId)}
+                  style={styles.sheetItem}
+                >
+                  <Text style={styles.sheetItemText} numberOfLines={1}>{name}</Text>
+                  <Text style={styles.sheetItemHint}>{forwardBusy ? "…" : "›"}</Text>
+                </Pressable>
+              );
+            })}
+            {forwardInbox !== undefined && forwardInbox.length === 0 && !forwardError ? (
+              <Text style={styles.sheetItemHint}>没有可转发的会话</Text>
             ) : null}
           </Pressable>
         </Pressable>
@@ -1031,6 +1167,9 @@ const styles = StyleSheet.create({
   menuRowText: { color: lotus.ink, fontSize: 13, fontWeight: "700" },
   menuDanger: { color: "#a94b41" },
   menuHint: { color: lotus.muted, fontSize: 11, lineHeight: 15, paddingVertical: 8 },
+  seedCard: { backgroundColor: "#F4EFFA", borderColor: "#DDD2EE", borderRadius: 12, borderWidth: 1, marginHorizontal: 14, marginTop: 8, padding: 10 },
+  seedLabel: { color: "#6B3ACF", fontSize: 11, fontWeight: "800" },
+  seedBody: { color: lotus.ink, fontSize: 12, lineHeight: 17, marginTop: 4 },
 
   // 消息区
   messageList: { flex: 1 },
@@ -1038,10 +1177,15 @@ const styles = StyleSheet.create({
   dayDivider: { color: lotus.faint, fontSize: 11, marginBottom: 15, marginTop: 4, textAlign: "center" },
   systemEvent: { color: "#9a958d", fontSize: 11, lineHeight: 15, marginVertical: 12, paddingHorizontal: 40, textAlign: "center" },
   systemEventWrap: { alignItems: "center", marginVertical: 12 },
+  aiTypingRow: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", gap: 7, marginBottom: 11, marginLeft: 30, marginTop: 2 },
+  aiTypingText: { color: lotus.muted, fontSize: 11 },
   retryButton: { backgroundColor: lotus.ink, borderRadius: 10, marginTop: 8, paddingHorizontal: 14, paddingVertical: 8 },
   retryButtonText: { color: "#ffffff", fontSize: 11, fontWeight: "800" },
 
   cluster: { marginBottom: 11 },
+  homeDivider: { alignItems: "center", flexDirection: "row", gap: 8, marginVertical: 10, paddingHorizontal: 8 },
+  homeDividerLine: { backgroundColor: lotus.line, flex: 1, height: StyleSheet.hairlineWidth },
+  homeDividerText: { color: lotus.faint, fontSize: 11, fontWeight: "600" },
   msgRow: { alignItems: "flex-end", flexDirection: "row", gap: 6, marginVertical: 1 },
   msgRowMe: { justifyContent: "flex-end", paddingLeft: 52 },
   msgRowPeer: { paddingRight: 52 },

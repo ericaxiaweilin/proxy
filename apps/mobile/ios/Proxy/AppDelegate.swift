@@ -61,10 +61,15 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
 
   override func bundleURL() -> URL? {
 #if DEBUG
-    // A physical iPhone cannot use Metro's localhost default. Keep the
-    // Bonjour host in the Debug shell so Wi-Fi/hotspot IP changes do not leave
-    // the native app without a script URL.
-    let metroHost = "Thanhs-MacBook-Air.local"
+    // A physical iPhone cannot use Metro's localhost default.
+    // Priority: Info.plist `MetroHost` (per-build override) → Bonjour hostname.
+    //
+    // 为什么需要 override：手机侧 mDNS 缓存过旧地址时（实测把
+    // Thanhs-MacBook-Air.local 解析成已失效的 10.20.30.223），packager status
+    // 一直超时、拉不到 bundle，App 会回落内置/缓存旧 JS —— 表现就是「改了没生效，
+    // 像装了个旧包」。此时把 MetroHost 指到 Mac 当前可达的 IPv4 即可。
+    let metroHost = (Bundle.main.object(forInfoDictionaryKey: "MetroHost") as? String)
+      ?? "Thanhs-MacBook-Air.local"
     var components = URLComponents()
     components.scheme = "http"
     components.host = metroHost

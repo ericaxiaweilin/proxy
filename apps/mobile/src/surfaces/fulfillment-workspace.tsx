@@ -43,6 +43,8 @@ export function FulfillmentWorkspace({
   onBack: () => void;
 }): React.JSX.Element {
   const [actionNote, setActionNote] = useState<string>();
+  // 本地已选候选（草稿同步失败/无连接时仍保留选择并展示）。
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | undefined>(undefined);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -252,7 +254,24 @@ export function FulfillmentWorkspace({
                 setActionNote("已记录关键问题回答（等待服务端连接）。");
               }
             } else if (actionName === "select_candidate") {
-              setActionNote(`已选择候选${params?.agentId ? `（${String(params.agentId)}）` : ""}。确认成交将通过后端命令执行。`);
+              // 候选选择落盘到 TaskDraft（与关键问题回答同链路）；
+              // 无连接时只记本地选择，不谎称已成交。
+              const agentId = params?.agentId !== undefined ? String(params.agentId) : "";
+              if (demandClient && draftId && agentId) {
+                void demandClient.updateDraft(draftId, draftVersion, {
+                  selectedCandidate: agentId
+                } as Record<string, string>).then((result) => {
+                  if (result.aggregate?.version) setDraftVersion(result.aggregate.version);
+                  setSelectedCandidateId(agentId);
+                  setActionNote(`已选择候选（${agentId}），已写入草稿。`);
+                }).catch(() => {
+                  setSelectedCandidateId(agentId);
+                  setActionNote(`已选择候选（${agentId}，本地暂存，服务端同步中）。`);
+                });
+              } else {
+                if (agentId) setSelectedCandidateId(agentId);
+                setActionNote(agentId ? `已选择候选（${agentId}，等待服务端连接）。` : "已选择候选。");
+              }
             }
           }}
         />
@@ -267,6 +286,11 @@ export function FulfillmentWorkspace({
                 <Text style={styles.retryBtnText}>重试</Text>
               </Pressable>
             ) : null}
+          </View>
+        ) : null}
+        {selectedCandidateId && !actionNote ? (
+          <View style={styles.actionNoteRow}>
+            <Text style={styles.actionNote}>已选候选（{selectedCandidateId}）</Text>
           </View>
         ) : null}
         {observability ? (

@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { ProxyIcon } from "../components/proxy-icon";
+import { useModuleBackHandler } from "../components/module-back";
 import { color } from "../theme";
 import type { SessionAuthClient } from "../auth-client";
 import type { SecureSessionStore, StoredSession } from "../secure-session";
 import { parseCommandResult } from "../login-client";
+import { localApiBaseUrl } from "../native-clients";
+
+// IDENTITY-ID-001: 真人头像与账号同源。服务端可能返回以 "/" 开头的媒体路径（账号头像
+// 资产，见 internal/mockidentity），这里统一拼 API base；空串表示该人暂无头像，卡片
+// 回落首字母（不再对外链/空串渲染破图）。
+function humanAvatarUri(url: string): string | undefined {
+  const trimmed = url.trim();
+  if (trimmed === "") return undefined;
+  return trimmed.startsWith("/") ? `${localApiBaseUrl}${trimmed}` : trimmed;
+}
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 
@@ -62,6 +74,8 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [visited, setVisited] = useState<ReadonlySet<string>>(new Set());
   const [visitedAt, setVisitedAt] = useState<ReadonlyMap<string, string>>(new Map());
   const [planned, setPlanned] = useState<ReadonlySet<string>>(new Set());
+  // 收藏/去过/去这里三态的操作反馈：未登录提示、同步失败回滚+提示。
+  const [triStateMsg, setTriStateMsg] = useState<string | undefined>(undefined);
   const [scenes, setScenes] = useState<ReadonlyArray<RealityScene>>([]);
   const [session, setSession] = useState<AuthenticatedStoredSession>();
   const [origin, setOrigin] = useState<{ latitude: number; longitude: number }>();
@@ -78,6 +92,15 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [actionBusy, setActionBusy] = useState(false);
   const [actionResult, setActionResult] = useState<string>();
   const [inviteAmountText, setInviteAmountText] = useState("150,000");
+
+  // 全页无 shell chrome，必须自己留安全区，否则顶栏顶进状态栏
+  // （标题被时间盖住、返回键落进系统手势区点不了）。
+  const insets = useSafeAreaInsets();
+  // 顶栏刚好让出状态栏时间即可，多了显空：安全区只取到时间行下方。
+  const rootPad = { paddingTop: Math.max(insets.top - 10, 8), paddingBottom: Math.max(insets.bottom, 0) };
+  // §4/§13：系统返回逐层收起——详情→列表→关闭（与屏上 ‹ 同序，后注册先消费，详情优先）。
+  useModuleBackHandler(() => { onBack(); return true; });
+  useModuleBackHandler(selectedId && selectedId !== initialSceneId ? () => { setSelectedId(undefined); return true; } : undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -211,17 +234,34 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     commit(next);
   };
   const persistToggle = (source: ReadonlySet<string>, id: string, commit: (next: ReadonlySet<string>) => void, commandType: string): void => {
-    if (!session?.principal) return;
+    // 未登录：之前直接 return，点的按钮毫无反馈；现在明说。
+    if (!session?.principal) {
+      setTriStateMsg("请先登录，收藏与计划才会同步。");
+      return;
+    }
+    setTriStateMsg(undefined);
     const enabled = !source.has(id);
     toggle(source, id, commit);
-    void sendSceneCommand(authClient, session, commandType, id, { sceneId: id, enabled }).catch(() => commit(source));
+    // 失败：之前静默回滚；现在回滚并展示原因，可重试。
+    void sendSceneCommand(authClient, session, commandType, id, { sceneId: id, enabled }).catch(() => {
+      commit(source);
+      setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
+    });
   };
   const persistVisited = (id: string): void => {
-    if (!session?.principal) return;
+    if (!session?.principal) {
+      setTriStateMsg("请先登录，足迹才会同步。");
+      return;
+    }
+    setTriStateMsg(undefined);
     const enabled = !visited.has(id); const previousVisited = visited; const previousTimes = visitedAt;
     toggle(visited, id, setVisited);
     const nextTimes = new Map(visitedAt); if (enabled) nextTimes.set(id, new Date().toISOString()); else nextTimes.delete(id); setVisitedAt(nextTimes);
-    void sendSceneCommand(authClient, session, "SetPrivateRealitySceneVisited", id, { sceneId: id, enabled }).catch(() => { setVisited(previousVisited); setVisitedAt(previousTimes); });
+    void sendSceneCommand(authClient, session, "SetPrivateRealitySceneVisited", id, { sceneId: id, enabled }).catch(() => {
+      setVisited(previousVisited);
+      setVisitedAt(previousTimes);
+      setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
+    });
   };
   const recommendNearby = async (): Promise<void> => {
     if (nearbyBusy || !session) return;
@@ -261,7 +301,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   if (selected) {
     const activeVariant = detail?.variants.find((item) => item.id === detail.selectedVariant);
     return (
-      <ScrollView style={styles.root} contentContainerStyle={styles.detailContent}>
+      <ScrollView style={[styles.root, rootPad]} contentContainerStyle={styles.detailContent}>
         <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}><Text style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text style={styles.detailTopSub}>{activeVariant?.name ?? selected.area} · {selected.area}</Text></View><View style={styles.topSpacer} /></View>
         <View style={styles.hero}>
           {detail?.heroImageUrl ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene:${detail.sceneId}:${detail.mediaVersion}`} source={{ uri: detail.heroImageUrl }} style={styles.heroMap} transition={0} /> : <MapView initialRegion={{ latitude: selected.latitude, longitude: selected.longitude, latitudeDelta: 0.025, longitudeDelta: 0.025 }} pointerEvents="none" style={styles.heroMap}><Marker coordinate={{ latitude: selected.latitude, longitude: selected.longitude }} pinColor={selected.active ? color.magenta : color.violet} /></MapView>}
@@ -282,7 +322,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             {whyOpen ? <View style={styles.whyCard}><Text style={styles.whyTitle}>推荐依据</Text><Text style={styles.whyText}>当前时段：{activeVariant?.window}</Text><Text style={styles.whyText}>场景标签：{activeVariant?.facets.join(" · ")}</Text><Text style={styles.whyText}>现场状态：{detail.liveState.label}，数据有效至 {new Date(detail.liveState.freshUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text><Text style={styles.whyBoundary}>这是场景推荐，不代表真人在场，也不生成到访、订单或履约证明。</Text></View> : null}
             <Text style={styles.sectionTitle}>适合一起的人</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.humanRail}>
-              {detail.humans.map((human) => <Pressable key={human.id} onPress={() => setSelectedHumanId(human.id)} style={[styles.humanCard, selectedHumanId === human.id && styles.humanCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-human:${human.id}`} source={{ uri: human.avatarUrl }} style={styles.humanAvatar} transition={0} /><Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
+              {detail.humans.map((human) => <Pressable key={human.id} onPress={() => setSelectedHumanId(human.id)} style={[styles.humanCard, selectedHumanId === human.id && styles.humanCardSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-human:${human.id}`} source={{ uri: humanAvatarUri(human.avatarUrl)! }} style={styles.humanAvatar} transition={0} /> : <Text style={[styles.humanAvatar, styles.humanName]}>{human.name.slice(0, 1).toUpperCase()}</Text>}<Text style={styles.humanName}>{human.name}</Text><Text style={styles.humanRole}>{human.role}</Text><Text style={styles.humanFit}>Scene fit {human.sceneFit}%</Text><Text style={styles.humanAvailability}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}</Text></Pressable>)}
             </ScrollView>
             <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
@@ -291,6 +331,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               <Pressable onPress={() => persistVisited(selected.id)} style={styles.action}><Text style={styles.actionText}>{visited.has(selected.id) ? "✓ 已去过" : "标记去过"}</Text></Pressable>
               <Pressable onPress={() => persistToggle(planned, selected.id, setPlanned, "SetRealityScenePlanned")} style={styles.primaryAction}><Text style={styles.primaryActionText}>{planned.has(selected.id) ? "✓ 已计划" : "去这里"}</Text></Pressable>
             </View>
+            {triStateMsg ? <Text style={styles.nearbyError}>{triStateMsg}</Text> : null}
             <Text style={styles.sectionTitle}>怎么组织这次现实行动</Text>
             <View style={styles.executionCard}>
               {detail.actions.map((action) => <Pressable key={action.type} onPress={() => { setSelectedAction(action); setActionResult(undefined); setActionExplanation(`${action.label}：${action.moneyMeaning}`); }} style={[styles.executionAction, selectedAction?.type === action.type && styles.executionActionSelected]}><Text style={styles.executionLabel}>{action.label}</Text><Text style={styles.executionState}>{action.type === "DIRECT_INVITE" ? "需本人接受" : action.type === "OPEN_TASK" ? "候选人申请" : "公开报名"}</Text></Pressable>)}
@@ -312,7 +353,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   }
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, rootPad]}>
       <View style={styles.topBar}>
         <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><Text style={styles.backText}>‹</Text></Pressable>
         <View style={styles.topCopy}><Text style={styles.title}>场景地图</Text><Text style={styles.subtitle}>{origin ? `当前位置附近 · ${scenes.length} 个热门场景` : `场景目录 · ${scenes.length} 个 Scene`}</Text></View>
@@ -401,7 +442,7 @@ function DataRow({ label, value, last = false }: { label: string; value: string;
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
-  topBar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 10 },
+  topBar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 6 },
   topCopy: { flex: 1 }, title: { color: color.ink, fontSize: 27, fontWeight: "900", lineHeight: 34 }, subtitle: { color: color.muted, fontSize: 12, marginTop: 1 },
   roundButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 22, borderWidth: 1, height: 44, justifyContent: "center", width: 44 },
   stats: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 10 }, stat: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 9 }, statValue: { color: color.ink, fontSize: 19, fontWeight: "900" }, statLabel: { color: color.muted, fontSize: 11, marginTop: 2 },

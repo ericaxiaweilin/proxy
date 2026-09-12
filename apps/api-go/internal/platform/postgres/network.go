@@ -2,12 +2,15 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/engagement"
@@ -166,6 +169,16 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 		FROM localnet.posts
 		WHERE status='PUBLISHED'
 		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1))
+		  -- MUTED-AUTHORS-002: feed must exclude posts from authors the
+		  -- viewer muted. Was missing entirely: AddMutedAuthor had no read
+		  -- side — IsMuted had zero callers, so mutes were decoration
+		  -- (next page / other device / re-login all re-showed the author;
+		  -- the mobile UI's local filter promised server sync that never
+		  -- existed). In-SQL so pagination LIMIT counting stays correct.
+		  AND NOT EXISTS (
+			SELECT 1 FROM engagement.muted_authors
+			WHERE actor_id=$1 AND author_id=localnet.posts.author_id
+		  )
 		  AND ($2::timestamptz IS NULL OR created_at < $2 OR (created_at = $2 AND id > $3))
 		ORDER BY created_at DESC, id ASC
 		LIMIT $4`, actorID, beforeValue, beforeID, limit)
@@ -405,9 +418,9 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 		return fmt.Errorf("encode protection: %w", err)
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
-		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount,
+		INSERT INTO conversation.messages (id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		m.ID, m.ConversationID, m.SenderID, m.MessageType, m.Body, m.MediaRef, m.CreatedAt, protectionJSON, m.Protection.ViewCount, m.ConvoID,
 	)
 	if err != nil {
 		return err
@@ -421,7 +434,7 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, m conversati
 
 func (r *ConversationRepository) Messages(ctx context.Context, conversationID string) ([]conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id
 		FROM conversation.messages WHERE conversation_id = $1 ORDER BY created_at`, conversationID)
 	if err != nil {
 		return nil, err
@@ -452,7 +465,7 @@ func (r *ConversationRepository) Messages(ctx context.Context, conversationID st
 // would mask the fact that the seed path skipped protection.
 func (r *ConversationRepository) GetMessage(ctx context.Context, id string) (conversation.Message, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count
+		SELECT id, conversation_id, sender_id, message_type, body, media_ref, created_at, protection, view_count, convo_id
 		FROM conversation.messages WHERE id = $1`, id)
 	if err != nil {
 		return conversation.Message{}, err
@@ -506,11 +519,16 @@ func (r *ConversationRepository) UpdateMessage(ctx context.Context, m conversati
 func scanConversationMessage(rows pgx.Rows) (conversation.Message, error) {
 	var m conversation.Message
 	var protection []byte
+	var convoID *string
 	if err := rows.Scan(
 		&m.ID, &m.ConversationID, &m.SenderID, &m.MessageType,
 		&m.Body, &m.MediaRef, &m.CreatedAt, &protection, &m.Protection.ViewCount,
+		&convoID,
 	); err != nil {
 		return conversation.Message{}, err
+	}
+	if convoID != nil && *convoID != "" {
+		m.ConvoID = convoID
 	}
 	if len(protection) > 0 {
 		if err := json.Unmarshal(protection, &m.Protection); err != nil {
@@ -586,6 +604,89 @@ func (r *ConversationRepository) PurgeExpiredMessages(ctx context.Context, now t
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+// --- Lotus v1 Convo (Message Branch) PG 实现 ---
+// convos 表结构见 040 迁移（conversation.convos），与 DialogRepository
+// 共用同一张表；这里只做 Conversation 世界的读写面。
+
+func (r *ConversationRepository) CreateConvo(ctx context.Context, c conversation.Convo) error {
+	pIDs, _ := json.Marshal(c.ParticipantIDs)
+	ePIDs, _ := json.Marshal(c.ExternalParticipantIDs)
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO conversation.convos (id, parent_dialog_id, seed_message_id, title, participant_ids, external_participant_ids, latest_seq, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		c.ID, c.ParentDialogID, c.SeedMessageID, c.Title, pIDs, ePIDs, c.LatestSeq, c.CreatedAt,
+	)
+	return err
+}
+
+func scanConvoRow(rows pgx.Rows) (conversation.Convo, error) {
+	var c conversation.Convo
+	var pIDs, ePIDs []byte
+	if err := rows.Scan(&c.ID, &c.ParentDialogID, &c.SeedMessageID, &c.Title, &pIDs, &ePIDs, &c.LatestSeq, &c.CreatedAt); err != nil {
+		return conversation.Convo{}, err
+	}
+	_ = json.Unmarshal(pIDs, &c.ParticipantIDs)
+	_ = json.Unmarshal(ePIDs, &c.ExternalParticipantIDs)
+	return c, nil
+}
+
+func (r *ConversationRepository) GetConvo(ctx context.Context, id string) (conversation.Convo, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, parent_dialog_id, seed_message_id, title, participant_ids, external_participant_ids, latest_seq, created_at
+		FROM conversation.convos WHERE id = $1`, id)
+	if err != nil {
+		return conversation.Convo{}, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return conversation.Convo{}, conversation.ErrConvoNotFound
+	}
+	c, err := scanConvoRow(rows)
+	if err != nil {
+		return conversation.Convo{}, err
+	}
+	return c, rows.Err()
+}
+
+func (r *ConversationRepository) ListConvosByConversation(ctx context.Context, conversationID string) ([]conversation.Convo, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, parent_dialog_id, seed_message_id, title, participant_ids, external_participant_ids, latest_seq, created_at
+		FROM conversation.convos WHERE parent_dialog_id = $1 ORDER BY created_at`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []conversation.Convo{}
+	for rows.Next() {
+		c, err := scanConvoRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, c)
+	}
+	return result, rows.Err()
+}
+
+func (r *ConversationRepository) ListConvosByUser(ctx context.Context, userID string) ([]conversation.Convo, error) {
+	needle, _ := json.Marshal([]string{userID})
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, parent_dialog_id, seed_message_id, title, participant_ids, external_participant_ids, latest_seq, created_at
+		FROM conversation.convos WHERE participant_ids @> $1 ORDER BY created_at DESC`, needle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []conversation.Convo{}
+	for rows.Next() {
+		c, err := scanConvoRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, c)
+	}
+	return result, rows.Err()
 }
 
 var _ conversation.Repository = (*ConversationRepository)(nil)
@@ -764,17 +865,24 @@ func (r *EngagementRepository) SetReaction(ctx context.Context, re engagement.Re
 		_, err := queryerForContext(ctx, r.pool).Exec(ctx, `DELETE FROM engagement.reactions WHERE post_id=$1 AND actor_id=$2`, re.PostID, re.ActorID)
 		return false, err
 	}
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (post_id, actor_id) DO UPDATE SET kind=EXCLUDED.kind`, re.ID, re.PostID, re.ActorID, re.Kind, re.CreatedAt)
-	return true, err
+	// R16.12: 走 insertEngagementRow 让 FK(23503) 违例翻译成 ErrPostNotFound
+	// （点赞不存在的帖 → 业务码而非 500）。ON CONFLICT DO UPDATE 使 23505
+	// 不可能出现，因此 alreadyExistsErr 传 nil。
+	if err := insertEngagementRow(ctx, r.pool,
+		`INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (post_id, actor_id) DO UPDATE SET kind=EXCLUDED.kind`,
+		[]any{re.ID, re.PostID, re.ActorID, re.Kind, re.CreatedAt}, nil); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *EngagementRepository) AddReply(ctx context.Context, re engagement.Reply) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+	return insertEngagementRow(ctx, r.pool, `
 		INSERT INTO engagement.replies (reply_id, post_id, actor_id, body, created_at)
 		VALUES ($1,$2,$3,$4,$5)`,
-		re.ID, re.PostID, re.ActorID, re.Body, re.CreatedAt,
+		[]any{re.ID, re.PostID, re.ActorID, re.Body, re.CreatedAt},
+		nil, // replies 无 UNIQUE(post,actor) — 只有 FK 违例需要映射
 	)
-	return err
 }
 
 func (r *EngagementRepository) ListRepliesByPost(ctx context.Context, postID string, limit int) ([]engagement.Reply, error) {
@@ -801,21 +909,81 @@ func (r *EngagementRepository) ListRepliesByPost(ctx context.Context, postID str
 }
 
 func (r *EngagementRepository) AddRepost(ctx context.Context, re engagement.Repost) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+	return insertEngagementRow(ctx, r.pool, `
 		INSERT INTO engagement.reposts (id, post_id, actor_id, created_at)
 		VALUES ($1,$2,$3,$4)`,
-		re.ID, re.PostID, re.ActorID, re.CreatedAt,
+		[]any{re.ID, re.PostID, re.ActorID, re.CreatedAt},
+		engagement.ErrRepostAlreadyExists,
 	)
-	return err
 }
 
 func (r *EngagementRepository) AddBookmark(ctx context.Context, b engagement.Bookmark) error {
-	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+	return insertEngagementRow(ctx, r.pool, `
 		INSERT INTO engagement.bookmarks (bookmark_id, post_id, actor_id, created_at)
 		VALUES ($1,$2,$3,$4)`,
-		b.ID, b.PostID, b.ActorID, b.CreatedAt,
+		[]any{b.ID, b.PostID, b.ActorID, b.CreatedAt},
+		engagement.ErrBookmarkAlreadyExists,
 	)
-	return err
+}
+
+// insertEngagementRow 执行 engagement 写路径 INSERT, 并把 PG 约束违例翻译成域哨兵错误。
+//
+// R16.12 背景 (audit 2026-09-03): 直接 Exec 时, UNIQUE(post_id, actor_id) 冲突 (23505)
+// 或 FK(post_id) 违例 (23503) 会把外层 command dispatch 事务毒死 — 后续
+// Idempotency.Complete 在同一事务里写幂等记录时撞 25P02 (transaction aborted),
+// 整个命令变成 500 command_transaction_failed, 吞掉 service 层本该返回的业务 REJECTED。
+//
+// 方案: SAVEPOINT 包住 INSERT。违例时 ROLLBACK TO SAVEPOINT 只回滚这一条,
+// 外层事务保持可用 (幂等记录能正常落库), 同时把 pgconn.PgError 翻译成域错误:
+//   - 23505 unique_violation → alreadyExistsErr (调用方指定, 如 ErrReactionAlreadyExists)
+//   - 23503 foreign_key_violation → engagement.ErrPostNotFound (帖子不存在)
+//
+// 其余错误原样上抛 (含非事务上下文里的写失败)。
+func insertEngagementRow(ctx context.Context, pool *pgxpool.Pool, sql string, args []any, alreadyExistsErr error) error {
+	q := queryerForContext(ctx, pool)
+	savepointID := "engagement_write_" + newSavepointToken()
+	if _, err := q.Exec(ctx, "SAVEPOINT "+savepointID); err != nil {
+		// 保存点建不起来 (连接故障等) — 直接执行原始 INSERT, 保留旧行为
+		_, execErr := q.Exec(ctx, sql, args...)
+		return execErr
+	}
+	if _, err := q.Exec(ctx, sql, args...); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && (pgErr.Code == "23505" || pgErr.Code == "23503") {
+			// 约束违例是预期内的业务分支: 回滚保存点救活外层事务, 返域哨兵
+			if _, rollbackErr := q.Exec(ctx, "ROLLBACK TO SAVEPOINT "+savepointID); rollbackErr != nil {
+				return rollbackErr
+			}
+			if pgErr.Code == "23505" {
+				if alreadyExistsErr != nil {
+					return alreadyExistsErr
+				}
+				return err
+			}
+			return engagement.ErrPostNotFound
+		}
+		return err
+	}
+	if _, err := q.Exec(ctx, "RELEASE SAVEPOINT "+savepointID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// newSavepointToken 生成 SAVEPOINT 名里的随机段, 避免嵌套调用时撞名。
+var savepointSource = randomTokenSource{}
+
+func newSavepointToken() string { return savepointSource.token() }
+
+type randomTokenSource struct{}
+
+func (randomTokenSource) token() string {
+	buf := make([]byte, 6)
+	if _, err := rand.Read(buf); err != nil {
+		// 不可依赖 crypto 随机时退化为时间戳 — savepoint 名只需同事务内唯一
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 func (r *EngagementRepository) AddFeedPreference(ctx context.Context, preference engagement.FeedPreference) error {

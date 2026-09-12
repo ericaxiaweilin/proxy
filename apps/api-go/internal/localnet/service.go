@@ -600,6 +600,23 @@ type Service struct {
 	sceneAesthetic SceneAestheticProvider
 	modelStack     modelstack.Port
 	clock          clock.Clock
+	// authorNames resolves USER post display names from the verified
+	// account profile (PROFILE-READ-001). Nil = legacy unwired behaviour
+	// (client-supplied echo); production wiring always sets it.
+	authorNames authorNameResolver
+}
+
+// authorNameResolver is the narrow consumer-side contract so localnet does
+// not import the identity package.
+type authorNameResolver interface {
+	ResolveAuthorDisplayName(ctx context.Context, userAccountID string) (string, bool)
+}
+
+// SetAuthorNameResolver wires profile-backed author resolution.
+func (s *Service) SetAuthorNameResolver(resolver authorNameResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authorNames = resolver
 }
 
 func New() *Service {
@@ -705,6 +722,25 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	}
 }
 
+// resolvePostAuthorName implements PROFILE-READ-001 for USER posts: the
+// display name always comes from the verified account profile, never from
+// the client payload (which used to carry a hardcoded viewer-relative
+// label). Other author types keep their caller-supplied names (agents,
+// merchants and platform specials are server-driven). Without a wired
+// resolver the legacy payload echo applies.
+func resolvePostAuthorName(resolver authorNameResolver, ctx context.Context, authorType, actorID, payloadName string) string {
+	if authorType != "USER" {
+		return payloadName
+	}
+	if resolver == nil {
+		return payloadName
+	}
+	if name, ok := resolver.ResolveAuthorDisplayName(ctx, actorID); ok {
+		return name
+	}
+	return ""
+}
+
 // ---------- CreatePost ----------
 // PRD §4/§11：Post = durable content；发布永不自动创建 Task。
 
@@ -798,7 +834,7 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		ID:                newID("post_"),
 		AuthorType:        p.AuthorType,
 		AuthorID:          e.Actor.ID,
-		AuthorDisplayName: p.AuthorDisplayName,
+		AuthorDisplayName: resolvePostAuthorName(s.authorNames, ctx, p.AuthorType, e.Actor.ID, p.AuthorDisplayName),
 		Body:              p.Body,
 		MediaRefs:         append([]PostMediaRef(nil), p.MediaRefs...),
 		Visibility:        p.Visibility,
@@ -1266,4 +1302,46 @@ func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, 
 func encodeRef(payload map[string]any) string {
 	raw, _ := json.Marshal(payload)
 	return string(raw)
+}
+
+// xiaomeiSeedPosts 是 5 小美的开屏帖（AI-POSTS-001）：一人一条，带写真。
+// AuthorType AI_NATIVE（feed 卡有 AI 生成标注）；Upsert 幂等，可重跑。
+func xiaomeiSeedPosts(now time.Time) []Post {
+	seed := func(id, authorID, displayName, body, assetID string) Post {
+		return Post{
+			ID:                id,
+			AuthorType:        "AI_NATIVE",
+			AuthorID:          authorID,
+			AuthorDisplayName: displayName,
+			Body:              body,
+			MediaRefs:         []PostMediaRef{{MediaAssetID: assetID, SortOrder: 0}},
+			Visibility:        "PUBLIC",
+			CityScope:         "Hanoi",
+			Status:            "PUBLISHED",
+			SceneType:         "PHOTO",
+			CreatedAt:         now,
+		}
+	}
+	return []Post{
+		seed("post_xiaomei_001", "ai_001", "小美 · 周末企划", "本周六下午，西湖边那家能看日落的咖啡馆我替你们踩过点了，座位图在照片里。想去的举手，我来组局。", "seed_media_xiaomei_001"),
+		seed("post_xiaomei_002", "ai_002", "小美 · 拍照季", "同款机位分享：在西湖拍晚霞，18:10 的光最好。这是我上周拍的，参数和站位都在照片里。", "seed_media_xiaomei_002"),
+		seed("post_xiaomei_003", "ai_003", "小美 · 拍照搭子", "周六 15:00 还剑湖缺一位互拍搭子，我带反光板，你带笑就行。", "seed_media_xiaomei_003"),
+		seed("post_xiaomei_004", "ai_004", "小美 · 餐厅尝鲜", "岚庭出了新菜，我昨晚替你们尝了第一轮。周五尝鲜局开 6 个名额，报名的私我。", "seed_media_xiaomei_004"),
+		seed("post_xiaomei_005", "ai_005", "小美 · 饭局推荐", "周五晚饭局还差 2 位，西湖边上那家，有人一起吗？", "seed_media_xiaomei_005"),
+	}
+}
+
+// SeedXiaomeiPosts 幂等写入 5 小美帖（AI-POSTS-001）。
+// Upsert 语义：已存在覆盖同 id 行，不存在插入；绝不删任何行。
+func (s *Service) SeedXiaomeiPosts(ctx context.Context) error {
+	if s.repository == nil {
+		return nil
+	}
+	now := s.clock.Now().UTC()
+	for _, p := range xiaomeiSeedPosts(now) {
+		if err := s.repository.UpsertPost(ctx, p); err != nil {
+			return err
+		}
+	}
+	return nil
 }

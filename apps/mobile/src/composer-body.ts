@@ -24,6 +24,10 @@ export type ComposerBodyInput = {
   topic: string | null;
   isGhost24h: boolean;
   quoteTarget: FeedPost | undefined;
+  // 回复/引用权限：后端暂无字段，非“所有人”时序列化成正文标记行
+  // （与 GIF/投票装饰同口径），草稿恢复时再解析回来。
+  replyPerm?: string | undefined;
+  quotePerm?: string | undefined;
 };
 
 const POLL_GLYPHS = ["①", "②", "③", "④"];
@@ -58,6 +62,8 @@ export function estimateAssembledBodyLength(input: {
   topic: string | null;
   isGhost24h: boolean;
   quoteTarget: FeedPost | undefined;
+  replyPerm?: string | undefined;
+  quotePerm?: string | undefined;
 }): number {
   // 只关心 area 与 quoteTarget 的长度；这里伪造最小化 place 与 quoteTarget 以满足类型
   const minimalPlace = input.place
@@ -70,7 +76,9 @@ export function estimateAssembledBodyLength(input: {
     place: minimalPlace,
     topic: input.topic,
     isGhost24h: input.isGhost24h,
-    quoteTarget: input.quoteTarget
+    quoteTarget: input.quoteTarget,
+    replyPerm: input.replyPerm,
+    quotePerm: input.quotePerm
   }).length;
 }
 
@@ -152,6 +160,8 @@ const GHOST24H_PREFIX = "⏱ [24h 临时动态]";
 const GIF_PREFIX = "🎬 GIF: ";
 const POLL_PREFIX = "📊 投票 · ";
 const TOPIC_PREFIX = "# ";
+const REPLY_PERM_PREFIX = "💬 回复权限：";
+const QUOTE_PERM_PREFIX = "🔁 引用权限：";
 
 /**
  * 投票是否应该被序列化到 body 或 schema。
@@ -190,6 +200,8 @@ export function assembleComposerBody(input: ComposerBodyInput): string {
   if (poll) segments.push(poll);
   if (input.place) segments.push(`📍 ${input.place.area}`);
   if (input.topic) segments.push(input.topic);
+  if (input.replyPerm && input.replyPerm !== "所有人") segments.push(`${REPLY_PERM_PREFIX}${input.replyPerm}`);
+  if (input.quotePerm && input.quotePerm !== "所有人") segments.push(`${QUOTE_PERM_PREFIX}${input.quotePerm}`);
   const quote = quoteBlock(input.quoteTarget);
   if (quote) segments.push(quote);
   segments.push(input.body.trim());
@@ -209,6 +221,8 @@ export type ParsedComposerBody = {
   gifWord: string | null;
   poll: PollStateForBody | null;
   topic: string | null;
+  replyPerm: string | null;
+  quotePerm: string | null;
 };
 
 const POLL_LINE_PREFIX = /^[\s]*[①②③④\d][\s]*(.*)$/;
@@ -256,11 +270,13 @@ export function parseComposerBody(input: string): ParsedComposerBody {
     text = text.slice(GHOST24H_PREFIX.length).replace(/^\n+/, "");
   }
 
-  // 按 \n\n 拆段，顺序扫描匹配 GIF / 投票
+  // 按 \n\n 拆段，顺序扫描匹配 GIF / 投票 / 权限标记
   const segments = text.split(/\n\n+/);
   const kept: string[] = [];
   let gifWord: string | null = null;
   let poll: PollStateForBody | null = null;
+  let replyPerm: string | null = null;
+  let quotePerm: string | null = null;
 
   for (const seg of segments) {
     const trimmed = seg.trim();
@@ -278,6 +294,20 @@ export function parseComposerBody(input: string): ParsedComposerBody {
         continue;
       }
     }
+    if (replyPerm === null && trimmed.startsWith(REPLY_PERM_PREFIX) && !trimmed.includes("\n")) {
+      const value = trimmed.slice(REPLY_PERM_PREFIX.length).trim();
+      if (value) {
+        replyPerm = value;
+        continue;
+      }
+    }
+    if (quotePerm === null && trimmed.startsWith(QUOTE_PERM_PREFIX) && !trimmed.includes("\n")) {
+      const value = trimmed.slice(QUOTE_PERM_PREFIX.length).trim();
+      if (value) {
+        quotePerm = value;
+        continue;
+      }
+    }
     kept.push(seg);
   }
 
@@ -289,6 +319,8 @@ export function parseComposerBody(input: string): ParsedComposerBody {
     isGhost24h,
     gifWord,
     poll,
-    topic: topicResult.topic
+    topic: topicResult.topic,
+    replyPerm,
+    quotePerm
   };
 }

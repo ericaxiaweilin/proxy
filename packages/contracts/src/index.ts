@@ -495,6 +495,8 @@ export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;
 //     后下发，客户端不允许传空。
 export const ActivitySchema = z.object({
   activityId: z.string().min(1),
+  // R58 展示编号（PX-A-yymmdd-####，展示用；权威主键仍是 activityId）。
+  code: z.string().min(1).optional(),
   origin: z.enum(["PLATFORM", "MERCHANT", "USER", "TEST"]),
   title: z.string().min(1),
   time: z.string(),
@@ -507,7 +509,7 @@ export const ActivitySchema = z.object({
   venueName: z.string(),
   realitySceneId: z.string().min(1).optional(),
   venueSpend: z.string(),
-  venueType: z.enum(["CAFE", "RESTAURANT", ""]),
+  venueType: z.enum(["CAFE", "RESTAURANT", "PARK", "LAKE", "STREET", "OTHER", ""]),
   venueTypeLabel: z.string(),
   // 活动封面图（R17.x 预留）：HTTPS URL，上传管线接好之前 server 不下发，
   // 客户端无此字段时必须显示诚实占位（不得用假图冒充实拍）。
@@ -523,6 +525,9 @@ export const ActivitySchema = z.object({
   ownerId: z.string().optional(),
   status: z.enum(["PUBLISHED", "CANCELLED"]).optional(),
   consumptionTerm: z.enum(["SPLIT", "HOST_COVERS"]).optional(),
+  // R58: 报名方式 + 主题。
+  signupMode: z.enum(["OPEN", "REVIEW", "INVITE_ONLY"]).optional(),
+  theme: z.string().max(30).optional(),
   // MERCHANT-PUBLISH-001: 以商家名义发布时的店名（Origin=MERCHANT 时必有）。
   // 只认服务端注记；个人发布为空。
   merchantName: z.string().min(1).optional(),
@@ -588,7 +593,13 @@ export const MarketOpportunitySchema = z.object({
   price: z.string(),
   moneyFlow: MarketOpportunityMoneyFlowSchema,
   priceLabel: z.string().min(1),
-  owner: z.string().min(1),
+  // PROFILE-READ-001: PERSON owner may be empty when the author has no
+  // resolvable profile (legacy backfilled rows, unresolved publishers).
+  // Readers show a neutral label; one unresolvable row must never fail
+  // the whole list parse.
+  owner: z.string(),
+  // R58 demand notes (optional free text, max 500 runes enforced server-side).
+  desc: z.string().max(500).optional(),
   ownerType: z.enum(["BUSINESS", "PERSON"]),
   match: z.string(),
   responses: z.number().int().nonnegative(),
@@ -607,7 +618,10 @@ export const MarketOpportunitySchema = z.object({
   appliedByViewer: z.boolean().optional(),
   viewerApplicationId: z.string().optional(),
   viewerApplicationStatus: z.enum(["SUBMITTED", "SELECTED", "NOT_SELECTED", "CONFIRMED"]).optional(),
-  viewerOrderRef: z.string().optional()
+  viewerOrderRef: z.string().optional(),
+  // OPP-TARGETED-001: 定向邀约时非空 — 只对目标人和 owner 可见、
+  // 只收目标人报名。空/缺省 = 经典公开卡（向后兼容）。
+  targetAccountId: z.string().min(1).optional()
 });
 export type MarketOpportunity = z.infer<typeof MarketOpportunitySchema>;
 
@@ -615,6 +629,101 @@ export const ListMarketOpportunitiesPayloadSchema = z.object({
   opportunities: z.array(MarketOpportunitySchema)
 });
 export type ListMarketOpportunitiesPayload = z.infer<typeof ListMarketOpportunitiesPayloadSchema>;
+
+// OPP-TEMPLATE-001: 发布流程目录契约（ListOpportunityTemplates）。
+// HOT = 一步热门卡；THEME = 完整组合；MORE = 长尾（搜索可达）。
+// 每张卡带发布表单需要的全部默认值：tags、参考价 price、参考区间
+// range、合规服务标准 standard（公共场所 · 现场消费自结口径）。
+// 该目录是 server 内置的静态读模型 — 不含任何用户数据，匿名可读。
+export const OpportunityTemplateGroupSchema = z.enum(["HOT", "THEME", "MORE"]);
+export type OpportunityTemplateGroup = z.infer<typeof OpportunityTemplateGroupSchema>;
+
+export const OpportunityTemplateSchema = z.object({
+  id: z.string().min(1),
+  group: OpportunityTemplateGroupSchema,
+  title: z.string().min(1),
+  sub: z.string(),
+  icon: z.string(),
+  mark: z.string(),
+  tags: z.array(z.string().min(1)).min(1),
+  price: z.string().min(1),
+  range: z.string().min(1),
+  standard: z.string().min(1)
+});
+export type OpportunityTemplate = z.infer<typeof OpportunityTemplateSchema>;
+
+export const ListOpportunityTemplatesPayloadSchema = z.object({
+  templates: z.array(OpportunityTemplateSchema).min(1),
+  // OPP-CATALOG-001 (R58): the delivery-style category rail + Moment
+  // spec sheet + ratio policy + dynamic pricing — one payload serves
+  // the whole publish flow. All optional for backward compatibility
+  // with older payloads that only carried the card list.
+  categories: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    hint: z.string(),
+    items: z.array(z.string().min(1)).min(1)
+  })).optional(),
+  specs: z.array(z.object({
+    templateId: z.string().min(1),
+    groups: z.array(z.string().min(1)).min(1),
+    times: z.array(z.string().min(1)).min(1),
+    durations: z.array(z.string().min(1)).min(1),
+    places: z.array(z.string().min(1)).min(1)
+  })).optional(),
+  policies: z.array(z.object({
+    templateId: z.string().min(1),
+    mode: z.enum(["Moment", "Professional"]),
+    ratio: z.string().min(1),
+    ratioText: z.string().min(1),
+    fixed: z.boolean(),
+    groups: z.array(z.string().min(1)).min(1),
+    prefs: z.array(z.object({
+      key: z.string().min(1),
+      label: z.string().min(1),
+      options: z.array(z.object({
+        value: z.string().min(1),
+        add: z.number().int()
+      })).min(1)
+    })).optional()
+  })).optional(),
+  pricing: z.array(z.object({
+    templateId: z.string().min(1),
+    duration: z.record(z.string(), z.number().int()).optional(),
+    time: z.record(z.string(), z.number().int()).optional(),
+    group: z.record(z.string(), z.number().int()).optional(),
+    perPair: z.boolean().optional()
+  })).optional(),
+  // OPP-CATALOG-002 (R58 activity line): creation-flow presets.
+  activityPresets: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    mark: z.string(),
+    theme: z.boolean(),
+    tags: z.array(z.string().min(1)).min(1),
+    sub: z.string(),
+    capacity: z.string().min(1),
+    time: z.string().min(1)
+  })).optional()
+});
+export type ListOpportunityTemplatesPayload = z.infer<typeof ListOpportunityTemplatesPayloadSchema>;
+
+// Client-facing types for the R58 catalog engine.
+export type OpportunityCatalogCategory = NonNullable<ListOpportunityTemplatesPayload["categories"]>[number];
+export type MomentSpec = NonNullable<ListOpportunityTemplatesPayload["specs"]>[number];
+export type MomentPolicyInfo = NonNullable<ListOpportunityTemplatesPayload["policies"]>[number];
+export type MomentPricingRule = NonNullable<ListOpportunityTemplatesPayload["pricing"]>[number];
+export type ActivityPresetInfo = NonNullable<ListOpportunityTemplatesPayload["activityPresets"]>[number];
+
+// OPP-SUGGEST-001: 发布搜索"生成"wire 契约（SuggestOpportunityTemplate）。
+// server 语义层把自由文本映射到目录卡：template 必是目录内真实卡
+// （server 白名单校验，LLM 幻觉 id 被拒），reason 是一句人类可读的
+// 匹配理由。query 为输入；匿名可调（不含用户数据）。
+export const SuggestOpportunityTemplatePayloadSchema = z.object({
+  template: OpportunityTemplateSchema,
+  reason: z.string()
+});
+export type SuggestOpportunityTemplatePayload = z.infer<typeof SuggestOpportunityTemplatePayloadSchema>;
 
 export const PublishMarketOpportunityPayloadSchema = z.object({
   opportunity: MarketOpportunitySchema
@@ -644,9 +753,15 @@ export const PublishMarketOpportunityInputSchema = z.object({
   skills: z.string(),
   lens: z.array(z.enum(["NOW", "NEARBY", "BOOKED", "REMOTE"])).min(1),
   travel: z.number().int().nullable().optional(),
+  // R58 demand notes.
+  desc: z.string().max(500).optional(),
   // MERCHANT-PUBLISH-001: 以商家名义发布时带店 id。server 在 api 层验
   // business 成员（OWNER/ADMIN）后才认；伪造的直接 403。个人发布不传。
-  merchantId: z.string().min(1).optional()
+  merchantId: z.string().min(1).optional(),
+  // OPP-TARGETED-001: 定向邀约（选人 → 向 TA 发出邀约）。带上后 server
+  // 把机会快照为 targetAccountId 非空：List 只对目标人和 owner 可见，
+  // Apply 只收目标人。不传 = 公开发布，行为与之前完全一致。
+  targetUserId: z.string().min(1).optional()
 });
 export type PublishMarketOpportunityInput = z.infer<typeof PublishMarketOpportunityInputSchema>;
 
@@ -825,5 +940,8 @@ export * from "./city-key";
 // so any rename forces a compile error on both ends.
 export * from "./facet";
 export * from "./engagement";
+
+// AI-ASSIST-001: 平台 AI 助手公开目录（首页 5 小美推荐）wire 契约。
+export * from "./ai-assistants";
 
 // R15.33: map contracts 撤了 — 独立 map tab 已删。

@@ -1,6 +1,7 @@
 package engagement
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -511,4 +512,122 @@ func TestListUserBookmarks_InvalidUserId(t *testing.T) {
 	if result.Outcome != "REJECTED" {
 		t.Errorf("expected REJECTED (empty userId), got %s", result.Outcome)
 	}
+}
+
+// ---------- R16.12 约束违例 → 业务码（audit 2026-09-03 dup-like 500 修复）----------
+
+// TestReactToPost_DuplicateLike 已删除：HEAD 基线（556dabc fix(feed): hydrate
+// reactions and post replies）把 ReactToPost 改成 toggle 语义（SetReaction with
+// active bool + ON CONFLICT DO UPDATE），重复点赞是幂等 toggle 而不是
+// ALREADY_REACTED 错误 —— 该基线由 TestPostReactionTruthToggleAndRemountHydration
+// 钉住。合并时保留 HEAD 语义，分支上这条断言旧基线的用例随之作废。
+// 约束违例 → 业务码的保证仍然保留：FK(23503) 走 POST_NOT_FOUND（见下方用例 +
+// platform/postgres SetReaction 的 insertEngagementRow 翻译）。
+
+// TestReactToPost_PostNotFound —— 对不存在的帖文点赞必须返 POST_NOT_FOUND,
+// 不允许 FK 违例 (23503) 泄成 500。
+func TestReactToPost_PostNotFound(t *testing.T) {
+	// Memory 仓不做 FK 检查 (无 posts 表); PG 路径由集成测试覆盖。
+	// 这里测 service 层对哨兵错误的映射: 注入 ErrPostNotFound 的仓。
+	s := NewWithRepository(&postNotFoundRepo{inner: NewMemoryRepository()})
+	result := s.Handle(envelopeFor("ReactToPost", map[string]any{"postId": "post_ghost", "kind": "LIKE"}, ""))
+	if result.Outcome != "REJECTED" || result.Error == nil || result.Error.ErrorCode != "POST_NOT_FOUND" {
+		t.Fatalf("ghost post like: want REJECTED/POST_NOT_FOUND, got %s err=%+v", result.Outcome, result.Error)
+	}
+}
+
+// TestRepostPost_DuplicateAndGhost —— repost 的 23505/23503 同样映射成业务码。
+func TestRepostPost_DuplicateAndGhost(t *testing.T) {
+	s := New()
+	first := s.Handle(envelopeFor("RepostPost", map[string]any{"postId": "post_dup"}, ""))
+	if first.Outcome != "ACCEPTED" {
+		t.Fatalf("first repost should be accepted, got %s", first.Outcome)
+	}
+	second := s.Handle(envelopeFor("RepostPost", map[string]any{"postId": "post_dup"}, ""))
+	if second.Outcome != "REJECTED" || second.Error == nil || second.Error.ErrorCode != "ALREADY_REPOSTED" {
+		t.Fatalf("dup repost: want REJECTED/ALREADY_REPOSTED, got %s err=%+v", second.Outcome, second.Error)
+	}
+	s2 := NewWithRepository(&postNotFoundRepo{inner: NewMemoryRepository()})
+	ghost := s2.Handle(envelopeFor("RepostPost", map[string]any{"postId": "post_ghost"}, ""))
+	if ghost.Outcome != "REJECTED" || ghost.Error == nil || ghost.Error.ErrorCode != "POST_NOT_FOUND" {
+		t.Fatalf("ghost repost: want REJECTED/POST_NOT_FOUND, got %s err=%+v", ghost.Outcome, ghost.Error)
+	}
+}
+
+// TestBookmarkPost_DuplicateAndGhost —— bookmark 的 23505/23503 同样映射成业务码。
+func TestBookmarkPost_DuplicateAndGhost(t *testing.T) {
+	s := New()
+	first := s.Handle(envelopeFor("BookmarkPost", map[string]any{"postId": "post_dup"}, ""))
+	if first.Outcome != "ACCEPTED" {
+		t.Fatalf("first bookmark should be accepted, got %s", first.Outcome)
+	}
+	second := s.Handle(envelopeFor("BookmarkPost", map[string]any{"postId": "post_dup"}, ""))
+	if second.Outcome != "REJECTED" || second.Error == nil || second.Error.ErrorCode != "ALREADY_BOOKMARKED" {
+		t.Fatalf("dup bookmark: want REJECTED/ALREADY_BOOKMARKED, got %s err=%+v", second.Outcome, second.Error)
+	}
+	s2 := NewWithRepository(&postNotFoundRepo{inner: NewMemoryRepository()})
+	ghost := s2.Handle(envelopeFor("BookmarkPost", map[string]any{"postId": "post_ghost"}, ""))
+	if ghost.Outcome != "REJECTED" || ghost.Error == nil || ghost.Error.ErrorCode != "POST_NOT_FOUND" {
+		t.Fatalf("ghost bookmark: want REJECTED/POST_NOT_FOUND, got %s err=%+v", ghost.Outcome, ghost.Error)
+	}
+}
+
+// postNotFoundRepo — 把所有 Add* 写路径变成 ErrPostNotFound, 模拟 PG FK 违例翻译后的行为。
+type postNotFoundRepo struct {
+	inner *MemoryRepository
+}
+
+func (p *postNotFoundRepo) AddFollow(ctx context.Context, f Follow) error {
+	return p.inner.AddFollow(ctx, f)
+}
+func (p *postNotFoundRepo) RemoveFollow(ctx context.Context, followerID, followeeID string) (bool, error) {
+	return p.inner.RemoveFollow(ctx, followerID, followeeID)
+}
+func (p *postNotFoundRepo) CountFollowers(ctx context.Context, userID string) (int, error) {
+	return p.inner.CountFollowers(ctx, userID)
+}
+func (p *postNotFoundRepo) CountFollowing(ctx context.Context, userID string) (int, error) {
+	return p.inner.CountFollowing(ctx, userID)
+}
+func (p *postNotFoundRepo) IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error) {
+	return p.inner.IsFollowing(ctx, followerID, followeeID)
+}
+func (p *postNotFoundRepo) SetReaction(ctx context.Context, r Reaction, active bool) (bool, error) {
+	return false, ErrPostNotFound
+}
+func (p *postNotFoundRepo) ListRepliesByPost(ctx context.Context, postID string, limit int) ([]Reply, error) {
+	return p.inner.ListRepliesByPost(ctx, postID, limit)
+}
+func (p *postNotFoundRepo) AddReply(ctx context.Context, r Reply) error       { return ErrPostNotFound }
+func (p *postNotFoundRepo) AddRepost(ctx context.Context, r Repost) error     { return ErrPostNotFound }
+func (p *postNotFoundRepo) AddBookmark(ctx context.Context, b Bookmark) error { return ErrPostNotFound }
+func (p *postNotFoundRepo) ListRepliesByActor(ctx context.Context, actorID string, limit int) ([]Reply, error) {
+	return p.inner.ListRepliesByActor(ctx, actorID, limit)
+}
+func (p *postNotFoundRepo) ListBookmarksByActor(ctx context.Context, actorID string, limit int) ([]Bookmark, error) {
+	return p.inner.ListBookmarksByActor(ctx, actorID, limit)
+}
+func (p *postNotFoundRepo) AddPostPin(ctx context.Context, pin PostPin) (PostPin, bool, error) {
+	return p.inner.AddPostPin(ctx, pin)
+}
+func (p *postNotFoundRepo) RemovePostPin(ctx context.Context, ownerID, postID string) (bool, error) {
+	return p.inner.RemovePostPin(ctx, ownerID, postID)
+}
+func (p *postNotFoundRepo) ListPinnedPosts(ctx context.Context, ownerID string) ([]string, error) {
+	return p.inner.ListPinnedPosts(ctx, ownerID)
+}
+func (p *postNotFoundRepo) AddFeedPreference(ctx context.Context, preference FeedPreference) error {
+	return p.inner.AddFeedPreference(ctx, preference)
+}
+func (p *postNotFoundRepo) AddPostReport(ctx context.Context, report PostReport) error {
+	return p.inner.AddPostReport(ctx, report)
+}
+func (p *postNotFoundRepo) AddMutedAuthor(ctx context.Context, mute MutedAuthor) (MutedAuthor, bool, error) {
+	return p.inner.AddMutedAuthor(ctx, mute)
+}
+func (p *postNotFoundRepo) IsMuted(ctx context.Context, actorID, authorID string) (bool, error) {
+	return p.inner.IsMuted(ctx, actorID, authorID)
+}
+func (p *postNotFoundRepo) Engagement(ctx context.Context, postID string, viewerID ...string) (PostEngagement, error) {
+	return p.inner.Engagement(ctx, postID, viewerID...)
 }

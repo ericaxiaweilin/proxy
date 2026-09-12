@@ -715,3 +715,124 @@ func TestMerchantStampRequiresAnnotation(t *testing.T) {
 	// 注：OwnerID 是 json:"-" 内部字段（仍是发布人本人，保证 Owned/接单/
 	// 屏蔽逻辑不变），wire 上不可见，这里不 assert。
 }
+
+type stubAuthorNames struct{ names map[string]string }
+
+func (s stubAuthorNames) ResolveAuthorDisplayName(_ context.Context, userID string) (string, bool) {
+	name, ok := s.names[userID]
+	return name, ok
+}
+
+// PROFILE-READ-001: PERSON opportunity owners resolve from the verified
+// account profile; unresolved authors store an empty owner (never hardcoded).
+func TestPublishOpportunityResolvesOwnerFromProfile(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	s.SetAuthorNameResolver(stubAuthorNames{names: map[string]string{"owner": "NguyenThanhHuyen"}})
+	payload := map[string]any{
+		"title": "周六城市同行", "theme": "城市同行", "date": "周六", "time": "10:00",
+		"location": "河内", "price": "2,000,000₫", "moneyFlow": "EARN",
+	}
+	out := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", payload))
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", out)
+	}
+	var body struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Opportunity.OwnerType != "PERSON" || body.Opportunity.Owner != "NguyenThanhHuyen" {
+		t.Fatalf("owner must resolve from profile: %+v", body.Opportunity)
+	}
+	unknown := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "stranger", payload))
+	var unknownBody struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(unknown.OperationRef), &unknownBody); err != nil {
+		t.Fatal(err)
+	}
+	if unknownBody.Opportunity.Owner != "" {
+		t.Fatalf("unresolved owner must store empty, got %q", unknownBody.Opportunity.Owner)
+	}
+}
+
+// R58 demand notes round-trip through publish; over-500 runes rejected.
+func TestPublishOpportunityNotesRoundTrip(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	base := map[string]any{
+		"title": "周六城市同行", "theme": "城市同行", "date": "周六", "time": "10:00",
+		"location": "河内", "price": "2,000,000₫", "moneyFlow": "EARN",
+	}
+	withNotes := map[string]any{}
+	for key, value := range base {
+		withNotes[key] = value
+	}
+	withNotes["desc"] = "需要会说中文"
+	out := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", withNotes))
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("publish with notes: %+v", out)
+	}
+	var body struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Opportunity.Desc != "需要会说中文" {
+		t.Fatalf("notes not stored: %+v", body.Opportunity)
+	}
+	tooLong := map[string]any{}
+	for key, value := range base {
+		tooLong[key] = value
+	}
+	long := ""
+	for range 501 {
+		long += "x"
+	}
+	tooLong["desc"] = long
+	rejected := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", tooLong))
+	if rejected.Outcome != "REJECTED" || rejected.Error == nil || rejected.Error.ErrorCode != "INVALID_OPPORTUNITY" {
+		t.Fatalf("over-long notes must reject INVALID_OPPORTUNITY, got %+v", rejected)
+	}
+}
+
+// TestListOpportunityTemplatesShipsWholeEngine pins the WIRE payload of
+// the anonymous catalog read: every engine field the mobile spec sheet
+// consumes must survive the service dispatch layer. The engine struct
+// test alone cannot catch a dropped key in the map[string]any assembly
+// (that exact bug shipped activityPresets as an empty list once).
+func TestListOpportunityTemplatesShipsWholeEngine(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	resp := s.HandleContext(t.Context(), marketEnvelope("ListOpportunityTemplates", "anon", map[string]any{}))
+	if resp.Outcome != "ACCEPTED" {
+		t.Fatalf("list templates: %+v", resp)
+	}
+	var body struct {
+		Templates        []OpportunityTemplate `json:"templates"`
+		Categories       []TemplateCategory    `json:"categories"`
+		Specs            []MomentSpecs         `json:"specs"`
+		Policies         []MomentPolicy        `json:"policies"`
+		Pricing          []PricingRule         `json:"pricing"`
+		ActivityPresets  []ActivityPreset      `json:"activityPresets"`
+	}
+	if err := json.Unmarshal([]byte(resp.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Templates) != 16 {
+		t.Fatalf("wire templates: got %d", len(body.Templates))
+	}
+	if len(body.Categories) != 5 {
+		t.Fatalf("wire categories: got %d", len(body.Categories))
+	}
+	if len(body.Specs) != 16 || len(body.Policies) != 16 || len(body.Pricing) == 0 {
+		t.Fatalf("wire engine incomplete: specs=%d policies=%d pricing=%d", len(body.Specs), len(body.Policies), len(body.Pricing))
+	}
+	if len(body.ActivityPresets) != 6 {
+		t.Fatalf("wire activityPresets: got %d (dispatch layer must forward every engine field)", len(body.ActivityPresets))
+	}
+}
+

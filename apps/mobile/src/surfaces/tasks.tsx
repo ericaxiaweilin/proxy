@@ -258,24 +258,11 @@ export function ActivityDetail({
 
       {/* 参加状态与 CTA：确认参加后才开放群聊 */}
       {joined ? (
-        <>
-          <View style={styles.joinState}>
-            <Text style={styles.joinStateTitle}>你已参加这场活动</Text>
-            <Text style={styles.joinStateText}>活动群聊仅向已确认参与者开放，用于到店前必要沟通。</Text>
-          </View>
-          <Gradient from={color.magenta} to={color.violet} style={styles.ctaPrimary}>
-            <Pressable style={styles.ctaPrimaryInner}>
-              <Text style={styles.ctaPrimaryText}>进入活动群聊</Text>
-            </Pressable>
-          </Gradient>
-        </>
-      ) : item.origin === "USER" || (item.aiStatus !== "NONE" && item.aiActorKind === "USER_TWIN") ? (
-        <Gradient from={color.magenta} to={color.violet} style={styles.ctaPrimary}>
-          <Pressable style={styles.ctaPrimaryInner}>
-            <Text style={styles.ctaPrimaryText}>查看参与者匹配</Text>
-          </Pressable>
-        </Gradient>
-      ) : (
+        <View style={styles.joinState}>
+          <Text style={styles.joinStateTitle}>你已参加这场活动</Text>
+          <Text style={styles.joinStateText}>活动群聊仅向已确认参与者开放，用于到店前必要沟通。群聊入口尚未接入，不显示假按钮。</Text>
+        </View>
+      ) : item.origin === "USER" || (item.aiStatus !== "NONE" && item.aiActorKind === "USER_TWIN") ? null : (
         <Gradient from={color.magenta} to={color.violet} style={styles.ctaPrimary}>
           <Pressable onPress={onJoin} disabled={busy} style={styles.ctaPrimaryInner}>
             <Text style={styles.ctaPrimaryText}>{busy ? "处理中…" : "参加活动"}</Text>
@@ -283,7 +270,7 @@ export function ActivityDetail({
         </Gradient>
       )}
       {item.origin !== "USER" ? (
-        <Pressable style={styles.ctaLight}>
+        <Pressable onPress={() => void Share.share({ message: `${item.title} · ${item.time} · ${item.venueName} — Proxy` })} style={styles.ctaLight} accessibilityLabel="找人一起参加">
           <Text style={styles.ctaLightText}>找人一起参加</Text>
         </Pressable>
       ) : null}

@@ -1,7 +1,7 @@
 // Home semantic runtime：Home 的三个快捷入口只给模型语义方向，发送后进入这里。
 // 这里不是 Market 页面跳转，也不直接创建 Need / Order / Activity；业务事实仍由后续确认动作产生。
 import { useEffect, useRef, useState } from "react";
-import { Image, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { ConversationClient } from "../conversation-client";
 import type { HomeAttachment, HomeIntentMode } from "../components/home-chat-box";
 import type { MediaClient } from "../media-client";
@@ -10,6 +10,7 @@ import { color, shadows } from "../theme";
 import type { MarketTab } from "../market-fixtures";
 import { ExperienceSurfaceBanner } from "../experience-runtime/ExperienceSurfaceBanner";
 import type { SurfacePlan, UISchema } from "@proxy/contracts";
+import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 
 interface AssistantMessage {
   id: string;
@@ -18,6 +19,7 @@ interface AssistantMessage {
   isAI?: boolean;
   attachmentUri?: string;
   time: string;
+  isDivider?: boolean;
 }
 
 export function HomeAssistantSurface({
@@ -34,6 +36,7 @@ export function HomeAssistantSurface({
   experienceSchema,
   ensureSession,
   embedded = false,
+  externalComposer = false,
 }: {
   conversationClient: ConversationClient;
   mediaClient: MediaClient;
@@ -48,20 +51,24 @@ export function HomeAssistantSurface({
   experienceSchema?: UISchema | null;
   ensureSession?: () => Promise<void>;
   embedded?: boolean;
+  externalComposer?: boolean;
 }): React.JSX.Element {
   const [conversationId, setConversationId] = useState<string>();
-  const [messages, setMessages] = useState<AssistantMessage[]>([
-    makeMessage(initialText, true, initialAttachment?.uri)
-  ]);
+  // 首轮建会话失败：之前只留一条 status，输入框永久 disabled、无重试。
+  // 现在记失败态并给重试按钮，重试计数进 effect 依赖重新建连。
+  const [startFailed, setStartFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const [messages, setMessages] = useState<AssistantMessage[]>(() =>
+    initialText || initialAttachment ? [makeMessage(initialText, true, initialAttachment?.uri)] : []
+  );
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<string>();
   const [temporaryUI, setTemporaryUI] = useState<ServerTemporaryUI>();
   const [suggestedActions, setSuggestedActions] = useState<Array<{ label: string; tab?: MarketTab; isFeed?: boolean }>>([]);
-  const [collapsed, setCollapsed] = useState(false);
-  const [inputFocused, setInputFocused] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const keyboardInset = useKeyboardSafeInset();
 
   useEffect(() => {
     let cancelled = false;
@@ -82,46 +89,45 @@ export function HomeAssistantSurface({
       }
       return conversationClient.startConversation({
         originType: "HOME",
-        originId: `home_intent_${Date.now().toString(36)}`,
+        originId: "proxy_ai_home",
         participantId: "proxy_ai",
         firstMessage: initialText,
         ...(mode ? { assistantMode: mode } : {}),
         ...(mediaRef ? { mediaRef } : {})
       });
     };
-    void start().then((result) => {
+    void start().then(async (result) => {
       if (cancelled) return;
       const payload = parseOperationRef(result);
-      if (typeof payload?.conversationId === "string") setConversationId(payload.conversationId);
-      appendAIReply(payload, setMessages);
+      if (typeof payload?.conversationId === "string") {
+        setConversationId(payload.conversationId);
+        try {
+          const historyResult = await conversationClient.listMessages(payload.conversationId);
+          if (!cancelled) setMessages(readAssistantHistory(historyResult));
+        } catch {
+          if (!cancelled) appendAIReply(payload, setMessages);
+        }
+      } else {
+        appendAIReply(payload, setMessages);
+      }
       setTemporaryUI(readServerTemporaryUI(payload?.temporaryUI));
       setStatus(statusMessage(payload?.assistantStatus));
+      setStartFailed(false);
     }).catch(() => {
-      if (!cancelled) setStatus("无法连接 Proxy 对话，请检查连接后重试。");
+      if (!cancelled) {
+        setStatus("无法连接 Proxy 对话，请检查连接后重试。");
+        setStartFailed(true);
+      }
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [conversationClient, ensureSession, initialAttachment, initialText, mediaClient, mode]);
+  }, [conversationClient, ensureSession, initialAttachment, initialText, mediaClient, mode, retryNonce]);
 
   useEffect(() => {
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     return () => clearTimeout(timer);
   }, [messages, status]);
-
-  // Home is a discovery surface, not a permanently-open chat screen. Once an
-  // exchange settles and the user is no longer typing, retain the conversation
-  // as a single-line resumable strip instead of continuing to split the feed.
-  // This is deliberately time/intent based; keyboard geometry changes never
-  // drive collapse, which avoids the jumpy behaviour seen on real devices.
-  useEffect(() => {
-    if (!embedded || collapsed || inputFocused || loading || sending || temporaryUI) return;
-    const timer = setTimeout(() => {
-      Keyboard.dismiss();
-      setCollapsed(true);
-    }, 9000);
-    return () => clearTimeout(timer);
-  }, [collapsed, embedded, inputFocused, loading, messages, sending, temporaryUI]);
 
   function handleLocalIntent(text: string): void {
     const t = text.toLowerCase();
@@ -185,50 +191,11 @@ export function HomeAssistantSurface({
     } finally {
       setSending(false);
       Keyboard.dismiss();
-      setInputFocused(false);
     }
-  }
-
-  async function finishEvent(): Promise<void> {
-    if (!conversationId || sending) return;
-    setSending(true);
-    setStatus("正在整理本次事件总结…");
-    try {
-      const result = await conversationClient.sendMessage(
-        conversationId,
-        "请把本次 Home 事件整理成一段简洁总结，包含目标、已确认条件、待确认事项和下一步。",
-        mode
-      );
-      const payload = parseOperationRef(result);
-      if (!payload?.aiMessage) {
-        setStatus("总结暂未生成，请稍后重试完成。");
-        return;
-      }
-      appendAIReply(payload, setMessages);
-      onBack();
-    } catch (error: unknown) {
-      setStatus(chatErrorMessage(error, "事件总结生成失败，请重试。"));
-    } finally {
-      setSending(false);
-    }
-  }
-
-  if (embedded && collapsed) {
-    const lastReply = [...messages].reverse().find((message) => !message.isOwn)?.body;
-    return (
-      <Pressable accessibilityLabel="继续和 Proxy 对话" onPress={() => setCollapsed(false)} style={styles.collapsedBar}>
-        <View style={styles.collapsedMark}><Text style={styles.collapsedMarkText}>P</Text></View>
-        <View style={styles.collapsedCopy}>
-          <Text style={styles.collapsedTitle}>Proxy</Text>
-          <Text numberOfLines={1} style={styles.collapsedPreview}>{lastReply || status || "继续刚才的对话"}</Text>
-        </View>
-        <Text style={styles.collapsedChevron}>›</Text>
-      </Pressable>
-    );
   }
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.root, embedded && styles.embeddedRoot]}>
+    <View style={[styles.root, embedded && styles.embeddedRoot, keyboardInset > 0 && { paddingBottom: keyboardInset }]}>
       {!embedded ? <View style={styles.header}>
         <Pressable accessibilityLabel="返回 Home" onPress={onBack} style={styles.backButton}>
           <Text style={styles.backText}>‹</Text>
@@ -243,11 +210,8 @@ export function HomeAssistantSurface({
             <Text style={styles.embeddedTitle}>Proxy</Text>
           </View>
           <View style={styles.embeddedActions}>
-            <Pressable accessibilityLabel="收起 Home 对话" onPress={() => { Keyboard.dismiss(); setInputFocused(false); setCollapsed(true); }} style={styles.embeddedClose}>
+            <Pressable accessibilityLabel="收起 Home 对话" onPress={() => { Keyboard.dismiss(); onBack(); }} style={styles.embeddedClose}>
               <Text style={styles.embeddedCloseText}>收起</Text>
-            </Pressable>
-            <Pressable accessibilityLabel="总结并结束 Home 会话" disabled={sending || !conversationId} onPress={() => void finishEvent()} style={[styles.embeddedClose, (sending || !conversationId) && styles.disabled]}>
-              <Text style={styles.embeddedCloseText}>{sending ? "总结中…" : "完成"}</Text>
             </Pressable>
           </View>
         </View>
@@ -258,7 +222,9 @@ export function HomeAssistantSurface({
       ) : null}
 
       <ScrollView ref={scrollRef} style={styles.messages} contentContainerStyle={styles.messageContent} keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled">
-        {messages.map((message) => (
+        {messages.map((message) => message.isDivider ? (
+          <View key={message.id} style={styles.timelineDivider}><View style={styles.timelineLine} /><Text style={styles.timelineText}>{message.body}</Text><View style={styles.timelineLine} /></View>
+        ) : (
           <View key={message.id} style={[styles.bubble, message.isOwn ? styles.userBubble : styles.aiBubble]}>
             {message.attachmentUri ? <Image accessibilityLabel="会话照片" source={{ uri: message.attachmentUri }} style={styles.messageImage} /> : null}
             {!message.isOwn ? <Text style={styles.sender}>Proxy AI</Text> : null}
@@ -270,7 +236,11 @@ export function HomeAssistantSurface({
         {suggestedActions.length > 0 ? (
           <View style={styles.suggestedRow}>
             {suggestedActions.map((a) => (
-              <Pressable key={a.label} onPress={() => { if (a.isFeed && onOpenFeed) onOpenFeed(); else if (a.label.includes("小美") && onOpenXiaomei) onOpenXiaomei(); else if (a.tab) onOpenMarket?.(a.tab); }} style={styles.suggestedPill}>
+              // 优先级：显式目标（动态/市场 Tab）优先；小美回调只在没有
+              // 明确目标时兜底——之前“看小美机会”被 label 分支截胡，
+              // 只关窗口、进不了市场（调用方 onOpenXiaomei 仅关闭）。
+              // 都没有 handler 则收起建议条，不留死按钮。
+              <Pressable key={a.label} onPress={() => { if (a.isFeed && onOpenFeed) onOpenFeed(); else if (a.tab && onOpenMarket) onOpenMarket(a.tab); else if (a.label.includes("小美") && onOpenXiaomei) onOpenXiaomei(); else setSuggestedActions([]); }} style={styles.suggestedPill}>
                 <Text style={styles.suggestedText}>{a.label}</Text>
               </Pressable>
             ))}
@@ -281,15 +251,22 @@ export function HomeAssistantSurface({
         ) : null}
         {loading ? <View style={styles.systemPill}><Text style={styles.systemText}>正在理解你的意图…</Text></View> : null}
         {status ? <View style={styles.statusBox}><Text style={styles.statusText}>{status}</Text></View> : null}
+        {startFailed && !conversationId && !loading ? (
+          <Pressable
+            onPress={() => { setStartFailed(false); setLoading(true); setRetryNonce((n) => n + 1); }}
+            style={[styles.suggestedPill]}
+            accessibilityLabel="重试连接"
+          >
+            <Text style={styles.suggestedText}>↻ 重试连接</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
-      <View style={styles.composer}>
+      {!externalComposer ? <View style={styles.composer}>
         <TextInput
           editable={Boolean(conversationId) && !sending}
           multiline
           onChangeText={setDraft}
-          onBlur={() => setInputFocused(false)}
-          onFocus={() => { setInputFocused(true); setCollapsed(false); }}
           onSubmitEditing={() => void send()}
           placeholder={conversationId ? "输入 挑选小美 / 活动 / 机会 / 状态 试试…" : "连接中…"}
           placeholderTextColor="#A9A2B0"
@@ -299,8 +276,8 @@ export function HomeAssistantSurface({
         <Pressable disabled={!draft.trim() || !conversationId || sending} onPress={() => void send()} style={[styles.sendButton, (!draft.trim() || !conversationId || sending) && styles.disabled]}>
           <Text style={styles.sendText}>{sending ? "…" : "↑"}</Text>
         </Pressable>
-      </View>
-    </KeyboardAvoidingView>
+      </View> : null}
+    </View>
   );
 }
 
@@ -317,6 +294,28 @@ function makeMessage(body: string, isOwn: boolean, attachmentUri?: string): Assi
 function parseOperationRef(result: Record<string, unknown>): Record<string, unknown> | undefined {
   if (typeof result.operationRef !== "string") return undefined;
   try { return JSON.parse(result.operationRef) as Record<string, unknown>; } catch { return undefined; }
+}
+
+function readAssistantHistory(result: Record<string, unknown>): AssistantMessage[] {
+  const payload = parseOperationRef(result);
+  const rows = Array.isArray(payload?.messages) ? payload.messages : [];
+  const actorId = typeof payload?.actorId === "string" ? payload.actorId : "";
+  return rows.flatMap((value): AssistantMessage[] => {
+    if (!value || typeof value !== "object") return [];
+    const row = value as Record<string, unknown>;
+    const body = typeof row.body === "string" ? row.body : "";
+    const messageType = typeof row.messageType === "string" ? row.messageType : "TEXT";
+    const isDivider = messageType === "SYSTEM_CONTEXT" && row.senderId === "SYSTEM";
+    if (!body && !isDivider) return [];
+    return [{
+      id: typeof row.messageId === "string" ? row.messageId : `history_${Math.random().toString(36).slice(2)}`,
+      body: body || "新的 Home 对话",
+      isOwn: row.senderId === actorId,
+      isAI: row.senderId === "proxy_ai",
+      isDivider,
+      time: typeof row.createdAt === "string" ? new Date(row.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : ""
+    }];
+  });
 }
 
 function appendAIReply(payload: Record<string, unknown> | undefined, setMessages: React.Dispatch<React.SetStateAction<AssistantMessage[]>>): void {
@@ -342,19 +341,15 @@ function statusMessage(value: unknown): string | undefined {
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.offWhite, flex: 1 },
-  embeddedRoot: { borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 0, height: 520, overflow: "hidden", ...shadows.card },
+  embeddedRoot: { borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 0, height: 350, overflow: "hidden", ...shadows.card },
   embeddedHeader: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 11 },
+  timelineDivider: { alignItems: "center", flexDirection: "row", gap: 8, marginVertical: 7 },
+  timelineLine: { backgroundColor: color.line, flex: 1, height: StyleSheet.hairlineWidth },
+  timelineText: { color: color.muted, fontSize: 11, fontWeight: "700" },
   embeddedTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   embeddedActions: { alignItems: "center", flexDirection: "row", gap: 7 },
   embeddedClose: { backgroundColor: color.surface, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 6 },
   embeddedCloseText: { color: color.ink, fontSize: 11, fontWeight: "800" },
-  collapsedBar: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 12, paddingHorizontal: 12, paddingVertical: 9, ...shadows.card },
-  collapsedMark: { alignItems: "center", backgroundColor: color.ink, borderRadius: 15, height: 30, justifyContent: "center", width: 30 },
-  collapsedMarkText: { color: color.white, fontSize: 12, fontWeight: "900" },
-  collapsedCopy: { flex: 1, minWidth: 0 },
-  collapsedTitle: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  collapsedPreview: { color: color.muted, fontSize: 11, marginTop: 1 },
-  collapsedChevron: { color: color.muted, fontSize: 20, fontWeight: "800" },
   header: { alignItems: "center", backgroundColor: color.white, borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
   backButton: { alignItems: "center", height: 32, justifyContent: "center", width: 30 },
   backText: { color: color.ink, fontSize: 26, lineHeight: 30 },

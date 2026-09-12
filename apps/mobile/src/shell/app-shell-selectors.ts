@@ -10,6 +10,10 @@ export type MeTabView = "guest" | "voucher" | "me";
 export function selectShellChromeVisible(input: {
   tab: "HOME" | "MARKET" | "FEED" | "MESSAGES" | "ME";
   feedChromeVisible: boolean;
+  /** HOME 主信息流的滑动显隐信号（可选：未接线时 HOME 保持常显，向后兼容）。 */
+  homeChromeVisible?: boolean;
+  /** MESSAGES 收件箱的滑动显隐信号（可选：未接线时 MESSAGES 保持常显，向后兼容）。 */
+  messageChromeVisible?: boolean;
   feedChatOpen: boolean;
   feedPrefsOpen: boolean;
   /**
@@ -23,8 +27,13 @@ export function selectShellChromeVisible(input: {
 }): boolean {
   // 1:1 conversation overlay is a fullscreen takeover — hide chrome.
   if (input.messageChatOpen) return false;
-  // R15.33: MAP tab 撤了；底栏一直可见。
-  if (input.tab !== "FEED") return true;
+  // R15.33: MAP tab 撤了；不可滚动的 tab 底栏一直可见。
+  // Feed + Market 列表滚动驱动显隐（下滑隐藏、上滑恢复），与其余 tab 无关。
+  // HOME / MESSAGES 与动态同一套滑动显隐（chrome-parity）：信号由各自
+  // Surface 上报；optional 未接线时保持常显（旧调用兼容）。
+  if (input.tab === "HOME") return input.homeChromeVisible ?? true;
+  if (input.tab === "MESSAGES") return input.messageChromeVisible ?? true;
+  if (input.tab !== "FEED" && input.tab !== "MARKET") return true;
   if (input.feedChatOpen || input.feedPrefsOpen) return true;
   return input.feedChromeVisible;
 }

@@ -12,7 +12,9 @@ export function opportunityAsPost(opportunity: MarketOpportunity, index: number,
     postId: `market_opportunity:${opportunity.id}`,
     authorType: opportunity.ownerType === "BUSINESS" ? "MERCHANT" : "USER",
     authorId: `market_owner:${opportunity.owner}`,
-    authorDisplayName: opportunity.owner,
+    // FEED-OWN-001: 服务端个人机会 Owner 恒为写死的 "你"；viewer 相对标签
+    // 绝不带进合成帖——读端按 author id 判定归属、无名按中性兜底展示。
+    ...(opportunity.owner && opportunity.owner !== "你" ? { authorDisplayName: opportunity.owner } : {}),
     body: `${opportunity.title}\n${opportunity.date} ${opportunity.time} · ${opportunity.location} · ${opportunity.price}`,
     mediaRefs: [],
     visibility: "PUBLIC",

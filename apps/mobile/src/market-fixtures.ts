@@ -101,6 +101,8 @@ export interface MarketOpportunity {
   price: string;
   moneyFlow: MarketOpportunityMoneyFlow;
   priceLabel: string;
+  // R58 demand notes (optional, server-capped at 500 runes).
+  desc?: string;
   owner: string;
   ownerType: "BUSINESS" | "PERSON";
   match: string;

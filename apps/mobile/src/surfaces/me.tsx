@@ -6,7 +6,7 @@
 // 视觉基线：Proxy_P0_Prototype_R15_12_7_Market_Map_Parity_Freeze.html
 // （renderRequesterMe / renderBusinessMe / contextline），
 // 切换 Sheet 由 App Shell 共享渲染（ContextSwitcherSheet）。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Linking, Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { useModuleBackHandler } from "../components/module-back";
 import { SwipeBackShell } from "../architecture/swipe-back";
@@ -14,10 +14,13 @@ import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import { Directory, File, Paths } from "expo-file-system";
-import { createProfileStore, DEFAULT_PROFILE, avatarFileName, type ProfileRecord } from "../profile-store";
+import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
+import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
+import { createLastSignInStore } from "../last-signin-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
+import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { CreatorInvitationCard } from "./creator-application";
@@ -39,6 +42,7 @@ import type { MyScene, MySceneInvitation, SceneClient } from "../scene-client";
 import type { BusinessClient } from "../business-client";
 import type { ActivityClient } from "../activity-client";
 import type { ProfileClient } from "../profile-client";
+import type { MediaClient } from "../media-client";
 import type { RelationshipClient } from "../relationship-client";
 import type { SocialSettingsClient } from "../social-settings-client";
 import type { SupplyClient } from "../supply-client";
@@ -58,12 +62,50 @@ import { styles } from "./me-styles";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
-const profileStore = createProfileStore(nativeSecureStorageDriver);
+const lastSignInStore = createLastSignInStore(nativeSecureStorageDriver);
 const socialSettingsStore = createSocialSettingsStore(nativeSecureStorageDriver);
 
 const PROFILE_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
 function nextProfileAvatarFile(): File {
   return new File(PROFILE_AVATAR_DIR, `avatar-${Date.now()}.jpg`);
+}
+
+// AVATAR-FLASH-001: 首帧就给出本机最新头像。hydration 是异步的，若首帧
+// profileAvatarUri 为 undefined，会先渲染字母头/占位再被异步结果刷掉——用户看到的
+// 就是「切页回来先闪旧头再变新头」。expo-file-system 的 list()/File 是同步 API，
+// 因此可以在 useState 初值里直接取到最新副本，消除这一跳。
+function initialProfileAvatarUri(): string | undefined {
+  try {
+    // 注意：不要用 `instanceof File` 过滤 list() 元素（真机上类身份可能对不上，
+    // 一旦滤空就回落字母头，等于没修）。与 hydration 同款：只信 name。
+    const names = PROFILE_AVATAR_DIR.list()
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith("avatar-"))
+      .sort();
+    const newest = names.at(-1);
+    return newest ? new File(PROFILE_AVATAR_DIR, newest).uri : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// AVATAR-GC-001: 换头像只留最新一份副本。此前每次选图都新建 avatar-<ts>.jpg，
+// 只增不删（真机实测堆到 23 份）。prune 只删 avatar-* 且不是本次保留的那份，
+// 单个删除失败不影响主链。
+function pruneProfileAvatars(keepName: string): void {
+  try {
+    for (const name of PROFILE_AVATAR_DIR.list().map((entry) => entry.name)) {
+      if (name.startsWith("avatar-") && name !== keepName) {
+        try {
+          new File(PROFILE_AVATAR_DIR, name).delete();
+        } catch {
+          // 单个文件删除失败（被占用等）不阻塞换头像。
+        }
+      }
+    }
+  } catch {
+    // 目录不可读：跳过清理，不影响本次换头像。
+  }
 }
 
 interface PersonaConfig {
@@ -228,6 +270,7 @@ export function MeSurface({
   viewerAccountId,
   socialSettingsClient,
   profileClient,
+  mediaClient,
   relationshipClient,
 }: {
   context: ActiveContext;
@@ -248,6 +291,7 @@ export function MeSurface({
   business?: BusinessClient;
   supply?: SupplyClient;
   profileClient?: ProfileClient | undefined;
+  mediaClient?: MediaClient | undefined;
   relationshipClient?: RelationshipClient | undefined;
   activities?: ActivityClient | undefined;
   engagement?: EngagementClient;
@@ -255,12 +299,20 @@ export function MeSurface({
   socialSettingsClient?: SocialSettingsClient | undefined;
   onOpenSearch?: ((query: string) => void) | undefined;
 }): React.JSX.Element {
+  // PROFILE-READ-001: profile storage is scoped per account. The module
+  // singleton cannot be used: two accounts on one device must never share
+  // a name/handle.
+  const profileStore = useMemo(
+    () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
+    [viewerAccountId]
+  );
   const [subPage, setSubPage] = useState<MeSubPage>();
   useModuleBackHandler(subPage ? () => { setSubPage(undefined); return true; } : undefined);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [myScenes, setMyScenes] = useState<MyScene[]>([]);
   const [myInvitations, setMyInvitations] = useState<MySceneInvitation[]>([]);
   const [invitationBusyId, setInvitationBusyId] = useState<string>();
+  const [invitationError, setInvitationError] = useState<string | undefined>(undefined);
   const [memoriesLoadState, setMemoriesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   useEffect(() => {
     if (subPage?.route !== "myscenes" || !scene) return;
@@ -311,7 +363,29 @@ export function MeSurface({
   // fake verified badge entirely.
   const merchantIdentity = useMerchantIdentity();
   const liveShopName = merchantIdentity.accounts[0]?.name;
-  const [enterpriseOpsAssets, setEnterpriseOpsAssets] = useState(3);
+  // 现实资料：之前两个按钮只 count+1，素材数组写死 3 项，超限后点按无变化、
+  // 也从不打开 picker。现在存真实条目（label+uri），拍照/上传都走 ImagePicker，
+  // 列表随条目增长，无静默上限。
+  const [enterpriseAssets, setEnterpriseAssets] = useState<Array<{ label: string; uri?: string }>>([
+    { label: "店门" },
+    { label: "菜单" },
+    { label: "品牌资料" },
+  ]);
+  const [enterpriseAssetError, setEnterpriseAssetError] = useState<string | undefined>(undefined);
+  async function addEnterpriseAsset(kind: "photo" | "file"): Promise<void> {
+    setEnterpriseAssetError(undefined);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setEnterpriseAssetError(kind === "photo" ? "请允许 Proxy 使用相机/照片才能拍店铺。" : "请允许 Proxy 读取照片才能上传文件。");
+      return;
+    }
+    const result = kind === "photo"
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8, selectionLimit: 1 });
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (!asset?.uri) return;
+    setEnterpriseAssets((prev) => [...prev, { label: kind === "photo" ? `实拍 ${prev.length + 1}` : `文件 ${prev.length + 1}`, uri: asset.uri }]);
+  }
   const [abilities, setAbilities] = useState<AbilityInstance[]>(DEFAULT_ABILITIES);
   const [abilitySheet, setAbilitySheet] = useState<{ mode: "ADD" | "EDIT"; type: AbilityType; id?: string }>();
   const [availabilityPanel, setAvailabilityPanel] = useState<"ABILITIES" | "CALENDAR">("ABILITIES");
@@ -327,12 +401,20 @@ export function MeSurface({
   const [insightsSheetOpen, setInsightsSheetOpen] = useState(false);
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // 主页实搜：搜自己主页动态正文，结果可点开（之前输入直接丢弃）。
+  const [profileSearchResults, setProfileSearchResults] = useState<FeedPost[] | undefined>(undefined);
+  function runProfileSearch(query: string): void {
+    const q = query.trim().toLowerCase();
+    if (!q) return;
+    setProfileSearchResults(profilePosts.filter((post) => post.body.toLowerCase().includes(q)));
+  }
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [aiIdentityOpen, setAiIdentityOpen] = useState(false);
   const [personalReplyPosts, setPersonalReplyPosts] = useState<FeedPost[]>([]);
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
   const [personalTaggedPosts, setPersonalTaggedPosts] = useState<FeedPost[]>([]);
   const [personalPinnedIds, setPersonalPinnedIds] = useState<ReadonlyArray<string>>([]);
+  const [likeError, setLikeError] = useState<string | undefined>(undefined);
   const [personalFollowCounts, setPersonalFollowCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
   const viewingProfileId = viewerAccountId;
   const isSelfProfile = true;
@@ -349,13 +431,18 @@ export function MeSurface({
   // 关注数没拉到之前也是未知不是零。
   const dash = (n: number | undefined): string => (n === undefined ? "—" : String(n));
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
-  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(undefined);
+  // 资料保存失败必须留编辑器内提示，不静默吞掉（本地写失败/服务端同步失败都一样）。
+  const [profileSaveError, setProfileSaveError] = useState<string | undefined>(undefined);
+  // AVATAR-FLASH-001: 初值直接取本机最新头像（同步），避免首帧闪旧头再刷成新头。
+  const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(() => initialProfileAvatarUri());
+  const [profileRemoteAvatarPath, setProfileRemoteAvatarPath] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
   const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
   const [profileMediaPositions, setProfileMediaPositions] = useState<Record<string, number>>({});
   const [profileViewer, setProfileViewer] = useState<{ postId: string; index: number }>();
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>(INITIAL_SOCIAL_ACCOUNTS);
   const [socialEditor, setSocialEditor] = useState<SocialAccount>();
+  const [socialOpenError, setSocialOpenError] = useState<string | undefined>(undefined);
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
   const [collaboration, setCollaboration] = useState({ enabled: false, types: ["探店", "UGC"], rate: "", contact: "" });
   const socialSettingsHydrated = useRef(false);
@@ -364,40 +451,116 @@ export function MeSurface({
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
   const [profileDraft, setProfileDraft] = useState({
-    name: DEFAULT_PROFILE.name,
-    handle: DEFAULT_PROFILE.handle,
-    bio: DEFAULT_PROFILE.bio,
-    city: DEFAULT_PROFILE.city
+    name: NEUTRAL_PROFILE.name,
+    handle: NEUTRAL_PROFILE.handle,
+    bio: NEUTRAL_PROFILE.bio,
+    city: NEUTRAL_PROFILE.city
   });
   const profileHydratedRef = useRef(false);
+  const profileHydratedForRef = useRef<string | undefined>(undefined);
   const profileTouchedRef = useRef(false);
   useEffect(() => {
-    if (profileHydratedRef.current) return;
+    // PROFILE-READ-001 hydration order (first writer wins per account):
+    // 1. server profile (source of truth once the user has saved);
+    // 2. this account's local record;
+    // 3. derived from this account's own login identifier;
+    // 4. neutral label (never the hardcoded demo identity).
+    if (profileHydratedRef.current && profileHydratedForRef.current === viewerAccountId) return;
+    // A session/account transition is a hard identity boundary. Clear the
+    // previous account's visual state before any async source resolves.
+    profileTouchedRef.current = false;
+    profileHydratedRef.current = false;
+    profileHydratedForRef.current = viewerAccountId;
+    setProfileDraft({ ...NEUTRAL_PROFILE });
+    setProfileAvatarUri(undefined);
+    setProfileRemoteAvatarPath(undefined);
     let cancelled = false;
-    void profileStore.read().then((record) => {
-      if (cancelled || profileTouchedRef.current || !record) return;
-      profileHydratedRef.current = true;
-      setProfileDraft({ name: record.name, handle: record.handle, bio: record.bio, city: record.city });
-      // AVATAR-001: 文件名按当前沙盒重锚 + 存在性校验（v57 File 没有
-      // exists API，用目录 listing 判）。之前 `file.exists` 恒 falsy，
-      // 每次冷启动都丢头像只剩字母头。读到老绝对路径则后台回写规范化。
-      if (record.avatarPath) {
+    void (async () => {
+      const applyRecord = (record: { name: string; handle: string; bio: string; city: string; avatarPath?: string | undefined }): void => {
+        if (cancelled || profileTouchedRef.current) return;
+        profileHydratedRef.current = true;
+        profileHydratedForRef.current = viewerAccountId;
+        setProfileDraft({ name: record.name, handle: record.handle, bio: record.bio, city: record.city });
+      };
+      const hydrateRemoteAvatar = (avatarPath?: string | undefined): boolean => {
+        if (cancelled || !avatarPath?.startsWith("assets/")) return false;
+        const mediaAssetId = avatarPath.slice("assets/".length).trim();
+        if (mediaAssetId === "" || mediaAssetId.startsWith("avatar-")) return false;
+        setProfileRemoteAvatarPath(avatarPath);
+        setProfileAvatarUri(`${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(mediaAssetId)}`);
+        return true;
+      };
+      // AVATAR-DELIVER-001: 返回是否命中本地副本。本机有副本时**优先**用它——
+      // 服务端副本受可见性约束（上传默认 OWNER_ONLY，公开 thumb 路由要求 PUBLIC，
+      // 命中不了就 404），远端取不到时头像绝不能被表现成「被重置」。
+      const hydrateAvatar = (avatarPath?: string | undefined, record?: ProfileRecord): boolean => {
+        if (cancelled || !avatarPath) return false;
         try {
-          const name = avatarFileName(record.avatarPath);
+          const name = avatarFileName(avatarPath);
           const names = new Set(PROFILE_AVATAR_DIR.list().map((entry) => entry.name));
           if (names.has(name)) {
             setProfileAvatarUri(new File(PROFILE_AVATAR_DIR, name).uri);
-            if (record.avatarPath !== name) {
+            if (record && record.avatarPath !== name) {
               void profileStore.write({ ...record, avatarPath: name }).catch(() => undefined);
             }
+            return true;
           }
         } catch {
           // 目录不可读：保持字母头，不崩。
         }
+        return false;
+      };
+      // 1. server (PROFILE-001 source of truth).
+      if (profileClient && viewerAccountId) {
+        try {
+          const remote = await profileClient.getProfile(viewerAccountId);
+          if (cancelled || profileTouchedRef.current) return;
+          // AVATAR-SAVE-002: 本地副本文件名优先保留（见 mergeRemoteProfile）——
+          // 服务端 avatarPath 是 assets/<mediaAssetId>，直接当本机文件名写会把
+          // documentDirectory 里的头像指针抹掉，表现为「换完头像被默认重置」。
+          const existingRecord = await profileStore.read().catch(() => undefined);
+          const record: ProfileRecord = mergeRemoteProfile(remote, existingRecord);
+          await profileStore.write(record).catch(() => undefined);
+          applyRecord(record);
+          if (!hydrateAvatar(record.avatarPath)) hydrateRemoteAvatar(remote.avatarPath);
+          return;
+        } catch {
+          // No server profile yet (fresh account) or offline: fall through
+          // to local sources instead of blocking the page.
+        }
       }
-    }).catch(() => undefined);
+      // 2. this account's local record.
+      try {
+        const record = await profileStore.read();
+        if (record) {
+          applyRecord(record);
+          setProfileRemoteAvatarPath(undefined);
+          hydrateAvatar(record.avatarPath, record);
+          return;
+        }
+      } catch {
+        // fall through
+      }
+      // Never adopt the old device-global profile here. lastSignIn already
+      // points at the newly authenticated account, so it cannot prove who
+      // owned that legacy record and previously leaked Huyen into newcomers.
+      // 3. derive from this account's own login identifier.
+      try {
+        const remembered = await lastSignInStore.read().catch(() => undefined);
+        const owned = remembered && (!viewerAccountId || remembered.userAccountId === viewerAccountId)
+          ? remembered
+          : undefined;
+        const derived = deriveProfileFromIdentifier(owned?.identifier, owned?.channel);
+        const record: ProfileRecord = { ...derived, avatarPath: undefined, updatedAt: new Date().toISOString() };
+        // Cache per account so composer/status publish the same truthful name.
+        if (viewerAccountId) await profileStore.write(record).catch(() => undefined);
+        applyRecord(record);
+      } catch {
+        applyRecord(NEUTRAL_PROFILE);
+      }
+    })();
     return () => { cancelled = true; };
-  }, []);
+  }, [profileClient, viewerAccountId, profileStore]);
 
   useEffect(() => {
     let cancelled = false;
@@ -542,7 +705,7 @@ export function MeSurface({
   }
 
   if (subPage?.route === "friendcrm") {
-    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
+    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
     return (
@@ -638,7 +801,11 @@ export function MeSurface({
 
   async function chooseProfileAvatar(): Promise<void> {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
+    if (!permission.granted) {
+      setProfileSaveError("请允许 Proxy 读取照片才能换头像。");
+      setProfileEditorOpen(true);
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsEditing: true,
       aspect: [1, 1],
@@ -655,21 +822,52 @@ export function MeSurface({
       await new File(selected.uri).copy(avatarFile, { overwrite: true });
       profileTouchedRef.current = true;
       profileHydratedRef.current = true;
+      setProfileRemoteAvatarPath(undefined);
       setProfileAvatarUri(avatarFile.uri);
-      await profileStore.write({
+      const localRecord: ProfileRecord = {
         ...profileDraft,
         // AVATAR-001: 只存文件名。绝对 file:// URI 含沙盒 container UUID，
         // 重装 App 后必死；读时按当前 documentDirectory 重锚。
         avatarPath: avatarFileName(avatarFile.uri),
         updatedAt: new Date().toISOString()
-      });
-    } catch {
+      };
+      await profileStore.write(localRecord);
+      // AVATAR-GC-001: 只保留本次这份副本，避免旧头像文件无限堆积。
+      pruneProfileAvatars(avatarFileName(avatarFile.uri));
+      // Avatar controls also exist outside the profile editor. Selecting a
+      // photo is therefore a complete action: upload and sync immediately,
+      // rather than requiring a hidden second "完成" step.
+      if (mediaClient && profileClient) {
+        try {
+          const uploaded = await mediaClient.uploadImage({
+            uri: avatarFile.uri,
+            mimeType: selected.mimeType ?? "image/jpeg",
+            width: selected.width,
+            height: selected.height
+          });
+          const remotePath = `assets/${uploaded.mediaAssetId}`;
+          await profileClient.updateProfile({ ...profileDraft, avatarPath: remotePath });
+          setProfileRemoteAvatarPath(remotePath);
+          setProfileSaveError(undefined);
+        } catch {
+          setProfileSaveError("头像已保存在本机，但同步失败，请检查网络后重试。");
+        }
+      }
+    } catch (err) {
+      // AVATAR-SAVE-001: 这里以前是静默 `catch { setProfileAvatarUri(selected.uri) }`
+      // —— 相册原 URI 只在本进程有效（且 iOS 会清 tmp），一旦落盘失败：头像看着
+      // 变了、其实没写进 documentDirectory / SecureStore，离开页面或重启就回到
+      // 字母头，而且**没有任何报错**，用户和测试都看不见。现在：保留预览，同时
+      // 把真实原因报出来，并且不再假装保存成功。
+      const detail = err instanceof Error ? err.message : String(err);
+      console.log(`[proxy.AVATAR-SAVE-001] local avatar persist FAIL: ${detail}`);
       setProfileAvatarUri(selected.uri);
+      setProfileSaveError(`头像没能保存到本机（${detail}）。请重试，或检查存储权限。`);
     }
   }
 
   async function saveProfile(): Promise<void> {
-    let avatarPath: string | undefined;
+    setProfileSaveError(undefined);
     let localAvatarFileName: string | undefined;
     if (profileAvatarUri?.startsWith(PROFILE_AVATAR_DIR.uri)) {
       // AVATAR-001: 同上，只存文件名。
@@ -693,7 +891,21 @@ export function MeSurface({
     // an 'assets/' or 'ai-personas/' prefix (isValidProfileAssetPath).
     // Local SecureStore keeps the bare filename for the on-device
     // read-back path; the wire path prepends the canonical prefix.
-    const wireAvatarPath = localAvatarFileName ? `assets/${localAvatarFileName}` : "";
+    let wireAvatarPath = profileRemoteAvatarPath ?? "";
+    if (localAvatarFileName && profileAvatarUri?.startsWith("file:") && !wireAvatarPath) {
+      if (!mediaClient) {
+        setProfileSaveError("头像上传服务暂不可用，请稍后重试。");
+        return;
+      }
+      try {
+        const uploaded = await mediaClient.uploadImage({ uri: profileAvatarUri, mimeType: "image/jpeg", width: 0, height: 0 });
+        wireAvatarPath = `assets/${uploaded.mediaAssetId}`;
+        setProfileRemoteAvatarPath(wireAvatarPath);
+      } catch {
+        setProfileSaveError("头像上传失败，请检查网络后重试。");
+        return;
+      }
+    }
     const record: ProfileRecord = {
       name: profileDraft.name,
       handle: profileDraft.handle,
@@ -705,6 +917,8 @@ export function MeSurface({
     try {
       await profileStore.write(record);
     } catch {
+      // 本地都没写进去：编辑器保持打开并提示，不假装保存成功。
+      setProfileSaveError("本地保存失败，资料没有更新，请重试。");
       return;
     }
     // R18.x PROFILE-001: send the edit to the server. Local
@@ -721,9 +935,9 @@ export function MeSurface({
           avatarPath: wireAvatarPath,
         });
       } catch {
-        // Server write failure is non-fatal for the local edit
-        // (the user can retry). The local cache still has the
-        // new record; an outbox/queue handler can re-sync.
+        // 服务端同步失败：本地已更新但云端没跟上，明确告诉用户可重试，
+        // 编辑器保持打开，不假装全部成功。
+        setProfileSaveError("已保存到本机，但同步到服务端失败，请稍后点完成重试。");
         return;
       }
     }
@@ -747,12 +961,17 @@ export function MeSurface({
       async function respond(invitationId: string, decision: "ACCEPTED" | "DECLINED" | "ASK"): Promise<void> {
         if (!scene || invitationBusyId) return;
         setInvitationBusyId(invitationId);
+        setInvitationError(undefined);
         try {
           const result = await scene.respondInvitation(invitationId, decision);
           const status = (result.aggregate?.state ?? decision) as MySceneInvitation["status"];
           let orderRef: string | undefined;
           if (result.operationRef) { try { orderRef = (JSON.parse(result.operationRef) as { orderRef?: string }).orderRef; } catch { orderRef = undefined; } }
           setMyInvitations((rows) => rows.map((row) => row.invitationId === invitationId ? { ...row, status, ...(orderRef ? { orderRef } : {}) } : row));
+        } catch (error) {
+          // 回应失败：之前 void 调用直接变 unhandled rejection，按钮还解了锁。
+          // 现在错误留在页内，邀请状态不动，可重试。
+          setInvitationError(error instanceof Error ? error.message : "回应没有提交成功，请重试。");
         } finally { setInvitationBusyId(undefined); }
       }
       return contentWrapper(
@@ -768,6 +987,7 @@ export function MeSurface({
             </View>
             <View style={styles.fallbackSection}><View style={styles.detailSectionHead}><Text style={styles.detailSectionTitle}>收到的真人邀请</Text></View>
               {myInvitations.length === 0 ? <View style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>还没有收到邀请</Text></View> : myInvitations.map((row) => <View key={row.invitationId} style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>{row.card.what ?? "场景邀请"}</Text><Text style={styles.prototypeCardDesc}>{row.card.where ?? "地点待确认"} · {row.card.when ?? "时间待确认"}</Text><Text style={styles.prototypeCardDesc}>{row.plannedBudget ? `${row.plannedBudget.toLocaleString()} ${row.currency || "VND"}` : "金额待双方确认"} · {row.status}</Text>{row.orderRef ? <Text style={styles.prototypeCardDesc}>已生成订单 · {row.orderRef}</Text> : null}{row.status === "PENDING" ? <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "ACCEPTED")} style={styles.lightCta}><Text style={styles.lightCtaText}>接受</Text></Pressable><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "ASK")} style={styles.lightCta}><Text style={styles.lightCtaText}>询问</Text></Pressable><Pressable disabled={invitationBusyId === row.invitationId} onPress={() => void respond(row.invitationId, "DECLINED")} style={styles.lightCta}><Text style={styles.lightCtaText}>拒绝</Text></Pressable></View> : null}</View>)}
+            {invitationError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{invitationError}</Text> : null}
             </View>
             <View style={styles.fallbackSection}>
               <View style={styles.detailSectionHead}>
@@ -836,8 +1056,6 @@ export function MeSurface({
               onRetentionChange={setSecurityRetention}
               screenshotWarnEnabled={screenshotWarn}
               onToggleScreenshotWarn={setScreenshotWarn}
-              onManageIdentities={() => setSubPage(undefined)}
-              onManageDevices={() => setSubPage(undefined)}
             />
             <Text style={[styles.appBehaviorTitle, { marginTop: 24 }]}>应用行为检查</Text>
             {checks.map(([title, desc], index) => (
@@ -942,9 +1160,10 @@ export function MeSurface({
                 <View style={styles.socialEditorHead}><Text style={styles.socialEditorTitle}>{socialEditor.name}</Text><Pressable onPress={() => setSocialEditor(undefined)} style={styles.socialEditorClose}><Text style={styles.socialEditorCloseText}>×</Text></Pressable></View>
                 <Text style={styles.socialEditorNote}>账号和主页链接用于跳转外部平台。展示范围可单独控制。</Text>
                 <Text style={styles.socialEditorLabel}>账号</Text><TextInput onChangeText={(handle) => setSocialEditor((current) => current ? { ...current, handle } : current)} style={styles.socialEditorInput} value={socialEditor.handle} />
-                <Text style={styles.socialEditorLabel}>主页链接</Text><TextInput autoCapitalize="none" keyboardType="url" onChangeText={(url) => setSocialEditor((current) => current ? { ...current, url } : current)} style={styles.socialEditorInput} value={socialEditor.url} />
+                <Text style={styles.socialEditorLabel}>主页链接</Text><TextInput autoCapitalize="none" keyboardType="url" onChangeText={(url) => { setSocialOpenError(undefined); setSocialEditor((current) => current ? { ...current, url } : current); }} style={styles.socialEditorInput} value={socialEditor.url} />
                 <Text style={styles.socialEditorLabel}>谁可以看到</Text><View style={styles.socialVisibilityRow}>{(["仅自己", "商家可见", "公开展示"] as const).map((visibility) => <Pressable key={visibility} onPress={() => setSocialEditor((current) => current ? { ...current, visibility } : current)} style={[styles.socialVisibilityButton, socialEditor.visibility === visibility ? styles.socialVisibilityButtonOn : null]}><Text style={[styles.socialVisibilityText, socialEditor.visibility === visibility ? styles.socialVisibilityTextOn : null]}>{visibility}</Text></Pressable>)}</View>
-                <Pressable disabled={!socialEditor.url} onPress={() => { const url = socialEditor.url.trim(); if (url) void Linking.openURL(/^https?:\/\//i.test(url) ? url : `https://${url}`).catch(() => undefined); }} style={styles.socialOpenLink}><Text style={styles.socialOpenLinkText}>打开外部主页</Text><Text style={styles.socialOpenLinkText}>↗</Text></Pressable>
+                <Pressable disabled={!socialEditor.url} onPress={() => { const url = socialEditor.url.trim(); if (url) void Linking.openURL(/^https?:\/\//i.test(url) ? url : `https://${url}`).catch(() => setSocialOpenError("外部主页打不开，请检查链接后重试。")); }} style={styles.socialOpenLink}><Text style={styles.socialOpenLinkText}>打开外部主页</Text><Text style={styles.socialOpenLinkText}>↗</Text></Pressable>
+                {socialOpenError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{socialOpenError}</Text> : null}
                 <Pressable onPress={() => { setSocialAccounts((current) => current.map((account) => account.key === socialEditor.key ? socialEditor : account)); setSocialEditor(undefined); }} style={styles.socialSave}><Text style={styles.socialSaveText}>保存</Text></Pressable>
               </Pressable> : null}
             </Pressable>
@@ -1087,7 +1306,6 @@ export function MeSurface({
                 </View>
               </View>
             </ScrollView>
-            <AvRuleSheet onClose={() => setAvRuleSheetOpen(false)} onSave={setAvRule} open={avRuleSheetOpen} rule={avRule} />
             {avDaySheet ? <AvDaySheet day={avDaySheet} key={avDaySheet.key} onClose={() => setAvDaySheet(undefined)} onSet={(key, override) => setAvOverrides((prev) => { const next = { ...prev }; if (override) next[key] = override; else delete next[key]; return next; })} rule={avRule} /> : null}
           </View>
         );
@@ -1156,6 +1374,8 @@ export function MeSurface({
               sheet={abilitySheet}
             />
           ) : null}
+          {/* 状态规则表全局挂载：hub 头像旁状态点与 available 页编辑按钮共用。
+              之前只挂在 available 子页，hub 上点状态点毫无反应。 */}
           <AvRuleSheet onClose={() => setAvRuleSheetOpen(false)} onSave={setAvRule} open={avRuleSheetOpen} rule={avRule} />
           {avDaySheet ? (
             <AvDaySheet
@@ -1185,18 +1405,18 @@ export function MeSurface({
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text style={styles.subPageTitle}>钱包与结算</Text>
-            <Text style={styles.subPageDesc}>只展示 Proxy 真正经手或需要记录的资金状态。</Text>
+            <Text style={styles.subPageDesc}>只展示 Proxy 真正经手或需要记录的资金状态。账本接口未接入前不编造余额。</Text>
 
             <View style={styles.walletDarkCard}>
               <Text style={styles.walletDarkLabel}>可用余额</Text>
-              <Text style={styles.walletDarkAmount}>860,000₫</Text>
-              <Text style={styles.walletDarkHint}>平台账本展示值</Text>
+              <Text style={styles.walletDarkAmount}>—</Text>
+              <Text style={styles.walletDarkHint}>账本未接入，未知不画数</Text>
             </View>
 
             <View style={styles.walletCard}>
               <Text style={styles.walletCardLabel}>待结算收入</Text>
-              <Text style={styles.walletCardValue}>1,200,000₫</Text>
-              <Text style={styles.walletCardHint}>来自平台支付订单</Text>
+              <Text style={styles.walletCardValue}>—</Text>
+              <Text style={styles.walletCardHint}>来自平台支付订单（待账本接入）</Text>
             </View>
 
             <View style={styles.walletCard}>
@@ -1204,7 +1424,7 @@ export function MeSurface({
               <Text style={styles.walletCardHint}>个人时间 / 技能服务可由双方直接结算；这里只保留合作确认与双方状态。</Text>
             </View>
 
-            <Pressable style={styles.walletAction}>
+            <Pressable onPress={() => openSubPage("myorders")} style={styles.walletAction} accessibilityLabel="现场结算记录">
               <Text style={styles.walletActionIcon}>₫</Text>
               <View style={styles.walletActionBody}>
                 <Text style={styles.walletActionLabel}>现场结算记录</Text>
@@ -1213,7 +1433,7 @@ export function MeSurface({
               <Text style={styles.walletActionArrow}>›</Text>
             </Pressable>
 
-            <Pressable style={styles.walletBtnLight}>
+            <Pressable onPress={() => openSubPage("myorders")} style={styles.walletBtnLight} accessibilityLabel="退款记录">
               <Text style={styles.walletBtnLightText}>退款记录</Text>
             </Pressable>
           </ScrollView>
@@ -1235,7 +1455,7 @@ export function MeSurface({
             <Text style={styles.customSectionHint}>公开主页展示</Text>
             <View style={styles.profileManageRow}>
               <View style={styles.profileManageAva}>
-                {profileAvatarUri ? <Image source={{ uri: profileAvatarUri }} style={styles.profileManageAvaImg} /> : <Text style={styles.profileManageAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
+                {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={88} uri={profileAvatarUri} /> : <Text style={styles.profileManageAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
               </View>
               <View style={styles.profileManageCopy}>
                 <Text style={styles.profileManageName}>{profileDraft.name}</Text>
@@ -1297,7 +1517,7 @@ export function MeSurface({
                 <Pressable accessibilityLabel="分析" style={styles.personalTopbarIconBtn} onPress={() => setInsightsSheetOpen(true)}>
                   <ProxyIcon name="ring" color={color.ink} size={20} />
                 </Pressable>
-                <Pressable accessibilityLabel="搜索" style={styles.personalTopbarIconBtn} onPress={() => setSearchSheetOpen(true)}>
+                <Pressable accessibilityLabel="搜索" style={styles.personalTopbarIconBtn} onPress={() => { setSearchQuery(""); setProfileSearchResults(undefined); setSearchSheetOpen(true); }}>
                   <ProxyIcon name="crosshair" color={color.ink} size={20} />
                 </Pressable>
                 <Pressable accessibilityLabel="更多" style={styles.personalTopbarIconBtn} onPress={() => setSettingsSheetOpen(true)}>
@@ -1313,7 +1533,7 @@ export function MeSurface({
               </View>
               <View style={styles.personalAvaWrap}>
                 <View style={styles.personalAva}>
-                  {profileAvatarUri ? <Image source={{ uri: profileAvatarUri }} style={styles.personalAvaImg} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
+                  {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={82} uri={profileAvatarUri} /> : <Text style={styles.personalAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
                 </View>
                 <Pressable accessibilityLabel="更换头像" onPress={() => void chooseProfileAvatar()} style={styles.personalAvaAdd}>
                   <ProxyIcon name="plus" color="#333" size={15} />
@@ -1381,6 +1601,7 @@ export function MeSurface({
               }}
               onEditProfile={() => setProfileEditorOpen(true)}
               onShareProfile={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
+              onLikePost={engagement ? (postId) => { void engagement.reactToPost(postId, "LIKE", true).then(() => setLikeError(undefined)).catch(() => setLikeError("点赞没有提交成功，请检查连接后重试。")); } : undefined}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
               isFollowing={false}
               followBusy={false}
@@ -1391,6 +1612,7 @@ export function MeSurface({
               fallbackLogo={OTTER_LOGO}
               color={color}
             />
+            {likeError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{likeError}</Text> : null}
 
           </ScrollView>
           <Modal animationType="slide" onRequestClose={() => setInsightsSheetOpen(false)} transparent visible={insightsSheetOpen}>
@@ -1412,7 +1634,7 @@ export function MeSurface({
             <View style={styles.sheetOverlay}>
               <View style={styles.sheetCard}>
                 <Text style={styles.sheetTitle}>搜索主页</Text>
-                <Text style={styles.sheetSub}>找人、主题和公开对话。</Text>
+                <Text style={styles.sheetSub}>搜自己主页的动态正文，点结果直接打开。</Text>
                 <View style={styles.sheetField}>
                   <TextInput
                     autoFocus
@@ -1422,24 +1644,31 @@ export function MeSurface({
                     onChangeText={setSearchQuery}
                     onSubmitEditing={() => {
                       const q = searchQuery.trim();
-                      if (q.length > 0) {
-                        setSearchSheetOpen(false);
-                        setSearchQuery("");
-                        onOpenFeed();
-                      }
+                      if (q.length > 0) runProfileSearch(q);
                     }}
                     returnKeyType="search"
                     style={styles.sheetFieldInput}
                   />
                 </View>
+                {profileSearchResults !== undefined ? (
+                  profileSearchResults.length === 0 ? (
+                    <Text style={styles.sheetSub}>没有匹配的主页内容</Text>
+                  ) : (
+                    profileSearchResults.slice(0, 5).map((post) => (
+                      <Pressable
+                        key={post.postId}
+                        onPress={() => { setSearchSheetOpen(false); setSearchQuery(""); setProfileSearchResults(undefined); setProfileViewer({ postId: post.postId, index: 0 }); }}
+                        style={styles.sheetWideBtn}
+                      >
+                        <Text numberOfLines={2} style={styles.sheetWideBtnText}>{post.body.slice(0, 60)}</Text>
+                      </Pressable>
+                    ))
+                  )
+                ) : null}
                 <Pressable
                   onPress={() => {
                     const q = searchQuery.trim();
-                    if (q.length > 0) {
-                      setSearchSheetOpen(false);
-                      setSearchQuery("");
-                      onOpenFeed();
-                    }
+                    if (q.length > 0) runProfileSearch(q);
                   }}
                   disabled={searchQuery.trim().length === 0}
                   style={[styles.sheetWideBtn, styles.sheetWideBtnDark, searchQuery.trim().length === 0 ? { opacity: 0.5 } : undefined]}
@@ -1556,20 +1785,21 @@ export function MeSurface({
             </View>
             <View style={styles.detailSectionHead}>
               <Text style={styles.detailSectionTitle}>给 Proxy 看现实资料</Text>
-              <Text style={styles.detailSectionHint}>{enterpriseOpsAssets} 个 Source Assets</Text>
+              <Text style={styles.detailSectionHint}>{enterpriseAssets.length} 个 Source Assets</Text>
             </View>
             <View style={styles.enterpriseAssetTray}>
-              {["店门", "菜单", "品牌资料"].slice(0, enterpriseOpsAssets).map((asset) => (
-                <View key={asset} style={styles.enterpriseAsset}>
-                  <Text style={styles.enterpriseAssetThumb}>▧</Text>
-                  <Text style={styles.enterpriseAssetText}>{asset}</Text>
+              {enterpriseAssets.map((asset) => (
+                <View key={`${asset.label}-${asset.uri ?? "preset"}`} style={styles.enterpriseAsset}>
+                  {asset.uri ? <Image source={{ uri: asset.uri }} style={styles.enterpriseAssetThumbImg} /> : <Text style={styles.enterpriseAssetThumb}>▧</Text>}
+                  <Text style={styles.enterpriseAssetText}>{asset.label}</Text>
                 </View>
               ))}
             </View>
             <View style={styles.enterpriseAssetActions}>
-              <Pressable onPress={() => setEnterpriseOpsAssets((count) => count + 1)} style={styles.lightCta}><Text style={styles.lightCtaText}>拍店铺 / 产品</Text></Pressable>
-              <Pressable onPress={() => setEnterpriseOpsAssets((count) => count + 1)} style={styles.lightCta}><Text style={styles.lightCtaText}>上传文件</Text></Pressable>
+              <Pressable onPress={() => void addEnterpriseAsset("photo")} style={styles.lightCta}><Text style={styles.lightCtaText}>拍店铺 / 产品</Text></Pressable>
+              <Pressable onPress={() => void addEnterpriseAsset("file")} style={styles.lightCta}><Text style={styles.lightCtaText}>上传文件</Text></Pressable>
             </View>
+            {enterpriseAssetError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{enterpriseAssetError}</Text> : null}
             {draftReady ? (
               <View style={styles.enterpriseDraft}>
                 <Text style={styles.enterpriseDraftTitle}>Store Digitization Draft</Text>
@@ -1800,7 +2030,7 @@ export function MeSurface({
             <View style={styles.profileTop}>
               <Gradient from="#241246" to="#7A2CFF" style={styles.profileAvatar}>
                 {hubProfile.hasAvatar ? (
-                  <Image source={{ uri: profileAvatarUri }} style={styles.profileAvatarImg} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={46} uri={profileAvatarUri!} />
                 ) : (
                   <Text style={styles.profileAvatarText}>{hubProfile.initial}</Text>
                 )}
@@ -1853,7 +2083,7 @@ export function MeSurface({
             {persona.avatarGrad ? (
               <Gradient from={color.magenta} to={color.violet} style={styles.identityAvatar}>
                 {hubProfile.hasAvatar ? (
-                  <Image source={{ uri: profileAvatarUri }} style={styles.identityAvatarImg} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={40} uri={profileAvatarUri!} />
                 ) : (
                   <Text style={styles.identityAvatarText}>{hubProfile.initial}</Text>
                 )}
@@ -1861,7 +2091,7 @@ export function MeSurface({
             ) : (
               <View style={[styles.identityAvatar, styles.identityAvatarSolid]}>
                 {hubProfile.hasAvatar ? (
-                  <Image source={{ uri: profileAvatarUri }} style={styles.identityAvatarImg} />
+                  <CircularAvatarImage accessibilityLabel={`${hubProfile.displayName}头像`} size={40} uri={profileAvatarUri!} />
                 ) : (
                   <Text style={styles.identityAvatarText}>{hubProfile.initial}</Text>
                 )}
@@ -1939,6 +2169,7 @@ export function MeSurface({
         <View style={styles.profileEditorOverlay}>
           <View style={styles.profileEditorSheet}>
             <View style={styles.profileEditorHead}><Text style={styles.profileEditorTitle}>编辑主页</Text><Pressable onPress={() => void saveProfile()}><Text style={styles.profileEditorDone}>完成</Text></Pressable></View>
+            {profileSaveError ? <Text style={{ color: "#B3261E", fontSize: 11, marginTop: 6 }}>{profileSaveError}</Text> : null}
             <Pressable onPress={() => void chooseProfileAvatar()} style={styles.profileEditorAvatarRow}>
               <Image source={profileAvatarUri ? { uri: profileAvatarUri } : OTTER_LOGO} style={styles.profileEditorAvatar} />
               <View><Text style={styles.profileEditorAvatarTitle}>更换头像</Text><Text style={styles.profileEditorAvatarHint}>从之前发布或手机相册选择</Text></View>
@@ -1949,6 +2180,8 @@ export function MeSurface({
           </View>
         </View>
       </Modal>
+      {/* 状态规则表放根：hub 头像旁状态点也能打开（原来只在 available 子页挂载）。 */}
+      <AvRuleSheet onClose={() => setAvRuleSheetOpen(false)} onSave={setAvRule} open={avRuleSheetOpen} rule={avRule} />
     </View>
   );
 }

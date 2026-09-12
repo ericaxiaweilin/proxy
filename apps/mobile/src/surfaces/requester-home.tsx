@@ -6,23 +6,30 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
-import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
+import { HomeSearchDock } from "../components/home-search-dock";
+import { buildHomeSearchIndex, matchHomeSearchIntent, type HomeSearchSuggestion } from "../home-search-intent";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
 import { color, shadows } from "../theme";
 import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
+import type { LocalNetClient } from "../localnet-client";
+import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-publish";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
 import { ActivityCommandRejectedError, ActivityProtocolError } from "../activity-client";
 import type { ExperienceClient } from "../experience-client";
 import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
-import type { EngagementClient } from "../engagement-client";
+import type { RelationshipClient } from "../relationship-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
+import { SCENE_ACTIONS, SceneActivityDiscovery } from "../components/scene-activity-discovery";
+import { AIAssistantsRow } from "../ai-assistants-row";
 import {
   RECOMMEND_FILTER_CHIPS,
   RECOMMEND_MODE_ORDER,
@@ -68,46 +75,44 @@ function projectTask(t: RequesterHomeTaskItem): ContinueCard {
   };
 }
 
-// Empty-state fallback used when the user is not signed in yet
-// (demandClient not provided) or the read model returned no rows.
-// Preserves the original two placeholder cards so the visual baseline
-// doesn't shift when the user is anonymous.
-const PLACEHOLDER_ITEMS: ReadonlyArray<ContinueCard> = [
-  { key: "ph:new", icon: "diamond", title: "周六新店开业", sub: "正在匹配 · 还差 1 位", progress: "80%" },
-  { key: "ph:walk", icon: "circle", title: "周末摄影散步", sub: "你已感兴趣 · 周六 15:30", headcount: "8/12" }
-];
-
 export function RequesterHome({
   onEnterWorkspace,
   onOpenMarket,
   onOpenFeed,
   onChat,
+  onOpenAssistantConversation,
   conversationPanel,
   topContext,
   demandClient,
+  localNet,
   marketplace,
   activities,
   experiences,
   aiAccounts,
-  engagement,
+  relationship,
   onMessageAI,
   onOpenAIProfile,
   onOpenHumanScene,
   onOpenHumanProfile,
+  onMessageHuman,
   viewerAccountId,
   onCreateScene,
   onOpenSceneMap,
   sceneApiBaseUrl,
   onChromeVisibilityChange,
+  onChooserVisibilityChange,
   bottomNavVisible,
 }: {
   onEnterWorkspace: (selection: RequesterGoal) => void;
   onOpenMarket?: ((tab: MarketTab) => void) | undefined;
   onOpenFeed?: (() => void) | undefined;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
+  onOpenAssistantConversation?: (() => void) | undefined;
   conversationPanel?: ReactNode;
   topContext?: ReactNode;
   demandClient?: DemandClient;
+  // Moment 发布到动态：调用方传入 localNet（发帖写接口），没传则不渲染发布按钮。
+  localNet?: LocalNetClient;
   // R15.22 fix: 机会/活动计数从 API 拉, 替换 r157MarketPulse 硬编码 24/46/18.
   // server 端 ListMarketOpportunities / ListActivities 不限 actor, 匿名可读.
   marketplace?: MarketplaceClient;
@@ -115,20 +120,28 @@ export function RequesterHome({
   // R15.49 — experience count 从 server 拉 (替换 hardcode 24).
   experiences?: ExperienceClient;
   aiAccounts?: AIAccountClient;
-  engagement?: EngagementClient;
+  relationship?: RelationshipClient;
   onMessageAI?: (account: PlatformAIAccount) => void;
   onOpenAIProfile?: (account: PlatformAIAccount) => void;
   onOpenHumanScene?: (person: RecommendPerson, sceneId: string) => void;
   onOpenHumanProfile?: (person: RecommendPerson) => void;
+  onMessageHuman?: (person: RecommendPerson) => void;
   viewerAccountId?: string;
   onCreateScene?: ((tool: SceneToolId) => void) | undefined;
   onOpenSceneMap?: ((sceneId?: string) => void) | undefined;
   sceneApiBaseUrl?: string | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
+  onChooserVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
 }): React.JSX.Element {
-  const [intentMode, setIntentMode] = useState<HomeIntentMode | undefined>("SERVICE");
-  const [composerOpen, setComposerOpen] = useState(false);
+  const safeArea = useSafeAreaInsets();
+  // Home Search/Conversation v3：常驻搜索 dock（原型 .searchDock）。
+  // searchQuery 只驱动全站实体匹配；模型历史统一由消息模块持久化。
+  const [searchQuery, setSearchQuery] = useState("");
+  const [responseText, setResponseText] = useState<string>();
+  const [responseWhy, setResponseWhy] = useState<string>();
+  const [clarifyQuestion, setClarifyQuestion] = useState<string>();
+  const [clarifyChoices, setClarifyChoices] = useState<ReadonlyArray<string>>();
   // 4 宫格：各槽位独立下标，点格子弹选择窗（弹窗控制格子），主页入口保留。
   const [personIndex, setPersonIndex] = useState(0);
   const [timeIndex, setTimeIndex] = useState(0);
@@ -136,9 +149,11 @@ export function RequesterHome({
   const [placeIndex, setPlaceIndex] = useState(0);
   const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
   const [momentOpen, setMomentOpen] = useState(false);
+  const [momentBusy, setMomentBusy] = useState(false);
+  const [momentMsg, setMomentMsg] = useState<string | undefined>(undefined);
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinMsg, setJoinMsg] = useState<string | undefined>(undefined);
-  const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>(PLACEHOLDER_ITEMS);
+  const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>([]);
   // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
   // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
   // 看到摄影好搭子。
@@ -147,37 +162,82 @@ export function RequesterHome({
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   const [activeFilters, setActiveFilters] = useState<ReadonlyArray<string>>([]);
   const [recommendedAI, setRecommendedAI] = useState<PlatformAIAccount[]>(BUNDLED_AI_COMPANIONS);
-  // 首页一键加好友：头像右下 + 徽标直接调 engagement.followProfile，
-  // 本次会话内记住已加状态。主页仍是关系的源头（profile 的
-  // toggleFollow / 发消息不变，进主页照样能做）。
-  const [followedIds, setFollowedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [followBusyId, setFollowBusyId] = useState<string | undefined>(undefined);
-  const [followMsg, setFollowMsg] = useState<string | undefined>(undefined);
+  type HomeRelationshipState = "NONE" | "OUTGOING" | "INCOMING" | "FRIEND";
+  const [relationshipStates, setRelationshipStates] = useState<ReadonlyMap<string, HomeRelationshipState>>(() => new Map());
+  const [relationshipBusyId, setRelationshipBusyId] = useState<string | undefined>(undefined);
+  const [relationshipMsg, setRelationshipMsg] = useState<string | undefined>(undefined);
+  const [humanScenePreview, setHumanScenePreview] = useState<{ person: RecommendPerson; sceneId: string } | undefined>(undefined);
+  const [publicHistoryOpen, setPublicHistoryOpen] = useState(false);
 
-  async function toggleHomeFollow(id: string, name: string): Promise<void> {
-    if (!engagement || !viewerAccountId) {
-      setFollowMsg("登录后可加好友");
+  useEffect(() => {
+    onChooserVisibilityChange?.(chooser !== null);
+    return () => {
+      if (chooser !== null) onChooserVisibilityChange?.(false);
+    };
+  }, [chooser, onChooserVisibilityChange]);
+
+  useEffect(() => {
+    if (!relationship || !viewerAccountId) return;
+    let cancelled = false;
+    void relationship.listMyFriendships().then((payload) => {
+      if (cancelled) return;
+      const next = new Map<string, HomeRelationshipState>();
+      payload.active.forEach((item) => next.set(item.userId, "FRIEND"));
+      payload.pending.forEach((item) => next.set(item.userId, item.direction === "INCOMING" ? "INCOMING" : "OUTGOING"));
+      setRelationshipStates(next);
+    }).catch(() => {
+      if (!cancelled) setRelationshipMsg("好友状态暂时无法加载");
+    });
+    return () => { cancelled = true; };
+  }, [relationship, viewerAccountId]);
+
+  async function handleHomeFriend(id: string, name: string): Promise<void> {
+    if (!relationship || !viewerAccountId) {
+      setRelationshipMsg("登录后可添加好友");
       return;
     }
-    if (followBusyId !== undefined) return;
-    const followed = followedIds.has(id);
-    setFollowBusyId(id);
-    setFollowMsg(undefined);
+    if (relationshipBusyId !== undefined) return;
+    const current = relationshipStates.get(id) ?? "NONE";
+    if (current === "OUTGOING" || current === "FRIEND") return;
+    setRelationshipBusyId(id);
+    setRelationshipMsg(undefined);
     try {
-      if (followed) await engagement.unfollowProfile(id);
-      else await engagement.followProfile(id);
-      setFollowedIds((prev) => {
-        const next = new Set(prev);
-        if (followed) next.delete(id);
-        else next.add(id);
+      const nextState: HomeRelationshipState = current === "INCOMING" ? "FRIEND" : "OUTGOING";
+      if (current === "INCOMING") await relationship.acceptFriendRequest(id);
+      else await relationship.sendFriendRequest(id);
+      setRelationshipStates((prev) => {
+        const next = new Map(prev);
+        next.set(id, nextState);
         return next;
       });
-      setFollowMsg(followed ? `已取消关注 ${name}` : `已加好友 · ${name}`);
-    } catch {
-      setFollowMsg("加好友失败，登录后重试");
+      setRelationshipMsg(current === "INCOMING" ? `已成为好友 · ${name}` : `好友申请已发送 · ${name}`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "";
+      setRelationshipMsg(
+        reason.includes("self_forbidden") ? "不能添加自己"
+          : reason.includes("authenticated") || reason.includes("sign-in") ? "登录后可添加好友"
+            : "好友操作失败，请稍后重试"
+      );
     } finally {
-      setFollowBusyId(undefined);
+      setRelationshipBusyId(undefined);
     }
+  }
+
+  function relationshipGlyph(id: string): string {
+    if (relationshipBusyId === id) return "…";
+    const state = relationshipStates.get(id) ?? "NONE";
+    if (state === "FRIEND") return "✓";
+    if (state === "OUTGOING") return "↗";
+    if (state === "INCOMING") return "!";
+    return "+";
+  }
+
+  function relationshipLabel(id: string, name: string): string {
+    const state = relationshipStates.get(id) ?? "NONE";
+    if (state === "FRIEND") return `已是好友 ${name}`;
+    if (state === "OUTGOING") return `已申请好友 ${name}`;
+    if (state === "INCOMING") return `接受 ${name} 的好友申请`;
+    return `添加好友 ${name}`;
   }
 
   useEffect(() => {
@@ -195,22 +255,14 @@ export function RequesterHome({
   //   - "附近" 过滤：要求 distanceM < 1000
   // server 端接上后，filter 逻辑移过去；这里只负责本地预览。
   const recommendFeed: RecommendFeed = SCENE_RECOMMEND[recommendMode] ?? SCENE_RECOMMEND[RECOMMEND_MODE_ORDER[0]!]!;
+  const recommendActionLabel = ({ PHOTO: "拍照", COMPANION: "同行", COFFEE_MEAL: "咖啡 / 用餐", ACTIVITY: "活动同行", TRIP: "周边出行", CREATOR: "内容创作", TRANSLATE: "翻译", MEDICAL: "陪诊" } as Record<string, string>)[recommendMode] ?? recommendFeed.title;
   const filteredPeople: ReadonlyArray<RecommendPerson> = recommendFeed.people.filter((p) => {
     if (activeFilters.includes("online") && !p.online) return false;
     if (activeFilters.includes("lang_zh") && !p.tags.some((t) => t.text === "会中文" && t.kind === "lang")) return false;
-    if (activeFilters.includes("mutual") && p.mutualFriends < 1) return false;
     if (activeFilters.includes("active") && !p.tags.some((t) => t.text === "最近活跃" && t.kind === "social")) return false;
     if (activeFilters.includes("near") && p.distanceM >= 1000) return false;
     return true;
   });
-  // HomeItemsLoadState distinguishes the three post-auth states:
-  //   "idle"    — no fetch attempted yet (initial render)
-  //   "loading" — fetch in flight (placeholder still visible)
-  //   "loaded"  — fetch succeeded (real items, possibly empty)
-  //   "error"   — fetch failed (placeholder visible + error chip)
-  // Without this, a transient network blip is indistinguishable
-  // from "user has no in-progress needs" or "user is anonymous".
-  const [homeItemsState, setHomeItemsState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
 
   // R36.x SCENE-RECOMMEND-001: 真实场景列表（公开接口，免登录），用于
   // 地图入口真计数 + 场景推荐横滑。失败/未配置时保持空，不展示假场景。
@@ -239,9 +291,147 @@ export function RequesterHome({
     return () => { cancelled = true; };
   }, [sceneApiBaseUrl]);
   const activeSceneCount = sceneBriefs.filter((s) => s.active).length;
+  const previewScene = humanScenePreview ? sceneBriefs.find((scene) => scene.id === humanScenePreview.sceneId) : undefined;
+  const previewSceneImage = previewScene?.imageUrl
+    ? (/^https?:\/\//i.test(previewScene.imageUrl) ? previewScene.imageUrl : sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${previewScene.imageUrl.replace(/^\//, "")}` : undefined)
+    : undefined;
+  const previewSceneOptions = humanScenePreview
+    ? [
+        ...(previewScene ? [previewScene] : []),
+        ...sceneBriefs.filter((scene) => scene.id !== previewScene?.id && scene.imageUrl),
+      ].slice(0, 2)
+    : [];
 
-  // R36.x STORE-ACTIVITY-001: 店铺场景活动推荐（公开 listActivities，
-  // 免登录）。本店（Three Beans）优先排前，其次按时间。
+  function applyHomeSearchSuggestion(s: HomeSearchSuggestion): void {
+    setSearchQuery("");
+    if (s.slot === "person") {
+      const at = filteredPeople.findIndex((p) => p.id === s.id);
+      if (at >= 0) setPersonIndex(at);
+    } else if (s.slot === "time") {
+      const at = distinctTimes.indexOf(s.id);
+      if (at >= 0) setTimeIndex(at);
+    } else if (s.slot === "activity") {
+      const at = storeActivities.findIndex((a) => a.activityId === s.id);
+      if (at >= 0) setActivityIndex(at);
+    } else {
+      const at = sceneBriefs.findIndex((scene) => scene.id === s.id);
+      if (at >= 0) setPlaceIndex(at);
+    }
+  }
+
+  function showResponse(text: string, why: string = ""): void {
+    setResponseText(text);
+    setResponseWhy(why || text);
+  }
+
+  // 整组换（remix）— 与原型及四宫格 remix 按钮完全对齐
+  function remixForYou(): void {
+    if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
+    if (distinctTimes.length > 1) setTimeIndex((current) => (current + 1) % distinctTimes.length);
+    if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
+    if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
+    showResponse("重新配了一套", "根据当前时间和附近可用 Scene 重新组合。");
+    setSearchQuery("");
+    setClarifyChoices(undefined);
+  }
+
+  function refineHomeSearchSlot(slot: "person" | "time" | "activity" | "place"): void {
+    setSearchQuery("");
+    setClarifyChoices(undefined);
+    setChooser(slot);
+    if (slot === "person") {
+      showResponse("换个人", "其他三格保持不动。");
+    } else if (slot === "place") {
+      showResponse("换场景", "其他三格保持不动。");
+    } else if (slot === "time") {
+      showResponse("换时间", "其他三格保持不动。");
+    } else {
+      showResponse("换活动", "其他三格保持不动。");
+    }
+  }
+
+  // 对齐原型 execute(q) 核心自然语言与实体执行器：
+  function handleExecuteHomeQuery(raw: string, attachment?: HomeAttachment): void {
+    const q = (raw || "").trim();
+    if (!q) return;
+
+    // 1. 周末 -> 澄清问询
+    if (q === "周末" || q.includes("周末有空")) {
+      setClarifyQuestion("下午还是晚上？");
+      setClarifyChoices(["下午", "晚上"]);
+      showResponse("还差一个时间条件", "确认后我直接更新，不会进入聊天页。");
+      return;
+    }
+
+    // 2. 找人 / 换人 / 会中文
+    if (q.includes("会中文") || q.includes("换个人") || q.includes("换人") || q.includes("找人")) {
+      setClarifyChoices(undefined);
+      refineHomeSearchSlot("person");
+      return;
+    }
+
+    // 3. 太远 / 找场景 / 拍照
+    if (q.includes("太远") || q.includes("近一点") || q.includes("找场景") || q.includes("拍照")) {
+      setClarifyChoices(undefined);
+      refineHomeSearchSlot("place");
+      return;
+    }
+
+    // 4. 晚上 / 今晚 -> 只改时间
+    if (q.includes("晚上") || q.includes("今晚")) {
+      setClarifyChoices(undefined);
+      const eveningIdx = distinctTimes.findIndex((t) => t.includes("晚"));
+      if (eveningIdx >= 0) setTimeIndex(eveningIdx);
+      showResponse("时间改成今晚", "其他 3 格保持不动。");
+      return;
+    }
+
+    // 5. 散步 / City Walk -> 改活动
+    if (q.includes("散步") || q.includes("City Walk") || q.includes("走走")) {
+      setClarifyChoices(undefined);
+      const walkIdx = storeActivities.findIndex((a) => a.title.includes("散步") || a.title.includes("Walk"));
+      if (walkIdx >= 0) setActivityIndex(walkIdx);
+      showResponse("活动改成散步 / City Walk", "其余 3 格保持不动。");
+      return;
+    }
+
+    // 6. 咖啡 -> 整体配好 (人/时间/活动/场景联动)
+    if (q.includes("咖啡")) {
+      setClarifyChoices(undefined);
+      // IDENTITY-ID-001: 按身份 id 匹配，不再用显示名子串 —— 用户名可编辑、可重复，
+      // 按名字找人在改名或存在同名用户时会串到别人身上。
+      const linhIdx = filteredPeople.findIndex((p) => p.id === "u_linh");
+      if (linhIdx >= 0) setPersonIndex(linhIdx);
+      const coffeeActIdx = storeActivities.findIndex((a) => a.title.includes("咖啡"));
+      if (coffeeActIdx >= 0) setActivityIndex(coffeeActIdx);
+      const beanSceneIdx = sceneBriefs.findIndex((s) => s.name.toLowerCase().includes("bean"));
+      if (beanSceneIdx >= 0) setPlaceIndex(beanSceneIdx);
+      showResponse("已配好 · Three Beans 更适合聊天", "你提到咖啡和轻松聊天，所以优先选择更安静、有窗位的场景。");
+      return;
+    }
+
+    // 7. 配一套 / 随便
+    if (q.includes("配一套") || q.includes("随便") || q.includes("换一套")) {
+      remixForYou();
+      return;
+    }
+
+    // 8. 搜索词直接匹配具体候选
+    if (searchSuggestions.length > 0) {
+      applyHomeSearchSuggestion(searchSuggestions[0]!);
+      return;
+    }
+
+    // 9. 无命中仍保持搜索语义。模型对话只能由左侧 AI 标识显式进入。
+    setClarifyChoices(undefined);
+    showResponse(
+      attachment ? "图片需要在 Proxy AI 对话中发送" : `没有找到“${q}”`,
+      "换个关键词继续搜索，或点左侧 AI 标识进入模型对话。"
+    );
+  }
+
+  // 活动数据只供四宫格“选活动”使用。完整活动发现和报名归市场活动模块，
+  // Home 不再复制一条活动列表。
   type StoreActivityBrief = { activityId: string; title: string; venueName: string; time: string; joined: number; capacity: number; coverImageUrl: string | undefined; realitySceneId: string | undefined };
   const [storeActivities, setStoreActivities] = useState<StoreActivityBrief[]>([]);
   useEffect(() => {
@@ -265,6 +455,20 @@ export function RequesterHome({
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [activities]);
+
+  // Home Search/Conversation v3 — 全站搜索合一：把真实推荐人/店铺活动/
+  // 场景/时段装进搜索索引。人名/活动名/场景名/时段都能被同一输入命中。
+  // 数据全部来自上方已拉取的真实列表，不造演示数据；列表为空时
+  // lookup 自然无候选，输入直接走模型对话。
+  const distinctTimes = [...new Set(storeActivities.map((a) => a.time).filter(Boolean))];
+  const searchIndex = buildHomeSearchIndex({
+    people: filteredPeople.map((p) => ({ id: p.id, name: p.name, bio: p.bio })),
+    activities: storeActivities.map((a) => ({ id: a.activityId, title: a.title, venueName: a.venueName })),
+    scenes: sceneBriefs.map((s) => ({ id: s.id, name: s.name, area: s.area, type: s.type })),
+    times: distinctTimes
+  });
+  const searchMatch = matchHomeSearchIntent(searchQuery, searchIndex);
+  const searchSuggestions: ReadonlyArray<HomeSearchSuggestion> = searchMatch.kind === "lookup" ? searchMatch.suggestions : [];
 
   // 报名：对当前活动格报名（真接口），顺手把 joined 刷进本地 rail。
   // 注意：这是"我去参加活动"，不是"邀请小美来"。真邀请（createInvitation）
@@ -324,17 +528,15 @@ export function RequesterHome({
 
   useEffect(() => {
     if (!demandClient) {
-      // Anonymous: keep placeholder so the layout is non-empty.
-      setContinueItems(PLACEHOLDER_ITEMS);
-      setHomeItemsState("idle");
+      // Anonymous and untouched state have no active-work surface.
+      setContinueItems([]);
       return;
     }
     let cancelled = false;
-    setHomeItemsState("loading");
     (async () => {
       // R15.22 fix: 匿名 session 没 principal, listHomeItems 调
       // requireSession() 立即抛 DemandProtocolError — 不应误报 "加载失败"
-      // 仍保持 placeholder + idle 状态, 由顶 chip 提示登入。
+      // 由登录入口表达身份状态，不伪造“进行中”事项。
       // hasAuthenticatedSession 内部已包 try/catch, 但这里仍 wrap 一层以防意外.
       let hasSession = false;
       try {
@@ -344,8 +546,7 @@ export function RequesterHome({
       }
       if (!hasSession) {
         if (cancelled) return;
-        setContinueItems(PLACEHOLDER_ITEMS);
-        setHomeItemsState("idle");
+        setContinueItems([]);
         return;
       }
       try {
@@ -355,15 +556,10 @@ export function RequesterHome({
         for (const d of home.drafts) cards.push(projectDraft(d));
         for (const t of home.tasks) cards.push(projectTask(t));
         setContinueItems(cards);
-        setHomeItemsState("loaded");
       } catch {
-        // Fail closed: keep the placeholder strip so a transient
-        // network blip doesn't wipe the surface, but flag the
-        // state so the section header can show an error chip.
-        if (!cancelled) {
-          setContinueItems(PLACEHOLDER_ITEMS);
-          setHomeItemsState("error");
-        }
+        // Fail closed. Retain a previously loaded projection if one exists,
+        // but never manufacture an active-work section from a read failure.
+        if (cancelled) return;
       }
     })();
     return () => {
@@ -374,11 +570,12 @@ export function RequesterHome({
   const lastYRef = useRef(0);
   const dirRef = useRef(0);
   const visibleRef = useRef(true);
+  // 卸载回显 chrome（与动态一致）：切走时壳会重置，内部替换（如进 Scene
+  // Composer）时靠这里复位，避免停在隐藏态。
+  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
     const y = Math.max(0, e.nativeEvent.contentOffset.y);
     const delta = y - lastYRef.current;
-    // 滑动即把展开的模型对话收回单行。
-    if (Math.abs(delta) >= 4) setComposerOpen(false);
     if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
     else if (Math.abs(delta) >= 1) {
       const prevDir = Math.sign(dirRef.current);
@@ -392,31 +589,32 @@ export function RequesterHome({
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
-      {/* Search and Proxy share one top-level intent entry. It stays one line
-          until the user explicitly starts/resumes a conversation. */}
-      {conversationPanel ?? (onChat ? (
-        <>
-          <Pressable onPress={() => setComposerOpen(true)} style={styles.composerSingle} accessibilityLabel="搜索或询问 Proxy">
-            <ProxyIcon color={color.muted} name="search" size={18} />
-            <Text style={styles.composerSingleText}>搜索场景、地点，或问 Proxy</Text>
-            <Text style={styles.composerSingleChev}>›</Text>
-          </Pressable>
-          {composerOpen ? (
-            <View>
-              <HomeChatBox
-                contextLabel="用户"
-                placeholder="搜索地点、活动，或直接说你想做什么"
-                mode={intentMode}
-                onSelectMode={(mode) => setIntentMode((current) => current === mode ? undefined : mode)}
-                onSend={(text, mode, attachment) => { setComposerOpen(false); onChat(text, mode, attachment); }}
-              />
-              <Pressable onPress={() => setComposerOpen(false)} style={styles.composerCollapse}>
-                <Text style={styles.composerCollapseText}>收起 ↑</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </>
-      ) : null)}
+      {/* Home Search/Conversation v3（原型 .searchDock）：单行输入默认搜索；
+          左侧 AI 标识显式进入消息模块中的唯一 Proxy AI 会话。 */}
+      {onChat ? (
+        <HomeSearchDock
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          suggestions={searchSuggestions}
+          onApplySuggestion={applyHomeSearchSuggestion}
+          intentRemix={searchMatch.kind === "remix"}
+          intentSlot={searchMatch.kind === "exchange" ? searchMatch.slot : null}
+          onRemix={() => remixForYou()}
+          onExchange={refineHomeSearchSlot}
+          onExecute={handleExecuteHomeQuery}
+          responseText={responseText}
+          responseWhy={responseWhy}
+          clarifyQuestion={clarifyQuestion}
+          clarifyChoices={clarifyChoices}
+          onSelectClarify={(c) => {
+            setClarifyChoices(undefined);
+            handleExecuteHomeQuery(c);
+          }}
+          onOpenConversation={() => onOpenAssistantConversation?.()}
+        />
+      ) : null}
+      {/* 点左侧 AI 标识后在 Home 内展开独立对话输入框；默认输入仍只搜索。 */}
+      {conversationPanel ?? null}
       {/* R15.35: 去掉 “今天想做什么？” 标题 — 是解释性废话，
           用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
           不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
@@ -428,8 +626,10 @@ export function RequesterHome({
         <FilterChipRail
           items={RECOMMEND_MODE_ORDER.map((modeId) => {
             const feed = SCENE_RECOMMEND[modeId];
+            const actionIconId = modeId === "PHOTO" ? "photo" : modeId === "COMPANION" ? "city-walk" : modeId === "COFFEE_MEAL" ? "dining" : modeId === "ACTIVITY" ? "music" : modeId === "TRIP" ? "travel" : modeId === "CREATOR" ? "explore-store" : modeId === "TRANSLATE" || modeId === "HOSPITAL" ? "translation" : "city-walk";
             return {
               id: modeId,
+              assetIcon: SCENE_ACTIONS.find((action) => action.id === actionIconId)!.icon,
               label: feed ? (
                 modeId === "PHOTO" ? "拍照" : modeId === "COMPANION" ? "同行" : modeId === "COFFEE_MEAL" ? "吃饭" : modeId === "ACTIVITY" ? "活动" : modeId === "TRIP" ? "出去玩" : modeId === "CREATOR" ? "创作" : modeId === "TRANSLATE" ? "翻译" : "陪诊"
               ) : modeId
@@ -451,8 +651,6 @@ export function RequesterHome({
       <View style={styles.peopleHead}>
         <View style={{ flex: 1 }}>
           <View style={styles.peopleTitleRow}><Text style={styles.peopleTitle}>真人推荐</Text><View style={styles.humanBadge}><Text style={styles.humanBadgeText}>真人</Text></View></View>
-          <Text style={styles.peopleSceneTitle}>{recommendFeed.title}</Text>
-          <Text style={styles.peopleSub}>{recommendFeed.subtitle}</Text>
         </View>
         <Pressable onPress={() => setFilterSheetOpen(true)} style={styles.filterTrigger}>
           <Text style={styles.filterTriggerText}>筛选 〉</Text>
@@ -468,7 +666,7 @@ export function RequesterHome({
         {filteredPeople.map((p) => (
           <Pressable
             key={`story:${p.id}`}
-            onPress={() => onOpenHumanScene?.(p, recommendFeed.boundSceneId)}
+            onPress={() => { setPublicHistoryOpen(false); setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId }); }}
             style={styles.story}
             accessibilityLabel={`推荐人 ${p.name}，${p.online ? "在线" : "离线"}`}
           >
@@ -478,12 +676,12 @@ export function RequesterHome({
               </View>
               {p.online ? <View style={styles.onlineDot} /> : null}
               <Pressable
-                onPress={() => void toggleHomeFollow(p.id, p.name)}
-                disabled={followBusyId === p.id}
-                style={[styles.addBadge, followedIds.has(p.id) && styles.addBadgeDone]}
-                accessibilityLabel={followedIds.has(p.id) ? `已加好友 ${p.name}` : `加好友 ${p.name}`}
+                onPress={() => void handleHomeFriend(p.id, p.name)}
+                disabled={relationshipBusyId === p.id || relationshipStates.get(p.id) === "OUTGOING" || relationshipStates.get(p.id) === "FRIEND"}
+                style={[styles.addBadge, relationshipStates.get(p.id) === "FRIEND" && styles.addBadgeDone, relationshipStates.get(p.id) === "OUTGOING" && styles.addBadgePending]}
+                accessibilityLabel={relationshipLabel(p.id, p.name)}
               >
-                <Text style={styles.addBadgeText}>{followBusyId === p.id ? "…" : followedIds.has(p.id) ? "✓" : "+"}</Text>
+                <Text style={styles.addBadgeText}>{relationshipGlyph(p.id)}</Text>
               </Pressable>
             </View>
             <Text style={styles.storyName} numberOfLines={1}>{p.name}</Text>
@@ -491,9 +689,13 @@ export function RequesterHome({
         ))}
       </HorizontalSwipeRail>
 
-      {followMsg ? (
-        <Text style={styles.followMsg}>{followMsg}</Text>
+      {relationshipMsg ? (
+        <Text style={styles.followMsg}>{relationshipMsg}</Text>
       ) : null}
+
+      {/* AI-ASSIST-001: 5 小美行放真人推荐之后，不抢镜。
+          服务端目录 + 关注/发消息，与真人“推荐人”分开渲染不混排。 */}
+      <AIAssistantsRow />
 
       {recommendedAI.length > 0 ? <View style={styles.aiSection}>
         <View style={styles.aiSectionHead}>
@@ -506,12 +708,12 @@ export function RequesterHome({
               <View style={styles.aiAvatarWrap}>
                 <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`ai-avatar:${account.accountId}:${account.avatarVersion ?? 1}`} source={aiAccountPhoto(account)} style={styles.aiAvatar} transition={0} />
                 <Pressable
-                  onPress={() => void toggleHomeFollow(account.accountId, account.displayName)}
-                  disabled={followBusyId === account.accountId}
-                  style={[styles.addBadge, followedIds.has(account.accountId) && styles.addBadgeDone]}
-                  accessibilityLabel={followedIds.has(account.accountId) ? `已加好友 ${account.displayName}` : `加好友 ${account.displayName}`}
+                  onPress={() => void handleHomeFriend(account.accountId, account.displayName)}
+                  disabled={relationshipBusyId === account.accountId || relationshipStates.get(account.accountId) === "OUTGOING" || relationshipStates.get(account.accountId) === "FRIEND"}
+                  style={[styles.addBadge, relationshipStates.get(account.accountId) === "FRIEND" && styles.addBadgeDone, relationshipStates.get(account.accountId) === "OUTGOING" && styles.addBadgePending]}
+                  accessibilityLabel={relationshipLabel(account.accountId, account.displayName)}
                 >
-                  <Text style={styles.addBadgeText}>{followBusyId === account.accountId ? "…" : followedIds.has(account.accountId) ? "✓" : "+"}</Text>
+                  <Text style={styles.addBadgeText}>{relationshipGlyph(account.accountId)}</Text>
                 </Pressable>
               </View>
               <Text style={styles.aiName} numberOfLines={1}>{account.displayName}</Text>
@@ -526,14 +728,12 @@ export function RequesterHome({
         <>
           {(() => {
             const gridPerson = filteredPeople.length > 0 ? filteredPeople[personIndex % filteredPeople.length] : undefined;
-            const distinctTimes = [...new Set(storeActivities.map((a) => a.time).filter(Boolean))];
             const gridTime = distinctTimes.length > 0 ? distinctTimes[timeIndex % distinctTimes.length] : undefined;
             const gridActivity = storeActivities.length > 0 ? storeActivities[activityIndex % storeActivities.length] : undefined;
             const gridPlace = sceneBriefs.length > 0 ? sceneBriefs[placeIndex % sceneBriefs.length] : undefined;
             if (!gridPerson && !gridActivity && !gridPlace && !gridTime) return null;
             const remixAll = (): void => {
-              setComposerOpen(false);
-              if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
+                        if (filteredPeople.length > 1) setPersonIndex((current) => (current + 1) % filteredPeople.length);
               if (distinctTimes.length > 1) setTimeIndex((current) => (current + 1) % distinctTimes.length);
               if (storeActivities.length > 1) setActivityIndex((current) => (current + 1) % storeActivities.length);
               if (sceneBriefs.length > 1) setPlaceIndex((current) => (current + 1) % sceneBriefs.length);
@@ -556,7 +756,7 @@ export function RequesterHome({
                 <View style={styles.gridStage}>
                   <View style={styles.grid4}>
                     {tiles.map((t) => t ? (
-                      <Pressable key={t.key} onPress={() => { setComposerOpen(false); setChooser(t.slot); }} style={styles.gridTile}>
+                      <Pressable key={t.key} onPress={() => setChooser(t.slot)} style={styles.gridTile}>
                         {t.imageUri ? <Image source={{ uri: t.imageUri }} style={styles.gridImage} /> : <View style={styles.gridImageMissing}><Text style={styles.gridGlyph}>{t.glyph}</Text></View>}
                         <View style={styles.gridOverlay}>
                           <Text style={[styles.gridLabel, !t.imageUri && styles.gridLabelDark]} numberOfLines={1}>{t.label}</Text>
@@ -580,7 +780,7 @@ export function RequesterHome({
                   <View>
                     <Text style={styles.chainHint}>直接约她：点头像进 Scene 主页聊 · 想等人来：发布需求等小美接单</Text>
                     <View style={styles.gridCtaRow}>
-                    <Pressable onPress={() => setMomentOpen(true)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="出图">
+                    <Pressable onPress={() => { setMomentMsg(undefined); setMomentOpen(true); }} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="出图">
                       <Text style={styles.gridCtaTextSmall}>✦ 出图</Text>
                     </Pressable>
                     <Pressable disabled={joinBusy} onPress={() => void joinSelected(gridActivity?.activityId)} style={[styles.gridCta, styles.gridCtaHalf]} accessibilityLabel="报名参加活动">
@@ -593,6 +793,7 @@ export function RequesterHome({
                   </View>
                 ) : null}
                 {joinMsg ? <Text style={styles.joinMsg}>{joinMsg}</Text> : null}
+                {momentMsg && !momentOpen ? <Text style={styles.joinMsg}>{momentMsg}</Text> : null}
                 {chooser ? (
                   <Modal transparent animationType="fade" visible onRequestClose={() => setChooser(null)}>
                     <Pressable onPress={() => setChooser(null)} style={styles.sheetBackdrop}>
@@ -691,12 +892,68 @@ export function RequesterHome({
                           ) : null)}
                         </View>
                         <Text style={styles.momentCopy} numberOfLines={2}>{composed}</Text>
+                        {momentMsg && momentOpen ? <Text style={styles.joinMsg}>{momentMsg}</Text> : null}
+                        {localNet ? (
+                          <Pressable
+                            disabled={momentBusy}
+                            onPress={() => {
+                              if (momentBusy) return;
+                              setMomentBusy(true);
+                              setMomentMsg(undefined);
+                              const payload = buildCreatePostPayload({
+                                body: composed,
+                                media: [],
+                                visibility: "PUBLIC",
+                                includeCity: true,
+                                quoteTargetId: null,
+                                place: null,
+                                topic: null,
+                                gifWord: null,
+                                poll: { open: false, options: ["", ""], durationLabel: "1 天" },
+                                isGhost24h: false,
+                              });
+                              void localNet.createPost(payload, newPublishIdempotencyKey()).then(() => {
+                                setMomentOpen(false);
+                                setMomentMsg("已发布到动态");
+                                // 发完直达动态：Tab 切换重挂 FeedSurface 即重新拉取，
+                                // 新帖出现在最上面。之前停在首页，用户看不到结果。
+                                onOpenFeed?.();
+                              }).catch((error: unknown) => {
+                                // 发布失败：sheet 留着，错误说明白，可重试。
+                                // 游客/掉登录直接报英文原错等于没说，映射成人话。
+                                const raw = error instanceof Error ? error.message : "";
+                                if (/principal|signed|sign in|auth|session|401|403|INVALID_ACCESS_TOKEN|登录/i.test(raw)) {
+                                  setMomentMsg("请先登录后再发布（游客身份不能发动态）。");
+                                } else {
+                                  setMomentMsg(raw || "发布失败，请重试。");
+                                }
+                              }).finally(() => setMomentBusy(false));
+                            }}
+                            style={[styles.gridCta, { marginTop: 10 }]}
+                            accessibilityLabel="发布到动态"
+                          >
+                            <Text style={styles.gridCtaText}>{momentBusy ? "发布中…" : "发布到动态"}</Text>
+                          </Pressable>
+                        ) : null}
                         <Pressable
-                          onPress={() => { setMomentOpen(false); void Share.share({ message: composed }); }}
+                          disabled={momentBusy}
+                          onPress={() => {
+                            if (momentBusy) return;
+                            setMomentBusy(true);
+                            setMomentMsg(undefined);
+                            void Share.share({ message: composed }).then((result) => {
+                              // 用户取消分享：静默关 sheet，不报“已分享”。
+                              setMomentOpen(false);
+                              if (!result || result.action === Share.sharedAction) setMomentMsg("邀请已分享");
+                            }).catch(() => {
+                              // 调起失败：sheet 保持打开并给重试机会，不吞错。
+                              setMomentMsg("分享没有调起，请重试。");
+                            }).finally(() => setMomentBusy(false));
+                          }}
                           style={[styles.gridCta, { marginTop: 10 }]}
                           accessibilityLabel="分享邀约"
                         >
-                          <Text style={styles.gridCtaText}>分享邀请 →</Text>
+                          <Text style={styles.gridCtaText}>{momentBusy ? "分享中…" : "分享邀请 →"}</Text>
                         </Pressable>
                       </View>
                     </Pressable>
@@ -708,66 +965,14 @@ export function RequesterHome({
         </>
       ) : null}
 
-      {sceneBriefs.length > 0 ? (
-        <View>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>场景</Text>
-            <Text style={styles.sectionHint}>{activeSceneCount > 0 ? `${activeSceneCount} 个正在发生` : `${sceneBriefs.length} 个待探索`}</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sceneWideRail}>
-            {sceneBriefs.slice(0, 6).map((s) => (
-              <Pressable key={s.id} onPress={() => onOpenSceneMap?.(s.id)} style={styles.sceneWideCard} accessibilityLabel={`场景 ${s.name}`}>
-                {s.imageUrl ? <Image source={{ uri: s.imageUrl }} style={styles.sceneWideImage} /> : <View style={styles.sceneWideImageMissing} />}
-                <Text style={styles.sceneCardName} numberOfLines={1}>{s.name}</Text>
-                <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.area}{s.type ? ` · ${s.type}` : ""}</Text>
-                {s.best ? <Text style={styles.sceneCardMeta} numberOfLines={1}>{s.best}</Text> : null}
-              </Pressable>
-            ))}
-          </ScrollView>
+      {/* “继续进行”是状态机投影，不是常驻导航。只有服务端返回真实草稿/
+          订单状态时才出现；0、匿名、初始加载和首次失败均不占首页空间。 */}
+      {continueItems.length > 0 ? <View>
+        <View style={styles.sectionHead}>
+          <Text style={styles.sectionTitle}>继续进行</Text>
+          <Text style={styles.sectionHint}>{continueItems.length} 项</Text>
         </View>
-      ) : null}
-
-      {storeActivities.length > 0 ? (
-        <View>
-          <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>店铺场景活动</Text>
-            <Text style={styles.sectionHint}>报名 · 到店 · 复盘</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sceneRail}>
-            {storeActivities.slice(0, 8).map((a) => (
-              <Pressable key={a.activityId} onPress={() => onOpenMarket?.("ACTIVITY")} style={styles.sceneCard} accessibilityLabel={`活动 ${a.title}`}>
-                <Text style={styles.sceneCardName} numberOfLines={1}>{a.title}</Text>
-                <Text style={styles.sceneCardMeta} numberOfLines={1}>{a.venueName}{a.time ? ` · ${a.time}` : ""}</Text>
-                <Text style={styles.sceneCardDesc} numberOfLines={2}>{a.joined > 0 ? `${a.joined} 人已参加` : "等你来开场"}{a.capacity > 0 ? ` · 限 ${a.capacity} 人` : ""}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      {/* R15.34: 继续进行 — 大 thumb 卡片 list。只渲染 server 返回的
-          continueItems；未加载/失败时显示诚实状态，不展示假数据。 */}
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionTitle}>继续进行</Text>
-        <Text style={styles.sectionHint}>
-          {homeItemsState === "loaded"
-            ? `${continueItems.length} 项`
-            : homeItemsState === "error"
-            ? " · 加载失败"
-            : homeItemsState === "loading"
-            ? " · 加载中"
-            : ""}
-        </Text>
-      </View>
-      {continueItems.length === 0 ? (
-        <View style={styles.actionCard}>
-          <View style={styles.actionCopy}>
-            <Text style={styles.actionTitle}>没有进行中的需求</Text>
-            <Text style={styles.actionSub}>在上方输入开始一个新草稿。</Text>
-          </View>
-        </View>
-      ) : (
-        (homeItemsState === "loaded" ? continueItems : []).map((item) => (
+        {continueItems.map((item) => (
           <Pressable
             key={item.key}
             onPress={() => onOpenMarket?.("OPPORTUNITY")}
@@ -793,13 +998,78 @@ export function RequesterHome({
               <Text style={styles.continueChevron}>›</Text>
             )}
           </Pressable>
-        ))
-      )}
-      {homeItemsState === "loading" ? (
-        <Text style={styles.emptyNote}>加载中…</Text>
-      ) : homeItemsState === "error" ? (
-        <Text style={styles.emptyNote}>加载失败，下拉或稍后重试</Text>
-      ) : null}
+        ))}
+      </View> : null}
+
+      {/* Scene/Activity 是撮合完成后的见面道具，不抢人物发现首屏。
+          放在进行中链路之后，并替代旧的重复“场景”横栏。 */}
+      <View style={styles.sectionHead}>
+        <Text style={styles.peopleTitle}>附近场景</Text>
+        <Pressable accessibilityLabel="打开附近场景地图" onPress={() => onOpenSceneMap?.()}>
+          <Text style={styles.filterTriggerText}>地图 〉</Text>
+        </Pressable>
+      </View>
+      <SceneActivityDiscovery
+        apiBaseUrl={sceneApiBaseUrl}
+        scenes={sceneBriefs}
+        onOpenScene={(sceneId) => onOpenSceneMap?.(sceneId)}
+        onCompose={(prompt) => handleExecuteHomeQuery(prompt)}
+      />
+
+      {humanScenePreview ? <Modal animationType="slide" onRequestClose={() => setHumanScenePreview(undefined)} visible>
+        <View style={styles.humanScenePage}>
+          <View style={[styles.humanSceneHeader, { height: 54 + safeArea.top, paddingTop: safeArea.top }]}><Pressable accessibilityLabel="返回Home" hitSlop={12} onPress={() => setHumanScenePreview(undefined)} style={styles.humanSceneBack}><Text style={styles.humanSceneBackText}>‹ 返回</Text></Pressable><Text style={styles.humanSceneHeaderTitle}>真人主页</Text><View style={styles.humanSceneHeaderSpacer} /></View>
+            <ScrollView contentContainerStyle={styles.humanSceneContent} showsVerticalScrollIndicator={false}>
+              <View style={styles.humanSceneTop}>
+                <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? "附近 · 现在可见" : "附近推荐"}</Text>
+              </View>
+              <View style={styles.humanScenePerson}>
+                <View style={styles.humanSceneAvatarRing}>{humanScenePreview.person.photoUri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: humanScenePreview.person.photoUri }} style={styles.humanSceneAvatar} transition={0} /> : <Text style={styles.humanSceneInitials}>{humanScenePreview.person.initials}</Text>}</View>
+                <View style={styles.humanScenePersonCopy}>
+                  <Text style={styles.humanSceneName}>{humanScenePreview.person.name}</Text>
+                  <Text style={styles.humanSceneBio}>{humanScenePreview.person.bio}</Text>
+                  {humanScenePreview.person.rating !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneRating}>★ {humanScenePreview.person.rating.toFixed(1)} · {humanScenePreview.person.completedActivities} 次活动记录</Text> : null}
+                </View>
+              </View>
+              <View style={styles.humanSceneActionsTop}>
+                <Pressable accessibilityLabel={relationshipLabel(humanScenePreview.person.id, humanScenePreview.person.name)} disabled={relationshipBusyId === humanScenePreview.person.id || relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND"} onPress={() => void handleHomeFriend(humanScenePreview.person.id, humanScenePreview.person.name)} style={[styles.humanSceneTopAction, styles.humanSceneTopActionPrimary, (relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" || relationshipStates.get(humanScenePreview.person.id) === "FRIEND") && styles.humanSceneAddDone]}><Text style={styles.humanSceneTopActionPrimaryText}>{relationshipBusyId === humanScenePreview.person.id ? "添加中…" : relationshipStates.get(humanScenePreview.person.id) === "OUTGOING" ? "添加中" : relationshipStates.get(humanScenePreview.person.id) === "FRIEND" ? "✓ 已添加" : relationshipStates.get(humanScenePreview.person.id) === "INCOMING" ? "接受添加" : "+ 添加"}</Text></Pressable>
+                <Pressable accessibilityLabel="查看主页" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanProfile?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>主页</Text></Pressable>
+                <Pressable accessibilityLabel="发消息" onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onMessageHuman?.(person); }} style={styles.humanSceneTopAction}><Text style={styles.humanSceneTopActionText}>发消息</Text></Pressable>
+              </View>
+              {relationshipMsg ? <Text style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
+              <View style={styles.humanSceneFacts}>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? "查看可用时间"}</Text></View>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
+                <Pressable accessibilityLabel="查看公开历史活动" onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? `${humanScenePreview.person.completedActivities} 次历史活动 ›` : "暂无公开记录"}</Text></Pressable>
+              </View>
+              {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text style={styles.humanSceneHistoryTitle}>本人公开的活动记录</Text><Text style={styles.humanSceneHistoryPrivacy}>非公开记录不展示</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text style={styles.humanSceneHistoryName}>{item.title}</Text><Text style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text style={styles.humanSceneHistoryEmpty}>她暂未公开活动明细。</Text>}</View> : null}
+              <Text style={styles.humanSceneSectionTitle}>她可以做什么</Text>
+              <View style={styles.humanScenePills}>{humanScenePreview.person.capabilities?.map((item) => <View key={item} style={styles.humanScenePill}><Text style={styles.humanScenePillText}>{item}</Text></View>)}</View>
+              <Text style={styles.humanSceneSectionTitle}>与当前推荐的关联</Text>
+              <View style={styles.humanSceneLinkRow}>
+                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前动作</Text><Text style={styles.humanSceneLinkValue}>{recommendActionLabel}</Text></View>
+                <Pressable accessibilityLabel="查看完整场景" onPress={() => { const current = humanScenePreview; setHumanScenePreview(undefined); onOpenHumanScene?.(current.person, current.sceneId); }} style={styles.humanSceneLinkCard}>
+                  {previewSceneImage ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: previewSceneImage }} style={StyleSheet.absoluteFill} transition={0} /> : null}
+                  <View style={styles.humanSceneLinkShade} />
+                  <Text style={styles.humanSceneLinkLabelLight}>当前 Scene</Text><Text style={styles.humanSceneLinkValueLight}>{previewScene?.name ?? humanScenePreview.person.sceneNames?.[0] ?? "查看场景"} ›</Text>
+                </Pressable>
+                <View style={styles.humanSceneLinkChip}><Text style={styles.humanSceneLinkLabel}>当前主题</Text><Text style={styles.humanSceneLinkValue}>{humanScenePreview.person.themes?.slice(0, 2).join(" · ") || recommendFeed.sceneTag}</Text></View>
+              </View>
+              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>关联主题</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.themes?.join(" · ") || recommendFeed.sceneTag}</Text><Text style={styles.humanSceneDetailTitle}>适合场景</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.sceneNames?.join(" · ") || previewScene?.name || "附近都市场景"}</Text><Text style={styles.humanSceneDetailTitle}>语言</Text><Text style={styles.humanSceneDetailText}>{humanScenePreview.person.languages?.join(" · ") || "以主页资料为准"}</Text></View>
+              <View style={styles.humanSceneDetailCard}><Text style={styles.humanSceneDetailTitle}>历史信誉与评价</Text>{humanScenePreview.person.rating !== undefined && humanScenePreview.person.positiveRate !== undefined && humanScenePreview.person.completedActivities !== undefined ? <Text style={styles.humanSceneTrust}>★ {humanScenePreview.person.rating.toFixed(1)} · 好评 {humanScenePreview.person.positiveRate}% · {humanScenePreview.person.completedActivities} 次活动</Text> : null}<Text style={styles.humanSceneDetailText}>{humanScenePreview.person.reviewSummary ?? "暂无公开评价摘要"}</Text></View>
+              {previewSceneOptions.length > 0 ? <>
+                <View style={styles.humanSceneSceneHead}><Text style={styles.humanSceneSectionTitle}>当前可一起去</Text><Text style={styles.humanSceneSceneHint}>场景建议</Text></View>
+                <View style={styles.humanSceneSceneRow}>{previewSceneOptions.map((scene) => {
+                  const uri = /^https?:\/\//i.test(scene.imageUrl) ? scene.imageUrl : sceneApiBaseUrl ? `${sceneApiBaseUrl.replace(/\/$/, "")}/${scene.imageUrl.replace(/^\//, "")}` : undefined;
+                  return <Pressable accessibilityLabel={`查看${scene.name}`} key={scene.id} onPress={() => { const person = humanScenePreview.person; setHumanScenePreview(undefined); onOpenHumanScene?.(person, scene.id); }} style={styles.humanSceneSceneCard}>
+                    {uri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri }} style={StyleSheet.absoluteFill} transition={0} /> : null}<View style={styles.humanSceneSceneShade} /><Text numberOfLines={1} style={styles.humanSceneSceneName}>{scene.name}</Text><Text numberOfLines={1} style={styles.humanSceneSceneMeta}>{scene.area || scene.best || "附近场景"}</Text>
+                  </Pressable>;
+                })}</View>
+              </> : null}
+              <Text style={styles.humanSceneReason}>时间可配、距离较近，动作与主题匹配；场景只是见面建议，是否参加仍由双方确认。</Text>
+            </ScrollView>
+        </View>
+      </Modal> : null}
 
       {/* R15.34: 推荐筛选 sheet — 5 个 chip 叠加过滤 (多选)，Modal 模态。
           之前是 ScrollView 内的 absolute 定位，bottom 落在滚动内容最底下，
@@ -855,8 +1125,8 @@ const styles = StyleSheet.create({
   aiSub: { color: color.muted, fontSize: 11, marginTop: 3 },
   aiBadge: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
   aiBadgeText: { color: color.violet, fontSize: 11, fontWeight: "900" },
-  aiRail: { marginBottom: 10 },
-  aiRailContent: { gap: 15, paddingHorizontal: 16 },
+  aiRail: { marginBottom: 10, marginHorizontal: -16 },
+  aiRailContent: { gap: 12, paddingHorizontal: 16 },
   aiCard: { alignItems: "center", width: 104 },
   aiAvatar: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, height: 88, width: 88 },
   aiName: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 7, textAlign: "center" },
@@ -890,6 +1160,10 @@ const styles = StyleSheet.create({
   composerSingleChev: { color: color.muted, fontSize: 18, fontWeight: "800" },
   composerCollapse: { alignItems: "center", paddingVertical: 6 },
   composerCollapseText: { color: color.muted, fontSize: 11, fontWeight: "700" },
+  // Home Search/Conversation v3：意图确认 chip — 命中 remix/exchange 后的
+  // 明确执行入口，样式跟基线 CTA 一致（ink 底白字）。
+  searchActionChip: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, marginTop: 7, paddingVertical: 13 },
+  searchActionText: { color: color.white, fontSize: 13, fontWeight: "800" },
   gridStage: { position: "relative" },
   grid4: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   gridRemixButton: { alignItems: "center", backgroundColor: "#171715", borderColor: color.offWhite, borderRadius: 29, borderWidth: 2, elevation: 7, height: 58, justifyContent: "center", left: "50%", marginLeft: -29, marginTop: -24, position: "absolute", top: "50%", width: 58, zIndex: 8 },
@@ -943,11 +1217,6 @@ const styles = StyleSheet.create({
   momentImageMissing: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 12, height: 120, justifyContent: "center", width: "100%" },
   momentLabel: { color: color.ink, fontSize: 12, fontWeight: "700" },
   momentCopy: { color: color.ink, fontSize: 14, fontWeight: "700", lineHeight: 20, marginTop: 10, textAlign: "center" },
-  sceneRail: { gap: 10, paddingRight: 16, paddingVertical: 4 },
-  sceneCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 3, padding: 11, width: 208 },
-  sceneCardName: { color: color.ink, fontSize: 14, fontWeight: "900" },
-  sceneCardMeta: { color: color.muted, fontSize: 11, lineHeight: 15 },
-  sceneCardDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 2 },
 
   // 基线 .r157Action：white card，icon 块 + 标题/副标题 + 右侧数值。
   actionCard: {
@@ -986,6 +1255,74 @@ const styles = StyleSheet.create({
   peopleHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginTop: 18, marginBottom: 12 },
   peopleTitleRow: { alignItems: "center", flexDirection: "row", gap: 8 },
   peopleTitle: { color: color.ink, fontSize: 22, fontWeight: "800", lineHeight: 26 },
+  humanScenePage: { backgroundColor: "#162030", flex: 1 },
+  humanSceneHeader: { alignItems: "center", backgroundColor: "#162030", borderBottomColor: "rgba(255,255,255,0.12)", borderBottomWidth: 1, flexDirection: "row", height: 54, paddingHorizontal: 16 },
+  humanSceneBack: { flex: 1 },
+  humanSceneBackText: { color: "#DCE6F7", fontSize: 14, fontWeight: "800" },
+  humanSceneHeaderTitle: { color: color.white, fontSize: 16, fontWeight: "900" },
+  humanSceneHeaderSpacer: { flex: 1 },
+  humanSceneContent: { padding: 18, paddingBottom: 40 },
+  humanSceneTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  humanSceneEyebrow: { color: "#DCE6F7", fontSize: 12, fontWeight: "700" },
+  humanSceneClose: { alignItems: "center", borderColor: "rgba(255,255,255,0.35)", borderRadius: 21, borderWidth: 1, height: 42, justifyContent: "center", width: 42 },
+  humanSceneCloseText: { color: color.white, fontSize: 27, fontWeight: "300", lineHeight: 30 },
+  humanScenePerson: { alignItems: "center", flexDirection: "row", gap: 14, marginTop: 10 },
+  humanSceneAvatarRing: { alignItems: "center", borderColor: "rgba(150,203,255,0.9)", borderRadius: 999, borderWidth: 2, height: 96, justifyContent: "center", padding: 3, width: 96 },
+  humanSceneAvatar: { borderRadius: 999, height: "100%", width: "100%" },
+  humanSceneInitials: { color: color.white, fontSize: 24, fontWeight: "900" },
+  humanScenePersonCopy: { flex: 1, minWidth: 0 },
+  humanSceneName: { color: color.white, fontSize: 28, fontWeight: "900" },
+  humanSceneBio: { color: "#CFDAEA", fontSize: 13, lineHeight: 18, marginTop: 4 },
+  humanSceneRating: { color: "#FFCE55", fontSize: 12, fontWeight: "800", marginTop: 6 },
+  humanSceneActionsTop: { flexDirection: "row", gap: 8, marginTop: 16 },
+  humanSceneTopAction: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", borderColor: "rgba(255,255,255,0.24)", borderRadius: 999, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 46 },
+  humanSceneTopActionPrimary: { backgroundColor: "#586CFF", borderColor: "#586CFF" },
+  humanSceneTopActionText: { color: color.white, fontSize: 13, fontWeight: "900" },
+  humanSceneTopActionPrimaryText: { color: color.white, fontSize: 13, fontWeight: "900" },
+  humanSceneFacts: { flexDirection: "row", gap: 7, marginTop: 14 },
+  humanSceneFact: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 14, borderWidth: 1, flex: 1, gap: 5, justifyContent: "center", minHeight: 62, paddingHorizontal: 6 },
+  humanSceneFactValue: { color: "#DCE6F7", fontSize: 11, fontWeight: "700", textAlign: "center" },
+  humanSceneHistory: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 16, borderWidth: 1, marginTop: 9, padding: 12 },
+  humanSceneHistoryHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+  humanSceneHistoryTitle: { color: color.white, fontSize: 13, fontWeight: "900" },
+  humanSceneHistoryPrivacy: { color: "#AAB9CE", fontSize: 11 },
+  humanSceneHistoryRow: { alignItems: "center", borderTopColor: "rgba(255,255,255,0.12)", borderTopWidth: 1, flexDirection: "row", paddingVertical: 10 },
+  humanSceneHistoryCopy: { flex: 1 },
+  humanSceneHistoryName: { color: color.white, fontSize: 13, fontWeight: "800" },
+  humanSceneHistoryMeta: { color: "#AAB9CE", fontSize: 11, marginTop: 3 },
+  humanSceneHistoryRating: { color: "#FFCE55", fontSize: 12, fontWeight: "900" },
+  humanSceneHistoryEmpty: { color: "#AAB9CE", fontSize: 12, paddingVertical: 12 },
+  humanScenePills: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 9 },
+  humanScenePill: { backgroundColor: "rgba(88,108,255,0.2)", borderColor: "rgba(150,203,255,0.45)", borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+  humanScenePillText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  humanSceneSectionTitle: { color: color.white, fontSize: 14, fontWeight: "900", marginTop: 18 },
+  humanSceneLinkRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  humanSceneLinkChip: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.2)", borderRadius: 14, borderWidth: 1, flex: 1, minHeight: 72, padding: 10 },
+  humanSceneLinkCard: { borderColor: "rgba(255,255,255,0.2)", borderRadius: 14, borderWidth: 1, flex: 1.2, minHeight: 72, overflow: "hidden", padding: 10 },
+  humanSceneLinkShade: { backgroundColor: "rgba(8,13,24,0.48)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  humanSceneLinkLabel: { color: "#AAB9CE", fontSize: 11 },
+  humanSceneLinkValue: { color: color.white, fontSize: 12, fontWeight: "800", marginTop: 8 },
+  humanSceneLinkLabelLight: { color: "#E0E8F4", fontSize: 11 },
+  humanSceneLinkValueLight: { color: color.white, fontSize: 12, fontWeight: "900", marginTop: 8 },
+  humanSceneSceneHead: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 13 },
+  humanSceneSceneHint: { color: "#AAB9CE", fontSize: 11 },
+  humanSceneSceneRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  humanSceneSceneCard: { borderColor: "rgba(255,255,255,0.2)", borderRadius: 15, borderWidth: 1, flex: 1, height: 92, justifyContent: "flex-end", overflow: "hidden", padding: 10 },
+  humanSceneSceneShade: { backgroundColor: "rgba(8,13,24,0.35)", bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  humanSceneSceneName: { color: color.white, fontSize: 13, fontWeight: "900" },
+  humanSceneSceneMeta: { color: "#E0E8F4", fontSize: 11, marginTop: 2 },
+  humanSceneDetailCard: { backgroundColor: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.18)", borderRadius: 16, borderWidth: 1, marginTop: 12, padding: 13 },
+  humanSceneDetailTitle: { color: "#AAB9CE", fontSize: 11, fontWeight: "700", marginTop: 4 },
+  humanSceneDetailText: { color: color.white, fontSize: 13, lineHeight: 19, marginBottom: 7, marginTop: 4 },
+  humanSceneTrust: { color: "#FFCE55", fontSize: 13, fontWeight: "900", marginTop: 7 },
+  humanSceneReason: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 14, color: "#DCE6F7", fontSize: 12, lineHeight: 18, marginTop: 12, padding: 11 },
+  humanSceneNotice: { color: "#FFCE55", fontSize: 11, marginTop: 8 },
+  humanSceneAdd: { alignItems: "center", backgroundColor: "#586CFF", borderRadius: 999, flexDirection: "row", gap: 7, justifyContent: "center", marginTop: 12, minHeight: 48 },
+  humanSceneAddDone: { backgroundColor: "rgba(255,255,255,0.14)", borderColor: "rgba(255,255,255,0.3)", borderWidth: 1 },
+  humanSceneAddText: { color: color.white, fontSize: 14, fontWeight: "900" },
+  humanSceneActions: { flexDirection: "row", gap: 8, marginTop: 9 },
+  humanSceneAction: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.86)", borderRadius: 999, flex: 1, flexDirection: "row", gap: 7, justifyContent: "center", minHeight: 44 },
+  humanSceneActionText: { color: color.ink, fontSize: 13, fontWeight: "900" },
   humanBadge: { backgroundColor: "#EAF7EE", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   humanBadgeText: { color: "#18733B", fontSize: 11, fontWeight: "900" },
   peopleSceneTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 5 },
@@ -1022,6 +1359,7 @@ const styles = StyleSheet.create({
   // + 好友徽标：右下黑圆白字，加完变绿勾。真人 stories 和 AI 头像共用。
   addBadge: { alignItems: "center", backgroundColor: "#171715", borderColor: color.white, borderRadius: 999, borderWidth: 2, bottom: -2, height: 28, justifyContent: "center", position: "absolute", right: -2, width: 28 },
   addBadgeDone: { backgroundColor: "#18733B" },
+  addBadgePending: { backgroundColor: "#66511F" },
   addBadgeText: { color: color.white, fontSize: 16, fontWeight: "900", lineHeight: 20 },
   aiAvatarWrap: { position: "relative" },
   followMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },

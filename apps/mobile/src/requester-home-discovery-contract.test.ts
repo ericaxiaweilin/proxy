@@ -9,13 +9,37 @@ const scene = readFileSync(fileURLToPath(new URL("./surfaces/reality-scene-map.t
 const fixtures = readFileSync(fileURLToPath(new URL("./recommend-fixtures.ts", import.meta.url)), "utf8");
 const locationPicker = readFileSync(fileURLToPath(new URL("./components/location-picker-sheet.tsx", import.meta.url)), "utf8");
 const mapCanvas = readFileSync(fileURLToPath(new URL("./components/map-canvas.tsx", import.meta.url)), "utf8");
+const searchDock = readFileSync(fileURLToPath(new URL("./components/home-search-dock.tsx", import.meta.url)), "utf8");
+const homeAssistant = readFileSync(fileURLToPath(new URL("./surfaces/home-assistant.tsx", import.meta.url)), "utf8");
 
 describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   it("puts the unified search and model conversation before discovery sections", () => {
-    const intent = source.indexOf('accessibilityLabel="搜索或询问 Proxy"');
-    expect(intent).toBeGreaterThan(-1);
-    expect(intent).toBeLessThan(source.indexOf(">真人推荐<"));
-    expect(source).toContain("搜索场景、地点，或问 Proxy");
+    // Home Search/Conversation v3：常驻搜索 dock，AI 标识另进持久会话。
+    expect(searchDock).toContain('accessibilityLabel="搜索人、活动、地点或时间"');
+    expect(searchDock).toContain('accessibilityLabel="打开 Proxy AI 对话"');
+    expect(searchDock).toContain("onPress={onOpenConversation}");
+    expect(searchDock).toContain("想找谁、去哪、做什么？");
+    expect(searchDock).toContain('accessibilityLabel="添加照片"');
+    expect(searchDock).toContain('"语音输入"');
+    expect(searchDock).toContain('accessibilityLabel="发送"');
+    const dockUse = source.indexOf("<HomeSearchDock");
+    expect(dockUse).toBeGreaterThan(-1);
+    expect(dockUse).toBeLessThan(source.indexOf(">真人推荐<"));
+    expect((searchDock.match(/<TextInput\s/g) ?? [])).toHaveLength(1);
+    expect(searchDock).toContain("<View style={styles.searchShell}>");
+    expect(searchDock).toContain('name="camera" size={24}');
+    expect(searchDock).toContain('name="microphone" size={24}');
+    expect(searchDock).toContain('name="spark" size={25}');
+    expect(shell).not.toContain("externalComposer");
+    expect(shell).toContain("onOpenAssistantConversation={openProxyAIConversation}");
+    expect(shell).toContain('setHomeAssistant({ text: "" })');
+    expect(source).not.toContain("threadTurns");
+    expect(source).toContain("模型对话只能由左侧 AI 标识显式进入");
+    expect(source).not.toContain("自由自然语言 -> 走现有模型对话");
+    expect(homeAssistant).toContain('originType: "HOME"');
+    expect(homeAssistant).toContain('participantId: "proxy_ai"');
+    expect(homeAssistant).toContain('originId: "proxy_ai_home"');
+    expect(homeAssistant).toContain("!externalComposer ? <View style={styles.composer}>");
   });
   it("keeps the labeled human section before the labeled AI section", () => {
     const human = source.indexOf(">真人推荐<");
@@ -26,18 +50,73 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain(">AI 生成<");
   });
 
+  it("keeps matchmaking above nearby scenes because Scene is a meeting tool, not inventory", () => {
+    const human = source.indexOf(">真人推荐<");
+    const ai = source.indexOf(">AI 推荐<");
+    const composition = source.indexOf(">为你组合<");
+    const activeWork = source.indexOf(">继续进行<");
+    const sceneInspiration = source.indexOf(">附近场景<");
+    expect(sceneInspiration).toBeGreaterThan(activeWork);
+    expect(activeWork).toBeGreaterThan(composition);
+    expect(composition).toBeGreaterThan(ai);
+    expect(ai).toBeGreaterThan(human);
+    expect(source).toContain("打开附近场景地图");
+    expect((source.match(/<SceneActivityDiscovery/g) ?? [])).toHaveLength(1);
+  });
+
   it("keeps human discovery as circle-and-name nodes that preserve the real Scene context", () => {
-    expect(source).toContain("onPress={() => onOpenHumanScene?.(p, recommendFeed.boundSceneId)}");
+    expect(source).toContain("setHumanScenePreview({ person: p, sceneId: recommendFeed.boundSceneId })");
+    expect(source).toContain('accessibilityLabel="查看完整场景"');
     expect(source).not.toContain('testID="human-node-reveal"');
     expect(source).not.toContain("styles.recCard");
     expect(source).not.toContain("styles.storyHint");
     expect(source).toContain("p.photoUri ? <Image");
     expect(source).toContain("styles.avatarPhoto");
-    // 真人头像右下 + 徽标一键加好友，点头像本身仍走 Scene（下一条不断言的路由不变）。
-    expect(source).toContain("toggleHomeFollow(p.id, p.name)");
+    // 真人头像右下 + 徽标走真实好友申请，点头像本身仍走 Scene。
+    expect(source).toContain("handleHomeFriend(p.id, p.name)");
     expect(source).toContain("styles.addBadge");
-    expect(fixtures).toContain("R34_HUMAN_PORTRAITS");
+    // IDENTITY-ID-001: 头像不再是客户端自带的原型肖像（按下标轮转，与身份无关），
+    // 而是按 id 取账号的媒体资产 —— 同一个人在任何页面都是同一张图。
+    expect(fixtures).not.toContain("R34_HUMAN_PORTRAITS");
+    expect(fixtures).not.toContain("images.unsplash.com");
+    expect(fixtures).toContain("ACCOUNT_AVATAR_ASSET");
+    expect(fixtures).toContain("/v1/media/thumb/");
     expect(fixtures).toContain("withR34Portraits");
+  });
+
+  it("keeps the linked human Scene preview connected to friendship, profile and messaging workflows", () => {
+    expect(source).toContain("handleHomeFriend(humanScenePreview.person.id");
+    expect(source).toContain('"添加中"');
+    expect(source).toContain('accessibilityLabel="查看主页"');
+    expect(source).toContain('accessibilityLabel="发消息"');
+    expect(source).toContain("onOpenHumanProfile?.(person)");
+    expect(source).toContain("onMessageHuman?.(person)");
+    expect(source).toContain("person.availabilityText");
+    expect(source).toContain("person.rating");
+    expect(source).toContain("person.completedActivities");
+    expect(source).toContain(">当前主题<");
+    expect(source).toContain(">当前可一起去<");
+    expect(source).toContain("previewSceneOptions.map");
+    expect(fixtures).toContain("availabilityText");
+    expect(source).toContain('style={styles.humanScenePage}');
+    expect(source).toContain('style={styles.humanSceneActionsTop}');
+    expect(source).toContain(">她可以做什么<");
+    expect(source).toContain(">历史信誉与评价<");
+    expect(source).not.toContain("位共同好友");
+    expect(fixtures).not.toContain('{ id: "mutual", label: "共同好友" }');
+    expect(fixtures).toContain('sceneNames: person.id === "u_linh"');
+    expect(source).toContain('accessibilityLabel="返回Home"');
+    expect(source).toContain("safeArea.top");
+    expect(source).toContain('accessibilityLabel="查看公开历史活动"');
+    expect(source).toContain("publicActivityHistory?.length");
+    expect(source).toContain("非公开记录不展示");
+  });
+
+  it("reuses the approved Scene action logo registry in the compact Home action rail", () => {
+    expect(source).toContain("SCENE_ACTIONS.find");
+    expect(source).toContain('modeId === "PHOTO" ? "photo"');
+    expect(source).toContain('modeId === "COMPANION" ? "city-walk"');
+    expect(source).not.toContain('modeId === "PHOTO" ? "camera"');
   });
 
   it("keeps AI discovery circular and opens the non-physical AI profile directly", () => {
@@ -48,10 +127,12 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain('testID="ai-scene-preview"');
     expect(source).not.toContain("setSelectedAIAccount");
     expect(source).not.toContain("onPress={() => onOpenAIScene?.(account)}");
-    // Owner 决议：一键加好友可以在首页做（+ 徽标直调 follow），发消息仍只能进主页。
-    expect(source).toContain("toggleHomeFollow");
-    expect(source).toContain("engagement.followProfile");
-    expect(source).toContain("加好友 ${");
+    // Owner 决议：AI 也是可寻址账户，使用同一套好友关系；发消息仍从主页进入。
+    expect(source).toContain("relationship.sendFriendRequest(id)");
+    expect(source).toContain("relationship.acceptFriendRequest(id)");
+    expect(source).toContain("relationship.listMyFriendships()");
+    expect(source).toContain("好友申请已发送");
+    expect(source).not.toContain("engagement.followProfile");
     expect(source).not.toContain("onMessageAI?.(account)");
     expect(scene).toContain('testID="human-scene-binding"');
     expect(scene).toContain("onOpenHumanProfile?.(featuredHuman)");
@@ -101,6 +182,14 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain("styles.chooserItem");
     expect(source).toContain("<HorizontalSwipeRail contentContainerStyle={styles.photoChooserRail}>");
     expect(source).toContain("<HorizontalSwipeRail contentContainerStyle={styles.timeChooserRail}>");
+  });
+
+  it("hard-disables root page swiping for the whole chooser lifetime", () => {
+    expect(source).toContain("onChooserVisibilityChange?.(chooser !== null)");
+    expect(source).toContain("onChooserVisibilityChange?.(false)");
+    expect(shell).toContain("if (rootSwipeBlockedRef.current) return false");
+    expect(shell).toContain("const canSwipeRoot = !rootSwipeBlockedRef.current");
+    expect(shell).toContain("onChooserVisibilityChange={setRootSwipeBlocked}");
   });
 
   it("keeps relationship and messaging actions inside the profile", () => {

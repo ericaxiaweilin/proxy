@@ -12,6 +12,7 @@ import {
 } from "expo-speech-recognition";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { color } from "../theme";
+import { type HomeSearchSuggestion } from "../home-search-intent";
 
 export type HomeIntentMode = "SERVICE" | "ORDER" | "ACTIVITY";
 export type HomeAttachment = {
@@ -28,6 +29,11 @@ interface HomeChatBoxProps {
   mode?: HomeIntentMode | undefined;
   onSelectMode?: ((mode: HomeIntentMode) => void) | undefined;
   onSend: (text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void;
+  // Home Search/Conversation v3：输入实时回传给父层做全站实体匹配。
+  // 可选 — 不传时行为与 R15.12.7 基线完全一致（纯模型对话）。
+  onQueryChange?: ((text: string) => void) | undefined;
+  searchSuggestions?: ReadonlyArray<HomeSearchSuggestion> | undefined;
+  onApplySuggestion?: ((suggestion: HomeSearchSuggestion) => void) | undefined;
 }
 
 const SEMANTIC_MODES: ReadonlyArray<{ id: HomeIntentMode; icon: ProxyIconName; label: string; placeholder: string }> = [
@@ -48,7 +54,10 @@ export function HomeChatBox({
   placeholder = "直接告诉 Proxy 你现在想做什么…",
   mode,
   onSelectMode,
-  onSend
+  onSend,
+  onQueryChange,
+  searchSuggestions,
+  onApplySuggestion
 }: HomeChatBoxProps): React.JSX.Element {
   const [text, setText] = useState("");
   const [voiceState, setVoiceState] = useState<"IDLE" | "LISTENING" | "DONE">("IDLE");
@@ -65,7 +74,7 @@ export function HomeChatBox({
   });
   useSpeechRecognitionEvent("result", (event) => {
     const transcript = event.results[0]?.transcript?.trim();
-    if (transcript) setText(transcript);
+    if (transcript) handleQueryChange(transcript);
     if (event.isFinal) setVoiceState("DONE");
   });
   useSpeechRecognitionEvent("end", () => {
@@ -93,11 +102,17 @@ export function HomeChatBox({
     ExpoSpeechRecognitionModule.abort();
   }, []);
 
+  function handleQueryChange(next: string): void {
+    setText(next);
+    onQueryChange?.(next);
+  }
+
   function handleSend(): void {
     const trimmed = text.trim();
     if (!trimmed) return;
     onSend(trimmed, mode, photo);
     setText("");
+    onQueryChange?.("");
     setPhoto(undefined);
     setVoiceState("IDLE");
   }
@@ -169,7 +184,7 @@ export function HomeChatBox({
           accessibilityLabel={`向 Proxy 输入需求（${contextLabel}）`}
           multiline
           maxLength={500}
-          onChangeText={setText}
+          onChangeText={handleQueryChange}
           placeholder=""
           placeholderTextColor="#A9A2B0"
           style={styles.input}
@@ -203,6 +218,26 @@ export function HomeChatBox({
         </Pressable>
       </View>
 
+      {/* Home Search/Conversation v3：同一条输入既可搜也可聊 — 输入时
+          命中站内实体（人/时段/活动/场景）就出候选 chips，点选直接套入
+          四宫格；没命中继续走模型对话。相机/语音按钮不动。 */}
+      {searchSuggestions && searchSuggestions.length > 0 ? (
+        <View style={styles.searchRow}>
+          {searchSuggestions.map((s) => (
+            <Pressable
+              key={`${s.slot}:${s.id}`}
+              accessibilityLabel={`套入${SLOT_LABEL[s.slot]} ${s.label}`}
+              onPress={() => onApplySuggestion?.(s)}
+              style={styles.searchChip}
+            >
+              <Text style={styles.searchChipSlot}>{SLOT_LABEL[s.slot]}</Text>
+              <Text numberOfLines={1} style={styles.searchChipLabel}>{s.label}</Text>
+              {s.detail ? <Text numberOfLines={1} style={styles.searchChipDetail}>{s.detail}</Text> : null}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
       {photo ? (
         <View style={styles.photoPreviewRow}>
           <Image accessibilityLabel="已选择的照片" source={{ uri: photo.uri }} style={styles.photoPreview} />
@@ -217,7 +252,6 @@ export function HomeChatBox({
       ) : null}
 
       {toolError ? <Text accessibilityLiveRegion="polite" style={styles.toolError}>{toolError}</Text> : null}
-
       {photoMenuOpen ? (
         <View style={styles.photoMenu}>
           <Pressable accessibilityLabel="拍照" onPress={() => void choosePhoto("CAMERA")} style={styles.photoMenuItem}>
@@ -254,6 +288,13 @@ function CameraIcon({ color: iconColor }: { color: string }): React.JSX.Element 
 function PhotoIcon({ color: iconColor }: { color: string }): React.JSX.Element {
   return <ProxyIcon color={iconColor} name="image" size={24} />;
 }
+
+const SLOT_LABEL: Record<HomeSearchSuggestion["slot"], string> = {
+  person: "人",
+  time: "时段",
+  activity: "活动",
+  place: "地点"
+};
 
 const styles = StyleSheet.create({
   // 基线 .r157Composer：bg #fff border ln radius 20 padding 12 shadow 0 8 22 rgba(32,16,50,.05) margin 7 0 12。
@@ -359,4 +400,11 @@ const styles = StyleSheet.create({
   quickIcon: { alignItems: "center", height: 24, justifyContent: "center", width: 24 },
   quickLabel: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 18 },
   quickLabelActive: { color: color.white },
+  // Home Search/Conversation v3：候选 chips — 同一条输入搜人/搜场景
+  // 命中站内实体时出现；样式沿用基线 chip 语言（白底 line 边框圆角）。
+  searchRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 },
+  searchChip: { alignItems: "flex-start", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, maxWidth: "100%", paddingHorizontal: 10, paddingVertical: 7 },
+  searchChipSlot: { color: color.muted, fontSize: 11, fontWeight: "700", lineHeight: 15 },
+  searchChipLabel: { color: color.ink, fontSize: 13, fontWeight: "800", lineHeight: 18 },
+  searchChipDetail: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 1 },
 });

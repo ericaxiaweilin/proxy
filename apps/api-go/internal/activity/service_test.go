@@ -500,3 +500,53 @@ func TestMerchantActivityStampRequiresAnnotation(t *testing.T) {
 		t.Fatalf("annotation must stamp merchant: %+v", b2.Activity)
 	}
 }
+
+// R58: 户外场地 + 报名方式 + 主题 + 展示编号。
+func TestPublishActivityR58Fields(t *testing.T) {
+	s := New()
+	publish := func(actor, uniq string, payload map[string]any) command.Result {
+		e := activityEnvelope("PublishActivity", actor, "new")
+		e.CommandID = "PublishActivityR58_" + uniq
+		e.IdempotencyKey = "PublishActivityR58_" + actor + "_" + uniq
+		e.CorrelationID = "corr_r58_" + uniq
+		e.Payload = payload
+		return s.HandleContext(t.Context(), e)
+	}
+	out := publish("owner_r58", "a", map[string]any{
+		"title": "西湖日落骑行", "time": "周六 15:00–18:00", "capacity": 6,
+		"venueName": "西湖", "venueIcon": "🚲", "venueType": "LAKE",
+		"realitySceneId": "scene_westlake", "desc": "一起骑行",
+		"consumptionTerm": "SPLIT", "signupMode": "REVIEW", "theme": "日落",
+	})
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", out)
+	}
+	var body struct {
+		Activity Activity `json:"activity"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	a := body.Activity
+	if a.VenueTypeLabel != "湖边" || a.SignupMode != "REVIEW" || a.Theme != "日落" {
+		t.Fatalf("R58 fields lost: %+v", a)
+	}
+	if len(a.Code) < 12 || a.Code[:5] != "PX-A-" {
+		t.Fatalf("display code malformed: %q", a.Code)
+	}
+	// Default signup is OPEN; bad signup/theme/venue rejected.
+	defOut := publish("owner_r58b", "b", map[string]any{"title": "t", "time": "周六", "capacity": 4, "venueName": "v", "venueType": "PARK", "realitySceneId": "s", "consumptionTerm": "SPLIT"})
+	var defBody struct {
+		Activity Activity `json:"activity"`
+	}
+	if err := json.Unmarshal([]byte(defOut.OperationRef), &defBody); err != nil {
+		t.Fatal(err)
+	}
+	if defBody.Activity.SignupMode != "OPEN" || defBody.Activity.VenueTypeLabel != "公园" {
+		t.Fatalf("defaults wrong: %+v", defBody.Activity)
+	}
+	badOut := publish("owner_r58c", "c", map[string]any{"title": "t", "time": "周六", "capacity": 4, "venueName": "v", "venueType": "PARK", "realitySceneId": "s", "consumptionTerm": "SPLIT", "signupMode": "VIP", "theme": "日落"})
+	if badOut.Outcome != "REJECTED" || badOut.Error == nil || badOut.Error.ErrorCode != "ACTIVITY_SIGNUP_INVALID" {
+		t.Fatalf("bad signup must reject: %+v", badOut)
+	}
+}
