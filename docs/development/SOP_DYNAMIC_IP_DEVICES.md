@@ -62,23 +62,67 @@ EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:4100 pnpm --filter @proxy/mobile start
 |------|------|------|
 | LaunchAgent（API） | `~/Library/LaunchAgents/com.user.kake-dev-api.plist` | `RunAtLoad` + `KeepAlive`，登录自启、崩溃自愈 |
 | LaunchAgent（Metro） | `~/Library/LaunchAgents/com.user.kake-dev-metro.plist` | 同上，跑 `apps/mobile/scripts/dev-ios.sh` |
-| 包装脚本 | `~/bin/kake-dev-api.sh`、`~/bin/kake-dev-metro.sh` | 启动前先回收端口上的残留监听，保证重启不会 `address already in use` |
+| 包装脚本 | `~/bin/kake-dev-api.sh`、`~/bin/kake-dev-metro.sh` | ① 先 unset 会话沙箱环境 ② 已有健康实例则**待命** ③ 否则回收残留监听后启动 |
 | 自愈循环 | `~/bin/kake-dev-supervise.sh` | 进程退出后 5s 重启；供 launchctl 不可用时使用 |
 | 分离器 | `~/bin/kake-dev-detach.sh` | macOS 无 `setsid`，用 double-fork + `setsid` 让服务脱离调用它的 shell（`nohup … & disown` **不够**，会被连坐杀掉） |
 
-日志：`~/Library/Logs/kake/dev-api.log`、`dev-metro.log`
-（**真机 JS 的 `console.log/error` 也会转发到 dev-metro.log**，是排查真机问题的第一现场）。
+**日志：分清两个文件（踩过，会得出相反结论）**
+
+| 文件 | 内容 | 可信度 |
+|------|------|--------|
+| `apps/mobile/.expo/dev/logs/start.log` | Expo 的 **JSON 事件流**：`metro:bundling:*` / `metro:client_log` / `metro:server_log`，带 epoch ms 时间戳 | ✅ **权威**，排查真机问题看这个 |
+| `~/Library/Logs/kake/dev-metro.log` | Metro 的 stdout（含 `iOS Bundled …` 行） | ⚠️ 会**在某时刻起不再增长**，只信它会误判「设备根本没发请求」 |
+
+⚠️ 另有一条**假阴性**：`metro:client_log`（真机 `console.log` 转发）依赖 dev client 的
+websocket，websocket 一断，JS 跑得好好的也一条日志都收不到。
+**判断 JS 是否真在跑，只看设备到 API 的连接数**：
+`lsof -nP -i :4100 | grep -c ESTABLISHED`。详见 **§7.3**。
+
+**⚠️ 包装脚本必须自己洗环境（否则「自愈」是假的）**
+
+包装脚本若由工具会话启动，会继承 `BASH_ENV`（沙箱替身）+ 会话级 broker socket；
+**会话一结束，重启就崩**：
+
+```
+Error: Cannot find module '<repo>/apps/expo/bin/cli'
+Brokered program policy check unavailable
+```
+
+所以两个包装脚本启动前都执行：
+
+```bash
+unset BASH_ENV CODEBUDDY_SAFE_DELETE_BIN_DIR CODEBUDDY_BROKERED_BIN_DIR TOYBOX_SANDBOX_SOCK
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8"
+```
+
+**⚠️ 单一属主（否则 launchd 与 supervisor 会互相杀，无限抖动）**
+
+LaunchAgent（`KeepAlive`）和 `kake-dev-supervise.sh` 跑的是**同一个**包装脚本。
+早期版本两边都「先回收端口再启动」，于是 A 起 → B 杀掉 A → A 被 KeepAlive 拉起 →
+A 杀掉 B ……**永久抖动**。现在包装脚本开头先探健康：
+
+- 端口上**已有健康实例**（`/status` 或 `/health/live` 返回 200）→ **待命阻塞**，不抢；
+- 属主消失 → 待命者接管；
+- 端口有监听但**不健康**（卡死）→ 才回收。
+
+必须是「阻塞」而不是「退出」——`KeepAlive` 会在退出的瞬间把它拉起来，
+变成 10s 一次的空转循环。
+
+**实测**：并发起第二个实例 → 打印 `already served by a healthy instance; standing by`
+且原 Metro PID **不变**；`kill -9` 属主 → **16s 内收敛为恰好一个属主**，之后 56s 稳定不动。
 
 ```bash
 launchctl list | grep kake                                    # 是否被 launchd 托管
 launchctl kickstart -k gui/$(id -u)/com.user.kake-dev-api     # 重启 API
-tail -f ~/Library/Logs/kake/dev-metro.log                     # Metro + 真机日志
+tail -f ~/Library/Logs/kake/dev-metro.log                     # Metro stdout（见上表，别当唯一依据）
 ```
 
 > `launchctl` 在部分受限 shell 里**完全不可用**：`launchctl list` 返回空、
 > `bootstrap` 报 `Bootstrap failed: 5: Input/output error`。此时改用
 > `~/bin/kake-dev-detach.sh ~/bin/kake-dev-supervise.sh api`（metro 同理）。
-> 两条路径可共存 —— 包装脚本的端口回收保证了干净的交接。
+> 两条路径可共存：包装脚本的**单一属主**逻辑保证任何时刻只有一个真属主，
+> 另一个待命（见上文「单一属主」）。
 
 > ⚠️ **跑门禁/提交前注意**：受限 shell 的 `PATH` 里 `grep` 会被替换成不支持
 > `\|`、`\b` 的替身，`python3` 也缺少 `yaml`。会让 `scripts/gate.sh` 的 g4
@@ -226,7 +270,11 @@ iOS dev client 会保存历次连接过的 dev-server 地址。Mac 换 IP 后，
 轮询一个早已失效的旧地址（实测见过 `10.20.30.223:8081`、`localhost:8082`），
 而当前正确地址一次都不试。
 
-**排查**：读 Metro 日志里的 `Packager status check` 报错，它会直接暴露设备在找哪个地址。
+**排查**：读 `apps/mobile/.expo/dev/logs/start.log` 里的 `Packager status check` 报错
+（属 `metro:client_log`，**不在** `dev-metro.log` 里），它会直接暴露设备在找哪个地址。
+实测会看到类似 `Packager status check returned unexpected result for http://192.168.112.30:8081/status`
+—— 那条 IP 只是 dev client 自己的历史残留，**不影响加载**（它随后正常走 Bonjour 拿到了 bundle），
+所以别把它当成故障去修。
 
 **修复**：重跑 `dev-ios-device.sh install`（它会用 deep link 明确指定 dev-server，见 **§7.3**）；
 或真机上摇一摇 → Dev Menu → 重新输入 `http://thanhs-macbook-air.local:8081`。
@@ -325,7 +373,8 @@ pnpm --filter @proxy/mobile doctor:delivery && node ./scripts/check-design-basel
 
 ---
 *文档生成：2026-08-25，外出动态 IP 场景专用。
-最近更新：2026-09-12 —— 新增 §3.1 常驻开发服务、§7.1 `Info.plist MetroHost` 陷阱（含
-`METRO_HOST` 免重编译救急通道与 `DEVICE-METROHOST-001` 守门）、§7.2 设备端历史 URL、
-§7.3 dev client 静默停在 launcher（deep link 修复 + 三条判定法）；
+最近更新：2026-09-12 —— §3.1 重写（权威日志是 `start.log` 而非 `dev-metro.log`、
+包装脚本洗环境、**单一属主待命**避免 launchd↔supervisor 互相杀）；新增 §7.1
+`Info.plist MetroHost` 陷阱（含 `METRO_HOST` 免重编译救急通道与 `DEVICE-METROHOST-001` 守门）、
+§7.2 设备端历史 URL、§7.3 dev client 静默停在 launcher（deep link 修复 + 三条判定法）；
 修正 §1 过期 IP、§8 快照、§9 过期路径。*
