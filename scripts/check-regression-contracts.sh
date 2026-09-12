@@ -1615,3 +1615,21 @@ if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/ready >/dev/
 else
   echo "    MEDIA-FILE-001: SKIP (dev API is down — live checks need postgres; run go -C apps/api-go run ./cmd/media-audit --check-files and node scripts/check-feed-media-urls.mjs)"
 fi
+
+# AI-ROW-DUPE-001: Home rendered the same AI catalogue twice. The upper AI
+# assistants row and the lower "AI 推荐" row both read /v1/ai/assistants, so the
+# screen showed two identical horizontal rails both labelled AI 生成. Reading
+# the same server data twice is invisible in code review — it only shows up on
+# the device — so the gate pins the single-row contract in the discovery test
+# instead of trusting the deletion.
+if ! grep -q 'AI-ROW-DUPE-001' apps/mobile/src/requester-home-discovery-contract.test.ts; then
+  echo "  FAIL [AI-ROW-DUPE-001]: the single-AI-row regression test is missing." >&2
+  exit 1
+fi
+if grep -q '<AIAssistantsRow' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [AI-ROW-DUPE-001]: requester-home mounts a second AI row again." >&2
+  echo "        Both rows read /v1/ai/assistants, so the screen shows the same five AI twice." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/requester-home-discovery-contract.test.ts || exit $?
+echo "    AI-ROW-DUPE-001: PASS (home renders exactly one AI row)"
