@@ -502,3 +502,40 @@ func TestAudioMessageRequiresMediaAndPersists(t *testing.T) {
 		t.Fatalf("wrong audio record: %+v", last)
 	}
 }
+// AI-CONV-001: 小美主页发消息必须端到端进消息模块。客户端曾传
+// originType=AI_ASSISTANT，被服务端 validOrigins 拒（INVALID_ORIGIN_TYPE），
+// 用户看到“已发起”了吗？没有——直接失败。现在固定用 PROFILE 来源。
+// 本测试锁死：PROFILE + AI participant 建会话成功，且出现在发起人 inbox。
+func TestXiaomeiDMProfileOriginAppearsInInbox(t *testing.T) {
+	s := New()
+	start := envelopeFor("StartConversation", map[string]any{
+		"originType": "PROFILE", "originId": "ai_001", "participantId": "ai_001",
+		"firstMessage": "你好小美，我想聊聊周末企划。",
+	}, "")
+	r := s.Handle(start)
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("xiaomei DM start: got %s (%+v)", r.Outcome, r.Error)
+	}
+	list := s.Handle(envelopeFor("ListConversations", map[string]any{}, "user_001"))
+	if list.Outcome != "ACCEPTED" {
+		t.Fatalf("list: %s (%+v)", list.Outcome, list.Error)
+	}
+	var view struct {
+		Conversations []ConversationSummary `json:"conversations"`
+	}
+	if err := json.Unmarshal([]byte(list.OperationRef), &view); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range view.Conversations {
+		if c.CounterpartyID == "ai_001" {
+			found = true
+			if c.LatestMessage == nil || c.LatestMessage.Body == "" {
+				t.Fatalf("xiaomei DM must carry the first message: %+v", c.LatestMessage)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("xiaomei DM missing from inbox: %+v", view.Conversations)
+	}
+}

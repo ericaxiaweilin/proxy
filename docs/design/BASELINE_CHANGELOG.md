@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 165 — 2026-09-12
+
+- AI-ASSIST-001：首页 AI 助手推荐目录（AI-ASSIST-001）—— 5 小美公开目录
+  （/v1/ai/assistants，匿名可读）+ AI 标签 + 关注/发消息。目录改名/换色必须
+  服务端/种子/SVG 三处同步；AI 能力不扩大到接单/报名/收付款（服务端门禁）。
+  照片走服务端原文件直出（/v1/ai/personas/photo/{id}），客户端不复制第二份。
+  首页「真人推荐」之后渲染 AIAssistantsRow，与真人推荐分开不混排。
+- AI-CONV-001：小美主页发消息固定 PROFILE origin，进消息模块 inbox。
+- AI-POSTS-001：5 小美开屏帖（AI_NATIVE + 写真，AI_PERSONA provenance），
+  帖子 Upsert 幂等，动态卡 AI 生成徽。
+
 ## Revision 164 — 2026-09-12
 
 - 修「个人主页头像保存不上」：`me.tsx` 的 chooseProfileAvatar 最外层 `catch` 此前是

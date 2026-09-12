@@ -29,6 +29,7 @@ import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { SCENE_ACTIONS, SceneActivityDiscovery } from "../components/scene-activity-discovery";
+import { AIAssistantsRow } from "../ai-assistants-row";
 import {
   RECOMMEND_FILTER_CHIPS,
   RECOMMEND_MODE_ORDER,
@@ -691,6 +692,10 @@ export function RequesterHome({
       {relationshipMsg ? (
         <Text style={styles.followMsg}>{relationshipMsg}</Text>
       ) : null}
+
+      {/* AI-ASSIST-001: 5 小美行放真人推荐之后，不抢镜。
+          服务端目录 + 关注/发消息，与真人“推荐人”分开渲染不混排。 */}
+      <AIAssistantsRow />
 
       {recommendedAI.length > 0 ? <View style={styles.aiSection}>
         <View style={styles.aiSectionHead}>

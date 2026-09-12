@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -125,7 +126,7 @@ func TestLC06UnknownSourceRejectedAtMarkReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := s.Handle(envelopeFor("MarkMediaReady", map[string]any{
-		"playbackStorageKey": "playback/x.mp4",
+		"playbackStorageKey":  "playback/x.mp4",
 		"thumbnailStorageKey": "thumb/x.jpg",
 	}, "ma_lc06_unknown"))
 	if r.Outcome != "REJECTED" {
@@ -392,4 +393,33 @@ func TestLC07LegacyServiceNoPersonaWiredStillPublishes(t *testing.T) {
 		t.Fatalf("legacy MarkMediaReady must succeed: %s (%+v)", r.Outcome, r.Error)
 	}
 	_ = command.Envelope{}
+}
+
+// AI-POSTS-001: 5 小美写真资产种子。APPROVED + PUBLIC + READY 才能进
+// Feed；AI_PERSONA + PersonaID 挂好 provenance；幂等可重跑。
+func TestSeedXiaomeiAssets(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+	if err := s.SeedXiaomeiAssets(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedXiaomeiAssets(ctx); err != nil {
+		t.Fatal("reseed must be idempotent")
+	}
+	for _, id := range []string{"ai_001", "ai_002", "ai_003", "ai_004", "ai_005"} {
+		assetID := "seed_media_xiaomei_" + id[len("ai_"):]
+		a, err := s.repository.GetAsset(ctx, assetID)
+		if err != nil {
+			t.Fatalf("missing seeded asset %s: %v", assetID, err)
+		}
+		if a.ModerationStatus != "APPROVED" || a.VisibilityClass != "PUBLIC" || a.ProcessingStatus != "READY" {
+			t.Fatalf("asset %s must be feed-visible: %+v", assetID, a)
+		}
+		if !a.AIGenerated || a.AIGenerationSource != "AI_PERSONA" || a.PersonaID != id {
+			t.Fatalf("asset %s must carry AI provenance: %+v", assetID, a)
+		}
+		if a.MediaType != "IMAGE" {
+			t.Fatalf("asset %s must be IMAGE, got %q", assetID, a.MediaType)
+		}
+	}
 }

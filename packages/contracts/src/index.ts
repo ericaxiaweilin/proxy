@@ -941,4 +941,7 @@ export * from "./city-key";
 export * from "./facet";
 export * from "./engagement";
 
+// AI-ASSIST-001: 平台 AI 助手公开目录（首页 5 小美推荐）wire 契约。
+export * from "./ai-assistants";
+
 // R15.33: map contracts 撤了 — 独立 map tab 已删。

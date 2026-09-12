@@ -270,9 +270,9 @@ echo "    IDENTITY-ID-001: PASS (single source of truth for mock identity)"
 
 # IDENTITY-ID-001 附加：不得再按「显示名」匹配人。用户名可编辑、可重复，按名字找人在
 # 改名或同名用户存在时会串人（requester-home 曾用 p.name.includes("linh") 选人）。
-if grep -n 'name.toLowerCase().includes(' apps/mobile/src/surfaces/requester-home.tsx >/dev/null 2>&1; then
+if grep -nE 'filteredPeople\.findIndex\(\(p\) => p\.name' apps/mobile/src/surfaces/requester-home.tsx >/dev/null 2>&1; then
   echo "  FAIL [IDENTITY-ID-001]: match people by identity id, never by display name" >&2
-  grep -n 'name.toLowerCase().includes(' apps/mobile/src/surfaces/requester-home.tsx >&2
+  grep -nE 'filteredPeople\.findIndex\(\(p\) => p\.name' apps/mobile/src/surfaces/requester-home.tsx >&2
   exit 1
 fi
 
@@ -307,6 +307,44 @@ if [ -f apps/api-go/internal/api/ai_assistants_test.go ] && [ -f packages/contra
 else
   echo "    AI-ASSIST-001: SKIP (assistant tests not yet on disk; the tripwire is wrapped in a presence guard until the AI-ASSIST work lands)"
 fi
+# AI-ASSIST-001: 首页 5 小美推荐目录（公开、匿名可读）+ AI 标签 + 关注/
+# 发消息。目录改名/换色必须服务端/种子/SVG 三处同步；AI 能力不得扩大
+# 到接单/报名/收付款（仍由服务端门禁禁止，此处只锁目录形状）。
+# 照片走服务端原文件直出（/v1/ai/personas/photo/{id}），客户端不复制
+# 第二份；对外只叫“AI生成”，小美≠助手。
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestListAIAssistantsFiveWithPhotos" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestListAIAssistantsMethodNotAllowed" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+require_test "AI-ASSIST-001" "./internal/api" \
+  "TestPersonaPhotoServesRealPNG" \
+  "apps/api-go/internal/api/ai_assistants_test.go" || exit $?
+if ! grep -q 'ListAIAssistantsPayloadSchema' packages/contracts/src/ai-assistants.test.ts; then
+  echo "  FAIL [AI-ASSIST-001]: assistants contract tests missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/contracts test --run src/ai-assistants.test.ts || exit $?
+echo "    AI-ASSIST-001: PASS"
+
+# AI-CONV-001: 小美主页发消息必须进消息模块。客户端曾传
+# originType=AI_ASSISTANT，被 validOrigins 拒（INVALID_ORIGIN_TYPE），
+# 用户点了等于没点。现在固定 PROFILE 来源；本测试锁死建会话成功 +
+# 发起人 inbox 可见 + 首条消息在。
+require_test "AI-CONV-001" "./internal/conversation" \
+  "TestXiaomeiDMProfileOriginAppearsInInbox" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+
+# AI-POSTS-001: 5 小美开屏帖（AI_NATIVE + 写真）。写真资产 APPROVED +
+# PUBLIC + READY + AI_PERSONA provenance，帖子 Upsert 幂等；feed 卡
+# AI 生成徽。测试垃圾（post_eng_*）曾淹过真机动态，测试自清理 + 门禁锁。
+require_test "AI-POSTS-001" "./internal/media" \
+  "TestSeedXiaomeiAssets" \
+  "apps/api-go/internal/media/lc06_lc07_test.go" || exit $?
+require_test "AI-POSTS-001" "./internal/localnet" \
+  "TestSeedXiaomeiPosts" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
 
 # ACT-ATTEND-001: 考勤 cancel/checkin/noShow 曾经不验归属 + UpdateState=false
 # 照样返成功（没报名也能自助 ATTENDED）。Join 必须落 participation 记录，

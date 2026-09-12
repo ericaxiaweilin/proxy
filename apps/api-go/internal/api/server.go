@@ -232,6 +232,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/ai/personas", s.routePersonaCollection)
 	mux.HandleFunc("/v1/ai/personas/", s.routePersonaItem)
 	mux.HandleFunc("/v1/ai/accounts", s.listPlatformAIAccounts)
+	// AI-ASSIST-001: 平台 AI 助手公开目录（首页推荐），匿名可读。
+	mux.HandleFunc("/v1/ai/assistants", s.listAIAssistants)
+	// 小美头像原文件（GPT 交付 SVG）：更长 prefix，优先于 personas/ 通配。
+	mux.HandleFunc("/v1/ai/personas/photo/", s.personaPhoto)
 	// R16.7-P1-E: Jurisdiction Policy Engine self-service.
 	// GET reads the caller's current jurisdiction (default
 	// VN-79 when no row exists); PATCH updates it. Operator
