@@ -38,6 +38,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/media"
+	"github.com/proxy-app/proxy-api/internal/mockidentity"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
@@ -873,10 +874,14 @@ func merchantCreatorSeedProfiles() []creatorSeedProfile {
 	}
 }
 
-// creatorAvatarPath 由固定 facet 键派生候选头像的服务端路径（客户端把以 "/" 开头的
-// photos 项当服务端路径渲染）。图片本体与账号 profile.avatar_path 是同一媒体资产。
+// creatorAccountID / creatorAvatarPath 委托给 mockidentity（唯一事实源）：
+// 身份映射只允许有一处实现，避免各 surface 再各自硬编码姓名/头像。
+func creatorAccountID(agentID string) string {
+	return mockidentity.AccountIDForFacetKey(strings.TrimPrefix(agentID, "agent_"))
+}
+
 func creatorAvatarPath(agentID string) string {
-	return "/v1/media/thumb/ma_creator_" + strings.TrimPrefix(agentID, "agent_") + "_portrait_v1"
+	return mockidentity.AvatarPathForFacetKey(strings.TrimPrefix(agentID, "agent_"))
 }
 
 func merchantCreatorAvailability(now time.Time) (time.Time, time.Time) {
@@ -885,9 +890,6 @@ func merchantCreatorAvailability(now time.Time) (time.Time, time.Time) {
 
 // creatorAccountID 由固定 facet 键（agent_id）确定性派生出系统账号 id。
 // 与可编辑的显示名解耦：改名字不动 id，同名不同人也能区分。
-func creatorAccountID(agentID string) string {
-	return "user_mockcreator_" + strings.TrimPrefix(agentID, "agent_")
-}
 
 // creatorCity 把服务区映射为账号 profile 的城市（profile 要求 1..60 字符）。
 func creatorCity(areas []string) string {
