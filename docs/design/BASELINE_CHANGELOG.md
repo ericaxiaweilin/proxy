@@ -29,12 +29,17 @@ same commit. Do not record routine business logic changes here.
   `OWNER_ONLY`，而 `/v1/media/thumb|play/{id}` 要求 `APPROVED && PUBLIC` 才服务
   （fail-closed），只有发帖/上架店铺会在事务里提权到 PUBLIC —— 更新个人资料这条
   链路没做，于是头像 URL 恒 404，界面回字母头。客户端先落兜底：hydration 改为
-  **本地副本优先**（离线可用、不受可见性约束），远端仅作后备。服务端提权（
-  UpdateProfile 内 `AuthorizeForPost(...,"PUBLIC")`）为下一步修复。
+  **本地副本优先**（离线可用、不受可见性约束），远端仅作后备；服务端同步补齐：
+  `UpdateProfile` 落库前调 `AuthorizeForPost(ctx,[mediaAssetId],actor,"PUBLIC")`，
+  提权失败即拒绝整条命令（不写「存了但显示不出来」的半成品），`cmd/api/main.go`
+  装配 `SetProfileMediaAuthorizer(mediaService)`。
 - 头像「切页回来先闪旧头再刷成新头」（AVATAR-FLASH-001）：hydration 异步返回前首帧
   `profileAvatarUri` 为 undefined，于是先渲染字母头/占位再被异步结果覆盖。改为
   useState 初值直接同步读本机最新副本（expo-file-system list()/File 是同步 API），
   首帧即为新头像，不再有这一跳。
+- 头像副本只增不删（AVATAR-GC-001）：每次选图新建 `avatar-<ts>.jpg`，真机实测堆到
+  23 份。现在换头像后只保留本次那一份，其余 `avatar-*` 删除；单文件删除失败不影响
+  换头像主链。
 
 
 ## Revision 163 — 2026-09-11

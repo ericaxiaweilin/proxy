@@ -66,9 +66,27 @@ type Service struct {
 	challengeProvider      LoginChallengeProvider
 	displayIdentityService *DisplayIdentityService
 	profileService         *ProfileService
+	// AVATAR-DELIVER-001: 头像这类「挂在个人资料上的媒体」必须在本命令事务内
+	// 提权（OWNER_ONLY → PUBLIC），否则公开路由 /v1/media/thumb|play/{id}
+	// 因为 fail-closed 一律 404，头像永远加载不出来（历史 bug：换完头像被重置）。
+	// 发帖/上架店铺已有同样的提权（AuthorizeForPost / AuthorizeForStorefront）。
+	profileMedia ProfileMediaAuthorizer
 	// otpRequests bounds code delivery per login identifier
 	// (OTP-THROTTLE-001: 1/min, 10/hour — Twilio Verify ladder).
 	otpRequests *otpThrottler
+}
+
+// ProfileMediaAuthorizer 是 media 服务的最小能力面：把本人上传且技术审核通过的
+// 媒体资产提权到指定可见性（PUBLIC 表示可在公开路由投递）。
+type ProfileMediaAuthorizer interface {
+	AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error
+}
+
+// SetProfileMediaAuthorizer 注入媒体提权能力（cmd/api 装配）。
+func (s *Service) SetProfileMediaAuthorizer(a ProfileMediaAuthorizer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profileMedia = a
 }
 
 func New(seed *Seed) *Service {
@@ -1365,6 +1383,15 @@ func (s *Service) updateProfile(ctx context.Context, e command.Envelope) command
 		Bio:           p.Bio,
 		City:          strings.TrimSpace(p.City),
 		AvatarPath:    p.AvatarPath,
+	}
+	// AVATAR-DELIVER-001: 头像资产先提权再落库。上传默认 OWNER_ONLY，而公开投递
+	// 路由要求 APPROVED && PUBLIC，不提权则头像 URL 恒 404（客户端只能靠本地副本
+	// 兜底，跨设备/新装即丢）。提权失败即整条命令失败——避免把「存了但显示不出来」
+	// 的半成品写进档案。
+	if mediaAssetID, ok := strings.CutPrefix(candidate.AvatarPath, "assets/"); ok && mediaAssetID != "" && s.profileMedia != nil {
+		if err := s.profileMedia.AuthorizeForPost(ctx, []string{mediaAssetID}, e.Actor.ID, "PUBLIC"); err != nil {
+			return command.Rejected(e, "PROFILE_AVATAR_NOT_DELIVERABLE", "VALIDATION", "AFTER_USER_ACTION", "identity.profile_avatar_not_deliverable", nil)
+		}
 	}
 	saved, err := s.profileService.UpsertProfile(ctx, candidate)
 	if err != nil {

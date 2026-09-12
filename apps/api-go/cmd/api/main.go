@@ -238,6 +238,9 @@ func main() {
 		// media pipeline; attaching them to a store publishes the
 		// assets to PUBLIC so thumb/play URLs resolve.
 		businessService.SetMediaAuthorizer(mediaService)
+		// AVATAR-DELIVER-001: 头像同样要提权——上传默认 OWNER_ONLY，
+		// 公开 thumb/play 路由要求 APPROVED && PUBLIC，不提权头像恒 404。
+		identityService.SetProfileMediaAuthorizer(mediaService)
 		relationshipService = relationship.NewWithRepository(postgres.NewRelationshipRepository(pool))
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
 		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())

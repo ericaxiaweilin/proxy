@@ -83,12 +83,28 @@ function initialProfileAvatarUri(): string | undefined {
       .filter((name) => name.startsWith("avatar-"))
       .sort();
     const newest = names.at(-1);
-    const uri = newest ? new File(PROFILE_AVATAR_DIR, newest).uri : undefined;
-    console.log(`[proxy.AVATAR-FLASH-001] first-frame avatar=${uri ?? "(none)"} candidates=${names.length}`);
-    return uri;
-  } catch (err) {
-    console.log(`[proxy.AVATAR-FLASH-001] first-frame avatar read FAIL: ${err instanceof Error ? err.message : String(err)}`);
+    return newest ? new File(PROFILE_AVATAR_DIR, newest).uri : undefined;
+  } catch {
     return undefined;
+  }
+}
+
+// AVATAR-GC-001: 换头像只留最新一份副本。此前每次选图都新建 avatar-<ts>.jpg，
+// 只增不删（真机实测堆到 23 份）。prune 只删 avatar-* 且不是本次保留的那份，
+// 单个删除失败不影响主链。
+function pruneProfileAvatars(keepName: string): void {
+  try {
+    for (const name of PROFILE_AVATAR_DIR.list().map((entry) => entry.name)) {
+      if (name.startsWith("avatar-") && name !== keepName) {
+        try {
+          new File(PROFILE_AVATAR_DIR, name).delete();
+        } catch {
+          // 单个文件删除失败（被占用等）不阻塞换头像。
+        }
+      }
+    }
+  } catch {
+    // 目录不可读：跳过清理，不影响本次换头像。
   }
 }
 
@@ -816,6 +832,8 @@ export function MeSurface({
         updatedAt: new Date().toISOString()
       };
       await profileStore.write(localRecord);
+      // AVATAR-GC-001: 只保留本次这份副本，避免旧头像文件无限堆积。
+      pruneProfileAvatars(avatarFileName(avatarFile.uri));
       // Avatar controls also exist outside the profile editor. Selecting a
       // photo is therefore a complete action: upload and sync immediately,
       // rather than requiring a hidden second "完成" step.

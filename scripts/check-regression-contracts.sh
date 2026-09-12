@@ -230,6 +230,22 @@ fi
 pnpm --filter @proxy/mobile test --run src/profile-store.test.ts || exit $?
 echo "    AVATAR-SAVE-002: PASS"
 
+# AVATAR-DELIVER-001: 头像「存了但显示不出来/被重置」的服务端半边。
+# 上传媒体默认 OWNER_ONLY，公开路由 /v1/media/thumb|play/{id} 要求
+# APPROVED && PUBLIC（fail-closed），发帖/上架店铺会在命令事务内提权到 PUBLIC，
+# 而 UpdateProfile 这条链路此前没做 → 头像 URL 恒 404，跨设备/新装直接丢头像。
+# 守门：UpdateProfile 必须在落库前提权（owner=actor, PUBLIC），失败即拒绝命令；
+# 且装配（SetProfileMediaAuthorizer）必须存在，否则能力被静默摘掉。
+require_test "AVATAR-DELIVER-001" "./internal/identity" \
+  "TestUpdateProfileAuthorizesAvatarForPublicDelivery" \
+  "apps/api-go/internal/identity/profile_avatar_delivery_test.go" || exit $?
+if ! grep -q 'AuthorizeForPost(ctx, \[\]string{mediaAssetID}' apps/api-go/internal/identity/service.go || \
+   ! grep -q 'SetProfileMediaAuthorizer' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [AVATAR-DELIVER-001]: avatar media authorization is not wired" >&2
+  exit 1
+fi
+echo "    AVATAR-DELIVER-001: PASS"
+
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
 # 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
 # follow），发消息仍只能进主页后做。语义变更待 commander 确认。
