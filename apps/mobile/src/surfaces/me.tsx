@@ -76,12 +76,18 @@ function nextProfileAvatarFile(): File {
 // 因此可以在 useState 初值里直接取到最新副本，消除这一跳。
 function initialProfileAvatarUri(): string | undefined {
   try {
-    const newest = PROFILE_AVATAR_DIR.list()
-      .filter((entry): entry is File => entry instanceof File && entry.name.startsWith("avatar-"))
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .at(-1);
-    return newest?.uri;
-  } catch {
+    // 注意：不要用 `instanceof File` 过滤 list() 元素（真机上类身份可能对不上，
+    // 一旦滤空就回落字母头，等于没修）。与 hydration 同款：只信 name。
+    const names = PROFILE_AVATAR_DIR.list()
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith("avatar-"))
+      .sort();
+    const newest = names.at(-1);
+    const uri = newest ? new File(PROFILE_AVATAR_DIR, newest).uri : undefined;
+    console.log(`[proxy.AVATAR-FLASH-001] first-frame avatar=${uri ?? "(none)"} candidates=${names.length}`);
+    return uri;
+  } catch (err) {
+    console.log(`[proxy.AVATAR-FLASH-001] first-frame avatar read FAIL: ${err instanceof Error ? err.message : String(err)}`);
     return undefined;
   }
 }
