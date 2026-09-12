@@ -6,7 +6,7 @@
 
 - **不需要在 `apps/mobile/.env` 里写死 `192.168.1.49:4100`**。脚本会自动处理动态 IP：
   - **iOS 真机/模拟器**：`scripts/dev-ios.sh` 用 Bonjour `Thanhs-MacBook-Air.local:4100`（`scutil --get LocalHostName`），热点/Wi-Fi 切换不失效。
-    - ⚠️ 这**只在 `ios/Proxy/Info.plist` 没有 `MetroHost` 时**才成立。该 key 存在时 Bonjour 兜底会被完全绕过 —— 见 §7.1（2026-09-12 真实事故）。
+    - ⚠️ 这**只在 `ios/Proxy/Info.plist` 没有 `MetroHost` 时**才成立。该 key 存在时 Bonjour 兜底会被完全绕过 —— 见 §7.1（2026-09-12 真实事故）。守门 `DEVICE-METROHOST-001` 已保证它不会再被提交。
     - 2026-09-12 实测解析到 `127.0.0.1` + `192.168.112.30` + `169.254.214.60`。**IP 会变，任何地方都别写死。**
   - **Android 模拟器**：`scripts/dev-android.sh` 用 `adb reverse tcp:4100 tcp:4100` + `tcp:8081`，模拟器内走 `127.0.0.1` 回环，不依赖局域网 IP。
 - **外出时的唯一前提**：真机与 Mac 能互访（USB + `coredevice.local` 已满足），API 监听 `4100`，Metro 监听 `8081`。
@@ -145,7 +145,8 @@ lsof -i :4100 -i :8081
 
 | 现象 | 原因 | 解法 |
 |------|------|------|
-| **iOS 真机白屏/打不开（首选排查项）** | `ios/Proxy/Info.plist` 里有写死的 `MetroHost` | 删掉该 key，见 **§7.1**。优先级高于 Bonjour，存在即让兜底失效 |
+| **iOS 真机白屏/打不开（首选排查项）** | `ios/Proxy/Info.plist` 里有写死的 `MetroHost` | 删掉该 key，见 **§7.1**。优先级高于 Bonjour，存在即让兜底失效。**勿改 plist 救急 —— 用 `METRO_HOST=<ip> dev-ios-device.sh install`** |
+| **App 进程活着、Metro 毫无反应、设备无报错、停在 launcher** | dev client 没有可用 dev-server，**静默**等待（全新安装/历史被清/存的是旧 IP） | 重跑 `dev-ios-device.sh install`（内置 deep link），见 **§7.3**。**先按 §7.3 的三条判定，别猜网络** |
 | iOS 真机连的是很久以前的地址 | dev client 记住了历史 dev-server URL | 见 **§7.2** |
 | iOS 真机白屏/连不上 API | `apps/mobile/.env` 写死旧 IP | 改用 `ios:dev`（Bonjour），或设置 `PROXY_IOS_API_BASE_URL=http://Thanhs-MacBook-Air.local:4100` 覆盖。**注意：先排除 §7.1** |
 | 真机 App 里所有请求都 `Could not connect to the server` | API 进程没在跑（不是网络问题） | 见 **§3.1**（常驻服务）；`curl --noproxy '*' -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4100/health/live` 应为 200 |
@@ -157,11 +158,12 @@ lsof -i :4100 -i :8081
 
 ### 7.1 `Info.plist` 写死的 `MetroHost`（2026-09-12 实际踩坑）
 
-`apps/mobile/ios/Proxy/AppDelegate.swift` 的取值逻辑是：
+`apps/mobile/ios/Proxy/AppDelegate.swift` 的取值优先级是（高 → 低）：
 
 ```swift
-let metroHost = (Bundle.main.object(forInfoDictionaryKey: "MetroHost") as? String)
-  ?? "Thanhs-MacBook-Air.local"
+// 1) 启动环境变量 METRO_HOST   —— 无需改文件、无需重编译（救急用这个）
+// 2) Info.plist `MetroHost`    —— per-build 覆盖（历史手段，受版本控制，勿提交）
+// 3) Bonjour 兜底 "Thanhs-MacBook-Air.local"
 ```
 
 即 **`Info.plist` 一旦有 `MetroHost`，Bonjour 兜底永远不生效**。
@@ -181,6 +183,43 @@ plutil -extract MetroHost raw apps/mobile/ios/Proxy/Info.plist
 **修复**：直接删掉 `MetroHost` / 它的 `<string>` 两行，然后重编译（`ios:bootstrap`），
 让 App 回落到 Bonjour。**不要**改成新 IP —— 下次 IP 一变又会复发。
 
+**救急（不改文件、不重编译）** —— 想临时把 Metro 指到某个具体 IP 时用这个：
+
+```bash
+# 1) 先看 Mac 当前可达的 IPv4
+ipconfig getifaddr en0 || ipconfig getifaddr en1
+
+# 2) 带着环境变量构建+安装+启动（不设 METRO_HOST 则自动用 Bonjour）
+METRO_HOST=192.168.115.138 bash apps/mobile/scripts/dev-ios-device.sh install
+```
+
+脚本自己会解析主机并把它转成启动参数：
+
+- `METRO_HOST` 显式给出 → 用它；
+- 否则用 Bonjour（`scutil --get LocalHostName` → `thanhs-macbook-air.local`）。
+
+解析结果**同时**用于两处，避免「原生按 A、dev client 按 B」：
+
+```bash
+xcrun devicectl device process launch --device <uuid> --terminate-existing \
+  -e '{"METRO_HOST":"<host>"}' \
+  --payload-url 'proxy://expo-development-client/?url=http%3A%2F%2F<host>%3A8081'
+```
+
+⚠️ 环境变量只在**从该脚本 / Xcode 启动**时生效；从桌面点图标启动走的是
+Info.plist → Bonjour 兜底，所以它只解决「本次调试连不上」，不改变默认行为 ——
+这正是它比「改 plist」安全的地方。deep link 见 **§7.3**。
+
+**守门（`DEVICE-METROHOST-001`）**：`scripts/check-regression-contracts.sh`
+（提交门禁）+ `apps/mobile/scripts/doctor-delivery.sh`（`ios:bootstrap` 前置，避免白跑一次
+10 分钟构建）各有一条断言，三条 pin 一起保证：
+
+1. 受版本控制的 `Info.plist` 不得出现 `MetroHost`；
+2. `AppDelegate.swift` 必须保留 `METRO_HOST` 环境变量层（否则又会被逼回改 plist）；
+3. `AppDelegate.swift` 必须保留 `.local` Bonjour 兜底（防止有人用「删兜底」来消警）。
+
+即「把 IP 提交进 plist」这条路已被堵死，且堵死它之后仍然有合法的救急出口。
+
 ### 7.2 设备端 dev client 记着历史 URL
 
 iOS dev client 会保存历次连接过的 dev-server 地址。Mac 换 IP 后，App 可能仍在
@@ -189,8 +228,51 @@ iOS dev client 会保存历次连接过的 dev-server 地址。Mac 换 IP 后，
 
 **排查**：读 Metro 日志里的 `Packager status check` 报错，它会直接暴露设备在找哪个地址。
 
-**修复**：真机上摇一摇 → Dev Menu → 重新输入 `http://Thanhs-MacBook-Air.local:8081`；
-或直接重装 App。
+**修复**：重跑 `dev-ios-device.sh install`（它会用 deep link 明确指定 dev-server，见 **§7.3**）；
+或真机上摇一摇 → Dev Menu → 重新输入 `http://thanhs-macbook-air.local:8081`。
+
+### 7.3 dev client 没有可用 dev-server 时**静默停住**（2026-09-12 实测，最像「打不开」）
+
+这是本次真正卡住最久的一个坑，症状和 §7.1 几乎一样但成因完全不同。
+
+**症状**：点 App / 用 `devicectl ... launch` 启动后，App **进程活着**、Metro **什么都没收到**、
+设备上**没有任何报错**、屏幕停在 dev client 的 launcher。`proxy.smoke` 之类的 JS 日志
+一条都不出现。等待 96s 依然如此。
+
+**成因**：dev client 需要知道 dev-server 地址。当它**没有**可用地址时（全新安装、
+清过历史、或存的是旧 IP），它**不会报错**，而是停在 launcher 等用户点选。
+此时「App 打不开」和「App 连不上」看起来一模一样，极易误判成网络/端口问题。
+
+**判定（不要猜，按这三条查）**：
+
+```bash
+# 1) 设备上 App 是否活着
+xcrun devicectl device info processes --device <uuid> | grep 'Proxy.app/Proxy'
+# 2) 设备到 API / Metro 有没有真实连接（有连接 = JS 真的在跑）
+lsof -nP -i :4100 | grep -c ESTABLISHED
+lsof -nP -i :8081 | grep -c ESTABLISHED
+# 3) App 到底在请求哪个地址（最直接）
+xcrun devicectl device process launch --device <uuid> --terminate-existing --console <bundle-id>
+#    → 看有没有 [RCTMultipartDataTask] GET http://<host>:8081/...，以及用的是哪个 host
+```
+
+⚠️ 只有第 2 条能证明 JS 在跑：`console.log` 转发依赖 dev client 的 websocket，
+websocket 断了会**假阴性**（JS 正常但日志一条都收不到）。
+
+**修复**：用 deep link 明确把 dev-server 交给启动命令：
+
+```bash
+xcrun devicectl device process launch --device <uuid> --terminate-existing \
+  --payload-url 'proxy://expo-development-client/?url=http%3A%2F%2Fthanhs-macbook-air.local%3A8081' \
+  com.proxy.creator.dev.c4673fy8u7
+```
+
+实测：**卸载重装后普通启动 96s 无反应，带 deep link 后 24s 正常加载**（API 15 条连接）。
+`dev-ios-device.sh` 已内置这条 URL，所以**重跑脚本即可**，不必手工敲。
+
+同时脚本加了 `--terminate-existing`：安装完新构建必须替换正在跑的旧实例，
+否则重跑只会把旧 App 拉到前台 —— 你看到的是**上一次**的 bundle，
+表现为「改了没生效」（正是 §4 三层交付模型里最容易踩的那条）。
 
 ## 8. 当前本机快照（2026-09-12）
 
@@ -198,7 +280,8 @@ iOS dev client 会保存历次连接过的 dev-server 地址。Mac 换 IP 后，
   搬家后旧绝对路径会残留在 `ios/Pods` 的 `React-VFS.yaml` 引用里，导致
   `xcodebuild` 直接失败（`virtual filesystem overlay file ... not found`）。
   修法：`LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pod install`。
-- Mac: `Thanhs-MacBook-Air.local` / `Thanh’s MacBook Air` / `192.168.112.30`
+- Mac: `Thanhs-MacBook-Air.local` / `Thanh’s MacBook Air` / `192.168.115.138`（**IP 随时会变，别写死**；
+  2026-09-12 当天就见过 `192.168.115.138` ↔ `192.168.112.30`）
 - iOS 真机: `weilin` (iPhone15,4) available (paired)，bundle id `com.proxy.creator.dev.c4673fy8u7`
 - iOS Simulator: `Proxy iPhone 15 QA`
 - Git: 分支 `fix/home-chooser-root-swipe` @ `bdf23f5`，无 remote
@@ -229,6 +312,11 @@ pnpm --filter @proxy/mobile android:dev
 # 4) 更新 iOS 真机 weilin（热更新，Bonjour 自动 IP）
 pnpm --filter @proxy/mobile ios:dev
 
+# 4b) 改了 Native Shell（或真机停在 dev client launcher）→ 重编译+安装+启动。
+#     脚本会解析 Bonjour 主机、带 METRO_HOST 环境变量，并用 deep link 明确指定 dev-server，
+#     所以启动是确定的（见 §7.3）。想临时指到某个 IP 就加 METRO_HOST=<ip>。
+bash apps/mobile/scripts/dev-ios-device.sh install
+
 # 5) 验证
 pnpm --filter @proxy/mobile doctor:delivery && node ./scripts/check-design-baseline.mjs
 ```
@@ -237,5 +325,7 @@ pnpm --filter @proxy/mobile doctor:delivery && node ./scripts/check-design-basel
 
 ---
 *文档生成：2026-08-25，外出动态 IP 场景专用。
-最近更新：2026-09-12 —— 新增 §3.1 常驻开发服务、§7.1 `Info.plist MetroHost` 陷阱、
-§7.2 设备端历史 URL；修正 §1 过期 IP、§8 快照、§9 过期路径。*
+最近更新：2026-09-12 —— 新增 §3.1 常驻开发服务、§7.1 `Info.plist MetroHost` 陷阱（含
+`METRO_HOST` 免重编译救急通道与 `DEVICE-METROHOST-001` 守门）、§7.2 设备端历史 URL、
+§7.3 dev client 静默停在 launcher（deep link 修复 + 三条判定法）；
+修正 §1 过期 IP、§8 快照、§9 过期路径。*

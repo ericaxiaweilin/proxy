@@ -1477,3 +1477,39 @@ require_test "OTP-SINGLE-CODE-001" "./internal/platform/postgres" \
 require_test "OTP-THROTTLE-001" "./internal/platform/postgres" \
   "TestLoginChallengeRequestThrottle" \
   "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?
+
+# DEVICE-METROHOST-001: a `MetroHost` key committed into the *versioned*
+# apps/mobile/ios/Proxy/Info.plist pins every device to one LAN IP and
+# COMPLETELY bypasses AppDelegate.bundleURL()'s Bonjour fallback — so the next
+# DHCP lease change leaves the phone stuck on "Could not connect to the
+# development server" with no recovery short of a native rebuild.
+# Escaped 2026-09-12: commit d4dadba baked in the then-current 192.168.115.138
+# to work around a stale on-device mDNS cache; hours were lost before anyone
+# thought to read the plist.
+#
+# The escape hatch is now a *launch-time* environment variable, which needs no
+# file edit and no rebuild:
+#   METRO_HOST=192.168.1.23 ./scripts/dev-ios-device.sh install
+# So the tracked plist must stay clean. Three pins: the key stays absent, the
+# env override stays wired, and the Bonjour fallback is not deleted in a
+# misguided attempt to "fix" the plist.
+if grep -q '<key>MetroHost</key>' apps/mobile/ios/Proxy/Info.plist; then
+  echo "  FAIL [DEVICE-METROHOST-001]: apps/mobile/ios/Proxy/Info.plist hardcodes MetroHost." >&2
+  echo "        That bypasses AppDelegate's Bonjour fallback and pins every device to one LAN IP." >&2
+  echo "        Delete the <key>MetroHost</key> / <string>...</string> pair." >&2
+  echo "        For an emergency override use: METRO_HOST=<ip> ./scripts/dev-ios-device.sh install" >&2
+  echo "        See docs/development/SOP_DYNAMIC_IP_DEVICES.md §7.1." >&2
+  exit 1
+fi
+if ! grep -q 'environment\["METRO_HOST"\]' apps/mobile/ios/Proxy/AppDelegate.swift; then
+  echo "  FAIL [DEVICE-METROHOST-001]: AppDelegate.swift no longer honours the METRO_HOST env override." >&2
+  echo "        Without it there is no rebuild-free way to point a device at Metro," >&2
+  echo "        which is exactly what tempted someone into committing MetroHost." >&2
+  exit 1
+fi
+if ! grep -qE '"[A-Za-z0-9._-]+\.local"' apps/mobile/ios/Proxy/AppDelegate.swift; then
+  echo "  FAIL [DEVICE-METROHOST-001]: AppDelegate.swift lost its Bonjour (.local) host fallback." >&2
+  echo "        Removing the fallback re-breaks every device the moment the Mac IP changes." >&2
+  exit 1
+fi
+echo "    DEVICE-METROHOST-001: PASS (no committed MetroHost; env override + Bonjour fallback intact)"
