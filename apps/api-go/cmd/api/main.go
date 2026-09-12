@@ -874,6 +874,20 @@ func merchantCreatorAvailability(now time.Time) (time.Time, time.Time) {
 	return now.Add(time.Hour), now.Add(72 * time.Hour)
 }
 
+// creatorAccountID 由固定 facet 键（agent_id）确定性派生出系统账号 id。
+// 与可编辑的显示名解耦：改名字不动 id，同名不同人也能区分。
+func creatorAccountID(agentID string) string {
+	return "user_mockcreator_" + strings.TrimPrefix(agentID, "agent_")
+}
+
+// creatorCity 把服务区映射为账号 profile 的城市（profile 要求 1..60 字符）。
+func creatorCity(areas []string) string {
+	if len(areas) > 0 && areas[0] == "hcm" {
+		return "Ho Chi Minh City"
+	}
+	return "Hanoi"
+}
+
 // seedPostgresSupply 写入可用于商家 Creator 推荐的真实测试 Agent。
 // Linh：河内，中文+越南语 VERIFIED+摄影，120 万
 // Mai：河内，仅越南语 VERIFIED，100 万（中文查询应被过滤）
@@ -894,6 +908,28 @@ func seedPostgresSupply(pool *pgxpool.Pool) error {
 			ON CONFLICT (agent_id) DO UPDATE SET name=EXCLUDED.name, bio=EXCLUDED.bio,
 				photos=EXCLUDED.photos, languages=EXCLUDED.languages, service_areas=EXCLUDED.service_areas, status='ACTIVE', updated_at=EXCLUDED.updated_at`,
 			p.agentID, p.name, p.bio, photos, languages, areas, now); err != nil {
+			return err
+		}
+		// IDENTITY-ID-001: mock Creator 同样必须是「有系统 id 的账号」，不能只有手写
+		// agent_id + 显示名 —— 否则同一显示名在不同页面各持一份头像，无法判断是否同一个人。
+		// 账号 id 由 agent_id（固定 facet 键）确定性派生，与可编辑的显示名无关，保证幂等；
+		// 名字改了不影响身份，同名也不会互相串头像。
+		accountID := creatorAccountID(p.agentID)
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO identity.user_accounts (id, status, created_at, updated_at)
+			VALUES ($1,'REGISTERED',$2,$2)
+			ON CONFLICT (id) DO NOTHING`, accountID, now); err != nil {
+			return err
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO identity.profiles (user_account_id, name, handle, bio, city, avatar_path, version, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'',1,$6)
+			ON CONFLICT (user_account_id) DO UPDATE SET name=EXCLUDED.name, bio=EXCLUDED.bio,
+				city=EXCLUDED.city, updated_at=EXCLUDED.updated_at`,
+			accountID, p.name, "creator_"+strings.TrimPrefix(p.agentID, "agent_"), p.bio, creatorCity(p.areas), now); err != nil {
+			return err
+		}
+		if _, err := pool.Exec(ctx, `UPDATE supply.agent_profiles SET user_account_id=$1 WHERE agent_id=$2`, accountID, p.agentID); err != nil {
 			return err
 		}
 	}
