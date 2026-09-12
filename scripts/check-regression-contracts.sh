@@ -1675,3 +1675,29 @@ if git grep -niI -e 'pimp' -e '鸡头' -e '跑路' -e '小妹' -- \
   exit 1
 fi
 echo "    COMP-CHAT-001: PASS (paid threads stay auditable; social privacy untouched)"
+
+# COMP-ID-001: a self-destructing persona is incompatible with selling.
+# E-commerce Law 122/2025 (in force 2026-07-01) bans anonymous selling, and
+# burning an identity also destroyed every conversation, message and media
+# conducted under it — the record of the paid engagements. Personas stay as a
+# presentation layer; the self-destructing variant is refused for any account
+# that has transacted, and refused outright when we cannot tell, because
+# "could not check" must never become "allowed".
+require_test "COMP-ID-001" "./internal/identity" \
+  "TestBurnerRefusedForAccountThatTransacted" \
+  "apps/api-go/internal/identity/display_identity_compliance_test.go" || exit $?
+require_test "COMP-ID-001" "./internal/identity" \
+  "TestBurnerRefusedWhenLookupIsMissing" \
+  "apps/api-go/internal/identity/display_identity_compliance_test.go" || exit $?
+require_test "COMP-ID-001" "./internal/identity" \
+  "TestNonBurnerPersonasRemainAvailableToTransactingAccounts" \
+  "apps/api-go/internal/identity/display_identity_compliance_test.go" || exit $?
+# The guard must sit in the command handlers, not only in the helper: a
+# caller that reaches Create/Burn directly would bypass a helper-only check.
+if ! grep -q 'BurnerAllowedFor' apps/api-go/internal/identity/service.go ||
+   ! grep -q 'BURN_FORBIDDEN_FOR_TRANSACTING_ACCOUNT' apps/api-go/internal/identity/service.go; then
+  echo "  FAIL [COMP-ID-001]: persona create/burn no longer enforces the compliance guard." >&2
+  echo "        A self-destructing seller identity defeats real-name selling rules." >&2
+  exit 1
+fi
+echo "    COMP-ID-001: PASS (self-destructing personas refused once an account has transacted)"

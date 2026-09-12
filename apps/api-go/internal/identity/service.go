@@ -74,6 +74,17 @@ type Service struct {
 	// otpRequests bounds code delivery per login identifier
 	// (OTP-THROTTLE-001: 1/min, 10/hour — Twilio Verify ladder).
 	otpRequests *otpThrottler
+	// COMP-ID-001: persona lifecycle needs to know whether the account has
+	// transacted. Nil fails closed — see BurnerAllowedFor.
+	transactions TransactionHistoryLookup
+}
+
+// SetTransactionHistoryLookup wires the payment-side lookup used by
+// COMP-ID-001. Without it, self-destructing personas are refused outright.
+func (s *Service) SetTransactionHistoryLookup(lookup TransactionHistoryLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.transactions = lookup
 }
 
 // ProfileMediaAuthorizer 是 media 服务的最小能力面：把本人上传且技术审核通过的
@@ -1271,6 +1282,15 @@ func (s *Service) createDisplayIdentity(ctx context.Context, e command.Envelope)
 	if typ == "" {
 		typ = DisplayIdentityPublic
 	}
+	// COMP-ID-001: an account that has transacted may not hold a persona that
+	// erases itself. Anonymous selling is banned, and the burn would also
+	// take the record of the paid engagements with it.
+	if ok, checkErr := BurnerAllowedFor(ctx, s.transactions, e.Actor.ID, typ); checkErr != nil || !ok {
+		if errors.Is(checkErr, ErrBurnerForbiddenForTransactingAccount) || !ok {
+			return command.Rejected(e, "BURNER_FORBIDDEN_FOR_TRANSACTING_ACCOUNT", "COMPLIANCE", "AFTER_USER_ACTION", "identity.burner_forbidden", nil)
+		}
+		return command.Rejected(e, "DISPLAY_IDENTITY_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.display_identity_create_failed", nil)
+	}
 	d, err := s.displayIdentityService.Create(ctx, CreateInput{
 		OwnerID:     e.Actor.ID,
 		Type:        typ,
@@ -1329,6 +1349,19 @@ func (s *Service) burnDisplayIdentity(ctx context.Context, e command.Envelope) c
 	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "DISPLAY_IDENTITY_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.display_identity_forbidden", nil)
+	}
+	// COMP-ID-001: burning erases that identity's conversations, messages and
+	// media. Harmless for an account that never transacted; once money has
+	// moved it is destruction of the record, so it is refused. Fails closed.
+	if s.transactions == nil {
+		return command.Rejected(e, "BURN_FORBIDDEN_FOR_TRANSACTING_ACCOUNT", "COMPLIANCE", "AFTER_USER_ACTION", "identity.burn_forbidden", nil)
+	}
+	transacted, txErr := s.transactions.HasTransacted(ctx, e.Actor.ID)
+	if txErr != nil {
+		return command.Rejected(e, "DISPLAY_IDENTITY_BURN_FAILED", "INTERNAL", "SAFE_RETRY", "identity.display_identity_burn_failed", nil)
+	}
+	if transacted {
+		return command.Rejected(e, "BURN_FORBIDDEN_FOR_TRANSACTING_ACCOUNT", "COMPLIANCE", "AFTER_USER_ACTION", "identity.burn_forbidden", nil)
 	}
 	d, err := s.displayIdentityService.Burn(ctx, BurnInput{IdentityID: id, OwnerID: e.Actor.ID})
 	if errors.Is(err, ErrDisplayIdentityNotFound) {

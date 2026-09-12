@@ -490,3 +490,50 @@ func (s *DisplayIdentityService) SweepExpiredBurners(ctx context.Context, ownerI
 func newDisplayIdentityID() string {
 	return newID("did_")
 }
+
+// ---------------------------------------------------------------------------
+// COMP-ID-001 — a self-destructing persona is incompatible with selling.
+//
+// Vietnam's E-commerce Law 122/2025 (in force 2026-07-01) bans anonymous
+// selling: a seller must be identifiable and bound to a tax identity. A
+// persona that erases itself after 7 days makes that unenforceable, and
+// burning it also destroyed the record of the paid engagements conducted
+// under it. Personas stay as a presentation layer for everyone else; the
+// self-destructing variant is switched off once an account has transacted.
+// ---------------------------------------------------------------------------
+
+// TransactionHistoryLookup reports whether an account has ever had money
+// move through the platform, either as the party paid or the party paying.
+type TransactionHistoryLookup interface {
+	HasTransacted(ctx context.Context, userAccountID string) (bool, error)
+}
+
+var (
+	// ErrBurnerForbiddenForTransactingAccount is returned when an account that
+	// has transacted asks for a self-destructing persona.
+	ErrBurnerForbiddenForTransactingAccount = errors.New("self-destructing identities are not available to accounts that have transacted")
+
+	// ErrBurnForbiddenForTransactingAccount is returned when burning an
+	// identity would erase the record of paid engagements.
+	ErrBurnForbiddenForTransactingAccount = errors.New("an identity with transaction history cannot be burned")
+)
+
+// BurnerAllowedFor reports whether the persona type may be created for this
+// account. It fails closed: without a transaction lookup the answer is no,
+// because "we could not tell" must not become "allowed".
+func BurnerAllowedFor(ctx context.Context, lookup TransactionHistoryLookup, userAccountID string, typ DisplayIdentityType) (bool, error) {
+	if typ != DisplayIdentityBurner {
+		return true, nil
+	}
+	if lookup == nil {
+		return false, ErrBurnerForbiddenForTransactingAccount
+	}
+	transacted, err := lookup.HasTransacted(ctx, userAccountID)
+	if err != nil {
+		return false, err
+	}
+	if transacted {
+		return false, ErrBurnerForbiddenForTransactingAccount
+	}
+	return true, nil
+}
