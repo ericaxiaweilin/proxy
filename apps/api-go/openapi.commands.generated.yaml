@@ -293,6 +293,10 @@ commands:
     domain: Scene
   - command: RecordAttribution
     domain: LocalNet
+  - command: RecordAuthorityRequest
+    domain: Moderation
+  - command: RecordAuthorityResponse
+    domain: Moderation
   - command: RecordCandidateViewed
     domain: LocalNet
   - command: RecordConsent
