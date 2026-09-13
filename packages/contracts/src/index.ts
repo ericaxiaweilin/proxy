@@ -318,8 +318,9 @@ export const PostContextRefSchema = z.object({
 export type PostContextRef = z.infer<typeof PostContextRefSchema>;
 
 // R15.24 P0：Post.Poll — 简单的帖内投票。
-// 后端尚未实现。发送时 client 依然走 body 序列化作为兼容路径（ComposerV2Screen 的
-// assembleComposerBody），后端落地后可同时填 ephemeralUntil / poll，服务端优先以新字段为准。
+// 后端尚未实现（GHOST-24H-001 只落地了 ephemeralUntil，poll 仍然没有服务端字段）。
+// 发送时 client 走 body 序列化作为兼容路径（ComposerV2Screen 的 assembleComposerBody），
+// 等服务端落地后本字段成为单一事实来源。
 export const PostPollOptionSchema = z.object({
   optionId: z.string().min(1),
   label: z.string().min(1).max(80),
@@ -469,9 +470,11 @@ export const CreatePostPayloadSchema = z.object({
     "ACTIVITY"
   ]).optional(),
   contextRefs: z.array(PostContextRefSchema).optional(),
-  // R15.24 P0：可携带 ephemeralUntil 和 poll。后端尚未实现，发送时
-  // client 仍然走 body 序列化作为兼容路径。等后端落地后，本字段成为单一事实来源。
+  // ephemeralUntil：GHOST-24H-001 起服务端真正持久化，并在读时过滤（过期即
+  // 从 feed / 详情里消失），本字段是单一事实来源。必须是未来时间，否则服务端
+  // 以 INVALID_POST_EPHEMERAL_UNTIL 拒绝 —— 不会静默降级成一条永久帖。
   ephemeralUntil: z.string().optional(),
+  // poll：仍然只有 body fallback，服务端尚无对应字段。
   poll: PostPollSchema.optional()
 });
 export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;

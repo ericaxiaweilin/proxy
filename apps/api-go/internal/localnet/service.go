@@ -79,6 +79,19 @@ type Post struct {
 	Status            string         `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
 	ContextRefs       []ContextRef   `json:"contextRefs"`
 	CreatedAt         time.Time      `json:"createdAt"`
+	// EphemeralUntil 是临时动态（24h）的到期时刻（GHOST-24H-001）。
+	// nil = 永久动态 —— 存量数据全是 nil，不需要回填。
+	//
+	// 这个字段以前**只存在于 contracts 的 zod schema 和 mobile 的发布 payload 里**，
+	// api-go 一次都没出现过：Post 没有这个字段、createPostPayload 不解析它、
+	// 数据库没有列、feed 没有过期条件。结果就是用户打开「24h 临时动态」发了一条
+	// 帖子、客户端算好 now+24h 发上来、Go 的 JSON 解码静默忽略未知字段、客户端
+	// 弹 toast「24h 动态已发布」，而这条帖子**永久存在**。
+	//
+	// 这不是少做功能，是一条对用户撒谎的路径：用户正是因为相信它会消失才发的。
+	// 用指针而不是 time.Time + IsZero：nil 与「零值时间」是两件事，零值时间会被
+	// 序列化成 "0001-01-01T00:00:00Z" 这种让客户端 zod parse 失败的垃圾。
+	EphemeralUntil *time.Time `json:"ephemeralUntil,omitempty"`
 	// R15.15 P1: SceneType 是 Post 与 Scene aggregate 之间的选择
 	// 门 (ROOFTOP | BRUNCH | SPA | CINEMA | PHOTO | NIGHTLIFE |
 	// OUTDOOR | COFFEE | UNKNOWN). 跟 Scene.SceneType 同样枚举
@@ -777,6 +790,26 @@ type createPostPayload struct {
 	// 记忆轮。不传默认 UNKNOWN（依然能查到，只是样本少）。
 	SceneType   string       `json:"sceneType"`
 	ContextRefs []ContextRef `json:"contextRefs"`
+	// GHOST-24H-001：临时动态到期时刻（RFC3339）。不传 / null = 永久动态。
+	// 用指针以便区分「没传」与「传了零值」；传了非 RFC3339 的字符串会让
+	// decode 失败 → INVALID_POST，而不是被静默丢弃。
+	EphemeralUntil *time.Time `json:"ephemeralUntil"`
+}
+
+// ephemeralUntilSkewTolerance 容忍一点点客户端与服务端之间的时钟偏差。
+// 只在判断「是否已经是过去」时用：差几秒不该把一次正常发布打成非法请求。
+const ephemeralUntilSkewTolerance = 5 * time.Minute
+
+// postIsExpired 报告一条临时动态是否已经到期。永久动态（nil）永不到期。
+//
+// 这是**读时**判断而不是写时删行：feed 分页的 LIMIT 计数必须正确（先删行再
+// limit 会少给一页，先 limit 再过滤会漏），而且行留着才能举证「这条内容确实
+// 到期了」而不是被谁偷偷删掉的。
+func postIsExpired(p Post, now time.Time) bool {
+	if p.EphemeralUntil == nil {
+		return false
+	}
+	return !p.EphemeralUntil.After(now)
 }
 
 // allowedSceneTypes 是 Post.SceneType 的允许集。需要保持与
@@ -849,6 +882,24 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "POST_AUTHOR_MISMATCH", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.post_author_mismatch", nil)
 	}
+	// GHOST-24H-001：到期时刻必须是**将来**，否则拒绝。
+	//
+	// 为什么不能「收到过去的时间就当没传、照发一条永久帖」—— 那正是这次修的
+	// bug 本身：客户端说「24h 临时动态已发布」，实际是永久的。静默忽略一个用户
+	// 明确表达的意图，等于替用户做了个他没同意的决定。要么按他说的做，要么
+	// 明确告诉他做不到。
+	//
+	// 也不接受「已经过去但仍存下来」——那会产出一条发出即可见的、谁都看不到的
+	// 幽灵帖：客户端会以为发布成功，用户翻遍 feed 也找不到自己的帖子。
+	if p.EphemeralUntil != nil {
+		cutoff := s.clock.Now().UTC().Add(-ephemeralUntilSkewTolerance)
+		if !p.EphemeralUntil.After(cutoff) {
+			return command.Rejected(e, "INVALID_POST_EPHEMERAL_UNTIL", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_ephemeral_until", map[string]any{
+				"got":      p.EphemeralUntil.UTC().Format(time.RFC3339),
+				"serverAt": s.clock.Now().UTC().Format(time.RFC3339),
+			})
+		}
+	}
 	post := Post{
 		ID:                newID("post_"),
 		AuthorType:        p.AuthorType,
@@ -862,14 +913,21 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		ContextRefs:       mergeClassificationRefs(p.ContextRefs, classifyPostFallback(p.Body)),
 		SceneType:         p.SceneType,
 		CreatedAt:         s.clock.Now().UTC(),
+		EphemeralUntil:    p.EphemeralUntil,
 	}
-	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, map[string]any{
+	domainEventData := map[string]any{
 		"authorType":  post.AuthorType,
 		"body":        post.Body,
 		"visibility":  post.Visibility,
 		"contextRefs": post.ContextRefs,
 		"note":        "Post 发布永不自动创建 Task；Intent 经 DM / 显式 Need 涌现",
-	})}
+	}
+	// GHOST-24H-001：到期时刻要进事件流。用户主张「这条内容是临时的」这一事实
+	// 本身要能举证 —— 否则日后对不上「它到底是什么时候该消失的」。
+	if post.EphemeralUntil != nil {
+		domainEventData["ephemeralUntil"] = post.EphemeralUntil.UTC().Format(time.RFC3339)
+	}
+	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, domainEventData)}
 	if len(p.MediaRefs) > 0 && s.mediaLookup != nil {
 		ids := make([]string, 0, len(p.MediaRefs))
 		for _, ref := range p.MediaRefs {
@@ -937,6 +995,12 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 			continue
 		}
 		if post.Visibility == "FOLLOWERS" && post.AuthorID != e.Actor.ID {
+			continue
+		}
+		// GHOST-24H-001: 按 ID 直取也不能把已过期的临时动态捞回来。收藏夹里躺着
+		// 一条 24h 帖，过期后再点进去应该「没有了」，而不是把它复活 —— 复活正是
+		// 用户当初选择「临时」时要避免的事。
+		if postIsExpired(post, s.clock.Now().UTC()) {
 			continue
 		}
 		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null
@@ -1330,6 +1394,12 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		}
 		// SEARCH-CORPUS-001: 匹配字段见 postMatchesSearch（正文 / 作者展示名 / 城市）。
 		if !postMatchesSearch(p, search) {
+			continue
+		}
+		// GHOST-24H-001: 到期的临时动态不再出现在 feed 里。
+		// PG 侧同一条谓语写在 SQL 里（保证 LIMIT 数对），这里是内存仓的路径，
+		// 同时对 PG 结果再兜一层 —— 过期的东西宁可漏也别漏出来。
+		if postIsExpired(p, s.clock.Now().UTC()) {
 			continue
 		}
 		// Follow-graph authorization is not implemented yet. Fail closed instead

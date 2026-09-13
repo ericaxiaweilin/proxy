@@ -35,10 +35,11 @@ func (r *LocalNetRepository) CreatePost(ctx context.Context, post localnet.Post)
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, scene_type, status, context_refs, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		post.ID, post.AuthorType, post.AuthorID, post.AuthorDisplayName, post.Body, mediaRefs,
 		post.Visibility, post.CityScope, nullIfEmptyNetwork(post.SceneType), post.Status, contextRefs, post.CreatedAt,
+		post.EphemeralUntil,
 	)
 	return err
 }
@@ -54,8 +55,8 @@ func (r *LocalNetRepository) UpsertPost(ctx context.Context, post localnet.Post)
 	}
 	_, err = queryerForContext(ctx, r.pool).Exec(ctx, `
 		INSERT INTO localnet.posts (id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, scene_type, status, context_refs, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (id) DO UPDATE SET
 			author_type=EXCLUDED.author_type,
 			author_id=EXCLUDED.author_id,
@@ -66,9 +67,11 @@ func (r *LocalNetRepository) UpsertPost(ctx context.Context, post localnet.Post)
 			city_scope=EXCLUDED.city_scope,
 			scene_type=EXCLUDED.scene_type,
 			status=EXCLUDED.status,
-			context_refs=EXCLUDED.context_refs`,
+			context_refs=EXCLUDED.context_refs,
+			ephemeral_until=EXCLUDED.ephemeral_until`,
 		post.ID, post.AuthorType, post.AuthorID, post.AuthorDisplayName, post.Body, mediaRefs,
 		post.Visibility, post.CityScope, nullIfEmptyNetwork(post.SceneType), post.Status, contextRefs, post.CreatedAt,
+		post.EphemeralUntil,
 	)
 	return err
 }
@@ -86,10 +89,11 @@ func (r *LocalNetRepository) GetPost(ctx context.Context, id string) (localnet.P
 	var sceneType *string
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, scene_type, status, context_refs, created_at
+			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until
 		FROM localnet.posts WHERE id = $1`, id).Scan(
 		&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
 		&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+		&post.EphemeralUntil,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return localnet.Post{}, localnet.ErrPostNotFound
@@ -125,7 +129,7 @@ func (r *LocalNetRepository) UpdatePost(ctx context.Context, post localnet.Post,
 func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, scene_type, status, context_refs, created_at
+			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until
 		FROM localnet.posts ORDER BY created_at DESC, id ASC`)
 	if err != nil {
 		return nil, err
@@ -139,6 +143,7 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 		if err := rows.Scan(
 			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
 			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+			&post.EphemeralUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -165,10 +170,14 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 	}
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, scene_type, status, context_refs, created_at
+			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until
 		FROM localnet.posts
 		WHERE status='PUBLISHED'
 		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1))
+		  -- GHOST-24H-001: 到期的临时动态不再出现。必须写在 SQL 里而不是查完
+		  -- 再在 Go 里过滤 —— 先 LIMIT 再过滤会让一页少给好几条、往下翻还会
+		  -- 重复或漏帖。NULL = 永久动态（存量数据全是 NULL，无需回填）。
+		  AND (ephemeral_until IS NULL OR ephemeral_until > now())
 		  -- MUTED-AUTHORS-002: feed must exclude posts from authors the
 		  -- viewer muted. Was missing entirely: AddMutedAuthor had no read
 		  -- side — IsMuted had zero callers, so mutes were decoration
@@ -194,6 +203,7 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 		if err := rows.Scan(
 			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
 			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+			&post.EphemeralUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -225,11 +235,15 @@ func (r *LocalNetRepository) ListPostsMentioning(ctx context.Context, actorID st
 	}
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
-			visibility, city_scope, scene_type, status, context_refs, created_at
+			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until
 		FROM localnet.posts
 		WHERE status='PUBLISHED'
 		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1))
 		  AND author_id <> $1
+		  -- GHOST-24H-001: 与 ListFeedPage 同一个过期谓语。这条查询刻意与 feed
+		  -- 保持同一套 WHERE 形状，否则一条已经「消失」的 24h 帖会因为提到了谁
+		  -- 而重新出现在 Ta 的 TAGGED 里 —— 从后门复活。
+		  AND (ephemeral_until IS NULL OR ephemeral_until > now())
 		  AND NOT EXISTS (
 			SELECT 1 FROM engagement.muted_authors
 			WHERE actor_id=$1 AND author_id=localnet.posts.author_id
@@ -249,6 +263,7 @@ func (r *LocalNetRepository) ListPostsMentioning(ctx context.Context, actorID st
 		if err := rows.Scan(
 			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
 			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+			&post.EphemeralUntil,
 		); err != nil {
 			return nil, err
 		}
