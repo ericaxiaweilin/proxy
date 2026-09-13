@@ -82,9 +82,6 @@ func ReportableReasons() []string {
 	return out
 }
 
-// ReportStateSubmitted 是举报的初始状态。受理即留痕，不预判真假。
-const ReportStateSubmitted = "SUBMITTED"
-
 // ErrReportTargetRequired / ErrReportReasonRequired 由仓储层在写入前兜底，
 // 防止有人绕过 Service 直接调仓储写进一条说不清在报什么的记录。
 var (
@@ -107,8 +104,14 @@ type Report struct {
 
 // Repository 是举报记录的写入口。故意只暴露 Add：举报是 append-only，
 // 不允许改、不允许删。
+//
+// AddDisposition 同理（COMP-REPORT-003）：处置记录也是 append-only。
+// FindReport 是给处置用的 —— 给一条不存在的举报写处置，只能制造「看起来
+// 处理过」的假象，所以写入前必须能确认举报真实存在。
 type Repository interface {
 	AddReport(ctx context.Context, report Report) error
+	AddDisposition(ctx context.Context, disposition Disposition) error
+	FindReport(ctx context.Context, reportID string) (Report, bool)
 }
 
 type reportPayload struct {
@@ -135,7 +138,7 @@ func NewWithRepository(repository Repository) *Service {
 }
 
 func (s *Service) Supports(commandType string) bool {
-	return commandType == "ReportTarget"
+	return commandType == "ReportTarget" || commandType == "RecordReportDisposition"
 }
 
 func (s *Service) Handle(e command.Envelope) command.Result {
@@ -148,6 +151,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	switch e.CommandType {
 	case "ReportTarget":
 		return s.reportTarget(ctx, e)
+	// COMP-REPORT-003: 处置留痕。operator-only —— 白名单见
+	// internal/api/security.go 的 operatorCommandTypes，未配白名单时
+	// 在命令边界就被拒，走不到这里。
+	case "RecordReportDisposition":
+		return s.recordDisposition(ctx, e)
 	default:
 		return command.Rejected(e, "MODERATION_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "moderation.unsupported_command", nil)
 	}

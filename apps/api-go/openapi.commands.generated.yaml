@@ -311,6 +311,8 @@ commands:
     domain: LocalNet
   - command: RecordProfileOpen
     domain: LocalNet
+  - command: RecordReportDisposition
+    domain: Moderation
   - command: RecordSatisfaction
     domain: Fulfillment
   - command: RecordSceneCommerceVisit

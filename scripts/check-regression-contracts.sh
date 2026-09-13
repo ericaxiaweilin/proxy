@@ -2124,3 +2124,52 @@ for t in "always offers the activity itself, and the host merchant only when it 
   fi
 done
 echo "    COMP-REPORT-002: PASS (message, account, transaction, activity, merchant, opportunity and invite are all reportable from the UI)"
+
+# COMP-REPORT-003: 举报的**处置**留痕。
+# 001/002 解决了「收得到、点得到」，但 reports 表把 state 钉死在 SUBMITTED
+# 且整表 append-only —— 平台能证明「收到过」，证明不了「处理过」。
+# 服务条款承诺了举报与申诉渠道，并承诺「依法要求删除违法信息：最迟 24 小时
+# 内处理」。收进来却没有处置记录，等于书面承认收到、却拿不出处理痕迹；
+# 在刑法 327 条的语境下，MINOR_SAFETY / SOLICITATION 两类举报查不到处置，
+# 姿态就是「知情不办」。
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestDispositionAcceptedAndAttributed" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestReportStateFollowsDispositions" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestDispositionRejectedWhenActionTakenWithoutOutcome" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestDispositionRejectedWhenDismissedWithoutReason" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestDispositionRejectedForUnknownReport" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+# 处置是 operator-only：普通用户能给自己写「已处置」，这条留痕就一文不值。
+if ! grep -qF '"RecordReportDisposition": true' \
+     apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-REPORT-003]: RecordReportDisposition is no longer operator-only," >&2
+  echo "        so anyone could write a fake disposition onto their own report." >&2
+  exit 1
+fi
+# 命令必须真被 moderation 服务受理，否则命令面写了也走不到。
+if ! grep -qF 'case "RecordReportDisposition"' \
+     apps/api-go/internal/moderation/service.go; then
+  echo "  FAIL [COMP-REPORT-003]: the disposition command is no longer handled by" >&2
+  echo "        the moderation service, so it would 501." >&2
+  exit 1
+fi
+# 落库实现：只有内存仓储的话，重启一次处置记录就没了。
+if ! grep -qF 'func (r *ModerationRepository) AddDisposition' \
+     apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-REPORT-003]: the Postgres disposition repository is missing," >&2
+  echo "        so dispositions would not survive a restart." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/087_moderation_dispositions.sql ]; then
+  echo "  FAIL [COMP-REPORT-003]: migration 087_moderation_dispositions.sql is missing." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-003: PASS (handled reports leave an attributable, append-only trail)"

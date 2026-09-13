@@ -49,5 +49,51 @@ func (r *ModerationRepository) AddReport(ctx context.Context, report moderation.
 	return err
 }
 
+// COMP-REPORT-003 — 处置落库。与举报同规则：只有 INSERT，没有
+// UPDATE / DELETE。处置记录是「平台处理过」的举证材料。
+const insertDispositionSQL = `
+INSERT INTO moderation.dispositions
+    (id, report_id, action, outcome, actor_id, note, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+func (r *ModerationRepository) AddDisposition(ctx context.Context, disposition moderation.Disposition) error {
+	if strings.TrimSpace(disposition.ReportID) == "" || strings.TrimSpace(disposition.Action) == "" {
+		return moderation.ErrDispositionActionRequired
+	}
+	if strings.TrimSpace(disposition.ActorID) == "" {
+		return moderation.ErrDispositionActorRequired
+	}
+	if r == nil || r.pool == nil {
+		return moderation.ErrReportRepositoryDown
+	}
+	note := disposition.Note
+	outcome := disposition.Outcome
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, insertDispositionSQL,
+		disposition.ID, disposition.ReportID, disposition.Action, outcome,
+		disposition.ActorID, note, disposition.CreatedAt.UTC())
+	return err
+}
+
+const findReportSQL = `
+SELECT id, reporter_id, target_type, target_id, reason, COALESCE(note, ''), state, created_at
+  FROM moderation.reports
+ WHERE id = $1`
+
+func (r *ModerationRepository) FindReport(ctx context.Context, reportID string) (moderation.Report, bool) {
+	if r == nil || r.pool == nil || strings.TrimSpace(reportID) == "" {
+		return moderation.Report{}, false
+	}
+	var out moderation.Report
+	var note string
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, findReportSQL, reportID).Scan(
+		&out.ID, &out.ReporterID, &out.TargetType, &out.TargetID,
+		&out.Reason, &note, &out.State, &out.CreatedAt)
+	if err != nil {
+		return moderation.Report{}, false
+	}
+	out.Note = note
+	return out, true
+}
+
 // 签名漂移就在这里编译失败，而不是运行期静默写不进去。
 var _ moderation.Repository = (*ModerationRepository)(nil)
