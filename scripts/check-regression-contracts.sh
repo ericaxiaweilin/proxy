@@ -1915,3 +1915,43 @@ if ! grep -qF 'personaSvc.SetAgeLookup(' apps/api-go/cmd/api/main.go; then
   exit 1
 fi
 echo "    COMP-AI-MINOR-001: PASS (AI companions are refused to minors and to accounts with no age evidence)"
+
+# COMP-E2EE-001: 不许宣称做不到的加密。
+# EndToEndEncrypted 此前恒为 true，理由写的是「transport TLS + at-rest KMS」——
+# 那不是端到端加密，两种情况服务端都能读到明文。对用户挂一把兑现不了的锁是
+# 虚假安全声明（他会以为连平台都看不到，从而说出他不会说的话），而且与
+# COMP-CHAT-001 冲突：付费会话必须保留可审计记录，本来就不能是 E2EE。
+# 三条出口都要钉：默认值、发送路径、序列化边界（库里的旧消息带着 true）。
+require_test "COMP-E2EE-001" "./internal/conversation" \
+  "TestNoDefaultProtectionClaimsEndToEndEncryption" \
+  "apps/api-go/internal/conversation/message_protection_e2ee_test.go" || exit $?
+require_test "COMP-E2EE-001" "./internal/conversation" \
+  "TestWithoutUnbackedClaimsStripsEndToEndClaim" \
+  "apps/api-go/internal/conversation/message_protection_e2ee_test.go" || exit $?
+require_test "COMP-E2EE-001" "./internal/conversation" \
+  "TestMarshalledProtectionNeverClaimsEndToEndEncryption" \
+  "apps/api-go/internal/conversation/message_protection_e2ee_test.go" || exit $?
+# 去掉恒真条件后行为不能变（以前实际生效的一直是 ScreenshotProtected）。
+require_test "COMP-E2EE-001" "./internal/conversation" \
+  "TestSecurityModeStillKeyedOnScreenshotProtection" \
+  "apps/api-go/internal/conversation/message_protection_e2ee_test.go" || exit $?
+
+# 序列化兜底必须在：改默认值管不到库里已有的旧消息。
+if ! grep -qF 'func (p MessageProtection) MarshalJSON()' \
+     apps/api-go/internal/conversation/message_protection.go; then
+  echo "  FAIL [COMP-E2EE-001]: protection is no longer sanitized at the serialization" >&2
+  echo "        boundary, so stale rows still advertise end-to-end encryption." >&2
+  exit 1
+fi
+# 发送路径必须再抹一次，调用方不能自称端到端加密。
+if ! grep -qF 'protection.WithoutUnbackedClaims()' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [COMP-E2EE-001]: the send path no longer strips the end-to-end claim." >&2
+  exit 1
+fi
+# app.json 的出口申报必须与代码一致：没有 E2EE 就写 false。
+if ! grep -qF '"usesNonExemptEncryption": false' apps/mobile/app.json; then
+  echo "  FAIL [COMP-E2EE-001]: app.json now declares non-exempt encryption while the" >&2
+  echo "        code has no end-to-end encryption to declare." >&2
+  exit 1
+fi
+echo "    COMP-E2EE-001: PASS (no unbacked end-to-end encryption claim on any egress)"

@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 174 — 2026-09-13
+
+- COMP-E2EE-001（合规整改）：不再宣称做不到的加密。
+  `MessageProtection.EndToEndEncrypted` 此前恒为 true，理由写的是
+  「transport TLS + at-rest KMS」—— 那不是端到端加密，两种情况服务端都能
+  读到明文。对用户挂一把兑现不了的锁是虚假安全声明，且与 COMP-CHAT-001
+  冲突（付费会话必须保留可审计记录）。默认值、发送路径、序列化边界三处
+  都钉死为 false；`security.mode` 的判定不变（以前实际生效的一直是
+  ScreenshotProtected）。**无视觉改动** —— 移动端从未读取该字段。
+
 ## Revision 173 — 2026-09-13
 
 - COMP-AI-MINOR-001（越南合规整改）：AI 伴侣 / 数字分身不对未成年人开放。

@@ -218,7 +218,12 @@ type MessageProtection struct {
     ExpiresAt   *time.Time `json:"expiresAt,omitempty"`     // 服务端硬过期时间
 
     // 加密标记（营销用）
-    EndToEndEncrypted bool `json:"endToEndEncrypted"` // 永远 true（前端展示 🔒）
+    EndToEndEncrypted bool `json:"endToEndEncrypted"` // COMP-E2EE-001：恒为 false
+    // 原 RFC 写的是「永远 true（前端展示 🔒）」，理由是 transport TLS + at-rest KMS。
+    // 那不是端到端加密 —— 两种情况下服务端都能读到明文。改掉的原因：
+    //   1. 虚假安全声明：用户以为连平台都看不到，会说出他不会说的话
+    //   2. 与 COMP-CHAT-001 冲突：付费会话必须保留可审计记录，本来就不能 E2EE
+    // 默认值、发送路径、序列化边界（历史脏数据）三处都钉死为 false。
 }
 ```
 
