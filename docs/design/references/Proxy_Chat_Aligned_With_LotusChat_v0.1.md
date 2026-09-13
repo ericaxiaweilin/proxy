@@ -14,9 +14,14 @@
 > 1. 付费会话（OriginType TASK/SERVICE/ACTIVITY/NEED/OFFER/ORDER）
 >    禁用阅后即焚、查看上限、防截屏 —— 服务端强制，客户端不可覆盖。
 > 2. 自毁身份（BURNER）**不得**对已产生交易的账号开放 —— 与电商法 122/2025
->    「禁止匿名销售」冲突。**已实现**（COMP-ID-001）：
+>    「禁止匿名销售」冲突。**已实现并已接真数据**（COMP-ID-001 / COMP-ID-002）：
 >    `BurnerAllowedFor()` 拒绝交易账号创建 BURNER，`burnDisplayIdentity`
 >    拒绝销毁有交易记录的身份；查不到交易记录时 fail-closed。
+>    「是否交易过」由 `TransactionHistoryRepository.HasTransacted()` 读**真实
+>    资金表**判定（`payment.payment_intents` / `payment.payout_holds` /
+>    `payment.ledger_entries` / 已结算的 `fulfillment.orders`），不是桩实现：
+>    恒返回 false 会让每个卖家都「查无交易」从而绕过本条，恒返回 true 会把
+>    守卫退化成一刀切拒绝，两个方向都有具名测试钉死。
 > 3. 销毁身份不得清空任何已产生交易的会话 / 消息 / 媒体。
 >
 > 对齐 Lotus 的隐私能力本身保留，但**只适用于社交会话**，不是交易链路。

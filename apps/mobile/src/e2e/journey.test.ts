@@ -105,7 +105,7 @@ describe("end-to-end requester journey (device-level smoke)", () => {
         accessToken: "access_e2e",
         refreshToken: "refresh_e2e",
         accessExpiresAt: "2026-08-27T00:15:00.000Z",
-        refreshExpiresAt: "2026-09-27T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1
       }
     });
@@ -216,7 +216,7 @@ describe("end-to-end requester journey (device-level smoke)", () => {
         accessToken: "access_e2e_002",
         refreshToken: "refresh_e2e_002",
         accessExpiresAt: "2026-08-27T00:15:00.000Z",
-        refreshExpiresAt: "2026-09-27T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1
       }
     });

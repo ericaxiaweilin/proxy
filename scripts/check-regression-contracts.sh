@@ -1701,3 +1701,97 @@ if ! grep -q 'BurnerAllowedFor' apps/api-go/internal/identity/service.go ||
   exit 1
 fi
 echo "    COMP-ID-001: PASS (self-destructing personas refused once an account has transacted)"
+
+# COMP-ID-002: the burner guard is only as strong as its answer to "has this
+# account transacted?". COMP-ID-001 refuses self-destructing personas to
+# accounts with money history; if the lookup behind it is a stub that always
+# answers "no transactions", every seller looks clean and Vietnam's
+# E-commerce Law 122/2025 (in force 2026-07-01, anonymous selling banned) is
+# defeated by nothing more than a one-line shortcut. The opposite stub
+# ("always yes") is just as bad: it turns the guard into a blanket refusal
+# that the team learns to route around. Both directions are pinned here.
+require_test "COMP-ID-002" "./internal/platform/postgres" \
+  "TestTransactionHistoryRefusesEmptyAccountID" \
+  "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+require_test "COMP-ID-002" "./internal/platform/postgres" \
+  "TestTransactionHistoryRefusesWhenPoolMissing" \
+  "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+
+# The lookup must actually query the money tables — not short-circuit.
+transaction_history_file=apps/api-go/internal/platform/postgres/transaction_history.go
+if ! grep -qF 'queryerForContext(ctx, r.pool).QueryRow(ctx, hasTransactedSQL' "$transaction_history_file" ||
+   ! grep -qF 'payment.payment_intents' "$transaction_history_file" ||
+   ! grep -qF 'payment.payout_holds' "$transaction_history_file" ||
+   ! grep -qF 'payment.ledger_entries' "$transaction_history_file" ||
+   ! grep -qF 'fulfillment.orders' "$transaction_history_file"; then
+  echo "  FAIL [COMP-ID-002]: HasTransacted no longer reads the payment ledger." >&2
+  echo "        A lookup that skips the money tables makes the burner guard decorative." >&2
+  exit 1
+fi
+# A signature drift must break the build here, not fail open at runtime.
+if ! grep -qF 'var _ identity.TransactionHistoryLookup = (*TransactionHistoryRepository)(nil)' "$transaction_history_file"; then
+  echo "  FAIL [COMP-ID-002]: TransactionHistoryRepository is no longer pinned to the" >&2
+  echo "        identity.TransactionHistoryLookup contract." >&2
+  exit 1
+fi
+# Wiring: without this the lookup stays nil, which fails closed — meaning
+# "nobody may use a burner" instead of "sellers may not", and the real check
+# silently never runs.
+if ! grep -qF 'SetTransactionHistoryLookup' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'NewTransactionHistoryRepository' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-ID-002]: the money-side lookup is no longer wired in cmd/api/main.go." >&2
+  exit 1
+fi
+# The database-backed half runs whenever a Postgres is reachable. Locally the
+# test helper boots its own throwaway cluster, so an unset DATABASE_URL is
+# fine; with no cluster and no DATABASE_URL those tests skip rather than fail
+# a developer's machine.
+if [ -n "${DATABASE_URL:-}" ] || command -v pg_ctl >/dev/null 2>&1; then
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryDetectsPayingRequester" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryDetectsEarningAgent" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryDetectsHeldPayout" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryDetectsLedgerEntryOnOrder" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestBurnerRefusedForAccountWithRealPaymentIntent" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryAllowsBurnerForAccountWithNoMoney" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+fi
+echo "    COMP-ID-002: PASS (burner guard reads the real payment tables, both stub directions pinned)"
+
+# TEST-ABSDATE-001: 测试里写死绝对日期 = 定时炸弹。
+# 2026-09-13 全仓库 g2 变红：business/service_test.go 把 bucketDate 写成
+# "2026-09-06"，7 天滚动窗口一过就查不到它，OrderCount 恒为 0，测试自己
+# 就红了 —— 而代码一行没动。同一个坑 2026-09-12 已经在这文件的另一个测试
+# 里修过一次（见 TestSpendDailyUpsertAndList 的注释），这次是漏网的那个。
+# 凡是「相对现在的滚动窗口」的入参，都必须用 time.Now() 现算。
+if grep -rn '"bucketDate": *"20[0-9][0-9]-' apps/api-go --include='*_test.go' | grep -q .; then
+  echo "  FAIL [TEST-ABSDATE-001]: 测试里出现了写死的 bucketDate 日期：" >&2
+  grep -rn '"bucketDate": *"20[0-9][0-9]-' apps/api-go --include='*_test.go' >&2
+  echo "        滚动窗口会把旧日期滚出去，测试会在几天后无缘无故变红。" >&2
+  exit 1
+fi
+echo "    TEST-ABSDATE-001: PASS (no hardcoded bucket dates in api-go tests)"
+
+# TEST-ABSDATE-002: 同一个坑的移动端版本。
+# SecureSessionStore.write() 会拒掉 refreshExpiresAt 不在未来的 session，
+# 所以测试夹具里的 refreshExpiresAt 天生就必须是「未来」。写死成
+# "2026-09-13T00:00:00.000Z" 这种字面量，到了那天就自己过期：
+# 2026-09-13 全仓库 mobile 测试变红，而代码一行没动。
+# 夹具里的时间必须用 Date.now() 现算（+30d 对测试中注入的所有假时钟都是未来）。
+if grep -rn 'refreshExpiresAt: *"' apps/mobile/src --include='*.test.ts' --include='*.test.tsx' | grep -q .; then
+  echo "  FAIL [TEST-ABSDATE-002]: 移动端测试夹具里出现了写死的 refreshExpiresAt：" >&2
+  grep -rn 'refreshExpiresAt: *"' apps/mobile/src --include='*.test.ts' --include='*.test.tsx' >&2
+  echo "        它必须是相对现在的未来时间，写死就会过期，整个 mobile 测试会自己变红。" >&2
+  exit 1
+fi
+echo "    TEST-ABSDATE-002: PASS (mobile session fixtures use relative refresh expiry)"

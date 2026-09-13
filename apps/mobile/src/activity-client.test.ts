@@ -8,7 +8,7 @@ function response(body: unknown): TransportResponse { return { status: 200, json
 
 async function authenticatedStore(): Promise<SecureSessionStore> {
   const store = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date("2026-09-04T00:00:00Z"));
-  await store.write({ userAccountId:"user_1", principal:{type:"INDIVIDUAL", id:"user_1"}, auth:{sessionId:"s1", userAccountId:"user_1", principal:{type:"INDIVIDUAL", id:"user_1"}, accessToken:"a", refreshToken:"r", accessExpiresAt:"2026-09-05T00:00:00Z", refreshExpiresAt:"2026-10-04T00:00:00Z", rotation:1} });
+  await store.write({ userAccountId:"user_1", principal:{type:"INDIVIDUAL", id:"user_1"}, auth:{sessionId:"s1", userAccountId:"user_1", principal:{type:"INDIVIDUAL", id:"user_1"}, accessToken:"a", refreshToken:"r", accessExpiresAt:"2026-09-05T00:00:00Z", refreshExpiresAt:new Date(Date.now() + 2592000000).toISOString(), rotation:1} });
   return store;
 }
 

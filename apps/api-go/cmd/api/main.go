@@ -189,6 +189,13 @@ func main() {
 		// Lotus §1: DisplayIdentity PG persistence (038) — wire PG repo so
 		// CreateDisplayIdentity/List/Burn survive restarts.
 		identityService.SetDisplayIdentityRepository(postgres.NewDisplayIdentityRepository(pool))
+		// COMP-ID-001/002: self-destructing personas are refused to any
+		// account with money history. The guard must read the REAL payment
+		// tables — wired here, inside the `pool != nil` branch, so a
+		// database-less boot leaves the lookup nil and identity fails
+		// closed (no lookup == no burner) instead of answering "never
+		// transacted" for everyone.
+		identityService.SetTransactionHistoryLookup(postgres.NewTransactionHistoryRepository(pool))
 		// R18.x PROFILE-001: Profile persistence (039) — wire PG repo
 		// so the mobile '编辑主页' modal's UpdateProfile call survives
 		// restarts. The IdentityRepository implements ProfileRepository.

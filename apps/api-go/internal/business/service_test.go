@@ -303,8 +303,13 @@ func TestMerchantOperatingHomeDoesNotInventDemandOrForecast(t *testing.T) {
 	_ = json.Unmarshal([]byte(created.OperationRef), &createdBody)
 	businessID := createdBody["businessId"].(string)
 	service.Handle(businessEnvelope("owner", "CreateBusinessStore", "new", map[string]any{"businessId": businessID, "name": "西湖店", "address": "Tây Hồ"}))
+	// 同 TestSpendDailyUpsertAndList：bucketDate 必须相对「现在」取。
+	// GetMerchantOperatingHome 走的是 ListSpendDaily(ctx, id, 7) 的 7 天
+	// 滚动窗口，写死日期过几天就被滚出窗口 → OrderCount 恒为 0 → 全仓库
+	// g2 红。2026-09-13 这条测试就是这样炸的。
+	today := time.Now().UTC().Format("2006-01-02")
 	service.Handle(businessEnvelope("owner", "UpsertSpendDaily", businessID, map[string]any{
-		"businessId": businessID, "bucketDate": "2026-09-06", "orderCount": 3,
+		"businessId": businessID, "bucketDate": today, "orderCount": 3,
 		"grossMinor": 450000000, "newCustomerCount": 1, "returningCustomerCount": 2,
 	}))
 

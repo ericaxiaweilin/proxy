@@ -11,7 +11,7 @@ const initialSession: StoredSession = {
     accessToken: "access_1",
     refreshToken: "refresh_1",
     accessExpiresAt: "2026-08-14T00:00:10.000Z",
-    refreshExpiresAt: "2026-09-13T00:00:00.000Z",
+    refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
     rotation: 1
   },
   principal: { type: "BUSINESS", id: "business_001" }

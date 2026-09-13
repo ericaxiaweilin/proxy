@@ -4,6 +4,26 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 170 — 2026-09-13
+
+- COMP-ID-002（越南合规整改）：`apps/api-go/cmd/api/main.go` 里把
+  「账号是否交易过」的查询接到真实资金表（`payment.payment_intents` /
+  `payout_holds` / `ledger_entries` / 已结算 `fulfillment.orders`）。
+  此前 `SetTransactionHistoryLookup` 没有接线，COMP-ID-001 的守卫恒为
+  fail-closed —— 安全但等于没查，形同虚设。**无视觉改动、无 API 契约改动**；
+  新增 `migrations/083` 只加索引。
+- TEST-ABSDATE-001 / 002：修掉两处「测试夹具写死绝对日期」的时间炸弹。
+  **无产品视觉改动、无行为改动**，只动测试夹具。
+  - `apps/api-go/internal/business/service_test.go`：`bucketDate` 写死
+    `2026-09-06`，而 `GetMerchantOperatingHome` 走的是 7 天滚动窗口，
+    日期滚出去后 `OrderCount` 恒为 0，代码没动而 g2 全红。改为按当天现算。
+  - `apps/mobile/src` 17 个测试文件：`SecureSessionStore.write()` 拒收
+    `refreshExpiresAt` 不在未来的 session，夹具里写死的日期到点即过期。
+    统一改为 `Date.now() + 30d`；`secure-session.test.ts` 里那条需要
+    「已过期」的用例改为按该用例假时钟显式造过期，不再靠日期自然变老。
+- 门禁新增两条钉子，防止同类写法再进仓库：api-go 测试禁止写死
+  `bucketDate`，mobile 测试夹具禁止写死 `refreshExpiresAt`。
+
 ## Revision 169 — 2026-09-12
 
 - FEED-SCOPE-001：时间范围判定从 `feed.tsx` 的两份内联拷贝抽成共用的

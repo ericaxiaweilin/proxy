@@ -19,7 +19,7 @@ const session: StoredSession = {
     accessToken: "access_secret",
     refreshToken: "refresh_secret",
     accessExpiresAt: "2026-08-14T00:15:00.000Z",
-    refreshExpiresAt: "2026-09-13T00:00:00.000Z",
+    refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
     rotation: 1
   },
   principal: { type: "BUSINESS", id: "business_001" }
@@ -38,13 +38,21 @@ describe("secure mobile session boundary", () => {
   });
 
   it("deletes malformed or expired credentials and fails closed", async () => {
+    const expiredNow = "2026-10-01T00:00:00.000Z";
     const driver = new InMemorySecureStorageDriver();
-    const store = new SecureSessionStore(driver, () => new Date("2026-10-01T00:00:00.000Z"));
+    const store = new SecureSessionStore(driver, () => new Date(expiredNow));
     await driver.setItem(SECURE_SESSION_STORAGE_KEY, JSON.stringify({ auth: { refreshToken: "not-enough" } }));
     expect(await store.read()).toBeUndefined();
     expect(await driver.getItem(SECURE_SESSION_STORAGE_KEY)).toBeNull();
 
-    await driver.setItem(SECURE_SESSION_STORAGE_KEY, JSON.stringify(session));
+    // 「已过期」必须是显式造出来的，不能靠写死的日期自然变老：真实时间一漂，
+    // 这个夹具就会在两种语义之间翻转（2026-09-13 全仓库 mobile 测试红过一次）。
+    // 见门禁 TEST-ABSDATE-002。
+    const expiredSession: StoredSession = {
+      ...session,
+      auth: { ...session.auth, refreshExpiresAt: new Date(Date.parse(expiredNow) - 86400000).toISOString() }
+    };
+    await driver.setItem(SECURE_SESSION_STORAGE_KEY, JSON.stringify(expiredSession));
     expect(await store.read()).toBeUndefined();
     expect(await driver.getItem(SECURE_SESSION_STORAGE_KEY)).toBeNull();
   });
@@ -91,7 +99,7 @@ describe("secure mobile session boundary", () => {
         accessToken: "offline_legacy_access_abc",
         refreshToken: "offline_legacy_refresh_def",
         accessExpiresAt: "2026-08-14T01:00:00.000Z",
-        refreshExpiresAt: "2026-09-13T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1
       },
       principal: { type: "INDIVIDUAL", id: "guest_legacy" }

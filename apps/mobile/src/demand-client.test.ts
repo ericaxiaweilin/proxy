@@ -20,7 +20,7 @@ describe("requester demand client", () => {
         accessToken: "access_001",
         refreshToken: "refresh_001",
         accessExpiresAt: "2026-08-14T00:15:00.000Z",
-        refreshExpiresAt: "2026-09-14T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1
       }
     });
@@ -54,7 +54,7 @@ describe("requester demand client", () => {
       principal: { type: "INDIVIDUAL", id: "user_001" },
       auth: {
         sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh",
-        accessExpiresAt: "2026-08-14T00:15:00.000Z", refreshExpiresAt: "2026-09-14T00:00:00.000Z", rotation: 1
+        accessExpiresAt: "2026-08-14T00:15:00.000Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1
       }
     });
     const client = new DemandClient({
@@ -81,7 +81,7 @@ describe("requester demand client", () => {
         accessToken: "access_001",
         refreshToken: "refresh_001",
         accessExpiresAt: "2026-08-14T00:15:00.000Z",
-        refreshExpiresAt: "2026-09-14T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1
       }
     });
@@ -147,7 +147,7 @@ describe("requester demand client", () => {
         accessToken: "access_001",
         refreshToken: "refresh_001",
         accessExpiresAt: "2026-08-14T00:15:00.000Z",
-        refreshExpiresAt: "2026-09-14T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1
       }
     });

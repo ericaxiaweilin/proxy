@@ -4,7 +4,7 @@ import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-sessio
 
 async function store(): Promise<SecureSessionStore> {
   const value = new SecureSessionStore(new InMemorySecureStorageDriver(), () => new Date("2026-09-04T00:00:00Z"));
-  await value.write({ userAccountId:"user_1", principal:{type:"INDIVIDUAL",id:"user_1"}, auth:{sessionId:"s1",userAccountId:"user_1",principal:{type:"INDIVIDUAL",id:"user_1"},accessToken:"a",refreshToken:"r",accessExpiresAt:"2026-09-05T00:00:00Z",refreshExpiresAt:"2026-10-04T00:00:00Z",rotation:1} });
+  await value.write({ userAccountId:"user_1", principal:{type:"INDIVIDUAL",id:"user_1"}, auth:{sessionId:"s1",userAccountId:"user_1",principal:{type:"INDIVIDUAL",id:"user_1"},accessToken:"a",refreshToken:"r",accessExpiresAt:"2026-09-05T00:00:00Z",refreshExpiresAt:new Date(Date.now() + 2592000000).toISOString(),rotation:1} });
   return value;
 }
 
