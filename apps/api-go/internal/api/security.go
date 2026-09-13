@@ -82,6 +82,12 @@ var operatorCommandTypes = map[string]bool{
 	// 否则「申诉成立 / 驳回」就成了谁都能伪造的制衡结论，申诉渠道的
 	// 意义归零。同走 PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
 	"RecordAppealDecision": true,
+	// COMP-AUTHORITY-001: 有权机关请求的受理与响应。这条更不能让普通用户碰 ——
+	// 任何人都能写「有权机关要求调取某某的信息」，等于给社工和恐吓发了一
+	// 枚官方印章，也会污染平台对机关请求的举证。两个入口都走
+	// PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
+	"RecordAuthorityRequest":  true,
+	"RecordAuthorityResponse": true,
 }
 
 func requiresOperator(commandType string) bool {

@@ -158,5 +158,84 @@ func (r *ModerationRepository) AddAppealDecision(ctx context.Context, decision m
 	return err
 }
 
+// COMP-AUTHORITY-001 — 有权机关请求受理落库。与举报 / 处置 / 申诉同规则：
+// 只有 INSERT，没有 UPDATE / DELETE。这是「在法定时限内响应了」的举证材料。
+const insertAuthorityRequestSQL = `
+INSERT INTO moderation.authority_requests
+    (id, request_ref, authority, request_kind,
+     verified_subject, verified_authority, verified_scope, verified_legality,
+     received_at, deadline_at, note, actor_id, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+
+func (r *ModerationRepository) AddAuthorityRequest(ctx context.Context, request moderation.AuthorityRequest) error {
+	if strings.TrimSpace(request.RequestRef) == "" || strings.TrimSpace(request.Authority) == "" || strings.TrimSpace(request.Kind) == "" {
+		return moderation.ErrAuthorityRequestRequired
+	}
+	if !request.VerifiedSubject || !request.VerifiedAuthority ||
+		!request.VerifiedScope || !request.VerifiedLegality {
+		return moderation.ErrAuthorityRequestVerificationRequired
+	}
+	if strings.TrimSpace(request.ActorID) == "" {
+		return moderation.ErrAuthorityRequestActorRequired
+	}
+	if r == nil || r.pool == nil {
+		return moderation.ErrReportRepositoryDown
+	}
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, insertAuthorityRequestSQL,
+		request.ID, request.RequestRef, request.Authority, request.Kind,
+		request.VerifiedSubject, request.VerifiedAuthority,
+		request.VerifiedScope, request.VerifiedLegality,
+		request.ReceivedAt.UTC(), request.DeadlineAt.UTC(),
+		request.Note, request.ActorID, request.CreatedAt.UTC())
+	return err
+}
+
+const findAuthorityRequestSQL = `
+SELECT id, request_ref, authority, request_kind,
+       verified_subject, verified_authority, verified_scope, verified_legality,
+       received_at, deadline_at, COALESCE(note, ''), actor_id, created_at
+  FROM moderation.authority_requests
+ WHERE id = $1`
+
+func (r *ModerationRepository) FindAuthorityRequest(ctx context.Context, requestID string) (moderation.AuthorityRequest, bool) {
+	if r == nil || r.pool == nil || strings.TrimSpace(requestID) == "" {
+		return moderation.AuthorityRequest{}, false
+	}
+	var out moderation.AuthorityRequest
+	var note string
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, findAuthorityRequestSQL, requestID).Scan(
+		&out.ID, &out.RequestRef, &out.Authority, &out.Kind,
+		&out.VerifiedSubject, &out.VerifiedAuthority,
+		&out.VerifiedScope, &out.VerifiedLegality,
+		&out.ReceivedAt, &out.DeadlineAt, &note, &out.ActorID, &out.CreatedAt)
+	if err != nil {
+		return moderation.AuthorityRequest{}, false
+	}
+	out.Note = note
+	return out, true
+}
+
+// COMP-AUTHORITY-001 — 有权机关请求响应落库（operator-only 的入口在 service 层把关）。
+const insertAuthorityResponseSQL = `
+INSERT INTO moderation.authority_responses
+    (id, request_id, outcome, responded_at, note, actor_id, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+func (r *ModerationRepository) AddAuthorityResponse(ctx context.Context, response moderation.AuthorityResponse) error {
+	if strings.TrimSpace(response.RequestID) == "" || strings.TrimSpace(response.Outcome) == "" {
+		return moderation.ErrAuthorityResponseRequired
+	}
+	if strings.TrimSpace(response.ActorID) == "" {
+		return moderation.ErrAuthorityResponseActorRequired
+	}
+	if r == nil || r.pool == nil {
+		return moderation.ErrReportRepositoryDown
+	}
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, insertAuthorityResponseSQL,
+		response.ID, response.RequestID, response.Outcome,
+		response.RespondedAt.UTC(), response.Note, response.ActorID, response.CreatedAt.UTC())
+	return err
+}
+
 // 签名漂移就在这里编译失败，而不是运行期静默写不进去。
 var _ moderation.Repository = (*ModerationRepository)(nil)
