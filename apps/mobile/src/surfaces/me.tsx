@@ -675,11 +675,14 @@ export function MeSurface({
       .then(async (b) => {
         if (cancelled) return;
         try {
+          // PROFILE-SAVED-001: 收藏按 ID 直取。之前是拿动态流（默认一页 25 条）
+          // 按 bookmark id 过滤 —— 收藏一条不在这一页里的帖子就等于丢了，
+          // 用户会以为收藏被吞。服务端 ListPostsByIds 用同一条可见性口径。
+          const bookmarked = await localNet.listPostsByIds(b.bookmarks);
+          if (cancelled) return;
+          setPersonalSavedPosts(bookmarked.posts);
           const feed = await localNet.listFeedPosts();
           if (cancelled) return;
-          const bookmarkedSet = new Set(b.bookmarks);
-          const saved = feed.posts.filter((p) => bookmarkedSet.has(p.postId));
-          setPersonalSavedPosts(saved);
           const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
           const tagged = feed.posts.filter((p) => {
             if (p.authorId === viewerAccountId) return false;

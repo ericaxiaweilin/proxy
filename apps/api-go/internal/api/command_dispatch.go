@@ -29,12 +29,12 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
-		result := invalidEnvelope("unknown", "invalid_envelope", "command.invalid_envelope", r)
+		result := invalidEnvelope("unknown", "invalid_envelope", "command.invalid_envelope", nil)
 		writeResult(w, http.StatusBadRequest, result)
 		return
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		result := invalidEnvelope("unknown", "invalid_envelope", "command.invalid_envelope", r)
+		result := invalidEnvelope("unknown", "invalid_envelope", "command.invalid_envelope", nil)
 		writeResult(w, http.StatusBadRequest, result)
 		return
 	}
@@ -336,9 +336,54 @@ func bearerToken(header string) (string, bool) {
 	return parts[1], true
 }
 
+// missingEnvelopeField names the first required envelope field that is absent
+// or too short, or "" when the envelope is structurally complete.
+//
+// Why this exists: validateEnvelope used to reject with an empty safeDetails
+// map, so a caller that sent, say, target.id = "" got a bare
+// INVALID_COMMAND_ENVELOPE with no way to tell which field was wrong -- and
+// because the rejection happens before dispatch, the server log looks
+// identical to "this command does not exist". Naming the field is the same
+// convention already used for the requestedAt branch below.
+func missingEnvelopeField(envelope command.Envelope) string {
+	switch {
+	case envelope.CommandID == "":
+		return "commandId"
+	case envelope.CommandType == "":
+		return "commandType"
+	case envelope.CommandVersion <= 0:
+		return "commandVersion"
+	case envelope.Actor.Type == "":
+		return "actor.type"
+	case envelope.Actor.ID == "":
+		return "actor.id"
+	case envelope.Principal.Type == "":
+		return "principal.type"
+	case envelope.Principal.ID == "":
+		return "principal.id"
+	case envelope.Target.Type == "":
+		return "target.type"
+	case envelope.Target.ID == "":
+		return "target.id"
+	case len(envelope.IdempotencyKey) < 8:
+		return "idempotencyKey"
+	case envelope.AuthContext == nil:
+		return "authContext"
+	case envelope.Purpose == "":
+		return "purpose"
+	case envelope.CorrelationID == "":
+		return "correlationId"
+	case envelope.RequestedAt == "":
+		return "requestedAt"
+	case envelope.Payload == nil:
+		return "payload"
+	}
+	return ""
+}
+
 func validateEnvelope(envelope command.Envelope, routeCommandType string) *command.Result {
-	if envelope.CommandID == "" || envelope.CommandType == "" || envelope.CommandVersion <= 0 || envelope.Actor.Type == "" || envelope.Actor.ID == "" || envelope.Principal.Type == "" || envelope.Principal.ID == "" || envelope.Target.Type == "" || envelope.Target.ID == "" || len(envelope.IdempotencyKey) < 8 || envelope.AuthContext == nil || envelope.Purpose == "" || envelope.CorrelationID == "" || envelope.RequestedAt == "" || envelope.Payload == nil {
-		result := invalidEnvelope(envelope.CommandID, envelope.CorrelationID, "command.invalid_envelope", nil)
+	if field := missingEnvelopeField(envelope); field != "" {
+		result := invalidEnvelope(envelope.CommandID, envelope.CorrelationID, "command.invalid_envelope", map[string]any{"field": field})
 		return &result
 	}
 	if _, err := time.Parse(time.RFC3339, envelope.RequestedAt); err != nil {
@@ -352,11 +397,14 @@ func validateEnvelope(envelope command.Envelope, routeCommandType string) *comma
 	return nil
 }
 
-func invalidEnvelope(commandID, correlationID, messageKey string, _ *http.Request) command.Result {
+func invalidEnvelope(commandID, correlationID, messageKey string, safeDetails map[string]any) command.Result {
 	if correlationID == "" {
 		correlationID = "http_invalid"
 	}
-	return command.Result{CommandID: commandID, Outcome: "REJECTED", EventRefs: []string{}, CorrelationID: correlationID, Error: &command.ErrorEnvelope{ErrorCode: "INVALID_COMMAND_ENVELOPE", Category: "VALIDATION", Retryability: "AFTER_USER_ACTION", MessageKey: messageKey, SafeDetails: map[string]any{}, CorrelationID: correlationID}}
+	if safeDetails == nil {
+		safeDetails = map[string]any{}
+	}
+	return command.Result{CommandID: commandID, Outcome: "REJECTED", EventRefs: []string{}, CorrelationID: correlationID, Error: &command.ErrorEnvelope{ErrorCode: "INVALID_COMMAND_ENVELOPE", Category: "VALIDATION", Retryability: "AFTER_USER_ACTION", MessageKey: messageKey, SafeDetails: safeDetails, CorrelationID: correlationID}}
 }
 
 func notImplemented(envelope command.Envelope) command.Result {

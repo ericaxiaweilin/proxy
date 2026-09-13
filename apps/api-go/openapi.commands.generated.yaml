@@ -237,6 +237,8 @@ commands:
     domain: Engagement
   - command: ListPostReplies
     domain: Engagement
+  - command: ListPostsByIds
+    domain: LocalNet
   - command: ListPrivacyRequests
     domain: Identity
   - command: ListRequesterHomeItems

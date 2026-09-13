@@ -4,6 +4,28 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 183 — 2026-09-13
+
+- PROFILE-SAVED-001：收藏按 ID 直取，并修掉一个会让收藏 tab 全量失效的信封 bug。
+  - **收藏不再从动态流里捞**。之前 `me.tsx` 拿一页动态（默认 25 条）按 bookmark
+    id 过滤 —— 收藏一条不在这一页里的帖子就等于丢了，用户会以为收藏被吞。新增
+    服务端 `ListPostsByIds`（复用已有 `GetPost`，无迁移、无新表），可见性口径与
+    动态流一致且 fail-closed：FOLLOWERS 只有作者本人可见，取不到的 ID 跳过而不是
+    整条失败，上限 100 条、去重、trim。
+  - **媒体口径合并**。`hydratePostMedia` 从 `listFeed` 里抽出来，两条读路径共用
+    同一份媒体契约，同一条帖子在动态流和收藏夹渲染结果一致（真机服务实测 15 条
+    带媒体帖子逐字节相同）。
+  - **信封必须真的能 dispatch**。客户端最初发 `target.id = ""`，而
+    `internal/api/command_dispatch.go` 的 `validateEnvelope` 在 dispatch **之前**
+    就要求 `target.id` 非空 —— 收藏 tab 每次加载都会抛错。批量读没有单一聚合，
+    改用显式哨兵 `by_ids`（与 `CreatePost` 的 `new` 同属「命名操作、不假装是真实
+    聚合」的惯例）。
+  - **拒绝信息不再是无字天书**。`validateEnvelope` 过去返回空的 `safeDetails`，
+    又因为拒绝发生在 dispatch 之前，日志里「命令不存在」和「信封不合法」长得
+    一模一样。新增 `missingEnvelopeField` 指名第一个缺失/过短的字段（沿用
+    requestedAt 分支已有的 `field` 约定），并顺手删掉 `invalidEnvelope` 那个
+    从未被使用的 `*http.Request` 参数。
+
 ## Revision 182 — 2026-09-13
 
 - PROFILE-TABS-001：个人主页 5 tab 的可见性与真数据。

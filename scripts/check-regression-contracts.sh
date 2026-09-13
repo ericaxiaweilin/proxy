@@ -2380,3 +2380,86 @@ if ! grep -qF 'PROFILE-TABS-001' apps/mobile/src/surfaces/profile-tabs-model.tes
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/profile-tabs-model.test.ts || exit $?
 echo "    PROFILE-TABS-001: PASS (SAVED stays private; other profiles show real replies)"
+
+# PROFILE-SAVED-001: 收藏夹只存 postId，必须能按 ID 直取。
+# 之前客户端把动态流（默认一页 25 条）按 bookmark id 过滤 —— 收藏一条不在这一页
+# 里的帖子就等于丢了，用户会以为收藏被吞。本条锁死：服务端提供 ListPostsByIds，
+# 可见性口径与动态流一致且 fail-closed（FOLLOWERS 只有作者本人可见，不能因为
+# 「谁收藏了」就漏出来），取不到的 ID 跳过而不是整条失败；客户端收藏走这条直取，
+# 不再从 feed 里捞。
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsReturnsRequestedPostsInOrder" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsSkipsUnknownIDsInsteadOfFailing" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsDeduplicatesAndTrimsIDs" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsKeepsVisibilityFailClosed" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsReturnsEmptyArrayNotNull" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsCapsTheBatch" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+if ! grep -qF 'func (s *Service) listPostsByIds' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [PROFILE-SAVED-001]: the by-id post reader is gone," >&2
+  echo "        so saved posts can only be scraped from one feed page again." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) hydratePostMedia' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [PROFILE-SAVED-001]: feed and by-id reads no longer share one media" >&2
+  echo "        contract, so the same post renders differently in each surface." >&2
+  exit 1
+fi
+if ! grep -qF 'ListPostsByIds' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [PROFILE-SAVED-001]: ListPostsByIds is missing from the generated" >&2
+  echo "        command registry (run go run ./cmd/openapi-commands)." >&2
+  exit 1
+fi
+if ! grep -qF 'localNet.listPostsByIds(b.bookmarks)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-SAVED-001]: the saved tab no longer fetches bookmarks by id." >&2
+  exit 1
+fi
+if grep -qF 'bookmarkedSet' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-SAVED-001]: the saved tab filters one feed page by bookmark id" >&2
+  echo "        again, so bookmarks outside that page silently disappear." >&2
+  exit 1
+fi
+if ! grep -qF 'PROFILE-SAVED-001' apps/mobile/src/localnet-client.test.ts; then
+  echo "  FAIL [PROFILE-SAVED-001]: the saved-posts regression ID or its test is missing" >&2
+  exit 1
+fi
+# 信封必须真的能被服务端 dispatch。validateEnvelope 在 dispatch **之前**就要求
+# target.id 非空，空串会被拒成 INVALID_COMMAND_ENVELOPE —— 收藏 tab 每次加载都
+# 抛错，而且因为拒绝早于 dispatch，日志里和「命令不存在」长得一模一样。
+# 批量读没有单一聚合，必须用显式哨兵 by_ids，不能图省事发空串。
+if ! grep -qF '{ type: "Post", id: "by_ids" }' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [PROFILE-SAVED-001]: the batch reader no longer sends the by_ids" >&2
+  echo "        sentinel, so its envelope may be rejected before dispatch." >&2
+  exit 1
+fi
+if grep -qF '{ type: "Post", id: "" }' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [PROFILE-SAVED-001]: an empty target id is back in a command" >&2
+  echo "        envelope. The server rejects that before dispatch with" >&2
+  echo "        INVALID_COMMAND_ENVELOPE, so the saved tab always throws." >&2
+  exit 1
+fi
+# 拒绝信息必须指名出错的字段，否则「信封不合法」和「命令不存在」无法区分。
+if ! grep -qF 'func missingEnvelopeField' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [PROFILE-SAVED-001]: envelope rejections no longer name the" >&2
+  echo "        offending field, so a bad envelope is indistinguishable from an" >&2
+  echo "        unknown command in the logs." >&2
+  exit 1
+fi
+require_test "PROFILE-SAVED-001" "./internal/api" \
+  "TestMissingEnvelopeFieldNamesTheEmptyTargetID" \
+  "apps/api-go/internal/api/envelope_field_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/api" \
+  "TestValidateEnvelopeStillRejectsBlankTargetID" \
+  "apps/api-go/internal/api/envelope_field_test.go" || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/localnet-client.test.ts || exit $?
+echo "    PROFILE-SAVED-001: PASS (saved posts are read by id, with the feed's visibility rules)"

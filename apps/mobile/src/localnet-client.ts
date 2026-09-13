@@ -135,6 +135,41 @@ export class LocalNetClient {
     return mine;
   }
 
+  /**
+   * PROFILE-SAVED-001 — 按 ID 批量取帖子。
+   *
+   * 收藏夹里只有 postId。之前只能从动态流里「捞」，于是收藏一条不在前 25 条
+   * 里的帖子就等于丢了（用户会以为收藏被吞了）。这条直取：服务端用与动态流
+   * 相同的可见性口径，取不到的 ID 直接跳过（帖子可能已删）。
+   */
+  public async listPostsByIds(postIds: readonly string[]): Promise<FeedReadModel> {
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of postIds) {
+      const id = raw.trim();
+      if (id.length === 0 || seen.has(id)) continue;
+      seen.add(id);
+      unique.push(id);
+      if (unique.length >= 100) break;
+    }
+    if (unique.length === 0) {
+      return { posts: [], media: {}, nextCursor: undefined, hasMore: false };
+    }
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListPostsByIds",
+      // 服务端 validateEnvelope 要求 target.id 非空（fail-closed，先于 dispatch）。
+      // 批量按 ID 读没有单一聚合，用显式哨兵值而不是空串：空串会被拒成
+      // INVALID_COMMAND_ENVELOPE，收藏 tab 每次都会抛错。与 CreatePost 的
+      // "new" 同属「命名操作、不假装是真实聚合」的哨兵惯例。
+      { type: "Post", id: "by_ids" },
+      { postIds: unique }
+    );
+    const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
+    return { posts: payload.posts, media: payload.media, nextCursor: undefined, hasMore: false };
+  }
+
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {
     const session = await this.requireSession();
     console.log(`[proxy.R15.63.DEBUG.post] CreatePost start bodyLen=${payload.body?.length ?? 0} mediaRefs=${payload.mediaRefs?.length ?? 0} idempotencyKey=${idempotencyKey ?? "none"}`);

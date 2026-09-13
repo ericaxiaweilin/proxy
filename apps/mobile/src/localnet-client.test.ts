@@ -209,3 +209,95 @@ describe("LocalNetClient listMyFeedPosts pagination (R16.6)", () => {
     expect(pages).toBe(2); // 翻到底 (hasMore=false) 后停止, 不无限翻。
   });
 });
+
+describe("PROFILE-SAVED-001 — saved posts are fetched by id, not scraped from the feed", () => {
+  async function clientWithCapture(): Promise<{
+    client: LocalNetClient;
+    envelopes: Record<string, unknown>[];
+    publicCalls: string[];
+  }> {
+    const store = await authenticatedStore("user_001");
+    const envelopes: Record<string, unknown>[] = [];
+    const publicCalls: string[] = [];
+    const client = new LocalNetClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      authClient: {
+        request: async (_path, init) => {
+          envelopes.push(init.body as Record<string, unknown>);
+          return {
+            status: 200,
+            json: async () => ({
+              commandId: "command_saved_001",
+              outcome: "ACCEPTED",
+              aggregate: { type: "Post", id: "", version: 0, state: "POSTS_BY_IDS" },
+              eventRefs: [],
+              correlationId: "correlation_saved_001",
+              operationRef: JSON.stringify({ posts: [], media: {} })
+            })
+          };
+        },
+        requestPublic: async (path) => {
+          publicCalls.push(path);
+          throw new Error("saved posts must never be read from the public feed");
+        }
+      }
+    });
+    return { client, envelopes, publicCalls };
+  }
+
+  it("asks the server for the bookmarked ids instead of filtering one feed page", async () => {
+    const { client, envelopes, publicCalls } = await clientWithCapture();
+    await client.listPostsByIds(["post_b", "post_a"]);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.commandType).toBe("ListPostsByIds");
+    expect(envelopes[0]!.payload).toEqual({ postIds: ["post_b", "post_a"] });
+    // 走的是需要鉴权的 command 通道，不是匿名 feed 通道。
+    expect(publicCalls).toEqual([]);
+  });
+
+  it("deduplicates, trims and caps the id batch", async () => {
+    const { client, envelopes } = await clientWithCapture();
+    const ids = ["post_a", " post_a ", "", "   ", "post_b"];
+    for (let i = 0; i < 150; i += 1) ids.push(`post_extra_${i}`);
+    await client.listPostsByIds(ids);
+    const sent = (envelopes[0]!.payload as { postIds: string[] }).postIds;
+    expect(sent.slice(0, 2)).toEqual(["post_a", "post_b"]);
+    expect(sent).toHaveLength(100);
+    expect(new Set(sent).size).toBe(100);
+  });
+
+  it("sends an envelope the server will actually dispatch, with a non-empty target id", async () => {
+    // 服务端 internal/api/command_dispatch.go 的 validateEnvelope 在 dispatch
+    // 之前就要求 target.id 非空，空串会被拒成 INVALID_COMMAND_ENVELOPE ——
+    // 收藏 tab 每次都会抛错，而且因为拒绝发生在 dispatch 之前，服务端日志里
+    // 看不出「命令不支持」和「信封不合法」的区别。这里把服务端的必填字段契约
+    // 钉在客户端侧：批量读没有单一聚合，必须用显式哨兵值而不是空串。
+    const { client, envelopes } = await clientWithCapture();
+    await client.listPostsByIds(["post_a"]);
+    const envelope = envelopes[0]!;
+    const target = envelope.target as { type: string; id: string };
+    const actor = envelope.actor as { type: string; id: string };
+    const principal = envelope.principal as { type: string; id: string };
+    expect(target.type).not.toBe("");
+    expect(target.id).not.toBe("");
+    expect(actor.type).not.toBe("");
+    expect(actor.id).not.toBe("");
+    expect(principal.type).not.toBe("");
+    expect(principal.id).not.toBe("");
+    expect(envelope.commandVersion as number).toBeGreaterThan(0);
+    expect((envelope.idempotencyKey as string).length).toBeGreaterThanOrEqual(8);
+    expect(envelope.authContext).not.toBeNull();
+    expect(envelope.purpose).not.toBe("");
+    expect(envelope.correlationId).not.toBe("");
+    expect(Number.isNaN(Date.parse(envelope.requestedAt as string))).toBe(false);
+    expect(envelope.payload).not.toBeNull();
+  });
+
+  it("does not touch the network for an empty collection", async () => {
+    const { client, envelopes } = await clientWithCapture();
+    const page = await client.listPostsByIds([]);
+    expect(envelopes).toEqual([]);
+    expect(page).toMatchObject({ posts: [], hasMore: false });
+  });
+});

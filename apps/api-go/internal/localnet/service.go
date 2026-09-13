@@ -682,7 +682,7 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreatePost", "ListFeedPosts", "CreateNeedFromPost", "RecordAttribution",
+	case "CreatePost", "ListFeedPosts", "ListPostsByIds", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed",
 		"ShortlistAgent", "ListInteractionEvents":
 		return true
@@ -703,6 +703,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.createPost(ctx, e)
 	case "ListFeedPosts":
 		return s.listFeed(ctx, e)
+	case "ListPostsByIds":
+		return s.listPostsByIds(ctx, e)
 	case "CreateNeedFromPost":
 		return s.createNeedFromPost(ctx, e)
 	case "RecordAttribution":
@@ -871,96 +873,76 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 // PRD §8 Feed 管道。ALL 是全部可见公开帖文，默认 createdAt DESC、
 // postId ASC；LocationContext 只作为元数据和显式“附近”筛选依据。
 
-func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
+// ---------- ListPostsByIds ----------
+
+// ListPostsByIds 按 ID 批量取帖子。
+//
+// 收藏夹、回复的父帖这类场景手里只有 postId。之前只能从时间流里「捞」——
+// 于是收藏一条老帖，只要它不在动态流前 25 条里就永远不出现，用户会以为
+// 收藏丢了。这里给一个按 ID 直取的读法。
+//
+// 可见性口径与 listFeed 完全一致，并且 fail-closed：
+//   - 只取 PUBLISHED；
+//   - PUBLIC 人人可见；FOLLOWERS 只有作者本人可见（关注图谱授权还没做，
+//     不能因为「被谁收藏了」就把别人的 followers-only 帖子漏出来）；
+//   - 取不到的 ID 直接跳过（帖子可能已删），不报错、不补假数据；
+//   - 保持请求顺序、去重、最多 100 个。
+func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) command.Result {
 	var request struct {
-		Cursor string `json:"cursor"`
-		Limit  int    `json:"limit"`
-		// R15.94: search query — server 侧 filter (body 包含 search, case-insensitive).
-		Search string `json:"search"`
+		PostIDs []string `json:"postIds"`
 	}
-	_ = decode(e.Payload, &request) // legacy malformed payloads keep first-page behavior
-	search := strings.ToLower(strings.TrimSpace(request.Search))
-	if request.Limit <= 0 {
-		request.Limit = 25
+	if !decode(e.Payload, &request) {
+		return command.Rejected(e, "INVALID_LIST_POSTS_BY_IDS", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_list_posts_by_ids", nil)
 	}
-	if request.Limit > 50 {
-		request.Limit = 50
-	}
-	var cursor struct {
-		CreatedAt time.Time `json:"createdAt"`
-		PostID    string    `json:"postId"`
-	}
-	if request.Cursor != "" {
-		if raw, ok := verifyCursor(request.Cursor); ok {
-			_ = json.Unmarshal(raw, &cursor)
-		} else if strings.Contains(request.Cursor, ".") {
-			// 带签名的游标验签失败 → 视为篡改，拒绝而非回退首屏（防缓存投毒）
-			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
-		} else if raw, err := base64.RawURLEncoding.DecodeString(request.Cursor); err == nil {
-			// 兼容旧明文游标（滚动升级期），下个版本收紧为仅验签
-			_ = json.Unmarshal(raw, &cursor)
-		} else {
-			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
+	const maxPostIDs = 100
+	posts := make([]Post, 0, len(request.PostIDs))
+	seen := make(map[string]struct{}, len(request.PostIDs))
+	for _, rawID := range request.PostIDs {
+		if len(posts) >= maxPostIDs {
+			break
 		}
-	}
-	var posts []Post
-	var err error
-	if pageRepository, ok := s.repository.(FeedPageRepository); ok {
-		posts, err = pageRepository.ListFeedPage(ctx, e.Actor.ID, cursor.CreatedAt, cursor.PostID, request.Limit+1)
-	} else {
-		posts, err = s.repository.Snapshot(ctx)
-	}
-	if err != nil {
-		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)
-	}
-	// ALL 是全局公开时间流；LocationContext 不参与 eligibility。
-	feed := make([]Post, 0, len(posts))
-	for _, p := range posts {
-		if p.Status != "PUBLISHED" {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
 			continue
 		}
-		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
+		if _, duplicate := seen[id]; duplicate {
 			continue
 		}
-		// R15.94: server 端 search filter (body 包含, case-insensitive).
-		//   跟 R15.92 client 端 filter 一致, 但放在 server 节省 传输量.
-		if search != "" && !strings.Contains(strings.ToLower(p.Body), search) {
+		seen[id] = struct{}{}
+		post, err := s.repository.GetPost(ctx, id)
+		if err != nil {
 			continue
 		}
-		// Follow-graph authorization is not implemented yet. Fail closed instead
-		// of treating FOLLOWERS as public; authors may still see their own post.
-		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
+		if post.Status != "PUBLISHED" {
 			continue
 		}
-		if !cursor.CreatedAt.IsZero() && (p.CreatedAt.After(cursor.CreatedAt) || (p.CreatedAt.Equal(cursor.CreatedAt) && p.ID <= cursor.PostID)) {
+		if post.Visibility != "PUBLIC" && post.Visibility != "FOLLOWERS" {
 			continue
 		}
-		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
-		if p.MediaRefs == nil {
-			p.MediaRefs = []PostMediaRef{}
+		if post.Visibility == "FOLLOWERS" && post.AuthorID != e.Actor.ID {
+			continue
 		}
-		if p.ContextRefs == nil {
-			p.ContextRefs = []ContextRef{}
+		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null
+		if post.MediaRefs == nil {
+			post.MediaRefs = []PostMediaRef{}
 		}
-		feed = append(feed, p)
+		if post.ContextRefs == nil {
+			post.ContextRefs = []ContextRef{}
+		}
+		posts = append(posts, post)
 	}
-	// 按 Utility 排序（时间衰减为主，P0 简化）
-	sort.Slice(feed, func(i, j int) bool {
-		if feed[i].CreatedAt.Equal(feed[j].CreatedAt) {
-			return feed[i].ID < feed[j].ID
-		}
-		return feed[i].CreatedAt.After(feed[j].CreatedAt)
-	})
-	hasMore := len(feed) > request.Limit
-	if hasMore {
-		feed = feed[:request.Limit]
-	}
-	nextCursor := ""
-	if hasMore && len(feed) > 0 {
-		last := feed[len(feed)-1]
-		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
-		nextCursor = signCursor(raw)
-	}
+	return acceptedWithPayload(e, "Post", "", 0, "POSTS_BY_IDS", map[string]any{
+		"posts": posts,
+		"media": s.hydratePostMedia(ctx, posts),
+	}, nil)
+}
+
+// hydratePostMedia 把一批 Post 的媒体引用 hydrate 成读模型：只呈现 READY 且
+// APPROVED、可见性与帖子一致的媒体，并按 (CityScope, SceneType) 补场景背景色。
+//
+// 从 listFeed 里抽出来，让「按 ID 取帖子」（ListPostsByIds）走同一套媒体口径 ——
+// 否则同一个帖子在动态流里和在收藏网格里会长得不一样。
+func (s *Service) hydratePostMedia(ctx context.Context, feed []Post) map[string][]PostMediaItem {
 	// R14 §16.5：Feed Read Model Hydrate 媒体（mediaLookup + READY 过滤）
 	feedMedia := make(map[string][]PostMediaItem, len(feed))
 	// R15.15 P1: Memory → Feed 反馈重构。R15.13 P4 用了
@@ -1071,6 +1053,100 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 			}
 		}
 	}
+	return feedMedia
+}
+
+func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
+	var request struct {
+		Cursor string `json:"cursor"`
+		Limit  int    `json:"limit"`
+		// R15.94: search query — server 侧 filter (body 包含 search, case-insensitive).
+		Search string `json:"search"`
+	}
+	_ = decode(e.Payload, &request) // legacy malformed payloads keep first-page behavior
+	search := strings.ToLower(strings.TrimSpace(request.Search))
+	if request.Limit <= 0 {
+		request.Limit = 25
+	}
+	if request.Limit > 50 {
+		request.Limit = 50
+	}
+	var cursor struct {
+		CreatedAt time.Time `json:"createdAt"`
+		PostID    string    `json:"postId"`
+	}
+	if request.Cursor != "" {
+		if raw, ok := verifyCursor(request.Cursor); ok {
+			_ = json.Unmarshal(raw, &cursor)
+		} else if strings.Contains(request.Cursor, ".") {
+			// 带签名的游标验签失败 → 视为篡改，拒绝而非回退首屏（防缓存投毒）
+			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
+		} else if raw, err := base64.RawURLEncoding.DecodeString(request.Cursor); err == nil {
+			// 兼容旧明文游标（滚动升级期），下个版本收紧为仅验签
+			_ = json.Unmarshal(raw, &cursor)
+		} else {
+			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
+		}
+	}
+	var posts []Post
+	var err error
+	if pageRepository, ok := s.repository.(FeedPageRepository); ok {
+		posts, err = pageRepository.ListFeedPage(ctx, e.Actor.ID, cursor.CreatedAt, cursor.PostID, request.Limit+1)
+	} else {
+		posts, err = s.repository.Snapshot(ctx)
+	}
+	if err != nil {
+		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)
+	}
+	// ALL 是全局公开时间流；LocationContext 不参与 eligibility。
+	feed := make([]Post, 0, len(posts))
+	for _, p := range posts {
+		if p.Status != "PUBLISHED" {
+			continue
+		}
+		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
+			continue
+		}
+		// R15.94: server 端 search filter (body 包含, case-insensitive).
+		//   跟 R15.92 client 端 filter 一致, 但放在 server 节省 传输量.
+		if search != "" && !strings.Contains(strings.ToLower(p.Body), search) {
+			continue
+		}
+		// Follow-graph authorization is not implemented yet. Fail closed instead
+		// of treating FOLLOWERS as public; authors may still see their own post.
+		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
+			continue
+		}
+		if !cursor.CreatedAt.IsZero() && (p.CreatedAt.After(cursor.CreatedAt) || (p.CreatedAt.Equal(cursor.CreatedAt) && p.ID <= cursor.PostID)) {
+			continue
+		}
+		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
+		if p.MediaRefs == nil {
+			p.MediaRefs = []PostMediaRef{}
+		}
+		if p.ContextRefs == nil {
+			p.ContextRefs = []ContextRef{}
+		}
+		feed = append(feed, p)
+	}
+	// 按 Utility 排序（时间衰减为主，P0 简化）
+	sort.Slice(feed, func(i, j int) bool {
+		if feed[i].CreatedAt.Equal(feed[j].CreatedAt) {
+			return feed[i].ID < feed[j].ID
+		}
+		return feed[i].CreatedAt.After(feed[j].CreatedAt)
+	})
+	hasMore := len(feed) > request.Limit
+	if hasMore {
+		feed = feed[:request.Limit]
+	}
+	nextCursor := ""
+	if hasMore && len(feed) > 0 {
+		last := feed[len(feed)-1]
+		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
+		nextCursor = signCursor(raw)
+	}
+	feedMedia := s.hydratePostMedia(ctx, feed)
 	return acceptedWithPayload(e, "Post", "", 0, "FEED", map[string]any{
 		"posts": feed,
 		"media": feedMedia, // postId → []PostMediaItem（R14 Adaptive Media Rail Read Model）
