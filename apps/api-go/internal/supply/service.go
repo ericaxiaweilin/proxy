@@ -93,7 +93,11 @@ type EligibilitySnapshot struct {
 	AvailabilityOK  bool   `json:"availabilityOk"`
 	MarketOK        bool   `json:"marketOk"`
 	NoOrderConflict bool   `json:"noOrderConflict"`
-	Eligible        bool   `json:"eligible"`
+	// COMP-SELLER-001：供给侧实名。候选集里出现的每一个卖家都必须可识别
+	// （电商法 122/2025 + NĐ 248/2026）。查不到实名记录一律 false，
+	// 因为「查不到」不能变成「已核验」。
+	RealNameVerified bool `json:"realNameVerified"`
+	Eligible         bool `json:"eligible"`
 }
 
 // AvailabilitySnapshot 是候选可用性快照（冻结时的时间窗）。
@@ -445,6 +449,15 @@ type Service struct {
 	mu         sync.Mutex
 	repository TransactionalRepository
 	clock      clock.Clock
+	// COMP-SELLER-001：供给侧实名查询。nil = 没接 = 所有卖家都算未核验
+	// = 候选集为空。这是刻意的 fail-closed，不是 bug：宁可撮合不着，
+	// 也不能在「明知卖家匿名」的状态下收款。
+	sellerIdentity SellerIdentityLookup
+}
+
+// SetSellerIdentityLookup 接上实名查询。不接就撮合不出任何候选。
+func (s *Service) SetSellerIdentityLookup(lookup SellerIdentityLookup) {
+	s.sellerIdentity = lookup
 }
 
 func New() *Service {
@@ -1021,7 +1034,14 @@ func (s *Service) evaluateEligibility(ctx context.Context, agentID string, q Sup
 		}
 	}
 	snap.NoOrderConflict = snap.AvailabilityOK // BOOKED 窗口已在 overlap 检查排除（AVALIABLE 才算）
-	snap.Eligible = snap.ProfileActive && snap.ServiceActive && snap.CapabilitiesOK && snap.AvailabilityOK && snap.MarketOK
+	// COMP-SELLER-001：实名是准入条件，不是加分项。能力验证只回答「会不会」，
+	// 实名回答「是谁」；两个都要有答案，缺一个都不能进候选集。
+	// 注意这里不把查询错误吞掉：出错时 RealNameVerified 保持 false，
+	// 于是 Eligible 为 false —— 出事的时候撮合停摆，而不是照常放行。
+	realNameOK, realNameErr := SellerRealNameVerified(ctx, s.sellerIdentity, agentID)
+	snap.RealNameVerified = realNameOK && realNameErr == nil
+	snap.Eligible = snap.ProfileActive && snap.ServiceActive && snap.CapabilitiesOK &&
+		snap.AvailabilityOK && snap.MarketOK && snap.RealNameVerified
 	return snap, nil
 }
 

@@ -233,6 +233,9 @@ func main() {
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
+		// COMP-SELLER-001：候选资格只认已实名且未过期的卖家。接在这里（pool 分支内）
+		// 意味着没有数据库时 lookup 为 nil → 撮合不出候选，而不是「照常撮合」。
+		supplyService.SetSellerIdentityLookup(postgres.NewSellerRealNameRepository(pool))
 		mediaService = media.NewWithReviewDecisionRepository(
 			postgres.NewMediaRepository(pool),
 			postgres.NewMediaReviewDecisionRepository(pool),

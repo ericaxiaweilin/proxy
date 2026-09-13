@@ -4,6 +4,18 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 171 — 2026-09-13
+
+- COMP-SELLER-001（越南合规整改）：供给侧实名成为准入条件。
+  越南电商法 122/2025 + NĐ 248/2026（2026-07-01 生效）禁止匿名销售，
+  而此前 supply 侧只有「能力验证」（会不会中文），完全没有「是谁」的证据。
+  新增 `supply.seller_real_name_verifications`（migrations/084），
+  `Eligibility` 增加 `realNameVerified`，未实名或未接查询的卖家不再进候选集
+  （fail-closed）。**无视觉改动**；`Candidate` 快照多一个布尔字段。
+- ⚠️ 已知副作用：库里目前没有任何实名记录，因此**开发环境的撮合候选集会是空的**，
+  直到为对应 agent 写入 status='VERIFIED' 的记录（method=OPERATOR_ATTESTATION
+  时需有具名的 verified_by）。这是刻意的，不是 bug。
+
 ## Revision 170 — 2026-09-13
 
 - COMP-ID-002（越南合规整改）：`apps/api-go/cmd/api/main.go` 里把

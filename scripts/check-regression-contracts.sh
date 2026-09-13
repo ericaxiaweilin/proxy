@@ -1795,3 +1795,52 @@ if grep -rn 'refreshExpiresAt: *"' apps/mobile/src --include='*.test.ts' --inclu
   exit 1
 fi
 echo "    TEST-ABSDATE-002: PASS (mobile session fixtures use relative refresh expiry)"
+
+# COMP-SELLER-001: 供给侧实名 —— 能收钱的人必须可识别。
+# 越南电商法 122/2025 + NĐ 248/2026（2026-07-01 生效）禁止匿名销售：平台上
+# 卖出服务的人必须可识别、且绑定税务身份。此前 supply 侧只有「能力验证」
+# （会不会中文），完全没有「是谁」的证据 —— 那正是法条要禁的形态。
+# 能力验证不能替代实名：一个回答「会不会」，一个回答「是谁」。
+# 守卫 fail-closed：没接查询 / 查询报错 = 撮合停摆，不是照常放行。
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestSellerRealNameRefusedWhenLookupMissing" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestSellerRealNameRefusedWhenLookupErrors" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestEligibilityRequiresSellerRealName" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestCandidateBatchEmptyWhenRealNameLookupUnwired" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestEligibilitySnapshotExposesRealName" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+
+# 实名必须真的参与准入判定，不能只是写进快照给人看。
+if ! grep -qF 'snap.AvailabilityOK && snap.MarketOK && snap.RealNameVerified' \
+     apps/api-go/internal/supply/service.go; then
+  echo "  FAIL [COMP-SELLER-001]: real-name no longer gates eligibility." >&2
+  echo "        A snapshot field that nobody reads is not a compliance control." >&2
+  exit 1
+fi
+if ! grep -qF 'RealNameVerified bool `json:"realNameVerified"`' \
+     apps/api-go/internal/supply/service.go; then
+  echo "  FAIL [COMP-SELLER-001]: EligibilitySnapshot no longer exposes real-name status." >&2
+  exit 1
+fi
+# 生产实现必须查真实名表，且签名漂移要在编译期炸。
+if ! grep -qF 'supply.seller_real_name_verifications' apps/api-go/internal/platform/postgres/seller_identity.go ||
+   ! grep -qF 'var _ supply.SellerIdentityLookup = (*SellerRealNameRepository)(nil)' apps/api-go/internal/platform/postgres/seller_identity.go; then
+  echo "  FAIL [COMP-SELLER-001]: the seller real-name store no longer reads the" >&2
+  echo "        verification table, or is no longer pinned to the domain contract." >&2
+  exit 1
+fi
+# 不接线 = 候选集为空（fail-closed）。这里钉的是「接线」本身。
+if ! grep -qF 'SetSellerIdentityLookup' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'NewSellerRealNameRepository' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-SELLER-001]: the seller real-name lookup is no longer wired in cmd/api/main.go." >&2
+  exit 1
+fi
+echo "    COMP-SELLER-001: PASS (sellers must be real-name verified before they can be matched)"
