@@ -116,6 +116,9 @@ type Repository interface {
 	AddAppeal(ctx context.Context, appeal Appeal) error
 	FindAppeal(ctx context.Context, appealID string) (Appeal, bool)
 	AddAppealDecision(ctx context.Context, decision AppealDecision) error
+	AddAuthorityRequest(ctx context.Context, request AuthorityRequest) error
+	FindAuthorityRequest(ctx context.Context, requestID string) (AuthorityRequest, bool)
+	AddAuthorityResponse(ctx context.Context, response AuthorityResponse) error
 }
 
 type reportPayload struct {
@@ -147,7 +150,11 @@ func (s *Service) Supports(commandType string) bool {
 		// COMP-REPORT-004: 申诉渠道。FileAppeal 是普通已登录用户可用的申诉提交；
 		// RecordAppealDecision 是 operator-only 的复核（见 security.go）。
 		commandType == "FileAppeal" ||
-		commandType == "RecordAppealDecision"
+		commandType == "RecordAppealDecision" ||
+		// COMP-AUTHORITY-001: 有权机关请求的受理与响应。两者都是
+		// operator-only（见 security.go）。
+		commandType == "RecordAuthorityRequest" ||
+		commandType == "RecordAuthorityResponse"
 }
 
 func (s *Service) Handle(e command.Envelope) command.Result {
@@ -173,6 +180,13 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.fileAppeal(ctx, e)
 	case "RecordAppealDecision":
 		return s.recordAppealDecision(ctx, e)
+	// COMP-AUTHORITY-001: 有权机关请求。两者都是 operator-only —— 白名单见
+	// security.go 的 operatorCommandTypes，未配白名单时在命令边界就被拒，
+	// 走不到这里。普通用户绝不能伪造「有权机关要调你的信息」这种记录。
+	case "RecordAuthorityRequest":
+		return s.recordAuthorityRequest(ctx, e)
+	case "RecordAuthorityResponse":
+		return s.recordAuthorityResponse(ctx, e)
 	default:
 		return command.Rejected(e, "MODERATION_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "moderation.unsupported_command", nil)
 	}

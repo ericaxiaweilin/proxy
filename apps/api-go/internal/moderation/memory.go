@@ -14,6 +14,8 @@ type MemoryRepository struct {
 	dispositions    []Disposition
 	appeals         []Appeal
 	appealDecisions []AppealDecision
+	authRequests    []AuthorityRequest
+	authResponses   []AuthorityResponse
 	fail            bool
 }
 
@@ -132,6 +134,57 @@ func (r *MemoryRepository) Dispositions() []Disposition {
 	return out
 }
 
+// COMP-AUTHORITY-001: 有权机关请求落库。与举报 / 处置 / 申诉同口径：
+// 只有 append，没有 UPDATE / DELETE。
+func (r *MemoryRepository) AddAuthorityRequest(_ context.Context, request AuthorityRequest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail {
+		return ErrReportRepositoryDown
+	}
+	if request.RequestRef == "" || request.Authority == "" || request.Kind == "" {
+		return ErrAuthorityRequestRequired
+	}
+	// 四项核验缺一不得受理（Service 已验过一遍，这里是绕过 Service 时的兜底）。
+	if !request.VerifiedSubject || !request.VerifiedAuthority ||
+		!request.VerifiedScope || !request.VerifiedLegality {
+		return ErrAuthorityRequestVerificationRequired
+	}
+	if request.ActorID == "" {
+		return ErrAuthorityRequestActorRequired
+	}
+	r.authRequests = append(r.authRequests, request)
+	return nil
+}
+
+func (r *MemoryRepository) FindAuthorityRequest(_ context.Context, requestID string) (AuthorityRequest, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, row := range r.authRequests {
+		if row.ID == requestID {
+			return row, true
+		}
+	}
+	return AuthorityRequest{}, false
+}
+
+// COMP-AUTHORITY-001: 有权机关请求响应落库（operator-only 的入口在 service 层把关）。
+func (r *MemoryRepository) AddAuthorityResponse(_ context.Context, response AuthorityResponse) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail {
+		return ErrReportRepositoryDown
+	}
+	if response.RequestID == "" || response.Outcome == "" {
+		return ErrAuthorityResponseRequired
+	}
+	if response.ActorID == "" {
+		return ErrAuthorityResponseActorRequired
+	}
+	r.authResponses = append(r.authResponses, response)
+	return nil
+}
+
 // Appeals 返回已提交的申诉（测试用），按写入顺序。
 func (r *MemoryRepository) Appeals() []Appeal {
 	r.mu.Lock()
@@ -150,6 +203,24 @@ func (r *MemoryRepository) AppealDecisions() []AppealDecision {
 	return out
 }
 
+// AuthorityRequests 返回已受理的有权机关请求（测试用），按写入顺序。
+func (r *MemoryRepository) AuthorityRequests() []AuthorityRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]AuthorityRequest, len(r.authRequests))
+	copy(out, r.authRequests)
+	return out
+}
+
+// AuthorityResponses 返回已记录的有权机关响应（测试用），按写入顺序。
+func (r *MemoryRepository) AuthorityResponses() []AuthorityResponse {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]AuthorityResponse, len(r.authResponses))
+	copy(out, r.authResponses)
+	return out
+}
+
 // 仓储层兜底错误。Service 已经在命令层校验过一遍，这里是防止有人绕过
 // Service 直接调仓储写进一条说不清是谁处置了什么、或谁申诉了什么的记录。
 var (
@@ -159,4 +230,10 @@ var (
 	ErrAppealReasonRequired        = errors.New("moderation appeal requires a non-empty reason")
 	ErrAppealDecisionRequired      = errors.New("moderation appeal decision requires an appeal id and decision")
 	ErrAppealDecisionActorRequired = errors.New("moderation appeal decision requires an actor")
+	// COMP-AUTHORITY-001
+	ErrAuthorityRequestRequired             = errors.New("moderation authority request requires a ref, authority and kind")
+	ErrAuthorityRequestVerificationRequired = errors.New("moderation authority request requires all four verifications")
+	ErrAuthorityRequestActorRequired        = errors.New("moderation authority request requires an actor")
+	ErrAuthorityResponseRequired            = errors.New("moderation authority response requires a request id and outcome")
+	ErrAuthorityResponseActorRequired       = errors.New("moderation authority response requires an actor")
 )

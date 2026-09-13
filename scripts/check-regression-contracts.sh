@@ -2229,3 +2229,47 @@ if [ ! -f apps/api-go/migrations/088_moderation_appeals.sql ]; then
   exit 1
 fi
 echo "    COMP-REPORT-004: PASS (the appeal channel exists, is attributable, and is operator-reviewed)"
+
+# COMP-AUTHORITY-001: 有权机关请求的受理留痕与响应时限（§55 + 网安法
+# 116/2025 + 333/2026/NĐ-CP）。代码里 REFERRED_TO_AUTHORITY 曾是 087 里
+# 一个从未被写入路径使用的枚举值 —— 平台证明不了自己在法定时限内响应过，
+# 也证明不了核验过请求的合法性。本条锁死：受理/响应必须 append-only 且可
+# 归因；四项核验（主体/权限/范围/合法性）缺一不得受理；请求种类不认识
+# → 拿不到时限 → 拒绝写入（不能悄悄按 24h 兜底，那会把 3 小时的生命安全
+# 紧急请求拖成 24 小时）；两个写入命令必须 operator-only；PG 仓储与迁移
+# 089 必须存在。
+require_test "COMP-AUTHORITY-001" "./internal/moderation" \
+  "TestAuthorityRequestAcceptedAndAttributed" \
+  "apps/api-go/internal/moderation/authority_compliance_test.go" || exit $?
+require_test "COMP-AUTHORITY-001" "./internal/moderation" \
+  "TestAuthoritySLAMatchesStatutoryDeadlines" \
+  "apps/api-go/internal/moderation/authority_compliance_test.go" || exit $?
+require_test "COMP-AUTHORITY-001" "./internal/moderation" \
+  "TestAuthorityMetDeadlineDistinguishesOnTimeAndLate" \
+  "apps/api-go/internal/moderation/authority_compliance_test.go" || exit $?
+require_test "COMP-AUTHORITY-001" "./internal/moderation" \
+  "TestAuthorityRequestRejectedWhenVerificationIncomplete" \
+  "apps/api-go/internal/moderation/authority_compliance_test.go" || exit $?
+require_test "COMP-AUTHORITY-001" "./internal/moderation" \
+  "TestAuthorityRequestRejectsFutureReceivedAt" \
+  "apps/api-go/internal/moderation/authority_compliance_test.go" || exit $?
+if ! grep -qF '"RecordAuthorityRequest":  true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-AUTHORITY-001]: RecordAuthorityRequest is no longer operator-only," >&2
+  echo "        so anyone could forge an authority request record." >&2
+  exit 1
+fi
+if ! grep -qF '"RecordAuthorityResponse": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-AUTHORITY-001]: RecordAuthorityResponse is no longer operator-only," >&2
+  echo "        so anyone could forge an authority response record." >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *ModerationRepository) AddAuthorityRequest' apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-AUTHORITY-001]: the Postgres authority repository is missing," >&2
+  echo "        so authority requests would not survive a restart." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/089_moderation_authority_requests.sql ]; then
+  echo "  FAIL [COMP-AUTHORITY-001]: migration 089_moderation_authority_requests.sql is missing." >&2
+  exit 1
+fi
+echo "    COMP-AUTHORITY-001: PASS (authority requests are attributable, SLA-tracked, and operator-only)"
