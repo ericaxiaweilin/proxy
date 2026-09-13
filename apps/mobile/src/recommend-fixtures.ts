@@ -55,6 +55,10 @@ import { localApiBaseUrl } from "./native-clients";
 // 回落首字母（卡片本就支持），不再伪造照片。
 const ACCOUNT_AVATAR_ASSET: Record<string, string> = {
   u_linh: "ma_creator_linh_portrait_v1",
+  u_mai: "ma_creator_mai_portrait_v1",
+  u_an: "ma_creator_an_portrait_v1",
+  u_minh: "ma_creator_minh_portrait_v1",
+  u_trang: "ma_creator_trang_portrait_v1",
 };
 
 function withR34Portraits(people: RecommendPerson[], offset: number): RecommendPerson[] {

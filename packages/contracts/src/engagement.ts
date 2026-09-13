@@ -7,9 +7,13 @@ export const PostEngagementSchema = z.object({
 });
 export type PostEngagement = z.infer<typeof PostEngagementSchema>;
 
+// FEED-REPLY-001: actorDisplayName 是服务端按 profile 解析出的评论作者展示名，
+// 可能缺失（老评论 / 无 profile）。缺失时客户端必须退化成中性标签，
+// 绝不能把 actorId 当名字显示——显示名与权威身份是两件事。
 export const PostReplySchema = z.object({
   replyId: z.string().min(1), postId: z.string().min(1), actorId: z.string().min(1),
-  body: z.string(), createdAt: z.string()
+  body: z.string(), createdAt: z.string(),
+  actorDisplayName: z.string().optional()
 });
 export type PostReply = z.infer<typeof PostReplySchema>;
 export const PostRepliesListSchema = z.object({

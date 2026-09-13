@@ -17,7 +17,7 @@
 package mockidentity
 
 // CreatorFacetKeys 是 mock Creator 的固定 facet 键（种子与各 surface 共用）。
-var CreatorFacetKeys = []string{"linh", "mai", "an", "thao", "yen", "minh"}
+var CreatorFacetKeys = []string{"linh", "mai", "an", "thao", "yen", "minh", "trang"}
 
 // AccountIDForFacetKey 返回 facet 键对应的系统账号 id。
 func AccountIDForFacetKey(key string) string {

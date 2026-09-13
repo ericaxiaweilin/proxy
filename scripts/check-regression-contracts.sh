@@ -2273,3 +2273,73 @@ if [ ! -f apps/api-go/migrations/089_moderation_authority_requests.sql ]; then
   exit 1
 fi
 echo "    COMP-AUTHORITY-001: PASS (authority requests are attributable, SLA-tracked, and operator-only)"
+
+# FEED-REPLY-001: 评论必须显示作者名，而不是把 actorId 当成名字渲染给用户。
+# 服务端 ListPostReplies 之前只下发 actorId，feed 直接把它当作者名显示 ——
+# 用户看到的是一串账号 ID。名字必须来自 profile（权威）、不接受客户端提供
+# （ReplyToPost 里塞什么都不作数）、读时解析（存量评论不用迁移也能改名）；
+# 解析不到时保持空串，由客户端降级成中性标签，绝不能退回 ID。
+require_test "FEED-REPLY-001" "./internal/engagement" \
+  "TestListPostRepliesResolvesActorDisplayNameFromProfile" \
+  "apps/api-go/internal/engagement/reply_author_name_test.go" || exit $?
+require_test "FEED-REPLY-001" "./internal/engagement" \
+  "TestListPostRepliesLeavesUnresolvedActorNameBlank" \
+  "apps/api-go/internal/engagement/reply_author_name_test.go" || exit $?
+require_test "FEED-REPLY-001" "./internal/engagement" \
+  "TestListPostRepliesNamesLegacyRepliesWrittenBeforeWiring" \
+  "apps/api-go/internal/engagement/reply_author_name_test.go" || exit $?
+require_test "FEED-REPLY-001" "./internal/engagement" \
+  "TestListPostRepliesRejectsPoisonedYouDisplayName" \
+  "apps/api-go/internal/engagement/reply_author_name_test.go" || exit $?
+require_test "FEED-REPLY-001" "./internal/engagement" \
+  "TestReplyActorDisplayNameIsNeverClientSupplied" \
+  "apps/api-go/internal/engagement/reply_author_name_test.go" || exit $?
+if ! grep -qF 'func (s *Service) withReplyActorNames' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [FEED-REPLY-001]: profile-backed reply author resolution is gone," >&2
+  echo "        so comments can only render raw account ids." >&2
+  exit 1
+fi
+if ! grep -qF 'engagementService.SetAuthorNameResolver(authorNames)' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [FEED-REPLY-001]: the engagement service is no longer wired to the profile" >&2
+  echo "        resolver, so production would keep returning unnamed comments." >&2
+  exit 1
+fi
+if ! grep -qF 'resolveReplyAuthorDisplayName(reply, viewerAccountId)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-REPLY-001]: the feed stopped resolving the comment author label." >&2
+  exit 1
+fi
+if grep -qF '{reply.actorId}' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-REPLY-001]: the feed renders the raw account id as the comment author again." >&2
+  exit 1
+fi
+if ! grep -qF 'FEED-REPLY-001' apps/mobile/src/feed-author.test.ts; then
+  echo "  FAIL [FEED-REPLY-001]: the comment author label regression ID or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/feed-author.test.ts || exit $?
+echo "    FEED-REPLY-001: PASS (comment authors are named from the profile, never by account id)"
+
+# FEED-REPLY-002: 评论不能被全部折叠 —— 默认显示前 5 条，超出才折叠。
+# 之前不点「回复 N」就一条评论都看不到（全折叠），点开了又把全部评论一次性
+# 铺开。Threads 的做法是首屏固定给几条，剩下的收进「查看全部」。
+if ! grep -qF 'REPLY_PREVIEW_LIMIT = 5' apps/mobile/src/reply-preview.ts; then
+  echo "  FAIL [FEED-REPLY-002]: the comment preview limit is no longer 5," >&2
+  echo "        so comments are either fully collapsed or fully expanded again." >&2
+  exit 1
+fi
+if ! grep -qF 'visibleReplies(replies, repliesExpanded)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-REPLY-002]: the feed no longer renders the comment preview," >&2
+  echo "        so comments collapse entirely until the reader taps through." >&2
+  exit 1
+fi
+if ! grep -qF 'hydrateReplyPreviews(item.postId)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-REPLY-002]: comments are not hydrated with the post list," >&2
+  echo "        so the feed would only ever show a reply count." >&2
+  exit 1
+fi
+if ! grep -qF 'FEED-REPLY-002' apps/mobile/src/reply-preview.test.ts; then
+  echo "  FAIL [FEED-REPLY-002]: the comment preview regression ID or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/reply-preview.test.ts || exit $?
+echo "    FEED-REPLY-002: PASS (5 comments show inline, only the overflow collapses)"

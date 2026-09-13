@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isOwnPost, resolveAuthorDisplayName } from "./feed-author";
+import { isOwnPost, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "./feed-author";
 
 describe("FEED-OWN-001 different accounts never share the own-post label", () => {
   it("labels only the author's own posts as 你", () => {
@@ -32,5 +32,41 @@ describe("FEED-OWN-001 different accounts never share the own-post label", () =>
     expect(resolveAuthorDisplayName({ authorId: "user_b", authorDisplayName: "  " }, "user_a")).toBe("用户");
     expect(resolveAuthorDisplayName({ authorId: "m1", authorType: "MERCHANT" }, "user_a")).toBe("商家");
     expect(resolveAuthorDisplayName({ authorId: "market_owner:你" }, "user_a")).toBe("用户");
+  });
+});
+
+describe("FEED-REPLY-001 comment author shows a name, never an account id", () => {
+  it("shows the server-resolved profile name", () => {
+    const reply = { actorId: "user_b", actorDisplayName: "Khoa" };
+    expect(resolveReplyAuthorDisplayName(reply, "user_a")).toBe("Khoa");
+  });
+
+  it("labels the viewer's own comment as 你", () => {
+    const mine = { actorId: "user_a", actorDisplayName: "Huyen" };
+    expect(resolveReplyAuthorDisplayName(mine, "user_a")).toBe("你");
+  });
+
+  it("never falls back to the raw account id when the name is missing", () => {
+    const unnamed = { actorId: "user_b" };
+    const label = resolveReplyAuthorDisplayName(unnamed, "user_a");
+    expect(label).toBe("用户");
+    expect(label).not.toBe(unnamed.actorId);
+    // 空串 / 空白等同缺失。
+    expect(resolveReplyAuthorDisplayName({ actorId: "user_b", actorDisplayName: "   " }, "user_a")).toBe("用户");
+  });
+
+  it("does not let another author's poisoned 你 become the viewer's own label", () => {
+    const poisoned = { actorId: "user_b", actorDisplayName: "你" };
+    expect(resolveReplyAuthorDisplayName(poisoned, "user_a")).toBe("用户");
+    expect(resolveReplyAuthorDisplayName(poisoned, undefined)).toBe("用户");
+    // 真正的作者仍然凭 actorId 认领自己的评论。
+    expect(resolveReplyAuthorDisplayName(poisoned, "user_b")).toBe("你");
+  });
+
+  it("agrees with the post author label for the same identity", () => {
+    const reply = { actorId: "user_b", actorDisplayName: "Khoa" };
+    expect(resolveReplyAuthorDisplayName(reply, "user_a")).toBe(
+      resolveAuthorDisplayName({ authorId: "user_b", authorDisplayName: "Khoa" }, "user_a")
+    );
   });
 });
