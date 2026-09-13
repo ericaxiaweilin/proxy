@@ -545,6 +545,7 @@ export function AppShell({
               target={openHumanProfile}
               engagement={engagement}
               localNet={localNet}
+              moderation={moderation}
               {...(secureSessionStore ? { secureSessionStore } : {})}
               onBack={() => { setOpenHumanProfile(undefined); if (humanProfileReturnToScene) { setHumanProfileReturnToScene(false); setRealitySceneOpen(true); } }}
               onMessage={(name, avatarUri) => {
@@ -731,6 +732,7 @@ export function AppShell({
               mediaClient={media}
               relationshipClient={relationship}
               socialSettingsClient={socialSettings}
+              moderation={moderation}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               {...(experienceManifest?.context === context
                 ? {

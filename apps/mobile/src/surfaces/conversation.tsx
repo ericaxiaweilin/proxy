@@ -16,7 +16,8 @@ import { readServerTemporaryUI, ServerTemporaryForm, type ServerTemporaryUI } fr
 import type { ConversationClient, ConversationInboxItem, ProtectionOverride } from "../conversation-client";
 import type { ActivityClient } from "../activity-client";
 import type { MediaClient, UploadableImage } from "../media-client";
-import { REPORT_REASONS, type ModerationClient, type ReportReason } from "../moderation-client";
+import type { ModerationClient } from "../moderation-client";
+import { ReportSheet } from "../components/report-sheet";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
@@ -147,8 +148,6 @@ export function ConversationSurface({
   // COMP-REPORT-002: 举报「这条消息」。招嫖揽客 / 人身威胁 / 涉未成年人
   // 都发生在聊天里，用户必须能在这里报上来。
   const [reportFor, setReportFor] = useState<Message | null>(null);
-  const [reportBusy, setReportBusy] = useState(false);
-  const [reportError, setReportError] = useState<string>();
   // 当前分支：props 带进来（从 Convo 页打开）或屏内创建。null = 主线。
   const [activeConvo, setActiveConvo] = useState<{ id: string; title: string } | null>(
     initialConvoId ? { id: initialConvoId, title: convoTitle ?? "支线" } : null
@@ -652,24 +651,6 @@ export function ConversationSurface({
     });
   }
 
-  async function submitMessageReport(reason: ReportReason): Promise<void> {
-    const target = reportFor;
-    if (!target || reportBusy) return;
-    setReportBusy(true);
-    setReportError(undefined);
-    try {
-      await moderationClient.reportTarget("MESSAGE", target.id, reason);
-      setReportFor(null);
-      showToast("举报已提交，平台将按审核流程处理。");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      // 登录态问题不能说成网络问题，否则用户会一直重试。
-      setReportError(/session|signed|sign in|auth|401|403/i.test(message) ? "请先登录后再举报。" : "举报没有提交成功，请检查连接后重试。");
-    } finally {
-      setReportBusy(false);
-    }
-  }
-
   const menuMsg = menuMessage;
   const menuReactions = menuMsg ? reactions[menuMsg.id] ?? [] : [];
   const secureOn = burn !== "off";
@@ -1043,7 +1024,7 @@ export function ConversationSurface({
               <Text style={styles.sheetItemText}>置顶</Text><Text style={styles.sheetItemHint}>›</Text>
             </Pressable>
             <Pressable
-              onPress={() => { const target = menuMsg; setMenuMessage(null); setReportError(undefined); setReportFor(target); }}
+              onPress={() => { const target = menuMsg; setMenuMessage(null); setReportFor(target); }}
               style={styles.sheetItem}
               accessibilityLabel="举报这条消息"
             >
@@ -1058,30 +1039,18 @@ export function ConversationSurface({
         </Pressable>
       ) : null}
 
-      {/* COMP-REPORT-002: 举报原因。理由清单里 SOLICITATION（招嫖 / 线下
-          付费招揽）与 MINOR_SAFETY（涉未成年人）排在前面 —— 这两类风险
-          最高，用户慌的时候要能一眼找到，不该让他翻九行。 */}
+      {/* COMP-REPORT-002: 举报这条消息。原因清单与各入口共用 ReportSheet，
+          理由排序（SOLICITATION / MINOR_SAFETY 在最前）也在那里统一维护。 */}
       {reportFor ? (
-        <Pressable accessibilityLabel="关闭举报" onPress={() => { if (!reportBusy) setReportFor(null); }} style={styles.scrim}>
-          <Pressable onPress={() => undefined} style={styles.bottomSheet}>
-            <View style={styles.sheetGrab} />
-            <Text style={styles.sheetItemText}>举报这条消息</Text>
-            <Text style={styles.sheetItemHint} numberOfLines={1}>{reportFor.body.slice(0, 40)}</Text>
-            {reportError ? <Text style={styles.menuDanger}>{reportError}</Text> : null}
-            {REPORT_REASONS.map((item) => (
-              <Pressable
-                key={item.reason}
-                disabled={reportBusy}
-                accessibilityLabel={`举报原因 ${item.label}`}
-                onPress={() => { void submitMessageReport(item.reason); }}
-                style={styles.sheetItem}
-              >
-                <Text style={styles.sheetItemText}>{item.label}</Text>
-              </Pressable>
-            ))}
-            {reportBusy ? <ActivityIndicator style={{ marginVertical: 12 }} /> : null}
-          </Pressable>
-        </Pressable>
+        <ReportSheet
+          moderation={moderationClient}
+          targetType="MESSAGE"
+          targetId={reportFor.id}
+          title="举报这条消息"
+          {...(reportFor.body ? { subtitle: reportFor.body.slice(0, 40) } : {})}
+          onClose={() => setReportFor(null)}
+          onDone={() => { setReportFor(null); showToast("举报已提交，平台将按审核流程处理。"); }}
+        />
       ) : null}
 
       {/* 转发目标选择：真调 ForwardMessage，有加载/空态/错误态 */}

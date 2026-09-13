@@ -2059,7 +2059,7 @@ echo "    COMP-REPORT-001: PASS (every target promised in the terms is reportabl
 # 就又犯一次「改了后端就宣称解决了」的错 —— 那是我在 COMP-E2EE-002
 # 里刚批评过的同一个毛病。所以这里把「用户点得到」也钉住。
 if ! grep -q 'COMP-REPORT-002' apps/mobile/src/moderation-client.test.ts ||
-   ! grep -q 'reportTarget("MESSAGE"' apps/mobile/src/surfaces/conversation.tsx; then
+   ! grep -q 'targetType="MESSAGE"' apps/mobile/src/surfaces/conversation.tsx; then
   echo "  FAIL [COMP-REPORT-002]: the message report entry point is gone —" >&2
   echo "        the API accepts reports but users can no longer file one." >&2
   exit 1
@@ -2080,4 +2080,19 @@ if ! grep -q 'SOLICITATION' apps/mobile/src/moderation-client.ts ||
   exit 1
 fi
 pnpm --filter @proxy/mobile exec vitest run src/moderation-client.test.ts || exit $?
-echo "    COMP-REPORT-002: PASS (users can actually file a report from a message)"
+# 账号与交易入口：这两类和「消息」一样是高风险面 —— 冒充身份是看整个账号
+# 看出来的，诈骗与招嫖揽客落在订单上。只做消息入口仍然只覆盖了 2/8。
+if ! grep -q 'targetType="ACCOUNT"' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the account report entry point is gone." >&2
+  exit 1
+fi
+if ! grep -q 'targetType="TRANSACTION"' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the transaction report entry point is gone." >&2
+  exit 1
+fi
+# 原因选择抽成了共用组件：三个入口各自抄一份，迟早有一份忘了更新理由清单。
+if ! grep -q 'REPORT_REASONS' apps/mobile/src/components/report-sheet.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: ReportSheet no longer uses the shared reason list." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-002: PASS (message, account and transaction are all reportable from the UI)"

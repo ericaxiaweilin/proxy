@@ -4,6 +4,22 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 178 — 2026-09-13
+
+- COMP-REPORT-002（续）：举报入口补齐**账号**与**交易**。
+  上一笔只做了「消息」，8 类里用户能点到 2 类。这两类和消息同属高风险面，
+  而且各自对应不同的事实形态：冒充身份是看**整个账号**看出来的（不是某条
+  帖子），诈骗与招嫖揽客落在**订单**上（不是某条消息）。
+  - 他人主页（other-profile）顶栏加「举报」→ 报 ACCOUNT（target=userId）。
+  - 我的订单 → 订单详情加「举报这笔交易」→ 报 TRANSACTION（target=orderId）。
+  - 原因选择抽成共用组件 `components/report-sheet.tsx`，三个入口共用同一份
+    REPORT_REASONS —— 各抄一份的话，迟早有一份忘了跟着更新理由清单。
+  - 会话页改为复用该组件（原来那份内联实现删掉），理由排序与错误提示
+    因此与另两个入口一致。
+  **有视觉改动**：他人主页顶栏多「举报」；订单详情多「举报这笔交易」按钮；
+  会话的举报弹层改用共用组件（结构一致，配色随共用样式）。
+  仍未接入口：活动 / 机会 / 商家 / 邀约（4 类）。
+
 ## Revision 177 — 2026-09-13
 
 - COMP-REPORT-002（越南合规整改）：举报入口要真的能被用户点到。

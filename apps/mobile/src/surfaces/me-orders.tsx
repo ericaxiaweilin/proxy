@@ -3,6 +3,8 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "rea
 import type { Activity } from "@proxy/contracts";
 import { ActivityClient, ActivityCommandRejectedError } from "../activity-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
+import type { ModerationClient } from "../moderation-client";
+import { ReportSheet } from "../components/report-sheet";
 import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { color } from "../theme";
 import { ActivityDetailSurface } from "./activity-detail";
@@ -20,13 +22,21 @@ function canCancel(order: FulfillmentOrder): boolean {
   return order.lifecycle === "OFFERED" || order.lifecycle === "CONFIRMED" || order.lifecycle === "EXECUTING";
 }
 
-export function MyOrdersSurface({ client, onBack }: { client: FulfillmentClient; onBack: () => void }): React.JSX.Element {
+export function MyOrdersSurface({ client, moderation, onBack }: {
+  client: FulfillmentClient;
+  // COMP-REPORT-002: 举报这笔交易。钱与线下见面都在这一层 —— 诈骗、
+  // 招嫖揽客、人身威胁的暴露面正是订单，不是帖子。
+  moderation: ModerationClient;
+  onBack: () => void;
+}): React.JSX.Element {
   const [filter, setFilter] = useState<OrderFilter>("all");
   const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [detail, setDetail] = useState<FulfillmentOrder>();
   const [cancellingId, setCancellingId] = useState<string | undefined>(undefined);
   const [cancelError, setCancelError] = useState<string | undefined>(undefined);
+  const [reporting, setReporting] = useState<string | undefined>(undefined);
+  const [reportNotice, setReportNotice] = useState<string | undefined>(undefined);
   const reload = useCallback(() => {
     let active = true;
     setPhase("LOADING");
@@ -118,7 +128,28 @@ export function MyOrdersSurface({ client, onBack }: { client: FulfillmentClient;
             </Pressable>
           ) : null}
           {cancelError ? <Text style={styles.orderNotice}>{cancelError}</Text> : null}
+          <Pressable
+            accessibilityLabel="举报这笔交易"
+            onPress={() => { setReportNotice(undefined); setReporting(detail.orderId); }}
+            style={styles.orderTab}
+          >
+            <Text style={styles.orderTabText}>举报这笔交易</Text>
+          </Pressable>
+          {reportNotice ? <Text style={styles.orderNotice}>{reportNotice}</Text> : null}
         </ScrollView>
+        {/* COMP-REPORT-002: 举报交易。target 用 orderId —— 报的是这笔
+            交易，不是对方这个人（报人走账号举报入口）。 */}
+        {reporting ? (
+          <ReportSheet
+            moderation={moderation}
+            targetType="TRANSACTION"
+            targetId={reporting}
+            title="举报这笔交易"
+            subtitle={reporting}
+            onClose={() => setReporting(undefined)}
+            onDone={() => { setReporting(undefined); setReportNotice("举报已提交，平台将按审核流程处理。"); }}
+          />
+        ) : null}
       </View>
     );
   }

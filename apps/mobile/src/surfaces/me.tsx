@@ -35,6 +35,7 @@ import { resolveLocationConsentClient } from "../location-consent-client";
 import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
+import type { ModerationClient } from "../moderation-client";
 import { type LocalNetClient } from "../localnet-client";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
@@ -278,6 +279,8 @@ export function MeSurface({
   profileClient,
   mediaClient,
   relationshipClient,
+  // COMP-REPORT-002: 举报入口，透传到「我的订单」（举报交易）。
+  moderation,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -303,6 +306,7 @@ export function MeSurface({
   engagement?: EngagementClient;
   viewerAccountId?: string | undefined;
   socialSettingsClient?: SocialSettingsClient | undefined;
+  moderation: ModerationClient;
   onOpenSearch?: ((query: string) => void) | undefined;
 }): React.JSX.Element {
   // PROFILE-READ-001: profile storage is scoped per account. The module
@@ -942,7 +946,7 @@ export function MeSurface({
     const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => setSubPage(undefined)}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
-    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
+    if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "myactivities") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyActivitiesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "merchantcampaign") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MerchantCampaignSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
     if (subPage.route === "favorites") return <SwipeBackShell onExit={() => setSubPage(undefined)}><FavoritesSurface onBack={() => setSubPage(undefined)} /></SwipeBackShell>;

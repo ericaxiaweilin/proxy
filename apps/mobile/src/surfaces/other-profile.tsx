@@ -3,6 +3,8 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import type { FeedMediaItem, FeedPost } from "@proxy/contracts";
 import type { EngagementClient } from "../engagement-client";
 import type { LocalNetClient } from "../localnet-client";
+import type { ModerationClient } from "../moderation-client";
+import { ReportSheet } from "../components/report-sheet";
 import type { SecureSessionStore } from "../secure-session";
 import { color } from "../theme";
 import { ProfileTabs, type ProfileMediaEntry } from "./ProfileTabs";
@@ -20,10 +22,13 @@ export type OtherProfileTarget = {
   mediaByPost: Record<string, FeedMediaItem[]>;
 };
 
-export function OtherProfileSurface({ target, engagement, localNet, secureSessionStore, onBack, onMessage }: {
+export function OtherProfileSurface({ target, engagement, localNet, moderation, secureSessionStore, onBack, onMessage }: {
   target: OtherProfileTarget;
   engagement: EngagementClient;
   localNet: LocalNetClient;
+  // COMP-REPORT-002: 举报这个账号。冒充他人 / 招嫖揽客这类事，用户往往
+  // 是从某个账号整体看出来的，而不是某一条帖子。
+  moderation: ModerationClient;
   secureSessionStore?: SecureSessionStore | undefined;
   onBack: () => void;
   onMessage: (name: string, avatarUri?: string) => void;
@@ -32,6 +37,7 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
   const [following, setFollowing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const [reporting, setReporting] = useState(false);
   const [resolvedPosts, setResolvedPosts] = useState<FeedPost[]>(target.posts);
   const [resolvedMedia, setResolvedMedia] = useState<Record<string, FeedMediaItem[]>>(target.mediaByPost);
   // 图片查看器：之前 onOpenMedia 是空函数，他人照片点不开。
@@ -118,14 +124,27 @@ export function OtherProfileSurface({ target, engagement, localNet, secureSessio
   }
 
   return <View style={styles.root}>
-    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable><Text style={styles.headerTitle}>{target.name}</Text><View style={styles.headerSpacer} /></View>
+    <View style={styles.header}><Pressable onPress={onBack} style={styles.back}><Text style={styles.backText}>‹ 返回</Text></Pressable><Text style={styles.headerTitle}>{target.name}</Text><Pressable onPress={() => setReporting(true)} style={styles.headerAction} accessibilityLabel="举报这个账号"><Text style={styles.headerActionText}>举报</Text></Pressable></View>
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
     </ScrollView>
     {viewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={viewer.index} author={target.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setViewer((current) => current ? { ...current, index } : current)} onClose={() => setViewer(undefined)} /> : null}
+    {/* COMP-REPORT-002: 举报账号。target 用 userId —— 举报要指到账号，
+        不是指到某条帖子（帖子举报走 feed 的入口）。 */}
+    {reporting ? (
+      <ReportSheet
+        moderation={moderation}
+        targetType="ACCOUNT"
+        targetId={target.userId}
+        title={`举报账号 ${target.name}`}
+        {...(target.userId ? { subtitle: `@${target.userId}` } : {})}
+        onClose={() => setReporting(false)}
+        onDone={() => { setReporting(false); setNotice("举报已提交，平台将按审核流程处理。"); }}
+      />
+    ) : null}
   </View>;
 }
 
-const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},backText:{color:color.magenta,fontSize:15,fontWeight:"800"},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},content:{paddingBottom:30},identity:{alignItems:"center",flexDirection:"row",gap:14,padding:18},avatar:{alignItems:"center",backgroundColor:color.proxyPurpleSoft,borderRadius:38,height:76,justifyContent:"center",overflow:"hidden",width:76},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:color.violet,fontSize:30,fontWeight:"900"},identityCopy:{flex:1},name:{color:color.ink,fontSize:24,fontWeight:"900"},handle:{color:color.muted,fontSize:13,marginTop:2},bio:{color:color.ink,fontSize:13,marginTop:7},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});
+const styles=StyleSheet.create({root:{backgroundColor:color.offWhite,flex:1},header:{alignItems:"center",borderBottomColor:color.line,borderBottomWidth:1,flexDirection:"row",height:50,paddingHorizontal:16},back:{flex:1},backText:{color:color.magenta,fontSize:15,fontWeight:"800"},headerTitle:{color:color.ink,fontSize:17,fontWeight:"900"},headerSpacer:{flex:1},headerAction:{alignItems:"flex-end",flex:1},headerActionText:{color:color.muted,fontSize:14,fontWeight:"700"},content:{paddingBottom:30},identity:{alignItems:"center",flexDirection:"row",gap:14,padding:18},avatar:{alignItems:"center",backgroundColor:color.proxyPurpleSoft,borderRadius:38,height:76,justifyContent:"center",overflow:"hidden",width:76},avatarPhoto:{height:"100%",width:"100%"},avatarText:{color:color.violet,fontSize:30,fontWeight:"900"},identityCopy:{flex:1},name:{color:color.ink,fontSize:24,fontWeight:"900"},handle:{color:color.muted,fontSize:13,marginTop:2},bio:{color:color.ink,fontSize:13,marginTop:7},notice:{color:color.error,fontSize:12,paddingHorizontal:18,paddingBottom:8}});
