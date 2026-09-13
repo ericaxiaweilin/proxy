@@ -340,3 +340,119 @@ describe("POST-REACTION-TRUTH-001 / POST-COMMENT-VISIBILITY-001 wire", () => {
     await expect(clientWith({ postId: "post_1", replies, count: 1 }).listPostReplies("post_1")).resolves.toEqual({ postId: "post_1", replies, count: 1 });
   });
 });
+
+// MUTE-REVERSIBLE-001 — 屏蔽以前是单向的：服务端只有 AddMutedAuthor / IsMuted，
+// 没有 UnmuteAuthor 也没有 ListMutedAuthors，于是被屏蔽者的帖子被 feed 永久过滤
+// 之后再无任何入口可撤销。这一组钉住「有回程」这件事真的接到了线上命令名上。
+describe("MUTE-REVERSIBLE-001 unmute / list muted authors wire", () => {
+  function newAuthedClient(responder: (env: Record<string, unknown>) => Record<string, unknown>) {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
+    });
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
+      const envelope = init.body as Record<string, unknown>;
+      return { status: 200, json: async () => responder(envelope) };
+    } } });
+  }
+
+  it("unmuteAuthor sends UnmuteAuthor carrying the author id", async () => {
+    const seen: Array<{ commandType: unknown; target: unknown; payload: unknown }> = [];
+    const client = newAuthedClient((env) => {
+      seen.push({ commandType: env.commandType, target: env.target, payload: env.payload });
+      return {
+        commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+        aggregate: { type: "MutedAuthor", id: "author_1", version: 1, state: "UNMUTED" },
+        correlationId: env.correlationId
+      };
+    });
+    await expect(client.unmuteAuthor("author_1")).resolves.toBe("UNMUTED");
+    expect(seen[0]?.commandType).toBe("UnmuteAuthor");
+    expect(seen[0]?.payload).toEqual({ authorId: "author_1" });
+    // target.id 必须非空，否则信封在 dispatch 之前就被拒成 INVALID_COMMAND_ENVELOPE。
+    expect(seen[0]?.target).toEqual({ type: "Profile", id: "author_1" });
+  });
+
+  it("unmuteAuthor reports NOT_MUTED for an idempotent repeat", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "MutedAuthor", id: "author_1", version: 1, state: "NOT_MUTED" },
+      correlationId: env.correlationId
+    }));
+    await expect(client.unmuteAuthor("author_1")).resolves.toBe("NOT_MUTED");
+  });
+
+  it("listMutedAuthors parses { actorId, mutedAuthors[], count } and keeps server-resolved names", async () => {
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "MutedAuthor", id: "user_001", version: 1, state: "LISTED" },
+      operationRef: JSON.stringify({
+        actorId: "user_001",
+        mutedAuthors: [
+          { muteId: "mute_1", authorId: "author_1", createdAt: "2026-09-13T12:00:00Z", authorDisplayName: "NguyenThanhHuyen" },
+          { muteId: "mute_2", authorId: "author_2", createdAt: "2026-09-13T11:00:00Z" }
+        ],
+        count: 2
+      }),
+      correlationId: env.correlationId
+    }));
+    const out = await client.listMutedAuthors();
+    expect(out.count).toBe(2);
+    expect(out.actorId).toBe("user_001");
+    expect(out.mutedAuthors.map((row) => row.authorId)).toEqual(["author_1", "author_2"]);
+    expect(out.mutedAuthors[0]?.authorDisplayName).toBe("NguyenThanhHuyen");
+    // 解析不到的作者名缺席，而不是被回填成 authorId。
+    expect(out.mutedAuthors[1]?.authorDisplayName).toBeUndefined();
+  });
+
+  it("listMutedAuthors forwards an optional limit and targets the caller", async () => {
+    let captured: { target: unknown; payload: unknown } | undefined;
+    const client = newAuthedClient((env) => {
+      captured = { target: env.target, payload: env.payload };
+      return {
+        commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+        aggregate: { type: "MutedAuthor", id: "user_001", version: 1, state: "LISTED" },
+        operationRef: JSON.stringify({ actorId: "user_001", mutedAuthors: [], count: 0 }),
+        correlationId: env.correlationId
+      };
+    });
+    await client.listMutedAuthors(25);
+    expect(captured?.payload).toEqual({ limit: 25 });
+    expect(captured?.target).toEqual({ type: "Profile", id: "user_001" });
+  });
+
+  it("listMutedAuthors omits limit when not given", async () => {
+    let payload: unknown;
+    const client = newAuthedClient((env) => {
+      payload = env.payload;
+      return {
+        commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+        aggregate: { type: "MutedAuthor", id: "user_001", version: 1, state: "LISTED" },
+        operationRef: JSON.stringify({ actorId: "user_001", mutedAuthors: [], count: 0 }),
+        correlationId: env.correlationId
+      };
+    });
+    await client.listMutedAuthors();
+    expect(payload).toEqual({});
+  });
+
+  it("listMutedAuthors throws instead of faking an empty list", async () => {
+    // 唯一解除入口：服务端没给读模型时绝不能悄悄返 { count: 0 }，
+    // 否则界面会渲染「还没有屏蔽任何人」，用户会以为屏蔽丢了。
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "MutedAuthor", id: "user_001", version: 1, state: "LISTED" },
+      correlationId: env.correlationId
+    }));
+    await expect(client.listMutedAuthors()).rejects.toThrow(/missing operationRef/);
+  });
+
+  it("listMutedAuthors refuses to run for a guest", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    const client = new EngagementClient({ secureSessionStore: store, authClient: { request: async () => { throw new Error("should not reach"); } } });
+    await expect(client.listMutedAuthors()).rejects.toBeInstanceOf(OfflineFallbackSessionError);
+    await expect(client.unmuteAuthor("author_1")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
+  });
+});

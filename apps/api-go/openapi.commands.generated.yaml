@@ -217,6 +217,8 @@ commands:
     domain: Media
   - command: ListMemberDirectory
     domain: Business
+  - command: ListMutedAuthors
+    domain: Engagement
   - command: ListMyActivities
     domain: Activity
   - command: ListMyBusinessAccounts
@@ -414,6 +416,8 @@ commands:
   - command: ToggleActivityInterest
     domain: Activity
   - command: UnfollowProfile
+    domain: Engagement
+  - command: UnmuteAuthor
     domain: Engagement
   - command: UnpinPost
     domain: Engagement

@@ -2738,3 +2738,170 @@ if ! grep -qF 'SEARCH-CORPUS-001' apps/mobile/src/feed-search.test.ts; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/feed-search.test.ts || exit $?
 echo "    SEARCH-CORPUS-001: PASS (feed search reaches the server and matches name/city)"
+
+# MUTE-REVERSIBLE-001: 屏蔽必须是「能进也能出」的。
+#
+# 坏掉的形态：服务端只有 AddMutedAuthor / IsMuted —— 没有 UnmuteAuthor，也没有
+# ListMutedAuthors。MuteAuthor 一发出去，被屏蔽者的帖子被 feed 永久过滤（PG 侧是
+# NOT EXISTS 子查询），于是你**再也点不到** Ta 的帖子菜单或头像，也就没有任何入口
+# 能撤销这次屏蔽。客户端那句「不可逆：当前 client 不提供 unmute；Phase 2 在 '我屏蔽
+# 的人' 列表里做」把「服务端缺命令」说成了「产品分期」，进一步掩盖了它。一个只能
+# 进不能出的关系操作不是功能，是陷阱。
+#
+# 还有第二个同样致命的点：列出屏蔽的人时必须给出**可展示的名字**。屏蔽列表恰恰是
+# 「帖子全被 feed 过滤掉」的一群人，客户端没法像 feed 那样从帖子读模型里借名字，
+# 它手里只有一个 authorId。服务端不回填名字，用户就只能对着一串账号 id 猜该解除
+# 谁 —— 那这个解除入口等于还是没做。
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestUnmuteAuthorMakesMuteReversible" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestUnmuteAuthorIdempotent" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestListMutedAuthorsIsScopedToActor" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestListMutedAuthorsResolvesAuthorDisplayName" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestListMutedAuthorsIgnoresPoisonedName" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+# 命令必须真的挂在 dispatch 上（openapi 注册表是自动生成的，漏挂载会在 CI 报警）。
+if ! grep -qF '  - command: UnmuteAuthor' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: UnmuteAuthor is not a dispatched command anymore," >&2
+  echo "        so mute is one-way again." >&2
+  exit 1
+fi
+if ! grep -qF '  - command: ListMutedAuthors' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: ListMutedAuthors is not a dispatched command" >&2
+  echo "        anymore, so there is no way to enumerate who you muted." >&2
+  exit 1
+fi
+if ! grep -qF '"UnmuteAuthor", "ListMutedAuthors",' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: engagement.Supports() no longer advertises both" >&2
+  echo "        commands, so they are rejected before reaching the handlers." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) unmuteAuthor(ctx context.Context, e command.Envelope) command.Result {' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the UnmuteAuthor handler is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) listMutedAuthors(ctx context.Context, e command.Envelope) command.Result {' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the ListMutedAuthors handler is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'INVALID_UNMUTE_PAYLOAD' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: unmute no longer validates a missing authorId, so" >&2
+  echo "        a blank payload can silently 'succeed' without unmuting anyone." >&2
+  exit 1
+fi
+# 名字必须读时用**同一个** profile 解析器填（跟评论同一条链），不能另起一套。
+if ! grep -qF 'func (s *Service) withMutedAuthorNames(ctx context.Context, rows []MutedAuthorView) []MutedAuthorView {' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the muted-author list no longer resolves display" >&2
+  echo "        names at read time, so the UI can only show raw account ids." >&2
+  exit 1
+fi
+# 分成两半钉：gofmt 会在字段名与 tag 之间塞对齐空格，钉整行会白白变红。
+if ! grep -qF 'AuthorDisplayName string' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: MutedAuthorView lost its display-name field." >&2
+  exit 1
+fi
+if ! grep -qF 'json:"authorDisplayName,omitempty"' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the muted list no longer publishes a display name" >&2
+  echo "        on the wire, so the UI can only show raw account ids." >&2
+  exit 1
+fi
+# 生产路径是 Postgres，不是内存仓 —— 内存仓绿了不代表用户能解除屏蔽。
+if ! grep -qF 'func (r *EngagementRepository) RemoveMutedAuthor(ctx context.Context, actorID, authorID string) (bool, error) {' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the Postgres repository lost RemoveMutedAuthor," >&2
+  echo "        so unmute does not persist in production." >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *EngagementRepository) ListMutedAuthors(ctx context.Context, actorID string) ([]engagement.MutedAuthor, error) {' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the Postgres repository lost ListMutedAuthors." >&2
+  exit 1
+fi
+if ! grep -qF 'RemoveMutedAuthor(ctx context.Context, actorID, authorID string) (bool, error)' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: Repository no longer requires RemoveMutedAuthor." >&2
+  exit 1
+fi
+if ! grep -qF 'ListMutedAuthors(ctx context.Context, actorID string) ([]MutedAuthor, error)' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: Repository no longer requires ListMutedAuthors." >&2
+  exit 1
+fi
+# ---------- 客户端：命令名、解析、界面接线 ----------
+if ! grep -qF 'public async unmuteAuthor(authorId: string): Promise<"UNMUTED" | "NOT_MUTED"> {' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: EngagementClient lost unmuteAuthor." >&2
+  exit 1
+fi
+if ! grep -qF 'public async listMutedAuthors(limit?: number): Promise<MutedAuthorsList> {' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: EngagementClient lost listMutedAuthors." >&2
+  exit 1
+fi
+if ! grep -qF '"UnmuteAuthor", { type: "Profile", id: authorId }, { authorId }' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: unmuteAuthor no longer sends the authorId it was" >&2
+  echo "        given — that is the dead-parameter class of bug again." >&2
+  exit 1
+fi
+if ! grep -qF '"ListMutedAuthors",' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: listMutedAuthors no longer calls the server." >&2
+  exit 1
+fi
+if ! grep -qF 'export const MutedAuthorsListSchema = z.object({' packages/contracts/src/engagement.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the shared MutedAuthorsList contract is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'export function parseMutedAuthorsList(' packages/contracts/src/engagement.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the MutedAuthorsList parser is gone, so the client" >&2
+  echo "        would trust an unvalidated server payload." >&2
+  exit 1
+fi
+if ! grep -qF 'export function mutedAuthorLabel(' apps/mobile/src/muted-authors.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: muted-author labels stopped going through the single" >&2
+  echo "        identity chain, so a muted person can be shown as a raw account id." >&2
+  exit 1
+fi
+if ! grep -qF 'export function removeMutedAuthor(' apps/mobile/src/muted-authors.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: unmuting no longer removes the row locally, so the" >&2
+  echo "        list keeps showing someone who is already unmuted." >&2
+  exit 1
+fi
+# 界面必须真的接上（「通道建好了但没人接线」这个仓库出过一次，见 SEARCH-CORPUS-001）。
+if ! grep -qF 'await engagement.listMutedAuthors();' apps/mobile/src/surfaces/feed-prefs.tsx; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the feed-prefs surface never reads the muted list," >&2
+  echo "        so the section is an empty shell." >&2
+  exit 1
+fi
+if ! grep -qF 'await engagement.unmuteAuthor(authorId);' apps/mobile/src/surfaces/feed-prefs.tsx; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the feed-prefs surface has no working unmute" >&2
+  echo "        action, so mute is one-way again in practice." >&2
+  exit 1
+fi
+if ! grep -qF '{mutedAuthorLabel(row)}' apps/mobile/src/surfaces/feed-prefs.tsx; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the muted-author rows stopped rendering a resolved" >&2
+  echo "        display name." >&2
+  exit 1
+fi
+if ! grep -qF 'removeMutedAuthor(prev, authorId)' apps/mobile/src/surfaces/feed-prefs.tsx; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: unmuting does not update the local list." >&2
+  exit 1
+fi
+# 反向 pin：下面这些就是当初的 bug 本身，任何一个回来都要拦住。
+if grep -qF '不可逆：当前 client 不提供 unmute' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the stale 'mute is irreversible, do it in phase 2'" >&2
+  echo "        comment is back — it is what dressed up a missing command as a plan." >&2
+  exit 1
+fi
+if grep -qF 'MutedAuthors []MutedAuthor `json:"mutedAuthors"`' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the muted list is back to shipping the raw" >&2
+  echo "        aggregate rows, which carry no display name." >&2
+  exit 1
+fi
+if ! grep -qF 'MUTE-REVERSIBLE-001' apps/mobile/src/muted-authors.test.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the regression ID or its mobile test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/muted-authors.test.ts || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/engagement-client.test.ts || exit $?
+echo "    MUTE-REVERSIBLE-001: PASS (mute is reversible end to end, and names people)"

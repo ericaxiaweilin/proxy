@@ -129,6 +129,30 @@ type MutedAuthor struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// MutedAuthorView 是「我屏蔽的人」列表里的一行（MUTE-REVERSIBLE-001）。
+//
+// AuthorDisplayName 跟评论一样是**读时**用同一个 profile 解析器填的
+// （见 withMutedAuthorNames）：客户端手里只有一个 authorId，除了这条读时
+// 解析没有任何 id → 名字的通路，而屏蔽列表恰恰是「帖子全被过滤掉」的一群人，
+// 所以没法像 feed 那样从帖子读模型里借名字。不回填名字的话，这个列表就只能
+// 显示一串账号 id —— 那就等于让用户对着 id 猜该解除谁。
+//
+// 不复用 MutedAuthor 聚合本体：聚合是落库形态（含 actorId），读模型只该带
+// 界面需要的东西，免得以后有人把 ActorDisplayName 也写进表里。
+type MutedAuthorView struct {
+	MuteID            string    `json:"muteId"`
+	AuthorID          string    `json:"authorId"`
+	CreatedAt         time.Time `json:"createdAt"`
+	AuthorDisplayName string    `json:"authorDisplayName,omitempty"`
+}
+
+// MutedAuthorsList 是 ListMutedAuthors 的读模型（MUTE-REVERSIBLE-001）。
+type MutedAuthorsList struct {
+	ActorID      string            `json:"actorId"`
+	MutedAuthors []MutedAuthorView `json:"mutedAuthors"`
+	Count        int               `json:"count"`
+}
+
 // PostEngagement 是某帖子的互动汇总（读取视图）。
 type PostEngagement struct {
 	PostID     string `json:"postId"`
@@ -164,6 +188,15 @@ type Repository interface {
 	// IsMuted 查 actor 是否屏蔽了 author（feed 过滤用）。
 	AddMutedAuthor(ctx context.Context, mute MutedAuthor) (MutedAuthor, bool, error)
 	IsMuted(ctx context.Context, actorID, authorID string) (bool, error)
+	// MUTE-REVERSIBLE-001：RemoveMutedAuthor 解除屏蔽，返回是否真的删掉了
+	// （false = 本来就没屏蔽，幂等）。ListMutedAuthors 按 created_at DESC
+	// 列出 actor 屏蔽过的人，供「我屏蔽的人」界面把屏蔽解掉。
+	//
+	// 没有这两个方法时 MuteAuthor 是**单向**的：被屏蔽者的帖子被 feed 永久过滤，
+	// 你再也点不到 Ta 的帖子菜单，于是没有任何入口能撤销 —— 一个只能进不能出的
+	// 关系操作不是功能，是陷阱。
+	RemoveMutedAuthor(ctx context.Context, actorID, authorID string) (bool, error)
+	ListMutedAuthors(ctx context.Context, actorID string) ([]MutedAuthor, error)
 	Engagement(ctx context.Context, postID string, viewerID ...string) (PostEngagement, error)
 }
 
@@ -451,6 +484,40 @@ func (r *MemoryRepository) IsMuted(_ context.Context, actorID, authorID string) 
 	return ok, nil
 }
 
+// RemoveMutedAuthor MUTE-REVERSIBLE-001 — 幂等解除屏蔽。
+// 返回是否真的删掉了：false 表示本来就没屏蔽（重复 unmute 不报错）。
+func (r *MemoryRepository) RemoveMutedAuthor(_ context.Context, actorID, authorID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := actorID + "|" + authorID
+	if _, ok := r.mutes[key]; !ok {
+		return false, nil
+	}
+	delete(r.mutes, key)
+	return true, nil
+}
+
+// ListMutedAuthors MUTE-REVERSIBLE-001 — 列出 actor 屏蔽过的人，最新在前。
+// 与 PG 的 ORDER BY created_at DESC 对齐；created_at 相同时用 ID 兜底，
+// 保证顺序稳定（否则 map 遍历顺序会让同一个测试时红时绿）。
+func (r *MemoryRepository) ListMutedAuthors(_ context.Context, actorID string) ([]MutedAuthor, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]MutedAuthor, 0, len(r.mutes))
+	for _, mute := range r.mutes {
+		if mute.ActorID == actorID {
+			out = append(out, mute)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
 func (r *MemoryRepository) Engagement(_ context.Context, postID string, viewerIDs ...string) (PostEngagement, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -510,7 +577,7 @@ func NewWithRepository(repository Repository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "ListPostReplies", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor", "PinPost", "UnpinPost", "ListPinnedPosts", "ListUserReplies", "ListUserBookmarks":
+	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "ListPostReplies", "RepostPost", "BookmarkPost", "GetPostEngagement", "RecordFeedPreference", "ReportPost", "MuteAuthor", "UnmuteAuthor", "ListMutedAuthors", "PinPost", "UnpinPost", "ListPinnedPosts", "ListUserReplies", "ListUserBookmarks":
 		return true
 	default:
 		return false
@@ -551,6 +618,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.reportPost(ctx, e)
 	case "MuteAuthor":
 		return s.muteAuthor(ctx, e)
+	case "UnmuteAuthor":
+		return s.unmuteAuthor(ctx, e)
+	case "ListMutedAuthors":
+		return s.listMutedAuthors(ctx, e)
 	case "PinPost":
 		return s.pinPost(ctx, e)
 	case "UnpinPost":
@@ -1172,6 +1243,128 @@ func (s *Service) muteAuthor(ctx context.Context, e command.Envelope) command.Re
 		state = "ALREADY_MUTED"
 	}
 	return command.Accepted(e, "MutedAuthor", stored.ID, 1, state, eventRefsOut)
+}
+
+// ---------- UnmuteAuthor / ListMutedAuthors (MUTE-REVERSIBLE-001) ----------
+
+type unmuteAuthorPayload struct {
+	AuthorID string `json:"authorId"`
+}
+
+// unmuteAuthor 解除对某个作者的屏蔽。
+//
+// 幂等：本来没屏蔽也算成功（state=NOT_MUTED），只有真的删掉了才发 AuthorUnmuted
+// 事件 —— 跟 muteAuthor 只在 !alreadyExisted 时发事件同一个道理，免得 audit log
+// 里出现「解除了一条并不存在的屏蔽」。
+//
+// 为什么必须有这条命令：MuteAuthor 以前是**单向**的。被屏蔽者的帖子会被 feed
+// 永久过滤（PG 侧是 NOT EXISTS 子查询），你再也点不到 Ta 的帖子菜单或头像，
+// 于是没有任何入口能撤销这次屏蔽。一个只能进不能出的关系操作不是功能，是陷阱。
+func (s *Service) unmuteAuthor(ctx context.Context, e command.Envelope) command.Result {
+	var p unmuteAuthorPayload
+	if !decode(e.Payload, &p) || strings.TrimSpace(p.AuthorID) == "" {
+		return command.Rejected(e, "INVALID_UNMUTE_PAYLOAD", "VALIDATION", "AFTER_USER_ACTION", "engagement.invalid_unmute_payload", nil)
+	}
+	removed, err := s.repository.RemoveMutedAuthor(ctx, e.Actor.ID, p.AuthorID)
+	if err != nil {
+		return command.Rejected(e, "UNMUTE_AUTHOR_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.unmute_author_failed", nil)
+	}
+	state := "UNMUTED"
+	if !removed {
+		state = "NOT_MUTED"
+	}
+	var eventRefsOut []string
+	if removed {
+		domainEvents := []event.DomainEvent{event.New("AuthorUnmuted", "UnmuteAuthor", p.AuthorID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{
+			"actorId":  e.Actor.ID,
+			"authorId": p.AuthorID,
+		})}
+		eventRefsOut = eventRefs(domainEvents)
+	}
+	return command.Accepted(e, "MutedAuthor", p.AuthorID, 1, state, eventRefsOut)
+}
+
+type listMutedAuthorsPayload struct {
+	Limit int `json:"limit"`
+}
+
+const (
+	defaultListMutedAuthorsLimit = 50
+	maxListMutedAuthorsLimit     = 100
+)
+
+// listMutedAuthors 列出「我屏蔽的人」，最新在前。
+//
+// 没有这个查询，被屏蔽的人会从 feed 里彻底消失，也就没有入口能把屏蔽解掉 ——
+// 所以它跟 UnmuteAuthor 是一对，缺一个这条链路就还是死的。
+func (s *Service) listMutedAuthors(ctx context.Context, e command.Envelope) command.Result {
+	var p listMutedAuthorsPayload
+	_ = decode(e.Payload, &p) // legacy/空 payload 保持默认
+	limit := p.Limit
+	if limit <= 0 {
+		limit = defaultListMutedAuthorsLimit
+	}
+	if limit > maxListMutedAuthorsLimit {
+		limit = maxListMutedAuthorsLimit
+	}
+	mutes, err := s.repository.ListMutedAuthors(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "LIST_MUTED_AUTHORS_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.list_muted_authors_failed", nil)
+	}
+	if len(mutes) > limit {
+		mutes = mutes[:limit]
+	}
+	// 归一 nil → 空数组：读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）。
+	out := make([]MutedAuthorView, 0, len(mutes))
+	for _, mute := range mutes {
+		out = append(out, MutedAuthorView{MuteID: mute.ID, AuthorID: mute.AuthorID, CreatedAt: mute.CreatedAt})
+	}
+	out = s.withMutedAuthorNames(ctx, out)
+	accepted := command.Accepted(e, "MutedAuthor", e.Actor.ID, 1, "LISTED", nil)
+	accepted.OperationRef = mustMarshal(MutedAuthorsList{ActorID: e.Actor.ID, MutedAuthors: out, Count: len(out)})
+	return accepted
+}
+
+// withMutedAuthorNames 用 profile 名字填充「我屏蔽的人」每一行（MUTE-REVERSIBLE-001）。
+//
+// 跟 withReplyActorNames 是同一套规矩，刻意共用同一个解析器：屏蔽列表里的人和
+// 评论里的人必须给出同一个称呼，否则同一个人在两处显示不同名字。按作者去重，
+// 解析不到就留空串由客户端降级成中性标签 —— 服务端绝不回填 authorId 当名字。
+func (s *Service) withMutedAuthorNames(ctx context.Context, rows []MutedAuthorView) []MutedAuthorView {
+	if s.authorNames == nil || len(rows) == 0 {
+		return rows
+	}
+	names := make(map[string]string, len(rows))
+	for _, row := range rows {
+		author := strings.TrimSpace(row.AuthorID)
+		if author == "" {
+			continue
+		}
+		if _, seen := names[author]; seen {
+			continue
+		}
+		name, ok := s.authorNames.ResolveAuthorDisplayName(ctx, author)
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name != "" && name != "你" {
+			// 同 withReplyActorNames：历史客户端把 "你" 硬编码进过 profile，
+			// 当成名字回给所有人会让被屏蔽者显示成"你"。
+			names[author] = name
+		}
+	}
+	if len(names) == 0 {
+		return rows
+	}
+	out := make([]MutedAuthorView, 0, len(rows))
+	for _, row := range rows {
+		if name, ok := names[strings.TrimSpace(row.AuthorID)]; ok {
+			row.AuthorDisplayName = name
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func oneOf(value string, allowed ...string) bool {

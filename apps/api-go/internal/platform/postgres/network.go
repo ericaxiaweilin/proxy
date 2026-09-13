@@ -1087,6 +1087,44 @@ func (r *EngagementRepository) IsMuted(ctx context.Context, actorID, authorID st
 	return count > 0, nil
 }
 
+// RemoveMutedAuthor MUTE-REVERSIBLE-001 — 解除屏蔽。
+// 返回是否真的删掉了：false = 本来就没屏蔽（幂等，重复 unmute 不报错）。
+// 用 RowsAffected 而不是先 SELECT 再 DELETE，避免并发下 TOCTOU。
+func (r *EngagementRepository) RemoveMutedAuthor(ctx context.Context, actorID, authorID string) (bool, error) {
+	tag, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		DELETE FROM engagement.muted_authors
+		WHERE actor_id=$1 AND author_id=$2`, actorID, authorID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ListMutedAuthors MUTE-REVERSIBLE-001 — 「我屏蔽的人」，最新在前。
+// 排序必须跟 MemoryRepository.ListMutedAuthors 一致（created_at DESC，
+// id DESC 兜底）：否则同一份断言在内存与 PG 两种 repo 下会给出不同顺序。
+// 走 idx_engagement_muted_authors_actor (actor_id, created_at DESC)。
+func (r *EngagementRepository) ListMutedAuthors(ctx context.Context, actorID string) ([]engagement.MutedAuthor, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, actor_id, author_id, created_at FROM engagement.muted_authors
+		WHERE actor_id=$1
+		ORDER BY created_at DESC, id DESC`, actorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	// 归一 nil → 空切片：读模型 JSON 输出 [] 而非 null（客户端 zod fail-closed）。
+	out := make([]engagement.MutedAuthor, 0)
+	for rows.Next() {
+		var mute engagement.MutedAuthor
+		if err := rows.Scan(&mute.ID, &mute.ActorID, &mute.AuthorID, &mute.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, mute)
+	}
+	return out, rows.Err()
+}
+
 func (r *EngagementRepository) Engagement(ctx context.Context, postID string, viewerIDs ...string) (engagement.PostEngagement, error) {
 	e := engagement.PostEngagement{PostID: postID}
 	var reactions, replies, reposts int
