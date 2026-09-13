@@ -2463,3 +2463,72 @@ require_test "PROFILE-SAVED-001" "./internal/api" \
   "apps/api-go/internal/api/envelope_field_test.go" || exit $?
 pnpm --filter @proxy/mobile exec vitest run src/localnet-client.test.ts || exit $?
 echo "    PROFILE-SAVED-001: PASS (saved posts are read by id, with the feed's visibility rules)"
+
+# MENTION-001: 个人主页 TAGGED tab 必须是「完整的、口径正确的提及列表」。
+# 之前它有三个毛病叠在一起：
+#   1. 客户端拿**一页**动态（默认 25 条）做 strings.Contains —— 更早的提及直接
+#      消失，用户被提到 50 次也只看到 2 次；
+#   2. 子串匹配 —— "@thanh2" 被算成提到了 "@thanh"，看到与自己无关的帖子；
+#   3. `contextType === "MENTION"` 那一支是死代码：服务端任何地方都没有写过
+#      MENTION 这种 contextRef（分类器只产出 DEMAND/VENUE/ACTIVITY/...），
+#      所以那个条件永远为假，却被当成「另一条能用的路径」。
+# 现在由服务端扫全量已发布帖子，可见性/静音口径与动态流完全一致。
+require_test "MENTION-001" "./internal/localnet" \
+  "TestContainsMentionHandleRequiresAWholeHandle" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestListPostsMentioningFindsMentionsBeyondTheFirstFeedPage" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestListPostsMentioningKeepsVisibilityFailClosed" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestListPostsMentioningWithoutAHandleReturnsEmptyNotNull" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestListPostsMentioningExcludesMyOwnPosts" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestMentionRegexEscapesRegexMetacharacters" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+if ! grep -qF 'func (s *Service) listPostsMentioning' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [MENTION-001]: the mention reader is gone, so TAGGED can only be" >&2
+  echo "        scraped from one feed page again." >&2
+  exit 1
+fi
+# 提及匹配必须是「整 handle」，不是子串。SQL 与 Go 两条路径共用 MentionRegex。
+if ! grep -qF 'func MentionRegex' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [MENTION-001]: there is no single definition of what counts as a" >&2
+  echo "        mention, so the SQL and Go paths can silently disagree." >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *LocalNetRepository) ListPostsMentioning' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MENTION-001]: the store can no longer answer 'who mentioned me'," >&2
+  echo "        so TAGGED is back to scanning a single page." >&2
+  exit 1
+fi
+if ! grep -qF 'ListPostsMentioning' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [MENTION-001]: ListPostsMentioning is missing from the generated" >&2
+  echo "        command registry (run go run ./cmd/openapi-commands)." >&2
+  exit 1
+fi
+if ! grep -qF 'localNet.listPostsMentioning(profileDraft.handle)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [MENTION-001]: the tagged tab no longer asks the server for mentions." >&2
+  exit 1
+fi
+if grep -qF 'p.body.includes(myHandle)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [MENTION-001]: the tagged tab is substring-matching a single feed" >&2
+  echo "        page again, so older mentions vanish and '@thanh2' counts as '@thanh'." >&2
+  exit 1
+fi
+if grep -qF 'ref.contextType === "MENTION"' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [MENTION-001]: the dead MENTION contextRef branch is back. No writer" >&2
+  echo "        has ever produced that ref, so the condition is always false." >&2
+  exit 1
+fi
+if ! grep -qF 'MENTION-001' apps/mobile/src/localnet-client.test.ts; then
+  echo "  FAIL [MENTION-001]: the mention regression ID or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/localnet-client.test.ts || exit $?
+echo "    MENTION-001: PASS (mentions are complete, whole-handle, and visibility-safe)"

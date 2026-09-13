@@ -239,6 +239,8 @@ commands:
     domain: Engagement
   - command: ListPostsByIds
     domain: LocalNet
+  - command: ListPostsMentioning
+    domain: LocalNet
   - command: ListPrivacyRequests
     domain: Identity
   - command: ListRequesterHomeItems

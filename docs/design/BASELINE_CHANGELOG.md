@@ -4,6 +4,28 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 184 — 2026-09-13
+
+- MENTION-001：个人主页 TAGGED tab 从「一页动态的子串扫描」改成服务端全量提及查询。
+  - **原来的三个毛病叠在一起**。TAGGED 是客户端拿**一页**动态（默认 25 条）做
+    `body.includes("@handle")` 筛的：①比你这一页更早的提及直接消失，用户被提到
+    50 次也只看到 2 次；②子串匹配，`@thanh2` 被算成提到了 `@thanh`，看到与自己
+    无关的帖子；③`contextType === "MENTION"` 那一支是**死代码** —— 服务端任何地方
+    都没写过 MENTION 这种 contextRef（分类器只产出 DEMAND / VENUE / ACTIVITY /
+    PEOPLE_RELATIONSHIP / INDUSTRY_INFO / GENERAL / OPPORTUNITY），那个条件永远为假，
+    却被当成「另一条能用的路径」。
+  - **服务端新增 `ListPostsMentioning`**（payload `{handle, limit}`）。SQL 与内存仓
+    两条路径共用同一个 `MentionRegex` / `containsMentionHandle` 定义：整 handle
+    边界匹配（`@Comple` 不匹配 `@Complex`，因为后面跟的是 handle 字符），大小写不敏感。
+    可见性/静音口径与动态流**逐条对齐**（PUBLISHED + PUBLIC 或作者本人可见 +
+    排除已静音作者），并额外排除自己的帖子。handle 缺失或空白时 **fail-closed 返回空**，
+    绝不退化成「返回全部帖子」。
+  - **客户端**：TAGGED 改走 `localNet.listPostsMentioning(profileDraft.handle)`，
+    顺带**不再需要 `listFeedPosts()`**（少一次整页拉取）。同时修掉一个耦合 bug：
+    TAGGED 原来被塞在收藏那条 promise 链里，收藏一失败 TAGGED 就静默空掉，看起来
+    像「没人提到过我」；现在两条独立加载。effect 依赖也补上了 `profileDraft.handle`
+    —— 之前依赖的是 `profileDraft.name` 却在逻辑里用 handle，改 handle 不会刷新。
+
 ## Revision 183 — 2026-09-13
 
 - PROFILE-SAVED-001：收藏按 ID 直取，并修掉一个会让收藏 tab 全量失效的信封 bug。

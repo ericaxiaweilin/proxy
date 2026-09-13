@@ -301,3 +301,88 @@ describe("PROFILE-SAVED-001 — saved posts are fetched by id, not scraped from 
     expect(page).toMatchObject({ posts: [], hasMore: false });
   });
 });
+
+describe("MENTION-001 — tagged posts come from the server, not from one feed page", () => {
+  async function mentionClient(): Promise<{
+    client: LocalNetClient;
+    envelopes: Record<string, unknown>[];
+    publicCalls: string[];
+  }> {
+    const store = await authenticatedStore("user_001");
+    const envelopes: Record<string, unknown>[] = [];
+    const publicCalls: string[] = [];
+    const client = new LocalNetClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      authClient: {
+        request: async (_path, init) => {
+          envelopes.push(init.body as Record<string, unknown>);
+          return {
+            status: 200,
+            json: async () => ({
+              commandId: "command_mention_001",
+              outcome: "ACCEPTED",
+              aggregate: { type: "Post", id: "", version: 0, state: "POSTS_MENTIONING" },
+              eventRefs: [],
+              correlationId: "correlation_mention_001",
+              operationRef: JSON.stringify({ posts: [], media: {}, hasMore: true })
+            })
+          };
+        },
+        requestPublic: async (path) => {
+          publicCalls.push(path);
+          throw new Error("mentions must never be scraped from the public feed");
+        }
+      }
+    });
+    return { client, envelopes, publicCalls };
+  }
+
+  it("asks the server for mentions instead of scanning one feed page", async () => {
+    const { client, envelopes, publicCalls } = await mentionClient();
+    await client.listPostsMentioning("@thanh");
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.commandType).toBe("ListPostsMentioning");
+    // 走鉴权 command 通道，不碰匿名 feed —— 扫 feed 就又会退化成「只看得见一页」。
+    expect(publicCalls).toEqual([]);
+    expect(envelopes[0]!.payload).toEqual({ handle: "thanh", limit: 30 });
+  });
+
+  it("normalizes the handle before sending it", async () => {
+    const { client, envelopes } = await mentionClient();
+    await client.listPostsMentioning("  @@Thanh  ");
+    expect((envelopes[0]!.payload as { handle: string }).handle).toBe("thanh");
+  });
+
+  it("does not touch the network when there is no handle to look up", async () => {
+    const { client, envelopes } = await mentionClient();
+    const page = await client.listPostsMentioning("  @ ");
+    expect(envelopes).toEqual([]);
+    expect(page).toMatchObject({ posts: [], hasMore: false });
+  });
+
+  it("reports the server's hasMore instead of pretending the first page is everything", async () => {
+    const { client } = await mentionClient();
+    const page = await client.listPostsMentioning("@thanh");
+    expect(page.hasMore).toBe(true);
+  });
+
+  it("clamps the limit to the server's range", async () => {
+    const { client, envelopes } = await mentionClient();
+    await client.listPostsMentioning("@thanh", 500);
+    expect((envelopes[0]!.payload as { limit: number }).limit).toBe(50);
+    envelopes.length = 0;
+    await client.listPostsMentioning("@thanh", 0);
+    expect((envelopes[0]!.payload as { limit: number }).limit).toBe(1);
+  });
+
+  it("sends an envelope the server will actually dispatch, with a non-empty target id", async () => {
+    // 与 PROFILE-SAVED-001 同一个坑：validateEnvelope 在 dispatch 之前就要求
+    // target.id 非空，空串会被拒成 INVALID_COMMAND_ENVELOPE。
+    const { client, envelopes } = await mentionClient();
+    await client.listPostsMentioning("@thanh");
+    const target = envelopes[0]!.target as { type: string; id: string };
+    expect(target.type).not.toBe("");
+    expect(target.id).not.toBe("");
+  });
+});

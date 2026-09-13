@@ -681,25 +681,21 @@ export function MeSurface({
           const bookmarked = await localNet.listPostsByIds(b.bookmarks);
           if (cancelled) return;
           setPersonalSavedPosts(bookmarked.posts);
-          const feed = await localNet.listFeedPosts();
-          if (cancelled) return;
-          const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
-          const tagged = feed.posts.filter((p) => {
-            if (p.authorId === viewerAccountId) return false;
-            if (p.body.includes(myHandle)) return true;
-            return p.contextRefs.some((ref) => ref.contextType === "MENTION" && ref.contextId === viewerAccountId);
-          });
-          setPersonalTaggedPosts(tagged);
         } catch {
-          if (!cancelled) {
-            setPersonalSavedPosts([]);
-            setPersonalTaggedPosts([]);
-          }
+          if (!cancelled) setPersonalSavedPosts([]);
         }
       })
       .catch(() => { if (!cancelled) setPersonalSavedPosts([]); });
+    // MENTION-001: TAGGED 独立加载。之前它被塞在收藏那条 promise 链里 ——
+    // 收藏一失败，TAGGED 就静默空掉，看起来像「没人提到过我」。
+    // 读取也改成服务端扫全量已发布帖子：原来是在上面那一页动态（默认 25 条）里
+    // 做 strings.Contains，更早的提及直接消失，而且 "@thanh2" 会被算成提到了
+    // "@thanh"。服务端的可见性/静音口径与动态流完全一致。
+    void localNet.listPostsMentioning(profileDraft.handle)
+      .then((mentions) => { if (!cancelled) setPersonalTaggedPosts(mentions.posts); })
+      .catch(() => { if (!cancelled) setPersonalTaggedPosts([]); });
     return () => { cancelled = true; };
-  }, [engagement, viewerAccountId, localNet, profileDraft.name]);
+  }, [engagement, viewerAccountId, localNet, profileDraft.name, profileDraft.handle]);
 
   // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
   const onScroll = useScrollChrome(onChromeVisibilityChange);

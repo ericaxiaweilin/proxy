@@ -5,8 +5,11 @@
 //   "我" 的内容生态表达完整 — 收藏 = 用户私库 (重要入口), tagged = 别人
 //   提到我, replies = 别人看得到我的活动 (信任).
 // 数据: 5 个 tabs 都接真数据 —— POSTS/PHOTOS 复用 me.tsx profilePosts /
-//   personalPhotos; REPLIES 走 ListUserReplies; SAVED 走 ListUserBookmarks。
-//   TAGGED 目前是客户端按 @handle / MENTION contextRef 从动态里筛出来的。
+//   personalPhotos; REPLIES 走 ListUserReplies; SAVED 走 ListUserBookmarks
+//   (再按 ID 直取); TAGGED 走 ListPostsMentioning（MENTION-001）。
+//   TAGGED 原先是在客户端拿一页动态做 @handle 子串筛的 —— 更早的提及会静默
+//   消失，而且 "@thanh2" 会被算成提到了 "@thanh"。现在由服务端扫全量已发布
+//   帖子，可见性与动态流一致。
 // 可见性: SAVED 只对本人可见（PROFILE-TABS-001）—— 别人的收藏夹是他的私库，
 //   不是公开主页的一栏。
 

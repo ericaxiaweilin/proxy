@@ -170,6 +170,38 @@ export class LocalNetClient {
     return { posts: payload.posts, media: payload.media, nextCursor: undefined, hasMore: false };
   }
 
+  /**
+   * MENTION-001: 个人主页 TAGGED tab —— 「提到我的帖子」。
+   *
+   * 之前是客户端拿**一页**动态（默认 25 条）做 strings.Contains 筛的：比你这一页
+   * 更早的提及直接消失（被提到 50 次也只看到 2 次），而且 "@thanh2" 会被算成
+   * 提到了 "@thanh"。现在交给服务端扫全量已发布帖子，可见性/静音口径与动态流
+   * 完全一致且 fail-closed。
+   */
+  public async listPostsMentioning(handle: string, limit = 30): Promise<FeedReadModel> {
+    const normalized = handle.trim().replace(/^@+/, "").toLowerCase();
+    if (normalized.length === 0) {
+      // fail-closed：没有可用的 handle 就别去问服务端，更不能退化成「整条动态流」。
+      return { posts: [], media: {}, nextCursor: undefined, hasMore: false };
+    }
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListPostsMentioning",
+      // 服务端 validateEnvelope 要求 target.id 非空。批量提及读没有单一聚合，
+      // 用显式哨兵值（与 ListPostsByIds 的 by_ids、CreatePost 的 new 同属惯例）。
+      { type: "Post", id: "mentions" },
+      { handle: normalized, limit: Math.max(1, Math.min(50, limit)) }
+    );
+    const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
+    return {
+      posts: payload.posts,
+      media: payload.media,
+      nextCursor: undefined,
+      hasMore: payload.hasMore ?? false
+    };
+  }
+
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {
     const session = await this.requireSession();
     console.log(`[proxy.R15.63.DEBUG.post] CreatePost start bodyLen=${payload.body?.length ?? 0} mediaRefs=${payload.mediaRefs?.length ?? 0} idempotencyKey=${idempotencyKey ?? "none"}`);

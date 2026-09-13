@@ -245,6 +245,21 @@ type FeedPageRepository interface {
 	ListFeedPage(ctx context.Context, actorID string, before time.Time, beforeID string, limit int) ([]Post, error)
 }
 
+// MentionRepository is the optional narrow read used by the profile TAGGED tab.
+//
+// Why this exists: TAGGED used to be derived on the client by scanning a single
+// feed page (25 posts) for "@handle". Anything older than that page silently
+// vanished, so a user could be mentioned fifty times and see two. The match has
+// to run over every published post, which only the store can do — hence a
+// repository method rather than another client-side filter.
+//
+// handle is passed WITHOUT the leading "@". The implementation is responsible
+// for matching whole-handle occurrences only (so "@thanh" never matches
+// "@thanh2") and for applying the same visibility and mute rules as the feed.
+type MentionRepository interface {
+	ListPostsMentioning(ctx context.Context, actorID string, handle string, limit int) ([]Post, error)
+}
+
 // InteractionEvent 是网络交互事件（C1 Event Stream 最小底座）。
 // 读侧事件：PROFILE_OPEN / POST_IMPRESSION / CANDIDATE_VIEWED / AGENT_SHORTLISTED。
 type InteractionEvent struct {
@@ -682,7 +697,7 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreatePost", "ListFeedPosts", "ListPostsByIds", "CreateNeedFromPost", "RecordAttribution",
+	case "CreatePost", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed",
 		"ShortlistAgent", "ListInteractionEvents":
 		return true
@@ -705,6 +720,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listFeed(ctx, e)
 	case "ListPostsByIds":
 		return s.listPostsByIds(ctx, e)
+	case "ListPostsMentioning":
+		return s.listPostsMentioning(ctx, e)
 	case "CreateNeedFromPost":
 		return s.createNeedFromPost(ctx, e)
 	case "RecordAttribution":
@@ -934,6 +951,179 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 	return acceptedWithPayload(e, "Post", "", 0, "POSTS_BY_IDS", map[string]any{
 		"posts": posts,
 		"media": s.hydratePostMedia(ctx, posts),
+	}, nil)
+}
+
+// normalizeMentionHandle 归一化一个 @handle：去掉前后空白与所有前导 "@"，返回
+// 小写形式与是否可用。空 handle 不可用 —— 调用方必须据此拒绝，而不是退化成
+// 「匹配所有帖子」（那会让 TAGGED 变成整个动态流）。
+func normalizeMentionHandle(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	trimmed = strings.TrimLeft(trimmed, "@")
+	trimmed = strings.ToLower(trimmed)
+	if trimmed == "" || len(trimmed) > 60 {
+		return "", false
+	}
+	return trimmed, true
+}
+
+// isHandleByte 报告 body[index] 是否属于 handle 字符集；越界视为「不是」。
+func isHandleByte(body string, index int) bool {
+	if index < 0 || index >= len(body) {
+		return false
+	}
+	c := body[index]
+	return c == '_' || c == '.' ||
+		(c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+}
+
+// containsMentionHandle 判断 body 里是否出现了完整的 @handle。
+//
+// 为什么要边界判断：客户端原来是 strings.Contains(body, "@thanh")，于是
+// "@thanh2" 会被当成提到了 @thanh —— 用户会在自己的 TAGGED 里看到跟自己
+// 毫无关系的帖子。handle 的字符集按 profile 的约定是 [a-z0-9_.]（大小写不敏感），
+// 因此前后只要不是这些字符就算一次完整提及。
+func containsMentionHandle(body, handle string) bool {
+	if handle == "" {
+		return false
+	}
+	lowered := strings.ToLower(body)
+	needle := "@" + handle
+	offset := 0
+	for offset <= len(lowered) {
+		index := strings.Index(lowered[offset:], needle)
+		if index < 0 {
+			return false
+		}
+		start := offset + index
+		end := start + len(needle)
+		if !isHandleByte(lowered, start-1) && !isHandleByte(lowered, end) {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+// mentionHandleCharset 是 handle 的合法字符类（profile 约定：小写字母、数字、
+// 下划线、点）。containsMentionHandle 和 MentionRegex 必须共用它 —— 两边一旦
+// 不一致，就会出现「SQL 捞出来了 Go 又滤掉」或者反过来的静默不一致。
+const mentionHandleCharset = "a-z0-9_."
+
+// MentionRegex 返回「完整提及 @handle」的 POSIX 正则，配合 Postgres 的 `~*`
+// 使用（大小写不敏感）。handle 必须已经过 normalizeMentionHandle。
+//
+// 用正则而不是 LIKE '%@handle%'，是因为 LIKE 会把 "@thanh2" 也算成提到了
+// "@thanh"，这正是客户端旧实现的老毛病。
+func MentionRegex(handle string) string {
+	var escaped strings.Builder
+	for _, r := range handle {
+		switch r {
+		// POSIX ERE 元字符，逐个转义成字面量。**只**转义这些：给普通字母加
+		// 反斜杠会造出 \A / \b 之类的锚点或转义序列，把正则整个改意。
+		case '.', '+', '*', '?', '(', ')', '[', ']', '{', '}', '^', '$', '|', '\\':
+			escaped.WriteByte('\\')
+		}
+		escaped.WriteRune(r)
+	}
+	return "(^|[^" + mentionHandleCharset + "])@" + escaped.String() + "([^" + mentionHandleCharset + "]|$)"
+}
+
+// listPostsMentioning 支撑个人主页的 TAGGED tab：「提到我的帖子」。
+//
+// 为什么要有这个命令：TAGGED 原来是客户端拿**一页**动态（25 条）做
+// strings.Contains 筛出来的 —— 比你这一页更早的提及直接消失，用户会以为
+// 没人提到过自己。要完整就必须在服务端扫全量已发布帖子。
+//
+// 可见性口径与动态流完全一致且 fail-closed：
+//   - 只取 PUBLISHED；PUBLIC 人人可见，FOLLOWERS 只有作者本人可见；
+//   - 排除被自己静音的作者的帖子（与动态流一致，否则静音形同虚设）；
+//   - 排除自己发的帖子（「自己提到自己」不是 TAGGED 的语义）；
+//   - 匹配是整 handle 的，不是子串（@thanh 不匹配 @thanh2）。
+func (s *Service) listPostsMentioning(ctx context.Context, e command.Envelope) command.Result {
+	var request struct {
+		Handle string `json:"handle"`
+		Limit  int    `json:"limit"`
+	}
+	if !decode(e.Payload, &request) {
+		return command.Rejected(e, "INVALID_LIST_POSTS_MENTIONING", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_list_posts_mentioning", nil)
+	}
+	handle, ok := normalizeMentionHandle(request.Handle)
+	if !ok {
+		// fail-closed：没有可用的 handle 就返回空，绝不退化成「返回全部帖子」。
+		return acceptedWithPayload(e, "Post", "", 0, "POSTS_MENTIONING", map[string]any{
+			"posts": []Post{}, "media": map[string][]PostMediaItem{}, "hasMore": false,
+		}, nil)
+	}
+	if request.Limit <= 0 {
+		request.Limit = 30
+	}
+	if request.Limit > 50 {
+		request.Limit = 50
+	}
+	var (
+		posts []Post
+		err   error
+	)
+	if mentions, ok := s.repository.(MentionRepository); ok {
+		posts, err = mentions.ListPostsMentioning(ctx, e.Actor.ID, handle, request.Limit+1)
+	} else {
+		// 内存仓（无 DATABASE_URL 的 smoke 路径）没有索引可查，退回全量快照后在
+		// Go 侧过滤；语义与 SQL 路径一致。
+		var snapshot []Post
+		snapshot, err = s.repository.Snapshot(ctx)
+		if err == nil {
+			for _, p := range snapshot {
+				if containsMentionHandle(p.Body, handle) {
+					posts = append(posts, p)
+				}
+			}
+			sort.Slice(posts, func(i, j int) bool {
+				if posts[i].CreatedAt.Equal(posts[j].CreatedAt) {
+					return posts[i].ID < posts[j].ID
+				}
+				return posts[i].CreatedAt.After(posts[j].CreatedAt)
+			})
+		}
+	}
+	if err != nil {
+		return command.Rejected(e, "MENTION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.mention_read_failed", nil)
+	}
+	matched := make([]Post, 0, len(posts))
+	for _, p := range posts {
+		// SQL 路径已经在 WHERE 里过了一遍，这里再判一次是纵深防御：只要有一处
+		// 实现漏掉可见性，TAGGED 就会漏出别人的 followers-only 帖子。
+		if p.Status != "PUBLISHED" {
+			continue
+		}
+		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
+			continue
+		}
+		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
+			continue
+		}
+		if p.AuthorID == e.Actor.ID {
+			continue
+		}
+		if !containsMentionHandle(p.Body, handle) {
+			continue
+		}
+		if p.MediaRefs == nil {
+			p.MediaRefs = []PostMediaRef{}
+		}
+		if p.ContextRefs == nil {
+			p.ContextRefs = []ContextRef{}
+		}
+		matched = append(matched, p)
+	}
+	hasMore := len(matched) > request.Limit
+	if hasMore {
+		matched = matched[:request.Limit]
+	}
+	return acceptedWithPayload(e, "Post", "", 0, "POSTS_MENTIONING", map[string]any{
+		"posts":   matched,
+		"media":   s.hydratePostMedia(ctx, matched),
+		"hasMore": hasMore,
 	}, nil)
 }
 

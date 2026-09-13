@@ -211,6 +211,61 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 	return result, rows.Err()
 }
 
+// ListPostsMentioning backs the profile TAGGED tab. The WHERE clause is
+// deliberately the same shape as ListFeedPage — same visibility rule, same
+// muted-author exclusion, same ORDER BY — so a post that is invisible in the
+// feed can never become visible through a mention of the viewer. The only
+// additions are "not my own post" and the mention regex.
+//
+// The match runs in SQL (not in Go after the fact) so LIMIT counts real
+// matches: filtering a page in Go would silently truncate the tab again.
+func (r *LocalNetRepository) ListPostsMentioning(ctx context.Context, actorID string, handle string, limit int) ([]localnet.Post, error) {
+	if limit <= 0 || limit > 51 {
+		limit = 31
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT id, author_type, author_id, author_display_name, body, media_refs,
+			visibility, city_scope, scene_type, status, context_refs, created_at
+		FROM localnet.posts
+		WHERE status='PUBLISHED'
+		  AND (visibility='PUBLIC' OR (visibility='FOLLOWERS' AND author_id=$1))
+		  AND author_id <> $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM engagement.muted_authors
+			WHERE actor_id=$1 AND author_id=localnet.posts.author_id
+		  )
+		  AND body ~* $2
+		ORDER BY created_at DESC, id ASC
+		LIMIT $3`, actorID, localnet.MentionRegex(handle), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]localnet.Post, 0, limit)
+	for rows.Next() {
+		var post localnet.Post
+		var mediaRefs, contextRefs []byte
+		var sceneType *string
+		if err := rows.Scan(
+			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
+			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(mediaRefs, &post.MediaRefs); err != nil {
+			return nil, fmt.Errorf("decode media refs: %w", err)
+		}
+		if err := json.Unmarshal(contextRefs, &post.ContextRefs); err != nil {
+			return nil, fmt.Errorf("decode context refs: %w", err)
+		}
+		if sceneType != nil {
+			post.SceneType = *sceneType
+		}
+		result = append(result, post)
+	}
+	return result, rows.Err()
+}
+
 func (r *LocalNetRepository) SaveNeedFromPost(ctx context.Context, record localnet.NeedFromPost) error {
 	lineage, err := json.Marshal(record.Lineage)
 	if err != nil {
