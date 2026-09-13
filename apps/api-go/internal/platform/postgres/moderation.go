@@ -95,5 +95,68 @@ func (r *ModerationRepository) FindReport(ctx context.Context, reportID string) 
 	return out, true
 }
 
+// COMP-REPORT-004 — 申诉落库。与举报 / 处置同规则：只有 INSERT，没有
+// UPDATE / DELETE。申诉记录是被处理方申辩的举证材料。
+const insertAppealSQL = `
+INSERT INTO moderation.appeals
+    (id, report_id, appellant_account_id, reason, created_at)
+VALUES ($1, $2, $3, $4, $5)`
+
+func (r *ModerationRepository) AddAppeal(ctx context.Context, appeal moderation.Appeal) error {
+	if strings.TrimSpace(appeal.ReportID) == "" || strings.TrimSpace(appeal.AppellantID) == "" {
+		return moderation.ErrAppealRequired
+	}
+	if strings.TrimSpace(appeal.Reason) == "" {
+		return moderation.ErrAppealReasonRequired
+	}
+	if r == nil || r.pool == nil {
+		return moderation.ErrReportRepositoryDown
+	}
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, insertAppealSQL,
+		appeal.ID, appeal.ReportID, appeal.AppellantID, appeal.Reason, appeal.CreatedAt.UTC())
+	return err
+}
+
+const findAppealSQL = `
+SELECT id, report_id, appellant_account_id, COALESCE(reason, ''), created_at
+  FROM moderation.appeals
+ WHERE id = $1`
+
+func (r *ModerationRepository) FindAppeal(ctx context.Context, appealID string) (moderation.Appeal, bool) {
+	if r == nil || r.pool == nil || strings.TrimSpace(appealID) == "" {
+		return moderation.Appeal{}, false
+	}
+	var out moderation.Appeal
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, findAppealSQL, appealID).Scan(
+		&out.ID, &out.ReportID, &out.AppellantID, &out.Reason, &out.CreatedAt)
+	if err != nil {
+		return moderation.Appeal{}, false
+	}
+	return out, true
+}
+
+// COMP-REPORT-004 — 申诉复核落库（operator-only 的入口在 service 层把关）。
+// 与处置同规则：只有 INSERT，没有 UPDATE / DELETE。
+const insertAppealDecisionSQL = `
+INSERT INTO moderation.appeal_decisions
+    (id, appeal_id, decision, note, actor_id, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)`
+
+func (r *ModerationRepository) AddAppealDecision(ctx context.Context, decision moderation.AppealDecision) error {
+	if strings.TrimSpace(decision.AppealID) == "" || strings.TrimSpace(decision.Decision) == "" {
+		return moderation.ErrAppealDecisionRequired
+	}
+	if strings.TrimSpace(decision.ActorID) == "" {
+		return moderation.ErrAppealDecisionActorRequired
+	}
+	if r == nil || r.pool == nil {
+		return moderation.ErrReportRepositoryDown
+	}
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, insertAppealDecisionSQL,
+		decision.ID, decision.AppealID, decision.Decision, decision.Note,
+		decision.ActorID, decision.CreatedAt.UTC())
+	return err
+}
+
 // 签名漂移就在这里编译失败，而不是运行期静默写不进去。
 var _ moderation.Repository = (*ModerationRepository)(nil)

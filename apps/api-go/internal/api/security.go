@@ -78,6 +78,10 @@ var operatorCommandTypes = map[string]bool{
 	// 否则处置记录就成了谁都能伪造的东西，举证价值归零。
 	// 同走 PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
 	"RecordReportDisposition": true,
+	// COMP-REPORT-004: 申诉复核（成立 / 驳回）。同样绝不能让普通用户自己写 ——
+	// 否则「申诉成立 / 驳回」就成了谁都能伪造的制衡结论，申诉渠道的
+	// 意义归零。同走 PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
+	"RecordAppealDecision": true,
 }
 
 func requiresOperator(commandType string) bool {

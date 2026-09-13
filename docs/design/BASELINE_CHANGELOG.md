@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 180 — 2026-09-13
+
+- 活动冷启动种子的 AI persona 写真路径从旧 SVG（ai-personas/ai_00X.svg）
+  统一为新 PNG（ai-personas/photos/ai_00X.png），与首页/消息/AI-ASSIST-001
+  目录的写真资产三处同步。activity 卡片的可见头像仍走
+  aiPersonaAvatar/aiPersonaName（emoji + 名称），此字段为资产元数据
+  一致性修正，不改渲染。
+
 ## Revision 179 — 2026-09-13
 
 - COMP-REPORT-002（续完）：举报入口补齐最后四类 —— **活动 / 商家 / 机会 /

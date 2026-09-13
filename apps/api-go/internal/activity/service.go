@@ -657,7 +657,7 @@ func defaultCatalog() []*Activity {
 			Desc:    "周末限定主题场次，联合合作咖啡店开放。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 4, Interested: 36, Joined: 18, Capacity: 24, Shares: 12,
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_001", AIPersonaName: "平台 AI 小美 · 周末企划", AIPersonaAvatar: "☕", AIPersonaPhoto: "ai-personas/ai_001.svg", MoneyFlow: "FREE", PriceLabel: "免费参加",
+			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_001", AIPersonaName: "平台 AI 小美 · 周末企划", AIPersonaAvatar: "☕", AIPersonaPhoto: "ai-personas/photos/ai_001.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
 			ID: "merchant_photo_day", Origin: "PLATFORM", Title: "木光咖啡 · 周日下午拍照季",
@@ -668,7 +668,7 @@ func defaultCatalog() []*Activity {
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 3, Interested: 18, Joined: 6, Capacity: 10, Shares: 7,
 			ParentTitle: "Proxy 周末咖啡企划",
-			AIStatus:    "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_002", AIPersonaName: "平台 AI 小美 · 拍照季", AIPersonaAvatar: "📸", AIPersonaPhoto: "ai-personas/ai_002.svg", MoneyFlow: "FREE", PriceLabel: "免费参加",
+			AIStatus:    "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_002", AIPersonaName: "平台 AI 小美 · 拍照季", AIPersonaAvatar: "📸", AIPersonaPhoto: "ai-personas/photos/ai_002.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
 			ID: "user_photo_buddy", Origin: "PLATFORM", Title: "周六 咖啡拍照搭子",
@@ -678,7 +678,7 @@ func defaultCatalog() []*Activity {
 			Desc:    "互相帮对方拍照，一起喝咖啡；到店消费各自承担。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
 			QACount: 1, Interested: 5, Joined: 1, Capacity: 2, Shares: 2,
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_003", AIPersonaName: "平台 AI 小美 · 拍照搭子", AIPersonaAvatar: "🤝", AIPersonaPhoto: "ai-personas/ai_003.svg", MoneyFlow: "FREE", PriceLabel: "免费参加",
+			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_003", AIPersonaName: "平台 AI 小美 · 拍照搭子", AIPersonaAvatar: "🤝", AIPersonaPhoto: "ai-personas/photos/ai_003.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
 			ID: "merchant_tasting", Origin: "PLATFORM", Title: "岚庭餐厅 · 新菜尝鲜晚餐",
@@ -688,7 +688,7 @@ func defaultCatalog() []*Activity {
 			Desc:    "餐厅开放新品尝鲜场次，按活动套餐到店消费。",
 			Benefit: "Proxy 活动预订赠餐后甜点",
 			QACount: 2, Interested: 24, Joined: 4, Capacity: 6, Shares: 9,
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_004", AIPersonaName: "平台 AI 小美 · 餐厅尝鲜", AIPersonaAvatar: "🍽️", AIPersonaPhoto: "ai-personas/ai_004.svg", MoneyFlow: "FREE", PriceLabel: "免费参加",
+			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_004", AIPersonaName: "平台 AI 小美 · 餐厅尝鲜", AIPersonaAvatar: "🍽️", AIPersonaPhoto: "ai-personas/photos/ai_004.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
 			ID: "user_dinner_group", Origin: "PLATFORM", Title: "周五一起吃新菜",
@@ -699,7 +699,7 @@ func defaultCatalog() []*Activity {
 			Benefit: "Proxy 活动预订赠餐后甜点",
 			QACount: 1, Interested: 8, Joined: 2, Capacity: 4, Shares: 3,
 			ParentTitle: "岚庭餐厅 · 新菜尝鲜晚餐",
-			AIStatus:    "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_005", AIPersonaName: "平台 AI 小美 · 饭局推荐", AIPersonaAvatar: "🍜", AIPersonaPhoto: "ai-personas/ai_005.svg", MoneyFlow: "FREE", PriceLabel: "免费参加",
+			AIStatus:    "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_005", AIPersonaName: "平台 AI 小美 · 饭局推荐", AIPersonaAvatar: "🍜", AIPersonaPhoto: "ai-personas/photos/ai_005.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 	}
 }

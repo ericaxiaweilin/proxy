@@ -2173,3 +2173,43 @@ if [ ! -f apps/api-go/migrations/087_moderation_dispositions.sql ]; then
   exit 1
 fi
 echo "    COMP-REPORT-003: PASS (handled reports leave an attributable, append-only trail)"
+
+# COMP-REPORT-004: 申诉机制（§37 §38 承诺的「恢复或申诉机制」+ NĐ 147/2024
+# 硬性要求）。001/002 证明「收到」、003 证明「处理」，但被处理方没有申诉
+# 渠道 —— 处置权缺少制衡，在行政与刑事语境下是 posture 缺陷。
+# 本条锁死：申诉与其复核必须 append-only 且可归因；申诉必须挂真实存在的
+# 举报、复核必须挂真实存在的申诉（fail-closed）；复核只能由 operator 写入
+# （RecordAppealDecision 走 PROXY_OPERATOR_PRINCIPALS 白名单）；PG 仓储与
+# 迁移 088 必须存在（不能只在内存里演）。
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealAcceptedAndAttributed" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealStateFollowsDecisions" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealRejectedForUnknownReport" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealDecisionRejectedWhenRejectedWithoutNote" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+if ! grep -q 'RecordAppealDecision' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-REPORT-004]: RecordAppealDecision is no longer operator-only," >&2
+  echo "  or the operator gate in security.go was removed." >&2
+  exit 1
+fi
+if ! grep -q 'AddAppeal(ctx context.Context, appeal Appeal) error' apps/api-go/internal/moderation/service.go; then
+  echo "  FAIL [COMP-REPORT-004]: the moderation Repository interface no longer" >&2
+  echo "  carries the appeal methods (appeal writes would not compile)." >&2
+  exit 1
+fi
+if ! grep -q 'moderation.appeals' apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-REPORT-004]: the Postgres appeal repository is missing," >&2
+  echo "  or no longer writes moderation.appeals." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/088_moderation_appeals.sql ]; then
+  echo "  FAIL [COMP-REPORT-004]: migration 088_moderation_appeals.sql is missing." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-004: PASS (appeals + operator-only review leave an attributable, append-only trail)"

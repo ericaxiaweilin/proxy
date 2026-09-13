@@ -102,16 +102,20 @@ type Report struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
-// Repository 是举报记录的写入口。故意只暴露 Add：举报是 append-only，
-// 不允许改、不允许删。
+// Repository 是举报记录的写入口。故意只暴露 Add / Find：举报与申诉都是
+// append-only，不允许改、不允许删。
 //
-// AddDisposition 同理（COMP-REPORT-003）：处置记录也是 append-only。
-// FindReport 是给处置用的 —— 给一条不存在的举报写处置，只能制造「看起来
-// 处理过」的假象，所以写入前必须能确认举报真实存在。
+// AddDisposition（COMP-REPORT-003）与 AddAppeal / AddAppealDecision
+// （COMP-REPORT-004）同理——处置与申诉复核记录也是 append-only。
+// FindReport / FindAppeal 是给后续环节用的：给不存在的对象写记录，只能制造
+// 「看起来处理过 / 申诉过」的假象，所以写入前必须能确认对象真实存在。
 type Repository interface {
 	AddReport(ctx context.Context, report Report) error
 	AddDisposition(ctx context.Context, disposition Disposition) error
 	FindReport(ctx context.Context, reportID string) (Report, bool)
+	AddAppeal(ctx context.Context, appeal Appeal) error
+	FindAppeal(ctx context.Context, appealID string) (Appeal, bool)
+	AddAppealDecision(ctx context.Context, decision AppealDecision) error
 }
 
 type reportPayload struct {
@@ -138,7 +142,12 @@ func NewWithRepository(repository Repository) *Service {
 }
 
 func (s *Service) Supports(commandType string) bool {
-	return commandType == "ReportTarget" || commandType == "RecordReportDisposition"
+	return commandType == "ReportTarget" ||
+		commandType == "RecordReportDisposition" ||
+		// COMP-REPORT-004: 申诉渠道。FileAppeal 是普通已登录用户可用的申诉提交；
+		// RecordAppealDecision 是 operator-only 的复核（见 security.go）。
+		commandType == "FileAppeal" ||
+		commandType == "RecordAppealDecision"
 }
 
 func (s *Service) Handle(e command.Envelope) command.Result {
@@ -156,6 +165,14 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	// 在命令边界就被拒，走不到这里。
 	case "RecordReportDisposition":
 		return s.recordDisposition(ctx, e)
+	// COMP-REPORT-004: 申诉渠道。
+	//   - FileAppeal：普通已登录用户提交申诉（鉴权在命令边界，这里再兜一道）。
+	//   - RecordAppealDecision：operator-only，白名单见 security.go 的
+	//     operatorCommandTypes，未配白名单时在命令边界就被拒，走不到这里。
+	case "FileAppeal":
+		return s.fileAppeal(ctx, e)
+	case "RecordAppealDecision":
+		return s.recordAppealDecision(ctx, e)
 	default:
 		return command.Rejected(e, "MODERATION_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "moderation.unsupported_command", nil)
 	}
