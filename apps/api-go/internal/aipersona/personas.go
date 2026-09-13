@@ -153,7 +153,14 @@ type Service struct {
 	repo        Repository
 	termsVersion string
 	nowFunc     func() time.Time
+	// COMP-AI-MINOR-001：年龄查询。nil = 没接 = 谁都不能建数字分身
+	// （fail-closed）。见 minor_protection.go。
+	ageLookup AgeLookup
 }
+
+// SetAgeLookup 接上年龄查询。不接则 CreatePersona 一律拒绝 ——
+// 宁可关闭这个功能，也不能对未成年人开放。
+func (s *Service) SetAgeLookup(lookup AgeLookup) { s.ageLookup = lookup }
 
 func NewService(repo Repository, termsVersion string) *Service {
 	return &Service{repo: repo, nowFunc: time.Now, termsVersion: termsVersion}
@@ -179,6 +186,15 @@ func (s *Service) CreatePersona(ctx context.Context, p Persona) (*Persona, error
 		return nil, errors.New("aipersona: display name is required")
 	}
 	if _, err := NormalizePersonaType(string(p.PersonaType)); err != nil {
+		return nil, err
+	}
+	// COMP-AI-MINOR-001：数字分身 / AI 伴侣不对未成年人开放。
+	// 年龄必须在「建」之前就判掉 —— 建了再删，未成年人已经和它说过话了。
+	// 没接年龄查询 / 没有年龄证据 / 确认未成年，三种都拒绝。
+	if ok, err := CompanionAllowedFor(ctx, s.ageLookup, p.OwnerID, s.now().UTC()); err != nil || !ok {
+		if err == nil {
+			err = ErrMinorForbidden
+		}
 		return nil, err
 	}
 	if p.ID == "" {

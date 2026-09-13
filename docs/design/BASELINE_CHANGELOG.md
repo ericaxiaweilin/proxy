@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 173 — 2026-09-13
+
+- COMP-AI-MINOR-001（越南合规整改）：AI 伴侣 / 数字分身不对未成年人开放。
+  越南 AI 法 134/2025/QH15（2026-03-01 生效）要求对未成年人采取保护措施，
+  陪伴型 AI（数字分身、平台 AI 角色）是点名场景。`CreatePersona` 现在在建
+  之前先查年龄（前置的年龄信号来自 COMP-AGE-001）：没接查询 / 没有年龄证据 /
+  确认未成年，三种都拒绝。**无视觉改动**；成年人不受影响。
+  ⚠️ 副作用：注册在 COMP-AGE-001 之前的历史账号没有年龄断言，需要补一条
+  才能建分身 —— 这是 fail-closed 的代价，我们主动选的。
+
 ## Revision 172 — 2026-09-13
 
 - COMP-AGE-001（越南合规整改）：把注册时那条已经通过 18+ 判定的出生日期

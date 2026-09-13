@@ -409,6 +409,13 @@ func main() {
 		personaRepo = postgres.NewAIPersonaRepository(pool)
 	}
 	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
+	// COMP-AI-MINOR-001: 数字分身 / AI 伴侣不对未成年人开放。年龄查询结果
+	// 由 identity 侧提供（identity.user_age_assertions，见 COMP-AGE-001）。
+	// 同样只在 pool 可用时接：没有数据库 → nil lookup → CreatePersona 一律拒绝
+	// （fail-closed），功能宁可关闭也不能对未成年人开放。
+	if pool != nil {
+		personaSvc.SetAgeLookup(postgres.NewIdentityRepository(pool))
+	}
 	mediaService.WithAIPersonaService(personaSvc)
 	server.AIPersona = personaSvc
 	// R16.7-P1-E: Jurisdiction Policy Engine. The

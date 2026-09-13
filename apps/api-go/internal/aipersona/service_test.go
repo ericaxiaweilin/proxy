@@ -7,9 +7,27 @@ import (
 	"time"
 )
 
+// COMP-AI-MINOR-001：这些用例要测的是「persona / likeness consent」本身，
+// 不是年龄。年龄查询必须先放行一个成年人，否则每条用例都会先被年龄卡住，
+// 测的就不是它声称要测的东西。
+type fixedAgeLookup struct {
+	age int
+	err error
+}
+
+func (l fixedAgeLookup) AgeAt(context.Context, string, time.Time) (int, error) {
+	return l.age, l.err
+}
+
+func newAdultService(repo Repository, termsVersion string) *Service {
+	svc := NewService(repo, termsVersion)
+	svc.SetAgeLookup(fixedAgeLookup{age: 30})
+	return svc
+}
+
 func TestCreateAndGetPersona(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	p, err := svc.CreatePersona(context.Background(), Persona{
 		OwnerID:     "u_alice",
 		DisplayName: "小美 (Twin)",
@@ -36,7 +54,7 @@ func TestCreateAndGetPersona(t *testing.T) {
 
 func TestCreatePersonaRejectsEmptyFields(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	if _, err := svc.CreatePersona(context.Background(), Persona{PersonaType: PersonaTypeUserTwin, DisplayName: "x"}); err == nil {
 		t.Fatal("empty owner id must error")
 	}
@@ -50,7 +68,7 @@ func TestCreatePersonaRejectsEmptyFields(t *testing.T) {
 
 func TestGrantConsentCreatesAndReuses(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	p, _ := svc.CreatePersona(context.Background(), Persona{OwnerID: "u_alice", DisplayName: "x", PersonaType: PersonaTypeUserTwin})
 	c1, err := svc.GrantConsent(context.Background(), p.ID, "u_alice", ConsentVisualAndVoice, nil)
 	if err != nil {
@@ -71,7 +89,7 @@ func TestGrantConsentCreatesAndReuses(t *testing.T) {
 
 func TestRevokedConsentStopsBeingLive(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	p, _ := svc.CreatePersona(context.Background(), Persona{OwnerID: "u_alice", DisplayName: "x", PersonaType: PersonaTypeUserTwin})
 	c, _ := svc.GrantConsent(context.Background(), p.ID, "u_alice", ConsentVisualAndVoice, nil)
 	live, err := svc.HasLiveConsent(context.Background(), p.ID, "u_alice")
@@ -92,7 +110,7 @@ func TestRevokedConsentStopsBeingLive(t *testing.T) {
 
 func TestExpiredConsentStopsBeingLive(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	now := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
 	svc.SetNowFunc(func() time.Time { return now })
 	p, _ := svc.CreatePersona(context.Background(), Persona{OwnerID: "u_alice", DisplayName: "x", PersonaType: PersonaTypeUserTwin})
@@ -117,7 +135,7 @@ func TestExpiredConsentStopsBeingLive(t *testing.T) {
 
 func TestReconsentAfterRevoke(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	p, _ := svc.CreatePersona(context.Background(), Persona{OwnerID: "u_alice", DisplayName: "x", PersonaType: PersonaTypeUserTwin})
 	c1, _ := svc.GrantConsent(context.Background(), p.ID, "u_alice", ConsentVisual, nil)
 	if err := svc.RevokeConsent(context.Background(), c1.ID); err != nil {
@@ -140,7 +158,7 @@ func TestReconsentAfterRevoke(t *testing.T) {
 
 func TestLatestConsentForUnknownPersona(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	live, err := svc.HasLiveConsent(context.Background(), "aip_does_not_exist", "u_alice")
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +185,7 @@ func TestNormalizers(t *testing.T) {
 
 func TestListPersonasByOwnerSorted(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	// Three personas, two for the same owner.
 	now := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
 	svc.SetNowFunc(func() time.Time { return now })
@@ -192,7 +210,7 @@ func TestListPersonasByOwnerSorted(t *testing.T) {
 
 func TestGrantConsentRejectsEmptyIDs(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	if _, err := svc.GrantConsent(context.Background(), "", "u", ConsentVisual, nil); err == nil {
 		t.Fatal("empty persona id must error")
 	}
@@ -206,7 +224,7 @@ func TestGrantConsentRejectsEmptyIDs(t *testing.T) {
 
 func TestRevokeUnknownConsentErrors(t *testing.T) {
 	repo := NewMemoryRepository()
-	svc := NewService(repo, "terms-1.1")
+	svc := newAdultService(repo, "terms-1.1")
 	err := svc.RevokeConsent(context.Background(), "lic_does_not_exist")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)

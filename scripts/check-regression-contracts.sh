@@ -1875,3 +1875,43 @@ if ! grep -qF 'INSERT INTO identity.user_age_assertions' apps/api-go/internal/pl
   exit 1
 fi
 echo "    COMP-AGE-001: PASS (the 18+ decision leaves an auditable age assertion)"
+
+# COMP-AI-MINOR-001: AI 伴侣 / 数字分身不对未成年人开放。
+# 越南 AI 法 134/2025/QH15（2026-03-01 生效）要求对未成年人采取保护措施。
+# 陪伴型 AI（数字分身、平台 AI 角色）是点名场景：未成年人可以全天候和一个
+# 不会拒绝、还带着真人 likeness 的对象建立情感依赖。
+# 前置的年龄信号由 COMP-AGE-001 提供；这里钉的是守卫本身。
+# fail-closed 三个方向：没接查询 / 没有年龄证据 / 查询报错，全部拒绝。
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCompanionRefusedForConfirmedMinor" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCompanionRefusedWhenNoAgeEvidence" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCompanionRefusedWhenAgeLookupUnwired" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCreatePersonaBlockedForMinor" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCreatePersonaBlockedWhenAgeLookupUnwired" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+# 反向也钉：成年人必须还能建，否则守卫就退化成「关掉这个功能」。
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCreatePersonaAllowedForAdult" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+
+# 年龄检查必须发生在「建」之前 —— 建了再删没用，孩子已经和它说过话了。
+if ! grep -qF 'CompanionAllowedFor(ctx, s.ageLookup, p.OwnerID, s.now().UTC())' \
+     apps/api-go/internal/aipersona/personas.go; then
+  echo "  FAIL [COMP-AI-MINOR-001]: CreatePersona no longer checks age." >&2
+  echo "        Deleting a persona after the fact does not undo the conversation." >&2
+  exit 1
+fi
+# 不接线 = 谁都建不了（fail-closed）。
+if ! grep -qF 'personaSvc.SetAgeLookup(' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the age lookup is no longer wired in cmd/api/main.go." >&2
+  exit 1
+fi
+echo "    COMP-AI-MINOR-001: PASS (AI companions are refused to minors and to accounts with no age evidence)"
