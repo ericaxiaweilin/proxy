@@ -4,6 +4,28 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 179 — 2026-09-13
+
+- COMP-REPORT-002（续完）：举报入口补齐最后四类 —— **活动 / 商家 / 机会 /
+  邀约**。至此法律文件 §38 承诺的八类目标，用户在界面上都点得到。
+  - 活动详情页底部常驻两个入口：举报这条活动（ACTIVITY，target=activityId）；
+    主办方是商家时再列一个「举报主办商家」（MERCHANT，target=ownerId）。
+    只列商家入口当且仅当 `origin === "MERCHANT"` 且 ownerId 非空 —— 报上去
+    一条查不到的 id 比没有入口更糟。
+  - 订单详情页（机会详情）底部常驻入口：公开机会报 OPPORTUNITY、定向邀约报
+    INVITE（同一个服务端实体，区别只在 targetAccountId 是否为空），
+    target 一律用服务端 opportunity.id。
+    **刻意不用**界面上那个 `PX-O-…` 编号：它是 `formatTraceId` 客户端随机
+    生成的展示号，服务端根本不认，报上去等于白报。
+  - 「这一类对象该报成哪一类」抽成 `moderation-client.ts` 里的两个纯函数
+    （`activityReportTargets` / `opportunityReportTarget`）而不是写在 JSX 里，
+    因为入口还会继续增加，判定逻辑必须能被单独测试。
+  - 门禁 pin 一并从「JSX 里的 targetType 字符串」改为「判定函数名」——
+    上一笔把内联弹层抽成 ReportSheet 时，钉字符串的那条 pin 直接误报：
+    能力还在，只是实现挪了位置。
+  **有视觉改动**：活动详情底部多一排举报按钮（1–2 个）；订单详情底部多一个
+  「举报这条机会 / 邀约」按钮。
+
 ## Revision 178 — 2026-09-13
 
 - COMP-REPORT-002（续）：举报入口补齐**账号**与**交易**。

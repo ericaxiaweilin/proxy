@@ -13,6 +13,7 @@ import type { FulfillmentClient } from "../fulfillment-client";
 import type { OutcomeClient } from "../outcome-client";
 import type { BusinessClient } from "../business-client";
 import type { ActivityClient } from "../activity-client";
+import type { ModerationClient } from "../moderation-client";
 
 const SURFACE_LABEL: Partial<Record<SurfaceId, string>> = {
   BUSINESS_HOME: "商家首页",
@@ -24,7 +25,7 @@ const SURFACE_LABEL: Partial<Record<SurfaceId, string>> = {
   ACTIVITY_DETAIL: "活动详情"
 };
 
-export function ComingSoonSurface({ surface, fulfillment, outcome, business, activities }: { surface: SurfaceId; fulfillment?: FulfillmentClient; outcome?: OutcomeClient; business?: BusinessClient; activities?: ActivityClient }): React.JSX.Element {
+export function ComingSoonSurface({ surface, fulfillment, outcome, business, activities, moderation }: { surface: SurfaceId; fulfillment?: FulfillmentClient; outcome?: OutcomeClient; business?: BusinessClient; activities?: ActivityClient; moderation: ModerationClient }): React.JSX.Element {
   if (surface === "ORDER_EXECUTION" && fulfillment) {
     return <OrderExecutionSurface client={fulfillment} />;
   }
@@ -35,7 +36,7 @@ export function ComingSoonSurface({ surface, fulfillment, outcome, business, act
     return <MerchantStorefrontSurface client={business} />;
   }
   if (surface === "ACTIVITY_DETAIL" && activities) {
-    return <ActivityDetailSurface client={activities} />;
+    return <ActivityDetailSurface client={activities} moderation={moderation} />;
   }
   if (surface === "SKILL_WORKSPACE") {
     return <SkillWorkspaceSurface />;

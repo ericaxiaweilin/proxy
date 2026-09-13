@@ -2095,4 +2095,32 @@ if ! grep -q 'REPORT_REASONS' apps/mobile/src/components/report-sheet.tsx; then
   echo "  FAIL [COMP-REPORT-002]: ReportSheet no longer uses the shared reason list." >&2
   exit 1
 fi
-echo "    COMP-REPORT-002: PASS (message, account and transaction are all reportable from the UI)"
+# 活动 / 商家 / 机会 / 邀约 四类入口。
+#
+# 这里钉的是**判定函数**而不是 JSX 里的 targetType="ACTIVITY" —— 上次
+# 把内联弹层抽成 ReportSheet 时，钉字符串的那条 pin 直接误报（能力还在，
+# 实现挪了位置）。判定逻辑抽成纯函数后，pin 住函数就同时钉住了能力和测试。
+if ! grep -q 'activityReportTargets' apps/mobile/src/surfaces/activity-detail.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the activity / merchant report entry point is gone." >&2
+  exit 1
+fi
+if ! grep -q 'opportunityReportTarget' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the opportunity / invite report entry point is gone." >&2
+  exit 1
+fi
+# 客户端必须真的造出来并传进市场页，否则按钮点了也是 undefined。
+if ! grep -q 'moderation={moderation}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: ModerationClient is no longer threaded into the market surface." >&2
+  exit 1
+fi
+# 四类判定都要有具名测试（require_test 由上面的 vitest run 覆盖，这里
+# 再钉一次文件，避免有人把 describe 块整段删掉而测试文件还在）。
+for t in "always offers the activity itself, and the host merchant only when it is merchant-run" \
+         "reports a targeted opportunity as INVITE and a public one as OPPORTUNITY" \
+         "sends every target the new entry points offer"; do
+  if ! grep -q "$t" apps/mobile/src/moderation-client.test.ts; then
+    echo "  FAIL [COMP-REPORT-002]: missing named test for the new entry points: $t" >&2
+    exit 1
+  fi
+done
+echo "    COMP-REPORT-002: PASS (message, account, transaction, activity, merchant, opportunity and invite are all reportable from the UI)"

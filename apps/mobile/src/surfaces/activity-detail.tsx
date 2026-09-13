@@ -6,6 +6,9 @@ import { color, shadows } from "../theme";
 import type { ActivityClient } from "../activity-client";
 import type { Activity } from "@proxy/contracts";
 import { activityAIDisclosure, activityMoneySummary } from "./activity-detail-model";
+// COMP-REPORT-002: 活动与（商家主办的）主办商家都要可举报。
+import { ReportSheet } from "../components/report-sheet";
+import { activityReportTargets, type ModerationClient, type ReportTarget } from "../moderation-client";
 
 // R17.x persona 色：与 tasks.tsx personaColorStyle 同源（ai_001=紫/002=粉/
 // 003=绿/004=橙/005=金）。tasks 侧为 canonical；这里仅为明细页封面
@@ -21,11 +24,13 @@ function personaColor(personaId: string | undefined): string {
   }
 }
 
-export function ActivityDetailSurface({ client, initialActivityId, onBack }: { client: ActivityClient; initialActivityId?: string; onBack?: () => void }): React.JSX.Element {
+export function ActivityDetailSurface({ client, moderation, initialActivityId, onBack }: { client: ActivityClient; moderation: ModerationClient; initialActivityId?: string; onBack?: () => void }): React.JSX.Element {
   const [items, setItems] = useState<Activity[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [selected, setSelected] = useState<Activity | undefined>(undefined);
+  const [reporting, setReporting] = useState<ReportTarget | undefined>(undefined);
+  const [reportDone, setReportDone] = useState<string | undefined>(undefined);
   useEffect(() => {
     let c = false;
     (async () => {
@@ -47,37 +52,58 @@ export function ActivityDetailSurface({ client, initialActivityId, onBack }: { c
     const aiDisclosure = activityAIDisclosure(selected);
     const showPersona = selected.aiStatus !== "NONE" && selected.aiPersonaId;
     return (
-      <ScrollView style={styles.root} contentContainerStyle={styles.container}>
-        <Pressable onPress={() => { if (onBack) onBack(); else setSelected(undefined); }}><Text style={styles.back}>‹ 返回</Text></Pressable>
-        {selected.coverImageUrl ? (
-          <Image source={{ uri: selected.coverImageUrl }} style={styles.cover} />
-        ) : showPersona ? (
-          <View style={styles.coverPlaceholder}>
-            <View style={[styles.personaToken, { backgroundColor: personaColor(selected.aiPersonaId) }]}>
-              <Text style={styles.personaTokenText}>{selected.aiPersonaAvatar ?? "🤖"}</Text>
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.container}>
+          <Pressable onPress={() => { if (onBack) onBack(); else setSelected(undefined); }}><Text style={styles.back}>‹ 返回</Text></Pressable>
+          {selected.coverImageUrl ? (
+            <Image source={{ uri: selected.coverImageUrl }} style={styles.cover} />
+          ) : showPersona ? (
+            <View style={styles.coverPlaceholder}>
+              <View style={[styles.personaToken, { backgroundColor: personaColor(selected.aiPersonaId) }]}>
+                <Text style={styles.personaTokenText}>{selected.aiPersonaAvatar ?? "🤖"}</Text>
+              </View>
+              <Text style={styles.coverNote}>{selected.aiPersonaName ?? "平台 AI"} · 真人照片待上传</Text>
             </View>
-            <Text style={styles.coverNote}>{selected.aiPersonaName ?? "平台 AI"} · 真人照片待上传</Text>
+          ) : (
+            <View style={styles.coverPlaceholder}>
+              <Text style={styles.coverIcon}>{selected.venueIcon || "◎"}</Text>
+              <Text style={styles.coverNote}>活动照片待商家 / 发起人上传</Text>
+            </View>
+          )}
+          <Text style={styles.title}>{selected.title}</Text>
+          <Text style={styles.meta}>{selected.venueName} · {selected.time}</Text>
+          <View style={styles.card}>
+            <Text style={styles.body}>{selected.desc}</Text>
+            <Text style={styles.meta}>感兴趣 {selected.interested} · 参加 {selected.joined} · 提问 {selected.qaCount}</Text>
+            <Text style={styles.money}>{activityMoneySummary(selected)}</Text>
+            <Text style={styles.meta}>{selected.people} · {selected.consumption}</Text>
+            {aiDisclosure ? <Text style={styles.aiDisclosure}>🤖 {aiDisclosure}</Text> : null}
           </View>
-        ) : (
-          <View style={styles.coverPlaceholder}>
-            <Text style={styles.coverIcon}>{selected.venueIcon || "◎"}</Text>
-            <Text style={styles.coverNote}>活动照片待商家 / 发起人上传</Text>
+          <Pressable onPress={async () => { try { await client.toggleInterest(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.cta}><Text style={styles.ctaText}>感兴趣 / 取消</Text></Pressable>
+          <Pressable onPress={async () => { try { await client.join(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); setNotice("报名成功"); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.ctaSecondary}><Text style={styles.ctaSecondaryText}>报名参加</Text></Pressable>
+          {notice ? <Text style={styles.meta}>{notice}</Text> : null}
+          <View style={styles.reportRow}>
+            {activityReportTargets(selected).map((target) => (
+              <Pressable key={target.targetType + target.targetId} onPress={() => { setReportDone(undefined); setReporting(target); }} style={styles.reportButton} accessibilityLabel={target.label}>
+                <Text style={styles.reportButtonText}>⚑ {target.label}</Text>
+              </Pressable>
+            ))}
           </View>
-        )}
-        <Text style={styles.title}>{selected.title}</Text>
-        <Text style={styles.meta}>{selected.venueName} · {selected.time}</Text>
-        <View style={styles.card}>
-          <Text style={styles.body}>{selected.desc}</Text>
-          <Text style={styles.meta}>感兴趣 {selected.interested} · 参加 {selected.joined} · 提问 {selected.qaCount}</Text>
-          <Text style={styles.money}>{activityMoneySummary(selected)}</Text>
-          <Text style={styles.meta}>{selected.people} · {selected.consumption}</Text>
-          {aiDisclosure ? <Text style={styles.aiDisclosure}>🤖 {aiDisclosure}</Text> : null}
-        </View>
-        <Pressable onPress={async () => { try { await client.toggleInterest(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.cta}><Text style={styles.ctaText}>感兴趣 / 取消</Text></Pressable>
-        <Pressable onPress={async () => { try { await client.join(selected.activityId); const list = await client.listActivities(); setItems(list); const upd = list.find((x) => x.activityId === selected.activityId); if (upd) setSelected(upd); setNotice("报名成功"); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }} style={styles.ctaSecondary}><Text style={styles.ctaSecondaryText}>报名参加</Text></Pressable>
-        {notice ? <Text style={styles.meta}>{notice}</Text> : null}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
+          {reportDone ? <Text style={styles.meta}>{reportDone}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+        </ScrollView>
+        {reporting ? (
+          <ReportSheet
+            moderation={moderation}
+            targetType={reporting.targetType}
+            targetId={reporting.targetId}
+            title={reporting.label}
+            {...(selected.title ? { subtitle: selected.title } : {})}
+            onClose={() => setReporting(undefined)}
+            onDone={() => { setReporting(undefined); setReportDone("举报已提交，我们会尽快处理。"); }}
+          />
+        ) : null}
+      </View>
     );
   }
   return (
@@ -120,4 +146,9 @@ const styles = StyleSheet.create({
   ctaSecondary: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingVertical: 12, alignItems: "center" },
   ctaSecondaryText: { color: color.ink, fontSize: 13, fontWeight: "800" },
   error: { color: "#B00020", fontSize: 12, marginTop: 8 },
+  // COMP-REPORT-002: 举报入口常驻在明细底部，不做成长按菜单 ——
+  // 用户在活动里碰到招嫖招揽时，不该还要先猜「哪里能举报」。
+  reportRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 12 },
+  reportButton: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 9 },
+  reportButtonText: { color: color.ink, fontSize: 12, fontWeight: "700" },
 });

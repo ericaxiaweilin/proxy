@@ -208,7 +208,7 @@ export function MyOrdersSurface({ client, moderation, onBack }: {
   );
 }
 
-export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+export function MyActivitiesSurface({ onBack, moderation }: { onBack: () => void; moderation: ModerationClient }): React.JSX.Element {
   // R17.x: 我的活动物化路径。listMyActivities 取代
   // hardcoded mock (会报 "本周暂无开放活动") — 服务端
   // 返 actor-scoped created + joined, 客户端按 tab 分类.
@@ -289,7 +289,7 @@ export function MyActivitiesSurface({ onBack }: { onBack: () => void }): React.J
   if (detailId) {
     return (
       <View style={styles.root}>
-        <ActivityDetailSurface client={client} initialActivityId={detailId} onBack={() => { setDetailId(undefined); reload(); }} />
+        <ActivityDetailSurface client={client} moderation={moderation} initialActivityId={detailId} onBack={() => { setDetailId(undefined); reload(); }} />
       </View>
     );
   }
@@ -363,7 +363,7 @@ export function FavoritesSurface({ onBack }: { onBack: () => void }): React.JSX.
 
 // 商家活动导流：只列 Origin=MERCHANT 的开放活动（种子 + 商家实发），匿名
 // 可读；报名走认证通道，未登录提示登录。之前是有 tile 无页面的死入口。
-export function MerchantCampaignSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
+export function MerchantCampaignSurface({ onBack, moderation }: { onBack: () => void; moderation: ModerationClient }): React.JSX.Element {
   const [client] = useState(() => new ActivityClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore }));
   const [items, setItems] = useState<Activity[]>([]);
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
@@ -407,7 +407,7 @@ export function MerchantCampaignSurface({ onBack }: { onBack: () => void }): Rea
   if (detailId) {
     return (
       <View style={styles.root}>
-        <ActivityDetailSurface client={client} initialActivityId={detailId} onBack={() => { setDetailId(undefined); reload(); }} />
+        <ActivityDetailSurface client={client} moderation={moderation} initialActivityId={detailId} onBack={() => { setDetailId(undefined); reload(); }} />
       </View>
     );
   }

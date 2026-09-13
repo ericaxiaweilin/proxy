@@ -41,6 +41,9 @@ import { ActivityDetail, ActivityFeedCard } from "./tasks";
 import { DemandWizard } from "./demand-wizard";
 import { ActivityWizard } from "./activity-wizard";
 import { resolveAuthorDisplayName } from "../feed-author";
+// COMP-REPORT-002: 机会 / 定向邀约的举报入口。
+import { ReportSheet } from "../components/report-sheet";
+import { opportunityReportTarget, type ModerationClient, type ReportTarget } from "../moderation-client";
 
 // “热门探索点” = 可以是河内市中心的著名地点 (西湖、还剑湖)，
 // 不过是真实经纬度，作为"探索"显示的独立 marker (PURPLE_HOT)。
@@ -90,6 +93,7 @@ export function MarketSurface({
   media,
   supply,
   marketLabel,
+  moderation,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
   onOpenRealityScene,
@@ -101,6 +105,7 @@ export function MarketSurface({
   fulfillment?: FulfillmentClient;
   media?: MediaClient;
   supply?: SupplyClient;
+  moderation: ModerationClient;
   marketLabel: string;
   initialTab?: MarketTab;
   onOpenExperience?: ((experienceId: string) => void) | undefined;
@@ -434,7 +439,9 @@ export function MarketSurface({
       ) : pageTab === "OPPORTUNITY" ? (
         oppDetail ? (
           <OpportunityDetail
+            key={oppDetail.id}
             opportunity={oppDetail}
+            moderation={moderation}
             quoteMode={oppQuoteMode}
             setQuoteMode={setOppQuoteMode}
             onBack={() => setOppDetail(null)}
@@ -619,6 +626,7 @@ function OpportunityTab({
 
 function OpportunityDetail({
   opportunity,
+  moderation,
   quoteMode,
   setQuoteMode,
   onBack,
@@ -628,6 +636,7 @@ function OpportunityDetail({
   busy
 }: {
   opportunity: MarketOpportunity;
+  moderation: ModerationClient;
   quoteMode: "budget" | "standard" | "premium" | "custom";
   setQuoteMode: (m: "budget" | "standard" | "premium" | "custom") => void;
   onBack: () => void;
@@ -642,6 +651,11 @@ function OpportunityDetail({
   // 也不再静默回退到客户预算（之前选自定义照样按预算发出）。
   const [customQuote, setCustomQuote] = useState("");
   const [quoteError, setQuoteError] = useState<string | undefined>(undefined);
+  // COMP-REPORT-002: 机会 / 邀约举报。targetId 用服务端 opportunity.id，
+  // 不用界面上那个 PX-O 展示编号（客户端随机的，服务端查不到）。
+  const [reporting, setReporting] = useState<ReportTarget | undefined>(undefined);
+  const [reportDone, setReportDone] = useState<string | undefined>(undefined);
+  const reportTarget = opportunityReportTarget(opportunity);
   const customDigits = customQuote.replace(/[^0-9]/g, "");
   const customValid = customDigits.length > 0;
   const quote = quoteMode === "custom"
@@ -650,7 +664,7 @@ function OpportunityDetail({
       ? `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.25).toLocaleString()}₫`
       : quoteMode === "standard" ? (fair.split("–")[0]?.trim() ?? budget) : budget;
   return (
-    <View>
+    <View style={styles.oppDetailRoot}>
       <View style={styles.detailHead}>
         <Pressable onPress={onBack} style={styles.detailBack}>
           <Text style={styles.detailBackText}>‹</Text>
@@ -796,6 +810,24 @@ function OpportunityDetail({
       ) : null}
 
       <Text style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
+
+      {/* COMP-REPORT-002: 机会 / 邀约举报入口。常驻在详情页底部，不做成
+          长按菜单 —— 用户读到一条可疑的邀约时，不该还要先猜哪里能举报。 */}
+      <Pressable accessibilityLabel={reportTarget.label} onPress={() => { setReportDone(undefined); setReporting(reportTarget); }} style={styles.reportLink}>
+        <Text style={styles.reportLinkText}>⚑ {reportTarget.label}</Text>
+      </Pressable>
+      {reportDone ? <Text style={styles.detailHint}>{reportDone}</Text> : null}
+      {reporting ? (
+        <ReportSheet
+          moderation={moderation}
+          targetType={reporting.targetType}
+          targetId={reporting.targetId}
+          title={reporting.label}
+          {...(opportunity.title ? { subtitle: opportunity.title } : {})}
+          onClose={() => setReporting(undefined)}
+          onDone={() => { setReporting(undefined); setReportDone("举报已提交，我们会尽快处理。"); }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -2027,6 +2059,11 @@ const styles = StyleSheet.create({
   quotePrice: { color: color.ink, fontSize: 12, fontWeight: "800" },
   quoteSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   detailHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 10, textAlign: "center" },
+  // COMP-REPORT-002: oppDetailRoot 需要 flex:1 —— 举报弹层是绝对定位
+  // (StyleSheet.absoluteFill)，没有撑满的根节点就盖不住整屏。
+  oppDetailRoot: { flex: 1 },
+  reportLink: { alignItems: "center", borderColor: color.line, borderRadius: 999, borderWidth: 1, marginTop: 12, paddingVertical: 9 },
+  reportLinkText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   emptyBox: { alignItems: "center", borderColor: "#D9D0DE", borderRadius: 17, borderStyle: "dashed", borderWidth: 1, gap: 8, marginTop: 12, padding: 22 },
   emptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   retryBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },

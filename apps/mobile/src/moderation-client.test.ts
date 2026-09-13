@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ModerationClient, REPORT_REASONS } from "./moderation-client";
+import { ModerationClient, REPORT_REASONS, activityReportTargets, opportunityReportTarget } from "./moderation-client";
 import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-session";
 
 // COMP-REPORT-002: 举报入口接得上。
@@ -66,5 +66,56 @@ describe("ModerationClient report intake", () => {
     const client = clientWith(store, envelopes);
     await expect(client.reportTarget("POST", "   ", "SPAM")).rejects.toThrow();
     expect(envelopes).toHaveLength(0);
+  });
+});
+
+// COMP-REPORT-002（续）: 活动 / 商家 / 机会 / 邀约 四类入口。
+// 判定「这一类对象该报成哪一类」抽成纯函数就是为了在这里钉住 ——
+// 入口越加越多，靠肉眼看 JSX 迟早会漏。
+describe("report target selection for activity / merchant / opportunity / invite", () => {
+  it("always offers the activity itself, and the host merchant only when it is merchant-run", () => {
+    const plain = activityReportTargets({ activityId: "act_1", origin: "USER", ownerId: "user_9" });
+    expect(plain.map((t) => t.targetType)).toEqual(["ACTIVITY"]);
+
+    const merchantRun = activityReportTargets({ activityId: "act_2", origin: "MERCHANT", ownerId: "biz_9" });
+    expect(merchantRun.map((t) => t.targetType)).toEqual(["ACTIVITY", "MERCHANT"]);
+    expect(merchantRun[1]?.targetId).toBe("biz_9");
+
+    // 商家主办但没有 ownerId 时不列 —— 报上去一条查不到的 id 等于白报。
+    expect(activityReportTargets({ activityId: "act_3", origin: "MERCHANT" }).map((t) => t.targetType)).toEqual(["ACTIVITY"]);
+    expect(activityReportTargets({ activityId: "act_4", origin: "MERCHANT", ownerId: "   " }).map((t) => t.targetType)).toEqual(["ACTIVITY"]);
+  });
+
+  it("reports a targeted opportunity as INVITE and a public one as OPPORTUNITY", () => {
+    expect(opportunityReportTarget({ id: "opp_1" })).toMatchObject({ targetType: "OPPORTUNITY", targetId: "opp_1" });
+    expect(opportunityReportTarget({ id: "opp_2", targetAccountId: "user_7" })).toMatchObject({ targetType: "INVITE", targetId: "opp_2" });
+    // 空白 targetAccountId 视为公开。
+    expect(opportunityReportTarget({ id: "opp_3", targetAccountId: "  " }).targetType).toBe("OPPORTUNITY");
+  });
+
+  // 界面上那个 PX-O-… 编号是客户端随机生成的展示号，服务端不认。
+  // 这里钉住「用服务端主键」这件事，防止以后有人顺手把展示编号传进来。
+  it("targets the server opportunity id, not the client-side PX-O display code", () => {
+    const target = opportunityReportTarget({ id: "opp_server_1", targetAccountId: "user_7" });
+    expect(target.targetId).toBe("opp_server_1");
+    expect(target.targetId).not.toMatch(/^PX-/);
+  });
+
+  // 入口算出来的每一类都要真能发出去 —— 这是「界面有按钮」和
+  // 「举报真的落库」之间的那道缝。
+  it("sends every target the new entry points offer", async () => {
+    const store = await signedInStore();
+    const envelopes: Array<Record<string, unknown>> = [];
+    const client = clientWith(store, envelopes);
+    const offered = [
+      ...activityReportTargets({ activityId: "act_2", origin: "MERCHANT", ownerId: "biz_9" }),
+      opportunityReportTarget({ id: "opp_1" }),
+      opportunityReportTarget({ id: "opp_2", targetAccountId: "user_7" })
+    ];
+    for (const target of offered) {
+      await client.reportTarget(target.targetType, target.targetId, "SOLICITATION");
+    }
+    expect(envelopes.map((item) => (item.payload as { targetType: string }).targetType)).toEqual(["ACTIVITY", "MERCHANT", "OPPORTUNITY", "INVITE"]);
+    expect(envelopes.map((item) => (item.payload as { targetId: string }).targetId)).toEqual(["act_2", "biz_9", "opp_1", "opp_2"]);
   });
 });

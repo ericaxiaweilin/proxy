@@ -648,6 +648,7 @@ export function AppShell({
               fulfillment={fulfillment}
               media={media}
               supply={supply}
+              moderation={moderation}
               marketLabel="河内"
               initialTab={marketEntry.tab}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}

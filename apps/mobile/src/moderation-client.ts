@@ -62,6 +62,54 @@ const TARGET_AGGREGATE: Record<ReportTargetType, string> = {
   TRANSACTION: "Transaction"
 };
 
+// 一个「可举报对象」：目标类型 + 服务端认得的主键 + 按钮文案。
+// 抽成纯函数而不是写在 JSX 里，是因为入口会继续增加（活动 / 机会 /
+// 商家 / 邀约 …），判断「这一类对象该报成哪一类」必须能被单独测试 ——
+// 否则就是把前面 COMP-REPORT-001 服务端那套 fail-closed 校验的严谨性
+// 在客户端又丢掉一次。
+export type ReportTarget = {
+  targetType: ReportTargetType;
+  targetId: string;
+  label: string;
+};
+
+// 活动：活动本体永远可报；主办方是商家时，商家也单独可报。
+//
+// 商家单独列一条，是因为「这条活动有问题」和「这个商家有问题」是两件
+// 不同的事 —— 前者下架一条，后者可能要停掉整个店。origin 是服务端
+// 下发的发布主体（PLATFORM | MERCHANT | USER | TEST），ownerId 是该
+// 活动的归属账号；两者都命中才列商家入口，缺一就不列（报上去没有
+// 可追溯的对象，比没有入口更糟）。
+export function activityReportTargets(activity: {
+  activityId: string;
+  origin?: string | undefined;
+  ownerId?: string | undefined;
+}): ReportTarget[] {
+  const targets: ReportTarget[] = [
+    { targetType: "ACTIVITY", targetId: activity.activityId, label: "举报这条活动" }
+  ];
+  if (activity.origin === "MERCHANT" && activity.ownerId && activity.ownerId.trim()) {
+    targets.push({ targetType: "MERCHANT", targetId: activity.ownerId, label: "举报主办商家" });
+  }
+  return targets;
+}
+
+// 机会 / 邀约：同一个服务端实体（opportunity），区别只在有没有
+// targetAccountId —— 有就是定向邀约（只对被邀的人和发布者可见），
+// 没有就是公开机会。
+//
+// 注意不能用界面上那个 PX-O-… 编号当 targetId：它是客户端随机生成的
+// 展示号（market-template-price.ts 的 formatTraceId），服务端根本不认。
+// 报上去一条查不到的 id，等于这条举报白报。
+export function opportunityReportTarget(opportunity: {
+  id: string;
+  targetAccountId?: string | undefined;
+}): ReportTarget {
+  return opportunity.targetAccountId && opportunity.targetAccountId.trim()
+    ? { targetType: "INVITE", targetId: opportunity.id, label: "举报这条邀约" }
+    : { targetType: "OPPORTUNITY", targetId: opportunity.id, label: "举报这条机会" };
+}
+
 export type ModerationCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<TransportResponse>;
 };
