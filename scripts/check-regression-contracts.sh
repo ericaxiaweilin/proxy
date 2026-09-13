@@ -2050,3 +2050,34 @@ if [ ! -f apps/api-go/migrations/086_moderation_reports.sql ]; then
   exit 1
 fi
 echo "    COMP-REPORT-001: PASS (every target promised in the terms is reportable and persisted)"
+
+# COMP-REPORT-002: 举报入口必须真的能被用户点到。
+# 001 把服务端接上了（八类目标全部受理），但移动端只有一个入口 ——
+# feed 帖子菜单里的「举报」。用户能碰到的仍然只有 1/8，而招嫖揽客、
+# 人身威胁、涉未成年人这些恰恰发生在**消息**里。
+# 上一笔我自己在 commit message 里写了「无视觉改动，另开」，如果不另开，
+# 就又犯一次「改了后端就宣称解决了」的错 —— 那是我在 COMP-E2EE-002
+# 里刚批评过的同一个毛病。所以这里把「用户点得到」也钉住。
+if ! grep -q 'COMP-REPORT-002' apps/mobile/src/moderation-client.test.ts ||
+   ! grep -q 'reportTarget("MESSAGE"' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the message report entry point is gone —" >&2
+  echo "        the API accepts reports but users can no longer file one." >&2
+  exit 1
+fi
+# 客户端要真的造出来并传进会话页，否则按钮点了也是 undefined。
+if ! grep -q 'new ModerationClient(' apps/mobile/src/native-app.tsx ||
+   ! grep -q 'moderationClient={moderation}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: ModerationClient is no longer constructed and" >&2
+  echo "        passed into the conversation surface." >&2
+  exit 1
+fi
+# 理由清单里必须有 SOLICITATION 与 MINOR_SAFETY —— 这两类风险最高，
+# 只能塞进「其他」等于没有信号。
+if ! grep -q 'SOLICITATION' apps/mobile/src/moderation-client.ts ||
+   ! grep -q 'MINOR_SAFETY' apps/mobile/src/moderation-client.ts; then
+  echo "  FAIL [COMP-REPORT-002]: the report reason list lost SOLICITATION or" >&2
+  echo "        MINOR_SAFETY, so the highest-risk reports carry no signal." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/moderation-client.test.ts || exit $?
+echo "    COMP-REPORT-002: PASS (users can actually file a report from a message)"

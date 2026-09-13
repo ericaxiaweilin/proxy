@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 177 — 2026-09-13
+
+- COMP-REPORT-002（越南合规整改）：举报入口要真的能被用户点到。
+  上一笔（176）把服务端接上了，八类目标全部受理，但移动端入口只有
+  feed 帖子菜单里的「举报」—— 用户能碰到的仍然只有 1/8，而招嫖揽客、
+  人身威胁、涉未成年人这些恰恰发生在**消息**里。接口接得上而用户点不到，
+  等于没改；那正是我在 COMP-E2EE-002 里刚批评过的同一个毛病
+  （改了后端就宣称解决了）。
+  新增 `src/moderation-client.ts`（`reportTarget`）并在会话页长按菜单加
+  「举报」→ 原因选择。理由清单里 SOLICITATION（招嫖 / 线下付费招揽）与
+  MINOR_SAFETY（涉未成年人）**排在前面** —— 用户慌的时候要能一眼找到，
+  不该让他翻九行。
+  **有视觉改动**：会话长按菜单多一项「举报」，新增原因选择底部弹层。
+
 ## Revision 176 — 2026-09-13
 
 - COMP-REPORT-001（越南合规整改）：把「用户举报」真正接下来。

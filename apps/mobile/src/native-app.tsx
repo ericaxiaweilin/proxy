@@ -20,6 +20,7 @@ import { ActivityClient } from "./activity-client";
 import { ExperienceClient } from "./experience-client";
 import { VoucherClient } from "./voucher-client";
 import { EngagementClient } from "./engagement-client";
+import { ModerationClient } from "./moderation-client";
 import { MarketplaceClient } from "./marketplace-client";
 import { SocialSpaceClient } from "./socialspace-client";
 import { FulfillmentClient } from "./fulfillment-client";
@@ -148,6 +149,9 @@ const mediaClient = new MediaClient({ authClient: sessionAuthClient, secureSessi
 const demandClient = new DemandClient({ authClient: sessionAuthClient, secureSessionStore });
 const voucherClient = new VoucherClient({ authClient: sessionAuthClient, secureSessionStore });
 const engagementClient = new EngagementClient({ authClient: sessionAuthClient, secureSessionStore });
+// COMP-REPORT-002: 举报入口。法律文件 §38 承诺可举报八类目标，用户得
+// 真能点到 —— 服务端接得上而客户端没入口，等于没改。
+const moderationClient = new ModerationClient({ authClient: sessionAuthClient, secureSessionStore });
 const marketplaceClient = new MarketplaceClient({ authClient: sessionAuthClient, secureSessionStore });
 const socialSpaceClient = new SocialSpaceClient({ authClient: sessionAuthClient, secureSessionStore });
 const fulfillmentClient = new FulfillmentClient({ authClient: sessionAuthClient, secureSessionStore });
@@ -249,6 +253,7 @@ export function ProxyApp(): React.JSX.Element {
         demand={demandClient}
         vouchers={voucherClient}
         engagement={engagementClient}
+        moderation={moderationClient}
         marketplace={marketplaceClient}
         socialSpace={socialSpaceClient}
         fulfillment={fulfillmentClient}
