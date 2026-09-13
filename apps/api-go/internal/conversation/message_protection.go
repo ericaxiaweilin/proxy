@@ -2,11 +2,15 @@
 //
 // WHAT THIS IS
 //
-//	Per-message anti-leak controls aligned with the Proxy chat RFC v0.1
-//	(docs/design/references/Proxy_Chat_Aligned_With_LotusChat_v0.1.md §3).
-//	The lotus pattern is per-conversation toggles; we do per-message so a
-//	pimp can lock down a single sensitive image while keeping the rest of
-//	the chat scannable.
+//	Per-message anti-leak controls. Per-conversation toggles were rejected
+//	because a sender may need to protect one sensitive attachment while
+//	keeping the rest of the thread readable.
+//
+// COMPLIANCE (COMP-CHAT-001): these knobs are a privacy feature, not an
+// evidence feature. On a conversation that carries money between users
+// they are disabled server-side and a client cannot switch them back on.
+// A marketplace on which both sides can make a paid meeting untraceable
+// reads as a brokering channel rather than a services platform.
 //
 // THE FOUR KNOBS
 //  1. Forwardable:    if false, server refuses forward attempts with
@@ -30,7 +34,9 @@
 package conversation
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -73,9 +79,46 @@ type MessageProtection struct {
 	// for any read after this point.
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 
-	// EndToEndEncrypted is always true in the current architecture
-	// (transport TLS + at-rest KMS). The client renders the 🔒 badge.
+	// COMP-E2EE-001: EndToEndEncrypted 此前恒为 true，注释里写的原因是
+	// 「transport TLS + at-rest KMS」。那不是端到端加密 —— TLS 是传输层
+	// 加密，KMS 是服务端静态加密，两种情况下服务端都能读到明文。
+	//
+	// 对外宣称 E2EE 而实际做不到，是虚假安全声明：用户会以为连平台都看
+	// 不到内容，从而说出他不会说的话。而且付费会话按 COMP-CHAT-001 必须
+	// 保留可审计记录，本来就与真正的 E2EE 互斥。
+	//
+	// 所以这个字段恒为 false：要么真的实现 E2EE（那时付费会话要先解决
+	// 可审计性），要么就别挂那把锁。发送路径会再次强制置 false，
+	// 调用方改不回去（见 WithoutUnbackedClaims）。
 	EndToEndEncrypted bool `json:"endToEndEncrypted"`
+}
+
+// WithoutUnbackedClaims 去掉平台兑现不了的声明。
+//
+// 目前只有一条：端到端加密。默认与发送路径都会过这一道，客户端传上来的
+// protectionOverride 也不能把它改回 true —— 安全声明必须由服务端说了算，
+// 不能由调用方自称。
+func (p MessageProtection) WithoutUnbackedClaims() MessageProtection {
+	p.EndToEndEncrypted = false
+	return p
+}
+
+// ClaimsEndToEndEncryption 是给门禁与审计用的显式的「有没有在宣称 E2EE」。
+// 平台当前没有端到端加密实现，因此恒为 false。
+func (p MessageProtection) ClaimsEndToEndEncryption() bool { return p.EndToEndEncrypted }
+
+// MarshalJSON 在序列化边界把端到端加密声明钉成 false。
+//
+// 为什么要在这一层再钉一次：库里已经存着的旧消息，protection JSON 里带着
+// endToEndEncrypted: true。改默认值只影响新消息，旧消息仍会被读出来发给
+// 客户端。安全声明是给用户看的，只要有一条出口还在宣称，就等于没改。
+// 这里兜底后，不论数据多旧、调用方怎么构造，响应里都不会再出现那把锁。
+func (p MessageProtection) MarshalJSON() ([]byte, error) {
+	// shadow 不带 MarshalJSON 方法，避免无限递归。
+	type shadow MessageProtection
+	out := shadow(p)
+	out.EndToEndEncrypted = false
+	return json.Marshal(out)
 }
 
 // IsExpiredAt reports whether the message is past its expiration.
@@ -115,7 +158,7 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 				Copyable:          true,
 				ScreenshotWarn:    false,
 				ExpiresAt:         &in30d,
-				EndToEndEncrypted: true,
+				EndToEndEncrypted: false,
 			}
 		}
 		return MessageProtection{
@@ -123,7 +166,7 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 			Copyable:          false,
 			ScreenshotWarn:    true,
 			ExpiresAt:         &in30d,
-			EndToEndEncrypted: true,
+			EndToEndEncrypted: false,
 		}
 	case "IMAGE":
 		if conversationType == "GROUP" {
@@ -132,7 +175,7 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 				Copyable:          false,
 				ScreenshotWarn:    true,
 				ExpiresAt:         &in30d,
-				EndToEndEncrypted: true,
+				EndToEndEncrypted: false,
 			}
 		}
 		return MessageProtection{
@@ -142,7 +185,7 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 			ScreenshotWarn:      true,
 			ViewLimit:           3,
 			ExpiresAt:           &in30d,
-			EndToEndEncrypted:   true,
+			EndToEndEncrypted: false,
 		}
 	case "VIDEO", "AUDIO":
 		// RFC defines VIDEO for DM. Group video uses IMAGE protection.
@@ -153,7 +196,7 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 			ScreenshotWarn:      true,
 			ViewLimit:           1,
 			ExpiresAt:           &in30d,
-			EndToEndEncrypted:   true,
+			EndToEndEncrypted: false,
 		}
 	case "LOCATION":
 		return MessageProtection{
@@ -163,7 +206,7 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 			ScreenshotWarn:      true,
 			ViewLimit:           1,
 			ExpiresAt:           &in1h,
-			EndToEndEncrypted:   true,
+			EndToEndEncrypted: false,
 		}
 	case "SYSTEM_CONTEXT", "STRUCTURED_SUGGESTION":
 		// Server-generated. Always forwardable, never expires.
@@ -179,7 +222,7 @@ func DefaultProtectionFor(messageType, conversationType string) MessageProtectio
 		Forwardable:       false,
 		ScreenshotWarn:    true,
 		ExpiresAt:         &in30d,
-		EndToEndEncrypted: true,
+		EndToEndEncrypted: false,
 	}
 }
 
@@ -236,6 +279,112 @@ func Apply(base MessageProtection, override ProtectionOverride, now time.Time) (
 		out.ViewLimit = v
 	}
 	if override.TTL != nil {
+		d := *override.TTL
+		if d < 0 || d > 365*24*time.Hour {
+			return MessageProtection{}, ErrProtectionTTLOutOfRange
+		}
+		exp := now.Add(d)
+		out.ExpiresAt = &exp
+	}
+	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// COMP-CHAT-001 — transaction-linked conversations must stay auditable.
+//
+// A marketplace where both parties can make a paid meet-up untraceable
+// (burn-after-read, view caps, screenshot blocking) is the fact pattern used
+// to argue the platform knowingly facilitated brokering. The anti-leak knobs
+// stay for social conversations; they are switched off and locked off
+// wherever money changes hands between users.
+// ---------------------------------------------------------------------------
+
+// TransactionLinkedOrigins are conversation origins that carry a commercial
+// transaction between two users. These threads are business evidence.
+var TransactionLinkedOrigins = map[string]bool{
+	"TASK":     true,
+	"SERVICE":  true,
+	"ACTIVITY": true,
+	"NEED":     true,
+	"OFFER":    true,
+	"ORDER":    true,
+}
+
+// IsTransactionLinkedOrigin reports whether the origin carries money.
+func IsTransactionLinkedOrigin(originType string) bool {
+	return TransactionLinkedOrigins[strings.ToUpper(strings.TrimSpace(originType))]
+}
+
+// ErrEphemeralNotAllowed is returned when a caller tries to make a
+// transaction-linked message disappear.
+var ErrEphemeralNotAllowed = errors.New("ephemeral messaging is disabled on transaction-linked conversations")
+
+// TransactionLinkedProtection is the auditable envelope: nothing expires,
+// nothing is view-capped, forwarding and screenshots stay available.
+func TransactionLinkedProtection() MessageProtection {
+	return MessageProtection{
+		Forwardable:         true,
+		Copyable:            true,
+		ScreenshotProtected: false,
+		ScreenshotWarn:      false,
+		ViewLimit:           0,
+		ExpiresAt:           nil,
+		EndToEndEncrypted:   false,
+	}
+}
+
+// EphemeralityPolicy decides which anti-leak knobs a caller may move.
+type EphemeralityPolicy struct {
+	AllowViewLimit bool
+	AllowTTL       bool
+	AllowAntiLeak  bool
+}
+
+// PolicyForOrigin returns the ephemerality policy for a conversation origin.
+// Transaction-linked origins get an all-false policy: locked down.
+func PolicyForOrigin(originType string) EphemeralityPolicy {
+	if IsTransactionLinkedOrigin(originType) {
+		return EphemeralityPolicy{}
+	}
+	return EphemeralityPolicy{AllowViewLimit: true, AllowTTL: true, AllowAntiLeak: true}
+}
+
+// ApplyWithPolicy layers the override on top of base, refusing any override
+// the policy does not allow. Plain Apply stays for social conversations.
+func ApplyWithPolicy(base MessageProtection, override ProtectionOverride, now time.Time, policy EphemeralityPolicy) (MessageProtection, error) {
+	out := base
+	if override.Forwardable != nil {
+		if !policy.AllowAntiLeak {
+			return MessageProtection{}, ErrEphemeralNotAllowed
+		}
+		out.Forwardable = *override.Forwardable
+	}
+	if override.Copyable != nil {
+		if !policy.AllowAntiLeak {
+			return MessageProtection{}, ErrEphemeralNotAllowed
+		}
+		out.Copyable = *override.Copyable
+	}
+	if override.Warn != nil {
+		if !policy.AllowAntiLeak {
+			return MessageProtection{}, ErrEphemeralNotAllowed
+		}
+		out.ScreenshotWarn = *override.Warn
+	}
+	if override.ViewLimit != nil {
+		if !policy.AllowViewLimit {
+			return MessageProtection{}, ErrEphemeralNotAllowed
+		}
+		v := *override.ViewLimit
+		if v < 0 || v > 100 {
+			return MessageProtection{}, ErrProtectionViewLimitOutOfRange
+		}
+		out.ViewLimit = v
+	}
+	if override.TTL != nil {
+		if !policy.AllowTTL {
+			return MessageProtection{}, ErrEphemeralNotAllowed
+		}
 		d := *override.TTL
 		if d < 0 || d > 365*24*time.Hour {
 			return MessageProtection{}, ErrProtectionTTLOutOfRange

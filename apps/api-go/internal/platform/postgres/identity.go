@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -942,6 +943,58 @@ func (r *IdentityRepository) RecordLegalConsent(ctx context.Context, userID, doc
 		ON CONFLICT (user_id, doc_kind, doc_version) DO NOTHING
 	`, id, userID, docKind, docVersion, ip, userAgent)
 	return err
+}
+
+// COMP-AGE-001: 把注册时通过 18+ 判定的出生日期写进年龄断言流水
+// （migrations/085）。Append-only —— 每次重新断言追加一行，不覆盖历史，
+// 这样「改年龄」会留下痕迹而不是被抹掉。取当前年龄按 asserted_at 取最新一行。
+func (r *IdentityRepository) RecordAgeAssertion(ctx context.Context, userID, dateOfBirth, source, ip, userAgent string) error {
+	if source == "" {
+		source = "SELF_DECLARED_AT_SIGNUP"
+	}
+	// 日期必须是 YYYY-MM-DD：createAnonymousSession 已经用同样的布局解析过
+	// 一次，这里再确认一遍，避免把无法比较的字符串写进 DATE 列。
+	if _, err := time.Parse("2006-01-02", dateOfBirth); err != nil {
+		return fmt.Errorf("age assertion has an unparseable date of birth: %w", err)
+	}
+	id := "age_" + userID + "_" + time.Now().UTC().Format("20060102150405.000000")
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO identity.user_age_assertions
+		(id, user_account_id, date_of_birth, source, asserted_at, ip, user_agent)
+		VALUES ($1, $2, $3::date, $4, now(), NULLIF($5, '')::inet, NULLIF($6, ''))
+	`, id, userID, dateOfBirth, source, ip, userAgent)
+	return err
+}
+
+// AgeAt 计算某账号「当前年龄」：按 asserted_at 取最新一条断言。
+// 查不到返回 0 —— 调用方必须把「查不到」当成「没有年龄证据」处理，
+// 不能当成成年（fail-closed）。
+func (r *IdentityRepository) AgeAt(ctx context.Context, userID string, at time.Time) (int, error) {
+	var dob time.Time
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT date_of_birth
+		FROM identity.user_age_assertions
+		WHERE user_account_id = $1
+		ORDER BY asserted_at DESC
+		LIMIT 1
+	`, userID).Scan(&dob)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return calendarAge(dob.UTC(), at.UTC()), nil
+}
+
+// calendarAge 用日历日比较，不用天数除法 —— 18 岁生日当天就该算成年
+// （与 createAnonymousSession 里的 18+ 判定保持一致）。
+func calendarAge(dob, at time.Time) int {
+	age := at.Year() - dob.Year()
+	if at.YearDay() < dob.YearDay() {
+		age--
+	}
+	return age
 }
 
 // ListLegalConsents returns the consent rows the user has on file, in

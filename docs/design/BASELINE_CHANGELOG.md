@@ -4,6 +4,209 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 180 — 2026-09-13
+
+- 活动冷启动种子的 AI persona 写真路径从旧 SVG（ai-personas/ai_00X.svg）
+  统一为新 PNG（ai-personas/photos/ai_00X.png），与首页/消息/AI-ASSIST-001
+  目录的写真资产三处同步。activity 卡片的可见头像仍走
+  aiPersonaAvatar/aiPersonaName（emoji + 名称），此字段为资产元数据
+  一致性修正，不改渲染。
+
+## Revision 179 — 2026-09-13
+
+- COMP-REPORT-002（续完）：举报入口补齐最后四类 —— **活动 / 商家 / 机会 /
+  邀约**。至此法律文件 §38 承诺的八类目标，用户在界面上都点得到。
+  - 活动详情页底部常驻两个入口：举报这条活动（ACTIVITY，target=activityId）；
+    主办方是商家时再列一个「举报主办商家」（MERCHANT，target=ownerId）。
+    只列商家入口当且仅当 `origin === "MERCHANT"` 且 ownerId 非空 —— 报上去
+    一条查不到的 id 比没有入口更糟。
+  - 订单详情页（机会详情）底部常驻入口：公开机会报 OPPORTUNITY、定向邀约报
+    INVITE（同一个服务端实体，区别只在 targetAccountId 是否为空），
+    target 一律用服务端 opportunity.id。
+    **刻意不用**界面上那个 `PX-O-…` 编号：它是 `formatTraceId` 客户端随机
+    生成的展示号，服务端根本不认，报上去等于白报。
+  - 「这一类对象该报成哪一类」抽成 `moderation-client.ts` 里的两个纯函数
+    （`activityReportTargets` / `opportunityReportTarget`）而不是写在 JSX 里，
+    因为入口还会继续增加，判定逻辑必须能被单独测试。
+  - 门禁 pin 一并从「JSX 里的 targetType 字符串」改为「判定函数名」——
+    上一笔把内联弹层抽成 ReportSheet 时，钉字符串的那条 pin 直接误报：
+    能力还在，只是实现挪了位置。
+  **有视觉改动**：活动详情底部多一排举报按钮（1–2 个）；订单详情底部多一个
+  「举报这条机会 / 邀约」按钮。
+
+## Revision 178 — 2026-09-13
+
+- COMP-REPORT-002（续）：举报入口补齐**账号**与**交易**。
+  上一笔只做了「消息」，8 类里用户能点到 2 类。这两类和消息同属高风险面，
+  而且各自对应不同的事实形态：冒充身份是看**整个账号**看出来的（不是某条
+  帖子），诈骗与招嫖揽客落在**订单**上（不是某条消息）。
+  - 他人主页（other-profile）顶栏加「举报」→ 报 ACCOUNT（target=userId）。
+  - 我的订单 → 订单详情加「举报这笔交易」→ 报 TRANSACTION（target=orderId）。
+  - 原因选择抽成共用组件 `components/report-sheet.tsx`，三个入口共用同一份
+    REPORT_REASONS —— 各抄一份的话，迟早有一份忘了跟着更新理由清单。
+  - 会话页改为复用该组件（原来那份内联实现删掉），理由排序与错误提示
+    因此与另两个入口一致。
+  **有视觉改动**：他人主页顶栏多「举报」；订单详情多「举报这笔交易」按钮；
+  会话的举报弹层改用共用组件（结构一致，配色随共用样式）。
+  仍未接入口：活动 / 机会 / 商家 / 邀约（4 类）。
+
+## Revision 177 — 2026-09-13
+
+- COMP-REPORT-002（越南合规整改）：举报入口要真的能被用户点到。
+  上一笔（176）把服务端接上了，八类目标全部受理，但移动端入口只有
+  feed 帖子菜单里的「举报」—— 用户能碰到的仍然只有 1/8，而招嫖揽客、
+  人身威胁、涉未成年人这些恰恰发生在**消息**里。接口接得上而用户点不到，
+  等于没改；那正是我在 COMP-E2EE-002 里刚批评过的同一个毛病
+  （改了后端就宣称解决了）。
+  新增 `src/moderation-client.ts`（`reportTarget`）并在会话页长按菜单加
+  「举报」→ 原因选择。理由清单里 SOLICITATION（招嫖 / 线下付费招揽）与
+  MINOR_SAFETY（涉未成年人）**排在前面** —— 用户慌的时候要能一眼找到，
+  不该让他翻九行。
+  **有视觉改动**：会话长按菜单多一项「举报」，新增原因选择底部弹层。
+
+## Revision 176 — 2026-09-13
+
+- COMP-REPORT-001（越南合规整改）：把「用户举报」真正接下来。
+  服务条款 §38 与隐私政策都承诺用户可以举报内容 / 消息 / 账号 / 活动 /
+  机会 / 商家 / 邀约 / 交易，但代码里只有 `engagement.ReportPost` 一个
+  入口 —— 承诺 8 类，接得上 1 类，而最重的刑事风险（刑法 327 条介绍卖淫）
+  恰恰发生在 MESSAGE / ACCOUNT / TRANSACTION 上：没有入口，平台既收不到
+  线索，也拿不出「收到过、处理过」的证据。电商法 122/2025 与
+  NĐ 147/2024 也都要求平台提供举报受理渠道。
+  新增 `internal/moderation`（命令 `ReportTarget`）+ 迁移
+  `086_moderation_reports.sql`（`moderation.reports`，append-only）。
+  理由枚举补上了 MINOR_SAFETY 与 SOLICITATION —— 原接口只有
+  SPAM / HARASSMENT / UNSAFE / OTHER，涉未成年人与线下招嫖只能塞进
+  UNSAFE，运营看不出该优先处理哪一条。
+  本包只做受理与留痕，不做裁决、不做自动处置（要人判断）。
+  一律 fail-closed：目标类型不认识、目标 ID 为空、理由不认识、举报人身份
+  拿不到，全部拒绝；写库失败必须报出来，不能当成「已受理」。
+  **无视觉改动**（接口层，移动端尚未接入举报入口）。
+- 同步：`openapi.commands.generated.yaml` 重新生成（210 → 211 条），
+  并把新域 `moderation` 登记进 `openapicmds.DomainDir`（不登记的话
+  生成器扫不到新命令，spec 会静默缺失）。
+
+## Revision 175 — 2026-09-13
+
+- COMP-E2EE-002（合规整改）：用户看得到的地方不许出现做不到的加密承诺。
+  001 只钉住了后端字段，但真正对用户作出承诺的是 UI 文案与法律文件：
+  设置页「安全」卡片原本直接显示「🔒 端到端加密 / 军用级 AES-256 /
+  已开启 · 始终保护」；ToS §16 把它列进 Secure Chat 功能清单；隐私政策
+  原文写着「如果 Proxy 明确标记某会话为端到端加密 Secure Chat…」。
+  平台没有 E2EE，这些都是虚假陈述（RFC 里甚至直白写着「这是让人觉得
+  安全」）。改为如实表述：卡片改成「🔒 加密与访问控制」+ 传输/静态加密
+  说明 + 「不提供 E2EE（端到端）加密」；法律文件改为明确声明目前不提供，
+  并说明为履行法律义务、处理举报与安全审计可能访问通信内容。
+  **有视觉改动**：设置页第一张安全卡片标题与正文文案变化。
+  门禁新增 COMP-E2EE-002：法律文件不许把它当功能列、必须写明不提供；
+  `apps/mobile/src` 里该能力名一律不得出现；HTML 原型不许再画该徽标。
+- 同步修订：`docs/legal/vietnam/*`（3 份）与 `apps/api-go/internal/api/
+  legal_docs/*`（go:embed 实际对外服务的那份，是另一份拷贝，同样要改）。
+
+## Revision 174 — 2026-09-13
+
+- COMP-E2EE-001（合规整改）：不再宣称做不到的加密。
+  `MessageProtection.EndToEndEncrypted` 此前恒为 true，理由写的是
+  「transport TLS + at-rest KMS」—— 那不是端到端加密，两种情况服务端都能
+  读到明文。对用户挂一把兑现不了的锁是虚假安全声明，且与 COMP-CHAT-001
+  冲突（付费会话必须保留可审计记录）。默认值、发送路径、序列化边界三处
+  都钉死为 false；`security.mode` 的判定不变（以前实际生效的一直是
+  ScreenshotProtected）。**无视觉改动** —— 移动端从未读取该字段。
+
+## Revision 173 — 2026-09-13
+
+- COMP-AI-MINOR-001（越南合规整改）：AI 伴侣 / 数字分身不对未成年人开放。
+  越南 AI 法 134/2025/QH15（2026-03-01 生效）要求对未成年人采取保护措施，
+  陪伴型 AI（数字分身、平台 AI 角色）是点名场景。`CreatePersona` 现在在建
+  之前先查年龄（前置的年龄信号来自 COMP-AGE-001）：没接查询 / 没有年龄证据 /
+  确认未成年，三种都拒绝。**无视觉改动**；成年人不受影响。
+  ⚠️ 副作用：注册在 COMP-AGE-001 之前的历史账号没有年龄断言，需要补一条
+  才能建分身 —— 这是 fail-closed 的代价，我们主动选的。
+
+## Revision 172 — 2026-09-13
+
+- COMP-AGE-001（越南合规整改）：把注册时那条已经通过 18+ 判定的出生日期
+  留下来。`CreateAnonymousSession` 一直在服务端判 18+，判完就把
+  `dateOfBirth` 丢了（`identity.user_accounts` 没有任何年龄字段）——
+  于是「这个用户满 18」只在注册那一瞬间成立，无法复查、无法举证，
+  AI 法 134/2025 要求的未成年人保护也因为没有年龄信号而无从做起。
+  新增 `identity.user_age_assertions`（migrations/085，append-only，
+  按 asserted_at 取最新；只存出生日期，不存证件影像）。
+  走与同意记录相同的可选接口断言，缺表不会拖垮注册主流程。
+  **无视觉改动、无 API 契约改动。**
+
+## Revision 171 — 2026-09-13
+
+- COMP-SELLER-001（越南合规整改）：供给侧实名成为准入条件。
+  越南电商法 122/2025 + NĐ 248/2026（2026-07-01 生效）禁止匿名销售，
+  而此前 supply 侧只有「能力验证」（会不会中文），完全没有「是谁」的证据。
+  新增 `supply.seller_real_name_verifications`（migrations/084），
+  `Eligibility` 增加 `realNameVerified`，未实名或未接查询的卖家不再进候选集
+  （fail-closed）。**无视觉改动**；`Candidate` 快照多一个布尔字段。
+- ⚠️ 已知副作用：库里目前没有任何实名记录，因此**开发环境的撮合候选集会是空的**，
+  直到为对应 agent 写入 status='VERIFIED' 的记录（method=OPERATOR_ATTESTATION
+  时需有具名的 verified_by）。这是刻意的，不是 bug。
+
+## Revision 170 — 2026-09-13
+
+- COMP-ID-002（越南合规整改）：`apps/api-go/cmd/api/main.go` 里把
+  「账号是否交易过」的查询接到真实资金表（`payment.payment_intents` /
+  `payout_holds` / `ledger_entries` / 已结算 `fulfillment.orders`）。
+  此前 `SetTransactionHistoryLookup` 没有接线，COMP-ID-001 的守卫恒为
+  fail-closed —— 安全但等于没查，形同虚设。**无视觉改动、无 API 契约改动**；
+  新增 `migrations/083` 只加索引。
+- TEST-ABSDATE-001 / 002：修掉两处「测试夹具写死绝对日期」的时间炸弹。
+  **无产品视觉改动、无行为改动**，只动测试夹具。
+  - `apps/api-go/internal/business/service_test.go`：`bucketDate` 写死
+    `2026-09-06`，而 `GetMerchantOperatingHome` 走的是 7 天滚动窗口，
+    日期滚出去后 `OrderCount` 恒为 0，代码没动而 g2 全红。改为按当天现算。
+  - `apps/mobile/src` 17 个测试文件：`SecureSessionStore.write()` 拒收
+    `refreshExpiresAt` 不在未来的 session，夹具里写死的日期到点即过期。
+    统一改为 `Date.now() + 30d`；`secure-session.test.ts` 里那条需要
+    「已过期」的用例改为按该用例假时钟显式造过期，不再靠日期自然变老。
+- 门禁新增两条钉子，防止同类写法再进仓库：api-go 测试禁止写死
+  `bucketDate`，mobile 测试夹具禁止写死 `refreshExpiresAt`。
+
+## Revision 169 — 2026-09-12
+
+- FEED-SCOPE-001：时间范围判定从 `feed.tsx` 的两份内联拷贝抽成共用的
+  `src/feed-scope-filter.ts`（`isPostWithinScope`）。两份拷贝此前已经漂移 ——
+  横幅那个「已隐藏 N 篇」把 hidden/muted 的帖子也算进去，会多报。
+  现在横幅的计数 = 「不筛选时可见数 − 当前可见数」，与过滤用同一个谓词。
+  **无视觉改动**；未标注日期的帖子改为保留而非丢弃（此前会被静默过滤掉）。
+
+## Revision 168 — 2026-09-12
+
+- AI-ASSIST-001 相关：**5 张 AI 小美写真此前在常规开发启动方式下全部 404**
+  （`personaPhoto` 用仓库根相对路径，而 `scripts/dev-api.sh` 从 `apps/api-go`
+  启动）。首页 AI 助手行因此渲染 5 个空框。改为从工作目录向上定位仓库资源目录，
+  环境变量 `PROXY_AI_PERSONA_ASSETS_DIR` 仍优先。**这是把本该显示的图片显示出来，
+  不是视觉改动。**
+- 启动种子 `seedPostgresMedia()` 不再无条件把资产写成 `READY`：文件不在
+  media_store 里就写 `FAILED` 并打日志。此前手工修好的状态会在下次 API 启动时
+  被重新覆盖成「有字节」的谎言，导致图片重新变成黑块。**无视觉改动。**
+
+## Revision 167 — 2026-09-12
+
+- SCROLL-CHROME-001：六个信息流页面（messages / feed / market / me /
+  requester-home / business-home）原先各抄一份「上滑隐藏 chrome」的逻辑，
+  现统一到 `apps/mobile/src/shell/scroll-chrome.ts`。**页面视觉样式不变**；
+  变的是交互行为：隐藏 chrome 之后 150ms 内忽略 scroll 事件，避免
+  「内容高度骤减 → offset 被 clamp → 负 delta 被当成用户上滑 → 又显示」
+  的无限振荡（表现为消息列表滑到底部自动弹回中部、顶部 logo 黑屏/显示闪）。
+  market 原有的 nearBottom 否决（到底部保留工具栏）通过 canHide 保留。
+- FEED-SCOPE-001：动态时间范围不再默认「近 7 天」（改为长期），
+  正在按时间筛选时显示可关闭的横幅。**这是信息架构改动，不是视觉改动**：
+  原先 62% 的帖文被静默隐藏且无任何提示。
+- MEDIA-FILE-001：图片加载失败不再渲染成黑块，改为带文案的占位
+  （`media-unavailable-v1`）。**这是新的可见状态**，此前该状态被黑块掩盖。
+
+## Revision 166 — 2026-09-12
+
+- 修市场订单 / 活动双页 Pager 的发布向导双实例：订单向导只驻留订单页，活动向导只驻留活动页；移除状态切换时强制重建 ScrollView，已加载活动刷新保持原卡片，避免上下切换闪屏。
+- 头像本机副本按 `userAccountId` 分区命名、首帧只读当前账户目录；账户 id 到达后重新挂载资料页，禁止同机账号先闪出另一人的头像。
+- 页面视觉样式不变；补充 UI 回归守卫，固定单实例发布和账户头像边界。
+
 ## Revision 165 — 2026-09-12
 
 - AI-ASSIST-001：首页 AI 助手推荐目录（AI-ASSIST-001）—— 5 小美公开目录

@@ -1477,3 +1477,755 @@ require_test "OTP-SINGLE-CODE-001" "./internal/platform/postgres" \
 require_test "OTP-THROTTLE-001" "./internal/platform/postgres" \
   "TestLoginChallengeRequestThrottle" \
   "apps/api-go/internal/platform/postgres/otp_protection_integration_test.go" || exit $?
+
+# DEVICE-METROHOST-001: a `MetroHost` key committed into the *versioned*
+# apps/mobile/ios/Proxy/Info.plist pins every device to one LAN IP and
+# COMPLETELY bypasses AppDelegate.bundleURL()'s Bonjour fallback — so the next
+# DHCP lease change leaves the phone stuck on "Could not connect to the
+# development server" with no recovery short of a native rebuild.
+# Escaped 2026-09-12: commit d4dadba baked in the then-current 192.168.115.138
+# to work around a stale on-device mDNS cache; hours were lost before anyone
+# thought to read the plist.
+#
+# The escape hatch is now a *launch-time* environment variable, which needs no
+# file edit and no rebuild:
+#   METRO_HOST=192.168.1.23 ./scripts/dev-ios-device.sh install
+# So the tracked plist must stay clean. Three pins: the key stays absent, the
+# env override stays wired, and the Bonjour fallback is not deleted in a
+# misguided attempt to "fix" the plist.
+if grep -q '<key>MetroHost</key>' apps/mobile/ios/Proxy/Info.plist; then
+  echo "  FAIL [DEVICE-METROHOST-001]: apps/mobile/ios/Proxy/Info.plist hardcodes MetroHost." >&2
+  echo "        That bypasses AppDelegate's Bonjour fallback and pins every device to one LAN IP." >&2
+  echo "        Delete the <key>MetroHost</key> / <string>...</string> pair." >&2
+  echo "        For an emergency override use: METRO_HOST=<ip> ./scripts/dev-ios-device.sh install" >&2
+  echo "        See docs/development/SOP_DYNAMIC_IP_DEVICES.md §7.1." >&2
+  exit 1
+fi
+if ! grep -q 'environment\["METRO_HOST"\]' apps/mobile/ios/Proxy/AppDelegate.swift; then
+  echo "  FAIL [DEVICE-METROHOST-001]: AppDelegate.swift no longer honours the METRO_HOST env override." >&2
+  echo "        Without it there is no rebuild-free way to point a device at Metro," >&2
+  echo "        which is exactly what tempted someone into committing MetroHost." >&2
+  exit 1
+fi
+if ! grep -qE '"[A-Za-z0-9._-]+\.local"' apps/mobile/ios/Proxy/AppDelegate.swift; then
+  echo "  FAIL [DEVICE-METROHOST-001]: AppDelegate.swift lost its Bonjour (.local) host fallback." >&2
+  echo "        Removing the fallback re-breaks every device the moment the Mac IP changes." >&2
+  exit 1
+fi
+echo "    DEVICE-METROHOST-001: PASS (no committed MetroHost; env override + Bonjour fallback intact)"
+
+# ---------------------------------------------------------------------------
+# Escaped 2026-09-12 — three P0s that no gate covered. They are recorded here
+# in the order they were reported: the messages-list oscillation, the missing
+# feed posts, and the black images.
+# ---------------------------------------------------------------------------
+
+# SCROLL-CHROME-001: hiding the shell chrome while scrolling used to feed back
+# into the scroll itself. Hiding unmounts the shell Header (the Otter logo
+# lives there) and shrinks several surfaces' bottom padding, so the scroll
+# container's content height drops; the current offset is then past the end, RN
+# clamps it, and the clamp arrives as a NEGATIVE-delta scroll event — which the
+# same controller reads as "user scrolling up" and shows the chrome again.
+# Infinite oscillation: the messages list snapped back to the middle and the
+# logo blinked on and off. Six surfaces each carried their own copy of the
+# rule, so the fix is a shared controller that ignores scroll events until the
+# layout has settled.
+for surface in messages feed market me requester-home business-home; do
+  if ! grep -q 'useScrollChrome' "apps/mobile/src/surfaces/${surface}.tsx"; then
+    echo "  FAIL [SCROLL-CHROME-001]: apps/mobile/src/surfaces/${surface}.tsx does not use the shared scroll-chrome controller." >&2
+    echo "        A hand-rolled copy re-introduces the hide/show feedback loop." >&2
+    echo "        Use useScrollChrome() from apps/mobile/src/shell/scroll-chrome.ts." >&2
+    exit 1
+  fi
+done
+if ! grep -q 'SCROLL-CHROME-001' apps/mobile/src/shell/scroll-chrome.test.ts; then
+  echo "  FAIL [SCROLL-CHROME-001]: the scroll-chrome regression test is missing." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/shell/scroll-chrome.test.ts || exit $?
+echo "    SCROLL-CHROME-001: PASS (settle guard kills the clamp echo; all 6 surfaces on the shared controller)"
+
+# FEED-SCOPE-001: the feed's default time scope was "7D", a window that rolls
+# against Date.now(). Posts silently aged out of the timeline — measured at
+# 24 of 39 posts (62%) hidden — with no indicator anywhere that a filter was
+# active, so it read as "the data is gone". The API was never at fault.
+if ! grep -q 'FEED-SCOPE-001' apps/mobile/src/expo-feed-prefs-store.test.ts ||
+   ! grep -q 'scope: "PERSISTENT"' apps/mobile/src/expo-feed-prefs-store.ts; then
+  echo "  FAIL [FEED-SCOPE-001]: the feed default scope regressed to a rolling window." >&2
+  echo "        A rolling default hides posts silently; time range is a user choice, not a default." >&2
+  exit 1
+fi
+# The filter itself must be the shared, tested predicate — not a second inline
+# copy in the surface. Two copies had already drifted (the banner over-counted).
+if ! grep -q 'isPostWithinScope' apps/mobile/src/surfaces/feed.tsx ||
+   ! grep -q 'FEED-SCOPE-001' apps/mobile/src/feed-scope-filter.test.ts; then
+  echo "  FAIL [FEED-SCOPE-001]: feed.tsx no longer uses the shared, tested scope predicate." >&2
+  echo "        Inline copies of this filter drift apart and silently hide content." >&2
+  exit 1
+fi
+if ! grep -q 'feed-scope-banner-v1' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-SCOPE-001]: the feed no longer tells the user that a time filter is active." >&2
+  echo "        Silent filtering is what made this look like data loss." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/expo-feed-prefs-store.test.ts src/feed-scope-filter.test.ts || exit $?
+echo "    FEED-SCOPE-001: PASS (default is long-lived; explicit 7D/30D still honoured; shared predicate; filter is visible)"
+
+# MEDIA-FILE-001: the read model advertised URLs for media whose bytes were
+# gone. 104 of 528 READY variants (19.7%, across 27 assets) had no file behind
+# them; expo-image renders a failed request as nothing, so the parent's dark
+# background showed through as a black rectangle — indistinguishable from "this
+# post has no image".
+require_test "MEDIA-FILE-001" "./internal/media" \
+  "TestPostMediaLookupDoesNotAdvertiseMissingFiles" \
+  "apps/api-go/internal/media/media_file_gating_test.go" || exit $?
+require_test "MEDIA-FILE-001" "./internal/media" \
+  "TestMediaFilePresenceRejectsMissingAndTraversalKeys" \
+  "apps/api-go/internal/media/media_file_gating_test.go" || exit $?
+# MEDIA-FILE-001 (second instance): static repo assets resolved from a bare
+# relative path. The AI persona photos are not media_variants rows, so the DB
+# sweep cannot see them — they 404'd from the API's real working directory
+# (apps/api-go) and the home screen rendered five empty frames.
+require_test "MEDIA-FILE-001" "./internal/api" \
+  "TestResolveRepoDirFindsAssetsFromNestedWorkingDir" \
+  "apps/api-go/internal/api/aipersona_assets_test.go" || exit $?
+for client_file in media-fallback.tsx AdaptiveMediaCollection.tsx SocialMediaFrame.tsx; do
+  if ! grep -q 'media-unavailable-v1\|isMediaUnavailable\|UnavailableMedia' "apps/mobile/src/media/${client_file}"; then
+    echo "  FAIL [MEDIA-FILE-001]: apps/mobile/src/media/${client_file} lost the labelled media placeholder." >&2
+    echo "        Without it a failed image renders as a black frame again." >&2
+    exit 1
+  fi
+done
+if ! grep -q 'media object MISSING' apps/api-go/internal/api/media_handlers.go; then
+  echo "  FAIL [MEDIA-FILE-001]: serving a missing media object no longer logs distinctly." >&2
+  echo "        Success and failure used to log the identical line, which is why 104 dead URLs went unnoticed." >&2
+  exit 1
+fi
+# Live DB <-> disk sweep. The unit test pins the code contract; this pins the
+# data. It needs the dev postgres, so it skips loudly rather than lie.
+if curl -sf --noproxy '*' --max-time 3 http://127.0.0.1:4100/health/ready >/dev/null 2>&1; then
+  (cd apps/api-go && PROXY_MEDIA_STORE_DIR="${PROXY_MEDIA_STORE_DIR:-$HOME/Developer/kake-data/media_store}" \
+    go run ./cmd/media-audit --check-files) || exit $?
+  echo "    MEDIA-FILE-001: PASS (live store sweep: no READY object without bytes)"
+  # And the end-to-end view: every media URL the feed actually hands out must
+  # resolve. A 404 here is precisely the black frame the user reported.
+  # NO_PROXY: some dev shells export an HTTP_PROXY that blackholes 127.0.0.1.
+  NO_PROXY='*' no_proxy='*' node scripts/check-feed-media-urls.mjs || exit $?
+  echo "    MEDIA-FILE-001: PASS (feed media URLs all resolve)"
+else
+  echo "    MEDIA-FILE-001: SKIP (dev API is down — live checks need postgres; run go -C apps/api-go run ./cmd/media-audit --check-files and node scripts/check-feed-media-urls.mjs)"
+fi
+
+# AI-ROW-DUPE-001: Home rendered the same AI catalogue twice. The upper AI
+# assistants row and the lower "AI 推荐" row both read /v1/ai/assistants, so the
+# screen showed two identical horizontal rails both labelled AI 生成. Reading
+# the same server data twice is invisible in code review — it only shows up on
+# the device — so the gate pins the single-row contract in the discovery test
+# instead of trusting the deletion.
+if ! grep -q 'AI-ROW-DUPE-001' apps/mobile/src/requester-home-discovery-contract.test.ts; then
+  echo "  FAIL [AI-ROW-DUPE-001]: the single-AI-row regression test is missing." >&2
+  exit 1
+fi
+if grep -q '<AIAssistantsRow' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [AI-ROW-DUPE-001]: requester-home mounts a second AI row again." >&2
+  echo "        Both rows read /v1/ai/assistants, so the screen shows the same five AI twice." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/requester-home-discovery-contract.test.ts || exit $?
+echo "    AI-ROW-DUPE-001: PASS (home renders exactly one AI row)"
+
+# COMP-CHAT-001: a paid engagement must keep an auditable thread. The chat was
+# modelled on a privacy messenger, so every DM defaults to burn-after-read,
+# view caps and screenshot blocking. On a marketplace where users pay each
+# other to meet, that combination is the fact pattern used to argue the
+# platform knowingly facilitated brokering — a criminal exposure for the
+# operators, not a fine. Anti-leak stays for social conversations and is
+# locked off wherever money moves (OriginType TASK/SERVICE/ACTIVITY/NEED/
+# OFFER/ORDER), with the server — not the client — doing the refusing.
+require_test "COMP-CHAT-001" "./internal/conversation" \
+  "TestTransactionLinkedProtectionIsAuditable" \
+  "apps/api-go/internal/conversation/message_protection_compliance_test.go" || exit $?
+require_test "COMP-CHAT-001" "./internal/conversation" \
+  "TestApplyWithPolicyRefusesEphemeralOverridesOnTransaction" \
+  "apps/api-go/internal/conversation/message_protection_compliance_test.go" || exit $?
+require_test "COMP-CHAT-001" "./internal/conversation" \
+  "TestPolicyForOriginLocksEveryPaidOrigin" \
+  "apps/api-go/internal/conversation/message_protection_compliance_test.go" || exit $?
+# Enforcement has to live in the send path. A client-side check can be
+# patched out of an installed build in minutes.
+if ! grep -q 'ApplyWithPolicy' apps/api-go/internal/conversation/service.go ||
+   ! grep -q 'IsTransactionLinkedOrigin' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [COMP-CHAT-001]: the send path no longer routes protection through the compliance policy." >&2
+  echo "        Only a server-side refusal holds; a client-side check can be patched out." >&2
+  exit 1
+fi
+# Wording matters as much as code. The original spec named its acceptance
+# scenarios after pimps, sex workers and "running away"; a document that
+# describes a criminal trade as the target reads as a statement of intent
+# and is more damaging than any single code path. Removed on purpose.
+# Extension allowlist, not a directory scan: design HTML embeds base64
+# blobs that randomly contain these byte sequences and would fail the
+# build on a false positive.
+if git grep -niI -e 'pimp' -e '鸡头' -e '跑路' -e '小妹' -- \
+     '*.go' '*.ts' '*.tsx' '*.md' '*.sql' | grep -q .; then
+  echo "  FAIL [COMP-CHAT-001]: the repository names a criminal trade as a target scenario." >&2
+  echo "        In an investigation this reads as a statement of intent, not an accident." >&2
+  git grep -niI -e 'pimp' -e '鸡头' -e '跑路' -e '小妹' -- \
+    '*.go' '*.ts' '*.tsx' '*.md' '*.sql' >&2
+  exit 1
+fi
+echo "    COMP-CHAT-001: PASS (paid threads stay auditable; social privacy untouched)"
+
+# COMP-ID-001: a self-destructing persona is incompatible with selling.
+# E-commerce Law 122/2025 (in force 2026-07-01) bans anonymous selling, and
+# burning an identity also destroyed every conversation, message and media
+# conducted under it — the record of the paid engagements. Personas stay as a
+# presentation layer; the self-destructing variant is refused for any account
+# that has transacted, and refused outright when we cannot tell, because
+# "could not check" must never become "allowed".
+require_test "COMP-ID-001" "./internal/identity" \
+  "TestBurnerRefusedForAccountThatTransacted" \
+  "apps/api-go/internal/identity/display_identity_compliance_test.go" || exit $?
+require_test "COMP-ID-001" "./internal/identity" \
+  "TestBurnerRefusedWhenLookupIsMissing" \
+  "apps/api-go/internal/identity/display_identity_compliance_test.go" || exit $?
+require_test "COMP-ID-001" "./internal/identity" \
+  "TestNonBurnerPersonasRemainAvailableToTransactingAccounts" \
+  "apps/api-go/internal/identity/display_identity_compliance_test.go" || exit $?
+# The guard must sit in the command handlers, not only in the helper: a
+# caller that reaches Create/Burn directly would bypass a helper-only check.
+if ! grep -q 'BurnerAllowedFor' apps/api-go/internal/identity/service.go ||
+   ! grep -q 'BURN_FORBIDDEN_FOR_TRANSACTING_ACCOUNT' apps/api-go/internal/identity/service.go; then
+  echo "  FAIL [COMP-ID-001]: persona create/burn no longer enforces the compliance guard." >&2
+  echo "        A self-destructing seller identity defeats real-name selling rules." >&2
+  exit 1
+fi
+echo "    COMP-ID-001: PASS (self-destructing personas refused once an account has transacted)"
+
+# COMP-ID-002: the burner guard is only as strong as its answer to "has this
+# account transacted?". COMP-ID-001 refuses self-destructing personas to
+# accounts with money history; if the lookup behind it is a stub that always
+# answers "no transactions", every seller looks clean and Vietnam's
+# E-commerce Law 122/2025 (in force 2026-07-01, anonymous selling banned) is
+# defeated by nothing more than a one-line shortcut. The opposite stub
+# ("always yes") is just as bad: it turns the guard into a blanket refusal
+# that the team learns to route around. Both directions are pinned here.
+require_test "COMP-ID-002" "./internal/platform/postgres" \
+  "TestTransactionHistoryRefusesEmptyAccountID" \
+  "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+require_test "COMP-ID-002" "./internal/platform/postgres" \
+  "TestTransactionHistoryRefusesWhenPoolMissing" \
+  "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+
+# The lookup must actually query the money tables — not short-circuit.
+transaction_history_file=apps/api-go/internal/platform/postgres/transaction_history.go
+if ! grep -qF 'queryerForContext(ctx, r.pool).QueryRow(ctx, hasTransactedSQL' "$transaction_history_file" ||
+   ! grep -qF 'payment.payment_intents' "$transaction_history_file" ||
+   ! grep -qF 'payment.payout_holds' "$transaction_history_file" ||
+   ! grep -qF 'payment.ledger_entries' "$transaction_history_file" ||
+   ! grep -qF 'fulfillment.orders' "$transaction_history_file"; then
+  echo "  FAIL [COMP-ID-002]: HasTransacted no longer reads the payment ledger." >&2
+  echo "        A lookup that skips the money tables makes the burner guard decorative." >&2
+  exit 1
+fi
+# A signature drift must break the build here, not fail open at runtime.
+if ! grep -qF 'var _ identity.TransactionHistoryLookup = (*TransactionHistoryRepository)(nil)' "$transaction_history_file"; then
+  echo "  FAIL [COMP-ID-002]: TransactionHistoryRepository is no longer pinned to the" >&2
+  echo "        identity.TransactionHistoryLookup contract." >&2
+  exit 1
+fi
+# Wiring: without this the lookup stays nil, which fails closed — meaning
+# "nobody may use a burner" instead of "sellers may not", and the real check
+# silently never runs.
+if ! grep -qF 'SetTransactionHistoryLookup' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'NewTransactionHistoryRepository' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-ID-002]: the money-side lookup is no longer wired in cmd/api/main.go." >&2
+  exit 1
+fi
+# The database-backed half runs whenever a Postgres is reachable. Locally the
+# test helper boots its own throwaway cluster, so an unset DATABASE_URL is
+# fine; with no cluster and no DATABASE_URL those tests skip rather than fail
+# a developer's machine.
+if [ -n "${DATABASE_URL:-}" ] || command -v pg_ctl >/dev/null 2>&1; then
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryDetectsPayingRequester" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryDetectsEarningAgent" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryDetectsHeldPayout" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryDetectsLedgerEntryOnOrder" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestBurnerRefusedForAccountWithRealPaymentIntent" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+  require_test "COMP-ID-002" "./internal/platform/postgres" \
+    "TestTransactionHistoryAllowsBurnerForAccountWithNoMoney" \
+    "apps/api-go/internal/platform/postgres/transaction_history_compliance_test.go" || exit $?
+fi
+echo "    COMP-ID-002: PASS (burner guard reads the real payment tables, both stub directions pinned)"
+
+# TEST-ABSDATE-001: 测试里写死绝对日期 = 定时炸弹。
+# 2026-09-13 全仓库 g2 变红：business/service_test.go 把 bucketDate 写成
+# "2026-09-06"，7 天滚动窗口一过就查不到它，OrderCount 恒为 0，测试自己
+# 就红了 —— 而代码一行没动。同一个坑 2026-09-12 已经在这文件的另一个测试
+# 里修过一次（见 TestSpendDailyUpsertAndList 的注释），这次是漏网的那个。
+# 凡是「相对现在的滚动窗口」的入参，都必须用 time.Now() 现算。
+if grep -rn '"bucketDate": *"20[0-9][0-9]-' apps/api-go --include='*_test.go' | grep -q .; then
+  echo "  FAIL [TEST-ABSDATE-001]: 测试里出现了写死的 bucketDate 日期：" >&2
+  grep -rn '"bucketDate": *"20[0-9][0-9]-' apps/api-go --include='*_test.go' >&2
+  echo "        滚动窗口会把旧日期滚出去，测试会在几天后无缘无故变红。" >&2
+  exit 1
+fi
+echo "    TEST-ABSDATE-001: PASS (no hardcoded bucket dates in api-go tests)"
+
+# TEST-ABSDATE-002: 同一个坑的移动端版本。
+# SecureSessionStore.write() 会拒掉 refreshExpiresAt 不在未来的 session，
+# 所以测试夹具里的 refreshExpiresAt 天生就必须是「未来」。写死成
+# "2026-09-13T00:00:00.000Z" 这种字面量，到了那天就自己过期：
+# 2026-09-13 全仓库 mobile 测试变红，而代码一行没动。
+# 夹具里的时间必须用 Date.now() 现算（+30d 对测试中注入的所有假时钟都是未来）。
+if grep -rn 'refreshExpiresAt: *"' apps/mobile/src --include='*.test.ts' --include='*.test.tsx' | grep -q .; then
+  echo "  FAIL [TEST-ABSDATE-002]: 移动端测试夹具里出现了写死的 refreshExpiresAt：" >&2
+  grep -rn 'refreshExpiresAt: *"' apps/mobile/src --include='*.test.ts' --include='*.test.tsx' >&2
+  echo "        它必须是相对现在的未来时间，写死就会过期，整个 mobile 测试会自己变红。" >&2
+  exit 1
+fi
+echo "    TEST-ABSDATE-002: PASS (mobile session fixtures use relative refresh expiry)"
+
+# COMP-SELLER-001: 供给侧实名 —— 能收钱的人必须可识别。
+# 越南电商法 122/2025 + NĐ 248/2026（2026-07-01 生效）禁止匿名销售：平台上
+# 卖出服务的人必须可识别、且绑定税务身份。此前 supply 侧只有「能力验证」
+# （会不会中文），完全没有「是谁」的证据 —— 那正是法条要禁的形态。
+# 能力验证不能替代实名：一个回答「会不会」，一个回答「是谁」。
+# 守卫 fail-closed：没接查询 / 查询报错 = 撮合停摆，不是照常放行。
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestSellerRealNameRefusedWhenLookupMissing" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestSellerRealNameRefusedWhenLookupErrors" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestEligibilityRequiresSellerRealName" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestCandidateBatchEmptyWhenRealNameLookupUnwired" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+require_test "COMP-SELLER-001" "./internal/supply" \
+  "TestEligibilitySnapshotExposesRealName" \
+  "apps/api-go/internal/supply/seller_identity_compliance_test.go" || exit $?
+
+# 实名必须真的参与准入判定，不能只是写进快照给人看。
+if ! grep -qF 'snap.AvailabilityOK && snap.MarketOK && snap.RealNameVerified' \
+     apps/api-go/internal/supply/service.go; then
+  echo "  FAIL [COMP-SELLER-001]: real-name no longer gates eligibility." >&2
+  echo "        A snapshot field that nobody reads is not a compliance control." >&2
+  exit 1
+fi
+if ! grep -qF 'RealNameVerified bool `json:"realNameVerified"`' \
+     apps/api-go/internal/supply/service.go; then
+  echo "  FAIL [COMP-SELLER-001]: EligibilitySnapshot no longer exposes real-name status." >&2
+  exit 1
+fi
+# 生产实现必须查真实名表，且签名漂移要在编译期炸。
+if ! grep -qF 'supply.seller_real_name_verifications' apps/api-go/internal/platform/postgres/seller_identity.go ||
+   ! grep -qF 'var _ supply.SellerIdentityLookup = (*SellerRealNameRepository)(nil)' apps/api-go/internal/platform/postgres/seller_identity.go; then
+  echo "  FAIL [COMP-SELLER-001]: the seller real-name store no longer reads the" >&2
+  echo "        verification table, or is no longer pinned to the domain contract." >&2
+  exit 1
+fi
+# 不接线 = 候选集为空（fail-closed）。这里钉的是「接线」本身。
+if ! grep -qF 'SetSellerIdentityLookup' apps/api-go/cmd/api/main.go ||
+   ! grep -qF 'NewSellerRealNameRepository' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-SELLER-001]: the seller real-name lookup is no longer wired in cmd/api/main.go." >&2
+  exit 1
+fi
+echo "    COMP-SELLER-001: PASS (sellers must be real-name verified before they can be matched)"
+
+# COMP-AGE-001: 注册时判过的 18+ 必须留下证据。
+# 此前 CreateAnonymousSession 在服务端做了 18+ 判定，判完就把 dateOfBirth 丢了 ——
+# identity.user_accounts 里没有任何年龄字段。于是「这个用户满 18 岁」只在注册
+# 那一瞬间成立：无法复查、无法举证，而 AI 法 134/2025（2026-03-01 生效）要求的
+# 未成年人保护也因为没有年龄信号而无从做起。判定和留痕是两个动作，两个都要有。
+require_test "COMP-AGE-001" "./internal/identity" \
+  "TestAnonymousSessionPersistsTheAgeItJustVerified" \
+  "apps/api-go/internal/identity/age_assertion_compliance_test.go" || exit $?
+require_test "COMP-AGE-001" "./internal/identity" \
+  "TestAgeAssertionIsNotWrittenWhenTheAgeGateRejects" \
+  "apps/api-go/internal/identity/age_assertion_compliance_test.go" || exit $?
+require_test "COMP-AGE-001" "./internal/identity" \
+  "TestAgeAssertionUsesTheSameDateTheGateAccepted" \
+  "apps/api-go/internal/identity/age_assertion_compliance_test.go" || exit $?
+
+# 判定之后必须真的写，不能只在内存里判完就算了。
+if ! grep -qF 'RecordAgeAssertionDetached(context.WithoutCancel(ctx), session.UserAccountID, p.DateOfBirth, e)' \
+     apps/api-go/internal/identity/service.go; then
+  echo "  FAIL [COMP-AGE-001]: the date of birth is no longer persisted after the 18+ gate." >&2
+  echo "        A gate that leaves no record cannot be re-checked or evidenced." >&2
+  exit 1
+fi
+# 生产实现必须写进真表，且按 asserted_at 取最新（append-only）。
+if ! grep -qF 'INSERT INTO identity.user_age_assertions' apps/api-go/internal/platform/postgres/identity.go ||
+   ! grep -qF 'ORDER BY asserted_at DESC' apps/api-go/internal/platform/postgres/identity.go; then
+  echo "  FAIL [COMP-AGE-001]: the age assertion store no longer reads/writes" >&2
+  echo "        identity.user_age_assertions as an append-only log." >&2
+  exit 1
+fi
+echo "    COMP-AGE-001: PASS (the 18+ decision leaves an auditable age assertion)"
+
+# COMP-AI-MINOR-001: AI 伴侣 / 数字分身不对未成年人开放。
+# 越南 AI 法 134/2025/QH15（2026-03-01 生效）要求对未成年人采取保护措施。
+# 陪伴型 AI（数字分身、平台 AI 角色）是点名场景：未成年人可以全天候和一个
+# 不会拒绝、还带着真人 likeness 的对象建立情感依赖。
+# 前置的年龄信号由 COMP-AGE-001 提供；这里钉的是守卫本身。
+# fail-closed 三个方向：没接查询 / 没有年龄证据 / 查询报错，全部拒绝。
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCompanionRefusedForConfirmedMinor" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCompanionRefusedWhenNoAgeEvidence" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCompanionRefusedWhenAgeLookupUnwired" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCreatePersonaBlockedForMinor" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCreatePersonaBlockedWhenAgeLookupUnwired" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+# 反向也钉：成年人必须还能建，否则守卫就退化成「关掉这个功能」。
+require_test "COMP-AI-MINOR-001" "./internal/aipersona" \
+  "TestCreatePersonaAllowedForAdult" \
+  "apps/api-go/internal/aipersona/minor_protection_test.go" || exit $?
+
+# 年龄检查必须发生在「建」之前 —— 建了再删没用，孩子已经和它说过话了。
+if ! grep -qF 'CompanionAllowedFor(ctx, s.ageLookup, p.OwnerID, s.now().UTC())' \
+     apps/api-go/internal/aipersona/personas.go; then
+  echo "  FAIL [COMP-AI-MINOR-001]: CreatePersona no longer checks age." >&2
+  echo "        Deleting a persona after the fact does not undo the conversation." >&2
+  exit 1
+fi
+# 不接线 = 谁都建不了（fail-closed）。
+if ! grep -qF 'personaSvc.SetAgeLookup(' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-AI-MINOR-001]: the age lookup is no longer wired in cmd/api/main.go." >&2
+  exit 1
+fi
+echo "    COMP-AI-MINOR-001: PASS (AI companions are refused to minors and to accounts with no age evidence)"
+
+# COMP-E2EE-001: 不许宣称做不到的加密。
+# EndToEndEncrypted 此前恒为 true，理由写的是「transport TLS + at-rest KMS」——
+# 那不是端到端加密，两种情况服务端都能读到明文。对用户挂一把兑现不了的锁是
+# 虚假安全声明（他会以为连平台都看不到，从而说出他不会说的话），而且与
+# COMP-CHAT-001 冲突：付费会话必须保留可审计记录，本来就不能是 E2EE。
+# 三条出口都要钉：默认值、发送路径、序列化边界（库里的旧消息带着 true）。
+require_test "COMP-E2EE-001" "./internal/conversation" \
+  "TestNoDefaultProtectionClaimsEndToEndEncryption" \
+  "apps/api-go/internal/conversation/message_protection_e2ee_test.go" || exit $?
+require_test "COMP-E2EE-001" "./internal/conversation" \
+  "TestWithoutUnbackedClaimsStripsEndToEndClaim" \
+  "apps/api-go/internal/conversation/message_protection_e2ee_test.go" || exit $?
+require_test "COMP-E2EE-001" "./internal/conversation" \
+  "TestMarshalledProtectionNeverClaimsEndToEndEncryption" \
+  "apps/api-go/internal/conversation/message_protection_e2ee_test.go" || exit $?
+# 去掉恒真条件后行为不能变（以前实际生效的一直是 ScreenshotProtected）。
+require_test "COMP-E2EE-001" "./internal/conversation" \
+  "TestSecurityModeStillKeyedOnScreenshotProtection" \
+  "apps/api-go/internal/conversation/message_protection_e2ee_test.go" || exit $?
+
+# 序列化兜底必须在：改默认值管不到库里已有的旧消息。
+if ! grep -qF 'func (p MessageProtection) MarshalJSON()' \
+     apps/api-go/internal/conversation/message_protection.go; then
+  echo "  FAIL [COMP-E2EE-001]: protection is no longer sanitized at the serialization" >&2
+  echo "        boundary, so stale rows still advertise end-to-end encryption." >&2
+  exit 1
+fi
+# 发送路径必须再抹一次，调用方不能自称端到端加密。
+if ! grep -qF 'protection.WithoutUnbackedClaims()' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [COMP-E2EE-001]: the send path no longer strips the end-to-end claim." >&2
+  exit 1
+fi
+# app.json 的出口申报必须与代码一致：没有 E2EE 就写 false。
+if ! grep -qF '"usesNonExemptEncryption": false' apps/mobile/app.json; then
+  echo "  FAIL [COMP-E2EE-001]: app.json now declares non-exempt encryption while the" >&2
+  echo "        code has no end-to-end encryption to declare." >&2
+  exit 1
+fi
+echo "    COMP-E2EE-001: PASS (no unbacked end-to-end encryption claim on any egress)"
+
+# COMP-E2EE-002: 用户真正看得到的地方，不许出现做不到的加密承诺。
+# 001 只钉住了后端字段，但对用户作出承诺的其实是 UI 文案和法律文件：
+#   - 设置页卡片原文「🔒 端到端加密 / 军用级 AES-256 / 已开启 · 始终保护」；
+#   - ToS §16 把端到端加密列进 Secure Chat 功能清单；
+#   - 隐私政策原文「如果 Proxy 明确标记某会话为端到端加密 Secure Chat…」。
+# 平台没有 E2EE，这些全是虚假陈述（RFC 里更直白地写着「这是让人觉得安全」）。
+# 钉法两条：
+#   1) 法律文件里不许把它当功能列出来（`- 端到端加密`），并且必须明确写
+#      「目前不提供端到端加密」——只删不管会让人以为是我们漏写了。
+#   2) 移动端源码里这个能力名一律不许出现（含注释）。要留免责说明就用
+#      「E2EE（端到端）加密」的写法，这样「出现即为违规」这条铁律才成立。
+for f in apps/api-go/internal/api/legal_docs/terms_v1.1.txt \
+         apps/api-go/internal/api/legal_docs/privacy_v1.1.txt \
+         docs/legal/vietnam/Proxy_Terms_CN_v1.1_Vietnam_2026-08-31.txt \
+         docs/legal/vietnam/Proxy_Privacy_CN_v1.1_Vietnam_2026-08-31.txt \
+         docs/legal/vietnam/Proxy_Terms_Privacy_CN_v1.1_Vietnam_2026-08-31.txt; do
+  if [ ! -f "$f" ]; then
+    echo "  FAIL [COMP-E2EE-002]: legal document $f is missing." >&2
+    exit 1
+  fi
+  if grep -qF -- '- 端到端加密' "$f"; then
+    echo "  FAIL [COMP-E2EE-002]: $f still lists 端到端加密 as a feature." >&2
+    exit 1
+  fi
+  if ! grep -qF -- '目前不提供端到端加密' "$f"; then
+    echo "  FAIL [COMP-E2EE-002]: $f no longer states that Proxy does not provide" >&2
+    echo "        end-to-end encryption." >&2
+    exit 1
+  fi
+done
+if grep -rqF -- '端到端加密' apps/mobile/src; then
+  echo "  FAIL [COMP-E2EE-002]: mobile UI copy still names 端到端加密." >&2
+  grep -rlF -- '端到端加密' apps/mobile/src >&2
+  exit 1
+fi
+# 设计稿长什么样，UI 就会长成什么样：原型里不许再画这个徽标。
+if grep -rqF --include='*.html' -- '端到端加密' docs/design/references; then
+  echo "  FAIL [COMP-E2EE-002]: a design prototype still renders an 端到端加密 badge:" >&2
+  grep -rlF --include='*.html' -- '端到端加密' docs/design/references >&2
+  exit 1
+fi
+echo "    COMP-E2EE-002: PASS (no end-to-end encryption claim in UI copy, prototypes or legal docs)"
+
+# COMP-REPORT-001: 法律文件 §38 承诺可举报的八类目标，必须真的都能报。
+# 之前只有 engagement.ReportPost（POST）一个入口 —— 承诺 8 类，接得上 1 类。
+# 这不是功能缺失那么简单：
+#   1. 电商法 122/2025 与 NĐ 147/2024 都要求平台提供举报受理渠道；
+#   2. 我们最重的刑事风险（刑法 327 条介绍卖淫）恰恰发生在 MESSAGE /
+#      ACCOUNT / TRANSACTION 上 —— 没有入口，平台既收不到线索，也拿不出
+#      「收到过、处理过」的证据；
+#   3. 原接口只有 SPAM / HARASSMENT / UNSAFE / OTHER 四种理由，涉未成年人
+#      与线下招嫖只能塞进 UNSAFE，运营看不出该优先处理哪一条。
+# 「建了包」不等于「接得上」—— 服务没挂到调度器上，命令会落到 501。
+# 所以除了用例，还要静态钉住调度器与 main 的接线。
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportableTargetTypesMatchTermsSection38" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportAcceptedForEveryTargetPromisedInTerms" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportRejectedForUnknownTargetType" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportRejectedWhenActorMissing" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportFailedWhenRepositoryDown" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+# 命令必须真的接到调度器上，否则一切用例都是自娱自乐。
+if ! grep -qF 's.Moderation != nil && s.Moderation.Supports' \
+     apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [COMP-REPORT-001]: ReportTarget is no longer routed by the" >&2
+  echo "        dispatcher, so users would get 501 instead of a report." >&2
+  exit 1
+fi
+# 没接数据库实现的话，开发模式下内存仓储会静默吞掉举报。
+if ! grep -qF 'moderation.NewWithRepository(postgres.NewModerationRepository(pool))' \
+     apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-REPORT-001]: the Postgres report repository is no longer" >&2
+  echo "        wired, so reports would only live in memory." >&2
+  exit 1
+fi
+if ! grep -qF 'server.Moderation = moderationService' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-REPORT-001]: the moderation service is no longer attached" >&2
+  echo "        to the HTTP server." >&2
+  exit 1
+fi
+# 表没了，接口接得再好也是往空气里写。
+if [ ! -f apps/api-go/migrations/086_moderation_reports.sql ]; then
+  echo "  FAIL [COMP-REPORT-001]: migration 086_moderation_reports.sql is missing." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-001: PASS (every target promised in the terms is reportable and persisted)"
+
+# COMP-REPORT-002: 举报入口必须真的能被用户点到。
+# 001 把服务端接上了（八类目标全部受理），但移动端只有一个入口 ——
+# feed 帖子菜单里的「举报」。用户能碰到的仍然只有 1/8，而招嫖揽客、
+# 人身威胁、涉未成年人这些恰恰发生在**消息**里。
+# 上一笔我自己在 commit message 里写了「无视觉改动，另开」，如果不另开，
+# 就又犯一次「改了后端就宣称解决了」的错 —— 那是我在 COMP-E2EE-002
+# 里刚批评过的同一个毛病。所以这里把「用户点得到」也钉住。
+if ! grep -q 'COMP-REPORT-002' apps/mobile/src/moderation-client.test.ts ||
+   ! grep -q 'targetType="MESSAGE"' apps/mobile/src/surfaces/conversation.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the message report entry point is gone —" >&2
+  echo "        the API accepts reports but users can no longer file one." >&2
+  exit 1
+fi
+# 客户端要真的造出来并传进会话页，否则按钮点了也是 undefined。
+if ! grep -q 'new ModerationClient(' apps/mobile/src/native-app.tsx ||
+   ! grep -q 'moderationClient={moderation}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: ModerationClient is no longer constructed and" >&2
+  echo "        passed into the conversation surface." >&2
+  exit 1
+fi
+# 理由清单里必须有 SOLICITATION 与 MINOR_SAFETY —— 这两类风险最高，
+# 只能塞进「其他」等于没有信号。
+if ! grep -q 'SOLICITATION' apps/mobile/src/moderation-client.ts ||
+   ! grep -q 'MINOR_SAFETY' apps/mobile/src/moderation-client.ts; then
+  echo "  FAIL [COMP-REPORT-002]: the report reason list lost SOLICITATION or" >&2
+  echo "        MINOR_SAFETY, so the highest-risk reports carry no signal." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/moderation-client.test.ts || exit $?
+# 账号与交易入口：这两类和「消息」一样是高风险面 —— 冒充身份是看整个账号
+# 看出来的，诈骗与招嫖揽客落在订单上。只做消息入口仍然只覆盖了 2/8。
+if ! grep -q 'targetType="ACCOUNT"' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the account report entry point is gone." >&2
+  exit 1
+fi
+if ! grep -q 'targetType="TRANSACTION"' apps/mobile/src/surfaces/me-orders.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the transaction report entry point is gone." >&2
+  exit 1
+fi
+# 原因选择抽成了共用组件：三个入口各自抄一份，迟早有一份忘了更新理由清单。
+if ! grep -q 'REPORT_REASONS' apps/mobile/src/components/report-sheet.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: ReportSheet no longer uses the shared reason list." >&2
+  exit 1
+fi
+# 活动 / 商家 / 机会 / 邀约 四类入口。
+#
+# 这里钉的是**判定函数**而不是 JSX 里的 targetType="ACTIVITY" —— 上次
+# 把内联弹层抽成 ReportSheet 时，钉字符串的那条 pin 直接误报（能力还在，
+# 实现挪了位置）。判定逻辑抽成纯函数后，pin 住函数就同时钉住了能力和测试。
+if ! grep -q 'activityReportTargets' apps/mobile/src/surfaces/activity-detail.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the activity / merchant report entry point is gone." >&2
+  exit 1
+fi
+if ! grep -q 'opportunityReportTarget' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: the opportunity / invite report entry point is gone." >&2
+  exit 1
+fi
+# 客户端必须真的造出来并传进市场页，否则按钮点了也是 undefined。
+if ! grep -q 'moderation={moderation}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [COMP-REPORT-002]: ModerationClient is no longer threaded into the market surface." >&2
+  exit 1
+fi
+# 四类判定都要有具名测试（require_test 由上面的 vitest run 覆盖，这里
+# 再钉一次文件，避免有人把 describe 块整段删掉而测试文件还在）。
+for t in "always offers the activity itself, and the host merchant only when it is merchant-run" \
+         "reports a targeted opportunity as INVITE and a public one as OPPORTUNITY" \
+         "sends every target the new entry points offer"; do
+  if ! grep -q "$t" apps/mobile/src/moderation-client.test.ts; then
+    echo "  FAIL [COMP-REPORT-002]: missing named test for the new entry points: $t" >&2
+    exit 1
+  fi
+done
+echo "    COMP-REPORT-002: PASS (message, account, transaction, activity, merchant, opportunity and invite are all reportable from the UI)"
+
+# COMP-REPORT-003: 举报的**处置**留痕。
+# 001/002 解决了「收得到、点得到」，但 reports 表把 state 钉死在 SUBMITTED
+# 且整表 append-only —— 平台能证明「收到过」，证明不了「处理过」。
+# 服务条款承诺了举报与申诉渠道，并承诺「依法要求删除违法信息：最迟 24 小时
+# 内处理」。收进来却没有处置记录，等于书面承认收到、却拿不出处理痕迹；
+# 在刑法 327 条的语境下，MINOR_SAFETY / SOLICITATION 两类举报查不到处置，
+# 姿态就是「知情不办」。
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestDispositionAcceptedAndAttributed" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestReportStateFollowsDispositions" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestDispositionRejectedWhenActionTakenWithoutOutcome" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestDispositionRejectedWhenDismissedWithoutReason" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+require_test "COMP-REPORT-003" "./internal/moderation" \
+  "TestDispositionRejectedForUnknownReport" \
+  "apps/api-go/internal/moderation/disposition_compliance_test.go" || exit $?
+# 处置是 operator-only：普通用户能给自己写「已处置」，这条留痕就一文不值。
+if ! grep -qF '"RecordReportDisposition": true' \
+     apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-REPORT-003]: RecordReportDisposition is no longer operator-only," >&2
+  echo "        so anyone could write a fake disposition onto their own report." >&2
+  exit 1
+fi
+# 命令必须真被 moderation 服务受理，否则命令面写了也走不到。
+if ! grep -qF 'case "RecordReportDisposition"' \
+     apps/api-go/internal/moderation/service.go; then
+  echo "  FAIL [COMP-REPORT-003]: the disposition command is no longer handled by" >&2
+  echo "        the moderation service, so it would 501." >&2
+  exit 1
+fi
+# 落库实现：只有内存仓储的话，重启一次处置记录就没了。
+if ! grep -qF 'func (r *ModerationRepository) AddDisposition' \
+     apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-REPORT-003]: the Postgres disposition repository is missing," >&2
+  echo "        so dispositions would not survive a restart." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/087_moderation_dispositions.sql ]; then
+  echo "  FAIL [COMP-REPORT-003]: migration 087_moderation_dispositions.sql is missing." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-003: PASS (handled reports leave an attributable, append-only trail)"
+
+# COMP-REPORT-004: 申诉机制（§37 第 693 行、§38 第 709 行承诺的「恢复或申诉
+# 机制」，NĐ 147/2024 把社交网络的投诉 / 申诉渠道列为硬性要求）。
+#
+# 003 让举报闭环到「收到 → 处理」，但没有申诉渠道，被处理方无从申辩 ——
+# 平台能证明自己处理了举报，却证明不了「被处理方有救济途径」。
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealAcceptedAndAttributed" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealStateFollowsDecisions" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealRejectedForUnknownReport" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealDecisionRejectedWhenRejectedWithoutNote" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealDecisionsCoverUpheldAndRejected" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+# 复核是 operator-only：普通用户能给自己写「申诉成立 / 驳回」，这个渠道的
+# 制衡意义就归零了。
+if ! grep -qF '"RecordAppealDecision": true' \
+     apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-REPORT-004]: RecordAppealDecision is no longer operator-only," >&2
+  echo "        so anyone could write a fake review onto their own appeal." >&2
+  exit 1
+fi
+# 反向钉：提交申诉**不能**变成 operator-only —— 否则普通用户根本够不到申诉
+# 入口，§38 承诺的申诉渠道在界面上消失（与 002 同一类：承诺了但点不到）。
+if grep -qF '"FileAppeal": true' \
+    apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-REPORT-004]: FileAppeal became operator-only, so ordinary" >&2
+  echo "        logged-in users can no longer reach the appeal channel at all." >&2
+  exit 1
+fi
+# 命令必须真被 moderation 服务受理，否则命令面写了也走不到。
+if ! grep -qF 'case "FileAppeal"' \
+     apps/api-go/internal/moderation/service.go; then
+  echo "  FAIL [COMP-REPORT-004]: the appeal command is no longer handled by" >&2
+  echo "        the moderation service, so it would 501." >&2
+  exit 1
+fi
+# 落库实现：只有内存仓储的话，重启一次申诉记录就没了。
+if ! grep -qF 'func (r *ModerationRepository) AddAppeal' \
+     apps/api-go/internal/platform/postgres/moderation.go; then
+  echo "  FAIL [COMP-REPORT-004]: the Postgres appeal repository is missing," >&2
+  echo "        so appeals would not survive a restart." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/088_moderation_appeals.sql ]; then
+  echo "  FAIL [COMP-REPORT-004]: migration 088_moderation_appeals.sql is missing." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-004: PASS (the appeal channel exists, is attributable, and is operator-reviewed)"

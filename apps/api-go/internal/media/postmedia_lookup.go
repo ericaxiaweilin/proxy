@@ -45,7 +45,7 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 			}
 		}
 		for _, asset := range assets {
-			result[asset.MediaAssetID] = mediaAssetInfo(asset, variantsByAsset[asset.MediaAssetID])
+			result[asset.MediaAssetID] = mediaAssetInfo(asset, variantsByAsset[asset.MediaAssetID], l.service)
 		}
 		return result, nil
 	}
@@ -58,20 +58,37 @@ func (l *PostMediaLookup) LookupMediaAssets(ctx context.Context, ids []string) (
 		if variantErr != nil {
 			variants = nil
 		}
-		result[id] = mediaAssetInfo(asset, variants)
+		result[id] = mediaAssetInfo(asset, variants, l.service)
 	}
 	return result, nil
 }
 
-func mediaAssetInfo(asset MediaAsset, variants []MediaVariant) localnet.MediaAssetInfo {
+// mediaAssetInfo builds the wire DTO for one asset.
+//
+// MEDIA-FILE-001: every URL emitted here is gated on the backing file actually
+// existing. The variant rows are the source of truth for "we intended to publish
+// this", not for "the bytes are still there" — and the client renders a URL that
+// 404s as a black frame, which looks exactly like a post with no image. Dropping
+// the URL instead lets the client fall back to the next candidate it has (for
+// example gallery -> feed -> thumbnail), so a missing derivative degrades to a
+// smaller but real image rather than to a black hole.
+func mediaAssetInfo(asset MediaAsset, variants []MediaVariant, svc *Service) localnet.MediaAssetInfo {
 	info := localnet.MediaAssetInfo{
 		MediaAssetID: asset.MediaAssetID, MediaType: asset.MediaType,
-		ThumbnailURL: asset.ThumbnailURL, PlaybackURL: asset.PlaybackURL,
 		Width: asset.Width, Height: asset.Height, DurationMs: asset.DurationMs, Animated: asset.Animated,
 		ProcessingStatus: asset.ProcessingStatus, ModerationStatus: asset.ModerationStatus,
 		VisibilityClass: asset.VisibilityClass, DominantColorHex: asset.DominantColorHex,
 	}
+	if svc.AssetThumbnailPresent(asset) {
+		info.ThumbnailURL = asset.ThumbnailURL
+	}
+	if svc.AssetPlaybackPresent(asset) {
+		info.PlaybackURL = asset.PlaybackURL
+	}
 	for _, variant := range variants {
+		if !svc.VariantFilePresent(variant) {
+			continue
+		}
 		url := "/v1/media/variant/" + variant.MediaVariantID
 		switch variant.Purpose {
 		case "ORIGINAL":

@@ -14,7 +14,7 @@ const auth = {
   accessToken: "access_secret",
   refreshToken: "refresh_secret",
   accessExpiresAt: "2026-08-14T00:15:00.000Z",
-  refreshExpiresAt: "2026-09-13T00:00:00.000Z",
+  refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
   rotation: 1
 };
 

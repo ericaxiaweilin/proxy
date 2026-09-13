@@ -26,6 +26,8 @@ import {
   type MediaCompositionHint
 } from "@proxy/contracts";
 import { mediaAspect } from "../media-presentation";
+import { color } from "../theme";
+import { isMediaUnavailable, UnavailableMedia, useMediaLoadState } from "./media-fallback";
 import { SOCIAL_MEDIA_RADIUS } from "./social-media-aesthetics";
 
 type FeedItemWithHint = FeedMediaItem & { compositionHint?: MediaCompositionHint };
@@ -56,6 +58,10 @@ export function SocialMediaFrame({ item, frameAspect, resolveUrl }: Props): Reac
   // "natural" 等价 expo-image 的 "fill" (不缩放)
   const contentFit = strategy === "natural" ? "fill" : strategy;
   const frameBackground = resolveFrameBackground(item.dominantColorHex);
+  // MEDIA-FILE-001: a media URL the server cannot serve used to leave the frame's
+  // near-black FRAME_BACKGROUND_HEX showing, which reads as a real dark photo.
+  const { failed, onError } = useMediaLoadState(uri);
+  const unavailable = isMediaUnavailable(uri, failed);
   const showExtendedBackdrop = shouldUseExtendedBackdrop({ strategy, sourceAspect, frameAspect });
   const contentPosition = (contentFit === "cover" && hint?.focalPoint)
     ? { top: `${Math.round(hint.focalPoint.y * 100)}%`, left: `${Math.round(hint.focalPoint.x * 100)}%` }
@@ -66,29 +72,36 @@ export function SocialMediaFrame({ item, frameAspect, resolveUrl }: Props): Reac
   // history: v3 早期内部调用 selectImageShape(sourceAspect) → shapeAspect，被 caller 的 frameAspect 覆盖，
   // 但 MediaWall 把 cellAspect 传给 frameAspect 后又被 shapeAspect 压回 0.8（4:5）→ 横图被压成方。
   return (
-    <View style={[styles.frame, { aspectRatio: frameAspect, backgroundColor: frameBackground }]}>
-      {showExtendedBackdrop && uri ? (
-        <ExpoImage
-          accessible={false}
-          source={{ uri }}
-          style={styles.extendedBackdrop}
-          contentFit="cover"
-          blurRadius={32}
-          cachePolicy="memory-disk"
-          priority="low"
-          recyclingKey={`${item.mediaAssetId}:backdrop`}
-        />
-      ) : null}
-      <ExpoImage
-        source={{ uri }}
-        style={styles.asset}
-        contentFit={contentFit}
-        {...(contentPosition ? { contentPosition } : {})}
-        transition={200}
-        cachePolicy="memory-disk"
-        priority="normal"
-        recyclingKey={item.mediaAssetId}
-      />
+    <View style={[styles.frame, { aspectRatio: frameAspect, backgroundColor: unavailable ? color.surface : frameBackground }]}>
+      {unavailable ? (
+        <UnavailableMedia />
+      ) : (
+        <>
+          {showExtendedBackdrop && uri ? (
+            <ExpoImage
+              accessible={false}
+              source={{ uri }}
+              style={styles.extendedBackdrop}
+              contentFit="cover"
+              blurRadius={32}
+              cachePolicy="memory-disk"
+              priority="low"
+              recyclingKey={`${item.mediaAssetId}:backdrop`}
+            />
+          ) : null}
+          <ExpoImage
+            source={{ uri }}
+            style={styles.asset}
+            contentFit={contentFit}
+            {...(contentPosition ? { contentPosition } : {})}
+            transition={200}
+            cachePolicy="memory-disk"
+            priority="normal"
+            recyclingKey={item.mediaAssetId}
+            onError={onError}
+          />
+        </>
+      )}
     </View>
   );
 }

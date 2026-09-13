@@ -1,13 +1,50 @@
 package supply
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
+
+// COMP-SELLER-001：测试里的「已实名」必须由人显式放行，不能是默认状态。
+// 生产里对应的是 supply.seller_real_name_verifications 里 status='VERIFIED'
+// 且未过期的行（method=OPERATOR_ATTESTATION 时还要有具名的 verified_by）。
+// 这里用同样的语义：没被 mark 过的 agent 一律未实名。
+type stubSellerIdentity struct {
+	mu       sync.Mutex
+	verified map[string]bool
+	err      error
+}
+
+func (s *stubSellerIdentity) RealNameVerified(_ context.Context, agentID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return false, s.err
+	}
+	return s.verified[agentID], nil
+}
+
+// markSellersVerified 显式把这些 agent 标为已核验。
+func markSellersVerified(s *Service, agentIDs ...string) {
+	if s.sellerIdentity == nil {
+		s.SetSellerIdentityLookup(&stubSellerIdentity{verified: map[string]bool{}})
+	}
+	lookup, ok := s.sellerIdentity.(*stubSellerIdentity)
+	if !ok {
+		panic("seller identity lookup already replaced; cannot mark sellers verified")
+	}
+	lookup.mu.Lock()
+	defer lookup.mu.Unlock()
+	for _, id := range agentIDs {
+		lookup.verified[id] = true
+	}
+}
 
 func envelopeFor(commandType string, payload map[string]any, targetID string) command.Envelope {
 	return envelopeForPrincipal(commandType, payload, targetID, "business_001")
@@ -70,6 +107,10 @@ func setupAgent(t *testing.T, s *Service, agentID, name string, languages []stri
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("set window %s: %s (%+v)", agentID, r.Outcome, r.Error)
 	}
+	// 能力/时间窗都齐了还不够：供给侧实名是准入条件（COMP-SELLER-001）。
+	// 这里显式放行，代表该 agent 在 seller_real_name_verifications 里
+	// 有一条未过期的 VERIFIED 记录。
+	markSellersVerified(s, agentID)
 }
 
 // B 完成标准：3 个真实测试 Agent → 不同 Capability/Verification/Availability
@@ -147,6 +188,9 @@ func TestEligibilityGateBlocksUnverified(t *testing.T) {
 	if r.Outcome != "ACCEPTED" {
 		t.Fatalf("window: %s", r.Outcome)
 	}
+	// 本用例要验的是「能力未验证会被挡」，所以实名必须先放行 —— 否则它会先被
+	// 实名卡住，测的就不是它声称要测的东西（COMP-SELLER-001 之后尤其如此）。
+	markSellersVerified(s, "agent_dung")
 
 	r = s.Handle(envelopeFor("QuerySuppliers", map[string]any{
 		"marketId": "hn", "startAt": start, "durationH": 8,
@@ -313,6 +357,8 @@ func TestEligibilityBlocksExpiredVerification(t *testing.T) {
 	start := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
 	end := time.Now().Add(34 * time.Hour).UTC().Format(time.RFC3339)
 	_ = repo.CreateWindow(nil, AvailabilityWindow{ID: "aw_expired", AgentID: agentID, StartAt: time.Now().Add(24 * time.Hour), EndAt: time.Now().Add(34 * time.Hour), MarketID: "hn", Status: "AVAILABLE", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	// 实名先放行：本用例要验的是「过期 KYC 会被挡」，不是实名（COMP-SELLER-001）。
+	markSellersVerified(s, agentID)
 
 	r := s.Handle(envelopeFor("QuerySuppliers", map[string]any{
 		"marketId": "hn", "startAt": start, "durationH": 8,

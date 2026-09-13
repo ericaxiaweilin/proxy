@@ -21,7 +21,11 @@ export const DEFAULT_FEED_PREFS: Omit<FeedPrefsSnapshot, "updatedAt"> = {
     lifestyle: 30,
     commercial: 20,
   },
-  scope: "7D",
+  // FEED-SCOPE-001: 曾经默认 "7D"。因为窗口是相对 Date.now() 滚动的，帖文会一天天
+  // 无声消失 —— 实测隐藏了 62% 的帖文（39 篇只剩 15 篇可见），而时间线上又完全
+  // 不显示筛选状态，看起来就是「数据丢失」。默认改为长期，时间范围变成一个用户
+  // 主动选择的筛选项。
+  scope: "PERSISTENT",
   muted: [],
   algoApplied: null,
 };
@@ -54,7 +58,9 @@ export function parseFeedPrefsSnapshot(raw: unknown): FeedPrefsSnapshot {
   return {
     version: 1,
     weights: sanitizeWeights(snapshot.weights),
-    scope: snapshot.scope === "30D" || snapshot.scope === "PERSISTENT" ? snapshot.scope : "7D",
+    // FEED-SCOPE-001: 三个取值都显式接受，只有「缺失/非法」才回落到默认长期。
+    // 旧实现把显式保存的 "7D" 也当成非法值，改默认值时会静默覆盖用户选择。
+    scope: snapshot.scope === "7D" || snapshot.scope === "30D" || snapshot.scope === "PERSISTENT" ? snapshot.scope : "PERSISTENT",
     muted: Array.isArray(snapshot.muted) ? snapshot.muted.filter((m): m is string => typeof m === "string") : [],
     algoApplied: typeof snapshot.algoApplied === "string" ? snapshot.algoApplied : null,
     updatedAt: new Date().toISOString(),

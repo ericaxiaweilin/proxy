@@ -211,6 +211,36 @@ func (s *Server) listAIAssistants(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"assistants": platformAIAssistants})
 }
 
+// resolveRepoDir finds a repo-relative directory no matter where the process
+// was started from.
+//
+// MEDIA-FILE-001 (2026-09-12): the default was the bare relative path
+// "apps/mobile/assets/ai-personas", which only resolves when the API's working
+// directory is the repo root. scripts/dev-api.sh starts it from apps/api-go, so
+// all five AI persona photos 404'd in the normal dev loop — and because
+// success and failure logged the same line, nobody saw it. The photos render as
+// plain black/empty frames on the home screen.
+//
+// Walk up from the working directory instead. The env override still wins.
+func resolveRepoDir(relative string) string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return relative
+	}
+	for i := 0; i < 6; i += 1 {
+		candidate := filepath.Join(dir, filepath.FromSlash(relative))
+		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return relative
+}
+
 // GET /v1/ai/personas/photo/{id} — 小美写真原文件（模型生成的真人写真
 // PNG），匿名可读。mobile 用 Image 直接渲染，不复制第二份。
 // 只认目录里的 5 个公开 id（与 platformAIAssistants.Photo 一一对应），
@@ -236,7 +266,7 @@ func (s *Server) personaPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	dir := os.Getenv("PROXY_AI_PERSONA_ASSETS_DIR")
 	if dir == "" {
-		dir = "apps/mobile/assets/ai-personas"
+		dir = resolveRepoDir("apps/mobile/assets/ai-personas")
 	}
 	serveMediaPath(w, r, filepath.Join(dir, filepath.FromSlash(photo[len("ai-personas/"):])), "public, max-age=86400, stale-while-revalidate=604800")
 }

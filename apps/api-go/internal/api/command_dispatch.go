@@ -288,6 +288,11 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 		return s.Benefit.HandleContext(ctx, envelope)
 	case s.Profile != nil && s.Profile.Supports(envelope.CommandType):
 		return s.Profile.HandleContext(ctx, envelope)
+	// COMP-REPORT-001: user report intake. Listed last because ReportTarget
+	// does not collide with any other service's command names; if it ever
+	// does, the collision should be found in review, not by reordering.
+	case s.Moderation != nil && s.Moderation.Supports(envelope.CommandType):
+		return s.Moderation.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}

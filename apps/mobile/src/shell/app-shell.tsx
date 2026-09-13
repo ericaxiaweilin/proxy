@@ -32,6 +32,7 @@ import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type DemandClient } from "../demand-client";
 import { type VoucherClient } from "../voucher-client";
 import { type EngagementClient } from "../engagement-client";
+import type { ModerationClient } from "../moderation-client";
 import { type MarketplaceClient } from "../marketplace-client";
 import { type ExperienceClient } from "../experience-client";
 import { keepManifestRevision } from "../experience-refresh";
@@ -115,6 +116,7 @@ export function AppShell({
   demand,
   vouchers,
   engagement,
+  moderation,
   marketplace,
   socialSpace,
   fulfillment,
@@ -143,6 +145,8 @@ export function AppShell({
   demand: DemandClient;
   vouchers: VoucherClient;
   engagement: EngagementClient;
+  // COMP-REPORT-002: 举报入口客户端，透传到会话页等需要举报的表面。
+  moderation: ModerationClient;
   marketplace: MarketplaceClient;
   socialSpace: SocialSpaceClient;
   fulfillment: FulfillmentClient;
@@ -541,6 +545,7 @@ export function AppShell({
               target={openHumanProfile}
               engagement={engagement}
               localNet={localNet}
+              moderation={moderation}
               {...(secureSessionStore ? { secureSessionStore } : {})}
               onBack={() => { setOpenHumanProfile(undefined); if (humanProfileReturnToScene) { setHumanProfileReturnToScene(false); setRealitySceneOpen(true); } }}
               onMessage={(name, avatarUri) => {
@@ -643,6 +648,7 @@ export function AppShell({
               fulfillment={fulfillment}
               media={media}
               supply={supply}
+              moderation={moderation}
               marketLabel="河内"
               initialTab={marketEntry.tab}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
@@ -656,6 +662,7 @@ export function AppShell({
               conversationClient={conversation}
               activityClient={activities}
               mediaClient={media}
+              moderationClient={moderation}
               onBack={() => setFeedChatAuthor(undefined)}
             />
           ) : feedPrefsOpen ? (
@@ -699,6 +706,7 @@ export function AppShell({
               conversationClient={conversation}
               activityClient={activities}
               mediaClient={media}
+              moderationClient={moderation}
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
@@ -714,6 +722,7 @@ export function AppShell({
             <VoucherSurface client={vouchers} context={context} onBack={() => setVoucherOpen(false)} />
           ) : (
             <MeSurface
+              key={viewerAccountId ?? "pending-account"}
               context={context}
               localNet={localNet}
               fulfillment={fulfillment}
@@ -724,6 +733,7 @@ export function AppShell({
               mediaClient={media}
               relationshipClient={relationship}
               socialSettingsClient={socialSettings}
+              moderation={moderation}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               {...(experienceManifest?.context === context
                 ? {

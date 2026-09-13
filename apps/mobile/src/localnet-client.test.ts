@@ -14,7 +14,7 @@ async function authenticatedStore(userId: string): Promise<SecureSessionStore> {
       accessToken: "access",
       refreshToken: "refresh",
       accessExpiresAt: "2026-09-04T00:00:00.000Z",
-      refreshExpiresAt: "2026-10-04T00:00:00.000Z",
+      refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
       rotation: 1
     }
   });
@@ -56,7 +56,7 @@ describe("LocalNetClient post publishing", () => {
         accessToken: "access",
         refreshToken: "refresh",
         accessExpiresAt: "2026-08-24T01:00:00.000Z",
-        refreshExpiresAt: "2026-09-24T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1
       }
     });

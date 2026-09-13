@@ -20,7 +20,7 @@ async function writeSession(store: SecureSessionStore): Promise<StoredSession & 
       accessToken: "access_001",
       refreshToken: "refresh_001",
       accessExpiresAt: "2026-08-14T00:15:00.000Z",
-      refreshExpiresAt: "2026-09-14T00:00:00.000Z",
+      refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
       rotation: 1,
     },
   };
@@ -58,7 +58,7 @@ describe("scene client", () => {
         accessToken: "a",
         refreshToken: "r",
         accessExpiresAt: "2026-08-14T00:15:00.000Z",
-        refreshExpiresAt: "2026-09-14T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1,
       },
     };
@@ -95,7 +95,7 @@ describe("scene client", () => {
         accessToken: "a",
         refreshToken: "r",
         accessExpiresAt: "2026-08-14T00:15:00.000Z",
-        refreshExpiresAt: "2026-09-14T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1,
       },
     };
@@ -243,7 +243,7 @@ describe("scene client", () => {
         sessionId: "session_001", userAccountId: "guest_viewer",
         principal: { type: "INDIVIDUAL", id: "guest_viewer" },
         accessToken: "a", refreshToken: "r",
-        accessExpiresAt: "2026-08-14T00:15:00.000Z", refreshExpiresAt: "2026-09-14T00:00:00.000Z",
+        accessExpiresAt: "2026-08-14T00:15:00.000Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1,
       },
     };

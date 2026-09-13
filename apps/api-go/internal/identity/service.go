@@ -74,6 +74,17 @@ type Service struct {
 	// otpRequests bounds code delivery per login identifier
 	// (OTP-THROTTLE-001: 1/min, 10/hour — Twilio Verify ladder).
 	otpRequests *otpThrottler
+	// COMP-ID-001: persona lifecycle needs to know whether the account has
+	// transacted. Nil fails closed — see BurnerAllowedFor.
+	transactions TransactionHistoryLookup
+}
+
+// SetTransactionHistoryLookup wires the payment-side lookup used by
+// COMP-ID-001. Without it, self-destructing personas are refused outright.
+func (s *Service) SetTransactionHistoryLookup(lookup TransactionHistoryLookup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.transactions = lookup
 }
 
 // ProfileMediaAuthorizer 是 media 服务的最小能力面：把本人上传且技术审核通过的
@@ -342,6 +353,12 @@ func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope
 		if err := s.RecordLegalConsentsDetached(context.WithoutCancel(ctx), session.UserAccountID, e); err != nil {
 			log.Printf("legal consent write failed user=%s err=%v", session.UserAccountID, err)
 		}
+		// COMP-AGE-001: 18+ 判定在上面对 dob 做过一次，判完就丢 —— 库里
+		// 从此没有任何年龄证据，既无法复查也无法举证，AI 法 134/2025
+		// 要求的未成年人保护更是无从做起。这里把这条断言留下来。
+		if err := s.RecordAgeAssertionDetached(context.WithoutCancel(ctx), session.UserAccountID, p.DateOfBirth, e); err != nil {
+			log.Printf("age assertion write failed user=%s err=%v", session.UserAccountID, err)
+		}
 	}
 	result := command.Accepted(e, "Session", session.ID, session.Version, session.Status, eventRefs(domainEvents))
 	result.Auth = authTokens(pair, session)
@@ -365,6 +382,29 @@ func (s *Service) recordLegalConsents(ctx context.Context, userID, docVersion st
 			return err
 		}
 		return recorder.RecordLegalConsent(ctx, userID, "PRIVACY", docVersion, ip, ua)
+	}
+	return nil
+}
+
+// RecordAgeAssertionDetached 把注册时那条已经通过 18+ 判定的出生日期写进
+// 年龄断言流水（migrations/085）。
+//
+// COMP-AGE-001：判定与留痕是两个动作，此前只有判定。没有留痕意味着 ——
+//   1. 无法复查（账号一旦建好，年龄这件事就再没人知道）
+//   2. 无法举证（监管问「你怎么确认他 18 岁」，答不上来）
+//   3. 未成年人保护无从做起（没有任何年龄信号可供 AI 法 134/2025 的守卫使用）
+//
+// 与同意记录同样的写法：走可选接口断言，不进 Repository 契约，
+// 因此隐私/年龄这两套独立部署的表缺了也不会把注册主流程拖垮。
+func (s *Service) RecordAgeAssertionDetached(ctx context.Context, userID, dateOfBirth string, e command.Envelope) error {
+	if s.repository == nil || dateOfBirth == "" {
+		return nil
+	}
+	if recorder, ok := s.repository.(interface {
+		RecordAgeAssertion(ctx context.Context, userID, dateOfBirth, source, ip, userAgent string) error
+	}); ok {
+		ip, ua := clientFingerprint(e)
+		return recorder.RecordAgeAssertion(ctx, userID, dateOfBirth, "SELF_DECLARED_AT_SIGNUP", ip, ua)
 	}
 	return nil
 }
@@ -1271,6 +1311,15 @@ func (s *Service) createDisplayIdentity(ctx context.Context, e command.Envelope)
 	if typ == "" {
 		typ = DisplayIdentityPublic
 	}
+	// COMP-ID-001: an account that has transacted may not hold a persona that
+	// erases itself. Anonymous selling is banned, and the burn would also
+	// take the record of the paid engagements with it.
+	if ok, checkErr := BurnerAllowedFor(ctx, s.transactions, e.Actor.ID, typ); checkErr != nil || !ok {
+		if errors.Is(checkErr, ErrBurnerForbiddenForTransactingAccount) || !ok {
+			return command.Rejected(e, "BURNER_FORBIDDEN_FOR_TRANSACTING_ACCOUNT", "COMPLIANCE", "AFTER_USER_ACTION", "identity.burner_forbidden", nil)
+		}
+		return command.Rejected(e, "DISPLAY_IDENTITY_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.display_identity_create_failed", nil)
+	}
 	d, err := s.displayIdentityService.Create(ctx, CreateInput{
 		OwnerID:     e.Actor.ID,
 		Type:        typ,
@@ -1329,6 +1378,19 @@ func (s *Service) burnDisplayIdentity(ctx context.Context, e command.Envelope) c
 	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "DISPLAY_IDENTITY_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.display_identity_forbidden", nil)
+	}
+	// COMP-ID-001: burning erases that identity's conversations, messages and
+	// media. Harmless for an account that never transacted; once money has
+	// moved it is destruction of the record, so it is refused. Fails closed.
+	if s.transactions == nil {
+		return command.Rejected(e, "BURN_FORBIDDEN_FOR_TRANSACTING_ACCOUNT", "COMPLIANCE", "AFTER_USER_ACTION", "identity.burn_forbidden", nil)
+	}
+	transacted, txErr := s.transactions.HasTransacted(ctx, e.Actor.ID)
+	if txErr != nil {
+		return command.Rejected(e, "DISPLAY_IDENTITY_BURN_FAILED", "INTERNAL", "SAFE_RETRY", "identity.display_identity_burn_failed", nil)
+	}
+	if transacted {
+		return command.Rejected(e, "BURN_FORBIDDEN_FOR_TRANSACTING_ACCOUNT", "COMPLIANCE", "AFTER_USER_ACTION", "identity.burn_forbidden", nil)
 	}
 	d, err := s.displayIdentityService.Burn(ctx, BurnInput{IdentityID: id, OwnerID: e.Actor.ID})
 	if errors.Is(err, ErrDisplayIdentityNotFound) {

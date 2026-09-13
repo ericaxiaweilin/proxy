@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -197,6 +198,10 @@ func (s *Server) mediaFile(w http.ResponseWriter, r *http.Request) {
 func serveMediaPath(w http.ResponseWriter, r *http.Request, path, cacheControl string) {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
+		// MEDIA-FILE-001: the "media access" line is emitted by the caller before
+		// this check and reads identically for a 200 and a 404, so a missing
+		// object used to be invisible in the logs. Say it out loud instead.
+		log.Printf("media object MISSING file=%s", filepath.Base(path))
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "media_object_missing"})
 		return
 	}

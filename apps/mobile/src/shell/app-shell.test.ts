@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { selectMeTabView, selectShellChromeVisible, selectMotionProfile } from "./app-shell-selectors";
 
 describe("app shell guest path", () => {
+  it("AVATAR-ACCOUNT-001: remounts MeSurface when authenticated account resolves", () => {
+    const source = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+    expect(source).toContain('key={viewerAccountId ?? "pending-account"}');
+  });
   it("PROFILE-READ-001: wires account identity and avatar upload into MeSurface", () => {
     const source = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
     const start = source.indexOf("<MeSurface");

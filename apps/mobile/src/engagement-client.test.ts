@@ -8,7 +8,7 @@ describe("EngagementClient moderation actions", () => {
     await store.write({
       userAccountId: "user_001",
       principal: { type: "INDIVIDUAL", id: "user_001" },
-      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
     });
     const envelopes: Array<Record<string, unknown>> = [];
     const client = new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
@@ -48,7 +48,7 @@ describe("EngagementClient moderation actions", () => {
         accessToken: "revoked",
         refreshToken: "refresh_keep_for_silent_reauth",
         accessExpiresAt: "2026-08-14T01:00:00.000Z",
-        refreshExpiresAt: "2026-09-13T00:00:00.000Z",
+        refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(),
         rotation: 1
       },
       principal: { type: "INDIVIDUAL", id: "user_001" },
@@ -70,7 +70,7 @@ describe("EngagementClient.muteAuthor", () => {
     await store.write({
       userAccountId: "user_001",
       principal: { type: "INDIVIDUAL", id: "user_001" },
-      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
     });
     return store;
   }
@@ -118,7 +118,7 @@ describe("EngagementClient.muteAuthor", () => {
     await store.write({
       userAccountId: "user_001",
       principal: { type: "INDIVIDUAL", id: "user_001" },
-      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 },
       serverSession: false
     });
     const client = new EngagementClient({
@@ -135,7 +135,7 @@ describe("EngagementClient R15.54 follow graph", () => {
     void store.write({
       userAccountId: "user_001",
       principal: { type: "INDIVIDUAL", id: "user_001" },
-      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
     });
     return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
       const envelope = init.body as Record<string, unknown>;
@@ -205,7 +205,7 @@ describe("EngagementClient R15.56 post pin (置顶)", () => {
     void store.write({
       userAccountId: "user_001",
       principal: { type: "INDIVIDUAL", id: "user_001" },
-      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
     });
     return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
       const envelope = init.body as Record<string, unknown>;
@@ -263,7 +263,7 @@ describe("EngagementClient R15.61/R15.62 list user replies/bookmarks", () => {
     void store.write({
       userAccountId: "user_001",
       principal: { type: "INDIVIDUAL", id: "user_001" },
-      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 }
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
     });
     return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
       const envelope = init.body as Record<string, unknown>;
@@ -326,7 +326,7 @@ describe("EngagementClient R15.61/R15.62 list user replies/bookmarks", () => {
 describe("POST-REACTION-TRUTH-001 / POST-COMMENT-VISIBILITY-001 wire", () => {
   function clientWith(operationRef: Record<string, unknown>) {
     const store = new SecureSessionStore(new InMemorySecureStorageDriver());
-    void store.write({ userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: "2026-09-24T00:00:00Z", rotation: 1 } });
+    void store.write({ userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 } });
     return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => ({ status: 200, json: async () => ({ commandId: (init.body as any).commandId, outcome: "ACCEPTED", eventRefs: [], aggregate: { type: "Post", id: "post_1", version: 1, state: "OK" }, operationRef: JSON.stringify(operationRef), correlationId: (init.body as any).correlationId }) }) } });
   }
 

@@ -40,6 +40,7 @@ var DomainDir = []struct {
 	{"localcontext", "LocalContext"},
 	{"localnet", "LocalNet"},
 	{"media", "Media"},
+	{"moderation", "Moderation"},
 	{"notification", "Notification"},
 	{"outcome", "Outcome"},
 	{"payment", "Payment"},

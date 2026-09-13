@@ -478,7 +478,11 @@ func messageTypeToKind(t string) string {
 
 func protectionToSecurityV1(p MessageProtection) *MessageSecurityV1 {
 	mode := "normal"
-	if p.EndToEndEncrypted && p.ScreenshotProtected {
+	// COMP-E2EE-001: 原来的条件是 p.EndToEndEncrypted && p.ScreenshotProtected，
+	// 而 EndToEndEncrypted 恒为 true（其实是假声明），所以真正生效的一直是
+	// ScreenshotProtected。去掉那个恒真项，行为不变 —— 变的只是不再用一个
+	// 平台兑现不了的声明来当判断依据。
+	if p.ScreenshotProtected {
 		mode = "secure"
 	}
 	sec := &MessageSecurityV1{
@@ -1018,16 +1022,26 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 	}
 
 	// Apply per-type protection defaults, then the user override.
+	// COMP-CHAT-001: a paid engagement keeps an auditable thread — no
+	// burn-after-read, no view cap, no screenshot blocking, and the client
+	// cannot switch them back on via protectionOverride.
 	base := DefaultProtectionFor(p.MessageType, conv.Type)
+	if IsTransactionLinkedOrigin(conv.OriginType) {
+		base = TransactionLinkedProtection()
+	}
 	var protection MessageProtection
 	if p.ProtectionOverride != nil {
-		protection, err = Apply(base, *p.ProtectionOverride, s.clock.Now().UTC())
+		protection, err = ApplyWithPolicy(base, *p.ProtectionOverride, s.clock.Now().UTC(), PolicyForOrigin(conv.OriginType))
 		if err != nil {
 			return command.Rejected(e, "INVALID_PROTECTION", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_protection", map[string]any{"reason": err.Error()})
 		}
 	} else {
 		protection = base
 	}
+	// COMP-E2EE-001: 安全声明由服务端说了算。平台没有端到端加密实现
+	// （只有 TLS + 静态 KMS，服务端能读明文），所以不论默认值还是客户端
+	// override，这里一律抹掉 —— 不能让调用方自称「端到端加密」。
+	protection = protection.WithoutUnbackedClaims()
 
 	existing, _ := s.repository.Messages(ctx, conv.ID)
 	kind := messageTypeToKind(p.MessageType)

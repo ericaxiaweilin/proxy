@@ -50,6 +50,24 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain(">AI 生成<");
   });
 
+  // AI-ROW-DUPE-001: 首页曾经同时渲染两条 AI 行 —— 上面一条「小美们」
+  // (AIAssistantsRow)、下面一条「AI 推荐」，两者都来自同一个服务端目录
+  // /v1/ai/assistants，视觉上是两条一模一样的 AI 生成横滑行。用户看到的是
+  // "两行一样的 AI 生成"。删掉上面那条，只留「AI 推荐」。
+  it("renders exactly one AI row on home instead of two identical AI rows", () => {
+    expect(source).not.toMatch(/<AIAssistantsRow[\s/>]/);
+    expect(source).not.toContain('from "../ai-assistants-row"');
+    expect(source).not.toContain("小美们");
+    expect((source.match(/>AI 推荐</g) ?? [])).toHaveLength(1);
+    expect((source.match(/styles\.aiRail\b/g) ?? [])).toHaveLength(1);
+    expect((source.match(/styles\.aiSection\b/g) ?? [])).toHaveLength(1);
+    // 「AI 生成」只作为徽标 / 卡片副标题出现，不再是一条独立行的标题。
+    expect((source.match(/>AI 生成</g) ?? [])).toHaveLength(2);
+    expect(source).toContain("<Text style={styles.aiTitle}>AI 推荐</Text>");
+    expect(source).toContain("styles.aiBadgeText}>AI 生成");
+    expect(source).toContain("styles.aiHandle}");
+  });
+
   it("keeps matchmaking above nearby scenes because Scene is a meeting tool, not inventory", () => {
     const human = source.indexOf(">真人推荐<");
     const ai = source.indexOf(">AI 推荐<");

@@ -5,6 +5,7 @@ import { Animated, AppState, Modal, NativeScrollEvent, NativeSyntheticEvent, Pan
 import { Image } from "expo-image";
 import { Directory, File, Paths } from "expo-file-system";
 import { SwipeBackShell } from "../architecture/swipe-back";
+import { useScrollChrome } from "../shell/scroll-chrome";
 import { IdentitySwitcher } from "../components/identity-switcher";
 import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { parseCommandResult } from "../login-client";
@@ -267,23 +268,11 @@ export function MessagesSurface({
   const [inboxError, setInboxError] = useState(false);
 
   // 与动态 / 首页 / 市场同一套滑动显隐（上滑藏、下滑/回顶显，阈值 -18/+28）。
-  const lastYRef = useRef(0);
-  const dirRef = useRef(0);
-  const visibleRef = useRef(true);
-  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
-  function onInboxScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const y = Math.max(0, e.nativeEvent.contentOffset.y);
-    const delta = y - lastYRef.current;
-    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-    else if (Math.abs(delta) >= 1) {
-      const prevDir = Math.sign(dirRef.current);
-      const nextDir = Math.sign(delta);
-      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
-      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
-    }
-    lastYRef.current = y;
-  }
+  // SCROLL-CHROME-001: 改用共享控制器。原先这里的本地副本会和自己造成的布局变化
+  // 互相激励 —— 隐藏 chrome 会让 Header 卸载、底部留白 96→16，内容变矮导致偏移被
+  // 钳制，钳制又产生负 delta 事件，于是 chrome 再次显示……列表滑到底部被弹回、
+  // logo 一显一隐闪循环。控制器在状态切换后短暂忽略滚动事件来打断这个回路。
+  const onInboxScroll = useScrollChrome(onChromeVisibilityChange);
   // 左滑删除的本机隐藏集：落盘，服务端刷新回来也照样过滤。
   // SYNC-FS-001: 读盘异步，mount 时 hydration 并与会话内状态合并。
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(new Set());

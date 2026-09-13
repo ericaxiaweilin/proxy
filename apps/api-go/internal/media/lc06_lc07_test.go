@@ -10,6 +10,19 @@ import (
 	"github.com/proxy-app/proxy-api/internal/command"
 )
 
+// COMP-AI-MINOR-001：这批用例测的是 LC-06/07（AI 生成标注 + likeness consent），
+// 不是年龄。年龄查询先放行一个成年人，否则每条用例都会先被年龄卡住，
+// 测的就不是它声称要测的东西。
+type adultAgeLookup struct{}
+
+func (adultAgeLookup) AgeAt(context.Context, string, time.Time) (int, error) { return 30, nil }
+
+func newAdultPersonaService(repo aipersona.Repository) *aipersona.Service {
+	svc := aipersona.NewService(repo, "terms-1.1")
+	svc.SetAgeLookup(adultAgeLookup{})
+	return svc
+}
+
 // R16.7-P1-K (LC-06) + R16.7-P1-I (LC-07) tests.
 //
 // The test scenarios focus on the boundary that
@@ -143,7 +156,7 @@ func TestLC07UserTwinWithoutConsentRejectedAtMarkReady(t *testing.T) {
 	// consents. The markReady gate should refuse to publish
 	// the asset.
 	personaRepo := aipersona.NewMemoryRepository()
-	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
+	personaSvc := newAdultPersonaService(personaRepo)
 	s.WithAIPersonaService(personaSvc)
 	persona, err := personaSvc.CreatePersona(t.Context(), aipersona.Persona{
 		OwnerID:     "user_subject_1",
@@ -186,7 +199,7 @@ func TestLC07UserTwinWithoutConsentRejectedAtMarkReady(t *testing.T) {
 func TestLC07UserTwinWithLiveConsentStampedOnAsset(t *testing.T) {
 	s, repo := newServiceWithMemory()
 	personaRepo := aipersona.NewMemoryRepository()
-	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
+	personaSvc := newAdultPersonaService(personaRepo)
 	s.WithAIPersonaService(personaSvc)
 	persona, _ := personaSvc.CreatePersona(t.Context(), aipersona.Persona{
 		OwnerID:     "user_subject_1",
@@ -234,7 +247,7 @@ func TestLC07UserTwinWithLiveConsentStampedOnAsset(t *testing.T) {
 func TestLC07CreativePersonaNeedsNoConsent(t *testing.T) {
 	s, repo := newServiceWithMemory()
 	personaRepo := aipersona.NewMemoryRepository()
-	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
+	personaSvc := newAdultPersonaService(personaRepo)
 	s.WithAIPersonaService(personaSvc)
 	persona, _ := personaSvc.CreatePersona(t.Context(), aipersona.Persona{
 		OwnerID:     "business_001",
@@ -273,7 +286,7 @@ func TestLC07CreativePersonaNeedsNoConsent(t *testing.T) {
 func TestLC07UnknownPersonaRejectedAtMarkReady(t *testing.T) {
 	s, repo := newServiceWithMemory()
 	personaRepo := aipersona.NewMemoryRepository()
-	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
+	personaSvc := newAdultPersonaService(personaRepo)
 	s.WithAIPersonaService(personaSvc)
 	r := s.Handle(envelopeFor("CreateMediaAsset", map[string]any{
 		"mediaType":          "VIDEO",
@@ -322,7 +335,7 @@ func TestLC06InvalidSourceRejectedAtCreate(t *testing.T) {
 func TestLC07AIPersonaDefaultsSubjectIDToOwner(t *testing.T) {
 	s, repo := newServiceWithMemory()
 	personaRepo := aipersona.NewMemoryRepository()
-	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
+	personaSvc := newAdultPersonaService(personaRepo)
 	s.WithAIPersonaService(personaSvc)
 	persona, _ := personaSvc.CreatePersona(t.Context(), aipersona.Persona{
 		OwnerID:     "business_001",

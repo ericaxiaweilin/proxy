@@ -2221,7 +2221,7 @@ button{cursor:pointer}
         <span class="face warm">L</span><span class="face blue">M</span><span class="face dark">T</span>
       </div>
       <div class="callName" id="activeCallName">Linh</div>
-      <div class="callState" id="activeCallState">端到端加密 · 已连接</div>
+      <div class="callState" id="activeCallState">已连接</div>
       <div class="callTime" id="activeCallTime">00:00</div>
       <div class="recordState" id="activeRecordState"><span class="recDot"></span><span id="recordStateText">正在录音 · 所有人已同意</span></div>
     </div>
@@ -2496,7 +2496,7 @@ button{cursor:pointer}
 
       <button class="centerTitle" id="secureInfoBtn" style="border:0;background:none;color:#fff">
         <div class="main">Linh</div>
-        <div class="sub">安全聊天 · 端到端加密</div>
+        <div class="sub">安全聊天 · 传输与存储加密</div>
       </button>
 
       <div class="topRight">
@@ -2864,7 +2864,7 @@ button{cursor:pointer}
     <div class="sheetTitle">安全聊天信息</div>
 
     <div class="securityCard">
-      <div class="settingName">端到端加密密钥</div>
+      <div class="settingName">静态加密（KMS）</div>
       <div class="settingMeta">你和 Linh 看到的安全密钥必须完全一致。</div>
       <div class="securityFingerprint">
         <i style="--o:.95"></i><i style="--o:.35"></i><i style="--o:.7"></i><i style="--o:.2"></i><i style="--o:.8"></i><i style="--o:.45"></i><i style="--o:.95"></i><i style="--o:.3"></i>
@@ -3154,7 +3154,7 @@ button{cursor:pointer}
 
     <button class="callModeRow" id="normalAudioCall">
       <span class="callModeIcon"><svg viewBox="0 0 24 24"><path d="M7 4 4.5 6.5c0 6 7 13 13 13L20 17l-4-3-2 2c-2.5-1-5-3.5-6-6l2-2z"/></svg></span>
-      <span class="callModeCopy"><span class="callModeName">普通语音通话</span><span class="callModeMeta">端到端加密 · 本次通话不能中途切换成录音</span></span>
+      <span class="callModeCopy"><span class="callModeName">普通语音通话</span><span class="callModeMeta">本次通话不能中途切换成录音</span></span>
     </button>
 
     <button class="callModeRow" id="recordAudioCall">
@@ -4032,7 +4032,7 @@ function startActiveCall(){
   document.getElementById('callRecordControl').querySelector('span+*');
   document.getElementById('callRecordControl').childNodes[1].textContent;
   document.getElementById('callRecordControl').lastChild.textContent='暂停录音';
-  document.getElementById('activeCallState').textContent='端到端加密 · 已连接';
+  document.getElementById('activeCallState').textContent='已连接';
   document.getElementById('activeCallTime').textContent='00:00';
   go('call');
   callTimerId=setInterval(()=>{

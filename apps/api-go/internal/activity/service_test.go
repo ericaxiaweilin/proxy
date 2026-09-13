@@ -314,9 +314,11 @@ func TestPlatformAIPersonaPhotoRequiredOnColdStart(t *testing.T) {
 		if a.AIPersonaPhoto == "" {
 			t.Fatalf("PLATFORM_AI activity %s must carry aiPersonaPhoto (asset path under ai-personas/)", a.ID)
 		}
-		wantPrefix := "ai-personas/" + a.AIPersonaID
+		// 路径必须在 assets/ai-personas/ 目录内（新写真在 photos/ 子目录），
+		// 不能是任意外链 URL（防“看起来像真人”的远程提图）。
+		wantPrefix := "ai-personas/"
 		if len(a.AIPersonaPhoto) < len(wantPrefix) || a.AIPersonaPhoto[:len(wantPrefix)] != wantPrefix {
-			t.Fatalf("PLATFORM_AI activity %s aiPersonaPhoto=%q must start with %q (asset path under apps/mobile/assets/ai-personas/)", a.ID, a.AIPersonaPhoto, wantPrefix)
+			t.Fatalf("PLATFORM_AI activity %s aiPersonaPhoto=%q must be an asset path under ai-personas/ (was: arbitrary URL?)", a.ID, a.AIPersonaPhoto)
 		}
 		seen[a.AIPersonaID] = true
 	}

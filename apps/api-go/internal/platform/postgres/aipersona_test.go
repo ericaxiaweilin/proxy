@@ -9,6 +9,14 @@ import (
 	"github.com/proxy-app/proxy-api/internal/aipersona"
 )
 
+// COMP-AI-MINOR-001：CreatePersona 现在是 fail-closed 的 —— 没接年龄查询/没
+// 年龄证据/未成年都拒绝。本测试测的是 persona + likeness consent 的仓储往返，
+// 不是年龄；因此必须先把一个成年人年龄查询接上，否则每条用例都会先被年龄卡住。
+// （与 aipersona 包内 newAdultService 同一约定。）
+type testAdultAgeLookup struct{}
+
+func (testAdultAgeLookup) AgeAt(context.Context, string, time.Time) (int, error) { return 30, nil }
+
 func TestAIPersonaPostgresPersistsPersonaAndReconsent(t *testing.T) {
 	pool := requireTestPool(t)
 	ctx := context.Background()
@@ -25,6 +33,7 @@ func TestAIPersonaPostgresPersistsPersonaAndReconsent(t *testing.T) {
 	clock := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
 	svc := aipersona.NewService(repo, "terms-1.1")
 	svc.SetNowFunc(func() time.Time { return clock })
+	svc.SetAgeLookup(testAdultAgeLookup{})
 
 	created, err := svc.CreatePersona(ctx, aipersona.Persona{
 		ID: personaID, OwnerID: ownerID, DisplayName: "Mai", PersonaType: aipersona.PersonaTypePlatformAI,

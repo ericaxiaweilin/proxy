@@ -20,6 +20,7 @@ import { type EngagementClient } from "../engagement-client";
 import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
 import { FilterChipRail } from "../components/filter-chip-rail";
+import { useScrollChrome } from "../shell/scroll-chrome";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { isOpportunityPost } from "../feed-content";
 import { mediaAspect, mediaCollectionMode, mediaRailMetrics, nearestRailIndex, shouldPreserveWholeSubject } from "../media-presentation";
@@ -45,7 +46,9 @@ import { color, shadows } from "../theme";
 import { CommunityHub } from "./community";
 import { CustomFeedHub, type CustomFeed } from "./custom-feed";
 import { readCustomFeedsAsync } from "../expo-custom-feed-store";
-import { defaultFeedPrefs, readFeedPrefsAsync } from "../expo-feed-prefs-store";
+import { defaultFeedPrefs, readFeedPrefsAsync, writeFeedPrefs } from "../expo-feed-prefs-store";
+import { feedScopeLabel, isFeedScopeActive, isPostWithinScope } from "../feed-scope-filter";
+import type { FeedScope } from "../feed-scope-filter";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
 import { isOwnPost as isOwnPostById, resolveAuthorDisplayName } from "../feed-author";
@@ -325,9 +328,7 @@ export function FeedSurface({
   const [pendingPosts, setPendingPosts] = useState<FeedPost[]>([]);
   const [pendingMedia, setPendingMedia] = useState<Record<string, FeedMediaItem[]>>({});
   const scrollRef = useRef<ScrollView>(null);
-  const lastScrollYRef = useRef(0);
-  const scrollDirectionDistanceRef = useRef(0);
-  const chromeVisibleRef = useRef(true);
+  // (scroll-chrome state now lives in useScrollChrome — see shell/scroll-chrome.ts)
   const postIdsRef = useRef<Set<string>>(cachedPostIds);
   // R15.34.1: filterRail 横滑逻辑已抽到共享组件 FilterChipRail
   // (components/filter-chip-rail.tsx)。原本 feed 这边的
@@ -371,47 +372,22 @@ export function FeedSurface({
     setFrames((prev) => ({ ...prev, [videoKey]: frame }));
   }, []);
 
+  // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts). The local
+  // copy fed on its own layout change: hiding chrome shrank the bottom padding,
+  // the clamped offset produced an upward delta, and the chrome came straight
+  // back — an oscillation near the end of the list.
+  const scrollChrome = useScrollChrome(onChromeVisibilityChange);
   function onFeedScroll(event: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const nextY = Math.max(0, event.nativeEvent.contentOffset.y);
-    const delta = nextY - lastScrollYRef.current;
-    setScrollY(nextY);
-    if (nextY <= 48) {
-      setStickyHeaderVisible(false);
-      scrollDirectionDistanceRef.current = 0;
-      if (!chromeVisibleRef.current) {
-        chromeVisibleRef.current = true;
-        onChromeVisibilityChange?.(true);
-      }
-    } else if (Math.abs(delta) >= 1) {
-      const previousDirection = Math.sign(scrollDirectionDistanceRef.current);
-      const nextDirection = Math.sign(delta);
-      scrollDirectionDistanceRef.current = previousDirection !== 0 && previousDirection !== nextDirection
-        ? delta
-        : scrollDirectionDistanceRef.current + delta;
-      if (scrollDirectionDistanceRef.current <= -18) {
-        setStickyHeaderVisible(true);
-        if (!chromeVisibleRef.current) {
-          chromeVisibleRef.current = true;
-          onChromeVisibilityChange?.(true);
-        }
-        scrollDirectionDistanceRef.current = 0;
-      } else if (scrollDirectionDistanceRef.current >= 28) {
-        setStickyHeaderVisible(false);
-        if (chromeVisibleRef.current) {
-          chromeVisibleRef.current = false;
-          onChromeVisibilityChange?.(false);
-        }
-        scrollDirectionDistanceRef.current = 0;
-      }
-    }
-    lastScrollYRef.current = nextY;
+    const { y, action } = scrollChrome(event);
+    setScrollY(y);
+    if (y <= 48) setStickyHeaderVisible(false);
+    else if (action === "show") setStickyHeaderVisible(true);
+    else if (action === "hide") setStickyHeaderVisible(false);
     const { contentSize, layoutMeasurement } = event.nativeEvent;
-    if (contentSize.height - (nextY + layoutMeasurement.height) < 900) {
+    if (contentSize.height - (y + layoutMeasurement.height) < 900) {
       void loadMoreFeed();
     }
   }
-
-  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
 
   function toggleEmbeddedComposer(): void {
     if (composerOpen) {
@@ -789,18 +765,14 @@ export function FeedSurface({
     return feedPrefs.weights[category] ?? 50;
   }
 
-  const getVisibleForTab = (forTab: FeedTab): FeedPost[] =>
+  // `scope` is a parameter (not feedPrefs.scope) so the banner can ask "how many
+  // posts would I see without the time filter?" using the exact same predicate —
+  // the count and the filter can never drift apart again.
+  const getVisibleForTab = (forTab: FeedTab, scope: FeedScope = feedPrefs.scope): FeedPost[] =>
     posts.filter((post) => {
       if (hiddenPosts.has(post.postId)) return false;
-      // 偏好-时间范围：7D/30D 按创建时间过滤，长期不过滤。
-      if (feedPrefs.scope !== "PERSISTENT") {
-        const created = Date.parse(post.createdAt);
-        if (Number.isFinite(created)) {
-          const ageMs = Date.now() - created;
-          const limitMs = feedPrefs.scope === "7D" ? 7 * 86_400_000 : 30 * 86_400_000;
-          if (ageMs > limitMs) return false;
-        }
-      }
+      // 偏好-时间范围：7D/30D 按创建时间过滤，长期不过滤（FEED-SCOPE-001）。
+      if (!isPostWithinScope(post.createdAt, scope)) return false;
       // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
       if (feedPrefs.muted.length > 0) {
         const haystack = [resolveAuthorDisplayName(post, viewerAccountId), post.body, ...post.contextRefs.map((entry) => entry.contextId)]
@@ -873,6 +845,17 @@ export function FeedSurface({
   const scored = unranked.map((post, index) => ({ post, index, score: feedWeightFor(post) }));
   scored.sort((a, b) => b.score - a.score || a.index - b.index);
   const visible = scored.map((entry) => entry.post);
+  // FEED-SCOPE-001: 时间范围是相对 Date.now() 滚动的，帖文会一天天无声消失 ——
+  // 实测默认 7D 隐藏了 62% 的帖文，而时间线上没有任何提示，看起来就是「数据丢了」。
+  // 生效时把「正在筛选」和「藏了多少」摆出来，并给一个一键看全部的出口。
+  const scopeHiddenCount = isFeedScopeActive(feedPrefs.scope)
+    ? getVisibleForTab(tab, "PERSISTENT").length - unranked.length
+    : 0;
+  const clearScopeFilter = useCallback(() => {
+    const next = { ...feedPrefs, scope: "PERSISTENT" as const };
+    setFeedPrefs(next);
+    writeFeedPrefs(next);
+  }, [feedPrefs]);
   const quoteTarget = composerQuoteId ? posts.find((post) => post.postId === composerQuoteId) : undefined;
   const viewerPost = viewer ? posts.find((post) => post.postId === viewer.postId) : undefined;
   const viewerItems = viewerPost ? mediaFor(viewerPost.postId) : [];
@@ -919,6 +902,17 @@ export function FeedSurface({
           );
         })}
       </View>
+
+      {scopeHiddenCount > 0 ? (
+        <View style={styles.scopeBanner} testID="feed-scope-banner-v1">
+          <Text style={styles.scopeBannerText}>
+            正在按「{feedScopeLabel(feedPrefs.scope)}」筛选 · 已隐藏 {scopeHiddenCount} 篇更早的
+          </Text>
+          <Pressable accessibilityLabel="显示全部帖文" onPress={clearScopeFilter}>
+            <Text style={styles.scopeBannerAction}>显示全部</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {section === "STATUS" ? (
         <StatusFeed client={socialSpace} onReply={onOpenChat} viewerAccountId={viewerAccountId} />
@@ -1463,6 +1457,9 @@ const styles = StyleSheet.create({
   //   R15.34.1: 抽到共享 FilterChipRail (components/filter-chip-rail.tsx)。
   //   requester-home 也复用同一份。feed 这里的 filterRailCapture /
   //   filterRail / filterRailContent / filterChip* 样式不再使用，删除。
+  scopeBanner: { alignItems: "center", backgroundColor: color.warn, borderRadius: 10, flexDirection: "row", gap: 8, justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  scopeBannerText: { color: color.ink, flexShrink: 1, fontSize: 11, fontWeight: "700" },
+  scopeBannerAction: { color: color.ink, fontSize: 11, fontWeight: "700", textDecorationLine: "underline" },
   customFeedBanner: { alignItems: "center", backgroundColor: "#F3EFF5", borderRadius: 10, flexDirection: "row", justifyContent: "space-between", marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6 },
   customFeedBannerText: { color: color.ink, fontSize: 11, fontWeight: "700" },
   customFeedBannerAction: { color: color.muted, fontSize: 11, fontWeight: "700" },

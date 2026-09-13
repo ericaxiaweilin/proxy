@@ -12,6 +12,7 @@ import { ActivityIndicator, Image, Modal, NativeScrollEvent, NativeSyntheticEven
 import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
+import { useScrollChrome } from "../shell/scroll-chrome";
 import type { Activity, OpportunityTemplate, ListOpportunityTemplatesPayload, ActivityPresetInfo } from "@proxy/contracts";
 import { type ActivityClient } from "../activity-client";
 import { describeJoinError } from "../activity-client";
@@ -40,6 +41,9 @@ import { ActivityDetail, ActivityFeedCard } from "./tasks";
 import { DemandWizard } from "./demand-wizard";
 import { ActivityWizard } from "./activity-wizard";
 import { resolveAuthorDisplayName } from "../feed-author";
+// COMP-REPORT-002: 机会 / 定向邀约的举报入口。
+import { ReportSheet } from "../components/report-sheet";
+import { opportunityReportTarget, type ModerationClient, type ReportTarget } from "../moderation-client";
 
 // “热门探索点” = 可以是河内市中心的著名地点 (西湖、还剑湖)，
 // 不过是真实经纬度，作为"探索"显示的独立 marker (PURPLE_HOT)。
@@ -89,6 +93,7 @@ export function MarketSurface({
   media,
   supply,
   marketLabel,
+  moderation,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
   onOpenRealityScene,
@@ -100,6 +105,7 @@ export function MarketSurface({
   fulfillment?: FulfillmentClient;
   media?: MediaClient;
   supply?: SupplyClient;
+  moderation: ModerationClient;
   marketLabel: string;
   initialTab?: MarketTab;
   onOpenExperience?: ((experienceId: string) => void) | undefined;
@@ -159,39 +165,19 @@ export function MarketSurface({
   useModuleBackHandler(demandWizardOpen ? () => { setDemandWizardOpen(false); return true; } : undefined);
   useModuleBackHandler(activityDetail ? () => { setActivityDetail(null); return true; } : undefined);
   useModuleBackHandler(oppDetail ? () => { setOppDetail(null); return true; } : undefined);
-  const lastScrollYRef = useRef(0);
-  const chromeVisibleRef = useRef(true);
-  const scrollDirectionDistanceRef = useRef(0);
-  function onMarketScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const y = Math.max(0, e.nativeEvent.contentOffset.y);
-    const delta = y - lastScrollYRef.current;
-    // 底部防回弹：隐藏底栏会把内容区 paddingBottom 从 120 切到 16，
-    // 内容总高度瞬间 -104；若此时已在底部，offset 会被钳制回弹，
-    // 回弹的上位移又会触发恢复，形成来回弹。距底部不足一个隐藏
-    // 高度时直接保持可见（Safari 到底保留工具栏同款行为）。
-    const viewportH = e.nativeEvent.layoutMeasurement.height;
-    const contentH = e.nativeEvent.contentSize.height;
-    const nearBottom = contentH - (y + viewportH) < 140;
-    if (y <= 48) {
-      chromeVisibleRef.current = true;
-      onChromeVisibilityChange?.(true);
-      scrollDirectionDistanceRef.current = 0;
-    } else if (Math.abs(delta) >= 1) {
-      const prevDir = Math.sign(scrollDirectionDistanceRef.current);
-      const nextDir = Math.sign(delta);
-      scrollDirectionDistanceRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : scrollDirectionDistanceRef.current + delta;
-      if (scrollDirectionDistanceRef.current <= -18) {
-        if (!chromeVisibleRef.current) { chromeVisibleRef.current = true; onChromeVisibilityChange?.(true); }
-        scrollDirectionDistanceRef.current = 0;
-      } else if (scrollDirectionDistanceRef.current >= 28 && !nearBottom) {
-        if (chromeVisibleRef.current) { chromeVisibleRef.current = false; onChromeVisibilityChange?.(false); }
-        scrollDirectionDistanceRef.current = 0;
-      }
+  // SCROLL-CHROME-001: shared controller (see shell/scroll-chrome.ts).
+  // 底部防回弹保留为 canHide 否决：隐藏底栏会把内容区 paddingBottom 从 120 切到 16，
+  // 内容总高度瞬间 -104；若此时已在底部，offset 会被钳制回弹，回弹的上位移又会触发
+  // 恢复，形成来回弹。距底部不足一个隐藏高度时直接保持可见（Safari 到底保留工具栏
+  // 同款行为）。现在控制器另外还会忽略状态切换后那一瞬的布局回弹事件。
+  const onMarketScroll = useScrollChrome(onChromeVisibilityChange, {
+    canHide: (e) => {
+      const y = Math.max(0, e.nativeEvent.contentOffset.y);
+      const viewportH = e.nativeEvent.layoutMeasurement.height;
+      const contentH = e.nativeEvent.contentSize.height;
+      return contentH - (y + viewportH) >= 140;
     }
-    lastScrollYRef.current = y;
-  }
-  // 与动态一致：卸载（切 tab）时恢复顶栏+底栏，避免隐藏态带到别的页。
-  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
+  });
 
   const loadActivities = useCallback(async (): Promise<void> => {
     setActivityPhase("LOADING");
@@ -376,7 +362,7 @@ export function MarketSurface({
     const bottomPad = bottomNavVisible === false ? 16 : 120;
     return (
     <View style={styles.marketPage}>
-    <ScrollView key={`${pageTab}:${demandWizardOpen ? "demand" : activityPublishOpen ? "activity" : "list"}`} style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       <View style={styles.marketHead}>
         <Text style={styles.marketTitle}>市场</Text>
         <View style={styles.headActions}>
@@ -406,7 +392,7 @@ export function MarketSurface({
           {supplierMatches === undefined ? "供给匹配中…（hn·ZH）" : supplierError ? `供给查询失败：${supplierError}` : `供给匹配 ${supplierMatches.length} 人（hn·ZH 已核验）`}
         </Text>
       ) : null}
-      {demandWizardOpen ? (
+      {demandWizardOpen && pageTab === "OPPORTUNITY" ? (
         <DemandWizard
           marketplace={marketplace}
           supply={supply}
@@ -417,7 +403,7 @@ export function MarketSurface({
           onViewMarket={() => setDemandWizardOpen(false)}
           onCreateActivity={() => { setDemandWizardOpen(false); openActivityPublisher(); }}
         />
-      ) : activityPublishOpen ? (
+      ) : activityPublishOpen && pageTab === "ACTIVITY" ? (
         <ActivityWizard
           activities={activities}
           scenes={activityItems}          onBack={() => setActivityPublishOpen(false)}
@@ -453,7 +439,9 @@ export function MarketSurface({
       ) : pageTab === "OPPORTUNITY" ? (
         oppDetail ? (
           <OpportunityDetail
+            key={oppDetail.id}
             opportunity={oppDetail}
+            moderation={moderation}
             quoteMode={oppQuoteMode}
             setQuoteMode={setOppQuoteMode}
             onBack={() => setOppDetail(null)}
@@ -492,7 +480,7 @@ export function MarketSurface({
             <Text style={styles.sectionTitle}>趋势活动</Text>
             <Text style={styles.sectionHint}>多人 / 兴趣 / 品牌场景</Text>
           </View>
-          {activityPhase === "LOADING" ? (
+          {activityPhase === "LOADING" && activityItems.length === 0 ? (
             <View style={styles.emptyBox}>
               <ActivityIndicator color={color.magenta} />
               <Text style={styles.emptyText}>正在读取活动读模型（ListActivities）…</Text>
@@ -638,6 +626,7 @@ function OpportunityTab({
 
 function OpportunityDetail({
   opportunity,
+  moderation,
   quoteMode,
   setQuoteMode,
   onBack,
@@ -647,6 +636,7 @@ function OpportunityDetail({
   busy
 }: {
   opportunity: MarketOpportunity;
+  moderation: ModerationClient;
   quoteMode: "budget" | "standard" | "premium" | "custom";
   setQuoteMode: (m: "budget" | "standard" | "premium" | "custom") => void;
   onBack: () => void;
@@ -661,6 +651,11 @@ function OpportunityDetail({
   // 也不再静默回退到客户预算（之前选自定义照样按预算发出）。
   const [customQuote, setCustomQuote] = useState("");
   const [quoteError, setQuoteError] = useState<string | undefined>(undefined);
+  // COMP-REPORT-002: 机会 / 邀约举报。targetId 用服务端 opportunity.id，
+  // 不用界面上那个 PX-O 展示编号（客户端随机的，服务端查不到）。
+  const [reporting, setReporting] = useState<ReportTarget | undefined>(undefined);
+  const [reportDone, setReportDone] = useState<string | undefined>(undefined);
+  const reportTarget = opportunityReportTarget(opportunity);
   const customDigits = customQuote.replace(/[^0-9]/g, "");
   const customValid = customDigits.length > 0;
   const quote = quoteMode === "custom"
@@ -669,7 +664,7 @@ function OpportunityDetail({
       ? `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.25).toLocaleString()}₫`
       : quoteMode === "standard" ? (fair.split("–")[0]?.trim() ?? budget) : budget;
   return (
-    <View>
+    <View style={styles.oppDetailRoot}>
       <View style={styles.detailHead}>
         <Pressable onPress={onBack} style={styles.detailBack}>
           <Text style={styles.detailBackText}>‹</Text>
@@ -815,6 +810,24 @@ function OpportunityDetail({
       ) : null}
 
       <Text style={styles.detailHint}>价格只属于这次需求。你的主页不会永久显示“小时价”。AI 不替客户压价，也不替你接受。</Text>
+
+      {/* COMP-REPORT-002: 机会 / 邀约举报入口。常驻在详情页底部，不做成
+          长按菜单 —— 用户读到一条可疑的邀约时，不该还要先猜哪里能举报。 */}
+      <Pressable accessibilityLabel={reportTarget.label} onPress={() => { setReportDone(undefined); setReporting(reportTarget); }} style={styles.reportLink}>
+        <Text style={styles.reportLinkText}>⚑ {reportTarget.label}</Text>
+      </Pressable>
+      {reportDone ? <Text style={styles.detailHint}>{reportDone}</Text> : null}
+      {reporting ? (
+        <ReportSheet
+          moderation={moderation}
+          targetType={reporting.targetType}
+          targetId={reporting.targetId}
+          title={reporting.label}
+          {...(opportunity.title ? { subtitle: opportunity.title } : {})}
+          onClose={() => setReporting(undefined)}
+          onDone={() => { setReporting(undefined); setReportDone("举报已提交，我们会尽快处理。"); }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -2046,6 +2059,11 @@ const styles = StyleSheet.create({
   quotePrice: { color: color.ink, fontSize: 12, fontWeight: "800" },
   quoteSub: { color: color.muted, fontSize: 11, marginTop: 2 },
   detailHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 10, textAlign: "center" },
+  // COMP-REPORT-002: oppDetailRoot 需要 flex:1 —— 举报弹层是绝对定位
+  // (StyleSheet.absoluteFill)，没有撑满的根节点就盖不住整屏。
+  oppDetailRoot: { flex: 1 },
+  reportLink: { alignItems: "center", borderColor: color.line, borderRadius: 999, borderWidth: 1, marginTop: 12, paddingVertical: 9 },
+  reportLinkText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   emptyBox: { alignItems: "center", borderColor: "#D9D0DE", borderRadius: 17, borderStyle: "dashed", borderWidth: 1, gap: 8, marginTop: 12, padding: 22 },
   emptyText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
   retryBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },

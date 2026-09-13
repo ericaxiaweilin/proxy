@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useScrollChrome } from "../shell/scroll-chrome";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { HomeSearchDock } from "../components/home-search-dock";
 import { buildHomeSearchIndex, matchHomeSearchIntent, type HomeSearchSuggestion } from "../home-search-intent";
@@ -29,7 +30,6 @@ import { type SceneToolId } from "@proxy/contracts";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { SCENE_ACTIONS, SceneActivityDiscovery } from "../components/scene-activity-discovery";
-import { AIAssistantsRow } from "../ai-assistants-row";
 import {
   RECOMMEND_FILTER_CHIPS,
   RECOMMEND_MODE_ORDER,
@@ -567,25 +567,9 @@ export function RequesterHome({
     };
   }, [demandClient]);
 
-  const lastYRef = useRef(0);
-  const dirRef = useRef(0);
-  const visibleRef = useRef(true);
-  // 卸载回显 chrome（与动态一致）：切走时壳会重置，内部替换（如进 Scene
-  // Composer）时靠这里复位，避免停在隐藏态。
-  useEffect(() => () => onChromeVisibilityChange?.(true), [onChromeVisibilityChange]);
-  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const y = Math.max(0, e.nativeEvent.contentOffset.y);
-    const delta = y - lastYRef.current;
-    if (y <= 48) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-    else if (Math.abs(delta) >= 1) {
-      const prevDir = Math.sign(dirRef.current);
-      const nextDir = Math.sign(delta);
-      dirRef.current = prevDir !== 0 && prevDir !== nextDir ? delta : dirRef.current + delta;
-      if (dirRef.current <= -18) { if (!visibleRef.current) { visibleRef.current = true; onChromeVisibilityChange?.(true); } dirRef.current = 0; }
-      else if (dirRef.current >= 28) { if (visibleRef.current) { visibleRef.current = false; onChromeVisibilityChange?.(false); } dirRef.current = 0; }
-    }
-    lastYRef.current = y;
-  }
+  // SCROLL-CHROME-001: 共享控制器。卸载回显 chrome 也由它负责（与动态一致）：
+  // 切走时壳会重置，内部替换（如进 Scene Composer）时靠这里复位，避免停在隐藏态。
+  const onScroll = useScrollChrome(onChromeVisibilityChange);
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingBottom: bottomNavVisible === false ? 16 : 120 }]} onScroll={onScroll} scrollEventThrottle={16}>
       {topContext ?? null}
@@ -693,10 +677,10 @@ export function RequesterHome({
         <Text style={styles.followMsg}>{relationshipMsg}</Text>
       ) : null}
 
-      {/* AI-ASSIST-001: 5 小美行放真人推荐之后，不抢镜。
-          服务端目录 + 关注/发消息，与真人“推荐人”分开渲染不混排。 */}
-      <AIAssistantsRow />
-
+      {/* AI-ROW-DUPE-001: 首页只保留一行 AI 推荐。曾经在这上面还挂了一条
+          AI 助手横滑行（同一个组件、同一个服务端目录 /v1/ai/assistants），
+          于是页面出现两条一模一样的 AI 生成横滑行。删掉上面那条，
+          留下下面这条带「AI 生成」徽标的「AI 推荐」。再挂回去会被门禁挡下。 */}
       {recommendedAI.length > 0 ? <View style={styles.aiSection}>
         <View style={styles.aiSectionHead}>
           <View><Text style={styles.aiTitle}>AI 推荐</Text><Text style={styles.aiSub}>先看她为什么适合当前场景</Text></View>

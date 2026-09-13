@@ -57,7 +57,7 @@ var operatorCommandTypes = map[string]bool{
 	"MarkMediaReady":           true,
 	// R15.17: admin content review — nudity / politics / violence.
 	// 仍需通过 PROXY_OPERATOR_PRINCIPALS 白名单检。未设 = 拒。
-	"ReviewMediaAsset":         true,
+	"ReviewMediaAsset": true,
 	// R15.18: audit list — operator 查 content review 决策历史。
 	// 同走 PROXY_OPERATOR_PRINCIPALS 门 (server 验证在 /v1/commands 边界)。
 	"ListMediaReviewDecisions": true,
@@ -73,6 +73,15 @@ var operatorCommandTypes = map[string]bool{
 	"ReleasePayout":        true,
 	"CreateVoucher":        true,
 	"SettleVoucher":        true,
+	// COMP-REPORT-003: 举报处置（接手 / 升级 / 处置 / 判定不成立 / 重开）。
+	// 这是「平台处理过举报」的唯一留痕入口，绝不能让普通用户自己写 ——
+	// 否则处置记录就成了谁都能伪造的东西，举证价值归零。
+	// 同走 PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
+	"RecordReportDisposition": true,
+	// COMP-REPORT-004: 申诉复核（成立 / 驳回）。同样绝不能让普通用户自己写 ——
+	// 否则「申诉成立 / 驳回」就成了谁都能伪造的制衡结论，申诉渠道的
+	// 意义归零。同走 PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
+	"RecordAppealDecision": true,
 }
 
 func requiresOperator(commandType string) bool {

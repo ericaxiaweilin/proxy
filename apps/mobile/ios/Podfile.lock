@@ -2424,7 +2424,7 @@ SPEC CHECKSUMS:
   ExpoLinking: 2e9ead00fcb0d3e623a8d4935fadae3cdb6d4d97
   ExpoLocation: cc81013b678d75014ae395cd4707c0136e88cfb1
   ExpoLogBox: 6bb73c341aca22e699bd4da6cc61afc844e1a648
-  ExpoModulesCore: 8adad4960a87530e95f6ff24dab87b10d86c53b8
+  ExpoModulesCore: 863e32cb91dca34ffe9825b91165adc4ec832ad8
   ExpoModulesJSI: b20fefa4cdd9097e7e6b715466d1900b8c5d4711
   ExpoModulesWorklets: 53d4ca8d32225cb3ec4660b9f03496192b4f3cac
   ExpoSecureStore: 94793113049a2d7478dfe1a13aa15081e9f61755

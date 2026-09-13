@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -37,6 +38,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
+	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/mockidentity"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
@@ -114,6 +116,9 @@ func main() {
 	paymentService := payment.New()
 	notificationService := notification.NewWithPushProvider(nil, configuredNotificationPush())
 	safetyService := safety.New()
+	// COMP-REPORT-001: 举报受理。法律文件 §38 承诺可举报八类目标，
+	// 之前只有 engagement.ReportPost（POST）一类接得上。
+	moderationService := moderation.New()
 	outcomeService := outcome.New()
 	sceneService := scene.New()
 	realitySceneService := realityscene.New()
@@ -188,6 +193,13 @@ func main() {
 		// Lotus §1: DisplayIdentity PG persistence (038) — wire PG repo so
 		// CreateDisplayIdentity/List/Burn survive restarts.
 		identityService.SetDisplayIdentityRepository(postgres.NewDisplayIdentityRepository(pool))
+		// COMP-ID-001/002: self-destructing personas are refused to any
+		// account with money history. The guard must read the REAL payment
+		// tables — wired here, inside the `pool != nil` branch, so a
+		// database-less boot leaves the lookup nil and identity fails
+		// closed (no lookup == no burner) instead of answering "never
+		// transacted" for everyone.
+		identityService.SetTransactionHistoryLookup(postgres.NewTransactionHistoryRepository(pool))
 		// R18.x PROFILE-001: Profile persistence (039) — wire PG repo
 		// so the mobile '编辑主页' modal's UpdateProfile call survives
 		// restarts. The IdentityRepository implements ProfileRepository.
@@ -225,6 +237,9 @@ func main() {
 		engagementService = engagement.NewWithRepository(postgres.NewEngagementRepository(pool))
 		fulfillmentService = fulfillment.NewWithRepository(postgres.NewFulfillmentRepositoryWithOutbox(pool, outboxRepository))
 		supplyService = supply.NewWithRepository(postgres.NewSupplyRepositoryWithOutbox(pool, outboxRepository))
+		// COMP-SELLER-001：候选资格只认已实名且未过期的卖家。接在这里（pool 分支内）
+		// 意味着没有数据库时 lookup 为 nil → 撮合不出候选，而不是「照常撮合」。
+		supplyService.SetSellerIdentityLookup(postgres.NewSellerRealNameRepository(pool))
 		mediaService = media.NewWithReviewDecisionRepository(
 			postgres.NewMediaRepository(pool),
 			postgres.NewMediaReviewDecisionRepository(pool),
@@ -246,6 +261,7 @@ func main() {
 		paymentService = payment.NewWithRepository(postgres.NewPaymentRepository(pool, outboxRepository))
 		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())
 		safetyService = safety.NewWithRepository(postgres.NewSafetyRepository(pool))
+		moderationService = moderation.NewWithRepository(postgres.NewModerationRepository(pool))
 		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
 		localNetService = localnet.NewWithAll(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack, scene.NewSceneAestheticAdapter(sceneService))
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
@@ -308,6 +324,7 @@ func main() {
 	server.Payment = paymentService
 	server.Notification = notificationService
 	server.Safety = safetyService
+	server.Moderation = moderationService
 	server.Outcome = outcomeService
 	server.Scene = sceneService
 	server.RealityScene = realitySceneService
@@ -398,6 +415,13 @@ func main() {
 		personaRepo = postgres.NewAIPersonaRepository(pool)
 	}
 	personaSvc := aipersona.NewService(personaRepo, "terms-1.1")
+	// COMP-AI-MINOR-001: 数字分身 / AI 伴侣不对未成年人开放。年龄查询结果
+	// 由 identity 侧提供（identity.user_age_assertions，见 COMP-AGE-001）。
+	// 同样只在 pool 可用时接：没有数据库 → nil lookup → CreatePersona 一律拒绝
+	// （fail-closed），功能宁可关闭也不能对未成年人开放。
+	if pool != nil {
+		personaSvc.SetAgeLookup(postgres.NewIdentityRepository(pool))
+	}
 	mediaService.WithAIPersonaService(personaSvc)
 	server.AIPersona = personaSvc
 	// R16.7-P1-E: Jurisdiction Policy Engine. The
@@ -795,7 +819,21 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 			durationMs                                                     int64
 		}{medical.id, "IMAGE", medical.key, medical.key, medical.key, "image/jpeg", "", medical.width, medical.height, 0})
 	}
+	// MEDIA-FILE-001: a seed row claiming READY for bytes that are not on disk
+	// is the same lie the read model used to tell — a URL that 404s, which the
+	// client renders as a black frame. It also re-asserts itself on every boot,
+	// so quarantining the row by hand never sticks. Derive the status from the
+	// filesystem instead.
+	storeDir, err := media.ResolveLocalStoreDir(os.Getenv("PROXY_MEDIA_STORE_DIR"))
+	if err != nil {
+		return err
+	}
 	for _, a := range assets {
+		status := "READY"
+		if _, statErr := os.Stat(filepath.Join(storeDir, a.playbackKey)); statErr != nil {
+			status = "FAILED"
+			log.Printf("seed media %s has no bytes at %s; marking FAILED instead of READY", a.id, a.playbackKey)
+		}
 		// First-party editorial assets are owned by the PLATFORM principal.
 		// Never attribute system content to a synthetic individual account.
 		if _, err := pool.Exec(ctx, `
@@ -804,15 +842,15 @@ func seedPostgresMedia(pool *pgxpool.Pool) error {
 				original_storage_key, playback_storage_key, thumbnail_storage_key,
 				mime_type, width, height, duration_ms, codec,
 				processing_status, playback_url, thumbnail_url, moderation_status, visibility_class, created_at, updated_at
-			) VALUES ($1,'PLATFORM','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,'READY',$11,$12,'APPROVED','PUBLIC',$13,$13)
+			) VALUES ($1,'PLATFORM','seed',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'APPROVED','PUBLIC',$14,$14)
 			ON CONFLICT (media_asset_id) DO UPDATE SET
 				owner_principal_type=EXCLUDED.owner_principal_type,
 				owner_principal_id=EXCLUDED.owner_principal_id,
 				playback_storage_key=EXCLUDED.playback_storage_key,
 				thumbnail_storage_key=EXCLUDED.thumbnail_storage_key,
-				processing_status='READY', moderation_status='APPROVED', visibility_class='PUBLIC', updated_at=EXCLUDED.updated_at`,
+				processing_status=EXCLUDED.processing_status, moderation_status='APPROVED', visibility_class='PUBLIC', updated_at=EXCLUDED.updated_at`,
 			a.id, a.mediaType, a.originalKey, a.playbackKey, a.thumbKey, a.mime,
-			a.width, a.height, a.durationMs, a.codec,
+			a.width, a.height, a.durationMs, a.codec, status,
 			"/v1/media/play/"+a.id, "/v1/media/thumb/"+a.id, now); err != nil {
 			return err
 		}
