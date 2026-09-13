@@ -131,6 +131,8 @@ commands:
     domain: Business
   - command: DismissOutcomeLearning
     domain: Outcome
+  - command: FileAppeal
+    domain: Moderation
   - command: FinalizeObservationSet
     domain: Outcome
   - command: FollowProfile
@@ -285,6 +287,8 @@ commands:
     domain: Engagement
   - command: RecordAggregatedDemandSignal
     domain: Business
+  - command: RecordAppealDecision
+    domain: Moderation
   - command: RecordAttendance
     domain: Scene
   - command: RecordAttribution

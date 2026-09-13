@@ -2174,13 +2174,11 @@ if [ ! -f apps/api-go/migrations/087_moderation_dispositions.sql ]; then
 fi
 echo "    COMP-REPORT-003: PASS (handled reports leave an attributable, append-only trail)"
 
-# COMP-REPORT-004: 申诉机制（§37 §38 承诺的「恢复或申诉机制」+ NĐ 147/2024
-# 硬性要求）。001/002 证明「收到」、003 证明「处理」，但被处理方没有申诉
-# 渠道 —— 处置权缺少制衡，在行政与刑事语境下是 posture 缺陷。
-# 本条锁死：申诉与其复核必须 append-only 且可归因；申诉必须挂真实存在的
-# 举报、复核必须挂真实存在的申诉（fail-closed）；复核只能由 operator 写入
-# （RecordAppealDecision 走 PROXY_OPERATOR_PRINCIPALS 白名单）；PG 仓储与
-# 迁移 088 必须存在（不能只在内存里演）。
+# COMP-REPORT-004: 申诉机制（§37 第 693 行、§38 第 709 行承诺的「恢复或申诉
+# 机制」，NĐ 147/2024 把社交网络的投诉 / 申诉渠道列为硬性要求）。
+#
+# 003 让举报闭环到「收到 → 处理」，但没有申诉渠道，被处理方无从申辩 ——
+# 平台能证明自己处理了举报，却证明不了「被处理方有救济途径」。
 require_test "COMP-REPORT-004" "./internal/moderation" \
   "TestAppealAcceptedAndAttributed" \
   "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
@@ -2193,23 +2191,41 @@ require_test "COMP-REPORT-004" "./internal/moderation" \
 require_test "COMP-REPORT-004" "./internal/moderation" \
   "TestAppealDecisionRejectedWhenRejectedWithoutNote" \
   "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
-if ! grep -q 'RecordAppealDecision' apps/api-go/internal/api/security.go; then
+require_test "COMP-REPORT-004" "./internal/moderation" \
+  "TestAppealDecisionsCoverUpheldAndRejected" \
+  "apps/api-go/internal/moderation/appeal_compliance_test.go" || exit $?
+# 复核是 operator-only：普通用户能给自己写「申诉成立 / 驳回」，这个渠道的
+# 制衡意义就归零了。
+if ! grep -qF '"RecordAppealDecision": true' \
+     apps/api-go/internal/api/security.go; then
   echo "  FAIL [COMP-REPORT-004]: RecordAppealDecision is no longer operator-only," >&2
-  echo "  or the operator gate in security.go was removed." >&2
+  echo "        so anyone could write a fake review onto their own appeal." >&2
   exit 1
 fi
-if ! grep -q 'AddAppeal(ctx context.Context, appeal Appeal) error' apps/api-go/internal/moderation/service.go; then
-  echo "  FAIL [COMP-REPORT-004]: the moderation Repository interface no longer" >&2
-  echo "  carries the appeal methods (appeal writes would not compile)." >&2
+# 反向钉：提交申诉**不能**变成 operator-only —— 否则普通用户根本够不到申诉
+# 入口，§38 承诺的申诉渠道在界面上消失（与 002 同一类：承诺了但点不到）。
+if grep -qF '"FileAppeal": true' \
+    apps/api-go/internal/api/security.go; then
+  echo "  FAIL [COMP-REPORT-004]: FileAppeal became operator-only, so ordinary" >&2
+  echo "        logged-in users can no longer reach the appeal channel at all." >&2
   exit 1
 fi
-if ! grep -q 'moderation.appeals' apps/api-go/internal/platform/postgres/moderation.go; then
+# 命令必须真被 moderation 服务受理，否则命令面写了也走不到。
+if ! grep -qF 'case "FileAppeal"' \
+     apps/api-go/internal/moderation/service.go; then
+  echo "  FAIL [COMP-REPORT-004]: the appeal command is no longer handled by" >&2
+  echo "        the moderation service, so it would 501." >&2
+  exit 1
+fi
+# 落库实现：只有内存仓储的话，重启一次申诉记录就没了。
+if ! grep -qF 'func (r *ModerationRepository) AddAppeal' \
+     apps/api-go/internal/platform/postgres/moderation.go; then
   echo "  FAIL [COMP-REPORT-004]: the Postgres appeal repository is missing," >&2
-  echo "  or no longer writes moderation.appeals." >&2
+  echo "        so appeals would not survive a restart." >&2
   exit 1
 fi
 if [ ! -f apps/api-go/migrations/088_moderation_appeals.sql ]; then
   echo "  FAIL [COMP-REPORT-004]: migration 088_moderation_appeals.sql is missing." >&2
   exit 1
 fi
-echo "    COMP-REPORT-004: PASS (appeals + operator-only review leave an attributable, append-only trail)"
+echo "    COMP-REPORT-004: PASS (the appeal channel exists, is attributable, and is operator-reviewed)"
