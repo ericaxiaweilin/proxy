@@ -4,6 +4,24 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 181 — 2026-09-13
+
+- FEED-REPLY-001/002：评论预览（Threads 式：首屏 5 条 + 查看全部）与回复作者名
+  服务端解析。feed 评论区视觉变化（默认可见前 5 条评论，超出折叠）。
+
+## Revision 181 — 2026-09-13
+
+- FEED-REPLY-001 / FEED-REPLY-002：动态评论的作者身份与折叠规则。
+  - **评论作者不再显示账号 ID**。`ListPostReplies` 现在按 profile 解析
+    `actorDisplayName`：读时解析、按作者去重，不落库、不接受客户端提供
+    （`ReplyToPost` 里塞什么都不作数）。`cmd/api/main.go` 给 engagement 接上
+    `SetAuthorNameResolver`，与 localnet / socialspace / marketplace 走同一条
+    权威链路。解析不到时客户端退化成中性标签「用户」，绝不回显 `actorId`；
+    profile 里历史脏值「你」同样不作数，避免别人的评论显示成"你"。
+  - **评论不再全折叠**。帖子进列表即预取评论，首屏固定显示前 5 条，超出才
+    收进「查看其余 N 条回复」，展开后可收起（Threads 式）。规则抽成纯函数
+    放在 `apps/mobile/src/reply-preview.ts`。
+
 ## Revision 180 — 2026-09-13
 
 - 活动冷启动种子的 AI persona 写真路径从旧 SVG（ai-personas/ai_00X.svg）

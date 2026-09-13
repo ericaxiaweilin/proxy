@@ -37,3 +37,26 @@ export function resolveAuthorDisplayName(
 export function isOwnPost(post: AuthoredItem, viewerAccountId?: string | undefined): boolean {
   return !!viewerAccountId && post.authorId === viewerAccountId;
 }
+
+export type ReplyAuthorItem = {
+  actorId: string;
+  actorDisplayName?: string | undefined;
+};
+
+/**
+ * FEED-REPLY-001 — resolve the comment author label for one viewer.
+ *
+ * Delegates to resolveAuthorDisplayName so a comment and a post can never
+ * disagree about identity: own comments render as "你", legacy rows whose
+ * profile name is literally "你" fall back to a neutral label, and a reply
+ * with no server-resolved name never degrades to showing the raw account id.
+ */
+export function resolveReplyAuthorDisplayName(
+  reply: ReplyAuthorItem,
+  viewerAccountId?: string | undefined
+): string {
+  return resolveAuthorDisplayName(
+    { authorId: reply.actorId, authorDisplayName: reply.actorDisplayName },
+    viewerAccountId
+  );
+}

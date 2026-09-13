@@ -51,7 +51,8 @@ import { feedScopeLabel, isFeedScopeActive, isPostWithinScope } from "../feed-sc
 import type { FeedScope } from "../feed-scope-filter";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
-import { isOwnPost as isOwnPostById, resolveAuthorDisplayName } from "../feed-author";
+import { isOwnPost as isOwnPostById, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "../feed-author";
+import { hiddenReplyCount, shouldOfferReplyToggle, visibleReplies } from "../reply-preview";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
 type FeedSection = "POSTS" | "STATUS" | "COMMUNITY";
@@ -218,6 +219,8 @@ export function FeedSurface({
 	const [postEngagement, setPostEngagement] = useState<Record<string, PostEngagement>>({});
 	const [postReplies, setPostReplies] = useState<Record<string, PostReply[]>>({});
 	const [expandedReplies, setExpandedReplies] = useState<ReadonlySet<string>>(new Set());
+	// FEED-REPLY-002: 已经拉过评论的帖子，翻页回来不再重复拉。
+	const requestedRepliesRef = useRef<Set<string>>(new Set());
   const [bookmarked, setBookmarked] = useState<ReadonlySet<string>>(new Set());
   const [engagementBusy, setEngagementBusy] = useState<ReadonlySet<string>>(new Set());
   const [engagementError, setEngagementError] = useState<string>();
@@ -570,6 +573,31 @@ export function FeedSurface({
 	  if (available.length === 0) return;
 	  setPostEngagement((previous) => mergePostEngagement(previous, available));
 	  setLiked((previous) => mergeReactedPostIds(previous, available));
+	  // FEED-REPLY-002: 评论不再全折叠。帖子一进列表就把评论拉下来，首屏直接
+	  // 显示前 5 条；只拉有评论的帖子，且每个帖子只拉一次。
+	  for (const item of available) {
+		if (item.replies > 0) void hydrateReplyPreviews(item.postId);
+	  }
+	}
+
+	async function hydrateReplyPreviews(postId: string): Promise<void> {
+	  if (requestedRepliesRef.current.has(postId)) return;
+	  requestedRepliesRef.current.add(postId);
+	  try {
+		const listed = await engagement.listPostReplies(postId);
+		setPostReplies((previous) => ({ ...previous, [postId]: listed.replies }));
+	  } catch {
+		// 拉不到就允许下次再试，但不要因为一条评论炸掉整屏。
+		requestedRepliesRef.current.delete(postId);
+	  }
+	}
+
+	function toggleReplies(postId: string): void {
+	  setExpandedReplies((previous) => {
+		const next = new Set(previous);
+		if (next.has(postId)) next.delete(postId); else next.add(postId);
+		return next;
+	  });
 	}
 
 	async function toggleLike(postId: string): Promise<void> {
@@ -1050,6 +1078,12 @@ export function FeedSurface({
           const isLiked = liked.has(post.postId);
 		  const isSaved = bookmarked.has(post.postId);
 		  const truth = postEngagement[post.postId];
+		  // FEED-REPLY-002: 评论默认展开前 5 条，超出才折叠；不再「全折叠」。
+		  const replies = postReplies[post.postId] ?? [];
+		  const repliesExpanded = expandedReplies.has(post.postId);
+		  const shownReplies = visibleReplies(replies, repliesExpanded);
+		  const collapsedReplies = hiddenReplyCount(replies.length);
+		  const offerReplyToggle = shouldOfferReplyToggle(replies.length);
           const chips = post.contextRefs.filter((entry) => entry.contextType !== "QUOTE_POST");
           const isCityCompanion = post.authorType === "AGENT";
           return (
@@ -1193,9 +1227,25 @@ export function FeedSurface({
                   <Text style={styles.postActionText}>···</Text>
                 </Pressable>
 		  </View>
-		  {expandedReplies.has(post.postId) && (postReplies[post.postId]?.length ?? 0) > 0 ? (
+		  {shownReplies.length > 0 ? (
 			<View style={styles.postReplies}>
-			  {postReplies[post.postId]?.map((reply) => <View key={reply.replyId} style={styles.postReply}><Text style={styles.postReplyAuthor}>{reply.actorId}</Text><Text style={styles.postReplyBody}>{reply.body}</Text></View>)}
+			  {shownReplies.map((reply) => (
+				<View key={reply.replyId} style={styles.postReply}>
+				  {/* FEED-REPLY-001: 显示作者名，绝不回显 actorId。 */}
+				  <Text style={styles.postReplyAuthor}>{resolveReplyAuthorDisplayName(reply, viewerAccountId)}</Text>
+				  <Text style={styles.postReplyBody}>{reply.body}</Text>
+				</View>
+			  ))}
+			  {offerReplyToggle && !repliesExpanded ? (
+				<Pressable accessibilityLabel="查看全部回复" hitSlop={8} onPress={() => toggleReplies(post.postId)}>
+				  <Text style={styles.postRepliesMore}>查看其余 {collapsedReplies} 条回复</Text>
+				</Pressable>
+			  ) : null}
+			  {offerReplyToggle && repliesExpanded ? (
+				<Pressable accessibilityLabel="收起回复" hitSlop={8} onPress={() => toggleReplies(post.postId)}>
+				  <Text style={styles.postRepliesMore}>收起回复</Text>
+				</Pressable>
+			  ) : null}
 			</View>
 		  ) : null}
 
@@ -1755,6 +1805,8 @@ const styles = StyleSheet.create({
 	postReply: { flexDirection: "row", gap: 8 },
 	postReplyAuthor: { color: color.ink, fontSize: 12, fontWeight: "800" },
 	postReplyBody: { color: color.ink, flex: 1, fontSize: 13, lineHeight: 18 },
+	// FEED-REPLY-002: 展开/收起控件。
+	postRepliesMore: { color: color.muted, fontSize: 12, fontWeight: "700", paddingTop: 2 },
   postActionText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   postActionOn: { color: "#6C36C8" },
 

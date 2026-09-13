@@ -20,7 +20,7 @@ SELECT 'ma_creator_' || suffix || '_portrait_v1',
        'creator_' || suffix || '_portrait_v1.jpg',
        'creator_' || suffix || '_portrait_v1.jpg',
        'image/jpeg', 128, 128, 'READY', 'APPROVED', 'PUBLIC', now(), now()
-FROM (VALUES ('linh'), ('mai'), ('an'), ('thao'), ('yen'), ('minh')) AS t(suffix)
+FROM (VALUES ('linh'), ('mai'), ('an'), ('thao'), ('yen'), ('minh'), ('trang')) AS t(suffix)
 ON CONFLICT (media_asset_id) DO UPDATE
   SET original_storage_key  = EXCLUDED.original_storage_key,
       playback_storage_key  = EXCLUDED.playback_storage_key,

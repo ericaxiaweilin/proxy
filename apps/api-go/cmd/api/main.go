@@ -38,10 +38,10 @@ import (
 	"github.com/proxy-app/proxy-api/internal/localnet"
 	"github.com/proxy-app/proxy-api/internal/location"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
-	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/mockidentity"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
+	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
@@ -301,6 +301,9 @@ func main() {
 	localNetService.SetAuthorNameResolver(authorNames)
 	socialSpaceService.SetAuthorNameResolver(authorNames)
 	marketplaceService.SetAuthorNameResolver(authorNames)
+	// FEED-REPLY-001: comments resolve the author name from the profile too —
+	// otherwise the feed can only render the raw account id.
+	engagementService.SetAuthorNameResolver(authorNames)
 	sceneService.SetInvitationOrderCreator(sceneFulfillmentAdapter{repo: fulfillmentService.Repository()})
 	databaseReadyCheck := readyCheck
 	readyCheck = func(ctx context.Context) error {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,10 @@ type Reply struct {
 	ActorID   string    `json:"actorId"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"createdAt"`
+	// ActorDisplayName 是评论作者的展示名（FEED-REPLY-001）。它在读时由
+	// profile 解析，既不落库也不接受客户端提供——客户端拿不到名字时只能
+	// 退化成中性标签，绝不允许把 actorId 当成名字显示给用户。
+	ActorDisplayName string `json:"actorDisplayName,omitempty"`
 }
 
 // Repost 是转发。
@@ -475,6 +480,21 @@ type Service struct {
 	mu         sync.Mutex
 	repository Repository
 	clock      clock.Clock
+	// authorNames 解析评论作者的展示名（profile 权威）。nil = 未接线，
+	// 保持旧行为（只回 actorId）；生产接线必设（main.go）。
+	authorNames authorNameResolver
+}
+
+// authorNameResolver 是消费侧窄接口，engagement 不需要 import identity。
+type authorNameResolver interface {
+	ResolveAuthorDisplayName(ctx context.Context, userAccountID string) (string, bool)
+}
+
+// SetAuthorNameResolver wires profile-backed reply author resolution.
+func (s *Service) SetAuthorNameResolver(resolver authorNameResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authorNames = resolver
 }
 
 func New() *Service {
@@ -768,7 +788,51 @@ func (s *Service) listPostReplies(ctx context.Context, e command.Envelope) comma
 	if replies == nil {
 		replies = []Reply{}
 	}
+	replies = s.withReplyActorNames(ctx, replies)
 	return acceptedWithPayload(e, "Post", p.PostID, 1, "REPLIES_LISTED", map[string]any{"postId": p.PostID, "replies": replies, "count": len(replies)}, nil)
+}
+
+// withReplyActorNames 用 profile 名字填充每条评论的 ActorDisplayName
+// （FEED-REPLY-001）。
+//
+// 名字是读时解析、按作者去重的：加这个字段之前写下的存量评论也能拿到名字，
+// 不需要迁移；一条评论流只花「不同作者数」次查询，而不是「评论数」次。
+// 解析不到的作者保持空串，由客户端降级成中性标签——服务端绝不回填 actorId。
+func (s *Service) withReplyActorNames(ctx context.Context, replies []Reply) []Reply {
+	if s.authorNames == nil || len(replies) == 0 {
+		return replies
+	}
+	names := make(map[string]string, len(replies))
+	for _, reply := range replies {
+		actor := strings.TrimSpace(reply.ActorID)
+		if actor == "" {
+			continue
+		}
+		if _, seen := names[actor]; seen {
+			continue
+		}
+		name, ok := s.authorNames.ResolveAuthorDisplayName(ctx, actor)
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name != "" && name != "你" {
+			// "你" 是历史客户端硬编码写进 profile 的脏值（FEED-OWN-001），
+			// 当成名字回给所有人会让别人的评论显示成"你"。
+			names[actor] = name
+		}
+	}
+	if len(names) == 0 {
+		return replies
+	}
+	out := make([]Reply, 0, len(replies))
+	for _, reply := range replies {
+		if name, ok := names[strings.TrimSpace(reply.ActorID)]; ok {
+			reply.ActorDisplayName = name
+		}
+		out = append(out, reply)
+	}
+	return out
 }
 
 // ---------- RepostPost ----------
