@@ -2620,3 +2620,121 @@ if ! grep -qF 'REPLY-TARGET-001' apps/mobile/src/reply-target.test.ts; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/reply-target.test.ts || exit $?
 echo "    REPLY-TARGET-001: PASS (replies name the post they answered, keyed by replyId)"
+
+# SEARCH-CORPUS-001: 动态搜索必须真的搜到「整个 feed」，而不是你已经滚过的那几页。
+#
+# 坏掉的形态很隐蔽 —— 每一块单看都像是对的：
+#   1. server 端 R15.94 建好了 search 通道（feed_handlers 读 ?search=，
+#      listFeed 按关键词过滤），但 listFeedPosts 的 searchQuery 参数**全仓无人传**，
+#      于是这条通道没有任何 caller，搜索退化成「在已加载的那一页里做本地子串匹配」；
+#   2. localnet-client 里还留着 R15.94 之前写的注释「server ListFeedPosts 暂不接
+#      search params, Phase 2 …」，让人以为这条通道本来就不通，于是没人去接线；
+#   3. server 只匹配 Body，客户端两处 filter 却都 OR 了 authorDisplayName ——
+#      server 先把正文不含关键词的帖子全丢掉，客户端再 OR 也永远匹配不到东西。
+#      表现就是：搜索框写着「搜索人、机会、活动、情报…」，搜人恒返回 0 条。
+# 现在两端共用同一份字段语义（正文 / 作者展示名 / 城市；派生 contextRefs 不算），
+# 且两条读取分支都把查询交给服务端。
+require_test "SEARCH-CORPUS-001" "./internal/localnet" \
+  "TestListFeedPosts_SearchMatchesAuthorNameAndCity" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "SEARCH-CORPUS-001" "./internal/localnet" \
+  "TestPostMatchesSearch_ExcludesDerivedContextRefs" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+if ! grep -qF 'func postMatchesSearch(p Post, loweredQuery string) bool {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the single search predicate is gone from the server," >&2
+  echo "        so the matched field set can drift again." >&2
+  exit 1
+fi
+if ! grep -qF 'if p.AuthorDisplayName != "" && strings.Contains(strings.ToLower(p.AuthorDisplayName), loweredQuery) {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: server search no longer matches the author display" >&2
+  echo "        name, so searching for a person returns nothing." >&2
+  exit 1
+fi
+if ! grep -qF 'if p.CityScope != "" && strings.Contains(strings.ToLower(p.CityScope), loweredQuery) {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: server search no longer matches the city scope." >&2
+  exit 1
+fi
+if ! grep -qF 'if !postMatchesSearch(p, search) {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: listFeed no longer routes through postMatchesSearch." >&2
+  exit 1
+fi
+if ! grep -qF 'export function normalizeFeedSearchQuery(' apps/mobile/src/feed-search.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the shared query normaliser is gone, so the client" >&2
+  echo "        and the server can disagree about what a query even is." >&2
+  exit 1
+fi
+if ! grep -qF 'export function postMatchesFeedSearch(' apps/mobile/src/feed-search.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the shared client-side predicate is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'query.push(`search=${encodeURIComponent(search)}`);' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the public feed projection no longer forwards the" >&2
+  echo "        query, so search degrades back to 'only what you already scrolled'." >&2
+  exit 1
+fi
+if ! grep -qF 'search === "" ? { cursor, limit } : { cursor, limit, search },' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the authenticated feed branch no longer sends the" >&2
+  echo "        query, so logged-in search only filters one page locally." >&2
+  exit 1
+fi
+if ! grep -qF 'const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined);' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the feed surface stopped passing its query to the" >&2
+  echo "        server — this is the exact dead-parameter bug that was fixed." >&2
+  exit 1
+fi
+if ! grep -qF 'const timer = setTimeout(() => void loadFeed(query), query === "" ? 0 : 250);' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: nothing re-runs the feed load when the query changes," >&2
+  echo "        so the search box only filters whatever is already loaded." >&2
+  exit 1
+fi
+if ! grep -qF 'if (!postMatchesFeedSearch(post, normalizeFeedSearchQuery(searchQuery))) return false;' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the feed surface re-implements its own search" >&2
+  echo "        haystack instead of using the shared predicate, so the two field sets" >&2
+  echo "        can drift and the client silently drops rows the server matched." >&2
+  exit 1
+fi
+# 两处都要有：backgroundRefresh 的「新动态」合并 + showLatest 的刷入。
+# 注释锚点说清意图，计数保证行为行真的还在两处（单看一处会漏掉另一处）。
+if ! grep -qF '// SEARCH-CORPUS-001: 搜索中不做「N 条新动态」合并' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the background 'new posts' merge is no longer" >&2
+  echo "        suppressed while searching, so unfiltered posts leak into results." >&2
+  exit 1
+fi
+if ! grep -qF '// SEARCH-CORPUS-001: 搜索中不存在「展示最新」' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: 'show latest' can be pressed mid-search again, which" >&2
+  echo "        silently replaces the results with the unfiltered feed." >&2
+  exit 1
+fi
+search_guards=$(grep -cF 'if (lastSearchRef.current !== "") return;' apps/mobile/src/surfaces/feed.tsx)
+if [ "${search_guards:-0}" -lt 2 ]; then
+  echo "  FAIL [SEARCH-CORPUS-001]: expected the search guard in BOTH the background" >&2
+  echo "        refresh and 'show latest' paths, found ${search_guards:-0}." >&2
+  exit 1
+fi
+# 反向 pin：下面这些就是当初那几个 bug，任何一个回来都要拦住。
+if grep -qF 'if search != "" && !strings.Contains(strings.ToLower(p.Body), search) {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: server search is body-only again — searching for a" >&2
+  echo "        person or a city then returns nothing." >&2
+  exit 1
+fi
+if grep -qF 'server ListFeedPosts 暂不接 search params' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the stale comment claiming the server takes no" >&2
+  echo "        search params is back — it is what made the channel look unwired." >&2
+  exit 1
+fi
+if grep -qF 'p.authorDisplayName?.toLowerCase().includes(q)' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the client-side re-filter is back; it is strictly" >&2
+  echo "        narrower than the server and can only drop rows the server accepted." >&2
+  exit 1
+fi
+if grep -qF 'post.cityScope, ...post.contextRefs.map' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the feed is searching its own ad-hoc haystack again," >&2
+  echo "        including derived contextRefs the user never typed." >&2
+  exit 1
+fi
+if ! grep -qF 'SEARCH-CORPUS-001' apps/mobile/src/feed-search.test.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the regression ID or its mobile test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/feed-search.test.ts || exit $?
+echo "    SEARCH-CORPUS-001: PASS (feed search reaches the server and matches name/city)"

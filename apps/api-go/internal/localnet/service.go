@@ -1246,6 +1246,37 @@ func (s *Service) hydratePostMedia(ctx context.Context, feed []Post) map[string]
 	return feedMedia
 }
 
+// postMatchesSearch 是 feed 搜索的唯一判定点（SEARCH-CORPUS-001）。
+//
+// 之前只匹配 Body，但搜索框自己写的是「搜索人、机会、活动、情报…」，
+// 客户端两处 filter 也都宣称能按作者名/城市搜 —— 于是出现「代码看起来支持、
+// 实际搜不到」：server 先把正文不含关键词的帖子全部丢掉，客户端那两段
+// 再怎么 OR authorDisplayName 都永远匹配不到东西。
+//
+// 现在匹配「用户能看见的东西」：正文、作者展示名、城市。
+// 刻意**不含** ContextRefs —— 它是 classifyPostFallback 从正文派生的
+// （见 createPost），让搜索命中派生标签会返回用户根本没写过的词，
+// 那是噪音不是功能。
+//
+// 语义与 apps/mobile/src/localnet-client.ts 的 searchFieldsOf 保持一致：
+// 两边不一致时，客户端 filter 只会把 server 已认可的帖子再丢掉一遍，
+// 表现为「服务端明明匹配了，列表里却没有」。
+func postMatchesSearch(p Post, loweredQuery string) bool {
+	if loweredQuery == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(p.Body), loweredQuery) {
+		return true
+	}
+	if p.AuthorDisplayName != "" && strings.Contains(strings.ToLower(p.AuthorDisplayName), loweredQuery) {
+		return true
+	}
+	if p.CityScope != "" && strings.Contains(strings.ToLower(p.CityScope), loweredQuery) {
+		return true
+	}
+	return false
+}
+
 func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
 	var request struct {
 		Cursor string `json:"cursor"`
@@ -1297,9 +1328,8 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
 			continue
 		}
-		// R15.94: server 端 search filter (body 包含, case-insensitive).
-		//   跟 R15.92 client 端 filter 一致, 但放在 server 节省 传输量.
-		if search != "" && !strings.Contains(strings.ToLower(p.Body), search) {
+		// SEARCH-CORPUS-001: 匹配字段见 postMatchesSearch（正文 / 作者展示名 / 城市）。
+		if !postMatchesSearch(p, search) {
 			continue
 		}
 		// Follow-graph authorization is not implemented yet. Fail closed instead

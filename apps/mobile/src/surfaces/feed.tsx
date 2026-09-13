@@ -32,6 +32,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { avatarFileName, createProfileStore } from "../profile-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
+import { normalizeFeedSearchQuery, postMatchesFeedSearch } from "../feed-search";
 import { mergePostEngagement, mergeReactedPostIds } from "../post-engagement-model";
 
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
@@ -233,6 +234,9 @@ export function FeedSurface({
   const [composerQuoteId, setComposerQuoteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(Boolean(initialSearchQuery));
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery ?? "");
+  // SEARCH-CORPUS-001: 当前生效的搜索词（归一后）。放在这里而不是搜索 effect 里，
+  // 是因为 backgroundRefresh / showLatest 也要读它来决定「现在能不能合并全量动态」。
+  const lastSearchRef = useRef("");
   // 搜索种子只消费一次：mount 即通知调用方清除，下次进动态不再复用。
   useEffect(() => {
     if (initialSearchQuery) onSearchSeedConsumed?.();
@@ -409,22 +413,33 @@ export function FeedSurface({
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
   }
 
-  const loadFeed = useCallback(async (): Promise<void> => {
+  const loadFeed = useCallback(async (rawQuery?: string): Promise<void> => {
     // 动态帖文与地址解绑：帖文不按 viewingCity 过滤，地址仅作 Status/社区等筛选项
+    //
+    // SEARCH-CORPUS-001: 带查询时走**服务端**搜索（server listFeed 接 search 字段），
+    // 这样搜索覆盖整个 feed 语料，而不是「你已经滚过的那几页」。修之前
+    // listFeedPosts 的 searchQuery 参数全仓无人传，搜索只在本地对已加载的
+    // 帖做子串匹配 —— 搜「人」只能搜到恰好滚过的几条。
+    const search = normalizeFeedSearchQuery(rawQuery);
+    const searching = search !== "";
     if (cachedPosts.length === 0) {
       setPhase("LOADING");
     }
     try {
-      const read = await localNet.listFeedPosts();
-      cachedPosts = read.posts;
-      cachedMedia = read.media;
-      cachedPostIds = new Set(read.posts.map((p) => p.postId));
-      postIdsRef.current = cachedPostIds;
+      const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined);
+      // 搜索结果不是 feed 本身：写回模块级缓存会让退出搜索后（以及冷启动读盘时）
+      // 看到的是上次的搜索结果，所以只在非搜索加载时更新缓存与磁盘缓存。
+      if (!searching) {
+        cachedPosts = read.posts;
+        cachedMedia = read.media;
+        cachedPostIds = new Set(read.posts.map((p) => p.postId));
+        postIdsRef.current = cachedPostIds;
+        writeFeedDiskCache(read.posts, read.media);
+      }
       setPosts(read.posts);
       setMedia(read.media);
       setNextCursor(read.nextCursor);
       setHasMore(read.hasMore);
-      writeFeedDiskCache(read.posts, read.media);
       feedRetryAttemptRef.current = 0;
 	  setPhase("READY");
 	  void hydrateEngagement(read.posts);
@@ -442,8 +457,23 @@ export function FeedSurface({
     if (!hasMore || !nextCursor || loadingMoreRef.current || phase !== "READY") return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
+    // SEARCH-CORPUS-001: 搜索中翻的是**搜索结果**的下一页，游标来自搜索响应，
+    // 所以必须把同一个查询带上，否则第二页会悄悄变回未过滤的全量。
+    const search = lastSearchRef.current;
     try {
-      const read = await localNet.listFeedPosts(nextCursor);
+      const read = await localNet.listFeedPosts(nextCursor, search === "" ? 25 : 50, search === "" ? undefined : search);
+      if (search !== "") {
+        // 搜索结果不进模块级缓存/磁盘缓存，避免退出搜索后 feed 被搜索结果污染。
+        setPosts((prev) => {
+          const known = new Set(prev.map((post) => post.postId));
+          return [...prev, ...read.posts.filter((post) => !known.has(post.postId))];
+        });
+        setMedia((prev) => ({ ...prev, ...read.media }));
+        setNextCursor(read.nextCursor);
+        setHasMore(read.hasMore);
+        void hydrateEngagement(read.posts);
+        return;
+      }
       const known = new Set(cachedPosts.map((post) => post.postId));
       const appended = read.posts.filter((post) => !known.has(post.postId));
       cachedPosts = [...cachedPosts, ...appended];
@@ -467,6 +497,9 @@ export function FeedSurface({
 
   // 后台静默刷新：不显示 LOADING，只检测新帖（同解绑）
   const backgroundRefresh = useCallback(async (): Promise<void> => {
+    // SEARCH-CORPUS-001: 搜索中不做「N 条新动态」合并 —— 它拿的是**未过滤**的首屏，
+    // 合并进来会让搜索结果凭空多出无关帖（点「展示最新」更是直接退出搜索）。
+    if (lastSearchRef.current !== "") return;
     try {
       const read = await localNet.listFeedPosts();
       if (read.posts.length === 0) return;
@@ -525,8 +558,22 @@ export function FeedSurface({
     return () => subscription.remove();
   }, [phase, loadFeed]);
 
+  // SEARCH-CORPUS-001: 输入搜索词后走服务端搜索（防抖 250ms），清空则立刻恢复全量。
+  // 只在「查询真的变了」时触发，免得 mount 时把首屏那次 loadFeed 又打一遍。
+  // 注意这里不写入模块级缓存 —— loadFeed 自己会区分搜索与非搜索。
+  useEffect(() => {
+    const query = normalizeFeedSearchQuery(searchQuery);
+    if (query === lastSearchRef.current) return;
+    lastSearchRef.current = query;
+    const timer = setTimeout(() => void loadFeed(query), query === "" ? 0 : 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery, loadFeed]);
+
   // 点击"展示最新"：将 pending 内容刷入正式列表
   function showLatest(): void {
+    // SEARCH-CORPUS-001: 搜索中不存在「展示最新」—— pendingPosts 是未过滤的全量，
+    // 合并进来等于静默退出搜索，而且会把搜索结果写进 feed 缓存。
+    if (lastSearchRef.current !== "") return;
     const pendingIDs = new Set(pendingPosts.map((post) => post.postId));
     cachedPosts = [...pendingPosts, ...posts.filter((post) => !pendingIDs.has(post.postId))];
     cachedMedia = { ...media, ...pendingMedia };
@@ -857,14 +904,11 @@ export function FeedSurface({
         if (!customFeedTokens.some((token) => haystack.includes(token))) return false;
       }
     }
-      const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
-      if (normalizedQuery) {
-        const searchable = [resolveAuthorDisplayName(post, viewerAccountId), post.body, post.cityScope, ...post.contextRefs.map((entry) => entry.contextId)]
-        .filter((value): value is string => typeof value === "string")
-        .join(" ")
-        .toLocaleLowerCase();
-      if (!searchable.includes(normalizedQuery)) return false;
-    }
+    // SEARCH-CORPUS-001: 改用 ./feed-search 的唯一实现，字段集与 server 的
+    // postMatchesSearch 逐字对应（正文 / 作者展示名 / 城市；派生 contextRefs 不算）。
+    // 服务端已经按同一份语义过滤过，这里只是本地兜底 —— 之前两边的字段集不一致，
+    // 客户端这一层只会把服务端已认可的帖子再丢掉一遍。
+    if (!postMatchesFeedSearch(post, normalizeFeedSearchQuery(searchQuery))) return false;
     return true;
   });
   // 偏好-权重：只重排不隐藏。类别按帖子属性归一后取权重分，

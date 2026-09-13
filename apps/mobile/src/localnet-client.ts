@@ -4,6 +4,7 @@
 import type { CommandResult, CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { ListFeedPostsPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
+import { filterPostsByFeedSearch, normalizeFeedSearchQuery } from "./feed-search";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
@@ -60,14 +61,19 @@ export class LocalNetClient {
   public async listFeedPosts(cursor?: string, limit = 25, searchQuery?: string): Promise<FeedReadModel> {
     // 动态 ALL 固定读取全局公开时间流。地址只用于用户显式选择的
     // 二级筛选，不能进入服务端 ListFeedPosts payload。
-    // R15.92: searchQuery — client 端过滤 (server ListFeedPosts 暂不接 search params,
-    //   Phase 2 server 加 search 后可走 ListFeedPosts search 或独立 SearchPosts 端点).
+    //
+    // SEARCH-CORPUS-001: searchQuery 走**服务端**过滤（R15.94 起 server 的
+    // listFeed 就接 search 字段）。这里原来的注释写「server ListFeedPosts 暂不接
+    // search params, Phase 2 …」，那是 R15.94 之前的事实，已经过期；它让这条通道
+    // 看起来还没通，于是 client 的 searchQuery 参数全仓无人传，
+    // 搜索只在**已加载的那几页**里做本地过滤 —— 搜「人」只能搜到你恰好滚过的几条。
+    // 过滤字段语义统一在 ./feed-search（逐字对应 Go 侧 postMatchesSearch）。
+    const search = normalizeFeedSearchQuery(searchQuery);
     if (this.input.authClient.requestPublic) {
       const query = [`limit=${Math.max(1, Math.min(50, limit))}`];
       if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`);
-      // R15.94: 真正传 server (server listFeed service.go R15.94 接 Search 字段).
-      if (searchQuery && searchQuery.trim().length > 0) {
-        query.push(`search=${encodeURIComponent(searchQuery.trim())}`);
+      if (search !== "") {
+        query.push(`search=${encodeURIComponent(search)}`);
       }
       const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
       if (response.status < 200 || response.status >= 300) {
@@ -80,30 +86,34 @@ export class LocalNetClient {
         throw new LocalNetProtocolError("动态服务返回异常，请稍后重试");
       }
       const payload = ListFeedPostsPayloadSchema.parse(body);
-      const posts = searchQuery && searchQuery.trim().length > 0
-        ? payload.posts.filter((p) => {
-            const q = searchQuery.toLowerCase();
-            return p.body.toLowerCase().includes(q) || (p.authorDisplayName?.toLowerCase().includes(q) ?? false);
-          })
-        : payload.posts;
-      return { posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+      // 服务端已按同一份字段语义过滤过；这里再走一次同一个 helper 只是兜底
+      // （老 server / 缓存回放）。字段集完全一致，所以不会把服务端已认可的结果丢掉。
+      return {
+        posts: filterPostsByFeedSearch(payload.posts, search),
+        media: payload.media,
+        nextCursor: payload.nextCursor || undefined,
+        hasMore: payload.hasMore === true
+      };
     }
     const result = await this.sendCommand(
       undefined,
       "ListFeedPosts",
       { type: "Feed", id: "local" },
-      { cursor, limit },
+      // SEARCH-CORPUS-001: 这条分支以前**不带** search，于是登录态下的搜索
+      // 只会在服务端返回的那一页里做本地过滤。server 的 listFeed 读的就是
+      // payload.search（跟公开分支同一个 handler），所以这里必须同样带上，
+      // 两条分支的搜索语义才一致。
+      search === "" ? { cursor, limit } : { cursor, limit, search },
       undefined,
       true
     );
     const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
-    const posts = searchQuery && searchQuery.trim().length > 0
-      ? payload.posts.filter((p) => {
-          const q = searchQuery.toLowerCase();
-          return p.body.toLowerCase().includes(q) || (p.authorDisplayName?.toLowerCase().includes(q) ?? false);
-        })
-      : payload.posts;
-    return { posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+    return {
+      posts: filterPostsByFeedSearch(payload.posts, search),
+      media: payload.media,
+      nextCursor: payload.nextCursor || undefined,
+      hasMore: payload.hasMore === true
+    };
   }
 
   public async listMyFeedPosts(): Promise<FeedReadModel> {

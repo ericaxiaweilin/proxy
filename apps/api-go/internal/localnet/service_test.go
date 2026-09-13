@@ -3,6 +3,7 @@ package localnet
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,6 +300,101 @@ func TestListFeedPosts_SearchFilterOnBody(t *testing.T) {
 	}
 	if len(payload3.Posts) != 2 {
 		t.Fatalf("expected 2 posts matching '西', got %d", len(payload3.Posts))
+	}
+}
+
+// SEARCH-CORPUS-001：搜索必须命中「用户看得见的字段」。
+//
+// 回归背景：搜索框自己写的是「搜索人、机会、活动、情报…」，客户端两处 filter
+// 也都 OR 了 authorDisplayName，但 server 只匹配 Body —— 正文不含关键词的帖子
+// 在 server 就被丢掉了，客户端那两段 OR 永远匹配不到东西，表现为
+// 「搜作者名恒返回 0 条，而代码看起来是支持的」。
+//
+// 这个测试把「按作者名搜 / 按城市搜」钉住，避免再退回只匹配正文。
+func TestListFeedPosts_SearchMatchesAuthorNameAndCity(t *testing.T) {
+	s := New()
+	create := func(payload map[string]any) {
+		t.Helper()
+		if r := s.Handle(envelopeFor("", "CreatePost", payload)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("create post %+v: %+v", payload, r.Error)
+		}
+	}
+	create(map[string]any{"body": "西湖昨天夕阳", "visibility": "PUBLIC"})
+	create(map[string]any{"body": "河内夜市美食", "visibility": "PUBLIC"})
+	create(map[string]any{"body": "西湖水上日出", "visibility": "PUBLIC"})
+	// 这条正文完全不含「晴晴」也不含「岘港」——只有作者展示名和城市带。
+	create(map[string]any{
+		"body": "今天的咖啡不错", "visibility": "PUBLIC",
+		"authorType": "MERCHANT", "authorDisplayName": "晴晴", "cityScope": "岘港",
+	})
+
+	count := func(query string) int {
+		t.Helper()
+		r := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"search": query}))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("list feed search %q: %+v", query, r.Error)
+		}
+		var payload struct {
+			Posts []map[string]any `json:"posts"`
+		}
+		if err := json.Unmarshal([]byte(r.OperationRef), &payload); err != nil {
+			t.Fatalf("unmarshal payload for %q: %v", query, err)
+		}
+		return len(payload.Posts)
+	}
+
+	// R15.94 的既有行为不能回退：正文匹配
+	if got := count("西湖"); got != 2 {
+		t.Fatalf("body search '西湖': want 2, got %d", got)
+	}
+	if got := count("河内"); got != 1 {
+		t.Fatalf("body search '河内': want 1, got %d", got)
+	}
+	// SEARCH-CORPUS-001：作者展示名可搜 —— 修复前这里是 0
+	if got := count("晴晴"); got != 1 {
+		t.Fatalf("author-name search '晴晴': want 1, got %d (搜索必须能按人搜)", got)
+	}
+	// SEARCH-CORPUS-001：城市可搜 —— 修复前这里是 0
+	if got := count("岘港"); got != 1 {
+		t.Fatalf("city search '岘港': want 1, got %d", got)
+	}
+	// 大小写/子串语义对非正文字段同样成立
+	if got := count("晴"); got != 1 {
+		t.Fatalf("author-name substring search '晴': want 1, got %d", got)
+	}
+	// 反向：不匹配任何字段的查询仍然返回空（防止 filter 被写成恒真）
+	if got := count("不存在的关键词"); got != 0 {
+		t.Fatalf("unrelated search: want 0, got %d", got)
+	}
+}
+
+// postMatchesSearch 的字段边界：正文 / 作者名 / 城市命中，
+// 但**派生**的 ContextRefs 不参与 —— 否则搜索会返回用户根本没写过的词。
+func TestPostMatchesSearch_ExcludesDerivedContextRefs(t *testing.T) {
+	post := Post{
+		ID:                "post_1",
+		Body:              "西湖昨天夕阳",
+		AuthorDisplayName: "晴晴",
+		CityScope:         "岘港",
+		// classifyPostFallback 从正文派生出来的分类标签，不是用户输入。
+		ContextRefs: []ContextRef{{ContextID: "scene_rooftop_夜景"}},
+	}
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"", true},         // 空查询不过滤
+		{"西湖", true},       // 正文
+		{"晴晴", true},       // 作者展示名
+		{"岘港", true},       // 城市
+		{"夜景", false},      // 派生 ContextRefs 不算
+		{"rooftop", false}, // 派生 ContextRefs 不算（大小写不敏感）
+		{"河内", false},      // 谁都不含
+	}
+	for _, c := range cases {
+		if got := postMatchesSearch(post, strings.ToLower(c.query)); got != c.want {
+			t.Fatalf("postMatchesSearch(%q) = %v, want %v", c.query, got, c.want)
+		}
 	}
 }
 
@@ -976,6 +1072,7 @@ func TestCreatePostDisplayNameFallbacks(t *testing.T) {
 		t.Fatalf("non-USER names stay caller-supplied, got %q", agentPost.AuthorDisplayName)
 	}
 }
+
 // AI-POSTS-001: 5 小美开屏帖种子。一人一条 AI_NATIVE + 写真 mediaRef；
 // Upsert 幂等，可重跑。
 func TestSeedXiaomeiPosts(t *testing.T) {

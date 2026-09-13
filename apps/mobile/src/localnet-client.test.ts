@@ -386,3 +386,101 @@ describe("MENTION-001 — tagged posts come from the server, not from one feed p
     expect(target.id).not.toBe("");
   });
 });
+
+describe("SEARCH-CORPUS-001 — feed search actually reaches the server", () => {
+  // 回归本体：listFeedPosts 的 searchQuery 参数**全仓无人传**，server 端 R15.94
+  // 建好的 search 通道因此没有任何 caller —— 搜索只在「已加载的那几页」里做
+  // 本地过滤，搜「人」只能搜到你恰好滚过的几条。下面钉住两条分支都要真的把
+  // 查询交给服务端，而不是在本地把一页结果再筛一遍。
+  function publicClient(): { client: LocalNetClient; requests: string[] } {
+    const requests: string[] = [];
+    const client = new LocalNetClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: new SecureSessionStore(new InMemorySecureStorageDriver()),
+      authClient: {
+        request: async () => { throw new Error("command fallback must not run"); },
+        requestPublic: async (path, init) => {
+          requests.push(`${init.method} ${path}`);
+          return { status: 200, json: async () => ({ posts: [], media: {}, nextCursor: "", hasMore: false }) };
+        }
+      }
+    });
+    return { client, requests };
+  }
+
+  it("forwards a trimmed, lowercased query on the public projection", async () => {
+    const { client, requests } = publicClient();
+    await client.listFeedPosts(undefined, 25, "  晴晴 ");
+    expect(requests).toEqual(["GET /v1/feed?limit=25&search=%E6%99%B4%E6%99%B4"]);
+  });
+
+  it("omits the param entirely when the query is blank", async () => {
+    const { client, requests } = publicClient();
+    await client.listFeedPosts(undefined, 25, "   ");
+    expect(requests).toEqual(["GET /v1/feed?limit=25"]);
+  });
+
+  it("sends search in the command payload on the authenticated path", async () => {
+    // 这条分支以前完全不带 search，登录态下搜索就退化成「只筛一页」。
+    const store = await authenticatedStore("user_001");
+    const envelopes: Record<string, unknown>[] = [];
+    const client = new LocalNetClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      authClient: {
+        request: async (_path, init) => {
+          envelopes.push(init.body as Record<string, unknown>);
+          return {
+            status: 200,
+            json: async () => ({
+              commandId: "command_search_001",
+              outcome: "ACCEPTED",
+              aggregate: { type: "Feed", id: "local", version: 0, state: "LISTED" },
+              eventRefs: [],
+              correlationId: "correlation_search_001",
+              operationRef: JSON.stringify({ posts: [], media: {}, hasMore: false })
+            })
+          };
+        }
+      }
+    });
+    await client.listFeedPosts(undefined, 25, "岘港");
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.commandType).toBe("ListFeedPosts");
+    expect((envelopes[0]!.payload as { search?: string }).search).toBe("岘港");
+  });
+
+  it("keeps a post found by author name even though its body does not contain the query", async () => {
+    // 修之前：server 只匹配 body 就把这条丢了，客户端再 OR authorDisplayName
+    // 也永远匹配不到东西 —— 搜作者名恒返回 0 条，而代码看起来是支持的。
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    const client = new LocalNetClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: store,
+      authClient: {
+        request: async () => { throw new Error("command fallback must not run"); },
+        requestPublic: async () => ({
+          status: 200,
+          json: async () => ({
+            posts: [{
+              postId: "post_by_name",
+              authorType: "USER",
+              authorId: "user_1",
+              authorDisplayName: "晴晴",
+              body: "今天的咖啡不错",
+              mediaRefs: [],
+              contextRefs: [],
+              status: "PUBLISHED",
+              createdAt: "2026-09-12T00:00:00Z"
+            }],
+            media: {},
+            nextCursor: "",
+            hasMore: false
+          })
+        })
+      }
+    });
+    const page = await client.listFeedPosts(undefined, 25, "晴晴");
+    expect(page.posts.map((p) => p.postId)).toEqual(["post_by_name"]);
+  });
+});
