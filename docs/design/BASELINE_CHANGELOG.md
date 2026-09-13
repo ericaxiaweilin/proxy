@@ -4,6 +4,18 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 172 — 2026-09-13
+
+- COMP-AGE-001（越南合规整改）：把注册时那条已经通过 18+ 判定的出生日期
+  留下来。`CreateAnonymousSession` 一直在服务端判 18+，判完就把
+  `dateOfBirth` 丢了（`identity.user_accounts` 没有任何年龄字段）——
+  于是「这个用户满 18」只在注册那一瞬间成立，无法复查、无法举证，
+  AI 法 134/2025 要求的未成年人保护也因为没有年龄信号而无从做起。
+  新增 `identity.user_age_assertions`（migrations/085，append-only，
+  按 asserted_at 取最新；只存出生日期，不存证件影像）。
+  走与同意记录相同的可选接口断言，缺表不会拖垮注册主流程。
+  **无视觉改动、无 API 契约改动。**
+
 ## Revision 171 — 2026-09-13
 
 - COMP-SELLER-001（越南合规整改）：供给侧实名成为准入条件。

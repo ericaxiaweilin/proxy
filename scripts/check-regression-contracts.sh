@@ -1844,3 +1844,34 @@ if ! grep -qF 'SetSellerIdentityLookup' apps/api-go/cmd/api/main.go ||
   exit 1
 fi
 echo "    COMP-SELLER-001: PASS (sellers must be real-name verified before they can be matched)"
+
+# COMP-AGE-001: 注册时判过的 18+ 必须留下证据。
+# 此前 CreateAnonymousSession 在服务端做了 18+ 判定，判完就把 dateOfBirth 丢了 ——
+# identity.user_accounts 里没有任何年龄字段。于是「这个用户满 18 岁」只在注册
+# 那一瞬间成立：无法复查、无法举证，而 AI 法 134/2025（2026-03-01 生效）要求的
+# 未成年人保护也因为没有年龄信号而无从做起。判定和留痕是两个动作，两个都要有。
+require_test "COMP-AGE-001" "./internal/identity" \
+  "TestAnonymousSessionPersistsTheAgeItJustVerified" \
+  "apps/api-go/internal/identity/age_assertion_compliance_test.go" || exit $?
+require_test "COMP-AGE-001" "./internal/identity" \
+  "TestAgeAssertionIsNotWrittenWhenTheAgeGateRejects" \
+  "apps/api-go/internal/identity/age_assertion_compliance_test.go" || exit $?
+require_test "COMP-AGE-001" "./internal/identity" \
+  "TestAgeAssertionUsesTheSameDateTheGateAccepted" \
+  "apps/api-go/internal/identity/age_assertion_compliance_test.go" || exit $?
+
+# 判定之后必须真的写，不能只在内存里判完就算了。
+if ! grep -qF 'RecordAgeAssertionDetached(context.WithoutCancel(ctx), session.UserAccountID, p.DateOfBirth, e)' \
+     apps/api-go/internal/identity/service.go; then
+  echo "  FAIL [COMP-AGE-001]: the date of birth is no longer persisted after the 18+ gate." >&2
+  echo "        A gate that leaves no record cannot be re-checked or evidenced." >&2
+  exit 1
+fi
+# 生产实现必须写进真表，且按 asserted_at 取最新（append-only）。
+if ! grep -qF 'INSERT INTO identity.user_age_assertions' apps/api-go/internal/platform/postgres/identity.go ||
+   ! grep -qF 'ORDER BY asserted_at DESC' apps/api-go/internal/platform/postgres/identity.go; then
+  echo "  FAIL [COMP-AGE-001]: the age assertion store no longer reads/writes" >&2
+  echo "        identity.user_age_assertions as an append-only log." >&2
+  exit 1
+fi
+echo "    COMP-AGE-001: PASS (the 18+ decision leaves an auditable age assertion)"
