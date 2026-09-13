@@ -2959,3 +2959,95 @@ if grep -qF '>回复帖文<' apps/mobile/src/surfaces/feed.tsx; then
   exit 1
 fi
 echo "    REPLY-INLINE-001: PASS (reply composer is inline and keyboard-safe)"
+
+# GHOST-24H-001: 「24h 临时动态」必须真的会消失。
+#
+# 坏掉的样子：ephemeralUntil 只存在于 packages/contracts 的 zod schema 和
+# mobile 的发布 payload 里，**api-go 一次都没出现过** —— Post 没这个字段、
+# createPostPayload 不解析它、数据库没列、feed 没过期条件。Go 的 JSON 解码
+# 静默忽略未知字段，所以客户端算好 now+24h 发上来、弹 toast「24h 动态已发布」，
+# 而这条帖子**永久存在**。这不是少做功能，是一条对用户撒谎的路径：用户正是
+# 因为相信它会消失才发的（越南 PDP 91/2025 下这属于对数据留存期的承诺）。
+#
+# 关键约束：过期写在 SQL 谓语里（`ephemeral_until IS NULL OR ephemeral_until >
+# now()`），不是查完在 Go 里过滤 —— 先 LIMIT 再过滤会让一页少给好几条，往下
+# 翻还会重复或漏帖。而且是**读时过滤**：行留着，才能举证「这条确实到期了」
+# 而不是被谁偷偷删掉的。
+require_test "GHOST-24H-001" "./internal/localnet" \
+  "TestEphemeralPostDisappearsFromFeedWhenExpired" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "GHOST-24H-001" "./internal/localnet" \
+  "TestCreatePostRejectsPastEphemeralUntil" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "GHOST-24H-001" "./internal/localnet" \
+  "TestPostIsExpiredBoundaries" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "GHOST-24H-001" "./internal/localnet" \
+  "TestCreatePostPersistsEphemeralUntil" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+# 这条是 PG 集成测试：没有 DATABASE_URL 时它会 SKIP（起不了临时集群），
+# 但仍然钉住「文件 + 函数名」存在，并且是唯一能抓到 SELECT/scan 列数漂移的
+# 防线（见下面那条结构性 pin 的注释）。
+require_test "GHOST-24H-001" "./internal/platform/postgres" \
+  "TestEphemeralPostFeedFilterLifecycle" \
+  "apps/api-go/internal/platform/postgres/posts_ephemeral_integration_test.go" || exit $?
+
+if ! grep -qF 'EphemeralUntil *time.Time' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [GHOST-24H-001]: localnet.Post lost its EphemeralUntil field —" >&2
+  echo "        the 24h expiry has nowhere to live again." >&2
+  exit 1
+fi
+if ! grep -qF 'func postIsExpired(' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [GHOST-24H-001]: postIsExpired is gone — nothing decides when an" >&2
+  echo "        ephemeral post has expired." >&2
+  exit 1
+fi
+if ! grep -qF 'INVALID_POST_EPHEMERAL_UNTIL' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [GHOST-24H-001]: an expiry in the past is no longer rejected, so a" >&2
+  echo "        post can be created already-expired: published OK, visible to no one." >&2
+  exit 1
+fi
+# 过期谓语必须同时在 feed 和「提到我」两条查询里。只写 feed 的话，一条已经
+# 「消失」的 24h 帖会因为提到了谁而从 TAGGED 后门复活。
+feed_predicates=$(grep -cF 'AND (ephemeral_until IS NULL OR ephemeral_until > now())' apps/api-go/internal/platform/postgres/network.go)
+if [ "$feed_predicates" -lt 2 ]; then
+  echo "  FAIL [GHOST-24H-001]: the expiry predicate is missing from a read path" >&2
+  echo "        (found $feed_predicates, want >= 2: feed + mentions)." >&2
+  exit 1
+fi
+# 结构性 pin：每一行 SELECT 都必须在列清单里带上 ephemeral_until，数量要和
+# 扫它的 rows.Scan 对齐。
+#
+# 为什么需要这条：给 4 个 rows.Scan 加了 &post.EphemeralUntil、却忘了给其中
+# 3 条 SELECT 的列清单加 ephemeral_until，结果**任何真实数据库上的 feed 读取
+# 全部失败**（number of field descriptions must equal number of destinations），
+# 而 `go test ./...` 因为全跑在内存 fake 上，绿得发亮。这个 bug 只有真机联调
+# 才暴露 —— 所以这里用源码结构做个廉价守门。
+#
+# 只对行尾匹配（`ephemeral_until$`）：INSERT 的列清单以 `)` 结尾，不会被算进来。
+scans=$(grep -cF '&post.EphemeralUntil' apps/api-go/internal/platform/postgres/network.go)
+selected=$(grep -cE 'context_refs, created_at, ephemeral_until[[:space:]]*$' apps/api-go/internal/platform/postgres/network.go)
+if [ "$scans" != "$selected" ]; then
+  echo "  FAIL [GHOST-24H-001]: SELECT/scan drift on ephemeral_until —" >&2
+  echo "        $scans rows.Scan destination(s) vs $selected SELECT list(s)." >&2
+  echo "        A pgx scan-count mismatch fails every feed read on a real DB" >&2
+  echo "        while the in-memory tests stay green." >&2
+  exit 1
+fi
+# 反向 pin：别把同一列写两遍（一次 substring 替换就造得出来，见 2026-09-13）。
+if grep -qF 'ephemeral_until, ephemeral_until' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [GHOST-24H-001]: ephemeral_until is listed twice in the same" >&2
+  echo "        column list — that breaks the INSERT/SELECT arity." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/090_post_ephemeral_until.sql ]; then
+  echo "  FAIL [GHOST-24H-001]: migration 090 (post ephemeral_until) is missing." >&2
+  exit 1
+fi
+# 反向 pin：注释不许再宣称「服务端尚未持久化」—— 那句话正是这个 bug 当年的遮羞布。
+if grep -qF '服务端尚未持久化' apps/mobile/src/composer-body.ts; then
+  echo "  FAIL [GHOST-24H-001]: composer-body.ts claims the server still does not" >&2
+  echo "        persist ephemeralUntil. Either implement it or fix the comment." >&2
+  exit 1
+fi
+echo "    GHOST-24H-001: PASS (24h posts really expire, in SQL, at read time)"
