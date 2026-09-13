@@ -946,6 +946,17 @@ export function FeedSurface({
       onScroll={onFeedScroll}
       onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setViewportHeight(ly.height); }}
       scrollEventThrottle={16}
+      // REPLY-INLINE-001: 回复框内联在帖子下方，键盘弹起时必须把它顶进可见区。
+      // 以前整个 feed 没有任何键盘避让（也没有 KeyboardAvoidingView），而回复框
+      // 又是一个贴在屏幕底部的 Modal —— 键盘一弹正好把它盖住，用户是在盲打。
+      //   - automaticallyAdjustKeyboardInsets：键盘出现时收 ScrollView 的
+      //     contentInset，聚焦的输入框才会被滚进可见区（只调 inset 不会自动滚）。
+      //   - keyboardShouldPersistTaps="handled"：不加这个，键盘开着时第一次点
+      //     「发送」只会被当成“收起键盘”，按钮根本点不动。
+      //   - on-drag：往下拖即可收键盘，符合流媒体 App 的手感。
+      automaticallyAdjustKeyboardInsets
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
     >
       {/* R15.3 feedhead：≡ + 标题 + ＋ */}
       <View style={styles.feedHead}>
@@ -1293,6 +1304,45 @@ export function FeedSurface({
 			</View>
 		  ) : null}
 
+              {/* REPLY-INLINE-001：回复框内联在这条帖子下方。
+                  点「回复」就地展开一行输入框，无遮罩、无上滑动画。
+                  以前它是一个 <Modal> + justifyContent:"flex-end" 的底部白卡
+                  （还带「回复帖文」标题），而且整个 feed 没有任何键盘避让 ——
+                  键盘一弹正好把贴在底部的输入框盖住。 */}
+              {replyTargetId === post.postId ? (
+                <View style={styles.inlineReply}>
+                  <TextInput
+                    autoFocus
+                    maxLength={500}
+                    multiline
+                    onChangeText={setReplyDraft}
+                    onSubmitEditing={() => { if (replyDraft.trim() && !replying) void submitReply(); }}
+                    placeholder={`回复 ${name}…`}
+                    placeholderTextColor={color.muted}
+                    style={styles.inlineReplyInput}
+                    value={replyDraft}
+                  />
+                  <View style={styles.inlineReplyActions}>
+                    <Pressable
+                      accessibilityLabel="取消回复"
+                      hitSlop={8}
+                      onPress={() => { setReplyTargetId(null); setReplyDraft(""); }}
+                      style={styles.inlineReplyCancel}
+                    >
+                      <Text style={styles.inlineReplyCancelText}>取消</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="发送回复"
+                      disabled={!replyDraft.trim() || replying}
+                      onPress={() => void submitReply()}
+                      style={[styles.inlineReplySend, (!replyDraft.trim() || replying) && styles.disabled]}
+                    >
+                      <Text style={styles.inlineReplySendText}>{replying ? "发送中…" : "发送"}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+
               {/* postintent（基线文案）：城市同行动态 → 聊一下 / 按这个想法找同行 */}
               {isCityCompanion ? (
                 <View style={styles.postIntent}>
@@ -1371,29 +1421,6 @@ export function FeedSurface({
         </Modal>
       ) : null}
 
-      {replyTargetId ? (
-        <Modal transparent animationType="fade" onRequestClose={() => setReplyTargetId(null)}>
-          <Pressable style={styles.replyOverlay} onPress={() => setReplyTargetId(null)}>
-            <Pressable style={styles.replySheet} onPress={(event) => event.stopPropagation()}>
-              <Text style={styles.replyTitle}>回复帖文</Text>
-              <TextInput
-                autoFocus
-                maxLength={500}
-                multiline
-                onChangeText={setReplyDraft}
-                placeholder="写下公开回复…"
-                placeholderTextColor={color.muted}
-                style={styles.replyInput}
-                value={replyDraft}
-              />
-              <View style={styles.replyActions}>
-                <Pressable onPress={() => setReplyTargetId(null)} style={styles.replyCancel}><Text style={styles.replyCancelText}>取消</Text></Pressable>
-                <Pressable disabled={!replyDraft.trim() || replying} onPress={() => void submitReply()} style={[styles.replySubmit, (!replyDraft.trim() || replying) && styles.disabled]}><Text style={styles.replySubmitText}>{replying ? "提交中…" : "回复"}</Text></Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
-      ) : null}
       </>
       )}
 
@@ -1621,15 +1648,32 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.45 },
   disabledText: { color: color.muted, opacity: 0.45 },
 
-  replyOverlay: { alignItems: "center", backgroundColor: "rgba(17,13,22,0.45)", flex: 1, justifyContent: "flex-end", padding: 18 },
-  replySheet: { backgroundColor: color.white, borderRadius: 18, padding: 14, width: "100%", ...shadows.card },
-  replyTitle: { color: color.ink, fontSize: 17, fontWeight: "800" },
-  replyInput: { backgroundColor: "#F8F5FA", borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, lineHeight: 21, marginTop: 10, minHeight: 108, padding: 10, textAlignVertical: "top" },
-  replyActions: { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 10 },
-  replyCancel: { borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
-  replyCancelText: { color: color.ink, fontSize: 12, fontWeight: "700" },
-  replySubmit: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
-  replySubmitText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  // REPLY-INLINE-001 — 内联回复框：贴着帖子下方就地展开，不再是底部白卡。
+  // 没有遮罩、没有标题、没有上滑动画，也不占 minHeight 108 那种厚卡片高度；
+  // 单行起步、随输入长高（maxHeight 兜底），手感对齐 Threads / Instagram。
+  inlineReply: {
+    backgroundColor: "#F8F5FA",
+    borderColor: color.line,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 8,
+    padding: 10
+  },
+  inlineReplyInput: {
+    color: color.ink,
+    fontSize: 14,
+    lineHeight: 20,
+    maxHeight: 132,
+    minHeight: 40,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    textAlignVertical: "top"
+  },
+  inlineReplyActions: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "flex-end", marginTop: 6 },
+  inlineReplyCancel: { paddingHorizontal: 6, paddingVertical: 6 },
+  inlineReplyCancelText: { color: color.muted, fontSize: 12, fontWeight: "700" },
+  inlineReplySend: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
+  inlineReplySendText: { color: color.white, fontSize: 12, fontWeight: "800" },
 
   // 基线 .networktabs：border-bottom var(--ln)。
   tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row" },

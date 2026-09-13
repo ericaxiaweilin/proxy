@@ -2905,3 +2905,57 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/muted-authors.test.ts || exit $?
 pnpm --filter @proxy/mobile exec vitest run src/engagement-client.test.ts || exit $?
 echo "    MUTE-REVERSIBLE-001: PASS (mute is reversible end to end, and names people)"
+
+# REPLY-INLINE-001: 回复输入框必须内联在帖子下方，且键盘不能盖住它。
+#
+# 坏掉的形态：回复框曾经是一个 `<Modal transparent>` + `justifyContent:"flex-end"`
+# 的底部白卡（还带「回复帖文」标题、取消/回复按钮），点「回复」时它从屏幕底部
+# 弹上来；而 feed 整屏**没有任何键盘避让**（全文没有 KeyboardAvoidingView，
+# ScrollView 也没开 automaticallyAdjustKeyboardInsets）。两条叠在一起的后果是：
+# 键盘一弹起，正好压在那个贴在底部的输入框上 —— 用户是在盲打。
+# 现在的形态：点「回复」→ 在那条帖子正下方就地展开一行输入框，无遮罩、无上滑
+# 动画，键盘弹起时由 ScrollView 的 inset 调整把它顶进可见区。
+# 这两颗 pin 用行锚定（^空白+prop+空白$）而不是裸 grep -qF：feed.tsx 的注释里
+# 原样写着这两个 prop 的名字来解释它们各自解决什么，裸 grep 会被注释满足 ——
+# 把真正的 prop 从 ScrollView 上删掉，pin 照样是绿的，等于没设防。锚定之后
+# 注释行（以 // 开头）匹配不上，只有货真价实的 JSX 属性行才算数。
+if ! grep -qE '^[[:space:]]+automaticallyAdjustKeyboardInsets[[:space:]]*$' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the feed ScrollView no longer adjusts for the" >&2
+  echo "        keyboard, so an inline reply box gets covered again." >&2
+  exit 1
+fi
+if ! grep -qE '^[[:space:]]+keyboardShouldPersistTaps="handled"[[:space:]]*$' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: keyboardShouldPersistTaps is gone — with the" >&2
+  echo "        keyboard up, the first tap on 发送 only dismisses it and the" >&2
+  echo "        reply can never be submitted." >&2
+  exit 1
+fi
+if ! grep -qF 'replyTargetId === post.postId ? (' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the reply composer is no longer anchored to the" >&2
+  echo "        post you tapped — either it shows on every post or on none." >&2
+  exit 1
+fi
+if ! grep -qF 'styles.inlineReplyInput' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the inline reply input style is gone." >&2
+  exit 1
+fi
+# 反向 pin：底部白卡那套东西一个都不许回来。
+if grep -qF 'styles.replyOverlay' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the bottom-sheet reply overlay is back — that is" >&2
+  echo "        the modal that slid up from the bottom and got covered by the keyboard." >&2
+  exit 1
+fi
+if grep -qF 'styles.replySheet' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the reply bottom sheet is back." >&2
+  exit 1
+fi
+# 注意这里 pin 的是 `>回复帖文<` 而不是裸的「回复帖文」：裸字符串会命中
+# feed.tsx 里解释这段历史的注释本身（注释里写了「还带「回复帖文」标题」），
+# 于是这颗 pin 会永远红、且排查时看不出是注释在触发。加上 JSX 的尖括号后
+# 只有真正的 `<Text …>回复帖文</Text>` 能命中。
+if grep -qF '>回复帖文<' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the '回复帖文' sheet title is back — an inline" >&2
+  echo "        composer does not need a modal title." >&2
+  exit 1
+fi
+echo "    REPLY-INLINE-001: PASS (reply composer is inline and keyboard-safe)"
