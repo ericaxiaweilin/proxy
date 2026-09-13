@@ -40,6 +40,11 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   const [reporting, setReporting] = useState(false);
   const [resolvedPosts, setResolvedPosts] = useState<FeedPost[]>(target.posts);
   const [resolvedMedia, setResolvedMedia] = useState<Record<string, FeedMediaItem[]>>(target.mediaByPost);
+  // PROFILE-TABS-001: 他人主页的 REPLIES tab 之前硬编码传 []，5 个 tabs 里有
+  // 3 个永远是空态。回复是公开内容，这里拉真数据；SAVED/TAGGED 保持空 ——
+  // 收藏是别人的私库（不上他人主页），标记目前只有客户端侧的说法，没有
+  // 服务端依据，宁可留空态也不编数据。
+  const [replyPosts, setReplyPosts] = useState<FeedPost[]>([]);
   // 图片查看器：之前 onOpenMedia 是空函数，他人照片点不开。
   // 与我的主页同款 MediaViewer，可左右切、可关。
   const [viewer, setViewer] = useState<{ postId: string; index: number } | undefined>(undefined);
@@ -101,6 +106,28 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
     return () => { cancelled = true; };
   }, [engagement, secureSessionStore, target.userId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void engagement.listUserReplies(target.userId, 30)
+      .then((r) => {
+        if (cancelled) return;
+        setReplyPosts(r.replies.map((rep) => ({
+          postId: rep.postId,
+          authorType: "USER" as const,
+          authorId: target.userId,
+          authorDisplayName: target.name,
+          body: rep.body,
+          mediaRefs: [],
+          sceneType: "UNKNOWN" as const,
+          status: "ACTIVE",
+          contextRefs: [],
+          createdAt: rep.createdAt
+        })));
+      })
+      .catch(() => { if (!cancelled) setReplyPosts([]); });
+    return () => { cancelled = true; };
+  }, [engagement, target.userId, target.name]);
+
   async function likePost(postId: string): Promise<void> {
     setNotice(undefined);
     try {
@@ -128,7 +155,7 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
+      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={replyPosts} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
     </ScrollView>
     {viewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={viewer.index} author={target.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setViewer((current) => current ? { ...current, index } : current)} onClose={() => setViewer(undefined)} /> : null}
     {/* COMP-REPORT-002: 举报账号。target 用 userId —— 举报要指到账号，

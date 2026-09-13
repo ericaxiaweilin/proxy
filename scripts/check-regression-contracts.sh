@@ -2343,3 +2343,40 @@ if ! grep -qF 'FEED-REPLY-002' apps/mobile/src/reply-preview.test.ts; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/reply-preview.test.ts || exit $?
 echo "    FEED-REPLY-002: PASS (5 comments show inline, only the overflow collapses)"
+
+# PROFILE-TABS-001: 收藏是私库，不是他人主页的一栏。
+# 之前 ProfileTabs 无条件渲染 IG/Threads 那 5 个 tab，SAVED 也在里面 —— 别人的
+# 主页上摆一个「收藏」tab，等于把他的私人书签当成公开内容展示（就算当时数据是
+# 空的，接口也随时可能接上）。同时 other-profile.tsx 把 REPLIES 硬编码成 []，
+# 5 个 tab 里有 3 个永远是空态。本条锁死：SAVED 只在 viewerMode === "SELF" 时
+# 出现（身份未知 = 不给，fail-closed），他人主页的 REPLIES 必须拉真数据。
+if ! grep -qF 'function visibleProfileTabs' apps/mobile/src/surfaces/profile-tabs-model.ts; then
+  echo "  FAIL [PROFILE-TABS-001]: the profile tab visibility rule is gone," >&2
+  echo "        so SAVED can render on somebody else's profile again." >&2
+  exit 1
+fi
+if ! grep -qF 'visibleProfileTabs(props.viewerMode)' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: ProfileTabs renders a hardcoded tab list again," >&2
+  echo "        so the private SAVED tab is no longer gated on the viewer." >&2
+  exit 1
+fi
+if ! grep -qF 'viewerMode=' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the own profile no longer declares viewerMode," >&2
+  echo "        so the fail-closed rule would hide the owner's own SAVED tab." >&2
+  exit 1
+fi
+if ! grep -qF 'replyPosts={replyPosts}' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the other-profile REPLIES tab is not fed real data," >&2
+  echo "        so three of the five tabs stay permanently empty." >&2
+  exit 1
+fi
+if grep -qF 'replyPosts={[]}' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the other-profile REPLIES tab is hardcoded empty again." >&2
+  exit 1
+fi
+if ! grep -qF 'PROFILE-TABS-001' apps/mobile/src/surfaces/profile-tabs-model.test.ts; then
+  echo "  FAIL [PROFILE-TABS-001]: the profile tab regression ID or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/profile-tabs-model.test.ts || exit $?
+echo "    PROFILE-TABS-001: PASS (SAVED stays private; other profiles show real replies)"

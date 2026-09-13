@@ -4,9 +4,11 @@
 //   IG/Threads 标准是 5 tabs (帖子/回复/收藏/标记/关于). 5 tabs 把
 //   "我" 的内容生态表达完整 — 收藏 = 用户私库 (重要入口), tagged = 别人
 //   提到我, replies = 别人看得到我的活动 (信任).
-// Phase 1.5 策略: REPLIES/SAVED/TAGGED 用本地 mock (空数组 + 空态文案);
-//   POSTS/PHOTOS 复用 me.tsx profilePosts / personalPhotos. 这样不依赖
-//   server 改动 — Phase 2 接 backend 时 5 个 tabs 都用真数据.
+// 数据: 5 个 tabs 都接真数据 —— POSTS/PHOTOS 复用 me.tsx profilePosts /
+//   personalPhotos; REPLIES 走 ListUserReplies; SAVED 走 ListUserBookmarks。
+//   TAGGED 目前是客户端按 @handle / MENTION contextRef 从动态里筛出来的。
+// 可见性: SAVED 只对本人可见（PROFILE-TABS-001）—— 别人的收藏夹是他的私库，
+//   不是公开主页的一栏。
 
 import React, { useMemo, useState } from "react";
 import { Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
@@ -15,12 +17,16 @@ import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import type { LocalNetClient } from "../localnet-client";
-import { selectPinnedPostAndRest, selectPostMedia, type ProfileMediaEntry } from "./profile-tabs-model";
-export type { ProfileMediaEntry } from "./profile-tabs-model";
+import {
+  selectPinnedPostAndRest,
+  selectPostMedia,
+  visibleProfileTabs,
+  type ProfileMediaEntry,
+  type ProfileTabKey
+} from "./profile-tabs-model";
+export type { ProfileMediaEntry, ProfileTabKey } from "./profile-tabs-model";
 
 // ---------- 类型 ----------
-
-export type ProfileTabKey = "POSTS" | "REPLIES" | "SAVED" | "TAGGED" | "ABOUT";
 
 export interface ProfileTabsProps {
   profileDraft: {
@@ -35,9 +41,13 @@ export interface ProfileTabsProps {
   photos: ProfileMediaEntry[];                // PHOTOS (IG 3-列网格 in POSTS)
   // R15.73: 置顶帖 ID 列表 (server 返, ListPinnedPosts). pinnedIds[0] 渲染置顶, 其余标 "已置顶" 标记.
   pinnedIds?: ReadonlyArray<string> | undefined;
-  replyPosts: FeedPost[];                     // REPLIES tab (Phase 1 mock)
-  savedPosts: FeedPost[];                     // SAVED tab (Phase 1 mock)
-  taggedPosts: FeedPost[];                    // TAGGED tab (Phase 1 mock)
+  // REPLIES/SAVED/TAGGED 都已经是真数据（me.tsx 走 ListUserReplies /
+  // ListUserBookmarks；other-profile.tsx 走 ListUserReplies）。SAVED 只在
+  // viewerMode === "SELF" 时渲染 —— 收藏是私库，不上他人主页
+  // （PROFILE-TABS-001）。
+  replyPosts: FeedPost[];
+  savedPosts: FeedPost[];
+  taggedPosts: FeedPost[];
   // 统计 (IG/Threads 风格 "粉丝 关注 帖子")。没拉到就是 undefined，
   // 渲染 "—" 不回填 0。
   stats: {
@@ -76,8 +86,29 @@ export interface ProfileTabsProps {
 
 // ---------- 组件 ----------
 
+const PROFILE_TAB_LABEL: Record<ProfileTabKey, string> = {
+  POSTS: "帖子",
+  REPLIES: "回复",
+  SAVED: "收藏",
+  TAGGED: "标签",
+  ABOUT: "关于"
+};
+
+const PROFILE_TAB_ICON: Record<ProfileTabKey, ProxyIconName> = {
+  POSTS: "sparkle",
+  REPLIES: "spark",
+  SAVED: "star",
+  TAGGED: "target",
+  ABOUT: "ring"
+};
+
 export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
   const [tab, setTab] = useState<ProfileTabKey>("POSTS");
+
+  // PROFILE-TABS-001: SAVED 只给本人。viewer 身份未知时不给（fail-closed）。
+  const tabs = useMemo(() => visibleProfileTabs(props.viewerMode), [props.viewerMode]);
+  // 当前 tab 被隐藏时（例如从本人主页切到他人主页）回落 POSTS，避免留一个空白页。
+  const activeTab: ProfileTabKey = tabs.includes(tab) ? tab : "POSTS";
 
   // R15.73: 置顶帖 = server 返的 pinnedIds 中第一个, 不在 profilePosts 时走 fallback.
   // 之前 (Phase 1) 取 posts[0] mock — 跟 post 列表重复, 只是占位.
@@ -141,30 +172,25 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
         )}
       </View>
 
-      {/* Tabs 5 选 1 — IG/Threads 风: 顶部小 icon + 中文 label, active 黑下划线 2px */}
+      {/* Tabs N 选 1 — IG/Threads 风: 顶部小 icon + 中文 label, active 黑下划线 2px。
+          PROFILE-TABS-001: 列表走 visibleProfileTabs，SAVED 只给本人。 */}
       <View style={styles.tabsRow}>
-        {([
-          ["POSTS", "sparkle", "帖子"],
-          ["REPLIES", "spark", "回复"],
-          ["SAVED", "star", "收藏"],
-          ["TAGGED", "target", "标签"],
-          ["ABOUT", "ring", "关于"]
-        ] as Array<[ProfileTabKey, ProxyIconName, string]>).map(([key, iconName, label]) => (
+        {tabs.map((key) => (
           <Pressable
             key={key}
             accessibilityLabel={`${key} tab`}
             onPress={() => setTab(key)}
             style={styles.tabBtn}
           >
-            <ProxyIcon name={iconName} color={tab === key ? props.color.ink : props.color.muted} size={20} />
-            <Text style={[styles.tabLabel, tab === key && styles.tabLabelActive]}>{label}</Text>
-            {tab === key ? <View style={styles.tabUnderline} /> : null}
+            <ProxyIcon name={PROFILE_TAB_ICON[key]} color={activeTab === key ? props.color.ink : props.color.muted} size={20} />
+            <Text style={[styles.tabLabel, activeTab === key && styles.tabLabelActive]}>{PROFILE_TAB_LABEL[key]}</Text>
+            {activeTab === key ? <View style={styles.tabUnderline} /> : null}
           </Pressable>
         ))}
       </View>
 
       {/* Tab body */}
-      {tab === "POSTS" ? (
+      {activeTab === "POSTS" ? (
         <PostsTab
           pinnedPost={pinnedPost}
           posts={unpinnedPosts}
@@ -181,7 +207,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           color={props.color}
         />
       ) : null}
-      {tab === "REPLIES" ? (
+      {activeTab === "REPLIES" ? (
         <RepliesTab
           replies={props.replyPosts}
           avatarUri={props.profileAvatarUri}
@@ -189,7 +215,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           color={props.color}
         />
       ) : null}
-      {tab === "SAVED" ? (
+      {activeTab === "SAVED" ? (
         <SavedTab
           saved={props.savedPosts}
           mediaByPost={props.mediaByPost}
@@ -198,7 +224,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           color={props.color}
         />
       ) : null}
-      {tab === "TAGGED" ? (
+      {activeTab === "TAGGED" ? (
         <TaggedTab
           tagged={props.taggedPosts}
           mediaByPost={props.mediaByPost}
@@ -207,7 +233,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           color={props.color}
         />
       ) : null}
-      {tab === "ABOUT" ? (
+      {activeTab === "ABOUT" ? (
         <AboutTab
           profileDraft={props.profileDraft}
           stats={props.stats}

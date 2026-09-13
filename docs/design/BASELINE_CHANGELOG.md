@@ -4,10 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
-## Revision 181 — 2026-09-13
+## Revision 182 — 2026-09-13
 
-- FEED-REPLY-001/002：评论预览（Threads 式：首屏 5 条 + 查看全部）与回复作者名
-  服务端解析。feed 评论区视觉变化（默认可见前 5 条评论，超出折叠）。
+- PROFILE-TABS-001：个人主页 5 tab 的可见性与真数据。
+  - **收藏不上他人主页**。之前 `ProfileTabs` 无条件渲染 IG/Threads 那 5 个 tab，
+    SAVED 也在里面 —— 别人的主页上摆「收藏」等于把他的私人书签当公开内容展示。
+    现在走 `visibleProfileTabs(viewerMode)`：只有 `SELF` 才给 SAVED，**viewer
+    身份未知一律不给**（fail-closed），少一个 tab 也强过泄露别人的私库。
+  - **他人主页的「回复」tab 不再恒空**。`other-profile.tsx` 之前把 `replyPosts`
+    硬编码成 `[]`，5 个 tab 里有 3 个永远是空态；现在走
+    `ListUserReplies(target.userId)` 拉真数据（回复是公开内容）。SAVED / TAGGED
+    保持空态 —— 收藏是私库，标记目前只有客户端侧说法、没有服务端依据，宁可留空
+    也不编数据。
+  - tab 顺序抽成 `PROFILE_TAB_ORDER`；当前 tab 被隐藏时回落 POSTS，不留空白页。
 
 ## Revision 181 — 2026-09-13
 
