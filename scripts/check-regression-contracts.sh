@@ -1955,3 +1955,46 @@ if ! grep -qF '"usesNonExemptEncryption": false' apps/mobile/app.json; then
   exit 1
 fi
 echo "    COMP-E2EE-001: PASS (no unbacked end-to-end encryption claim on any egress)"
+
+# COMP-E2EE-002: 用户真正看得到的地方，不许出现做不到的加密承诺。
+# 001 只钉住了后端字段，但对用户作出承诺的其实是 UI 文案和法律文件：
+#   - 设置页卡片原文「🔒 端到端加密 / 军用级 AES-256 / 已开启 · 始终保护」；
+#   - ToS §16 把端到端加密列进 Secure Chat 功能清单；
+#   - 隐私政策原文「如果 Proxy 明确标记某会话为端到端加密 Secure Chat…」。
+# 平台没有 E2EE，这些全是虚假陈述（RFC 里更直白地写着「这是让人觉得安全」）。
+# 钉法两条：
+#   1) 法律文件里不许把它当功能列出来（`- 端到端加密`），并且必须明确写
+#      「目前不提供端到端加密」——只删不管会让人以为是我们漏写了。
+#   2) 移动端源码里这个能力名一律不许出现（含注释）。要留免责说明就用
+#      「E2EE（端到端）加密」的写法，这样「出现即为违规」这条铁律才成立。
+for f in apps/api-go/internal/api/legal_docs/terms_v1.1.txt \
+         apps/api-go/internal/api/legal_docs/privacy_v1.1.txt \
+         docs/legal/vietnam/Proxy_Terms_CN_v1.1_Vietnam_2026-08-31.txt \
+         docs/legal/vietnam/Proxy_Privacy_CN_v1.1_Vietnam_2026-08-31.txt \
+         docs/legal/vietnam/Proxy_Terms_Privacy_CN_v1.1_Vietnam_2026-08-31.txt; do
+  if [ ! -f "$f" ]; then
+    echo "  FAIL [COMP-E2EE-002]: legal document $f is missing." >&2
+    exit 1
+  fi
+  if grep -qF -- '- 端到端加密' "$f"; then
+    echo "  FAIL [COMP-E2EE-002]: $f still lists 端到端加密 as a feature." >&2
+    exit 1
+  fi
+  if ! grep -qF -- '目前不提供端到端加密' "$f"; then
+    echo "  FAIL [COMP-E2EE-002]: $f no longer states that Proxy does not provide" >&2
+    echo "        end-to-end encryption." >&2
+    exit 1
+  fi
+done
+if grep -rqF -- '端到端加密' apps/mobile/src; then
+  echo "  FAIL [COMP-E2EE-002]: mobile UI copy still names 端到端加密." >&2
+  grep -rlF -- '端到端加密' apps/mobile/src >&2
+  exit 1
+fi
+# 设计稿长什么样，UI 就会长成什么样：原型里不许再画这个徽标。
+if grep -rqF --include='*.html' -- '端到端加密' docs/design/references; then
+  echo "  FAIL [COMP-E2EE-002]: a design prototype still renders an 端到端加密 badge:" >&2
+  grep -rlF --include='*.html' -- '端到端加密' docs/design/references >&2
+  exit 1
+fi
+echo "    COMP-E2EE-002: PASS (no end-to-end encryption claim in UI copy, prototypes or legal docs)"

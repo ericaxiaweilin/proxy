@@ -4,6 +4,23 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 175 — 2026-09-13
+
+- COMP-E2EE-002（合规整改）：用户看得到的地方不许出现做不到的加密承诺。
+  001 只钉住了后端字段，但真正对用户作出承诺的是 UI 文案与法律文件：
+  设置页「安全」卡片原本直接显示「🔒 端到端加密 / 军用级 AES-256 /
+  已开启 · 始终保护」；ToS §16 把它列进 Secure Chat 功能清单；隐私政策
+  原文写着「如果 Proxy 明确标记某会话为端到端加密 Secure Chat…」。
+  平台没有 E2EE，这些都是虚假陈述（RFC 里甚至直白写着「这是让人觉得
+  安全」）。改为如实表述：卡片改成「🔒 加密与访问控制」+ 传输/静态加密
+  说明 + 「不提供 E2EE（端到端）加密」；法律文件改为明确声明目前不提供，
+  并说明为履行法律义务、处理举报与安全审计可能访问通信内容。
+  **有视觉改动**：设置页第一张安全卡片标题与正文文案变化。
+  门禁新增 COMP-E2EE-002：法律文件不许把它当功能列、必须写明不提供；
+  `apps/mobile/src` 里该能力名一律不得出现；HTML 原型不许再画该徽标。
+- 同步修订：`docs/legal/vietnam/*`（3 份）与 `apps/api-go/internal/api/
+  legal_docs/*`（go:embed 实际对外服务的那份，是另一份拷贝，同样要改）。
+
 ## Revision 174 — 2026-09-13
 
 - COMP-E2EE-001（合规整改）：不再宣称做不到的加密。

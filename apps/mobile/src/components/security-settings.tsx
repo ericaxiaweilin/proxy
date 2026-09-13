@@ -1,5 +1,11 @@
-// Lotus RFC §8 — 设置页「安全」区块 (营销包装 + 真开关)
-// 包含：端到端加密徽标、防截图提醒、多身份入口、消息保留时间、设备管理 (2 设备踢旧)
+// Lotus RFC §8 — 设置页「安全」区块 (如实的安全说明 + 真开关)
+// 包含：加密与访问控制说明、防截图提醒、多身份入口、消息保留时间、设备管理 (2 设备踢旧)
+// COMP-E2EE-001：此处原卡片标题写的是 E2EE（即端到端那种加密）+「军用级
+// AES-256」+「已开启 · 始终保护」，三项都与实现不符。
+// 平台没有 E2EE（端到端）加密的实现，服务端能读到明文；TLS 是传输层加密、
+// KMS 是静态加密，两者都不算端到端。向用户挂一把兑现不了的锁是虚假安全声明，
+// 会放大法律与人身安全风险，已改为如实表述。
+// 门禁 COMP-E2EE-002 钉着：apps/mobile/src 里不允许再出现该能力的中文名。
 // 管理类按钮暂无后端与管理页面可接：只留信息卡，不渲染死按钮
 // （之前点按直接回“我的”，哪儿也没去）。
 
@@ -21,9 +27,10 @@ export function SecuritySettings({
   return (
     <View style={styles.root}>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>🔒 端到端加密</Text>
-        <Text style={styles.cardDesc}>所有消息、照片、语音均使用军用级 AES-256 加密（传输 TLS + 静态 KMS）。</Text>
-        <Text style={styles.badge}>已开启 · 始终保护</Text>
+        <Text style={styles.cardTitle}>🔒 加密与访问控制</Text>
+        <Text style={styles.cardDesc}>消息在传输中使用 TLS 加密，在服务器上使用 AES-256 静态加密。</Text>
+        <Text style={styles.cardDesc}>Proxy 不提供 E2EE（端到端）加密：为履行法律义务、处理举报与安全审计，Proxy 可能依法访问通信内容。</Text>
+        <Text style={styles.badge}>已开启</Text>
       </View>
 
       <View style={styles.card}>
