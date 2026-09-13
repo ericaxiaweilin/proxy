@@ -4,6 +4,28 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 176 — 2026-09-13
+
+- COMP-REPORT-001（越南合规整改）：把「用户举报」真正接下来。
+  服务条款 §38 与隐私政策都承诺用户可以举报内容 / 消息 / 账号 / 活动 /
+  机会 / 商家 / 邀约 / 交易，但代码里只有 `engagement.ReportPost` 一个
+  入口 —— 承诺 8 类，接得上 1 类，而最重的刑事风险（刑法 327 条介绍卖淫）
+  恰恰发生在 MESSAGE / ACCOUNT / TRANSACTION 上：没有入口，平台既收不到
+  线索，也拿不出「收到过、处理过」的证据。电商法 122/2025 与
+  NĐ 147/2024 也都要求平台提供举报受理渠道。
+  新增 `internal/moderation`（命令 `ReportTarget`）+ 迁移
+  `086_moderation_reports.sql`（`moderation.reports`，append-only）。
+  理由枚举补上了 MINOR_SAFETY 与 SOLICITATION —— 原接口只有
+  SPAM / HARASSMENT / UNSAFE / OTHER，涉未成年人与线下招嫖只能塞进
+  UNSAFE，运营看不出该优先处理哪一条。
+  本包只做受理与留痕，不做裁决、不做自动处置（要人判断）。
+  一律 fail-closed：目标类型不认识、目标 ID 为空、理由不认识、举报人身份
+  拿不到，全部拒绝；写库失败必须报出来，不能当成「已受理」。
+  **无视觉改动**（接口层，移动端尚未接入举报入口）。
+- 同步：`openapi.commands.generated.yaml` 重新生成（210 → 211 条），
+  并把新域 `moderation` 登记进 `openapicmds.DomainDir`（不登记的话
+  生成器扫不到新命令，spec 会静默缺失）。
+
 ## Revision 175 — 2026-09-13
 
 - COMP-E2EE-002（合规整改）：用户看得到的地方不许出现做不到的加密承诺。

@@ -333,6 +333,8 @@ commands:
     domain: Engagement
   - command: ReportPost
     domain: Engagement
+  - command: ReportTarget
+    domain: Moderation
   - command: RepostPost
     domain: Engagement
   - command: RequestAccountRecovery

@@ -37,6 +37,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/safety"
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
+	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"github.com/proxy-app/proxy-api/internal/voucher"
 )
@@ -83,6 +84,10 @@ type Server struct {
 	// Compliance.GlobalStatus to expose the active switches to
 	// the mobile client at boot.
 	Compliance *compliance.Service
+	// Moderation owns the user report intake (COMP-REPORT-001). The terms
+	// of service §38 promise users can report eight kinds of targets; this
+	// is the single intake that actually accepts all of them.
+	Moderation *moderation.Service
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
 	// CONFIRMED transition for PLATFORM_PAY orders. Wired

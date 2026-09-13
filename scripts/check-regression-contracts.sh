@@ -1998,3 +1998,55 @@ if grep -rqF --include='*.html' -- '端到端加密' docs/design/references; the
   exit 1
 fi
 echo "    COMP-E2EE-002: PASS (no end-to-end encryption claim in UI copy, prototypes or legal docs)"
+
+# COMP-REPORT-001: 法律文件 §38 承诺可举报的八类目标，必须真的都能报。
+# 之前只有 engagement.ReportPost（POST）一个入口 —— 承诺 8 类，接得上 1 类。
+# 这不是功能缺失那么简单：
+#   1. 电商法 122/2025 与 NĐ 147/2024 都要求平台提供举报受理渠道；
+#   2. 我们最重的刑事风险（刑法 327 条介绍卖淫）恰恰发生在 MESSAGE /
+#      ACCOUNT / TRANSACTION 上 —— 没有入口，平台既收不到线索，也拿不出
+#      「收到过、处理过」的证据；
+#   3. 原接口只有 SPAM / HARASSMENT / UNSAFE / OTHER 四种理由，涉未成年人
+#      与线下招嫖只能塞进 UNSAFE，运营看不出该优先处理哪一条。
+# 「建了包」不等于「接得上」—— 服务没挂到调度器上，命令会落到 501。
+# 所以除了用例，还要静态钉住调度器与 main 的接线。
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportableTargetTypesMatchTermsSection38" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportAcceptedForEveryTargetPromisedInTerms" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportRejectedForUnknownTargetType" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportRejectedWhenActorMissing" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+require_test "COMP-REPORT-001" "./internal/moderation" \
+  "TestReportFailedWhenRepositoryDown" \
+  "apps/api-go/internal/moderation/report_compliance_test.go" || exit $?
+# 命令必须真的接到调度器上，否则一切用例都是自娱自乐。
+if ! grep -qF 's.Moderation != nil && s.Moderation.Supports' \
+     apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [COMP-REPORT-001]: ReportTarget is no longer routed by the" >&2
+  echo "        dispatcher, so users would get 501 instead of a report." >&2
+  exit 1
+fi
+# 没接数据库实现的话，开发模式下内存仓储会静默吞掉举报。
+if ! grep -qF 'moderation.NewWithRepository(postgres.NewModerationRepository(pool))' \
+     apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-REPORT-001]: the Postgres report repository is no longer" >&2
+  echo "        wired, so reports would only live in memory." >&2
+  exit 1
+fi
+if ! grep -qF 'server.Moderation = moderationService' apps/api-go/cmd/api/main.go; then
+  echo "  FAIL [COMP-REPORT-001]: the moderation service is no longer attached" >&2
+  echo "        to the HTTP server." >&2
+  exit 1
+fi
+# 表没了，接口接得再好也是往空气里写。
+if [ ! -f apps/api-go/migrations/086_moderation_reports.sql ]; then
+  echo "  FAIL [COMP-REPORT-001]: migration 086_moderation_reports.sql is missing." >&2
+  exit 1
+fi
+echo "    COMP-REPORT-001: PASS (every target promised in the terms is reportable and persisted)"
