@@ -4,6 +4,30 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 185 — 2026-09-13
+
+- REPLY-TARGET-001：个人主页 REPLIES tab 现在能回答「我回复了谁的帖子」。
+  - **原来的三个毛病叠在一起**。①服务端一直在发 `parentPostId`（这条回复挂在哪条
+    帖子下面），但客户端从来没读它 —— 于是这一栏唯一有用的信息被丢掉，只剩一句
+    光秃秃的「你回复了」；而 `ProfileTabs.tsx` 里那行注释还断言「server Reply 暂没
+    parentPostId 字段」，让这个降级看起来是永久性的（实测每条 reply 都带这个字段）。
+    ②「你回复了」是**写死的** —— 看**别人**的主页时，别人的回复也在说「你回复了」。
+    ③React key 用了 `reply.postId`。同一条帖子可以被同一个人回复多次（真实数据里
+    就是这样：两行 `postId` 相同、`replyId` 不同），两行于是撞成同一个 key。
+  - **父帖用 PROFILE-SAVED-001 的 `ListPostsByIds` 回查**，不再新增服务端命令：
+    可见性口径与动态流完全一致 —— 已删、或已收紧成「仅关注者可见」的帖子取不回来，
+    这一行就退化成中性文案（「你回复了这条帖子」），不猜、不编、也绝不把 account id
+    当名字显示。名字一律走 `feed-author` 的 `resolveAuthorDisplayName`，与 feed 和
+    评论共用同一个身份判定，保证同一个人在任何一栏里都是同一个称呼。
+  - **回复不再伪装成 `FeedPost`**：新增 `ReplyEntry`（`replyId` / `parentPostId` /
+    `body` / `createdAt`），key 改用 `replyId`。顺带删掉了「把回复作者硬写成
+    `viewerAccountId` / `target.userId`」的伪造 —— 那正是当初「回复 @{authorId} 的帖子」
+    永远显示自己的根因。`viewerMode` 现在参与文案（SELF「你回复了 X 的帖子」/
+    OTHER「回复了 X 的帖子」），引用块展示原帖摘要（`numberOfLines={2}`）。
+  - 新增 `apps/mobile/src/reply-target.ts` 纯函数模块（20 条 vitest），并在
+    `scripts/check-regression-contracts.sh` 登记 REPLY-TARGET-001（9 条正向 pin +
+    3 条反向 pin，13 个注入用例全部验证过会红）。
+
 ## Revision 184 — 2026-09-13
 
 - MENTION-001：个人主页 TAGGED tab 从「一页动态的子串扫描」改成服务端全量提及查询。

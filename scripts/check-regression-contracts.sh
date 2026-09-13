@@ -2365,12 +2365,19 @@ if ! grep -qF 'viewerMode=' apps/mobile/src/surfaces/me.tsx; then
   echo "        so the fail-closed rule would hide the owner's own SAVED tab." >&2
   exit 1
 fi
-if ! grep -qF 'replyPosts={replyPosts}' apps/mobile/src/surfaces/other-profile.tsx; then
-  echo "  FAIL [PROFILE-TABS-001]: the other-profile REPLIES tab is not fed real data," >&2
-  echo "        so three of the five tabs stay permanently empty." >&2
+if ! grep -qF 'engagement.listUserReplies(target.userId' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the other-profile REPLIES tab no longer fetches real" >&2
+  echo "        replies, so it is back to being permanently empty." >&2
   exit 1
 fi
-if grep -qF 'replyPosts={[]}' apps/mobile/src/surfaces/other-profile.tsx; then
+# REPLY-TARGET-001 之后回复不再伪装成 FeedPost，prop 也从 replyPosts 换成了
+# replies —— pin 跟着改成「拉回来的回复真的接到了 tabs 上」，语义不变。
+if ! grep -qF 'replies={replyEntries}' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the fetched replies are no longer wired into the" >&2
+  echo "        other-profile tabs." >&2
+  exit 1
+fi
+if grep -qF 'replies={[]}' apps/mobile/src/surfaces/other-profile.tsx; then
   echo "  FAIL [PROFILE-TABS-001]: the other-profile REPLIES tab is hardcoded empty again." >&2
   exit 1
 fi
@@ -2532,3 +2539,84 @@ if ! grep -qF 'MENTION-001' apps/mobile/src/localnet-client.test.ts; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/localnet-client.test.ts || exit $?
 echo "    MENTION-001: PASS (mentions are complete, whole-handle, and visibility-safe)"
+
+# REPLY-TARGET-001: 个人主页 REPLIES tab 必须能回答「我回复了谁的帖子」。
+# 之前这一栏有三个毛病叠在一起：
+#   1. 服务端一直在发 parentPostId（就是这条回复挂在哪条帖子下面），但客户端
+#      从来没读它 —— 于是这一栏唯一有用的信息被丢掉，只剩一句光秃秃的
+#      「你回复了」；而且旁边那行注释还断言「server 没有 parentPostId 字段」，
+#      让这个降级看起来是永久性的（实测服务端每条 reply 都带这个字段）；
+#   2. 「你回复了」是写死的 —— 看**别人**的主页时，别人的回复也在说「你回复了」；
+#   3. React key 用了 reply.postId。同一条帖子可以被同一个人回复多次（真实数据
+#      里就是这样：两行 postId 相同、replyId 不同），两行于是撞成同一个 key。
+# 现在父帖用 PROFILE-SAVED-001 的 ListPostsByIds 回查（同一条可见性口径，取不
+# 回来的帖子退化成中性文案），名字走 feed-author 的 resolveAuthorDisplayName，
+# key 改用 replyId。
+if ! grep -qF 'export function replyEntriesFromReplies' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: there is no reply-entry builder, so replies are" >&2
+  echo "        reshaped into fake FeedPosts again (losing replyId)." >&2
+  exit 1
+fi
+if ! grep -qF 'export function parentPostIdsForReplies' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: the parent-post id collector is gone, so nothing" >&2
+  echo "        resolves which post a reply answered." >&2
+  exit 1
+fi
+if ! grep -qF 'export function replyTargetsFromPosts' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: resolved parent posts are no longer turned into" >&2
+  echo "        reply targets." >&2
+  exit 1
+fi
+if ! grep -qF 'export function replyTargetLabel' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: there is no single definition of the reply-target" >&2
+  echo "        label, so SELF and OTHER can drift apart again." >&2
+  exit 1
+fi
+if ! grep -qF 'localNet.listPostsByIds(parentIds)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: my-profile replies no longer resolve the post they" >&2
+  echo "        answered, so the tab degrades back to a bare label." >&2
+  exit 1
+fi
+if ! grep -qF 'replyEntriesFromReplies(r.replies)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: my-profile replies are no longer built from the" >&2
+  echo "        server rows (replyId/parentPostId)." >&2
+  exit 1
+fi
+if ! grep -qF 'localNet.listPostsByIds(parentIds)' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: other-profile replies no longer resolve their" >&2
+  echo "        parent post." >&2
+  exit 1
+fi
+# 同一条帖子可以被回复多次 —— key 必须是 replyId，不是父帖 id。
+if ! grep -qF 'key={reply.replyId}' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: the replies list is not keyed by replyId, so two" >&2
+  echo "        replies to the same post collide." >&2
+  exit 1
+fi
+if ! grep -qF 'replyTargetLabel(props.viewerMode, target, props.viewerAccountId)' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: the replies tab no longer uses the shared label," >&2
+  echo "        so it can disagree with the feed about who someone is." >&2
+  exit 1
+fi
+# 反向 pin：下面这几个写法就是当初那三个 bug，任何一个回来都要拦住。
+if grep -qF 'key={reply.postId}' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: replies are keyed by parent post id again — two" >&2
+  echo "        replies to one post then share a key." >&2
+  exit 1
+fi
+if grep -qF 'styles.replyTarget}>你回复了<' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: the hardcoded label is back, so other people's" >&2
+  echo "        replies are attributed to the viewer." >&2
+  exit 1
+fi
+if grep -qF 'authorId: target.userId' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: replies are authored by the profile owner again —" >&2
+  echo "        that is what made the old '回复 @{authorId} 的帖子' show yourself." >&2
+  exit 1
+fi
+if ! grep -qF 'REPLY-TARGET-001' apps/mobile/src/reply-target.test.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: the reply-target regression ID or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/reply-target.test.ts || exit $?
+echo "    REPLY-TARGET-001: PASS (replies name the post they answered, keyed by replyId)"

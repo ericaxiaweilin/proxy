@@ -37,6 +37,13 @@ import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client"
 import type { EngagementClient } from "../engagement-client";
 import type { ModerationClient } from "../moderation-client";
 import { type LocalNetClient } from "../localnet-client";
+import {
+  parentPostIdsForReplies,
+  replyEntriesFromReplies,
+  replyTargetsFromPosts,
+  type ReplyEntry,
+  type ReplyTarget
+} from "../reply-target";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
@@ -420,7 +427,10 @@ export function MeSurface({
   }
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [aiIdentityOpen, setAiIdentityOpen] = useState(false);
-  const [personalReplyPosts, setPersonalReplyPosts] = useState<FeedPost[]>([]);
+  // REPLY-TARGET-001: 回复有自己的形状（replyId 才是稳定 key），不再伪装成
+  // FeedPost；被回复的父帖另放一张表，查不到就是缺项。
+  const [personalReplyEntries, setPersonalReplyEntries] = useState<ReplyEntry[]>([]);
+  const [personalReplyTargets, setPersonalReplyTargets] = useState<Record<string, ReplyTarget>>({});
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
   const [personalTaggedPosts, setPersonalTaggedPosts] = useState<FeedPost[]>([]);
   const [personalPinnedIds, setPersonalPinnedIds] = useState<ReadonlyArray<string>>([]);
@@ -654,23 +664,34 @@ export function MeSurface({
     if (!engagement || !viewerAccountId) return;
     let cancelled = false;
     void engagement.listUserReplies(viewerAccountId, 30)
-      .then((r) => {
+      .then(async (r) => {
         if (cancelled) return;
-        const replyPosts: FeedPost[] = r.replies.map((rep: { replyId: string; postId: string; parentPostId: string; body: string; createdAt: string }) => ({
-          postId: rep.postId,
-          authorType: "USER" as const,
-          authorId: viewerAccountId,
-          authorDisplayName: profileDraft.name,
-          body: rep.body,
-          mediaRefs: [],
-          sceneType: "UNKNOWN" as const,
-          status: "ACTIVE",
-          contextRefs: [],
-          createdAt: rep.createdAt
-        }));
-        setPersonalReplyPosts(replyPosts);
+        // REPLY-TARGET-001: 服务端一直在发 parentPostId（就是这条回复挂在哪条
+        // 帖子下面），只是以前没人读它，于是「回复了谁」被降级成光秃秃的
+        // 「你回复了」。父帖用 PROFILE-SAVED-001 的 ListPostsByIds 回查 ——
+        // 同一条可见性口径：已删 / 已收紧成仅关注者可见的帖子取不回来，
+        // 那一行就退化成中性文案，不猜也不编。
+        const entries = replyEntriesFromReplies(r.replies);
+        setPersonalReplyEntries(entries);
+        const parentIds = parentPostIdsForReplies(entries);
+        if (parentIds.length === 0) {
+          setPersonalReplyTargets({});
+          return;
+        }
+        try {
+          const parents = await localNet.listPostsByIds(parentIds);
+          if (!cancelled) setPersonalReplyTargets(replyTargetsFromPosts(parents.posts));
+        } catch {
+          // 引用块拿不到不该把回复本身也吞掉 —— 回复正文仍然照常显示。
+          if (!cancelled) setPersonalReplyTargets({});
+        }
       })
-      .catch(() => { if (!cancelled) setPersonalReplyPosts([]); });
+      .catch(() => {
+        if (!cancelled) {
+          setPersonalReplyEntries([]);
+          setPersonalReplyTargets({});
+        }
+      });
     void engagement.listUserBookmarks(viewerAccountId, 60)
       .then(async (b) => {
         if (cancelled) return;
@@ -1583,7 +1604,8 @@ export function MeSurface({
               posts={profilePosts}
               mediaByPost={profileMedia}
               photos={personalPhotos}
-              replyPosts={personalReplyPosts}
+              replies={personalReplyEntries}
+              replyTargets={personalReplyTargets}
               savedPosts={personalSavedPosts}
               taggedPosts={personalTaggedPosts}
               stats={{ posts: profilePosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
@@ -1599,6 +1621,7 @@ export function MeSurface({
               onShareProfile={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
               onLikePost={engagement ? (postId) => { void engagement.reactToPost(postId, "LIKE", true).then(() => setLikeError(undefined)).catch(() => setLikeError("点赞没有提交成功，请检查连接后重试。")); } : undefined}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
+              viewerAccountId={viewerAccountId}
               isFollowing={false}
               followBusy={false}
               onFollow={undefined}

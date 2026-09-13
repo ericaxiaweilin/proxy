@@ -5,7 +5,8 @@
 //   "我" 的内容生态表达完整 — 收藏 = 用户私库 (重要入口), tagged = 别人
 //   提到我, replies = 别人看得到我的活动 (信任).
 // 数据: 5 个 tabs 都接真数据 —— POSTS/PHOTOS 复用 me.tsx profilePosts /
-//   personalPhotos; REPLIES 走 ListUserReplies; SAVED 走 ListUserBookmarks
+//   personalPhotos; REPLIES 走 ListUserReplies，再用 ListPostsByIds 回查
+//   被回复的父帖（REPLY-TARGET-001）; SAVED 走 ListUserBookmarks
 //   (再按 ID 直取); TAGGED 走 ListPostsMentioning（MENTION-001）。
 //   TAGGED 原先是在客户端拿一页动态做 @handle 子串筛的 —— 更早的提及会静默
 //   消失，而且 "@thanh2" 会被算成提到了 "@thanh"。现在由服务端扫全量已发布
@@ -20,6 +21,12 @@ import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import type { LocalNetClient } from "../localnet-client";
+import {
+  replyTargetLabel,
+  replyTimestampLabel,
+  type ReplyEntry,
+  type ReplyTarget
+} from "../reply-target";
 import {
   selectPinnedPostAndRest,
   selectPostMedia,
@@ -48,9 +55,17 @@ export interface ProfileTabsProps {
   // ListUserBookmarks；other-profile.tsx 走 ListUserReplies）。SAVED 只在
   // viewerMode === "SELF" 时渲染 —— 收藏是私库，不上他人主页
   // （PROFILE-TABS-001）。
-  replyPosts: FeedPost[];
+  // REPLY-TARGET-001: 回复不再是伪装成 FeedPost 的假帖子 —— 它有自己的形状
+  // （replyId / parentPostId），因为同一条帖子可以被回复多次，用父帖 id 当
+  // React key 会撞。被回复的父帖由调用方用 ListPostsByIds 回查后放进
+  // replyTargets；查不到就是缺项，渲染退化成中性文案。
+  replies: ReplyEntry[];
+  replyTargets: Record<string, ReplyTarget>;
   savedPosts: FeedPost[];
   taggedPosts: FeedPost[];
+  // REPLY-TARGET-001: 判定「这条帖子是不是访问者自己的」用，跟 feed 同一套
+  // 身份规则（resolveAuthorDisplayName）。缺省 = 游客，一律不当成自己。
+  viewerAccountId?: string | undefined;
   // 统计 (IG/Threads 风格 "粉丝 关注 帖子")。没拉到就是 undefined，
   // 渲染 "—" 不回填 0。
   stats: {
@@ -212,9 +227,10 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
       ) : null}
       {activeTab === "REPLIES" ? (
         <RepliesTab
-          replies={props.replyPosts}
-          avatarUri={props.profileAvatarUri}
-          name={props.profileDraft.name}
+          replies={props.replies}
+          targets={props.replyTargets}
+          viewerMode={props.viewerMode}
+          viewerAccountId={props.viewerAccountId}
           color={props.color}
         />
       ) : null}
@@ -450,12 +466,13 @@ function PostCard(props: {
   );
 }
 
-// ---------- RepliesTab (回复, Phase 1 mock) ----------
+// ---------- RepliesTab (回复) ----------
 
 function RepliesTab(props: {
-  replies: FeedPost[];
-  avatarUri?: string | undefined;
-  name: string;
+  replies: ReplyEntry[];
+  targets: Record<string, ReplyTarget>;
+  viewerMode: "SELF" | "OTHER" | undefined;
+  viewerAccountId?: string | undefined;
   color: ProfileTabsProps["color"];
 }): React.JSX.Element {
   if (props.replies.length === 0) {
@@ -463,19 +480,30 @@ function RepliesTab(props: {
   }
   return (
     <View>
-      {props.replies.map((reply) => (
-        <View key={reply.postId} style={styles.replyCard}>
-          <View style={styles.replyMeta}>
-            {/* R15.87 fix: 之前 '回复 @{reply.authorId} 的帖子' 永远显示回复自己
-                 (me.tsx listUserReplies handler hardcode authorId=viewerAccountId).
-                 改为 '你回复了' 跟原始帖 ID. server Reply 暂没 parentPostId 字段
-                 (commander 域), Phase 2 加 schema. */}
-            <Text style={styles.replyTarget}>你回复了</Text>
-            <Text style={styles.replyTime}>· {new Date(reply.createdAt).toLocaleDateString()}</Text>
+      {props.replies.map((reply) => {
+        // REPLY-TARGET-001: 取不回来的父帖（已删 / 已收紧成仅关注者可见）就是
+        // undefined —— 这一行退化成中性文案，不显示 id、不编名字。
+        const target = props.targets[reply.parentPostId];
+        return (
+          // key 用 replyId：同一条帖子可以被同一个人回复多次，用父帖 id 会撞。
+          <View key={reply.replyId} style={styles.replyCard}>
+            <View style={styles.replyMeta}>
+              <Text style={styles.replyTarget}>
+                {replyTargetLabel(props.viewerMode, target, props.viewerAccountId)}
+              </Text>
+              <Text style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
+            </View>
+            <Text style={styles.replyText}>{reply.body}</Text>
+            {/* 引用块：让「回复了谁」这条信息能落到实处 —— 看到原帖才知道
+                说的是哪件事（Threads 的做法）。 */}
+            {target && target.excerpt !== "" ? (
+              <View style={styles.replyQuote}>
+                <Text numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
+              </View>
+            ) : null}
           </View>
-          <Text style={styles.replyText}>{reply.body}</Text>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -672,6 +700,9 @@ const styles = StyleSheet.create({
   replyTarget: { fontSize: 11, color: "#94a3b8" },
   replyTime: { fontSize: 11, color: "#94a3b8" },
   replyText: { fontSize: 13, color: "#0f172a", marginTop: 4, lineHeight: 18 },
+  // REPLY-TARGET-001: 被回复帖子的引用块（Threads 风格）。
+  replyQuote: { marginTop: 6, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: "#e2e8f0" },
+  replyQuoteText: { fontSize: 12, color: "#64748b", lineHeight: 17 },
   // About
   aboutCard: { marginHorizontal: 16, marginVertical: 12, padding: 16, backgroundColor: "#f8fafc", borderRadius: 10 },
   aboutBio: { fontSize: 13, color: "#0f172a", lineHeight: 19 },
