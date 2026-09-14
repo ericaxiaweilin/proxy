@@ -156,6 +156,29 @@ var operatorCommandTypes = map[string]bool{
 	// "RecordAuthorityResponse" 还长 —— 不留空行会把上面 33 行全部重新填充，
 	// 在授权白名单里制造 33 行纯空白 diff，review 时反而看不出真正改了什么。
 	"CreateObservationTemplate": true,
+
+	// NOTIF-INBOX-GATE-001: notification 域同样**整域没进这张表**，而
+	// SendInboxNotification 是这条域里唯一的「代别人写」命令：recipientId
+	// 与 title/body/deepLink 全从 payload 来，handler（notification/service.go
+	// 的 sendInbox）只校验 recipientId/title 非空，完全不问调用者与收件人
+	// 是什么关系。
+	//
+	// 为什么这条尤其不能敞开：inbox 是**平台自己说话的渠道**。真正的生产者
+	// 是 outbox worker —— cmd/worker/main.go 的 businessInboxDelivery 用直连
+	// SQL 往 notification.inbox_items 写「订单已成立」「收到 Offer」，注释写着
+	// "bypass service to avoid auth"。也就是说这条渠道在用户心里等同于系统
+	// 通知；任何已登录用户却能走同一个命令，往**任意用户**的 inbox 塞任意
+	// 标题/正文/deepLink，等于给钓鱼和恐吓发了一枚平台印章。openapi.yaml 的
+	// 公开命令枚举里它就和 CreateIncident / GrantJITAccess / ConfirmPaymentIntent
+	// 排在一起 —— 那几个都已在门里，唯独漏了它。
+	//
+	// App 侧 NotificationClient 只暴露 registerDevice/listInbox/markRead/
+	// resolveDeepLink，**没有** sendInbox（全仓零调用），收紧不打断现网。
+	//
+	// 只收 SendInboxNotification：同域其余四条都是用户读自己 inbox 的正常动作
+	// （ListInbox 按 principal 取、MarkRead 按 recipientId 校验），把它们一起
+	// 收紧只会让用户静默用不了，故不做。
+	"SendInboxNotification": true,
 }
 
 func requiresOperator(commandType string) bool {

@@ -576,6 +576,33 @@ func TestObservationTemplateCreationRequiresOperator(t *testing.T) {
 	}
 }
 
+// NOTIF-INBOX-GATE-001: inbox 写入必须走 operator 门。
+//
+// inbox 是平台自己说话的渠道。真正的生产者是 outbox worker（cmd/worker/main.go
+// 的 businessInboxDelivery 用直连 SQL 写 notification.inbox_items，注释写着
+// "bypass service to avoid auth"），写的是「订单已成立」「收到 Offer」这类系统
+// 通知。而 SendInboxNotification 这条 HTTP 命令能往**任意用户**的 inbox 塞
+// 任意 title/body/deepLink —— sendInbox 只校验非空，不问调用者是谁、收件人是谁。
+// 任何已登录用户因此都能伪造一条平台通知（钓鱼/恐吓），且落库后与系统通知
+// 同表同形，收件人无法区分。
+//
+// openapi.yaml 的公开命令枚举里它和 CreateIncident / GrantJITAccess /
+// ConfirmPaymentIntent 排在一起，那几个都已在门里，唯独漏了它。
+//
+// 只钉 SendInboxNotification。同域其余四条是用户读自己 inbox 的正常动作
+// （ListInbox 按 principal 取、MarkRead 按 recipientId 校验），过度收紧是
+// **静默失败**（测试不会红，用户只是用不了），所以这里反向钉住它们。
+func TestInboxNotificationRequiresOperator(t *testing.T) {
+	if !requiresOperator("SendInboxNotification") {
+		t.Fatalf("SendInboxNotification must require operator: ungated, any logged-in user can forge a platform inbox notification into any other user's inbox, with attacker-controlled title/body/deepLink")
+	}
+	for _, cmd := range []string{"RegisterDeviceToken", "ListInbox", "MarkInboxRead", "ResolveDeepLink"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: it is a normal user action on the caller's own inbox, gating it would silently break the notification flow", cmd)
+		}
+	}
+}
+
 // Audit tripwire (Pass 1 — Scene R15.13): the public-read allowlist is
 // the single source of truth for "which List* commands can be called
 // without authentication". Adding or removing entries here MUST be

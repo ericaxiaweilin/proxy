@@ -3801,3 +3801,32 @@ for cmd in ListObservationTemplates GetObservationTemplate; do
   fi
 done
 echo "    OUTCOME-TEMPLATE-GATE-001: PASS (template creation is operator-only; reading the vocabulary stays open)"
+
+# NOTIF-INBOX-GATE-001: inbox 写入必须走 operator 门。
+#
+# inbox 是平台自己说话的渠道。真正的生产者是 outbox worker（cmd/worker/main.go
+# 的 businessInboxDelivery 用直连 SQL 写 notification.inbox_items，注释写着
+# "bypass service to avoid auth"），写的是「订单已成立」「收到 Offer」这类系统通知。
+# 而 SendInboxNotification 这条 HTTP 命令能往**任意用户**的 inbox 塞任意
+# title/body/deepLink —— sendInbox 只校验非空，不问调用者是谁、收件人是谁。
+# 任何已登录用户因此都能伪造一条平台通知，且落库后与系统通知同表同形。
+require_test "NOTIF-INBOX-GATE-001" "./internal/api" \
+  "TestInboxNotificationRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+# 用 [[:space:]]* 而不是写死空格：gofmt 会按最长 key 重新填充整张表，
+# 写死空格的钉会在一次无关的格式化后突然变红（SAFETY-GATE-001 踩过）。
+if ! grep -qE '"SendInboxNotification":[[:space:]]*true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [NOTIF-INBOX-GATE-001]: SendInboxNotification 不在 operator 门里 ——" >&2
+  echo "        任何已登录用户都能往任意用户的 inbox 塞伪造的平台通知（钓鱼/恐吓）。" >&2
+  exit 1
+fi
+# 反向钉：读自己 inbox 的正常动作不该被顺手收紧。过度收紧在门禁上是**静默**的 ——
+# 测试不会红，用户只是用不了。
+for cmd in RegisterDeviceToken ListInbox MarkInboxRead ResolveDeepLink; do
+  if grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [NOTIF-INBOX-GATE-001]: $cmd 被收进 operator 门了 ——" >&2
+    echo "        这是用户读自己 inbox 的正常动作，收紧只会让用户静默用不了。" >&2
+    exit 1
+  fi
+done
+echo "    NOTIF-INBOX-GATE-001: PASS (inbox writes are operator-only; reading your own inbox stays open)"
