@@ -247,7 +247,12 @@ const BUSINESS_ME: PersonaConfig = {
         { icon: "↗", label: "活动导流", desc: "商家活动 · 可报名", route: "merchantcampaign" },
         { icon: "▤", label: "线上店铺", desc: "实时数据已接入", grad: true, route: "merchantstorefront" },
         { icon: "₫", label: "销售中心", desc: "功能预览 · 实时数据待接入", route: "outcomehistory" },
-        { icon: "✦", label: "经营", desc: "功能预览 · 实时数据待接入", route: "enterpriseops" }
+        { icon: "✦", label: "经营", desc: "功能预览 · 实时数据待接入", route: "enterpriseops" },
+        // STORE-REC-002/004: 评估队列对 BUSINESS 身份也要可达 —— 运营更可能挂在这个
+        // 身份下，而此前入口只挂在 REQUESTER 的「企业 / 店铺」组里。
+        // 队列本身是 operator-only（服务端白名单），普通商家点进去会看到明确的
+        // 「没有运营权限」，而不是一个空列表。
+        { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" }
       ]
     }
   ]

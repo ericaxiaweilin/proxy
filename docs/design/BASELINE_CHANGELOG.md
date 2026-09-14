@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 190 — 2026-09-14
+
+- 推荐评估队列（STORE-REC-002/004）对 **BUSINESS 身份**开放入口。
+  有视觉改动：我的（企业身份）→ 商家 · 我的 → 推荐评估队列。
+  - 此前入口只挂在 REQUESTER 身份的「企业 / 店铺」组里，而运营更可能挂在
+    BUSINESS 身份（"Business Principal · 当前你有经营权限"）下 —— 功能建好了，
+    但它的使用者进不去。
+  - 队列本身仍是 operator-only（服务端 `PROXY_OPERATOR_PRINCIPALS` 白名单）。
+    没有运营权限的商家点进去看到的是明确的「这个账号没有运营权限」，
+    **不是一个空列表** —— 空列表会被读成「没人推荐这家店」。
+
 ## Revision 189 — 2026-09-14
 
 - STORE-REC-003：让小美（AI）推荐真正产生数据。有视觉改动：我的→推荐商铺进体系，
