@@ -4,6 +4,12 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 187 — 2026-09-14
+
+- PROFILE-QR-001：个人二维码真实化（react-native-qrcode-svg 编码
+  proxy.app/@handle，替换 FakeQr 假码）+ 复制链接（expo-clipboard）+
+  系统分享。有视觉改动：我的→我的二维码 子页。
+
 ## Revision 185 — 2026-09-13
 
 - REPLY-TARGET-001：个人主页 REPLIES tab 现在能回答「我回复了谁的帖子」。

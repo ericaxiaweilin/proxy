@@ -732,6 +732,40 @@ export const styles = StyleSheet.create({
   },
   qrCardBtnText: { color: color.white, fontSize: 11, fontWeight: "900" },
 
+  // STORE-REC/PROFILE-QR-001: 真实个人二维码（react-native-qrcode-svg）。
+  qrRealCard: {
+    alignItems: "center",
+    backgroundColor: color.white,
+    borderColor: "rgba(20,18,31,0.04)",
+    borderRadius: 17,
+    borderWidth: 1,
+    marginVertical: 8,
+    padding: 18,
+    ...shadows.card
+  },
+  qrRealHandle: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 12 },
+  qrRealHint: { color: color.muted, fontSize: 11, marginTop: 4, textAlign: "center" },
+  qrRealActions: { flexDirection: "row", gap: 8, marginTop: 14, width: "100%" },
+  qrRealBtn: {
+    alignItems: "center",
+    backgroundColor: color.ink,
+    borderRadius: 999,
+    flex: 1,
+    paddingVertical: 10
+  },
+  qrRealBtnGhost: {
+    alignItems: "center",
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 999,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: 10
+  },
+  qrRealBtnText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  qrRealBtnTextGhost: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  qrRealNotice: { color: "#1B7F4D", fontSize: 11, marginTop: 8, textAlign: "center" },
+
   socialRow: {
     alignItems: "center",
     backgroundColor: color.white,
