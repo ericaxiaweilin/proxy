@@ -553,6 +553,38 @@ func TestAcceptedRecommendationsStayReachable(t *testing.T) {
 	}
 }
 
+// STORE-REC-006: 结论必须落在一条真实存在的推荐上。
+//
+// 少了这个校验，id 打错也会写进一条结论 —— 它永远 join 不到任何推荐，于是那条
+// 推荐在队列里永远还是「待评估」。运营看到的是「我点了采纳但没反应」，会反复点，
+// append-only 的举证链里就堆满谁也解释不了的孤儿结论（删不掉，因为 append-only）。
+func TestDispositionOnUnknownRecommendationIsRefused(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	svc.SetClock(fixedClock())
+	real := seedRecommendation(t, svc, repo)
+
+	orphan := svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": "rec_does_not_exist", "decision": "ACCEPT",
+	}, "operator_1"))
+	if orphan.Outcome != "REJECTED" || orphan.Error == nil || orphan.Error.ErrorCode != "DISPOSITION_RECOMMENDATION_NOT_FOUND" {
+		t.Fatalf("disposition on an unknown recommendation must be refused: %+v", orphan)
+	}
+	// 关键：不能留下一条对不上任何推荐的结论。append-only 表删不掉，
+	// 写进去就是永久垃圾。
+	if got := repo.Dispositions(); len(got) != 0 {
+		t.Fatalf("no orphan disposition may be written: %+v", got)
+	}
+
+	// 真实存在的推荐仍然要能出结论 —— 校验不能误伤正常路径。
+	ok := svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": real, "decision": "REJECT", "reason": "位置不合适",
+	}, "operator_1"))
+	if ok.Outcome != "ACCEPTED" {
+		t.Fatalf("disposition on a real recommendation must still work: %+v", ok)
+	}
+}
+
 // 改主意 = 追加一条新结论，以最新一条为准（append-only，不改旧记录）。
 func TestLatestDispositionWinsWhenOperatorChangesMind(t *testing.T) {
 	repo := NewMemoryRepository()

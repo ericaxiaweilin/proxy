@@ -25,7 +25,10 @@ import {
 // 两者都表现为列表为空，混在一起会让运营以为「没人推荐这家店」，
 // 而真实情况是他根本看不到。所以被拒时明确显示权限原因，不显示空列表。
 
+// 「没有权限」和「没有数据」必须长不一样；同理，「推荐不存在」也不能
+// 长成一句笼统的「记录失败」—— 那只会让运营反复点同一个按钮。
 const FORBIDDEN_CODE = "OPERATOR_PRIVILEGE_REQUIRED";
+const NOT_FOUND_CODE = "DISPOSITION_RECOMMENDATION_NOT_FOUND";
 
 type OriginFilter = "ALL" | StoreRecommendationOrigin;
 
@@ -141,7 +144,15 @@ export function StoreRecommendationQueue(): React.JSX.Element {
       setRejectReason("");
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "结论记录失败");
+      const code =
+        err instanceof StoreRecommendationRejectedError ? err.result.error?.errorCode : undefined;
+      // STORE-REC-006: 推荐已经不存在了。不说清楚的话运营只会看到一句「记录失败」，
+      // 于是反复点 —— 而队列里那条还杵在那儿，看起来就像系统坏了。
+      if (code === NOT_FOUND_CODE) {
+        setError("这条推荐已经不存在了（可能已被清理）。刷新一下队列。");
+      } else {
+        setError(err instanceof Error ? err.message : "结论记录失败");
+      }
     } finally {
       setActingId(undefined);
     }

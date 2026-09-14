@@ -98,6 +98,9 @@ type Repository interface {
 	// STORE-REC-004: 追加一条评估结论。append-only —— 没有 Update/Delete，
 	// 改主意就是再追加一条。
 	AddDisposition(ctx context.Context, d Disposition) error
+	// STORE-REC-006: 按 id 取一条推荐。found=false = 不存在。
+	// 结论必须落在一条真实存在的推荐上，否则会产生 join 不到任何东西的孤儿结论。
+	FindRecommendation(ctx context.Context, id string) (StoreRecommendation, bool, error)
 }
 
 // ListLimitDefault / ListLimitMax：读路径必须自带上限，否则「拉全表」迟早会
@@ -390,6 +393,21 @@ func (s *Service) decideStoreRecommendation(ctx context.Context, e command.Envel
 	}
 	if s.repository == nil {
 		return command.Rejected(e, "DISPOSITION_FAILED", "INTERNAL", "SAFE_RETRY", "storeonboarding.disposition_failed", nil)
+	}
+	// STORE-REC-006: 结论必须落在一条**真实存在**的推荐上。
+	//
+	// 少了这一步，id 打错（或推荐已被清理）时也会写进一条结论 —— 它永远 join
+	// 不到任何推荐，于是那条推荐在队列里**永远还是「待评估」**。运营看到的是
+	// 「我点了采纳但没反应」，会反复点，append-only 的举证链里就堆满一堆谁也
+	// 解释不了的孤儿结论。宁可当场拒绝，也不要留一条对不上的证据。
+	_, found, err := s.repository.FindRecommendation(ctx, recID)
+	if err != nil {
+		return command.Rejected(e, "DISPOSITION_FAILED", "INTERNAL", "SAFE_RETRY", "storeonboarding.disposition_failed", nil)
+	}
+	if !found {
+		return command.Rejected(e, "DISPOSITION_RECOMMENDATION_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.disposition_recommendation_not_found", map[string]any{
+			"recommendationId": recID,
+		})
 	}
 	if err := s.repository.AddDisposition(ctx, Disposition{
 		ID:               newDispositionID(),

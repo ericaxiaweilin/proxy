@@ -3483,3 +3483,50 @@ if ! grep -qF 'StoreRecommendationQueueStatus' apps/mobile/src/storeonboarding-c
   exit 1
 fi
 echo "    STORE-REC-005: PASS (accepted recommendations stay reachable, 采纳 is not a dead end)"
+
+# STORE-REC-006: 评估结论必须落在一条真实存在的推荐上。
+#
+# 少了这个校验，id 打错（或推荐已被清理）时照样写进一条结论 —— 它永远 join 不到
+# 任何推荐，于是那条推荐在队列里**永远还是「待评估」**。运营看到的是「我点了采纳
+# 但没反应」，会反复点；而 dispositions 是 append-only 表，孤儿结论写进去就删不掉，
+# 举证链里堆满谁也解释不了的记录。
+#
+# 钉死：①测试存在；②服务层在写结论**之前**查这条推荐（顺序不能反 ——
+# 先写后查等于没查）；③仓储接口有 FindRecommendation（内存 + Postgres 都要有，
+# 只在内存里实现 = 本地全绿、线上照写孤儿）；④App 把这个错误说清楚，
+# 否则运营只会看到一句笼统的「记录失败」然后反复点。
+require_test "STORE-REC-006" "./internal/storeonboarding" \
+  "TestDispositionOnUnknownRecommendationIsRefused" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 's.repository.FindRecommendation(ctx, recID)' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-006]: the disposition path no longer checks that the" >&2
+  echo "        recommendation exists, so orphan dispositions can be written again." >&2
+  exit 1
+fi
+if ! grep -qF 'DISPOSITION_RECOMMENDATION_NOT_FOUND' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-006]: the not-found rejection code is gone." >&2
+  exit 1
+fi
+# 顺序：查必须在写**之前**。先写后查等于没查。
+if [ "$(grep -n 'FindRecommendation(ctx, recID)' apps/api-go/internal/storeonboarding/service.go | head -1 | cut -d: -f1)" -ge \
+     "$(grep -n 's.repository.AddDisposition(ctx, Disposition{' apps/api-go/internal/storeonboarding/service.go | head -1 | cut -d: -f1)" ]; then
+  echo "  FAIL [STORE-REC-006]: FindRecommendation must run BEFORE AddDisposition." >&2
+  echo "        Checking after writing proves nothing -- the orphan is already stored." >&2
+  exit 1
+fi
+# 匹配方法定义（`) FindRecommendation(`）而不是参数名 —— 内存仓储用的是
+# `_ context.Context`，Postgres 用的是 `ctx context.Context`，钉参数名会误报。
+for f in apps/api-go/internal/storeonboarding/memory.go apps/api-go/internal/platform/postgres/storeonboarding.go; do
+  if ! grep -qF ') FindRecommendation(' "$f"; then
+    echo "  FAIL [STORE-REC-006]: $f is missing FindRecommendation." >&2
+    echo "        A memory-repo-only implementation is a half-wire: green locally," >&2
+    echo "        orphans written in production." >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'DISPOSITION_RECOMMENDATION_NOT_FOUND' apps/mobile/src/surfaces/store-recommendation-queue.tsx; then
+  echo "  FAIL [STORE-REC-006]: the queue UI no longer explains the not-found case," >&2
+  echo "        so operators see a bare failure and tap the same button again." >&2
+  exit 1
+fi
+echo "    STORE-REC-006: PASS (no orphan dispositions: a decision must point at a real recommendation)"

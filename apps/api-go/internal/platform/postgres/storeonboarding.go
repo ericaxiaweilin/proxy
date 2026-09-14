@@ -123,6 +123,39 @@ func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, fil
 	return out, nil
 }
 
+// STORE-REC-006 — 按 id 取一条推荐，用于校验结论落在真实存在的推荐上。
+const findStoreRecommendationSQL = `
+SELECT id, store_name, city, category, reason, recommended_by, origin, created_at
+FROM business.store_recommendations
+WHERE id = $1
+LIMIT 1`
+
+func (r *StoreOnboardingRepository) FindRecommendation(ctx context.Context, id string) (storeonboarding.StoreRecommendation, bool, error) {
+	if r == nil || r.pool == nil {
+		return storeonboarding.StoreRecommendation{}, false, storeonboarding.ErrRecommendationRepositoryDown
+	}
+	if strings.TrimSpace(id) == "" {
+		return storeonboarding.StoreRecommendation{}, false, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, findStoreRecommendationSQL, id)
+	if err != nil {
+		return storeonboarding.StoreRecommendation{}, false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return storeonboarding.StoreRecommendation{}, false, err
+		}
+		return storeonboarding.StoreRecommendation{}, false, nil
+	}
+	var rec storeonboarding.StoreRecommendation
+	if err := rows.Scan(&rec.ID, &rec.StoreName, &rec.City, &rec.Category, &rec.Reason,
+		&rec.RecommendedBy, &rec.Origin, &rec.CreatedAt); err != nil {
+		return storeonboarding.StoreRecommendation{}, false, err
+	}
+	return rec, true, nil
+}
+
 // STORE-REC-004 — 追加一条运营评估结论（append-only，只有 INSERT）。
 func (r *StoreOnboardingRepository) AddDisposition(ctx context.Context, d storeonboarding.Disposition) error {
 	if r == nil || r.pool == nil {

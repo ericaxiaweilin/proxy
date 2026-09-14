@@ -108,6 +108,21 @@ func (r *MemoryRepository) AddDisposition(_ context.Context, d Disposition) erro
 	return nil
 }
 
+// FindRecommendation 按 id 取一条推荐（STORE-REC-006）。
+func (r *MemoryRepository) FindRecommendation(_ context.Context, id string) (StoreRecommendation, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail {
+		return StoreRecommendation{}, false, ErrRecommendationRepositoryDown
+	}
+	for _, rec := range r.recommendations {
+		if rec.ID == id {
+			return rec, true, nil
+		}
+	}
+	return StoreRecommendation{}, false, nil
+}
+
 // Dispositions 返回全部结论（测试用），按写入顺序。
 func (r *MemoryRepository) Dispositions() []Disposition {
 	r.mu.Lock()
