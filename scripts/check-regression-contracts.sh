@@ -2303,7 +2303,7 @@ if ! grep -qF 'func (r *StoreOnboardingRepository) AddRecommendation' apps/api-g
   echo "        so recommendations would not survive a restart." >&2
   exit 1
 fi
-if [ ! -f apps/api-go/migrations/090_store_recommendations.sql ]; then
+if [ ! -f apps/api-go/migrations/092_store_recommendations.sql ]; then
   echo "  FAIL [STORE-REC-001]: migration 090_store_recommendations.sql is missing." >&2
   exit 1
 fi

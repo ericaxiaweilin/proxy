@@ -291,6 +291,8 @@ commands:
     domain: Supply
   - command: ReactToPost
     domain: Engagement
+  - command: RecommendStore
+    domain: StoreOnboarding
   - command: RecordAggregatedDemandSignal
     domain: Business
   - command: RecordAppealDecision
