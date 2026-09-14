@@ -14,6 +14,8 @@ import { useScrollChrome } from "../shell/scroll-chrome";
 import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
+import * as Clipboard from "expo-clipboard";
+import QRCode from "react-native-qrcode-svg";
 import { Directory, File, Paths } from "expo-file-system";
 import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
 import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
@@ -479,6 +481,16 @@ export function MeSurface({
   const [storeRecBusy, setStoreRecBusy] = useState(false);
   const [storeRecError, setStoreRecError] = useState<string | undefined>(undefined);
   const [storeRecDone, setStoreRecDone] = useState<string | undefined>(undefined);
+  // 个人二维码复制反馈（PROFILE-QR-001）。
+  const [qrNotice, setQrNotice] = useState<string | undefined>(undefined);
+  async function copyProfileLink(link: string): Promise<void> {
+    try {
+      await Clipboard.setStringAsync(link);
+      setQrNotice("链接已复制，去粘贴给你的好友吧。");
+    } catch {
+      setQrNotice("复制失败，请长按链接手动复制。");
+    }
+  }
   async function submitStoreRecommendation(): Promise<void> {
     setStoreRecBusy(true);
     setStoreRecError(undefined);
@@ -1738,6 +1750,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "personalqr") {
+      const profileLink = `proxy.app/@${profileDraft.handle}`;
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
@@ -1746,13 +1759,20 @@ export function MeSurface({
             </Pressable>
             <Text style={styles.subPageTitle}>我的二维码</Text>
 
-            <QrCard
-              title={`${profileDraft.name} · Proxy`}
-              desc="分享你的 Proxy 主页链接（二维码图形升级中，先分享链接）。TikTok / Zalo 是否展示，继续遵循你的可见范围。"
-              actionLabel="分享主页链接"
-              onAction={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
-              alignCenter
-            />
+            <View style={styles.qrRealCard}>
+              <QRCode value={profileLink} size={208} color="#17131F" backgroundColor="#FFFFFF" ecl="M" />
+              <Text style={styles.qrRealHandle}>{profileLink}</Text>
+              <Text style={styles.qrRealHint}>扫描即打开你的 Proxy 主页；TikTok / Zalo 是否展示，继续遵循你的可见范围。</Text>
+              <View style={styles.qrRealActions}>
+                <Pressable onPress={() => void copyProfileLink(profileLink)} style={styles.qrRealBtnGhost}>
+                  <Text style={styles.qrRealBtnTextGhost}>复制链接</Text>
+                </Pressable>
+                <Pressable onPress={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：${profileLink}` }); }} style={styles.qrRealBtn}>
+                  <Text style={styles.qrRealBtnText}>分享</Text>
+                </Pressable>
+              </View>
+              {qrNotice ? <Text style={styles.qrRealNotice}>{qrNotice}</Text> : null}
+            </View>
 
             <Text style={styles.customSectionTitle}>扫码后看到</Text>
             <Text style={styles.customSectionHint}>预览</Text>
