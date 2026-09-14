@@ -28,6 +28,7 @@ var DomainDir = []struct {
 	Name string
 }{
 	{"activity", "Activity"},
+	{"benefit", "Benefit"},
 	{"business", "Business"},
 	{"citycompanion", "CityCompanion"},
 	{"contribution", "Contribution"},
@@ -39,21 +40,31 @@ var DomainDir = []struct {
 	{"identity", "Identity"},
 	{"localcontext", "LocalContext"},
 	{"localnet", "LocalNet"},
+	{"location", "Location"},
+	{"marketplace", "Marketplace"},
 	{"media", "Media"},
 	{"moderation", "Moderation"},
 	{"notification", "Notification"},
 	{"outcome", "Outcome"},
 	{"payment", "Payment"},
+	{"profile", "Profile"},
+	{"realityscene", "RealityScene"},
+	{"relationship", "Relationship"},
 	{"safety", "Safety"},
 	{"scene", "Scene"},
 	{"socialspace", "SocialSpace"},
-	// storeonboarding (STORE-REC-001): 漏在这里的后果是命令能跑但永不进
-	// OpenAPI 契约 —— 漂移检查也发现不了，因为它只比对「生成结果 vs 已提交文件」，
-	// 而生成器根本不会去看没登记的域。
 	{"storeonboarding", "StoreOnboarding"},
 	{"supply", "Supply"},
 	{"voucher", "Voucher"},
 }
+
+// 漏登记的代价（2026-09-14 实测，OPENAPI-DOMAIN-001）：域不在这个清单里，
+// 生成器就永远不看它 —— 于是它的命令**能 dispatch、跑得好好的，却不在契约里**，
+// 而漂移检查照样绿：它比对的是「重新生成 vs 已提交」，两边缺的是同一个命令。
+// 这次一并补回 benefit / location / marketplace / profile / realityscene /
+// relationship 六个域（共 37 条命令），它们都接在 command_dispatch.go 上，
+// 只是从 fb9e377 引入漂移检查起就没人回头登记过。
+// 防复发不靠记性：见 scripts/check-regression-contracts.sh 的 OPENAPI-DOMAIN-001。
 
 // casePattern matches every quoted identifier that appears in a
 // `case "X", "Y", "Z":` arm. We require the line to begin with

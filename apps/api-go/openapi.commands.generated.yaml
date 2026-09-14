@@ -9,22 +9,32 @@
 commands:
   - command: AcceptCityCompanionRoute
     domain: CityCompanion
+  - command: AcceptFriendRequest
+    domain: Relationship
   - command: AcceptSlotOffer
     domain: Fulfillment
+  - command: ActivateCampaign
+    domain: Benefit
   - command: ActivateContribution
     domain: Contribution
   - command: AddBusinessMember
     domain: Business
   - command: AddStorePhoto
     domain: Business
+  - command: AllocateBenefit
+    domain: Benefit
   - command: AmendMediaReviewDecision
     domain: Media
+  - command: ApplyToMarketOpportunity
+    domain: Marketplace
   - command: AuthenticateWithGoogle
     domain: Identity
   - command: BeginPasswordlessAuthentication
     domain: Identity
   - command: BlockAvailabilityWindow
     domain: Supply
+  - command: BlockFriend
+    domain: Relationship
   - command: BookmarkPost
     domain: Engagement
   - command: BurnDisplayIdentity
@@ -43,6 +53,8 @@ commands:
     domain: Safety
   - command: CheckinActivity
     domain: Activity
+  - command: ClaimBenefit
+    domain: Benefit
   - command: CompleteCityCompanion
     domain: CityCompanion
   - command: CompleteMediaUpload
@@ -51,6 +63,8 @@ commands:
     domain: CityCompanion
   - command: ConfirmCooperation
     domain: Fulfillment
+  - command: ConfirmMarketApplication
+    domain: Marketplace
   - command: ConfirmNeedDraft
     domain: Conversation
   - command: ConfirmOutcomeLearning
@@ -69,6 +83,8 @@ commands:
     domain: Business
   - command: CreateBusinessStore
     domain: Business
+  - command: CreateCampaign
+    domain: Benefit
   - command: CreateCandidateBatch
     domain: Supply
   - command: CreateCityCompanionNeed
@@ -129,6 +145,8 @@ commands:
     domain: Conversation
   - command: DeleteStorePhoto
     domain: Business
+  - command: DismissMarketOpportunity
+    domain: Marketplace
   - command: DismissOutcomeLearning
     domain: Outcome
   - command: FileAppeal
@@ -155,6 +173,8 @@ commands:
     domain: Engagement
   - command: GetLocalContext
     domain: LocalContext
+  - command: GetLocationConsentStatus
+    domain: Location
   - command: GetMediaAsset
     domain: Media
   - command: GetMemory
@@ -173,6 +193,8 @@ commands:
     domain: Identity
   - command: GetStoreLines
     domain: Business
+  - command: GetUserProfile
+    domain: Profile
   - command: GetVoucher
     domain: Voucher
   - command: GetVoucherSettlement
@@ -183,6 +205,10 @@ commands:
     domain: LocalContext
   - command: GrantJITAccess
     domain: Safety
+  - command: GrantLocationConsent
+    domain: Location
+  - command: IgnoreFriendRequest
+    domain: Relationship
   - command: IsFollowing
     domain: Engagement
   - command: JoinActivity
@@ -211,6 +237,10 @@ commands:
     domain: Notification
   - command: ListInteractionEvents
     domain: LocalNet
+  - command: ListMarketApplications
+    domain: Marketplace
+  - command: ListMarketOpportunities
+    domain: Marketplace
   - command: ListMediaAssets
     domain: Media
   - command: ListMediaReviewDecisions
@@ -225,6 +255,8 @@ commands:
     domain: Business
   - command: ListMyConvos
     domain: Conversation
+  - command: ListMyFriendships
+    domain: Relationship
   - command: ListMyInvitations
     domain: Scene
   - command: ListMyMemories
@@ -235,6 +267,8 @@ commands:
     domain: Scene
   - command: ListObservationTemplates
     domain: Outcome
+  - command: ListOpportunityTemplates
+    domain: Marketplace
   - command: ListPinnedPosts
     domain: Engagement
   - command: ListPostReplies
@@ -275,6 +309,8 @@ commands:
     domain: Engagement
   - command: OpenVoucherRedemption
     domain: Voucher
+  - command: PauseCampaign
+    domain: Benefit
   - command: PinPost
     domain: Engagement
   - command: PreviewTaskDraft
@@ -283,6 +319,8 @@ commands:
     domain: Media
   - command: PublishActivity
     domain: Activity
+  - command: PublishMarketOpportunity
+    domain: Marketplace
   - command: PublishScene
     domain: Scene
   - command: PublishTask
@@ -335,6 +373,8 @@ commands:
     domain: CityCompanion
   - command: RecordScreenshot
     domain: Conversation
+  - command: RedeemBenefit
+    domain: Benefit
   - command: RefreshSession
     domain: Identity
   - command: RefundPaymentIntent
@@ -383,8 +423,14 @@ commands:
     domain: Contribution
   - command: RevokeAllSessions
     domain: Identity
+  - command: RevokeLocationConsent
+    domain: Location
   - command: RevokeSession
     domain: Identity
+  - command: SelectMarketApplication
+    domain: Marketplace
+  - command: SendFriendRequest
+    domain: Relationship
   - command: SendInboxNotification
     domain: Notification
   - command: SendMessage
@@ -413,6 +459,8 @@ commands:
     domain: Contribution
   - command: SubmitEvidence
     domain: Fulfillment
+  - command: SuggestOpportunityTemplate
+    domain: Marketplace
   - command: SwitchPrincipalContext
     domain: Identity
   - command: ToggleActivityInterest
@@ -445,6 +493,8 @@ commands:
     domain: Business
   - command: UpsertStoreLines
     domain: Business
+  - command: UpsertUserProfile
+    domain: Profile
   - command: VerifyCapability
     domain: Supply
   - command: VerifyLoginChallenge
