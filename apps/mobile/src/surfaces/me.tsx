@@ -26,6 +26,7 @@ import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
+import { StoreRecommendationQueue } from "./store-recommendation-queue";
 import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
 import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
@@ -194,7 +195,8 @@ const REQUESTER_ME: PersonaConfig = {
       hint: "经营与体系共建 · 独立模块（原始设计：发展 builder，小美与用户推荐商铺进入体系）",
       rows: [
         { icon: "store-lines", label: "我的企业 / 店铺", desc: "有经营权限时进入 Business Workspace", route: "bdash" },
-        { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" }
+        { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" },
+        { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" }
       ]
     },
     {
@@ -390,6 +392,9 @@ export function MeSurface({
   // fake verified badge entirely.
   const merchantIdentity = useMerchantIdentity();
   const liveShopName = merchantIdentity.accounts[0]?.name;
+  // 商家二维码要指向真实门店主体：优先用户显式选中的商家，否则用第一个 ACTIVE
+  // 店铺（与 liveShopName 同一个账号，避免名字显示店铺、二维码却指向个人主页）。
+  const merchantId = merchantIdentity.merchantId ?? merchantIdentity.accounts[0]?.id;
   // 现实资料：之前两个按钮只 count+1，素材数组写死 3 项，超限后点按无变化、
   // 也从不打开 picker。现在存真实条目（label+uri），拍照/上传都走 ImagePicker，
   // 列表随条目增长，无静默上限。
@@ -1514,9 +1519,10 @@ export function MeSurface({
             <Text style={styles.customSectionHint}>分享主页链接</Text>
             <QrCard
               title={`${profileDraft.name} · Proxy`}
-              desc="分享你的 Proxy 主页链接（二维码图形升级中，先分享链接）。"
+              desc="分享你的 Proxy 主页链接，扫码即可打开。"
               actionLabel="分享主页链接"
               onAction={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
+              qrValue={`proxy.app/@${profileDraft.handle}`}
               alignCenter
             />
 
@@ -1995,6 +2001,7 @@ export function MeSurface({
               desc="顾客扫码核验商家主体与真实到店记录，扫码先看到门店主页与信誉。"
               actionLabel="打开商家二维码"
               onAction={() => openSubPage("personalqr")}
+              qrValue={merchantId ? `proxy.app/store/${merchantId}` : `proxy.app/@${profileDraft.handle}`}
             />
 
             <View style={styles.subSection}>
@@ -2026,6 +2033,20 @@ export function MeSurface({
               desc="知道二维码带来多少到店与核销"
               onPress={() => openSubPage("socialanalytics")}
             />
+          </ScrollView>
+        </View>
+      );
+    }
+
+    if (subPage.route === "storerecqueue") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>推荐评估队列</Text>
+            <StoreRecommendationQueue />
           </ScrollView>
         </View>
       );

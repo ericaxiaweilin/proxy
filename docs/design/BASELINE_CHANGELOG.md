@@ -4,6 +4,23 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 188 — 2026-09-14
+
+- STORE-REC-002（App 侧运营队列）：新增 `apps/mobile/src/surfaces/store-recommendation-queue.tsx`，
+  并在「我的 → 企业 / 店铺」下挂「推荐评估队列」入口，运营可在 App 内查看用户与小美
+  推荐进体系的商铺。有视觉改动：我的→企业 / 店铺→推荐评估队列 子页。
+  - **「没有权限」和「没有数据」必须长得不一样**：命中 `OPERATOR_PRIVILEGE_REQUIRED`
+    时给出明确的权限说明，而不是渲染一个空列表 —— 空列表会让运营以为「系统里没有
+    待评估的推荐」，而真相只是当前账号不在运营白名单里。
+  - 城市 / 来源筛选走 `ListStoreRecommendations`；来源为 ALL 时不传 origin，
+    避免用一个空字符串把结果筛没了。
+- 二维码真实化收尾：`QrCard`（`me-profile-components.tsx`）支持 `qrValue`，个人主页卡
+  与商家身份卡都渲染真实可扫描码，不再是 FakeQr 假图。商家码指向
+  `proxy.app/store/{merchantId}`，merchantId 取「显式选中的商家或第一个 ACTIVE 店铺」，
+  没有店铺才回落个人主页 —— 否则会出现名字显示店铺、扫出来却是个人主页的错位。
+- 好友邀请 sheet 收尾：补全复制邀请链接（expo-clipboard）与复制成功提示，
+  此前 `Clipboard` 已 import 但没有任何调用点，复制按钮点了没反应。
+
 ## Revision 187 — 2026-09-14
 
 - PROFILE-QR-001：个人二维码真实化（react-native-qrcode-svg 编码
