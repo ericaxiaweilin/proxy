@@ -16,7 +16,9 @@ import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
+import { captureRef } from "react-native-view-shot";
 import { Directory, File, Paths } from "expo-file-system";
+import { profileQrPayload } from "../profile-qr";
 import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
 import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
 import { createLastSignInStore } from "../last-signin-store";
@@ -516,6 +518,17 @@ export function MeSurface({
   const [storeRecAiNote, setStoreRecAiNote] = useState<string | undefined>(undefined);
   // 个人二维码复制反馈（PROFILE-QR-001）。
   const [qrNotice, setQrNotice] = useState<string | undefined>(undefined);
+  // PROFILE-QR-002：放大扫码 + 分享二维码图。
+  const [qrZoomOpen, setQrZoomOpen] = useState(false);
+  const qrShotRef = useRef<View>(null);
+  async function shareQrImage(): Promise<void> {
+    try {
+      const uri = await captureRef(qrShotRef, { format: "png", quality: 1 });
+      await Share.share({ url: uri, message: `查看 ${profileDraft.name} 的 Proxy 主页` });
+    } catch {
+      setQrNotice("分享失败，请重试或直接复制链接。");
+    }
+  }
   async function copyProfileLink(link: string): Promise<void> {
     try {
       await Clipboard.setStringAsync(link);
@@ -1822,7 +1835,21 @@ export function MeSurface({
     }
 
     if (subPage.route === "personalqr") {
-      const profileLink = `proxy.app/@${profileDraft.handle}`;
+      // PROFILE-QR-002：编码/复制/分享一律 https 全量；坏 handle 不画坏码。
+      const profileLink = profileQrPayload(profileDraft.handle);
+      if (!profileLink) {
+        return contentWrapper(
+          <View style={styles.root}>
+            <ScrollView contentContainerStyle={styles.content}>
+              <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+                <Text style={styles.subPageBackText}>‹ 返回</Text>
+              </Pressable>
+              <Text style={styles.subPageTitle}>我的二维码</Text>
+              <Text style={styles.qrRealHint}>先设置你的个人主页名，才能生成二维码。</Text>
+            </ScrollView>
+          </View>
+        );
+      }
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
@@ -1832,12 +1859,19 @@ export function MeSurface({
             <Text style={styles.subPageTitle}>我的二维码</Text>
 
             <View style={styles.qrRealCard}>
-              <QRCode value={profileLink} size={208} color="#17131F" backgroundColor="#FFFFFF" ecl="M" />
-              <Text style={styles.qrRealHandle}>{profileLink}</Text>
-              <Text style={styles.qrRealHint}>扫描即打开你的 Proxy 主页；TikTok / Zalo 是否展示，继续遵循你的可见范围。</Text>
+              <View ref={qrShotRef} collapsable={false} style={styles.qrShotWrap}>
+                <Pressable onPress={() => setQrZoomOpen(true)} accessibilityLabel="放大二维码" accessibilityRole="button">
+                  <QRCode value={profileLink} size={208} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+                </Pressable>
+                <Text selectable style={styles.qrRealHandle}>{profileLink}</Text>
+              </View>
+              <Text style={styles.qrRealHint}>点二维码可放大，方便对方扫描；TikTok / Zalo 是否展示，继续遵循你的可见范围。</Text>
               <View style={styles.qrRealActions}>
                 <Pressable onPress={() => void copyProfileLink(profileLink)} style={styles.qrRealBtnGhost}>
                   <Text style={styles.qrRealBtnTextGhost}>复制链接</Text>
+                </Pressable>
+                <Pressable onPress={() => void shareQrImage()} style={styles.qrRealBtnGhost}>
+                  <Text style={styles.qrRealBtnTextGhost}>分享二维码</Text>
                 </Pressable>
                 <Pressable onPress={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：${profileLink}` }); }} style={styles.qrRealBtn}>
                   <Text style={styles.qrRealBtnText}>分享</Text>
@@ -1845,6 +1879,15 @@ export function MeSurface({
               </View>
               {qrNotice ? <Text style={styles.qrRealNotice}>{qrNotice}</Text> : null}
             </View>
+            <Modal animationType="fade" onRequestClose={() => setQrZoomOpen(false)} transparent visible={qrZoomOpen}>
+              <Pressable onPress={() => setQrZoomOpen(false)} accessibilityLabel="关闭放大的二维码" style={styles.qrZoomScrim}>
+                <View style={styles.qrZoomCard}>
+                  <QRCode value={profileLink} size={296} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+                  <Text style={styles.qrRealHandle}>{profileLink}</Text>
+                  <Text style={styles.qrRealHint}>把屏幕朝向对方即可扫描；点任意处关闭。</Text>
+                </View>
+              </Pressable>
+            </Modal>
 
             <Text style={styles.customSectionTitle}>扫码后看到</Text>
             <Text style={styles.customSectionHint}>预览</Text>

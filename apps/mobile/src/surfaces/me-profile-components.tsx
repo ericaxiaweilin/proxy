@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import QRCode from "react-native-qrcode-svg";
+import { toQrPayload } from "../profile-qr";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { color, Gradient } from "../theme";
 import type { AbilityType, AvailabilityRule, AvailabilityState, AvOverride, MenuRow } from "./me-types";
@@ -283,7 +284,7 @@ function QrCard({
   return (
     <View style={[styles.qrCard, alignCenter && styles.qrCardCenter]}>
       {qrValue ? (
-        <QRCode value={qrValue} size={104} color="#17131F" backgroundColor="#FFFFFF" ecl="M" />
+        <QRCode value={toQrPayload(qrValue)} size={104} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
       ) : (
         <FakeQr />
       )}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
+import { inviteQrPayload } from "../profile-qr";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { FriendView, RelationshipClient } from "../relationship-client";
 import { color, shadows } from "../theme";
@@ -307,12 +308,12 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
             <>
               <View style={styles.qrName}><Text style={styles.qrNameStrong}>{viewer.name}</Text><Text style={styles.qrNameSub}>Proxy ID · {viewer.handle}</Text></View>
               <View style={styles.inviteQrWrap}>
-                <QRCode value={`proxy.app/invite/${viewer.handle}`} size={168} color="#17131F" backgroundColor="#FFFFFF" ecl="M" />
+                <QRCode value={inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`} size={168} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
               </View>
-              <View style={styles.inviteLink}><Text style={styles.inviteLinkText}>proxy.app/invite/{viewer.handle}</Text></View>
+              <View style={styles.inviteLink}><Text selectable style={styles.inviteLinkText}>{inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}</Text></View>
               <View style={styles.actions}>
-                <Pressable onPress={() => void copyInviteLink(`proxy.app/invite/${viewer.handle}`)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制邀请链接"><Text style={styles.btnGhostText}>复制链接</Text></Pressable>
-                <Pressable onPress={() => void Share.share({ message: `加我 Proxy 好友：proxy.app/invite/${viewer.handle}` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable>
+                <Pressable onPress={() => void copyInviteLink(inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制邀请链接"><Text style={styles.btnGhostText}>复制链接</Text></Pressable>
+                <Pressable onPress={() => void Share.share({ message: `加我 Proxy 好友：${inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable>
               </View>
               {inviteCopied ? <Text style={styles.inviteCopiedNote}>链接已复制，去粘贴给你的好友吧。</Text> : null}
             </>

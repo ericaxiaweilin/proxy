@@ -1648,6 +1648,28 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - react-native-view-shot (5.1.1):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - React-NativeModulesApple (0.86.2):
     - hermes-engine
     - React-callinvoker
@@ -2163,6 +2185,7 @@ DEPENDENCIES:
   - "React-mutationobservernativemodule (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/mutationobserver`)"
   - "react-native-maps (from `../../../node_modules/.pnpm/react-native-maps@1.29.0_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@_75902684cc91495259b91bcbfb06881b/node_modules/react-native-maps`)"
   - "react-native-safe-area-context (from `../../../node_modules/.pnpm/react-native-safe-area-context@5.7.0_react-native@0.86.2_@babel+core@7.29.7_supports-co_c12b47d9bf65f88fca95e0f12a866a0c/node_modules/react-native-safe-area-context`)"
+  - react-native-view-shot (from `/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../node_modules/react-native-view-shot`)
   - "React-NativeModulesApple (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)"
   - "React-networking (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/networking`)"
   - "React-oscompat (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/oscompat`)"
@@ -2341,6 +2364,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/react-native-maps@1.29.0_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@_75902684cc91495259b91bcbfb06881b/node_modules/react-native-maps"
   react-native-safe-area-context:
     :path: "../../../node_modules/.pnpm/react-native-safe-area-context@5.7.0_react-native@0.86.2_@babel+core@7.29.7_supports-co_c12b47d9bf65f88fca95e0f12a866a0c/node_modules/react-native-safe-area-context"
+  react-native-view-shot:
+    :path: "/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../node_modules/react-native-view-shot"
   React-NativeModulesApple:
     :path: "../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-networking:
@@ -2486,6 +2511,7 @@ SPEC CHECKSUMS:
   React-mutationobservernativemodule: 58f6d2adf7d98e72b241608dfa2ddce414d2a4e7
   react-native-maps: 7e3af023b773d6670e3c07e9c8170af842b243e0
   react-native-safe-area-context: 6b4966397ada0f7dd481e4486a2ef936834861a1
+  react-native-view-shot: 2829bd78c1fef42db12553bf85833e05a1a73609
   React-NativeModulesApple: 167e532fb9bae30f3c66636b8ee0092bab263667
   React-networking: 89f6b69755a3176f30e56ba1ba8e214b1518ecfb
   React-oscompat: db6675ddaef3bddd1b41533627f3d26ec710c05f
@@ -2524,6 +2550,6 @@ SPEC CHECKSUMS:
   RNSVG: 3fe8590403ac9f107b4d14591bc6e54da4894e5c
   Yoga: 9891cfb1c680f64de9c41b09e7453dea33454d2b
 
-PODFILE CHECKSUM: 13d3e052586d446f92ee6e6ff192a23ca5b0e5e6
+PODFILE CHECKSUM: 4a6e9e5c56e756073671f9f189cc6ff5eb4da90c
 
 COCOAPODS: 1.16.2

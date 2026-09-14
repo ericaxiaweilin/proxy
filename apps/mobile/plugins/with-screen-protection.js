@@ -17,6 +17,8 @@ const {
   withDangerousMod,
   withAppDelegate,
   withGradleProperties,
+  withSettingsGradle,
+  withAppBuildGradle,
 } = require("@expo/config-plugins");
 
 const MODULE_DIR = path.join(__dirname, "..", "modules", "proxy-screen-protection");
@@ -95,6 +97,7 @@ module.exports = function withScreenProtection(config) {
   config = withScreenProtectionRegistration(config);
   config = withMetroHostDelegate(config);
   config = withDeterministicGradle(config);
+  config = withViewShotLinkage(config);
   return config;
 };
 
@@ -144,6 +147,76 @@ function withDeterministicGradle(config) {
     setProp("reactNativeArchitectures", "arm64-v8a");
     return config;
   });
+}
+
+// PROFILE-QR-002：react-native-view-shot 是纯第三方 RN 库，本仓 pnpm+expo 的
+// 两套 autolinking 都发现不了它（无 expo-module.config、无 codegen 声明，
+// 之前也没有纯第三方原生库被链过）。prebuild-safe 做法：iOS 显式 pod，
+// Android 显式 include + implementation + MainApplication 注册。
+// 全部幂等（includes 守卫），锚点丢失 loud fail。
+function withViewShotLinkage(config) {
+  config = withPodfile(config, (config) => {
+    const podLine =
+      "  pod 'react-native-view-shot', :path => File.join(__dir__, '..', 'node_modules', 'react-native-view-shot')";
+    if (!config.modResults.contents.includes("'react-native-view-shot'")) {
+      if (!config.modResults.contents.includes("target 'Proxy' do")) {
+        throw new Error("[with-screen-protection] Podfile hook anchor missing (target Proxy)");
+      }
+      config.modResults.contents = config.modResults.contents.replace(
+        "target 'Proxy' do",
+        `target 'Proxy' do\n${podLine}`
+      );
+    }
+    return config;
+  });
+  config = withSettingsGradle(config, (config) => {
+    let src = config.modResults.contents;
+    if (!src.includes("react-native-view-shot")) {
+      src += `\ninclude ':react-native-view-shot'\nproject(':react-native-view-shot').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-view-shot/android')\n`;
+    }
+    config.modResults.contents = src;
+    return config;
+  });
+  config = withAppBuildGradle(config, (config) => {
+    let src = config.modResults.contents;
+    if (!src.includes("react-native-view-shot")) {
+      const anchor = "dependencies {";
+      if (!src.includes(anchor)) {
+        throw new Error("[with-screen-protection] app/build.gradle hook anchor missing (dependencies block)");
+      }
+      src = src.replace(
+        anchor,
+        `${anchor}\n    implementation project(':react-native-view-shot')`
+      );
+    }
+    config.modResults.contents = src;
+    return config;
+  });
+  config = withMainApplication(config, (config) => {
+    let src = config.modResults.contents;
+    const importLine = "import fr.greweb.reactnativeviewshot.RNViewShotPackage";
+    if (!src.includes(importLine)) {
+      if (!src.includes("import com.facebook.react.ReactPackage")) {
+        throw new Error("[with-screen-protection] MainApplication hook anchor missing (ReactPackage import)");
+      }
+      src = src.replace(
+        "import com.facebook.react.ReactPackage",
+        `import com.facebook.react.ReactPackage\n\n${importLine}`
+      );
+    }
+    if (!src.includes("RNViewShotPackage()")) {
+      if (!src.includes("// add(MyReactNativePackage())")) {
+        throw new Error("[with-screen-protection] MainApplication hook anchor missing (packages.apply block)");
+      }
+      src = src.replace(
+        "// add(MyReactNativePackage())",
+        `// add(MyReactNativePackage())\n          add(RNViewShotPackage())`
+      );
+    }
+    config.modResults.contents = src;
+    return config;
+  });
+  return config;
 }
 
 // 逐字取自 prebuild 前的 AppDelegate.swift（DEVICE-METROHOST-001），

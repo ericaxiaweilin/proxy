@@ -4,6 +4,45 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 194 — 2026-09-14
+
+- PROFILE-QR-002：个人二维码常规能力（`me.tsx` 个人qr页 + `friend-crm.tsx`
+  邀请码 + `QrCard` 小卡）。有视觉改动：我的→我的二维码（点码放大 296 全屏
+  黑底白卡、新增「分享二维码」按钮、链接文本可选）；邀请 sheet 二维码同口径。
+  - **原状**：三处二维码全是裸 `proxy.app/...`（相机/浏览器/分享面板不认）、
+    纠错等级 M、点不开大图；复制/分享出去的也是裸链接，很多 App 点不动。
+  - **改后**：编码/复制/分享一律 `https://` 全量（`profile-qr.ts` 纯函数 +
+    9 条单测，坏 handle fail-closed 不画坏码）；ecl M→H；白底卡片留足
+    quiet zone；分享走 view-shot 截白底卡经系统分享（面板自带存相册，
+    无需新权限）。
+  - **备注**：本提交同批带上他人已写好的 Rev 193 原文（一字未改），因门禁
+    要求基线登记必须同提交；Rev 193 对应的 app-shell 改动不在本提交内。
+
+## Revision 193 — 2026-09-14
+
+- PROFILE-FROM-ANY-TAB-001：动态页点「访问个人主页」修好。
+  **无视觉改动**（只把分支位置从 tab 分支里面挪到上面），但 `app-shell.tsx` 是
+  基线敏感文件，故仍记一条。
+  - **原状**：动态 → 帖文 → 点头像 → 菜单「访问个人主页」，点了没反应。
+  - **根因**：`openHumanProfile` 的**写入方在 FEED**（feed.tsx 点头像 →
+    `onOpenProfile` → app-shell 的 `setOpenHumanProfile`），但读它的渲染分支
+    此前只写在 `tab === "HOME"` 里面。链子是
+    `realitySceneOpen → tab === "HOME" → tab === "MARKET" → tab === "FEED" → …`，
+    在动态页 `tab === "FEED"` 就先返回了 —— 状态被设了却**没有任何分支去读它**，
+    菜单一关，屏幕纹丝不动。
+  - **同一洞的第二份**：`openAIProfile` 同样只在 HOME 分支里，而动态页可以
+    → 现实场景图 → 点 AI 账号（`onOpenRealityScene` 就在 FeedSurface 上），
+    此时 tab 仍是 FEED，一样进不去。两条一起修。
+  - **修法**：把两个个人主页分支提到与 `realitySceneOpen` 同级（覆盖整个 body
+    的目的地，不属于任何一个 tab），并从 HOME 分支里移除。同时把
+    `!openHumanProfile` 加进 `isNavVisible` —— 与 AI 主页一致：全屏、收掉导航
+    chrome、用返回键退出；否则从动态进入后底栏还在，切个 tab 会被留在一个
+    没人负责关闭的主页上。
+  - 回归钉 PROFILE-FROM-ANY-TAB-001 钉的是**顺序**而不是「存在」：
+    `<OtherProfileSurface` 一直都在文件里，只断言它存在的话，把它挪回 HOME
+    分支测试依然全绿 —— 那正是当初漏掉这个 bug 的原因。已做反向注入验证
+    （把分支挪回 HOME 分支 → 测试与门禁同时变红，字节级还原）。
+
 ## Revision 192 — 2026-09-14
 
 - STORE-REC-007：新增「我推荐的店」，推荐人能看见自己那条推荐的进展。
