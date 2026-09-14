@@ -3293,3 +3293,41 @@ if [ -n "$unlisted_domain" ]; then
   exit 1
 fi
 echo "    OPENAPI-DOMAIN-001: PASS (every command-dispatching domain reaches the contract)"
+
+# STORE-REC-002: 运营评估队列必须存在。STORE-REC-001 只做了受理 —— 记录写进
+# business.store_recommendations 之后**没有任何读路径**，运营在 bdash 里评估
+# 这件事在数据层根本做不到，于是「推荐商铺进体系」变成只进不出的黑洞，
+# 写进去的举证材料谁也看不到。这是本仓库反复踩的那一类坑：
+# **通道建好了，但没有调用方**（SEARCH-CORPUS-001 的 server search 就是同一个形状）。
+# 顺带钉死两件事：读路径必须 operator-only（记录含推荐人账号与理由，属个人信息），
+# 且必须自带 LIMIT（否则「拉全表」迟早变成一次把整张表读进内存的运维事故）。
+require_test "STORE-REC-002" "./internal/storeonboarding" \
+  "TestListStoreRecommendationsNewestFirst" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-002" "./internal/storeonboarding" \
+  "TestListStoreRecommendationsRejectsUnknownOriginInsteadOfReturningEverything" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-002" "./internal/storeonboarding" \
+  "TestListStoreRecommendationsReturnsArrayWhenEmpty" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'ListRecommendations(ctx context.Context, filter RecommendationFilter)' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-002]: the Repository interface no longer carries" >&2
+  echo "        ListRecommendations, so the operator queue has no read path." >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *StoreOnboardingRepository) ListRecommendations' apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-002]: the Postgres read path is gone, so recommendations" >&2
+  echo "        can be written but never read back." >&2
+  exit 1
+fi
+if ! grep -qF '"ListStoreRecommendations": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [STORE-REC-002]: ListStoreRecommendations is no longer operator-only," >&2
+  echo "        so any user could enumerate who recommended what." >&2
+  exit 1
+fi
+if ! grep -qF 'LIMIT $3' apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-002]: the queue query lost its LIMIT, so one request can" >&2
+  echo "        pull the whole table into memory." >&2
+  exit 1
+fi
+echo "    STORE-REC-002: PASS (operator queue can read recommendations back, gated and bounded)"

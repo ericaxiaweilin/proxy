@@ -42,7 +42,6 @@ func (r *StoreOnboardingRepository) AddRecommendation(ctx context.Context, rec s
 	return err
 }
 
-
 // STORE-REC-002 — 运营评估队列的读路径。
 //
 // 上限用 storeonboarding 导出的常量，避免「服务层 clamp 到 200、仓储层却敢

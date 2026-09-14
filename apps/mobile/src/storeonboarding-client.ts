@@ -11,6 +11,24 @@ import type { SecureSessionStore } from "./secure-session";
 
 export type StoreRecommendationOrigin = "USER" | "AI";
 
+// STORE-REC-002: 运营评估队列的读模型（与服务端 StoreRecommendation 的 json tag 对齐）。
+export interface StoreRecommendation {
+  recommendationId: string;
+  storeName: string;
+  city: string;
+  category: string;
+  reason: string;
+  recommendedByAccountId: string;
+  origin: StoreRecommendationOrigin;
+  createdAt: string;
+}
+
+export interface ListStoreRecommendationsQuery {
+  city?: string;
+  origin?: StoreRecommendationOrigin;
+  limit?: number;
+}
+
 export interface RecommendStoreInput {
   storeName: string;
   city: string;
@@ -59,6 +77,41 @@ export class StoreOnboardingClient {
     });
   }
 
+  /**
+   * STORE-REC-002: 拉取运营评估队列。
+   *
+   * ⚠️ 这是 operator-only 命令。没有运营权限的账号会被服务端拒
+   * （OPERATOR_PRIVILEGE_REQUIRED），这里会抛 StoreRecommendationRejectedError ——
+   * 调用方必须把它显示成「没有权限」，**绝不能显示成「还没有人推荐」**。
+   * 两种情况的列表都是空的，混在一起会让运营以为「没人推荐这家店」，
+   * 而真实情况是他根本看不到。
+   */
+  public async listRecommendations(query: ListStoreRecommendationsQuery = {}): Promise<StoreRecommendation[]> {
+    const payload: Record<string, unknown> = {};
+    if (query.city && query.city.trim()) payload.city = query.city.trim();
+    if (query.origin) payload.origin = query.origin;
+    if (query.limit && query.limit > 0) payload.limit = query.limit;
+
+    const result = await this.command("ListStoreRecommendations", payload, {
+      type: "STORE",
+      id: "queue"
+    });
+    // 服务端把队列 JSON 放在 operationRef 里；没有它算协议异常，
+    // 不能当成空队列 —— 同上，会把「读不出来」误报成「没人推荐」。
+    const ref = result.operationRef;
+    if (typeof ref !== "string") {
+      throw new StoreRecommendationProtocolError("推荐队列响应缺少 operationRef");
+    }
+    try {
+      const parsed = JSON.parse(ref) as { recommendations?: StoreRecommendation[] };
+      return parsed.recommendations ?? [];
+    } catch (err) {
+      throw new StoreRecommendationProtocolError(
+        "推荐队列解析失败: " + (err instanceof Error ? err.message : String(err))
+      );
+    }
+  }
+
   private nextId(prefix: string): string {
     this.commandSequence += 1;
     return `${prefix}_${Date.now().toString(36)}_${this.commandSequence}`;
@@ -72,7 +125,8 @@ export class StoreOnboardingClient {
 
   private async command(
     commandType: string,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    target: { type: string; id: string } = { type: "STORE", id: "recommend" }
   ): Promise<CommandResult> {
     const session = await this.requireSession();
     const envelope = {
@@ -81,7 +135,7 @@ export class StoreOnboardingClient {
       commandVersion: 1,
       actor: { type: "USER", id: session.userAccountId },
       principal: session.principal,
-      target: { type: "STORE", id: "recommend" },
+      target,
       idempotencyKey: this.nextId("idempotency"),
       authContext: { sessionId: session.auth.sessionId },
       purpose: "store_recommendation",
