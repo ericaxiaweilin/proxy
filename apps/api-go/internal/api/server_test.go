@@ -603,6 +603,35 @@ func TestInboxNotificationRequiresOperator(t *testing.T) {
 	}
 }
 
+// LOCALNET-EVENTSTREAM-001: 跨用户读事件流必须走 operator 门。
+//
+// ListInteractionEvents 先取 payload 里的 actorId，只有它为空才回退到 e.Actor.ID
+// （localnet/service.go:1909）—— 任何已登录用户传别人的 id 就能拿到那个人的交互
+// 事件流。Postgres 侧的 WHERE（platform/postgres/network.go:453）也只按这个入参
+// 过滤，没有第二道 scoping。
+//
+// 流里是行为轨迹：{eventType: PROFILE_OPEN|POST_IMPRESSION|CANDIDATE_VIEWED|
+// AGENT_SHORTLISTED, targetId, needId} —— 即「某人某时刻看了谁的主页 / 哪条帖子 /
+// 哪个候选人」，属于个人信息。同类先例：STORE-REC-002 的 ListStoreRecommendations
+// 正是因为「含推荐人账号 id 与推荐理由，属于个人信息」而进门。
+//
+// 收门而不是「改成只读自己」：payload 里那个 actorId 字段本就是为运营回放准备的
+// （响应注释「事件流：订单是怎么来的，从这里可回放」），而 App 侧对这条命令零调用
+// —— 只读自己会让它对所有人都没用，那才是静默失败。
+//
+// 反向钉住帖子读：ListFeedPosts 是公开只读（在 requiresAuthentication 豁免名单
+// 里），ListPostsByIds / ListPostsMentioning 是用户正常浏览，收紧会让 App 静默坏掉。
+func TestListInteractionEventsRequiresOperator(t *testing.T) {
+	if !requiresOperator("ListInteractionEvents") {
+		t.Fatalf("ListInteractionEvents must require operator: it takes actorId from the payload, so ungated any logged-in user can enumerate another user's behavioural event stream (which profiles and posts they viewed)")
+	}
+	for _, cmd := range []string{"ListFeedPosts", "ListPostsByIds", "ListPostsMentioning"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: it is a normal post-browsing read, gating it would silently break the feed", cmd)
+		}
+	}
+}
+
 // Audit tripwire (Pass 1 — Scene R15.13): the public-read allowlist is
 // the single source of truth for "which List* commands can be called
 // without authentication". Adding or removing entries here MUST be

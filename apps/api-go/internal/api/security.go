@@ -179,6 +179,36 @@ var operatorCommandTypes = map[string]bool{
 	// （ListInbox 按 principal 取、MarkRead 按 recipientId 校验），把它们一起
 	// 收紧只会让用户静默用不了，故不做。
 	"SendInboxNotification": true,
+
+	// LOCALNET-EVENTSTREAM-001: localnet 域同样整域没进这张表，而
+	// ListInteractionEvents 是这条域里唯一**按 payload 里的 actorId 读别人数据**
+	// 的命令：handler（localnet/service.go:1909）先取 payload 的 actorId，只有它
+	// 为空才回退到 e.Actor.ID —— 任何已登录用户传一个别人的 id，就能拿到**那个人
+	// 的**交互事件流。Postgres 侧（platform/postgres/network.go:453）的 WHERE 也只
+	// 按这个入参过滤，没有第二道 scoping。
+	//
+	// 流里是什么：{eventType: PROFILE_OPEN | POST_IMPRESSION | CANDIDATE_VIEWED |
+	// AGENT_SHORTLISTED, targetType, targetId, needId} —— 即「某人某时刻看了谁的
+	// 主页 / 哪条帖子 / 哪个候选人」。这是行为轨迹，属于个人信息。同类先例是
+	// STORE-REC-002 的 ListStoreRecommendations：那条进门的理由正是「含推荐人
+	// 账号 id 与推荐理由，属于个人信息 —— 普通用户绝不能枚举别人的推荐」。
+	//
+	// 为什么收门而不是「改成只读自己」：payload 里那个 actorId 字段就是为运营准备
+	// 的（响应注释写着「事件流：订单是怎么来的，从这里可回放」，是归因回放的运营
+	// 动作）；而 App 侧对这条命令**零调用**，所以「只读自己」会让它对所有人都没用，
+	// 那才是真的静默失败。收进 operator 门既保住运营回放，又关掉公开面。
+	//
+	// 注意这条现在是**潜伏**洞而非活跃洞：写侧四条（RecordProfileOpen /
+	// RecordPostImpression / RecordCandidateViewed / ShortlistAgent）目前也零调用，
+	// 所以流是空的。但 localnet 已明确计划接线（GHOST-24H-001 注释：到期时刻要进
+	// 事件流，且「要能举证」）—— 一旦有写入方，跨用户读立刻变成活的。一个「按
+	// payload 里的 user id 返回该用户记录」的端点本身就是缺陷，与表里有没有数据
+	// 无关，所以现在就 fail-closed。
+	//
+	// 只收 ListInteractionEvents：ListFeedPosts（公开只读，在 requiresAuthentication
+	// 的豁免名单里）、ListPostsByIds、ListPostsMentioning 都是用户正常浏览帖子的读，
+	// 收紧会让 App 静默坏掉，故反向钉住不做。
+	"ListInteractionEvents": true,
 }
 
 func requiresOperator(commandType string) bool {

@@ -3830,3 +3830,35 @@ for cmd in RegisterDeviceToken ListInbox MarkInboxRead ResolveDeepLink; do
   fi
 done
 echo "    NOTIF-INBOX-GATE-001: PASS (inbox writes are operator-only; reading your own inbox stays open)"
+
+# LOCALNET-EVENTSTREAM-001: 跨用户读事件流必须走 operator 门。
+#
+# ListInteractionEvents 先取 payload 里的 actorId，只有它为空才回退到 e.Actor.ID
+# （localnet/service.go:1909）—— 任何已登录用户传别人的 id 就能拿到那个人的交互
+# 事件流。Postgres 侧的 WHERE 也只按这个入参过滤，没有第二道 scoping。
+#
+# 流里是行为轨迹：{eventType: PROFILE_OPEN|POST_IMPRESSION|CANDIDATE_VIEWED|
+# AGENT_SHORTLISTED, targetId, needId} —— 即「某人某时刻看了谁的主页 / 哪条帖子 /
+# 哪个候选人」，属于个人信息。同类先例：STORE-REC-002 的 ListStoreRecommendations
+# 正是因为「含推荐人账号 id 与推荐理由，属于个人信息」而进门。
+require_test "LOCALNET-EVENTSTREAM-001" "./internal/api" \
+  "TestListInteractionEventsRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+# 用 [[:space:]]* 而不是写死空格：gofmt 会按最长 key 重新填充整张表，
+# 写死空格的钉会在一次无关的格式化后突然变红（SAFETY-GATE-001 踩过）。
+if ! grep -qE '"ListInteractionEvents":[[:space:]]*true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [LOCALNET-EVENTSTREAM-001]: ListInteractionEvents 不在 operator 门里 ——" >&2
+  echo "        任何已登录用户传一个别人的 actorId，就能枚举那个人的行为轨迹。" >&2
+  exit 1
+fi
+# 反向钉：帖子读不该被顺手收紧。ListFeedPosts 是公开只读（在 requiresAuthentication
+# 豁免名单里），另两条是用户正常浏览；过度收紧在门禁上是**静默**的 ——
+# 测试不会红，用户只是用不了。
+for cmd in ListFeedPosts ListPostsByIds ListPostsMentioning; do
+  if grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [LOCALNET-EVENTSTREAM-001]: $cmd 被收进 operator 门了 ——" >&2
+    echo "        这是用户正常浏览帖子的读，收紧只会让 App 静默坏掉。" >&2
+    exit 1
+  fi
+done
+echo "    LOCALNET-EVENTSTREAM-001: PASS (cross-user event-stream reads are operator-only; post browsing stays open)"
