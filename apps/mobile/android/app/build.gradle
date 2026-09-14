@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.proxy.app'
+    namespace 'com.proxy.creator.dev.c4673fy8u7'
     defaultConfig {
-        applicationId 'com.proxy.app'
+        applicationId 'com.proxy.creator.dev.c4673fy8u7'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

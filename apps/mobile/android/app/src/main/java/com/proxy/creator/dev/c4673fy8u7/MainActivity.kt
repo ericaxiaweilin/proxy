@@ -1,4 +1,4 @@
-package com.proxy.app
+package com.proxy.creator.dev.c4673fy8u7
 
 import android.os.Build
 import android.os.Bundle

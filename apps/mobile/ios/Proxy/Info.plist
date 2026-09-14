@@ -28,7 +28,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>proxy</string>
-				<string>com.proxy.app</string>
+				<string>com.proxy.creator.dev.c4673fy8u7</string>
 			</array>
 		</dict>
 	</array>
@@ -55,12 +55,18 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Proxy 使用相机拍摄并添加到你主动发起的需求或对话。</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Proxy 使用麦克风进行语音输入，将你的语音转换为文字。</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allow $(PRODUCT_NAME) to access your location</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Allow $(PRODUCT_NAME) to access your location</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Proxy 在你打开"切换本地范围"时用一次位置，把地图中心定到你附近，帮你快速放坐标。我们不后台追踪。</string>
+	<string>Proxy 在你打开“切换本地范围”时用一次位置，把地图中心定到你附近，帮你快速放坐标。我们不后台追踪。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Proxy 使用麦克风将你的语音转换为输入文字。</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Allow $(PRODUCT_NAME) to detect your current motion activity</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Proxy 读取你主动选择的照片并添加到需求或对话。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

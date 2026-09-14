@@ -1,4 +1,4 @@
-package com.proxy.app
+package com.proxy.creator.dev.c4673fy8u7
 
 import android.app.Application
 import android.content.res.Configuration
@@ -7,6 +7,8 @@ import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.ReactPackage
+
+import com.proxy.screenprotection.ScreenProtectionPackage
 import com.facebook.react.ReactHost
 import com.facebook.react.common.ReleaseLevel
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
@@ -23,6 +25,7 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
+          add(ScreenProtectionPackage())
         }
     )
   }

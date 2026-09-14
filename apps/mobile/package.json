@@ -53,6 +53,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@expo/config-plugins": "~57.0.7",
     "@types/node": "^22.15.21",
     "@types/react": "~19.2.18",
     "typescript": "^6.0.3",
