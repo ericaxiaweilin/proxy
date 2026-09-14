@@ -4,6 +4,23 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 191 — 2026-09-14
+
+- BENEFIT-WIRE-001：把写好了但从没接线的权益链路接进 App。
+  有视觉改动：我的 → 我的市场 → 我的权益；我的（企业身份）→ 商家 · 我的 → 权益核销。
+  - **原状**：`BenefitClaimScreen` / `BenefitRedeemScreen` / `benefit-home-card`
+    三个组件都写好了，`benefit-client` 方法齐全，服务端命令也在契约里 ——
+    但**没有任何界面渲染它们**，`listCampaigns` / `getClaim` / `checkEligibility`
+    一个都没人调。命令、客户端、UI 三者之间缺一段接线，用户永远看不到入口。
+    这是第六次「通道建好了，没有调用方」。
+  - 补的是最上游那一段：新增 `benefit-hub.tsx` 列出 ACTIVE 活动，点进去才进
+    `BenefitClaimScreen` —— 后者需要 `campaignId`，所以「列活动」这步省不掉，
+    不能凭空跳进去。只列 ACTIVE：DRAFT / ENDED 的活动列出来只会让人点进去
+    发现领不了。
+  - 商家侧核销必须绑定店铺主体：**没有主体时说清楚**，而不是塞一个空
+    `merchantId` 让它静默失败 —— 那样运营只会看到「扫了没反应」，
+    根本不知道是主体没绑。
+
 ## Revision 190 — 2026-09-14
 
 - 推荐评估队列（STORE-REC-002/004）对 **BUSINESS 身份**开放入口。

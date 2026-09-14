@@ -40,6 +40,11 @@ import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client"
 import type { EngagementClient } from "../engagement-client";
 import type { ModerationClient } from "../moderation-client";
 import { StoreOnboardingClient, StoreRecommendationAiUnavailableError } from "../storeonboarding-client";
+// BENEFIT-WIRE-001: 权益链路。命令、client、界面早就写好了，但从没被渲染过 ——
+// 这里补的是「入口 + 接线」那一段。
+import { BenefitClient } from "../benefit-client";
+import { BenefitHubSurface } from "./benefit-hub";
+import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
 import { type LocalNetClient } from "../localnet-client";
 import {
   parentPostIdsForReplies,
@@ -186,7 +191,8 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "diamond", label: "我的订单", desc: "我发布的 / 我参与的已成交订单", route: "myorders" },
         { icon: "clock", label: "能力与可用时间", desc: "能力、主题、区域与空闲时间", route: "available" },
         { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", route: "myactivities" },
-        { icon: "star", label: "收藏", desc: "商家、Creator、动态与活动", route: "favorites" }
+        { icon: "star", label: "收藏", desc: "商家、Creator、动态与活动", route: "favorites" },
+        { icon: "gift", label: "我的权益", desc: "可领取的活动权益，领取后到店出示验证码核销", route: "benefits" }
       ]
     },
     {
@@ -252,7 +258,10 @@ const BUSINESS_ME: PersonaConfig = {
         // 身份下，而此前入口只挂在 REQUESTER 的「企业 / 店铺」组里。
         // 队列本身是 operator-only（服务端白名单），普通商家点进去会看到明确的
         // 「没有运营权限」，而不是一个空列表。
-        { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" }
+        { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" },
+        // BENEFIT-WIRE-001: 商家侧核销。需要店铺主体，没有主体时子页会说清楚，
+        // 而不是塞一个空 merchantId 让核销必然失败。
+        { icon: "gift", label: "权益核销", desc: "扫描用户出示的权益验证码并确认核销", route: "benefitredeem" }
       ]
     }
   ]
@@ -400,6 +409,8 @@ export function MeSurface({
   // 商家二维码要指向真实门店主体：优先用户显式选中的商家，否则用第一个 ACTIVE
   // 店铺（与 liveShopName 同一个账号，避免名字显示店铺、二维码却指向个人主页）。
   const merchantId = merchantIdentity.merchantId ?? merchantIdentity.accounts[0]?.id;
+  // BENEFIT-WIRE-001: 权益 client。构造只吃 authClient，会话从 transport 里走。
+  const [benefitClient] = useState(() => new BenefitClient({ authClient: sessionAuthClient }));
   // 现实资料：之前两个按钮只 count+1，素材数组写死 3 项，超限后点按无变化、
   // 也从不打开 picker。现在存真实条目（label+uri），拍照/上传都走 ImagePicker，
   // 列表随条目增长，无静默上限。
@@ -2098,6 +2109,51 @@ export function MeSurface({
             </Pressable>
             <Text style={styles.subPageTitle}>推荐评估队列</Text>
             <StoreRecommendationQueue />
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // BENEFIT-WIRE-001: 权益领取（个人身份）。
+    if (subPage.route === "benefits") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>我的权益</Text>
+            <BenefitHubSurface onBack={() => setSubPage(undefined)} />
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // BENEFIT-WIRE-001: 权益核销（商家身份）。没有店铺主体时**说清楚**，
+    // 而不是塞一个空 merchantId 进去让核销必然失败 —— 那样运营只会看到
+    // 「扫了没反应」，根本不知道是主体没绑。
+    if (subPage.route === "benefitredeem") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>权益核销</Text>
+            {merchantId ? (
+              <BenefitRedeemScreen
+                client={benefitClient}
+                merchantId={merchantId}
+                onBack={() => setSubPage(undefined)}
+              />
+            ) : (
+              <View style={styles.infoNote}>
+                <Text style={styles.infoNoteText}>当前账号没有店铺主体，无法核销权益。</Text>
+                <Text style={[styles.appBehaviorCardDesc, { marginTop: 4 }]}>
+                  核销必须绑定到一个真实门店（商家主体），因为它决定了这笔核销记在谁账上。
+                </Text>
+              </View>
+            )}
           </ScrollView>
         </View>
       );
