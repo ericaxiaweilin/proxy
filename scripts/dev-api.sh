@@ -6,6 +6,8 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_dir}"
 
 set -a
+export NO_PROXY="127.0.0.1,localhost,0.0.0.0,::1"
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
 if [[ -f .env ]]; then
   # shellcheck disable=SC1091
   source ./.env
