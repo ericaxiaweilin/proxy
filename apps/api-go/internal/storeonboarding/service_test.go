@@ -479,6 +479,80 @@ func TestQueueShowsDecisionAndHonoursPendingOnly(t *testing.T) {
 	}
 }
 
+// STORE-REC-005: 采纳之后，这条推荐必须还能被查出来。
+//
+// 队列默认只看待评估，采纳完一条它就从默认视图消失 —— 而 status 此前只有
+// 「待评估 / 全部」两种看法（一个 bool 表达不了四态），运营没有任何办法把
+// 「我批过的」单独列出来。于是采纳等于把这条推荐扔进黑洞：结论存下来了，
+// 却读不回来，既看不到自己批过什么，也没法跟进商家实际入驻。
+// 这是本仓库第七次「通道建好了，没有调用方」，只是这次死在**读**的一侧。
+func TestAcceptedRecommendationsStayReachable(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	svc.SetClock(fixedClock())
+
+	for _, name := range []string{"采纳店", "否决店", "待评估店"} {
+		res := svc.Handle(envelopeFor("RecommendStore", map[string]any{
+			"storeName": name, "city": "河内", "category": "咖啡", "reason": "值得进", "origin": "USER",
+		}, "user_1"))
+		if res.Outcome != "ACCEPTED" {
+			t.Fatalf("seed %s: %+v", name, res)
+		}
+	}
+	byName := map[string]string{}
+	for _, rec := range repo.Recommendations() {
+		byName[rec.StoreName] = rec.ID
+	}
+
+	mustDecide := func(name, decision, reason string) {
+		t.Helper()
+		payload := map[string]any{"recommendationId": byName[name], "decision": decision}
+		if reason != "" {
+			payload["reason"] = reason
+		}
+		if res := svc.Handle(envelopeFor("DecideStoreRecommendation", payload, "operator_1")); res.Outcome != "ACCEPTED" {
+			t.Fatalf("decide %s: %+v", name, res)
+		}
+	}
+	mustDecide("采纳店", "ACCEPT", "")
+	mustDecide("否决店", "REJECT", "同品类已接入三家")
+
+	queue := func(status string) []string {
+		t.Helper()
+		payload := map[string]any{}
+		if status != "" {
+			payload["status"] = status
+		}
+		rows := parseQueue(t, svc.Handle(envelopeFor("ListStoreRecommendations", payload, "operator_1")))
+		names := make([]string, 0, len(rows))
+		for _, r := range rows {
+			names = append(names, r.StoreName)
+		}
+		return names
+	}
+
+	// 核心断言：采纳的这家店必须能单独查出来，而不是只剩下「全部」里那一堆。
+	if got := queue(StatusAccepted); len(got) != 1 || got[0] != "采纳店" {
+		t.Fatalf("accepted queue must show the accepted recommendation, got %v", got)
+	}
+	if got := queue(StatusRejected); len(got) != 1 || got[0] != "否决店" {
+		t.Fatalf("rejected queue must show the rejected recommendation, got %v", got)
+	}
+	if got := queue(StatusPending); len(got) != 1 || got[0] != "待评估店" {
+		t.Fatalf("pending queue must show only undecided ones, got %v", got)
+	}
+	if got := queue(StatusAny); len(got) != 3 {
+		t.Fatalf("no status must mean all three, got %v", got)
+	}
+
+	// 拼错的 status 必须明确拒绝，不能静默返回全量 —— 否则运营会照着
+	// 一份错误的清单去跟进商家。
+	typo := svc.Handle(envelopeFor("ListStoreRecommendations", map[string]any{"status": "ACCEPTEDD"}, "operator_1"))
+	if typo.Outcome != "REJECTED" || typo.Error == nil || typo.Error.ErrorCode != "INVALID_RECOMMENDATION_STATUS" {
+		t.Fatalf("unknown status must be refused, not silently ignored: %+v", typo)
+	}
+}
+
 // 改主意 = 追加一条新结论，以最新一条为准（append-only，不改旧记录）。
 func TestLatestDispositionWinsWhenOperatorChangesMind(t *testing.T) {
 	repo := NewMemoryRepository()

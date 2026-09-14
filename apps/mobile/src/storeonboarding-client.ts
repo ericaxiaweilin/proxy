@@ -15,6 +15,10 @@ export type StoreRecommendationOrigin = "USER" | "AI";
 // 以最新一条为准，绝不回头改旧记录。
 export type StoreRecommendationDecision = "ACCEPT" | "REJECT";
 
+// STORE-REC-005: 队列的四种看法。PENDING = 还没出结论；ACCEPTED = 已批准接入
+// （注意：批准不等于店铺已存在，商家实际入驻是另一回事）；REJECTED = 不采纳。
+export type StoreRecommendationQueueStatus = "PENDING" | "ACCEPTED" | "REJECTED";
+
 // STORE-REC-002: 运营评估队列的读模型（与服务端 StoreRecommendation 的 json tag 对齐）。
 export interface StoreRecommendation {
   recommendationId: string;
@@ -37,8 +41,14 @@ export interface ListStoreRecommendationsQuery {
   city?: string;
   origin?: StoreRecommendationOrigin;
   limit?: number;
-  /** 只看还没出结论的。运营队列默认开 —— 已评估的杵在列表里会让队列越用越长。 */
-  pendingOnly?: boolean;
+  /**
+   * 按最新结论筛选。不传 = 全部。
+   *
+   * 为什么不是布尔值：队列要有四种看法（待评估 / 已采纳待接入 / 不采纳 / 全部）。
+   * 用 `只看待评估` 这种开关表达不了「只看我采纳过的」—— 而采纳完一条它就从
+   * 默认视图消失了，运营看不到自己批过什么、也没法跟进商家入驻（STORE-REC-005）。
+   */
+  status?: StoreRecommendationQueueStatus;
 }
 
 export interface RecommendStoreInput {
@@ -128,7 +138,8 @@ export class StoreOnboardingClient {
     if (query.city && query.city.trim()) payload.city = query.city.trim();
     if (query.origin) payload.origin = query.origin;
     if (query.limit && query.limit > 0) payload.limit = query.limit;
-    if (query.pendingOnly) payload.pendingOnly = true;
+    // STORE-REC-005: status 取代了旧的 pendingOnly 布尔开关。
+    if (query.status) payload.status = query.status;
 
     const result = await this.command("ListStoreRecommendations", payload, {
       type: "STORE",

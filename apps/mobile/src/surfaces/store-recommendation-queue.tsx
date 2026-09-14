@@ -8,7 +8,8 @@ import {
   StoreRecommendationRejectedError,
   type StoreRecommendation,
   type StoreRecommendationDecision,
-  type StoreRecommendationOrigin
+  type StoreRecommendationOrigin,
+  type StoreRecommendationQueueStatus
 } from "../storeonboarding-client";
 
 // STORE-REC-002/004: 运营评估队列（App 内）。
@@ -34,6 +35,24 @@ const ORIGIN_FILTERS: Array<{ id: OriginFilter; label: string }> = [
   { id: "AI", label: "小美推荐" }
 ];
 
+// STORE-REC-005: 队列的四种看法。
+//
+// 之前这里是个「只看待评估」的开关（布尔），只能表达两种状态。那够用是因为
+// 当时的队列只有这两种看法；但采纳是个死胡同 —— 一点采纳，这条推荐就只存在于
+// 「全部」那一堆里，运营看不到自己批过什么，更没法跟进商家实际入驻。
+// 布尔值表达不了四态，所以换成 status。
+//
+// 「已采纳 · 待接入」这个名字是刻意的：采纳 = 运营批准接入，**不等于店铺已经
+// 存在**。商家真正入驻是另一件事，这里不伪造那个结果。
+type StatusFilter = "ALL" | StoreRecommendationQueueStatus;
+
+const STATUS_FILTERS: Array<{ id: StatusFilter; label: string; empty: string }> = [
+  { id: "PENDING", label: "待评估", empty: "待评估的都处理完了。" },
+  { id: "ACCEPTED", label: "已采纳 · 待接入", empty: "还没有采纳过任何推荐。" },
+  { id: "REJECTED", label: "不采纳", empty: "还没有不采纳的记录。" },
+  { id: "ALL", label: "全部", empty: "当前筛选条件下还没有推荐记录。" }
+];
+
 function when(iso: string): string {
   // 服务端给的是 RFC3339（UTC）。本地展示取到分钟即可，
   // 不做「几小时前」这类会随时间漂移、且无法核对的模糊表达。
@@ -46,8 +65,9 @@ function when(iso: string): string {
 export function StoreRecommendationQueue(): React.JSX.Element {
   const [city, setCity] = useState("");
   const [origin, setOrigin] = useState<OriginFilter>("ALL");
-  // 默认只看没出结论的：评估完一条它还杵在列表里，队列会越用越长。
-  const [pendingOnly, setPendingOnly] = useState(true);
+  // 默认看「待评估」：评估完一条它还杵在默认列表里，队列会越用越长。
+  // 但另外三种看法必须存在 —— 采纳完就查不到，等于把这条推荐扔进黑洞。
+  const [status, setStatus] = useState<StatusFilter>("PENDING");
   const [rows, setRows] = useState<StoreRecommendation[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [forbidden, setForbidden] = useState(false);
@@ -67,12 +87,14 @@ export function StoreRecommendationQueue(): React.JSX.Element {
       });
       // 仓库开了 exactOptionalPropertyTypes：可选字段不能显式传 undefined，
       // 只能不写这个键。
-      const query: { city: string; limit: number; origin?: StoreRecommendationOrigin; pendingOnly?: boolean } = {
-        city,
-        limit: 50
-      };
+      const query: {
+        city: string;
+        limit: number;
+        origin?: StoreRecommendationOrigin;
+        status?: StoreRecommendationQueueStatus;
+      } = { city, limit: 50 };
       if (origin !== "ALL") query.origin = origin;
-      if (pendingOnly) query.pendingOnly = true;
+      if (status !== "ALL") query.status = status;
       const next = await client.listRecommendations(query);
       setRows(next);
     } catch (err) {
@@ -88,7 +110,7 @@ export function StoreRecommendationQueue(): React.JSX.Element {
     } finally {
       setBusy(false);
     }
-  }, [city, origin, pendingOnly]);
+  }, [city, origin, status]);
 
   useEffect(() => {
     void load();
@@ -173,23 +195,37 @@ export function StoreRecommendationQueue(): React.JSX.Element {
         </Pressable>
       </View>
 
-      <Pressable
-        onPress={() => setPendingOnly((v) => !v)}
-        style={{
-          alignSelf: "flex-start",
-          backgroundColor: pendingOnly ? "#EAF3EE" : color.white,
-          borderColor: pendingOnly ? "#1B7F4D" : color.line,
-          borderRadius: 999,
-          borderWidth: 1,
-          marginTop: 10,
-          paddingHorizontal: 12,
-          paddingVertical: 7
-        }}
-      >
-        <Text style={{ color: pendingOnly ? "#1B7F4D" : color.ink, fontSize: 11, fontWeight: "700" }}>
-          {pendingOnly ? "只看待评估" : "全部（含已评估）"}
+      <Text style={[styles.socialEditorLabel, { marginTop: 12 }]}>结论</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+        {STATUS_FILTERS.map((option) => {
+          const active = status === option.id;
+          return (
+            <Pressable
+              key={option.id}
+              onPress={() => setStatus(option.id)}
+              style={{
+                backgroundColor: active ? "#1B7F4D" : color.white,
+                borderColor: active ? "#1B7F4D" : color.line,
+                borderRadius: 999,
+                borderWidth: 1,
+                paddingHorizontal: 12,
+                paddingVertical: 7
+              }}
+            >
+              <Text style={{ color: active ? color.white : color.ink, fontSize: 11, fontWeight: "700" }}>
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {/* 采纳不等于店铺已存在。这句话必须说，否则运营会以为批完就完事了，
+          而实际上商家还没入驻 —— 队列看起来「办结了」，事情却没发生。 */}
+      {status === "ACCEPTED" ? (
+        <Text style={[styles.appBehaviorCardDesc, { marginTop: 6 }]}>
+          已采纳只代表运营批准接入，商家实际入驻是另一件事 —— 这一列就是待跟进的名单。
         </Text>
-      </Pressable>
+      ) : null}
 
       {busy && rows === null ? (
         <View style={{ paddingVertical: 18, alignItems: "center" }}>
@@ -214,7 +250,7 @@ export function StoreRecommendationQueue(): React.JSX.Element {
       {!forbidden && !error && rows && rows.length === 0 ? (
         <View style={styles.infoNote}>
           <Text style={styles.infoNoteText}>
-            {pendingOnly ? "待评估的都处理完了。" : "当前筛选条件下还没有推荐记录。"}
+            {STATUS_FILTERS.find((option) => option.id === status)?.empty ?? "当前筛选条件下还没有推荐记录。"}
           </Text>
         </View>
       ) : null}

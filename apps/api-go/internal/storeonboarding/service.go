@@ -71,10 +71,24 @@ type RecommendationFilter struct {
 	City   string // 精确匹配城市；空 = 不限
 	Origin string // USER | AI；空 = 不限
 	Limit  int    // 已经过 clamp，仓储层直接用于 LIMIT
-	// PendingOnly = true 时只返回**还没出结论**的推荐。运营队列默认用它，
-	// 否则每评估完一条它就还杵在列表里，队列越长越没法用。
-	PendingOnly bool
+	// Status 按**最新结论**筛选，见下面四个常量；空 = 不限。
+	//
+	// STORE-REC-005 前这里是个 PendingOnly bool，只能表达「待评估 / 全部」。
+	// 那够用是因为当时队列只有这两种看法；但采纳是个死胡同 —— 一点采纳，
+	// 这条推荐就只存在于「全部」里，运营看不到自己批过什么、更没法跟进。
+	// 布尔值表达不了四态，所以换成 status。
+	Status string
 }
+
+// 队列的四种看法。PENDING 不是一种「结论」，而是「还没有结论」——
+// 之所以仍然给它一个常量，是为了让调用方能明确说「我要待评估的」，
+// 而不是靠「不传 status」这种含糊的默认。
+const (
+	StatusAny      = ""
+	StatusPending  = "PENDING"
+	StatusAccepted = "ACCEPTED"
+	StatusRejected = "REJECTED"
+)
 
 // Repository 落库边界。append-only：只有 Add，没有 Update/Delete。
 // List 是给运营的评估队列用的读路径 —— 没有它，推荐就只进不出。
@@ -205,10 +219,47 @@ func (s *Service) recommendStore(ctx context.Context, e command.Envelope) comman
 }
 
 type listRecommendationsPayload struct {
-	City        string `json:"city"`
-	Origin      string `json:"origin"`
-	Limit       int    `json:"limit"`
-	PendingOnly bool   `json:"pendingOnly"`
+	City   string `json:"city"`
+	Origin string `json:"origin"`
+	Limit  int    `json:"limit"`
+	Status string `json:"status"`
+	// PendingOnly 是 STORE-REC-005 之前的旧字段，等价于 status=PENDING。
+	// 保留是为了不让既有调用方（与 STORE-REC-004 的回归钉）突然失效；
+	// 两个都传时以 status 为准，见 normalizeQueueStatus。
+	PendingOnly bool `json:"pendingOnly"`
+}
+
+// normalizeQueueStatus 把队列的筛选条件收敛成一个 status。
+//
+// 为什么显式校验而不是静默忽略：拼错 status 却返回「全量」，运营会以为
+// 「已采纳的就是这些」，照着错误的清单去跟进商家。
+func normalizeQueueStatus(status string, pendingOnly bool) (string, bool) {
+	s := strings.ToUpper(strings.TrimSpace(status))
+	switch s {
+	case StatusAny, StatusPending, StatusAccepted, StatusRejected:
+		// ok
+	default:
+		return "", false
+	}
+	if s == StatusAny && pendingOnly {
+		s = StatusPending
+	}
+	return s, true
+}
+
+// matchesStatus 判断一条推荐的最新结论是否符合筛选条件。
+// decision 是 LEFT JOIN 带出来的快照，空串 = 还没评估。
+func matchesStatus(status, decision string) bool {
+	switch status {
+	case StatusPending:
+		return decision == ""
+	case StatusAccepted:
+		return decision == AcceptDecision
+	case StatusRejected:
+		return decision == RejectDecision
+	default:
+		return true
+	}
 }
 
 // listRecommendations 是运营的评估队列（STORE-REC-002）。
@@ -235,6 +286,12 @@ func (s *Service) listRecommendations(ctx context.Context, e command.Envelope) c
 			"origin": p.Origin,
 		})
 	}
+	status, ok := normalizeQueueStatus(p.Status, p.PendingOnly)
+	if !ok {
+		return command.Rejected(e, "INVALID_RECOMMENDATION_STATUS", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.invalid_recommendation_status", map[string]any{
+			"status": p.Status,
+		})
+	}
 	limit := p.Limit
 	if limit <= 0 {
 		limit = ListLimitDefault
@@ -246,10 +303,10 @@ func (s *Service) listRecommendations(ctx context.Context, e command.Envelope) c
 		return command.Rejected(e, "RECOMMENDATION_FAILED", "INTERNAL", "SAFE_RETRY", "storeonboarding.recommendation_failed", nil)
 	}
 	rows, err := s.repository.ListRecommendations(ctx, RecommendationFilter{
-		City:        strings.TrimSpace(p.City),
-		Origin:      origin,
-		Limit:       limit,
-		PendingOnly: p.PendingOnly,
+		City:   strings.TrimSpace(p.City),
+		Origin: origin,
+		Limit:  limit,
+		Status: status,
 	})
 	if err != nil {
 		return command.Rejected(e, "RECOMMENDATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "storeonboarding.recommendation_read_failed", nil)

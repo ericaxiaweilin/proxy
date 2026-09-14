@@ -3443,3 +3443,43 @@ if ! grep -qF 'DecideStoreRecommendation' apps/api-go/openapi.commands.generated
   exit 1
 fi
 echo "    STORE-REC-004: PASS (operators can record 采纳/不采纳, append-only and operator-only)"
+
+# STORE-REC-005: 采纳之后，这条推荐必须还能被查出来。
+#
+# 队列默认只看待评估，而筛选条件此前是个布尔（只看待评估 / 全部），表达不了
+# 「只看我采纳过的」。于是采纳是个死胡同：一点采纳，这条推荐就从默认视图消失，
+# 只埋在「全部」那一堆里 —— 运营看不到自己批过什么，更没法跟进商家入驻。
+# 采纳 = 批准接入，不等于店铺已存在；批准完查不到，事情就等于没发生。
+#
+# 注意这是又一次「通道建好了，没有调用方」，只是这次死在**读**的一侧：
+# 结论写进去了（STORE-REC-004），却没有任何路径把它读回来。
+#
+# 钉死：①测试存在；②四态 status 在服务层存在（布尔表达不了「已采纳」）；
+# ③**生产**读路径（Postgres）也认 ACCEPTED —— 只在内存仓储里实现是最经典的
+# 半截接线，本地测试全绿、线上什么都查不到；④App 队列里有这个视图。
+require_test "STORE-REC-005" "./internal/storeonboarding" \
+  "TestAcceptedRecommendationsStayReachable" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'StatusAccepted = "ACCEPTED"' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-005]: the four-state queue status filter is gone, so" >&2
+  echo "        accepted recommendations can no longer be listed on their own." >&2
+  exit 1
+fi
+if ! grep -qF "\$4 = 'ACCEPTED'" apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-005]: the Postgres read path no longer honours the" >&2
+  echo "        ACCEPTED filter -- a memory-repo-only filter is a half-wire that" >&2
+  echo "        passes every local test and returns nothing in production." >&2
+  exit 1
+fi
+# 光有服务端不够：App 里没有这个视图，采纳完运营照样看不到。
+if ! grep -qF '已采纳' apps/mobile/src/surfaces/store-recommendation-queue.tsx; then
+  echo "  FAIL [STORE-REC-005]: the queue UI has no 已采纳 view, so operators still" >&2
+  echo "        lose sight of every recommendation the moment they accept it." >&2
+  exit 1
+fi
+if ! grep -qF 'StoreRecommendationQueueStatus' apps/mobile/src/storeonboarding-client.ts; then
+  echo "  FAIL [STORE-REC-005]: the mobile client lost the queue status type, so the" >&2
+  echo "        UI cannot ask for accepted/rejected recommendations any more." >&2
+  exit 1
+fi
+echo "    STORE-REC-005: PASS (accepted recommendations stay reachable, 采纳 is not a dead end)"

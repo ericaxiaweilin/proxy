@@ -63,9 +63,10 @@ func (r *MemoryRepository) ListRecommendations(_ context.Context, filter Recomme
 			continue
 		}
 		rec.attachLatestDisposition(r.dispositions)
-		// PendingOnly：只要还没出结论的。评估完一条它就得从默认队列里消失，
-		// 否则队列越用越长，运营要在里面翻旧账。
-		if filter.PendingOnly && rec.Decision != "" {
+		// Status：默认（待评估）只留还没出结论的，评估完一条它就得从默认队列里
+		// 消失，否则队列越用越长，运营要在里面翻旧账。但采纳 / 不采纳必须能单独
+		// 查出来 —— 否则采纳完这条推荐就凭空消失了，运营看不到自己批过什么。
+		if !matchesStatus(filter.Status, rec.Decision) {
 			continue
 		}
 		matched = append(matched, rec)

@@ -67,7 +67,13 @@ LEFT JOIN LATERAL (
 ) d ON TRUE
 WHERE ($1 = '' OR r.city = $1)
   AND ($2 = '' OR r.origin = $2)
-  AND (NOT $4::boolean OR d.decision IS NULL)
+  -- STORE-REC-005: 按最新结论筛选。'' = 不限；PENDING = 还没有结论；
+  -- ACCEPTED / REJECTED 对上 disposition 的 ACCEPT / REJECT。
+  -- 不写成 OR 链的话，采纳完的推荐就再也查不出来了。
+  AND ($4 = ''
+       OR ($4 = 'PENDING'  AND d.decision IS NULL)
+       OR ($4 = 'ACCEPTED' AND d.decision = 'ACCEPT')
+       OR ($4 = 'REJECTED' AND d.decision = 'REJECT'))
 ORDER BY r.created_at DESC
 LIMIT $3`
 
@@ -88,7 +94,7 @@ func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, fil
 		limit = storeonboarding.ListLimitMax
 	}
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, listStoreRecommendationsSQL,
-		filter.City, filter.Origin, limit, filter.PendingOnly)
+		filter.City, filter.Origin, limit, filter.Status)
 	if err != nil {
 		return nil, err
 	}
