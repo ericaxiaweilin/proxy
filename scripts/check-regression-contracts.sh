@@ -3613,3 +3613,25 @@ if ! grep -qF 'func (s *Service) countRedemptions' apps/api-go/internal/benefit/
   exit 1
 fi
 echo "    BENEFIT-ELIG-001: PASS (redemption cap is really enforced, through the service)"
+
+# BENEFIT-REDEEM-001: 核销方必须是这个活动的归属商家。
+#
+# p.MerchantID 由**调用方传入**，却被直接写进 Redemption，结算也据此进行。
+# 缺了归属校验，任何商家扫到别人的券码都能把这笔核销记到自己名下 —— 钱也就结给了他。
+# 与 business.createStore 的 BUSINESS_WRITE_REQUIRED 同一个口径：调用方声明的
+# 身份必须被验证，不能只因为「他说他是」就算数。
+#
+# 钉死：①测试存在；②核销路径真的查了活动归属；③拒绝码还在。
+require_test "BENEFIT-REDEEM-001" "./internal/benefit" \
+  "TestRedeemRequiresTheCampaignOwner" \
+  "apps/api-go/internal/benefit/service_test.go" || exit $?
+if ! grep -qF 's.repo.GetCampaign(ctx, cl.CampaignID)' apps/api-go/internal/benefit/service.go; then
+  echo "  FAIL [BENEFIT-REDEEM-001]: the redeem path no longer loads the campaign," >&2
+  echo "        so a caller-supplied merchantId is trusted for settlement again." >&2
+  exit 1
+fi
+if ! grep -qF 'MERCHANT_NOT_CAMPAIGN_OWNER' apps/api-go/internal/benefit/service.go; then
+  echo "  FAIL [BENEFIT-REDEEM-001]: the ownership rejection code is gone." >&2
+  exit 1
+fi
+echo "    BENEFIT-REDEEM-001: PASS (only the owning merchant can redeem; settlement cannot be hijacked)"

@@ -416,6 +416,21 @@ func (s *Service) HandleRedeemBenefit(ctx context.Context, e command.Envelope) c
 	if cl.Status != ClaimClaimed && cl.Status != ClaimReserved {
 		return command.Rejected(e, "CLAIM_NOT_REDEEMABLE", "STATE", "AFTER_USER_ACTION", "benefit.claim_not_redeemable", nil)
 	}
+	// BENEFIT-REDEEM-001: 核销方必须是这个活动的归属商家。
+	//
+	// p.MerchantID 是**调用方传的**，而它被直接写进 Redemption，结算也据此进行 ——
+	// 不校验的话，任何商家扫到别人的券码都能把这笔核销记到自己名下，钱也就结给了他。
+	// 与 business.createStore 的 BUSINESS_WRITE_REQUIRED 同一个口径：调用方声明的
+	// 身份必须被验证，不能只因为「他说他是」就算数。
+	campaign, err := s.repo.GetCampaign(ctx, cl.CampaignID)
+	if err != nil {
+		return command.Rejected(e, "CAMPAIGN_NOT_FOUND", "NOT_FOUND", "AFTER_USER_ACTION", "benefit.campaign_not_found", nil)
+	}
+	// ownerType 不是 merchant（例如平台自营）时没有可比的归属方，保持放行 ——
+	// 但那种情况本来就没有商家可冒充，风险不同。
+	if campaign.OwnerType == "merchant" && campaign.OwnerID != "" && campaign.OwnerID != p.MerchantID {
+		return command.Rejected(e, "MERCHANT_NOT_CAMPAIGN_OWNER", "AUTHORIZATION", "AFTER_USER_ACTION", "benefit.merchant_not_campaign_owner", nil)
+	}
 	// R16.7-P1-H prep: eligibility re-check at redemption. A claim
 	// that was eligible at claim time may have aged out (max
 	// redemptions reached, account suspended, risk score changed).
