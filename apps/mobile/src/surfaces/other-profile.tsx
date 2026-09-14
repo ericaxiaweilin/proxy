@@ -10,6 +10,13 @@ import { color } from "../theme";
 import { ProfileTabs, type ProfileMediaEntry } from "./ProfileTabs";
 import { MediaViewer } from "../media/AdaptiveMediaCollection";
 import { mapFollowError } from "./feed-error-map";
+import {
+  parentPostIdsForReplies,
+  replyEntriesFromReplies,
+  replyTargetsFromPosts,
+  type ReplyEntry,
+  type ReplyTarget
+} from "../reply-target";
 
 const OTTER_LOGO = require("../../assets/otter-logo.png");
 
@@ -40,6 +47,17 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
   const [reporting, setReporting] = useState(false);
   const [resolvedPosts, setResolvedPosts] = useState<FeedPost[]>(target.posts);
   const [resolvedMedia, setResolvedMedia] = useState<Record<string, FeedMediaItem[]>>(target.mediaByPost);
+  // PROFILE-TABS-001: 他人主页的 REPLIES tab 之前硬编码传 []，5 个 tabs 里有
+  // 3 个永远是空态。回复是公开内容，这里拉真数据；SAVED/TAGGED 保持空 ——
+  // 收藏是别人的私库（不上他人主页），标记目前只有客户端侧的说法，没有
+  // 服务端依据，宁可留空态也不编数据。
+  // REPLY-TARGET-001: 回复有自己的形状（replyId 才是稳定 key），被回复的父帖
+  // 另放一张表。以前这里把作者硬写成 target.userId、标题写死「你回复了」——
+  // 看别人的主页却说「你回复了」。
+  const [replyEntries, setReplyEntries] = useState<ReplyEntry[]>([]);
+  const [replyTargets, setReplyTargets] = useState<Record<string, ReplyTarget>>({});
+  // 判定「被回复的帖子是不是访问者自己的」用，跟 feed 同一套身份规则。
+  const [viewerAccountId, setViewerAccountId] = useState<string | undefined>(undefined);
   // 图片查看器：之前 onOpenMedia 是空函数，他人照片点不开。
   // 与我的主页同款 MediaViewer，可左右切、可关。
   const [viewer, setViewer] = useState<{ postId: string; index: number } | undefined>(undefined);
@@ -90,6 +108,7 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
         if (!cancelled) setCounts(nextCounts);
         const session = await secureSessionStore?.read();
         if (session?.userAccountId) {
+          if (!cancelled) setViewerAccountId(session.userAccountId);
           const state = await engagement.isFollowing(session.userAccountId, target.userId);
           if (!cancelled) setFollowing(state);
         }
@@ -100,6 +119,38 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
     })();
     return () => { cancelled = true; };
   }, [engagement, secureSessionStore, target.userId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void engagement.listUserReplies(target.userId, 30)
+      .then(async (r) => {
+        if (cancelled) return;
+        // REPLY-TARGET-001: 服务端一直在发 parentPostId，只是以前没人读，
+        // 于是这一栏只能显示光秃秃的「你回复了」。父帖走 ListPostsByIds 回查
+        // —— 与动态流同一条可见性口径，取不回来的就退化成中性文案。
+        const entries = replyEntriesFromReplies(r.replies);
+        setReplyEntries(entries);
+        const parentIds = parentPostIdsForReplies(entries);
+        if (parentIds.length === 0) {
+          setReplyTargets({});
+          return;
+        }
+        try {
+          const parents = await localNet.listPostsByIds(parentIds);
+          if (!cancelled) setReplyTargets(replyTargetsFromPosts(parents.posts));
+        } catch {
+          // 引用块拿不到不该把回复本身也吞掉。
+          if (!cancelled) setReplyTargets({});
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReplyEntries([]);
+          setReplyTargets({});
+        }
+      });
+    return () => { cancelled = true; };
+  }, [engagement, localNet, target.userId]);
 
   async function likePost(postId: string): Promise<void> {
     setNotice(undefined);
@@ -128,7 +179,7 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.identity}><View style={styles.avatar}>{target.avatarUri ? <Image source={{ uri: target.avatarUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarText}>{target.name.charAt(0).toUpperCase()}</Text>}</View><View style={styles.identityCopy}><Text style={styles.name}>{target.name}</Text><Text style={styles.handle}>@{target.userId}</Text><Text style={styles.bio}>{target.city ?? "公开主页"}</Text></View></View>
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replyPosts={[]} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
+      <ProfileTabs profileDraft={{ name: target.name, handle: target.userId, bio: "", city: target.city ?? "" }} posts={resolvedPosts} mediaByPost={resolvedMedia} photos={photos} replies={replyEntries} replyTargets={replyTargets} savedPosts={[]} taggedPosts={[]} stats={{ posts: resolvedPosts.length, followers: counts?.followers, following: counts?.following }} onOpenMedia={(entry) => setViewer(entry)} onLikePost={(postId) => void likePost(postId)} resolveMediaUrl={(path) => localNet.resolveMediaUrl(path)} fallbackLogo={OTTER_LOGO} color={color} viewerMode="OTHER" viewerAccountId={viewerAccountId} isFollowing={following} followBusy={busy} onFollow={toggleFollow} onUnfollow={toggleFollow} onSendMessage={() => onMessage(target.name, target.avatarUri)} />
     </ScrollView>
     {viewer && viewedItems.length > 0 ? <MediaViewer items={viewedItems} index={viewer.index} author={target.name} resolveUrl={(path) => localNet.resolveMediaUrl(path)} onNavigate={(index) => setViewer((current) => current ? { ...current, index } : current)} onClose={() => setViewer(undefined)} /> : null}
     {/* COMP-REPORT-002: 举报账号。target 用 userId —— 举报要指到账号，

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
 )
@@ -266,6 +267,247 @@ func TestMuteAuthor_PerUserIsolation(t *testing.T) {
 	}
 	if r1.Aggregate.ID == r2.Aggregate.ID {
 		t.Error("per-user mutes should have different ids")
+	}
+}
+
+// ---------- MUTE-REVERSIBLE-001 UnmuteAuthor / ListMutedAuthors ----------
+
+// TestUnmuteAuthorMakesMuteReversible —— 本次修复的核心断言。
+//
+// 修复前 UnmuteAuthor 这条命令**根本不存在**：mute 之后被屏蔽者的帖子会被
+// feed 永久过滤，你再也点不到 Ta 的帖子菜单/头像，于是没有任何入口能撤销。
+// 这个测试钉住「mute → 解掉 → IsMuted 立刻回到 false」这条闭环。
+func TestUnmuteAuthorMakesMuteReversible(t *testing.T) {
+	s := New()
+	if r := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": "author_xyz"}, "user_001")); r.Aggregate.State != "MUTED" {
+		t.Fatalf("setup mute failed: %#v", r)
+	}
+	if muted, err := s.repository.IsMuted(context.Background(), "user_001", "author_xyz"); err != nil || !muted {
+		t.Fatalf("expected IsMuted=true after mute, got muted=%v err=%v", muted, err)
+	}
+
+	r := s.Handle(envelopeFor("UnmuteAuthor", map[string]any{"authorId": "author_xyz"}, "user_001"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("unmute should be ACCEPTED, got %#v", r)
+	}
+	if r.Aggregate == nil || r.Aggregate.State != "UNMUTED" {
+		t.Errorf("expected state=UNMUTED, got %#v", r.Aggregate)
+	}
+	if muted, err := s.repository.IsMuted(context.Background(), "user_001", "author_xyz"); err != nil || muted {
+		t.Fatalf("expected IsMuted=false after unmute, got muted=%v err=%v", muted, err)
+	}
+}
+
+// TestUnmuteAuthorIdempotent —— 本来没屏蔽也 ACCEPTED/NOT_MUTED，且不发事件。
+// 跟 MuteAuthor 的 ALREADY_MUTED 同一个道理：重复操作不是错误。
+func TestUnmuteAuthorIdempotent(t *testing.T) {
+	s := New()
+	r := s.Handle(envelopeFor("UnmuteAuthor", map[string]any{"authorId": "author_never_muted"}, "user_001"))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("unmuting a never-muted author must be idempotent ACCEPTED, got %#v", r)
+	}
+	if r.Aggregate == nil || r.Aggregate.State != "NOT_MUTED" {
+		t.Errorf("expected state=NOT_MUTED, got %#v", r.Aggregate)
+	}
+	if len(r.EventRefs) != 0 {
+		t.Errorf("idempotent unmute must not emit AuthorUnmuted, got %v", r.EventRefs)
+	}
+}
+
+// TestUnmuteAuthorRequiresAuthorID —— 缺 authorId 要拒绝，不能静默成功。
+func TestUnmuteAuthorRequiresAuthorID(t *testing.T) {
+	s := New()
+	for _, payload := range []map[string]any{{}, {"authorId": ""}, {"authorId": "   "}} {
+		r := s.Handle(envelopeFor("UnmuteAuthor", payload, "user_001"))
+		if r.Outcome != "REJECTED" {
+			t.Fatalf("payload %#v should be REJECTED, got %#v", payload, r)
+		}
+		if r.Error == nil || r.Error.ErrorCode != "INVALID_UNMUTE_PAYLOAD" {
+			t.Errorf("payload %#v: expected INVALID_UNMUTE_PAYLOAD, got %#v", payload, r.Error)
+		}
+	}
+}
+
+// TestListMutedAuthorsIsScopedToActor —— 「我屏蔽的人」只能看到自己的，
+// 且解掉一条之后列表要跟着少一条（否则界面会把已解除的人继续列着）。
+func TestListMutedAuthorsIsScopedToActor(t *testing.T) {
+	s := New()
+	for _, author := range []string{"author_a", "author_b", "author_c"} {
+		if r := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": author}, "user_001")); r.Outcome != "ACCEPTED" {
+			t.Fatalf("mute %s failed: %#v", author, r)
+		}
+	}
+	// 另一个用户也屏蔽了一个 —— 绝不能出现在 user_001 的列表里。
+	if r := s.Handle(envelopeWithActor("MuteAuthor", "user_002", map[string]any{"authorId": "author_z"})); r.Outcome != "ACCEPTED" {
+		t.Fatalf("user_002 mute failed: %#v", r)
+	}
+
+	read := func() MutedAuthorsList {
+		t.Helper()
+		return listMutedAuthorsFor(t, s, "user_001")
+	}
+
+	list := read()
+	if list.Count != 3 || len(list.MutedAuthors) != 3 {
+		t.Fatalf("expected 3 mutes for user_001, got count=%d len=%d", list.Count, len(list.MutedAuthors))
+	}
+	if list.ActorID != "user_001" {
+		t.Errorf("list must be scoped to the caller, got actorId=%q", list.ActorID)
+	}
+	for _, mute := range list.MutedAuthors {
+		if mute.AuthorID == "author_z" {
+			t.Error("list leaked user_002's mute of author_z")
+		}
+		if mute.MuteID == "" {
+			t.Errorf("every row needs a muteId so the client can key it: %+v", mute)
+		}
+	}
+
+	if r := s.Handle(envelopeFor("UnmuteAuthor", map[string]any{"authorId": "author_b"}, "user_001")); r.Outcome != "ACCEPTED" {
+		t.Fatalf("unmute author_b failed: %#v", r)
+	}
+	list = read()
+	if list.Count != 2 {
+		t.Errorf("expected 2 mutes after unmuting author_b, got %d", list.Count)
+	}
+	for _, mute := range list.MutedAuthors {
+		if mute.AuthorID == "author_b" {
+			t.Error("author_b is still listed after being unmuted")
+		}
+	}
+}
+
+// TestListMutedAuthorsOrdersNewestFirst —— 顺序必须与 PG 的
+// ORDER BY created_at DESC, id DESC 一致，否则同一份断言在内存与 PG
+// 两种 repo 下会给出不同顺序。这里直接喂确定的 CreatedAt，不依赖真实时钟。
+func TestListMutedAuthorsOrdersNewestFirst(t *testing.T) {
+	repo := NewMemoryRepository()
+	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	// 刻意乱序插入。
+	for _, spec := range []struct {
+		id     string
+		author string
+		offset time.Duration
+	}{
+		{"mute_oldest", "author_a", 0},
+		{"mute_newest", "author_c", 2 * time.Hour},
+		{"mute_middle", "author_b", time.Hour},
+	} {
+		if _, _, err := repo.AddMutedAuthor(context.Background(), MutedAuthor{
+			ID: spec.id, ActorID: "user_001", AuthorID: spec.author, CreatedAt: base.Add(spec.offset),
+		}); err != nil {
+			t.Fatalf("seed %s: %v", spec.id, err)
+		}
+	}
+	got, err := repo.ListMutedAuthors(context.Background(), "user_001")
+	if err != nil {
+		t.Fatalf("ListMutedAuthors: %v", err)
+	}
+	gotAuthors := make([]string, 0, len(got))
+	for _, mute := range got {
+		gotAuthors = append(gotAuthors, mute.AuthorID)
+	}
+	want := []string{"author_c", "author_b", "author_a"}
+	if len(gotAuthors) != len(want) {
+		t.Fatalf("expected %d mutes, got %v", len(want), gotAuthors)
+	}
+	for i := range want {
+		if gotAuthors[i] != want[i] {
+			t.Fatalf("newest-first order: want %v, got %v", want, gotAuthors)
+		}
+	}
+}
+
+// listMutedAuthorsFor 读「我屏蔽的人」并解开读模型，供上面几组断言共用。
+func listMutedAuthorsFor(t *testing.T, s *Service, actorID string) MutedAuthorsList {
+	t.Helper()
+	r := s.Handle(envelopeWithActor("ListMutedAuthors", actorID, map[string]any{}))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("ListMutedAuthors should be ACCEPTED, got %#v", r)
+	}
+	if r.OperationRef == "" {
+		t.Fatal("ListMutedAuthors returned no operationRef")
+	}
+	var list MutedAuthorsList
+	if err := json.Unmarshal([]byte(r.OperationRef), &list); err != nil {
+		t.Fatalf("unmarshal MutedAuthorsList: %v", err)
+	}
+	return list
+}
+
+// TestListMutedAuthorsResolvesAuthorDisplayName —— 列表必须给出**可展示的名字**。
+//
+// 为什么这条是能力而不是装饰：屏蔽列表恰恰是「帖子全被 feed 过滤掉」的一群人，
+// 客户端没法像 feed 那样从帖子读模型里借名字 —— 它手里只有一个 authorId。服务端
+// 不回填名字，用户就只能对着一串账号 id 猜该解除谁，这个「解除屏蔽」入口等于没做。
+// 名字必须来自 profile 解析器（跟评论同一个），解析不到留空串由客户端降级，
+// 任何一条退化成回显 authorId 都是回归。
+func TestListMutedAuthorsResolvesAuthorDisplayName(t *testing.T) {
+	s := New()
+	resolver := &stubReplyAuthorNames{names: map[string]string{"author_a": "NguyenThanhHuyen", "author_b": "Khoa"}}
+	s.SetAuthorNameResolver(resolver)
+	for _, author := range []string{"author_a", "author_b", "author_c"} {
+		if r := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": author}, "user_001")); r.Outcome != "ACCEPTED" {
+			t.Fatalf("mute %s failed: %#v", author, r)
+		}
+	}
+
+	rows := listMutedAuthorsFor(t, s, "user_001").MutedAuthors
+	names := make(map[string]string, len(rows))
+	for _, row := range rows {
+		names[row.AuthorID] = row.AuthorDisplayName
+		if row.AuthorID == row.AuthorDisplayName {
+			t.Errorf("display name must never be the raw author id: %+v", row)
+		}
+	}
+	if names["author_a"] != "NguyenThanhHuyen" {
+		t.Errorf("author_a name must come from the profile resolver, got %q", names["author_a"])
+	}
+	if names["author_b"] != "Khoa" {
+		t.Errorf("author_b name must come from the profile resolver, got %q", names["author_b"])
+	}
+	if names["author_c"] != "" {
+		t.Errorf("unresolved author must stay blank (client degrades to a neutral label), got %q", names["author_c"])
+	}
+	if len(resolver.looked) != len(rows) {
+		t.Errorf("names must be resolved once per distinct author, looked=%v rows=%d", resolver.looked, len(rows))
+	}
+}
+
+// TestListMutedAuthorsIgnoresPoisonedName —— 跟 withReplyActorNames 同一条规矩：
+// 历史客户端把 "你" 硬编码进过 profile（FEED-OWN-001），当成名字回给所有人会让
+// 被屏蔽者显示成"你"。脏值必须当作「解析不到」。
+func TestListMutedAuthorsIgnoresPoisonedName(t *testing.T) {
+	s := New()
+	s.SetAuthorNameResolver(&stubReplyAuthorNames{names: map[string]string{"author_a": "你", "author_b": "   "}})
+	for _, author := range []string{"author_a", "author_b"} {
+		if r := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": author}, "user_001")); r.Outcome != "ACCEPTED" {
+			t.Fatalf("mute %s failed: %#v", author, r)
+		}
+	}
+	for _, row := range listMutedAuthorsFor(t, s, "user_001").MutedAuthors {
+		if row.AuthorDisplayName != "" {
+			t.Errorf("poisoned/blank profile name must not be sent as a display name: %+v", row)
+		}
+	}
+}
+
+// TestListMutedAuthorsUnwiredResolverYieldsNoName —— 没接 resolver（或 profile
+// 服务不可用）时不能崩，也不能回填 authorId 当名字，只是名字为空。
+func TestListMutedAuthorsUnwiredResolverYieldsNoName(t *testing.T) {
+	s := New()
+	if r := s.Handle(envelopeFor("MuteAuthor", map[string]any{"authorId": "author_a"}, "user_001")); r.Outcome != "ACCEPTED" {
+		t.Fatalf("mute failed: %#v", r)
+	}
+	rows := listMutedAuthorsFor(t, s, "user_001").MutedAuthors
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].AuthorDisplayName != "" {
+		t.Errorf("unwired resolver must yield no name, got %q", rows[0].AuthorDisplayName)
+	}
+	if rows[0].AuthorID != "author_a" {
+		t.Errorf("authorId must survive: %+v", rows[0])
 	}
 }
 
@@ -627,6 +869,16 @@ func (p *postNotFoundRepo) AddMutedAuthor(ctx context.Context, mute MutedAuthor)
 }
 func (p *postNotFoundRepo) IsMuted(ctx context.Context, actorID, authorID string) (bool, error) {
 	return p.inner.IsMuted(ctx, actorID, authorID)
+}
+
+// MUTE-REVERSIBLE-001: 新增的解除屏蔽/列出被屏蔽者也要透传，
+// 否则这个 wrapper 不再满足 Repository 接口。
+func (p *postNotFoundRepo) RemoveMutedAuthor(ctx context.Context, actorID, authorID string) (bool, error) {
+	return p.inner.RemoveMutedAuthor(ctx, actorID, authorID)
+}
+
+func (p *postNotFoundRepo) ListMutedAuthors(ctx context.Context, actorID string) ([]MutedAuthor, error) {
+	return p.inner.ListMutedAuthors(ctx, actorID)
 }
 func (p *postNotFoundRepo) Engagement(ctx context.Context, postID string, viewerID ...string) (PostEngagement, error) {
 	return p.inner.Engagement(ctx, postID, viewerID...)

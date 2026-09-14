@@ -4,9 +4,15 @@
 //   IG/Threads 标准是 5 tabs (帖子/回复/收藏/标记/关于). 5 tabs 把
 //   "我" 的内容生态表达完整 — 收藏 = 用户私库 (重要入口), tagged = 别人
 //   提到我, replies = 别人看得到我的活动 (信任).
-// Phase 1.5 策略: REPLIES/SAVED/TAGGED 用本地 mock (空数组 + 空态文案);
-//   POSTS/PHOTOS 复用 me.tsx profilePosts / personalPhotos. 这样不依赖
-//   server 改动 — Phase 2 接 backend 时 5 个 tabs 都用真数据.
+// 数据: 5 个 tabs 都接真数据 —— POSTS/PHOTOS 复用 me.tsx profilePosts /
+//   personalPhotos; REPLIES 走 ListUserReplies，再用 ListPostsByIds 回查
+//   被回复的父帖（REPLY-TARGET-001）; SAVED 走 ListUserBookmarks
+//   (再按 ID 直取); TAGGED 走 ListPostsMentioning（MENTION-001）。
+//   TAGGED 原先是在客户端拿一页动态做 @handle 子串筛的 —— 更早的提及会静默
+//   消失，而且 "@thanh2" 会被算成提到了 "@thanh"。现在由服务端扫全量已发布
+//   帖子，可见性与动态流一致。
+// 可见性: SAVED 只对本人可见（PROFILE-TABS-001）—— 别人的收藏夹是他的私库，
+//   不是公开主页的一栏。
 
 import React, { useMemo, useState } from "react";
 import { Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
@@ -15,12 +21,22 @@ import { ThreadsPostMedia } from "../components/threads-post-media";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import type { LocalNetClient } from "../localnet-client";
-import { selectPinnedPostAndRest, selectPostMedia, type ProfileMediaEntry } from "./profile-tabs-model";
-export type { ProfileMediaEntry } from "./profile-tabs-model";
+import {
+  replyTargetLabel,
+  replyTimestampLabel,
+  type ReplyEntry,
+  type ReplyTarget
+} from "../reply-target";
+import {
+  selectPinnedPostAndRest,
+  selectPostMedia,
+  visibleProfileTabs,
+  type ProfileMediaEntry,
+  type ProfileTabKey
+} from "./profile-tabs-model";
+export type { ProfileMediaEntry, ProfileTabKey } from "./profile-tabs-model";
 
 // ---------- 类型 ----------
-
-export type ProfileTabKey = "POSTS" | "REPLIES" | "SAVED" | "TAGGED" | "ABOUT";
 
 export interface ProfileTabsProps {
   profileDraft: {
@@ -35,9 +51,21 @@ export interface ProfileTabsProps {
   photos: ProfileMediaEntry[];                // PHOTOS (IG 3-列网格 in POSTS)
   // R15.73: 置顶帖 ID 列表 (server 返, ListPinnedPosts). pinnedIds[0] 渲染置顶, 其余标 "已置顶" 标记.
   pinnedIds?: ReadonlyArray<string> | undefined;
-  replyPosts: FeedPost[];                     // REPLIES tab (Phase 1 mock)
-  savedPosts: FeedPost[];                     // SAVED tab (Phase 1 mock)
-  taggedPosts: FeedPost[];                    // TAGGED tab (Phase 1 mock)
+  // REPLIES/SAVED/TAGGED 都已经是真数据（me.tsx 走 ListUserReplies /
+  // ListUserBookmarks；other-profile.tsx 走 ListUserReplies）。SAVED 只在
+  // viewerMode === "SELF" 时渲染 —— 收藏是私库，不上他人主页
+  // （PROFILE-TABS-001）。
+  // REPLY-TARGET-001: 回复不再是伪装成 FeedPost 的假帖子 —— 它有自己的形状
+  // （replyId / parentPostId），因为同一条帖子可以被回复多次，用父帖 id 当
+  // React key 会撞。被回复的父帖由调用方用 ListPostsByIds 回查后放进
+  // replyTargets；查不到就是缺项，渲染退化成中性文案。
+  replies: ReplyEntry[];
+  replyTargets: Record<string, ReplyTarget>;
+  savedPosts: FeedPost[];
+  taggedPosts: FeedPost[];
+  // REPLY-TARGET-001: 判定「这条帖子是不是访问者自己的」用，跟 feed 同一套
+  // 身份规则（resolveAuthorDisplayName）。缺省 = 游客，一律不当成自己。
+  viewerAccountId?: string | undefined;
   // 统计 (IG/Threads 风格 "粉丝 关注 帖子")。没拉到就是 undefined，
   // 渲染 "—" 不回填 0。
   stats: {
@@ -76,8 +104,29 @@ export interface ProfileTabsProps {
 
 // ---------- 组件 ----------
 
+const PROFILE_TAB_LABEL: Record<ProfileTabKey, string> = {
+  POSTS: "帖子",
+  REPLIES: "回复",
+  SAVED: "收藏",
+  TAGGED: "标签",
+  ABOUT: "关于"
+};
+
+const PROFILE_TAB_ICON: Record<ProfileTabKey, ProxyIconName> = {
+  POSTS: "sparkle",
+  REPLIES: "spark",
+  SAVED: "star",
+  TAGGED: "target",
+  ABOUT: "ring"
+};
+
 export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
   const [tab, setTab] = useState<ProfileTabKey>("POSTS");
+
+  // PROFILE-TABS-001: SAVED 只给本人。viewer 身份未知时不给（fail-closed）。
+  const tabs = useMemo(() => visibleProfileTabs(props.viewerMode), [props.viewerMode]);
+  // 当前 tab 被隐藏时（例如从本人主页切到他人主页）回落 POSTS，避免留一个空白页。
+  const activeTab: ProfileTabKey = tabs.includes(tab) ? tab : "POSTS";
 
   // R15.73: 置顶帖 = server 返的 pinnedIds 中第一个, 不在 profilePosts 时走 fallback.
   // 之前 (Phase 1) 取 posts[0] mock — 跟 post 列表重复, 只是占位.
@@ -141,30 +190,25 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
         )}
       </View>
 
-      {/* Tabs 5 选 1 — IG/Threads 风: 顶部小 icon + 中文 label, active 黑下划线 2px */}
+      {/* Tabs N 选 1 — IG/Threads 风: 顶部小 icon + 中文 label, active 黑下划线 2px。
+          PROFILE-TABS-001: 列表走 visibleProfileTabs，SAVED 只给本人。 */}
       <View style={styles.tabsRow}>
-        {([
-          ["POSTS", "sparkle", "帖子"],
-          ["REPLIES", "spark", "回复"],
-          ["SAVED", "star", "收藏"],
-          ["TAGGED", "target", "标签"],
-          ["ABOUT", "ring", "关于"]
-        ] as Array<[ProfileTabKey, ProxyIconName, string]>).map(([key, iconName, label]) => (
+        {tabs.map((key) => (
           <Pressable
             key={key}
             accessibilityLabel={`${key} tab`}
             onPress={() => setTab(key)}
             style={styles.tabBtn}
           >
-            <ProxyIcon name={iconName} color={tab === key ? props.color.ink : props.color.muted} size={20} />
-            <Text style={[styles.tabLabel, tab === key && styles.tabLabelActive]}>{label}</Text>
-            {tab === key ? <View style={styles.tabUnderline} /> : null}
+            <ProxyIcon name={PROFILE_TAB_ICON[key]} color={activeTab === key ? props.color.ink : props.color.muted} size={20} />
+            <Text style={[styles.tabLabel, activeTab === key && styles.tabLabelActive]}>{PROFILE_TAB_LABEL[key]}</Text>
+            {activeTab === key ? <View style={styles.tabUnderline} /> : null}
           </Pressable>
         ))}
       </View>
 
       {/* Tab body */}
-      {tab === "POSTS" ? (
+      {activeTab === "POSTS" ? (
         <PostsTab
           pinnedPost={pinnedPost}
           posts={unpinnedPosts}
@@ -181,15 +225,16 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           color={props.color}
         />
       ) : null}
-      {tab === "REPLIES" ? (
+      {activeTab === "REPLIES" ? (
         <RepliesTab
-          replies={props.replyPosts}
-          avatarUri={props.profileAvatarUri}
-          name={props.profileDraft.name}
+          replies={props.replies}
+          targets={props.replyTargets}
+          viewerMode={props.viewerMode}
+          viewerAccountId={props.viewerAccountId}
           color={props.color}
         />
       ) : null}
-      {tab === "SAVED" ? (
+      {activeTab === "SAVED" ? (
         <SavedTab
           saved={props.savedPosts}
           mediaByPost={props.mediaByPost}
@@ -198,7 +243,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           color={props.color}
         />
       ) : null}
-      {tab === "TAGGED" ? (
+      {activeTab === "TAGGED" ? (
         <TaggedTab
           tagged={props.taggedPosts}
           mediaByPost={props.mediaByPost}
@@ -207,7 +252,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
           color={props.color}
         />
       ) : null}
-      {tab === "ABOUT" ? (
+      {activeTab === "ABOUT" ? (
         <AboutTab
           profileDraft={props.profileDraft}
           stats={props.stats}
@@ -421,12 +466,13 @@ function PostCard(props: {
   );
 }
 
-// ---------- RepliesTab (回复, Phase 1 mock) ----------
+// ---------- RepliesTab (回复) ----------
 
 function RepliesTab(props: {
-  replies: FeedPost[];
-  avatarUri?: string | undefined;
-  name: string;
+  replies: ReplyEntry[];
+  targets: Record<string, ReplyTarget>;
+  viewerMode: "SELF" | "OTHER" | undefined;
+  viewerAccountId?: string | undefined;
   color: ProfileTabsProps["color"];
 }): React.JSX.Element {
   if (props.replies.length === 0) {
@@ -434,19 +480,30 @@ function RepliesTab(props: {
   }
   return (
     <View>
-      {props.replies.map((reply) => (
-        <View key={reply.postId} style={styles.replyCard}>
-          <View style={styles.replyMeta}>
-            {/* R15.87 fix: 之前 '回复 @{reply.authorId} 的帖子' 永远显示回复自己
-                 (me.tsx listUserReplies handler hardcode authorId=viewerAccountId).
-                 改为 '你回复了' 跟原始帖 ID. server Reply 暂没 parentPostId 字段
-                 (commander 域), Phase 2 加 schema. */}
-            <Text style={styles.replyTarget}>你回复了</Text>
-            <Text style={styles.replyTime}>· {new Date(reply.createdAt).toLocaleDateString()}</Text>
+      {props.replies.map((reply) => {
+        // REPLY-TARGET-001: 取不回来的父帖（已删 / 已收紧成仅关注者可见）就是
+        // undefined —— 这一行退化成中性文案，不显示 id、不编名字。
+        const target = props.targets[reply.parentPostId];
+        return (
+          // key 用 replyId：同一条帖子可以被同一个人回复多次，用父帖 id 会撞。
+          <View key={reply.replyId} style={styles.replyCard}>
+            <View style={styles.replyMeta}>
+              <Text style={styles.replyTarget}>
+                {replyTargetLabel(props.viewerMode, target, props.viewerAccountId)}
+              </Text>
+              <Text style={styles.replyTime}>· {replyTimestampLabel(reply.createdAt)}</Text>
+            </View>
+            <Text style={styles.replyText}>{reply.body}</Text>
+            {/* 引用块：让「回复了谁」这条信息能落到实处 —— 看到原帖才知道
+                说的是哪件事（Threads 的做法）。 */}
+            {target && target.excerpt !== "" ? (
+              <View style={styles.replyQuote}>
+                <Text numberOfLines={2} style={styles.replyQuoteText}>{target.excerpt}</Text>
+              </View>
+            ) : null}
           </View>
-          <Text style={styles.replyText}>{reply.body}</Text>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -643,6 +700,9 @@ const styles = StyleSheet.create({
   replyTarget: { fontSize: 11, color: "#94a3b8" },
   replyTime: { fontSize: 11, color: "#94a3b8" },
   replyText: { fontSize: 13, color: "#0f172a", marginTop: 4, lineHeight: 18 },
+  // REPLY-TARGET-001: 被回复帖子的引用块（Threads 风格）。
+  replyQuote: { marginTop: 6, paddingLeft: 8, borderLeftWidth: 2, borderLeftColor: "#e2e8f0" },
+  replyQuoteText: { fontSize: 12, color: "#64748b", lineHeight: 17 },
   // About
   aboutCard: { marginHorizontal: 16, marginVertical: 12, padding: 16, backgroundColor: "#f8fafc", borderRadius: 10 },
   aboutBio: { fontSize: 13, color: "#0f172a", lineHeight: 19 },

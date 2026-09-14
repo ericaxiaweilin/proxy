@@ -1,11 +1,16 @@
 // R15.3 我的推荐 — Feed 偏好设置屏幕
 // 对齐 Proxy_P0_Prototype_R15_3_SearchFirst_ModelUI_BusinessOS.html 的 feedprefs 页面
 // 每行 3 列 grid：标签(96px) + range slider(1fr) + 数值(34px)
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { GestureResponderEvent } from "react-native";
+import type { MutedAuthorEntry } from "@proxy/contracts";
 import { color } from "../theme";
 import { readFeedPrefsAsync, writeFeedPrefs, defaultFeedPrefs } from "../expo-feed-prefs-store";
+import { EngagementClient } from "../engagement-client";
+import { OfflineFallbackSessionError } from "../secure-session";
+import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
+import { mutedAuthorLabel, removeMutedAuthor } from "../muted-authors";
 
 const FEED_ROWS: ReadonlyArray<[string, string]> = [
   ["opportunity", "机会 / 需求"],
@@ -70,6 +75,17 @@ function Slider({
   );
 }
 
+// MUTE-REVERSIBLE-001 — 「我屏蔽的人」需要一个 engagement client。这个表面目前
+// 不是由 app-shell 透传 client 的（只有 onBack），所以照 ai-assistants-row.tsx
+// 的既有做法自建一个：client 本身无状态（只有一个自增序号），多一个实例无害，
+// 也比为了透传一个 prop 去动受控的 shell 更安全。
+function useEngagementClient(): EngagementClient {
+  const [client] = useState(
+    () => new EngagementClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore })
+  );
+  return client;
+}
+
 export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
   // R36.x PREFS-001: 设置落本地（expo-feed-prefs-store），退出重进保留。
   // SYNC-FS-001: 读盘异步，mount 时 hydration（此时用户尚未编辑，直接应用）。
@@ -97,6 +113,60 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
     }
     writeFeedPrefs({ weights, scope, muted: [...muted], algoApplied });
   }, [weights, scope, muted, algoApplied]);
+
+  // ---------- 我屏蔽的人（MUTE-REVERSIBLE-001） ----------
+  //
+  // 注意：**不要**和上面那个 `muted` 集合合并。上面那个是主题级本地偏好
+  // （只存在本地 store），这里是作者级关系事实，权威在服务端。混在一起会让
+  // 「暂停某个主题」和「屏蔽某个人」互相覆盖。
+  //
+  // 这一块存在的理由：屏蔽以前是单向的。被屏蔽者的帖子被 feed 永久过滤，
+  // 你再也点不到 Ta 的帖子菜单或头像，于是没有任何入口能撤销这次屏蔽。
+  // 这里是唯一的回程，所以它必须真的能读、真的能解，而不是摆个空壳。
+  const engagement = useEngagementClient();
+  const [mutedAuthors, setMutedAuthors] = useState<MutedAuthorEntry[] | undefined>(undefined);
+  const [mutedAuthorsError, setMutedAuthorsError] = useState<string | undefined>(undefined);
+  const [unmutingId, setUnmutingId] = useState<string | undefined>(undefined);
+
+  const loadMutedAuthors = useCallback(async () => {
+    setMutedAuthorsError(undefined);
+    setMutedAuthors(undefined);
+    try {
+      const list = await engagement.listMutedAuthors();
+      setMutedAuthors(list.mutedAuthors);
+    } catch (err) {
+      // 刻意**不**退化成空列表：这个列表是用户唯一的解除入口，渲染成
+      // 「还没有屏蔽任何人」会让用户以为屏蔽丢了，而且没有可操作的下一步。
+      setMutedAuthors(undefined);
+      setMutedAuthorsError(
+        err instanceof OfflineFallbackSessionError
+          ? "登录后可以查看和管理你屏蔽的人。"
+          : "读取失败，请重试。"
+      );
+    }
+  }, [engagement]);
+
+  useEffect(() => {
+    void loadMutedAuthors();
+  }, [loadMutedAuthors]);
+
+  async function handleUnmute(authorId: string): Promise<void> {
+    if (unmutingId !== undefined) return; // 防连点：同一时刻只允许一个解除在飞
+    setUnmutingId(authorId);
+    setMutedAuthorsError(undefined);
+    try {
+      await engagement.unmuteAuthor(authorId);
+      // 服务端已经 ACCEPTED（本来没屏蔽也算成功，幂等），本地直接摘掉那一行，
+      // 不再重拉一次 —— 重拉只会让那一行在慢网下「先消失又回来」。
+      setMutedAuthors((prev) => (prev ? removeMutedAuthor(prev, authorId) : prev));
+    } catch (err) {
+      setMutedAuthorsError(
+        err instanceof OfflineFallbackSessionError ? "请登录后再解除屏蔽。" : "解除失败，请重试。"
+      );
+    } finally {
+      setUnmutingId(undefined);
+    }
+  }
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
@@ -179,6 +249,41 @@ export function FeedPrefsSurface({ onBack }: { onBack: () => void }): React.JSX.
             </Pressable>
           );
         })}
+      </View>
+
+      {/* 我屏蔽的人（MUTE-REVERSIBLE-001）— 作者级，权威在服务端，唯一的解除入口 */}
+      <Text style={styles.sectionTitle}>我屏蔽的人</Text>
+      <Text style={styles.sectionSub}>屏蔽后 Ta 的帖子不再出现，可以随时解除</Text>
+      <View style={styles.card}>
+        {mutedAuthorsError ? (
+          <View style={styles.mutedAuthorRow}>
+            <Text style={styles.mutedAuthorHint}>{mutedAuthorsError}</Text>
+            <Pressable onPress={() => void loadMutedAuthors()} style={styles.mutedAuthorAction}>
+              <Text style={styles.mutedAuthorActionText}>重试</Text>
+            </Pressable>
+          </View>
+        ) : mutedAuthors === undefined ? (
+          <Text style={styles.mutedAuthorHint}>读取中…</Text>
+        ) : mutedAuthors.length === 0 ? (
+          <Text style={styles.mutedAuthorHint}>还没有屏蔽任何人。</Text>
+        ) : (
+          mutedAuthors.map((row) => (
+            <View key={row.muteId} style={styles.mutedAuthorRow}>
+              <Text style={styles.mutedAuthorName} numberOfLines={1}>
+                {mutedAuthorLabel(row)}
+              </Text>
+              <Pressable
+                onPress={() => void handleUnmute(row.authorId)}
+                disabled={unmutingId !== undefined}
+                style={[styles.mutedAuthorAction, unmutingId !== undefined && styles.disabled]}
+              >
+                <Text style={styles.mutedAuthorActionText}>
+                  {unmutingId === row.authorId ? "解除中…" : "解除屏蔽"}
+                </Text>
+              </Pressable>
+            </View>
+          ))
+        )}
       </View>
 
       {/* 推荐原则 */}
@@ -294,6 +399,27 @@ const styles = StyleSheet.create({
   mutedChipOff: { backgroundColor: "#F3EFF5", borderColor: "#D9D0DE" },
   mutedChipText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   mutedChipTextOff: { color: "#8A8290", textDecorationLine: "line-through" },
+
+  // muted authors — 作者级屏蔽（服务端权威）。刻意和上面的主题 chip 视觉上分开：
+  // chip 是「少看这类」，这里是「这个人我屏蔽了」，操作后果不一样。
+  mutedAuthorRow: {
+    alignItems: "center",
+    borderBottomColor: "#F1EDF3",
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    paddingVertical: 10
+  },
+  mutedAuthorName: { color: color.ink, flex: 1, fontSize: 12, fontWeight: "700" },
+  mutedAuthorHint: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 15, paddingVertical: 10 },
+  mutedAuthorAction: {
+    borderColor: color.line,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  mutedAuthorActionText: { color: color.ink, fontSize: 11, fontWeight: "800" },
 
   // principle card — dark
   principleCard: {

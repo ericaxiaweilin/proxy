@@ -4,6 +4,7 @@
 import type { CommandResult, CreatePostPayload, FeedMediaItem, FeedPost } from "@proxy/contracts";
 import { ListFeedPostsPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
+import { filterPostsByFeedSearch, normalizeFeedSearchQuery } from "./feed-search";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
@@ -60,14 +61,19 @@ export class LocalNetClient {
   public async listFeedPosts(cursor?: string, limit = 25, searchQuery?: string): Promise<FeedReadModel> {
     // 动态 ALL 固定读取全局公开时间流。地址只用于用户显式选择的
     // 二级筛选，不能进入服务端 ListFeedPosts payload。
-    // R15.92: searchQuery — client 端过滤 (server ListFeedPosts 暂不接 search params,
-    //   Phase 2 server 加 search 后可走 ListFeedPosts search 或独立 SearchPosts 端点).
+    //
+    // SEARCH-CORPUS-001: searchQuery 走**服务端**过滤（R15.94 起 server 的
+    // listFeed 就接 search 字段）。这里原来的注释写「server ListFeedPosts 暂不接
+    // search params, Phase 2 …」，那是 R15.94 之前的事实，已经过期；它让这条通道
+    // 看起来还没通，于是 client 的 searchQuery 参数全仓无人传，
+    // 搜索只在**已加载的那几页**里做本地过滤 —— 搜「人」只能搜到你恰好滚过的几条。
+    // 过滤字段语义统一在 ./feed-search（逐字对应 Go 侧 postMatchesSearch）。
+    const search = normalizeFeedSearchQuery(searchQuery);
     if (this.input.authClient.requestPublic) {
       const query = [`limit=${Math.max(1, Math.min(50, limit))}`];
       if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`);
-      // R15.94: 真正传 server (server listFeed service.go R15.94 接 Search 字段).
-      if (searchQuery && searchQuery.trim().length > 0) {
-        query.push(`search=${encodeURIComponent(searchQuery.trim())}`);
+      if (search !== "") {
+        query.push(`search=${encodeURIComponent(search)}`);
       }
       const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
       if (response.status < 200 || response.status >= 300) {
@@ -80,30 +86,34 @@ export class LocalNetClient {
         throw new LocalNetProtocolError("动态服务返回异常，请稍后重试");
       }
       const payload = ListFeedPostsPayloadSchema.parse(body);
-      const posts = searchQuery && searchQuery.trim().length > 0
-        ? payload.posts.filter((p) => {
-            const q = searchQuery.toLowerCase();
-            return p.body.toLowerCase().includes(q) || (p.authorDisplayName?.toLowerCase().includes(q) ?? false);
-          })
-        : payload.posts;
-      return { posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+      // 服务端已按同一份字段语义过滤过；这里再走一次同一个 helper 只是兜底
+      // （老 server / 缓存回放）。字段集完全一致，所以不会把服务端已认可的结果丢掉。
+      return {
+        posts: filterPostsByFeedSearch(payload.posts, search),
+        media: payload.media,
+        nextCursor: payload.nextCursor || undefined,
+        hasMore: payload.hasMore === true
+      };
     }
     const result = await this.sendCommand(
       undefined,
       "ListFeedPosts",
       { type: "Feed", id: "local" },
-      { cursor, limit },
+      // SEARCH-CORPUS-001: 这条分支以前**不带** search，于是登录态下的搜索
+      // 只会在服务端返回的那一页里做本地过滤。server 的 listFeed 读的就是
+      // payload.search（跟公开分支同一个 handler），所以这里必须同样带上，
+      // 两条分支的搜索语义才一致。
+      search === "" ? { cursor, limit } : { cursor, limit, search },
       undefined,
       true
     );
     const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
-    const posts = searchQuery && searchQuery.trim().length > 0
-      ? payload.posts.filter((p) => {
-          const q = searchQuery.toLowerCase();
-          return p.body.toLowerCase().includes(q) || (p.authorDisplayName?.toLowerCase().includes(q) ?? false);
-        })
-      : payload.posts;
-    return { posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+    return {
+      posts: filterPostsByFeedSearch(payload.posts, search),
+      media: payload.media,
+      nextCursor: payload.nextCursor || undefined,
+      hasMore: payload.hasMore === true
+    };
   }
 
   public async listMyFeedPosts(): Promise<FeedReadModel> {
@@ -133,6 +143,73 @@ export class LocalNetClient {
       cursor = read.nextCursor;
     }
     return mine;
+  }
+
+  /**
+   * PROFILE-SAVED-001 — 按 ID 批量取帖子。
+   *
+   * 收藏夹里只有 postId。之前只能从动态流里「捞」，于是收藏一条不在前 25 条
+   * 里的帖子就等于丢了（用户会以为收藏被吞了）。这条直取：服务端用与动态流
+   * 相同的可见性口径，取不到的 ID 直接跳过（帖子可能已删）。
+   */
+  public async listPostsByIds(postIds: readonly string[]): Promise<FeedReadModel> {
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of postIds) {
+      const id = raw.trim();
+      if (id.length === 0 || seen.has(id)) continue;
+      seen.add(id);
+      unique.push(id);
+      if (unique.length >= 100) break;
+    }
+    if (unique.length === 0) {
+      return { posts: [], media: {}, nextCursor: undefined, hasMore: false };
+    }
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListPostsByIds",
+      // 服务端 validateEnvelope 要求 target.id 非空（fail-closed，先于 dispatch）。
+      // 批量按 ID 读没有单一聚合，用显式哨兵值而不是空串：空串会被拒成
+      // INVALID_COMMAND_ENVELOPE，收藏 tab 每次都会抛错。与 CreatePost 的
+      // "new" 同属「命名操作、不假装是真实聚合」的哨兵惯例。
+      { type: "Post", id: "by_ids" },
+      { postIds: unique }
+    );
+    const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
+    return { posts: payload.posts, media: payload.media, nextCursor: undefined, hasMore: false };
+  }
+
+  /**
+   * MENTION-001: 个人主页 TAGGED tab —— 「提到我的帖子」。
+   *
+   * 之前是客户端拿**一页**动态（默认 25 条）做 strings.Contains 筛的：比你这一页
+   * 更早的提及直接消失（被提到 50 次也只看到 2 次），而且 "@thanh2" 会被算成
+   * 提到了 "@thanh"。现在交给服务端扫全量已发布帖子，可见性/静音口径与动态流
+   * 完全一致且 fail-closed。
+   */
+  public async listPostsMentioning(handle: string, limit = 30): Promise<FeedReadModel> {
+    const normalized = handle.trim().replace(/^@+/, "").toLowerCase();
+    if (normalized.length === 0) {
+      // fail-closed：没有可用的 handle 就别去问服务端，更不能退化成「整条动态流」。
+      return { posts: [], media: {}, nextCursor: undefined, hasMore: false };
+    }
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "ListPostsMentioning",
+      // 服务端 validateEnvelope 要求 target.id 非空。批量提及读没有单一聚合，
+      // 用显式哨兵值（与 ListPostsByIds 的 by_ids、CreatePost 的 new 同属惯例）。
+      { type: "Post", id: "mentions" },
+      { handle: normalized, limit: Math.max(1, Math.min(50, limit)) }
+    );
+    const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
+    return {
+      posts: payload.posts,
+      media: payload.media,
+      nextCursor: undefined,
+      hasMore: payload.hasMore ?? false
+    };
   }
 
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {

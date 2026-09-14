@@ -217,6 +217,8 @@ commands:
     domain: Media
   - command: ListMemberDirectory
     domain: Business
+  - command: ListMutedAuthors
+    domain: Engagement
   - command: ListMyActivities
     domain: Activity
   - command: ListMyBusinessAccounts
@@ -237,6 +239,10 @@ commands:
     domain: Engagement
   - command: ListPostReplies
     domain: Engagement
+  - command: ListPostsByIds
+    domain: LocalNet
+  - command: ListPostsMentioning
+    domain: LocalNet
   - command: ListPrivacyRequests
     domain: Identity
   - command: ListRequesterHomeItems
@@ -285,6 +291,8 @@ commands:
     domain: Supply
   - command: ReactToPost
     domain: Engagement
+  - command: RecommendStore
+    domain: StoreOnboarding
   - command: RecordAggregatedDemandSignal
     domain: Business
   - command: RecordAppealDecision
@@ -411,6 +419,8 @@ commands:
     domain: Activity
   - command: UnfollowProfile
     domain: Engagement
+  - command: UnmuteAuthor
+    domain: Engagement
   - command: UnpinPost
     domain: Engagement
   - command: UpdateAccountPreferences
@@ -439,3 +449,5 @@ commands:
     domain: Supply
   - command: VerifyLoginChallenge
     domain: Identity
+  - command: VotePostPoll
+    domain: LocalNet

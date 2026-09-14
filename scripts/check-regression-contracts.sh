@@ -2274,6 +2274,46 @@ if [ ! -f apps/api-go/migrations/089_moderation_authority_requests.sql ]; then
 fi
 echo "    COMP-AUTHORITY-001: PASS (authority requests are attributable, SLA-tracked, and operator-only)"
 
+# STORE-REC-001: 推荐商铺进体系（原始设计：企业/店铺是独立模块，体系增长靠
+# 发展 builder + 小美/用户推荐商铺进入体系）。本条锁死：RecommendStore 命令
+# 必须被 storeonboarding 服务受理（匿名不可用——推荐人必须是鉴权账号）；记录
+# 必须 append-only（无 UPDATE/DELETE 路径）；PG 仓储与迁移 090 必须存在；
+# 移动端必须有「推荐商铺进体系」入口（me.tsx 企业/店铺组，独立于账户）。
+require_test "STORE-REC-001" "./internal/storeonboarding" \
+  "TestRecommendStoreAcceptedAndAttributed" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-001" "./internal/storeonboarding" \
+  "TestRecommendStoreRejectedWhenActorMissing" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-001" "./internal/storeonboarding" \
+  "TestRecommendStoreAIOriginAccepted" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'case "RecommendStore"' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-001]: the RecommendStore command is no longer handled" >&2
+  echo "        by the storeonboarding service, so it would 501." >&2
+  exit 1
+fi
+if ! grep -qF 'AddRecommendation(ctx context.Context, r StoreRecommendation) error' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-001]: the Repository interface no longer carries" >&2
+  echo "        AddRecommendation (append-only write would not compile)." >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *StoreOnboardingRepository) AddRecommendation' apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-001]: the Postgres store-onboarding repository is missing," >&2
+  echo "        so recommendations would not survive a restart." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/092_store_recommendations.sql ]; then
+  echo "  FAIL [STORE-REC-001]: migration 090_store_recommendations.sql is missing." >&2
+  exit 1
+fi
+if ! grep -qF 'label: "推荐商铺进体系"' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [STORE-REC-001]: the recommend-store entry is no longer on the" >&2
+  echo "        Me surface (企业/店铺 standalone group)." >&2
+  exit 1
+fi
+echo "    STORE-REC-001: PASS (store recommendations are attributable, append-only, and independently reachable)"
+
 # FEED-REPLY-001: 评论必须显示作者名，而不是把 actorId 当成名字渲染给用户。
 # 服务端 ListPostReplies 之前只下发 actorId，feed 直接把它当作者名显示 ——
 # 用户看到的是一串账号 ID。名字必须来自 profile（权威）、不接受客户端提供
@@ -2343,3 +2383,887 @@ if ! grep -qF 'FEED-REPLY-002' apps/mobile/src/reply-preview.test.ts; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/reply-preview.test.ts || exit $?
 echo "    FEED-REPLY-002: PASS (5 comments show inline, only the overflow collapses)"
+
+# PROFILE-TABS-001: 收藏是私库，不是他人主页的一栏。
+# 之前 ProfileTabs 无条件渲染 IG/Threads 那 5 个 tab，SAVED 也在里面 —— 别人的
+# 主页上摆一个「收藏」tab，等于把他的私人书签当成公开内容展示（就算当时数据是
+# 空的，接口也随时可能接上）。同时 other-profile.tsx 把 REPLIES 硬编码成 []，
+# 5 个 tab 里有 3 个永远是空态。本条锁死：SAVED 只在 viewerMode === "SELF" 时
+# 出现（身份未知 = 不给，fail-closed），他人主页的 REPLIES 必须拉真数据。
+if ! grep -qF 'function visibleProfileTabs' apps/mobile/src/surfaces/profile-tabs-model.ts; then
+  echo "  FAIL [PROFILE-TABS-001]: the profile tab visibility rule is gone," >&2
+  echo "        so SAVED can render on somebody else's profile again." >&2
+  exit 1
+fi
+if ! grep -qF 'visibleProfileTabs(props.viewerMode)' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: ProfileTabs renders a hardcoded tab list again," >&2
+  echo "        so the private SAVED tab is no longer gated on the viewer." >&2
+  exit 1
+fi
+if ! grep -qF 'viewerMode=' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the own profile no longer declares viewerMode," >&2
+  echo "        so the fail-closed rule would hide the owner's own SAVED tab." >&2
+  exit 1
+fi
+if ! grep -qF 'engagement.listUserReplies(target.userId' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the other-profile REPLIES tab no longer fetches real" >&2
+  echo "        replies, so it is back to being permanently empty." >&2
+  exit 1
+fi
+# REPLY-TARGET-001 之后回复不再伪装成 FeedPost，prop 也从 replyPosts 换成了
+# replies —— pin 跟着改成「拉回来的回复真的接到了 tabs 上」，语义不变。
+if ! grep -qF 'replies={replyEntries}' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the fetched replies are no longer wired into the" >&2
+  echo "        other-profile tabs." >&2
+  exit 1
+fi
+if grep -qF 'replies={[]}' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [PROFILE-TABS-001]: the other-profile REPLIES tab is hardcoded empty again." >&2
+  exit 1
+fi
+if ! grep -qF 'PROFILE-TABS-001' apps/mobile/src/surfaces/profile-tabs-model.test.ts; then
+  echo "  FAIL [PROFILE-TABS-001]: the profile tab regression ID or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/profile-tabs-model.test.ts || exit $?
+echo "    PROFILE-TABS-001: PASS (SAVED stays private; other profiles show real replies)"
+
+# PROFILE-SAVED-001: 收藏夹只存 postId，必须能按 ID 直取。
+# 之前客户端把动态流（默认一页 25 条）按 bookmark id 过滤 —— 收藏一条不在这一页
+# 里的帖子就等于丢了，用户会以为收藏被吞。本条锁死：服务端提供 ListPostsByIds，
+# 可见性口径与动态流一致且 fail-closed（FOLLOWERS 只有作者本人可见，不能因为
+# 「谁收藏了」就漏出来），取不到的 ID 跳过而不是整条失败；客户端收藏走这条直取，
+# 不再从 feed 里捞。
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsReturnsRequestedPostsInOrder" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsSkipsUnknownIDsInsteadOfFailing" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsDeduplicatesAndTrimsIDs" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsKeepsVisibilityFailClosed" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsReturnsEmptyArrayNotNull" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/localnet" \
+  "TestListPostsByIdsCapsTheBatch" \
+  "apps/api-go/internal/localnet/posts_by_ids_test.go" || exit $?
+if ! grep -qF 'func (s *Service) listPostsByIds' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [PROFILE-SAVED-001]: the by-id post reader is gone," >&2
+  echo "        so saved posts can only be scraped from one feed page again." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) hydratePostMedia' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [PROFILE-SAVED-001]: feed and by-id reads no longer share one media" >&2
+  echo "        contract, so the same post renders differently in each surface." >&2
+  exit 1
+fi
+if ! grep -qF 'ListPostsByIds' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [PROFILE-SAVED-001]: ListPostsByIds is missing from the generated" >&2
+  echo "        command registry (run go run ./cmd/openapi-commands)." >&2
+  exit 1
+fi
+if ! grep -qF 'localNet.listPostsByIds(b.bookmarks)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-SAVED-001]: the saved tab no longer fetches bookmarks by id." >&2
+  exit 1
+fi
+if grep -qF 'bookmarkedSet' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-SAVED-001]: the saved tab filters one feed page by bookmark id" >&2
+  echo "        again, so bookmarks outside that page silently disappear." >&2
+  exit 1
+fi
+if ! grep -qF 'PROFILE-SAVED-001' apps/mobile/src/localnet-client.test.ts; then
+  echo "  FAIL [PROFILE-SAVED-001]: the saved-posts regression ID or its test is missing" >&2
+  exit 1
+fi
+# 信封必须真的能被服务端 dispatch。validateEnvelope 在 dispatch **之前**就要求
+# target.id 非空，空串会被拒成 INVALID_COMMAND_ENVELOPE —— 收藏 tab 每次加载都
+# 抛错，而且因为拒绝早于 dispatch，日志里和「命令不存在」长得一模一样。
+# 批量读没有单一聚合，必须用显式哨兵 by_ids，不能图省事发空串。
+if ! grep -qF '{ type: "Post", id: "by_ids" }' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [PROFILE-SAVED-001]: the batch reader no longer sends the by_ids" >&2
+  echo "        sentinel, so its envelope may be rejected before dispatch." >&2
+  exit 1
+fi
+if grep -qF '{ type: "Post", id: "" }' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [PROFILE-SAVED-001]: an empty target id is back in a command" >&2
+  echo "        envelope. The server rejects that before dispatch with" >&2
+  echo "        INVALID_COMMAND_ENVELOPE, so the saved tab always throws." >&2
+  exit 1
+fi
+# 拒绝信息必须指名出错的字段，否则「信封不合法」和「命令不存在」无法区分。
+if ! grep -qF 'func missingEnvelopeField' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [PROFILE-SAVED-001]: envelope rejections no longer name the" >&2
+  echo "        offending field, so a bad envelope is indistinguishable from an" >&2
+  echo "        unknown command in the logs." >&2
+  exit 1
+fi
+require_test "PROFILE-SAVED-001" "./internal/api" \
+  "TestMissingEnvelopeFieldNamesTheEmptyTargetID" \
+  "apps/api-go/internal/api/envelope_field_test.go" || exit $?
+require_test "PROFILE-SAVED-001" "./internal/api" \
+  "TestValidateEnvelopeStillRejectsBlankTargetID" \
+  "apps/api-go/internal/api/envelope_field_test.go" || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/localnet-client.test.ts || exit $?
+echo "    PROFILE-SAVED-001: PASS (saved posts are read by id, with the feed's visibility rules)"
+
+# MENTION-001: 个人主页 TAGGED tab 必须是「完整的、口径正确的提及列表」。
+# 之前它有三个毛病叠在一起：
+#   1. 客户端拿**一页**动态（默认 25 条）做 strings.Contains —— 更早的提及直接
+#      消失，用户被提到 50 次也只看到 2 次；
+#   2. 子串匹配 —— "@thanh2" 被算成提到了 "@thanh"，看到与自己无关的帖子；
+#   3. `contextType === "MENTION"` 那一支是死代码：服务端任何地方都没有写过
+#      MENTION 这种 contextRef（分类器只产出 DEMAND/VENUE/ACTIVITY/...），
+#      所以那个条件永远为假，却被当成「另一条能用的路径」。
+# 现在由服务端扫全量已发布帖子，可见性/静音口径与动态流完全一致。
+require_test "MENTION-001" "./internal/localnet" \
+  "TestContainsMentionHandleRequiresAWholeHandle" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestListPostsMentioningFindsMentionsBeyondTheFirstFeedPage" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestListPostsMentioningKeepsVisibilityFailClosed" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestListPostsMentioningWithoutAHandleReturnsEmptyNotNull" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestListPostsMentioningExcludesMyOwnPosts" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+require_test "MENTION-001" "./internal/localnet" \
+  "TestMentionRegexEscapesRegexMetacharacters" \
+  "apps/api-go/internal/localnet/posts_mentioning_test.go" || exit $?
+if ! grep -qF 'func (s *Service) listPostsMentioning' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [MENTION-001]: the mention reader is gone, so TAGGED can only be" >&2
+  echo "        scraped from one feed page again." >&2
+  exit 1
+fi
+# 提及匹配必须是「整 handle」，不是子串。SQL 与 Go 两条路径共用 MentionRegex。
+if ! grep -qF 'func MentionRegex' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [MENTION-001]: there is no single definition of what counts as a" >&2
+  echo "        mention, so the SQL and Go paths can silently disagree." >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *LocalNetRepository) ListPostsMentioning' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MENTION-001]: the store can no longer answer 'who mentioned me'," >&2
+  echo "        so TAGGED is back to scanning a single page." >&2
+  exit 1
+fi
+if ! grep -qF 'ListPostsMentioning' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [MENTION-001]: ListPostsMentioning is missing from the generated" >&2
+  echo "        command registry (run go run ./cmd/openapi-commands)." >&2
+  exit 1
+fi
+if ! grep -qF 'localNet.listPostsMentioning(profileDraft.handle)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [MENTION-001]: the tagged tab no longer asks the server for mentions." >&2
+  exit 1
+fi
+if grep -qF 'p.body.includes(myHandle)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [MENTION-001]: the tagged tab is substring-matching a single feed" >&2
+  echo "        page again, so older mentions vanish and '@thanh2' counts as '@thanh'." >&2
+  exit 1
+fi
+if grep -qF 'ref.contextType === "MENTION"' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [MENTION-001]: the dead MENTION contextRef branch is back. No writer" >&2
+  echo "        has ever produced that ref, so the condition is always false." >&2
+  exit 1
+fi
+if ! grep -qF 'MENTION-001' apps/mobile/src/localnet-client.test.ts; then
+  echo "  FAIL [MENTION-001]: the mention regression ID or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/localnet-client.test.ts || exit $?
+echo "    MENTION-001: PASS (mentions are complete, whole-handle, and visibility-safe)"
+
+# REPLY-TARGET-001: 个人主页 REPLIES tab 必须能回答「我回复了谁的帖子」。
+# 之前这一栏有三个毛病叠在一起：
+#   1. 服务端一直在发 parentPostId（就是这条回复挂在哪条帖子下面），但客户端
+#      从来没读它 —— 于是这一栏唯一有用的信息被丢掉，只剩一句光秃秃的
+#      「你回复了」；而且旁边那行注释还断言「server 没有 parentPostId 字段」，
+#      让这个降级看起来是永久性的（实测服务端每条 reply 都带这个字段）；
+#   2. 「你回复了」是写死的 —— 看**别人**的主页时，别人的回复也在说「你回复了」；
+#   3. React key 用了 reply.postId。同一条帖子可以被同一个人回复多次（真实数据
+#      里就是这样：两行 postId 相同、replyId 不同），两行于是撞成同一个 key。
+# 现在父帖用 PROFILE-SAVED-001 的 ListPostsByIds 回查（同一条可见性口径，取不
+# 回来的帖子退化成中性文案），名字走 feed-author 的 resolveAuthorDisplayName，
+# key 改用 replyId。
+if ! grep -qF 'export function replyEntriesFromReplies' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: there is no reply-entry builder, so replies are" >&2
+  echo "        reshaped into fake FeedPosts again (losing replyId)." >&2
+  exit 1
+fi
+if ! grep -qF 'export function parentPostIdsForReplies' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: the parent-post id collector is gone, so nothing" >&2
+  echo "        resolves which post a reply answered." >&2
+  exit 1
+fi
+if ! grep -qF 'export function replyTargetsFromPosts' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: resolved parent posts are no longer turned into" >&2
+  echo "        reply targets." >&2
+  exit 1
+fi
+if ! grep -qF 'export function replyTargetLabel' apps/mobile/src/reply-target.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: there is no single definition of the reply-target" >&2
+  echo "        label, so SELF and OTHER can drift apart again." >&2
+  exit 1
+fi
+if ! grep -qF 'localNet.listPostsByIds(parentIds)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: my-profile replies no longer resolve the post they" >&2
+  echo "        answered, so the tab degrades back to a bare label." >&2
+  exit 1
+fi
+if ! grep -qF 'replyEntriesFromReplies(r.replies)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: my-profile replies are no longer built from the" >&2
+  echo "        server rows (replyId/parentPostId)." >&2
+  exit 1
+fi
+if ! grep -qF 'localNet.listPostsByIds(parentIds)' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: other-profile replies no longer resolve their" >&2
+  echo "        parent post." >&2
+  exit 1
+fi
+# 同一条帖子可以被回复多次 —— key 必须是 replyId，不是父帖 id。
+if ! grep -qF 'key={reply.replyId}' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: the replies list is not keyed by replyId, so two" >&2
+  echo "        replies to the same post collide." >&2
+  exit 1
+fi
+if ! grep -qF 'replyTargetLabel(props.viewerMode, target, props.viewerAccountId)' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: the replies tab no longer uses the shared label," >&2
+  echo "        so it can disagree with the feed about who someone is." >&2
+  exit 1
+fi
+# 反向 pin：下面这几个写法就是当初那三个 bug，任何一个回来都要拦住。
+if grep -qF 'key={reply.postId}' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: replies are keyed by parent post id again — two" >&2
+  echo "        replies to one post then share a key." >&2
+  exit 1
+fi
+if grep -qF 'styles.replyTarget}>你回复了<' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: the hardcoded label is back, so other people's" >&2
+  echo "        replies are attributed to the viewer." >&2
+  exit 1
+fi
+if grep -qF 'authorId: target.userId' apps/mobile/src/surfaces/other-profile.tsx; then
+  echo "  FAIL [REPLY-TARGET-001]: replies are authored by the profile owner again —" >&2
+  echo "        that is what made the old '回复 @{authorId} 的帖子' show yourself." >&2
+  exit 1
+fi
+if ! grep -qF 'REPLY-TARGET-001' apps/mobile/src/reply-target.test.ts; then
+  echo "  FAIL [REPLY-TARGET-001]: the reply-target regression ID or its test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/reply-target.test.ts || exit $?
+echo "    REPLY-TARGET-001: PASS (replies name the post they answered, keyed by replyId)"
+
+# SEARCH-CORPUS-001: 动态搜索必须真的搜到「整个 feed」，而不是你已经滚过的那几页。
+#
+# 坏掉的形态很隐蔽 —— 每一块单看都像是对的：
+#   1. server 端 R15.94 建好了 search 通道（feed_handlers 读 ?search=，
+#      listFeed 按关键词过滤），但 listFeedPosts 的 searchQuery 参数**全仓无人传**，
+#      于是这条通道没有任何 caller，搜索退化成「在已加载的那一页里做本地子串匹配」；
+#   2. localnet-client 里还留着 R15.94 之前写的注释「server ListFeedPosts 暂不接
+#      search params, Phase 2 …」，让人以为这条通道本来就不通，于是没人去接线；
+#   3. server 只匹配 Body，客户端两处 filter 却都 OR 了 authorDisplayName ——
+#      server 先把正文不含关键词的帖子全丢掉，客户端再 OR 也永远匹配不到东西。
+#      表现就是：搜索框写着「搜索人、机会、活动、情报…」，搜人恒返回 0 条。
+# 现在两端共用同一份字段语义（正文 / 作者展示名 / 城市；派生 contextRefs 不算），
+# 且两条读取分支都把查询交给服务端。
+require_test "SEARCH-CORPUS-001" "./internal/localnet" \
+  "TestListFeedPosts_SearchMatchesAuthorNameAndCity" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "SEARCH-CORPUS-001" "./internal/localnet" \
+  "TestPostMatchesSearch_ExcludesDerivedContextRefs" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+if ! grep -qF 'func postMatchesSearch(p Post, loweredQuery string) bool {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the single search predicate is gone from the server," >&2
+  echo "        so the matched field set can drift again." >&2
+  exit 1
+fi
+if ! grep -qF 'if p.AuthorDisplayName != "" && strings.Contains(strings.ToLower(p.AuthorDisplayName), loweredQuery) {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: server search no longer matches the author display" >&2
+  echo "        name, so searching for a person returns nothing." >&2
+  exit 1
+fi
+if ! grep -qF 'if p.CityScope != "" && strings.Contains(strings.ToLower(p.CityScope), loweredQuery) {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: server search no longer matches the city scope." >&2
+  exit 1
+fi
+if ! grep -qF 'if !postMatchesSearch(p, search) {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: listFeed no longer routes through postMatchesSearch." >&2
+  exit 1
+fi
+if ! grep -qF 'export function normalizeFeedSearchQuery(' apps/mobile/src/feed-search.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the shared query normaliser is gone, so the client" >&2
+  echo "        and the server can disagree about what a query even is." >&2
+  exit 1
+fi
+if ! grep -qF 'export function postMatchesFeedSearch(' apps/mobile/src/feed-search.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the shared client-side predicate is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'query.push(`search=${encodeURIComponent(search)}`);' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the public feed projection no longer forwards the" >&2
+  echo "        query, so search degrades back to 'only what you already scrolled'." >&2
+  exit 1
+fi
+if ! grep -qF 'search === "" ? { cursor, limit } : { cursor, limit, search },' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the authenticated feed branch no longer sends the" >&2
+  echo "        query, so logged-in search only filters one page locally." >&2
+  exit 1
+fi
+if ! grep -qF 'const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined);' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the feed surface stopped passing its query to the" >&2
+  echo "        server — this is the exact dead-parameter bug that was fixed." >&2
+  exit 1
+fi
+if ! grep -qF 'const timer = setTimeout(() => void loadFeed(query), query === "" ? 0 : 250);' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: nothing re-runs the feed load when the query changes," >&2
+  echo "        so the search box only filters whatever is already loaded." >&2
+  exit 1
+fi
+if ! grep -qF 'if (!postMatchesFeedSearch(post, normalizeFeedSearchQuery(searchQuery))) return false;' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the feed surface re-implements its own search" >&2
+  echo "        haystack instead of using the shared predicate, so the two field sets" >&2
+  echo "        can drift and the client silently drops rows the server matched." >&2
+  exit 1
+fi
+# 两处都要有：backgroundRefresh 的「新动态」合并 + showLatest 的刷入。
+# 注释锚点说清意图，计数保证行为行真的还在两处（单看一处会漏掉另一处）。
+if ! grep -qF '// SEARCH-CORPUS-001: 搜索中不做「N 条新动态」合并' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the background 'new posts' merge is no longer" >&2
+  echo "        suppressed while searching, so unfiltered posts leak into results." >&2
+  exit 1
+fi
+if ! grep -qF '// SEARCH-CORPUS-001: 搜索中不存在「展示最新」' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: 'show latest' can be pressed mid-search again, which" >&2
+  echo "        silently replaces the results with the unfiltered feed." >&2
+  exit 1
+fi
+search_guards=$(grep -cF 'if (lastSearchRef.current !== "") return;' apps/mobile/src/surfaces/feed.tsx)
+if [ "${search_guards:-0}" -lt 2 ]; then
+  echo "  FAIL [SEARCH-CORPUS-001]: expected the search guard in BOTH the background" >&2
+  echo "        refresh and 'show latest' paths, found ${search_guards:-0}." >&2
+  exit 1
+fi
+# 反向 pin：下面这些就是当初那几个 bug，任何一个回来都要拦住。
+if grep -qF 'if search != "" && !strings.Contains(strings.ToLower(p.Body), search) {' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [SEARCH-CORPUS-001]: server search is body-only again — searching for a" >&2
+  echo "        person or a city then returns nothing." >&2
+  exit 1
+fi
+if grep -qF 'server ListFeedPosts 暂不接 search params' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the stale comment claiming the server takes no" >&2
+  echo "        search params is back — it is what made the channel look unwired." >&2
+  exit 1
+fi
+if grep -qF 'p.authorDisplayName?.toLowerCase().includes(q)' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the client-side re-filter is back; it is strictly" >&2
+  echo "        narrower than the server and can only drop rows the server accepted." >&2
+  exit 1
+fi
+if grep -qF 'post.cityScope, ...post.contextRefs.map' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the feed is searching its own ad-hoc haystack again," >&2
+  echo "        including derived contextRefs the user never typed." >&2
+  exit 1
+fi
+if ! grep -qF 'SEARCH-CORPUS-001' apps/mobile/src/feed-search.test.ts; then
+  echo "  FAIL [SEARCH-CORPUS-001]: the regression ID or its mobile test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/feed-search.test.ts || exit $?
+echo "    SEARCH-CORPUS-001: PASS (feed search reaches the server and matches name/city)"
+
+# MUTE-REVERSIBLE-001: 屏蔽必须是「能进也能出」的。
+#
+# 坏掉的形态：服务端只有 AddMutedAuthor / IsMuted —— 没有 UnmuteAuthor，也没有
+# ListMutedAuthors。MuteAuthor 一发出去，被屏蔽者的帖子被 feed 永久过滤（PG 侧是
+# NOT EXISTS 子查询），于是你**再也点不到** Ta 的帖子菜单或头像，也就没有任何入口
+# 能撤销这次屏蔽。客户端那句「不可逆：当前 client 不提供 unmute；Phase 2 在 '我屏蔽
+# 的人' 列表里做」把「服务端缺命令」说成了「产品分期」，进一步掩盖了它。一个只能
+# 进不能出的关系操作不是功能，是陷阱。
+#
+# 还有第二个同样致命的点：列出屏蔽的人时必须给出**可展示的名字**。屏蔽列表恰恰是
+# 「帖子全被 feed 过滤掉」的一群人，客户端没法像 feed 那样从帖子读模型里借名字，
+# 它手里只有一个 authorId。服务端不回填名字，用户就只能对着一串账号 id 猜该解除
+# 谁 —— 那这个解除入口等于还是没做。
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestUnmuteAuthorMakesMuteReversible" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestUnmuteAuthorIdempotent" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestListMutedAuthorsIsScopedToActor" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestListMutedAuthorsResolvesAuthorDisplayName" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "MUTE-REVERSIBLE-001" "./internal/engagement" \
+  "TestListMutedAuthorsIgnoresPoisonedName" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+# 命令必须真的挂在 dispatch 上（openapi 注册表是自动生成的，漏挂载会在 CI 报警）。
+if ! grep -qF '  - command: UnmuteAuthor' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: UnmuteAuthor is not a dispatched command anymore," >&2
+  echo "        so mute is one-way again." >&2
+  exit 1
+fi
+if ! grep -qF '  - command: ListMutedAuthors' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: ListMutedAuthors is not a dispatched command" >&2
+  echo "        anymore, so there is no way to enumerate who you muted." >&2
+  exit 1
+fi
+if ! grep -qF '"UnmuteAuthor", "ListMutedAuthors",' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: engagement.Supports() no longer advertises both" >&2
+  echo "        commands, so they are rejected before reaching the handlers." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) unmuteAuthor(ctx context.Context, e command.Envelope) command.Result {' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the UnmuteAuthor handler is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) listMutedAuthors(ctx context.Context, e command.Envelope) command.Result {' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the ListMutedAuthors handler is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'INVALID_UNMUTE_PAYLOAD' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: unmute no longer validates a missing authorId, so" >&2
+  echo "        a blank payload can silently 'succeed' without unmuting anyone." >&2
+  exit 1
+fi
+# 名字必须读时用**同一个** profile 解析器填（跟评论同一条链），不能另起一套。
+if ! grep -qF 'func (s *Service) withMutedAuthorNames(ctx context.Context, rows []MutedAuthorView) []MutedAuthorView {' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the muted-author list no longer resolves display" >&2
+  echo "        names at read time, so the UI can only show raw account ids." >&2
+  exit 1
+fi
+# 分成两半钉：gofmt 会在字段名与 tag 之间塞对齐空格，钉整行会白白变红。
+if ! grep -qF 'AuthorDisplayName string' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: MutedAuthorView lost its display-name field." >&2
+  exit 1
+fi
+if ! grep -qF 'json:"authorDisplayName,omitempty"' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the muted list no longer publishes a display name" >&2
+  echo "        on the wire, so the UI can only show raw account ids." >&2
+  exit 1
+fi
+# 生产路径是 Postgres，不是内存仓 —— 内存仓绿了不代表用户能解除屏蔽。
+if ! grep -qF 'func (r *EngagementRepository) RemoveMutedAuthor(ctx context.Context, actorID, authorID string) (bool, error) {' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the Postgres repository lost RemoveMutedAuthor," >&2
+  echo "        so unmute does not persist in production." >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *EngagementRepository) ListMutedAuthors(ctx context.Context, actorID string) ([]engagement.MutedAuthor, error) {' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the Postgres repository lost ListMutedAuthors." >&2
+  exit 1
+fi
+if ! grep -qF 'RemoveMutedAuthor(ctx context.Context, actorID, authorID string) (bool, error)' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: Repository no longer requires RemoveMutedAuthor." >&2
+  exit 1
+fi
+if ! grep -qF 'ListMutedAuthors(ctx context.Context, actorID string) ([]MutedAuthor, error)' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: Repository no longer requires ListMutedAuthors." >&2
+  exit 1
+fi
+# ---------- 客户端：命令名、解析、界面接线 ----------
+if ! grep -qF 'public async unmuteAuthor(authorId: string): Promise<"UNMUTED" | "NOT_MUTED"> {' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: EngagementClient lost unmuteAuthor." >&2
+  exit 1
+fi
+if ! grep -qF 'public async listMutedAuthors(limit?: number): Promise<MutedAuthorsList> {' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: EngagementClient lost listMutedAuthors." >&2
+  exit 1
+fi
+if ! grep -qF '"UnmuteAuthor", { type: "Profile", id: authorId }, { authorId }' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: unmuteAuthor no longer sends the authorId it was" >&2
+  echo "        given — that is the dead-parameter class of bug again." >&2
+  exit 1
+fi
+if ! grep -qF '"ListMutedAuthors",' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: listMutedAuthors no longer calls the server." >&2
+  exit 1
+fi
+if ! grep -qF 'export const MutedAuthorsListSchema = z.object({' packages/contracts/src/engagement.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the shared MutedAuthorsList contract is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'export function parseMutedAuthorsList(' packages/contracts/src/engagement.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the MutedAuthorsList parser is gone, so the client" >&2
+  echo "        would trust an unvalidated server payload." >&2
+  exit 1
+fi
+if ! grep -qF 'export function mutedAuthorLabel(' apps/mobile/src/muted-authors.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: muted-author labels stopped going through the single" >&2
+  echo "        identity chain, so a muted person can be shown as a raw account id." >&2
+  exit 1
+fi
+if ! grep -qF 'export function removeMutedAuthor(' apps/mobile/src/muted-authors.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: unmuting no longer removes the row locally, so the" >&2
+  echo "        list keeps showing someone who is already unmuted." >&2
+  exit 1
+fi
+# 界面必须真的接上（「通道建好了但没人接线」这个仓库出过一次，见 SEARCH-CORPUS-001）。
+if ! grep -qF 'await engagement.listMutedAuthors();' apps/mobile/src/surfaces/feed-prefs.tsx; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the feed-prefs surface never reads the muted list," >&2
+  echo "        so the section is an empty shell." >&2
+  exit 1
+fi
+if ! grep -qF 'await engagement.unmuteAuthor(authorId);' apps/mobile/src/surfaces/feed-prefs.tsx; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the feed-prefs surface has no working unmute" >&2
+  echo "        action, so mute is one-way again in practice." >&2
+  exit 1
+fi
+if ! grep -qF '{mutedAuthorLabel(row)}' apps/mobile/src/surfaces/feed-prefs.tsx; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the muted-author rows stopped rendering a resolved" >&2
+  echo "        display name." >&2
+  exit 1
+fi
+if ! grep -qF 'removeMutedAuthor(prev, authorId)' apps/mobile/src/surfaces/feed-prefs.tsx; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: unmuting does not update the local list." >&2
+  exit 1
+fi
+# 反向 pin：下面这些就是当初的 bug 本身，任何一个回来都要拦住。
+if grep -qF '不可逆：当前 client 不提供 unmute' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the stale 'mute is irreversible, do it in phase 2'" >&2
+  echo "        comment is back — it is what dressed up a missing command as a plan." >&2
+  exit 1
+fi
+if grep -qF 'MutedAuthors []MutedAuthor `json:"mutedAuthors"`' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the muted list is back to shipping the raw" >&2
+  echo "        aggregate rows, which carry no display name." >&2
+  exit 1
+fi
+if ! grep -qF 'MUTE-REVERSIBLE-001' apps/mobile/src/muted-authors.test.ts; then
+  echo "  FAIL [MUTE-REVERSIBLE-001]: the regression ID or its mobile test is missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/muted-authors.test.ts || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/engagement-client.test.ts || exit $?
+echo "    MUTE-REVERSIBLE-001: PASS (mute is reversible end to end, and names people)"
+
+# REPLY-INLINE-001: 回复输入框必须内联在帖子下方，且键盘不能盖住它。
+#
+# 坏掉的形态：回复框曾经是一个 `<Modal transparent>` + `justifyContent:"flex-end"`
+# 的底部白卡（还带「回复帖文」标题、取消/回复按钮），点「回复」时它从屏幕底部
+# 弹上来；而 feed 整屏**没有任何键盘避让**（全文没有 KeyboardAvoidingView，
+# ScrollView 也没开 automaticallyAdjustKeyboardInsets）。两条叠在一起的后果是：
+# 键盘一弹起，正好压在那个贴在底部的输入框上 —— 用户是在盲打。
+# 现在的形态：点「回复」→ 在那条帖子正下方就地展开一行输入框，无遮罩、无上滑
+# 动画，键盘弹起时由 ScrollView 的 inset 调整把它顶进可见区。
+# 这两颗 pin 用行锚定（^空白+prop+空白$）而不是裸 grep -qF：feed.tsx 的注释里
+# 原样写着这两个 prop 的名字来解释它们各自解决什么，裸 grep 会被注释满足 ——
+# 把真正的 prop 从 ScrollView 上删掉，pin 照样是绿的，等于没设防。锚定之后
+# 注释行（以 // 开头）匹配不上，只有货真价实的 JSX 属性行才算数。
+if ! grep -qE '^[[:space:]]+automaticallyAdjustKeyboardInsets[[:space:]]*$' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the feed ScrollView no longer adjusts for the" >&2
+  echo "        keyboard, so an inline reply box gets covered again." >&2
+  exit 1
+fi
+if ! grep -qE '^[[:space:]]+keyboardShouldPersistTaps="handled"[[:space:]]*$' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: keyboardShouldPersistTaps is gone — with the" >&2
+  echo "        keyboard up, the first tap on 发送 only dismisses it and the" >&2
+  echo "        reply can never be submitted." >&2
+  exit 1
+fi
+if ! grep -qF 'replyTargetId === post.postId ? (' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the reply composer is no longer anchored to the" >&2
+  echo "        post you tapped — either it shows on every post or on none." >&2
+  exit 1
+fi
+if ! grep -qF 'styles.inlineReplyInput' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the inline reply input style is gone." >&2
+  exit 1
+fi
+# 反向 pin：底部白卡那套东西一个都不许回来。
+if grep -qF 'styles.replyOverlay' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the bottom-sheet reply overlay is back — that is" >&2
+  echo "        the modal that slid up from the bottom and got covered by the keyboard." >&2
+  exit 1
+fi
+if grep -qF 'styles.replySheet' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the reply bottom sheet is back." >&2
+  exit 1
+fi
+# 注意这里 pin 的是 `>回复帖文<` 而不是裸的「回复帖文」：裸字符串会命中
+# feed.tsx 里解释这段历史的注释本身（注释里写了「还带「回复帖文」标题」），
+# 于是这颗 pin 会永远红、且排查时看不出是注释在触发。加上 JSX 的尖括号后
+# 只有真正的 `<Text …>回复帖文</Text>` 能命中。
+if grep -qF '>回复帖文<' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [REPLY-INLINE-001]: the '回复帖文' sheet title is back — an inline" >&2
+  echo "        composer does not need a modal title." >&2
+  exit 1
+fi
+echo "    REPLY-INLINE-001: PASS (reply composer is inline and keyboard-safe)"
+
+# GHOST-24H-001: 「24h 临时动态」必须真的会消失。
+#
+# 坏掉的样子：ephemeralUntil 只存在于 packages/contracts 的 zod schema 和
+# mobile 的发布 payload 里，**api-go 一次都没出现过** —— Post 没这个字段、
+# createPostPayload 不解析它、数据库没列、feed 没过期条件。Go 的 JSON 解码
+# 静默忽略未知字段，所以客户端算好 now+24h 发上来、弹 toast「24h 动态已发布」，
+# 而这条帖子**永久存在**。这不是少做功能，是一条对用户撒谎的路径：用户正是
+# 因为相信它会消失才发的（越南 PDP 91/2025 下这属于对数据留存期的承诺）。
+#
+# 关键约束：过期写在 SQL 谓语里（`ephemeral_until IS NULL OR ephemeral_until >
+# now()`），不是查完在 Go 里过滤 —— 先 LIMIT 再过滤会让一页少给好几条，往下
+# 翻还会重复或漏帖。而且是**读时过滤**：行留着，才能举证「这条确实到期了」
+# 而不是被谁偷偷删掉的。
+require_test "GHOST-24H-001" "./internal/localnet" \
+  "TestEphemeralPostDisappearsFromFeedWhenExpired" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "GHOST-24H-001" "./internal/localnet" \
+  "TestCreatePostRejectsPastEphemeralUntil" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "GHOST-24H-001" "./internal/localnet" \
+  "TestPostIsExpiredBoundaries" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+require_test "GHOST-24H-001" "./internal/localnet" \
+  "TestCreatePostPersistsEphemeralUntil" \
+  "apps/api-go/internal/localnet/service_test.go" || exit $?
+# 这条是 PG 集成测试：没有 DATABASE_URL 时它会 SKIP（起不了临时集群），
+# 但仍然钉住「文件 + 函数名」存在，并且是唯一能抓到 SELECT/scan 列数漂移的
+# 防线（见下面那条结构性 pin 的注释）。
+require_test "GHOST-24H-001" "./internal/platform/postgres" \
+  "TestEphemeralPostFeedFilterLifecycle" \
+  "apps/api-go/internal/platform/postgres/posts_ephemeral_integration_test.go" || exit $?
+
+if ! grep -qF 'EphemeralUntil *time.Time' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [GHOST-24H-001]: localnet.Post lost its EphemeralUntil field —" >&2
+  echo "        the 24h expiry has nowhere to live again." >&2
+  exit 1
+fi
+if ! grep -qF 'func postIsExpired(' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [GHOST-24H-001]: postIsExpired is gone — nothing decides when an" >&2
+  echo "        ephemeral post has expired." >&2
+  exit 1
+fi
+if ! grep -qF 'INVALID_POST_EPHEMERAL_UNTIL' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [GHOST-24H-001]: an expiry in the past is no longer rejected, so a" >&2
+  echo "        post can be created already-expired: published OK, visible to no one." >&2
+  exit 1
+fi
+# 过期谓语必须同时在 feed 和「提到我」两条查询里。只写 feed 的话，一条已经
+# 「消失」的 24h 帖会因为提到了谁而从 TAGGED 后门复活。
+feed_predicates=$(grep -cF 'AND (ephemeral_until IS NULL OR ephemeral_until > now())' apps/api-go/internal/platform/postgres/network.go)
+if [ "$feed_predicates" -lt 2 ]; then
+  echo "  FAIL [GHOST-24H-001]: the expiry predicate is missing from a read path" >&2
+  echo "        (found $feed_predicates, want >= 2: feed + mentions)." >&2
+  exit 1
+fi
+# 结构性 pin：每一行 SELECT 都必须在列清单里带上 ephemeral_until，数量要和
+# 扫它的 rows.Scan 对齐。
+#
+# 为什么需要这条：给 4 个 rows.Scan 加了 &post.EphemeralUntil、却忘了给其中
+# 3 条 SELECT 的列清单加 ephemeral_until，结果**任何真实数据库上的 feed 读取
+# 全部失败**（number of field descriptions must equal number of destinations），
+# 而 `go test ./...` 因为全跑在内存 fake 上，绿得发亮。这个 bug 只有真机联调
+# 才暴露 —— 所以这里用源码结构做个廉价守门。
+#
+# 只对行尾匹配（`ephemeral_until$`）：INSERT 的列清单以 `)` 结尾，不会被算进来。
+scans=$(grep -cF '&post.EphemeralUntil' apps/api-go/internal/platform/postgres/network.go)
+selected=$(grep -cE 'context_refs, created_at, ephemeral_until[[:space:]]*$' apps/api-go/internal/platform/postgres/network.go)
+if [ "$scans" != "$selected" ]; then
+  echo "  FAIL [GHOST-24H-001]: SELECT/scan drift on ephemeral_until —" >&2
+  echo "        $scans rows.Scan destination(s) vs $selected SELECT list(s)." >&2
+  echo "        A pgx scan-count mismatch fails every feed read on a real DB" >&2
+  echo "        while the in-memory tests stay green." >&2
+  exit 1
+fi
+# 反向 pin：别把同一列写两遍（一次 substring 替换就造得出来，见 2026-09-13）。
+if grep -qF 'ephemeral_until, ephemeral_until' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [GHOST-24H-001]: ephemeral_until is listed twice in the same" >&2
+  echo "        column list — that breaks the INSERT/SELECT arity." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/090_post_ephemeral_until.sql ]; then
+  echo "  FAIL [GHOST-24H-001]: migration 090 (post ephemeral_until) is missing." >&2
+  exit 1
+fi
+# 反向 pin：注释不许再宣称「服务端尚未持久化」—— 那句话正是这个 bug 当年的遮羞布。
+if grep -qF '服务端尚未持久化' apps/mobile/src/composer-body.ts; then
+  echo "  FAIL [GHOST-24H-001]: composer-body.ts claims the server still does not" >&2
+  echo "        persist ephemeralUntil. Either implement it or fix the comment." >&2
+  exit 1
+fi
+echo "    GHOST-24H-001: PASS (24h posts really expire, in SQL, at read time)"
+
+# POLL-VOTE-001: 投票必须真的能投、真的能数票。
+#
+# 坏掉的样子：投票的 UI 是完整的（ComposerV2Screen 的「添加投票」、增删选项、
+# 选时长），发布时客户端也老老实实把 `payload.poll` 发上来了 —— 但 api-go
+# 里 5 处 `poll` 全是不相干的同名东西（outbox poll / poll for completion /
+# message kind），服务端一个投票字段都没有。Go 的 JSON 解码静默忽略未知字段，
+# 于是产出一条「正文里躺着一段看起来像投票的文本」的帖子：谁都投不了，也没有
+# 任何票数。跟 GHOST-24H-001 是同一类缺陷（写出来像有、实际没有），只是更尴尬
+# —— 「投票」这个词本身就在承诺「能投」和「有结果」。
+#
+# 口径（迁移 091 里有完整论证）：投票是帖子的附属物 1:1 并级联删除；一人一票
+# （再投 = 改票）；票数永远 COUNT(*) 现算不落计数字段；到期只关闭投票、不隐藏
+# 结果；multiSelect 明确不支持且**显式拒绝**，绝不静默降级成单选。
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestCreatePostWithPollExposesOptionsWithZeroVotes" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollCountsVotes" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollIsOneVotePerUserAndSwitchable" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollRejectsOptionBelongingToAnotherPost" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollRejectedAfterExpiryButResultsStayVisible" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestPollWithoutExpiryNeverCloses" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestCreatePostRejectsMultiSelectPollInsteadOfDowngrading" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestCreatePostRejectsPollThatExpiresInThePast" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollRequiresAUserActor" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+# PG 集成测试（无 DATABASE_URL 时 SKIP，但仍钉住文件 + 函数名存在）。
+# 它是唯一能抓到「写子表没加入环境事务」这条链路的防线，见下面那条 pin。
+require_test "POLL-VOTE-001" "./internal/platform/postgres" \
+  "TestSavePostPollJoinsAmbientTransaction" \
+  "apps/api-go/internal/platform/postgres/posts_poll_integration_test.go" || exit $?
+
+if [ ! -f apps/api-go/migrations/091_post_polls.sql ]; then
+  echo "  FAIL [POLL-VOTE-001]: migration 091 (post polls) is missing." >&2
+  exit 1
+fi
+if ! grep -qF 'Poll *PostPollView' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [POLL-VOTE-001]: localnet.Post lost its Poll field — the poll" >&2
+  echo "        read model has nowhere to travel to the client." >&2
+  exit 1
+fi
+if ! grep -qF '"VotePostPoll"' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [POLL-VOTE-001]: VotePostPoll is no longer a supported command —" >&2
+  echo "        nobody can vote again." >&2
+  exit 1
+fi
+# 三条「说不」的路径。少一条就会退化成静默接受一条没人能投 / 永远截止 / 选项
+# 不属于本贴的票 —— 而静默接受正是 GHOST-24H-001 的病根。
+for code in POLL_NOT_FOUND POLL_CLOSED POLL_OPTION_NOT_FOUND POLL_MULTISELECT_UNSUPPORTED POLL_VOTE_NOT_ALLOWED; do
+  if ! grep -qF "$code" apps/api-go/internal/localnet/service.go; then
+    echo "  FAIL [POLL-VOTE-001]: error code $code is gone — a bad vote would" >&2
+    echo "        now be silently accepted instead of refused with a reason." >&2
+    exit 1
+  fi
+done
+# 反向 pin：SavePostPoll 不许自己 r.pool.Begin 开第二个连接。
+#
+# 为什么这条必须存在：命令处理跑在一个挂在 ctx 上的环境事务里，CreatePost 写
+# 进去的帖子行在提交前**别的连接看不见**。自己新开事务去写 post_polls 就会撞上
+# post_id → posts(id) 的外键（真实报错：violates foreign key constraint
+# "post_polls_post_id_fkey"），于是「建一条带投票的帖子」100% 失败 —— 而内存仓
+# 根本没有外键，所有 service 层单测绿得发亮。这个是真机联调才炸出来的。
+if grep -qF 'r.pool.Begin(ctx)' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [POLL-VOTE-001]: a repository method opens its own connection" >&2
+  echo "        instead of joining the ambient transaction — writing a child" >&2
+  echo "        row right after its parent will fail the foreign key." >&2
+  exit 1
+fi
+if ! grep -qF 'runInTransaction(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [POLL-VOTE-001]: runInTransaction is no longer used — the poll" >&2
+  echo "        write lost its transaction." >&2
+  exit 1
+fi
+# 客户端：votePostPoll 必须真的发命令，并且用服务端返回的权威票数。
+if ! grep -qF 'public async votePostPoll(' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [POLL-VOTE-001]: EngagementClient.votePostPoll is gone — the UI" >&2
+  echo "        cannot submit a vote." >&2
+  exit 1
+fi
+if ! grep -qF 'PostPollViewSchema.parse(raw.poll)' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [POLL-VOTE-001]: votePostPoll no longer returns the server's" >&2
+  echo "        authoritative tally (a client-side +1 drifts on re-votes)." >&2
+  exit 1
+fi
+# 契约：读模型必须是带票数的 PostPollView，不是只有结构的写模型。
+if ! grep -qF 'poll: PostPollViewSchema.optional()' packages/contracts/src/index.ts; then
+  echo "  FAIL [POLL-VOTE-001]: FeedPost.poll no longer uses the read model —" >&2
+  echo "        vote counts would never reach the client." >&2
+  exit 1
+fi
+if ! grep -qF 'export const PostPollViewSchema' packages/contracts/src/index.ts; then
+  echo "  FAIL [POLL-VOTE-001]: PostPollViewSchema is missing from contracts." >&2
+  exit 1
+fi
+# 反向 pin：注释不许再宣称「服务端尚无对应字段」—— 那句话正是这个 bug 的遮羞布。
+if grep -qF '服务端尚无对应字段' packages/contracts/src/index.ts; then
+  echo "  FAIL [POLL-VOTE-001]: contracts claim the server still has no poll" >&2
+  echo "        field. Either implement it or fix the comment." >&2
+  exit 1
+fi
+echo "    POLL-VOTE-001: PASS (polls are really votable and really counted)"
+
+# POLL-OPTION-SCOPE-001: 投票选项的身份是 (post_id, option_id)，不是 option_id。
+#
+# 坏掉的样子：post_poll_options 一开始把 option_id 单独设成了 PRIMARY KEY。
+# optionId 是客户端生成的（`opt_<ts>_<idx>`），两条帖子完全可能用同一批 id
+# （重发草稿、重试发布、硬编码）。于是第二条帖子的 INSERT 撞上
+# ON CONFLICT (option_id) —— 它只改写 label/sort_order，**不改写 post_id** ——
+# 结果第二条帖子的选项整批消失（投票渲染不出来），第一条帖子的选项被悄悄改标签。
+#
+# 同一处设计错误还有第二个后果：数票的子查询如果只按 option_id 分组，A 帖子的
+# 票会被算到 B 帖子同名选项的头上。两条 pin 一起钉。
+require_test "POLL-OPTION-SCOPE-001" "./internal/platform/postgres" \
+  "TestPollOptionsAreScopedToTheirPost" \
+  "apps/api-go/internal/platform/postgres/posts_poll_integration_test.go" || exit $?
+if ! grep -qF 'ON CONFLICT (post_id, option_id)' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [POLL-OPTION-SCOPE-001]: options are upserted by option_id alone" >&2
+  echo "        — two posts sharing an option id will steal each other's options." >&2
+  exit 1
+fi
+if ! grep -qF 'GROUP BY post_id, option_id' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [POLL-OPTION-SCOPE-001]: votes are aggregated by option_id alone" >&2
+  echo "        — counts leak across posts that reuse an option id." >&2
+  exit 1
+fi
+# 反向 pin：option_id 不许再单独当主键。
+if grep -qE '^[[:space:]]*option_id[[:space:]]+TEXT[[:space:]]+PRIMARY KEY' apps/api-go/migrations/091_post_polls.sql; then
+  echo "  FAIL [POLL-OPTION-SCOPE-001]: option_id is a global primary key again" >&2
+  echo "        — options must be scoped to their post." >&2
+  exit 1
+fi
+echo "    POLL-OPTION-SCOPE-001: PASS (poll options belong to their own post)"
+
+# FEED-NULL-CITY-001: 一行 city_scope 为 NULL 的帖子不许打挂所有人的动态流。
+#
+# 坏掉的样子：city_scope 是可空列，但 4 条读路径都把它直接扫进 `post.CityScope`
+# —— 一个普通 `string`。pgx 拒绝把 NULL 扫进 *string 目标（cannot scan NULL into
+# *string），ListFeedPage 直接把这个错误往上抛，于是**整页 feed 读取失败**，
+# 不是「这一条渲染怪」，是「所有人的动态流都打不开」。
+#
+# 为什么 `go test ./...` 抓不到：内存仓里根本没有 NULL，而 Go 的写路径永远绑 ""
+# 而不是 NULL。能造出这种行的只有裸 INSERT（迁移、回填、手工修复、seed 脚本）
+# 或将来某个漏了这一列的代码路径 —— 恰恰都是上线前最不会被跑到、凌晨最可能
+# 发生的情况。
+require_test "FEED-NULL-CITY-001" "./internal/platform/postgres" \
+  "TestFeedReadsSurviveNullCityScope" \
+  "apps/api-go/internal/platform/postgres/posts_null_city_integration_test.go" || exit $?
+# 反向 pin：不许再把可空的 city_scope 直接扫进 string。
+if grep -qF '&post.CityScope' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [FEED-NULL-CITY-001]: city_scope is scanned straight into a" >&2
+  echo "        string again — one NULL row will fail every feed read." >&2
+  exit 1
+fi
+# 4 条读路径（ListFeedPage / Snapshot / GetPost / ListPostsMentioning）都要判空。
+city_guards=$(grep -cF 'cityScope != nil' apps/api-go/internal/platform/postgres/network.go)
+if [ "$city_guards" -lt 4 ]; then
+  echo "  FAIL [FEED-NULL-CITY-001]: only $city_guards read path(s) guard the" >&2
+  echo "        nullable city_scope, want 4." >&2
+  exit 1
+fi
+echo "    FEED-NULL-CITY-001: PASS (one NULL city_scope no longer kills the feed)"

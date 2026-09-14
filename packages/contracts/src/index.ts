@@ -318,8 +318,9 @@ export const PostContextRefSchema = z.object({
 export type PostContextRef = z.infer<typeof PostContextRefSchema>;
 
 // R15.24 P0：Post.Poll — 简单的帖内投票。
-// 后端尚未实现。发送时 client 依然走 body 序列化作为兼容路径（ComposerV2Screen 的
-// assembleComposerBody），后端落地后可同时填 ephemeralUntil / poll，服务端优先以新字段为准。
+// POLL-VOTE-001 起服务端真正持久化：写入走 CreatePostPayload.poll（下面的
+// PostPollSchema），读出走 FeedPost.poll（下面的 PostPollViewSchema）。
+// 两者形状**不同**，不是同一个 schema 复用：写模型只有结构，读模型带票数。
 export const PostPollOptionSchema = z.object({
   optionId: z.string().min(1),
   label: z.string().min(1).max(80),
@@ -336,6 +337,36 @@ export const PostPollSchema = z.object({
   multiSelect: z.boolean().optional()
 });
 export type PostPoll = z.infer<typeof PostPollSchema>;
+
+// 投票的**读**模型：结构 + 票数 + 我投了哪个 + 是否已截止。
+//
+// 跟写模型分开是刻意的：
+//   * voteCount / totalVotes 由服务端 COUNT(*) 现算，绝不落计数字段 ——
+//     计数列一定会跟 votes 表慢慢对不上，而对不上时无法判断谁是对的。
+//   * votedOptionId 只对当前浏览者有意义（每个人看到的"我投了哪个"不同），
+//     所以它是 per-viewer 的，不进帖子本身。为空 = 这个人还没投。
+//   * closed 由服务端按自己的时钟判定，客户端**不许**拿 expiresAt 自己判 ——
+//     客户端时钟可能不准，而"到底还能不能投"必须以服务端为准。
+//   * 到期只关闭投票、**不隐藏结果**：把结果一起藏掉等于把投票变成一场
+//     没有开奖的抽奖。
+export const PostPollOptionViewSchema = z.object({
+  optionId: z.string().min(1),
+  label: z.string().min(1),
+  sortOrder: z.number().int().nonnegative(),
+  voteCount: z.number().int().nonnegative()
+});
+export type PostPollOptionView = z.infer<typeof PostPollOptionViewSchema>;
+
+export const PostPollViewSchema = z.object({
+  // 已按 sortOrder 升序排好，客户端不要自己重排。
+  options: z.array(PostPollOptionViewSchema).min(2).max(8),
+  totalVotes: z.number().int().nonnegative(),
+  votedOptionId: z.string().min(1).optional(),
+  // 不传 = 永不截止。
+  expiresAt: z.string().optional(),
+  closed: z.boolean()
+});
+export type PostPollView = z.infer<typeof PostPollViewSchema>;
 
 export const FeedPostSchema = z.object({
   postId: z.string().min(1),
@@ -359,8 +390,9 @@ export const FeedPostSchema = z.object({
   // R15.24 P0：Post.EphemeralUntil — 临时动态到期时间。
   // 已过期帖子 feed 不返回（除非显式未过滤）。不传 = 永久动态。
   ephemeralUntil: z.string().optional(),
-  // R15.24 P0：Post.Poll — 帖内投票。
-  poll: PostPollSchema.optional()
+  // R15.24 P0：Post.Poll — 帖内投票。POLL-VOTE-001 起服务端会真的下发
+  // （读模型，带票数）；没有投票的帖子不带这个字段。
+  poll: PostPollViewSchema.optional()
 });
 export type FeedPost = z.infer<typeof FeedPostSchema>;
 
@@ -469,9 +501,15 @@ export const CreatePostPayloadSchema = z.object({
     "ACTIVITY"
   ]).optional(),
   contextRefs: z.array(PostContextRefSchema).optional(),
-  // R15.24 P0：可携带 ephemeralUntil 和 poll。后端尚未实现，发送时
-  // client 仍然走 body 序列化作为兼容路径。等后端落地后，本字段成为单一事实来源。
+  // ephemeralUntil：GHOST-24H-001 起服务端真正持久化，并在读时过滤（过期即
+  // 从 feed / 详情里消失），本字段是单一事实来源。必须是未来时间，否则服务端
+  // 以 INVALID_POST_EPHEMERAL_UNTIL 拒绝 —— 不会静默降级成一条永久帖。
   ephemeralUntil: z.string().optional(),
+  // poll：POLL-VOTE-001 起服务端持久化并在读时下发。仍然保留 body 里的
+  // 文本块（composer-body 的 pollBlock），那是**正文**的一部分、给人读的；
+  // 这个字段是给机器读的结构化数据，两者并存不是冗余。
+  // multiSelect 服务端明确不支持：传 true 会被 POLL_MULTISELECT_UNSUPPORTED
+  // 拒绝，不会静默降级成单选 —— 静默降级正是 GHOST-24H-001 的病根。
   poll: PostPollSchema.optional()
 });
 export type CreatePostPayload = z.infer<typeof CreatePostPayloadSchema>;

@@ -2,10 +2,13 @@
 //
 // 历史背景：GIF / 投票 / 24h 这些 UI-only 装饰项早期无对应后端字段，
 // 发布时拼到 body 文本前缀（🎬 / 📊 / ⏱）。
-// R15.24 起共享契约已定义 ephemeralUntil / poll 字段（@proxy/contracts），
-// 但服务端尚未持久化这两个字段。发送时同时带 schema 字段与 body 文本；当前
-// 服务器依靠 body fallback 保留语义，待服务端落地后再以 schema 为准。本文件保留正文序列化与反向解析
-// 两个函数以保持草稿恢复（重启后能从 body 文本回填 UI 状态）。
+// R15.24 起共享契约已定义 ephemeralUntil / poll 字段（@proxy/contracts）。
+// GHOST-24H-001 之后：ephemeralUntil 服务端已真正落地（持久化 + 读时过滤，
+// 过期后不再出现在任何 feed / 详情里），schema 字段成为单一事实来源；body 前缀
+// 里的 ⏱ 从此只是装饰，不再是语义的唯一载体。
+// poll 仍然只有 body fallback（服务端没有 poll 字段）—— 别当成已实现。
+// 本文件保留正文序列化与反向解析两个函数以保持草稿恢复（重启后能从 body 文本
+// 回填 UI 状态）。
 
 import type { FeedPost } from "@proxy/contracts";
 import type { AnyLocation } from "./components/location-picker-sheet";

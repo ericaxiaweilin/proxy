@@ -47,6 +47,10 @@ var DomainDir = []struct {
 	{"safety", "Safety"},
 	{"scene", "Scene"},
 	{"socialspace", "SocialSpace"},
+	// storeonboarding (STORE-REC-001): 漏在这里的后果是命令能跑但永不进
+	// OpenAPI 契约 —— 漂移检查也发现不了，因为它只比对「生成结果 vs 已提交文件」，
+	// 而生成器根本不会去看没登记的域。
+	{"storeonboarding", "StoreOnboarding"},
 	{"supply", "Supply"},
 	{"voucher", "Voucher"},
 }

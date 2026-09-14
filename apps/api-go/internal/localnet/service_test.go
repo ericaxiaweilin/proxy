@@ -3,9 +3,11 @@ package localnet
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 )
 
@@ -299,6 +301,101 @@ func TestListFeedPosts_SearchFilterOnBody(t *testing.T) {
 	}
 	if len(payload3.Posts) != 2 {
 		t.Fatalf("expected 2 posts matching '西', got %d", len(payload3.Posts))
+	}
+}
+
+// SEARCH-CORPUS-001：搜索必须命中「用户看得见的字段」。
+//
+// 回归背景：搜索框自己写的是「搜索人、机会、活动、情报…」，客户端两处 filter
+// 也都 OR 了 authorDisplayName，但 server 只匹配 Body —— 正文不含关键词的帖子
+// 在 server 就被丢掉了，客户端那两段 OR 永远匹配不到东西，表现为
+// 「搜作者名恒返回 0 条，而代码看起来是支持的」。
+//
+// 这个测试把「按作者名搜 / 按城市搜」钉住，避免再退回只匹配正文。
+func TestListFeedPosts_SearchMatchesAuthorNameAndCity(t *testing.T) {
+	s := New()
+	create := func(payload map[string]any) {
+		t.Helper()
+		if r := s.Handle(envelopeFor("", "CreatePost", payload)); r.Outcome != "ACCEPTED" {
+			t.Fatalf("create post %+v: %+v", payload, r.Error)
+		}
+	}
+	create(map[string]any{"body": "西湖昨天夕阳", "visibility": "PUBLIC"})
+	create(map[string]any{"body": "河内夜市美食", "visibility": "PUBLIC"})
+	create(map[string]any{"body": "西湖水上日出", "visibility": "PUBLIC"})
+	// 这条正文完全不含「晴晴」也不含「岘港」——只有作者展示名和城市带。
+	create(map[string]any{
+		"body": "今天的咖啡不错", "visibility": "PUBLIC",
+		"authorType": "MERCHANT", "authorDisplayName": "晴晴", "cityScope": "岘港",
+	})
+
+	count := func(query string) int {
+		t.Helper()
+		r := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"search": query}))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("list feed search %q: %+v", query, r.Error)
+		}
+		var payload struct {
+			Posts []map[string]any `json:"posts"`
+		}
+		if err := json.Unmarshal([]byte(r.OperationRef), &payload); err != nil {
+			t.Fatalf("unmarshal payload for %q: %v", query, err)
+		}
+		return len(payload.Posts)
+	}
+
+	// R15.94 的既有行为不能回退：正文匹配
+	if got := count("西湖"); got != 2 {
+		t.Fatalf("body search '西湖': want 2, got %d", got)
+	}
+	if got := count("河内"); got != 1 {
+		t.Fatalf("body search '河内': want 1, got %d", got)
+	}
+	// SEARCH-CORPUS-001：作者展示名可搜 —— 修复前这里是 0
+	if got := count("晴晴"); got != 1 {
+		t.Fatalf("author-name search '晴晴': want 1, got %d (搜索必须能按人搜)", got)
+	}
+	// SEARCH-CORPUS-001：城市可搜 —— 修复前这里是 0
+	if got := count("岘港"); got != 1 {
+		t.Fatalf("city search '岘港': want 1, got %d", got)
+	}
+	// 大小写/子串语义对非正文字段同样成立
+	if got := count("晴"); got != 1 {
+		t.Fatalf("author-name substring search '晴': want 1, got %d", got)
+	}
+	// 反向：不匹配任何字段的查询仍然返回空（防止 filter 被写成恒真）
+	if got := count("不存在的关键词"); got != 0 {
+		t.Fatalf("unrelated search: want 0, got %d", got)
+	}
+}
+
+// postMatchesSearch 的字段边界：正文 / 作者名 / 城市命中，
+// 但**派生**的 ContextRefs 不参与 —— 否则搜索会返回用户根本没写过的词。
+func TestPostMatchesSearch_ExcludesDerivedContextRefs(t *testing.T) {
+	post := Post{
+		ID:                "post_1",
+		Body:              "西湖昨天夕阳",
+		AuthorDisplayName: "晴晴",
+		CityScope:         "岘港",
+		// classifyPostFallback 从正文派生出来的分类标签，不是用户输入。
+		ContextRefs: []ContextRef{{ContextID: "scene_rooftop_夜景"}},
+	}
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"", true},         // 空查询不过滤
+		{"西湖", true},       // 正文
+		{"晴晴", true},       // 作者展示名
+		{"岘港", true},       // 城市
+		{"夜景", false},      // 派生 ContextRefs 不算
+		{"rooftop", false}, // 派生 ContextRefs 不算（大小写不敏感）
+		{"河内", false},      // 谁都不含
+	}
+	for _, c := range cases {
+		if got := postMatchesSearch(post, strings.ToLower(c.query)); got != c.want {
+			t.Fatalf("postMatchesSearch(%q) = %v, want %v", c.query, got, c.want)
+		}
 	}
 }
 
@@ -976,6 +1073,7 @@ func TestCreatePostDisplayNameFallbacks(t *testing.T) {
 		t.Fatalf("non-USER names stay caller-supplied, got %q", agentPost.AuthorDisplayName)
 	}
 }
+
 // AI-POSTS-001: 5 小美开屏帖种子。一人一条 AI_NATIVE + 写真 mediaRef；
 // Upsert 幂等，可重跑。
 func TestSeedXiaomeiPosts(t *testing.T) {
@@ -1009,5 +1107,211 @@ func TestSeedXiaomeiPosts(t *testing.T) {
 	}
 	if len(seen) != 5 {
 		t.Fatalf("expected 5 xiaomei posts, got %d", len(seen))
+	}
+}
+
+// ---------- GHOST-24H-001: 临时动态（24h）的到期必须真的生效 ----------
+//
+// 这组测试钉住的是一条**对用户撒谎**的路径。修复前 `ephemeralUntil` 只存在于
+// contracts 的 zod schema 和 mobile 的发布 payload 里，api-go 一次都没出现过：
+// Post 没这个字段、createPostPayload 不解析、数据库没列、feed 没过期条件。于是
+// 用户打开「24h 临时动态」发帖 → 客户端算好 now+24h 发上来 → Go 的 JSON 解码
+// 静默忽略未知字段 → 客户端弹 toast「24h 动态已发布」→ 帖子**永久存在**。
+//
+// 用户正是因为相信它会消失才发那些内容，所以它带隐私含义：承诺了会过期却永久
+// 留存，比一开始就没提供这个功能严重得多。
+
+func newGhostClockService(t *testing.T, now time.Time) (*Service, *clock.Fixed) {
+	t.Helper()
+	fixed := clock.NewFixed(now)
+	return NewWithRepositoryAndClock(NewMemoryRepository(), fixed), fixed
+}
+
+func listFeedBodies(t *testing.T, s *Service) []string {
+	t.Helper()
+	res := s.Handle(envelopeFor("", "ListFeedPosts", map[string]any{"limit": 50}))
+	if res.Outcome != "ACCEPTED" {
+		t.Fatalf("ListFeedPosts: %s (%+v)", res.Outcome, res.Error)
+	}
+	var body struct {
+		Posts []Post `json:"posts"`
+	}
+	if err := json.Unmarshal([]byte(res.OperationRef), &body); err != nil {
+		t.Fatalf("decode feed: %v", err)
+	}
+	out := make([]string, 0, len(body.Posts))
+	for _, p := range body.Posts {
+		out = append(out, p.Body)
+	}
+	return out
+}
+
+func containsBody(bodies []string, want string) bool {
+	for _, b := range bodies {
+		if strings.Contains(b, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// 核心断言：发一条 24h 临时动态，到期前在 feed 里，到期后不在。
+func TestEphemeralPostDisappearsFromFeedWhenExpired(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	s, clk := newGhostClockService(t, now)
+
+	marker := "GHOST24H_EPHEMERAL_MARKER"
+	e := envelopeFor("", "CreatePost", map[string]any{
+		"body":           marker,
+		"visibility":     "PUBLIC",
+		"ephemeralUntil": now.Add(24 * time.Hour).Format(time.RFC3339),
+	})
+	if res := s.Handle(e); res.Outcome != "ACCEPTED" {
+		t.Fatalf("create ephemeral post: %s (%+v)", res.Outcome, res.Error)
+	}
+
+	if !containsBody(listFeedBodies(t, s), marker) {
+		t.Fatal("an unexpired 24h post must still be in the feed")
+	}
+
+	clk.Advance(25 * time.Hour)
+	if containsBody(listFeedBodies(t, s), marker) {
+		t.Error("an expired 24h post must be gone from the feed — this is the whole point of the feature")
+	}
+}
+
+// 不传 ephemeralUntil = 永久动态。存量数据全是这个形态，不能被回归伤到。
+func TestPostWithoutEphemeralUntilIsPermanent(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	s, clk := newGhostClockService(t, now)
+
+	marker := "GHOST24H_PERMANENT_MARKER"
+	if res := s.Handle(envelopeFor("", "CreatePost", map[string]any{"body": marker, "visibility": "PUBLIC"})); res.Outcome != "ACCEPTED" {
+		t.Fatalf("create post: %s (%+v)", res.Outcome, res.Error)
+	}
+	clk.Advance(30 * 24 * time.Hour)
+	if !containsBody(listFeedBodies(t, s), marker) {
+		t.Error("a post with no ephemeralUntil must never expire")
+	}
+}
+
+// 到期时刻必须是将来。静默忽略一个过去的值 = 用户以为临时、实际永久 —— 正是这次修的 bug。
+func TestCreatePostRejectsPastEphemeralUntil(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	s, _ := newGhostClockService(t, now)
+
+	e := envelopeFor("", "CreatePost", map[string]any{
+		"body":           "GHOST24H_PAST",
+		"visibility":     "PUBLIC",
+		"ephemeralUntil": now.Add(-time.Hour).Format(time.RFC3339),
+	})
+	res := s.Handle(e)
+	if res.Outcome != "REJECTED" {
+		t.Fatalf("a past ephemeralUntil must be rejected, got %s", res.Outcome)
+	}
+	if res.Error == nil || res.Error.ErrorCode != "INVALID_POST_EPHEMERAL_UNTIL" {
+		t.Fatalf("want INVALID_POST_EPHEMERAL_UNTIL, got %+v", res.Error)
+	}
+	// 绝不能产出一条「发出即可见」的幽灵帖：客户端以为发布成功，用户翻遍 feed 找不到。
+	if containsBody(listFeedBodies(t, s), "GHOST24H_PAST") {
+		t.Error("rejected post must not have been published")
+	}
+}
+
+// 格式不对要响亮地失败，不能像以前那样被 Go 的 JSON 解码静默丢掉。
+func TestCreatePostRejectsMalformedEphemeralUntil(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	s, _ := newGhostClockService(t, now)
+
+	res := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"body":           "GHOST24H_MALFORMED",
+		"visibility":     "PUBLIC",
+		"ephemeralUntil": "tomorrow-ish",
+	}))
+	if res.Outcome != "REJECTED" {
+		t.Fatalf("a malformed ephemeralUntil must be rejected, got %s", res.Outcome)
+	}
+}
+
+// 按 ID 直取不能把已过期的临时动态捞回来 —— 收藏夹里躺着一条 24h 帖，过期后
+// 再点进去应该「没有了」，而不是把它从后门复活。
+func TestListPostsByIdsHidesExpiredEphemeralPost(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	s, clk := newGhostClockService(t, now)
+
+	res := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"body":           "GHOST24H_BYIDS",
+		"visibility":     "PUBLIC",
+		"ephemeralUntil": now.Add(time.Hour).Format(time.RFC3339),
+	}))
+	if res.Outcome != "ACCEPTED" {
+		t.Fatalf("create: %s (%+v)", res.Outcome, res.Error)
+	}
+	postID := res.Aggregate.ID
+
+	byID := func() int {
+		t.Helper()
+		r := s.Handle(envelopeFor("", "ListPostsByIds", map[string]any{"postIds": []string{postID}}))
+		if r.Outcome != "ACCEPTED" {
+			t.Fatalf("ListPostsByIds: %s (%+v)", r.Outcome, r.Error)
+		}
+		var body struct {
+			Posts []Post `json:"posts"`
+		}
+		if err := json.Unmarshal([]byte(r.OperationRef), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return len(body.Posts)
+	}
+
+	if got := byID(); got != 1 {
+		t.Fatalf("unexpired post must be fetchable by id, got %d", got)
+	}
+	clk.Advance(2 * time.Hour)
+	if got := byID(); got != 0 {
+		t.Errorf("expired post must not be resurrected by id, got %d", got)
+	}
+}
+
+// 到期时刻必须真的**落库**，不是只在 payload 里路过一趟。
+// 修复前它连 Post 结构体上的字段都没有，服务端无处可存 —— 这条断言正是那个空洞。
+func TestCreatePostPersistsEphemeralUntil(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	s, _ := newGhostClockService(t, now)
+	until := now.Add(24 * time.Hour).UTC()
+
+	res := s.Handle(envelopeFor("", "CreatePost", map[string]any{
+		"body":           "GHOST24H_PERSISTED",
+		"visibility":     "PUBLIC",
+		"ephemeralUntil": until.Format(time.RFC3339),
+	}))
+	if res.Outcome != "ACCEPTED" {
+		t.Fatalf("create: %s (%+v)", res.Outcome, res.Error)
+	}
+	stored, err := s.repository.GetPost(context.Background(), res.Aggregate.ID)
+	if err != nil {
+		t.Fatalf("GetPost: %v", err)
+	}
+	if stored.EphemeralUntil == nil {
+		t.Fatal("ephemeralUntil was not persisted — the field is only travelling on the wire again")
+	}
+	if !stored.EphemeralUntil.Equal(until) {
+		t.Errorf("stored expiry = %s, want %s", stored.EphemeralUntil.UTC().Format(time.RFC3339), until.Format(time.RFC3339))
+	}
+}
+
+// postIsExpired 的边界：nil 永不到期；正好等于 now 算已到期（不是「之后」）。
+func TestPostIsExpiredBoundaries(t *testing.T) {
+	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	if postIsExpired(Post{}, now) {
+		t.Error("a permanent post (nil) must never be expired")
+	}
+	exactly := now
+	if !postIsExpired(Post{EphemeralUntil: &exactly}, now) {
+		t.Error("expiry == now must count as expired (otherwise it lingers for a tick)")
+	}
+	future := now.Add(time.Second)
+	if postIsExpired(Post{EphemeralUntil: &future}, now) {
+		t.Error("a future expiry must not count as expired")
 	}
 }

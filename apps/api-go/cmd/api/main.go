@@ -42,6 +42,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/mockidentity"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/moderation"
+	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
@@ -119,6 +120,9 @@ func main() {
 	// COMP-REPORT-001: 举报受理。法律文件 §38 承诺可举报八类目标，
 	// 之前只有 engagement.ReportPost（POST）一类接得上。
 	moderationService := moderation.New()
+	// STORE-REC-001: 店铺推荐受理（独立模块「企业/店铺」的增长入口：
+	// 用户/小美推荐商铺进体系）。无 DB 时用内存仓，重启即失，但命令面照常。
+	storeOnboardingService := storeonboarding.New()
 	outcomeService := outcome.New()
 	sceneService := scene.New()
 	realitySceneService := realityscene.New()
@@ -262,6 +266,7 @@ func main() {
 		notificationService = notification.NewWithPushProvider(postgres.NewNotificationRepository(pool), configuredNotificationPush())
 		safetyService = safety.NewWithRepository(postgres.NewSafetyRepository(pool))
 		moderationService = moderation.NewWithRepository(postgres.NewModerationRepository(pool))
+		storeOnboardingService = storeonboarding.NewWithRepository(postgres.NewStoreOnboardingRepository(pool))
 		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
 		localNetService = localnet.NewWithAll(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack, scene.NewSceneAestheticAdapter(sceneService))
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
@@ -328,6 +333,7 @@ func main() {
 	server.Notification = notificationService
 	server.Safety = safetyService
 	server.Moderation = moderationService
+	server.StoreOnboarding = storeOnboardingService
 	server.Outcome = outcomeService
 	server.Scene = sceneService
 	server.RealityScene = realitySceneService

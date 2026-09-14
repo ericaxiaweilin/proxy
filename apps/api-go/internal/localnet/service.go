@@ -79,6 +79,23 @@ type Post struct {
 	Status            string         `json:"status"` // DRAFT | PUBLISHED | HIDDEN | REMOVED
 	ContextRefs       []ContextRef   `json:"contextRefs"`
 	CreatedAt         time.Time      `json:"createdAt"`
+	// EphemeralUntil 是临时动态（24h）的到期时刻（GHOST-24H-001）。
+	// nil = 永久动态 —— 存量数据全是 nil，不需要回填。
+	//
+	// 这个字段以前**只存在于 contracts 的 zod schema 和 mobile 的发布 payload 里**，
+	// api-go 一次都没出现过：Post 没有这个字段、createPostPayload 不解析它、
+	// 数据库没有列、feed 没有过期条件。结果就是用户打开「24h 临时动态」发了一条
+	// 帖子、客户端算好 now+24h 发上来、Go 的 JSON 解码静默忽略未知字段、客户端
+	// 弹 toast「24h 动态已发布」，而这条帖子**永久存在**。
+	//
+	// 这不是少做功能，是一条对用户撒谎的路径：用户正是因为相信它会消失才发的。
+	// 用指针而不是 time.Time + IsZero：nil 与「零值时间」是两件事，零值时间会被
+	// 序列化成 "0001-01-01T00:00:00Z" 这种让客户端 zod parse 失败的垃圾。
+	EphemeralUntil *time.Time `json:"ephemeralUntil,omitempty"`
+	// Poll 是这条帖子的投票（POLL-VOTE-001）。它是**读时**拼上去的，不落进
+	// posts 表的任何列 —— 票数会变、而且"我投了哪个"因人而异，缓存进帖子
+	// 行里必然是错的。nil = 这条帖子没有投票。
+	Poll *PostPollView `json:"poll,omitempty"`
 	// R15.15 P1: SceneType 是 Post 与 Scene aggregate 之间的选择
 	// 门 (ROOFTOP | BRUNCH | SPA | CINEMA | PHOTO | NIGHTLIFE |
 	// OUTDOOR | COFFEE | UNKNOWN). 跟 Scene.SceneType 同样枚举
@@ -239,10 +256,31 @@ type Repository interface {
 	SnapshotNeeds(ctx context.Context) ([]NeedFromPost, error)
 	AppendInteractionEvent(ctx context.Context, ie InteractionEvent) error
 	ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]InteractionEvent, error)
+	// POLL-VOTE-001：投票。刻意放进**必需**的 Repository 而不是另开一个可选
+	// 接口 —— 可选接口一旦没人实现，投票就又变成"UI 有、服务端没有"的静默
+	// 降级，正是这次要修的病。宁可编译期就逼着每个实现把投票接上。
+	SavePostPoll(ctx context.Context, poll PostPoll) error
+	RecordPollVote(ctx context.Context, postID, optionID, voterID string) error
+	ListPollsForPosts(ctx context.Context, postIDs []string, viewerID string) (map[string]PostPollTally, error)
 }
 
 type FeedPageRepository interface {
 	ListFeedPage(ctx context.Context, actorID string, before time.Time, beforeID string, limit int) ([]Post, error)
+}
+
+// MentionRepository is the optional narrow read used by the profile TAGGED tab.
+//
+// Why this exists: TAGGED used to be derived on the client by scanning a single
+// feed page (25 posts) for "@handle". Anything older than that page silently
+// vanished, so a user could be mentioned fifty times and see two. The match has
+// to run over every published post, which only the store can do — hence a
+// repository method rather than another client-side filter.
+//
+// handle is passed WITHOUT the leading "@". The implementation is responsible
+// for matching whole-handle occurrences only (so "@thanh" never matches
+// "@thanh2") and for applying the same visibility and mute rules as the feed.
+type MentionRepository interface {
+	ListPostsMentioning(ctx context.Context, actorID string, handle string, limit int) ([]Post, error)
 }
 
 // InteractionEvent 是网络交互事件（C1 Event Stream 最小底座）。
@@ -260,6 +298,9 @@ type InteractionEvent struct {
 var (
 	ErrPostNotFound    = errors.New("post not found")
 	ErrVersionConflict = errors.New("post version conflict")
+	// POLL-VOTE-001
+	ErrPollNotFound       = errors.New("poll not found")
+	ErrPollOptionNotFound = errors.New("poll option not found")
 )
 
 type MemoryRepository struct {
@@ -268,10 +309,92 @@ type MemoryRepository struct {
 	needs             []NeedFromPost
 	interactionEvents []InteractionEvent
 	events            []event.DomainEvent
+	// POLL-VOTE-001
+	polls map[string]PostPoll          // postID -> poll
+	votes map[string]map[string]string // postID -> voterID -> optionID
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{posts: make(map[string]Post)}
+	return &MemoryRepository{
+		posts: make(map[string]Post),
+		polls: make(map[string]PostPoll),
+		votes: make(map[string]map[string]string),
+	}
+}
+
+func (r *MemoryRepository) SavePostPoll(_ context.Context, poll PostPoll) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	options := append([]PostPollOption(nil), poll.Options...)
+	sortPollOptions(options)
+	r.polls[poll.PostID] = PostPoll{PostID: poll.PostID, ExpiresAt: poll.ExpiresAt, Options: options}
+	return nil
+}
+
+func (r *MemoryRepository) RecordPollVote(_ context.Context, postID, optionID, voterID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	poll, ok := r.polls[postID]
+	if !ok {
+		return ErrPostNotFound
+	}
+	belongs := false
+	for _, opt := range poll.Options {
+		if opt.OptionID == optionID {
+			belongs = true
+			break
+		}
+	}
+	if !belongs {
+		return ErrPollOptionNotFound
+	}
+	if r.votes[postID] == nil {
+		r.votes[postID] = make(map[string]string)
+	}
+	// 一人一票：再投即改票，仍然只算一票。
+	r.votes[postID][voterID] = optionID
+	return nil
+}
+
+func (r *MemoryRepository) ListPollsForPosts(_ context.Context, postIDs []string, viewerID string) (map[string]PostPollTally, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]PostPollTally, len(postIDs))
+	for _, postID := range postIDs {
+		poll, ok := r.polls[postID]
+		if !ok {
+			continue
+		}
+		counts := make(map[string]int, len(poll.Options))
+		for _, opt := range poll.Options {
+			counts[opt.OptionID] = 0
+		}
+		voted := ""
+		for voter, optionID := range r.votes[postID] {
+			counts[optionID]++
+			if viewerID != "" && voter == viewerID {
+				voted = optionID
+			}
+		}
+		out[postID] = PostPollTally{Poll: poll, Counts: counts, VotedOptionID: voted}
+	}
+	return out, nil
+}
+
+// sortPollOptions 按 sortOrder 升序（同序按 optionID 兜底，保证顺序确定）。
+func sortPollOptions(options []PostPollOption) {
+	for i := 1; i < len(options); i++ {
+		for j := i; j > 0; j-- {
+			a, b := options[j-1], options[j]
+			if a.SortOrder < b.SortOrder {
+				break
+			}
+			if a.SortOrder == b.SortOrder && a.OptionID <= b.OptionID {
+				break
+			}
+			options[j-1], options[j] = b, a
+		}
+	}
 }
 
 // SeedDemoPosts idempotently inserts a small set of demo posts so a
@@ -590,6 +713,11 @@ func (r *MemoryRepository) ListInteractionEvents(_ context.Context, actorID stri
 func clonePost(post Post) Post {
 	post.MediaRefs = append([]PostMediaRef(nil), post.MediaRefs...)
 	post.ContextRefs = append([]ContextRef(nil), post.ContextRefs...)
+	if post.Poll != nil {
+		poll := *post.Poll
+		poll.Options = append([]PostPollOptionView(nil), poll.Options...)
+		post.Poll = &poll
+	}
 	return post
 }
 
@@ -682,9 +810,9 @@ func NewWithRepositoryAndClock(repository Repository, domainClock clock.Clock) *
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "CreatePost", "ListFeedPosts", "CreateNeedFromPost", "RecordAttribution",
+	case "CreatePost", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed",
-		"ShortlistAgent", "ListInteractionEvents":
+		"ShortlistAgent", "ListInteractionEvents", "VotePostPoll":
 		return true
 	default:
 		return false
@@ -703,6 +831,10 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.createPost(ctx, e)
 	case "ListFeedPosts":
 		return s.listFeed(ctx, e)
+	case "ListPostsByIds":
+		return s.listPostsByIds(ctx, e)
+	case "ListPostsMentioning":
+		return s.listPostsMentioning(ctx, e)
 	case "CreateNeedFromPost":
 		return s.createNeedFromPost(ctx, e)
 	case "RecordAttribution":
@@ -717,6 +849,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.shortlistAgent(ctx, e)
 	case "ListInteractionEvents":
 		return s.listInteractionEvents(ctx, e)
+	case "VotePostPoll":
+		return s.votePostPoll(ctx, e)
 	default:
 		return command.Rejected(e, "LOCAL_NET_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "localnet.unsupported_command", nil)
 	}
@@ -758,6 +892,47 @@ type createPostPayload struct {
 	// 记忆轮。不传默认 UNKNOWN（依然能查到，只是样本少）。
 	SceneType   string       `json:"sceneType"`
 	ContextRefs []ContextRef `json:"contextRefs"`
+	// GHOST-24H-001：临时动态到期时刻（RFC3339）。不传 / null = 永久动态。
+	// 用指针以便区分「没传」与「传了零值」；传了非 RFC3339 的字符串会让
+	// decode 失败 → INVALID_POST，而不是被静默丢弃。
+	EphemeralUntil *time.Time `json:"ephemeralUntil"`
+	// POLL-VOTE-001：帖内投票。不传 / null = 普通帖子。
+	Poll *createPostPollPayload `json:"poll"`
+}
+
+// createPostPollPayload 是建帖时随帖提交的投票。
+//
+// MultiSelect 用 **bool** 而不是 *bool 拿不到"客户端没传"这回事，这里刻意用
+// 指针：契约里 multiSelect 是 optional，但**不支持多选**，所以必须能分辨
+// 「没传」（= 单选，正常）和「传了 true」（= 显式要求多选，必须报错拒绝）。
+// 用非指针 bool 会把两者都读成 false，于是用户以为自己建了多选投票、服务端
+// 悄悄按单选存了 —— 那正是 GHOST-24H-001 那种"静默降级"。
+type createPostPollPayload struct {
+	ExpiresAt   *time.Time                    `json:"expiresAt"`
+	MultiSelect *bool                         `json:"multiSelect"`
+	Options     []createPostPollOptionPayload `json:"options"`
+}
+
+type createPostPollOptionPayload struct {
+	OptionID  string `json:"optionId"`
+	Label     string `json:"label"`
+	SortOrder int    `json:"sortOrder"`
+}
+
+// ephemeralUntilSkewTolerance 容忍一点点客户端与服务端之间的时钟偏差。
+// 只在判断「是否已经是过去」时用：差几秒不该把一次正常发布打成非法请求。
+const ephemeralUntilSkewTolerance = 5 * time.Minute
+
+// postIsExpired 报告一条临时动态是否已经到期。永久动态（nil）永不到期。
+//
+// 这是**读时**判断而不是写时删行：feed 分页的 LIMIT 计数必须正确（先删行再
+// limit 会少给一页，先 limit 再过滤会漏），而且行留着才能举证「这条内容确实
+// 到期了」而不是被谁偷偷删掉的。
+func postIsExpired(p Post, now time.Time) bool {
+	if p.EphemeralUntil == nil {
+		return false
+	}
+	return !p.EphemeralUntil.After(now)
 }
 
 // allowedSceneTypes 是 Post.SceneType 的允许集。需要保持与
@@ -830,6 +1005,79 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "POST_AUTHOR_MISMATCH", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.post_author_mismatch", nil)
 	}
+	// GHOST-24H-001：到期时刻必须是**将来**，否则拒绝。
+	//
+	// 为什么不能「收到过去的时间就当没传、照发一条永久帖」—— 那正是这次修的
+	// bug 本身：客户端说「24h 临时动态已发布」，实际是永久的。静默忽略一个用户
+	// 明确表达的意图，等于替用户做了个他没同意的决定。要么按他说的做，要么
+	// 明确告诉他做不到。
+	//
+	// 也不接受「已经过去但仍存下来」——那会产出一条发出即可见的、谁都看不到的
+	// 幽灵帖：客户端会以为发布成功，用户翻遍 feed 也找不到自己的帖子。
+	if p.EphemeralUntil != nil {
+		cutoff := s.clock.Now().UTC().Add(-ephemeralUntilSkewTolerance)
+		if !p.EphemeralUntil.After(cutoff) {
+			return command.Rejected(e, "INVALID_POST_EPHEMERAL_UNTIL", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_ephemeral_until", map[string]any{
+				"got":      p.EphemeralUntil.UTC().Format(time.RFC3339),
+				"serverAt": s.clock.Now().UTC().Format(time.RFC3339),
+			})
+		}
+	}
+	// POLL-VOTE-001：投票在建帖时就地校验 + 落库。
+	//
+	// 校验放在**建帖之前**：这样绝大多数非法投票（选项不够、标签过长、
+	// 要求多选、到期时间在过去）根本不会产生一条帖子，也就不存在
+	// 「帖子发出来了但投票没成」这种半截状态。
+	var poll *PostPoll
+	if p.Poll != nil {
+		if p.Poll.MultiSelect != nil && *p.Poll.MultiSelect {
+			// 明确拒绝，绝不静默降级成单选 —— 静默降级正是 GHOST-24H-001 的病根：
+			// 用户以为自己建了多选投票，服务端悄悄按单选存了，谁都不会报错。
+			return command.Rejected(e, "POLL_MULTISELECT_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "localnet.poll_multiselect_unsupported", nil)
+		}
+		if p.Poll.ExpiresAt != nil && !p.Poll.ExpiresAt.After(s.clock.Now().UTC().Add(-ephemeralUntilSkewTolerance)) {
+			// 同 GHOST-24H-001：不接受「已经截止的投票」。那会产出一条发出即可见、
+			// 但谁都投不了的投票 —— 用户建完发现投不了，跟没建一样。
+			return command.Rejected(e, "INVALID_POST_POLL_EXPIRES_AT", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_poll_expires_at", map[string]any{
+				"got":      p.Poll.ExpiresAt.UTC().Format(time.RFC3339),
+				"serverAt": s.clock.Now().UTC().Format(time.RFC3339),
+			})
+		}
+		options := make([]PostPollOption, 0, len(p.Poll.Options))
+		for i, opt := range p.Poll.Options {
+			label := strings.TrimSpace(opt.Label)
+			if label == "" {
+				continue
+			}
+			if utf8.RuneCountInString(label) > maxPollLabelRune {
+				return command.Rejected(e, "INVALID_POST_POLL", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_poll", map[string]any{
+					"reason": "option_label_too_long",
+					"index":  i,
+					"max":    maxPollLabelRune,
+				})
+			}
+			id := strings.TrimSpace(opt.OptionID)
+			if id == "" {
+				id = newID("opt_")
+			}
+			options = append(options, PostPollOption{OptionID: id, Label: label, SortOrder: opt.SortOrder})
+		}
+		if len(options) < minPollOptions {
+			return command.Rejected(e, "INVALID_POST_POLL", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_poll", map[string]any{
+				"reason": "too_few_options",
+				"got":    len(options),
+				"min":    minPollOptions,
+			})
+		}
+		if len(options) > maxPollOptions {
+			return command.Rejected(e, "INVALID_POST_POLL", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_poll", map[string]any{
+				"reason": "too_many_options",
+				"got":    len(options),
+				"max":    maxPollOptions,
+			})
+		}
+		poll = &PostPoll{PostID: "", ExpiresAt: p.Poll.ExpiresAt, Options: options}
+	}
 	post := Post{
 		ID:                newID("post_"),
 		AuthorType:        p.AuthorType,
@@ -843,14 +1091,26 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 		ContextRefs:       mergeClassificationRefs(p.ContextRefs, classifyPostFallback(p.Body)),
 		SceneType:         p.SceneType,
 		CreatedAt:         s.clock.Now().UTC(),
+		EphemeralUntil:    p.EphemeralUntil,
 	}
-	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, map[string]any{
+	domainEventData := map[string]any{
 		"authorType":  post.AuthorType,
 		"body":        post.Body,
 		"visibility":  post.Visibility,
 		"contextRefs": post.ContextRefs,
 		"note":        "Post 发布永不自动创建 Task；Intent 经 DM / 显式 Need 涌现",
-	})}
+	}
+	// GHOST-24H-001：到期时刻要进事件流。用户主张「这条内容是临时的」这一事实
+	// 本身要能举证 —— 否则日后对不上「它到底是什么时候该消失的」。
+	if post.EphemeralUntil != nil {
+		domainEventData["ephemeralUntil"] = post.EphemeralUntil.UTC().Format(time.RFC3339)
+	}
+	// POLL-VOTE-001：投票进了事件流。是否建过投票（以及几个选项）要能举证，
+	// 否则日后对不上「用户到底主张过什么」。
+	if poll != nil {
+		domainEventData["pollOptionCount"] = len(poll.Options)
+	}
+	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, domainEventData)}
 	if len(p.MediaRefs) > 0 && s.mediaLookup != nil {
 		ids := make([]string, 0, len(p.MediaRefs))
 		for _, ref := range p.MediaRefs {
@@ -863,104 +1123,379 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if err := s.repository.CreatePost(ctx, post); err != nil {
 		return command.Rejected(e, "POST_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_create_failed", nil)
 	}
+	// POLL-VOTE-001：投票必须在同一条命令里真的落库，且失败必须报失败。
+	//
+	// 这里绝不「帖子发了、投票没存也照样返回成功」——那产出的是一条自称有投票、
+	// 实际谁都投不了的帖子，正是这次要消灭的东西。宁可让客户端看到失败去重发。
+	if poll != nil {
+		poll.PostID = post.ID
+		if err := s.repository.SavePostPoll(ctx, *poll); err != nil {
+			return command.Rejected(e, "POST_POLL_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_save_failed", nil)
+		}
+	}
 	go s.enrichPostClassification(post)
 	return command.Accepted(e, "Post", post.ID, 1, post.Status, eventRefs(domainEvents))
+}
+
+// ---------- VotePostPoll ----------
+
+// attachPolls 把投票读模型挂到一批帖子上（一次批量查询，不是 N 次）。
+//
+// 为什么不在 feed 的 SQL 里 JOIN 投票：票数会变、"我投了哪个"因人而异，
+// 塞进 posts 表的列里必然是错的；而且给主查询加 JOIN 会牵动
+// SELECT 列清单 —— 那正是 GHOST-24H-001 里把 feed 读崩的事故类型
+// （列数对不上 rows.Scan）。单独一次批量查询既安全又好测。
+//
+// 查询失败时**原样返回**而不是让整个 feed 挂掉：投票是帖子的附加信息，
+// 读不到投票不代表帖子不该出现。宁可少一个投票卡片，不要整个动态流 500。
+func (s *Service) attachPolls(ctx context.Context, posts []Post, viewerID string) []Post {
+	if len(posts) == 0 {
+		return posts
+	}
+	ids := make([]string, 0, len(posts))
+	for _, p := range posts {
+		ids = append(ids, p.ID)
+	}
+	tallies, err := s.repository.ListPollsForPosts(ctx, ids, viewerID)
+	if err != nil || len(tallies) == 0 {
+		return posts
+	}
+	now := s.clock.Now().UTC()
+	for i := range posts {
+		tally, ok := tallies[posts[i].ID]
+		if !ok {
+			continue
+		}
+		view := newPostPollView(tally.Poll, tally.Counts, tally.VotedOptionID, now)
+		posts[i].Poll = &view
+	}
+	return posts
+}
+
+// votePostPoll 给一条帖子的投票投一票。
+//
+// 三条自觉：
+//   - 一人一票，且**改票是直接覆盖**（再投不同选项 = 改票，不是两票）。
+//     落在仓储层是 UPSERT (post_id, voter_id)。
+//   - 截止后拒投，但**结果照常可见**：把结果一起藏掉等于把投票变成一场
+//     没有开奖的抽奖，用户需要看到最终票数。
+//   - 投票完成后直接把最新的票数回给客户端，省掉一次「投完再拉一遍」的往返，
+//     也避免客户端自己拿旧数字 +1 画出一条跟服务端对不上的百分比。
+func (s *Service) votePostPoll(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		PostID   string `json:"postId"`
+		OptionID string `json:"optionId"`
+	}
+	if !decode(e.Payload, &p) || p.PostID == "" || p.OptionID == "" {
+		return command.Rejected(e, "INVALID_POLL_VOTE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_poll_vote", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "POLL_VOTE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.poll_vote_not_allowed", nil)
+	}
+	tallies, err := s.repository.ListPollsForPosts(ctx, []string{p.PostID}, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "POLL_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_read_failed", nil)
+	}
+	tally, ok := tallies[p.PostID]
+	if !ok {
+		return command.Rejected(e, "POLL_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.poll_not_found", map[string]any{"postId": p.PostID})
+	}
+	now := s.clock.Now().UTC()
+	if pollIsClosed(tally.Poll.ExpiresAt, now) {
+		return command.Rejected(e, "POLL_CLOSED", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.poll_closed", map[string]any{
+			"postId":   p.PostID,
+			"serverAt": now.Format(time.RFC3339),
+		})
+	}
+	belongs := false
+	for _, opt := range tally.Poll.Options {
+		if opt.OptionID == p.OptionID {
+			belongs = true
+			break
+		}
+	}
+	if !belongs {
+		// 明确拒绝，不让「拿 A 帖子的选项去投 B 帖子的票」悄悄变成无效票。
+		// 数据库层还有复合外键兜底，这里是为了给客户端一个说得清的错误码。
+		return command.Rejected(e, "POLL_OPTION_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "localnet.poll_option_not_found", map[string]any{
+			"postId":   p.PostID,
+			"optionId": p.OptionID,
+		})
+	}
+	if err := s.repository.RecordPollVote(ctx, p.PostID, p.OptionID, e.Actor.ID); err != nil {
+		return command.Rejected(e, "POLL_VOTE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_vote_failed", nil)
+	}
+	// 重新读一遍，把权威票数回给客户端。
+	tallies, err = s.repository.ListPollsForPosts(ctx, []string{p.PostID}, e.Actor.ID)
+	if err != nil || tallies[p.PostID].Poll.PostID == "" {
+		return command.Rejected(e, "POLL_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_read_failed", nil)
+	}
+	fresh := tallies[p.PostID]
+	view := newPostPollView(fresh.Poll, fresh.Counts, fresh.VotedOptionID, s.clock.Now().UTC())
+	domainEvents := []event.DomainEvent{event.New("PostPollVoted", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"optionId": p.OptionID,
+	})}
+	return acceptedWithPayload(e, "Post", p.PostID, 1, "POLL_VOTED", map[string]any{
+		"postId": p.PostID,
+		"poll":   view,
+	}, domainEvents)
 }
 
 // ---------- ListFeedPosts ----------
 // PRD §8 Feed 管道。ALL 是全部可见公开帖文，默认 createdAt DESC、
 // postId ASC；LocationContext 只作为元数据和显式“附近”筛选依据。
 
-func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
+// ---------- ListPostsByIds ----------
+
+// ListPostsByIds 按 ID 批量取帖子。
+//
+// 收藏夹、回复的父帖这类场景手里只有 postId。之前只能从时间流里「捞」——
+// 于是收藏一条老帖，只要它不在动态流前 25 条里就永远不出现，用户会以为
+// 收藏丢了。这里给一个按 ID 直取的读法。
+//
+// 可见性口径与 listFeed 完全一致，并且 fail-closed：
+//   - 只取 PUBLISHED；
+//   - PUBLIC 人人可见；FOLLOWERS 只有作者本人可见（关注图谱授权还没做，
+//     不能因为「被谁收藏了」就把别人的 followers-only 帖子漏出来）；
+//   - 取不到的 ID 直接跳过（帖子可能已删），不报错、不补假数据；
+//   - 保持请求顺序、去重、最多 100 个。
+func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) command.Result {
 	var request struct {
-		Cursor string `json:"cursor"`
-		Limit  int    `json:"limit"`
-		// R15.94: search query — server 侧 filter (body 包含 search, case-insensitive).
-		Search string `json:"search"`
+		PostIDs []string `json:"postIds"`
 	}
-	_ = decode(e.Payload, &request) // legacy malformed payloads keep first-page behavior
-	search := strings.ToLower(strings.TrimSpace(request.Search))
+	if !decode(e.Payload, &request) {
+		return command.Rejected(e, "INVALID_LIST_POSTS_BY_IDS", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_list_posts_by_ids", nil)
+	}
+	const maxPostIDs = 100
+	posts := make([]Post, 0, len(request.PostIDs))
+	seen := make(map[string]struct{}, len(request.PostIDs))
+	for _, rawID := range request.PostIDs {
+		if len(posts) >= maxPostIDs {
+			break
+		}
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		post, err := s.repository.GetPost(ctx, id)
+		if err != nil {
+			continue
+		}
+		if post.Status != "PUBLISHED" {
+			continue
+		}
+		if post.Visibility != "PUBLIC" && post.Visibility != "FOLLOWERS" {
+			continue
+		}
+		if post.Visibility == "FOLLOWERS" && post.AuthorID != e.Actor.ID {
+			continue
+		}
+		// GHOST-24H-001: 按 ID 直取也不能把已过期的临时动态捞回来。收藏夹里躺着
+		// 一条 24h 帖，过期后再点进去应该「没有了」，而不是把它复活 —— 复活正是
+		// 用户当初选择「临时」时要避免的事。
+		if postIsExpired(post, s.clock.Now().UTC()) {
+			continue
+		}
+		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null
+		if post.MediaRefs == nil {
+			post.MediaRefs = []PostMediaRef{}
+		}
+		if post.ContextRefs == nil {
+			post.ContextRefs = []ContextRef{}
+		}
+		posts = append(posts, post)
+	}
+	posts = s.attachPolls(ctx, posts, e.Actor.ID)
+	return acceptedWithPayload(e, "Post", "", 0, "POSTS_BY_IDS", map[string]any{
+		"posts": posts,
+		"media": s.hydratePostMedia(ctx, posts),
+	}, nil)
+}
+
+// normalizeMentionHandle 归一化一个 @handle：去掉前后空白与所有前导 "@"，返回
+// 小写形式与是否可用。空 handle 不可用 —— 调用方必须据此拒绝，而不是退化成
+// 「匹配所有帖子」（那会让 TAGGED 变成整个动态流）。
+func normalizeMentionHandle(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	trimmed = strings.TrimLeft(trimmed, "@")
+	trimmed = strings.ToLower(trimmed)
+	if trimmed == "" || len(trimmed) > 60 {
+		return "", false
+	}
+	return trimmed, true
+}
+
+// isHandleByte 报告 body[index] 是否属于 handle 字符集；越界视为「不是」。
+func isHandleByte(body string, index int) bool {
+	if index < 0 || index >= len(body) {
+		return false
+	}
+	c := body[index]
+	return c == '_' || c == '.' ||
+		(c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+}
+
+// containsMentionHandle 判断 body 里是否出现了完整的 @handle。
+//
+// 为什么要边界判断：客户端原来是 strings.Contains(body, "@thanh")，于是
+// "@thanh2" 会被当成提到了 @thanh —— 用户会在自己的 TAGGED 里看到跟自己
+// 毫无关系的帖子。handle 的字符集按 profile 的约定是 [a-z0-9_.]（大小写不敏感），
+// 因此前后只要不是这些字符就算一次完整提及。
+func containsMentionHandle(body, handle string) bool {
+	if handle == "" {
+		return false
+	}
+	lowered := strings.ToLower(body)
+	needle := "@" + handle
+	offset := 0
+	for offset <= len(lowered) {
+		index := strings.Index(lowered[offset:], needle)
+		if index < 0 {
+			return false
+		}
+		start := offset + index
+		end := start + len(needle)
+		if !isHandleByte(lowered, start-1) && !isHandleByte(lowered, end) {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+// mentionHandleCharset 是 handle 的合法字符类（profile 约定：小写字母、数字、
+// 下划线、点）。containsMentionHandle 和 MentionRegex 必须共用它 —— 两边一旦
+// 不一致，就会出现「SQL 捞出来了 Go 又滤掉」或者反过来的静默不一致。
+const mentionHandleCharset = "a-z0-9_."
+
+// MentionRegex 返回「完整提及 @handle」的 POSIX 正则，配合 Postgres 的 `~*`
+// 使用（大小写不敏感）。handle 必须已经过 normalizeMentionHandle。
+//
+// 用正则而不是 LIKE '%@handle%'，是因为 LIKE 会把 "@thanh2" 也算成提到了
+// "@thanh"，这正是客户端旧实现的老毛病。
+func MentionRegex(handle string) string {
+	var escaped strings.Builder
+	for _, r := range handle {
+		switch r {
+		// POSIX ERE 元字符，逐个转义成字面量。**只**转义这些：给普通字母加
+		// 反斜杠会造出 \A / \b 之类的锚点或转义序列，把正则整个改意。
+		case '.', '+', '*', '?', '(', ')', '[', ']', '{', '}', '^', '$', '|', '\\':
+			escaped.WriteByte('\\')
+		}
+		escaped.WriteRune(r)
+	}
+	return "(^|[^" + mentionHandleCharset + "])@" + escaped.String() + "([^" + mentionHandleCharset + "]|$)"
+}
+
+// listPostsMentioning 支撑个人主页的 TAGGED tab：「提到我的帖子」。
+//
+// 为什么要有这个命令：TAGGED 原来是客户端拿**一页**动态（25 条）做
+// strings.Contains 筛出来的 —— 比你这一页更早的提及直接消失，用户会以为
+// 没人提到过自己。要完整就必须在服务端扫全量已发布帖子。
+//
+// 可见性口径与动态流完全一致且 fail-closed：
+//   - 只取 PUBLISHED；PUBLIC 人人可见，FOLLOWERS 只有作者本人可见；
+//   - 排除被自己静音的作者的帖子（与动态流一致，否则静音形同虚设）；
+//   - 排除自己发的帖子（「自己提到自己」不是 TAGGED 的语义）；
+//   - 匹配是整 handle 的，不是子串（@thanh 不匹配 @thanh2）。
+func (s *Service) listPostsMentioning(ctx context.Context, e command.Envelope) command.Result {
+	var request struct {
+		Handle string `json:"handle"`
+		Limit  int    `json:"limit"`
+	}
+	if !decode(e.Payload, &request) {
+		return command.Rejected(e, "INVALID_LIST_POSTS_MENTIONING", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_list_posts_mentioning", nil)
+	}
+	handle, ok := normalizeMentionHandle(request.Handle)
+	if !ok {
+		// fail-closed：没有可用的 handle 就返回空，绝不退化成「返回全部帖子」。
+		return acceptedWithPayload(e, "Post", "", 0, "POSTS_MENTIONING", map[string]any{
+			"posts": []Post{}, "media": map[string][]PostMediaItem{}, "hasMore": false,
+		}, nil)
+	}
 	if request.Limit <= 0 {
-		request.Limit = 25
+		request.Limit = 30
 	}
 	if request.Limit > 50 {
 		request.Limit = 50
 	}
-	var cursor struct {
-		CreatedAt time.Time `json:"createdAt"`
-		PostID    string    `json:"postId"`
-	}
-	if request.Cursor != "" {
-		if raw, ok := verifyCursor(request.Cursor); ok {
-			_ = json.Unmarshal(raw, &cursor)
-		} else if strings.Contains(request.Cursor, ".") {
-			// 带签名的游标验签失败 → 视为篡改，拒绝而非回退首屏（防缓存投毒）
-			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
-		} else if raw, err := base64.RawURLEncoding.DecodeString(request.Cursor); err == nil {
-			// 兼容旧明文游标（滚动升级期），下个版本收紧为仅验签
-			_ = json.Unmarshal(raw, &cursor)
-		} else {
-			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
+	var (
+		posts []Post
+		err   error
+	)
+	if mentions, ok := s.repository.(MentionRepository); ok {
+		posts, err = mentions.ListPostsMentioning(ctx, e.Actor.ID, handle, request.Limit+1)
+	} else {
+		// 内存仓（无 DATABASE_URL 的 smoke 路径）没有索引可查，退回全量快照后在
+		// Go 侧过滤；语义与 SQL 路径一致。
+		var snapshot []Post
+		snapshot, err = s.repository.Snapshot(ctx)
+		if err == nil {
+			for _, p := range snapshot {
+				if containsMentionHandle(p.Body, handle) {
+					posts = append(posts, p)
+				}
+			}
+			sort.Slice(posts, func(i, j int) bool {
+				if posts[i].CreatedAt.Equal(posts[j].CreatedAt) {
+					return posts[i].ID < posts[j].ID
+				}
+				return posts[i].CreatedAt.After(posts[j].CreatedAt)
+			})
 		}
 	}
-	var posts []Post
-	var err error
-	if pageRepository, ok := s.repository.(FeedPageRepository); ok {
-		posts, err = pageRepository.ListFeedPage(ctx, e.Actor.ID, cursor.CreatedAt, cursor.PostID, request.Limit+1)
-	} else {
-		posts, err = s.repository.Snapshot(ctx)
-	}
 	if err != nil {
-		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)
+		return command.Rejected(e, "MENTION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.mention_read_failed", nil)
 	}
-	// ALL 是全局公开时间流；LocationContext 不参与 eligibility。
-	feed := make([]Post, 0, len(posts))
+	matched := make([]Post, 0, len(posts))
 	for _, p := range posts {
+		// SQL 路径已经在 WHERE 里过了一遍，这里再判一次是纵深防御：只要有一处
+		// 实现漏掉可见性，TAGGED 就会漏出别人的 followers-only 帖子。
 		if p.Status != "PUBLISHED" {
 			continue
 		}
 		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
 			continue
 		}
-		// R15.94: server 端 search filter (body 包含, case-insensitive).
-		//   跟 R15.92 client 端 filter 一致, 但放在 server 节省 传输量.
-		if search != "" && !strings.Contains(strings.ToLower(p.Body), search) {
-			continue
-		}
-		// Follow-graph authorization is not implemented yet. Fail closed instead
-		// of treating FOLLOWERS as public; authors may still see their own post.
 		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
 			continue
 		}
-		if !cursor.CreatedAt.IsZero() && (p.CreatedAt.After(cursor.CreatedAt) || (p.CreatedAt.Equal(cursor.CreatedAt) && p.ID <= cursor.PostID)) {
+		if p.AuthorID == e.Actor.ID {
 			continue
 		}
-		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
+		if !containsMentionHandle(p.Body, handle) {
+			continue
+		}
 		if p.MediaRefs == nil {
 			p.MediaRefs = []PostMediaRef{}
 		}
 		if p.ContextRefs == nil {
 			p.ContextRefs = []ContextRef{}
 		}
-		feed = append(feed, p)
+		matched = append(matched, p)
 	}
-	// 按 Utility 排序（时间衰减为主，P0 简化）
-	sort.Slice(feed, func(i, j int) bool {
-		if feed[i].CreatedAt.Equal(feed[j].CreatedAt) {
-			return feed[i].ID < feed[j].ID
-		}
-		return feed[i].CreatedAt.After(feed[j].CreatedAt)
-	})
-	hasMore := len(feed) > request.Limit
+	hasMore := len(matched) > request.Limit
 	if hasMore {
-		feed = feed[:request.Limit]
+		matched = matched[:request.Limit]
 	}
-	nextCursor := ""
-	if hasMore && len(feed) > 0 {
-		last := feed[len(feed)-1]
-		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
-		nextCursor = signCursor(raw)
-	}
+	matched = s.attachPolls(ctx, matched, e.Actor.ID)
+	return acceptedWithPayload(e, "Post", "", 0, "POSTS_MENTIONING", map[string]any{
+		"posts":   matched,
+		"media":   s.hydratePostMedia(ctx, matched),
+		"hasMore": hasMore,
+	}, nil)
+}
+
+// hydratePostMedia 把一批 Post 的媒体引用 hydrate 成读模型：只呈现 READY 且
+// APPROVED、可见性与帖子一致的媒体，并按 (CityScope, SceneType) 补场景背景色。
+//
+// 从 listFeed 里抽出来，让「按 ID 取帖子」（ListPostsByIds）走同一套媒体口径 ——
+// 否则同一个帖子在动态流里和在收藏网格里会长得不一样。
+func (s *Service) hydratePostMedia(ctx context.Context, feed []Post) map[string][]PostMediaItem {
 	// R14 §16.5：Feed Read Model Hydrate 媒体（mediaLookup + READY 过滤）
 	feedMedia := make(map[string][]PostMediaItem, len(feed))
 	// R15.15 P1: Memory → Feed 反馈重构。R15.13 P4 用了
@@ -1071,6 +1606,137 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 			}
 		}
 	}
+	return feedMedia
+}
+
+// postMatchesSearch 是 feed 搜索的唯一判定点（SEARCH-CORPUS-001）。
+//
+// 之前只匹配 Body，但搜索框自己写的是「搜索人、机会、活动、情报…」，
+// 客户端两处 filter 也都宣称能按作者名/城市搜 —— 于是出现「代码看起来支持、
+// 实际搜不到」：server 先把正文不含关键词的帖子全部丢掉，客户端那两段
+// 再怎么 OR authorDisplayName 都永远匹配不到东西。
+//
+// 现在匹配「用户能看见的东西」：正文、作者展示名、城市。
+// 刻意**不含** ContextRefs —— 它是 classifyPostFallback 从正文派生的
+// （见 createPost），让搜索命中派生标签会返回用户根本没写过的词，
+// 那是噪音不是功能。
+//
+// 语义与 apps/mobile/src/localnet-client.ts 的 searchFieldsOf 保持一致：
+// 两边不一致时，客户端 filter 只会把 server 已认可的帖子再丢掉一遍，
+// 表现为「服务端明明匹配了，列表里却没有」。
+func postMatchesSearch(p Post, loweredQuery string) bool {
+	if loweredQuery == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(p.Body), loweredQuery) {
+		return true
+	}
+	if p.AuthorDisplayName != "" && strings.Contains(strings.ToLower(p.AuthorDisplayName), loweredQuery) {
+		return true
+	}
+	if p.CityScope != "" && strings.Contains(strings.ToLower(p.CityScope), loweredQuery) {
+		return true
+	}
+	return false
+}
+
+func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Result {
+	var request struct {
+		Cursor string `json:"cursor"`
+		Limit  int    `json:"limit"`
+		// R15.94: search query — server 侧 filter (body 包含 search, case-insensitive).
+		Search string `json:"search"`
+	}
+	_ = decode(e.Payload, &request) // legacy malformed payloads keep first-page behavior
+	search := strings.ToLower(strings.TrimSpace(request.Search))
+	if request.Limit <= 0 {
+		request.Limit = 25
+	}
+	if request.Limit > 50 {
+		request.Limit = 50
+	}
+	var cursor struct {
+		CreatedAt time.Time `json:"createdAt"`
+		PostID    string    `json:"postId"`
+	}
+	if request.Cursor != "" {
+		if raw, ok := verifyCursor(request.Cursor); ok {
+			_ = json.Unmarshal(raw, &cursor)
+		} else if strings.Contains(request.Cursor, ".") {
+			// 带签名的游标验签失败 → 视为篡改，拒绝而非回退首屏（防缓存投毒）
+			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
+		} else if raw, err := base64.RawURLEncoding.DecodeString(request.Cursor); err == nil {
+			// 兼容旧明文游标（滚动升级期），下个版本收紧为仅验签
+			_ = json.Unmarshal(raw, &cursor)
+		} else {
+			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
+		}
+	}
+	var posts []Post
+	var err error
+	if pageRepository, ok := s.repository.(FeedPageRepository); ok {
+		posts, err = pageRepository.ListFeedPage(ctx, e.Actor.ID, cursor.CreatedAt, cursor.PostID, request.Limit+1)
+	} else {
+		posts, err = s.repository.Snapshot(ctx)
+	}
+	if err != nil {
+		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)
+	}
+	// ALL 是全局公开时间流；LocationContext 不参与 eligibility。
+	feed := make([]Post, 0, len(posts))
+	for _, p := range posts {
+		if p.Status != "PUBLISHED" {
+			continue
+		}
+		if p.Visibility != "PUBLIC" && p.Visibility != "FOLLOWERS" {
+			continue
+		}
+		// SEARCH-CORPUS-001: 匹配字段见 postMatchesSearch（正文 / 作者展示名 / 城市）。
+		if !postMatchesSearch(p, search) {
+			continue
+		}
+		// GHOST-24H-001: 到期的临时动态不再出现在 feed 里。
+		// PG 侧同一条谓语写在 SQL 里（保证 LIMIT 数对），这里是内存仓的路径，
+		// 同时对 PG 结果再兜一层 —— 过期的东西宁可漏也别漏出来。
+		if postIsExpired(p, s.clock.Now().UTC()) {
+			continue
+		}
+		// Follow-graph authorization is not implemented yet. Fail closed instead
+		// of treating FOLLOWERS as public; authors may still see their own post.
+		if p.Visibility == "FOLLOWERS" && p.AuthorID != e.Actor.ID {
+			continue
+		}
+		if !cursor.CreatedAt.IsZero() && (p.CreatedAt.After(cursor.CreatedAt) || (p.CreatedAt.Equal(cursor.CreatedAt) && p.ID <= cursor.PostID)) {
+			continue
+		}
+		// 归一 nil 切片 → 空数组，保证读模型 JSON 永远输出 [] 而非 null（客户端 zod fail-closed）
+		if p.MediaRefs == nil {
+			p.MediaRefs = []PostMediaRef{}
+		}
+		if p.ContextRefs == nil {
+			p.ContextRefs = []ContextRef{}
+		}
+		feed = append(feed, p)
+	}
+	// 按 Utility 排序（时间衰减为主，P0 简化）
+	sort.Slice(feed, func(i, j int) bool {
+		if feed[i].CreatedAt.Equal(feed[j].CreatedAt) {
+			return feed[i].ID < feed[j].ID
+		}
+		return feed[i].CreatedAt.After(feed[j].CreatedAt)
+	})
+	hasMore := len(feed) > request.Limit
+	if hasMore {
+		feed = feed[:request.Limit]
+	}
+	nextCursor := ""
+	if hasMore && len(feed) > 0 {
+		last := feed[len(feed)-1]
+		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
+		nextCursor = signCursor(raw)
+	}
+	feed = s.attachPolls(ctx, feed, e.Actor.ID)
+	feedMedia := s.hydratePostMedia(ctx, feed)
 	return acceptedWithPayload(e, "Post", "", 0, "FEED", map[string]any{
 		"posts": feed,
 		"media": feedMedia, // postId → []PostMediaItem（R14 Adaptive Media Rail Read Model）

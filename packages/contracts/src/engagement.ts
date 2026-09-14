@@ -41,6 +41,43 @@ export const MutedAuthorSchema = z.object({
 });
 export type MutedAuthor = z.infer<typeof MutedAuthorSchema>;
 
+// MUTE-REVERSIBLE-001 — 「我屏蔽的人」列表的一行。
+//
+// authorDisplayName 跟评论（PostReply.actorDisplayName）一样是**读时**由服务端
+// 用同一个 profile 解析器填的，不落库、不接受客户端提供。为什么这条列表非得
+// 服务端给名字：屏蔽列表恰恰是「帖子全被 feed 过滤掉」的一群人，客户端没法像
+// feed 那样从帖子读模型里借名字，它手里只有一个 authorId。缺失时客户端必须
+// 退化成中性标签，绝不能把 authorId 当名字显示 —— 否则用户只能对着一串账号 id
+// 猜该解除谁，这个「解除屏蔽」入口等于没做。
+export const MutedAuthorEntrySchema = z.object({
+  muteId: z.string().min(1),
+  authorId: z.string().min(1),
+  createdAt: z.string(),
+  authorDisplayName: z.string().optional()
+});
+export type MutedAuthorEntry = z.infer<typeof MutedAuthorEntrySchema>;
+
+// MutedAuthorsList — ListMutedAuthors 返 { actorId, mutedAuthors[], count }
+export const MutedAuthorsListSchema = z.object({
+  actorId: z.string().min(1),
+  mutedAuthors: z.array(MutedAuthorEntrySchema),
+  count: z.number().int().min(0)
+});
+export type MutedAuthorsList = z.infer<typeof MutedAuthorsListSchema>;
+
+// ListMutedAuthorsPayload — limit 可选（服务端默认 50、上限 100）
+export const ListMutedAuthorsPayloadSchema = z.object({
+  limit: z.number().int().positive().optional()
+});
+export type ListMutedAuthorsPayload = z.infer<typeof ListMutedAuthorsPayloadSchema>;
+
+export function parseMutedAuthorsList(raw: unknown): MutedAuthorsList {
+  return MutedAuthorsListSchema.parse(raw);
+}
+export function parseListMutedAuthorsPayload(raw: unknown): ListMutedAuthorsPayload {
+  return ListMutedAuthorsPayloadSchema.parse(raw);
+}
+
 // ---------- R15.54 follow graph ----------
 
 // FollowCounts — GetFollowCounts 返 { userId, followers, following }

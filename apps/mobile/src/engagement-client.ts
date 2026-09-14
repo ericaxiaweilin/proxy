@@ -1,12 +1,14 @@
-import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList } from "@proxy/contracts";
+import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList, MutedAuthorsList, PostPollView } from "@proxy/contracts";
 import {
   parseFollowCounts,
   parseFollowingState,
   parsePinnedPostsList,
   parseUserRepliesList,
   parseUserBookmarksList,
+  parseMutedAuthorsList,
   PostEngagementSchema,
-  PostRepliesListSchema
+  PostRepliesListSchema,
+  PostPollViewSchema
 } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -95,10 +97,78 @@ export class EngagementClient {
    *   - MuteAuthor: 关系层（"我屏蔽 Ta"），feed 永久过滤
    *
    * 幂等：重复 mute 同一 author 不报错。
-   * 不可逆：当前 client 不提供 unmute；Phase 2 在 "我屏蔽的人" 列表里 unmute。
+   * 可逆（MUTE-REVERSIBLE-001）：用 unmuteAuthor 解掉，或在 "我屏蔽的人" 列表里
+   *   解除。以前这行把「屏蔽不可撤销、等 Phase 2 再说」写成了产品分期，其实是
+   *   服务端根本没有这条命令。真实的后果是：屏蔽后 Ta 的帖子被 feed 永久过滤
+   *   （PG 侧 NOT EXISTS），你再也点不到 Ta 的帖子菜单或头像，于是**没有任何入口**
+   *   能撤销这次屏蔽。一个只能进不能出的关系操作不是功能，是陷阱。
    */
   public async muteAuthor(authorId: string): Promise<void> {
     await this.command("MuteAuthor", { type: "Profile", id: authorId }, { authorId });
+  }
+
+  /**
+   * MUTE-REVERSIBLE-001 — 解除对某个作者的屏蔽。
+   *
+   * 幂等：本来没屏蔽也成功（服务端 state=NOT_MUTED），所以重复点「解除」不报错。
+   * 返回值让界面能区分「真的解掉了」和「本来就没屏蔽」—— 两者都算成功，
+   * 但不该显示成同一句话。
+   */
+  public async unmuteAuthor(authorId: string): Promise<"UNMUTED" | "NOT_MUTED"> {
+    const result = await this.command("UnmuteAuthor", { type: "Profile", id: authorId }, { authorId });
+    return result.aggregate?.state === "UNMUTED" ? "UNMUTED" : "NOT_MUTED";
+  }
+
+  /**
+   * MUTE-REVERSIBLE-001 — 列出「我屏蔽的人」，最新在前。
+   *
+   * 跟 unmuteAuthor 是一对：没有这条查询，被屏蔽的人会从 feed 里彻底消失，
+   * 也就没有入口能把屏蔽解掉，这条链路仍然是死的。
+   *
+   * 返回的 authorDisplayName 由服务端**读时**用跟评论同一个 profile 解析器填
+   * （屏蔽列表里的人帖子全被过滤掉了，客户端没有别的名字来源）。解析不到时是
+   * undefined，界面必须退化成中性标签，绝不能把 authorId 当名字显示。
+   *
+   * 刻意**不做** listPinnedPosts / listUserReplies 那种「5xx 就吞掉返空列表」的
+   * fallback：那些列表是装饰性的，这个是用户唯一的解除入口。服务端不可用时渲染
+   * 「还没有屏蔽任何人」是在骗人 —— 用户会以为屏蔽丢了、而且没有任何可操作的
+   * 下一步。这里让错误抛出去，由界面给「读取失败 · 重试」。
+   */
+  public async listMutedAuthors(limit?: number): Promise<MutedAuthorsList> {
+    const session = await this.requireSession();
+    const result = await this.command(
+      "ListMutedAuthors",
+      { type: "Profile", id: session.userAccountId },
+      { ...(limit ? { limit } : {}) }
+    );
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("listMutedAuthors response missing operationRef");
+    }
+    return parseMutedAuthorsList(JSON.parse(result.operationRef));
+  }
+
+  /**
+   * POLL-VOTE-001 — 给帖内投票投一票。
+   *
+   * 返回**服务端算出来的最新票数**，不是「旧数字 +1」。刻意不在本地乐观地
+   * 自己加一：百分比条要是按本地猜测先画出来、再被服务端纠正，用户会看到
+   * 数字跳一下，而「投票结果」恰好是用户最不该怀疑的东西。
+   *
+   * 一人一票：重复投同一个选项幂等；投另一个选项 = 改票（仍然只算一票）。
+   *
+   * 会被服务端明确拒绝的几种情况（抛 EngagementCommandRejectedError，
+   * result.error.errorCode 可读）：
+   *   - POLL_CLOSED —— 已截止。注意结果仍然要显示，只是不能再投。
+   *   - POLL_OPTION_NOT_FOUND —— 选项不属于这条帖子。
+   *   - POLL_NOT_FOUND —— 这条帖子没有投票。
+   */
+  public async votePostPoll(postId: string, optionId: string): Promise<PostPollView> {
+    const result = await this.command("VotePostPoll", { type: "Post", id: postId }, { postId, optionId });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("votePostPoll response missing operationRef");
+    }
+    const raw = JSON.parse(result.operationRef) as { poll?: unknown };
+    return PostPollViewSchema.parse(raw.poll);
   }
 
   // R15.54 — UnfollowProfile: 幂等, 之前没 follow 返 NOT_FOLLOWING

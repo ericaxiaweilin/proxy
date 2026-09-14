@@ -9,7 +9,7 @@ import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollV
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
-import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
+import type { FeedMediaItem, FeedPost, PostEngagement, PostPollView, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
 import { type AIAccountClient } from "../ai-account-client";
@@ -32,6 +32,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { avatarFileName, createProfileStore } from "../profile-store";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { readFeedDiskCache, writeFeedDiskCache } from "../feed-disk-cache";
+import { normalizeFeedSearchQuery, postMatchesFeedSearch } from "../feed-search";
 import { mergePostEngagement, mergeReactedPostIds } from "../post-engagement-model";
 
 // Re-export v2 组件，保持其他 surface （me.tsx 等）从 ./feed 导入的兼容性。
@@ -233,6 +234,9 @@ export function FeedSurface({
   const [composerQuoteId, setComposerQuoteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(Boolean(initialSearchQuery));
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery ?? "");
+  // SEARCH-CORPUS-001: 当前生效的搜索词（归一后）。放在这里而不是搜索 effect 里，
+  // 是因为 backgroundRefresh / showLatest 也要读它来决定「现在能不能合并全量动态」。
+  const lastSearchRef = useRef("");
   // 搜索种子只消费一次：mount 即通知调用方清除，下次进动态不再复用。
   useEffect(() => {
     if (initialSearchQuery) onSearchSeedConsumed?.();
@@ -409,22 +413,33 @@ export function FeedSurface({
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
   }
 
-  const loadFeed = useCallback(async (): Promise<void> => {
+  const loadFeed = useCallback(async (rawQuery?: string): Promise<void> => {
     // 动态帖文与地址解绑：帖文不按 viewingCity 过滤，地址仅作 Status/社区等筛选项
+    //
+    // SEARCH-CORPUS-001: 带查询时走**服务端**搜索（server listFeed 接 search 字段），
+    // 这样搜索覆盖整个 feed 语料，而不是「你已经滚过的那几页」。修之前
+    // listFeedPosts 的 searchQuery 参数全仓无人传，搜索只在本地对已加载的
+    // 帖做子串匹配 —— 搜「人」只能搜到恰好滚过的几条。
+    const search = normalizeFeedSearchQuery(rawQuery);
+    const searching = search !== "";
     if (cachedPosts.length === 0) {
       setPhase("LOADING");
     }
     try {
-      const read = await localNet.listFeedPosts();
-      cachedPosts = read.posts;
-      cachedMedia = read.media;
-      cachedPostIds = new Set(read.posts.map((p) => p.postId));
-      postIdsRef.current = cachedPostIds;
+      const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined);
+      // 搜索结果不是 feed 本身：写回模块级缓存会让退出搜索后（以及冷启动读盘时）
+      // 看到的是上次的搜索结果，所以只在非搜索加载时更新缓存与磁盘缓存。
+      if (!searching) {
+        cachedPosts = read.posts;
+        cachedMedia = read.media;
+        cachedPostIds = new Set(read.posts.map((p) => p.postId));
+        postIdsRef.current = cachedPostIds;
+        writeFeedDiskCache(read.posts, read.media);
+      }
       setPosts(read.posts);
       setMedia(read.media);
       setNextCursor(read.nextCursor);
       setHasMore(read.hasMore);
-      writeFeedDiskCache(read.posts, read.media);
       feedRetryAttemptRef.current = 0;
 	  setPhase("READY");
 	  void hydrateEngagement(read.posts);
@@ -442,8 +457,23 @@ export function FeedSurface({
     if (!hasMore || !nextCursor || loadingMoreRef.current || phase !== "READY") return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
+    // SEARCH-CORPUS-001: 搜索中翻的是**搜索结果**的下一页，游标来自搜索响应，
+    // 所以必须把同一个查询带上，否则第二页会悄悄变回未过滤的全量。
+    const search = lastSearchRef.current;
     try {
-      const read = await localNet.listFeedPosts(nextCursor);
+      const read = await localNet.listFeedPosts(nextCursor, search === "" ? 25 : 50, search === "" ? undefined : search);
+      if (search !== "") {
+        // 搜索结果不进模块级缓存/磁盘缓存，避免退出搜索后 feed 被搜索结果污染。
+        setPosts((prev) => {
+          const known = new Set(prev.map((post) => post.postId));
+          return [...prev, ...read.posts.filter((post) => !known.has(post.postId))];
+        });
+        setMedia((prev) => ({ ...prev, ...read.media }));
+        setNextCursor(read.nextCursor);
+        setHasMore(read.hasMore);
+        void hydrateEngagement(read.posts);
+        return;
+      }
       const known = new Set(cachedPosts.map((post) => post.postId));
       const appended = read.posts.filter((post) => !known.has(post.postId));
       cachedPosts = [...cachedPosts, ...appended];
@@ -467,6 +497,9 @@ export function FeedSurface({
 
   // 后台静默刷新：不显示 LOADING，只检测新帖（同解绑）
   const backgroundRefresh = useCallback(async (): Promise<void> => {
+    // SEARCH-CORPUS-001: 搜索中不做「N 条新动态」合并 —— 它拿的是**未过滤**的首屏，
+    // 合并进来会让搜索结果凭空多出无关帖（点「展示最新」更是直接退出搜索）。
+    if (lastSearchRef.current !== "") return;
     try {
       const read = await localNet.listFeedPosts();
       if (read.posts.length === 0) return;
@@ -525,8 +558,22 @@ export function FeedSurface({
     return () => subscription.remove();
   }, [phase, loadFeed]);
 
+  // SEARCH-CORPUS-001: 输入搜索词后走服务端搜索（防抖 250ms），清空则立刻恢复全量。
+  // 只在「查询真的变了」时触发，免得 mount 时把首屏那次 loadFeed 又打一遍。
+  // 注意这里不写入模块级缓存 —— loadFeed 自己会区分搜索与非搜索。
+  useEffect(() => {
+    const query = normalizeFeedSearchQuery(searchQuery);
+    if (query === lastSearchRef.current) return;
+    lastSearchRef.current = query;
+    const timer = setTimeout(() => void loadFeed(query), query === "" ? 0 : 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery, loadFeed]);
+
   // 点击"展示最新"：将 pending 内容刷入正式列表
   function showLatest(): void {
+    // SEARCH-CORPUS-001: 搜索中不存在「展示最新」—— pendingPosts 是未过滤的全量，
+    // 合并进来等于静默退出搜索，而且会把搜索结果写进 feed 缓存。
+    if (lastSearchRef.current !== "") return;
     const pendingIDs = new Set(pendingPosts.map((post) => post.postId));
     cachedPosts = [...pendingPosts, ...posts.filter((post) => !pendingIDs.has(post.postId))];
     cachedMedia = { ...media, ...pendingMedia };
@@ -614,6 +661,36 @@ export function FeedSurface({
 	  } finally {
 		setEngagementBusy((value) => { const next = new Set(value); next.delete(busyKey); return next; });
 	  }
+	}
+
+	/**
+	 * POLL-VOTE-001 — 投一票，并**整体替换**这条帖子的投票读模型。
+	 *
+	 * 为什么用服务端返回的结果整体替换、而不是在本地给某个选项 +1：
+	 * 一人一票意味着「改票」是常态 —— 投过 A 再投 B，本地得同时给 A 减一、
+	 * B 加一，还得知道之前投的是哪个。任何一步猜错，用户看到的百分比就跟
+	 * 服务端对不上，而投票结果恰好是最不该被怀疑的东西。服务端本来就把最新
+	 * 票数算好了回给我们，直接用。
+	 */
+	async function votePoll(postId: string, optionId: string): Promise<void> {
+	  const busyKey = `poll:${postId}`;
+	  if (engagementBusy.has(busyKey)) return;
+	  setEngagementBusy((value) => new Set(value).add(busyKey));
+	  setEngagementError(undefined);
+	  try {
+		const poll = await engagement.votePostPoll(postId, optionId);
+		applyPoll(postId, poll);
+	  } catch (error) {
+		setEngagementError(mapEngagementError(error, "投票没有提交成功，请稍后重试。"));
+	  } finally {
+		setEngagementBusy((value) => { const next = new Set(value); next.delete(busyKey); return next; });
+	  }
+	}
+
+	/** 把一份新的投票读模型写回 posts（pending 列表里也可能有同一条帖子）。 */
+	function applyPoll(postId: string, poll: PostPollView): void {
+	  setPosts((previous) => previous.map((post) => (post.postId === postId ? { ...post, poll } : post)));
+	  setPendingPosts((previous) => previous.map((post) => (post.postId === postId ? { ...post, poll } : post)));
 	}
 
 	async function openReplies(postId: string): Promise<void> {
@@ -857,14 +934,11 @@ export function FeedSurface({
         if (!customFeedTokens.some((token) => haystack.includes(token))) return false;
       }
     }
-      const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
-      if (normalizedQuery) {
-        const searchable = [resolveAuthorDisplayName(post, viewerAccountId), post.body, post.cityScope, ...post.contextRefs.map((entry) => entry.contextId)]
-        .filter((value): value is string => typeof value === "string")
-        .join(" ")
-        .toLocaleLowerCase();
-      if (!searchable.includes(normalizedQuery)) return false;
-    }
+    // SEARCH-CORPUS-001: 改用 ./feed-search 的唯一实现，字段集与 server 的
+    // postMatchesSearch 逐字对应（正文 / 作者展示名 / 城市；派生 contextRefs 不算）。
+    // 服务端已经按同一份语义过滤过，这里只是本地兜底 —— 之前两边的字段集不一致，
+    // 客户端这一层只会把服务端已认可的帖子再丢掉一遍。
+    if (!postMatchesFeedSearch(post, normalizeFeedSearchQuery(searchQuery))) return false;
     return true;
   });
   // 偏好-权重：只重排不隐藏。类别按帖子属性归一后取权重分，
@@ -902,6 +976,17 @@ export function FeedSurface({
       onScroll={onFeedScroll}
       onLayout={(event) => { const ly = event?.nativeEvent?.layout; if (ly) setViewportHeight(ly.height); }}
       scrollEventThrottle={16}
+      // REPLY-INLINE-001: 回复框内联在帖子下方，键盘弹起时必须把它顶进可见区。
+      // 以前整个 feed 没有任何键盘避让（也没有 KeyboardAvoidingView），而回复框
+      // 又是一个贴在屏幕底部的 Modal —— 键盘一弹正好把它盖住，用户是在盲打。
+      //   - automaticallyAdjustKeyboardInsets：键盘出现时收 ScrollView 的
+      //     contentInset，聚焦的输入框才会被滚进可见区（只调 inset 不会自动滚）。
+      //   - keyboardShouldPersistTaps="handled"：不加这个，键盘开着时第一次点
+      //     「发送」只会被当成“收起键盘”，按钮根本点不动。
+      //   - on-drag：往下拖即可收键盘，符合流媒体 App 的手感。
+      automaticallyAdjustKeyboardInsets
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
     >
       {/* R15.3 feedhead：≡ + 标题 + ＋ */}
       <View style={styles.feedHead}>
@@ -1200,6 +1285,15 @@ export function FeedSurface({
                 </View>
               ) : null}
 
+              {/* POLL-VOTE-001 — 帖内投票。 */}
+              {post.poll ? (
+                <PollCard
+                  busy={engagementBusy.has(`poll:${post.postId}`)}
+                  poll={post.poll}
+                  onVote={(optionId) => void votePoll(post.postId, optionId)}
+                />
+              ) : null}
+
               {/* postactions：♡ / 回复 / 引用 / 收藏 / 分享 / ···(更多) */}
               <View style={styles.postActions}>
 			<Pressable disabled={engagementBusy.has(`like:${post.postId}`)} onPress={() => void toggleLike(post.postId)} style={styles.postAction}>
@@ -1248,6 +1342,45 @@ export function FeedSurface({
 			  ) : null}
 			</View>
 		  ) : null}
+
+              {/* REPLY-INLINE-001：回复框内联在这条帖子下方。
+                  点「回复」就地展开一行输入框，无遮罩、无上滑动画。
+                  以前它是一个 <Modal> + justifyContent:"flex-end" 的底部白卡
+                  （还带「回复帖文」标题），而且整个 feed 没有任何键盘避让 ——
+                  键盘一弹正好把贴在底部的输入框盖住。 */}
+              {replyTargetId === post.postId ? (
+                <View style={styles.inlineReply}>
+                  <TextInput
+                    autoFocus
+                    maxLength={500}
+                    multiline
+                    onChangeText={setReplyDraft}
+                    onSubmitEditing={() => { if (replyDraft.trim() && !replying) void submitReply(); }}
+                    placeholder={`回复 ${name}…`}
+                    placeholderTextColor={color.muted}
+                    style={styles.inlineReplyInput}
+                    value={replyDraft}
+                  />
+                  <View style={styles.inlineReplyActions}>
+                    <Pressable
+                      accessibilityLabel="取消回复"
+                      hitSlop={8}
+                      onPress={() => { setReplyTargetId(null); setReplyDraft(""); }}
+                      style={styles.inlineReplyCancel}
+                    >
+                      <Text style={styles.inlineReplyCancelText}>取消</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="发送回复"
+                      disabled={!replyDraft.trim() || replying}
+                      onPress={() => void submitReply()}
+                      style={[styles.inlineReplySend, (!replyDraft.trim() || replying) && styles.disabled]}
+                    >
+                      <Text style={styles.inlineReplySendText}>{replying ? "发送中…" : "发送"}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
 
               {/* postintent（基线文案）：城市同行动态 → 聊一下 / 按这个想法找同行 */}
               {isCityCompanion ? (
@@ -1327,29 +1460,6 @@ export function FeedSurface({
         </Modal>
       ) : null}
 
-      {replyTargetId ? (
-        <Modal transparent animationType="fade" onRequestClose={() => setReplyTargetId(null)}>
-          <Pressable style={styles.replyOverlay} onPress={() => setReplyTargetId(null)}>
-            <Pressable style={styles.replySheet} onPress={(event) => event.stopPropagation()}>
-              <Text style={styles.replyTitle}>回复帖文</Text>
-              <TextInput
-                autoFocus
-                maxLength={500}
-                multiline
-                onChangeText={setReplyDraft}
-                placeholder="写下公开回复…"
-                placeholderTextColor={color.muted}
-                style={styles.replyInput}
-                value={replyDraft}
-              />
-              <View style={styles.replyActions}>
-                <Pressable onPress={() => setReplyTargetId(null)} style={styles.replyCancel}><Text style={styles.replyCancelText}>取消</Text></Pressable>
-                <Pressable disabled={!replyDraft.trim() || replying} onPress={() => void submitReply()} style={[styles.replySubmit, (!replyDraft.trim() || replying) && styles.disabled]}><Text style={styles.replySubmitText}>{replying ? "提交中…" : "回复"}</Text></Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
-      ) : null}
       </>
       )}
 
@@ -1577,15 +1687,32 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.45 },
   disabledText: { color: color.muted, opacity: 0.45 },
 
-  replyOverlay: { alignItems: "center", backgroundColor: "rgba(17,13,22,0.45)", flex: 1, justifyContent: "flex-end", padding: 18 },
-  replySheet: { backgroundColor: color.white, borderRadius: 18, padding: 14, width: "100%", ...shadows.card },
-  replyTitle: { color: color.ink, fontSize: 17, fontWeight: "800" },
-  replyInput: { backgroundColor: "#F8F5FA", borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 15, lineHeight: 21, marginTop: 10, minHeight: 108, padding: 10, textAlignVertical: "top" },
-  replyActions: { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 10 },
-  replyCancel: { borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
-  replyCancelText: { color: color.ink, fontSize: 12, fontWeight: "700" },
-  replySubmit: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
-  replySubmitText: { color: color.white, fontSize: 12, fontWeight: "800" },
+  // REPLY-INLINE-001 — 内联回复框：贴着帖子下方就地展开，不再是底部白卡。
+  // 没有遮罩、没有标题、没有上滑动画，也不占 minHeight 108 那种厚卡片高度；
+  // 单行起步、随输入长高（maxHeight 兜底），手感对齐 Threads / Instagram。
+  inlineReply: {
+    backgroundColor: "#F8F5FA",
+    borderColor: color.line,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 8,
+    padding: 10
+  },
+  inlineReplyInput: {
+    color: color.ink,
+    fontSize: 14,
+    lineHeight: 20,
+    maxHeight: 132,
+    minHeight: 40,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    textAlignVertical: "top"
+  },
+  inlineReplyActions: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "flex-end", marginTop: 6 },
+  inlineReplyCancel: { paddingHorizontal: 6, paddingVertical: 6 },
+  inlineReplyCancelText: { color: color.muted, fontSize: 12, fontWeight: "700" },
+  inlineReplySend: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
+  inlineReplySendText: { color: color.white, fontSize: 12, fontWeight: "800" },
 
   // 基线 .networktabs：border-bottom var(--ln)。
   tabs: { borderBottomColor: color.line, borderBottomWidth: 1, flexDirection: "row" },
@@ -1768,6 +1895,30 @@ const styles = StyleSheet.create({
     marginVertical: 7,
     padding: 8
   },
+  // POLL-VOTE-001 — 投票卡片。浅色底 + 描边，跟引用卡同一套卡片语言。
+  pollCard: { gap: 6, marginVertical: 7 },
+  pollOption: {
+    backgroundColor: "#F5F1F7",
+    borderColor: "#E8E0EC",
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 42,
+    overflow: "hidden",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    position: "relative"
+  },
+  pollOptionMine: { backgroundColor: "#F0E7FF", borderColor: "#C9A6FF" },
+  // 百分比条：绝对定位铺在选项底，宽度由票数比例给出。
+  pollBar: { backgroundColor: "rgba(133,51,245,0.14)", bottom: 0, left: 0, position: "absolute", top: 0 },
+  pollOptionRow: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "space-between" },
+  pollOptionLabel: { color: color.ink, flexShrink: 1, fontSize: 14 },
+  pollOptionLabelMine: { color: "#5B2CB5", fontWeight: "700" },
+  pollOptionCount: { color: color.muted, fontSize: 12 },
+  pollOptionCountMine: { color: "#5B2CB5", fontWeight: "700" },
+  pollMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
+
   quoteHead: { alignItems: "center", flexDirection: "row", gap: 5 },
   quoteAvatar: {
     alignItems: "center",
@@ -1898,6 +2049,66 @@ const styles = StyleSheet.create({
     textAlign: "center"
   }
 });
+
+// ---------- POLL-VOTE-001: 帖内投票卡片 ----------
+
+type PollCardProps = {
+  poll: PostPollView;
+  busy: boolean;
+  onVote: (optionId: string) => void;
+};
+
+/**
+ * 帖内投票卡片。
+ *
+ * 三条纪律，都不是审美问题：
+ *  1. **投票前不显示票数**。先看到别人的选择会带节奏 —— 这是投票类 UI 的
+ *     底线，不是可选项。
+ *  2. **投过票或截止后一律显示结果**，而且截止后结果**必须**还能看。把结果
+ *     一起藏掉，等于把投票变成一场没有开奖的抽奖。
+ *  3. **未截止时永远可以改票**（服务端 UPSERT，一人一票）。所以这里禁用条件
+ *     只有「已截止」和「请求进行中」，不包括「已经投过了」—— 否则界面写着
+ *     "可改票" 却点不动，是典型的自相矛盾。
+ *  4. closed 用服务端给的布尔值，**不**拿 expiresAt 跟本地时钟比：客户端时钟
+ *     可能不准，而"到底还能不能投"只能以服务端为准。
+ */
+export function PollCard({ poll, busy, onVote }: PollCardProps): React.JSX.Element {
+  const voted = Boolean(poll.votedOptionId);
+  const showResults = voted || poll.closed;
+  return (
+    <View style={styles.pollCard}>
+      {poll.options.map((option) => {
+        const percent = poll.totalVotes > 0 ? Math.round((option.voteCount / poll.totalVotes) * 100) : 0;
+        const mine = poll.votedOptionId === option.optionId;
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={showResults ? `${option.label}，${option.voteCount} 票` : `投票给 ${option.label}`}
+            disabled={poll.closed || busy}
+            key={option.optionId}
+            onPress={() => onVote(option.optionId)}
+            style={[styles.pollOption, mine && styles.pollOptionMine]}
+          >
+            {showResults ? <View style={[styles.pollBar, { width: `${percent}%` }]} /> : null}
+            <View style={styles.pollOptionRow}>
+              <Text numberOfLines={2} style={[styles.pollOptionLabel, mine && styles.pollOptionLabelMine]}>
+                {option.label}
+              </Text>
+              {showResults ? (
+                <Text style={[styles.pollOptionCount, mine && styles.pollOptionCountMine]}>
+                  {percent}% · {option.voteCount}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
+        );
+      })}
+      <Text style={styles.pollMeta}>
+        {poll.closed ? `已截止 · 共 ${poll.totalVotes} 票` : `共 ${poll.totalVotes} 票${voted ? " · 可改票" : ""}`}
+      </Text>
+    </View>
+  );
+}
 
 // ---------- R15.45: PostMenuModal ----------
 

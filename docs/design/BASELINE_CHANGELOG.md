@@ -4,10 +4,94 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
-## Revision 181 — 2026-09-13
+## Revision 185 — 2026-09-13
 
-- FEED-REPLY-001/002：评论预览（Threads 式：首屏 5 条 + 查看全部）与回复作者名
-  服务端解析。feed 评论区视觉变化（默认可见前 5 条评论，超出折叠）。
+- REPLY-TARGET-001：个人主页 REPLIES tab 现在能回答「我回复了谁的帖子」。
+  - **原来的三个毛病叠在一起**。①服务端一直在发 `parentPostId`（这条回复挂在哪条
+    帖子下面），但客户端从来没读它 —— 于是这一栏唯一有用的信息被丢掉，只剩一句
+    光秃秃的「你回复了」；而 `ProfileTabs.tsx` 里那行注释还断言「server Reply 暂没
+    parentPostId 字段」，让这个降级看起来是永久性的（实测每条 reply 都带这个字段）。
+    ②「你回复了」是**写死的** —— 看**别人**的主页时，别人的回复也在说「你回复了」。
+    ③React key 用了 `reply.postId`。同一条帖子可以被同一个人回复多次（真实数据里
+    就是这样：两行 `postId` 相同、`replyId` 不同），两行于是撞成同一个 key。
+  - **父帖用 PROFILE-SAVED-001 的 `ListPostsByIds` 回查**，不再新增服务端命令：
+    可见性口径与动态流完全一致 —— 已删、或已收紧成「仅关注者可见」的帖子取不回来，
+    这一行就退化成中性文案（「你回复了这条帖子」），不猜、不编、也绝不把 account id
+    当名字显示。名字一律走 `feed-author` 的 `resolveAuthorDisplayName`，与 feed 和
+    评论共用同一个身份判定，保证同一个人在任何一栏里都是同一个称呼。
+  - **回复不再伪装成 `FeedPost`**：新增 `ReplyEntry`（`replyId` / `parentPostId` /
+    `body` / `createdAt`），key 改用 `replyId`。顺带删掉了「把回复作者硬写成
+    `viewerAccountId` / `target.userId`」的伪造 —— 那正是当初「回复 @{authorId} 的帖子」
+    永远显示自己的根因。`viewerMode` 现在参与文案（SELF「你回复了 X 的帖子」/
+    OTHER「回复了 X 的帖子」），引用块展示原帖摘要（`numberOfLines={2}`）。
+  - 新增 `apps/mobile/src/reply-target.ts` 纯函数模块（20 条 vitest），并在
+    `scripts/check-regression-contracts.sh` 登记 REPLY-TARGET-001（9 条正向 pin +
+    3 条反向 pin，13 个注入用例全部验证过会红）。
+
+## Revision 184 — 2026-09-13
+
+- MENTION-001：个人主页 TAGGED tab 从「一页动态的子串扫描」改成服务端全量提及查询。
+  - **原来的三个毛病叠在一起**。TAGGED 是客户端拿**一页**动态（默认 25 条）做
+    `body.includes("@handle")` 筛的：①比你这一页更早的提及直接消失，用户被提到
+    50 次也只看到 2 次；②子串匹配，`@thanh2` 被算成提到了 `@thanh`，看到与自己
+    无关的帖子；③`contextType === "MENTION"` 那一支是**死代码** —— 服务端任何地方
+    都没写过 MENTION 这种 contextRef（分类器只产出 DEMAND / VENUE / ACTIVITY /
+    PEOPLE_RELATIONSHIP / INDUSTRY_INFO / GENERAL / OPPORTUNITY），那个条件永远为假，
+    却被当成「另一条能用的路径」。
+  - **服务端新增 `ListPostsMentioning`**（payload `{handle, limit}`）。SQL 与内存仓
+    两条路径共用同一个 `MentionRegex` / `containsMentionHandle` 定义：整 handle
+    边界匹配（`@Comple` 不匹配 `@Complex`，因为后面跟的是 handle 字符），大小写不敏感。
+    可见性/静音口径与动态流**逐条对齐**（PUBLISHED + PUBLIC 或作者本人可见 +
+    排除已静音作者），并额外排除自己的帖子。handle 缺失或空白时 **fail-closed 返回空**，
+    绝不退化成「返回全部帖子」。
+  - **客户端**：TAGGED 改走 `localNet.listPostsMentioning(profileDraft.handle)`，
+    顺带**不再需要 `listFeedPosts()`**（少一次整页拉取）。同时修掉一个耦合 bug：
+    TAGGED 原来被塞在收藏那条 promise 链里，收藏一失败 TAGGED 就静默空掉，看起来
+    像「没人提到过我」；现在两条独立加载。effect 依赖也补上了 `profileDraft.handle`
+    —— 之前依赖的是 `profileDraft.name` 却在逻辑里用 handle，改 handle 不会刷新。
+
+## Revision 183 — 2026-09-13
+
+- PROFILE-SAVED-001：收藏按 ID 直取，并修掉一个会让收藏 tab 全量失效的信封 bug。
+  - **收藏不再从动态流里捞**。之前 `me.tsx` 拿一页动态（默认 25 条）按 bookmark
+    id 过滤 —— 收藏一条不在这一页里的帖子就等于丢了，用户会以为收藏被吞。新增
+    服务端 `ListPostsByIds`（复用已有 `GetPost`，无迁移、无新表），可见性口径与
+    动态流一致且 fail-closed：FOLLOWERS 只有作者本人可见，取不到的 ID 跳过而不是
+    整条失败，上限 100 条、去重、trim。
+  - **媒体口径合并**。`hydratePostMedia` 从 `listFeed` 里抽出来，两条读路径共用
+    同一份媒体契约，同一条帖子在动态流和收藏夹渲染结果一致（真机服务实测 15 条
+    带媒体帖子逐字节相同）。
+  - **信封必须真的能 dispatch**。客户端最初发 `target.id = ""`，而
+    `internal/api/command_dispatch.go` 的 `validateEnvelope` 在 dispatch **之前**
+    就要求 `target.id` 非空 —— 收藏 tab 每次加载都会抛错。批量读没有单一聚合，
+    改用显式哨兵 `by_ids`（与 `CreatePost` 的 `new` 同属「命名操作、不假装是真实
+    聚合」的惯例）。
+  - **拒绝信息不再是无字天书**。`validateEnvelope` 过去返回空的 `safeDetails`，
+    又因为拒绝发生在 dispatch 之前，日志里「命令不存在」和「信封不合法」长得
+    一模一样。新增 `missingEnvelopeField` 指名第一个缺失/过短的字段（沿用
+    requestedAt 分支已有的 `field` 约定），并顺手删掉 `invalidEnvelope` 那个
+    从未被使用的 `*http.Request` 参数。
+
+## Revision 182 — 2026-09-13
+
+- PROFILE-TABS-001：个人主页 5 tab 的可见性与真数据。
+  - **收藏不上他人主页**。之前 `ProfileTabs` 无条件渲染 IG/Threads 那 5 个 tab，
+    SAVED 也在里面 —— 别人的主页上摆「收藏」等于把他的私人书签当公开内容展示。
+    现在走 `visibleProfileTabs(viewerMode)`：只有 `SELF` 才给 SAVED，**viewer
+    身份未知一律不给**（fail-closed），少一个 tab 也强过泄露别人的私库。
+  - **他人主页的「回复」tab 不再恒空**。`other-profile.tsx` 之前把 `replyPosts`
+    硬编码成 `[]`，5 个 tab 里有 3 个永远是空态；现在走
+    `ListUserReplies(target.userId)` 拉真数据（回复是公开内容）。SAVED / TAGGED
+    保持空态 —— 收藏是私库，标记目前只有客户端侧说法、没有服务端依据，宁可留空
+    也不编数据。
+  - tab 顺序抽成 `PROFILE_TAB_ORDER`；当前 tab 被隐藏时回落 POSTS，不留空白页。
+
+## Revision 186 — 2026-09-14
+
+- 我的 Tab IA 重构：设置与隐私 / 我的隐私 合并为单一「设置与隐私」模块
+  （隐私与数据区：PDPA 下载/删除 + 定位授权并入）；企业/店铺从账户组移出
+  独立成组，新增「推荐商铺进体系」入口（STORE-REC-001）。
+- 有视觉改动：我的页分组结构、设置与隐私子页、新推荐商铺表单。
 
 ## Revision 181 — 2026-09-13
 
