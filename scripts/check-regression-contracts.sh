@@ -3530,3 +3530,50 @@ if ! grep -qF 'DISPOSITION_RECOMMENDATION_NOT_FOUND' apps/mobile/src/surfaces/st
   exit 1
 fi
 echo "    STORE-REC-006: PASS (no orphan dispositions: a decision must point at a real recommendation)"
+
+# STORE-REC-007: 推荐人必须能看见自己那条的进展 —— 且只能看见自己的。
+#
+# 采纳只代表运营批准接入，商家真正入驻是另一件事。而能完成入驻的人通常就是
+# 推荐人本人，可他提交完就再无回音（运营队列是 operator-only，他调不动），
+# 于是「已采纳 · 待接入」那一列永远等不到人：队列看起来办结了，事情却没发生。
+#
+# 钉死：①测试存在；②命令存在；③作用域由**服务端**收敛到 Actor.ID（这条最要紧 ——
+# 客户端传参收敛是个安全洞，任何人都能读到别人的推荐理由）；
+# ④**不是** operator 命令（否则普通用户照样看不到，缺口原样保留）；
+# ⑤App 有这一屏；⑥命令进 OpenAPI 契约。
+require_test "STORE-REC-007" "./internal/storeonboarding" \
+  "TestRecommenderCanSeeOnlyTheirOwnStatus" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'func (s *Service) listMyRecommendations' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-007]: ListMyStoreRecommendations handler is gone, so" >&2
+  echo "        recommenders are left without any feedback again." >&2
+  exit 1
+fi
+# 作用域必须在服务端收敛。靠客户端传参收敛 = 任何人都能读到别人的推荐理由。
+if ! grep -qF 'RecommendedBy: e.Actor.ID' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-007]: the per-caller scope is gone from the service." >&2
+  echo "        Client-supplied scoping is not scoping -- it lets anyone read" >&2
+  echo "        anyone else's recommendations." >&2
+  exit 1
+fi
+# 若被加进 operator 白名单，普通用户就又看不到了，缺口原样保留。
+if grep -qF '"ListMyStoreRecommendations": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [STORE-REC-007]: ListMyStoreRecommendations became operator-only," >&2
+  echo "        so ordinary recommenders cannot see their own status again." >&2
+  exit 1
+fi
+if ! grep -qF 'ListMyStoreRecommendations' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [STORE-REC-007]: ListMyStoreRecommendations is missing from the" >&2
+  echo "        OpenAPI command contract. Regenerate with go run ./cmd/openapi-commands." >&2
+  exit 1
+fi
+if ! grep -qF 'listMyRecommendations' apps/mobile/src/storeonboarding-client.ts; then
+  echo "  FAIL [STORE-REC-007]: the mobile client lost listMyRecommendations." >&2
+  exit 1
+fi
+if ! [ -f apps/mobile/src/surfaces/my-store-recommendations.tsx ]; then
+  echo "  FAIL [STORE-REC-007]: the 我推荐的店 surface is gone, so the recommender" >&2
+  echo "        has no place to learn that their store was approved." >&2
+  exit 1
+fi
+echo "    STORE-REC-007: PASS (recommenders can see their own status, scoped server-side)"

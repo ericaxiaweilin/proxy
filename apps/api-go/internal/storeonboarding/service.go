@@ -71,6 +71,11 @@ type RecommendationFilter struct {
 	City   string // 精确匹配城市；空 = 不限
 	Origin string // USER | AI；空 = 不限
 	Limit  int    // 已经过 clamp，仓储层直接用于 LIMIT
+	// RecommendedBy 限定「谁推荐的」（STORE-REC-007）。给「我推荐的店」用：
+	// 推荐人必须能看见自己那条的进展，否则他永远不知道结果，也就不会知道
+	// 「该去建店了」—— 而能完成入驻这件事的人通常就是他。
+	// 空 = 不限（运营队列）。
+	RecommendedBy string
 	// Status 按**最新结论**筛选，见下面四个常量；空 = 不限。
 	//
 	// STORE-REC-005 前这里是个 PendingOnly bool，只能表达「待评估 / 全部」。
@@ -142,7 +147,8 @@ func (s *Service) Supports(commandType string) bool {
 	return commandType == "RecommendStore" ||
 		commandType == "ListStoreRecommendations" ||
 		commandType == "SuggestStoreRecommendation" ||
-		commandType == "DecideStoreRecommendation"
+		commandType == "DecideStoreRecommendation" ||
+		commandType == "ListMyStoreRecommendations"
 }
 
 func (s *Service) Handle(e command.Envelope) command.Result {
@@ -159,6 +165,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.suggestRecommendation(ctx, e)
 	case "DecideStoreRecommendation":
 		return s.decideStoreRecommendation(ctx, e)
+	case "ListMyStoreRecommendations":
+		return s.listMyRecommendations(ctx, e)
 	default:
 		return command.Rejected(e, "UNKNOWN_COMMAND", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.unknown_command", nil)
 	}
@@ -295,22 +303,61 @@ func (s *Service) listRecommendations(ctx context.Context, e command.Envelope) c
 			"status": p.Status,
 		})
 	}
-	limit := p.Limit
+	return s.queryQueue(ctx, e, RecommendationFilter{
+		City:   strings.TrimSpace(p.City),
+		Origin: origin,
+		Limit:  p.Limit,
+		Status: status,
+	})
+}
+
+// listMyRecommendations 让推荐人看见**自己**推荐的进展（STORE-REC-007）。
+//
+// 为什么必须存在：采纳只代表运营批准接入，商家真正入驻是另一件事 —— 而能完成
+// 那件事的人（推荐人，通常就是店主本人）**看不到自己那条推荐怎么样了**。
+// 他提交完就再无回音，自然也不会知道「该去建店了」，于是「已采纳 · 待接入」
+// 那一列永远等不到人。队列是给运营看的，这一条是给推荐人看的，两件事。
+//
+// 权限：登录即可，**不是** operator 命令。但作用域强制收敛到 e.Actor.ID ——
+// 调用方传什么参数都改变不了这个条件，绝无可能看到别人的推荐。
+// 推荐理由属于个人信息，跨账号读是绝不能开的口子。
+func (s *Service) listMyRecommendations(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.ID == "" {
+		return command.Rejected(e, "RECOMMENDATION_REQUIRES_AUTHENTICATED_ACTOR", "AUTHORIZATION", "AFTER_USER_ACTION", "storeonboarding.recommendation_requires_actor", nil)
+	}
+	var p listRecommendationsPayload
+	if blob, err := json.Marshal(e.Payload); err != nil || json.Unmarshal(blob, &p) != nil {
+		return command.Rejected(e, "INVALID_RECOMMENDATION_QUERY", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.invalid_recommendation_query", nil)
+	}
+	status, ok := normalizeQueueStatus(p.Status, p.PendingOnly)
+	if !ok {
+		return command.Rejected(e, "INVALID_RECOMMENDATION_STATUS", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.invalid_recommendation_status", map[string]any{
+			"status": p.Status,
+		})
+	}
+	// 城市 / 来源这类筛选对「我自己的」没有意义，也不该被外部控制：
+	// 唯一生效的作用域就是调用者本人。
+	return s.queryQueue(ctx, e, RecommendationFilter{
+		Limit:         p.Limit,
+		Status:        status,
+		RecommendedBy: e.Actor.ID,
+	})
+}
+
+// queryQueue 是两条读路径共用的尾巴：clamp 上限、读、并保证空结果是 []。
+func (s *Service) queryQueue(ctx context.Context, e command.Envelope, filter RecommendationFilter) command.Result {
+	limit := filter.Limit
 	if limit <= 0 {
 		limit = ListLimitDefault
 	}
 	if limit > ListLimitMax {
 		limit = ListLimitMax
 	}
+	filter.Limit = limit
 	if s.repository == nil {
 		return command.Rejected(e, "RECOMMENDATION_FAILED", "INTERNAL", "SAFE_RETRY", "storeonboarding.recommendation_failed", nil)
 	}
-	rows, err := s.repository.ListRecommendations(ctx, RecommendationFilter{
-		City:   strings.TrimSpace(p.City),
-		Origin: origin,
-		Limit:  limit,
-		Status: status,
-	})
+	rows, err := s.repository.ListRecommendations(ctx, filter)
 	if err != nil {
 		return command.Rejected(e, "RECOMMENDATION_READ_FAILED", "INTERNAL", "SAFE_RETRY", "storeonboarding.recommendation_read_failed", nil)
 	}

@@ -62,6 +62,10 @@ func (r *MemoryRepository) ListRecommendations(_ context.Context, filter Recomme
 		if filter.Origin != "" && rec.Origin != filter.Origin {
 			continue
 		}
+		// STORE-REC-007: 「我推荐的店」按推荐人收敛作用域。
+		if filter.RecommendedBy != "" && rec.RecommendedBy != filter.RecommendedBy {
+			continue
+		}
 		rec.attachLatestDisposition(r.dispositions)
 		// Status：默认（待评估）只留还没出结论的，评估完一条它就得从默认队列里
 		// 消失，否则队列越用越长，运营要在里面翻旧账。但采纳 / 不采纳必须能单独

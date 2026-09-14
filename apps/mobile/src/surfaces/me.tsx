@@ -45,6 +45,7 @@ import { StoreOnboardingClient, StoreRecommendationAiUnavailableError } from "..
 import { BenefitClient } from "../benefit-client";
 import { BenefitHubSurface } from "./benefit-hub";
 import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
+import { MyStoreRecommendations } from "./my-store-recommendations";
 import { type LocalNetClient } from "../localnet-client";
 import {
   parentPostIdsForReplies,
@@ -202,6 +203,9 @@ const REQUESTER_ME: PersonaConfig = {
       rows: [
         { icon: "store-lines", label: "我的企业 / 店铺", desc: "有经营权限时进入 Business Workspace", route: "bdash" },
         { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" },
+        // STORE-REC-007: 推荐完就没有回音了 —— 推荐人看不到自己那条被采纳了没有，
+        // 而能完成入驻的人通常就是他。队列是运营专属的，这一条是给推荐人自己的。
+        { icon: "ring", label: "我推荐的店", desc: "查看我推荐的店铺现在什么状态，被采纳后去建店", route: "mystorerecs" },
         { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" }
       ]
     },
@@ -2154,6 +2158,21 @@ export function MeSurface({
                 </Text>
               </View>
             )}
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // STORE-REC-007: 我推荐的店 —— 推荐人自己的进展视图。
+    if (subPage.route === "mystorerecs") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>我推荐的店</Text>
+            <MyStoreRecommendations />
           </ScrollView>
         </View>
       );

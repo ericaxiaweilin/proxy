@@ -553,6 +553,66 @@ func TestAcceptedRecommendationsStayReachable(t *testing.T) {
 	}
 }
 
+// STORE-REC-007: 推荐人能看见**自己**那条的进展，且只能看见自己的。
+//
+// 采纳只代表运营批准接入，商家真正入驻是另一件事 —— 而能完成入驻的人（推荐人，
+// 通常就是店主）此前**看不到自己那条推荐怎么样了**：提交完再无回音，自然不知道
+// 「该去建店了」，于是「已采纳 · 待接入」那一列永远等不到人。
+// 队列（ListStoreRecommendations）是 operator-only，解决不了这件事。
+func TestRecommenderCanSeeOnlyTheirOwnStatus(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	svc.SetClock(fixedClock())
+
+	recommend := func(store, by string) {
+		t.Helper()
+		if res := svc.Handle(envelopeFor("RecommendStore", map[string]any{
+			"storeName": store, "city": "河内", "category": "咖啡", "reason": "值得进", "origin": "USER",
+		}, by)); res.Outcome != "ACCEPTED" {
+			t.Fatalf("seed %s: %+v", store, res)
+		}
+	}
+	recommend("我的店", "user_1")
+	recommend("别人的店", "user_2")
+
+	byName := map[string]string{}
+	for _, rec := range repo.Recommendations() {
+		byName[rec.StoreName] = rec.ID
+	}
+	if res := svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": byName["我的店"], "decision": "ACCEPT",
+	}, "operator_1")); res.Outcome != "ACCEPTED" {
+		t.Fatalf("accept: %+v", res)
+	}
+
+	mine := parseQueue(t, svc.Handle(envelopeFor("ListMyStoreRecommendations", map[string]any{}, "user_1")))
+	if len(mine) != 1 || mine[0].StoreName != "我的店" {
+		t.Fatalf("user_1 must see only their own recommendation, got %+v", mine)
+	}
+	// 关键：他必须能看见「被采纳了」—— 否则他不知道该去建店。
+	if mine[0].Decision != AcceptDecision {
+		t.Fatalf("recommender must see the decision: %+v", mine[0])
+	}
+
+	theirs := parseQueue(t, svc.Handle(envelopeFor("ListMyStoreRecommendations", map[string]any{}, "user_2")))
+	if len(theirs) != 1 || theirs[0].StoreName != "别人的店" {
+		t.Fatalf("user_2 must see only their own recommendation, got %+v", theirs)
+	}
+
+	// 传参不能改变作用域：试图指定别人的 id（或任何筛选）都只看到自己的。
+	spoof := parseQueue(t, svc.Handle(envelopeFor("ListMyStoreRecommendations", map[string]any{
+		"city": "河内", "recommendedBy": "user_2", "origin": "USER",
+	}, "user_1")))
+	if len(spoof) != 1 || spoof[0].StoreName != "我的店" {
+		t.Fatalf("caller must not be able to widen the scope: %+v", spoof)
+	}
+
+	anon := svc.Handle(envelopeFor("ListMyStoreRecommendations", map[string]any{}, ""))
+	if anon.Outcome != "REJECTED" || anon.Error == nil || anon.Error.ErrorCode != "RECOMMENDATION_REQUIRES_AUTHENTICATED_ACTOR" {
+		t.Fatalf("anonymous read must be refused: %+v", anon)
+	}
+}
+
 // STORE-REC-006: 结论必须落在一条真实存在的推荐上。
 //
 // 少了这个校验，id 打错也会写进一条结论 —— 它永远 join 不到任何推荐，于是那条

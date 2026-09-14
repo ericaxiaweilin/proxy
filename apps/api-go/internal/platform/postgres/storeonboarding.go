@@ -74,6 +74,8 @@ WHERE ($1 = '' OR r.city = $1)
        OR ($4 = 'PENDING'  AND d.decision IS NULL)
        OR ($4 = 'ACCEPTED' AND d.decision = 'ACCEPT')
        OR ($4 = 'REJECTED' AND d.decision = 'REJECT'))
+  -- STORE-REC-007: 「我推荐的店」按推荐人收敛作用域。
+  AND ($5 = '' OR r.recommended_by = $5)
 ORDER BY r.created_at DESC
 LIMIT $3`
 
@@ -94,7 +96,7 @@ func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, fil
 		limit = storeonboarding.ListLimitMax
 	}
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, listStoreRecommendationsSQL,
-		filter.City, filter.Origin, limit, filter.Status)
+		filter.City, filter.Origin, limit, filter.Status, filter.RecommendedBy)
 	if err != nil {
 		return nil, err
 	}

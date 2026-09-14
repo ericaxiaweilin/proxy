@@ -9,6 +9,23 @@ import type { SecureSessionStore } from "./secure-session";
 // 靠发展 builder + 小美（AI）/ 用户推荐商铺进入体系，运营评估后接入。
 // 这里只提交推荐受理记录（append-only），接入与否由运营在 bdash 评估。
 
+// 服务端把队列 JSON 放在 operationRef 里。没有它算**协议异常**，不能当成空队列 ——
+// 那会把「读不出来」误报成「没人推荐」，两种情况的列表都是空的，必须分开。
+function parseQueueRef(result: CommandResult): StoreRecommendation[] {
+  const ref = result.operationRef;
+  if (typeof ref !== "string") {
+    throw new StoreRecommendationProtocolError("推荐队列响应缺少 operationRef");
+  }
+  try {
+    const parsed = JSON.parse(ref) as { recommendations?: StoreRecommendation[] };
+    return parsed.recommendations ?? [];
+  } catch (err) {
+    throw new StoreRecommendationProtocolError(
+      "推荐队列解析失败: " + (err instanceof Error ? err.message : String(err))
+    );
+  }
+}
+
 export type StoreRecommendationOrigin = "USER" | "AI";
 
 // STORE-REC-004: 运营对一条推荐做出的结论。append-only —— 改主意是追加一条新的，
@@ -145,20 +162,31 @@ export class StoreOnboardingClient {
       type: "STORE",
       id: "queue"
     });
-    // 服务端把队列 JSON 放在 operationRef 里；没有它算协议异常，
-    // 不能当成空队列 —— 同上，会把「读不出来」误报成「没人推荐」。
-    const ref = result.operationRef;
-    if (typeof ref !== "string") {
-      throw new StoreRecommendationProtocolError("推荐队列响应缺少 operationRef");
-    }
-    try {
-      const parsed = JSON.parse(ref) as { recommendations?: StoreRecommendation[] };
-      return parsed.recommendations ?? [];
-    } catch (err) {
-      throw new StoreRecommendationProtocolError(
-        "推荐队列解析失败: " + (err instanceof Error ? err.message : String(err))
-      );
-    }
+    return parseQueueRef(result);
+  }
+
+  /**
+   * STORE-REC-007: 我推荐的那些店，现在什么状态。
+   *
+   * 为什么需要它：运营队列（listRecommendations）是 operator-only，普通用户
+   * 调不动 —— 于是推荐人提交完就再无回音，永远不知道自己推荐的那家店被采纳了
+   * 没有。而**能完成入驻的人通常就是他**：采纳只代表批准接入，不等于店铺已存在，
+   * 他看不到「该去建店了」，那条已批准的记录就永远等不到人。
+   *
+   * 作用域由服务端强制收敛到当前账号，这里传不了也改不了别人的。
+   */
+  public async listMyRecommendations(
+    query: Pick<ListStoreRecommendationsQuery, "limit" | "status"> = {}
+  ): Promise<StoreRecommendation[]> {
+    const payload: Record<string, unknown> = {};
+    if (query.limit && query.limit > 0) payload.limit = query.limit;
+    if (query.status) payload.status = query.status;
+
+    const result = await this.command("ListMyStoreRecommendations", payload, {
+      type: "STORE",
+      id: "mine"
+    });
+    return parseQueueRef(result);
   }
 
   /**

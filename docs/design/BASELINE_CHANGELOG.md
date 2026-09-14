@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 192 — 2026-09-14
+
+- STORE-REC-007：新增「我推荐的店」，推荐人能看见自己那条推荐的进展。
+  有视觉改动：我的 → 企业 / 店铺 → 我推荐的店。
+  - **原状**：运营队列 `ListStoreRecommendations` 是 operator-only，普通用户
+    调不动 —— 推荐人提交完就再无回音，永远不知道自己推荐的那家店被采纳了没有。
+  - **为什么是缺口**：采纳只代表运营批准接入，**不等于店铺已存在**；而能完成
+    入驻的人通常就是推荐人本人。他看不到「该去建店了」，
+    「已采纳 · 待接入」那一列就永远等不到人 —— 队列看起来办结了，事情却没发生。
+  - 服务端新增 `ListMyStoreRecommendations`（非 operator 命令），作用域由服务端
+    强制收敛到 `e.Actor.ID`，调用方传参无法放大。
+  - 采纳态明确写成「已采纳 · 等你建店」，并说明批准不等于店铺已存在。
+
 ## Revision 191 — 2026-09-14
 
 - BENEFIT-WIRE-001：把写好了但从没接线的权益链路接进 App。

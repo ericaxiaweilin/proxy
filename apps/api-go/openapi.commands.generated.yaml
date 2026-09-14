@@ -267,6 +267,8 @@ commands:
     domain: Fulfillment
   - command: ListMyScenes
     domain: Scene
+  - command: ListMyStoreRecommendations
+    domain: StoreOnboarding
   - command: ListObservationTemplates
     domain: Outcome
   - command: ListOpportunityTemplates
