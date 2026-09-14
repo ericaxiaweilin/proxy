@@ -92,6 +92,10 @@ type Post struct {
 	// 用指针而不是 time.Time + IsZero：nil 与「零值时间」是两件事，零值时间会被
 	// 序列化成 "0001-01-01T00:00:00Z" 这种让客户端 zod parse 失败的垃圾。
 	EphemeralUntil *time.Time `json:"ephemeralUntil,omitempty"`
+	// Poll 是这条帖子的投票（POLL-VOTE-001）。它是**读时**拼上去的，不落进
+	// posts 表的任何列 —— 票数会变、而且"我投了哪个"因人而异，缓存进帖子
+	// 行里必然是错的。nil = 这条帖子没有投票。
+	Poll *PostPollView `json:"poll,omitempty"`
 	// R15.15 P1: SceneType 是 Post 与 Scene aggregate 之间的选择
 	// 门 (ROOFTOP | BRUNCH | SPA | CINEMA | PHOTO | NIGHTLIFE |
 	// OUTDOOR | COFFEE | UNKNOWN). 跟 Scene.SceneType 同样枚举
@@ -252,6 +256,12 @@ type Repository interface {
 	SnapshotNeeds(ctx context.Context) ([]NeedFromPost, error)
 	AppendInteractionEvent(ctx context.Context, ie InteractionEvent) error
 	ListInteractionEvents(ctx context.Context, actorID string, limit int) ([]InteractionEvent, error)
+	// POLL-VOTE-001：投票。刻意放进**必需**的 Repository 而不是另开一个可选
+	// 接口 —— 可选接口一旦没人实现，投票就又变成"UI 有、服务端没有"的静默
+	// 降级，正是这次要修的病。宁可编译期就逼着每个实现把投票接上。
+	SavePostPoll(ctx context.Context, poll PostPoll) error
+	RecordPollVote(ctx context.Context, postID, optionID, voterID string) error
+	ListPollsForPosts(ctx context.Context, postIDs []string, viewerID string) (map[string]PostPollTally, error)
 }
 
 type FeedPageRepository interface {
@@ -288,6 +298,9 @@ type InteractionEvent struct {
 var (
 	ErrPostNotFound    = errors.New("post not found")
 	ErrVersionConflict = errors.New("post version conflict")
+	// POLL-VOTE-001
+	ErrPollNotFound       = errors.New("poll not found")
+	ErrPollOptionNotFound = errors.New("poll option not found")
 )
 
 type MemoryRepository struct {
@@ -296,10 +309,92 @@ type MemoryRepository struct {
 	needs             []NeedFromPost
 	interactionEvents []InteractionEvent
 	events            []event.DomainEvent
+	// POLL-VOTE-001
+	polls map[string]PostPoll          // postID -> poll
+	votes map[string]map[string]string // postID -> voterID -> optionID
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{posts: make(map[string]Post)}
+	return &MemoryRepository{
+		posts: make(map[string]Post),
+		polls: make(map[string]PostPoll),
+		votes: make(map[string]map[string]string),
+	}
+}
+
+func (r *MemoryRepository) SavePostPoll(_ context.Context, poll PostPoll) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	options := append([]PostPollOption(nil), poll.Options...)
+	sortPollOptions(options)
+	r.polls[poll.PostID] = PostPoll{PostID: poll.PostID, ExpiresAt: poll.ExpiresAt, Options: options}
+	return nil
+}
+
+func (r *MemoryRepository) RecordPollVote(_ context.Context, postID, optionID, voterID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	poll, ok := r.polls[postID]
+	if !ok {
+		return ErrPostNotFound
+	}
+	belongs := false
+	for _, opt := range poll.Options {
+		if opt.OptionID == optionID {
+			belongs = true
+			break
+		}
+	}
+	if !belongs {
+		return ErrPollOptionNotFound
+	}
+	if r.votes[postID] == nil {
+		r.votes[postID] = make(map[string]string)
+	}
+	// 一人一票：再投即改票，仍然只算一票。
+	r.votes[postID][voterID] = optionID
+	return nil
+}
+
+func (r *MemoryRepository) ListPollsForPosts(_ context.Context, postIDs []string, viewerID string) (map[string]PostPollTally, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]PostPollTally, len(postIDs))
+	for _, postID := range postIDs {
+		poll, ok := r.polls[postID]
+		if !ok {
+			continue
+		}
+		counts := make(map[string]int, len(poll.Options))
+		for _, opt := range poll.Options {
+			counts[opt.OptionID] = 0
+		}
+		voted := ""
+		for voter, optionID := range r.votes[postID] {
+			counts[optionID]++
+			if viewerID != "" && voter == viewerID {
+				voted = optionID
+			}
+		}
+		out[postID] = PostPollTally{Poll: poll, Counts: counts, VotedOptionID: voted}
+	}
+	return out, nil
+}
+
+// sortPollOptions 按 sortOrder 升序（同序按 optionID 兜底，保证顺序确定）。
+func sortPollOptions(options []PostPollOption) {
+	for i := 1; i < len(options); i++ {
+		for j := i; j > 0; j-- {
+			a, b := options[j-1], options[j]
+			if a.SortOrder < b.SortOrder {
+				break
+			}
+			if a.SortOrder == b.SortOrder && a.OptionID <= b.OptionID {
+				break
+			}
+			options[j-1], options[j] = b, a
+		}
+	}
 }
 
 // SeedDemoPosts idempotently inserts a small set of demo posts so a
@@ -618,6 +713,11 @@ func (r *MemoryRepository) ListInteractionEvents(_ context.Context, actorID stri
 func clonePost(post Post) Post {
 	post.MediaRefs = append([]PostMediaRef(nil), post.MediaRefs...)
 	post.ContextRefs = append([]ContextRef(nil), post.ContextRefs...)
+	if post.Poll != nil {
+		poll := *post.Poll
+		poll.Options = append([]PostPollOptionView(nil), poll.Options...)
+		post.Poll = &poll
+	}
 	return post
 }
 
@@ -712,7 +812,7 @@ func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreatePost", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed",
-		"ShortlistAgent", "ListInteractionEvents":
+		"ShortlistAgent", "ListInteractionEvents", "VotePostPoll":
 		return true
 	default:
 		return false
@@ -749,6 +849,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.shortlistAgent(ctx, e)
 	case "ListInteractionEvents":
 		return s.listInteractionEvents(ctx, e)
+	case "VotePostPoll":
+		return s.votePostPoll(ctx, e)
 	default:
 		return command.Rejected(e, "LOCAL_NET_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "localnet.unsupported_command", nil)
 	}
@@ -794,6 +896,27 @@ type createPostPayload struct {
 	// 用指针以便区分「没传」与「传了零值」；传了非 RFC3339 的字符串会让
 	// decode 失败 → INVALID_POST，而不是被静默丢弃。
 	EphemeralUntil *time.Time `json:"ephemeralUntil"`
+	// POLL-VOTE-001：帖内投票。不传 / null = 普通帖子。
+	Poll *createPostPollPayload `json:"poll"`
+}
+
+// createPostPollPayload 是建帖时随帖提交的投票。
+//
+// MultiSelect 用 **bool** 而不是 *bool 拿不到"客户端没传"这回事，这里刻意用
+// 指针：契约里 multiSelect 是 optional，但**不支持多选**，所以必须能分辨
+// 「没传」（= 单选，正常）和「传了 true」（= 显式要求多选，必须报错拒绝）。
+// 用非指针 bool 会把两者都读成 false，于是用户以为自己建了多选投票、服务端
+// 悄悄按单选存了 —— 那正是 GHOST-24H-001 那种"静默降级"。
+type createPostPollPayload struct {
+	ExpiresAt   *time.Time                    `json:"expiresAt"`
+	MultiSelect *bool                         `json:"multiSelect"`
+	Options     []createPostPollOptionPayload `json:"options"`
+}
+
+type createPostPollOptionPayload struct {
+	OptionID  string `json:"optionId"`
+	Label     string `json:"label"`
+	SortOrder int    `json:"sortOrder"`
 }
 
 // ephemeralUntilSkewTolerance 容忍一点点客户端与服务端之间的时钟偏差。
@@ -900,6 +1023,61 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 			})
 		}
 	}
+	// POLL-VOTE-001：投票在建帖时就地校验 + 落库。
+	//
+	// 校验放在**建帖之前**：这样绝大多数非法投票（选项不够、标签过长、
+	// 要求多选、到期时间在过去）根本不会产生一条帖子，也就不存在
+	// 「帖子发出来了但投票没成」这种半截状态。
+	var poll *PostPoll
+	if p.Poll != nil {
+		if p.Poll.MultiSelect != nil && *p.Poll.MultiSelect {
+			// 明确拒绝，绝不静默降级成单选 —— 静默降级正是 GHOST-24H-001 的病根：
+			// 用户以为自己建了多选投票，服务端悄悄按单选存了，谁都不会报错。
+			return command.Rejected(e, "POLL_MULTISELECT_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "localnet.poll_multiselect_unsupported", nil)
+		}
+		if p.Poll.ExpiresAt != nil && !p.Poll.ExpiresAt.After(s.clock.Now().UTC().Add(-ephemeralUntilSkewTolerance)) {
+			// 同 GHOST-24H-001：不接受「已经截止的投票」。那会产出一条发出即可见、
+			// 但谁都投不了的投票 —— 用户建完发现投不了，跟没建一样。
+			return command.Rejected(e, "INVALID_POST_POLL_EXPIRES_AT", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_poll_expires_at", map[string]any{
+				"got":      p.Poll.ExpiresAt.UTC().Format(time.RFC3339),
+				"serverAt": s.clock.Now().UTC().Format(time.RFC3339),
+			})
+		}
+		options := make([]PostPollOption, 0, len(p.Poll.Options))
+		for i, opt := range p.Poll.Options {
+			label := strings.TrimSpace(opt.Label)
+			if label == "" {
+				continue
+			}
+			if utf8.RuneCountInString(label) > maxPollLabelRune {
+				return command.Rejected(e, "INVALID_POST_POLL", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_poll", map[string]any{
+					"reason": "option_label_too_long",
+					"index":  i,
+					"max":    maxPollLabelRune,
+				})
+			}
+			id := strings.TrimSpace(opt.OptionID)
+			if id == "" {
+				id = newID("opt_")
+			}
+			options = append(options, PostPollOption{OptionID: id, Label: label, SortOrder: opt.SortOrder})
+		}
+		if len(options) < minPollOptions {
+			return command.Rejected(e, "INVALID_POST_POLL", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_poll", map[string]any{
+				"reason": "too_few_options",
+				"got":    len(options),
+				"min":    minPollOptions,
+			})
+		}
+		if len(options) > maxPollOptions {
+			return command.Rejected(e, "INVALID_POST_POLL", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_post_poll", map[string]any{
+				"reason": "too_many_options",
+				"got":    len(options),
+				"max":    maxPollOptions,
+			})
+		}
+		poll = &PostPoll{PostID: "", ExpiresAt: p.Poll.ExpiresAt, Options: options}
+	}
 	post := Post{
 		ID:                newID("post_"),
 		AuthorType:        p.AuthorType,
@@ -927,6 +1105,11 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if post.EphemeralUntil != nil {
 		domainEventData["ephemeralUntil"] = post.EphemeralUntil.UTC().Format(time.RFC3339)
 	}
+	// POLL-VOTE-001：投票进了事件流。是否建过投票（以及几个选项）要能举证，
+	// 否则日后对不上「用户到底主张过什么」。
+	if poll != nil {
+		domainEventData["pollOptionCount"] = len(poll.Options)
+	}
 	domainEvents := []event.DomainEvent{event.New("PostCreated", "Post", post.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, post.CreatedAt, domainEventData)}
 	if len(p.MediaRefs) > 0 && s.mediaLookup != nil {
 		ids := make([]string, 0, len(p.MediaRefs))
@@ -940,8 +1123,122 @@ func (s *Service) createPost(ctx context.Context, e command.Envelope) command.Re
 	if err := s.repository.CreatePost(ctx, post); err != nil {
 		return command.Rejected(e, "POST_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.post_create_failed", nil)
 	}
+	// POLL-VOTE-001：投票必须在同一条命令里真的落库，且失败必须报失败。
+	//
+	// 这里绝不「帖子发了、投票没存也照样返回成功」——那产出的是一条自称有投票、
+	// 实际谁都投不了的帖子，正是这次要消灭的东西。宁可让客户端看到失败去重发。
+	if poll != nil {
+		poll.PostID = post.ID
+		if err := s.repository.SavePostPoll(ctx, *poll); err != nil {
+			return command.Rejected(e, "POST_POLL_SAVE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_save_failed", nil)
+		}
+	}
 	go s.enrichPostClassification(post)
 	return command.Accepted(e, "Post", post.ID, 1, post.Status, eventRefs(domainEvents))
+}
+
+// ---------- VotePostPoll ----------
+
+// attachPolls 把投票读模型挂到一批帖子上（一次批量查询，不是 N 次）。
+//
+// 为什么不在 feed 的 SQL 里 JOIN 投票：票数会变、"我投了哪个"因人而异，
+// 塞进 posts 表的列里必然是错的；而且给主查询加 JOIN 会牵动
+// SELECT 列清单 —— 那正是 GHOST-24H-001 里把 feed 读崩的事故类型
+// （列数对不上 rows.Scan）。单独一次批量查询既安全又好测。
+//
+// 查询失败时**原样返回**而不是让整个 feed 挂掉：投票是帖子的附加信息，
+// 读不到投票不代表帖子不该出现。宁可少一个投票卡片，不要整个动态流 500。
+func (s *Service) attachPolls(ctx context.Context, posts []Post, viewerID string) []Post {
+	if len(posts) == 0 {
+		return posts
+	}
+	ids := make([]string, 0, len(posts))
+	for _, p := range posts {
+		ids = append(ids, p.ID)
+	}
+	tallies, err := s.repository.ListPollsForPosts(ctx, ids, viewerID)
+	if err != nil || len(tallies) == 0 {
+		return posts
+	}
+	now := s.clock.Now().UTC()
+	for i := range posts {
+		tally, ok := tallies[posts[i].ID]
+		if !ok {
+			continue
+		}
+		view := newPostPollView(tally.Poll, tally.Counts, tally.VotedOptionID, now)
+		posts[i].Poll = &view
+	}
+	return posts
+}
+
+// votePostPoll 给一条帖子的投票投一票。
+//
+// 三条自觉：
+//   - 一人一票，且**改票是直接覆盖**（再投不同选项 = 改票，不是两票）。
+//     落在仓储层是 UPSERT (post_id, voter_id)。
+//   - 截止后拒投，但**结果照常可见**：把结果一起藏掉等于把投票变成一场
+//     没有开奖的抽奖，用户需要看到最终票数。
+//   - 投票完成后直接把最新的票数回给客户端，省掉一次「投完再拉一遍」的往返，
+//     也避免客户端自己拿旧数字 +1 画出一条跟服务端对不上的百分比。
+func (s *Service) votePostPoll(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		PostID   string `json:"postId"`
+		OptionID string `json:"optionId"`
+	}
+	if !decode(e.Payload, &p) || p.PostID == "" || p.OptionID == "" {
+		return command.Rejected(e, "INVALID_POLL_VOTE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_poll_vote", nil)
+	}
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "POLL_VOTE_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "localnet.poll_vote_not_allowed", nil)
+	}
+	tallies, err := s.repository.ListPollsForPosts(ctx, []string{p.PostID}, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "POLL_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_read_failed", nil)
+	}
+	tally, ok := tallies[p.PostID]
+	if !ok {
+		return command.Rejected(e, "POLL_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.poll_not_found", map[string]any{"postId": p.PostID})
+	}
+	now := s.clock.Now().UTC()
+	if pollIsClosed(tally.Poll.ExpiresAt, now) {
+		return command.Rejected(e, "POLL_CLOSED", "BUSINESS_STATE", "AFTER_USER_ACTION", "localnet.poll_closed", map[string]any{
+			"postId":   p.PostID,
+			"serverAt": now.Format(time.RFC3339),
+		})
+	}
+	belongs := false
+	for _, opt := range tally.Poll.Options {
+		if opt.OptionID == p.OptionID {
+			belongs = true
+			break
+		}
+	}
+	if !belongs {
+		// 明确拒绝，不让「拿 A 帖子的选项去投 B 帖子的票」悄悄变成无效票。
+		// 数据库层还有复合外键兜底，这里是为了给客户端一个说得清的错误码。
+		return command.Rejected(e, "POLL_OPTION_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "localnet.poll_option_not_found", map[string]any{
+			"postId":   p.PostID,
+			"optionId": p.OptionID,
+		})
+	}
+	if err := s.repository.RecordPollVote(ctx, p.PostID, p.OptionID, e.Actor.ID); err != nil {
+		return command.Rejected(e, "POLL_VOTE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_vote_failed", nil)
+	}
+	// 重新读一遍，把权威票数回给客户端。
+	tallies, err = s.repository.ListPollsForPosts(ctx, []string{p.PostID}, e.Actor.ID)
+	if err != nil || tallies[p.PostID].Poll.PostID == "" {
+		return command.Rejected(e, "POLL_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.poll_read_failed", nil)
+	}
+	fresh := tallies[p.PostID]
+	view := newPostPollView(fresh.Poll, fresh.Counts, fresh.VotedOptionID, s.clock.Now().UTC())
+	domainEvents := []event.DomainEvent{event.New("PostPollVoted", "Post", p.PostID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
+		"optionId": p.OptionID,
+	})}
+	return acceptedWithPayload(e, "Post", p.PostID, 1, "POLL_VOTED", map[string]any{
+		"postId": p.PostID,
+		"poll":   view,
+	}, domainEvents)
 }
 
 // ---------- ListFeedPosts ----------
@@ -1012,6 +1309,7 @@ func (s *Service) listPostsByIds(ctx context.Context, e command.Envelope) comman
 		}
 		posts = append(posts, post)
 	}
+	posts = s.attachPolls(ctx, posts, e.Actor.ID)
 	return acceptedWithPayload(e, "Post", "", 0, "POSTS_BY_IDS", map[string]any{
 		"posts": posts,
 		"media": s.hydratePostMedia(ctx, posts),
@@ -1184,6 +1482,7 @@ func (s *Service) listPostsMentioning(ctx context.Context, e command.Envelope) c
 	if hasMore {
 		matched = matched[:request.Limit]
 	}
+	matched = s.attachPolls(ctx, matched, e.Actor.ID)
 	return acceptedWithPayload(e, "Post", "", 0, "POSTS_MENTIONING", map[string]any{
 		"posts":   matched,
 		"media":   s.hydratePostMedia(ctx, matched),
@@ -1436,6 +1735,7 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
 		nextCursor = signCursor(raw)
 	}
+	feed = s.attachPolls(ctx, feed, e.Actor.ID)
 	feedMedia := s.hydratePostMedia(ctx, feed)
 	return acceptedWithPayload(e, "Post", "", 0, "FEED", map[string]any{
 		"posts": feed,

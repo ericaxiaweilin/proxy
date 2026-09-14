@@ -1,4 +1,4 @@
-import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList, MutedAuthorsList } from "@proxy/contracts";
+import type { CommandResult, FollowCounts, FollowingState, PinnedPostsList, UserRepliesList, UserBookmarksList, PostEngagement, PostRepliesList, MutedAuthorsList, PostPollView } from "@proxy/contracts";
 import {
   parseFollowCounts,
   parseFollowingState,
@@ -7,7 +7,8 @@ import {
   parseUserBookmarksList,
   parseMutedAuthorsList,
   PostEngagementSchema,
-  PostRepliesListSchema
+  PostRepliesListSchema,
+  PostPollViewSchema
 } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { parseCommandResult } from "./login-client";
@@ -144,6 +145,30 @@ export class EngagementClient {
       throw new EngagementProtocolError("listMutedAuthors response missing operationRef");
     }
     return parseMutedAuthorsList(JSON.parse(result.operationRef));
+  }
+
+  /**
+   * POLL-VOTE-001 — 给帖内投票投一票。
+   *
+   * 返回**服务端算出来的最新票数**，不是「旧数字 +1」。刻意不在本地乐观地
+   * 自己加一：百分比条要是按本地猜测先画出来、再被服务端纠正，用户会看到
+   * 数字跳一下，而「投票结果」恰好是用户最不该怀疑的东西。
+   *
+   * 一人一票：重复投同一个选项幂等；投另一个选项 = 改票（仍然只算一票）。
+   *
+   * 会被服务端明确拒绝的几种情况（抛 EngagementCommandRejectedError，
+   * result.error.errorCode 可读）：
+   *   - POLL_CLOSED —— 已截止。注意结果仍然要显示，只是不能再投。
+   *   - POLL_OPTION_NOT_FOUND —— 选项不属于这条帖子。
+   *   - POLL_NOT_FOUND —— 这条帖子没有投票。
+   */
+  public async votePostPoll(postId: string, optionId: string): Promise<PostPollView> {
+    const result = await this.command("VotePostPoll", { type: "Post", id: postId }, { postId, optionId });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("votePostPoll response missing operationRef");
+    }
+    const raw = JSON.parse(result.operationRef) as { poll?: unknown };
+    return PostPollViewSchema.parse(raw.poll);
   }
 
   // R15.54 — UnfollowProfile: 幂等, 之前没 follow 返 NOT_FOLLOWING

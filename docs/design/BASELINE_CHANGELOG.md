@@ -86,6 +86,13 @@ same commit. Do not record routine business logic changes here.
     也不编数据。
   - tab 顺序抽成 `PROFILE_TAB_ORDER`；当前 tab 被隐藏时回落 POSTS，不留空白页。
 
+## Revision 186 — 2026-09-14
+
+- 我的 Tab IA 重构：设置与隐私 / 我的隐私 合并为单一「设置与隐私」模块
+  （隐私与数据区：PDPA 下载/删除 + 定位授权并入）；企业/店铺从账户组移出
+  独立成组，新增「推荐商铺进体系」入口（STORE-REC-001）。
+- 有视觉改动：我的页分组结构、设置与隐私子页、新推荐商铺表单。
+
 ## Revision 181 — 2026-09-13
 
 - FEED-REPLY-001 / FEED-REPLY-002：动态评论的作者身份与折叠规则。

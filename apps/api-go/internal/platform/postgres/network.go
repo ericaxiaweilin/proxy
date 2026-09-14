@@ -86,13 +86,13 @@ func nullIfEmptyNetwork(s string) interface{} {
 func (r *LocalNetRepository) GetPost(ctx context.Context, id string) (localnet.Post, error) {
 	var post localnet.Post
 	var mediaRefs, contextRefs []byte
-	var sceneType *string
+	var sceneType, cityScope *string
 	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
 		SELECT id, author_type, author_id, author_display_name, body, media_refs,
 			visibility, city_scope, scene_type, status, context_refs, created_at, ephemeral_until
 		FROM localnet.posts WHERE id = $1`, id).Scan(
 		&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
-		&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+		&post.Visibility, &cityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
 		&post.EphemeralUntil,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -103,6 +103,10 @@ func (r *LocalNetRepository) GetPost(ctx context.Context, id string) (localnet.P
 	}
 	if sceneType != nil {
 		post.SceneType = *sceneType
+	}
+	// FEED-NULL-CITY-001: 同上，city_scope 可空，扫进 string 会因单行 NULL 打挂整页。
+	if cityScope != nil {
+		post.CityScope = *cityScope
 	}
 	if err := json.Unmarshal(mediaRefs, &post.MediaRefs); err != nil {
 		return post, fmt.Errorf("decode media refs: %w", err)
@@ -139,10 +143,10 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 	for rows.Next() {
 		var post localnet.Post
 		var mediaRefs, contextRefs []byte
-		var sceneType *string
+		var sceneType, cityScope *string
 		if err := rows.Scan(
 			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
-			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+			&post.Visibility, &cityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
 			&post.EphemeralUntil,
 		); err != nil {
 			return nil, err
@@ -151,6 +155,12 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 		_ = json.Unmarshal(contextRefs, &post.ContextRefs)
 		if sceneType != nil {
 			post.SceneType = *sceneType
+		}
+		// FEED-NULL-CITY-001: city_scope 是可空列，直接扫进 string 会让**一整页
+		// feed** 因为某一行的 NULL 而整体报错（cannot scan NULL into *string）。
+		// 一行脏数据打挂所有人的动态流，这个代价远大于多一次判空。
+		if cityScope != nil {
+			post.CityScope = *cityScope
 		}
 		result = append(result, post)
 	}
@@ -199,10 +209,10 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 	for rows.Next() {
 		var post localnet.Post
 		var mediaRefs, contextRefs []byte
-		var sceneType *string
+		var sceneType, cityScope *string
 		if err := rows.Scan(
 			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
-			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+			&post.Visibility, &cityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
 			&post.EphemeralUntil,
 		); err != nil {
 			return nil, err
@@ -215,6 +225,12 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 		}
 		if sceneType != nil {
 			post.SceneType = *sceneType
+		}
+		// FEED-NULL-CITY-001: city_scope 是可空列，直接扫进 string 会让**一整页
+		// feed** 因为某一行的 NULL 而整体报错（cannot scan NULL into *string）。
+		// 一行脏数据打挂所有人的动态流，这个代价远大于多一次判空。
+		if cityScope != nil {
+			post.CityScope = *cityScope
 		}
 		result = append(result, post)
 	}
@@ -259,10 +275,10 @@ func (r *LocalNetRepository) ListPostsMentioning(ctx context.Context, actorID st
 	for rows.Next() {
 		var post localnet.Post
 		var mediaRefs, contextRefs []byte
-		var sceneType *string
+		var sceneType, cityScope *string
 		if err := rows.Scan(
 			&post.ID, &post.AuthorType, &post.AuthorID, &post.AuthorDisplayName, &post.Body, &mediaRefs,
-			&post.Visibility, &post.CityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
+			&post.Visibility, &cityScope, &sceneType, &post.Status, &contextRefs, &post.CreatedAt,
 			&post.EphemeralUntil,
 		); err != nil {
 			return nil, err
@@ -276,9 +292,140 @@ func (r *LocalNetRepository) ListPostsMentioning(ctx context.Context, actorID st
 		if sceneType != nil {
 			post.SceneType = *sceneType
 		}
+		// FEED-NULL-CITY-001: city_scope 是可空列，直接扫进 string 会让**一整页
+		// feed** 因为某一行的 NULL 而整体报错（cannot scan NULL into *string）。
+		// 一行脏数据打挂所有人的动态流，这个代价远大于多一次判空。
+		if cityScope != nil {
+			post.CityScope = *cityScope
+		}
 		result = append(result, post)
 	}
 	return result, rows.Err()
+}
+
+// ---------- POLL-VOTE-001：投票 ----------
+
+// SavePostPoll 写入投票及其选项（一次事务）。
+//
+// 选项走 ON CONFLICT DO UPDATE 而不是「先删再插」：删选项会连带把已投的票
+// 一起级联掉（FK ON DELETE CASCADE），而 SavePostPoll 语义上是「建/改投票」，
+// 不该顺手清掉别人的票。
+//
+// 必须走 runInTransaction 而不是 r.pool.Begin：命令处理跑在一个挂在 ctx 上的
+// 环境事务里，CreatePost 写进去的帖子行在提交前**别的连接看不见**。自己新开
+// 一个事务去写 post_polls，就会撞上 post_id → posts(id) 的外键（真实报错：
+// violates foreign key constraint "post_polls_post_id_fkey"），而这时帖子其实
+// 已经写好了 —— 一个只在「同一条命令里补写附属表」时才出现的连锁失败。
+func (r *LocalNetRepository) SavePostPoll(ctx context.Context, poll localnet.PostPoll) error {
+	return runInTransaction(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+		INSERT INTO localnet.post_polls (post_id, expires_at)
+		VALUES ($1, $2)
+		ON CONFLICT (post_id) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+			poll.PostID, poll.ExpiresAt); err != nil {
+			return err
+		}
+		for _, opt := range poll.Options {
+			if _, err := tx.Exec(ctx, `
+			INSERT INTO localnet.post_poll_options (option_id, post_id, label, sort_order)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (post_id, option_id) DO UPDATE SET label = EXCLUDED.label, sort_order = EXCLUDED.sort_order`,
+				opt.OptionID, poll.PostID, opt.Label, opt.SortOrder); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// RecordPollVote 记一票。一人一票：重复投票 = 改票（覆盖 option_id）。
+func (r *LocalNetRepository) RecordPollVote(ctx context.Context, postID, optionID, voterID string) error {
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, `
+		INSERT INTO localnet.post_poll_votes (post_id, option_id, voter_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (post_id, voter_id) DO UPDATE SET option_id = EXCLUDED.option_id, created_at = now()`,
+		postID, optionID, voterID)
+	return err
+}
+
+// ListPollsForPosts 一次取回一批帖子的投票：结构 + 票数 + 浏览者投了哪个。
+//
+// 票数一律 COUNT(*) 现算（不存计数列），"是否截止"由 service 用自己的时钟判 ——
+// 这里刻意不使用 SQL 的 now()，否则测试里的假时钟永远测不到截止行为。
+func (r *LocalNetRepository) ListPollsForPosts(ctx context.Context, postIDs []string, viewerID string) (map[string]localnet.PostPollTally, error) {
+	out := make(map[string]localnet.PostPollTally)
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT p.post_id, p.expires_at, o.option_id, o.label, o.sort_order,
+		       COALESCE(v.cnt, 0) AS vote_count
+		FROM localnet.post_polls p
+		JOIN localnet.post_poll_options o ON o.post_id = p.post_id
+		-- POLL-OPTION-SCOPE-001: 必须按 (post_id, option_id) 聚合。
+		-- option_id 只在一条帖子内唯一（客户端生成，重发草稿就会与另一条帖子撞），
+		-- 只按 option_id 分组会把 A 帖子的票算到 B 帖子同名选项的头上。
+		LEFT JOIN (
+			SELECT post_id, option_id, COUNT(*) AS cnt
+			FROM localnet.post_poll_votes
+			GROUP BY post_id, option_id
+		) v ON v.post_id = o.post_id AND v.option_id = o.option_id
+		WHERE p.post_id = ANY($1)
+		ORDER BY p.post_id, o.sort_order, o.option_id`, postIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			postID    string
+			expiresAt *time.Time
+			optionID  string
+			label     string
+			sortOrder int
+			votes     int
+		)
+		if err := rows.Scan(&postID, &expiresAt, &optionID, &label, &sortOrder, &votes); err != nil {
+			return nil, err
+		}
+		tally := out[postID]
+		tally.Poll.PostID = postID
+		tally.Poll.ExpiresAt = expiresAt
+		if tally.Counts == nil {
+			tally.Counts = make(map[string]int)
+		}
+		tally.Counts[optionID] = votes
+		tally.Poll.Options = append(tally.Poll.Options, localnet.PostPollOption{
+			OptionID: optionID, Label: label, SortOrder: sortOrder,
+		})
+		out[postID] = tally
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if viewerID == "" {
+		return out, nil
+	}
+	voteRows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT post_id, option_id FROM localnet.post_poll_votes
+		WHERE post_id = ANY($1) AND voter_id = $2`, postIDs, viewerID)
+	if err != nil {
+		return nil, err
+	}
+	defer voteRows.Close()
+	for voteRows.Next() {
+		var postID, optionID string
+		if err := voteRows.Scan(&postID, &optionID); err != nil {
+			return nil, err
+		}
+		tally := out[postID]
+		tally.VotedOptionID = optionID
+		out[postID] = tally
+	}
+	if err := voteRows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *LocalNetRepository) SaveNeedFromPost(ctx context.Context, record localnet.NeedFromPost) error {

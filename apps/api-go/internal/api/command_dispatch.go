@@ -293,6 +293,9 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 	// does, the collision should be found in review, not by reordering.
 	case s.Moderation != nil && s.Moderation.Supports(envelope.CommandType):
 		return s.Moderation.HandleContext(ctx, envelope)
+	// STORE-REC-001: store recommendation intake (独立模块：推荐商铺进体系).
+	case s.StoreOnboarding != nil && s.StoreOnboarding.Supports(envelope.CommandType):
+		return s.StoreOnboarding.HandleContext(ctx, envelope)
 	default:
 		return notImplemented(envelope)
 	}

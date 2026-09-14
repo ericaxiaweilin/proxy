@@ -36,6 +36,7 @@ import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
 import type { ModerationClient } from "../moderation-client";
+import { StoreOnboardingClient } from "../storeonboarding-client";
 import { type LocalNetClient } from "../localnet-client";
 import {
   parentPostIdsForReplies,
@@ -57,7 +58,7 @@ import type { SocialSettingsClient } from "../social-settings-client";
 import type { SupplyClient } from "../supply-client";
 import { FacetHomeSurface } from "../facet/FacetHomeSurface";
 import { FacetClient } from "../facet-client";
-import { sessionAuthClient, localApiBaseUrl, nativeTransport } from "../native-clients";
+import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore, nativeTransport } from "../native-clients";
 import { createSocialSettingsStore } from "../social-settings-store";
 
 // Extracted modules
@@ -186,14 +187,21 @@ const REQUESTER_ME: PersonaConfig = {
       ]
     },
     {
+      id: "biz",
+      title: "企业 / 店铺",
+      hint: "经营与体系共建 · 独立模块（原始设计：发展 builder，小美与用户推荐商铺进入体系）",
+      rows: [
+        { icon: "store-lines", label: "我的企业 / 店铺", desc: "有经营权限时进入 Business Workspace", route: "bdash" },
+        { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" }
+      ]
+    },
+    {
       id: "account",
       title: "账户",
       hint: "安全与结算",
       rows: [
         { icon: "coin", label: "钱包与结算", desc: "付款、收入、退款与记录", route: "wallet" },
-        { icon: "gear", label: "设置与隐私", desc: "推荐、通知、权限与隐私", route: "appbehavior" },
-        { icon: "shield", label: "我的隐私", desc: "依据《个人数据保护法》下载我的数据或请求删除账号", route: "privacy" },
-        { icon: "store-lines", label: "我的企业 / 店铺", desc: "有经营权限时进入 Business Workspace", route: "bdash" }
+        { icon: "gear", label: "设置与隐私", desc: "安全、推荐、通知与隐私（含数据下载/删除）", route: "appbehavior" }
       ]
     },
     {
@@ -466,6 +474,26 @@ export function MeSurface({
   const [socialOpenError, setSocialOpenError] = useState<string | undefined>(undefined);
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
   const [collaboration, setCollaboration] = useState({ enabled: false, types: ["探店", "UGC"], rate: "", contact: "" });
+  // STORE-REC-001: 推荐商铺进体系表单状态。
+  const [storeRecDraft, setStoreRecDraft] = useState({ storeName: "", city: "", category: "", reason: "" });
+  const [storeRecBusy, setStoreRecBusy] = useState(false);
+  const [storeRecError, setStoreRecError] = useState<string | undefined>(undefined);
+  const [storeRecDone, setStoreRecDone] = useState<string | undefined>(undefined);
+  async function submitStoreRecommendation(): Promise<void> {
+    setStoreRecBusy(true);
+    setStoreRecError(undefined);
+    setStoreRecDone(undefined);
+    try {
+      const client = new StoreOnboardingClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });
+      await client.recommendStore({ ...storeRecDraft, origin: "USER" });
+      setStoreRecDone("已提交，运营会评估这家店是否接入体系。谢谢推荐！");
+      setStoreRecDraft({ storeName: "", city: "", category: "", reason: "" });
+    } catch (err) {
+      setStoreRecError(err instanceof Error ? err.message : "提交失败，请稍后重试");
+    } finally {
+      setStoreRecBusy(false);
+    }
+  }
   const socialSettingsHydrated = useRef(false);
   useEffect(() => { let cancelled = false; void (async () => { const local = await socialSettingsStore.read(); let remote: typeof local; let serverReachable = false; if (socialSettingsClient) { try { remote = await socialSettingsClient.read(); serverReachable = true; } catch { serverReachable = false; } } const value = remote ?? local; if (!cancelled && value) { setSocialAccounts(value.accounts); setSocialSettings({ merchant: value.merchant, profile: value.profile, influence: value.influence }); setCollaboration({ enabled: value.collaborationEnabled ?? false, types: value.collaborationTypes ?? ["探店", "UGC"], rate: value.collaborationRate ?? "", contact: value.collaborationContact ?? "" }); await socialSettingsStore.write(value); if (serverReachable && !remote && local) await socialSettingsClient?.write(local).catch(() => undefined); } if (!cancelled) socialSettingsHydrated.current = true; })(); return () => { cancelled = true; }; }, [socialSettingsClient]);
   useEffect(() => { if (!socialSettingsHydrated.current) return; const value = { accounts: socialAccounts, ...socialSettings, collaborationEnabled: collaboration.enabled, collaborationTypes: collaboration.types, collaborationRate: collaboration.rate, collaborationContact: collaboration.contact }; void socialSettingsStore.write(value); if (!socialSettingsClient) return; const timer = setTimeout(() => { void socialSettingsClient.write(value).catch(() => undefined); }, 250); return () => clearTimeout(timer); }, [socialAccounts, socialSettings, collaboration, socialSettingsClient]);
@@ -1081,27 +1109,7 @@ export function MeSurface({
                 <Text style={[styles.appBehaviorCardDesc, index === checks.length - 1 && styles.appBehaviorCardDescDark]}>{desc}</Text>
               </View>
             ))}
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
-              <Text style={styles.appBehaviorReturnText}>返回我的</Text>
-            </Pressable>
-          </ScrollView>
-        </View>
-      );
-    }
-
-    // R16.10-P1-F: privacy request center subpage. Mounts the
-    // PrivacySettings component against the active session's
-    // PrivacyClient. The subpage stays inside the standard me.tsx
-    // navigation stack so the user can back out with the same swipe
-    // gesture they use for the other subpages.
-    if (subPage.route === "privacy") {
-      return contentWrapper(
-        <View style={styles.root}>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
-              <Text style={styles.subPageBackText}>‹ 返回</Text>
-            </Pressable>
-            <Text style={styles.appBehaviorTitle}>我的隐私</Text>
+            <Text style={[styles.appBehaviorTitle, { marginTop: 24 }]}>隐私与数据</Text>
             <Text style={styles.appBehaviorCardDesc}>
               依据《个人数据保护法》91/2025/QH15 第 31 条 (访问权) 与第 32 条 (删除权), 你可以随时下载或删除 Proxy 保存的个人数据。
             </Text>
@@ -1114,6 +1122,9 @@ export function MeSurface({
             <PreciseLocationCard
               client={resolveLocationConsentClient({ baseUrl: localApiBaseUrl, transport: nativeTransport })}
             />
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
+              <Text style={styles.appBehaviorReturnText}>返回我的</Text>
+            </Pressable>
           </ScrollView>
         </View>
       );
@@ -1995,6 +2006,62 @@ export function MeSurface({
               desc="知道二维码带来多少到店与核销"
               onPress={() => openSubPage("socialanalytics")}
             />
+          </ScrollView>
+        </View>
+      );
+    }
+
+    if (subPage.route === "recommendstore") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>推荐商铺进体系</Text>
+            <Text style={styles.appBehaviorCardDesc}>
+              把你看过、去过、觉得适合 Proxy 的场地 / 商家推荐给平台：小美（AI）与
+              用户一起把好的店铺带进体系，运营评估后接入。推荐记录会留档（append-only），
+              后续接入进度在运营侧推进。
+            </Text>
+            <Text style={styles.socialEditorLabel}>店名 / 场地名</Text>
+            <TextInput
+              placeholder="例如：Three Beans · Cầu Giấy"
+              style={styles.socialEditorInput}
+              value={storeRecDraft.storeName}
+              onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, storeName: v }))}
+            />
+            <Text style={styles.socialEditorLabel}>城市</Text>
+            <TextInput
+              placeholder="例如：河内"
+              style={styles.socialEditorInput}
+              value={storeRecDraft.city}
+              onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, city: v }))}
+            />
+            <Text style={styles.socialEditorLabel}>品类（可选）</Text>
+            <TextInput
+              placeholder="例如：咖啡 / 餐饮 / 展览"
+              style={styles.socialEditorInput}
+              value={storeRecDraft.category}
+              onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, category: v }))}
+            />
+            <Text style={styles.socialEditorLabel}>为什么推荐它进体系</Text>
+            <TextInput
+              placeholder="例如：适合聊天与 Afterwork 场景，老板愿意合作活动"
+              style={[styles.socialEditorInput, { minHeight: 88 }]}
+              multiline
+              value={storeRecDraft.reason}
+              onChangeText={(v) => setStoreRecDraft((cur) => ({ ...cur, reason: v }))}
+            />
+            {storeRecError ? <Text style={{ color: "#B3261E", fontSize: 12, marginTop: 8 }}>{storeRecError}</Text> : null}
+            {storeRecDone ? <Text style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecDone}</Text> : null}
+            <Pressable
+              disabled={storeRecBusy}
+              onPress={() => void submitStoreRecommendation()}
+              style={[styles.appBehaviorReturn, storeRecBusy && { opacity: 0.5 }]}
+            >
+              <Text style={styles.appBehaviorReturnText}>{storeRecBusy ? "提交中…" : "提交推荐"}</Text>
+            </Pressable>
           </ScrollView>
         </View>
       );

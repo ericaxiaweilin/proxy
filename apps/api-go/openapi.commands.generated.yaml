@@ -447,3 +447,5 @@ commands:
     domain: Supply
   - command: VerifyLoginChallenge
     domain: Identity
+  - command: VotePostPoll
+    domain: LocalNet

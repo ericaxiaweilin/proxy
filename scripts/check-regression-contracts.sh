@@ -2274,6 +2274,46 @@ if [ ! -f apps/api-go/migrations/089_moderation_authority_requests.sql ]; then
 fi
 echo "    COMP-AUTHORITY-001: PASS (authority requests are attributable, SLA-tracked, and operator-only)"
 
+# STORE-REC-001: 推荐商铺进体系（原始设计：企业/店铺是独立模块，体系增长靠
+# 发展 builder + 小美/用户推荐商铺进入体系）。本条锁死：RecommendStore 命令
+# 必须被 storeonboarding 服务受理（匿名不可用——推荐人必须是鉴权账号）；记录
+# 必须 append-only（无 UPDATE/DELETE 路径）；PG 仓储与迁移 090 必须存在；
+# 移动端必须有「推荐商铺进体系」入口（me.tsx 企业/店铺组，独立于账户）。
+require_test "STORE-REC-001" "./internal/storeonboarding" \
+  "TestRecommendStoreAcceptedAndAttributed" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-001" "./internal/storeonboarding" \
+  "TestRecommendStoreRejectedWhenActorMissing" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-001" "./internal/storeonboarding" \
+  "TestRecommendStoreAIOriginAccepted" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'case "RecommendStore"' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-001]: the RecommendStore command is no longer handled" >&2
+  echo "        by the storeonboarding service, so it would 501." >&2
+  exit 1
+fi
+if ! grep -qF 'AddRecommendation(ctx context.Context, r StoreRecommendation) error' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-001]: the Repository interface no longer carries" >&2
+  echo "        AddRecommendation (append-only write would not compile)." >&2
+  exit 1
+fi
+if ! grep -qF 'func (r *StoreOnboardingRepository) AddRecommendation' apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-001]: the Postgres store-onboarding repository is missing," >&2
+  echo "        so recommendations would not survive a restart." >&2
+  exit 1
+fi
+if [ ! -f apps/api-go/migrations/090_store_recommendations.sql ]; then
+  echo "  FAIL [STORE-REC-001]: migration 090_store_recommendations.sql is missing." >&2
+  exit 1
+fi
+if ! grep -qF 'label: "推荐商铺进体系"' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [STORE-REC-001]: the recommend-store entry is no longer on the" >&2
+  echo "        Me surface (企业/店铺 standalone group)." >&2
+  exit 1
+fi
+echo "    STORE-REC-001: PASS (store recommendations are attributable, append-only, and independently reachable)"
+
 # FEED-REPLY-001: 评论必须显示作者名，而不是把 actorId 当成名字渲染给用户。
 # 服务端 ListPostReplies 之前只下发 actorId，feed 直接把它当作者名显示 ——
 # 用户看到的是一串账号 ID。名字必须来自 profile（权威）、不接受客户端提供
@@ -3051,3 +3091,179 @@ if grep -qF '服务端尚未持久化' apps/mobile/src/composer-body.ts; then
   exit 1
 fi
 echo "    GHOST-24H-001: PASS (24h posts really expire, in SQL, at read time)"
+
+# POLL-VOTE-001: 投票必须真的能投、真的能数票。
+#
+# 坏掉的样子：投票的 UI 是完整的（ComposerV2Screen 的「添加投票」、增删选项、
+# 选时长），发布时客户端也老老实实把 `payload.poll` 发上来了 —— 但 api-go
+# 里 5 处 `poll` 全是不相干的同名东西（outbox poll / poll for completion /
+# message kind），服务端一个投票字段都没有。Go 的 JSON 解码静默忽略未知字段，
+# 于是产出一条「正文里躺着一段看起来像投票的文本」的帖子：谁都投不了，也没有
+# 任何票数。跟 GHOST-24H-001 是同一类缺陷（写出来像有、实际没有），只是更尴尬
+# —— 「投票」这个词本身就在承诺「能投」和「有结果」。
+#
+# 口径（迁移 091 里有完整论证）：投票是帖子的附属物 1:1 并级联删除；一人一票
+# （再投 = 改票）；票数永远 COUNT(*) 现算不落计数字段；到期只关闭投票、不隐藏
+# 结果；multiSelect 明确不支持且**显式拒绝**，绝不静默降级成单选。
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestCreatePostWithPollExposesOptionsWithZeroVotes" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollCountsVotes" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollIsOneVotePerUserAndSwitchable" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollRejectsOptionBelongingToAnotherPost" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollRejectedAfterExpiryButResultsStayVisible" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestPollWithoutExpiryNeverCloses" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestCreatePostRejectsMultiSelectPollInsteadOfDowngrading" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestCreatePostRejectsPollThatExpiresInThePast" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+require_test "POLL-VOTE-001" "./internal/localnet" \
+  "TestVotePostPollRequiresAUserActor" \
+  "apps/api-go/internal/localnet/poll_test.go" || exit $?
+# PG 集成测试（无 DATABASE_URL 时 SKIP，但仍钉住文件 + 函数名存在）。
+# 它是唯一能抓到「写子表没加入环境事务」这条链路的防线，见下面那条 pin。
+require_test "POLL-VOTE-001" "./internal/platform/postgres" \
+  "TestSavePostPollJoinsAmbientTransaction" \
+  "apps/api-go/internal/platform/postgres/posts_poll_integration_test.go" || exit $?
+
+if [ ! -f apps/api-go/migrations/091_post_polls.sql ]; then
+  echo "  FAIL [POLL-VOTE-001]: migration 091 (post polls) is missing." >&2
+  exit 1
+fi
+if ! grep -qF 'Poll *PostPollView' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [POLL-VOTE-001]: localnet.Post lost its Poll field — the poll" >&2
+  echo "        read model has nowhere to travel to the client." >&2
+  exit 1
+fi
+if ! grep -qF '"VotePostPoll"' apps/api-go/internal/localnet/service.go; then
+  echo "  FAIL [POLL-VOTE-001]: VotePostPoll is no longer a supported command —" >&2
+  echo "        nobody can vote again." >&2
+  exit 1
+fi
+# 三条「说不」的路径。少一条就会退化成静默接受一条没人能投 / 永远截止 / 选项
+# 不属于本贴的票 —— 而静默接受正是 GHOST-24H-001 的病根。
+for code in POLL_NOT_FOUND POLL_CLOSED POLL_OPTION_NOT_FOUND POLL_MULTISELECT_UNSUPPORTED POLL_VOTE_NOT_ALLOWED; do
+  if ! grep -qF "$code" apps/api-go/internal/localnet/service.go; then
+    echo "  FAIL [POLL-VOTE-001]: error code $code is gone — a bad vote would" >&2
+    echo "        now be silently accepted instead of refused with a reason." >&2
+    exit 1
+  fi
+done
+# 反向 pin：SavePostPoll 不许自己 r.pool.Begin 开第二个连接。
+#
+# 为什么这条必须存在：命令处理跑在一个挂在 ctx 上的环境事务里，CreatePost 写
+# 进去的帖子行在提交前**别的连接看不见**。自己新开事务去写 post_polls 就会撞上
+# post_id → posts(id) 的外键（真实报错：violates foreign key constraint
+# "post_polls_post_id_fkey"），于是「建一条带投票的帖子」100% 失败 —— 而内存仓
+# 根本没有外键，所有 service 层单测绿得发亮。这个是真机联调才炸出来的。
+if grep -qF 'r.pool.Begin(ctx)' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [POLL-VOTE-001]: a repository method opens its own connection" >&2
+  echo "        instead of joining the ambient transaction — writing a child" >&2
+  echo "        row right after its parent will fail the foreign key." >&2
+  exit 1
+fi
+if ! grep -qF 'runInTransaction(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [POLL-VOTE-001]: runInTransaction is no longer used — the poll" >&2
+  echo "        write lost its transaction." >&2
+  exit 1
+fi
+# 客户端：votePostPoll 必须真的发命令，并且用服务端返回的权威票数。
+if ! grep -qF 'public async votePostPoll(' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [POLL-VOTE-001]: EngagementClient.votePostPoll is gone — the UI" >&2
+  echo "        cannot submit a vote." >&2
+  exit 1
+fi
+if ! grep -qF 'PostPollViewSchema.parse(raw.poll)' apps/mobile/src/engagement-client.ts; then
+  echo "  FAIL [POLL-VOTE-001]: votePostPoll no longer returns the server's" >&2
+  echo "        authoritative tally (a client-side +1 drifts on re-votes)." >&2
+  exit 1
+fi
+# 契约：读模型必须是带票数的 PostPollView，不是只有结构的写模型。
+if ! grep -qF 'poll: PostPollViewSchema.optional()' packages/contracts/src/index.ts; then
+  echo "  FAIL [POLL-VOTE-001]: FeedPost.poll no longer uses the read model —" >&2
+  echo "        vote counts would never reach the client." >&2
+  exit 1
+fi
+if ! grep -qF 'export const PostPollViewSchema' packages/contracts/src/index.ts; then
+  echo "  FAIL [POLL-VOTE-001]: PostPollViewSchema is missing from contracts." >&2
+  exit 1
+fi
+# 反向 pin：注释不许再宣称「服务端尚无对应字段」—— 那句话正是这个 bug 的遮羞布。
+if grep -qF '服务端尚无对应字段' packages/contracts/src/index.ts; then
+  echo "  FAIL [POLL-VOTE-001]: contracts claim the server still has no poll" >&2
+  echo "        field. Either implement it or fix the comment." >&2
+  exit 1
+fi
+echo "    POLL-VOTE-001: PASS (polls are really votable and really counted)"
+
+# POLL-OPTION-SCOPE-001: 投票选项的身份是 (post_id, option_id)，不是 option_id。
+#
+# 坏掉的样子：post_poll_options 一开始把 option_id 单独设成了 PRIMARY KEY。
+# optionId 是客户端生成的（`opt_<ts>_<idx>`），两条帖子完全可能用同一批 id
+# （重发草稿、重试发布、硬编码）。于是第二条帖子的 INSERT 撞上
+# ON CONFLICT (option_id) —— 它只改写 label/sort_order，**不改写 post_id** ——
+# 结果第二条帖子的选项整批消失（投票渲染不出来），第一条帖子的选项被悄悄改标签。
+#
+# 同一处设计错误还有第二个后果：数票的子查询如果只按 option_id 分组，A 帖子的
+# 票会被算到 B 帖子同名选项的头上。两条 pin 一起钉。
+require_test "POLL-OPTION-SCOPE-001" "./internal/platform/postgres" \
+  "TestPollOptionsAreScopedToTheirPost" \
+  "apps/api-go/internal/platform/postgres/posts_poll_integration_test.go" || exit $?
+if ! grep -qF 'ON CONFLICT (post_id, option_id)' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [POLL-OPTION-SCOPE-001]: options are upserted by option_id alone" >&2
+  echo "        — two posts sharing an option id will steal each other's options." >&2
+  exit 1
+fi
+if ! grep -qF 'GROUP BY post_id, option_id' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [POLL-OPTION-SCOPE-001]: votes are aggregated by option_id alone" >&2
+  echo "        — counts leak across posts that reuse an option id." >&2
+  exit 1
+fi
+# 反向 pin：option_id 不许再单独当主键。
+if grep -qE '^[[:space:]]*option_id[[:space:]]+TEXT[[:space:]]+PRIMARY KEY' apps/api-go/migrations/091_post_polls.sql; then
+  echo "  FAIL [POLL-OPTION-SCOPE-001]: option_id is a global primary key again" >&2
+  echo "        — options must be scoped to their post." >&2
+  exit 1
+fi
+echo "    POLL-OPTION-SCOPE-001: PASS (poll options belong to their own post)"
+
+# FEED-NULL-CITY-001: 一行 city_scope 为 NULL 的帖子不许打挂所有人的动态流。
+#
+# 坏掉的样子：city_scope 是可空列，但 4 条读路径都把它直接扫进 `post.CityScope`
+# —— 一个普通 `string`。pgx 拒绝把 NULL 扫进 *string 目标（cannot scan NULL into
+# *string），ListFeedPage 直接把这个错误往上抛，于是**整页 feed 读取失败**，
+# 不是「这一条渲染怪」，是「所有人的动态流都打不开」。
+#
+# 为什么 `go test ./...` 抓不到：内存仓里根本没有 NULL，而 Go 的写路径永远绑 ""
+# 而不是 NULL。能造出这种行的只有裸 INSERT（迁移、回填、手工修复、seed 脚本）
+# 或将来某个漏了这一列的代码路径 —— 恰恰都是上线前最不会被跑到、凌晨最可能
+# 发生的情况。
+require_test "FEED-NULL-CITY-001" "./internal/platform/postgres" \
+  "TestFeedReadsSurviveNullCityScope" \
+  "apps/api-go/internal/platform/postgres/posts_null_city_integration_test.go" || exit $?
+# 反向 pin：不许再把可空的 city_scope 直接扫进 string。
+if grep -qF '&post.CityScope' apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [FEED-NULL-CITY-001]: city_scope is scanned straight into a" >&2
+  echo "        string again — one NULL row will fail every feed read." >&2
+  exit 1
+fi
+# 4 条读路径（ListFeedPage / Snapshot / GetPost / ListPostsMentioning）都要判空。
+city_guards=$(grep -cF 'cityScope != nil' apps/api-go/internal/platform/postgres/network.go)
+if [ "$city_guards" -lt 4 ]; then
+  echo "  FAIL [FEED-NULL-CITY-001]: only $city_guards read path(s) guard the" >&2
+  echo "        nullable city_scope, want 4." >&2
+  exit 1
+fi
+echo "    FEED-NULL-CITY-001: PASS (one NULL city_scope no longer kills the feed)"

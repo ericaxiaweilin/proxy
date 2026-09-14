@@ -38,6 +38,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
 	"github.com/proxy-app/proxy-api/internal/moderation"
+	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"github.com/proxy-app/proxy-api/internal/voucher"
 )
@@ -88,6 +89,10 @@ type Server struct {
 	// of service §38 promise users can report eight kinds of targets; this
 	// is the single intake that actually accepts all of them.
 	Moderation *moderation.Service
+	// StoreOnboarding owns the store-recommendation intake (STORE-REC-001).
+	// Original design: stores enter the ecosystem when users / AI Xiaomei
+	// recommend them; this is the append-only intake for that flow.
+	StoreOnboarding *storeonboarding.Service
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
 	// CONFIRMED transition for PLATFORM_PAY orders. Wired

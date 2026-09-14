@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EngagementClient } from "./engagement-client";
+import { EngagementClient, EngagementCommandRejectedError } from "./engagement-client";
 import { InMemorySecureStorageDriver, OfflineFallbackSessionError, SecureSessionStore } from "./secure-session";
 
 describe("EngagementClient moderation actions", () => {
@@ -454,5 +454,104 @@ describe("MUTE-REVERSIBLE-001 unmute / list muted authors wire", () => {
     const client = new EngagementClient({ secureSessionStore: store, authClient: { request: async () => { throw new Error("should not reach"); } } });
     await expect(client.listMutedAuthors()).rejects.toBeInstanceOf(OfflineFallbackSessionError);
     await expect(client.unmuteAuthor("author_1")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
+  });
+});
+
+// ---------- POLL-VOTE-001: VotePostPoll ----------
+
+describe("EngagementClient.votePostPoll", () => {
+  function newAuthedClient(responder: (env: Record<string, unknown>) => Record<string, unknown>, onPath?: (path: string) => void) {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 }
+    });
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (path, init) => {
+      onPath?.(path);
+      const envelope = init.body as Record<string, unknown>;
+      return { status: 200, json: async () => responder(envelope) };
+    } } });
+  }
+
+  function accepted(env: Record<string, unknown>, poll: unknown) {
+    return {
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "Post", id: "post_1", version: 1, state: "POLL_VOTED" },
+      operationRef: JSON.stringify({ postId: "post_1", poll }),
+      correlationId: env.correlationId
+    };
+  }
+
+  const pollView = {
+    options: [
+      { optionId: "opt_a", label: "甜", sortOrder: 0, voteCount: 3 },
+      { optionId: "opt_b", label: "辣", sortOrder: 1, voteCount: 1 }
+    ],
+    totalVotes: 4,
+    votedOptionId: "opt_a",
+    expiresAt: "2026-09-15T10:00:00.000Z",
+    closed: false
+  };
+
+  it("POSTs VotePostPoll with { postId, optionId } targeting the post", async () => {
+    let capturedPath = "";
+    let captured: Record<string, unknown> | undefined;
+    const client = newAuthedClient((env) => { captured = env; return accepted(env, pollView); }, (path) => { capturedPath = path; });
+    await client.votePostPoll("post_1", "opt_a");
+    expect(capturedPath).toBe("/v1/commands/VotePostPoll");
+    expect(captured?.target).toEqual({ type: "Post", id: "post_1" });
+    expect(captured?.payload).toEqual({ postId: "post_1", optionId: "opt_a" });
+  });
+
+  it("returns the server's authoritative tally rather than guessing client-side", async () => {
+    // 关键：票数必须是服务端给的。客户端绝不能自己「旧数字 +1」——
+    // 改票时还得给旧选项 -1，猜错一步百分比就与服务端对不上。
+    const client = newAuthedClient((env) => accepted(env, pollView));
+    const poll = await client.votePostPoll("post_1", "opt_a");
+    expect(poll.totalVotes).toBe(4);
+    expect(poll.votedOptionId).toBe("opt_a");
+    expect(poll.options.map((option) => option.voteCount)).toEqual([3, 1]);
+    expect(poll.closed).toBe(false);
+  });
+
+  it("surfaces the server error code when the poll is closed", async () => {
+    // 截止后必须让调用方拿到 POLL_CLOSED：界面据此「显示结果 + 禁止再投」，
+    // 而不是笼统报一句「请检查连接」。
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId,
+      outcome: "REJECTED",
+      // 字段必须完整：parseErrorEnvelope 要求 errorCode/category/retryability/
+      // messageKey/correlationId 齐备，缺一个就整条 error 被丢掉 —— 客户端
+      // 于是只能笼统报「请检查连接」，POLL_CLOSED 这个码就白设计了。
+      error: {
+        errorCode: "POLL_CLOSED",
+        category: "BUSINESS_STATE",
+        retryability: "AFTER_USER_ACTION",
+        messageKey: "localnet.poll_closed",
+        correlationId: env.correlationId
+      },
+      eventRefs: [],
+      correlationId: env.correlationId
+    }));
+    const caught = await client.votePostPoll("post_1", "opt_a").catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(EngagementCommandRejectedError);
+    expect((caught as EngagementCommandRejectedError).result.error?.errorCode).toBe("POLL_CLOSED");
+  });
+
+  it("throws instead of inventing a result when operationRef is missing", async () => {
+    // 跟屏蔽列表同理：没有权威票数就渲染「0 票」是在骗人，用户会以为票丢了。
+    const client = newAuthedClient((env) => ({
+      commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [],
+      aggregate: { type: "Post", id: "post_1", version: 1, state: "POLL_VOTED" },
+      correlationId: env.correlationId
+    }));
+    await expect(client.votePostPoll("post_1", "opt_a")).rejects.toThrow(/missing operationRef/);
+  });
+
+  it("refuses to run for a guest", async () => {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    const client = new EngagementClient({ secureSessionStore: store, authClient: { request: async () => { throw new Error("should not reach"); } } });
+    await expect(client.votePostPoll("post_1", "opt_a")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
   });
 });

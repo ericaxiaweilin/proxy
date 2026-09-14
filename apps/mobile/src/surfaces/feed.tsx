@@ -9,7 +9,7 @@ import { ActivityIndicator, Animated, AppState, Image, Modal, Pressable, ScrollV
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import ImageViewing from "react-native-image-viewing";
-import type { FeedMediaItem, FeedPost, PostEngagement, PostReply } from "@proxy/contracts";
+import type { FeedMediaItem, FeedPost, PostEngagement, PostPollView, PostReply } from "@proxy/contracts";
 import { type LocalNetClient } from "../localnet-client";
 import { type SecureSessionStore, OfflineFallbackSessionError } from "../secure-session";
 import { type AIAccountClient } from "../ai-account-client";
@@ -663,6 +663,36 @@ export function FeedSurface({
 	  }
 	}
 
+	/**
+	 * POLL-VOTE-001 — 投一票，并**整体替换**这条帖子的投票读模型。
+	 *
+	 * 为什么用服务端返回的结果整体替换、而不是在本地给某个选项 +1：
+	 * 一人一票意味着「改票」是常态 —— 投过 A 再投 B，本地得同时给 A 减一、
+	 * B 加一，还得知道之前投的是哪个。任何一步猜错，用户看到的百分比就跟
+	 * 服务端对不上，而投票结果恰好是最不该被怀疑的东西。服务端本来就把最新
+	 * 票数算好了回给我们，直接用。
+	 */
+	async function votePoll(postId: string, optionId: string): Promise<void> {
+	  const busyKey = `poll:${postId}`;
+	  if (engagementBusy.has(busyKey)) return;
+	  setEngagementBusy((value) => new Set(value).add(busyKey));
+	  setEngagementError(undefined);
+	  try {
+		const poll = await engagement.votePostPoll(postId, optionId);
+		applyPoll(postId, poll);
+	  } catch (error) {
+		setEngagementError(mapEngagementError(error, "投票没有提交成功，请稍后重试。"));
+	  } finally {
+		setEngagementBusy((value) => { const next = new Set(value); next.delete(busyKey); return next; });
+	  }
+	}
+
+	/** 把一份新的投票读模型写回 posts（pending 列表里也可能有同一条帖子）。 */
+	function applyPoll(postId: string, poll: PostPollView): void {
+	  setPosts((previous) => previous.map((post) => (post.postId === postId ? { ...post, poll } : post)));
+	  setPendingPosts((previous) => previous.map((post) => (post.postId === postId ? { ...post, poll } : post)));
+	}
+
 	async function openReplies(postId: string): Promise<void> {
 	  setReplyTargetId(postId);
 	  setReplyDraft("");
@@ -1253,6 +1283,15 @@ export function FeedSurface({
                   <Text numberOfLines={2} style={styles.quoteBody}>{quoted.body}</Text>
                   {mediaFor(quoted.postId)[0] ? <Text style={styles.quoteMediaLabel}>🎞 含媒体附件</Text> : null}
                 </View>
+              ) : null}
+
+              {/* POLL-VOTE-001 — 帖内投票。 */}
+              {post.poll ? (
+                <PollCard
+                  busy={engagementBusy.has(`poll:${post.postId}`)}
+                  poll={post.poll}
+                  onVote={(optionId) => void votePoll(post.postId, optionId)}
+                />
               ) : null}
 
               {/* postactions：♡ / 回复 / 引用 / 收藏 / 分享 / ···(更多) */}
@@ -1856,6 +1895,30 @@ const styles = StyleSheet.create({
     marginVertical: 7,
     padding: 8
   },
+  // POLL-VOTE-001 — 投票卡片。浅色底 + 描边，跟引用卡同一套卡片语言。
+  pollCard: { gap: 6, marginVertical: 7 },
+  pollOption: {
+    backgroundColor: "#F5F1F7",
+    borderColor: "#E8E0EC",
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 42,
+    overflow: "hidden",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    position: "relative"
+  },
+  pollOptionMine: { backgroundColor: "#F0E7FF", borderColor: "#C9A6FF" },
+  // 百分比条：绝对定位铺在选项底，宽度由票数比例给出。
+  pollBar: { backgroundColor: "rgba(133,51,245,0.14)", bottom: 0, left: 0, position: "absolute", top: 0 },
+  pollOptionRow: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "space-between" },
+  pollOptionLabel: { color: color.ink, flexShrink: 1, fontSize: 14 },
+  pollOptionLabelMine: { color: "#5B2CB5", fontWeight: "700" },
+  pollOptionCount: { color: color.muted, fontSize: 12 },
+  pollOptionCountMine: { color: "#5B2CB5", fontWeight: "700" },
+  pollMeta: { color: color.muted, fontSize: 11, marginTop: 2 },
+
   quoteHead: { alignItems: "center", flexDirection: "row", gap: 5 },
   quoteAvatar: {
     alignItems: "center",
@@ -1986,6 +2049,66 @@ const styles = StyleSheet.create({
     textAlign: "center"
   }
 });
+
+// ---------- POLL-VOTE-001: 帖内投票卡片 ----------
+
+type PollCardProps = {
+  poll: PostPollView;
+  busy: boolean;
+  onVote: (optionId: string) => void;
+};
+
+/**
+ * 帖内投票卡片。
+ *
+ * 三条纪律，都不是审美问题：
+ *  1. **投票前不显示票数**。先看到别人的选择会带节奏 —— 这是投票类 UI 的
+ *     底线，不是可选项。
+ *  2. **投过票或截止后一律显示结果**，而且截止后结果**必须**还能看。把结果
+ *     一起藏掉，等于把投票变成一场没有开奖的抽奖。
+ *  3. **未截止时永远可以改票**（服务端 UPSERT，一人一票）。所以这里禁用条件
+ *     只有「已截止」和「请求进行中」，不包括「已经投过了」—— 否则界面写着
+ *     "可改票" 却点不动，是典型的自相矛盾。
+ *  4. closed 用服务端给的布尔值，**不**拿 expiresAt 跟本地时钟比：客户端时钟
+ *     可能不准，而"到底还能不能投"只能以服务端为准。
+ */
+export function PollCard({ poll, busy, onVote }: PollCardProps): React.JSX.Element {
+  const voted = Boolean(poll.votedOptionId);
+  const showResults = voted || poll.closed;
+  return (
+    <View style={styles.pollCard}>
+      {poll.options.map((option) => {
+        const percent = poll.totalVotes > 0 ? Math.round((option.voteCount / poll.totalVotes) * 100) : 0;
+        const mine = poll.votedOptionId === option.optionId;
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={showResults ? `${option.label}，${option.voteCount} 票` : `投票给 ${option.label}`}
+            disabled={poll.closed || busy}
+            key={option.optionId}
+            onPress={() => onVote(option.optionId)}
+            style={[styles.pollOption, mine && styles.pollOptionMine]}
+          >
+            {showResults ? <View style={[styles.pollBar, { width: `${percent}%` }]} /> : null}
+            <View style={styles.pollOptionRow}>
+              <Text numberOfLines={2} style={[styles.pollOptionLabel, mine && styles.pollOptionLabelMine]}>
+                {option.label}
+              </Text>
+              {showResults ? (
+                <Text style={[styles.pollOptionCount, mine && styles.pollOptionCountMine]}>
+                  {percent}% · {option.voteCount}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
+        );
+      })}
+      <Text style={styles.pollMeta}>
+        {poll.closed ? `已截止 · 共 ${poll.totalVotes} 票` : `共 ${poll.totalVotes} 票${voted ? " · 可改票" : ""}`}
+      </Text>
+    </View>
+  );
+}
 
 // ---------- R15.45: PostMenuModal ----------
 
