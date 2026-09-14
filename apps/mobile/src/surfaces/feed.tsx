@@ -52,7 +52,7 @@ import { feedScopeLabel, isFeedScopeActive, isPostWithinScope } from "../feed-sc
 import type { FeedScope } from "../feed-scope-filter";
 import { StatusFeed } from "./status";
 import { type SocialSpaceClient } from "../socialspace-client";
-import { isOwnPost as isOwnPostById, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "../feed-author";
+import { isOwnAuthorId, isOwnPost as isOwnPostById, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "../feed-author";
 import { hiddenReplyCount, shouldOfferReplyToggle, visibleReplies } from "../reply-preview";
 
 type FeedTab = "RECOMMENDED" | "FOLLOWING";
@@ -793,6 +793,9 @@ export function FeedSurface({
   }
   async function toggleProfileFollow(): Promise<void> {
     if (!profileActions || profileFollowBusy) return;
+    // SELF-FOLLOW-001: 本人不显示「关注」，这里再兜一道，免得将来 UI 改动把它露出来。
+    // 服务端同样拒绝自关注（CANNOT_FOLLOW_SELF），两层都 fail-closed。
+    if (isOwnAuthorId(profileActions.userId, viewerAccountId)) return;
     setProfileFollowBusy(true);
     try {
       if (profileFollowing) await engagement.unfollowProfile(profileActions.userId);
@@ -1499,9 +1502,14 @@ export function FeedSurface({
     <Modal transparent animationType="fade" visible={profileActions !== undefined} onRequestClose={() => setProfileActions(undefined)}>
       <Pressable onPress={() => setProfileActions(undefined)} style={styles.profileActionOverlay}>
         <GlassContainer spacing={8} style={[styles.profileGlassContainer, { left: Math.max(12, Math.min(viewportWidth - 200, (profileActions?.anchor.x ?? 24) - 28)), top: (profileActions?.anchor.y ?? 80) + 20 }]}>
-          <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
-            <Pressable disabled={profileFollowBusy} onPress={(event) => { event.stopPropagation(); void toggleProfileFollow(); }} style={styles.profileDropPress}><Text style={styles.profileDropText}>{profileFollowBusy ? "处理中…" : profileFollowing ? "✓ 已关注" : "+ 关注"}</Text></Pressable>
-          </GlassView>
+          {/* SELF-FOLLOW-001: 自己的帖子不显示「关注」——关注自己没有意义，后端也会
+              拒绝（CANNOT_FOLLOW_SELF）。未知 viewer 沿用既有约定 fail-closed
+              （当作不是自己），所以只有明确是自己时才隐藏这一行。 */}
+          {profileActions && !isOwnAuthorId(profileActions.userId, viewerAccountId) ? (
+            <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
+              <Pressable disabled={profileFollowBusy} onPress={(event) => { event.stopPropagation(); void toggleProfileFollow(); }} style={styles.profileDropPress}><Text style={styles.profileDropText}>{profileFollowBusy ? "处理中…" : profileFollowing ? "✓ 已关注" : "+ 关注"}</Text></Pressable>
+            </GlassView>
+          ) : null}
           <GlassView glassEffectStyle="clear" isInteractive style={styles.profileGlassDropFull}>
             <Pressable onPress={(event) => { event.stopPropagation(); const target = profileActions; setProfileActions(undefined); if (target) { const { anchor: _anchor, ...profileTarget } = target; onOpenProfile?.(profileTarget); } }} style={styles.profileDropPress}><Text style={styles.profileDropText}>访问个人主页</Text></Pressable>
           </GlassView>

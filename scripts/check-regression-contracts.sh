@@ -3753,3 +3753,20 @@ if ! grep -qF 'CANNOT_FOLLOW_SELF' apps/api-go/internal/engagement/service.go; t
   exit 1
 fi
 echo "    SELF-FOLLOW-001: PASS (self-follow rejected; counts untouched; symmetric with unfollow)"
+
+# UI 侧：本人帖子的头像菜单不该提供「关注」。移动端不能渲染 RN 组件
+# （没有 testing-library / react-test-renderer），所以这里是源码级断言 ——
+# 但断言的是「关注那一行被 isOwnAuthorId 挡住」这件事本身，不是「文件里有这个字符串」。
+pnpm --filter @proxy/mobile exec vitest run src/feed-author.test.ts src/surfaces/feed-profile-actions.test.ts || exit $?
+if ! grep -qF '!isOwnAuthorId(profileActions.userId, viewerAccountId)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SELF-FOLLOW-001]: 本人帖子的头像菜单又把「关注」露出来了 ——" >&2
+  echo "        后端会拒绝（CANNOT_FOLLOW_SELF），用户看到的是一个必然失败的操作。" >&2
+  exit 1
+fi
+if ! grep -qF 'return isOwnAuthorId(post.authorId, viewerAccountId);' apps/mobile/src/feed-author.ts; then
+  echo "  FAIL [SELF-FOLLOW-001]: isOwnPost 又开始自己比一遍了 ——" >&2
+  echo "        「是不是我」必须只有一处定义（帖子用 authorId、主页菜单用 userId），" >&2
+  echo "        两处各比一次正是当初漂移出「+ 关注」的原因。" >&2
+  exit 1
+fi
+echo "    SELF-FOLLOW-001: PASS (UI 侧：本人帖子不显示关注，自己的主页入口仍可用)"
