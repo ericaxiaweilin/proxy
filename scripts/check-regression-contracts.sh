@@ -3770,3 +3770,34 @@ if ! grep -qF 'return isOwnAuthorId(post.authorId, viewerAccountId);' apps/mobil
   exit 1
 fi
 echo "    SELF-FOLLOW-001: PASS (UI 侧：本人帖子不显示关注，自己的主页入口仍可用)"
+
+# OUTCOME-TEMPLATE-GATE-001: 观察模板的创建必须走 operator 门。
+#
+# 模板是**全局共享词汇表**：ObservationTemplate 没有 owner/scope 字段，而
+# createTemplate 只校验 name 非空 —— 任何已登录用户都能往这张全局表里塞模板。
+#
+# 更硬的一层不是污染，而是**未授权用户能翻转全局状态**：CreateObservationSet 的
+# 兼容门是 `if len(ListTemplates()) > 0 { 必须引用已存在的模板 }`，也就是
+# 「有没有模板」本身就是一个全局开关。普通用户塞一个垃圾模板，就能把整个平台
+# 踢出 bootstrap —— 之后**所有人**用历史模板 ID 建观察集都会被 TEMPLATE_NOT_FOUND
+# 拒掉，而失败原因指向调用方，看起来像用户自己的错。
+require_test "OUTCOME-TEMPLATE-GATE-001" "./internal/api" \
+  "TestObservationTemplateCreationRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+# 用 [[:space:]]* 而不是写死空格：gofmt 会按最长 key 重新填充整张表，
+# 写死空格的钉会在一次无关的格式化后突然变红（SAFETY-GATE-001 踩过）。
+if ! grep -qE '"CreateObservationTemplate":[[:space:]]*true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [OUTCOME-TEMPLATE-GATE-001]: CreateObservationTemplate 不在 operator 门里 ——" >&2
+  echo "        任何已登录用户都能往全局模板表里塞东西，并翻转 bootstrap 开关。" >&2
+  exit 1
+fi
+# 反向钉：读词表不该被顺手收紧。过度收紧在门禁上是**静默**的 ——
+# 测试不会红，用户只是用不了。
+for cmd in ListObservationTemplates GetObservationTemplate; do
+  if grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [OUTCOME-TEMPLATE-GATE-001]: $cmd 被收进 operator 门了 ——" >&2
+    echo "        读一张运营维护的词表不构成越权，收紧只会让用户静默用不了。" >&2
+    exit 1
+  fi
+done
+echo "    OUTCOME-TEMPLATE-GATE-001: PASS (template creation is operator-only; reading the vocabulary stays open)"

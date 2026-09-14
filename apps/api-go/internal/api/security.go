@@ -129,6 +129,33 @@ var operatorCommandTypes = map[string]bool{
 	"ActivateCampaign": true,
 	"PauseCampaign":    true,
 	"AllocateBenefit":  true,
+
+	// OUTCOME-TEMPLATE-GATE-001: outcome 域的模板命令也没进这张表。
+	//
+	// 模板是**全局共享词汇表**：ObservationTemplate 没有 owner/scope 字段
+	// （postgres 侧建表列也只有 id/name/description/keys/created_at），而
+	// createTemplate 只校验 name 非空 —— 任何已登录用户都能往这张全局表里塞
+	// 模板，运营和所有用户都会看到。
+	//
+	// 更硬的一层不是命名空间污染，而是**未授权用户能翻转全局状态**：
+	// CreateObservationSet 的兼容门写的是
+	//   `if len(ListTemplates()) > 0 { 必须引用已存在的模板 }`
+	// ——「有没有模板」本身就是一个全局开关。没人塞过模板时放行历史 ID
+	// （bootstrap），一旦表里有了模板就一律强制校验。于是普通用户塞一个垃圾
+	// 模板，就能把整个平台踢出 bootstrap：之后**所有人**用历史模板 ID 建观察集
+	// 都会被 TEMPLATE_NOT_FOUND 拒掉，而失败原因指向调用方，看起来像用户自己的错。
+	//
+	// 模板是平台级词表而不是商家私有数据，所以收进 operator 门（未配
+	// PROXY_OPERATOR_PRINCIPALS 时 fail-closed 403）。App 侧对这三条**零调用**
+	// （已确认无 client 方法、无 surface 引用），收紧不打断现网。
+	//
+	// 只收 Create：List/Get 读的是一张运营维护的词表，读本身不构成越权 ——
+	// 过度收紧是静默失败（测试不会红，用户只是用不了），所以不做。
+	//
+	// 上面那个空行是刻意的：gofmt 以空行分组对齐，而本 key 比表里最长的
+	// "RecordAuthorityResponse" 还长 —— 不留空行会把上面 33 行全部重新填充，
+	// 在授权白名单里制造 33 行纯空白 diff，review 时反而看不出真正改了什么。
+	"CreateObservationTemplate": true,
 }
 
 func requiresOperator(commandType string) bool {

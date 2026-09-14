@@ -551,6 +551,31 @@ func TestBenefitCampaignManagementRequiresOperator(t *testing.T) {
 	}
 }
 
+// OUTCOME-TEMPLATE-GATE-001: 观察模板的创建必须走 operator 门。
+//
+// 模板是全局共享词汇表：ObservationTemplate 没有 owner/scope 字段（postgres 侧
+// 建表列也只有 id/name/description/keys/created_at），而 createTemplate 只校验
+// name 非空 —— 任何已登录用户都能往这张全局表里塞模板。
+//
+// 危害不只是命名空间污染：CreateObservationSet 的兼容门写的是
+//   `if len(ListTemplates()) > 0 { 必须引用已存在的模板 }`
+// 也就是「有没有模板」本身是一个全局开关。普通用户塞一个垃圾模板，就能把整个
+// 平台踢出 bootstrap —— 之后**所有人**用历史模板 ID 建观察集都会被
+// TEMPLATE_NOT_FOUND 拒掉，且失败原因指向调用方。
+//
+// 只钉 Create。List/Get 读的是一张运营维护的词表，读本身不构成越权；
+// 过度收紧是**静默失败**（测试不会红，用户只是用不了），所以这里反向钉住它们。
+func TestObservationTemplateCreationRequiresOperator(t *testing.T) {
+	if !requiresOperator("CreateObservationTemplate") {
+		t.Fatalf("CreateObservationTemplate must require operator: ungated, any logged-in user can mint a template into the global vocabulary and flip the whole platform out of bootstrap mode")
+	}
+	for _, cmd := range []string{"ListObservationTemplates", "GetObservationTemplate"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: reading an operator-curated vocabulary is not a privilege escalation", cmd)
+		}
+	}
+}
+
 // Audit tripwire (Pass 1 — Scene R15.13): the public-read allowlist is
 // the single source of truth for "which List* commands can be called
 // without authentication". Adding or removing entries here MUST be
