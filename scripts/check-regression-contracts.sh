@@ -3267,3 +3267,29 @@ if [ "$city_guards" -lt 4 ]; then
   exit 1
 fi
 echo "    FEED-NULL-CITY-001: PASS (one NULL city_scope no longer kills the feed)"
+
+# OPENAPI-DOMAIN-001: 域漏登记进 openapicmds.DomainDir 的后果是「命令能 dispatch、
+# 跑得好好的，却永远不在 OpenAPI 契约里」，而且漂移检查发现不了 —— 它比对的是
+# 「重新生成 vs 已提交」，两边缺的是同一个命令，于是 221 对 221 一路绿灯。
+# 2026-09-14 实测：storeonboarding / benefit / location / marketplace / profile /
+# realityscene / relationship 七个域都是这样隐身的（契约里少了 25 条命令）。
+# 所以这里不 pin 某个具体域，而是**结构性地**遍历 internal/*/service.go：
+# 凡是有 `case "` 命令分支的域，必须出现在 DomainDir 里。新域只要漏登记就红。
+unlisted_domain=""
+for svc in apps/api-go/internal/*/service.go; do
+  domain=$(basename "$(dirname "$svc")")
+  if ! grep -qE '^[[:space:]]*case "' "$svc"; then
+    continue
+  fi
+  if ! grep -qF "{\"$domain\"," apps/api-go/internal/openapicmds/openapicmds.go; then
+    unlisted_domain="$domain"
+    break
+  fi
+done
+if [ -n "$unlisted_domain" ]; then
+  echo "  FAIL [OPENAPI-DOMAIN-001]: domain '$unlisted_domain' dispatches commands" >&2
+  echo "        but is not listed in openapicmds DomainDir, so its commands can never" >&2
+  echo "        reach the OpenAPI contract (and the drift check stays green)." >&2
+  exit 1
+fi
+echo "    OPENAPI-DOMAIN-001: PASS (every command-dispatching domain reaches the contract)"
