@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -46,13 +47,34 @@ func (r *StoreOnboardingRepository) AddRecommendation(ctx context.Context, rec s
 //
 // 上限用 storeonboarding 导出的常量，避免「服务层 clamp 到 200、仓储层却敢
 // 拉全表」这种两处各写各的漂移。
+// STORE-REC-004: 每条推荐带出**最新**一条评估结论。
+// LEFT JOIN LATERAL 而不是 LEFT JOIN 整张结论表 —— 后者会把「改过主意」的
+// 推荐复制成多行，运营会在队列里看到同一家店出现两次。
+// decided_at 可能为 NULL（还没评估），必须扫进可空类型。
 const listStoreRecommendationsSQL = `
-SELECT id, store_name, city, category, reason, recommended_by, origin, created_at
-FROM business.store_recommendations
-WHERE ($1 = '' OR city = $1)
-  AND ($2 = '' OR origin = $2)
-ORDER BY created_at DESC
+SELECT r.id, r.store_name, r.city, r.category, r.reason, r.recommended_by, r.origin, r.created_at,
+       COALESCE(d.decision, '')   AS decision,
+       COALESCE(d.reason, '')     AS decision_reason,
+       COALESCE(d.decided_by, '') AS decided_by,
+       d.created_at               AS decided_at
+FROM business.store_recommendations r
+LEFT JOIN LATERAL (
+    SELECT decision, reason, decided_by, created_at
+    FROM business.store_recommendation_dispositions
+    WHERE recommendation_id = r.id
+    ORDER BY created_at DESC
+    LIMIT 1
+) d ON TRUE
+WHERE ($1 = '' OR r.city = $1)
+  AND ($2 = '' OR r.origin = $2)
+  AND (NOT $4::boolean OR d.decision IS NULL)
+ORDER BY r.created_at DESC
 LIMIT $3`
+
+const insertStoreDispositionSQL = `
+INSERT INTO business.store_recommendation_dispositions
+    (id, recommendation_id, decision, reason, decided_by, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)`
 
 func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, filter storeonboarding.RecommendationFilter) ([]storeonboarding.StoreRecommendation, error) {
 	if r == nil || r.pool == nil {
@@ -65,7 +87,8 @@ func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, fil
 	if limit > storeonboarding.ListLimitMax {
 		limit = storeonboarding.ListLimitMax
 	}
-	rows, err := queryerForContext(ctx, r.pool).Query(ctx, listStoreRecommendationsSQL, filter.City, filter.Origin, limit)
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, listStoreRecommendationsSQL,
+		filter.City, filter.Origin, limit, filter.PendingOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +97,17 @@ func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, fil
 	out := []storeonboarding.StoreRecommendation{}
 	for rows.Next() {
 		var rec storeonboarding.StoreRecommendation
+		// 结论列可能为 NULL —— 必须扫进 sql.Null*，否则「还没评估」会
+		// 变成一次 scan 错误，整个队列直接读不出来。
+		var decidedAt sql.NullTime
 		if err := rows.Scan(&rec.ID, &rec.StoreName, &rec.City, &rec.Category, &rec.Reason,
-			&rec.RecommendedBy, &rec.Origin, &rec.CreatedAt); err != nil {
+			&rec.RecommendedBy, &rec.Origin, &rec.CreatedAt,
+			&rec.Decision, &rec.DecisionReason, &rec.DecidedBy, &decidedAt); err != nil {
 			return nil, err
+		}
+		if decidedAt.Valid {
+			at := decidedAt.Time
+			rec.DecidedAt = &at
 		}
 		out = append(out, rec)
 	}
@@ -84,6 +115,25 @@ func (r *StoreOnboardingRepository) ListRecommendations(ctx context.Context, fil
 		return nil, err
 	}
 	return out, nil
+}
+
+// STORE-REC-004 — 追加一条运营评估结论（append-only，只有 INSERT）。
+func (r *StoreOnboardingRepository) AddDisposition(ctx context.Context, d storeonboarding.Disposition) error {
+	if r == nil || r.pool == nil {
+		return storeonboarding.ErrRecommendationRepositoryDown
+	}
+	if strings.TrimSpace(d.RecommendationID) == "" {
+		return storeonboarding.ErrDispositionRecommendationRequired
+	}
+	if d.Decision != storeonboarding.AcceptDecision && d.Decision != storeonboarding.RejectDecision {
+		return storeonboarding.ErrDispositionDecisionInvalid
+	}
+	if strings.TrimSpace(d.DecidedBy) == "" {
+		return storeonboarding.ErrDispositionDeciderRequired
+	}
+	_, err := queryerForContext(ctx, r.pool).Exec(ctx, insertStoreDispositionSQL,
+		d.ID, d.RecommendationID, d.Decision, d.Reason, d.DecidedBy, d.CreatedAt.UTC())
+	return err
 }
 
 // 签名漂移就在这里编译失败，而不是运行期静默写不进去。

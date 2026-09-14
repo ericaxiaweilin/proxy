@@ -91,6 +91,9 @@ var operatorCommandTypes = map[string]bool{
 	// STORE-REC-002: 运营的推荐评估队列。推荐记录含推荐人账号 id 与推荐理由，
 	// 属于个人信息 —— 普通用户绝不能枚举别人的推荐。
 	"ListStoreRecommendations": true,
+	// STORE-REC-004: 评估结论同样 operator-only —— 记录里写着「谁否掉了哪家店」，
+	// 落到普通用户手里等于把运营的判断过程公开出去。
+	"DecideStoreRecommendation": true,
 }
 
 func requiresOperator(commandType string) bool {

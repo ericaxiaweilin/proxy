@@ -3396,3 +3396,50 @@ for svc in marketplaceService storeOnboardingService; do
   fi
 done
 echo "    STORE-REC-003: PASS (小美 can actually produce an AI-origin recommendation, fail-closed)"
+
+# STORE-REC-004: 运营评估队列必须能**出结论**。
+#
+# STORE-REC-002 给了读路径，但运营读完一条推荐之后没有任何地方记录
+# 「采纳 / 不采纳」—— 结论只存在于他脑子里，队列变成一条只读的死胡同：
+# 看完了，然后呢？
+#
+# 钉死：①命令存在且有测试；②operator-only（结论里写着「谁否掉了哪家店」，
+# 落到普通用户手里等于公开运营的判断过程）；③结论进单独一张 append-only 表，
+# 不给推荐记录加状态列（推荐是举证材料，改它就是改证据）；④命令进 OpenAPI 契约。
+require_test "STORE-REC-004" "./internal/storeonboarding" \
+  "TestDecideStoreRecommendationRecordsTheDecision" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-004" "./internal/storeonboarding" \
+  "TestQueueShowsDecisionAndHonoursPendingOnly" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-004" "./internal/storeonboarding" \
+  "TestLatestDispositionWinsWhenOperatorChangesMind" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'func (s *Service) decideStoreRecommendation' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-004]: DecideStoreRecommendation handler is gone, so the" >&2
+  echo "        queue is read-only again and decisions exist only in the operator's head." >&2
+  exit 1
+fi
+if ! grep -qF '"DecideStoreRecommendation": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [STORE-REC-004]: DecideStoreRecommendation is no longer operator-only," >&2
+  echo "        so any user could read who rejected which store." >&2
+  exit 1
+fi
+# 结论必须落在**独立的 append-only 表**里，不能给 store_recommendations 加状态列：
+# 推荐记录是举证材料（谁、什么时候、因为什么推荐了哪家店），
+# 为了记结论去 UPDATE 它，等于把证据本身改掉了。
+if ! [ -f apps/api-go/migrations/093_store_recommendation_dispositions.sql ]; then
+  echo "  FAIL [STORE-REC-004]: the dispositions migration is missing, so decisions" >&2
+  echo "        would have to be stored by mutating the recommendation evidence row." >&2
+  exit 1
+fi
+if ! grep -qF 'CREATE TABLE IF NOT EXISTS business.store_recommendation_dispositions' apps/api-go/migrations/093_store_recommendation_dispositions.sql; then
+  echo "  FAIL [STORE-REC-004]: store_recommendation_dispositions table is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'DecideStoreRecommendation' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [STORE-REC-004]: DecideStoreRecommendation is missing from the OpenAPI" >&2
+  echo "        command contract. Regenerate with go run ./cmd/openapi-commands." >&2
+  exit 1
+fi
+echo "    STORE-REC-004: PASS (operators can record 采纳/不采纳, append-only and operator-only)"

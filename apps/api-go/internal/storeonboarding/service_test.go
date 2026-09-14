@@ -378,3 +378,131 @@ func TestSuggestStoreRecommendationDistinguishesFailureFromMalformed(t *testing.
 		t.Fatalf("empty note must be rejected: %+v", empty)
 	}
 }
+
+// ---------- STORE-REC-004: 运营评估结论 ----------
+
+func seedRecommendation(t *testing.T, svc *Service, repo *MemoryRepository) string {
+	t.Helper()
+	res := svc.Handle(envelopeFor("RecommendStore", map[string]any{
+		"storeName": "Three Beans", "city": "河内", "category": "咖啡", "reason": "适合 afterwork", "origin": "USER",
+	}, "user_1"))
+	if res.Outcome != "ACCEPTED" {
+		t.Fatalf("seed recommendation: %+v", res)
+	}
+	rows := repo.Recommendations()
+	if len(rows) == 0 {
+		t.Fatal("recommendation was not stored")
+	}
+	return rows[0].ID
+}
+
+func parseQueue(t *testing.T, res command.Result) []StoreRecommendation {
+	t.Helper()
+	var view struct {
+		Recommendations []StoreRecommendation `json:"recommendations"`
+	}
+	if err := json.Unmarshal([]byte(res.OperationRef), &view); err != nil {
+		t.Fatal(err)
+	}
+	return view.Recommendations
+}
+
+// STORE-REC-004: 运营能记录「采纳 / 不采纳」，而不是看完什么都不留下。
+// 钉死：不采纳必须给理由；拼错的 decision 不能被当成 ACCEPT；匿名处置要拒。
+func TestDecideStoreRecommendationRecordsTheDecision(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	svc.SetClock(fixedClock())
+	id := seedRecommendation(t, svc, repo)
+
+	accept := svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": id, "decision": "ACCEPT",
+	}, "operator_1"))
+	if accept.Outcome != "ACCEPTED" {
+		t.Fatalf("accept must succeed: %+v", accept)
+	}
+	rows := repo.Dispositions()
+	if len(rows) != 1 || rows[0].Decision != AcceptDecision || rows[0].DecidedBy != "operator_1" {
+		t.Fatalf("disposition not recorded with its decider: %+v", rows)
+	}
+
+	noReason := svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": id, "decision": "REJECT",
+	}, "operator_1"))
+	if noReason.Outcome != "REJECTED" || noReason.Error == nil || noReason.Error.ErrorCode != "DISPOSITION_REJECT_REQUIRES_REASON" {
+		t.Fatalf("reject without a reason must be refused: %+v", noReason)
+	}
+
+	typo := svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": id, "decision": "MAYBE",
+	}, "operator_1"))
+	if typo.Outcome != "REJECTED" || typo.Error == nil || typo.Error.ErrorCode != "INVALID_DISPOSITION_DECISION" {
+		t.Fatalf("unknown decision must be refused, not silently treated as ACCEPT: %+v", typo)
+	}
+
+	anon := svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": id, "decision": "ACCEPT",
+	}, ""))
+	if anon.Outcome != "REJECTED" || anon.Error == nil || anon.Error.ErrorCode != "RECOMMENDATION_REQUIRES_AUTHENTICATED_ACTOR" {
+		t.Fatalf("anonymous disposition must be refused: %+v", anon)
+	}
+}
+
+// 队列要能看见结论，并且默认（pendingOnly）把已评估的过滤掉 ——
+// 否则运营每评估完一条它还杵在列表里，队列越用越长。
+func TestQueueShowsDecisionAndHonoursPendingOnly(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	id := seedRecommendation(t, svc, repo)
+
+	reject := svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": id, "decision": "REJECT", "reason": "同品类已接入三家",
+	}, "operator_1"))
+	if reject.Outcome != "ACCEPTED" {
+		t.Fatalf("reject with reason must succeed: %+v", reject)
+	}
+
+	all := parseQueue(t, svc.Handle(envelopeFor("ListStoreRecommendations", map[string]any{}, "operator_1")))
+	if len(all) != 1 {
+		t.Fatalf("expected the recommendation to still be listable, got %d", len(all))
+	}
+	if all[0].Decision != RejectDecision || all[0].DecisionReason != "同品类已接入三家" {
+		t.Fatalf("queue must carry the decision: %+v", all[0])
+	}
+	if all[0].DecidedBy != "operator_1" || all[0].DecidedAt == nil {
+		t.Fatalf("queue must carry who decided and when: %+v", all[0])
+	}
+
+	pending := parseQueue(t, svc.Handle(envelopeFor("ListStoreRecommendations", map[string]any{"pendingOnly": true}, "operator_1")))
+	if len(pending) != 0 {
+		t.Fatalf("decided recommendation must leave the pending queue, got %d", len(pending))
+	}
+}
+
+// 改主意 = 追加一条新结论，以最新一条为准（append-only，不改旧记录）。
+func TestLatestDispositionWinsWhenOperatorChangesMind(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewWithRepository(repo)
+	// 递增时钟，确保两条结论时间不同。
+	now := time.Date(2026, 9, 14, 9, 0, 0, 0, time.UTC)
+	svc.SetClock(func() time.Time { now = now.Add(time.Minute); return now })
+	id := seedRecommendation(t, svc, repo)
+
+	svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": id, "decision": "ACCEPT",
+	}, "operator_1"))
+	svc.Handle(envelopeFor("DecideStoreRecommendation", map[string]any{
+		"recommendationId": id, "decision": "REJECT", "reason": "再看了下，位置不合适",
+	}, "operator_1"))
+
+	if len(repo.Dispositions()) != 2 {
+		t.Fatalf("changing mind must append, not replace: %+v", repo.Dispositions())
+	}
+	all := parseQueue(t, svc.Handle(envelopeFor("ListStoreRecommendations", map[string]any{}, "operator_1")))
+	if len(all) != 1 {
+		t.Fatalf("LEFT JOIN must not duplicate the row, got %d", len(all))
+	}
+	if all[0].Decision != RejectDecision || all[0].DecisionReason != "再看了下，位置不合适" {
+		t.Fatalf("latest disposition must win: %+v", all[0])
+	}
+}

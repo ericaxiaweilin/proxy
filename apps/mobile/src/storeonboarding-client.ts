@@ -11,6 +11,10 @@ import type { SecureSessionStore } from "./secure-session";
 
 export type StoreRecommendationOrigin = "USER" | "AI";
 
+// STORE-REC-004: 运营对一条推荐做出的结论。append-only —— 改主意是追加一条新的，
+// 以最新一条为准，绝不回头改旧记录。
+export type StoreRecommendationDecision = "ACCEPT" | "REJECT";
+
 // STORE-REC-002: 运营评估队列的读模型（与服务端 StoreRecommendation 的 json tag 对齐）。
 export interface StoreRecommendation {
   recommendationId: string;
@@ -21,12 +25,20 @@ export interface StoreRecommendation {
   recommendedByAccountId: string;
   origin: StoreRecommendationOrigin;
   createdAt: string;
+  // STORE-REC-004: 运营的最新评估结论。服务端用 omitempty，没评估时这些字段
+  // 根本不会出现 —— 所以「没有 decision」才代表「还没评估」。
+  decision?: StoreRecommendationDecision;
+  decisionReason?: string;
+  decidedBy?: string;
+  decidedAt?: string;
 }
 
 export interface ListStoreRecommendationsQuery {
   city?: string;
   origin?: StoreRecommendationOrigin;
   limit?: number;
+  /** 只看还没出结论的。运营队列默认开 —— 已评估的杵在列表里会让队列越用越长。 */
+  pendingOnly?: boolean;
 }
 
 export interface RecommendStoreInput {
@@ -116,6 +128,7 @@ export class StoreOnboardingClient {
     if (query.city && query.city.trim()) payload.city = query.city.trim();
     if (query.origin) payload.origin = query.origin;
     if (query.limit && query.limit > 0) payload.limit = query.limit;
+    if (query.pendingOnly) payload.pendingOnly = true;
 
     const result = await this.command("ListStoreRecommendations", payload, {
       type: "STORE",
@@ -184,6 +197,27 @@ export class StoreOnboardingClient {
         "小美整理结果解析失败: " + (err instanceof Error ? err.message : String(err))
       );
     }
+  }
+
+  /**
+   * STORE-REC-004: 记录运营的评估结论（operator-only）。
+   *
+   * 为什么需要它：队列（STORE-REC-002）只能看不能判 —— 运营读完一条推荐，
+   * 没有任何地方记录「采纳 / 不采纳」，评估结论只存在于他脑子里。
+   *
+   * 不采纳必须给理由（服务端会拒）：否则举证链上会留一条无法解释的拒绝。
+   */
+  public async decideRecommendation(input: {
+    recommendationId: string;
+    decision: StoreRecommendationDecision;
+    reason?: string;
+  }): Promise<void> {
+    const recommendationId = input.recommendationId.trim();
+    if (!recommendationId) throw new StoreRecommendationProtocolError("缺少推荐 id，无法记录结论");
+    const payload: Record<string, unknown> = { recommendationId, decision: input.decision };
+    const reason = input.reason?.trim();
+    if (reason) payload.reason = reason;
+    await this.command("DecideStoreRecommendation", payload, { type: "STORE", id: "disposition" });
   }
 
   private nextId(prefix: string): string {

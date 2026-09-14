@@ -139,6 +139,8 @@ commands:
     domain: Demand
   - command: CreateVoucher
     domain: Voucher
+  - command: DecideStoreRecommendation
+    domain: StoreOnboarding
   - command: DeclareCapability
     domain: Supply
   - command: DeleteMessage

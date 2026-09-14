@@ -7,14 +7,18 @@ import {
   StoreOnboardingClient,
   StoreRecommendationRejectedError,
   type StoreRecommendation,
+  type StoreRecommendationDecision,
   type StoreRecommendationOrigin
 } from "../storeonboarding-client";
 
-// STORE-REC-002: 运营评估队列（App 内）。
+// STORE-REC-002/004: 运营评估队列（App 内）。
 //
 // 为什么必须存在：STORE-REC-001 只做了受理，记录写进 business.store_recommendations
 // 之后没有任何读路径，运营在 App 里评估这件事做不到，「推荐商铺进体系」变成
 // 只进不出的黑洞。这一屏就是那条读路径的调用方。
+//
+// STORE-REC-004 补上了另一半：光能看不能判，运营读完一条推荐，结论只存在他脑子里
+// —— 队列就成了一条只读的死胡同。现在每条都能记「采纳 / 不采纳」。
 //
 // 最重要的一条纪律：**「没有权限」和「没有数据」必须长不一样**。
 // 两者都表现为列表为空，混在一起会让运营以为「没人推荐这家店」，
@@ -42,10 +46,15 @@ function when(iso: string): string {
 export function StoreRecommendationQueue(): React.JSX.Element {
   const [city, setCity] = useState("");
   const [origin, setOrigin] = useState<OriginFilter>("ALL");
+  // 默认只看没出结论的：评估完一条它还杵在列表里，队列会越用越长。
+  const [pendingOnly, setPendingOnly] = useState(true);
   const [rows, setRows] = useState<StoreRecommendation[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [actingId, setActingId] = useState<string | undefined>(undefined);
+  const [rejectFor, setRejectFor] = useState<string | undefined>(undefined);
+  const [rejectReason, setRejectReason] = useState("");
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -58,11 +67,12 @@ export function StoreRecommendationQueue(): React.JSX.Element {
       });
       // 仓库开了 exactOptionalPropertyTypes：可选字段不能显式传 undefined，
       // 只能不写这个键。
-      const query: { city: string; limit: number; origin?: StoreRecommendationOrigin } = {
+      const query: { city: string; limit: number; origin?: StoreRecommendationOrigin; pendingOnly?: boolean } = {
         city,
         limit: 50
       };
       if (origin !== "ALL") query.origin = origin;
+      if (pendingOnly) query.pendingOnly = true;
       const next = await client.listRecommendations(query);
       setRows(next);
     } catch (err) {
@@ -78,17 +88,48 @@ export function StoreRecommendationQueue(): React.JSX.Element {
     } finally {
       setBusy(false);
     }
-  }, [city, origin]);
+  }, [city, origin, pendingOnly]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  async function decide(id: string, decision: StoreRecommendationDecision, reason?: string): Promise<void> {
+    setActingId(id);
+    setError(undefined);
+    try {
+      const client = new StoreOnboardingClient({
+        authClient: sessionAuthClient,
+        secureSessionStore: nativeSecureSessionStore
+      });
+      const input: { recommendationId: string; decision: StoreRecommendationDecision; reason?: string } = {
+        recommendationId: id,
+        decision
+      };
+      // 不采纳必须给理由：服务端会拒，但这里也别发一次注定失败的请求。
+      if (decision === "REJECT") {
+        if (!rejectReason.trim()) {
+          setError("不采纳必须写理由 —— 否则以后没人知道当时为什么否掉这家店。");
+          return;
+        }
+        input.reason = rejectReason.trim();
+      }
+      await client.decideRecommendation(input);
+      setRejectFor(undefined);
+      setRejectReason("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "结论记录失败");
+    } finally {
+      setActingId(undefined);
+    }
+  }
+
   return (
     <View>
       <Text style={styles.appBehaviorCardDesc}>
         用户与小美（AI）推荐进体系的商铺都会留在这里，按城市 / 来源筛选后逐条评估。
-        记录 append-only，只增不改 —— 评估结论在别处推进，这里不伪造结果。
+        推荐记录 append-only，只增不改 —— 评估结论记在另一张表里，也不改原记录。
       </Text>
 
       <Text style={styles.socialEditorLabel}>城市（可选）</Text>
@@ -132,6 +173,24 @@ export function StoreRecommendationQueue(): React.JSX.Element {
         </Pressable>
       </View>
 
+      <Pressable
+        onPress={() => setPendingOnly((v) => !v)}
+        style={{
+          alignSelf: "flex-start",
+          backgroundColor: pendingOnly ? "#EAF3EE" : color.white,
+          borderColor: pendingOnly ? "#1B7F4D" : color.line,
+          borderRadius: 999,
+          borderWidth: 1,
+          marginTop: 10,
+          paddingHorizontal: 12,
+          paddingVertical: 7
+        }}
+      >
+        <Text style={{ color: pendingOnly ? "#1B7F4D" : color.ink, fontSize: 11, fontWeight: "700" }}>
+          {pendingOnly ? "只看待评估" : "全部（含已评估）"}
+        </Text>
+      </Pressable>
+
       {busy && rows === null ? (
         <View style={{ paddingVertical: 18, alignItems: "center" }}>
           <ActivityIndicator />
@@ -154,7 +213,9 @@ export function StoreRecommendationQueue(): React.JSX.Element {
 
       {!forbidden && !error && rows && rows.length === 0 ? (
         <View style={styles.infoNote}>
-          <Text style={styles.infoNoteText}>当前筛选条件下还没有推荐记录。</Text>
+          <Text style={styles.infoNoteText}>
+            {pendingOnly ? "待评估的都处理完了。" : "当前筛选条件下还没有推荐记录。"}
+          </Text>
         </View>
       ) : null}
 
@@ -190,6 +251,67 @@ export function StoreRecommendationQueue(): React.JSX.Element {
               ? `小美整理 · 发起账号 ${row.recommendedByAccountId}`
               : `推荐人 ${row.recommendedByAccountId}`}
           </Text>
+
+          {row.decision ? (
+            // 已经出过结论：把结论连同人与时间显示出来，不留「默默被处理掉了」的观感。
+            <View style={{ marginTop: 8 }}>
+              <Text style={[styles.prototypeCardDesc, { color: row.decision === "ACCEPT" ? "#1B7F4D" : "#8C5A2B", fontWeight: "800" }]}>
+                {row.decision === "ACCEPT" ? "已采纳" : "已不采纳"}
+                {row.decisionReason ? ` · ${row.decisionReason}` : ""}
+              </Text>
+              <Text style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
+                {row.decidedBy}
+                {row.decidedAt ? ` · ${when(row.decidedAt)}` : ""}
+              </Text>
+            </View>
+          ) : (
+            <View style={{ marginTop: 8 }}>
+              {rejectFor === row.recommendationId ? (
+                <View>
+                  <Text style={styles.socialEditorLabel}>为什么不采纳（必填）</Text>
+                  <TextInput
+                    placeholder="例如：同品类已接入三家"
+                    style={[styles.socialEditorInput, { minHeight: 60 }]}
+                    multiline
+                    value={rejectReason}
+                    onChangeText={setRejectReason}
+                  />
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                    <Pressable
+                      disabled={actingId === row.recommendationId}
+                      onPress={() => void decide(row.recommendationId, "REJECT")}
+                      style={{ backgroundColor: color.ink, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, opacity: actingId === row.recommendationId ? 0.5 : 1 }}
+                    >
+                      <Text style={{ color: color.white, fontSize: 11, fontWeight: "900" }}>确认不采纳</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => { setRejectFor(undefined); setRejectReason(""); }}
+                      style={{ backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 }}
+                    >
+                      <Text style={{ color: color.ink, fontSize: 11, fontWeight: "900" }}>取消</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <Pressable
+                    disabled={actingId === row.recommendationId}
+                    onPress={() => void decide(row.recommendationId, "ACCEPT")}
+                    style={{ backgroundColor: color.ink, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, opacity: actingId === row.recommendationId ? 0.5 : 1 }}
+                  >
+                    <Text style={{ color: color.white, fontSize: 11, fontWeight: "900" }}>采纳</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={actingId === row.recommendationId}
+                    onPress={() => setRejectFor(row.recommendationId)}
+                    style={{ backgroundColor: color.white, borderColor: color.line, borderRadius: 10, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 8, opacity: actingId === row.recommendationId ? 0.5 : 1 }}
+                  >
+                    <Text style={{ color: color.ink, fontSize: 11, fontWeight: "900" }}>不采纳</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          )}
         </View>
       ))}
     </View>
