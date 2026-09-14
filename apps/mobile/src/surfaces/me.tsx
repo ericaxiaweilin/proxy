@@ -39,7 +39,7 @@ import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
 import type { ModerationClient } from "../moderation-client";
-import { StoreOnboardingClient } from "../storeonboarding-client";
+import { StoreOnboardingClient, StoreRecommendationAiUnavailableError } from "../storeonboarding-client";
 import { type LocalNetClient } from "../localnet-client";
 import {
   parentPostIdsForReplies,
@@ -486,6 +486,14 @@ export function MeSurface({
   const [storeRecBusy, setStoreRecBusy] = useState(false);
   const [storeRecError, setStoreRecError] = useState<string | undefined>(undefined);
   const [storeRecDone, setStoreRecDone] = useState<string | undefined>(undefined);
+  // STORE-REC-003: 小美（AI）整理。origin 决定这条推荐记成「用户推荐」还是
+  // 「小美推荐」—— 默认 USER，只有小美真的整理过才切成 AI。
+  const [storeRecNote, setStoreRecNote] = useState("");
+  const [storeRecOrigin, setStoreRecOrigin] = useState<"USER" | "AI">("USER");
+  const [storeRecAiBusy, setStoreRecAiBusy] = useState(false);
+  // 底座未配置时把入口整个藏掉：留一个点了没反应的按钮，比没有这个功能更糟。
+  const [storeRecAiAvailable, setStoreRecAiAvailable] = useState(true);
+  const [storeRecAiNote, setStoreRecAiNote] = useState<string | undefined>(undefined);
   // 个人二维码复制反馈（PROFILE-QR-001）。
   const [qrNotice, setQrNotice] = useState<string | undefined>(undefined);
   async function copyProfileLink(link: string): Promise<void> {
@@ -502,13 +510,51 @@ export function MeSurface({
     setStoreRecDone(undefined);
     try {
       const client = new StoreOnboardingClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });
-      await client.recommendStore({ ...storeRecDraft, origin: "USER" });
-      setStoreRecDone("已提交，运营会评估这家店是否接入体系。谢谢推荐！");
+      await client.recommendStore({ ...storeRecDraft, origin: storeRecOrigin });
+      setStoreRecDone(
+        storeRecOrigin === "AI"
+          ? "已提交，这条记为「小美推荐」，运营会评估这家店是否接入体系。"
+          : "已提交，运营会评估这家店是否接入体系。谢谢推荐！"
+      );
       setStoreRecDraft({ storeName: "", city: "", category: "", reason: "" });
+      setStoreRecNote("");
+      setStoreRecOrigin("USER");
+      setStoreRecAiNote(undefined);
     } catch (err) {
       setStoreRecError(err instanceof Error ? err.message : "提交失败，请稍后重试");
     } finally {
       setStoreRecBusy(false);
+    }
+  }
+
+  // STORE-REC-003: 让小美把随口说的话整理成草稿。**只读** —— 草稿要用户确认后
+  // 才由 recommendStore 落库，小美不直接写库，也就绕不过服务端那套校验。
+  // 小美没填的字段保持空，让用户自己补，绝不替他编一个城市或理由出来。
+  async function suggestWithXiaomei(): Promise<void> {
+    setStoreRecAiBusy(true);
+    setStoreRecError(undefined);
+    setStoreRecAiNote(undefined);
+    try {
+      const client = new StoreOnboardingClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });
+      const draft = await client.suggestRecommendation(storeRecNote);
+      setStoreRecDraft({ storeName: draft.storeName, city: draft.city, category: draft.category, reason: draft.reason });
+      setStoreRecOrigin("AI");
+      const missing = [
+        draft.storeName ? "" : "店名",
+        draft.city ? "" : "城市",
+        draft.reason ? "" : "推荐理由"
+      ].filter((label) => label !== "");
+      setStoreRecAiNote(
+        missing.length > 0
+          ? `小美整理好了，但你没提到${missing.join("、")} —— 补上再提交，这几项我们不替你猜。`
+          : "小美整理好了，确认后会记为「小美推荐」。"
+      );
+    } catch (err) {
+      // 能力不存在 ≠ 操作失败：不弹红字，直接把入口藏起来。
+      if (err instanceof StoreRecommendationAiUnavailableError) setStoreRecAiAvailable(false);
+      else setStoreRecError(err instanceof Error ? err.message : "小美整理失败，请稍后重试");
+    } finally {
+      setStoreRecAiBusy(false);
     }
   }
   const socialSettingsHydrated = useRef(false);
@@ -2065,6 +2111,30 @@ export function MeSurface({
               用户一起把好的店铺带进体系，运营评估后接入。推荐记录会留档（append-only），
               后续接入进度在运营侧推进。
             </Text>
+            {storeRecAiAvailable ? (
+              <View style={styles.infoNote}>
+                <Text style={styles.socialEditorLabel}>让小美帮你整理</Text>
+                <Text style={styles.appBehaviorCardDesc}>
+                  用一句话说说这家店（在哪儿、为什么值得进体系），小美整理成草稿，
+                  你确认后提交 —— 会记为「小美推荐」。你没提到的字段小美不会瞎填。
+                </Text>
+                <TextInput
+                  placeholder="例如：Cầu Giấy 那家 Three Beans 咖啡，适合 afterwork，老板愿意合作活动"
+                  style={[styles.socialEditorInput, { minHeight: 64 }]}
+                  multiline
+                  value={storeRecNote}
+                  onChangeText={setStoreRecNote}
+                />
+                <Pressable
+                  disabled={storeRecAiBusy || storeRecNote.trim() === ""}
+                  onPress={() => void suggestWithXiaomei()}
+                  style={[styles.lightCta, (storeRecAiBusy || storeRecNote.trim() === "") && { opacity: 0.5 }]}
+                >
+                  <Text style={styles.lightCtaText}>{storeRecAiBusy ? "小美整理中…" : "让小美整理"}</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {storeRecAiNote ? <Text style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecAiNote}</Text> : null}
             <Text style={styles.socialEditorLabel}>店名 / 场地名</Text>
             <TextInput
               placeholder="例如：Three Beans · Cầu Giấy"
@@ -2101,7 +2171,7 @@ export function MeSurface({
               onPress={() => void submitStoreRecommendation()}
               style={[styles.appBehaviorReturn, storeRecBusy && { opacity: 0.5 }]}
             >
-              <Text style={styles.appBehaviorReturnText}>{storeRecBusy ? "提交中…" : "提交推荐"}</Text>
+              <Text style={styles.appBehaviorReturnText}>{storeRecBusy ? "提交中…" : (storeRecOrigin === "AI" ? "以小美推荐提交" : "提交推荐")}</Text>
             </Pressable>
           </ScrollView>
         </View>

@@ -16,9 +16,11 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/modelstack"
 )
 
 // StoreRecommendation 是一条店铺推荐受理记录（append-only）。
@@ -60,6 +62,10 @@ const (
 type Service struct {
 	repository Repository
 	clock      func() time.Time
+	mu         sync.RWMutex
+	// modelStack 是语义层（小美）适配器。nil 或未配置 = 该能力不可用，
+	// SuggestStoreRecommendation 必须 fail-closed，不能退化为本地假结果。
+	modelStack modelstack.Port
 }
 
 func New() *Service {
@@ -72,8 +78,18 @@ func NewWithRepository(repo Repository) *Service {
 
 func (s *Service) SetClock(f func() time.Time) { s.clock = f }
 
+// SetModelStack 注入语义层适配器。nil 保持 fail-closed 的未配置语义
+// （对齐 marketplace OPP-SUGGEST-001 的接法）。
+func (s *Service) SetModelStack(port modelstack.Port) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.modelStack = port
+}
+
 func (s *Service) Supports(commandType string) bool {
-	return commandType == "RecommendStore" || commandType == "ListStoreRecommendations"
+	return commandType == "RecommendStore" ||
+		commandType == "ListStoreRecommendations" ||
+		commandType == "SuggestStoreRecommendation"
 }
 
 func (s *Service) Handle(e command.Envelope) command.Result {
@@ -86,6 +102,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recommendStore(ctx, e)
 	case "ListStoreRecommendations":
 		return s.listRecommendations(ctx, e)
+	case "SuggestStoreRecommendation":
+		return s.suggestRecommendation(ctx, e)
 	default:
 		return command.Rejected(e, "UNKNOWN_COMMAND", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.unknown_command", nil)
 	}
@@ -203,6 +221,87 @@ func (s *Service) listRecommendations(ctx context.Context, e command.Envelope) c
 	result := command.Accepted(e, "StoreRecommendationList", "queue", 1, "PENDING", nil)
 	result.OperationRef = encodeRef(map[string]any{"recommendations": rows})
 	return result
+}
+
+// suggestionTaskID 是 modelstack 的任务路由 id（pi 配置里注册后可换更便宜的模型）。
+const suggestionTaskID = "proxy.storeonboarding.recommendation_suggest"
+
+// SuggestedRecommendation 是小美把用户的话整理成的推荐草稿。
+// 字段允许为空 —— 空代表「用户没说」，由 UI 提示补，服务端绝不替他填。
+type SuggestedRecommendation struct {
+	StoreName string `json:"storeName"`
+	City      string `json:"city"`
+	Category  string `json:"category"`
+	Reason    string `json:"reason"`
+}
+
+// suggestRecommendation 处理「让小美整理这条推荐」（STORE-REC-003）。
+//
+// 为什么必须存在：origin 字段区分「真人用户推荐」与「AI（小美）推荐」，运营
+// 队列也有「小美推荐」筛选与徽章 —— 但落地时 RecommendStore 唯一的调用点写死
+// origin="USER"，从来没有一个能写入 AI 推荐的地方。schema、服务、筛选、UI 徽章
+// 全都在，通道却是死的：队列里那个「小美推荐」筛选永远筛不出任何东西。
+//
+// 设计对齐 marketplace 的 OPP-SUGGEST-001：
+//   - **只读**：本命令不写任何状态。写路径仍然只有 RecommendStore 一个
+//     choke point —— LLM 不参与落库，也就绕不过它那套 fail-closed 校验。
+//   - **fail-closed**：模型底座未配置时以 AI_NOT_CONFIGURED 明确拒绝，客户端
+//     据此隐藏「让小美整理」入口，而不是摆一个点了没反应的按钮。
+//   - **不许编造**：LLM 只把用户的话整理成字段，用户没提到的留空字符串。
+//     模型输出非法 JSON 或幻觉字段一律拒绝，不猜、不补、不降级。
+func (s *Service) suggestRecommendation(ctx context.Context, e command.Envelope) command.Result {
+	note, _ := e.Payload["note"].(string)
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return command.Rejected(e, "INVALID_SUGGESTION_NOTE", "VALIDATION", "AFTER_USER_ACTION", "storeonboarding.invalid_suggestion_note", nil)
+	}
+
+	s.mu.RLock()
+	stack := s.modelStack
+	s.mu.RUnlock()
+	if stack == nil || !stack.Available() {
+		return command.Rejected(e, "AI_NOT_CONFIGURED", "PROVIDER", "AFTER_USER_ACTION", "storeonboarding.ai_not_configured", nil)
+	}
+
+	system := "你是 Proxy 的小美，负责把用户随口描述的店铺整理成一条推荐草稿。" +
+		"只输出一个 JSON 对象，键固定为 storeName / city / category / reason，不要输出其他任何文字。" +
+		"严格按用户说的话整理：用户没提到的字段一律填空字符串，绝不推测、绝不编造店名或城市。" +
+		"city 只填城市名（例如「河内」），不要带国家或区县；reason 用一句中文说明为什么值得进体系。"
+	messages := []modelstack.ChatMessage{
+		{Role: "system", Content: system},
+		{Role: "user", Content: note},
+	}
+	completion, err := stack.Complete(ctx, suggestionTaskID, messages)
+	if err != nil || strings.TrimSpace(completion.Content) == "" {
+		return command.Rejected(e, "SUGGESTION_FAILED", "PROVIDER", "SAFE_RETRY", "storeonboarding.suggestion_failed", nil)
+	}
+	var draft SuggestedRecommendation
+	if err := json.Unmarshal([]byte(extractJSONObject(completion.Content)), &draft); err != nil {
+		return command.Rejected(e, "SUGGESTION_MALFORMED", "PROVIDER", "SAFE_RETRY", "storeonboarding.suggestion_malformed", nil)
+	}
+	// 只裁剪，不补全：模型多给的去掉，少给的留空交给用户补。
+	draft.StoreName = strings.TrimSpace(draft.StoreName)
+	draft.City = strings.TrimSpace(draft.City)
+	draft.Category = strings.TrimSpace(draft.Category)
+	draft.Reason = strings.TrimSpace(draft.Reason)
+	result := command.Accepted(e, "StoreRecommendationSuggestion", "draft", 1, "READY", nil)
+	result.OperationRef = encodeRef(map[string]any{
+		"storeName": draft.StoreName,
+		"city":      draft.City,
+		"category":  draft.Category,
+		"reason":    draft.Reason,
+	})
+	return result
+}
+
+// extractJSONObject 从可能被散文或 markdown 代码围栏包住的回复里取出第一个 {...}。
+func extractJSONObject(text string) string {
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start < 0 || end <= start {
+		return text
+	}
+	return text[start : end+1]
 }
 
 func encodeRef(payload map[string]any) string {

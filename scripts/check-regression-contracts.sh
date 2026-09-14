@@ -3331,3 +3331,68 @@ if ! grep -qF 'LIMIT $3' apps/api-go/internal/platform/postgres/storeonboarding.
   exit 1
 fi
 echo "    STORE-REC-002: PASS (operator queue can read recommendations back, gated and bounded)"
+
+# STORE-REC-003: 小美（AI）推荐必须能产生数据。
+#
+# origin 字段区分「真人用户推荐」与「AI（小美）推荐」，运营队列也有「小美推荐」
+# 筛选与徽章 —— 但落地时 RecommendStore 唯一的调用点写死 origin="USER"，从来
+# 没有一个能写入 AI 推荐的地方。schema、服务、筛选、UI 徽章全都在，通道却是死的：
+# 队列里那个「小美推荐」筛选永远筛不出任何东西。**又是同一类坑：通道建好了，
+# 但没有调用方。**
+#
+# 钉死四件事：
+#   ① 命令存在且有测试；
+#   ② 底座未配置时以 AI_NOT_CONFIGURED fail-closed（这是「前端隐藏入口」的依据，
+#      绝不能静默返回假草稿）；
+#   ③ 命令进了 OpenAPI 契约（否则客户端生成不出调用点）；
+#   ④ SetModelStack 必须在 PG 替换**之后**注入 —— 见下面那段顺序检查。
+require_test "STORE-REC-003" "./internal/storeonboarding" \
+  "TestSuggestStoreRecommendationStructuresTheNote" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-003" "./internal/storeonboarding" \
+  "TestSuggestStoreRecommendationDoesNotInventUnsaidFields" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-003" "./internal/storeonboarding" \
+  "TestSuggestStoreRecommendationFailsClosedWhenAIUnavailable" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-003" "./internal/storeonboarding" \
+  "TestSuggestStoreRecommendationDistinguishesFailureFromMalformed" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'func (s *Service) suggestRecommendation' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-003]: SuggestStoreRecommendation handler is gone, so" >&2
+  echo "        origin=\"AI\" can never be produced and the queue's AI filter is dead UI." >&2
+  exit 1
+fi
+if ! grep -qF 'commandType == "SuggestStoreRecommendation"' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-003]: the domain no longer advertises" >&2
+  echo "        SuggestStoreRecommendation, so the command will not dispatch." >&2
+  exit 1
+fi
+if ! grep -qF 'storeonboarding.ai_not_configured' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-003]: the AI_NOT_CONFIGURED fail-closed path is gone, so an" >&2
+  echo "        unwired model stack would silently degrade into a fabricated draft." >&2
+  exit 1
+fi
+if ! grep -qF 'SuggestStoreRecommendation' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [STORE-REC-003]: SuggestStoreRecommendation is missing from the OpenAPI" >&2
+  echo "        command contract, so no client can call it. Regenerate with" >&2
+  echo "        go run ./cmd/openapi-commands in apps/api-go." >&2
+  exit 1
+fi
+# 注入顺序：SetModelStack 必须在 PG 替换之后。NewWithRepository 不会携带
+# modelstack，先注入再被替换 = 适配器静默丢失，AI 能力退化成「永远
+# AI_NOT_CONFIGURED」，而客户端会据此把入口藏起来 —— 从外部看，这个功能
+# 就像从来没做过一样。marketplace 的 OPP-SUGGEST-001 原来就踩在这个坑上。
+for svc in marketplaceService storeOnboardingService; do
+  if ! awk -v svc="$svc" '
+    $0 ~ svc " = [a-z]+\\.NewWithRepository" { repl = NR }
+    $0 ~ svc "\\.SetModelStack" { wire = NR }
+    END { if (wire && (!repl || wire > repl)) exit 0; else exit 1 }
+  ' apps/api-go/cmd/api/main.go; then
+    echo "  FAIL [STORE-REC-003]: $svc.SetModelStack is not wired after the PostgreSQL" >&2
+    echo "        replacement, so the model stack is silently discarded when" >&2
+    echo "        DATABASE_URL is set and every AI command returns AI_NOT_CONFIGURED." >&2
+    exit 1
+  fi
+done
+echo "    STORE-REC-003: PASS (小美 can actually produce an AI-origin recommendation, fail-closed)"

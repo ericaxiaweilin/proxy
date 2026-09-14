@@ -44,6 +44,31 @@ export class StoreRecommendationProtocolError extends Error {
   }
 }
 
+// STORE-REC-003: 小美（AI）整理出来的推荐草稿。
+//
+// 字段允许为空字符串 —— 空代表「用户没说」，**不是服务端没填**。
+// 调用方必须让用户自己补，绝不能替他编一个城市或品类出来。
+export interface SuggestedStoreRecommendation {
+  storeName: string;
+  city: string;
+  category: string;
+  reason: string;
+}
+
+/**
+ * 模型底座未配置或不可用。
+ *
+ * 这不是「用户这次操作失败」，而是**这个能力当前根本不存在**。调用方必须
+ * 据此把「让小美整理」入口**藏起来**：弹一个红字报错是误导（重试也没用），
+ * 留一个点了没反应的按钮更糟。
+ */
+export class StoreRecommendationAiUnavailableError extends Error {
+  public constructor() {
+    super("小美整理功能当前不可用");
+    this.name = "StoreRecommendationAiUnavailableError";
+  }
+}
+
 export class StoreRecommendationRejectedError extends Error {
   public constructor(public readonly result: CommandResult) {
     super(`推荐未受理：${result.error?.messageKey ?? "请稍后重试"}`);
@@ -108,6 +133,55 @@ export class StoreOnboardingClient {
     } catch (err) {
       throw new StoreRecommendationProtocolError(
         "推荐队列解析失败: " + (err instanceof Error ? err.message : String(err))
+      );
+    }
+  }
+
+  /**
+   * STORE-REC-003: 让小美把用户随口说的话整理成推荐草稿（**只读，不落库**）。
+   *
+   * 为什么需要它：origin 区分「用户推荐」与「小美推荐」，运营队列也有
+   * 「小美推荐」筛选 —— 但之前没有一个地方能产生 AI 推荐，那个筛选是死 UI。
+   *
+   * 拿到的草稿仍然要经用户确认，再由 recommendStore 落库；小美不直接写库，
+   * 也就绕不过服务端那套 fail-closed 校验。
+   */
+  public async suggestRecommendation(note: string): Promise<SuggestedStoreRecommendation> {
+    const trimmed = note.trim();
+    if (!trimmed) throw new StoreRecommendationProtocolError("先说说这家店，小美才能整理");
+
+    let result: CommandResult;
+    try {
+      result = await this.command(
+        "SuggestStoreRecommendation",
+        { note: trimmed },
+        { type: "STORE", id: "suggest" }
+      );
+    } catch (err) {
+      if (
+        err instanceof StoreRecommendationRejectedError &&
+        err.result.error?.errorCode === "AI_NOT_CONFIGURED"
+      ) {
+        throw new StoreRecommendationAiUnavailableError();
+      }
+      throw err;
+    }
+
+    const ref = result.operationRef;
+    if (typeof ref !== "string") {
+      throw new StoreRecommendationProtocolError("小美整理结果缺少 operationRef");
+    }
+    try {
+      const parsed = JSON.parse(ref) as Partial<SuggestedStoreRecommendation>;
+      return {
+        storeName: (parsed.storeName ?? "").trim(),
+        city: (parsed.city ?? "").trim(),
+        category: (parsed.category ?? "").trim(),
+        reason: (parsed.reason ?? "").trim()
+      };
+    } catch (err) {
+      throw new StoreRecommendationProtocolError(
+        "小美整理结果解析失败: " + (err instanceof Error ? err.message : String(err))
       );
     }
   }

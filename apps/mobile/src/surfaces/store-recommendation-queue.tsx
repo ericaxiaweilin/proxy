@@ -184,7 +184,11 @@ export function StoreRecommendationQueue(): React.JSX.Element {
           </Text>
           <Text style={styles.prototypeCardDesc}>{row.reason}</Text>
           <Text style={[styles.prototypeCardDesc, { marginTop: 4 }]}>
-            推荐人 {row.recommendedByAccountId}
+            {/* origin=AI 表示内容由小美产出，recommendedBy 是发起对话的账号 —— 两个
+                身份都要留着：前者说明谁写的，后者保证举证链能回访。 */}
+            {row.origin === "AI"
+              ? `小美整理 · 发起账号 ${row.recommendedByAccountId}`
+              : `推荐人 ${row.recommendedByAccountId}`}
           </Text>
         </View>
       ))}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/modelstack"
 )
 
 func envelopeFor(cmd string, payload map[string]any, actorID string) command.Envelope {
@@ -250,5 +251,130 @@ func TestRecommendStoreAIOriginAccepted(t *testing.T) {
 	}
 	if repo.Recommendations()[0].Origin != "AI" {
 		t.Fatalf("origin must be AI, got %+v", repo.Recommendations()[0])
+	}
+}
+
+// ---------- STORE-REC-003: 小美（AI）推荐 ----------
+
+// stubSuggestStack 是脚本化的 modelstack.Port。
+type stubSuggestStack struct {
+	reply string
+	err   error
+}
+
+func (s stubSuggestStack) Available() bool { return true }
+func (s stubSuggestStack) Complete(_ context.Context, taskID string, msgs []modelstack.ChatMessage) (modelstack.Completion, error) {
+	if s.err != nil {
+		return modelstack.Completion{}, s.err
+	}
+	// 任务 id 必须是本域注册的 id —— 拿错 id 说明接错底座任务。
+	if taskID != suggestionTaskID {
+		return modelstack.Completion{}, modelstack.ErrTaskNotRoutable
+	}
+	return modelstack.Completion{Content: s.reply}, nil
+}
+
+// wiredUnavailableStack 模拟「注入了适配器但底座不可用」。
+type wiredUnavailableStack struct{}
+
+func (wiredUnavailableStack) Available() bool { return false }
+func (wiredUnavailableStack) Complete(context.Context, string, []modelstack.ChatMessage) (modelstack.Completion, error) {
+	return modelstack.Completion{}, nil
+}
+
+// STORE-REC-003: 小美把用户随口说的话整理成推荐草稿。
+// 关键行为：①合法 JSON → 返回结构化草稿；②markdown 围栏也能抽出；
+// ③底座未配置 → AI_NOT_CONFIGURED（fail-closed，前端据此隐藏入口）；
+// ④模型报错 / 输出非 JSON → 分别以 SUGGESTION_FAILED / SUGGESTION_MALFORMED 拒。
+func TestSuggestStoreRecommendationStructuresTheNote(t *testing.T) {
+	svc := NewWithRepository(NewMemoryRepository())
+
+	svc.SetModelStack(stubSuggestStack{reply: `{"storeName":"Three Beans","city":"河内","category":"咖啡","reason":"适合 afterwork，老板愿意合作活动"}`})
+	res := svc.Handle(envelopeFor("SuggestStoreRecommendation", map[string]any{
+		"note": "Cầu Giấy 那家 Three Beans 咖啡不错，适合 afterwork，老板愿意合作活动",
+	}, "user_1"))
+	if res.Outcome != "ACCEPTED" {
+		t.Fatalf("suggest should be accepted: %+v", res)
+	}
+	var draft SuggestedRecommendation
+	if err := json.Unmarshal([]byte(res.OperationRef), &draft); err != nil {
+		t.Fatal(err)
+	}
+	if draft.StoreName != "Three Beans" || draft.City != "河内" || draft.Category != "咖啡" {
+		t.Fatalf("draft not structured: %+v", draft)
+	}
+	if !strings.Contains(draft.Reason, "afterwork") {
+		t.Fatalf("reason lost: %q", draft.Reason)
+	}
+
+	// markdown 代码围栏包裹的回复同样能抽出 JSON。
+	svc.SetModelStack(stubSuggestStack{reply: "```json\n{\"storeName\":\"A\",\"city\":\"河内\",\"category\":\"\",\"reason\":\"好\"}\n```"})
+	fenced := svc.Handle(envelopeFor("SuggestStoreRecommendation", map[string]any{"note": "A 不错"}, "user_1"))
+	if fenced.Outcome != "ACCEPTED" || !strings.Contains(fenced.OperationRef, `"storeName":"A"`) {
+		t.Fatalf("fenced reply must still parse: %+v", fenced)
+	}
+}
+
+// 最重要的一条：**不许编造**。用户没说城市，模型就不该给城市；
+// 即便模型硬塞了一个，服务端也不补全 —— 缺的字段留空，交给用户补。
+// 一旦这里退化成「随便填个默认值」，运营就会按一条假推荐去做评估。
+func TestSuggestStoreRecommendationDoesNotInventUnsaidFields(t *testing.T) {
+	svc := NewWithRepository(NewMemoryRepository())
+	svc.SetModelStack(stubSuggestStack{reply: `{"storeName":"某家店","city":"","category":"","reason":"环境好"}`})
+	res := svc.Handle(envelopeFor("SuggestStoreRecommendation", map[string]any{"note": "有家店环境挺好"}, "user_1"))
+	if res.Outcome != "ACCEPTED" {
+		t.Fatalf("partial draft should still be accepted: %+v", res)
+	}
+	var draft SuggestedRecommendation
+	if err := json.Unmarshal([]byte(res.OperationRef), &draft); err != nil {
+		t.Fatal(err)
+	}
+	if draft.City != "" || draft.Category != "" {
+		t.Fatalf("unsaid fields must stay empty, got %+v", draft)
+	}
+	if draft.StoreName == "" || draft.Reason == "" {
+		t.Fatalf("said fields must survive: %+v", draft)
+	}
+}
+
+// fail-closed：没注入 / 注入了但不可用，一律 AI_NOT_CONFIGURED。
+// 这是「前端隐藏入口」的依据 —— 不能静默返回一个假草稿。
+func TestSuggestStoreRecommendationFailsClosedWhenAIUnavailable(t *testing.T) {
+	unwired := NewWithRepository(NewMemoryRepository())
+	res := unwired.Handle(envelopeFor("SuggestStoreRecommendation", map[string]any{"note": "有家店不错"}, "user_1"))
+	if res.Outcome != "REJECTED" || res.Error == nil || res.Error.ErrorCode != "AI_NOT_CONFIGURED" {
+		t.Fatalf("unwired stack must fail closed: %+v", res)
+	}
+
+	wired := NewWithRepository(NewMemoryRepository())
+	wired.SetModelStack(wiredUnavailableStack{})
+	res2 := wired.Handle(envelopeFor("SuggestStoreRecommendation", map[string]any{"note": "有家店不错"}, "user_1"))
+	if res2.Outcome != "REJECTED" || res2.Error == nil || res2.Error.ErrorCode != "AI_NOT_CONFIGURED" {
+		t.Fatalf("unavailable stack must fail closed: %+v", res2)
+	}
+}
+
+// 模型故障（SUGGESTION_FAILED）与输出非法（SUGGESTION_MALFORMED）必须是
+// 两个不同的错误码：前者可以安全重试，后者重试大概率还是同样坏的输出。
+func TestSuggestStoreRecommendationDistinguishesFailureFromMalformed(t *testing.T) {
+	svc := NewWithRepository(NewMemoryRepository())
+
+	svc.SetModelStack(stubSuggestStack{err: modelstack.ErrGatewayFailure})
+	failed := svc.Handle(envelopeFor("SuggestStoreRecommendation", map[string]any{"note": "有家店不错"}, "user_1"))
+	if failed.Outcome != "REJECTED" || failed.Error == nil || failed.Error.ErrorCode != "SUGGESTION_FAILED" {
+		t.Fatalf("gateway failure must be SUGGESTION_FAILED: %+v", failed)
+	}
+
+	svc.SetModelStack(stubSuggestStack{reply: "我觉得这家店很不错，你应该去看看"})
+	malformed := svc.Handle(envelopeFor("SuggestStoreRecommendation", map[string]any{"note": "有家店不错"}, "user_1"))
+	if malformed.Outcome != "REJECTED" || malformed.Error == nil || malformed.Error.ErrorCode != "SUGGESTION_MALFORMED" {
+		t.Fatalf("prose instead of JSON must be SUGGESTION_MALFORMED: %+v", malformed)
+	}
+
+	// 空 note：连问都不问模型，直接参数校验拒。
+	svc.SetModelStack(stubSuggestStack{reply: `{"storeName":"x","city":"y","category":"","reason":"z"}`})
+	empty := svc.Handle(envelopeFor("SuggestStoreRecommendation", map[string]any{"note": "   "}, "user_1"))
+	if empty.Outcome != "REJECTED" || empty.Error == nil || empty.Error.ErrorCode != "INVALID_SUGGESTION_NOTE" {
+		t.Fatalf("empty note must be rejected: %+v", empty)
 	}
 }

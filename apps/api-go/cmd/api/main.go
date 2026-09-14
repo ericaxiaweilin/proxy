@@ -127,10 +127,11 @@ func main() {
 	sceneService := scene.New()
 	realitySceneService := realityscene.New()
 	marketplaceService := marketplace.New()
-	// OPP-SUGGEST-001: 发布搜索"生成"走语义层（modelstack），与
-	// conversation 同一适配器；未配置时 SuggestOpportunityTemplate
-	// fail-closed 明确拒绝（AI_NOT_CONFIGURED），前端隐藏生成入口。
-	marketplaceService.SetModelStack(modelStack)
+	// OPP-SUGGEST-001 / STORE-REC-003: 语义层（modelstack）注入见下方
+	// 「Wire after the optional PostgreSQL replacements」区块 —— 必须在
+	// PG 替换之后注入。这里注入会被 NewWithRepository 重建的对象丢掉，
+	// 结果是配了 DATABASE_URL 时 SuggestOpportunityTemplate /
+	// SuggestStoreRecommendation 永远只能返回 AI_NOT_CONFIGURED。
 	// R17.x: chat → order 派生. marketplace ConfirmMarketApplication
 	// 委托 fulfillment 创建真 Order, 让“我的订单”页能看见.
 	// 接口定义在 marketplace package (DIP: 消费者侧),
@@ -298,6 +299,12 @@ func main() {
 	// Wire after the optional PostgreSQL replacements. Wiring before this block
 	// leaves marketplace pointing at the discarded in-memory fulfillment repo.
 	marketplaceService.SetOrderCreator(marketplaceFulfillmentAdapter{repo: fulfillmentService.Repository()})
+	// 语义层同理：必须在 PG 替换之后注入，否则配了 DATABASE_URL 时
+	// NewWithRepository 重建的 Service 会丢掉 modelstack，AI 能力被静默降级成
+	// 「永远 AI_NOT_CONFIGURED」—— 而客户端会因此把入口藏起来，从外部看
+	// 就像是这个功能从来没做过。
+	marketplaceService.SetModelStack(modelStack)
+	storeOnboardingService.SetModelStack(modelStack)
 	// PROFILE-READ-001: content publishers resolve USER display names from
 	// the verified account profile instead of trusting client-supplied
 	// strings. Wired here so both the memory and PostgreSQL instances are

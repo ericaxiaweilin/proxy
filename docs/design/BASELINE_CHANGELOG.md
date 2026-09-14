@@ -4,6 +4,29 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 189 — 2026-09-14
+
+- STORE-REC-003：让小美（AI）推荐真正产生数据。有视觉改动：我的→推荐商铺进体系，
+  新增「让小美帮你整理」。
+  - **原状：origin="AI" 是一条从来没跑过数据的通道。** schema、服务、运营队列的
+    「小美推荐」筛选与徽章全都支持 AI 来源，但 `RecommendStore` 唯一的调用点写死
+    `origin="USER"` —— 队列里那个筛选器永远筛不出任何东西，是死 UI。而 Master PRD
+    §15 里，AI（小美）本是体系增长的一半推荐来源。又是同一类坑：**通道建好了，
+    没有调用方**。
+  - 新增 `SuggestStoreRecommendation`（**只读**）：小美把用户随口说的话整理成
+    {店名, 城市, 品类, 理由} 草稿；用户确认后才由 `RecommendStore` 落库并记
+    `origin="AI"`。小美不直接写库，因此绕不过服务端那套 fail-closed 校验。
+  - **不许编造**：用户没提到的字段留空，由用户自己补 —— 一旦服务端替他填个默认
+    城市，运营就会照着一条假推荐去做评估。
+  - **fail-closed**：模型底座未配置时用 `AI_NOT_CONFIGURED` 明确拒绝，App 据此把
+    「让小美整理」入口**整个藏起来**。弹红字是误导（重试也没用），留一个点了没
+    反应的按钮更糟。模型故障与输出非法是两个错误码（可重试 vs 不可重试）。
+  - **顺带修掉一个同类的隐性降级**：`main.go` 里 `SetModelStack` 原先在 PG 替换
+    **之前**注入，而 `NewWithRepository` 不携带 modelstack —— 配了 `DATABASE_URL`
+    时适配器被静默丢弃，AI 能力退化成「永远 AI_NOT_CONFIGURED」，客户端又据此隐藏
+    入口，从外部看这个功能就像从来没做过。marketplace 的 OPP-SUGGEST-001 正是踩在
+    这个坑上。已加顺序 pin 钉住（负向注入验证会变红）。
+
 ## Revision 188 — 2026-09-14
 
 - STORE-REC-002（App 侧运营队列）：新增 `apps/mobile/src/surfaces/store-recommendation-queue.tsx`，

@@ -463,6 +463,8 @@ commands:
     domain: Fulfillment
   - command: SuggestOpportunityTemplate
     domain: Marketplace
+  - command: SuggestStoreRecommendation
+    domain: StoreOnboarding
   - command: SwitchPrincipalContext
     domain: Identity
   - command: ToggleActivityInterest
