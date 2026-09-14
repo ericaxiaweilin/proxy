@@ -58,6 +58,29 @@ func (s *Service) WithEligibility(engine Evaluator) *Service {
 	return s
 }
 
+// countRedemptions 统计某用户在某活动下**已核销**的次数（BENEFIT-ELIG-001）。
+//
+// 为什么必须存在：max_redemptions 规则比的是 ec.TotalRedemptions，而此前
+// claim / redeem 两条路径都没填它 —— 恒为 0，于是 `0 >= N` 永不成立，
+// 「每人最多 N 次」这条规则从来没生效过。喊了却执行不了的封顶就是个装饰。
+//
+// 用现成的 ListClaimsByUser 在内存里过滤，而不是给仓储加一个 count 方法：
+// 后者要同时改接口 + 内存 + Postgres 三处；当前规模下过滤成本可以忽略，
+// 真到量级再换成 SQL COUNT。
+func (s *Service) countRedemptions(ctx context.Context, userID, campaignID string) (int, error) {
+	claims, err := s.repo.ListClaimsByUser(ctx, userID, nil)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, c := range claims {
+		if c.CampaignID == campaignID && c.Status == ClaimRedeemed {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "CreateCampaign", "ActivateCampaign", "PauseCampaign", "AllocateBenefit", "ClaimBenefit", "RedeemBenefit":
@@ -90,8 +113,15 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	}
 }
 
+// NewServiceWithClock 给测试用的时钟构造器。
+//
+// BENEFIT-ELIG-001: 这里以前**不接资格引擎** —— s.eligibility 恒为 nil，
+// 于是 `if s.eligibility != nil` 这道门在所有用这个构造器写的测试里**从不执行**。
+// 后果是：引擎的单测全绿（它们直接测引擎、喂真实信号），而服务这条路径上的
+// 资格门从来没被测过 —— 这正是「信号没喂」能潜伏到现在的原因。
+// 默认引擎必须在这里也接上；要打桩的测试用 WithEligibility 覆盖。
 func NewServiceWithClock(repo Repository, clock Clock) *Service {
-	return &Service{repo: repo, clock: clock}
+	return &Service{repo: repo, clock: clock, eligibility: NewEligibilityEngine(repo, clock)}
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -277,19 +307,36 @@ func (s *Service) HandleClaimBenefit(ctx context.Context, e command.Envelope) co
 	if c.Status != CampaignActive {
 		return command.Rejected(e, "CAMPAIGN_NOT_ACTIVE", "STATE", "AFTER_USER_ACTION", "benefit.campaign_not_active", nil)
 	}
-	// R16.7-P1-H prep: eligibility gate. Fires before the claim is
-	// written so a RISK_FLAGGED or SOURCE_NOT_ALLOWED user does not
-	// pollute the capacity counter or the claim ledger. The signals
-	// are best-effort defaults (AccountAge=0, DeviceCount=1,
-	// AccountCount=1); the engine accepts partial signals and only
-	// blocks when the rules say so.
-	if s.eligibility != nil {
-		result, err := s.eligibility.Evaluate(ctx, &EligibilityContext{
-			UserID:      e.Actor.ID,
-			CampaignID:  p.CampaignID,
-			BenefitID:   p.BenefitID,
-			AccountStatus: "ACTIVE",
-		})
+// R16.7-P1-H: eligibility gate. Fires before the claim is written so a
+// RISK_FLAGGED or SOURCE_NOT_ALLOWED user does not pollute the capacity
+// counter or the claim ledger.
+//
+// BENEFIT-ELIG-001 — 这个门此前是装饰。上面那版注释写着「best-effort defaults
+// (AccountAge=0, DeviceCount=1, AccountCount=1)」，但代码**一个都没设**，
+// 四个信号全是零值。后果是：
+//   - max_redemptions：TotalRedemptions 恒为 0，0 >= N 永不成立 → 封顶形同虚设；
+//   - geoCities：UserCity 恒为 ""，而判断条件是 `len>0 && UserCity != ""` → 地域限制被跳过；
+//   - min_account_age_days：AccountAge 恒为 0 → **所有人**都被判 ACCOUNT_TOO_NEW，
+//     且理由还是错的（运营会以为没人来领，实际是规则根本验不了）；
+//   - RISK_FLAGGED：DeviceCount/AccountCount 恒为 0 → 风控分支不可达。
+// 前两条 fail-open，第三条 fail-closed 但理由误导，第四条纯装饰。
+//
+// 本轮只修**本地算得出来**的那个：TotalRedemptions（BENEFIT-ELIG-001）。
+// UserCity / AccountAge / DeviceCount / AccountCount 需要身份与设备图谱，
+// benefit 域拿不到，保持不填 —— 但它们对应的规则仍然不生效，见
+// docs 说明；等真实信号接入再补。**不要用 0 冒充真实值**，那比留空更糟。
+if s.eligibility != nil {
+	totalRedemptions, err := s.countRedemptions(ctx, e.Actor.ID, p.CampaignID)
+	if err != nil {
+		return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)
+	}
+	result, err := s.eligibility.Evaluate(ctx, &EligibilityContext{
+		UserID:           e.Actor.ID,
+		CampaignID:       p.CampaignID,
+		BenefitID:        p.BenefitID,
+		AccountStatus:    "ACTIVE",
+		TotalRedemptions: totalRedemptions,
+	})
 		if err != nil {
 			return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)
 		}
@@ -375,11 +422,19 @@ func (s *Service) HandleRedeemBenefit(ctx context.Context, e command.Envelope) c
 	// Running the engine again here is cheap and is the natural
 	// place to apply lifecycle-based rules.
 	if s.eligibility != nil {
+		// BENEFIT-ELIG-001: 同上，填真实的已核销次数。核销时这张券还没变成
+		// REDEEMED（状态检查在更前面），所以数出来的是**此前**的核销次数，
+		// 正是 max_redemptions 要比较的那个值。
+		totalRedemptions, err := s.countRedemptions(ctx, cl.UserID, cl.CampaignID)
+		if err != nil {
+			return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)
+		}
 		result, err := s.eligibility.Evaluate(ctx, &EligibilityContext{
-			UserID:      cl.UserID,
-			CampaignID:  cl.CampaignID,
-			BenefitID:   cl.BenefitID,
-			AccountStatus: "ACTIVE",
+			UserID:           cl.UserID,
+			CampaignID:       cl.CampaignID,
+			BenefitID:        cl.BenefitID,
+			AccountStatus:    "ACTIVE",
+			TotalRedemptions: totalRedemptions,
 		})
 		if err != nil {
 			return command.Rejected(e, "ELIGIBILITY_EVAL_FAILED", "INTERNAL", "SAFE_RETRY", "benefit.eligibility_eval_failed", nil)

@@ -3577,3 +3577,39 @@ if ! [ -f apps/mobile/src/surfaces/my-store-recommendations.tsx ]; then
   exit 1
 fi
 echo "    STORE-REC-007: PASS (recommenders can see their own status, scoped server-side)"
+
+# BENEFIT-ELIG-001: 资格门不能只是个装饰。
+#
+# EligibilityEngine 本身是对的，eligibility_test.go 也用真实信号把它测透了 ——
+# 但 claim / redeem 两条调用路径**没喂信号**：TotalRedemptions 恒为 0，于是
+# `0 >= N` 永不成立，「每人最多 N 次」这条规则从来没生效过。
+# 更隐蔽的是 NewServiceWithClock 以前根本不接引擎（s.eligibility == nil），
+# 而 `if s.eligibility != nil` 会让整道门被静默跳过 —— 所以**服务这条路径上的
+# 资格门从来没被测过**，引擎的单测给了虚假的安全感。
+#
+# 本轮只修本地算得出的 TotalRedemptions。UserCity / AccountAge /
+# DeviceCount / AccountCount 仍缺真实来源，对应规则依旧不生效 ——
+# **不要用 0 冒充真实值**，那比留空更糟（min_account_age_days 会把所有人
+# 判成 ACCOUNT_TOO_NEW，理由还是错的）。
+#
+# 钉死：①测试存在且走服务（不是只测引擎）；②测试用构造器必须接上默认引擎；
+# ③两条调用路径都传了真实计数；④countRedemptions 还在。
+require_test "BENEFIT-ELIG-001" "./internal/benefit" \
+  "TestMaxRedemptionsIsEnforcedThroughTheService" \
+  "apps/api-go/internal/benefit/service_test.go" || exit $?
+if ! grep -qF 'eligibility: NewEligibilityEngine' apps/api-go/internal/benefit/service.go; then
+  echo "  FAIL [BENEFIT-ELIG-001]: no constructor wires the eligibility engine," >&2
+  echo "        so 'if s.eligibility != nil' silently skips the whole gate." >&2
+  exit 1
+fi
+if [ "$(grep -c 'TotalRedemptions:' apps/api-go/internal/benefit/service.go)" -lt 2 ]; then
+  echo "  FAIL [BENEFIT-ELIG-001]: the claim and redeem paths must both pass a real" >&2
+  echo "        TotalRedemptions. Leaving it zero makes max_redemptions unenforceable." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) countRedemptions' apps/api-go/internal/benefit/service.go; then
+  echo "  FAIL [BENEFIT-ELIG-001]: countRedemptions is gone, so the redemption cap" >&2
+  echo "        has no real number behind it again." >&2
+  exit 1
+fi
+echo "    BENEFIT-ELIG-001: PASS (redemption cap is really enforced, through the service)"
