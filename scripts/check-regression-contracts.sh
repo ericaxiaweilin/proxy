@@ -3635,3 +3635,33 @@ if ! grep -qF 'MERCHANT_NOT_CAMPAIGN_OWNER' apps/api-go/internal/benefit/service
   exit 1
 fi
 echo "    BENEFIT-REDEEM-001: PASS (only the owning merchant can redeem; settlement cannot be hijacked)"
+
+# SAFETY-GATE-001: safety 域的特权命令必须在 operator 门里。
+#
+# 全仓唯一的授权门就是 internal/api/security.go 的 operatorCommandTypes
+# （command_dispatch.go:77 的 requiresOperator）。safety 域此前**一个都没进表**，
+# 于是这些命令对任何已登录用户敞开：
+#   - GrantJITAccess：granteeId + scope 全从 payload 来且无校验 → 自我签发任意权限（提权）
+#   - CreateIncident：建 incident 之外还会**自动给目标打 ACCOUNT 封禁** → 冻掉任意账号
+#   - CreateSafetyBlock / CreateOperatorCase / CreateLegalHold / ReleaseLegalHold：
+#     封禁、运营工单、法务保全，天然是 moderaton 动作
+#
+# 钉死：①测试存在；②六个命令都在 operator 白名单里（逐个 grep，
+# 只钉一个的话，少钉的那些照样可以悄悄被拿掉）。
+#
+# 注意用 `[[:space:]]*` 而不是字面一个空格：gofmt 会**按最长键对齐**这张 map 的值列，
+# 于是实际写法是 `"GrantJITAccess":     true,`（5 个空格）。钉字面单空格会永远匹配不到
+# —— 而且是在"门禁变红"的方向上错，很容易被误读成"有人把门拆了"。
+# 更隐蔽的是：gofmt 的重排意味着**删掉任意一个条目都会改变别人的缩进**，
+# 所以任何依赖固定空格数的钉都会随机变红。钉语义（键 + 值），别钉排版。
+require_test "SAFETY-GATE-001" "./internal/api" \
+  "TestSafetyPrivilegedCommandsRequireOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+for cmd in GrantJITAccess CreateIncident CreateSafetyBlock CreateOperatorCase CreateLegalHold ReleaseLegalHold; do
+  if ! grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [SAFETY-GATE-001]: $cmd is no longer operator-gated, so any" >&2
+    echo "        logged-in user can self-grant JIT scope or auto-block an account." >&2
+    exit 1
+  fi
+done
+echo "    SAFETY-GATE-001: PASS (safety privileges are operator-only; no self-grant, no drive-by account block)"

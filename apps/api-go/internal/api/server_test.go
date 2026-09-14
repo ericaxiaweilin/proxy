@@ -491,6 +491,31 @@ func TestOperatorGateFailsClosedAndAllowlist(t *testing.T) {
 	}
 }
 
+// SAFETY-GATE-001: safety 域的特权命令必须走 operator 门。
+//
+// 全仓唯一的授权门就是 operatorCommandTypes（command_dispatch.go:77），
+// 而 safety 此前**一个命令都没进表** —— 于是下面这些对任何已登录用户敞开：
+//   - GrantJITAccess：granteeId 与 scope 全从 payload 来且无任何校验，
+//     任何用户都能给自己签发任意 scope 的临时权限（自我提权）。
+//   - CreateIncident：除了建 incident，还会**自动给目标打一个 ACCOUNT 封禁**，
+//     任何用户都能冻掉任意账号。
+//   - CreateSafetyBlock / CreateOperatorCase：封禁与运营工单，天然是 moderaton 动作。
+//   - CreateLegalHold / ReleaseLegalHold：法务保全，同上。
+func TestSafetyPrivilegedCommandsRequireOperator(t *testing.T) {
+	for _, cmd := range []string{
+		"GrantJITAccess",
+		"CreateIncident",
+		"CreateSafetyBlock",
+		"CreateOperatorCase",
+		"CreateLegalHold",
+		"ReleaseLegalHold",
+	} {
+		if !requiresOperator(cmd) {
+			t.Fatalf("%s must require operator: ungated, any logged-in user can self-grant JIT scope or auto-block an account", cmd)
+		}
+	}
+}
+
 // Audit tripwire (Pass 1 — Scene R15.13): the public-read allowlist is
 // the single source of truth for "which List* commands can be called
 // without authentication". Adding or removing entries here MUST be

@@ -94,6 +94,23 @@ var operatorCommandTypes = map[string]bool{
 	// STORE-REC-004: 评估结论同样 operator-only —— 记录里写着「谁否掉了哪家店」，
 	// 落到普通用户手里等于把运营的判断过程公开出去。
 	"DecideStoreRecommendation": true,
+	// SAFETY-GATE-001: safety 域此前**一个命令都没有进这张表**，而全仓唯一的
+	// 授权门就是本表（command_dispatch.go:77 的 requiresOperator）。也就是说
+	// 下面这些命令对任何已登录用户都是敞开的：
+	//   - GrantJITAccess：granteeId 与 scope 全从 payload 来，无任何校验 ——
+	//     任何用户都能给自己签发任意 scope 的临时权限（提权）。
+	//   - CreateIncident：除了建 incident，还会**自动给目标打一个 ACCOUNT 封禁**
+	//     （safety/service.go 的 createIncident）。任何用户都能冻掉任意账号。
+	//   - CreateSafetyBlock / CreateOperatorCase：封禁与运营工单，天然是 moderaton 动作。
+	//   - CreateLegalHold / ReleaseLegalHold：法务保全，同上。
+	// 全部收进 operator 门（未配 PROXY_OPERATOR_PRINCIPALS 时 fail-closed 403）。
+	// 目前 App 侧对 safety 域**零调用**，所以收紧不会打断任何现网流程。
+	"GrantJITAccess":     true,
+	"CreateIncident":     true,
+	"CreateSafetyBlock":  true,
+	"CreateOperatorCase": true,
+	"CreateLegalHold":    true,
+	"ReleaseLegalHold":   true,
 }
 
 func requiresOperator(commandType string) bool {
