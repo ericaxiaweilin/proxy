@@ -3665,3 +3665,36 @@ for cmd in GrantJITAccess CreateIncident CreateSafetyBlock CreateOperatorCase Cr
   fi
 done
 echo "    SAFETY-GATE-001: PASS (safety privileges are operator-only; no self-grant, no drive-by account block)"
+
+# BENEFIT-CAMPAIGN-001: 活动管理四条必须在 operator 门里。
+#
+# 与 SAFETY-GATE-001 同一个根因：benefit 域整域没进 operatorCommandTypes。
+# 这四条把「活动归谁 / 配额给谁」放在 payload 里且不校验：
+#   - CreateCampaign：ownerType + ownerId 来自 payload 只判非空 → 冒名建活动
+#   - ActivateCampaign / PauseCampaign：只带 campaignId，不问归属 → 动别人的活动
+#   - AllocateBenefit：distributorId 来自 payload → 把配额分给任意分销方
+# 冒名活动一旦 Activate，真实用户领取核销时结算按 campaign.OwnerID 归属
+# （BENEFIT-REDEEM-001 依赖它）→ 被冒名商家为别人造的活动买单。
+#
+# 钉死：①测试存在；②四条都在门里；③ClaimBenefit / RedeemBenefit **不在**门里
+# （反向钉）—— 它们是真实用户动作，被顺手收紧就会把 BENEFIT-WIRE-001 刚接上的
+# 权益链路重新锁死，而且这种「过度收紧」在门禁上是静默的：测试不会红，用户只是用不了。
+require_test "BENEFIT-CAMPAIGN-001" "./internal/api" \
+  "TestBenefitCampaignManagementRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+for cmd in CreateCampaign ActivateCampaign PauseCampaign AllocateBenefit; do
+  if ! grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [BENEFIT-CAMPAIGN-001]: $cmd is no longer operator-gated, so any" >&2
+    echo "        logged-in user can create a campaign in someone else's name," >&2
+    echo "        activate it, and bill that merchant's settlement." >&2
+    exit 1
+  fi
+done
+for cmd in ClaimBenefit RedeemBenefit; do
+  if grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [BENEFIT-CAMPAIGN-001]: $cmd is operator-gated now, but it is a normal" >&2
+    echo "        user action — gating it locks the benefit flow back out for everyone." >&2
+    exit 1
+  fi
+done
+echo "    BENEFIT-CAMPAIGN-001: PASS (campaign management is operator-only; claiming/redeeming stay open to users)"

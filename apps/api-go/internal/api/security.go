@@ -111,6 +111,24 @@ var operatorCommandTypes = map[string]bool{
 	"CreateOperatorCase": true,
 	"CreateLegalHold":    true,
 	"ReleaseLegalHold":   true,
+	// BENEFIT-CAMPAIGN-001: benefit 域和 safety 一样**整域没进这张表**，于是
+	// 活动管理四条对任何已登录用户敞开，且全部把归属/配额身份放在 payload 里
+	// 且不校验（BENEFIT-REDEEM-001 同一个洞，只是方向相反）：
+	//   - CreateCampaign：ownerType + ownerId 直接来自 payload，只判非空。
+	//     任何人都能建一个**挂在别人名下的活动**（budgetMinor 也自填）。
+	//   - ActivateCampaign / PauseCampaign：只带 campaignId，完全不问是谁的活动 ——
+	//     别人建的活动我也能激活/暂停。
+	//   - AllocateBenefit：distributorId 来自 payload，能给任意活动把配额分给
+	//     任意分销方。
+	// 危害链：冒名活动一旦被 Activate，真实用户来领取/核销，而 BENEFIT-REDEEM-001
+	// 的结算归属正是按 campaign.OwnerID 判 —— 于是被冒名的商家要为别人造的活动买单。
+	// 收进 operator 门；App 侧对这四条**零调用**，收紧不打断现网。
+	// 注意这是止血而非终态：等真正出现「商家自建活动」的入口，必须换成校验
+	// e.Actor 是否为该 ownerId 的主体成员，而不是继续留在 operator 门里。
+	"CreateCampaign":   true,
+	"ActivateCampaign": true,
+	"PauseCampaign":    true,
+	"AllocateBenefit":  true,
 }
 
 func requiresOperator(commandType string) bool {

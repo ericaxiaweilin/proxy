@@ -516,6 +516,41 @@ func TestSafetyPrivilegedCommandsRequireOperator(t *testing.T) {
 	}
 }
 
+// BENEFIT-CAMPAIGN-001: 活动管理四条必须走 operator 门。
+//
+// benefit 域和 safety 一样整域没进 operatorCommandTypes，而这四条把
+// 「这个活动归谁 / 配额给谁」放在 payload 里且不校验：
+//   - CreateCampaign：ownerType + ownerId 来自 payload，只判非空 → 任何人都能
+//     建一个挂在**别人名下**的活动（budgetMinor 也是自己填的）。
+//   - ActivateCampaign / PauseCampaign：只带 campaignId，不问是谁的活动 →
+//     别人建的活动我也能激活、暂停。
+//   - AllocateBenefit：distributorId 来自 payload → 能给任意活动把配额分给任意分销方。
+//
+// 危害链：冒名活动被 Activate 后，真实用户来领取核销，而结算归属是按
+// campaign.OwnerID 判的（BENEFIT-REDEEM-001 依赖它）—— 被冒名的商家要为
+// 别人造的活动买单。同一个洞，只是方向相反。
+//
+// ClaimBenefit / RedeemBenefit 是真实用户动作，必须保持开放；这里只钉管理侧四条。
+func TestBenefitCampaignManagementRequiresOperator(t *testing.T) {
+	for _, cmd := range []string{
+		"CreateCampaign",
+		"ActivateCampaign",
+		"PauseCampaign",
+		"AllocateBenefit",
+	} {
+		if !requiresOperator(cmd) {
+			t.Fatalf("%s must require operator: ungated, any logged-in user can create a campaign in someone else's name and bill their settlement", cmd)
+		}
+	}
+	// 反向：领取与核销是用户动作，绝不能被顺手一起收紧（那会把刚接上的
+	// BENEFIT-WIRE-001 权益链路重新锁死）。
+	for _, cmd := range []string{"ClaimBenefit", "RedeemBenefit"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: it is a normal user action, gating it would re-break the benefit flow", cmd)
+		}
+	}
+}
+
 // Audit tripwire (Pass 1 — Scene R15.13): the public-read allowlist is
 // the single source of truth for "which List* commands can be called
 // without authentication". Adding or removing entries here MUST be
