@@ -2,6 +2,7 @@ package storeonboarding
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -39,6 +40,38 @@ func (r *MemoryRepository) AddRecommendation(_ context.Context, rec StoreRecomme
 	}
 	r.recommendations = append(r.recommendations, rec)
 	return nil
+}
+
+// ListRecommendations 是运营队列的读路径（STORE-REC-002）：最新的在前，
+// 支持城市 / origin 过滤。空结果返回空切片而不是 nil —— 调用方（命令层）
+// 依赖这一点把 `[]` 而不是 `null` 发给客户端。
+func (r *MemoryRepository) ListRecommendations(_ context.Context, filter RecommendationFilter) ([]StoreRecommendation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	matched := make([]StoreRecommendation, 0, len(r.recommendations))
+	for _, rec := range r.recommendations {
+		if filter.City != "" && rec.City != filter.City {
+			continue
+		}
+		if filter.Origin != "" && rec.Origin != filter.Origin {
+			continue
+		}
+		matched = append(matched, rec)
+	}
+	sort.SliceStable(matched, func(i, j int) bool {
+		return matched[i].CreatedAt.After(matched[j].CreatedAt)
+	})
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = ListLimitDefault
+	}
+	if limit > ListLimitMax {
+		limit = ListLimitMax
+	}
+	if limit > len(matched) {
+		limit = len(matched)
+	}
+	return matched[:limit], nil
 }
 
 // Recommendations 返回已受理的全部推荐（测试用），按写入顺序。

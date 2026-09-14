@@ -88,6 +88,9 @@ var operatorCommandTypes = map[string]bool{
 	// PROXY_OPERATOR_PRINCIPALS 白名单，未设 = 拒。
 	"RecordAuthorityRequest":  true,
 	"RecordAuthorityResponse": true,
+	// STORE-REC-002: 运营的推荐评估队列。推荐记录含推荐人账号 id 与推荐理由，
+	// 属于个人信息 —— 普通用户绝不能枚举别人的推荐。
+	"ListStoreRecommendations": true,
 }
 
 func requiresOperator(commandType string) bool {
