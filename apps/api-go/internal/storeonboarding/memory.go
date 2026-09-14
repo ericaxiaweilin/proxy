@@ -11,6 +11,7 @@ import (
 type MemoryRepository struct {
 	mu              sync.Mutex
 	recommendations []StoreRecommendation
+	dispositions    []Disposition
 	fail            bool
 }
 
@@ -61,6 +62,17 @@ func (r *MemoryRepository) ListRecommendations(_ context.Context, filter Recomme
 		if filter.Origin != "" && rec.Origin != filter.Origin {
 			continue
 		}
+		// STORE-REC-007: 「我推荐的店」按推荐人收敛作用域。
+		if filter.RecommendedBy != "" && rec.RecommendedBy != filter.RecommendedBy {
+			continue
+		}
+		rec.attachLatestDisposition(r.dispositions)
+		// Status：默认（待评估）只留还没出结论的，评估完一条它就得从默认队列里
+		// 消失，否则队列越用越长，运营要在里面翻旧账。但采纳 / 不采纳必须能单独
+		// 查出来 —— 否则采纳完这条推荐就凭空消失了，运营看不到自己批过什么。
+		if !matchesStatus(filter.Status, rec.Decision) {
+			continue
+		}
 		matched = append(matched, rec)
 	}
 	sort.SliceStable(matched, func(i, j int) bool {
@@ -77,6 +89,74 @@ func (r *MemoryRepository) ListRecommendations(_ context.Context, filter Recomme
 		limit = len(matched)
 	}
 	return matched[:limit], nil
+}
+
+// AddDisposition 追加一条评估结论（STORE-REC-004）。append-only：只增不改，
+// 改主意由调用方再追加一条，读的时候取时间最新的一条。
+func (r *MemoryRepository) AddDisposition(_ context.Context, d Disposition) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail {
+		return ErrRecommendationRepositoryDown
+	}
+	if strings.TrimSpace(d.RecommendationID) == "" {
+		return ErrDispositionRecommendationRequired
+	}
+	if d.Decision != AcceptDecision && d.Decision != RejectDecision {
+		return ErrDispositionDecisionInvalid
+	}
+	if strings.TrimSpace(d.DecidedBy) == "" {
+		return ErrDispositionDeciderRequired
+	}
+	r.dispositions = append(r.dispositions, d)
+	return nil
+}
+
+// FindRecommendation 按 id 取一条推荐（STORE-REC-006）。
+func (r *MemoryRepository) FindRecommendation(_ context.Context, id string) (StoreRecommendation, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail {
+		return StoreRecommendation{}, false, ErrRecommendationRepositoryDown
+	}
+	for _, rec := range r.recommendations {
+		if rec.ID == id {
+			return rec, true, nil
+		}
+	}
+	return StoreRecommendation{}, false, nil
+}
+
+// Dispositions 返回全部结论（测试用），按写入顺序。
+func (r *MemoryRepository) Dispositions() []Disposition {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Disposition, len(r.dispositions))
+	copy(out, r.dispositions)
+	return out
+}
+
+// attachLatestDisposition 把最新一条结论挂到推荐上（没有就保持空）。
+// 「最新」按 CreatedAt 判定 —— 因为改主意是追加，不是修改。
+func (rec *StoreRecommendation) attachLatestDisposition(all []Disposition) {
+	var latest *Disposition
+	for i := range all {
+		d := &all[i]
+		if d.RecommendationID != rec.ID {
+			continue
+		}
+		if latest == nil || d.CreatedAt.After(latest.CreatedAt) {
+			latest = d
+		}
+	}
+	if latest == nil {
+		return
+	}
+	decidedAt := latest.CreatedAt
+	rec.Decision = latest.Decision
+	rec.DecisionReason = latest.Reason
+	rec.DecidedBy = latest.DecidedBy
+	rec.DecidedAt = &decidedAt
 }
 
 // Recommendations 返回已受理的全部推荐（测试用），按写入顺序。

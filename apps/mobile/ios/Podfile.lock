@@ -33,6 +33,8 @@ PODS:
     - ExpoModulesCore
   - ExpoAudio (57.0.4):
     - ExpoModulesCore
+  - ExpoClipboard (57.0.2):
+    - ExpoModulesCore
   - ExpoCrypto (57.0.1):
     - ExpoModulesCore
   - ExpoDomWebView (57.0.1):
@@ -104,6 +106,8 @@ PODS:
     - hermes-engine/Pre-built (= 250829098.0.16)
   - hermes-engine/Pre-built (250829098.0.16)
   - ProxyNativeTabBar (1.0.0):
+    - ExpoModulesCore
+  - ProxyScreenProtection (1.0.0):
     - ExpoModulesCore
   - RCTDeprecation (0.86.2)
   - RCTRequired (0.86.2)
@@ -1644,6 +1648,28 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - react-native-view-shot (5.1.1):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - React-NativeModulesApple (0.86.2):
     - hermes-engine
     - React-callinvoker
@@ -2094,6 +2120,7 @@ DEPENDENCIES:
   - "Expo (from `../../../node_modules/.pnpm/expo@57.0.12_@babel+core@7.29.7_supports-color@8.1.1__@expo+dom-webview@57.0.1_react-do_dfcab389c0ed814c3724132c2d193e33/node_modules/expo`)"
   - "ExpoAsset (from `../../../node_modules/.pnpm/expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8_2f548c49a560756b2f323de94f824054/node_modules/expo-asset/ios`)"
   - "ExpoAudio (from `../../../node_modules/.pnpm/expo-audio@57.0.4_expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29._ad656b07e45440d1edcf06126209f749/node_modules/expo-audio/ios`)"
+  - "ExpoClipboard (from `../../../node_modules/.pnpm/expo-clipboard@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-colo_681c61d1b60e8e6b87150a9db4d207d5/node_modules/expo-clipboard/ios`)"
   - "ExpoCrypto (from `../../../node_modules/.pnpm/expo-crypto@57.0.1_expo@57.0.12/node_modules/expo-crypto/ios`)"
   - "ExpoDomWebView (from `../../../node_modules/.pnpm/@expo+dom-webview@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-c_797694d88359341a42e63ef165daca13/node_modules/@expo/dom-webview/ios`)"
   - "ExpoFileSystem (from `../../../node_modules/.pnpm/expo-file-system@57.0.5_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-co_a536d157c44106a14233dd5d58674f5f/node_modules/expo-file-system/ios/ExpoFileSystem.podspec`)"
@@ -2117,6 +2144,7 @@ DEPENDENCIES:
   - "FBLazyVector (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/Libraries/FBLazyVector`)"
   - "hermes-engine (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)"
   - ProxyNativeTabBar (from `../modules/proxy-native-tab-bar/ios`)
+  - ProxyScreenProtection (from `/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../modules/proxy-screen-protection/ios`)
   - "RCTDeprecation (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)"
   - "RCTRequired (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/Libraries/Required`)"
   - "RCTSwiftUI (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/RCTSwiftUI`)"
@@ -2157,6 +2185,7 @@ DEPENDENCIES:
   - "React-mutationobservernativemodule (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/mutationobserver`)"
   - "react-native-maps (from `../../../node_modules/.pnpm/react-native-maps@1.29.0_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@_75902684cc91495259b91bcbfb06881b/node_modules/react-native-maps`)"
   - "react-native-safe-area-context (from `../../../node_modules/.pnpm/react-native-safe-area-context@5.7.0_react-native@0.86.2_@babel+core@7.29.7_supports-co_c12b47d9bf65f88fca95e0f12a866a0c/node_modules/react-native-safe-area-context`)"
+  - react-native-view-shot (from `/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../node_modules/react-native-view-shot`)
   - "React-NativeModulesApple (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)"
   - "React-networking (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/networking`)"
   - "React-oscompat (from `../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/oscompat`)"
@@ -2206,6 +2235,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8_2f548c49a560756b2f323de94f824054/node_modules/expo-asset/ios"
   ExpoAudio:
     :path: "../../../node_modules/.pnpm/expo-audio@57.0.4_expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29._ad656b07e45440d1edcf06126209f749/node_modules/expo-audio/ios"
+  ExpoClipboard:
+    :path: "../../../node_modules/.pnpm/expo-clipboard@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-colo_681c61d1b60e8e6b87150a9db4d207d5/node_modules/expo-clipboard/ios"
   ExpoCrypto:
     :path: "../../../node_modules/.pnpm/expo-crypto@57.0.1_expo@57.0.12/node_modules/expo-crypto/ios"
   ExpoDomWebView:
@@ -2253,6 +2284,8 @@ EXTERNAL SOURCES:
     :tag: hermes-v250829098.0.16
   ProxyNativeTabBar:
     :path: "../modules/proxy-native-tab-bar/ios"
+  ProxyScreenProtection:
+    :path: "/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../modules/proxy-screen-protection/ios"
   RCTDeprecation:
     :path: "../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -2331,6 +2364,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/react-native-maps@1.29.0_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@_75902684cc91495259b91bcbfb06881b/node_modules/react-native-maps"
   react-native-safe-area-context:
     :path: "../../../node_modules/.pnpm/react-native-safe-area-context@5.7.0_react-native@0.86.2_@babel+core@7.29.7_supports-co_c12b47d9bf65f88fca95e0f12a866a0c/node_modules/react-native-safe-area-context"
+  react-native-view-shot:
+    :path: "/Users/thanhhuyennguyen/work/kake/apps/mobile/ios/../node_modules/react-native-view-shot"
   React-NativeModulesApple:
     :path: "../../../node_modules/.pnpm/react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1__@types+react@19.2.18_react@19.2.3_supports-color@8.1.1/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-networking:
@@ -2412,6 +2447,7 @@ SPEC CHECKSUMS:
   Expo: 423915c60a05e620e67a1f1bfcb612a217fd6f1b
   ExpoAsset: 64e4684e2cb6c45a52009f91e18c45ff56ed4a09
   ExpoAudio: bd075db379c5a70b7f9a7b5b541d5c67f59b5dca
+  ExpoClipboard: 15b8cc88075d7c50af165ed8fca0a76915903bba
   ExpoCrypto: 366380ffafeb22cc9795438cddcbfa299e1aaf42
   ExpoDomWebView: beaec034e51bd028428b98bb1f2633ab79c6d095
   ExpoFileSystem: 0e74ed1536e1643f4a352d84ed55d311d795828d
@@ -2433,8 +2469,9 @@ SPEC CHECKSUMS:
   ExpoVideo: b1d9a325ddcd4f3ed8ccb374c01b688e98bc6a04
   ExpoWebBrowser: 9b98d939d5f1c5dd8f523f0a0683056fb1204434
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
-  hermes-engine: 16e790118c4aefa1c09a1119de194e86d22cfa15
+  hermes-engine: e09f68f6158db2be81404a3b89155eecf0d6d5ed
   ProxyNativeTabBar: 8c769bb027f5ba481406304e348dd14cf2a32c57
+  ProxyScreenProtection: 085f64c68be82c2fcca49fe513ac119091080f56
   RCTDeprecation: bccb6545c26db881ecddfd83a3f9ea82aba1605f
   RCTRequired: b2f74764d596fc0051f00fee94b49bf41a6f7f5a
   RCTSwiftUI: c6d6a31b849b9dfa64c33b55dc91ac15dd55774c
@@ -2474,6 +2511,7 @@ SPEC CHECKSUMS:
   React-mutationobservernativemodule: 58f6d2adf7d98e72b241608dfa2ddce414d2a4e7
   react-native-maps: 7e3af023b773d6670e3c07e9c8170af842b243e0
   react-native-safe-area-context: 6b4966397ada0f7dd481e4486a2ef936834861a1
+  react-native-view-shot: 2829bd78c1fef42db12553bf85833e05a1a73609
   React-NativeModulesApple: 167e532fb9bae30f3c66636b8ee0092bab263667
   React-networking: 89f6b69755a3176f30e56ba1ba8e214b1518ecfb
   React-oscompat: db6675ddaef3bddd1b41533627f3d26ec710c05f
@@ -2512,6 +2550,6 @@ SPEC CHECKSUMS:
   RNSVG: 3fe8590403ac9f107b4d14591bc6e54da4894e5c
   Yoga: 9891cfb1c680f64de9c41b09e7453dea33454d2b
 
-PODFILE CHECKSUM: 17e36df0b0a9d1903d3f933c705f77462ad9d8f4
+PODFILE CHECKSUM: 4a6e9e5c56e756073671f9f189cc6ff5eb4da90c
 
 COCOAPODS: 1.16.2

@@ -4,6 +4,140 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 195 — 2026-09-14
+
+- PROFILE-FROM-ANY-TAB-001 的**代码**落地：`app-shell.tsx`（两个个人主页分支
+  提到 tab 分支之上 + `isNavVisible` 补 `!openHumanProfile`）、
+  `app-shell.test.ts`（4 条顺序/接线测试）、`check-regression-contracts.sh`
+  （PROFILE-FROM-ANY-TAB-001 回归钉）。**无新增视觉改动** —— 只是让既有的
+  全屏主页目的地真的能被读到。
+  - **为什么 193 和 195 说的是同一件事**：Rev 193 的条目已经完整描述了这个改动，
+    但它在 `ee362ab`（PROFILE-QR-002）里被同批带走了 —— 那个提交因为「基线敏感
+    文件必须在同一提交里登记」这条规则，收编了我当时尚未提交的 baseline 改动
+    （Rev 194 的备注里也写明了这一点，一字未改）。
+  - 本次提交动的是基线敏感文件 `app-shell.tsx` **本身**，按同一条规则必须再登记
+    一次，所以补此条。**193 = 提前落地的登记，195 = 代码落地**，两者描述同一个改动。
+
+## Revision 194 — 2026-09-14
+
+- PROFILE-QR-002：个人二维码常规能力（`me.tsx` 个人qr页 + `friend-crm.tsx`
+  邀请码 + `QrCard` 小卡）。有视觉改动：我的→我的二维码（点码放大 296 全屏
+  黑底白卡、新增「分享二维码」按钮、链接文本可选）；邀请 sheet 二维码同口径。
+  - **原状**：三处二维码全是裸 `proxy.app/...`（相机/浏览器/分享面板不认）、
+    纠错等级 M、点不开大图；复制/分享出去的也是裸链接，很多 App 点不动。
+  - **改后**：编码/复制/分享一律 `https://` 全量（`profile-qr.ts` 纯函数 +
+    9 条单测，坏 handle fail-closed 不画坏码）；ecl M→H；白底卡片留足
+    quiet zone；分享走 view-shot 截白底卡经系统分享（面板自带存相册，
+    无需新权限）。
+  - **备注**：本提交同批带上他人已写好的 Rev 193 原文（一字未改），因门禁
+    要求基线登记必须同提交；Rev 193 对应的 app-shell 改动不在本提交内。
+
+## Revision 193 — 2026-09-14
+
+- PROFILE-FROM-ANY-TAB-001：动态页点「访问个人主页」修好。
+  **无视觉改动**（只把分支位置从 tab 分支里面挪到上面），但 `app-shell.tsx` 是
+  基线敏感文件，故仍记一条。
+  - **原状**：动态 → 帖文 → 点头像 → 菜单「访问个人主页」，点了没反应。
+  - **根因**：`openHumanProfile` 的**写入方在 FEED**（feed.tsx 点头像 →
+    `onOpenProfile` → app-shell 的 `setOpenHumanProfile`），但读它的渲染分支
+    此前只写在 `tab === "HOME"` 里面。链子是
+    `realitySceneOpen → tab === "HOME" → tab === "MARKET" → tab === "FEED" → …`，
+    在动态页 `tab === "FEED"` 就先返回了 —— 状态被设了却**没有任何分支去读它**，
+    菜单一关，屏幕纹丝不动。
+  - **同一洞的第二份**：`openAIProfile` 同样只在 HOME 分支里，而动态页可以
+    → 现实场景图 → 点 AI 账号（`onOpenRealityScene` 就在 FeedSurface 上），
+    此时 tab 仍是 FEED，一样进不去。两条一起修。
+  - **修法**：把两个个人主页分支提到与 `realitySceneOpen` 同级（覆盖整个 body
+    的目的地，不属于任何一个 tab），并从 HOME 分支里移除。同时把
+    `!openHumanProfile` 加进 `isNavVisible` —— 与 AI 主页一致：全屏、收掉导航
+    chrome、用返回键退出；否则从动态进入后底栏还在，切个 tab 会被留在一个
+    没人负责关闭的主页上。
+  - 回归钉 PROFILE-FROM-ANY-TAB-001 钉的是**顺序**而不是「存在」：
+    `<OtherProfileSurface` 一直都在文件里，只断言它存在的话，把它挪回 HOME
+    分支测试依然全绿 —— 那正是当初漏掉这个 bug 的原因。已做反向注入验证
+    （把分支挪回 HOME 分支 → 测试与门禁同时变红，字节级还原）。
+
+## Revision 192 — 2026-09-14
+
+- STORE-REC-007：新增「我推荐的店」，推荐人能看见自己那条推荐的进展。
+  有视觉改动：我的 → 企业 / 店铺 → 我推荐的店。
+  - **原状**：运营队列 `ListStoreRecommendations` 是 operator-only，普通用户
+    调不动 —— 推荐人提交完就再无回音，永远不知道自己推荐的那家店被采纳了没有。
+  - **为什么是缺口**：采纳只代表运营批准接入，**不等于店铺已存在**；而能完成
+    入驻的人通常就是推荐人本人。他看不到「该去建店了」，
+    「已采纳 · 待接入」那一列就永远等不到人 —— 队列看起来办结了，事情却没发生。
+  - 服务端新增 `ListMyStoreRecommendations`（非 operator 命令），作用域由服务端
+    强制收敛到 `e.Actor.ID`，调用方传参无法放大。
+  - 采纳态明确写成「已采纳 · 等你建店」，并说明批准不等于店铺已存在。
+
+## Revision 191 — 2026-09-14
+
+- BENEFIT-WIRE-001：把写好了但从没接线的权益链路接进 App。
+  有视觉改动：我的 → 我的市场 → 我的权益；我的（企业身份）→ 商家 · 我的 → 权益核销。
+  - **原状**：`BenefitClaimScreen` / `BenefitRedeemScreen` / `benefit-home-card`
+    三个组件都写好了，`benefit-client` 方法齐全，服务端命令也在契约里 ——
+    但**没有任何界面渲染它们**，`listCampaigns` / `getClaim` / `checkEligibility`
+    一个都没人调。命令、客户端、UI 三者之间缺一段接线，用户永远看不到入口。
+    这是第六次「通道建好了，没有调用方」。
+  - 补的是最上游那一段：新增 `benefit-hub.tsx` 列出 ACTIVE 活动，点进去才进
+    `BenefitClaimScreen` —— 后者需要 `campaignId`，所以「列活动」这步省不掉，
+    不能凭空跳进去。只列 ACTIVE：DRAFT / ENDED 的活动列出来只会让人点进去
+    发现领不了。
+  - 商家侧核销必须绑定店铺主体：**没有主体时说清楚**，而不是塞一个空
+    `merchantId` 让它静默失败 —— 那样运营只会看到「扫了没反应」，
+    根本不知道是主体没绑。
+
+## Revision 190 — 2026-09-14
+
+- 推荐评估队列（STORE-REC-002/004）对 **BUSINESS 身份**开放入口。
+  有视觉改动：我的（企业身份）→ 商家 · 我的 → 推荐评估队列。
+  - 此前入口只挂在 REQUESTER 身份的「企业 / 店铺」组里，而运营更可能挂在
+    BUSINESS 身份（"Business Principal · 当前你有经营权限"）下 —— 功能建好了，
+    但它的使用者进不去。
+  - 队列本身仍是 operator-only（服务端 `PROXY_OPERATOR_PRINCIPALS` 白名单）。
+    没有运营权限的商家点进去看到的是明确的「这个账号没有运营权限」，
+    **不是一个空列表** —— 空列表会被读成「没人推荐这家店」。
+
+## Revision 189 — 2026-09-14
+
+- STORE-REC-003：让小美（AI）推荐真正产生数据。有视觉改动：我的→推荐商铺进体系，
+  新增「让小美帮你整理」。
+  - **原状：origin="AI" 是一条从来没跑过数据的通道。** schema、服务、运营队列的
+    「小美推荐」筛选与徽章全都支持 AI 来源，但 `RecommendStore` 唯一的调用点写死
+    `origin="USER"` —— 队列里那个筛选器永远筛不出任何东西，是死 UI。而 Master PRD
+    §15 里，AI（小美）本是体系增长的一半推荐来源。又是同一类坑：**通道建好了，
+    没有调用方**。
+  - 新增 `SuggestStoreRecommendation`（**只读**）：小美把用户随口说的话整理成
+    {店名, 城市, 品类, 理由} 草稿；用户确认后才由 `RecommendStore` 落库并记
+    `origin="AI"`。小美不直接写库，因此绕不过服务端那套 fail-closed 校验。
+  - **不许编造**：用户没提到的字段留空，由用户自己补 —— 一旦服务端替他填个默认
+    城市，运营就会照着一条假推荐去做评估。
+  - **fail-closed**：模型底座未配置时用 `AI_NOT_CONFIGURED` 明确拒绝，App 据此把
+    「让小美整理」入口**整个藏起来**。弹红字是误导（重试也没用），留一个点了没
+    反应的按钮更糟。模型故障与输出非法是两个错误码（可重试 vs 不可重试）。
+  - **顺带修掉一个同类的隐性降级**：`main.go` 里 `SetModelStack` 原先在 PG 替换
+    **之前**注入，而 `NewWithRepository` 不携带 modelstack —— 配了 `DATABASE_URL`
+    时适配器被静默丢弃，AI 能力退化成「永远 AI_NOT_CONFIGURED」，客户端又据此隐藏
+    入口，从外部看这个功能就像从来没做过。marketplace 的 OPP-SUGGEST-001 正是踩在
+    这个坑上。已加顺序 pin 钉住（负向注入验证会变红）。
+
+## Revision 188 — 2026-09-14
+
+- STORE-REC-002（App 侧运营队列）：新增 `apps/mobile/src/surfaces/store-recommendation-queue.tsx`，
+  并在「我的 → 企业 / 店铺」下挂「推荐评估队列」入口，运营可在 App 内查看用户与小美
+  推荐进体系的商铺。有视觉改动：我的→企业 / 店铺→推荐评估队列 子页。
+  - **「没有权限」和「没有数据」必须长得不一样**：命中 `OPERATOR_PRIVILEGE_REQUIRED`
+    时给出明确的权限说明，而不是渲染一个空列表 —— 空列表会让运营以为「系统里没有
+    待评估的推荐」，而真相只是当前账号不在运营白名单里。
+  - 城市 / 来源筛选走 `ListStoreRecommendations`；来源为 ALL 时不传 origin，
+    避免用一个空字符串把结果筛没了。
+- 二维码真实化收尾：`QrCard`（`me-profile-components.tsx`）支持 `qrValue`，个人主页卡
+  与商家身份卡都渲染真实可扫描码，不再是 FakeQr 假图。商家码指向
+  `proxy.app/store/{merchantId}`，merchantId 取「显式选中的商家或第一个 ACTIVE 店铺」，
+  没有店铺才回落个人主页 —— 否则会出现名字显示店铺、扫出来却是个人主页的错位。
+- 好友邀请 sheet 收尾：补全复制邀请链接（expo-clipboard）与复制成功提示，
+  此前 `Clipboard` 已 import 但没有任何调用点，复制按钮点了没反应。
+
 ## Revision 187 — 2026-09-14
 
 - PROFILE-QR-001：个人二维码真实化（react-native-qrcode-svg 编码

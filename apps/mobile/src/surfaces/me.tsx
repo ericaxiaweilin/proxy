@@ -16,7 +16,9 @@ import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
+import { captureRef } from "react-native-view-shot";
 import { Directory, File, Paths } from "expo-file-system";
+import { profileQrPayload } from "../profile-qr";
 import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
 import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
 import { createLastSignInStore } from "../last-signin-store";
@@ -26,6 +28,7 @@ import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
+import { StoreRecommendationQueue } from "./store-recommendation-queue";
 import { CreatorInvitationCard } from "./creator-application";
 import { FriendCrmSurface } from "./friend-crm";
 import { AdaptiveMediaCollection, MediaViewer, SinglePostImage } from "./feed";
@@ -38,7 +41,13 @@ import { resolvePrivacyRequestClient } from "../privacy-client";
 import type { FulfillmentClient, FulfillmentOrder } from "../fulfillment-client";
 import type { EngagementClient } from "../engagement-client";
 import type { ModerationClient } from "../moderation-client";
-import { StoreOnboardingClient } from "../storeonboarding-client";
+import { StoreOnboardingClient, StoreRecommendationAiUnavailableError } from "../storeonboarding-client";
+// BENEFIT-WIRE-001: 权益链路。命令、client、界面早就写好了，但从没被渲染过 ——
+// 这里补的是「入口 + 接线」那一段。
+import { BenefitClient } from "../benefit-client";
+import { BenefitHubSurface } from "./benefit-hub";
+import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
+import { MyStoreRecommendations } from "./my-store-recommendations";
 import { type LocalNetClient } from "../localnet-client";
 import {
   parentPostIdsForReplies,
@@ -185,7 +194,8 @@ const REQUESTER_ME: PersonaConfig = {
         { icon: "diamond", label: "我的订单", desc: "我发布的 / 我参与的已成交订单", route: "myorders" },
         { icon: "clock", label: "能力与可用时间", desc: "能力、主题、区域与空闲时间", route: "available" },
         { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", route: "myactivities" },
-        { icon: "star", label: "收藏", desc: "商家、Creator、动态与活动", route: "favorites" }
+        { icon: "star", label: "收藏", desc: "商家、Creator、动态与活动", route: "favorites" },
+        { icon: "gift", label: "我的权益", desc: "可领取的活动权益，领取后到店出示验证码核销", route: "benefits" }
       ]
     },
     {
@@ -194,7 +204,11 @@ const REQUESTER_ME: PersonaConfig = {
       hint: "经营与体系共建 · 独立模块（原始设计：发展 builder，小美与用户推荐商铺进入体系）",
       rows: [
         { icon: "store-lines", label: "我的企业 / 店铺", desc: "有经营权限时进入 Business Workspace", route: "bdash" },
-        { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" }
+        { icon: "spark", label: "推荐商铺进体系", desc: "把好的场地 / 商家推荐给 Proxy 平台，运营评估后接入", route: "recommendstore" },
+        // STORE-REC-007: 推荐完就没有回音了 —— 推荐人看不到自己那条被采纳了没有，
+        // 而能完成入驻的人通常就是他。队列是运营专属的，这一条是给推荐人自己的。
+        { icon: "ring", label: "我推荐的店", desc: "查看我推荐的店铺现在什么状态，被采纳后去建店", route: "mystorerecs" },
+        { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" }
       ]
     },
     {
@@ -245,7 +259,15 @@ const BUSINESS_ME: PersonaConfig = {
         { icon: "↗", label: "活动导流", desc: "商家活动 · 可报名", route: "merchantcampaign" },
         { icon: "▤", label: "线上店铺", desc: "实时数据已接入", grad: true, route: "merchantstorefront" },
         { icon: "₫", label: "销售中心", desc: "功能预览 · 实时数据待接入", route: "outcomehistory" },
-        { icon: "✦", label: "经营", desc: "功能预览 · 实时数据待接入", route: "enterpriseops" }
+        { icon: "✦", label: "经营", desc: "功能预览 · 实时数据待接入", route: "enterpriseops" },
+        // STORE-REC-002/004: 评估队列对 BUSINESS 身份也要可达 —— 运营更可能挂在这个
+        // 身份下，而此前入口只挂在 REQUESTER 的「企业 / 店铺」组里。
+        // 队列本身是 operator-only（服务端白名单），普通商家点进去会看到明确的
+        // 「没有运营权限」，而不是一个空列表。
+        { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" },
+        // BENEFIT-WIRE-001: 商家侧核销。需要店铺主体，没有主体时子页会说清楚，
+        // 而不是塞一个空 merchantId 让核销必然失败。
+        { icon: "gift", label: "权益核销", desc: "扫描用户出示的权益验证码并确认核销", route: "benefitredeem" }
       ]
     }
   ]
@@ -390,6 +412,11 @@ export function MeSurface({
   // fake verified badge entirely.
   const merchantIdentity = useMerchantIdentity();
   const liveShopName = merchantIdentity.accounts[0]?.name;
+  // 商家二维码要指向真实门店主体：优先用户显式选中的商家，否则用第一个 ACTIVE
+  // 店铺（与 liveShopName 同一个账号，避免名字显示店铺、二维码却指向个人主页）。
+  const merchantId = merchantIdentity.merchantId ?? merchantIdentity.accounts[0]?.id;
+  // BENEFIT-WIRE-001: 权益 client。构造只吃 authClient，会话从 transport 里走。
+  const [benefitClient] = useState(() => new BenefitClient({ authClient: sessionAuthClient }));
   // 现实资料：之前两个按钮只 count+1，素材数组写死 3 项，超限后点按无变化、
   // 也从不打开 picker。现在存真实条目（label+uri），拍照/上传都走 ImagePicker，
   // 列表随条目增长，无静默上限。
@@ -481,8 +508,27 @@ export function MeSurface({
   const [storeRecBusy, setStoreRecBusy] = useState(false);
   const [storeRecError, setStoreRecError] = useState<string | undefined>(undefined);
   const [storeRecDone, setStoreRecDone] = useState<string | undefined>(undefined);
+  // STORE-REC-003: 小美（AI）整理。origin 决定这条推荐记成「用户推荐」还是
+  // 「小美推荐」—— 默认 USER，只有小美真的整理过才切成 AI。
+  const [storeRecNote, setStoreRecNote] = useState("");
+  const [storeRecOrigin, setStoreRecOrigin] = useState<"USER" | "AI">("USER");
+  const [storeRecAiBusy, setStoreRecAiBusy] = useState(false);
+  // 底座未配置时把入口整个藏掉：留一个点了没反应的按钮，比没有这个功能更糟。
+  const [storeRecAiAvailable, setStoreRecAiAvailable] = useState(true);
+  const [storeRecAiNote, setStoreRecAiNote] = useState<string | undefined>(undefined);
   // 个人二维码复制反馈（PROFILE-QR-001）。
   const [qrNotice, setQrNotice] = useState<string | undefined>(undefined);
+  // PROFILE-QR-002：放大扫码 + 分享二维码图。
+  const [qrZoomOpen, setQrZoomOpen] = useState(false);
+  const qrShotRef = useRef<View>(null);
+  async function shareQrImage(): Promise<void> {
+    try {
+      const uri = await captureRef(qrShotRef, { format: "png", quality: 1 });
+      await Share.share({ url: uri, message: `查看 ${profileDraft.name} 的 Proxy 主页` });
+    } catch {
+      setQrNotice("分享失败，请重试或直接复制链接。");
+    }
+  }
   async function copyProfileLink(link: string): Promise<void> {
     try {
       await Clipboard.setStringAsync(link);
@@ -497,13 +543,51 @@ export function MeSurface({
     setStoreRecDone(undefined);
     try {
       const client = new StoreOnboardingClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });
-      await client.recommendStore({ ...storeRecDraft, origin: "USER" });
-      setStoreRecDone("已提交，运营会评估这家店是否接入体系。谢谢推荐！");
+      await client.recommendStore({ ...storeRecDraft, origin: storeRecOrigin });
+      setStoreRecDone(
+        storeRecOrigin === "AI"
+          ? "已提交，这条记为「小美推荐」，运营会评估这家店是否接入体系。"
+          : "已提交，运营会评估这家店是否接入体系。谢谢推荐！"
+      );
       setStoreRecDraft({ storeName: "", city: "", category: "", reason: "" });
+      setStoreRecNote("");
+      setStoreRecOrigin("USER");
+      setStoreRecAiNote(undefined);
     } catch (err) {
       setStoreRecError(err instanceof Error ? err.message : "提交失败，请稍后重试");
     } finally {
       setStoreRecBusy(false);
+    }
+  }
+
+  // STORE-REC-003: 让小美把随口说的话整理成草稿。**只读** —— 草稿要用户确认后
+  // 才由 recommendStore 落库，小美不直接写库，也就绕不过服务端那套校验。
+  // 小美没填的字段保持空，让用户自己补，绝不替他编一个城市或理由出来。
+  async function suggestWithXiaomei(): Promise<void> {
+    setStoreRecAiBusy(true);
+    setStoreRecError(undefined);
+    setStoreRecAiNote(undefined);
+    try {
+      const client = new StoreOnboardingClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore });
+      const draft = await client.suggestRecommendation(storeRecNote);
+      setStoreRecDraft({ storeName: draft.storeName, city: draft.city, category: draft.category, reason: draft.reason });
+      setStoreRecOrigin("AI");
+      const missing = [
+        draft.storeName ? "" : "店名",
+        draft.city ? "" : "城市",
+        draft.reason ? "" : "推荐理由"
+      ].filter((label) => label !== "");
+      setStoreRecAiNote(
+        missing.length > 0
+          ? `小美整理好了，但你没提到${missing.join("、")} —— 补上再提交，这几项我们不替你猜。`
+          : "小美整理好了，确认后会记为「小美推荐」。"
+      );
+    } catch (err) {
+      // 能力不存在 ≠ 操作失败：不弹红字，直接把入口藏起来。
+      if (err instanceof StoreRecommendationAiUnavailableError) setStoreRecAiAvailable(false);
+      else setStoreRecError(err instanceof Error ? err.message : "小美整理失败，请稍后重试");
+    } finally {
+      setStoreRecAiBusy(false);
     }
   }
   const socialSettingsHydrated = useRef(false);
@@ -1514,9 +1598,10 @@ export function MeSurface({
             <Text style={styles.customSectionHint}>分享主页链接</Text>
             <QrCard
               title={`${profileDraft.name} · Proxy`}
-              desc="分享你的 Proxy 主页链接（二维码图形升级中，先分享链接）。"
+              desc="分享你的 Proxy 主页链接，扫码即可打开。"
               actionLabel="分享主页链接"
               onAction={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
+              qrValue={`proxy.app/@${profileDraft.handle}`}
               alignCenter
             />
 
@@ -1750,7 +1835,21 @@ export function MeSurface({
     }
 
     if (subPage.route === "personalqr") {
-      const profileLink = `proxy.app/@${profileDraft.handle}`;
+      // PROFILE-QR-002：编码/复制/分享一律 https 全量；坏 handle 不画坏码。
+      const profileLink = profileQrPayload(profileDraft.handle);
+      if (!profileLink) {
+        return contentWrapper(
+          <View style={styles.root}>
+            <ScrollView contentContainerStyle={styles.content}>
+              <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+                <Text style={styles.subPageBackText}>‹ 返回</Text>
+              </Pressable>
+              <Text style={styles.subPageTitle}>我的二维码</Text>
+              <Text style={styles.qrRealHint}>先设置你的个人主页名，才能生成二维码。</Text>
+            </ScrollView>
+          </View>
+        );
+      }
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
@@ -1760,12 +1859,19 @@ export function MeSurface({
             <Text style={styles.subPageTitle}>我的二维码</Text>
 
             <View style={styles.qrRealCard}>
-              <QRCode value={profileLink} size={208} color="#17131F" backgroundColor="#FFFFFF" ecl="M" />
-              <Text style={styles.qrRealHandle}>{profileLink}</Text>
-              <Text style={styles.qrRealHint}>扫描即打开你的 Proxy 主页；TikTok / Zalo 是否展示，继续遵循你的可见范围。</Text>
+              <View ref={qrShotRef} collapsable={false} style={styles.qrShotWrap}>
+                <Pressable onPress={() => setQrZoomOpen(true)} accessibilityLabel="放大二维码" accessibilityRole="button">
+                  <QRCode value={profileLink} size={208} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+                </Pressable>
+                <Text selectable style={styles.qrRealHandle}>{profileLink}</Text>
+              </View>
+              <Text style={styles.qrRealHint}>点二维码可放大，方便对方扫描；TikTok / Zalo 是否展示，继续遵循你的可见范围。</Text>
               <View style={styles.qrRealActions}>
                 <Pressable onPress={() => void copyProfileLink(profileLink)} style={styles.qrRealBtnGhost}>
                   <Text style={styles.qrRealBtnTextGhost}>复制链接</Text>
+                </Pressable>
+                <Pressable onPress={() => void shareQrImage()} style={styles.qrRealBtnGhost}>
+                  <Text style={styles.qrRealBtnTextGhost}>分享二维码</Text>
                 </Pressable>
                 <Pressable onPress={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：${profileLink}` }); }} style={styles.qrRealBtn}>
                   <Text style={styles.qrRealBtnText}>分享</Text>
@@ -1773,6 +1879,15 @@ export function MeSurface({
               </View>
               {qrNotice ? <Text style={styles.qrRealNotice}>{qrNotice}</Text> : null}
             </View>
+            <Modal animationType="fade" onRequestClose={() => setQrZoomOpen(false)} transparent visible={qrZoomOpen}>
+              <Pressable onPress={() => setQrZoomOpen(false)} accessibilityLabel="关闭放大的二维码" style={styles.qrZoomScrim}>
+                <View style={styles.qrZoomCard}>
+                  <QRCode value={profileLink} size={296} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+                  <Text style={styles.qrRealHandle}>{profileLink}</Text>
+                  <Text style={styles.qrRealHint}>把屏幕朝向对方即可扫描；点任意处关闭。</Text>
+                </View>
+              </Pressable>
+            </Modal>
 
             <Text style={styles.customSectionTitle}>扫码后看到</Text>
             <Text style={styles.customSectionHint}>预览</Text>
@@ -1995,6 +2110,7 @@ export function MeSurface({
               desc="顾客扫码核验商家主体与真实到店记录，扫码先看到门店主页与信誉。"
               actionLabel="打开商家二维码"
               onAction={() => openSubPage("personalqr")}
+              qrValue={merchantId ? `proxy.app/store/${merchantId}` : `proxy.app/@${profileDraft.handle}`}
             />
 
             <View style={styles.subSection}>
@@ -2031,6 +2147,80 @@ export function MeSurface({
       );
     }
 
+    if (subPage.route === "storerecqueue") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>推荐评估队列</Text>
+            <StoreRecommendationQueue />
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // BENEFIT-WIRE-001: 权益领取（个人身份）。
+    if (subPage.route === "benefits") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>我的权益</Text>
+            <BenefitHubSurface onBack={() => setSubPage(undefined)} />
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // BENEFIT-WIRE-001: 权益核销（商家身份）。没有店铺主体时**说清楚**，
+    // 而不是塞一个空 merchantId 进去让核销必然失败 —— 那样运营只会看到
+    // 「扫了没反应」，根本不知道是主体没绑。
+    if (subPage.route === "benefitredeem") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>权益核销</Text>
+            {merchantId ? (
+              <BenefitRedeemScreen
+                client={benefitClient}
+                merchantId={merchantId}
+                onBack={() => setSubPage(undefined)}
+              />
+            ) : (
+              <View style={styles.infoNote}>
+                <Text style={styles.infoNoteText}>当前账号没有店铺主体，无法核销权益。</Text>
+                <Text style={[styles.appBehaviorCardDesc, { marginTop: 4 }]}>
+                  核销必须绑定到一个真实门店（商家主体），因为它决定了这笔核销记在谁账上。
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // STORE-REC-007: 我推荐的店 —— 推荐人自己的进展视图。
+    if (subPage.route === "mystorerecs") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Text style={styles.subPageBackText}>‹ 返回</Text>
+            </Pressable>
+            <Text style={styles.subPageTitle}>我推荐的店</Text>
+            <MyStoreRecommendations />
+          </ScrollView>
+        </View>
+      );
+    }
+
     if (subPage.route === "recommendstore") {
       return contentWrapper(
         <View style={styles.root}>
@@ -2044,6 +2234,30 @@ export function MeSurface({
               用户一起把好的店铺带进体系，运营评估后接入。推荐记录会留档（append-only），
               后续接入进度在运营侧推进。
             </Text>
+            {storeRecAiAvailable ? (
+              <View style={styles.infoNote}>
+                <Text style={styles.socialEditorLabel}>让小美帮你整理</Text>
+                <Text style={styles.appBehaviorCardDesc}>
+                  用一句话说说这家店（在哪儿、为什么值得进体系），小美整理成草稿，
+                  你确认后提交 —— 会记为「小美推荐」。你没提到的字段小美不会瞎填。
+                </Text>
+                <TextInput
+                  placeholder="例如：Cầu Giấy 那家 Three Beans 咖啡，适合 afterwork，老板愿意合作活动"
+                  style={[styles.socialEditorInput, { minHeight: 64 }]}
+                  multiline
+                  value={storeRecNote}
+                  onChangeText={setStoreRecNote}
+                />
+                <Pressable
+                  disabled={storeRecAiBusy || storeRecNote.trim() === ""}
+                  onPress={() => void suggestWithXiaomei()}
+                  style={[styles.lightCta, (storeRecAiBusy || storeRecNote.trim() === "") && { opacity: 0.5 }]}
+                >
+                  <Text style={styles.lightCtaText}>{storeRecAiBusy ? "小美整理中…" : "让小美整理"}</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {storeRecAiNote ? <Text style={{ color: "#1B7F4D", fontSize: 12, marginTop: 8 }}>{storeRecAiNote}</Text> : null}
             <Text style={styles.socialEditorLabel}>店名 / 场地名</Text>
             <TextInput
               placeholder="例如：Three Beans · Cầu Giấy"
@@ -2080,7 +2294,7 @@ export function MeSurface({
               onPress={() => void submitStoreRecommendation()}
               style={[styles.appBehaviorReturn, storeRecBusy && { opacity: 0.5 }]}
             >
-              <Text style={styles.appBehaviorReturnText}>{storeRecBusy ? "提交中…" : "提交推荐"}</Text>
+              <Text style={styles.appBehaviorReturnText}>{storeRecBusy ? "提交中…" : (storeRecOrigin === "AI" ? "以小美推荐提交" : "提交推荐")}</Text>
             </Pressable>
           </ScrollView>
         </View>

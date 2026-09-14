@@ -142,6 +142,147 @@ func TestClaimAndRedeemBenefit(t *testing.T) {
 	}
 }
 
+// BENEFIT-ELIG-001: max_redemptions 必须真的生效 —— 而且是通过**服务**生效，
+// 不是只在引擎的单元测试里生效。
+//
+// 此前 claim / redeem 两条路径调 EligibilityEngine 时都没填 TotalRedemptions，
+// 它恒为 0，于是 `0 >= N` 永不成立：活动方写了「每人最多 N 次」，
+// 系统照发不误。引擎本身是对的（eligibility_test.go 用真实信号测过），
+// 错的是**调用方没喂数据** —— 而引擎的单测给了虚假的安全感，
+// 因为它从不经过服务这条路径。
+func TestMaxRedemptionsIsEnforcedThroughTheService(t *testing.T) {
+	repo := NewMemoryRepository()
+	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
+	svc := NewServiceWithClock(repo, clock)
+	ctx := context.Background()
+
+	campResult := svc.HandleCreateCampaign(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT", ID: "m1"},
+		Payload: map[string]any{
+			"type": "SCENE_IGNITION", "ownerType": "merchant", "ownerId": "m1",
+			"budgetMinor": 100000, "currency": "VND",
+			"startAt": "2026-09-03T00:00:00Z", "endAt": "2026-09-30T23:59:59Z",
+		},
+	})
+	campaignID := campResult.Aggregate.ID
+
+	benefit := &BenefitDefinition{ID: "b1", CampaignID: campaignID, Kind: FreeDrink, Label: "Coffee", RetailValueMinor: 45000, UserPayMinor: 0, Currency: "VND", CreatedAt: clock.Now()}
+	_ = repo.CreateBenefitDefinition(ctx, benefit)
+	// 容量给足，确保下面被拒是资格门拦的，不是容量拦的。
+	pool := &CapacityPool{ID: "p1", CampaignID: campaignID, TotalCapacity: 50, Claimed: 0, Redeemed: 0, CreatedAt: clock.Now(), UpdatedAt: clock.Now(), Version: 1}
+	_ = repo.UpsertCapacityPool(ctx, pool)
+	_ = svc.HandleActivateCampaign(ctx, command.Envelope{Actor: command.Actor{Type: "MERCHANT", ID: "m1"}, Payload: map[string]any{"campaignId": campaignID}})
+
+	// 每人最多 1 次。
+	_ = repo.UpsertCampaignAudience(ctx, &CampaignAudience{
+		CampaignID:     campaignID,
+		LifecyclePreds: map[string]any{"max_redemptions": float64(1)},
+	})
+
+	// 第一次：领 + 核销，都该成功。
+	r1 := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if r1.Outcome != "ACCEPTED" {
+		t.Fatalf("first claim should succeed, got %s: %v", r1.Outcome, r1.Error)
+	}
+	token := r1.Body["claimToken"].(string)
+	redeem := svc.HandleRedeemBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT_STAFF", ID: "staff_1"},
+		Payload: map[string]any{
+			"claimToken": token, "merchantId": "m1", "staffId": "staff_1",
+			"evidenceType": "MERCHANT_SCAN", "idempotencyKey": "idem_1",
+		},
+	})
+	if redeem.Outcome != "ACCEPTED" {
+		t.Fatalf("first redeem should succeed, got %s: %v", redeem.Outcome, redeem.Error)
+	}
+
+	// 第二次：**必须**被资格门拦住（已核销 1 次 >= 上限 1）。
+	r2 := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if r2.Outcome != "REJECTED" {
+		t.Fatalf("second claim must be blocked by max_redemptions, got %s", r2.Outcome)
+	}
+	if r2.Error == nil || r2.Error.ErrorCode != "ELIGIBILITY_FAILED" {
+		t.Fatalf("expected ELIGIBILITY_FAILED, got %v", r2.Error)
+	}
+	if got := r2.Error.SafeDetails["reasonCode"]; got != "MAX_REDEMPTIONS_REACHED" {
+		t.Fatalf("expected MAX_REDEMPTIONS_REACHED, got %v", got)
+	}
+}
+
+// BENEFIT-REDEEM-001: 别的商家不能把这笔核销记到自己名下。
+//
+// p.MerchantID 由调用方传入，直接写进 Redemption 并据此结算。缺少归属校验时，
+// 任何商家扫到别人的券码都能把核销记成自己的 —— 钱也就结给了他。
+func TestRedeemRequiresTheCampaignOwner(t *testing.T) {
+	repo := NewMemoryRepository()
+	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}
+	svc := NewServiceWithClock(repo, clock)
+	ctx := context.Background()
+
+	campResult := svc.HandleCreateCampaign(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT", ID: "owner_1"},
+		Payload: map[string]any{
+			"type": "SCENE_IGNITION", "ownerType": "merchant", "ownerId": "owner_1",
+			"budgetMinor": 100000, "currency": "VND",
+			"startAt": "2026-09-03T00:00:00Z", "endAt": "2026-09-30T23:59:59Z",
+		},
+	})
+	campaignID := campResult.Aggregate.ID
+	_ = repo.CreateBenefitDefinition(ctx, &BenefitDefinition{ID: "b1", CampaignID: campaignID, Kind: FreeDrink, Label: "Coffee", RetailValueMinor: 45000, UserPayMinor: 0, Currency: "VND", CreatedAt: clock.Now()})
+	_ = repo.UpsertCapacityPool(ctx, &CapacityPool{ID: "p1", CampaignID: campaignID, TotalCapacity: 10, CreatedAt: clock.Now(), UpdatedAt: clock.Now(), Version: 1})
+	_ = svc.HandleActivateCampaign(ctx, command.Envelope{Actor: command.Actor{Type: "MERCHANT", ID: "owner_1"}, Payload: map[string]any{"campaignId": campaignID}})
+
+	claim := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u1"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if claim.Outcome != "ACCEPTED" {
+		t.Fatalf("claim should succeed, got %s: %v", claim.Outcome, claim.Error)
+	}
+	token := claim.Body["claimToken"].(string)
+
+	// 归属商家的核销必须成功。
+	ok := svc.HandleRedeemBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT_STAFF", ID: "staff_1"},
+		Payload: map[string]any{
+			"claimToken": token, "merchantId": "owner_1", "staffId": "staff_1",
+			"evidenceType": "MERCHANT_SCAN", "idempotencyKey": "idem_owner",
+		},
+	})
+	if ok.Outcome != "ACCEPTED" {
+		t.Fatalf("own merchant must be able to redeem, got %s: %v", ok.Outcome, ok.Error)
+	}
+
+	// 换个商家再来一次：券已被核销，先领一张新的，再用别人的 merchantId 核销。
+	claim2 := svc.HandleClaimBenefit(ctx, command.Envelope{
+		Actor:   command.Actor{Type: "INDIVIDUAL", ID: "u2"},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": "b1"},
+	})
+	if claim2.Outcome != "ACCEPTED" {
+		t.Fatalf("second claim should succeed, got %s: %v", claim2.Outcome, claim2.Error)
+	}
+	token2 := claim2.Body["claimToken"].(string)
+	intruder := svc.HandleRedeemBenefit(ctx, command.Envelope{
+		Actor: command.Actor{Type: "MERCHANT_STAFF", ID: "staff_2"},
+		Payload: map[string]any{
+			"claimToken": token2, "merchantId": "other_merchant", "staffId": "staff_2",
+			"evidenceType": "MERCHANT_SCAN", "idempotencyKey": "idem_intruder",
+		},
+	})
+	if intruder.Outcome != "REJECTED" {
+		t.Fatalf("another merchant must not redeem this campaign's claim, got %s", intruder.Outcome)
+	}
+	if intruder.Error == nil || intruder.Error.ErrorCode != "MERCHANT_NOT_CAMPAIGN_OWNER" {
+		t.Fatalf("expected MERCHANT_NOT_CAMPAIGN_OWNER, got %v", intruder.Error)
+	}
+}
+
 func TestCapacityExhausted(t *testing.T) {
 	repo := NewMemoryRepository()
 	clock := &testClock{now: time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)}

@@ -89,6 +89,47 @@ describe("app shell scroll chrome ownership", () => {
   });
 });
 
+describe("PROFILE-FROM-ANY-TAB-001 profile destinations must not be tab-scoped", () => {
+  const shell = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+
+  // 洞的形状：openHumanProfile 的**写入方在 FEED**（feed.tsx 点头像 → 菜单
+  // 「访问个人主页」→ app-shell 的 onOpenProfile），但读它的分支此前只写在
+  // `tab === "HOME"` 里面。于是从动态进入时：状态被设了 → 重渲染 → 链子在
+  // `tab === "FEED"` 处就返回了 → 没有任何分支去读它 → 菜单一关屏幕纹丝不动。
+  // 用户看到的现象就是「点头像选访问个人主页没反应」。
+  //
+  // 这里钉的是**顺序**而不是「存在」：`<OtherProfileSurface` 一直都在这文件里，
+  // 只断言它存在的话，把它挪回 HOME 分支测试依然全绿 —— 那正是当初漏掉的原因。
+  it("reads openHumanProfile BEFORE the tab branches (its writer lives in FEED)", () => {
+    const readAt = shell.indexOf(") : openHumanProfile ? (");
+    const homeAt = shell.indexOf(') : tab === "HOME" ? (');
+    expect(readAt).toBeGreaterThan(-1);
+    expect(homeAt).toBeGreaterThan(-1);
+    expect(readAt).toBeLessThan(homeAt);
+  });
+
+  it("reads openAIProfile BEFORE the tab branches too (scene map is reachable from FEED)", () => {
+    // 同一个洞的第二份：动态页 → 现实场景图 → 点某个 AI 账号，
+    // tab 仍是 FEED，所以 AI 主页也必须挂在 tab 分支之上。
+    const readAt = shell.indexOf(") : openAIProfile ? (");
+    const homeAt = shell.indexOf(') : tab === "HOME" ? (');
+    expect(readAt).toBeGreaterThan(-1);
+    expect(readAt).toBeLessThan(homeAt);
+  });
+
+  it("hides shell chrome while a human profile is open, same as the AI profile", () => {
+    // 否则从动态进入后底栏还在，切个 tab 就会被留在一个没人负责关闭的主页上。
+    expect(shell).toContain("!openAIProfile && !openHumanProfile");
+  });
+
+  it("keeps the feed writer wired end to end", () => {
+    const feed = readFileSync(new URL("../surfaces/feed.tsx", import.meta.url), "utf8");
+    expect(feed).toContain("访问个人主页");
+    expect(feed).toContain("onOpenProfile?.(profileTarget)");
+    expect(shell).toContain("onOpenProfile={(profile) => setOpenHumanProfile(profile)}");
+  });
+});
+
 describe("app shell motion profile (R15.22 reduce-motion downgrade)", () => {
   it("uses Animated.spring when Reduce Motion is off", () => {
     expect(selectMotionProfile(false)).toEqual({ useSpring: true });

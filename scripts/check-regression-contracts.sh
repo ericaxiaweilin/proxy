@@ -3331,3 +3331,502 @@ if ! grep -qF 'LIMIT $3' apps/api-go/internal/platform/postgres/storeonboarding.
   exit 1
 fi
 echo "    STORE-REC-002: PASS (operator queue can read recommendations back, gated and bounded)"
+
+# STORE-REC-003: 小美（AI）推荐必须能产生数据。
+#
+# origin 字段区分「真人用户推荐」与「AI（小美）推荐」，运营队列也有「小美推荐」
+# 筛选与徽章 —— 但落地时 RecommendStore 唯一的调用点写死 origin="USER"，从来
+# 没有一个能写入 AI 推荐的地方。schema、服务、筛选、UI 徽章全都在，通道却是死的：
+# 队列里那个「小美推荐」筛选永远筛不出任何东西。**又是同一类坑：通道建好了，
+# 但没有调用方。**
+#
+# 钉死四件事：
+#   ① 命令存在且有测试；
+#   ② 底座未配置时以 AI_NOT_CONFIGURED fail-closed（这是「前端隐藏入口」的依据，
+#      绝不能静默返回假草稿）；
+#   ③ 命令进了 OpenAPI 契约（否则客户端生成不出调用点）；
+#   ④ SetModelStack 必须在 PG 替换**之后**注入 —— 见下面那段顺序检查。
+require_test "STORE-REC-003" "./internal/storeonboarding" \
+  "TestSuggestStoreRecommendationStructuresTheNote" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-003" "./internal/storeonboarding" \
+  "TestSuggestStoreRecommendationDoesNotInventUnsaidFields" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-003" "./internal/storeonboarding" \
+  "TestSuggestStoreRecommendationFailsClosedWhenAIUnavailable" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-003" "./internal/storeonboarding" \
+  "TestSuggestStoreRecommendationDistinguishesFailureFromMalformed" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'func (s *Service) suggestRecommendation' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-003]: SuggestStoreRecommendation handler is gone, so" >&2
+  echo "        origin=\"AI\" can never be produced and the queue's AI filter is dead UI." >&2
+  exit 1
+fi
+if ! grep -qF 'commandType == "SuggestStoreRecommendation"' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-003]: the domain no longer advertises" >&2
+  echo "        SuggestStoreRecommendation, so the command will not dispatch." >&2
+  exit 1
+fi
+if ! grep -qF 'storeonboarding.ai_not_configured' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-003]: the AI_NOT_CONFIGURED fail-closed path is gone, so an" >&2
+  echo "        unwired model stack would silently degrade into a fabricated draft." >&2
+  exit 1
+fi
+if ! grep -qF 'SuggestStoreRecommendation' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [STORE-REC-003]: SuggestStoreRecommendation is missing from the OpenAPI" >&2
+  echo "        command contract, so no client can call it. Regenerate with" >&2
+  echo "        go run ./cmd/openapi-commands in apps/api-go." >&2
+  exit 1
+fi
+# 注入顺序：SetModelStack 必须在 PG 替换之后。NewWithRepository 不会携带
+# modelstack，先注入再被替换 = 适配器静默丢失，AI 能力退化成「永远
+# AI_NOT_CONFIGURED」，而客户端会据此把入口藏起来 —— 从外部看，这个功能
+# 就像从来没做过一样。marketplace 的 OPP-SUGGEST-001 原来就踩在这个坑上。
+for svc in marketplaceService storeOnboardingService; do
+  if ! awk -v svc="$svc" '
+    $0 ~ svc " = [a-z]+\\.NewWithRepository" { repl = NR }
+    $0 ~ svc "\\.SetModelStack" { wire = NR }
+    END { if (wire && (!repl || wire > repl)) exit 0; else exit 1 }
+  ' apps/api-go/cmd/api/main.go; then
+    echo "  FAIL [STORE-REC-003]: $svc.SetModelStack is not wired after the PostgreSQL" >&2
+    echo "        replacement, so the model stack is silently discarded when" >&2
+    echo "        DATABASE_URL is set and every AI command returns AI_NOT_CONFIGURED." >&2
+    exit 1
+  fi
+done
+echo "    STORE-REC-003: PASS (小美 can actually produce an AI-origin recommendation, fail-closed)"
+
+# STORE-REC-004: 运营评估队列必须能**出结论**。
+#
+# STORE-REC-002 给了读路径，但运营读完一条推荐之后没有任何地方记录
+# 「采纳 / 不采纳」—— 结论只存在于他脑子里，队列变成一条只读的死胡同：
+# 看完了，然后呢？
+#
+# 钉死：①命令存在且有测试；②operator-only（结论里写着「谁否掉了哪家店」，
+# 落到普通用户手里等于公开运营的判断过程）；③结论进单独一张 append-only 表，
+# 不给推荐记录加状态列（推荐是举证材料，改它就是改证据）；④命令进 OpenAPI 契约。
+require_test "STORE-REC-004" "./internal/storeonboarding" \
+  "TestDecideStoreRecommendationRecordsTheDecision" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-004" "./internal/storeonboarding" \
+  "TestQueueShowsDecisionAndHonoursPendingOnly" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+require_test "STORE-REC-004" "./internal/storeonboarding" \
+  "TestLatestDispositionWinsWhenOperatorChangesMind" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'func (s *Service) decideStoreRecommendation' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-004]: DecideStoreRecommendation handler is gone, so the" >&2
+  echo "        queue is read-only again and decisions exist only in the operator's head." >&2
+  exit 1
+fi
+if ! grep -qF '"DecideStoreRecommendation": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [STORE-REC-004]: DecideStoreRecommendation is no longer operator-only," >&2
+  echo "        so any user could read who rejected which store." >&2
+  exit 1
+fi
+# 结论必须落在**独立的 append-only 表**里，不能给 store_recommendations 加状态列：
+# 推荐记录是举证材料（谁、什么时候、因为什么推荐了哪家店），
+# 为了记结论去 UPDATE 它，等于把证据本身改掉了。
+if ! [ -f apps/api-go/migrations/093_store_recommendation_dispositions.sql ]; then
+  echo "  FAIL [STORE-REC-004]: the dispositions migration is missing, so decisions" >&2
+  echo "        would have to be stored by mutating the recommendation evidence row." >&2
+  exit 1
+fi
+if ! grep -qF 'CREATE TABLE IF NOT EXISTS business.store_recommendation_dispositions' apps/api-go/migrations/093_store_recommendation_dispositions.sql; then
+  echo "  FAIL [STORE-REC-004]: store_recommendation_dispositions table is gone." >&2
+  exit 1
+fi
+if ! grep -qF 'DecideStoreRecommendation' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [STORE-REC-004]: DecideStoreRecommendation is missing from the OpenAPI" >&2
+  echo "        command contract. Regenerate with go run ./cmd/openapi-commands." >&2
+  exit 1
+fi
+echo "    STORE-REC-004: PASS (operators can record 采纳/不采纳, append-only and operator-only)"
+
+# STORE-REC-005: 采纳之后，这条推荐必须还能被查出来。
+#
+# 队列默认只看待评估，而筛选条件此前是个布尔（只看待评估 / 全部），表达不了
+# 「只看我采纳过的」。于是采纳是个死胡同：一点采纳，这条推荐就从默认视图消失，
+# 只埋在「全部」那一堆里 —— 运营看不到自己批过什么，更没法跟进商家入驻。
+# 采纳 = 批准接入，不等于店铺已存在；批准完查不到，事情就等于没发生。
+#
+# 注意这是又一次「通道建好了，没有调用方」，只是这次死在**读**的一侧：
+# 结论写进去了（STORE-REC-004），却没有任何路径把它读回来。
+#
+# 钉死：①测试存在；②四态 status 在服务层存在（布尔表达不了「已采纳」）；
+# ③**生产**读路径（Postgres）也认 ACCEPTED —— 只在内存仓储里实现是最经典的
+# 半截接线，本地测试全绿、线上什么都查不到；④App 队列里有这个视图。
+require_test "STORE-REC-005" "./internal/storeonboarding" \
+  "TestAcceptedRecommendationsStayReachable" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'StatusAccepted = "ACCEPTED"' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-005]: the four-state queue status filter is gone, so" >&2
+  echo "        accepted recommendations can no longer be listed on their own." >&2
+  exit 1
+fi
+if ! grep -qF "\$4 = 'ACCEPTED'" apps/api-go/internal/platform/postgres/storeonboarding.go; then
+  echo "  FAIL [STORE-REC-005]: the Postgres read path no longer honours the" >&2
+  echo "        ACCEPTED filter -- a memory-repo-only filter is a half-wire that" >&2
+  echo "        passes every local test and returns nothing in production." >&2
+  exit 1
+fi
+# 光有服务端不够：App 里没有这个视图，采纳完运营照样看不到。
+if ! grep -qF '已采纳' apps/mobile/src/surfaces/store-recommendation-queue.tsx; then
+  echo "  FAIL [STORE-REC-005]: the queue UI has no 已采纳 view, so operators still" >&2
+  echo "        lose sight of every recommendation the moment they accept it." >&2
+  exit 1
+fi
+if ! grep -qF 'StoreRecommendationQueueStatus' apps/mobile/src/storeonboarding-client.ts; then
+  echo "  FAIL [STORE-REC-005]: the mobile client lost the queue status type, so the" >&2
+  echo "        UI cannot ask for accepted/rejected recommendations any more." >&2
+  exit 1
+fi
+echo "    STORE-REC-005: PASS (accepted recommendations stay reachable, 采纳 is not a dead end)"
+
+# STORE-REC-006: 评估结论必须落在一条真实存在的推荐上。
+#
+# 少了这个校验，id 打错（或推荐已被清理）时照样写进一条结论 —— 它永远 join 不到
+# 任何推荐，于是那条推荐在队列里**永远还是「待评估」**。运营看到的是「我点了采纳
+# 但没反应」，会反复点；而 dispositions 是 append-only 表，孤儿结论写进去就删不掉，
+# 举证链里堆满谁也解释不了的记录。
+#
+# 钉死：①测试存在；②服务层在写结论**之前**查这条推荐（顺序不能反 ——
+# 先写后查等于没查）；③仓储接口有 FindRecommendation（内存 + Postgres 都要有，
+# 只在内存里实现 = 本地全绿、线上照写孤儿）；④App 把这个错误说清楚，
+# 否则运营只会看到一句笼统的「记录失败」然后反复点。
+require_test "STORE-REC-006" "./internal/storeonboarding" \
+  "TestDispositionOnUnknownRecommendationIsRefused" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 's.repository.FindRecommendation(ctx, recID)' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-006]: the disposition path no longer checks that the" >&2
+  echo "        recommendation exists, so orphan dispositions can be written again." >&2
+  exit 1
+fi
+if ! grep -qF 'DISPOSITION_RECOMMENDATION_NOT_FOUND' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-006]: the not-found rejection code is gone." >&2
+  exit 1
+fi
+# 顺序：查必须在写**之前**。先写后查等于没查。
+if [ "$(grep -n 'FindRecommendation(ctx, recID)' apps/api-go/internal/storeonboarding/service.go | head -1 | cut -d: -f1)" -ge \
+     "$(grep -n 's.repository.AddDisposition(ctx, Disposition{' apps/api-go/internal/storeonboarding/service.go | head -1 | cut -d: -f1)" ]; then
+  echo "  FAIL [STORE-REC-006]: FindRecommendation must run BEFORE AddDisposition." >&2
+  echo "        Checking after writing proves nothing -- the orphan is already stored." >&2
+  exit 1
+fi
+# 匹配方法定义（`) FindRecommendation(`）而不是参数名 —— 内存仓储用的是
+# `_ context.Context`，Postgres 用的是 `ctx context.Context`，钉参数名会误报。
+for f in apps/api-go/internal/storeonboarding/memory.go apps/api-go/internal/platform/postgres/storeonboarding.go; do
+  if ! grep -qF ') FindRecommendation(' "$f"; then
+    echo "  FAIL [STORE-REC-006]: $f is missing FindRecommendation." >&2
+    echo "        A memory-repo-only implementation is a half-wire: green locally," >&2
+    echo "        orphans written in production." >&2
+    exit 1
+  fi
+done
+if ! grep -qF 'DISPOSITION_RECOMMENDATION_NOT_FOUND' apps/mobile/src/surfaces/store-recommendation-queue.tsx; then
+  echo "  FAIL [STORE-REC-006]: the queue UI no longer explains the not-found case," >&2
+  echo "        so operators see a bare failure and tap the same button again." >&2
+  exit 1
+fi
+echo "    STORE-REC-006: PASS (no orphan dispositions: a decision must point at a real recommendation)"
+
+# STORE-REC-007: 推荐人必须能看见自己那条的进展 —— 且只能看见自己的。
+#
+# 采纳只代表运营批准接入，商家真正入驻是另一件事。而能完成入驻的人通常就是
+# 推荐人本人，可他提交完就再无回音（运营队列是 operator-only，他调不动），
+# 于是「已采纳 · 待接入」那一列永远等不到人：队列看起来办结了，事情却没发生。
+#
+# 钉死：①测试存在；②命令存在；③作用域由**服务端**收敛到 Actor.ID（这条最要紧 ——
+# 客户端传参收敛是个安全洞，任何人都能读到别人的推荐理由）；
+# ④**不是** operator 命令（否则普通用户照样看不到，缺口原样保留）；
+# ⑤App 有这一屏；⑥命令进 OpenAPI 契约。
+require_test "STORE-REC-007" "./internal/storeonboarding" \
+  "TestRecommenderCanSeeOnlyTheirOwnStatus" \
+  "apps/api-go/internal/storeonboarding/service_test.go" || exit $?
+if ! grep -qF 'func (s *Service) listMyRecommendations' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-007]: ListMyStoreRecommendations handler is gone, so" >&2
+  echo "        recommenders are left without any feedback again." >&2
+  exit 1
+fi
+# 作用域必须在服务端收敛。靠客户端传参收敛 = 任何人都能读到别人的推荐理由。
+if ! grep -qF 'RecommendedBy: e.Actor.ID' apps/api-go/internal/storeonboarding/service.go; then
+  echo "  FAIL [STORE-REC-007]: the per-caller scope is gone from the service." >&2
+  echo "        Client-supplied scoping is not scoping -- it lets anyone read" >&2
+  echo "        anyone else's recommendations." >&2
+  exit 1
+fi
+# 若被加进 operator 白名单，普通用户就又看不到了，缺口原样保留。
+if grep -qF '"ListMyStoreRecommendations": true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [STORE-REC-007]: ListMyStoreRecommendations became operator-only," >&2
+  echo "        so ordinary recommenders cannot see their own status again." >&2
+  exit 1
+fi
+if ! grep -qF 'ListMyStoreRecommendations' apps/api-go/openapi.commands.generated.yaml; then
+  echo "  FAIL [STORE-REC-007]: ListMyStoreRecommendations is missing from the" >&2
+  echo "        OpenAPI command contract. Regenerate with go run ./cmd/openapi-commands." >&2
+  exit 1
+fi
+if ! grep -qF 'listMyRecommendations' apps/mobile/src/storeonboarding-client.ts; then
+  echo "  FAIL [STORE-REC-007]: the mobile client lost listMyRecommendations." >&2
+  exit 1
+fi
+if ! [ -f apps/mobile/src/surfaces/my-store-recommendations.tsx ]; then
+  echo "  FAIL [STORE-REC-007]: the 我推荐的店 surface is gone, so the recommender" >&2
+  echo "        has no place to learn that their store was approved." >&2
+  exit 1
+fi
+echo "    STORE-REC-007: PASS (recommenders can see their own status, scoped server-side)"
+
+# BENEFIT-ELIG-001: 资格门不能只是个装饰。
+#
+# EligibilityEngine 本身是对的，eligibility_test.go 也用真实信号把它测透了 ——
+# 但 claim / redeem 两条调用路径**没喂信号**：TotalRedemptions 恒为 0，于是
+# `0 >= N` 永不成立，「每人最多 N 次」这条规则从来没生效过。
+# 更隐蔽的是 NewServiceWithClock 以前根本不接引擎（s.eligibility == nil），
+# 而 `if s.eligibility != nil` 会让整道门被静默跳过 —— 所以**服务这条路径上的
+# 资格门从来没被测过**，引擎的单测给了虚假的安全感。
+#
+# 本轮只修本地算得出的 TotalRedemptions。UserCity / AccountAge /
+# DeviceCount / AccountCount 仍缺真实来源，对应规则依旧不生效 ——
+# **不要用 0 冒充真实值**，那比留空更糟（min_account_age_days 会把所有人
+# 判成 ACCOUNT_TOO_NEW，理由还是错的）。
+#
+# 钉死：①测试存在且走服务（不是只测引擎）；②测试用构造器必须接上默认引擎；
+# ③两条调用路径都传了真实计数；④countRedemptions 还在。
+require_test "BENEFIT-ELIG-001" "./internal/benefit" \
+  "TestMaxRedemptionsIsEnforcedThroughTheService" \
+  "apps/api-go/internal/benefit/service_test.go" || exit $?
+if ! grep -qF 'eligibility: NewEligibilityEngine' apps/api-go/internal/benefit/service.go; then
+  echo "  FAIL [BENEFIT-ELIG-001]: no constructor wires the eligibility engine," >&2
+  echo "        so 'if s.eligibility != nil' silently skips the whole gate." >&2
+  exit 1
+fi
+if [ "$(grep -c 'TotalRedemptions:' apps/api-go/internal/benefit/service.go)" -lt 2 ]; then
+  echo "  FAIL [BENEFIT-ELIG-001]: the claim and redeem paths must both pass a real" >&2
+  echo "        TotalRedemptions. Leaving it zero makes max_redemptions unenforceable." >&2
+  exit 1
+fi
+if ! grep -qF 'func (s *Service) countRedemptions' apps/api-go/internal/benefit/service.go; then
+  echo "  FAIL [BENEFIT-ELIG-001]: countRedemptions is gone, so the redemption cap" >&2
+  echo "        has no real number behind it again." >&2
+  exit 1
+fi
+echo "    BENEFIT-ELIG-001: PASS (redemption cap is really enforced, through the service)"
+
+# BENEFIT-REDEEM-001: 核销方必须是这个活动的归属商家。
+#
+# p.MerchantID 由**调用方传入**，却被直接写进 Redemption，结算也据此进行。
+# 缺了归属校验，任何商家扫到别人的券码都能把这笔核销记到自己名下 —— 钱也就结给了他。
+# 与 business.createStore 的 BUSINESS_WRITE_REQUIRED 同一个口径：调用方声明的
+# 身份必须被验证，不能只因为「他说他是」就算数。
+#
+# 钉死：①测试存在；②核销路径真的查了活动归属；③拒绝码还在。
+require_test "BENEFIT-REDEEM-001" "./internal/benefit" \
+  "TestRedeemRequiresTheCampaignOwner" \
+  "apps/api-go/internal/benefit/service_test.go" || exit $?
+if ! grep -qF 's.repo.GetCampaign(ctx, cl.CampaignID)' apps/api-go/internal/benefit/service.go; then
+  echo "  FAIL [BENEFIT-REDEEM-001]: the redeem path no longer loads the campaign," >&2
+  echo "        so a caller-supplied merchantId is trusted for settlement again." >&2
+  exit 1
+fi
+if ! grep -qF 'MERCHANT_NOT_CAMPAIGN_OWNER' apps/api-go/internal/benefit/service.go; then
+  echo "  FAIL [BENEFIT-REDEEM-001]: the ownership rejection code is gone." >&2
+  exit 1
+fi
+echo "    BENEFIT-REDEEM-001: PASS (only the owning merchant can redeem; settlement cannot be hijacked)"
+
+# SAFETY-GATE-001: safety 域的特权命令必须在 operator 门里。
+#
+# 全仓唯一的授权门就是 internal/api/security.go 的 operatorCommandTypes
+# （command_dispatch.go:77 的 requiresOperator）。safety 域此前**一个都没进表**，
+# 于是这些命令对任何已登录用户敞开：
+#   - GrantJITAccess：granteeId + scope 全从 payload 来且无校验 → 自我签发任意权限（提权）
+#   - CreateIncident：建 incident 之外还会**自动给目标打 ACCOUNT 封禁** → 冻掉任意账号
+#   - CreateSafetyBlock / CreateOperatorCase / CreateLegalHold / ReleaseLegalHold：
+#     封禁、运营工单、法务保全，天然是 moderaton 动作
+#
+# 钉死：①测试存在；②六个命令都在 operator 白名单里（逐个 grep，
+# 只钉一个的话，少钉的那些照样可以悄悄被拿掉）。
+#
+# 注意用 `[[:space:]]*` 而不是字面一个空格：gofmt 会**按最长键对齐**这张 map 的值列，
+# 于是实际写法是 `"GrantJITAccess":     true,`（5 个空格）。钉字面单空格会永远匹配不到
+# —— 而且是在"门禁变红"的方向上错，很容易被误读成"有人把门拆了"。
+# 更隐蔽的是：gofmt 的重排意味着**删掉任意一个条目都会改变别人的缩进**，
+# 所以任何依赖固定空格数的钉都会随机变红。钉语义（键 + 值），别钉排版。
+require_test "SAFETY-GATE-001" "./internal/api" \
+  "TestSafetyPrivilegedCommandsRequireOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+for cmd in GrantJITAccess CreateIncident CreateSafetyBlock CreateOperatorCase CreateLegalHold ReleaseLegalHold; do
+  if ! grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [SAFETY-GATE-001]: $cmd is no longer operator-gated, so any" >&2
+    echo "        logged-in user can self-grant JIT scope or auto-block an account." >&2
+    exit 1
+  fi
+done
+echo "    SAFETY-GATE-001: PASS (safety privileges are operator-only; no self-grant, no drive-by account block)"
+
+# BENEFIT-CAMPAIGN-001: 活动管理四条必须在 operator 门里。
+#
+# 与 SAFETY-GATE-001 同一个根因：benefit 域整域没进 operatorCommandTypes。
+# 这四条把「活动归谁 / 配额给谁」放在 payload 里且不校验：
+#   - CreateCampaign：ownerType + ownerId 来自 payload 只判非空 → 冒名建活动
+#   - ActivateCampaign / PauseCampaign：只带 campaignId，不问归属 → 动别人的活动
+#   - AllocateBenefit：distributorId 来自 payload → 把配额分给任意分销方
+# 冒名活动一旦 Activate，真实用户领取核销时结算按 campaign.OwnerID 归属
+# （BENEFIT-REDEEM-001 依赖它）→ 被冒名商家为别人造的活动买单。
+#
+# 钉死：①测试存在；②四条都在门里；③ClaimBenefit / RedeemBenefit **不在**门里
+# （反向钉）—— 它们是真实用户动作，被顺手收紧就会把 BENEFIT-WIRE-001 刚接上的
+# 权益链路重新锁死，而且这种「过度收紧」在门禁上是静默的：测试不会红，用户只是用不了。
+require_test "BENEFIT-CAMPAIGN-001" "./internal/api" \
+  "TestBenefitCampaignManagementRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+for cmd in CreateCampaign ActivateCampaign PauseCampaign AllocateBenefit; do
+  if ! grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [BENEFIT-CAMPAIGN-001]: $cmd is no longer operator-gated, so any" >&2
+    echo "        logged-in user can create a campaign in someone else's name," >&2
+    echo "        activate it, and bill that merchant's settlement." >&2
+    exit 1
+  fi
+done
+for cmd in ClaimBenefit RedeemBenefit; do
+  if grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [BENEFIT-CAMPAIGN-001]: $cmd is operator-gated now, but it is a normal" >&2
+    echo "        user action — gating it locks the benefit flow back out for everyone." >&2
+    exit 1
+  fi
+done
+echo "    BENEFIT-CAMPAIGN-001: PASS (campaign management is operator-only; claiming/redeeming stay open to users)"
+
+# PROFILE-FROM-ANY-TAB-001: 动态页点「访问个人主页」必须真的能到主页。
+#
+# 洞的形状：openHumanProfile 的**写入方在 FEED**（feed.tsx 点头像 → 菜单
+# 「访问个人主页」→ app-shell 的 onOpenProfile），但读它的分支此前只写在
+# `tab === "HOME"` 里面。于是从动态进入时：状态被设了 → 重渲染 → 链子在
+# `tab === "FEED"` 处就返回了 → **没有任何分支去读它** → 菜单一关屏幕纹丝不动。
+# 用户看到的就是「点头像选访问个人主页没反应」。
+# openAIProfile 是同一个洞的第二份：动态页 → 现实场景图 → 点 AI 账号时 tab 仍是 FEED。
+#
+# 注意这里钉的是**顺序**而不是「存在」：`<OtherProfileSurface` 一直都在这文件里，
+# 只断言它存在的话，把它挪回 HOME 分支测试依然全绿 —— 那正是当初漏掉的原因。
+pnpm --filter @proxy/mobile exec vitest run src/shell/app-shell.test.ts || exit $?
+# 结构断言之外再钉一次顺序，这样即使有人把上面的测试文件改了也拦得住。
+human_at=$(grep -n ') : openHumanProfile ? (' apps/mobile/src/shell/app-shell.tsx | head -1 | cut -d: -f1)
+home_at=$(grep -n ') : tab === "HOME" ? (' apps/mobile/src/shell/app-shell.tsx | head -1 | cut -d: -f1)
+if [ -z "$human_at" ] || [ -z "$home_at" ]; then
+  echo "  FAIL [PROFILE-FROM-ANY-TAB-001]: 找不到个人主页分支或 HOME 分支（结构被改过）" >&2
+  exit 1
+fi
+if [ "$human_at" -ge "$home_at" ]; then
+  echo "  FAIL [PROFILE-FROM-ANY-TAB-001]: openHumanProfile 分支被挪到 tab 分支里面了" >&2
+  echo "        （第 $human_at 行 vs HOME 分支第 $home_at 行）。" >&2
+  echo "        它的写入方在动态页，挪进去会让「访问个人主页」静默失效。" >&2
+  exit 1
+fi
+if ! grep -qF '!openAIProfile && !openHumanProfile' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [PROFILE-FROM-ANY-TAB-001]: 打开真人主页时没有收掉导航 chrome，" >&2
+  echo "        用户切 tab 会被留在一个没人负责关闭的主页上。" >&2
+  exit 1
+fi
+echo "    PROFILE-FROM-ANY-TAB-001: PASS (profile destinations sit above the tab branches; feed entry point reaches them)"
+
+# SELF-FOLLOW-001: follow 缺了一道 unfollow 早就有的「自己人」门。
+#
+# 不对称：UnfollowProfile 有 CANNOT_UNFOLLOW_SELF，FollowProfile 没有任何自己人判断。
+# 于是自关注是一条**永远删不掉**的行 —— follow 建了它，unfollow 又拒绝删除自己。
+# 而 CountFollowers / CountFollowing 分别按 followee_id / follower_id 计数，
+# 一次自关注会让自己的「粉丝」和「关注」各 +1，且没有任何 API 能回滚。
+# 可达性：移动端「点头像 → + 关注」在本人帖子上就会走到这里（feed.tsx 的
+# openProfileActions 没有 isOwnPost 判断），所以这不是一条够不着的路径。
+require_test "SELF-FOLLOW-001" "./internal/engagement" \
+  "TestFollow_CannotFollowSelf" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "SELF-FOLLOW-001" "./internal/engagement" \
+  "TestFollow_SelfFollowLeavesCountsUntouched" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+# 结构断言：门必须还在源码里。上面两条测试已经会红，但这条能给出「哪里错了」的
+# 直接提示（unfollow 还留着自己的门，不对称会回来）。
+if ! grep -qF 'CANNOT_FOLLOW_SELF' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [SELF-FOLLOW-001]: follow 的自己人门被拿掉了；unfollow 还留着 CANNOT_UNFOLLOW_SELF，" >&2
+  echo "        不对称会回来 —— 自关注将再次变成一条删不掉、且会给自己刷 +1 的行。" >&2
+  exit 1
+fi
+echo "    SELF-FOLLOW-001: PASS (self-follow rejected; counts untouched; symmetric with unfollow)"
+
+# UI 侧：本人帖子的头像菜单不该提供「关注」。移动端不能渲染 RN 组件
+# （没有 testing-library / react-test-renderer），所以这里是源码级断言 ——
+# 但断言的是「关注那一行被 isOwnAuthorId 挡住」这件事本身，不是「文件里有这个字符串」。
+pnpm --filter @proxy/mobile exec vitest run src/feed-author.test.ts src/surfaces/feed-profile-actions.test.ts || exit $?
+if ! grep -qF '!isOwnAuthorId(profileActions.userId, viewerAccountId)' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [SELF-FOLLOW-001]: 本人帖子的头像菜单又把「关注」露出来了 ——" >&2
+  echo "        后端会拒绝（CANNOT_FOLLOW_SELF），用户看到的是一个必然失败的操作。" >&2
+  exit 1
+fi
+if ! grep -qF 'return isOwnAuthorId(post.authorId, viewerAccountId);' apps/mobile/src/feed-author.ts; then
+  echo "  FAIL [SELF-FOLLOW-001]: isOwnPost 又开始自己比一遍了 ——" >&2
+  echo "        「是不是我」必须只有一处定义（帖子用 authorId、主页菜单用 userId），" >&2
+  echo "        两处各比一次正是当初漂移出「+ 关注」的原因。" >&2
+  exit 1
+fi
+echo "    SELF-FOLLOW-001: PASS (UI 侧：本人帖子不显示关注，自己的主页入口仍可用)"
+
+# OUTCOME-TEMPLATE-GATE-001: 观察模板的创建必须走 operator 门。
+#
+# 模板是**全局共享词汇表**：ObservationTemplate 没有 owner/scope 字段，而
+# createTemplate 只校验 name 非空 —— 任何已登录用户都能往这张全局表里塞模板。
+#
+# 更硬的一层不是污染，而是**未授权用户能翻转全局状态**：CreateObservationSet 的
+# 兼容门是 `if len(ListTemplates()) > 0 { 必须引用已存在的模板 }`，也就是
+# 「有没有模板」本身就是一个全局开关。普通用户塞一个垃圾模板，就能把整个平台
+# 踢出 bootstrap —— 之后**所有人**用历史模板 ID 建观察集都会被 TEMPLATE_NOT_FOUND
+# 拒掉，而失败原因指向调用方，看起来像用户自己的错。
+require_test "OUTCOME-TEMPLATE-GATE-001" "./internal/api" \
+  "TestObservationTemplateCreationRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+# 用 [[:space:]]* 而不是写死空格：gofmt 会按最长 key 重新填充整张表，
+# 写死空格的钉会在一次无关的格式化后突然变红（SAFETY-GATE-001 踩过）。
+if ! grep -qE '"CreateObservationTemplate":[[:space:]]*true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [OUTCOME-TEMPLATE-GATE-001]: CreateObservationTemplate 不在 operator 门里 ——" >&2
+  echo "        任何已登录用户都能往全局模板表里塞东西，并翻转 bootstrap 开关。" >&2
+  exit 1
+fi
+# 反向钉：读词表不该被顺手收紧。过度收紧在门禁上是**静默**的 ——
+# 测试不会红，用户只是用不了。
+for cmd in ListObservationTemplates GetObservationTemplate; do
+  if grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [OUTCOME-TEMPLATE-GATE-001]: $cmd 被收进 operator 门了 ——" >&2
+    echo "        读一张运营维护的词表不构成越权，收紧只会让用户静默用不了。" >&2
+    exit 1
+  fi
+done
+echo "    OUTCOME-TEMPLATE-GATE-001: PASS (template creation is operator-only; reading the vocabulary stays open)"
+
+# NOTIF-INBOX-GATE-001: inbox 写入必须走 operator 门。
+#
+# inbox 是平台自己说话的渠道。真正的生产者是 outbox worker（cmd/worker/main.go
+# 的 businessInboxDelivery 用直连 SQL 写 notification.inbox_items，注释写着
+# "bypass service to avoid auth"），写的是「订单已成立」「收到 Offer」这类系统通知。
+# 而 SendInboxNotification 这条 HTTP 命令能往**任意用户**的 inbox 塞任意
+# title/body/deepLink —— sendInbox 只校验非空，不问调用者是谁、收件人是谁。
+# 任何已登录用户因此都能伪造一条平台通知，且落库后与系统通知同表同形。
+require_test "NOTIF-INBOX-GATE-001" "./internal/api" \
+  "TestInboxNotificationRequiresOperator" \
+  "apps/api-go/internal/api/server_test.go" || exit $?
+# 用 [[:space:]]* 而不是写死空格：gofmt 会按最长 key 重新填充整张表，
+# 写死空格的钉会在一次无关的格式化后突然变红（SAFETY-GATE-001 踩过）。
+if ! grep -qE '"SendInboxNotification":[[:space:]]*true' apps/api-go/internal/api/security.go; then
+  echo "  FAIL [NOTIF-INBOX-GATE-001]: SendInboxNotification 不在 operator 门里 ——" >&2
+  echo "        任何已登录用户都能往任意用户的 inbox 塞伪造的平台通知（钓鱼/恐吓）。" >&2
+  exit 1
+fi
+# 反向钉：读自己 inbox 的正常动作不该被顺手收紧。过度收紧在门禁上是**静默**的 ——
+# 测试不会红，用户只是用不了。
+for cmd in RegisterDeviceToken ListInbox MarkInboxRead ResolveDeepLink; do
+  if grep -qE "\"$cmd\":[[:space:]]*true" apps/api-go/internal/api/security.go; then
+    echo "  FAIL [NOTIF-INBOX-GATE-001]: $cmd 被收进 operator 门了 ——" >&2
+    echo "        这是用户读自己 inbox 的正常动作，收紧只会让用户静默用不了。" >&2
+    exit 1
+  fi
+done
+echo "    NOTIF-INBOX-GATE-001: PASS (inbox writes are operator-only; reading your own inbox stays open)"

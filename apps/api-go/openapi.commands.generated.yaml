@@ -139,6 +139,8 @@ commands:
     domain: Demand
   - command: CreateVoucher
     domain: Voucher
+  - command: DecideStoreRecommendation
+    domain: StoreOnboarding
   - command: DeclareCapability
     domain: Supply
   - command: DeleteMessage
@@ -265,6 +267,8 @@ commands:
     domain: Fulfillment
   - command: ListMyScenes
     domain: Scene
+  - command: ListMyStoreRecommendations
+    domain: StoreOnboarding
   - command: ListObservationTemplates
     domain: Outcome
   - command: ListOpportunityTemplates
@@ -463,6 +467,8 @@ commands:
     domain: Fulfillment
   - command: SuggestOpportunityTemplate
     domain: Marketplace
+  - command: SuggestStoreRecommendation
+    domain: StoreOnboarding
   - command: SwitchPrincipalContext
     domain: Identity
   - command: ToggleActivityInterest

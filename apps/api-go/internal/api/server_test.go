@@ -491,6 +491,118 @@ func TestOperatorGateFailsClosedAndAllowlist(t *testing.T) {
 	}
 }
 
+// SAFETY-GATE-001: safety 域的特权命令必须走 operator 门。
+//
+// 全仓唯一的授权门就是 operatorCommandTypes（command_dispatch.go:77），
+// 而 safety 此前**一个命令都没进表** —— 于是下面这些对任何已登录用户敞开：
+//   - GrantJITAccess：granteeId 与 scope 全从 payload 来且无任何校验，
+//     任何用户都能给自己签发任意 scope 的临时权限（自我提权）。
+//   - CreateIncident：除了建 incident，还会**自动给目标打一个 ACCOUNT 封禁**，
+//     任何用户都能冻掉任意账号。
+//   - CreateSafetyBlock / CreateOperatorCase：封禁与运营工单，天然是 moderaton 动作。
+//   - CreateLegalHold / ReleaseLegalHold：法务保全，同上。
+func TestSafetyPrivilegedCommandsRequireOperator(t *testing.T) {
+	for _, cmd := range []string{
+		"GrantJITAccess",
+		"CreateIncident",
+		"CreateSafetyBlock",
+		"CreateOperatorCase",
+		"CreateLegalHold",
+		"ReleaseLegalHold",
+	} {
+		if !requiresOperator(cmd) {
+			t.Fatalf("%s must require operator: ungated, any logged-in user can self-grant JIT scope or auto-block an account", cmd)
+		}
+	}
+}
+
+// BENEFIT-CAMPAIGN-001: 活动管理四条必须走 operator 门。
+//
+// benefit 域和 safety 一样整域没进 operatorCommandTypes，而这四条把
+// 「这个活动归谁 / 配额给谁」放在 payload 里且不校验：
+//   - CreateCampaign：ownerType + ownerId 来自 payload，只判非空 → 任何人都能
+//     建一个挂在**别人名下**的活动（budgetMinor 也是自己填的）。
+//   - ActivateCampaign / PauseCampaign：只带 campaignId，不问是谁的活动 →
+//     别人建的活动我也能激活、暂停。
+//   - AllocateBenefit：distributorId 来自 payload → 能给任意活动把配额分给任意分销方。
+//
+// 危害链：冒名活动被 Activate 后，真实用户来领取核销，而结算归属是按
+// campaign.OwnerID 判的（BENEFIT-REDEEM-001 依赖它）—— 被冒名的商家要为
+// 别人造的活动买单。同一个洞，只是方向相反。
+//
+// ClaimBenefit / RedeemBenefit 是真实用户动作，必须保持开放；这里只钉管理侧四条。
+func TestBenefitCampaignManagementRequiresOperator(t *testing.T) {
+	for _, cmd := range []string{
+		"CreateCampaign",
+		"ActivateCampaign",
+		"PauseCampaign",
+		"AllocateBenefit",
+	} {
+		if !requiresOperator(cmd) {
+			t.Fatalf("%s must require operator: ungated, any logged-in user can create a campaign in someone else's name and bill their settlement", cmd)
+		}
+	}
+	// 反向：领取与核销是用户动作，绝不能被顺手一起收紧（那会把刚接上的
+	// BENEFIT-WIRE-001 权益链路重新锁死）。
+	for _, cmd := range []string{"ClaimBenefit", "RedeemBenefit"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: it is a normal user action, gating it would re-break the benefit flow", cmd)
+		}
+	}
+}
+
+// OUTCOME-TEMPLATE-GATE-001: 观察模板的创建必须走 operator 门。
+//
+// 模板是全局共享词汇表：ObservationTemplate 没有 owner/scope 字段（postgres 侧
+// 建表列也只有 id/name/description/keys/created_at），而 createTemplate 只校验
+// name 非空 —— 任何已登录用户都能往这张全局表里塞模板。
+//
+// 危害不只是命名空间污染：CreateObservationSet 的兼容门写的是
+//   `if len(ListTemplates()) > 0 { 必须引用已存在的模板 }`
+// 也就是「有没有模板」本身是一个全局开关。普通用户塞一个垃圾模板，就能把整个
+// 平台踢出 bootstrap —— 之后**所有人**用历史模板 ID 建观察集都会被
+// TEMPLATE_NOT_FOUND 拒掉，且失败原因指向调用方。
+//
+// 只钉 Create。List/Get 读的是一张运营维护的词表，读本身不构成越权；
+// 过度收紧是**静默失败**（测试不会红，用户只是用不了），所以这里反向钉住它们。
+func TestObservationTemplateCreationRequiresOperator(t *testing.T) {
+	if !requiresOperator("CreateObservationTemplate") {
+		t.Fatalf("CreateObservationTemplate must require operator: ungated, any logged-in user can mint a template into the global vocabulary and flip the whole platform out of bootstrap mode")
+	}
+	for _, cmd := range []string{"ListObservationTemplates", "GetObservationTemplate"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: reading an operator-curated vocabulary is not a privilege escalation", cmd)
+		}
+	}
+}
+
+// NOTIF-INBOX-GATE-001: inbox 写入必须走 operator 门。
+//
+// inbox 是平台自己说话的渠道。真正的生产者是 outbox worker（cmd/worker/main.go
+// 的 businessInboxDelivery 用直连 SQL 写 notification.inbox_items，注释写着
+// "bypass service to avoid auth"），写的是「订单已成立」「收到 Offer」这类系统
+// 通知。而 SendInboxNotification 这条 HTTP 命令能往**任意用户**的 inbox 塞
+// 任意 title/body/deepLink —— sendInbox 只校验非空，不问调用者是谁、收件人是谁。
+// 任何已登录用户因此都能伪造一条平台通知（钓鱼/恐吓），且落库后与系统通知
+// 同表同形，收件人无法区分。
+//
+// openapi.yaml 的公开命令枚举里它和 CreateIncident / GrantJITAccess /
+// ConfirmPaymentIntent 排在一起，那几个都已在门里，唯独漏了它。
+//
+// 只钉 SendInboxNotification。同域其余四条是用户读自己 inbox 的正常动作
+// （ListInbox 按 principal 取、MarkRead 按 recipientId 校验），过度收紧是
+// **静默失败**（测试不会红，用户只是用不了），所以这里反向钉住它们。
+func TestInboxNotificationRequiresOperator(t *testing.T) {
+	if !requiresOperator("SendInboxNotification") {
+		t.Fatalf("SendInboxNotification must require operator: ungated, any logged-in user can forge a platform inbox notification into any other user's inbox, with attacker-controlled title/body/deepLink")
+	}
+	for _, cmd := range []string{"RegisterDeviceToken", "ListInbox", "MarkInboxRead", "ResolveDeepLink"} {
+		if requiresOperator(cmd) {
+			t.Fatalf("%s must NOT require operator: it is a normal user action on the caller's own inbox, gating it would silently break the notification flow", cmd)
+		}
+	}
+}
+
 // Audit tripwire (Pass 1 — Scene R15.13): the public-read allowlist is
 // the single source of truth for "which List* commands can be called
 // without authentication". Adding or removing entries here MUST be

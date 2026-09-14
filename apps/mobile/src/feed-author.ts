@@ -13,6 +13,22 @@ export type AuthoredItem = {
 };
 
 /**
+ * The single "is this me?" predicate (SELF-FOLLOW-001).
+ *
+ * Every viewer-relative identity check goes through here so a post, a comment
+ * and the profile menu can never disagree about who the viewer is. The display
+ * name is NOT a safe key. Unknown viewer (guest / unrestored session) is
+ * fail-closed: never own.
+ *
+ * Note the callers pass different field names for the same idea — a post has
+ * `authorId`, the profile menu has `userId` — which is exactly how the two
+ * drifted apart before; keeping one predicate makes that impossible.
+ */
+export function isOwnAuthorId(authorId: string | undefined, viewerAccountId?: string | undefined): boolean {
+  return !!viewerAccountId && authorId === viewerAccountId;
+}
+
+/**
  * Resolve the author label for one viewer. Own posts render as "你";
  * everyone else sees the stored name — except legacy poisoned rows whose
  * stored name is literally "你", which fall back to a neutral label so one
@@ -23,7 +39,7 @@ export function resolveAuthorDisplayName(
   post: AuthoredItem,
   viewerAccountId?: string | undefined
 ): string {
-  if (viewerAccountId && post.authorId === viewerAccountId) return "你";
+  if (isOwnAuthorId(post.authorId, viewerAccountId)) return "你";
   const stored = (post.authorDisplayName ?? "").trim();
   if (stored !== "" && stored !== "你") return stored;
   return post.authorType === "MERCHANT" ? "商家" : "用户";
@@ -35,7 +51,7 @@ export function resolveAuthorDisplayName(
  * are not unique and legacy rows all say "你".
  */
 export function isOwnPost(post: AuthoredItem, viewerAccountId?: string | undefined): boolean {
-  return !!viewerAccountId && post.authorId === viewerAccountId;
+  return isOwnAuthorId(post.authorId, viewerAccountId);
 }
 
 export type ReplyAuthorItem = {

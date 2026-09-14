@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { isOwnPost, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "./feed-author";
+import { isOwnAuthorId, isOwnPost, resolveAuthorDisplayName, resolveReplyAuthorDisplayName } from "./feed-author";
 
 describe("FEED-OWN-001 different accounts never share the own-post label", () => {
   it("labels only the author's own posts as 你", () => {
@@ -68,5 +69,28 @@ describe("FEED-REPLY-001 comment author shows a name, never an account id", () =
     expect(resolveReplyAuthorDisplayName(reply, "user_a")).toBe(
       resolveAuthorDisplayName({ authorId: "user_b", authorDisplayName: "Khoa" }, "user_a")
     );
+  });
+});
+
+describe("SELF-FOLLOW-001 one shared own-identity predicate", () => {
+  it("works for the profile menu's field name too, not just post.authorId", () => {
+    // 个人主页菜单带的是 userId，帖子带的是 authorId —— 两个不同的字段名承载同一个
+    // 「是不是我」，正是本人帖子的头像菜单出现「+ 关注」的原因。
+    expect(isOwnAuthorId("user_a", "user_a")).toBe(true);
+    expect(isOwnAuthorId("user_b", "user_a")).toBe(false);
+  });
+
+  it("is fail-closed without a viewer, and on a missing/empty author id", () => {
+    expect(isOwnAuthorId("user_a", undefined)).toBe(false);
+    expect(isOwnAuthorId(undefined, "user_a")).toBe(false);
+    expect(isOwnAuthorId("", "user_a")).toBe(false);
+  });
+
+  it("stays the single definition — isOwnPost delegates instead of comparing again", () => {
+    // 钉「只有一处比较」。如果有人把 isOwnPost 改回自己比一遍（历史上就是这样漂移的），
+    // 比较式会出现两次，这条立刻红。
+    const src = readFileSync(new URL("./feed-author.ts", import.meta.url), "utf8");
+    const comparisons = src.split("authorId === viewerAccountId").length - 1;
+    expect(comparisons).toBe(1);
   });
 });

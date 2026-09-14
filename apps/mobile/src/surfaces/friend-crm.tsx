@@ -2,6 +2,9 @@
 // 接线 /Users/thanhhuyennguyen/Downloads/proxy_add_friend_detail.html 的 5 种加好友 + 轻 CRM 详情
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import QRCode from "react-native-qrcode-svg";
+import { inviteQrPayload } from "../profile-qr";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { FriendView, RelationshipClient } from "../relationship-client";
 import { color, shadows } from "../theme";
@@ -112,6 +115,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [friendsError, setFriendsError] = useState<string | undefined>(undefined);
   const [toast, setToast] = useState("");
   const [crmTab, setCrmTab] = useState<"ALL" | "WARM" | "FOLLOW" | "MET">("ALL");
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   const reload = useCallback(async () => {
     if (!relationship) return;
@@ -188,6 +192,16 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   function showToast(text: string): void {
     setToast(text);
     setTimeout(() => setToast(""), 1700);
+  }
+
+  // 复制邀请链接：成功给出可见确认，失败也说人话而不是静默无响应。
+  async function copyInviteLink(link: string): Promise<void> {
+    try {
+      await Clipboard.setStringAsync(link);
+      setInviteCopied(true);
+    } catch {
+      showToast("复制失败，请长按链接手动复制。");
+    }
   }
 
   // 好友请求失败说人话：英文技术错不上屏，会话类问题提示登录。
@@ -289,12 +303,19 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
           <View style={styles.actions}><Pressable onPress={() => { setProxySearch("PX-937201"); setProxySearchDone(true); setSheet("SEARCH"); }} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>模拟识别</Text></Pressable></View>
         </CrmSheet>
 
-        <CrmSheet open={sheet === "INVITE"} onClose={() => setSheet(undefined)} title="邀请好友" sub="分享你的邀请链接。对方注册/打开 Proxy 后可向你发送好友请求。">
+        <CrmSheet open={sheet === "INVITE"} onClose={() => { setSheet(undefined); setInviteCopied(false); }} title="邀请好友" sub="分享你的邀请链接。对方注册/打开 Proxy 后可向你发送好友请求。">
           {viewer ? (
             <>
               <View style={styles.qrName}><Text style={styles.qrNameStrong}>{viewer.name}</Text><Text style={styles.qrNameSub}>Proxy ID · {viewer.handle}</Text></View>
-              <View style={styles.inviteLink}><Text style={styles.inviteLinkText}>proxy.app/invite/{viewer.handle}</Text></View>
-              <View style={styles.actions}><Pressable onPress={() => void Share.share({ message: `加我 Proxy 好友：proxy.app/invite/${viewer.handle}` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable></View>
+              <View style={styles.inviteQrWrap}>
+                <QRCode value={inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`} size={168} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+              </View>
+              <View style={styles.inviteLink}><Text selectable style={styles.inviteLinkText}>{inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}</Text></View>
+              <View style={styles.actions}>
+                <Pressable onPress={() => void copyInviteLink(inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制邀请链接"><Text style={styles.btnGhostText}>复制链接</Text></Pressable>
+                <Pressable onPress={() => void Share.share({ message: `加我 Proxy 好友：${inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable>
+              </View>
+              {inviteCopied ? <Text style={styles.inviteCopiedNote}>链接已复制，去粘贴给你的好友吧。</Text> : null}
             </>
           ) : (
             <View style={styles.qrName}><Text style={styles.qrNameSub}>登录后显示你的邀请名片</Text></View>
@@ -621,11 +642,15 @@ const styles = StyleSheet.create({
   btnPrimary: { backgroundColor: color.ink, borderColor: color.ink },
   btnText: { color: color.ink, fontSize: 11, fontWeight: "800" },
   btnPrimaryText: { color: color.white, fontSize: 11, fontWeight: "900" },
+  btnGhost: { backgroundColor: "#FFFFFF" },
+  btnGhostText: { color: color.ink, fontSize: 11, fontWeight: "900" },
   qrName: { alignItems: "center", marginTop: 10 },
   qrNameStrong: { color: color.ink, fontSize: 14, fontWeight: "900" },
   qrNameSub: { color: color.muted, fontSize: 11, marginTop: 3 },
   inviteLink: { alignItems: "center", backgroundColor: "#FAFAFA", borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, marginTop: 12, padding: 10 },
   inviteLinkText: { color: "#6D6672", flex: 1, fontSize: 11 },
+  inviteQrWrap: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginTop: 12, paddingVertical: 16 },
+  inviteCopiedNote: { color: "#4C8A5B", fontSize: 11, marginTop: 10, textAlign: "center" },
   permission: { alignItems: "center", backgroundColor: "#FAF9FB", borderColor: color.line, borderRadius: 14, borderWidth: 1, marginTop: 12, padding: 14 },
   permissionIcon: { alignItems: "center", backgroundColor: color.proxyPurpleSoft, borderRadius: 14, height: 48, justifyContent: "center", width: 48 },
   permissionStrong: { color: color.ink, fontSize: 13, fontWeight: "900", marginTop: 8 },

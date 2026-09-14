@@ -25,6 +25,8 @@ platform :ios, podfile_properties['ios.deploymentTarget'] || '16.4'
 prepare_react_native_project!
 
 target 'Proxy' do
+  pod 'ProxyScreenProtection', :path => File.join(__dir__, '..', 'modules', 'proxy-screen-protection', 'ios')
+  pod 'react-native-view-shot', :path => File.join(__dir__, '..', 'node_modules', 'react-native-view-shot')
   use_expo_modules!
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'

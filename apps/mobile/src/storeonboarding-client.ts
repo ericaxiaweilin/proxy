@@ -9,7 +9,32 @@ import type { SecureSessionStore } from "./secure-session";
 // 靠发展 builder + 小美（AI）/ 用户推荐商铺进入体系，运营评估后接入。
 // 这里只提交推荐受理记录（append-only），接入与否由运营在 bdash 评估。
 
+// 服务端把队列 JSON 放在 operationRef 里。没有它算**协议异常**，不能当成空队列 ——
+// 那会把「读不出来」误报成「没人推荐」，两种情况的列表都是空的，必须分开。
+function parseQueueRef(result: CommandResult): StoreRecommendation[] {
+  const ref = result.operationRef;
+  if (typeof ref !== "string") {
+    throw new StoreRecommendationProtocolError("推荐队列响应缺少 operationRef");
+  }
+  try {
+    const parsed = JSON.parse(ref) as { recommendations?: StoreRecommendation[] };
+    return parsed.recommendations ?? [];
+  } catch (err) {
+    throw new StoreRecommendationProtocolError(
+      "推荐队列解析失败: " + (err instanceof Error ? err.message : String(err))
+    );
+  }
+}
+
 export type StoreRecommendationOrigin = "USER" | "AI";
+
+// STORE-REC-004: 运营对一条推荐做出的结论。append-only —— 改主意是追加一条新的，
+// 以最新一条为准，绝不回头改旧记录。
+export type StoreRecommendationDecision = "ACCEPT" | "REJECT";
+
+// STORE-REC-005: 队列的四种看法。PENDING = 还没出结论；ACCEPTED = 已批准接入
+// （注意：批准不等于店铺已存在，商家实际入驻是另一回事）；REJECTED = 不采纳。
+export type StoreRecommendationQueueStatus = "PENDING" | "ACCEPTED" | "REJECTED";
 
 // STORE-REC-002: 运营评估队列的读模型（与服务端 StoreRecommendation 的 json tag 对齐）。
 export interface StoreRecommendation {
@@ -21,12 +46,26 @@ export interface StoreRecommendation {
   recommendedByAccountId: string;
   origin: StoreRecommendationOrigin;
   createdAt: string;
+  // STORE-REC-004: 运营的最新评估结论。服务端用 omitempty，没评估时这些字段
+  // 根本不会出现 —— 所以「没有 decision」才代表「还没评估」。
+  decision?: StoreRecommendationDecision;
+  decisionReason?: string;
+  decidedBy?: string;
+  decidedAt?: string;
 }
 
 export interface ListStoreRecommendationsQuery {
   city?: string;
   origin?: StoreRecommendationOrigin;
   limit?: number;
+  /**
+   * 按最新结论筛选。不传 = 全部。
+   *
+   * 为什么不是布尔值：队列要有四种看法（待评估 / 已采纳待接入 / 不采纳 / 全部）。
+   * 用 `只看待评估` 这种开关表达不了「只看我采纳过的」—— 而采纳完一条它就从
+   * 默认视图消失了，运营看不到自己批过什么、也没法跟进商家入驻（STORE-REC-005）。
+   */
+  status?: StoreRecommendationQueueStatus;
 }
 
 export interface RecommendStoreInput {
@@ -41,6 +80,31 @@ export class StoreRecommendationProtocolError extends Error {
   public constructor(message: string) {
     super(message);
     this.name = "StoreRecommendationProtocolError";
+  }
+}
+
+// STORE-REC-003: 小美（AI）整理出来的推荐草稿。
+//
+// 字段允许为空字符串 —— 空代表「用户没说」，**不是服务端没填**。
+// 调用方必须让用户自己补，绝不能替他编一个城市或品类出来。
+export interface SuggestedStoreRecommendation {
+  storeName: string;
+  city: string;
+  category: string;
+  reason: string;
+}
+
+/**
+ * 模型底座未配置或不可用。
+ *
+ * 这不是「用户这次操作失败」，而是**这个能力当前根本不存在**。调用方必须
+ * 据此把「让小美整理」入口**藏起来**：弹一个红字报错是误导（重试也没用），
+ * 留一个点了没反应的按钮更糟。
+ */
+export class StoreRecommendationAiUnavailableError extends Error {
+  public constructor() {
+    super("小美整理功能当前不可用");
+    this.name = "StoreRecommendationAiUnavailableError";
   }
 }
 
@@ -91,25 +155,108 @@ export class StoreOnboardingClient {
     if (query.city && query.city.trim()) payload.city = query.city.trim();
     if (query.origin) payload.origin = query.origin;
     if (query.limit && query.limit > 0) payload.limit = query.limit;
+    // STORE-REC-005: status 取代了旧的 pendingOnly 布尔开关。
+    if (query.status) payload.status = query.status;
 
     const result = await this.command("ListStoreRecommendations", payload, {
       type: "STORE",
       id: "queue"
     });
-    // 服务端把队列 JSON 放在 operationRef 里；没有它算协议异常，
-    // 不能当成空队列 —— 同上，会把「读不出来」误报成「没人推荐」。
+    return parseQueueRef(result);
+  }
+
+  /**
+   * STORE-REC-007: 我推荐的那些店，现在什么状态。
+   *
+   * 为什么需要它：运营队列（listRecommendations）是 operator-only，普通用户
+   * 调不动 —— 于是推荐人提交完就再无回音，永远不知道自己推荐的那家店被采纳了
+   * 没有。而**能完成入驻的人通常就是他**：采纳只代表批准接入，不等于店铺已存在，
+   * 他看不到「该去建店了」，那条已批准的记录就永远等不到人。
+   *
+   * 作用域由服务端强制收敛到当前账号，这里传不了也改不了别人的。
+   */
+  public async listMyRecommendations(
+    query: Pick<ListStoreRecommendationsQuery, "limit" | "status"> = {}
+  ): Promise<StoreRecommendation[]> {
+    const payload: Record<string, unknown> = {};
+    if (query.limit && query.limit > 0) payload.limit = query.limit;
+    if (query.status) payload.status = query.status;
+
+    const result = await this.command("ListMyStoreRecommendations", payload, {
+      type: "STORE",
+      id: "mine"
+    });
+    return parseQueueRef(result);
+  }
+
+  /**
+   * STORE-REC-003: 让小美把用户随口说的话整理成推荐草稿（**只读，不落库**）。
+   *
+   * 为什么需要它：origin 区分「用户推荐」与「小美推荐」，运营队列也有
+   * 「小美推荐」筛选 —— 但之前没有一个地方能产生 AI 推荐，那个筛选是死 UI。
+   *
+   * 拿到的草稿仍然要经用户确认，再由 recommendStore 落库；小美不直接写库，
+   * 也就绕不过服务端那套 fail-closed 校验。
+   */
+  public async suggestRecommendation(note: string): Promise<SuggestedStoreRecommendation> {
+    const trimmed = note.trim();
+    if (!trimmed) throw new StoreRecommendationProtocolError("先说说这家店，小美才能整理");
+
+    let result: CommandResult;
+    try {
+      result = await this.command(
+        "SuggestStoreRecommendation",
+        { note: trimmed },
+        { type: "STORE", id: "suggest" }
+      );
+    } catch (err) {
+      if (
+        err instanceof StoreRecommendationRejectedError &&
+        err.result.error?.errorCode === "AI_NOT_CONFIGURED"
+      ) {
+        throw new StoreRecommendationAiUnavailableError();
+      }
+      throw err;
+    }
+
     const ref = result.operationRef;
     if (typeof ref !== "string") {
-      throw new StoreRecommendationProtocolError("推荐队列响应缺少 operationRef");
+      throw new StoreRecommendationProtocolError("小美整理结果缺少 operationRef");
     }
     try {
-      const parsed = JSON.parse(ref) as { recommendations?: StoreRecommendation[] };
-      return parsed.recommendations ?? [];
+      const parsed = JSON.parse(ref) as Partial<SuggestedStoreRecommendation>;
+      return {
+        storeName: (parsed.storeName ?? "").trim(),
+        city: (parsed.city ?? "").trim(),
+        category: (parsed.category ?? "").trim(),
+        reason: (parsed.reason ?? "").trim()
+      };
     } catch (err) {
       throw new StoreRecommendationProtocolError(
-        "推荐队列解析失败: " + (err instanceof Error ? err.message : String(err))
+        "小美整理结果解析失败: " + (err instanceof Error ? err.message : String(err))
       );
     }
+  }
+
+  /**
+   * STORE-REC-004: 记录运营的评估结论（operator-only）。
+   *
+   * 为什么需要它：队列（STORE-REC-002）只能看不能判 —— 运营读完一条推荐，
+   * 没有任何地方记录「采纳 / 不采纳」，评估结论只存在于他脑子里。
+   *
+   * 不采纳必须给理由（服务端会拒）：否则举证链上会留一条无法解释的拒绝。
+   */
+  public async decideRecommendation(input: {
+    recommendationId: string;
+    decision: StoreRecommendationDecision;
+    reason?: string;
+  }): Promise<void> {
+    const recommendationId = input.recommendationId.trim();
+    if (!recommendationId) throw new StoreRecommendationProtocolError("缺少推荐 id，无法记录结论");
+    const payload: Record<string, unknown> = { recommendationId, decision: input.decision };
+    const reason = input.reason?.trim();
+    if (reason) payload.reason = reason;
+    await this.command("DecideStoreRecommendation", payload, { type: "STORE", id: "disposition" });
   }
 
   private nextId(prefix: string): string {

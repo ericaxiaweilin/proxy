@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import QRCode from "react-native-qrcode-svg";
+import { toQrPayload } from "../profile-qr";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
 import { color, Gradient } from "../theme";
 import type { AbilityType, AvailabilityRule, AvailabilityState, AvOverride, MenuRow } from "./me-types";
@@ -268,17 +270,24 @@ function QrCard({
   desc,
   actionLabel,
   onAction,
-  alignCenter = false
+  alignCenter = false,
+  qrValue
 }: {
   title: string;
   desc: string;
   actionLabel: string;
   onAction?: () => void;
   alignCenter?: boolean;
+  /** 传入则渲染真实可扫描二维码（PROFILE-QR-001）；缺省保持 FakeQr 兜底。 */
+  qrValue?: string;
 }): React.JSX.Element {
   return (
     <View style={[styles.qrCard, alignCenter && styles.qrCardCenter]}>
-      <FakeQr />
+      {qrValue ? (
+        <QRCode value={toQrPayload(qrValue)} size={104} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+      ) : (
+        <FakeQr />
+      )}
       <View style={[styles.qrCardText, alignCenter && styles.qrCardTextCenter]}>
         <Text style={styles.qrCardTitle}>{title}</Text>
         <Text style={styles.qrCardDesc}>{desc}</Text>

@@ -1,4 +1,4 @@
-package com.proxy.app
+package com.proxy.screenprotection
 
 import android.view.WindowManager
 import com.facebook.react.bridge.ReactApplicationContext

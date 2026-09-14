@@ -651,6 +651,16 @@ func (s *Service) follow(ctx context.Context, e command.Envelope) command.Result
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "FOLLOW_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.follow_not_allowed", nil)
 	}
+	// SELF-FOLLOW-001: 镜像下面 unfollow 的 CANNOT_UNFOLLOW_SELF。
+	//
+	// 缺这道门时的不对称：follow 收下自己，unfollow 却拒绝自己 —— 于是自关注是一条
+	// **永远删不掉**的行。而 CountFollowers / CountFollowing 分别按 followee_id /
+	// follower_id 计数，一次自关注会让自己「粉丝」和「关注」各 +1，且没有任何 API
+	// 能回滚。移动端「点头像 → + 关注」在本人帖子上就会走到这里（feed.tsx 的
+	// openProfileActions 没有 isOwnPost 判断）。
+	if p.FolloweeID == e.Actor.ID {
+		return command.Rejected(e, "CANNOT_FOLLOW_SELF", "VALIDATION", "AFTER_USER_ACTION", "engagement.cannot_follow_self", nil)
+	}
 	f := Follow{FollowerID: e.Actor.ID, FolloweeID: p.FolloweeID, CreatedAt: s.clock.Now().UTC()}
 	domainEvents := []event.DomainEvent{event.New("ProfileFollowed", "Follow", e.Actor.ID+"|"+p.FolloweeID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, f.CreatedAt, map[string]any{
 		"followerId": f.FollowerID,

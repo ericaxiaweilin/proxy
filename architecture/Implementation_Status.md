@@ -998,3 +998,43 @@ Observer role 拆分 (R15.20 遗留) + 启动 API 自动 apply migrations (R15.2
 4. 其他 RLS policy 加固: scene / contribution / supply 表加
    SELECT-only policy for observer, BI 范围拓到跨域。
 ```
+
+## 补记 2026-09-14 — R15.23→R92 / Rev186→192（审计补档，HEAD be94065）
+
+```text
+基线：分支 fix/p0-scroll-chrome-feed-media，HEAD be94065 clean，
+7天 316 commits，24h 25 commits，无 origin（本地集成仓）。
+设计基线 Rev192，openapi 251 commands（R15.19时151），
+migrations 109（R15.22时34，新增090_post_ephemeral_until/091_post_polls/
+092_store_recommendations/093_store_recommendation_dispositions），
+Go 66 packages，regression pin 277处。
+
+落地（详见 docs/design/BASELINE_CHANGELOG.md Rev186-192）：
+- STORE-REC-002→007：运营评估队列App内化→小美AI SuggestStoreRecommendation
+  只读草稿→运营写结论→采纳可回查→孤儿结论堵住→推荐人ListMyStoreRecommendations
+  看“已采纳·等你建店”；PG去重+operator白名单。
+- BENEFIT-WIRE-001+BENEFIT-ELIG-001：benefit-hub.tsx列ACTIVE活动接
+  BenefitClaim/Redeem三件套，max_redemptions真生效。
+- PROFILE-QR-001：个人/商家二维码真实化+复制/分享；好友邀请复制收尾。
+- feed/profile诚实化：FEED-REPLY-002/MENTION-001/PROFILE-SAVED-001/
+  PROFILE-TABS-001/REPLY-TARGET-001/REPLY-INLINE-001/SEARCH-CORPUS-001/
+  GHOST-24H-001/MUTE-REVERSIBLE-001/帖文投票post_polls。
+- 越南合规 COMP-*批量：AGE/AI-MINOR/SELLER/ID-001-002/E2EE-001-002/
+  REPORT-001-004/AUTHORITY-001；OPENAPI-DOMAIN-001域命令全进契约。
+
+verify（2026-09-14 commander审计实跑）：
+  pnpm check:design PASS / check:liquid-dock PASS
+  contracts build PASS / mobile facet-client+design-system-r3 PASS
+  go facet 8 tests PASS / check:openapi drift passed
+  go build PASS / mobile build PASS
+  benefit/storeonboarding/localnet Go三包 PASS
+  mobile engagement 32+muted 10 PASS / mobile typecheck PASS
+  full-vibe overall PASS（已修rate误报：RateLimit在server.go，
+  rateAllow在middleware.go，旧脚本单文件查导致FAIL）
+
+遗留（沿用R15.22四项，AI审核已6轮未动，需确认做/下线）：
+1. AI内容审核worker hook未接；2. decision表按月partition未做；
+3. startup dry-run+apply双报未做；4. scene/contribution/supply observer
+   RLS未拓。新增：regression门禁全量>120s超时需拆分；worktrees 18个残留需清理；
+   Implementation_Status以本补记+BASELINE_CHANGELOG为准，R23+分节待补。
+```
