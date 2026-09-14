@@ -3730,3 +3730,26 @@ if ! grep -qF '!openAIProfile && !openHumanProfile' apps/mobile/src/shell/app-sh
   exit 1
 fi
 echo "    PROFILE-FROM-ANY-TAB-001: PASS (profile destinations sit above the tab branches; feed entry point reaches them)"
+
+# SELF-FOLLOW-001: follow 缺了一道 unfollow 早就有的「自己人」门。
+#
+# 不对称：UnfollowProfile 有 CANNOT_UNFOLLOW_SELF，FollowProfile 没有任何自己人判断。
+# 于是自关注是一条**永远删不掉**的行 —— follow 建了它，unfollow 又拒绝删除自己。
+# 而 CountFollowers / CountFollowing 分别按 followee_id / follower_id 计数，
+# 一次自关注会让自己的「粉丝」和「关注」各 +1，且没有任何 API 能回滚。
+# 可达性：移动端「点头像 → + 关注」在本人帖子上就会走到这里（feed.tsx 的
+# openProfileActions 没有 isOwnPost 判断），所以这不是一条够不着的路径。
+require_test "SELF-FOLLOW-001" "./internal/engagement" \
+  "TestFollow_CannotFollowSelf" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+require_test "SELF-FOLLOW-001" "./internal/engagement" \
+  "TestFollow_SelfFollowLeavesCountsUntouched" \
+  "apps/api-go/internal/engagement/service_test.go" || exit $?
+# 结构断言：门必须还在源码里。上面两条测试已经会红，但这条能给出「哪里错了」的
+# 直接提示（unfollow 还留着自己的门，不对称会回来）。
+if ! grep -qF 'CANNOT_FOLLOW_SELF' apps/api-go/internal/engagement/service.go; then
+  echo "  FAIL [SELF-FOLLOW-001]: follow 的自己人门被拿掉了；unfollow 还留着 CANNOT_UNFOLLOW_SELF，" >&2
+  echo "        不对称会回来 —— 自关注将再次变成一条删不掉、且会给自己刷 +1 的行。" >&2
+  exit 1
+fi
+echo "    SELF-FOLLOW-001: PASS (self-follow rejected; counts untouched; symmetric with unfollow)"

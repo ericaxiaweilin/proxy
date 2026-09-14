@@ -550,6 +550,41 @@ func TestUnfollow_CannotUnfollowSelf(t *testing.T) {
 	}
 }
 
+// SELF-FOLLOW-001: unfollow 拒绝自己（上面那条），follow 却照收 —— 这个不对称让
+// 自关注成为一条**永远删不掉**的行：follow 建了它，unfollow 又拒绝删除自己。
+// 而 CountFollowers/CountFollowing 分别按 followee_id / follower_id 计数，
+// 所以一次自关注会让自己「粉丝」和「关注」各 +1，且没有任何 API 能回滚。
+func TestFollow_CannotFollowSelf(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeWithActor("FollowProfile", "user_001", map[string]any{"followeeId": "user_001"}))
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("expected REJECTED for self-follow, got %s", result.Outcome)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "CANNOT_FOLLOW_SELF" {
+		t.Errorf("expected CANNOT_FOLLOW_SELF, got %+v", result.Error)
+	}
+}
+
+// SELF-FOLLOW-001 的后果面：自关注被拒后，计数必须保持 0/0。
+// 这条钉的是「不可回滚」——如果 follow 收了自关注，unfollow 又拒绝自己，
+// 那么 +1 是永久的。
+func TestFollow_SelfFollowLeavesCountsUntouched(t *testing.T) {
+	s := New()
+	s.Handle(envelopeWithActor("FollowProfile", "user_001", map[string]any{"followeeId": "user_001"}))
+	result := s.Handle(envelopeWithActor("GetFollowCounts", "user_001", map[string]any{"userId": "user_001"}))
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("expected ACCEPTED, got %s", result.Outcome)
+	}
+	var counts map[string]any
+	if err := json.Unmarshal([]byte(result.OperationRef), &counts); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if int(counts["followers"].(float64)) != 0 || int(counts["following"].(float64)) != 0 {
+		t.Errorf("self-follow must not move counts, got followers=%v following=%v",
+			counts["followers"], counts["following"])
+	}
+}
+
 func TestGetFollowCounts(t *testing.T) {
 	s := New()
 	// user_002 follow user_001; user_003 follow user_001; user_001 follow user_004
