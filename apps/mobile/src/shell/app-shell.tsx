@@ -434,7 +434,11 @@ export function AppShell({
   // bottom dock hide on scroll down, restore on scroll up). Chat,
   // Home/Me forms and Feed's nested chat/preferences keep navigation
   // stable so moving through messages cannot unexpectedly summon/hide it.
-  const isNavVisible = !realitySceneOpen && !openAIProfile && selectShellChromeVisible({
+  // PROFILE-FROM-ANY-TAB-001: openHumanProfile 和 openAIProfile 一样是「盖住整个
+  // body 的目的地」，不是某个 tab 的子页面 —— 所以也要一起收掉导航 chrome。
+  // 否则从动态点进他人主页后底栏还在，用户切个 tab 就会被留在一个没人负责关闭的
+  // 主页上（它的写入方不在那个 tab，返回键也回不到正确的来源）。
+  const isNavVisible = !realitySceneOpen && !openAIProfile && !openHumanProfile && selectShellChromeVisible({
     tab,
     feedChromeVisible,
     homeChromeVisible,
@@ -483,8 +487,62 @@ export function AppShell({
           {...bodySwipePanResponder.panHandlers}
           style={styles.body}
         >
+        {/*
+          ============================================================
+          PROFILE-FROM-ANY-TAB-001 — 个人主页必须挂在 tab 分支**之上**。
+
+          这两支（openAIProfile / openHumanProfile）的**写入方不在 HOME**：
+            - 动态页点头像 → 菜单「访问个人主页」(feed.tsx onOpenProfile → app-shell 的
+              onOpenProfile)
+            - 动态页 → 现实场景图 → 点某个人 / 某个 AI 账号
+          而它们此前只写在 `tab === "HOME"` 分支里面。于是从动态进入时：
+          状态被设了 → 重新渲染 → 链子在 `tab === "FEED"` 处就返回了 →
+          **没有任何分支去读它** → 菜单一关，屏幕纹丝不动。
+          （用户看到的现象就是「点头像选访问个人主页没反应」。）
+
+          放在这一层与 realitySceneOpen 同级，因为它们语义相同：覆盖整个 body 的
+          目的地，不属于任何一个 tab。移动它们之前请先读这段 —— 放回 tab 分支里
+          会立刻让动态入口再次失效，而且不会有任何测试变红。
+          ============================================================
+        */}
         {realitySceneOpen ? (
           <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
+        ) : openAIProfile ? (
+          <AIAccountProfileSurface
+            account={openAIProfile}
+            engagement={engagement}
+            relationship={relationship}
+            {...(secureSessionStore ? { secureSessionStore } : {})}
+            onBack={() => { setOpenAIProfile(undefined); if (aiProfileReturnToScene) { setAIProfileReturnToScene(false); setRealitySceneOpen(true); } }}
+            onViewPosts={(account) => {
+              // 查看个人主页：关主页页，进动态看她的全部内容（搜索种子即消费）。
+              setOpenAIProfile(undefined);
+              setAIProfileReturnToScene(false);
+              setFeedSearchSeed(account.displayName);
+              setTab("FEED");
+            }}
+            onMessage={(account, initialDraft) => {
+              setOpenAIProfile(undefined);
+              setMessageChat({ author: account.displayName, aiAccount: account, ...(initialDraft ? { initialDraft } : {}) });
+              setPageOverride("MSG_CHAT");
+              setTab("MESSAGES");
+            }}
+          />
+        ) : openHumanProfile ? (
+          <OtherProfileSurface
+            target={openHumanProfile}
+            engagement={engagement}
+            localNet={localNet}
+            moderation={moderation}
+            {...(secureSessionStore ? { secureSessionStore } : {})}
+            onBack={() => { setOpenHumanProfile(undefined); if (humanProfileReturnToScene) { setHumanProfileReturnToScene(false); setRealitySceneOpen(true); } }}
+            onMessage={(name, avatarUri) => {
+              setOpenHumanProfile(undefined);
+              setMessageChat({ author: name, ...(avatarUri ? { avatarSource: { uri: avatarUri } } : {}) });
+              setPageOverride("MSG_CHAT");
+              setTab("MESSAGES");
+            }}
+          />
         ) : tab === "HOME" ? (
           sceneComposerTool ? (
             <SceneComposerSurface tool={sceneComposerTool} scene={scene} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
@@ -518,42 +576,6 @@ export function AppShell({
               business={business}
               activities={activities}
               supply={supply}
-            />
-          ) : openAIProfile ? (
-            <AIAccountProfileSurface
-              account={openAIProfile}
-              engagement={engagement}
-              relationship={relationship}
-              {...(secureSessionStore ? { secureSessionStore } : {})}
-              onBack={() => { setOpenAIProfile(undefined); if (aiProfileReturnToScene) { setAIProfileReturnToScene(false); setRealitySceneOpen(true); } }}
-              onViewPosts={(account) => {
-                // 查看个人主页：关主页页，进动态看她的全部内容（搜索种子即消费）。
-                setOpenAIProfile(undefined);
-                setAIProfileReturnToScene(false);
-                setFeedSearchSeed(account.displayName);
-                setTab("FEED");
-              }}
-              onMessage={(account, initialDraft) => {
-                setOpenAIProfile(undefined);
-                setMessageChat({ author: account.displayName, aiAccount: account, ...(initialDraft ? { initialDraft } : {}) });
-                setPageOverride("MSG_CHAT");
-                setTab("MESSAGES");
-              }}
-            />
-          ) : openHumanProfile ? (
-            <OtherProfileSurface
-              target={openHumanProfile}
-              engagement={engagement}
-              localNet={localNet}
-              moderation={moderation}
-              {...(secureSessionStore ? { secureSessionStore } : {})}
-              onBack={() => { setOpenHumanProfile(undefined); if (humanProfileReturnToScene) { setHumanProfileReturnToScene(false); setRealitySceneOpen(true); } }}
-              onMessage={(name, avatarUri) => {
-                setOpenHumanProfile(undefined);
-                setMessageChat({ author: name, ...(avatarUri ? { avatarSource: { uri: avatarUri } } : {}) });
-                setPageOverride("MSG_CHAT");
-                setTab("MESSAGES");
-              }}
             />
           ) : workspaceTarget ? (
             <FulfillmentWorkspace

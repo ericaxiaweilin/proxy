@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 195 — 2026-09-14
+
+- PROFILE-FROM-ANY-TAB-001 的**代码**落地：`app-shell.tsx`（两个个人主页分支
+  提到 tab 分支之上 + `isNavVisible` 补 `!openHumanProfile`）、
+  `app-shell.test.ts`（4 条顺序/接线测试）、`check-regression-contracts.sh`
+  （PROFILE-FROM-ANY-TAB-001 回归钉）。**无新增视觉改动** —— 只是让既有的
+  全屏主页目的地真的能被读到。
+  - **为什么 193 和 195 说的是同一件事**：Rev 193 的条目已经完整描述了这个改动，
+    但它在 `ee362ab`（PROFILE-QR-002）里被同批带走了 —— 那个提交因为「基线敏感
+    文件必须在同一提交里登记」这条规则，收编了我当时尚未提交的 baseline 改动
+    （Rev 194 的备注里也写明了这一点，一字未改）。
+  - 本次提交动的是基线敏感文件 `app-shell.tsx` **本身**，按同一条规则必须再登记
+    一次，所以补此条。**193 = 提前落地的登记，195 = 代码落地**，两者描述同一个改动。
+
 ## Revision 194 — 2026-09-14
 
 - PROFILE-QR-002：个人二维码常规能力（`me.tsx` 个人qr页 + `friend-crm.tsx`

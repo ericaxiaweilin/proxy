@@ -3698,3 +3698,35 @@ for cmd in ClaimBenefit RedeemBenefit; do
   fi
 done
 echo "    BENEFIT-CAMPAIGN-001: PASS (campaign management is operator-only; claiming/redeeming stay open to users)"
+
+# PROFILE-FROM-ANY-TAB-001: 动态页点「访问个人主页」必须真的能到主页。
+#
+# 洞的形状：openHumanProfile 的**写入方在 FEED**（feed.tsx 点头像 → 菜单
+# 「访问个人主页」→ app-shell 的 onOpenProfile），但读它的分支此前只写在
+# `tab === "HOME"` 里面。于是从动态进入时：状态被设了 → 重渲染 → 链子在
+# `tab === "FEED"` 处就返回了 → **没有任何分支去读它** → 菜单一关屏幕纹丝不动。
+# 用户看到的就是「点头像选访问个人主页没反应」。
+# openAIProfile 是同一个洞的第二份：动态页 → 现实场景图 → 点 AI 账号时 tab 仍是 FEED。
+#
+# 注意这里钉的是**顺序**而不是「存在」：`<OtherProfileSurface` 一直都在这文件里，
+# 只断言它存在的话，把它挪回 HOME 分支测试依然全绿 —— 那正是当初漏掉的原因。
+pnpm --filter @proxy/mobile exec vitest run src/shell/app-shell.test.ts || exit $?
+# 结构断言之外再钉一次顺序，这样即使有人把上面的测试文件改了也拦得住。
+human_at=$(grep -n ') : openHumanProfile ? (' apps/mobile/src/shell/app-shell.tsx | head -1 | cut -d: -f1)
+home_at=$(grep -n ') : tab === "HOME" ? (' apps/mobile/src/shell/app-shell.tsx | head -1 | cut -d: -f1)
+if [ -z "$human_at" ] || [ -z "$home_at" ]; then
+  echo "  FAIL [PROFILE-FROM-ANY-TAB-001]: 找不到个人主页分支或 HOME 分支（结构被改过）" >&2
+  exit 1
+fi
+if [ "$human_at" -ge "$home_at" ]; then
+  echo "  FAIL [PROFILE-FROM-ANY-TAB-001]: openHumanProfile 分支被挪到 tab 分支里面了" >&2
+  echo "        （第 $human_at 行 vs HOME 分支第 $home_at 行）。" >&2
+  echo "        它的写入方在动态页，挪进去会让「访问个人主页」静默失效。" >&2
+  exit 1
+fi
+if ! grep -qF '!openAIProfile && !openHumanProfile' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [PROFILE-FROM-ANY-TAB-001]: 打开真人主页时没有收掉导航 chrome，" >&2
+  echo "        用户切 tab 会被留在一个没人负责关闭的主页上。" >&2
+  exit 1
+fi
+echo "    PROFILE-FROM-ANY-TAB-001: PASS (profile destinations sit above the tab branches; feed entry point reaches them)"
