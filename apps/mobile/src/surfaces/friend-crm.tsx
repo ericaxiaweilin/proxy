@@ -1,8 +1,9 @@
 // 个人轻 CRM — 好友不是消息列表的子集，而是独立的个人关系资产。
 // 接线 /Users/thanhhuyennguyen/Downloads/proxy_add_friend_detail.html 的 5 种加好友 + 轻 CRM 详情
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import QRCode from "react-native-qrcode-svg";
 import { inviteQrPayload, parseScannedQr } from "../profile-qr";
 import type { ScannedQr } from "../profile-qr";
@@ -138,9 +139,11 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [crmTab, setCrmTab] = useState<"ALL" | "WARM" | "FOLLOW" | "MET">("ALL");
   const [inviteCopied, setInviteCopied] = useState(false);
   // PROFILE-QR-003: 扫码识别三态 —— undefined 还没试 / null 识别失败 / ScannedQr 成功。
-  // 相机扫描未接入（要加原生依赖），入口是剪贴板：对方分享的链接、扫码枪输出都落在这里。
+  // 相机扫描（expo-camera）与剪贴板共用 parseScannedQr，落在同一状态机。
   const [scanned, setScanned] = useState<ScannedQr | null>();
   const [scanError, setScanError] = useState("");
+  // 相机权限（PROFILE-QR-003）：granted 前显示授权按钮，拒绝后显示明确文案。
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   // HANDLE-LOOKUP-001: 识别出 handle 之后要落到**人**。四种结果四种文案 ——
   // 查到 / 没这个人 / 查询失败 / 没有登录态，谁也不许长得像谁：
   // 把「查不到」显示成「查询失败」会让人一直重试，把「没登录」显示成
@@ -148,6 +151,8 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [scanLookup, setScanLookup] = useState<"found" | "missing" | "failed" | "no-client">();
   const [scanMatch, setScanMatch] = useState<ProfileWire>();
   const [scanBusy, setScanBusy] = useState(false);
+  // 相机每帧可能触发多次 barcode 事件：ref 锁住重复解析（state 更新是异步的）。
+  const scanBusyRef = useRef(false);
   const [scanAddSent, setScanAddSent] = useState(false);
 
   const reload = useCallback(async () => {
@@ -306,7 +311,16 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       setScanError("剪贴板里没有内容 —— 先复制对方分享的 Proxy 二维码链接。");
       return;
     }
-    const parsed = parseScannedQr(text);
+    await handleScannedCode(text);
+  }
+
+  // PROFILE-QR-003：相机扫码与剪贴板共用同一解析/落人状态机。
+  // 相机每帧可能触发多次，扫码成功一次后锁住，避免重复查人。
+  async function handleScannedCode(raw: string): Promise<void> {
+    if (scanBusyRef.current || scanned) return;
+    setScanned(undefined);
+    setScanError("");
+    const parsed = parseScannedQr(raw);
     if (!parsed) {
       setScanned(null);
       setScanError("这不是 Proxy 二维码。只识别 proxy.app 的链接，其他内容不会被跳转。");
@@ -458,8 +472,27 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         <View style={styles.privacy}><View style={styles.privacyIcon}><Text style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text style={styles.privacyStrong}>关系不会自动导入</Text><Text style={styles.privacyP}>通讯录或外部社媒只用于发现“可能认识”的人。成为 Proxy 好友前，仍需要发送好友请求并由对方确认。</Text></View></View>
 
         {/* Sheets */}
-        <CrmSheet open={sheet === "SCAN"} onClose={() => { setSheet(undefined); setScanned(undefined); setScanError(""); }} title="扫码添加好友" sub="相机扫描未接入（需要原生依赖）。从剪贴板识别对方分享的 Proxy 二维码链接，识别成功后再去添加。">
-          <View style={styles.scanner}><View style={styles.scanFrame} /><Text style={styles.scannerNote}>相机扫描未接入 · 请用剪贴板识别</Text></View>
+        <CrmSheet open={sheet === "SCAN"} onClose={() => { setSheet(undefined); setScanned(undefined); setScanError(""); scanBusyRef.current = false; }} title="扫码添加好友" sub="对准对方的 Proxy 二维码（个人主页 / 邀请码），或从剪贴板识别链接，识别成功后再去添加。">
+          {cameraPermission?.granted ? (
+            <View style={styles.cameraWrap}>
+              <CameraView
+                style={styles.cameraView}
+                facing="back"
+                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                onBarcodeScanned={(result) => { void handleScannedCode(result.data); }}
+              />
+              <View style={styles.scanFrame} />
+              <Text style={styles.scannerNote}>对准二维码即可识别</Text>
+            </View>
+          ) : (
+            <View style={styles.scanner}>
+              <View style={styles.scanFrame} />
+              <Text style={styles.scannerNote}>{cameraPermission ? "需要相机权限才能扫码" : "相机权限未决定"}</Text>
+              {!cameraPermission?.granted ? (
+                <Pressable onPress={() => void requestCameraPermission()} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>允许使用相机</Text></Pressable>
+              ) : null}
+            </View>
+          )}
           <View style={styles.actions}><Pressable onPress={() => void scanFromClipboard()} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>从剪贴板识别</Text></Pressable></View>
           {scanned ? (
             <View style={styles.scanHit}>
@@ -839,6 +872,8 @@ const styles = StyleSheet.create({
   sheetTitle: { color: color.ink, fontSize: 15, fontWeight: "900" },
   sheetClose: { color: color.muted, fontSize: 20, paddingHorizontal: 6 },
   sheetSub: { color: color.muted, fontSize: 11, lineHeight: 16, marginTop: 6 },
+  cameraWrap: { alignItems: "center", backgroundColor: "#0C0A12", borderRadius: 14, overflow: "hidden" },
+  cameraView: { height: 320, width: "100%" },
   scanner: { alignItems: "center", backgroundColor: "#111", borderRadius: 18, height: 260, justifyContent: "center", marginTop: 12, overflow: "hidden" },
   scanFrame: { borderColor: "rgba(255,255,255,0.85)", borderRadius: 18, borderWidth: 2, height: 170, width: 170 },
   scannerNote: { bottom: 18, color: "#D6D1D8", fontSize: 11, position: "absolute" },
