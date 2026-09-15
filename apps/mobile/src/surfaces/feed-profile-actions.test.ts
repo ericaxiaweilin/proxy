@@ -35,3 +35,18 @@ describe("SELF-FOLLOW-001 本人帖子的头像菜单不提供「关注」", () 
     expect(feed.slice(rowAt, menuAt)).not.toContain("isOwnAuthorId");
   });
 });
+
+describe("AVATAR-FLASH-001 本人头像不闪黑头", () => {
+  // 首帧时异步解析（读盘/读网）还没回来，旧实现直接画 #111 黑底首字，
+  // 照片到了再换 —— 每次进动态都"黑一下"。现在：内存缓存首帧直出，
+  // 算不出来时画透明占位，算出来是首字才画黑底。
+  it("caches the resolved avatar URI across mounts, keyed by account", () => {
+    expect(feed).toContain("cachedViewerAvatar");
+    expect(feed).toContain("cachedViewerAvatar.accountId === viewerAccountId");
+  });
+
+  it("renders a transparent placeholder (not the #111 circle) while the own avatar is unresolved", () => {
+    expect(feed).toContain("!viewerAvatarLoaded && viewerAvatarUri === undefined");
+    expect(feed).toContain('backgroundColor: "transparent"');
+  });
+});

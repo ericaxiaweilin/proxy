@@ -13,7 +13,7 @@
 // already has a Transport abstraction (see auth-client.ts) that knows
 // how to inject the Authorization header.
 
-import type { Transport, TransportRequest, TransportResponse } from "./auth-client";
+import type { TransportResponse } from "./auth-client";
 
 export type PrivacyRequestKind = "export" | "delete";
 export type PrivacyRequestStatus =
@@ -112,29 +112,23 @@ export class PrivacyError extends Error {
 }
 
 export type PrivacyClientOptions = {
-  baseUrl: string;
-  transport: Transport;
-  // Optional override for tests; defaults to a 30-second timeout.
-  timeoutMs?: number | undefined;
+  // Authenticated command transport (SessionAuthClient): injects the Bearer
+  // access token and refreshes on 401. /v1/privacy/* rejects anonymous calls
+  // (access_token_required), so the old raw fetch transport left every
+  // privacy screen failing with "privacy GET … failed" on device.
+  authClient: { request(path: string, init: { method: "POST" | "GET"; body?: unknown }): Promise<TransportResponse> };
 };
 
 export class PrivacyClient {
   constructor(private readonly options: PrivacyClientOptions) {}
 
-  private url(path: string): string {
-    return this.options.baseUrl.replace(/\/$/, "") + path;
-  }
-
   private async call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
-    const request: TransportRequest = {
-      url: this.url(path),
-      method,
-      headers: { "Content-Type": "application/json" },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {})
-    };
     let response: TransportResponse;
     try {
-      response = await this.options.transport(request);
+      response = await this.options.authClient.request(path, {
+        method,
+        ...(body !== undefined ? { body } : {}),
+      });
     } catch (err) {
       throw new PrivacyError(0, "PRIVACY_REQUEST_UNAVAILABLE", `network error: ${(err as Error).message}`);
     }
@@ -180,18 +174,13 @@ export class PrivacyClient {
 }
 
 // resolvePrivacyRequestClient builds a PrivacyClient from the same
-// inputs the rest of the app uses. The mobile app keeps one
-// PrivacyClient instance per session because the auth context is
-// captured in the transport; if the user re-authenticates, the
-// caller is expected to construct a new client.
+// authenticated transport the command clients use (SessionAuthClient).
+// Privacy endpoints are NOT public — anonymous calls get
+// access_token_required — so this must never go back to a raw fetch.
 export function resolvePrivacyRequestClient(input: {
-  baseUrl: string;
-  transport: Transport;
-  timeoutMs?: number;
+  authClient: { request(path: string, init: { method: "POST" | "GET"; body?: unknown }): Promise<TransportResponse> };
 }): PrivacyClient {
   return new PrivacyClient({
-    baseUrl: input.baseUrl,
-    transport: input.transport,
-    timeoutMs: input.timeoutMs
+    authClient: input.authClient,
   });
 }

@@ -704,6 +704,7 @@ export function AppShell({
             <FeedSurface
               key={feedSearchSeed ?? "feed"}
               engagement={engagement}
+              profileClient={profile}
               localNet={localNet}
               mediaClient={media}
               socialSpace={socialSpace}

@@ -1255,10 +1255,10 @@ export function MeSurface({
               如需联系 DPO (数据保护官) 或申诉数据处理问题, 请发邮件至 privacy@proxy.vn (最终地址以《服务协议》§53 为准)。依据 PDP 91/2025/QH15 Art. 13, Proxy 已指定 DPO 负责监管个人数据处理活动及处理用户申诉。
             </Text>
             <PrivacySettings
-              client={resolvePrivacyRequestClient({ baseUrl: localApiBaseUrl, transport: nativeTransport })}
+              client={resolvePrivacyRequestClient({ authClient: sessionAuthClient })}
             />
             <PreciseLocationCard
-              client={resolveLocationConsentClient({ baseUrl: localApiBaseUrl, transport: nativeTransport })}
+              client={resolveLocationConsentClient({ authClient: sessionAuthClient })}
             />
             <Pressable onPress={() => setSubPage(undefined)} style={styles.appBehaviorReturn}>
               <Text style={styles.appBehaviorReturnText}>返回我的</Text>

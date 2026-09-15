@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Transport, TransportRequest, TransportResponse } from "./auth-client";
+import type { TransportResponse } from "./auth-client";
 import {
   ALLOWED_DURATION_SECONDS,
   type LocationConsent,
@@ -10,20 +10,27 @@ import {
   resolveLocationConsentClient,
 } from "./location-consent-client";
 
+type AuthCall = { path: string; init: { method: "POST" | "GET"; body?: unknown } };
+
 interface StubResponse extends TransportResponse {
   status: number;
   body: any;
 }
 
 function makeStub(responses: Array<{
-  match: (req: TransportRequest) => boolean;
+  match: (call: AuthCall) => boolean;
   response: StubResponse;
-}>): Transport {
-  return async (req: TransportRequest): Promise<TransportResponse> => {
-    for (const r of responses) {
-      if (r.match(req)) return r.response;
-    }
-    throw new Error(`no stub for ${req.method} ${req.url}`);
+}>): { request(path: string, init: { method: "POST" | "GET"; body?: unknown }): Promise<TransportResponse>; calls: AuthCall[] } {
+  const calls: AuthCall[] = [];
+  return {
+    calls,
+    request: async (path, init) => {
+      calls.push({ path, init });
+      for (const r of responses) {
+        if (r.match({ path, init })) return r.response;
+      }
+      throw new Error(`no stub for ${init.method} ${path}`);
+    },
   };
 }
 
@@ -50,8 +57,7 @@ describe("LocationConsentClient", () => {
 
   it("rejects grant() with a duration outside the allowed set", async () => {
     const client = new LocationConsentClient({
-      baseUrl: "https://api.example/v1",
-      transport: makeStub([]),
+      authClient: makeStub([]),
     });
     await expect(client.grant(60)).rejects.toBeInstanceOf(LocationConsentError);
     await expect(client.grant(99999)).rejects.toMatchObject({
@@ -70,22 +76,20 @@ describe("LocationConsentClient", () => {
     };
     const transport = makeStub([
       {
-        match: (req) =>
-          req.method === "GET" &&
-          req.url === "https://api.example/v1/location/consent",
+        match: (call) =>
+          call.init.method === "GET" &&
+          call.path === "/v1/location/consent",
         response: okResponse(consent),
       },
     ]);
     const client = new LocationConsentClient({
-      baseUrl: "https://api.example/v1",
-      transport,
+      authClient: transport,
     });
     const got = await client.getStatus();
     expect(got).toEqual(consent);
   });
 
   it("grant() POSTs to /grant with the duration in the body", async () => {
-    const captured: TransportRequest[] = [];
     const consent: LocationConsent = {
       kind: "PRECISE_GPS",
       status: "GRANTED",
@@ -94,52 +98,50 @@ describe("LocationConsentClient", () => {
       remainingSeconds: 1800,
       durationSeconds: 1800,
     };
-    const transport: Transport = async (req) => {
-      captured.push(req);
-      return okResponse(consent);
-    };
+    const stub = makeStub([
+      {
+        match: (call) =>
+          call.init.method === "POST" &&
+          call.path === "/v1/location/consent/grant",
+        response: okResponse(consent),
+      },
+    ]);
     const client = new LocationConsentClient({
-      baseUrl: "https://api.example/v1",
-      transport,
+      authClient: stub,
     });
     const got = await client.grant(1800);
-    expect(captured).toEqual([
+    expect(stub.calls).toEqual([
       {
-        method: "POST",
-        url: "https://api.example/v1/location/consent/grant",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ durationSeconds: 1800 }),
+        path: "/v1/location/consent/grant",
+        init: { method: "POST", body: { durationSeconds: 1800 } },
       },
     ]);
     expect(got.durationSeconds).toBe(1800);
   });
 
   it("revoke() POSTs to /revoke with no body", async () => {
-    let captured: TransportRequest | undefined;
-    const transport: Transport = async (req) => {
-      captured = req;
-      return okResponse({ kind: "PRECISE_GPS", status: "REVOKED", wasActive: true });
-    };
+    const stub = makeStub([
+      {
+        match: () => true,
+        response: okResponse({ kind: "PRECISE_GPS", status: "REVOKED", wasActive: true }),
+      },
+    ]);
     const client = new LocationConsentClient({
-      baseUrl: "https://api.example/v1",
-      transport,
+      authClient: stub,
     });
     const result = await client.revoke();
-    expect(captured?.url).toBe("https://api.example/v1/location/consent/revoke");
-    expect(captured?.method).toBe("POST");
-    expect(captured?.body).toBeUndefined();
+    expect(stub.calls[0]?.path).toBe("/v1/location/consent/revoke");
+    expect(stub.calls[0]?.init.method).toBe("POST");
+    expect(stub.calls[0]?.init.body).toBeUndefined();
     expect(result.wasActive).toBe(true);
   });
 
   it("history() GETs /consent/history and returns the rows array", async () => {
     const transport = makeStub([
       {
-        match: (req) =>
-          req.method === "GET" &&
-          req.url === "https://api.example/v1/location/consent/history",
+        match: (call) =>
+          call.init.method === "GET" &&
+          call.path === "/v1/location/consent/history",
         response: okResponse({
           rows: [
             {
@@ -155,29 +157,31 @@ describe("LocationConsentClient", () => {
       },
     ]);
     const client = new LocationConsentClient({
-      baseUrl: "https://api.example/v1",
-      transport,
+      authClient: transport,
     });
     const got = await client.history();
     expect(got.rows).toHaveLength(1);
     expect(got.rows[0]?.durationSeconds).toBe(28800);
   });
 
-  it("trims trailing slashes from baseUrl", async () => {
-    const transport = makeStub([
+  it("calls the /v1-prefixed path the server mux expects", async () => {
+    // LOCATION-CONSENT-PATH-001: the old client built `${baseUrl}/location/…`
+    // (no /v1) while the server only serves /v1/location/… — every call 404'd
+    // on device. Paths are now literals, not baseUrl arithmetic.
+    const stub = makeStub([
       {
-        match: (req) =>
-          req.method === "GET" &&
-          req.url === "https://api.example/v1/location/consent",
+        match: (call) =>
+          call.init.method === "GET" &&
+          call.path === "/v1/location/consent",
         response: okResponse({ kind: "PRECISE_GPS", status: "NONE", remainingSeconds: 0, durationSeconds: 0 }),
       },
     ]);
     const client = new LocationConsentClient({
-      baseUrl: "https://api.example/v1////",
-      transport,
+      authClient: stub,
     });
     const got = await client.getStatus();
     expect(got.status).toBe("NONE");
+    expect(stub.calls[0]?.path).toBe("/v1/location/consent");
   });
 
   it("wraps a 4xx response in LocationConsentError with the server code", async () => {
@@ -191,8 +195,7 @@ describe("LocationConsentClient", () => {
       },
     ]);
     const client = new LocationConsentClient({
-      baseUrl: "https://api.example/v1",
-      transport,
+      authClient: transport,
     });
     await expect(client.grant(1800)).rejects.toMatchObject({
       code: "INVALID_LOCATION_CONSENT_DURATION",
@@ -200,14 +203,21 @@ describe("LocationConsentClient", () => {
     });
   });
 
-  it("resolveLocationConsentClient builds a usable client", async () => {
-    const transport: Transport = async (req) => {
-      expect(req.url).toBe("https://api.example/v1/location/consent");
-      return okResponse({ kind: "PRECISE_GPS", status: "NONE", remainingSeconds: 0, durationSeconds: 0 });
-    };
-    const client = resolveLocationConsentClient({ baseUrl: "https://api.example/v1", transport });
+  it("resolveLocationConsentClient routes through the injected authClient", async () => {
+    // LOCATION-CONSENT-AUTH-001: same disease as PRIVACY-AUTH-001 — the
+    // endpoints need a Bearer token, so the client must go through the
+    // authenticated SessionAuthClient, never a raw fetch.
+    const stub = makeStub([
+      {
+        match: () => true,
+        response: okResponse({ kind: "PRECISE_GPS", status: "NONE", remainingSeconds: 0, durationSeconds: 0 }),
+      },
+    ]);
+    const client = resolveLocationConsentClient({ authClient: stub });
     const got = await client.getStatus();
     expect(got.status).toBe("NONE");
+    expect(stub.calls).toHaveLength(1);
+    expect(stub.calls[0]?.path).toBe("/v1/location/consent");
   });
 });
 

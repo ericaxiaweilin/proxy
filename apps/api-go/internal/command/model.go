@@ -1,6 +1,9 @@
 package command
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Actor struct {
 	Type string `json:"type"`
@@ -147,6 +150,15 @@ func (e Envelope) AuthContextIP() string {
 		return ""
 	}
 	if v, ok := e.AuthContext["clientIp"].(string); ok {
+		// IPv6 link-local remotes arrive with a zone suffix
+		// (fe80::…%en0) naming the server-side interface. It carries
+		// no audit value and Postgres inet rejects it outright, which
+		// used to fail the whole write (on-device PRIVACY_REQUEST_WRITE_FAILED
+		// for export/delete on v6 link-local Wi-Fi). Strip the zone,
+		// keep the address.
+		if i := strings.LastIndex(v, "%"); i >= 0 {
+			v = v[:i]
+		}
 		return v
 	}
 	return ""

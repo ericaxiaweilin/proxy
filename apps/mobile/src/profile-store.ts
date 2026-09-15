@@ -36,6 +36,14 @@ export type ProfileRecord = {
   city: string;
   /** 稳定路径, 指向 documentDirectory 下的头像副本 (或 undefined). */
   avatarPath: string | undefined;
+  /**
+   * FEED-AVATAR-REMOTE-001: 服务端头像指针（形如 assets/<mediaAssetId>），与
+   * avatarPath 分开存。avatarPath 可能是本机文件名（离线可读），重装后文件
+   * 没了、记录还在 —— 那时靠这个指针回退服务端 thumb，而不是黑头。
+   * 同步成功时以远端为准；远端缺失时保留旧值（stale thumb 也比黑头强，
+   * 下次同步成功即纠正）。
+   */
+  remoteAvatarPath?: string | undefined;
   updatedAt: string;
 };
 
@@ -60,6 +68,7 @@ export function isProfileRecord(value: unknown): value is ProfileRecord {
     typeof v.bio === "string" && v.bio.length <= MAX_BIO &&
     typeof v.city === "string" && v.city.length > 0 && v.city.length <= MAX_CITY &&
     (v.avatarPath === undefined || (typeof v.avatarPath === "string" && v.avatarPath.length > 0 && v.avatarPath.length <= MAX_AVATAR_PATH)) &&
+    (v.remoteAvatarPath === undefined || (typeof v.remoteAvatarPath === "string" && v.remoteAvatarPath.length > 0 && v.remoteAvatarPath.length <= MAX_AVATAR_PATH)) &&
     typeof v.updatedAt === "string" && v.updatedAt.length > 0
   );
 }
@@ -86,6 +95,7 @@ export function mergeRemoteProfile(
     bio: remote.bio,
     city: remote.city,
     avatarPath: existing?.avatarPath ?? remoteDerived,
+    remoteAvatarPath: remote.avatarPath ?? existing?.remoteAvatarPath,
     updatedAt: remote.updatedAt
   };
 }
