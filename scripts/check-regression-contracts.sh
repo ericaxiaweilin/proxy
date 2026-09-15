@@ -3879,6 +3879,15 @@ if ! grep -q 'PROFILE-QR-003' apps/mobile/src/profile-qr.test.ts ||
   echo "  FAIL [PROFILE-QR-003]: scan-parse wiring or its tests are missing" >&2
   exit 1
 fi
+# 互斥锁必须是**活的**。scanBusyRef 之前只在关闭 sheet 时被置 false，从头到尾
+# 没有一处置 true —— `if (scanBusyRef.current || scanned) return;` 的前半恒为假。
+# 相机每帧都回调 onBarcodeScanned，而 `scanned` 是 state、要等一次渲染才生效，
+# 同一 tick 里的后续帧全部穿过去，同一个人被查 N 次。锁不置位 = 锁不存在。
+if ! grep -qF 'scanBusyRef.current = true;' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [PROFILE-QR-003]: scan re-entrancy lock is dead ——" >&2
+  echo "        scanBusyRef is never set to true, so every camera frame re-runs the lookup." >&2
+  exit 1
+fi
 # 反向钉：假演示不许回来。硬编码的演示号和假识别按钮一旦重现，用户扫到的
 # 永远是同一个人 —— 这是**静默**的撒谎，测试不红但行为是假的。
 if grep -q '模拟识别' apps/mobile/src/surfaces/friend-crm.tsx ||
@@ -4740,8 +4749,8 @@ require_test "SCENE-CHECKIN-001" "./internal/realityscene" \
   "apps/api-go/internal/realityscene/service_test.go" || exit $?
 # 命令必须进 Supports()：不进就是"命令存在但没人接"，等于功能不存在。
 # 钉 `|| t == "…"` 这整个片段，不钉光秃秃的 `"SetRealitySceneCheckIn"` ——
-# 后者在 `if e.CommandType == "SetRealitySceneCheckIn" {` 里也有，把命令从
-# Supports() 里删掉这个 pin 都不会红（"存在"不是 pin，多个出现点要数）。
+# 后者在 `case "SetRealitySceneCheckIn":` 分派臂里也有，把命令从 Supports()
+# 里删掉这个 pin 都不会红（"存在"不是 pin，多个出现点要数）。
 if ! grep -qF '|| t == "SetRealitySceneCheckIn"' apps/api-go/internal/realityscene/service.go; then
   echo "  FAIL [SCENE-CHECKIN-001]: SetRealitySceneCheckIn 不在 Supports() 里 ——" >&2
   echo "        dispatch 永远不会把它路由过来，这是一根新的半截接线。" >&2
@@ -4982,3 +4991,43 @@ if [ ! -f apps/mobile/src/surfaces/opportunity-quote-sheet.tsx ]; then
   exit 1
 fi
 echo "    MARKET-QUOTE-SHEET-001: PASS (quote lives in its own sheet; detail no longer fakes a travel time or a competitiveness score)"
+
+# SCENE-MAP-LOCATION-001: 场景地图每次打开都回到河内默认（P0）。
+#
+# 面的 origin state 每次挂载都从 undefined 开始，只有点"定位"按钮才设值 ——
+# 关掉再进，设备明明开着定位，地图却回到 21.036, 105.842。而壳里有活的设备
+# 定位（DEVICE-LOCATION-001 的 tracking），就是没传进来。现在壳透传
+# initialOrigin（tracking > 手选地点），面只在还没值时接，不抢手动定位。
+if ! grep -q 'initialOrigin' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'prev ?? initialOrigin' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'sceneMapOrigin' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [SCENE-MAP-LOCATION-001]: 场景地图没接壳里的设备定位 ——" >&2
+  echo "        关掉再进就回到河内默认，手机定位白开了。" >&2
+  exit 1
+fi
+if ! grep -q 'SCENE-MAP-LOCATION-001' apps/mobile/src/surfaces/dynamic-scene-actions.test.ts; then
+  echo "  FAIL [SCENE-MAP-LOCATION-001]: 接线测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/dynamic-scene-actions.test.ts || exit $?
+echo "    SCENE-MAP-LOCATION-001: PASS (scene map opens on the phone location, not the Hanoi default)"
+
+# DEVICE-LOCATION-002: 跟随开关冷启动必丢（P0）。
+#
+# 开关只活在内存（useState 默认 true），手动地点存在 keychain —— 每次冷启动
+# 恢复流程读到存过的手动地点就 setFollowDevice(false)，用户点了"开启"也没用，
+# 杀掉重进就回去，首页地址永远跟不上手机。现在开关和地点同一持久层，恢复读
+# 开关、透传与手动选择都落盘。
+if ! grep -q 'loadFollowDevice\|saveFollowDevice' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -q 'KEY_FOLLOW_DEVICE' apps/mobile/src/components/location-store.ts; then
+  echo "  FAIL [DEVICE-LOCATION-002]: 跟随开关没持久化 ——" >&2
+  echo "        冷启动恢复流程会把它打回 false，首页地址跟不上手机。" >&2
+  exit 1
+fi
+if ! grep -q 'DEVICE-LOCATION-002' apps/mobile/src/components/location-store.test.ts ||
+   ! grep -q 'DEVICE-LOCATION-002' apps/mobile/src/requester-home-discovery-contract.test.ts; then
+  echo "  FAIL [DEVICE-LOCATION-002]: 开关持久化测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/components/location-store.test.ts || exit $?
+echo "    DEVICE-LOCATION-002: PASS (follow toggle survives restarts next to the manual pin)"

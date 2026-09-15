@@ -64,3 +64,22 @@ export async function saveCustomLocation(next: CustomLocation): Promise<void> {
 export async function clearActiveCustom(): Promise<void> {
   await SecureStore.deleteItemAsync(KEY_CUSTOM_ACTIVE);
 }
+
+const KEY_FOLLOW_DEVICE = "proxy_location_follow_device";
+
+// DEVICE-LOCATION-002: 跟随开关必须和手动地点一样持久。之前开关只活在内存，
+// 手动地点存在 keychain —— 每次冷启动恢复流程都把开关打回 false，用户点了
+// "开启"也没用（杀掉重进就回去）。现在开关和地点同一持久层：
+//   - true = 用户明确要跟随，手动地点只当首帧回退，不拦跟随；
+//   - false = 用户明确关掉，手动优先；
+//   - undefined = 从没动过开关，走老口径（有存过手动地点就手动优先）。
+export async function loadFollowDevice(): Promise<boolean | undefined> {
+  const raw = await SecureStore.getItemAsync(KEY_FOLLOW_DEVICE);
+  if (raw === "1") return true;
+  if (raw === "0") return false;
+  return undefined;
+}
+
+export async function saveFollowDevice(next: boolean): Promise<void> {
+  await SecureStore.setItemAsync(KEY_FOLLOW_DEVICE, next ? "1" : "0");
+}

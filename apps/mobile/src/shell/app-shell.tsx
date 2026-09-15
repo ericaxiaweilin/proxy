@@ -25,7 +25,7 @@ import {
   type CustomLocation,
   type PresetLocation
 } from "../components/location-picker-sheet";
-import { loadActiveCustomId, loadCustomHistory } from "../components/location-store";
+import { loadActiveCustomId, loadCustomHistory, loadFollowDevice, saveFollowDevice } from "../components/location-store";
 import { makeDeviceLocation } from "../components/location-options";
 // DEVICE-LOCATION-001: 位置要跟着人走。device-location.ts 是纯逻辑（可单测），
 // device-location-native.ts 是全仓唯一 import expo-location 的地方。
@@ -332,12 +332,24 @@ export function AppShell({
     let cancelled = false;
     (async () => {
       const activeId = await loadActiveCustomId();
-      if (cancelled || !activeId) return;
+      if (cancelled) return;
+      const storedFollow = await loadFollowDevice().catch(() => undefined);
+      if (cancelled) return;
+      // DEVICE-LOCATION-002: 开关和手动地点同一持久层。用户明确开过跟随就
+      // 不再被存过的手动地点打回 false（之前开关只活内存，冷启动必丢）。
+      if (storedFollow !== undefined) {
+        setFollowDevice(storedFollow);
+      }
+      if (!activeId) return;
       const items = await loadCustomHistory();
       const found = items.find((entry) => entry.id === activeId);
       if (cancelled) return;
-      // 有存过的手动地点 = 用户自己选过，手动优先：关掉跟随，别拿设备位置盖掉。
-      if (found) { setCurrentLocation(found); setFollowDevice(false); }
+      // 有存过的手动地点 = 用户自己选过。开关没明确开过才手动优先；
+      // 明确开过跟随的，手动地点只当首帧回退（首个 tracking fix 一到就覆盖）。
+      if (found) {
+        setCurrentLocation(found);
+        if (storedFollow !== true) setFollowDevice(false);
+      }
     })().finally(() => { if (!cancelled) setLocationRestoreDone(true); });
     return () => { cancelled = true; };
   }, []);
@@ -508,6 +520,17 @@ export function AppShell({
     feedPrefsOpen,
     messageChatOpen: Boolean(messageChatAuthor)
   });
+  // SCENE-MAP-LOCATION-001: 场景地图的初始原点。地图面自己 state 每次挂载
+  // 都从 undefined 开始，只有点"定位"按钮才设值 —— 关掉再进就回到河内默认。
+  // 壳里有活的设备定位（tracking）就给它；其次是用户自己定的地点
+  // （DEVICE 整条 / CUSTOM 有坐标）；都没有才让地图走目录模式（河内默认）。
+  const sceneMapOrigin = deviceLocationState.kind === "tracking"
+    ? { latitude: deviceLocationState.latitude, longitude: deviceLocationState.longitude }
+    : currentLocation.kind === "DEVICE"
+      ? { latitude: currentLocation.device.lat, longitude: currentLocation.device.lng }
+      : currentLocation.kind === "CUSTOM" && currentLocation.custom.lat !== undefined && currentLocation.custom.lng !== undefined
+        ? { latitude: currentLocation.custom.lat, longitude: currentLocation.custom.lng }
+        : undefined;
 
   return (
     <>
@@ -568,7 +591,7 @@ export function AppShell({
           ============================================================
         */}
         {realitySceneOpen ? (
-          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
+          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} {...(sceneMapOrigin ? { initialOrigin: sceneMapOrigin } : {})} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
         ) : openAIProfile ? (
           <AIAccountProfileSurface
             account={openAIProfile}
@@ -869,11 +892,13 @@ export function AppShell({
           baseUrl={localApiBaseUrl}
           deviceState={deviceLocationState}
           followDevice={followDevice}
-          onFollowDevice={(next) => setFollowDevice(next)}
+          onFollowDevice={(next) => { setFollowDevice(next); void saveFollowDevice(next).catch(() => undefined); }}
           onClose={() => setLocationSheetOpen(false)}
           onSelect={(next) => {
             // 手动选地点 = 用户明确要这个范围，跟随让位（否则下一次回调又把它冲掉）。
+            // 选择本身也要落盘，否则下次冷启动恢复流程只记得"开过跟随"，把这次手动选择吃了。
             setFollowDevice(false);
+            void saveFollowDevice(false).catch(() => undefined);
             setCurrentLocation(next);
           }}
           open={locationSheetOpen}

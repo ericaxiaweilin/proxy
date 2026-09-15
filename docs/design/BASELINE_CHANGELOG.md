@@ -4,6 +4,25 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 205 — 2026-09-15
+
+- DEVICE-LOCATION-002：跟随开关冷启动必丢（P0）。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx` —— 恢复流程读写
+    开关持久值（明确开过跟随不再被存过的手动地点打回；手动选择落盘关闭）。
+    无渲染结构、无筛选、无发布链路改动。
+  - 其余文件（store 持久层与单测、接线命名测试、回归契约条目）均非基线敏感。
+
+## Revision 204 — 2026-09-15
+
+- SCENE-MAP-LOCATION-001：场景地图每次打开回到河内默认（P0）。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx` —— 算出
+    `sceneMapOrigin`（设备 tracking 优先，其次手选地点 DEVICE 整条 /
+    CUSTOM 有坐标）并透传给地图面。无渲染结构、无筛选、无发布链路改动。
+  - **视觉改动**（非基线敏感的 `reality-scene-map.tsx`）：面挂载时 origin
+    从透传值起步（仅还没值时接，不抢手动定位）；真没位置才走目录模式。
+    用户看到的不再是每次重置的河内，而是手机位置附近。
+  - 其余文件（接线命名测试、回归契约条目）均非基线敏感。
+
 ## Revision 203 — 2026-09-15
 
 - MARKET-QUOTE-SHEET-001：报价搬出详情页，独立「你的报价」sheet。

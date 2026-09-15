@@ -89,7 +89,7 @@ type SceneDetail = {
 
 type FeaturedHuman = { userId: string; name: string; city?: string | undefined; avatarUri?: string | undefined };
 
-export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void }): React.JSX.Element {
+export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, initialOrigin, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; initialOrigin?: { latitude: number; longitude: number } | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void }): React.JSX.Element {
   const [view, setView] = useState<SceneView>("MAP");
   const [filter, setFilter] = useState<SceneFilter>("ALL");
   const [query, setQuery] = useState("");
@@ -118,7 +118,13 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [triStateMsg, setTriStateMsg] = useState<string | undefined>(undefined);
   const [scenes, setScenes] = useState<ReadonlyArray<RealityScene>>([]);
   const [session, setSession] = useState<AuthenticatedStoredSession>();
-  const [origin, setOrigin] = useState<{ latitude: number; longitude: number }>();
+  const [origin, setOrigin] = useState<{ latitude: number; longitude: number } | undefined>(initialOrigin);
+  // SCENE-MAP-LOCATION-001: 壳透传进来的起点（设备实时位置优先）。面每次挂载
+  // state 都重置，只在 origin 还没值时接 —— 用户亲手点的定位和地图内状态不抢。
+  // 之前这里永远从 undefined 开始，关掉再进就回到河内默认（21.036, 105.842）。
+  useEffect(() => {
+    if (initialOrigin) setOrigin((prev) => prev ?? initialOrigin);
+  }, [initialOrigin]);
   const [nearbyBusy, setNearbyBusy] = useState(false);
   const [nearbyError, setNearbyError] = useState<string>();
   const [detail, setDetail] = useState<SceneDetail>();

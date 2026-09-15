@@ -268,4 +268,15 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // 旧谎言不许回来：注释曾明写"不是全站用户，这里还没接"。
     expect(source).not.toContain("这里还没接");
   });
+
+  it("DEVICE-LOCATION-002: the follow toggle survives restarts", () => {
+    // 开关曾只活内存、手动地点存在 keychain —— 每次冷启动恢复流程都把开关
+    // 打回 false，用户点了"开启"杀掉重进就回去。不断线三处任一即红：
+    // 恢复读开关、开关透传落盘、手动选择落盘关闭。
+    expect(shell).toContain("loadFollowDevice");
+    expect(shell).toContain("saveFollowDevice");
+    expect(shell).toContain("storedFollow !== undefined");
+    expect(shell).toContain("saveFollowDevice(next)");
+    expect(shell).toContain("saveFollowDevice(false)");
+  });
 });

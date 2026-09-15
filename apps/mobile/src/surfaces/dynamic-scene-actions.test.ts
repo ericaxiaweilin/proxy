@@ -47,3 +47,18 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source.match(/menuItemId: selectedMenuItem\?\.id/g)).toHaveLength(2);
   });
 });
+
+describe("SCENE-MAP-LOCATION-001 scene map keeps the phone location across open/close", () => {
+  it("takes its origin from the shell instead of starting at the Hanoi default", () => {
+    // 面每次挂载 state 都重置：之前 origin 永远从 undefined 开始，只有点
+    // "定位"按钮才设值 —— 关掉再进就回到河内默认（21.036, 105.842）。
+    // 现在壳把活的设备定位透传进来，面只在还没值时接，不抢手动定位。
+    expect(source).toContain("initialOrigin");
+    expect(source).toContain("prev ?? initialOrigin");
+    expect(source).not.toContain("useState<{ latitude: number; longitude: number }>()");
+    const shell = readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8");
+    expect(shell).toContain("sceneMapOrigin");
+    expect(shell).toContain("deviceLocationState.kind === \"tracking\"");
+    expect(shell).toContain("initialOrigin: sceneMapOrigin");
+  });
+});
