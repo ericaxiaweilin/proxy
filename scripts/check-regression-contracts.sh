@@ -3862,3 +3862,363 @@ for cmd in ListFeedPosts ListPostsByIds ListPostsMentioning; do
   fi
 done
 echo "    LOCALNET-EVENTSTREAM-001: PASS (cross-user event-stream reads are operator-only; post browsing stays open)"
+
+# PROFILE-QR-003: SCAN sheet 曾是假识别 —— 点一下就把写死的 PX-937201 填进搜索框，
+# 假装扫到了人。现在走 parseScannedQr 真解析：三种失败说三句不同的话
+# （读不到剪贴板 / 剪贴板是空的 / 不是 Proxy 码），非 proxy.app 一律 fail-closed，
+# 相机未接入诚实说明，不许静默吞掉。
+if ! grep -q 'PROFILE-QR-003' apps/mobile/src/profile-qr.test.ts ||
+   ! grep -q 'parseScannedQr' apps/mobile/src/profile-qr.ts ||
+   ! grep -q 'parseScannedQr(text)' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'PROFILE-QR-003' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PROFILE-QR-003]: scan-parse wiring or its tests are missing" >&2
+  exit 1
+fi
+# 反向钉：假演示不许回来。硬编码的演示号和假识别按钮一旦重现，用户扫到的
+# 永远是同一个人 —— 这是**静默**的撒谎，测试不红但行为是假的。
+if grep -q '模拟识别' apps/mobile/src/surfaces/friend-crm.tsx ||
+   grep -q 'setProxySearch("PX-937201")' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [PROFILE-QR-003]: fake scan demo is back ——" >&2
+  echo "        SCAN sheet must parse the real clipboard content, never fill a hardcoded demo id." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/profile-qr.test.ts src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    PROFILE-QR-003: PASS (real scan parse + three honest errors, fake demo stays dead)"
+
+# HANDLE-UNIQUE-001: handle 的唯一性曾只写在 profile.go 的注释里
+# （"uniqueness is per-tenant, enforced by repository on create"）。
+# 039_profile.sql 建的是普通索引而非唯一索引，两个 repository 也都不查冲突，
+# 而 initialProfileFor 从邮箱 local-part 派生 handle —— linh@gmail.com 与
+# linh@outlook.com 必然同得 @linh。二维码/邀请链接就是 proxy.app/@linh，
+# 客户端解析还按大小写不敏感，所以歧义意味着扫一个人的码可能加到另一个人。
+require_test "HANDLE-UNIQUE-001" "./internal/identity" \
+  "TestProfileHandleIsUniqueCaseInsensitively" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+require_test "HANDLE-UNIQUE-001" "./internal/identity" \
+  "TestUpdateProfileRejectsTakenHandleWithItsOwnCode" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+require_test "HANDLE-UNIQUE-001" "./internal/identity" \
+  "TestProvisionInitialProfileAvoidsTakenHandle" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+
+# Postgres 侧不用 require_test：集成测试在临时集群起不来时会 SKIP，而
+# `go test` 对 skip 返回 0 —— 门禁会绿着放行一条根本没跑过的钉。这里直接
+# 要一行 "--- PASS"，SKIP 与 FAIL 一视同仁。
+if ! go -C apps/api-go test -count=1 -run '^TestProfileHandleUniquenessIsEnforced$' -v ./internal/platform/postgres 2>&1 | grep -q -- "--- PASS: TestProfileHandleUniquenessIsEnforced"; then
+  echo "  FAIL [HANDLE-UNIQUE-001]: the Postgres half did not actually run ——" >&2
+  echo "        约束必须在 schema 里（raw INSERT 也要被挡），SKIP 等于没验证。" >&2
+  exit 1
+fi
+echo "    HANDLE-UNIQUE-001: PASS (postgres: duplicate handle rejected by the index itself)"
+
+# 反向钉：唯一索引不许被降级成普通索引 —— 降级后 Postgres 侧静默放行重复，
+# 只有上面那条集成测试会红。
+if ! grep -q 'CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_handle_unique' apps/api-go/migrations/078_profile_handle_unique.sql; then
+  echo "  FAIL [HANDLE-UNIQUE-001]: 唯一索引不见了或被降级 ——" >&2
+  echo "        普通索引不挡重复，两个账号能同时拿到 @linh。" >&2
+  exit 1
+fi
+# 反向钉：那句没有实现的声明不许回来。
+if grep -q 'uniqueness is per-tenant' apps/api-go/internal/identity/profile.go; then
+  echo "  FAIL [HANDLE-UNIQUE-001]: profile.go 又出现「uniqueness is per-tenant」这种没有实现支撑的声明" >&2
+  exit 1
+fi
+echo "    HANDLE-UNIQUE-001: PASS (handle unique case-insensitively; registration resolves a free handle)"
+
+# ADD-FRIEND-ENTRY-001: 整个 ADD_FRIEND 表面曾不可达。me.tsx 只在
+# subPage.route === "addfriend" 时渲染它，而全仓库没有一处 setSubPage 到那个
+# route；friend-crm 内部也从没调用过 setView("ADD_FRIEND")（view 只在挂载时
+# 取 initialView）。于是 5 种加好友方式 + 好友请求 + 扫码全都没有入口 ——
+# 一个建好却没有调用方的通道。
+#
+# 证据就在 friend-crm 自己的返回处理器里：它按 initialView === "ADD_FRIEND"
+# 分支，否则 setView("LIST")。那条 LIST 回退分支只能为「从 LIST 进 ADD_FRIEND」
+# 而写，入口缺失时它就是死代码 —— 同时也是入口缺失的证据。
+if ! grep -qF 'onPress={() => setView("ADD_FRIEND")}' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -qF 'accessibilityLabel="添加好友"' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -qF 'else setView("LIST")' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'ADD-FRIEND-ENTRY-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [ADD-FRIEND-ENTRY-001]: 加好友入口断了 ——" >&2
+  echo "        ADD_FRIEND 表面（扫码/邀请/通讯录/社媒/搜索/请求）又变成不可达。" >&2
+  exit 1
+fi
+echo "    ADD-FRIEND-ENTRY-001: PASS (LIST pushes ADD_FRIEND; the whole surface is reachable)"
+
+# ADD-FRIEND-DEAD-BRANCH: me.tsx 里曾有两处 route === "friendcrm" —— line 848 的
+# guard（在 `if (subPage)` 之前，无条件 return）和 `if (subPage)` 块内一份更旧的
+# 残骸（少了 relationship / viewer / onOpenVouchers / profileClient）。848 无条件
+# return，所以残骸永远走不到；但一旦 guard 被挪走或挪到后面，它就变成活代码 ——
+# 渲染出一个连关系客户端都没接的表面，而且是静默降级。残骸已删除，这条钉防止
+# 同路由的重复渲染分支再回来。
+friendcrm_branches=$(grep -cE 'if \(subPage[^)]*route === "friendcrm"\)' apps/mobile/src/surfaces/me.tsx)
+if [ "$friendcrm_branches" -ne 1 ]; then
+  echo "  FAIL [ADD-FRIEND-DEAD-BRANCH]: friendcrm 渲染分支有 $friendcrm_branches 处，应为 1 ——" >&2
+  echo "        重复的那处会被前面的 guard 遮蔽，guard 一挪就变成没接线的活代码。" >&2
+  exit 1
+fi
+if ! grep -A1 -E 'if \(subPage[^)]*route === "friendcrm"\)' apps/mobile/src/surfaces/me.tsx | grep -qF 'profileClient={profileClient}'; then
+  echo "  FAIL [ADD-FRIEND-DEAD-BRANCH]: 唯一那处 friendcrm 分支没接线 ——" >&2
+  exit 1
+fi
+if ! grep -q 'ADD-FRIEND-DEAD-BRANCH' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [ADD-FRIEND-DEAD-BRANCH]: 测试不见了" >&2
+  exit 1
+fi
+echo "    ADD-FRIEND-DEAD-BRANCH: PASS (exactly one friendcrm branch, and it is wired)"
+
+# ADD-FRIEND-FROM-MESSAGES-001: 加好友表面住在 Me 模块，但 friend-crm 自己的返回
+# 分支写着「当从 Messages 进入时…」—— 信息模块里从来没有这个入口，半截。
+#
+# 同一个 bug 还有第二面：me.tsx 以 initialView="ADD_FRIEND" 进这个表面，
+# friend-crm 就从 initialView 猜返回标签，猜出来的目的地和 onBack 实际去向
+# 不是同一个地方。标签必须由调用方给（addFriendBackLabel），不能猜。
+#
+# 所以这条钉两件事：(1) 信息 → 添加好友这条链路真的接上了（表面 → shell → Me）；
+# (2) friend-crm 里不再出现任何写死的目的地文案。
+if ! grep -qF 'onOpenAddFriend' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'accessibilityLabel="添加好友"' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'if (!onOpenAddFriend) return false;' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: 信息模块的加好友入口断了 ——" >&2
+  echo "        「新聊天」里只剩收件箱里的人，找不出还没聊过的人。" >&2
+  exit 1
+fi
+if ! grep -qF 'onOpenAddFriend={() =>' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'setMeOpenSubPage(meSubPage("addfriend"))' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'goToPage("ME")' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'requestedSubPage={meOpenSubPage}' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'onRequestedSubPageConsumed={clearMeOpenSubPage}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: shell 没接这个入口 ——" >&2
+  echo "        入口在、回调不在 = 点下去什么都不发生（或者停在信息页）。" >&2
+  exit 1
+fi
+if ! grep -qF 'if (!requestedSubPage) return;' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'setSubPage(requestedSubPage);' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'onRequestedSubPageConsumed?.();' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: Me 没消费跨模块请求 ——" >&2
+  echo "        没有「请求 + 消费」，要么打不开，要么每次进「我的」都弹回添加好友。" >&2
+  exit 1
+fi
+# 反向钉：写死的目的地文案不能回来。注意 friend-crm 里也不许在注释里提到它 ——
+# 否则「删掉代码、留下解释」能让这条钉永远绿。
+if grep -qF '‹ 返回消息' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: 返回标签又在替调用方猜目的地 ——" >&2
+  echo "        friend-crm 不知道 onBack 通向哪里，标签只能由调用方传。" >&2
+  exit 1
+fi
+if ! grep -qF 'addFriendBackLabel="‹ 返回我的"' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: Me 入口没说明返回去向 ——" >&2
+  echo "        onBack 回「我的」，标签就得写「返回我的」。" >&2
+  exit 1
+fi
+if ! grep -q 'ADD-FRIEND-FROM-MESSAGES-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    ADD-FRIEND-FROM-MESSAGES-001: PASS (Messages reaches add-friend; the back label comes from the caller)"
+
+# DEAD-PROP-001: 两个「声明了但没人读」的 prop。它们不是半截接线（有生产者、没消费者
+# 才叫半截），是彻底的声明 —— 在仓库里只出现一次，就是它自己的类型声明。
+#
+# MessagesSurface 那个尤其值得记：app-shell 一直在传值，组件从来没读过。而且这不是
+# 「忘了读」——它的词表（"CHAT"/"FRIENDS"）和本页的 panel 模型（对话/Convo/文件夹）
+# 根本对不上，补线就得先编一套映射，那正是「组件替调用方猜目的地」的老毛病。所以删。
+if grep -qF 'onOpenSearch' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [DEAD-PROP-001]: MeSurface 的空壳搜索 prop 回来了 ——" >&2
+  echo "        要么入口和消费者一起接，要么别声明。" >&2
+  exit 1
+fi
+if grep -qF 'initialTab' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [DEAD-PROP-001]: MessagesSurface 的初始 tab prop 回来了 ——" >&2
+  echo "        它和本页的 panel 模型对不上，接了也不会生效。" >&2
+  exit 1
+fi
+if grep -F 'MessagesSurface' apps/mobile/src/shell/app-shell.tsx | grep -qF 'initialTab'; then
+  echo "  FAIL [DEAD-PROP-001]: shell 又在给 MessagesSurface 传初始 tab ——" >&2
+  exit 1
+fi
+if ! grep -q 'DEAD-PROP-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [DEAD-PROP-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    DEAD-PROP-001: PASS (no declared-but-unread props on the Me / Messages surfaces)"
+
+# SEARCH-COPY-HONEST-001: 两处搜索文案声称的比代码做到的更多。
+#
+# 1) 信息页搜索框只匹配 `${name} ${preview}` —— 会话名 + 最近一条消息，
+#    搜不到历史消息，但 placeholder 写「搜索聊天、联系人和消息」。
+#    同一个文件里的联系人页早就写着「姓名或最近消息」，对齐它。
+# 2) 首页搜索索引的注释把 people 分组说成「真实推荐人」「不造演示数据」，
+#    而那份数据来自 SCENE_RECOMMEND fixture（没有真实 userId）。
+#
+# 这两条钉的都是**说法**，所以必须 grep 原文 —— 注释被剥掉就永远绿。
+if grep -qF '搜索聊天、联系人和消息' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [SEARCH-COPY-HONEST-001]: 信息页搜索框又在承诺消息全文搜索 ——" >&2
+  echo "        它只匹配会话名 + 最近一条消息。" >&2
+  exit 1
+fi
+if ! grep -qF 'placeholder="搜索聊天名称和最近消息"' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [SEARCH-COPY-HONEST-001]: 信息页搜索框的精确文案不见了" >&2
+  exit 1
+fi
+if ! grep -qF 'return `${it.name} ${it.preview}`.toLowerCase().includes(kw);' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [SEARCH-COPY-HONEST-001]: 搜索匹配器变了 ——" >&2
+  echo "        改了匹配范围就要一起改文案，别让两者再次脱节。" >&2
+  exit 1
+fi
+if grep -qF '不造演示数据' apps/mobile/src/surfaces/requester-home.tsx ||
+   grep -qF '真实推荐人' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SEARCH-COPY-HONEST-001]: 首页搜索索引又在假装 people 分组是真数据 ——" >&2
+  echo "        people 来自 SCENE_RECOMMEND fixture，没有真实 userId。" >&2
+  exit 1
+fi
+if ! grep -qF 'ProfileClient.searchProfiles' apps/mobile/src/surfaces/requester-home.tsx; then
+  echo "  FAIL [SEARCH-COPY-HONEST-001]: 首页搜索没写明全站人物搜索该走哪里" >&2
+  exit 1
+fi
+if ! grep -q 'SEARCH-COPY-HONEST-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [SEARCH-COPY-HONEST-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    SEARCH-COPY-HONEST-001: PASS (search copy matches what the code actually matches)"
+
+# PROFILE-POSTS-FAILURE-001: 「我的」页拉动态失败时，两条路都失败的分支以前直接把
+# 异常吞掉（catch 体是空的），profilePosts 留成 []，页面就渲染出「0 条动态」——
+# 和「你还没发过动态」长得一模一样。这正是本仓反复强调的口径：空数据是答案，
+# 拉取失败不是；两者不能长得一样。
+#
+# 同文件里关注数早就是 dash(n)（未知显示 —，不显示 0），所以这不是新发明，
+# 是补上同一个口径。
+if ! grep -qF 'setProfilePostsState("failed")' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: 动态拉取失败又不吭声了 ——" >&2
+  echo "        失败会被渲染成「0 条动态」，看起来就是「你还没发过动态」。" >&2
+  exit 1
+fi
+if ! grep -qF 'posts: profilePostsState === "failed" ? undefined : profilePosts.length' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: 失败时条数又显示成 0 ——" >&2
+  echo "        未知要显示 —（dash 口径），不是 0。" >&2
+  exit 1
+fi
+if ! grep -qF '不是你没有动态' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'setProfilePostsReload((n) => n + 1)' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'profilePostsReload]' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: 失败提示或重试不见了 ——" >&2
+  echo "        重试必须真的能重跑 effect（reload 计数在依赖里）。" >&2
+  exit 1
+fi
+# 反向钉：这个表面里不许再有「吞掉异常的空 catch」。注意 me.tsx 是基线敏感文件，
+# 注释也要一起守规矩 —— 注释里写出那个 token 会让这条钉永远红。
+if grep -qF 'catch {}' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: me.tsx 又出现吞掉异常的空 catch ——" >&2
+  echo "        静默失败会把「没拉到」渲染成「没有」。" >&2
+  exit 1
+fi
+if ! grep -q 'PROFILE-POSTS-FAILURE-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PROFILE-POSTS-FAILURE-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    PROFILE-POSTS-FAILURE-001: PASS (a failed posts load says so; unknown shows —, not 0)"
+
+# HANDLE-LOOKUP-001: 扫码识别出 @handle 之后必须真的问服务端「这是谁」。
+# 旧行为只把 handle 塞进本机搜索框，而搜索结果是写死的 SEARCH_RESULTS ——
+# 扫谁的码都返回同一批人，这是静默的撒谎。现在走 GetProfileByHandle
+# （服务端按 lower(handle) 唯一解析），且四种结果分开：找到了 / 查无此人 /
+# 请求失败 / 根本没接线。
+require_test "HANDLE-LOOKUP-001" "./internal/identity" \
+  "TestGetProfileByHandleResolvesExactlyOnePerson" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+if ! grep -q 'getProfileByHandle' apps/mobile/src/profile-client.ts ||
+   ! grep -q 'await lookupScannedHandle(parsed)' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'profile_not_found' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'GetProfileByHandle' apps/api-go/internal/identity/service.go ||
+   ! grep -q 'HANDLE-LOOKUP-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [HANDLE-LOOKUP-001]: handle 解析链路断了 ——" >&2
+  exit 1
+fi
+# 反向钉：profileClient 必须挂在**可到达**的入口上。只断言「me.tsx 里有这个
+# prop」是不够的 —— me.tsx 里还有一处 route === "friendcrm" 的重复分支不可达，
+# 它带着 prop 会让门禁绿着放行一条断掉的活链路（反向注入时验证过这个坑）。
+for anchor in 'if (subPage?.route === "friendcrm")' 'if (subPage.route === "addfriend")'; do
+  if ! grep -A1 -F "$anchor" apps/mobile/src/surfaces/me.tsx | grep -qF 'profileClient={profileClient}'; then
+    echo "  FAIL [HANDLE-LOOKUP-001]: 可到达的入口 $anchor 没拿到 profileClient ——" >&2
+    echo "        扫码会停在「没接线」状态。" >&2
+    exit 1
+  fi
+done
+# 反向钉：不许退回「把 handle 塞进本机搜索框」。
+if grep -q 'setProxySearch(scanned.handle)' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [HANDLE-LOOKUP-001]: 扫码又退回本机搜索框 ——" >&2
+  echo "        SEARCH_RESULTS 是演示数据，扫谁的码都会返回同一批人。" >&2
+  exit 1
+fi
+# 反向钉：没接线时不许静默停住，必须留下可分辨的 "no-client" 状态。
+if ! grep -q '"no-client"' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [HANDLE-LOOKUP-001]: profileClient 缺失时静默停住了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    HANDLE-LOOKUP-001: PASS (scan resolves the handle server-side; four outcomes stay distinct)"
+
+# PROFILE-SEARCH-001: 「搜索 Proxy」曾把写死的 SEARCH_RESULTS 显示给每一次查询 ——
+# 搜什么都是同两个人，输入框纯装饰。服务端当时也**没有**任何搜索命令：Profile 只能
+# 按 userAccountID（自己）或精确 handle 读，凡是不能精确说出 handle 的人都搜不到。
+# 现在走服务端 SearchProfiles。
+require_test "PROFILE-SEARCH-001" "./internal/identity" \
+  "TestSearchProfilesFindsByHandleAndNameCaseInsensitively" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+require_test "PROFILE-SEARCH-001" "./internal/identity" \
+  "TestSearchProfilesEmptyResultIsAnAnswerNotAnError" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+require_test "PROFILE-SEARCH-001" "./internal/identity" \
+  "TestSearchProfilesRejectsQueriesTooShortToBeUseful" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+require_test "PROFILE-SEARCH-001" "./internal/identity" \
+  "TestSearchProfilesIsAuthenticatedOnly" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+require_test "PROFILE-SEARCH-001" "./internal/identity" \
+  "TestSearchProfilesHonoursLimitAndOrdersByHandle" \
+  "apps/api-go/internal/identity/profile_test.go" || exit $?
+
+# Postgres 侧同样不用 require_test（集成测试 SKIP 时 go test 返回 0）。这条钉的是
+# 谓词本身：写成 LIKE '%'||$1||'%' 就等于把手伸给调用方的通配符语法 —— "%%" 只有
+# 两个字符、过得了长度校验，然后匹配**每一行**，一个请求拖走整张用户表。strpos 是
+# 字面量匹配。内存实现用 strings.Contains，结构上不可能有这个 bug，所以只有
+# Postgres 能证明它。
+if ! go -C apps/api-go test -count=1 -run '^TestSearchProfilesIsLiteralNotWildcard$' -v ./internal/platform/postgres 2>&1 | grep -q -- "--- PASS: TestSearchProfilesIsLiteralNotWildcard"; then
+  echo "  FAIL [PROFILE-SEARCH-001]: Postgres 谓词那半没真跑 ——" >&2
+  echo "        通配符一旦被当模式解析，\"%%\" 就能拖走整张用户表。SKIP 等于没验证。" >&2
+  exit 1
+fi
+
+# 反向钉：结果必须走 operationRef。parseCommandResult 在移动端按固定字段表构造
+# CommandResult 并**丢掉 body**，所以只写 Body 的响应客户端读不到 —— 搜索会永远
+# 看起来「什么都没找到」，而且不报错。
+if ! grep -q 'result.operationRef' apps/mobile/src/profile-client.ts ||
+   ! grep -q 'searchProfiles' apps/mobile/src/profile-client.ts; then
+  echo "  FAIL [PROFILE-SEARCH-001]: 客户端读不到搜索结果 ——" >&2
+  exit 1
+fi
+# 反向钉：站点级搜索能被用来枚举账号，必须要求登录。
+if grep -q '"SearchProfiles"' apps/api-go/internal/api/command_dispatch.go; then
+  echo "  FAIL [PROFILE-SEARCH-001]: SearchProfiles 被放进了公开白名单 ——" >&2
+  echo "        匿名调用者可以借此枚举全站账号。" >&2
+  exit 1
+fi
+# 反向钉：写死的演示结果不许回来。（不查 PX-482167 —— 那个 id 也合法地出现在
+# CRM_FRIENDS 的演示好友行里，不是这套写死搜索结果的专属标记。）
+if grep -q 'SEARCH_RESULTS' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [PROFILE-SEARCH-001]: 写死的演示搜索结果回来了 ——" >&2
+  echo "        SEARCH_RESULTS 会让每次查询都返回同一批编造的人。" >&2
+  exit 1
+fi
+# 反向钉：手机号搜索还没有授权开关撑着，UI 不许再声称能搜。
+if grep -q '手机号只在对方允许被手机号搜索时可找到' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [PROFILE-SEARCH-001]: UI 又在声称能按手机号搜 ——" >&2
+  echo "        Profile 没有手机号列，也没有「允许被手机号搜到」的开关。" >&2
+  exit 1
+fi
+if ! grep -q 'PROFILE-SEARCH-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [PROFILE-SEARCH-001]: 测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    PROFILE-SEARCH-001: PASS (site-wide search is a real server read; literal predicate, four honest states)"

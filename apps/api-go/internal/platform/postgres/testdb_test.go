@@ -234,6 +234,19 @@ func startTempCluster(binDir string) (*tempCluster, error) {
 		"start",
 		"-w", // wait until server is up
 	)
+	// LC_ALL must be set on pg_ctl too, not only on initdb. On macOS, with an
+	// unset or invalid locale, the postmaster goes multithreaded during
+	// startup and refuses to start:
+	//
+	//   FATAL: postmaster became multithreaded during startup
+	//   HINT:  Set the LC_ALL environment variable to a valid locale.
+	//
+	// pg_ctl's output goes to the log file, which this function deletes on
+	// failure, so the symptom is an unreadable "pg_ctl: could not start
+	// server". isSkipable() then classifies it as a skip, and EVERY
+	// integration test in this package silently passes without touching
+	// Postgres — a green run that verified nothing, including the migrations.
+	start.Env = append(os.Environ(), "LC_ALL=C")
 	if out, err := start.CombinedOutput(); err != nil {
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("pg_ctl start: %w (%s)", err, string(out))

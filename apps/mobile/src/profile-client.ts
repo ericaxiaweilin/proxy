@@ -57,7 +57,48 @@ export class ProfileClient {
     return profile;
   }
 
-  private async command(session: StoredSession & { principal: NonNullable<StoredSession["principal"]> }, commandType: string, userAccountId: string, payload: Record<string, unknown>): Promise<CommandResult> {
+  // HANDLE-LOOKUP-001: resolve the person behind a handle — the landing point
+  // of a scanned profile QR / invite link (proxy.app/@linh).
+  //
+  // The handle travels in the payload, which is the only place the server reads
+  // it from; target.id carries it too so the command reads naturally, while
+  // payload.userAccountId stays the REAL actor id rather than being overloaded
+  // with a handle.
+  public async getProfileByHandle(handle: string): Promise<ProfileWire> {
+    const session = await this.requireSession();
+    const result = await this.command(session, "GetProfileByHandle", session.userAccountId, { handle }, handle);
+    const profile = (result.operationRef ? JSON.parse(result.operationRef) : {}).profile as ProfileWire | undefined;
+    if (!profile?.userAccountId) throw new Error("profile response malformed");
+    return profile;
+  }
+
+  // PROFILE-SEARCH-001: site-wide people search, behind the add-friend sheet's
+  // 「搜索 Proxy」 box.
+  //
+  // That box used to render SEARCH_RESULTS — a hardcoded array — so every query
+  // returned the same people and the input was decoration. There was no
+  // server-side search at all: a profile could be read only by userAccountId
+  // (yourself) or by an exact handle.
+  //
+  // The payload arrives in operationRef, NOT body: parseCommandResult builds a
+  // CommandResult from a fixed field list and drops `body`, so a body-only
+  // answer would be invisible here and the search would look like it returned
+  // nothing, forever, with no error.
+  public async searchProfiles(query: string, limit?: number): Promise<ProfileWire[]> {
+    const session = await this.requireSession();
+    const result = await this.command(session, "SearchProfiles", session.userAccountId, {
+      query,
+      ...(limit ? { limit } : {}),
+    });
+    const body = (result.operationRef ? JSON.parse(result.operationRef) : {}) as { profiles?: ProfileWire[] };
+    // An empty array is a real answer — "nobody matches". Only a MISSING array
+    // is malformed. Collapsing the two is how a UI ends up telling the user
+    // 「搜索失败，请重试」 about a person who simply does not exist.
+    if (!Array.isArray(body.profiles)) throw new Error("profile search response malformed");
+    return body.profiles;
+  }
+
+  private async command(session: StoredSession & { principal: NonNullable<StoredSession["principal"]> }, commandType: string, userAccountId: string, payload: Record<string, unknown>, targetId: string = userAccountId): Promise<CommandResult> {
     const next = (prefix: string) => `mobile_profile_${prefix}_${Date.now().toString(36)}_${(++this.sequence).toString(36)}`;
     const envelope = {
       commandId: next("command"),
@@ -65,7 +106,7 @@ export class ProfileClient {
       commandVersion: 1,
       actor: { type: "USER", id: session.userAccountId },
       principal: session.principal,
-      target: { type: "Profile", id: userAccountId },
+      target: { type: "Profile", id: targetId },
       idempotencyKey: next("idempotency"),
       authContext: { sessionId: session.auth.sessionId },
       purpose: "profile",

@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
-import { inviteQrPayload } from "../profile-qr";
+import { inviteQrPayload, parseScannedQr } from "../profile-qr";
+import type { ScannedQr } from "../profile-qr";
 import { ProxyIcon } from "../components/proxy-icon";
+import type { ProfileClient, ProfileWire } from "../profile-client";
 import type { FriendView, RelationshipClient } from "../relationship-client";
 import { color, shadows } from "../theme";
 
@@ -74,15 +76,23 @@ const SOCIAL_MATCHES: Array<{ name: string; initial: string; sub: string }> = [
   { name: "An Tran", initial: "AT", sub: "Instagram · @an.tran" },
 ];
 
-const SEARCH_RESULTS: Array<{ name: string; initial: string; sub: string }> = [
-  { name: "Huyen Le", initial: "HL", sub: "Proxy ID · PX-482167 · Hanoi" },
-  { name: "Huy Nguyen", initial: "HN", sub: "共同好友 1 人 · Ho Chi Minh City" },
-];
+// PROFILE-SEARCH-001: a two-row hardcoded result array used to live here, and
+// the 「搜索 Proxy」 box rendered it for EVERY query — so the input was
+// decoration and the results were always the same two people, carrying
+// fabricated "PX-" ids that are not even the handle format the rest of the app
+// uses. It is deleted rather than kept as a fallback: a fallback that silently
+// shows invented people is worse than an honest "no results". Search now goes
+// to SearchProfiles on the server.
+//
+// The deleted constant's name and those fake ids are deliberately NOT written
+// out in this file — scripts/check-regression-contracts.sh greps this file for
+// them, and a comment mentioning them would satisfy the grep and make the
+// tripwire useless. See the PROFILE-SEARCH-001 block there for the details.
 
 type AddFriendSheet = "SCAN" | "INVITE" | "CONTACTS" | "SOCIAL" | "SEARCH" | "REQUESTS" | undefined;
 type CrmView = "LIST" | "ADD_FRIEND" | "DETAIL";
 
-export function FriendCrmSurface({ relationship, onOpenConversation, onBack, initialView = "LIST", viewer, onOpenVouchers }: {
+export function FriendCrmSurface({ relationship, onOpenConversation, onBack, initialView = "LIST", viewer, onOpenVouchers, profileClient, addFriendBackLabel }: {
   relationship?: RelationshipClient | undefined;
   onOpenConversation: (author: string) => void;
   onBack: () => void;
@@ -91,6 +101,12 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   viewer?: { name: string; handle: string } | undefined;
   // 跳券表面：推荐动作“发礼券”走真实券流程，不再弹演示 toast。
   onOpenVouchers?: (() => void) | undefined;
+  // HANDLE-LOOKUP-001: 扫码/邀请链接解析出的 handle 要靠它落到真人。
+  // 没有它就只能停在「识别出来了但查不到」——那是半截，所以调用方要传。
+  profileClient?: ProfileClient | undefined;
+  // ADD-FRIEND-FROM-MESSAGES-001: initialView="ADD_FRIEND" 时返回按钮的文案。
+  // 本组件不知道 onBack 会把用户带到哪，所以不能自己猜 —— 调用方说去哪就写哪。
+  addFriendBackLabel?: string | undefined;
 }): React.JSX.Element {
   const [view, setView] = useState<CrmView>(initialView);
   const [sheet, setSheet] = useState<AddFriendSheet>();
@@ -98,7 +114,12 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [selected, setSelected] = useState<CrmFriend | undefined>();
   const [contactsAllowed, setContactsAllowed] = useState(false);
   const [proxySearch, setProxySearch] = useState("");
-  const [proxySearchDone, setProxySearchDone] = useState(false);
+  // PROFILE-SEARCH-001: 全站搜索。六种状态分开，尤其是「查无此人」和
+  // 「搜索失败」不能长得一样 —— 前者要用户换个词，后者要用户重试，
+  // 合并成一句会让用户对着一个永远不会成功的搜索反复点。
+  const [searchState, setSearchState] = useState<"idle" | "busy" | "found" | "empty" | "failed" | "no-client" | "too-short">("idle");
+  const [searchResults, setSearchResults] = useState<ProfileWire[]>([]);
+  const [searchAdded, setSearchAdded] = useState<Record<string, boolean>>({});
   // 本机演示状态机：无服务端搜索/匹配接口，添加→已发送、请求接受/忽略、
   // 拉黑移除全部在本地流转，与服务端行走同一套 UI，保证每个按钮可点、
   // 每次点按都有可验证的状态变化。
@@ -116,6 +137,18 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [toast, setToast] = useState("");
   const [crmTab, setCrmTab] = useState<"ALL" | "WARM" | "FOLLOW" | "MET">("ALL");
   const [inviteCopied, setInviteCopied] = useState(false);
+  // PROFILE-QR-003: 扫码识别三态 —— undefined 还没试 / null 识别失败 / ScannedQr 成功。
+  // 相机扫描未接入（要加原生依赖），入口是剪贴板：对方分享的链接、扫码枪输出都落在这里。
+  const [scanned, setScanned] = useState<ScannedQr | null>();
+  const [scanError, setScanError] = useState("");
+  // HANDLE-LOOKUP-001: 识别出 handle 之后要落到**人**。四种结果四种文案 ——
+  // 查到 / 没这个人 / 查询失败 / 没有登录态，谁也不许长得像谁：
+  // 把「查不到」显示成「查询失败」会让人一直重试，把「没登录」显示成
+  // 「查不到」会让人以为码坏了。
+  const [scanLookup, setScanLookup] = useState<"found" | "missing" | "failed" | "no-client">();
+  const [scanMatch, setScanMatch] = useState<ProfileWire>();
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanAddSent, setScanAddSent] = useState(false);
 
   const reload = useCallback(async () => {
     if (!relationship) return;
@@ -250,6 +283,128 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
     showToast("已拉黑");
   }
 
+  // PROFILE-QR-003: 从剪贴板识别二维码链接。
+  //
+  // 旧实现是假识别：点一下就把写死的演示号 PX-937201 填进搜索框，假装扫到了人。
+  // 现在走真解析，并且三种失败说三句不同的话 —— 读不到剪贴板 / 剪贴板是空的 /
+  // 不是 Proxy 码，绝不合并成一句含糊的「识别失败」：
+  //   · 非 proxy.app 的内容一律 fail-closed（扫什么码都给反应等于帮钓鱼码做跳转）；
+  //   · 解析不出结果时返回 null，UI 必须说人话，不许静默吞掉。
+  async function scanFromClipboard(): Promise<void> {
+    setScanned(undefined);
+    setScanError("");
+    let text = "";
+    try {
+      text = await Clipboard.getStringAsync();
+    } catch {
+      setScanned(null);
+      setScanError("读取剪贴板失败 —— 请手动复制对方的二维码链接后重试。");
+      return;
+    }
+    if (!text.trim()) {
+      setScanned(null);
+      setScanError("剪贴板里没有内容 —— 先复制对方分享的 Proxy 二维码链接。");
+      return;
+    }
+    const parsed = parseScannedQr(text);
+    if (!parsed) {
+      setScanned(null);
+      setScanError("这不是 Proxy 二维码。只识别 proxy.app 的链接，其他内容不会被跳转。");
+      return;
+    }
+    setScanned(parsed);
+    await lookupScannedHandle(parsed);
+  }
+
+  // HANDLE-LOOKUP-001: 把识别出的 handle 落到真人（服务端按 handle 唯一解析）。
+  async function lookupScannedHandle(parsed: ScannedQr): Promise<void> {
+    setScanMatch(undefined);
+    setScanLookup(undefined);
+    setScanAddSent(false);
+    if (!profileClient) {
+      setScanLookup("no-client");
+      return;
+    }
+    setScanBusy(true);
+    try {
+      const person = await profileClient.getProfileByHandle(parsed.handle);
+      setScanMatch(person);
+      setScanLookup("found");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      // 服务端把「没这个人」（PROFILE_NOT_FOUND）和「查询失败」分得很清楚，
+      // 这里必须原样分开，不能合并成一句「查询失败」。
+      setScanLookup(message.includes("profile_not_found") ? "missing" : "failed");
+    } finally {
+      setScanBusy(false);
+    }
+  }
+
+  // 扫到人之后走真实的好友请求，不假装「已添加」。
+  async function addScannedPerson(): Promise<void> {
+    if (!relationship || !scanMatch) return;
+    try {
+      await relationship.sendFriendRequest(scanMatch.userAccountId);
+      setScanAddSent(true);
+      void reload();
+    } catch (error) {
+      showToast(requestErrorMessage(error, "好友请求没有发送成功，请稍后重试。"));
+    }
+  }
+
+  // PROFILE-SEARCH-001: 全站搜索。以前的「搜索」只是把写死的两行演示结果
+  // 显示出来 —— 搜什么都是同两个人，输入框纯装饰。（那两行已删除；常量名不
+  // 在这里写出来，门禁会 grep 这个文件找它。）
+  //
+  // 最少 2 个字符，按**码点**数（不是 UTF-16 长度，也不是字节）：一个汉字
+  // 是 1 个码点、3 个字节，用字节数会把单字查询放过去，然后返回大半张用户表。
+  // 服务端同样按 rune 拒绝，这里先拦一道只是为了不白跑一次网络。
+  async function runProxySearch(): Promise<void> {
+    const query = proxySearch.trim();
+    if ([...query].length < 2) {
+      setSearchResults([]);
+      setSearchState("too-short");
+      return;
+    }
+    if (!profileClient) {
+      setSearchResults([]);
+      setSearchState("no-client");
+      return;
+    }
+    setSearchState("busy");
+    try {
+      const found = await profileClient.searchProfiles(query);
+      setSearchResults(found);
+      // 空数组是**答案**，不是错误。这里绝不能把 length === 0 当异常。
+      setSearchState(found.length ? "found" : "empty");
+    } catch {
+      setSearchResults([]);
+      setSearchState("failed");
+    }
+  }
+
+  // 搜到自己时不给「添加」按钮 —— 服务端会用 FRIEND_SELF_FORBIDDEN 拒绝，
+  // 留一个必然失败的按钮只会让用户以为是自己点错了。
+  function isSelfProfile(person: ProfileWire): boolean {
+    if (!viewer?.handle) return false;
+    const norm = (h: string): string => h.trim().replace(/^@+/, "").toLowerCase();
+    return norm(viewer.handle) === norm(person.handle);
+  }
+
+  async function addSearchResult(person: ProfileWire): Promise<void> {
+    if (!relationship) {
+      showToast("登录后才能发送好友请求。");
+      return;
+    }
+    try {
+      await relationship.sendFriendRequest(person.userAccountId);
+      setSearchAdded((m) => ({ ...m, [person.userAccountId]: true }));
+      void reload();
+    } catch (error) {
+      showToast(requestErrorMessage(error, "好友请求没有发送成功，请稍后重试。"));
+    }
+  }
+
   function openDetail(friend: CrmFriend): void {
     setSelected(friend);
     setView("DETAIL");
@@ -272,14 +427,19 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   }
 
   if (view === "ADD_FRIEND") {
-    // 当从 Messages 进入时，initialView=ADD_FRIEND，此时返回应直回 Messages，而非先到 CRM LIST
+    // ADD-FRIEND-FROM-MESSAGES-001: 直接以 ADD_FRIEND 挂载时，返回就是离开本
+    // 表面 —— 去哪由调用方决定，标签也必须由调用方给。以前这里从 initialView
+    // 猜一个目的地文案，而 Me 入口的 onBack 其实是回「我的」，标签在撒谎。
+    // 同一个 directEntry 同时驱动行为和标签，两者不可能再对不上。
+    const directEntry = initialView === "ADD_FRIEND";
     const handleBack = (): void => {
-      if (initialView === "ADD_FRIEND") onBack();
+      if (directEntry) onBack();
       else setView("LIST");
     };
+    const backText = directEntry ? (addFriendBackLabel ?? "‹ 返回") : "‹ 返回好友";
     return (
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-        <Pressable onPress={handleBack} style={styles.backRow}><Text style={styles.backText}>{initialView === "ADD_FRIEND" ? "‹ 返回消息" : "‹ 返回好友"}</Text></Pressable>
+        <Pressable onPress={handleBack} style={styles.backRow}><Text style={styles.backText}>{backText}</Text></Pressable>
         <Text style={styles.title}>添加好友</Text>
         <Text style={styles.sub}>通过二维码、邀请、通讯录、社媒或 Proxy 搜索找到你认识的人。</Text>
 
@@ -298,9 +458,28 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         <View style={styles.privacy}><View style={styles.privacyIcon}><Text style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text style={styles.privacyStrong}>关系不会自动导入</Text><Text style={styles.privacyP}>通讯录或外部社媒只用于发现“可能认识”的人。成为 Proxy 好友前，仍需要发送好友请求并由对方确认。</Text></View></View>
 
         {/* Sheets */}
-        <CrmSheet open={sheet === "SCAN"} onClose={() => setSheet(undefined)} title="扫码添加好友" sub="演示扫码：点模拟识别会填入一个演示 ID 并跳到搜索，添加走本地状态机。相册识别未接入。">
-          <View style={styles.scanner}><View style={styles.scanFrame} /><Text style={styles.scannerNote}>对准二维码即可识别（演示）</Text></View>
-          <View style={styles.actions}><Pressable onPress={() => { setProxySearch("PX-937201"); setProxySearchDone(true); setSheet("SEARCH"); }} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>模拟识别</Text></Pressable></View>
+        <CrmSheet open={sheet === "SCAN"} onClose={() => { setSheet(undefined); setScanned(undefined); setScanError(""); }} title="扫码添加好友" sub="相机扫描未接入（需要原生依赖）。从剪贴板识别对方分享的 Proxy 二维码链接，识别成功后再去添加。">
+          <View style={styles.scanner}><View style={styles.scanFrame} /><Text style={styles.scannerNote}>相机扫描未接入 · 请用剪贴板识别</Text></View>
+          <View style={styles.actions}><Pressable onPress={() => void scanFromClipboard()} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>从剪贴板识别</Text></Pressable></View>
+          {scanned ? (
+            <View style={styles.scanHit}>
+              <Text style={styles.scanHitTitle}>已识别{scanned.kind === "profile" ? "个人二维码" : "邀请二维码"} · @{scanned.handle}</Text>
+              <Text style={styles.scanHitSub}>{scanned.url}</Text>
+              {scanBusy ? <Text style={styles.scanHitNote}>正在查找这个人…</Text> : null}
+              {scanLookup === "found" && scanMatch ? (
+                <View style={styles.scanPerson}>
+                  <View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{(scanMatch.name || "?").slice(0, 1)}</Text></View>
+                  <View style={styles.personCopy}><Text style={styles.personName}>{scanMatch.name}</Text><Text style={styles.personSub}>@{scanMatch.handle}{scanMatch.city ? ` · ${scanMatch.city}` : ""}</Text></View>
+                  <Pressable disabled={scanAddSent || !relationship} onPress={() => void addScannedPerson()} style={[styles.addBtn, scanAddSent && styles.addBtnSent]}><Text style={[styles.addBtnText, scanAddSent && styles.addBtnTextSent]}>{scanAddSent ? "已发送" : "添加"}</Text></Pressable>
+                </View>
+              ) : null}
+              {scanLookup === "found" && !relationship ? <Text style={styles.scanHitNote}>登录后才能发送好友请求。</Text> : null}
+              {scanLookup === "missing" ? <Text style={styles.scanError}>这个二维码指向的人不存在 —— 可能已注销，或者链接被改过。</Text> : null}
+              {scanLookup === "failed" ? <Text style={styles.scanError}>查询失败，请稍后重试。</Text> : null}
+              {scanLookup === "no-client" ? <Text style={styles.scanHitNote}>识别到了 @{scanned.handle}，但当前没有登录态，查不到这个人。</Text> : null}
+            </View>
+          ) : null}
+          {scanned === null && scanError ? <Text style={styles.scanError}>{scanError}</Text> : null}
         </CrmSheet>
 
         <CrmSheet open={sheet === "INVITE"} onClose={() => { setSheet(undefined); setInviteCopied(false); }} title="邀请好友" sub="分享你的邀请链接。对方注册/打开 Proxy 后可向你发送好友请求。">
@@ -342,11 +521,22 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
           ))}
         </CrmSheet>
 
-        <CrmSheet open={sheet === "SEARCH"} onClose={() => setSheet(undefined)} title="搜索 Proxy" sub="下面是本机演示结果，添加后按钮变已发送，仅本机流转。手机号只在对方允许被手机号搜索时可找到。">
-          <View style={styles.searchLine}><TextInput value={proxySearch} onChangeText={(v) => { setProxySearch(v); setProxySearchDone(false); }} placeholder="昵称 / Proxy ID / 手机号" placeholderTextColor={color.muted} style={styles.searchInput} /><Pressable onPress={() => { if (!proxySearch.trim()) { showToast("请输入搜索信息"); return; } setProxySearchDone(true); }} style={styles.searchBtn}><Text style={styles.searchBtnText}>搜索</Text></Pressable></View>
-          {!proxySearchDone ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>输入信息开始搜索</Text></View> : <View>{SEARCH_RESULTS.map((p) => (
-            <View key={p.name} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{p.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{p.name}</Text><Text style={styles.personSub}>{p.sub}</Text></View><Pressable disabled={Boolean(sentIds[p.name])} onPress={() => setSentIds((m) => ({ ...m, [p.name]: true }))} style={[styles.addBtn, sentIds[p.name] && styles.addBtnSent]} accessibilityLabel={sentIds[p.name] ? `已发送给${p.name}` : `添加${p.name}`}><Text style={[styles.addBtnText, sentIds[p.name] && styles.addBtnTextSent]}>{sentIds[p.name] ? "已发送" : "添加"}</Text></Pressable></View>
-          ))}</View>}
+        <CrmSheet open={sheet === "SEARCH"} onClose={() => { setSheet(undefined); setSearchState("idle"); setSearchResults([]); }} title="搜索 Proxy" sub="按昵称或 Proxy ID 搜索全站用户，至少 2 个字符。手机号暂不可搜 —— 还没有「允许被手机号搜到」这个授权开关，先不假装能搜。">
+          <View style={styles.searchLine}><TextInput value={proxySearch} onChangeText={setProxySearch} onSubmitEditing={() => void runProxySearch()} returnKeyType="search" placeholder="昵称 / Proxy ID" placeholderTextColor={color.muted} style={styles.searchInput} /><Pressable onPress={() => void runProxySearch()} style={styles.searchBtn}><Text style={styles.searchBtnText}>搜索</Text></Pressable></View>
+          {searchState === "idle" ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>输入昵称或 Proxy ID 开始搜索</Text></View> : null}
+          {searchState === "too-short" ? <Text style={styles.scanError}>至少输入 2 个字符 —— 一个字会匹配到太多人。</Text> : null}
+          {searchState === "no-client" ? <Text style={styles.scanHitNote}>当前没有登录态，无法搜索全站用户。</Text> : null}
+          {searchState === "busy" ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>搜索中…</Text></View> : null}
+          {searchState === "failed" ? <Text style={styles.scanError}>搜索失败，请稍后重试。</Text> : null}
+          {searchState === "empty" ? <View style={styles.resultEmpty}><Text style={styles.resultEmptyText}>没有找到匹配的人。换个昵称或 Proxy ID 试试。</Text></View> : null}
+          {searchState === "found" ? <View>{searchResults.map((p) => {
+            const self = isSelfProfile(p);
+            const added = Boolean(searchAdded[p.userAccountId]);
+            const label = p.name || p.handle;
+            return (
+              <View key={p.userAccountId} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{label.slice(0, 1)}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{label}</Text><Text style={styles.personSub}>@{p.handle}{p.city ? ` · ${p.city}` : ""}</Text></View>{self ? <Text style={styles.scanHitNote}>这是你</Text> : <Pressable disabled={added || !relationship} onPress={() => void addSearchResult(p)} style={[styles.addBtn, added && styles.addBtnSent]} accessibilityLabel={added ? `已发送给${label}` : `添加${label}`}><Text style={[styles.addBtnText, added && styles.addBtnTextSent]}>{added ? "已发送" : "添加"}</Text></Pressable>}</View>
+            );
+          })}</View> : null}
         </CrmSheet>
 
         <CrmSheet open={sheet === "REQUESTS"} onClose={() => setSheet(undefined)} title="好友请求" sub="只有你接受后，双方才会成为 Proxy 好友。demo: 开头的是本机演示请求，接受/忽略立即生效。">
@@ -373,6 +563,21 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       <Pressable onPress={onBack} style={styles.backRow}><Text style={styles.backText}>‹ 返回我的</Text></Pressable>
       <Text style={styles.title}>好友关系</Text>
       <Text style={styles.sub}>关系状态、互动与下一步动作</Text>
+      {/*
+        ADD-FRIEND-ENTRY-001: until now nothing in the app could reach the
+        ADD_FRIEND view. `me.tsx` renders it for subPage.route === "addfriend",
+        but no code ever sets that route; and inside this file nothing ever
+        called setView("ADD_FRIEND"). The whole ADD_FRIEND surface — SCAN,
+        INVITE, CONTACTS, SOCIAL, SEARCH, REQUESTS — was unreachable, including
+        the clipboard scan that resolves a scanned @handle.
+
+        The give-away was the back handler below: it branches on
+        `initialView === "ADD_FRIEND"` and otherwise does setView("LIST"), i.e.
+        it was written for a LIST → ADD_FRIEND push that was never wired.
+      */}
+      <View style={styles.actions}>
+        <Pressable onPress={() => setView("ADD_FRIEND")} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="添加好友"><Text style={styles.btnPrimaryText}>添加好友</Text></Pressable>
+      </View>
       {friendsError ? <Text style={styles.loadError}>好友列表加载失败（{friendsError}），当前显示本地数据。</Text> : null}
 
       <View style={styles.metricGrid}>
@@ -637,6 +842,12 @@ const styles = StyleSheet.create({
   scanner: { alignItems: "center", backgroundColor: "#111", borderRadius: 18, height: 260, justifyContent: "center", marginTop: 12, overflow: "hidden" },
   scanFrame: { borderColor: "rgba(255,255,255,0.85)", borderRadius: 18, borderWidth: 2, height: 170, width: 170 },
   scannerNote: { bottom: 18, color: "#D6D1D8", fontSize: 11, position: "absolute" },
+  scanHit: { backgroundColor: color.violetSoftBg, borderRadius: 14, marginTop: 14, padding: 14 },
+  scanHitTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },
+  scanHitSub: { color: color.muted, fontSize: 11, marginTop: 4 },
+  scanHitNote: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 8 },
+  scanPerson: { alignItems: "center", flexDirection: "row", gap: 10, marginTop: 12 },
+  scanError: { color: color.error, fontSize: 11, lineHeight: 15, marginTop: 14 },
   actions: { flexDirection: "row", gap: 8, marginTop: 14 },
   btn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: 10 },
   btnPrimary: { backgroundColor: color.ink, borderColor: color.ink },

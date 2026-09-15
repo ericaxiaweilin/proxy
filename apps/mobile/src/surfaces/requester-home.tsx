@@ -456,10 +456,14 @@ export function RequesterHome({
     return () => { cancelled = true; };
   }, [activities]);
 
-  // Home Search/Conversation v3 — 全站搜索合一：把真实推荐人/店铺活动/
-  // 场景/时段装进搜索索引。人名/活动名/场景名/时段都能被同一输入命中。
-  // 数据全部来自上方已拉取的真实列表，不造演示数据；列表为空时
-  // lookup 自然无候选，输入直接走模型对话。
+  // Home Search/Conversation v3 — 一个输入框同时做实体匹配和模型对话。
+  // 索引里的四个分组**来源不一样**，别把它们混为一谈：
+  //   - activities / scenes / times：来自上方已拉取的真实接口列表；
+  //   - people：来自本机推荐列表（SCENE_RECOMMEND），**仍是 fixture、没有真实
+  //     userId** —— 见下方 join 处那条同口径的备注。所以「输入人名」命中的是这份
+  //     本地预览，**不是全站用户**；真正的全站人物搜索要走
+  //     ProfileClient.searchProfiles（PROFILE-SEARCH-001 已上），这里还没接。
+  // 列表为空时 lookup 自然无候选，输入直接走模型对话。
   const distinctTimes = [...new Set(storeActivities.map((a) => a.time).filter(Boolean))];
   const searchIndex = buildHomeSearchIndex({
     people: filteredPeople.map((p) => ({ id: p.id, name: p.name, bio: p.bio })),

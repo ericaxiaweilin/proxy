@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
@@ -1250,6 +1251,78 @@ func (r *IdentityRepository) GetProfile(ctx context.Context, userAccountID strin
 	return p, err
 }
 
+// GetProfileByHandle resolves a profile by handle. HANDLE-UNIQUE-001: the
+// comparison uses the same normalized form as the unique index
+// (lower(ltrim(handle,'@'))), so "@Linh", "linh" and "@linh" all resolve to
+// one row — which is what a proxy.app/@linh QR code means. Without this the
+// index would be an unused artefact, which is exactly how the handle
+// uniqueness invariant rotted into a comment in the first place.
+func (r *IdentityRepository) GetProfileByHandle(ctx context.Context, handle string) (identity.Profile, error) {
+	want := identity.NormalizeHandle(handle)
+	if want == "" {
+		return identity.Profile{}, identity.ErrProfileNotFound
+	}
+	var p identity.Profile
+	err := queryerForContext(ctx, r.pool).QueryRow(ctx, `
+		SELECT user_account_id, name, handle, bio, city, avatar_path, version, updated_at
+		FROM identity.profiles WHERE lower(ltrim(handle, '@')) = $1`, want).Scan(
+		&p.UserAccountID, &p.Name, &p.Handle, &p.Bio, &p.City, &p.AvatarPath, &p.Version, &p.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return identity.Profile{}, identity.ErrProfileNotFound
+	}
+	return p, err
+}
+
+// SearchProfiles finds profiles by normalized handle or display name
+// (PROFILE-SEARCH-001). Mirrors MemoryProfileRepository.SearchProfiles:
+// same predicate, same ordering, same limit.
+//
+// strpos() rather than LIKE, deliberately. LIKE gives the caller wildcard
+// semantics, so a query of "%" or "_" would match every row — a two-character
+// request that dumps the entire user table, and one that no amount of input
+// validation on length would catch. strpos is a literal substring test, which
+// is exactly what the in-memory store does with strings.Contains, so the two
+// cannot drift.
+//
+// Ordered by the normalized handle so the result set is stable and matches the
+// in-memory order.
+func (r *IdentityRepository) SearchProfiles(ctx context.Context, query string, limit int) ([]identity.Profile, error) {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	handleNeedle := identity.NormalizeHandle(query)
+	if needle == "" || limit <= 0 {
+		return []identity.Profile{}, nil
+	}
+	// The `$1 <> ''` guard is load-bearing: strpos(x, '') returns 1, i.e.
+	// "matches everything", so an empty handle needle (a query of just "@")
+	// would return the whole user table. The guard has to live in SQL — a
+	// sentinel value cannot work here, because Postgres text parameters cannot
+	// carry a NUL byte at all (SQLSTATE 22021, invalid byte sequence for
+	// encoding "UTF8").
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT user_account_id, name, handle, bio, city, avatar_path, version, updated_at
+		FROM identity.profiles
+		WHERE ($1 <> '' AND strpos(lower(ltrim(handle, '@')), $1) > 0)
+		   OR strpos(lower(name), $2) > 0
+		ORDER BY lower(ltrim(handle, '@'))
+		LIMIT $3`, handleNeedle, needle, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]identity.Profile, 0, limit)
+	for rows.Next() {
+		var p identity.Profile
+		if err := rows.Scan(
+			&p.UserAccountID, &p.Name, &p.Handle, &p.Bio, &p.City, &p.AvatarPath, &p.Version, &p.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // UpsertProfile atomically increments the version and updates
 // updated_at on conflict, so concurrent updates from the same
 // actor (rare but possible on slow networks) see monotonically
@@ -1270,6 +1343,16 @@ func (r *IdentityRepository) UpsertProfile(ctx context.Context, p identity.Profi
 		p.UserAccountID, p.Name, p.Handle, p.Bio, p.City, p.AvatarPath, p.UpdatedAt)
 	var out identity.Profile
 	if err := row.Scan(&out.UserAccountID, &out.Name, &out.Handle, &out.Bio, &out.City, &out.AvatarPath, &out.Version, &out.UpdatedAt); err != nil {
+		// HANDLE-UNIQUE-001: the ON CONFLICT clause above only covers
+		// user_account_id. A collision on the handle unique index arrives
+		// here as a 23505, and it must be reported as "that handle is taken"
+		// rather than as a generic failure — otherwise the user is told
+		// their profile is invalid while the one field they could actually
+		// change goes unnamed.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && strings.Contains(pgErr.ConstraintName, "handle") {
+			return identity.Profile{}, identity.ErrProfileHandleTaken
+		}
 		return identity.Profile{}, err
 	}
 	return out, nil

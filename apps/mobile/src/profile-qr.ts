@@ -26,3 +26,29 @@ export function toQrPayload(value: string): string {
   if (v.startsWith("proxy.app/")) return `https://${v}`;
   return v;
 }
+
+// PROFILE-QR-003 扫码解析：扫码枪/剪贴板拿到的文本落到哪。
+//
+// 为什么只认 proxy.app：扫任何码都给反应等于帮钓鱼码做跳转；非 Proxy 内容
+// 返回 null，调用方必须说人话（"这不是 Proxy 二维码"），不许静默吞掉，
+// 更不许拿演示 ID 凑数（杀掉 SCAN sheet 的模拟识别演示）。
+export type ScannedQr =
+  | { kind: "profile"; handle: string; url: string }
+  | { kind: "invite"; handle: string; url: string };
+
+export function parseScannedQr(value: string): ScannedQr | null {
+  const v = value.trim();
+  if (!v) return null;
+  const normalized = toQrPayload(v);
+  const profile = /^https:\/\/proxy\.app\/@([A-Za-z0-9._-]+)\/?$/i.exec(normalized);
+  if (profile?.[1] && HANDLE_PATTERN.test(profile[1])) {
+    const handle = profile[1].replace(/^@+/, "");
+    return { kind: "profile", handle, url: `https://proxy.app/@${handle}` };
+  }
+  const invite = /^https:\/\/proxy\.app\/invite\/([A-Za-z0-9._-]+)\/?$/i.exec(normalized);
+  if (invite?.[1] && HANDLE_PATTERN.test(invite[1])) {
+    const handle = invite[1].replace(/^@+/, "");
+    return { kind: "invite", handle, url: `https://proxy.app/invite/${handle}` };
+  }
+  return null;
+}

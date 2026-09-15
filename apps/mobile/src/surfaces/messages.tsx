@@ -180,6 +180,7 @@ export function MessagesSurface({
   onOpenConversation,
   onOpenRequests,
   onOpenContacts,
+  onOpenAddFriend,
   onChromeVisibilityChange,
   bottomNavVisible,
   displayIdentityClient,
@@ -192,9 +193,16 @@ export function MessagesSurface({
   onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: number | { uri: string }) => void;
   onOpenRequests?: () => void;
   onOpenContacts?: () => void;
+  // ADD-FRIEND-FROM-MESSAGES-001: 「新聊天」里找还没聊过的人。没有它就只能
+  // 在本机收件箱里找人 —— 那是「找人聊天」，不是「加好友」。
+  onOpenAddFriend?: (() => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
-  initialTab?: "CHAT" | "FRIENDS";
+  // 这里曾声明过一个 "CHAT" | "FRIENDS" 的初始 tab：app-shell 一直在传，本组件
+  // 从来没读过。而且它的词表和本页的 panel 模型（对话 / Convo / 文件夹）对不上 ——
+  // 不是「没接」，是「接不上」，所以删掉而不是补线。真正区分「在聊天里 / 在消息
+  // 列表」的是 shell 的 messageChat 状态（它会换成 ConversationSurface 渲染），
+  // 不是这个 prop。已删。
   displayIdentityClient?: import("../display-identity-client").DisplayIdentityClient;
   activeIdentityId?: string;
   onSwitchIdentity?: (id: string) => void;
@@ -209,6 +217,9 @@ export function MessagesSurface({
   const [subView, setSubView] = useState<"home" | "requests" | "contacts" | "person">("home");
   const [personName, setPersonName] = useState("");
   const [contactSearch, setContactSearch] = useState("");
+  // ADD-FRIEND-FROM-MESSAGES-001: 加好友入口没接通时把话说出来，
+  // 不能点下去什么都不发生 —— 静默的死按钮和「没这个人」长得一样。
+  const [addFriendNotice, setAddFriendNotice] = useState("");
   // 文件夹页类型筛选：全部/照片/视频。
   const [folderKind, setFolderKind] = useState<"all" | FolderMediaKind>("all");
   // chips 行内新建：展开输入行，创建后收起并选中新文件夹。
@@ -403,6 +414,14 @@ export function MessagesSurface({
     if (onOpenContacts) onOpenContacts();
     else setSubView("contacts");
   };
+  // ADD-FRIEND-FROM-MESSAGES-001: 加好友表面住在 Me 模块（relationship +
+  // profileClient + 本人身份都在那边齐了），所以这里只负责把请求交出去；
+  // 没有人接的时候不静默 —— 返回 false 让按钮自己说清楚。
+  const openAddFriend = (): boolean => {
+    if (!onOpenAddFriend) return false;
+    onOpenAddFriend();
+    return true;
+  };
   // 联系人详情带上会话上下文：名字 + 最近消息 + 会话 id，
   // “消息”按钮直达该会话，不断链；在线/username/手机号之前是现编的，已去掉。
   const [personCtx, setPersonCtx] = useState<{ name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string } }>({ name: "" });
@@ -462,6 +481,19 @@ export function MessagesSurface({
             <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名或最近消息" placeholderTextColor="#9a968f" style={styles.contactInput} />
           </View>
           <ScrollView style={{ flex: 1 }}>
+            <Pressable
+              accessibilityLabel="添加好友"
+              onPress={() => setAddFriendNotice(openAddFriend() ? "" : "加好友入口还没接通：调用方没有传 onOpenAddFriend。")}
+              style={styles.addFriendRow}
+            >
+              <View style={styles.addFriendIcon}><Text style={styles.addFriendIconText}>＋</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.contactName}>添加好友</Text>
+                <Text style={styles.contactMeta}>搜索 Proxy、扫码或邀请 —— 找还没聊过的人</Text>
+              </View>
+              <Text style={styles.contactAction}>去添加 ›</Text>
+            </Pressable>
+            {addFriendNotice ? <Text style={styles.empty}>{addFriendNotice}</Text> : null}
             <Text style={styles.contactSection}>已在 Proxy · 来自你的收件箱</Text>
             {filtered.length === 0 ? <Text style={styles.empty}>{serverDialogs === undefined ? "加载中…" : "暂无联系人"}</Text> : null}
             {filtered.map((c) => (
@@ -536,7 +568,7 @@ export function MessagesSurface({
             ref={searchInputRef}
             value={search}
             onChangeText={setSearch}
-            placeholder="搜索聊天、联系人和消息"
+            placeholder="搜索聊天名称和最近消息"
             placeholderTextColor="#9a968f"
             returnKeyType="search"
             style={styles.searchInput}
@@ -975,6 +1007,11 @@ const styles = StyleSheet.create({
   contactInput: { flex: 1, fontSize: 12.5, color: "#11110f" },
   contactSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, fontSize: 11, fontWeight: "700", color: "#9b978f", letterSpacing: 0.3 },
   contactRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
+  // ADD-FRIEND-FROM-MESSAGES-001: 加好友排在收件箱联系人之前 —— 「找新人」
+  // 比「找聊过的人」更常是用户打开这一页的目的。
+  addFriendRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 13, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
+  addFriendIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#efe9ff" },
+  addFriendIconText: { fontSize: 18, fontWeight: "700", color: "#6b4fd8" },
   contactName: { fontSize: 13, fontWeight: "700", color: "#11110f" },
   contactMeta: { fontSize: 11, color: "#aaa69e", marginTop: 2 },
   // 左滑删除：behind 贴右全高，front 滑开露出；两段确认防误触。

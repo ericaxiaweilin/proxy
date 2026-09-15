@@ -17,6 +17,21 @@ const meSub = readFileSync(fileURLToPath(new URL("./me-sub-pages.ts", import.met
 const composer = readFileSync(fileURLToPath(new URL("./ComposerV2Screen.tsx", import.meta.url)), "utf8");
 const storefront = readFileSync(fileURLToPath(new URL("./merchant-storefront.tsx", import.meta.url)), "utf8");
 
+// 反向注入验证暴露过的一个坑：断言若直接在原文上 indexOf，解释这段历史的注释里
+// 往往**也写着同一个字符串** —— 把代码删掉、注释留下，测试照样绿。所以凡是钉
+// 「某段代码在不在」，先剥注释再断言，只认代码。
+const stripComments = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+const crmCode = stripComments(crm);
+const meCode = stripComments(me);
+const profileClientSrc = readFileSync(fileURLToPath(new URL("../profile-client.ts", import.meta.url)), "utf8");
+// ADD-FRIEND-FROM-MESSAGES-001: 跨模块入口的接线点在 shell 里 —— 表面文件
+// 自己看不出「有没有人接」，所以要把 shell 也读进来。
+const appShellCode = stripComments(readFileSync(fileURLToPath(new URL("../shell/app-shell.tsx", import.meta.url)), "utf8"));
+// SEARCH-COPY-HONEST-001: 这一条要钉的东西**本身就是注释里的说法**，
+// 所以用原文（stripComments 会把要钉的那句话一起删掉，断言就永远绿）。
+const homeRaw = readFileSync(fileURLToPath(new URL("./requester-home.tsx", import.meta.url)), "utf8");
+
 describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => {
   it("drops only the invented self identity and dead stubs", () => {
     // PX-827491/Huyen Nguyen 是冒充本人的假身份，必须彻底消失；
@@ -24,9 +39,16 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
     for (const dead of ["PX-827491", "Huyen Nguyen", "fakeQr", "原型查看", "主页已打开"]) {
       expect(crm).not.toContain(dead);
     }
-    for (const mock of ["CONTACT_MATCHES", "SOCIAL_MATCHES", "SEARCH_RESULTS", "模拟识别"]) {
+    // 「模拟识别」不在这个列表里了：它本来就是假动作（点一下把写死的演示号填进搜索框），
+    // PROFILE-QR-003 已换成 parseScannedQr 真解析，见下面的接线断言。
+    //
+    // SEARCH_RESULTS 也移出这个列表了：PROFILE-SEARCH-001 把「搜索」换成了真
+    // 服务端查询，那两行写死的演示结果已删除。留着它当 fallback 就等于搜谁
+    // 都返回同一批编造的人 —— 那不是测试替身，是静默的撒谎。
+    for (const mock of ["CONTACT_MATCHES", "SOCIAL_MATCHES"]) {
       expect(crm).toContain(mock);
     }
+    expect(crmCode).not.toContain("SEARCH_RESULTS");
   });
 
   it("never toasts a send that did not happen", () => {
@@ -36,12 +58,29 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
   });
 
   it("runs add/invite through a real local state machine", () => {
-    // 添加→已发送（setSentIds 真实翻转并禁用按钮），扫码模拟→预填并跳搜索。
+    // 添加→已发送（setSentIds 真实翻转并禁用按钮）；扫码走真解析（PROFILE-QR-003），
+    // 不再是「模拟识别」把写死的 PX-937201 填进搜索框假装扫到了人。
     expect(crm).toContain("setSentIds");
     expect(crm).toContain("已发送");
-    expect(crm).toContain('setProxySearch("PX-937201")');
+    expect(crm).toContain("parseScannedQr(text)");
+    // 识别出 handle 之后不再往本机搜索框里塞：那等于拿演示结果假装找到了人
+    // （扫谁的码都是同一批 SEARCH_RESULTS）。现在交给 lookupScannedHandle
+    // 去服务端按 handle 解析真人，见下面的 HANDLE-LOOKUP-001。
+    expect(crm).not.toContain("setProxySearch(scanned.handle)");
+    expect(crm).toContain("await lookupScannedHandle(parsed)");
+    expect(crm).not.toContain("模拟识别");
+    expect(crm).not.toContain('setProxySearch("PX-937201")');
     expect(crm).toContain("Share.share");
     expect(crm).toContain("登录后显示你的邀请名片");
+  });
+
+  it("PROFILE-QR-003 scan fails closed with three distinct messages", () => {
+    // 读不到剪贴板 / 剪贴板是空的 / 不是 Proxy 码 —— 三件事三句话，
+    // 不许合并成一句含糊的「识别失败」，也不许静默吞掉。
+    expect(crm).toContain("读取剪贴板失败");
+    expect(crm).toContain("剪贴板里没有内容");
+    expect(crm).toContain("这不是 Proxy 二维码");
+    expect(crm).toContain("相机扫描未接入");
   });
 
   it("accepts/ignores/blocks with immediate effect in both modes", () => {
@@ -202,6 +241,14 @@ describe("PLACEHOLDER-002 every chain runs to completion", () => {
     expect(me).not.toContain("onManageIdentities");
     expect(security).not.toContain("管理身份");
     expect(security).not.toContain("查看我的设备");
+  });
+
+  it("HANDLE-UNIQUE-001: a taken handle is actionable, not a retry loop", () => {
+    // 服务端因 handle 冲突拒绝时，必须给出「换一个」的文案。如果它落进
+    // 通用的「同步失败，请稍后重试」，用户会对着一个永远不会成功的按钮
+    // 反复点 —— 拒绝原因明明可行动，却被抹平成一句含糊的失败。
+    expect(me).toContain("profile_handle_taken");
+    expect(me).toContain("这个 @handle 已经被别人用了");
   });
 
   it("fulfillment/benefit/creator/messages chains complete", () => {
@@ -458,5 +505,244 @@ describe("PLACEHOLDER-018 new folder chip in type row", () => {
     expect(messages).toContain("＋ 新建");
     expect(messages).toContain("submitFolderCreate");
     expect(messages).toContain("folderCreateInput");
+  });
+});
+
+describe("ADD-FRIEND-ENTRY-001 the add-friend surface is actually reachable", () => {
+  it("pushes ADD_FRIEND from the LIST view, not from inside ADD_FRIEND", () => {
+    // 逃掉的 bug：整个 ADD_FRIEND 表面（5 种加好友方式 + 好友请求 + 扫码）
+    // 不可达。me.tsx 只在 subPage.route === "addfriend" 时渲染它，而全仓库
+    // 没有一处 setSubPage 到那个 route；friend-crm 内部也从没调用过
+    // setView("ADD_FRIEND") —— view 只在挂载时取 initialView。
+    //
+    // 断言的不只是「字符串在」，而是「这个 push 发生在 LIST 视图里」：
+    // 如果它落在 ADD_FRIEND 自己的分支里，就是自己推自己，等于没接。
+    const listHeader = crmCode.indexOf("好友关系");
+    const push = crmCode.indexOf('onPress={() => setView("ADD_FRIEND")}');
+    expect(listHeader).toBeGreaterThan(-1);
+    expect(push).toBeGreaterThan(listHeader);
+    expect(crmCode).toContain('accessibilityLabel="添加好友"');
+  });
+
+  it("keeps the LIST back-path alive", () => {
+    // setView("LIST") 这条回退分支本来就是为「从 LIST 进 ADD_FRIEND」写的。
+    // 入口缺失时它是死代码 —— 它同时也是入口缺失的证据，别把它一起删了。
+    expect(crmCode).toContain('else setView("LIST")');
+  });
+});
+
+describe("ADD-FRIEND-FROM-MESSAGES-001 Messages reaches add-friend, and the back label tells the truth", () => {
+  it("offers the entry from the new-chat sheet, not from the inbox", () => {
+    // friend-crm 的返回分支早就写着「当从 Messages 进入时…」，但信息模块里
+    // 从来没有这个入口：全仓库 grep addfriend 只有渲染分支和内容条目两处命中。
+    // 入口挂在「新聊天」的联系人视图里 —— 那一页的目的就是「找人聊天」，
+    // 而收件箱里只有已经聊过的人，找不出新人。
+    expect(messages).toContain('accessibilityLabel="添加好友"');
+    expect(messages).toContain("onOpenAddFriend");
+  });
+
+  it("hands the request to the shell instead of doing nothing", () => {
+    // 没有 onOpenAddFriend 时不能静默：点下去什么都不发生，和「没这个人」
+    // 长得一模一样。openAddFriend 返回 false，调用点把话写出来。
+    expect(messages).toContain("const openAddFriend = (): boolean => {");
+    expect(messages).toContain("if (!onOpenAddFriend) return false;");
+    expect(messages).toContain('setAddFriendNotice(openAddFriend() ? "" :');
+  });
+
+  it("the shell passes the callback and actually switches module", () => {
+    // 光有入口没有接线就是半截：点下去要么无反应，要么停在信息页。
+    // goToPage 而不是 setTab —— pageOverride 可能停在 MSG_FRIENDS，
+    // 只改 tab 切不过去。
+    expect(appShellCode).toContain("onOpenAddFriend={() =>");
+    expect(appShellCode).toContain('setMeOpenSubPage(meSubPage("addfriend"))');
+    expect(appShellCode).toContain('goToPage("ME")');
+  });
+
+  it("the Me surface opens the requested sub-page exactly once", () => {
+    // 用「请求 + 消费」而不是「初始值」：MeSurface 切走 tab 会卸载，
+    // 消费后 shell 清空请求，下次正常进「我的」不会又弹回添加好友。
+    expect(appShellCode).toContain("requestedSubPage={meOpenSubPage}");
+    expect(appShellCode).toContain("onRequestedSubPageConsumed={clearMeOpenSubPage}");
+    expect(meCode).toContain("if (!requestedSubPage) return;");
+    expect(meCode).toContain("setSubPage(requestedSubPage);");
+    expect(meCode).toContain("onRequestedSubPageConsumed?.();");
+  });
+
+  it("the back label is supplied by the caller, never guessed", () => {
+    // 逃掉的 bug：me.tsx 以 initialView="ADD_FRIEND" 进这个表面，于是返回
+    // 按钮写着「‹ 返回消息」，而 onBack 其实是回「我的」—— 标签在撒谎。
+    // 本组件不知道 onBack 通向哪里，所以标签只能由调用方给。
+    expect(crmCode).not.toContain("‹ 返回消息");
+    expect(crmCode).toContain('const backText = directEntry ? (addFriendBackLabel ?? "‹ 返回") : "‹ 返回好友";');
+    expect(meCode).toContain('addFriendBackLabel="‹ 返回我的"');
+  });
+
+  it("one boolean drives both the label and the behaviour", () => {
+    // 标签和行为各算各的，就还能再对不上。directEntry 同时决定
+    // handleBack 走哪条路、backText 写什么。
+    expect(crmCode).toContain('const directEntry = initialView === "ADD_FRIEND";');
+    expect(crmCode).toContain("if (directEntry) onBack();");
+    expect(crmCode).not.toContain('initialView === "ADD_FRIEND" ? "');
+  });
+});
+
+describe("DEAD-PROP-001 no declared-but-unread props on the Me / Messages surfaces", () => {
+  it("the Me surface does not declare a search callback nobody reads", () => {
+    // 这个 prop 在全仓库只出现一次：它自己的类型声明。没有调用方，也没有读者。
+    // 空壳 prop 比死按钮更隐蔽 —— 死按钮至少有人点得到。
+    expect(meCode).not.toContain("onOpenSearch");
+  });
+
+  it("the Messages surface does not declare an initial tab it can never honour", () => {
+    // app-shell 一直在传 "CHAT"/"FRIENDS"，组件从来没读。而且这不是「忘了读」：
+    // 本页的 panel 模型是 对话/Convo/文件夹，两套词表对不上，补线就得先编一套
+    // 映射 —— 那正是「组件替调用方猜」的老毛病。所以删，不补。
+    expect(messages).not.toContain("initialTab");
+    expect(appShellCode).not.toMatch(/MessagesSurface[^\n]*initialTab/);
+  });
+});
+
+describe("SEARCH-COPY-HONEST-001 search copy says what the code actually matches", () => {
+  it("the Messages search box does not promise message search it cannot do", () => {
+    // 那个输入框只匹配 `${name} ${preview}` —— 会话名 + **最近一条**消息，
+    // 搜不到历史消息。原来的 placeholder 写「搜索聊天、联系人和消息」，
+    // 把「最近一条」说成了「消息」。同一个文件里的联系人页早就写着
+    // 「姓名或最近消息」，这里对齐它。
+    expect(messages).toContain('placeholder="搜索聊天名称和最近消息"');
+    expect(messages).not.toContain("搜索聊天、联系人和消息");
+    // 文案和匹配器必须同时改：这条钉住匹配器，谁要真做消息全文搜索，
+    // 会先在这里看见「文案也要一起改」。
+    expect(messages).toContain("return `${it.name} ${it.preview}`.toLowerCase().includes(kw);");
+  });
+
+  it("the Home search does not claim its people group is real site data", () => {
+    // 索引里 activities / scenes / times 是真的，people 来自 SCENE_RECOMMEND
+    // fixture（没有真实 userId，见同文件 join 处那条备注）。原注释写
+    // 「真实推荐人」「数据全部来自…真实列表，不造演示数据」—— 对一个 fixture
+    // 分组说了假话，会骗到下一个在这上面继续搭东西的人。
+    expect(homeRaw).not.toContain("不造演示数据");
+    expect(homeRaw).not.toContain("真实推荐人");
+    expect(homeRaw).toContain("仍是 fixture、没有真实");
+    expect(homeRaw).toContain("ProfileClient.searchProfiles");
+  });
+});
+
+describe("PROFILE-POSTS-FAILURE-001 a failed posts load is not an empty profile", () => {
+  it("keeps failed distinct from empty", () => {
+    // 以前两条路都失败时直接把异常吞掉：profilePosts 留成 []，页面渲染出
+    // 「0 条动态」—— 和「你还没发过动态」一模一样。空是答案，失败不是。
+    expect(meCode).toContain('setProfilePostsState("failed")');
+    expect(meCode).toContain('setProfilePostsState("ready")');
+    // 整个文件不许再有「吞掉异常的空 catch」—— 这一类 bug 的入口就在那儿。
+    expect(meCode).not.toContain("catch {}");
+  });
+
+  it("shows an honest notice with a retry, and unknown instead of zero", () => {
+    // 条数在失败时显示 —（同文件 dash() 的口径：未知不是零）。
+    expect(meCode).toContain('posts: profilePostsState === "failed" ? undefined : profilePosts.length');
+    expect(meCode).toContain("不是你没有动态");
+    expect(meCode).toContain("setProfilePostsReload((n) => n + 1)");
+    // 重试要真的能重跑 effect：reload 计数必须在依赖里。
+    expect(meCode).toContain("profilePostsReload]");
+  });
+});
+
+describe("ADD-FRIEND-DEAD-BRANCH no duplicate branch shadows the wired one", () => {
+  it("has exactly one friendcrm branch, and it is the wired one", () => {
+    // me.tsx 曾有两处 route === "friendcrm"：line 848 的 guard，和 `if (subPage)`
+    // 块内一份更旧的残骸（少了 relationship / viewer / onOpenVouchers /
+    // profileClient）。848 无条件 return，所以残骸永远走不到 —— 但一旦 guard 被
+    // 挪走，它就变成活代码，渲染出一个连关系客户端都没接的表面，而且静默降级。
+    // 残骸已删除；这条钉防止它（或任何同路由的重复分支）再回来。
+    const branches = meCode.match(/route === "friendcrm"/g) ?? [];
+    expect(branches.length, "friendcrm 又出现重复渲染分支").toBe(1);
+    // 剩下那一处必须是接了线的。
+    const start = meCode.indexOf('route === "friendcrm"');
+    const tag = meCode.slice(start, meCode.indexOf("/>", start));
+    expect(tag).toContain("relationship={relationshipClient}");
+    expect(tag).toContain("profileClient={profileClient}");
+    expect(tag).toContain("viewer=");
+  });
+});
+
+describe("HANDLE-LOOKUP-001 a scanned QR resolves to a real person", () => {
+  it("asks the server who owns the handle instead of seeding a local search box", () => {
+    // 扫到码之后必须真的问服务端「这个 @handle 是谁」。旧行为只把 handle
+    // 塞进本机搜索框，而搜索结果全是本机演示数据 —— 扫谁结果都一样。
+    expect(crmCode).toContain("profileClient.getProfileByHandle(parsed.handle)");
+    expect(crmCode).toContain("await lookupScannedHandle(parsed)");
+  });
+
+  it("keeps found / missing / failed / no-client as four different truths", () => {
+    // 找到人、服务端说查无此人、请求失败、根本没接线 —— 四件事四种界面。
+    // 合并成一句「查询失败」会让用户对着一个不会好的按钮反复点。
+    //
+    // 这里钉的是那个三元：PROFILE_NOT_FOUND 必须走 "missing" 而不是并进
+    // "failed"。少了这个分叉，「查无此人」就会显示成「请重试」。
+    expect(crmCode).toContain('setScanLookup(message.includes("profile_not_found") ? "missing" : "failed")');
+    expect(crmCode).toContain('setScanLookup("found")');
+    expect(crmCode).toContain('setScanLookup("no-client")');
+  });
+
+  it("adds the scanned person through the real friendship command", () => {
+    expect(crmCode).toContain("relationship.sendFriendRequest(scanMatch.userAccountId)");
+  });
+
+  it("every FriendCrmSurface gets the profile client", () => {
+    // 只断言 me.tsx「包含 profileClient={profileClient}」不够：文件里只要有任何
+    // 一处带着这个 prop，断言就会绿着放行一条断掉的活链路（反向注入时就是这么
+    // 骗过去的）。逐个开标签检查，一个都不能漏 —— 残骸分支删掉之后这条才成立。
+    const tags = meCode.match(/<FriendCrmSurface[\s\S]*?\/>/g) ?? [];
+    expect(tags.length, "一个 FriendCrmSurface 都没找到").toBeGreaterThan(0);
+    for (const tag of tags) {
+      expect(tag).toContain("profileClient={profileClient}");
+    }
+  });
+});
+
+describe("PROFILE-SEARCH-001 the search box actually searches the site", () => {
+  it("calls SearchProfiles instead of rendering a hardcoded list", () => {
+    // 逃掉的 bug：「搜索 Proxy」把写死的 SEARCH_RESULTS 显示给每一次查询 ——
+    // 搜什么都是同两个人，输入框是装饰。服务端当时也**没有**任何搜索命令：
+    // Profile 只能按 userAccountID（自己）或精确 handle 读。
+    expect(crmCode).toContain("profileClient.searchProfiles(query)");
+    expect(crmCode).toContain("runProxySearch");
+    // 反向钉：写死的演示结果不许回来，`proxySearchDone` 这个纯本机开关也不许。
+    expect(crmCode).not.toContain("SEARCH_RESULTS");
+    expect(crmCode).not.toContain("proxySearchDone");
+  });
+
+  it("keeps empty / failed / too-short / no-client as four different truths", () => {
+    // 「没找到人」要用户换个词，「搜索失败」要用户重试，「字数不够」要用户多打
+    // 几个字，「没登录」要用户去登录 —— 四件事四种文案，合并成一句就是让用户
+    // 对着一个永远不会成功的搜索反复点。
+    for (const state of ['setSearchState("failed")', 'setSearchState("too-short")', 'setSearchState("no-client")']) {
+      expect(crmCode).toContain(state);
+    }
+    // "empty" 不是字面量：它由那个三元产生，而且正是「空结果不算异常」的写法
+    // 本身。断言 setSearchState("empty") 会永远找不到 —— 那个 needle 不存在。
+    expect(crmCode).toContain('found.length ? "found" : "empty"');
+  });
+
+  it("counts the minimum query length in code points, not bytes or UTF-16 units", () => {
+    // 一个汉字是 1 个码点 / 3 个字节。用字节数会把单字查询放过去，然后返回
+    // 大半张用户表；Go 侧按 rune 拒绝，两边必须一致。
+    expect(crmCode).toContain("[...query].length < 2");
+  });
+
+  it("does not offer an add button on your own profile", () => {
+    // 服务端会用 FRIEND_SELF_FORBIDDEN 拒绝自己加自己。留一个必然失败的按钮
+    // 只会让用户以为是自己点错了。
+    expect(crmCode).toContain("isSelfProfile");
+    expect(crmCode).toContain("这是你");
+  });
+
+  it("the client sends SearchProfiles and reads operationRef, not body", () => {
+    expect(profileClientSrc).toContain('"SearchProfiles"');
+    expect(profileClientSrc).toContain("searchProfiles");
+    // parseCommandResult 会丢掉 body，所以结果只能走 operationRef。服务端如果
+    // 只写 Body，搜索会永远看起来「什么都没找到」，而且不报错。
+    expect(profileClientSrc).toContain("result.operationRef");
+    expect(profileClientSrc).toContain("profile search response malformed");
   });
 });

@@ -60,6 +60,8 @@ import { HomeAssistantSurface } from "../surfaces/home-assistant";
 import { MarketSurface, type MarketViewMode } from "../surfaces/market";
 import { MeSurface } from "../surfaces/me";
 import { MessagesSurface } from "../surfaces/messages";
+import { meSubPage } from "../surfaces/me-sub-pages";
+import type { MeSubPage } from "../surfaces/me-types";
 import { RequesterHome, type RequesterGoal } from "../surfaces/requester-home";
 import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
 import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
@@ -188,6 +190,12 @@ export function AppShell({
   }>({ tab: "OPPORTUNITY", viewMode: "LIST" });
   // R15.22: 子页 override (swipe 跨 7 page). null = 跟随 tab + sub-tab 状态.
   const [pageOverride, setPageOverride] = useState<PageId | undefined>();
+  // ADD-FRIEND-FROM-MESSAGES-001: 信息 → 添加好友是跨模块的（加好友表面住在
+  // Me，relationship / profileClient / 本人身份都在那边齐了）。MeSurface 切走
+  // tab 就卸载，所以用「请求 + 消费」而不是「初始值」：Me 消费后这里清空，
+  // 下次正常进「我的」不会又弹回添加好友。
+  const [meOpenSubPage, setMeOpenSubPage] = useState<MeSubPage>();
+  const clearMeOpenSubPage = useCallback((): void => setMeOpenSubPage(undefined), []);
   // R15.23: feedSection 是 FEED tab 内部的 section 状态 (动态/状态/社区)。
   // 跨 page 切到 FEED_* 时同步设过来；swipe 切到 next/prev page 时也同步更新。
   const [feedSection, setFeedSection] = useState<"POSTS" | "STATUS" | "COMMUNITY">("POSTS");
@@ -732,7 +740,7 @@ export function AppShell({
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} initialTab={currentPage === "MSG_CHAT" ? "CHAT" : "FRIENDS"} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenAddFriend={() => { setMeOpenSubPage(meSubPage("addfriend")); goToPage("ME"); }} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -756,6 +764,8 @@ export function AppShell({
               relationshipClient={relationship}
               socialSettingsClient={socialSettings}
               moderation={moderation}
+              requestedSubPage={meOpenSubPage}
+              onRequestedSubPageConsumed={clearMeOpenSubPage}
               {...(viewerAccountId ? { viewerAccountId } : {})}
               {...(experienceManifest?.context === context
                 ? {

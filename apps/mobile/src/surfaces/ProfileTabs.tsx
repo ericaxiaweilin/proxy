@@ -69,7 +69,7 @@ export interface ProfileTabsProps {
   // 统计 (IG/Threads 风格 "粉丝 关注 帖子")。没拉到就是 undefined，
   // 渲染 "—" 不回填 0。
   stats: {
-    posts: number;
+    posts: number | undefined;
     followers: number | undefined;
     following: number | undefined;
   };
@@ -603,7 +603,7 @@ function AboutTab(props: {
       <View style={styles.aboutStatBig}>
         <Text style={styles.aboutStatBigLabel}>粉丝 / 关注 / 帖子</Text>
         <Text style={styles.aboutStatBigValue}>
-          {props.stats.followers ?? "—"} · {props.stats.following ?? "—"} · {props.stats.posts}
+          {props.stats.followers ?? "—"} · {props.stats.following ?? "—"} · {props.stats.posts ?? "—"}
         </Text>
       </View>
     </View>

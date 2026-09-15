@@ -4,6 +4,60 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 196 — 2026-09-15
+
+- ADD-FRIEND-FROM-MESSAGES-001：接上「信息 → 添加好友」入口，并修掉返回按钮
+  **写错目的地**的标签。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx`、
+    `apps/mobile/src/surfaces/me.tsx`。
+  - `app-shell.tsx`：新增 `meOpenSubPage` 请求状态与 `clearMeOpenSubPage`
+    （`useCallback` 稳定，否则 Me 侧的消费 effect 每次渲染都会重跑）；
+    `MessagesSurface` 接 `onOpenAddFriend`（内部 `setMeOpenSubPage(meSubPage("addfriend"))`
+    + `goToPage("ME")` —— 用 `goToPage` 而不是 `setTab`，因为
+    `currentPage = pageOverride ?? 派生值`，`pageOverride` 停在 `MSG_FRIENDS` 时
+    只改 `tab` 切不过去）；`MeSurface` 接 `requestedSubPage` /
+    `onRequestedSubPageConsumed`。
+  - `me.tsx`：新增消费跨模块请求的 effect（**请求 + 消费**，不是初始值 ——
+    `MeSurface` 切走 tab 会卸载，用初始值会在之后每次进「我的」时又弹回添加好友）；
+    `addFriendBackLabel="‹ 返回我的"`；三处重复的 `{title,desc,icon,route}`
+    拼装收进 `me-sub-pages.ts` 的 `meSubPage(route)`（跨模块入口要用同一份文案，
+    不收就会变成第四份拷贝）。
+  - **视觉改动**：只在 `messages.tsx`（非基线敏感）的「新聊天」联系人页顶部加一行
+    「添加好友」（＋ 圆形图标 / 两行文案 / 「去添加 ›」）。图标底色 `#efe9ff`、
+    字形 `#6b4fd8`，与该文件既有硬编码色值同口径；无新增组件、无主题/图标注册表改动。
+  - **原状**：`friend-crm.tsx` 的返回分支写着「当从 Messages 进入时…」，但信息模块里
+    从来没有这个入口（全仓库 `addfriend` 只有渲染分支和内容条目两处命中），
+    「新聊天」只能列收件箱里已聊过的人；同时 `me.tsx` 以
+    `initialView="ADD_FRIEND"` 进这个表面，组件就从 `initialView` **猜**返回标签，
+    猜出的目的地与 `onBack` 实际去向不是同一个地方 —— 标签在撒谎。
+  - **改后**：标签由调用方给（`addFriendBackLabel`），且同一个 `directEntry`
+    同时驱动行为与标签，两者不可能再对不上。
+- DEAD-PROP-001（同一提交批次）：删掉两个「声明了但没人读」的 prop，两个文件都是
+  基线敏感文件。
+  - `me.tsx`：删掉一个全站搜索回调 prop（`(query: string) => void`）。它在全仓库
+    只出现一次 —— 就是它自己的类型声明；没有调用方，也没有读者。
+  - `app-shell.tsx` + `messages.tsx`：删掉 `MessagesSurface` 的初始 tab prop
+    （`"CHAT" | "FRIENDS"`）。shell 一直在传值，组件从来没读过；而且这不是
+    「忘了读」—— 它的词表和本页的 panel 模型（对话 / Convo / 文件夹）对不上，
+    补线就得先编一套映射，那正是「组件替调用方猜」的老毛病。**删，不补。**
+    真正区分「在聊天里 / 在消息列表」的是 shell 的 `messageChat` 状态
+    （它会换成 `ConversationSurface` 渲染），不是这个 prop。
+  - **无视觉改动**：两个 prop 都没人读，删除是行为等价的。
+- PROFILE-POSTS-FAILURE-001（同一提交批次，基线敏感文件 `me.tsx`）：修掉
+  「拉动态失败被渲染成 0 条动态」。
+  - **原状**：两条读取路径（`listMyFeedPosts` → 失败后分页 `listFeedPosts` 过滤）
+    都失败时，第二个 catch 体是**空的**，`profilePosts` 留成 `[]`，于是
+    `ProfileTabs` 收到 `posts={[]}`、`stats.posts = 0` —— **「没拉到」和
+    「你还没发过动态」渲染成同一个样子**。
+  - **改后**：加 `profilePostsState: "loading" | "ready" | "failed"`；成功（含
+    合法空结果）置 `ready`，两条路都失败置 `failed`。失败时在 ProfileTabs 上方
+    渲染一条可重试的提示（`profilePostsReload` 计数进 effect 依赖，重试真的会重跑），
+    且 `stats.posts` 传 `undefined` → 走同文件既有的 `dash()` 显示 **—**（未知不是零）。
+  - **视觉改动**：仅失败态新增一条内联样式提示条（`#fdf2f2` / `#B3261E`，字号 11，
+    与同文件 `profileSaveError` 的写法一致）。成功态与空态渲染不变。
+  - **为什么不是新发明**：同文件里关注数早就是 `dash(n)`（未知显示 —），
+    这次只是把同一个口径补到动态条数上。
+
 ## Revision 195 — 2026-09-14
 
 - PROFILE-FROM-ANY-TAB-001 的**代码**落地：`app-shell.tsx`（两个个人主页分支

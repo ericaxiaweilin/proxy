@@ -1,6 +1,6 @@
 // PROFILE-QR-002 tripwires: 二维码 payload 必须是 https 全量，坏 handle 不画坏码。
 import { describe, expect, it } from "vitest";
-import { inviteQrPayload, profileQrPayload, toQrPayload } from "./profile-qr";
+import { inviteQrPayload, parseScannedQr, profileQrPayload, toQrPayload } from "./profile-qr";
 
 describe("profileQrPayload", () => {
   it("PROFILE-QR-002: happy path emits https payload", () => {
@@ -40,5 +40,22 @@ describe("inviteQrPayload", () => {
   it("PROFILE-QR-002: bad handle fails closed", () => {
     expect(inviteQrPayload("")).toBeNull();
     expect(inviteQrPayload("a/b")).toBeNull();
+  });
+});
+
+describe("parseScannedQr", () => {
+  it("PROFILE-QR-003: profile qr resolves to handle", () => {
+    expect(parseScannedQr("https://proxy.app/@linh")).toEqual({ kind: "profile", handle: "linh", url: "https://proxy.app/@linh" });
+  });
+  it("PROFILE-QR-003: bare proxy.app normalizes before parse", () => {
+    expect(parseScannedQr("proxy.app/@linh")?.handle).toBe("linh");
+    expect(parseScannedQr("  proxy.app/invite/linh  ")?.kind).toBe("invite");
+  });
+  it("PROFILE-QR-003: non-proxy content fails closed, never null-crashes", () => {
+    expect(parseScannedQr("")).toBeNull();
+    expect(parseScannedQr("https://evil.com/@linh")).toBeNull();
+    expect(parseScannedQr("https://proxy.app.evil.com/@linh")).toBeNull();
+    expect(parseScannedQr("https://proxy.app/store/m_1")).toBeNull();
+    expect(parseScannedQr("hello")).toBeNull();
   });
 });

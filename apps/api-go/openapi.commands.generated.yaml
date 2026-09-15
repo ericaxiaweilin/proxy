@@ -193,6 +193,8 @@ commands:
     domain: Identity
   - command: GetProfile
     domain: Identity
+  - command: GetProfileByHandle
+    domain: Identity
   - command: GetStoreLines
     domain: Business
   - command: GetUserProfile
@@ -432,6 +434,8 @@ commands:
   - command: RevokeLocationConsent
     domain: Location
   - command: RevokeSession
+    domain: Identity
+  - command: SearchProfiles
     domain: Identity
   - command: SelectMarketApplication
     domain: Marketplace

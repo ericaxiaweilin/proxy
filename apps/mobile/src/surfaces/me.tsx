@@ -77,7 +77,7 @@ import type { MeSubPage, AvailabilityState, EnterpriseOpsStage, MenuRow, MenuSec
 import { ABILITY_SCHEMAS, DEFAULT_ABILITIES, AVAILABILITY_OPTIONS, AV_DAY_NAMES, avKeyOf, avFmt, describeAvRule, avStateFor, nextDays, INITIAL_SOCIAL_ACCOUNTS, resolveHubProfile, resolveHubSocials } from "./me-types";
 import { AbilitySheet, AvRuleSheet, AvDaySheet, FakeQr, QrCard, SocialRow, AvailabilitySheet, MeLocationContext, VoucherMenuGlyph, ServiceRow, availabilityLabel } from "./me-profile-components";
 import { MyOrdersSurface, MyActivitiesSurface, FavoritesSurface, MerchantCampaignSurface } from "./me-orders";
-import { SUB_PAGE_CONTENT } from "./me-sub-pages";
+import { SUB_PAGE_CONTENT, meSubPage } from "./me-sub-pages";
 import { useMerchantIdentity } from "../use-merchant-identity";
 import { styles } from "./me-styles";
 
@@ -320,6 +320,10 @@ export function MeSurface({
   relationshipClient,
   // COMP-REPORT-002: 举报入口，透传到「我的订单」（举报交易）。
   moderation,
+  // ADD-FRIEND-FROM-MESSAGES-001: 跨模块入口（信息 → 添加好友）要能在 Me 页
+  // 打开时直接落到某个子页。调用方给请求，本页消费后回调清掉。
+  requestedSubPage,
+  onRequestedSubPageConsumed,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -346,7 +350,13 @@ export function MeSurface({
   viewerAccountId?: string | undefined;
   socialSettingsClient?: SocialSettingsClient | undefined;
   moderation: ModerationClient;
-  onOpenSearch?: ((query: string) => void) | undefined;
+  // 这里曾声明过一个全站搜索回调（(query: string) => void）：全仓库没有任何
+  // 调用方传它，本组件也没有任何地方读它 —— 纯粹的声明，不是半截接线。
+  // 已删。全站搜索真要做时，入口和消费者一起进来，不留空壳 prop。
+  /** 外部请求打开的子页（跨模块入口）。undefined = 没有请求。 */
+  requestedSubPage?: MeSubPage;
+  /** 请求已被消费：调用方必须清掉它，否则重进 Me 会又弹回子页。 */
+  onRequestedSubPageConsumed?: (() => void) | undefined;
 }): React.JSX.Element {
   // PROFILE-READ-001: profile storage is scoped per account. The module
   // singleton cannot be used: two accounts on one device must never share
@@ -356,6 +366,13 @@ export function MeSurface({
     [viewerAccountId]
   );
   const [subPage, setSubPage] = useState<MeSubPage>();
+  // 消费外部请求。MeSurface 在切走 tab 时会被卸载，所以这里用「请求 + 消费」
+  // 而不是「初始值」：消费后调用方清空请求，下次重进 Me 不会又弹回子页。
+  useEffect(() => {
+    if (!requestedSubPage) return;
+    setSubPage(requestedSubPage);
+    onRequestedSubPageConsumed?.();
+  }, [requestedSubPage, onRequestedSubPageConsumed]);
   useModuleBackHandler(subPage ? () => { setSubPage(undefined); return true; } : undefined);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [myScenes, setMyScenes] = useState<MyScene[]>([]);
@@ -495,6 +512,12 @@ export function MeSurface({
   const [profileAvatarUri, setProfileAvatarUri] = useState<string | undefined>(() => initialProfileAvatarUri(viewerAccountId));
   const [profileRemoteAvatarPath, setProfileRemoteAvatarPath] = useState<string | undefined>(undefined);
   const [profilePosts, setProfilePosts] = useState<FeedPost[]>([]);
+  // PROFILE-POSTS-FAILURE-001: 动态拉取失败不能留成空数组 —— 空数组渲染出来就是
+  // 「你还没有动态」，把「没拉到」说成了「没有」。同文件里关注数早就是 dash(n)
+  // （未知显示 —，不显示 0），这里补上同一口径：失败时条数显示 —，并给一条
+  // 可重试的提示。reload 计数只为让下面的 effect 能重跑。
+  const [profilePostsState, setProfilePostsState] = useState<"loading" | "ready" | "failed">("loading");
+  const [profilePostsReload, setProfilePostsReload] = useState(0);
   const [profileMedia, setProfileMedia] = useState<Record<string, FeedMediaItem[]>>({});
   const [profileMediaPositions, setProfileMediaPositions] = useState<Record<string, number>>({});
   const [profileViewer, setProfileViewer] = useState<{ postId: string; index: number }>();
@@ -710,12 +733,14 @@ export function MeSurface({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      setProfilePostsState("loading");
       try {
         const read = await localNet.listMyFeedPosts();
         if (cancelled) return;
         if (read.posts.length > 0) {
           setProfilePosts(read.posts);
           setProfileMedia(read.media);
+          setProfilePostsState("ready");
           return;
         }
         let cursor: string | undefined = undefined;
@@ -744,6 +769,8 @@ export function MeSurface({
           setProfilePosts(read.posts);
           setProfileMedia(read.media);
         }
+        // 走到这里说明两次读取都成功了（可能是空列表）—— 空是答案，不是失败。
+        setProfilePostsState("ready");
       } catch {
         try {
           let cursor: string | undefined = undefined;
@@ -769,11 +796,16 @@ export function MeSurface({
             setProfilePosts(filtered);
             setProfileMedia(media);
           }
-        } catch {}
+          setProfilePostsState("ready");
+        } catch {
+          // 两条路都失败。以前这里直接把异常吞掉（catch 体是空的）：数组留空 →
+          // 页面显示「0 条动态」，和「你还没发过动态」一模一样。失败必须自己说出来。
+          setProfilePostsState("failed");
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [localNet, profileDraft.name, profileDraft.handle, viewerAccountId]);
+  }, [localNet, profileDraft.name, profileDraft.handle, viewerAccountId, profilePostsReload]);
 
   useEffect(() => {
     if (!engagement || !viewerAccountId) return;
@@ -846,7 +878,7 @@ export function MeSurface({
   const onScroll = useScrollChrome(onChromeVisibilityChange);
 
   if (subPage?.route === "friendcrm") {
-    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
+    return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="LIST" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onOpenVouchers={onOpenVouchers} onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
   }
   if (context === "BUSINESS") {
     return (
@@ -900,9 +932,9 @@ export function MeSurface({
       onOpenVouchers();
       return;
     }
-    const content = SUB_PAGE_CONTENT[route];
-    if (!content) return;
-    setSubPage({ title: content.title, desc: content.desc, icon: content.icon, route });
+    const next = meSubPage(route);
+    if (!next) return;
+    setSubPage(next);
   }
 
   function pressRow(row: MenuRow): void {
@@ -924,20 +956,15 @@ export function MeSurface({
       return;
     }
     if (row.route) {
-      const content = SUB_PAGE_CONTENT[row.route];
-      setSubPage({
-        title: content?.title ?? row.label,
-        desc: content?.desc ?? row.desc,
-        icon: content?.icon ?? row.icon,
-        route: row.route
-      });
+      // 菜单行自带 label/desc/icon，注册表里没有这条路由时用行自身的文案兜底。
+      setSubPage(meSubPage(row.route) ?? { title: row.label, desc: row.desc, icon: row.icon, route: row.route });
     }
   }
 
   function openSubPage(route: string): void {
-    const content = SUB_PAGE_CONTENT[route];
-    if (!content) return;
-    setSubPage({ title: content.title, desc: content.desc, icon: content.icon, route });
+    const next = meSubPage(route);
+    if (!next) return;
+    setSubPage(next);
   }
 
   async function chooseProfileAvatar(): Promise<void> {
@@ -1075,7 +1102,16 @@ export function MeSurface({
           city: profileDraft.city,
           avatarPath: wireAvatarPath,
         });
-      } catch {
+      } catch (error) {
+        // HANDLE-UNIQUE-001: handle 被占用是**可行动**的（换一个就能过），
+        // 不能混进下面那句「同步失败，请重试」—— 那样用户会对着一个永远
+        // 不会成功的按钮反复点。ProfileClient 在 REJECTED 时把 messageKey
+        // 放进 Error.message（见 profile-client.ts）。
+        const message = error instanceof Error ? error.message : "";
+        if (message.includes("profile_handle_taken")) {
+          setProfileSaveError("这个 @handle 已经被别人用了，换一个再保存。");
+          return;
+        }
         // 服务端同步失败：本地已更新但云端没跟上，明确告诉用户可重试，
         // 编辑器保持打开，不假装全部成功。
         setProfileSaveError("已保存到本机，但同步到服务端失败，请稍后点完成重试。");
@@ -1377,11 +1413,7 @@ export function MeSurface({
     }
 
     if (subPage.route === "addfriend") {
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} initialView="ADD_FRIEND" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
-    }
-
-    if (subPage.route === "friendcrm") {
-      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface initialView="LIST" onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
+      return <SwipeBackShell onExit={() => setSubPage(undefined)}><FriendCrmSurface relationship={relationshipClient} profileClient={profileClient} initialView="ADD_FRIEND" addFriendBackLabel="‹ 返回我的" viewer={{ name: profileDraft.name, handle: profileDraft.handle }} onBack={() => setSubPage(undefined)} onOpenConversation={(author) => { setSubPage(undefined); onOpenConversation?.(author); }} /></SwipeBackShell>;
     }
 
     if (subPage.route === "available") {
@@ -1705,6 +1737,18 @@ export function MeSurface({
               </View>
             </View>
 
+            {/* PROFILE-POSTS-FAILURE-001: 拉动态失败时把话说出来 —— 不留一条
+                「0 条动态」，那看起来就是「你还没发过动态」。样式跟同文件里
+                profileSaveError 的写法一致（内联，字号 >= 11）。 */}
+            {profilePostsState === "failed" ? (
+              <View style={{ marginHorizontal: 16, marginBottom: 10, padding: 10, borderRadius: 10, backgroundColor: "#fdf2f2", borderWidth: 1, borderColor: "#f3c6c6", flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Text style={{ flex: 1, color: "#B3261E", fontSize: 11, lineHeight: 15 }}>动态没拉到 —— 可能是网络或登录态的问题，不是你没有动态。</Text>
+                <Pressable onPress={() => setProfilePostsReload((n) => n + 1)} accessibilityLabel="重新拉取动态" style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: "#B3261E" }}>
+                  <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>重试</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
             <ProfileTabs
               profileDraft={profileDraft}
               profileAvatarUri={profileAvatarUri}
@@ -1716,7 +1760,7 @@ export function MeSurface({
               replyTargets={personalReplyTargets}
               savedPosts={personalSavedPosts}
               taggedPosts={personalTaggedPosts}
-              stats={{ posts: profilePosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
+              stats={{ posts: profilePostsState === "failed" ? undefined : profilePosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
               onOpenMedia={(entry) => setProfileViewer(entry)}
               onOpenRealitySceneMap={onOpenRealitySceneMap}
               onOpenScene={(sceneId) => {

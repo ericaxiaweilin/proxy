@@ -164,7 +164,7 @@ func (s *Service) Supports(commandType string) bool {
 	switch commandType {
 	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "LookupPasswordlessIdentity", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
-		"UpdateProfile", "GetProfile",
+		"UpdateProfile", "GetProfile", "GetProfileByHandle", "SearchProfiles",
 		"GetAccountPreferences", "UpdateAccountPreferences",
 		"RequestPrivacyExport", "RequestPrivacyDelete", "CancelPrivacyRequest", "GetPrivacyRequestStatus", "ListPrivacyRequests":
 		return true
@@ -220,6 +220,10 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.updateProfile(ctx, envelope)
 	case "GetProfile":
 		return s.getProfile(ctx, envelope)
+	case "GetProfileByHandle":
+		return s.getProfileByHandle(ctx, envelope)
+	case "SearchProfiles":
+		return s.searchProfiles(ctx, envelope)
 	case "GetAccountPreferences":
 		return s.getAccountPreferences(ctx, envelope)
 	case "UpdateAccountPreferences":
@@ -706,13 +710,26 @@ func (s *Service) verifyLoginChallenge(ctx context.Context, e command.Envelope) 
 	// created no Profile row, so fresh accounts rendered a hardcoded demo
 	// identity. Provision-if-absent only: an explicit UpdateProfile always
 	// wins, and provisioning never fails verification (best-effort).
+	//
+	// HANDLE-UNIQUE-001: the derived handle can already be taken — two
+	// linh@... registrations both derive @linh — so provisioning resolves a
+	// free handle instead of failing. Best-effort still holds, but a failure
+	// is now reported in the response body rather than dropped: an account
+	// with no profile is a half-state, and the client cannot tell it apart
+	// from "profile not loaded yet".
+	var provisionReason string
 	if loginIdentity, err := s.repository.GetLoginIdentity(ctx, challenge.LoginIdentityID); err == nil && loginIdentity.Verified && loginIdentity.UserAccountID != "" {
 		if _, err := s.profileService.GetProfile(ctx, loginIdentity.UserAccountID); errors.Is(err, ErrProfileNotFound) {
-			initial := initialProfileFor(loginIdentity.UserAccountID, challenge.Channel, loginIdentity.Identifier)
-			_, _ = s.profileService.UpsertProfile(ctx, initial)
+			if _, err := s.profileService.ProvisionInitialProfile(ctx, loginIdentity.UserAccountID, challenge.Channel, loginIdentity.Identifier); err != nil {
+				provisionReason = "handle_unavailable"
+			}
 		}
 	}
-	return command.Accepted(e, "LoginChallenge", challenge.ID, challenge.Version, challenge.Status, eventRefs(domainEvents))
+	result := command.Accepted(e, "LoginChallenge", challenge.ID, challenge.Version, challenge.Status, eventRefs(domainEvents))
+	if provisionReason != "" {
+		result.Body = map[string]any{"profileProvisioning": "FAILED", "reason": provisionReason}
+	}
+	return result
 }
 
 func (s *Service) createSession(ctx context.Context, e command.Envelope) command.Result {
@@ -1458,6 +1475,12 @@ func (s *Service) updateProfile(ctx context.Context, e command.Envelope) command
 	saved, err := s.profileService.UpsertProfile(ctx, candidate)
 	if err != nil {
 		switch {
+		// HANDLE-UNIQUE-001: a taken handle is its own outcome, not a
+		// variation of "invalid profile". It is the one thing the user can
+		// act on (pick another @handle), and the category follows the
+		// DUPLICATE_CONTRIBUTION_TARGET precedent for conflicts.
+		case errors.Is(err, ErrProfileHandleTaken):
+			return command.Rejected(e, "PROFILE_HANDLE_TAKEN", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.profile_handle_taken", map[string]any{"handle": candidate.Handle})
 		case strings.Contains(err.Error(), "avatar"):
 			return command.Rejected(e, "PROFILE_INVALID_AVATAR", "VALIDATION", "AFTER_USER_ACTION", "identity.profile_invalid_avatar", nil)
 		default:
@@ -1501,6 +1524,108 @@ func (s *Service) getProfile(ctx context.Context, e command.Envelope) command.Re
 	r := command.Accepted(e, "Profile", p.UserAccountID, p.Version, "READ", nil)
 	r.OperationRef = string(raw)
 	return r
+}
+
+// getProfileByHandle resolves the person behind a handle — what a profile QR
+// or an invite link (proxy.app/@linh) actually points at.
+//
+// HANDLE-UNIQUE-001 is what makes this safe to expose. Before it, "@linh"
+// could name two accounts (the handle was derived from the email local-part
+// and nothing enforced uniqueness), so this command would have resolved a
+// scanned code to an arbitrary one of them. It is only offered now that the
+// repository and the schema agree that a handle names exactly one account.
+//
+// Deliberately NOT added to the requiresAuthentication allowlist. That
+// allowlist is for browsing content (feed, activities, statuses); a handle
+// lookup resolves a PERSON, and leaving it public would make it an
+// unauthenticated directory-enumeration endpoint — walk @a, @b, @c and you
+// have the user table.
+func (s *Service) getProfileByHandle(ctx context.Context, e command.Envelope) command.Result {
+	var p struct {
+		Handle string `json:"handle"`
+	}
+	_ = decode(e.Payload, &p)
+	// The handle comes from the payload and ONLY from the payload. Falling
+	// back to e.Target.ID would be worse than useless here: the client sets
+	// target.id to the actor's userAccountId, so an empty handle would be
+	// silently looked up as if it were a handle, and a malformed request
+	// would come back as "no such person" instead of "bad request". Those
+	// are two different truths and must not render the same.
+	handle := strings.TrimSpace(p.Handle)
+	// NormalizeHandle returns "" for "@" / whitespace / empty — reject those
+	// as malformed input rather than reporting a misleading NOT_FOUND.
+	if NormalizeHandle(handle) == "" {
+		return command.Rejected(e, "INVALID_PROFILE_READ", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_profile_read", nil)
+	}
+	found, err := s.profileService.GetProfileByHandle(ctx, handle)
+	if errors.Is(err, ErrProfileNotFound) {
+		return command.Rejected(e, "PROFILE_NOT_FOUND", "BUSINESS_STATE", "AFTER_USER_ACTION", "identity.profile_not_found", nil)
+	}
+	if err != nil {
+		return command.Rejected(e, "PROFILE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "identity.profile_read_failed", nil)
+	}
+	raw, _ := json.Marshal(map[string]any{"profile": found})
+	r := command.Accepted(e, "Profile", found.UserAccountID, found.Version, "READ", nil)
+	r.OperationRef = string(raw)
+	return r
+}
+
+// searchProfiles is the site-wide people search behind the add-friend search
+// sheet (PROFILE-SEARCH-001).
+//
+// Three outcomes are kept apart on purpose, because collapsing them is how a UI
+// ends up telling the user "搜索失败，请重试" about a person who simply does
+// not exist:
+//   - query too short to be meaningful  → INVALID_PROFILE_SEARCH (VALIDATION),
+//     the request itself is malformed;
+//   - query matches nobody              → an ACCEPTED result with count 0,
+//     because "nobody matches" is a real answer;
+//   - the store failed                  → PROFILE_SEARCH_FAILED (INTERNAL,
+//     retryable).
+//
+// Length is counted in RUNES, not bytes: a single CJK character is 3 bytes, so
+// a byte check would let a one-character Chinese query through the
+// MinProfileSearchQuery gate it was written to stop.
+func (s *Service) searchProfiles(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "PROFILE_SEARCH_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.profile_search_forbidden", nil)
+	}
+	var request struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}
+	_ = decode(e.Payload, &request)
+	query := strings.TrimSpace(request.Query)
+	if len([]rune(query)) < MinProfileSearchQuery {
+		return command.Rejected(e, "INVALID_PROFILE_SEARCH", "VALIDATION", "AFTER_USER_ACTION", "identity.invalid_profile_search", nil)
+	}
+	if runes := []rune(query); len(runes) > MaxProfileSearchQuery {
+		query = string(runes[:MaxProfileSearchQuery])
+	}
+	found, err := s.profileService.SearchProfiles(ctx, query, request.Limit)
+	if err != nil {
+		return command.Rejected(e, "PROFILE_SEARCH_FAILED", "INTERNAL", "SAFE_RETRY", "identity.profile_search_failed", nil)
+	}
+	// Never hand the client a nil slice: JSON-encoding it yields `null`, and a
+	// client that does `profiles.length` then crashes on a successful search
+	// that found nobody.
+	if found == nil {
+		found = []Profile{}
+	}
+	// The payload goes in operationRef, NOT Body. parseCommandResult on the
+	// mobile side builds a CommandResult from a fixed field list and drops
+	// `body` entirely, so a Body-only answer is a response the client cannot
+	// read — the search would appear to return nothing, forever, with no error.
+	// Every list command the app consumes (ListMyFriendships, …) does it this
+	// way.
+	raw, _ := json.Marshal(map[string]any{
+		"profiles": found,
+		"count":    len(found),
+		"query":    query,
+	})
+	result := command.Accepted(e, "ProfileSearch", e.Actor.ID, 1, "LISTED", nil)
+	result.OperationRef = string(raw)
+	return result
 }
 
 // enforceMaxConcurrentSessions revokes the oldest ACTIVE sessions so a new

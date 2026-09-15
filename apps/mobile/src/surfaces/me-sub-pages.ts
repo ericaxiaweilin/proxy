@@ -1,4 +1,6 @@
 // 原型子页面内容映射 — 每个路由对应原型中的页面标题、描述和关键内容。
+import type { MeSubPage } from "./me-types";
+
 export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; icon: string; sections?: Array<{ title: string; rows: Array<{ label: string; value: string }> }> }> = {
   myscenes: {
     title: "我的场景",
@@ -420,3 +422,19 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
     ]
   }
 };
+
+/**
+ * 由路由构造 Me 子页描述。
+ *
+ * ADD-FRIEND-FROM-MESSAGES-001: me.tsx 里原本有三处一模一样的
+ * `{ title: content.title, desc: content.desc, icon: content.icon, route }`
+ * 拼装。跨模块入口（信息 → 添加好友）也要用同一份文案，所以收成一个函数：
+ * 两个入口共用一条路由的标题/描述，不会各自维护一份而漂移。
+ * 路由不存在时返回 undefined —— 调用方必须自己决定「没有这一页」怎么办，
+ * 不能拿到一个 title 为空串的子页。
+ */
+export function meSubPage(route: string): MeSubPage {
+  const content = SUB_PAGE_CONTENT[route];
+  if (!content) return undefined;
+  return { title: content.title, desc: content.desc, icon: content.icon, route };
+}
