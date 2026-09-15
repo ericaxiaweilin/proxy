@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useScrollChrome } from "../shell/scroll-chrome";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { HomeSearchDock } from "../components/home-search-dock";
-import { buildHomeSearchIndex, matchHomeSearchIntent, type HomeSearchSuggestion } from "../home-search-intent";
+import { buildHomeSearchIndex, matchHomeSearchIntent, shouldSearchServerPeople, type HomeSearchSuggestion } from "../home-search-intent";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { type MarketTab } from "../market-fixtures";
 import { color, shadows } from "../theme";
@@ -24,6 +24,7 @@ import { ActivityCommandRejectedError, ActivityProtocolError } from "../activity
 import type { ExperienceClient } from "../experience-client";
 import type { AIAccountClient, PlatformAIAccount } from "../ai-account-client";
 import type { RelationshipClient } from "../relationship-client";
+import type { ProfileClient, ProfileWire } from "../profile-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { type SceneToolId } from "@proxy/contracts";
@@ -90,6 +91,7 @@ export function RequesterHome({
   experiences,
   aiAccounts,
   relationship,
+  profileClient,
   onMessageAI,
   onOpenAIProfile,
   onOpenHumanScene,
@@ -121,6 +123,9 @@ export function RequesterHome({
   experiences?: ExperienceClient;
   aiAccounts?: AIAccountClient;
   relationship?: RelationshipClient;
+  // HOME-PEOPLE-SEARCH-001: 全站真人搜索。没有它，首页人名搜索只能命中
+  // 本地推荐预览，新注册用户永远搜不到。
+  profileClient?: ProfileClient;
   onMessageAI?: (account: PlatformAIAccount) => void;
   onOpenAIProfile?: (account: PlatformAIAccount) => void;
   onOpenHumanScene?: (person: RecommendPerson, sceneId: string) => void;
@@ -142,6 +147,13 @@ export function RequesterHome({
   const [responseWhy, setResponseWhy] = useState<string>();
   const [clarifyQuestion, setClarifyQuestion] = useState<string>();
   const [clarifyChoices, setClarifyChoices] = useState<ReadonlyArray<string>>();
+  // HOME-PEOPLE-SEARCH-001: 全站真人结果（服务端 searchProfiles）。本地
+  // people 索引只是推荐预览，新注册用户不在里面；够长且有 client 就问
+  // 服务端，结果区独立展示，不断本地流程。
+  const [serverPeople, setServerPeople] = useState<ReadonlyArray<ProfileWire> | undefined>(undefined);
+  const [serverPeopleState, setServerPeopleState] = useState<"idle" | "busy" | "failed">("idle");
+  const [serverPeopleQuery, setServerPeopleQuery] = useState("");
+  const serverPeopleSeq = useRef(0);
   // 4 宫格：各槽位独立下标，点格子弹选择窗（弹窗控制格子），主页入口保留。
   const [personIndex, setPersonIndex] = useState(0);
   const [timeIndex, setTimeIndex] = useState(0);
@@ -176,9 +188,15 @@ export function RequesterHome({
     };
   }, [chooser, onChooserVisibilityChange]);
 
+  // 查询一改，全站结果即过期：不清掉会把上一个词的人挂在新查询下面。
   useEffect(() => {
-    if (!relationship || !viewerAccountId) return;
-    let cancelled = false;
+    serverPeopleSeq.current += 1;
+    setServerPeople(undefined);
+    setServerPeopleState("idle");
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!relationship || !viewerAccountId) return;    let cancelled = false;
     void relationship.listMyFriendships().then((payload) => {
       if (cancelled) return;
       const next = new Map<string, HomeRelationshipState>();
@@ -190,6 +208,56 @@ export function RequesterHome({
     });
     return () => { cancelled = true; };
   }, [relationship, viewerAccountId]);
+
+  // HOME-PEOPLE-SEARCH-001: 服务端用户转本地人物卡形状，供主页入口复用。
+  // 主页按 userId 拉服务端数据，这里只传身份目标，不传业务断言。
+  function profileWireToPerson(wire: ProfileWire): RecommendPerson {
+    const name = wire.name || wire.handle || wire.userAccountId;
+    const first = [...name.trim()][0] ?? "?";
+    return {
+      id: wire.userAccountId,
+      name,
+      initials: first.toUpperCase(),
+      bio: [wire.handle ? `@${wire.handle.replace(/^@+/, "")}` : "", wire.city].filter(Boolean).join(" · "),
+      tags: [],
+      distanceM: 0,
+      online: false,
+      mutualFriends: 0,
+    };
+  }
+
+  async function runServerPeopleSearch(query: string, speak: boolean): Promise<void> {
+    if (!profileClient) return;
+    const seq = (serverPeopleSeq.current += 1);
+    setServerPeople(undefined);
+    setServerPeopleState("busy");
+    setServerPeopleQuery(query);
+    try {
+      const found = await profileClient.searchProfiles(query);
+      if (serverPeopleSeq.current !== seq) return;
+      setServerPeople(found);
+      setServerPeopleState("idle");
+      if (speak) {
+        setClarifyChoices(undefined);
+        if (found.length > 0) {
+          showResponse(`找到 ${found.length} 位真人`, "点主页查看，+ 直接加好友。");
+        } else {
+          showResponse(
+            `没有找到“${query}”`,
+            "本地推荐和全站都没命中。换个关键词，或去加好友页用 handle 精确找。"
+          );
+        }
+      }
+    } catch {
+      if (serverPeopleSeq.current !== seq) return;
+      setServerPeople(undefined);
+      setServerPeopleState("failed");
+      if (speak) {
+        setClarifyChoices(undefined);
+        showResponse("全站搜索失败", "网络可能有问题，点下面的重试，或换个关键词。");
+      }
+    }
+  }
 
   async function handleHomeFriend(id: string, name: string): Promise<void> {
     if (!relationship || !viewerAccountId) {
@@ -417,17 +485,31 @@ export function RequesterHome({
     }
 
     // 8. 搜索词直接匹配具体候选
-    if (searchSuggestions.length > 0) {
+    const consumedLocal = searchSuggestions.length > 0;
+    if (consumedLocal) {
       applyHomeSearchSuggestion(searchSuggestions[0]!);
+    }
+
+    // 8b. HOME-PEOPLE-SEARCH-001: 全站真人兜底。本地 people 索引只是推荐
+    // 预览，新注册用户不在里面；够长且有 client 就问服务端。本地命中也不拦
+    // （同名会藏人），结果区独立展示，不断本地流程。
+    if (shouldSearchServerPeople(q, !!profileClient)) {
+      if (!consumedLocal) {
+        setClarifyChoices(undefined);
+        showResponse(`正在全站找“${q}”…`, "本地推荐没有命中，正在问服务端。");
+      }
+      void runServerPeopleSearch(q, !consumedLocal);
       return;
     }
 
     // 9. 无命中仍保持搜索语义。模型对话只能由左侧 AI 标识显式进入。
-    setClarifyChoices(undefined);
-    showResponse(
-      attachment ? "图片需要在 Proxy AI 对话中发送" : `没有找到“${q}”`,
-      "换个关键词继续搜索，或点左侧 AI 标识进入模型对话。"
-    );
+    if (!consumedLocal) {
+      setClarifyChoices(undefined);
+      showResponse(
+        attachment ? "图片需要在 Proxy AI 对话中发送" : `没有找到“${q}”`,
+        "换个关键词继续搜索，或点左侧 AI 标识进入模型对话。"
+      );
+    }
   }
 
   // 活动数据只供四宫格“选活动”使用。完整活动发现和报名归市场活动模块，
@@ -459,10 +541,10 @@ export function RequesterHome({
   // Home Search/Conversation v3 — 一个输入框同时做实体匹配和模型对话。
   // 索引里的四个分组**来源不一样**，别把它们混为一谈：
   //   - activities / scenes / times：来自上方已拉取的真实接口列表；
-  //   - people：来自本机推荐列表（SCENE_RECOMMEND），**仍是 fixture、没有真实
-  //     userId** —— 见下方 join 处那条同口径的备注。所以「输入人名」命中的是这份
-  //     本地预览，**不是全站用户**；真正的全站人物搜索要走
-  //     ProfileClient.searchProfiles（PROFILE-SEARCH-001 已上），这里还没接。
+  //   - people：本地推荐预览 + 服务端全站（ProfileClient.searchProfiles，
+  //     PROFILE-SEARCH-001 已上，HOME-PEOPLE-SEARCH-001 已接）：输入人名先匹配
+  //     本地推荐，够长（≥2 码点）且有 ProfileClient 就再问服务端全站用户，
+  //     结果独立展示。只看本地会漏掉新注册用户。
   // 列表为空时 lookup 自然无候选，输入直接走模型对话。
   const distinctTimes = [...new Set(storeActivities.map((a) => a.time).filter(Boolean))];
   const searchIndex = buildHomeSearchIndex({
@@ -600,6 +682,51 @@ export function RequesterHome({
           }}
           onOpenConversation={() => onOpenAssistantConversation?.()}
         />
+      ) : null}
+      {/* HOME-PEOPLE-SEARCH-001: 全站真人结果。本地推荐是 fixture 预览，
+          新注册用户只会出现在这里。点主页进对方主页，+ 直接加好友。 */}
+      {serverPeople !== undefined && serverPeople.length > 0 ? (
+        <View>
+          <Text style={styles.serverPeopleTitle}>全站真人 · {serverPeople.length} 位</Text>
+          {serverPeople.map((person) => {
+            const isSelf = !!viewerAccountId && person.userAccountId === viewerAccountId;
+            const displayName = person.name || person.handle || person.userAccountId;
+            const sub = [person.handle ? `@${person.handle.replace(/^@+/, "")}` : "", person.city].filter(Boolean).join(" · ");
+            const state = relationshipStates.get(person.userAccountId) ?? "NONE";
+            const busy = relationshipBusyId === person.userAccountId;
+            return (
+              <View key={`server-person:${person.userAccountId}`} style={styles.serverPeopleRow}>
+                <View style={styles.serverPeopleCopy}>
+                  <Text style={styles.serverPeopleName}>{displayName}</Text>
+                  {sub ? <Text style={styles.serverPeopleSub}>{sub}</Text> : null}
+                </View>
+                <Pressable accessibilityLabel={`查看${displayName}主页`} onPress={() => onOpenHumanProfile?.(profileWireToPerson(person))}>
+                  <Text style={styles.serverPeopleAction}>主页</Text>
+                </Pressable>
+                {isSelf ? <Text style={styles.serverPeopleSub}>这是你</Text> : (
+                  <Pressable
+                    accessibilityLabel={`加${displayName}为好友`}
+                    disabled={busy || state === "OUTGOING" || state === "FRIEND"}
+                    onPress={() => void handleHomeFriend(person.userAccountId, displayName)}
+                  >
+                    <Text style={styles.serverPeopleAction}>{state === "FRIEND" ? "已是好友" : state === "OUTGOING" ? "已发送" : "+ 加好友"}</Text>
+                  </Pressable>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+      {serverPeopleState === "failed" ? (
+        <View style={styles.serverPeopleRow}>
+          <Text style={styles.serverPeopleSub}>全站搜索失败，请稍后重试。</Text>
+          <Pressable
+            accessibilityLabel="重试全站搜索"
+            onPress={() => { if (serverPeopleQuery) void runServerPeopleSearch(serverPeopleQuery, true); }}
+          >
+            <Text style={styles.serverPeopleAction}>重试</Text>
+          </Pressable>
+        </View>
       ) : null}
       {/* 点左侧 AI 标识后在 Home 内展开独立对话输入框；默认输入仍只搜索。 */}
       {conversationPanel ?? null}
@@ -1351,6 +1478,12 @@ const styles = StyleSheet.create({
   addBadgeText: { color: color.white, fontSize: 16, fontWeight: "900", lineHeight: 20 },
   aiAvatarWrap: { position: "relative" },
   followMsg: { color: color.muted, fontSize: 11, marginTop: 6, textAlign: "center" },
+  serverPeopleTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginTop: 10 },
+  serverPeopleRow: { alignItems: "center", flexDirection: "row", gap: 12, marginTop: 8 },
+  serverPeopleCopy: { flex: 1, minWidth: 0 },
+  serverPeopleName: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  serverPeopleSub: { color: color.muted, fontSize: 11, marginTop: 2 },
+  serverPeopleAction: { color: color.violet, fontSize: 12, fontWeight: "800" },
   // 为你组合 For You 独立主题头：4 宫格不再裸奔。
   forYouHead: { marginTop: 18, marginBottom: 4 },
   forYouBadge: { backgroundColor: color.proxyPurpleSoft, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },

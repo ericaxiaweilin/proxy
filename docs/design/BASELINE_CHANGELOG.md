@@ -4,6 +4,28 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 203 — 2026-09-15
+
+- MARKET-QUOTE-SHEET-001：报价搬出详情页，独立「你的报价」sheet。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/market.tsx`（market scope）——
+    详情页删 customQuote 输入框与 quoteMode 本地计算，改 sheet 开关 + K 单位
+    公平区间（与详情 VND 同一份预算推）；hero 加场景样张兜底（真媒体优先）；
+    报价提交走 sheet 回调（K×1000）。无列表、无筛选改动。
+  - 其余文件（sheet 新文件、推断函数参数放宽、命名测试、卡片 export 沿用
+    Rev201）均非基线敏感。
+
+## Revision 202 — 2026-09-15
+
+- HOME-PEOPLE-SEARCH-001：首页人名搜不到新注册用户（P0）。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx` —— 只把既有的
+    `profileClient` 多透传给 `RequesterHome`（与 Rev197/198/199 同 pattern）。
+    无渲染结构、无筛选、无发布链路改动。
+  - **视觉改动**（均在非基线敏感的 `requester-home.tsx`）：输入人名本地推荐
+    未命中（或同时）时，够长（≥2 码点）且有 client 就问服务端全站，结果以
+    「全站真人」独立区块展示（主页 / + 加好友，本人显示"这是你"不给加按钮）；
+    空结果与失败各说各话，失败给重试。无现有区块、无主题图标改动。
+  - 其余文件（intent 触发判定与单测、命名测试、回归契约条目）均非基线敏感。
+
 ## Revision 201 — 2026-09-15
 
 - MARKET-R37-DETAIL-001：订单详情头部与 R37 卡片视觉断裂修复。

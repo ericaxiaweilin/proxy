@@ -4228,6 +4228,24 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
 echo "    PROFILE-SEARCH-001: PASS (site-wide search is a real server read; literal predicate, four honest states)"
 
+# HOME-PEOPLE-SEARCH-001: 首页人名搜索只查本地推荐预览（fixture），新注册的
+# 真人永远搜不到 —— 服务端 SearchProfiles 早就有了（PROFILE-SEARCH-001），
+# 首页就是没接。现在够长（≥2 码点）且有 client 就问服务端，结果独立展示。
+if ! grep -q 'shouldSearchServerPeople' apps/mobile/src/surfaces/requester-home.tsx ||
+   ! grep -q 'profileClient.searchProfiles' apps/mobile/src/surfaces/requester-home.tsx ||
+   ! grep -q 'profileClient={profile}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [HOME-PEOPLE-SEARCH-001]: 首页人名搜索没接服务端 ——" >&2
+  echo "        本地推荐预览里没有的人，在首页永远搜不到。" >&2
+  exit 1
+fi
+if ! grep -q 'HOME-PEOPLE-SEARCH-001' apps/mobile/src/home-search-intent.test.ts ||
+   ! grep -q 'HOME-PEOPLE-SEARCH-001' apps/mobile/src/requester-home-discovery-contract.test.ts; then
+  echo "  FAIL [HOME-PEOPLE-SEARCH-001]: 触发判定或接线测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/home-search-intent.test.ts src/requester-home-discovery-contract.test.ts || exit $?
+echo "    HOME-PEOPLE-SEARCH-001: PASS (home person search falls through to server profiles)"
+
 # CONVO-LIST-001: ConversationClient.listMyConvos 是「建好了没人调」—— 服务端有
 # ListMyConvos，客户端有方法也有单测，但 App 里从来没有调用方。结果是
 # conversation.tsx 能把一条消息分叉成支线（createConvo 已接线），分叉完却
@@ -4902,3 +4920,65 @@ if ! grep -qF 'export const TYPE_LABEL' apps/mobile/src/surfaces/r37-opportunity
   exit 1
 fi
 echo "    MARKET-R37-DETAIL-001: PASS (order detail carries the approved type logo and shares the card's label table)"
+# MARKET-QUOTE-SHEET-001: 详情页不再身兼"读订单 + 出价"两件事。
+#
+# 之前详情页底部塞了 4 格报价选择 (budget / standard / premium / custom) +
+# 一个数字输入框 + "按我的条件回应"。这一坨挤在详情末尾, 用户得边读订单
+# 边算金额, 而且 "参考区间 / 私密度声明 / 锚定说明" 都没地方放。Prototype
+# 是把报价拆成独立一屏 "你的报价": 大号 K VND 输入 + 区间锚定 + 三个预设
+# + 私密度声明。这里钉:
+#   · 详情页真的把报价搬出去了 (sheet 渲染 + 状态机);
+#   · 旧的"按我的条件回应"按钮和那 4 格选择不再回来;
+#   · 详情页里编出来的数字 (通勤 `travel ?? 20` 在 null 时编 20 分钟, valueBox
+#     的 "中等 / 68%" 没有任何来源) 不许静默复活。
+if ! grep -q 'MARKET-QUOTE-SHEET-001' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-QUOTE-SHEET-001]: 详情页没有标注报价已搬出 ——" >&2
+  echo "        没有标注就意味着没人负责这块的契约, 容易在重构里悄悄回去。" >&2
+  exit 1
+fi
+# sheet 真的接到了详情页, 不是写出来没人调用。`<OpportunityQuoteSheet` 这个
+# JSX 形式, 单独 `OpportunityQuoteSheet` 也会被 import 行命中。
+if ! grep -qF '<OpportunityQuoteSheet' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-QUOTE-SHEET-001]: 详情页没有渲染报价 sheet ——" >&2
+  echo "        sheet 写出来没人用 = 半截接线。" >&2
+  exit 1
+fi
+if ! grep -qF 'setQuoteOpen' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-QUOTE-SHEET-001]: 报价 sheet 没有开关状态 ——" >&2
+  echo "        没法触发 = 按钮是死的。" >&2
+  exit 1
+fi
+# 旧的"按我的条件回应"按钮不许回来。钉整段而不钉 "回应" —— "活动回应" /
+# "申请回应" 也会命中, 太宽。
+# 同时钉字面量 "报名报价" —— 详情页 CTA 必须是这个, 否则就是悄悄回到了 inline 报价。
+if ! grep -qF '"报名报价"' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-QUOTE-SHEET-001]: 详情页 CTA 不是「报名报价」 ——" >&2
+  echo "        没有这个字面量说明详情页还在 inline 报价模式。" >&2
+  exit 1
+fi
+if grep -qF '按我的条件回应' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-QUOTE-SHEET-001]: 详情页又用回旧 CTA 「按我的条件回应」 ——" >&2
+  echo "        旧 CTA 配套的是 inline 4 格报价 grid, 已经搬出。" >&2
+  exit 1
+fi
+# 详情页 hero 不许再编通勤时间。`travel ?? 20` 是 null 时编 20 分钟。
+if grep -qF 'travel ?? 20' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-QUOTE-SHEET-001]: 详情页在 null 时编了 20 分钟通勤 ——" >&2
+  echo "        travel 是 null 就是\"未知\", 写 20 是从 0 编出来的数字。" >&2
+  exit 1
+fi
+# valueBox 的硬编码竞争力进度条 (68%) 没有任何服务端来源, 不许回来。
+# 钉 `width: \"68%\"` 这个具体的 JSX 内联样式 —— 单独钉 "68%" 会命中其它字段,
+# 单独钉 "中等" 会命中发布向导(那边也是同类假数据, 单独处理)。
+if grep -qF 'width: "68%"' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-QUOTE-SHEET-001]: 详情页又出现硬编码的竞争力进度条 (68%) ——" >&2
+  echo "        服务端没返回这个评分, 渲染它等于把假数据展示给用户。" >&2
+  exit 1
+fi
+# sheet 自己是独立的 (不是详情页 inline)。存在性是底线。
+if [ ! -f apps/mobile/src/surfaces/opportunity-quote-sheet.tsx ]; then
+  echo "  FAIL [MARKET-QUOTE-SHEET-001]: 报价 sheet 文件不在 ——" >&2
+  echo "        详情页引用的 OpportunityQuoteSheet 找不到实现。" >&2
+  exit 1
+fi
+echo "    MARKET-QUOTE-SHEET-001: PASS (quote lives in its own sheet; detail no longer fakes a travel time or a competitiveness score)"

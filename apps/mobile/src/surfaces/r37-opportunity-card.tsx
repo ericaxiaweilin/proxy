@@ -30,7 +30,9 @@ export const TYPE_LABEL: Record<OpportunityType, { label: string; sub: string }>
   event_photo: { label: "活动 + 拍照", sub: "Event" },
 };
 
-const SAMPLE_SCENE_IMAGE: Record<OpportunityType, number> = {
+// MARKET-QUOTE-SHEET-001: 详情 hero 兜底图与卡片共用这一张（同 TYPE_LABEL
+// 一样的道理：两处各写一份，改了卡片详情又漂移）。
+export const SAMPLE_SCENE_IMAGE: Record<OpportunityType, number> = {
   coffee_photo: require("../../assets/market-scene-samples/coffee-photo-v1.jpg"),
   coffee_chinese: require("../../assets/market-scene-samples/coffee-photo-v1.jpg"),
   walk_photo: require("../../assets/market-scene-samples/city-walk-photo-v1.jpg"),
@@ -38,7 +40,7 @@ const SAMPLE_SCENE_IMAGE: Record<OpportunityType, number> = {
   event_photo: require("../../assets/market-scene-samples/event-photo-v1.jpg"),
 };
 
-export function inferOpportunityTypeForFilter(opportunity: MarketOpportunity): OpportunityType {
+export function inferOpportunityTypeForFilter(opportunity: { opportunityType?: OpportunityType; theme?: string; skills?: string; title?: string }): OpportunityType {
   if (opportunity.opportunityType) return opportunity.opportunityType;
   const theme = (opportunity.theme ?? "").toLowerCase();
   const skills = (opportunity.skills ?? "").toLowerCase();

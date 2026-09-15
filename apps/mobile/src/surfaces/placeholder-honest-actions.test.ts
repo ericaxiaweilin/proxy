@@ -198,8 +198,12 @@ describe("PLACEHOLDER-002 every chain runs to completion", () => {
 
   it("market search/quote/pins consume input and open real detail", () => {
     expect(market).toContain("setQuery");
-    expect(market).toContain("customQuote");
-    expect(market).toContain("请先填写自定义报价金额");
+    // MARKET-QUOTE-SHEET-001: 报价不再是详情页里塞一个 customQuote 输入框,
+    // 是独立 sheet。pin 改成 sheet 接线 (state + 组件渲染 + 提交回调),
+    // 保证这一屏仍然真的能走报价而不是死按钮。
+    expect(market).toContain("setQuoteOpen");
+    expect(market).toContain("<OpportunityQuoteSheet");
+    expect(market).toContain("onSubmit={");
     expect(market).toContain("活动暂无位置坐标");
     expect(market).not.toContain("as unknown as Activity");
   });
@@ -624,13 +628,16 @@ describe("SEARCH-COPY-HONEST-001 search copy says what the code actually matches
   });
 
   it("the Home search does not claim its people group is real site data", () => {
-    // 索引里 activities / scenes / times 是真的，people 来自 SCENE_RECOMMEND
-    // fixture（没有真实 userId，见同文件 join 处那条备注）。原注释写
-    // 「真实推荐人」「数据全部来自…真实列表，不造演示数据」—— 对一个 fixture
-    // 分组说了假话，会骗到下一个在这上面继续搭东西的人。
+    // 索引里 activities / scenes / times 是真的，people 本地部分来自
+    // SCENE_RECOMMEND fixture。原注释写「真实推荐人」「数据全部来自…真实列表，
+    // 不造演示数据」—— 对一个 fixture 分组说了假话，会骗到下一个在这上面
+    // 继续搭东西的人。
+    // HOME-PEOPLE-SEARCH-001 之后人名多了服务端全站兜底，旧注释那句
+    // 「仍是 fixture、没有真实…」描述的是修之前的世界，已随修更新为接线说明；
+    // 两句假话本身继续禁。
     expect(homeRaw).not.toContain("不造演示数据");
     expect(homeRaw).not.toContain("真实推荐人");
-    expect(homeRaw).toContain("仍是 fixture、没有真实");
+    expect(homeRaw).toContain("HOME-PEOPLE-SEARCH-001");
     expect(homeRaw).toContain("ProfileClient.searchProfiles");
   });
 });

@@ -36,9 +36,12 @@ import { ProxyIcon } from "../components/proxy-icon";
 import { ProxyTabs } from "../components/proxy-foundation";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
-import { R37OpportunityCard, TYPE_LABEL, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
+import { R37OpportunityCard, SAMPLE_SCENE_IMAGE, TYPE_LABEL, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
 // R37-DETAIL-001: 订单详情头部用 R37.4 批准的类型 logo，跟卡片同一套视觉。
 import { MarketTypeLogo } from "../components/market-type-logo";
+// MARKET-QUOTE-SHEET-001: 报价搬出详情页，独立一屏 "你的报价"。
+import { OpportunityQuoteSheet } from "./opportunity-quote-sheet";
+import { Image as ExpoImage } from "expo-image";
 import { R37TypePalette } from "./r37-type-palette";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
 import { DemandWizard } from "./demand-wizard";
@@ -658,22 +661,23 @@ function OpportunityDetail({
   // 「咖啡 + 拍照」、点进来变成 OPPORTUNITY 这种断裂就是这么来的。
   const detailType = inferOpportunityTypeForFilter(opportunity);
   const detailTypeLabel = TYPE_LABEL[detailType];
+  // MARKET-QUOTE-SHEET-001: 详情页给 VND, sheet 给 K。两者都从同一份预算推。
+  const budgetDigits = parseInt(budget.replace(/\D/g, ""), 10);
+  const detailFairLowK = Number.isFinite(budgetDigits) && budgetDigits > 0 ? Math.max(1, Math.round(budgetDigits * 0.95 / 1000)) : 0;
+  const detailFairHighK = Number.isFinite(budgetDigits) && budgetDigits > 0 ? Math.max(detailFairLowK, Math.round(budgetDigits * 1.35 / 1000)) : 0;
+  // MARKET-QUOTE-SHEET-001: 详情 hero 沿用卡片同款场景样张兜底（共用
+  // SAMPLE_SCENE_IMAGE 那一张表，不另起一份），真媒体仍然优先。
   // 自定义报价：输入框的数字才是依据；为空/非数字时不许提交，
   // 也不再静默回退到客户预算（之前选自定义照样按预算发出）。
-  const [customQuote, setCustomQuote] = useState("");
+  // MARKET-QUOTE-SHEET-001: 报价搬出去之后, 这里不再需要 customQuote / quoteMode,
+  // 只留 sheet 的开关和错误。
+  const [quoteOpen, setQuoteOpen] = useState(false);
   const [quoteError, setQuoteError] = useState<string | undefined>(undefined);
   // COMP-REPORT-002: 机会 / 邀约举报。targetId 用服务端 opportunity.id，
   // 不用界面上那个 PX-O 展示编号（客户端随机的，服务端查不到）。
   const [reporting, setReporting] = useState<ReportTarget | undefined>(undefined);
   const [reportDone, setReportDone] = useState<string | undefined>(undefined);
   const reportTarget = opportunityReportTarget(opportunity);
-  const customDigits = customQuote.replace(/[^0-9]/g, "");
-  const customValid = customDigits.length > 0;
-  const quote = quoteMode === "custom"
-    ? (customValid ? `${Number(customDigits).toLocaleString()}₫` : "")
-    : quoteMode === "premium"
-      ? `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.25).toLocaleString()}₫`
-      : quoteMode === "standard" ? (fair.split("–")[0]?.trim() ?? budget) : budget;
   return (
     <View style={styles.oppDetailRoot}>
       <View style={styles.detailHead}>
@@ -685,16 +689,26 @@ function OpportunityDetail({
       </View>
 
       <View style={styles.detailHero}>
-        <View style={styles.detailHeroTypeRow}>
-          <MarketTypeLogo type={detailType} size="FILTER" />
-          <View style={styles.detailHeroTypeMeta}>
-            <Text style={styles.detailHeroKicker}>标准订单类型</Text>
-            <Text style={styles.detailHeroTypeTitle}>{detailTypeLabel.label}</Text>
+        <View style={styles.detailHeroPhoto}>
+          <ExpoImage cachePolicy="memory-disk" contentFit="cover" source={opportunity.sceneImageUrl ? { uri: opportunity.sceneImageUrl } : SAMPLE_SCENE_IMAGE[detailType]} style={StyleSheet.absoluteFill} transition={0} />
+          {!opportunity.sceneImageUrl ? <View style={styles.detailHeroPhotoTag}><Text style={styles.detailHeroPhotoTagText}>AI 样张</Text></View> : null}
+          <View style={styles.detailHeroOverlay}>
+            <Text style={styles.detailHeroKicker}>{detailTypeLabel.sub.toUpperCase()} · {opportunity.location || "河内"}</Text>
+            <Text style={styles.detailHeroTitle}>{opportunity.title}</Text>
           </View>
         </View>
-        <Text style={styles.detailHeroTitle}>{opportunity.title}</Text>
-        <Text style={styles.detailHeroSub}>先回答：值不值得接、条件是否公平、你能不能按自己的条件做。</Text>
       </View>
+      {/* R37-DETAIL-001: 详情体里也有"标准订单类型"行 —— hero 只放照片 + kicker,
+          logo + 中文类型名单独一行跟 prototype 一致, 也满足 MARKET-R37-DETAIL-001
+          的"详情里有 MarketTypeLogo"pin。 */}
+      <View style={styles.detailTypeRow}>
+        <MarketTypeLogo type={detailType} size="FILTER" />
+        <View style={styles.detailTypeMeta}>
+          <Text style={styles.detailTypeLabel}>标准订单类型</Text>
+          <Text style={styles.detailTypeTitle}>{detailTypeLabel.label}</Text>
+        </View>
+      </View>
+      {opportunity.desc ? <Text style={styles.detailDesc}>{opportunity.desc}</Text> : null}
 
       <View style={styles.r4PriceStrip}>
         <View style={styles.r4PriceCell}>
@@ -713,15 +727,15 @@ function OpportunityDetail({
         </View>
       </View>
 
+      {/* MARKET-QUOTE-SHEET-001: valueBox 之前写一个硬编码的竞争力评分(中等 + 68% 进度条),
+          服务端没返回任何竞争力数据 —— 这是从 0 编出来的数字。换成参考区间 + 一句
+          话, 跟 prototype 的"参考报价区间"对齐。 */}
       <View style={styles.valueBox}>
         <View style={styles.valueHead}>
-          <Text style={styles.valueTitle}>当前预算竞争力</Text>
-          <Text style={styles.valueBadge}>中等</Text>
+          <Text style={styles.valueTitle}>参考报价区间</Text>
+          <Text style={styles.valueBadge}>仅供锚定</Text>
         </View>
-        <View style={styles.valueBar}>
-          <View style={[styles.valueFill, { width: "68%" }]} />
-        </View>
-        <Text style={styles.valueText}>客户预算处在 Proxy 公平区间内。可以直接按建议回应，不需要先接受低价。你的最低条件仅 Agent 可见，不对客户公开。</Text>
+        <Text style={styles.valueText}>客户预算落在 Proxy 公平区间内。你点的"报名报价"会进独立 sheet 自己定金额 —— 报价 UI 不在这屏, 不让详情页同时承担读订单和出价两件事。</Text>
       </View>
 
       <View style={styles.factGrid}>
@@ -760,52 +774,41 @@ function OpportunityDetail({
         <View style={styles.aiChecks}>
           <Text style={styles.aiCheck}>✓ {opportunity.match} 匹配；你的组合满足硬条件。</Text>
           <Text style={styles.aiCheck}>₫ 按类似履约，不建议低于预算 85% 接单。</Text>
-          <Text style={styles.aiCheck}>↗ 通勤约 {opportunity.travel ?? 20} 分钟，平台托管付款。</Text>
+          {opportunity.travel != null ? <Text style={styles.aiCheck}>↗ 通勤约 {opportunity.travel} 分钟，平台托管付款。</Text> : null}
         </View>
       </View>
 
-      <View style={styles.quoteGrid}>
-        {(
-          [
-            ["budget", budget, "客户预算 · 成交更快"],
-            ["standard", fair.split("–")[0] ?? budget, "Proxy 建议 · 保持价值"],
-            ["premium", `${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.25).toLocaleString()}₫`, "含更完整交付"],
-            ["custom", "自定义", "自己决定金额与范围"]
-          ] as const
-        ).map(([id, label, sub]) => (
-          <Pressable key={id} onPress={() => setQuoteMode(id)} style={[styles.quoteOption, quoteMode === id && styles.quoteOptionOn]}>
-            <Text style={styles.quotePrice}>{label}</Text>
-            <Text style={styles.quoteSub}>{sub}</Text>
-          </Pressable>
-        ))}
+      {/* MARKET-QUOTE-SHEET-001: 为什么不直接报价 —— 详情页给"推荐理由"+"区间"，
+          真正的报价按钮独立成一屏 sheet, 不让用户在这屏边读边算。 */}
+      <View style={styles.detailWhyBox}>
+        <Text style={styles.detailWhyTitle}>为什么推荐给你</Text>
+        <Text style={styles.detailWhyRow}>✓ {opportunity.match} 匹配 · 你的组合满足硬条件</Text>
+        {opportunity.verified ? <Text style={styles.detailWhyRow}>✓ 发布方已验证</Text> : null}
+        {opportunity.travel != null ? <Text style={styles.detailWhyRow}>✓ 通勤约 {opportunity.travel} 分钟</Text> : null}
       </View>
 
-      {quoteMode === "custom" ? (
-        <View>
-          <TextInput keyboardType="number-pad" onChangeText={(v) => { setCustomQuote(v); setQuoteError(undefined); }} placeholder="输入你的报价金额（₫）" placeholderTextColor="#A9A2B0" style={styles.publishPriceInput} value={customQuote} />
-          {quoteError ? <Text style={styles.marketError}>{quoteError}</Text> : null}
-        </View>
-      ) : null}
-
-      <View style={styles.r4Actions}>
-        <Pressable onPress={onBack} style={styles.r4ActionGhost}>
-          <Text style={styles.r4ActionGhostText}>返回</Text>
+      <View style={styles.detailActions}>
+        <Pressable onPress={onBack} style={styles.detailActionGhost}>
+          <Text style={styles.detailActionGhostText}>先看看</Text>
         </Pressable>
         <Pressable
           disabled={busy || opportunity.appliedByViewer || opportunity.ownedByViewer}
-          onPress={() => {
-            if (quoteMode === "custom" && !customValid) {
-              setQuoteError("请先填写自定义报价金额。");
-              return;
-            }
-            setQuoteError(undefined);
-            onApply(quote);
-          }}
-          style={styles.r4ActionPrimary}
+          onPress={() => { setQuoteError(undefined); setQuoteOpen(true); }}
+          style={[styles.detailActionPrimary, (busy || opportunity.appliedByViewer || opportunity.ownedByViewer) && styles.detailActionBusy]}
         >
-          <Text style={styles.r4ActionPrimaryText}>{opportunity.appliedByViewer ? "已回应" : opportunity.ownedByViewer ? "这是你发布的订单" : busy ? "提交中…" : quoteMode === "custom" && customValid ? `以 ${quote} 回应` : "按我的条件回应"}</Text>
+          <Text style={styles.detailActionPrimaryText}>{opportunity.appliedByViewer ? "已回应" : opportunity.ownedByViewer ? "这是你发布的订单" : busy ? "打开报价中…" : "报名报价"}</Text>
         </Pressable>
       </View>
+
+      <OpportunityQuoteSheet
+        visible={quoteOpen}
+        opportunity={opportunity}
+        fairLowK={detailFairLowK}
+        fairHighK={detailFairHighK}
+        busy={busy}
+        onClose={() => setQuoteOpen(false)}
+        onSubmit={(k) => { setQuoteOpen(false); onApply(`${(k * 1000).toLocaleString()}₫`); }}
+      />
       {opportunity.ownedByViewer ? (
         <Pressable onPress={onOpenSelect} style={[styles.r4ActionGhost, { marginTop: 7 }]}>
           <Text style={styles.r4ActionGhostText}>查看客户选人视角 ›</Text>
@@ -2152,5 +2155,25 @@ const styles = StyleSheet.create({
   mapResultTitle: { color: color.ink, fontSize: 11, fontWeight: "700" },
   mapResultMeta: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 3 },
   mapResultBtn: { alignSelf: "flex-start", backgroundColor: color.ink, borderRadius: 10, marginTop: 8, paddingHorizontal: 10, paddingVertical: 7 },
-  mapResultBtnText: { color: color.white, fontSize: 11, fontWeight: "800" }
+  mapResultBtnText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  // MARKET-QUOTE-SHEET-001: 详情 hero 改为场景照片 + overlay, 跟 prototype 客户需求
+  // 屏一致; 报价搬出去之后, 详情底部只剩"为什么推荐给你 + 先看看 / 报名报价"。
+  detailHeroPhoto: { backgroundColor: "#F1ECE3", borderRadius: 18, height: 196, justifyContent: "flex-end", marginBottom: 12, overflow: "hidden" },
+  detailHeroPhotoTag: { backgroundColor: "rgba(20,19,26,.74)", borderRadius: 6, left: 10, paddingHorizontal: 6, paddingVertical: 3, position: "absolute", top: 10 },
+  detailHeroPhotoTagText: { color: color.white, fontSize: 11, fontWeight: "800" },
+  detailHeroOverlay: { backgroundColor: "rgba(20,19,26,.45)", paddingBottom: 14, paddingHorizontal: 14, paddingTop: 18 },
+  detailDesc: { color: "#5F5E5A", fontSize: 13, lineHeight: 19, marginBottom: 14 },
+  detailWhyBox: { backgroundColor: "#FAF6EE", borderColor: "#E8DFCB", borderRadius: 14, borderWidth: 1, marginBottom: 14, paddingHorizontal: 14, paddingVertical: 12 },
+  detailWhyTitle: { color: color.ink, fontSize: 13, fontWeight: "800", marginBottom: 6 },
+  detailWhyRow: { color: "#3D3A33", fontSize: 12, lineHeight: 18 },
+  detailActions: { flexDirection: "row", gap: 8, marginTop: 6 },
+  detailActionGhost: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, paddingVertical: 13 },
+  detailActionGhostText: { color: color.ink, fontSize: 13, fontWeight: "800" },
+  detailActionPrimary: { alignItems: "center", backgroundColor: color.ink, borderRadius: 12, flex: 2, paddingVertical: 13 },
+  detailActionBusy: { opacity: 0.6 },
+  detailActionPrimaryText: { color: color.white, fontSize: 13, fontWeight: "900" },
+  detailTypeRow: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 12 },
+  detailTypeMeta: { flex: 1, minWidth: 0 },
+  detailTypeLabel: { color: "#AAA49C", fontSize: 11, fontWeight: "700", letterSpacing: 0.3 },
+  detailTypeTitle: { color: color.ink, fontSize: 13, fontWeight: "800", lineHeight: 17, marginTop: 2 }
 });

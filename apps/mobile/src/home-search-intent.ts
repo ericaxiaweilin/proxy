@@ -131,3 +131,13 @@ export function buildHomeSearchIndex(input: HomeSearchIndexInput): HomeSearchInd
     }))
   };
 }
+
+// HOME-PEOPLE-SEARCH-001: 本地 people 索引只是推荐预览（fixture），
+// 不是全站用户 —— 新注册的真人不在里面，搜名字永远搜不到。query 够长
+// （≥2 码点，与服务端 MinProfileSearchQuery 同口径）且调用方有
+// ProfileClient 时，Home 必须再走一遍服务端全站人物搜索。
+// 本地有没有命中都不拦服务端：本地名和真人可能同名，拦了会藏人。
+export function shouldSearchServerPeople(rawQuery: string, hasClient: boolean): boolean {
+  if (!hasClient) return false;
+  return [...(rawQuery || "").trim()].length >= 2;
+}

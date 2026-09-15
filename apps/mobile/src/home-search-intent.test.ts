@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHomeSearchIndex, matchHomeSearchIntent } from "./home-search-intent";
+import { buildHomeSearchIndex, matchHomeSearchIntent, shouldSearchServerPeople } from "./home-search-intent";
 
 function makeIndex() {
   return buildHomeSearchIndex({
@@ -80,5 +80,25 @@ describe("matchHomeSearchIntent", () => {
     const out = matchHomeSearchIntent("user", big);
     if (out.kind !== "lookup") return;
     expect(out.suggestions.length).toBeLessThanOrEqual(8);
+  });
+});
+
+describe("HOME-PEOPLE-SEARCH-001 shouldSearchServerPeople", () => {
+  it("asks the server for queries of 2+ code points when a client exists", () => {
+    expect(shouldSearchServerPeople("nguyen", true)).toBe(true);
+    expect(shouldSearchServerPeople("林夏", true)).toBe(true);
+    expect(shouldSearchServerPeople("@ng", true)).toBe(true);
+  });
+
+  it("never asks without a client (guests keep the old local-only flow)", () => {
+    expect(shouldSearchServerPeople("nguyen", false)).toBe(false);
+  });
+
+  it("does not burn a network round-trip on too-short queries (server would 400)", () => {
+    expect(shouldSearchServerPeople("n", true)).toBe(false);
+    expect(shouldSearchServerPeople(" ", true)).toBe(false);
+    expect(shouldSearchServerPeople("", true)).toBe(false);
+    // 一个汉字是 1 个码点：按字节数会把单字放过去，服务端按 rune 拒绝。
+    expect(shouldSearchServerPeople("林", true)).toBe(false);
   });
 });

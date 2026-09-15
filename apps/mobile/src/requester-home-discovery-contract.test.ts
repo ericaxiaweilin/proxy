@@ -249,4 +249,23 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(shell).not.toMatch(/lat\.toFixed\(4\).*lng\.toFixed\(4\)/);
     expect(mapCanvas).not.toContain("当前 grid 坐标");
   });
+
+  it("HOME-PEOPLE-SEARCH-001: home person search reaches the server user table", () => {
+    // 本地 people 索引只是推荐预览——新注册用户搜名字永远搜不到，只能走
+    // ProfileClient.searchProfiles。断线三处任一即红：触发判定、调用、透传。
+    expect(source).toContain("shouldSearchServerPeople");
+    expect(source).toContain("profileClient.searchProfiles");
+    expect(source).toContain("全站真人");
+    expect(source).toContain("profileWireToPerson");
+    expect(source).toContain("onOpenHumanProfile?.(profileWireToPerson(person))");
+    // 壳必须把 client 透传给首页（与 Feed/Market/Me 同 pattern），否则
+    // shouldSearchServerPeople 永远收到 hasClient=false。
+    const homeUse = shell.indexOf("<RequesterHome");
+    expect(homeUse).toBeGreaterThan(-1);
+    const profilePass = shell.indexOf("profileClient={profile}", homeUse);
+    expect(profilePass).toBeGreaterThan(homeUse);
+    expect(profilePass).toBeLessThan(shell.indexOf("onOpenHumanProfile={(person) => setOpenHumanProfile", homeUse));
+    // 旧谎言不许回来：注释曾明写"不是全站用户，这里还没接"。
+    expect(source).not.toContain("这里还没接");
+  });
 });
