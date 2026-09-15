@@ -28,6 +28,7 @@ import { PaymentClient } from "./payment-client";
 import { NotificationClient } from "./notification-client";
 import { BusinessClient } from "./business-client";
 import { ProfileClient } from "./profile-client";
+import { SessionClient } from "./session-client";
 import { AIAccountClient } from "./ai-account-client";
 import { RelationshipClient } from "./relationship-client";
 import { SceneClient } from "./scene-client";
@@ -159,6 +160,8 @@ const paymentClient = new PaymentClient({ authClient: sessionAuthClient, secureS
 const notificationClient = new NotificationClient({ authClient: sessionAuthClient, secureSessionStore });
 const businessClient = new BusinessClient({ authClient: sessionAuthClient, secureSessionStore });
 const profileClient = new ProfileClient({ authClient: sessionAuthClient, secureSessionStore });
+// DEVICE-LIST-001: 设置页设备管理从此读真会话列表（ previously "设备列表尚未接入"）。
+const sessionClient = new SessionClient({ authClient: sessionAuthClient, secureSessionStore });
 const aiAccountClient = new AIAccountClient(sessionAuthClient);
 const relationshipClient = new RelationshipClient({ authClient: sessionAuthClient, secureSessionStore });
 const sceneClient = new SceneClient({ authClient: sessionAuthClient, secureSessionStore });
@@ -262,6 +265,7 @@ export function ProxyApp(): React.JSX.Element {
         notification={notificationClient}
         business={businessClient}
         profile={profileClient}
+        sessionClient={sessionClient}
         aiAccounts={aiAccountClient}
         relationship={relationshipClient}
         supply={supplyClient}

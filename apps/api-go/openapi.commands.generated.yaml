@@ -269,6 +269,8 @@ commands:
     domain: Fulfillment
   - command: ListMyScenes
     domain: Scene
+  - command: ListMySessions
+    domain: Identity
   - command: ListMyStoreRecommendations
     domain: StoreOnboarding
   - command: ListObservationTemplates

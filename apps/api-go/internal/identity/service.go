@@ -162,7 +162,7 @@ func (s *Service) Repository() Repository {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "LookupPasswordlessIdentity", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
+	case "BeginPasswordlessAuthentication", "RequestLoginChallenge", "VerifyLoginChallenge", "LookupPasswordlessIdentity", "CreateSession", "CreateAnonymousSession", "RegisterDevice", "RevokeSession", "RevokeAllSessions", "ListMySessions", "SwitchPrincipalContext", "RequestAccountRecovery", "RefreshSession", "ResumeTrustedDeviceSession", "AuthenticateWithGoogle",
 		"CreateDisplayIdentity", "ListDisplayIdentities", "BurnDisplayIdentity",
 		"UpdateProfile", "GetProfile", "GetProfileByHandle", "SearchProfiles",
 		"GetAccountPreferences", "UpdateAccountPreferences",
@@ -200,6 +200,8 @@ func (s *Service) HandleContext(ctx context.Context, envelope command.Envelope) 
 		return s.revokeSession(ctx, envelope)
 	case "RevokeAllSessions":
 		return s.revokeAllSessions(ctx, envelope)
+	case "ListMySessions":
+		return s.listMySessions(ctx, envelope)
 	case "SwitchPrincipalContext":
 		return s.switchPrincipalContext(ctx, envelope)
 	case "RequestAccountRecovery":
@@ -1624,6 +1626,70 @@ func (s *Service) searchProfiles(ctx context.Context, e command.Envelope) comman
 		"query":    query,
 	})
 	result := command.Accepted(e, "ProfileSearch", e.Actor.ID, 1, "LISTED", nil)
+	result.OperationRef = string(raw)
+	return result
+}
+
+// listMySessions answers the device-management card in Settings ("设备管理").
+//
+// DEVICE-LIST-001: that card used to end with "设备列表尚未接入" — the honest
+// placeholder for a read that did not exist. The server already enforces the
+// promise next to it (MaxConcurrentSessions: a new login auto-evicts the
+// oldest, see enforceMaxConcurrentSessions), and RevokeSession already refuses
+// other people's sessions, but there was no way to SEE the two slots. Now
+// there is: every session of the caller, newest-issued last, with the device
+// platform joined in and the calling session marked `current` so the UI can
+// label it 本机 and hide its own revoke button.
+//
+// Three outcomes stay apart: someone else's sessions are never listed (the
+// query is keyed by the actor, not by a request parameter — there is nothing
+// to tamper with), an anonymous caller gets its own FORBIDDEN (not an empty
+// list, which would read as "you have no devices"), and an empty list is a
+// real answer, never null.
+//
+// The payload goes in operationRef, NOT Body — same reason as searchProfiles
+// above: the mobile parser drops Body.
+func (s *Service) listMySessions(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "SESSION_LIST_FORBIDDEN", "AUTHORIZATION", "AFTER_USER_ACTION", "identity.session_list_forbidden", nil)
+	}
+	sessions, err := s.repository.ListSessionsByUser(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "SESSION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_list_failed", nil)
+	}
+	// The transport stashes the calling session id in authContext (the mobile
+	// client sends authContext.sessionId on every command). It only drives
+	// the `current` label; a missing one degrades to "no label", never to a
+	// wrong label.
+	var currentID string
+	if e.AuthContext != nil {
+		currentID, _ = e.AuthContext["sessionId"].(string)
+	}
+	wires := make([]map[string]any, 0, len(sessions))
+	for _, session := range sessions {
+		// Best-effort join: a session whose device row is gone (retention GC,
+		// legacy row) still lists — with an empty platform the UI renders
+		// 未知设备, which is true, instead of dropping a live session.
+		platform := ""
+		if session.DeviceID != "" {
+			if device, err := s.repository.GetDevice(ctx, session.DeviceID); err == nil {
+				platform = device.Platform
+			}
+		}
+		wires = append(wires, map[string]any{
+			"id":        session.ID,
+			"platform":  platform,
+			"status":    session.Status,
+			"issuedAt":  session.IssuedAt.UTC().Format(time.RFC3339),
+			"expiresAt": session.ExpiresAt.UTC().Format(time.RFC3339),
+			"current":   currentID != "" && session.ID == currentID,
+		})
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"sessions": wires,
+		"count":    len(wires),
+	})
+	result := command.Accepted(e, "SessionList", e.Actor.ID, 1, "LISTED", nil)
 	result.OperationRef = string(raw)
 	return result
 }

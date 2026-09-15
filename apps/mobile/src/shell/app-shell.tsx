@@ -47,7 +47,7 @@ import { type PaymentClient } from "../payment-client";
 import { type NotificationClient } from "../notification-client";
 import { type BusinessClient } from "../business-client";
 import { type ProfileClient } from "../profile-client";
-import { type AIAccountClient, type PlatformAIAccount } from "../ai-account-client";
+import { type SessionClient } from "../session-client";import { type AIAccountClient, type PlatformAIAccount } from "../ai-account-client";
 import { type RelationshipClient } from "../relationship-client";
 import { type SupplyClient } from "../supply-client";
 import { type SocialSettingsClient } from "../social-settings-client";
@@ -128,6 +128,7 @@ export function AppShell({
   supply,
   socialSettings,
   profile,
+  sessionClient,
   aiAccounts,
   relationship,
   scene,
@@ -157,6 +158,7 @@ export function AppShell({
   business: BusinessClient;
   supply: SupplyClient;
   profile: ProfileClient;
+  sessionClient: SessionClient;
   aiAccounts: AIAccountClient;
   relationship: RelationshipClient;
   socialSettings: SocialSettingsClient;
@@ -760,6 +762,7 @@ export function AppShell({
               supply={supply}
               activities={activities}
               profileClient={profile}
+              sessionClient={sessionClient}
               mediaClient={media}
               relationshipClient={relationship}
               socialSettingsClient={socialSettings}

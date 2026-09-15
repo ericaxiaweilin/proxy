@@ -4,6 +4,23 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 197 — 2026-09-15
+
+- DEVICE-LIST-001：设置页「设备管理」卡片从"设备列表尚未接入"换成真会话列表
+  （ListMySessions + 踢出）。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx`、
+    `apps/mobile/src/surfaces/me.tsx`。两处都只是把新建的 `SessionClient`
+    顺着既有管线透传（native-app 构建 → shell → Me → SecuritySettings，
+    与 `profileClient` 同 pattern），无渲染结构、无文案口径（除设备卡片自身）、
+    无主题/图标改动。
+  - **视觉改动**：只在 `security-settings.tsx`（非基线敏感）的设备卡片内：
+    原来一行"设备列表尚未接入"的位置现在是四态列表（读取中 / 失败可重试 /
+    空 / 设备行：平台 + 状态 + 登录日期 + 本机标记 + 非本机踢出）。
+    卡片标题与"最多 2 台…自动踢出最旧"承诺文案不变 —— 该行为服务端本就
+    在执行（MaxConcurrentSessions），这次只是让用户看得见两格槽位。
+  - 其余文件（`session-client.ts` 新建、Go `ListMySessions`、openapi regen）
+    均非基线敏感，按常规业务逻辑处理，不在此登记。
+
 ## Revision 196 — 2026-09-15
 
 - ADD-FRIEND-FROM-MESSAGES-001：接上「信息 → 添加好友」入口，并修掉返回按钮

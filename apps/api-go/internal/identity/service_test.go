@@ -697,3 +697,132 @@ func TestLookupPasswordlessIdentityHintsUnregistered(t *testing.T) {
 		t.Fatalf("malformed identifier must reject INVALID, got %#v", bad)
 	}
 }
+
+type sessionWire struct {
+	ID        string `json:"id"`
+	Platform  string `json:"platform"`
+	Status    string `json:"status"`
+	IssuedAt  string `json:"issuedAt"`
+	ExpiresAt string `json:"expiresAt"`
+	Current   bool   `json:"current"`
+}
+
+func createVerifiedSession(t *testing.T, svc *Service, challengeID string) command.Result {
+	t.Helper()
+	created := svc.Handle(testEnvelope("CreateSession", map[string]any{
+		"userAccountId": "user_001", "loginIdentityId": "login_001", "deviceId": "device_001", "challengeId": challengeID,
+		"requestedPrincipal": map[string]any{"type": "INDIVIDUAL", "id": "user_001"},
+	}, command.Target{Type: "Session", ID: "new"}))
+	if created.Outcome != "ACCEPTED" {
+		t.Fatalf("CreateSession(%s) must be ACCEPTED, got %#v", challengeID, created)
+	}
+	return created
+}
+
+func listMySessionWires(t *testing.T, svc *Service, actor command.Actor, authContext map[string]any) []sessionWire {
+	t.Helper()
+	e := testEnvelope("ListMySessions", map[string]any{}, command.Target{Type: "SessionList", ID: "mine"})
+	e.Actor = actor
+	e.AuthContext = authContext
+	got := svc.Handle(e)
+	if got.Outcome != "ACCEPTED" {
+		t.Fatalf("ListMySessions must be ACCEPTED, got %#v", got)
+	}
+	var body struct {
+		Sessions []sessionWire `json:"sessions"`
+		Count    int           `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(got.OperationRef), &body); err != nil {
+		t.Fatalf("ListMySessions operationRef must parse, got %q: %v", got.OperationRef, err)
+	}
+	if body.Sessions == nil {
+		t.Fatalf("sessions must be [] when empty, never null")
+	}
+	if body.Count != len(body.Sessions) {
+		t.Fatalf("count %d must match sessions length %d", body.Count, len(body.Sessions))
+	}
+	return body.Sessions
+}
+
+// TestListMySessionsReturnsOnlyOwnSessions pins DEVICE-LIST-001's read half.
+//
+// The query is keyed by the actor, not by a request parameter, so there is
+// nothing to tamper with — but that is exactly what this test holds: a second
+// account's list must not contain the first account's sessions.
+func TestListMySessionsReturnsOnlyOwnSessions(t *testing.T) {
+	svc := testService()
+	first := createVerifiedSession(t, svc, "challenge_001")
+	second := createVerifiedSession(t, svc, "challenge_002")
+
+	mine := listMySessionWires(t, svc, command.Actor{Type: "USER", ID: "user_001"}, nil)
+	if len(mine) != 2 {
+		t.Fatalf("user_001 must see 2 sessions, got %d (%#v)", len(mine), mine)
+	}
+	seen := map[string]bool{}
+	for _, w := range mine {
+		seen[w.ID] = true
+	}
+	if !seen[first.Aggregate.ID] || !seen[second.Aggregate.ID] {
+		t.Fatalf("both created sessions must list, got %#v", mine)
+	}
+
+	other := listMySessionWires(t, svc, command.Actor{Type: "USER", ID: "user_002"}, nil)
+	if len(other) != 0 {
+		t.Fatalf("user_002 must see none of user_001's sessions, got %#v", other)
+	}
+}
+
+// TestListMySessionsMarksCurrentAndJoinsPlatform pins the two things that make
+// the list usable: the platform (so the row can say iPhone / Android instead
+// of a raw device id) and the `current` flag (so the UI can label 本机 and
+// hide the self-revoke button — revoking your own session from under yourself
+// is a logout wearing a "kick device" costume).
+func TestListMySessionsMarksCurrentAndJoinsPlatform(t *testing.T) {
+	svc := testService()
+	first := createVerifiedSession(t, svc, "challenge_001")
+	createVerifiedSession(t, svc, "challenge_002")
+
+	wires := listMySessionWires(t, svc,
+		command.Actor{Type: "USER", ID: "user_001"},
+		map[string]any{"sessionId": first.Aggregate.ID})
+	if len(wires) != 2 {
+		t.Fatalf("want 2 sessions, got %#v", wires)
+	}
+	for _, w := range wires {
+		if w.Platform != "IOS" {
+			t.Fatalf("session %s must join platform IOS from device_001, got %q", w.ID, w.Platform)
+		}
+		if w.IssuedAt == "" || w.ExpiresAt == "" {
+			t.Fatalf("session %s must carry issued/expires timestamps, got %#v", w.ID, w)
+		}
+		wantCurrent := w.ID == first.Aggregate.ID
+		if w.Current != wantCurrent {
+			t.Fatalf("session %s current must be %v, got %#v", w.ID, wantCurrent, w)
+		}
+	}
+}
+
+// TestListMySessionsEmptyIsAnAnswerNotAnError: zero devices is a real answer
+// ("no other sessions"), and it must arrive as [] — a null would crash a
+// client doing `sessions.length` on a successful read.
+func TestListMySessionsEmptyIsAnAnswerNotAnError(t *testing.T) {
+	svc := testService()
+	wires := listMySessionWires(t, svc, command.Actor{Type: "USER", ID: "user_001"}, nil)
+	if len(wires) != 0 {
+		t.Fatalf("fresh account must list zero sessions, got %#v", wires)
+	}
+}
+
+// TestListMySessionsForbiddenWhenAnonymous: the list names every live session
+// of an account. Answering it anonymously would turn it into an oracle, so it
+// gets its own FORBIDDEN — not an empty list, which would read as "you have
+// no devices".
+func TestListMySessionsForbiddenWhenAnonymous(t *testing.T) {
+	svc := testService()
+	e := testEnvelope("ListMySessions", map[string]any{}, command.Target{Type: "SessionList", ID: "mine"})
+	e.Actor = command.Actor{}
+	got := svc.Handle(e)
+	if got.Outcome != "REJECTED" || got.Error == nil || got.Error.ErrorCode != "SESSION_LIST_FORBIDDEN" {
+		t.Fatalf("anonymous list must be SESSION_LIST_FORBIDDEN, got %#v", got)
+	}
+}

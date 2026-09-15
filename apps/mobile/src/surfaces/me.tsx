@@ -63,6 +63,7 @@ import type { MyScene, MySceneInvitation, SceneClient } from "../scene-client";
 import type { BusinessClient } from "../business-client";
 import type { ActivityClient } from "../activity-client";
 import type { ProfileClient } from "../profile-client";
+import type { SessionClient } from "../session-client";
 import type { MediaClient } from "../media-client";
 import type { RelationshipClient } from "../relationship-client";
 import type { SocialSettingsClient } from "../social-settings-client";
@@ -316,6 +317,7 @@ export function MeSurface({
   viewerAccountId,
   socialSettingsClient,
   profileClient,
+  sessionClient,
   mediaClient,
   relationshipClient,
   // COMP-REPORT-002: 举报入口，透传到「我的订单」（举报交易）。
@@ -343,6 +345,9 @@ export function MeSurface({
   business?: BusinessClient;
   supply?: SupplyClient;
   profileClient?: ProfileClient | undefined;
+  // DEVICE-LIST-001: 设置页设备管理读真会话列表。调用方（shell）必传；
+  // 缺省时卡片如实显示未接线，不画假列表。
+  sessionClient?: SessionClient | undefined;
   mediaClient?: MediaClient | undefined;
   relationshipClient?: RelationshipClient | undefined;
   activities?: ActivityClient | undefined;
@@ -1233,6 +1238,7 @@ export function MeSurface({
               onRetentionChange={setSecurityRetention}
               screenshotWarnEnabled={screenshotWarn}
               onToggleScreenshotWarn={setScreenshotWarn}
+              sessionClient={sessionClient}
             />
             <Text style={[styles.appBehaviorTitle, { marginTop: 24 }]}>应用行为检查</Text>
             {checks.map(([title, desc], index) => (
