@@ -33,6 +33,10 @@ PODS:
     - ExpoModulesCore
   - ExpoAudio (57.0.4):
     - ExpoModulesCore
+  - ExpoCamera (57.0.4):
+    - ExpoModulesCore
+  - ExpoCameraBarcodeScanning (57.0.4):
+    - ExpoCamera
   - ExpoClipboard (57.0.2):
     - ExpoModulesCore
   - ExpoCrypto (57.0.1):
@@ -2120,6 +2124,8 @@ DEPENDENCIES:
   - "Expo (from `../../../node_modules/.pnpm/expo@57.0.12_@babel+core@7.29.7_supports-color@8.1.1__@expo+dom-webview@57.0.1_react-do_dfcab389c0ed814c3724132c2d193e33/node_modules/expo`)"
   - "ExpoAsset (from `../../../node_modules/.pnpm/expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8_2f548c49a560756b2f323de94f824054/node_modules/expo-asset/ios`)"
   - "ExpoAudio (from `../../../node_modules/.pnpm/expo-audio@57.0.4_expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29._ad656b07e45440d1edcf06126209f749/node_modules/expo-audio/ios`)"
+  - "ExpoCamera (from `../../../node_modules/.pnpm/expo-camera@57.0.4_@types+emscripten@1.41.6_expo@57.0.12_react-native@0.86.2_@babel+cor_cfc3a949845deac8d4683f63a82dbe7a/node_modules/expo-camera/ios/ExpoCamera.podspec`)"
+  - "ExpoCameraBarcodeScanning (from `../../../node_modules/.pnpm/expo-camera@57.0.4_@types+emscripten@1.41.6_expo@57.0.12_react-native@0.86.2_@babel+cor_cfc3a949845deac8d4683f63a82dbe7a/node_modules/expo-camera/ios/ExpoCameraBarcodeScanning.podspec`)"
   - "ExpoClipboard (from `../../../node_modules/.pnpm/expo-clipboard@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-colo_681c61d1b60e8e6b87150a9db4d207d5/node_modules/expo-clipboard/ios`)"
   - "ExpoCrypto (from `../../../node_modules/.pnpm/expo-crypto@57.0.1_expo@57.0.12/node_modules/expo-crypto/ios`)"
   - "ExpoDomWebView (from `../../../node_modules/.pnpm/@expo+dom-webview@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-c_797694d88359341a42e63ef165daca13/node_modules/@expo/dom-webview/ios`)"
@@ -2235,6 +2241,10 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.pnpm/expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@8_2f548c49a560756b2f323de94f824054/node_modules/expo-asset/ios"
   ExpoAudio:
     :path: "../../../node_modules/.pnpm/expo-audio@57.0.4_expo-asset@57.0.10_expo@57.0.12_react-native@0.86.2_@babel+core@7.29._ad656b07e45440d1edcf06126209f749/node_modules/expo-audio/ios"
+  ExpoCamera:
+    :podspec: "../../../node_modules/.pnpm/expo-camera@57.0.4_@types+emscripten@1.41.6_expo@57.0.12_react-native@0.86.2_@babel+cor_cfc3a949845deac8d4683f63a82dbe7a/node_modules/expo-camera/ios/ExpoCamera.podspec"
+  ExpoCameraBarcodeScanning:
+    :podspec: "../../../node_modules/.pnpm/expo-camera@57.0.4_@types+emscripten@1.41.6_expo@57.0.12_react-native@0.86.2_@babel+cor_cfc3a949845deac8d4683f63a82dbe7a/node_modules/expo-camera/ios/ExpoCameraBarcodeScanning.podspec"
   ExpoClipboard:
     :path: "../../../node_modules/.pnpm/expo-clipboard@57.0.2_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-colo_681c61d1b60e8e6b87150a9db4d207d5/node_modules/expo-clipboard/ios"
   ExpoCrypto:
@@ -2447,6 +2457,8 @@ SPEC CHECKSUMS:
   Expo: 423915c60a05e620e67a1f1bfcb612a217fd6f1b
   ExpoAsset: 64e4684e2cb6c45a52009f91e18c45ff56ed4a09
   ExpoAudio: bd075db379c5a70b7f9a7b5b541d5c67f59b5dca
+  ExpoCamera: 00a098da25adbc6013f051b5db47279cb10a716c
+  ExpoCameraBarcodeScanning: 14c72e1f522eb69f7a672d757eb294c096756faa
   ExpoClipboard: 15b8cc88075d7c50af165ed8fca0a76915903bba
   ExpoCrypto: 366380ffafeb22cc9795438cddcbfa299e1aaf42
   ExpoDomWebView: beaec034e51bd028428b98bb1f2633ab79c6d095

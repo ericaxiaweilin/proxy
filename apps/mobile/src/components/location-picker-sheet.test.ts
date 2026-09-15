@@ -22,6 +22,7 @@ import {
   gridToLatLng,
   LOCATION_OPTIONS,
   makeCustomLocation,
+  makeDeviceLocation,
   reverseGeocode,
   reverseGeocodeViaProxy,
   formatLocationTitle,
@@ -363,5 +364,46 @@ describe("reverseGeocodeViaProxy", () => {
     } finally {
       (globalThis as unknown as { fetch: typeof fetch }).fetch = original as typeof fetch;
     }
+  });
+});
+
+// DEVICE-LOCATION-001：设备位置（跟随我的位置）。
+//
+// 用户报告「移动几公里位置不刷新」的修复里新增了第三种 kind。这里钉住：
+//   · 反查有地址 → 显示地址；
+//   · 反查没地址 → **显示坐标**，绝不拿别的城市冒充（"人在曼谷显示河内"正是 R15.33 修过的 bug）；
+//   · DEVICE 不编造 gridX/gridY —— 网格是"用户在自绘地图上放点"的产物，
+//     设备定位没有这个概念，硬算一个就是假数据。
+describe("DEVICE-LOCATION-001 设备位置", () => {
+  it("有反查地址时显示地址", () => {
+    const loc = makeDeviceLocation(21.0285, 105.8542, { address: "Hoàn Kiếm, Hà Nội", updatedAt: 1000 });
+    expect(loc.kind).toBe("DEVICE");
+    expect(formatLocationTitle(loc)).toBe("Hoàn Kiếm, Hà Nội");
+    expect(loc.device).toEqual({ lat: 21.0285, lng: 105.8542, address: "Hoàn Kiếm, Hà Nội", updatedAt: 1000 });
+  });
+
+  it("没有反查地址时退回坐标 —— 不猜城市，也不留空白", () => {
+    const loc = makeDeviceLocation(13.7563, 100.5018, { updatedAt: 1000 });
+    // 曼谷不在 CITY_BOUNDS 里。这里绝不能显示"河内"或其他任何预设城市。
+    expect(loc.city).toBe("");
+    expect(loc.area).toBe("");
+    expect(formatLocationTitle(loc)).toBe("13.7563, 100.5018");
+  });
+
+  it("空白地址当作没有地址，不显示空串", () => {
+    const loc = makeDeviceLocation(1, 2, { address: "   " });
+    expect(loc.device.address).toBeUndefined();
+    expect(formatLocationTitle(loc)).toBe("1.0000, 2.0000");
+  });
+
+  it("DEVICE 不带网格字段（不伪造 gridX/gridY）", () => {
+    const loc = makeDeviceLocation(21.0285, 105.8542);
+    expect("custom" in loc).toBe(false);
+    expect((loc as unknown as { custom?: unknown }).custom).toBeUndefined();
+  });
+
+  it("DEVICE 也能进 AnyLocation 联合且能被 kind 区分", () => {
+    const loc: AnyLocation = makeDeviceLocation(21.0285, 105.8542, { address: "河内" });
+    expect(loc.kind === "DEVICE" ? loc.device.lat : null).toBe(21.0285);
   });
 });

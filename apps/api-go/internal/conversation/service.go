@@ -798,21 +798,93 @@ func (s *Service) listConversations(ctx context.Context, e command.Envelope) com
 // Gate C：Post → Profile → Conversation；origin_type/origin_id 必存；
 // 同一个 Post 被不同用户发起 DM 时 Conversation 独立。
 
+// maxGroupParticipants 是一次建群的人数上限（含创建者）。这不是业务上限，是防滥用：
+// 成员会进消息扇出和成员可见性判断，不设上限等于让人用一次 StartConversation
+// 造出一个百万成员的会话。
+const maxGroupParticipants = 500
+
+// validConversationTypes 是允许客户端声明的会话类型白名单。
+//
+// conversationType 决定消息保护强度（见 DefaultProtectionFor）：GROUP 的保护明显
+// 弱于 DM —— 可转发、可复制、不警告截屏。而这个字段以前客户端填什么就是什么，
+// 谁都能把一条 1:1 对话声明成 GROUP，从而把对方消息的保护降级。必须收口成白名单。
+var validConversationTypes = map[string]bool{"DM": true, "GROUP": true, "SUPPORT": true}
+
 type startConversationPayload struct {
 	ConversationType string `json:"conversationType"`
 	OriginType       string `json:"originType"`
 	OriginID         string `json:"originId"`
-	ParticipantID    string `json:"participantId"`
-	MarketID         string `json:"marketId"`
-	FirstMessage     string `json:"firstMessage"`
-	MediaRef         string `json:"mediaRef"`
-	AssistantMode    string `json:"assistantMode"`
+	// ParticipantID 是既有客户端的单数写法，继续支持（见 resolveStartParticipants）。
+	ParticipantID string `json:"participantId"`
+	// ParticipantIDs 是建群用的复数写法。以前参与者恒为 {创建者, participantId}
+	// 两个，所以「群组」最多也就两个人 —— 真·多人建群靠这个字段。
+	ParticipantIDs []string `json:"participantIds"`
+	MarketID       string   `json:"marketId"`
+	FirstMessage   string   `json:"firstMessage"`
+	MediaRef       string   `json:"mediaRef"`
+	AssistantMode  string   `json:"assistantMode"`
+}
+
+// resolveStartParticipants 拼出最终成员列表：创建者永远在，且在第一位。
+// 返回 (成员列表, 错误码)；错误码为 "" 表示没问题。
+//
+// 规则：
+//
+//	· participantIds（复数）与 participantId（单数）都认，合并去重；
+//	  participantId 为空是合法的（走复数写法时它就是空的），不因此报错；
+//	  但 participantIds 里出现空白 id 要拒 —— 那会把一个空成员写进会话；
+//	· DM 必须恰好 2 人；
+//	· GROUP 至少 3 人 —— 两个人叫「群组」没有任何群组语义，只是把 DM 的保护
+//	  降级（DefaultProtectionFor 对 GROUP 更宽松），所以必须堵死；
+//	· SUPPORT 保持 ≥2（它走 DM 那一档保护，不存在降级，且不收紧以免改变既有行为）；
+//	· 超过 maxGroupParticipants 直接拒。
+func resolveStartParticipants(actorID string, p startConversationPayload) ([]string, string) {
+	seen := map[string]bool{actorID: true}
+	members := []string{actorID}
+	for _, raw := range p.ParticipantIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			return nil, "INVALID_PARTICIPANT_ID"
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		members = append(members, id)
+	}
+	if single := strings.TrimSpace(p.ParticipantID); single != "" && !seen[single] {
+		seen[single] = true
+		members = append(members, single)
+	}
+	if len(members) > maxGroupParticipants {
+		return nil, "TOO_MANY_PARTICIPANTS"
+	}
+	switch p.ConversationType {
+	case "DM":
+		if len(members) != 2 {
+			return nil, "DM_REQUIRES_ONE_PARTICIPANT"
+		}
+	case "GROUP":
+		if len(members) < 3 {
+			return nil, "GROUP_REQUIRES_MULTIPLE_PARTICIPANTS"
+		}
+	default: // SUPPORT
+		if len(members) < 2 {
+			return nil, "INVALID_PARTICIPANT_ID"
+		}
+	}
+	return members, ""
 }
 
 func (s *Service) startConversation(ctx context.Context, e command.Envelope) command.Result {
 	var p startConversationPayload
-	if !decode(e.Payload, &p) || p.OriginType == "" || p.OriginID == "" || p.ParticipantID == "" {
+	if !decode(e.Payload, &p) || p.OriginType == "" || p.OriginID == "" {
 		return command.Rejected(e, "INVALID_CONVERSATION_START", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_start", nil)
+	}
+	// GROUP-CREATE-001: 建群走 participantIds（复数），此时 participantId 是空的。
+	// 两种写法至少要给一种 —— 一个参与者都不带的会话没有意义。
+	if strings.TrimSpace(p.ParticipantID) == "" && len(p.ParticipantIDs) == 0 {
+		return command.Rejected(e, "INVALID_CONVERSATION_START", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_start", map[string]any{"reason": "participantId or participantIds is required"})
 	}
 	validOrigins := map[string]bool{"HOME": true, "TASK": true, "POST": true, "PROFILE": true, "SERVICE": true, "ACTIVITY": true, "NEED": true, "OFFER": true, "ORDER": true}
 	if !validOrigins[p.OriginType] {
@@ -821,8 +893,17 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 	if p.ConversationType == "" {
 		p.ConversationType = "DM"
 	}
+	// GROUP-CREATE-001: 类型必须落在白名单里。它决定消息保护强度，客户端不能随意取值。
+	if !validConversationTypes[p.ConversationType] {
+		return command.Rejected(e, "INVALID_CONVERSATION_TYPE", "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_type", map[string]any{"conversationType": p.ConversationType})
+	}
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "CONVERSATION_START_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "conversation.start_not_allowed", nil)
+	}
+	// GROUP-CREATE-001: 成员不再恒为 {创建者, participantId} 两个。
+	participants, participantErr := resolveStartParticipants(e.Actor.ID, p)
+	if participantErr != "" {
+		return command.Rejected(e, participantErr, "VALIDATION", "AFTER_USER_ACTION", "conversation.invalid_participants", map[string]any{"conversationType": p.ConversationType})
 	}
 	conv := Conversation{
 		ID:            newID("conv_"),
@@ -831,7 +912,7 @@ func (s *Service) startConversation(ctx context.Context, e command.Envelope) com
 		OriginID:      p.OriginID,
 		MarketID:      p.MarketID,
 		State:         "ACTIVE",
-		Participants:  []string{e.Actor.ID, p.ParticipantID},
+		Participants:  participants,
 		CreatedAt:     s.clock.Now().UTC(),
 		LastMessageAt: s.clock.Now().UTC(),
 	}

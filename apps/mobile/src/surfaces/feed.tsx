@@ -64,17 +64,16 @@ type FilterKey = "ALL" | "人/关系" | "机会/需求" | "活动/团体" | "情
 let cachedPosts: FeedPost[] = [];
 let cachedMedia: Record<string, FeedMediaItem[]> = {};
 let cachedPostIds: Set<string> = new Set();
+// AVATAR-FLASH-001: 上次解析出的本人头像 URI（带所属账户）。首帧同步初值用它，
+// 切 tab 再回来不闪；effect 照常异步重验，不一致就纠正（换头像后最多闪一帧旧图，
+// 不闪黑）。按账户 key，切换账号不串。
+let cachedViewerAvatar: { accountId: string; uri: string } | undefined;
 
 // 本人头像：与“我的→个人总管理”同源（profileStore 本地记录 + document
 // 目录重锚 + 存在性校验，AVATAR-001 同款逻辑）。动态之前写死黑底圆圈，
 // 自己的帖子也显示黑头——现在本人帖子用真头像，他人暂无来源仍用首字 fallback。
 // PROFILE-READ-001: 按账户隔离，和 me 页同一 key 规则（组件内 useMemo 实例）。
 const FEED_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
-
-// AVATAR-FLASH-001: 上次解析出的本人头像 URI（带所属账户）。首帧同步初值用它，
-// 切 tab 再回来不闪；effect 照常异步重验，不一致就纠正（换头像后最多闪一帧旧图，
-// 不闪黑）。按账户 key，切换账号不串。
-let cachedViewerAvatar: { accountId: string; uri: string } | undefined;
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
 
@@ -253,7 +252,8 @@ export function FeedSurface({
   }, []);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
   // 本人头像 URI：首帧用模块缓存同步初值（AVATAR-FLASH-001），不闪黑；
-  // effect 照常异步重验并纠正。
+  // 同步读 profileStore，不依赖 effect 异步延迟；本地文件不存在时保持
+  // undefined，渲染走首字 fallback，不显示原始默认黑头像。effect 照常异步重验并纠正。
   const [viewerAvatarUri, setViewerAvatarUri] = useState<string | undefined>(
     () => (cachedViewerAvatar && viewerAccountId && cachedViewerAvatar.accountId === viewerAccountId ? cachedViewerAvatar.uri : undefined)
   );
@@ -263,9 +263,13 @@ export function FeedSurface({
     [viewerAccountId]
   );
   useEffect(() => {
+    // 启动优化：并行异步初始化，不阻塞首帧渲染（避免 6s+ 启动）。
+    // 头像 / 账号数据缺失时渲染直接走 fallback，不显示原始默认黑头像。
     let active = true;
     setViewerAvatarLoaded(false);
-    void feedProfileStore.read().then(async (record) => {
+    setAiAccountsById(new Map());
+    // 并行读 profile + AI 账号，不串行等待
+    const avatarTask = feedProfileStore.read().then(async (record) => {
       if (!active) return;
       const thumbOf = (pointer: string): string | undefined => {
         const id = pointer.startsWith("assets/") ? pointer.slice("assets/".length).trim() : "";
@@ -326,15 +330,8 @@ export function FeedSurface({
       }
       done(undefined);
     }).catch(() => { if (active) setViewerAvatarLoaded(true); });
-    return () => { active = false; };
-  }, [feedProfileStore, profileClient, viewerAccountId]);
-  // MEDIA-PIPELINE-001: AI 账号目录（accountId → 账号），用于解析 AGENT
-  // 帖头像。mount 拉一次；失败/缺 client 则 AI 帖走首字，不打断列表。
-  const [aiAccountsById, setAiAccountsById] = useState<ReadonlyMap<string, AvatarAccount>>(new Map());
-  useEffect(() => {
-    if (!aiAccountsClient) return;
-    let active = true;
-    void aiAccountsClient.listRecommended().then((accounts) => {
+
+    const aiTask = aiAccountsClient ? aiAccountsClient.listRecommended().then((accounts) => {
       if (!active) return;
       setAiAccountsById(new Map(accounts.map((account) => [account.accountId, {
         accountId: account.accountId,
@@ -343,9 +340,13 @@ export function FeedSurface({
         avatarMediaAssetId: account.avatarMediaAssetId,
         avatarVersion: account.avatarVersion
       }])));
-    }).catch(() => undefined);
+    }).catch(() => undefined) : Promise.resolve();
+
+    Promise.all([avatarTask, aiTask]).catch(() => undefined);
     return () => { active = false; };
-  }, [aiAccountsClient]);
+  }, [feedProfileStore, aiAccountsClient, profileClient, viewerAccountId]);
+  // MEDIA-PIPELINE-001: AI 账号目录已在上方并行初始化（启动优化），此处仅保留状态。
+  const [aiAccountsById, setAiAccountsById] = useState<ReadonlyMap<string, AvatarAccount>>(new Map());
   function isOwnPost(post: FeedPost): boolean {
     // FEED-OWN-001: strict author-id check only. Unknown viewer is
     // fail-closed (never own); display-name matching is forbidden.
@@ -1222,7 +1223,7 @@ export function FeedSurface({
           // MEDIA-PIPELINE-001: 头像走统一管线（本人/AI 账号/AI 人像/首字）。
           const avatar = resolveAuthorAvatar(
             { authorType: post.authorType, authorId: post.authorId },
-            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri, aiAccountsById, displayName: name }
+            { baseUrl: localApiBaseUrl, viewerAccountId, viewerAvatarUri: isOwnPost(post) ? viewerAvatarUri : undefined, avatarSource: isOwnPost(post) ? viewerAvatarUri ? { uri: viewerAvatarUri } : undefined : undefined, aiAccountsById, displayName: name }
           );
           const meta = AUTHOR_TYPE_META[post.authorType];
           const isFollow = following.has(post.authorId);
@@ -1252,7 +1253,7 @@ export function FeedSurface({
                   onPress={(event) => void openProfileActions({ userId: post.authorId, name, city: post.cityScope, posts: posts.filter((candidate) => candidate.authorId === post.authorId), mediaByPost: media, anchor: { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY } })}
                   style={styles.postAvatarPressable}
                 >
-                <View style={styles.postAvatarWrap}>
+                  <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatarClip}>
                     {isOwnPost(post) && !viewerAvatarLoaded && viewerAvatarUri === undefined ? (
                       // AVATAR-FLASH-001: 头像还没算出来时不画 #111 黑底占位 ——

@@ -37,9 +37,9 @@ export interface CustomLocationFields {
   geocodeVersion?: string;
 }
 
-// LocationKind 区分"预设地点"和"自定义坐标"。新字段 — 旧的
+// LocationKind 区分"预设地点"、"自定义坐标"和"跟随设备"。新字段 — 旧的
 // LocationPickerSheet 不传 custom 就走 preset 路径 (向后兼容)。
-export type LocationKind = "PRESET" | "CUSTOM";
+export type LocationKind = "PRESET" | "CUSTOM" | "DEVICE";
 
 export interface CustomLocation extends Location {
   kind: "CUSTOM";
@@ -50,7 +50,52 @@ export interface PresetLocation extends Location {
   kind: "PRESET";
 }
 
-export type AnyLocation = PresetLocation | CustomLocation;
+// R?: DEVICE-LOCATION-001 —— 设备实时位置。
+//
+// 为什么不是 CUSTOM：CUSTOM 的 gridX/gridY 是"城市网格里的 cell"，
+// 是用户在自绘地图上放点时的产物。设备定位给的是真实 lat/lng，
+// 拿城市的 CITY_BOUNDS 反推一个网格 cell 等于凭空造一份假数据
+// （人在曼谷却算出"河内第 3 格"）。所以单独一个 kind —— 它只有
+// 坐标，没有网格，这本来就是事实。
+export interface DeviceLocationFields {
+  lat: number;
+  lng: number;
+  /** 反查到的人话地址。反查失败就没有 —— 坐标仍然是真的。 */
+  address?: string;
+  updatedAt: number;
+}
+
+export interface DeviceLocation extends Location {
+  kind: "DEVICE";
+  device: DeviceLocationFields;
+}
+
+export type AnyLocation = PresetLocation | CustomLocation | DeviceLocation;
+
+/**
+ * 构造设备位置。反查没给地址时 city/area 留空（不是猜一个），
+ * formatLocationTitle 会退回显示坐标 —— 宁可显示 "21.0285, 105.8542"，
+ * 也不拿别的城市冒充。
+ */
+export function makeDeviceLocation(
+  lat: number,
+  lng: number,
+  options?: { address?: string; updatedAt?: number }
+): DeviceLocation {
+  const trimmed = options?.address?.trim();
+  return {
+    id: "device-current",
+    city: "",
+    area: trimmed && trimmed.length > 0 ? trimmed : "",
+    kind: "DEVICE",
+    device: {
+      lat,
+      lng,
+      ...(trimmed ? { address: trimmed } : {}),
+      updatedAt: options?.updatedAt ?? Date.now()
+    }
+  };
+}
 
 // Custom locations already carry the reverse-geocoded address in `area`.
 // Do not prepend `city` again ("Bac Ninh · 自定义 · Bac Ninh, Vietnam").
@@ -59,6 +104,13 @@ export function formatLocationTitle(location: AnyLocation): string {
   if (location.kind === "CUSTOM") {
     const address = location.area.replace(/^自定义\s*[·・]?\s*/u, "").trim();
     return address || location.city;
+  }
+  if (location.kind === "DEVICE") {
+    // 顺序：反查地址 → 城市 → 坐标。坐标兜底保证永不显示空白 ——
+    // "没定位到" 和 "定位到了但没地址" 不能长得一样（也不能都长成"成功"）。
+    if (location.area.trim()) return location.area.trim();
+    if (location.city.trim()) return location.city.trim();
+    return `${location.device.lat.toFixed(4)}, ${location.device.lng.toFixed(4)}`;
   }
   return [location.city, location.area].filter(Boolean).join(" · ");
 }

@@ -22,23 +22,23 @@ import (
 
 // Activity 是本地活动（对齐基线 activityCatalog 字段）。
 type Activity struct {
-	ID              string `json:"activityId"`
+	ID string `json:"activityId"`
 	// Code 是 R58 成功页展示编号（PX-A-yymmdd-####，展示用；权威主键仍是 ID）。
-	Code            string `json:"code,omitempty"`
-	Origin          string `json:"origin"` // PLATFORM | MERCHANT | USER | TEST (AI 不可作 origin — 平台发布主体)
-	Title           string `json:"title"`
-	Time            string `json:"time"`
-	People          string `json:"people"`
-	Price           string `json:"price"`
-	MoneyFlow       string `json:"moneyFlow"` // FREE | PAY_TO_JOIN | PAID_TO_ATTEND
-	PriceLabel      string `json:"priceLabel"`
-	Consumption     string `json:"consumption"`
-	VenueIcon       string `json:"venueIcon"`
-	VenueName       string `json:"venueName"`
-	RealitySceneID  string `json:"realitySceneId,omitempty"`
-	VenueSpend      string `json:"venueSpend"`
-	VenueType       string `json:"venueType"` // CAFE | RESTAURANT
-	VenueTypeLabel  string `json:"venueTypeLabel"`
+	Code           string `json:"code,omitempty"`
+	Origin         string `json:"origin"` // PLATFORM | MERCHANT | USER | TEST (AI 不可作 origin — 平台发布主体)
+	Title          string `json:"title"`
+	Time           string `json:"time"`
+	People         string `json:"people"`
+	Price          string `json:"price"`
+	MoneyFlow      string `json:"moneyFlow"` // FREE | PAY_TO_JOIN | PAID_TO_ATTEND
+	PriceLabel     string `json:"priceLabel"`
+	Consumption    string `json:"consumption"`
+	VenueIcon      string `json:"venueIcon"`
+	VenueName      string `json:"venueName"`
+	RealitySceneID string `json:"realitySceneId,omitempty"`
+	VenueSpend     string `json:"venueSpend"`
+	VenueType      string `json:"venueType"` // CAFE | RESTAURANT
+	VenueTypeLabel string `json:"venueTypeLabel"`
 	// CoverImageURL 活动封面图（R17.x 预留，omitempty：上传管线接好之前
 	// 不下发，客户端见契约注释）。
 	CoverImageURL   string `json:"coverImageUrl,omitempty"`
@@ -59,7 +59,7 @@ type Activity struct {
 	Theme string `json:"theme,omitempty"`
 	// MerchantName 以商家名义发布时的店名（MERCHANT-PUBLISH-001，omitempty）。
 	// 只认 api 层注记；个人发布为空。
-	MerchantName    string `json:"merchantName,omitempty"`
+	MerchantName string `json:"merchantName,omitempty"`
 
 	// AI 状态字段。AIStatus != NONE 时客户端必须显示 AI 标注 +
 	// persona 头像 + 名字 (跟 X / Threads / 抖音 / 小红书的 "AI 生成"
@@ -77,9 +77,9 @@ type Activity struct {
 	// 用 Image 渲染, fallback 到 AIPersonaAvatar emoji.
 	// 必须明确标识 AI 身份, 不能"看起来像真人". USER_TWIN
 	// 必须先有 LikenessConsent LIVE (PRD LC-07) 才会下发.
-	AIPersonaPhoto  string `json:"aiPersonaPhoto,omitempty"`
-	AIStatus        string `json:"aiStatus"` // NONE | AI_ASSISTED | AI_GENERATED
-	AIActorKind     string `json:"aiActorKind,omitempty"`
+	AIPersonaPhoto string `json:"aiPersonaPhoto,omitempty"`
+	AIStatus       string `json:"aiStatus"` // NONE | AI_ASSISTED | AI_GENERATED
+	AIActorKind    string `json:"aiActorKind,omitempty"`
 
 	interestedBy map[string]bool
 	joinedBy     map[string]bool
@@ -249,6 +249,7 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 	if err := s.repository.Create(ctx, a); err != nil {
 		return command.Rejected(e, "ACTIVITY_PUBLISH_FAILED", "INTERNAL", "SAFE_RETRY", "activity.publish_failed", nil)
 	}
+	normalizeActivityForOutput(&a)
 	return acceptedWithPayload(e, "Activity", a.ID, 1, "PUBLISHED", map[string]any{"activity": a}, nil)
 }
 
@@ -260,7 +261,7 @@ func (s *Service) listActivities(ctx context.Context, e command.Envelope) comman
 		return command.Rejected(e, "ACTIVITY_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "activity.list_failed", nil)
 	}
 	for i := range list {
-		normalizeActivityMoneyAndAI(&list[i])
+		normalizeActivityForOutput(&list[i])
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Interested > list[j].Interested })
 	return acceptedWithPayload(e, "Activity", "", 0, "LISTED", map[string]any{
@@ -293,10 +294,10 @@ func (s *Service) listMyActivities(ctx context.Context, e command.Envelope) comm
 		return command.Rejected(e, "ACTIVITY_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "activity.list_failed", nil)
 	}
 	for i := range created {
-		normalizeActivityMoneyAndAI(&created[i])
+		normalizeActivityForOutput(&created[i])
 	}
 	for i := range joined {
-		normalizeActivityMoneyAndAI(&joined[i])
+		normalizeActivityForOutput(&joined[i])
 	}
 	return acceptedWithPayload(e, "Activity", e.Actor.ID, 1, "LISTED", map[string]any{
 		"created": created,
@@ -305,7 +306,7 @@ func (s *Service) listMyActivities(ctx context.Context, e command.Envelope) comm
 	}, nil)
 }
 
-func normalizeActivityMoneyAndAI(a *Activity) {
+func normalizeActivityForOutput(a *Activity) {
 	if a.MoneyFlow == "" {
 		if a.Price == "" || a.Price == "0₫" {
 			a.MoneyFlow = "FREE"
@@ -326,6 +327,24 @@ func normalizeActivityMoneyAndAI(a *Activity) {
 	if a.AIStatus == "" {
 		a.AIStatus = "NONE"
 	}
+	deriveActivityPeople(a)
+}
+
+// deriveActivityPeople 把展示用的 people 字符串改成**从 joined 推出来**的。
+//
+// SCENE-ACTIVITY-LINK-001: people 以前是写死在 payload 里的常量，Join 只
+// 改 joined_count / Joined，从来不碰它 —— 于是有人报名之后列表仍然显示
+// "0 / 24 人"。同一个事实（已报名人数）有两个来源，其中一个是不会更新的
+// 常量，这就是刚从场景里删掉的那类假数字。
+// 报名人数唯一权威是 Joined（内存仓 Join++；PG 仓 activity.activities
+// .joined_count，和 participants 行在同一个事务里 +1）。
+// Capacity <= 0 表示这条活动不设名额（如"找 1 位"这种招人帖），此时没有
+// 可推的数字，保留作者写的原文，不编。
+func deriveActivityPeople(a *Activity) {
+	if a.Capacity <= 0 {
+		return
+	}
+	a.People = strconv.Itoa(a.Joined) + " / " + strconv.Itoa(a.Capacity) + " 人"
 }
 
 // ---------- ToggleActivityInterest ----------
@@ -354,7 +373,7 @@ func (s *Service) toggleInterest(ctx context.Context, e command.Envelope) comman
 	}
 	// ACT-CONTRACT-001: 单条返回也要 normalize（旧 PG 行缺 moneyFlow/
 	// priceLabel/aiStatus，List 有 normalize 但 Toggle/Join 之前没有 → zod 炸）。
-	normalizeActivityMoneyAndAI(&a)
+	normalizeActivityForOutput(&a)
 	return acceptedWithPayload(e, "Activity", a.ID, 1, "INTEREST_UPDATED", map[string]any{
 		"activity": a, "interested": interested,
 	}, nil)
@@ -393,7 +412,7 @@ func (s *Service) joinActivity(ctx context.Context, e command.Envelope) command.
 		s.participations.Ensure(p.ActivityID, e.Actor.ID, PartConfirmed)
 	}
 	// ACT-CONTRACT-001: 同上，Join 单条返回也要 normalize。
-	normalizeActivityMoneyAndAI(&a)
+	normalizeActivityForOutput(&a)
 	return acceptedWithPayload(e, "Activity", a.ID, 1, "JOINED", map[string]any{
 		"activity": a,
 		"joined":   true,
@@ -632,11 +651,22 @@ func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, 
 	return result
 }
 
-// defaultCatalog 是基线 activityCatalog 的 5 条活动。
+// defaultCatalog 是基线 activityCatalog 的 3 条活动。
 //
-// 平台没有"假数据"。冷启动期间，5 条活动都明确标 origin = "PLATFORM"，
+// SCENE-ACTIVITY-LINK-001: 每条活动的 RealitySceneID 必须指向**真实存在**的场景。
+// 现在全部指向 threebeans —— 目录里唯一有菜单、有照片的真实门店。
+// 以前 5 条里 3 条指 bonsaidon、2 条指 westlake，这两个场景在 SCENE-NO-
+// FABRICATED-001 里已下架 —— 活动于是挂在"目录里查不到的场景"上，点了进不去。
+// 另 2 条是"岚庭餐厅 · 西湖"这家编出来的餐厅，没有真实门店对应，已删。
+//
+// 计数（Interested / Joined / Shares / QACount）一律从 0 开始：真数来自
+// activity.interests 和 activity.participants，不是 seed 里写死的常数。
+// people 同理 —— 它现在是 deriveActivityPeople 从 Joined/Capacity 推出来的，
+// seed 里写的值只作占位，输出前会被覆盖。
+//
+// 平台没有"假数据"。冷启动期间，3 条活动都明确标 origin = "PLATFORM"，
 // 配合 aiStatus = "AI_GENERATED" + aiActorKind = "PLATFORM_AI" + 一个
-// 平台 AI 助手 persona (ai_001..ai_005)，由 Proxy 作为发布方承担
+// 平台 AI 助手 persona (ai_001..ai_003)，由 Proxy 作为发布方承担
 // 内容责任 — 而不是把 AI 数字人伪装成"活动主办方"。
 //
 // UI 端三件套：
@@ -645,61 +675,40 @@ func acceptedWithPayload(e command.Envelope, aggregateType, aggregateID string, 
 //   - aiActorKind + aiPersona* — 平台 AI 小美的辅助信息
 //
 // 新增字段 MoneyFlow / PriceLabel 把"客户预算"和"到店消费"分开：
-// MoneyFlow ∈ { FREE, PAY_TO_JOIN, PAID_TO_ATTEND }。基线 5 条全是
+// MoneyFlow ∈ { FREE, PAY_TO_JOIN, PAID_TO_ATTEND }。基线 3 条全是
 // FREE 活动 + 门店各自消费 — 平台/AI 不能借活动收钱。
 func defaultCatalog() []*Activity {
 	return []*Activity{
 		{
 			ID: "proxy_coffee_weekend", Origin: "PLATFORM", Title: "Proxy 周末咖啡企划",
-			Time: "本周六至周日", People: "特别企划", Price: "0₫", Consumption: "按门店场次",
-			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
+			Time: "本周六至周日", People: "0 / 24 人", Price: "0₫", Consumption: "按门店场次",
+			VenueIcon: "☕", VenueName: "Three Beans · Cầu Giấy", RealitySceneID: "threebeans", VenueSpend: "45,000–90,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
 			Desc:    "周末限定主题场次，联合合作咖啡店开放。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
-			QACount: 4, Interested: 36, Joined: 18, Capacity: 24, Shares: 12,
+			QACount: 0, Interested: 0, Joined: 0, Capacity: 24, Shares: 0,
 			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_001", AIPersonaName: "平台 AI 小美 · 周末企划", AIPersonaAvatar: "☕", AIPersonaPhoto: "ai-personas/photos/ai_001.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
-			ID: "merchant_photo_day", Origin: "PLATFORM", Title: "木光咖啡 · 周日下午拍照季",
-			Time: "周日 15:00–17:00", People: "6 / 10 人", Price: "0₫", Consumption: "各自消费",
-			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
+			ID: "merchant_photo_day", Origin: "PLATFORM", Title: "Three Beans · 周日下午拍照季",
+			Time: "周日 15:00–17:00", People: "0 / 10 人", Price: "0₫", Consumption: "各自消费",
+			VenueIcon: "☕", VenueName: "Three Beans · Cầu Giấy", RealitySceneID: "threebeans", VenueSpend: "45,000–90,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
 			Desc:    "自然光座位已预留，适合互相拍照和慢慢喝咖啡。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
-			QACount: 3, Interested: 18, Joined: 6, Capacity: 10, Shares: 7,
+			QACount: 0, Interested: 0, Joined: 0, Capacity: 10, Shares: 0,
 			ParentTitle: "Proxy 周末咖啡企划",
 			AIStatus:    "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_002", AIPersonaName: "平台 AI 小美 · 拍照季", AIPersonaAvatar: "📸", AIPersonaPhoto: "ai-personas/photos/ai_002.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 		{
-			ID: "user_photo_buddy", Origin: "PLATFORM", Title: "周六 咖啡拍照搭子",
+			ID: "user_photo_buddy", Origin: "PLATFORM", Title: "周六 Three Beans 拍照搭子",
 			Time: "周六 15:00–17:00", People: "找 1 位", Price: "0₫", Consumption: "各自消费",
-			VenueIcon: "☕", VenueName: "木光咖啡 · 还剑郡", RealitySceneID: "bonsaidon", VenueSpend: "90,000–140,000₫ / 人",
+			VenueIcon: "☕", VenueName: "Three Beans · Cầu Giấy", RealitySceneID: "threebeans", VenueSpend: "45,000–90,000₫ / 人",
 			VenueType: "CAFE", VenueTypeLabel: "咖啡店",
 			Desc:    "互相帮对方拍照，一起喝咖啡；到店消费各自承担。",
 			Benefit: "双人到店各点一杯，赠共享甜点",
-			QACount: 1, Interested: 5, Joined: 1, Capacity: 2, Shares: 2,
+			QACount: 0, Interested: 0, Joined: 0, Capacity: 2, Shares: 0,
 			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_003", AIPersonaName: "平台 AI 小美 · 拍照搭子", AIPersonaAvatar: "🤝", AIPersonaPhoto: "ai-personas/photos/ai_003.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
-		},
-		{
-			ID: "merchant_tasting", Origin: "PLATFORM", Title: "岚庭餐厅 · 新菜尝鲜晚餐",
-			Time: "周五 18:30–20:30", People: "4 / 6 人", Price: "0₫", Consumption: "活动套餐 399k / 人",
-			VenueIcon: "🍽️", VenueName: "岚庭餐厅 · 西湖", RealitySceneID: "westlake", VenueSpend: "380,000–650,000₫ / 人",
-			VenueType: "RESTAURANT", VenueTypeLabel: "餐厅",
-			Desc:    "餐厅开放新品尝鲜场次，按活动套餐到店消费。",
-			Benefit: "Proxy 活动预订赠餐后甜点",
-			QACount: 2, Interested: 24, Joined: 4, Capacity: 6, Shares: 9,
-			AIStatus: "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_004", AIPersonaName: "平台 AI 小美 · 餐厅尝鲜", AIPersonaAvatar: "🍽️", AIPersonaPhoto: "ai-personas/photos/ai_004.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
-		},
-		{
-			ID: "user_dinner_group", Origin: "PLATFORM", Title: "周五一起吃新菜",
-			Time: "周五 18:30–20:30", People: "2 / 4 人", Price: "0₫", Consumption: "各自消费",
-			VenueIcon: "🍽️", VenueName: "岚庭餐厅 · 西湖", RealitySceneID: "westlake", VenueSpend: "380,000–650,000₫ / 人",
-			VenueType: "RESTAURANT", VenueTypeLabel: "餐厅",
-			Desc:    "围绕岚庭餐厅的新品场次组一个小饭局，一起尝鲜。",
-			Benefit: "Proxy 活动预订赠餐后甜点",
-			QACount: 1, Interested: 8, Joined: 2, Capacity: 4, Shares: 3,
-			ParentTitle: "岚庭餐厅 · 新菜尝鲜晚餐",
-			AIStatus:    "AI_GENERATED", AIActorKind: "PLATFORM_AI", AIPersonaID: "ai_005", AIPersonaName: "平台 AI 小美 · 饭局推荐", AIPersonaAvatar: "🍜", AIPersonaPhoto: "ai-personas/photos/ai_005.png", MoneyFlow: "FREE", PriceLabel: "免费参加",
 		},
 	}
 }

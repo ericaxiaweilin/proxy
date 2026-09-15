@@ -463,7 +463,12 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
           <Pressable onPress={() => setSheet("INVITE")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="arrowUpRight" size={20} /></View><Text style={styles.methodStrong}>邀请好友</Text><Text style={styles.methodSpan}>发送链接或你的个人二维码</Text></Pressable>
           <Pressable onPress={() => setSheet("CONTACTS")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="user" size={20} /></View><Text style={styles.methodStrong}>通讯录</Text><Text style={styles.methodSpan}>授权后只匹配可能认识的人</Text></Pressable>
           <Pressable onPress={() => setSheet("SOCIAL")} style={styles.method}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="spark" size={20} /></View><Text style={styles.methodStrong}>社媒好友</Text><Text style={styles.methodSpan}>TikTok / Instagram / Facebook / Zalo</Text></Pressable>
-          <Pressable onPress={() => setSheet("SEARCH")} style={styles.methodFull}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="search" size={20} /></View><View style={styles.methodFullCopy}><Text style={styles.methodStrong}>搜索 Proxy</Text><Text style={styles.methodSpan}>昵称、Proxy ID 或手机号</Text></View><Text style={styles.chev}>›</Text></Pressable>
+          {/* ADD-FRIEND-PHONE-COPY-001: 这一行原本把手机号也列成可搜项，但它打开的
+              SEARCH sheet 自己写着「手机号暂不可搜 —— 还没有『允许被手机号搜到』这个
+              授权开关」。同一屏自相矛盾：方式列表说能搜手机号，点进去说搜不了。
+              手机号搜索落地（授权开关 + 后端）之前，这一行只报昵称与 Proxy ID，
+              与 sheet 和输入框 placeholder 保持一致。 */}
+          <Pressable onPress={() => setSheet("SEARCH")} style={styles.methodFull}><View style={styles.methodIcon}><ProxyIcon color={color.proxyPurple} name="search" size={20} /></View><View style={styles.methodFullCopy}><Text style={styles.methodStrong}>搜索 Proxy</Text><Text style={styles.methodSpan}>昵称或 Proxy ID</Text></View><Text style={styles.chev}>›</Text></Pressable>
         </View>
 
         <View style={styles.sectionHead}><Text style={styles.sectionTitle}>好友请求</Text><Text style={styles.sectionNote}>需要你确认</Text></View>

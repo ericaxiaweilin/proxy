@@ -15,7 +15,7 @@
       },
       "infoPlist": {
         "NSCameraUsageDescription": "Proxy 使用相机拍摄并添加到你主动发起的需求或对话。",
-        "NSLocationWhenInUseUsageDescription": "Proxy 在你打开“切换本地范围”时用一次位置，把地图中心定到你附近，帮你快速放坐标。我们不后台追踪。",
+        "NSLocationWhenInUseUsageDescription": "Proxy 在你使用 App 期间读取大致位置（城市/区域级别），让首页、动态与机会的本地范围跟着你走。位置只用于本机筛选，不在后台获取。",
         "NSPhotoLibraryUsageDescription": "Proxy 读取你主动选择的照片并添加到需求或对话。",
         "NSMicrophoneUsageDescription": "Proxy 使用麦克风将你的语音转换为输入文字。",
         "NSSpeechRecognitionUsageDescription": "Proxy 使用系统语音识别将你的语音转换为输入文字。",

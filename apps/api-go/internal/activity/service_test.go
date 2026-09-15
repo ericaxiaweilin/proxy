@@ -1,12 +1,15 @@
 package activity
 
 import (
+	"context"
+
 	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/realityscene"
 )
 
 func activityEnvelope(kind, actor, activityID string) command.Envelope {
@@ -34,7 +37,7 @@ func TestActivityInterestAndJoinAreRepositoryFacts(t *testing.T) {
 	if err := json.Unmarshal([]byte(toggled.OperationRef), &toggleBody); err != nil {
 		t.Fatal(err)
 	}
-	if !toggleBody.Interested || toggleBody.Activity.Interested != 6 {
+	if !toggleBody.Interested || toggleBody.Activity.Interested != 1 {
 		t.Fatalf("unexpected interest state: %+v", toggleBody)
 	}
 
@@ -47,7 +50,14 @@ func TestActivityInterestAndJoinAreRepositoryFacts(t *testing.T) {
 		t.Fatalf("duplicate join was not rejected: %+v", repeated)
 	}
 
-	full := s.HandleContext(t.Context(), activityEnvelope("JoinActivity", "user_b", id))
+	// 容量是 2，所以 user_a + user_b 占满，user_c 必须被拒。
+	// 以前这条靠 seed 里写死的 `joined: 1`（user_a 一进就满了）—— 那个 1 是
+	// 编的，现在计数从 0 开始，满不满只由真实的参加记录决定。
+	second := s.HandleContext(t.Context(), activityEnvelope("JoinActivity", "user_b", id))
+	if second.Outcome != "ACCEPTED" {
+		t.Fatalf("second join should fit in capacity 2: %+v", second)
+	}
+	full := s.HandleContext(t.Context(), activityEnvelope("JoinActivity", "user_c", id))
 	if full.Outcome != "REJECTED" || full.Error == nil || full.Error.ErrorCode != "ACTIVITY_FULL" {
 		t.Fatalf("capacity was not enforced: %+v", full)
 	}
@@ -256,8 +266,8 @@ func TestColdStartActivitiesArePlatformAIGeneratedAndFree(t *testing.T) {
 	if err := json.Unmarshal([]byte(list.OperationRef), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Activities) < 5 {
-		t.Fatalf("baseline catalog has %d activities, want ≥5", len(body.Activities))
+	if len(body.Activities) < 3 {
+		t.Fatalf("baseline catalog has %d activities, want ≥3", len(body.Activities))
 	}
 	for _, a := range body.Activities {
 		if a.Origin != "PLATFORM" {
@@ -298,7 +308,7 @@ func TestPlatformAIPersonaPhotoRequiredOnColdStart(t *testing.T) {
 	if err := json.Unmarshal([]byte(list.OperationRef), &body); err != nil {
 		t.Fatal(err)
 	}
-	platformAIPersonas := []string{"ai_001", "ai_002", "ai_003", "ai_004", "ai_005"}
+	platformAIPersonas := []string{"ai_001", "ai_002", "ai_003"}
 	seen := make(map[string]bool, len(platformAIPersonas))
 	for _, a := range body.Activities {
 		if a.AIStatus != "AI_GENERATED" || a.AIActorKind != "PLATFORM_AI" {
@@ -329,7 +339,7 @@ func TestPlatformAIPersonaPhotoRequiredOnColdStart(t *testing.T) {
 	}
 }
 
-// R16.x: MONEYFLOW-005 — normalizeActivityMoneyAndAI 把不规范的旧数据
+// R16.x: MONEYFLOW-005 — normalizeActivityForOutput 把不规范的旧数据
 // 落到合法集合。任何"裸金额" (MoneyFlow 空 + Price 非空) 都必须是 FREE
 // 或 PAY_TO_JOIN (活动只有这两种)，PriceLabel 永远不能空。
 func TestNormalizeActivityMoneyAndAIDefaults(t *testing.T) {
@@ -348,7 +358,7 @@ func TestNormalizeActivityMoneyAndAIDefaults(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			a := c.input
-			normalizeActivityMoneyAndAI(&a)
+			normalizeActivityForOutput(&a)
 			if a.MoneyFlow != c.wantFlow {
 				t.Fatalf("MoneyFlow = %q, want %q", a.MoneyFlow, c.wantFlow)
 			}
@@ -550,5 +560,89 @@ func TestPublishActivityR58Fields(t *testing.T) {
 	badOut := publish("owner_r58c", "c", map[string]any{"title": "t", "time": "周六", "capacity": 4, "venueName": "v", "venueType": "PARK", "realitySceneId": "s", "consumptionTerm": "SPLIT", "signupMode": "VIP", "theme": "日落"})
 	if badOut.Outcome != "REJECTED" || badOut.Error == nil || badOut.Error.ErrorCode != "ACTIVITY_SIGNUP_INVALID" {
 		t.Fatalf("bad signup must reject: %+v", badOut)
+	}
+}
+
+// SCENE-ACTIVITY-LINK-001: 活动挂的「现实场景」必须是**目录里真的有**的场景。
+//
+// 这条是被自己咬出来的：SCENE-NO-FABRICATED-001 把 bonsaidon / westlake 两个
+// 演示场景下架之后，activity 的 seed 里还有 3 条指 bonsaidon、2 条指 westlake ——
+// 活动于是挂在"目录里查不到的场景"上，用户点进去什么都没有，而且**没有任何测试
+// 会红**。跨表的外键式引用在 SQL 里写不出来，就必须在测试里钉。
+//
+// 同时钉住计数：seed 里的 Interested / Joined / Shares / QACount 一律必须是 0 ——
+// 真数来自 activity.interests 和 activity.participants，写死一个数就是在给用户
+// 看编的数字（跟 SCENE-NO-FABRICATED-001 删掉的那五个是同一种病）。
+func TestSeededActivitiesPointAtRealScenes(t *testing.T) {
+	scenes, err := realityscene.New().ListScenes(context.Background())
+	if err != nil {
+		t.Fatalf("list scenes: %v", err)
+	}
+	known := map[string]bool{}
+	for _, sc := range scenes {
+		known[sc.ID] = true
+	}
+	if len(known) == 0 {
+		t.Fatal("scene catalog is empty — this check would pass vacuously")
+	}
+	catalog := defaultCatalog()
+	if len(catalog) == 0 {
+		t.Fatal("activity seed is empty — this check would pass vacuously")
+	}
+	for _, a := range catalog {
+		if a.RealitySceneID == "" {
+			t.Fatalf("activity %q has no realitySceneId — PublishActivity requires one, the seed must set it too", a.ID)
+		}
+		if !known[a.RealitySceneID] {
+			t.Fatalf("activity %q points at scene %q, which is not in the scene catalog — the link is dead", a.ID, a.RealitySceneID)
+		}
+		if a.Interested != 0 || a.Joined != 0 || a.Shares != 0 || a.QACount != 0 {
+			t.Fatalf("activity %q seeds fabricated counters (interested=%d joined=%d shares=%d qa=%d) — real counts come from interests/participants", a.ID, a.Interested, a.Joined, a.Shares, a.QACount)
+		}
+	}
+}
+
+// TestJoinUpdatesDisplayedPeopleCount 钉住 SCENE-ACTIVITY-LINK-001 的另一半。
+//
+// people 以前是写死在 payload 里的字符串，Join 只动 Joined，不动 people ——
+// 有人报名之后列表依旧写着 "0 / 24 人"。同一个事实两个来源，其中一个不会
+// 更新。这里要求：只要 Joined 变了，输出里的 people 必须跟着变。
+func TestJoinUpdatesDisplayedPeopleCount(t *testing.T) {
+	svc := New()
+	svc.SeedDefaults()
+
+	before, err := svc.repository.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	target := ""
+	for _, a := range before {
+		if a.ID == "user_photo_buddy" {
+			target = a.ID
+		}
+	}
+	if target == "" {
+		t.Fatalf("seed catalog no longer contains user_photo_buddy — this test needs an activity with a small capacity")
+	}
+
+	got, err := svc.repository.Join(context.Background(), target, "user_display")
+	if err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	normalizeActivityForOutput(&got)
+
+	// user_photo_buddy 的 capacity 是 2，报名一个之后应该是 "1 / 2 人"。
+	if want := "1 / 2 人"; got.People != want {
+		t.Fatalf("after one join, people = %q, want %q — the displayed headcount is still a frozen constant", got.People, want)
+	}
+	if got.Joined != 1 {
+		t.Fatalf("Joined = %d, want 1", got.Joined)
+	}
+
+	// 反向：没名额的活动（capacity 0）不该被硬塞一个推出来的数字。
+	open := Activity{ID: "open_001", Title: "找搭子", People: "找 1 位", Capacity: 0, Joined: 0}
+	normalizeActivityForOutput(&open)
+	if open.People != "找 1 位" {
+		t.Fatalf("capacity 0 activity had people overwritten to %q — inventing a headcount for an activity that has no capacity", open.People)
 	}
 }

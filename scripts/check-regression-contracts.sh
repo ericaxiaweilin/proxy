@@ -3866,10 +3866,15 @@ echo "    LOCALNET-EVENTSTREAM-001: PASS (cross-user event-stream reads are oper
 # PROFILE-QR-003: SCAN sheet 曾是假识别 —— 点一下就把写死的 PX-937201 填进搜索框，
 # 假装扫到了人。现在走 parseScannedQr 真解析：三种失败说三句不同的话
 # （读不到剪贴板 / 剪贴板是空的 / 不是 Proxy 码），非 proxy.app 一律 fail-closed，
-# 相机未接入诚实说明，不许静默吞掉。
+# 相机与剪贴板共用同一处理器，不许静默吞掉。
+#
+# 钉接线，不钉调用拼写：钉死 `parseScannedQr(text)` 会在参数改名时对**合法**重构误报
+# （相机接入后是 parseScannedQr(raw)），而这条钉真正要守的是「剪贴板内容必须经共用
+# 处理器进真解析器」。参数名是实现细节，接线才是契约。
 if ! grep -q 'PROFILE-QR-003' apps/mobile/src/profile-qr.test.ts ||
    ! grep -q 'parseScannedQr' apps/mobile/src/profile-qr.ts ||
-   ! grep -q 'parseScannedQr(text)' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'handleScannedCode' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -qE 'parseScannedQr\(' apps/mobile/src/surfaces/friend-crm.tsx ||
    ! grep -q 'PROFILE-QR-003' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
   echo "  FAIL [PROFILE-QR-003]: scan-parse wiring or its tests are missing" >&2
   exit 1
@@ -4222,3 +4227,639 @@ if ! grep -q 'PROFILE-SEARCH-001' apps/mobile/src/surfaces/placeholder-honest-ac
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
 echo "    PROFILE-SEARCH-001: PASS (site-wide search is a real server read; literal predicate, four honest states)"
+
+# CONVO-LIST-001: ConversationClient.listMyConvos 是「建好了没人调」—— 服务端有
+# ListMyConvos，客户端有方法也有单测，但 App 里从来没有调用方。结果是
+# conversation.tsx 能把一条消息分叉成支线（createConvo 已接线），分叉完却
+# **永远看不到它**。同一页还有第二个毛病：Convo 页列的是 GROUP/SUPPORT 会话，
+# 而那些在「对话」页已经出现过一遍；真正的支线一条都没有 —— 标题和内容对不上。
+if ! grep -qF 'conversationClient.listMyConvos()' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'const [myConvos, setMyConvos] = useState<ConvoSummary[] | undefined>(undefined);' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'setMyConvosFailed(true)' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONVO-LIST-001]: 支线列表没接上，或者三态被合并了 ——" >&2
+  echo "        把「拉失败」画成「一条都没有」，用户会以为自己从没开过支线。" >&2
+  exit 1
+fi
+if ! grep -qF 'setMyConvosNonce((n) => n + 1)' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'myConvosNonce]' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'Convo 加载失败' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONVO-LIST-001]: 失败提示或重试不见了 ——" >&2
+  echo "        重试必须真的能重跑 effect（reload 计数在依赖数组里）。" >&2
+  exit 1
+fi
+if ! grep -qF 'function convoTimeText' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'if (!Number.isFinite(ms) || ms <= 0) return "—";' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF '我的 Convo' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF '群组对话' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONVO-LIST-001]: Convo 标题或时间口径不见了" >&2
+  echo "        解析不出的时间要显示 —，不能留空（未知和「就是现在」不许一样）。" >&2
+  exit 1
+fi
+# 反向钉：把群组会话叫成 Convo 的旧标题不许回来。注意这个 token 不许出现在
+# messages.tsx 的**任何地方**（含注释）—— raw grep 认全文，注释里留一个
+# 就等于让这条钉永远红。
+if grep -qF '关注的 Convo' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONVO-LIST-001]: Convo 页又在拿群组会话冒充 Convo ——" >&2
+  echo "        群组会话在「对话」页已经有了；这一页该列真的支线。" >&2
+  exit 1
+fi
+if ! grep -q 'CONVO-LIST-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [CONVO-LIST-001]: 测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    CONVO-LIST-001: PASS (my convos are listed with three honest states; group chats are no longer labelled Convo)"
+
+# CONTACT-SEARCH-COPY-001: 「新聊天」联系人页的副标题承诺了它那个搜索框做不到的事。
+#
+# 那张 sheet 的搜索框只匹配 `${c.name}${c.preview}` —— 姓名 + 最近一条消息；
+# CONTACTS 由 visibleDialogs 映射而来，**没有 username**（同段注释写着
+# 「不编造 username/在线状态/手机号」）。副标题却写「联系人 / Username」，
+# 让用户在框里输 @handle 却永远搜不到。同一个框的 placeholder 早已是
+# 「姓名或最近消息」。找没聊过的人走「添加好友」入口，不走这条搜索。
+#
+# 这条钉的是**界面文案**，所以必须 grep 原文 —— 用 stripComments 会把要钉的
+# 那句话一起剥掉，断言永远绿。
+if grep -qF '联系人 / Username' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONTACT-SEARCH-COPY-001]: 联系人页副标题又在承诺 Username 搜索 ——" >&2
+  echo "        那个搜索框只匹配姓名 + 最近一条消息，CONTACTS 里没有 username。" >&2
+  exit 1
+fi
+if ! grep -qF '联系人 · 姓名或最近消息' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONTACT-SEARCH-COPY-001]: 联系人页副标题的精确文案不见了" >&2
+  exit 1
+fi
+if ! grep -qF '${c.name}${c.preview}' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONTACT-SEARCH-COPY-001]: 联系人页搜索匹配器变了 ——" >&2
+  echo "        副标题里的「最近消息」就靠它兜着，改了要一起改文案。" >&2
+  exit 1
+fi
+if ! grep -q 'CONTACT-SEARCH-COPY-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [CONTACT-SEARCH-COPY-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    CONTACT-SEARCH-COPY-001: PASS (contacts-sheet subtitle matches what its search box actually matches)"
+
+# ADD-FRIEND-PHONE-COPY-001: 加好友把「按手机号搜索」讲给用户，但后端没有这个能力，
+# 也没有「允许被手机号搜到」的授权开关 —— friend-crm 的 SEARCH sheet 自己就写着
+# 「手机号暂不可搜」。同一处能力却在两个地方被说成能搜手机号：
+#   · friend-crm 的「添加方式」列表（用户真会看到的那一份）；
+#   · me-sub-pages 的 addfriend 说明表（sections 目前没有渲染方 —— 只有
+#     title/desc/icon 经 meSubPage 被用上；一旦接上就会把不存在的能力讲给用户）。
+# 这条钉的是**界面文案**，所以 grep 原文：注释里留一个同样的 token 会让它永远红。
+if grep -qF '昵称、Proxy ID 或手机号' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [ADD-FRIEND-PHONE-COPY-001]: 加好友方式列表又在承诺手机号搜索 ——" >&2
+  echo "        它打开的 SEARCH sheet 自己写着「手机号暂不可搜」。" >&2
+  exit 1
+fi
+if grep -qF '昵称、Proxy ID、手机号' apps/mobile/src/surfaces/me-sub-pages.ts; then
+  echo "  FAIL [ADD-FRIEND-PHONE-COPY-001]: addfriend 说明表又在承诺手机号搜索 ——" >&2
+  exit 1
+fi
+if ! grep -qF '昵称或 Proxy ID' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -qF '手机号暂不可搜' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -qF '昵称、Proxy ID' apps/mobile/src/surfaces/me-sub-pages.ts; then
+  echo "  FAIL [ADD-FRIEND-PHONE-COPY-001]: 只报昵称与 Proxy ID 的文案，或 sheet 那句诚实说明，不见了" >&2
+  exit 1
+fi
+if ! grep -q 'ADD-FRIEND-PHONE-COPY-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [ADD-FRIEND-PHONE-COPY-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    ADD-FRIEND-PHONE-COPY-001: PASS (add-friend surface does not advertise a phone search that does not exist)"
+
+# CONVO-OPEN-001: Convo 列表点进去必须打开那条支线，而不是主线。
+#
+# 支线（Convo）是主线 DM 的一个分支：conversation.tsx 用 convId（父母会话）
+# + activeConvo.id 去 listMessages，两者缺一不可。列表里点一条 Convo，以前只交出
+# parentDialogId —— shell 于是按普通 DM 打开，入口写着「打开 Convo」，点开却是主线，
+# 支线内容一条都看不到。要害是 convoId 必须一路带到 ConversationSurface
+# （它认的 prop 名是 convoId / convoTitle）。
+# 钉**整个调用**而不是光钉 s.convo.id：那个 token 在 key={s.convo.id} 里也有一份，
+# 光钉它会漏判（把 convoId 从调用里删掉、key 还在，钉照样绿）。
+if ! grep -qF 'onOpenConvo' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'openConvo(' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'openConvo(parentName, s.convo.parentDialogId, s.convo.id,' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONVO-OPEN-001]: Convo 列表没把 convoId 交出去 ——" >&2
+  echo "        少了它，点开的会是主线 DM，支线内容一条都看不到。" >&2
+  exit 1
+fi
+if ! grep -qF 'onOpenConvo={' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF '{...(messageChat?.convoId ? { convoId: messageChat.convoId } : {})}' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF '{...(messageChat?.convoTitle ? { convoTitle: messageChat.convoTitle } : {})}' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [CONVO-OPEN-001]: shell 没把 convoId / convoTitle 传给 ConversationSurface ——" >&2
+  echo "        ConversationSurface 认的 prop 名就是这两个。" >&2
+  exit 1
+fi
+# 反向钉：旧接线只带 parentDialogId 调 onOpenConversation，只能打开主线。
+# 注意这个 token 不许出现在 messages.tsx 的**任何地方**（含注释）—— raw grep 认全文，
+# 注释里留一个就等于让这条钉永远红。
+if grep -qF 'onPress={() => onOpenConversation(parentName, s.convo.parentDialogId)}' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONVO-OPEN-001]: Convo 行又在只带 parentDialogId 打开主线 ——" >&2
+  echo "        那打开的是主线 DM，不是这一行承诺的支线。" >&2
+  exit 1
+fi
+# 没人接的时候不许静默：静默的死按钮和「这条支线不存在」长得一样。
+if ! grep -qF 'if (!onOpenConvo) return false;' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF '支线入口还没接通' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [CONVO-OPEN-001]: 支线入口没接通时不说话了 ——" >&2
+  echo "        静默的死按钮和「这条支线不存在」长得一样。" >&2
+  exit 1
+fi
+if ! grep -q 'CONVO-OPEN-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [CONVO-OPEN-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    CONVO-OPEN-001: PASS (tapping a Convo opens the branch, not the mainline)"
+
+# GROUP-CREATE-001: 群组从来就没真正建起来过 —— StartConversation 的参与者恒为
+# {创建者, participantId} 两个，所以一个「GROUP」最多也就两个人。
+#
+# 更糟的是 conversationType 由客户端直接给、服务端从不校验，而
+# DefaultProtectionFor 对 GROUP 给出**更弱**的保护（可转发 / 可复制 / 不警告截屏）。
+# 两者合起来是一条降级通道：任何人都能把一条 1:1 对话声明成 GROUP，从而把对方
+# 消息的保护降级。所以建群要真能建多人，同时把「两人 GROUP」这条路堵死。
+require_test "GROUP-CREATE-001" "./internal/conversation" \
+  "TestStartConversationCreatesGroupWithAllMembers" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+require_test "GROUP-CREATE-001" "./internal/conversation" \
+  "TestStartConversationRejectsTwoPersonGroup" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+require_test "GROUP-CREATE-001" "./internal/conversation" \
+  "TestStartConversationRejectsUnknownConversationType" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+require_test "GROUP-CREATE-001" "./internal/conversation" \
+  "TestStartConversationRejectsTooManyParticipants" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+require_test "GROUP-CREATE-001" "./internal/conversation" \
+  "TestStartConversationDedupesGroupParticipants" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+require_test "GROUP-CREATE-001" "./internal/conversation" \
+  "TestStartConversationStillAcceptsLegacySingleParticipant" \
+  "apps/api-go/internal/conversation/service_test.go" || exit $?
+# 反向钉：参与者不许再写死成两个。不钉 "Participants:" 前缀 —— gofmt 会按最长 key
+# 重新填充整张表，写死空格会在一次无关的格式化后突然变红（SAFETY-GATE-001 踩过）。
+if grep -qF '[]string{e.Actor.ID, p.ParticipantID}' apps/api-go/internal/conversation/service.go; then
+  echo "  FAIL [GROUP-CREATE-001]: 参与者又写死成 {创建者, participantId} 两个 ——" >&2
+  echo "        那样建出来的「群组」永远只有两个人。" >&2
+  exit 1
+fi
+for needle in maxGroupParticipants validConversationTypes resolveStartParticipants participantIds INVALID_CONVERSATION_TYPE GROUP_REQUIRES_MULTIPLE_PARTICIPANTS TOO_MANY_PARTICIPANTS; do
+  if ! grep -qF "$needle" apps/api-go/internal/conversation/service.go; then
+    echo "  FAIL [GROUP-CREATE-001]: $needle 不见了 ——" >&2
+    echo "        人数上限 / 类型白名单 / 成员解析少一样，保护降级通道就回来了。" >&2
+    exit 1
+  fi
+done
+echo "    GROUP-CREATE-001: PASS (groups can hold more than two people; a two-person GROUP is rejected)"
+
+# DEVICE-LOCATION-001: 移动几公里，「当前位置」不刷新。
+#
+# 根因不是"刷新失败"：app-shell 的「当前位置」只有两个来源，而且**都是静态的** ——
+# 预设地点，或用户自己在地图上放的点（SecureStore 持久化），且只在挂载时读一次。
+# expo-location 确实在 package.json 里也确实被 import 了，但既有三处用法
+# （market.tsx / reality-scene-map.tsx / map-canvas.tsx）**全是按钮点一下取一次**
+# 的 getCurrentPositionAsync —— 取完即弃，没有任何一处订阅设备移动。
+# 所以人走出几公里，屏幕上还是挂载那一刻的地点：不是延迟，是没人听。
+#
+# 现成方案 = watchPositionAsync：移动时持续回调。distanceInterval 1000m +
+# 低精度，对"移动几公里"正好，省电，也不碰需要服务端同意的精确定位那条线
+# （/v1/location/consent 是另一条路，本模块不碰）。
+# 同意 UI 就是 iOS 的「使用 App 期间」系统弹窗：拿到授权才订阅，拿不到停在
+# permission_denied —— 不静默降级，也不拿旧坐标假装成功。
+if ! grep -qF 'startDeviceLocationWatch({' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'expoLocationApi' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'makeDeviceLocation(next.latitude, next.longitude,' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [DEVICE-LOCATION-001]: app-shell 没订阅设备位置 ——" >&2
+  echo "        不订阅，「当前位置」就只有预设/手动两个静态来源，走到哪都不刷新。" >&2
+  exit 1
+fi
+# 手动选点必须让跟随让位 —— 否则下一次回调立刻把用户刚选的地点冲掉。
+if ! grep -qF 'setFollowDevice(false);' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [DEVICE-LOCATION-001]: 手动选点后没关跟随 ——" >&2
+  echo "        下一个定位回调会把用户刚选的地点冲掉，看起来像「选了没用」。" >&2
+  exit 1
+fi
+# 上次保存的手动地点读完之前不许启动跟随，否则出现"先被设备覆盖、再被存档盖回"
+# 的竞态（最终跟着一个 followDevice=true 的脏状态，下一次回调又吃掉存档）。
+if ! grep -qF 'locationRestoreDone' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'if (!locationRestoreDone || !followDevice) return;' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [DEVICE-LOCATION-001]: 没等存档读完就启动跟随 ——" >&2
+  echo "        存档和首个定位回调的先后不定，用户存过的地点会被随机冲掉。" >&2
+  exit 1
+fi
+# 设备状态要一路传到顶栏和 picker —— 否则「没授权」「不可用」会显示成
+# 「河内 · 还剑湖附近」，失败看起来跟成功一模一样。
+# 必须传**两处**：顶栏 LocationContext 一处 + picker sheet 一处。
+# 光钉"存在"是漏的 —— 这个 token 在 app-shell 里天然有两份，只给顶栏、
+# 漏了 sheet 也能让"存在"成立，于是跟随开关消失、失败态无处显示。
+DEVICE_STATE_PROPS=$(grep -cF 'deviceState={deviceLocationState}' apps/mobile/src/shell/app-shell.tsx)
+if [ "$DEVICE_STATE_PROPS" -lt 2 ] ||
+   ! grep -qF 'onFollowDevice={(next) => setFollowDevice(next)}' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'describeDeviceRow' apps/mobile/src/components/location-picker-sheet.tsx; then
+  echo "  FAIL [DEVICE-LOCATION-001]: 设备定位状态没传到 UI ——" >&2
+  echo "        顶栏和 picker 都收到才算接完；少一处，「未授权/定位中/不可用」就会显示得跟成功一样。" >&2
+  exit 1
+fi
+# 纯逻辑不许沾 native —— 沾了就再也进不了 vitest，这条钉自己也会失效。
+if grep -qE 'from "(react-native|expo-location)"' apps/mobile/src/device-location.ts; then
+  echo "  FAIL [DEVICE-LOCATION-001]: device-location.ts 直接 import 了 native 模块 ——" >&2
+  echo "        一旦沾上 native runtime 就测不了，DEVICE-LOCATION-001 的测试会整块失效。" >&2
+  exit 1
+fi
+# 反向钉：app-shell 不许直接 import expo-location —— 走适配器，别再加一处散装调用。
+if grep -qF 'from "expo-location"' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [DEVICE-LOCATION-001]: app-shell 直接 import 了 expo-location ——" >&2
+  echo "        走 device-location-native.ts 适配器，别再散一处权限流程。" >&2
+  exit 1
+fi
+# 反向钉：不做后台定位。app.json 对用户的承诺是"不在后台获取"，
+# UIBackgroundModes 里出现 location 就是说话不算话（也是审核风险）。
+if grep -qE '^[[:space:]]*"location",?[[:space:]]*$' apps/mobile/app.json; then
+  echo "  FAIL [DEVICE-LOCATION-001]: 开了后台定位 ——" >&2
+  echo "        声明了"不在后台获取"却又注册 background location，是审核风险。">&2
+  exit 1
+fi
+# 反向钉：权限文案不许再说"用一次位置" —— 现在是持续跟随，那句话是假的
+# （Apple 会因为用途描述与实际行为不符拒审）。
+if grep -qF '用一次位置' apps/mobile/app.json; then
+  echo "  FAIL [DEVICE-LOCATION-001]: 定位用途文案还写着"用一次位置" ——" >&2
+  echo "        实际是持续跟随，用途描述与行为不符会被拒审。" >&2
+  exit 1
+fi
+if ! grep -q 'DEVICE-LOCATION-001' apps/mobile/src/device-location.test.ts ||
+   ! grep -q 'DEVICE-LOCATION-001' apps/mobile/src/components/location-picker-sheet.test.ts; then
+  echo "  FAIL [DEVICE-LOCATION-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    DEVICE-LOCATION-001: PASS (location follows the device; denial/acquiring/failure render distinctly)"
+
+# SCENE-ADDRESS-001: 场景有坐标没地址；Bắc Ninh 一个场景都没有。
+#
+# 用户问「Three Beans 这家店的地址有没有？在 maps 上显示了吗？」
+#   · **地址：没有。** reality.scenes 只有 area（"Cầu Giấy" 这种区名）+ lat/lng。
+#     地图 marker 的 description 拼的是「区 · 类型」—— 用户问"在哪条街"答不上来。
+#     区名不是地址，拿它冒充就是假数据，所以 address 必须是独立字段。
+#   · **maps：显示了，但只显示区名。** 场景地图（reality-scene-map）确实把每个
+#     scene 画成 Marker；市场地图（market.tsx）根本不画 scene（它只画机会点和
+#     硬编码的 3 个河内探索点）。
+#   · **Bắc Ninh：空的。** launchScenes 里 9 条全是河内，Bắc Ninh 用户打开
+#     nearby 一个场景都搜不到。
+#
+# 另有一个隐蔽半截接线：Scene 有自定义 MarshalJSON，结构体上加了字段**不会**
+# 自动出现在接口 JSON 里。必须两处都改，否则 "Go 里有、客户端读不到"。
+require_test "SCENE-ADDRESS-001" "./internal/realityscene" \
+  "TestSceneCatalogCarriesStreetAddressDistinctFromArea" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-ADDRESS-001" "./internal/realityscene" \
+  "TestSceneCatalogIncludesBacNinhVenue" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-ADDRESS-001" "./internal/realityscene" \
+  "TestSceneAddressIsSerialized" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+# 地址是独立字段，不是 area 的别名。
+# 查询里 address 要选**两处**：CTE 一次 + 外层 SELECT 一次。只钉"存在"是漏的 ——
+# 这个片段在 listScenes 的 SQL 里天然有两份，删掉外层那一份照样能匹配到 CTE 的，
+# 于是地址在 CTE 里算了、最终却没选出来（负向注入实测：删一份仍绿）。
+# 用 -o 数**出现次数**而不是 grep -c（它数的是行数 —— 这两处在同一行 SQL 上，
+# grep -c 永远返回 1，钉就形同虚设）。
+ADDRESS_SELECTS=$(grep -oF 'type,address,latitude' apps/api-go/internal/platform/postgres/reality_scene.go | wc -l | tr -d ' ')
+if ! grep -qF 'ADD COLUMN IF NOT EXISTS address' apps/api-go/migrations/094_scene_address_bacninh.sql ||
+   ! grep -qF '&s.Address' apps/api-go/internal/platform/postgres/reality_scene.go ||
+   [ "$ADDRESS_SELECTS" -lt 2 ]; then
+  echo "  FAIL [SCENE-ADDRESS-001]: 地址没接到底 ——" >&2
+  echo "        迁移 / CTE / 外层 SELECT / Scan 少一处，接口就退回"只有区名"。" >&2
+  exit 1
+fi
+# MarshalJSON 是接口真正的形状：结构体上有字段但这里没有 = Go 里有、客户端读不到。
+if ! grep -qF 'json:"address,omitempty"' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-ADDRESS-001]: Scene.MarshalJSON 没输出 address ——" >&2
+  echo "        Scene 有自定义 MarshalJSON，只改结构体字段不会进 JSON。" >&2
+  exit 1
+fi
+# Bắc Ninh 那家店：id + 真实地址都要在（地址是反查得到的，不是编的）。
+if ! grep -qF '"threebeans_bn"' apps/api-go/internal/realityscene/service.go ||
+   ! grep -qF 'Lê Văn Thịnh, Suối Hoa, TP Bắc Ninh' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-ADDRESS-001]: Bắc Ninh 的 Three Beans 不在场景目录里 ——" >&2
+  echo "        缺了它，Bắc Ninh 用户打开场景地图是空的。" >&2
+  exit 1
+fi
+# 客户端：marker 的描述要走 sceneAddressLine（有地址用地址，没有退回区名+类型）。
+if ! grep -qF 'sceneAddressLine(scene)' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -qF 'sceneAddressLine' apps/mobile/src/reality-scene-address.ts; then
+  echo "  FAIL [SCENE-ADDRESS-001]: 地图 marker 没用地址行 ——" >&2
+  echo "        拼回「区 · 类型」就等于这个字段白加。" >&2
+  exit 1
+fi
+# 反向钉：marker 不许再写死"区 · 类型"。注释里不许出现下面这个 token ——
+# raw grep 认全文，注释里留一份就能让这条钉永远红。
+if grep -qF 'description={`${scene.area} · ${scene.type}`}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-ADDRESS-001]: marker 描述又写死成区名+类型了 ——" >&2
+  echo "        有地址也不显示，等于没加这个字段。" >&2
+  exit 1
+fi
+if ! grep -q 'SCENE-ADDRESS-001' apps/mobile/src/reality-scene-address.test.ts; then
+  echo "  FAIL [SCENE-ADDRESS-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    SCENE-ADDRESS-001: PASS (scenes carry a street address; Bắc Ninh venue exists; marker shows it)"
+
+# SCENE-DATA-ACCURACY-001: 场景数据要准，且不许静默漂移。
+#
+# 用户要求「核心必须要准确……而不是死数据」。两件具体的事：
+#
+# 1. **两个真相来源会静默漂移。** launchScenes()（内存仓库，没配 DATABASE_URL 时
+#    走它）和 migrations 里 reality.scenes 的 seed（配了库走它）是同一份产品的两份
+#    数据。一边加了店、另一边没加，本地和线上就是两个不同的场景目录，而且**不会
+#    有任何东西报错** —— 数据不是被改坏的，是被忘记同步的。
+# 2. **坐标要落在它声称的城市里。** 标着"Bắc Ninh"却落在河内（差 ~30 km），
+#    地图上就会把 Bắc Ninh 的店画在河内。
+require_test "SCENE-DATA-ACCURACY-001" "./internal/realityscene" \
+  "TestSceneSeedMatchesMigrationSeed" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-DATA-ACCURACY-001" "./internal/realityscene" \
+  "TestSceneCoordinatesMatchTheirArea" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+# 目录里要真的同时有「店」和「公共景点」两类，不是只有一家咖啡店。
+if ! grep -qF '咖啡 · 动态场景' apps/api-go/internal/realityscene/service.go ||
+   ! grep -qF '公共景点 · 湖边' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-DATA-ACCURACY-001]: 场景目录缺类别 ——" >&2
+  echo "        目录要同时覆盖咖啡店和公共景点，只有一类就是"只有一家店"的老问题。" >&2
+  exit 1
+fi
+# 还剑湖（用户点名要的公共景点）必须在。
+# 注意：Go 里是双引号 ID: "hoankiem"，SQL 里才是单引号 —— 钉错引号会永久红。
+if ! grep -qF 'ID: "hoankiem"' apps/api-go/internal/realityscene/service.go ||
+   ! grep -qF "Hồ Hoàn Kiếm, Phường Hoàn Kiếm, Hà Nội" apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-DATA-ACCURACY-001]: 还剑湖不在场景目录里 ——" >&2
+  echo "        用户点名要的公共景点，坐标/地址都以 OSM 为准。" >&2
+  exit 1
+fi
+echo "    SCENE-DATA-ACCURACY-001: PASS (scene seed in sync, coordinates match their area, cafés + attractions present)"
+
+# SCENE-REAL-COUNTS-001: 场景上的数字必须是真算出来的，不是写死的。
+#
+# 069 迁移里给每个场景写死了 posts / creators / activities / invites（312 / 118 / 26…）。
+# 全仓**根本没有 post↔scene 的关联** —— 这些数没有任何真实来源。它们不显示，
+# 却被拿去算 recommendation_score（"推荐度"），等于用编的数字给用户排序。
+# 现在 saved / visited / planned 三个计数由 reality.user_scene_states 真聚合而来：
+# 没人动过就是 0，有人收藏就 +1。
+require_test "SCENE-REAL-COUNTS-001" "./internal/realityscene" \
+  "TestSceneCountsAreDerivedFromUserStates" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-REAL-COUNTS-001" "./internal/realityscene" \
+  "TestSceneRealCountsAreSerialized" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+# 排序不许再用那四个编的数。
+if grep -qF 'ln(1+posts+2*creators+4*activities+2*invites)' apps/api-go/internal/platform/postgres/reality_scene.go; then
+  echo "  FAIL [SCENE-REAL-COUNTS-001]: 推荐度还在用写死常数算 ——" >&2
+  echo "        posts/creators/activities/invites 全仓没有真实来源，拿它们排序等于编造。" >&2
+  exit 1
+fi
+if ! grep -qF 'json:"savedCount"' apps/api-go/internal/realityscene/service.go ||
+   ! grep -qF 'sceneCountsLine(selected)' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-REAL-COUNTS-001]: 真实计数没接到 UI ——" >&2
+  echo "        服务端算出来但没人显示 = 新的半截接线。" >&2
+  exit 1
+fi
+echo "    SCENE-REAL-COUNTS-001: PASS (scene counts are aggregated from real user states, not seeded constants)"
+
+# SCENE-NO-FABRICATED-001: 场景上不许再有**编出来的数字**。
+#
+# quality / posts / creators / activities / invites 五个整数是 069 迁移里手写死的
+# 常数，没有任何真实来源：
+#   · posts / creators / activities / invites —— 全仓根本没有 post↔scene 的关联，
+#     这些数从哪来？答不上来。
+#   · quality（84..96）—— 没有任何评分来源，85 和 96 差在哪说不出来。
+# 它们大部分连 UI 都不显示，却被拿去算 recommendation_score（"推荐度"）——
+# 等于用编的数字决定用户先看到谁。095 已经把五列 DROP 掉，这里钉住它们
+# **不许回来**。
+require_test "SCENE-NO-FABRICATED-001" "./internal/realityscene" \
+  "TestSceneHasNoFabricatedNumbers" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-NO-FABRICATED-001" "./internal/realityscene" \
+  "TestRecommendationScoreUsesOnlyRealSignals" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+# 客户端那句假信号的测试也得在（这是 vitest，require_test 只跑 go）。
+if ! grep -qF 'describe("SCENE-NO-FABRICATED-001 sceneSignalLine"' apps/mobile/src/reality-scene-address.test.ts; then
+  echo "  FAIL [SCENE-NO-FABRICATED-001]: sceneSignalLine 的测试不见了 ——" >&2
+  echo "        「正在发生 / Scene Quality」就是从客户端这行文案冒出来的。" >&2
+  exit 1
+fi
+# 1) 服务端：结构体、MarshalJSON、SQL SELECT 三处都不许再出现这些列。
+#    三处都要钉 —— 结构体上有字段不代表进 JSON（Scene 有自定义 MarshalJSON）。
+for needle in 'json:"quality"' 'json:"posts"' 'json:"creators"' 'json:"activities"' 'json:"invites"'; do
+  if grep -qF "$needle" apps/api-go/internal/realityscene/service.go; then
+    echo "  FAIL [SCENE-NO-FABRICATED-001]: Scene.MarshalJSON 里又出现 $needle ——" >&2
+    echo "        这五个数字没有任何真实来源，拿它们算推荐度等于编造。" >&2
+    exit 1
+  fi
+done
+if grep -qF 'quality,best,posts,creators,activities,invites' apps/api-go/internal/platform/postgres/reality_scene.go; then
+  echo "  FAIL [SCENE-NO-FABRICATED-001]: SQL 还在 SELECT 那五个已删除的列 ——" >&2
+  echo "        095 已经 DROP 掉了，SELECT 会直接报错（列不存在）。" >&2
+  exit 1
+fi
+# 2) 排序只能用真实信号：ln(1+ 真计数)，且**不许再掺** quality。
+#    正向 + 反向都要钉：只钉正向的话，有人写 `quality*.55 + ln(1+...)`
+#    照样能过（子串还在），反向钉才拦得住。
+if ! grep -qF 'ln(1+COALESCE(tally.saved_count,0)' apps/api-go/internal/platform/postgres/reality_scene.go; then
+  echo "  FAIL [SCENE-NO-FABRICATED-001]: SQL 推荐度不再由真实计数驱动 ——" >&2
+  echo "        没人碰过的场景必须退回"按距离排"，不能靠写死的常数顶上去。" >&2
+  exit 1
+fi
+if grep -qF 'quality*' apps/api-go/internal/platform/postgres/reality_scene.go; then
+  echo "  FAIL [SCENE-NO-FABRICATED-001]: SQL 推荐度又掺进了 quality ——" >&2
+  echo "        095 已经 DROP 了这一列，写一个不存在的列只会让查询报错；" >&2
+  echo "        就算列还在，它也是没有来源的手写分数。" >&2
+  exit 1
+fi
+# 3) 客户端：类型和文案都不许再有这些字段。
+for needle in 'quality: number' 'posts: number' 'creators: number' 'activities: number' 'invites: number' 'Scene Quality' '正在发生'; do
+  if grep -qF "$needle" apps/mobile/src/surfaces/reality-scene-map.tsx; then
+    echo "  FAIL [SCENE-NO-FABRICATED-001]: 客户端又出现 $needle ——" >&2
+    echo "        "正在发生" 读的是 seed 里的静态布尔值，跟此刻有没有人在现场无关。" >&2
+    exit 1
+  fi
+done
+# 4) 演示场所必须真的下架了（不是只从 Go 里删掉、SQL 里还活着）。
+#    注意钉的是 **Go 目录**，SQL 里保留着 status='HIDDEN' 的历史行是有意的。
+for dead in 'complex01' 'banana' 'bonsaidon' 'westlake'; do
+  if grep -qF "ID: \"$dead\"" apps/api-go/internal/realityscene/service.go; then
+    echo "  FAIL [SCENE-NO-FABRICATED-001]: 演示场景 $dead 又回到目录里了 ——" >&2
+    echo "        它搜不到任何公开记录（complex01/banana/bonsaidon），或者不是一个点（westlake 是环湖路线）。" >&2
+    exit 1
+  fi
+done
+# 钉 `SET status='HIDDEN'` 而不是光钉 `status='HIDDEN'` —— 095 的**注释**里
+# 也写着这个词，只钉后者的话，把 UPDATE 改成 status='ACTIVE' 都不会红。
+# （这类"注释把反向钉永久顶住"的坑在本仓出现过不止一次。）
+if ! grep -qF "SET status='HIDDEN'" apps/api-go/migrations/095_scene_catalog_real.sql; then
+  echo "  FAIL [SCENE-NO-FABRICATED-001]: 095 迁移不再隐藏演示场所 ——" >&2
+  echo "        从 Go 里删掉而 SQL 里还活着 = 本地和线上两个目录，又一处静默漂移。" >&2
+  exit 1
+fi
+echo "    SCENE-NO-FABRICATED-001: PASS (no fabricated scene numbers; demo venues retired; ranking uses real signals only)"
+
+# SCENE-CHECKIN-001: 「我在这里」—— 场景要能跟用户互动，不能是死数据。
+#
+# 收藏 / 去过 / 计划去都是**静态**的私人标记，写下去就不变；这一条是**会自己
+# 过期**的现场声明，场景上第一次出现一个会变化的数字（hereCount）。
+# 三件事一起钉，少一件它就变成新的假数据：
+#   1. **会过期** —— 人走了数字自己掉下来。一个永不消失的"我在这里"会让场景
+#      永远显示有人，正是我们要消灭的那种死数据；
+#   2. **接得上** —— 命令进了 Supports() 才会被 dispatch 路由过来。本仓被
+#      "建好了但没人调用"咬过很多次；
+#   3. **只出聚合数** —— 不许带出"谁"在现场，也不许说"已核实本人在场"。
+require_test "SCENE-CHECKIN-001" "./internal/realityscene" \
+  "TestCheckInIsTimeBoxedAndCountedForReal" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-CHECKIN-001" "./internal/realityscene" \
+  "TestCheckInIsReachableThroughCommand" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-CHECKIN-001" "./internal/realityscene" \
+  "TestCheckInCountIsSerializedWithoutIdentity" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+# 命令必须进 Supports()：不进就是"命令存在但没人接"，等于功能不存在。
+# 钉 `|| t == "…"` 这整个片段，不钉光秃秃的 `"SetRealitySceneCheckIn"` ——
+# 后者在 `if e.CommandType == "SetRealitySceneCheckIn" {` 里也有，把命令从
+# Supports() 里删掉这个 pin 都不会红（"存在"不是 pin，多个出现点要数）。
+if ! grep -qF '|| t == "SetRealitySceneCheckIn"' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-CHECKIN-001]: SetRealitySceneCheckIn 不在 Supports() 里 ——" >&2
+  echo "        dispatch 永远不会把它路由过来，这是一根新的半截接线。" >&2
+  exit 1
+fi
+# hereCount 必须真的进 JSON（Scene 有自定义 MarshalJSON，结构体加字段不算）。
+if ! grep -qF 'json:"hereCount"' apps/api-go/internal/realityscene/service.go ||
+   ! grep -qF 'reality.scene_checkins' apps/api-go/migrations/096_scene_checkin.sql; then
+  echo "  FAIL [SCENE-CHECKIN-001]: hereCount 或 check-in 表没落地 ——" >&2
+  echo "        服务端算了但客户端读不到 / 表不存在 = 半截接线。" >&2
+  exit 1
+fi
+# 客户端必须真的发这个命令，而且不许把"声明"说成"已核实"。
+if ! grep -qF '"SetRealitySceneCheckIn"' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -qF 'persistCheckIn(selected)' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-CHECKIN-001]: 客户端没有「我在这里」按钮 ——" >&2
+  echo "        服务端支持但没有入口 = 用户根本用不到。" >&2
+  exit 1
+fi
+# 真值边界：check-in 是**本人声明**，没有任何现场核销（订单/核销码/商家确认）。
+if grep -qF '已核实' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-CHECKIN-001]: 客户端声称"已核实"本人在场 ——" >&2
+  echo "        没有核销就不是核实，说了就是假证据。" >&2
+  exit 1
+fi
+echo "    SCENE-CHECKIN-001: PASS (check-in is reachable, time-boxed, and exposes aggregate counts only)"
+
+# SCENE-CONTRIB-001: 用户可以提交新场景，但**不能自己给自己背书**。
+#
+# 目录里的 11 条坐标是 OSM/Nominatim 查过的；用户提交的一条都没查过。把两种
+# 数据混在一起还长得一模一样，就是重犯刚删掉的那五个假数字的错。所以：
+#   · 提交进来是 PENDING，要 ≥2 个**除提交者以外**的人确认才进目录；
+#   · 进目录时必须带 Source=COMMUNITY，客户端要标「社区提交 · 坐标未经核实」；
+#   · 没有 source 字段的老数据按"来源未知"处理，不许静默当成已核实。
+require_test "SCENE-CONTRIB-001" "./internal/realityscene" \
+  "TestCommunityProposalNeedsOtherPeoplesConfirmation" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+require_test "SCENE-CONTRIB-001" "./internal/realityscene" \
+  "TestSceneSourceIsSerialized" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+# 命令必须进 Supports()，否则 dispatch 永远路由不到（半截接线）。
+# 同样钉 `|| t == "…"` 而不是 bare `"ProposeRealityScene"` —— 后者在
+# `case "ProposeRealityScene":` 里也出现，删掉 Supports() 里的这一项不会红。
+if ! grep -qF '|| t == "ProposeRealityScene"' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-CONTRIB-001]: ProposeRealityScene 不在服务里 ——" >&2
+  echo "        用户根本没有入口提交新场景。" >&2
+  exit 1
+fi
+# source 必须进 JSON（Scene 有自定义 MarshalJSON，结构体加字段不算）。
+if ! grep -qF 'json:"source"' apps/api-go/internal/realityscene/service.go ||
+   ! grep -qF 'reality.scene_proposals' apps/api-go/migrations/097_scene_contribution.sql; then
+  echo "  FAIL [SCENE-CONTRIB-001]: 来源标记或提案表没落地 ——" >&2
+  echo "        没有来源标记，用户就分不清哪些坐标是查过的、哪些是别人随手点的。" >&2
+  exit 1
+fi
+# 客户端必须真的能提交，而且必须把来源显示出来。
+if ! grep -qF '"ProposeRealityScene"' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -qF 'sceneSourceSuffix(scene.source)' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-CONTRIB-001]: 客户端没有提交入口或没有显示来源 ——" >&2
+  echo "        不显示来源 = 把"用户填的"当成"我们核实过的"。" >&2
+  exit 1
+fi
+echo "    SCENE-CONTRIB-001: PASS (community proposals need peer confirmation and stay labelled as unverified)"
+
+# SCENE-ACTIVITY-LINK-001: 活动挂在"目录里查不到的场景"上，点了进不去。
+#
+# 为了删掉编出来的字段，场景目录把 bonsaidon / westlake 下架了
+# (SCENE-NO-FABRICATED-001)。但 activity seed 里 5 条活动有 3 条指
+# bonsaidon、2 条指 westlake —— 活动于是全部挂在已下架的场景上，而
+# **没有任何测试变红**。PublishActivity 本来就强制要 realitySceneId，
+# 所以这不是"没接线"，是"接线指向了一个已经不存在的东西"。
+#
+# 同一个 bug 的第二半是 people 字符串：它以前是写死在 payload 里的展示
+# 文案，Join 只改 Joined，从来不碰 people —— 有人报名之后列表依旧写着
+# "0 / 24 人"。同一个事实（已报名人数）两个来源，其中一个永远不更新，
+# 这就是刚从场景字段里删掉的那类假数字。现在 people 由 Joined/Capacity
+# 推导，没有名额的活动（capacity 0）不编数字、保留原文。
+require_test "SCENE-ACTIVITY-LINK-001" "./internal/activity" \
+  "TestSeededActivitiesPointAtRealScenes" \
+  "apps/api-go/internal/activity/service_test.go" || exit $?
+require_test "SCENE-ACTIVITY-LINK-001" "./internal/activity" \
+  "TestJoinUpdatesDisplayedPeopleCount" \
+  "apps/api-go/internal/activity/service_test.go" || exit $?
+# 发布活动必须带 realitySceneId —— 没有场景的活动等于一个去不到的地方。
+# 钉 `p.RealitySceneID == ""` 这个校验形式，而不是 bare "realitySceneId"。
+if ! grep -qF 'p.RealitySceneID == ""' apps/api-go/internal/activity/service.go; then
+  echo "  FAIL [SCENE-ACTIVITY-LINK-001]: PublishActivity 不再要求 realitySceneId ——" >&2
+  echo "        活动没有场景 = 用户点进去不知道要去哪。" >&2
+  exit 1
+fi
+echo "    SCENE-ACTIVITY-LINK-001: PASS (every activity points at a live scene; headcount is derived, not frozen)"
+
+# SCENE-EVENT-SIGNUP-001: 场景详情只能"发起"活动，看不到、也报不上这里已有的活动。
+#
+# 场景详情原来只有三个**发布**动作（邀请真人 / 发布机会 / 发布活动）。用户面对
+# 一个具体场景时只能喊话，看不到这个场景上已经有什么局、也没法报名 —— 这就是
+# 用户说的"死数据"的另一半：内容是真的，但读不到、进不去。
+#
+# 修法是**复用**活动域（activity.activities + activity.participants，报名有
+# 名额、有事务），不是再新造一套报名。所以这里钉两件事：
+#   · 详情真的会拉这个场景的活动、真的有报名按钮；
+#   · 报名走 ActivityClient，不许在场景面里手搓一条命令 —— 那会变成第二套
+#     报名实现，两边计数各算各的（刚在 SCENE-ACTIVITY-LINK-001 修过一次）。
+#
+# 另外：列表「没有活动 / 取不到 / 没登录」必须是三种不同的说法。合并成一句
+# 「暂无」，用户会以为这里真的没活动 —— 本仓的规矩是这几种状态不许长得一样。
+if ! grep -qF 'new ActivityClient({ authClient, secureSessionStore })' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -qF 'loadSceneActivities(selectedId)' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -qF 'joinSceneActivity(item.activityId)' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-EVENT-SIGNUP-001]: 场景详情没接上活动列表或报名按钮 ——" >&2
+  echo "        只能发布、看不到也报不上 = 活动对这个场景里的用户不存在。" >&2
+  exit 1
+fi
+# 状态文案必须由专门的函数给（EMPTY / ERROR / SIGNED_OUT 三种不同说法），
+# 不许在 JSX 里手写一句「暂无活动」把三种情况糊成一种。
+if ! grep -qF 'sceneActivityFeedText(activityFeed)' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-EVENT-SIGNUP-001]: 活动列表的状态文案没走 sceneActivityFeedText ——" >&2
+  echo "        「取不到」被说成「还没有活动」，用户会以为这地方真的没活动。" >&2
+  exit 1
+fi
+# 不许在场景面里手搓报名命令 —— 那是第二套报名实现，两套计数会各算各的。
+# （注释里故意不写那条命令的字面量：写了这条反向钉就永远红不了。）
+if grep -qF '"JoinActivity"' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-EVENT-SIGNUP-001]: 场景面自己发起了报名命令 ——" >&2
+  echo "        应该复用 ActivityClient，否则报名人数会有两套互不同步的算法。" >&2
+  exit 1
+fi
+# 纯逻辑不许沾 native —— 沾了就再也进不了 vitest，这条钉自己也会失效。
+if grep -qE 'from "react-native"' apps/mobile/src/scene-activities.ts; then
+  echo "  FAIL [SCENE-EVENT-SIGNUP-001]: scene-activities.ts 沾了 react-native ——" >&2
+  echo "        把纯逻辑搬出 tsx 就是为了能测，沾了 native 就白搬了。" >&2
+  exit 1
+fi
+if ! grep -q 'SCENE-EVENT-SIGNUP-001' apps/mobile/src/scene-activities.test.ts; then
+  echo "  FAIL [SCENE-EVENT-SIGNUP-001]: 场景活动逻辑没有命名测试 ——" >&2
+  echo "        名额判定 / 场景归属 / 状态文案这三条会悄悄退化。" >&2
+  exit 1
+fi
+echo "    SCENE-EVENT-SIGNUP-001: PASS (scene detail lists real events and signs up through the activity domain)"

@@ -62,7 +62,11 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
     // 不再是「模拟识别」把写死的 PX-937201 填进搜索框假装扫到了人。
     expect(crm).toContain("setSentIds");
     expect(crm).toContain("已发送");
-    expect(crm).toContain("parseScannedQr(text)");
+    // 钉**接线**，不钉调用拼写。剪贴板内容 → 共用处理器 → 真解析器 → 落人，
+    // 这条链才是要守的；参数名只是实现细节（相机接入后走 handleScannedCode(raw)），
+    // 钉死 "(text)" 会让任何合法重构都误报，把好改动挡在门外。
+    expect(crm).toContain("await handleScannedCode(text)");
+    expect(crm).toMatch(/parseScannedQr\(/);
     // 识别出 handle 之后不再往本机搜索框里塞：那等于拿演示结果假装找到了人
     // （扫谁的码都是同一批 SEARCH_RESULTS）。现在交给 lookupScannedHandle
     // 去服务端按 handle 解析真人，见下面的 HANDLE-LOOKUP-001。
@@ -80,7 +84,11 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
     expect(crm).toContain("读取剪贴板失败");
     expect(crm).toContain("剪贴板里没有内容");
     expect(crm).toContain("这不是 Proxy 二维码");
-    expect(crm).toContain("相机扫描未接入");
+    // 相机不再是「未接入」的诚实说明，而是真接上了：真 CameraView + 权限门。
+    // 钉住新契约 —— 权限没给时必须说清楚，不许假装能扫。
+    expect(crm).toContain("CameraView");
+    expect(crm).toContain("useCameraPermissions");
+    expect(crm).toContain("需要相机权限才能扫码");
   });
 
   it("accepts/ignores/blocks with immediate effect in both modes", () => {
@@ -627,6 +635,72 @@ describe("SEARCH-COPY-HONEST-001 search copy says what the code actually matches
   });
 });
 
+describe("CONTACT-SEARCH-COPY-001 the contacts-sheet subtitle matches its search box", () => {
+  it("does not promise a username search the sheet cannot do", () => {
+    // 「新聊天」那张 sheet 的副标题正压在搜索框上方。CONTACTS 由 visibleDialogs
+    // 映射而来（name / preview / time / conversationId），**没有 username**
+    // —— 本段自己的注释就写着「不编造 username」。filtered 也只匹配
+    // `${c.name}${c.preview}`。副标题原写「联系人 / Username」，等于让用户
+    // 在框里输 @handle 却永远搜不到；同一个框的 placeholder 早就写着
+    // 「姓名或最近消息」。副标题对齐它。
+    // 找没聊过的人不走这条搜索，走下面的「添加好友」入口
+    // （ADD-FRIEND-FROM-MESSAGES-001），那是另一条线。
+    expect(messages).toContain("联系人 · 姓名或最近消息");
+    expect(messages).not.toContain("联系人 / Username");
+    // 副标题里的「最近消息」得有匹配器兜着：匹配范围一旦收窄到只剩 name，
+    // 副标题就又变回空头承诺。
+    expect(messages).toContain("${c.name}${c.preview}");
+  });
+});
+
+describe("ADD-FRIEND-PHONE-COPY-001 the add-friend list does not advertise phone search", () => {
+  it("drops the phone claim from the live list and from the sub-page table", () => {
+    // 后端没有按手机号搜索的能力，也没有「允许被手机号搜到」这个授权开关 ——
+    // friend-crm 的 SEARCH sheet 自己就写着「手机号暂不可搜」。同一处能力却在
+    // 两个地方被说成能搜手机号：
+    //  · friend-crm 的「添加方式」列表（用户真会看到的那一份）；
+    //  · me-sub-pages 的 addfriend 说明表（sections 目前没有渲染方 —— 只有
+    //    title/desc/icon 经 meSubPage 被用上；一旦接上就会把不存在的能力讲给用户）。
+    expect(crm).not.toContain("昵称、Proxy ID 或手机号");
+    expect(meSub).not.toContain("昵称、Proxy ID、手机号");
+    // 正向：两处都只报昵称与 Proxy ID；sheet 那句诚实说明不许被顺手删掉。
+    expect(crm).toContain("昵称或 Proxy ID");
+    expect(crm).toContain("手机号暂不可搜");
+    expect(meSub).toContain("昵称、Proxy ID");
+  });
+});
+
+describe("CONVO-OPEN-001 tapping a Convo opens the branch, not the mainline", () => {
+  it("passes the convo id all the way to ConversationSurface", () => {
+    // 支线（Convo）是主线 DM 的一个分支：conversation.tsx 用 convId（父母会话）
+    // + activeConvo.id 去 listMessages，两者缺一不可。列表里点一条 Convo，以前只交出
+    // parentDialogId —— shell 于是按普通 DM 打开，入口写着「打开 Convo」，
+    // 点开却是主线，支线内容一条都看不到。
+    expect(messages).toContain("onOpenConvo");
+    expect(messages).toContain("openConvo(");
+    // 少了 convoId 就还是打开主线 —— 这一句是整条接线的要害。钉**整个调用**而不是光钉
+    // "s.convo.id"：那个 token 在 key={s.convo.id} 里也有，光钉它会漏判。
+    expect(messages).toContain("openConvo(parentName, s.convo.parentDialogId, s.convo.id,");
+    // shell 必须真的把它传到 ConversationSurface（它认的 prop 名是 convoId / convoTitle）。
+    expect(appShellCode).toContain("onOpenConvo={");
+    expect(appShellCode).toContain("{...(messageChat?.convoId ? { convoId: messageChat.convoId } : {})}");
+    expect(appShellCode).toContain("{...(messageChat?.convoTitle ? { convoTitle: messageChat.convoTitle } : {})}");
+  });
+
+  it("says so when nobody hands it a convo opener", () => {
+    // 同 ADD-FRIEND-FROM-MESSAGES-001：没人接的入口不能静默 —— 静默的死按钮
+    // 和「这条支线不存在」长得一样。
+    expect(messages).toContain("if (!onOpenConvo) return false;");
+    expect(messages).toContain("支线入口还没接通");
+    expect(messages).toContain("{convoNotice ?");
+  });
+
+  it("no longer opens the parent dialog as a plain DM", () => {
+    // 旧接线：只带 parentDialogId 调 onOpenConversation —— 那只能打开主线。
+    expect(messages).not.toContain("onPress={() => onOpenConversation(parentName, s.convo.parentDialogId)}");
+  });
+});
+
 describe("PROFILE-POSTS-FAILURE-001 a failed posts load is not an empty profile", () => {
   it("keeps failed distinct from empty", () => {
     // 以前两条路都失败时直接把异常吞掉：profilePosts 留成 []，页面渲染出
@@ -744,5 +818,47 @@ describe("PROFILE-SEARCH-001 the search box actually searches the site", () => {
     // 只写 Body，搜索会永远看起来「什么都没找到」，而且不报错。
     expect(profileClientSrc).toContain("result.operationRef");
     expect(profileClientSrc).toContain("profile search response malformed");
+  });
+});
+
+describe("CONVO-LIST-001 my convos are listed, not just creatable", () => {
+  // 这条盯的是一个「建好了没人调」的半截接线。ConversationClient.listMyConvos
+  // 一直在（服务端 ListMyConvos 也在，客户端单测也在），但 App 里从来没有调用方 ——
+  // 于是 conversation.tsx 能把一条消息分叉成支线，分叉完却**永远看不到它**。
+  //
+  // 同一个页面还有第二个毛病：Convo 页当时列的是 GROUP/SUPPORT 会话，而那些在
+  // 「对话」页已经出现过一遍；真正的 Convo 一条都没有 —— 标题和内容对不上。
+
+  it("actually calls listMyConvos from the messages surface", () => {
+    expect(messages).toContain("conversationClient.listMyConvos()");
+    expect(messages).toContain("ConvoSummary");
+  });
+
+  it("keeps loading / empty / failed as three different things", () => {
+    // undefined = 还没拉，[] = 真的没有，failed = 拉失败。合成两个，
+    // 就必然把「没拉到」画成「一条都没有」—— 用户会以为自己从没开过支线。
+    expect(messages).toContain("const [myConvos, setMyConvos] = useState<ConvoSummary[] | undefined>(undefined);");
+    expect(messages).toContain("setMyConvos(rows)");
+    expect(messages).toContain("setMyConvosFailed(true)");
+  });
+
+  it("offers a retry that actually re-runs the fetch", () => {
+    expect(messages).toContain("setMyConvosNonce((n) => n + 1)");
+    // reload 计数必须在依赖数组里，否则「重试」点下去不会重跑 effect。
+    expect(messages).toContain("myConvosNonce]");
+    expect(messages).toContain("Convo 加载失败");
+  });
+
+  it("stops labelling a list of group conversations as Convo", () => {
+    // 旧标题下面列的是 GROUP/SUPPORT 会话 —— 名字和内容对不上。
+    expect(messages).not.toContain("关注的 Convo");
+    expect(messages).toContain("我的 Convo");
+    // 群组那一段保留（「＋文件夹」是它独有的入口），但如实叫它群组对话。
+    expect(messages).toContain("群组对话");
+  });
+
+  it("shows an unparseable convo timestamp as a dash, never as blank", () => {
+    expect(messages).toContain("function convoTimeText");
+    expect(messages).toContain('if (!Number.isFinite(ms) || ms <= 0) return "—";');
   });
 });

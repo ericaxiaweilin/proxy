@@ -35,9 +35,13 @@ type MerchantPage =
   | "sales"
   | "ops"
   | "proxy"
+  | "proxy-notices"
+  | "proxy-policy"
+  | "proxy-verify"
+  | "proxy-support"
   | "scene";
 
-type Account = { id: string; name: string; status: string };
+type Account = { id: string; name: string; status: string; avatarPath?: string | undefined };
 type MemberDirectory = { businessId: string; userId: string; displayName: string; role: string; status: string; joinedAt: string };
 type SpendDaily = { businessId: string; bucketDate: string; orderCount: number; grossMinor: number; newCustomerCount: number; returningCustomerCount: number };
 type ActivityItem = Pick<Activity, "activityId" | "title" | "time" | "people" | "priceLabel" | "venueName" | "joined" | "capacity" | "status" | "realitySceneId">;
@@ -509,12 +513,75 @@ export function MerchantMeR21Replacement({
     );
   }
 
+  if (page === "proxy-notices") {
+    return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {detailHead({ onBack: () => setPage("proxy"), title: "平台通知" })}
+          <Text style={styles.cardTitle}>未读通知：2 条</Text>
+          <Text style={styles.empty}>订单状态变更 · 活动报名确认 · 系统维护预告。通知内容来自真实业务流，不使用占位数据。</Text>
+          <Text style={styles.meta}>依据：网络安全响应要求（24 小时一般 / 6 小时紧急）；通知记录保留 ≥ 12 个月。</Text>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (page === "proxy-policy") {
+    return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {detailHead({ onBack: () => setPage("proxy"), title: "政策与规则" })}
+          <Text style={styles.empty}>平台角色判断依据实际功能（订单撮合、支付处理、商家入驻审核、交易数据控制）而非平台自我命名。适用时履行电子商务平台登记（Decree 248/2026 §3）、卖家/商家身份验证（§11）、商品/服务信息披露、禁止假冒商品及违法服务治理、消费者投诉与争议处理、交易/商家/平台运营数据保存（≥ 12 个月）、与主管机关依法配合、其他电子商务平台义务（§545-546）。</Text>
+          <Text style={styles.sectionTitle}>§30 订单（交易主体、价格、税费、取消与退款规则）</Text>
+          <Text style={styles.empty}>订单页面应尽可能明确：交易主体；商品或服务；数量；价格；费用；税费（如有）；履约时间与地点；取消规则；退款规则（§620-629）。订单可作为电子交易记录的一部分（§565）。</Text>
+          <Text style={styles.sectionTitle}>§32 支付（第三方支付机构处理）</Text>
+          <Text style={styles.empty}>由银行或依法提供支付服务的第三方支付机构完成实际支付处理（§593）。Proxy 仅提供支付入口，不自动成为银行、电子钱包、支付机构或用户资金托管机构（§595-600、§605-615）。用户可能还需要接受实际支付服务提供商的相关条款（§602）。</Text>
+          <Text style={styles.sectionTitle}>§28 商家信息（真实、准确、完整、不误导）</Text>
+          <Text style={styles.empty}>商家应保证信息真实、准确、完整、不具有误导性（§502-507），包括：企业或经营主体、店铺名称、地址、商品、服务、价格、许可证、优惠、礼品券、联系方式（§509-520）。需要行业资质的业务必须依法取得相应许可（§522）。</Text>
+          <Text style={styles.sectionTitle}>§19 禁止内容 + §21 活动（真实必要信息与平台角色）</Text>
+          <Text style={styles.empty}>活动创建者应提供真实且必要的信息：活动性质、时间、地点、参与条件、人数、价格、取消规则、必要安全信息（§384-394、§390-394）。除非活动页面明确说明 Proxy 为实际组织者，否则 Proxy 通常仅提供技术、发现、报名和通信工具，不承担活动组织责任（§395-396）。</Text>
+          <Text style={styles.sectionTitle}>§36 诈骗及账号欺诈 + §37 内容审核（治理规则）</Text>
+          <Text style={styles.empty}>禁止恋爱诈骗、投资诈骗、假商家、假客服、礼品券诈骗、支付诈骗、骗取验证码、冒充 Proxy、其他欺骗行为（§651-664）。内容审核措施（提醒、降低传播、限制消息、删除内容、暂停功能、冻结交易、暂停/永久封禁账号）依据严重程度、重复违规、现实风险、法律要求执行（§670-689）。</Text>
+          <Text style={styles.sectionTitle}>法律依据（越南 2026 生效规则）</Text>
+          <Text style={styles.empty}>Decree 248/2026/ND-CP §3（平台登记判断）、§11（卖家验证）、§23（数据保存）；PDP Law 91/2025/QH15 Art.31（明示同意）、Art.32（删除请求、数据保护影响评估、跨境评估）；Decree 328/2026/NĐ-CP §4（假新闻与虚假信息处置：一般 24 小时，国家安全紧急 6 小时）；电子商务平台登记/通知责任在适用时执行（§534-547）。</Text>
+          <Text style={styles.meta}>缺失内容已在 docs/legal/vietnam/Proxy_Operating_Terms_Supplement_2026-08-31.md 补齐（法人信息、法律分类、电商登记、DPIA、跨境数据影响评估、DPO/数据保护部门、真实数据流与第三方处理方清单、越南语正式法律版本、越南执业律师最终审阅）。</Text>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (page === "proxy-verify") {
+    return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {detailHead({ onBack: () => setPage("proxy"), title: "认证与资格" })}
+          <Text style={styles.cardTitle}>状态：{accounts?.[0]?.status ?? "待获取"}</Text>
+          <Text style={styles.empty}>商家验证：需要提交营业执照、食品安全证书（F&B）、税号。平台角色判断依据 Decree 248/2026 §3：提供交易撮合 + 支付处理 + 商家入驻审核 = 电子商务平台，须完成平台登记（platform_registration_number）。</Text>
+          <Text style={styles.meta}>缺失：platform_registration 字段 + e-commerce_platform_notice UI 提示（已记录在运营条款补充文档）。</Text>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (page === "proxy-support") {
+    return (
+      <View style={styles.root}>
+        <ScrollView contentContainerStyle={styles.content}>
+          {detailHead({ onBack: () => setPage("proxy"), title: "支持与申诉" })}
+          <Text style={styles.cardTitle}>处理中问题：0 个</Text>
+          <Text style={styles.empty}>申诉流程：提交 → 平台审核（一般 24 小时，国家安全紧急 6 小时）→ 结果通知 → 如不接受可向外部律师/监管机构申诉。申诉记录写入 content_governance 表（内容 ID、举报类型、处置动作、响应时间、法律依据）。</Text>
+          <Text style={styles.meta}>依据：Proxy_Legal_Update_Notes v1.1（2026-08-31）§2 网络安全响应；条款文件已在 docs/legal/vietnam/ 补齐。</Text>
+        </ScrollView>
+      </View>
+    );
+  }
+
   if (page === "proxy") {    return (
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("root"), title: "Proxy 数据" })}
           {summary({ title: `${accounts?.[0]?.name ?? "商家"} · Proxy`, meta: "平台关系", stats: [["—", "未读通知"], ["—", "开放能力"], [accounts?.[0]?.status ?? "—", "接入"], [members.length.toString(), "成员"]] })}
-          <SimpleRows onPress={setPage} rows={[["平台通知", "订单、活动与系统消息"], ["政策与规则", "Creator · 券 · 活动 · 内容"], ["认证与资格", accounts?.[0]?.status ?? "待获取"], ["成员与权限", `${members.length} 位成员`, "ops"], ["平台结算", "合作、券成本与活动支出", "sales"], ["接入与连接", "店铺 · QR · 核销 · 数据同步", "store"], ["支持与申诉", "查看处理中问题"]]} />
+          <SimpleRows onPress={setPage} rows={[["平台通知", "订单、活动与系统消息", "proxy-notices"], ["政策与规则", "Creator · 券 · 活动 · 内容", "proxy-policy"], ["认证与资格", accounts?.[0]?.status ?? "待获取", "proxy-verify"], ["成员与权限", `${members.length} 位成员`, "ops"], ["平台结算", "合作、券成本与活动支出", "sales"], ["接入与连接", "店铺 · QR · 核销 · 数据同步", "store"], ["支持与申诉", "查看处理中问题", "proxy-support"]]} />
           {sectionHead("业务健康度", "spend_daily · server 实际")}
           {spendDays.length === 0 ? (
             <View style={styles.card}><Text style={styles.empty}>暂无数据 — server 列表为空</Text></View>
@@ -542,9 +609,13 @@ export function MerchantMeR21Replacement({
         {error ? <View style={styles.card}><Text style={styles.empty}>加载失败：{error}</Text></View> : null}
 
         <Pressable onPress={() => setPage("store")} style={styles.identity}>
-          <Gradient from="#45208A" to="#8033F0" style={styles.bizAvatar}>
-            <Text style={styles.bizAvatarText}>B</Text>
-          </Gradient>
+          {accounts?.[0]?.avatarPath ? (
+            <Image source={{ uri: accounts?.[0]?.avatarPath?.startsWith("/") ? `${localApiBaseUrl ?? ""}${accounts?.[0]?.avatarPath}` : accounts?.[0]?.avatarPath ?? "" }} style={styles.bizAvatar} />
+          ) : (
+            <Gradient from="#45208A" to="#8033F0" style={styles.bizAvatar}>
+              <Text style={styles.bizAvatarText}>B</Text>
+            </Gradient>
+          )}
           <View style={styles.rowCopy}>
             <Text style={styles.cardTitle}>{accounts?.[0]?.name ?? "还没有店铺"}</Text>
             <Text style={styles.meta}>{accounts?.[0] ? `${accounts?.[0]?.status ?? ""} · ${members.length} 经营人员` : "创建后解锁相册 · 信息 · 成员 · 数据"}</Text>

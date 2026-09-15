@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -537,5 +538,124 @@ func TestXiaomeiDMProfileOriginAppearsInInbox(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("xiaomei DM missing from inbox: %+v", view.Conversations)
+	}
+}
+
+// ---------- GROUP-CREATE-001: 真·多人建群 ----------
+//
+// 以前 startConversation 只认单个 participantId，参与者恒为 {actor, participantId}
+// 两个 —— 于是「群组」最多也就两个人。更糟的是 conversationType 由客户端直接给、
+// 服务端从不校验，而 DefaultProtectionFor 对 GROUP 给出**更弱**的保护（可转发 /
+// 可复制 / 不警告截屏）。两者合起来就是一条降级通道：任何人都能把一条 1:1 对话
+// 声明成 GROUP，从而把对方消息的保护降级。
+// 所以建群要真能建多人，同时把「两人 GROUP」这条路堵死。
+
+func groupConversationID(t *testing.T, s *Service, result command.Result) string {
+	t.Helper()
+	if result.Outcome != "ACCEPTED" {
+		t.Fatalf("start must be accepted: %+v", result.Error)
+	}
+	var view struct {
+		ConversationID string `json:"conversationId"`
+	}
+	_ = json.Unmarshal([]byte(result.OperationRef), &view)
+	if view.ConversationID == "" {
+		t.Fatalf("no conversationId in operationRef: %s", result.OperationRef)
+	}
+	return view.ConversationID
+}
+
+func TestStartConversationCreatesGroupWithAllMembers(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"conversationType": "GROUP", "originType": "PROFILE", "originId": "grp_1",
+		"participantIds": []string{"user_002", "user_003"}, "firstMessage": "大家好",
+	}, ""))
+	id := groupConversationID(t, s, result)
+	conv, err := s.repository.GetConversation(context.Background(), id)
+	if err != nil {
+		t.Fatalf("missing conversation: %v", err)
+	}
+	if conv.Type != "GROUP" {
+		t.Fatalf("expected GROUP, got %q", conv.Type)
+	}
+	if len(conv.Participants) != 3 {
+		t.Fatalf("expected 3 participants (actor + 2), got %v", conv.Participants)
+	}
+	if conv.Participants[0] != "user_001" {
+		t.Fatalf("the actor must always be a member, got %v", conv.Participants)
+	}
+}
+
+func TestStartConversationRejectsTwoPersonGroup(t *testing.T) {
+	// 两个人叫「GROUP」没有任何群组语义，只是把 DM 的保护降级 —— 必须拒绝。
+	s := New()
+	result := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"conversationType": "GROUP", "originType": "PROFILE", "originId": "grp_2",
+		"participantId": "user_002",
+	}, ""))
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("two-person GROUP must be rejected (protection downgrade), got %s", result.Outcome)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "GROUP_REQUIRES_MULTIPLE_PARTICIPANTS" {
+		t.Fatalf("expected GROUP_REQUIRES_MULTIPLE_PARTICIPANTS, got %+v", result.Error)
+	}
+}
+
+func TestStartConversationRejectsUnknownConversationType(t *testing.T) {
+	// conversationType 决定消息保护强度，绝不能由客户端任意取值。
+	s := New()
+	result := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"conversationType": "TOTALLY_A_GROUP", "originType": "PROFILE", "originId": "grp_3",
+		"participantIds": []string{"user_002", "user_003"},
+	}, ""))
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("unknown conversationType must be rejected, got %s", result.Outcome)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "INVALID_CONVERSATION_TYPE" {
+		t.Fatalf("expected INVALID_CONVERSATION_TYPE, got %+v", result.Error)
+	}
+}
+
+func TestStartConversationDedupesGroupParticipants(t *testing.T) {
+	s := New()
+	result := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"conversationType": "GROUP", "originType": "PROFILE", "originId": "grp_4",
+		// 故意重复，并把本人也列进来 —— 结果应折叠成 3 人。
+		"participantIds": []string{"user_002", "user_003", "user_002", "user_001"},
+	}, ""))
+	conv, _ := s.repository.GetConversation(context.Background(), groupConversationID(t, s, result))
+	if len(conv.Participants) != 3 {
+		t.Fatalf("duplicates and the actor must collapse to 3, got %v", conv.Participants)
+	}
+}
+
+func TestStartConversationRejectsTooManyParticipants(t *testing.T) {
+	s := New()
+	tooMany := make([]string, 0, maxGroupParticipants+1)
+	for i := 0; i <= maxGroupParticipants; i++ {
+		tooMany = append(tooMany, "user_"+strconv.Itoa(10000+i))
+	}
+	result := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"conversationType": "GROUP", "originType": "PROFILE", "originId": "grp_5",
+		"participantIds": tooMany,
+	}, ""))
+	if result.Outcome != "REJECTED" {
+		t.Fatalf("oversized group must be rejected, got %s", result.Outcome)
+	}
+	if result.Error == nil || result.Error.ErrorCode != "TOO_MANY_PARTICIPANTS" {
+		t.Fatalf("expected TOO_MANY_PARTICIPANTS, got %+v", result.Error)
+	}
+}
+
+func TestStartConversationStillAcceptsLegacySingleParticipant(t *testing.T) {
+	// participantId（单数）是既有客户端的写法，必须继续能用，且仍是 2 人 DM。
+	s := New()
+	result := s.Handle(envelopeFor("StartConversation", map[string]any{
+		"originType": "PROFILE", "originId": "profile_legacy", "participantId": "user_002", "firstMessage": "hi",
+	}, ""))
+	conv, _ := s.repository.GetConversation(context.Background(), groupConversationID(t, s, result))
+	if conv.Type != "DM" || len(conv.Participants) != 2 {
+		t.Fatalf("expected 2-person DM, got %s %v", conv.Type, conv.Participants)
 	}
 }

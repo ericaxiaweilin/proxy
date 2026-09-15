@@ -32,6 +32,7 @@ import {
   loadCustomHistory,
   saveCustomLocation
 } from "./location-store";
+import type { DeviceLocationState } from "../device-location";
 
 export { DEFAULT_LOCATION, LOCATION_OPTIONS };
 export type { Location, CustomLocation, PresetLocation, AnyLocation, CustomLocationFields, ReverseGeocodeShape };
@@ -44,15 +45,51 @@ export { gridToLatLng, formatLocationTitle, formatRadius, reverseGeocode };
 
 type Tab = "PRESET" | "CUSTOM" | "HISTORY";
 
+// DEVICE-LOCATION-001：设备跟随那一行的文案。
+//
+// 每一态都要有自己的说法 —— 「没授权」不能写成「跟随中」，「不可用」
+// 不能看起来像「已关闭」。失败必须长得像失败（全仓一贯口径）。
+function describeDeviceRow(
+  state: DeviceLocationState,
+  following: boolean
+): { title: string; desc: string; action: string; next: boolean; enabled: boolean } {
+  switch (state.kind) {
+    case "permission_denied":
+      // 不写「去设置」—— 那是个会承诺动作却不发生的按钮。如实说未授权。
+      return { title: "跟随我的位置", desc: "系统定位未授权 · 现在用的是手动选点", action: "未授权", next: true, enabled: false };
+    case "unavailable":
+      return { title: "跟随我的位置", desc: `定位不可用 · ${state.message}`, action: "不可用", next: true, enabled: false };
+    case "acquiring":
+      return following
+        ? { title: "跟随我的位置", desc: "正在定位…", action: "关闭", next: false, enabled: true }
+        : { title: "跟随我的位置", desc: "正在定位…", action: "定位中", next: true, enabled: false };
+    case "tracking":
+      return following
+        ? { title: "跟随我的位置", desc: "已跟随 · 移动后自动更新", action: "关闭", next: false, enabled: true }
+        : { title: "跟随我的位置", desc: "当前是手动选点 · 开启后跟随设备", action: "开启", next: true, enabled: true };
+    default:
+      return { title: "跟随我的位置", desc: "开启后跟随设备位置 · 仅城市 / 区域，不用精确定位", action: "开启", next: true, enabled: true };
+  }
+}
+
 export function LocationPickerSheet({
   open,
   current,
   baseUrl,
+  deviceState,
+  followDevice,
+  onFollowDevice,
   onSelect,
   onClose
 }: {
   open: boolean;
   current: AnyLocation;
+  // DEVICE-LOCATION-001: 设备跟随。三个都可选 —— ComposerV2Screen 这类
+  // 调用点不传就完全不渲染这一行（向后兼容，不加半截 UI）。
+  deviceState?: DeviceLocationState;
+  followDevice?: boolean;
+  /** 传 true 开启跟随 / false 关闭。是真开关，不是只能开的单向按钮。 */
+  onFollowDevice?: (next: boolean) => void;
   // R15.32.1.3: baseUrl is used by the custom-tab reverse geocode
   // lookup. We call Proxy's own /v1/geocode/reverse so the result
   // is observable / cacheable from the server side, and we don't
@@ -63,6 +100,7 @@ export function LocationPickerSheet({
   onSelect: (next: AnyLocation) => void;
   onClose: () => void;
 }): React.JSX.Element {
+  const deviceRow = deviceState && onFollowDevice ? describeDeviceRow(deviceState, followDevice === true) : undefined;
   const [tab, setTab] = useState<Tab>(current.kind === "CUSTOM" ? "CUSTOM" : "PRESET");
   const [history, setHistory] = useState<CustomLocation[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -232,7 +270,7 @@ export function LocationPickerSheet({
           <View style={styles.head}>
             <Text style={styles.headTitle}>切换本地范围</Text>
             <Text style={styles.headSub}>
-              影响首页、动态、推荐与机会的本地筛选 · 仅城市/区域，不会反向定位你
+              影响首页、动态、推荐与机会的本地筛选 · 仅城市/区域，位置只用于本机筛选
             </Text>
           </View>
 
@@ -245,6 +283,26 @@ export function LocationPickerSheet({
 
           {tab === "PRESET" ? (
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+              {/* DEVICE-LOCATION-001：设备跟随。没传 deviceState 的调用点
+                  （ComposerV2Screen 等）这一行整个不渲染。 */}
+              {deviceRow && onFollowDevice ? (
+                <Pressable
+                  accessibilityLabel="跟随我的位置"
+                  accessibilityRole="button"
+                  disabled={!deviceRow.enabled}
+                  onPress={() => onFollowDevice(deviceRow.next)}
+                  style={[styles.opt, followDevice === true && styles.optActive]}
+                >
+                  <View style={[styles.optIcon, followDevice === true && styles.optIconActive]}>
+                    <ProxyIcon color={followDevice === true ? color.white : color.ink} name="route" size={24} />
+                  </View>
+                  <View style={styles.optCopy}>
+                    <Text style={styles.optTitle}>{deviceRow.title}</Text>
+                    <Text style={styles.optDesc}>{deviceRow.desc}</Text>
+                  </View>
+                  <Text style={styles.optAction}>{deviceRow.action}</Text>
+                </Pressable>
+              ) : null}
               {LOCATION_OPTIONS.map((option) => {
                 const active = presetCurrentId === option.id;
                 return (

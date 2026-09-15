@@ -368,7 +368,11 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc: string; ico
         { label: "邀请好友", value: "链接或二维码邀请" },
         { label: "通讯录", value: "授权后只做匹配" },
         { label: "社媒好友", value: "Facebook / TikTok / IG / Zalo" },
-        { label: "搜索 Proxy", value: "昵称、Proxy ID、手机号" }
+        // ADD-FRIEND-PHONE-COPY-001: 与 friend-crm「添加方式」列表是同一处承诺 ——
+        // 手机号搜索还没落地（没有「允许被手机号搜到」的授权开关，后端也没有）。
+        // 这张表的 sections 目前还没有渲染方（只有 title/desc/icon 经 meSubPage 被
+        // 用上），但一旦接上就会把不存在的手机号搜索讲给用户，所以先在源头对齐。
+        { label: "搜索 Proxy", value: "昵称、Proxy ID" }
       ]}
     ]
   },

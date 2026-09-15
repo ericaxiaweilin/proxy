@@ -28,6 +28,8 @@ export type AuthorAvatarOptions = {
   baseUrl: string;
   viewerAccountId?: string | undefined;
   viewerAvatarUri?: string | undefined;
+  /** 本人帖子直接传入的头像 source（优先级高于 profileStore 解析），确保与个人主页一致。 */
+  avatarSource?: number | { uri: string } | undefined;
   /** AI 账号表（accountId → 账号），动态按需加载后传入。 */
   aiAccountsById?: ReadonlyMap<string, AvatarAccount> | undefined;
   /** 首字 fallback 用名（已解析的展示名）。 */
@@ -35,8 +37,9 @@ export type AuthorAvatarOptions = {
 };
 
 export function resolveAuthorAvatar(author: AvatarAuthor, opts: AuthorAvatarOptions): AuthorAvatar {
-  if (opts.viewerAccountId && author.authorId === opts.viewerAccountId && opts.viewerAvatarUri) {
-    return { kind: "image", source: { uri: opts.viewerAvatarUri } };
+  if (opts.viewerAccountId && author.authorId === opts.viewerAccountId && (opts.viewerAvatarUri || opts.avatarSource)) {
+    const source = opts.avatarSource ?? (opts.viewerAvatarUri ? { uri: opts.viewerAvatarUri } : undefined);
+    if (source !== undefined) return { kind: "image", source };
   }
   if (author.authorType === "AGENT" && opts.aiAccountsById) {
     const account = opts.aiAccountsById.get(author.authorId);

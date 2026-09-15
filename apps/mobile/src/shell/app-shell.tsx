@@ -26,6 +26,11 @@ import {
   type PresetLocation
 } from "../components/location-picker-sheet";
 import { loadActiveCustomId, loadCustomHistory } from "../components/location-store";
+import { makeDeviceLocation } from "../components/location-options";
+// DEVICE-LOCATION-001: 位置要跟着人走。device-location.ts 是纯逻辑（可单测），
+// device-location-native.ts 是全仓唯一 import expo-location 的地方。
+import { startDeviceLocationWatch, type DeviceLocationState } from "../device-location";
+import { expoLocationApi } from "../device-location-native";
 import { type ConversationClient } from "../conversation-client";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
@@ -176,7 +181,11 @@ export function AppShell({
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
-  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string }>();
+  // CONVO-OPEN-001: convoId = 消息支线。支线是**主线 DM 里的一个分支**，所以两个 id
+  // 要一起带：conversationId 是父母会话（ConvoSummary.convo.parentDialogId），
+  // convoId 是分支本身。少了 convoId，ConversationSurface 只会打开主线 —— 而入口上
+  // 写着「打开 Convo」。
+  const [messageChat, setMessageChat] = useState<{ author: string; conversationId?: string; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string }; initialDraft?: string; convoId?: string; convoTitle?: string }>();
   const [openAIProfile, setOpenAIProfile] = useState<PlatformAIAccount>();
   const [openHumanProfile, setOpenHumanProfile] = useState<OtherProfileTarget>();
   const [viewerAccountId, setViewerAccountId] = useState<string>();
@@ -300,6 +309,15 @@ export function AppShell({
   // 计算，仅在渲染时计算一次 (避免在 LocationContext 重复)。
   const [currentLocation, setCurrentLocation] = useState<AnyLocation>(DEFAULT_LOCATION);
   const [locationSheetOpen, setLocationSheetOpen] = useState(false);
+  // DEVICE-LOCATION-001: 设备定位。
+  //   deviceLocationState —— 五个状态分得清：没授权 / 定位中 / 跟随中 / 不可用 / 停了。
+  //     「没授权」「不可用」绝不能显示成「河内 · 还剑湖附近」那种"看起来成功了"的样子。
+  //   followDevice —— 是否用设备位置覆盖当前范围。用户手动选过地点就关掉（手动优先）。
+  //   locationRestoreDone —— 上次保存的自定义地点读完之前不启动跟随，否则会出现
+  //     "先被设备覆盖、用户手动选的地点又被吃掉" 的竞态。
+  const [deviceLocationState, setDeviceLocationState] = useState<DeviceLocationState>({ kind: "idle" });
+  const [followDevice, setFollowDevice] = useState(true);
+  const [locationRestoreDone, setLocationRestoreDone] = useState(false);
   const [realitySceneOpen, setRealitySceneOpen] = useState(false);
   const [realitySceneSelection, setRealitySceneSelection] = useState<string>();
   const [realitySceneAI, setRealitySceneAI] = useState<PlatformAIAccount>();
@@ -317,10 +335,43 @@ export function AppShell({
       if (cancelled || !activeId) return;
       const items = await loadCustomHistory();
       const found = items.find((entry) => entry.id === activeId);
-      if (!cancelled && found) setCurrentLocation(found);
-    })();
+      if (cancelled) return;
+      // 有存过的手动地点 = 用户自己选过，手动优先：关掉跟随，别拿设备位置盖掉。
+      if (found) { setCurrentLocation(found); setFollowDevice(false); }
+    })().finally(() => { if (!cancelled) setLocationRestoreDone(true); });
     return () => { cancelled = true; };
   }, []);
+
+  // DEVICE-LOCATION-001：订阅设备位置，人走几公里就刷新几次。
+  //
+// 现成方案 = expo-location 的 watchPositionAsync。既有用法（market /
+// reality-scene-map / map-canvas）都是按钮触发的一次性 getCurrentPositionAsync，
+// 取完就完 —— 所以必须自己订阅。
+// DistanceInterval 1000m + 低精度：对"移动几公里要更新"正好够，省电，也
+// 不碰精确定位那条需要服务端同意的线（/v1/location/consent 是另一条路）。
+  //
+  // 同意：iOS 的「使用 App 期间」系统弹窗本身就是法规要求的同意 UI，
+  // 没拿到授权就停在 permission_denied —— 不静默降级、不拿旧坐标假装。
+  useEffect(() => {
+    if (!locationRestoreDone || !followDevice) return;
+    let cancelled = false;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      stop = await startDeviceLocationWatch({
+        location: expoLocationApi,
+        onState: (next) => {
+          if (cancelled) return;
+          setDeviceLocationState(next);
+          // 只有真的拿到坐标才改当前范围；其余状态只影响提示文案。
+          if (next.kind === "tracking") {
+            setCurrentLocation(makeDeviceLocation(next.latitude, next.longitude, next.address ? { address: next.address } : {}));
+          }
+        }
+      });
+      if (cancelled) stop();
+    })();
+    return () => { cancelled = true; stop?.(); };
+  }, [locationRestoreDone, followDevice]);
 
   // 规范 §4/§13：Android 硬件返回 = 退整个模块，不逐页退（模块内层级由
   // useModuleBackHandler 注册栈先消费）。顺序即最上层优先：后挂载的 Tab 状态先判。
@@ -468,6 +519,7 @@ export function AppShell({
         {isNavVisible && (tab === "HOME" || tab === "MESSAGES") ? (
           <LocationContext
             location={currentLocation}
+            deviceState={deviceLocationState}
             onOpenSceneMap={() => setRealitySceneOpen(true)}
             onSwitchLocation={() => setLocationSheetOpen(true)}
           />
@@ -736,6 +788,8 @@ export function AppShell({
               {...(messageChat?.aiAccount ? { aiAccount: messageChat.aiAccount } : {})}
               {...(messageChat?.avatarSource ? { peerAvatarSource: messageChat.avatarSource } : {})}
               {...(messageChat?.initialDraft ? { initialDraft: messageChat.initialDraft } : {})}
+              {...(messageChat?.convoId ? { convoId: messageChat.convoId } : {})}
+              {...(messageChat?.convoTitle ? { convoTitle: messageChat.convoTitle } : {})}
               {...(ensureConversationSession ? { ensureSession: ensureConversationSession } : {})}
               conversationClient={conversation}
               activityClient={activities}
@@ -744,7 +798,7 @@ export function AppShell({
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenAddFriend={() => { setMeOpenSubPage(meSubPage("addfriend")); goToPage("ME"); }} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenAddFriend={() => { setMeOpenSubPage(meSubPage("addfriend")); goToPage("ME"); }} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onOpenConvo={(author, conversationId, convoId, convoTitle) => setMessageChat({ author, conversationId, convoId, convoTitle })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -811,8 +865,15 @@ export function AppShell({
         <LocationPickerSheet
           current={currentLocation}
           baseUrl={localApiBaseUrl}
+          deviceState={deviceLocationState}
+          followDevice={followDevice}
+          onFollowDevice={(next) => setFollowDevice(next)}
           onClose={() => setLocationSheetOpen(false)}
-          onSelect={setCurrentLocation}
+          onSelect={(next) => {
+            // 手动选地点 = 用户明确要这个范围，跟随让位（否则下一次回调又把它冲掉）。
+            setFollowDevice(false);
+            setCurrentLocation(next);
+          }}
           open={locationSheetOpen}
         />
       </View>
@@ -877,16 +938,27 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
 // 自定义位置的坐标只用于数据层和地图定位；摘要层只呈现用户可理解的覆盖范围。
 function LocationContext({
   location,
+  deviceState,
   onOpenSceneMap,
   onSwitchLocation
 }: {
   location: AnyLocation;
+  deviceState: DeviceLocationState;
   onOpenSceneMap: () => void;
   onSwitchLocation: () => void;
 }): React.JSX.Element {
+  // DEVICE-LOCATION-001：副标题要能区分「跟随中」「定位中」「没授权」「不可用」——
+  // 四者不许长得一样，更不许失败态伪装成成功的样子。
+  const deviceSub =
+    deviceState.kind === "acquiring" ? "正在定位… · 拿到位置后自动更新"
+    : deviceState.kind === "permission_denied" ? "定位未授权 · 点「切换⌄」手动选或重新授权"
+    : deviceState.kind === "unavailable" ? `定位不可用 · ${deviceState.message}`
+    : "";
   const sub = location.kind === "CUSTOM"
     ? `地图选点 · 覆盖范围 ${formatRadius(location.custom.radiusMeters)}`
-    : "你正在看的本地范围 · 仅城市 / 区域";
+    : location.kind === "DEVICE"
+      ? (deviceSub || "跟随你的位置 · 移动后自动更新 · 仅城市 / 区域")
+      : (deviceSub || "你正在看的本地范围 · 仅城市 / 区域");
   return (
     <View style={styles.locationRow}>
     <Pressable

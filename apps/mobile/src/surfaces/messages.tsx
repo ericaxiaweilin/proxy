@@ -11,7 +11,7 @@ import { FolderManager, type FolderV1 } from "../components/folder-manager";
 import { parseCommandResult } from "../login-client";
 import { ProxyIcon } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
-import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
+import type { ConversationClient, ConversationInboxItem, ConvoSummary } from "../conversation-client";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { dedupeInboxDialogs } from "../conversation-inbox-model";
@@ -67,6 +67,14 @@ export interface FolderMediaItem {
   timestampMs: number;
   timeText: string;
 }
+// CONVO-LIST-001: Convo 的时间戳。解析不出来显示 —，不留空、不显示 0 ——
+// 未知和「就是现在」不能长得一样。
+function convoTimeText(iso: string): string {
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  return new Date(ms).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function dayBucket(timestampMs: number): "今天" | "昨天" | "更早" {
   if (!timestampMs) return "更早";
   const now = new Date();
@@ -181,6 +189,7 @@ export function MessagesSurface({
   onOpenRequests,
   onOpenContacts,
   onOpenAddFriend,
+  onOpenConvo,
   onChromeVisibilityChange,
   bottomNavVisible,
   displayIdentityClient,
@@ -196,6 +205,10 @@ export function MessagesSurface({
   // ADD-FRIEND-FROM-MESSAGES-001: 「新聊天」里找还没聊过的人。没有它就只能
   // 在本机收件箱里找人 —— 那是「找人聊天」，不是「加好友」。
   onOpenAddFriend?: (() => void) | undefined;
+  // CONVO-OPEN-001: 从 Convo 列表打开一条**支线**。它比 onOpenConversation 多带
+  // convoId + convoTitle —— 少了 convoId，shell 只会按普通 DM 打开主线，而这一行的
+  // 无障碍标签写着「打开 Convo」。列表里能看见支线、点开却落在主线，等于没接线。
+  onOpenConvo?: ((author: string, conversationId: string, convoId: string, convoTitle: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
   // 这里曾声明过一个 "CHAT" | "FRIENDS" 的初始 tab：app-shell 一直在传，本组件
@@ -220,6 +233,9 @@ export function MessagesSurface({
   // ADD-FRIEND-FROM-MESSAGES-001: 加好友入口没接通时把话说出来，
   // 不能点下去什么都不发生 —— 静默的死按钮和「没这个人」长得一样。
   const [addFriendNotice, setAddFriendNotice] = useState("");
+  // CONVO-OPEN-001: 支线入口没接通时把话说出来 —— 同 addFriendNotice，
+  // 静默的死按钮和「这条支线不存在」长得一样。
+  const [convoNotice, setConvoNotice] = useState("");
   // 文件夹页类型筛选：全部/照片/视频。
   const [folderKind, setFolderKind] = useState<"all" | FolderMediaKind>("all");
   // chips 行内新建：展开输入行，创建后收起并选中新文件夹。
@@ -227,6 +243,12 @@ export function MessagesSurface({
   const [folderCreateName, setFolderCreateName] = useState("");
   // 自建文件夹：选中过滤成员，移入移出落盘。
   const [folders, setFolders] = useState<FolderV1[]>([]);
+  // CONVO-LIST-001: 我的 Convo（消息支线）。ConversationClient.listMyConvos 一直是
+  // 「建好了没人调」—— createConvo 能从一条消息分叉出支线，但分叉完**永远看不到它**。
+  // 三态分开：undefined 还没拉 / [] 真的一条都没有 / failed 拉失败。三者不许长得一样。
+  const [myConvos, setMyConvos] = useState<ConvoSummary[] | undefined>(undefined);
+  const [myConvosFailed, setMyConvosFailed] = useState(false);
+  const [myConvosNonce, setMyConvosNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void readFoldersAsync().then((stored) => {
@@ -240,6 +262,24 @@ export function MessagesSurface({
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
+  // CONVO-LIST-001: 进 Convo 页时拉我的支线。失败必须自己说出来 ——
+  // 把拉取失败画成空列表，用户会以为自己从没开过支线（和「还没有」是两回事）。
+  useEffect(() => {
+    if (panel !== "convos" || !conversationClient) return;
+    let cancelled = false;
+    setMyConvos(undefined);
+    setMyConvosFailed(false);
+    void (async () => {
+      try {
+        const rows = await conversationClient.listMyConvos();
+        if (!cancelled) setMyConvos(rows);
+      } catch {
+        if (!cancelled) setMyConvosFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [panel, conversationClient, myConvosNonce]);
+
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   function persistFolders(next: FolderV1[]): void {
     setFolders(next);
@@ -422,6 +462,14 @@ export function MessagesSurface({
     onOpenAddFriend();
     return true;
   };
+  // CONVO-OPEN-001: 打开一条支线。必须把 convoId 一起交出去 —— 只带 parentDialogId
+  // 的话 shell 会按普通 DM 打开，用户点「打开 Convo」却落在主线，支线内容一条都看不到。
+  // 同 openAddFriend：没人接的时候不静默，返回 false 让调用点自己说清楚。
+  const openConvo = (author: string, conversationId: string, convoId: string, convoTitle: string): boolean => {
+    if (!onOpenConvo) return false;
+    onOpenConvo(author, conversationId, convoId, convoTitle);
+    return true;
+  };
   // 联系人详情带上会话上下文：名字 + 最近消息 + 会话 id，
   // “消息”按钮直达该会话，不断链；在线/username/手机号之前是现编的，已去掉。
   const [personCtx, setPersonCtx] = useState<{ name: string; preview?: string | undefined; time?: string | undefined; conversationId?: string | undefined; aiAccount?: PlatformAIAccount; avatarSource?: number | { uri: string } }>({ name: "" });
@@ -473,7 +521,11 @@ export function MessagesSurface({
           <View style={styles.safe} />
           <View style={styles.topbar}>
             <Pressable onPress={() => setSubView("home")} style={styles.icon}><Text style={styles.backText}>‹</Text></Pressable>
-            <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 / Username</Text></View>
+            {/* CONTACT-SEARCH-COPY-001: 副标题正压在这个搜索框上方，必须和它搜得到的东西一致。
+                这一页只搜「姓名 + 最近一条消息」（见下方 filtered），CONTACTS 里根本没有 username
+                —— 见本段开头注释「不编造 username」。写「/ Username」等于让用户在框里输 @handle
+                却永远搜不到。要找没聊过的人走下面的「添加好友」入口，不在这条搜索里。 */}
+            <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 · 姓名或最近消息</Text></View>
             <View style={styles.icon} />
           </View>
           <View style={styles.contactHeadSearch}>
@@ -669,7 +721,55 @@ export function MessagesSurface({
           </>
         ) : panel === "convos" ? (
           <>
-            <Text style={styles.sectionLabel}>关注的 Convo</Text>
+            {/* CONVO-LIST-001: 这一页以前挂着 Convo 的名字，列出来的却是 GROUP/SUPPORT 会话 ——
+                那些在「对话」页里已经出现过一遍，而真正的 Convo（消息支线）一条都看不到。
+                现在两件事分开：上面是**真的** Convo，下面是群组对话（它带着「＋文件夹」
+                这个唯一入口，所以留着，但如实叫它群组对话）。 */}
+            <Text style={styles.sectionLabel}>我的 Convo</Text>
+            {myConvosFailed ? (
+              <>
+                <Text style={styles.empty}>Convo 加载失败，请检查连接后重试</Text>
+                <Pressable
+                  onPress={() => setMyConvosNonce((n) => n + 1)}
+                  style={[styles.folderChip, { alignSelf: "center", marginTop: 8 }]}
+                  accessibilityLabel="重新加载 Convo"
+                >
+                  <Text style={styles.folderChipText}>重试</Text>
+                </Pressable>
+              </>
+            ) : myConvos === undefined ? (
+              <Text style={styles.empty}>正在加载 Convo…</Text>
+            ) : myConvos.length === 0 ? (
+              <Text style={styles.preview}>还没有 Convo —— 在对话里对一条消息开一条支线，这里就会出现</Text>
+            ) : (
+              myConvos.map((s) => {
+                const parent = visibleDialogs.find((d) => d.conversationId === s.convo.parentDialogId);
+                const parentName = parent?.name ?? "原对话";
+                return (
+                  <Pressable
+                    key={s.convo.id}
+                    onPress={() => setConvoNotice(openConvo(parentName, s.convo.parentDialogId, s.convo.id, s.convo.title || "未命名支线") ? "" : "支线入口还没接通：调用方没有传 onOpenConvo。")}
+                    style={styles.convoCard}
+                    accessibilityLabel={`打开 Convo ${s.convo.title || "未命名支线"}`}
+                  >
+                    <View style={styles.convoHead}>
+                      <View style={styles.convoMark}><ProxyIcon color="#fff" name="chat" size={16} /></View>
+                      <View style={styles.convoCopy}>
+                        <Text style={styles.convoName}>{s.convo.title || "未命名支线"}</Text>
+                        <Text style={styles.convoParent}>在「{parentName}」里 · {s.messageCount} 条</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.convoPreview} numberOfLines={1}>{s.latestBody || s.seedPreview}</Text>
+                    <View style={styles.convoFoot}>
+                      <Text style={styles.convoFootText}>{convoTimeText(s.latestAt || s.convo.createdAt)}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
+            {convoNotice ? <Text style={styles.empty}>{convoNotice}</Text> : null}
+
+            <Text style={styles.sectionLabel}>群组对话</Text>
             {groupDialogs.length === 0 ? (
               <Text style={styles.preview}>还没有群组对话</Text>
             ) : null}
@@ -877,7 +977,7 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
     || (aiAccountNumber !== undefined && account.accountId.match(/^ai_account_0*(\d+)$/)?.[1] === aiAccountNumber));
   const name = aiAccount?.displayName || snapshotName || (item.counterpartyId === "proxy_ai" ? "Proxy AI" : item.counterpartyId) || "对话";
   const avatarRef = item.counterpartySnapshot?.avatarRef?.trim();
-  const avatarSource = aiAccount ? aiAccountPhoto(aiAccount) : avatarRef ? resolveAvatarSource(avatarRef, apiBaseUrl) : undefined;
+  const avatarSource = aiAccount ? aiAccountPhoto(aiAccount) : (avatarRef ? { uri: avatarRef.startsWith("/") ? `${apiBaseUrl ?? ""}${avatarRef}` : avatarRef } : (item.counterpartyId ? { uri: `${apiBaseUrl ?? ""}/v1/media/thumb/${encodeURIComponent("user_" + item.counterpartyId)}` } : undefined));
   const preview = latest
     ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.body?.trim() || "新消息"
     : "暂无消息";

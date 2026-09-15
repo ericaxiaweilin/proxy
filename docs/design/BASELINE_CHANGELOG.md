@@ -4,6 +4,26 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 200 — 2026-09-15
+
+- DEVICE-LOCATION-001 + CONVO-OPEN-001 / merchant-me Proxy 子页与真头像。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx` —— ① 设备定位订阅
+   （expo-location watchPositionAsync，DistanceInterval 1000m + 低精度，不碰
+    精确定位那条需服务端同意的线；手动选过地点就关跟随，上次地点读完前不启动，
+    未授权/不可用停在对应状态绝不伪装成成功）；LocationContext 副标题区分
+    跟随中/定位中/没授权/不可用四态文案；LocationPickerSheet 多透传设备状态与
+    跟随开关。② Convo 支线打开：messageChat 多带 convoId/convoTitle，
+    MessagesSurface 新增 onOpenConvo。无顶栏/底栏/页面结构、无主题图标改动。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx`
+    —— Proxy 数据页下新增平台通知/政策与规则/认证与资格/支持与申诉四个子页
+    （复用既有 detailHead 与卡片样式；政策文案引用 Decree 248/2026、PDP 91/2025
+    等已生效规则，缺失项明示并指向运营条款补充文档，不编造登记号与资质状态）；
+    店铺头像有真图用真图，无图保持原渐变 + B fallback。无新增导航入口、
+    无列表结构改动。
+  - 其余文件（device-location 纯逻辑与单测、location-options/picker、
+    reality-scene-address、scene 迁移 094–097、conversation/realityscene 服务、
+    messages/me-sub-pages/friend-crm、回归契约脚本）均非基线敏感。
+
 ## Revision 199 — 2026-09-15
 
 - FEED-AVATAR-REMOTE-001 + AVATAR-FLASH-001：动态本人头像黑头两连修。

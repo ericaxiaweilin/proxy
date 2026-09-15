@@ -71,6 +71,8 @@ commands:
     domain: Outcome
   - command: ConfirmPaymentIntent
     domain: Payment
+  - command: ConfirmRealitySceneProposal
+    domain: RealityScene
   - command: ConfirmVoucherRedemption
     domain: Voucher
   - command: CreateAgentProfile
@@ -287,6 +289,8 @@ commands:
     domain: LocalNet
   - command: ListPrivacyRequests
     domain: Identity
+  - command: ListRealitySceneProposals
+    domain: RealityScene
   - command: ListRequesterHomeItems
     domain: Demand
   - command: ListSpendDaily
@@ -327,6 +331,8 @@ commands:
     domain: Demand
   - command: ProcessMediaAsset
     domain: Media
+  - command: ProposeRealityScene
+    domain: RealityScene
   - command: PublishActivity
     domain: Activity
   - command: PublishMarketOpportunity
