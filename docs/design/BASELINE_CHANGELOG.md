@@ -4,6 +4,18 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 199 — 2026-09-15
+
+- FEED-AVATAR-REMOTE-001 + AVATAR-FLASH-001：动态本人头像黑头两连修。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx` —— 只把既有的
+    `profileClient` 多透传给 `FeedSurface`（与 Rev197/198 同 pattern）。
+    无渲染结构、无筛选、无发布链路改动。
+  - **视觉改动**（均在非基线敏感的 `feed.tsx`）：① 本机文件丢失时（重装/清理）
+    按远端指针回退服务端 thumb（与个人主页同一张），替代黑头；② 首帧用内存
+    缓存直出、算不出时画透明占位，替代"黑底闪一下再换照片"。
+    首字 fallback（#111 圆 + 字母）只在确认无照片时画。
+  - 其余文件（profile-store 远端指针字段、clients、隐私/位置鉴权）均非基线敏感。
+
 ## Revision 198 — 2026-09-15
 
 - APPLICANT-PROFILE-001：选人工作台的报名人从截断 ID（`申请人 xxx…`）换成真人

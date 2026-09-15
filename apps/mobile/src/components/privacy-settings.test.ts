@@ -6,7 +6,7 @@
 // verified by manual reload on the simulator (see R16.10
 // e2e checklist in docs/compliance/).
 import { describe, expect, it } from "vitest";
-import { activeRequestOf, formatDate, kindLabel, statusLabel } from "./privacy-settings-helpers";
+import { activeRequestOf, exportCopyFileName, formatDate, kindLabel, sessionStatusLabel, statusLabel, truncateId } from "./privacy-settings-helpers";
 import type { PrivacyRequest, PrivacyRequestStatus } from "../privacy-client";
 
 describe("PrivacySettings helpers", () => {
@@ -70,5 +70,28 @@ describe("PrivacySettings helpers", () => {
     ];
     expect(activeRequestOf(history, "export")).toBeUndefined();
     expect(activeRequestOf(history, "delete")).toBeUndefined();
+  });
+
+  it("PRIVACY-EXPORT-INSPECT-001 export copy filename is sortable and share-safe", () => {
+    // 本地时间、无冒号无空格 —— 分享面板"存储到文件"不会改名，
+    // 文件名本身即时间序。
+    const name = exportCopyFileName(new Date(2026, 8, 15, 13, 58, 1));
+    expect(name).toBe("proxy-data-export-20260915-135801.json");
+    expect(name).not.toMatch(/[:\s]/);
+  });
+
+  it("PRIVACY-EXPORT-INSPECT-001 truncateId keeps rows distinguishable without dumping full ids", () => {
+    expect(truncateId("")).toBe("—");
+    expect(truncateId("short")).toBe("short");
+    expect(truncateId("session_5923dd14adcc2f81c85bfd8f76b2a998")).toBe("session_…");
+  });
+
+  it("PRIVACY-EXPORT-INSPECT-001 sessionStatusLabel never renders blank for unknown states", () => {
+    expect(sessionStatusLabel("ACTIVE")).toBe("在线");
+    expect(sessionStatusLabel("REVOKED")).toBe("已踢出");
+    expect(sessionStatusLabel("EXPIRED")).toBe("已过期");
+    expect(sessionStatusLabel("")).toBe("未知");
+    // 服务端新增状态时客户端不认识 —— 原样显示，不留空白。
+    expect(sessionStatusLabel("SUSPENDED")).toBe("SUSPENDED");
   });
 });

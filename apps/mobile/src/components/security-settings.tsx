@@ -10,7 +10,7 @@
 // （之前点按直接回“我的”，哪儿也没去）。
 
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { color } from "../theme";
 import { ProxySwitch } from "./proxy-foundation";
 import type { SessionWire } from "../session-client";
@@ -24,8 +24,16 @@ export type SessionListClient = {
   revokeSession(sessionId: string): Promise<void>;
 };
 
-function platformLabel(platform: string): string {
-  if (platform === "IOS") return "iPhone / iPad";
+function platformLabel(platform: string, current: boolean): string {
+  // 本机行不猜：手里这台是 iPhone 还是 iPad，标准库 Platform.isPad 说了算。
+  if (current) {
+    if (Platform.OS === "ios") return Platform.isPad === true ? "iPad" : "iPhone";
+    if (Platform.OS === "android") return "安卓手机";
+    return "本机";
+  }
+  // 非本机行服务端只存了 OS 家族（IOS/ANDROID），显示家族不猜机型 ——
+  // 之前的 "iPhone / iPad" 是把不知道的事说成了二选一。
+  if (platform === "IOS") return "iOS 设备";
   if (platform === "ANDROID") return "安卓设备";
   if (platform === "WEB") return "网页端";
   // 空字符串 = 会话还在、设备行没了（保留期清理/历史行）。说「未知」，
@@ -107,10 +115,14 @@ function DeviceList({ client }: { client: SessionListClient | undefined }): Reac
   const [state, setState] = useState<DeviceLoadState>({ kind: "idle" });
   const [revokingId, setRevokingId] = useState<string | undefined>(undefined);
   const [revokeError, setRevokeError] = useState<string | undefined>(undefined);
+  // 历史登录（已踢出/已失效）默认只露 5 行，剩下的折起来 —— 全摊开时
+  // 真正要管的两格在线槽位会被埋没。折叠只藏展示，不丢数据。
+  const [expanded, setExpanded] = useState(false);
 
   const reload = useCallback(async () => {
     if (!client) return;
     setState({ kind: "loading" });
+    setExpanded(false);
     try {
       const sessions = await client.listMySessions();
       setState({ kind: "ready", sessions });
@@ -167,13 +179,23 @@ function DeviceList({ client }: { client: SessionListClient | undefined }): Reac
       </View>
     );
   }
+  // 本机 → 在线 → 历史（新的在前）。折叠后露出的 5 行永远是当下
+  // 要管的：本机和在线槽位排前面，踢出记录沉底。
+  const ordered = [...state.sessions].sort((a, b) => {
+    const rank = (s: SessionWire): number => (s.current ? 0 : s.status === "ACTIVE" ? 1 : 2);
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    return b.issuedAt.localeCompare(a.issuedAt);
+  });
+  const visible = expanded ? ordered : ordered.slice(0, 5);
   return (
     <View style={styles.deviceBox}>
-      {state.sessions.map((session) => (
+      {visible.map((session) => (
         <View key={session.id} style={styles.deviceRow}>
           <View style={styles.deviceInfo}>
             <Text style={styles.deviceName}>
-              {platformLabel(session.platform)}
+              {platformLabel(session.platform, session.current)}
               {session.current ? <Text style={styles.deviceCurrent}> · 本机</Text> : null}
             </Text>
             <Text style={styles.deviceMeta}>
@@ -184,7 +206,7 @@ function DeviceList({ client }: { client: SessionListClient | undefined }): Reac
             <Pressable
               disabled={revokingId === session.id}
               onPress={() => void kick(session.id)}
-              accessibilityLabel={`踢出${platformLabel(session.platform)}`}
+              accessibilityLabel={`踢出${platformLabel(session.platform, session.current)}`}
               style={styles.kickBtn}
             >
               <Text style={styles.kickText}>{revokingId === session.id ? "踢出中…" : "踢出"}</Text>
@@ -193,6 +215,11 @@ function DeviceList({ client }: { client: SessionListClient | undefined }): Reac
         </View>
       ))}
       {revokeError ? <Text style={styles.deviceError}>{revokeError}</Text> : null}
+      {ordered.length > 5 ? (
+        <Pressable onPress={() => setExpanded((v) => !v)} accessibilityLabel={expanded ? "收起历史登录" : `展开全部${ordered.length}条登录记录`} style={styles.retryBtn}>
+          <Text style={styles.retryText}>{expanded ? "‹ 收起" : `展开全部 ${ordered.length} 条 ›`}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

@@ -48,3 +48,30 @@ export function kindLabel(kind: PrivacyRequest["kind"]): string {
 export function activeRequestOf(history: PrivacyRequest[], kind: PrivacyRequest["kind"]): PrivacyRequest | undefined {
   return history.find((r) => r.kind === kind && (r.status === "received" || r.status === "in_progress"));
 }
+
+// exportCopyFileName builds the on-disk name for a saved data copy:
+// proxy-data-export-20260915-135801.json. Local time, filename-safe
+// (no colons, no spaces) so it survives the iOS share sheet and
+// "存到文件" without renaming.
+export function exportCopyFileName(now: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `proxy-data-export-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.json`;
+}
+
+// truncateId shortens long technical ids for list rows. The full id stays
+// in the saved JSON copy — the row only needs enough to tell entries apart.
+export function truncateId(id: string): string {
+  if (!id) return "—";
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+// sessionStatusLabel maps session/device lifecycle states to user words.
+// Unknown states render as-is (never blank): a state the client does not
+// know is still a fact about the account.
+export function sessionStatusLabel(status: string): string {
+  if (status === "ACTIVE") return "在线";
+  if (status === "REVOKED") return "已踢出";
+  if (status === "EXPIRED") return "已过期";
+  if (!status) return "未知";
+  return status;
+}

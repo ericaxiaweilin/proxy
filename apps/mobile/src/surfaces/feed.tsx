@@ -17,6 +17,7 @@ import { localApiBaseUrl } from "../native-clients";
 import { resolveAuthorAvatar, type AvatarAccount } from "../media/author-avatar";
 import { mapEngagementError, mapFollowError } from "./feed-error-map";
 import { type EngagementClient } from "../engagement-client";
+import type { ProfileClient } from "../profile-client";
 import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
 import { FilterChipRail } from "../components/filter-chip-rail";
@@ -69,6 +70,11 @@ let cachedPostIds: Set<string> = new Set();
 // 自己的帖子也显示黑头——现在本人帖子用真头像，他人暂无来源仍用首字 fallback。
 // PROFILE-READ-001: 按账户隔离，和 me 页同一 key 规则（组件内 useMemo 实例）。
 const FEED_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
+
+// AVATAR-FLASH-001: 上次解析出的本人头像 URI（带所属账户）。首帧同步初值用它，
+// 切 tab 再回来不闪；effect 照常异步重验，不一致就纠正（换头像后最多闪一帧旧图，
+// 不闪黑）。按账户 key，切换账号不串。
+let cachedViewerAvatar: { accountId: string; uri: string } | undefined;
 
 // 种子媒体资产固定 ID（后端 seedPostgresMedia 幂等写入，READY）。
 
@@ -150,6 +156,7 @@ export function FeedSurface({
   onOpenChat,
   onOpenFeedPrefs,
   viewerAccountId,
+  profileClient,
   aiAccountsClient,
   onOpenRealityScene,
   onOpenProfile,
@@ -172,6 +179,9 @@ export function FeedSurface({
   onOpenFeedPrefs: () => void;
   // 本人账号 id：用于判定“自己的帖子”并显示真头像；没有则退回名字判断。
   viewerAccountId?: string | undefined;
+  // FEED-AVATAR-REMOTE-001: 本机头像文件丢失时（重装/清理）向服务端要回
+  // 远端指针。缺省则只用到本地记录为止，之后是首字。
+  profileClient?: ProfileClient | undefined;
   // MEDIA-PIPELINE-001: AI 账号目录，用于解析 AGENT 帖头像；缺省则 AI 帖走首字。
   aiAccountsClient?: AIAccountClient | undefined;
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
@@ -242,29 +252,82 @@ export function FeedSurface({
     if (initialSearchQuery) onSearchSeedConsumed?.();
   }, []);
   const [viewer, setViewer] = useState<{ postId: string; index: number } | null>(null);
-  // 本人头像 URI（与个人总管理同源）：mount 时读一次，换头像后切 Tab
-  // 重挂即刷新。读不到/文件不存在就保持 undefined，走首字 fallback。
-  const [viewerAvatarUri, setViewerAvatarUri] = useState<string | undefined>(undefined);
+  // 本人头像 URI：首帧用模块缓存同步初值（AVATAR-FLASH-001），不闪黑；
+  // effect 照常异步重验并纠正。
+  const [viewerAvatarUri, setViewerAvatarUri] = useState<string | undefined>(
+    () => (cachedViewerAvatar && viewerAccountId && cachedViewerAvatar.accountId === viewerAccountId ? cachedViewerAvatar.uri : undefined)
+  );
+  const [viewerAvatarLoaded, setViewerAvatarLoaded] = useState<boolean>(false);
   const feedProfileStore = useMemo(
     () => createProfileStore(nativeSecureStorageDriver, viewerAccountId),
     [viewerAccountId]
   );
   useEffect(() => {
     let active = true;
-    void feedProfileStore.read().then((record) => {
-      if (!active || !record?.avatarPath) return;
-      const name = avatarFileName(record.avatarPath);
+    setViewerAvatarLoaded(false);
+    void feedProfileStore.read().then(async (record) => {
+      if (!active) return;
+      const thumbOf = (pointer: string): string | undefined => {
+        const id = pointer.startsWith("assets/") ? pointer.slice("assets/".length).trim() : "";
+        return id ? `${localApiBaseUrl}/v1/media/thumb/${encodeURIComponent(id)}` : undefined;
+      };
+      const done = (uri: string | undefined): void => {
+        if (!active) return;
+        // 首帧缓存：解析出真图就记住，下次 mount 同步初值不再闪黑。
+        if (uri && viewerAccountId) cachedViewerAvatar = { accountId: viewerAccountId, uri };
+        setViewerAvatarUri(uri);
+        setViewerAvatarLoaded(true);
+      };
+      const stored = record?.avatarPath ?? "";
+      if (!stored) {
+        // 无头像记录：保持 undefined 走首字。注意不能构造 user_<accountId>
+        // 别名 URL —— 服务端 thumb 路由只认真实 media id（ResolveServingPath
+        // 直接 GetAsset），别名必 404，一张必坏的图还不如首字。
+        done(undefined);
+        return;
+      }
+      // 1) 本机文件命中直接用（离线可读，无需网络）。
+      const name = avatarFileName(stored);
       try {
         const names = new Set(FEED_AVATAR_DIR.list().map((entry) => entry.name));
         if (names.has(name)) {
-          if (active) setViewerAvatarUri(new File(FEED_AVATAR_DIR, name).uri);
+          done(new File(FEED_AVATAR_DIR, name).uri);
+          return;
         }
       } catch {
-        // 目录不可读则保持 fallback，不打断动态。
+        // 目录不可读：往下走远端回退，不崩。
       }
-    }).catch(() => undefined);
+      // 2) 本地记录里的远端指针（重装后文件没了、keychain 记录还在的情形）。
+      // FEED-AVATAR-REMOTE-001: 指针与本机文件名分开存（profileStore.remoteAvatarPath），
+      // 远端 assets/<mediaId> 永远对不上 avatar-<ts>.jpg —— 对不上就回退服务端
+      // thumb（与个人主页同一张），不留黑头。
+      const known = thumbOf(record?.remoteAvatarPath ?? "");
+      if (known) {
+        done(known);
+        return;
+      }
+      // 3) 现场向服务端要回远端指针（与个人主页同一张），并写回记录自愈 ——
+      // 下次连这一步都省了。拿不到就首字，不黑头。
+      if (profileClient && viewerAccountId) {
+        try {
+          const remote = await profileClient.getProfile(viewerAccountId);
+          if (!active) return;
+          if (remote.avatarPath) {
+            const existing = await feedProfileStore.read().catch(() => undefined);
+            if (existing) {
+              void feedProfileStore.write({ ...existing, remoteAvatarPath: remote.avatarPath }).catch(() => undefined);
+            }
+          }
+          done(thumbOf(remote.avatarPath));
+          return;
+        } catch {
+          // 远端也拿不到：往下走首字。
+        }
+      }
+      done(undefined);
+    }).catch(() => { if (active) setViewerAvatarLoaded(true); });
     return () => { active = false; };
-  }, [feedProfileStore]);
+  }, [feedProfileStore, profileClient, viewerAccountId]);
   // MEDIA-PIPELINE-001: AI 账号目录（accountId → 账号），用于解析 AGENT
   // 帖头像。mount 拉一次；失败/缺 client 则 AI 帖走首字，不打断列表。
   const [aiAccountsById, setAiAccountsById] = useState<ReadonlyMap<string, AvatarAccount>>(new Map());
@@ -1191,7 +1254,11 @@ export function FeedSurface({
                 >
                 <View style={styles.postAvatarWrap}>
                   <View style={styles.postAvatarClip}>
-                    {avatar.kind === "image" ? (
+                    {isOwnPost(post) && !viewerAvatarLoaded && viewerAvatarUri === undefined ? (
+                      // AVATAR-FLASH-001: 头像还没算出来时不画 #111 黑底占位 ——
+                      // 那个"黑头闪一下再换照片"就是它。透明占位同尺寸，不抖。
+                      <View style={[styles.postAvatar, { backgroundColor: "transparent" }]} />
+                    ) : avatar.kind === "image" ? (
                       <CircularAvatarImage accessibilityLabel={`${name}头像`} size={44} source={avatar.source} />
                     ) : (
                       <View style={styles.postAvatar}>

@@ -201,3 +201,40 @@ describe("AVATAR-SAVE-002 server round-trip keeps the local avatar", () => {
     expect(merged.avatarPath).toBe("avatar-777.jpg");
   });
 });
+
+describe("FEED-AVATAR-REMOTE-001 merge keeps the server avatar pointer", () => {
+  const base = {
+    name: "Huyen",
+    handle: "huyen.hanoi",
+    bio: "hi",
+    city: "河内",
+    updatedAt: "2026-09-12T00:00:00.000Z"
+  };
+  it("stores the remote pointer alongside the kept local file", () => {
+    // 重装后本机文件没了、keychain 记录还在 —— feed 靠这个指针回退服务端
+    // thumb，而不是黑头。本地文件名照旧保留（离线可读）。
+    const merged = mergeRemoteProfile(
+      { ...base, avatarPath: "assets/ma_0dff" },
+      { ...base, avatarPath: "avatar-user_x-123.jpg", updatedAt: "2026-09-11T00:00:00.000Z" }
+    );
+    expect(merged.avatarPath).toBe("avatar-user_x-123.jpg");
+    expect(merged.remoteAvatarPath).toBe("assets/ma_0dff");
+    expect(isProfileRecord(merged)).toBe(true);
+  });
+
+  it("refreshes a stale pointer when the server avatar changes", () => {
+    const merged = mergeRemoteProfile(
+      { ...base, avatarPath: "assets/ma_new" },
+      { ...base, avatarPath: "avatar-user_x-123.jpg", remoteAvatarPath: "assets/ma_old", updatedAt: "2026-09-11T00:00:00.000Z" }
+    );
+    expect(merged.remoteAvatarPath).toBe("assets/ma_new");
+  });
+
+  it("keeps the old pointer when the server profile temporarily has none", () => {
+    const merged = mergeRemoteProfile(
+      { ...base, avatarPath: undefined },
+      { ...base, avatarPath: "avatar-user_x-123.jpg", remoteAvatarPath: "assets/ma_old", updatedAt: "2026-09-11T00:00:00.000Z" }
+    );
+    expect(merged.remoteAvatarPath).toBe("assets/ma_old");
+  });
+});

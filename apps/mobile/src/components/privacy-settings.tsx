@@ -15,14 +15,15 @@
 // Errors are surfaced inline so the user can retry without leaving
 // the page; the parent surface does not need to handle them.
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, Share, StyleSheet, Text, View } from "react-native";
+import { documentDirectory, writeAsStringAsync } from "expo-file-system/legacy";
 import { color } from "../theme";
 import type {
   PrivacyClient,
   PrivacyExportEnvelope,
   PrivacyRequest
 } from "../privacy-client";
-import { activeRequestOf, formatDate, kindLabel, statusLabel } from "./privacy-settings-helpers";
+import { activeRequestOf, exportCopyFileName, formatDate, kindLabel, sessionStatusLabel, statusLabel, truncateId } from "./privacy-settings-helpers";
 
 export type PrivacySettingsProps = {
   client: PrivacyClient;
@@ -43,6 +44,9 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
   const [history, setHistory] = useState<PrivacyRequest[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // PRIVACY-EXPORT-INSPECT-001: 导出不能只给计数 —— 访问权要的是可检查的副本。
+  const [showExportDetail, setShowExportDetail] = useState(false);
+  const [saveState, setSaveState] = useState<{ kind: "idle" } | { kind: "saving" } | { kind: "saved"; name: string } | { kind: "failed"; message: string }>({ kind: "idle" });
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -129,6 +133,27 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
   const activeDelete = activeRequestOf(history, "delete");
   const activeExport = activeRequestOf(history, "export");
 
+  // 把刚拿到的副本写成 JSON 文件并打开系统分享面板 —— 用户从那里"存储到
+  // 文件"即完成下载（7 天下载期承诺的落点）。文件留在应用文档目录，
+  // 分享被取消也不影响已写好的副本。
+  const onSaveCopy = useCallback(async () => {
+    if (!exportData || busy !== null) return;
+    setBusy("save");
+    setSaveState({ kind: "saving" });
+    try {
+      const name = exportCopyFileName(new Date());
+      const uri = `${documentDirectory ?? ""}${name}`;
+      if (!documentDirectory) throw new Error("no document directory");
+      await writeAsStringAsync(uri, JSON.stringify(exportData, null, 2));
+      await Share.share({ url: uri, message: "Proxy 个人数据副本" });
+      setSaveState({ kind: "saved", name });
+    } catch {
+      setSaveState({ kind: "failed", message: "副本没存下来 —— 文件没写出来或分享被中断，请重试。" });
+    } finally {
+      setBusy(null);
+    }
+  }, [exportData, busy]);
+
   return (
     <View style={styles.root}>
       <View style={styles.card}>
@@ -158,6 +183,61 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
             <Text style={styles.exportLine}>已记录的同意: {exportData.data.consents.length}</Text>
             <Text style={styles.exportLine}>生成时间: {formatDate(exportData.generatedAt)}</Text>
             <Text style={styles.exportFootnote}>依据: {exportData.legalBasis}</Text>
+            <View style={styles.exportActions}>
+              <Pressable
+                onPress={() => setShowExportDetail((v) => !v)}
+                accessibilityLabel={showExportDetail ? "收起数据明细" : "查看数据明细"}
+                style={styles.ctaSecondary}
+              >
+                <Text style={styles.ctaSecondaryText}>{showExportDetail ? "‹ 收起明细" : "查看明细 ›"}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void onSaveCopy()}
+                disabled={busy !== null}
+                accessibilityLabel="保存副本到文件"
+                style={[styles.ctaSecondary, busy !== null && styles.ctaDisabled]}
+              >
+                <Text style={styles.ctaSecondaryText}>{busy === "save" ? "保存中…" : "保存副本到文件"}</Text>
+              </Pressable>
+            </View>
+            {saveState.kind === "saved" ? (
+              <Text style={styles.exportLine}>已存为 {saveState.name}，可从刚才的分享面板存到"文件"。</Text>
+            ) : null}
+            {saveState.kind === "failed" ? (
+              <Text style={styles.errorText}>{saveState.message}</Text>
+            ) : null}
+            {showExportDetail ? (
+              <View style={styles.exportDetail}>
+                <Text style={styles.exportDetailTitle}>会话（{exportData.data.sessions.length}）</Text>
+                {exportData.data.sessions.length === 0 ? <Text style={styles.exportLine}>暂无会话记录。</Text> : null}
+                {exportData.data.sessions.map((s) => (
+                  <Text key={s.id} style={styles.exportLine}>
+                    {truncateId(s.id)} · {sessionStatusLabel(s.status)} · 设备 {truncateId(s.deviceId)}
+                  </Text>
+                ))}
+                <Text style={styles.exportDetailTitle}>设备（{exportData.data.devices.length}）</Text>
+                {exportData.data.devices.length === 0 ? <Text style={styles.exportLine}>暂无设备记录。</Text> : null}
+                {exportData.data.devices.map((d) => (
+                  <Text key={d.id} style={styles.exportLine}>
+                    {truncateId(d.id)} · {d.platform || "未知平台"} · {sessionStatusLabel(d.status)}
+                  </Text>
+                ))}
+                <Text style={styles.exportDetailTitle}>同意记录（{exportData.data.consents.length}）</Text>
+                {exportData.data.consents.length === 0 ? <Text style={styles.exportLine}>暂无同意记录。</Text> : null}
+                {exportData.data.consents.map((c, index) => (
+                  <Text key={`${c.docKind}-${c.docVersion}-${index}`} style={styles.exportLine}>
+                    {c.docKind} · 版本 {c.docVersion} · {formatDate(c.acceptedAt)}{c.required ? " · 必需" : ""}
+                  </Text>
+                ))}
+                <Text style={styles.exportDetailTitle}>历史请求（{exportData.history.length}）</Text>
+                {exportData.history.length === 0 ? <Text style={styles.exportLine}>暂无历史请求。</Text> : null}
+                {exportData.history.map((r) => (
+                  <Text key={r.id} style={styles.exportLine}>
+                    {kindLabel(r.kind)} · {statusLabel(r.status)} · {formatDate(r.requestedAt)}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
           </View>
         )}
       </View>
@@ -273,6 +353,9 @@ const styles = StyleSheet.create({
   },
   ctaDangerText: { color: color.white, fontSize: 14, fontWeight: "600" },
   exportSummary: { marginTop: 12, gap: 4 },
+  exportActions: { flexDirection: "row", gap: 8, marginTop: 8 },
+  exportDetail: { gap: 3, marginTop: 8 },
+  exportDetailTitle: { color: color.ink, fontSize: 12, fontWeight: "700", marginTop: 6 },
   exportLine: { fontSize: 12, color: color.muted },
   exportFootnote: { fontSize: 11, color: color.muted, fontStyle: "italic", marginTop: 6 },
   historyRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },
