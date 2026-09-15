@@ -17,6 +17,7 @@ import type { Activity, OpportunityTemplate, ListOpportunityTemplatesPayload, Ac
 import { type ActivityClient } from "../activity-client";
 import { describeJoinError } from "../activity-client";
 import { type FulfillmentClient } from "../fulfillment-client";
+import { type ProfileClient, type ProfileWire } from "../profile-client";
 import { type MarketplaceClient, type MarketApplication } from "../marketplace-client";
 import { nearestCityLabel } from "../market-city-label";
 import { type MediaClient } from "../media-client";
@@ -94,6 +95,7 @@ export function MarketSurface({
   supply,
   marketLabel,
   moderation,
+  profileClient,
   initialTab = "OPPORTUNITY",
   onOpenExperience,
   onOpenRealityScene,
@@ -106,6 +108,9 @@ export function MarketSurface({
   media?: MediaClient;
   supply?: SupplyClient;
   moderation: ModerationClient;
+  // APPLICANT-PROFILE-001: 选人工作台把报名人 applicantId 解析成真人名字。
+  // 缺省 = 没接线：退回截断 ID（原来唯一的样子），不编名字。
+  profileClient?: ProfileClient | undefined;
   marketLabel: string;
   initialTab?: MarketTab;
   onOpenExperience?: ((experienceId: string) => void) | undefined;
@@ -421,7 +426,7 @@ export function MarketSurface({
             setPagerPage(1);          }}
         />
       ) : selectOpp ? (
-        <SelectWorkbench marketplace={marketplace} fulfillment={fulfillment} opportunity={selectOpp} onBack={() => setSelectOpp(null)} />
+        <SelectWorkbench marketplace={marketplace} fulfillment={fulfillment} profileClient={profileClient} opportunity={selectOpp} onBack={() => setSelectOpp(null)} />
       ) : view === "MAP" ? (
         <MarketMap
           tab={pageTab}
@@ -1569,7 +1574,18 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
     </View>
   );
 }
-function SelectWorkbench({ marketplace, fulfillment, opportunity, onBack }: { marketplace: MarketplaceClient; fulfillment?: FulfillmentClient | undefined; opportunity: MarketOpportunity; onBack: () => void }): React.JSX.Element {
+// APPLICANT-PROFILE-001: 报名人行的人名。
+//
+// 解析得到名字就显示名字（+ handle），解析不到就回退原来的截断 ID ——
+// 未知保持未知，不编名字。空名字（wire 里 name 为空）同样
+// 走回退：空字符串渲染出来是一行空白标题，比截断 ID 更糟。
+function applicantTitle(profile: ProfileWire | undefined, applicantId: string): string {
+  const name = profile?.name?.trim();
+  if (!name) return `申请人 ${applicantId.slice(0, 10)}`;
+  const handle = profile?.handle?.trim().replace(/^@/, "");
+  return handle ? `${name} @${handle}` : name;
+}
+function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity, onBack }: { marketplace: MarketplaceClient; fulfillment?: FulfillmentClient | undefined; profileClient?: ProfileClient | undefined; opportunity: MarketOpportunity; onBack: () => void }): React.JSX.Element {
   const [phase, setPhase] = useState<"LOADING" | "READY" | "ERROR">("LOADING");
   const [candidates, setCandidates] = useState<MarketApplication[]>([]);
   const [workingId, setWorkingId] = useState<string>();
@@ -1578,6 +1594,36 @@ function SelectWorkbench({ marketplace, fulfillment, opportunity, onBack }: { ma
   const [offerAmount, setOfferAmount] = useState("1200000");
   const [offerWorkingId, setOfferWorkingId] = useState<string>();
   const [offerMsg, setOfferMsg] = useState<string>();
+  // APPLICANT-PROFILE-001：applicantId → profile 的 best-effort 解析表。
+  // 这面本就只给发布者看（"报名明细 · 仅发布者可见"），名字/handle 是报名人
+  // 自己选的公开身份（与扫码分享同一口径），不是联系方式（电话/社媒仍按
+  // "合作后"漏斗 gating）。单个解析失败只影响那一行（回退截断 ID），
+  // 不整面报错 —— 一个人的资料读不到，不该挡住整份报名名单。
+  const [applicantProfiles, setApplicantProfiles] = useState<Record<string, ProfileWire | undefined>>({});
+  const requestedApplicantIds = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (!profileClient) return;
+    const ids = [...new Set(candidates.map((c) => c.applicantId))].filter((id) => !requestedApplicantIds.current.has(id));
+    if (ids.length === 0) return;
+    requestedApplicantIds.current = new Set([...requestedApplicantIds.current, ...ids]);
+    let cancelled = false;
+    void (async () => {
+      const entries = await Promise.all(ids.map(async (id) => {
+        try {
+          return [id, await profileClient.getProfile(id)] as const;
+        } catch {
+          return [id, undefined] as const;
+        }
+      }));
+      if (cancelled) return;
+      setApplicantProfiles((prev) => {
+        const next = { ...prev };
+        for (const [id, profile] of entries) next[id] = profile;
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [profileClient, candidates]);
   const load = useCallback(async (): Promise<void> => {
     setPhase("LOADING");
     try {
@@ -1656,7 +1702,7 @@ function SelectWorkbench({ marketplace, fulfillment, opportunity, onBack }: { ma
       {candidates.map((c) => (
         <View key={c.applicationId} style={[styles.r4Card, (c.status === "SELECTED" || c.status === "CONFIRMED") && { borderColor: color.magenta }]}>
           <View style={styles.r4Top}>
-            <Text style={styles.r4Title}>申请人 {c.applicantId.slice(0, 10)}</Text>
+            <Text style={styles.r4Title}>{applicantTitle(applicantProfiles[c.applicantId], c.applicantId)}</Text>
             <View style={styles.r4FitBadge}>
               <Text style={styles.r4FitText}>{c.status === "SUBMITTED" ? "待选择" : c.status === "SELECTED" ? "等待对方确认" : c.status === "CONFIRMED" ? "双方已确认" : "未选择"}</Text>
             </View>

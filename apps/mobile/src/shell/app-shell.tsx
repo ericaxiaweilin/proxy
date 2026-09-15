@@ -678,6 +678,7 @@ export function AppShell({
               activities={activities}
               marketplace={marketplace}
               fulfillment={fulfillment}
+              profileClient={profile}
               media={media}
               supply={supply}
               moderation={moderation}

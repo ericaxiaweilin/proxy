@@ -38,4 +38,18 @@ describe("market workflow surface", () => {
     expect(source).not.toContain('key={`${pageTab}:${demandWizardOpen');
     expect(source).toContain('activityPhase === "LOADING" && activityItems.length === 0');
   });
+
+  it("APPLICANT-PROFILE-001 resolves applicant ids to profile names", () => {
+    // 选人工作台曾只渲染截断 ID（申请人 xxx…）—— 名单是真的，人名是缺的。
+    // 现在经 ProfileClient.getProfile 解析，名字/handle 是报名人自选的公开身份。
+    expect(source).toContain("profileClient.getProfile(");
+    expect(source).toContain("function applicantTitle(");
+    expect(source).toContain("applicantProfiles[c.applicantId]");
+    // 未知保持未知：解析失败/无 profile/空名字一律回退截断 ID，不编名字。
+    expect(source).toContain("申请人 ${applicantId.slice(0, 10)}");
+    // 反向钉：单行解析失败不许整面报错，更不许用演示名顶替。
+    expect(source).toContain("requestedApplicantIds");
+    expect(source).not.toContain("热心市民");
+    expect(source).not.toContain("申请人 Alice");
+  });
 });

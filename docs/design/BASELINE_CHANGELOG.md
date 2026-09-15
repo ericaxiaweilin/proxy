@@ -4,6 +4,22 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 198 — 2026-09-15
+
+- APPLICANT-PROFILE-001：选人工作台的报名人从截断 ID（`申请人 xxx…`）换成真人
+  名字（+ @handle），解析不到时回退截断 ID。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/market.tsx`（market scope）、
+    `apps/mobile/src/shell/app-shell.tsx`（market 等 scope 的实现载体）。
+    market 侧只动选人工作台的人名行与新增的 best-effort 解析 effect；
+    shell 侧只把既有的 `profileClient` 多透传给 `MarketSurface`（与之前
+    Rev197 给 Me 透传 `SessionClient` 同 pattern）。无列表结构、无筛选、
+    无发布链路、无主题/图标改动。
+  - **视觉改动**：报名人卡片标题从 `申请人 {id前10位}` 变成 `名字 @handle`
+   （读不到时保持原样）。名字/handle 是报名人自选的公开身份（与扫码分享
+    同一口径），不是联系方式；该面本就只给发布者看（"报名明细 · 仅发布者可见"）。
+  - 单个解析失败只影响那一行，不整面报错 —— 一个人的资料读不到，
+    不该挡住整份报名名单。
+
 ## Revision 197 — 2026-09-15
 
 - DEVICE-LIST-001：设置页「设备管理」卡片从"设备列表尚未接入"换成真会话列表
