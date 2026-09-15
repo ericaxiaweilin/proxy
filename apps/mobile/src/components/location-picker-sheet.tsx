@@ -6,7 +6,8 @@
 // 给了真实 grid 坐标 + 半径 + 城市名 — 这三件对"feed 怎么用
 // location" 已经够。
 import { useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { ProxyIcon, type ProxyIconName } from "./proxy-icon";
 import { MapCanvas } from "./map-canvas";
 import type { GridCoord } from "./location-options";
@@ -14,10 +15,13 @@ import { color } from "../theme";
 import {
   CITY_BOUNDS,
   DEFAULT_LOCATION,
+  clampToRadius,
   formatRadius,
   formatLocationTitle,
+  googleMapsUrl,
   gridToLatLng,
   LOCATION_OPTIONS,
+  MAX_MANUAL_TWEAK_METERS,
   reverseGeocode,
   reverseGeocodeViaProxy,
   type AnyLocation,
@@ -131,6 +135,10 @@ export function LocationPickerSheet({
   // lat/lng 提前计算 — useEffect dep + 渲染两处都需要。
   const gridLatLng = gridToLatLng(customCity, pin.x, pin.y);
   const { lat, lng } = lastLatLng ?? gridLatLng;
+  // LOC-PIN-3KM-001: 拖拽微调提示。钳制只发生在 onChange 里，这里只展示。
+  const [pinNotice, setPinNotice] = useState<string | undefined>(undefined);
+  // LOC-SHARE-001: 复制 / 地图打开的操作反馈。成功失败各说各的。
+  const [shareMsg, setShareMsg] = useState<string | undefined>(undefined);
   // R15.15 P2 + R15.32.1.3: 逆编码 — 拍 pin 以后从 lat/lng 拿
   // "还剑湖附近" / "Lê Thánh Tôn, Thành phố Hồ Chí Minh" 这样
   // 的人话描述。优先走我们的 /v1/geocode/reverse（背后是
@@ -166,9 +174,27 @@ export function LocationPickerSheet({
     return () => { cancelled = true; ac.abort(); };
   }, [tab, baseUrl, customCity, lastLatLng, lat, lng]);
 
+  // LOC-SHARE-001: 复制当前点的地址 + 用 Google 地图打开。
+  // 复制的是屏幕上显示的那一行（反查名，没有就写坐标）—— 复制"正在识别
+  // 地址…"这种中间态等于撒谎。地图打开失败也明说，不静默。
+  async function copyPickedAddress(): Promise<void> {
+    const text = reverse?.displayName?.trim() || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    try {
+      await Clipboard.setStringAsync(text);
+      setShareMsg("已复制");
+    } catch {
+      setShareMsg("复制失败，请重试");
+    }
+  }
+
+  function openPickedInGoogleMaps(): void {
+    void Linking.openURL(googleMapsUrl(lat, lng)).catch(() => {
+      setShareMsg("打不开地图应用");
+    });
+  }
+
   // 加载历史 — 只在切到 HISTORY tab 时拉一次，避免每次开 sheet 都打 keychain
-  async function openHistory(): Promise<void> {
-    if (!historyLoaded) {
+  async function openHistory(): Promise<void> {    if (!historyLoaded) {
       const items = await loadCustomHistory();
       setHistory(items);
       setHistoryLoaded(true);
@@ -348,6 +374,16 @@ export function LocationPickerSheet({
                   </Text>
                 )}
               </View>
+              {/* LOC-SHARE-001: 对当前点操作 —— 复制地址 / Google 地图打开。 */}
+              <View style={styles.shareRow}>
+                <Pressable accessibilityLabel="复制地址" onPress={() => void copyPickedAddress()} style={styles.shareBtn}>
+                  <Text style={styles.shareBtnText}>复制地址</Text>
+                </Pressable>
+                <Pressable accessibilityLabel="用 Google 地图打开" onPress={openPickedInGoogleMaps} style={styles.shareBtn}>
+                  <Text style={styles.shareBtnText}>Google地图</Text>
+                </Pressable>
+              </View>
+              {shareMsg ? <Text style={styles.shareMsg}>{shareMsg}</Text> : null}
 
               {/* Map — the dominant element in CUSTOM tab.
                   R15.33: 高度从 aspectRatio:1 调到 300 (路牌习惯的
@@ -358,10 +394,23 @@ export function LocationPickerSheet({
                   initialPin={pin}
                   initialCoordinate={lastLatLng}
                   radiusMeters={radius}
-                  onChange={(nextPin, coordinate) => {
+                  onChange={(nextPin, coordinate, kind) => {
+                    let point = coordinate;
+                    // LOC-PIN-3KM-001: 只有"拖拽微调"才限 3KM（以上次落点为锚）。
+                    // 点选跳远地方不受限 —— 全球选点是既有功能，不能一起掐死。
+                    // GPS 按钮给的是真相，也不受限。
+                    if (kind === "drag" && point && lastLatLng) {
+                      const r = clampToRadius(lastLatLng, point, MAX_MANUAL_TWEAK_METERS);
+                      if (r.clamped) {
+                        setPinNotice("拖动超出3公里，已停在3公里处");
+                        point = r.point;
+                      } else {
+                        setPinNotice(undefined);
+                      }
+                    }
                     setPin(nextPin);
-                    if (coordinate) {
-                      setLastLatLng(coordinate);
+                    if (point) {
+                      setLastLatLng(point);
                       // 清掉预设城市提示，避免全球坐标在解析期间显示旧城市。
                       setCustomCity("");
                     }
@@ -372,6 +421,7 @@ export function LocationPickerSheet({
               <Text style={styles.mapHint}>
                 点地图或拖动 pin 重新定位
               </Text>
+              {pinNotice ? <Text style={styles.pinNotice}>{pinNotice}</Text> : null}
 
               {/* Radius selector */}
               <Text style={styles.fieldLabel}>覆盖半径</Text>
@@ -580,6 +630,12 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     marginTop: 4
   },
+  // LOC-SHARE-001：复制 / 地图打开行 + LOC-PIN-3KM-001 钳制提示。
+  shareRow: { flexDirection: "row", gap: 8, marginTop: 8, paddingHorizontal: 4 },
+  shareBtn: { backgroundColor: "#F2EDF5", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  shareBtnText: { color: color.ink, fontSize: 12, fontWeight: "800" },
+  shareMsg: { color: color.muted, fontSize: 11, marginTop: 4, paddingHorizontal: 4 },
+  pinNotice: { color: "#C97A1F", fontSize: 11, marginTop: 4 },
   // R15.33: 地图占主位。高度 280 + fullWidth，代替原来
   // aspectRatio:1 那个方块。
   mapWrapper: {

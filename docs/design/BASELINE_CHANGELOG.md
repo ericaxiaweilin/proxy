@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 206 — 2026-09-15
+
+- DEVICE-LOCATION-003 + LOC-PIN-3KM-001 + LOC-SHARE-001：开屏定一次位，
+  拖拽限 3KM，地址可复制/进 Google 地图。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx` —— mount 后定
+    一次位（跟随开着才定，拿不到当没发生）。无渲染结构、无筛选、无发布链路改动。
+  - **视觉改动**（均非基线敏感）：选点页地址行下加复制地址/Google地图两按钮；
+    拖 pin 超 3KM 停在 3KM 处并明说；地图"定位"按钮复用同一份取 fix 逻辑。
+  - 其余文件（helper 与单测、命名测试、回归契约条目）均非基线敏感。
+
 ## Revision 205 — 2026-09-15
 
 - DEVICE-LOCATION-002：跟随开关冷启动必丢（P0）。

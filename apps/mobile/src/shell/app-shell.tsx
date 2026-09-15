@@ -29,7 +29,7 @@ import { loadActiveCustomId, loadCustomHistory, loadFollowDevice, saveFollowDevi
 import { makeDeviceLocation } from "../components/location-options";
 // DEVICE-LOCATION-001: 位置要跟着人走。device-location.ts 是纯逻辑（可单测），
 // device-location-native.ts 是全仓唯一 import expo-location 的地方。
-import { startDeviceLocationWatch, type DeviceLocationState } from "../device-location";
+import { startDeviceLocationWatch, getCurrentFix, type DeviceLocationState } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { type ConversationClient } from "../conversation-client";
 import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
@@ -383,6 +383,22 @@ export function AppShell({
       if (cancelled) stop();
     })();
     return () => { cancelled = true; stop?.(); };
+  }, [locationRestoreDone, followDevice]);
+
+  // DEVICE-LOCATION-003: 每次打开 App 就定一次位（跟随开着才定）。
+  // watch 负责"走着走着更新"，这里负责"打开就是新的" —— 之前冷启动只恢复
+  // 旧地点，watch 的首个 fix 又要等距离/时间闸，首页地址半天不动。
+  // 拿不到就当没发生：回退链（手动地点/默认）照旧，不许编坐标。
+  useEffect(() => {
+    if (!locationRestoreDone || !followDevice) return;
+    let cancelled = false;
+    void (async () => {
+      const fix = await getCurrentFix(expoLocationApi);
+      if (cancelled || !fix) return;
+      setCurrentLocation(makeDeviceLocation(fix.latitude, fix.longitude, fix.address ? { address: fix.address } : {}));
+      setDeviceLocationState({ kind: "tracking", latitude: fix.latitude, longitude: fix.longitude, ...(fix.address ? { address: fix.address } : {}) });
+    })();
+    return () => { cancelled = true; };
   }, [locationRestoreDone, followDevice]);
 
   // 规范 §4/§13：Android 硬件返回 = 退整个模块，不逐页退（模块内层级由

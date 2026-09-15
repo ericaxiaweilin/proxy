@@ -40,9 +40,10 @@ export interface MapCanvasProps {
   radiusMeters: 1000 | 3000 | 5000;
   // 城市名（显示在角标）。"" 表示未知 — 不再默认任何城市。
   cityHint: string;
-  // pin / 拖动 / 完成时回调 (新 grid coord)
+  // pin / 拖动 / 完成时回调 (新 grid coord)。kind 区分"点选跳跃"和
+  // "拖拽微调" —— 调用方只想 clamp 拖拽（3KM 内轻改），点选跳远地方不受限。
   initialCoordinate?: { lat: number; lng: number } | undefined;
-  onChange: (next: GridCoord, coordinate?: { lat: number; lng: number }) => void;
+  onChange: (next: GridCoord, coordinate?: { lat: number; lng: number }, kind?: "tap" | "drag" | "gps") => void;
   // 可选：测试 ID
   testID?: string;
   // 打开自动定位：无真实坐标时 mount 即请求一次 GPS（默认 true）。
@@ -173,14 +174,14 @@ export function MapCanvas({
   // frame during a drag, but we only want to commit on idle so the
   // downstream state doesn't churn.
   const lastCommittedRef = useRef<GridCoord>(pin);
-  const commitFromLatLng = (coord: LatLng): void => {
+  const commitFromLatLng = (coord: LatLng, kind: "tap" | "drag" | "gps"): void => {
     const g = latLngToGrid(cityKey, coord.latitude, coord.longitude);
     // Skip if same grid cell (avoid setState spam on map idle)
     if (g.x === lastCommittedRef.current.x && g.y === lastCommittedRef.current.y) return;
     lastCommittedRef.current = g;
     setPin(g);
     setExactCoordinate(coord);
-    onChange(g, { lat: coord.latitude, lng: coord.longitude });
+    onChange(g, { lat: coord.latitude, lng: coord.longitude }, kind);
   };
 
   // GPS 定位并把地图 + pin 吸到真实坐标 — 手动按钮和打开自动定位共用。
@@ -204,7 +205,7 @@ export function MapCanvas({
       lastCommittedRef.current = g;
       setPin(g);
       setExactCoordinate({ latitude, longitude });
-      onChange(g, { lat: latitude, lng: longitude });
+      onChange(g, { lat: latitude, lng: longitude }, "gps");
       // Animate map camera to the GPS coord. We use a tight delta
       // (~ 2 km) so the user sees the immediate neighborhood.
       if (mapRef.current) {
@@ -253,9 +254,9 @@ export function MapCanvas({
         initialRegion={initialRegion}
         onRegionChangeComplete={setRegion}
         // Pin drag — drag-end commit
-        onMarkerDragEnd={(e) => commitFromLatLng(e.nativeEvent.coordinate)}
+        onMarkerDragEnd={(e) => commitFromLatLng(e.nativeEvent.coordinate, "drag")}
         // Map tap (anywhere) — move pin there
-        onPress={(e) => commitFromLatLng(e.nativeEvent.coordinate)}
+        onPress={(e) => commitFromLatLng(e.nativeEvent.coordinate, "tap")}
         // iOS MapKit via react-native-maps
         provider={undefined}
         // Camera + gesture config

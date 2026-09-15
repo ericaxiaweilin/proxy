@@ -370,7 +370,6 @@ export function formatRadius(m: number): string {
 }
 
 // CustomLocation 构造器 — 给 sheet 选完点 + 半径时调。id 用
-// "custom_" + city + "_" + gridX + "x" + gridY 防止和 preset 重名。
 export function makeCustomLocation(
   city: string,
   gridX: number,
@@ -384,4 +383,60 @@ export function makeCustomLocation(
     kind: "CUSTOM",
     custom: { gridX, gridY, radiusMeters }
   };
+}
+
+// LOC-PIN-3KM-001: 手动拖 pin 微调限 3KM。haversine 真球面距离 ——
+// gridToLatLng 注释里那种 ~111km/° 近似在 3KM 尺度上误差不可接受，
+// 这里不用。返回钳制后的点 + 是否被钳制（调用方据此提示用户）。
+export const MAX_MANUAL_TWEAK_METERS = 3000;
+
+export function metersBetweenPoints(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const toRad = (d: number): number => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+export function clampToRadius(
+  anchor: { lat: number; lng: number },
+  point: { lat: number; lng: number },
+  maxMeters: number = MAX_MANUAL_TWEAK_METERS
+): { point: { lat: number; lng: number }; clamped: boolean } {
+  const dist = metersBetweenPoints(anchor, point);
+  if (!(dist > maxMeters)) return { point, clamped: false };
+  // 沿大圆方向拉回 maxMeters 处：球面插值，按比例走 angular distance。
+  const toRad = (d: number): number => (d * Math.PI) / 180;
+  const toDeg = (r: number): number => (r * 180) / Math.PI;
+  const lat1 = toRad(anchor.lat);
+  const lng1 = toRad(anchor.lng);
+  const lat2 = toRad(point.lat);
+  const lng2 = toRad(point.lng);
+  const angular = dist / 6371000;
+  const target = maxMeters / 6371000;
+  const f = target / angular;
+  const a = Math.sin((1 - f) * angular) / Math.sin(angular);
+  const b = Math.sin(f * angular) / Math.sin(angular);
+  const x = a * Math.cos(lat1) * Math.cos(lng1) + b * Math.cos(lat2) * Math.cos(lng2);
+  const y = a * Math.cos(lat1) * Math.sin(lng1) + b * Math.cos(lat2) * Math.sin(lng2);
+  const z = a * Math.sin(lat1) + b * Math.sin(lat2);
+  return {
+    point: {
+      lat: toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))),
+      lng: toDeg(Math.atan2(y, x)),
+    },
+    clamped: true,
+  };
+}
+
+// LOC-SHARE-001: Google 地图外链。maps.google.com 通用链接 —— 装了 Google
+// 地图 App 会接住，没装就进网页版同一坐标。不碰 LSApplicationQueriesSchemes
+//（那要改 Info.plist 走发版），也不新加 expo 依赖。
+export function googleMapsUrl(lat: number, lng: number): string {
+  return `https://maps.google.com/?q=${lat},${lng}`;
 }

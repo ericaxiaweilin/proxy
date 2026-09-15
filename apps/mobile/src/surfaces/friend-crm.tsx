@@ -318,16 +318,25 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   // 相机每帧可能触发多次，扫码成功一次后锁住，避免重复查人。
   async function handleScannedCode(raw: string): Promise<void> {
     if (scanBusyRef.current || scanned) return;
-    setScanned(undefined);
-    setScanError("");
-    const parsed = parseScannedQr(raw);
-    if (!parsed) {
-      setScanned(null);
-      setScanError("这不是 Proxy 二维码。只识别 proxy.app 的链接，其他内容不会被跳转。");
-      return;
+    // scanBusyRef 必须真的置 true，否则这把锁是死的：相机每帧都回调
+    // onBarcodeScanned，而 `scanned` 是 state、要等一次渲染才生效 ——
+    // 同一 tick 里的后续帧全部能穿过这个判断，同一个人被查 N 次。
+    scanBusyRef.current = true;
+    try {
+      setScanned(undefined);
+      setScanError("");
+      const parsed = parseScannedQr(raw);
+      if (!parsed) {
+        setScanned(null);
+        setScanError("这不是 Proxy 二维码。只识别 proxy.app 的链接，其他内容不会被跳转。");
+        return;
+      }
+      setScanned(parsed);
+      await lookupScannedHandle(parsed);
+    } finally {
+      // 失败 / 不是二维码也要解锁，否则扫错一次就永久卡住扫不动了。
+      scanBusyRef.current = false;
     }
-    setScanned(parsed);
-    await lookupScannedHandle(parsed);
   }
 
   // HANDLE-LOOKUP-001: 把识别出的 handle 落到真人（服务端按 handle 唯一解析）。

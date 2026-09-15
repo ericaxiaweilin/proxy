@@ -50,6 +50,8 @@ export interface DeviceLocationApi {
     callback: (fix: DeviceLocationFix) => void,
   ): Promise<{ remove: () => void }>;
   reverseGeocodeAsync(fix: DeviceLocationFix): Promise<DeviceLocationAddress[]>;
+  getLastKnownPositionAsync(): Promise<DeviceLocationFix | undefined>;
+  getCurrentPositionAsync(options: { accuracy: number }): Promise<DeviceLocationFix>;
 }
 
 // 三态之外的每一态都要能被 UI 区分开 —— 「没授权」「正在定位」「定位不可用」
@@ -167,4 +169,57 @@ export async function startDeviceLocationWatch(opts: StartDeviceLocationOptions)
     subscription?.remove();
     onState({ kind: "idle" });
   };
+}
+
+export interface CurrentFixOptions {
+  /** 没授权时是否弹系统授权框。默认 false —— 打开 App 就调，不能每次冷启动都弹。 */
+  requestPermission?: boolean;
+  /** 超时毫秒。默认 10 秒（地图"定位"按钮同口径）。 */
+  timeoutMs?: number;
+  /** 反查地址。默认 true；失败不影响坐标。 */
+  reverseGeocode?: boolean;
+}
+
+export interface CurrentFix {
+  latitude: number;
+  longitude: number;
+  address?: string;
+}
+
+// DEVICE-LOCATION-003: 打开 App 就定一次位 + 地图"定位"按钮，共用这一份。
+// 之前两处各写一遍（缓存秒回 → GPS → 10 秒超时），改超时改两处。
+// 语义：有缓存 fix 直接用（秒回）；没有才开 GPS，最多等 timeoutMs。
+// 返回 undefined = 这次没拿到（没授权/超时/失败），调用方走原有回退，不许编坐标。
+export async function getCurrentFix(
+  location: DeviceLocationApi,
+  options?: CurrentFixOptions
+): Promise<CurrentFix | undefined> {
+  const { requestPermission = false, timeoutMs = 10_000, reverseGeocode = true } = options ?? {};
+  try {
+    let permission = await location.getForegroundPermissionsAsync();
+    if (!permission.granted && requestPermission && permission.canAskAgain) {
+      permission = await location.requestForegroundPermissionsAsync();
+    }
+    if (!permission.granted) return undefined;
+    const cached = await location.getLastKnownPositionAsync().catch(() => undefined);
+    const fix =
+      cached ??
+      (await Promise.race([
+        location.getCurrentPositionAsync({ accuracy: COARSE_ACCURACY }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("fix timeout")), timeoutMs)),
+      ]).catch(() => undefined));
+    if (!fix) return undefined;
+    let address: string | undefined;
+    if (reverseGeocode) {
+      try {
+        const rows = await location.reverseGeocodeAsync(fix);
+        address = formatDeviceAddress(rows[0]);
+      } catch {
+        address = undefined;
+      }
+    }
+    return { latitude: fix.latitude, longitude: fix.longitude, ...(address ? { address } : {}) };
+  } catch {
+    return undefined;
+  }
 }

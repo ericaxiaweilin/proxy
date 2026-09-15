@@ -16,6 +16,7 @@ import {
   DEFAULT_DISTANCE_METERS,
   DEFAULT_INTERVAL_MS,
   formatDeviceAddress,
+  getCurrentFix,
   startDeviceLocationWatch,
   type DeviceLocationAddress,
   type DeviceLocationApi,
@@ -39,6 +40,9 @@ function makeFake(opts?: {
   watchFails?: string;
   reverseFails?: boolean;
   reverseRows?: DeviceLocationAddress[];
+  cachedFix?: DeviceLocationFix | undefined;
+  currentFix?: DeviceLocationFix | undefined;
+  currentFails?: boolean;
 }): FakeLocation {
   const cfg = {
     granted: true,
@@ -47,6 +51,9 @@ function makeFake(opts?: {
     watchFails: undefined as string | undefined,
     reverseFails: false,
     reverseRows: [{ city: "河内", district: "还剑湖", formattedAddress: "Hoàn Kiếm, Hà Nội" }] as DeviceLocationAddress[],
+    cachedFix: undefined as DeviceLocationFix | undefined,
+    currentFix: { latitude: 21.0285, longitude: 105.8542 } as DeviceLocationFix | undefined,
+    currentFails: false,
     ...opts
   };
   let cb: ((fix: DeviceLocationFix) => void) | undefined;
@@ -73,6 +80,14 @@ function makeFake(opts?: {
     async reverseGeocodeAsync() {
       if (cfg.reverseFails) throw new Error("geocode down");
       return cfg.reverseRows;
+    },
+    async getLastKnownPositionAsync() {
+      return cfg.cachedFix;
+    },
+    async getCurrentPositionAsync() {
+      if (cfg.currentFails) throw new Error("no fix");
+      if (!cfg.currentFix) throw new Error("no fix");
+      return cfg.currentFix;
     }
   };
   return fake;
@@ -211,8 +226,45 @@ describe("DEVICE-LOCATION-001 startDeviceLocationWatch", () => {
   });
 });
 
-describe("DEVICE-LOCATION-001 formatDeviceAddress", () => {
-  it("优先用 formattedAddress", () => {
+describe("DEVICE-LOCATION-003 getCurrentFix", () => {
+  it("有缓存 fix 直接用，不开 GPS（秒回）", async () => {
+    const fake = makeFake({ cachedFix: { latitude: 1, longitude: 2 } });
+    let gpsCalls = 0;
+    const wrapped: DeviceLocationApi = {
+      ...fake,
+      async getCurrentPositionAsync(fix) {
+        gpsCalls += 1;
+        return fake.getCurrentPositionAsync(fix);
+      }
+    };
+    const out = await getCurrentFix(wrapped);
+    expect(gpsCalls).toBe(0);
+    expect(out).toMatchObject({ latitude: 1, longitude: 2, address: "Hoàn Kiếm, Hà Nội" });
+  });
+
+  it("没缓存才开 GPS，拿不到就返回 undefined（不编坐标）", async () => {
+    const none = await getCurrentFix(makeFake({ cachedFix: undefined, currentFix: undefined }));
+    expect(none).toBeUndefined();
+    const denied = await getCurrentFix(makeFake({ granted: false, canAskAgain: false }));
+    expect(denied).toBeUndefined();
+  });
+
+  it("默认不弹授权框（打开 App 就调，不能每次冷启动都弹）", async () => {
+    const fake = makeFake({ granted: false, canAskAgain: true });
+    await getCurrentFix(fake);
+    expect(fake.permissionRequests).toBe(0);
+    await getCurrentFix(fake, { requestPermission: true });
+    expect(fake.permissionRequests).toBe(1);
+  });
+
+  it("反查失败不丢坐标", async () => {
+    const out = await getCurrentFix(makeFake({ cachedFix: { latitude: 3, longitude: 4 }, reverseFails: true }));
+    expect(out).toMatchObject({ latitude: 3, longitude: 4 });
+    expect(out?.address).toBeUndefined();
+  });
+});
+
+describe("DEVICE-LOCATION-001 formatDeviceAddress", () => {  it("优先用 formattedAddress", () => {
     expect(formatDeviceAddress({ formattedAddress: "  Hoàn Kiếm, Hà Nội  ", city: "河内" })).toBe("Hoàn Kiếm, Hà Nội");
   });
 

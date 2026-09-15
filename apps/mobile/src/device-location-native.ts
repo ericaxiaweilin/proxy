@@ -30,6 +30,16 @@ export const expoLocationApi: DeviceLocationApi = {
       (loc) => callback({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }),
     );
   },
+  async getLastKnownPositionAsync() {
+    const fix = await Location.getLastKnownPositionAsync().catch(() => null);
+    return fix ? { latitude: fix.coords.latitude, longitude: fix.coords.longitude } : undefined;
+  },
+  async getCurrentPositionAsync(options) {
+    const fix = await Location.getCurrentPositionAsync({
+      accuracy: options.accuracy as Location.LocationAccuracy,
+    });
+    return { latitude: fix.coords.latitude, longitude: fix.coords.longitude };
+  },
   async reverseGeocodeAsync(fix) {
     return (await Location.reverseGeocodeAsync(fix)) as DeviceLocationAddress[];
   },

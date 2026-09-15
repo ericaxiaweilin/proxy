@@ -4482,7 +4482,8 @@ fi
 # 漏了 sheet 也能让"存在"成立，于是跟随开关消失、失败态无处显示。
 DEVICE_STATE_PROPS=$(grep -cF 'deviceState={deviceLocationState}' apps/mobile/src/shell/app-shell.tsx)
 if [ "$DEVICE_STATE_PROPS" -lt 2 ] ||
-   ! grep -qF 'onFollowDevice={(next) => setFollowDevice(next)}' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'onFollowDevice={(next) => ' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -q 'setFollowDevice(next)' apps/mobile/src/shell/app-shell.tsx ||
    ! grep -qF 'describeDeviceRow' apps/mobile/src/components/location-picker-sheet.tsx; then
   echo "  FAIL [DEVICE-LOCATION-001]: 设备定位状态没传到 UI ——" >&2
   echo "        顶栏和 picker 都收到才算接完；少一处，「未授权/定位中/不可用」就会显示得跟成功一样。" >&2
@@ -5031,3 +5032,62 @@ if ! grep -q 'DEVICE-LOCATION-002' apps/mobile/src/components/location-store.tes
 fi
 pnpm --filter @proxy/mobile exec vitest run src/components/location-store.test.ts || exit $?
 echo "    DEVICE-LOCATION-002: PASS (follow toggle survives restarts next to the manual pin)"
+
+# DEVICE-LOCATION-003: 打开 App 不定位，首页地址半天不动。
+#
+# 冷启动只恢复旧地点，watch 的首个 fix 又要等距离/时间闸 —— 用户开着跟随，
+# 杀掉重进，地址还是上次的。现在 mount 就定一次（跟随开着才定），拿不到就当
+# 没发生（回退链照旧），不许编坐标。取 fix 的逻辑只许在 device-location.ts
+# 里有一份，地图"定位"按钮复用它。
+if ! grep -q 'getCurrentFix' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -q 'getCurrentFix(expoLocationApi' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [DEVICE-LOCATION-003]: 取 fix 又在各处手写 ——" >&2
+  echo "        缓存秒回/GPS/超时三件必须只有一份实现。" >&2
+  exit 1
+fi
+if grep -q 'getLastKnownPositionAsync().catch' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [DEVICE-LOCATION-003]: 地图里还有手写的取 fix 逻辑 ——" >&2
+  echo "        改超时改两处就是这么漏的，统一走 getCurrentFix。" >&2
+  exit 1
+fi
+if ! grep -q 'DEVICE-LOCATION-003' apps/mobile/src/device-location.test.ts; then
+  echo "  FAIL [DEVICE-LOCATION-003]: 一次定位的命名测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/device-location.test.ts || exit $?
+echo "    DEVICE-LOCATION-003: PASS (app open takes one fix; map reuses the same helper)"
+
+# LOC-PIN-3KM-001: 拖 pin 一下飞出几十公里。
+#
+# pin 拖拽微调没有上限，手指一滑就飞出城，撤销只能重进。点选跳远地方不受限
+# （全球选点是既有功能），只有拖拽按上次落点钳 3KM，超了明说并停在 3KM 处。
+if ! grep -q 'clampToRadius' apps/mobile/src/components/location-picker-sheet.tsx ||
+   ! grep -q 'MAX_MANUAL_TWEAK_METERS' apps/mobile/src/components/location-picker-sheet.tsx ||
+   ! grep -q '"drag"' apps/mobile/src/components/map-canvas.tsx; then
+  echo "  FAIL [LOC-PIN-3KM-001]: 拖拽钳制没接上 ——" >&2
+  echo "        pin 一拖就飞，没有 3KM 上限。" >&2
+  exit 1
+fi
+if ! grep -q 'LOC-PIN-3KM-001' apps/mobile/src/components/location-options.test.ts; then
+  echo "  FAIL [LOC-PIN-3KM-001]: 钳制数学的命名测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/components/location-options.test.ts || exit $?
+echo "    LOC-PIN-3KM-001: PASS (pin drags clamp to 3km; taps still jump anywhere)"
+
+# LOC-SHARE-001: 选好的地址拿不走、跳不过去。
+#
+# 选点页的地址只能看：想发给朋友得手抄，想到 Google 地图导航得自己搜一遍。
+# 现在地址行下面有复制 + Google 地图打开，复制的是屏幕上显示的那一行。
+if ! grep -q '复制地址' apps/mobile/src/components/location-picker-sheet.tsx ||
+   ! grep -q 'Google地图' apps/mobile/src/components/location-picker-sheet.tsx ||
+   ! grep -q 'googleMapsUrl' apps/mobile/src/components/location-picker-sheet.tsx; then
+  echo "  FAIL [LOC-SHARE-001]: 复制/地图打开没接上 ——" >&2
+  echo "        选好的地址只能看不能用。" >&2
+  exit 1
+fi
+if ! grep -q 'LOC-SHARE-001' apps/mobile/src/components/location-options.test.ts; then
+  echo "  FAIL [LOC-SHARE-001]: 分享链接的命名测试不见了" >&2
+  exit 1
+fi
+echo "    LOC-SHARE-001: PASS (picked address copies out and opens in Google Maps)"

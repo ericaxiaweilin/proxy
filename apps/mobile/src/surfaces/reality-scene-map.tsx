@@ -4,6 +4,8 @@ import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
+import { getCurrentFix } from "../device-location";
+import { expoLocationApi } from "../device-location-native";
 import { sceneAddressLine, sceneCountsLine, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
 // SCENE-EVENT-SIGNUP-001: 场景上的活动列表 + 报名。复用现成的 ActivityClient，
 // 不新造一套报名机制 —— 活动域（名额 / participants / 事务）本来就是真的。
@@ -439,15 +441,12 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       if (status !== "granted") throw new Error("未授权定位 — 去 iOS 设置 → Proxy → 位置，允许“使用 App 期间”");
       const grant = await authClient.request("/v1/location/consent/grant", { method: "POST", body: { durationSeconds: 1800 } });
       if (grant.status < 200 || grant.status >= 300) throw new Error("位置授权未生效（请检查登录状态后重试）");
-      // 有缓存 fix 直接用（秒回）；没有才开 GPS，且最多等 10 秒。
-      // expo-location v57 的 getCurrentPositionAsync 没有 timeout 参数，
-      // 不自己 race 就会在室内无 fix 时一直转（用户看到的“失败”就是卡死）。
-      const cached = await Location.getLastKnownPositionAsync().catch(() => null);
-      const fix = cached ?? await Promise.race([
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("定位超时（10 秒无 GPS 信号）— 请到开阔处重试，或用搜场景切换地址")), 10_000)),
-      ]);
-      const { latitude, longitude } = fix.coords;
+      // DEVICE-LOCATION-003: 取 fix 走共用 helper（缓存秒回 → GPS → 10 秒超时），
+      // 别在这里再手写一遍。授权前面已要过，这里不再弹。精度用 Low（15km
+      // 附近列表够用，省电；要精确定位的那条路走服务端同意）。
+      const fix = await getCurrentFix(expoLocationApi, { requestPermission: false });
+      if (!fix) throw new Error("定位超时（10 秒无 GPS 信号）— 请到开阔处重试，或用搜场景切换地址");
+      const { latitude, longitude } = fix;
       const response = await authClient.request("/v1/reality-scenes/nearby", { method: "POST", body: { latitude, longitude, radiusKm: 15 } });
       const body = await response.json() as { scenes?: unknown };
       if (response.status < 200 || response.status >= 300 || !Array.isArray(body.scenes)) throw new Error("附近场景暂时不可用");
