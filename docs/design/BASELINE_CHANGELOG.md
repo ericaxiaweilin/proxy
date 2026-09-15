@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 201 — 2026-09-15
+
+- MARKET-R37-DETAIL-001：订单详情头部与 R37 卡片视觉断裂修复。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/market.tsx`（market scope）——
+    `OpportunityDetail` 头部不再写英文 OPPORTUNITY kicker，改用批准的类型 logo
+    （`MarketTypeLogo`，与卡片同一组件）+「标准订单类型 + 中文类型名」
+    （`TYPE_LABEL[detailType]`，与卡片同一张表，推断函数共用
+    `inferOpportunityTypeForFilter`）；新增 `detailHeroTypeRow/Meta/Title`
+    三个样式，其余 hero 结构不动。无列表、无筛选、无发布链路改动。
+  - 其余文件（卡片 `TYPE_LABEL` 改 export、命名测试、回归契约条目）均非基线敏感。
+
 ## Revision 200 — 2026-09-15
 
 - DEVICE-LOCATION-001 + CONVO-OPEN-001 / merchant-me Proxy 子页与真头像。

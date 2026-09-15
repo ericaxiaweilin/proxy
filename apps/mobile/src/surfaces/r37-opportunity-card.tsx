@@ -19,7 +19,10 @@ import { MarketTypeLogo, type MarketOpportunityType } from "../components/market
 
 export type OpportunityType = MarketOpportunityType;
 
-const TYPE_LABEL: Record<OpportunityType, { label: string; sub: string }> = {
+// R37-DETAIL-001: 导出给订单详情用。以前详情页头部写的是英文 OPPORTUNITY
+// kicker，卡片却是「标准订单类型 + 咖啡 + 拍照」—— 点进去之后视觉断掉。
+// 两处共用这一张表，改文案不会出现"卡片改了详情页没改"。
+export const TYPE_LABEL: Record<OpportunityType, { label: string; sub: string }> = {
   coffee_photo: { label: "咖啡 + 拍照", sub: "Coffee" },
   walk_photo: { label: "City Walk + 拍照", sub: "Walk" },
   coffee_chinese: { label: "咖啡 + 中文", sub: "Talk" },

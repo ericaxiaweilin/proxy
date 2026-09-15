@@ -4863,3 +4863,42 @@ if ! grep -q 'SCENE-EVENT-SIGNUP-001' apps/mobile/src/scene-activities.test.ts; 
   exit 1
 fi
 echo "    SCENE-EVENT-SIGNUP-001: PASS (scene detail lists real events and signs up through the activity domain)"
+
+# MARKET-R37-DETAIL-001: 点「我想接」之后进的订单详情，还是 R4 老样子。
+#
+# R37 那次改版（ee9b0f6，"implements the same visual on the live R4
+# opportunity card"）只落地了两个组件：卡片 + 筛选 palette。点「我想接」
+# 进的 `OpportunityDetail` 从来没动过 —— 卡片上是「标准订单类型 + 咖啡 +
+# 拍照」，点进去变成英文 `OPPORTUNITY` kicker，视觉直接断掉，而且两套字号
+# 尺度都不一样（卡片 6.4–15pt，详情 11–18pt）。
+#
+# 根因不是"没画好"，是**改版范围没覆盖用户点下去之后看到的那屏**。所以这里
+# 钉的是"详情和卡片必须共用同一套类型视觉 + 同一张文案表"，不是钉某个像素。
+# 详细断言在 apps/mobile/src/surfaces/r37-market-logo.test.ts。
+if ! grep -q 'MARKET-R37-DETAIL-001' apps/mobile/src/surfaces/r37-market-logo.test.ts; then
+  echo "  FAIL [MARKET-R37-DETAIL-001]: 订单详情的 R37 视觉没有命名测试 ——" >&2
+  echo "        改版只改卡片不看下一屏，是最容易悄悄退化的那类漏改。" >&2
+  exit 1
+fi
+# 详情头必须是批准的类型 logo。钉 `<MarketTypeLogo` 这个 JSX 形式而不是
+# `MarketTypeLogo` —— 后者在 import 行里也有，删掉用法照样绿。
+if ! grep -qF '<MarketTypeLogo' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-R37-DETAIL-001]: 订单详情没有用批准的类型 logo ——" >&2
+  echo "        卡片有 logo、点进去没有 = 用户以为点错了订单。" >&2
+  exit 1
+fi
+# 英文 kicker 不许回来。钉 `>OPPORTUNITY<`（JSX 文本节点）—— 单独钉
+# "OPPORTUNITY" 会被 OPPORTUNITY_STATUS_FILTERS 之类的常量命中，永远绿。
+if grep -qF '>OPPORTUNITY<' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-R37-DETAIL-001]: 订单详情又用回英文 OPPORTUNITY kicker ——" >&2
+  echo "        R37 把它换成「标准订单类型 + 中文类型名」就是为了不再堆英文。" >&2
+  exit 1
+fi
+# 卡片和详情共用一张文案表：否则改了卡片文案，详情又漂移回旧说法。
+if ! grep -qF 'export const TYPE_LABEL' apps/mobile/src/surfaces/r37-opportunity-card.tsx ||
+   ! grep -qF 'TYPE_LABEL[detailType]' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-R37-DETAIL-001]: 卡片和详情没有共用同一张类型文案表 ——" >&2
+  echo "        两处各写一份 = 改一处就漂移，正是这次断掉的原因。" >&2
+  exit 1
+fi
+echo "    MARKET-R37-DETAIL-001: PASS (order detail carries the approved type logo and shares the card's label table)"

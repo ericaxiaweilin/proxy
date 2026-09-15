@@ -36,7 +36,9 @@ import { ProxyIcon } from "../components/proxy-icon";
 import { ProxyTabs } from "../components/proxy-foundation";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
-import { R37OpportunityCard, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
+import { R37OpportunityCard, TYPE_LABEL, type OpportunityType, inferOpportunityTypeForFilter } from "./r37-opportunity-card";
+// R37-DETAIL-001: 订单详情头部用 R37.4 批准的类型 logo，跟卡片同一套视觉。
+import { MarketTypeLogo } from "../components/market-type-logo";
 import { R37TypePalette } from "./r37-type-palette";
 import { ActivityDetail, ActivityFeedCard } from "./tasks";
 import { DemandWizard } from "./demand-wizard";
@@ -652,6 +654,10 @@ function OpportunityDetail({
 }): React.JSX.Element {
   const budget = opportunity.price;
   const fair = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()} – ${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
+  // R37-DETAIL-001: 跟卡片用同一个推断函数 + 同一张文案表 —— 卡片显示
+  // 「咖啡 + 拍照」、点进来变成 OPPORTUNITY 这种断裂就是这么来的。
+  const detailType = inferOpportunityTypeForFilter(opportunity);
+  const detailTypeLabel = TYPE_LABEL[detailType];
   // 自定义报价：输入框的数字才是依据；为空/非数字时不许提交，
   // 也不再静默回退到客户预算（之前选自定义照样按预算发出）。
   const [customQuote, setCustomQuote] = useState("");
@@ -679,7 +685,13 @@ function OpportunityDetail({
       </View>
 
       <View style={styles.detailHero}>
-        <Text style={styles.detailHeroKicker}>OPPORTUNITY</Text>
+        <View style={styles.detailHeroTypeRow}>
+          <MarketTypeLogo type={detailType} size="FILTER" />
+          <View style={styles.detailHeroTypeMeta}>
+            <Text style={styles.detailHeroKicker}>标准订单类型</Text>
+            <Text style={styles.detailHeroTypeTitle}>{detailTypeLabel.label}</Text>
+          </View>
+        </View>
         <Text style={styles.detailHeroTitle}>{opportunity.title}</Text>
         <Text style={styles.detailHeroSub}>先回答：值不值得接、条件是否公平、你能不能按自己的条件做。</Text>
       </View>
@@ -2075,7 +2087,7 @@ const styles = StyleSheet.create({
   detailBackText: { color: color.ink, fontSize: 22, fontWeight: "700" },
   detailTitle: { color: color.ink, flex: 1, fontSize: 16, fontWeight: "800" },
   detailMore: { color: color.muted, fontSize: 16 },
-  detailHero: { backgroundColor: color.ink, borderRadius: 18, marginBottom: 10, padding: 14 },
+  detailHero: { backgroundColor: color.ink, borderRadius: 18, marginBottom: 10, padding: 14 }, detailHeroTypeRow: { alignItems: "center", flexDirection: "row", gap: 10, marginBottom: 10 }, detailHeroTypeMeta: { flex: 1, minWidth: 0 }, detailHeroTypeTitle: { color: color.white, fontSize: 14, fontWeight: "800", lineHeight: 18, marginTop: 2 },
   detailHeroKicker: { color: "#CDC8BF", fontSize: 11, fontWeight: "800" },
   detailHeroTitle: { color: color.white, fontSize: 18, fontWeight: "800", lineHeight: 24, marginTop: 4 },
   detailHeroSub: { color: "#D8D4CA", fontSize: 11, lineHeight: 16, marginTop: 6 },
