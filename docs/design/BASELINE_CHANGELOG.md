@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 208 — 2026-09-16
+
+- MERCHANT-ACCOUNT-AVATAR-001：个人主页有头，商家账户卡永远字母（P0）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx`
+    —— 身份卡头像改走店主头像指针解析（远端指针拼 thumb，与个人主页同一张；
+    拼不出的回渐变首字）。无新增入口、无列表结构改动。
+  - 其余文件（服务端读模型 JOIN、客户端透传与单测、命名测试、回归契约条目）
+    均非基线敏感。
+
 ## Revision 207 — 2026-09-16
 
 - 「编造数据 / 假状态」清扫批。统一原则：**没有数据源时不许显示成数字、成功、或者空**

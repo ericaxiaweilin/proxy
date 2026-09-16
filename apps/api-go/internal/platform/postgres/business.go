@@ -82,9 +82,11 @@ func (r *BusinessRepository) GetMembership(ctx context.Context, businessID, user
 
 func (r *BusinessRepository) ListAccountsForUser(ctx context.Context, userID string) ([]business.Account, error) {
 	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
-		SELECT a.id, a.owner_user_id, a.name, a.status, a.created_at
+		SELECT a.id, a.owner_user_id, a.name, a.status, a.created_at,
+			COALESCE(p.avatar_path, '')
 		FROM business.accounts a
 		JOIN business.memberships m ON m.business_id=a.id
+		LEFT JOIN identity.profiles p ON p.user_account_id=a.owner_user_id
 		WHERE m.user_id=$1 AND m.status='ACTIVE' AND a.status='ACTIVE'
 		ORDER BY a.created_at DESC`, userID)
 	if err != nil {
@@ -94,7 +96,7 @@ func (r *BusinessRepository) ListAccountsForUser(ctx context.Context, userID str
 	result := []business.Account{}
 	for rows.Next() {
 		var account business.Account
-		if err := rows.Scan(&account.ID, &account.OwnerUserID, &account.Name, &account.Status, &account.CreatedAt); err != nil {
+		if err := rows.Scan(&account.ID, &account.OwnerUserID, &account.Name, &account.Status, &account.CreatedAt, &account.AvatarPath); err != nil {
 			return nil, err
 		}
 		result = append(result, account)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BusinessClient } from "./business-client";
+import { BusinessClient, merchantAvatarUri } from "./business-client";
 import { InMemorySecureStorageDriver, OfflineFallbackSessionError, SecureSessionStore } from "./secure-session";
 
 function makeStore(): SecureSessionStore {
@@ -59,7 +59,7 @@ describe("BusinessClient", () => {
       authClient: { request: async (path) => {
         if (path.endsWith("/ListMyBusinessAccounts")) {
           return { status: 200, json: async () => envelope("ListMyBusinessAccounts", { type: "BusinessAccount", id: "mine" }, {
-            accounts: [{ id: "biz_1", name: "Bonsaidon", status: "ACTIVE" }],
+            accounts: [{ id: "biz_1", name: "Bonsaidon", status: "ACTIVE", avatarPath: "assets/ma_avatar1" }],
           }) };
         }
         if (path.endsWith("/ListBusinessStores")) {
@@ -79,6 +79,8 @@ describe("BusinessClient", () => {
     const accounts = await client.listMyAccounts();
     expect(accounts).toHaveLength(1);
     expect(accounts[0]?.name).toBe("Bonsaidon");
+    // MERCHANT-ACCOUNT-AVATAR-001: 店主头像指针必须透传（缺席/空串归一成缺席）。
+    expect(accounts[0]?.avatarPath).toBe("assets/ma_avatar1");
     const stores = await client.listStores("biz_1");
     expect(stores).toHaveLength(1);
     expect(stores[0]?.name).toBe("West Lake");
@@ -259,5 +261,20 @@ describe("BusinessClient", () => {
     expect(photo.mediaAssetId).toBe("ma_photo_1");
     const made = await client.createProduct({ storeId: "store_1", name: "Banh Mi", priceMinor: 25000, mediaAssetId: "ma_dish_9" });
     expect(made.product.mediaAssetId).toBe("ma_dish_9");
+  });
+});
+
+describe("MERCHANT-ACCOUNT-AVATAR-001 merchantAvatarUri", () => {
+  const base = "http://mac.local:4100";
+  it("resolves the remote pointer to the same thumb as the personal page", () => {
+    expect(merchantAvatarUri("assets/ma_74ad", base)).toBe(`${base}/v1/media/thumb/ma_74ad`);
+  });
+  it("passes server paths and http(s) through, rejects everything else", () => {
+    expect(merchantAvatarUri("/v1/media/thumb/x", base)).toBe(`${base}/v1/media/thumb/x`);
+    expect(merchantAvatarUri("https://cdn.example/a.png", base)).toBe("https://cdn.example/a.png");
+    expect(merchantAvatarUri("avatar-123.jpg", base)).toBeUndefined();
+    expect(merchantAvatarUri("assets/", base)).toBeUndefined();
+    expect(merchantAvatarUri("", base)).toBeUndefined();
+    expect(merchantAvatarUri(undefined, base)).toBeUndefined();
   });
 });

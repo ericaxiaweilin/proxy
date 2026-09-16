@@ -20,6 +20,11 @@ type Account struct {
 	OwnerUserID string    `json:"ownerUserId"`
 	Name        string    `json:"name"`
 	Status      string    `json:"status"`
+	// MERCHANT-ACCOUNT-AVATAR-001: 店主个人主页的头像指针（identity.profiles
+	// 落库值，如 assets/<mediaId>）。个人主页有头、商家账户卡永远字母的根因
+	// 就是这行没人带：读模型里根本没有头像字段。空 = 店主没设头像，客户端画
+	// fallback，不许编。
+	AvatarPath  string    `json:"avatarPath,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
 

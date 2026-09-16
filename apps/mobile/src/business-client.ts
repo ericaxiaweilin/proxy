@@ -27,7 +27,6 @@ export interface StorePhoto {
   mediaAssetId: string;
   createdAt: string;
 }
-
 export interface StoreProduct {
   id: string;
   storeId: string;
@@ -46,6 +45,22 @@ export interface StoreProduct {
   updatedAt: string;
 }
 
+// MERCHANT-ACCOUNT-AVATAR-001: 店主头像指针 → 可渲染 URI。identity.profiles
+// 落库值是远端指针（如 assets/<mediaId>），与个人主页同一张图；只认远端指针、
+// 服务端路径、http(s) 三种形状，其他一律回 undefined 走渐变 fallback ——
+// 拼一半的坏 URL 不许进 Image。纯函数放这里（不放 tsx）就是为了能直测。
+export function merchantAvatarUri(pointer: string | undefined, baseUrl: string): string | undefined {
+  const id = (pointer ?? "").trim();
+  if (!id) return undefined;
+  if (id.startsWith("assets/")) {
+    const mediaId = id.slice("assets/".length).trim();
+    return mediaId ? `${baseUrl}/v1/media/thumb/${encodeURIComponent(mediaId)}` : undefined;
+  }
+  if (id.startsWith("/")) return `${baseUrl}${id}`;
+  if (/^https?:\/\//.test(id)) return id;
+  return undefined;
+}
+
 export class BusinessClient {
   private sequence = 0;
   public constructor(
@@ -61,10 +76,18 @@ export class BusinessClient {
     return { businessId: requiredString(body, "businessId") };
   }
 
-  public async listMyAccounts(): Promise<Array<{ id: string; name: string; status: string }>> {
+  public async listMyAccounts(): Promise<Array<{ id: string; name: string; status: string; avatarPath?: string }>> {
     const body = this.body(await this.command("ListMyBusinessAccounts", { type: "BusinessAccount", id: "mine" }, {}));
     if (!Array.isArray(body.accounts)) throw new Error("business accounts malformed");
-    return body.accounts as Array<{ id: string; name: string; status: string }>;
+    // MERCHANT-ACCOUNT-AVATAR-001: avatarPath 是店主 identity profile 的落库指针
+    // （如 assets/<mediaId>），服务端 LEFT JOIN 带出；缺席/空串一律归一成
+    // undefined，调用方画 fallback。只认字符串，别把非字符串透传给 Image。
+    return (body.accounts as Array<{ id: string; name: string; status: string; avatarPath?: unknown }>).map((account) => ({
+      id: account.id,
+      name: account.name,
+      status: account.status,
+      ...(typeof account.avatarPath === "string" && account.avatarPath ? { avatarPath: account.avatarPath } : {}),
+    }));
   }
 
   public async addMember(businessId: string, userId: string, role?: string): Promise<void> {

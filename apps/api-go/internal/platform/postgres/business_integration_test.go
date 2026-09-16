@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -231,5 +232,84 @@ func bizEnvelope(commandType string, payload map[string]any, actorID string) com
 		CorrelationID:  "corr_biz_1",
 		RequestedAt:    "2026-08-16T00:00:00Z",
 		Payload:        payload,
+	}
+}
+
+// MERCHANT-ACCOUNT-AVATAR-001: 商家账户卡永远字母 —— ListMyBusinessAccounts
+// 不带店主头像。个人主页有头（identity.profiles.avatar_path），账户读模型没
+// JOIN 过来。现在带出来；没设头像的店主给 ""，客户端画 fallback，不许编。
+func TestListMyBusinessAccountsCarriesOwnerAvatar(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	repo := NewBusinessRepository(pool)
+	svc := business.NewWithRepository(repo)
+
+	run := time.Now().UnixNano()
+	owner := "user_biz_pg_avatar_" + itoa(run)
+	seedBusinessUsersPG(t, pool, []string{owner})
+	t.Cleanup(func() {
+		ctx := context.Background()
+		var bizIDs []string
+		rows, err := pool.Query(ctx, `SELECT id FROM business.accounts WHERE owner_user_id=$1`, owner)
+		if err == nil {
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err == nil {
+					bizIDs = append(bizIDs, id)
+				}
+			}
+			rows.Close()
+		}
+		for _, bizID := range bizIDs {
+			pool.Exec(ctx, `DELETE FROM business.memberships WHERE business_id=$1`, bizID)
+			pool.Exec(ctx, `DELETE FROM business.accounts WHERE id=$1`, bizID)
+		}
+		pool.Exec(ctx, `DELETE FROM identity.profiles WHERE user_account_id=$1`, owner)
+		cleanupBusinessUsersPG(t, pool, []string{owner})
+	})
+
+	r := svc.HandleContext(ctx, bizEnvelope("CreateBusinessAccount", map[string]any{"name": "Avatar Shop"}, owner))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("CreateBusinessAccount: %+v", r.Error)
+	}
+	bizID := readStringBiz(r.OperationRef, "businessId")
+	if bizID == "" {
+		t.Fatalf("CreateBusinessAccount: missing businessId, op=%s", r.OperationRef)
+	}
+
+	accountAvatar := func() string {
+		t.Helper()
+		lr := svc.HandleContext(ctx, bizEnvelope("ListMyBusinessAccounts", map[string]any{}, owner))
+		if lr.Outcome != "ACCEPTED" {
+			t.Fatalf("ListMyBusinessAccounts: %+v", lr.Error)
+		}
+		var top map[string]any
+		if err := json.Unmarshal([]byte(lr.OperationRef), &top); err != nil {
+			t.Fatalf("list payload is not JSON: %v", err)
+		}
+		items, _ := top["accounts"].([]any)
+		for _, it := range items {
+			if m, ok := it.(map[string]any); ok && m["id"] == bizID {
+				s, _ := m["avatarPath"].(string)
+				return s
+			}
+		}
+		t.Fatalf("created account %s missing from list: %s", bizID, lr.OperationRef)
+		return ""
+	}
+
+	// 店主没设头像：给 ""，不能编一个出来，也不能把整行弄丢。
+	if got := accountAvatar(); got != "" {
+		t.Fatalf("avatarPath without a profile must be empty, got %q", got)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity.profiles (user_account_id, name, handle, bio, city, avatar_path, version, updated_at)
+		VALUES ($1,'Avatar Owner','avatarowner','', '河内','assets/ma_test_avatar',1,now())
+		ON CONFLICT (user_account_id) DO UPDATE SET avatar_path=EXCLUDED.avatar_path`, owner); err != nil {
+		t.Fatalf("seed owner profile: %v", err)
+	}
+	if got := accountAvatar(); got != "assets/ma_test_avatar" {
+		t.Fatalf("avatarPath must carry the owner profile pointer, got %q", got)
 	}
 }

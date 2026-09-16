@@ -5871,3 +5871,25 @@ if ! grep -q 'never pre-fills settlement states the server did not return' apps/
 fi
 echo "    VOUCHER-SETTLEMENT-FAKE-STATE-001: PASS (settlement shows real states only; no success screen for unredeemed vouchers)"
 
+# MERCHANT-ACCOUNT-AVATAR-001: 个人主页有头，商家账户卡永远字母。
+#
+# 店主 identity.profiles.avatar_path 明明有值（与个人主页同一张图），但
+# ListMyBusinessAccounts 读模型里根本没有头像字段 —— 商家卡只能画首字。
+# 现在服务端 LEFT JOIN 带出来，客户端按远端指针走 thumb 解析；没设头像的
+# 给空，画 fallback，不许编。
+if ! grep -q 'AvatarPath' apps/api-go/internal/business/service.go ||
+   ! grep -q 'identity.profiles' apps/api-go/internal/platform/postgres/business.go ||
+   ! grep -q 'merchantAvatarUri' apps/mobile/src/business-client.ts ||
+   ! grep -q 'merchantAvatarUri(' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 商家账户头像没接上店主头像 ——" >&2
+  echo "        个人主页有头，账户卡还是字母。" >&2
+  exit 1
+fi
+if ! grep -q 'MERCHANT-ACCOUNT-AVATAR-001' apps/api-go/internal/platform/postgres/business_integration_test.go ||
+   ! grep -q 'MERCHANT-ACCOUNT-AVATAR-001' apps/mobile/src/business-client.test.ts; then
+  echo "  FAIL [MERCHANT-ACCOUNT-AVATAR-001]: 头像透传测试不见了" >&2
+  exit 1
+fi
+go -C apps/api-go test -count=1 -run '^TestListMyBusinessAccountsCarriesOwnerAvatar$' ./internal/platform/postgres/ || exit $?
+pnpm --filter @proxy/mobile exec vitest run src/business-client.test.ts || exit $?
+echo "    MERCHANT-ACCOUNT-AVATAR-001: PASS (merchant card shows the owner portrait)"

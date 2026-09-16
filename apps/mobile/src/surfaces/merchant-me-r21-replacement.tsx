@@ -16,6 +16,7 @@ import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, Text
 import { color, Gradient, shadows } from "../theme";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import type { BusinessClient } from "../business-client";
+import { merchantAvatarUri } from "../business-client";
 import type { SupplyClient, SupplierCandidate } from "../supply-client";
 import { MerchantStorefrontSurface } from "./merchant-storefront";
 import { MerchantCreatorRecommendations } from "./merchant-creator-recommendations";
@@ -115,8 +116,7 @@ function summary({ title, meta, stats }: { title: string; meta: string; stats: A
   );
 }
 
-function SimpleRows({ rows, onPress }: { rows: Array<[string, string, MerchantPage?]>; onPress?: (page: MerchantPage) => void }): React.JSX.Element {
-  return <View style={styles.rowList}>{rows.map(([title, meta, destination]) => <Pressable key={title} disabled={!destination} onPress={() => destination && onPress?.(destination)} style={styles.row}><View style={styles.rowCopy}><Text style={styles.objectTitle}>{title}</Text><Text style={styles.meta}>{meta}</Text></View>{destination ? <Text style={styles.chev}>›</Text> : null}</Pressable>)}</View>;
+function SimpleRows({ rows, onPress }: { rows: Array<[string, string, MerchantPage?]>; onPress?: (page: MerchantPage) => void }): React.JSX.Element {  return <View style={styles.rowList}>{rows.map(([title, meta, destination]) => <Pressable key={title} disabled={!destination} onPress={() => destination && onPress?.(destination)} style={styles.row}><View style={styles.rowCopy}><Text style={styles.objectTitle}>{title}</Text><Text style={styles.meta}>{meta}</Text></View>{destination ? <Text style={styles.chev}>›</Text> : null}</Pressable>)}</View>;
 }
 
 export function MerchantMeR21Replacement({
@@ -609,8 +609,8 @@ export function MerchantMeR21Replacement({
         {error ? <View style={styles.card}><Text style={styles.empty}>加载失败：{error}</Text></View> : null}
 
         <Pressable onPress={() => setPage("store")} style={styles.identity}>
-          {accounts?.[0]?.avatarPath ? (
-            <Image source={{ uri: accounts?.[0]?.avatarPath?.startsWith("/") ? `${localApiBaseUrl ?? ""}${accounts?.[0]?.avatarPath}` : accounts?.[0]?.avatarPath ?? "" }} style={styles.bizAvatar} />
+          {merchantAvatarUri(accounts?.[0]?.avatarPath, localApiBaseUrl) ? (
+            <Image source={{ uri: merchantAvatarUri(accounts?.[0]?.avatarPath, localApiBaseUrl)! }} style={styles.bizAvatar} />
           ) : (
             <Gradient from="#45208A" to="#8033F0" style={styles.bizAvatar}>
               <Text style={styles.bizAvatarText}>B</Text>
