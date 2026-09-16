@@ -783,7 +783,11 @@ describe("HANDLE-LOOKUP-001 a scanned QR resolves to a real person", () => {
     // 那是把「这是一家店」显示成「这个人注销了」。所以必须先分叉、单独说一句。
     expect(crmCode).toContain('if (parsed.kind === "store")');
     expect(crmCode).toContain('setScanLookup("store")');
-    expect(crmCode).toContain("这是店铺名片");
+    // 反向钉：不许再指路到「我的 → …」。扫码的人**不是**这家店的老板，
+    // 把他送去自己的商家页等于指错人（这个 bug 这次真的写进去过）。
+    expect(crmCode).not.toContain("我的 →");
+    expect(crmCode).toContain("不是个人名片");
+    expect(crmCode).toContain("App 目前不支持用店铺名片加好友");
   });
 
   it("keeps found / missing / failed / no-client / store as five different truths", () => {

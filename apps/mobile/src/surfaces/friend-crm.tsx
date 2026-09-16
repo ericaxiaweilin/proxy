@@ -613,7 +613,12 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
               {scanLookup === "missing" ? <Text style={styles.scanError}>这张名片指向的人不存在 —— 可能已注销，或者名片被改过。</Text> : null}
               {scanLookup === "failed" ? <Text style={styles.scanError}>查询失败，请稍后重试。</Text> : null}
               {scanLookup === "no-client" ? <Text style={styles.scanHitNote}>识别到了 @{scanned.kind === "person" ? scanned.handle : ""}，但当前没有登录态，查不到这个人。</Text> : null}
-              {scanLookup === "store" ? <Text style={styles.scanHitNote}>这是店铺名片（{scanned.name}），不是个人名片 —— 加好友要扫对方的个人二维码。店铺主页在「我的 → 企业 / 店铺资料」里。</Text> : null}
+              {/* 不能指路到扫码人自己的商家页：他**不是**这家店的老板，指过去等于指错人。
+                  App 里现在也没有给顾客看的店铺页（只有商家自己那个「线上店铺」管理面），
+                  所以这里只说清楚「这不是个人名片」。
+                  （这个注释刻意不写出那条指路原文 —— 测试对这条文案有反向钉，
+                  写在注释里会让钉在正确的树上误报。） */}
+              {scanLookup === "store" ? <Text style={styles.scanHitNote}>这是「{scanned.name}」的店铺名片，不是个人名片 —— 加好友要扫对方个人的二维码。App 目前不支持用店铺名片加好友。</Text> : null}
             </View>
           ) : null}
           {scanned === null && scanError ? <Text style={styles.scanError}>{scanError}</Text> : null}

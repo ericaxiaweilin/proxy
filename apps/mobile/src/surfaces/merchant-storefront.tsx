@@ -545,7 +545,10 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     <Text style={styles.photoHeadTitle}>菜单 / 服务</Text>
                     <Text style={styles.photoHeadMeta}>{sProducts.length} 项 · 在售 {sAvailable.length}</Text>
                   </View>
-                  <Text style={styles.empty}>{sProducts.length ? "顾客在公开主页看到的菜单与服务" : "还没有菜单或服务"}</Text>
+                  {/* 以前这里写「顾客在公开主页看到的菜单与服务」—— App 里**没有**给顾客看的
+                      店铺页（全仓库只有「我的 › 线上店铺」这一个商家自己的管理面），
+                      对外店铺页属于后续的 Web 管理范围。先说实话。 */}
+                  <Text style={styles.empty}>{sProducts.length ? "菜单与服务维护在这里；对外的顾客展示页还没做。" : "还没有菜单或服务"}</Text>
                   <Pressable onPress={() => startEditProduct(s.id, undefined)} style={styles.uploadButton}><Text style={styles.uploadButtonText}>+ 添加菜单 / 服务</Text></Pressable>
                   {sAvailable.length > 0 ? <>
                     <Text style={styles.catalogTitle}>值得先看的 SKU</Text>
@@ -763,7 +766,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                       </View>
                     </View>
                   ))}</View>
-                  <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>Creator 权益</Text><Text style={styles.photoHeadMeta}>联营与内容合作</Text></View><Text style={styles.empty}>设置 Creator 到店体验、内容合作与专属权益；权益会展示在公开店铺页。</Text></View></> : null}
+                  <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>Creator 权益</Text><Text style={styles.photoHeadMeta}>联营与内容合作</Text></View><Text style={styles.empty}>设置 Creator 到店体验、内容合作与专属权益；对外的展示页还没做，配好之后暂时只有你自己看得到。</Text></View></> : null}
                   {currentPage === "details" ? <View style={styles.managerPanel}><View style={styles.photoHead}><Text style={styles.photoHeadTitle}>营业资料</Text><Text style={styles.photoHeadMeta}>公开展示</Text></View>{sLines ? <View style={styles.linesBlock}><Text style={styles.linesDescription}>{sLines.description || "店铺简介待完善"}</Text><Text style={styles.linesContact}>{[sLines.contactPhone, sLines.contactEmail].filter(Boolean).join(" · ") || "联系方式待完善"}</Text><Text style={styles.linesHours}>{Object.entries(linesAsHoursObject(sLines.hoursJson)).map(([k, v]) => k === "营业时间" ? v : `${k} ${v}`).join(" · ") || "营业时间待完善"}</Text></View> : <Text style={styles.empty}>店铺简介、联系方式和营业时间待完善</Text>}</View> : null}
                   <View style={styles.scopeNote}><Text style={styles.scopeNoteText}>线上店铺只负责对外展示。订单、客户、退款和经营分析分别进入对应经营模块，不在这里重复做后台。</Text></View>
                 </View>
