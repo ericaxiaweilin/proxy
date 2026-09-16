@@ -379,7 +379,15 @@ export function MeSurface({
     setSubPage(requestedSubPage);
     onRequestedSubPageConsumed?.();
   }, [requestedSubPage, onRequestedSubPageConsumed]);
-  useModuleBackHandler(subPage ? () => { setSubPage(undefined); return true; } : undefined);
+  // PROFILE-QR-005：关闭子页这件事以前在 20 多个地方各写一遍
+  // `setSubPage(undefined)` —— 一律甩回「我的」根页。二维码页可以从
+  // 「个人总管理」或「我的企业/店铺」进来，返回就得回到那一页，不然
+  // 点进去再返回等于被人踢回主页。没有 backRoute 的行为完全不变。
+  function closeSubPage(): void {
+    const parent = subPage?.backRoute ? meSubPage(subPage.backRoute) : undefined;
+    setSubPage(parent);
+  }
+  useModuleBackHandler(subPage ? () => { closeSubPage(); return true; } : undefined);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [myScenes, setMyScenes] = useState<MyScene[]>([]);
   const [myInvitations, setMyInvitations] = useState<MySceneInvitation[]>([]);
@@ -1003,7 +1011,7 @@ export function MeSurface({
 
   // PROFILE-QR-004：二维码页可以带 payload 进来（商家卡片画的是店铺码，打开的
   // 页就必须还是店铺码）。extra 只对需要透传的路由传。
-  function openSubPage(route: string, extra?: { qrPayload?: string; qrTitle?: string }): void {
+  function openSubPage(route: string, extra?: { qrPayload?: string; qrTitle?: string; backRoute?: string }): void {
     const next = meSubPage(route);
     if (!next) return;
     setSubPage(extra ? { ...next, ...extra } : next);
@@ -1165,7 +1173,7 @@ export function MeSurface({
   }
 
   if (subPage) {
-    const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => setSubPage(undefined)}>{node}</SwipeBackShell>;
+    const contentWrapper = (node: React.JSX.Element): React.JSX.Element => <SwipeBackShell onExit={() => closeSubPage()}>{node}</SwipeBackShell>;
     const content = SUB_PAGE_CONTENT[subPage.route];
 
     if (subPage.route === "myorders") return <SwipeBackShell onExit={() => setSubPage(undefined)}><MyOrdersSurface client={fulfillment} moderation={moderation} onBack={() => setSubPage(undefined)} /></SwipeBackShell>;
@@ -1685,7 +1693,7 @@ export function MeSurface({
               actions={manageQrPayload ? [
                 { label: "复制链接", onPress: () => void copyProfileLink(manageQrPayload) },
                 { label: "保存到相册", onPress: () => void saveQrToAlbum(qrCardShotRef), primary: true },
-                { label: "我的二维码页 ›", onPress: () => openSubPage("personalqr") }
+                { label: "我的二维码页 ›", onPress: () => openSubPage("personalqr", { backRoute: "personalmanage" }) }
               ] : [{ label: "去设置主页名", onPress: () => setProfileEditorOpen(true), primary: true }]}
             />
 
@@ -1947,7 +1955,7 @@ export function MeSurface({
         return contentWrapper(
           <View style={styles.root}>
             <ScrollView contentContainerStyle={styles.content}>
-              <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+              <Pressable onPress={() => closeSubPage()} style={styles.subPageBack}>
                 <Text style={styles.subPageBackText}>‹ 返回</Text>
               </Pressable>
               <Text style={styles.subPageTitle}>我的二维码</Text>
@@ -1959,7 +1967,7 @@ export function MeSurface({
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
-            <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
+            <Pressable onPress={() => closeSubPage()} style={styles.subPageBack}>
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text style={styles.subPageTitle}>{qrHeading}</Text>
@@ -2213,7 +2221,7 @@ export function MeSurface({
               title="商家身份二维码"
               desc="顾客扫码核验商家主体与真实到店记录，扫码先看到门店主页与信誉。"
               actionLabel="打开商家二维码"
-              onAction={() => openSubPage("personalqr", merchantId ? { qrPayload: toQrPayload(`proxy.app/store/${merchantId}`), qrTitle: "商家二维码" } : undefined)}
+              onAction={() => openSubPage("personalqr", { backRoute: "bdash", ...(merchantId ? { qrPayload: toQrPayload(`proxy.app/store/${merchantId}`), qrTitle: "商家二维码" } : {}) })}
               qrValue={merchantId ? `proxy.app/store/${merchantId}` : `proxy.app/@${profileDraft.handle}`}
             />
 

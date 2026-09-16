@@ -9,6 +9,8 @@ export type MeSubPage = {
   route: string;
   qrPayload?: string | undefined;
   qrTitle?: string | undefined;
+  // PROFILE-QR-005：从哪个子页点进来的，返回就回哪一页；缺省回「我的」根页。
+  backRoute?: string | undefined;
 } | undefined;
 export type AvailabilityState = "AVAILABLE" | "BUSY" | "PAUSED" | "HIDDEN";
 

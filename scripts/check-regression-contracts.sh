@@ -3943,6 +3943,22 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts -t "PROFILE-QR-004" || exit $?
 echo "    PROFILE-QR-004: PASS (qr copy/save/zoom reachable from profile manage; store qr stays a store qr)"
 
+# PROFILE-QR-005: 二维码页可以从「个人总管理」或「我的企业/店铺」进来，但关闭子页
+# 的代码在 20 多个地方各写一遍 `setSubPage(undefined)` —— 一律甩回「我的」根页。
+# 只改页内返回键不够：安卓返回键和侧滑还是会把人踢回主页，所以三条退出路径
+# 必须走同一个出口，而那个出口要真的读 backRoute。
+if ! grep -qF 'backRoute: "personalmanage"' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'backRoute: "bdash"' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'const parent = subPage?.backRoute ? meSubPage(subPage.backRoute) : undefined;' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'useModuleBackHandler(subPage ? () => { closeSubPage(); return true; } : undefined)' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'onExit={() => closeSubPage()}' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-QR-005]: sub-page back is not parent-aware ——" >&2
+  echo "        hardware back, swipe-back and the in-page back button must all go through closeSubPage()." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts -t "PROFILE-QR-005" || exit $?
+echo "    PROFILE-QR-005: PASS (qr page returns to the sub-page that opened it)"
+
 # HANDLE-UNIQUE-001: handle 的唯一性曾只写在 profile.go 的注释里
 # （"uniqueness is per-tenant, enforced by repository on create"）。
 # 039_profile.sql 建的是普通索引而非唯一索引，两个 repository 也都不查冲突，

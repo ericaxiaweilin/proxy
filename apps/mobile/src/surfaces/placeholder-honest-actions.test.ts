@@ -98,7 +98,7 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
   // 全部断言走剥注释后的源码（meCode / crmCode），注释里写了同款字符串不算数。
   it("PROFILE-QR-004 personalmanage can reach the full qr page", () => {
     // 导航本身：个人总管理里必须有一个按得动的入口。
-    expect(meCode).toContain('onPress: () => openSubPage("personalqr")');
+    expect(meCode).toMatch(/openSubPage\("personalqr"/);
     // 卡片上要有复制和存图，且存图锚点是这张卡自己的 ref。
     expect(meCode).toContain("copyProfileLink(manageQrPayload)");
     expect(meCode).toContain("saveQrToAlbum(qrCardShotRef)");
@@ -116,6 +116,23 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
     expect(meCode).toContain("const profileLink = storeQr ?? profileQrPayload(profileDraft.handle);");
     // 店铺码扫出来是门店公开页 —— 拿 TikTok / Zalo 分层去描述它属于编内容。
     expect(meCode).toContain("storeQr ? null :");
+  });
+
+  // PROFILE-QR-005：二维码页可以从「个人总管理」或「我的企业/店铺」进来，
+  // 而关闭子页的代码在 20 多个地方各写一遍 `setSubPage(undefined)` ——
+  // 一律甩回「我的」根页。点进二维码页再返回等于被踢回主页。
+  it("PROFILE-QR-005 a qr page opened from a sub-page returns to it", () => {
+    // 两个入口都得声明自己是谁的父页。
+    expect(meCode).toContain('backRoute: "personalmanage"');
+    expect(meCode).toContain('backRoute: "bdash"');
+    // 关闭走统一出口，且出口真的读了 backRoute。
+    expect(meCode).toContain("function closeSubPage(): void {");
+    expect(meCode).toContain("const parent = subPage?.backRoute ? meSubPage(subPage.backRoute) : undefined;");
+    // 三条退出路径（硬件返回 / 侧滑 / 页内返回键）全部走 closeSubPage ——
+    // 只改页内按钮的话，安卓返回键和侧滑还是会把人甩回根页。
+    expect(meCode).toContain("useModuleBackHandler(subPage ? () => { closeSubPage(); return true; } : undefined)");
+    expect(meCode).toContain("onExit={() => closeSubPage()}");
+    expect(meCode).toContain('onPress={() => closeSubPage()} style={styles.subPageBack}');
   });
 
   it("PROFILE-QR-004 qr capture is not hardwired to the sub-page ref", () => {

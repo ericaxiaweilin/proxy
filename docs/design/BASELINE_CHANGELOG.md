@@ -4,6 +4,17 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 215 — 2026-09-16
+
+- PROFILE-QR-005：子页返回认父页（personal-profile scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`
+    —— 新增 `closeSubPage()`：子页带 `backRoute` 时返回到父页，缺省回「我的」
+    根页。三条退出路径（硬件返回 / 侧滑 / 页内返回键）统一走这个出口；
+    二维码页的两个入口分别声明 `backRoute: "personalmanage"` /
+    `"bdash"`。没有 `backRoute` 的子页行为一字不变。
+  - `apps/mobile/src/surfaces/me-types.ts`（`MeSubPage` 增加可选 `backRoute`）。
+  - 无新增页面、无列表结构改动、无文案改动。
+
 ## Revision 214 — 2026-09-16
 
 - PROFILE-QR-004：二维码常规能力不再只挂在商家路径（personal-profile scope）。
