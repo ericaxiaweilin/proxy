@@ -839,7 +839,7 @@ export function AppShell({
               onBack={() => setMessageChat(undefined)}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} onOpenAddFriend={() => { setMeOpenSubPage(meSubPage("addfriend")); goToPage("ME"); }} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onOpenConvo={(author, conversationId, convoId, convoTitle) => setMessageChat({ author, conversationId, convoId, convoTitle })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
+            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenAddFriend={() => { /* ADD-FRIEND-FROM-MESSAGES-001: 添加好友已内嵌消息模块（扫码/搜索/邀请），不再跳去「我的」。 */ }} onOpenConversation={(author, conversationId, aiAccount, avatarSource) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}) } : { author })} onOpenConvo={(author, conversationId, convoId, convoTitle) => setMessageChat({ author, conversationId, convoId, convoTitle })} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>

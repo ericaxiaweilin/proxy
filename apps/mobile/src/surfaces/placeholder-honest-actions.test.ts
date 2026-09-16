@@ -561,13 +561,14 @@ describe("ADD-FRIEND-FROM-MESSAGES-001 Messages reaches add-friend, and the back
     expect(messages).toContain('setAddFriendNotice(openAddFriend() ? "" :');
   });
 
-  it("the shell passes the callback and actually switches module", () => {
-    // 光有入口没有接线就是半截：点下去要么无反应，要么停在信息页。
-    // goToPage 而不是 setTab —— pageOverride 可能停在 MSG_FRIENDS，
-    // 只改 tab 切不过去。
+  it("the shell hands the relationship to MessagesSurface and no longer jumps to Me", () => {
+    // 用户要求：添加好友（扫码/搜索/邀请）内嵌在消息模块，不再跳去「我的」。
+    // shell 必须把 relationship 传给 MessagesSurface（FriendCrmSurface 由
+    // MessagesSurface 自渲染）；不得再 setMeOpenSubPage/goToPage("ME")。
+    expect(appShellCode).toContain("relationship={relationship}");
     expect(appShellCode).toContain("onOpenAddFriend={() =>");
-    expect(appShellCode).toContain('setMeOpenSubPage(meSubPage("addfriend"))');
-    expect(appShellCode).toContain('goToPage("ME")');
+    expect(appShellCode).not.toContain('setMeOpenSubPage(meSubPage("addfriend"))');
+    expect(appShellCode).not.toContain('goToPage("ME")');
   });
 
   it("the Me surface opens the requested sub-page exactly once", () => {

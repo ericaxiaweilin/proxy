@@ -16,6 +16,8 @@ import type { PlatformAIAccount } from "../ai-account-client";
 import { BUNDLED_AI_COMPANIONS } from "../ai-companion-catalog";
 import { dedupeInboxDialogs } from "../conversation-inbox-model";
 import type { ProfileClient } from "../profile-client";
+import type { RelationshipClient } from "../relationship-client";
+import { FriendCrmSurface } from "./friend-crm";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { parseFolders, parseHiddenChatIds } from "../local-snapshot";
 
@@ -198,6 +200,8 @@ export function MessagesSurface({
   conversationClient,
   profileClient,
   apiBaseUrl,
+  relationship,
+  viewer,
 }: {
   onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: number | { uri: string }) => void;
   onOpenRequests?: () => void;
@@ -205,6 +209,11 @@ export function MessagesSurface({
   // ADD-FRIEND-FROM-MESSAGES-001: 「新聊天」里找还没聊过的人。没有它就只能
   // 在本机收件箱里找人 —— 那是「找人聊天」，不是「加好友」。
   onOpenAddFriend?: (() => void) | undefined;
+  // 添加好友的完整 UI（扫码/搜索/邀请）内嵌在消息模块 —— 不再跳去「我的」。
+  // 调用方（app-shell）传入 relationship + viewer 后本组件自渲染；
+  // 未传时回退到 onOpenAddFriend（诚实提示，不静默）。
+  relationship?: RelationshipClient | undefined;
+  viewer?: { name: string; handle: string } | undefined;
   // CONVO-OPEN-001: 从 Convo 列表打开一条**支线**。它比 onOpenConversation 多带
   // convoId + convoTitle —— 少了 convoId，shell 只会按普通 DM 打开主线，而这一行的
   // 无障碍标签写着「打开 Convo」。列表里能看见支线、点开却落在主线，等于没接线。
@@ -233,6 +242,8 @@ export function MessagesSurface({
   // ADD-FRIEND-FROM-MESSAGES-001: 加好友入口没接通时把话说出来，
   // 不能点下去什么都不发生 —— 静默的死按钮和「没这个人」长得一样。
   const [addFriendNotice, setAddFriendNotice] = useState("");
+  // ADD-FRIEND-FROM-MESSAGES-001: 消息模块内嵌「添加好友」表面（扫码/搜索/邀请）。
+  const [showAddFriend, setShowAddFriend] = useState(false);
   // CONVO-OPEN-001: 支线入口没接通时把话说出来 —— 同 addFriendNotice，
   // 静默的死按钮和「这条支线不存在」长得一样。
   const [convoNotice, setConvoNotice] = useState("");
@@ -457,7 +468,14 @@ export function MessagesSurface({
   // ADD-FRIEND-FROM-MESSAGES-001: 加好友表面住在 Me 模块（relationship +
   // profileClient + 本人身份都在那边齐了），所以这里只负责把请求交出去；
   // 没有人接的时候不静默 —— 返回 false 让按钮自己说清楚。
+  // 现在改为：调用方传了 relationship 就在**消息模块内嵌** FriendCrmSurface
+  // （扫码/搜索/邀请全在本页），不再跳去「我的」；只有没传时才回退到
+  // onOpenAddFriend（旧行为，也保持诚实）。
   const openAddFriend = (): boolean => {
+    if (relationship) {
+      setShowAddFriend(true);
+      return true;
+    }
     if (!onOpenAddFriend) return false;
     onOpenAddFriend();
     return true;
@@ -503,6 +521,20 @@ export function MessagesSurface({
   }
 
   if (subView === "contacts") {
+    // 添加好友完整表面内嵌在消息模块（用户要求：不在「我的」）。
+    if (showAddFriend) {
+      return (
+        <FriendCrmSurface
+          relationship={relationship}
+          profileClient={profileClient}
+          initialView="ADD_FRIEND"
+          addFriendBackLabel="‹ 返回"
+          viewer={viewer}
+          onBack={() => { setShowAddFriend(false); setAddFriendNotice(""); }}
+          onOpenConversation={(author) => { setShowAddFriend(false); onOpenConversation(author); }}
+        />
+      );
+    }
     // 联系人 = 收件箱里真实聊过天的人（名字/最近消息/时间都来自服务端），
     // 没有独立通讯录接口，不编造 username/在线状态/手机号。
     // 已左滑删除的会话不同步到联系人。
