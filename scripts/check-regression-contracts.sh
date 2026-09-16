@@ -4202,7 +4202,7 @@ require_test "HANDLE-LOOKUP-001" "./internal/identity" \
   "TestGetProfileByHandleResolvesExactlyOnePerson" \
   "apps/api-go/internal/identity/profile_test.go" || exit $?
 if ! grep -q 'getProfileByHandle' apps/mobile/src/profile-client.ts ||
-   ! grep -q 'await lookupScannedHandle(parsed)' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'await lookupScannedPerson(parsed)' apps/mobile/src/surfaces/friend-crm.tsx ||
    ! grep -q 'profile_not_found' apps/mobile/src/surfaces/friend-crm.tsx ||
    ! grep -q 'GetProfileByHandle' apps/api-go/internal/identity/service.go ||
    ! grep -q 'HANDLE-LOOKUP-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
@@ -6123,3 +6123,37 @@ if ! grep -q 'CHECKIN_RADIUS_METERS = 100' apps/mobile/src/scene-checkin.ts; the
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-checkin.test.ts || exit $?
 echo "    SCENE-CHECKIN-100M-001: PASS (check-in gated by 100m GPS truth)"
+
+# ADD-FRIEND-NEXT-001: 发出的请求必须可查，“已发送”不是终点。
+#
+# 根因：reload() 只把 INCOMING 投影到请求列表，OUTGOING 没有任何渲染面 ——
+# 点了添加变“已发送”即终点：查不到状态、通过了不提醒、无开聊入口。
+# 现在 serverFriends.pending 按 direction === "OUTGOING" 派生 outgoingRequests，
+# REQUESTS 加“我发出的”分组只展示等待态（服务端无撤回命令，不编按钮），
+# SCAN 已发送态给下一步指路 + 内跳 REQUESTS，通过后开聊走 LIST 已有 onOpenConversation。
+if ! grep -q 'outgoingRequests' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'direction === "OUTGOING"' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q '等待对方通过' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q '对方通过后会出现在好友列表，可直接开聊' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q '看看我发出的请求' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q '你还没发出过请求' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'ADD-FRIEND-NEXT-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [ADD-FRIEND-NEXT-001]: 发出的请求又不可查了 ——" >&2
+  echo "        已发送即终点，无状态、无提醒、无开聊入口。" >&2
+  exit 1
+fi
+# 反向钉：不许给发出态编撤回按钮，服务端没有撤回指令。
+if grep -q '撤回好友请求' apps/mobile/src/surfaces/friend-crm.tsx ||
+   grep -q 'cancelFriendRequest' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [ADD-FRIEND-NEXT-001]: 发出态编造了撤回动作 ——" >&2
+  echo "        服务端无撤回命令，不编按钮。" >&2
+  exit 1
+fi
+# 反向钉：两句空态不许混用一句（收件箱空 ≠ 发出箱空）。
+if grep -q '暂无待处理请求，你还没' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [ADD-FRIEND-NEXT-001]: 两句空态混用了一句 ——" >&2
+  echo "        没人加我 ≠ 我没加过人。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    ADD-FRIEND-NEXT-001: PASS (outgoing requests stay visible with a next step)"

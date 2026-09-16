@@ -905,3 +905,38 @@ describe("CONVO-LIST-001 my convos are listed, not just creatable", () => {
     expect(messages).toContain('if (!Number.isFinite(ms) || ms <= 0) return "—";');
   });
 });
+
+describe("ADD-FRIEND-NEXT-001 an outgoing request stays visible with a next step", () => {
+  it("derives outgoing requests from server pending instead of ending at 已发送", () => {
+    // 根因：reload() 只把 INCOMING 投影到请求列表，OUTGOING 没有任何渲染面。
+    // 派生必须走 direction === "OUTGOING"，字段用现成的 displayName/city/since，
+    // 只展示等待态，不编撤回按钮（服务端无撤回命令）。
+    expect(crmCode).toContain("outgoingRequests");
+    expect(crmCode).toContain('direction === "OUTGOING"');
+    expect(crmCode).toContain("等待对方通过");
+    // 反向：不许给发出态编动作按钮，服务端没有撤回指令。
+    expect(crmCode).not.toContain("撤回好友请求");
+    expect(crmCode).not.toContain("cancelFriendRequest");
+  });
+
+  it("gives the SCAN sent state a next step into REQUESTS", () => {
+    // SCAN 页“已发送”态下必须有下一步行 + 内跳，不新增 prop。
+    // 通过后的开聊走 LIST 已有的 onOpenConversation，闭环在那一端。
+    expect(crmCode).toContain("对方通过后会出现在好友列表，可直接开聊");
+    expect(crmCode).toContain("看看我发出的请求");
+    expect(crmCode).toContain("scanAddSent");
+    // 内跳必须真实存在：pendingCard 一处 + 已发送下一步一处，少一处都是断链。
+    const jumps = crmCode.match(/setSheet\("REQUESTS"\)/g) ?? [];
+    expect(jumps.length).toBeGreaterThanOrEqual(2);
+    expect(crmCode).toContain("onOpenConversation");
+  });
+
+  it("keeps the outgoing empty copy independent from the incoming one", () => {
+    // “你还没发出过请求”与“暂无待处理请求”不许混用一句：前者是发出箱空，
+    // 后者是收件箱空，合成一句会把“没人加我”画成“我没加过人”。
+    expect(crmCode).toContain("你还没发出过请求");
+    expect(crmCode).toContain("暂无待处理请求");
+    expect(crmCode).toContain("我发出的");
+    expect(crmCode).not.toContain("暂无待处理请求，你还没");
+  });
+});
