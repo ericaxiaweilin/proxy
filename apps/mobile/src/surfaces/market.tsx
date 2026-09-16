@@ -1907,7 +1907,9 @@ function MarketMap({
               pinColor="#0B7A73"
             />
           )) : null}
-          {/* 热门探索点：紫色 marker，仅作为“可以去看看” — 不走 onPinPress */}
+          {/* 热门探索点：紫色 marker，仅作为“可以去看看” — 不走 onPinPress。
+              跟订单钉同视觉权重（MARKET-PIN-PARITY-001）：不许再挂 opacity，
+              淡紫+半透明在活动页看起来比订单钉小一圈。 */}
           {EXPLORER_SPOTS.map((spot) => (
             <Marker
               key={spot.id}
@@ -1915,7 +1917,6 @@ function MarketMap({
               title={spot.name}
               description={spot.tag === "HOT" ? "热门探索点" : "探索点"}
               pinColor={spot.tag === "HOT" ? "#7A2DC7" : "#9A8AB5"}
-              opacity={0.85}
             />
           ))}
           {/* 您当前位置的覆盖圈：准确可视、但隐私级别仍然是“粗粒度” */}
