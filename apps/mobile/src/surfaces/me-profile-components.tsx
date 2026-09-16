@@ -280,7 +280,8 @@ function QrCard({
   qrValue,
   qrSize = 104,
   actions,
-  shotRef
+  shotRef,
+  notice
 }: {
   title: string;
   desc: string;
@@ -292,6 +293,8 @@ function QrCard({
   qrSize?: number | undefined;
   actions?: QrCardAction[] | undefined;
   shotRef?: React.RefObject<View | null> | undefined;
+  /** 复制/存图的结果必须出得来。没有这个出口时，成功失败一律静默 —— 用户看到的就是「按了没反应」。 */
+  notice?: string | undefined;
 }): React.JSX.Element {
   const buttons = actions && actions.length > 0 ? actions : undefined;
   return (
@@ -319,6 +322,7 @@ function QrCard({
             <Text style={styles.qrCardBtnText}>{actionLabel}</Text>
           </Pressable>
         )}
+        {notice ? <Text style={styles.qrCardNotice}>{notice}</Text> : null}
       </View>
     </View>
   );

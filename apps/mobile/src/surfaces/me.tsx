@@ -569,12 +569,18 @@ export function MeSurface({
   const qrCardShotRef = useRef<View>(null);
   // 结构化类型，避免 React 18/19 的 RefObject 定义差异把签名写死。
   type QrShotRef = { current: View | null };
+  // 失败必须带上真实原因。笼统的「请重试」把「这个安装包根本没带原生模块」
+  // 和「用户没给权限」说成同一句话 —— 前者重试一万次也不会好。
+  function qrFailureReason(err: unknown): string {
+    if (err instanceof Error && err.message) return err.message;
+    return typeof err === "string" && err ? err : "未知错误";
+  }
   async function shareQrImage(shotRef: QrShotRef = qrShotRef): Promise<void> {
     try {
       const uri = await captureRef(shotRef, { format: "png", quality: 1 });
       await Share.share({ url: uri, message: `查看 ${profileDraft.name} 的 Proxy 主页` });
-    } catch {
-      setQrNotice("分享失败，请重试或直接复制链接。");
+    } catch (err) {
+      setQrNotice(`分享失败：${qrFailureReason(err)}`);
     }
   }
   // PROFILE-QR-002：一键保存二维码到相册（不再依赖系统分享面板的
@@ -589,16 +595,16 @@ export function MeSurface({
       const uri = await captureRef(shotRef, { format: "png", quality: 1 });
       await MediaLibrary.saveToLibraryAsync(uri);
       setQrNotice("二维码已保存到相册。");
-    } catch {
-      setQrNotice("保存失败，请重试，或改用系统分享存图。");
+    } catch (err) {
+      setQrNotice(`保存失败：${qrFailureReason(err)}`);
     }
   }
   async function copyProfileLink(link: string): Promise<void> {
     try {
       await Clipboard.setStringAsync(link);
       setQrNotice("链接已复制，去粘贴给你的好友吧。");
-    } catch {
-      setQrNotice("复制失败，请长按链接手动复制。");
+    } catch (err) {
+      setQrNotice(`复制失败：${qrFailureReason(err)}`);
     }
   }
   async function submitStoreRecommendation(): Promise<void> {
@@ -1689,6 +1695,7 @@ export function MeSurface({
               qrValue={manageQrPayload ?? undefined}
               qrSize={160}
               shotRef={qrCardShotRef}
+              notice={qrNotice}
               alignCenter
               actions={manageQrPayload ? [
                 { label: "复制链接", onPress: () => void copyProfileLink(manageQrPayload) },

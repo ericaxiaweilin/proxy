@@ -741,6 +741,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 7
   },
   qrCardBtnTextGhost: { color: color.ink, fontSize: 11, fontWeight: "800" },
+  qrCardNotice: { color: color.muted, fontSize: 11, marginTop: 6 },
 
   // STORE-REC/PROFILE-QR-001: 真实个人二维码（react-native-qrcode-svg）。
   qrRealCard: {
