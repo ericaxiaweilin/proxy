@@ -210,56 +210,50 @@ export class EngagementClient {
 
   // R15.56 — ListPinnedPosts: 返 { ownerId, postIds, count }
   public async listPinnedPosts(ownerId: string): Promise<PinnedPostsList> {
-    // R16.0: server 5xx fallback 返空 list (engagement.post_pins 表未建, commander 域).
-    try {
-      const result = await this.command("ListPinnedPosts", { type: "Profile", id: ownerId }, { ownerId });
-      if (!result.operationRef) {
-        throw new EngagementProtocolError("listPinnedPosts response missing operationRef");
-      }
-      return parsePinnedPostsList(JSON.parse(result.operationRef));
-    } catch (err) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) {
-        // eslint-disable-next-line no-console
-        console.log(`[proxy.R16.0.fallback.engagement] listPinnedPosts fallback []: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return { ownerId, postIds: [], count: 0 };
+    // ENGAGEMENT-FALLBACK-EMPTY-001: 这里以前 try/catch 把所有错误（含协议错）
+    // 吞成空列表 + 计数 0。后果不只是"少显示一点" —— promise 永远 resolve，
+    // 调用方根本没机会知道失败了：个人主页的收藏/回复/置顶会照常渲染成
+    // 「还没有收藏／还没有回复」，用户以为自己的东西没了。
+    // 注释里写的理由（engagement 表未建、server 5xx）已经过期：三个命令在
+    // apps/api-go 里都有实现，并且都有真实 PostgreSQL round-trip 集成测试。
+    // 同文件的 listMutedAuthors（上一屏）一直就是这个口径：宁可抛，不假空。
+    const result = await this.command("ListPinnedPosts", { type: "Profile", id: ownerId }, { ownerId });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("listPinnedPosts response missing operationRef");
     }
+    return parsePinnedPostsList(JSON.parse(result.operationRef));
   }
 
   // R15.61 — ListUserReplies: 返 user 全部 reply 帖 (含父 post 上下文)
   public async listUserReplies(userId: string, limit?: number): Promise<UserRepliesList> {
-    // R16.0: server 5xx fallback 返空 list.
-    try {
-      const result = await this.command("ListUserReplies", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
-      if (!result.operationRef) {
-        throw new EngagementProtocolError("listUserReplies response missing operationRef");
-      }
-      return parseUserRepliesList(JSON.parse(result.operationRef));
-    } catch (err) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) {
-        // eslint-disable-next-line no-console
-        console.log(`[proxy.R16.0.fallback.engagement] listUserReplies fallback []: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return { userId, replies: [], count: 0 };
+    // ENGAGEMENT-FALLBACK-EMPTY-001: 这里以前 try/catch 把所有错误（含协议错）
+    // 吞成空列表 + 计数 0。后果不只是"少显示一点" —— promise 永远 resolve，
+    // 调用方根本没机会知道失败了：个人主页的收藏/回复/置顶会照常渲染成
+    // 「还没有收藏／还没有回复」，用户以为自己的东西没了。
+    // 注释里写的理由（engagement 表未建、server 5xx）已经过期：三个命令在
+    // apps/api-go 里都有实现，并且都有真实 PostgreSQL round-trip 集成测试。
+    // 同文件的 listMutedAuthors（上一屏）一直就是这个口径：宁可抛，不假空。
+    const result = await this.command("ListUserReplies", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("listUserReplies response missing operationRef");
     }
+    return parseUserRepliesList(JSON.parse(result.operationRef));
   }
 
   // R15.62 — ListUserBookmarks: 返 user 全部 bookmark post IDs
   public async listUserBookmarks(userId: string, limit?: number): Promise<UserBookmarksList> {
-    // R16.0: server 5xx fallback 返空 list.
-    try {
-      const result = await this.command("ListUserBookmarks", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
-      if (!result.operationRef) {
-        throw new EngagementProtocolError("listUserBookmarks response missing operationRef");
-      }
-      return parseUserBookmarksList(JSON.parse(result.operationRef));
-    } catch (err) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) {
-        // eslint-disable-next-line no-console
-        console.log(`[proxy.R16.0.fallback.engagement] listUserBookmarks fallback []: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return { userId, bookmarks: [], count: 0 };
+    // ENGAGEMENT-FALLBACK-EMPTY-001: 这里以前 try/catch 把所有错误（含协议错）
+    // 吞成空列表 + 计数 0。后果不只是"少显示一点" —— promise 永远 resolve，
+    // 调用方根本没机会知道失败了：个人主页的收藏/回复/置顶会照常渲染成
+    // 「还没有收藏／还没有回复」，用户以为自己的东西没了。
+    // 注释里写的理由（engagement 表未建、server 5xx）已经过期：三个命令在
+    // apps/api-go 里都有实现，并且都有真实 PostgreSQL round-trip 集成测试。
+    // 同文件的 listMutedAuthors（上一屏）一直就是这个口径：宁可抛，不假空。
+    const result = await this.command("ListUserBookmarks", { type: "Profile", id: userId }, { userId, ...(limit ? { limit } : {}) });
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("listUserBookmarks response missing operationRef");
     }
+    return parseUserBookmarksList(JSON.parse(result.operationRef));
   }
 
   private async command(commandType: string, target: { type: string; id: string }, payload: Record<string, unknown>): Promise<CommandResult> {

@@ -20,6 +20,26 @@ export function composePriceRange(min: string, max: string): string {
 export const MIN_OPPORTUNITY_ORDER_VND = 100_000;
 export const MAX_OPPORTUNITY_ORDER_VND = 10_000_000;
 
+// 机会 price 在 wire 上是一个自由字符串，合法形态有两种：
+//   单价  "1,500,000₫" / "100K"
+//   区间  "1,500,000₫ – 2,000,000₫"（composePriceRange 合成 —— 发布页两框都填时）
+//
+// 显示侧以前统一用 `price.replace(/\D/g, "")` 取数字，这会把区间的两端直接拼成
+// 一个数："1,500,000₫ – 2,000,000₫" → "15000002000000"。卡片、详情页「Proxy
+// 建议区间」、报价 sheet 的锚定区间三处都中招（详见 MARKET-PRICE-RANGE-PARSE-001）。
+export function parseOpportunityPrice(price: string): { low: number; high: number; hasRange: boolean } {
+  const parts = (price ?? "").split(/[–—-]/).map((part) => part.trim()).filter(Boolean);
+  const amounts = parts
+    .map(parseVNDLabel)
+    .filter((amount): amount is number => typeof amount === "number" && Number.isFinite(amount) && amount > 0);
+  if (amounts.length === 0) return { low: 0, high: 0, hasRange: false };
+  const [first = 0] = amounts;
+  if (amounts.length === 1) return { low: first, high: first, hasRange: false };
+  const low = Math.min(...amounts);
+  const high = Math.max(...amounts);
+  return { low, high, hasRange: high > low };
+}
+
 function parseVNDLabel(value: string): number | undefined {
   let clean = value.trim().toUpperCase().replace(/VND|₫/g, "").trim();
   let multiplier = 1;
@@ -135,6 +155,17 @@ export interface MarketOpportunity {
   // only; server-provided real-scene media always wins when present.
   sceneImageUrl?: string;
   travelSource?: "seeded" | "user_distance" | "unknown";
+}
+
+// MARKET-SEEDED-TRAVEL-001: travel 只有在 travelSource 是 user_distance 时才是
+// "从看的人所在位置算出来的通勤时间"。seeded 是种子数据里写死的占位
+// （apps/api-go/internal/marketplace/service.go SeedDefaults 写的是 18/24/52/20，
+// 注释原话：客户端还没给前台定位时，seeded Travel 顶上并标 travelSource="seeded"）。
+// 它跟**正在看的人**在哪毫无关系 —— 按通勤时间展示就是拿占位数字冒充实时推算。
+// 服务端专门返了 travelSource 就是为了让客户端分得开；以前这个字段声明了但没人读。
+export function travelMinutesFromViewer(opportunity: MarketOpportunity): number | null {
+  if (opportunity.travelSource !== "user_distance") return null;
+  return opportunity.travel ?? null;
 }
 
 export const OPPORTUNITY_LENS_LABEL: Record<OpportunityLens, string> = {

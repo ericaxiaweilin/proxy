@@ -1,6 +1,8 @@
 package openapicmds
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -108,25 +110,22 @@ func TestCollectDedupesFirstDomainWins(t *testing.T) {
 // tripwire: if a refactor drops the `case "ListRequesterHomeItems"`
 // arm from internal/demand/service.go, the OpenAPI commands
 // fragment will lose the entry and a downstream consumer (mobile
-// listHomeItems, audit gate #2) will silently break. This test
-// reads the real source so the tripwire cannot be satisfied by
-// editing the test alone.
+// listHomeItems, audit gate #2) will silently break.
+//
+// It really does read apps/api-go/internal/demand/service.go off
+// disk — an earlier version of this test asserted against a
+// hardcoded `const src` literal while claiming in this comment that
+// it read the real source. That version could not fail: deleting
+// the arm from the service kept the literal intact and the test
+// green. A tripwire whose needle lives in the test is not a
+// tripwire.
 func TestRealDemandServiceContainsListRequesterHomeItems(t *testing.T) {
-	const src = `package demand
-
-import "github.com/proxy-app/proxy-api/internal/command"
-
-func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command.Result {
-	switch e.CommandType {
-	case "CreateTaskDraft", "UpdateTaskDraft":
-		return s.handleDraft(ctx, e)
-	case "ListRequesterHomeItems":
-		return s.listRequesterHomeItems(ctx, e)
-	default:
-		return command.Rejected(e, "UNKNOWN_COMMAND", "INTERNAL", "NO", "command.unknown", nil)
+	root := repoRootForTest(t)
+	raw, err := os.ReadFile(filepath.Join(root, "apps", "api-go", "internal", "demand", "service.go"))
+	if err != nil {
+		t.Fatalf("read real demand service: %v", err)
 	}
-}
-`
+	src := string(raw)
 	if !containsCommand(src, "ListRequesterHomeItems") {
 		t.Fatalf("real demand service must keep ListRequesterHomeItems in the case switch")
 	}

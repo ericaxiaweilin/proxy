@@ -4,6 +4,59 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 207 — 2026-09-16
+
+- 「编造数据 / 假状态」清扫批。统一原则：**没有数据源时不许显示成数字、成功、或者空**
+  —— 编出来的数、把失败显示成「你还没有」、把占位当真值，三者都算。
+  本次涉及的回归 ID：`MARKET-FAKE-JUDGMENT-001`、`MARKET-SEEDED-TRAVEL-001`、
+  `MARKET-PRICE-RANGE-PARSE-001`、`MARKET-SEED-FAKE-ACTIVITY-001`、
+  `CONVO-INBOX-SWALLOW-001`、`PROFILE-TAB-LOAD-FAILED-001`、
+  `SCENE-COMPOSER-PREVIEW-001`、`ENTERPRISE-FABRICATED-001`、`STATIC-COUNT-001`、
+  `FACET-HERO-FABRICATED-001`、`RECOMMEND-REPUTATION-FABRICATED-001`、
+  `PERSON-DISTANCE-ZERO-001`、`SUBPAGE-GENERIC-FABRICATED-001`
+  （同时收紧了既有的 `ADD-FRIEND-PHONE-COPY-001`）。
+  - **基线敏感文件**：
+    - `apps/mobile/src/surfaces/market.tsx`（market scope）—— 详情页不再直接读
+      `opportunity.travel` 渲染「通勤约 N 分钟」，改走只认
+      `travelSource === "user_distance"` 的派生函数（种子占位值不再冒充实时推算）；
+      价格区间按两端解析而不是把两个数字拼成一个；删掉整盒写死的
+      「Proxy · 给小美的判断」三条结论，改一句如实说明。**无渲染结构、无筛选、
+      无发布链路改动。**
+    - `apps/mobile/src/market-fixtures.ts`（market scope）—— 新增两个纯派生函数
+      `parseOpportunityPrice` / `travelMinutesFromViewer`。**无 UI 结构。**
+    - `apps/mobile/src/surfaces/ProfileTabs.tsx` —— 收藏 / 回复 / 被标记三个 tab
+      增加 `failed` 入参，失败时在**长度判断之前**渲染「没读出来」，
+      不再显示成「还没有收藏 / 回复 / 被标记」。
+    - `apps/mobile/src/surfaces/me.tsx` —— 上一条对应的三个 failed 状态（失败置位、
+      成功复位）；企业 / 经营子页面改为说明缺什么，不再整屏编内容。
+    - `apps/mobile/src/conversation-client.ts` —— `listConversations` 的三条坏
+      payload 路径由「返回空数组」改为抛错；收件箱加载失败不再长得像
+      「还没有对话」。
+    - `apps/mobile/src/shell/app-shell.tsx` —— Scene Composer 的「对方将看到」
+      由写死的样例文案改为按用户选的参与方式 / 费用方式 + 与 `createScene`
+      **同一个 `startsAt`** 拼出。**无渲染结构、无筛选、无发布链路改动。**
+    - `apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx` ——
+      「未读通知：2 条」改为「暂无数据接入」（没有通知数据源）。
+    - `apps/api-go/internal/marketplace/service.go`（market scope）—— 发布不再
+      无条件写 `Match = "100%"` / `Verified = true`（改为默认 false，仅在
+      `merchantStamp` 命中、商家成员资格确被验过时置 true）；四条种子行的
+      Match / Verified 清空，响应数归零、紧急度标记清空（发布路径的响应数初值
+      本就是 0，只在真有人报名时 +1）。
+  - **非基线敏感**的其余文件：facet 服务端 hero 统计（改为按对象 signals 累加，
+    不再返回字面量）、`recommend-fixtures.ts`（推荐人评价类字段不再由下标生成）、
+    `requester-home.tsx`（服务端真人不再被盖上距离 0；空状态文案如实）、
+    `supply-client.ts` / `engagement-client.ts` / `surfaces/messages.tsx`、
+    以及新增测试与 `scripts/check-regression-contracts.sh` 的回归条目。
+    其中 `apps/mobile/src/surfaces/me-sub-pages.ts`（`SUBPAGE-GENERIC-FABRICATED-001`）：
+    「我的 → 子页面」有专属分支与通用兜底两条渲染路径，通用兜底会把
+    `SUB_PAGE_CONTENT[route].sections` 的每一行原样当用户数据渲染。删除 17 处
+    `sections` 表 —— 其中 **「成员与权限」和「商家结果历史」两条路由没有专属分支，
+    真的会把编造内容上屏**（前者列过三个不存在的人并给它们派了所有者 / 运营 / 账单
+    权限，后者列过一条不存在的复查趋势：三次分数一路走高外加结论）。删除后这两条
+    路由落回诚实的空态「正在准备这个工作区」。同时给 `ADD-FRIEND-PHONE-COPY-001`
+    补上条件式正向钉：说明表一旦被加回来就必须写清搜索范围。**无渲染结构改动**，
+    `me.tsx` 的兜底分支本身未改。
+
 ## Revision 206 — 2026-09-15
 
 - DEVICE-LOCATION-003 + LOC-PIN-3KM-001 + LOC-SHARE-001：开屏定一次位，

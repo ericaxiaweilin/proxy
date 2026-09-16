@@ -666,14 +666,19 @@ describe("ADD-FRIEND-PHONE-COPY-001 the add-friend list does not advertise phone
     // friend-crm 的 SEARCH sheet 自己就写着「手机号暂不可搜」。同一处能力却在
     // 两个地方被说成能搜手机号：
     //  · friend-crm 的「添加方式」列表（用户真会看到的那一份）；
-    //  · me-sub-pages 的 addfriend 说明表（sections 目前没有渲染方 —— 只有
+    //  · me-sub-pages 的 addfriend 说明表（sections 没有渲染方 —— 只有
     //    title/desc/icon 经 meSubPage 被用上；一旦接上就会把不存在的能力讲给用户）。
     expect(crm).not.toContain("昵称、Proxy ID 或手机号");
     expect(meSub).not.toContain("昵称、Proxy ID、手机号");
     // 正向：两处都只报昵称与 Proxy ID；sheet 那句诚实说明不许被顺手删掉。
     expect(crm).toContain("昵称或 Proxy ID");
     expect(crm).toContain("手机号暂不可搜");
-    expect(meSub).toContain("昵称、Proxy ID");
+    // me-sub-pages 那份 addfriend 说明表是**死内容**（sections 没有渲染方），
+    // 已随 ME-SUBPAGE-FABRICATED-001 一起删掉。原来那条正向钉
+    // `toContain("昵称、Proxy ID")` 钉的正是这份死内容 —— 它绿了两年，但从没
+    // 守住任何用户看得见的东西。改成反向钉：整个文件不许再出现手机号能力，
+    // 谁把这份表接上渲染、并顺手把手机号写回去，这里会先红。
+    expect(meSub).not.toContain("手机号");
   });
 });
 

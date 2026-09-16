@@ -218,7 +218,19 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 	// R15.44: 调 Reasoner 之前先拉副空间内容 + 算 SideSpaceStats
 	// （副空间数据用于 R15.44 缺口实时判定）。
 	reasoned := make([]Object, len(objects))
+	// FACET-HERO-FABRICATED-001: hero 的 freshAssets / shownAssets 过去是
+	// 两个凭空写死的常量 —— 用户看到的是「已展示 N 条 · 新鲜素材 M 个」，
+	// 但这两个数字跟库里任何一行数据都没有关系，且跟同一屏里每个对象的
+	// currentState（「已展示 N 条」）直接矛盾。
+	//
+	// 现在按对象 signals 累加：ObjectSignals 是本服务唯一的数据源，累加值
+	// 保证 hero 与列表自洽（每个对象的「已展示 N 条」加起来 = hero 的
+	// shownAssets）。语义是「跨对象累计的展示 / 新鲜次数」，不是去重后的
+	// 素材总数 —— 后者需要 Phase 2 的真实素材库才能算。
+	var heroFresh, heroShown int
 	for i, obj := range objects {
+		heroFresh += obj.Signals.FreshAssetCount
+		heroShown += obj.Signals.ShownAssetCount
 		// R15.43: 拉副空间内容（合作方才有）
 		var sideSpaceStats SideSpaceStats
 		sideSpaceStats.KindCounts = map[string]int{}
@@ -277,9 +289,8 @@ func (s *Service) List(ctx context.Context) (Payload, error) {
 		}
 		reasoned[i] = objects[i]
 	}
-	// freshAssets / shownAssets 跟对象列表解耦，是 hero 用的全局统计。
-	// Phase 1.5 仍 hardcode 386/17；Phase 2 接 real 数据源再算。
-	return Payload{Objects: reasoned, TotalObjects: len(reasoned), FreshAssets: 17, ShownAssets: 386}, nil
+	// FACET-HERO-FABRICATED-001: 上面循环里按对象 signals 累加，不再返回常量。
+	return Payload{Objects: reasoned, TotalObjects: len(reasoned), FreshAssets: heroFresh, ShownAssets: heroShown}, nil
 }
 
 // AddSideSpacePost 把一个全局 catalog post 加入到某个对象的副空间。

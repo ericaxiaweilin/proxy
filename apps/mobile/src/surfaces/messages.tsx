@@ -715,6 +715,10 @@ export function MessagesSurface({
                   </Pressable>
                   </SwipeableRow>
                 ))
+            ) : inboxError ? (
+              // CONVO-INBOX-SWALLOW-001: 这一格以前只有一个分支，加载失败和真的
+              // 没有会话共用同一句文案 —— 失败被渲染成「还没有对话」。
+              <Text style={styles.empty}>会话列表没读出来 —— 这不是「还没有对话」。5 秒后自动重试</Text>
             ) : (
               <Text style={styles.empty}>还没有对话 — 从动态或市场开始聊一下</Text>
             )}

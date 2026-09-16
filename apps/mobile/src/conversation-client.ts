@@ -139,11 +139,19 @@ export class ConversationClient {
   public async listConversations(): Promise<ConversationInboxItem[]> {
     const session = await this.requireSession();
     const result = await this.sendCommand(session, "ListConversations", { type: "ConversationInbox", id: session.userAccountId }, {});
-    if (typeof result.operationRef !== "string") return [];
+    // CONVO-INBOX-SWALLOW-001: 服务端 listConversations 恒走 acceptedWithPayload，
+    // operationRef 一定在（空收件箱是 `{"conversations":[]}` 不是没有 ref）。所以
+    // 读不出来就是**失败**，不能当空列表 —— 空列表会被渲染成「还没有对话」，
+    // 用户以为自己没有会话。同文件的 listMyConvos 早已按这个口径抛错（见上）。
+    if (typeof result.operationRef !== "string") throw new Error("list conversations response malformed");
+    let payload: { conversations?: ConversationInboxItem[] };
     try {
-      const payload = JSON.parse(result.operationRef) as { conversations?: ConversationInboxItem[] };
-      return Array.isArray(payload.conversations) ? payload.conversations : [];
-    } catch { return []; }
+      payload = JSON.parse(result.operationRef) as { conversations?: ConversationInboxItem[] };
+    } catch {
+      throw new Error("list conversations response malformed");
+    }
+    if (!Array.isArray(payload.conversations)) throw new Error("list conversations response malformed");
+    return payload.conversations;
   }
 
   public async markMessageRead(messageId: string): Promise<Record<string, unknown>> {

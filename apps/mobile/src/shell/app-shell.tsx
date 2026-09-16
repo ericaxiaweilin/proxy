@@ -953,11 +953,20 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const guard = cost === "HOST_PAY" ? "HIGH_TRANSACTION_FEELING" : "GOOD_FIT";
+  // SCENE-COMPOSER-PREVIEW-001: 「对方将看到」原来是一句写死的样例文案，被当成
+  // 用户刚填的内容展示给他自己看。场景此刻还没创建，那句里的确认人数是从 0
+  // 编出来的，地点和时间也不是用户选的（他选的是下面三个 chip）。现在预览由
+  // 工具名 + 起始时间 + 参与方式 + 费用方式拼出来，和 createScene 用同一个
+  // startsAt，两边说的必须是同一个场景。
+  const startsAt = new Date(Date.now() + 86400000);
+  const participationLabel = participation === "OPEN_SIGNUP" ? "公开报名" : participation === "PRIVATE_INVITE" ? "私邀关系" : "混合";
+  const costLabel = cost === "HOST_SPONSORED" ? "发起方承担" : cost === "AA" ? "AA 分摊" : "商家权益";
+  const previewBody = `${meta?.label ?? tool} · ${startsAt.toLocaleString()} · ${participationLabel} · ${costLabel}`;
   async function handleCreate(){
     if(!scene){ onCreated(); return; }
     setBusy(true); setError(undefined);
     try{
-      await scene.createScene(tool, meta?.intentPrompt ?? "拍照", participation, cost, new Date(Date.now()+86400000).toISOString());
+      await scene.createScene(tool, meta?.intentPrompt ?? "拍照", participation, cost, startsAt.toISOString());
       onCreated();
     }catch(e:any){ setError(e?.result?.error?.messageKey ?? e?.message ?? "创建失败"); } finally{ setBusy(false); }
   }
@@ -970,7 +979,7 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
       <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="OPEN_SIGNUP"&&styles.composerChipTextActive]}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="PRIVATE_INVITE"&&styles.composerChipTextActive]}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text style={[styles.composerChipText, participation==="HYBRID"&&styles.composerChipTextActive]}>混合</Text></Pressable></View>
       <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="HOST_SPONSORED"&&styles.composerChipTextActive]}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="AA"&&styles.composerChipTextActive]}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text style={[styles.composerChipText, cost==="MERCHANT_SPONSORED"&&styles.composerChipTextActive]}>商家权益</Text></Pressable></View>
       {guard!=="GOOD_FIT" ? <View style={styles.guardWarn}><Text style={styles.guardWarnText}>Guard: 交易感过重 — 建议加场景权益而非直付</Text></View> : <View style={styles.guardOk}><Text style={styles.guardOkText}>Guard: GOOD_FIT · 拿掉目标人仍成立</Text></View>}
-      <View style={styles.invitePreview}><Text style={styles.invitePreviewTitle}>对方将看到</Text><Text style={styles.invitePreviewBody}>West Lake Rooftop · 周六 16:00 · 3人已确认 · 饮品 included · 交通支持 — 你也会参加</Text><Text style={styles.invitePreviewHint}>独立同意 · 可婉拒</Text></View>
+      <View style={styles.invitePreview}><Text style={styles.invitePreviewTitle}>对方将看到</Text><Text style={styles.invitePreviewBody}>{previewBody}</Text><Text style={styles.invitePreviewHint}>独立同意 · 可婉拒</Text></View>
       {error ? <Text style={styles.guardWarnText}>{error}</Text> : null}
       <Pressable onPress={handleCreate} style={[styles.composerCTA, busy && {opacity:0.6}]} disabled={busy}><Text style={styles.composerCTAText}>{busy ? "创建中…" : "创建 Scene 草稿"}</Text></Pressable>
     </View>

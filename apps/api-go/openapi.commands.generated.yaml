@@ -269,6 +269,8 @@ commands:
     domain: Scene
   - command: ListMyOrders
     domain: Fulfillment
+  - command: ListMyRealitySceneState
+    domain: RealityScene
   - command: ListMyScenes
     domain: Scene
   - command: ListMySessions
@@ -461,8 +463,16 @@ commands:
     domain: Conversation
   - command: SetLocalContext
     domain: LocalContext
+  - command: SetPrivateRealitySceneVisited
+    domain: RealityScene
   - command: SetProductAvailability
     domain: Business
+  - command: SetRealitySceneCheckIn
+    domain: RealityScene
+  - command: SetRealityScenePlanned
+    domain: RealityScene
+  - command: SetRealitySceneSaved
+    domain: RealityScene
   - command: SettleVoucher
     domain: Voucher
   - command: ShortlistAgent

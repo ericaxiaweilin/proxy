@@ -26,6 +26,8 @@ import { useMerchantIdentity } from "../use-merchant-identity";
 import {  OPPORTUNITY_LENS_LABEL,
   buildSlotOfferInput,
   composePriceRange,
+  parseOpportunityPrice,
+  travelMinutesFromViewer,
   validateOpportunityPriceRange,
   type MarketOpportunity,
   type MarketTab,
@@ -656,15 +658,23 @@ function OpportunityDetail({
   busy: boolean;
 }): React.JSX.Element {
   const budget = opportunity.price;
-  const fair = `${Math.round(parseInt(budget.replace(/\D/g, "")) * 0.95).toLocaleString()} – ${Math.round(parseInt(budget.replace(/\D/g, "")) * 1.35).toLocaleString()}₫`;
+  // MARKET-PRICE-RANGE-PARSE-001: 这一格以前是拿单一预算乘两个系数造出来的区间；
+  // 预算本身可能就是个区间，抠数字会把两端拼成一个天文数字。现在只显示发布方真正
+  // 填的两框 —— 只有一个价的时候压根没有区间可显示。
+  const parsedBudget = parseOpportunityPrice(budget);
+  const fairRange = parsedBudget.hasRange ? `${parsedBudget.low.toLocaleString()} – ${parsedBudget.high.toLocaleString()}₫` : "";
   // R37-DETAIL-001: 跟卡片用同一个推断函数 + 同一张文案表 —— 卡片显示
   // 「咖啡 + 拍照」、点进来变成 OPPORTUNITY 这种断裂就是这么来的。
   const detailType = inferOpportunityTypeForFilter(opportunity);
   const detailTypeLabel = TYPE_LABEL[detailType];
+  // MARKET-SEEDED-TRAVEL-001: 只有服务端按看的人的位置算出来的通勤时间才展示。
+  // seeded（种子占位）就当没有 —— 不给定位授权时显示"通勤约 18 分钟"是假的。
+  const viewerTravelMinutes = travelMinutesFromViewer(opportunity);
   // MARKET-QUOTE-SHEET-001: 详情页给 VND, sheet 给 K。两者都从同一份预算推。
-  const budgetDigits = parseInt(budget.replace(/\D/g, ""), 10);
-  const detailFairLowK = Number.isFinite(budgetDigits) && budgetDigits > 0 ? Math.max(1, Math.round(budgetDigits * 0.95 / 1000)) : 0;
-  const detailFairHighK = Number.isFinite(budgetDigits) && budgetDigits > 0 ? Math.max(detailFairLowK, Math.round(budgetDigits * 1.35 / 1000)) : 0;
+  // MARKET-PRICE-RANGE-PARSE-001: 报价 sheet 的锚定区间必须来自发布方真实填的
+  // 两框；单一预算外推出的区间会让三个预设按钮变成编出来的金额。
+  const detailFairLowK = parsedBudget.hasRange ? Math.max(1, Math.round(parsedBudget.low / 1000)) : 0;
+  const detailFairHighK = parsedBudget.hasRange ? Math.max(detailFairLowK, Math.round(parsedBudget.high / 1000)) : 0;
   // MARKET-QUOTE-SHEET-001: 详情 hero 沿用卡片同款场景样张兜底（共用
   // SAMPLE_SCENE_IMAGE 那一张表，不另起一份），真媒体仍然优先。
   // 自定义报价：输入框的数字才是依据；为空/非数字时不许提交，
@@ -715,10 +725,10 @@ function OpportunityDetail({
           <Text style={styles.r4PriceLabel}>{opportunity.priceLabel ?? "完成后你可获得"}</Text>
           <Text style={styles.r4PriceValue}>{budget || "费用待确认"}</Text>
         </View>
-        {opportunity.moneyFlow !== "TBD" && opportunity.moneyFlow !== "FREE" ? (
+        {opportunity.moneyFlow !== "TBD" && opportunity.moneyFlow !== "FREE" && fairRange ? (
           <View style={[styles.r4PriceCell, styles.r4PriceCellHot]}>
-            <Text style={styles.r4PriceLabel}>Proxy 建议区间</Text>
-            <Text style={styles.r4PriceValue}>{fair}</Text>
+            <Text style={styles.r4PriceLabel}>报价区间</Text>
+            <Text style={styles.r4PriceValue}>{fairRange}</Text>
           </View>
         ) : null}
         <View style={styles.r4PriceCell}>
@@ -769,12 +779,14 @@ function OpportunityDetail({
       <View style={styles.aiBox}>
         <View style={styles.aiHead}>
           <Text style={styles.aiTitle}>Proxy · 给小美的判断</Text>
-          <Text style={styles.aiStrong}>值得考虑</Text>
         </View>
         <View style={styles.aiChecks}>
-          <Text style={styles.aiCheck}>✓ {opportunity.match} 匹配；你的组合满足硬条件。</Text>
-          <Text style={styles.aiCheck}>₫ 按类似履约，不建议低于预算 85% 接单。</Text>
-          {opportunity.travel != null ? <Text style={styles.aiCheck}>↗ 通勤约 {opportunity.travel} 分钟，平台托管付款。</Text> : null}
+          {/* MARKET-FAKE-JUDGMENT-001: 这一盒以前是三条写死的结论（匹配度 / 出价
+               下限 / 是否值得接），服务端既没有匹配引擎，也不存在"类似履约"数据
+               —— 整盒是编出来的 AI 判断。改成如实说明这一版还没有评估：
+               不删这块位置，但不再伪造结论。 */}
+          <Text style={styles.aiCheck}>这一版还没有评估：匹配度要按你的技能与历史履约算，出价建议要按同类订单算 —— 两样数据目前都没有，所以这里不给出结论。</Text>
+          <Text style={styles.aiCheck}>↗ {viewerTravelMinutes != null ? `通勤约 ${viewerTravelMinutes} 分钟，` : ""}平台托管付款。</Text>
         </View>
       </View>
 
@@ -782,9 +794,10 @@ function OpportunityDetail({
           真正的报价按钮独立成一屏 sheet, 不让用户在这屏边读边算。 */}
       <View style={styles.detailWhyBox}>
         <Text style={styles.detailWhyTitle}>为什么推荐给你</Text>
-        <Text style={styles.detailWhyRow}>✓ {opportunity.match} 匹配 · 你的组合满足硬条件</Text>
-        {opportunity.verified ? <Text style={styles.detailWhyRow}>✓ 发布方已验证</Text> : null}
-        {opportunity.travel != null ? <Text style={styles.detailWhyRow}>✓ 通勤约 {opportunity.travel} 分钟</Text> : null}
+        {/* MARKET-FAKE-JUDGMENT-001: 匹配度那条删掉了 —— 服务端没有匹配引擎，
+            以前显示的是发布时写死的常量。 */}
+        {opportunity.verified ? <Text style={styles.detailWhyRow}>✓ 商家身份已验证</Text> : null}
+        {viewerTravelMinutes != null ? <Text style={styles.detailWhyRow}>✓ 通勤约 {viewerTravelMinutes} 分钟</Text> : null}
       </View>
 
       <View style={styles.detailActions}>
@@ -1486,7 +1499,7 @@ function PublishDemand({ marketplace, supply, onBack, onPublished }: { marketpla
           <Text style={styles.r4PriceLabel}>平台保底：100,000 VND · 上限 10,000,000 VND</Text>
         </View>
         <View style={styles.r4Match}>
-          <Text style={styles.r4MatchText}>会完整展示给回应者 · 预计 6–10 位合格回应 · 竞争力：中等</Text>
+          <Text style={styles.r4MatchText}>{moneyFlow === "TBD" ? "金额不公开，由双方面谈确定" : moneyFlow === "FREE" ? "免费任务 · 完整展示给回应者" : "金额完整展示给回应者"} · 有多少人报名要等发布后才知道，这里不预估</Text>
         </View>
       </View>
       <View style={styles.aiBox}>

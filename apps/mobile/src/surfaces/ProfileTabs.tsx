@@ -63,6 +63,13 @@ export interface ProfileTabsProps {
   replyTargets: Record<string, ReplyTarget>;
   savedPosts: FeedPost[];
   taggedPosts: FeedPost[];
+  // PROFILE-TAB-LOAD-FAILED-001: 这三个列表加载失败时，调用方以前把它们 set 成 []。
+  // 而空数组在这里渲染成「你还没有这类内容」的空态文案 —— 用户会以为自己的
+  // 收藏、回复、被提及记录**没了**。失败和「真的没有」必须渲染成两句话。
+  // 缺省 false（其它调用方不传）＝ 不显示失败态。
+  savedFailed?: boolean;
+  repliesFailed?: boolean;
+  taggedFailed?: boolean;
   // REPLY-TARGET-001: 判定「这条帖子是不是访问者自己的」用，跟 feed 同一套
   // 身份规则（resolveAuthorDisplayName）。缺省 = 游客，一律不当成自己。
   viewerAccountId?: string | undefined;
@@ -229,6 +236,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
         <RepliesTab
           replies={props.replies}
           targets={props.replyTargets}
+          failed={props.repliesFailed}
           viewerMode={props.viewerMode}
           viewerAccountId={props.viewerAccountId}
           color={props.color}
@@ -237,6 +245,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
       {activeTab === "SAVED" ? (
         <SavedTab
           saved={props.savedPosts}
+          failed={props.savedFailed}
           mediaByPost={props.mediaByPost}
           onOpenMedia={props.onOpenMedia}
           resolveMediaUrl={props.resolveMediaUrl}
@@ -246,6 +255,7 @@ export function ProfileTabs(props: ProfileTabsProps): React.JSX.Element {
       {activeTab === "TAGGED" ? (
         <TaggedTab
           tagged={props.taggedPosts}
+          failed={props.taggedFailed}
           mediaByPost={props.mediaByPost}
           onOpenMedia={props.onOpenMedia}
           resolveMediaUrl={props.resolveMediaUrl}
@@ -474,7 +484,12 @@ function RepliesTab(props: {
   viewerMode: "SELF" | "OTHER" | undefined;
   viewerAccountId?: string | undefined;
   color: ProfileTabsProps["color"];
+  failed?: boolean | undefined;
 }): React.JSX.Element {
+  // PROFILE-TAB-LOAD-FAILED-001: 失败要单独一句，不能落进下面那条空态文案。
+  if (props.failed) {
+    return <EmptyState title="回复没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
+  }
   if (props.replies.length === 0) {
     return <EmptyState title="还没有回复" sub="你在其他帖子下面的回复会出现在这里" />;
   }
@@ -516,7 +531,12 @@ function SavedTab(props: {
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   resolveMediaUrl: (path: string) => string;
   color: ProfileTabsProps["color"];
+  failed?: boolean | undefined;
 }): React.JSX.Element {
+  // PROFILE-TAB-LOAD-FAILED-001: 收藏读失败却显示空态文案，等于告诉用户收藏丢了。
+  if (props.failed) {
+    return <EmptyState title="收藏没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
+  }
   if (props.saved.length === 0) {
     return <EmptyState title="还没有收藏" sub="点击帖子右下角的 🔖 可以加入收藏" />;
   }
@@ -554,7 +574,12 @@ function TaggedTab(props: {
   onOpenMedia: (entry: { postId: string; index: number }) => void;
   resolveMediaUrl: (path: string) => string;
   color: ProfileTabsProps["color"];
+  failed?: boolean | undefined;
 }): React.JSX.Element {
+  // PROFILE-TAB-LOAD-FAILED-001: 同 SavedTab —— 读失败 ≠ 没人 @ 过你。
+  if (props.failed) {
+    return <EmptyState title="被标记没读出来" sub="这次请求失败了 —— 不是真的没有。重进页面再试。" />;
+  }
   if (props.tagged.length === 0) {
     return <EmptyState title="还没有被标记" sub="其他人在帖子里 @ 你时会出现在这里" />;
   }

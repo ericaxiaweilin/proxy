@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { ConversationClient } from "./conversation-client";
 import { InMemorySecureStorageDriver, SecureSessionStore } from "./secure-session";
 
@@ -114,5 +116,50 @@ describe("CONVO-001 message branch commands", () => {
     expect((sent[0]?.payload as Record<string,unknown>).convoId).toBe("convo_9");
     await client.listMessages("conv_1", "convo_9");
     expect((sent[1]?.payload as Record<string,unknown>).convoId).toBe("convo_9");
+  });
+});
+
+// CONVO-INBOX-SWALLOW-001: listConversations 以前把读不出来的 payload 吞成 []。
+// [] 和「真的没有会话」在 UI 上是同一件事 —— 加载失败会显示成「还没有对话」。
+describe("CONVO-INBOX-SWALLOW-001", () => {
+  it("a malformed inbox payload raises instead of looking empty", async () => {
+    const client = new ConversationClient({
+      baseUrl: "http://127.0.0.1:4100",
+      secureSessionStore: await store(),
+      authClient: { request: async () => ({ status: 200, json: async () => ({ outcome: "ACCEPTED", operationRef: "{not json" }) }) },
+    });
+    await expect(client.listConversations()).rejects.toThrow("list conversations response malformed");
+  });
+
+  it("a payload with no conversations array raises instead of looking empty", async () => {
+    const client = new ConversationClient({
+      baseUrl: "http://127.0.0.1:4100",
+      secureSessionStore: await store(),
+      authClient: { request: async () => ({ status: 200, json: async () => ({ outcome: "ACCEPTED", operationRef: JSON.stringify({ unexpected: 1 }) }) }) },
+    });
+    await expect(client.listConversations()).rejects.toThrow("list conversations response malformed");
+  });
+
+  it("a genuinely empty inbox is still an empty list, not an error", async () => {
+    // 反向钉：修这个 bug 不能把「空的」也变成「坏的」。
+    const client = new ConversationClient({
+      baseUrl: "http://127.0.0.1:4100",
+      secureSessionStore: await store(),
+      authClient: { request: async () => ({ status: 200, json: async () => ({ outcome: "ACCEPTED", operationRef: JSON.stringify({ conversations: [] }) }) }) },
+    });
+    await expect(client.listConversations()).resolves.toEqual([]);
+  });
+
+  it("the client has no swallowing catch left and raises at every bad-payload path", () => {
+    const source = readFileSync(fileURLToPath(new URL("./conversation-client.ts", import.meta.url)), "utf8");
+    expect(source).not.toContain("catch { return []; }");
+    // 三处坏 payload 都要抛：没有 ref / JSON 坏了 / 解析出来不是数组。
+    expect((source.match(/list conversations response malformed/g) ?? []).length).toBe(3);
+  });
+
+  it("the inbox screen does not render a failed load as 'no conversations'", () => {
+    const screen = readFileSync(fileURLToPath(new URL("./surfaces/messages.tsx", import.meta.url)), "utf8");
+    expect(screen).toContain(") : inboxError ? (");
+    expect(screen).toContain("会话列表没读出来");
   });
 });

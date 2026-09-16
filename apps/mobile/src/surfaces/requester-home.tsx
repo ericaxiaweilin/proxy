@@ -220,7 +220,8 @@ export function RequesterHome({
       initials: first.toUpperCase(),
       bio: [wire.handle ? `@${wire.handle.replace(/^@+/, "")}` : "", wire.city].filter(Boolean).join(" · "),
       tags: [],
-      distanceM: 0,
+      // PERSON-DISTANCE-ZERO-001: 不填距离。服务端没有这个人的坐标，
+      // 填 0 会让详情页显示「0 m」并让人无条件通过「附近」筛选。
       online: false,
       mutualFriends: 0,
     };
@@ -328,7 +329,9 @@ export function RequesterHome({
     if (activeFilters.includes("online") && !p.online) return false;
     if (activeFilters.includes("lang_zh") && !p.tags.some((t) => t.text === "会中文" && t.kind === "lang")) return false;
     if (activeFilters.includes("active") && !p.tags.some((t) => t.text === "最近活跃" && t.kind === "social")) return false;
-    if (activeFilters.includes("near") && p.distanceM >= 1000) return false;
+    // PERSON-DISTANCE-ZERO-001: 没有坐标的人不算「附近」—— 以前 distanceM 恒为 0，
+    // 于是每个服务端真人都能通过 <1000m 的附近筛选。
+    if (activeFilters.includes("near") && (p.distanceM === undefined || p.distanceM >= 1000)) return false;
     return true;
   });
 
@@ -1154,10 +1157,10 @@ export function RequesterHome({
               {relationshipMsg ? <Text style={styles.humanSceneNotice}>{relationshipMsg}</Text> : null}
               <View style={styles.humanSceneFacts}>
                 <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="clock" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.availabilityText ?? "查看可用时间"}</Text></View>
-                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
+                <View style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="route" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.distanceM === undefined ? "距离未知" : humanScenePreview.person.distanceM < 1000 ? `${humanScenePreview.person.distanceM} m` : `${(humanScenePreview.person.distanceM / 1000).toFixed(1)} km`}</Text></View>
                 <Pressable accessibilityLabel="查看公开历史活动" onPress={() => setPublicHistoryOpen((open) => !open)} style={styles.humanSceneFact}><ProxyIcon color="#DCE6F7" name="check" size={18} /><Text style={styles.humanSceneFactValue}>{humanScenePreview.person.completedActivities !== undefined ? `${humanScenePreview.person.completedActivities} 次历史活动 ›` : "暂无公开记录"}</Text></Pressable>
               </View>
-              {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text style={styles.humanSceneHistoryTitle}>本人公开的活动记录</Text><Text style={styles.humanSceneHistoryPrivacy}>非公开记录不展示</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text style={styles.humanSceneHistoryName}>{item.title}</Text><Text style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text style={styles.humanSceneHistoryEmpty}>她暂未公开活动明细。</Text>}</View> : null}
+              {publicHistoryOpen ? <View style={styles.humanSceneHistory}><View style={styles.humanSceneHistoryHead}><Text style={styles.humanSceneHistoryTitle}>本人公开的活动记录</Text><Text style={styles.humanSceneHistoryPrivacy}>非公开记录不展示</Text></View>{humanScenePreview.person.publicActivityHistory?.length ? humanScenePreview.person.publicActivityHistory.map((item) => <View key={item.id} style={styles.humanSceneHistoryRow}><View style={styles.humanSceneHistoryCopy}><Text style={styles.humanSceneHistoryName}>{item.title}</Text><Text style={styles.humanSceneHistoryMeta}>{item.scene} · {item.dateLabel}</Text></View><Text style={styles.humanSceneHistoryRating}>★ {item.rating.toFixed(1)}</Text></View>) : <Text style={styles.humanSceneHistoryEmpty}>还没有可展示的活动记录</Text>}</View> : null}
               <Text style={styles.humanSceneSectionTitle}>她可以做什么</Text>
               <View style={styles.humanScenePills}>{humanScenePreview.person.capabilities?.map((item) => <View key={item} style={styles.humanScenePill}><Text style={styles.humanScenePillText}>{item}</Text></View>)}</View>
               <Text style={styles.humanSceneSectionTitle}>与当前推荐的关联</Text>

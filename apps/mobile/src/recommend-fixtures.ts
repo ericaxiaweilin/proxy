@@ -23,8 +23,11 @@ export interface RecommendPerson {
   initials: string;
   /** R34.5 prototype portrait. Replace with the account avatar URL when the feed is server-backed. */
   photoUri?: string;
-  // 距离，单位米
-  distanceM: number;
+  // 距离，单位米。PERSON-DISTANCE-ZERO-001：服务端真人**没有坐标**，
+  // 以前一律填 0 —— 0 会在详情页渲染成「0 m」（等于断言对方就在你脚下），
+  // 还会让每个人无条件通过「附近 <1000m」筛选。没有坐标就必须是 undefined，
+  // 让展示侧说「距离未知」、筛选侧把它排除在「附近」之外。
+  distanceM?: number;
   // 一句话描述
   bio: string;
   // 卡片右下 tag
@@ -68,20 +71,19 @@ function withR34Portraits(people: RecommendPerson[], offset: number): RecommendP
     ...(ACCOUNT_AVATAR_ASSET[person.id] !== undefined
       ? { photoUri: `${localApiBaseUrl}/v1/media/thumb/${ACCOUNT_AVATAR_ASSET[person.id]}` }
       : {}),
-    rating: Number((4.9 - ((index + offset) % 3) * 0.1).toFixed(1)),
-    completedActivities: 12 + ((index + offset) % 5) * 5,
-    availabilityText: person.online ? (index % 2 === 0 ? "今天 18:00 后可用" : "今天可约") : "查看近期可用时间",
-    positiveRate: 96 - ((index + offset) % 3),
-    reviewSummary: index % 2 === 0 ? "沟通自然，守时，熟悉本地路线" : "响应清楚，场景准备充分",
+    // RECOMMEND-REPUTATION-FABRICATED-001: 评价类字段一律不再由下标算出来。
+    //
+    // 这里曾经用 `(index + offset) % n` 给每个人生成星级、好评百分比、
+    // 完成次数、一句"用户评价"和一份带日期的历史活动记录，然后在详情页
+    // 「历史信誉与评价」卡片里显示成一行信誉数字和一段引号里的话 ——
+    // 全是凭空的，却挂在真人姓名下，还附了「非公开记录不展示」的隐私说明。
+    //
+    // 字段保留在 RecommendPerson 上（可选），等服务端人物 feed 落地后由真
+    // 数据填。没有真数据时不填，UI 各自回落到「暂无公开记录」这类如实文案。
     languages: person.tags.some((tag) => tag.text === "会中文") || person.id === "u_linh" ? ["Tiếng Việt", "中文"] : ["Tiếng Việt", "English"],
     capabilities: person.id === "u_linh" ? ["胶片街拍", "City Walk", "奥黛写真"] : [person.bio.split("/")[0]?.trim() || "城市同行", "本地陪伴"],
     themes: person.id === "u_linh" ? ["胶片", "老城区", "日落"] : ["日常", "本地生活"],
     sceneNames: person.id === "u_linh" ? ["河内老城区", "还剑湖", "西湖日落"] : [],
-    publicActivityHistory: person.id === "u_linh" ? [
-      { id: "linh_history_01", title: "胶片 City Walk", scene: "河内老城区", dateLabel: "2026年8月", rating: 5 },
-      { id: "linh_history_02", title: "西湖日落街拍", scene: "西湖", dateLabel: "2026年7月", rating: 4.9 },
-      { id: "linh_history_03", title: "奥黛写真同行", scene: "还剑湖", dateLabel: "2026年6月", rating: 4.9 },
-    ] : [],
   }));
 }
 

@@ -14,8 +14,13 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
     expect(source).toContain("给真人小美的报酬（VND）");
     expect(source).toContain('currency: "VND"');
     expect(source).toContain("等待真人候选报名");
-    expect(source).toContain('price: "150,000₫"');
+    // SCENE-OPP-PRICE-001: 公开任务出口没有让用户填过金额，之前硬编码
+    // "150,000₫" 会真的写进服务端。改成 TBD（金额双方面谈），服务端对
+    // TBD 要求 Price 为空，所以两个 pin 必须成对出现。
+    expect(source).toContain('moneyFlow: "TBD"');
+    expect(source).toContain('price: ""');
     expect(source).not.toContain('price: "150K"');
+    expect(source).not.toContain('150,000₫');
     expect(source).toContain("已进入“我的活动”");
   });
 

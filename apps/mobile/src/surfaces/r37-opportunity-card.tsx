@@ -13,7 +13,7 @@
 
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
-import { type MarketOpportunity, type MarketOpportunityMoneyFlow } from "../market-fixtures";
+import { type MarketOpportunity, type MarketOpportunityMoneyFlow, parseOpportunityPrice } from "../market-fixtures";
 import { color } from "../theme";
 import { MarketTypeLogo, type MarketOpportunityType } from "../components/market-type-logo";
 
@@ -56,15 +56,21 @@ function inferType(opportunity: MarketOpportunity): OpportunityType {
   return inferOpportunityTypeForFilter(opportunity);
 }
 
-function formatRange(budget: string, moneyFlow: MarketOpportunityMoneyFlow): { label: string; value: string; negotiable: boolean } {
-  const num = parseInt(budget.replace(/\D/g, ""), 10);
-  if (Number.isNaN(num) || num === 0) {
+// MARKET-PRICE-RANGE-PARSE-001: 这里以前把 price 里的数字整串抠出来当单一预算，
+// 再乘两个系数外推一个「参考区间」。两个问题：
+//   · price 可以是发布方自己填的真区间（两端各有一个金额），抠数字会把两端拼成
+//     一个天文数字，卡片上显示成一串没人看得懂的 K 值；
+//   · 只有单一价格时，那个区间是客户端替发布方外推的，没有人填过这两框。
+// 现在：有真区间就显示真区间；只有一个价就显示那个价，不外推，也不声称可协商。
+function formatRange(budget: string, moneyFlow: MarketOpportunityMoneyFlow, priceLabel?: string): { label: string; value: string; negotiable: boolean } {
+  const parsed = parseOpportunityPrice(budget);
+  if (parsed.low <= 0) {
     return { label: moneyFlow === "FREE" ? "同好/社区" : moneyFlow === "TBD" ? "双方面谈" : "完成后获得", value: moneyFlow === "FREE" ? "0₫" : moneyFlow === "TBD" ? "—" : "费用待确认", negotiable: true };
   }
-  const k = Math.round(num / 1000);
-  const low = Math.round(k * 0.95);
-  const high = Math.round(k * 1.35);
-  return { label: "参考区间", value: `${low}–${high}K`, negotiable: true };
+  if (parsed.hasRange) {
+    return { label: "报价区间", value: `${Math.round(parsed.low / 1000)}–${Math.round(parsed.high / 1000)}K`, negotiable: true };
+  }
+  return { label: priceLabel?.trim() || (moneyFlow === "EARN" ? "完成后获得" : "报价"), value: `${Math.round(parsed.low / 1000)}K`, negotiable: false };
 }
 
 function buildWhy(opportunity: MarketOpportunity): string {
@@ -79,9 +85,11 @@ function buildWhy(opportunity: MarketOpportunity): string {
 export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportunity: MarketOpportunity; onOpen: () => void; onDismiss: () => void }): React.JSX.Element {
   const type = inferType(opportunity);
   const typeLabel = TYPE_LABEL[type];
-  const range = formatRange(opportunity.price ?? "0", opportunity.moneyFlow);
+  const range = formatRange(opportunity.price ?? "0", opportunity.moneyFlow, opportunity.priceLabel);
   const why = buildWhy(opportunity);
-  const fit = opportunity.match ?? "0%";
+  // MARKET-FAKE-JUDGMENT-001: 服务端没有匹配引擎时 match 是空串 —— 这时候不能
+  // 渲染「N% 匹配」标签。以前缺省值写的是 "0%"，等于把"没算过"显示成"0% 匹配"。
+  const fit = (opportunity.match ?? "").trim();
   const isHot = opportunity.signalClass === "hot";
 
   return (
@@ -99,10 +107,10 @@ export function R37OpportunityCard({ opportunity, onOpen, onDismiss }: { opportu
             <Text style={styles.typeMetaLabel}>标准订单类型</Text>
             <Text style={styles.typeMetaTitle} numberOfLines={1}>{typeLabel.label}</Text>
           </View>
-          <View style={styles.fitTag}>
+          {fit !== "" ? <View style={styles.fitTag}>
             <View style={[styles.fitDot, isHot && styles.fitDotHot]} />
             <Text style={styles.fitTagText}>{fit} 匹配</Text>
-          </View>
+          </View> : null}
         </View>
         <Text style={styles.oppTitle} numberOfLines={1}>{opportunity.title}</Text>
         <View style={styles.metaLine}>

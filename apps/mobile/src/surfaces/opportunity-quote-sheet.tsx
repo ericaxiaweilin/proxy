@@ -46,12 +46,6 @@ export type OpportunityQuoteSheetProps = {
   onSubmit: (quoteK: number) => void;
 };
 
-function parseBudgetToK(price: string): number {
-  const digits = price.replace(/[^0-9]/g, "");
-  if (digits === "") return 0;
-  return Math.round(Number(digits) / 1000);
-}
-
 export function OpportunityQuoteSheet(props: OpportunityQuoteSheetProps): React.JSX.Element {
   const { visible, opportunity, fairLowK, fairHighK, busy, onClose, onSubmit } = props;
   const type: OpportunityType = inferOpportunityTypeForFilter(opportunity);

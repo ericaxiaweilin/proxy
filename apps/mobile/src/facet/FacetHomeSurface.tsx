@@ -445,8 +445,8 @@ export function FacetHomeSurface({ client, onBack, onComingSoon }: FacetHomeSurf
             <View style={styles.subPageCard}>
               <SubRow label="已展示" value={`${payload.shownAssets} 条`} />
               <SubRow label="新鲜素材" value={`${payload.freshAssets} 个`} />
-              <SubRow label="草稿" value="12 条 · 本地" />
-              <SubRow label="备选" value="5 条 · 待审核" />
+              <SubRow label="草稿" value="— · 本地上传待后续版本" />
+              <SubRow label="备选" value="— · 审核队列待后续版本" />
               <Text style={styles.subPageHint}>Phase 1.5：内容库为统计视图，上传与审核在后续版本</Text>
             </View>
           ) : null}

@@ -126,8 +126,8 @@ type Opportunity struct {
 	// MoneyFlow = "TBD" 的发布方。PriceLabel 是给移动端的"语义副本"
 	// （"完成后你可获得" / "你需支付" / "免费" / "费用待确认"），由
 	// server 强制派生，不允许客户端随意传入。
-	MoneyFlow               string   `json:"moneyFlow"`
-	PriceLabel              string   `json:"priceLabel"`
+	MoneyFlow  string `json:"moneyFlow"`
+	PriceLabel string `json:"priceLabel"`
 	// R58 demand notes (optional free text). Stored verbatim in the JSONB
 	// payload; no migration needed for the additive field.
 	Desc                    string   `json:"desc,omitempty"`
@@ -203,10 +203,10 @@ func (s *Service) SeedDefaults() {
 	bacNinhLat, bacNinhLng := 21.1600, 105.9600
 	hkOldQuartersLat, hkOldQuartersLng := 21.0338, 105.8500
 	_ = s.repository.Seed(context.Background(), []Opportunity{
-		{ID: "biz_negotiation", Title: "商务谈判陪同 · 中英越沟通", ShortTitle: "谈判", Theme: "商务谈判", Date: "今天", Time: "14:00–18:00", Location: "河内 · Hoàn Kiếm", Price: "1,200,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Nova Trading", OwnerID: "seed_nova", OwnerType: "BUSINESS", Match: "94%", Responses: 6, Posted: "12 分钟前", Skills: "中文 · 英语 · 商务沟通", Verified: true, Lens: []string{"NOW", "NEARBY"}, Travel: &travel18, Lat: &hkLat, Lng: &hkLng, TravelSource: "seeded", Signal: "急需", SignalClass: "hot", Countdown: "42m"},
-		{ID: "event_photo", Title: "品牌活动摄影 / 短视频", ShortTitle: "摄影", Theme: "摄影", Date: "周六", Time: "15:00–20:00", Location: "河内 · 西湖", Price: "1,500,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Bonsaidon", OwnerID: "seed_bonsaidon", OwnerType: "BUSINESS", Match: "91%", Responses: 9, Posted: "25 分钟前", Skills: "摄影 · 基础剪辑 · 活动经验", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel24, Lat: &westLakeLat, Lng: &westLakeLng, TravelSource: "seeded", Signal: "热门", Countdown: "3天"},
-		{ID: "supplier_visit", Title: "供应商拜访 · 中文陪同", ShortTitle: "陪同", Theme: "商务陪同", Date: "明天", Time: "09:00–15:00", Location: "北宁 · Yên Phong", Price: "1,100,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Acme VN", OwnerID: "seed_acme", OwnerType: "BUSINESS", Match: "89%", Responses: 3, Posted: "42 分钟前", Skills: "中文 · 制造业 · 会议记录", Verified: true, Lens: []string{"BOOKED"}, Travel: &travel52, Lat: &bacNinhLat, Lng: &bacNinhLng, TravelSource: "seeded", Signal: "新发布", Countdown: "明天"},
-		{ID: "city_companion", Title: "河内半日城市同行 / 拍照", ShortTitle: "同行", Theme: "城市同行", Date: "周日", Time: "13:30–18:00", Location: "河内 · 西湖 → 老城区", Price: "950,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Chen", OwnerID: "seed_chen", OwnerType: "PERSON", Match: "87%", Responses: 11, Posted: "1 小时前", Skills: "中文 · 路线 · 轻摄影", Verified: true, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel20, Lat: &hkOldQuartersLat, Lng: &hkOldQuartersLng, TravelSource: "seeded", Signal: "高响应", Countdown: "周日"},
+		{ID: "biz_negotiation", Title: "商务谈判陪同 · 中英越沟通", ShortTitle: "谈判", Theme: "商务谈判", Date: "今天", Time: "14:00–18:00", Location: "河内 · Hoàn Kiếm", Price: "1,200,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Nova Trading", OwnerID: "seed_nova", OwnerType: "BUSINESS", Match: "", Responses: 0, Posted: "12 分钟前", Skills: "中文 · 英语 · 商务沟通", Verified: false, Lens: []string{"NOW", "NEARBY"}, Travel: &travel18, Lat: &hkLat, Lng: &hkLng, TravelSource: "seeded", Signal: "急需", SignalClass: "", Countdown: "42m"},
+		{ID: "event_photo", Title: "品牌活动摄影 / 短视频", ShortTitle: "摄影", Theme: "摄影", Date: "周六", Time: "15:00–20:00", Location: "河内 · 西湖", Price: "1,500,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Bonsaidon", OwnerID: "seed_bonsaidon", OwnerType: "BUSINESS", Match: "", Responses: 0, Posted: "25 分钟前", Skills: "摄影 · 基础剪辑 · 活动经验", Verified: false, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel24, Lat: &westLakeLat, Lng: &westLakeLng, TravelSource: "seeded", Signal: "热门", Countdown: "3天"},
+		{ID: "supplier_visit", Title: "供应商拜访 · 中文陪同", ShortTitle: "陪同", Theme: "商务陪同", Date: "明天", Time: "09:00–15:00", Location: "北宁 · Yên Phong", Price: "1,100,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Acme VN", OwnerID: "seed_acme", OwnerType: "BUSINESS", Match: "", Responses: 0, Posted: "42 分钟前", Skills: "中文 · 制造业 · 会议记录", Verified: false, Lens: []string{"BOOKED"}, Travel: &travel52, Lat: &bacNinhLat, Lng: &bacNinhLng, TravelSource: "seeded", Signal: "新发布", Countdown: "明天"},
+		{ID: "city_companion", Title: "河内半日城市同行 / 拍照", ShortTitle: "同行", Theme: "城市同行", Date: "周日", Time: "13:30–18:00", Location: "河内 · 西湖 → 老城区", Price: "950,000₫", MoneyFlow: "EARN", PriceLabel: "完成后你可获得", Owner: "Chen", OwnerID: "seed_chen", OwnerType: "PERSON", Match: "", Responses: 0, Posted: "1 小时前", Skills: "中文 · 路线 · 轻摄影", Verified: false, Lens: []string{"BOOKED", "NEARBY"}, Travel: &travel20, Lat: &hkOldQuartersLat, Lng: &hkOldQuartersLng, TravelSource: "seeded", Signal: "高响应", Countdown: "周日"},
 	})
 }
 
@@ -230,11 +230,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		// aiboundary gate (it discloses nothing about any user).
 		snap := buildCatalogSnapshot()
 		return payload(e, "Market", "templates", "READY", map[string]any{
-			"templates":   snap.Templates,
-			"categories":  snap.Categories,
-			"specs":       snap.Specs,
-			"policies":    snap.Policies,
-			"pricing":     snap.Pricing,
+			"templates":  snap.Templates,
+			"categories": snap.Categories,
+			"specs":      snap.Specs,
+			"policies":   snap.Policies,
+			"pricing":    snap.Pricing,
 			// OPP-CATALOG-002 (R58 activity line): creation-flow presets
 			// ride the same anonymous snapshot read.
 			"activityPresets": snap.ActivityPresets,
@@ -339,7 +339,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			}
 		}
 		p.OwnerType = "PERSON"
-		p.Verified = true
+		// MARKET-FAKE-JUDGMENT-001: 以前这里无条件写 true —— 任何人发一条机会就带
+		// 「发布方已验证」的勾，而平台对个人发布者没有做任何核验。这个勾是编出来的。
+		// 只有下面 merchantStamp 命中（商家成员资格真的验过，见
+		// apps/api-go/internal/api/merchant_identity.go）才算已验证。
+		p.Verified = false
 		// MERCHANT-PUBLISH-001: 商家注记（api 层 resolveMerchantPublish
 		// 已验成员，见 apps/api-go/internal/api/merchant_identity.go，
 		// 那里是 canonical）→ 以店名义发布。无注记保持个人路径不变。
@@ -348,10 +352,14 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if _, merchantName, ok := merchantStamp(e); ok {
 			p.Owner = merchantName
 			p.OwnerType = "BUSINESS"
+			// 商家成员资格验过了 —— 这时候"已验证"才是有依据的。
+			p.Verified = true
 		}
 		p.Posted = "刚刚"
 		p.Responses = 0
-		p.Match = "100%"
+		// MARKET-FAKE-JUDGMENT-001: 平台没有匹配引擎，写死一个百分比就是在编。
+		// 空串 = 没有匹配度可展示；客户端据此不渲染那个"N% 匹配"标签。
+		p.Match = ""
 		p.Signal = "新发布"
 		p.Countdown = p.Date
 		p.Owned = true

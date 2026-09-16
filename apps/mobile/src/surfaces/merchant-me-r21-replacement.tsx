@@ -518,7 +518,7 @@ export function MerchantMeR21Replacement({
       <View style={styles.root}>
         <ScrollView contentContainerStyle={styles.content}>
           {detailHead({ onBack: () => setPage("proxy"), title: "平台通知" })}
-          <Text style={styles.cardTitle}>未读通知：2 条</Text>
+          <Text style={styles.cardTitle}>未读通知：暂无数据接入</Text>
           <Text style={styles.empty}>订单状态变更 · 活动报名确认 · 系统维护预告。通知内容来自真实业务流，不使用占位数据。</Text>
           <Text style={styles.meta}>依据：网络安全响应要求（24 小时一般 / 6 小时紧急）；通知记录保留 ≥ 12 个月。</Text>
         </ScrollView>

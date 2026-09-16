@@ -492,6 +492,12 @@ export function MeSurface({
   const [personalReplyTargets, setPersonalReplyTargets] = useState<Record<string, ReplyTarget>>({});
   const [personalSavedPosts, setPersonalSavedPosts] = useState<FeedPost[]>([]);
   const [personalTaggedPosts, setPersonalTaggedPosts] = useState<FeedPost[]>([]);
+  // PROFILE-TAB-LOAD-FAILED-001: 收藏 / 回复 / 提及 的**加载成败**。以前失败时只把
+  // 数组 set 成 []，空数组在 ProfileTabs 里渲染成「你还没有这类内容」—— 用户
+  // 看到的是「我的东西没了」，而不是「没读出来」。
+  const [personalSavedFailed, setPersonalSavedFailed] = useState(false);
+  const [personalRepliesFailed, setPersonalRepliesFailed] = useState(false);
+  const [personalTaggedFailed, setPersonalTaggedFailed] = useState(false);
   const [personalPinnedIds, setPersonalPinnedIds] = useState<ReadonlyArray<string>>([]);
   const [likeError, setLikeError] = useState<string | undefined>(undefined);
   const [personalFollowCounts, setPersonalFollowCounts] = useState<{ followers: number; following: number } | undefined>(undefined);
@@ -827,6 +833,7 @@ export function MeSurface({
     void engagement.listUserReplies(viewerAccountId, 30)
       .then(async (r) => {
         if (cancelled) return;
+        setPersonalRepliesFailed(false);
         // REPLY-TARGET-001: 服务端一直在发 parentPostId（就是这条回复挂在哪条
         // 帖子下面），只是以前没人读它，于是「回复了谁」被降级成光秃秃的
         // 「你回复了」。父帖用 PROFILE-SAVED-001 的 ListPostsByIds 回查 ——
@@ -851,11 +858,13 @@ export function MeSurface({
         if (!cancelled) {
           setPersonalReplyEntries([]);
           setPersonalReplyTargets({});
+          setPersonalRepliesFailed(true);
         }
       });
     void engagement.listUserBookmarks(viewerAccountId, 60)
       .then(async (b) => {
         if (cancelled) return;
+        setPersonalSavedFailed(false);
         try {
           // PROFILE-SAVED-001: 收藏按 ID 直取。之前是拿动态流（默认一页 25 条）
           // 按 bookmark id 过滤 —— 收藏一条不在这一页里的帖子就等于丢了，
@@ -864,18 +873,22 @@ export function MeSurface({
           if (cancelled) return;
           setPersonalSavedPosts(bookmarked.posts);
         } catch {
-          if (!cancelled) setPersonalSavedPosts([]);
+          if (!cancelled) { setPersonalSavedPosts([]); setPersonalSavedFailed(true); }
         }
       })
-      .catch(() => { if (!cancelled) setPersonalSavedPosts([]); });
+      .catch(() => { if (!cancelled) { setPersonalSavedPosts([]); setPersonalSavedFailed(true); } });
     // MENTION-001: TAGGED 独立加载。之前它被塞在收藏那条 promise 链里 ——
     // 收藏一失败，TAGGED 就静默空掉，看起来像「没人提到过我」。
     // 读取也改成服务端扫全量已发布帖子：原来是在上面那一页动态（默认 25 条）里
     // 做 strings.Contains，更早的提及直接消失，而且 "@thanh2" 会被算成提到了
     // "@thanh"。服务端的可见性/静音口径与动态流完全一致。
     void localNet.listPostsMentioning(profileDraft.handle)
-      .then((mentions) => { if (!cancelled) setPersonalTaggedPosts(mentions.posts); })
-      .catch(() => { if (!cancelled) setPersonalTaggedPosts([]); });
+      .then((mentions) => {
+        if (!cancelled) { setPersonalTaggedPosts(mentions.posts); setPersonalTaggedFailed(false); }
+      })
+      .catch(() => {
+        if (!cancelled) { setPersonalTaggedPosts([]); setPersonalTaggedFailed(true); }
+      });
     return () => { cancelled = true; };
   }, [engagement, viewerAccountId, localNet, profileDraft.name, profileDraft.handle]);
 
@@ -1188,7 +1201,7 @@ export function MeSurface({
               ) : memories.length === 0 ? (
                 <View style={styles.prototypeCard}>
                   <Text style={styles.prototypeCardTitle}>还没有记忆</Text>
-                  <Text style={styles.prototypeCardDesc}>完成一次场景后会在此生成一条 Memory（host + guest 双视角可见）</Text>
+                  <Text style={styles.prototypeCardDesc}>场景结束后由发起方记录实际花费与时长，才会生成一条 Memory（host + guest 双视角可见）。App 目前还没有「记录结果」的入口 —— 在它接上之前，这里不会有内容。</Text>
                 </View>
               ) : (
                 memories.map((m) => (
@@ -1766,6 +1779,9 @@ export function MeSurface({
               replyTargets={personalReplyTargets}
               savedPosts={personalSavedPosts}
               taggedPosts={personalTaggedPosts}
+              savedFailed={personalSavedFailed}
+              repliesFailed={personalRepliesFailed}
+              taggedFailed={personalTaggedFailed}
               stats={{ posts: profilePostsState === "failed" ? undefined : profilePosts.length, followers: personalFollowCounts?.followers, following: personalFollowCounts?.following }}
               onOpenMedia={(entry) => setProfileViewer(entry)}
               onOpenRealitySceneMap={onOpenRealitySceneMap}
@@ -1969,7 +1985,6 @@ export function MeSurface({
     if (subPage.route === "enterpriseops") {
       const draftReady = enterpriseOpsStage !== "READY";
       const confirmed = enterpriseOpsStage === "CONFIRMED" || enterpriseOpsStage === "PUBLISHED";
-      const published = enterpriseOpsStage === "PUBLISHED";
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
@@ -2018,17 +2033,17 @@ export function MeSurface({
             {draftReady ? (
               <View style={styles.enterpriseDraft}>
                 <Text style={styles.enterpriseDraftTitle}>Store Digitization Draft</Text>
-                {[["Bonsaidon", "海鲜自助 · 河内 · 11:00–22:00", "结构 ✓"], ["工作日下午双人权益", "329,000₫ · 来源：菜单与活动资料", "96%"], ["双人晚餐预约套餐", "599,000₫ · 来源：菜单照片", "需确认"]].map(([name, meta, state]) => (
-                  <View key={name} style={styles.enterpriseDraftRow}>
-                    <View style={styles.enterpriseDraftCopy}><Text style={styles.enterpriseDraftName}>{name}</Text><Text style={styles.enterpriseDraftMeta}>{meta}</Text></View>
-                    <Text style={styles.enterpriseDraftState}>{state}</Text>
+                {enterpriseAssets.map((asset) => (
+                  <View key={asset.label} style={styles.enterpriseDraftRow}>
+                    <View style={styles.enterpriseDraftCopy}><Text style={styles.enterpriseDraftName}>{asset.label}</Text><Text style={styles.enterpriseDraftMeta}>{asset.uri ? "你上传的现实资料 · 存在本机" : "内置示例条目 · 不是你上传的资料"}</Text></View>
+                    <Text style={styles.enterpriseDraftState}>待抽取</Text>
                   </View>
                 ))}
+                <Text style={styles.enterpriseDraftMeta}>菜单项、价格、权益与置信度都由模型层抽取。这个面还没有接模型调用，所以不显示任何抽取结果或百分比。</Text>
               </View>
             ) : null}
-            {draftReady && !confirmed ? <Pressable onPress={() => setEnterpriseOpsStage("CONFIRMED")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>确认这个 Draft</Text></Pressable> : null}
-            {confirmed && !published ? <Pressable onPress={() => setEnterpriseOpsStage("PUBLISHED")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>发布线上店铺</Text></Pressable> : null}
-            {published ? <Pressable onPress={() => openSubPage("merchantstorefront")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>查看已发布店铺</Text></Pressable> : null}
+            {draftReady && !confirmed ? <Pressable onPress={() => setEnterpriseOpsStage("CONFIRMED")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>确认这些资料</Text></Pressable> : null}
+            <Pressable onPress={() => openSubPage("merchantstorefront")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>查看线上店铺</Text></Pressable>
             <View style={styles.infoNote}><Text style={styles.infoNoteTitle}>Skill Boundary</Text><Text style={styles.infoNoteText}>Source Asset → Model Output → Draft Artifact → Merchant Confirmation → Authorized Domain Command。模型不直接成为 Merchant、Catalog 或 Order 真源。</Text></View>
           </ScrollView>
         </View>
@@ -2036,42 +2051,20 @@ export function MeSurface({
     }
 
     if (subPage.route === "trustedteam") {
-      const executors = [
-        { initial: "A", name: "An · 活动接待", meta: "河内 · 最近合作 8 天前", rating: "4.9", stats: [["18 次", "完成合作"], ["94%", "按时率"], ["可用", "本周六"]] },
-        { initial: "M", name: "Minh · 中越口译", meta: "北宁 / 河内 · 最近合作 12 天前", rating: "4.8", stats: [["12 次", "完成合作"], ["97%", "按时率"], ["可用", "周末"]] }
-      ];
+      // ENTERPRISE-FABRICATED-001: 这里原来是两条写死的执行者档案（含评分、
+      // 合作次数、按时率三项指标）和一句关于真实合作人数与本周可用人数的断言。
+      // App 没有「可靠执行者」接口，也没有合作次数与按时率字段，那些数字没有
+      // 任何来源。入口卡片本身就写着「实时数据待接入」，页身却把编造的人名和
+      // 指标显示成真的 —— 改成明确的功能预览态。
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
             <Text style={styles.detailTitle}>合作执行网络</Text>
-            <Text style={styles.detailSub}>Bonsaidon · 真实合作过 27 人 · 本周 11 人可用</Text>
-            {executors.map((executor) => (
-              <View key={executor.initial} style={styles.trustedExecutorCard}>
-                <View style={styles.trustedExecutorTop}>
-                  <Gradient from={color.magenta} to={color.violet} style={styles.trustedExecutorAvatar}><Text style={styles.trustedExecutorAvatarText}>{executor.initial}</Text></Gradient>
-                  <View style={styles.trustedExecutorCopy}>
-                    <Text style={styles.trustedExecutorName}>{executor.name}</Text>
-                    <Text style={styles.trustedExecutorMeta}>{executor.meta}</Text>
-                  </View>
-                  <Text style={styles.trustedExecutorRating}>{executor.rating}</Text>
-                </View>
-                <View style={styles.trustedExecutorStats}>
-                  {executor.stats.map(([value, label]) => (
-                    <View key={label} style={styles.trustedExecutorStat}>
-                      <Text style={styles.trustedExecutorStatValue}>{value}</Text>
-                      <Text style={styles.trustedExecutorStatLabel}>{label}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ))}
-            <View style={styles.trustedSuggestion}>
-              <View style={styles.trustedSuggestionHead}><Text style={styles.trustedSuggestionTitle}>智能辅助 建议组合</Text><Text style={styles.trustedSuggestionHint}>不自动下单</Text></View>
-              <View style={styles.trustedSuggestionBody}>
-                <Text style={styles.trustedSuggestionBodyTitle}>周六新店活动 · 推荐 4 人</Text>
-                <Text style={styles.trustedSuggestionBodyText}>优先复用 3 位历史合作 + 1 位探索型新执行者</Text>
-              </View>
+            <Text style={styles.detailSub}>功能预览 · 执行者数据尚未接入</Text>
+            <View style={styles.infoNote}>
+              <Text style={styles.infoNoteTitle}>这里还没有执行者</Text>
+              <Text style={styles.infoNoteText}>常用执行者来自真实合作记录：谁接过你的单、有没有到场、有没有按时完成。App 目前没有这个接口，也没有合作次数与按时率字段，所以这里不显示任何名字、评分或百分比。</Text>
             </View>
             <Pressable accessibilityLabel="再次邀请团队" onPress={() => openSubPage("multislot")} style={styles.trustedInviteTouchable}>
               <Gradient from={color.magenta} to={color.violet} style={styles.trustedInvite}><Text style={styles.trustedInviteText}>再次邀请团队</Text></Gradient>
@@ -2083,13 +2076,18 @@ export function MeSurface({
     }
 
     if (subPage.route === "multislot") {
+      // ENTERPRISE-FABRICATED-001: 这里原来是 5 条写死的名额行（含已分配到的
+      // 人名）加一句整体进度百分比。服务端没有多名额任务模型接进这个面，显示
+      // 它会让人以为名额真的分配出去了。
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
             <Text style={styles.detailTitle}>门店开业</Text>
-            {[["接待 · G-01", "已分配 · An"], ["接待 · G-02", "已分配 · Minh"], ["接待 · G-03", "待分配 · 独立名额"], ["口译 · I-01", "已分配"], ["内容人员 · C-01", "待分配"]].map(([name, detail]) => <View key={name} style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>{name}</Text><Text style={styles.prototypeCardDesc}>{detail}</Text></View>)}
-            <View style={[styles.infoNote, styles.enterpriseProgressNote]}><Text style={styles.infoNoteTitle}>整体进度</Text><Text style={styles.infoNoteText}>4 / 5 名额 · 80%</Text></View>
+            <View style={styles.infoNote}>
+              <Text style={styles.infoNoteTitle}>名额尚未接入</Text>
+              <Text style={styles.infoNoteText}>多名额任务需要服务端把一项需求拆成多个独立名额，并逐个记录匹配、取消、支付与评价。这个面目前读不到名额数据，所以名额清单与整体进度都不显示。</Text>
+            </View>
             <Pressable onPress={() => openSubPage("todayboard")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>打开今日执行</Text></Pressable>
           </ScrollView>
         </View>
@@ -2097,13 +2095,18 @@ export function MeSurface({
     }
 
     if (subPage.route === "todayboard") {
+      // ENTERPRISE-FABRICATED-001: 这里原来是三条写死的统计（名额 / 已到场 /
+      // 有风险）加三条执行者行（含到场时刻与预计到达分钟数）。到场与风险来自
+      // 执行者真实上报，这个面读不到，编出来会被当成真的执行状态。
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}><Text style={styles.subPageBackText}>‹ 返回</Text></Pressable>
             <Text style={styles.detailTitle}>今日执行</Text>
-            <View style={styles.enterpriseMetrics}>{[["5", "名额"], ["3", "已到场"], ["1", "有风险"]].map(([value, label]) => <View key={label} style={styles.enterpriseMetric}><Text style={styles.enterpriseMetricValue}>{value}</Text><Text style={styles.enterpriseMetricLabel}>{label}</Text></View>)}</View>
-            {[["G-01 · An", "已到场 · 17:46"], ["G-02 · Minh", "前往中 · 预计 8 分钟"], ["G-03", "待补位 · 需要替补"]].map(([name, detail]) => <View key={name} style={styles.prototypeCard}><Text style={styles.prototypeCardTitle}>{name}</Text><Text style={styles.prototypeCardDesc}>{detail}</Text></View>)}
+            <View style={styles.infoNote}>
+              <Text style={styles.infoNoteTitle}>执行看板尚未接入</Text>
+              <Text style={styles.infoNoteText}>名额统计、到场与风险都来自执行者真实上报的位置和状态。这个面目前读不到执行数据，所以不显示任何统计数字或执行者清单。</Text>
+            </View>
             <Pressable onPress={() => openSubPage("multislot")} style={styles.primaryCta}><Text style={styles.primaryCtaText}>查看名额与补位</Text></Pressable>
             <Pressable onPress={() => openSubPage("members")} style={styles.lightCta}><Text style={styles.lightCtaText}>成员与权限</Text></Pressable>
           </ScrollView>

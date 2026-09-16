@@ -11,6 +11,24 @@ export type AgentPassport = {
   availability: Array<{ id: string; startAt: string; endAt: string; marketId: string; status: string }>;
 };
 
+export class SupplyProtocolError extends Error {}
+
+// SUPPLY-BODY-001: operationRef 是服务端 payload 的 JSON 串。解析不出来就是
+// 协议损坏，不能静默返回 {} —— 那跟"成功但为空"长得一模一样：供给列表会显示
+// 0 个可邀约的人（看起来是"没有供给"），实际上是一次失败。同理，解析出来不是
+// 对象（裸数字 / null / 字符串）也是损坏，一样要抛，不能退化成空对象。
+export function parseSupplyBody(operationRef: string | undefined): Record<string, unknown> {
+  if (!operationRef) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(operationRef) as unknown;
+  } catch {
+    throw new SupplyProtocolError("supply response payload was malformed");
+  }
+  if (!parsed || typeof parsed !== "object") throw new SupplyProtocolError("supply response payload was not an object");
+  return parsed as Record<string, unknown>;
+}
+
 export type SupplierCandidate = {
   agentId: string;
   name: string;
@@ -125,11 +143,6 @@ export class SupplyClient {
   }
 
   private body(result: CommandResult): Record<string, unknown> {
-    if (!result.operationRef) return {};
-    try {
-      const v = JSON.parse(result.operationRef) as unknown;
-      if (v && typeof v === "object") return v as Record<string, unknown>;
-    } catch {}
-    return {};
+    return parseSupplyBody(result.operationRef);
   }
 }

@@ -812,12 +812,12 @@ func TestListOpportunityTemplatesShipsWholeEngine(t *testing.T) {
 		t.Fatalf("list templates: %+v", resp)
 	}
 	var body struct {
-		Templates        []OpportunityTemplate `json:"templates"`
-		Categories       []TemplateCategory    `json:"categories"`
-		Specs            []MomentSpecs         `json:"specs"`
-		Policies         []MomentPolicy        `json:"policies"`
-		Pricing          []PricingRule         `json:"pricing"`
-		ActivityPresets  []ActivityPreset      `json:"activityPresets"`
+		Templates       []OpportunityTemplate `json:"templates"`
+		Categories      []TemplateCategory    `json:"categories"`
+		Specs           []MomentSpecs         `json:"specs"`
+		Policies        []MomentPolicy        `json:"policies"`
+		Pricing         []PricingRule         `json:"pricing"`
+		ActivityPresets []ActivityPreset      `json:"activityPresets"`
 	}
 	if err := json.Unmarshal([]byte(resp.OperationRef), &body); err != nil {
 		t.Fatal(err)
@@ -836,3 +836,119 @@ func TestListOpportunityTemplatesShipsWholeEngine(t *testing.T) {
 	}
 }
 
+// MARKET-FAKE-JUDGMENT-001: 发布路径以前无条件写 p.Match="100%" 和 p.Verified=true。
+// 平台既没有匹配引擎，也没有对个人发布者的核验流程 —— 卡片上的「100% 匹配」和
+// 详情页的「发布方已验证」全是编的。现在：匹配度留空（客户端据此不渲染标签），
+// 已验证只在商家成员资格真验过（merchantStamp 命中）时才为 true。
+func TestPublishDoesNotFabricateMatchOrVerification(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+
+	published := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner_fj", map[string]any{
+		"title": "市场判断测试", "theme": "城市同行", "date": "周六", "time": "10:00–18:00",
+		"location": "河内 · 西湖", "price": "2,000,000₫", "skills": "中文 · 摄影", "moneyFlow": "EARN",
+	}))
+	if published.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", published)
+	}
+	var body struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(published.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	// 没有匹配引擎 -> 不能凭空给一个百分比。
+	if body.Opportunity.Match != "" {
+		t.Fatalf("publish fabricated a match score: %q", body.Opportunity.Match)
+	}
+	// 没有核验流程 -> 不能给已验证的勾。
+	if body.Opportunity.Verified {
+		t.Fatalf("publish marked an unverified person as verified")
+	}
+}
+
+// 带商家注记（成员资格已验）的发布才算已验证 —— 这时候那个勾是有依据的。
+func TestPublishMarksVerifiedOnlyWithMerchantMembership(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	env := marketEnvelope("PublishMarketOpportunity", "owner_fj2", map[string]any{
+		"title": "商家发布测试", "theme": "城市同行", "date": "周六", "time": "10:00–18:00",
+		"location": "河内 · 西湖", "price": "2,000,000₫", "skills": "中文 · 摄影", "moneyFlow": "EARN",
+	})
+	// 注记由 api 层 resolveMerchantPublish 在验过成员资格后写入（见
+	// internal/api/merchant_identity.go），服务只读它、不读 payload。
+	env.AuthContext = map[string]any{"merchantID": "m_1", "merchantName": "Nova Trading"}
+	out := s.HandleContext(t.Context(), env)
+	if out.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", out)
+	}
+	var body struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(out.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Opportunity.Verified {
+		t.Fatalf("merchant membership was verified but Verified stayed false")
+	}
+	if body.Opportunity.OwnerType != "BUSINESS" {
+		t.Fatalf("expected BUSINESS owner, got %q", body.Opportunity.OwnerType)
+	}
+}
+
+// ---------- MARKET-SEED-FAKE-ACTIVITY-001 ----------
+//
+// SeedDefaults 在**生产 PG 路径**上也会跑（cmd/api/main.go 无条件下调），
+// 所以它写进去的每一行都会被真实用户看到。以前这四行种子带着非零的
+// 响应人数和一个"热门"紧急度标记 —— 但发布路径
+// （PublishMarketOpportunity）把响应数初始化成 0、只在有人真的报名时才
+// +1，紧急度标记压根不由发布路径产生。于是种子行凭空带着"已有人响应"
+// 和"热门/紧急"的判断，详情页把前者渲染成一行人数。
+// （注释刻意不复述那几个字面量，否则守门的 grep 会被注释自己骗绿。）
+
+func TestSeedDefaultsCarryNoFabricatedEngagement(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	listed := s.HandleContext(context.Background(), marketEnvelope("ListMarketOpportunities", "viewer", nil))
+	var listBody struct {
+		Opportunities []Opportunity `json:"opportunities"`
+	}
+	if err := json.Unmarshal([]byte(listed.OperationRef), &listBody); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	list := listBody.Opportunities
+	if len(list) == 0 {
+		t.Fatal("expected the seed to produce opportunities")
+	}
+	for _, o := range list {
+		if o.Responses != 0 {
+			t.Errorf("seed %q carries %d fabricated responses: a real publish starts at 0 and only increments on a real application", o.ID, o.Responses)
+		}
+		if o.SignalClass != "" {
+			t.Errorf("seed %q carries signalClass %q: urgency is a computed judgement, the publish path never sets one", o.ID, o.SignalClass)
+		}
+	}
+}
+
+// 反向钉：清掉的是"凭空的互动与紧急度"，不是这些 demo 列表本身。
+// 标题 / 地点 / 价格是这条机会自己的属性，seed 的内容还得在。
+func TestSeedDefaultsStillProvideDemoListings(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	listed := s.HandleContext(context.Background(), marketEnvelope("ListMarketOpportunities", "viewer", nil))
+	var listBody struct {
+		Opportunities []Opportunity `json:"opportunities"`
+	}
+	if err := json.Unmarshal([]byte(listed.OperationRef), &listBody); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	list := listBody.Opportunities
+	if len(list) != 4 {
+		t.Fatalf("expected 4 seeded opportunities, got %d", len(list))
+	}
+	for _, o := range list {
+		if o.Title == "" || o.Location == "" || o.Price == "" {
+			t.Errorf("seed %q lost its own attributes (title=%q location=%q price=%q)", o.ID, o.Title, o.Location, o.Price)
+		}
+	}
+}

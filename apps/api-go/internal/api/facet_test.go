@@ -77,7 +77,9 @@ func authedFacetRequest(method, path, body string) *http.Request {
 // TestFacetObjects_GET_OK 验证 R15.25 Phase 1 wire 形状:
 //   - 3 个对象 (ken / linh / spa)
 //   - 每个对象有 8 个必填字段
-//   - totalObjects = 3, freshAssets > 0, shownAssets > 0
+//   - totalObjects = 3
+//   - freshAssets / shownAssets 非负（FACET-HERO-FABRICATED-001：不再断言 > 0，
+//     因为那等于把 hardcode 常量钉成契约；取值由对象 signals 累加决定）
 //   - avatarUrl 永远 = "" (Phase 1 不做图片)
 //
 // 字段命名 / 类型必须跟 packages/contracts/src/facet.ts
@@ -112,8 +114,13 @@ func TestFacetObjects_GET_OK(t *testing.T) {
 	if len(raw.Objects) != 3 {
 		t.Fatalf("expected 3 objects, got %d", len(raw.Objects))
 	}
-	if raw.Fresh <= 0 || raw.Shown <= 0 {
-		t.Fatalf("expected freshAssets > 0 and shownAssets > 0, got fresh=%d shown=%d", raw.Fresh, raw.Shown)
+	// FACET-HERO-FABRICATED-001: 这里曾经断言两个 hero 计数必须为正 ——
+	// 那是在把两个凭空写死的常量钉死成契约。改成非负断言：hero 必须按
+	// 对象 signals 累加（真正的钉子在
+	// facet.TestFacetService_HeroStatsTrackSignals），没有 signals 时允许为 0。
+	// （注释刻意不复述当年那条断言的文本，否则守门的 grep 会被注释自己骗绿。）
+	if raw.Fresh < 0 || raw.Shown < 0 {
+		t.Fatalf("hero stats must be non-negative, got fresh=%d shown=%d", raw.Fresh, raw.Shown)
 	}
 
 	wantIDs := map[string]bool{"ken": false, "linh": false, "spa": false}

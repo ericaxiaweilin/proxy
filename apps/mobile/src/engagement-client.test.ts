@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { EngagementClient, EngagementCommandRejectedError } from "./engagement-client";
 import { InMemorySecureStorageDriver, OfflineFallbackSessionError, SecureSessionStore } from "./secure-session";
 
@@ -553,5 +555,45 @@ describe("EngagementClient.votePostPoll", () => {
     const store = new SecureSessionStore(new InMemorySecureStorageDriver());
     const client = new EngagementClient({ secureSessionStore: store, authClient: { request: async () => { throw new Error("should not reach"); } } });
     await expect(client.votePostPoll("post_1", "opt_a")).rejects.toBeInstanceOf(OfflineFallbackSessionError);
+  });
+});
+
+// ENGAGEMENT-FALLBACK-EMPTY-001: 这三个读取方法以前把**所有**错误（连协议错也算）
+// 吞成空列表 + 计数 0。危害不只是少显示一点：promise 永远 resolve，调用方没有机会
+// 知道失败了 —— 个人主页照常渲染「还没有收藏／还没有回复」，用户以为东西丢了。
+// 这也让 PROFILE-TAB-LOAD-FAILED-001 的失败标记永远翻不起来。
+describe("ENGAGEMENT-FALLBACK-EMPTY-001", () => {
+  function clientWithoutPayload(): EngagementClient {
+    const store = new SecureSessionStore(new InMemorySecureStorageDriver());
+    void store.write({
+      userAccountId: "user_001",
+      principal: { type: "INDIVIDUAL", id: "user_001" },
+      auth: { sessionId: "session_001", userAccountId: "user_001", principal: { type: "INDIVIDUAL", id: "user_001" }, accessToken: "access", refreshToken: "refresh", accessExpiresAt: "2026-08-25T00:00:00Z", refreshExpiresAt: new Date(Date.now() + 2592000000).toISOString(), rotation: 1 },
+    });
+    // 服务端 ACCEPTED 但没给 operationRef —— 正是以前会掉进 fallback 的那种响应。
+    return new EngagementClient({ secureSessionStore: store, authClient: { request: async (_path, init) => {
+      const env = init.body as Record<string, unknown>;
+      return { status: 200, json: async () => ({ commandId: env.commandId, outcome: "ACCEPTED", eventRefs: [], aggregate: { type: "Profile", id: "user_001", version: 1, state: "LISTED" }, correlationId: env.correlationId }) };
+    } } });
+  }
+
+  it("listPinnedPosts rejects instead of faking an empty list", async () => {
+    await expect(clientWithoutPayload().listPinnedPosts("user_001")).rejects.toThrow(/missing operationRef/);
+  });
+
+  it("listUserReplies rejects instead of faking an empty list", async () => {
+    await expect(clientWithoutPayload().listUserReplies("user_001")).rejects.toThrow(/missing operationRef/);
+  });
+
+  it("listUserBookmarks rejects instead of faking an empty list", async () => {
+    await expect(clientWithoutPayload().listUserBookmarks("user_001")).rejects.toThrow(/missing operationRef/);
+  });
+
+  it("no reader swallows into an empty list any more", () => {
+    const source = readFileSync(fileURLToPath(new URL("./engagement-client.ts", import.meta.url)), "utf8");
+    // 反向钉：三条静默兜底不许回来。
+    expect(source).not.toContain("return { ownerId, postIds: [], count: 0 };");
+    expect(source).not.toContain("return { userId, replies: [], count: 0 };");
+    expect(source).not.toContain("return { userId, bookmarks: [], count: 0 };");
   });
 });

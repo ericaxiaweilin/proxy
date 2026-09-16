@@ -4331,8 +4331,13 @@ echo "    CONTACT-SEARCH-COPY-001: PASS (contacts-sheet subtitle matches what it
 # 也没有「允许被手机号搜到」的授权开关 —— friend-crm 的 SEARCH sheet 自己就写着
 # 「手机号暂不可搜」。同一处能力却在两个地方被说成能搜手机号：
 #   · friend-crm 的「添加方式」列表（用户真会看到的那一份）；
-#   · me-sub-pages 的 addfriend 说明表（sections 目前没有渲染方 —— 只有
-#     title/desc/icon 经 meSubPage 被用上；一旦接上就会把不存在的能力讲给用户）。
+#   · me-sub-pages 的 addfriend 说明表。
+#
+# 关于那张说明表：addfriend 在 me.tsx 里**有**专属渲染分支，所以它的 sections
+# 从来没有真的上过屏（meSubPage 也只投影 title/desc/icon，见 me-sub-pages.ts）。
+# 表里装的是编造内容，已在 SUBPAGE-GENERIC-FABRICATED-001 里整表删除；因此
+# 「表里必须有诚实说明」这一条改成条件式：表一旦被加回来就必须同时写清搜索
+# 范围，否则照旧红。反方向（不许出现承诺手机号的那句）仍然无条件钉死。
 # 这条钉的是**界面文案**，所以 grep 原文：注释里留一个同样的 token 会让它永远红。
 if grep -qF '昵称、Proxy ID 或手机号' apps/mobile/src/surfaces/friend-crm.tsx; then
   echo "  FAIL [ADD-FRIEND-PHONE-COPY-001]: 加好友方式列表又在承诺手机号搜索 ——" >&2
@@ -4344,10 +4349,16 @@ if grep -qF '昵称、Proxy ID、手机号' apps/mobile/src/surfaces/me-sub-page
   exit 1
 fi
 if ! grep -qF '昵称或 Proxy ID' apps/mobile/src/surfaces/friend-crm.tsx ||
-   ! grep -qF '手机号暂不可搜' apps/mobile/src/surfaces/friend-crm.tsx ||
-   ! grep -qF '昵称、Proxy ID' apps/mobile/src/surfaces/me-sub-pages.ts; then
+   ! grep -qF '手机号暂不可搜' apps/mobile/src/surfaces/friend-crm.tsx; then
   echo "  FAIL [ADD-FRIEND-PHONE-COPY-001]: 只报昵称与 Proxy ID 的文案，或 sheet 那句诚实说明，不见了" >&2
   exit 1
+fi
+ADDFRIEND_BLOCK=$(awk '/^  addfriend: \{/{f=1} f{print} f&&/^  \},$/{exit}' apps/mobile/src/surfaces/me-sub-pages.ts)
+if printf '%s\n' "$ADDFRIEND_BLOCK" | grep -qF 'sections:'; then
+  if ! printf '%s\n' "$ADDFRIEND_BLOCK" | grep -qF '昵称、Proxy ID'; then
+    echo "  FAIL [ADD-FRIEND-PHONE-COPY-001]: addfriend 说明表回来了，却没写清搜索范围 ——" >&2
+    exit 1
+  fi
 fi
 if ! grep -q 'ADD-FRIEND-PHONE-COPY-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
   echo "  FAIL [ADD-FRIEND-PHONE-COPY-001]: 测试不见了" >&2
@@ -5033,6 +5044,170 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/components/location-store.test.ts || exit $?
 echo "    DEVICE-LOCATION-002: PASS (follow toggle survives restarts next to the manual pin)"
 
+# SCENE-COMPOSER-PREVIEW-001: Scene Composer 的「对方将看到」是一句**写死的样例**，
+# 被当成用户刚填的内容展示给他自己看。
+#
+# 原句："West Lake Rooftop · 周六 16:00 · 3人已确认 · 饮品 included · 交通支持 — 你也会参加"
+# 场景此刻还没创建（createScene 是点 CTA 才发），所以：
+#   · "3人已确认" —— 一个人都没有，这个数字是从 0 编出来的；
+#   · "West Lake Rooftop / 周六 16:00" —— 不是用户填的地点和时间，他选的是
+#     tool / participation / cost 三个 chip；
+#   · 整句不随选择变化，等于把一份样例当成预览。
+# 现在预览由 meta.label + startsAt + participationLabel + costLabel 拼出来。
+# 反向钉：那句编的样例不许回来。
+if grep -qF 'West Lake Rooftop' apps/mobile/src/shell/app-shell.tsx ||
+   grep -qF '3人已确认' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [SCENE-COMPOSER-PREVIEW-001]: 场景预览又变成写死的样例 ——" >&2
+  echo "        「对方将看到」必须由用户刚选的 tool / 时间 / 参与方式 / 费用拼出来，" >&2
+  echo "        不能报一个还没存在的确认人数。" >&2
+  exit 1
+fi
+# 正向：预览真的读用户的选择，且和 createScene 用的是同一个起始时间。
+if ! grep -qF 'const previewBody =' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF 'startsAt.toISOString()' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [SCENE-COMPOSER-PREVIEW-001]: 预览没有接到用户的选择上 ——" >&2
+  echo "        预览和 createScene 必须用同一个 startsAt，否则两边说的不是一个场景。" >&2
+  exit 1
+fi
+# 场景记忆那段不能承诺 App 做不到的事：RecordOutcome 在 App 里**没有调用方**
+# （scene-client.recordOutcome 只有测试在用），所以「完成一次场景后会生成记忆」
+# 是一句空头承诺 —— 和 SEARCH-COPY-HONEST-001 同一类。
+if grep -qF '完成一次场景后会在此生成一条 Memory' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [SCENE-COMPOSER-PREVIEW-001]: 场景记忆在承诺 App 做不到的事 ——" >&2
+  echo "        recordOutcome 没有调用方，场景无法被"完成"，记忆永远不会生成。" >&2
+  exit 1
+fi
+echo "    SCENE-COMPOSER-PREVIEW-001: PASS (composer preview comes from the user's own choices)"
+
+# MARKET-PUBLISH-ESTIMATE-001: 发布页在**替用户预测**一个没有来源的数字。
+#
+# 价格区下面那行写的是「预计 6–10 位合格回应 · 竞争力：中等」。机会此刻还没发布，
+# 服务端没有「合格回应数」这个概念，也没有竞争力评分 —— 6–10 和「中等」都是字面
+# 常量，任何价格、任何城市、任何时候都显示同一句。发布方会拿它当定价依据。
+#
+# 现在这行只说两件确定成立的事：金额（或「不公开」）会怎么展示给回应者，以及
+# 「有多少人报名要等发布后才知道，这里不预估」。
+# 反向钉 —— 那个预测常量和那个竞争力评级不许回来。
+if grep -qF '预计 6–10 位合格回应' apps/mobile/src/surfaces/market.tsx ||
+   grep -qF '竞争力：中等' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-PUBLISH-ESTIMATE-001]: 发布页又在预测回应人数/竞争力 ——" >&2
+  echo "        机会还没发布，服务端没有「合格回应数」也没有竞争力评分。" >&2
+  echo "        只说确定的事（金额怎么展示），报名人数留给发布后的真实数据。" >&2
+  exit 1
+fi
+# 正向：这行必须随 moneyFlow 变（TBD 不能说「完整展示金额」），并且明确不预估。
+#
+# 钉子要钉在**这行独有**的字串上：只写 'moneyFlow === "TBD" ? "金额不公开' 会被
+# 上一行已有的 {moneyFlow === "TBD" ? "金额不公开在卡片上" : "0₫"} 满足 —— 那行
+# 是改动前就有的，删掉新分支它照样绿（实测过，确实绿）。带上「，由双方面谈确定」
+# 才唯一指向新的这行。
+if ! grep -qF '有多少人报名要等发布后才知道' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qF '金额不公开，由双方面谈确定' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qF '免费任务 · 完整展示给回应者' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-PUBLISH-ESTIMATE-001]: 发布页价格说明没接上 moneyFlow ——" >&2
+  echo "        TBD 时金额不公开，这行就不能说「完整展示给回应者」。" >&2
+  exit 1
+fi
+echo "    MARKET-PUBLISH-ESTIMATE-001: PASS (publish sheet states what is certain, predicts nothing)"
+
+# SCENE-OPP-PRICE-001: 场景「公开任务」出口把**编出来的报酬写进了服务端**。
+#
+# 这个出口的 UI 里根本没有金额输入（只有 DIRECT_INVITE 才让用户填），但
+# PublishMarketOpportunity 的 payload 里写死了 price "150,000₫" + moneyFlow EARN，
+# 成功提示还回显「完成者可获得 150,000₫」。于是一个没人定价的机会带着一个
+# 真实金额落库 —— 这不是显示层的假数字，是写进真源的假数据。
+#
+# 改成 moneyFlow TBD + price ""（服务端对 TBD 要求 Price 为空，见 marketplace
+# service 的 moneyFlow 校验），提示改成「报酬由双方面谈确定」。
+if grep -qF '150,000₫' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-OPP-PRICE-001]: 公开任务出口又带了写死的报酬 ——" >&2
+  echo "        这个出口没有金额输入，写死金额会把没定价的机会写进服务端。" >&2
+  echo "        走 moneyFlow TBD（金额双方面谈），不要替用户定价。" >&2
+  exit 1
+fi
+if ! grep -qF 'moneyFlow: "TBD"' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -qF 'price: ""' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-OPP-PRICE-001]: TBD 必须带空金额 ——" >&2
+  echo "        服务端对 moneyFlow=TBD 要求 Price 为空，两个必须成对出现。" >&2
+  exit 1
+fi
+# 接线测试跟着改了口径，别只改源文本把钉子留在旧断言上。
+if ! grep -q 'SCENE-OPP-PRICE-001' apps/mobile/src/surfaces/dynamic-scene-actions.test.ts; then
+  echo "  FAIL [SCENE-OPP-PRICE-001]: 接线测试没有跟着改口径" >&2
+  exit 1
+fi
+echo "    SCENE-OPP-PRICE-001: PASS (scene open-task publishes no invented compensation)"
+
+# ENTERPRISE-FABRICATED-001: me.tsx 里三个「企业/经营」子页面整屏是编的。
+#
+# · trustedteam：两条写死的执行者档案（评分 / 合作次数 / 按时率），外加一句
+#   「真实合作过 27 人 · 本周 11 人可用」和「推荐 4 人」。App 没有可靠执行者
+#   接口，也没有合作次数、按时率字段。
+# · multislot：5 条写死的名额行（含已分配到的人名）+「4 / 5 名额 · 80%」。
+# · todayboard：名额 / 已到场 / 有风险三条统计 + 三条执行者行（含到场时刻与
+#   预计到达分钟数）。到场与风险来自执行者真实上报，这个面读不到。
+# · enterpriseops 的 Store Digitization Draft：三条写死的门店/权益行，含价格与
+#   一个置信度百分比；抽取结果不随用户上传的素材变化，因为没有接模型调用。
+#
+# 入口卡片自己就写着「功能预览 · 实时数据待接入」，页身却在把编造的人名、评分和
+# 百分比展示成真的。现在这些页落到明确的「尚未接入」态，Draft 只列真实素材。
+if grep -qE '"4\.9"|"4\.8"|"94%"|"97%"|"96%"|真实合作过|17:46|329,000₫|599,000₫' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ENTERPRISE-FABRICATED-001]: 企业/经营页又出现编造的执行者或抽取结果 ——" >&2
+  echo "        没有接口的页面必须落到「尚未接入」，不能编人名、评分和百分比。" >&2
+  exit 1
+fi
+# 「4 / 5 名额 · 80%」里的 80% 单独钉（上面那条只覆盖带引号/百分号的写法）。
+if grep -qF '名额 · 80%' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ENTERPRISE-FABRICATED-001]: 名额进度又是写死的百分比" >&2
+  exit 1
+fi
+# 正向：三页各自说清楚自己缺什么，Draft 只列真实素材且标「待抽取」。
+if ! grep -qF '这里还没有执行者' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF '名额尚未接入' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF '执行看板尚未接入' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF '待抽取' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ENTERPRISE-FABRICATED-001]: 未接入的页面没有说清自己缺什么 ——" >&2
+  echo "        删掉假数据不能顺手把「为什么是空的」也删了。" >&2
+  exit 1
+fi
+# 「发布线上店铺」原来只是把一个本地 state 翻成 PUBLISHED —— 什么都没发布，
+# 却给出「查看已发布店铺」。线上店铺有真实面（merchantstorefront），直接跳过去，
+# 让它自己按有没有商家身份说话。
+if grep -qF '查看已发布店铺' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [ENTERPRISE-FABRICATED-001]: 本地 state 又在冒充「已发布」 ——" >&2
+  echo "        翻一个本地布尔不是发布。要跳就跳真实的线上店铺面。" >&2
+  exit 1
+fi
+echo "    ENTERPRISE-FABRICATED-001: PASS (enterprise pages state what is missing instead of inventing it)"
+
+# STATIC-COUNT-001: 两处**写死的条数**，紧跟的文案却说「不使用占位数据」。
+#
+# · merchant-me 的「平台通知」：标题写「未读通知：2 条」，正文下一句就是
+#   「通知内容来自真实业务流，不使用占位数据」。2 是这个常量，不是真实未读。
+# · FACET 内容库：「草稿 12 条 · 本地」「备选 5 条 · 待审核」，同一张卡片里的提示
+#   已经写明「上传与审核在后续版本」—— 说明这两条数根本不该有。
+if grep -qF '未读通知：2 条' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [STATIC-COUNT-001]: 未读通知条数又是写死的常量 ——" >&2
+  echo "        同一屏还写着「不使用占位数据」，2 条就是占位数据。" >&2
+  exit 1
+fi
+if ! grep -qF '未读通知：暂无数据接入' apps/mobile/src/surfaces/merchant-me-r21-replacement.tsx; then
+  echo "  FAIL [STATIC-COUNT-001]: 未读通知没有落到「暂无数据接入」" >&2
+  exit 1
+fi
+if grep -qF '"12 条 · 本地"' apps/mobile/src/facet/FacetHomeSurface.tsx ||
+   grep -qF '"5 条 · 待审核"' apps/mobile/src/facet/FacetHomeSurface.tsx; then
+  echo "  FAIL [STATIC-COUNT-001]: FACET 内容库又在报写死的草稿/备选条数 ——" >&2
+  echo "        同卡片已写明上传与审核在后续版本，这两个数没有来源。" >&2
+  exit 1
+fi
+if ! grep -qF '— · 本地上传待后续版本' apps/mobile/src/facet/FacetHomeSurface.tsx ||
+   ! grep -qF '— · 审核队列待后续版本' apps/mobile/src/facet/FacetHomeSurface.tsx; then
+  echo '  FAIL [STATIC-COUNT-001]: FACET 草稿/备选没有落到 "—"' >&2
+  exit 1
+fi
+echo "    STATIC-COUNT-001: PASS (hardcoded counts replaced by an honest no-data value)"
+
 # DEVICE-LOCATION-003: 打开 App 不定位，首页地址半天不动。
 #
 # 冷启动只恢复旧地点，watch 的首个 fix 又要等距离/时间闸 —— 用户开着跟随，
@@ -5091,3 +5266,608 @@ if ! grep -q 'LOC-SHARE-001' apps/mobile/src/components/location-options.test.ts
   exit 1
 fi
 echo "    LOC-SHARE-001: PASS (picked address copies out and opens in Google Maps)"
+# SUBPAGE-GENERIC-FABRICATED-001: 「我的 → 子页面」有两条渲染路径 —— 专属分支
+# （`subPage.route === "xxx"`）与通用兜底分支。通用兜底把 SUB_PAGE_CONTENT[route]
+# .sections 的每一行原样当用户自己的数据渲染（label 当标题、value 当正文），
+# 没有 sections 才显示诚实空态。
+#
+# 所以「菜单可达 + 没有专属分支 + 带 sections」三者凑齐，用户点进一个还没做
+# 出来的页面，看到的是一张编造的数据表。历史上真发生过两张：
+#   · 成员与权限页 → 列出三个不存在的人，还给他们派了所有者/运营/账单权限；
+#   · 商家结果历史页 → 列出一条不存在的复查趋势（三次分数一路走高）和结论。
+# 两张表已删除，这两条路由现在落回空态。
+#
+# 这条钉三件事：编造内容不许回到数据文件；诚实空态不许消失；以及那条结构性
+# 规则本身 —— 没有专属分支的路由不许配 sections（要展示就先把表面做出来）。
+# 注释里不写那些被 grep 的原文：虽然本块 grep 的是数据文件而不是本脚本，
+# 但保持同一个习惯，免得哪天改成 grep 本文件时自己把自己钉住。
+MESUB=apps/mobile/src/surfaces/me-sub-pages.ts
+METSX=apps/mobile/src/surfaces/me.tsx
+for dead in 'Nguyen A' '检查 #001' '重复出现的问题' '已验证的改善' '英文菜单可用' '8,450,000' '满意度 4.6' 'Identity verified' 'Principal ACTIVE'; do
+  if grep -qF "$dead" "$MESUB"; then
+    echo "  FAIL [SUBPAGE-GENERIC-FABRICATED-001]: 编造的表格内容回到了子页面数据文件（$dead）——" >&2
+    exit 1
+  fi
+done
+if ! grep -qF '正在准备这个工作区' "$METSX"; then
+  echo "  FAIL [SUBPAGE-GENERIC-FABRICATED-001]: 通用兜底的诚实空态不见了 ——" >&2
+  exit 1
+fi
+DEDICATED=$(grep -oE 'subPage\.route === "[a-z]+"' "$METSX" | sed 's/subPage\.route === "//; s/"//' | sort -u)
+MENU=$( { grep -oE 'openSubPage\("[a-z]+"\)' "$METSX" | sed 's/openSubPage("//; s/")//'; grep -oE 'route: "[a-z]+"' "$METSX" | sed 's/route: "//; s/"//'; } | sort -u )
+for r in $MENU; do
+  if printf '%s\n' "$DEDICATED" | grep -qx "$r"; then continue; fi
+  BLK=$(awk -v k="  $r: {" 'index($0,k)==1{f=1} f{print} f&&/^  \},$/{exit}' "$MESUB")
+  if printf '%s\n' "$BLK" | grep -qF 'sections:'; then
+    echo "  FAIL [SUBPAGE-GENERIC-FABRICATED-001]: 路由 $r 没有专属渲染分支，它配的 sections 会被通用兜底当成用户数据上屏 ——" >&2
+    exit 1
+  fi
+done
+if ! grep -q 'SUBPAGE-GENERIC-FABRICATED-001' apps/mobile/src/surfaces/subpage-generic-fabricated.test.ts; then
+  echo "  FAIL [SUBPAGE-GENERIC-FABRICATED-001]: 测试不见了" >&2
+  exit 1
+fi
+echo "    SUBPAGE-GENERIC-FABRICATED-001: PASS (no generic sub-page renders an invented table)"
+
+
+# CONVO-INBOX-SWALLOW-001: 收件箱加载失败不得显示成「还没有对话」（客户端不吞 + 屏幕有独立失败分支）
+# 两层都要成立：
+#   · conversation-client.listConversations() 读不出 payload 必须抛，不能吞成 []；
+#   · messages.tsx 必须把「加载失败」和「真的没有会话」渲染成两句话。
+# 只修一层等于没修：客户端抛了而屏幕仍显示「还没有对话」，用户看到的结果一样。
+# ============================================================
+  if ! grep -q 'CONVO-INBOX-SWALLOW-001' apps/mobile/src/conversation-client.ts; then
+    echo "  FAIL [CONVO-INBOX-SWALLOW-001]: 客户端没有标注这个契约，判断口径无从追溯" >&2
+    exit 1
+  fi
+  # 客户端：不许有吞异常的 catch。
+  if grep -q 'catch { return \[\]; }' apps/mobile/src/conversation-client.ts; then
+    echo "  FAIL [CONVO-INBOX-SWALLOW-001]: 收件箱把坏 payload 吞成了空列表 ——" >&2
+    echo "        空列表和「真的没有会话」在 UI 上无法区分。" >&2
+    exit 1
+  fi
+  # 三处坏 payload 都要抛（没有 ref / JSON 坏了 / 不是数组）。
+  if [ "$(grep -c 'list conversations response malformed' apps/mobile/src/conversation-client.ts)" -lt 3 ]; then
+    echo "  FAIL [CONVO-INBOX-SWALLOW-001]: 坏 payload 没有全部抛错（应为 3 处）" >&2
+    exit 1
+  fi
+  # 屏幕：必须有独立的失败分支。
+  if ! grep -q ') : inboxError ? (' apps/mobile/src/surfaces/messages.tsx; then
+    echo "  FAIL [CONVO-INBOX-SWALLOW-001]: 收件箱没有独立的失败分支 ——" >&2
+    echo "        加载失败会被渲染成「还没有对话」。" >&2
+    exit 1
+  fi
+  if ! grep -q '会话列表没读出来' apps/mobile/src/surfaces/messages.tsx; then
+    echo "  FAIL [CONVO-INBOX-SWALLOW-001]: 失败态文案不见了" >&2
+    exit 1
+  fi
+  # 钉**那几条断言**，不是「文件里出现过这个 ID」。
+  if ! grep -q 'a malformed inbox payload raises instead of looking empty' apps/mobile/src/conversation-client.test.ts; then
+    echo "  FAIL [CONVO-INBOX-SWALLOW-001]: 行为测试不见了" >&2
+    exit 1
+  fi
+  # 反向钉同在：修这个 bug 不能把「真的空收件箱」也变成错误。
+  if ! grep -q 'a genuinely empty inbox is still an empty list, not an error' apps/mobile/src/conversation-client.test.ts; then
+    echo "  FAIL [CONVO-INBOX-SWALLOW-001]: 空收件箱的反向钉不见了 ——" >&2
+    echo "        不能为了修「失败像空」而把「空」也变成「失败」。" >&2
+    exit 1
+  fi
+  echo "  PASS [CONVO-INBOX-SWALLOW-001]: a failed inbox load never reads as 'no conversations'"
+
+
+# ENGAGEMENT-FALLBACK-EMPTY-001: 三个 engagement 读取方法不得把错误吞成空列表 + 计数 0。
+# 危害不只是少显示：promise 永远 resolve，调用方没有机会知道失败了 —— 个人主页照常
+# 渲染「还没有收藏／还没有回复」，用户以为自己的东西丢了；这也让
+# PROFILE-TAB-LOAD-FAILED-001 的失败标记永远翻不起来（那一层的修会被这一层吃掉）。
+# 同文件的 listMutedAuthors 一直就是这个口径：宁可抛，不假空。
+  if ! grep -q 'ENGAGEMENT-FALLBACK-EMPTY-001' apps/mobile/src/engagement-client.ts; then
+    echo "  FAIL [ENGAGEMENT-FALLBACK-EMPTY-001]: 客户端没有标注这个契约" >&2
+    exit 1
+  fi
+  # 反向钉：三条静默兜底不许回来。
+  for RET in 'return { ownerId, postIds: [], count: 0 };' 'return { userId, replies: [], count: 0 };' 'return { userId, bookmarks: [], count: 0 };'; do
+    if grep -qF "$RET" apps/mobile/src/engagement-client.ts; then
+      echo "  FAIL [ENGAGEMENT-FALLBACK-EMPTY-001]: 静默兜底回来了 —— $RET" >&2
+      echo "        空列表 + 计数 0 会让调用方以为"加载成功、只是没有内容"。" >&2
+      exit 1
+    fi
+  done
+  # 正向：三个方法都要抛协议错（缺 operationRef 是以前会掉进 fallback 的那种响应）。
+  for CMD in listPinnedPosts listUserReplies listUserBookmarks; do
+    if ! grep -q "throw new EngagementProtocolError(\"$CMD response missing operationRef\")" apps/mobile/src/engagement-client.ts; then
+      echo "  FAIL [ENGAGEMENT-FALLBACK-EMPTY-001]: $CMD 不再抛协议错" >&2
+      exit 1
+    fi
+  done
+  # 钉**那条断言**，不是「文件里出现过这个 ID」。
+  if ! grep -q 'listUserBookmarks rejects instead of faking an empty list' apps/mobile/src/engagement-client.test.ts; then
+    echo "  FAIL [ENGAGEMENT-FALLBACK-EMPTY-001]: 行为测试不见了" >&2
+    exit 1
+  fi
+  echo "  PASS [ENGAGEMENT-FALLBACK-EMPTY-001]: engagement readers raise instead of faking an empty list"
+
+# FACET-HERO-FABRICATED-001: facet 首屏 hero 的「已展示 N 条 / 新鲜素材 M 个」
+# 不得是凭空写死的常量。
+#
+# Service.List 以前直接 return 两个字面量常量，跟库里任何一行数据都无关，还跟
+# 同一屏里每个对象的 currentState（「已展示 N 条 · 本周新增 M 个素材」）矛盾
+# —— 用户看到的是「全局 386 条」，点开每个人却都是「0 条 / 16 条」。
+# 现在必须按对象 signals 累加：ObjectSignals 是本服务唯一的数据源。
+  SVC=apps/api-go/internal/facet/service.go
+  SVC_TEST=apps/api-go/internal/facet/service_test.go
+  API_TEST=apps/api-go/internal/api/facet_test.go
+  # 反向钉：那两个字面量常量不许再出现在 List 的返回里。
+  # （注意：本块的注释刻意不复述这两个数字，否则 grep 会被自己的注释骗绿。）
+  if grep -qE 'FreshAssets:[[:space:]]*[0-9]+' "$SVC"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: List 又直接返回了 freshAssets 字面量" >&2
+    exit 1
+  fi
+  if grep -qE 'ShownAssets:[[:space:]]*[0-9]+' "$SVC"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: List 又直接返回了 shownAssets 字面量" >&2
+    exit 1
+  fi
+  # 正向：必须把累加出来的变量写进 Payload。
+  if ! grep -q 'FreshAssets: heroFresh' "$SVC"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: hero freshAssets 没有用累加值" >&2
+    exit 1
+  fi
+  if ! grep -q 'ShownAssets: heroShown' "$SVC"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: hero shownAssets 没有用累加值" >&2
+    exit 1
+  fi
+  # 正向：累加必须来自对象 signals（唯一数据源），不是别的常量。
+  if ! grep -q 'heroFresh += obj.Signals.FreshAssetCount' "$SVC"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: freshAssets 不从对象 signals 累加" >&2
+    exit 1
+  fi
+  if ! grep -q 'heroShown += obj.Signals.ShownAssetCount' "$SVC"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: shownAssets 不从对象 signals 累加" >&2
+    exit 1
+  fi
+  # 钉**断言本身**，不是「文件里出现过这个 ID」。
+  if ! grep -q 'TestFacetService_HeroStatsAreSumOfObjectSignals' "$SVC_TEST"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: hero = signals 之和的行为测试不见了" >&2
+    exit 1
+  fi
+  # 反 hardcode 的核心钉子：换 signals 必须换 hero。常量实现会卡死在这里。
+  if ! grep -q 'TestFacetService_HeroStatsTrackSignals' "$SVC_TEST"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: 「换 signals 必须换 hero」的钉子不见了 ——" >&2
+    echo "        没有这条，常量实现可以悄悄回来而不被拦住。" >&2
+    exit 1
+  fi
+  # 反向钉：不许为了去掉假数字而反过来断言「hero 必须 > 0」（那等于把种子数字钉成契约）。
+  if grep -q 'freshAssets > 0 && shownAssets > 0' "$API_TEST"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: HTTP 层又把「hero 必须 > 0」钉成了契约 ——" >&2
+    echo "        这会让没有数据源时无法如实返回 0。" >&2
+    exit 1
+  fi
+  # 正向：HTTP 层只要求非负（跟 contracts 的 z.number().int().nonnegative() 一致）。
+  if ! grep -q 'hero stats must be non-negative' "$API_TEST"; then
+    echo "  FAIL [FACET-HERO-FABRICATED-001]: HTTP 层的非负断言不见了" >&2
+    exit 1
+  fi
+  echo "  PASS [FACET-HERO-FABRICATED-001]: facet hero stats are summed from object signals"
+
+
+# MARKET-FAKE-JUDGMENT-001: 市场不得编造「匹配度」与「已验证」。
+# 服务端发布路径以前无条件写 p.Match="100%" 和 p.Verified=true —— 平台没有匹配引擎，
+# 也没有对个人发布者的核验流程。客户端据此渲染「N% 匹配」标签 / 「发布方已验证」勾，
+# 外加一整盒写死的 AI 结论（是否值得接 / 出价下限）。
+# 服务端行为由 Go 测试钉住；这个块钉的是：服务端的常量不许回来 + 展示侧不许再造句。
+  G=apps/api-go/internal/marketplace/service.go
+  # 服务端：不许再无条件给匹配度 / 已验证。
+  if grep -q 'p.Match = "100%"' "$G"; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 发布又写死了匹配度 —— 平台没有匹配引擎" >&2
+    exit 1
+  fi
+  if ! grep -q 'p.Match = ""' "$G"; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 发布没有把匹配度留空" >&2
+    exit 1
+  fi
+  if ! grep -q 'p.Verified = false' "$G"; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 发布默认仍然标记已验证 ——" >&2
+    echo "        平台对个人发布者没有核验流程，那个勾是编的。" >&2
+    exit 1
+  fi
+  # 已验证必须只在商家成员资格验过时打开（merchantStamp 分支里）。
+  if [ "$(grep -c 'p.Verified = true' "$G")" -lt 1 ]; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 验过成员资格的商家也没拿到已验证标记" >&2
+    exit 1
+  fi
+  # 钉**那两条 Go 断言**，不是「文件里出现过这个 ID」。
+  if ! grep -q 'TestPublishDoesNotFabricateMatchOrVerification' apps/api-go/internal/marketplace/service_test.go; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 服务端行为测试不见了" >&2
+    exit 1
+  fi
+  if ! grep -q 'TestPublishMarksVerifiedOnlyWithMerchantMembership' apps/api-go/internal/marketplace/service_test.go; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 商家成员资格的反向钉不见了 ——" >&2
+    echo "        不能为了去掉假勾而让真验过的商家也失去标记。" >&2
+    exit 1
+  fi
+  # 展示侧：卡片不许把"没算过"显示成 0%；详情页不许再拿匹配度造句。
+  if grep -q 'opportunity.match ?? "0%"' apps/mobile/src/surfaces/r37-opportunity-card.tsx; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 卡片把没有匹配度显示成 0%" >&2
+    exit 1
+  fi
+  if grep -q 'opportunity.match' apps/mobile/src/surfaces/market.tsx; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 详情页又在拿匹配度造句" >&2
+    exit 1
+  fi
+  if ! grep -q '这一版还没有评估' apps/mobile/src/surfaces/market.tsx; then
+    echo "  FAIL [MARKET-FAKE-JUDGMENT-001]: 判断区没有如实说明" >&2
+    exit 1
+  fi
+  echo "  PASS [MARKET-FAKE-JUDGMENT-001]: no fabricated match score or verification badge"
+
+
+# MARKET-PRICE-RANGE-PARSE-001: 机会的 price 可能是一个**真区间**，显示侧却把它当单一数字读。
+#
+# 发布页有两框（最低 / 最高），都填了 composePriceRange 会合成
+# "1,500,000₫ – 2,000,000₫" 落到 wire 的 price 上 —— 这是合法形态，发布校验也认。
+# 但卡片、详情页、报价 sheet 三处各自把 price 里的数字整串抠出来当单一预算：
+#   1. 区间的两端被拼成一个数，卡片于是显示出一串天文数字般的 K 值；
+#   2. 详情页那格再拿这个"单一预算"乘两个系数外推一个区间 —— 那两框没人填过；
+#   3. 报价 sheet 的锚定区间和三个预设按钮跟着一起错。
+#
+# 现在统一走 parseOpportunityPrice（market-fixtures.ts，按区间两端拆开读）：
+# 有真区间就显示真区间；只有单一价格就显示那个价格，不外推、也不声称可协商。
+# 行为测试在 apps/mobile/src/market-price-range.test.ts（纯 .ts，跑得动）。
+if grep -qF 'replace(/\D/g' apps/mobile/src/surfaces/r37-opportunity-card.tsx ||
+   grep -qF 'replace(/\D/g' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-PRICE-RANGE-PARSE-001]: 显示侧又把 price 里的数字整串抠出来了 ——" >&2
+  echo "        price 可能是发布方填的真区间，抠数字会把两端拼成一个天文数字。" >&2
+  echo "        走 parseOpportunityPrice，按区间两端拆开读。" >&2
+  exit 1
+fi
+# 外推系数：那两框发布方从来没填过，客户端不许替他造一个区间。
+if grep -qF '0.95' apps/mobile/src/surfaces/r37-opportunity-card.tsx ||
+   grep -qF '1.35' apps/mobile/src/surfaces/r37-opportunity-card.tsx ||
+   grep -qF '0.95' apps/mobile/src/surfaces/market.tsx ||
+   grep -qF '1.35' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-PRICE-RANGE-PARSE-001]: 又在拿单一预算外推一个区间 ——" >&2
+  echo "        只有发布方真的填了两框才有区间；只有一个价就显示那个价。" >&2
+  exit 1
+fi
+if grep -qF 'Proxy 建议区间' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-PRICE-RANGE-PARSE-001]: 详情页那格又变成编出来的建议区间" >&2
+  exit 1
+fi
+# 正向：三处都接到同一个解析器上，且解析器真的存在。
+if ! grep -qF 'export function parseOpportunityPrice' apps/mobile/src/market-fixtures.ts ||
+   ! grep -qF 'parseOpportunityPrice' apps/mobile/src/surfaces/r37-opportunity-card.tsx ||
+   ! grep -qF 'parseOpportunityPrice' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-PRICE-RANGE-PARSE-001]: 显示侧没有接到 parseOpportunityPrice 上 ——" >&2
+  echo "        解析器对了而没人调用等于没修（三处以前就是各写一份）。" >&2
+  exit 1
+fi
+if ! grep -q 'MARKET-PRICE-RANGE-PARSE-001' apps/mobile/src/market-price-range.test.ts; then
+  echo "  FAIL [MARKET-PRICE-RANGE-PARSE-001]: 行为测试没有跟着改口径" >&2
+  exit 1
+fi
+echo "    MARKET-PRICE-RANGE-PARSE-001: PASS (a published price range is read as two ends, never concatenated)"
+
+# MARKET-SEED-FAKE-ACTIVITY-001: 市场种子行不得带凭空的互动量与紧急度。
+#
+# marketplace.SeedDefaults 在**生产 PG 路径**上也会跑（cmd/api/main.go 无条件下调），
+# 所以它写进去的每一行真实用户都看得到。四行种子以前带着非零的响应人数和一个
+# "热门"紧急度标记，但发布路径（PublishMarketOpportunity）把响应数初始化成 0、只在
+# 有人真的报名时才 +1，紧急度标记压根不由发布路径产生 —— 于是种子行凭空声称"已经有
+# 人响应了"且"很抢手"，详情页把响应数渲染成一行人数，卡片会为"热门"换一个强调色。
+  SVC=apps/api-go/internal/marketplace/service.go
+  TEST=apps/api-go/internal/marketplace/service_test.go
+  # 反向钉：种子行不许再出现非零的响应数字面量。
+  if grep -qE 'Responses: [1-9]' "$SVC"; then
+    echo "  FAIL [MARKET-SEED-FAKE-ACTIVITY-001]: 种子行又带了非零的响应数 ——" >&2
+    echo "        没有人报名过，发布路径的初值就是 0。" >&2
+    exit 1
+  fi
+  # 反向钉：紧急度是算出来的判断，不是种子属性。
+  if grep -qE 'SignalClass: "(hot|new|rising)"' "$SVC"; then
+    echo "  FAIL [MARKET-SEED-FAKE-ACTIVITY-001]: 种子行又在自称「热门/紧急」" >&2
+    exit 1
+  fi
+  # 正向：四行种子都必须从 0 起步（跟真实发布一致）。
+  n=$(grep -c 'Responses: 0' "$SVC")
+  if [ "$n" -lt 4 ]; then
+    echo "  FAIL [MARKET-SEED-FAKE-ACTIVITY-001]: 只有 $n 行种子从 0 起步，期望 4 行" >&2
+    exit 1
+  fi
+  # 钉**断言本身**，不是「文件里出现过这个 ID」。
+  if ! grep -q 'TestSeedDefaultsCarryNoFabricatedEngagement' "$TEST"; then
+    echo "  FAIL [MARKET-SEED-FAKE-ACTIVITY-001]: 种子不带假互动的行为测试不见了" >&2
+    exit 1
+  fi
+  # 反向钉：不能为了去掉假互动就把 demo 列表本身删了。
+  if ! grep -q 'TestSeedDefaultsStillProvideDemoListings' "$TEST"; then
+    echo "  FAIL [MARKET-SEED-FAKE-ACTIVITY-001]: 「demo 列表还在」的反向钉不见了 ——" >&2
+    echo "        修的是凭空的互动量，不是把市场种子一起端掉。" >&2
+    exit 1
+  fi
+  echo "  PASS [MARKET-SEED-FAKE-ACTIVITY-001]: market seed rows carry no fabricated engagement"
+
+
+# MARKET-SEEDED-TRAVEL-001: 市场的通勤时间不得拿种子占位数字冒充实时推算。
+# travel 只有在 travelSource === "user_distance" 时才是"从看的人所在位置算出来的"；
+# 种子数据里写死的 18/24/52/20（apps/api-go/internal/marketplace/service.go
+# SeedDefaults）跟正在看的人在哪毫无关系，显示成"通勤约 18 分钟"就是编的。
+# 服务端专门返了 travelSource 就是为了让客户端分得开 —— 以前声明了但没人读。
+  if ! grep -q 'MARKET-SEEDED-TRAVEL-001' apps/mobile/src/market-fixtures.ts; then
+    echo "  FAIL [MARKET-SEEDED-TRAVEL-001]: 派生函数没有标注这个契约" >&2
+    exit 1
+  fi
+  # 反向钉：详情页不许再直接拿 travel 字段就渲染。
+  if grep -q 'opportunity.travel != null' apps/mobile/src/surfaces/market.tsx; then
+    echo "  FAIL [MARKET-SEEDED-TRAVEL-001]: 详情页直接渲染了 travel 字段 ——" >&2
+    echo "        seeded（种子占位）会被当成看的人的通勤时间显示。" >&2
+    exit 1
+  fi
+  # 正向：必须走派生函数，且派生函数只认 user_distance。
+  if ! grep -q 'const viewerTravelMinutes = travelMinutesFromViewer(opportunity);' apps/mobile/src/surfaces/market.tsx; then
+    echo "  FAIL [MARKET-SEEDED-TRAVEL-001]: 详情页没有走派生函数" >&2
+    exit 1
+  fi
+  if ! grep -q 'opportunity.travelSource !== "user_distance"' apps/mobile/src/market-fixtures.ts; then
+    echo "  FAIL [MARKET-SEEDED-TRAVEL-001]: 派生函数不再按 travelSource 区分 ——" >&2
+    echo "        不区分就是把占位数字当实时推算。" >&2
+    exit 1
+  fi
+  # 钉**那条断言**，不是「文件里出现过这个 ID」。
+  if ! grep -q 'hides the seeded placeholder' apps/mobile/src/market-seeded-travel.test.ts; then
+    echo "  FAIL [MARKET-SEEDED-TRAVEL-001]: 行为测试不见了" >&2
+    exit 1
+  fi
+  # 反向钉：真算出来的通勤时间仍然要显示 —— 不能为了不编就把真的也删了。
+  if ! grep -q 'returns the minutes when the server computed them from the viewer' apps/mobile/src/market-seeded-travel.test.ts; then
+    echo "  FAIL [MARKET-SEEDED-TRAVEL-001]: 真通勤时间的反向钉不见了 ——" >&2
+    echo "        修「占位当真」不能把真的算出来的时间也一起藏掉。" >&2
+    exit 1
+  fi
+  echo "  PASS [MARKET-SEEDED-TRAVEL-001]: commute time is shown only when computed from the viewer"
+
+# PERSON-DISTANCE-ZERO-001: 服务端真人不得被盖上「距离 0 米」。
+#
+# 首页按 userId 搜到的**真实平台用户**经 profileWireToPerson 转成本地人物卡时，
+# 以前一律填 `distanceM: 0`。服务端没有这个人的坐标，0 不是"很近"而是"没有数据"，
+# 但详情页会把它渲染成「0 m」—— 等于断言对方就在看的人脚下；同时「附近 <1000m」
+# 筛选会把 0 当成通过，于是任何一个被搜到的真人都算「附近」。
+# 没有坐标就必须留空：展示侧说「距离未知」，筛选侧排除出「附近」。
+  FIX=apps/mobile/src/recommend-fixtures.ts
+  UI=apps/mobile/src/surfaces/requester-home.tsx
+  TEST=apps/mobile/src/person-distance-zero.test.ts
+  # 反向钉：服务端真人身上不许再出现 distanceM 赋值（0 也是编的）。
+  if /usr/bin/grep -q 'distanceM: 0' "$UI"; then
+    echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 又在给没有坐标的真人填距离 0" >&2
+    echo "        0 会渲染成「0 m」，并把人塞进「附近」筛选。" >&2
+    exit 1
+  fi
+  # 正向：距离字段必须是可选的，否则"未知"无法表达。
+  if ! /usr/bin/grep -q 'distanceM?: number' "$FIX"; then
+    echo "  FAIL [PERSON-DISTANCE-ZERO-001]: distanceM 又变回必填 ——" >&2
+    echo "        必填就等于逼调用方拿 0 冒充没数据。" >&2
+    exit 1
+  fi
+  # 正向：筛选侧要把"未知"排除在「附近」之外。
+  if ! /usr/bin/grep -q 'p.distanceM === undefined || p.distanceM >= 1000' "$UI"; then
+    echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 「附近」筛选不再排除距离未知的人" >&2
+    exit 1
+  fi
+  # 正向：展示侧要有如实文案，不能显示 0 m。
+  if ! /usr/bin/grep -q '距离未知' "$UI"; then
+    echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 没有距离的如实文案不见了" >&2
+    exit 1
+  fi
+  # 钉**断言本身**，不是「文件里出现过这个 ID」。
+  if ! /usr/bin/grep -q 'does not stamp a distance onto server people' "$TEST"; then
+    echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 「不给真人盖距离」的断言不见了" >&2
+    exit 1
+  fi
+  # 反向钉：不能为了不编就把 demo 列表的距离也删了。
+  if ! /usr/bin/grep -q 'keeps the distance on the demo recommendation list' "$TEST"; then
+    echo "  FAIL [PERSON-DISTANCE-ZERO-001]: 「demo 列表的距离还在」的反向钉不见了 ——" >&2
+    echo "        修的是服务端真人那一路，不是把推荐列表的距离一起端掉。" >&2
+    exit 1
+  fi
+  echo "  PASS [PERSON-DISTANCE-ZERO-001]: real people carry no invented proximity"
+
+
+# PROFILE-TAB-LOAD-FAILED-001: 个人主页「收藏 / 回复 / 被标记」加载失败不得显示成「还没有…」
+# 两层：me.tsx 必须记录失败并传下去；ProfileTabs 必须把失败态和空态渲染成两句话，
+# 且失败态先判定（数组的失败形态就是 []，判空在前等于没修）。
+# 只修一层没用：光在 me.tsx 记 flag 而 ProfileTabs 没有失败分支，用户看到的还是
+# 「还没有收藏」。
+  if ! grep -q 'PROFILE-TAB-LOAD-FAILED-001' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+    echo "  FAIL [PROFILE-TAB-LOAD-FAILED-001]: ProfileTabs 没有标注这个契约" >&2
+    exit 1
+  fi
+  # 三个失败态文案（和「还没有…」是不同的两句话）。
+  for MSG in '回复没读出来' '收藏没读出来' '被标记没读出来'; do
+    if ! grep -q "$MSG" apps/mobile/src/surfaces/ProfileTabs.tsx; then
+      echo "  FAIL [PROFILE-TAB-LOAD-FAILED-001]: 失败态文案不见了：$MSG" >&2
+      exit 1
+    fi
+  done
+  # 三个「真的没有」的文案必须还在 —— 不能把空态删掉只留失败态。
+  for MSG in '还没有收藏' '还没有回复' '还没有被标记'; do
+    if ! grep -q "$MSG" apps/mobile/src/surfaces/ProfileTabs.tsx; then
+      echo "  FAIL [PROFILE-TAB-LOAD-FAILED-001]: 空态文案被删掉了：$MSG ——" >&2
+      echo "        修「失败像空」不能把真的空也一起干掉。" >&2
+      exit 1
+    fi
+  done
+  # 失败分支数量：三个 tab 各一个，且必须在判空之前。
+  if [ "$(grep -c 'if (props.failed) {' apps/mobile/src/surfaces/ProfileTabs.tsx)" -lt 3 ]; then
+    echo "  FAIL [PROFILE-TAB-LOAD-FAILED-001]: 三个 tab 的失败分支不全（需 3 个）" >&2
+    exit 1
+  fi
+  # flag 必须从 ProfileTabsProps 穿到各 tab。
+  if ! grep -q 'failed={props.savedFailed}' apps/mobile/src/surfaces/ProfileTabs.tsx ||
+     ! grep -q 'failed={props.repliesFailed}' apps/mobile/src/surfaces/ProfileTabs.tsx ||
+     ! grep -q 'failed={props.taggedFailed}' apps/mobile/src/surfaces/ProfileTabs.tsx; then
+    echo "  FAIL [PROFILE-TAB-LOAD-FAILED-001]: 失败 flag 没有穿进 tab 组件" >&2
+    exit 1
+  fi
+  # me.tsx：失败要记 true，成功要清 false。
+  for CALL in 'setPersonalSavedFailed(true)' 'setPersonalRepliesFailed(true)' 'setPersonalTaggedFailed(true)'; do
+    if ! grep -q "$CALL" apps/mobile/src/surfaces/me.tsx; then
+      echo "  FAIL [PROFILE-TAB-LOAD-FAILED-001]: me.tsx 没有记录失败：$CALL" >&2
+      exit 1
+    fi
+  done
+  for CALL in 'setPersonalSavedFailed(false)' 'setPersonalRepliesFailed(false)' 'setPersonalTaggedFailed(false)'; do
+    if ! grep -q "$CALL" apps/mobile/src/surfaces/me.tsx; then
+      echo "  FAIL [PROFILE-TAB-LOAD-FAILED-001]: 成功时没有清掉失败标记：$CALL ——" >&2
+      echo "        一次抖动会让 tab 永远显示失败。" >&2
+      exit 1
+    fi
+  done
+  # 钉**那条断言**，不是「文件里出现过这个 ID」。
+  if ! grep -q 'the failure branch is decided before the empty branch in all three tabs' apps/mobile/src/profile-tabs-load-failed.test.ts; then
+    echo "  FAIL [PROFILE-TAB-LOAD-FAILED-001]: 行为测试不见了" >&2
+    exit 1
+  fi
+  echo "  PASS [PROFILE-TAB-LOAD-FAILED-001]: a failed profile tab never reads as 'you have none'"
+
+# RECOMMEND-REPUTATION-FABRICATED-001: 推荐人的「历史信誉与评价」不得是编的。
+#
+# 详情页那张卡（requester-home.tsx 「历史信誉与评价」）曾经显示星级 / 好评百分比 /
+# 完成次数 / 一句引号里的"用户评价" / 一份带日期的历史活动记录，而 recommend-fixtures
+# 里这些值全部由 `(index + offset) % n` 算出来 —— 挂在真人姓名下的凭空信誉，还附了
+# 「非公开记录不展示」的隐私说明。fixture 本身（姓名 / 描述 / 距离 / 标签）可以继续是
+# demo 内容，但**评价类字段**声称的是"被测量过的历史"，没有真数据就必须为空，
+# 让 UI 回落到「暂无公开记录」这类如实文案。
+  FIX=apps/mobile/src/recommend-fixtures.ts
+  TEST=apps/mobile/src/recommend-reputation-honest.test.ts
+  UI=apps/mobile/src/surfaces/requester-home.tsx
+  # 反向钉：任何按下标算出来的评价类字段都不许回来。
+  if grep -qE 'rating:[[:space:]]*Number\(' "$FIX"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 星级又是算出来的" >&2
+    exit 1
+  fi
+  if grep -qE 'positiveRate:[[:space:]]*[0-9]' "$FIX"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 好评率又是算出来的" >&2
+    exit 1
+  fi
+  if grep -qE 'completedActivities:[[:space:]]*[0-9]' "$FIX"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 完成次数又是算出来的" >&2
+    exit 1
+  fi
+  if grep -qE '(^|[^?])reviewSummary:' "$FIX"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 又在编" >&2
+    echo "        一段「用户评价」摘要" >&2
+    exit 1
+  fi
+  if grep -qE '(^|[^?])availabilityText:' "$FIX"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 又在替真人断言可用时间" >&2
+    exit 1
+  fi
+  # 反向钉：那份带日期的历史活动记录（挂在真人姓名下 + 隐私说明）不许回来。
+  if grep -q 'linh_history_' "$FIX"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 编造的历史活动记录又回来了" >&2
+    exit 1
+  fi
+  # 正向：改动必须在这个契约下留名。
+  if ! grep -q 'RECOMMEND-REPUTATION-FABRICATED-001' "$FIX"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: fixture 没标注这个契约" >&2
+    exit 1
+  fi
+  # 钉**断言本身**，不是「文件里出现过这个 ID」。
+  if ! grep -q 'carries no star rating for any recommended person' "$TEST"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 星级的断言不见了" >&2
+    exit 1
+  fi
+  if ! grep -q 'carries no public activity history rows for any recommended person' "$TEST"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 历史活动记录的断言不见了" >&2
+    exit 1
+  fi
+  # 反向钉：不能为了不编就把整个推荐列表删空。
+  if ! grep -q 'still describes the person themselves' "$TEST"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 「demo 列表本身还在」的反向钉不见了 ——" >&2
+    echo "        修「编信誉」不能把推荐人列表一起端掉。" >&2
+    exit 1
+  fi
+  # 反向钉：读模型要留着，等服务端人物 feed 落地能直接填。
+  if ! grep -q 'keeps the reputation fields on the type so the server feed can fill them' "$TEST"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 「字段要留着给真数据」的反向钉不见了 ——" >&2
+    echo "        把字段删了，UI 的回落分支会变成死代码。" >&2
+    exit 1
+  fi
+  # 展示侧：空状态不许暗示"有记录只是没公开"。
+  if grep -q '她暂未公开活动明细' "$UI"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 空状态仍在暗示存在未公开的记录" >&2
+    exit 1
+  fi
+  if ! grep -q '还没有可展示的活动记录' "$UI"; then
+    echo "  FAIL [RECOMMEND-REPUTATION-FABRICATED-001]: 如实的空状态文案不见了" >&2
+    exit 1
+  fi
+  echo "  PASS [RECOMMEND-REPUTATION-FABRICATED-001]: recommendation reputation is never invented"
+
+
+# SUPPLY-BODY-001: 服务端 payload 解析失败被静默吞成 {}，跟"成功但为空"长得一样。
+#
+# supply-client 的 body() 以前是：
+#     try { const v = JSON.parse(result.operationRef); if (v && typeof v === "object") return v; }
+#     catch {}            ← 吞掉
+#     return {};          ← 损坏的响应和空的响应都走到这里
+#
+# 后果：一次**失败**会渲染成"没有数据"而不是"加载失败" ——
+#   · querySuppliers → 0 个可邀约的人（发布页「选个人邀约」显示空，而不是 ERROR）；
+#   · getAgentPassport → 一个字段全 undefined 的 passport，不报错；
+#   · setAvailabilityWindow → 返回 windowId ""，当成成功。
+# 现在统一抛 SupplyProtocolError；六个调用方都有 catch，会各自落到自己的错误态。
+if grep -qF 'catch {}' apps/mobile/src/supply-client.ts; then
+  echo "  FAIL [SUPPLY-BODY-001]: 又出现吞异常的 catch ——" >&2
+  echo "        payload 解析失败必须抛，不能退化成空对象（那跟"成功但没有数据"一样）。" >&2
+  exit 1
+fi
+if ! grep -qF 'export function parseSupplyBody' apps/mobile/src/supply-client.ts ||
+   ! grep -qF 'parseSupplyBody(result.operationRef)' apps/mobile/src/supply-client.ts; then
+  echo "  FAIL [SUPPLY-BODY-001]: body() 没有走共享解析器 ——" >&2
+  echo "        解析器对了而 body() 自己吞异常等于没修。" >&2
+  exit 1
+fi
+# 钉**那条断言**，不是"文件里出现过这个 ID"。
+if ! grep -q 'throws instead of returning {} when the payload is not valid JSON' apps/mobile/src/supply-client.test.ts; then
+  echo "  FAIL [SUPPLY-BODY-001]: 行为测试不见了" >&2
+  exit 1
+fi
+echo "    SUPPLY-BODY-001: PASS (a malformed supply payload raises instead of looking empty)"
+
+
+# VOUCHER-SETTLEMENT-FAKE-STATE-001: 结算页在服务端没给数据时**预填三条状态**，
+# 而且第一条是「已核销 · 完成」。
+#
+#   const states = settlement.length ? settlement
+#     : [ {REDEEMED, 完成}, {RISK_CHECK, 检查中}, {SETTLEMENT, 待结算} ];
+#
+# 副标题还写着「商家已确认真实消费」。于是一张根本没核销过的券被渲染成已核销完成 ——
+# 没有数据却渲染成了成功，这是最不能接受的一类。服务端今天确实总是返回三条，所以
+# 这是个潜伏的兜底：一旦 states 为空（协议返回空数组、字段漂移）就会立刻说谎。
+#
+# 同一个分支还有第二个假成功：只要 status 不是 REDEEMED 就给「查看核销结果」，
+# 而那一屏写的是「核销成功」—— 一张 EXPIRED 的券点进去也会看到核销成功。
+# 现在只有 SETTLED 才进那一屏，其余状态显示自己真实的状态。
+if grep -qF 'status:"COMPLETED"' apps/mobile/src/surfaces/voucher.tsx ||
+   grep -qF 'status:"CHECKING"' apps/mobile/src/surfaces/voucher.tsx; then
+  echo "  FAIL [VOUCHER-SETTLEMENT-FAKE-STATE-001]: 结算状态又在预填 ——" >&2
+  echo "        服务端没返回就是没记录，不能给一张没核销过的券显示已完成。" >&2
+  exit 1
+fi
+if ! grep -qF 'states.length ?' apps/mobile/src/surfaces/voucher.tsx ||
+   ! grep -qF '还没有核销与结算记录' apps/mobile/src/surfaces/voucher.tsx; then
+  echo "  FAIL [VOUCHER-SETTLEMENT-FAKE-STATE-001]: 没有记录时没有落到空态" >&2
+  exit 1
+fi
+if ! grep -qF 'selected.status === "SETTLED" ? <Pressable' apps/mobile/src/surfaces/voucher.tsx ||
+   ! grep -qF '这张礼券没有核销结果' apps/mobile/src/surfaces/voucher.tsx; then
+  echo "  FAIL [VOUCHER-SETTLEMENT-FAKE-STATE-001]: 未核销的券又能直接跳到「核销成功」——" >&2
+  echo "        只有 SETTLED 才有结果可看；其它状态要显示自己真实的状态。" >&2
+  exit 1
+fi
+# 钉**那条断言**，不是"文件里出现过这个 ID"。
+if ! grep -q 'never pre-fills settlement states the server did not return' apps/mobile/src/voucher-validity.test.ts; then
+  echo "  FAIL [VOUCHER-SETTLEMENT-FAKE-STATE-001]: 行为测试不见了" >&2
+  exit 1
+fi
+echo "    VOUCHER-SETTLEMENT-FAKE-STATE-001: PASS (settlement shows real states only; no success screen for unredeemed vouchers)"
+

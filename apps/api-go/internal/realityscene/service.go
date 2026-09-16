@@ -700,9 +700,15 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	if e.Actor.Type != "USER" || e.Actor.ID == "" {
 		return command.Rejected(e, "REALITY_SCENE_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_REAUTH", "reality_scene.actor_required", nil)
 	}
-	// SCENE-CONTRIB-001: 社区提交 / 确认 / 列表。
-	// 这三个命令不操作"某个已存在的场景"，所以必须排在下面那段
-	// "先取 sceneId 再查命令→列映射" 的通用逻辑之前。
+	// OPENAPI-COMMAND-COVERAGE-001: 命令一律用 `case "X":` 分派，不要用
+	// `if e.CommandType == "X"` 或 map 查表。openapi.commands.generated.yaml
+	// 是**扫 `case "X"` 行**生成的（internal/openapicmds），这两种写法命令
+	// 照样 dispatch、测试照样绿，却永远不会出现在契约里 —— 而漂移检查比对的是
+	// 「重新生成 vs 已提交」，两边缺的是同一条，所以它也是绿的。
+	//
+	// SCENE-CONTRIB-001: 社区提交 / 确认 / 列表，以及本人状态清单。
+	// 这几个命令不操作"某个已存在的场景"，所以必须排在下面那段
+	// "先取 sceneId 再分派" 的通用逻辑之前。
 	switch e.CommandType {
 	case "ProposeRealityScene":
 		return s.proposeScene(ctx, e)
@@ -710,57 +716,74 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.confirmProposal(ctx, e)
 	case "ListRealitySceneProposals":
 		return s.listProposals(ctx, e)
-	}
-	if e.CommandType == "ListMyRealitySceneState" {
-		states, err := s.repo.ListUserStates(ctx, e.Actor.ID)
-		if err != nil {
-			return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
-		}
-		// SCENE-CHECKIN-001: 一并把本人还在有效期内的 check-in 带回去，客户端
-		// 重开 app 时才知道按钮该显示"我在这里"还是"✓ 在这里"。
-		checkIns, err := s.repo.ListMyCheckIns(ctx, e.Actor.ID, time.Now())
-		if err != nil {
-			return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
-		}
-		r := command.Accepted(e, "RealitySceneStateCollection", e.Actor.ID, 1, "READY", nil)
-		raw, _ := json.Marshal(map[string]any{"states": states, "checkIns": checkIns})
-		r.OperationRef = string(raw)
-		return r
+	case "ListMyRealitySceneState":
+		return s.listMyState(ctx, e)
 	}
 	sceneID, _ := e.Payload["sceneId"].(string)
 	enabled, ok := e.Payload["enabled"].(bool)
 	if sceneID == "" || !ok {
 		return command.Rejected(e, "REALITY_SCENE_INPUT_INVALID", "VALIDATION", "AFTER_USER_ACTION", "reality_scene.input_invalid", nil)
 	}
+	switch e.CommandType {
 	// SCENE-CHECKIN-001: 「我在这里」—— 有时间窗的现场声明。
 	//
-	// 必须放在下面那张 commandType→column 的映射**之前**：这个命令不对应
-	// user_scene_states 的任何一列，走下去只会返回 command_unsupported。
+	// 必须排在下面那三个「命令→user_scene_states 某一列」的 case **之前**：
+	// 这个命令不对应任何一列，掉下去只会返回 command_unsupported。
 	//
 	// distanceMeters 是**可选**的：没授权定位 / 没定位到时不带，声明照样成立，
 	// 只是没有距离佐证。我们不会反过来因为没有位置就拒绝 —— 但也绝不因此
 	// 声称"已核实本人在场"。
-	if e.CommandType == "SetRealitySceneCheckIn" {
-		var distance *int
-		if raw, ok := e.Payload["distanceMeters"].(float64); ok && raw >= 0 {
-			metres := int(raw)
-			distance = &metres
-		}
-		if !enabled {
-			if err := s.repo.CancelCheckIn(ctx, e.Actor.ID, sceneID); err != nil {
-				return command.Rejected(e, "REALITY_SCENE_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.write_failed", nil)
-			}
-			return s.checkInResult(e, sceneID, false, nil)
-		}
-		if err := s.repo.CheckInScene(ctx, e.Actor.ID, sceneID, distance, time.Now()); err != nil {
+	case "SetRealitySceneCheckIn":
+		return s.setCheckIn(ctx, e, sceneID, enabled)
+	case "SetRealitySceneSaved":
+		return s.setUserStateField(ctx, e, sceneID, "saved", enabled)
+	case "SetRealityScenePlanned":
+		return s.setUserStateField(ctx, e, sceneID, "planned", enabled)
+	case "SetPrivateRealitySceneVisited":
+		return s.setUserStateField(ctx, e, sceneID, "private_visited", enabled)
+	}
+	return command.Rejected(e, "REALITY_SCENE_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "reality_scene.command_unsupported", nil)
+}
+
+// listMyState 回本人对每个场景的 saved / planned / private_visited 状态。
+func (s *Service) listMyState(ctx context.Context, e command.Envelope) command.Result {
+	states, err := s.repo.ListUserStates(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
+	}
+	// SCENE-CHECKIN-001: 一并把本人还在有效期内的 check-in 带回去，客户端
+	// 重开 app 时才知道按钮该显示"我在这里"还是"✓ 在这里"。
+	checkIns, err := s.repo.ListMyCheckIns(ctx, e.Actor.ID, time.Now())
+	if err != nil {
+		return command.Rejected(e, "REALITY_SCENE_READ_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.read_failed", nil)
+	}
+	r := command.Accepted(e, "RealitySceneStateCollection", e.Actor.ID, 1, "READY", nil)
+	raw, _ := json.Marshal(map[string]any{"states": states, "checkIns": checkIns})
+	r.OperationRef = string(raw)
+	return r
+}
+
+// setCheckIn 处理「我在这里」的开启与取消。
+func (s *Service) setCheckIn(ctx context.Context, e command.Envelope, sceneID string, enabled bool) command.Result {
+	var distance *int
+	if raw, ok := e.Payload["distanceMeters"].(float64); ok && raw >= 0 {
+		metres := int(raw)
+		distance = &metres
+	}
+	if !enabled {
+		if err := s.repo.CancelCheckIn(ctx, e.Actor.ID, sceneID); err != nil {
 			return command.Rejected(e, "REALITY_SCENE_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.write_failed", nil)
 		}
-		return s.checkInResult(e, sceneID, true, distance)
+		return s.checkInResult(e, sceneID, false, nil)
 	}
-	field := map[string]string{"SetRealitySceneSaved": "saved", "SetRealityScenePlanned": "planned", "SetPrivateRealitySceneVisited": "private_visited"}[e.CommandType]
-	if field == "" {
-		return command.Rejected(e, "REALITY_SCENE_COMMAND_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "reality_scene.command_unsupported", nil)
+	if err := s.repo.CheckInScene(ctx, e.Actor.ID, sceneID, distance, time.Now()); err != nil {
+		return command.Rejected(e, "REALITY_SCENE_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.write_failed", nil)
 	}
+	return s.checkInResult(e, sceneID, true, distance)
+}
+
+// setUserStateField 处理 saved / planned / private_visited 三个布尔列。
+func (s *Service) setUserStateField(ctx context.Context, e command.Envelope, sceneID string, field string, enabled bool) command.Result {
 	if err := s.repo.SetUserState(ctx, e.Actor.ID, sceneID, field, enabled, time.Now()); err != nil {
 		return command.Rejected(e, "REALITY_SCENE_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "reality_scene.write_failed", nil)
 	}
