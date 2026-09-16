@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import QRCode from "react-native-qrcode-svg";
 import { captureRef } from "react-native-view-shot";
 import { inviteQrPayload, parseScannedQr } from "../profile-qr";
 import type { ScannedQr } from "../profile-qr";
+import { ProxyQrCode } from "../components/proxy-qr-code";
+import { QrZoomOverlay } from "../components/qr-zoom-overlay";
 import { describeError, saveImageToAlbum } from "../image-export";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { ProfileClient, ProfileWire } from "../profile-client";
@@ -143,6 +144,10 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   // PROFILE-QR-004：邀请二维码的存图锚点。以前这处只有「复制链接 / 系统分享」，
   // 想发给好友只能发一段文字，存不下图。
   const inviteShotRef = useRef<View>(null);
+  // 放大层：和「我的二维码」页共用同一个组件，不再各页自己搭 Modal。
+  const [inviteZoomOpen, setInviteZoomOpen] = useState(false);
+  const inviteZoomShotRef = useRef<View>(null);
+  const [inviteQrNotice, setInviteQrNotice] = useState<string | undefined>(undefined);
   // PROFILE-QR-003: 扫码识别三态 —— undefined 还没试 / null 识别失败 / ScannedQr 成功。
   // 相机扫描（expo-camera）与剪贴板共用 parseScannedQr，落在同一状态机。
   const [scanned, setScanned] = useState<ScannedQr | null>();
@@ -248,20 +253,22 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   }
   // PROFILE-QR-004：邀请码存图。和「我的二维码」页同一套失败文案口径 ——
   // 没权限说没权限，失败说失败，不静默。
-  async function saveInviteQrToAlbum(): Promise<void> {
+  // 返回提示文案而不是自己弹，是因为两个入口的出口不同：邀请卡用 toast，放大层用行内提示。
+  async function saveInviteQrToAlbum(shot: { current: View | null } = inviteShotRef): Promise<string> {
     try {
-      const uri = await captureRef(inviteShotRef, { format: "png", quality: 1 });
+      const uri = await captureRef(shot, { format: "png", quality: 1 });
       const result = await saveImageToAlbum(uri);
-      showToast(
-        result.ok
-          ? "二维码已保存到相册。"
-          : result.code === "permission"
-            ? "需要相册权限才能保存二维码。"
-            : `保存失败：${result.reason}`,
-      );
+      if (result.ok) return "二维码已保存到相册。";
+      return result.code === "permission" ? "需要相册权限才能保存二维码。" : `保存失败：${result.reason}`;
     } catch (err) {
-      showToast(`保存失败：${describeError(err)}`);
+      return `保存失败：${describeError(err)}`;
     }
+  }
+  async function saveInviteQrFromSheet(): Promise<void> {
+    showToast(await saveInviteQrToAlbum(inviteShotRef));
+  }
+  async function saveInviteQrFromZoom(): Promise<void> {
+    setInviteQrNotice(await saveInviteQrToAlbum(inviteZoomShotRef));
   }
 
   // 好友请求失败说人话：英文技术错不上屏，会话类问题提示登录。
@@ -556,12 +563,14 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
             <>
               <View style={styles.qrName}><Text style={styles.qrNameStrong}>{viewer.name}</Text><Text style={styles.qrNameSub}>Proxy ID · {viewer.handle}</Text></View>
               <View ref={inviteShotRef} collapsable={false} style={styles.inviteQrWrap}>
-                <QRCode value={inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`} size={168} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+                <Pressable accessibilityLabel="放大邀请二维码" accessibilityRole="button" onPress={() => { setInviteQrNotice(undefined); setInviteZoomOpen(true); }}>
+                  <ProxyQrCode size={168} value={`proxy.app/invite/${viewer.handle}`} />
+                </Pressable>
               </View>
               <View style={styles.inviteLink}><Text selectable style={styles.inviteLinkText}>{inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}</Text></View>
               <View style={styles.actions}>
                 <Pressable onPress={() => void copyInviteLink(inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制邀请链接"><Text style={styles.btnGhostText}>复制链接</Text></Pressable>
-                <Pressable onPress={() => void saveInviteQrToAlbum()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="保存邀请二维码到相册"><Text style={styles.btnGhostText}>保存到相册</Text></Pressable>
+                <Pressable onPress={() => void saveInviteQrFromSheet()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="保存邀请二维码到相册"><Text style={styles.btnGhostText}>保存到相册</Text></Pressable>
                 <Pressable onPress={() => void Share.share({ message: `加我 Proxy 好友：${inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable>
               </View>
               {inviteCopied ? <Text style={styles.inviteCopiedNote}>链接已复制，去粘贴给你的好友吧。</Text> : null}
@@ -570,6 +579,24 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
             <View style={styles.qrName}><Text style={styles.qrNameSub}>登录后显示你的邀请名片</Text></View>
           )}
         </CrmSheet>
+
+        <QrZoomOverlay
+          actions={
+            viewer
+              ? [
+                  { label: "复制链接", onPress: () => void copyInviteLink(inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`) },
+                  { label: "保存到相册", onPress: () => void saveInviteQrFromZoom(), primary: true },
+                ]
+              : []
+          }
+          hint="把屏幕朝向对方即可扫描；长按可识别图中二维码。"
+          notice={inviteQrNotice}
+          onClose={() => setInviteZoomOpen(false)}
+          shotRef={inviteZoomShotRef}
+          title={viewer ? `${viewer.name} 的邀请二维码` : "邀请二维码"}
+          value={viewer ? inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}` : ""}
+          visible={inviteZoomOpen}
+        />
 
         <CrmSheet open={sheet === "CONTACTS"} onClose={() => setSheet(undefined)} title="通讯录匹配" sub="Proxy 不会自动添加你的通讯录联系人。下面是本机演示匹配，添加后按钮变已发送，仅本机流转。">
           {!contactsAllowed ? (

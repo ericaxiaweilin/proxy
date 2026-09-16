@@ -743,7 +743,7 @@ export const styles = StyleSheet.create({
   qrCardBtnTextGhost: { color: color.ink, fontSize: 11, fontWeight: "800" },
   qrCardNotice: { color: color.muted, fontSize: 11, marginTop: 6 },
 
-  // STORE-REC/PROFILE-QR-001: 真实个人二维码（react-native-qrcode-svg）。
+  // STORE-REC/PROFILE-QR-001: 真实个人二维码（渲染见 components/proxy-qr-code）。
   qrRealCard: {
     alignItems: "center",
     backgroundColor: color.white,
@@ -778,19 +778,6 @@ export const styles = StyleSheet.create({
   qrRealNotice: { color: "#1B7F4D", fontSize: 11, marginTop: 8, textAlign: "center" },
   // PROFILE-QR-002：被分享出去的二维码图取自这块白底（quiet zone 留足，纯白高对比）。
   qrShotWrap: { alignItems: "center", backgroundColor: color.white, padding: 12 },
-  qrZoomScrim: {
-    alignItems: "center",
-    backgroundColor: "rgba(5,5,8,0.86)",
-    flex: 1,
-    justifyContent: "center",
-    padding: 32
-  },
-  qrZoomCard: {
-    alignItems: "center",
-    backgroundColor: color.white,
-    borderRadius: 20,
-    padding: 24
-  },
 
   socialRow: {
     alignItems: "center",

@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
-import QRCode from "react-native-qrcode-svg";
-import { toQrPayload } from "../profile-qr";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
+import { ProxyQrCode } from "../components/proxy-qr-code";
 import { color, Gradient } from "../theme";
 import type { AbilityType, AvailabilityRule, AvailabilityState, AvOverride, MenuRow } from "./me-types";
 import { ABILITY_SCHEMAS, AVAILABILITY_OPTIONS, avFmt, AV_DAY_NAMES, avStateFor } from "./me-types";
@@ -281,7 +280,8 @@ function QrCard({
   qrSize = 104,
   actions,
   shotRef,
-  notice
+  notice,
+  onQrPress
 }: {
   title: string;
   desc: string;
@@ -295,15 +295,20 @@ function QrCard({
   shotRef?: React.RefObject<View | null> | undefined;
   /** 复制/存图的结果必须出得来。没有这个出口时，成功失败一律静默 —— 用户看到的就是「按了没反应」。 */
   notice?: string | undefined;
+  /** 点码放大。传了才可点 —— 没有放大层的页面不要给一个按下去没反应的码。 */
+  onQrPress?: (() => void) | undefined;
 }): React.JSX.Element {
   const buttons = actions && actions.length > 0 ? actions : undefined;
+  const qr = qrValue ? <ProxyQrCode size={qrSize} value={qrValue} /> : <FakeQr />;
   return (
     <View style={[styles.qrCard, alignCenter && styles.qrCardCenter]}>
       <View ref={shotRef} collapsable={false}>
-        {qrValue ? (
-          <QRCode value={toQrPayload(qrValue)} size={qrSize} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+        {onQrPress ? (
+          <Pressable accessibilityLabel="放大二维码" accessibilityRole="button" onPress={onQrPress}>
+            {qr}
+          </Pressable>
         ) : (
-          <FakeQr />
+          qr
         )}
       </View>
       <View style={[styles.qrCardText, alignCenter && styles.qrCardTextCenter]}>

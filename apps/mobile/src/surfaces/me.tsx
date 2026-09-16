@@ -15,7 +15,8 @@ import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
-import QRCode from "react-native-qrcode-svg";
+import { ProxyQrCode } from "../components/proxy-qr-code";
+import { QrZoomOverlay } from "../components/qr-zoom-overlay";
 import { captureRef } from "react-native-view-shot";
 import { Directory, File, Paths } from "expo-file-system";
 import { profileQrPayload, toQrPayload } from "../profile-qr";
@@ -564,6 +565,10 @@ export function MeSurface({
   // PROFILE-QR-002：放大扫码 + 分享二维码图。
   const [qrZoomOpen, setQrZoomOpen] = useState(false);
   const qrShotRef = useRef<View>(null);
+  // 放大层里的那块码是**另一棵视图**，不能和页内那张共用锚点 —— 共用会把页内那张截下来。
+  // 两个能开放大层的分支（personalmanage / personalqr）互斥，所以这一个锚点够用；
+  // 谁改了「同屏两个放大层」的假设，这里就得拆成两个。
+  const qrZoomShotRef = useRef<View>(null);
   // PROFILE-QR-004：个人总管理的小卡也有自己的截图锚点。同一次渲染里只会挂载
   // 其中一个（子页与卡片互斥），所以锚点必须由调用方传进来，不许写死一个。
   const qrCardShotRef = useRef<View>(null);
@@ -1663,7 +1668,7 @@ export function MeSurface({
       // 商家路径才到的 personalqr 子页上，这里只有「分享链接」一个按钮。
       // handle 非法时 payload 为 null —— 不画假码，也不给存假码的按钮。
       const manageQrPayload = profileQrPayload(profileDraft.handle);
-      return contentWrapper(
+      const managePage = contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
@@ -1701,6 +1706,7 @@ export function MeSurface({
               shotRef={qrCardShotRef}
               notice={qrNotice}
               alignCenter
+              onQrPress={manageQrPayload ? () => setQrZoomOpen(true) : undefined}
               actions={manageQrPayload ? [
                 { label: "复制链接", onPress: () => void copyProfileLink(manageQrPayload) },
                 { label: "保存到相册", onPress: () => void saveQrToAlbum(qrCardShotRef), primary: true },
@@ -1727,6 +1733,29 @@ export function MeSurface({
           <AvailabilitySheet current={availability} open={availabilityOpen} onClose={() => setAvailabilityOpen(false)} onSelect={(next) => setAvailability(next)} />
 
         </View>
+      );
+      // 这张卡上的码也能点开放大（PROFILE-QR-004 的常规能力）。放大层必须和
+      // contentWrapper 平级挂，不能塞进页面外壳里 —— 见 personalqr 分支同样的说明。
+      // 两个分支互斥（同一次渲染只有一个 subPage.route），所以共用 qrZoomShotRef 安全。
+      return (
+        <>
+          {managePage}
+          {manageQrPayload ? (
+            <QrZoomOverlay
+              actions={[
+                { label: "复制链接", onPress: () => void copyProfileLink(manageQrPayload) },
+                { label: "保存到相册", onPress: () => void saveQrToAlbum(qrZoomShotRef), primary: true },
+                { label: "分享二维码图", onPress: () => void shareQrImage(qrZoomShotRef) },
+              ]}
+              notice={qrNotice}
+              onClose={() => setQrZoomOpen(false)}
+              shotRef={qrZoomShotRef}
+              title={`${profileDraft.name} · 我的二维码`}
+              value={manageQrPayload}
+              visible={qrZoomOpen}
+            />
+          ) : null}
+        </>
       );
     }
 
@@ -1975,7 +2004,7 @@ export function MeSurface({
           </View>
         );
       }
-      return contentWrapper(
+      const qrPage = contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
             <Pressable onPress={() => closeSubPage()} style={styles.subPageBack}>
@@ -1986,7 +2015,7 @@ export function MeSurface({
             <View style={styles.qrRealCard}>
               <View ref={qrShotRef} collapsable={false} style={styles.qrShotWrap}>
                 <Pressable onPress={() => setQrZoomOpen(true)} accessibilityLabel="放大二维码" accessibilityRole="button">
-                  <QRCode value={profileLink} size={208} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+                  <ProxyQrCode size={208} value={profileLink} />
                 </Pressable>
                 <Text selectable style={styles.qrRealHandle}>{profileLink}</Text>
               </View>
@@ -2009,15 +2038,6 @@ export function MeSurface({
               </View>
               {qrNotice ? <Text style={styles.qrRealNotice}>{qrNotice}</Text> : null}
             </View>
-            <Modal animationType="fade" onRequestClose={() => setQrZoomOpen(false)} transparent visible={qrZoomOpen}>
-              <Pressable onPress={() => setQrZoomOpen(false)} accessibilityLabel="关闭放大的二维码" style={styles.qrZoomScrim}>
-                <View style={styles.qrZoomCard}>
-                  <QRCode value={profileLink} size={296} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
-                  <Text style={styles.qrRealHandle}>{profileLink}</Text>
-                  <Text style={styles.qrRealHint}>把屏幕朝向对方即可扫描；点任意处关闭。</Text>
-                </View>
-              </Pressable>
-            </Modal>
 
             {/* PROFILE-QR-004：这段是「个人主页」的可见范围预览 —— 店铺码扫出来
                 是门店公开页，拿 TikTok / Zalo 的分层去描述它属于编内容，不显示。 */}
@@ -2049,6 +2069,27 @@ export function MeSurface({
             )}
           </ScrollView>
         </View>
+      );
+      // 放大层挂在 contentWrapper **外面**：它是全屏 Modal，塞进页面外壳里会跟着外壳一起被裁，
+      // 而且外层 Pressable 会把「点任意处关闭」抢走。
+      return (
+        <>
+          {qrPage}
+          <QrZoomOverlay
+            actions={[
+              { label: "复制链接", onPress: () => void copyProfileLink(profileLink) },
+              { label: "保存到相册", onPress: () => void saveQrToAlbum(qrZoomShotRef), primary: true },
+              { label: "分享二维码图", onPress: () => void shareQrImage(qrZoomShotRef) },
+            ]}
+            hint={storeQr ? "让顾客把屏幕朝向自己即可扫描；长按可识别图中二维码。" : "把屏幕朝向对方即可扫描；长按可识别图中二维码。"}
+            notice={qrNotice}
+            onClose={() => setQrZoomOpen(false)}
+            shotRef={qrZoomShotRef}
+            title={qrHeading}
+            value={profileLink}
+            visible={qrZoomOpen}
+          />
+        </>
       );
     }
 

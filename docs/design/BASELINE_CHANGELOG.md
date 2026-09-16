@@ -4,6 +4,37 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 219 — 2026-09-16
+
+- PROFILE-QR-006（统一二维码管线）：全 App 只剩一处画码的地方
+  `apps/mobile/src/components/proxy-qr-code.tsx` —— 分离的圆角点阵 + 圆角定位角 +
+  圆形品牌徽标。四处调用点（个人二维码页 / 个人总管理卡 / 好友邀请 / 店铺卡 + 各自的
+  放大层）全部收口，`react-native-qrcode-svg` 从依赖里移除。
+  - **基线敏感文件**：`apps/mobile/src/components/proxy-qr-code.tsx`（新）
+    —— **几何常数即基线**：点边长 0.87、点圆角 0.22、定位角外圈 0.30 / 挖空 0.55 /
+      内芯 0.40、徽标 24% + 白圈 3.2%。动任何一个都要重跑解码验证。
+  - 为什么要自己画：库把整个矩阵压成**一条** `strokeLinecap='butt'` 的 `<Path>`，
+    圆点在它的 props 里没有入口；而参考样式（用户提供）要求分离的圆角点。
+  - 编码器改成**直接依赖** `qrcode`（纯 JS）。不能让 `qrcode` 退回成
+    react-native-qrcode-svg 的传递依赖 —— pnpm 严格布局下从 apps/mobile 根本解析不到，
+    而 ambient d.ts 会把这个问题在类型层藏起来（typecheck 绿、Metro 报 Unable to resolve）。
+  - 几何是量出来的不是拍的：在参考样式图（v3、29×29、模块 47.97px）上，相邻深色模块的
+    公共边界 134/134 全为纯白，点宽中位 42.0px、缝宽 6.0px → 点 0.876 模块、缝 0.125
+    模块（7:1）；点宽随高度的收缩曲线匹配**圆角方块**而不是圆。
+  - 可扫性验证：144 用例（3 payload × 6 尺寸 × 4 徽标比 × 1x/3x）用 CoreImage 逐张解码，
+    132 通过；12 个失败**与旧几何逐个同名**（即这次改几何零代价），且全部带「无徽标」
+    对照，集中在 1x 的 88/104px 长 payload —— 真机 3x 全过。
+- PROFILE-QR-002（放大 + 高亮）：全屏放大层统一成
+  `apps/mobile/src/components/qr-zoom-overlay.tsx`，替换 me.tsx 里那套私有 Modal。
+  - **基线敏感文件**：`apps/mobile/src/components/qr-zoom-overlay.tsx`（新）
+    —— 深色标题条（圆形 qrGrid 徽章 + 粗体白标题 + 关闭钮）+ 纯白码区（**不加边框/阴影**，
+      白边本身就是静默区）+ 灰色底部提示 + 动作行。
+  - 高亮 = 纯白满屏（微信 / 支付宝出示码那一屏的做法）。真·系统亮度需要
+    `expo-brightness`，要 pod install + 重建 dev client，本次未引入；接入位置在文件头注释里。
+  - 放大层必须挂在 `contentWrapper` **外面** —— 全屏 Modal 塞进页面外壳会跟着被裁。
+- 修掉一处「按了没反应」：个人总管理页的 QrCard 已经传了 `onQrPress`，但放大层只挂在
+  personalqr 分支 —— 点下去只改了一个没人渲染的 state。两个分支各挂一份（互斥，共用锚点）。
+
 ## Revision 218 — 2026-09-16
 
 - MAP-CONTAINER-PARITY-001：Home 场景页 / 市场内联卡 / 发布器三处地图容器统一

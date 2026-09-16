@@ -5,9 +5,10 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ActivityIndicator, Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
-import QRCode from "react-native-qrcode-svg";
 import { captureRef } from "react-native-view-shot";
 import { toQrPayload } from "../profile-qr";
+import { ProxyQrCode } from "../components/proxy-qr-code";
+import { QrZoomOverlay } from "../components/qr-zoom-overlay";
 import { describeError, saveImageToAlbum } from "../image-export";
 import { color, shadows } from "../theme";
 import { retainStorePhoto, storePhotoUri, type RetainedStorePhoto } from "../expo-composer-draft-store";
@@ -64,6 +65,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   // 在 A 店按保存会截到列表里最后渲染的那张码。
   const storeQrRefs = useRef<Record<string, { current: View | null }>>({});
   const [storeQrNotice, setStoreQrNotice] = useState<{ storeId: string; text: string } | undefined>(undefined);
+  // 放大层当前展示的店铺。存 id+name 而不是只存 id —— 关掉列表数据后标题还得在。
+  const [zoomedStore, setZoomedStore] = useState<{ id: string; name: string } | undefined>(undefined);
+  const storeZoomShotRef = useRef<View>(null);
   function storeQrRefFor(storeId: string): { current: View | null } {
     const existing = storeQrRefs.current[storeId];
     if (existing) return existing;
@@ -425,8 +429,20 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     }
   }
   async function saveStoreQrToAlbum(storeId: string): Promise<void> {
+    await saveQrBlockToAlbum(storeQrRefFor(storeId), storeId);
+  }
+  // 放大层里的存图走同一个出口 —— 但截的是放大层那张（更大、更清楚），
+  // 而且结果提示要落回放大层自己，不然用户看不见。
+  async function saveZoomedStoreQr(): Promise<void> {
+    if (!zoomedStore) return;
+    await saveQrBlockToAlbum(storeZoomShotRef, zoomedStore.id);
+  }
+  async function saveQrBlockToAlbum(
+    shot: { current: View | null },
+    storeId: string,
+  ): Promise<void> {
     try {
-      const uri = await captureRef(storeQrRefFor(storeId), { format: "png", quality: 1 });
+      const uri = await captureRef(shot, { format: "png", quality: 1 });
       const result = await saveImageToAlbum(uri);
       setStoreQrNotice({
         storeId,
@@ -442,6 +458,7 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   }
 
   return (
+    <>
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       {header}
       {accounts === undefined && !error ? <ActivityIndicator /> : null}
@@ -489,7 +506,9 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                   <View style={styles.heroActions}><Pressable onPress={() => void Share.share({ message: `${s.name} · Proxy 公开店铺页：proxy.app/store/${s.id}` })} style={styles.previewButton} accessibilityLabel="分享公开主页链接"><Text style={styles.previewButtonText}>公开主页</Text></Pressable><Pressable onPress={() => void Share.share({ message: `${s.name} · Proxy 店铺` })} style={styles.shareButton}><Text style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
                   <View style={styles.qrCard}>
                     <View ref={storeQrRefFor(s.id)} collapsable={false} style={styles.qrShot}>
-                      <QRCode value={toQrPayload(`proxy.app/store/${s.id}`)} size={104} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+                      <Pressable accessibilityLabel="放大店铺二维码" accessibilityRole="button" onPress={() => setZoomedStore({ id: s.id, name: s.name })}>
+                        <ProxyQrCode size={104} value={`proxy.app/store/${s.id}`} />
+                      </Pressable>
                     </View>
                     <View style={styles.storeHeroCopy}>
                       <Text style={styles.photoHeadTitle}>店铺二维码</Text>
@@ -745,6 +764,25 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
         );
       })}
     </ScrollView>
+    <QrZoomOverlay
+      actions={
+        zoomedStore
+          ? [
+              { label: "复制链接", onPress: () => void copyStoreLink(zoomedStore.id) },
+              { label: "保存到相册", onPress: () => void saveZoomedStoreQr(), primary: true },
+            ]
+          : []
+      }
+      hint="把屏幕朝向顾客即可扫描；可用于店内桌牌、海报和 Creator 分享。"
+      // 反馈只属于「这张码」：列表里存了 A 店、放大层开着 B 店时，不能把 A 的结果挂到 B 上。
+      notice={storeQrNotice && zoomedStore && storeQrNotice.storeId === zoomedStore.id ? storeQrNotice.text : undefined}
+      onClose={() => setZoomedStore(undefined)}
+      shotRef={storeZoomShotRef}
+      title={zoomedStore ? `${zoomedStore.name} · 店铺二维码` : "店铺二维码"}
+      value={zoomedStore ? toQrPayload(`proxy.app/store/${zoomedStore.id}`) : ""}
+      visible={zoomedStore !== undefined}
+    />
+    </>
   );
 }
 
