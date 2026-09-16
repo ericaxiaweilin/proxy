@@ -4,6 +4,35 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 217 — 2026-09-16
+
+- PROFILE-QR-002 修复：「保存到相册」在真机上调用即抛，相册里什么都没有（personal-profile /
+  invite / storefront 三个 scope 共用同一条坏调用）。
+  - **根因（不是 UI 问题，是调用了一个只会 throw 的占位函数）**：
+    `expo-media-library@57.0.5` 主入口 `src/index.ts` 结尾是
+    `export * from './legacyWarnings'`，把真实现整个盖掉了；`legacyWarnings.ts` 里
+    `saveToLibraryAsync` 的实现体是 `throw errorOnLegacyMethodUse('saveToLibraryAsync')`。
+    也就是说从 Revision 210 起，「保存到相册」**在真机上从来没有成功过一次** ——
+    它甚至没有走到权限或截图那一步。真实现在 `expo-media-library/legacy` 子路径，
+    官方迁移方向是新类 API `Asset.create()`（走 `ExpoMediaLibraryNext` 原生模块）。
+  - **修复**：新增 `apps/mobile/src/image-export.ts` 收口这条路径，三处调用点
+    （`me.tsx` / `friend-crm.tsx` / `merchant-storefront.tsx`）不再各抄一遍。
+    - `saveImageToAlbum(uri)` 用 `Asset.create()`；返回值区分
+      `code: "permission" | "failed"` —— 没权限要引导去设置，保存失败才谈重试，
+      两者合成一句「保存失败请重试」会让用户对着一个永远不会好的按钮反复点。
+    - `toFileUrl(uri)`：`captureRef` 在 iOS 上返回的是**裸绝对路径**
+      （`/var/mobile/.../tmp/ReactNative/xxx.png`，没有 `file://`）。相册模块对裸路径
+      宽容，但系统分享面板拿到无 scheme 的 URL 会少给动作 —— 分享路径同样收口。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`、
+    `apps/mobile/src/surfaces/friend-crm.tsx`、
+    `apps/mobile/src/surfaces/merchant-storefront.tsx`、
+    `apps/mobile/src/image-export.ts`（新增）。
+  - `friend-crm.tsx` / `merchant-storefront.tsx` 的 `catch {}` 不再吞掉真实错误，
+    失败文案带上原因。
+  - **不改**：三个页面的布局、按钮位置、成功文案、二维码 payload 全部不变。
+  - **验证方式**：真机点一下，相册里有图。源码级 grep 测试对这一类故障无效 ——
+    它证明的是「这行代码还在」，不是「这个功能能用」，所以本次不加单测。
+
 ## Revision 216 — 2026-09-16
 
 - STORE-QR-001：店铺二维码从图标改成真码（merchant-storefront scope）。

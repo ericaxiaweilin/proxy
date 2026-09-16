@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
-import * as MediaLibrary from "expo-media-library";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import QRCode from "react-native-qrcode-svg";
 import { captureRef } from "react-native-view-shot";
 import { inviteQrPayload, parseScannedQr } from "../profile-qr";
 import type { ScannedQr } from "../profile-qr";
+import { describeError, saveImageToAlbum } from "../image-export";
 import { ProxyIcon } from "../components/proxy-icon";
 import type { ProfileClient, ProfileWire } from "../profile-client";
 import type { FriendView, RelationshipClient } from "../relationship-client";
@@ -250,16 +250,17 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   // 没权限说没权限，失败说失败，不静默。
   async function saveInviteQrToAlbum(): Promise<void> {
     try {
-      const permission = await MediaLibrary.requestPermissionsAsync(true);
-      if (!permission.granted) {
-        showToast("需要相册权限才能保存二维码。");
-        return;
-      }
       const uri = await captureRef(inviteShotRef, { format: "png", quality: 1 });
-      await MediaLibrary.saveToLibraryAsync(uri);
-      showToast("二维码已保存到相册。");
-    } catch {
-      showToast("保存失败，请重试，或改用系统分享。");
+      const result = await saveImageToAlbum(uri);
+      showToast(
+        result.ok
+          ? "二维码已保存到相册。"
+          : result.code === "permission"
+            ? "需要相册权限才能保存二维码。"
+            : `保存失败：${result.reason}`,
+      );
+    } catch (err) {
+      showToast(`保存失败：${describeError(err)}`);
     }
   }
 

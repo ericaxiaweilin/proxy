@@ -15,11 +15,11 @@ import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
-import * as MediaLibrary from "expo-media-library";
 import QRCode from "react-native-qrcode-svg";
 import { captureRef } from "react-native-view-shot";
 import { Directory, File, Paths } from "expo-file-system";
 import { profileQrPayload, toQrPayload } from "../profile-qr";
+import { saveImageToAlbum, toFileUrl } from "../image-export";
 import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
 import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
 import { createLastSignInStore } from "../last-signin-store";
@@ -577,7 +577,8 @@ export function MeSurface({
   }
   async function shareQrImage(shotRef: QrShotRef = qrShotRef): Promise<void> {
     try {
-      const uri = await captureRef(shotRef, { format: "png", quality: 1 });
+      // 必须补成 file:// —— 分享面板拿到无 scheme 的裸路径会少给动作（存图/发消息）。
+      const uri = toFileUrl(await captureRef(shotRef, { format: "png", quality: 1 }));
       await Share.share({ url: uri, message: `查看 ${profileDraft.name} 的 Proxy 主页` });
     } catch (err) {
       setQrNotice(`分享失败：${qrFailureReason(err)}`);
@@ -585,16 +586,19 @@ export function MeSurface({
   }
   // PROFILE-QR-002：一键保存二维码到相册（不再依赖系统分享面板的
   // 「存储图像」选项 —— 那个选项在部分机型/面板版本不出现）。
+  //
+  // 权限和失败分开报：前者要引导去设置，后者才谈重试。
   async function saveQrToAlbum(shotRef: QrShotRef = qrShotRef): Promise<void> {
     try {
-      const permission = await MediaLibrary.requestPermissionsAsync(true);
-      if (!permission.granted) {
-        setQrNotice("需要相册权限才能保存二维码。");
-        return;
-      }
       const uri = await captureRef(shotRef, { format: "png", quality: 1 });
-      await MediaLibrary.saveToLibraryAsync(uri);
-      setQrNotice("二维码已保存到相册。");
+      const result = await saveImageToAlbum(uri);
+      setQrNotice(
+        result.ok
+          ? "二维码已保存到相册。"
+          : result.code === "permission"
+            ? "需要相册权限才能保存二维码。"
+            : `保存失败：${result.reason}`,
+      );
     } catch (err) {
       setQrNotice(`保存失败：${qrFailureReason(err)}`);
     }

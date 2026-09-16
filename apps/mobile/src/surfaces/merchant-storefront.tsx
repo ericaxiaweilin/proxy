@@ -5,10 +5,10 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ActivityIndicator, Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
-import * as MediaLibrary from "expo-media-library";
 import QRCode from "react-native-qrcode-svg";
 import { captureRef } from "react-native-view-shot";
 import { toQrPayload } from "../profile-qr";
+import { describeError, saveImageToAlbum } from "../image-export";
 import { color, shadows } from "../theme";
 import { retainStorePhoto, storePhotoUri, type RetainedStorePhoto } from "../expo-composer-draft-store";
 import type { BusinessClient, StoreProduct } from "../business-client";
@@ -426,16 +426,18 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
   }
   async function saveStoreQrToAlbum(storeId: string): Promise<void> {
     try {
-      const permission = await MediaLibrary.requestPermissionsAsync(true);
-      if (!permission.granted) {
-        setStoreQrNotice({ storeId, text: "需要相册权限才能保存二维码。" });
-        return;
-      }
       const uri = await captureRef(storeQrRefFor(storeId), { format: "png", quality: 1 });
-      await MediaLibrary.saveToLibraryAsync(uri);
-      setStoreQrNotice({ storeId, text: "二维码已保存到相册。" });
-    } catch {
-      setStoreQrNotice({ storeId, text: "保存失败，请重试，或改用系统分享。" });
+      const result = await saveImageToAlbum(uri);
+      setStoreQrNotice({
+        storeId,
+        text: result.ok
+          ? "二维码已保存到相册。"
+          : result.code === "permission"
+            ? "需要相册权限才能保存二维码。"
+            : `保存失败：${result.reason}`,
+      });
+    } catch (err) {
+      setStoreQrNotice({ storeId, text: `保存失败：${describeError(err)}` });
     }
   }
 
