@@ -5058,6 +5058,25 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/dynamic-scene-actions.test.ts || exit $?
 echo "    SCENE-MAP-LOCATION-001: PASS (scene map opens on the phone location, not the Hanoi default)"
 
+# MARKET-MAP-USER-CENTER-001: 市场地图初开摆河内硬编码/订单 centroid（P0）。
+#
+# 跟 SCENE-MAP-LOCATION-001 同一病：壳里有活的人位（sceneMapOrigin），
+# 市场面就是不接，非要点一下“用我当前位置”。现在壳透传 userCenter，
+# 面以人为先（晚到补飞，不抢手动点）；没人位才退回 centroid/河内。
+if ! grep -q 'userCenter' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -q 'if (userCenter) {' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -q 'userCenter={sceneMapOrigin' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [MARKET-MAP-USER-CENTER-001]: 市场地图没接壳里的人位 ——" >&2
+  echo "        初开就回到河内默认，手机定位白开了。" >&2
+  exit 1
+fi
+if ! grep -q 'MARKET-MAP-USER-CENTER-001' apps/mobile/src/market-map-center.test.ts; then
+  echo "  FAIL [MARKET-MAP-USER-CENTER-001]: 接线测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/market-map-center.test.ts || exit $?
+echo "    MARKET-MAP-USER-CENTER-001: PASS (market map opens on the viewer, Hanoi stays the last resort)"
+
 # DEVICE-LOCATION-002: 跟随开关冷启动必丢（P0）。
 #
 # 开关只活在内存（useState 默认 true），手动地点存在 keychain —— 每次冷启动

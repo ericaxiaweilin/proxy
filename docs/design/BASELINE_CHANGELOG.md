@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 211 — 2026-09-16
+
+- MARKET-MAP-USER-CENTER-001：市场地图初开以人为中心（market scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/market.tsx`
+    （`MarketMap` 新增 `userCenter`，有人位先居中、无人位退回订单 centroid/河内；
+    人位晚到补飞、不抢手动定位；文案无蓝点时不写“蓝点是您”）、
+    `apps/mobile/src/shell/app-shell.tsx`（透传壳人位 `sceneMapOrigin`）。
+    按钮行为与图钉不变，无新增页面。
+
 ## Revision 210 — 2026-09-16
 
 - PROFILE-QR-002：一键保存二维码到相册（personal-profile scope）。
