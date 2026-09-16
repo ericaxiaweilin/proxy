@@ -560,18 +560,9 @@ export function MessagesSurface({
             <View style={styles.centerTitle}><Text style={styles.centerMain}>新聊天</Text><Text style={styles.centerSub}>联系人 · 姓名或最近消息</Text></View>
             <View style={styles.icon} />
           </View>
-          <View style={styles.contactSearchRow}>
-            <View style={styles.contactHeadSearch}>
-              <ProxyIcon color="#97938b" name="search" size={17} />
-              <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名或最近消息" placeholderTextColor="#9a968f" style={styles.contactInput} />
-            </View>
-            <Pressable
-              accessibilityLabel="添加好友"
-              onPress={() => setAddFriendNotice(openAddFriend() ? "" : "加好友入口还没接通：调用方没有传 onOpenAddFriend。")}
-              style={styles.addFriendQuickBtn}
-            >
-              <ProxyIcon color="#5B3FA3" name="plus" size={20} />
-            </Pressable>
+          <View style={styles.contactHeadSearch}>
+            <ProxyIcon color="#97938b" name="search" size={17} />
+            <TextInput value={contactSearch} onChangeText={setContactSearch} placeholder="姓名或最近消息" placeholderTextColor="#9a968f" style={styles.contactInput} />
           </View>
           <ScrollView style={{ flex: 1 }}>
             <Pressable
@@ -646,7 +637,10 @@ export function MessagesSurface({
             <Pressable accessibilityLabel="搜索" onPress={() => searchInputRef.current?.focus()} style={styles.icon}>
               <ProxyIcon color={color.ink} name="search" size={20} />
             </Pressable>
-              <Pressable accessibilityLabel="消息请求" onPress={openRequests} style={styles.iconBell}>
+              <Pressable accessibilityLabel="添加好友" onPress={() => setAddFriendNotice(openAddFriend() ? "" : "加好友入口还没接通：调用方没有传 onOpenAddFriend。")} style={styles.iconPlus}>
+              <ProxyIcon color={color.ink} name="plus" size={20} />
+            </Pressable>
+            <Pressable accessibilityLabel="消息请求" onPress={openRequests} style={styles.iconBell}>
                 <ProxyIcon color={color.ink} name="mail" size={20} />
               </Pressable>
             <Pressable accessibilityLabel="新聊天" onPress={openContacts} style={styles.icon}>
@@ -1149,8 +1143,7 @@ const styles = StyleSheet.create({
   btnPrimaryText: { fontSize: 11.5, fontWeight: "700", color: "#fff", textAlign: "center" },
   btnText: { fontSize: 11.5, fontWeight: "700", color: "#11110f", textAlign: "center" },
   contactHeadSearch: { marginHorizontal: 14, marginTop: 8, height: 39, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#f6f3ee", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 11 },
-  contactSearchRow: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 14, marginTop: 8 },
-  addFriendQuickBtn: { alignItems: "center", backgroundColor: "#F4F0FF", borderColor: "#E5DCF5", borderRadius: 12, height: 39, justifyContent: "center", width: 39, borderWidth: 1 },
+  iconPlus: { alignItems: "center", backgroundColor: "#F4F0FF", borderColor: "#E5DCF5", borderRadius: 11, borderWidth: 1, height: 32, justifyContent: "center", width: 32 },
   contactInput: { flex: 1, fontSize: 12.5, color: "#11110f" },
   contactSection: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6, fontSize: 11, fontWeight: "700", color: "#9b978f", letterSpacing: 0.3 },
   contactRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 15, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#e8e3da", backgroundColor: "#fffdf8" },
