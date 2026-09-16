@@ -554,8 +554,10 @@ export function AppShell({
       <View style={[styles.root, width >= 768 && styles.rootWide]}>
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
         {isNavVisible ? <Header compact={compactWidth} /> : null}
-        {/* 首页的本地范围说明属于 root Chrome；“我的”根页由 Me Surface 自己渲染，避免泄漏到其详情页。 */}
-        {isNavVisible && (tab === "HOME" || tab === "MESSAGES") ? (
+        {/* 首页的本地范围说明属于 root Chrome 且只在首页出现 —— 消息页不再重复
+            （MSG-LOCATION-DUPE-001：入口只在 Home 留一个）；“我的”根页由 Me Surface
+            自己渲染，避免泄漏到其详情页。 */}
+        {isNavVisible && tab === "HOME" ? (
           <LocationContext
             location={currentLocation}
             deviceState={deviceLocationState}
