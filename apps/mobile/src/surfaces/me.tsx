@@ -59,6 +59,7 @@ import {
   type ReplyEntry,
   type ReplyTarget
 } from "../reply-target";
+import { filterPostsByFeedSearch, normalizeFeedSearchQuery } from "../feed-search";
 import { meOwnedRouteForLabel } from "../me-owned-routes";
 import { color, Gradient, shadows } from "../theme";
 import type { ActiveContext } from "../uiplan/types";
@@ -297,6 +298,15 @@ function toManagedMenuSections(sections: ExperienceMenuSection[]): MenuSection[]
   }));
 }
 
+// SEARCH-CORPUS-002：个人主页搜索的命中项。这一屏的数据域有两种东西 ——
+// 帖子和回复，所以命中项是一个联合，UI 要把「这是帖子还是回复」显示出来，
+// 不能把回复假装成帖子。postId 对回复来说是**父帖** id：点开就打开它所在的那条帖子。
+type ProfileSearchHit = {
+  kind: "post" | "reply";
+  postId: string;
+  body: string;
+};
+
 export function MeSurface({
   context,
   localNet,
@@ -488,12 +498,38 @@ export function MeSurface({
   const [insightsSheetOpen, setInsightsSheetOpen] = useState(false);
   const [searchSheetOpen, setSearchSheetOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  // 主页实搜：搜自己主页动态正文，结果可点开（之前输入直接丢弃）。
-  const [profileSearchResults, setProfileSearchResults] = useState<FeedPost[] | undefined>(undefined);
+  // SEARCH-CORPUS-002：这一屏**有什么数据域就搜什么** —— 个人主页的数据域是
+  // 「我的动态」（正文 / 作者展示名 / 城市）+「我的回复」（正文 / 被回复那条的作者）。
+  //
+  // 以前只滤 `post.body`：同一份数据在**动态流**里能按作者名和城市搜到
+  // （SEARCH-CORPUS-001，feed-search.ts 与 Go 的 postMatchesSearch 同一套字段语义），
+  // 到了主页这一屏却搜不到，等于同一份数据两套口径。回复更是完全搜不到。
+  // 所以这里复用 feed-search 那份**共享字段语义**，不另写一份。
+  const [profileSearchResults, setProfileSearchResults] = useState<ProfileSearchHit[] | undefined>(undefined);
   function runProfileSearch(query: string): void {
-    const q = query.trim().toLowerCase();
+    const q = normalizeFeedSearchQuery(query);
     if (!q) return;
-    setProfileSearchResults(profilePosts.filter((post) => post.body.toLowerCase().includes(q)));
+    const posts: ProfileSearchHit[] = filterPostsByFeedSearch(profilePosts, q).map((post) => ({
+      kind: "post",
+      postId: post.postId,
+      body: post.body
+    }));
+    const replies: ProfileSearchHit[] = personalReplyEntries
+      .filter((reply) => replyMatchesProfileSearch(reply, q))
+      .map((reply) => ({
+        kind: "reply",
+        postId: reply.parentPostId,
+        body: reply.body
+      }));
+    // 回复挂在父帖下面，所以同一条父帖可能既命中正文又命中回复 —— 不去重，
+    // 两条都是真的命中，用户点哪条都直接打开那一条所在的帖子。
+    setProfileSearchResults([...posts, ...replies]);
+  }
+  /** 回复的可搜字段：回复正文，加上**被回复那条**的作者展示名（父子都在这屏的数据域里）。 */
+  function replyMatchesProfileSearch(reply: ReplyEntry, loweredQuery: string): boolean {
+    if (reply.body.toLowerCase().includes(loweredQuery)) return true;
+    const parentName = personalReplyTargets[reply.parentPostId]?.authorDisplayName;
+    return Boolean(parentName && parentName.toLowerCase().includes(loweredQuery));
   }
   const [settingsSheetOpen, setSettingsSheetOpen] = useState(false);
   const [aiIdentityOpen, setAiIdentityOpen] = useState(false);
@@ -1941,14 +1977,14 @@ export function MeSurface({
             <View style={styles.sheetOverlay}>
               <View style={styles.sheetCard}>
                 <Text style={styles.sheetTitle}>搜索主页</Text>
-                <Text style={styles.sheetSub}>搜自己主页的动态正文，点结果直接打开。</Text>
-                {/* placeholder 以前写「搜索用户名或关键词」—— 但这处**只搜自己帖子的正文**
-                    （runProfileSearch 只滤 profilePosts 的 body），搜不到任何人、也搜不到
-                    @handle。搜人要走「加好友 → 搜索 Proxy」，那是服务端 SearchProfiles。 */}
+                {/* 这一屏**有什么数据域就搜什么**：动态（正文 / 作者 / 城市）+ 我的回复。
+                    搜**人**要走「加好友 → 搜索 Proxy」（服务端 SearchProfiles）—— 那不是
+                    这一屏的数据域，混进来等于用一个模块的搜索去承诺另一个模块的能力。 */}
+                <Text style={styles.sheetSub}>搜自己主页的动态（正文 / 作者 / 城市）和我的回复，点结果直接打开。</Text>
                 <View style={styles.sheetField}>
                   <TextInput
                     autoFocus
-                    placeholder="搜索主页动态正文"
+                    placeholder="搜索动态、作者、城市、回复"
                     placeholderTextColor="#999"
                     value={searchQuery}
                     onChangeText={setSearchQuery}
@@ -1964,13 +2000,16 @@ export function MeSurface({
                   profileSearchResults.length === 0 ? (
                     <Text style={styles.sheetSub}>没有匹配的主页内容</Text>
                   ) : (
-                    profileSearchResults.slice(0, 5).map((post) => (
+                    profileSearchResults.slice(0, 5).map((hit) => (
                       <Pressable
-                        key={post.postId}
-                        onPress={() => { setSearchSheetOpen(false); setSearchQuery(""); setProfileSearchResults(undefined); setProfileViewer({ postId: post.postId, index: 0 }); }}
+                        key={`${hit.kind}:${hit.postId}:${hit.body.slice(0, 12)}`}
+                        onPress={() => { setSearchSheetOpen(false); setSearchQuery(""); setProfileSearchResults(undefined); setProfileViewer({ postId: hit.postId, index: 0 }); }}
                         style={styles.sheetWideBtn}
                       >
-                        <Text numberOfLines={2} style={styles.sheetWideBtnText}>{post.body.slice(0, 60)}</Text>
+                        {/* 命中项有两种东西，必须说清是哪一种 —— 把回复显示成帖子
+                            用户点进去会发现「这上面没我搜的那句话」。 */}
+                        <Text style={styles.sheetSub}>{hit.kind === "reply" ? "我的回复" : "动态"}</Text>
+                        <Text numberOfLines={2} style={styles.sheetWideBtnText}>{hit.body.slice(0, 60)}</Text>
                       </Pressable>
                     ))
                   )

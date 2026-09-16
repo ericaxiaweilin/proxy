@@ -2795,6 +2795,42 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/feed-search.test.ts || exit $?
 echo "    SEARCH-CORPUS-001: PASS (feed search reaches the server and matches name/city)"
 
+# SEARCH-CORPUS-002：每个模块**有什么数据域就搜什么**。
+#
+# 个人主页这一屏的数据域是「我的动态」（正文 / 作者展示名 / 城市）+「我的回复」。
+# 以前 `runProfileSearch` 只滤 `post.body` —— 同一份数据在**动态流**里能按作者名和
+# 城市搜到（SEARCH-CORPUS-001），到主页这一屏却搜不到，等于一份数据两套口径；
+# 回复更是完全搜不到。现在复用 feed-search 那份**共享字段语义**，不另写一份。
+#
+# 注意别钉裸符号：`personalReplyEntries` 在 state 声明里就出现了，只 grep 它
+# 在删掉搜索链路后照样绿（和 buildContactCard 被 import 行满足是同一个坑）。
+# 所以钉的是**搜索接线**上的形状。
+if ! grep -qF 'filterPostsByFeedSearch(profilePosts, q)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-002]: the profile search re-implements its own haystack" >&2
+  echo "        instead of using the shared SEARCH-CORPUS-001 predicate, so the same" >&2
+  echo "        data is searchable in the feed but not on the profile." >&2
+  exit 1
+fi
+if ! grep -qF 'function replyMatchesProfileSearch(' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'replyMatchesProfileSearch(reply, q)' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-002]: profile search no longer covers replies, which are" >&2
+  echo "        part of this screen's data domain." >&2
+  exit 1
+fi
+# 命中项有两种东西，不许把回复显示成帖子 —— 用户点进去会发现「这上面没我搜的那句话」。
+if ! grep -qF 'hit.kind === "reply" ? "我的回复" : "动态"' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-002]: search hits no longer say whether they are a post" >&2
+  echo "        or a reply, so a reply can be presented as a post." >&2
+  exit 1
+fi
+# 反向 pin：当初那个「只搜正文」的实现不许回来。
+if grep -qF 'profilePosts.filter((post) => post.body.toLowerCase().includes(q))' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [SEARCH-CORPUS-002]: profile search is body-only again — author name," >&2
+  echo "        city and replies are all part of this screen's data domain." >&2
+  exit 1
+fi
+echo "    SEARCH-CORPUS-002: PASS (profile search covers posts by body/author/city + replies)"
+
 # MUTE-REVERSIBLE-001: 屏蔽必须是「能进也能出」的。
 #
 # 坏掉的形态：服务端只有 AddMutedAuthor / IsMuted —— 没有 UnmuteAuthor，也没有
@@ -6157,3 +6193,19 @@ if grep -q '暂无待处理请求，你还没' apps/mobile/src/surfaces/friend-c
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
 echo "    ADD-FRIEND-NEXT-001: PASS (outgoing requests stay visible with a next step)"
+
+# ADD-FRIEND-SEND-BUSY-001: 点添加在弱网下长时间没反应，还能重复点。
+#
+# 根因：addScannedPerson 在途无忙态（按钮一直是可点的“添加”）、无登录态
+# 直接静默 return。修法：在途锁 + “发送中…”文案 + 失败 finally 解锁，
+# 没登录态给 toast 不静默。
+if ! grep -q 'scanAddBusy' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q '发送中' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'if (scanAddBusy || scanAddSent) return;' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'ADD-FRIEND-SEND-BUSY-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
+  echo "  FAIL [ADD-FRIEND-SEND-BUSY-001]: 添加按钮又回到无忙态 ——" >&2
+  echo "        弱网下点下去像没反应，还能重复发送。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    ADD-FRIEND-SEND-BUSY-001: PASS (sending locks the button with a busy label)"
