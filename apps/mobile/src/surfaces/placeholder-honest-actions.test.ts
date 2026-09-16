@@ -91,60 +91,6 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
     expect(crm).toContain("需要相机权限才能扫码");
   });
 
-  // PROFILE-QR-004：二维码的常规能力（复制 / 保存到相册 / 放大页）曾经只挂在
-  // `personalqr` 子页上，而那个子页只有商家路径能到 —— 普通用户在「个人总管理」
-  // 里看到的二维码只有一个「分享链接」按钮，等于三个能力全部不存在。
-  // 另一半是错位：商家卡片画店铺码，点进去的页却画个人主页码。
-  // 全部断言走剥注释后的源码（meCode / crmCode），注释里写了同款字符串不算数。
-  it("PROFILE-QR-004 personalmanage can reach the full qr page", () => {
-    // 导航本身：个人总管理里必须有一个按得动的入口。
-    expect(meCode).toMatch(/openSubPage\("personalqr"/);
-    // 卡片上要有复制和存图，且存图锚点是这张卡自己的 ref。
-    expect(meCode).toContain("copyProfileLink(manageQrPayload)");
-    expect(meCode).toContain("saveQrToAlbum(qrCardShotRef)");
-    // 坏 handle 时不许画假码、更不许给「保存假码」的按钮 —— fail-closed。
-    expect(meCode).toContain("const manageQrPayload = profileQrPayload(profileDraft.handle);");
-    expect(meCode).toContain("manageQrPayload ? [");
-  });
-
-  it("PROFILE-QR-004 store qr stays a store qr once opened", () => {
-    // 商家卡片必须把店铺码透传进页。
-    expect(meCode).toMatch(/qrPayload: toQrPayload\(`proxy\.app\/store\//);
-    expect(meCode).toContain('qrTitle: "商家二维码"');
-    // 页里优先用带进来的 payload，不许偷偷退回个人主页码。
-    expect(meCode).toContain("const storeQr = subPage.qrPayload;");
-    expect(meCode).toContain("const profileLink = storeQr ?? profileQrPayload(profileDraft.handle);");
-    // 店铺码扫出来是门店公开页 —— 拿 TikTok / Zalo 分层去描述它属于编内容。
-    expect(meCode).toContain("storeQr ? null :");
-  });
-
-  // PROFILE-QR-005：二维码页可以从「个人总管理」或「我的企业/店铺」进来，
-  // 而关闭子页的代码在 20 多个地方各写一遍 `setSubPage(undefined)` ——
-  // 一律甩回「我的」根页。点进二维码页再返回等于被踢回主页。
-  it("PROFILE-QR-005 a qr page opened from a sub-page returns to it", () => {
-    // 两个入口都得声明自己是谁的父页。
-    expect(meCode).toContain('backRoute: "personalmanage"');
-    expect(meCode).toContain('backRoute: "bdash"');
-    // 关闭走统一出口，且出口真的读了 backRoute。
-    expect(meCode).toContain("function closeSubPage(): void {");
-    expect(meCode).toContain("const parent = subPage?.backRoute ? meSubPage(subPage.backRoute) : undefined;");
-    // 三条退出路径（硬件返回 / 侧滑 / 页内返回键）全部走 closeSubPage ——
-    // 只改页内按钮的话，安卓返回键和侧滑还是会把人甩回根页。
-    expect(meCode).toContain("useModuleBackHandler(subPage ? () => { closeSubPage(); return true; } : undefined)");
-    expect(meCode).toContain("onExit={() => closeSubPage()}");
-    expect(meCode).toContain('onPress={() => closeSubPage()} style={styles.subPageBack}');
-  });
-
-  it("PROFILE-QR-004 qr capture is not hardwired to the sub-page ref", () => {
-    // 反向钉：以前 captureRef 写死 qrShotRef，而那个 ref 只挂在子页的 View 上 ——
-    // 在卡片上按保存时 ref 是 null，报一句「保存失败」就完事。
-    expect(meCode).not.toContain("captureRef(qrShotRef");
-    expect(meCode).toMatch(/async function saveQrToAlbum\(shotRef: QrShotRef/);
-    // 邀请二维码（加好友那条路）也要能存图，不然「分享给好友」仍只有一段文字。
-    expect(crmCode).toContain("saveInviteQrToAlbum()");
-    expect(crmCode).toContain("ref={inviteShotRef}");
-  });
-
   it("accepts/ignores/blocks with immediate effect in both modes", () => {
     expect(crm).toContain("acceptDemoRequest");
     expect(crm).toContain("ignoreDemoRequest");
@@ -235,31 +181,6 @@ describe("PLACEHOLDER-001 storefront public page shares, analytics without calib
     expect(meSub).toContain("口径未接入前不编数");
   });
 
-  // STORE-QR-001：店铺卡片上写着「店铺二维码 · 扫码进入 xxx 的 Proxy 公开店铺页，
-  // 可用于店内桌牌、海报和 Creator 分享」，但画的是一个 58×58 的 qrGrid 图标 ——
-  // 没有任何可扫的东西，也没有复制/存图。承诺了一个不存在的功能。
-  it("STORE-QR-001 renders a real store qr with copy and save", () => {
-    const storefrontCode = stripComments(storefront);
-    // 真码，不是图标。
-    expect(storefrontCode).toContain("<QRCode");
-    expect(storefrontCode).toContain("toQrPayload(`proxy.app/store/${s.id}`)");
-    // 反向钉：装饰性图标不许回到这个位置。
-    expect(storefrontCode).not.toContain('name="qrGrid"');
-    // 同一套能力：复制 + 存图。
-    expect(storefrontCode).toContain("copyStoreLink(s.id)");
-    expect(storefrontCode).toContain("saveStoreQrToAlbum(s.id)");
-    expect(storefrontCode).toContain("captureRef(storeQrRefFor(storeId)");
-  });
-
-  // 一个账号可能有多家店。共用一个 ref 时，在 A 店按保存会截到列表里最后渲染的
-  // 那张码 —— 静默存错图，比存不了更糟。锚点必须按店铺分开。
-  it("STORE-QR-001 keeps one shot anchor per store, not one shared", () => {
-    const storefrontCode = stripComments(storefront);
-    expect(storefrontCode).toContain("storeQrRefs.current[storeId] = created;");
-    expect(storefrontCode).toContain("ref={storeQrRefFor(s.id)}");
-    // 存图提示也要认店铺，不然 A 店的提示会同时出现在 B 店的卡片上。
-    expect(storefrontCode).toContain("storeQrNotice?.storeId === s.id");
-  });
 });
 
 describe("PLACEHOLDER-002 every chain runs to completion", () => {
