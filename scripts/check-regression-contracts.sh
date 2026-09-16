@@ -3959,6 +3959,29 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts -t "PROFILE-QR-005" || exit $?
 echo "    PROFILE-QR-005: PASS (qr page returns to the sub-page that opened it)"
 
+# STORE-QR-001: 店铺卡片上写着「店铺二维码 · 扫码进入 xxx 的 Proxy 公开店铺页，
+# 可用于店内桌牌、海报和 Creator 分享」，画的是一个 58×58 的 qrGrid 图标 ——
+# 没有任何可扫的东西。承诺一个不存在的功能属于编内容，和编数字同一类。
+# 另外：一个账号可能有多家店，截图锚点必须按店铺分开，否则在 A 店按保存会
+# 静默存下 B 店的码 —— 存错图比存不了更糟。
+if ! grep -q '<QRCode' apps/mobile/src/surfaces/merchant-storefront.tsx ||
+   ! grep -qF 'toQrPayload(`proxy.app/store/${s.id}`)' apps/mobile/src/surfaces/merchant-storefront.tsx ||
+   ! grep -qF 'copyStoreLink(s.id)' apps/mobile/src/surfaces/merchant-storefront.tsx ||
+   ! grep -qF 'saveStoreQrToAlbum(s.id)' apps/mobile/src/surfaces/merchant-storefront.tsx ||
+   ! grep -qF 'captureRef(storeQrRefFor(storeId)' apps/mobile/src/surfaces/merchant-storefront.tsx ||
+   ! grep -qF 'ref={storeQrRefFor(s.id)}' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "  FAIL [STORE-QR-001]: the storefront qr is not a real, per-store qr ——" >&2
+  echo "        a decorative icon where a scannable code is promised is a fabricated feature." >&2
+  exit 1
+fi
+# 反向钉：装饰性 qrGrid 图标不许回到这个位置。
+if grep -qF 'name="qrGrid"' apps/mobile/src/surfaces/merchant-storefront.tsx; then
+  echo "  FAIL [STORE-QR-001]: the decorative qrGrid icon is back where a real qr belongs ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts -t "STORE-QR-001" || exit $?
+echo "    STORE-QR-001: PASS (real per-store qr with copy/save; no decorative icon where a code is promised)"
+
 # HANDLE-UNIQUE-001: handle 的唯一性曾只写在 profile.go 的注释里
 # （"uniqueness is per-tenant, enforced by repository on create"）。
 # 039_profile.sql 建的是普通索引而非唯一索引，两个 repository 也都不查冲突，

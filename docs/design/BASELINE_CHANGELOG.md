@@ -4,6 +4,19 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 216 — 2026-09-16
+
+- STORE-QR-001：店铺二维码从图标改成真码（merchant-storefront scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/merchant-storefront.tsx`
+    —— 店铺卡片上的「店铺二维码」此前画的是一个 58×58 的 `qrGrid` 图标，
+    却写着「扫码进入 … 可用于店内桌牌、海报和 Creator 分享」——承诺了一个
+    不存在的功能。改为真实可扫二维码（`proxy.app/store/<id>` 的 https 全量），
+    并补「复制链接」「保存到相册」两个动作与失败提示。
+  - 截图锚点按店铺分开（`storeQrRefFor(storeId)`）：一个账号可能有多家店，
+    共用锚点会在 A 店按保存时截到列表里最后渲染的那张码。
+  - 样式：`qrIcon` 换成 `qrShot` / `qrActions` / `storeQrNotice`。
+  - 无新增页面、无列表结构改动、无文案改动。
+
 ## Revision 215 — 2026-09-16
 
 - PROFILE-QR-005：子页返回认父页（personal-profile scope）。

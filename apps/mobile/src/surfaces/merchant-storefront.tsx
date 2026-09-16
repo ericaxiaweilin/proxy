@@ -1,9 +1,14 @@
 // MERCHANT_STOREFRONT — R18.x 真接商家店铺
 // 之前 43 行只列账号；现在拉 account + store + photo album + lines +
 // spend_daily + member_directory, 全部 server-authoritative.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as Clipboard from "expo-clipboard";
+import * as MediaLibrary from "expo-media-library";
+import QRCode from "react-native-qrcode-svg";
+import { captureRef } from "react-native-view-shot";
+import { toQrPayload } from "../profile-qr";
 import { color, shadows } from "../theme";
 import { retainStorePhoto, storePhotoUri, type RetainedStorePhoto } from "../expo-composer-draft-store";
 import type { BusinessClient, StoreProduct } from "../business-client";
@@ -51,6 +56,21 @@ type StoreAssetPage = "root" | "menu" | "photos" | "details";
 export function MerchantStorefrontSurface({ client, viewerAccountId, header, showcaseActivities, onOpenVouchers, onStartStoreSetup }: { client: BusinessClient; viewerAccountId?: string | undefined; header?: ReactNode; showcaseActivities?: Array<{ id: string; title: string }>; onOpenVouchers?: () => void; onStartStoreSetup?: () => void }): React.JSX.Element {
   const [accounts, setAccounts] = useState<Account[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  // STORE-QR-001：店铺二维码此前只是一个 qrGrid 图标 + 「扫码进入…可用于店内
+  // 桌牌、海报」的说明 —— 没有任何可扫的东西，也没有复制/存图。等于承诺了一个
+  // 不存在的功能。现在画真码，并给同一套复制/存图能力。
+  //
+  // 一个账号可能有多家店，所以截图锚点必须**按店铺分开**：共用一个 ref 时，
+  // 在 A 店按保存会截到列表里最后渲染的那张码。
+  const storeQrRefs = useRef<Record<string, { current: View | null }>>({});
+  const [storeQrNotice, setStoreQrNotice] = useState<{ storeId: string; text: string } | undefined>(undefined);
+  function storeQrRefFor(storeId: string): { current: View | null } {
+    const existing = storeQrRefs.current[storeId];
+    if (existing) return existing;
+    const created: { current: View | null } = { current: null };
+    storeQrRefs.current[storeId] = created;
+    return created;
+  }
   const [stores, setStores] = useState<Record<string, Store[]>>({});
   const [photos, setPhotos] = useState<Record<string, StorePhoto[]>>({});
   const [lines, setLines] = useState<Record<string, StoreLines | undefined>>({});
@@ -395,6 +415,30 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     }
   }
 
+  // STORE-QR-001：复制走 https 全量，失败说人话而不是静默。
+  async function copyStoreLink(storeId: string): Promise<void> {
+    try {
+      await Clipboard.setStringAsync(toQrPayload(`proxy.app/store/${storeId}`));
+      setStoreQrNotice({ storeId, text: "链接已复制，去粘贴给你的好友吧。" });
+    } catch {
+      setStoreQrNotice({ storeId, text: "复制失败，请长按链接手动复制。" });
+    }
+  }
+  async function saveStoreQrToAlbum(storeId: string): Promise<void> {
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync(true);
+      if (!permission.granted) {
+        setStoreQrNotice({ storeId, text: "需要相册权限才能保存二维码。" });
+        return;
+      }
+      const uri = await captureRef(storeQrRefFor(storeId), { format: "png", quality: 1 });
+      await MediaLibrary.saveToLibraryAsync(uri);
+      setStoreQrNotice({ storeId, text: "二维码已保存到相册。" });
+    } catch {
+      setStoreQrNotice({ storeId, text: "保存失败，请重试，或改用系统分享。" });
+    }
+  }
+
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.container}>
       {header}
@@ -441,7 +485,20 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                     <View style={styles.storeHeroCopy}><Text style={styles.storeName}>{s.name} · Proxy 店铺</Text><Text style={styles.storeMeta}>{s.address || "地址待完善"} · {s.status} · 公开店铺页</Text></View>
                   </View>
                   <View style={styles.heroActions}><Pressable onPress={() => void Share.share({ message: `${s.name} · Proxy 公开店铺页：proxy.app/store/${s.id}` })} style={styles.previewButton} accessibilityLabel="分享公开主页链接"><Text style={styles.previewButtonText}>公开主页</Text></Pressable><Pressable onPress={() => void Share.share({ message: `${s.name} · Proxy 店铺` })} style={styles.shareButton}><Text style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
-                  <View style={styles.qrCard}><View style={styles.qrIcon}><ProxyIcon color={color.ink} name="qrGrid" size={38} /></View><View style={styles.storeHeroCopy}><Text style={styles.photoHeadTitle}>店铺二维码</Text><Text style={styles.storeMeta}>扫码进入 {s.name} 的 Proxy 公开店铺页，可用于店内桌牌、海报和 Creator 分享。</Text></View></View>
+                  <View style={styles.qrCard}>
+                    <View ref={storeQrRefFor(s.id)} collapsable={false} style={styles.qrShot}>
+                      <QRCode value={toQrPayload(`proxy.app/store/${s.id}`)} size={104} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+                    </View>
+                    <View style={styles.storeHeroCopy}>
+                      <Text style={styles.photoHeadTitle}>店铺二维码</Text>
+                      <Text style={styles.storeMeta}>扫码进入 {s.name} 的 Proxy 公开店铺页，可用于店内桌牌、海报和 Creator 分享。</Text>
+                      <View style={styles.qrActions}>
+                        <Pressable onPress={() => void copyStoreLink(s.id)} style={styles.previewButton} accessibilityLabel="复制店铺链接"><Text style={styles.previewButtonText}>复制链接</Text></Pressable>
+                        <Pressable onPress={() => void saveStoreQrToAlbum(s.id)} style={styles.shareButton} accessibilityLabel="保存店铺二维码到相册"><Text style={styles.shareButtonText}>保存到相册</Text></Pressable>
+                      </View>
+                      {storeQrNotice?.storeId === s.id ? <Text style={styles.storeQrNotice}>{storeQrNotice.text}</Text> : null}
+                    </View>
+                  </View>
 
                   <View style={styles.metricStrip}>{[[(aSpend?.totalOrders ?? 0).toString(), "近7天订单"], [aSpend ? formatVnd(aSpend.totalGrossMinor) : "—", "成交额"], [newCustomers.toString(), "新客"], [returningCustomers.toString(), "复购"]].map(([value, label]) => <View key={label} style={styles.metricItem}><Text numberOfLines={1} style={styles.metricValue}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>)}</View>
 
@@ -804,7 +861,10 @@ const styles = StyleSheet.create({
   shareButton: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flex: 1, paddingVertical: 11 },
   shareButtonText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   qrCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, padding: 12 },
-  qrIcon: { alignItems: "center", backgroundColor: color.offWhite, borderRadius: 14, height: 58, justifyContent: "center", width: 58 },
+  // STORE-QR-001：真二维码 + 复制/存图动作（原来是 58×58 的 qrGrid 图标）。
+  qrShot: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, padding: 8 },
+  qrActions: { flexDirection: "row", gap: 8, marginTop: 10 },
+  storeQrNotice: { color: color.muted, fontSize: 11, marginTop: 6 },
   createInput: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 10, borderWidth: 1, color: color.ink, fontSize: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
   createBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, marginTop: 10, paddingVertical: 12 },
   createBtnBusy: { opacity: 0.6 },

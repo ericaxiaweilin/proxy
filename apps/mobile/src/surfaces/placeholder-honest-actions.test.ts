@@ -234,6 +234,32 @@ describe("PLACEHOLDER-001 storefront public page shares, analytics without calib
     }
     expect(meSub).toContain("口径未接入前不编数");
   });
+
+  // STORE-QR-001：店铺卡片上写着「店铺二维码 · 扫码进入 xxx 的 Proxy 公开店铺页，
+  // 可用于店内桌牌、海报和 Creator 分享」，但画的是一个 58×58 的 qrGrid 图标 ——
+  // 没有任何可扫的东西，也没有复制/存图。承诺了一个不存在的功能。
+  it("STORE-QR-001 renders a real store qr with copy and save", () => {
+    const storefrontCode = stripComments(storefront);
+    // 真码，不是图标。
+    expect(storefrontCode).toContain("<QRCode");
+    expect(storefrontCode).toContain("toQrPayload(`proxy.app/store/${s.id}`)");
+    // 反向钉：装饰性图标不许回到这个位置。
+    expect(storefrontCode).not.toContain('name="qrGrid"');
+    // 同一套能力：复制 + 存图。
+    expect(storefrontCode).toContain("copyStoreLink(s.id)");
+    expect(storefrontCode).toContain("saveStoreQrToAlbum(s.id)");
+    expect(storefrontCode).toContain("captureRef(storeQrRefFor(storeId)");
+  });
+
+  // 一个账号可能有多家店。共用一个 ref 时，在 A 店按保存会截到列表里最后渲染的
+  // 那张码 —— 静默存错图，比存不了更糟。锚点必须按店铺分开。
+  it("STORE-QR-001 keeps one shot anchor per store, not one shared", () => {
+    const storefrontCode = stripComments(storefront);
+    expect(storefrontCode).toContain("storeQrRefs.current[storeId] = created;");
+    expect(storefrontCode).toContain("ref={storeQrRefFor(s.id)}");
+    // 存图提示也要认店铺，不然 A 店的提示会同时出现在 B 店的卡片上。
+    expect(storefrontCode).toContain("storeQrNotice?.storeId === s.id");
+  });
 });
 
 describe("PLACEHOLDER-002 every chain runs to completion", () => {
