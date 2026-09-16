@@ -1,5 +1,6 @@
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
+import { encodeMeetupLocation, type MeetupPoint } from "./meetup-share";
 
 export type AuthenticatedCommandTransport = {
   request(path: string, init: { method: "POST"; body: unknown }): Promise<{ status: number; json: () => Promise<unknown> }>;
@@ -106,6 +107,16 @@ export class ConversationClient {
 
   public async sendAudioMessage(conversationId: string, mediaRef: string, protectionOverride?: ProtectionOverride, assistantMode?: string, convoId?: string): Promise<Record<string, unknown>> {
     return this.sendMessage(conversationId, "语音消息", assistantMode, undefined, mediaRef, protectionOverride, "AUDIO", undefined, convoId);
+  }
+
+  // MEETUP-SHARE-001: 好友对好友发位置。body 走 encodeMeetupLocation 可解析格式
+  // （`label\nlat,lng`），messageType LOCATION。坐标非法直接抛错不发 ——
+  // 绝不把 (0,0) / NaN 当真位置发出去（fail-closed，与 CHAT-PROXY-ACTIVITY-001
+  // 禁 silent fallback 同口径）。
+  public async sendLocationMessage(conversationId: string, point: MeetupPoint, protectionOverride?: ProtectionOverride, assistantMode?: string, convoId?: string): Promise<Record<string, unknown>> {
+    const body = encodeMeetupLocation(point);
+    if (!body) throw new Error("invalid location: lat must be -90..90, lng -180..180, both finite");
+    return this.sendMessage(conversationId, body, assistantMode, undefined, undefined, protectionOverride, "LOCATION", undefined, convoId);
   }
 
   public async listMessages(conversationId: string, convoId?: string): Promise<Record<string, unknown>> {

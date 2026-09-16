@@ -18,6 +18,7 @@ import { dedupeInboxDialogs } from "../conversation-inbox-model";
 import type { ProfileClient } from "../profile-client";
 import type { RelationshipClient } from "../relationship-client";
 import { FriendCrmSurface } from "./friend-crm";
+import { meetupPreview } from "../meetup-share";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { parseFolders, parseHiddenChatIds } from "../local-snapshot";
 
@@ -1017,8 +1018,9 @@ function toDialog(item: ConversationInboxItem, apiBaseUrl?: string): Dialog {
   const name = aiAccount?.displayName || snapshotName || (item.counterpartyId === "proxy_ai" ? "Proxy AI" : item.counterpartyId) || "对话";
   const avatarRef = item.counterpartySnapshot?.avatarRef?.trim();
   const avatarSource = aiAccount ? aiAccountPhoto(aiAccount) : (avatarRef ? { uri: avatarRef.startsWith("/") ? `${apiBaseUrl ?? ""}${avatarRef}` : avatarRef } : (item.counterpartyId ? { uri: `${apiBaseUrl ?? ""}/v1/media/thumb/${encodeURIComponent("user_" + item.counterpartyId)}` } : undefined));
+  // MEETUP-SHARE-001: LOCATION 预览显示 [位置]（解不出才回落原文，不猜）。
   const preview = latest
-    ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.body?.trim() || "新消息"
+    ? latest.messageType === "IMAGE" ? "[图片]" : latest.messageType === "VIDEO" ? "[视频]" : latest.messageType === "LOCATION" ? ((meetupPreview(latest.body ?? "") ?? latest.body?.trim()) || "新消息") : latest.body?.trim() || "新消息"
     : "暂无消息";
   const timestamp = latest?.createdAt || item.conversation.lastMessageAt;
   const parsed = new Date(timestamp);

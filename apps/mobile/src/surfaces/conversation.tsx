@@ -4,7 +4,7 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Image, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, Image, Keyboard, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { ProxySwitch } from "../components/proxy-foundation";
@@ -21,6 +21,8 @@ import { ReportSheet } from "../components/report-sheet";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
+import { decodeMeetupLocation, meetupDirectionsUrls, meetupMapsUrls, meetupPointFromLocation, type DecodedMeetup, type MeetupPoint } from "../meetup-share";
+import { LocationPickerSheet, type AnyLocation, DEFAULT_LOCATION } from "../components/location-picker-sheet";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { VoiceToolButton } from "../components/VoiceToolButton";
@@ -81,6 +83,8 @@ interface Message {
   imageSource?: number | { uri: string };
   videoUri?: string;
   audioUri?: string;
+  // MEETUP-SHARE-001: LOCATION 消息解出的坐标（解不出就不带，冒泡原文）。
+  location?: DecodedMeetup;
   v1?: MessageV1;
   stickerCode?: string;
   stickerName?: string;
@@ -180,6 +184,9 @@ export function ConversationSurface({
   const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const [activityOptions, setActivityOptions] = useState<{ id: string; title: string; subtitle: string }[] | undefined>(undefined);
   const [activityPickerError, setActivityPickerError] = useState<string | undefined>(undefined);
+  // MEETUP-SHARE-001 seg4: 会话内发位置直接复用 LocationPickerSheet（成熟组件：
+  // 真地图 MapCanvas + 拖拽限 3KM + 复制/Google 打开 + 历史收藏），不再自写确认页。
+  const [locationSheetOpen, setLocationSheetOpen] = useState(false);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   // Keep live-sync hydration from replacing an optimistic bubble while the
@@ -221,6 +228,7 @@ export function ConversationSurface({
     setSecureSheetOpen(false);
     setAttachOpen(false);
     setActivityPickerOpen(false);
+    setLocationSheetOpen(false);
     setConversationMenuOpen(false);
   }, []);
 
@@ -258,16 +266,21 @@ export function ConversationSurface({
     const actorId = typeof payload?.actorId === "string" ? payload.actorId : undefined;
     const seed = payload?.seed as Record<string, unknown> | undefined;
     if (seed && typeof seed === "object") {
-      const seedBody = String(seed.body ?? (seed.messageType === "IMAGE" ? "[图片]" : seed.messageType === "VIDEO" ? "[视频]" : ""));
+      const seedBody = String(seed.body ?? (seed.messageType === "IMAGE" ? "[图片]" : seed.messageType === "VIDEO" ? "[视频]" : seed.messageType === "LOCATION" ? "[位置]" : ""));
       const seedSender = seed.senderId === actorId ? "你" : String((seed.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方");
       setSeedMsg(seedBody ? { sender: seedSender, body: seedBody } : null);
     } else {
       setSeedMsg(null);
     }
-    setMessages(rows.map((row) => ({
+    setMessages(rows.map((row) => {
+      // MEETUP-SHARE-001: LOCATION 行解坐标。解得出 → body 只留标签（卡片另 shows 坐标），
+      // 解不出 → body 留原文（不猜不藏，收到什么看什么）。
+      const rawBody = String(row.body ?? (row.messageType === "IMAGE" ? "[图片]" : row.messageType === "VIDEO" ? "[视频]" : row.messageType === "LOCATION" ? "[位置]" : ""));
+      const location = row.messageType === "LOCATION" && typeof row.body === "string" ? decodeMeetupLocation(row.body) : undefined;
+      return {
         id: String(row.messageId ?? `message_${Date.now()}`),
         sender: row.senderId === actorId ? "你" : String((row.senderSnapshot as Record<string, unknown> | undefined)?.displayName ?? aiAccount?.displayName ?? "对方"),
-        body: String(row.body ?? (row.messageType === "IMAGE" ? "[图片]" : row.messageType === "VIDEO" ? "[视频]" : "")),
+        body: location ? (location.label ?? "") : rawBody,
         time: new Date(String(row.createdAt ?? Date.now())).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
         isOwn: row.senderId === actorId,
         isAI: Boolean(aiAccount && row.senderId !== actorId),
@@ -281,7 +294,9 @@ export function ConversationSurface({
         ...(row.messageType === "AUDIO" && typeof row.mediaRef === "string"
           ? { audioUri: `${conversationClient.baseUrl}/v1/media/play/${encodeURIComponent(row.mediaRef)}` }
           : {}),
-    })));
+        ...(location ? { location } : {}),
+      };
+    }));
     setError(undefined);
   }, [aiAccount, conversationClient.baseUrl, parseOperationRef]);
 
@@ -426,6 +441,42 @@ export function ConversationSurface({
       // 活动卡片发送失败同样撤回气泡，不留假成功。
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setError(e instanceof Error ? e.message : "发送活动卡片失败");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // MEETUP-SHARE-001 seg4: 选点页结果 → 发 LOCATION。PRESET 这类无坐标结果
+  // 直接拒掉并指路“地图选点”，不拿城市中心冒充。
+  async function sendLocationFromPicker(next: AnyLocation): Promise<void> {
+    const point = meetupPointFromLocation(next);
+    if (!point) {
+      setError("这个地点没有坐标，用“地图选点”定一个点再发");
+      return;
+    }
+    await sendLocation(point);
+  }
+
+  // MEETUP-SHARE-001 seg3: 发位置。乐观气泡 + 失败撤回（与活动卡片同口径，
+  // 不留假成功）。非法坐标由 sendLocationMessage 抛错，同样走撤回。
+  async function sendLocation(point: MeetupPoint): Promise<void> {
+    if (sending || !convId) return;
+    setSending(true);
+    setLocationSheetOpen(false);
+    const userMsg: Message = {
+      id: `msg_${Date.now()}`,
+      sender: "你",
+      body: point.label ?? "",
+      time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+      isOwn: true,
+      location: { lat: point.lat, lng: point.lng, ...(point.label ? { label: point.label } : {}) },
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    try {
+      await conversationClient.sendLocationMessage(convId, point, buildProtection(), undefined, activeConvo?.id);
+    } catch (e: unknown) {
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      setError(e instanceof Error ? e.message : "发送位置失败");
     } finally {
       setSending(false);
     }
@@ -676,8 +727,8 @@ export function ConversationSurface({
     // 贴纸：单 emoji 文本按大表情渲染（OpenMoji 字形直出，离线可用）。
     const stickerEmoji = message.stickerCode
       ? (STICKERS.find((s) => s.code === message.stickerCode)?.emoji ?? message.body)
-      : (!message.imageUri && !message.videoUri && !message.audioUri && isSingleEmoji(message.body) ? message.body : undefined);
-    if (stickerEmoji && !message.imageUri && !message.videoUri && !message.audioUri) {
+      : (!message.imageUri && !message.videoUri && !message.audioUri && !message.location && isSingleEmoji(message.body) ? message.body : undefined);
+    if (stickerEmoji && !message.imageUri && !message.videoUri && !message.audioUri && !message.location) {
       return (
         <View style={styles.stickerMessage}>
           <Text style={styles.stickerGlyph}>{stickerEmoji}</Text>
@@ -696,6 +747,47 @@ export function ConversationSurface({
         {message.imageUri || message.imageSource ? <ExpoImage accessibilityLabel="聊天图片" cachePolicy="memory-disk" contentFit="cover" recyclingKey={`chat:image:${message.id}`} source={message.imageSource ?? { uri:message.imageUri ?? "" }} style={styles.messageImage} transition={0} /> : null}
         {message.videoUri ? <ChatVideo uri={message.videoUri} /> : null}
         {message.audioUri ? <ChatAudio uri={message.audioUri} /> : null}
+        {message.location ? (
+          <View style={styles.locationCard}>
+            <Text style={styles.locationTitle}>📍 {message.location.label ?? "位置共享"}</Text>
+            <Text style={styles.locationCoord}>{message.location.lat.toFixed(5)}, {message.location.lng.toFixed(5)}</Text>
+            {/* MEETUP-NAV-001: 查看是图钉（认地方），导航是路线（走过去）。
+                iOS 进 Apple Maps、Android 进 Google Maps —— 两家各自的官方
+                directions scheme，免 key 免依赖，打不开明说。 */}
+            <View style={styles.locationActionRow}>
+              <Pressable
+                accessibilityLabel="查看位置"
+                onPress={() => {
+                  const urls = meetupMapsUrls(message.location!);
+                  if (!urls) {
+                    setError("这个位置打不开，坐标无效");
+                    return;
+                  }
+                  const url = Platform.OS === "ios" ? urls.apple : urls.google;
+                  void Linking.openURL(url).catch(() => setError("打不开地图应用，请重试"));
+                }}
+                style={styles.locationOpen}
+              >
+                <Text style={styles.locationOpenText}>查看</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel="导航去这里"
+                onPress={() => {
+                  const urls = meetupDirectionsUrls(message.location!);
+                  if (!urls) {
+                    setError("这个位置打不开，坐标无效");
+                    return;
+                  }
+                  const url = Platform.OS === "ios" ? urls.apple : urls.google;
+                  void Linking.openURL(url).catch(() => setError("打不开导航，请重试"));
+                }}
+                style={[styles.locationOpen, styles.locationNav]}
+              >
+                <Text style={styles.locationNavText}>导航去这里 ›</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         {message.body.trim() ? <Text style={styles.bubbleText}>{message.body}</Text> : null}
         <View style={styles.bubbleMetaRow}>
           {message.secureMeta ? <Text style={styles.secureMeta}>{message.secureMeta}</Text> : null}
@@ -931,6 +1023,7 @@ export function ConversationSurface({
             <Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.sheetItem}><Text style={styles.sheetItemText}>照片</Text></Pressable>
             <Pressable onPress={() => void chooseVideo()} style={styles.sheetItem}><Text style={styles.sheetItemText}>视频</Text></Pressable>
             {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} style={styles.sheetItem}><Text style={styles.sheetItemText}>Proxy 活动</Text></Pressable> : null}
+            {!aiAccount ? <Pressable accessibilityLabel="发送位置" onPress={() => { setAttachOpen(false); setLocationSheetOpen(true); }} style={styles.sheetItem}><Text style={styles.sheetItemText}>📍 位置</Text></Pressable> : null}
           </Pressable>
         </Pressable>
       ) : null}
@@ -958,6 +1051,19 @@ export function ConversationSurface({
             </Pressable>
           </Pressable>
         </Pressable>
+      ) : null}
+
+      {/* MEETUP-SHARE-001 seg4: 复用 LocationPickerSheet 发位置。
+          地图选点 / 拖拽限 3KM / 复制地址 / Google 打开 / 历史收藏全是现成的；
+          只有带真坐标的结果才发，无坐标（预设地点）fail-closed 并指路。 */}
+      {locationSheetOpen ? (
+        <LocationPickerSheet
+          open={locationSheetOpen}
+          current={DEFAULT_LOCATION}
+          baseUrl={conversationClient.baseUrl}
+          onSelect={(next) => void sendLocationFromPicker(next)}
+          onClose={() => setLocationSheetOpen(false)}
+        />
       ) : null}
 
       {/* 长按菜单：reactions + 回复 / 创建 Convo / 转发 / 置顶 / 删除 */}
@@ -1247,6 +1353,16 @@ const styles = StyleSheet.create({
   reactionChipText: { fontSize: 11 },
   messageImage: { borderRadius: 9, height: 180, marginBottom: 6, width: 220 },
   messageVideo: { borderRadius: 9, height: 180, marginBottom: 6, width: 220 },
+  // MEETUP-SHARE-001: 位置卡（label + 坐标 + 外链入口，与图片同宽）。
+  locationCard: { backgroundColor: "#f6f3ee", borderRadius: 9, marginBottom: 6, padding: 10, width: 220 },
+  locationTitle: { color: lotus.ink, fontSize: 13, fontWeight: "800", lineHeight: 18 },
+  locationCoord: { color: lotus.muted, fontSize: 11, marginTop: 2 },
+  locationOpen: { marginTop: 8, alignSelf: "flex-start", backgroundColor: "#ffffff", borderColor: lotus.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
+  locationOpenText: { color: lotus.ink, fontSize: 12, fontWeight: "800" },
+  locationActionRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  // 导航是主动作：墨底白字（与发送按钮同语言）；查看是次动作：白底墨字。
+  locationNav: { backgroundColor: lotus.ink, borderColor: lotus.ink },
+  locationNavText: { color: "#ffffff", fontSize: 12, fontWeight: "800" },
 
   // 语音条（Lotus 录音对象基线）
   audioMessage: { alignItems: "center", flexDirection: "row", gap: 8, minWidth: 180, paddingVertical: 6 },

@@ -98,6 +98,16 @@ same commit. Do not record routine business logic changes here.
 - 修掉一处「按了没反应」：个人总管理页的 QrCard 已经传了 `onQrPress`，但放大层只挂在
   personalqr 分支 —— 点下去只改了一个没人渲染的 state。两个分支各挂一份（互斥，共用锚点）。
 
+## Revision 222 — 2026-09-16
+
+- SCENE-CHECKIN-100M-001：场景详情只留「收藏 / 打卡」两个动作（requester-home-discovery scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/reality-scene-map.tsx`
+    —— 删「标记去过 / 去这里 / 我在这里」三个人工声明入口；打卡走 100m GPS
+    门禁（圈内可打 + 进圈自动打卡，圈外/无定位拒绝并明说距离）；取消不限。
+    去过改由 300m 自动足迹记，planned/visited 历史数据照常加载展示。
+    无列表结构、无主题图标改动。
+  - 其余文件（`scene-checkin.ts` 纯门禁逻辑与单测）均非基线敏感。
+
 ## Revision 218 — 2026-09-16
 
 - MAP-CONTAINER-PARITY-001：Home 场景页 / 市场内联卡 / 发布器三处地图容器统一
