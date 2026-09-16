@@ -4005,6 +4005,10 @@ echo "    ADD-FRIEND-DEAD-BRANCH: PASS (exactly one friendcrm branch, and it is 
 #
 # 所以这条钉两件事：(1) 信息 → 添加好友这条链路真的接上了（表面 → shell → Me）；
 # (2) friend-crm 里不再出现任何写死的目的地文案。
+#
+# 2026-09-16 改线：添加好友不再跳「我的」—— 调用方传了 relationship，就在
+# 消息模块内嵌 FriendCrmSurface（扫码/搜索/邀请全在本页）。门禁跟着改线：
+# shell 必须透传 relationship，表面必须用调用方给的返回标签。
 if ! grep -qF 'onOpenAddFriend' apps/mobile/src/surfaces/messages.tsx ||
    ! grep -qF 'accessibilityLabel="添加好友"' apps/mobile/src/surfaces/messages.tsx ||
    ! grep -qF 'if (!onOpenAddFriend) return false;' apps/mobile/src/surfaces/messages.tsx; then
@@ -4012,11 +4016,12 @@ if ! grep -qF 'onOpenAddFriend' apps/mobile/src/surfaces/messages.tsx ||
   echo "        「新聊天」里只剩收件箱里的人，找不出还没聊过的人。" >&2
   exit 1
 fi
-if ! grep -qF 'onOpenAddFriend={() =>' apps/mobile/src/shell/app-shell.tsx ||
-   ! grep -qF 'setMeOpenSubPage(meSubPage("addfriend"))' apps/mobile/src/shell/app-shell.tsx ||
-   ! grep -qF 'goToPage("ME")' apps/mobile/src/shell/app-shell.tsx ||
-   ! grep -qF 'requestedSubPage={meOpenSubPage}' apps/mobile/src/shell/app-shell.tsx ||
-   ! grep -qF 'onRequestedSubPageConsumed={clearMeOpenSubPage}' apps/mobile/src/shell/app-shell.tsx; then
+if ! grep -qF 'relationship={relationship}' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF '<MessagesSurface' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -qF '<FriendCrmSurface' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'initialView="ADD_FRIEND"' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'addFriendBackLabel="‹ 返回"' apps/mobile/src/surfaces/messages.tsx ||
+   ! grep -qF 'setShowAddFriend(false)' apps/mobile/src/surfaces/messages.tsx; then
   echo "  FAIL [ADD-FRIEND-FROM-MESSAGES-001]: shell 没接这个入口 ——" >&2
   echo "        入口在、回调不在 = 点下去什么都不发生（或者停在信息页）。" >&2
   exit 1
@@ -4512,10 +4517,23 @@ if [ "$DEVICE_STATE_PROPS" -lt 2 ] ||
    ! grep -qF 'onFollowDevice={(next) => ' apps/mobile/src/shell/app-shell.tsx ||
    ! grep -q 'setFollowDevice(next)' apps/mobile/src/shell/app-shell.tsx ||
    ! grep -qF 'describeDeviceRow' apps/mobile/src/components/location-picker-sheet.tsx; then
-  echo "  FAIL [DEVICE-LOCATION-001]: 设备定位状态没传到 UI ——" >&2
-  echo "        顶栏和 picker 都收到才算接完；少一处，「未授权/定位中/不可用」就会显示得跟成功一样。" >&2
+   echo "  FAIL [DEVICE-LOCATION-001]: 设备定位状态没传到 UI ——" >&2
+   echo "        顶栏和 picker 都收到才算接完；少一处，「未授权/定位中/不可用」就会显示得跟成功一样。" >&2
+   exit 1
+fi
+# MSG-LOCATION-DUPE-001: 顶栏本地范围入口只许在 HOME 出现 —— MESSAGES 曾挂了
+# 同一个 LocationContext（城市 + 切换 + 地图），消息页不需要地址入口。
+# 把 `|| tab === "MESSAGES"` 加回来即红。
+if grep -nF '(tab === "HOME" || tab === "MESSAGES")' apps/mobile/src/shell/app-shell.tsx >/dev/null 2>&1; then
+  echo "  FAIL [MSG-LOCATION-DUPE-001]: location entry duplicated on messages — home keeps the single entry" >&2
+  grep -nF '(tab === "HOME" || tab === "MESSAGES")' apps/mobile/src/shell/app-shell.tsx >&2
   exit 1
 fi
+if ! grep -nF '{isNavVisible && tab === "HOME" ? (' apps/mobile/src/shell/app-shell.tsx >/dev/null 2>&1; then
+  echo "  FAIL [MSG-LOCATION-DUPE-001]: home location entry gate missing" >&2
+  exit 1
+fi
+echo "    MSG-LOCATION-DUPE-001: PASS (location entry only on home)"
 # 纯逻辑不许沾 native —— 沾了就再也进不了 vitest，这条钉自己也会失效。
 if grep -qE 'from "(react-native|expo-location)"' apps/mobile/src/device-location.ts; then
   echo "  FAIL [DEVICE-LOCATION-001]: device-location.ts 直接 import 了 native 模块 ——" >&2

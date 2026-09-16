@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 209 — 2026-09-16
+
+- MSG-LOCATION-DUPE-001：顶栏本地范围入口只留 Home，消息页不再重复。
+  - **基线敏感文件**：`apps/mobile/src/shell/app-shell.tsx`
+    —— root Chrome 的 `LocationContext`（城市 + 切换 + 地图入口）只在
+    `tab === "HOME"` 渲染；MESSAGES 分支摘掉，入口只在 Home 留一个。
+    picker sheet 与定位状态透传不变，无新增入口、无列表结构改动。
+
 ## Revision 208 — 2026-09-16
 
 - MERCHANT-ACCOUNT-AVATAR-001：个人主页有头，商家账户卡永远字母（P0）。

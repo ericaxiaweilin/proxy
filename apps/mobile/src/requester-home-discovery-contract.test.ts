@@ -257,6 +257,16 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(mapCanvas).not.toContain("当前 grid 坐标");
   });
 
+  it("MSG-LOCATION-DUPE-001: the location entry lives only on home, not on messages", () => {
+    // 顶栏本地范围入口（城市 + 切换 + 地图）曾在 HOME 与 MESSAGES 各挂一份。
+    // 消息页不需要地址入口 —— Home 留一个，重复即红。
+    expect(shell).toContain("MSG-LOCATION-DUPE-001");
+    expect(shell).toContain('{isNavVisible && tab === "HOME" ? (');
+    expect(shell).not.toContain('(tab === "HOME" || tab === "MESSAGES")');
+    expect(shell).toContain("<LocationContext");
+    expect(shell).toContain("<LocationPickerSheet");
+  });
+
   it("HOME-PEOPLE-SEARCH-001: home person search reaches the server user table", () => {
     // 本地 people 索引只是推荐预览——新注册用户搜名字永远搜不到，只能走
     // ProfileClient.searchProfiles。断线三处任一即红：触发判定、调用、透传。
