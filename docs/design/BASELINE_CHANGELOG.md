@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 212 — 2026-09-16
+
+- MARKET-PIN-PARITY-001：探索点图钉去半透明，与订单钉同视觉权重（market scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/market.tsx`
+    —— 摘掉探索点 `Marker` 的 `opacity={0.85}`；颜色语义不变（订单靛青/探索紫）。
+    仍是原生图钉，无自定义尺寸。
+
 ## Revision 211 — 2026-09-16
 
 - MARKET-MAP-USER-CENTER-001：市场地图初开以人为中心（market scope）。

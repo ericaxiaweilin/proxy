@@ -5077,6 +5077,20 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/market-map-center.test.ts || exit $?
 echo "    MARKET-MAP-USER-CENTER-001: PASS (market map opens on the viewer, Hanoi stays the last resort)"
 
+# MARKET-PIN-PARITY-001: 探索点钉挂 opacity=0.85，淡紫+半透明在活动页
+# 看起来比实心订单钉小一圈。同一种原生图钉只许颜色区分语义。
+if grep -n 'opacity={0.85}' apps/mobile/src/surfaces/market.tsx >/dev/null 2>&1; then
+  echo "  FAIL [MARKET-PIN-PARITY-001]: explorer pins faded — align with order pins" >&2
+  grep -n 'opacity={0.85}' apps/mobile/src/surfaces/market.tsx >&2
+  exit 1
+fi
+if ! grep -q 'MARKET-PIN-PARITY-001' apps/mobile/src/market-pin-parity.test.ts; then
+  echo "  FAIL [MARKET-PIN-PARITY-001]: 接线测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/market-pin-parity.test.ts || exit $?
+echo "    MARKET-PIN-PARITY-001: PASS (explorer and order pins share one visual weight)"
+
 # DEVICE-LOCATION-002: 跟随开关冷启动必丢（P0）。
 #
 # 开关只活在内存（useState 默认 true），手动地点存在 keychain —— 每次冷启动
