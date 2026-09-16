@@ -12,6 +12,10 @@
 - owned files (only):
   - apps/mobile/src/meetup-share.ts (new)
   - apps/mobile/src/meetup-share.test.ts (new)
+  - apps/mobile/src/conversation-location.test.ts (new, segment 2)
+  - apps/mobile/src/conversation-client.ts (segment 2: sendLocationMessage only)
+  - apps/mobile/src/surfaces/conversation.tsx (segment 2: LOCATION hydrate/card/preview only)
+  - apps/mobile/src/surfaces/messages.tsx (segment 2: inbox LOCATION preview line only)
   - AGENT_LOCK.md (this file)
 - avoided: market.tsx / reality-scene-map.tsx (geo-honest),
   geo/precision.go + supply/service.go (geo-precision),
