@@ -4,7 +4,7 @@
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Image, Keyboard, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, AppState, Image, Keyboard, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { ProxySwitch } from "../components/proxy-foundation";
@@ -21,7 +21,7 @@ import { ReportSheet } from "../components/report-sheet";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
-import { decodeMeetupLocation, meetupMapsUrls, meetupPointFromLocation, type DecodedMeetup, type MeetupPoint } from "../meetup-share";
+import { decodeMeetupLocation, meetupDirectionsUrls, meetupMapsUrls, meetupPointFromLocation, type DecodedMeetup, type MeetupPoint } from "../meetup-share";
 import { LocationPickerSheet, type AnyLocation, DEFAULT_LOCATION } from "../components/location-picker-sheet";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
@@ -751,20 +751,41 @@ export function ConversationSurface({
           <View style={styles.locationCard}>
             <Text style={styles.locationTitle}>📍 {message.location.label ?? "位置共享"}</Text>
             <Text style={styles.locationCoord}>{message.location.lat.toFixed(5)}, {message.location.lng.toFixed(5)}</Text>
-            <Pressable
-              accessibilityLabel="在地图中打开"
-              onPress={() => {
-                const urls = meetupMapsUrls(message.location!);
-                if (!urls) {
-                  setError("这个位置打不开，坐标无效");
-                  return;
-                }
-                void Linking.openURL(urls.google).catch(() => setError("打不开地图应用，请重试"));
-              }}
-              style={styles.locationOpen}
-            >
-              <Text style={styles.locationOpenText}>在地图中打开 ›</Text>
-            </Pressable>
+            {/* MEETUP-NAV-001: 查看是图钉（认地方），导航是路线（走过去）。
+                iOS 进 Apple Maps、Android 进 Google Maps —— 两家各自的官方
+                directions scheme，免 key 免依赖，打不开明说。 */}
+            <View style={styles.locationActionRow}>
+              <Pressable
+                accessibilityLabel="查看位置"
+                onPress={() => {
+                  const urls = meetupMapsUrls(message.location!);
+                  if (!urls) {
+                    setError("这个位置打不开，坐标无效");
+                    return;
+                  }
+                  const url = Platform.OS === "ios" ? urls.apple : urls.google;
+                  void Linking.openURL(url).catch(() => setError("打不开地图应用，请重试"));
+                }}
+                style={styles.locationOpen}
+              >
+                <Text style={styles.locationOpenText}>查看</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel="导航去这里"
+                onPress={() => {
+                  const urls = meetupDirectionsUrls(message.location!);
+                  if (!urls) {
+                    setError("这个位置打不开，坐标无效");
+                    return;
+                  }
+                  const url = Platform.OS === "ios" ? urls.apple : urls.google;
+                  void Linking.openURL(url).catch(() => setError("打不开导航，请重试"));
+                }}
+                style={[styles.locationOpen, styles.locationNav]}
+              >
+                <Text style={styles.locationNavText}>导航去这里 ›</Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
         {message.body.trim() ? <Text style={styles.bubbleText}>{message.body}</Text> : null}
@@ -1338,6 +1359,10 @@ const styles = StyleSheet.create({
   locationCoord: { color: lotus.muted, fontSize: 11, marginTop: 2 },
   locationOpen: { marginTop: 8, alignSelf: "flex-start", backgroundColor: "#ffffff", borderColor: lotus.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
   locationOpenText: { color: lotus.ink, fontSize: 12, fontWeight: "800" },
+  locationActionRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  // 导航是主动作：墨底白字（与发送按钮同语言）；查看是次动作：白底墨字。
+  locationNav: { backgroundColor: lotus.ink, borderColor: lotus.ink },
+  locationNavText: { color: "#ffffff", fontSize: 12, fontWeight: "800" },
 
   // 语音条（Lotus 录音对象基线）
   audioMessage: { alignItems: "center", flexDirection: "row", gap: 8, minWidth: 180, paddingVertical: 6 },

@@ -7,6 +7,7 @@ import {
   meetupDistanceMeters,
   meetupMidpoint,
   meetupMapsUrls,
+  meetupDirectionsUrls,
   meetupPointFromLocation,
   meetupPreview,
   meetupSummary,
@@ -100,6 +101,23 @@ describe("MEETUP-SHARE-001 inbox preview", () => {
   });
   it("非位置回落 undefined（调用方显示原文）", () => {
     expect(meetupPreview("今晚见")).toBeUndefined();
+  });
+});
+
+describe("MEETUP-NAV-001 directions urls", () => {
+  it("默认步行：Google travelmode + Apple dirflg", () => {
+    expect(meetupDirectionsUrls({ lat: 21.0285, lng: 105.8542 })).toEqual({
+      google: "https://www.google.com/maps/dir/?api=1&destination=21.0285,105.8542&travelmode=walking",
+      apple: "https://maps.apple.com/?daddr=21.0285,105.8542&dirflg=w",
+    });
+  });
+  it("开车/公交映射", () => {
+    expect(meetupDirectionsUrls({ lat: 21, lng: 105 }, "driving")?.google).toContain("travelmode=driving");
+    expect(meetupDirectionsUrls({ lat: 21, lng: 105 }, "driving")?.apple).toContain("dirflg=d");
+    expect(meetupDirectionsUrls({ lat: 21, lng: 105 }, "transit")?.apple).toContain("dirflg=r");
+  });
+  it("非法坐标不出链", () => {
+    expect(meetupDirectionsUrls({ lat: 91, lng: 0 })).toBeUndefined();
   });
 });
 

@@ -91,10 +91,50 @@ export function meetupMapsUrls(point: MeetupPoint): { google: string; apple: str
   };
 }
 
+// MEETUP-NAV-001: 真导航深链。
+//
+// 之前卡片上的"在地图中打开"只是丢个图钉（q=），不算导航 —— 用户要的是
+// turn-by-turn。自写路线引擎需要 Directions API key + 计费 + 后台定位，
+// 不走那条路；直接用两家系统地图的官方 directions scheme（免 key、免依赖）：
+//   · Google 通用 URL（官方文档 Maps URLs）：dir/?api=1&destination=&travelmode=
+//   · Apple Maps（官方 Map Links）：?daddr=&dirflg=（d 开车 / w 步行 / r 公交）
+// 不带 saddr = 从用户当前位置出发（系统自己取，不经我们手，不碰隐私线）。
+
 /** 两人中点：算术平均（城市级 <100km 足够，文档写明，不装球面插值）。 */
 export function meetupMidpoint(a: MeetupPoint, b: MeetupPoint): MeetupPoint | undefined {
   if (!isValidLatLng(a.lat, a.lng) || !isValidLatLng(b.lat, b.lng)) return undefined;
   return { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+}
+
+/** 导航出行方式。bicycling 两家口径不一（Google 支持、Apple 用驾车代替），不提供。 */
+export type DirectionsMode = "walking" | "driving" | "transit";
+
+const GOOGLE_TRAVELMODE: Record<DirectionsMode, string> = {
+  walking: "walking",
+  driving: "driving",
+  transit: "transit",
+};
+
+const APPLE_DIRFLG: Record<DirectionsMode, string> = {
+  walking: "w",
+  driving: "d",
+  transit: "r",
+};
+
+/**
+ * 导航深链（起点 = 用户当前位置，终点 = 碰头点）。默认步行 —— 约人见面多半是
+ * 走过去；调用方按需传 driving/transit。非法坐标返回 undefined。
+ */
+export function meetupDirectionsUrls(
+  point: MeetupPoint,
+  mode: DirectionsMode = "walking",
+): { google: string; apple: string } | undefined {
+  if (!isValidLatLng(point.lat, point.lng)) return undefined;
+  const dest = `${point.lat},${point.lng}`;
+  return {
+    google: `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=${GOOGLE_TRAVELMODE[mode]}`,
+    apple: `https://maps.apple.com/?daddr=${dest}&dirflg=${APPLE_DIRFLG[mode]}`,
+  };
 }
 
 /** 两人距离（米）。非法返回 undefined。 */
