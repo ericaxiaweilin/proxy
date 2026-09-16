@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { FixtureNotice } from "../components/FixtureNotice";
 
-type Payload = { bands: Array<{ segment: string; health: number; status: string }>; activation_ladder: Array<{ k: string; v: string; d: string }> };
+type Payload = { dataSource?: string; bands: Array<{ segment: string; health: number; status: string }>; activation_ladder: Array<{ k: string; v: string; d: string }> };
 
 export function SupplyActivation() {
   const [data, setData] = useState<Payload | null>(null);
@@ -8,6 +9,7 @@ export function SupplyActivation() {
   if (!data) return <div className="notice">加载 Supply Health…</div>;
   return (
     <>
+      <FixtureNotice dataSource={data.dataSource} />
       <div className="section-title"><h2>Supply Health</h2><span>能力图谱 · 可用度 · 供给充足度</span></div>
       <div className="supply-health">
         <div className="card">

@@ -120,12 +120,32 @@ type Variant struct {
 	BestFor     string   `json:"bestFor"`
 }
 
+// SourceFixture 标记"这个字段没有上游生产方，值由本文件写死"。
+//
+// 它与"值恰好等于某个常量"不是一回事：一个从真实查询里读出来的 61% 和一个
+// 写死的 61% 在 JSON 里长得完全一样，只有声明能区分。缺了这个声明，
+// 客户端就只能把占位值当实测值渲染。
+const SourceFixture = "FIXTURE"
+
 type LiveState struct {
-	State       string    `json:"state"`
-	Label       string    `json:"label"`
-	BestWindow  string    `json:"bestWindow"`
-	CapacityPct int       `json:"capacityPct"`
-	FreshUntil  time.Time `json:"freshUntil"`
+	State      string `json:"state"`
+	Label      string `json:"label"`
+	BestWindow string `json:"bestWindow"`
+	// GEO-HONEST-001: capacityPct / freshUntil 曾经是编造的。
+	//
+	// capacityFor() 用一张写死的 map 返回 61/39/74/81，FreshUntil 又把这个
+	// 编出来的数字声明成"5 分钟内有效"。客户端把它渲染成
+	// 「容量 61%」和「数据有效至 14:32」—— 用户看到的是一个带保鲜期的
+	// 实时占用率，而它没有任何来源。
+	//
+	// 关键：仓库里**有**真实来源 —— business.scene_supply_snapshots
+	// (internal/business/operating_resolver.go，命令 UpsertSceneSupplySnapshot，
+	// 商家侧写入 current_capacity_pct / forecast_capacity_pct)。所以这不是
+	// "没有数据"，是"生产方存在、读取方绕过了它"。接上它属于
+	// GEO-SUPPLY-WIRE-001；在那之前，这两个字段保持 nil，
+	// 让"未知"在接口上就是"未知"，而不是一个看着像真的数字。
+	CapacityPct *int       `json:"capacityPct,omitempty"`
+	FreshUntil  *time.Time `json:"freshUntil,omitempty"`
 }
 
 type MenuItem struct {
@@ -143,9 +163,16 @@ type Human struct {
 	Role         string `json:"role"`
 	Availability string `json:"availability"`
 	FitReason    string `json:"fitReason"`
-	SceneFit     int    `json:"sceneFit"`
-	IsAI         bool   `json:"isAI"`
-	AvatarURL    string `json:"avatarUrl"`
+	// GEO-HONEST-001: SceneFit 曾经是写死的 96/92/88，客户端渲染成
+	// 「Scene fit 96%」。没有任何评分来源，所以改成可空：nil = 未知。
+	// 注意 0 和 nil 不是一回事 —— 0% 是"测出来不匹配"，nil 是"没测过"。
+	SceneFit *int `json:"sceneFit,omitempty"`
+	IsAI     bool `json:"isAI"`
+	// Source 是 FIXTURE 时，表示这条候选没有账号背书（creator_mai 只在
+	// benefit/service_test.go 里作为测试夹具存在，头像走 mockidentity）。
+	// IsAI=false 只说"不是 AI"，不等于"是真人"—— 这两件事必须分开表达。
+	Source    string `json:"source,omitempty"`
+	AvatarURL string `json:"avatarUrl"`
 }
 
 type SceneAction struct {
@@ -617,7 +644,10 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 		SceneID: scene.ID, VenueID: venueIDFor(scene), VenueName: scene.Name,
 		HeroImageURL: heroImageFor(scene.ID), MediaVersion: 1,
 		SelectedVariant: selected.ID, Variants: variants,
-		LiveState: LiveState{State: state, Label: label, BestWindow: selected.Window, CapacityPct: capacityFor(selected.ID, minute), FreshUntil: now.UTC().Add(5 * time.Minute)},
+		// GEO-HONEST-001: state / label / bestWindow 是**真实计算** ——
+		// 由当前分钟与 variant.StartMinute/EndMinute 比较得出。它们留下。
+		// CapacityPct / FreshUntil 没有来源，留空（见 LiveState 注释）。
+		LiveState: LiveState{State: state, Label: label, BestWindow: selected.Window},
 		Menu:      menuFor(selected.ID), FullMenu: fullMenu(), Humans: humansFor(selected.ID),
 		Actions: []SceneAction{
 			{Type: "DIRECT_INVITE", Label: "邀请真人", State: "REQUIRES_HUMAN_ACCEPTANCE", MoneyMeaning: "费用约定，不代表已付款或收入"},
@@ -652,16 +682,12 @@ func variantsFor(scene Scene) []Variant {
 	}
 	return []Variant{{ID: "best-time", Name: scene.Type, Window: scene.Best, StartMinute: 0, EndMinute: 1440, Facets: []string{scene.Type}, BestFor: scene.Description}}
 }
-func capacityFor(variant string, minute int) int {
-	base := map[string]int{"morning": 61, "sunlight": 39, "afterwork": 74, "weekend": 81}[variant]
-	if base == 0 {
-		base = 52
-	}
-	if minute%60 > 45 {
-		base += 4
-	}
-	return base
-}
+
+// capacityFor 已删除（GEO-HONEST-001）。
+//
+// 它返回的 61/39/74/81/52 是四个手写整数，没有查询、没有表、没有写入方。
+// 它唯一的出口是 LiveState.CapacityPct，而客户端把它渲染成「容量 61%」。
+// 需要真实容量时，读 business.scene_supply_snapshots —— 见 GEO-SUPPLY-WIRE-001。
 func menuFor(variant string) []MenuItem {
 	all := fullMenu()
 	items := []MenuItem{all[0], all[1]}
@@ -682,16 +708,35 @@ func fullMenu() []MenuItem {
 		{ID: "sku_popcorn", Name: "Bắp Rang Bơ", PriceLabel: "55K", SceneFit: "多人分享", Available: true, ImageURL: "https://images.unsplash.com/photo-1527529482837-4698179dc6ce?auto=format&fit=crop&w=520&q=84"},
 	}
 }
+
+// humansFor 返回**占位候选**，不是真实用户（GEO-HONEST-001）。
+//
+// 原来这里写的是 FitReason:"同类 Scene 有真实完成记录" / "出片与到访转化稳定"、
+// SceneFit:96/92/88、Availability:"本周可约" —— 每一条都是可证伪的断言：
+// 全仓没有 Scene 完成记录表、没有到访转化指标，creator_mai 只在
+// benefit/service_test.go 里作为测试夹具出现，头像走 mockidentity。
+// 而客户端把这些渲染成「Scene fit 96%」和「本周可约」，用户会据此判断
+// "这个人真的能约"。
+//
+// 保留三条是为了场景地图有人可展示，但必须让调用方看得见它们是占位的。
+// 接真实匹配（能力图谱 / 履约记录）属于 GEO-HONEST-002。
+//
+// 注意 IsAI=false 只说"不是 AI"，**不等于**"是真人"—— 这两件事由
+// Source 字段分开表达，不要合并。
 func humansFor(variant string) []Human {
 	role := "Cafe / Lifestyle"
-	availability := "本周可约"
 	if variant == "morning" {
-		role, availability = "Coffee / Work", "上午可约"
+		role = "Coffee / Work"
 	}
 	if variant == "weekend" {
-		role, availability = "Host / Lifestyle", "周末可约"
+		role = "Host / Lifestyle"
 	}
-	return []Human{{ID: "creator_mai", Name: "Mai", Role: role, Availability: availability, FitReason: "同类 Scene 有真实完成记录", SceneFit: 96, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("mai")}, {ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: "近期可约", FitReason: "出片与到访转化稳定", SceneFit: 92, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("linh")}, {ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: "周末可约", FitReason: "相关 SKU 内容经验", SceneFit: 88, IsAI: false, AvatarURL: mockidentity.AvatarPathForFacetKey("trang")}}
+	const placeholderAvailability = "占位候选 · 未接入真实可约状态"
+	return []Human{
+		{ID: "creator_mai", Name: "Mai", Role: role, Availability: placeholderAvailability, FitReason: "占位数据：无真实履约记录来源", IsAI: false, Source: SourceFixture, AvatarURL: mockidentity.AvatarPathForFacetKey("mai")},
+		{ID: "creator_linh", Name: "Linh", Role: "Photo / Lifestyle", Availability: placeholderAvailability, FitReason: "占位数据：无真实转化指标来源", IsAI: false, Source: SourceFixture, AvatarURL: mockidentity.AvatarPathForFacetKey("linh")},
+		{ID: "creator_trang", Name: "Trang", Role: "Food / UGC", Availability: placeholderAvailability, FitReason: "占位数据：无真实内容经验来源", IsAI: false, Source: SourceFixture, AvatarURL: mockidentity.AvatarPathForFacetKey("trang")},
+	}
 }
 func (s *Service) Supports(t string) bool {
 	return t == "ListMyRealitySceneState" || t == "SetRealitySceneSaved" || t == "SetRealityScenePlanned" || t == "SetPrivateRealitySceneVisited" || t == "SetRealitySceneCheckIn" || t == "ProposeRealityScene" || t == "ConfirmRealitySceneProposal" || t == "ListRealitySceneProposals"

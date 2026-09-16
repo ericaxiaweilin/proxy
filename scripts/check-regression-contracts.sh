@@ -148,6 +148,83 @@ require_test "UI-SCENE-MAP-001" "./internal/realityscene" \
 require_test "UI-SCENE-MAP-001" "./internal/api" \
   "TestNearbyRealityScenesRequiresConsentAndUsesLocationRanking" \
   "apps/api-go/internal/api/reality_scene_test.go" || exit $?
+
+# GEO-HONEST-001: 地图/场景域不许再有"没有来源、却长得像实测"的数字。
+#
+# 修之前：capacityFor() 用一张写死的 map 返回 61/39/74/81 当"容量"，
+# LiveState.FreshUntil 又把这个编出来的数字声明成"5 分钟内有效"，
+# humansFor() 给占位候选写上 SceneFit 96/92/88 与
+# FitReason:"同类 Scene 有真实完成记录"。客户端把它们渲染成「容量 61%」
+# 「数据有效至 14:32」「Scene fit 96%」—— 用户看到的是一个带保鲜期的
+# 实时占用率，而它没有任何来源。
+#
+# 关键不是"数字是假的"，而是**假数字和真数据在接口上长得一模一样**。
+# 所以修法是让"没有来源"在类型上可表达（字段省略 + source），而不是换个数字。
+#
+# 注意：仓库里**有**真实容量来源 —— business.scene_supply_snapshots
+# (internal/business/operating_resolver.go，命令 UpsertSceneSupplySnapshot)。
+# 也就是说这不是"没数据"，是"生产方存在、读取方绕过了它"。
+# 接上它属于 GEO-SUPPLY-WIRE-001。
+if grep -q 'func capacityFor' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [GEO-HONEST-001]: capacityFor is back — hand-written ints served as live venue capacity" >&2
+  exit 1
+fi
+# 生产渲染路径里不许留调试输出（TEMP-DIAG-MAPDEAD-001 曾在这里挂 4 处）。
+if grep -q 'console\.log' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [GEO-HONEST-001]: debug console logging is back in the map render path" >&2
+  exit 1
+fi
+# 兜底坐标必须走具名常量：内联字面量和真实坐标在代码里长得一样，会被下一个人
+# 当成实测数据。精确到 "latitude: " 前缀，避免误伤解释性注释。
+if [ "$(grep -c 'latitude: 21\.036' apps/mobile/src/surfaces/reality-scene-map.tsx)" != "1" ] \
+  || ! grep -q 'HANOI_CENTER_FALLBACK' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [GEO-HONEST-001]: Hanoi fallback coordinates are inlined again in reality-scene-map.tsx" >&2
+  exit 1
+fi
+if [ "$(grep -c 'latitude: 21\.0285' apps/mobile/src/surfaces/market.tsx)" != "1" ] \
+  || ! grep -q 'HANOI_VIEWPORT_FALLBACK' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [GEO-HONEST-001]: Hanoi viewport fallback is inlined again in market.tsx" >&2
+  exit 1
+fi
+# 没有热度数据就不许自称"热门"。
+if grep -q '"热门探索点"' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [GEO-HONEST-001]: market.tsx labels seeded markers as 热门 with no popularity source" >&2
+  exit 1
+fi
+# 零调用方的死桩不许回来。
+if grep -q 'function mapConfig' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [GEO-HONEST-001]: dead mapConfig() stub is back with zero callers" >&2
+  exit 1
+fi
+require_test "GEO-HONEST-001" "./internal/realityscene" \
+  "TestSceneDetailDeclaresFixtureProvenance" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+echo "    GEO-HONEST-001: PASS (伪造容量 / 占位候选 / 临时诊断 / 死桩 均未复现)"
+
+# OPS-TELEMETRY-001: 纯字面量端点必须自报 dataSource，且控制台必须真的渲染它。
+#
+# 服务端声明来源只是半截接线 —— 控制台不读这个字段，运营看到的还是
+# "决策引擎 30 天 1860 万次调用 · 谱系完整度 99.92%"，照样会以为引擎在跑。
+# 一个假的健康度比没有健康度更糟：它让人停止怀疑。所以两边一起钉。
+#
+# 范围要说清：不是所有 /v1/operator/* 都是占位。context-field / surface-plans
+# 真的调用了 runtime.Decide 和 compiler.Compile（输入是固定快照），
+# experience/metrics 返回的是真实进程内计数器。所以只钉这三个纯字面量端点，
+# 不写"整个 /v1/operator 都是假的" —— 那会是另一个谎。
+require_test "OPS-TELEMETRY-001" "./internal/api" \
+  "TestOperatorFixtureEndpointsDeclareSource" \
+  "apps/api-go/internal/api/reality_scene_test.go" || exit $?
+for page in SupplyActivation Clarification Engine; do
+  # 钉 JSX 用法，不钉 import —— 第一版写的是 grep 'FixtureNotice'，它匹配的是
+  # import 那一行；把 <FixtureNotice .../> 从渲染里删掉，import 还在，契约照样绿。
+  # 反向注入时抓到的：那条是假守卫。
+  if ! grep -q '<FixtureNotice' "apps/market-intelligence-console/src/pages/$page.tsx"; then
+    echo "  FAIL [OPS-TELEMETRY-001]: $page.tsx does not render <FixtureNotice> — the server declares dataSource but the console ignores it" >&2
+    exit 1
+  fi
+done
+echo "    OPS-TELEMETRY-001: PASS (3 个占位端点已声明来源，控制台已渲染)"
+
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRejectsAnonymousActorAndOversizedContact" \
   "apps/api-go/internal/identity/account_preferences_test.go" || exit $?
