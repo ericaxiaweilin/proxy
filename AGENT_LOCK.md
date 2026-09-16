@@ -10,12 +10,18 @@
   打卡/足迹不硬塞进会话：订单打卡在 order-execution、现场声明在场景面，
   各有归属。不碰基线敏感文件，不改门禁脚本，不碰他人认领文件。
 - owned files (only):
-  - apps/mobile/src/meetup-share.ts (new)
+  - apps/mobile/src/meetup-share.ts (new, seg1/seg4)
   - apps/mobile/src/meetup-share.test.ts (new)
-  - apps/mobile/src/conversation-location.test.ts (new, segment 2)
-  - apps/mobile/src/conversation-client.ts (segment 2: sendLocationMessage only)
-  - apps/mobile/src/surfaces/conversation.tsx (segment 2: LOCATION hydrate/card/preview only)
-  - apps/mobile/src/surfaces/messages.tsx (segment 2: inbox LOCATION preview line only)
+  - apps/mobile/src/scene-checkin.ts (new, seg5: 100m 门禁纯逻辑)
+  - apps/mobile/src/scene-checkin.test.ts (new, seg5)
+  - apps/mobile/src/conversation-location.test.ts (new, seg2)
+  - apps/mobile/src/conversation-client.ts (seg2: sendLocationMessage only)
+  - apps/mobile/src/surfaces/conversation.tsx (seg2-4: LOCATION 接线 + 复用选点 sheet)
+  - apps/mobile/src/surfaces/messages.tsx (seg2: inbox LOCATION preview line only)
+  - apps/mobile/src/surfaces/reality-scene-map.tsx (seg5 ONLY: 打卡门禁 + 按钮区
+    persistCheckIn/自动打卡/509-519 行；geo-honest 的推荐/容量/marker hunk 未碰）
+  - docs/design/BASELINE_CHANGELOG.md + CURRENT_BASELINE.json（seg5: Rev221 登记，
+    ⚠️ 变基时 commander 重排，集成本已 Rev220）
   - AGENT_LOCK.md (this file)
 - avoided: market.tsx / reality-scene-map.tsx (geo-honest),
   geo/precision.go + supply/service.go (geo-precision),

@@ -4,6 +4,16 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 221 — 2026-09-16（⚠️ 变基时由 commander 重排：本分支起点 Rev218，集成已行至 Rev220）
+
+- SCENE-CHECKIN-100M-001：场景详情只留「收藏 / 打卡」两个动作（requester-home-discovery scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/reality-scene-map.tsx`
+    —— 删「标记去过 / 去这里 / 我在这里」三个人工声明入口；打卡走 100m GPS
+    门禁（圈内可打 + 进圈自动打卡，圈外/无定位拒绝并明说距离）；取消不限。
+    去过改由 300m 自动足迹记，planned/visited 历史数据照常加载展示。
+    无列表结构、无主题图标改动。
+  - 其余文件（`scene-checkin.ts` 纯门禁逻辑与单测）均非基线敏感。
+
 ## Revision 218 — 2026-09-16
 
 - MAP-CONTAINER-PARITY-001：Home 场景页 / 市场内联卡 / 发布器三处地图容器统一

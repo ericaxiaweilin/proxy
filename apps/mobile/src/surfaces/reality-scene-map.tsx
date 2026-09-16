@@ -7,6 +7,7 @@ import * as Location from "expo-location";
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
+import { checkinEligibility, checkinHint } from "../scene-checkin";
 // SCENE-EVENT-SIGNUP-001: 场景上的活动列表 + 报名。复用现成的 ActivityClient，
 // 不新造一套报名机制 —— 活动域（名额 / participants / 事务）本来就是真的。
 import { ActivityClient } from "../activity-client";
@@ -393,19 +394,30 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       .catch(() => setContribMsg("确认失败 —— 自己提交的不能自己确认。"))
       .finally(() => setContribBusy(false));
   };
+  // SCENE-CHECKIN-100M-001: 打卡只认 GPS 真值。100 米内可打（含自动打卡），
+  // 之外拒绝并明说距离；没定位（origin 未知）= 没证据 = 不能打。
+  // 取消（enabled=false）不设门 —— 随时可撤自己的声明。
   const persistCheckIn = (scene: RealityScene): void => {
     if (!session?.principal) {
-      setTriStateMsg("请先登录，才能标记「我在这里」。");
+      setTriStateMsg("请先登录，才能打卡。");
       return;
     }
     setTriStateMsg(undefined);
     const enabled = !here.has(scene.id);
+    if (enabled) {
+      const distance = origin ? metersBetween(origin, scene) : undefined;
+      const eligibility = checkinEligibility(distance);
+      if (!eligibility.eligible) {
+        setTriStateMsg(checkinHint(false, distance));
+        return;
+      }
+    }
     toggle(here, scene.id, setHere);
     const payload: Record<string, unknown> = { sceneId: scene.id, enabled };
     const distance = origin ? metersBetween(origin, scene) : undefined;
     if (distance !== undefined) payload.distanceMeters = distance;
     void sendSceneCommand(authClient, session, "SetRealitySceneCheckIn", scene.id, payload)
-      .then(() => setTriStateMsg(enabled ? "已标记「我在这里」，90 分钟后自动结束。" : undefined))
+      .then(() => setTriStateMsg(enabled ? "已打卡，90 分钟后自动结束。" : undefined))
       .catch(() => {
         setHere(here);
         setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
@@ -438,6 +450,20 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     persistVisited(selected.id);
     setTriStateMsg("已按你的当前位置自动标记足迹。");
   }, [selected, session, origin, visited]);
+  // SCENE-CHECKIN-100M-001: 进圈自动打卡。打开场景详情时设备位置在 100m 内且
+  // 已登录，自动记一次打卡（走同一 persistCheckIn 门禁链，圈外/无定位直接不打，
+  // 不弹失败 —— 没证据不是失败）。每场景一次，失败静默（门禁内已判过 eligible）。
+  const autoCheckinDone = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (!selected || !session?.principal || !origin) return;
+    if (here.has(selected.id) || autoCheckinDone.current.has(selected.id)) return;
+    if (!checkinEligibility(metersBetween(origin, selected)).eligible) return;
+    autoCheckinDone.current = new Set(autoCheckinDone.current).add(selected.id);
+    persistCheckIn(selected);
+    setTriStateMsg("已按你的当前位置自动打卡。");
+    // 只认进圈那一刻的 here/menu 状态 —— 与自动足迹同口径，guard 靠 ref。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, session, origin, here]);
   const recommendNearby = async (): Promise<void> => {
     if (nearbyBusy || !session) return;
     setNearbyBusy(true); setNearbyError(undefined);
@@ -506,16 +532,16 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             </ScrollView>
             <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuRail}>{(fullMenuOpen ? detail.fullMenu : detail.menu).map((item) => <Pressable disabled={!item.available} key={item.id} onPress={() => setSelectedMenuId(item.id)} style={[styles.menuCard, selectedMenuId === item.id && styles.menuCardSelected]}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`scene-sku:${item.id}`} source={{ uri: item.imageUrl }} style={styles.menuImage} transition={0} /><Text numberOfLines={1} style={styles.menuName}>{item.name}</Text><Text style={styles.menuFit}>{item.sceneFit} · {item.available ? selectedMenuId === item.id ? "✓ 已选择" : "可售" : "售罄"}</Text><Text style={styles.menuPrice}>{item.priceLabel}</Text></Pressable>)}</ScrollView>
+            {/* SCENE-CHECKIN-100M-001: 详情只留两个动作 —— 收藏（意愿）与打卡
+                （到场证明，100m 门禁）。「标记去过 / 去这里 / 我在这里」三个人工
+                声明入口已撤：无验证的手点不产生到场事实；去过由 300m 自动足迹记，
+                计划走活动报名。底层 planned/visited 数据照常加载展示，不断历史。 */}
             <View style={styles.actions}>
               <Pressable onPress={() => persistToggle(saved, selected.id, setSaved, "SetRealitySceneSaved")} style={[styles.action, saved.has(selected.id) && styles.actionSelected]}><Text style={styles.actionText}>{saved.has(selected.id) ? "★ 已收藏" : "☆ 收藏"}</Text></Pressable>
-              <Pressable onPress={() => persistVisited(selected.id)} style={styles.action}><Text style={styles.actionText}>{visited.has(selected.id) ? "✓ 已去过" : "标记去过"}</Text></Pressable>
-              <Pressable onPress={() => persistToggle(planned, selected.id, setPlanned, "SetRealityScenePlanned")} style={styles.primaryAction}><Text style={styles.primaryActionText}>{planned.has(selected.id) ? "✓ 已计划" : "去这里"}</Text></Pressable>
+              <Pressable accessibilityLabel={here.has(selected.id) ? "取消打卡" : "打卡"} onPress={() => persistCheckIn(selected)} style={here.has(selected.id) ? [styles.action, styles.actionSelected] : styles.primaryAction}><Text style={here.has(selected.id) ? styles.actionText : styles.primaryActionText}>{here.has(selected.id) ? "✓ 已打卡" : "打卡"}</Text></Pressable>
             </View>
-            {/* SCENE-CHECKIN-001: 「我在这里」。这是本人声明，不是定位证据 ——
-                没有订单/核销码/商家确认参与，所以文案只说"标记"，不声称核实过。 */}
             <View style={styles.actions}>
-              <Pressable onPress={() => persistCheckIn(selected)} style={[styles.action, here.has(selected.id) && styles.actionSelected]}><Text style={styles.actionText}>{here.has(selected.id) ? "✓ 在这里" : "我在这里"}</Text></Pressable>
-              <Text style={styles.checkInHint}>{here.has(selected.id) ? "90 分钟后自动结束，也可以再点一次取消。" : "标记后这个场景会显示「N 人说在这里」，只显示人数，不显示是谁。"}</Text>
+              <Text style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin ? metersBetween(origin, selected) : undefined)}</Text>
             </View>
             {triStateMsg ? <Text style={styles.nearbyError}>{triStateMsg}</Text> : null}
             {/* SCENE-EVENT-SIGNUP-001: 只能"发起"的详情页等于只能喊话 —— 看
