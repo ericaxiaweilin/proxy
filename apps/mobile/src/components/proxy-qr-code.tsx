@@ -18,7 +18,8 @@
 // 可扫性不是拍脑袋：这套几何（点边长 0.87、定位角 0.30、徽标 24%）在 144 个用例上
 // 用 CoreImage 解码器逐张验过 —— 3x（真机实际情况）全过；1x 下 88/104px 的小尺寸
 // 会失败，但**不带徽标时同样失败**，是极小尺寸下的固有损失，不是徽标造成的。
-// 改这里的任何一个常数都要重跑那套解码验证（脚本见 docs/design 里的记录）。
+// **动这里的任何一个常数，就跑 `apps/mobile/scripts/qr-geometry/run.sh`** ——
+// 那个目录里的脚本会用真矩阵重渲染 144 个用例并逐张解码，README 记了基线和踩过的坑。
 
 import { memo, useMemo } from "react";
 import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
