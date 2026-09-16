@@ -1942,10 +1942,13 @@ export function MeSurface({
               <View style={styles.sheetCard}>
                 <Text style={styles.sheetTitle}>搜索主页</Text>
                 <Text style={styles.sheetSub}>搜自己主页的动态正文，点结果直接打开。</Text>
+                {/* placeholder 以前写「搜索用户名或关键词」—— 但这处**只搜自己帖子的正文**
+                    （runProfileSearch 只滤 profilePosts 的 body），搜不到任何人、也搜不到
+                    @handle。搜人要走「加好友 → 搜索 Proxy」，那是服务端 SearchProfiles。 */}
                 <View style={styles.sheetField}>
                   <TextInput
                     autoFocus
-                    placeholder="搜索用户名或关键词"
+                    placeholder="搜索主页动态正文"
                     placeholderTextColor="#999"
                     value={searchQuery}
                     onChangeText={setSearchQuery}
