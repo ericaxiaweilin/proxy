@@ -6057,3 +6057,69 @@ fi
 go -C apps/api-go test -count=1 -run '^TestListMyBusinessAccountsCarriesOwnerAvatar$' ./internal/platform/postgres/ || exit $?
 pnpm --filter @proxy/mobile exec vitest run src/business-client.test.ts || exit $?
 echo "    MERCHANT-ACCOUNT-AVATAR-001: PASS (merchant card shows the owner portrait)"
+
+# MEETUP-SHARE-001: 好友位置消息掉回 raw 文本。
+#
+# ConversationClient.sendMessage 早支持 messageType LOCATION，但会话面只渲染
+# IMAGE/VIDEO/AUDIO —— 位置掉回原文一串字，收件箱也没有 [位置] 预览。
+# 现在发送走 sendLocationMessage（可解析格式 + LOCATION 类型，非法坐标抛错不发），
+# 会话面解码成卡，收件箱显示 [位置·标签]。
+if ! grep -q 'public async sendLocationMessage' apps/mobile/src/conversation-client.ts ||
+   ! grep -q 'decodeMeetupLocation(row.body' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'meetupPreview(latest.body' apps/mobile/src/surfaces/messages.tsx; then
+  echo "  FAIL [MEETUP-SHARE-001]: 位置收发接线断了 ——" >&2
+  echo "        发的发不出去，收的看不懂。" >&2
+  exit 1
+fi
+if ! grep -q 'MEETUP-SHARE-001' apps/mobile/src/meetup-share.test.ts ||
+   ! grep -q 'MEETUP-SHARE-001' apps/mobile/src/conversation-location.test.ts; then
+  echo "  FAIL [MEETUP-SHARE-001]: 接线测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/meetup-share.test.ts src/conversation-location.test.ts || exit $?
+echo "    MEETUP-SHARE-001: PASS (location sends parsed, renders as card, previews as [位置])"
+
+# MEETUP-NAV-001: 位置卡只有图钉没有导航。
+#
+# "在地图中打开"只是 q= 丢个图钉，不算导航。自写路线引擎要 Directions key +
+# 计费 + 后台定位，不走那条路；用两家系统地图官方 directions scheme
+# （Google dir/?api=1&destination=&travelmode=，Apple ?daddr=&dirflg=），
+# iOS 进 Apple Maps、Android 进 Google Maps。
+if ! grep -q 'export function meetupDirectionsUrls' apps/mobile/src/meetup-share.ts ||
+   ! grep -q 'meetupDirectionsUrls(message.location' apps/mobile/src/surfaces/conversation.tsx ||
+   ! grep -q 'dir/?api=1' apps/mobile/src/meetup-share.ts ||
+   ! grep -q 'dirflg=' apps/mobile/src/meetup-share.ts; then
+  echo "  FAIL [MEETUP-NAV-001]: 真导航深链断了 ——" >&2
+  echo "        卡片退回只能看不能走。" >&2
+  exit 1
+fi
+if ! grep -q 'MEETUP-NAV-001' apps/mobile/src/meetup-share.test.ts; then
+  echo "  FAIL [MEETUP-NAV-001]: 导航 URL 测试不见了" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/meetup-share.test.ts || exit $?
+echo "    MEETUP-NAV-001: PASS (card navigates via system maps directions)"
+
+# SCENE-CHECKIN-100M-001: 场景打卡不认位置。
+#
+# 之前「我在这里」谁点谁就算 —— 没定位能标，异地能标，标完还显示
+# 「N 人说在这里」。现在打卡只认 GPS 真值：100 米内可打（含进圈自动打卡），
+# 之外拒绝并明说距离；详情只留收藏/打卡，人工声明入口已撤。
+if ! grep -q 'CHECKIN_RADIUS_METERS' apps/mobile/src/scene-checkin.ts ||
+   ! grep -q 'checkinEligibility(' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'checkinHint(' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-CHECKIN-100M-001]: 打卡门禁断了 ——" >&2
+  echo "        又退回谁点谁算。" >&2
+  exit 1
+fi
+if ! grep -q 'SCENE-CHECKIN-100M-001' apps/mobile/src/scene-checkin.test.ts; then
+  echo "  FAIL [SCENE-CHECKIN-100M-001]: 门禁测试不见了" >&2
+  exit 1
+fi
+# 反向钉：半径必须是 100（单测含 100/100.1 边界，改大就红）。
+if ! grep -q 'CHECKIN_RADIUS_METERS = 100' apps/mobile/src/scene-checkin.ts; then
+  echo "  FAIL [SCENE-CHECKIN-100M-001]: 打卡半径被改掉了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-checkin.test.ts || exit $?
+echo "    SCENE-CHECKIN-100M-001: PASS (check-in gated by 100m GPS truth)"
