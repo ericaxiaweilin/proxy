@@ -4,6 +4,27 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 220 — 2026-09-16
+
+- PROFILE-QR-002（高亮补完）：放大层接上**真·系统亮度** —— 亮着这一层把屏幕拉到最亮，
+  退出 / 卸载还原原值（`expo-brightness`，iOS 不需要 Info.plist 权限）。作用范围只有出示码
+  这一屏，且只在 `visible` 时生效。
+  - **基线敏感文件**：`apps/mobile/src/components/qr-zoom-overlay.tsx`
+    —— 亮度副作用的位置与还原语义属于基线行为。
+  - **不能顶层 `import`**：`expo-brightness/build/ExpoBrightness.js` 在**模块作用域**就执行
+    `requireNativeModule('ExpoBrightness')`，而它在原生模块缺失时是**抛异常**、不是返回 null。
+    本组件在 me.tsx / merchant-storefront / friend-crm 的 import 图里 → 顶层 import 会让
+    **还没装这个 pod 的包一启动就崩**。改为 `loadBrightness()` 延迟 require + try/catch，
+    原生模块不在就静默降级（白底满屏照常生效）。
+  - 已用项目真实的 `babel-preset-expo` 转换该文件核对：模块顶层只有 react / react-native 等
+    静态依赖的 require，`require("expo-brightness")` 落在 `loadBrightness()` 函数体内 ——
+    启动期不会执行。
+  - 还原语义：进入时先 `getBrightnessAsync()` 存原值 → 拉满 → 退出 / 卸载写回；**读不到原值
+    就什么都不写**（宁可还原不了，也不要瞎写一个值）。还原挂在同一条 promise 链上，快速开关
+    不会把亮度卡在 1 下不来。
+  - **生效前提**：`pod install` + **重建 dev client**（`ExpoBrightness` 目前不在 Podfile.lock；
+    Metro reload 不够）。
+
 ## Revision 219 — 2026-09-16
 
 - PROFILE-QR-006（统一二维码管线）：全 App 只剩一处画码的地方

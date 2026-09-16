@@ -5,16 +5,22 @@
 // 白底 + 尽可能大的码 = 屏幕能给出的最高亮度，也是微信 / 支付宝 / TikTok 出示码那一屏
 // 的做法。码区刻意不加边框/阴影 —— 存到相册的那张图就是它，白边本身就是静默区。
 //
-// 关于「真·屏幕亮度」：标准做法是在这一层把系统亮度拉到最高、退出时还原
-// （需要 `expo-brightness`）。本次**没有**引入它 —— 它要改共享的 pnpm-lock，
-// 而当时另一个任务正在同一棵树上写文件；而且新原生模块必须重建 dev client 才生效。
-// 白底本身已经吃掉了大部分收益，所以先落地这一层。要补上时：
-//   1) pnpm --filter @proxy/mobile add expo-brightness
-//   2) 在下面的 `useEffect` 里进入时 setBrightnessAsync(1)、退出时还原原值
-//      （`getBrightnessAsync()` 先存下来；不需要任何 Info.plist 权限）
-//   3) pod install + 重建 dev client（Metro reload 不够）
+// 关于「真·屏幕亮度」：进入这一层把系统亮度拉到最高、退出时还原 —— 微信 / 支付宝出示码那一屏
+// 的做法（`expo-brightness`；iOS 不需要任何 Info.plist 权限）。
+//
+// **坑：绝不能在模块顶层 `import`。** `expo-brightness/build/ExpoBrightness.js` 在**模块作用域**
+// 就执行 `requireNativeModule('ExpoBrightness')`，而 `requireNativeModule` 在原生模块缺失时是
+// **抛异常**、不是返回 null（见 `expo-modules-core/src/requireNativeModule.ts`）。本组件挂在
+// me.tsx / merchant-storefront / friend-crm 的正常 import 图里 —— 顶层 import 会让**还没装这个
+// pod 的包一启动就崩**。所以走 `loadBrightness()` 延迟 require + try/catch：原生模块不在就当没这
+// 功能，白底满屏照样生效。`expo-modules-core` 的 `requireOptionalNativeModule` 看着更合适，但
+// 那个包在 apps/mobile 下**没有声明**（pnpm 严格布局下从 apps/mobile 解析不到），不能直接引。
+//
+// 生效前提：`pod install` + **重建 dev client**（Metro reload 不够 —— 原生模块不在 JS 里）。
+// 还原：进入时先 `getBrightnessAsync()` 存原值再拉满，退出 / 卸载时写回；读不到原值就什么都不写
+// （宁可还原不了，也不要瞎写一个值）。同一时刻只有一个放大层 visible（各页互斥），不会互相抢。
 
-import { type RefObject } from "react";
+import { type RefObject, useEffect } from "react";
 import {
   Modal,
   Pressable,
@@ -46,6 +52,28 @@ export type QrZoomOverlayProps = {
   shotRef?: RefObject<View | null> | undefined;
 };
 
+type BrightnessApi = {
+  getBrightnessAsync: () => Promise<number>;
+  setBrightnessAsync: (brightnessValue: number) => Promise<void>;
+};
+
+/**
+ * 延迟加载 expo-brightness。返回 undefined = 这个包里没有对应原生模块（还没重建 dev client），
+ * 调用方静默降级。**别把它换成顶层 import** —— 原因见文件头注释（会一启动就崩）。
+ */
+function loadBrightness(): BrightnessApi | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require("expo-brightness") as Partial<BrightnessApi>;
+    if (typeof mod.getBrightnessAsync !== "function" || typeof mod.setBrightnessAsync !== "function") {
+      return undefined;
+    }
+    return mod as BrightnessApi;
+  } catch {
+    return undefined;
+  }
+}
+
 export function QrZoomOverlay({
   visible,
   onClose,
@@ -64,6 +92,30 @@ export function QrZoomOverlay({
   const maxByHeight = Math.max(160, height - chromeHeight);
   const maxByWidth = width - 56;
   const qrSize = Math.floor(Math.min(maxByWidth, maxByHeight));
+
+  // 真·屏幕亮度：亮着这一层时拉满，退出还原。为什么是延迟 require 而不是顶层 import，见文件头。
+  useEffect(() => {
+    if (!visible) return undefined;
+    const brightness = loadBrightness();
+    if (!brightness) return undefined;
+
+    // 一条链：读原值 → 拉满 → 把原值带出来。任何一步失败都退化成 undefined（= 不还原）。
+    const restoreTo = brightness
+      .getBrightnessAsync()
+      .then(async (before) => {
+        await brightness.setBrightnessAsync(1);
+        return before;
+      })
+      .catch(() => undefined);
+
+    return () => {
+      // 挂到同一条链上：快速开关时也要等原值读到再还原，否则亮度会卡在 1 下不来。
+      void restoreTo.then((before) => {
+        if (before === undefined) return;
+        void brightness.setBrightnessAsync(before).catch(() => {});
+      });
+    };
+  }, [visible]);
 
   return (
     <Modal animationType="fade" onRequestClose={onClose} statusBarTranslucent visible={visible}>
@@ -118,8 +170,6 @@ export function QrZoomOverlay({
     </Modal>
   );
 }
-
-/** 屏幕亮度：当前只做「白底满屏」；接入 expo-brightness 的位置见文件头注释。 */
 
 const styles = StyleSheet.create({
   root: { backgroundColor: color.white, flex: 1 },
