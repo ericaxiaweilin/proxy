@@ -88,7 +88,14 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).not.toContain('testID="human-node-reveal"');
     expect(source).not.toContain("styles.recCard");
     expect(source).not.toContain("styles.storyHint");
-    expect(source).toContain("p.photoUri ? <Image");
+    expect(source).toContain("p.photoUri && !brokenAvatarIds.has(p.id) ? <Image");
+    // HOME-AVATAR-FALLBACK-001: 头像图挂了（404/断网）回落首字母，不留白圈。
+    // stories/选人窗/真人主页三处同规，与 ai-assistants-row 的 broken 集同 pattern。
+    expect(source).toContain("brokenAvatarIds");
+    expect(source).toContain("markAvatarBroken");
+    expect(source).toContain("onError={() => markAvatarBroken(p.id)}");
+    expect(source).toContain("onError={() => markAvatarBroken(humanScenePreview.person.id)}");
+    expect(source).not.toContain("p.photoUri ? <Image");
     expect(source).toContain("styles.avatarPhoto");
     // 真人头像右下 + 徽标走真实好友申请，点头像本身仍走 Scene。
     expect(source).toContain("handleHomeFriend(p.id, p.name)");

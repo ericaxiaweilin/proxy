@@ -276,6 +276,22 @@ if grep -nE 'filteredPeople\.findIndex\(\(p\) => p\.name' apps/mobile/src/surfac
   exit 1
 fi
 
+# HOME-AVATAR-FALLBACK-001: 首页三处真人头像（stories 圆头/选人窗/真人主页）
+# 图挂了必须回落首字母，不许留白圈。旧写法 `p.photoUri ? <Image` 无 onError，
+# thumb 404/断网时 expo-image 空渲染。删任一处的 onError 即红。
+if grep -n 'p.photoUri ? <Image' apps/mobile/src/surfaces/requester-home.tsx >/dev/null 2>&1; then
+  echo "  FAIL [HOME-AVATAR-FALLBACK-001]: home avatar must fall back to initials onError, never render blank" >&2
+  grep -n 'p.photoUri ? <Image' apps/mobile/src/surfaces/requester-home.tsx >&2
+  exit 1
+fi
+for probe in 'onError={() => markAvatarBroken(p.id)}' 'onError={() => markAvatarBroken(humanScenePreview.person.id)}'; do
+  if ! grep -nF "$probe" apps/mobile/src/surfaces/requester-home.tsx >/dev/null 2>&1; then
+    echo "  FAIL [HOME-AVATAR-FALLBACK-001]: missing $probe" >&2
+    exit 1
+  fi
+done
+echo "    HOME-AVATAR-FALLBACK-001: PASS (home avatars fall back to initials on error)"
+
 # UI-HOME-DISCOVERY-001: 首页发现层级冻结。真人推荐必须在 AI 推荐之前；
 # 两区都要显式标识身份。Owner 决议：一键加好友可在首页做（+ 徽标直调
 # follow），发消息仍只能进主页后做。语义变更待 commander 确认。
