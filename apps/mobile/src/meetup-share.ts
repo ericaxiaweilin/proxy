@@ -11,7 +11,7 @@
 //   encode（发）/ decode（收）/ 外链 / 中点 / 距离 / 步行耗时 / 列表预览。
 // fail-closed：坐标非法一律返回 undefined，调用方按失败态渲染，绝不编坐标。
 
-import { googleMapsUrl, metersBetweenPoints } from "./components/location-options";
+import { formatLocationTitle, googleMapsUrl, gridToLatLng, metersBetweenPoints, type AnyLocation } from "./components/location-options";
 
 export interface MeetupPoint {
   lat: number;
@@ -138,4 +138,40 @@ export function meetupPreview(body: string): string | undefined {
   if (!decoded) return undefined;
   if (decoded.label) return `[位置] ${decoded.label}`;
   return "[位置]";
+}
+
+/**
+ * 选点页结果 → 可发送的碰头点（供会话“📍 位置”入口复用 LocationPickerSheet）。
+ *   · CUSTOM：优先真实 lat/lng；老数据只有网格时按同城网格换算（用户自己放的点，
+ *     不是编的）；都拿不到返回 undefined。
+ *   · DEVICE：设备真值。
+ *   · PRESET：无坐标，返回 undefined —— 调用方提示用户用“地图选点”定点再发，
+ *     不拿城市中心冒充。
+ * label 走 formatLocationTitle（与选点页显示同一口径）。
+ */
+export function meetupPointFromLocation(location: AnyLocation): MeetupPoint | undefined {
+  if (location.kind === "DEVICE") {
+    if (!isValidLatLng(location.device.lat, location.device.lng)) return undefined;
+    const label = formatLocationTitle(location).trim();
+    return {
+      lat: location.device.lat,
+      lng: location.device.lng,
+      ...(label ? { label } : {}),
+    };
+  }
+  if (location.kind === "CUSTOM") {
+    const custom = location.custom;
+    const label = formatLocationTitle(location).trim() || undefined;
+    if (
+      typeof custom.lat === "number" &&
+      typeof custom.lng === "number" &&
+      isValidLatLng(custom.lat, custom.lng)
+    ) {
+      return { lat: custom.lat, lng: custom.lng, ...(label ? { label } : {}) };
+    }
+    const grid = gridToLatLng(location.city, custom.gridX, custom.gridY);
+    if (!isValidLatLng(grid.lat, grid.lng)) return undefined;
+    return { lat: grid.lat, lng: grid.lng, ...(label ? { label } : {}) };
+  }
+  return undefined;
 }

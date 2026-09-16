@@ -5,8 +5,10 @@
 - starting commit: d9879026cb8ec8363fc443d7c14f83e315f4bb28
 - task: MEETUP-SHARE-001 —— 双人共享地址 + 地图导航纯逻辑管线。
   seg1 纯 TS 模块 + 单测；seg2 LOCATION 收发接线（client helper + 会话卡片 +
-  收件箱预览）；seg3 会话 composer“📍 位置”入口（GPS 真值 + 确认 sheet +
-  乐观发送 + 失败撤回）。不碰基线敏感文件，不改门禁脚本。
+  收件箱预览）；seg3 会话 composer“📍 位置”入口；seg4 入口改复用成熟
+  LocationPickerSheet（地图/3KM/复制/导航/历史收藏全现成），删自写确认页。
+  打卡/足迹不硬塞进会话：订单打卡在 order-execution、现场声明在场景面，
+  各有归属。不碰基线敏感文件，不改门禁脚本，不碰他人认领文件。
 - owned files (only):
   - apps/mobile/src/meetup-share.ts (new)
   - apps/mobile/src/meetup-share.test.ts (new)

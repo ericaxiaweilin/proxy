@@ -7,6 +7,7 @@ import {
   meetupDistanceMeters,
   meetupMidpoint,
   meetupMapsUrls,
+  meetupPointFromLocation,
   meetupPreview,
   meetupSummary,
   walkMinutesFor,
@@ -99,5 +100,33 @@ describe("MEETUP-SHARE-001 inbox preview", () => {
   });
   it("非位置回落 undefined（调用方显示原文）", () => {
     expect(meetupPreview("今晚见")).toBeUndefined();
+  });
+});
+
+describe("MEETUP-SHARE-001 meetupPointFromLocation（复用选点页结果）", () => {
+  it("CUSTOM 真坐标优先", () => {
+    const point = meetupPointFromLocation({
+      id: "custom_geo_1", city: "河内", area: "自定义 · 还剑湖", kind: "CUSTOM",
+      custom: { gridX: 5, gridY: 5, radiusMeters: 3000, lat: 21.0285, lng: 105.8542 },
+    });
+    expect(point?.lat).toBeCloseTo(21.0285, 5);
+    expect(point?.lng).toBeCloseTo(105.8542, 5);
+    expect(point?.label).toBe("还剑湖");
+  });
+  it("DEVICE 真值直通", () => {
+    const point = meetupPointFromLocation({
+      id: "device-current", city: "", area: "还剑湖附近", kind: "DEVICE",
+      device: { lat: 21.0285, lng: 105.8542, updatedAt: 1 },
+    });
+    expect(point).toEqual({ lat: 21.0285, lng: 105.8542, label: "还剑湖附近" });
+  });
+  it("PRESET 无坐标发不了（不拿城市中心冒充）", () => {
+    expect(meetupPointFromLocation({ id: "hn-swordlake", city: "河内", area: "还剑湖附近", kind: "PRESET" })).toBeUndefined();
+  });
+  it("非法 DEVICE 坐标 fail-closed", () => {
+    expect(meetupPointFromLocation({
+      id: "device-current", city: "", area: "", kind: "DEVICE",
+      device: { lat: 91, lng: 0, updatedAt: 1 },
+    })).toBeUndefined();
   });
 });
