@@ -21,7 +21,9 @@ import { ReportSheet } from "../components/report-sheet";
 import { attachScreenshotReporter } from "../lib/screenshot-protection";
 import { useKeyboardSafeInset } from "../components/use-keyboard-safe-inset";
 import { MessageRenderer, type MessageV1 } from "../components/message-renderer";
-import { decodeMeetupLocation, meetupMapsUrls, type DecodedMeetup } from "../meetup-share";
+import { decodeMeetupLocation, meetupMapsUrls, type DecodedMeetup, type MeetupPoint } from "../meetup-share";
+import { getCurrentFix } from "../device-location";
+import { expoLocationApi } from "../device-location-native";
 import type { PlatformAIAccount } from "../ai-account-client";
 import { aiAccountPhoto } from "../ai-persona-presentation";
 import { VoiceToolButton } from "../components/VoiceToolButton";
@@ -183,6 +185,12 @@ export function ConversationSurface({
   const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const [activityOptions, setActivityOptions] = useState<{ id: string; title: string; subtitle: string }[] | undefined>(undefined);
   const [activityPickerError, setActivityPickerError] = useState<string | undefined>(undefined);
+  // MEETUP-SHARE-001 seg3: 会话内发位置。fix 只认 GPS 真值（城市/区域粗精度），
+  // 拿不到就停在失败态让用户重试 —— 绝不拿旧坐标/默认城市冒充。
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [locatingFix, setLocatingFix] = useState(false);
+  const [locationFix, setLocationFix] = useState<{ latitude: number; longitude: number; address?: string } | undefined>(undefined);
+  const [locationFixError, setLocationFixError] = useState<string | undefined>(undefined);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   // Keep live-sync hydration from replacing an optimistic bubble while the
@@ -224,6 +232,7 @@ export function ConversationSurface({
     setSecureSheetOpen(false);
     setAttachOpen(false);
     setActivityPickerOpen(false);
+    setLocationPickerOpen(false);
     setConversationMenuOpen(false);
   }, []);
 
@@ -436,6 +445,54 @@ export function ConversationSurface({
       // 活动卡片发送失败同样撤回气泡，不留假成功。
       setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setError(e instanceof Error ? e.message : "发送活动卡片失败");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // MEETUP-SHARE-001 seg3: 打开位置 sheet 并取一次 GPS 真值。
+  // requestPermission: false —— 冷启动不弹框，没授权就如实报失败让用户去设置开。
+  async function openLocationPicker(): Promise<void> {
+    if (sending || !convId) return;
+    setAttachOpen(false);
+    setLocationPickerOpen(true);
+    setLocationFix(undefined);
+    setLocationFixError(undefined);
+    setLocatingFix(true);
+    const fix = await getCurrentFix(expoLocationApi, { requestPermission: false });
+    setLocatingFix(false);
+    if (!fix) {
+      setLocationFixError("没拿到定位：在 iOS 设置 → Proxy → 位置 里允许“使用 App 期间”，然后点重试");
+      return;
+    }
+    setLocationFix(fix);
+  }
+
+  // MEETUP-SHARE-001 seg3: 发位置。乐观气泡 + 失败撤回（与活动卡片同口径，
+  // 不留假成功）。非法坐标由 sendLocationMessage 抛错，同样走撤回。
+  async function sendLocation(): Promise<void> {
+    if (sending || !convId || !locationFix) return;
+    const point: MeetupPoint = {
+      lat: locationFix.latitude,
+      lng: locationFix.longitude,
+      ...(locationFix.address ? { label: locationFix.address } : {}),
+    };
+    setSending(true);
+    setLocationPickerOpen(false);
+    const userMsg: Message = {
+      id: `msg_${Date.now()}`,
+      sender: "你",
+      body: point.label ?? "",
+      time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+      isOwn: true,
+      location: { lat: point.lat, lng: point.lng, ...(point.label ? { label: point.label } : {}) },
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    try {
+      await conversationClient.sendLocationMessage(convId, point, buildProtection(), undefined, activeConvo?.id);
+    } catch (e: unknown) {
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+      setError(e instanceof Error ? e.message : "发送位置失败");
     } finally {
       setSending(false);
     }
@@ -961,6 +1018,7 @@ export function ConversationSurface({
             <Pressable onPress={() => void chooseImage("LIBRARY")} style={styles.sheetItem}><Text style={styles.sheetItemText}>照片</Text></Pressable>
             <Pressable onPress={() => void chooseVideo()} style={styles.sheetItem}><Text style={styles.sheetItemText}>视频</Text></Pressable>
             {!aiAccount ? <Pressable onPress={() => void openActivityPicker()} style={styles.sheetItem}><Text style={styles.sheetItemText}>Proxy 活动</Text></Pressable> : null}
+            {!aiAccount ? <Pressable accessibilityLabel="发送位置" onPress={() => void openLocationPicker()} style={styles.sheetItem}><Text style={styles.sheetItemText}>📍 位置</Text></Pressable> : null}
           </Pressable>
         </Pressable>
       ) : null}
@@ -984,6 +1042,39 @@ export function ConversationSurface({
               </ScrollView>
             )}
             <Pressable onPress={() => setActivityPickerOpen(false)} style={styles.pickerCancel}>
+              <Text style={styles.pickerCancelText}>取消</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      ) : null}
+
+      {/* MEETUP-SHARE-001 seg3: 位置确认 sheet。只发 GPS 真值：定位中 / 失败重试 /
+          就绪确认三态，失败态说清去哪开权限。发出的是城市/区域粗精度，不碰精确定位线。 */}
+      {locationPickerOpen ? (
+        <Pressable accessibilityLabel="关闭位置选择" onPress={() => setLocationPickerOpen(false)} style={styles.scrim}>
+          <Pressable onPress={() => undefined} style={styles.bottomSheet}>
+            <View style={styles.sheetGrab} />
+            <Text style={styles.pickerTitle}>发送我的位置</Text>
+            <Text style={styles.pickerSub}>只发你现在所在的城市/区域，对方点开进地图导航</Text>
+            {locatingFix ? <ActivityIndicator color={lotus.goldtext} /> : null}
+            {locationFixError ? <Text style={styles.pickerError}>{locationFixError}</Text> : null}
+            {locationFix && !locatingFix ? (
+              <View style={styles.locationSheetPreview}>
+                <Text style={styles.locationSheetTitle}>📍 {locationFix.address ?? "当前位置"}</Text>
+                <Text style={styles.pickerSub}>{locationFix.latitude.toFixed(5)}, {locationFix.longitude.toFixed(5)}</Text>
+              </View>
+            ) : null}
+            {!locatingFix && locationFixError ? (
+              <Pressable accessibilityLabel="重新定位" onPress={() => void openLocationPicker()} style={styles.locationSend}>
+                <Text style={styles.locationSendText}>重试</Text>
+              </Pressable>
+            ) : null}
+            {!locatingFix && locationFix ? (
+              <Pressable accessibilityLabel="发送位置" onPress={() => void sendLocation()} style={styles.locationSend}>
+                <Text style={styles.locationSendText}>发送位置</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={() => setLocationPickerOpen(false)} style={styles.pickerCancel}>
               <Text style={styles.pickerCancelText}>取消</Text>
             </Pressable>
           </Pressable>
@@ -1283,6 +1374,11 @@ const styles = StyleSheet.create({
   locationCoord: { color: lotus.muted, fontSize: 11, marginTop: 2 },
   locationOpen: { marginTop: 8, alignSelf: "flex-start", backgroundColor: "#ffffff", borderColor: lotus.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
   locationOpenText: { color: lotus.ink, fontSize: 12, fontWeight: "800" },
+  // MEETUP-SHARE-001 seg3: 位置确认 sheet（复用 picker 排版语言）。
+  locationSheetPreview: { backgroundColor: "#f6f3ee", borderRadius: 12, marginTop: 10, padding: 12 },
+  locationSheetTitle: { color: lotus.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },
+  locationSend: { alignItems: "center", backgroundColor: lotus.ink, borderRadius: 14, marginTop: 10, paddingVertical: 13 },
+  locationSendText: { color: "#ffffff", fontSize: 14, fontWeight: "800" },
 
   // 语音条（Lotus 录音对象基线）
   audioMessage: { alignItems: "center", flexDirection: "row", gap: 8, minWidth: 180, paddingVertical: 6 },
