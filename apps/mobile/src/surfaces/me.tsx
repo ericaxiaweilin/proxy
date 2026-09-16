@@ -15,6 +15,7 @@ import { ProfileTabs } from "./ProfileTabs";
 import { AIIdentityShowcaseSurface } from "./AIIdentityShowcaseSurface";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
+import * as MediaLibrary from "expo-media-library";
 import QRCode from "react-native-qrcode-svg";
 import { captureRef } from "react-native-view-shot";
 import { Directory, File, Paths } from "expo-file-system";
@@ -561,6 +562,22 @@ export function MeSurface({
       await Share.share({ url: uri, message: `查看 ${profileDraft.name} 的 Proxy 主页` });
     } catch {
       setQrNotice("分享失败，请重试或直接复制链接。");
+    }
+  }
+  // PROFILE-QR-002：一键保存二维码到相册（不再依赖系统分享面板的
+  // 「存储图像」选项 —— 那个选项在部分机型/面板版本不出现）。
+  async function saveQrToAlbum(): Promise<void> {
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync(true);
+      if (!permission.granted) {
+        setQrNotice("需要相册权限才能保存二维码。");
+        return;
+      }
+      const uri = await captureRef(qrShotRef, { format: "png", quality: 1 });
+      await MediaLibrary.saveToLibraryAsync(uri);
+      setQrNotice("二维码已保存到相册。");
+    } catch {
+      setQrNotice("保存失败，请重试，或改用系统分享存图。");
     }
   }
   async function copyProfileLink(link: string): Promise<void> {
@@ -1936,11 +1953,16 @@ export function MeSurface({
                 <Pressable onPress={() => void copyProfileLink(profileLink)} style={styles.qrRealBtnGhost}>
                   <Text style={styles.qrRealBtnTextGhost}>复制链接</Text>
                 </Pressable>
-                <Pressable onPress={() => void shareQrImage()} style={styles.qrRealBtnGhost}>
-                  <Text style={styles.qrRealBtnTextGhost}>分享二维码</Text>
+                <Pressable onPress={() => void saveQrToAlbum()} style={styles.qrRealBtn}>
+                  <Text style={styles.qrRealBtnText}>保存到相册</Text>
                 </Pressable>
-                <Pressable onPress={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：${profileLink}` }); }} style={styles.qrRealBtn}>
-                  <Text style={styles.qrRealBtnText}>分享</Text>
+              </View>
+              <View style={[styles.qrRealActions, { marginTop: 8 }]}>
+                <Pressable onPress={() => void shareQrImage()} style={styles.qrRealBtnGhost}>
+                  <Text style={styles.qrRealBtnTextGhost}>分享二维码图</Text>
+                </Pressable>
+                <Pressable onPress={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：${profileLink}` }); }} style={styles.qrRealBtnGhost}>
+                  <Text style={styles.qrRealBtnTextGhost}>分享链接</Text>
                 </Pressable>
               </View>
               {qrNotice ? <Text style={styles.qrRealNotice}>{qrNotice}</Text> : null}

@@ -4,6 +4,14 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 210 — 2026-09-16
+
+- PROFILE-QR-002：一键保存二维码到相册（personal-profile scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`
+    —— 二维码区新增「保存到相册」（`expo-media-library` 存图 + 相册权限说明；
+    无权限/失败走文案提示，不静默）。「分享二维码图」「分享链接」改回幽灵按钮，
+    同行只留一个主按钮。无列表结构改动、无新增页面。
+
 ## Revision 209 — 2026-09-16
 
 - MSG-LOCATION-DUPE-001：顶栏本地范围入口只留 Home，消息页不再重复。

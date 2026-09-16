@@ -67,6 +67,8 @@
 	<string>Proxy 使用麦克风将你的语音转换为输入文字。</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to detect your current motion activity</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>保存二维码到相册。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Proxy 读取你主动选择的照片并添加到需求或对话。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

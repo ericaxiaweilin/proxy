@@ -65,6 +65,9 @@ PODS:
     - ExpoModulesCore
   - ExpoLogBox (57.0.2):
     - React-Core
+  - ExpoMediaLibrary (57.0.5):
+    - ExpoModulesCore
+    - React-Core
   - ExpoModulesCore (57.0.10):
     - ExpoModulesJSI
     - hermes-engine
@@ -2139,6 +2142,7 @@ DEPENDENCIES:
   - "ExpoLinking (from `../../../node_modules/.pnpm/expo-linking@57.0.7_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-color@_74e08933ab54e8573f7074996f7e34e4/node_modules/expo-linking/ios`)"
   - "ExpoLocation (from `../../../node_modules/.pnpm/expo-location@57.0.14_expo@57.0.12_supports-color@8.1.1_typescript@6.0.3/node_modules/expo-location/ios/ExpoLocation.podspec`)"
   - "ExpoLogBox (from `../../../node_modules/.pnpm/@expo+log-box@57.0.2_@expo+dom-webview@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+c_18db1bc83d018e12944500dab2079985/node_modules/@expo/log-box`)"
+  - "ExpoMediaLibrary (from `../../../node_modules/.pnpm/expo-media-library@57.0.5_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-_16a4154f55cbff0d4d36f78d4af80417/node_modules/expo-media-library/ios/ExpoMediaLibrary.podspec`)"
   - "ExpoModulesCore (from `../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesCore.podspec`)"
   - "ExpoModulesJSI (from `../../../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=a78d1a4c55dadc7e20e76b76bfdfdca2a3419cdf107a542a8981_88216104a3087e678fb3ceac78a09733/node_modules/expo-modules-jsi/apple`)"
   - "ExpoModulesWorklets (from `../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesWorklets.podspec`)"
@@ -2271,6 +2275,8 @@ EXTERNAL SOURCES:
     :podspec: "../../../node_modules/.pnpm/expo-location@57.0.14_expo@57.0.12_supports-color@8.1.1_typescript@6.0.3/node_modules/expo-location/ios/ExpoLocation.podspec"
   ExpoLogBox:
     :path: "../../../node_modules/.pnpm/@expo+log-box@57.0.2_@expo+dom-webview@57.0.1_expo@57.0.12_react-native@0.86.2_@babel+c_18db1bc83d018e12944500dab2079985/node_modules/@expo/log-box"
+  ExpoMediaLibrary:
+    :podspec: "../../../node_modules/.pnpm/expo-media-library@57.0.5_expo@57.0.12_react-native@0.86.2_@babel+core@7.29.7_supports-_16a4154f55cbff0d4d36f78d4af80417/node_modules/expo-media-library/ios/ExpoMediaLibrary.podspec"
   ExpoModulesCore:
     :podspec: "../../../node_modules/.pnpm/expo-modules-core@57.0.10_react-native@0.86.2_@babel+core@7.29.7_supports-color@8.1.1___9845b473173f4cdf4ecf880a57783fff/node_modules/expo-modules-core/ExpoModulesCore.podspec"
   ExpoModulesJSI:
@@ -2472,6 +2478,7 @@ SPEC CHECKSUMS:
   ExpoLinking: 2e9ead00fcb0d3e623a8d4935fadae3cdb6d4d97
   ExpoLocation: cc81013b678d75014ae395cd4707c0136e88cfb1
   ExpoLogBox: 6bb73c341aca22e699bd4da6cc61afc844e1a648
+  ExpoMediaLibrary: 341321256621e7bf220b6272c42fedcb095607d0
   ExpoModulesCore: 863e32cb91dca34ffe9825b91165adc4ec832ad8
   ExpoModulesJSI: b20fefa4cdd9097e7e6b715466d1900b8c5d4711
   ExpoModulesWorklets: 53d4ca8d32225cb3ec4660b9f03496192b4f3cac
