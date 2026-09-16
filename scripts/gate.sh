@@ -46,10 +46,15 @@ gate_g1_build() {
   echo "=== G1: build (api-go + mobile + contracts) ==="
   go -C apps/api-go build ./... || return $?
   echo "  api-go build: OK"
-  pnpm --filter @proxy/mobile typecheck || return $?
-  echo "  mobile typecheck: OK"
+  # contracts dist is gitignored build output, so a fresh worktree/clone has no
+  # dist/index.d.ts until it is built. Mobile typecheck resolves
+  # @proxy/contracts to that dist — typechecking first fails with 100+
+  # TS2307 "Cannot find module" errors that vanish once contracts is built.
+  # Build contracts before typechecking mobile so G1 is green from a clean tree.
   pnpm --filter @proxy/contracts build || return $?
   echo "  contracts build: OK"
+  pnpm --filter @proxy/mobile typecheck || return $?
+  echo "  mobile typecheck: OK"
 }
 
 gate_g2_tests() {
