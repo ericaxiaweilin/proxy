@@ -107,7 +107,8 @@ export function MarketSurface({
   onOpenExperience,
   onOpenRealityScene,
   onChromeVisibilityChange,
-  bottomNavVisible
+  bottomNavVisible,
+  userCenter
 }: {
   activities: ActivityClient;
   marketplace: MarketplaceClient;
@@ -124,6 +125,10 @@ export function MarketSurface({
   onOpenRealityScene?: ((sceneId: string) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
+  // MARKET-MAP-USER-CENTER-001: 壳已经有活的位置（设备跟随/CUSTOM/DEVICE），
+  // 地图初开就该以人为中心 —— 而不是先摆河内、非要点一下按钮。
+  // 缺省 = 没接线：退回订单 centroid / 河内（原来唯一的样子），不编位置。
+  userCenter?: { lat: number; lng: number } | undefined;
 }): React.JSX.Element {
   const normalized = normalizeTab(initialTab);
   const [tab, setTab] = useState<"OPPORTUNITY" | "ACTIVITY">(normalized);
@@ -447,6 +452,7 @@ export function MarketSurface({
             if (found) setOppDetail(found);
           }}
           onUserFix={setUserFix}
+          userCenter={userCenter}
         />
       ) : pageTab === "OPPORTUNITY" ? (
         oppDetail ? (
@@ -1760,7 +1766,8 @@ function MarketMap({
   marketLabel,
   onOpenExperience,
   onOpenOpportunity,
-  onUserFix
+  onUserFix,
+  userCenter
 }: {
   tab: "OPPORTUNITY" | "ACTIVITY";
   opportunities: MarketOpportunity[];
@@ -1775,6 +1782,9 @@ function MarketMap({
   // by haversine distance via server, and (b) re-render the map's
   // blue dot.
   onUserFix: (fix: { lat: number; lng: number } | undefined) => void;
+  // MARKET-MAP-USER-CENTER-001: 壳的人位（设备跟随/CUSTOM/DEVICE），
+  // 由 MarketSurface 透传；初开以人为中心，晚到补飞。
+  userCenter?: { lat: number; lng: number } | undefined;
 }): React.JSX.Element {
   // 机会的本地集：跳过“远程”不显示；用 opportunities prop
   // 里机会的 coord 走 gridToLatLng 投影到真实经纬度。
@@ -1795,15 +1805,19 @@ function MarketMap({
         ),
     [localOpportunities, marketLabel]
   );
-  // 默认 region: 用本地机会的 centroid (未拿到 GPS 之前)。
+  // 默认 region: 有人位先以人为中心；都没有才退回订单 centroid / 河内。
+  // （MARKET-MAP-USER-CENTER-001：初开摆河内、非要点按钮，用户不在河内时就是错的。）
   const fallbackRegion: Region = useMemo(() => {
+    if (userCenter) {
+      return { latitude: userCenter.lat, longitude: userCenter.lng, latitudeDelta: 0.08, longitudeDelta: 0.08 };
+    }
     if (opportunityPins.length === 0) {
       return { latitude: 21.0285, longitude: 105.8542, latitudeDelta: 0.12, longitudeDelta: 0.12 };
     }
     const avgLat = opportunityPins.reduce((s, p) => s + p.lat, 0) / opportunityPins.length;
     const avgLng = opportunityPins.reduce((s, p) => s + p.lng, 0) / opportunityPins.length;
     return { latitude: avgLat, longitude: avgLng, latitudeDelta: 0.08, longitudeDelta: 0.08 };
-  }, [opportunityPins]);
+  }, [opportunityPins, userCenter]);
   const mapRef = useRef<MapView | null>(null);
   const [userRegion, setUserRegion] = useState<Region | null>(null);
   const [locBusy, setLocBusy] = useState(false);
@@ -1839,14 +1853,27 @@ function MarketMap({
       setLocBusy(false);
     }
   }
+  // 壳的人位可能是异步落定的（存档恢复/GPS 首 fix）—— 地图已挂载才来，
+  // 就补飞过去；用户自己点过按钮（userRegion）的不抢。
+  useEffect(() => {
+    if (!userCenter || userRegion) return;
+    if (mapRef.current) {
+      mapRef.current.animateToRegion(
+        { latitude: userCenter.lat, longitude: userCenter.lng, ...userRegionDelta },
+        350
+      );
+    }
+  }, [userCenter, userRegion]);
   const isOpportunity = tab === "OPPORTUNITY";
   const titleText = isOpportunity ? "订单地图" : "活动地图";
   const subText =
     locGranted && userRegion
       ? "以您当前位置为中心 — 蓝点是您"
-      : isOpportunity
-        ? "默认以订单分布为中心 — 需点击右下角“用我当前位置”"
-        : "活动暂无位置坐标 — 只显示探索点与你的位置";
+      : userCenter
+        ? "以您当前位置为中心 — 点右下角“用我当前位置”显示蓝点"
+        : isOpportunity
+          ? "默认以订单分布为中心 — 需点击右下角“用我当前位置”"
+          : "活动暂无位置坐标 — 只显示探索点与你的位置";
   const privacyTitle = "地址粒度";
   const privacyText =
     "您看到的真实地址仅供探索；具体商户地址需由业务确实需要且您授权后才提升精度。热门推荐点是参考点，不代表您当前位置。";

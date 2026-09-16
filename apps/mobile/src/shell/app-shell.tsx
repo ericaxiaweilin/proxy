@@ -782,6 +782,7 @@ export function AppShell({
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               onChromeVisibilityChange={setFeedChromeVisible}
               bottomNavVisible={isNavVisible}
+              userCenter={sceneMapOrigin ? { lat: sceneMapOrigin.latitude, lng: sceneMapOrigin.longitude } : undefined}
             />
         ) : tab === "FEED" ? (
           feedChatAuthor ? (
