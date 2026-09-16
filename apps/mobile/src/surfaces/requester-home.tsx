@@ -160,6 +160,12 @@ export function RequesterHome({
   const [activityIndex, setActivityIndex] = useState(0);
   const [placeIndex, setPlaceIndex] = useState(0);
   const [chooser, setChooser] = useState<"person" | "time" | "activity" | "place" | null>(null);
+  // HOME-AVATAR-FALLBACK-001: 真人头像挂了回落首字母（图走服务端 thumb；
+  // 加载失败不断白圈）。与 ai-assistants-row 的 broken 集同 pattern，按人记。
+  const [brokenAvatarIds, setBrokenAvatarIds] = useState<ReadonlySet<string>>(new Set());
+  const markAvatarBroken = (id: string): void => {
+    setBrokenAvatarIds((current) => (current.has(id) ? current : new Set(current).add(id)));
+  };
   const [momentOpen, setMomentOpen] = useState(false);
   const [momentBusy, setMomentBusy] = useState(false);
   const [momentMsg, setMomentMsg] = useState<string | undefined>(undefined);
@@ -790,7 +796,7 @@ export function RequesterHome({
           >
             <View style={styles.avatar}>
               <View style={styles.avatarInner}>
-                {p.photoUri ? <Image source={{ uri: p.photoUri }} style={styles.avatarPhoto} /> : <Text style={styles.avatarInitials}>{p.initials}</Text>}
+                {p.photoUri && !brokenAvatarIds.has(p.id) ? <Image source={{ uri: p.photoUri }} style={styles.avatarPhoto} onError={() => markAvatarBroken(p.id)} /> : <Text style={styles.avatarInitials}>{p.initials}</Text>}
               </View>
               {p.online ? <View style={styles.onlineDot} /> : null}
               <Pressable
@@ -929,8 +935,8 @@ export function RequesterHome({
                                   onPress={() => { setPersonIndex(i); setChooser(null); }}
                                   style={[styles.personChooserCard, selected && styles.personChooserCardSelected]}
                                 >
-                                  {p.photoUri ? (
-                                    <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: p.photoUri }} style={styles.personChooserPhoto} transition={0} />
+                                  {p.photoUri && !brokenAvatarIds.has(p.id) ? (
+                                    <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: p.photoUri }} style={styles.personChooserPhoto} transition={0} onError={() => markAvatarBroken(p.id)} />
                                   ) : (
                                     <View style={[styles.personChooserPhoto, styles.personChooserFallback]}><Text style={styles.personChooserInitials}>{p.initials}</Text></View>
                                   )}
@@ -1142,7 +1148,7 @@ export function RequesterHome({
                 <Text style={styles.humanSceneEyebrow}>{humanScenePreview.person.online ? "附近 · 现在可见" : "附近推荐"}</Text>
               </View>
               <View style={styles.humanScenePerson}>
-                <View style={styles.humanSceneAvatarRing}>{humanScenePreview.person.photoUri ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: humanScenePreview.person.photoUri }} style={styles.humanSceneAvatar} transition={0} /> : <Text style={styles.humanSceneInitials}>{humanScenePreview.person.initials}</Text>}</View>
+                <View style={styles.humanSceneAvatarRing}>{humanScenePreview.person.photoUri && !brokenAvatarIds.has(humanScenePreview.person.id) ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: humanScenePreview.person.photoUri }} style={styles.humanSceneAvatar} transition={0} onError={() => markAvatarBroken(humanScenePreview.person.id)} /> : <Text style={styles.humanSceneInitials}>{humanScenePreview.person.initials}</Text>}</View>
                 <View style={styles.humanScenePersonCopy}>
                   <Text style={styles.humanSceneName}>{humanScenePreview.person.name}</Text>
                   <Text style={styles.humanSceneBio}>{humanScenePreview.person.bio}</Text>
