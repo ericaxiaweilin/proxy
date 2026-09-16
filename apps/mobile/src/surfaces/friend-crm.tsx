@@ -186,6 +186,24 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   }, [relationship]);
   useEffect(() => { void reload(); }, [reload]);
 
+  // ADD-FRIEND-NEXT-001: 我发出的请求必须可查。reload() 以前只把 INCOMING 投影到
+  // requests，OUTGOING 没有任何渲染面 —— 点了添加变“已发送”即终点。通过后的开聊
+  // 走 LIST 已有的 onOpenConversation，这里只展示等待态，不加动作按钮
+  // （服务端无撤回命令，不编）。
+  const outgoingRequests = useMemo(() => {
+    return serverFriends.pending
+      .filter((f) => f.direction === "OUTGOING")
+      .map((f) => {
+        const name = f.displayName || f.userId;
+        return {
+          userId: f.userId,
+          name,
+          initial: name.slice(0, 1).toUpperCase() || "?",
+          sub: `${f.city ? `${f.city} · ` : ""}${f.since.slice(0, 10)} · 等待对方通过`,
+        };
+      });
+  }, [serverFriends]);
+
   // Project server `active` rows onto the CrmFriend shape
   // so the existing list / detail rendering can stay
   // identical. Each server friend becomes a CrmFriend
@@ -609,6 +627,15 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                   <Pressable disabled={scanAddSent || !relationship} onPress={() => void addScannedPerson()} style={[styles.addBtn, scanAddSent && styles.addBtnSent]}><Text style={[styles.addBtnText, scanAddSent && styles.addBtnTextSent]}>{scanAddSent ? "已发送" : "添加"}</Text></Pressable>
                 </View>
               ) : null}
+              {/* ADD-FRIEND-NEXT-001: “已发送”不是终点。对方通过后出现在好友列表走
+                  LIST 已有的 onOpenConversation，这里只给下一步指路 + 内跳 REQUESTS，
+                  不新增 prop、不碰邀请/解析/相机段。 */}
+              {scanLookup === "found" && scanAddSent ? (
+                <View>
+                  <Text style={styles.scanHitNote}>对方通过后会出现在好友列表，可直接开聊</Text>
+                  <Pressable onPress={() => setSheet("REQUESTS")} style={[styles.btn, styles.btnGhost, { marginTop: 8 }]} accessibilityLabel="看看我发出的请求"><Text style={styles.btnGhostText}>看看我发出的请求</Text></Pressable>
+                </View>
+              ) : null}
               {scanLookup === "found" && !relationship ? <Text style={styles.scanHitNote}>登录后才能发送好友请求。</Text> : null}
               {scanLookup === "missing" ? <Text style={styles.scanError}>这张名片指向的人不存在 —— 可能已注销，或者名片被改过。</Text> : null}
               {scanLookup === "failed" ? <Text style={styles.scanError}>查询失败，请稍后重试。</Text> : null}
@@ -712,6 +739,13 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
             );
           })}
           {!requests.length ? <Text style={styles.resultEmptyText}>暂无待处理请求</Text> : null}
+          {/* ADD-FRIEND-NEXT-001: “我发出的”分组只展示等待态，不加动作按钮
+              （服务端无撤回命令，不编）。空态独立一句，不与上混用。 */}
+          <View style={styles.sectionHead}><Text style={styles.sectionTitle}>我发出的</Text><Text style={styles.sectionNote}>{outgoingRequests.length} 个等待中</Text></View>
+          {outgoingRequests.map((o) => (
+            <View key={o.userId} style={styles.personRow}><View style={styles.avatarSmall}><Text style={styles.avatarSmallText}>{o.initial}</Text></View><View style={styles.personCopy}><Text style={styles.personName}>{o.name}</Text><Text style={styles.personSub}>{o.sub}</Text></View><Text style={styles.scanHitNote}>等待对方通过</Text></View>
+          ))}
+          {!outgoingRequests.length ? <Text style={styles.resultEmptyText}>你还没发出过请求</Text> : null}
         </CrmSheet>
 
         {toast ? <View style={styles.toast}><Text style={styles.toastText}>{toast}</Text></View> : null}
