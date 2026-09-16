@@ -5091,6 +5091,16 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/market-pin-parity.test.ts || exit $?
 echo "    MARKET-PIN-PARITY-001: PASS (explorer and order pins share one visual weight)"
 
+# MARKET-LEGEND-PARITY-001: 订单/活动副标题长短不一，图例行换行不同，
+# 整张地图卡一高一矮。锁死图例高度 + 副标题两行封顶。
+if ! grep -q 'numberOfLines={2} style={styles.mapLegendSub}' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -q 'MARKET-LEGEND-PARITY-001' apps/mobile/src/market-legend-parity.test.ts; then
+  echo "  FAIL [MARKET-LEGEND-PARITY-001]: legend height not locked — map cards differ per tab" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/market-legend-parity.test.ts || exit $?
+echo "    MARKET-LEGEND-PARITY-001: PASS (legend fixed height, both tabs equal)"
+
 # DEVICE-LOCATION-002: 跟随开关冷启动必丢（P0）。
 #
 # 开关只活在内存（useState 默认 true），手动地点存在 keychain —— 每次冷启动

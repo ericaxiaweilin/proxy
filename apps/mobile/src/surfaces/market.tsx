@@ -1883,8 +1883,9 @@ function MarketMap({
   return (
     <View style={styles.mapWrap}>
       <View style={styles.mapLegend}>
-        <Text style={styles.mapLegendTitle}>{titleText}</Text>
-        <Text style={styles.mapLegendSub}>{subText}</Text>
+          <Text style={styles.mapLegendTitle}>{titleText}</Text>
+          <Text style={styles.mapLegendTitle}>{titleText}</Text>
+          <Text numberOfLines={2} style={styles.mapLegendSub}>{subText}</Text>
       </View>
       <View style={styles.geoMap}>
         <MapView
@@ -2173,9 +2174,11 @@ const styles = StyleSheet.create({
   hostFlag: { marginHorizontal: 12, marginTop: -4, marginBottom: 7 },
   hostFlagText: { backgroundColor: "#F3EEFA", borderRadius: 999, color: "#633B99", fontSize: 11, fontWeight: "900", overflow: "hidden", paddingHorizontal: 6, paddingVertical: 4 },
   mapWrap: { marginVertical: 9 },
-  mapLegend: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  // MARKET-LEGEND-PARITY-001: 图例行锁死高度 —— 订单/活动副标题长短不一，
+  // 不锁的话换行行数不同，整张地图卡一高一矮。两行封顶，高度恒定。
+  mapLegend: { alignItems: "center", flexDirection: "row", height: 34, justifyContent: "space-between", marginBottom: 6 },
   mapLegendTitle: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  mapLegendSub: { color: color.muted, fontSize: 11, textAlign: "right" },
+  mapLegendSub: { color: color.muted, flexShrink: 1, fontSize: 11, lineHeight: 15, marginLeft: 12, textAlign: "right" },
   geoMap: { backgroundColor: "#F7F5F8", borderColor: color.line, borderRadius: 19, borderWidth: 1, height: 330, marginVertical: 8, overflow: "hidden", position: "relative" },
   geoDistrict: { backgroundColor: "rgba(255,255,255,0.78)", borderRadius: 8, color: "#8E8595", fontSize: 11, fontWeight: "900", paddingHorizontal: 6, paddingVertical: 4, position: "absolute" },
   geoPin: { alignItems: "center", backgroundColor: "#0B7A73", borderColor: color.white, borderRadius: 999, borderWidth: 2, height: 31, justifyContent: "center", minWidth: 31, paddingHorizontal: 7, position: "absolute", transform: [{ translateX: -15.5 }, { translateY: -15.5 }] },

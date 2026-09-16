@@ -4,6 +4,13 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 213 — 2026-09-16
+
+- MARKET-LEGEND-PARITY-001：地图图例行锁高，订单/活动两 Tab 等高（market scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/market.tsx`
+    —— 图例行定高 34、副标题两行封顶+可收缩换行；副标题长短不再撑出不同卡高。
+    文案内容不变，无新增页面。
+
 ## Revision 212 — 2026-09-16
 
 - MARKET-PIN-PARITY-001：探索点图钉去半透明，与订单钉同视觉权重（market scope）。
