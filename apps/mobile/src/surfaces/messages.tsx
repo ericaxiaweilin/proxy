@@ -497,6 +497,20 @@ export function MessagesSurface({
     setSubView("person");
   };
 
+  // 添加好友完整表面：从主界面「＋」或新聊天入口都可直达，不依赖 subView。
+  if (showAddFriend) {
+    return (
+      <FriendCrmSurface
+        relationship={relationship}
+        profileClient={profileClient}
+        initialView="ADD_FRIEND"
+        addFriendBackLabel="‹ 返回"
+        viewer={viewer}
+        onBack={() => { setShowAddFriend(false); setAddFriendNotice(""); }}
+        onOpenConversation={(author) => { setShowAddFriend(false); onOpenConversation(author); }}
+      />
+    );
+  }
   if (subView === "requests") {
     return (
       <SwipeBackShell onExit={() => setSubView("home")}>
@@ -521,20 +535,6 @@ export function MessagesSurface({
   }
 
   if (subView === "contacts") {
-    // 添加好友完整表面内嵌在消息模块（用户要求：不在「我的」）。
-    if (showAddFriend) {
-      return (
-        <FriendCrmSurface
-          relationship={relationship}
-          profileClient={profileClient}
-          initialView="ADD_FRIEND"
-          addFriendBackLabel="‹ 返回"
-          viewer={viewer}
-          onBack={() => { setShowAddFriend(false); setAddFriendNotice(""); }}
-          onOpenConversation={(author) => { setShowAddFriend(false); onOpenConversation(author); }}
-        />
-      );
-    }
     // 联系人 = 收件箱里真实聊过天的人（名字/最近消息/时间都来自服务端），
     // 没有独立通讯录接口，不编造 username/在线状态/手机号。
     // 已左滑删除的会话不同步到联系人。
