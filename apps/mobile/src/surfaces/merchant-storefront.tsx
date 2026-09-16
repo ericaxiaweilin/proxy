@@ -6,7 +6,7 @@ import { ActivityIndicator, Image, Pressable, ScrollView, Share, StyleSheet, Tex
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import { captureRef } from "react-native-view-shot";
-import { toQrPayload } from "../profile-qr";
+import { buildContactCard } from "../profile-qr";
 import { ProxyQrCode } from "../components/proxy-qr-code";
 import { QrZoomOverlay } from "../components/qr-zoom-overlay";
 import { describeError, saveImageToAlbum } from "../image-export";
@@ -419,13 +419,18 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
     }
   }
 
-  // STORE-QR-001：复制走 https 全量，失败说人话而不是静默。
-  async function copyStoreLink(storeId: string): Promise<void> {
+  // PROFILE-QR-002：店铺码里编的是**门店 vCard 名片**（店名 + 店铺 id），
+  // 所以能复制的是**店名** —— 以前复制的是拼出来的店铺主页链接：那个域名不是我们的
+  // （挂在 Spaceship 上待售），粘给谁都是把对方送去卖域名的落地页，
+  // 而且 App 自己的搜索按名字/字面匹配，那串链接谁也对不上。
+  // 这里刻意**不写出**那个域名：本文件被 gate 的「不许再拼链接」反向钉盯着，
+  // 写进注释会让钉在正确的树上误报。完整的实测记录在 `../profile-qr.ts` 文件头。
+  async function copyStoreName(storeId: string, name: string): Promise<void> {
     try {
-      await Clipboard.setStringAsync(toQrPayload(`proxy.app/store/${storeId}`));
-      setStoreQrNotice({ storeId, text: "链接已复制，去粘贴给你的好友吧。" });
+      await Clipboard.setStringAsync(name);
+      setStoreQrNotice({ storeId, text: `已复制「${name}」—— 让对方在 Proxy 里搜它就能找到这家店。` });
     } catch {
-      setStoreQrNotice({ storeId, text: "复制失败，请长按链接手动复制。" });
+      setStoreQrNotice({ storeId, text: "复制失败，请长按店名手动复制。" });
     }
   }
   async function saveStoreQrToAlbum(storeId: string): Promise<void> {
@@ -501,20 +506,24 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
                         ? <Image source={{ uri: coverUri }} style={styles.storeCover} />
                         : <View style={styles.storeLogo}><Text style={styles.storeLogoText}>{s.name.slice(0, 1).toUpperCase()}</Text></View>;
                     })()}
-                    <View style={styles.storeHeroCopy}><Text style={styles.storeName}>{s.name} · Proxy 店铺</Text><Text style={styles.storeMeta}>{s.address || "地址待完善"} · {s.status} · 公开店铺页</Text></View>
+                    <View style={styles.storeHeroCopy}><Text style={styles.storeName}>{s.name} · Proxy 店铺</Text><Text style={styles.storeMeta}>{s.address || "地址待完善"} · {s.status}</Text></View>
                   </View>
-                  <View style={styles.heroActions}><Pressable onPress={() => void Share.share({ message: `${s.name} · Proxy 公开店铺页：proxy.app/store/${s.id}` })} style={styles.previewButton} accessibilityLabel="分享公开主页链接"><Text style={styles.previewButtonText}>公开主页</Text></Pressable><Pressable onPress={() => void Share.share({ message: `${s.name} · Proxy 店铺` })} style={styles.shareButton}><Text style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
+                  {/* PROFILE-QR-002：这里原来是「公开主页」+「分享店铺」两个按钮，前者分享
+                      拼出来的店铺主页链接。没有域名/公开页之后它就只剩一个卖域名的落地页可分享，
+                      所以撤掉，只留「分享店铺」——分享的是**搜得到的店名**。
+                      （域名不写在这里，原因见上面 copyStoreName 的注释。） */}
+                  <View style={styles.heroActions}><Pressable onPress={() => void Share.share({ message: `${s.name} · 在 Proxy 里搜这家店就能找到。` })} style={styles.shareButton} accessibilityLabel="分享店铺"><Text style={styles.shareButtonText}>分享店铺</Text></Pressable></View>
                   <View style={styles.qrCard}>
                     <View ref={storeQrRefFor(s.id)} collapsable={false} style={styles.qrShot}>
                       <Pressable accessibilityLabel="放大店铺二维码" accessibilityRole="button" onPress={() => setZoomedStore({ id: s.id, name: s.name })}>
-                        <ProxyQrCode size={104} value={`proxy.app/store/${s.id}`} />
+                        <ProxyQrCode size={104} value={buildContactCard({ name: s.name, storeId: s.id }) ?? s.name} />
                       </Pressable>
                     </View>
                     <View style={styles.storeHeroCopy}>
                       <Text style={styles.photoHeadTitle}>店铺二维码</Text>
-                      <Text style={styles.storeMeta}>扫码进入 {s.name} 的 Proxy 公开店铺页，可用于店内桌牌、海报和 Creator 分享。</Text>
+                      <Text style={styles.storeMeta}>扫这张码会把「{s.name}」存成联系人（标准 vCard 名片），任何手机的相机都能扫。可用于店内桌牌、海报和 Creator 分享。</Text>
                       <View style={styles.qrActions}>
-                        <Pressable onPress={() => void copyStoreLink(s.id)} style={styles.previewButton} accessibilityLabel="复制店铺链接"><Text style={styles.previewButtonText}>复制链接</Text></Pressable>
+                        <Pressable onPress={() => void copyStoreName(s.id, s.name)} style={styles.previewButton} accessibilityLabel="复制店名"><Text style={styles.previewButtonText}>复制店名</Text></Pressable>
                         <Pressable onPress={() => void saveStoreQrToAlbum(s.id)} style={styles.shareButton} accessibilityLabel="保存店铺二维码到相册"><Text style={styles.shareButtonText}>保存到相册</Text></Pressable>
                       </View>
                       {storeQrNotice?.storeId === s.id ? <Text style={styles.storeQrNotice}>{storeQrNotice.text}</Text> : null}
@@ -768,18 +777,19 @@ export function MerchantStorefrontSurface({ client, viewerAccountId, header, sho
       actions={
         zoomedStore
           ? [
-              { label: "复制链接", onPress: () => void copyStoreLink(zoomedStore.id) },
+              { label: "复制店名", onPress: () => void copyStoreName(zoomedStore.id, zoomedStore.name) },
               { label: "保存到相册", onPress: () => void saveZoomedStoreQr(), primary: true },
             ]
           : []
       }
-      hint="把屏幕朝向顾客即可扫描；可用于店内桌牌、海报和 Creator 分享。"
+      caption={zoomedStore?.name ?? ""}
+      hint="把屏幕朝向顾客即可扫描；扫出来是一张标准 vCard 名片，存进通讯录即可。"
       // 反馈只属于「这张码」：列表里存了 A 店、放大层开着 B 店时，不能把 A 的结果挂到 B 上。
       notice={storeQrNotice && zoomedStore && storeQrNotice.storeId === zoomedStore.id ? storeQrNotice.text : undefined}
       onClose={() => setZoomedStore(undefined)}
       shotRef={storeZoomShotRef}
       title={zoomedStore ? `${zoomedStore.name} · 店铺二维码` : "店铺二维码"}
-      value={zoomedStore ? toQrPayload(`proxy.app/store/${zoomedStore.id}`) : ""}
+      value={zoomedStore ? buildContactCard({ name: zoomedStore.name, storeId: zoomedStore.id }) ?? zoomedStore.name : ""}
       visible={zoomedStore !== undefined}
     />
     </>

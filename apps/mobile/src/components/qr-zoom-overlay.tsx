@@ -6,21 +6,12 @@
 // 的做法。码区刻意不加边框/阴影 —— 存到相册的那张图就是它，白边本身就是静默区。
 //
 // 关于「真·屏幕亮度」：进入这一层把系统亮度拉到最高、退出时还原 —— 微信 / 支付宝出示码那一屏
-// 的做法（`expo-brightness`；iOS 不需要任何 Info.plist 权限）。
+// 的做法。逻辑在 `../lib/screen-brightness`（延迟 require 的原因、还原语义都在那边写清楚了），
+// 「我的二维码」页共用同一份实现，不各写一遍。
 //
-// **坑：绝不能在模块顶层 `import`。** `expo-brightness/build/ExpoBrightness.js` 在**模块作用域**
-// 就执行 `requireNativeModule('ExpoBrightness')`，而 `requireNativeModule` 在原生模块缺失时是
-// **抛异常**、不是返回 null（见 `expo-modules-core/src/requireNativeModule.ts`）。本组件挂在
-// me.tsx / merchant-storefront / friend-crm 的正常 import 图里 —— 顶层 import 会让**还没装这个
-// pod 的包一启动就崩**。所以走 `loadBrightness()` 延迟 require + try/catch：原生模块不在就当没这
-// 功能，白底满屏照样生效。`expo-modules-core` 的 `requireOptionalNativeModule` 看着更合适，但
-// 那个包在 apps/mobile 下**没有声明**（pnpm 严格布局下从 apps/mobile 解析不到），不能直接引。
-//
-// 生效前提：`pod install` + **重建 dev client**（Metro reload 不够 —— 原生模块不在 JS 里）。
-// 还原：进入时先 `getBrightnessAsync()` 存原值再拉满，退出 / 卸载时写回；读不到原值就什么都不写
-// （宁可还原不了，也不要瞎写一个值）。同一时刻只有一个放大层 visible（各页互斥），不会互相抢。
+// 同一时刻只有一个放大层是 visible（各页互斥），所以不会两个 hook 互相抢亮度。
 
-import { type RefObject, useEffect } from "react";
+import { type RefObject } from "react";
 import {
   Modal,
   Pressable,
@@ -34,14 +25,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProxyQrCode } from "./proxy-qr-code";
 import { ProxyIcon } from "./proxy-icon";
 import { color } from "../theme";
+import { useScreenBrightness } from "../lib/screen-brightness";
 
 export type QrZoomAction = { label: string; onPress: () => void; primary?: boolean };
 
 export type QrZoomOverlayProps = {
   visible: boolean;
   onClose: () => void;
-  /** 二维码内容。组件内部会再归一一次，传短式也安全。同时也是码下方展示/复制的那串。 */
+  /**
+   * 二维码**内容**（编码进码里的那份）。现在是一整张 vCard 名片文本 ——
+   * 所以它**不是**给用户看的那串，展示请用 `caption`。
+   */
   value: string;
+  /** 码下方展示 / 复制的那串。人给 `@handle`（App 搜得到的就是这个），店铺给店名。 */
+  caption: string;
   title: string;
   /** 底部说明，默认是给扫码方的提示。 */
   hint?: string | undefined;
@@ -52,32 +49,11 @@ export type QrZoomOverlayProps = {
   shotRef?: RefObject<View | null> | undefined;
 };
 
-type BrightnessApi = {
-  getBrightnessAsync: () => Promise<number>;
-  setBrightnessAsync: (brightnessValue: number) => Promise<void>;
-};
-
-/**
- * 延迟加载 expo-brightness。返回 undefined = 这个包里没有对应原生模块（还没重建 dev client），
- * 调用方静默降级。**别把它换成顶层 import** —— 原因见文件头注释（会一启动就崩）。
- */
-function loadBrightness(): BrightnessApi | undefined {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require("expo-brightness") as Partial<BrightnessApi>;
-    if (typeof mod.getBrightnessAsync !== "function" || typeof mod.setBrightnessAsync !== "function") {
-      return undefined;
-    }
-    return mod as BrightnessApi;
-  } catch {
-    return undefined;
-  }
-}
-
 export function QrZoomOverlay({
   visible,
   onClose,
   value,
+  caption,
   title,
   hint = "把屏幕朝向对方即可扫描；长按可识别图中二维码。",
   actions,
@@ -93,29 +69,8 @@ export function QrZoomOverlay({
   const maxByWidth = width - 56;
   const qrSize = Math.floor(Math.min(maxByWidth, maxByHeight));
 
-  // 真·屏幕亮度：亮着这一层时拉满，退出还原。为什么是延迟 require 而不是顶层 import，见文件头。
-  useEffect(() => {
-    if (!visible) return undefined;
-    const brightness = loadBrightness();
-    if (!brightness) return undefined;
-
-    // 一条链：读原值 → 拉满 → 把原值带出来。任何一步失败都退化成 undefined（= 不还原）。
-    const restoreTo = brightness
-      .getBrightnessAsync()
-      .then(async (before) => {
-        await brightness.setBrightnessAsync(1);
-        return before;
-      })
-      .catch(() => undefined);
-
-    return () => {
-      // 挂到同一条链上：快速开关时也要等原值读到再还原，否则亮度会卡在 1 下不来。
-      void restoreTo.then((before) => {
-        if (before === undefined) return;
-        void brightness.setBrightnessAsync(before).catch(() => {});
-      });
-    };
-  }, [visible]);
+  // 亮着这一层时把屏幕拉到最亮，退出还原（实现与还原语义见 ../lib/screen-brightness）。
+  useScreenBrightness(visible);
 
   return (
     <Modal animationType="fade" onRequestClose={onClose} statusBarTranslucent visible={visible}>
@@ -141,7 +96,7 @@ export function QrZoomOverlay({
             <ProxyQrCode size={qrSize} value={value} />
           </View>
           <Text selectable style={styles.link}>
-            {value}
+            {caption}
           </Text>
         </ScrollView>
 

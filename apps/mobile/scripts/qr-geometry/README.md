@@ -50,10 +50,50 @@ parsing the SVG.
   (`react-native-view-shot@5.1.1` `ios/RNViewShot.mm:139` — `rendererFormat.scale = 0`),
   so a 104pt code lands in the album as 312px on a 3x phone.
 
-## Baseline result (2026-09-16, baseline Rev 219)
+## Payloads changed: vCard, not a URL (2026-09-16, PROFILE-QR-002)
 
-Geometry: dot side 0.87 module (`DOT_INSET 0.065`), dot radius 0.22, finder 0.30 /
-hole inset 0.55 / core radius 0.40, logo 24% + ring 3.2%.
+`PAYLOADS` in `export-matrices.mjs` no longer matches the old `https://proxy.app/...`
+shapes. The app now encodes **standard vCard contact cards** (`buildContactCard()` in
+`src/profile-qr.ts`) — `proxy.app` is a parked domain listed for sale, and the app's own
+search matches handles literally, so a URL payload was never resolvable. **Update
+`PAYLOADS` whenever the card shape changes, then re-run `./run.sh`.**
+
+Payload length drives the QR version, which drives scannability at a fixed render size.
+Measured at ECC H:
+
+| payload | version | modules |
+|---|---|---|
+| old `store` URL | v7 | 45×45 |
+| person card (`N`/`FN`/`NICKNAME`/`X-PROXY-HANDLE`) | v10 | 57×57 |
+| store card (`N`/`FN`/`X-PROXY-STORE`) | v12 | 65×65 |
+| store card **with `ORG:`** | v13 | 69×69 |
+
+Decode pass rate over 51 pixel sizes (200–400px, step 4), shipping geometry:
+
+| payload | pass rate |
+|---|---|
+| old `store` URL (v7) | **98.0 %** |
+| person card (v10) | **88.2 %** |
+| store card, no `ORG` (v12) | **88.2 %** |
+| store card with `ORG` (v13) | **76.5 %** |
+
+`ORG:` is why the store card omits it: for a shop it merely repeats `FN`, but it costs a
+whole version step and **12 percentage points** of decode rate.
+
+**A single size is not a valid sample.** Decode success depends on sub-pixel grid
+alignment, so results are non-monotonic (`v10_min` failed at 260px and passed at 288px).
+Compare pass **rates across a size range**, never one size.
+
+Every size the app actually renders passes: 104pt@2x=208px, 104pt@3x=312px,
+168pt@2x=336px, and 416/504/592/624/888px (the personalqr page and the zoom overlay at
+2x/3x). Round-trip was verified too: decoded text equals the source payload with 0
+mismatches, and `parseScannedQr` reads all four real card shapes back.
+
+## Baseline result — pre-vCard URL payloads (2026-09-16, baseline Rev 219)
+
+Kept for reference: this is the sweep that validated the **old** `https://proxy.app/...`
+payloads, before the switch to vCards. Geometry: dot side 0.87 module (`DOT_INSET 0.065`),
+dot radius 0.22, finder 0.30 / hole inset 0.55 / core radius 0.40, logo 24% + ring 3.2%.
 
 - **132 / 144 decode.** The 12 failures are all `_1x` at 88px and 104px on the long
   payloads (`invite`, `store`), and **every one of them also fails at `ratio=00`**

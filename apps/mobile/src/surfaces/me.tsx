@@ -19,7 +19,8 @@ import { ProxyQrCode } from "../components/proxy-qr-code";
 import { QrZoomOverlay } from "../components/qr-zoom-overlay";
 import { captureRef } from "react-native-view-shot";
 import { Directory, File, Paths } from "expo-file-system";
-import { profileQrPayload, toQrPayload } from "../profile-qr";
+import { buildContactCard } from "../profile-qr";
+import { useScreenBrightness } from "../lib/screen-brightness";
 import { saveImageToAlbum, toFileUrl } from "../image-export";
 import { createProfileStore, avatarFileName, mergeRemoteProfile, type ProfileRecord } from "../profile-store";
 import { deriveProfileFromIdentifier, NEUTRAL_PROFILE } from "../profile-identity";
@@ -572,6 +573,14 @@ export function MeSurface({
   // PROFILE-QR-004：个人总管理的小卡也有自己的截图锚点。同一次渲染里只会挂载
   // 其中一个（子页与卡片互斥），所以锚点必须由调用方传进来，不许写死一个。
   const qrCardShotRef = useRef<View>(null);
+  // PROFILE-QR-008：出示码的那两屏把屏幕拉满 —— 微信、支付宝出示码那一屏的做法。
+  // 「我的二维码」页里那张 208px 的码就是给对方扫的，停在这一页期间屏幕要亮。
+  //
+  // **只允许一个 active**：`lib/screen-brightness` 的契约写明「同一时刻两个 active
+  // 会互相抢亮度」，而放大层自己已经调了一次（`useScreenBrightness(visible)`）。
+  // 所以这里要排除放大层开着的那一刻 —— 那时由放大层负责，关掉后这里再接手。
+  // 写成 `qrZoomOpen || …` 就会两个同时为 true，违反契约。
+  useScreenBrightness(subPage?.route === "personalqr" && !qrZoomOpen);
   // 结构化类型，避免 React 18/19 的 RefObject 定义差异把签名写死。
   type QrShotRef = { current: View | null };
   // 失败必须带上真实原因。笼统的「请重试」把「这个安装包根本没带原生模块」
@@ -584,7 +593,14 @@ export function MeSurface({
     try {
       // 必须补成 file:// —— 分享面板拿到无 scheme 的裸路径会少给动作（存图/发消息）。
       const uri = toFileUrl(await captureRef(shotRef, { format: "png", quality: 1 }));
-      await Share.share({ url: uri, message: `查看 ${profileDraft.name} 的 Proxy 主页` });
+      // 文案里**不再放链接**：码本身是一张 vCard 名片，配文给 handle 才是 App 搜得到的。
+      const handle = profileDraft.handle.replace(/^@+/, "");
+      await Share.share({
+        url: uri,
+        message: handle
+          ? `加我 Proxy：在 App 里搜 @${handle}，或者扫这张二维码。`
+          : `查看 ${profileDraft.name} 的 Proxy 主页`,
+      });
     } catch (err) {
       setQrNotice(`分享失败：${qrFailureReason(err)}`);
     }
@@ -608,10 +624,15 @@ export function MeSurface({
       setQrNotice(`保存失败：${qrFailureReason(err)}`);
     }
   }
-  async function copyProfileLink(link: string): Promise<void> {
+  // 复制的是**码下方那串展示文本**（人的 `@handle` / 店铺的店名），不是链接。
+  // 以前复制的是拼出来的主页链接 —— 那个域名不是我们的（挂在 Spaceship 上**待售**），
+  // 而且 App 自己的搜索按 handle 字面匹配，粘回去根本搜不到人。
+  // 这里刻意**不写出**那个域名：本文件被 gate 的「不许再拼链接」反向钉盯着，
+  // 写进注释会让钉在正确的树上误报。完整的实测记录在 `../profile-qr.ts` 文件头。
+  async function copyQrText(text: string): Promise<void> {
     try {
-      await Clipboard.setStringAsync(link);
-      setQrNotice("链接已复制，去粘贴给你的好友吧。");
+      await Clipboard.setStringAsync(text);
+      setQrNotice(`已复制 ${text} —— 让对方在 Proxy 里搜它就能找到。`);
     } catch (err) {
       setQrNotice(`复制失败：${qrFailureReason(err)}`);
     }
@@ -1024,9 +1045,11 @@ export function MeSurface({
     }
   }
 
-  // PROFILE-QR-004：二维码页可以带 payload 进来（商家卡片画的是店铺码，打开的
-  // 页就必须还是店铺码）。extra 只对需要透传的路由传。
-  function openSubPage(route: string, extra?: { qrPayload?: string; qrTitle?: string; backRoute?: string }): void {
+  // PROFILE-QR-004：二维码页可以带**店铺 id** 进来（商家卡片画的是店铺名片，打开的
+  // 页就必须还是店铺名片）。只传 id，名片本身由页面用 buildContactCard 统一生成 ——
+  // 以前这里传的是**编好的主页链接**，等于把域名这件事漏进了导航参数。
+  // （域名不写在这里，原因见上面 copyQrText 的注释。）
+  function openSubPage(route: string, extra?: { qrStoreId?: string; qrTitle?: string; backRoute?: string }): void {
     const next = meSubPage(route);
     if (!next) return;
     setSubPage(extra ? { ...next, ...extra } : next);
@@ -1667,7 +1690,8 @@ export function MeSurface({
       // PROFILE-QR-004：二维码的常规能力（复制 / 存图 / 放大页）以前只挂在
       // 商家路径才到的 personalqr 子页上，这里只有「分享链接」一个按钮。
       // handle 非法时 payload 为 null —— 不画假码，也不给存假码的按钮。
-      const manageQrPayload = profileQrPayload(profileDraft.handle);
+      const manageQrPayload = buildContactCard({ name: profileDraft.name, handle: profileDraft.handle });
+      const manageQrCaption = profileDraft.handle ? `@${profileDraft.handle.replace(/^@+/, "")}` : "";
       const managePage = contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
@@ -1708,7 +1732,7 @@ export function MeSurface({
               alignCenter
               onQrPress={manageQrPayload ? () => setQrZoomOpen(true) : undefined}
               actions={manageQrPayload ? [
-                { label: "复制链接", onPress: () => void copyProfileLink(manageQrPayload) },
+                { label: "复制 @handle", onPress: () => void copyQrText(manageQrCaption) },
                 { label: "保存到相册", onPress: () => void saveQrToAlbum(qrCardShotRef), primary: true },
                 { label: "我的二维码页 ›", onPress: () => openSubPage("personalqr", { backRoute: "personalmanage" }) }
               ] : [{ label: "去设置主页名", onPress: () => setProfileEditorOpen(true), primary: true }]}
@@ -1743,7 +1767,7 @@ export function MeSurface({
           {manageQrPayload ? (
             <QrZoomOverlay
               actions={[
-                { label: "复制链接", onPress: () => void copyProfileLink(manageQrPayload) },
+                { label: "复制 @handle", onPress: () => void copyQrText(manageQrCaption) },
                 { label: "保存到相册", onPress: () => void saveQrToAlbum(qrZoomShotRef), primary: true },
                 { label: "分享二维码图", onPress: () => void shareQrImage(qrZoomShotRef) },
               ]}
@@ -1752,6 +1776,7 @@ export function MeSurface({
               shotRef={qrZoomShotRef}
               title={`${profileDraft.name} · 我的二维码`}
               value={manageQrPayload}
+              caption={manageQrCaption}
               visible={qrZoomOpen}
             />
           ) : null}
@@ -1873,7 +1898,15 @@ export function MeSurface({
                 }
               }}
               onEditProfile={() => setProfileEditorOpen(true)}
-              onShareProfile={() => { void Share.share({ message: `查看 ${profileDraft.name} 的 Proxy 主页：proxy.app/@${profileDraft.handle}` }); }}
+              onShareProfile={() => {
+                // 分享的是**搜得到的那串**（@handle），不再是拼出来的主页链接 ——
+                // 那个域名不是我们的（挂在 Spaceship 上待售），而且 App 自己的搜索按
+                // handle 字面匹配，把链接粘进搜索框谁也对不上（用户报的就是这个）。
+                // 真域名 + Universal Link 是 T-15，还没做；在那之前只分享 handle 才是诚实的。
+                // （域名不写在这里，原因见上面 copyQrText 的注释。）
+                const shareHandle = profileDraft.handle.replace(/^@+/, "");
+                void Share.share({ message: shareHandle ? `查看 ${profileDraft.name} 的 Proxy 主页：在 App 里搜 @${shareHandle}` : `${profileDraft.name} 的 Proxy 主页` });
+              }}
               onLikePost={engagement ? (postId) => { void engagement.reactToPost(postId, "LIKE", true).then(() => setLikeError(undefined)).catch(() => setLikeError("点赞没有提交成功，请检查连接后重试。")); } : undefined}
               viewerMode={isSelfProfile ? "SELF" : "OTHER"}
               viewerAccountId={viewerAccountId}
@@ -1982,16 +2015,23 @@ export function MeSurface({
     }
 
     if (subPage.route === "personalqr") {
-      // PROFILE-QR-002：编码/复制/分享一律 https 全量；坏 handle 不画坏码。
-      // PROFILE-QR-004：商家卡片带店铺码进来就画店铺码 —— 以前不管谁按进来
+      // PROFILE-QR-002：码里编的是一张 **vCard 名片**（见 ../profile-qr），
+      // 码下面展示 / 复制的才是那串**搜得到**的文本（人给 @handle，店铺给店名）。
+      // PROFILE-QR-004：商家卡片带店铺 id 进来就画店铺名片 —— 以前不管谁按进来
       // 都画个人主页码，卡片和页对不上。
-      const storeQr = subPage.qrPayload;
-      const profileLink = storeQr ?? profileQrPayload(profileDraft.handle);
+      const storeId = subPage.qrStoreId;
+      const storeName = liveShopName ?? persona.name;
       const qrHeading = subPage.qrTitle ?? "我的二维码";
-      const qrShareText = storeQr
-        ? `${liveShopName ?? profileDraft.name} 的 Proxy 门店：${profileLink}`
-        : `查看 ${profileDraft.name} 的 Proxy 主页：${profileLink}`;
-      if (!profileLink) {
+      // 店铺对象里没有 handle，所以店铺名片只有「店名 + 店铺 id」；
+      // 个人名片才是「姓名 + handle」。
+      const profileCard = buildContactCard({ name: profileDraft.name, handle: profileDraft.handle });
+      const qrCard = storeId ? buildContactCard({ name: storeName, storeId }) : profileCard;
+      const profileHandle = profileDraft.handle.replace(/^@+/, "");
+      const qrCaption = storeId ? storeName : profileHandle ? `@${profileHandle}` : "";
+      const qrShareText = storeId
+        ? `${storeName} 的 Proxy 店铺名片 —— 扫码可直接存进通讯录。`
+        : `加我 Proxy：在 App 里搜 @${profileHandle}，或者扫这张二维码。`;
+      if (!qrCard) {
         return contentWrapper(
           <View style={styles.root}>
             <ScrollView contentContainerStyle={styles.content}>
@@ -2015,14 +2055,14 @@ export function MeSurface({
             <View style={styles.qrRealCard}>
               <View ref={qrShotRef} collapsable={false} style={styles.qrShotWrap}>
                 <Pressable onPress={() => setQrZoomOpen(true)} accessibilityLabel="放大二维码" accessibilityRole="button">
-                  <ProxyQrCode size={208} value={profileLink} />
+                  <ProxyQrCode size={208} value={qrCard} />
                 </Pressable>
-                <Text selectable style={styles.qrRealHandle}>{profileLink}</Text>
+                {qrCaption ? <Text selectable style={styles.qrRealHandle}>{qrCaption}</Text> : null}
               </View>
-              <Text style={styles.qrRealHint}>{storeQr ? "顾客扫码进入门店公开页；可用于桌牌、海报和 Creator 分享。点二维码可放大。" : "点二维码可放大，方便对方扫描；TikTok / Zalo 是否展示，继续遵循你的可见范围。"}</Text>
+              <Text style={styles.qrRealHint}>{storeId ? "扫这张码会把门店存成联系人（标准 vCard 名片），任何手机的相机都能扫。可用于桌牌、海报和 Creator 分享。点二维码可放大。" : "点二维码可放大，方便对方扫描；扫出来是一张标准 vCard 名片，存进通讯录即可。TikTok / Zalo 是否展示，继续遵循你的可见范围。"}</Text>
               <View style={styles.qrRealActions}>
-                <Pressable onPress={() => void copyProfileLink(profileLink)} style={styles.qrRealBtnGhost}>
-                  <Text style={styles.qrRealBtnTextGhost}>复制链接</Text>
+                <Pressable onPress={() => void copyQrText(qrCaption)} style={styles.qrRealBtnGhost}>
+                  <Text style={styles.qrRealBtnTextGhost}>{storeId ? "复制店名" : "复制 @handle"}</Text>
                 </Pressable>
                 <Pressable onPress={() => void saveQrToAlbum(qrShotRef)} style={styles.qrRealBtn}>
                   <Text style={styles.qrRealBtnText}>保存到相册</Text>
@@ -2033,15 +2073,15 @@ export function MeSurface({
                   <Text style={styles.qrRealBtnTextGhost}>分享二维码图</Text>
                 </Pressable>
                 <Pressable onPress={() => { void Share.share({ message: qrShareText }); }} style={styles.qrRealBtnGhost}>
-                  <Text style={styles.qrRealBtnTextGhost}>分享链接</Text>
+                  <Text style={styles.qrRealBtnTextGhost}>分享文字</Text>
                 </Pressable>
               </View>
               {qrNotice ? <Text style={styles.qrRealNotice}>{qrNotice}</Text> : null}
             </View>
 
             {/* PROFILE-QR-004：这段是「个人主页」的可见范围预览 —— 店铺码扫出来
-                是门店公开页，拿 TikTok / Zalo 的分层去描述它属于编内容，不显示。 */}
-            {storeQr ? null : (
+                是一张门店名片，拿 TikTok / Zalo 的分层去描述它属于编内容，不显示。 */}
+            {storeId ? null : (
               <>
                 <Text style={styles.customSectionTitle}>扫码后看到</Text>
                 <Text style={styles.customSectionHint}>预览</Text>
@@ -2077,16 +2117,17 @@ export function MeSurface({
           {qrPage}
           <QrZoomOverlay
             actions={[
-              { label: "复制链接", onPress: () => void copyProfileLink(profileLink) },
+              { label: storeId ? "复制店名" : "复制 @handle", onPress: () => void copyQrText(qrCaption) },
               { label: "保存到相册", onPress: () => void saveQrToAlbum(qrZoomShotRef), primary: true },
               { label: "分享二维码图", onPress: () => void shareQrImage(qrZoomShotRef) },
             ]}
-            hint={storeQr ? "让顾客把屏幕朝向自己即可扫描；长按可识别图中二维码。" : "把屏幕朝向对方即可扫描；长按可识别图中二维码。"}
+            caption={qrCaption}
+            hint={storeId ? "让顾客把屏幕朝向自己即可扫描；长按可识别图中二维码。" : "把屏幕朝向对方即可扫描；长按可识别图中二维码。"}
             notice={qrNotice}
             onClose={() => setQrZoomOpen(false)}
             shotRef={qrZoomShotRef}
             title={qrHeading}
-            value={profileLink}
+            value={qrCard}
             visible={qrZoomOpen}
           />
         </>
@@ -2249,6 +2290,16 @@ export function MeSurface({
     }
 
     if (subPage.route === "bdash") {
+      // PROFILE-QR-004：这张卡画的是**门店名片**（店名 + 店铺 id），不是个人主页码 ——
+      // 以前不管有没有商家主体，这里编的都是拼出来的主页链接，扫出来只有一条链接。
+      // 现在编标准 vCard：扫到就能存联系人，不需要域名。
+      // 没有商家主体时退回**个人名片**，并且标题/按钮跟着改口径 —— 卡上写着「商家」、
+      // 点开却是个人码，就是「卡和页对不上」那类 bug。
+      // （域名不写在这里，原因见上面 copyQrText 的注释。）
+      const merchantCard = merchantId
+        ? buildContactCard({ name: liveShopName ?? persona.name, storeId: merchantId })
+        : null;
+      const merchantQrValue = merchantCard ?? buildContactCard({ name: profileDraft.name, handle: profileDraft.handle });
       return contentWrapper(
         <View style={styles.root}>
           <ScrollView contentContainerStyle={styles.content}>
@@ -2270,11 +2321,13 @@ export function MeSurface({
             </View>
 
             <QrCard
-              title="商家身份二维码"
-              desc="顾客扫码核验商家主体与真实到店记录，扫码先看到门店主页与信誉。"
-              actionLabel="打开商家二维码"
-              onAction={() => openSubPage("personalqr", { backRoute: "bdash", ...(merchantId ? { qrPayload: toQrPayload(`proxy.app/store/${merchantId}`), qrTitle: "商家二维码" } : {}) })}
-              qrValue={merchantId ? `proxy.app/store/${merchantId}` : `proxy.app/@${profileDraft.handle}`}
+              title={merchantCard ? "商家身份二维码" : "个人二维码"}
+              desc={merchantCard
+                ? "扫这张码会把门店存成联系人（标准 vCard 名片），任何手机的相机都能扫。点下方按钮打开可放大、存图、分享的完整页面。"
+                : "还没有接入店铺主体，这里先放你的个人名片。点下方按钮可以放大、存图、分享。"}
+              actionLabel={merchantCard ? "打开商家二维码" : "打开我的二维码"}
+              onAction={() => openSubPage("personalqr", { backRoute: "bdash", ...(merchantId ? { qrStoreId: merchantId, qrTitle: "商家二维码" } : {}) })}
+              qrValue={merchantQrValue ?? undefined}
             />
 
             <View style={styles.subSection}>

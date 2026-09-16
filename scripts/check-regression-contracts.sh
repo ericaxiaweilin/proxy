@@ -3881,20 +3881,60 @@ echo "    LOCALNET-EVENTSTREAM-001: PASS (cross-user event-stream reads are oper
 
 # PROFILE-QR-003: SCAN sheet 曾是假识别 —— 点一下就把写死的 PX-937201 填进搜索框，
 # 假装扫到了人。现在走 parseScannedQr 真解析：三种失败说三句不同的话
-# （读不到剪贴板 / 剪贴板是空的 / 不是 Proxy 码），非 proxy.app 一律 fail-closed，
-# 相机与剪贴板共用同一处理器，不许静默吞掉。
+# （读不到剪贴板 / 剪贴板是空的 / 不是 Proxy 名片），不是 Proxy 名片一律 fail-closed，
+# 相机 / 相册 / 剪贴板共用同一处理器，不许静默吞掉。
 #
 # 钉接线，不钉调用拼写：钉死 `parseScannedQr(text)` 会在参数改名时对**合法**重构误报
 # （相机接入后是 parseScannedQr(raw)），而这条钉真正要守的是「剪贴板内容必须经共用
 # 处理器进真解析器」。参数名是实现细节，接线才是契约。
-if ! grep -q 'PROFILE-QR-003' apps/mobile/src/profile-qr.test.ts ||
-   ! grep -q 'parseScannedQr' apps/mobile/src/profile-qr.ts ||
+#
+# PROFILE-QR-007（2026-09-16）：`src/profile-qr.test.ts` 已删除 —— 它是纯函数单测，
+# 证明的是「这几行代码还在」，而这一轮改的是真机行为（相册选图、亮屏、名片格式）。
+# 用户对此有明确口径：这类源码级单测没有意义。改由下面这几条**接线钉**接手：
+# 解析器还在、三条入口都汇进 handleScannedCode、相册那条走标准入口 scanFromURLAsync。
+if ! grep -q 'parseScannedQr' apps/mobile/src/profile-qr.ts ||
+   ! grep -q 'buildContactCard' apps/mobile/src/profile-qr.ts ||
    ! grep -q 'handleScannedCode' apps/mobile/src/surfaces/friend-crm.tsx ||
    ! grep -qE 'parseScannedQr\(' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -qF 'await handleScannedCode(text)' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -qF 'await handleScannedCode(found[0]!)' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -q 'scanFromURLAsync' apps/mobile/src/surfaces/friend-crm.tsx ||
    ! grep -q 'PROFILE-QR-003' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
   echo "  FAIL [PROFILE-QR-003]: scan-parse wiring or its tests are missing" >&2
   exit 1
 fi
+# 反向钉：码里必须是 vCard，不是链接。
+# 注意**不能**拿域名当反向钉 —— `profile-qr.ts` 文件头的注释本来就要写明这段历史
+# （写了才有人不去改回来），而 `grep -qF 'proxy.app'` 读的是原文，会在**正确**的树上误报。
+# 所以钉编码路径独有的字面量：这三行只可能出现在 vCard 编码器里。
+if ! grep -qF '"BEGIN:VCARD"' apps/mobile/src/profile-qr.ts ||
+   ! grep -qF '"END:VCARD"' apps/mobile/src/profile-qr.ts ||
+   ! grep -qF 'VERSION:3.0' apps/mobile/src/profile-qr.ts; then
+  echo "  FAIL [PROFILE-QR-003]: the QR payload is no longer a vCard ——" >&2
+  echo "        proxy.app is a parked domain for sale; the code must encode a vCard." >&2
+  exit 1
+fi
+# 反向钉：三个出示码的地方（我的二维码 / 店铺卡 / 邀请卡）都不许再拼域名链接。
+#
+# 这三个文件里**一个字符都不许有**那个域名 —— 连解释「为什么删掉」的注释也不许写：
+# gate 读的是原文，注释里写了就会在**正确**的树上误报（这个坑这次真的踩到了）。
+# 完整的实测记录只写在 `profile-qr.ts` 文件头，那一个文件不在这条反向钉的范围内。
+#
+# 正向钉必须带 `(`：裸符号会被 `import { buildContactCard }` 那一行满足，
+# 把真正的调用点换成硬编码字符串照样绿 —— 反向注入实测过，所以钉的是调用形状。
+for qrsite in apps/mobile/src/surfaces/me.tsx \
+              apps/mobile/src/surfaces/merchant-storefront.tsx \
+              apps/mobile/src/surfaces/friend-crm.tsx; do
+  if grep -qF 'proxy.app' "$qrsite"; then
+    echo "  FAIL [PROFILE-QR-003]: $qrsite builds a QR payload from a domain again ——" >&2
+    echo "        that domain is for sale on Spaceship; the code must encode a vCard." >&2
+    exit 1
+  fi
+  if ! grep -qF 'buildContactCard(' "$qrsite"; then
+    echo "  FAIL [PROFILE-QR-003]: $qrsite no longer builds its QR from a vCard" >&2
+    exit 1
+  fi
+done
 # 互斥锁必须是**活的**。scanBusyRef 之前只在关闭 sheet 时被置 false，从头到尾
 # 没有一处置 true —— `if (scanBusyRef.current || scanned) return;` 的前半恒为假。
 # 相机每帧都回调 onBarcodeScanned，而 `scanned` 是 state、要等一次渲染才生效，
@@ -3912,8 +3952,8 @@ if grep -q '模拟识别' apps/mobile/src/surfaces/friend-crm.tsx ||
   echo "        SCAN sheet must parse the real clipboard content, never fill a hardcoded demo id." >&2
   exit 1
 fi
-pnpm --filter @proxy/mobile exec vitest run src/profile-qr.test.ts src/surfaces/placeholder-honest-actions.test.ts || exit $?
-echo "    PROFILE-QR-003: PASS (real scan parse + three honest errors, fake demo stays dead)"
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
+echo "    PROFILE-QR-003: PASS (real scan parse + distinct honest errors, fake demo stays dead)"
 
 # HANDLE-UNIQUE-001: handle 的唯一性曾只写在 profile.go 的注释里
 # （"uniqueness is per-tenant, enforced by repository on create"）。

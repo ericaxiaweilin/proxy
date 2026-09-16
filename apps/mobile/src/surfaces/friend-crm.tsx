@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView, scanFromURLAsync, useCameraPermissions } from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
 import { captureRef } from "react-native-view-shot";
-import { inviteQrPayload, parseScannedQr } from "../profile-qr";
+import { buildContactCard, parseScannedQr, scannedCaption } from "../profile-qr";
 import type { ScannedQr } from "../profile-qr";
 import { ProxyQrCode } from "../components/proxy-qr-code";
 import { QrZoomOverlay } from "../components/qr-zoom-overlay";
@@ -154,11 +155,11 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [scanError, setScanError] = useState("");
   // 相机权限（PROFILE-QR-003）：granted 前显示授权按钮，拒绝后显示明确文案。
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  // HANDLE-LOOKUP-001: 识别出 handle 之后要落到**人**。四种结果四种文案 ——
-  // 查到 / 没这个人 / 查询失败 / 没有登录态，谁也不许长得像谁：
+  // HANDLE-LOOKUP-001: 识别出 handle 之后要落到**人**。五种结果五种文案 ——
+  // 查到 / 没这个人 / 查询失败 / 没有登录态 / 这是店铺名片，谁也不许长得像谁：
   // 把「查不到」显示成「查询失败」会让人一直重试，把「没登录」显示成
-  // 「查不到」会让人以为码坏了。
-  const [scanLookup, setScanLookup] = useState<"found" | "missing" | "failed" | "no-client">();
+  // 「查不到」会让人以为码坏了，把「店铺名片」显示成「查无此人」会让人以为店关了。
+  const [scanLookup, setScanLookup] = useState<"found" | "missing" | "failed" | "no-client" | "store">();
   const [scanMatch, setScanMatch] = useState<ProfileWire>();
   const [scanBusy, setScanBusy] = useState(false);
   // 相机每帧可能触发多次 barcode 事件：ref 锁住重复解析（state 更新是异步的）。
@@ -242,13 +243,13 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
     setTimeout(() => setToast(""), 1700);
   }
 
-  // 复制邀请链接：成功给出可见确认，失败也说人话而不是静默无响应。
-  async function copyInviteLink(link: string): Promise<void> {
+  // 复制邀请文本（@handle）：成功给出可见确认，失败也说人话而不是静默无响应。
+  async function copyInviteText(text: string): Promise<void> {
     try {
-      await Clipboard.setStringAsync(link);
+      await Clipboard.setStringAsync(text);
       setInviteCopied(true);
     } catch {
-      showToast("复制失败，请长按链接手动复制。");
+      showToast("复制失败，请长按 @handle 手动复制。");
     }
   }
   // PROFILE-QR-004：邀请码存图。和「我的二维码」页同一套失败文案口径 ——
@@ -270,6 +271,15 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   async function saveInviteQrFromZoom(): Promise<void> {
     setInviteQrNotice(await saveInviteQrToAlbum(inviteZoomShotRef));
   }
+
+  // PROFILE-QR-002：邀请码里编的是一张**标准 vCard 名片**（姓名 + @handle），
+  // 不再是拼出来的邀请链接。那个域名不是我们的（挂在 Spaceship 上**待售**），
+  // 扫出来只是把对方送到卖域名的落地页；而名片是成熟标准，任何手机的相机
+  // 扫到都能「存联系人」，不需要域名。码下面展示 / 复制的才是**搜得到的那串**（@handle）。
+  // 这里刻意**不写出**那个域名：本文件被 gate 的「不许再拼链接」反向钉盯着，
+  // 写进注释会让钉在正确的树上误报。完整的实测记录在 `../profile-qr.ts` 文件头。
+  const inviteCard = viewer ? buildContactCard({ name: viewer.name, handle: viewer.handle }) : null;
+  const inviteCaption = viewer ? `@${viewer.handle.replace(/^@+/, "")}` : "";
 
   // 好友请求失败说人话：英文技术错不上屏，会话类问题提示登录。
   function requestErrorMessage(error: unknown, fallback: string): string {
@@ -317,12 +327,12 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
     showToast("已拉黑");
   }
 
-  // PROFILE-QR-003: 从剪贴板识别二维码链接。
+  // PROFILE-QR-003: 从剪贴板识别二维码内容。
   //
   // 旧实现是假识别：点一下就把写死的演示号 PX-937201 填进搜索框，假装扫到了人。
   // 现在走真解析，并且三种失败说三句不同的话 —— 读不到剪贴板 / 剪贴板是空的 /
-  // 不是 Proxy 码，绝不合并成一句含糊的「识别失败」：
-  //   · 非 proxy.app 的内容一律 fail-closed（扫什么码都给反应等于帮钓鱼码做跳转）；
+  // 不是 Proxy 名片，绝不合并成一句含糊的「识别失败」：
+  //   · 不是 Proxy 名片的内容一律 fail-closed（扫什么码都给反应等于帮钓鱼码做跳转）；
   //   · 解析不出结果时返回 null，UI 必须说人话，不许静默吞掉。
   async function scanFromClipboard(): Promise<void> {
     setScanned(undefined);
@@ -332,18 +342,56 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       text = await Clipboard.getStringAsync();
     } catch {
       setScanned(null);
-      setScanError("读取剪贴板失败 —— 请手动复制对方的二维码链接后重试。");
+      setScanError("读取剪贴板失败 —— 请重新复制对方的二维码内容后重试。");
       return;
     }
     if (!text.trim()) {
       setScanned(null);
-      setScanError("剪贴板里没有内容 —— 先复制对方分享的 Proxy 二维码链接。");
+      setScanError("剪贴板里没有内容 —— 先复制对方分享的 Proxy 名片文本（vCard）。");
       return;
     }
     await handleScannedCode(text);
   }
 
-  // PROFILE-QR-003：相机扫码与剪贴板共用同一解析/落人状态机。
+  // PROFILE-QR-007：从相册选一张图识别。走 expo-camera 的标准入口
+  // `scanFromURLAsync`，不自己写解码 —— 相机扫码、相册选图、剪贴板三条路
+  // 最后都落到同一个 handleScannedCode。
+  async function scanFromLibrary(): Promise<void> {
+    setScanned(undefined);
+    setScanError("");
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setScanned(null);
+      setScanError("需要相册权限才能从相册选图识别 —— 请在系统设置里允许 Proxy 访问照片。");
+      return;
+    }
+    const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 1, selectionLimit: 1 });
+    if (picked.canceled) return; // 用户自己取消，不是失败，不报错。
+    const uri = picked.assets[0]?.uri;
+    if (!uri) {
+      setScanned(null);
+      setScanError("这张图读不出来，换一张试试。");
+      return;
+    }
+    let found: string[] = [];
+    try {
+      const results = await scanFromURLAsync(uri, ["qr"]);
+      found = results.map((r) => r.data).filter((d): d is string => typeof d === "string" && d.length > 0);
+    } catch (error) {
+      setScanned(null);
+      setScanError(`识别这张图失败：${describeError(error)}`);
+      return;
+    }
+    if (found.length === 0) {
+      // 「图里没有二维码」和「二维码不是 Proxy 的」是两件事，分开说。
+      setScanned(null);
+      setScanError("这张图里没有找到二维码 —— 换一张裁掉多余背景的图再试。");
+      return;
+    }
+    await handleScannedCode(found[0]!);
+  }
+
+  // PROFILE-QR-003：相机 / 相册 / 剪贴板共用同一解析/落人状态机。
   // 相机每帧可能触发多次，扫码成功一次后锁住，避免重复查人。
   async function handleScannedCode(raw: string): Promise<void> {
     if (scanBusyRef.current || scanned) return;
@@ -357,11 +405,11 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       const parsed = parseScannedQr(raw);
       if (!parsed) {
         setScanned(null);
-        setScanError("这不是 Proxy 二维码。只识别 proxy.app 的链接，其他内容不会被跳转。");
+        setScanError("这不是 Proxy 名片。只识别 Proxy 生成的 vCard 名片（相机/相册/剪贴板都行），其他内容不会被跳转。");
         return;
       }
       setScanned(parsed);
-      await lookupScannedHandle(parsed);
+      await lookupScannedPerson(parsed);
     } finally {
       // 失败 / 不是二维码也要解锁，否则扫错一次就永久卡住扫不动了。
       scanBusyRef.current = false;
@@ -369,10 +417,18 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   }
 
   // HANDLE-LOOKUP-001: 把识别出的 handle 落到真人（服务端按 handle 唯一解析）。
-  async function lookupScannedHandle(parsed: ScannedQr): Promise<void> {
+  //
+  // PROFILE-QR-007：店铺名片里没有 handle，只有店铺 id —— 这个流程是「加好友」，
+  // 所以店铺名片必须**单独说一句**（"这是店铺名片"），不能悄悄当成「查无此人」。
+  // 三种结局三个屏，是这一屏从第一天起的规矩。
+  async function lookupScannedPerson(parsed: ScannedQr): Promise<void> {
     setScanMatch(undefined);
     setScanLookup(undefined);
     setScanAddSent(false);
+    if (parsed.kind === "store") {
+      setScanLookup("store");
+      return;
+    }
     if (!profileClient) {
       setScanLookup("no-client");
       return;
@@ -515,7 +571,7 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         <View style={styles.privacy}><View style={styles.privacyIcon}><Text style={styles.privacyIconText}>i</Text></View><View style={styles.privacyCopy}><Text style={styles.privacyStrong}>关系不会自动导入</Text><Text style={styles.privacyP}>通讯录或外部社媒只用于发现“可能认识”的人。成为 Proxy 好友前，仍需要发送好友请求并由对方确认。</Text></View></View>
 
         {/* Sheets */}
-        <CrmSheet open={sheet === "SCAN"} onClose={() => { setSheet(undefined); setScanned(undefined); setScanError(""); scanBusyRef.current = false; }} title="扫码添加好友" sub="对准对方的 Proxy 二维码（个人主页 / 邀请码），或从剪贴板识别链接，识别成功后再去添加。">
+        <CrmSheet open={sheet === "SCAN"} onClose={() => { setSheet(undefined); setScanned(undefined); setScanError(""); scanBusyRef.current = false; }} title="扫码添加好友" sub="对准对方的 Proxy 个人二维码，或从相册选图、从剪贴板识别名片文本，识别成功后再去添加。">
           {cameraPermission?.granted ? (
             <View style={styles.cameraWrap}>
               <CameraView
@@ -536,11 +592,15 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
               ) : null}
             </View>
           )}
-          <View style={styles.actions}><Pressable onPress={() => void scanFromClipboard()} style={[styles.btn, styles.btnPrimary]}><Text style={styles.btnPrimaryText}>从剪贴板识别</Text></Pressable></View>
+          {/* 相册和剪贴板都是「没相机 / 相机不好使」时的正路，不能只当兜底。 */}
+          <View style={styles.actions}>
+            <Pressable onPress={() => void scanFromLibrary()} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="从相册选取图片识别"><Text style={styles.btnPrimaryText}>从相册选取</Text></Pressable>
+            <Pressable onPress={() => void scanFromClipboard()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="从剪贴板识别"><Text style={styles.btnGhostText}>从剪贴板识别</Text></Pressable>
+          </View>
           {scanned ? (
             <View style={styles.scanHit}>
-              <Text style={styles.scanHitTitle}>已识别{scanned.kind === "profile" ? "个人二维码" : "邀请二维码"} · @{scanned.handle}</Text>
-              <Text style={styles.scanHitSub}>{scanned.url}</Text>
+              <Text style={styles.scanHitTitle}>已识别{scanned.kind === "store" ? "店铺名片" : "个人名片"}{scanned.name ? ` · ${scanned.name}` : ""}</Text>
+              <Text style={styles.scanHitSub}>{scannedCaption(scanned)}</Text>
               {scanBusy ? <Text style={styles.scanHitNote}>正在查找这个人…</Text> : null}
               {scanLookup === "found" && scanMatch ? (
                 <View style={styles.scanPerson}>
@@ -550,51 +610,53 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
                 </View>
               ) : null}
               {scanLookup === "found" && !relationship ? <Text style={styles.scanHitNote}>登录后才能发送好友请求。</Text> : null}
-              {scanLookup === "missing" ? <Text style={styles.scanError}>这个二维码指向的人不存在 —— 可能已注销，或者链接被改过。</Text> : null}
+              {scanLookup === "missing" ? <Text style={styles.scanError}>这张名片指向的人不存在 —— 可能已注销，或者名片被改过。</Text> : null}
               {scanLookup === "failed" ? <Text style={styles.scanError}>查询失败，请稍后重试。</Text> : null}
-              {scanLookup === "no-client" ? <Text style={styles.scanHitNote}>识别到了 @{scanned.handle}，但当前没有登录态，查不到这个人。</Text> : null}
+              {scanLookup === "no-client" ? <Text style={styles.scanHitNote}>识别到了 @{scanned.kind === "person" ? scanned.handle : ""}，但当前没有登录态，查不到这个人。</Text> : null}
+              {scanLookup === "store" ? <Text style={styles.scanHitNote}>这是店铺名片（{scanned.name}），不是个人名片 —— 加好友要扫对方的个人二维码。店铺主页在「我的 → 企业 / 店铺资料」里。</Text> : null}
             </View>
           ) : null}
           {scanned === null && scanError ? <Text style={styles.scanError}>{scanError}</Text> : null}
         </CrmSheet>
 
-        <CrmSheet open={sheet === "INVITE"} onClose={() => { setSheet(undefined); setInviteCopied(false); }} title="邀请好友" sub="分享你的邀请链接。对方注册/打开 Proxy 后可向你发送好友请求。">
-          {viewer ? (
+        <CrmSheet open={sheet === "INVITE"} onClose={() => { setSheet(undefined); setInviteCopied(false); }} title="邀请好友" sub="把你的名片发给对方。扫到就能存进通讯录；在 App 里搜你的 @handle 也能找到你。">
+          {viewer && inviteCard ? (
             <>
-              <View style={styles.qrName}><Text style={styles.qrNameStrong}>{viewer.name}</Text><Text style={styles.qrNameSub}>Proxy ID · {viewer.handle}</Text></View>
+              <View style={styles.qrName}><Text style={styles.qrNameStrong}>{viewer.name}</Text><Text style={styles.qrNameSub}>Proxy ID · {inviteCaption}</Text></View>
               <View ref={inviteShotRef} collapsable={false} style={styles.inviteQrWrap}>
                 <Pressable accessibilityLabel="放大邀请二维码" accessibilityRole="button" onPress={() => { setInviteQrNotice(undefined); setInviteZoomOpen(true); }}>
-                  <ProxyQrCode size={168} value={`proxy.app/invite/${viewer.handle}`} />
+                  <ProxyQrCode size={168} value={inviteCard} />
                 </Pressable>
               </View>
-              <View style={styles.inviteLink}><Text selectable style={styles.inviteLinkText}>{inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}</Text></View>
+              <View style={styles.inviteLink}><Text selectable style={styles.inviteLinkText}>{inviteCaption}</Text></View>
               <View style={styles.actions}>
-                <Pressable onPress={() => void copyInviteLink(inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制邀请链接"><Text style={styles.btnGhostText}>复制链接</Text></Pressable>
+                <Pressable onPress={() => void copyInviteText(inviteCaption)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制 Proxy ID"><Text style={styles.btnGhostText}>复制 @handle</Text></Pressable>
                 <Pressable onPress={() => void saveInviteQrFromSheet()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="保存邀请二维码到相册"><Text style={styles.btnGhostText}>保存到相册</Text></Pressable>
-                <Pressable onPress={() => void Share.share({ message: `加我 Proxy 好友：${inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable>
+                <Pressable onPress={() => void Share.share({ message: `加我 Proxy：在 App 里搜 ${inviteCaption}，或者扫我的名片二维码。` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable>
               </View>
-              {inviteCopied ? <Text style={styles.inviteCopiedNote}>链接已复制，去粘贴给你的好友吧。</Text> : null}
+              {inviteCopied ? <Text style={styles.inviteCopiedNote}>已复制 {inviteCaption} —— 让对方在 Proxy 里搜它就能找到你。</Text> : null}
             </>
           ) : (
-            <View style={styles.qrName}><Text style={styles.qrNameSub}>登录后显示你的邀请名片</Text></View>
+            <View style={styles.qrName}><Text style={styles.qrNameSub}>{viewer ? "先设置你的 Proxy ID，才能生成邀请名片。" : "登录后显示你的邀请名片"}</Text></View>
           )}
         </CrmSheet>
 
         <QrZoomOverlay
           actions={
-            viewer
+            inviteCard
               ? [
-                  { label: "复制链接", onPress: () => void copyInviteLink(inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`) },
+                  { label: "复制 @handle", onPress: () => void copyInviteText(inviteCaption) },
                   { label: "保存到相册", onPress: () => void saveInviteQrFromZoom(), primary: true },
                 ]
               : []
           }
-          hint="把屏幕朝向对方即可扫描；长按可识别图中二维码。"
+          caption={inviteCaption}
+          hint="把屏幕朝向对方即可扫描；扫出来是一张标准 vCard 名片，存进通讯录即可。"
           notice={inviteQrNotice}
           onClose={() => setInviteZoomOpen(false)}
           shotRef={inviteZoomShotRef}
           title={viewer ? `${viewer.name} 的邀请二维码` : "邀请二维码"}
-          value={viewer ? inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}` : ""}
+          value={inviteCard ?? ""}
           visible={inviteZoomOpen}
         />
 

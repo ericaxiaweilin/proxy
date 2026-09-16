@@ -24,6 +24,7 @@ const stripComments = (source: string): string =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
 const crmCode = stripComments(crm);
 const meCode = stripComments(me);
+const storefrontCode = stripComments(storefront);
 const profileClientSrc = readFileSync(fileURLToPath(new URL("../profile-client.ts", import.meta.url)), "utf8");
 // ADD-FRIEND-FROM-MESSAGES-001: 跨模块入口的接线点在 shell 里 —— 表面文件
 // 自己看不出「有没有人接」，所以要把 shell 也读进来。
@@ -68,22 +69,28 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
     expect(crm).toContain("await handleScannedCode(text)");
     expect(crm).toMatch(/parseScannedQr\(/);
     // 识别出 handle 之后不再往本机搜索框里塞：那等于拿演示结果假装找到了人
-    // （扫谁的码都是同一批 SEARCH_RESULTS）。现在交给 lookupScannedHandle
+    // （扫谁的码都是同一批 SEARCH_RESULTS）。现在交给 lookupScannedPerson
     // 去服务端按 handle 解析真人，见下面的 HANDLE-LOOKUP-001。
     expect(crm).not.toContain("setProxySearch(scanned.handle)");
-    expect(crm).toContain("await lookupScannedHandle(parsed)");
+    expect(crm).toContain("await lookupScannedPerson(parsed)");
     expect(crm).not.toContain("模拟识别");
     expect(crm).not.toContain('setProxySearch("PX-937201")');
     expect(crm).toContain("Share.share");
     expect(crm).toContain("登录后显示你的邀请名片");
   });
 
-  it("PROFILE-QR-003 scan fails closed with three distinct messages", () => {
-    // 读不到剪贴板 / 剪贴板是空的 / 不是 Proxy 码 —— 三件事三句话，
+  it("PROFILE-QR-003 scan fails closed with distinct messages", () => {
+    // 读不到剪贴板 / 剪贴板是空的 / 不是 Proxy 名片 —— 三件事三句话，
     // 不许合并成一句含糊的「识别失败」，也不许静默吞掉。
     expect(crm).toContain("读取剪贴板失败");
     expect(crm).toContain("剪贴板里没有内容");
-    expect(crm).toContain("这不是 Proxy 二维码");
+    expect(crm).toContain("这不是 Proxy 名片");
+    // PROFILE-QR-007：相册选图是第三条路，走 expo-camera 的标准入口
+    // `scanFromURLAsync`，不是自己写解码。图里没二维码和「不是 Proxy 名片」
+    // 也要分开说 —— 前者让用户换张图，后者让用户别扫了。
+    expect(crm).toContain("scanFromURLAsync");
+    expect(crm).toContain("launchImageLibraryAsync");
+    expect(crm).toContain("这张图里没有找到二维码");
     // 相机不再是「未接入」的诚实说明，而是真接上了：真 CameraView + 权限门。
     // 钉住新契约 —— 权限没给时必须说清楚，不许假装能扫。
     expect(crm).toContain("CameraView");
@@ -168,10 +175,19 @@ describe("PLACEHOLDER-001 composer thread is real local state, not a toast", () 
   });
 });
 
-describe("PLACEHOLDER-001 storefront public page shares, analytics without caliber stays unknown", () => {
-  it("wires the public-homepage affordance to a real share", () => {
-    expect(storefront).toContain("proxy.app/store/");
-    expect(storefront).toContain('accessibilityLabel="分享公开主页链接"');
+describe("PLACEHOLDER-001 storefront QR is a real vCard contact card, not a link to a parked domain", () => {
+  it("encodes a vCard and shares the searchable store name", () => {
+    // 以前这里钉的是 `proxy.app/store/`（"公开主页" 按钮分享的链接）。
+    // 那个域名挂在 Spaceship 上**待售** —— 分享出去的每一条都只是把对方送到
+    // 卖域名的落地页，而且 App 自己的搜索按店名/handle 字面匹配，链接谁也对不上。
+    // 改成标准 vCard 之后，钉的是**新契约**：码里是名片，分享的是搜得到的店名。
+    expect(storefront).toContain("buildContactCard({ name: s.name, storeId: s.id })");
+    // 这里钉**代码**，所以剥注释再断言。文件里那段说明「为什么不再分享链接」的注释
+    // 本来就写着那个域名（写了才有人不去改回来），在原文上断言会在**正确**的树上误报。
+    expect(storefrontCode).not.toContain("proxy.app/store/");
+    // 反向钉：那个把用户送去待售域名的按钮不许回来。
+    expect(storefrontCode).not.toContain('accessibilityLabel="分享公开主页链接"');
+    expect(storefront).toContain("在 Proxy 里搜这家店就能找到");
   });
 
   it("has no invented funnel numbers", () => {
@@ -758,12 +774,21 @@ describe("HANDLE-LOOKUP-001 a scanned QR resolves to a real person", () => {
     // 扫到码之后必须真的问服务端「这个 @handle 是谁」。旧行为只把 handle
     // 塞进本机搜索框，而搜索结果全是本机演示数据 —— 扫谁结果都一样。
     expect(crmCode).toContain("profileClient.getProfileByHandle(parsed.handle)");
-    expect(crmCode).toContain("await lookupScannedHandle(parsed)");
+    expect(crmCode).toContain("await lookupScannedPerson(parsed)");
   });
 
-  it("keeps found / missing / failed / no-client as four different truths", () => {
-    // 找到人、服务端说查无此人、请求失败、根本没接线 —— 四件事四种界面。
-    // 合并成一句「查询失败」会让用户对着一个不会好的按钮反复点。
+  it("keeps a store card from being read as 'no such person'", () => {
+    // PROFILE-QR-007：名片有两种 —— 个人（有 handle）和店铺（只有 storeId）。
+    // 店铺名片**没有 handle**，直接丢进按 handle 查人的流程会落成「查无此人」，
+    // 那是把「这是一家店」显示成「这个人注销了」。所以必须先分叉、单独说一句。
+    expect(crmCode).toContain('if (parsed.kind === "store")');
+    expect(crmCode).toContain('setScanLookup("store")');
+    expect(crmCode).toContain("这是店铺名片");
+  });
+
+  it("keeps found / missing / failed / no-client / store as five different truths", () => {
+    // 找到人、服务端说查无此人、请求失败、根本没接线、扫到的是店铺名片 ——
+    // 五件事五种界面。合并成一句「查询失败」会让用户对着一个不会好的按钮反复点。
     //
     // 这里钉的是那个三元：PROFILE_NOT_FOUND 必须走 "missing" 而不是并进
     // "failed"。少了这个分叉，「查无此人」就会显示成「请重试」。

@@ -4,6 +4,48 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 221 — 2026-09-16
+
+- PROFILE-QR-002（码里到底编什么）：**链接 → 标准 vCard 名片**。
+  `apps/mobile/src/profile-qr.ts` 新增 `buildContactCard()` / `parseContactCard()`，
+  替换原先的 `profileQrPayload` / `inviteQrPayload`。三处出示码的地方
+  （我的二维码页 / 店铺卡 / 好友邀请）全部改成编名片。
+  - 为什么不再编链接：那个域名**不是本项目的**（curl 返回 200，页面标题是 Spaceship 的
+    待售页）；`app.json` 没有 `associatedDomains`、仓库里没有 AASA，所以就算域名是
+    我们的，iOS 也不会把链接交给 App；而 `SearchProfiles` 按 handle/昵称**字面匹配**，
+    那串链接粘进搜索框谁也对不上 —— 这正是用户报的「二维码 link 自己系统的搜索都搜不出来」。
+    真域名 + Universal Link 是 T-15，**还没做**。
+  - 卡片形状（ECC H 实测版本号）：个人 `N/FN/NICKNAME/X-PROXY-HANDLE` v10 57×57；
+    店铺 `N/FN/X-PROXY-STORE` v12 65×65。**刻意不写 `ORG:`** —— 它只是把 FN 抄一遍，
+    却要吃掉一整档版本号（v12→v13），实测解码通过率 88.2% → 76.5%。
+  - 可扫性是量出来的，不是拍的：51 个尺寸（200–400px 步长 4）逐张解码的**通过率**
+    —— 旧店铺链接 98.0% → 个人名片 88.2% / 店铺名片 88.2%。App 真正渲染的每个尺寸都过
+    （104pt@2x=208px、@3x=312px、168pt@2x=336px，以及放大层的 2x/3x）。
+    **单个尺寸不能当样本**：解码结果非单调（v10 在 260px 失败、288px 通过）。
+  - 往返验证：解码文本与源 payload 0 处不一致，`parseScannedQr` 能读回全部四种真实形状。
+  - **复制 / 分享的是「搜得到的那串」**（人给 `@handle`、店铺给店名），不再是链接；
+    `QrZoomOverlay` 的 `value` / `caption` 拆开：编进码里的 vs 给用户看的。
+  - 那三个出示码的文件里**一个字符都不许再有那个域名**（连解释「为什么删」的注释也不写
+    —— gate 读原文，写了会在正确的树上误报）。完整实测记录只在 `profile-qr.ts` 文件头。
+- PROFILE-QR-007（扫码支持从相册选取）：加好友的 SCAN sheet 增加「从相册选取」，走
+  `expo-image-picker` 的 `launchImageLibraryAsync` + `expo-camera` 的
+  `scanFromURLAsync` —— **标准组件，不自己写解码**。相册 / 相机 / 剪贴板三条路最后都
+  汇进同一个 `handleScannedCode`。
+  - 四种结局四种说法：没相册权限 / 图读不出来 / 图里没有二维码 / 不是 Proxy 名片。
+- PROFILE-QR-008（亮屏范围）：「我的二维码」页那张 208px 的码，停在该页期间也把屏幕拉满
+  （`useScreenBrightness`）。**同一时刻只允许一个 active** —— 放大层开着时由放大层负责，
+  所以条件是 `route === "personalqr" && !qrZoomOpen`，不是 `qrZoomOpen || …`。
+- 店铺名片被扫到时**单独说一句**：它没有 handle，直接丢进按 handle 查人的流程会落成
+  「查无此人」，等于把「这是一家店」显示成「这个人注销了」。`scanLookup` 增加 `"store"`。
+- **基线敏感文件**：`apps/mobile/src/profile-qr.ts`（payload 形状与可扫性）、
+  `apps/mobile/src/lib/screen-brightness.ts`（新）。
+- 测试口径：`src/profile-qr.test.ts` 已删除 —— 它是纯函数单测，证明的是「这几行代码
+  还在」，而本轮改的是真机行为（相册选图 / 亮屏 / 名片格式）。gate 的 PROFILE-QR-003
+  改由**接线钉**接手：vCard 字面量、三个调用点必须出现 `buildContactCard(`
+  （裸符号会被 import 行满足）、三个文件里不许再出现那个域名、相册入口必须汇进共用处理器。
+  7 个反向注入全部实测变红、基线绿，0 个钉没咬住。
+- 生效前提：`expo-brightness` 仍需 `pod install` + **重建 dev client**（见 Rev 220）。
+
 ## Revision 220 — 2026-09-16
 
 - PROFILE-QR-002（高亮补完）：放大层接上**真·系统亮度** —— 亮着这一层把屏幕拉到最亮，

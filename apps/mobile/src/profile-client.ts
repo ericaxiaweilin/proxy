@@ -58,7 +58,8 @@ export class ProfileClient {
   }
 
   // HANDLE-LOOKUP-001: resolve the person behind a handle — the landing point
-  // of a scanned profile QR / invite link (proxy.app/@linh).
+  // of a scanned profile QR / invite card (a vCard carrying `X-PROXY-HANDLE`;
+  // see `profile-qr.ts` for why the payload is a card and not a URL).
   //
   // The handle travels in the payload, which is the only place the server reads
   // it from; target.id carries it too so the command reads naturally, while

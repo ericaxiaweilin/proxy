@@ -1,13 +1,17 @@
 import type { ExperienceAction } from "@proxy/contracts";
 
-// PROFILE-QR-004：`qrPayload` / `qrTitle` 是可选的二维码透传 —— 商家卡片画的是
-// 店铺码，就必须在打开「我的二维码」页时把店铺码带进去，不许页里偷偷画成个人码。
+// PROFILE-QR-004：`qrStoreId` / `qrTitle` 是可选的二维码透传 —— 商家卡片画的是
+// 店铺名片，就必须在打开「我的二维码」页时把**店铺 id** 带进去，不许页里偷偷画成个人码。
+//
+// 为什么传 id 而不是直接传编好的 payload：名片内容由 `profile-qr.buildContactCard()`
+// 统一生成，页面这边只决定「画谁的」。以前这里传的是一整条 `https://proxy.app/store/...`
+// 字符串，等于把「域名」这件事漏进了导航参数里。
 export type MeSubPage = {
   title: string;
   desc: string;
   icon: string;
   route: string;
-  qrPayload?: string | undefined;
+  qrStoreId?: string | undefined;
   qrTitle?: string | undefined;
   // PROFILE-QR-005：从哪个子页点进来的，返回就回哪一页；缺省回「我的」根页。
   backRoute?: string | undefined;

@@ -137,7 +137,12 @@ function buildQr(value: string, ecl: "L" | "M" | "Q" | "H"): BuiltQr | undefined
 }
 
 export type ProxyQrCodeProps = {
-  /** 二维码内容。内部统一过 `toQrPayload`，保证编码进去的永远是 https 全量。 */
+  /**
+   * 二维码内容。调用方给的就是**最终 payload** —— 现在是
+   * `buildContactCard()` 产出的 vCard 名片文本（见 `../profile-qr`）。
+   * 内部仍过一遍 `toQrPayload`，但它对 vCard 是原样透传，只负责把历史上那种裸
+   * `proxy.app/...` 补成 https，属于兼容垫片，不再是「统一成 https」的入口。
+   */
   value: string;
   /** 码的边长（含徽标，不含静默区）。静默区由外层容器给。 */
   size: number;

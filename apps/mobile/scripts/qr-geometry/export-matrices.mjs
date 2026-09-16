@@ -16,13 +16,25 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { create } = require("qrcode");
 
-// The payload shapes the app actually encodes. Keep in sync with
-// apps/mobile/src/profile-qr.ts (profileQrPayload / inviteQrPayload) and the
-// storefront's `proxy.app/store/<id>`.
+// PROFILE-QR-002 (2026-09-16): the app no longer encodes `proxy.app` URLs — it encodes
+// **standard vCard contact cards** produced by `buildContactCard()` in
+// `apps/mobile/src/profile-qr.ts`. These three strings are that function's verbatim
+// output (CRLF joined; this file writes them with \r\n so the byte length matches).
+//
+// If you change the card shape in `profile-qr.ts`, you MUST update these and re-run
+// `./run.sh` — a sweep over a stale payload validates a code the app will never draw.
+// That mistake already cost one round (gen-cases.py drew square modules while the
+// component drew rounded 0.87-module dots, so the "144 cases passed" proved nothing).
 export const PAYLOADS = {
-  profile: "https://proxy.app/@huyen",
+  // person:  N / FN / NICKNAME / X-PROXY-HANDLE
+  profile: "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Huyen Nguyen;;;;\r\nFN:Huyen Nguyen\r\nNICKNAME:@huyen\r\nX-PROXY-HANDLE:huyen\r\nEND:VCARD",
+  // legacy:  the pre-vCard shape. Still parsed by parseScannedQr (old codes are in
+  // people's photo libraries) but no longer produced — kept so the sweep can show the
+  // version-number cost of the old format.
   invite: "https://proxy.app/invite/huyen",
-  store: "https://proxy.app/store/8f3c1d92-4a7b-4e15-9c88-2b6f0a1d5e77",
+  // store:   N / FN / X-PROXY-STORE  — deliberately NO `ORG:` (it would copy FN and
+  // cost a whole version step: v12 65x65 -> v13 69x69, measured 88.2% -> 76.5%).
+  store: "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Bonsaidon Seafood Buffet;;;;\r\nFN:Bonsaidon Seafood Buffet\r\nX-PROXY-STORE:8f3c1d92-4a7b-4e15-9c88-2b6f0a1d5e77\r\nEND:VCARD",
 };
 
 const out = process.argv[2];
