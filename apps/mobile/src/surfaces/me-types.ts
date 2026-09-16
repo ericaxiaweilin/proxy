@@ -1,6 +1,15 @@
 import type { ExperienceAction } from "@proxy/contracts";
 
-export type MeSubPage = { title: string; desc: string; icon: string; route: string } | undefined;
+// PROFILE-QR-004：`qrPayload` / `qrTitle` 是可选的二维码透传 —— 商家卡片画的是
+// 店铺码，就必须在打开「我的二维码」页时把店铺码带进去，不许页里偷偷画成个人码。
+export type MeSubPage = {
+  title: string;
+  desc: string;
+  icon: string;
+  route: string;
+  qrPayload?: string | undefined;
+  qrTitle?: string | undefined;
+} | undefined;
 export type AvailabilityState = "AVAILABLE" | "BUSY" | "PAUSED" | "HIDDEN";
 
 // R18.x HUB-PROFILE-001: the me-hub top card (profile

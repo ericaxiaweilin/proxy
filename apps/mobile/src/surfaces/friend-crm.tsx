@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import * as MediaLibrary from "expo-media-library";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import QRCode from "react-native-qrcode-svg";
+import { captureRef } from "react-native-view-shot";
 import { inviteQrPayload, parseScannedQr } from "../profile-qr";
 import type { ScannedQr } from "../profile-qr";
 import { ProxyIcon } from "../components/proxy-icon";
@@ -138,6 +140,9 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
   const [toast, setToast] = useState("");
   const [crmTab, setCrmTab] = useState<"ALL" | "WARM" | "FOLLOW" | "MET">("ALL");
   const [inviteCopied, setInviteCopied] = useState(false);
+  // PROFILE-QR-004：邀请二维码的存图锚点。以前这处只有「复制链接 / 系统分享」，
+  // 想发给好友只能发一段文字，存不下图。
+  const inviteShotRef = useRef<View>(null);
   // PROFILE-QR-003: 扫码识别三态 —— undefined 还没试 / null 识别失败 / ScannedQr 成功。
   // 相机扫描（expo-camera）与剪贴板共用 parseScannedQr，落在同一状态机。
   const [scanned, setScanned] = useState<ScannedQr | null>();
@@ -239,6 +244,22 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       setInviteCopied(true);
     } catch {
       showToast("复制失败，请长按链接手动复制。");
+    }
+  }
+  // PROFILE-QR-004：邀请码存图。和「我的二维码」页同一套失败文案口径 ——
+  // 没权限说没权限，失败说失败，不静默。
+  async function saveInviteQrToAlbum(): Promise<void> {
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync(true);
+      if (!permission.granted) {
+        showToast("需要相册权限才能保存二维码。");
+        return;
+      }
+      const uri = await captureRef(inviteShotRef, { format: "png", quality: 1 });
+      await MediaLibrary.saveToLibraryAsync(uri);
+      showToast("二维码已保存到相册。");
+    } catch {
+      showToast("保存失败，请重试，或改用系统分享。");
     }
   }
 
@@ -533,12 +554,13 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
           {viewer ? (
             <>
               <View style={styles.qrName}><Text style={styles.qrNameStrong}>{viewer.name}</Text><Text style={styles.qrNameSub}>Proxy ID · {viewer.handle}</Text></View>
-              <View style={styles.inviteQrWrap}>
+              <View ref={inviteShotRef} collapsable={false} style={styles.inviteQrWrap}>
                 <QRCode value={inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`} size={168} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
               </View>
               <View style={styles.inviteLink}><Text selectable style={styles.inviteLinkText}>{inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}</Text></View>
               <View style={styles.actions}>
                 <Pressable onPress={() => void copyInviteLink(inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`)} style={[styles.btn, styles.btnGhost]} accessibilityLabel="复制邀请链接"><Text style={styles.btnGhostText}>复制链接</Text></Pressable>
+                <Pressable onPress={() => void saveInviteQrToAlbum()} style={[styles.btn, styles.btnGhost]} accessibilityLabel="保存邀请二维码到相册"><Text style={styles.btnGhostText}>保存到相册</Text></Pressable>
                 <Pressable onPress={() => void Share.share({ message: `加我 Proxy 好友：${inviteQrPayload(viewer.handle) ?? `proxy.app/invite/${viewer.handle}`}` })} style={[styles.btn, styles.btnPrimary]} accessibilityLabel="系统分享邀请"><Text style={styles.btnPrimaryText}>系统分享</Text></Pressable>
               </View>
               {inviteCopied ? <Text style={styles.inviteCopiedNote}>链接已复制，去粘贴给你的好友吧。</Text> : null}

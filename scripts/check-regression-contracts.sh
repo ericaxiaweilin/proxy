@@ -3915,6 +3915,34 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/profile-qr.test.ts src/surfaces/placeholder-honest-actions.test.ts || exit $?
 echo "    PROFILE-QR-003: PASS (real scan parse + three honest errors, fake demo stays dead)"
 
+# PROFILE-QR-004: 二维码的常规能力（复制 / 保存到相册 / 放大页）曾经整体挂在
+# `personalqr` 子页上，而那个子页只有商家路径能按到 —— 普通用户在「个人总管理」
+# 里看到的二维码只有一个「分享主页链接」按钮，三个能力等于全都不存在。
+# 另一半是错位：商家卡片画 `proxy.app/store/<id>`，点进去的页却画个人主页码。
+#
+# 钉接线，不钉具体文案：真正要守的是「个人总管理能进二维码页」「店铺码进页后
+# 还是店铺码」「存图锚点不再写死成只有子页才挂的那个 ref」。
+if ! grep -qF 'onPress: () => openSubPage("personalqr")' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'saveQrToAlbum(qrCardShotRef)' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'copyProfileLink(manageQrPayload)' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'const storeQr = subPage.qrPayload;' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -qF 'const profileLink = storeQr ?? profileQrPayload(profileDraft.handle);' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -q 'saveInviteQrToAlbum()' apps/mobile/src/surfaces/friend-crm.tsx ||
+   ! grep -qF 'ref={inviteShotRef}' apps/mobile/src/surfaces/friend-crm.tsx; then
+  echo "  FAIL [PROFILE-QR-004]: qr capability wiring is missing ——" >&2
+  echo "        copy/save/zoom must be reachable from 个人总管理, and the store qr must stay a store qr." >&2
+  exit 1
+fi
+# 反向钉：captureRef 写死 qrShotRef 时，在卡片上按保存拿到的是 null ref，
+# 只报一句「保存失败」。锚点必须由调用方传进来。
+if grep -qF 'captureRef(qrShotRef' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [PROFILE-QR-004]: qr capture is hardwired to the sub-page ref again ——" >&2
+  echo "        captureRef must take the caller's shot ref, not the personalqr-only one." >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts -t "PROFILE-QR-004" || exit $?
+echo "    PROFILE-QR-004: PASS (qr copy/save/zoom reachable from profile manage; store qr stays a store qr)"
+
 # HANDLE-UNIQUE-001: handle 的唯一性曾只写在 profile.go 的注释里
 # （"uniqueness is per-tenant, enforced by repository on create"）。
 # 039_profile.sql 建的是普通索引而非唯一索引，两个 repository 也都不查冲突，

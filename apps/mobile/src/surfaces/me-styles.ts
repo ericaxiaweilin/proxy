@@ -731,6 +731,16 @@ export const styles = StyleSheet.create({
     paddingVertical: 7
   },
   qrCardBtnText: { color: color.white, fontSize: 11, fontWeight: "900" },
+  // PROFILE-QR-004：二维码卡片的多动作行（复制 / 保存到相册 / 打开二维码页）。
+  qrCardActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  qrCardBtnGhost: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(20,18,31,0.05)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7
+  },
+  qrCardBtnTextGhost: { color: color.ink, fontSize: 11, fontWeight: "800" },
 
   // STORE-REC/PROFILE-QR-001: 真实个人二维码（react-native-qrcode-svg）。
   qrRealCard: {

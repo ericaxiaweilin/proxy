@@ -91,6 +91,43 @@ describe("PLACEHOLDER-001 friend-crm keeps mocks but wires every action", () => 
     expect(crm).toContain("需要相机权限才能扫码");
   });
 
+  // PROFILE-QR-004：二维码的常规能力（复制 / 保存到相册 / 放大页）曾经只挂在
+  // `personalqr` 子页上，而那个子页只有商家路径能到 —— 普通用户在「个人总管理」
+  // 里看到的二维码只有一个「分享链接」按钮，等于三个能力全部不存在。
+  // 另一半是错位：商家卡片画店铺码，点进去的页却画个人主页码。
+  // 全部断言走剥注释后的源码（meCode / crmCode），注释里写了同款字符串不算数。
+  it("PROFILE-QR-004 personalmanage can reach the full qr page", () => {
+    // 导航本身：个人总管理里必须有一个按得动的入口。
+    expect(meCode).toContain('onPress: () => openSubPage("personalqr")');
+    // 卡片上要有复制和存图，且存图锚点是这张卡自己的 ref。
+    expect(meCode).toContain("copyProfileLink(manageQrPayload)");
+    expect(meCode).toContain("saveQrToAlbum(qrCardShotRef)");
+    // 坏 handle 时不许画假码、更不许给「保存假码」的按钮 —— fail-closed。
+    expect(meCode).toContain("const manageQrPayload = profileQrPayload(profileDraft.handle);");
+    expect(meCode).toContain("manageQrPayload ? [");
+  });
+
+  it("PROFILE-QR-004 store qr stays a store qr once opened", () => {
+    // 商家卡片必须把店铺码透传进页。
+    expect(meCode).toMatch(/qrPayload: toQrPayload\(`proxy\.app\/store\//);
+    expect(meCode).toContain('qrTitle: "商家二维码"');
+    // 页里优先用带进来的 payload，不许偷偷退回个人主页码。
+    expect(meCode).toContain("const storeQr = subPage.qrPayload;");
+    expect(meCode).toContain("const profileLink = storeQr ?? profileQrPayload(profileDraft.handle);");
+    // 店铺码扫出来是门店公开页 —— 拿 TikTok / Zalo 分层去描述它属于编内容。
+    expect(meCode).toContain("storeQr ? null :");
+  });
+
+  it("PROFILE-QR-004 qr capture is not hardwired to the sub-page ref", () => {
+    // 反向钉：以前 captureRef 写死 qrShotRef，而那个 ref 只挂在子页的 View 上 ——
+    // 在卡片上按保存时 ref 是 null，报一句「保存失败」就完事。
+    expect(meCode).not.toContain("captureRef(qrShotRef");
+    expect(meCode).toMatch(/async function saveQrToAlbum\(shotRef: QrShotRef/);
+    // 邀请二维码（加好友那条路）也要能存图，不然「分享给好友」仍只有一段文字。
+    expect(crmCode).toContain("saveInviteQrToAlbum()");
+    expect(crmCode).toContain("ref={inviteShotRef}");
+  });
+
   it("accepts/ignores/blocks with immediate effect in both modes", () => {
     expect(crm).toContain("acceptDemoRequest");
     expect(crm).toContain("ignoreDemoRequest");

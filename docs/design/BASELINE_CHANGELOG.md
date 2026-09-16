@@ -4,6 +4,24 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 214 — 2026-09-16
+
+- PROFILE-QR-004：二维码常规能力不再只挂在商家路径（personal-profile scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`
+    —— 「个人总管理」的二维码卡片改成多动作（`QrCard` 新增可选 `actions` /
+    `shotRef` / `qrSize`）：复制链接、保存到相册、我的二维码页入口，三件事在
+    普通用户路径上就能按到；handle 非法时不画码、也不给存假码的按钮。
+    `personalqr` 子页接受透传的 `qrPayload` / `qrTitle`，商家卡片画店铺码时页里
+    仍是店铺码（以前一律画成个人主页码）；店铺码下不渲染「扫码后看到」的
+    TikTok / Zalo 分层预览 —— 那是个人主页的口径，套到门店页属于编内容。
+    保存/分享的截图锚点改由调用方传入，不再写死 `qrShotRef`。
+  - `apps/mobile/src/surfaces/me-profile-components.tsx`（QrCard 多动作 + 存图锚点）、
+    `apps/mobile/src/surfaces/me-styles.ts`（新增 `qrCardActions` / 幽灵按钮样式）、
+    `apps/mobile/src/surfaces/me-types.ts`（`MeSubPage` 增加可选二维码透传字段）。
+  - `apps/mobile/src/surfaces/friend-crm.tsx`：邀请二维码补「保存到相册」，
+    与另两处能力对齐。
+  - 无新增页面、无列表结构改动。
+
 ## Revision 213 — 2026-09-16
 
 - MARKET-LEGEND-PARITY-001：地图图例行锁高，订单/活动两 Tab 等高（market scope）。

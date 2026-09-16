@@ -265,35 +265,60 @@ function FakeQr({ size = 104 }: { size?: number }): React.JSX.Element {
   );
 }
 
+// PROFILE-QR-004：二维码卡片此前只有一个「分享链接」按钮 —— 复制、保存相册、
+// 放大页全都藏在只有商家路径能到的 `personalqr` 子页里，普通用户等于没有。
+// 卡片现在可以接一组动作；`shotRef` 是保存到相册的截图锚点（钩住 QR 本体，
+// 不把按钮文字一起截进图里）。
+export type QrCardAction = { label: string; onPress: () => void; primary?: boolean };
+
 function QrCard({
   title,
   desc,
   actionLabel,
   onAction,
   alignCenter = false,
-  qrValue
+  qrValue,
+  qrSize = 104,
+  actions,
+  shotRef
 }: {
   title: string;
   desc: string;
-  actionLabel: string;
-  onAction?: () => void;
-  alignCenter?: boolean;
+  actionLabel?: string | undefined;
+  onAction?: (() => void) | undefined;
+  alignCenter?: boolean | undefined;
   /** 传入则渲染真实可扫描二维码（PROFILE-QR-001）；缺省保持 FakeQr 兜底。 */
-  qrValue?: string;
+  qrValue?: string | undefined;
+  qrSize?: number | undefined;
+  actions?: QrCardAction[] | undefined;
+  shotRef?: React.RefObject<View | null> | undefined;
 }): React.JSX.Element {
+  const buttons = actions && actions.length > 0 ? actions : undefined;
   return (
     <View style={[styles.qrCard, alignCenter && styles.qrCardCenter]}>
-      {qrValue ? (
-        <QRCode value={toQrPayload(qrValue)} size={104} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
-      ) : (
-        <FakeQr />
-      )}
+      <View ref={shotRef} collapsable={false}>
+        {qrValue ? (
+          <QRCode value={toQrPayload(qrValue)} size={qrSize} color="#17131F" backgroundColor="#FFFFFF" ecl="H" />
+        ) : (
+          <FakeQr />
+        )}
+      </View>
       <View style={[styles.qrCardText, alignCenter && styles.qrCardTextCenter]}>
         <Text style={styles.qrCardTitle}>{title}</Text>
         <Text style={styles.qrCardDesc}>{desc}</Text>
-        <Pressable onPress={onAction} style={styles.qrCardBtn}>
-          <Text style={styles.qrCardBtnText}>{actionLabel}</Text>
-        </Pressable>
+        {buttons ? (
+          <View style={styles.qrCardActions}>
+            {buttons.map((action) => (
+              <Pressable key={action.label} onPress={action.onPress} accessibilityLabel={action.label} style={action.primary ? styles.qrCardBtn : styles.qrCardBtnGhost}>
+                <Text style={action.primary ? styles.qrCardBtnText : styles.qrCardBtnTextGhost}>{action.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : (
+          <Pressable onPress={onAction} style={styles.qrCardBtn}>
+            <Text style={styles.qrCardBtnText}>{actionLabel}</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
