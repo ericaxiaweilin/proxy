@@ -636,12 +636,12 @@ const styles = StyleSheet.create({
   shareBtnText: { color: color.ink, fontSize: 12, fontWeight: "800" },
   shareMsg: { color: color.muted, fontSize: 11, marginTop: 4, paddingHorizontal: 4 },
   pinNotice: { color: "#C97A1F", fontSize: 11, marginTop: 4 },
-  // R15.33: 地图占主位。高度 280 + fullWidth，代替原来
-  // aspectRatio:1 那个方块。
+  // MAP-CONTAINER-PARITY-001: sheet 里的地图框跟 Market 内联卡同规格 ——
+  // 高 330、圆角 22（foundation.radius.lg）。之前 280/12 在发布器里矮一截。
   mapWrapper: {
-    height: 280,
+    height: 330,
     width: "100%",
-    borderRadius: 12,
+    borderRadius: 22,
     overflow: "hidden",
     borderWidth: 1,
     borderColor: color.line,

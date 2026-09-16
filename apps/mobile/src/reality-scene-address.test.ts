@@ -5,7 +5,7 @@
 // 地图 marker 的 description 拼的是 `区 · 类型` —— 用户问"在哪条街"答不上来。
 // 现在服务端多给一个 address；这里钉住它的回退行为。
 import { describe, expect, it } from "vitest";
-import { hasSceneAddress, isVerifiedScene, sceneAddressLine, sceneCountsLine, sceneSignalLine, sceneSourceLabel, sceneSourceSuffix } from "./reality-scene-address";
+import { hasSceneAddress, isVerifiedScene, sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceLabel, sceneSourceSuffix } from "./reality-scene-address";
 
 describe("SCENE-ADDRESS-001 sceneAddressLine", () => {
   it("有街道地址就显示地址（Bắc Ninh 那家 Three Beans）", () => {
@@ -156,5 +156,14 @@ describe("SCENE-NO-FABRICATED-001 sceneSignalLine", () => {
       const line = sceneSignalLine(c as never);
       for (const word of forbidden) expect(line).not.toContain(word);
     }
+  });
+});
+
+describe("sceneHeatScore", () => {
+  it("weighs live presence highest and ignores garbage", () => {
+    expect(sceneHeatScore({})).toBe(0);
+    expect(sceneHeatScore({ savedCount: 5, visitedCount: 12, plannedCount: 3 })).toBe(20);
+    expect(sceneHeatScore({ hereCount: 3 })).toBe(9);
+    expect(sceneHeatScore({ hereCount: -2, visitedCount: NaN })).toBe(0);
   });
 });

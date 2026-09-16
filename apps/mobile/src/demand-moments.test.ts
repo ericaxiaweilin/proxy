@@ -50,6 +50,19 @@ describe("R58 demand wizard mapping", () => {
     expect(withoutNotes.desc).toBeUndefined();
     expect(PublishMarketOpportunityInputSchema.safeParse(withNotes).success).toBe(true);
   });
+
+  it("carries picked coordinates to lat/lng only when present", () => {
+    // OPP-REAL-COORDS-001: 有选点带真坐标发布，无选点保持纯文字（两种都过契约）。
+    const template = MOMENT_TEMPLATES[0]!;
+    const withPin = buildDemandPublishInput(template, { ...defaultSpecsFor(template), lat: 21.05, lng: 105.8197 });
+    expect(withPin.lat).toBe(21.05);
+    expect(withPin.lng).toBe(105.8197);
+    expect(PublishMarketOpportunityInputSchema.safeParse(withPin).success).toBe(true);
+    const withoutPin = buildDemandPublishInput(template, defaultSpecsFor(template));
+    expect(withoutPin.lat).toBeUndefined();
+    expect(withoutPin.lng).toBeUndefined();
+    expect(PublishMarketOpportunityInputSchema.safeParse(withoutPin).success).toBe(true);
+  });
 });
 
 describe("R58 people filtering", () => {

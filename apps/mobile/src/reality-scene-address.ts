@@ -140,3 +140,13 @@ export function sceneSignalLine(scene: SceneSignalFields): string {
   if (scene.planned) return "你计划去这里";
   return sceneCountsLine(scene);
 }
+
+/**
+ * 供热图的聚合分：只用服务端真聚合数，「在这里」权重最高（唯一活信号）。
+ * 非法/负数按 0 计；0 分 = 无数据，调用方不渲染（热力不许编）。
+ */
+export function sceneHeatScore(scene: SceneCountsFields): number {
+  const clamp = (v: number | undefined): number =>
+    typeof v !== "number" || !Number.isFinite(v) ? 0 : Math.max(0, Math.trunc(v));
+  return clamp(scene.hereCount) * 3 + clamp(scene.savedCount) + clamp(scene.visitedCount) + clamp(scene.plannedCount);
+}

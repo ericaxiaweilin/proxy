@@ -11,8 +11,8 @@ describe("MARKET-PIN-PARITY-001", () => {
   it("renders explorer spots at full strength like order pins", () => {
     expect(market).toContain("EXPLORER_SPOTS.map((spot) => (");
     expect(market).not.toContain("opacity={0.85}");
-    // 颜色语义保留：订单靛青，探索紫。
+    // 颜色语义保留：订单靛青，探索紫（聚合后变量改名，语义不变）。
     expect(market).toContain('pinColor="#0B7A73"');
-    expect(market).toContain('pinColor={spot.tag === "HOT" ? "#7A2DC7" : "#9A8AB5"}');
+    expect(market).toContain('m.tag === "HOT" ? "#7A2DC7" : "#9A8AB5"');
   });
 });

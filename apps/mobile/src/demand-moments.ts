@@ -87,6 +87,10 @@ export type DemandSpecs = {
   price: string;
   /** R58 备注（可选，500 字内，落库随机会展示）。 */
   notes: string;
+  // OPP-REAL-COORDS-001: 地图选点坐标（可选）。有 = 发布带真 lat/lng、订单上图；
+  // 无 = 老行为（纯文字地点、无钉）。草稿持久化顺带存取。
+  lat?: number | undefined;
+  lng?: number | undefined;
 };
 
 export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
@@ -112,6 +116,9 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
   const skills = [template.skills, ...specs.prefs.map((pref) => pref.trim()).filter((pref) => pref !== "")]
     .join(" · ");
   const notes = specs.notes.trim();
+  const hasPin =
+    typeof specs.lat === "number" && typeof specs.lng === "number" &&
+    Number.isFinite(specs.lat) && Number.isFinite(specs.lng);
   return {
     title: template.title,
     shortTitle: template.title,
@@ -123,7 +130,8 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     moneyFlow: "EARN",
     skills,
     lens: ["NOW", "NEARBY"],
-    ...(notes === "" ? {} : { desc: notes.slice(0, 500) })
+    ...(notes === "" ? {} : { desc: notes.slice(0, 500) }),
+    ...(hasPin ? { lat: specs.lat as number, lng: specs.lng as number } : {})
   };
 }
 

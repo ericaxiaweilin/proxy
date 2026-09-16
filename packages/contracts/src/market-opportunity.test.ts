@@ -110,3 +110,24 @@ describe("PublishMarketOpportunityInputSchema merchant identity", () => {
     expect(PublishMarketOpportunityInputSchema.safeParse({ ...base, merchantId: "" }).success).toBe(false);
   });
 });
+
+// OPP-REAL-COORDS-001: 发布输入可带真坐标（发布器地图选点），越界拒绝。
+describe("PublishMarketOpportunityInputSchema coordinates", () => {
+  it("accepts optional lat/lng and rejects out-of-range", async () => {
+    const { PublishMarketOpportunityInputSchema } = await import("./index");
+    const base = {
+      title: "t", shortTitle: "t", theme: "t", date: "today", time: "10:00",
+      location: "x", price: "100₫", moneyFlow: "EARN" as const,
+      skills: "x", lens: ["NEARBY" as const]
+    };
+    expect(PublishMarketOpportunityInputSchema.safeParse(base).success).toBe(true);
+    const withCoords = PublishMarketOpportunityInputSchema.safeParse({ ...base, lat: 21.0285, lng: 105.8542 });
+    expect(withCoords.success).toBe(true);
+    if (withCoords.success) {
+      expect(withCoords.data.lat).toBe(21.0285);
+      expect(withCoords.data.lng).toBe(105.8542);
+    }
+    expect(PublishMarketOpportunityInputSchema.safeParse({ ...base, lat: 999 }).success).toBe(false);
+    expect(PublishMarketOpportunityInputSchema.safeParse({ ...base, lng: -999 }).success).toBe(false);
+  });
+});

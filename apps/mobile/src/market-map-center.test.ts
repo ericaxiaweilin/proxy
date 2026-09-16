@@ -26,4 +26,10 @@ describe("MARKET-MAP-USER-CENTER-001", () => {
     expect(shell).toContain("userCenter={sceneMapOrigin");
     expect(shell).toContain("lat: sceneMapOrigin.latitude");
   });
+
+  it("lights the blue dot on the shell center like the home scene map", () => {
+    // 场景页 showsUserLocation={!!origin} 进门亮蓝点；市场页之前只认按钮
+    // locGranted，同一份人位进门不亮。无授权时 iOS 本来就不渲染，不撒谎。
+    expect(market).toContain("showsUserLocation={locGranted || !!userCenter}");
+  });
 });

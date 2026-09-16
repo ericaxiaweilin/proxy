@@ -5101,6 +5101,53 @@ fi
 pnpm --filter @proxy/mobile exec vitest run src/market-legend-parity.test.ts || exit $?
 echo "    MARKET-LEGEND-PARITY-001: PASS (legend fixed height, both tabs equal)"
 
+# MAP-CONTAINER-PARITY-001: 三处地图容器各说各话（尺寸/圆角/边框/横向间隙），
+# 定位/全屏/收起钮挂解释性文字，地图下面挂说明卡。统一到内联 330 + 圆角 22
+# + 无横向间隙，按钮只留图标，地图下面只放地图。
+if ! grep -q 'MAP-CONTAINER-PARITY-001' apps/mobile/src/map-container-parity.test.ts ||
+   ! grep -q 'view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -q 'geoPrivacy' apps/mobile/src/map-container-parity.test.ts; then
+  echo "  FAIL [MAP-CONTAINER-PARITY-001]: map containers diverged again" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/map-container-parity.test.ts || exit $?
+echo "    MAP-CONTAINER-PARITY-001: PASS (one container language, no side gaps, icon-only buttons)"
+
+# MAP-FULLSCREEN-001: 市场内联地图无全屏，详情进出重装原生地图顺带验证手势。
+# MAP-CLUSTER-001: 图钉重叠点不了。两块断言都在上面的 parity 文件里跑，
+# 这里只钉实现标记，防实现被删而测试被同步掏空。
+if ! grep -q 'testID="market-map-expand"' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -q 'MAP-CLUSTER-001' apps/mobile/src/cluster-pins.ts ||
+   ! grep -q 'MAP-CLUSTER-001' apps/mobile/src/cluster-pins.test.ts; then
+  echo "  FAIL [MAP-FULLSCREEN-001/MAP-CLUSTER-001]: fullscreen or clustering went missing" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/cluster-pins.test.ts || exit $?
+echo "    MAP-FULLSCREEN-001/MAP-CLUSTER-001: PASS (fullscreen shared instance, zoom-driven clusters)"
+
+# OPP-REAL-COORDS-001: 订单钉只认从没人写的 coord，服务端真 lat/lng 被无视，
+# 发布契约不开口，新订单永远无钉。显示优先真坐标，发布开 lat/lng 口。
+if ! grep -q 'lat: z.number().min(-90).max(90).optional()' packages/contracts/src/index.ts ||
+   ! grep -q 'OPP-REAL-COORDS-001' packages/contracts/src/market-opportunity.test.ts ||
+   ! grep -q 'OPP-REAL-COORDS-001' apps/mobile/src/demand-moments.test.ts; then
+  echo "  FAIL [OPP-REAL-COORDS-001]: real coordinates dropped from publish or display" >&2
+  exit 1
+fi
+pnpm --filter @proxy/contracts test --run src/market-opportunity.test.ts || exit $?
+require_test "OPP-REAL-COORDS-001" "./internal/marketplace" "TestOpportunityPublishPersistsCoordinates" "apps/api-go/internal/marketplace/service_test.go" || exit $?
+echo "    OPP-REAL-COORDS-001: PASS (pins use server lat/lng, publish carries coordinates)"
+
+# SCENE-FOOTPRINT-AUTO-001: 足迹只靠手点，订单完成/到场不沉淀。近场自动记
+# （同一审计链）。SCENE-MAP-GESTURE-001: 详情整页替换重装地图，手势死亡；
+# 改盖层常驻。断言在 parity 文件里跑，这里钉实现标记。
+if ! grep -q 'autoFootprintDone' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'style={styles.detailOverlay}' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   grep -q 'if (selected) {' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+  echo "  FAIL [SCENE-FOOTPRINT-AUTO-001/SCENE-MAP-GESTURE-001]: auto footprint or overlay gone" >&2
+  exit 1
+fi
+echo "    SCENE-FOOTPRINT-AUTO-001/SCENE-MAP-GESTURE-001: PASS (proximity footprint, overlay detail)"
+
 # DEVICE-LOCATION-002: 跟随开关冷启动必丢（P0）。
 #
 # 开关只活在内存（useState 默认 true），手动地点存在 keychain —— 每次冷启动

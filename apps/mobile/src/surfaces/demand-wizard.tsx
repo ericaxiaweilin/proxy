@@ -25,6 +25,7 @@ import {
   type ProService
 } from "../demand-moments";
 import { resolveAssetSource } from "../media/asset-sources";
+import { MapCanvas } from "../components/map-canvas";
 import { SCENE_ACTIONS } from "../components/scene-activity-discovery";
 import { Image } from "expo-image";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
@@ -543,6 +544,24 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
 
           <Text style={styles.fieldLabel}>地点</Text>
           <TextInput onChangeText={(place) => setSpecs((prev) => ({ ...prev, place }))} placeholder={template?.venue} placeholderTextColor={color.muted} style={styles.input} value={specs.place} />
+          {/* OPP-REAL-COORDS-001: 地图选点（可选，不卡发布）。点/拖即记真坐标，
+              发布带 lat/lng、订单上图；不动则纯文字地点、无钉。 */}
+          <View style={styles.mapWrapper}>
+            <MapCanvas
+              cityHint=""
+              initialPin={{ x: 5, y: 5 }}
+              radiusMeters={1000}
+              {...(specs.lat !== undefined && specs.lng !== undefined
+                ? { initialCoordinate: { lat: specs.lat, lng: specs.lng } }
+                : {})}
+              onChange={(_grid, coordinate) => {
+                if (coordinate && Number.isFinite(coordinate.lat) && Number.isFinite(coordinate.lng)) {
+                  setSpecs((prev) => ({ ...prev, lat: coordinate.lat, lng: coordinate.lng }));
+                }
+              }}
+              testID="demand-place-map"
+            />
+          </View>
 
           <Text style={styles.fieldLabel}>场景偏好 · 影响匹配 / 报价</Text>
           <View style={styles.chipRow}>
@@ -778,6 +797,8 @@ const styles = StyleSheet.create({
   negoBtnText: { color: color.ink, fontSize: 13, fontWeight: "700" },
   negoBtnTextOn: { color: color.white },
   notesInput: { minHeight: 64, textAlignVertical: "top" },
+  // OPP-REAL-COORDS-001: 地点选图框，跟 Market 内联卡同规格（高 330/圆角 22）。
+  mapWrapper: { borderColor: color.line, borderRadius: 22, borderWidth: 1, height: 330, marginTop: 8, overflow: "hidden", width: "100%" },
   hint: { color: color.muted, fontSize: 11, marginTop: 6 },
   error: { color: color.error, fontSize: 12, marginTop: 12, textAlign: "center" },
   primaryBtn: { alignItems: "center", backgroundColor: color.magenta, borderRadius: 14, marginTop: 18, minHeight: 50, justifyContent: "center" },

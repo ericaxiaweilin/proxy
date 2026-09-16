@@ -30,6 +30,7 @@ import * as Location from "expo-location";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { CITY_BOUNDS, GRID_W, GRID_H, type GridCoord, gridToLatLng } from "./location-options";
+import { ProxyIcon } from "./proxy-icon";
 import { color } from "../theme";
 
 export interface MapCanvasProps {
@@ -310,9 +311,9 @@ export function MapCanvas({
           style={({ pressed }) => [styles.locButton, pressed && styles.locButtonPressed, locBusy && styles.locButtonBusy]}
         >
           {locBusy ? (
-            <ActivityIndicator color={color.white} size="small" />
+            <ActivityIndicator color={color.ink} size="small" />
           ) : (
-            <Text style={styles.locButtonText}>📍 用我当前位置</Text>
+            <ProxyIcon color={color.ink} name="route" size={14} />
           )}
         </Pressable>
       </View>
@@ -372,12 +373,15 @@ function FallbackNotice({
 }
 
 const styles = StyleSheet.create({
+  // MAP-CONTAINER-PARITY-001: 发布器地图跟 Market/场景页同容器语言 ——
+  // 高 330、圆角 22（foundation.radius.lg）、边框 color.line、底 offWhite。
+  // 不用 aspectRatio:1（正方形在 sheet 里被裁，与内联卡不等高）。
   canvas: {
-    aspectRatio: 1,
-    backgroundColor: "#E5E1DA",
-    borderColor: "#D7C9B0",
-    borderRadius: 16,
+    backgroundColor: color.offWhite,
+    borderColor: color.line,
+    borderRadius: 22,
     borderWidth: 1,
+    height: 330,
     overflow: "hidden",
     position: "relative",
     width: "100%"
@@ -388,27 +392,25 @@ const styles = StyleSheet.create({
     top: 10,
     flexDirection: "row"
   },
+  // MAP-CONTAINER-PARITY-001: 定位钮跟 Market geoLocateBtn 同语言 —— 白底 +
+  // line 边框 + 圆角 18 + route 图标，不挂文字。位置留在右上（右下是 HUD 角标，
+  // 跟 Market 右下钮错开是故意的，避免压住坐标行）。
   locButton: {
-    backgroundColor: "rgba(128, 51, 240, 0.92)",
+    alignItems: "center",
+    backgroundColor: color.white,
+    borderColor: color.line,
     borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 2,
-    elevation: 2
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7
   },
   locButtonPressed: {
-    backgroundColor: "rgba(98, 25, 200, 0.96)"
+    opacity: 0.75
   },
   locButtonBusy: {
-    backgroundColor: "rgba(128, 51, 240, 0.55)"
-  },
-  locButtonText: {
-    color: color.white,
-    fontSize: 12,
-    fontWeight: "700"
+    opacity: 0.6
   },
   errorBanner: {
     backgroundColor: "rgba(214, 78, 70, 0.95)",

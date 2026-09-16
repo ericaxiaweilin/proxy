@@ -4,6 +4,25 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 218 — 2026-09-16
+
+- MAP-CONTAINER-PARITY-001：Home 场景页 / 市场内联卡 / 发布器三处地图容器统一
+  （高 330、圆角 22、边框 line、底 offWhite），地图视图双 tab 横向一律顶边无间隙；
+  定位/全屏/收起钮只留图标；地图下面只放地图（market scope）。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/market.tsx`
+    —— geoMap 规格、双 tab contentFlat、图标钮、全屏 Modal、聚合、需热；
+    文案只做减法（删地址粒度卡、按钮去字），无新增页面。
+- MAP-FULLSCREEN-001：市场内联地图右上 ⛶ 进真全屏（单实例复用，定位态不断），
+  ✕ / 返回键退出（market scope)。
+- MAP-CLUSTER-001：订单钉 + 探索点按可视跨度聚合，簇点放大散开；活动 tab
+  不渲染订单钉旧语义保留（market scope）。
+- OPP-REAL-COORDS-001：订单钉用服务端真 lat/lng（grid 投影只留兼容）；
+  发布契约开 lat/lng 口，发布器地点下嵌地图选点（market scope)。
+- SCENE-FOOTPRINT-AUTO-001：当面开详情 + 300m 内 + 已登录自动记私人足迹；
+  SCENE-MAP-GESTURE-001：详情改盖层，地图常驻、手势不断（requester-home-discovery scope)。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/reality-scene-map.tsx`
+    —— mapWrap 顶边、供热圈、自动足迹、详情盖层；视觉结构不变。
+
 ## Revision 217 — 2026-09-16
 
 - PROFILE-QR-002 修复：「保存到相册」在真机上调用即抛，相册里什么都没有（personal-profile /

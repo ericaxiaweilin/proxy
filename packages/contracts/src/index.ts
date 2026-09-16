@@ -791,6 +791,11 @@ export const PublishMarketOpportunityInputSchema = z.object({
   skills: z.string(),
   lens: z.array(z.enum(["NOW", "NEARBY", "BOOKED", "REMOTE"])).min(1),
   travel: z.number().int().nullable().optional(),
+  // OPP-REAL-COORDS-001: 发布时可带真坐标（发布器地图选点）。服务端 decode
+  // 进 Opportunity.Lat/Lng 并随 List 原样下发；地图优先用它，不再走 grid 投影。
+  // 不带 = 老行为（服务端按种子/缺省处理，地图跳过该钉）。
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
   // R58 demand notes.
   desc: z.string().max(500).optional(),
   // MERCHANT-PUBLISH-001: 以商家名义发布时带店 id。server 在 api 层验

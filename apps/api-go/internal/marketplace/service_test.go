@@ -62,6 +62,49 @@ func TestOpportunityPublishApplyAndDismiss(t *testing.T) {
 	}
 }
 
+// OPP-REAL-COORDS-001: 发布带真坐标 → 发布回执 + 列表原样下发。
+// decode 进 Opportunity.Lat/Lng（指针，缺省 nil），repository 原样存。
+func TestOpportunityPublishPersistsCoordinates(t *testing.T) {
+	s := New()
+	s.SeedDefaults()
+	published := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", map[string]any{
+		"title": "周六城市同行", "theme": "城市同行", "date": "周六", "time": "10:00–18:00", "location": "河内 · 西湖", "price": "2,000,000₫", "skills": "中文 · 摄影",
+		"lat": 21.05, "lng": 105.8197,
+	}))
+	if published.Outcome != "ACCEPTED" {
+		t.Fatalf("publish: %+v", published)
+	}
+	var publishBody struct {
+		Opportunity Opportunity `json:"opportunity"`
+	}
+	if err := json.Unmarshal([]byte(published.OperationRef), &publishBody); err != nil {
+		t.Fatal(err)
+	}
+	if publishBody.Opportunity.Lat == nil || *publishBody.Opportunity.Lat != 21.05 || publishBody.Opportunity.Lng == nil || *publishBody.Opportunity.Lng != 105.8197 {
+		t.Fatalf("coordinates not echoed on publish: %+v", publishBody.Opportunity)
+	}
+	listed := s.HandleContext(t.Context(), marketEnvelope("ListMarketOpportunities", "creator", nil))
+	var listBody struct {
+		Opportunities []Opportunity `json:"opportunities"`
+	}
+	if err := json.Unmarshal([]byte(listed.OperationRef), &listBody); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range listBody.Opportunities {
+		if item.ID != publishBody.Opportunity.ID {
+			continue
+		}
+		found = true
+		if item.Lat == nil || *item.Lat != 21.05 || item.Lng == nil || *item.Lng != 105.8197 {
+			t.Fatalf("coordinates not persisted to list: %+v", item)
+		}
+	}
+	if !found {
+		t.Fatal("published opportunity missing from list")
+	}
+}
+
 func TestOpportunityVNDLimit(t *testing.T) {
 	for _, accepted := range []string{"100,000₫", "100K VND", "10,000,000₫", "10M VND", "500,000₫ – 10,000,000₫"} {
 		if !priceWithinVNDLimit(accepted) {

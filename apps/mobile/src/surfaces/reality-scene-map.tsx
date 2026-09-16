@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Circle, Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
-import { sceneAddressLine, sceneCountsLine, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
+import { sceneAddressLine, sceneCountsLine, sceneHeatScore, sceneSignalLine, sceneSourceSuffix } from "../reality-scene-address";
 // SCENE-EVENT-SIGNUP-001: 场景上的活动列表 + 报名。复用现成的 ActivityClient，
 // 不新造一套报名机制 —— 活动域（名额 / participants / 事务）本来就是真的。
 import { ActivityClient } from "../activity-client";
@@ -94,6 +94,9 @@ type FeaturedHuman = { userId: string; name: string; city?: string | undefined; 
 export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, initialOrigin, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; initialOrigin?: { latitude: number; longitude: number } | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void }): React.JSX.Element {
   const [view, setView] = useState<SceneView>("MAP");
   const [filter, setFilter] = useState<SceneFilter>("ALL");
+  // 供热：图钉换成真实聚合圈（sceneHeatScore），0 分不渲染。
+  // Circle 本体不可点（该版本 react-native-maps 无 onPress），详情走列表行。
+  const [heat, setHeat] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | undefined>(initialSceneId);
   const [saved, setSaved] = useState<ReadonlySet<string>>(new Set());
@@ -272,8 +275,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   };
 
   const selected = scenes.find((scene) => scene.id === selectedId);
-  // TEMP-DIAG-MAPDEAD-001: P0 地图退出后手势死亡。抓完即删。
-  console.log(`[mapdead] render selectedId=${selectedId ?? "-"} view=${view} scenes=${scenes.length} hasSelected=${selected !== undefined}`);
   const filtered = useMemo(() => {
     const matching = scenes.filter((scene) => {
     const term = query.trim().toLocaleLowerCase();
@@ -425,6 +426,18 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       setTriStateMsg("同步失败，已恢复之前的状态，请重试。");
     });
   };
+  // SCENE-FOOTPRINT-AUTO-001: 近场自动足迹。打开场景详情时，若设备位置在
+  // 300m 内且已登录，记一次私人足迹（走同一 persistVisited 审计链）。
+  // 只认实时距离 + 当面打开的详情，不编到访；每场景一次，失败静默。
+  const autoFootprintDone = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (!selected || !session?.principal || !origin) return;
+    if (visited.has(selected.id) || autoFootprintDone.current.has(selected.id)) return;
+    if (metersBetween(origin, selected) > 300) return;
+    autoFootprintDone.current = new Set(autoFootprintDone.current).add(selected.id);
+    persistVisited(selected.id);
+    setTriStateMsg("已按你的当前位置自动标记足迹。");
+  }, [selected, session, origin, visited]);
   const recommendNearby = async (): Promise<void> => {
     if (nearbyBusy || !session) return;
     setNearbyBusy(true); setNearbyError(undefined);
@@ -457,9 +470,11 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
     finally { setNearbyBusy(false); }
   };
 
-  if (selected) {
-    const activeVariant = detail?.variants.find((item) => item.id === detail.selectedVariant);
-    return (
+  // SCENE-MAP-GESTURE-001: 详情原来是 early-return 整页替换，地图每次进出都
+  // 卸载/重装原生 MapView，iOS 手势在重装后死亡（滑动/缩放卡死）。
+  // 改为详情盖层：地图常驻挂载，进出只显隐盖层，手势不再断。
+  const activeVariant = selected ? detail?.variants.find((item) => item.id === detail.selectedVariant) : undefined;
+  const detailBody = selected ? (
       <ScrollView style={[styles.root, rootPad]} contentContainerStyle={styles.detailContent}>
         <View style={styles.detailTop}><Pressable accessibilityLabel="返回" onPress={() => { if (selectedId && selectedId !== initialSceneId) setSelectedId(undefined); else onBack(); }} style={styles.backButton}><Text style={styles.backText}>‹</Text></Pressable><View style={styles.detailTopCopy}><Text style={styles.detailTopTitle}>{detail?.venueName ?? selected.name}</Text><Text style={styles.detailTopSub}>{activeVariant?.name ?? selected.area} · {selected.area}</Text></View><View style={styles.topSpacer} /></View>
         <View style={styles.hero}>
@@ -540,8 +555,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         <View style={styles.sectionTitleRow}><Text style={styles.sectionTitle}>Reality Evidence · Scene Memory</Text></View>
         <View style={styles.memoryCard}><Text style={styles.memoryTitle}>{visited.has(selected.id) ? "已私人标记去过" : "暂无已核验现实记录"}</Text><Text style={styles.memoryText}>{visited.has(selected.id) ? "这只是你的私人足迹标记；完成订单、现场核销或上传并通过审核的证据，才会写入 Scene Memory。" : "完成订单、现场核销或上传并通过审核的证据后，这里才会沉淀同行人、消费项目、内容与关系变化。"}</Text></View>
       </ScrollView>
-    );
-  }
+  ) : null;
 
   return (
     <View style={[styles.root, rootPad]}>
@@ -591,9 +605,32 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
       {contribMsg ? <Text style={styles.nearbyError}>{contribMsg}</Text> : null}
       {view === "MAP" ? (
         <View style={styles.mapWrap}>
-          <MapView key={origin ? `${origin.latitude}:${origin.longitude}` : "catalog"} initialRegion={{ latitude: origin?.latitude ?? 21.036, longitude: origin?.longitude ?? 105.842, latitudeDelta: origin ? 0.12 : 0.115, longitudeDelta: origin ? 0.12 : 0.115 }} showsUserLocation={!!origin} style={StyleSheet.absoluteFill} onPress={() => console.log("[mapdead] map onPress fired")} onRegionChangeComplete={() => console.log("[mapdead] region change fired")}>
-            {filtered.map((scene) => <Marker key={scene.id} coordinate={{ latitude: scene.latitude, longitude: scene.longitude }} onPress={() => { console.log(`[mapdead] marker press ${scene.id}`); setSelectedId(scene.id); }} pinColor={scene.active ? color.magenta : visited.has(scene.id) ? color.muted : color.violet} title={scene.name} description={sceneAddressLine(scene)} />)}
+          {/* 人位晚到时 remount 一次吃新 initialRegion（origin 只接第一次，后续不变）。 */}
+          <MapView key={origin ? `${origin.latitude}:${origin.longitude}` : "catalog"} initialRegion={{ latitude: origin?.latitude ?? 21.036, longitude: origin?.longitude ?? 105.842, latitudeDelta: origin ? 0.12 : 0.115, longitudeDelta: origin ? 0.12 : 0.115 }} showsUserLocation={!!origin} style={StyleSheet.absoluteFill}>
+            {heat
+              ? filtered.map((scene) => {
+                  const score = sceneHeatScore(scene);
+                  if (score <= 0) return null;
+                  return (
+                    <Circle
+                      key={scene.id}
+                      center={{ latitude: scene.latitude, longitude: scene.longitude }}
+                      radius={150 + Math.min(score, 24) * 30}
+                      strokeColor="rgba(133,51,245,0.45)"
+                      fillColor="rgba(133,51,245,0.10)"
+                    />
+                  );
+                })
+              : filtered.map((scene) => <Marker key={scene.id} coordinate={{ latitude: scene.latitude, longitude: scene.longitude }} onPress={() => { setSelectedId(scene.id); }} pinColor={scene.active ? color.magenta : visited.has(scene.id) ? color.muted : color.violet} title={scene.name} description={sceneAddressLine(scene)} />)}
           </MapView>
+          <Pressable
+            style={[styles.heatToggle, heat && styles.heatToggleOn]}
+            onPress={() => setHeat((h) => !h)}
+            testID="scene-map-heat"
+            accessibilityLabel="热力图"
+          >
+            <Text style={heat ? styles.heatToggleTextOn : styles.heatToggleText}>◉</Text>
+          </Pressable>
           <View pointerEvents="none" style={styles.privacyPill}><Text style={styles.privacyText}>公开足迹 · 非实时位置</Text></View>
         </View>
       ) : (
@@ -602,6 +639,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           {!filtered.length ? <Text style={styles.empty}>没有符合条件的场景</Text> : null}
         </ScrollView>
       )}
+      {detailBody ? <View style={styles.detailOverlay}>{detailBody}</View> : null}
     </View>
   );
 }
@@ -700,7 +738,18 @@ const styles = StyleSheet.create({
   searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, flexDirection: "row", gap: 8, marginHorizontal: 16, paddingHorizontal: 13 }, searchInput: { color: color.ink, flex: 1, fontSize: 15, height: 46 },
   filterRail: { flexGrow: 0, height: 54, maxHeight: 54, minHeight: 54 },
   filters: { alignItems: "center", gap: 8, height: 54, paddingHorizontal: 16 }, filter: { alignItems: "center", alignSelf: "center", backgroundColor: color.surface, borderRadius: 18, height: 34, justifyContent: "center", paddingHorizontal: 15 }, filterActive: { backgroundColor: color.ink }, filterText: { color: color.muted, fontSize: 13, fontWeight: "700", lineHeight: 18 }, filterTextActive: { color: color.white },
-  mapWrap: { borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 1, marginBottom: 14, marginHorizontal: 16, overflow: "hidden" }, privacyPill: { alignSelf: "center", backgroundColor: "rgba(23,19,31,0.84)", borderRadius: 14, bottom: 12, paddingHorizontal: 12, paddingVertical: 7, position: "absolute" }, privacyText: { color: color.white, fontSize: 11, fontWeight: "700" },
+  // MAP-CONTAINER-PARITY-001: 跟 Market 内联地图同容器语言 —— 底 offWhite、
+  // 边框 line、圆角 22（foundation.radius.lg），横向顶边无间隙（无 marginHorizontal，
+  // 跟 Market 地图视图一致；页内顶栏/统计/搜索保持 16 缩进）。全屏页保留 flex:1
+  // 吃剩余高度，minHeight:330 保底与内联卡等高；position:relative 承接 privacyPill 悬浮。
+  mapWrap: { backgroundColor: color.offWhite, borderColor: color.line, borderRadius: 22, borderWidth: 1, flex: 1, marginBottom: 14, minHeight: 330, overflow: "hidden", position: "relative" }, privacyPill: { alignSelf: "center", backgroundColor: "rgba(23,19,31,0.84)", borderRadius: 14, bottom: 12, paddingHorizontal: 12, paddingVertical: 7, position: "absolute" }, privacyText: { color: color.white, fontSize: 11, fontWeight: "700" },
+  // 供热开关：左上白 pill，生效反转为 ink 底（跟市场定位钮同语言）。
+  heatToggle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, height: 34, justifyContent: "center", left: 10, position: "absolute", top: 10, width: 34 },
+  heatToggleOn: { backgroundColor: color.ink, borderColor: color.ink },
+  heatToggleText: { color: color.ink, fontSize: 14, fontWeight: "900" },
+  heatToggleTextOn: { color: color.white, fontSize: 14, fontWeight: "900" },
+  // SCENE-MAP-GESTURE-001: 详情盖层（不透明盖住整页，地图在下面常驻）。
+  detailOverlay: { backgroundColor: color.offWhite, bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 10 },
   list: { gap: 9, paddingBottom: 24, paddingHorizontal: 16 }, checkInHint: { color: color.muted, flex: 1, fontSize: 11, lineHeight: 16 },
   contribCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 8, marginHorizontal: 16, padding: 14 }, contribHint: { color: color.muted, fontSize: 11, lineHeight: 16 }, contribInput: { borderColor: color.line, borderRadius: 12, borderWidth: 1, color: color.ink, fontSize: 14, paddingHorizontal: 12, paddingVertical: 9 }, contribRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginHorizontal: 16, marginTop: 8, padding: 12 }, contribTag: { color: color.muted, fontSize: 11 }, contribButton: { backgroundColor: color.violet, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }, contribButtonText: { color: color.white, fontSize: 12, fontWeight: "700" },
   sceneRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, flexDirection: "row", gap: 12, minHeight: 82, padding: 14 }, sceneDot: { backgroundColor: color.violet, borderRadius: 9, height: 18, width: 18 }, sceneDotActive: { backgroundColor: color.magenta }, sceneDotVisited: { backgroundColor: color.muted }, sceneCopy: { flex: 1 }, sceneName: { color: color.ink, fontSize: 16, fontWeight: "800" }, sceneMeta: { color: color.muted, fontSize: 12, marginTop: 3 }, sceneSignal: { color: color.violet, fontSize: 11, fontWeight: "700", marginTop: 5 }, empty: { color: color.muted, paddingTop: 40, textAlign: "center" },
