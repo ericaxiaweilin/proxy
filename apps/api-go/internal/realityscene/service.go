@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/aipersona"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/mockidentity"
 )
@@ -108,6 +109,15 @@ type Detail struct {
 	Humans          []Human       `json:"humans"`
 	Actions         []SceneAction `json:"actions"`
 	TruthBoundary   string        `json:"truthBoundary"`
+	// SCENE-BADGE-001：绑定本场景的小美（真实 persona→boundSceneId 映射，不编计数）。
+	AIVisits        []AIVisit     `json:"aiVisits,omitempty"`
+}
+
+// AIVisit 是绑定到本场景的小美（展示名来自平台 persona 目录）。
+type AIVisit struct {
+	PersonaID   string `json:"personaId"`
+	DisplayName string `json:"displayName"`
+	BoundScene  string `json:"boundSceneId"`
 }
 
 type Variant struct {
@@ -643,7 +653,20 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 			{Type: "PUBLIC_ACTIVITY", Label: "报名活动", State: "REGISTRATION_ONLY", MoneyMeaning: "价格是参与者需支付的报名或消费费用"},
 		},
 		TruthBoundary: "推荐不预订真人；报名不等于到场；AI 预览不产生到访、出席或订单证据。",
+		AIVisits:      aiVisitsFor(sceneID),
 	}, true, nil
+}
+
+// aiVisitsFor 返回绑定到该场景的小美（真实 persona→boundSceneId 映射）。
+// 刻意不编「来过 N 次」：次数是现编数字，项目纪律禁止。
+func aiVisitsFor(sceneID string) []AIVisit {
+	out := make([]AIVisit, 0)
+	for _, account := range aipersona.ListPlatformAccounts() {
+		if account.BoundSceneID == sceneID {
+			out = append(out, AIVisit{PersonaID: account.PersonaID, DisplayName: account.DisplayName, BoundScene: account.BoundSceneID})
+		}
+	}
+	return out
 }
 
 func heroImageFor(sceneID string) string {

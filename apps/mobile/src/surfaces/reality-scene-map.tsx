@@ -96,6 +96,8 @@ type SceneDetail = {
   humans: Array<{ id: string; name: string; role: string; availability: string; fitReason: string; sceneFit: number; isAI: boolean; avatarUrl: string }>;
   actions: DynamicSceneAction[];
   truthBoundary: string;
+  // SCENE-BADGE-001：绑定本场景的小美（真实映射，不编计数）。
+  aiVisits?: Array<{ personaId: string; displayName: string; boundSceneId: string }>;
 };
 
 type FeaturedHuman = { userId: string; name: string; city?: string | undefined; avatarUri?: string | undefined };
@@ -605,8 +607,12 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
               <Text style={styles.checkInHint}>{checkinHint(here.has(selected.id), origin ? metersBetween(origin, selected) : undefined)}</Text>
             </View>
             {triStateMsg ? <Text style={styles.nearbyError}>{triStateMsg}</Text> : null}
-            {isXiaomeiScene(selected.id) ? (
-              <Text style={styles.xiaomeiSceneHint}>✨ 这是小美的绑定场景 —— 在这里打卡可获得「与小美同框」徽章。</Text>
+            {(detail?.aiVisits && detail.aiVisits.length > 0) || isXiaomeiScene(selected.id) ? (
+              <Text style={styles.xiaomeiSceneHint}>
+                ✨ {detail?.aiVisits && detail.aiVisits.length > 0
+                  ? `小美「${detail.aiVisits.map((v) => v.displayName).join("、")}」常来这里 —— 在这里打卡可获得「与小美同框」徽章。`
+                  : "这是小美的绑定场景 —— 在这里打卡可获得「与小美同框」徽章。"}
+              </Text>
             ) : null}
             {/* SCENE-EVENT-SIGNUP-001: 只能"发起"的详情页等于只能喊话 —— 看
                 不到这个场景上已经有什么局，也没法报名。这里列出来 + 直接报名。 */}

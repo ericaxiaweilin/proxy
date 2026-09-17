@@ -6286,6 +6286,10 @@ if ! grep -qF 'SCENE_BADGES' apps/mobile/src/scene-badges.ts; then
   echo "  FAIL [SCENE-BADGE-001]: the mobile badge catalog is missing." >&2
   exit 1
 fi
+if ! grep -qF 'AIVisits' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [SCENE-BADGE-001]: the scene detail no longer carries bound-Xiaomei visits" >&2
+  exit 1
+fi
 echo "    SCENE-BADGE-001: PASS (badge rules are single-sourced, earned badges are append-only and readable)"
 
 # ADD-FRIEND-NEXT-001: 发出的请求必须可查，“已发送”不是终点。

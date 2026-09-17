@@ -75,3 +75,23 @@ func contains(ids []string, id string) bool {
 	}
 	return false
 }
+
+func TestAIVisitsForBoundScene(t *testing.T) {
+	// threebeans 绑定晴晴（ai_001）；nguyenphilan 无绑定。
+	visits := aiVisitsFor("threebeans")
+	if len(visits) == 0 {
+		t.Fatal("threebeans must have a bound Xiaomei")
+	}
+	found := false
+	for _, v := range visits {
+		if v.PersonaID == "ai_001" && v.DisplayName != "" && v.BoundScene == "threebeans" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ai_001 missing from threebeans visits: %+v", visits)
+	}
+	if len(aiVisitsFor("nguyenphilan")) != 0 {
+		t.Fatal("unbound scene must have no AI visits")
+	}
+}
