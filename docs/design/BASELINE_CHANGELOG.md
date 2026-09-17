@@ -4,6 +4,20 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 224 — 2026-09-17
+
+- CONVO-ATTACH-001（相机图标直进相册）：会话窗输入框的相机图标以前和 ＋
+  弹同一张 sheet，进相册要点两次。现在点图标直进自建相册 —— 首格拍摄，
+  后面是最新 24 张；选图进已有的预览＋发送链，拍摄复用 `chooseImage("CAMERA")`。
+  - 为什么自建：系统相册一次只能做一件事（选图 XOR 拍照），合并不了；
+    v57 顶层的 `getAssetsAsync` 是只会 throw 的占位实现（见 `image-export.ts`
+    开头），列表走新 API `Query`/`Asset`，门禁有反向钉。
+  - ＋ 面板同步减负：照片和拍照两行都撤（都在相机图标上了），只留名片 /
+    视频 / 活动 / 位置。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/conversation.tsx`（入口行为、
+    相册 sheet）。复用既有 bottomSheet 语言与图标，无主题 token 改动、
+    无列表结构改动。
+
 ## Revision 223 — 2026-09-17
 
 - CONTACT-CARD-001（会话里发名片）：`＋` 面板多「名片」入口 —— 第一张永远是
