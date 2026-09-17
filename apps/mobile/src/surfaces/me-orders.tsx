@@ -9,7 +9,7 @@ import { nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { color } from "../theme";
 import { ActivityDetailSurface } from "./activity-detail";
 import { styles } from "./me-styles";
-import { ProxyLoading } from "../components/proxy-foundation";
+import { ProxyLoading, ProxyEmptyState } from "../components/proxy-foundation";
 
 type OrderFilter = "all" | "published" | "joined" | "done" | "cancelled";
 
@@ -357,9 +357,14 @@ type FavoriteTab = "all" | "merchant" | "creator" | "post" | "activity";
 
 export function FavoritesSurface({ onBack }: { onBack: () => void }): React.JSX.Element {
   const [tab, setTab] = useState<FavoriteTab>("all");
-  const entries = [{ type: "merchant", title: "Luna Spa", meta: "Beauty & Wellness · 西湖区" }, { type: "creator", title: "Linh Tran", meta: "Creator · 美妆 / Lifestyle" }];
-  const visible = tab === "all" ? entries : entries.filter((item) => item.type === tab);
-  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>收藏</Text></View><Text style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{visible.length ? visible.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text style={styles.savedThumbText}>☆</Text></View><View><Text style={styles.orderTitle}>{item.title}</Text><Text style={styles.savedMeta}>{item.meta}</Text></View></View>) : <View style={styles.savedCard}><Text style={styles.savedMeta}>这里还没有收藏。</Text></View>}</ScrollView></View>;
+  // FAVORITES-REAL-001: 以前这里是两条写死的假记录，所有用户看到同一份，
+  // 所有用户看到同一份，跟本人收藏无关。后端有 bookmarkPost 写入和
+  // ListUserBookmarks 读 ID 的能力，但 ID 没有批量解标题的接口 ——
+  // 逐条 N+1 查标题是错的（慢且失败一半时列表半真半假）。列表 UI 接好之前，
+  // 这里只放诚实空态，不放示例数据冒充。
+  const visible: Array<{ type: string; title: string; meta: string }> = [];
+  const shown = tab === "all" ? visible : visible.filter((item) => item.type === tab);
+  return <View style={styles.root}><ScrollView contentContainerStyle={styles.content}><View style={styles.orderPageHead}><Pressable onPress={onBack} style={styles.orderBack}><Text style={styles.orderBackText}>‹</Text></Pressable><Text style={styles.detailTitle}>收藏</Text></View><Text style={styles.savedIntro}>很轻的个人备忘夹。以后还想找到，就放这里。</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.orderTabs}>{([['all','全部'],['merchant','商家'],['creator','Creator'],['post','动态'],['activity','活动']] as const).map(([id,label]) => <Pressable key={id} onPress={() => setTab(id)} style={[styles.orderTab, tab === id && styles.orderTabOn]}><Text style={[styles.orderTabText, tab === id && styles.orderTabTextOn]}>{label}</Text></Pressable>)}</ScrollView>{shown.length ? shown.map((item) => <View key={item.title} style={[styles.savedCard, styles.savedRow]}><View style={styles.savedThumb}><Text style={styles.savedThumbText}>☆</Text></View><View><Text style={styles.orderTitle}>{item.title}</Text><Text style={styles.savedMeta}>{item.meta}</Text></View></View>) : <ProxyEmptyState title="还没有收藏列表" sub="动态收藏正在接入，这里不放示例数据。" />}</ScrollView></View>;
 }
 
 // 商家活动导流：只列 Origin=MERCHANT 的开放活动（种子 + 商家实发），匿名

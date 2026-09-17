@@ -902,10 +902,6 @@ export const styles = StyleSheet.create({
   personalStatValue: { color: "#111", fontWeight: "800" },
 
   personalFollowersRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 11, paddingHorizontal: 18, marginBottom: 15 },
-  personalFaces: { flexDirection: "row" },
-  personalFace: { width: 19, height: 19, borderRadius: 9.5, borderWidth: 2, borderColor: "#fff", alignItems: "center", justifyContent: "center", marginLeft: -5 },
-  personalFaceText: { color: "#555", fontSize: 11, fontWeight: "900" },
-  personalFaceFirst: { marginLeft: 0 },
   personalFollowersCount: { color: "#7f7f7f", fontSize: 11 },
   personalFollowersValue: { color: "#111", fontWeight: "800" },
   personalActions: { flexDirection: "row", gap: 8, marginTop: 16 },

@@ -6638,3 +6638,24 @@ if ! grep -q '| "pin"' apps/mobile/src/components/proxy-icon.tsx ||
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/convo-attach.test.ts || exit $?
 echo "    SHEET-ICONS-001: PASS (attach entries are icon tiles, camera media stays in the album)"
+# AUDIT-BATCH3-001: 第五~九轮 P0 小项合集（纯移动端，无后端变更）。
+# SHARE-LINK-001 分享链接写死测试账号 / FAVORITES-REAL-001 收藏两条假记录 /
+# LEGAL-BANNER-001 法律横幅从没挂载 / ANALYTICS-HONEST-001 漏斗文案自相矛盾 /
+# FOLLOWER-FACES-001 假脸配真数字。逐条有命名测试，丢一条这里红。
+if ! grep -q 'pxy.app/${shareHandle}/social' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -q '还没有收藏列表' apps/mobile/src/surfaces/me-orders.tsx ||
+   ! grep -q '<LegalStatusBanner' apps/mobile/src/shell/app-shell.tsx ||
+   ! grep -q '示例数据 · 真实统计即将上线' apps/mobile/src/surfaces/me.tsx ||
+   ! grep -q 'AUDIT-BATCH3-00' apps/mobile/src/surfaces/me-audit-batch3.test.ts; then
+  echo "  FAIL [AUDIT-BATCH3-001]: 审计小项修复丢了 ——" >&2
+  exit 1
+fi
+# 反向钉：写死的测试账号链接 / 两条假收藏 / 假脸不许回来。
+if grep -q 'pxy.app/huyen/social' apps/mobile/src/surfaces/me.tsx ||
+   grep -q 'Luna Spa' apps/mobile/src/surfaces/me-orders.tsx ||
+   grep -q 'styles.personalFaces' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [AUDIT-BATCH3-001]: 假数据回来了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/me-audit-batch3.test.ts || exit $?
+echo "    AUDIT-BATCH3-001: PASS (share link, favorites, legal banner, analytics copy, follower faces)"

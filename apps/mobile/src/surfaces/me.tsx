@@ -1434,7 +1434,15 @@ export function MeSurface({
 
             <View style={styles.socialShareBox}>
               <View style={styles.socialSettingsHead}><Text style={styles.socialSettingsTitle}>公开分享链接</Text><Text style={styles.socialSettingsHint}>可选</Text></View>
-              <View style={styles.socialShareLine}><Text numberOfLines={1} style={styles.socialShareLink}>pxy.app/huyen/social</Text><Pressable onPress={() => void Share.share({ message: "https://pxy.app/huyen/social" })} style={styles.socialShareButton}><Text style={styles.socialShareButtonText}>分享</Text></Pressable></View>
+              {/* SHARE-LINK-001: 分享链接里的用户名必须是当前登录用户。之前这里写死
+                  了测试账号，等于每个用户分享出去的都是别人的主页。空 handle 时
+                  禁用分享 —— 发一个带空用户名的残链接出去更糟。 */}
+              {(() => {
+                const shareHandle = profileDraft.handle.replace(/^@+/, "");
+                return (
+                  <View style={styles.socialShareLine}><Text numberOfLines={1} style={styles.socialShareLink}>{shareHandle ? `pxy.app/${shareHandle}/social` : "设置你的 Proxy ID 后可分享"}</Text><Pressable disabled={!shareHandle} onPress={() => void Share.share({ message: `https://pxy.app/${shareHandle}/social` })} style={styles.socialShareButton}><Text style={styles.socialShareButtonText}>分享</Text></Pressable></View>
+                );
+              })()}
               <Text style={styles.socialShareNote}>只有你设置为"公开展示"的账号会出现在这个分享页。商家可见账号不会自动公开。</Text>
             </View>
           </ScrollView>
@@ -1512,7 +1520,10 @@ export function MeSurface({
               <Text style={styles.subPageBackText}>‹ 返回</Text>
             </Pressable>
             <Text style={styles.detailTitle}>访问与转化</Text>
-            <Text style={styles.detailSub}>过去 30 天 · 只看真实下一步，不追虚荣指标。</Text>
+            {/* ANALYTICS-HONEST-001: 下面漏斗和渠道数字目前是示例占位（真实统计
+                管线还没建），以前副标题却写着“只看真实下一步”—— 文案和内容互相
+                矛盾，比空白更容易误导经营决策。先把话说老实，管线建好再换真数。 */}
+            <Text style={styles.detailSub}>示例数据 · 真实统计即将上线，做经营决策前请以实际到账和到店为准。</Text>
             <View style={styles.funnelCard}>
               {funnel.map(([label, width, value]) => (
                 <View key={label} style={styles.funnelRow}>
@@ -1889,11 +1900,9 @@ export function MeSurface({
                 </Text>
               </View>
               <View style={styles.personalFollowersRow}>
-                <View style={styles.personalFaces}>
-                  <View style={[styles.personalFace, { backgroundColor: "#fde68a" }]}><Text style={styles.personalFaceText}>M</Text></View>
-                  <View style={[styles.personalFace, { backgroundColor: "#bfdbfe" }]}><Text style={styles.personalFaceText}>A</Text></View>
-                  <View style={[styles.personalFace, { backgroundColor: "#fbcfe8" }]}><Text style={styles.personalFaceText}>L</Text></View>
-                </View>
+                {/* FOLLOWER-FACES-001: 以前这里是三个写死的字母头像（M/A/L），不管谁
+                    关注都长一个样 —— 数字是真的，脸是假的。最近关注者列表接口还没
+                    有（只有计数），先把假脸拿掉只留真数字，不拿装饰冒充真人预览。 */}
                 <Text style={styles.personalFollowersCount}><Text style={styles.personalFollowersValue}>{dash(personalFollowCounts?.followers)}</Text> 位关注者</Text>
               </View>
             </View>

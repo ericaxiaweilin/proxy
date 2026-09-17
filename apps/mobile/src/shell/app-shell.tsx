@@ -26,6 +26,8 @@ import {
   type PresetLocation
 } from "../components/location-picker-sheet";
 import { loadActiveCustomId, loadCustomHistory, loadFollowDevice, saveFollowDevice } from "../components/location-store";
+import { LegalStatusBanner } from "../components/legal-status-banner";
+import type { LegalStatus, LegalStatusClient } from "../legal-status-client";
 import { makeDeviceLocation } from "../components/location-options";
 // DEVICE-LOCATION-001: 位置要跟着人走。device-location.ts 是纯逻辑（可单测），
 // device-location-native.ts 是全仓唯一 import expo-location 的地方。
@@ -142,6 +144,7 @@ export function AppShell({
   onSignOut,
   sessionAuthClient,
   localApiBaseUrl,
+  legalStatus,
   // R15.37: 透传到 FeedSurface → ComposerV2Screen，拦 “未登录不发”。
   secureSessionStore
 }: {
@@ -173,11 +176,27 @@ export function AppShell({
   onSignOut: () => void;
   sessionAuthClient: import("../auth-client").SessionAuthClient;
   localApiBaseUrl: string;
+  // LEGAL-BANNER-001: 法律状态客户端（公开接口，无需登录）。
+  legalStatus: LegalStatusClient;
   secureSessionStore?: SecureSessionStore | undefined;
 }): React.JSX.Element {
   const { width } = useWindowDimensions();
   const compactWidth = width < 375;
   const [tab, setTab] = useState<RootTab>("HOME");
+  // LEGAL-BANNER-001: 法律 kill 状态。开机拉一次，每次回前台刷新一次。
+  // 拉失败静默（不知道≠没事，但拦界面更糟），下次回前台再试；用户手动关掉
+  // 只管当次会话（组件自己在无 kill 时返回 null）。
+  const [legalStatusState, setLegalStatusState] = useState<LegalStatus | null>(null);
+  const [legalDismissed, setLegalDismissed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = (): void => {
+      void legalStatus.getStatus().then((s) => { if (!cancelled) setLegalStatusState(s); }).catch(() => undefined);
+    };
+    void refresh();
+    const sub = AppState.addEventListener("change", (next) => { if (next === "active") void refresh(); });
+    return () => { cancelled = true; sub.remove(); };
+  }, [legalStatus]);
   const [context, setContext] = useState<ActiveContext>("REQUESTER");
   const [workspaceTarget, setWorkspaceTarget] = useState<WorkspaceTarget>();
   const [feedChatAuthor, setFeedChatAuthor] = useState<string>();
@@ -553,6 +572,8 @@ export function AppShell({
       <SafeAreaView edges={["top"]} style={styles.safeArea}>
       <View style={[styles.root, width >= 768 && styles.rootWide]}>
         <StatusBar animated={false} backgroundColor={color.offWhite} barStyle="dark-content" translucent={false} />
+        {/* LEGAL-BANNER-001: 有 kill 才显示（组件内部判空），置顶。 */}
+        {legalStatusState && !legalDismissed ? <LegalStatusBanner status={legalStatusState} onDismiss={() => setLegalDismissed(true)} /> : null}
         {isNavVisible ? <Header compact={compactWidth} /> : null}
         {/* 首页的本地范围说明属于 root Chrome 且只在首页出现 —— 消息页不再重复
             （MSG-LOCATION-DUPE-001：入口只在 Home 留一个）；“我的”根页由 Me Surface

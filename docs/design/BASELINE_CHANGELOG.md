@@ -41,6 +41,14 @@ same commit. Do not record routine business logic changes here.
   merge 冲突概率最高的单点，拆完各域改各域的文件。
   - **基线敏感文件**：`apps/api-go/cmd/api/main.go`（集成接线面）。
     无接线语义改动、无新增依赖、无主题改动。
+## Revision 228 — 2026-09-17
+
+- AUDIT-BATCH3-001（第五~九轮 P0 小项合集）：分享链接按登录用户动态拼
+  （空 handle 禁分享）；收藏页假记录换诚实空态；App Shell 挂载法律状态横幅
+  （开机＋回前台拉公开接口，失败静默）；访问转化页副标题改“示例数据”；
+  粉丝假脸删除只留真数字。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`（分享链接、漏斗文案、
+    粉丝区）。无主题 token 改动（删的恰好是三处 Tailwind 外来色）。
 
 ## Revision 226 — 2026-09-17
 

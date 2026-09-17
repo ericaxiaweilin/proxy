@@ -99,6 +99,7 @@ func main() {
 	supplyService := supply.New()
 	mediaService := media.New()
 	mediaService.SetStoreDir(mediaStoreDir)
+	conversationService.SetMediaAuthorizer(mediaService)
 	contributionService := contribution.New()
 	// Profile 域（P1，audit 2026-09-04）：默认内存仓；DATABASE_URL 存在时
 	// 在 DB 分支换成 postgres.NewProfileRepository（服务端持久化名片）。
@@ -243,6 +244,7 @@ func main() {
 			media.NewFFmpegProcessor(mediaStoreDir),
 		)
 		mediaService.SetStoreDir(mediaStoreDir)
+		conversationService.SetMediaAuthorizer(mediaService)
 		contributionService = contribution.NewWithRepository(postgres.NewContributionRepository(pool))
 		profileService = profile.NewWithRepository(postgres.NewProfileRepository(pool))
 		socialSpaceService = socialspace.NewWithRepository(postgres.NewSocialSpaceRepository(pool))

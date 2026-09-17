@@ -504,11 +504,21 @@ func protectionToSecurityV1(p MessageProtection) *MessageSecurityV1 {
 }
 
 type Service struct {
-	mu            sync.Mutex
-	repository    Repository
-	clock         clock.Clock
-	modelStack    modelstack.Port
-	mediaStoreDir string
+	mu              sync.Mutex
+	repository      Repository
+	clock           clock.Clock
+	modelStack      modelstack.Port
+	mediaStoreDir   string
+	mediaAuthorizer MediaAuthorizer
+}
+
+// MediaAuthorizer 由 media 包实现（注入避免循环依赖，同 localnet.MediaLookup
+// 的做法）。CreateMediaAsset 落库时资产默认 OWNER_ONLY——ResolveServingPath
+// 只放行 PUBLIC，不认 session/参与者身份（GET /v1/media/thumb|play 明确"不叠加
+// 会话鉴权"）。发消息带图/视频/语音时不显式转 PUBLIC，图/视频/语音就永远读不出来：
+// 这不是偶发的网络问题，是每一次都会发生的必然结果。
+type MediaAuthorizer interface {
+	AuthorizeForPost(ctx context.Context, ids []string, ownerPrincipalID, visibility string) error
 }
 
 // SweepExpiredMessages hard-deletes messages past protection.ExpiresAt.
@@ -555,6 +565,12 @@ func NewWithModelStack(repository Repository, ms modelstack.Port) *Service {
 // worker. Vision must not guess relative working directories.
 func (s *Service) SetMediaStoreDir(dir string) {
 	s.mediaStoreDir = strings.TrimSpace(dir)
+}
+
+// SetMediaAuthorizer wires the PUBLIC-visibility transition (see MediaAuthorizer
+// doc comment). Nil is a valid no-op state for tests that never send media.
+func (s *Service) SetMediaAuthorizer(authorizer MediaAuthorizer) {
+	s.mediaAuthorizer = authorizer
 }
 
 func (s *Service) Supports(commandType string) bool {
@@ -1161,6 +1177,14 @@ func (s *Service) sendMessage(ctx context.Context, e command.Envelope) command.R
 		}
 		id := convo.ID
 		convoID = &id
+	}
+	// CONVO-MEDIA-VISIBILITY-001: 上传落库时资产默认 OWNER_ONLY；serving 路由
+	// 只放行 PUBLIC 且不查会话成员身份。这里必须先转 PUBLIC 再落消息 ——
+	// 顺序照抄 localnet 发帖：先授权、授权失败就整条拒绝，不落一条图看不到的消息。
+	if (p.MessageType == "IMAGE" || p.MessageType == "VIDEO" || p.MessageType == "AUDIO") && strings.TrimSpace(p.MediaRef) != "" && s.mediaAuthorizer != nil {
+		if err := s.mediaAuthorizer.AuthorizeForPost(ctx, []string{p.MediaRef}, e.Actor.ID, "PUBLIC"); err != nil {
+			return command.Rejected(e, "MESSAGE_MEDIA_NOT_DELIVERABLE", "BUSINESS_STATE", "SAFE_RETRY", "conversation.media_not_deliverable", nil)
+		}
 	}
 	msg := Message{
 		ID:             newID("msg_"),
