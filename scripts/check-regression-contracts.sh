@@ -6584,3 +6584,30 @@ if grep -q '收藏 {isSaved ? 1 : 0}' apps/mobile/src/surfaces/feed.tsx; then
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/feed-saved-count.test.ts || exit $?
 echo "    FEED-SAVED-COUNT-001: PASS (saved shows state, never a fabricated aggregate)"
+
+# ORPHAN-SWEEP-001: 孤儿代码只增不减 —— cmd/ 里的一次性查询脚本、
+# 零 import 的 policy 草稿包，留着就是给后人埋"我以为接上了"的雷。
+# 删过的东西回来、新的重号出现，门禁直接红。
+if [ -e apps/api-go/cmd/qb ] || [ -e apps/api-go/cmd/qb2 ] || [ -e apps/api-go/cmd/qb3 ] || [ -e apps/api-go/cmd/qc ]; then
+  echo "  FAIL [ORPHAN-SWEEP-001]: 一次性查询脚本又回到了 cmd/ ——" >&2
+  echo "        扔 scripts/ 或删掉，不许和 api/worker/migrate 平级。" >&2
+  exit 1
+fi
+if [ -e apps/api-go/internal/ai ] || [ -e apps/api-go/internal/creator ] || [ -e apps/api-go/internal/scale ]; then
+  echo "  FAIL [ORPHAN-SWEEP-001]: 零 import 的孤儿包又回来了 ——" >&2
+  echo "        接线了再建包，先建包后接线等于埋雷。" >&2
+  exit 1
+fi
+# migration 序号：14 组历史重号（038/039/040 各 3 个，其余 2 个）是 grandfather，
+# 只许减不许增 —— 新文件再撞号就红。改历史文件名更危险（已 apply 的库会重放），
+# 所以存量不动，新号必须唯一。
+DUP_PREFIXES=$(ls apps/api-go/migrations/*.sql | sed 's/.*\///' | cut -c1-3 | sort | uniq -c | sort -rn | awk '$1>1{print $2}' | tr '\n' ' ')
+for known in 040 039 038 078 070 065 044 043 042 041 037 036 035 003; do
+  DUP_PREFIXES=$(echo "$DUP_PREFIXES" | tr ' ' '\n' | grep -v "^${known}$" | tr '\n' ' ')
+done
+if [ -n "$(echo "$DUP_PREFIXES" | tr -d ' ')" ]; then
+  echo "  FAIL [ORPHAN-SWEEP-001]: 新的 migration 撞号：$DUP_PREFIXES ——" >&2
+  echo "        合并前先改成唯一序号，不要等最后合并的人手工救火。" >&2
+  exit 1
+fi
+echo "    ORPHAN-SWEEP-001: PASS (no throwaway cmds, no orphan packages, no new migration collisions)"
