@@ -6391,7 +6391,8 @@ if grep -q '{human.role}' apps/mobile/src/surfaces/reality-scene-map.tsx ||
   exit 1
 fi
 # 反向钉：选中链不许断（DIRECT_INVITE 找不到人只会报“请先选择”）。
-if ! grep -q 'onPress={() => setSelectedHumanId(human.id)}' apps/mobile/src/surfaces/reality-scene-map.tsx; then
+# SCENE-HUMANS-003 起点按是 toggle（选中→取消），不断链只断“粘住”。
+if ! grep -q 'setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))' apps/mobile/src/surfaces/reality-scene-map.tsx; then
   echo "  FAIL [SCENE-HUMANS-001]: 点按选中邀约对象的链路被动了 ——" >&2
   exit 1
 fi
@@ -6451,3 +6452,37 @@ if ! grep -q 'scene.category === "商家" ? color.magenta' apps/mobile/src/surfa
 fi
 pnpm --filter @proxy/mobile exec vitest run src/scene-category.test.ts || exit $?
 echo "    SCENE-CATEGORY-001: PASS (closed merchant/attraction/other end to end)"
+# SCENE-HUMANS-003: 同一头像点两次 = 选中→取消。之前只有选中没有取消，
+# 选错人只能去选别人顶掉，取消不掉。
+if ! grep -q 'SCENE-HUMANS-003' apps/mobile/src/scene-humans.test.ts; then
+  echo "  FAIL [SCENE-HUMANS-003]: 取消选中的测试不见了" >&2
+  exit 1
+fi
+echo "    SCENE-HUMANS-003: PASS (tapping the selected person deselects)"
+
+# MERCHANT-LOGO-001: 商家详情页必须有商家 logo，现在没有。
+#
+# 现状：场景链只有 venue 大图；logo 只活在商家自己的管理面
+#（store_lines.logo_asset_path），且场景↔店铺没有关联键。
+# 本轮：Detail.logoUrl（omitempty）+ 映射点 logoFor + 详情页标题旁小圆标；
+# 没有回字母块（管理面同款），不编占位图。logo 文件本身要商户给 ——
+# 全仓现在没有任何一家上传过，空着比编诚实。
+require_test "MERCHANT-LOGO-001" "./internal/realityscene" \
+  "TestSceneDetailCarriesMerchantLogoURL" \
+  "apps/api-go/internal/realityscene/service_test.go" || exit $?
+if ! grep -q 'json:"logoUrl,omitempty"' apps/api-go/internal/realityscene/service.go ||
+   ! grep -q 'logoFor(scene.ID)' apps/api-go/internal/realityscene/service.go ||
+   ! grep -q 'detail?.logoUrl' apps/mobile/src/surfaces/reality-scene-map.tsx ||
+   ! grep -q 'MERCHANT-LOGO-001' apps/mobile/src/scene-merchant-logo.test.ts; then
+  echo "  FAIL [MERCHANT-LOGO-001]: 商家 logo 链路断了 ——" >&2
+  echo "        详情页又只剩 venue 大图。" >&2
+  exit 1
+fi
+# 反向钉：映射点不许编 URL —— 商户没给资产之前，空表就是真相。
+if grep -q 'sceneLogos = map\[string\]string{[^}]' apps/api-go/internal/realityscene/service.go; then
+  echo "  FAIL [MERCHANT-LOGO-001]: logo 映射表里出现了手写 URL ——" >&2
+  echo "        商户没给资产，空着。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/scene-merchant-logo.test.ts || exit $?
+echo "    MERCHANT-LOGO-001: PASS (merchant logo on scene detail, letter fallback)"

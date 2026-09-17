@@ -935,3 +935,20 @@ func TestApprovedProposalCarriesCategoryIntoCatalog(t *testing.T) {
 		t.Fatalf("proposal category = %q, want 商家", proposals[0].Category)
 	}
 }
+func TestSceneDetailCarriesMerchantLogoURL(t *testing.T) {
+	s := New()
+	ctx := t.Context()
+	d, found, err := s.GetDetail(ctx, "threebeans", "", time.Now())
+	if err != nil || !found {
+		t.Fatalf("GetDetail(threebeans): %v found=%v", err, found)
+	}
+	// 全仓没有任何一家商户上传过 logo（store_lines.logo_asset_path 都是空的）——
+	// 空着，不编一个占位图 URL 冒充。商户给了资产后在 logoFor 里加映射。
+	if d.LogoURL != "" {
+		t.Fatalf("logo URL is invented: %q", d.LogoURL)
+	}
+	// 未知场景没有详情，更没有 logo。
+	if _, found, _ := s.GetDetail(ctx, "no-such-scene", "", time.Now()); found {
+		t.Fatal("unknown scene must not have a detail to hang a logo on")
+	}
+}

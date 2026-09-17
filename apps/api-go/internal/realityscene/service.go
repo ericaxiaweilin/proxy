@@ -119,11 +119,14 @@ type Scene struct {
 // projections below are replaceable derived data and never create attendance,
 // visit, or order evidence.
 type Detail struct {
-	SceneID         string        `json:"sceneId"`
-	VenueID         string        `json:"venueId"`
-	VenueName       string        `json:"venueName"`
-	HeroImageURL    string        `json:"heroImageUrl"`
-	MediaVersion    int           `json:"mediaVersion"`
+	SceneID      string `json:"sceneId"`
+	VenueID      string `json:"venueId"`
+	VenueName    string `json:"venueName"`
+	HeroImageURL string `json:"heroImageUrl"`
+	MediaVersion int    `json:"mediaVersion"`
+	// MERCHANT-LOGO-001: 商家 logo（商户自己传的资产）。没有就是 ""，
+	// 客户端回字母块 —— 不许编一个占位图 URL 冒充。
+	LogoURL         string        `json:"logoUrl,omitempty"`
 	SelectedVariant string        `json:"selectedVariant"`
 	Variants        []Variant     `json:"variants"`
 	LiveState       LiveState     `json:"liveState"`
@@ -670,6 +673,7 @@ func (s *Service) GetDetail(ctx context.Context, sceneID, requestedVariant strin
 	return Detail{
 		SceneID: scene.ID, VenueID: venueIDFor(scene), VenueName: scene.Name,
 		HeroImageURL: heroImageFor(scene.ID), MediaVersion: 1,
+		LogoURL:         logoFor(scene.ID),
 		SelectedVariant: selected.ID, Variants: variants,
 		LiveState: LiveState{State: state, Label: label, BestWindow: selected.Window, CapacityPct: capacityFor(selected.ID, minute), FreshUntil: now.UTC().Add(5 * time.Minute)},
 		Menu:      menuFor(selected.ID), FullMenu: fullMenu(), Humans: humansFor(selected.ID),
@@ -701,6 +705,16 @@ func heroImageFor(sceneID string) string {
 	}
 	return "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=86"
 }
+
+// MERCHANT-LOGO-001: 场景→商家 logo 映射点。现在是空表 —— 全仓没有任何一家
+// 商户上传过 logo（store_lines.logo_asset_path 都是空的），空着比编一个 URL
+// 诚实。商户给了资产文件后，在这里加一行映射（sceneID → 可访问的 logo URL），
+// 不要在客户端手拼。
+func logoFor(sceneID string) string {
+	return sceneLogos[sceneID]
+}
+
+var sceneLogos = map[string]string{}
 
 func venueIDFor(scene Scene) string {
 	if scene.ID == "threebeans" {
