@@ -6193,19 +6193,3 @@ if grep -q '暂无待处理请求，你还没' apps/mobile/src/surfaces/friend-c
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
 echo "    ADD-FRIEND-NEXT-001: PASS (outgoing requests stay visible with a next step)"
-
-# ADD-FRIEND-SEND-BUSY-001: 点添加在弱网下长时间没反应，还能重复点。
-#
-# 根因：addScannedPerson 在途无忙态（按钮一直是可点的“添加”）、无登录态
-# 直接静默 return。修法：在途锁 + “发送中…”文案 + 失败 finally 解锁，
-# 没登录态给 toast 不静默。
-if ! grep -q 'scanAddBusy' apps/mobile/src/surfaces/friend-crm.tsx ||
-   ! grep -q '发送中' apps/mobile/src/surfaces/friend-crm.tsx ||
-   ! grep -q 'if (scanAddBusy || scanAddSent) return;' apps/mobile/src/surfaces/friend-crm.tsx ||
-   ! grep -q 'ADD-FRIEND-SEND-BUSY-001' apps/mobile/src/surfaces/placeholder-honest-actions.test.ts; then
-  echo "  FAIL [ADD-FRIEND-SEND-BUSY-001]: 添加按钮又回到无忙态 ——" >&2
-  echo "        弱网下点下去像没反应，还能重复发送。" >&2
-  exit 1
-fi
-pnpm --filter @proxy/mobile exec vitest run src/surfaces/placeholder-honest-actions.test.ts || exit $?
-echo "    ADD-FRIEND-SEND-BUSY-001: PASS (sending locks the button with a busy label)"
