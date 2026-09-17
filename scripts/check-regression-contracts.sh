@@ -6566,3 +6566,21 @@ if grep -q 'respond(row.invitationId, "ASK")' apps/mobile/src/surfaces/me.tsx; t
 fi
 pnpm --filter @proxy/mobile exec vitest run src/surfaces/me-invite-actions.test.ts || exit $?
 echo "    NOTIF-INVITE-OFFER-001: PASS (offer and invitations reach the one who must act)"
+# FEED-SAVED-COUNT-001: 收藏数显示查看者自己的 0/1，不是真实聚合数。
+#
+# 服务端根本没算这个聚合，计数管线建成之前只显示状态不显示数字。
+# 同案只此一处：点赞/回复都是真值＋0 兜底。另：#18“两套图片系统”是误读 ——
+# feed 多图轨＋X 式自动播只能用 Adaptive，个人主页照片墙才用 Threads 网格，
+# 迁过去等于把自动播砍了，两边各守各的 lane，门禁钉住。
+if ! grep -q '{isSaved ? "已收藏" : "收藏"}' apps/mobile/src/surfaces/feed.tsx ||
+   ! grep -q 'FEED-SAVED-COUNT-001' apps/mobile/src/surfaces/feed-saved-count.test.ts; then
+  echo "  FAIL [FEED-SAVED-COUNT-001]: 收藏数又开始编聚合了 ——" >&2
+  exit 1
+fi
+# 反向钉：拿“我收没收藏”冒充“多少人收藏”的写法不许回来。
+if grep -q '收藏 {isSaved ? 1 : 0}' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-SAVED-COUNT-001]: 0/1 假聚合回来了 ——" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run src/surfaces/feed-saved-count.test.ts || exit $?
+echo "    FEED-SAVED-COUNT-001: PASS (saved shows state, never a fabricated aggregate)"
