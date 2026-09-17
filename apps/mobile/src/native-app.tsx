@@ -10,6 +10,7 @@ import { DemandClient } from "./demand-client";
 import { LoginClient, LoginCommandRejectedError } from "./login-client";
 import { LegalDocClient, type LegalDoc, type LegalDocKind } from "./legal-doc";
 import { LegalDocRenderer } from "./legal-doc-render";
+import { LegalStatusClient } from "./legal-status-client";
 import { formatVietnamesePhoneForDisplay, normalizeVietnamesePhone, vietnamesePhoneReady } from "./vn-phone";
 import { MAX_LOGIN_EMAIL_LENGTH, normalizeLoginEmail } from "./email-identifier";
 import { formatDateOfBirthInput, getDateOfBirthError } from "./date-of-birth-input";
@@ -168,6 +169,8 @@ const relationshipClient = new RelationshipClient({ authClient: sessionAuthClien
 const sceneClient = new SceneClient({ authClient: sessionAuthClient, secureSessionStore });
 const supplyClient = new SupplyClient({ authClient: sessionAuthClient, secureSessionStore });
 const socialSettingsClient = new SocialSettingsClient({ authClient: sessionAuthClient, secureSessionStore });
+// LEGAL-BANNER-001: 法律状态是公开接口（无需登录），和登录态无关，模块级单例。
+const legalStatusClient = new LegalStatusClient({ baseUrl: localApiBaseUrl, transport: nativeTransport });
 type BootPhase = "BOOTSTRAPPING" | "PUBLIC" | "AUTHENTICATED" | "SIGNED_OUT";
 
 export function ProxyApp(): React.JSX.Element {
@@ -272,6 +275,7 @@ export function ProxyApp(): React.JSX.Element {
         supply={supplyClient}
         socialSettings={socialSettingsClient}
         scene={sceneClient}
+        legalStatus={legalStatusClient}
         isGuest={phase === "PUBLIC"}
         ensureConversationSession={phase === "PUBLIC" ? ensureNativeGuestSession : undefined}
         sessionAuthClient={sessionAuthClient}

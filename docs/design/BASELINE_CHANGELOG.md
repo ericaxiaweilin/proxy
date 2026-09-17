@@ -4,6 +4,15 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 228 — 2026-09-17
+
+- AUDIT-BATCH3-001（第五~九轮 P0 小项合集）：分享链接按登录用户动态拼
+  （空 handle 禁分享）；收藏页假记录换诚实空态；App Shell 挂载法律状态横幅
+  （开机＋回前台拉公开接口，失败静默）；访问转化页副标题改“示例数据”；
+  粉丝假脸删除只留真数字。
+  - **基线敏感文件**：`apps/mobile/src/surfaces/me.tsx`（分享链接、漏斗文案、
+    粉丝区）。无主题 token 改动（删的恰好是三处 Tailwind 外来色）。
+
 ## Revision 226 — 2026-09-17
 
 - NOTIF-INVITE-OFFER-001（邀请卡片删“询问”按钮）：点它只是把邀请状态从
