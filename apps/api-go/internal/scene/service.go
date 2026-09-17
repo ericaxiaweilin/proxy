@@ -395,7 +395,7 @@ func (s *Service) respondInvitation(ctx context.Context, e command.Envelope) com
 	if err := s.repo.UpdateInvitation(ctx, inv); err != nil {
 		return command.Rejected(e, "INVITATION_UPDATE_FAILED", "INTERNAL", "SAFE_RETRY", "scene.update_failed", nil)
 	}
-	ev := event.New("InvitationResponded", "Invitation", inv.ID, 2, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{"decision": p.Decision})
+	ev := event.New("InvitationResponded", "Invitation", inv.ID, 2, e.Principal.ID, e.CorrelationID, e.CommandID, s.clock.Now().UTC(), map[string]any{"decision": p.Decision, "hostId": inv.HostID})
 	if p.Decision == "ACCEPTED" {
 		return invitationAcceptedResult(e, inv)
 	}

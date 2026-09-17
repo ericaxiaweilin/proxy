@@ -60,26 +60,9 @@ func (d businessInboxDelivery) Deliver(ctx context.Context, e event.DomainEvent)
 }
 
 func (d businessInboxDelivery) createInboxForEvent(ctx context.Context, e event.DomainEvent) error {
-	// Map domain events to inbox notifications (recipient = actor for now, P0 simple)
-	var title, body, deepLink string
-	switch e.EventType {
-	case "TaskPublished":
-		title, body, deepLink = "需求已发布", "你的需求已进入撮合", "/tasks/"+e.AggregateID
-	case "TaskSlotsCreated":
-		return nil // skip noisy
-	case "OfferCreated", "SlotOfferCreated":
-		title, body, deepLink = "收到 Offer", "客户已发 Offer，5分钟内有效", "/offers/"+e.AggregateID
-	case "OrderCreated", "OfferAccepted":
-		title, body, deepLink = "订单已成立", "已生成订单，可打卡", "/orders/"+e.AggregateID
-	case "VoucherRedeemed", "VoucherSettled":
-		title, body, deepLink = "凭证动态", e.EventType, "/vouchers/"+e.AggregateID
-	default:
+	recipient, title, body, deepLink, ok := inboxForEvent(e)
+	if !ok {
 		return nil
-	}
-	// Use the event's PrincipalID as recipient (fallback to AggregateID)
-	recipient := e.PrincipalID
-	if recipient == "" {
-		recipient = e.AggregateID
 	}
 	// Direct PG insert to notification.inbox_items (bypass service to avoid auth)
 	_, err := d.pool.Exec(ctx, `
@@ -87,6 +70,63 @@ func (d businessInboxDelivery) createInboxForEvent(ctx context.Context, e event.
 		VALUES ($1,$2,$3,$4,$5,$6,false,now()) ON CONFLICT (id) DO NOTHING`,
 		"inbox_"+e.EventID, recipient, e.EventType, title, body, deepLink)
 	return err
+}
+
+// NOTIF-INVITE-OFFER-001: 事件→收件人的纯映射（可单测）。修过两处真洞：
+//
+//  1. SlotOfferCreated 以前按 PrincipalID 投递 —— 发起 offer 的是 requester，
+//     5 分钟内必须行动的是 agent(payload.agentId)，等于把信送给了发信人自己。
+//     现在按 agentId 投，缺失才回退 PrincipalID。
+//  2. InvitationCreated / InvitationResponded 以前根本不在 switch 里 ——
+//     被邀方和邀约方都收不到任何东西。现在按 inviteeId / hostId 投。
+//
+// 其余分支与原来一字不差（TaskPublished 等仍按 PrincipalID）。未知事件返回
+// ok=false，安静跳过 —— worker 的 best-effort 语义不变。
+func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string, ok bool) {
+	payloadString := func(key string) string {
+		if e.Payload == nil {
+			return ""
+		}
+		v, _ := e.Payload[key].(string)
+		return v
+	}
+	// 和原来一致的兜底：Principal 为空才拿 AggregateID。
+	fallbackRecipient := func(want string) string {
+		if want != "" {
+			return want
+		}
+		if e.PrincipalID != "" {
+			return e.PrincipalID
+		}
+		return e.AggregateID
+	}
+	switch e.EventType {
+	case "TaskPublished":
+		return fallbackRecipient(""), "需求已发布", "你的需求已进入撮合", "/tasks/" + e.AggregateID, true
+	case "TaskSlotsCreated":
+		return "", "", "", "", false // skip noisy
+	case "OfferCreated", "SlotOfferCreated":
+		return fallbackRecipient(payloadString("agentId")), "收到 Offer", "客户已发 Offer，5分钟内有效", "/offers/" + e.AggregateID, true
+	case "OrderCreated", "OfferAccepted":
+		return fallbackRecipient(""), "订单已成立", "已生成订单，可打卡", "/orders/" + e.AggregateID, true
+	case "VoucherRedeemed", "VoucherSettled":
+		return fallbackRecipient(""), "凭证动态", e.EventType, "/vouchers/" + e.AggregateID, true
+	case "InvitationCreated":
+		return fallbackRecipient(payloadString("inviteeId")), "收到场景邀请", "有人邀请你一起去场景看看", "/invitations/" + e.AggregateID, true
+	case "InvitationResponded":
+		decision := payloadString("decision")
+		reply := "对方回复了你的邀请"
+		if decision == "ACCEPTED" {
+			reply = "对方接受了你的邀请，可以约时间了"
+		} else if decision == "DECLINED" {
+			reply = "对方拒绝了你的邀请"
+		} else if decision == "ASK" {
+			reply = "对方想先问问细节再决定"
+		}
+		return fallbackRecipient(payloadString("hostId")), "邀请有回复了", reply, "/invitations/" + e.AggregateID, true
+	default:
+		return "", "", "", "", false
+	}
 }
 
 func main() {
